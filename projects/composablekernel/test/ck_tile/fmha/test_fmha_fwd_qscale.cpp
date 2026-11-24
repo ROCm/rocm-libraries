@@ -22,7 +22,7 @@ constexpr bool kIsMxFp8Config =
     ck_tile::is_any_of<DataTypeConfig, FmhaFwdMxFp8, FmhaFwdMxFp8Bf16>::value;
 constexpr bool kIsFp8Config = ck_tile::is_any_of<DataTypeConfig, FmhaFwdFp8, FmhaFwdFp8Bf16>::value;
 
-// On gfx125x the FP8 suites below must reach qr_tdm_fp8_sched, not fall back to another pipeline.
+// On gfx125x the FP8 suites below must reach qr_tdm_sched, not fall back to another pipeline.
 bool ExpectsFp8Sched(bool is_v_rowmajor)
 {
     // MX has no other gfx125x pipeline; FP8 prefers it at every seqlen_q.
@@ -32,19 +32,19 @@ bool ExpectsFp8Sched(bool is_v_rowmajor)
 void ExpectFp8Sched(const std::string& kernel_name, bool is_v_rowmajor)
 {
     if(ExpectsFp8Sched(is_v_rowmajor))
-        EXPECT_NE(kernel_name.find("qr_tdm_fp8_sched"), std::string::npos) << kernel_name;
+        EXPECT_NE(kernel_name.find("qr_tdm_sched"), std::string::npos) << kernel_name;
 }
 
-// Unlike CHECK_RESULT, a missing instance fails wherever qr_tdm_fp8_sched is expected.
+// Unlike CHECK_RESULT, a missing instance fails wherever qr_tdm_sched is expected.
 #define CHECK_FP8_SCHED_RESULT(result, is_v_rowmajor)                           \
     do                                                                          \
     {                                                                           \
         if(result == fwd_result::no_instance && ExpectsFp8Sched(is_v_rowmajor)) \
-            FAIL() << "No qr_tdm_fp8_sched instance for current parameters";    \
+            FAIL() << "No FP8 qr_tdm_sched instance for current parameters";    \
         CHECK_RESULT(result);                                                   \
     } while(0)
 
-// Skips what qr_tdm_fp8_sched leaves out by design: MX bias and gfx125x MX on col-major V.
+// Skips what qr_tdm_sched leaves out by design: MX bias and gfx125x MX on col-major V.
 #define SKIP_IF_MX_UNSUPPORTED(is_v_rowmajor, bias_str)                          \
     do                                                                           \
     {                                                                            \
@@ -688,7 +688,7 @@ std::string ExpectedDecodeKernel(int nhead, int nhead_k, int seqlen_q, bool perm
 
 std::string DecodeKernelOf(const std::string& kernel_name)
 {
-    if(kernel_name.find("_qr_tdm_fp8_sched_") == std::string::npos)
+    if(kernel_name.find("_qr_tdm_sched_") == std::string::npos)
         return "other";
     if(kernel_name.find("_packgqa_") == std::string::npos)
         return "sched";
@@ -1040,7 +1040,7 @@ INSTANTIATE_TEST_SUITE_P(
 TEST_P(QuantScaleBatchEarlyExit, DataTypeConfig)
 {
     if(!ck_tile::is_gfx125_supported())
-        GTEST_SKIP() << "qr_tdm_fp8_sched is gfx125x only";
+        GTEST_SKIP() << "FP8 qr_tdm_sched is gfx125x only";
     auto [hdims, lse, dims]                                                     = GetParam();
     auto [hdim, hdim_v]                                                         = hdims;
     auto [batch, nhead, nhead_k, seqlen_q, seqlen_k, q_eff, kv_eff, mask, perm] = dims;
@@ -1287,7 +1287,7 @@ INSTANTIATE_TEST_SUITE_P(TestCkTileFmhaFwd,
 TEST_P(QuantScaleBlockScaleKv, DataTypeConfig)
 {
     if(!ck_tile::is_gfx125_supported())
-        GTEST_SKIP() << "qr_tdm_fp8_sched is gfx125x only";
+        GTEST_SKIP() << "FP8 qr_tdm_sched is gfx125x only";
     auto [hdims, bss_kv, mask] = GetParam();
     DirectCase c;
     std::tie(c.hdim_q, c.hdim_v) = hdims;
@@ -1305,7 +1305,7 @@ TEST_P(QuantScaleBlockScaleKv, DataTypeConfig)
     EXPECT_TRUE(SameBits(wide.lse, narrow.lse));
 }
 
-// qr_tdm_fp8_sched rejects scale blocks that split its M tile or a 32-key group; zero ones fail.
+// qr_tdm_sched rejects scale blocks that split its M tile or a 32-key group; zero ones fail.
 class QuantScaleBlockScaleReject : public TestWithParam<std::tuple<bool, std::tuple<int, int>>>
 {
 };
@@ -1323,11 +1323,11 @@ INSTANTIATE_TEST_SUITE_P(TestCkTileFmhaFwd,
 TEST_P(QuantScaleBlockScaleReject, DataTypeConfig)
 {
     if(!ck_tile::is_gfx125_supported())
-        GTEST_SKIP() << "qr_tdm_fp8_sched is gfx125x only";
+        GTEST_SKIP() << "FP8 qr_tdm_sched is gfx125x only";
     DirectCase c;
     std::tie(c.bss_q, c.bss_kv) = std::get<1>(GetParam());
     const auto r                = RunDirect(c);
-    // qr_tdm, when built, takes the M64 Q scale blocks that qr_tdm_fp8_sched leaves.
+    // qr_tdm, when built, takes the M64 Q scale blocks that qr_tdm_sched leaves.
     if(c.bss_q > 0 && c.bss_kv > 0 && r.rc >= 0)
         EXPECT_EQ(DecodeKernelOf(r.kernel), "other") << r.kernel;
     else
@@ -1350,7 +1350,7 @@ INSTANTIATE_TEST_SUITE_P(TestCkTileFmhaFwd,
 TEST_P(QuantScaleMergeStride, DataTypeConfig)
 {
     if(!ck_tile::is_gfx125_supported())
-        GTEST_SKIP() << "qr_tdm_fp8_sched is gfx125x only";
+        GTEST_SKIP() << "FP8 qr_tdm_sched is gfx125x only";
     auto [hdims, dims] = GetParam();
     DirectCase c;
     std::tie(c.hdim_q, c.hdim_v)                      = hdims;
@@ -1394,7 +1394,7 @@ INSTANTIATE_TEST_SUITE_P(TestCkTileFmhaFwd,
 TEST_P(QuantScaleSinkNonFinite, DataTypeConfig)
 {
     if(!ck_tile::is_gfx125_supported())
-        GTEST_SKIP() << "qr_tdm_fp8_sched is gfx125x only";
+        GTEST_SKIP() << "FP8 qr_tdm_sched is gfx125x only";
     auto [hdims, dims, nan] = GetParam();
     DirectCase c;
     std::tie(c.hdim_q, c.hdim_v)                      = hdims;
@@ -1642,7 +1642,7 @@ TEST(TestCkTileFmhaFwd, QuantScaleMxFromFp8)
         ASSERT_GE(mx.rc, 0) << mx.kernel;
         EXPECT_EQ(alias.kernel, mx.kernel);
         EXPECT_NE(alias.kernel.find("_mx" + dtype + "_"), std::string::npos) << alias.kernel;
-        EXPECT_NE(alias.kernel.find("qr_tdm_fp8_sched"), std::string::npos) << alias.kernel;
+        EXPECT_NE(alias.kernel.find("qr_tdm_sched"), std::string::npos) << alias.kernel;
         EXPECT_TRUE(std::any_of(alias.o.begin(), alias.o.end(), [](float x) { return x != 0.f; }));
         EXPECT_TRUE(SameBits(alias.o, mx.o));
         EXPECT_TRUE(SameBits(alias.lse, mx.lse));

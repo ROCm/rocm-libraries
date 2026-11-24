@@ -375,7 +375,7 @@ class FmhaFwdApiTrait:
     # occupancy variants for the same tile can coexist in one shared object.
     occupancy: int = -1
     constraint: CppConstraint = field(default_factory=lambda: CppConstraint())
-    packgqa: str = "f"
+    packgqa: Optional[str] = None
 
     @property
     def name(self) -> str:
@@ -394,7 +394,6 @@ class FmhaFwdApiTrait:
             "qr_async_trload_v3",
             "qr_tdm",
             "qr_tdm_sched",
-            "qr_tdm_fp8_sched",
             "qr_tdm_pingpong",
         ]:
             if self.spad == "t":
@@ -440,7 +439,9 @@ class FmhaFwdApiTrait:
             else:
                 return f"(a.cu_seqlen_k_ptr == nullptr) && (a.seqlen_k != 0 && a.seqlen_k % {self.bn0} == 0)"
         elif self.pipeline_tag == "qr_tdm" or (
-            self.pipeline_tag == "qr_tdm_sched" and self.hdim == "64"
+            self.pipeline_tag == "qr_tdm_sched"
+            and self.hdim == "64"
+            and not is_qr_tdm_sched_fp8(self.pipeline_tag, self.dtype)
         ):
             if self.skpad == "t":
                 return "true"
@@ -450,7 +451,6 @@ class FmhaFwdApiTrait:
             "qr_async_trload",
             "qr_async_trload_v3",
             "qr_tdm_sched",
-            "qr_tdm_fp8_sched",
         ]:
             if self.skpad == "t":
                 return "true"
@@ -481,7 +481,6 @@ class FmhaFwdApiTrait:
             "qr_async_trload",
             "qr_async_trload_v3",
             "qr_tdm_sched",
-            "qr_tdm_fp8_sched",
         ]:
             bk0submax = K0_MAX_SUBMAX_MAP[self.bk0max]
             if self.dpad == "t":
@@ -513,11 +512,12 @@ class FmhaFwdApiTrait:
             "qr_async_trload",
             "qr_async_trload_v3",
             "qr_tdm_sched",
-            "qr_tdm_fp8_sched",
         ]:
             # FP8 sched tiles may have hdim_v below hdim_q (D192/V128), so check V's own width.
             v_width = (
-                self.bn1 if self.pipeline_tag == "qr_tdm_fp8_sched" else self.bk0max
+                self.bn1
+                if is_qr_tdm_sched_fp8(self.pipeline_tag, self.dtype)
+                else self.bk0max
             )
             bk0submax = K0_MAX_SUBMAX_MAP[v_width]
             if self.dvpad == "t":
@@ -549,7 +549,7 @@ class FmhaFwdPipeline:
     F_constraint: CppConstraint = field(default_factory=lambda: CppConstraint())
     F_use_double_kv_lds_buffer: str = "f"  # true/false
     F_progressive_ds_load_k: str = "f"  # true/false
-    F_packgqa: str = "f"  # true/false
+    F_packgqa: Optional[str] = None  # t/f where the pipeline has a packed GQA variant
 
     @property
     def name(self) -> str:
@@ -628,7 +628,7 @@ class FmhaFwdPipeline:
                 n += "_plk"
             else:
                 n += "_nplk"
-        if self.tag == "qr_tdm_fp8_sched":
+        if self.F_packgqa is not None:
             if self.F_packgqa == "t":
                 n += "_packgqa"
             else:
@@ -688,7 +688,15 @@ def api_trait_fmt_args(arch, dtype, hdim, trait: FmhaFwdApiTrait, max_bm0: int) 
     )
 
 
-KVSCALE_ALIGN_PIPELINE_TAGS = ("qr_tdm", "qr_tdm_fp8_sched")
+# Data types that qr_tdm_sched runs on its FP8 main loop.
+QR_TDM_SCHED_FP8_DTYPES = ("fp8", "fp8bf16", "mxfp8", "mxfp8bf16")
+
+
+def is_qr_tdm_sched_fp8(pipeline_tag: str, dtype: str) -> bool:
+    return pipeline_tag == "qr_tdm_sched" and dtype in QR_TDM_SCHED_FP8_DTYPES
+
+
+KVSCALE_ALIGN_PIPELINE_TAGS = ("qr_tdm", "qr_tdm_sched")
 
 
 def emits_kvscale_align(pipeline_tag: str, qscale: str) -> bool:
@@ -759,8 +767,7 @@ class FmhaFwdApiPool:
                     # First match wins: the sched pipelines go first; stable sort keeps tile order.
                     traits = sorted(
                         (trait for trait in pool_by_hdim if filter_fn(trait)),
-                        key=lambda trait: trait.pipeline_tag
-                        not in ("qr_tdm_sched", "qr_tdm_fp8_sched"),
+                        key=lambda trait: trait.pipeline_tag != "qr_tdm_sched",
                     )
                     max_bm0 = max((trait.bm0 for trait in traits), default=0)
                     inners = str()
@@ -979,7 +986,7 @@ class FmhaFwdKernel:
                 "    static_assert(fmha_pipeline_problem::kBlockPerCu == k_::kBlockPerCu,\n"
                 f'                  "{self.F_pipeline.tag} codegen occupancy must match '
                 'policy tuning");\n'
-                if self.F_pipeline.tag in ("qr_tdm_sched", "qr_tdm_fp8_sched")
+                if self.F_pipeline.tag == "qr_tdm_sched"
                 else ""
             ),
             F_pipeline_enum=PIPELINE_ENUM_MAP[self.F_pipeline.tag],
@@ -991,16 +998,16 @@ class FmhaFwdKernel:
             ],
             F_progressive_ds_load_k=BOOL_MAP[self.F_pipeline.F_progressive_ds_load_k],
             F_pipeline=PIPELINE_MAP[self.F_pipeline.tag],
-            # Virtual sink: none in qr_tdm_sched, F_sink in qr_tdm_fp8_sched; API checks sink_ptr.
+            # Virtual sink: none in 16-bit qr_tdm_sched, F_sink in FP8; API checks sink_ptr.
             F_pipeline_extra_args=(
-                ", ck_tile::FmhaTdmSchedPolicyFor<fmha_pipeline_problem>, false"
-                if self.F_pipeline.tag == "qr_tdm_sched"
-                else (
+                (
                     ", ck_tile::FmhaTdmSchedFp8PolicyFor<fmha_pipeline_problem>, "
                     + BOOL_MAP[self.F_pipeline.F_sink]
-                    if self.F_pipeline.tag == "qr_tdm_fp8_sched"
-                    else ""
+                    if is_qr_tdm_sched_fp8(self.F_pipeline.tag, self.F_dtype)
+                    else ", ck_tile::FmhaTdmSchedPolicyFor<fmha_pipeline_problem>, false"
                 )
+                if self.F_pipeline.tag == "qr_tdm_sched"
+                else ""
             ),
             F_kernel=self._get_cpp_kernel_class_name(self.F_pipeline.tag),
             F_kargs_creator=self._get_cpp_kargs_creator_func_name(self.F_pipeline.tag),
@@ -1135,7 +1142,7 @@ class CompatibilityRuleFactory:
             if (problem_ctx.hdim, problem_ctx.hdim_v) == (192, 128):
                 # The gfx125 FP8 scheduled pipeline also serves elementwise bias.
                 fp8_sched_bias = (
-                    kernel_ctx.pipeline.tag == "qr_tdm_fp8_sched"
+                    is_qr_tdm_sched_fp8(kernel_ctx.pipeline.tag, problem_ctx.dtype)
                     and kernel_ctx.pipeline.F_bias == "bias"
                 )
                 if (
@@ -2016,7 +2023,7 @@ class KernelComponentFactoryGfx125(CompatibilityRuleFactory):
     _PIPELINES_WITH_OWN_TILES = ("qr_tdm_pingpong",)
 
     # FP8 scheduled pipeline dtypes: FP8, FP8BF16, MXFP8.
-    _DT_QR_TDM_SCHED_FP8 = _DT_FP8_FP8BF16 + _DT_MXFP8
+    _DT_QR_TDM_SCHED_FP8 = QR_TDM_SCHED_FP8_DTYPES
 
     # Scheduled tiles by dtype group, then (hdim, hdim_v). Codegen inventory and pipeline
     # compatibility share these entries; runtime constraints are attached to copies.
@@ -2073,11 +2080,6 @@ class KernelComponentFactoryGfx125(CompatibilityRuleFactory):
             ),
         },
     }  # fmt: skip
-    # Scheduled pipeline of each dtype group.
-    _QR_TDM_SCHED_PIPELINE_TAGS = {
-        _DT_FP16_BF16: "qr_tdm_sched",
-        _DT_QR_TDM_SCHED_FP8: "qr_tdm_fp8_sched",
-    }
     # Workgroups per CU; the pipeline takes them from the generated traits.
     # Every quantization mode fits 512 VGPRs without mainloop spills, so all run two per CU.
     _QR_TDM_SCHED_FP8_OCCUPANCY = 2
@@ -2101,17 +2103,6 @@ class KernelComponentFactoryGfx125(CompatibilityRuleFactory):
             cls._QR_TDM_SCHED_ONE_WAVE_TILES if one_wave else cls._QR_TDM_SCHED_TILES
         )
         return next((tiles for dtypes, tiles in table.items() if dtype in dtypes), {})
-
-    @classmethod
-    def qr_tdm_sched_pipeline_tag(cls, dtype: str) -> Optional[str]:
-        return next(
-            (
-                tag
-                for dtypes, tag in cls._QR_TDM_SCHED_PIPELINE_TAGS.items()
-                if dtype in dtypes
-            ),
-            None,
-        )
 
     @classmethod
     def is_tile_supported_by_qr_tdm_sched(
@@ -2139,7 +2130,7 @@ class KernelComponentFactoryGfx125(CompatibilityRuleFactory):
         return dict(sorted(result.items()))
 
     @classmethod
-    def qr_tdm_fp8_sched_occupancy(
+    def qr_tdm_sched_fp8_occupancy(
         cls,
         hdim: int,
         bias: str,
@@ -2168,7 +2159,7 @@ class KernelComponentFactoryGfx125(CompatibilityRuleFactory):
         return cls._QR_TDM_SCHED_FP8_OCCUPANCY
 
     @classmethod
-    def qr_tdm_fp8_sched_constraint(
+    def qr_tdm_sched_fp8_constraint(
         cls, hdim: int, hdim_v: int, qscale: str, sink: str
     ) -> CppConstraint:
         # Runtime eligibility: exact head dims, sink pointer and scale layout; any seqlen_q.
@@ -2206,7 +2197,7 @@ class KernelComponentFactoryGfx125(CompatibilityRuleFactory):
     _QR_TDM_SCHED_FP8_ONE_WAVE_OCCUPANCY = {64: 2, 128: 2, 192: 2, 256: 1}
 
     @classmethod
-    def qr_tdm_fp8_sched_pipelines(
+    def qr_tdm_sched_fp8_pipelines(
         cls, hdim: int, hdim_v: int, mask_impl: str, qscales, biases
     ) -> List[FmhaFwdPipeline]:
         # Packed GQA decode first (one-wavefront tile, then the full tile), then the full tiles.
@@ -2219,15 +2210,15 @@ class KernelComponentFactoryGfx125(CompatibilityRuleFactory):
                 ["f", "t"],
                 bias_values,
             ):
-                sched_fp8_constraint = cls.qr_tdm_fp8_sched_constraint(hdim, hdim_v, qscale, sink)  # fmt: skip
-                pipelines.append(FmhaFwdPipeline("qr_tdm_fp8_sched", "row", "t", "t", "f", "f", "f", bias, lse, "f", qscale, mask, "f", "f", sink, F_constraint=sched_fp8_constraint, F_packgqa=packgqa))  # fmt: skip
+                sched_fp8_constraint = cls.qr_tdm_sched_fp8_constraint(hdim, hdim_v, qscale, sink)  # fmt: skip
+                pipelines.append(FmhaFwdPipeline("qr_tdm_sched", "row", "t", "t", "f", "f", "f", bias, lse, "f", qscale, mask, "f", "f", sink, F_constraint=sched_fp8_constraint, F_packgqa=packgqa))  # fmt: skip
         return pipelines
 
     @classmethod
     def get_rules(cls) -> List[CompatibilityRule]:
         rules = super().get_rules()
 
-        def check_qr_tdm_fp8_sched_kernel(
+        def check_qr_tdm_sched_fp8_kernel(
             problem_ctx: ProblemContext,
             kernel_ctx: KernelContext,
             is_one_wave_tile: bool,
@@ -2245,7 +2236,7 @@ class KernelComponentFactoryGfx125(CompatibilityRuleFactory):
             return (
                 kernel_ctx.pipeline.F_vlayout == "row"
                 and kernel_ctx.tile.F_occupancy
-                == cls.qr_tdm_fp8_sched_occupancy(
+                == cls.qr_tdm_sched_fp8_occupancy(
                     problem_ctx.hdim,
                     kernel_ctx.pipeline.F_bias,
                     kernel_ctx.pipeline.F_qscale,
@@ -2298,9 +2289,8 @@ class KernelComponentFactoryGfx125(CompatibilityRuleFactory):
         def check_qr_tdm_sched_codegen_compatibility(
             problem_ctx: ProblemContext, kernel_ctx: KernelContext
         ) -> bool:
-            # Each dtype group pairs its scheduled tiles with its scheduled pipeline only.
+            # A dtype group's scheduled tiles pair with qr_tdm_sched only.
             dtype = problem_ctx.dtype
-            sched_tag = cls.qr_tdm_sched_pipeline_tag(dtype)
             sched_tiles = cls.qr_tdm_sched_tiles(dtype)
             is_sched_tile = cls.is_tile_supported_by_qr_tdm_sched(
                 kernel_ctx.tile, problem_ctx.hdim, dtype
@@ -2313,16 +2303,15 @@ class KernelComponentFactoryGfx125(CompatibilityRuleFactory):
             has_sched_dims = (
                 is_fp8 or (problem_ctx.hdim, problem_ctx.hdim_v) in sched_tiles
             )
-            tag = kernel_ctx.pipeline.tag
-            if tag not in cls._QR_TDM_SCHED_PIPELINE_TAGS.values():
+            if kernel_ctx.pipeline.tag != "qr_tdm_sched":
                 # Other pipelines keep their own tiles.
                 return not (has_sched_dims and (is_sched_tile or is_one_wave_tile))
-            if tag != sched_tag or not has_sched_dims:
+            if not has_sched_dims:
                 return False
             if is_fp8:
                 return (
                     is_sched_tile or is_one_wave_tile
-                ) and check_qr_tdm_fp8_sched_kernel(
+                ) and check_qr_tdm_sched_fp8_kernel(
                     problem_ctx, kernel_ctx, is_one_wave_tile
                 )
             return is_sched_tile and check_qr_tdm_16bit_sched_kernel(
@@ -2335,7 +2324,7 @@ class KernelComponentFactoryGfx125(CompatibilityRuleFactory):
             if problem_ctx.dtype not in cls._DT_FP8_FP8BF16:
                 return True
             k0_loops = kernel_ctx.tile.F_bk0max // kernel_ctx.tile.F_bk0
-            if kernel_ctx.pipeline.tag in ("qr_tdm", "qr_tdm_fp8_sched"):
+            if kernel_ctx.pipeline.tag in ("qr_tdm", "qr_tdm_sched"):
                 return k0_loops == 1
             return k0_loops >= 2
 
@@ -2563,7 +2552,7 @@ class KernelComponentFactoryGfx125(CompatibilityRuleFactory):
             ) in cls.qr_tdm_sched_tiles(dtype):
                 # No alibi/dropout; bias runs one workgroup per CU. Dispatched ahead of qr_tdm.
                 pipelines.extend(
-                    cls.qr_tdm_fp8_sched_pipelines(
+                    cls.qr_tdm_sched_fp8_pipelines(
                         hdim,
                         hdim_v,
                         mask_impl,
@@ -2581,7 +2570,7 @@ class KernelComponentFactoryGfx125(CompatibilityRuleFactory):
             # MX only on the scheduled FP8 pipeline: no bias/dropout.
             if (hdim, hdim_v) in cls.qr_tdm_sched_tiles(dtype):
                 pipelines.extend(
-                    cls.qr_tdm_fp8_sched_pipelines(
+                    cls.qr_tdm_sched_fp8_pipelines(
                         hdim, hdim_v, mask_impl, ["mx"], ["no"]
                     )
                 )

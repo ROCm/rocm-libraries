@@ -53,7 +53,7 @@ struct BlockFmhaPipelineQRKSVSTdmSchedFp8
     using Softmax               = typename Policy::Softmax;
     using Schedule              = typename Policy::Schedule;
     using Mode                  = FmhaTdmSchedMode<Problem, Policy>;
-    static_assert(Mode::kIsLegal, "qr_tdm_fp8_sched schedule geometry is incompatible");
+    static_assert(Mode::kIsLegal, "FP8 qr_tdm_sched schedule geometry is incompatible");
 
     using BlockFmhaShape             = remove_cvref_t<typename Problem::BlockFmhaShape>;
     using VLayout                    = remove_cvref_t<typename BlockFmhaShape::VLayout>;
@@ -89,19 +89,19 @@ struct BlockFmhaPipelineQRKSVSTdmSchedFp8
     static constexpr bool kMergeHeads = Problem::kMergeNumHeadGroupsSeqLenQ;
 
     static_assert(CK_TILE_FMHA_FWD_FAST_EXP2,
-                  "qr_tdm_fp8_sched: every softmax site calls exp2, so log2(e) must be folded "
+                  "FP8 qr_tdm_sched: every softmax site calls exp2, so log2(e) must be folded "
                   "into scale_s");
     static_assert(BiasEnum == BlockAttentionBiasEnum::NO_BIAS ||
                       BiasEnum == BlockAttentionBiasEnum::ELEMENTWISE_BIAS,
-                  "qr_tdm_fp8_sched implements elementwise bias only, not alibi");
-    static_assert(!kHasLogitsSoftCap, "qr_tdm_fp8_sched does not implement logits soft cap");
-    static_assert(!kHasDropout, "qr_tdm_fp8_sched does not support dropout");
+                  "FP8 qr_tdm_sched implements elementwise bias only, not alibi");
+    static_assert(!kHasLogitsSoftCap, "FP8 qr_tdm_sched does not implement logits soft cap");
+    static_assert(!kHasDropout, "FP8 qr_tdm_sched does not support dropout");
     static_assert(QScaleEnum == BlockAttentionQuantScaleEnum::NO_SCALE ||
                       QScaleEnum == BlockAttentionQuantScaleEnum::PERTENSOR ||
                       QScaleEnum == BlockAttentionQuantScaleEnum::PERHEAD ||
                       QScaleEnum == BlockAttentionQuantScaleEnum::BLOCKSCALE ||
                       QScaleEnum == BlockAttentionQuantScaleEnum::MX,
-                  "qr_tdm_fp8_sched: unsupported quantization granularity");
+                  "FP8 qr_tdm_sched: unsupported quantization granularity");
     static_assert(!kMergeHeads || (!kIsGroupMode && BiasEnum == BlockAttentionBiasEnum::NO_BIAS),
                   "merged GQA rows need batch mode and no bias");
     // Derived switches, each described in the features table.
@@ -130,7 +130,7 @@ struct BlockFmhaPipelineQRKSVSTdmSchedFp8
         kPadSeqLenK ? 1 : Policy::template GetAlignmentRandVal<Problem>();
 
     static_assert(Policy::template IsSupportedProblem<Problem>(),
-                  "qr_tdm_fp8_sched requires an exact supported FP8 geometry");
+                  "FP8 qr_tdm_sched requires an exact supported FP8 geometry");
 
     // IsSupportedProblem above pins Geometry == FmhaTdmSchedGeometryFor<Problem>.
     using Geometry = typename Policy::Geometry;
@@ -149,7 +149,7 @@ struct BlockFmhaPipelineQRKSVSTdmSchedFp8
         return ((row % 2) * 2 + chunk % 2) * kNumN + chunk / 2;
     }
 
-    static constexpr const char* name = "qr_tdm_fp8_sched";
+    static constexpr const char* name = "qr_tdm_sched";
     using Common                      = FmhaTdmSchedPipelineCommon;
 
     static constexpr bool kUsesUntransposedVKernelPath = true;
@@ -232,7 +232,7 @@ struct BlockFmhaPipelineQRKSVSTdmSchedFp8
         const bool log    = ck_tile::EnvIsEnabled(CK_TILE_ENV(CK_TILE_LOGGING));
         const auto reject = [&](const char* reason) {
             if(log)
-                CK_TILE_ERROR("FMHA fwd qr_tdm_fp8_sched: ", reason);
+                CK_TILE_ERROR("FMHA fwd FP8 qr_tdm_sched: ", reason);
             return false;
         };
         if constexpr(!kEnableVirtualSink)

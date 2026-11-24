@@ -134,7 +134,7 @@ struct TestConfigs<FmhaFwdMxFp8>
     }
 };
 
-// MXFP8 with a BF16 O exists only on gfx125x qr_tdm_fp8_sched; d64/d256 run in the Hdim suites.
+// MXFP8 with a BF16 O exists only on gfx125x qr_tdm_sched; d64/d256 run in the Hdim suites.
 template <>
 struct TestConfigs<FmhaFwdMxFp8Bf16> : TestConfigs<FmhaFwdMxFp8>
 {

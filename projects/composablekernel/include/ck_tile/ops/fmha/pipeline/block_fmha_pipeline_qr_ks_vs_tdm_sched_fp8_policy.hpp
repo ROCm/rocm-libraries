@@ -343,7 +343,7 @@ struct BlockFmhaPipelineQRKSVSTdmSchedFp8Policy
     CK_TILE_HOST_DEVICE static constexpr auto MakeQLdsBlockDescriptor()
     {
         static_assert(IsSupportedProblem<Problem>(),
-                      "qr_tdm_fp8_sched policy geometry does not match the problem");
+                      "FP8 qr_tdm_sched policy geometry does not match the problem");
         static_assert(Problem::BlockFmhaShape::kSubQKHeaddim == kKValidWidth);
         constexpr auto desc = [] {
             if constexpr(kPadQRows)
