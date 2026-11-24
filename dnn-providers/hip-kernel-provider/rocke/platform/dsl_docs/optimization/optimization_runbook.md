@@ -1282,9 +1282,11 @@ layout match, independent of the atom's compute throughput.
 - The LDS destination of a gfx9 `buffer_load ... lds` copy is wave-uniform. Keep
   the wave's first group offset in one SGPR computed once and add a
   compile-time group constant per copy: deriving it per row in a VGPR costs a
-  VGPR and a `v_readfirstlane` per issue in the loop. In the dense attention
-  grid bodies this paid for the extra address arithmetic of launch-time
-  strides.
+  VGPR and a `v_readfirstlane` per issue in the loop. On the gfx950 dense
+  attention grid bodies this paid for the extra address arithmetic of
+  launch-time strides; on gfx942 it did not help every body (it timed slower on
+  the non-causal bf16 D128 grid, which keeps the per-row form), so time it per
+  body and re-check the schedule (Section 8.5).
 
 ### 8.3 Waits And Barriers
 
@@ -1371,9 +1373,14 @@ top of the main-loop body**, and when you use it **suppress the manual
 - Watch scalar ALU address arithmetic (`probe_isa_inspect.py`'s
   `salu` sub-bucket grows if the address math is not hoisted). Hoist what does
   not depend on the work item, keep the per-lane part in the VGPR offset, and
-  re-check the schedule after any address change: on a D128 attention KV loop
-  the compiler's overlap of the softmax exps with the PV MFMAs was lost by
-  address-code changes until each PV MFMA was emitted right after its P pack.
+  re-check the schedule after any address change: in the gfx942 D128 attention
+  KV loop at LLVM 22, address-code changes moved every softmax exp ahead of the
+  PV MFMAs in some kernels and let them overlap in others that had been
+  serialized. Emitting the PV MFMAs in issue order, each once the P pack it
+  reads exists and in the PV loop order, gave part of the lost overlap back and
+  added overlap where there had been none; each MFMA follows its own pack only
+  with the k-major PV order, since the default order emits most of them after
+  the last pack. The schedule LLVM picks differs between compiler versions.
 
 ### 8.6 Diagnosing the bound: barrier-bound vs schedule-bound
 

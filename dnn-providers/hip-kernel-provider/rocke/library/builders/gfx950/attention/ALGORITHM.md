@@ -5,10 +5,10 @@ This file explains *what* the CK DSL `unified_attention` kernels compute and
 The [`README.md`](README.md) is the parity + optimization history; this file is
 the specification, the data layout, and the two kernel strategies (2D and 3D
 split-KV) the production dispatcher chooses between. §8 additionally documents the
-**dense prefill kernel** — a compile-time-sized peak-TFLOPS sibling
-(persistent grid-stride + on-chip ragged support) for the `[B, S, H, d]` prefill
-regime (any batch, head and token strides the host admits), with a single-sequence
-paged K/V mode.
+**dense prefill kernel** — a peak-TFLOPS sibling (persistent grid-stride + on-chip
+ragged support) for the `[B, S, H, d]` prefill regime, with a single-sequence paged
+K/V mode. Most of its grid and persistent bodies read Q/K/V/O as strided views;
+§8, *Launch-time ABI*, lists the bodies that take packed tensors only.
 
 > The harness in this folder benchmarks against AITER's Triton
 > `unified_attention`; the CK DSL kernels mirror that Triton reference 1:1 in
@@ -469,7 +469,8 @@ $S_q = S_k$) is a different regime: the shape is known up front and there is no
 paging indirection to hide, so a dedicated kernel
 (`kernels/gfx950/attention_dense.py`) trades generality for **peak MFMA
 throughput**. It computes the exact same streaming-softmax core (§2) but bakes
-the shape into the kernel and reshapes the schedule around a 256-row query tile.
+the tile geometry (and, in the sub-modes below, the shape) into the kernel and
+reshapes the schedule around a 256-row query tile.
 
 - **Launch-time ABI.** `head_size / causal / dtype` are constants baked at build
   time. On the aligned path `batch / seqlen_q / seqlen_kv / num_query_heads /
@@ -480,7 +481,10 @@ the shape into the kernel and reshapes the schedule around a 256-row query tile.
   (`stride_{q,k,v,o}_{batch,head,token}`; the head-dim stride is 1): the grid and
   persistent bodies address Q/K/V/O through them, so a batch slice, a BHSD buffer
   or a packed QKV view launches without a copy
-  (`kernels/common/_attention_dense_strides.py`).
+  (`kernels/common/_attention_dense_strides.py`). The `gqa_pair` orders, the
+  ragged, varlen, paged and fp8 K/V-cache bodies and the additive-bias bodies take
+  the same twelve arguments, ignore them and launch packed tensors only
+  (`body_serves_strides`).
   The supported scale range is `DENSE_MIN_SCALE`..`DENSE_MAX_SCALE` in
   `kernels/common/attention_dense_spec.py`: `check_dense_scale` there makes
   `run_attention_dense_torch` raise `ValueError` for a NaN or infinite scale and

@@ -32,21 +32,24 @@ split matters when you build a spec by hand:
 The gfx950 golden is untouched either way: this is a separate kernel module emitting
 its own symbol against its own fixture, not an arch branch in the gfx950 file.
 
-Still rejected with a structured reason by `supports_attention_dense`: varlen, ragged and
-paged K/V.
+Still rejected with a structured reason by `supports_attention_dense`: varlen and ragged.
 A sliding window that leaves query rows no key (`seqlen_q - seqlen_kv >= W`, or a last
 query block whose window starts past `seqlen_kv`) is supported: those rows write O = 0,
 with or without sinks or the LSE output.
 Q, K, V and O are logical `[B, S, H, D]` views of any storage layout the host admits:
 every kernel takes twelve trailing `i32` arguments, a batch, head and token element stride
 per tensor (the head-dim stride is 1), so BSHD, BHSD, batch slices and packed QKV views
-launch without a copy. The default and persistent grids and the KV-segment grid read them;
-the opt-in `v_reg_prefetch=1` and `lds_num_buffers=2` pipelines and the paged body take the
-arguments and ignore them, and `run_attention_dense_torch` admits packed tensors only for
-those (`body_serves_strides`). The strides are not a spec field: the kernel name and the
-cache key do not change. The admission rules (stride multiples, alignment, overlap, size
-limits) are in `kernels/common/_attention_dense_strides.py`. The measured cost of the
-strides against `develop` on gfx942 and gfx950 and the strided-layout catalog sweep are in
+launch without a copy. The default and persistent grids and the KV-segment grid read them.
+Three kinds of body take the arguments and ignore them: the opt-in `v_reg_prefetch=1` and
+`lds_num_buffers=2` pipelines, the paged body, and the additive-bias bodies
+(`use_additive_bias`). `run_attention_dense_torch` admits packed tensors only for those
+(`body_serves_strides`) and raises `ValueError` for any other layout. The strides are not
+a spec field: the kernel name and the cache key do not change. The admission rules
+(stride multiples, alignment, overlap, size limits) are in
+`kernels/common/_attention_dense_strides.py`; it also refuses an O whose bytes meet those
+of Q, K or V, since the kernel writes O while other workgroups still read the inputs. The
+measured cost of the strides against the baseline kernels on gfx942 and gfx950 and the
+strided-layout catalog sweep are in
 [the case study](../../../gfx950/attention/prefill/dense_attention_launch_time_strides_case_study.md)
 in the gfx950 prefill folder (it covers both architectures).
 Sliding-window and attention sinks are supported, alone or combined. Paged K/V runs on
@@ -152,7 +155,9 @@ An additive bias (hipDNN's `attn_mask`, PyTorch's float `attn_mask`) is added to
 scaled scores before the mask: `softmax(QK * scale + bias)`. It is a compile-time
 opt-in on the gfx942 dense spec, `use_additive_bias=True`, served by both grids (the
 default and the persistent one). The kernel name gains `addb`, and the kernel gains
-four trailing params (the bias pointer and its three strides).
+four params (the bias pointer and its three strides), declared after every other param
+except the twelve launch-time stride params, which stay last (`attention_dense_signature`
+is the order).
 
 ```python
 spec = Gfx942AttentionDenseSpec(
@@ -187,6 +192,12 @@ run_attention_dense_torch(
   ignored. A bias above about 2.3e38 overflows to a NaN row.
 - **Composes with** every mask the kernel serves (none, top-left and bottom-right
   causal, sliding window), sinks and LSE, fp16/bf16, D64/D128, and both grids.
+- **Packed Q, K, V and O only.** The bias bodies take the twelve Q/K/V/O stride
+  arguments and ignore them: the bias read indexes only by the bias's own three
+  strides, and the bias bodies were added while the stride work was open and were not
+  ported to it. A strided Q, K, V or O raises `ValueError`; the hipDNN engine
+  declines such a graph with the cause `attn_mask`. Serving strides here is a separate
+  follow-up.
 - **Refused** by `supports_attention_dense`: the KV-segment split (`kv_segments > 1`;
   its segment store skips the bias epilogue), the opt-in K double-buffer / V
   register-prefetch pipeline (`lds_num_buffers=2`, `v_reg_prefetch=True`; the bias

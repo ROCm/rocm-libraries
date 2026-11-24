@@ -384,7 +384,7 @@ def test_binding_rejects_a_problem_that_disagrees_on_lse(arch, monkeypatch):
 def test_only_the_dense_candidates_hash_the_strided_abi():
     """The 12 trailing stride kernargs changed the dense kernels' argument list only:
     the dense candidates hash DENSE_ATTENTION_ABI_VERSION (v3) into their tuning ids,
-    every other attention_unified candidate keeps develop's v2 (the pins above)."""
+    every other attention_unified candidate keeps the v2 ABI (the pins above)."""
     from dispatch.attention import ATTENTION_REGISTRY
     from dispatch.attention.common import (
         ATTENTION_ABI_VERSION,
