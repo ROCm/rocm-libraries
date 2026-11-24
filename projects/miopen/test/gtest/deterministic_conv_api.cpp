@@ -120,4 +120,4 @@ using CPU_DeterministicConvApi_NONE = DeterministicConvApiTest;
 
 TEST_P(CPU_DeterministicConvApi_NONE, Test) { Run(); }
 
-INSTANTIATE_TEST_SUITE_P(Smoke, CPU_DeterministicConvApi_NONE, GetCases(), TestNameGenerator{});
+INSTANTIATE_TEST_SUITE_P(Quick, CPU_DeterministicConvApi_NONE, GetCases(), TestNameGenerator{});

@@ -50,9 +50,9 @@ auto GetConvTestCases(miopenDataType_t datatype)
     return cases;
 }
 
-// Half-open [begin, end) slice of the conv cases. The Smoke/Standard/Full tiers
-// use disjoint slices; the categories run cumulative tiers (standard =
-// Smoke+Standard, comprehensive/full = Smoke+Standard+Full), so the slices
+// Half-open [begin, end) slice of the conv cases. The Quick/Standard/Comprehensive
+// tiers use disjoint slices; the categories run cumulative tiers (standard =
+// Quick+Standard, comprehensive/full = Quick+Standard+Comprehensive), so the slices
 // reassemble the full list with no case repeated across tiers.
 auto GetConvTestCasesRange(miopenDataType_t datatype, std::size_t begin, std::size_t end)
 {
@@ -92,12 +92,12 @@ TEST_P(CPU_UnitTestConvSolverFFTDevApplicabilityFwd_NONE, fft)
     this->RunTest(miopen::solver::conv::fft{});
 };
 
-// Tiered with disjoint conv-case slices: Smoke [0,3), Standard [3,10), Full
-// [10,end). The categories run cumulative tiers, so Smoke+Standard+Full
+// Tiered with disjoint conv-case slices: Quick [0,3), Standard [3,10), Comprehensive
+// [10,end). The categories run cumulative tiers, so Quick+Standard+Comprehensive
 // reassemble the complete list with no case repeated across tiers.
 constexpr std::size_t kAllConvCases = static_cast<std::size_t>(-1);
 INSTANTIATE_TEST_SUITE_P(
-    Smoke,
+    Quick,
     GPU_UnitTestConvSolverFFTFwd_FP32,
     testing::Combine(testing::Values(GetTestParams()),
                      testing::Values(miopenConvolutionAlgoFFT),
@@ -109,14 +109,14 @@ INSTANTIATE_TEST_SUITE_P(
                      testing::Values(miopenConvolutionAlgoFFT),
                      testing::ValuesIn(GetConvTestCasesRange(miopenFloat, 3, 10))));
 INSTANTIATE_TEST_SUITE_P(
-    Full,
+    Comprehensive,
     GPU_UnitTestConvSolverFFTFwd_FP32,
     testing::Combine(testing::Values(GetTestParams()),
                      testing::Values(miopenConvolutionAlgoFFT),
                      testing::ValuesIn(GetConvTestCasesRange(miopenFloat, 10, kAllConvCases))));
 
 INSTANTIATE_TEST_SUITE_P(
-    Smoke,
+    Quick,
     GPU_UnitTestConvSolverFFTBwd_FP32,
     testing::Combine(testing::Values(GetTestParams()),
                      testing::Values(miopenConvolutionAlgoFFT),
@@ -128,14 +128,14 @@ INSTANTIATE_TEST_SUITE_P(
                      testing::Values(miopenConvolutionAlgoFFT),
                      testing::ValuesIn(GetConvTestCasesRange(miopenFloat, 3, 10))));
 INSTANTIATE_TEST_SUITE_P(
-    Full,
+    Comprehensive,
     GPU_UnitTestConvSolverFFTBwd_FP32,
     testing::Combine(testing::Values(GetTestParams()),
                      testing::Values(miopenConvolutionAlgoFFT),
                      testing::ValuesIn(GetConvTestCasesRange(miopenFloat, 10, kAllConvCases))));
 
 // Device applicability test
-INSTANTIATE_TEST_SUITE_P(Smoke,
+INSTANTIATE_TEST_SUITE_P(Quick,
                          CPU_UnitTestConvSolverFFTDevApplicabilityFwd_NONE,
                          testing::Combine(testing::Values(GetTestParams()),
                                           testing::Values(GetConvTestCases(miopenFloat)[0])));

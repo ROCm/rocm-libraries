@@ -73,15 +73,15 @@ TEST_P(CPU_UnitTestConvSolverHipImplicitGemmV4R4WrWDevApplicabilityWrw_NONE, SOL
     this->RunTest(miopen::solver::conv::ConvHipImplicitGemmV4R4WrW{});
 };
 
-// Smoke tests
-INSTANTIATE_TEST_SUITE_P(Smoke,
+// Quick tests
+INSTANTIATE_TEST_SUITE_P(Quick,
                          GPU_UnitTestConvSolverHipImplicitGemmV4R4WrW_FP32,
                          testing::Combine(testing::Values(GetTestParams()),
                                           testing::Values(miopenConvolutionAlgoImplicitGEMM),
                                           testing::ValuesIn(GetConvTestCases(miopenFloat))));
 
 // Device applicability test
-INSTANTIATE_TEST_SUITE_P(Smoke,
+INSTANTIATE_TEST_SUITE_P(Quick,
                          CPU_UnitTestConvSolverHipImplicitGemmV4R4WrWDevApplicabilityWrw_NONE,
                          testing::Combine(testing::Values(GetTestParams()),
                                           testing::Values(GetConvTestCases(miopenFloat)[0])));

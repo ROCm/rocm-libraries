@@ -145,9 +145,27 @@ if(ENABLE_HIP_FLASH2_ENGINE)
     # while looking like an upgrade.
     option(HIP_FLASH2_BUILD_VARIANTS "Regenerate the Flash2 kernel variant .co files" OFF)
     if(HIP_FLASH2_BUILD_VARIANTS)
-        find_program(HIP_FLASH2_HIPCC hipcc HINTS ${ROCM_PATH}/bin /opt/rocm/bin)
-        if(NOT HIP_FLASH2_HIPCC)
-            message(FATAL_ERROR "HIP_FLASH2_BUILD_VARIANTS=ON but hipcc was not found")
+        # Use the HIP compiler directly instead of hipcc.
+        if(CMAKE_HIP_COMPILER)
+            set(HIP_FLASH2_COMPILER "${CMAKE_HIP_COMPILER}")
+        else()
+            set(HIP_FLASH2_COMPILER "${CMAKE_CXX_COMPILER}")
+        endif()
+        if(NOT HIP_FLASH2_COMPILER)
+            message(FATAL_ERROR "HIP_FLASH2_BUILD_VARIANTS=ON but no HIP compiler was found")
+        endif()
+        # Derive hip-path and device-lib-path for the compiler.
+        if(hip_DIR)
+            get_filename_component(_f2_hip_path "${hip_DIR}/../../.." ABSOLUTE)
+        else()
+            set(_f2_hip_path "")
+        endif()
+        get_filename_component(_f2_compiler_dir "${HIP_FLASH2_COMPILER}" DIRECTORY)
+        set(_f2_device_lib_candidate "${_f2_compiler_dir}/../amdgcn/bitcode")
+        if(IS_DIRECTORY "${_f2_device_lib_candidate}")
+            get_filename_component(_f2_device_lib_path "${_f2_device_lib_candidate}" ABSOLUTE)
+        else()
+            set(_f2_device_lib_path "")
         endif()
 
         # Respect GPU_TARGETS rather than hardcoding gfx942: hardcoding both the
@@ -186,8 +204,10 @@ if(ENABLE_HIP_FLASH2_ENGINE)
             set(_co ${_f2_out}/hip_flash2_fwd_${_f2_arch}_${_tag}.co)
             add_custom_command(
                 OUTPUT ${_co}
-                COMMAND ${HIP_FLASH2_HIPCC} --genco -O3 -std=c++17
-                        --offload-arch=${_f2_arch}
+                COMMAND ${HIP_FLASH2_COMPILER} --offload-device-only -x hip
+                        -O3 -std=c++17 --offload-arch=${_f2_arch}
+                        "$<$<BOOL:${_f2_hip_path}>:--hip-path=${_f2_hip_path}>"
+                        "$<$<BOOL:${_f2_device_lib_path}>:--hip-device-lib-path=${_f2_device_lib_path}>"
                         -DF2_WAVES=${_waves} -DF2_QG=${_qg} -DF2_KG=${_kg}
                         ${_f2_src} -o ${_co}
                 DEPENDS ${_f2_src}
@@ -678,6 +698,40 @@ else()
     message(STATUS "rocKE features disabled")
 endif()
 
+# ============================================================================
+# Heuristics of engines that bind their L1 models by declared UUID
+# ============================================================================
+# The ASM SDPA engine binds its L1 models by a UUID declared in provider code
+# (RFC 0019 §4.1), so the models have no pack and must be delivered into the production
+# tree directly, each engine under its own folder. Declared ahead of descriptor-packaging
+# because the production pack wipes that tree and stages these files itself
+# (HIPKERNELPROVIDER_PRODUCT_STAGE_FILES); a separate copy would be deleted on repack.
+#
+# HIPKERNELPROVIDER_DECLARED_MODEL_ENGINES names each such engine's folder; for each,
+# HIPKERNELPROVIDER_<folder>_DESCRIPTOR_SOURCE_DIR is its source tree and
+# HIPKERNELPROVIDER_<folder>_DESCRIPTOR_FILES the files it ships. One list feeds staging
+# and install, so the two cannot disagree about what ships.
+set(HIPKERNELPROVIDER_DECLARED_MODEL_ENGINES)
+if(ENABLE_ASM_SDPA_ENGINE AND HIPDNN_ENABLE_KERNEL_INGESTOR)
+    list(APPEND HIPKERNELPROVIDER_DECLARED_MODEL_ENGINES asm_sdpa)
+    set(HIPKERNELPROVIDER_asm_sdpa_DESCRIPTOR_SOURCE_DIR
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/engines/asm_sdpa_engine/descriptors")
+    set(HIPKERNELPROVIDER_asm_sdpa_DESCRIPTOR_FILES
+        predict_engine/gfx942/asm_sdpa_engine_tflops.uhd.json
+        predict_engine/gfx942/asm_sdpa_engine_tflops.bin
+        predict_engine/gfx950/asm_sdpa_engine_tflops.uhd.json
+        predict_engine/gfx950/asm_sdpa_engine_tflops.bin
+    )
+endif()
+set(HIPKERNELPROVIDER_PRODUCT_STAGE_FILES)
+foreach(_engine IN LISTS HIPKERNELPROVIDER_DECLARED_MODEL_ENGINES)
+    foreach(_descriptor IN LISTS HIPKERNELPROVIDER_${_engine}_DESCRIPTOR_FILES)
+        list(APPEND HIPKERNELPROVIDER_PRODUCT_STAGE_FILES
+             "${HIPKERNELPROVIDER_${_engine}_DESCRIPTOR_SOURCE_DIR}/${_descriptor}"
+             "${_engine}/${_descriptor}")
+    endforeach()
+endforeach()
+
 # The kpack reader and the descriptor packer both ride the ingestor gate. (The ASM SDPA
 # engine is a separate kpack producer on its own gate; it packs but never reads.)
 #
@@ -919,4 +973,34 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
                 REGEX "/census/[^/]+/Testing$" EXCLUDE)
     endif()
 endif()
+
+# Production pack dormant: nothing stages or installs arch_content/, so copy the declared-id
+# engines' heuristics into the build tree and install them from the source tree.
+if(HIPKERNELPROVIDER_DECLARED_MODEL_ENGINES AND NOT TARGET hkp_packaging_product)
+    foreach(_engine IN LISTS HIPKERNELPROVIDER_DECLARED_MODEL_ENGINES)
+        set(_staged)
+        foreach(_descriptor IN LISTS HIPKERNELPROVIDER_${_engine}_DESCRIPTOR_FILES)
+            set(_source "${HIPKERNELPROVIDER_${_engine}_DESCRIPTOR_SOURCE_DIR}/${_descriptor}")
+            set(_target "${HIPKERNELPROVIDER_DESCRIPTOR_BUILD_DIR}/${_engine}/${_descriptor}")
+            add_custom_command(
+                OUTPUT "${_target}"
+                COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${_source}" "${_target}"
+                DEPENDS "${_source}"
+                COMMENT "Staging ${_engine} heuristic ${_descriptor}"
+                VERBATIM
+            )
+            list(APPEND _staged "${_target}")
+
+            get_filename_component(_descriptor_subdir "${_descriptor}" DIRECTORY)
+            install(
+                FILES "${_source}"
+                DESTINATION
+                    "${HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR}/${HIPKERNELPROVIDER_DESCRIPTOR_SUBDIR}/${_engine}/${_descriptor_subdir}"
+            )
+        endforeach()
+        add_custom_target(${_engine}_engine_descriptors ALL DEPENDS ${_staged}
+                          COMMENT "Staging ${_engine} engine heuristics")
+    endforeach()
+endif()
+
 hipdnn_apply_long_path_manifest()
