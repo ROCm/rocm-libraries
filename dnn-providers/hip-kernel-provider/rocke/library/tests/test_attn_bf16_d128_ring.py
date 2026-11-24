@@ -22,8 +22,9 @@ applied) and a depth-2 pipeline (ring_depth=2, k%2 -> no reuse). Current routing
 
 Two layers:
   * Pure-Python spec assertions (always run): per-dtype D128 routing, D64 ring.
-  * On-GPU numeric guardrail (skipped without a gfx942 device + torch): launch
-    the production kernel at randn magnitude and assert max_abs vs the fp32 oracle
+  * On-GPU numeric guardrail (skipped without a gfx942 device; needs no torch):
+    launch the production kernel at randn magnitude and assert max_abs vs the
+    float64 NumPy oracle
     for BOTH dtypes -- so both the bf16 non-ring path and the fp16 depth-2 ring are
     gated on numerics. A spec-only test cannot catch a numerics regression in the
     emitted kernel -- that is exactly what let #9198 through.
@@ -31,13 +32,15 @@ Two layers:
 
 from __future__ import annotations
 
-import importlib.util
-from pathlib import Path
-
+import numpy as np
 import pytest
-
+from dispatch.attention.common import AttentionTuningSpec
 from kernels import UnifiedAttentionProblem
 from kernels.common import attention_unified as au
+from rocke.runtime.hip_module import get_device_arch
+
+from . import _attention_numpy as an
+from ._attention_device_array import DeviceArray
 
 
 @pytest.fixture
@@ -149,60 +152,34 @@ def test_d64_ring_depth_unchanged(gfx942):
 # ---------------------------------------------------------------------------
 
 
-def _load_parity_harness():
-    import sys
-
-    here = Path(__file__).resolve()
-    # rocke/library/tests -> rocke/library/builders/gfx942/attention/prefill
-    harness = (
-        here.parents[1]
-        / "builders/gfx942/attention/prefill/parity_unified_attention.py"
-    )
-    if not harness.exists():
-        return None
-    spec = importlib.util.spec_from_file_location("parity_unified_attention", harness)
-    mod = importlib.util.module_from_spec(spec)
-    # Register before exec so dataclasses in the harness (e.g. Shape) can resolve
-    # cls.__module__ during field introspection.
-    sys.modules["parity_unified_attention"] = mod
-    spec.loader.exec_module(mod)
-    return mod
-
-
-def _gpu_ready():
-    try:
-        import torch
-    except Exception:  # noqa: BLE001
-        return False
-    if not torch.cuda.is_available():
-        return False
-    name = torch.cuda.get_device_name(0).lower()
-    return "mi300" in name or "gfx942" in name
-
-
+_ARCH = get_device_arch()
 requires_gfx942_gpu = pytest.mark.skipif(
-    not _gpu_ready(), reason="needs a gfx942 (MI300X) GPU with ROCm torch"
+    _ARCH != "gfx942", reason=f"needs a gfx942 (MI300X) GPU, found {_ARCH}"
 )
+
+_BLOCK_SIZE = 64
+
+
+@pytest.fixture(autouse=True)
+def _eager_launches(monkeypatch):
+    """Graph replay of short launches needs torch; run them eagerly."""
+    monkeypatch.setenv("HIPDNN_GFX942_2D_GRAPH", "0")
+    monkeypatch.setenv("HIPDNN_GFX942_3D_GRAPH", "0")
 
 
 @requires_gfx942_gpu
+@pytest.mark.gpu
 @pytest.mark.parametrize("dtype,tol", [("bf16", 5e-2), ("fp16", 5e-2)])
 @pytest.mark.parametrize("hq,hk", [(32, 8), (16, 16)])
 @pytest.mark.parametrize("sq", [512, 1024, 4096])
 def test_d128_numeric_vs_fp32_oracle_at_magnitude(monkeypatch, dtype, tol, hq, hk, sq):
     """Launch the production D128 kernel at realistic (unit-variance) magnitude
-    and assert max_abs vs the fp32 paged-attn oracle.
+    and assert max_abs vs the float64 paged-attn oracle.
 
     This is the guardrail #9198 lacked: with the default uniform_(-0.1, 0.1)
     inputs the ring bug is invisible (softmax ~uniform); randn inputs expose it
     immediately. If a future change re-enables the broken D128 ring, this fails.
     """
-    import torch
-
-    H = _load_parity_harness()
-    if H is None:
-        pytest.skip("parity harness not present in this checkout")
-
     # Force the arch resolver so the production selector picks the gfx942 path.
     old_arch = au._RESOLVED_ATTENTION_ARCH
     au._RESOLVED_ATTENTION_ARCH = "gfx942"
@@ -219,40 +196,18 @@ def test_d128_numeric_vs_fp32_oracle_at_magnitude(monkeypatch, dtype, tol, hq, h
     try:
         from builders.common.attention_spec_builder import _tiled_spec_from_problem
 
-        s = H.Shape(
-            f"d128_{hq}_{hk}_S{sq}", dtype, sq, sq, 128, hq, hk, 1, True, "perf"
-        )
-
         # randn (unit-variance) inputs -- NOT the uniform_(-0.1,0.1) default that
         # masked the ring bug.
-        torch.manual_seed(0)
-        td = torch.float16 if dtype == "fp16" else torch.bfloat16
-        BS = H.BLOCK_SIZE
-        max_blk = (sq + BS - 1) // BS
-        query = torch.randn(sq, hq, 128, device="cuda").to(td)
-        key_cache = torch.randn(max_blk, BS, hk, 128, device="cuda").to(td)
-        value_cache = torch.randn(max_blk, BS, hk, 128, device="cuda").to(td)
-        cu_q = torch.tensor([0, sq], dtype=torch.int32, device="cuda")
-        kv_lens = torch.tensor([sq], dtype=torch.int32, device="cuda")
-        block_tables = torch.arange(max_blk, dtype=torch.int32, device="cuda").view(
-            1, max_blk
-        )
+        rng = np.random.default_rng(0)
+        rt = an.runtime()
+        max_blk = -(-sq // _BLOCK_SIZE)
+        q = an.randn(rng, (sq, hq, 128), dtype)
+        k_cache = an.randn(rng, (max_blk, _BLOCK_SIZE, hk, 128), dtype)
+        v_cache = an.randn(rng, (max_blk, _BLOCK_SIZE, hk, 128), dtype)
+        block_tables = np.arange(max_blk, dtype=np.int32).reshape(1, max_blk)
         scale = 128**-0.5
-        data = {
-            "query": query,
-            "key_cache": key_cache,
-            "value_cache": value_cache,
-            "cu_q": cu_q,
-            "kv_lens": kv_lens,
-            "query_lens": [sq],
-            "kv_lens_list": [sq],
-            "block_tables": block_tables,
-            "scale": scale,
-            "max_query_len": sq,
-            "max_kv_len": sq,
-        }
-        ref = H.ref_paged_attn(
-            query, key_cache, value_cache, [sq], [sq], block_tables, scale
+        ref = an.paged_attention_reference(
+            q, k_cache, v_cache, block_tables, [sq], [sq], scale=scale
         )
 
         p = _problem(dtype, sq=sq, hq=hq, hk=hk)
@@ -265,24 +220,45 @@ def test_d128_numeric_vs_fp32_oracle_at_magnitude(monkeypatch, dtype, tol, hq, h
         elif spec.use_k_sliced_ring:
             assert spec.ring_depth == 2, "fp16 D128 ring must be depth-2"
 
-        from rocke import compile_kernel
-        from kernels import build_unified_attention_2d_tiled
-        from kernels.common.attention_unified import _tiled_2d_signature
-        from rocke.runtime import KernelLauncher
-
-        kernel = build_unified_attention_2d_tiled(spec, arch="gfx942")
-        artifact = compile_kernel(kernel, arch="gfx942", capture_ir_text=False)
-        launcher = KernelLauncher(
-            hsaco=artifact.hsaco,
-            kernel_name=artifact.kernel_name,
-            signature=_tiled_2d_signature("gfx942", dtype),
-            cache_key=("d128guard", spec.kernel_name(), dtype, sq, hq, hk),
+        # Launch exactly the spec asserted on above, not a re-selected one.
+        tuned = AttentionTuningSpec(
+            path="2d",
+            arch="gfx942",
+            builder_kind="tiled",
+            compile_backend="llvm",
+            candidate_name="d128_ring_guard",
+            tuning_id="d128_ring_guard",
+            kernel_spec=spec,
         )
-        out, _ = H._run_rocke(s, data, launcher, spec, warmup=3, attempts=3)
-        m = H.compare(ref, out)
-        assert m["max_abs"] <= tol, (
-            f"D128 {dtype} {hq}/{hk} S{sq}: max_abs {m['max_abs']:.4f} > {tol} "
-            f"(ring regression?)"
+        launched = tuned.with_num_kv_blocks(max_blk)
+        assert launched.kernel_spec == spec, "cache size must not retarget the spec"
+        key = launched.cache_key()
+        au._2D_LAUNCHERS.pop(key, None)
+        au._ATTN_TILED_CACHE.pop(key, None)
+
+        out = an.empty_device(rt, q.shape, dtype)
+        au.run_unified_attention_torch(
+            problem=p,
+            q=an.to_device(rt, q, dtype),
+            k=an.to_device(rt, k_cache, dtype),
+            v=an.to_device(rt, v_cache, dtype),
+            out=out,
+            cu_seqlens_q=DeviceArray(rt, np.array([0, sq], dtype=np.int32)),
+            seqused_k=DeviceArray(rt, np.array([sq], dtype=np.int32)),
+            softmax_scale=scale,
+            block_table=DeviceArray(rt, block_tables),
+            softcap=0.0,
+            backend="tiled",
+            tuning_spec=tuned,
+        )
+        # The launcher cached under the asserted spec's identity is the one that ran.
+        assert key in au._2D_LAUNCHERS, "the asserted spec was not the one launched"
+        an.assert_close(
+            an.read(out, dtype),
+            ref,
+            dtype,
+            f"D128 {dtype} {hq}/{hk} S{sq} (ring regression?)",
+            atol=tol,
         )
     finally:
         au._RESOLVED_ATTENTION_ARCH = old_arch

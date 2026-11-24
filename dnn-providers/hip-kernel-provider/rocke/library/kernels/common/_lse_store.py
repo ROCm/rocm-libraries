@@ -242,11 +242,9 @@ def zero_keyless_row(b, packed, row_has_key, dtype, width=4):
 def _check_lse_buffer(lse, q, expected, inputs):
     """Shared caller-owned LSE buffer contract: FP32, exact shape, contiguous,
     on q's GPU, and not overlapping any input or output tensor."""
-    import torch
-
-    if not isinstance(lse, torch.Tensor):
+    if not hasattr(lse, "data_ptr"):
         raise ValueError("lse must be a torch tensor")
-    if lse.dtype != torch.float32:
+    if str(lse.dtype) != "torch.float32":
         raise ValueError("lse must have dtype float32")
     if tuple(lse.shape) != expected:
         raise ValueError(f"lse shape {tuple(lse.shape)} != {expected}")

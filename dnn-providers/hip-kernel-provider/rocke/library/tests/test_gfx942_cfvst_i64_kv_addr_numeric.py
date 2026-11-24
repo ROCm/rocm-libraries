@@ -10,7 +10,7 @@ pointers with i32 offsets within the page.
 
 Each case launches through ``run_unified_attention_torch`` on a 2.125 GiB (per
 K and V) cache with every block-table entry on the top blocks, all past 2^31
-bytes, and checks max_abs against an fp32 paged reference. A wrapped offset
+bytes, and checks max_abs against a float64 NumPy paged reference. A wrapped offset
 reads other blocks' random data and fails the check. The routing anchor runs
 without a GPU and pins that each shipped shape compiles an i64 cfvst kernel with
 no launch limit, so the numeric check cannot silently test another kernel.
@@ -20,22 +20,31 @@ from __future__ import annotations
 
 from unittest import mock
 
-import pytest
-
 import builders.common.attention_spec_builder as _asb
+import numpy as np
+import pytest
 from kernels import UnifiedAttentionProblem
 from kernels.common import attention_unified as au
+from rocke.runtime.hip_module import get_device_arch
+
+from . import _attention_numpy as an
+from ._attention_device_array import DeviceArray
 
 _SEQ = 4096
 _NUM_SEQS = 2
 _NUM_QH = 32
 _NUM_KV = 8
 _CACHE_BYTES = 2 * 2**30 + 2**27  # 2.125 GiB per K and V
-# K and V caches plus the reference's fp32 working set.
-_GPU_BYTES_NEEDED = 8 << 30
 
 # The shipped cfvst prefill shapes: (dtype, head_size, block_size).
 _SHIPPED = (("bf16", 64, 32), ("fp16", 64, 32), ("fp16", 128, 32))
+
+
+@pytest.fixture(autouse=True)
+def _eager_launches(monkeypatch):
+    """Graph replay of short launches needs torch; run them eagerly."""
+    monkeypatch.setenv("HIPDNN_GFX942_2D_GRAPH", "0")
+    monkeypatch.setenv("HIPDNN_GFX942_3D_GRAPH", "0")
 
 
 _CASES = [pytest.param(*shape, id=f"{shape[0]}_d{shape[1]}") for shape in _SHIPPED]
@@ -61,52 +70,10 @@ def _problem(dtype: str, head_size: int, block_size: int, num_kv_blocks: int = 0
     )
 
 
-def _gpu_ready() -> bool:
-    try:
-        import torch
-    except Exception:  # noqa: BLE001
-        return False
-    if not torch.cuda.is_available():
-        return False
-    from rocke.runtime.hip_module import get_device_arch
-
-    if get_device_arch() != "gfx942":
-        return False
-    free, _ = torch.cuda.mem_get_info()
-    return free >= _GPU_BYTES_NEEDED
-
-
+_ARCH = get_device_arch()
 requires_gfx942_gpu = pytest.mark.skipif(
-    not _gpu_ready(),
-    reason="needs a gfx942 GPU with ROCm torch and ~8 GiB free",
+    _ARCH != "gfx942", reason=f"needs a gfx942 GPU, found {_ARCH}"
 )
-
-
-def _fp32_causal_paged_reference(query, key_cache, value_cache, block_tables, scale):
-    """fp32 causal paged attention, one sequence and one KV head group at a time.
-
-    Every sequence has ``_SEQ`` queries and keys, so the causal diagonal is the
-    plain lower triangle. Chunking by KV head keeps the fp32 score matrix small.
-    """
-    import torch
-
-    nq, nkv = query.shape[1], key_cache.shape[2]
-    group = nq // nkv
-    out = torch.empty(query.shape, dtype=torch.float32, device=query.device)
-    causal = torch.ones(_SEQ, _SEQ, dtype=torch.bool, device=query.device).triu(1)
-    for s in range(_NUM_SEQS):
-        rows = slice(s * _SEQ, (s + 1) * _SEQ)
-        blocks = block_tables[s].long()
-        k = key_cache[blocks].reshape(_SEQ, nkv, -1).float()
-        v = value_cache[blocks].reshape(_SEQ, nkv, -1).float()
-        for h in range(nkv):
-            heads = slice(h * group, (h + 1) * group)
-            q = query[rows, heads].float() * scale  # [q, group, d]
-            scores = torch.einsum("qgd,kd->gqk", q, k[:, h])
-            scores.masked_fill_(causal, float("-inf"))
-            probs = torch.softmax(scores, dim=-1)
-            out[rows, heads] = torch.einsum("gqk,kd->qgd", probs, v[:, h])
-    return out
 
 
 def _clean_launch_caches():
@@ -147,32 +114,35 @@ def test_route_compiles_i64_cfvst_without_limit(dtype, head_size, block_size):
 
 
 @requires_gfx942_gpu
+@pytest.mark.gpu
 @pytest.mark.parametrize("dtype,head_size,block_size", _CASES)
 def test_cfvst_prefill_on_top_blocks_past_2gib(dtype, head_size, block_size):
-    import torch
-
-    torch.manual_seed(0)
-    dev = "cuda"
-    tdt = torch.bfloat16 if dtype == "bf16" else torch.float16
+    rng = np.random.default_rng(0)
     block_bytes = _block_bytes(head_size, block_size)
     num_blocks = _CACHE_BYTES // block_bytes
     blocks_per_seq = _SEQ // block_size
-    # Random data everywhere, so a wrapped offset reads values that differ.
-    key_cache = torch.randn(
-        num_blocks, block_size, _NUM_KV, head_size, dtype=tdt, device=dev
-    )
-    value_cache = torch.randn_like(key_cache)
-    query = torch.randn(_SEQ * _NUM_SEQS, _NUM_QH, head_size, dtype=tdt, device=dev)
-    out = torch.empty_like(query)
     # The topmost blocks in a fixed shuffle: the table includes the last block
     # and nothing below 2^31 bytes.
     used = _NUM_SEQS * blocks_per_seq
-    top = torch.arange(num_blocks - used, num_blocks, dtype=torch.int32)
-    top = top[torch.randperm(used, generator=torch.Generator().manual_seed(0))]
+    top = rng.permutation(np.arange(num_blocks - used, num_blocks)).astype(np.int32)
     assert int(top.min()) * block_bytes >= 2**31
-    block_tables = top.view(_NUM_SEQS, blocks_per_seq).to(dev)
-    cu_q = torch.arange(0, _SEQ * (_NUM_SEQS + 1), _SEQ, dtype=torch.int32, device=dev)
-    kv_lens = torch.full((_NUM_SEQS,), _SEQ, dtype=torch.int32, device=dev)
+
+    rt = an.runtime()
+    # Random data everywhere, so a wrapped offset reads values that differ.
+    try:
+        key_cache, value_cache, k_host, v_host = an.scattered_paged_cache(
+            rt, rng, num_blocks, block_size, _NUM_KV, head_size, dtype, top
+        )
+    except RuntimeError as err:
+        if "hipMalloc" in str(err):
+            pytest.skip(f"needs about 5 GiB of free device memory: {err}")
+        raise
+    q = an.randn(rng, (_SEQ * _NUM_SEQS, _NUM_QH, head_size), dtype)
+    query = an.to_device(rt, q, dtype)
+    out = an.empty_device(rt, q.shape, dtype)
+    block_tables = DeviceArray(rt, top.reshape(_NUM_SEQS, blocks_per_seq))
+    cu_q = DeviceArray(rt, np.arange(0, _SEQ * (_NUM_SEQS + 1), _SEQ, dtype=np.int32))
+    kv_lens = DeviceArray(rt, np.full(_NUM_SEQS, _SEQ, dtype=np.int32))
     scale = head_size**-0.5
 
     patches = [mock.patch.object(au, "_resolve_attention_arch", return_value="gfx942")]
@@ -195,18 +165,21 @@ def test_cfvst_prefill_on_top_blocks_past_2gib(dtype, head_size, block_size):
             softcap=0.0,
             backend="tiled",
         )
-        torch.cuda.synchronize()
     finally:
         for patch in reversed(patches):
             patch.stop()
 
-    ref = _fp32_causal_paged_reference(
-        query, key_cache, value_cache, block_tables, scale
+    ref = an.paged_attention_reference(
+        q,
+        k_host,
+        v_host,
+        np.arange(used, dtype=np.int32).reshape(_NUM_SEQS, blocks_per_seq),
+        [_SEQ] * _NUM_SEQS,
+        [_SEQ] * _NUM_SEQS,
+        scale=scale,
     )
-    max_abs = float((ref - out.float()).abs().max())
     # The repo-wide attention gates (ALGORITHM.md section 10): 4e-2 bf16, 2e-2 fp16.
-    tol = 4e-2 if dtype == "bf16" else 2e-2
-    assert max_abs <= tol, f"cfvst past 2 GiB: max_abs {max_abs:.4f} > {tol}"
+    an.assert_close(an.read(out, dtype), ref, dtype, "cfvst past 2 GiB")
 
 
 if __name__ == "__main__":

@@ -12,59 +12,82 @@ diagonal, with ``causal_top_left`` choosing the alignment:
   unconditionally causal.
 * non-causal bands: a window with an unbounded or lookahead right bound.
 
-The oracle is ``parity_unified_attention.ref_paged_attn``. Every test is
-``gpu``-marked. The tiled-kernel tests self-skip off a gfx950 device; the scalar
-kernel is arch-neutral, so its tests run on any GPU, compiled for that GPU.
+The oracle is a float64 NumPy paged attention (``_unified_paged_numpy.reference``);
+the tests need no torch. Every test is ``gpu``-marked. The tiled-kernel tests skip off
+a gfx950 device; the scalar kernel is arch-neutral, so its tests run on any GPU with a
+known attention target, compiled for that GPU.
 """
 
 from __future__ import annotations
 
 import dataclasses
 
+import numpy as np
 import pytest
+from rocke.core.arch.target import known_arches
+from rocke.runtime.hip_module import get_device_arch
 
-torch = pytest.importorskip("torch", reason="ROCm torch required")
+from . import _attention_numpy as an
+from . import _unified_paged_numpy as U
 
-
-def _gpu_ready() -> bool:
-    if not torch.cuda.is_available():
-        return False
-    return "gfx950" in torch.cuda.get_device_properties(0).gcnArchName.lower()
-
+_ARCH = get_device_arch()
 
 requires_gfx950_gpu = pytest.mark.skipif(
-    not _gpu_ready(), reason="needs a gfx950 GPU with ROCm torch"
+    _ARCH != "gfx950", reason=f"needs a gfx950 GPU, found {_ARCH}"
 )
 
 requires_any_gpu = pytest.mark.skipif(
-    not torch.cuda.is_available(), reason="needs a GPU with ROCm torch"
+    _ARCH not in known_arches(),
+    reason=f"needs a GPU with a known attention target, found {_ARCH}",
 )
 
 
-def _harness():
-    import builders.gfx950.attention.prefill.parity_unified_attention as P
-
-    return P
+@pytest.fixture(scope="module")
+def rt():
+    return an.runtime()
 
 
 def _tol(dtype) -> float:
-    return 2e-2 if dtype == torch.float16 else 4e-2
+    return an.tolerance(dtype)
 
 
 def _max_abs(out, ref) -> float:
-    return (out.float() - ref.float()).abs().max().item()
+    err = np.abs(np.asarray(out, np.float64) - np.asarray(ref, np.float64))
+    return float(np.nan_to_num(err, nan=np.inf).max())
 
 
 def _scenarios():
-    try:
-        P = _harness()
-        return P.topleft_scenarios() + P.nomask_scenarios() + P.band_scenarios()
-    except Exception:  # harness needs its optional deps; tests then collect empty
-        return []
+    return U.topleft_scenarios() + U.nomask_scenarios() + U.band_scenarios()
 
 
 def _scenario(name):
     return next(s for s in _scenarios() if s.name == name)
+
+
+class _Edit:
+    """Overwrite whole cache blocks of one cache in place and put them back on exit,
+    so a multi-GiB cache is not copied for a small perturbation."""
+
+    def __init__(self, cache):
+        self.cache = cache
+        self.saved = {}
+
+    def block(self, blk):
+        blk = int(blk)
+        if blk not in self.saved:
+            self.saved[blk] = self.cache[blk].copy()
+        return blk
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        for blk, rows in self.saved.items():
+            self.cache[blk] = rows
+
+
+def _bump(cache, blk, dtype, delta, rows=slice(None)):
+    cache[blk][rows] = an.encode(an.decode(cache[blk][rows], dtype) + delta, dtype)
 
 
 class TestMaskNumeric:
@@ -72,15 +95,10 @@ class TestMaskNumeric:
     @pytest.mark.gpu
     @pytest.mark.parametrize("path", ["2d", "3d", "auto"])
     @pytest.mark.parametrize("scenario", _scenarios(), ids=lambda s: s.name)
-    def test_matches_reference(self, scenario, path):
-        P = _harness()
-        data = P.make_inputs(scenario)
-        ref = P.run_reference(scenario, data)
-        out, _ = P._run_rocke(scenario, data, path=path, warmup=0, attempts=1)
-        torch.cuda.synchronize()
-        assert not torch.isnan(out).any(), "NaN in kernel output"
-        err = _max_abs(out, ref)
-        assert err < _tol(scenario.dtype), f"{scenario.name}/{path}: max_abs={err:.3e}"
+    def test_matches_reference(self, rt, scenario, path):
+        data, ref = U.cached_case(scenario)
+        out = U.launch(rt, scenario, data, path)
+        an.assert_close(out, ref, scenario.dtype, f"{scenario.name}/{path}")
 
     @requires_gfx950_gpu
     @pytest.mark.gpu
@@ -98,16 +116,13 @@ class TestMaskNumeric:
             "bd_tl_two_sided_w64_r32",
         ],
     )
-    def test_default_mask_kernel_does_not_match(self, name):
+    def test_default_mask_kernel_does_not_match(self, rt, name):
         """Negative control: the same request forced onto the default bottom-right
         causal mask (window kept) must NOT match the oracle."""
-        P = _harness()
         scenario = _scenario(name)
-        data = P.make_inputs(scenario)
-        ref = P.run_reference(scenario, data)
+        data, ref = U.cached_case(scenario)
         default = dataclasses.replace(scenario, causal_top_left=False, right_bound=0)
-        out, _ = P._run_rocke(default, data, path="2d", warmup=0, attempts=1)
-        torch.cuda.synchronize()
+        out = U.launch(rt, default, data, "2d")
         err = _max_abs(out, ref)
         assert err > 1e-2, f"default-mask kernel unexpectedly matches ({err})"
 
@@ -151,32 +166,28 @@ class TestDispatchedMixedCohort:
         ],
     )
     def test_request_with_equal_batch_maxima_keeps_top_left(
-        self, name, request_kw, band, path
+        self, rt, name, request_kw, band, path
     ):
-        import dataclasses
-
         from dispatch.attention import (
             AttentionRequest,
             attention_problem,
             dispatch_attention,
         )
-        from kernels import run_unified_attention_torch
 
-        P = _harness()
-        scenario = P.Scenario(
+        scenario = U.Scenario(
             name=f"mixed_{name}",
             seq_lens=self._MIXED,
             num_query_heads=16,
             num_kv_heads=2,
             head_size=128,
             block_size=16,
-            dtype=torch.float16,
+            dtype="fp16",
             num_blocks=4096,
             sliding_window=band.get("sliding_window") or None,
             causal_top_left=band["causal_top_left"],
             right_bound=band["right_bound"],
         )
-        data = P.make_inputs(scenario)
+        data = U.make_inputs(scenario)
         req = AttentionRequest(
             batch=len(self._MIXED),
             nhead_q=16,
@@ -197,32 +208,18 @@ class TestDispatchedMixedCohort:
         # The request carries ``batch * seqlen_q`` rows; the launch has the real count.
         problem = dataclasses.replace(problem, total_q=data["query"].shape[0])
 
-        def launch(prob):
-            out = torch.empty_like(data["query"])
-            run_unified_attention_torch(
-                problem=prob,
-                q=data["query"],
-                k=data["key_cache"],
-                v=data["value_cache"],
-                out=out,
-                cu_seqlens_q=data["cu_q"],
-                seqused_k=data["kv_lens"],
-                softmax_scale=data["scale"],
-                block_table=data["block_tables"],
-                softcap=0.0,
-                backend=path,
-            )
-            torch.cuda.synchronize()
-            return out
-
-        ref = P.run_reference(scenario, data)
-        out = launch(problem)
-        assert not torch.isnan(out).any()
-        err = _max_abs(out, ref)
-        assert err < _tol(torch.float16), f"{name}/{path}: max_abs={err:.3e}"
+        ref = U.reference(scenario, data)
+        out = U.launch(rt, scenario, data, path, problem=problem)
+        an.assert_close(out, ref, "fp16", f"{name}/{path}")
         # Negative control: the bottom-right body (what the equal-maxima shortcut
         # selected) must NOT match, or this test could not have caught the bug.
-        wrong = launch(dataclasses.replace(problem, causal_top_left=False))
+        wrong = U.launch(
+            rt,
+            scenario,
+            data,
+            path,
+            problem=dataclasses.replace(problem, causal_top_left=False),
+        )
         assert _max_abs(wrong, ref) > 1e-2, "bottom-right body unexpectedly matches"
 
 
@@ -231,33 +228,30 @@ class TestTopLeftDecode:
     @pytest.mark.gpu
     @pytest.mark.parametrize("path", ["2d", "3d", "auto"])
     @pytest.mark.parametrize("name", ["tl_decode_q1", "tl_d256_decode_q1"])
-    def test_decode_attends_only_key_zero(self, name, path):
+    def test_decode_attends_only_key_zero(self, rt, name, path):
         """At seqlen_q=1 top-left lets the one query row see only key 0, so the KV
         cache is ignored: the output is exactly V[0] of each sequence. This is the
         definition of top-left, not a bug (bottom-right would attend all keys)."""
-        P = _harness()
         s = _scenario(name)
-        data = P.make_inputs(s)
-        out, _ = P._run_rocke(s, data, path=path, warmup=0, attempts=1)
-        torch.cuda.synchronize()
+        data = U.make_inputs(s)
+        out = U.launch(rt, s, data, path)
         group = s.num_query_heads // s.num_kv_heads
-        v0 = data["value_cache"][data["block_tables"][:, 0].long(), 0]  # [seq, kvh, d]
-        want = v0.repeat_interleave(group, dim=1).float()
-        err = _max_abs(out, want)
-        assert err < _tol(s.dtype), f"{name}/{path}: max_abs={err:.3e}"
+        first_blocks = data["block_tables"][:, 0]
+        v0 = an.decode(data["value_cache"][first_blocks, 0], s.dtype)  # [seq, kvh, d]
+        want = np.repeat(v0, group, axis=1)
+        an.assert_close(out, want, s.dtype, f"{name}/{path}")
         # Perturbing every later key/value must not change the result.
-        vc = data["value_cache"].clone()
-        kc = data["key_cache"].clone()
-        for i, kv_len in enumerate(data["kv_lens_list"]):
-            n_blocks = (kv_len + s.block_size - 1) // s.block_size
-            blocks = data["block_tables"][i, :n_blocks]
-            vc[blocks.long()] += 1.0
-            kc[blocks.long()] += 1.0
-            vc[blocks[0].long(), 0] = data["value_cache"][blocks[0].long(), 0]
-            kc[blocks[0].long(), 0] = data["key_cache"][blocks[0].long(), 0]
-        data2 = dict(data, value_cache=vc, key_cache=kc)
-        out2, _ = P._run_rocke(s, data2, path=path, warmup=0, attempts=1)
-        torch.cuda.synchronize()
+        with _Edit(data["value_cache"]) as vc, _Edit(data["key_cache"]) as kc:
+            for i, kv_len in enumerate(data["kv_lens_list"]):
+                n_blocks = (kv_len + s.block_size - 1) // s.block_size
+                blocks = data["block_tables"][i, :n_blocks]
+                for blk in dict.fromkeys(int(b) for b in blocks):
+                    _bump(data["value_cache"], vc.block(blk), s.dtype, 1.0)
+                    _bump(data["key_cache"], kc.block(blk), s.dtype, 1.0)
+                first = int(blocks[0])
+                data["value_cache"][first, 0] = vc.saved[first][0]
+                data["key_cache"][first, 0] = kc.saved[first][0]
+            out2 = U.launch(rt, s, data, path)
         assert _max_abs(out2, out) < _tol(s.dtype)
 
 
@@ -268,16 +262,14 @@ class TestEmptyRows:
     @pytest.mark.parametrize(
         "name", ["bd_br_causal_w100", "bd_tl_causal_w100", "bd_br_lookahead_r16"]
     )
-    def test_a_row_with_no_visible_key_is_exactly_zero(self, name, path):
+    def test_a_row_with_no_visible_key_is_exactly_zero(self, rt, name, path):
         """The contract for a row whose band holds no key (e.g. ``q > kv`` at
         bottom-right, or top-left rows past ``kv_len`` with a window): all-zero output,
         never NaN or stale data."""
-        P = _harness()
         s = _scenario(name)
-        data = P.make_inputs(s)
-        out, _ = P._run_rocke(s, data, path=path, warmup=0, attempts=1)
-        torch.cuda.synchronize()
-        assert not torch.isnan(out).any()
+        data, _ = U.cached_case(s)
+        out = U.launch(rt, s, data, path)
+        assert not np.isnan(out).any()
         total, empty_found = 0, 0
         for qlen, kvlen in s.seq_lens:
             for p in range(qlen):
@@ -290,7 +282,7 @@ class TestEmptyRows:
                 lo = 0 if not s.sliding_window else max(0, d - s.sliding_window + 1)
                 if lo > hi:
                     empty_found += 1
-                    assert out[total + p].abs().max().item() == 0.0, (qlen, kvlen, p)
+                    assert np.abs(out[total + p]).max() == 0.0, (qlen, kvlen, p)
             total += qlen
         assert empty_found > 0, "scenario has no empty rows; the test checks nothing"
 
@@ -299,22 +291,23 @@ class TestNoMaskVisibility:
     @requires_gfx950_gpu
     @pytest.mark.gpu
     @pytest.mark.parametrize("path", ["2d", "3d"])
-    def test_future_keys_change_the_output(self, path):
+    def test_future_keys_change_the_output(self, rt, path):
         """No-mask means a query sees keys AFTER its own position: perturbing the
         last key must change early query rows (a causal kernel would not)."""
-        P = _harness()
         s = _scenario("nm_equal")
-        data = P.make_inputs(s)
-        out, _ = P._run_rocke(s, data, path=path, warmup=0, attempts=1)
-        kv_len = data["kv_lens_list"][0]
-        last = kv_len - 1
+        data, _ = U.cached_case(s)
+        out = U.launch(rt, s, data, path)
+        last = data["kv_lens_list"][0] - 1
         blk = int(data["block_tables"][0, last // s.block_size])
-        vc = data["value_cache"].clone()
-        vc[blk, last % s.block_size] += 5.0
-        out2, _ = P._run_rocke(
-            s, dict(data, value_cache=vc), path=path, warmup=0, attempts=1
-        )
-        torch.cuda.synchronize()
+        with _Edit(data["value_cache"]) as vc:
+            _bump(
+                data["value_cache"],
+                vc.block(blk),
+                s.dtype,
+                5.0,
+                rows=last % s.block_size,
+            )
+            out2 = U.launch(rt, s, data, path)
         first_rows = slice(0, 4)  # sequence 0, earliest queries
         assert _max_abs(out2[first_rows], out[first_rows]) > 1e-3
 
@@ -350,36 +343,35 @@ class TestBandIndexTruthTable:
     @pytest.mark.gpu
     @pytest.mark.parametrize("path", ["2d", "3d"])
     @pytest.mark.parametrize("name", list(_ONE_HOT_BANDS))
-    def test_visible_key_set_is_exact(self, name, path):
-        P = _harness()
+    def test_visible_key_set_is_exact(self, rt, name, path):
         q_len, kv_len, left, right, top_left = _ONE_HOT_BANDS[name]
         head = 128
-        s = P.Scenario(
+        s = U.Scenario(
             name=name,
             seq_lens=[(q_len, kv_len)],
             num_query_heads=2,
             num_kv_heads=1,
             head_size=head,
             block_size=16,
-            dtype=torch.float16,
+            dtype="fp16",
             sliding_window=left or None,
             num_blocks=16,
             causal_top_left=top_left,
             right_bound=right,
         )
-        data = P.make_inputs(s)
+        data = U.make_inputs(s)
         blocks = (kv_len + s.block_size - 1) // s.block_size
-        data["block_tables"] = torch.arange(
-            blocks, dtype=torch.int32, device="cuda"
-        ).view(1, blocks)
-        data["query"].zero_()
-        vc = torch.zeros_like(data["value_cache"])
+        vc = np.zeros_like(data["value_cache"])
         for k in range(kv_len):
-            vc[k // s.block_size, k % s.block_size, 0, k] = 1.0
-        data["value_cache"] = vc
-        out, _ = P._run_rocke(s, data, path=path, warmup=0, attempts=1)
-        torch.cuda.synchronize()
-        expected = torch.zeros(q_len, 2, head, dtype=torch.float32)
+            vc[k // s.block_size, k % s.block_size, 0, k] = np.float16(1.0)
+        data = U.copy_inputs(
+            data,
+            block_tables=np.arange(blocks, dtype=np.int32).reshape(1, blocks),
+            query=np.zeros_like(data["query"]),
+            value_cache=vc,
+        )
+        out = U.launch(rt, s, data, path)
+        expected = np.zeros((q_len, 2, head), dtype=np.float32)
         for p in range(q_len):
             d = p if top_left else p + kv_len - q_len
             visible = [
@@ -389,8 +381,7 @@ class TestBandIndexTruthTable:
             ]
             if visible:
                 expected[p, :, visible] = 1.0 / len(visible)
-        err = (out.float().cpu() - expected).abs().max().item()
-        assert err < 2e-3, f"{name}/{path}: max_abs={err:.3e}"
+        an.assert_close(out, expected, "fp16", f"{name}/{path}", atol=2e-3)
 
 
 _SCALAR_MASKS = {
@@ -423,27 +414,25 @@ class TestMaskScalar:
         ],
         ids=["mixed", "sinks", "softcap", "window", "gqa_40_8"],
     )
-    def test_scalar_matches_reference(self, kw, mask):
-        from kernels import UnifiedAttentionProblem, run_unified_attention_torch
+    def test_scalar_matches_reference(self, rt, kw, mask):
+        from kernels import UnifiedAttentionProblem
 
-        P = _harness()
         band = _SCALAR_MASKS[mask]
         fields = dict(
             num_query_heads=4,
             num_kv_heads=2,
             head_size=128,
             block_size=16,
-            dtype=torch.float16,
+            dtype="fp16",
             num_blocks=256,
             **band,
         )
         fields.update(kw)
-        s = P.Scenario(name="scalar", **fields)
-        data = P.make_inputs(s)
-        ref = P.run_reference(s, data)
-        q = data["query"]
+        s = U.Scenario(name="scalar", **fields)
+        data = U.make_inputs(s)
+        ref = U.reference(s, data)
         problem = UnifiedAttentionProblem(
-            total_q=q.shape[0],
+            total_q=data["query"].shape[0],
             num_seqs=len(s.seq_lens),
             num_query_heads=s.num_query_heads,
             num_kv_heads=s.num_kv_heads,
@@ -457,25 +446,8 @@ class TestMaskScalar:
             use_sinks=s.use_sinks,
             **band,
         )
-        out = torch.empty_like(q)
-        run_unified_attention_torch(
-            problem=problem,
-            q=q,
-            k=data["key_cache"],
-            v=data["value_cache"],
-            out=out,
-            cu_seqlens_q=data["cu_q"],
-            seqused_k=data["kv_lens"],
-            softmax_scale=data["scale"],
-            block_table=data["block_tables"],
-            softcap=float(s.softcap),
-            sinks=data["sinks"],
-            backend="scalar",
-        )
-        torch.cuda.synchronize()
-        assert not torch.isnan(out).any()
-        err = _max_abs(out, ref)
-        assert err < _tol(torch.float16), f"scalar {kw}/{mask}: max_abs={err:.3e}"
+        out = U.launch(rt, s, data, "scalar", problem=problem)
+        an.assert_close(out, ref, "fp16", f"scalar {kw}/{mask}")
 
 
 # Transposed-32x32 softmax levers that each derive a causal bound from
@@ -516,13 +488,13 @@ _LEVER_SCENARIOS = {
         seq_lens=[(1024, 1024), (900, 300), (300, 900), (257, 129)],
         num_query_heads=64,
         num_kv_heads=8,
-        dtype="bfloat16",
+        dtype="bf16",
     ),
     "gqa64x8_q_gt_kv": dict(
         seq_lens=[(2048, 512), (700, 100)],
         num_query_heads=64,
         num_kv_heads=8,
-        dtype="bfloat16",
+        dtype="bf16",
     ),
 }
 
@@ -543,13 +515,11 @@ class TestMask2DLevers:
     @pytest.mark.parametrize("mask", list(_MASKS))
     @pytest.mark.parametrize("variant", list(_LEVER_VARIANTS))
     @pytest.mark.parametrize("scn", list(_LEVER_SCENARIOS))
-    def test_lever_matches_reference(self, scn, variant, mask, monkeypatch):
+    def test_lever_matches_reference(self, rt, scn, variant, mask, monkeypatch):
         import kernels.common.attention_unified as au
 
-        P = _harness()
         kw = dict(_LEVER_SCENARIOS[scn])
-        kw["dtype"] = getattr(torch, kw["dtype"])
-        scenario = P.Scenario(
+        scenario = U.Scenario(
             name=f"{mask}_lever_{scn}",
             num_blocks=4096,
             head_size=128,
@@ -569,31 +539,27 @@ class TestMask2DLevers:
             return spec
 
         monkeypatch.setattr(au, "_tiled_spec_from_problem", patched)
-        data = P.make_inputs(scenario)
-        ref = P.run_reference(scenario, data)
+        data = U.make_inputs(scenario)
+        ref = U.reference(scenario, data)
         if variant != "base":
             try:
                 dataclasses.replace(orig(_problem_of(scenario, data), "gfx950"), **over)
             except ValueError as exc:
                 pytest.skip(f"lever combination invalid: {exc}")
-        out, _ = P._run_rocke(scenario, data, path="2d", warmup=0, attempts=1)
-        torch.cuda.synchronize()
+        out = U.launch(rt, scenario, data, "2d")
         spec = built["spec"]
         for knob, want in over.items():
             assert getattr(spec, knob) == want, f"{knob} not applied"
         assert spec.causal_top_left == _MASKS[mask][0]
         assert spec.right_bound == _MASKS[mask][1]
-        assert not torch.isnan(out).any(), "NaN in kernel output"
-        err = _max_abs(out, ref)
-        assert err < _tol(scenario.dtype), f"{mask}/{scn}/{variant}: max_abs={err:.3e}"
+        an.assert_close(out, ref, scenario.dtype, f"{mask}/{scn}/{variant}")
 
 
 def _problem_of(scenario, data):
     from kernels import UnifiedAttentionProblem
 
-    q = data["query"]
     return UnifiedAttentionProblem(
-        total_q=q.shape[0],
+        total_q=data["query"].shape[0],
         num_seqs=len(scenario.seq_lens),
         num_query_heads=scenario.num_query_heads,
         num_kv_heads=scenario.num_kv_heads,
@@ -601,7 +567,7 @@ def _problem_of(scenario, data):
         block_size=scenario.block_size,
         max_seqlen_q=data["max_query_len"],
         max_seqlen_k=data["max_kv_len"],
-        dtype="fp16" if q.dtype is torch.float16 else "bf16",
+        dtype=scenario.dtype,
         sliding_window=scenario.sliding_window or 0,
         causal_top_left=scenario.causal_top_left,
         right_bound=scenario.right_bound,

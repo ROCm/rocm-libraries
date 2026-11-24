@@ -560,7 +560,6 @@ endif()
 # own, so `-L gpu` and `-L attention` do not match it in a YAML-categorized
 # install tree.
 set(_ROCKE_LIBRARY_ATTENTION_GPU_TEST_RELPATHS
-    "tests/library/tests/test_attention_dense_gfx950_numeric.py"
     "tests/library/tests/test_attn_tiled_2d_gfx950_fp8_k_lds_numeric.py"
     "tests/library/tests/test_extended_parity_attention.py")
 set(_ROCKE_LIBRARY_ATTENTION_GPU_TESTS "")
@@ -590,12 +589,60 @@ string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
        "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\"\n"
        "  TIMEOUT 1200)\n")
 
-# Library GPU numeric suites: convolution, attention, KDA, and GDN. The gfx950
-# dense numeric and extended-parity attention tests run only in
-# rocke_library_attention_gpu_pytest above, not again here; the exception is
-# the dense additive-bias torch-free subsets (test_attention_dense_bias_gfx950_gpu.py
-# and test_attention_dense_bias_gfx942_gpu.py), which run here because this lane
-# has no torch.
+# gfx950 unified-attention mask, sliding-window and sink numeric lanes. Torch-free
+# and compile-bound, so they get their own entry and timeout.
+string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
+       "add_test(rocke_library_attention_unified_gpu_pytest ${_ROCKE_INSTALLED_PYTEST} \"${ROCKE_TEST_CTEST_REL}tests/library/tests/test_attention_unified_swa_sink_gfx950_numeric.py\" \"${ROCKE_TEST_CTEST_REL}tests/library/tests/test_attention_unified_mask_gfx950_numeric.py\" -v -rs)\n")
+string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
+       "set_tests_properties(rocke_library_attention_unified_gpu_pytest PROPERTIES\n"
+       "  LABELS \"ckc\\;python\\;attention\\;gpu\"\n"
+       "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\"\n"
+       "  TIMEOUT 3600)\n")
+
+# gfx942 and gfx950 dense numeric lanes. Each has its own standard-tier entry so its
+# compile time does not eat into a quick or omnibus entry.
+string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
+       "add_test(rocke_library_attention_dense_gfx942_gpu_pytest ${_ROCKE_INSTALLED_PYTEST} \"${ROCKE_TEST_CTEST_REL}tests/library/tests/test_attention_dense_gfx942_numeric.py\" -v -rs)\n")
+string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
+       "set_tests_properties(rocke_library_attention_dense_gfx942_gpu_pytest PROPERTIES\n"
+       "  LABELS \"ckc\\;python\\;attention\\;gpu\"\n"
+       "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\"\n"
+       "  TIMEOUT 3600)\n")
+
+string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
+       "add_test(rocke_library_attention_dense_gfx950_gpu_pytest ${_ROCKE_INSTALLED_PYTEST} \"${ROCKE_TEST_CTEST_REL}tests/library/tests/test_attention_dense_gfx950_numeric.py\" -v -rs)\n")
+string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
+       "set_tests_properties(rocke_library_attention_dense_gfx950_gpu_pytest PROPERTIES\n"
+       "  LABELS \"ckc\\;python\\;attention\\;gpu\"\n"
+       "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\"\n"
+       "  TIMEOUT 3600)\n")
+
+# Unified-attention LSE numeric lane (split-KV and tiled 2D, both gfx942 and gfx950).
+# Compile-bound on a cold cache, so it gets its own entry and a long timeout.
+string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
+       "add_test(rocke_library_attention_lse_gpu_pytest ${_ROCKE_INSTALLED_PYTEST} \"${ROCKE_TEST_CTEST_REL}tests/library/tests/test_attention_unified_lse_numeric.py\" -v -rs)\n")
+string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
+       "set_tests_properties(rocke_library_attention_lse_gpu_pytest PROPERTIES\n"
+       "  LABELS \"ckc\\;python\\;attention\\;gpu\"\n"
+       "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\"\n"
+       "  TIMEOUT 7200)\n")
+
+# Typed refusals of the SDPA entry points (scale range, unsupported LSE, ALiBi,
+# head size, mask), each checked on a launch that must not write the output.
+string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
+       "add_test(rocke_library_sdpa_declines_gpu_pytest ${_ROCKE_INSTALLED_PYTEST} \"${ROCKE_TEST_CTEST_REL}tests/library/tests/test_sdpa_declines_gpu.py\" -v -rs)\n")
+string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
+       "set_tests_properties(rocke_library_sdpa_declines_gpu_pytest PROPERTIES\n"
+       "  LABELS \"ckc\\;python\\;attention\\;gpu\"\n"
+       "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\"\n"
+       "  TIMEOUT 600)\n")
+
+# Library GPU numeric suites: convolution, attention, KDA, and GDN. The
+# extended-parity attention tests run only in rocke_library_attention_gpu_pytest
+# above, and the dense and LSE numeric tests only in their own entries above, not
+# again here; the exception is the dense additive-bias torch-free subsets
+# (test_attention_dense_bias_gfx950_gpu.py and test_attention_dense_bias_gfx942_gpu.py),
+# which run here because this lane has no torch.
 # Select files rather than the "gpu" pytest marker because several runtime
 # tests lack that marker. Their dependency and architecture checks report
 # skips when the required torch installation or GPU is unavailable; the
@@ -627,11 +674,11 @@ set(_ROCKE_LIBRARY_GPU_TEST_RELPATHS
     # specs for minutes; it stays a manual run.
     "tests/library/tests/test_conv_direct_nongrouped_tf32.py::TestNongroupedF32Gpu::test_cases"
     "tests/library/tests/test_conv_direct_nongrouped_tf32.py::TestNongroupedF32Gpu::test_one_binary_serves_every_shape"
-    "tests/library/tests/test_attention_dense_gfx942_numeric.py"
     "tests/library/tests/test_attention_scalar_block_table_numeric.py"
     "tests/library/tests/test_attention_dense_bias_gfx942_gpu.py"
     "tests/library/tests/test_attention_dense_bias_gfx950_gpu.py"
-    "tests/library/tests/test_attention_unified_lse_numeric.py"
+    "tests/library/tests/test_attention_dense_strict_numeric.py"
+    "tests/library/tests/test_strided_kv_decode_numeric.py"
     "tests/library/tests/test_fmha_mfma_free_stride_numeric.py"
     "tests/library/tests/sdpa/test_unified_sdpa_numeric.py"
     "tests/library/tests/sdpa/test_dense_sdpa_numeric.py"

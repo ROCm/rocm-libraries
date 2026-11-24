@@ -281,6 +281,12 @@ test_categories:
       - "rocke_library_gdn_pytest"
       # Its host tests are too slow for the single-shard quick tier.
       - "rocke_library_conv_fwd_aot_packaging_pytest"
+      # Torch-free GPU lanes; the unified and dense lanes are compile-bound.
+      - "rocke_library_attention_unified_gpu_pytest"
+      - "rocke_library_attention_dense_gfx942_gpu_pytest"
+      - "rocke_library_attention_dense_gfx950_gpu_pytest"
+      - "rocke_library_attention_lse_gpu_pytest"
+      - "rocke_library_sdpa_declines_gpu_pytest"
     labels:
       - "standard"
       - "comprehensive"

@@ -15,7 +15,7 @@ the Q clamp.
 Each block-table row here carries extra columns filled with a page id whose K/V
 offset lies about 2 GiB past the cache, so any read past a sequence's last page
 faults deterministically instead of depending on what the allocator left there.
-Output is checked against an fp32 reference. The structural CPU twins are
+Output is checked against a float64 NumPy reference. The structural CPU twins are
 ``TestLeanBodyBoundsReads`` and ``TestD128BodyBoundsReads`` in
 ``test_d256_gfx942_fast_routing.py``.
 """
@@ -25,75 +25,83 @@ from __future__ import annotations
 import math
 from types import SimpleNamespace
 
+import numpy as np
 import pytest
 from kernels.common import attention_unified as au
+from rocke.runtime.hip_module import get_device_arch, get_device_num_cus
+
+from . import _attention_numpy as an
+from ._attention_device_array import DeviceArray
 
 _4WARP_SPEC = "gfx942_u2d_gfx942_4warp_nw1_mw32_t64_llvm"
 
-
-def _gpu_ready():
-    """Gate on ``gcnArchName`` (the ISA target), not the marketing name, which
-    varies across gfx942 parts."""
-    try:
-        import torch
-    except Exception:  # noqa: BLE001
-        return False
-    # gcnArchName exists only on ROCm builds of torch.
-    if not torch.cuda.is_available() or torch.version.hip is None:
-        return False
-    return "gfx942" in torch.cuda.get_device_properties(0).gcnArchName.lower()
-
-
+_ARCH = get_device_arch()
 requires_gfx942_gpu = pytest.mark.skipif(
-    not _gpu_ready(), reason="needs a gfx942 GPU with ROCm torch"
+    _ARCH != "gfx942", reason=f"needs a gfx942 GPU, found {_ARCH}"
 )
 
 _PAD_COLS = 8
 
 
+class _CudaDevice:
+    """The device the dispatcher's binding check expects on every tensor."""
+
+    type = "cuda"
+
+    def __str__(self):
+        return "cuda:0"
+
+
+_CUDA = _CudaDevice()
+
+
+@pytest.fixture(autouse=True)
+def _eager_launches(monkeypatch):
+    """Graph replay of short launches needs torch; run them eagerly."""
+    monkeypatch.setenv("HIPDNN_GFX942_2D_GRAPH", "0")
+    monkeypatch.setenv("HIPDNN_GFX942_3D_GRAPH", "0")
+
+
 def _paged_inputs(seqs, hq, hkv, d, bs, dt, seed):
     """Random Q/K/V, a permuted block table whose padding columns hold the
-    poison page id, sequence lengths, and a NaN-filled output."""
-    import torch
-
-    tdt = {"bf16": torch.bfloat16, "fp16": torch.float16}[dt]
+    poison page id, sequence lengths, and a NaN-filled output. The ``*_host``
+    fields are the fp32 values the device buffers hold."""
+    rt = an.runtime()
+    rng = np.random.default_rng(seed)
     pages = [-(-k // bs) for _, k in seqs]
     nblocks = sum(pages) + 3
-    g = torch.Generator(device="cuda").manual_seed(seed)
-    q = torch.randn(
-        sum(s for s, _ in seqs), hq, d, device="cuda", dtype=tdt, generator=g
-    )
-    kc = torch.randn(nblocks, bs, hkv, d, device="cuda", dtype=tdt, generator=g)
-    vc = torch.randn(nblocks, bs, hkv, d, device="cuda", dtype=tdt, generator=g)
-    perm = torch.randperm(nblocks, device="cuda", generator=g).to(torch.int32)
+    q = an.randn(rng, (sum(s for s, _ in seqs), hq, d), dt)
+    kc = an.randn(rng, (nblocks, bs, hkv, d), dt)
+    vc = an.randn(rng, (nblocks, bs, hkv, d), dt)
+    perm = rng.permutation(nblocks).astype(np.int32)
     poison = (1 << 30) // (bs * hkv * d)
-    bt = torch.full(
-        (len(seqs), max(pages) + _PAD_COLS), poison, dtype=torch.int32, device="cuda"
-    )
+    bt = np.full((len(seqs), max(pages) + _PAD_COLS), poison, dtype=np.int32)
     p0 = 0
     for i, n in enumerate(pages):
         bt[i, :n] = perm[p0 : p0 + n]
         p0 += n
-    cu = torch.tensor(
-        [0] + [s for s, _ in seqs], dtype=torch.int32, device="cuda"
-    ).cumsum(0, dtype=torch.int32)
-    kl = torch.tensor([k for _, k in seqs], dtype=torch.int32, device="cuda")
+    cu = np.concatenate([[0], np.cumsum([s for s, _ in seqs])]).astype(np.int32)
+    kl = np.array([k for _, k in seqs], dtype=np.int32)
     return SimpleNamespace(
-        q=q,
-        k=kc,
-        v=vc,
-        bt=bt,
-        cu=cu,
-        kl=kl,
+        q=an.to_device(rt, q, dt),
+        k=an.to_device(rt, kc, dt),
+        v=an.to_device(rt, vc, dt),
+        bt=DeviceArray(rt, bt),
+        cu=DeviceArray(rt, cu),
+        kl=DeviceArray(rt, kl),
+        q_host=q,
+        k_host=kc,
+        v_host=vc,
+        bt_host=bt,
+        dt=dt,
         pages=pages,
         nblocks=nblocks,
-        out=torch.full_like(q, float("nan")),
+        out=an.empty_device(rt, q.shape, dt),
     )
 
 
 def _launch_production(x, seqs, hq, hkv, d, bs, dt, window):
     """Launch through the production route; return the kernel name it builds."""
-    import torch
     from kernels.gfx942.attention_tiled_2d import build_gfx942_4warp_gqa
 
     problem = au.UnifiedAttentionProblem(
@@ -107,7 +115,7 @@ def _launch_production(x, seqs, hq, hkv, d, bs, dt, window):
         max_seqlen_k=max(k for _, k in seqs),
         dtype=dt,
         sliding_window=window,
-        num_cus=torch.cuda.get_device_properties(0).multi_processor_count,
+        num_cus=get_device_num_cus(),
         num_kv_blocks=x.nblocks,
     )
     assert (
@@ -163,54 +171,40 @@ def _launch_pinned(x, seqs, hq, hkv, d, bs, dt, window):
         "seqused_k": x.kl,
         "block_table": x.bt,
     }
+    for tensor in tensors.values():
+        tensor.device = _CUDA
     result.bind_torch(tensors).launch()
     return result.build().name
 
 
 def _max_abs_vs_reference(x, seqs, hq, hkv, d, window):
-    """max |out - ref| over all sequences against an fp32 SDPA reference with the
+    """max |out - ref| over all sequences against a float64 SDPA reference with the
     bottom-right causal (and sliding-window) mask; asserts the output is finite."""
-    import torch
-    import torch.nn.functional as F
-
-    rep = hq // hkv
-    st = 0
-    worst = 0.0
-    for i, (sq, skv) in enumerate(seqs):
-        idx = x.bt[i, : x.pages[i]].long()
-        k = x.k[idx].reshape(-1, hkv, d)[:skv].float().permute(1, 0, 2)
-        v = x.v[idx].reshape(-1, hkv, d)[:skv].float().permute(1, 0, 2)
-        k = k.repeat_interleave(rep, 0)
-        v = v.repeat_interleave(rep, 0)
-        qs = x.q[st : st + sq].float().permute(1, 0, 2)
-        ii = torch.arange(sq, device="cuda").view(sq, 1) + (skv - sq)
-        jj = torch.arange(skv, device="cuda").view(1, skv)
-        keep = jj <= ii
-        if window:
-            keep &= ii - jj < window
-        mask = torch.where(keep, 0.0, float("-inf"))
-        ref = F.scaled_dot_product_attention(
-            qs, k, v, attn_mask=mask, scale=1.0 / math.sqrt(d)
-        ).permute(1, 0, 2)
-        o = x.out[st : st + sq].float()
-        assert torch.isfinite(o).all(), f"seq {i}: non-finite output"
-        worst = max(worst, (o - ref).abs().max().item())
-        st += sq
-    return worst
+    out = an.read(x.out, x.dt)
+    ref = an.paged_attention_reference(
+        x.q_host,
+        x.k_host,
+        x.v_host,
+        x.bt_host,
+        [s for s, _ in seqs],
+        [k for _, k in seqs],
+        scale=1.0 / math.sqrt(d),
+        window=window,
+    )
+    assert np.isfinite(out).all(), "non-finite output"
+    return float(np.abs(out - ref).max())
 
 
 def _run(seqs, hq, hkv, d, bs, dt="bf16", window=0, pinned=False, seed=0):
-    """Launch one case; return (max_abs vs the fp32 reference, kernel name)."""
-    import torch
-
+    """Launch one case; return (max_abs vs the float64 reference, kernel name)."""
     x = _paged_inputs(seqs, hq, hkv, d, bs, dt, seed)
     launch = _launch_pinned if pinned else _launch_production
     name = launch(x, seqs, hq, hkv, d, bs, dt, window)
-    torch.cuda.synchronize()
     return _max_abs_vs_reference(x, seqs, hq, hkv, d, window), name
 
 
 @requires_gfx942_gpu
+@pytest.mark.gpu
 @pytest.mark.parametrize("d", [192, 256])
 @pytest.mark.parametrize(
     "seqs,hq,hkv,bs",
@@ -227,6 +221,7 @@ def test_lean_body_odd_lengths(d, seqs, hq, hkv, bs):
 
 
 @requires_gfx942_gpu
+@pytest.mark.gpu
 @pytest.mark.parametrize(
     "seqs",
     [[(129, 129)], [(339, 367)], [(513, 513), (77, 2001), (1023, 1023)]],
@@ -247,6 +242,7 @@ def test_d128_swa_odd_lengths(seqs, dt, hq, hkv, bs, suffix):
 
 
 @requires_gfx942_gpu
+@pytest.mark.gpu
 @pytest.mark.parametrize(
     "hq,hkv,window,suffix", [(64, 4, 0, "_4wgqa"), (32, 8, 128, "_4wgqa_fold")]
 )

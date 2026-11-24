@@ -18,14 +18,30 @@ def _u8(array):
     return (ctypes.c_uint8 * array.nbytes).from_buffer(array)
 
 
+_TORCH_NAME = {
+    np.dtype(np.float16): "torch.float16",
+    np.dtype(np.float32): "torch.float32",
+    np.dtype(np.float64): "torch.float64",
+    np.dtype(np.int32): "torch.int32",
+    np.dtype(np.int64): "torch.int64",
+    np.dtype(np.uint8): "torch.uint8",
+    np.dtype(np.uint16): "torch.bfloat16",
+}
+
+
 class DeviceArray:
     """A device copy of a numpy array, exposing the tensor attributes
     ``run_unified_attention_torch`` reads. ``shape`` may be narrower than the
-    host array along the last axis, which models a column view of it."""
+    host array along the last axis, which models a column view of it.
+
+    ``torch_dtype`` names the element type the kernels' host-side checks see
+    (``uint16`` hosts default to ``bfloat16``); it defaults from the host dtype.
+    """
 
     device = None
+    is_cuda = True
 
-    def __init__(self, rt, host, *, shape=None):
+    def __init__(self, rt, host, *, shape=None, torch_dtype=None):
         from rocke.runtime.launcher import DeviceMem
 
         self._rt = rt
@@ -33,9 +49,30 @@ class DeviceArray:
         self._mem = DeviceMem(self._host.nbytes)
         self.write(self._host)
         self.shape = self._host.shape if shape is None else shape
+        name = torch_dtype or _TORCH_NAME.get(self._host.dtype, str(self._host.dtype))
+        self.dtype = name if name.startswith("torch.") else f"torch.{name}"
 
-    def stride(self, dim):
-        return self._host.strides[dim] // self._host.itemsize
+    def is_contiguous(self):
+        return self._host.flags.c_contiguous and tuple(self.shape) == self._host.shape
+
+    def numel(self):
+        return int(np.prod(self.shape))
+
+    def element_size(self):
+        return self._host.itemsize
+
+    def dim(self):
+        return len(self.shape)
+
+    def stride(self, dim=None):
+        strides = tuple(s // self._host.itemsize for s in self._host.strides)
+        return strides if dim is None else strides[dim]
+
+    def __getitem__(self, index):
+        return self.read()[index]
+
+    def tolist(self):
+        return self.read().tolist()
 
     def data_ptr(self):
         return self._mem.ptr()
