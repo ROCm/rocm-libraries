@@ -1145,22 +1145,28 @@ TEST_F(ContractionCheckTest, TrinaryDOverlapsE)
     expectRefused(mHandle, ext, p, HIPTENSOR_STATUS_NOT_SUPPORTED, Stage::Contract);
 }
 
-// Trinary: an input in E's buffer.
+// Trinary: A or B in E's buffer gives the correct result, because step 1 reads A
+// and B into the workspace before step 2 writes E. The skip reference is the same
+// contraction with separate buffers, so that a refused call fails the test.
 TEST_F(ContractionCheckTest, TrinaryAOverlapsE)
 {
-    auto const ext = extents(false);
-    auto       p   = trinary(ext, kTrinaryCanonical);
-    p.aInD         = true;
-    expectRefused(mHandle, ext, p, HIPTENSOR_STATUS_NOT_SUPPORTED, Stage::Contract);
+    auto const ext      = extents(false);
+    auto       p        = trinary(ext, kTrinaryCanonical);
+    auto const separate = p;
+    p.aInD              = true;
+    expectCorrect(mHandle, ext, p, separate);
 }
 
 TEST_F(ContractionCheckTest, TrinaryBOverlapsE)
 {
-    auto const ext = extents(false);
-    auto       p   = trinary(ext, kTrinaryCanonical);
-    p.bInD         = true;
-    expectRefused(mHandle, ext, p, HIPTENSOR_STATUS_NOT_SUPPORTED, Stage::Contract);
+    auto const ext      = extents(false);
+    auto       p        = trinary(ext, kTrinaryCanonical);
+    auto const separate = p;
+    p.bInD              = true;
+    expectCorrect(mHandle, ext, p, separate);
 }
+
+// Trinary: C in E's buffer is refused, because step 2 reads C while it writes E.
 
 TEST_F(ContractionCheckTest, TrinaryCOverlapsE)
 {

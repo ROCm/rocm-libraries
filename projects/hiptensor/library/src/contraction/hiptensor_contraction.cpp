@@ -1820,15 +1820,14 @@ hiptensorStatus_t hiptensorContractTrinary(const hiptensorHandle_t handle,
         return errorCode;
     }
 
-    // The kernels write E while they still read A, B and C, so an input that
-    // shares memory with E is read after it has been overwritten. Memory is
-    // compared by range (see overlaps).
-    if(overlaps(A, byteSpan(plan->mOpDesc->mDescA), E, byteSpan(plan->mOpDesc->mDescE))
-       || overlaps(B, byteSpan(plan->mOpDesc->mDescB), E, byteSpan(plan->mOpDesc->mDescE))
-       || overlaps(C, byteSpan(plan->mOpDesc->mDescC), E, byteSpan(plan->mOpDesc->mDescE)))
+    // Step 2 writes E while it still reads C, so a C that shares memory with E
+    // is read after it has been overwritten. A and B may overlap E: step 1 reads
+    // them completely into the workspace before step 2, on the same stream,
+    // writes E. Memory is compared by range (see overlaps).
+    if(overlaps(C, byteSpan(plan->mOpDesc->mDescC), E, byteSpan(plan->mOpDesc->mDescE)))
     {
         auto errorCode = HIPTENSOR_STATUS_NOT_SUPPORTED;
-        snprintf(msg, sizeof(msg), "The memory ranges of A, B and C must not overlap E");
+        snprintf(msg, sizeof(msg), "The memory range of C must not overlap E");
         logger->logError("hiptensorContractTrinary", msg);
         return errorCode;
     }

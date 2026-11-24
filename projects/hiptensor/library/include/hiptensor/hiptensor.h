@@ -403,8 +403,8 @@ HIPTENSOR_EXPORT hiptensorStatus_t
 //! @param[in] handle Opaque handle representing the hipTensor library context.
 //! @param[in] plan Opaque handle containing the trinary contraction execution plan.
 //! @param[in] alpha Scaling factor for A*B*C. Pointer to host memory.
-//! @param[in] A Pointer to tensor A data in GPU-accessible memory. Must not overlap E.
-//! @param[in] B Pointer to tensor B data in GPU-accessible memory. Must not overlap E.
+//! @param[in] A Pointer to tensor A data in GPU-accessible memory. May overlap E.
+//! @param[in] B Pointer to tensor B data in GPU-accessible memory. May overlap E.
 //! @param[in] C Pointer to tensor C data in GPU-accessible memory. Must not overlap E.
 //! @param[in] beta Scaling factor for D. Pointer to host memory.
 //! @param[in] D Pointer to tensor D data in GPU-accessible memory. May be the same pointer as E when D and E have the same layout; otherwise must not overlap E.
@@ -413,7 +413,7 @@ HIPTENSOR_EXPORT hiptensorStatus_t
 //! @param[in] workspaceSize Size of the `workspace` array in bytes.
 //! @param[in] stream HIP stream for all computations.
 //! @retval `HIPTENSOR_STATUS_SUCCESS` When the operation completes successfully.
-//! @retval `HIPTENSOR_STATUS_NOT_SUPPORTED` When the operation isn't supported, when D and E are the same pointer with different layouts, when D overlaps E without being the same pointer, or when A, B or C overlaps E.
+//! @retval `HIPTENSOR_STATUS_NOT_SUPPORTED` When the operation isn't supported, when C overlaps E, or when D overlaps E without being the same pointer with the same layout.
 //! @retval `HIPTENSOR_STATUS_INVALID_VALUE` When input data is invalid.
 //! @retval `HIPTENSOR_STATUS_NOT_INITIALIZED` When the handle isn't initialized.
 //! @retval `HIPTENSOR_STATUS_ARCH_MISMATCH` When the plan was created for a different device.
