@@ -7,8 +7,10 @@
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
 #include <hipdnn-gpu-ref/detail/GpuRefKernelCompiler.hpp>
+#include <hipdnn-gpu-ref/detail/HipRtcTypeName.hpp>
 
 #include <stdexcept>
+#include <string>
 
 using namespace hipdnn_gpu_ref;
 
@@ -40,13 +42,14 @@ TEST(TestGpuRefKernelCompiler, CompilesLowPrecisionKernelWithoutEnvironmentPaths
     ASSERT_TRUE(hipdnn_data_sdk::utilities::getEnv("ROCM_PATH").empty());
 
     // Bypass the singleton cache so an earlier block-scale test cannot hide a broken lookup.
-    const detail::CompiledKernel kernel("GpuRefBlockScaleQuantize.cpp",
-                                        {"-DGPU_REF_USE_HIP_MX",
-                                         "-DX_TYPE=float",
-                                         "-DY_TYPE=__hip_fp8_e4m3",
-                                         "-DSCALE_TYPE=float",
-                                         "-DCOMPUTE_TYPE=float"},
-                                        "BlockScaleQuantizeRef");
+    const detail::CompiledKernel kernel(
+        "GpuRefBlockScaleQuantize.cpp",
+        {"-DGPU_REF_USE_HIP_MX",
+         "-DX_TYPE=float",
+         std::string("-DY_TYPE=") + detail::HipRtcTypeName<hipdnn_data_sdk::types::fp8_e4m3>::VALUE,
+         "-DSCALE_TYPE=float",
+         "-DCOMPUTE_TYPE=float"},
+        "BlockScaleQuantizeRef");
     EXPECT_NE(kernel.function(), nullptr);
 }
 
