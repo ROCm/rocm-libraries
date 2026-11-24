@@ -2,13 +2,17 @@
 # SPDX-License-Identifier: MIT
 """DebugDisableInstrMask: assembly filter, parameter registration and kernel naming."""
 
-import copy
+import re
+from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
+import yaml
 
-from tensilelite.Common.DebugInstrMask import (DEBUG_INSTR_MASK_ALL,
-                                               applyDebugDisableInstrMask,
-                                               debugDisableInstrMaskConflict)
+from config_harness import assert_assembles, emit_kernels_from_config
+from tensilelite.Common.DebugInstrMask import (DEBUG_INSTR_CLASSES, DEBUG_INSTR_KEEP_TAG,
+                                               DEBUG_INSTR_MASK_ALL,
+                                               applyDebugDisableInstrMask, keepInstrComment)
 from tensilelite.Common.GlobalParameters import defaultSolution
 from tensilelite.Common.ValidParameters import validParameters
 
@@ -74,75 +78,64 @@ def test_parameter_registered_with_off_default():
   assert validParameters["DebugDisableInstrMask"] == list(range(DEBUG_INSTR_MASK_ALL + 1))
 
 
-@pytest.mark.parametrize("streamK", [3, 4, 5])
-@pytest.mark.parametrize("mask", [2, 4, 6, 31])
-def test_streamk_fixup_rejects_global_mem_masks(streamK, mask):
-  # Fixup spins on a global-memory flag; removing its load/store hangs.
-  state = {"StreamK": streamK, "StreamKAtomic": 0, "DebugDisableInstrMask": mask}
-  assert "Stream-K" in debugDisableInstrMaskConflict(state)
+@pytest.mark.parametrize("mask", [DEBUG_INSTR_MASK_ALL, 2, 4, 8, 16])
+def test_keep_tag_survives(mask):
+  asm = (f"  buffer_load_dword v4, v5, s[8:11], 0 offen // get flag {DEBUG_INSTR_KEEP_TAG}\n"
+         f"  buffer_store_dword v4, v5, s[8:11], 0 offen // set flag {DEBUG_INSTR_KEEP_TAG}\n"
+         f"  ds_store_b32 v1, v2 // {DEBUG_INSTR_KEEP_TAG}\n"
+         f"  ds_load_b32 v2, v1 // {DEBUG_INSTR_KEEP_TAG}\n")
+  assert applyDebugDisableInstrMask(asm, mask) == asm
 
 
-@pytest.mark.parametrize("state", [
-  {"StreamK": 3, "StreamKAtomic": 0, "DebugDisableInstrMask": 1 | 8 | 16},  # no global mem bits
-  {"StreamK": 3, "StreamKAtomic": 1, "DebugDisableInstrMask": 31},          # atomic SK: no fixup
-  {"StreamK": 0, "DebugDisableInstrMask": 31},                              # not Stream-K
-  {"StreamK": 3, "StreamKAtomic": 0, "DebugDisableInstrMask": 0},
-])
-def test_no_conflict(state):
-  assert debugDisableInstrMaskConflict(state) is None
+@pytest.mark.parametrize("mask,expected", [(0, "c"), (1, f"c {DEBUG_INSTR_KEEP_TAG}"),
+                                           (DEBUG_INSTR_MASK_ALL, f"c {DEBUG_INSTR_KEEP_TAG}")])
+def test_keep_comment_only_tags_with_nonzero_mask(mask, expected):
+  writer = SimpleNamespace(states=SimpleNamespace(kernel={"DebugDisableInstrMask": mask}))
+  assert keepInstrComment(writer, "c") == expected
+  assert keepInstrComment(SimpleNamespace(states=SimpleNamespace()), "c") == "c"
 
 
-# --- End-to-end: Solution rejects the hanging combination (real gfx950 caps). ---
+# --- Codegen: Stream-K control data survives every mask (gfx950: VMEM flags). ---
 
-_PRISTINE_DEFAULT_SOLUTION = copy.deepcopy(dict(defaultSolution))
+_SK_CONFIG = Path(__file__).parent / "characterization/_codegen/data/test_data/_designed/gfx942/streamk.yaml"
+_ALL_PREFIXES = tuple(p for ps in DEBUG_INSTR_CLASSES.values() for p in ps)
+_LIVE_MEM = re.compile(r"^\s*((?:%s)\w*)\b(.*)$" % "|".join(_ALL_PREFIXES), re.M)
 
 
 @pytest.fixture(scope="module")
-def _gp_gfx950(gfx950_iim):
-  from tensilelite.Common.GlobalParameters import globalParameters, assignGlobalParameters
-  saved = [(d, copy.deepcopy(dict(d))) for d in (globalParameters, validParameters, defaultSolution)]
-  defaultSolution.clear()
-  defaultSolution.update(copy.deepcopy(_PRISTINE_DEFAULT_SOLUTION))
-  assignGlobalParameters({}, gfx950_iim)
-  yield
-  for d, s in saved:
-    d.clear()
-    d.update(s)
+def _sk_kernels(tmp_path_factory):
+  config = yaml.safe_load(_SK_CONFIG.read_text())
+  forks = config["BenchmarkProblems"][0][1]["ForkParameters"]
+  for p in forks:
+    if "WorkAssignment" in p:
+      p["WorkAssignment"] = ["StaticGrid", "DynamicWorkQueue"]
+    elif "StreamKAtomic" in p:
+      p["StreamKAtomic"] = [0]
+  forks.append({"DebugDisableInstrMask": [0, DEBUG_INSTR_MASK_ALL]})
+  path = tmp_path_factory.mktemp("ddim") / "sk_ddim_gfx950.yaml"
+  path.write_text(yaml.safe_dump(config))
+  results = emit_kernels_from_config(path, limit=8, arch="gfx950", canonical=False)
+  assert len(results) == 4 and all(err == 0 for _, _, err in results)
+  return {(("DebugDisableInstrMask:" in src), ("mailbox publish" in src)): (name, src)
+          for name, src, _ in results}
 
 
-def _solution(iim, assembler, mask, **overrides):
-  from tensilelite.Common.Architectures import gfxToIsa
-  from tensilelite.SolutionStructs.Solution import Solution
-  from tensilelite.SolutionStructs.Validators.MatrixInstruction import matrixInstructionToMIParameters
-
-  isa = gfxToIsa("gfx950")
-  mi = [16, 16, 32, 1, 1, 4, 4, 2, 2]  # MT 128x128
-  problemType = {"OperationType": "GEMM", "DataType": "b", "DestDataType": "b",
-                 "ComputeDataType": "s", "HighPrecisionAccumulate": True,
-                 "TransposeA": True, "TransposeB": False, "UseBeta": True, "Batched": True}
-  params = {"ProblemType": problemType, "InternalSupportParams": {"SupportUserGSU": True},
-            "MatrixInstruction": mi, "WorkGroup": [16, 16, 1], "WavefrontSize": 64,
-            "DepthU": 32, "KernelLanguage": "Assembly", "PrefetchGlobalRead": 2,
-            "PrefetchLocalRead": 0, "ScheduleIterAlg": 3, "StaggerU": 0,
-            "TileProcessingStrategy": "StreamK", "WorkAssignment": "StaticGrid",
-            "GlobalSplitU": 0, "WorkGroupMapping": 1, "MIArchVgpr": False,
-            "UseSubtileImpl": False, "DebugDisableInstrMask": mask}
-  params.update(overrides)
-  params.update(matrixInstructionToMIParameters(mi, isa, 64, problemType, params["WorkGroup"], iim))
-  return Solution(params, False, True, False, assembler, iim)
+# Static grid: fixup ready flag (VMEM on gfx950). Dynamic queue: arrival fixup
+# (scalar-atomic tickets, no flag) plus the LDS work-item mailbox.
+@pytest.mark.parametrize("dynamic,expected", [
+  (False, {"buffer_load_dword", "buffer_store_dword"}),
+  (True, {"ds_write_b32", "ds_read_b32"}),
+])
+def test_streamk_full_mask_keeps_only_control_data(_sk_kernels, dynamic, expected):
+  name, src = _sk_kernels[(True, dynamic)]
+  live = _LIVE_MEM.findall(src)
+  untagged = [m for m, rest in live if DEBUG_INSTR_KEEP_TAG not in rest]
+  assert not untagged, untagged
+  assert {m for m, _ in live} == expected
+  assert_assembles(src, name)
 
 
-@pytest.mark.parametrize("mask", [0, 1, 8 | 16])
-def test_solution_streamk_accepts_masks_without_global_mem(_gp_gfx950, gfx950_iim, assembler, capsys, mask):
-  assert _solution(gfx950_iim, assembler, mask)["Valid"], capsys.readouterr().out
-
-
-@pytest.mark.parametrize("mask", [2, 4])
-def test_solution_streamk_rejects_global_mem_masks(_gp_gfx950, gfx950_iim, assembler, capsys, mask):
-  assert not _solution(gfx950_iim, assembler, mask)["Valid"]
-  assert "Stream-K fixup flag handshake" in capsys.readouterr().out
-
-
-def test_solution_data_parallel_accepts_global_mem_masks(_gp_gfx950, gfx950_iim, assembler, capsys):
-  sol = _solution(gfx950_iim, assembler, 6, TileProcessingStrategy="None", GlobalSplitU=1)
-  assert sol["Valid"], capsys.readouterr().out
+@pytest.mark.parametrize("dynamic", [False, True])
+def test_streamk_mask_zero_has_no_keep_tag(_sk_kernels, dynamic):
+  _, src = _sk_kernels[(False, dynamic)]
+  assert DEBUG_INSTR_KEEP_TAG not in src

@@ -9,8 +9,6 @@ kernels compute wrong results. s_waitcnt instructions are kept, they just wait o
 
 import re
 
-from ..ExecutionPolicy import requiresPartialReduction
-
 # bit -> mnemonic prefixes
 DEBUG_INSTR_CLASSES = {
     1:  ("v_wmma", "v_swmmac", "v_mfma", "v_smfmac"),             # matrix instructions
@@ -20,9 +18,20 @@ DEBUG_INSTR_CLASSES = {
     16: ("ds_store", "ds_write"),                                    # LDS stores
 }
 DEBUG_INSTR_MASK_ALL = sum(DEBUG_INSTR_CLASSES)
-DEBUG_INSTR_GLOBAL_MEM = 2 | 4
+
+# Instructions whose comment carries this tag are never disabled: the kernel
+# branches on the data they move, so removing them would hang it.
+DEBUG_INSTR_KEEP_TAG = "[DDIM:keep]"
 
 _PREFIX = "// DebugDisableInstrMask: "
+
+
+def keepInstrComment(writer, comment: str = "") -> str:
+  """Tag `comment` so the mask keeps the instruction. No-op with mask 0."""
+  kernel = getattr(writer.states, "kernel", None) or {}
+  if not kernel.get("DebugDisableInstrMask", 0):
+    return comment
+  return f"{comment} {DEBUG_INSTR_KEEP_TAG}" if comment else DEBUG_INSTR_KEEP_TAG
 
 
 def applyDebugDisableInstrMask(code: str, mask: int) -> str:
@@ -31,17 +40,6 @@ def applyDebugDisableInstrMask(code: str, mask: int) -> str:
   if mask & ~DEBUG_INSTR_MASK_ALL:
     raise ValueError(f"DebugDisableInstrMask={mask} has unknown bits (valid: 0..{DEBUG_INSTR_MASK_ALL})")
   prefixes = tuple(p for bit, ps in DEBUG_INSTR_CLASSES.items() if mask & bit for p in ps)
-  pattern = re.compile(r"^(\s*)((?:%s)\w*\b.*)$" % "|".join(prefixes), re.MULTILINE)
+  pattern = re.compile(r"^(\s*)((?:%s)\w*\b(?!.*%s).*)$" % ("|".join(prefixes), re.escape(DEBUG_INSTR_KEEP_TAG)),
+                       re.MULTILINE)
   return pattern.sub(lambda m: m.group(1) + _PREFIX + m.group(2), code)
-
-
-def debugDisableInstrMaskConflict(state) -> str | None:
-  """Rejection reason if the mask would hang the kernel, else None.
-
-  The Stream-K partial-tile fixup spins on a ready flag in global memory,
-  read/written with buffer_load/buffer_store on several arches.
-  """
-  if state.get("DebugDisableInstrMask", 0) & DEBUG_INSTR_GLOBAL_MEM and requiresPartialReduction(state):
-    return ("DebugDisableInstrMask bits 2/4 (global loads/stores) would hang the "
-            "Stream-K fixup flag handshake")
-  return None
