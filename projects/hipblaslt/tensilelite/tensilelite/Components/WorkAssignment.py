@@ -210,7 +210,8 @@ class WorkAssignment(Component):
 
         if cluster:
             assert writer.states.asmCaps.get('HasClusterBarrier', False), 'persistent cluster handoff requires HasClusterBarrier'
-            pap = kernel.get('PrefetchAcrossPersistent', 0)
+            pap = (kernel.get('PrefetchAcrossPersistent', 0)
+                   and not self.primedEntryWaitsForTileClose(kernel))
             if debug or pap:
                 skipArrive = Label(writer.labels.getNameInc('PersistentMC_SkipNextTileArrive'), '')
             if debug:
@@ -231,6 +232,29 @@ class WorkAssignment(Component):
             if debug or pap:
                 beforeReentry.add(skipArrive)
         return always, beforeReentry
+
+    @staticmethod
+    def primedEntryWaitsForTileClose(kernel):
+        """Whether primed entry pairs the tile-close cluster arrive itself.
+
+        The PAP handoff phase completes before a compiled tail loop reads the
+        bank that primed entry refills with its next PGR group, so a fast peer
+        could multicast into it while a slow peer still runs its tail. Such
+        kernels keep the tile-close arrive on primed tiles and wait for it at
+        primed entry. Kernels without a tail loop also cover PAPs that issue
+        every PGR group, where no load and so no wait follows primed entry.
+        """
+        return (bool(persistentSpatialCluster(kernel)) and kernel.get("ClusterBarrier", True)
+                and bool(kernel.get('PrefetchAcrossPersistent', 0))
+                and not kernel["NoTailLoop"])
+
+    def persistentPrimedEntryClusterWait(self, writer, kernel):
+        module = Module('Persistent primed entry cluster wait')
+        if not self.primedEntryWaitsForTileClose(kernel):
+            return module
+        assert writer.states.asmCaps.get('HasClusterBarrier', False), 'cluster B-multicast requires the HasClusterBarrier asm capability'
+        module.add(SBarrier(True, True, True, comment='cluster_barrier wait: peers finished the previous tile (pairs tile-close arrive)'))
+        return module
 
     def persistentMulticastZeroIterClusterWait(self, writer, kernel):
         module = Module('Persistent multicast zero-iteration cluster wait')

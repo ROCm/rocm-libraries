@@ -24,10 +24,10 @@ def _isa(_isolate_rocisa_state):
     init_rocisa(target="gfx1250", wavesize=32)
 
 
-def _setup(monkeypatch, shape=(2, 2)):
+def _setup(monkeypatch, shape=(2, 2), tail_loop=False):
     kernel = _kernel()
     kernel.update(ClusterDim=list(shape), PrefetchAcrossPersistent=1, WavefrontSize=32,
-                  NumThreads=128, enableTDMA=True)
+                  NumThreads=128, enableTDMA=True, NoTailLoop=not tail_loop)
     processing, assignment = DataParallel(), StaticGrid()
     writer = _Writer(kernel, processing.tileWork(kernel), ())
     writer.states.asmCaps = {"HasClusterBarrier": True}
@@ -86,6 +86,21 @@ def test_loop_close_arrives_only_for_an_unprimed_next_tile(monkeypatch, state, h
         expected = [("s_barrier_signal", "-1"), ("s_barrier_wait", "-1")]
         if not state & 1 and wave == 0:
             expected.append(("s_barrier_signal", "-3"))
+    assert machine.barrier_operations == expected
+
+
+@pytest.mark.parametrize("state", [0, 1, 3])
+@pytest.mark.parametrize("wave", range(4))
+def test_loop_close_arrives_for_primed_tiles_with_a_tail_loop(monkeypatch, state, wave):
+    # Primed entry waits for this arrive before refilling the bank a tail loop read.
+    kernel, assignment, writer = _setup(monkeypatch, tail_loop=True)
+    close = assignment.closeLoop(writer, kernel)
+    machine = Machine(NextTile=8, TotalTiles=32, PersistentPrefetchState=state)
+    machine.registers[str(vgpr("Serial"))] = wave * 32
+    assert machine.run(close) == "label_PersistentLoopStart"
+    expected = [("s_barrier_signal", "-1"), ("s_barrier_wait", "-1")]
+    if wave == 0:
+        expected.append(("s_barrier_signal", "-3"))
     assert machine.barrier_operations == expected
 
 

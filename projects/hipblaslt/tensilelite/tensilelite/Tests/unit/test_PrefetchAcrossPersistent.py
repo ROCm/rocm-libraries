@@ -2279,6 +2279,43 @@ def test_cluster_close_handoff_covers_only_reachable_backedges(
     assert "s_wait_tensorcnt" not in close
 
 
+@pytest.mark.parametrize("tail_loop", [True, False])
+def test_cluster_pap_primed_entry_pairs_tile_close_arrive(
+        _gp_gfx1250, gfx1250_iim, assembler, capsys, tail_loop):
+    """A tail loop reads the bank primed entry refills after the PAP handoff
+    phase, so primed entry must wait for the tile-close arrive before it
+    issues the next PGR group; without a tail loop both stay skipped."""
+    sol, asm = _emit_asm(gfx1250_iim, assembler, **_NO_MX_EMIT,
+                         ClusterDim=[2, 2], PrefetchAcrossPersistent=1,
+                         ForceDisableShadowInit=True, ClusterLocalRead=0,
+                         AssertSummationElementMultiple=1 if tail_loop else 128)
+    assert sol.get("Valid") and asm, capsys.readouterr().out
+    assert sol["NoTailLoop"] != tail_loop
+    close = asm.split("label_PersistentLoopClose:", 1)[1].split("label_KernelEnd:", 1)[0]
+    assert close.count("s_barrier_signal -3") == 1
+    assert ("PersistentPrefetchState" in close) != tail_loop, \
+        "primed tiles must keep the tile-close arrive exactly when primed entry waits for it"
+
+    primed = re.findall(r"s_cbranch_scc1\s+(label_\w+)\s*//\s*skip first PGR group if primed", asm)
+    assert primed
+    for target in primed:
+        merge = re.search(r"(label_SK_PrefetchPrimedMerge\w*):", asm[asm.index(target + ":"):]
+                          if target + ":" in asm else "")
+        if not tail_loop:
+            assert target.startswith("label_SK_PrefetchPrimedMerge")
+            assert "label_SK_PrefetchPrimedClusterWait" not in asm
+            continue
+        assert target.startswith("label_SK_PrefetchPrimedClusterWait")
+        body = asm[asm.index(target + ":"):]
+        body = body[:body.index(merge.group(1) + ":")]
+        # Exactly one wait on the primed edge, nothing else that touches the cluster.
+        assert body.count("s_barrier_wait -3") == 1
+        assert "s_barrier_signal -3" not in body
+        # The cold edge reaches the merge without passing that wait.
+        cold = asm[:asm.index(target + ":")]
+        assert re.search(r"s_branch\s+%s\b" % merge.group(1), cold[cold.rindex(target):])
+
+
 @pytest.mark.parametrize("assignment,tdma,tdmb,threads,drains,barriers", [
     (StaticGrid, False, False, 64, 0, 0),
     (StaticGrid, True, False, 32, 0, 0),

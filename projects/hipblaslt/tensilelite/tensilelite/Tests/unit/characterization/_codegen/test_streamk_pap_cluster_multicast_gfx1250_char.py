@@ -93,7 +93,13 @@ def _assert_pap_handoff(src, *, late=False):
         assert handoff_end < checkpoint
     assert handoff_end < issue
     assert "restore current PersistentPhantomTile after PAP" in src
-    assert "PAP already completed the next-tile cluster handoff?" in src
+    if "label_TailLoopBeginL:" in src:
+        # The tail loop reads the bank primed entry refills: primed tiles keep
+        # the loop-close arrive and primed entry waits for it.
+        assert "PAP already completed the next-tile cluster handoff?" not in src
+        assert "(pairs tile-close arrive)" in src
+    else:
+        assert "PAP already completed the next-tile cluster handoff?" in src
 
 
 def _max_sgpr(src):

@@ -70,7 +70,7 @@ from .SolutionStructs.segment_interleave import wave_tile_span
 from .AsmMemoryInstruction import MemoryInstruction
 from .Activation import ActivationModule
 from .Common import printWarning, roundUp, print2, DebugConfig, DataDirection, \
-  INDEX_CHARS, IsaVersion, log2, clusterEnabled, \
+  INDEX_CHARS, IsaVersion, log2, clusterEnabled, persistentSpatialCluster, \
   swizzleGeometry, isMxf4SubtilePath
 from .Common.GlobalParameters import globalParameters
 from .Common.ScaleAlphaVec import scaleAlphaSupportsDeviceScalar, scaleAlphaVectorMode
@@ -3550,9 +3550,15 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
         module.add(self.openSumAtLeastUnroll(kernel, prefetch=True, isOptNLL=isOptNLL))
         usePrimedSkip = self.isPrefetchAcrossPersistentEnabled(kernel)
         lbl_prefetchPrimedMerge = Label(self.labels.getNameInc("SK_PrefetchPrimedMerge"), "")
+        primedWait = Module()
+        if usePrimedSkip and persistentSpatialCluster(kernel):
+          primedWait = Component.WorkAssignment.find(self).persistentPrimedEntryClusterWait(self, kernel)
+        lbl_primedEntry = lbl_prefetchPrimedMerge
+        if primedWait.items():
+          lbl_primedEntry = Label(self.labels.getNameInc("SK_PrefetchPrimedClusterWait"), "")
         if usePrimedSkip:
           module.add(SBitcmp1B32(src0=sgpr("PersistentPrefetchState"), src1=0, comment="tail prefetch already issued first PGR group?"))
-          module.add(SCBranchSCC1(labelName=lbl_prefetchPrimedMerge.getLabelName(), comment="skip first PGR group if primed"))
+          module.add(SCBranchSCC1(labelName=lbl_primedEntry.getLabelName(), comment="skip first PGR group if primed"))
         moduleTmp = self.directToLdsM0Update(kernel, 0, tensorParameters1st)
         module.add(replaceHolder(moduleTmp, 0))
 
@@ -3579,6 +3585,10 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
           moduleTmp = self.directToLdsM0Update(kernel, 0, tPM)
           module.add(replaceHolder(moduleTmp, 0))
           module.add(self.globalReadDo(kernel, 0, tPM))
+        if primedWait.items():
+          module.add(SBranch(labelName=lbl_prefetchPrimedMerge.getLabelName(), comment="cold entry: first-load wait paired the tile-close arrive"))
+          module.add(lbl_primedEntry)
+          module.add(primedWait)
         if usePrimedSkip:
           module.add(lbl_prefetchPrimedMerge)
           module.add(SMovB32(dst=sgpr("PersistentPrefetchState"), src=0, comment="clear after first PGR group merge"))
