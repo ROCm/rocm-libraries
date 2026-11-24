@@ -60,7 +60,9 @@ jobs:
           amdgpu_family: gfx94X-dcgpu
 
       - name: Install Python dependencies
-        run: pip install -r requirements.txt
+        # The same interpreter CMake is pinned to below, so the build's Python steps
+        # (solution-state fixtures) can import what this installs.
+        run: python3 -m pip install -r requirements.txt
 
       - name: Provide msgpack-cxx and GTest
         run: |
@@ -107,7 +109,9 @@ jobs:
             -DCMAKE_C_COMPILER="${ROCM_PATH}/bin/amdclang" \
             -DCMAKE_CXX_COMPILER="${ROCM_PATH}/bin/amdclang++" \
             -DTENSILELITE_BUILD_TESTING=ON \
-            -DHIPBLASLT_ENABLE_YAML=OFF
+            -DHIPBLASLT_ENABLE_YAML=OFF \
+            -DPython3_EXECUTABLE="$(command -v python3)" \
+            -DPython_EXECUTABLE="$(command -v python3)"
           cmake --build build --parallel --target tensilelite-tests cpu-gemm-driver
 
       # A PR that changes only a file this build reads, but the lane's path filter misses,
