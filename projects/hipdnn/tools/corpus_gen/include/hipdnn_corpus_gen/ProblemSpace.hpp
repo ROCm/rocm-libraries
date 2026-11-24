@@ -98,6 +98,14 @@ struct ExplorationRequest
     /// call.
     size_t maxSkeleton = 512;
 
+    /// Problems other sources already hold: a pack's kernel geometries (`--kdp-root`) and
+    /// recorded workload shapes (`--model-shapes`). Their numeric shapes go to the oracle in every
+    /// combination ahead of the regime skeleton, those recorded under the combination's own
+    /// categorical values first, so the walk starts from where the engine's kernels and real
+    /// workloads are known to sit (RFC 0019.13 §5.3 step 3). At most @ref maxSkeleton per
+    /// combination.
+    std::vector<ProblemPoint> seedPoints;
+
     /// Problems wanted from the whole operation; 0 means just the per-combination pass. Short of
     /// it, combinations that found something are searched again with growing budgets;
     /// combinations that found nothing are not grown.
@@ -741,6 +749,82 @@ inline std::vector<int64_t> apportion(int64_t total,
     return parts;
 }
 
+/// A point another source holds, split into the numeric shape a walk can start from and the
+/// categorical values it was recorded under.
+struct SeedShape
+{
+    ProblemPoint categorical;
+    Shape shape;
+};
+
+/// The shapes of @p points over @p numericParameters; a point missing one of them is skipped.
+inline std::vector<SeedShape> seedShapes(const std::vector<ProblemPoint>& points,
+                                         const std::vector<std::string>& numericParameters)
+{
+    std::vector<SeedShape> seeds;
+    seeds.reserve(points.size());
+    for(const auto& point : points)
+    {
+        SeedShape seed;
+        seed.shape.reserve(numericParameters.size());
+        for(const auto& name : numericParameters)
+        {
+            const auto value = integerAt(point, name);
+            if(!value.has_value())
+            {
+                break;
+            }
+            seed.shape.push_back(*value);
+        }
+        if(seed.shape.size() != numericParameters.size())
+        {
+            continue;
+        }
+        for(const auto& [name, value] : point)
+        {
+            if(std::find(numericParameters.begin(), numericParameters.end(), name)
+               == numericParameters.end())
+            {
+                seed.categorical.emplace(name, value);
+            }
+        }
+        seeds.push_back(std::move(seed));
+    }
+    return seeds;
+}
+
+/// The walk's first seeds under @p categorical: the shapes of @p pooled, those recorded under the
+/// same categorical values first (a value the point does not record counts as the same), each
+/// shape once, at most @p limit. The others still go to the oracle: a pack's geometry is a hint
+/// about where kernels are, whatever layout or form the pack was recorded under.
+inline std::vector<Shape>
+    pooledSeeds(const std::vector<SeedShape>& pooled, const ProblemPoint& categorical, size_t limit)
+{
+    const auto recordedHere = [&categorical](const SeedShape& seed) {
+        return std::all_of(categorical.begin(), categorical.end(), [&seed](const auto& value) {
+            const auto found = seed.categorical.find(value.first);
+            return found == seed.categorical.end() || found->second == value.second;
+        });
+    };
+    std::vector<Shape> seeds;
+    std::set<Shape> seen;
+    for(const bool here : {true, false})
+    {
+        for(const auto& seed : pooled)
+        {
+            if(seeds.size() >= limit)
+            {
+                return seeds;
+            }
+            if(recordedHere(seed) == here && seen.insert(seed.shape).second)
+            {
+                seeds.push_back(seed.shape);
+            }
+        }
+    }
+    return seeds;
+}
+
 /// The cross product of declared regime buckets and common values (§4.3.2, §4.3.5), used to
 /// seed the search: these combinations are realistic by construction, unlike independent draws.
 /// Parameters with neither take their floor and are left to the walk. Strided to @p limit;
@@ -870,7 +954,8 @@ inline std::string describe(const ProblemPoint& point)
 }
 
 /// Every numeric parameter's search window: the declared range clipped to the ceiling, or the
-/// ceiling alone. Shared with RegimeFocus.hpp so both walk the same box.
+/// ceiling alone, at the multiple the constraints require (Parameter::step). Shared with
+/// RegimeFocus.hpp so both walk the same box.
 inline std::vector<ShapeDimension> numericWindow(const OperationMetadata& metadata,
                                                  const ExplorationRequest& request)
 {
@@ -888,6 +973,7 @@ inline std::vector<ShapeDimension> numericWindow(const OperationMetadata& metada
             dimension.low = parameter.range->first;
             dimension.high = std::min(request.numericCeiling, parameter.range->second);
         }
+        dimension.step = parameter.step;
         window.push_back(dimension);
     }
     return window;
@@ -1246,6 +1332,8 @@ inline ProblemCorpus exploreProblemSpace(const OperationMetadata& metadata,
             std::to_string(skeletonTotal - skeleton.size()) + " of " + std::to_string(skeletonTotal)
             + " declared regime combinations not tried (maxSkeleton bound)");
     }
+    // The numeric shapes of the points other sources already hold, for each walk's first seeds.
+    const auto pooledShapes = detail::seedShapes(request.seedPoints, corpus.numericParameters);
 
     for(size_t index = 0; index < combinations.size(); ++index)
     {
@@ -1277,7 +1365,10 @@ inline ProblemCorpus exploreProblemSpace(const OperationMetadata& metadata,
         const auto oracle = oracleFor(index);
 
         FeasibleSetRequest search;
-        search.seeds = skeleton;
+        // Shapes other sources already hold come first: the first accepted seeds start the
+        // walks, and these are where the engine's kernels and real workloads are known to sit.
+        search.seeds = detail::pooledSeeds(pooledShapes, categorical, request.maxSkeleton);
+        search.seeds.insert(search.seeds.end(), skeleton.begin(), skeleton.end());
         search.dimensions = numericWindow;
         search.targetCount = pointsFor(index);
         search.oracleBudget = request.budgetPerCombination;

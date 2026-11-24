@@ -389,10 +389,18 @@ TEST(TestRegimeFocus, AnUnservedRegimeCostsOnlyTheProbe)
     EXPECT_TRUE(found.problems.empty());
     EXPECT_FALSE(found.saturated);
     // The sample is capped at maxCombinations, plus one extra combination per declared value it
-    // missed, so the cap is what the enumeration actually yields.
+    // missed, so the cap is what the enumeration actually yields: the same sample the focus
+    // takes, of the combinations that can hold a problem, under the request's seed.
     size_t total = 0;
     const auto combinations = detail::categoricalCombinations(
-        metadata.parameters, request.maxCombinations, request.seed, total);
+        metadata.parameters,
+        request.maxCombinations,
+        request.seed,
+        total,
+        [&metadata](const ProblemPoint& combination) {
+            return !detail::excludedByCategoricals(metadata, combination);
+        },
+        request.keep);
     EXPECT_LE(found.proposed, static_cast<int64_t>(combinations.size()) * request.probeBudget);
 }
 
@@ -521,7 +529,14 @@ TEST_P(TestShippedValueWeights,
     ASSERT_GE(few.problems.size(), 60u);
     size_t total = 0;
     const auto lanes = detail::categoricalCombinations(
-                           metadata.parameters, request.maxCombinations, request.seed, total)
+                           metadata.parameters,
+                           request.maxCombinations,
+                           request.seed,
+                           total,
+                           [&metadata](const ProblemPoint& combination) {
+                               return !detail::excludedByCategoricals(metadata, combination);
+                           },
+                           request.keep)
                            .size();
     EXPECT_LT(few.proposed, static_cast<int64_t>(lanes) * request.budgetPerCombination / 8)
         << "proposed " << few.proposed << " over " << lanes << " lanes";

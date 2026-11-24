@@ -11,6 +11,7 @@
 #include <cstdint>
 #include <limits>
 #include <map>
+#include <numeric>
 #include <optional>
 #include <string>
 #include <variant>
@@ -44,6 +45,14 @@ struct Parameter
 
     /// A semantic bound only (e.g. one dim cannot exceed another), never "expected sizes".
     std::optional<std::pair<int64_t, int64_t>> range;
+
+    /// The multiple an `int64` parameter must be by the operation's own definition, derived at
+    /// load from a top-level constraint that makes it a multiple of a constant (detail::
+    /// requiredMultiple; MX's K by its block of 32): random starts, walk steps and neighbourhood
+    /// moves land on multiples of it, so the search does not propose problems the declaration
+    /// refuses. Never declared, so it cannot encode a guess about what kernels prefer. 1 (no such
+    /// constraint) is every integer.
+    int64_t step = 1;
 
     /// Required for ENUM; a BOOL has an implicit [false, true].
     std::vector<std::string> values;
@@ -341,6 +350,55 @@ inline std::string queryReference(const std::string& text)
 {
     constexpr std::string_view PREFIX = "$q.";
     return text.rfind(PREFIX, 0) == 0 ? text.substr(PREFIX.size()) : std::string();
+}
+
+/// The parameter @p clause requires to be a multiple of a constant, and that constant:
+/// `{"divisible": ["$q.X", c]}` or `{"==": [{"%": ["$q.X", c]}, 0]}`, either side of the `==`,
+/// with c an integer of 2 or more; nullopt for any other clause, including a divisor that is
+/// another parameter (`C % groups`), which is a coupling and not a fixed multiple.
+inline std::optional<std::pair<std::string, int64_t>> requiredMultiple(const nlohmann::json& clause)
+{
+    const auto multiple
+        = [](const nlohmann::json& operands) -> std::optional<std::pair<std::string, int64_t>> {
+        if(!operands.is_array() || operands.size() != 2 || !operands[0].is_string()
+           || !operands[1].is_number_integer() || operands[1].get<int64_t>() < 2)
+        {
+            return std::nullopt;
+        }
+        const auto name = queryReference(operands[0].get<std::string>());
+        if(name.empty())
+        {
+            return std::nullopt;
+        }
+        return std::make_pair(name, operands[1].get<int64_t>());
+    };
+    if(!clause.is_object() || clause.size() != 1)
+    {
+        return std::nullopt;
+    }
+    if(clause.contains("divisible"))
+    {
+        return multiple(clause.at("divisible"));
+    }
+    if(clause.contains("=="))
+    {
+        const auto& sides = clause.at("==");
+        if(!sides.is_array() || sides.size() != 2)
+        {
+            return std::nullopt;
+        }
+        for(const size_t side : {size_t{0}, size_t{1}})
+        {
+            const auto& remainder = sides[side];
+            const auto& zero = sides[1 - side];
+            if(zero.is_number_integer() && zero.get<int64_t>() == 0 && remainder.is_object()
+               && remainder.size() == 1 && remainder.contains("%"))
+            {
+                return multiple(remainder.at("%"));
+            }
+        }
+    }
+    return std::nullopt;
 }
 
 /// @brief @p parameters' indices in an order where each comes after every parameter it reads.
@@ -1119,6 +1177,24 @@ inline MetadataLoad parseOperationMetadata(const nlohmann::json& root)
                 {
                     load.errors.push_back("constraint references undeclared parameter '" + name
                                           + "'");
+                }
+            }
+            // A top-level clause that makes a parameter a multiple of a constant is part of
+            // the problem's definition: the search draws and walks that parameter at that
+            // multiple (Parameter::step), the least common multiple when several apply.
+            for(const auto& clause : root.at("constraints"))
+            {
+                const auto required = detail::requiredMultiple(clause);
+                if(!required.has_value())
+                {
+                    continue;
+                }
+                for(auto& parameter : metadata.parameters)
+                {
+                    if(parameter.name == required->first && parameter.type == ParameterType::INT64)
+                    {
+                        parameter.step = std::lcm(parameter.step, required->second);
+                    }
                 }
             }
         }
