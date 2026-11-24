@@ -86,7 +86,7 @@ inline bool fmha_fwd_decode_pagedkv_is_valid(const fmha_fwd_decode_pagedkv_trait
                                              const fmha_fwd_decode_pagedkv_args& a)
 {
     if(a.batch <= 0 || a.nhead_k <= 0 || a.nhead_q <= 0 || a.nhead_q % a.nhead_k != 0 ||
-       a.nhead_q / a.nhead_k > 16 || a.block_table_stride <= 0 || a.num_groups <= 0)
+       a.block_table_stride <= 0 || a.num_groups <= 0)
         return false;
     if(!a.q_ptr || !a.k_ptr || !a.v_ptr || !a.o_ptr || !a.block_table_ptr || !a.seqlen_k_ptr ||
        !a.k_descale_ptr || !a.v_descale_ptr || !a.workspace_ptr || !a.counters_ptr)
@@ -117,7 +117,12 @@ auto fmha_fwd_decode_pagedkv_create_kargs_and_grids(fmha_fwd_decode_pagedkv_args
                                        args.window_size,
                                        args.num_groups,
                                        args.scale_s);
-    dim3 grids = FmhaKernel::GridSize(args.batch, args.nhead_k, args.num_groups);
+    // a kv head with more than 16 query heads takes several workgroup rows
+    const ck_tile::index_t q_blocks =
+        FmhaKernel::kHasQBlocks
+            ? ck_tile::fmha_fwd_decode_pagedkv_q_blocks(args.nhead_q, args.nhead_k)
+            : 1;
+    dim3 grids = FmhaKernel::GridSize(args.batch, args.nhead_k, args.num_groups, q_blocks);
     return ck_tile::make_tuple(kargs, grids);
 }
 
@@ -127,7 +132,8 @@ template <ck_tile::index_t HDim_,
           ck_tile::index_t kPageBlockSize_,
           bool kWaveSplit_,
           ck_tile::index_t kNumSplits_,
-          bool kHasGroups_>
+          bool kHasGroups_,
+          bool kHasQBlocks_>
 struct fmha_fwd_decode_pagedkv_traits_
 {
     static constexpr ck_tile::index_t HDim           = HDim_;
@@ -136,6 +142,7 @@ struct fmha_fwd_decode_pagedkv_traits_
     static constexpr bool kWaveSplit                 = kWaveSplit_;
     static constexpr ck_tile::index_t kNumSplits     = kNumSplits_;
     static constexpr bool kHasGroups                 = kHasGroups_;
+    static constexpr bool kHasQBlocks                = kHasQBlocks_;
 };
 
 template <typename Traits_, typename Arch_ = void>

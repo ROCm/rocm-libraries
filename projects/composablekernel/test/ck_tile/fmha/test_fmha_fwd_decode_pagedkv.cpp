@@ -75,6 +75,14 @@ std::vector<Param> params()
     add("full_b2_s10000", {2, 16, 1, {10000}, 0}, "coop/16x5");
     // one wave-split split where two would exceed 480 workgroups
     add("heads_wave_long", {16, 16, 16, {4200}, 0}, "wave/1");
+    // more than 16 query heads per kv head: one row of workgroups per 16 of them, the last one
+    // partly filled; both layouts, several clusters, several kv heads, 64-token pages
+    add("qblk_32_1_swa", {2, 32, 1, {8192}, 2048}, "coop/11");
+    add("qblk_40_1_full", {2, 40, 1, {8192}, 0}, "wave/16");
+    add("qblk_64_2_groups", {1, 64, 2, {20000}, 0}, "coop/15x7");
+    add("qblk_48_1_one_split", {3, 48, 1, {200, 77, 3}, 0}, "wave/1");
+    add("qblk_34_2_p64", {2, 34, 2, {5000}, 2048, 0, 0, "auto", 0, 64}, "coop/11");
+    add("qblk_fp16_32_1", {2, 32, 1, {3000}, 0, 0, 0, "auto", 0, 16, true}, "coop/16");
     // a device whose clusters hold fewer than 16 workgroups: no cluster above the cap, more
     // clusters instead; without clusters one split
     const auto capped = [](Case c, ck_tile::index_t cap) {

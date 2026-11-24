@@ -5,7 +5,7 @@
 
 pa_decode takes the arguments of aiter's FlyDSL pa_decode for the case it covers: one query
 token, bf16 or fp16 Q/O, head dim 128, fp8 e4m3 K/V with per-tensor scales, pages of 16, 64 or
-128 tokens, at most 16 query heads per kv head. Load libck_fmha_fwd_decode_pagedkv.so (target
+128 tokens. Load libck_fmha_fwd_decode_pagedkv.so (target
 ck_fmha_fwd_decode_pagedkv) from CK_FMHA_FWD_DECODE_PAGEDKV_LIB or the library search path.
 """
 
@@ -156,10 +156,8 @@ def pa_decode(
         raise ValueError(
             "value_cache must be [num_blocks, num_kv_heads, page_size // 16, 128, 16]"
         )
-    if nhead_q % nhead_k != 0 or nhead_q // nhead_k > 16:
-        raise ValueError(
-            "num_query_heads must be a multiple of num_kv_heads, at most 16 times"
-        )
+    if nhead_q % nhead_k != 0:
+        raise ValueError("num_query_heads must be a multiple of num_kv_heads")
     for t in (output, query, key_cache, value_cache, context_lengths):
         if not t.is_contiguous():
             raise ValueError(
@@ -223,14 +221,16 @@ def _launch(
     page,
 ):
     stream = torch.cuda.current_stream(device).cuda_stream
+    # a kv head takes one row of workgroups per 16 of its query heads
+    grid_rows = nhead_k * max(1, -(-(nhead_q // nhead_k) // 16))
     ws = _buffer(
         "workspace",
-        lib.ck_fmha_fwd_decode_pagedkv_max_workspace_bytes(batch, nhead_k),
+        lib.ck_fmha_fwd_decode_pagedkv_max_workspace_bytes(batch, grid_rows),
         device,
     )
     counters = _buffer(
         "counters",
-        lib.ck_fmha_fwd_decode_pagedkv_num_counters(batch, nhead_k) * 4,
+        lib.ck_fmha_fwd_decode_pagedkv_num_counters(batch, grid_rows) * 4,
         device,
     )
     err = lib.ck_fmha_fwd_decode_pagedkv(

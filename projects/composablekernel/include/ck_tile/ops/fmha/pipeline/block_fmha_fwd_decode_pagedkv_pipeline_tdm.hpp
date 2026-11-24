@@ -200,13 +200,15 @@ struct BlockFmhaFwdDecodePagedKVPipelineTdm
         }
     }
 
-    // q_ptr: [batch][nhead_q][kHeadDim]; the workgroup takes the num_rows = nhead_q / nhead_k
-    // query heads of kv head i_nhead_k of sequence i_batch
+    // q_ptr: [batch][nhead_q][kHeadDim]; kv head i_nhead_k of sequence i_batch has rows_per_head =
+    // nhead_q / nhead_k query heads, of which the workgroup takes num_rows from i_row0 on
     // k_ptr, v_ptr: the caches; block_table: the sequence's row of the block table
     // scale_s: softmax scale; *k_descale_ptr is folded into it, *v_descale_ptr left to the caller
     CK_TILE_DEVICE Result operator()(const QDataType* q_ptr,
                                      index_t i_batch,
                                      index_t nhead_q,
+                                     index_t rows_per_head,
+                                     index_t i_row0,
                                      index_t num_rows,
                                      const KDataType* k_ptr,
                                      const VDataType* v_ptr,
@@ -247,9 +249,10 @@ struct BlockFmhaFwdDecodePagedKVPipelineTdm
         // Q^T operand of row n: 16-byte d chunks 2i + h, quantized per row (absmax) below
         v4i qraw[8];
         {
-            const QDataType* qrow = q_ptr + (static_cast<long_index_t>(i_batch) * nhead_q +
-                                             i_nhead_k * num_rows + min(n, num_rows - 1)) *
-                                                kHeadDim;
+            const QDataType* qrow =
+                q_ptr + (static_cast<long_index_t>(i_batch) * nhead_q + i_nhead_k * rows_per_head +
+                         i_row0 + min(n, num_rows - 1)) *
+                            kHeadDim;
             for(index_t i = 0; i < 4; ++i)
             {
                 const index_t c = 2 * i + h;

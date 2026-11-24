@@ -91,9 +91,9 @@ inline Result run(const Case& c, bool validate, int warmup = 0, int repeat = 0)
         seqlens[b] = c.seqlen_k[std::min<size_t>(b, c.seqlen_k.size() - 1)];
     const index_t max_seqlen =
         std::max(c.max_seqlen_k, *std::max_element(seqlens.begin(), seqlens.end()));
-    if(c.nhead_k <= 0 || c.nhead % c.nhead_k != 0 || c.nhead / c.nhead_k > 16)
+    if(c.nhead_k <= 0 || c.nhead <= 0 || c.nhead % c.nhead_k != 0)
     {
-        res.error = "h / h_k must be an integer <= 16";
+        res.error = "h / h_k must be an integer";
         return res;
     }
 
@@ -103,11 +103,14 @@ inline Result run(const Case& c, bool validate, int warmup = 0, int repeat = 0)
         res.error = "page_size must be 16, 64 or 128";
         return res;
     }
+    // workgroup rows of the grid per sequence: one per kv head and 16 of its query heads
+    const index_t grid_rows =
+        c.nhead_k * ck_tile::fmha_fwd_decode_pagedkv_q_blocks(c.nhead, c.nhead_k);
     index_t max_cluster = ck_tile::get_max_cluster_size();
     if(c.max_cluster > 0)
         max_cluster = std::min(max_cluster, c.max_cluster);
     auto cfg = ck_tile::fmha_fwd_decode_pagedkv_config(
-        batch, c.nhead_k, max_seqlen, c.window, ps, max_cluster);
+        batch, grid_rows, max_seqlen, c.window, ps, max_cluster);
     if(c.layout == "coop" || c.layout == "wave")
         cfg.wave_split = c.layout == "wave";
     const index_t lo_align = ps > kPage ? 4 : 1;
@@ -143,13 +146,16 @@ inline Result run(const Case& c, bool validate, int warmup = 0, int repeat = 0)
         return (tok / 16) * kHdim * 16 + d * 16 + tok % 16;
     };
     const index_t gqa = c.nhead / c.nhead_k;
+    // needles are dealt to 16 classes of query rows at most (16 groups of 8 head dims); rows 16
+    // apart share a class
+    const index_t needle_classes = std::min<index_t>(gqa, kHdim / kNeedleDims);
     std::vector<uint16_t> q(static_cast<size_t>(batch) * c.nhead * kHdim);
     for(size_t i = 0; i < q.size(); ++i)
     {
         float x = 0.f;
         if(!c.needles)
             x = 2.f * uni(rng);
-        else if((i % kHdim) / kNeedleDims == (i / kHdim) % gqa)
+        else if((i % kHdim) / kNeedleDims == (i / kHdim) % gqa % needle_classes)
             x = 2.f;
         q[i] = c.fp16 ? ck_tile::bit_cast<uint16_t>(ck_tile::type_convert<ck_tile::fp16_t>(x))
                       : ck_tile::bit_cast<uint16_t>(ck_tile::type_convert<ck_tile::bf16_t>(x));
@@ -176,7 +182,8 @@ inline Result run(const Case& c, bool validate, int warmup = 0, int repeat = 0)
     const auto window_lo = [&](index_t sk) {
         return c.window > 0 ? std::max(0, sk - c.window) : 0;
     };
-    // needle tokens of each sequence, ascending; needle i belongs to row i % gqa of the kv head
+    // needle tokens of each sequence, ascending; needle i belongs to the rows of class i %
+    // needle_classes of the kv head
     std::vector<std::vector<index_t>> needles(batch);
     {
         size_t next = 0;
@@ -218,8 +225,9 @@ inline Result run(const Case& c, bool validate, int warmup = 0, int repeat = 0)
                                  c.nhead_k +
                              hk) *
                             page_bytes;
-                        const bool row_dim = d / kNeedleDims == static_cast<index_t>(i % gqa);
-                        const bool v_dim   = d == static_cast<index_t>(i / gqa % kHdim);
+                        const bool row_dim =
+                            d / kNeedleDims == static_cast<index_t>(i % needle_classes);
+                        const bool v_dim = d == static_cast<index_t>(i / needle_classes % kHdim);
                         k[base + k_off(n[i] % ps, d)] = row_dim ? kFp8ThirtyTwo : 0;
                         v[base + v_off(n[i] % ps, d)] = v_dim ? kFp8One : 0;
                     }
@@ -232,8 +240,8 @@ inline Result run(const Case& c, bool validate, int warmup = 0, int repeat = 0)
     ck_tile::DeviceMem bt_buf(block_table.size() * 4), sl_buf(seqlens32.size() * 4);
     ck_tile::DeviceMem o_buf(q.size() * 2), scale_buf(8);
     ck_tile::DeviceMem ws_buf(ck_tile::fmha_fwd_decode_pagedkv_workspace_bytes(
-        batch, c.nhead_k, cfg.num_splits, cfg.num_groups));
-    ck_tile::DeviceMem cnt_buf(ck_tile::fmha_fwd_decode_pagedkv_num_counters(batch, c.nhead_k) * 4);
+        batch, grid_rows, cfg.num_splits, cfg.num_groups));
+    ck_tile::DeviceMem cnt_buf(ck_tile::fmha_fwd_decode_pagedkv_num_counters(batch, grid_rows) * 4);
     HIP_CHECK_ERROR(hipMemset(ws_buf.GetDeviceBuffer(), 0xff, ws_buf.GetBufferSize()));
     cnt_buf.SetZero();
     q_buf.ToDevice(q.data());
@@ -341,7 +349,8 @@ inline Result run(const Case& c, bool validate, int warmup = 0, int repeat = 0)
                     ng += got * got;
                 }
                 index_t seen = 0;
-                for(size_t i = hq % gqa; i < needles[b].size(); i += gqa)
+                for(size_t i = hq % gqa % needle_classes; i < needles[b].size();
+                    i += needle_classes)
                     seen += needles[b][i] >= lo ? 1 : 0;
                 // A row of needles: a quarter of what one key lost or counted twice moves an
                 // element. Other rows carry the fp8 rounding of Q and P, a few percent of the

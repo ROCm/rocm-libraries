@@ -2872,11 +2872,13 @@ class TestFwdDecodePagedKVCodegen(unittest.TestCase):
                 k.F_pipeline.F_page_size,
                 k.F_pipeline.F_wave_split,
                 k.F_pipeline.F_groups,
+                k.F_pipeline.F_qblocks,
             )
             for k in kernels
         )
-        # bf16 / fp16 Q and O, three cache page sizes, both layouts, one or several clusters
-        self.assertEqual(len(variants), 2 * 3 * 2 * 2)
+        # bf16 / fp16 Q and O, three cache page sizes, both layouts, one or several clusters,
+        # up to or more than 16 query heads per kv head
+        self.assertEqual(len(variants), 2 * 3 * 2 * 2 * 2)
         for variant in variants:
             splits = sorted(
                 k.F_num_splits
@@ -2886,6 +2888,7 @@ class TestFwdDecodePagedKVCodegen(unittest.TestCase):
                     k.F_pipeline.F_page_size,
                     k.F_pipeline.F_wave_split,
                     k.F_pipeline.F_groups,
+                    k.F_pipeline.F_qblocks,
                 )
                 == variant
             )
@@ -2894,7 +2897,7 @@ class TestFwdDecodePagedKVCodegen(unittest.TestCase):
             self.assertRegex(
                 name,
                 r"^fmha_fwd_decode_pagedkv_d128_(bf16|fp16)_fp8kv_ps(16|64|128)_tdm_(coop|wsplit)"
-                r"_s\d+_n?groups$",
+                r"_s\d+_n?groups_n?qblk$",
             )
         # every instance is reachable from the API exactly once
         traits = re.findall(
@@ -2907,7 +2910,7 @@ class TestFwdDecodePagedKVCodegen(unittest.TestCase):
         _, kernels = get_fwd_decode_pagedkv_blobs(
             ["gfx1250"], "*_bf16_*_ps64_tdm_coop_*", 0, [-1]
         )
-        self.assertEqual(len(kernels), 2 * 16)
+        self.assertEqual(len(kernels), 2 * 2 * 16)
         self.assertTrue(
             all(
                 k.F_dtype == "bf16"

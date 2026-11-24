@@ -13,30 +13,33 @@
 
 extern "C" {
 
+// The size functions take grid_rows: the kv heads times the 16-head blocks of query heads per kv
+// head, num_kv_heads * ceil(num_query_heads / num_kv_heads / 16).
+
 // Bytes of scratch workspace for these sizes, 0 for invalid sizes.
 size_t ck_fmha_fwd_decode_pagedkv_workspace_bytes(
-    int batch, int nhead_k, int max_seqlen_k, int window, int page_size)
+    int batch, int grid_rows, int max_seqlen_k, int window, int page_size)
 {
     if(max_seqlen_k < 0 || (page_size != 16 && page_size != 64 && page_size != 128))
         return 0;
     const auto c = ck_tile::fmha_fwd_decode_pagedkv_config(
-        batch, nhead_k, max_seqlen_k, window, page_size, ck_tile::get_max_cluster_size());
+        batch, grid_rows, max_seqlen_k, window, page_size, ck_tile::get_max_cluster_size());
     return ck_tile::fmha_fwd_decode_pagedkv_workspace_bytes(
-        batch, nhead_k, c.num_splits, c.num_groups);
+        batch, grid_rows, c.num_splits, c.num_groups);
 }
 
 // An upper bound of ck_fmha_fwd_decode_pagedkv_workspace_bytes over all context lengths, windows
-// and page sizes; it grows with batch * nhead_k. 0 for invalid sizes.
-size_t ck_fmha_fwd_decode_pagedkv_max_workspace_bytes(int batch, int nhead_k)
+// and page sizes; it grows with batch * grid_rows. 0 for invalid sizes.
+size_t ck_fmha_fwd_decode_pagedkv_max_workspace_bytes(int batch, int grid_rows)
 {
     return ck_tile::fmha_fwd_decode_pagedkv_max_workspace_bytes(
-        batch, nhead_k, ck_tile::get_max_cluster_size());
+        batch, grid_rows, ck_tile::get_max_cluster_size());
 }
 
 // int32 counters for this batch; zero them once, calls of any shape share them (not concurrently).
-size_t ck_fmha_fwd_decode_pagedkv_num_counters(int batch, int nhead_k)
+size_t ck_fmha_fwd_decode_pagedkv_num_counters(int batch, int grid_rows)
 {
-    return ck_tile::fmha_fwd_decode_pagedkv_num_counters(batch, nhead_k);
+    return ck_tile::fmha_fwd_decode_pagedkv_num_counters(batch, grid_rows);
 }
 
 // q, o: [batch][nhead_q][128] bf16, or fp16 with qo_fp16 != 0; k, v: fp8 e4m3 caches in the
@@ -64,10 +67,15 @@ int ck_fmha_fwd_decode_pagedkv(const void* q,
                                float scale_s,
                                hipStream_t stream)
 {
-    if(batch <= 0 || nhead_k <= 0 || max_seqlen_k < 0)
+    if(batch <= 0 || nhead_k <= 0 || nhead_q <= 0 || max_seqlen_k < 0)
         return hipErrorInvalidValue;
     const auto c = ck_tile::fmha_fwd_decode_pagedkv_config(
-        batch, nhead_k, max_seqlen_k, window, page_size, ck_tile::get_max_cluster_size());
+        batch,
+        nhead_k * ck_tile::fmha_fwd_decode_pagedkv_q_blocks(nhead_q, nhead_k),
+        max_seqlen_k,
+        window,
+        page_size,
+        ck_tile::get_max_cluster_size());
 
     fmha_fwd_decode_pagedkv_args args{};
     args.q_ptr              = q;
