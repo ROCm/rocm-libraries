@@ -63,7 +63,7 @@ HIPBLASLT_PY_ROCM_VERSION=10.3.0a20261116 HIPBLASLT_PY_DEVICE=gfx942 \
   bash projects/hipblaslt/python/scripts/ci_lane.sh
 ```
 
-The gfx950 lane runs when a PR has the `ci:run-gfx950` label. See [TESTING.md](../TESTING.md#supported-configurations) for every lane.
+The gfx950 lane runs when a PR has the `ci:run-gfx950` label, and on a manual Component CI run. See [TESTING.md](../TESTING.md#supported-configurations) for every lane.
 
 ## Design
 

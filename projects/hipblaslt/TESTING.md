@@ -730,7 +730,7 @@ tracked as a gap.
 - The Python bindings lanes (`hipBLASLt Python bindings` in Component CI), when
   `projects/hipblaslt/python/` or the public headers change. They build the opt-in bindings
   against a pinned TheRock nightly and run their pytest suite: Linux CPU and gfx942 on every such
-  pull request, gfx950 with the `ci:run-gfx950` label, and Windows. The Linux lanes become trusted
+  pull request, gfx950 with the `ci:run-gfx950` label or on a manual run, and Windows. The Linux lanes become trusted
   gates after 20 green runs each (pull requests and `develop` pushes, at most one flake); until
   then the bindings job isn't part of `Component CI Summary`, so a failure shows on its own lane.
   The Windows lanes stay informational for good
@@ -931,7 +931,7 @@ the set of architectures the library supports or builds for.
 | Linux, gfx950 (MI350) | Benchmarks only | Nightly, in the rocPTS lane outside this repository | Non-gating, and not surfaced on a pull request. See [Performance and Benchmarking Testing](#performance-and-benchmarking-testing) |
 | Linux, gfx103X / gfx120X | Partial | Nightly, in TheRock's own nightly | |
 | Linux CPU, and Linux gfx942 | Python bindings suite | PR, when `projects/hipblaslt/python/` or the public headers change, via Component CI | Informational until 20 green runs per lane. Builds against the TheRock nightly pinned in `component-ci-hipblaslt-python.yml`, not against the PR's own hipBLASLt |
-| Linux, gfx950 | Python bindings suite | PR with the `ci:run-gfx950` label, or when the bindings' lanes change | Same pinned nightly |
+| Linux, gfx950 | Python bindings suite | PR with the `ci:run-gfx950` label, or a manual Component CI run | Same pinned nightly |
 | Windows CPU, and Windows gfx1151 | Python bindings build, import and CPU tests; GPU tests on gfx1151 | CPU on every bindings PR; GPU only when the lanes change or on a manual Component CI run | Never required checks |
 | Linux, gfx1250-strict | Client test suite and TensileLite common tests | Eligible PRs, nightly on develop, and manual dispatch | The [gfx1250 workflow](../../.github/workflows/gfx1250_hipblaslt_tensilelite_test.yml) (`gfx1250 HW hipBLASLt + TensileLite Tests`) checks non-draft PRs with an accepted organization label and relevant file changes. It verifies strict mode before testing. The client suite runs as 4 shards, then the large-memory cases one group per process; a large case that skips for lack of memory fails the job (`HIPBLASLT_TEST_FAIL_ON_MEMORY_SKIP=1`). The job summary lists each process's peak memory and every test that stopped for memory. See [Scoping test cases to architectures](#scoping-test-cases-to-architectures) |
 
@@ -995,7 +995,9 @@ The selected type is passed to the test runners for every architecture.
 Each architecture has one build and each library has a separate
 GPU job. Separately, `TheRock Multi-Arch CI ASAN` runs on every pull
 request to this repository with host-only ASAN, and builds full ASAN for its nightly and
-manually dispatched runs.
+manually dispatched runs. Neither runs for a pull request that changes only the Python bindings
+(`projects/hipblaslt/python/`), which `hipBLASLt ASAN CI`'s path filter and TheRock's skip list
+leave out; a pull request that also changes the library still gets both.
 
 | Sanitizer | What it catches | Where it runs | Gating |
 | --- | --- | --- | --- |
@@ -1933,6 +1935,7 @@ collected under the umbrella epic AIHPBLAS-5028.
 | Multi-GPU tests cover one feature, fused GEMM plus all-to-all, on two gfx950 GPUs | Low | High if hit | Math CI's `precheckin` runs the `*multi_gpu*` cases on pull requests | AIHPBLAS-4625 |
 | Three parallel enum-to-string tables can drift | Low | Medium | None automated | AIHPBLAS-3558 |
 | The Python bindings lanes compile and test against an installed hipBLASLt (a pinned TheRock nightly), so changes to its declarations or behavior reach these tests only after the pinned version is bumped. New status values are still caught on the PR that adds them | Medium | Medium | The lanes run when the public headers change, and the bindings' status check reads the PR's own hipblas-common.h | AIHPBLAS-5268 |
+| TheRock's CI path filter keeps only the new path of a renamed file, so moving a library source into `projects/hipblaslt/python/` could let the bindings' entry in `.github/skip-ci-config.toml` skip TheRock CI for that pull request | Low | High if hit | Any other library change in the same pull request still runs TheRock CI, and the gfx1250 gate reads both paths of a rename | AIHPBLAS-5276 |
 
 ## Owners and Review Cadence
 

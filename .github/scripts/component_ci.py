@@ -103,8 +103,9 @@ EXCLUSION_EXCEPTIONS = {
     ],
 }
 
-# A change to the bindings' lane definitions also runs their opt-in lanes (gfx950 and
-# Windows GPU), so the PR that edits a lane proves it still works.
+# A change to the bindings' lane definitions also runs their opt-in Windows GPU lane, so the PR
+# that edits a lane proves it still works. gfx950 machines are scarce, so gfx950 runs only with
+# its label or on a manual run.
 HIPBLASLT_PYTHON_ALL_LANES_PATHS = [
     ".github/workflows/component-ci-hipblaslt-python.yml",
     "projects/hipblaslt/python/scripts/ci_lane.sh",
