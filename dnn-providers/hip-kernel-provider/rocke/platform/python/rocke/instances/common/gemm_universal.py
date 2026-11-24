@@ -3635,6 +3635,10 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
         if cb and not _os_ra.environ.get("ROCKE_EXP_CLUSTER"):
             cb = False  # no cluster launch: the workgroup barrier is enough
         cw = int(_os_ra.environ.get("ROCKE_EXP_MX_RA_CW", "16"))
+        # ROCKE_EXP_MX_RA_REFILL_FIRST=1 (cluster barriers): in a tile's last
+        # K-atom, the cluster wait and the refill come before the next tile's
+        # head reads rather than after them.
+        refill_first = cb and _os_ra.environ.get("ROCKE_EXP_MX_RA_REFILL_FIRST") == "1"
         # ROCKE_EXP_MX_RA_CS=n: signal the cluster early, n WMMAs into the second
         # half of the K-atom before the last (as the mx_gemm prototype does),
         # without draining this wave's reads; -1 (default): after the barrier.
@@ -3766,6 +3770,28 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
                         if cs < 0:
                             b.inline_asm(_CL_SIGNAL0, "s,~{scc},~{memory}", [_tdm_wave_id])
                         fence()
+                        if refill_first:
+                            # Cluster wait and refill before the next tile's
+                            # reads, so the fill starts as early as possible.
+                            b.inline_asm("s_barrier_wait -3", "~{memory}")
+                            if stamp_on:
+                                st += _st_now()
+                                _st_store(k_cur, st)
+                            _refill(p, k_cur)
+                            if gl2_at_refill:
+                                _gl2_prefetch(k_cur)
+                            fence()
+                            na, nsa, nsb = rd_head(sp, sk)
+                            fence()
+                            wmmas(acc, a, b0, sa, sb, 0, bar_at)
+                            fence()
+                            nb0 = [rd_b(sp, sk, j) for j in range(half)]
+                            fence()
+                            wmmas(acc, a, b1, sa, sb, 1)
+                            fence()
+                            nb1 = [rd_b(sp, sk, half + j) for j in range(half)]
+                            a, sa, sb, b0, b1 = na, nsa, nsb, nb0, nb1
+                            continue
                         na, nsa, nsb = rd_head(sp, sk)
                         fence()
                         wait_at = min(bar_at + cw, half * mfmas_m)

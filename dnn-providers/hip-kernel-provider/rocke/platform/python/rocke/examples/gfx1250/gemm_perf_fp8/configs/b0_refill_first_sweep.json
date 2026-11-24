@@ -1,0 +1,125 @@
+{
+  "_comment": "mx_env_sweep.py config, B0 4096x4096x65536: the cluster wait and refill before the next tile's head reads (ROCKE_EXP_MX_RA_REFILL_FIRST=1, the order of the plain fp8 g1 kernel) for the MX best (mxpk0pf6) and the plain fp8 best (nb0pf6); g1 as the plain target. Cluster 4x4.",
+  "base_env": {
+    "ROCKE_EXP_MX": "1",
+    "ROCKE_EXP_MX_SWZ": "1",
+    "ROCKE_EXP_MX_SCALE_MC": "0",
+    "ROCKE_EXP_MX_KFENCE": "1",
+    "ROCKE_EXP_MX_SCALE_NOCLIP": "1",
+    "ROCKE_EXP_MC_SOLO0": "1"
+  },
+  "variants": [
+    {
+      "name": "mxpk0pf6",
+      "env": {
+        "ROCKE_EXP_MX_RA": "2",
+        "ROCKE_EXP_MX_RA_BAR": "0",
+        "ROCKE_EXP_TDM_SPLIT": "2",
+        "ROCKE_EXP_MX_RA_CB": "1",
+        "ROCKE_EXP_MX_RA_CW": "0",
+        "ROCKE_EXP_MX_RA_CS": "0",
+        "ROCKE_EXP_MX_RA_NOBRANCH": "1",
+        "ROCKE_EXP_GL2_PREFETCH": "6",
+        "ROCKE_EXP_GL2_CLUSTER": "2",
+        "ROCKE_EXP_MX_RA_NB1": "0",
+        "ROCKE_EXP_EPI_BATCH": "64",
+        "ROCKE_EXP_MX_RA_PRO": "1",
+        "ROCKE_EXP_GL2_SCALES": "1",
+        "ROCKE_EXP_MX_SCALE_PACK": "1"
+      }
+    },
+    {
+      "name": "mxpk0pf6rf",
+      "env": {
+        "ROCKE_EXP_MX_RA": "2",
+        "ROCKE_EXP_MX_RA_BAR": "0",
+        "ROCKE_EXP_TDM_SPLIT": "2",
+        "ROCKE_EXP_MX_RA_CB": "1",
+        "ROCKE_EXP_MX_RA_CW": "0",
+        "ROCKE_EXP_MX_RA_CS": "0",
+        "ROCKE_EXP_MX_RA_NOBRANCH": "1",
+        "ROCKE_EXP_GL2_PREFETCH": "6",
+        "ROCKE_EXP_GL2_CLUSTER": "2",
+        "ROCKE_EXP_MX_RA_NB1": "0",
+        "ROCKE_EXP_EPI_BATCH": "64",
+        "ROCKE_EXP_MX_RA_PRO": "1",
+        "ROCKE_EXP_GL2_SCALES": "1",
+        "ROCKE_EXP_MX_SCALE_PACK": "1",
+        "ROCKE_EXP_MX_RA_REFILL_FIRST": "1"
+      }
+    },
+    {
+      "name": "nb0pf6",
+      "env": {
+        "ROCKE_EXP_MX_RA": "2",
+        "ROCKE_EXP_MX_RA_BAR": "0",
+        "ROCKE_EXP_TDM_SPLIT": "2",
+        "ROCKE_EXP_MX_RA_CB": "1",
+        "ROCKE_EXP_MX_RA_CW": "0",
+        "ROCKE_EXP_MX_RA_CS": "0",
+        "ROCKE_EXP_MX_RA_NOBRANCH": "1",
+        "ROCKE_EXP_GL2_PREFETCH": "6",
+        "ROCKE_EXP_GL2_CLUSTER": "1",
+        "ROCKE_EXP_MX_RA_NB1": "0",
+        "ROCKE_EXP_EPI_BATCH": "64",
+        "ROCKE_EXP_MX_RA_PRO": "1",
+        "ROCKE_EXP_MX": ""
+      }
+    },
+    {
+      "name": "nb0pf6rf",
+      "env": {
+        "ROCKE_EXP_MX_RA": "2",
+        "ROCKE_EXP_MX_RA_BAR": "0",
+        "ROCKE_EXP_TDM_SPLIT": "2",
+        "ROCKE_EXP_MX_RA_CB": "1",
+        "ROCKE_EXP_MX_RA_CW": "0",
+        "ROCKE_EXP_MX_RA_CS": "0",
+        "ROCKE_EXP_MX_RA_NOBRANCH": "1",
+        "ROCKE_EXP_GL2_PREFETCH": "6",
+        "ROCKE_EXP_GL2_CLUSTER": "1",
+        "ROCKE_EXP_MX_RA_NB1": "0",
+        "ROCKE_EXP_EPI_BATCH": "64",
+        "ROCKE_EXP_MX_RA_PRO": "1",
+        "ROCKE_EXP_MX": "",
+        "ROCKE_EXP_MX_RA_REFILL_FIRST": "1"
+      }
+    },
+    {
+      "name": "g1",
+      "env": {
+        "ROCKE_EXP_MX_RA": "2",
+        "ROCKE_EXP_MX_RA_BAR": "0",
+        "ROCKE_EXP_TDM_SPLIT": "2",
+        "ROCKE_EXP_MX_RA_CB": "1",
+        "ROCKE_EXP_MX_RA_CW": "0",
+        "ROCKE_EXP_MX_RA_CS": "0",
+        "ROCKE_EXP_MX_RA_NOBRANCH": "1",
+        "ROCKE_EXP_GL2_PREFETCH": "6",
+        "ROCKE_EXP_GL2_CLUSTER": "1",
+        "ROCKE_EXP_MX_RA_NB1": "0",
+        "ROCKE_EXP_EPI_BATCH": "64",
+        "ROCKE_EXP_MX_RA_PRO": "1",
+        "ROCKE_EXP_MX": "",
+        "ROCKE_EXP_MX_RA_ILV": "1",
+        "ROCKE_EXP_MX_RA_ILVG": "1"
+      }
+    }
+  ],
+  "arms": [
+    {
+      "name": "c4x4",
+      "cluster": "4,4"
+    }
+  ],
+  "shapes": [
+    [
+      4096,
+      4096,
+      65536
+    ]
+  ],
+  "rounds": 5,
+  "warmup": 50,
+  "repeat": 100
+}
