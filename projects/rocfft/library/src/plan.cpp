@@ -908,6 +908,7 @@ static std::unique_ptr<ExecPlan> transpose_brick(int                        loca
         return execPlanMultiItem;
 
     rocfft_scoped_device dev(location.device);
+    execPlan.rootPlan->getLeafNode().BuildKernelView();
     execPlan.rootPlan->CreateDevKernelArgs();
 
     execPlan.rootPlan->comments.emplace_back(std::move(description));
@@ -1555,7 +1556,13 @@ std::unique_ptr<ExecPlan>
 
         // Plan is compiled, no need to alloc twiddles + kargs etc
         if(rocfft_getenv("ROCFFT_INTERNAL_COMPILE_ONLY") == "1")
+        {
+            // Grid/block dimensions do not require twiddles. The dry run
+            // can omit the dynamic LDS bytes occupied by large twiddles.
+            if(!execPlan.kernelNames.empty())
+                SetupPlanGrid(execPlan);
             return execPlanMultiItem;
+        }
 
         if(!PlanPowX(execPlan)) // PlanPowX enqueues the GPU kernels by function
         {
@@ -5560,7 +5567,7 @@ void TreeNode::DetermineBufferMemory(size_t& tmpBufSize,
             = blue && blue->get_conv_buf_layout(io_data_label::OUTPUT)
                   ? blue->get_conv_buf_layout(io_data_label::OUTPUT)->buffer_element_count()
                         + (obOut == OB_TEMP_BLUESTEIN ? blue->get_padded_length() : 0)
-                  : compute_ptrdiff(outputLength, outStride, batch, oDist);
+                  : getLeafNode().GetKernelView().output_elements;
 
         if(scheme == CS_KERNEL_CHIRP && blue)
             chirpSize = std::max(blue->get_padded_length(), chirpSize);
@@ -6171,8 +6178,8 @@ std::unique_ptr<SchemeTree>
         execPlan.solution_kernels.push_back(kernel_node.kernel_key);
         curScheme->numKernels = 1;
 
-        // Keep the references, and after buffer-assignment and collapse-batch-dim,
-        // we can save some info back to the kernel-configurations
+        // Keep the references, so we can save the prepared kernel geometry
+        // back to the kernel configurations after buffer assignment.
         if(TuningBenchmarker::GetSingleton().IsProcessingTuning())
         {
             execPlan.sol_kernel_configs.push_back(&(kernel_node.kernel_key.kernel_config));
@@ -6278,8 +6285,8 @@ void ProcessNode(ExecPlan& execPlan)
     // add padding if necessary
     policy.PadPlan(execPlan);
 
-    // Collapse high dims on leaf nodes where possible
-    execPlan.rootPlan->CollapseContiguousDims();
+    for(auto* node : execPlan.execSeq)
+        node->getLeafNode().BuildKernelView();
 
     // Check the buffer, param and tree integrity, Note we do this after fusion
     // rootScheme might be nullptr and solution_kernels might be empty (when no solution)
@@ -6351,6 +6358,34 @@ void PrintNode(rocfft_ostream& os, const ExecPlan& execPlan, const int indent, b
         os << indentStr << "Kernel names:\n";
         for(const auto& name : execPlan.kernelNames)
             os << indentStr << "  " << name << '\n';
+
+        const auto print_vector = [&os](std::span<const size_t> values) {
+            for(size_t index = 0; index < values.size(); ++index)
+            {
+                if(index != 0)
+                    os << ',';
+                os << values[index];
+            }
+        };
+        for(const auto* node : execPlan.execSeq)
+        {
+            const auto& view = node->getLeafNode().GetKernelView();
+            os << indentStr << "Kernel args: " << PrintScheme(node->scheme)
+               << " dim=" << node->dimension << " kint=" << (view.itype == KIntType::U32 ? 32 : 64)
+               << " batch=" << view.batch << " idist=" << view.iDist << " odist=" << view.oDist
+               << " length=";
+            print_vector(view.lengths());
+            os << " output=";
+            print_vector(view.output_lengths());
+            os << " istride=";
+            print_vector(view.in_strides());
+            os << " ostride=";
+            print_vector(view.out_strides());
+            os << '\n';
+        }
+        os << indentStr << "Work buffer parts: " << execPlan.tmpWorkBufSize << ' '
+           << execPlan.copyWorkBufSize << ' ' << execPlan.blueWorkBufSize << ' '
+           << execPlan.chirpWorkBufSize << '\n';
     }
 
     os << indentStr << "GridParams\n";

@@ -915,6 +915,7 @@ private:
 };
 
 bool PlanPowX(ExecPlan& execPlan);
+void SetupPlanGrid(ExecPlan& execPlan);
 bool GetTuningKernelInfo(ExecPlan& execPlan);
 void RuntimeCompilePlan(ExecPlan& execPlan);
 

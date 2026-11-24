@@ -593,7 +593,7 @@ INSTANTIATE_TEST_SUITE_P(
     ::testing::ValuesIn(param_generator_token(test_prob, fused_bluestein_non_unit_stride_tokens)),
     accuracy_test::TestName);
 
-// MaxKernelStride boundary. batch 1 => dist contributes nothing to ptrdiff,
+// Kernel stride boundary. batch 1 => dist contributes nothing to ptrdiff,
 // so buffers stay tiny while the packed dist crosses UINT32_MAX.
 // 4294967295 stays i32; 4294967296 flips to i64.
 const auto adhoc_kint_stride_boundary_tokens = {
@@ -646,7 +646,7 @@ INSTANTIATE_TEST_SUITE_P(
     ::testing::ValuesIn(param_generator_token(test_prob, adhoc_kint_stride_boundary_tokens)),
     accuracy_test::TestName);
 
-// MaxKernelIndex boundary. Scale batch on a fully packed layout.
+// Kernel offset boundary. Scale batch on a fully packed layout.
 // Each case allocates ~34.4 GB of VRAM for the padded side only;
 // the other side stays packed and is a few megabytes.
 const auto adhoc_kint_index_tokens = {

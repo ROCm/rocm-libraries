@@ -40,7 +40,8 @@ RTCKernel::RTCGenerator RTCKernelStockham::generate_from_node(const LeafNode&   
     std::optional<StockhamGeneratorSpecs> specs2d;
     StockhamPartialPassParams             pp_params;
 
-    KIntType itype = node.GetKIntType();
+    const auto& view  = node.GetKernelView();
+    KIntType    itype = view.itype;
 
     // SBRC variants look in the function pool for plain BLOCK_RC to
     // learn the block width, then decide on the transpose type once
@@ -99,7 +100,7 @@ RTCKernel::RTCGenerator RTCKernelStockham::generate_from_node(const LeafNode&   
                                              kernel->pp_params.pp_factors_curr.end());
             pp_params.pp_factors_other.assign(kernel->pp_params.pp_factors_other.begin(),
                                               kernel->pp_params.pp_factors_other.end());
-            pp_params.parent_length.assign(node.length.begin(), node.length.end());
+            pp_params.parent_length.assign(view.lengths().begin(), view.lengths().end());
             pp_params.node_length = pp_params.parent_length;
         }
 
@@ -115,7 +116,7 @@ RTCKernel::RTCGenerator RTCKernelStockham::generate_from_node(const LeafNode&   
         auto precision = static_cast<unsigned int>(node.precision);
 
         // need to break down factors into first dim and second dim
-        size_t len0_remain = node.length[0];
+        size_t len0_remain = view.lengths()[0];
         for(auto& f : kernel->factors)
         {
             len0_remain /= f;
@@ -174,7 +175,7 @@ RTCKernel::RTCGenerator RTCKernelStockham::generate_from_node(const LeafNode&   
 
     // SBRC specializes on the tiled output axis.
     bool unit_stride
-        = node.inStride.front() == 1 && node.outStride[node.LegacySBRCOutputAxis(0)] == 1;
+        = view.in_strides().front() == 1 && view.out_strides()[node.LegacySBRCOutputAxis(0)] == 1;
 
     specs->transform_type = node.GetRootPlanTransformType();
 
@@ -252,6 +253,7 @@ RTCKernelArgs RTCKernelStockham::get_launch_args(DeviceCallIn& data)
 {
     // construct arguments to pass to the kernel
     RTCKernelArgs kargs = make_launch_args();
+    const auto&   view  = data.node->GetKernelView();
 
     // twiddles
     if(data.node->scheme == CS_KERNEL_STOCKHAM_PP
@@ -266,7 +268,7 @@ RTCKernelArgs RTCKernelStockham::get_launch_args(DeviceCallIn& data)
        || data.node->scheme == CS_KERNEL_STOCKHAM_PP_BLOCK_CC)
         kargs.append_ptr(data.node->twiddles_large);
     if(!hardcoded_dim)
-        kargs.append_kint(data.node->length.size(), KIntType::U32);
+        kargs.append_kint(view.lengths().size(), KIntType::U32);
     // lengths
     kargs.append_ptr(data.node->devKernArg.lengths());
     // stride in/out
@@ -274,7 +276,7 @@ RTCKernelArgs RTCKernelStockham::get_launch_args(DeviceCallIn& data)
     if(data.node->placement == rocfft_placement_notinplace)
         kargs.append_ptr(data.node->devKernArg.stride_out());
     // nbatch
-    kargs.append_kint(data.node->batch);
+    kargs.append_kint(view.batch);
     // callback params
     kargs.append_ptr(data.callbacks.load_cb_fn);
     kargs.append_ptr(data.callbacks.load_cb_data);

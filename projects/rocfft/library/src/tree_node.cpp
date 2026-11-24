@@ -287,7 +287,7 @@ void LeafNode::Print(rocfft_ostream& os, int indent, bool detailed) const
 
 bool LeafNode::CreateDevKernelArgs()
 {
-    return devKernArg.create(length, inStride, outStride, iDist, oDist, GetKIntType());
+    return devKernArg.create(kernelView);
 }
 
 bool LeafNode::CreateDeviceResources()
@@ -355,7 +355,8 @@ void LeafNode::SetupGridParam(GridParam& gp)
             // consistency. Eventually, we need better solution arch
             // specific.
             bool double_half_lds_alloc = false;
-            if(is_device_gcn_arch(deviceProp, "gfx90a") && (length[0] == 343 || length[0] == 49))
+            if(is_device_gcn_arch(deviceProp, "gfx90a")
+               && (kernelView.lengths()[0] == 343 || kernelView.lengths()[0] == 49))
             {
                 double_half_lds_alloc = true;
             }
@@ -422,7 +423,7 @@ TreeNode::OutputAxisOrder TransposeNode::PackedOutputOrder(ComputeScheme scheme)
     }
 }
 
-void TreeNode::PermuteOutputAxes(OutputAxisOrder order, std::vector<size_t>& axes)
+void TreeNode::PermuteOutputAxes(OutputAxisOrder order, std::span<size_t> axes)
 {
     switch(order)
     {
@@ -437,130 +438,115 @@ void TreeNode::PermuteOutputAxes(OutputAxisOrder order, std::vector<size_t>& axe
     }
 }
 
-void TreeNode::CollapseContiguousDims()
+void LeafNode::BuildKernelView()
 {
-    assert(outputLength.size() == length.size());
-    // collapse children
-    for(auto& child : childNodes)
-        child->CollapseContiguousDims();
-
-    auto collapsible_axes = CollapsibleDims();
-    if(collapsible_axes.empty())
-        return;
-    // add batch dimension (implicitly understood herein as length.size())
-    collapsible_axes.push_back(length.size());
-
-    // TODO: replace members TreeNode::length, TreeNode::outputLength, TreeNode::inStride,
-    // TreeNode::outStride, etc. by data_set_t instances and introduce a (static)
-    //    data_set_t::compress_batch_axes_consistently_in(data_set_t& layout_0,
-    //                                                       data_set_t& layout_1
-    //                                                       [, ...]);
-    // which handle compression of batch axes consistently across two (or more) data layouts.
-
-    // Go over all couples of entries in collapsible_axes and collapse axis of smaller index
-    // into axis of larger index (so that batch dimension is never removed), iff collapsing
-    // is valid for both the input and output node's data layouts for the considered couple
-    // of axes
-    // Develop tested collapse eligibility against the packed output spans for
-    // these nodes. Keep that choice; additional collapses can change kernels.
-    auto collapseOutputLength = std::move(outputLength);
-    PermuteOutputAxes(legacyOutputOrder, collapseOutputLength);
-    auto first_axis_it = collapsible_axes.begin();
-    while(first_axis_it != collapsible_axes.end())
+    // Preserve the old division between kernel length axes and axes whose
+    // transforms can be treated as batches. In particular, partial passes
+    // and the multi-kernel fused Bluestein stages use fixed argument axes.
+    size_t length_rank = length.size();
+    switch(scheme)
     {
-        auto second_axis_it = collapsible_axes.begin();
-        bool collapsed_some = false;
-        while(!collapsed_some && second_axis_it != collapsible_axes.end())
-        {
-            if(second_axis_it == first_axis_it)
-            {
-                second_axis_it++;
-                continue;
-            }
-            // batch (along with iDist and oDist) cannot be erased ever, so the logic below
-            // always compresses collapsible couples of axes by removing the axis of lower
-            // dimension index (i.e., not "batch", "iDist", "oDist", etc.) by design, even
-            // if "natural" compression would be the other way around...
-            const auto keep_idx = std::max(*first_axis_it, *second_axis_it);
-            const auto del_idx  = std::min(*first_axis_it, *second_axis_it);
-            // note: del_idx < length.size() by construction
-
-            auto& keep_ilength = keep_idx < length.size() ? length[keep_idx] : batch;
-            auto& keep_istride = keep_idx < length.size() ? inStride[keep_idx] : iDist;
-            auto& keep_ostride = keep_idx < length.size() ? outStride[keep_idx] : oDist;
-            auto& keep_olength = keep_idx < length.size() ? collapseOutputLength[keep_idx] : batch;
-            const auto& del_ilength = del_idx < length.size() ? length[del_idx] : batch;
-            const auto& del_istride = del_idx < length.size() ? inStride[del_idx] : iDist;
-            const auto& del_olength = collapseOutputLength[del_idx];
-            const auto& del_ostride = del_idx < length.size() ? outStride[del_idx] : oDist;
-            const bool  keep_is_multiple_of_del
-                = (keep_ilength == 1 || keep_istride == del_istride * del_ilength)
-                  && (keep_olength == 1 || keep_ostride == del_ostride * del_olength);
-            const bool del_is_multiple_of_keep
-                = (del_ilength == 1 || del_istride == keep_istride * keep_ilength)
-                  && (del_olength == 1 || del_ostride == keep_ostride * keep_olength);
-            if(!keep_is_multiple_of_del && !del_is_multiple_of_keep)
-            {
-                second_axis_it++;
-                continue;
-            }
-            if(keep_idx == length.size() && del_ilength != del_olength)
-            {
-                // batch size to keep (unique variable) but multipliers differ...
-                // no can/should do compression
-                second_axis_it++;
-                continue;
-            }
-
-            // add to comment list:
-            std::stringstream msg;
-            msg << "collapsing contiguous high length " << del_ilength << " into "
-                << (keep_idx == length.size() ? "batch " : "other high length ") << keep_ilength;
-            // do the collapse
-            if(keep_is_multiple_of_del)
-            {
-                keep_istride = del_istride;
-                keep_ostride = del_ostride;
-            }
-            keep_ilength *= del_ilength;
-            if(keep_idx < length.size())
-                keep_olength *= del_olength;
-            // effectively erase the axis of index del_idx
-            length.erase(length.begin() + del_idx);
-            inStride.erase(inStride.begin() + del_idx);
-            collapseOutputLength.erase(collapseOutputLength.begin() + del_idx);
-            outStride.erase(outStride.begin() + del_idx);
-            if(del_idx == *first_axis_it)
-                collapsible_axes.erase(first_axis_it);
-            else
-                collapsible_axes.erase(second_axis_it);
-            for(auto& axis_idx : collapsible_axes)
-            {
-                if(axis_idx > del_idx)
-                    axis_idx--;
-            }
-            msg << ". Resulting lengths and batch are: ";
-            for(const auto& len : length)
-                msg << len << ", ";
-            msg << batch;
-            comments.push_back(msg.str());
-            collapsed_some = true;
-        }
-        if(collapsed_some)
-        {
-            // some compression of axes did happen, which may enable
-            // new compressions... restart from scratch
-            first_axis_it = collapsible_axes.begin();
-        }
-        else
-            first_axis_it++;
+    case CS_KERNEL_STOCKHAM:
+    case CS_KERNEL_STOCKHAM_BLOCK_CC:
+        if(GetBluesteinType() != BT_MULTI_KERNEL_FUSED)
+            length_rank = scheme == CS_KERNEL_STOCKHAM ? 1 : 2;
+        break;
+    case CS_KERNEL_R_TO_CMPLX:
+    case CS_KERNEL_R_TO_CMPLX_TRANSPOSE:
+    case CS_KERNEL_CMPLX_TO_R:
+    case CS_KERNEL_TRANSPOSE_CMPLX_TO_R:
+        length_rank = std::min(length_rank, dimension);
+        break;
+    default:
+        break;
     }
 
-    // The packed-order nodes do not change shape. Restore their output spans
-    // in input-axis order, including any axes collapsed above.
-    if(legacyOutputOrder != OutputAxisOrder::IDENTITY)
-        std::copy(length.begin(), length.end(), collapseOutputLength.begin());
-    outputLength = std::move(collapseOutputLength);
+    const auto batch_rank = length.size() + 1 - length_rank;
+    std::array layouts{data_set_t::full_range(length, inStride, batch, iDist, batch_rank),
+                       data_set_t::full_range(outputLength, outStride, batch, oDist, batch_rank)};
+    auto& [in, out] = layouts;
+    if(batch_rank > 1)
+    {
+        const bool packed = legacyOutputOrder != OutputAxisOrder::IDENTITY;
+        if(packed)
+        {
+            // AIFFT-591 preserved the old eligibility test for these fusions.
+            // Only the spans (not the output strides) are temporarily permuted.
+            std::array<size_t, 3> spans;
+            const auto            count = std::min(spans.size(), outputLength.size());
+            std::copy_n(outputLength.begin(), count, spans.begin());
+            PermuteOutputAxes(legacyOutputOrder, {spans.data(), count});
+            for(size_t axis = 0; axis < count; ++axis)
+                out[axis].upper = spans[axis];
+        }
+        data_set_t::compress_batch_axes_consistently_in(layouts, true);
+        if(packed)
+            for(size_t axis = 0; axis < out.get_full_rank() - 1; ++axis)
+                out[axis].upper = in[axis].upper;
+    }
+
+    auto&      view = kernelView;
+    const auto rank = in.get_full_rank() - 1;
+    if(rank >= KERN_ARGS_ARRAY_WIDTH)
+        throw std::runtime_error("too many dimensions for kernel argument buffer");
+    view.rank  = rank;
+    view.batch = in[rank].logical_span();
+    view.iDist = in[rank].inbuffer_stride;
+    view.oDist = out[rank].inbuffer_stride;
+    for(size_t axis = 0; axis < rank; ++axis)
+    {
+        view.input_lengths[axis]  = in[axis].logical_span();
+        view.output_spans[axis]   = out[axis].logical_span();
+        view.input_strides[axis]  = in[axis].inbuffer_stride;
+        view.output_strides[axis] = out[axis].inbuffer_stride;
+    }
+
+    // The 3D fused real transpose also handles 2D plans. A unit axis with
+    // an already-present stride does not increase the index width.
+    if(scheme == CS_KERNEL_STOCKHAM_R_TO_CMPLX_TRANSPOSE_Z_XY && rank == 2)
+    {
+        view.input_lengths[2] = view.output_spans[2] = 1;
+        view.input_strides[2]                        = view.input_strides[1];
+        view.output_strides[2]                       = view.output_strides[0];
+        ++view.rank;
+    }
+
+    // Base pointer offsets are applied by powX before launch. Include the
+    // strides themselves, even when the corresponding axis has unit span.
+    const auto last_offset = [](const data_set_t& d) {
+        return d.is_empty() ? std::numeric_limits<size_t>::max() : d.max_offset();
+    };
+    const auto output_offset = last_offset(out);
+    view.output_elements     = output_offset + 1;
+    auto limit = std::max({last_offset(in), output_offset, in.max_stride(), out.max_stride()});
+    const auto fuse_type = GetBluesteinFuseType();
+    if(fuse_type != BFT_NONE)
+        limit = std::max(limit, blue->get_padded_length());
+    if(blue)
+    {
+        for(auto io : {io_data_label::INPUT, io_data_label::OUTPUT})
+        {
+            const auto& conv = blue->get_conv_buf_layout(io);
+            if(!conv)
+                continue;
+            // These two operations skip the chirp stored at the beginning of
+            // the convolution buffer. Only axes 2, 3 and the dist are packed.
+            const bool skip_chirp
+                = (io == io_data_label::INPUT && fuse_type == BFT_INV_CHIRP_MUL
+                   && scheme == CS_KERNEL_STOCKHAM_BLOCK_CC)
+                  || (io == io_data_label::OUTPUT && fuse_type == BFT_FWD_CHIRP_MUL
+                      && scheme == CS_KERNEL_STOCKHAM_BLOCK_RC);
+            limit = std::max(limit,
+                             last_offset(*conv) + (skip_chirp ? blue->get_padded_length() : 0));
+            if(fuse_type != BFT_NONE)
+            {
+                for(size_t axis = 2; axis < conv->get_len_rank() && axis < 4; ++axis)
+                    limit = std::max(limit, (*conv)[axis].inbuffer_stride);
+                limit = std::max(limit, conv->distance());
+            }
+        }
+    }
+    view.itype = limit > UINT32_MAX ? KIntType::U64 : KIntType::U32;
 }
 
 bool TreeNode::IsBluesteinChirpSetup()

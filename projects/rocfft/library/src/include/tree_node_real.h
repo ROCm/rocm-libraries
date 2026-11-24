@@ -247,9 +247,6 @@ protected:
     size_t GetTwiddleTableLength() override;
     size_t GetTwiddleTableLengthLimit() override;
     void   SetupGridParam_internal(GridParam& gp) override{};
-
-public:
-    std::vector<size_t> CollapsibleDims() override;
 };
 
 #endif // TREE_NODE_REAL_H

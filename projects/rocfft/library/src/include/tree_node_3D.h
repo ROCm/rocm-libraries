@@ -184,7 +184,7 @@ public:
     {
         // This is 3D kernels, but are sometimes shoehorned
         // into 2D plans.  Make sure they get at least 3 dims.
-        auto ret = TreeNode::GetStaticDim();
+        auto ret = LeafNode::GetStaticDim();
         ret      = (ret == 2) ? 3 : ret;
         return ret;
     }
@@ -273,9 +273,6 @@ protected:
         // return length[1] * length[2];
         return length[1];
     }
-
-public:
-    bool CreateDevKernelArgs() override;
 };
 
 #endif // TREE_NODE_3D_H

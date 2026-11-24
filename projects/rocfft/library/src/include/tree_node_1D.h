@@ -93,7 +93,6 @@ protected:
 
 public:
     bool                CreateDeviceResources() override;
-    std::vector<size_t> CollapsibleDims() override;
 };
 
 /*****************************************************
@@ -113,7 +112,6 @@ protected:
 
 public:
     bool                CreateDeviceResources() override;
-    std::vector<size_t> CollapsibleDims() override;
 };
 
 /*****************************************************
@@ -156,7 +154,6 @@ public:
     {
         return true;
     }
-    std::vector<size_t> CollapsibleDims() override;
 };
 
 /*****************************************************
@@ -176,7 +173,6 @@ protected:
 
 public:
     bool                CreateDeviceResources() override;
-    std::vector<size_t> CollapsibleDims() override;
 };
 
 /*****************************************************

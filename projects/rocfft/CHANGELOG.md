@@ -9,6 +9,7 @@ Documentation for rocFFT is available at
 
 * `rocfft-test --dump_plans <dir>` writes a plan tree for each selected accuracy test without executing the transforms.
   Use `--dump_plans_skip <file>` to mark known hangs without attempting to create those plans.
+  Dumps include each leaf's prepared kernel arguments and launch dimensions.
 
 * Extended the optional RCCL backend to multi-process plans when built with both `ROCFFT_RCCL_ENABLE` and 
   `ROCFFT_MPI_ENABLE`. RCCL is used for the transpose data plane when every MPI rank's bricks use exactly
@@ -26,6 +27,7 @@ Documentation for rocFFT is available at
   output (previously, only the side with a field set was checked).
 * The planner tracks each node's input and output axes in the same order. Transposes are
   represented by output strides, and existing solution-map keys remain compatible.
+* Leaf kernels use a separate view for compressed batch axes instead of rewriting the planning tree.
 
 ### Resolved issues
 

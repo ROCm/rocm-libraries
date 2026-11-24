@@ -28,22 +28,11 @@
 #include <string>
 
 // malloc device buffer; copy host buffer to device buffer
-bool KernelArgsBuffer::create(const std::vector<size_t>& length,
-                              const std::vector<size_t>& inStride,
-                              const std::vector<size_t>& outStride,
-                              size_t                     iDist,
-                              size_t                     oDist,
-                              KIntType                   itype)
+bool KernelArgsBuffer::create(const KernelView& view)
 {
-    assert(length.size() == inStride.size());
-    assert(length.size() == outStride.size());
-
-    // the dist goes one past the last stride, so the arrays need to
-    // hold dim + 1 values
-    if(length.size() >= KERN_ARGS_ARRAY_WIDTH)
-        throw std::runtime_error("too many dimensions for kernel argument buffer");
-
-    this->itype = itype;
+    const auto length = view.lengths();
+    const auto itype  = view.itype;
+    this->itype       = itype;
 
     const size_t total_bytes = lengths_bytes() + 2 * strides_bytes();
 
@@ -68,7 +57,7 @@ bool KernelArgsBuffer::create(const std::vector<size_t>& length,
 
     // NB: iDist is right after the last inStride[dim-1], i.e. inStride[dim] = batch-in-stride
     //     oDist is right after the last outStride[dim-1], i.e. outStride[dim] = batch-out-stride
-    auto pack_strides = [&](size_t array_idx, const std::vector<size_t>& stride, size_t dist) {
+    auto pack_strides = [&](size_t array_idx, std::span<const size_t> stride, size_t dist) {
         char* array = host.data() + lengths_bytes() + array_idx * strides_bytes();
 
         for(size_t i = 0; i < stride.size(); ++i)
@@ -76,8 +65,8 @@ bool KernelArgsBuffer::create(const std::vector<size_t>& length,
         store(array, stride.size(), dist, "dist");
     };
 
-    pack_strides(0, inStride, iDist);
-    pack_strides(1, outStride, oDist);
+    pack_strides(0, view.in_strides(), view.iDist);
+    pack_strides(1, view.out_strides(), view.oDist);
 
     if(hipMemcpy(buf.data(), host.data(), total_bytes, hipMemcpyHostToDevice) != hipSuccess)
         buf.free();
