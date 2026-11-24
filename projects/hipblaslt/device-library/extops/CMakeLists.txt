@@ -11,12 +11,8 @@ message(STATUS "Architectures to process: ${archs}")
 
 set(previous_target "")
 
-# The environment target orders unpacking and native builds. Their file
-# dependencies also invalidate existing assembly after either input changes.
-set(_extop_codegen_dependencies ${HIPBLASLT_PYTHON_DEPS} ${HIPBLASLT_PYTHON_INPUTS})
-if(TARGET _rocisa)
-    list(APPEND _extop_codegen_dependencies _rocisa)
-endif()
+tensilelite_generator_command(tensilelite-generator
+    _extop_python_command _extop_codegen_dependencies)
 
 foreach(arch IN LISTS archs)
     message(STATUS "hipblaslt device library extops: Configuring target for architecture ${arch} for hipblasltExtOpLibrary")
@@ -69,17 +65,17 @@ foreach(arch IN LISTS archs)
             "${CMAKE_CURRENT_BINARY_DIR}/A_H_H_256_4_${arch}.s"
             "${CMAKE_CURRENT_BINARY_DIR}/A_H_S_256_4_${arch}.s"
             "${CMAKE_CURRENT_BINARY_DIR}/A_S_H_256_4_${arch}.s"
-        COMMAND ${HIPBLASLT_PYTHON_COMMAND} -m tensilelite._extops.layer_norm_generator -o "${CMAKE_CURRENT_BINARY_DIR}/L_256_4_1_${arch}.s" -w 256 -c 4 --sweep-once 1 --arch ${arch} --toolchain ${CMAKE_CXX_COMPILER} ${extop_xnack_args}
-        COMMAND ${HIPBLASLT_PYTHON_COMMAND} -m tensilelite._extops.layer_norm_generator -o "${CMAKE_CURRENT_BINARY_DIR}/L_256_4_0_${arch}.s" -w 256 -c 4 --sweep-once 0 --arch ${arch} --toolchain ${CMAKE_CXX_COMPILER} ${extop_xnack_args}
-        COMMAND ${HIPBLASLT_PYTHON_COMMAND} -m tensilelite._extops.softmax_generator -o "${CMAKE_CURRENT_BINARY_DIR}/S_8_32_${arch}.s" -m 8 -n 32 --arch ${arch} --toolchain ${CMAKE_CXX_COMPILER} ${extop_xnack_args}
-        COMMAND ${HIPBLASLT_PYTHON_COMMAND} -m tensilelite._extops.softmax_generator -o "${CMAKE_CURRENT_BINARY_DIR}/S_16_16_${arch}.s" -m 16 -n 16 --arch ${arch} --toolchain ${CMAKE_CXX_COMPILER} ${extop_xnack_args}
-        COMMAND ${HIPBLASLT_PYTHON_COMMAND} -m tensilelite._extops.softmax_generator -o "${CMAKE_CURRENT_BINARY_DIR}/S_4_64_${arch}.s" -m 4 -n 64 --arch ${arch} --toolchain ${CMAKE_CXX_COMPILER} ${extop_xnack_args}
-        COMMAND ${HIPBLASLT_PYTHON_COMMAND} -m tensilelite._extops.softmax_generator -o "${CMAKE_CURRENT_BINARY_DIR}/S_2_128_${arch}.s" -m 2 -n 128 --arch ${arch} --toolchain ${CMAKE_CXX_COMPILER} ${extop_xnack_args}
-        COMMAND ${HIPBLASLT_PYTHON_COMMAND} -m tensilelite._extops.softmax_generator -o "${CMAKE_CURRENT_BINARY_DIR}/S_1_256_${arch}.s" -m 1 -n 256 --arch ${arch} --toolchain ${CMAKE_CXX_COMPILER} ${extop_xnack_args}
-        COMMAND ${HIPBLASLT_PYTHON_COMMAND} -m tensilelite._extops.amax_generator -o "${CMAKE_CURRENT_BINARY_DIR}/A_S_S_256_4_${arch}.s" -t S -d S -w 256 -c 4 --arch ${arch} --toolchain ${CMAKE_CXX_COMPILER} ${extop_xnack_args}
-        COMMAND ${HIPBLASLT_PYTHON_COMMAND} -m tensilelite._extops.amax_generator -o "${CMAKE_CURRENT_BINARY_DIR}/A_H_H_256_4_${arch}.s" -t H -d H -w 256 -c 4 --arch ${arch} --toolchain ${CMAKE_CXX_COMPILER} ${extop_xnack_args}
-        COMMAND ${HIPBLASLT_PYTHON_COMMAND} -m tensilelite._extops.amax_generator -o "${CMAKE_CURRENT_BINARY_DIR}/A_H_S_256_4_${arch}.s" -t H -d S -w 256 -c 4 --arch ${arch} --toolchain ${CMAKE_CXX_COMPILER} ${extop_xnack_args}
-        COMMAND ${HIPBLASLT_PYTHON_COMMAND} -m tensilelite._extops.amax_generator -o "${CMAKE_CURRENT_BINARY_DIR}/A_S_H_256_4_${arch}.s" -t S -d H -w 256 -c 4 --arch ${arch} --toolchain ${CMAKE_CXX_COMPILER} ${extop_xnack_args}
+        COMMAND ${_extop_python_command} -m tensilelite._extops.layer_norm_generator -o "${CMAKE_CURRENT_BINARY_DIR}/L_256_4_1_${arch}.s" -w 256 -c 4 --sweep-once 1 --arch ${arch} --toolchain ${CMAKE_CXX_COMPILER} ${extop_xnack_args}
+        COMMAND ${_extop_python_command} -m tensilelite._extops.layer_norm_generator -o "${CMAKE_CURRENT_BINARY_DIR}/L_256_4_0_${arch}.s" -w 256 -c 4 --sweep-once 0 --arch ${arch} --toolchain ${CMAKE_CXX_COMPILER} ${extop_xnack_args}
+        COMMAND ${_extop_python_command} -m tensilelite._extops.softmax_generator -o "${CMAKE_CURRENT_BINARY_DIR}/S_8_32_${arch}.s" -m 8 -n 32 --arch ${arch} --toolchain ${CMAKE_CXX_COMPILER} ${extop_xnack_args}
+        COMMAND ${_extop_python_command} -m tensilelite._extops.softmax_generator -o "${CMAKE_CURRENT_BINARY_DIR}/S_16_16_${arch}.s" -m 16 -n 16 --arch ${arch} --toolchain ${CMAKE_CXX_COMPILER} ${extop_xnack_args}
+        COMMAND ${_extop_python_command} -m tensilelite._extops.softmax_generator -o "${CMAKE_CURRENT_BINARY_DIR}/S_4_64_${arch}.s" -m 4 -n 64 --arch ${arch} --toolchain ${CMAKE_CXX_COMPILER} ${extop_xnack_args}
+        COMMAND ${_extop_python_command} -m tensilelite._extops.softmax_generator -o "${CMAKE_CURRENT_BINARY_DIR}/S_2_128_${arch}.s" -m 2 -n 128 --arch ${arch} --toolchain ${CMAKE_CXX_COMPILER} ${extop_xnack_args}
+        COMMAND ${_extop_python_command} -m tensilelite._extops.softmax_generator -o "${CMAKE_CURRENT_BINARY_DIR}/S_1_256_${arch}.s" -m 1 -n 256 --arch ${arch} --toolchain ${CMAKE_CXX_COMPILER} ${extop_xnack_args}
+        COMMAND ${_extop_python_command} -m tensilelite._extops.amax_generator -o "${CMAKE_CURRENT_BINARY_DIR}/A_S_S_256_4_${arch}.s" -t S -d S -w 256 -c 4 --arch ${arch} --toolchain ${CMAKE_CXX_COMPILER} ${extop_xnack_args}
+        COMMAND ${_extop_python_command} -m tensilelite._extops.amax_generator -o "${CMAKE_CURRENT_BINARY_DIR}/A_H_H_256_4_${arch}.s" -t H -d H -w 256 -c 4 --arch ${arch} --toolchain ${CMAKE_CXX_COMPILER} ${extop_xnack_args}
+        COMMAND ${_extop_python_command} -m tensilelite._extops.amax_generator -o "${CMAKE_CURRENT_BINARY_DIR}/A_H_S_256_4_${arch}.s" -t H -d S -w 256 -c 4 --arch ${arch} --toolchain ${CMAKE_CXX_COMPILER} ${extop_xnack_args}
+        COMMAND ${_extop_python_command} -m tensilelite._extops.amax_generator -o "${CMAKE_CURRENT_BINARY_DIR}/A_S_H_256_4_${arch}.s" -t S -d H -w 256 -c 4 --arch ${arch} --toolchain ${CMAKE_CXX_COMPILER} ${extop_xnack_args}
         COMMENT "Creating Layer Norm, Softmax and Amax Assembly for ${arch}"
         DEPENDS ${_extop_codegen_dependencies}
     )
@@ -96,9 +92,9 @@ foreach(arch IN LISTS archs)
     add_custom_target(extop-library-${arch} ALL
         DEPENDS
             "${output_code_object_file}"
-            ${HIPBLASLT_PYTHON_DEPS}
+            ${_extop_codegen_dependencies}
             ${previous_target}
-        COMMAND ${HIPBLASLT_PYTHON_COMMAND} -m tensilelite._extops.extop_create_library --src=${CMAKE_CURRENT_BINARY_DIR} --co=${output_code_object_file} --output=${output_dir} --arch=${arch}
+        COMMAND ${_extop_python_command} -m tensilelite._extops.extop_create_library --src=${CMAKE_CURRENT_BINARY_DIR} --co=${output_code_object_file} --output=${output_dir} --arch=${arch}
         COMMAND ${CMAKE_COMMAND} -E make_directory "${HIPBLASLT_TENSILE_LIBPATH}/library/${arch}"
         COMMAND ${CMAKE_COMMAND} -E rm -f "${HIPBLASLT_TENSILE_LIBPATH}/library/${arch}/hipblasltExtOpLibrary_${arch}.dat"
         COMMAND ${CMAKE_COMMAND} -E copy "${output_dir}/hipblasltExtOpLibrary.dat.zlib" "${HIPBLASLT_TENSILE_LIBPATH}/library/${arch}/hipblasltExtOpLibrary_${arch}.dat.zlib"

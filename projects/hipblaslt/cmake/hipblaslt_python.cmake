@@ -15,7 +15,7 @@ endmacro()
 
 # Keep discovery in the caller's scope, including Python's imported targets.
 macro(hipblaslt_find_build_python)
-    if(HIPBLASLT_ENABLE_DEVICE OR ROCISA_BUILD_PYTHON
+    if(HIPBLASLT_ENABLE_DEVICE OR HIPBLASLT_PREPARE_TENSILELITE_GENERATOR OR ROCISA_BUILD_PYTHON
             OR HIPBLASLT_INSTALL_TENSILELITE_TEST_ARTIFACTS)
         if(ROCISA_USE_STABLE_ABI)
             hipblaslt_find_python(3.12 "Development.Module;Development.SABIModule")
@@ -63,101 +63,84 @@ function(hipblaslt_resolve_build_rocm_version output)
     set(${output} "${_version}" PARENT_SCOPE)
 endfunction()
 
-# Sets ${output} to the environment of the code-generation commands. Python
-# imports tensilelite from the wheel unpacked into the build tree (never from
-# the source tree, and never by installing it into the build Python) and rocisa
-# from the in-tree build.
+# Adapter selection is command-scoped and shared by dense generation, ExtOps and
+# embedded consumers. Python/native search paths belong to the generator target.
 function(hipblaslt_tensilelite_python_environment output)
-    set(_path "$ENV{PATH}")
-    if(WIN32)
-        string(REPLACE ";" "$<SEMICOLON>" _path "${_path}")
-    endif()
-
-    if(WIN32)
-        set(_ds "$<SEMICOLON>")
-    else()
-        set(_ds ":")
-    endif()
-    set(_python_path
-        "${HIPBLASLT_TENSILELITE_WHEEL_ROOT}"
-        "$<TARGET_FILE_DIR:_rocisa>/.."
-    )
-    list(JOIN _python_path "${_ds}" _python_path)
-
-    set(_environment
-        "PYTHONPATH=${_python_path}"
-        "PATH=${_path}"
-        # TensileLite's toolchain module needs the HIP version when it is
-        # imported, so every generator process gets it from the configure,
-        # as develop's command does. A TheRock build has no ROCm directory
-        # for the module to search.
-        "ROCM_VERSION=${hip_VERSION}"
-    )
+    set(_environment "ROCM_VERSION=${hip_VERSION}")
     if(HIPBLASLT_ENABLE_THEROCK)
-        # Internal marker: only these commands select TensileLite's TheRock
-        # build-time ROCm adapter; installed wheels never see it. The version
-        # is passed only when TheRock supplied a real one.
         list(APPEND _environment "TENSILELITE_ROCM_ADAPTER=therock-ci")
         if(HIPBLASLT_BUILD_ROCM_VERSION)
             list(APPEND _environment
                 "THEROCK_PACKAGE_VERSION=${HIPBLASLT_BUILD_ROCM_VERSION}")
         endif()
     else()
-        list(APPEND _environment
-            "ROCM_PATH=${HIPBLASLT_BUILD_ROCM_ROOT}")
+        list(APPEND _environment "ROCM_PATH=${HIPBLASLT_BUILD_ROCM_ROOT}")
     endif()
     set(${output} "${_environment}" PARENT_SCOPE)
 endfunction()
 
-# Sets HIPBLASLT_PYTHON_COMMAND, HIPBLASLT_PYTHON_DEPS (targets) and
-# HIPBLASLT_PYTHON_INPUTS (files) in the parent scope for the code-generation
-# commands. HIPBLASLT_PYTHON_COMMAND may be a multi-token list, so use it
-# without quotes in COMMAND lists.
 function(hipblaslt_configure_tensilelite_python asan_options)
-    if(NOT HIPBLASLT_ENABLE_DEVICE)
-        set(HIPBLASLT_PYTHON_COMMAND "${Python3_EXECUTABLE}" PARENT_SCOPE)
-        set(HIPBLASLT_PYTHON_DEPS "" PARENT_SCOPE)
-        set(HIPBLASLT_PYTHON_INPUTS "" PARENT_SCOPE)
+    if(NOT HIPBLASLT_ENABLE_DEVICE AND NOT HIPBLASLT_PREPARE_TENSILELITE_GENERATOR)
         return()
     endif()
-
     if(NOT TARGET _rocisa)
-        message(FATAL_ERROR
-            "Device generation requires the in-tree _rocisa target")
+        message(FATAL_ERROR "Packaged generation requires the in-tree _rocisa target")
     endif()
-
-    # Code generation runs the built wheel: unpack it into the build tree. The
-    # build Python's site-packages are never modified.
-    set(_wheel_manifest
-        "${CMAKE_CURRENT_BINARY_DIR}/tensilelite-release-wheels/.published")
-    set(HIPBLASLT_TENSILELITE_WHEEL_ROOT "${CMAKE_CURRENT_BINARY_DIR}/tensilelite-wheel")
-    set(_unpack_stamp "${CMAKE_CURRENT_BINARY_DIR}/tensilelite-wheel.stamp")
-    add_custom_command(
-        OUTPUT "${_unpack_stamp}"
-        COMMAND "${Python3_EXECUTABLE}"
-            "${hipblaslt_SOURCE_DIR}/tensilelite/scripts/install_release_wheels.py"
-            --destination "${HIPBLASLT_TENSILELITE_WHEEL_ROOT}"
-            --manifest "${_wheel_manifest}"
-        COMMAND "${CMAKE_COMMAND}" -E touch "${_unpack_stamp}"
-        DEPENDS
-            "${_wheel_manifest}"
-            "${hipblaslt_SOURCE_DIR}/tensilelite/scripts/install_release_wheels.py"
-        COMMENT "Unpacking the TensileLite wheel for device generation"
-        VERBATIM
-    )
-    add_custom_target(tensilelite-python-build-environment
-        DEPENDS "${_unpack_stamp}" _rocisa)
-
-    hipblaslt_tensilelite_python_environment(_python_environment)
-    set(_python_command "${CMAKE_COMMAND}" -E env ${_python_environment})
-    if(asan_options)
-        list(APPEND _python_command ${asan_options})
+    include("${hipblaslt_SOURCE_DIR}/tensilelite/cmake/TensileLiteGenerator.cmake")
+    hipblaslt_tensilelite_python_environment(_environment)
+    if(TENSILELITE_GENERATOR_WHEEL)
+        set(_selection WHEEL "${TENSILELITE_GENERATOR_WHEEL}")
+    else()
+        set(_selection WHEEL_MANIFEST "${TENSILELITE_CANONICAL_WHEEL_MANIFEST}")
     endif()
-    list(APPEND _python_command --
-        "${Python3_EXECUTABLE}")
+    get_filename_component(_compiler_dir "${CMAKE_CXX_COMPILER}" DIRECTORY)
+    tensilelite_prepare_generator(
+        TARGET tensilelite-generator
+        ${_selection}
+        METADATA "${TENSILELITE_METADATA_FILE}"
+        PYTHON_EXECUTABLE "${Python3_EXECUTABLE}"
+        TOOL_BIN_DIRS "${_compiler_dir}"
+        ENVIRONMENT ${_environment} ${asan_options})
+    add_dependencies(tensilelite-generator tensilelite-metadata)
+    if(NOT TENSILELITE_GENERATOR_WHEEL)
+        add_dependencies(tensilelite-generator tensilelite-canonical-release-wheel)
+    endif()
+    if(HIPBLASLT_PREPARE_TENSILELITE_GENERATOR)
+        add_custom_target(tensilelite-prepared-generator ALL DEPENDS tensilelite-generator)
+    endif()
+endfunction()
 
-    set(HIPBLASLT_TENSILELITE_WHEEL_ROOT "${HIPBLASLT_TENSILELITE_WHEEL_ROOT}" PARENT_SCOPE)
-    set(HIPBLASLT_PYTHON_COMMAND "${_python_command}" PARENT_SCOPE)
-    set(HIPBLASLT_PYTHON_DEPS "tensilelite-python-build-environment" PARENT_SCOPE)
-    set(HIPBLASLT_PYTHON_INPUTS "${_unpack_stamp}" PARENT_SCOPE)
+# Install the artifact handoff independently of tests and generated devices.
+# Native extensions/resources retain their existing devel install rules.
+function(hipblaslt_install_generator_support)
+    if(NOT TARGET _rocisa OR (NOT HIPBLASLT_ENABLE_DEVICE
+            AND NOT HIPBLASLT_PREPARE_TENSILELITE_GENERATOR))
+        return()
+    endif()
+    include(CMakePackageConfigHelpers)
+    set(_config_dir "${CMAKE_INSTALL_LIBDIR}/cmake/tensilelite")
+    set(_support_source "${hipblaslt_SOURCE_DIR}/tensilelite")
+    configure_package_config_file(
+        "${_support_source}/cmake/tensilelite-generator-support.cmake.in"
+        "${CMAKE_CURRENT_BINARY_DIR}/tensilelite-generator-support.cmake.gen"
+        INSTALL_DESTINATION "${_config_dir}"
+        PATH_VARS CMAKE_INSTALL_LIBDIR CMAKE_INSTALL_BINDIR)
+    file(GENERATE OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/tensilelite-generator-support.cmake"
+        INPUT "${CMAKE_CURRENT_BINARY_DIR}/tensilelite-generator-support.cmake.gen")
+    install(FILES "${CMAKE_CURRENT_BINARY_DIR}/tensilelite-generator-support.cmake"
+        DESTINATION "${_config_dir}" COMPONENT ${TENSILELITE_DEVEL_COMPONENT})
+    install(FILES "${TENSILELITE_METADATA_FILE}"
+        DESTINATION "${_config_dir}" RENAME tensilelite-generator-metadata.json COMPONENT ${TENSILELITE_DEVEL_COMPONENT})
+    install(FILES
+        "${_support_source}/cmake/TensileLiteGenerator.cmake"
+        "${_support_source}/cmake/hipblaslt_codegen.cmake"
+        DESTINATION "${_config_dir}" COMPONENT ${TENSILELITE_DEVEL_COMPONENT})
+    install(FILES
+        "${_support_source}/scripts/prepare_generator.py"
+        "${_support_source}/scripts/check_release_wheel_contents.py"
+        "${_support_source}/scripts/install_release_wheels.py"
+        DESTINATION "${_config_dir}/generator-scripts" COMPONENT ${TENSILELITE_DEVEL_COMPONENT})
+    install(FILES "${_support_source}/scripts/generator-bootstrap/sitecustomize.py"
+        DESTINATION "${_config_dir}/generator-scripts/generator-bootstrap"
+        COMPONENT ${TENSILELITE_DEVEL_COMPONENT})
 endfunction()

@@ -121,6 +121,9 @@ set(TENSILELITE_HOST_MSGPACK_SOURCES
 )
 
 add_subdirectory(rocisa)
+if(COMMAND hipblaslt_install_generator_support)
+    hipblaslt_install_generator_support()
+endif()
 
 if(TENSILELITE_ENABLE_HOST)
     find_package(ZLIB REQUIRED)

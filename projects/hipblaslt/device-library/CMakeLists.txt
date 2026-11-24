@@ -30,18 +30,6 @@ set(HIPBLASLT_TENSILE_LIBPATH "${hipblaslt_BINARY_DIR}/Tensile" CACHE STRING "Pa
 if(NOT HIPBLASLT_LIBLOGIC_PATH)
     set(HIPBLASLT_LIBLOGIC_PATH "${hipblaslt_SOURCE_DIR}/library")
 endif()
-if(NOT HIPBLASLT_CODEGEN_ROOT)
-    set(HIPBLASLT_CODEGEN_ROOT "${hipblaslt_SOURCE_DIR}/tensilelite")
-endif()
-
-set(_codegen_host_sanitizer_args "")
-if(HIPBLASLT_ENABLE_ASAN
-        OR THEROCK_SANITIZER STREQUAL "ASAN"
-        OR THEROCK_SANITIZER STREQUAL "HOST_ASAN")
-    list(APPEND _codegen_host_sanitizer_args HOST_ASAN)
-elseif(HIPBLASLT_ENABLE_TSAN OR THEROCK_SANITIZER STREQUAL "TSAN")
-    list(APPEND _codegen_host_sanitizer_args HOST_TSAN)
-endif()
 
 set(_codegen_product_args "")
 if(HIPBLASLT_ENABLE_ASAN)
@@ -59,12 +47,12 @@ endif()
 
 create_device_library(
     TARGET tensilelite-device-libraries
+    GENERATOR tensilelite-generator
     LOGIC_PATH "${HIPBLASLT_LIBLOGIC_PATH}"
     OUTPUT_DIR "${HIPBLASLT_TENSILE_LIBPATH}"
     # The unstripped targets: TensileCreateLibrary keys its capability overrides
     # on the xnack suffix, which GPU_TARGETS has had removed for hip::device.
     ARCHES ${TENSILELITE_GPU_TARGETS}
-    ${_codegen_host_sanitizer_args}
     ${_codegen_product_args}
 )
 

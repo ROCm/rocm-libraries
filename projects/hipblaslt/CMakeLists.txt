@@ -58,6 +58,8 @@ if(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
 endif()
 
 option(HIPBLASLT_ENABLE_DEVICE "Build hipBLASLt device libraries." ON)
+option(HIPBLASLT_PREPARE_TENSILELITE_GENERATOR "Prepare a packaged generator for other consumers." OFF)
+set(TENSILELITE_GENERATOR_WHEEL "" CACHE FILEPATH "Explicit TensileLite generator wheel (empty builds locally).")
 option(HIPBLASLT_ENABLE_EXTOPS "Build hipBLASLt ExtOp device libraries." ON)
 option(HIPBLASLT_ENABLE_MATRIX_TRANSFORM "Build hipBLASLt MatrixTransform device library." ON)
 option(HIPBLASLT_ENABLE_CLIENT "Build hipBLASLt client apps." ON)
@@ -240,7 +242,7 @@ if(HIPBLASLT_ENABLE_YAML)
     find_package(LLVM REQUIRED)
 endif()
 
-if(HIPBLASLT_ENABLE_DEVICE AND NOT WIN32)
+if((HIPBLASLT_ENABLE_DEVICE OR HIPBLASLT_PREPARE_TENSILELITE_GENERATOR) AND NOT WIN32)
     if(HIPBLASLT_ENABLE_ASAN OR THEROCK_SANITIZER STREQUAL "ASAN" OR THEROCK_SANITIZER STREQUAL "HOST_ASAN")
         set(_suffix "asan")
         set(_clang_rt_names "libclang_rt.${_suffix}.so" "libclang_rt.${_suffix}-x86_64.so")
@@ -291,16 +293,18 @@ if(HIPBLASLT_ENABLE_DEVICE AND NOT WIN32)
 endif()
 
 hipblaslt_find_build_python()
-set(HIPBLASLT_PYTHON_COMMAND "")
-set(HIPBLASLT_PYTHON_DEPS "")
-set(HIPBLASLT_PYTHON_INPUTS "")
 
 set(_tensilelite_needs_canonical_wheel FALSE)
-if(HIPBLASLT_ENABLE_DEVICE OR HIPBLASLT_INSTALL_TENSILELITE_TEST_ARTIFACTS)
+# An explicit wheel serves generation and the test artifact alike.
+if((HIPBLASLT_ENABLE_DEVICE OR HIPBLASLT_PREPARE_TENSILELITE_GENERATOR
+        OR HIPBLASLT_INSTALL_TENSILELITE_TEST_ARTIFACTS)
+        AND NOT TENSILELITE_GENERATOR_WHEEL)
     set(_tensilelite_needs_canonical_wheel TRUE)
 endif()
 
-if(_tensilelite_needs_canonical_wheel OR TENSILELITE_ENABLE_CLIENT)
+if(_tensilelite_needs_canonical_wheel OR TENSILELITE_ENABLE_CLIENT
+        OR HIPBLASLT_ENABLE_DEVICE OR HIPBLASLT_PREPARE_TENSILELITE_GENERATOR
+        OR HIPBLASLT_INSTALL_TENSILELITE_TEST_ARTIFACTS)
     set(_tensilelite_source_root "${CMAKE_CURRENT_SOURCE_DIR}/tensilelite")
     set(TENSILELITE_SOURCE_REVISION "" CACHE STRING
         "rocm-libraries commit to record when building from a tree without git")
@@ -555,7 +559,6 @@ block(SCOPE_FOR VARIABLES)
     set(BUILD_SHARED_LIBS "${TENSILELITE_BUILD_SHARED_LIBS}")
     add_subdirectory(tensilelite)
 endblock()
-hipblaslt_configure_tensilelite_python("${san_opts}")
 
 set(BUILD_SHARED_LIBS "${HIPBLASLT_BUILD_SHARED_LIBS}")
 
@@ -935,17 +938,16 @@ if(HIPBLASLT_ENABLE_CLIENT AND (HIPBLASLT_BUILD_TESTING OR BUILD_TESTING))
 endif()
 
 # Build the hermetic tensilelite release wheel from refreshed build metadata.
+set(_tensilelite_src "${CMAKE_CURRENT_SOURCE_DIR}/tensilelite")
+include(cmake/TensileLiteWheel.cmake)
 if(_tensilelite_needs_canonical_wheel)
-    set(_tensilelite_src "${CMAKE_CURRENT_SOURCE_DIR}/tensilelite")
-    include(cmake/TensileLiteWheel.cmake)
     hipblaslt_add_tensilelite_release_wheel("${_tensilelite_src}")
-    if(TARGET tensilelite-python-build-environment)
-        add_dependencies(tensilelite-python-build-environment tensilelite-canonical-release-wheel)
-    endif()
     if(HIPBLASLT_INSTALL_TENSILELITE_TEST_ARTIFACTS)
         add_custom_target(tensilelite-release-wheels-all ALL DEPENDS tensilelite-build-release-wheels)
     endif()
 endif()
+
+hipblaslt_configure_tensilelite_python("${san_opts}")
 
 if(HIPBLASLT_ENABLE_DEVICE)
     add_subdirectory(device-library)
@@ -954,22 +956,7 @@ endif()
 # Install ROCm-versioned wheels and installed tests for artifact-based testing.
 if(HIPBLASLT_INSTALL_TENSILELITE_TEST_ARTIFACTS AND NOT WIN32)
     set(_tensilelite_install_dest "${CMAKE_INSTALL_DATADIR}/hipblaslt/tensilelite")
-    # TheRock runs pytest with this artifact root on PYTHONPATH. Extract the
-    # validated pure-Python wheel so its packages are importable there while
-    # retaining the wheel file for installation tests.
-    install(CODE "
-        execute_process(
-            COMMAND \"${Python3_EXECUTABLE}\"
-                \"${_tensilelite_src}/scripts/install_release_wheels.py\"
-                --destination \"\$ENV{DESTDIR}\${CMAKE_INSTALL_PREFIX}/${_tensilelite_install_dest}\"
-                --manifest \"${TENSILELITE_CANONICAL_WHEEL_MANIFEST}\"
-                --copy-wheels \"\$ENV{DESTDIR}\${CMAKE_INSTALL_PREFIX}/${_tensilelite_install_dest}/wheels\"
-            RESULT_VARIABLE _tensilelite_wheel_install_result
-        )
-        if(NOT _tensilelite_wheel_install_result EQUAL 0)
-            message(FATAL_ERROR \"Failed to install TensileLite wheels into the test artifact\")
-        endif()
-    " COMPONENT tests)
+    hipblaslt_install_tensilelite_test_wheel("${_tensilelite_src}" "${_tensilelite_install_dest}")
 
     install(
         DIRECTORY "${_tensilelite_src}/tensilelite/Tests/"

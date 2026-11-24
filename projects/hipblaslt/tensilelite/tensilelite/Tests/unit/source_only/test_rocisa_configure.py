@@ -29,6 +29,7 @@ def _configure(tmp_path, options, generator="Ninja"):
     settings = dict.fromkeys(
         (
             "HIPBLASLT_ENABLE_DEVICE",
+            "HIPBLASLT_PREPARE_TENSILELITE_GENERATOR",
             "HIPBLASLT_ENABLE_CLIENT",
             "TENSILELITE_ENABLE_CLIENT",
             "HIPBLASLT_INSTALL_TENSILELITE_TEST_ARTIFACTS",
@@ -135,6 +136,13 @@ endforeach()
             ["Development.Module"],
             ["_rocisa"],
             id="device-generation",
+        ),
+        pytest.param(
+            {"HIPBLASLT_PREPARE_TENSILELITE_GENERATOR": "ON"},
+            "3.10",
+            ["Development.Module"],
+            ["_rocisa"],
+            id="generator-without-devices-or-tests",
         ),
         pytest.param(
             {"ROCISA_BUILD_PYTHON": "ON"},
