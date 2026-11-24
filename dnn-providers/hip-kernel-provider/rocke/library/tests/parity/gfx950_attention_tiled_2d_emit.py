@@ -776,18 +776,9 @@ _CONFIGS = {
         use_mfma32_skip_legacy_qreg=True,
         use_transposed_half_local_pv=True,
     ),
-    # idx52 REMOVED: it exercised the deep K prefetch ring (kv_ring_depth=3), a
-    # Python-only EXPERIMENTAL lever that the production selector NEVER sets
-    # (kv_ring_depth is not referenced in attention_unified.py) and that the
-    # gfx950 C twin rejects by design (ROCKE_ERR_NOTIMPL). The byte-identity gate
-    # compares EMITTED IR for the production-reachable surface; a config one
-    # engine cannot emit is intrinsically asymmetric (C reject vs Python emit)
-    # and does not belong here. The C-side reject guard remains in
-    # attention_tiled_2d_public_entry_glue.cpp; ring-3 was superseded by the
-    # use_softmax_mfma_interleave lever and is not a production path.
-    # idx52 (renumbered from 53 after the ring-3 config was removed; kept
-    # contiguous so the gate's shared-end-of-range detection doesn't stop early
-    # on a hole): #69 K single-buffer at T=64 -- the d128 long-context 2-WG/CU
+    # idx52 (renumbered from 53; kept contiguous so the gate's shared
+    # end-of-range detection doesn't stop early on a hole; the ring-3 config is
+    # idx93): #69 K single-buffer at T=64 -- the d128 long-context 2-WG/CU
     # win. The full single-batch d128 combo with tile_size=64 (== 2*block_size)
     # AND use_k_single_buffer=True. K_lds collapses 2->1 slot (32->16 KB) so
     # total LDS is 32 KB -> 2 WG/CU at the LARGER tile (better S4096 amortisation
@@ -1145,9 +1136,9 @@ _CONFIGS = {
         use_register_pv=True,
         tile_size=32,
     ),
-    # idx77-80: additive bias. idx77: the 16x16 path with two M atoms per warp
+    # idx137-110: additive bias. idx107: the 16x16 path with two M atoms per warp
     # (GQA).
-    77: dict(
+    107: dict(
         head_size=128,
         block_size=16,
         num_query_heads=16,
@@ -1162,9 +1153,9 @@ _CONFIGS = {
         block_m_per_warp=32,
         tile_size=32,
     ),
-    # idx78: the 16x16 path composed with ALiBi, QQ bias, softcap, sinks and a
+    # idx108: the 16x16 path composed with ALiBi, QQ bias, softcap, sinks and a
     # sliding window (the ALiBi slope replaces the hoisted query head).
-    78: dict(
+    108: dict(
         head_size=64,
         block_size=32,
         num_query_heads=32,
@@ -1177,9 +1168,9 @@ _CONFIGS = {
         use_qq_bias=True,
         use_additive_bias=True,
     ),
-    # idx79: the transposed 32x32 combo the selector builds for a biased
+    # idx109: the transposed 32x32 combo the selector builds for a biased
     # d64/b32/GQA-8 problem (mask-once and mask-limit off).
-    79: dict(
+    109: dict(
         head_size=64,
         block_size=32,
         num_query_heads=64,
@@ -1200,8 +1191,8 @@ _CONFIGS = {
         use_mfma32_skip_legacy_qreg=True,
         use_fast_paged_kv_desc=True,
     ),
-    # idx80: the bare transposed 32x32 path with QQ bias.
-    80: dict(
+    # idx110: the bare transposed 32x32 path with QQ bias.
+    110: dict(
         head_size=128,
         block_size=32,
         num_query_heads=16,
@@ -1218,9 +1209,9 @@ _CONFIGS = {
         use_mfma_32x32=True,
         use_transposed_qk_32x32=True,
     ),
-    # idx81, 82: additive bias with paths that do not emit it; both engines
+    # idx141, 112: additive bias with paths that do not emit it; both engines
     # reject these (BOTH_REJECTED).
-    81: dict(
+    111: dict(
         head_size=64,
         block_size=32,
         num_query_heads=64,
@@ -1238,7 +1229,7 @@ _CONFIGS = {
         use_transposed_scalar_state=True,
         use_transposed_mask_once=True,
     ),
-    82: dict(
+    112: dict(
         head_size=64,
         block_size=32,
         num_query_heads=32,
@@ -1250,7 +1241,7 @@ _CONFIGS = {
         use_additive_bias=True,
         use_register_pv=True,
     ),
-    # idx83-86: more additive-bias paths that do not emit it; both engines
+    # idx143-116: more additive-bias paths that do not emit it; both engines
     # reject these too (BOTH_REJECTED). 81/82 cover mask-once and
     # register-PV; these four cover the remaining rejections so losing any
     # one of them would go unnoticed (the non-transposed 32x32 path has no
@@ -1258,7 +1249,7 @@ _CONFIGS = {
     # kernel that takes the bias params and never adds them; an
     # invariant-hoist spec would pass a NULL query head into
     # rocke_add_additive_bias).
-    83: dict(
+    113: dict(
         head_size=64,
         block_size=32,
         num_query_heads=64,
@@ -1275,7 +1266,7 @@ _CONFIGS = {
         use_transposed_qk_32x32=True,
         use_transposed_invariant_hoist=True,
     ),
-    84: dict(
+    114: dict(
         head_size=64,
         block_size=32,
         num_query_heads=64,
@@ -1291,7 +1282,7 @@ _CONFIGS = {
         use_mfma_32x32=True,
         use_transposed_qk_32x32=False,
     ),
-    85: dict(
+    115: dict(
         head_size=64,
         block_size=32,
         num_query_heads=64,
@@ -1309,7 +1300,7 @@ _CONFIGS = {
         use_transposed_scalar_state=True,
         use_grouped_kv2_softmax=True,
     ),
-    86: dict(
+    116: dict(
         head_size=128,
         block_size=32,
         num_query_heads=32,
@@ -1348,20 +1339,20 @@ _CONFIGS[67] = {**_CONFIGS[5], "use_alibi": True, "emit_lse": True}
 _CONFIGS[72] = {**_CONFIGS[64], "lse_layout": "head_major"}
 _CONFIGS[73] = {**_CONFIGS[65], "lse_layout": "head_major"}
 _CONFIGS[74] = {**_CONFIGS[66], "lse_layout": "head_major"}
-# idx87: additive bias + emit_lse on the idx77 path; the four bias
+# idx117: additive bias + emit_lse on the idx107 path; the four bias
 # params precede lse_ptr in both engines.
-_CONFIGS[87] = {**_CONFIGS[77], "emit_lse": True}
+_CONFIGS[117] = {**_CONFIGS[107], "emit_lse": True}
 
 # Configs both engines must reject, with the reason each one pins: run_diff
 # requires the regex in both engines' stderr (BOTH_REJECTED alone accepts any
 # reason, a typo included).
 _EXPECTED_REJECTIONS = {
-    81: r"use_additive_bias does not support use_transposed_mask_once",
-    82: r"use_register_pv v1 does not support ALiBi, QQ bias, or additive bias",
-    83: r"use_additive_bias does not support use_transposed_invariant_hoist",
-    84: r"use_additive_bias does not support the non-transposed 32x32 path",
-    85: r"use_grouped_kv2_softmax v1 does not support .*additive bias",
-    86: r"transposed softmax VALU opts do not support .*additive bias",
+    111: r"use_additive_bias does not support use_transposed_mask_once",
+    112: r"use_register_pv v1 does not support ALiBi, QQ bias, or additive bias",
+    113: r"use_additive_bias does not support use_transposed_invariant_hoist",
+    114: r"use_additive_bias does not support the non-transposed 32x32 path",
+    115: r"use_grouped_kv2_softmax v1 does not support .*additive bias",
+    116: r"transposed softmax VALU opts do not support .*additive bias",
 }
 
 # --- idx75-76: fp8 K in LDS on each 32x32 QK path.
@@ -1386,6 +1377,587 @@ _CONFIGS[75] = dict(
 # The same fp8 K in LDS on the transposed 32x32 QK path, which reads K through
 # the same shared reader.
 _CONFIGS[76] = {**_CONFIGS[75], "use_transposed_qk_32x32": True}
+
+# ALiBi on the transposed 32x32 path without mask-once: the slope is loaded
+# inline per lane. idx77 is the multi-batch fp16 D128 spec
+# _tiled_spec_from_problem selects, idx78 the bf16 combo spec (scalar state,
+# still no mask-once). idx79 takes the hoisted slope (invariant hoist).
+_CONFIGS[77] = dict(
+    head_size=128,
+    block_size=16,
+    num_query_heads=8,
+    num_kv_heads=8,
+    dtype="fp16",
+    use_sinks=False,
+    sliding_window=0,
+    has_softcap=False,
+    use_alibi=True,
+    num_seqs=4,
+    num_warps=4,
+    waves_per_eu=2,
+    tile_size=32,
+    block_m_per_warp=32,
+    use_mfma_32x32=True,
+    use_transposed_qk_32x32=True,
+    use_transposed_half_local_pv=True,
+)
+
+_CONFIGS[78] = dict(
+    head_size=64,
+    block_size=32,
+    num_query_heads=64,
+    num_kv_heads=8,
+    dtype="bf16",
+    use_sinks=False,
+    sliding_window=0,
+    has_softcap=False,
+    use_alibi=True,
+    num_seqs=4,
+    num_warps=4,
+    waves_per_eu=4,
+    tile_size=64,
+    block_m_per_warp=32,
+    use_mfma_32x32=True,
+    use_transposed_qk_32x32=True,
+    use_transposed_scalar_state=True,
+    use_transposed_half_local_pv=True,
+    use_mfma32_skip_legacy_qreg=True,
+    use_fast_paged_kv_desc=True,
+)
+
+_CONFIGS[79] = dict(
+    head_size=128,
+    block_size=16,
+    num_query_heads=8,
+    num_kv_heads=8,
+    dtype="fp16",
+    use_sinks=False,
+    sliding_window=0,
+    has_softcap=False,
+    use_alibi=True,
+    num_seqs=4,
+    num_warps=4,
+    waves_per_eu=2,
+    tile_size=32,
+    block_m_per_warp=32,
+    use_mfma_32x32=True,
+    use_transposed_qk_32x32=True,
+    use_transposed_half_local_pv=True,
+    use_transposed_invariant_hoist=True,
+    use_transposed_mask_once=True,
+)
+
+# V double-buffer (V[i+1] prefetched into the alternate V_lds slot). idx80 is
+# the bf16 D64 GQA-8 single-batch prefill spec _tiled_spec_from_problem
+# selects; idx81 the fp16 MHA one (tile 128) plus the staggered iter-start
+# wait. idx84-84 cover the other QK/PV paths: narrow 16x16, non-transposed
+# 32x32 with the staggered wait, and early-V + sched_barrier at D128.
+_CONFIGS[80] = dict(
+    head_size=64,
+    block_size=32,
+    num_query_heads=64,
+    num_kv_heads=8,
+    dtype="bf16",
+    use_sinks=False,
+    sliding_window=0,
+    has_softcap=False,
+    num_seqs=1,
+    num_warps=4,
+    waves_per_eu=2,
+    use_v_double_buffer=True,
+    tile_size=64,
+    block_m_per_warp=32,
+    use_mfma_32x32=True,
+    use_transposed_qk_32x32=True,
+    use_transposed_scalar_state=True,
+    use_transposed_mask_once=True,
+    use_transposed_half_local_pv=True,
+    use_mfma32_skip_legacy_qreg=True,
+    use_transposed_mask_limit=True,
+    use_fast_paged_kv_desc=True,
+)
+
+_CONFIGS[81] = dict(
+    head_size=64,
+    block_size=32,
+    num_query_heads=32,
+    num_kv_heads=32,
+    dtype="fp16",
+    use_sinks=False,
+    sliding_window=0,
+    has_softcap=False,
+    num_seqs=1,
+    num_warps=4,
+    waves_per_eu=2,
+    use_v_double_buffer=True,
+    use_staggered_iter_wait=True,
+    tile_size=128,
+    block_m_per_warp=32,
+    use_mfma_32x32=True,
+    use_transposed_qk_32x32=True,
+    use_transposed_scalar_state=True,
+    use_transposed_mask_once=True,
+    use_transposed_half_local_pv=True,
+    use_mfma32_skip_legacy_qreg=True,
+    use_transposed_mask_limit=True,
+)
+
+_CONFIGS[82] = dict(
+    head_size=64,
+    block_size=32,
+    num_query_heads=8,
+    num_kv_heads=8,
+    dtype="bf16",
+    use_sinks=False,
+    sliding_window=0,
+    has_softcap=False,
+    num_seqs=1,
+    num_warps=2,
+    use_v_double_buffer=True,
+)
+
+_CONFIGS[83] = dict(
+    head_size=64,
+    block_size=32,
+    num_query_heads=8,
+    num_kv_heads=8,
+    dtype="bf16",
+    use_sinks=False,
+    sliding_window=0,
+    has_softcap=False,
+    num_seqs=1,
+    num_warps=2,
+    block_m_per_warp=32,
+    use_mfma_32x32=True,
+    use_v_double_buffer=True,
+    use_staggered_iter_wait=True,
+)
+
+_CONFIGS[84] = dict(
+    head_size=128,
+    block_size=32,
+    num_query_heads=8,
+    num_kv_heads=8,
+    dtype="fp16",
+    use_sinks=False,
+    sliding_window=0,
+    has_softcap=False,
+    num_seqs=1,
+    num_warps=1,
+    use_v_double_buffer=True,
+    use_early_v_schedule=True,
+    use_sched_barrier=True,
+)
+
+# D256 fast path (_d256_gfx950_spec_overrides): idx85 is the bf16 GQA-8 spec
+# _tiled_spec_from_problem selects (direct-to-register Q, K-slab LDS pad,
+# mask phase split, interleave mode 2), idx86 the same with the invariant
+# hoist, idx89 the MHA block-16 shape. idx89-88 take the levers apart at
+# D128: direct-register Q alone; K-slab pad + phase split + mode 2 (2 groups).
+_CONFIGS[85] = dict(
+    head_size=256,
+    block_size=32,
+    num_query_heads=64,
+    num_kv_heads=8,
+    dtype="bf16",
+    use_sinks=False,
+    sliding_window=0,
+    has_softcap=False,
+    num_seqs=2,
+    num_warps=2,
+    waves_per_eu=2,
+    tile_size=64,
+    block_m_per_warp=32,
+    use_mfma_32x32=True,
+    use_transposed_qk_32x32=True,
+    use_kq_lds_pad=True,
+    kq_lds_pad_halves=16,
+    use_transposed_scalar_state=True,
+    use_transposed_mask_once=True,
+    use_transposed_half_local_pv=True,
+    use_transposed_mask_limit=True,
+    use_k_single_buffer=True,
+    use_q_direct_reg=True,
+    use_softmax_mfma_interleave=True,
+    softmax_interleave_mode=2,
+    use_mask_phase_split=True,
+)
+
+_CONFIGS[86] = dict(
+    head_size=256,
+    block_size=32,
+    num_query_heads=64,
+    num_kv_heads=8,
+    dtype="bf16",
+    use_sinks=False,
+    sliding_window=0,
+    has_softcap=False,
+    num_seqs=2,
+    num_warps=2,
+    waves_per_eu=2,
+    tile_size=64,
+    block_m_per_warp=32,
+    use_mfma_32x32=True,
+    use_transposed_qk_32x32=True,
+    use_kq_lds_pad=True,
+    kq_lds_pad_halves=16,
+    use_transposed_scalar_state=True,
+    use_transposed_mask_once=True,
+    use_transposed_half_local_pv=True,
+    use_transposed_mask_limit=True,
+    use_k_single_buffer=True,
+    use_q_direct_reg=True,
+    use_softmax_mfma_interleave=True,
+    softmax_interleave_mode=2,
+    use_mask_phase_split=True,
+    use_transposed_invariant_hoist=True,
+)
+
+_CONFIGS[87] = dict(
+    head_size=128,
+    block_size=32,
+    num_query_heads=64,
+    num_kv_heads=8,
+    dtype="bf16",
+    use_sinks=False,
+    sliding_window=0,
+    has_softcap=False,
+    num_seqs=2,
+    num_warps=4,
+    tile_size=64,
+    block_m_per_warp=32,
+    use_mfma_32x32=True,
+    use_transposed_qk_32x32=True,
+    use_transposed_scalar_state=True,
+    use_transposed_mask_once=True,
+    use_transposed_half_local_pv=True,
+    use_transposed_mask_limit=True,
+    use_q_direct_reg=True,
+)
+
+_CONFIGS[88] = dict(
+    head_size=128,
+    block_size=32,
+    num_query_heads=64,
+    num_kv_heads=8,
+    dtype="fp16",
+    use_sinks=False,
+    sliding_window=0,
+    has_softcap=False,
+    num_seqs=1,
+    num_warps=2,
+    tile_size=64,
+    block_m_per_warp=32,
+    use_mfma_32x32=True,
+    use_transposed_qk_32x32=True,
+    use_transposed_scalar_state=True,
+    use_transposed_mask_once=True,
+    use_transposed_half_local_pv=True,
+    use_transposed_mask_limit=True,
+    use_k_single_buffer=True,
+    use_kq_lds_pad=True,
+    use_q_direct_reg=True,
+    use_mask_phase_split=True,
+    use_softmax_mfma_interleave=True,
+    softmax_interleave_mode=2,
+    softmax_interleave_groups=2,
+)
+
+_CONFIGS[89] = dict(
+    head_size=256,
+    block_size=16,
+    num_query_heads=32,
+    num_kv_heads=32,
+    dtype="bf16",
+    use_sinks=False,
+    sliding_window=0,
+    has_softcap=False,
+    num_seqs=1,
+    num_warps=2,
+    waves_per_eu=2,
+    tile_size=64,
+    block_m_per_warp=32,
+    use_mfma_32x32=True,
+    use_transposed_qk_32x32=True,
+    use_kq_lds_pad=True,
+    kq_lds_pad_halves=16,
+    use_transposed_scalar_state=True,
+    use_transposed_mask_once=True,
+    use_transposed_half_local_pv=True,
+    use_transposed_mask_limit=True,
+    use_k_single_buffer=True,
+    use_q_direct_reg=True,
+    use_softmax_mfma_interleave=True,
+    softmax_interleave_mode=2,
+    use_mask_phase_split=True,
+)
+
+# fp8-in-LDS K (native-fp8 MFMA QK loader) on the transposed 32x32 path: the
+# transposed QK reads K through the shared dequantizing K reader.
+_CONFIGS[90] = dict(
+    head_size=64,
+    block_size=32,
+    num_query_heads=64,
+    num_kv_heads=8,
+    dtype="bf16",
+    use_sinks=False,
+    sliding_window=0,
+    has_softcap=False,
+    num_seqs=2,
+    num_warps=4,
+    tile_size=64,
+    block_m_per_warp=32,
+    use_mfma_32x32=True,
+    use_transposed_qk_32x32=True,
+    use_transposed_scalar_state=True,
+    use_transposed_half_local_pv=True,
+    kv_storage_dtype="fp8e4m3",
+    use_fp8_mfma_qk=True,
+)
+
+# Q re-read (Q operand read from a dedicated Q_lds inside the QK loop) and
+# the depth-3 deep K prefetch ring. idx91 re-reads Q on the transposed
+# 32x32 combo, idx92 adds the grouped-KV2 second score tile, idx93 is the
+# d128 small-tile ring with the two-phase mask peel, idx94 combines both.
+_CONFIGS[91] = dict(
+    head_size=128,
+    block_size=32,
+    num_query_heads=64,
+    num_kv_heads=8,
+    dtype="bf16",
+    use_sinks=False,
+    sliding_window=0,
+    has_softcap=False,
+    num_seqs=2,
+    num_warps=4,
+    tile_size=64,
+    block_m_per_warp=32,
+    use_mfma_32x32=True,
+    use_transposed_qk_32x32=True,
+    use_transposed_scalar_state=True,
+    use_transposed_mask_once=True,
+    use_transposed_half_local_pv=True,
+    use_transposed_mask_limit=True,
+    use_q_reread=True,
+)
+
+_CONFIGS[92] = dict(
+    head_size=128,
+    block_size=32,
+    num_query_heads=32,
+    num_kv_heads=32,
+    dtype="bf16",
+    use_sinks=False,
+    sliding_window=0,
+    has_softcap=False,
+    use_mfma_32x32=True,
+    use_transposed_qk_32x32=True,
+    use_transposed_scalar_state=True,
+    use_transposed_invariant_hoist=True,
+    use_transposed_mask_once=True,
+    use_grouped_kv2_softmax=True,
+    block_m_per_warp=32,
+    tile_size=64,
+    use_q_reread=True,
+)
+
+_CONFIGS[93] = dict(
+    head_size=128,
+    block_size=32,
+    num_query_heads=64,
+    num_kv_heads=8,
+    dtype="bf16",
+    use_sinks=False,
+    sliding_window=0,
+    has_softcap=False,
+    num_seqs=1,
+    num_warps=4,
+    tile_size=32,
+    block_m_per_warp=32,
+    use_mfma_32x32=True,
+    use_transposed_qk_32x32=True,
+    use_transposed_scalar_state=True,
+    use_transposed_mask_once=True,
+    use_transposed_half_local_pv=True,
+    use_transposed_mask_limit=True,
+    use_mask_phase_split=True,
+    kv_ring_depth=3,
+)
+
+_CONFIGS[94] = dict(
+    head_size=64,
+    block_size=16,
+    num_query_heads=16,
+    num_kv_heads=16,
+    dtype="fp16",
+    use_sinks=True,
+    sliding_window=128,
+    has_softcap=True,
+    num_seqs=2,
+    num_warps=2,
+    tile_size=32,
+    block_m_per_warp=32,
+    use_mfma_32x32=True,
+    use_transposed_qk_32x32=True,
+    use_transposed_scalar_state=True,
+    use_transposed_half_local_pv=True,
+    kv_ring_depth=3,
+    use_q_reread=True,
+)
+
+# Selector spec for single-batch fp16 D128 sliding-window prefill (the
+# 4-warp T=64 transposed-32x32 combo with softmax/MFMA interleave).
+_CONFIGS[95] = dict(
+    head_size=128,
+    block_size=16,
+    num_query_heads=32,
+    num_kv_heads=8,
+    dtype="fp16",
+    use_sinks=False,
+    sliding_window=256,
+    has_softcap=False,
+    num_seqs=1,
+    num_warps=4,
+    waves_per_eu=2,
+    tile_size=64,
+    block_m_per_warp=32,
+    use_mfma_32x32=True,
+    use_transposed_qk_32x32=True,
+    use_transposed_half_local_pv=True,
+    use_softmax_mfma_interleave=True,
+)
+
+# Config 50 with a non-zero sched_barrier mask (MFMA may cross the fence).
+_CONFIGS[96] = dict(
+    head_size=128,
+    block_size=32,
+    num_query_heads=64,
+    num_kv_heads=8,
+    dtype="bf16",
+    use_sinks=False,
+    sliding_window=0,
+    has_softcap=False,
+    num_seqs=1,
+    num_warps=1,
+    block_m_per_warp=32,
+    tile_size=64,
+    use_mfma_32x32=True,
+    use_transposed_qk_32x32=True,
+    use_transposed_scalar_state=True,
+    use_transposed_invariant_hoist=True,
+    use_transposed_mask_once=True,
+    use_transposed_mask_limit=True,
+    use_mfma32_skip_legacy_qreg=True,
+    use_transposed_half_local_pv=True,
+    use_sched_barrier=True,
+    sched_barrier_mask=8,
+)
+
+# --- idx99-101: top-left / right-bound mask band.
+_CONFIGS[97] = dict(
+    head_size=64,
+    block_size=16,
+    num_query_heads=8,
+    num_kv_heads=2,
+    dtype="bf16",
+    use_sinks=False,
+    sliding_window=0,
+    has_softcap=False,
+    num_seqs=2,
+    causal_top_left=True,
+)
+
+_CONFIGS[98] = dict(
+    head_size=128,
+    block_size=32,
+    num_query_heads=16,
+    num_kv_heads=4,
+    dtype="fp16",
+    use_sinks=False,
+    sliding_window=64,
+    has_softcap=False,
+    num_warps=2,
+    use_mfma_32x32=True,
+    block_m_per_warp=32,
+    tile_size=64,
+    right_bound=5,
+)
+
+_CONFIGS[99] = dict(
+    head_size=128,
+    block_size=32,
+    num_query_heads=32,
+    num_kv_heads=8,
+    dtype="bf16",
+    use_sinks=True,
+    sliding_window=0,
+    has_softcap=False,
+    num_seqs=2,
+    num_warps=4,
+    tile_size=64,
+    block_m_per_warp=32,
+    use_mfma_32x32=True,
+    use_transposed_qk_32x32=True,
+    use_transposed_scalar_state=True,
+    use_transposed_half_local_pv=True,
+    right_bound=-1,
+)
+
+_CONFIGS[100] = dict(
+    head_size=128,
+    block_size=32,
+    num_query_heads=64,
+    num_kv_heads=8,
+    dtype="bf16",
+    use_sinks=False,
+    sliding_window=128,
+    has_softcap=True,
+    num_seqs=1,
+    num_warps=1,
+    block_m_per_warp=32,
+    tile_size=64,
+    use_mfma_32x32=True,
+    use_transposed_qk_32x32=True,
+    use_transposed_scalar_state=True,
+    use_transposed_invariant_hoist=True,
+    use_transposed_mask_once=True,
+    use_transposed_half_local_pv=True,
+    causal_top_left=True,
+    right_bound=3,
+)
+
+_CONFIGS[101] = dict(
+    head_size=64,
+    block_size=32,
+    num_query_heads=32,
+    num_kv_heads=32,
+    dtype="bf16",
+    use_sinks=False,
+    sliding_window=0,
+    has_softcap=False,
+    kv_storage_dtype="fp8e4m3",
+    use_fp8_mfma_pv=True,
+    causal_top_left=True,
+)
+
+# --- idx104-106: the band on the transposed mask-limit path. idx102 hoisted causal
+# limit with rb4, idx103 unbounded, idx106-105 the D256 fast path (idx85, mask phase
+# split) unbounded and top-left + rb7, idx106 the per-iteration causal limit with
+# top-left + rb2.
+_CONFIGS[102] = dict(_CONFIGS[44], right_bound=4)
+
+_CONFIGS[103] = dict(_CONFIGS[46], right_bound=-1)
+
+_CONFIGS[104] = dict(_CONFIGS[85], right_bound=-1)
+
+_CONFIGS[105] = dict(_CONFIGS[85], causal_top_left=True, right_bound=7)
+
+_CONFIGS[106] = dict(
+    _CONFIGS[46],
+    use_transposed_invariant_hoist=False,
+    causal_top_left=True,
+    right_bound=2,
+)
 
 
 def _spec(idx: int) -> UnifiedAttention2DTiledSpec:

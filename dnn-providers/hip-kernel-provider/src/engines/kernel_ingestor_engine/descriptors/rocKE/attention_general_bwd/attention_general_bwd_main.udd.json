@@ -1,0 +1,6 @@
+{
+  "version": "1.0",
+  "id": "66b6e7e7-0d8f-4334-b7bb-d45125beec7b",
+  "name": "AttentionGeneralBwd main dispatch",
+  "dispatch_symbol": "hipkernel.attention_general_bwd.main_dispatch"
+}

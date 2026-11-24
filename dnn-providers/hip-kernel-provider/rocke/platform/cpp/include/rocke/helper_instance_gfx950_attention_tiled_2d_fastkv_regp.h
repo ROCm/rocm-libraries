@@ -3,7 +3,7 @@
  *
  * rocke/helper_instance_gfx950_attention_tiled_2d_fastkv_regp.h -- C99 port of the
  * symbols named by the porting task from
- * rocke/instances/gfx950/attention_tiled_2d_fastkv_regp.py (the experimental
+ * library/kernels/gfx950/attention_tiled_2d_fastkv_regp.py (the experimental
  * gfx950 "fast paged-KV descriptor + register-P" 2D-attention wrapper that
  * forces the production tiled R4 builder down the register-P residency path).
  *
@@ -56,13 +56,12 @@
  *   attribute is just direct access to proxy.spec (the wrapped struct), exactly
  *   as Python's __getattr__ forwards to self._spec.
  *
- * BUILD ENTRY (stub-to-link kernel body).
+ * BUILD ENTRY.
  *   rocke_build_unified_attention_2d_fastkv_register_p reproduces the 3 Python
  *   ValueError guards (sticky-error on b) and then calls the tiled builder with
- *   the proxy applied (use_register_pv forced true). The tiled builder's
- *   ~4000-line kernel body is the stub-to-link surface ALREADY established by the
- *   rocke_build_unified_attention_2d_tiled_scalar port; nothing long is duplicated
- *   here. ``arch`` NULL == the Python default "gfx950".
+ *   the proxy applied (use_register_pv forced true). The kernel body is the
+ *   rocke_build_unified_attention_2d_tiled_scalar port; nothing long is
+ *   duplicated here. ``arch`` NULL == the Python default "gfx950".
  *
  * Error model mirrors the rest of the C port: pure helpers return a sentinel
  * (false / NULL); the builder variants route the first failure through the
@@ -228,9 +227,8 @@ bool rocke_gfx950_supports_fastkv_register_p_2d(
  *
  * On a failing guard it records the Python ValueError text on ``b`` (ROCKE_ERR_VALUE)
  * and returns NULL. Otherwise it forms the proxy (use_register_pv -> true) and
- * calls rocke_build_unified_attention_2d_tiled_scalar with arch threaded through;
- * that builder's kernel body is the established stub-to-link surface. ``arch``
- * NULL == the Python default "gfx950". A dead/NULL builder is a NULL no-op. */
+ * calls rocke_build_unified_attention_2d_tiled_scalar with arch threaded through.
+ * ``arch`` NULL == the Python default "gfx950". A dead/NULL builder is a NULL no-op. */
 rocke_kernel_def_t* rocke_build_unified_attention_2d_fastkv_register_p(
     rocke_ir_builder_t* b, const rocke_attention_tiled_2d_spec_t* spec, const char* arch);
 

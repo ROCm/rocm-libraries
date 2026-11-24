@@ -1,8 +1,8 @@
 /* Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
  * SPDX-License-Identifier: MIT
- * Mirrors attention_strided_kv_emit.py without changing public spec layouts
- * (12, 13: strided with swizzled K/V LDS tiles on gfx942, gfx950; 14, 15:
- * strided with additive bias on gfx942, gfx950, which both engines reject). */
+ * Mirrors attention_strided_kv_emit.py (12, 13: strided with swizzled K/V LDS
+ * tiles on gfx942, gfx950; 14, 15: strided with additive bias on gfx942, gfx950,
+ * which both engines reject). */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -45,15 +45,13 @@ int main(int argc, char** argv)
     s.num_segments = 4;
     s.num_seqs = 3;
     s.use_kv_lds_swizzle = swizzle;
+    s.kv_layout = strided ? "strided" : "paged";
     s.use_additive_bias = bias;
     rocke_ir_builder_t b;
     if(rocke_ir_builder_init(&b, "strided_kv") != ROCKE_OK)
         return 1;
-    rocke_kernel_def_t* k
-        = use942 ? (strided ? rocke_build_unified_attention_3d_tiled_strided_gfx942(&b, &s, arch)
-                            : rocke_build_unified_attention_3d_tiled_gfx942(&b, &s, arch))
-                 : (strided ? rocke_build_unified_attention_3d_tiled_strided_gfx950(&b, &s, arch)
-                            : rocke_build_unified_attention_3d_tiled_gfx950(&b, &s, arch));
+    rocke_kernel_def_t* k = use942 ? rocke_build_unified_attention_3d_tiled_gfx942(&b, &s, arch)
+                                   : rocke_build_unified_attention_3d_tiled_gfx950(&b, &s, arch);
     if(!k || !rocke_ir_builder_ok(&b))
     {
         fprintf(stderr, "%s\n", rocke_ir_builder_error(&b));

@@ -45,7 +45,7 @@ LIBRARY_PACKAGES = frozenset(
 
 # platform-relative path -> library imports it may still make. Burn down only.
 ALLOWED = {
-    "cpp/bindings/prove_parity_binding.py": 3,
+    "cpp/bindings/prove_parity_binding.py": 1,
     "dsl_docs/optimization/utilities/tools/dsl_probes/probe_occupancy.py": 1,
     "dsl_docs/optimization/utilities/tools/utils/extract_rocke_isa.py": 1,
     "dsl_docs/optimization/utilities/tools/utils/profile_register_usage.py": 2,
