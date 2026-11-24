@@ -485,7 +485,7 @@ namespace ArgumentsHelper
         }
     };
 };
-// clang-format on
+    // clang-format on
 #endif
 
 #undef APPLY
