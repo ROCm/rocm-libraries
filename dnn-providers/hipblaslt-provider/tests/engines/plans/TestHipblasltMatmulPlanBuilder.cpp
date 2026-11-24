@@ -541,7 +541,7 @@ TEST_F(TestHipblasltMatmulPlanBuilderDecline, IsApplicableAcceptsZeroLeadingDime
     }
 }
 
-// Fails if a zero-ld output, whose rows would alias, is accepted.
+// Fails if a zero-ld output, whose rows would overlap, is accepted.
 TEST_F(TestHipblasltMatmulPlanBuilderDecline, IsApplicableDeclinesZeroLeadingDimensionOutput)
 {
     const auto recorder
@@ -553,8 +553,29 @@ TEST_F(TestHipblasltMatmulPlanBuilderDecline, IsApplicableDeclinesZeroLeadingDim
     GraphWrapper const graph(builder.GetBufferPointer(), builder.GetSize());
 
     EXPECT_FALSE(_planBuilder.isApplicable(_handle, graph));
-    EXPECT_TRUE(
-        recorder.hasLogContaining(HIPDNN_SEV_INFO, "Output leading dimension must be positive"))
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_INFO, "Output rows overlap"))
+        << recorder.getRecordedLogsAsString();
+}
+
+// Fails if a fused graph whose final output has a batch stride below one output matrix
+// ([2, 4, 5] with stride 10 < 20 elements), so that batches overlap, is accepted.
+TEST_F(TestHipblasltMatmulPlanBuilderDecline, IsApplicableDeclinesFinalOutputBatchOverlap)
+{
+    const auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
+    auto builder = withTensorStrides(createBatchedGraph({2, 4, 8},
+                                                        {32, 8, 1},
+                                                        {2, 8, 5},
+                                                        {40, 5, 1},
+                                                        {2, 4, 5},
+                                                        {20, 5, 1},
+                                                        PointwiseMode::RELU_FWD),
+                                     "C",
+                                     {10, 5, 1});
+    GraphWrapper const graph(builder.GetBufferPointer(), builder.GetSize());
+
+    EXPECT_FALSE(_planBuilder.isApplicable(_handle, graph));
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_INFO, "Output batches overlap"))
         << recorder.getRecordedLogsAsString();
 }
 

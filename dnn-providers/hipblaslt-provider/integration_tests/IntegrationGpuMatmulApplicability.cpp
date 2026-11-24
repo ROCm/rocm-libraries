@@ -308,6 +308,19 @@ protected:
             << "declined only at build_plans, after the engine was selected: " << stage;
     }
 
+    // Expects the engine to decline the graph: validate accepts it and build_plans is never
+    // reached, so a frontend rejection or a late failure cannot satisfy the test.
+    void expectDeclinedByEngine(const MatmulCase& c) const
+    {
+        Graph graph;
+        const std::string stage = buildGraph(graph, c);
+        EXPECT_FALSE(stage.empty()) << "the provider accepted a graph it cannot compute correctly";
+        EXPECT_NE(stage.rfind("validate", 0), 0U)
+            << "rejected by the frontend before the engine saw the graph: " << stage;
+        EXPECT_NE(stage.rfind("build_plans", 0), 0U)
+            << "declined only at build_plans, after the engine was selected: " << stage;
+    }
+
     // Builds, executes and compares against a CPU reference computed from the rounded inputs.
     // Every output element outside the output tensor's own elements (the guard elements past its
     // extent and any padding between batches) must keep its guard value.
@@ -576,13 +589,7 @@ TEST_F(IntegrationGpuMatmulApplicability, ZeroLeadingDimensionOutputDeclines)
     c.k = 16;
     c.n = 12;
     c.cStrides = {0, 1};
-    Graph graph;
-    const std::string stage = buildGraph(graph, c);
-    EXPECT_FALSE(stage.empty()) << "the provider accepted a zero-leading-dimension output";
-    EXPECT_NE(stage.rfind("validate", 0), 0U)
-        << "rejected by the frontend before the engine saw the graph: " << stage;
-    EXPECT_NE(stage.rfind("build_plans", 0), 0U)
-        << "declined only at build_plans, after the engine was selected: " << stage;
+    expectDeclinedByEngine(c);
 }
 
 // The engine runs the epilogue on the FP32 accumulator, so a virtual intermediate narrower than
@@ -746,4 +753,47 @@ TEST_F(IntegrationGpuMatmulApplicability, HalfFusedFinalWithPaddedBatchStrideMat
     c.withRelu = true;
     c.finalType = DataType::HALF;
     expectMatchesReference(c, FP16_TOLERANCE);
+}
+
+// A final output [2,4,5] with strides [10,5,1] has a batch stride below one matrix's span (4 rows
+// of stride 5 and 5 columns = 20 elements): batch 0 row 2 and batch 1 row 0 share element 10. The
+// virtual matmul output is packed, so only the final output overlaps.
+// Fails if the provider accepts a fused final output whose batches overlap.
+TEST_F(IntegrationGpuMatmulApplicability, FusedFinalWithOverlappingBatchStrideDeclines)
+{
+    MatmulCase c;
+    c.m = 4;
+    c.k = 8;
+    c.n = 5;
+    c.batchDims = {2};
+    c.cStrides = {20, 5, 1};
+    c.finalStrides = {10, 5, 1};
+    c.withRelu = true;
+    expectDeclinedByEngine(c);
+}
+
+// A plain matmul output [2,4,5] with strides [10,5,1] overlaps its batches the same way.
+// Fails if the provider accepts a matmul output whose batch stride is below one matrix's span.
+TEST_F(IntegrationGpuMatmulApplicability, OverlappingBatchStrideOutputDeclines)
+{
+    MatmulCase c;
+    c.m = 4;
+    c.k = 8;
+    c.n = 5;
+    c.batchDims = {2};
+    c.cStrides = {10, 5, 1};
+    expectDeclinedByEngine(c);
+}
+
+// A matmul output [4,5] with strides [4,1] has a row stride below the column count: row 0 column 4
+// and row 1 column 0 share element 4.
+// Fails if the provider accepts an output whose row stride is smaller than its column count.
+TEST_F(IntegrationGpuMatmulApplicability, OverlappingRowsOutputDeclines)
+{
+    MatmulCase c;
+    c.m = 4;
+    c.k = 8;
+    c.n = 5;
+    c.cStrides = {4, 1};
+    expectDeclinedByEngine(c);
 }

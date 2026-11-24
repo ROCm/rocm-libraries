@@ -186,13 +186,17 @@ void requireRowMajorOutput(
             "Unsupported output layout: hipBLASLt engine requires a row-major output matrix: "
                 + tensor.name());
     }
+    const auto& dims = tensor.dims();
+    const auto rows = dims[dims.size() - 2];
+    const auto cols = dims[dims.size() - 1];
     const auto ld = leadingDimension(tensor);
-    if(ld == 0)
+    if(rows > 1 && ld < cols)
     {
         throw hipdnn_plugin_sdk::HipdnnPluginException(
             HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-            "Output leading dimension must be positive, rows would alias. UID: "
-                + std::to_string(tensor.uid()));
+            "Output rows overlap: row stride " + std::to_string(ld)
+                + " is smaller than the column count " + std::to_string(cols)
+                + ". UID: " + std::to_string(tensor.uid()));
     }
 }
 

@@ -229,7 +229,8 @@ void MatmulParams::setBatchInfo(
         // The layout takes its batch count from the matmul output tensor and its batch offset
         // from the final output, so the two must agree on the batch dimensions. The final
         // output's batch stride may differ from the matmul output's (a padded output); its
-        // batch axes must still nest on one stride.
+        // batch axes must still nest on one stride, and that stride must be at least the span
+        // of one output matrix so that batches do not overlap.
         const auto finalDims = tFinal.dims();
         PLUGIN_THROW_IF_TRUE(finalDims.size() != cDims.size()
                                  || !std::equal(cDims.begin(), cDims.end() - 2, finalDims.begin()),
@@ -237,6 +238,16 @@ void MatmulParams::setBatchInfo(
                              "Matmul: final output batch dimensions must equal the matmul output "
                              "batch dimensions");
         const int64_t finalBatchStride = flattenedBatchStride(tFinal);
+        const int64_t outRows = finalDims[finalDims.size() - 2];
+        const int64_t outCols = finalDims[finalDims.size() - 1];
+        const int64_t matrixSpan
+            = (outRows - 1) * hipblaslt_utils::leadingDimension(tFinal) + outCols;
+        PLUGIN_THROW_IF_TRUE(
+            finalBatchStride < matrixSpan,
+            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+            "Output batches overlap: batch stride " + std::to_string(finalBatchStride)
+                + " is smaller than one output matrix (" + std::to_string(matrixSpan)
+                + " elements). UID: " + std::to_string(tFinal.uid()));
 
         _matrixLayoutA.setBatchCount(cBatch);
         _matrixLayoutB.setBatchCount(cBatch);

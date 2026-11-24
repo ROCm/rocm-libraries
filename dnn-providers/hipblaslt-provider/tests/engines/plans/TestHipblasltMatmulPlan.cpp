@@ -631,6 +631,72 @@ TEST(TestMatmulParams, CLayoutBatchOffsetTakesFinalOutputStrideWhenPadded)
     EXPECT_EQ(stridedBatchOffset(params->c()), 27);
 }
 
+// Fails if a fused final output whose batch stride (10) is smaller than one output matrix
+// (20 elements, so batch 0 row 2 and batch 1 row 0 share an address) is accepted just because
+// the virtual matmul output is packed.
+TEST(TestMatmulParams, ThrowsOnFusedFinalOutputBatchStrideBelowMatrixSpan)
+{
+    auto fused = createValidMatmulBiasActivGraph(
+        {2, 4, 8},
+        {32, 8, 1},
+        {2, 8, 5},
+        {40, 5, 1},
+        {2, 4, 5},
+        {20, 5, 1},
+        false,
+        hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::RELU_FWD);
+    auto builder = mutateGraph(fused, [](auto& g) {
+        for(auto& tensor : g.tensors)
+        {
+            if(tensor->name == "C")
+            {
+                tensor->strides = {10, 5, 1};
+            }
+        }
+    });
+    GraphWrapper const graph(builder.GetBufferPointer(), builder.GetSize());
+
+    auto* matmulAttrs = graph.getNode(0).attributes_as_MatmulAttributes();
+    auto* activAttrs = graph.getNode(1).attributes_as_PointwiseAttributes();
+    ASSERT_NE(matmulAttrs, nullptr);
+    ASSERT_NE(activAttrs, nullptr);
+
+    EXPECT_THROW(MatmulParams(*matmulAttrs, nullptr, activAttrs, graph.getTensorMap()),
+                 HipdnnPluginException);
+}
+
+// Fails if a plain matmul output whose batch stride is smaller than one output matrix, or zero,
+// is accepted, or if a stride exactly equal to the matrix span ([2, 4, 5] with row stride 5
+// spans 20 elements) is declined. The padded case is covered by
+// CLayoutBatchOffsetTakesFinalOutputStrideWhenPadded.
+TEST(TestMatmulParams, PlainOutputBatchStrideMustCoverOneMatrix)
+{
+    const auto makeGraph = [](const std::vector<int64_t>& cStrides) {
+        return createValidMatmulGraph(
+            {2, 4, 8}, {32, 8, 1}, {2, 8, 5}, {40, 5, 1}, {2, 4, 5}, cStrides);
+    };
+
+    for(const auto& cStrides : {std::vector<int64_t>{10, 5, 1}, std::vector<int64_t>{0, 5, 1}})
+    {
+        auto builder = makeGraph(cStrides);
+        GraphWrapper const graph(builder.GetBufferPointer(), builder.GetSize());
+        auto* attrs = graph.getNode(0).attributes_as_MatmulAttributes();
+        ASSERT_NE(attrs, nullptr);
+
+        EXPECT_THROW(MatmulParams(*attrs, graph.getTensorMap()), HipdnnPluginException)
+            << "batch stride " << cStrides[0];
+    }
+
+    auto builder = makeGraph({20, 5, 1});
+    GraphWrapper const graph(builder.GetBufferPointer(), builder.GetSize());
+    auto* attrs = graph.getNode(0).attributes_as_MatmulAttributes();
+    ASSERT_NE(attrs, nullptr);
+
+    std::optional<MatmulParams> params;
+    ASSERT_NO_THROW(params.emplace(*attrs, graph.getTensorMap()));
+    EXPECT_EQ(stridedBatchOffset(params->c()), 20);
+}
+
 TEST(TestMatmulParams, ALayoutBatchOffsetIgnoresSingletonBatchAxis)
 {
     auto builder = createValidMatmulGraph(

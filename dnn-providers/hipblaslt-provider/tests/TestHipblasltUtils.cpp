@@ -378,22 +378,37 @@ TEST(TestHipblasltUtils, LeadingDimensionThrowsOnUnsupportedLayout)
         hipdnn_plugin_sdk::HipdnnPluginException);
 }
 
-// Fails if a zero-ld output, whose rows would alias, is accepted, or if a positive-ld
-// row-major output is declined.
-TEST(TestHipblasltUtils, RequireRowMajorOutputRejectsZeroLeadingDimension)
+// Fails if an output whose rows overlap (row stride below the column count, zero included) is
+// accepted, if a packed or padded output is declined, or if a single-row output, whose row
+// stride is never used, is declined for its stride.
+TEST(TestHipblasltUtils, RequireRowMajorOutputRejectsOverlappingRows)
 {
     using hipdnn_flatbuffers_sdk::flatbuffer_utilities::TensorAttributesWrapper;
 
-    const TensorHolder zeroLd({4, 8}, {0, 1});
+    const TensorHolder zeroLd({4, 5}, {0, 1});
     EXPECT_THROW(requireRowMajorOutput(TensorAttributesWrapper(zeroLd.attrs)),
+                 hipdnn_plugin_sdk::HipdnnPluginException);
+
+    const TensorHolder shortLd({4, 5}, {4, 1});
+    EXPECT_THROW(requireRowMajorOutput(TensorAttributesWrapper(shortLd.attrs)),
+                 hipdnn_plugin_sdk::HipdnnPluginException);
+
+    const TensorHolder unitLd({4, 5}, {1, 1});
+    EXPECT_THROW(requireRowMajorOutput(TensorAttributesWrapper(unitLd.attrs)),
                  hipdnn_plugin_sdk::HipdnnPluginException);
 
     const TensorHolder zeroLdBatched({2, 4, 8}, {32, 0, 1});
     EXPECT_THROW(requireRowMajorOutput(TensorAttributesWrapper(zeroLdBatched.attrs)),
                  hipdnn_plugin_sdk::HipdnnPluginException);
 
-    const TensorHolder positiveLd({4, 8}, {10, 1});
-    EXPECT_NO_THROW(requireRowMajorOutput(TensorAttributesWrapper(positiveLd.attrs)));
+    const TensorHolder packed({4, 5}, {5, 1});
+    EXPECT_NO_THROW(requireRowMajorOutput(TensorAttributesWrapper(packed.attrs)));
+
+    const TensorHolder padded({4, 5}, {7, 1});
+    EXPECT_NO_THROW(requireRowMajorOutput(TensorAttributesWrapper(padded.attrs)));
+
+    const TensorHolder singleRow({1, 5}, {0, 1});
+    EXPECT_NO_THROW(requireRowMajorOutput(TensorAttributesWrapper(singleRow.attrs)));
 }
 
 // ============================================================================

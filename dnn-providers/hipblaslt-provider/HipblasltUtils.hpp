@@ -130,8 +130,9 @@ int64_t leadingDimension(
 hipblasOperation_t operandTranspose(
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::TensorAttributesWrapper& tensor);
 
-// Throws BAD_PARAM unless the output matrix is row-major with a positive leading
-// dimension (a zero leading dimension would make output rows alias).
+// Throws BAD_PARAM unless the output matrix is row-major and its rows do not overlap:
+// with more than one row, the leading dimension must be at least the column count.
+// A single-row output keeps any stride.
 void requireRowMajorOutput(
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::TensorAttributesWrapper& tensor);
 
