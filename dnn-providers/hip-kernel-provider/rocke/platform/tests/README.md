@@ -98,7 +98,7 @@ do not all edit one central file:
 | `tests/cmake/InstanceTests.cmake` | Instance-layer native tests |
 | `tests/cmake/TestCategoryLabels.cmake` | Provider YAML category application after every test is registered |
 | `platform/CMakeLists.txt` | Installed Python CTest entries; includes `library/tests/ctest_lists.cmake`; not build-tree C++ ownership |
-| `library/tests/ctest_lists.cmake` | Installed library CTest entries (each library suite enrols its own pytest files) |
+| `library/tests/ctest_lists.cmake` | Installed library CTest entries (each library suite enrols its own pytest files), plus one build-tree entry, `rocke_library_attention_strided_ab_dryrun`, whose driver tests skip in an installed tree |
 | `library/cpp/tests/CMakeLists.txt` | Library C++ mirror host tests (`rocke_wgrad_streamk_host`, `rocke_conv_direct_dw_dgrad_host`) |
 
 Add a native target to its concern-owned fragment. Do not put registration back
