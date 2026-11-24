@@ -601,18 +601,8 @@ struct BlockFmhaPipelineQRKSVSTdmPingPong : BlockFmhaPipelineQRKSVSTdm<Problem_,
                                              index_t num_splits = 1,
                                              index_t i_split    = 0)
     {
-        if constexpr(kHasSink)
-        {
-            // split-KV: the sink tiles go to split 0, the window's tiles are shared out
-            if(num_splits > 1)
-                return mask.GetSplitSinkTileRangeAlongX(
-                    q_origin.at(I0), number<kM0>{}, number<kN0>{}, num_splits, i_split);
-            return mask.GetSinkTileRangeAlongX(q_origin.at(I0), number<kM0>{}, number<kN0>{});
-        }
-        else
-        {
-            auto [start, end] =
-                mask.GetTileRangeAlongX(q_origin.at(I0), number<kM0>{}, number<kN0>{});
+        // split i_split of num_splits: the next equal run of whole key tiles of [start, end)
+        const auto split = [&](index_t& start, index_t& end) {
             if(num_splits > 1)
             {
                 const index_t tiles_per_split =
@@ -621,6 +611,20 @@ struct BlockFmhaPipelineQRKSVSTdmPingPong : BlockFmhaPipelineQRKSVSTdm<Problem_,
                 end                       = min(end, split_start + tiles_per_split * kN0);
                 start                     = min(split_start, end);
             }
+        };
+        if constexpr(kHasSink)
+        {
+            // split-KV: the sink tiles go to split 0, the window's tiles are shared out
+            auto [sink_seq_end, start, end] =
+                mask.GetSinkTileRangeAlongX(q_origin.at(I0), number<kM0>{}, number<kN0>{});
+            split(start, end);
+            return ck_tile::make_tuple(i_split == 0 ? sink_seq_end : index_t{0}, start, end);
+        }
+        else
+        {
+            auto [start, end] =
+                mask.GetTileRangeAlongX(q_origin.at(I0), number<kM0>{}, number<kN0>{});
+            split(start, end);
             return ck_tile::make_tuple(0, start, end);
         }
     }
