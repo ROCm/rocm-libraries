@@ -1,7 +1,7 @@
 // Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
-// tile_example_mx_moe_flatmm: one MX (a4w4) MoE GEMM on gfx1250, checked against a CPU
+// tile_example_mx_moe_flatmm: one MX (a4w4 or a8w4) MoE GEMM on gfx1250, checked against a CPU
 // reference. See mx_moe_flatmm.hpp for the problem layout.
 
 #include "mx_moe_flatmm.hpp"
@@ -17,7 +17,7 @@ auto create_args(int argc, char* argv[])
                 "N of the GEMM, a multiple of 256 (gemm1_gate_up: 2 x intermediate; gemm2: hidden)")
         .insert("K", "1024", "K of the GEMM (gemm1_gate_up: hidden; gemm2: intermediate)")
         .insert("gemm_kind", "gemm1_gate_up", "gemm1_gate_up | gemm2 | gemm2_per_slot")
-        .insert("mx_prec", "fp4xfp4", "A x B data types; supported: fp4xfp4")
+        .insert("mx_prec", "fp4xfp4", "A x B data types: fp4xfp4 (a4w4) or fp8xfp4 (a8w4)")
         .insert("init",
                 "0",
                 "0: random, 1: constant (all 1), 2: row r of A = v(r), rest 1 (row-mapping check)")
@@ -37,8 +37,7 @@ int main(int argc, char* argv[])
         return EXIT_FAILURE;
     try
     {
-        if(arg_parser.get_str("mx_prec") != "fp4xfp4")
-            throw std::runtime_error("only mx_prec=fp4xfp4 is supported");
+        const std::string prec = arg_parser.get_str("mx_prec");
         const std::string kind = arg_parser.get_str("gemm_kind");
         MxMoeCase c;
         c.experts    = arg_parser.get_int("experts");
@@ -51,13 +50,22 @@ int main(int argc, char* argv[])
         c.validate   = arg_parser.get_int("validate") != 0;
         c.warmup     = arg_parser.get_int("warmup");
         c.repeat     = arg_parser.get_int("repeat");
-        if(kind == "gemm1_gate_up")
-            return run_mx_moe_case<ck_tile::MoeFlatmmKind::kFFN_gemm1_gate_up>(c).pass ? 0 : 1;
-        if(kind == "gemm2")
-            return run_mx_moe_case<ck_tile::MoeFlatmmKind::kFFN_gemm2>(c).pass ? 0 : 1;
-        if(kind == "gemm2_per_slot")
-            return run_mx_moe_case<ck_tile::MoeFlatmmKind::kFFN_gemm2_per_slot>(c).pass ? 0 : 1;
-        throw std::runtime_error("gemm_kind must be gemm1_gate_up, gemm2 or gemm2_per_slot");
+        auto run     = [&](auto a_type) -> int {
+            using A = decltype(a_type);
+            using K = ck_tile::MoeFlatmmKind;
+            if(kind == "gemm1_gate_up")
+                return run_mx_moe_case<K::kFFN_gemm1_gate_up, A>(c).pass ? 0 : 1;
+            if(kind == "gemm2")
+                return run_mx_moe_case<K::kFFN_gemm2, A>(c).pass ? 0 : 1;
+            if(kind == "gemm2_per_slot")
+                return run_mx_moe_case<K::kFFN_gemm2_per_slot, A>(c).pass ? 0 : 1;
+            throw std::runtime_error("gemm_kind must be gemm1_gate_up, gemm2 or gemm2_per_slot");
+        };
+        if(prec == "fp4xfp4")
+            return run(ck_tile::pk_fp4_t{});
+        if(prec == "fp8xfp4")
+            return run(ck_tile::fp8_t{});
+        throw std::runtime_error("mx_prec must be fp4xfp4 or fp8xfp4");
     }
     catch(const std::runtime_error& e)
     {
