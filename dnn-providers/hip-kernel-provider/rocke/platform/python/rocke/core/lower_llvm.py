@@ -987,6 +987,19 @@ _GLOBAL_LOAD_PTR_TYPES: dict[int, str] = {
 }
 
 
+def _scalar_global_align(op: Op, *, unannotated: int) -> int:
+    """The ``align`` that scalar global load or store ``op`` prints: its
+    :func:`align_attr`, refused as the vector accesses refuse it, or
+    ``unannotated`` when the op carries none.
+
+    ``unannotated`` is the op's own claim for IR without ``align`` (2 for the
+    ``f16`` ops, 1 for the typed ops), kept so such IR lowers as before. The
+    C++ engine's twin is ``ll_scalar_global_align`` in ``lower_llvm/mem.cpp``.
+    """
+    align = align_attr(op)
+    return unannotated if align is None else align
+
+
 # Declaration overrides, one table per declaration ABI generation
 # (:class:`_LlvmDeclarationAbi`, which a compiler lane reaches through its
 # emission profile). Each table holds only the entries whose text changed AT
@@ -3570,7 +3583,7 @@ class _Lowerer:
         ptr, idx = op.operands
         _, ptr_ty = self._anyptr_space("global_load_f16", ptr, _GLOBAL_LOAD_PTR_TYPES)
         gep = self._fresh("gep")
-        align = int(op.attrs.get("align", 2))
+        align = _scalar_global_align(op, unannotated=2)
         self._current().emit(
             f"  {gep} = getelementptr inbounds half, {ptr_ty} "
             f"{self._operand(ptr)}, i32 {self._operand(idx)}"
@@ -3587,7 +3600,7 @@ class _Lowerer:
         # an i64 element offset (paged caches past 2 GiB) stays valid IR.
         idx_ty = _llvm_type(idx.type)
         gep = self._fresh("gep")
-        align = int(op.attrs.get("align", 1))
+        align = _scalar_global_align(op, unannotated=1)
         self._current().emit(
             f"  {gep} = getelementptr inbounds {elem_ty}, {ptr_ty} "
             f"{self._operand(ptr)}, {idx_ty} {self._operand(idx)}"
@@ -3600,7 +3613,7 @@ class _Lowerer:
         ptr, idx, val = op.operands
         self._require_global_header_ptr("store_f16", ptr)
         gep = self._fresh("gep")
-        align = int(op.attrs.get("align", 2))
+        align = _scalar_global_align(op, unannotated=2)
         self._current().emit(
             f"  {gep} = getelementptr inbounds half, ptr addrspace(1) "
             f"{self._operand(ptr)}, i32 {self._operand(idx)}"
@@ -3614,7 +3627,7 @@ class _Lowerer:
         self._require_global_header_ptr("global_store", ptr)
         elem_ty = _llvm_type(val.type)
         gep = self._fresh("gep")
-        align = int(op.attrs.get("align", 1))
+        align = _scalar_global_align(op, unannotated=1)
         self._current().emit(
             f"  {gep} = getelementptr inbounds {elem_ty}, ptr addrspace(1) "
             f"{self._operand(ptr)}, i32 {self._operand(idx)}"

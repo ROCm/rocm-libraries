@@ -32,9 +32,12 @@ slice 3 (see resistance.md).
 
 import pytest
 
+from copy import deepcopy
+
 # `from ... import Solution` correctly yields the class (the package __init__
 # re-exports it). The module's static methods are reached via the class.
 from tensilelite.SolutionStructs.Solution import Solution
+from tensilelite.SolutionStructs import Naming
 
 pytestmark = pytest.mark.unit
 
@@ -51,6 +54,50 @@ def test_solution_construction(solution, solution_summary, snapshot):
 def test_all_solutions_constructed(solutions, snapshot):
     # Pin how many solutions the fixture yields + each one's name.
     assert {"count": len(solutions), "names": [str(s) for s in solutions]} == snapshot
+
+
+@pytest.mark.parametrize("b_rotate", [0, 1])
+@pytest.mark.parametrize("split_gsu", [False, True])
+@pytest.mark.parametrize("naming", [
+    Naming.getKernelNameMin, Naming.getSolutionNameMin, Naming.getSolutionNameFull,
+    Naming.getKeyNoInternalArgs, Naming.getKernelCompileKey,
+])
+def test_contiguous_a_layout_keeps_default_names(solution, naming, split_gsu, b_rotate):
+    state = deepcopy(solution._state)
+    state["LDSSegmentBRotate"] = b_rotate
+    assert state["WaveTileContiguousA"] is False
+    del state["WaveTileContiguousA"]
+    legacy_state = deepcopy(state)
+    disabled = naming(state, split_gsu)
+    assert "_WTCA" not in disabled
+    assert ("_LDSSBR1" in disabled) == bool(b_rotate)
+    assert state == legacy_state
+
+    state["WaveTileContiguousA"] = False
+    assert naming(state, split_gsu) == disabled
+    state["WaveTileContiguousA"] = True
+    enabled = naming(state, split_gsu)
+    assert "_WTCA1" in enabled
+    assert "_WTCA0" not in enabled
+    assert enabled.replace("_WTCA1", "") == disabled
+
+
+@pytest.mark.parametrize("naming", [
+    Naming.getKernelNameMin, Naming.getSolutionNameMin, Naming.getSolutionNameFull,
+    Naming.getKeyNoInternalArgs, Naming.getKernelCompileKey,
+])
+@pytest.mark.parametrize("custom", [
+    {"CustomKernelName": "handwritten_kernel"},
+    {"CustomKernel": {"name": "handwritten_kernel"}},
+])
+@pytest.mark.parametrize("contiguous_a", [False, True])
+def test_contiguous_a_preserves_explicit_custom_symbol(solution, naming, custom, contiguous_a):
+    state = deepcopy(solution._state)
+    state.update(custom, WaveTileContiguousA=contiguous_a)
+    expected = "handwritten_kernel"
+    if naming is Naming.getKeyNoInternalArgs:
+        expected += state.get("codeObjectFile", "") + str(state.get("DeviceNames", ""))
+    assert naming(state, False) == expected
 
 
 # ===========================================================================

@@ -41,7 +41,9 @@ constexpr int gfx942_sysdb_target_cu  = 304;
 
 } // namespace
 
-TEST(CPU_SysDbSelectionCu_NONE, Gfx942LowCuRedirectsToHighCuDb)
+using CPU_SysDbSelectionCu_NONE = testing::TestWithParam<int>;
+
+TEST_P(CPU_SysDbSelectionCu_NONE, Gfx942LowCuRedirectsToHighCuDb)
 {
     // A low-CU gfx942 part (MI308-class) must borrow the high-CU gfx942 DB.
     EXPECT_EQ(miopen::GetSysDbSelectionCu("gfx942", 1), gfx942_sysdb_target_cu);
@@ -49,7 +51,7 @@ TEST(CPU_SysDbSelectionCu_NONE, Gfx942LowCuRedirectsToHighCuDb)
     EXPECT_EQ(miopen::GetSysDbSelectionCu("gfx942", 64), gfx942_sysdb_target_cu);
 }
 
-TEST(CPU_SysDbSelectionCu_NONE, Gfx942ThresholdBoundary)
+TEST_P(CPU_SysDbSelectionCu_NONE, Gfx942ThresholdBoundary)
 {
     // At and below the threshold the redirect applies; one CU above it does not.
     EXPECT_EQ(miopen::GetSysDbSelectionCu("gfx942", gfx942_low_cu_threshold),
@@ -58,7 +60,7 @@ TEST(CPU_SysDbSelectionCu_NONE, Gfx942ThresholdBoundary)
               gfx942_low_cu_threshold + 1);
 }
 
-TEST(CPU_SysDbSelectionCu_NONE, Gfx942HighCuUnchanged)
+TEST_P(CPU_SysDbSelectionCu_NONE, Gfx942HighCuUnchanged)
 {
     // High-CU gfx942 parts already have a matching DB; the value passes through,
     // including the 304-CU part itself and a typical 228-CU (MI300X-class) part.
@@ -67,7 +69,7 @@ TEST(CPU_SysDbSelectionCu_NONE, Gfx942HighCuUnchanged)
               gfx942_sysdb_target_cu);
 }
 
-TEST(CPU_SysDbSelectionCu_NONE, OtherArchesArePassthrough)
+TEST_P(CPU_SysDbSelectionCu_NONE, OtherArchesArePassthrough)
 {
     // The redirect is scoped to gfx942 only; every other db_id keeps its real
     // CU count, even when that count is at or below the gfx942 threshold.
@@ -78,8 +80,10 @@ TEST(CPU_SysDbSelectionCu_NONE, OtherArchesArePassthrough)
     EXPECT_EQ(miopen::GetSysDbSelectionCu("gfx908", 120), 120);
 }
 
-TEST(CPU_SysDbSelectionCu_NONE, EmptyDbIdIsPassthrough)
+TEST_P(CPU_SysDbSelectionCu_NONE, EmptyDbIdIsPassthrough)
 {
     // A missing/empty db_id must not accidentally trigger the gfx942 redirect.
     EXPECT_EQ(miopen::GetSysDbSelectionCu("", 40), 40);
 }
+
+INSTANTIATE_TEST_SUITE_P(Quick, CPU_SysDbSelectionCu_NONE, testing::Values(0));

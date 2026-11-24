@@ -9,10 +9,7 @@
 
 #include <gtest/gtest.h>
 
-#include <nlohmann/json.hpp>
-
 #include "OperationsDir.hpp"
-#include <fstream>
 #include <string>
 #include <vector>
 
@@ -32,28 +29,19 @@ namespace sdk = hipdnn_flatbuffers_sdk::utilities;
 /// One real graph built through the shipped declaration, as the tool builds them.
 std::vector<uint8_t> someGraph()
 {
-    const std::string path = hipdnn_corpus_gen::test::operationsDir() + "/sdpa_fwd.opmeta.json";
-    std::ifstream file(path);
-    EXPECT_TRUE(file.is_open()) << path;
-    const auto parsed = parseOperationMetadata(nlohmann::json::parse(file));
-    EXPECT_TRUE(parsed.ok()) << (parsed.errors.empty() ? "" : parsed.errors.front());
-    if(!parsed.ok())
-    {
-        return {};
-    }
+    const auto metadata = test::shippedOperation("sdpa_fwd");
 
-    const ProblemPoint point{{"batch", int64_t{1}},
-                             {"heads", int64_t{32}},
-                             {"heads_kv", int64_t{32}},
-                             {"seqlen_q", int64_t{2048}},
-                             {"seqlen_k", int64_t{2048}},
-                             {"head_dim", int64_t{128}},
-                             {"is_causal", true},
-                             {"alignment", std::string("top_left")},
-                             {"generate_stats", false},
-                             {"dtype", std::string("bf16")}};
+    const auto point = test::withDefaultCategoricals(metadata,
+                                                     ProblemPoint{{"batch", int64_t{1}},
+                                                                  {"heads", int64_t{32}},
+                                                                  {"heads_kv", int64_t{32}},
+                                                                  {"seqlen_q", int64_t{2048}},
+                                                                  {"seqlen_k", int64_t{2048}},
+                                                                  {"head_dim", int64_t{128}},
+                                                                  {"is_causal", true},
+                                                                  {"dtype", std::string("bf16")}});
 
-    const auto built = buildGraphFor(*parsed.metadata, point);
+    const auto built = buildGraphFor(metadata, point);
     EXPECT_TRUE(built.ok()) << built.error;
     return built.bytes;
 }
@@ -151,23 +139,54 @@ TEST(TestGraphIdentity, DifferentGraphsGetDifferentContentKeys)
     auto other = someGraph();
     const auto original = stampGraphIdentity(other, "a_graph");
     // Another shape through the same declaration.
-    const std::string path = hipdnn_corpus_gen::test::operationsDir() + "/sdpa_fwd.opmeta.json";
-    std::ifstream file(path);
-    const auto parsed = parseOperationMetadata(nlohmann::json::parse(file));
-    ASSERT_TRUE(parsed.ok());
-    const ProblemPoint point{{"batch", int64_t{2}},
-                             {"heads", int64_t{32}},
-                             {"heads_kv", int64_t{32}},
-                             {"seqlen_q", int64_t{2048}},
-                             {"seqlen_k", int64_t{2048}},
-                             {"head_dim", int64_t{128}},
-                             {"is_causal", true},
-                             {"alignment", std::string("top_left")},
-                             {"generate_stats", false},
-                             {"dtype", std::string("bf16")}};
-    const auto built = buildGraphFor(*parsed.metadata, point);
+    const auto metadata = test::shippedOperation("sdpa_fwd");
+    const auto point = test::withDefaultCategoricals(metadata,
+                                                     ProblemPoint{{"batch", int64_t{2}},
+                                                                  {"heads", int64_t{32}},
+                                                                  {"heads_kv", int64_t{32}},
+                                                                  {"seqlen_q", int64_t{2048}},
+                                                                  {"seqlen_k", int64_t{2048}},
+                                                                  {"head_dim", int64_t{128}},
+                                                                  {"is_causal", true},
+                                                                  {"dtype", std::string("bf16")}});
+    const auto built = buildGraphFor(metadata, point);
     ASSERT_TRUE(built.ok()) << built.error;
     EXPECT_NE(stampGraphIdentity(built.bytes, "a_graph").key, original.key);
+}
+
+TEST(TestGraphIdentity, TheDefaultFacetsKeepTheContentKeyOfTheGraphBeforeTheyExisted)
+{
+    // plain form, bshd, inv_sqrt_d, no window: the graph the declaration built before the form,
+    // layout, scale and window facets were added, so a corpus's old measurements still join on
+    // `benchmark`. The keys are those the tool wrote for the same two problems before the facets
+    // (a decode and a prefill with statistics).
+    const auto metadata = test::shippedOperation("sdpa_fwd");
+    const auto keyOf = [&metadata](int64_t seqlenQ,
+                                   int64_t seqlenK,
+                                   int64_t batch,
+                                   int64_t heads,
+                                   int64_t headsKv,
+                                   int64_t headDim,
+                                   bool causal,
+                                   const std::string& dtype,
+                                   bool stats) {
+        const auto point = test::withDefaultCategoricals(metadata,
+                                                         ProblemPoint{{"batch", batch},
+                                                                      {"heads", heads},
+                                                                      {"heads_kv", headsKv},
+                                                                      {"seqlen_q", seqlenQ},
+                                                                      {"seqlen_k", seqlenK},
+                                                                      {"head_dim", headDim},
+                                                                      {"is_causal", causal},
+                                                                      {"generate_stats", stats},
+                                                                      {"dtype", dtype}});
+        const auto built = buildGraphFor(metadata, point);
+        EXPECT_TRUE(built.ok()) << built.error;
+        return stampGraphIdentity(built.bytes, "a_graph").key;
+    };
+
+    EXPECT_EQ(keyOf(1, 4096, 2, 32, 8, 128, true, "bf16", false), "17138204847398273196");
+    EXPECT_EQ(keyOf(2048, 2048, 1, 16, 16, 64, false, "fp16", true), "11702855325205750441");
 }
 
 TEST(TestGraphIdentity, BytesThatAreNotAGraphHaveNoContentKey)
