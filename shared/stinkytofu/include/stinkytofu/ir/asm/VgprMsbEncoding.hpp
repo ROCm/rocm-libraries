@@ -200,34 +200,6 @@ inline void forEachVgprMsbSlotOperand(const StinkyInstruction& inst, Callback&& 
                             });
 }
 
-/// Record the per-slot VGPR banks of \p inst; \p hasVgpr set if any VGPR is seen.
-///
-/// \p bankOf names the bank of each slotted VGPR operand, called as
-/// bankOf(operand, operandIndex, isDest). It exists so that a colouring can be
-/// priced before it is written into the operands; everywhere else the bank is
-/// the operand's own, which is what collectVgprMsbSlots() passes.
-template <typename BankOf>
-inline void collectVgprMsbSlotsWith(const StinkyInstruction* inst, BankOf&& bankOf, int msbSrc[3],
-                                    int& msbDst, bool& hasVgpr) {
-    forEachVgprMsbSlotOperand(
-        *inst, [&](const StinkyRegister& reg, size_t operand, bool isDest, int slot) {
-            const int msb = bankOf(reg, operand, isDest);
-
-            hasVgpr = true;
-            if (slot == 3)
-                msbDst = msb;
-            else
-                msbSrc[slot] = msb;
-        });
-}
-
-inline void collectVgprMsbSlots(const StinkyInstruction* inst, int msbSrc[3], int& msbDst,
-                                bool& hasVgpr) {
-    collectVgprMsbSlotsWith(
-        inst, [](const StinkyRegister& reg, size_t, bool) { return getMsbFromVgpr(reg); }, msbSrc,
-        msbDst, hasVgpr);
-}
-
 /// Every slot of a bank word.
 constexpr int kVgprMsbFullMask = 0xFF;
 
@@ -249,10 +221,11 @@ struct VgprMsbRequirement {
 };
 
 /// requiredVgprMsb() with each slotted VGPR operand's bank supplied by \p bankOf,
-/// as collectVgprMsbSlotsWith() takes it. One body for both, so a predicted
-/// word and an emitted one cannot disagree about which instructions carry an
-/// MSB or which field maps to which slot. When two operands share a slot, the
-/// later one is what the word holds.
+/// called as bankOf(operand, operandIndex, isDest), so that a colouring can be
+/// priced before it is written into the operands. One body for both, so a
+/// predicted word and an emitted one cannot disagree about which instructions
+/// carry an MSB or which field maps to which slot. When two operands share a
+/// slot, the later one is what the word holds.
 template <typename BankOf>
 inline VgprMsbRequirement requiredVgprMsbWith(const StinkyInstruction& inst, BankOf&& bankOf) {
     VgprMsbRequirement required;
@@ -285,20 +258,11 @@ inline VgprMsbRequirement requiredVgprMsb(const StinkyInstruction& inst) {
         inst, [](const StinkyRegister& reg, size_t, bool) { return getMsbFromVgpr(reg); });
 }
 
-/// requiredVgprMsbWith() as (word, hasVgpr): the word, or -1 with hasVgpr false
-/// for an instruction that needs none.
-template <typename BankOf>
-inline std::pair<int, bool> computeRequiredMsbWith(const StinkyInstruction* inst, BankOf&& bankOf) {
-    const VgprMsbRequirement required = requiredVgprMsbWith(*inst, bankOf);
-    return {required.word, required.needed()};
-}
-
-/// The s_set_vgpr_msb immediate \p inst needs for its VGPR operands; (setVal, hasVgpr)
-/// with hasVgpr false / setVal -1 for ops that carry no VGPR MSB. Shared by the scheduler
-/// (MSB-affinity tiebreak) and InsertVgprMsbPass (materialization) so they cannot drift.
+/// requiredVgprMsb() as (setVal, hasVgpr): the word \p inst needs for its VGPR
+/// operands, or -1 with hasVgpr false for an instruction that needs none.
 inline std::pair<int, bool> computeRequiredMsb(const StinkyInstruction* inst) {
-    return computeRequiredMsbWith(
-        inst, [](const StinkyRegister& reg, size_t, bool) { return getMsbFromVgpr(reg); });
+    const VgprMsbRequirement required = requiredVgprMsb(*inst);
+    return {required.word, required.needed()};
 }
 
 /// The word an s_set_vgpr_msb sets: the low byte of its literal, or -1 when it
