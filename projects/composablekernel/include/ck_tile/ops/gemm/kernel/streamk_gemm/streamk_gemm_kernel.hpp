@@ -105,7 +105,8 @@ struct StreamKKernel
         TilePartitioner::PERSISTENT == PersistentDP,
         "Persistent flag from TilePartitioner must match Persistent flag from UniversalGemm.");
 
-    static_assert(!UniversalGemmKernel::kIsGemmKernelOnlyPipeline,
+    static_assert(!UniversalGemmKernel::kIsGemmKernelOnlyPipeline ||
+                      UniversalGemmKernel::kPipelineSupportsStreamK,
                   "Stream-K GEMM does not support this pipeline (validated with the plain GEMM "
                   "kernel only)");
 
@@ -185,12 +186,12 @@ struct StreamKKernel
                   "TDM Stream-K GEMM: cluster launch unsupported (per-workgroup K ranges)");
 
     /**
-     *@brief True for comp_tdm, comp_tdm_v2, and comp_tdm_v3: the TDM pipelines other than the
-     *wavelet comp_tdm_pc. V1 and V2 can return with their last, clipped TDM prefetch still writing
-     *LDS (V3 drains before returning). CShuffleEpilogue and TdmEpilogue wait for it; StreamKGemm
-     *waits for it after a partial tile, which runs no epilogue. C must be row-major:
-     *CShuffleEpilogue supports nothing else, and TdmEpilogue's column-major store is not validated
-     *with these pipelines.
+     *@brief True for comp_tdm, comp_tdm_v2, comp_tdm_v3 and comp_tdm_ra: the TDM pipelines other
+     *than the wavelet comp_tdm_pc. V1 and V2 can return with their last, clipped TDM prefetch still
+     *writing LDS (V3 and comp_tdm_ra drain before returning). CShuffleEpilogue and TdmEpilogue wait
+     *for it; StreamKGemm waits for it after a partial tile, which runs no epilogue. C must be
+     *row-major: CShuffleEpilogue supports nothing else, and TdmEpilogue's column-major store is not
+     *validated with these pipelines.
      */
     static constexpr bool kIsCompTdmPipeline =
         UniversalGemmKernel::kIsTdmPipeline && !is_wavelet_pipeline<GemmPipeline>;
