@@ -219,9 +219,7 @@ def test_selectors_follow_env(engine, monkeypatch, env):
 # Spec fields Python has and the C++ spec does not, each with the missing
 # behaviour. Once a port adds the field to the binding's spec dict, the
 # field-set test fails until the entry is removed here and the field compared.
-_PY_ONLY_SPEC_FIELDS = {
-    "use_additive_bias": "additive bias is not in the C++ tiled-2D spec",
-}
+_PY_ONLY_SPEC_FIELDS: dict[str, str] = {}
 
 # gfx942 knobs carried by the C spec struct both arches share; the gfx950
 # Python spec has no such fields.
@@ -469,17 +467,13 @@ def test_gfx942_spec_matches_python(engine):
 
 
 # Python tiled-3D spec fields the C++ 3D spec has no slot for, per arch.
-_PY_ONLY_3D_SPEC_FIELDS = {
-    "gfx942": {},
-    "gfx950": {
-        "use_additive_bias": "additive bias is not in the C++ tiled-3D spec",
-    },
-}
+_PY_ONLY_3D_SPEC_FIELDS: dict[str, dict[str, str]] = {"gfx942": {}, "gfx950": {}}
 
 
-# The C 3D spec struct both arches share carries the gfx950 mask band.
+# The C 3D spec struct both arches share carries the gfx950 mask band and additive
+# bias.
 _CPP_ONLY_3D_SPEC_FIELDS = {
-    "gfx942": {"causal_top_left", "right_bound", "emit_lse"},
+    "gfx942": {"causal_top_left", "right_bound", "emit_lse", "use_additive_bias"},
     "gfx950": set(),
 }
 

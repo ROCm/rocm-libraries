@@ -111,7 +111,8 @@ static int nqpk(const rocke_unified_attention_problem_t* p)
     return p->num_query_heads / p->num_kv_heads;
 }
 
-/* Python: _has_score_bias(problem) -- any additive score term. */
+/* Python: _has_score_bias(problem). Fast paths that skip per-score bias
+ * handling exclude ALiBi, QQ bias and additive bias alike. */
 static bool has_score_bias(const rocke_unified_attention_problem_t* p)
 {
     return p->use_alibi || p->use_qq_bias || p->use_additive_bias;
@@ -434,6 +435,8 @@ static bool enable_transposed_subflags(const rocke_unified_attention_problem_t* 
     {
         return false;
     }
+    /* The VALU sub-flags do not support softcap or any score bias; the spec
+     * validator enforces this. */
     if(p->softcap > 0 || has_score_bias(p))
     {
         return false;
@@ -1454,6 +1457,7 @@ static rocke_attention_tiled_2d_spec_t
     s.has_softcap = (p->softcap > 0);
     s.use_alibi = p->use_alibi;
     s.use_qq_bias = p->use_qq_bias;
+    s.use_additive_bias = p->use_additive_bias; /* gfx950 only, like the Python tail */
     s.num_seqs = p->num_seqs;
     return s;
 }

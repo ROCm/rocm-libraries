@@ -242,7 +242,6 @@ rocke_fmha_common_spec_t common_of(const py::dict& d, Store& st)
 /* use_fp8 has a C slot, but the scalar builder does not emit the fp8 K/V path
  * the Python builder does, so it is treated as unported here. */
 const unported_field k_au_unported[] = {
-    {"use_additive_bias", false, 0},
     {"use_fp8", false, 0},
     {"fp8_fnuz", false, 0},
     {"target_ctas", false, 0},
@@ -275,6 +274,7 @@ rocke_unified_attention_problem_t au_build(const py::dict& d, Store& st)
         p.waves_per_eu_set = true;
         p.waves_per_eu = d["waves_per_eu"].cast<int>();
     }
+    p.use_additive_bias = a_bool(d, "use_additive_bias", p.use_additive_bias);
     std::string v;
     if(a_str(d, "dtype", v))
         p.dtype = st.keep(v);
@@ -854,20 +854,10 @@ static bool t2d_lse_head_major(const py::dict& d, bool current)
     return layout == "head_major";
 }
 
-/* Python fields of the gfx942 and gfx950 UnifiedAttention2DTiledSpec that the
- * shared C spec struct has no slot for. */
-const unported_field k_t2d_unported[] = {
-    {"use_additive_bias", false, 0},
-};
-
 /* Overlay every spec field present in `d` onto `s` (absent or None keeps the
  * current value), so a dict built with asdict(spec) reaches the builder whole. */
 void t2d_read(const py::dict& d, Store& st, rocke_attention_tiled_2d_spec_t& s)
 {
-    reject_unported(d,
-                    "attention_tiled_2d",
-                    k_t2d_unported,
-                    sizeof(k_t2d_unported) / sizeof(k_t2d_unported[0]));
     /* The KQ XOR swizzle exists only in the Python builder; the C spec has no
      * field for it, so lowering it here would silently emit an unswizzled K
      * read. The spec is valid, the C++ path is not written:
@@ -890,6 +880,7 @@ void t2d_read(const py::dict& d, Store& st, rocke_attention_tiled_2d_spec_t& s)
     s.has_softcap = a_bool(d, "has_softcap", s.has_softcap);
     s.use_qq_bias = a_bool(d, "use_qq_bias", s.use_qq_bias);
     s.use_alibi = a_bool(d, "use_alibi", s.use_alibi);
+    s.use_additive_bias = a_bool(d, "use_additive_bias", s.use_additive_bias);
     s.num_warps = a_int(d, "num_warps", s.num_warps);
     s.num_seqs = a_int(d, "num_seqs", s.num_seqs);
     if(d.contains("tile_size") && !d["tile_size"].is_none())
@@ -1249,18 +1240,8 @@ std::vector<std::string> fkv_verify(const py::dict& d, const std::string& arch)
 
 /* ===================== gfx942 / gfx950 tiled-3d ======================== */
 
-/* gfx950 UnifiedAttention3DTiledSpec fields the shared C struct has no slot
- * for. */
-const unported_field k_t3d_unported[] = {
-    {"use_additive_bias", false, 0},
-};
-
 rocke_unified_attention_3d_tiled_spec_t t3d_build(const py::dict& d, Store& st)
 {
-    reject_unported(d,
-                    "attention_tiled_3d",
-                    k_t3d_unported,
-                    sizeof(k_t3d_unported) / sizeof(k_t3d_unported[0]));
     rocke_unified_attention_3d_tiled_spec_t s = rocke_unified_attention_3d_tiled_spec_default();
     s.head_size = a_int(d, "head_size", s.head_size);
     s.block_size = a_int(d, "block_size", s.block_size);
@@ -1272,6 +1253,7 @@ rocke_unified_attention_3d_tiled_spec_t t3d_build(const py::dict& d, Store& st)
     s.has_softcap = a_bool(d, "has_softcap", s.has_softcap);
     s.use_alibi = a_bool(d, "use_alibi", s.use_alibi);
     s.use_qq_bias = a_bool(d, "use_qq_bias", s.use_qq_bias);
+    s.use_additive_bias = a_bool(d, "use_additive_bias", s.use_additive_bias);
     s.num_seqs = a_int(d, "num_seqs", s.num_seqs);
     s.use_invariant_hoist = a_bool(d, "use_invariant_hoist", s.use_invariant_hoist);
     s.use_wide_kv_load = a_bool(d, "use_wide_kv_load", s.use_wide_kv_load);
@@ -1511,7 +1493,6 @@ void reg3(py::module_& m,
 /* UnifiedAttentionProblem fields the C++ selectors do not read yet; each one
  * steers selection in Python, so accepting them would silently diverge. */
 static const unported_field k_problem_unported[] = {
-    {"use_additive_bias", false, 0},
     {"fp8_fnuz", false, 0},
     {"target_ctas", false, 0},
     {"compile_backend", true, 0},
@@ -1585,6 +1566,7 @@ static py::dict spec_to_dict(const rocke_attention_tiled_2d_spec_t& s)
     d["has_softcap"] = s.has_softcap;
     d["use_alibi"] = s.use_alibi;
     d["use_qq_bias"] = s.use_qq_bias;
+    d["use_additive_bias"] = s.use_additive_bias;
     d["num_seqs"] = s.num_seqs;
     d["num_warps"] = s.num_warps;
     d["waves_per_eu"] = s.has_waves_per_eu ? py::cast(s.waves_per_eu) : py::none();
@@ -1763,12 +1745,6 @@ static py::dict tiled_2d_selectors(const py::dict& d, const std::string& arch)
     return r;
 }
 
-/* UnifiedAttentionProblem fields the C 3D spec has no slot for (it sets the
- * gfx950-only spec field of the same name). */
-static const unported_field k_problem_3d_unported[] = {
-    {"use_additive_bias", false, 0},
-};
-
 static py::dict spec_3d_to_dict(const rocke_unified_attention_3d_tiled_spec_t& s)
 {
     py::dict d;
@@ -1798,6 +1774,7 @@ static py::dict spec_3d_to_dict(const rocke_unified_attention_3d_tiled_spec_t& s
     d["use_kv_lds_swizzle"] = s.use_kv_lds_swizzle;
     d["use_wave_page_id_load"] = s.use_wave_page_id_load;
     d["kv_layout"] = std::string(s.kv_layout ? s.kv_layout : "paged");
+    d["use_additive_bias"] = s.use_additive_bias;
     d["emit_lse"] = s.emit_lse;
     d["causal_top_left"] = s.causal_top_left;
     d["right_bound"] = s.right_bound;
@@ -1815,10 +1792,6 @@ static py::dict attn_tiled_3d_spec_from_problem(const py::dict& d,
     if(arch != hook_arch)
         raise_not_implemented("attn_tiled_3d_spec_from_problem: this hook builds only the "
                               + hook_arch + " spec (got " + arch + ")");
-    reject_unported(d,
-                    "attn_tiled_3d_spec_from_problem",
-                    k_problem_3d_unported,
-                    sizeof(k_problem_3d_unported) / sizeof(k_problem_3d_unported[0]));
     Store st;
     rocke_unified_attention_problem_t p = problem_fields_from_dict(d, st);
     if(p.num_kv_heads <= 0 || p.num_query_heads % p.num_kv_heads != 0)

@@ -25,9 +25,6 @@ from kernels.gfx950.attention_tiled_2d import (
 )
 from kernels.gfx950.attention_tiled_3d import UnifiedAttention3DTiledSpec
 
-# Python spec fields the tiled-2D spec-from-problem hooks do not return.
-_UNPORTED_2D = {"use_additive_bias"}
-
 _REQUIRED_2D = {
     "head_size": 64,
     "block_size": 32,
@@ -145,11 +142,27 @@ def test_gfx950_2d_default_spec_round_trips(engine):
     )
 
 
-def test_2d_binding_rejects_unported_fields(engine):
-    d = asdict(Gfx950Spec2D(**_REQUIRED_2D, dtype="bf16"))
-    d["use_additive_bias"] = True
-    with pytest.raises(NotImplementedError, match="use_additive_bias"):
-        engine.gfx950_attention_tiled_2d_lower_llvm(d, "gfx950")
+def test_2d_binding_carries_additive_bias(engine):
+    spec = Gfx950Spec2D(
+        **dict(
+            _REQUIRED_2D,
+            head_size=128,
+            block_size=16,
+            num_query_heads=16,
+            num_kv_heads=4,
+        ),
+        dtype="bf16",
+        use_additive_bias=True,
+        num_seqs=3,
+        num_warps=2,
+        block_m_per_warp=32,
+        tile_size=32,
+    )
+    expected = _lower_python(build_gfx950_2d(spec, arch="gfx950"), "gfx950")
+    assert "addb" in expected
+    assert (
+        engine.gfx950_attention_tiled_2d_lower_llvm(asdict(spec), "gfx950") == expected
+    )
 
 
 @pytest.mark.parametrize(
@@ -264,22 +277,44 @@ def test_gfx950_2d_ring_and_q_reread_rejects_match_python(engine, changes):
         engine.gfx950_attention_tiled_2d_lower_llvm(full, "gfx950")
 
 
-def test_3d_binding_rejects_unported_fields(engine):
+def test_3d_binding_carries_additive_bias(engine):
     spec = UnifiedAttention3DTiledSpec(
-        head_size=64,
+        head_size=128,
         block_size=16,
-        num_query_heads=8,
+        num_query_heads=32,
         num_kv_heads=8,
-        dtype="fp16",
+        dtype="bf16",
         use_sinks=False,
         sliding_window=0,
-        has_softcap=False,
+        has_softcap=True,
+        use_alibi=True,
+        use_qq_bias=True,
+        use_additive_bias=True,
         num_segments=8,
     )
-    d = asdict(spec)
-    d["use_additive_bias"] = True
-    with pytest.raises(NotImplementedError, match="use_additive_bias"):
-        engine.gfx950_attention_tiled_3d_lower_llvm(d, "gfx950")
+    from kernels.gfx950.attention_tiled_3d import (
+        UnifiedAttentionReduceTiledSpec,
+        build_unified_attention_3d_tiled,
+        build_unified_attention_reduce_tiled,
+    )
+
+    reduce_spec = UnifiedAttentionReduceTiledSpec(
+        head_size=spec.head_size,
+        num_query_heads=spec.num_query_heads,
+        num_kv_heads=spec.num_kv_heads,
+        dtype=spec.dtype,
+        num_segments=spec.num_segments,
+    )
+    segment = _lower_python(
+        build_unified_attention_3d_tiled(spec, arch="gfx950"), "gfx950"
+    )
+    assert "addb" in segment
+    expected = segment + _lower_python(
+        build_unified_attention_reduce_tiled(reduce_spec, arch="gfx950"), "gfx950"
+    )
+    assert (
+        engine.gfx950_attention_tiled_3d_lower_llvm(asdict(spec), "gfx950") == expected
+    )
 
 
 _REQUIRED_3D = {
@@ -451,7 +486,7 @@ def test_selector_hook_returns_every_spec_field(engine, arch):
     python_fields = {f.name for f in fields(Gfx942Spec2D)} | {
         f.name for f in fields(Gfx950Spec2D)
     }
-    assert set(spec) == python_fields - _UNPORTED_2D
+    assert set(spec) == python_fields
 
 
 @pytest.mark.parametrize("arch", ["gfx942", "gfx950"])
@@ -465,7 +500,7 @@ def test_3d_selector_hook_returns_every_spec_field(engine, arch):
     python_fields = {f.name for f in fields(Gfx942Spec3D)} | {
         f.name for f in fields(UnifiedAttention3DTiledSpec)
     }
-    assert set(spec) == python_fields - {"use_additive_bias"}
+    assert set(spec) == python_fields
     assert spec["kv_layout"] == "paged"
 
 

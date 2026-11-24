@@ -87,8 +87,6 @@ _DECLINED_CASES = {
     "dtype_mixed": replace(_BASE, o=bshd(2, 4, 8, 128, "fp32")),
     "compute_dtype": replace(_BASE, compute_dtype="fp16"),
     "scale_tensor": replace(_BASE, scale_source="tensor", scale_tensor=packed((1,))),
-    "bias": replace(_BASE, bias=SdpaBias(packed((2, 4, 8, 8)))),
-    "bias_broadcast": replace(_BASE, bias=SdpaBias(packed((8, 8)))),
     "alibi": replace(_BASE, alibi=True),
     "sinks": replace(_BASE, sink_token=packed((1, 4, 1, 1))),
     "dropout": replace(_BASE, dropout=SdpaDropout(0.1)),
@@ -120,8 +118,6 @@ def test_declined_feature_is_declined_with_a_declined_features_reason(feature):
 # follow-on (a reference oracle, a schema), not a permanent kernel/ABI limit.
 _NOT_YET_IMPLEMENTED_FEATURES = {
     "scale_tensor",
-    "bias",
-    "bias_broadcast",
     "alibi",
     "sinks",
     "dropout",
@@ -142,6 +138,61 @@ def test_shortcut_declines_are_tagged_not_yet_implemented(feature):
 )
 def test_permanent_declines_are_not_tagged_not_yet_implemented(feature):
     assert "NOT_YET_IMPLEMENTED" not in _DECLINED[feature]
+
+
+# --- additive bias -------------------------------------------------------------
+
+
+def _biased(dims=(2, 4, 8, 8), dtype="fp32", **overrides):
+    return _unified_request(bias=SdpaBias(packed(dims, dtype)), **overrides)
+
+
+@pytest.mark.parametrize("dims", [(2, 4, 8, 8), (1, 1, 8, 8), (8, 8), (2, 4, 1, 8)])
+@pytest.mark.parametrize("dtype", ["fp32", "fp16", "bf16"])
+def test_a_bias_is_admitted_on_gfx950(dims, dtype):
+    req = _biased(dims, dtype)
+    assert {"bias"} <= req.features()
+    _admitted(req)
+
+
+def test_a_broadcast_bias_is_carried():
+    req = _biased((8, 8))
+    assert {"bias", "bias_broadcast"} <= req.features()
+    _admitted(req)
+
+
+def test_a_bias_with_lse_and_a_causal_band_is_admitted():
+    _admitted(_biased(stats=packed((2, 4, 8, 1), "fp32"), right_bound=0))
+
+
+def test_a_bias_is_declined_on_gfx942():
+    _admitted(_unified_request(arch="gfx942", right_bound=0))
+    assert "bias" in _declined(_biased(arch="gfx942", right_bound=0))
+
+
+@pytest.mark.parametrize("dtype", ["bool", "int32", "fp8_e4m3"])
+def test_a_bias_that_cannot_become_f32_is_declined(dtype):
+    req = _biased((2, 4, 8, 8), dtype)
+    assert {"bias"} <= req.features()
+    assert _declined(req).startswith("bias: ")
+
+
+def test_a_ragged_bias_is_declined():
+    t = packed((2, 4, 8, 8), "fp32")
+    reason = _declined(_unified_request(bias=SdpaBias(_ragged(t))))
+    assert reason.startswith("bias: ")
+
+
+def test_a_bias_past_the_i32_addressing_is_declined():
+    req = _biased((2, 4, 8, 2**28), s_kv=2**28)
+    assert "bias" in _declined(req)
+
+
+def test_the_translated_request_carries_the_bias():
+    from dispatch.sdpa.bind_shared import to_attention_request
+
+    assert to_attention_request(_biased()).use_attn_bias is True
+    assert to_attention_request(_unified_request()).use_attn_bias is False
 
 
 # --- head_dim / arch validity ------------------------------------------------

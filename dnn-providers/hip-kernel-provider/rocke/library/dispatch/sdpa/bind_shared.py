@@ -97,6 +97,7 @@ def to_attention_request(req: SdpaRequest) -> AttentionRequest:
         ),
         use_sinks=req.sink_token is not None,
         use_alibi=req.alibi,
+        use_attn_bias=req.bias is not None,
         emit_lse=req.stats is not None,
     )
 

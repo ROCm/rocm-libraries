@@ -306,8 +306,10 @@ bool rocke_unified_attention_supports_scalar(const rocke_unified_attention_probl
         return scalar_gate_fail(
             reason, reason_cap, "QQ bias is not enabled in CK DSL attention yet");
     if(p->use_additive_bias)
-        return scalar_gate_fail(
-            reason, reason_cap, "Additive bias is not enabled in CK DSL attention yet");
+        return scalar_gate_fail(reason,
+                                reason_cap,
+                                "%s",
+                                rocke_attn_unified_scalar_bias_refusal(ROCKE_ATTN_UNIFIED_2D));
     if(rocke_attn_unified_reject_mask_semantics(p, reason, reason_cap))
         return false;
     scalar_gate_fail(reason, reason_cap, "supported by scalar CK DSL 2D attention backend");

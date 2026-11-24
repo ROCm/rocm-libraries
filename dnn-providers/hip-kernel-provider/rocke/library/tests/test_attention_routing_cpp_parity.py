@@ -7,8 +7,8 @@ The gates must reject with Python's reason wherever Python rejects. Where Python
 admits a problem the C++ builders cannot build yet, the C++ gate rejects it with
 a "not ported to C++" reason instead; each such reason is checked against the
 condition that is meant to trigger it. For the tiled 2D gate the test derives
-the exact expected answer, "not ported" reason included, from the Python
-predicates, and checks that every problem C++ admits actually builds."""
+the exact expected answer from the Python predicates, and checks that every
+problem C++ admits actually builds."""
 
 from __future__ import annotations
 
@@ -21,6 +21,7 @@ from kernels.common.attention_unified import (
     _canonical_arch_for_selection,
     _gfx942_4warp_fast,
     _mask_label,
+    _reject_fp8_format_arch_mismatch,
     _reject_lse,
     _reject_mask_on_arch,
     _reject_mask_semantics,
@@ -201,8 +202,6 @@ def test_tiled_3d_gate_matches_python(engine):
         ctx = (p, arch, py_ok, py_reason)
         if reason == "gfx1250 tiled 3D is not ported to C++":
             assert not ok and canon == "gfx1250", ctx
-        elif reason == "tiled 3D additive bias is not ported to C++ yet":
-            assert not ok and py_ok and canon == "gfx950" and p.use_additive_bias, ctx
         else:
             assert (ok, reason) == (py_ok, py_reason), ctx
 
@@ -247,16 +246,6 @@ _GFX942_ENVS = (
 )
 
 
-def _tiled_2d_not_ported(p: UnifiedAttentionProblem, arch: str):
-    """The "not ported" reason C++ must give for a problem Python admits."""
-    if arch == "gfx942":
-        # The tiled-2D and 4-warp GQA builders build every admitted spec.
-        return None
-    if p.use_additive_bias:
-        return "tiled 2D additive bias is not ported to C++ yet"
-    return None
-
-
 def _expected_tiled_2d(p: UnifiedAttentionProblem, arch: str):
     """The exact (ok, reason) the C++ 2D gate must return."""
     canon = _canonical_arch_for_selection(arch)
@@ -266,6 +255,7 @@ def _expected_tiled_2d(p: UnifiedAttentionProblem, arch: str):
             _reject_lse(p, canon, "tiled 2D")
             or _reject_mask_semantics(p)
             or _reject_mask_on_arch(p, canon)
+            or _reject_fp8_format_arch_mismatch(p, canon)
         )
         if rejected is not None:
             return rejected
@@ -274,11 +264,7 @@ def _expected_tiled_2d(p: UnifiedAttentionProblem, arch: str):
         if p.use_additive_bias:
             return False, "additive bias is only implemented on gfx950"
         return False, "gfx1250 tiled 2D is not ported to C++"
-    ok, reason = _python_gate(supports_native_unified_attention_tiled, p, arch)
-    if not ok:
-        return ok, reason
-    not_ported = _tiled_2d_not_ported(p, canon)
-    return (False, not_ported) if not_ported else (ok, reason)
+    return _python_gate(supports_native_unified_attention_tiled, p, arch)
 
 
 def _tiled_2d_shapes():

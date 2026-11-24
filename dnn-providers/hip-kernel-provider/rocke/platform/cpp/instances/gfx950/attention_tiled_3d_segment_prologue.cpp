@@ -331,6 +331,11 @@ void rocke_gfx950_attention_tiled_3d_declare_params(
     ctx->num_qh_p = rocke_b_param(B, "num_query_heads", rocke_i32(), NULL);
     ctx->num_kv_p = rocke_b_param(B, "num_kv_heads", rocke_i32(), NULL);
     ctx->sliding_window_p = rocke_b_param(B, "sliding_window", rocke_i32(), NULL);
+    /* Appended only when on, so the bias-off ABI and IR are unchanged. */
+    if(CFG.USE_ADDITIVE_BIAS)
+    {
+        ctx->additive_bias = rocke_declare_additive_bias_params(B);
+    }
     if(ctx->strided_kv)
     {
         ctx->k_strides = rocke_declare_strided_kv_params(B, "k");

@@ -106,17 +106,18 @@ extern "C" {
  * NULL/zero-capacity ``out``. */
 const char* rocke_unified_attention_canonical_arch(const char* arch, char* out, size_t out_cap);
 
-/* supports_native_unified_attention(problem, arch) -- the scalar backend. */
+/* supports_native_unified_attention(problem, arch) -- the scalar backend: head_size in
+ * {64,128,256}, block_size in {16,32,64}, dtype in {fp16,bf16}, no fp8, alibi, qq_bias or
+ * additive_bias. */
 bool rocke_unified_attention_supports_scalar(const rocke_unified_attention_problem_t* p,
                                              const char* arch,
                                              char* reason,
                                              size_t reason_cap);
 
 /* supports_native_unified_attention_tiled(problem, arch) -- the tiled 2D path.
- * Admits what Python admits on gfx942 and gfx950, except two cases the C++
- * builders cannot build yet, rejected with a "not ported to C++" reason after
- * Python's own checks pass: any gfx1250 problem, and a gfx950 problem with
- * use_additive_bias (Python allows additive bias on gfx950 only). */
+ * Admits what Python admits on gfx942 and gfx950; a gfx1250 problem, which the
+ * C++ builders cannot build yet, is rejected with a "not ported to C++" reason
+ * after Python's own checks pass. */
 bool rocke_unified_attention_supports_tiled_2d(const rocke_unified_attention_problem_t* p,
                                                const char* arch,
                                                char* reason,

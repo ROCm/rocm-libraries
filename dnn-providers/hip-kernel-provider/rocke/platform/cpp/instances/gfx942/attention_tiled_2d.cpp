@@ -80,6 +80,7 @@ rocke_attention_tiled_2d_spec_t rocke_attention_tiled_2d_spec_default(void)
     /* defaulted fields (mirror the dataclass defaults). */
     s.use_alibi = false;
     s.use_qq_bias = false;
+    s.use_additive_bias = false;
     s.num_seqs = 0;
     s.num_warps = 1;
     s.has_waves_per_eu = false;
@@ -347,6 +348,14 @@ bool rocke_attention_tiled_2d_spec_validate(rocke_ir_builder_t* b,
                      knobs);
             ckc::raise_status(ROCKE_ERR_VALUE, msg);
         }
+    }
+
+    /* The gfx942 Python spec has no additive-bias field. */
+    if(s->use_additive_bias)
+    {
+        rocke_attn2d_set_err(
+            b, ROCKE_ERR_VALUE, "use_additive_bias is not implemented on gfx942 yet");
+        return false;
     }
 
     /* transposed orientation legal only in the x8 pairing. */

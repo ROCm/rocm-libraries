@@ -84,7 +84,6 @@ typedef struct rocke_unified_attention_problem
     bool use_sinks; /* default false                                      */
     bool use_alibi; /* default false                                      */
     bool use_qq_bias; /* default false                                      */
-    bool use_additive_bias; /* default false                               */
     bool use_fp8; /* default false                                      */
     bool fp8_fnuz; /* default false                                      */
     int num_cus; /* default 120 (selector only; unused by scalar)      */
@@ -96,6 +95,9 @@ typedef struct rocke_unified_attention_problem
     bool causal_top_left; /* default false (bottom-right diagonal)       */
     int right_bound; /* default 0 (causal); -1 = unbounded           */
     bool emit_lse; /* default false; FP32 LSE output, split-KV only */
+    /* gfx950 tiled kernels only; the scalar path refuses it. Kept last:
+     * inserting a field moves every later one (abi.h). */
+    bool use_additive_bias; /* default false                                */
 } rocke_unified_attention_problem_t;
 
 /* Default-constructed problem (Python field defaults). The required positional

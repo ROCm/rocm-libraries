@@ -448,6 +448,7 @@ namespace TensileLite
         po.hasScaleE        = flag(row, "scaleE");
         po.hasScaleAlphaVec = flag(row, "scaleAlphaVec");
         po.hasAmaxD         = flag(row, "amaxD");
+        po.hasPeerD         = flag(row, "peerD"); // absent in older files: false
 
         po.swizzleA              = flag(row, "swizzle_a");
         po.swizzleB              = flag(row, "swizzle_b");
@@ -566,6 +567,7 @@ namespace TensileLite
         column("scaleE", key.hasScaleE ? 1 : 0);
         column("scaleAlphaVec", key.hasScaleAlphaVec ? 1 : 0);
         column("amaxD", key.hasAmaxD ? 1 : 0);
+        column("peerD", key.hasPeerD ? 1 : 0);
 
         column("swizzle_a", key.swizzleA ? 1 : 0);
         column("swizzle_b", key.swizzleB ? 1 : 0);

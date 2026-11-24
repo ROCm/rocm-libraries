@@ -331,6 +331,33 @@ _CONFIGS = {
         use_conflict_free_v_store=True,
         use_i64_kv_addr=True,
     ),
+    # idx51: additive bias on gfx942; both engines reject it (BOTH_REJECTED).
+    # The gfx942 Python spec has no use_additive_bias field at all, so this
+    # raises TypeError at construction. The C twin's spec validator rejects it
+    # on the build path, and the ctx-init refuses it for a caller that skips
+    # the validator.
+    51: dict(
+        head_size=64,
+        block_size=32,
+        num_query_heads=32,
+        num_kv_heads=32,
+        dtype="bf16",
+        use_sinks=True,
+        sliding_window=2048,
+        has_softcap=False,
+        use_additive_bias=True,
+    ),
+}
+
+# Configs both engines must reject, with the reason each one pins: run_diff
+# requires the regex in both engines' stderr (BOTH_REJECTED alone accepts any
+# reason, a typo included).
+_EXPECTED_REJECTIONS = {
+    # The Python gfx942 spec has no bias field, so Python fails on the keyword.
+    51: (
+        r"unexpected keyword argument 'use_additive_bias'"
+        r"|use_additive_bias is not implemented on gfx942"
+    ),
 }
 
 # D64 fp16 flash prefill with the transposed VALU stack (scalar state,

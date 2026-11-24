@@ -150,6 +150,93 @@ TEST(TestUnifiedAttentionGeometry, TheSplitKvScratchFollowsTheIdentityPrefix)
     EXPECT_EQ(layout->segmMaxBytes, 8192U);
 }
 
+/// The kernels index segm_output [total_q, Hq, nseg, D] with i32 element offsets. A tensor
+/// of N elements reaches offset N - 1, so exactly 2^31 elements still addresses and one more
+/// does not. Batch 1, Sq 16384, Hq 32, D 256, 16 segments is 16384 * 32 * 16 * 256 = 2^31.
+/// The layout takes any Sq; the shape the gfx950 matcher serves (Sq 1) is the next test.
+TEST(TestUnifiedAttentionGeometry, TheSplitKvScratchAdmitsTwoToThe31ElementsAndRefusesOneMore)
+{
+    EXPECT_TRUE(unifiedAttention3DWorkspaceLayout(1, 16384, 1024, 16, 32, 256, 16).has_value());
+    EXPECT_FALSE(unifiedAttention3DWorkspaceLayout(1, 16385, 1024, 16, 32, 256, 16).has_value());
+}
+
+/// The same boundary at the shape the gfx950 matcher serves: one query token per sequence,
+/// so the batch carries the size. Batch 16384, Hq 32, D 256, 16 segments is 2^31 elements.
+TEST(TestUnifiedAttentionGeometry, TheSplitKvScratchAdmitsTwoToThe31ElementsAtSqOne)
+{
+    EXPECT_TRUE(unifiedAttention3DWorkspaceLayout(16384, 1, 1024, 16, 32, 256, 16).has_value());
+    EXPECT_FALSE(unifiedAttention3DWorkspaceLayout(16385, 1, 1024, 16, 32, 256, 16).has_value());
+}
+
+/// 274177 * 67280421310721 = 2^64 + 1, which wraps to exactly 1 in 64 bits: the true scratch
+/// is far past the limit, and a product taken without an overflow check would not see it.
+TEST(TestUnifiedAttentionGeometry, TheSplitKvScratchRefusesAProductThatWrapsToOne)
+{
+    EXPECT_FALSE(
+        unifiedAttention3DWorkspaceLayout(274177, 67280421310721, 1024, 16, 1, 1, 1).has_value());
+    EXPECT_FALSE(
+        unifiedAttention3DWorkspaceLayout(1, 274177, 1024, 16, 67280421310721, 1, 1).has_value());
+    EXPECT_FALSE(
+        unifiedAttention3DWorkspaceLayout(1, 1, 1024, 16, 274177, 1, 67280421310721).has_value());
+    EXPECT_FALSE(
+        unifiedAttention3DWorkspaceLayout(1, 1, 1024, 16, 1, 274177, 67280421310721).has_value());
+}
+
+/// The shared helper places the three f32 sections, each on a 256-byte boundary: total_q 4,
+/// Hq 32, 16 segments, D 128 is 2048 rows, so segm_output is 2048 * 128 * 4 B = 1 MiB and
+/// segm_max and segm_expsum are 2048 * 4 B = 8 KiB each.
+TEST(TestUnifiedAttentionGeometry, SegmentScratchLayoutPlacesTheThreeSections)
+{
+    const auto s = unifiedAttentionSegmentScratchLayout(256, 4, 32, 16, 128);
+    ASSERT_TRUE(s.has_value());
+    EXPECT_EQ(s->segmOutputOffset, 256U);
+    EXPECT_EQ(s->segmOutputBytes, 1048576U);
+    EXPECT_EQ(s->segmMaxOffset, 256U + 1048576U);
+    EXPECT_EQ(s->segmMaxBytes, 8192U);
+    EXPECT_EQ(s->segmExpsumOffset, 256U + 1048576U + 8192U);
+    EXPECT_EQ(s->segmExpsumBytes, 8192U);
+    EXPECT_EQ(s->endOffset, 256U + 1048576U + 8192U + 8192U);
+}
+
+/// The helper owns the bound, so a pack cannot lay out a scratch without it. Exactly 2^31
+/// elements addresses (largest offset 2^31 - 1); one more row does not.
+TEST(TestUnifiedAttentionGeometry, SegmentScratchLayoutRefusesWhatTheKernelsCannotIndex)
+{
+    EXPECT_TRUE(unifiedAttentionSegmentScratchLayout(0, 16384, 32, 16, 256).has_value());
+    EXPECT_FALSE(unifiedAttentionSegmentScratchLayout(0, 16385, 32, 16, 256).has_value());
+    // Every dimension is a factor: growing any one of them alone crosses the bound.
+    EXPECT_FALSE(unifiedAttentionSegmentScratchLayout(0, 16384, 33, 16, 256).has_value());
+    EXPECT_FALSE(unifiedAttentionSegmentScratchLayout(0, 16384, 32, 17, 256).has_value());
+    EXPECT_FALSE(unifiedAttentionSegmentScratchLayout(0, 16384, 32, 16, 257).has_value());
+    // One element past 2^31: 3 * 715827883 = 2^31 + 1.
+    EXPECT_FALSE(unifiedAttentionSegmentScratchLayout(0, 3, 715827883, 1, 1).has_value());
+}
+
+TEST(TestUnifiedAttentionGeometry, SegmentScratchLayoutRefusesNonPositiveAndWrappingDimensions)
+{
+    EXPECT_FALSE(unifiedAttentionSegmentScratchLayout(0, 0, 32, 16, 128).has_value());
+    EXPECT_FALSE(unifiedAttentionSegmentScratchLayout(0, -1, 32, 16, 128).has_value());
+    EXPECT_FALSE(unifiedAttentionSegmentScratchLayout(0, 4, 0, 16, 128).has_value());
+    EXPECT_FALSE(unifiedAttentionSegmentScratchLayout(0, 4, -1, 16, 128).has_value());
+    EXPECT_FALSE(unifiedAttentionSegmentScratchLayout(0, 4, 32, 0, 128).has_value());
+    EXPECT_FALSE(unifiedAttentionSegmentScratchLayout(0, 4, 32, -1, 128).has_value());
+    EXPECT_FALSE(unifiedAttentionSegmentScratchLayout(0, 4, 32, 16, 0).has_value());
+    EXPECT_FALSE(unifiedAttentionSegmentScratchLayout(0, 4, 32, 16, -1).has_value());
+    // 274177 * 67280421310721 = 2^64 + 1 wraps to 1 in each position a product can take.
+    EXPECT_FALSE(unifiedAttentionSegmentScratchLayout(0, 274177, 67280421310721, 1, 1).has_value());
+    EXPECT_FALSE(unifiedAttentionSegmentScratchLayout(0, 1, 274177, 67280421310721, 1).has_value());
+    EXPECT_FALSE(unifiedAttentionSegmentScratchLayout(0, 1, 1, 274177, 67280421310721).has_value());
+}
+
+/// The predicate a matcher can call without laying anything out holds the same rule.
+TEST(TestUnifiedAttentionGeometry, SegmentScratchFitsI32IsTheLayoutsBound)
+{
+    EXPECT_TRUE(unifiedAttentionSegmentScratchFitsI32(16384, 32, 16, 256));
+    EXPECT_FALSE(unifiedAttentionSegmentScratchFitsI32(16385, 32, 16, 256));
+    EXPECT_FALSE(unifiedAttentionSegmentScratchFitsI32(0, 32, 16, 256));
+    EXPECT_FALSE(unifiedAttentionSegmentScratchFitsI32(274177, 67280421310721, 1, 1));
+}
+
 } // namespace hip_kernel_provider::kernel_ingestor_engine
 
 #endif // HIPDNN_ENABLE_KERNEL_INGESTOR

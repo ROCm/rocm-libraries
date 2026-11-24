@@ -311,14 +311,14 @@ def test_3d_spec_matches_python(engine, clean_env, arch, env):
 
 
 @pytest.mark.parametrize("arch", ["gfx942", "gfx950"])
-def test_3d_hook_rejects_other_arch_and_unported_fields(engine, arch):
+def test_3d_hook_rejects_other_arch_and_bad_fields(engine, arch):
     hook = getattr(engine, f"{arch}_attn_tiled_3d_spec_from_problem")
     p = asdict(next(_problems_3d()))
     other = "gfx950" if arch == "gfx942" else "gfx942"
     with pytest.raises(NotImplementedError, match=arch):
         hook(p, other)
-    with pytest.raises(NotImplementedError, match="use_additive_bias"):
-        hook(dict(p, use_additive_bias=True), arch)
+    biased = hook(dict(p, use_additive_bias=True), arch)
+    assert biased["use_additive_bias"] is (arch == "gfx950")
     band = dict(p, causal_top_left=True, right_bound=-1)
     if arch == "gfx950":
         spec = hook(band, arch)

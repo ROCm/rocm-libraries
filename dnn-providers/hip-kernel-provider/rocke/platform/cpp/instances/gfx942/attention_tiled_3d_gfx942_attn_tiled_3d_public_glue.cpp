@@ -39,6 +39,7 @@
 #include "rocke/error_boundary.hpp" /* ckc::guard_builder boundary shim */
 #include "rocke/helper_rocke.core.arch.h" /* rocke_archtarget_from_gfx, op_for_shape */
 #include "rocke/helper_rocke.helpers.atoms.h" /* rocke_mfma_atom, make_c_warp_dstr_encoding */
+#include "rocke/helper_rocke.helpers.attention_arch_caps.h"
 #include "rocke/helper_rocke.helpers.distribution.h" /* make_static_tile_distribution */
 #include "rocke/helper_rocke.helpers.spec.h" /* rocke_kernel_name_join */
 #include "rocke/helper_rocke.instances.common._fmha_common.h" /* rocke_attention_check_head_counts */
@@ -104,6 +105,7 @@ rocke_unified_attention_3d_tiled_spec_t rocke_unified_attention_3d_tiled_spec_de
     /* required fields stay zero/NULL (caller must set). Defaulted fields: */
     s.use_alibi = false;
     s.use_qq_bias = false;
+    s.use_additive_bias = false;
     s.num_seqs = 0;
     s.has_waves_per_eu = false;
     s.waves_per_eu = 0;
@@ -153,6 +155,13 @@ bool rocke_unified_attention_3d_tiled_spec_validate(
                         "gfx942 tiled attention does not implement %s/%s masks",
                         align,
                         upper);
+        return false;
+    }
+    /* The gfx942 Python spec has no additive-bias field, so this message has no
+     * Python counterpart: only a hand-built C spec can carry one. */
+    if(s->use_additive_bias)
+    {
+        rocke_i_set_err(b, ROCKE_ERR_VALUE, "use_additive_bias is not implemented on gfx942 yet");
         return false;
     }
     if(s->num_segments < 1)
@@ -683,7 +692,7 @@ bool rocke_gfx942_attn_tiled_3d_config_from_spec(
     }
 
     /* ---- async / wide / fp8 KV feed geometry (lines 549-667) ---- */
-    out->ASYNC_LDS_DWORDS = 1;
+    out->ASYNC_LDS_DWORDS = rocke_attn_max_lds_dma_dwords("gfx942");
     out->HALVES_PER_LANE = out->ASYNC_LDS_DWORDS * 2;
     out->KV_HALVES_PER_CALL = out->THREADS * out->HALVES_PER_LANE;
 

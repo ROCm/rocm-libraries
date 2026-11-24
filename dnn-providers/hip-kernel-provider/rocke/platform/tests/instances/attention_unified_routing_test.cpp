@@ -331,7 +331,7 @@ static void test_supports_tiled_2d(void)
 
     p = decode_problem();
     p.use_additive_bias = true;
-    check_tiled_2d(&p, "gfx950", false, "tiled 2D additive bias is not ported to C++ yet");
+    check_tiled_2d(&p, "gfx950", true, "supported");
     check_tiled_2d(&p, "gfx942", false, "additive bias is only implemented on gfx950");
 
     /* gfx942 prefill: D128 sliding window (4-warp GQA), fp16 D64 MHA (sliced-K ring) and

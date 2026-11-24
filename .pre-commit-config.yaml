@@ -329,10 +329,10 @@ repos:
       # than in the MIOpen component CI job, which installs no Python packages.
       - id: miopen-public-private-header-check-tests
         name: MIOpen public/private header check self-tests
-        entry: python -m pytest projects/miopen/script/test_check_public_abi.py projects/miopen/script/test_generate_wrapper_sources.py -q
+        entry: python -m pytest projects/miopen/script/test_check_public_abi.py projects/miopen/script/test_check_plugin_reentry.py projects/miopen/script/test_generate_wrapper_sources.py -q
         language: python
         additional_dependencies: ["pytest==8.4.2"]
-        files: ^projects/miopen/script/(check_public_abi|test_check_public_abi|generate_wrapper_sources|test_generate_wrapper_sources)\.py$
+        files: ^projects/miopen/script/(check_public_abi|test_check_public_abi|check_plugin_reentry|test_check_plugin_reentry|generate_wrapper_sources|test_generate_wrapper_sources)\.py$
         pass_filenames: false
 
       - id: kpack-pin-sync

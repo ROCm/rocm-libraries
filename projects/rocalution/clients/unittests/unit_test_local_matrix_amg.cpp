@@ -373,7 +373,43 @@ TYPED_TEST(local_matrix_amg, rs_coarsening_of_a_complete_graph)
     EXPECT_EQ(std::count(result.first.begin(), result.first.end(), 1), 1);
 }
 
-// Strength does not change when a row is scaled by -1
+// Rows 1 and 2 have a negative diagonal and only negative couplings, so they depend on
+// nothing and are F points from the start. Their couplings to 0 must stay weak: RSCoarsening()
+// does not allow a point that depends on another point to start as an F point.
+TYPED_TEST(local_matrix_amg,
+           rs_coarsening_of_rows_with_a_negative_diagonal_and_no_positive_coupling)
+{
+    using T          = typename TypeParam::value_type;
+    const Csr<T> ref = from_rows<T>(
+        3, {{{0, 2.0}, {1, -1.0}, {2, -1.0}}, {{0, -1.0}, {1, -1.0}}, {{0, -1.0}, {2, -1.0}}});
+
+    const auto result = rs_coarsening_on(TypeParam::backend, ref);
+    EXPECT_EQ(result.second, (std::vector<bool>{false, true, true, false, false, false, false}));
+    EXPECT_EQ(result.first, (std::vector<int>{1, 2, 2}));
+}
+
+// The threshold 0.25 a_01 of a subnormal coupling rounds to zero, yet a_01 stays strong, so
+// neither point is an F point from the start. Otherwise both would start as F points that
+// depend on another point, which RSCoarsening() does not allow, and no C point is left for them.
+TYPED_TEST(local_matrix_amg, rs_coarsening_of_couplings_whose_threshold_rounds_to_zero)
+{
+    using T      = typename TypeParam::value_type;
+    const T tiny = -std::numeric_limits<T>::denorm_min();
+    Csr<T>  ref(2);
+    ref.add(0, 1.0);
+    ref.add(1, tiny);
+    ref.end_row();
+    ref.add(0, tiny);
+    ref.add(1, 1.0);
+    ref.end_row();
+
+    const auto result = rs_coarsening_on(TypeParam::backend, ref);
+    EXPECT_EQ(result.second, (std::vector<bool>{false, true, true, false}));
+    EXPECT_EQ(result.second, rs_strength(ref, 0.25));
+    expect_valid_splitting(ref, result.second, result.first);
+}
+
+// Strength does not change when a row with a nonzero diagonal is scaled by -1
 TYPED_TEST(local_matrix_amg, rs_coarsening_of_a_negated_grid)
 {
     using T               = typename TypeParam::value_type;
@@ -384,7 +420,6 @@ TYPED_TEST(local_matrix_amg, rs_coarsening_of_a_negated_grid)
 
     const auto negated
         = rs_coarsening_on(TypeParam::backend, transformed(ref, [](int, int, T v) { return -v; }));
-    KNOWN_BUG("for a negative diagonal, a_ij < eps max_k a_ik is taken as strong");
     EXPECT_EQ(negated.second, original.second);
     EXPECT_EQ(negated.first, original.first);
 }

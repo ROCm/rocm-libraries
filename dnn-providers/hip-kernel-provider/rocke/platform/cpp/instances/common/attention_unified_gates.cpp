@@ -191,25 +191,6 @@ bool rocke_attn_unified_reject_fp8_format_arch_mismatch(const rocke_unified_atte
     return true;
 }
 
-/* Python admits these; the C++ builders cannot build them yet. Checked only
- * after the per-arch gate admits, so every Python reject keeps its reason. */
-static bool reject_tiled_2d_not_ported(const rocke_unified_attention_problem_t* p,
-                                       const char* arch,
-                                       char* reason,
-                                       size_t reason_cap)
-{
-    /* The gfx942 tiled-2D and 4-warp GQA builders build every spec the gfx942
-     * gate admits. */
-    if(streq(arch, "gfx942"))
-        return false;
-    if(p->use_additive_bias)
-    {
-        gate_reason(reason, reason_cap, "tiled 2D additive bias is not ported to C++ yet");
-        return true;
-    }
-    return false;
-}
-
 /* The bf16 wide-K (32x32x8) transposed flash branch: the build geometry of
  * _tiled_spec_from_problem's non-ring bf16 spec. */
 static bool supports_gfx942_bf16_wide(const rocke_unified_attention_problem_t* p,
@@ -331,7 +312,8 @@ bool rocke_unified_attention_supports_tiled_2d(const rocke_unified_attention_pro
 
     if(reject_lse(p, arch, "tiled 2D", reason, reason_cap)
        || rocke_attn_unified_reject_mask_semantics(p, reason, reason_cap)
-       || reject_mask_on_arch(p, arch, reason, reason_cap))
+       || reject_mask_on_arch(p, arch, reason, reason_cap)
+       || rocke_attn_unified_reject_fp8_format_arch_mismatch(p, arch, reason, reason_cap))
         return false;
     if(streq(arch, "gfx1250") && p->softcap > 0)
     {
@@ -360,7 +342,7 @@ bool rocke_unified_attention_supports_tiled_2d(const rocke_unified_attention_pro
                   : supports_tiled_2d_general(p, arch, nqpk, reason, reason_cap);
     if(!ok)
         return false;
-    return !reject_tiled_2d_not_ported(p, arch, reason, reason_cap);
+    return true;
 }
 
 bool rocke_unified_attention_supports_tiled_3d(const rocke_unified_attention_problem_t* p,
@@ -442,13 +424,6 @@ bool rocke_unified_attention_supports_tiled_3d(const rocke_unified_attention_pro
         return false;
     }
 
-    /* Python admits this on gfx950; the C++ tiled 3D builder does not
-     * implement it. */
-    if(p->use_additive_bias)
-    {
-        gate_reason(reason, reason_cap, "tiled 3D additive bias is not ported to C++ yet");
-        return false;
-    }
     gate_reason(reason, reason_cap, "%s", arch_reason != NULL ? arch_reason : "");
     return true;
 }
