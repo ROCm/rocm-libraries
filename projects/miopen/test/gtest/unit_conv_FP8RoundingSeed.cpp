@@ -18,7 +18,9 @@ uint32_t NewDescriptorSeed()
 
 } // namespace
 
-TEST(CPU_ConvFP8RoundingSeed_NONE, DistinctPerDescriptor)
+using CPU_ConvFP8RoundingSeed_NONE = ::testing::TestWithParam<int>;
+
+TEST_P(CPU_ConvFP8RoundingSeed_NONE, DistinctPerDescriptor)
 {
     if(MIOPEN_DEBUG_CONVOLUTION_ATTRIB_FP8_ROUNDING_SEED)
         GTEST_SKIP() << "MIOPEN_DEBUG_CONVOLUTION_ATTRIB_FP8_ROUNDING_SEED is set";
@@ -27,7 +29,7 @@ TEST(CPU_ConvFP8RoundingSeed_NONE, DistinctPerDescriptor)
 }
 
 // The seed engine is per thread, so threads must not start from the same state.
-TEST(CPU_ConvFP8RoundingSeed_NONE, DistinctAcrossThreads)
+TEST_P(CPU_ConvFP8RoundingSeed_NONE, DistinctAcrossThreads)
 {
     if(MIOPEN_DEBUG_CONVOLUTION_ATTRIB_FP8_ROUNDING_SEED)
         GTEST_SKIP() << "MIOPEN_DEBUG_CONVOLUTION_ATTRIB_FP8_ROUNDING_SEED is set";
@@ -42,3 +44,5 @@ TEST(CPU_ConvFP8RoundingSeed_NONE, DistinctAcrossThreads)
 
     EXPECT_EQ(std::set<uint32_t>(seeds.begin(), seeds.end()).size(), num_threads);
 }
+
+INSTANTIATE_TEST_SUITE_P(Quick, CPU_ConvFP8RoundingSeed_NONE, ::testing::Values(0));
