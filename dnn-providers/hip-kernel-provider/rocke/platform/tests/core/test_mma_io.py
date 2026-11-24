@@ -318,7 +318,7 @@ def test_bare_hip_keeps_required_vector_declarations(route, tmp_path):
     subprocess.run(
         [
             "amdclang++",
-            "--cuda-device-only",
+            "--offload-device-only",
             "-fsyntax-only",
             "-x",
             "hip",

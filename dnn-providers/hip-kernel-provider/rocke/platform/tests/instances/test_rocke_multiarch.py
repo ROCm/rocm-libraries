@@ -823,7 +823,7 @@ class TestDatalayoutDriftGuard(unittest.TestCase):
 
     This test re-derives the ground truth from the project's own ``amdclang++``:
     it lowers a tiny kernel to HIP C++, runs ``amdclang++ --offload-arch=<arch>
-    -S -emit-llvm --cuda-device-only`` (the same toolchain that compiles
+    -S -emit-llvm --offload-device-only`` (the same toolchain that compiles
     real kernels), extracts the ``target datalayout`` line, and asserts
     rocke's flavor-keyed constant matches byte-for-byte.
 

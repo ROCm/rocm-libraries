@@ -141,7 +141,7 @@ def test_u8_hip_source_compiles(tmp_path):
     subprocess.run(
         [
             "amdclang++",
-            "--cuda-device-only",
+            "--offload-device-only",
             "-fsyntax-only",
             "-x",
             "hip",

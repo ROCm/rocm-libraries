@@ -367,7 +367,7 @@ def _assert_amdclangxx_accepts(source: str, arch: str, tmp_path) -> None:
     subprocess.run(
         [
             "amdclang++",
-            "--cuda-device-only",
+            "--offload-device-only",
             "-fsyntax-only",
             "-x",
             "hip",
