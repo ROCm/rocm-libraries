@@ -55,9 +55,9 @@ CK_TILE_HOST index_t fmha_fwd_decode_pagedkv_max_span(index_t max_seqlen_k,
     return std::max<index_t>(span, 1);
 }
 
-// Pages per split the kernel uses for a range of span 16-token pages on this grid: the range
-// spread over all splits in whole steps, at least 8 pages for cooperative splits of several
-// clusters (FmhaFwdDecodePagedKVKernel computes the same on the device).
+// Pages per split for the longest range, span 16-token pages, on this grid: the range spread
+// over all splits in whole steps. FmhaFwdDecodePagedKVKernel sizes the splits of shorter ranges
+// on the device, up to this.
 CK_TILE_HOST index_t fmha_fwd_decode_pagedkv_split_pages(index_t span,
                                                          index_t num_splits,
                                                          index_t num_groups,
@@ -66,7 +66,7 @@ CK_TILE_HOST index_t fmha_fwd_decode_pagedkv_split_pages(index_t span,
     const index_t step  = wave_split ? 16 : 4;
     const index_t total = num_splits * num_groups;
     const index_t cover = ((span + total - 1) / total + step - 1) / step * step;
-    return std::max<index_t>(cover, wave_split ? 16 : (num_groups > 1 ? 8 : 4));
+    return std::max<index_t>(cover, wave_split ? 16 : 4);
 }
 
 // Layout for key ranges of up to span pages and heads = batch * nhead_k kv heads.
@@ -267,6 +267,8 @@ struct FmhaFwdDecodePagedKVKernel
         index_t block_table_stride;
         index_t window_size;
         index_t num_groups; // read with kHasGroups only
+        // pages per split of the longest range (FmhaFwdDecodePagedKVConfig::pages_per_split)
+        index_t bound_pps;
         // ceil(2^32 / (kNumSplits * num_groups)), for kHasGroups: the high half of a product with
         // it divides by the split count
         uint32_t splits_rcp;
@@ -312,6 +314,7 @@ struct FmhaFwdDecodePagedKVKernel
                                         index_t nhead_k,
                                         index_t window_size,
                                         index_t num_groups,
+                                        index_t pages_per_split,
                                         float scale_s,
                                         index_t nhead_stride_q,
                                         index_t batch_stride_q,
@@ -343,6 +346,7 @@ struct FmhaFwdDecodePagedKVKernel
                 block_table_stride,
                 window_size,
                 num_groups,
+                pages_per_split,
                 static_cast<uint32_t>(((uint64_t{1} << 32) + kNumSplits * num_groups - 1) /
                                       (kNumSplits * num_groups)),
                 scale_s,
@@ -401,19 +405,21 @@ struct FmhaFwdDecodePagedKVKernel
         // step's four pages of a wave lie in one cache page (positions before lo are masked)
         const index_t pg_lo = kSubPages > 1 ? lo / kN0 / 4 * 4 : lo / kN0;
         const index_t span  = max(pg_hi - pg_lo, 1);
-        // this range over all splits of the grid in whole steps
-        // (fmha_fwd_decode_pagedkv_split_pages); cooperative splits of several clusters take at
-        // least 8 pages, so a range shorter than the grid was sized for leaves later clusters
-        // empty, and they skip the merge
-        constexpr index_t kMinPages = kWaveSplit ? 16 : (kHasGroups ? 8 : 4);
-        index_t per_split;
+        // pages per split, in whole steps: the range over the splits of one cluster. With several
+        // clusters no more than the splits of the longest range take (bound_pps), so that a
+        // shorter range fills its first clusters as a launch sized for it would and leaves the
+        // others empty; and no less than spreads the range over the whole grid.
+        constexpr index_t kMinPages = kWaveSplit ? 16 : 4;
+        const auto steps            = [](index_t pages) {
+            return (pages + kStepPages - 1) / kStepPages * kStepPages;
+        };
+        index_t pps = max(steps((span + kNumSplits - 1) / kNumSplits), kMinPages);
         if constexpr(kHasGroups)
-            per_split =
-                __umulhi(static_cast<uint32_t>(span + kNumSplits * a.num_groups - 1), a.splits_rcp);
-        else
-            per_split = (span + kNumSplits - 1) / kNumSplits;
-        const index_t cover = (per_split + kStepPages - 1) / kStepPages * kStepPages;
-        const index_t pps   = max(cover, kMinPages);
+            pps = max(min(pps, a.bound_pps),
+                      steps(__umulhi(static_cast<uint32_t>(span + kNumSplits * a.num_groups - 1),
+                                     a.splits_rcp)));
+        // clusters with pages; one alone writes the output itself
+        const index_t groups = kHasGroups ? (span - 1) / (kNumSplits * pps) + 1 : 1;
         // groups without pages take no part in the merge
         if(gi > 0 && gi * kNumSplits * pps >= span)
             return;
@@ -500,7 +506,7 @@ struct FmhaFwdDecodePagedKVKernel
                     o0 += wgt * FmhaPipeline::o_to_f32(oi[i] & 0xffff);
                     o1 += wgt * FmhaPipeline::o_to_f32(oi[i] >> 16);
                 }
-                if constexpr(!kHasGroups)
+                if(!kHasGroups || groups == 1)
                 {
                     const float f = ll > 0.f ? vd / ll : 0.f;
                     *ptr_as<uint32_t>(ORow(a, b, g, q0 + mrow) + d2) =
@@ -529,7 +535,8 @@ struct FmhaFwdDecodePagedKVKernel
                 }
             }
             if constexpr(kHasGroups)
-                MergeGroups(a, head, b, g, q0, gqa, s, (span - 1) / (kNumSplits * pps) + 1, vd);
+                if(groups > 1)
+                    MergeGroups(a, head, b, g, q0, gqa, s, groups, vd);
         }
     }
 

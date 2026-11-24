@@ -69,12 +69,14 @@ struct fmha_fwd_decode_pagedkv_args
     ck_tile::index_t batch_stride_q;
     ck_tile::index_t nhead_stride_o;
     ck_tile::index_t batch_stride_o;
-    ck_tile::index_t window_size; // keys attended, the query's own included; 0 = no window
-    ck_tile::index_t num_groups;  // clusters per (batch, kv head)
+    ck_tile::index_t window_size;     // keys attended, the query's own included; 0 = no window
+    ck_tile::index_t num_groups;      // clusters per (batch, kv head)
+    ck_tile::index_t pages_per_split; // of the longest range
     float scale_s;
 };
 
-// runtime selection of an instance; wave_split, num_splits and args.num_groups come from
+// runtime selection of an instance; wave_split, num_splits, args.num_groups and
+// args.pages_per_split come from
 // ck_tile::fmha_fwd_decode_pagedkv_config
 struct fmha_fwd_decode_pagedkv_traits
 {
@@ -94,7 +96,7 @@ inline bool fmha_fwd_decode_pagedkv_is_valid(const fmha_fwd_decode_pagedkv_trait
                                              const fmha_fwd_decode_pagedkv_args& a)
 {
     if(a.batch <= 0 || a.nhead_k <= 0 || a.nhead_q <= 0 || a.nhead_q % a.nhead_k != 0 ||
-       a.block_table_stride <= 0 || a.num_groups <= 0)
+       a.block_table_stride <= 0 || a.num_groups <= 0 || a.pages_per_split <= 0)
         return false;
     if(!a.q_ptr || !a.k_ptr || !a.v_ptr || !a.o_ptr || !a.block_table_ptr || !a.seqlen_k_ptr ||
        !a.k_descale_ptr || !a.v_descale_ptr || !a.workspace_ptr || !a.counters_ptr)
@@ -136,6 +138,7 @@ auto fmha_fwd_decode_pagedkv_create_kargs_and_grids(fmha_fwd_decode_pagedkv_args
                                        args.nhead_k,
                                        args.window_size,
                                        args.num_groups,
+                                       args.pages_per_split,
                                        args.scale_s,
                                        args.nhead_stride_q,
                                        args.batch_stride_q,

@@ -336,6 +336,7 @@ inline Result run(const Case& c, bool validate, int warmup = 0, int repeat = 0)
     args.batch_stride_o     = batch_stride;
     args.window_size        = c.window;
     args.num_groups         = cfg.num_groups;
+    args.pages_per_split    = cfg.pages_per_split;
     args.scale_s            = scale_s;
 
     fmha_fwd_decode_pagedkv_traits traits{};

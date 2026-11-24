@@ -103,6 +103,7 @@ int ck_fmha_fwd_decode_pagedkv(const void* q,
     args.batch_stride_o     = o_strides ? o_strides[0] : nhead_q * 128;
     args.window_size        = window;
     args.num_groups         = c.num_groups;
+    args.pages_per_split    = c.pages_per_split;
     args.scale_s            = scale_s;
 
     fmha_fwd_decode_pagedkv_traits traits{};
