@@ -106,8 +106,9 @@ namespace
             hipDeviceProp_t properties;
             ASSERT_EQ(hipGetDevice(&device), hipSuccess);
             ASSERT_EQ(hipGetDeviceProperties(&properties, device), hipSuccess);
-            if(std::string(properties.gcnArchName).find("gfx1151") != 0)
-                GTEST_SKIP() << "W4A16 custom kernels require gfx1151";
+            const std::string arch(properties.gcnArchName);
+            if(arch.find("gfx1150") != 0 && arch.find("gfx1151") != 0)
+                GTEST_SKIP() << "W4A16 custom kernels require gfx1150 or gfx1151";
             ASSERT_EQ(hipMalloc(&storage, m * k * sizeof(float)), hipSuccess);
             ASSERT_EQ(hipblasLtCreate(&handle), HIPBLAS_STATUS_SUCCESS);
             ASSERT_EQ(hipblasLtMatmulPreferenceCreate(&pref), HIPBLAS_STATUS_SUCCESS);
@@ -227,7 +228,7 @@ TEST_F(w4a16_b_scale, every_mode_has_a_kernel_without_b_scale)
                              HIPBLASLT_INT4_ENCODING_UNSIGNED_BIAS8_EXT})
             for(bool zp : {false, true})
                 for(int group = 0; group < 3; ++group)
-                    for(int64_t cols : {int64_t(1), n})
+                    for(int64_t cols : {int64_t(1), int64_t(2), int64_t(3), int64_t(4), int64_t(5), n})
                     {
                         SCOPED_TRACE(::testing::Message() << "dtype=" << dtype << " encoding="
                                      << encoding << " zp=" << zp << " group=" << group
@@ -482,12 +483,81 @@ TEST_F(w4a16_b_scale, k_without_a_kernel_is_not_served)
 TEST_F(w4a16_b_scale, batch_count_above_one_is_rejected)
 {
     for(auto dtype : {HIP_R_16F, HIP_R_16BF})
-        for(int64_t cols : {int64_t(1), n})
+        for(int64_t cols : {int64_t(1), int64_t(2), int64_t(3), int64_t(4), int64_t(5), n})
         {
             SCOPED_TRACE(::testing::Message() << "dtype=" << dtype << " n=" << cols);
             EXPECT_EQ(runW4A16(handle, pref, dtype, 0, false, m, cols, k, 1).status,
                       HIPBLAS_STATUS_SUCCESS);
             EXPECT_NE(runW4A16(handle, pref, dtype, 0, false, m, cols, k, 2).status,
                       HIPBLAS_STATUS_SUCCESS);
+        }
+}
+
+// K the W4A16 kernels support beyond whole DepthU iterations. The decode kernels (1 to 5
+// tokens) run a masked last iteration, so K only has to be a multiple of a lane's K block: 16
+// for the kernels with DepthU 512, which every type has from 2 tokens on. The last scale group
+// may be incomplete: the scale tensor has ceil(K / group) entries per row.
+TEST_F(w4a16_b_scale, decode_kernels_take_a_k_remainder_and_an_incomplete_last_group)
+{
+    for(auto dtype : {HIP_R_16F, HIP_R_16BF})
+        for(bool zp : {false, true})
+            for(int group = 0; group < 3; ++group)
+                for(int64_t depth : {int64_t(240), int64_t(272), int64_t(1056)})
+                    for(int64_t cols : {int64_t(2), int64_t(3), int64_t(4), int64_t(5)})
+                    {
+                        SCOPED_TRACE(::testing::Message() << "dtype=" << dtype << " zp=" << zp
+                                     << " group=" << (32 << group) << " k=" << depth
+                                     << " n=" << cols);
+                        const auto run = runW4A16(handle, pref, dtype, group, zp, m, cols, depth);
+                        EXPECT_EQ(run.kernels, 1);
+                        ASSERT_EQ(run.status, HIPBLAS_STATUS_SUCCESS);
+                        EXPECT_GT(run.error, -0.5);
+                        EXPECT_LT(run.error, w4a16Tolerance(dtype));
+                    }
+}
+
+// One token: every type has a kernel for K a multiple of 32, with whole groups or not.
+TEST_F(w4a16_b_scale, one_token_takes_k_a_multiple_of_32)
+{
+    for(auto dtype : {HIP_R_16F, HIP_R_16BF})
+        for(bool zp : {false, true})
+            for(int group = 0; group < 3; ++group)
+                for(int64_t depth : {int64_t(288), int64_t(1056)})
+                {
+                    SCOPED_TRACE(::testing::Message() << "dtype=" << dtype << " zp=" << zp
+                                 << " group=" << (32 << group) << " k=" << depth);
+                    const auto run = runW4A16(handle, pref, dtype, group, zp, m, 1, depth);
+                    EXPECT_EQ(run.kernels, 1);
+                    ASSERT_EQ(run.status, HIPBLAS_STATUS_SUCCESS);
+                    EXPECT_GT(run.error, -0.5);
+                    EXPECT_LT(run.error, w4a16Tolerance(dtype));
+                }
+}
+
+// What the decode kernels do not serve: K has to be a multiple of 16. As above, no kernel is
+// returned and hipblasLtMatmul fails.
+TEST_F(w4a16_b_scale, decode_k_without_a_kernel_is_not_served)
+{
+    for(auto dtype : {HIP_R_16F, HIP_R_16BF})
+        for(bool zp : {false, true})
+            for(int group = 0; group < 3; ++group)
+                for(int64_t cols : {int64_t(1), int64_t(2), int64_t(3), int64_t(4), int64_t(5)})
+                {
+                    SCOPED_TRACE(::testing::Message() << "dtype=" << dtype << " zp=" << zp
+                                 << " group=" << (32 << group) << " n=" << cols);
+                    const auto run = runW4A16(handle, pref, dtype, group, zp, m, cols, 248);
+                    EXPECT_EQ(run.kernels, 0);
+                    EXPECT_NE(run.status, HIPBLAS_STATUS_SUCCESS);
+                }
+
+    // fp16 symmetric has no one-token kernel with DepthU 512, so its K is a multiple of 32.
+    for(int group = 0; group < 3; ++group)
+        for(int64_t depth : {int64_t(240), int64_t(272)})
+        {
+            SCOPED_TRACE(::testing::Message() << "fp16 symmetric, one token: group="
+                         << (32 << group) << " k=" << depth);
+            const auto run = runW4A16(handle, pref, HIP_R_16F, group, false, m, 1, depth);
+            EXPECT_EQ(run.kernels, 0);
+            EXPECT_NE(run.status, HIPBLAS_STATUS_SUCCESS);
         }
 }
