@@ -32,7 +32,7 @@ from pathlib import Path
 PASS, FAIL, SKIP = 0, 1, 77
 
 MESSAGE = "a hipDNN plugin called the public MIOpen entry point"
-DEFAULT_FILTER = "GPU_HipdnnReentry_FP32.RejectedCallThenDestroyReturns"
+DEFAULT_FILTER = "Full/GPU_HipdnnReentry_FP32.RejectedCallThenDestroyReturns/0"
 EXPECT_REJECTION = "MIOPEN_TEST_EXPECT_REENTRY_REJECTION"
 PASSED_LINE = "[  PASSED  ] 1 test"
 NO_TEST_LINE = "Running 0 tests"
