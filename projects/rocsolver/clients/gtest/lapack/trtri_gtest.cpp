@@ -69,9 +69,9 @@ const vector<vector<int>> large_matrix_size_range
 // for weekly_lapack tests
 // each matrix_size_range vector is a {n, lda, singular/diag}
 const vector<vector<int>> large_batch_matrix_size_range = {
-    {33, 33, 0},
-    {33, 33, 1},
-    {33, 33, 2},
+    {17, 17, 0}, {17, 17, 1}, {17, 17, 2},
+
+    {65, 65, 0}, {65, 65, 1}, {65, 65, 2},
 };
 
 Arguments trtri_setup_arguments(trtri_tuple tup)
