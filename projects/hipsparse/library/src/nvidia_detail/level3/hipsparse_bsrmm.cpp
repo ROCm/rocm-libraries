@@ -48,26 +48,34 @@ hipsparseStatus_t hipsparseSbsrmm(hipsparseHandle_t         handle,
                                   float*                    C,
                                   int                       ldc)
 {
-    return hipsparse::hipCUSPARSEStatusToHIPStatus(
-        cusparseSbsrmm((cusparseHandle_t)handle,
-                       hipsparse::hipDirectionToCudaDirection(dirA),
-                       hipsparse::hipOperationToCudaOperation(transA),
-                       hipsparse::hipOperationToCudaOperation(transB),
-                       mb,
-                       n,
-                       kb,
-                       nnzb,
-                       alpha,
-                       (const cusparseMatDescr_t)descrA,
-                       bsrValA,
-                       bsrRowPtrA,
-                       bsrColIndA,
-                       blockDim,
-                       B,
-                       ldb,
-                       beta,
-                       C,
-                       ldc));
+    cusparseDirection_t backend_dirA{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipDirectionToCudaDirection(dirA, &backend_dirA));
+
+    cusparseOperation_t backend_transA{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipOperationToCudaOperation(transA, &backend_transA));
+
+    cusparseOperation_t backend_transB{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipOperationToCudaOperation(transB, &backend_transB));
+
+    return hipsparse::hipCUSPARSEStatusToHIPStatus(cusparseSbsrmm((cusparseHandle_t)handle,
+                                                                  backend_dirA,
+                                                                  backend_transA,
+                                                                  backend_transB,
+                                                                  mb,
+                                                                  n,
+                                                                  kb,
+                                                                  nnzb,
+                                                                  alpha,
+                                                                  (const cusparseMatDescr_t)descrA,
+                                                                  bsrValA,
+                                                                  bsrRowPtrA,
+                                                                  bsrColIndA,
+                                                                  blockDim,
+                                                                  B,
+                                                                  ldb,
+                                                                  beta,
+                                                                  C,
+                                                                  ldc));
 }
 
 hipsparseStatus_t hipsparseDbsrmm(hipsparseHandle_t         handle,
@@ -90,26 +98,34 @@ hipsparseStatus_t hipsparseDbsrmm(hipsparseHandle_t         handle,
                                   double*                   C,
                                   int                       ldc)
 {
-    return hipsparse::hipCUSPARSEStatusToHIPStatus(
-        cusparseDbsrmm((cusparseHandle_t)handle,
-                       hipsparse::hipDirectionToCudaDirection(dirA),
-                       hipsparse::hipOperationToCudaOperation(transA),
-                       hipsparse::hipOperationToCudaOperation(transB),
-                       mb,
-                       n,
-                       kb,
-                       nnzb,
-                       alpha,
-                       (const cusparseMatDescr_t)descrA,
-                       bsrValA,
-                       bsrRowPtrA,
-                       bsrColIndA,
-                       blockDim,
-                       B,
-                       ldb,
-                       beta,
-                       C,
-                       ldc));
+    cusparseDirection_t backend_dirA{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipDirectionToCudaDirection(dirA, &backend_dirA));
+
+    cusparseOperation_t backend_transA{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipOperationToCudaOperation(transA, &backend_transA));
+
+    cusparseOperation_t backend_transB{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipOperationToCudaOperation(transB, &backend_transB));
+
+    return hipsparse::hipCUSPARSEStatusToHIPStatus(cusparseDbsrmm((cusparseHandle_t)handle,
+                                                                  backend_dirA,
+                                                                  backend_transA,
+                                                                  backend_transB,
+                                                                  mb,
+                                                                  n,
+                                                                  kb,
+                                                                  nnzb,
+                                                                  alpha,
+                                                                  (const cusparseMatDescr_t)descrA,
+                                                                  bsrValA,
+                                                                  bsrRowPtrA,
+                                                                  bsrColIndA,
+                                                                  blockDim,
+                                                                  B,
+                                                                  ldb,
+                                                                  beta,
+                                                                  C,
+                                                                  ldc));
 }
 
 hipsparseStatus_t hipsparseCbsrmm(hipsparseHandle_t         handle,
@@ -132,26 +148,34 @@ hipsparseStatus_t hipsparseCbsrmm(hipsparseHandle_t         handle,
                                   hipComplex*               C,
                                   int                       ldc)
 {
-    return hipsparse::hipCUSPARSEStatusToHIPStatus(
-        cusparseCbsrmm((cusparseHandle_t)handle,
-                       hipsparse::hipDirectionToCudaDirection(dirA),
-                       hipsparse::hipOperationToCudaOperation(transA),
-                       hipsparse::hipOperationToCudaOperation(transB),
-                       mb,
-                       n,
-                       kb,
-                       nnzb,
-                       (const cuComplex*)alpha,
-                       (const cusparseMatDescr_t)descrA,
-                       (const cuComplex*)bsrValA,
-                       bsrRowPtrA,
-                       bsrColIndA,
-                       blockDim,
-                       (const cuComplex*)B,
-                       ldb,
-                       (const cuComplex*)beta,
-                       (cuComplex*)C,
-                       ldc));
+    cusparseDirection_t backend_dirA{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipDirectionToCudaDirection(dirA, &backend_dirA));
+
+    cusparseOperation_t backend_transA{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipOperationToCudaOperation(transA, &backend_transA));
+
+    cusparseOperation_t backend_transB{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipOperationToCudaOperation(transB, &backend_transB));
+
+    return hipsparse::hipCUSPARSEStatusToHIPStatus(cusparseCbsrmm((cusparseHandle_t)handle,
+                                                                  backend_dirA,
+                                                                  backend_transA,
+                                                                  backend_transB,
+                                                                  mb,
+                                                                  n,
+                                                                  kb,
+                                                                  nnzb,
+                                                                  (const cuComplex*)alpha,
+                                                                  (const cusparseMatDescr_t)descrA,
+                                                                  (const cuComplex*)bsrValA,
+                                                                  bsrRowPtrA,
+                                                                  bsrColIndA,
+                                                                  blockDim,
+                                                                  (const cuComplex*)B,
+                                                                  ldb,
+                                                                  (const cuComplex*)beta,
+                                                                  (cuComplex*)C,
+                                                                  ldc));
 }
 
 hipsparseStatus_t hipsparseZbsrmm(hipsparseHandle_t         handle,
@@ -174,24 +198,32 @@ hipsparseStatus_t hipsparseZbsrmm(hipsparseHandle_t         handle,
                                   hipDoubleComplex*         C,
                                   int                       ldc)
 {
-    return hipsparse::hipCUSPARSEStatusToHIPStatus(
-        cusparseZbsrmm((cusparseHandle_t)handle,
-                       hipsparse::hipDirectionToCudaDirection(dirA),
-                       hipsparse::hipOperationToCudaOperation(transA),
-                       hipsparse::hipOperationToCudaOperation(transB),
-                       mb,
-                       n,
-                       kb,
-                       nnzb,
-                       (const cuDoubleComplex*)alpha,
-                       (const cusparseMatDescr_t)descrA,
-                       (const cuDoubleComplex*)bsrValA,
-                       bsrRowPtrA,
-                       bsrColIndA,
-                       blockDim,
-                       (const cuDoubleComplex*)B,
-                       ldb,
-                       (const cuDoubleComplex*)beta,
-                       (cuDoubleComplex*)C,
-                       ldc));
+    cusparseDirection_t backend_dirA{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipDirectionToCudaDirection(dirA, &backend_dirA));
+
+    cusparseOperation_t backend_transA{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipOperationToCudaOperation(transA, &backend_transA));
+
+    cusparseOperation_t backend_transB{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipOperationToCudaOperation(transB, &backend_transB));
+
+    return hipsparse::hipCUSPARSEStatusToHIPStatus(cusparseZbsrmm((cusparseHandle_t)handle,
+                                                                  backend_dirA,
+                                                                  backend_transA,
+                                                                  backend_transB,
+                                                                  mb,
+                                                                  n,
+                                                                  kb,
+                                                                  nnzb,
+                                                                  (const cuDoubleComplex*)alpha,
+                                                                  (const cusparseMatDescr_t)descrA,
+                                                                  (const cuDoubleComplex*)bsrValA,
+                                                                  bsrRowPtrA,
+                                                                  bsrColIndA,
+                                                                  blockDim,
+                                                                  (const cuDoubleComplex*)B,
+                                                                  ldb,
+                                                                  (const cuDoubleComplex*)beta,
+                                                                  (cuDoubleComplex*)C,
+                                                                  ldc));
 }

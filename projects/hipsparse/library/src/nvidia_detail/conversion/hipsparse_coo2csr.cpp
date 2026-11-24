@@ -35,11 +35,9 @@ hipsparseStatus_t hipsparseXcoo2csr(hipsparseHandle_t    handle,
                                     int*                 csrRowPtr,
                                     hipsparseIndexBase_t idxBase)
 {
+    cusparseIndexBase_t backend_idxBase{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipIndexBaseToCudaIndexBase(idxBase, &backend_idxBase));
+
     return hipsparse::hipCUSPARSEStatusToHIPStatus(
-        cusparseXcoo2csr((cusparseHandle_t)handle,
-                         cooRowInd,
-                         nnz,
-                         m,
-                         csrRowPtr,
-                         hipsparse::hipIndexBaseToCudaIndexBase(idxBase)));
+        cusparseXcoo2csr((cusparseHandle_t)handle, cooRowInd, nnz, m, csrRowPtr, backend_idxBase));
 }

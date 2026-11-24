@@ -42,19 +42,24 @@ hipsparseStatus_t hipsparseScsr2csc(hipsparseHandle_t    handle,
                                     hipsparseAction_t    copyValues,
                                     hipsparseIndexBase_t idxBase)
 {
-    return hipsparse::hipCUSPARSEStatusToHIPStatus(
-        cusparseScsr2csc((cusparseHandle_t)handle,
-                         m,
-                         n,
-                         nnz,
-                         csrSortedVal,
-                         csrSortedRowPtr,
-                         csrSortedColInd,
-                         cscSortedVal,
-                         cscSortedRowInd,
-                         cscSortedColPtr,
-                         hipsparse::hipActionToCudaAction(copyValues),
-                         hipsparse::hipIndexBaseToCudaIndexBase(idxBase)));
+    cusparseAction_t backend_copyValues{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipActionToCudaAction(copyValues, &backend_copyValues));
+
+    cusparseIndexBase_t backend_idxBase{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipIndexBaseToCudaIndexBase(idxBase, &backend_idxBase));
+
+    return hipsparse::hipCUSPARSEStatusToHIPStatus(cusparseScsr2csc((cusparseHandle_t)handle,
+                                                                    m,
+                                                                    n,
+                                                                    nnz,
+                                                                    csrSortedVal,
+                                                                    csrSortedRowPtr,
+                                                                    csrSortedColInd,
+                                                                    cscSortedVal,
+                                                                    cscSortedRowInd,
+                                                                    cscSortedColPtr,
+                                                                    backend_copyValues,
+                                                                    backend_idxBase));
 }
 
 hipsparseStatus_t hipsparseDcsr2csc(hipsparseHandle_t    handle,
@@ -70,19 +75,24 @@ hipsparseStatus_t hipsparseDcsr2csc(hipsparseHandle_t    handle,
                                     hipsparseAction_t    copyValues,
                                     hipsparseIndexBase_t idxBase)
 {
-    return hipsparse::hipCUSPARSEStatusToHIPStatus(
-        cusparseDcsr2csc((cusparseHandle_t)handle,
-                         m,
-                         n,
-                         nnz,
-                         csrSortedVal,
-                         csrSortedRowPtr,
-                         csrSortedColInd,
-                         cscSortedVal,
-                         cscSortedRowInd,
-                         cscSortedColPtr,
-                         hipsparse::hipActionToCudaAction(copyValues),
-                         hipsparse::hipIndexBaseToCudaIndexBase(idxBase)));
+    cusparseAction_t backend_copyValues{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipActionToCudaAction(copyValues, &backend_copyValues));
+
+    cusparseIndexBase_t backend_idxBase{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipIndexBaseToCudaIndexBase(idxBase, &backend_idxBase));
+
+    return hipsparse::hipCUSPARSEStatusToHIPStatus(cusparseDcsr2csc((cusparseHandle_t)handle,
+                                                                    m,
+                                                                    n,
+                                                                    nnz,
+                                                                    csrSortedVal,
+                                                                    csrSortedRowPtr,
+                                                                    csrSortedColInd,
+                                                                    cscSortedVal,
+                                                                    cscSortedRowInd,
+                                                                    cscSortedColPtr,
+                                                                    backend_copyValues,
+                                                                    backend_idxBase));
 }
 
 hipsparseStatus_t hipsparseCcsr2csc(hipsparseHandle_t    handle,
@@ -98,19 +108,24 @@ hipsparseStatus_t hipsparseCcsr2csc(hipsparseHandle_t    handle,
                                     hipsparseAction_t    copyValues,
                                     hipsparseIndexBase_t idxBase)
 {
-    return hipsparse::hipCUSPARSEStatusToHIPStatus(
-        cusparseCcsr2csc((cusparseHandle_t)handle,
-                         m,
-                         n,
-                         nnz,
-                         (const cuComplex*)csrSortedVal,
-                         csrSortedRowPtr,
-                         csrSortedColInd,
-                         (cuComplex*)cscSortedVal,
-                         cscSortedRowInd,
-                         cscSortedColPtr,
-                         hipsparse::hipActionToCudaAction(copyValues),
-                         hipsparse::hipIndexBaseToCudaIndexBase(idxBase)));
+    cusparseAction_t backend_copyValues{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipActionToCudaAction(copyValues, &backend_copyValues));
+
+    cusparseIndexBase_t backend_idxBase{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipIndexBaseToCudaIndexBase(idxBase, &backend_idxBase));
+
+    return hipsparse::hipCUSPARSEStatusToHIPStatus(cusparseCcsr2csc((cusparseHandle_t)handle,
+                                                                    m,
+                                                                    n,
+                                                                    nnz,
+                                                                    (const cuComplex*)csrSortedVal,
+                                                                    csrSortedRowPtr,
+                                                                    csrSortedColInd,
+                                                                    (cuComplex*)cscSortedVal,
+                                                                    cscSortedRowInd,
+                                                                    cscSortedColPtr,
+                                                                    backend_copyValues,
+                                                                    backend_idxBase));
 }
 
 hipsparseStatus_t hipsparseZcsr2csc(hipsparseHandle_t       handle,
@@ -126,6 +141,12 @@ hipsparseStatus_t hipsparseZcsr2csc(hipsparseHandle_t       handle,
                                     hipsparseAction_t       copyValues,
                                     hipsparseIndexBase_t    idxBase)
 {
+    cusparseAction_t backend_copyValues{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipActionToCudaAction(copyValues, &backend_copyValues));
+
+    cusparseIndexBase_t backend_idxBase{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipIndexBaseToCudaIndexBase(idxBase, &backend_idxBase));
+
     return hipsparse::hipCUSPARSEStatusToHIPStatus(
         cusparseZcsr2csc((cusparseHandle_t)handle,
                          m,
@@ -137,8 +158,8 @@ hipsparseStatus_t hipsparseZcsr2csc(hipsparseHandle_t       handle,
                          (cuDoubleComplex*)cscSortedVal,
                          cscSortedRowInd,
                          cscSortedColPtr,
-                         hipsparse::hipActionToCudaAction(copyValues),
-                         hipsparse::hipIndexBaseToCudaIndexBase(idxBase)));
+                         backend_copyValues,
+                         backend_idxBase));
 }
 #endif
 
@@ -162,6 +183,15 @@ hipsparseStatus_t hipsparseCsr2cscEx2_bufferSize(hipsparseHandle_t     handle,
     cudaDataType backend_data_type{};
     RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipDataTypeToCudaDataType(valType, &backend_data_type));
 
+    cusparseAction_t backend_copyValues{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipActionToCudaAction(copyValues, &backend_copyValues));
+
+    cusparseIndexBase_t backend_idxBase{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipIndexBaseToCudaIndexBase(idxBase, &backend_idxBase));
+
+    cusparseCsr2CscAlg_t backend_alg{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipCsr2CscAlgToCudaCsr2CscAlg(alg, &backend_alg));
+
     return hipsparse::hipCUSPARSEStatusToHIPStatus(
         cusparseCsr2cscEx2_bufferSize((cusparseHandle_t)handle,
                                       m,
@@ -174,9 +204,9 @@ hipsparseStatus_t hipsparseCsr2cscEx2_bufferSize(hipsparseHandle_t     handle,
                                       cscColPtr,
                                       cscRowInd,
                                       backend_data_type,
-                                      hipsparse::hipActionToCudaAction(copyValues),
-                                      hipsparse::hipIndexBaseToCudaIndexBase(idxBase),
-                                      hipsparse::hipCsr2CscAlgToCudaCsr2CscAlg(alg),
+                                      backend_copyValues,
+                                      backend_idxBase,
+                                      backend_alg,
                                       pBufferSizeInBytes));
 }
 
@@ -199,21 +229,29 @@ hipsparseStatus_t hipsparseCsr2cscEx2(hipsparseHandle_t     handle,
     cudaDataType backend_data_type{};
     RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipDataTypeToCudaDataType(valType, &backend_data_type));
 
-    return hipsparse::hipCUSPARSEStatusToHIPStatus(
-        cusparseCsr2cscEx2((cusparseHandle_t)handle,
-                           m,
-                           n,
-                           nnz,
-                           csrVal,
-                           csrRowPtr,
-                           csrColInd,
-                           cscVal,
-                           cscColPtr,
-                           cscRowInd,
-                           backend_data_type,
-                           hipsparse::hipActionToCudaAction(copyValues),
-                           hipsparse::hipIndexBaseToCudaIndexBase(idxBase),
-                           hipsparse::hipCsr2CscAlgToCudaCsr2CscAlg(alg),
-                           buffer));
+    cusparseAction_t backend_copyValues{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipActionToCudaAction(copyValues, &backend_copyValues));
+
+    cusparseIndexBase_t backend_idxBase{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipIndexBaseToCudaIndexBase(idxBase, &backend_idxBase));
+
+    cusparseCsr2CscAlg_t backend_alg{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipCsr2CscAlgToCudaCsr2CscAlg(alg, &backend_alg));
+
+    return hipsparse::hipCUSPARSEStatusToHIPStatus(cusparseCsr2cscEx2((cusparseHandle_t)handle,
+                                                                      m,
+                                                                      n,
+                                                                      nnz,
+                                                                      csrVal,
+                                                                      csrRowPtr,
+                                                                      csrColInd,
+                                                                      cscVal,
+                                                                      cscColPtr,
+                                                                      cscRowInd,
+                                                                      backend_data_type,
+                                                                      backend_copyValues,
+                                                                      backend_idxBase,
+                                                                      backend_alg,
+                                                                      buffer));
 }
 #endif

@@ -62,6 +62,15 @@ hipsparseStatus_t hipsparseSbsrsm2_bufferSize(hipsparseHandle_t         handle,
                                               bsrsm2Info_t              info,
                                               int*                      pBufferSizeInBytes)
 {
+    rocsparse_direction_ backend_dirA{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipDirectionToHCCDirection(dirA, &backend_dirA));
+
+    rocsparse_operation_ backend_transA{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipOperationToHCCOperation(transA, &backend_transA));
+
+    rocsparse_operation_ backend_transX{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipOperationToHCCOperation(transX, &backend_transX));
+
     if(pBufferSizeInBytes == nullptr)
     {
         return HIPSPARSE_STATUS_INVALID_VALUE;
@@ -71,9 +80,9 @@ hipsparseStatus_t hipsparseSbsrsm2_bufferSize(hipsparseHandle_t         handle,
 
     hipsparseStatus_t status = hipsparse::rocSPARSEStatusToHIPStatus(
         rocsparse_sbsrsm_buffer_size((rocsparse_handle)handle,
-                                     hipsparse::hipDirectionToHCCDirection(dirA),
-                                     hipsparse::hipOperationToHCCOperation(transA),
-                                     hipsparse::hipOperationToHCCOperation(transX),
+                                     backend_dirA,
+                                     backend_transA,
+                                     backend_transX,
                                      mb,
                                      nrhs,
                                      nnzb,
@@ -105,6 +114,15 @@ hipsparseStatus_t hipsparseDbsrsm2_bufferSize(hipsparseHandle_t         handle,
                                               bsrsm2Info_t              info,
                                               int*                      pBufferSizeInBytes)
 {
+    rocsparse_direction_ backend_dirA{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipDirectionToHCCDirection(dirA, &backend_dirA));
+
+    rocsparse_operation_ backend_transA{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipOperationToHCCOperation(transA, &backend_transA));
+
+    rocsparse_operation_ backend_transX{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipOperationToHCCOperation(transX, &backend_transX));
+
     if(pBufferSizeInBytes == nullptr)
     {
         return HIPSPARSE_STATUS_INVALID_VALUE;
@@ -114,9 +132,9 @@ hipsparseStatus_t hipsparseDbsrsm2_bufferSize(hipsparseHandle_t         handle,
 
     hipsparseStatus_t status = hipsparse::rocSPARSEStatusToHIPStatus(
         rocsparse_dbsrsm_buffer_size((rocsparse_handle)handle,
-                                     hipsparse::hipDirectionToHCCDirection(dirA),
-                                     hipsparse::hipOperationToHCCOperation(transA),
-                                     hipsparse::hipOperationToHCCOperation(transX),
+                                     backend_dirA,
+                                     backend_transA,
+                                     backend_transX,
                                      mb,
                                      nrhs,
                                      nnzb,
@@ -148,6 +166,15 @@ hipsparseStatus_t hipsparseCbsrsm2_bufferSize(hipsparseHandle_t         handle,
                                               bsrsm2Info_t              info,
                                               int*                      pBufferSizeInBytes)
 {
+    rocsparse_direction_ backend_dirA{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipDirectionToHCCDirection(dirA, &backend_dirA));
+
+    rocsparse_operation_ backend_transA{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipOperationToHCCOperation(transA, &backend_transA));
+
+    rocsparse_operation_ backend_transX{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipOperationToHCCOperation(transX, &backend_transX));
+
     if(pBufferSizeInBytes == nullptr)
     {
         return HIPSPARSE_STATUS_INVALID_VALUE;
@@ -157,9 +184,9 @@ hipsparseStatus_t hipsparseCbsrsm2_bufferSize(hipsparseHandle_t         handle,
 
     hipsparseStatus_t status = hipsparse::rocSPARSEStatusToHIPStatus(
         rocsparse_cbsrsm_buffer_size((rocsparse_handle)handle,
-                                     hipsparse::hipDirectionToHCCDirection(dirA),
-                                     hipsparse::hipOperationToHCCOperation(transA),
-                                     hipsparse::hipOperationToHCCOperation(transX),
+                                     backend_dirA,
+                                     backend_transA,
+                                     backend_transX,
                                      mb,
                                      nrhs,
                                      nnzb,
@@ -191,6 +218,15 @@ hipsparseStatus_t hipsparseZbsrsm2_bufferSize(hipsparseHandle_t         handle,
                                               bsrsm2Info_t              info,
                                               int*                      pBufferSizeInBytes)
 {
+    rocsparse_direction_ backend_dirA{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipDirectionToHCCDirection(dirA, &backend_dirA));
+
+    rocsparse_operation_ backend_transA{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipOperationToHCCOperation(transA, &backend_transA));
+
+    rocsparse_operation_ backend_transX{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipOperationToHCCOperation(transX, &backend_transX));
+
     if(pBufferSizeInBytes == nullptr)
     {
         return HIPSPARSE_STATUS_INVALID_VALUE;
@@ -200,9 +236,9 @@ hipsparseStatus_t hipsparseZbsrsm2_bufferSize(hipsparseHandle_t         handle,
 
     hipsparseStatus_t status = hipsparse::rocSPARSEStatusToHIPStatus(
         rocsparse_zbsrsm_buffer_size((rocsparse_handle)handle,
-                                     hipsparse::hipDirectionToHCCDirection(dirA),
-                                     hipsparse::hipOperationToHCCOperation(transA),
-                                     hipsparse::hipOperationToHCCOperation(transX),
+                                     backend_dirA,
+                                     backend_transA,
+                                     backend_transX,
                                      mb,
                                      nrhs,
                                      nnzb,
@@ -235,11 +271,23 @@ hipsparseStatus_t hipsparseSbsrsm2_analysis(hipsparseHandle_t         handle,
                                             hipsparseSolvePolicy_t    policy,
                                             void*                     pBuffer)
 {
+    rocsparse_direction_ backend_dirA{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipDirectionToHCCDirection(dirA, &backend_dirA));
+
+    rocsparse_operation_ backend_transA{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipOperationToHCCOperation(transA, &backend_transA));
+
+    rocsparse_operation_ backend_transX{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipOperationToHCCOperation(transX, &backend_transX));
+
+    rocsparse_solve_policy_ backend_policy{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipPolicyToHCCPolicy(policy, &backend_policy));
+
     return hipsparse::rocSPARSEStatusToHIPStatus(
         rocsparse_sbsrsm_analysis((rocsparse_handle)handle,
-                                  hipsparse::hipDirectionToHCCDirection(dirA),
-                                  hipsparse::hipOperationToHCCOperation(transA),
-                                  hipsparse::hipOperationToHCCOperation(transX),
+                                  backend_dirA,
+                                  backend_transA,
+                                  backend_transX,
                                   mb,
                                   nrhs,
                                   nnzb,
@@ -270,11 +318,23 @@ hipsparseStatus_t hipsparseDbsrsm2_analysis(hipsparseHandle_t         handle,
                                             hipsparseSolvePolicy_t    policy,
                                             void*                     pBuffer)
 {
+    rocsparse_direction_ backend_dirA{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipDirectionToHCCDirection(dirA, &backend_dirA));
+
+    rocsparse_operation_ backend_transA{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipOperationToHCCOperation(transA, &backend_transA));
+
+    rocsparse_operation_ backend_transX{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipOperationToHCCOperation(transX, &backend_transX));
+
+    rocsparse_solve_policy_ backend_policy{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipPolicyToHCCPolicy(policy, &backend_policy));
+
     return hipsparse::rocSPARSEStatusToHIPStatus(
         rocsparse_dbsrsm_analysis((rocsparse_handle)handle,
-                                  hipsparse::hipDirectionToHCCDirection(dirA),
-                                  hipsparse::hipOperationToHCCOperation(transA),
-                                  hipsparse::hipOperationToHCCOperation(transX),
+                                  backend_dirA,
+                                  backend_transA,
+                                  backend_transX,
                                   mb,
                                   nrhs,
                                   nnzb,
@@ -305,11 +365,23 @@ hipsparseStatus_t hipsparseCbsrsm2_analysis(hipsparseHandle_t         handle,
                                             hipsparseSolvePolicy_t    policy,
                                             void*                     pBuffer)
 {
+    rocsparse_direction_ backend_dirA{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipDirectionToHCCDirection(dirA, &backend_dirA));
+
+    rocsparse_operation_ backend_transA{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipOperationToHCCOperation(transA, &backend_transA));
+
+    rocsparse_operation_ backend_transX{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipOperationToHCCOperation(transX, &backend_transX));
+
+    rocsparse_solve_policy_ backend_policy{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipPolicyToHCCPolicy(policy, &backend_policy));
+
     return hipsparse::rocSPARSEStatusToHIPStatus(
         rocsparse_cbsrsm_analysis((rocsparse_handle)handle,
-                                  hipsparse::hipDirectionToHCCDirection(dirA),
-                                  hipsparse::hipOperationToHCCOperation(transA),
-                                  hipsparse::hipOperationToHCCOperation(transX),
+                                  backend_dirA,
+                                  backend_transA,
+                                  backend_transX,
                                   mb,
                                   nrhs,
                                   nnzb,
@@ -340,11 +412,23 @@ hipsparseStatus_t hipsparseZbsrsm2_analysis(hipsparseHandle_t         handle,
                                             hipsparseSolvePolicy_t    policy,
                                             void*                     pBuffer)
 {
+    rocsparse_direction_ backend_dirA{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipDirectionToHCCDirection(dirA, &backend_dirA));
+
+    rocsparse_operation_ backend_transA{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipOperationToHCCOperation(transA, &backend_transA));
+
+    rocsparse_operation_ backend_transX{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipOperationToHCCOperation(transX, &backend_transX));
+
+    rocsparse_solve_policy_ backend_policy{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipPolicyToHCCPolicy(policy, &backend_policy));
+
     return hipsparse::rocSPARSEStatusToHIPStatus(
         rocsparse_zbsrsm_analysis((rocsparse_handle)handle,
-                                  hipsparse::hipDirectionToHCCDirection(dirA),
-                                  hipsparse::hipOperationToHCCOperation(transA),
-                                  hipsparse::hipOperationToHCCOperation(transX),
+                                  backend_dirA,
+                                  backend_transA,
+                                  backend_transX,
                                   mb,
                                   nrhs,
                                   nnzb,
@@ -380,11 +464,23 @@ hipsparseStatus_t hipsparseSbsrsm2_solve(hipsparseHandle_t         handle,
                                          hipsparseSolvePolicy_t    policy,
                                          void*                     pBuffer)
 {
+    rocsparse_direction_ backend_dirA{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipDirectionToHCCDirection(dirA, &backend_dirA));
+
+    rocsparse_operation_ backend_transA{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipOperationToHCCOperation(transA, &backend_transA));
+
+    rocsparse_operation_ backend_transX{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipOperationToHCCOperation(transX, &backend_transX));
+
+    rocsparse_solve_policy_ backend_policy{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipPolicyToHCCPolicy(policy, &backend_policy));
+
     return hipsparse::rocSPARSEStatusToHIPStatus(
         rocsparse_sbsrsm_solve((rocsparse_handle)handle,
-                               hipsparse::hipDirectionToHCCDirection(dirA),
-                               hipsparse::hipOperationToHCCOperation(transA),
-                               hipsparse::hipOperationToHCCOperation(transX),
+                               backend_dirA,
+                               backend_transA,
+                               backend_transX,
                                mb,
                                nrhs,
                                nnzb,
@@ -424,11 +520,23 @@ hipsparseStatus_t hipsparseDbsrsm2_solve(hipsparseHandle_t         handle,
                                          hipsparseSolvePolicy_t    policy,
                                          void*                     pBuffer)
 {
+    rocsparse_direction_ backend_dirA{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipDirectionToHCCDirection(dirA, &backend_dirA));
+
+    rocsparse_operation_ backend_transA{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipOperationToHCCOperation(transA, &backend_transA));
+
+    rocsparse_operation_ backend_transX{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipOperationToHCCOperation(transX, &backend_transX));
+
+    rocsparse_solve_policy_ backend_policy{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipPolicyToHCCPolicy(policy, &backend_policy));
+
     return hipsparse::rocSPARSEStatusToHIPStatus(
         rocsparse_dbsrsm_solve((rocsparse_handle)handle,
-                               hipsparse::hipDirectionToHCCDirection(dirA),
-                               hipsparse::hipOperationToHCCOperation(transA),
-                               hipsparse::hipOperationToHCCOperation(transX),
+                               backend_dirA,
+                               backend_transA,
+                               backend_transX,
                                mb,
                                nrhs,
                                nnzb,
@@ -468,11 +576,23 @@ hipsparseStatus_t hipsparseCbsrsm2_solve(hipsparseHandle_t         handle,
                                          hipsparseSolvePolicy_t    policy,
                                          void*                     pBuffer)
 {
+    rocsparse_direction_ backend_dirA{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipDirectionToHCCDirection(dirA, &backend_dirA));
+
+    rocsparse_operation_ backend_transA{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipOperationToHCCOperation(transA, &backend_transA));
+
+    rocsparse_operation_ backend_transX{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipOperationToHCCOperation(transX, &backend_transX));
+
+    rocsparse_solve_policy_ backend_policy{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipPolicyToHCCPolicy(policy, &backend_policy));
+
     return hipsparse::rocSPARSEStatusToHIPStatus(
         rocsparse_cbsrsm_solve((rocsparse_handle)handle,
-                               hipsparse::hipDirectionToHCCDirection(dirA),
-                               hipsparse::hipOperationToHCCOperation(transA),
-                               hipsparse::hipOperationToHCCOperation(transX),
+                               backend_dirA,
+                               backend_transA,
+                               backend_transX,
                                mb,
                                nrhs,
                                nnzb,
@@ -512,11 +632,23 @@ hipsparseStatus_t hipsparseZbsrsm2_solve(hipsparseHandle_t         handle,
                                          hipsparseSolvePolicy_t    policy,
                                          void*                     pBuffer)
 {
+    rocsparse_direction_ backend_dirA{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipDirectionToHCCDirection(dirA, &backend_dirA));
+
+    rocsparse_operation_ backend_transA{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipOperationToHCCOperation(transA, &backend_transA));
+
+    rocsparse_operation_ backend_transX{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipOperationToHCCOperation(transX, &backend_transX));
+
+    rocsparse_solve_policy_ backend_policy{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipPolicyToHCCPolicy(policy, &backend_policy));
+
     return hipsparse::rocSPARSEStatusToHIPStatus(
         rocsparse_zbsrsm_solve((rocsparse_handle)handle,
-                               hipsparse::hipDirectionToHCCDirection(dirA),
-                               hipsparse::hipOperationToHCCOperation(transA),
-                               hipsparse::hipOperationToHCCOperation(transX),
+                               backend_dirA,
+                               backend_transA,
+                               backend_transX,
                                mb,
                                nrhs,
                                nnzb,

@@ -64,23 +64,32 @@ hipsparseStatus_t hipsparseSpSM_bufferSize(hipsparseHandle_t           handle,
                                            hipsparseSpSMDescr_t        spsmDescr,
                                            size_t*                     pBufferSizeInBytes)
 {
+    rocsparse_operation_ backend_opA{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipOperationToHCCOperation(opA, &backend_opA));
+
+    rocsparse_operation_ backend_opB{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipOperationToHCCOperation(opB, &backend_opB));
+
+    rocsparse_datatype_ backend_data_type{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipDataTypeToHCCDataType(computeType, &backend_data_type));
+
+    rocsparse_spsm_alg_ backend_alg{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipSpSMAlgToHCCSpSMAlg(alg, &backend_alg));
+
     if(spsmDescr == nullptr)
     {
         return HIPSPARSE_STATUS_INVALID_VALUE;
     }
 
-    rocsparse_datatype_ backend_data_type{};
-    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipDataTypeToHCCDataType(computeType, &backend_data_type));
-
     RETURN_IF_ROCSPARSE_ERROR(rocsparse_spsm((rocsparse_handle)handle,
-                                             hipsparse::hipOperationToHCCOperation(opA),
-                                             hipsparse::hipOperationToHCCOperation(opB),
+                                             backend_opA,
+                                             backend_opB,
                                              alpha,
                                              to_rocsparse_const_spmat_descr(matA),
                                              (rocsparse_const_dnmat_descr)matB,
                                              (const rocsparse_dnmat_descr)matC,
                                              backend_data_type,
-                                             hipsparse::hipSpSMAlgToHCCSpSMAlg(alg),
+                                             backend_alg,
                                              rocsparse_spsm_stage_buffer_size,
                                              pBufferSizeInBytes,
                                              nullptr));
@@ -102,23 +111,32 @@ hipsparseStatus_t hipsparseSpSM_analysis(hipsparseHandle_t           handle,
                                          hipsparseSpSMDescr_t        spsmDescr,
                                          void*                       externalBuffer)
 {
+    rocsparse_operation_ backend_opA{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipOperationToHCCOperation(opA, &backend_opA));
+
+    rocsparse_operation_ backend_opB{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipOperationToHCCOperation(opB, &backend_opB));
+
+    rocsparse_datatype_ backend_data_type{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipDataTypeToHCCDataType(computeType, &backend_data_type));
+
+    rocsparse_spsm_alg_ backend_alg{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipSpSMAlgToHCCSpSMAlg(alg, &backend_alg));
+
     if(spsmDescr == nullptr || externalBuffer == nullptr)
     {
         return HIPSPARSE_STATUS_INVALID_VALUE;
     }
 
-    rocsparse_datatype_ backend_data_type{};
-    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipDataTypeToHCCDataType(computeType, &backend_data_type));
-
     RETURN_IF_ROCSPARSE_ERROR(rocsparse_spsm((rocsparse_handle)handle,
-                                             hipsparse::hipOperationToHCCOperation(opA),
-                                             hipsparse::hipOperationToHCCOperation(opB),
+                                             backend_opA,
+                                             backend_opB,
                                              alpha,
                                              to_rocsparse_const_spmat_descr(matA),
                                              (rocsparse_const_dnmat_descr)matB,
                                              (const rocsparse_dnmat_descr)matC,
                                              backend_data_type,
-                                             hipsparse::hipSpSMAlgToHCCSpSMAlg(alg),
+                                             backend_alg,
                                              rocsparse_spsm_stage_preprocess,
                                              nullptr,
                                              externalBuffer));
@@ -140,24 +158,33 @@ hipsparseStatus_t hipsparseSpSM_solve(hipsparseHandle_t           handle,
                                       hipsparseSpSMDescr_t        spsmDescr,
                                       void*                       externalBuffer)
 {
+    rocsparse_operation_ backend_opA{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipOperationToHCCOperation(opA, &backend_opA));
+
+    rocsparse_operation_ backend_opB{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipOperationToHCCOperation(opB, &backend_opB));
+
+    rocsparse_datatype_ backend_data_type{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipDataTypeToHCCDataType(computeType, &backend_data_type));
+
+    rocsparse_spsm_alg_ backend_alg{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipSpSMAlgToHCCSpSMAlg(alg, &backend_alg));
+
     if(spsmDescr == nullptr)
     {
         return HIPSPARSE_STATUS_INVALID_VALUE;
     }
 
-    rocsparse_datatype_ backend_data_type{};
-    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipDataTypeToHCCDataType(computeType, &backend_data_type));
-
     return hipsparse::rocSPARSEStatusToHIPStatus(
         rocsparse_spsm((rocsparse_handle)handle,
-                       hipsparse::hipOperationToHCCOperation(opA),
-                       hipsparse::hipOperationToHCCOperation(opB),
+                       backend_opA,
+                       backend_opB,
                        alpha,
                        to_rocsparse_const_spmat_descr(matA),
                        (rocsparse_const_dnmat_descr)matB,
                        (const rocsparse_dnmat_descr)matC,
                        backend_data_type,
-                       hipsparse::hipSpSMAlgToHCCSpSMAlg(alg),
+                       backend_alg,
                        rocsparse_spsm_stage_compute,
                        nullptr,
                        spsmDescr->externalBuffer));
@@ -174,8 +201,17 @@ hipsparseStatus_t hipsparseSpSM_solve_ex(hipsparseHandle_t           handle,
                                          hipsparseSpSMAlg_t          alg,
                                          hipsparseSpSMDescr_t        spsmDescr)
 {
+    rocsparse_operation_ backend_opA{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipOperationToHCCOperation(opA, &backend_opA));
+
+    rocsparse_operation_ backend_opB{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipOperationToHCCOperation(opB, &backend_opB));
+
     rocsparse_datatype_ backend_data_type{};
     RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipDataTypeToHCCDataType(computeType, &backend_data_type));
+
+    rocsparse_spsm_alg_ backend_alg{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipSpSMAlgToHCCSpSMAlg(alg, &backend_alg));
 
     return hipsparseSpSM_solve(
         handle, opA, opB, alpha, matA, matB, matC, computeType, alg, spsmDescr, nullptr);

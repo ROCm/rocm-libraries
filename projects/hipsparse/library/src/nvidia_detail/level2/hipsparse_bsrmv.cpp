@@ -44,22 +44,27 @@ hipsparseStatus_t hipsparseSbsrmv(hipsparseHandle_t         handle,
                                   const float*              beta,
                                   float*                    y)
 {
-    return hipsparse::hipCUSPARSEStatusToHIPStatus(
-        cusparseSbsrmv((cusparseHandle_t)handle,
-                       hipsparse::hipDirectionToCudaDirection(dirA),
-                       hipsparse::hipOperationToCudaOperation(transA),
-                       mb,
-                       nb,
-                       nnzb,
-                       alpha,
-                       (const cusparseMatDescr_t)descrA,
-                       bsrSortedValA,
-                       bsrSortedRowPtrA,
-                       bsrSortedColIndA,
-                       blockDim,
-                       x,
-                       beta,
-                       y));
+    cusparseDirection_t backend_dirA{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipDirectionToCudaDirection(dirA, &backend_dirA));
+
+    cusparseOperation_t backend_transA{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipOperationToCudaOperation(transA, &backend_transA));
+
+    return hipsparse::hipCUSPARSEStatusToHIPStatus(cusparseSbsrmv((cusparseHandle_t)handle,
+                                                                  backend_dirA,
+                                                                  backend_transA,
+                                                                  mb,
+                                                                  nb,
+                                                                  nnzb,
+                                                                  alpha,
+                                                                  (const cusparseMatDescr_t)descrA,
+                                                                  bsrSortedValA,
+                                                                  bsrSortedRowPtrA,
+                                                                  bsrSortedColIndA,
+                                                                  blockDim,
+                                                                  x,
+                                                                  beta,
+                                                                  y));
 }
 
 hipsparseStatus_t hipsparseDbsrmv(hipsparseHandle_t         handle,
@@ -78,22 +83,27 @@ hipsparseStatus_t hipsparseDbsrmv(hipsparseHandle_t         handle,
                                   const double*             beta,
                                   double*                   y)
 {
-    return hipsparse::hipCUSPARSEStatusToHIPStatus(
-        cusparseDbsrmv((cusparseHandle_t)handle,
-                       hipsparse::hipDirectionToCudaDirection(dirA),
-                       hipsparse::hipOperationToCudaOperation(transA),
-                       mb,
-                       nb,
-                       nnzb,
-                       alpha,
-                       (const cusparseMatDescr_t)descrA,
-                       bsrSortedValA,
-                       bsrSortedRowPtrA,
-                       bsrSortedColIndA,
-                       blockDim,
-                       x,
-                       beta,
-                       y));
+    cusparseDirection_t backend_dirA{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipDirectionToCudaDirection(dirA, &backend_dirA));
+
+    cusparseOperation_t backend_transA{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipOperationToCudaOperation(transA, &backend_transA));
+
+    return hipsparse::hipCUSPARSEStatusToHIPStatus(cusparseDbsrmv((cusparseHandle_t)handle,
+                                                                  backend_dirA,
+                                                                  backend_transA,
+                                                                  mb,
+                                                                  nb,
+                                                                  nnzb,
+                                                                  alpha,
+                                                                  (const cusparseMatDescr_t)descrA,
+                                                                  bsrSortedValA,
+                                                                  bsrSortedRowPtrA,
+                                                                  bsrSortedColIndA,
+                                                                  blockDim,
+                                                                  x,
+                                                                  beta,
+                                                                  y));
 }
 
 hipsparseStatus_t hipsparseCbsrmv(hipsparseHandle_t         handle,
@@ -112,22 +122,27 @@ hipsparseStatus_t hipsparseCbsrmv(hipsparseHandle_t         handle,
                                   const hipComplex*         beta,
                                   hipComplex*               y)
 {
-    return hipsparse::hipCUSPARSEStatusToHIPStatus(
-        cusparseCbsrmv((cusparseHandle_t)handle,
-                       hipsparse::hipDirectionToCudaDirection(dirA),
-                       hipsparse::hipOperationToCudaOperation(transA),
-                       mb,
-                       nb,
-                       nnzb,
-                       (const cuComplex*)alpha,
-                       (const cusparseMatDescr_t)descrA,
-                       (const cuComplex*)bsrSortedValA,
-                       bsrSortedRowPtrA,
-                       bsrSortedColIndA,
-                       blockDim,
-                       (const cuComplex*)x,
-                       (const cuComplex*)beta,
-                       (cuComplex*)y));
+    cusparseDirection_t backend_dirA{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipDirectionToCudaDirection(dirA, &backend_dirA));
+
+    cusparseOperation_t backend_transA{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipOperationToCudaOperation(transA, &backend_transA));
+
+    return hipsparse::hipCUSPARSEStatusToHIPStatus(cusparseCbsrmv((cusparseHandle_t)handle,
+                                                                  backend_dirA,
+                                                                  backend_transA,
+                                                                  mb,
+                                                                  nb,
+                                                                  nnzb,
+                                                                  (const cuComplex*)alpha,
+                                                                  (const cusparseMatDescr_t)descrA,
+                                                                  (const cuComplex*)bsrSortedValA,
+                                                                  bsrSortedRowPtrA,
+                                                                  bsrSortedColIndA,
+                                                                  blockDim,
+                                                                  (const cuComplex*)x,
+                                                                  (const cuComplex*)beta,
+                                                                  (cuComplex*)y));
 }
 
 hipsparseStatus_t hipsparseZbsrmv(hipsparseHandle_t         handle,
@@ -146,10 +161,16 @@ hipsparseStatus_t hipsparseZbsrmv(hipsparseHandle_t         handle,
                                   const hipDoubleComplex*   beta,
                                   hipDoubleComplex*         y)
 {
+    cusparseDirection_t backend_dirA{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipDirectionToCudaDirection(dirA, &backend_dirA));
+
+    cusparseOperation_t backend_transA{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipOperationToCudaOperation(transA, &backend_transA));
+
     return hipsparse::hipCUSPARSEStatusToHIPStatus(
         cusparseZbsrmv((cusparseHandle_t)handle,
-                       hipsparse::hipDirectionToCudaDirection(dirA),
-                       hipsparse::hipOperationToCudaOperation(transA),
+                       backend_dirA,
+                       backend_transA,
                        mb,
                        nb,
                        nnzb,

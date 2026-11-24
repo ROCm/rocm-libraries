@@ -146,6 +146,12 @@ hipsparseStatus_t hipsparseSgebsr2gebsc(hipsparseHandle_t    handle,
                                         hipsparseIndexBase_t idx_base,
                                         void*                temp_buffer)
 {
+    rocsparse_action_ backend_copyValues{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipActionToHCCAction(copyValues, &backend_copyValues));
+
+    rocsparse_index_base_ backend_idx_base{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipBaseToHCCBase(idx_base, &backend_idx_base));
+
     RETURN_IF_ROCSPARSE_ERROR(rocsparse_sgebsr2gebsc((rocsparse_handle)handle,
                                                      mb,
                                                      nb,
@@ -158,8 +164,8 @@ hipsparseStatus_t hipsparseSgebsr2gebsc(hipsparseHandle_t    handle,
                                                      bscVal,
                                                      bscRowInd,
                                                      bscColPtr,
-                                                     hipsparse::hipActionToHCCAction(copyValues),
-                                                     hipsparse::hipBaseToHCCBase(idx_base),
+                                                     backend_copyValues,
+                                                     backend_idx_base,
                                                      temp_buffer));
     return HIPSPARSE_STATUS_SUCCESS;
 }
@@ -180,6 +186,11 @@ hipsparseStatus_t hipsparseDgebsr2gebsc(hipsparseHandle_t    handle,
                                         hipsparseIndexBase_t idx_base,
                                         void*                temp_buffer)
 {
+    rocsparse_action_ backend_copyValues{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipActionToHCCAction(copyValues, &backend_copyValues));
+
+    rocsparse_index_base_ backend_idx_base{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipBaseToHCCBase(idx_base, &backend_idx_base));
 
     RETURN_IF_ROCSPARSE_ERROR(rocsparse_dgebsr2gebsc((rocsparse_handle)handle,
                                                      mb,
@@ -193,8 +204,8 @@ hipsparseStatus_t hipsparseDgebsr2gebsc(hipsparseHandle_t    handle,
                                                      bscVal,
                                                      bscRowInd,
                                                      bscColPtr,
-                                                     hipsparse::hipActionToHCCAction(copyValues),
-                                                     hipsparse::hipBaseToHCCBase(idx_base),
+                                                     backend_copyValues,
+                                                     backend_idx_base,
                                                      temp_buffer));
     return HIPSPARSE_STATUS_SUCCESS;
 }
@@ -215,6 +226,11 @@ hipsparseStatus_t hipsparseCgebsr2gebsc(hipsparseHandle_t    handle,
                                         hipsparseIndexBase_t idx_base,
                                         void*                temp_buffer)
 {
+    rocsparse_action_ backend_copyValues{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipActionToHCCAction(copyValues, &backend_copyValues));
+
+    rocsparse_index_base_ backend_idx_base{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipBaseToHCCBase(idx_base, &backend_idx_base));
 
     RETURN_IF_ROCSPARSE_ERROR(rocsparse_cgebsr2gebsc((rocsparse_handle)handle,
                                                      mb,
@@ -228,8 +244,8 @@ hipsparseStatus_t hipsparseCgebsr2gebsc(hipsparseHandle_t    handle,
                                                      (rocsparse_float_complex*)bscVal,
                                                      bscRowInd,
                                                      bscColPtr,
-                                                     hipsparse::hipActionToHCCAction(copyValues),
-                                                     hipsparse::hipBaseToHCCBase(idx_base),
+                                                     backend_copyValues,
+                                                     backend_idx_base,
                                                      temp_buffer));
     return HIPSPARSE_STATUS_SUCCESS;
 }
@@ -250,6 +266,11 @@ hipsparseStatus_t hipsparseZgebsr2gebsc(hipsparseHandle_t       handle,
                                         hipsparseIndexBase_t    idx_base,
                                         void*                   temp_buffer)
 {
+    rocsparse_action_ backend_copyValues{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipActionToHCCAction(copyValues, &backend_copyValues));
+
+    rocsparse_index_base_ backend_idx_base{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipBaseToHCCBase(idx_base, &backend_idx_base));
 
     RETURN_IF_ROCSPARSE_ERROR(rocsparse_zgebsr2gebsc((rocsparse_handle)handle,
                                                      mb,
@@ -263,8 +284,8 @@ hipsparseStatus_t hipsparseZgebsr2gebsc(hipsparseHandle_t       handle,
                                                      (rocsparse_double_complex*)bscVal,
                                                      bscRowInd,
                                                      bscColPtr,
-                                                     hipsparse::hipActionToHCCAction(copyValues),
-                                                     hipsparse::hipBaseToHCCBase(idx_base),
+                                                     backend_copyValues,
+                                                     backend_idx_base,
                                                      temp_buffer));
     return HIPSPARSE_STATUS_SUCCESS;
 }

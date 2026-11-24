@@ -107,7 +107,8 @@ hipsparseStatus_t
 *  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
 *  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p mb, \p nnzb, \p blockDim,
 *              \p descr, \p bsrSortedValA, \p bsrSortedRowPtrA, \p bsrSortedColIndA,
-*              \p info, or \p pBufferSizeInBytes is invalid.
+*              \p info, or \p pBufferSizeInBytes is invalid, or \p dirA or \p transA is not a valid
+*              value of its enumeration type.
 *  \retval     HIPSPARSE_STATUS_INTERNAL_ERROR an internal error occurred.
 *  \retval     HIPSPARSE_STATUS_NOT_SUPPORTED
 *              \p transA == \ref HIPSPARSE_OPERATION_CONJUGATE_TRANSPOSE or
@@ -168,7 +169,8 @@ hipsparseStatus_t hipsparseSbsrsv2_bufferSize(hipsparseHandle_t         handle,
 *  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
 *  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p mb, \p nnzb, \p blockDim,
 *              \p descr, \p bsrSortedValA, \p bsrSortedRowPtrA, \p bsrSortedColIndA,
-*              \p info, or \p pBufferSizeInBytes is invalid.
+*              \p info, or \p pBufferSizeInBytes is invalid, or \p dirA or \p transA is not a valid
+*              value of its enumeration type.
 *  \retval     HIPSPARSE_STATUS_INTERNAL_ERROR an internal error occurred.
 *  \retval     HIPSPARSE_STATUS_NOT_SUPPORTED
 *              \p transA == \ref HIPSPARSE_OPERATION_CONJUGATE_TRANSPOSE or
@@ -228,7 +230,8 @@ hipsparseStatus_t hipsparseDbsrsv2_bufferSize(hipsparseHandle_t         handle,
 *  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
 *  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p mb, \p nnzb, \p blockDim,
 *              \p descr, \p bsrSortedValA, \p bsrSortedRowPtrA, \p bsrSortedColIndA,
-*              \p info, or \p pBufferSizeInBytes is invalid.
+*              \p info, or \p pBufferSizeInBytes is invalid, or \p dirA or \p transA is not a valid
+*              value of its enumeration type.
 *  \retval     HIPSPARSE_STATUS_INTERNAL_ERROR an internal error occurred.
 *  \retval     HIPSPARSE_STATUS_NOT_SUPPORTED
 *              \p transA == \ref HIPSPARSE_OPERATION_CONJUGATE_TRANSPOSE or
@@ -288,7 +291,8 @@ hipsparseStatus_t hipsparseCbsrsv2_bufferSize(hipsparseHandle_t         handle,
 *  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
 *  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p mb, \p nnzb, \p blockDim,
 *              \p descr, \p bsrSortedValA, \p bsrSortedRowPtrA, \p bsrSortedColIndA,
-*              \p info, or \p pBufferSizeInBytes is invalid.
+*              \p info, or \p pBufferSizeInBytes is invalid, or \p dirA or \p transA is not a valid
+*              value of its enumeration type.
 *  \retval     HIPSPARSE_STATUS_INTERNAL_ERROR an internal error occurred.
 *  \retval     HIPSPARSE_STATUS_NOT_SUPPORTED
 *              \p transA == \ref HIPSPARSE_OPERATION_CONJUGATE_TRANSPOSE or
@@ -351,7 +355,8 @@ hipsparseStatus_t hipsparseZbsrsv2_bufferSize(hipsparseHandle_t         handle,
 *  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
 *  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p mb, \p nnzb, \p blockDim,
 *              \p descr, \p bsrSortedValA, \p bsrSortedRowPtrA, \p bsrSortedColIndA,
-*              \p info, or \p pBufferSizeInBytes is invalid.
+*              \p info, or \p pBufferSizeInBytes is invalid, or \p dirA or \p transA is not a valid
+*              value of its enumeration type.
 *  \retval     HIPSPARSE_STATUS_INTERNAL_ERROR an internal error occurred.
 *  \retval     HIPSPARSE_STATUS_NOT_SUPPORTED
 *              \p transA == \ref HIPSPARSE_OPERATION_CONJUGATE_TRANSPOSE or
@@ -411,7 +416,8 @@ hipsparseStatus_t hipsparseSbsrsv2_bufferSizeExt(hipsparseHandle_t         handl
 *  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
 *  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p mb, \p nnzb, \p blockDim,
 *              \p descr, \p bsrSortedValA, \p bsrSortedRowPtrA, \p bsrSortedColIndA,
-*              \p info, or \p pBufferSizeInBytes is invalid.
+*              \p info, or \p pBufferSizeInBytes is invalid, or \p dirA or \p transA is not a valid
+*              value of its enumeration type.
 *  \retval     HIPSPARSE_STATUS_INTERNAL_ERROR an internal error occurred.
 *  \retval     HIPSPARSE_STATUS_NOT_SUPPORTED
 *              \p transA == \ref HIPSPARSE_OPERATION_CONJUGATE_TRANSPOSE or
@@ -470,7 +476,8 @@ hipsparseStatus_t hipsparseDbsrsv2_bufferSizeExt(hipsparseHandle_t         handl
 *  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
 *  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p mb, \p nnzb, \p blockDim,
 *              \p descr, \p bsrSortedValA, \p bsrSortedRowPtrA, \p bsrSortedColIndA,
-*              \p info, or \p pBufferSizeInBytes is invalid.
+*              \p info, or \p pBufferSizeInBytes is invalid, or \p dirA or \p transA is not a valid
+*              value of its enumeration type.
 *  \retval     HIPSPARSE_STATUS_INTERNAL_ERROR an internal error occurred.
 *  \retval     HIPSPARSE_STATUS_NOT_SUPPORTED
 *              \p transA == \ref HIPSPARSE_OPERATION_CONJUGATE_TRANSPOSE or
@@ -529,7 +536,8 @@ hipsparseStatus_t hipsparseCbsrsv2_bufferSizeExt(hipsparseHandle_t         handl
 *  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
 *  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p mb, \p nnzb, \p blockDim,
 *              \p descr, \p bsrSortedValA, \p bsrSortedRowPtrA, \p bsrSortedColIndA,
-*              \p info, or \p pBufferSizeInBytes is invalid.
+*              \p info, or \p pBufferSizeInBytes is invalid, or \p dirA or \p transA is not a valid
+*              value of its enumeration type.
 *  \retval     HIPSPARSE_STATUS_INTERNAL_ERROR an internal error occurred.
 *  \retval     HIPSPARSE_STATUS_NOT_SUPPORTED
 *              \p transA == \ref HIPSPARSE_OPERATION_CONJUGATE_TRANSPOSE or
@@ -598,7 +606,8 @@ hipsparseStatus_t hipsparseZbsrsv2_bufferSizeExt(hipsparseHandle_t         handl
 *  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
 *  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p mb, \p nnzb, \p blockDim,
 *              \p descrA, \p bsrSortedRowPtrA, \p bsrSortedColIndA, \p info, or
-*              \p pBuffer is invalid.
+*              \p pBuffer is invalid, or \p dirA, \p transA, or \p policy is not a valid value of
+*              its enumeration type.
 *  \retval     HIPSPARSE_STATUS_INTERNAL_ERROR an internal error occurred.
 *  \retval     HIPSPARSE_STATUS_NOT_SUPPORTED
 *              \p transA == \ref HIPSPARSE_OPERATION_CONJUGATE_TRANSPOSE or
@@ -667,7 +676,8 @@ hipsparseStatus_t hipsparseSbsrsv2_analysis(hipsparseHandle_t         handle,
 *  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
 *  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p mb, \p nnzb, \p blockDim,
 *              \p descrA, \p bsrSortedRowPtrA, \p bsrSortedColIndA, \p info, or
-*              \p pBuffer is invalid.
+*              \p pBuffer is invalid, or \p dirA, \p transA, or \p policy is not a valid value of
+*              its enumeration type.
 *  \retval     HIPSPARSE_STATUS_INTERNAL_ERROR an internal error occurred.
 *  \retval     HIPSPARSE_STATUS_NOT_SUPPORTED
 *              \p transA == \ref HIPSPARSE_OPERATION_CONJUGATE_TRANSPOSE or
@@ -735,7 +745,8 @@ hipsparseStatus_t hipsparseDbsrsv2_analysis(hipsparseHandle_t         handle,
 *  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
 *  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p mb, \p nnzb, \p blockDim,
 *              \p descrA, \p bsrSortedRowPtrA, \p bsrSortedColIndA, \p info, or
-*              \p pBuffer is invalid.
+*              \p pBuffer is invalid, or \p dirA, \p transA, or \p policy is not a valid value of
+*              its enumeration type.
 *  \retval     HIPSPARSE_STATUS_INTERNAL_ERROR an internal error occurred.
 *  \retval     HIPSPARSE_STATUS_NOT_SUPPORTED
 *              \p transA == \ref HIPSPARSE_OPERATION_CONJUGATE_TRANSPOSE or
@@ -803,7 +814,8 @@ hipsparseStatus_t hipsparseCbsrsv2_analysis(hipsparseHandle_t         handle,
 *  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
 *  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p mb, \p nnzb, \p blockDim,
 *              \p descrA, \p bsrSortedRowPtrA, \p bsrSortedColIndA, \p info, or
-*              \p pBuffer is invalid.
+*              \p pBuffer is invalid, or \p dirA, \p transA, or \p policy is not a valid value of
+*              its enumeration type.
 *  \retval     HIPSPARSE_STATUS_INTERNAL_ERROR an internal error occurred.
 *  \retval     HIPSPARSE_STATUS_NOT_SUPPORTED
 *              \p transA == \ref HIPSPARSE_OPERATION_CONJUGATE_TRANSPOSE or
@@ -924,7 +936,8 @@ hipsparseStatus_t hipsparseZbsrsv2_analysis(hipsparseHandle_t         handle,
 *  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
 *  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p mb, \p nnzb, \p blockDim,
 *              \p descrA, \p alpha, \p bsrSortedValA, \p bsrSortedRowPtrA, \p bsrSortedColIndA,
-*              \p f, or \p x is invalid.
+*              \p f, or \p x is invalid, or \p dirA, \p transA, or \p policy is not a valid value of
+*              its enumeration type.
 *  \retval     HIPSPARSE_STATUS_ARCH_MISMATCH the device is not supported.
 *  \retval     HIPSPARSE_STATUS_INTERNAL_ERROR an internal error occurred.
 *  \retval     HIPSPARSE_STATUS_NOT_SUPPORTED
@@ -1046,7 +1059,8 @@ hipsparseStatus_t hipsparseSbsrsv2_solve(hipsparseHandle_t         handle,
 *  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
 *  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p mb, \p nnzb, \p blockDim,
 *              \p descrA, \p alpha, \p bsrSortedValA, \p bsrSortedRowPtrA, \p bsrSortedColIndA,
-*              \p f, or \p x is invalid.
+*              \p f, or \p x is invalid, or \p dirA, \p transA, or \p policy is not a valid value of
+*              its enumeration type.
 *  \retval     HIPSPARSE_STATUS_ARCH_MISMATCH the device is not supported.
 *  \retval     HIPSPARSE_STATUS_INTERNAL_ERROR an internal error occurred.
 *  \retval     HIPSPARSE_STATUS_NOT_SUPPORTED
@@ -1167,7 +1181,8 @@ hipsparseStatus_t hipsparseDbsrsv2_solve(hipsparseHandle_t         handle,
 *  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
 *  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p mb, \p nnzb, \p blockDim,
 *              \p descrA, \p alpha, \p bsrSortedValA, \p bsrSortedRowPtrA, \p bsrSortedColIndA,
-*              \p f, or \p x is invalid.
+*              \p f, or \p x is invalid, or \p dirA, \p transA, or \p policy is not a valid value of
+*              its enumeration type.
 *  \retval     HIPSPARSE_STATUS_ARCH_MISMATCH the device is not supported.
 *  \retval     HIPSPARSE_STATUS_INTERNAL_ERROR an internal error occurred.
 *  \retval     HIPSPARSE_STATUS_NOT_SUPPORTED
@@ -1288,7 +1303,8 @@ hipsparseStatus_t hipsparseCbsrsv2_solve(hipsparseHandle_t         handle,
 *  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
 *  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p mb, \p nnzb, \p blockDim,
 *              \p descrA, \p alpha, \p bsrSortedValA, \p bsrSortedRowPtrA, \p bsrSortedColIndA,
-*              \p f, or \p x is invalid.
+*              \p f, or \p x is invalid, or \p dirA, \p transA, or \p policy is not a valid value of
+*              its enumeration type.
 *  \retval     HIPSPARSE_STATUS_ARCH_MISMATCH the device is not supported.
 *  \retval     HIPSPARSE_STATUS_INTERNAL_ERROR an internal error occurred.
 *  \retval     HIPSPARSE_STATUS_NOT_SUPPORTED

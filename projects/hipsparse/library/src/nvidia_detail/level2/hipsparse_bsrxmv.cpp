@@ -48,25 +48,30 @@ hipsparseStatus_t hipsparseSbsrxmv(hipsparseHandle_t         handle,
                                    const float*              beta,
                                    float*                    y)
 {
-    return hipsparse::hipCUSPARSEStatusToHIPStatus(
-        cusparseSbsrxmv((cusparseHandle_t)handle,
-                        hipsparse::hipDirectionToCudaDirection(dir),
-                        hipsparse::hipOperationToCudaOperation(trans),
-                        sizeOfMask,
-                        mb,
-                        nb,
-                        nnzb,
-                        alpha,
-                        (const cusparseMatDescr_t)descr,
-                        bsrVal,
-                        bsrMaskPtr,
-                        bsrRowPtr,
-                        bsrEndPtr,
-                        bsrColInd,
-                        blockDim,
-                        x,
-                        beta,
-                        y));
+    cusparseDirection_t backend_dir{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipDirectionToCudaDirection(dir, &backend_dir));
+
+    cusparseOperation_t backend_trans{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipOperationToCudaOperation(trans, &backend_trans));
+
+    return hipsparse::hipCUSPARSEStatusToHIPStatus(cusparseSbsrxmv((cusparseHandle_t)handle,
+                                                                   backend_dir,
+                                                                   backend_trans,
+                                                                   sizeOfMask,
+                                                                   mb,
+                                                                   nb,
+                                                                   nnzb,
+                                                                   alpha,
+                                                                   (const cusparseMatDescr_t)descr,
+                                                                   bsrVal,
+                                                                   bsrMaskPtr,
+                                                                   bsrRowPtr,
+                                                                   bsrEndPtr,
+                                                                   bsrColInd,
+                                                                   blockDim,
+                                                                   x,
+                                                                   beta,
+                                                                   y));
 }
 
 hipsparseStatus_t hipsparseDbsrxmv(hipsparseHandle_t         handle,
@@ -88,25 +93,30 @@ hipsparseStatus_t hipsparseDbsrxmv(hipsparseHandle_t         handle,
                                    const double*             beta,
                                    double*                   y)
 {
-    return hipsparse::hipCUSPARSEStatusToHIPStatus(
-        cusparseDbsrxmv((cusparseHandle_t)handle,
-                        hipsparse::hipDirectionToCudaDirection(dir),
-                        hipsparse::hipOperationToCudaOperation(trans),
-                        sizeOfMask,
-                        mb,
-                        nb,
-                        nnzb,
-                        alpha,
-                        (const cusparseMatDescr_t)descr,
-                        bsrVal,
-                        bsrMaskPtr,
-                        bsrRowPtr,
-                        bsrEndPtr,
-                        bsrColInd,
-                        blockDim,
-                        x,
-                        beta,
-                        y));
+    cusparseDirection_t backend_dir{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipDirectionToCudaDirection(dir, &backend_dir));
+
+    cusparseOperation_t backend_trans{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipOperationToCudaOperation(trans, &backend_trans));
+
+    return hipsparse::hipCUSPARSEStatusToHIPStatus(cusparseDbsrxmv((cusparseHandle_t)handle,
+                                                                   backend_dir,
+                                                                   backend_trans,
+                                                                   sizeOfMask,
+                                                                   mb,
+                                                                   nb,
+                                                                   nnzb,
+                                                                   alpha,
+                                                                   (const cusparseMatDescr_t)descr,
+                                                                   bsrVal,
+                                                                   bsrMaskPtr,
+                                                                   bsrRowPtr,
+                                                                   bsrEndPtr,
+                                                                   bsrColInd,
+                                                                   blockDim,
+                                                                   x,
+                                                                   beta,
+                                                                   y));
 }
 
 hipsparseStatus_t hipsparseCbsrxmv(hipsparseHandle_t         handle,
@@ -128,25 +138,30 @@ hipsparseStatus_t hipsparseCbsrxmv(hipsparseHandle_t         handle,
                                    const hipComplex*         beta,
                                    hipComplex*               y)
 {
-    return hipsparse::hipCUSPARSEStatusToHIPStatus(
-        cusparseCbsrxmv((cusparseHandle_t)handle,
-                        hipsparse::hipDirectionToCudaDirection(dir),
-                        hipsparse::hipOperationToCudaOperation(trans),
-                        sizeOfMask,
-                        mb,
-                        nb,
-                        nnzb,
-                        (const cuComplex*)alpha,
-                        (const cusparseMatDescr_t)descr,
-                        (const cuComplex*)bsrVal,
-                        bsrMaskPtr,
-                        bsrRowPtr,
-                        bsrEndPtr,
-                        bsrColInd,
-                        blockDim,
-                        (const cuComplex*)x,
-                        (const cuComplex*)beta,
-                        (cuComplex*)y));
+    cusparseDirection_t backend_dir{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipDirectionToCudaDirection(dir, &backend_dir));
+
+    cusparseOperation_t backend_trans{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipOperationToCudaOperation(trans, &backend_trans));
+
+    return hipsparse::hipCUSPARSEStatusToHIPStatus(cusparseCbsrxmv((cusparseHandle_t)handle,
+                                                                   backend_dir,
+                                                                   backend_trans,
+                                                                   sizeOfMask,
+                                                                   mb,
+                                                                   nb,
+                                                                   nnzb,
+                                                                   (const cuComplex*)alpha,
+                                                                   (const cusparseMatDescr_t)descr,
+                                                                   (const cuComplex*)bsrVal,
+                                                                   bsrMaskPtr,
+                                                                   bsrRowPtr,
+                                                                   bsrEndPtr,
+                                                                   bsrColInd,
+                                                                   blockDim,
+                                                                   (const cuComplex*)x,
+                                                                   (const cuComplex*)beta,
+                                                                   (cuComplex*)y));
 }
 
 hipsparseStatus_t hipsparseZbsrxmv(hipsparseHandle_t         handle,
@@ -168,24 +183,29 @@ hipsparseStatus_t hipsparseZbsrxmv(hipsparseHandle_t         handle,
                                    const hipDoubleComplex*   beta,
                                    hipDoubleComplex*         y)
 {
-    return hipsparse::hipCUSPARSEStatusToHIPStatus(
-        cusparseZbsrxmv((cusparseHandle_t)handle,
-                        hipsparse::hipDirectionToCudaDirection(dir),
-                        hipsparse::hipOperationToCudaOperation(trans),
-                        sizeOfMask,
-                        mb,
-                        nb,
-                        nnzb,
-                        (const cuDoubleComplex*)alpha,
-                        (const cusparseMatDescr_t)descr,
-                        (const cuDoubleComplex*)bsrVal,
-                        bsrMaskPtr,
-                        bsrRowPtr,
-                        bsrEndPtr,
-                        bsrColInd,
-                        blockDim,
-                        (const cuDoubleComplex*)x,
-                        (const cuDoubleComplex*)beta,
-                        (cuDoubleComplex*)y));
+    cusparseDirection_t backend_dir{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipDirectionToCudaDirection(dir, &backend_dir));
+
+    cusparseOperation_t backend_trans{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipOperationToCudaOperation(trans, &backend_trans));
+
+    return hipsparse::hipCUSPARSEStatusToHIPStatus(cusparseZbsrxmv((cusparseHandle_t)handle,
+                                                                   backend_dir,
+                                                                   backend_trans,
+                                                                   sizeOfMask,
+                                                                   mb,
+                                                                   nb,
+                                                                   nnzb,
+                                                                   (const cuDoubleComplex*)alpha,
+                                                                   (const cusparseMatDescr_t)descr,
+                                                                   (const cuDoubleComplex*)bsrVal,
+                                                                   bsrMaskPtr,
+                                                                   bsrRowPtr,
+                                                                   bsrEndPtr,
+                                                                   bsrColInd,
+                                                                   blockDim,
+                                                                   (const cuDoubleComplex*)x,
+                                                                   (const cuDoubleComplex*)beta,
+                                                                   (cuDoubleComplex*)y));
 }
 #endif

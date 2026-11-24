@@ -35,11 +35,14 @@ hipsparseStatus_t hipsparseDenseToSparse_bufferSize(hipsparseHandle_t           
                                                     hipsparseDenseToSparseAlg_t alg,
                                                     size_t*                     pBufferSizeInBytes)
 {
+    cusparseDenseToSparseAlg_t backend_alg{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipDnToSpAlgToCudaDnToSpAlg(alg, &backend_alg));
+
     return hipsparse::hipCUSPARSEStatusToHIPStatus(
         cusparseDenseToSparse_bufferSize((cusparseHandle_t)handle,
                                          (cusparseConstDnMatDescr_t)matA,
                                          (cusparseSpMatDescr_t)matB,
-                                         hipsparse::hipDnToSpAlgToCudaDnToSpAlg(alg),
+                                         backend_alg,
                                          pBufferSizeInBytes));
 }
 #elif(CUDART_VERSION >= 11020)
@@ -49,11 +52,14 @@ hipsparseStatus_t hipsparseDenseToSparse_bufferSize(hipsparseHandle_t           
                                                     hipsparseDenseToSparseAlg_t alg,
                                                     size_t*                     pBufferSizeInBytes)
 {
+    cusparseDenseToSparseAlg_t backend_alg{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipDnToSpAlgToCudaDnToSpAlg(alg, &backend_alg));
+
     return hipsparse::hipCUSPARSEStatusToHIPStatus(
         cusparseDenseToSparse_bufferSize((cusparseHandle_t)handle,
                                          (cusparseDnMatDescr_t)matA,
                                          (cusparseSpMatDescr_t)matB,
-                                         hipsparse::hipDnToSpAlgToCudaDnToSpAlg(alg),
+                                         backend_alg,
                                          pBufferSizeInBytes));
 }
 #endif
@@ -65,11 +71,14 @@ hipsparseStatus_t hipsparseDenseToSparse_analysis(hipsparseHandle_t           ha
                                                   hipsparseDenseToSparseAlg_t alg,
                                                   void*                       externalBuffer)
 {
+    cusparseDenseToSparseAlg_t backend_alg{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipDnToSpAlgToCudaDnToSpAlg(alg, &backend_alg));
+
     return hipsparse::hipCUSPARSEStatusToHIPStatus(
         cusparseDenseToSparse_analysis((cusparseHandle_t)handle,
                                        (cusparseConstDnMatDescr_t)matA,
                                        (cusparseSpMatDescr_t)matB,
-                                       hipsparse::hipDnToSpAlgToCudaDnToSpAlg(alg),
+                                       backend_alg,
                                        externalBuffer));
 }
 #elif(CUDART_VERSION >= 11020)
@@ -79,11 +88,14 @@ hipsparseStatus_t hipsparseDenseToSparse_analysis(hipsparseHandle_t           ha
                                                   hipsparseDenseToSparseAlg_t alg,
                                                   void*                       externalBuffer)
 {
+    cusparseDenseToSparseAlg_t backend_alg{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipDnToSpAlgToCudaDnToSpAlg(alg, &backend_alg));
+
     return hipsparse::hipCUSPARSEStatusToHIPStatus(
         cusparseDenseToSparse_analysis((cusparseHandle_t)handle,
                                        (cusparseDnMatDescr_t)matA,
                                        (cusparseSpMatDescr_t)matB,
-                                       hipsparse::hipDnToSpAlgToCudaDnToSpAlg(alg),
+                                       backend_alg,
                                        externalBuffer));
 }
 #endif
@@ -95,11 +107,14 @@ hipsparseStatus_t hipsparseDenseToSparse_convert(hipsparseHandle_t           han
                                                  hipsparseDenseToSparseAlg_t alg,
                                                  void*                       externalBuffer)
 {
+    cusparseDenseToSparseAlg_t backend_alg{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipDnToSpAlgToCudaDnToSpAlg(alg, &backend_alg));
+
     return hipsparse::hipCUSPARSEStatusToHIPStatus(
         cusparseDenseToSparse_convert((cusparseHandle_t)handle,
                                       (cusparseConstDnMatDescr_t)matA,
                                       (cusparseSpMatDescr_t)matB,
-                                      hipsparse::hipDnToSpAlgToCudaDnToSpAlg(alg),
+                                      backend_alg,
                                       externalBuffer));
 }
 #elif(CUDART_VERSION >= 11020)
@@ -109,11 +124,14 @@ hipsparseStatus_t hipsparseDenseToSparse_convert(hipsparseHandle_t           han
                                                  hipsparseDenseToSparseAlg_t alg,
                                                  void*                       externalBuffer)
 {
+    cusparseDenseToSparseAlg_t backend_alg{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipDnToSpAlgToCudaDnToSpAlg(alg, &backend_alg));
+
     return hipsparse::hipCUSPARSEStatusToHIPStatus(
         cusparseDenseToSparse_convert((cusparseHandle_t)handle,
                                       (cusparseDnMatDescr_t)matA,
                                       (cusparseSpMatDescr_t)matB,
-                                      hipsparse::hipDnToSpAlgToCudaDnToSpAlg(alg),
+                                      backend_alg,
                                       externalBuffer));
 }
 #endif

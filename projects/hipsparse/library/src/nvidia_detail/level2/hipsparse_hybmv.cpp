@@ -38,15 +38,17 @@ hipsparseStatus_t hipsparseShybmv(hipsparseHandle_t         handle,
                                   const float*              beta,
                                   float*                    y)
 {
-    return hipsparse::hipCUSPARSEStatusToHIPStatus(
-        cusparseShybmv((cusparseHandle_t)handle,
-                       hipsparse::hipOperationToCudaOperation(transA),
-                       alpha,
-                       (const cusparseMatDescr_t)descrA,
-                       (const cusparseHybMat_t)hybA,
-                       x,
-                       beta,
-                       y));
+    cusparseOperation_t backend_transA{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipOperationToCudaOperation(transA, &backend_transA));
+
+    return hipsparse::hipCUSPARSEStatusToHIPStatus(cusparseShybmv((cusparseHandle_t)handle,
+                                                                  backend_transA,
+                                                                  alpha,
+                                                                  (const cusparseMatDescr_t)descrA,
+                                                                  (const cusparseHybMat_t)hybA,
+                                                                  x,
+                                                                  beta,
+                                                                  y));
 }
 
 hipsparseStatus_t hipsparseDhybmv(hipsparseHandle_t         handle,
@@ -58,15 +60,17 @@ hipsparseStatus_t hipsparseDhybmv(hipsparseHandle_t         handle,
                                   const double*             beta,
                                   double*                   y)
 {
-    return hipsparse::hipCUSPARSEStatusToHIPStatus(
-        cusparseDhybmv((cusparseHandle_t)handle,
-                       hipsparse::hipOperationToCudaOperation(transA),
-                       alpha,
-                       (const cusparseMatDescr_t)descrA,
-                       (const cusparseHybMat_t)hybA,
-                       x,
-                       beta,
-                       y));
+    cusparseOperation_t backend_transA{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipOperationToCudaOperation(transA, &backend_transA));
+
+    return hipsparse::hipCUSPARSEStatusToHIPStatus(cusparseDhybmv((cusparseHandle_t)handle,
+                                                                  backend_transA,
+                                                                  alpha,
+                                                                  (const cusparseMatDescr_t)descrA,
+                                                                  (const cusparseHybMat_t)hybA,
+                                                                  x,
+                                                                  beta,
+                                                                  y));
 }
 
 hipsparseStatus_t hipsparseChybmv(hipsparseHandle_t         handle,
@@ -78,15 +82,17 @@ hipsparseStatus_t hipsparseChybmv(hipsparseHandle_t         handle,
                                   const hipComplex*         beta,
                                   hipComplex*               y)
 {
-    return hipsparse::hipCUSPARSEStatusToHIPStatus(
-        cusparseChybmv((cusparseHandle_t)handle,
-                       hipsparse::hipOperationToCudaOperation(transA),
-                       (const cuComplex*)alpha,
-                       (const cusparseMatDescr_t)descrA,
-                       (const cusparseHybMat_t)hybA,
-                       (const cuComplex*)x,
-                       (const cuComplex*)beta,
-                       (cuComplex*)y));
+    cusparseOperation_t backend_transA{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipOperationToCudaOperation(transA, &backend_transA));
+
+    return hipsparse::hipCUSPARSEStatusToHIPStatus(cusparseChybmv((cusparseHandle_t)handle,
+                                                                  backend_transA,
+                                                                  (const cuComplex*)alpha,
+                                                                  (const cusparseMatDescr_t)descrA,
+                                                                  (const cusparseHybMat_t)hybA,
+                                                                  (const cuComplex*)x,
+                                                                  (const cuComplex*)beta,
+                                                                  (cuComplex*)y));
 }
 
 hipsparseStatus_t hipsparseZhybmv(hipsparseHandle_t         handle,
@@ -98,14 +104,16 @@ hipsparseStatus_t hipsparseZhybmv(hipsparseHandle_t         handle,
                                   const hipDoubleComplex*   beta,
                                   hipDoubleComplex*         y)
 {
-    return hipsparse::hipCUSPARSEStatusToHIPStatus(
-        cusparseZhybmv((cusparseHandle_t)handle,
-                       hipsparse::hipOperationToCudaOperation(transA),
-                       (const cuDoubleComplex*)alpha,
-                       (const cusparseMatDescr_t)descrA,
-                       (const cusparseHybMat_t)hybA,
-                       (const cuDoubleComplex*)x,
-                       (const cuDoubleComplex*)beta,
-                       (cuDoubleComplex*)y));
+    cusparseOperation_t backend_transA{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipOperationToCudaOperation(transA, &backend_transA));
+
+    return hipsparse::hipCUSPARSEStatusToHIPStatus(cusparseZhybmv((cusparseHandle_t)handle,
+                                                                  backend_transA,
+                                                                  (const cuDoubleComplex*)alpha,
+                                                                  (const cusparseMatDescr_t)descrA,
+                                                                  (const cusparseHybMat_t)hybA,
+                                                                  (const cuDoubleComplex*)x,
+                                                                  (const cuDoubleComplex*)beta,
+                                                                  (cuDoubleComplex*)y));
 }
 #endif

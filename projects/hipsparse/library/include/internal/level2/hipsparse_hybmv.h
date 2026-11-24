@@ -83,7 +83,7 @@ extern "C" {
 *  \retval HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
 *  \retval HIPSPARSE_STATUS_NOT_INITIALIZED \p handle is not initialized.
 *  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p descrA, \p alpha, \p beta, or \p hybA is nullptr,
-*          or \p x or \p y is nullptr.
+*          or \p x or \p y is nullptr, or \p transA is not a valid value of its enumeration type.
 *  \retval HIPSPARSE_STATUS_ARCH_MISMATCH the device is not supported.
 *  \retval HIPSPARSE_STATUS_ALLOC_FAILED the buffer could not be allocated.
 *  \retval HIPSPARSE_STATUS_INTERNAL_ERROR an internal error occurred.
@@ -155,7 +155,7 @@ hipsparseStatus_t hipsparseShybmv(hipsparseHandle_t         handle,
 *  \retval HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
 *  \retval HIPSPARSE_STATUS_NOT_INITIALIZED \p handle is not initialized.
 *  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p descrA, \p alpha, \p beta, or \p hybA is nullptr,
-*          or \p x or \p y is nullptr.
+*          or \p x or \p y is nullptr, or \p transA is not a valid value of its enumeration type.
 *  \retval HIPSPARSE_STATUS_ARCH_MISMATCH the device is not supported.
 *  \retval HIPSPARSE_STATUS_ALLOC_FAILED the buffer could not be allocated.
 *  \retval HIPSPARSE_STATUS_INTERNAL_ERROR an internal error occurred.
@@ -226,7 +226,7 @@ hipsparseStatus_t hipsparseDhybmv(hipsparseHandle_t         handle,
 *  \retval HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
 *  \retval HIPSPARSE_STATUS_NOT_INITIALIZED \p handle is not initialized.
 *  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p descrA, \p alpha, \p beta, or \p hybA is nullptr,
-*          or \p x or \p y is nullptr.
+*          or \p x or \p y is nullptr, or \p transA is not a valid value of its enumeration type.
 *  \retval HIPSPARSE_STATUS_ARCH_MISMATCH the device is not supported.
 *  \retval HIPSPARSE_STATUS_ALLOC_FAILED the buffer could not be allocated.
 *  \retval HIPSPARSE_STATUS_INTERNAL_ERROR an internal error occurred.
@@ -297,7 +297,7 @@ hipsparseStatus_t hipsparseChybmv(hipsparseHandle_t         handle,
 *  \retval HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
 *  \retval HIPSPARSE_STATUS_NOT_INITIALIZED \p handle is not initialized.
 *  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p descrA, \p alpha, \p beta, or \p hybA is nullptr,
-*          or \p x or \p y is nullptr.
+*          or \p x or \p y is nullptr, or \p transA is not a valid value of its enumeration type.
 *  \retval HIPSPARSE_STATUS_ARCH_MISMATCH the device is not supported.
 *  \retval HIPSPARSE_STATUS_ALLOC_FAILED the buffer could not be allocated.
 *  \retval HIPSPARSE_STATUS_INTERNAL_ERROR an internal error occurred.

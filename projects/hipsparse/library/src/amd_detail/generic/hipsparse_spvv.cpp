@@ -38,18 +38,20 @@ hipsparseStatus_t hipsparseSpVV_bufferSize(hipsparseHandle_t          handle,
                                            hipDataType                computeType,
                                            size_t*                    pBufferSizeInBytes)
 {
+    rocsparse_operation_ backend_opX{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipOperationToHCCOperation(opX, &backend_opX));
+
     rocsparse_datatype_ backend_data_type{};
     RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipDataTypeToHCCDataType(computeType, &backend_data_type));
 
-    return hipsparse::rocSPARSEStatusToHIPStatus(
-        rocsparse_spvv((rocsparse_handle)handle,
-                       hipsparse::hipOperationToHCCOperation(opX),
-                       (rocsparse_const_spvec_descr)vecX,
-                       (rocsparse_const_dnvec_descr)vecY,
-                       result,
-                       backend_data_type,
-                       pBufferSizeInBytes,
-                       nullptr));
+    return hipsparse::rocSPARSEStatusToHIPStatus(rocsparse_spvv((rocsparse_handle)handle,
+                                                                backend_opX,
+                                                                (rocsparse_const_spvec_descr)vecX,
+                                                                (rocsparse_const_dnvec_descr)vecY,
+                                                                result,
+                                                                backend_data_type,
+                                                                pBufferSizeInBytes,
+                                                                nullptr));
 }
 
 hipsparseStatus_t hipsparseSpVV(hipsparseHandle_t          handle,
@@ -60,6 +62,9 @@ hipsparseStatus_t hipsparseSpVV(hipsparseHandle_t          handle,
                                 hipDataType                computeType,
                                 void*                      externalBuffer)
 {
+    rocsparse_operation_ backend_opX{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipOperationToHCCOperation(opX, &backend_opX));
+
     rocsparse_datatype_ backend_data_type{};
     RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipDataTypeToHCCDataType(computeType, &backend_data_type));
 
@@ -71,13 +76,12 @@ hipsparseStatus_t hipsparseSpVV(hipsparseHandle_t          handle,
         return HIPSPARSE_STATUS_INVALID_VALUE;
     }
 
-    return hipsparse::rocSPARSEStatusToHIPStatus(
-        rocsparse_spvv((rocsparse_handle)handle,
-                       hipsparse::hipOperationToHCCOperation(opX),
-                       (rocsparse_const_spvec_descr)vecX,
-                       (rocsparse_const_dnvec_descr)vecY,
-                       result,
-                       backend_data_type,
-                       &bufferSize,
-                       externalBuffer));
+    return hipsparse::rocSPARSEStatusToHIPStatus(rocsparse_spvv((rocsparse_handle)handle,
+                                                                backend_opX,
+                                                                (rocsparse_const_spvec_descr)vecX,
+                                                                (rocsparse_const_dnvec_descr)vecY,
+                                                                result,
+                                                                backend_data_type,
+                                                                &bufferSize,
+                                                                externalBuffer));
 }

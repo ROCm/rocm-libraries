@@ -37,11 +37,9 @@ hipsparseStatus_t hipsparseXcsr2coo(hipsparseHandle_t    handle,
                                     int*                 cooRowInd,
                                     hipsparseIndexBase_t idxBase)
 {
+    rocsparse_index_base_ backend_idxBase{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipBaseToHCCBase(idxBase, &backend_idxBase));
+
     return hipsparse::rocSPARSEStatusToHIPStatus(
-        rocsparse_csr2coo((rocsparse_handle)handle,
-                          csrRowPtr,
-                          nnz,
-                          m,
-                          cooRowInd,
-                          hipsparse::hipBaseToHCCBase(idxBase)));
+        rocsparse_csr2coo((rocsparse_handle)handle, csrRowPtr, nnz, m, cooRowInd, backend_idxBase));
 }

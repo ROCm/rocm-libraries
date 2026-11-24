@@ -37,6 +37,9 @@ hipsparseStatus_t hipsparseSgemvi_bufferSize(hipsparseHandle_t    handle,
                                              int                  nnz,
                                              int*                 pBufferSizeInBytes)
 {
+    rocsparse_operation_ backend_transA{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipOperationToHCCOperation(transA, &backend_transA));
+
     if(pBufferSizeInBytes == nullptr)
     {
         return HIPSPARSE_STATUS_INVALID_VALUE;
@@ -44,13 +47,8 @@ hipsparseStatus_t hipsparseSgemvi_bufferSize(hipsparseHandle_t    handle,
 
     size_t buffer_size;
 
-    hipsparseStatus_t status = hipsparse::rocSPARSEStatusToHIPStatus(
-        rocsparse_sgemvi_buffer_size((rocsparse_handle)handle,
-                                     hipsparse::hipOperationToHCCOperation(transA),
-                                     m,
-                                     n,
-                                     nnz,
-                                     &buffer_size));
+    hipsparseStatus_t status = hipsparse::rocSPARSEStatusToHIPStatus(rocsparse_sgemvi_buffer_size(
+        (rocsparse_handle)handle, backend_transA, m, n, nnz, &buffer_size));
 
     *pBufferSizeInBytes = (int)buffer_size;
 
@@ -64,6 +62,9 @@ hipsparseStatus_t hipsparseDgemvi_bufferSize(hipsparseHandle_t    handle,
                                              int                  nnz,
                                              int*                 pBufferSizeInBytes)
 {
+    rocsparse_operation_ backend_transA{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipOperationToHCCOperation(transA, &backend_transA));
+
     if(pBufferSizeInBytes == nullptr)
     {
         return HIPSPARSE_STATUS_INVALID_VALUE;
@@ -71,13 +72,8 @@ hipsparseStatus_t hipsparseDgemvi_bufferSize(hipsparseHandle_t    handle,
 
     size_t buffer_size;
 
-    hipsparseStatus_t status = hipsparse::rocSPARSEStatusToHIPStatus(
-        rocsparse_dgemvi_buffer_size((rocsparse_handle)handle,
-                                     hipsparse::hipOperationToHCCOperation(transA),
-                                     m,
-                                     n,
-                                     nnz,
-                                     &buffer_size));
+    hipsparseStatus_t status = hipsparse::rocSPARSEStatusToHIPStatus(rocsparse_dgemvi_buffer_size(
+        (rocsparse_handle)handle, backend_transA, m, n, nnz, &buffer_size));
 
     *pBufferSizeInBytes = (int)buffer_size;
 
@@ -91,6 +87,9 @@ hipsparseStatus_t hipsparseCgemvi_bufferSize(hipsparseHandle_t    handle,
                                              int                  nnz,
                                              int*                 pBufferSizeInBytes)
 {
+    rocsparse_operation_ backend_transA{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipOperationToHCCOperation(transA, &backend_transA));
+
     if(pBufferSizeInBytes == nullptr)
     {
         return HIPSPARSE_STATUS_INVALID_VALUE;
@@ -98,13 +97,8 @@ hipsparseStatus_t hipsparseCgemvi_bufferSize(hipsparseHandle_t    handle,
 
     size_t buffer_size;
 
-    hipsparseStatus_t status = hipsparse::rocSPARSEStatusToHIPStatus(
-        rocsparse_cgemvi_buffer_size((rocsparse_handle)handle,
-                                     hipsparse::hipOperationToHCCOperation(transA),
-                                     m,
-                                     n,
-                                     nnz,
-                                     &buffer_size));
+    hipsparseStatus_t status = hipsparse::rocSPARSEStatusToHIPStatus(rocsparse_cgemvi_buffer_size(
+        (rocsparse_handle)handle, backend_transA, m, n, nnz, &buffer_size));
 
     *pBufferSizeInBytes = (int)buffer_size;
 
@@ -118,6 +112,9 @@ hipsparseStatus_t hipsparseZgemvi_bufferSize(hipsparseHandle_t    handle,
                                              int                  nnz,
                                              int*                 pBufferSizeInBytes)
 {
+    rocsparse_operation_ backend_transA{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipOperationToHCCOperation(transA, &backend_transA));
+
     if(pBufferSizeInBytes == nullptr)
     {
         return HIPSPARSE_STATUS_INVALID_VALUE;
@@ -125,13 +122,8 @@ hipsparseStatus_t hipsparseZgemvi_bufferSize(hipsparseHandle_t    handle,
 
     size_t buffer_size;
 
-    hipsparseStatus_t status = hipsparse::rocSPARSEStatusToHIPStatus(
-        rocsparse_zgemvi_buffer_size((rocsparse_handle)handle,
-                                     hipsparse::hipOperationToHCCOperation(transA),
-                                     m,
-                                     n,
-                                     nnz,
-                                     &buffer_size));
+    hipsparseStatus_t status = hipsparse::rocSPARSEStatusToHIPStatus(rocsparse_zgemvi_buffer_size(
+        (rocsparse_handle)handle, backend_transA, m, n, nnz, &buffer_size));
 
     *pBufferSizeInBytes = (int)buffer_size;
 
@@ -153,21 +145,26 @@ hipsparseStatus_t hipsparseSgemvi(hipsparseHandle_t    handle,
                                   hipsparseIndexBase_t idxBase,
                                   void*                pBuffer)
 {
-    return hipsparse::rocSPARSEStatusToHIPStatus(
-        rocsparse_sgemvi((rocsparse_handle)handle,
-                         hipsparse::hipOperationToHCCOperation(transA),
-                         m,
-                         n,
-                         alpha,
-                         A,
-                         lda,
-                         nnz,
-                         x,
-                         xInd,
-                         beta,
-                         y,
-                         hipsparse::hipBaseToHCCBase(idxBase),
-                         pBuffer));
+    rocsparse_operation_ backend_transA{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipOperationToHCCOperation(transA, &backend_transA));
+
+    rocsparse_index_base_ backend_idxBase{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipBaseToHCCBase(idxBase, &backend_idxBase));
+
+    return hipsparse::rocSPARSEStatusToHIPStatus(rocsparse_sgemvi((rocsparse_handle)handle,
+                                                                  backend_transA,
+                                                                  m,
+                                                                  n,
+                                                                  alpha,
+                                                                  A,
+                                                                  lda,
+                                                                  nnz,
+                                                                  x,
+                                                                  xInd,
+                                                                  beta,
+                                                                  y,
+                                                                  backend_idxBase,
+                                                                  pBuffer));
 }
 
 hipsparseStatus_t hipsparseDgemvi(hipsparseHandle_t    handle,
@@ -185,21 +182,26 @@ hipsparseStatus_t hipsparseDgemvi(hipsparseHandle_t    handle,
                                   hipsparseIndexBase_t idxBase,
                                   void*                pBuffer)
 {
-    return hipsparse::rocSPARSEStatusToHIPStatus(
-        rocsparse_dgemvi((rocsparse_handle)handle,
-                         hipsparse::hipOperationToHCCOperation(transA),
-                         m,
-                         n,
-                         alpha,
-                         A,
-                         lda,
-                         nnz,
-                         x,
-                         xInd,
-                         beta,
-                         y,
-                         hipsparse::hipBaseToHCCBase(idxBase),
-                         pBuffer));
+    rocsparse_operation_ backend_transA{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipOperationToHCCOperation(transA, &backend_transA));
+
+    rocsparse_index_base_ backend_idxBase{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipBaseToHCCBase(idxBase, &backend_idxBase));
+
+    return hipsparse::rocSPARSEStatusToHIPStatus(rocsparse_dgemvi((rocsparse_handle)handle,
+                                                                  backend_transA,
+                                                                  m,
+                                                                  n,
+                                                                  alpha,
+                                                                  A,
+                                                                  lda,
+                                                                  nnz,
+                                                                  x,
+                                                                  xInd,
+                                                                  beta,
+                                                                  y,
+                                                                  backend_idxBase,
+                                                                  pBuffer));
 }
 
 hipsparseStatus_t hipsparseCgemvi(hipsparseHandle_t    handle,
@@ -217,9 +219,15 @@ hipsparseStatus_t hipsparseCgemvi(hipsparseHandle_t    handle,
                                   hipsparseIndexBase_t idxBase,
                                   void*                pBuffer)
 {
+    rocsparse_operation_ backend_transA{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipOperationToHCCOperation(transA, &backend_transA));
+
+    rocsparse_index_base_ backend_idxBase{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipBaseToHCCBase(idxBase, &backend_idxBase));
+
     return hipsparse::rocSPARSEStatusToHIPStatus(
         rocsparse_cgemvi((rocsparse_handle)handle,
-                         hipsparse::hipOperationToHCCOperation(transA),
+                         backend_transA,
                          m,
                          n,
                          (const rocsparse_float_complex*)alpha,
@@ -230,7 +238,7 @@ hipsparseStatus_t hipsparseCgemvi(hipsparseHandle_t    handle,
                          xInd,
                          (const rocsparse_float_complex*)beta,
                          (rocsparse_float_complex*)y,
-                         hipsparse::hipBaseToHCCBase(idxBase),
+                         backend_idxBase,
                          pBuffer));
 }
 
@@ -249,9 +257,15 @@ hipsparseStatus_t hipsparseZgemvi(hipsparseHandle_t       handle,
                                   hipsparseIndexBase_t    idxBase,
                                   void*                   pBuffer)
 {
+    rocsparse_operation_ backend_transA{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipOperationToHCCOperation(transA, &backend_transA));
+
+    rocsparse_index_base_ backend_idxBase{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipBaseToHCCBase(idxBase, &backend_idxBase));
+
     return hipsparse::rocSPARSEStatusToHIPStatus(
         rocsparse_zgemvi((rocsparse_handle)handle,
-                         hipsparse::hipOperationToHCCOperation(transA),
+                         backend_transA,
                          m,
                          n,
                          (const rocsparse_double_complex*)alpha,
@@ -262,6 +276,6 @@ hipsparseStatus_t hipsparseZgemvi(hipsparseHandle_t       handle,
                          xInd,
                          (const rocsparse_double_complex*)beta,
                          (rocsparse_double_complex*)y,
-                         hipsparse::hipBaseToHCCBase(idxBase),
+                         backend_idxBase,
                          pBuffer));
 }

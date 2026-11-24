@@ -36,11 +36,14 @@ hipsparseStatus_t hipsparseSparseToDense_bufferSize(hipsparseHandle_t           
                                                     hipsparseSparseToDenseAlg_t alg,
                                                     size_t*                     pBufferSizeInBytes)
 {
+    rocsparse_sparse_to_dense_alg_ backend_alg{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipSpToDnAlgToHCCSpToDnAlg(alg, &backend_alg));
+
     return hipsparse::rocSPARSEStatusToHIPStatus(
         rocsparse_sparse_to_dense((rocsparse_handle)handle,
                                   to_rocsparse_const_spmat_descr(matA),
                                   (rocsparse_dnmat_descr)matB,
-                                  hipsparse::hipSpToDnAlgToHCCSpToDnAlg(alg),
+                                  backend_alg,
                                   pBufferSizeInBytes,
                                   nullptr));
 }
@@ -51,11 +54,14 @@ hipsparseStatus_t hipsparseSparseToDense(hipsparseHandle_t           handle,
                                          hipsparseSparseToDenseAlg_t alg,
                                          void*                       externalBuffer)
 {
+    rocsparse_sparse_to_dense_alg_ backend_alg{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipSpToDnAlgToHCCSpToDnAlg(alg, &backend_alg));
+
     return hipsparse::rocSPARSEStatusToHIPStatus(
         rocsparse_sparse_to_dense((rocsparse_handle)handle,
                                   to_rocsparse_const_spmat_descr(matA),
                                   (rocsparse_dnmat_descr)matB,
-                                  hipsparse::hipSpToDnAlgToHCCSpToDnAlg(alg),
+                                  backend_alg,
                                   nullptr,
                                   externalBuffer));
 }

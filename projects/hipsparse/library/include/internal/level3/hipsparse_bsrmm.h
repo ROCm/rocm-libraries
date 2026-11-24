@@ -116,7 +116,8 @@ extern "C" {
  *  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p descrA, \p alpha, or \p beta is nullptr,
  *          \p mb, \p n, \p kb, or \p nnzb is negative, \p ldb or \p ldc is invalid,
  *          \p blockDim is less than or equal to zero, or \p bsrValA, \p bsrRowPtrA, \p bsrColIndA,
- *          \p B, or \p C is nullptr.
+ *          \p B, or \p C is nullptr, or \p dirA, \p transA, or \p transB is not a valid value of
+ *          its enumeration type.
  *  \retval HIPSPARSE_STATUS_ARCH_MISMATCH the device is not supported.
  *  \retval HIPSPARSE_STATUS_NOT_SUPPORTED \p transA is not \ref HIPSPARSE_OPERATION_NON_TRANSPOSE,
  *          \p transB is \ref HIPSPARSE_OPERATION_CONJUGATE_TRANSPOSE, or
@@ -231,7 +232,8 @@ hipsparseStatus_t hipsparseSbsrmm(hipsparseHandle_t         handle,
  *  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p descrA, \p alpha, or \p beta is nullptr,
  *          \p mb, \p n, \p kb, or \p nnzb is negative, \p ldb or \p ldc is invalid,
  *          \p blockDim is less than or equal to zero, or \p bsrValA, \p bsrRowPtrA, \p bsrColIndA,
- *          \p B, or \p C is nullptr.
+ *          \p B, or \p C is nullptr, or \p dirA, \p transA, or \p transB is not a valid value of
+ *          its enumeration type.
  *  \retval HIPSPARSE_STATUS_ARCH_MISMATCH the device is not supported.
  *  \retval HIPSPARSE_STATUS_NOT_SUPPORTED \p transA is not \ref HIPSPARSE_OPERATION_NON_TRANSPOSE,
  *          \p transB is \ref HIPSPARSE_OPERATION_CONJUGATE_TRANSPOSE, or
@@ -345,7 +347,8 @@ hipsparseStatus_t hipsparseDbsrmm(hipsparseHandle_t         handle,
  *  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p descrA, \p alpha, or \p beta is nullptr,
  *          \p mb, \p n, \p kb, or \p nnzb is negative, \p ldb or \p ldc is invalid,
  *          \p blockDim is less than or equal to zero, or \p bsrValA, \p bsrRowPtrA, \p bsrColIndA,
- *          \p B, or \p C is nullptr.
+ *          \p B, or \p C is nullptr, or \p dirA, \p transA, or \p transB is not a valid value of
+ *          its enumeration type.
  *  \retval HIPSPARSE_STATUS_ARCH_MISMATCH the device is not supported.
  *  \retval HIPSPARSE_STATUS_NOT_SUPPORTED \p transA is not \ref HIPSPARSE_OPERATION_NON_TRANSPOSE,
  *          \p transB is \ref HIPSPARSE_OPERATION_CONJUGATE_TRANSPOSE, or
@@ -459,7 +462,8 @@ hipsparseStatus_t hipsparseCbsrmm(hipsparseHandle_t         handle,
  *  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p descrA, \p alpha, or \p beta is nullptr,
  *          \p mb, \p n, \p kb, or \p nnzb is negative, \p ldb or \p ldc is invalid,
  *          \p blockDim is less than or equal to zero, or \p bsrValA, \p bsrRowPtrA, \p bsrColIndA,
- *          \p B, or \p C is nullptr.
+ *          \p B, or \p C is nullptr, or \p dirA, \p transA, or \p transB is not a valid value of
+ *          its enumeration type.
  *  \retval HIPSPARSE_STATUS_ARCH_MISMATCH the device is not supported.
  *  \retval HIPSPARSE_STATUS_NOT_SUPPORTED \p transA is not \ref HIPSPARSE_OPERATION_NON_TRANSPOSE,
  *          \p transB is \ref HIPSPARSE_OPERATION_CONJUGATE_TRANSPOSE, or

@@ -42,9 +42,12 @@ hipsparseStatus_t hipsparseSbsr2csr(hipsparseHandle_t         handle,
                                     int*                      csrRowPtrC,
                                     int*                      csrColIndC)
 {
+    cusparseDirection_t backend_dirA{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipDirectionToCudaDirection(dirA, &backend_dirA));
+
     return hipsparse::hipCUSPARSEStatusToHIPStatus(
         cusparseSbsr2csr((cusparseHandle_t)handle,
-                         hipsparse::hipDirectionToCudaDirection(dirA),
+                         backend_dirA,
                          mb,
                          nb,
                          (const cusparseMatDescr_t)descrA,
@@ -72,9 +75,12 @@ hipsparseStatus_t hipsparseDbsr2csr(hipsparseHandle_t         handle,
                                     int*                      csrRowPtrC,
                                     int*                      csrColIndC)
 {
+    cusparseDirection_t backend_dirA{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipDirectionToCudaDirection(dirA, &backend_dirA));
+
     return hipsparse::hipCUSPARSEStatusToHIPStatus(
         cusparseDbsr2csr((cusparseHandle_t)handle,
-                         hipsparse::hipDirectionToCudaDirection(dirA),
+                         backend_dirA,
                          mb,
                          nb,
                          (const cusparseMatDescr_t)descrA,
@@ -102,9 +108,12 @@ hipsparseStatus_t hipsparseCbsr2csr(hipsparseHandle_t         handle,
                                     int*                      csrRowPtrC,
                                     int*                      csrColIndC)
 {
+    cusparseDirection_t backend_dirA{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipDirectionToCudaDirection(dirA, &backend_dirA));
+
     return hipsparse::hipCUSPARSEStatusToHIPStatus(
         cusparseCbsr2csr((cusparseHandle_t)handle,
-                         hipsparse::hipDirectionToCudaDirection(dirA),
+                         backend_dirA,
                          mb,
                          nb,
                          (const cusparseMatDescr_t)descrA,
@@ -132,9 +141,12 @@ hipsparseStatus_t hipsparseZbsr2csr(hipsparseHandle_t         handle,
                                     int*                      csrRowPtrC,
                                     int*                      csrColIndC)
 {
+    cusparseDirection_t backend_dirA{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipDirectionToCudaDirection(dirA, &backend_dirA));
+
     return hipsparse::hipCUSPARSEStatusToHIPStatus(
         cusparseZbsr2csr((cusparseHandle_t)handle,
-                         hipsparse::hipDirectionToCudaDirection(dirA),
+                         backend_dirA,
                          mb,
                          nb,
                          (const cusparseMatDescr_t)descrA,

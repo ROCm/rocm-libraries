@@ -136,6 +136,10 @@ hipsparseStatus_t hipsparseGetStream(hipsparseHandle_t handle, hipStream_t* stre
  *  library context and all subsequent function calls. By default, all values are passed
  *  by reference on the host. Valid pointer modes are \ref HIPSPARSE_POINTER_MODE_HOST
  *  or \ref HIPSPARSE_POINTER_MODE_DEVICE.
+ *
+ *  \retval HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
+ *  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle is nullptr, or \p mode is not a valid value
+ *          of its enumeration type.
  */
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseSetPointerMode(hipsparseHandle_t handle, hipsparsePointerMode_t mode);

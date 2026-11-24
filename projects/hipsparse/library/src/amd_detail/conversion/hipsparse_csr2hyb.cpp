@@ -41,17 +41,20 @@ hipsparseStatus_t hipsparseScsr2hyb(hipsparseHandle_t         handle,
                                     int                       userEllWidth,
                                     hipsparseHybPartition_t   partitionType)
 {
-    return hipsparse::rocSPARSEStatusToHIPStatus(
-        rocsparse_scsr2hyb((rocsparse_handle)handle,
-                           m,
-                           n,
-                           (rocsparse_mat_descr)descrA,
-                           csrSortedValA,
-                           csrSortedRowPtrA,
-                           csrSortedColIndA,
-                           (rocsparse_hyb_mat)hybA,
-                           userEllWidth,
-                           hipsparse::hipHybPartToHCCHybPart(partitionType)));
+    rocsparse_hyb_partition_ backend_partitionType{};
+    RETURN_IF_HIPSPARSE_ERROR(
+        hipsparse::hipHybPartToHCCHybPart(partitionType, &backend_partitionType));
+
+    return hipsparse::rocSPARSEStatusToHIPStatus(rocsparse_scsr2hyb((rocsparse_handle)handle,
+                                                                    m,
+                                                                    n,
+                                                                    (rocsparse_mat_descr)descrA,
+                                                                    csrSortedValA,
+                                                                    csrSortedRowPtrA,
+                                                                    csrSortedColIndA,
+                                                                    (rocsparse_hyb_mat)hybA,
+                                                                    userEllWidth,
+                                                                    backend_partitionType));
 }
 
 hipsparseStatus_t hipsparseDcsr2hyb(hipsparseHandle_t         handle,
@@ -65,17 +68,20 @@ hipsparseStatus_t hipsparseDcsr2hyb(hipsparseHandle_t         handle,
                                     int                       userEllWidth,
                                     hipsparseHybPartition_t   partitionType)
 {
-    return hipsparse::rocSPARSEStatusToHIPStatus(
-        rocsparse_dcsr2hyb((rocsparse_handle)handle,
-                           m,
-                           n,
-                           (rocsparse_mat_descr)descrA,
-                           csrSortedValA,
-                           csrSortedRowPtrA,
-                           csrSortedColIndA,
-                           (rocsparse_hyb_mat)hybA,
-                           userEllWidth,
-                           hipsparse::hipHybPartToHCCHybPart(partitionType)));
+    rocsparse_hyb_partition_ backend_partitionType{};
+    RETURN_IF_HIPSPARSE_ERROR(
+        hipsparse::hipHybPartToHCCHybPart(partitionType, &backend_partitionType));
+
+    return hipsparse::rocSPARSEStatusToHIPStatus(rocsparse_dcsr2hyb((rocsparse_handle)handle,
+                                                                    m,
+                                                                    n,
+                                                                    (rocsparse_mat_descr)descrA,
+                                                                    csrSortedValA,
+                                                                    csrSortedRowPtrA,
+                                                                    csrSortedColIndA,
+                                                                    (rocsparse_hyb_mat)hybA,
+                                                                    userEllWidth,
+                                                                    backend_partitionType));
 }
 
 hipsparseStatus_t hipsparseCcsr2hyb(hipsparseHandle_t         handle,
@@ -89,6 +95,10 @@ hipsparseStatus_t hipsparseCcsr2hyb(hipsparseHandle_t         handle,
                                     int                       userEllWidth,
                                     hipsparseHybPartition_t   partitionType)
 {
+    rocsparse_hyb_partition_ backend_partitionType{};
+    RETURN_IF_HIPSPARSE_ERROR(
+        hipsparse::hipHybPartToHCCHybPart(partitionType, &backend_partitionType));
+
     return hipsparse::rocSPARSEStatusToHIPStatus(
         rocsparse_ccsr2hyb((rocsparse_handle)handle,
                            m,
@@ -99,7 +109,7 @@ hipsparseStatus_t hipsparseCcsr2hyb(hipsparseHandle_t         handle,
                            csrSortedColIndA,
                            (rocsparse_hyb_mat)hybA,
                            userEllWidth,
-                           hipsparse::hipHybPartToHCCHybPart(partitionType)));
+                           backend_partitionType));
 }
 
 hipsparseStatus_t hipsparseZcsr2hyb(hipsparseHandle_t         handle,
@@ -113,6 +123,10 @@ hipsparseStatus_t hipsparseZcsr2hyb(hipsparseHandle_t         handle,
                                     int                       userEllWidth,
                                     hipsparseHybPartition_t   partitionType)
 {
+    rocsparse_hyb_partition_ backend_partitionType{};
+    RETURN_IF_HIPSPARSE_ERROR(
+        hipsparse::hipHybPartToHCCHybPart(partitionType, &backend_partitionType));
+
     return hipsparse::rocSPARSEStatusToHIPStatus(
         rocsparse_zcsr2hyb((rocsparse_handle)handle,
                            m,
@@ -123,5 +137,5 @@ hipsparseStatus_t hipsparseZcsr2hyb(hipsparseHandle_t         handle,
                            csrSortedColIndA,
                            (rocsparse_hyb_mat)hybA,
                            userEllWidth,
-                           hipsparse::hipHybPartToHCCHybPart(partitionType)));
+                           backend_partitionType));
 }

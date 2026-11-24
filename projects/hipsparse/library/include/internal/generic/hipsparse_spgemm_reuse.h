@@ -65,7 +65,9 @@ extern "C" {
 *  externalBuffer1  temporary storage buffer allocated by the user.
 *
 *  \retval HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
-*  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p matA, \p matB, \p matC, or \p bufferSize1 pointer is invalid.
+*  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p matA, \p matB, \p matC, or \p bufferSize1
+*          pointer is invalid, or \p opA, \p opB, or \p alg is not a valid value of its enumeration
+*          type.
 *  \retval HIPSPARSE_STATUS_ALLOC_FAILED additional buffer for long rows could not be
 *          allocated.
 *  \retval HIPSPARSE_STATUS_NOT_SUPPORTED
@@ -159,7 +161,8 @@ hipsparseStatus_t hipsparseSpGEMMreuse_workEstimation(hipsparseHandle_t      han
 *
 *  \retval HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
 *  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p matA, \p matB, \p matC, \p bufferSize2, \p bufferSize3,
-*                                         or \p bufferSize4 pointer is invalid.
+*                                         or \p bufferSize4 pointer is invalid, or \p opA, \p opB,
+*                                         or \p alg is not a valid value of its enumeration type.
 *  \retval HIPSPARSE_STATUS_ALLOC_FAILED additional buffer for long rows could not be
 *          allocated.
 *  \retval HIPSPARSE_STATUS_NOT_SUPPORTED
@@ -255,7 +258,9 @@ hipsparseStatus_t hipsparseSpGEMMreuse_nnz(hipsparseHandle_t      handle,
 *  externalBuffer5  temporary storage buffer allocated by the user.
 *
 *  \retval HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
-*  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p matA, \p matB, \p matC, or \p bufferSize5 pointer is invalid.
+*  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p matA, \p matB, \p matC, or \p bufferSize5
+*          pointer is invalid, or \p opA, \p opB, or \p alg is not a valid value of its enumeration
+*          type.
 *  \retval HIPSPARSE_STATUS_ALLOC_FAILED additional buffer for long rows could not be
 *          allocated.
 *  \retval HIPSPARSE_STATUS_NOT_SUPPORTED
@@ -350,12 +355,14 @@ hipsparseStatus_t hipsparseSpGEMMreuse_copy(hipsparseHandle_t      handle,
 *
 *  \retval HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
 *  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p alpha, \p beta, \p matA, \p matB, or \p matC
-*                                         pointer is invalid.
+*                                         pointer is invalid, or \p opA, \p opB, \p computeType, or
+*                                         \p alg is not a valid value of its enumeration type.
 *  \retval HIPSPARSE_STATUS_ALLOC_FAILED additional buffer for long rows could not be
 *          allocated.
 *  \retval HIPSPARSE_STATUS_NOT_SUPPORTED
 *          \p opA != \ref HIPSPARSE_OPERATION_NON_TRANSPOSE or
-*          \p opB != \ref HIPSPARSE_OPERATION_NON_TRANSPOSE.
+*          \p opB != \ref HIPSPARSE_OPERATION_NON_TRANSPOSE, or \p computeType is currently not
+*          supported.
 */
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseSpGEMMreuse_compute(hipsparseHandle_t          handle,

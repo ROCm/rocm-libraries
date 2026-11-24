@@ -41,9 +41,10 @@ extern "C" {
 *
 *  \retval HIPSPARSE_STATUS_SUCCESS the descriptor was created.
 *  \retval HIPSPARSE_STATUS_INVALID_VALUE an argument is invalid (for example \p spVecDescr is nullptr,
-*          a size is negative, or an array is nullptr when it must hold at least one element) or
-*          \p valueType is not a \p hipDataType.
+*          a size is negative, or an array is nullptr when it must hold at least one element), or
+*          \p idxType, \p idxBase, or \p valueType is not a valid value of its enumeration type.
 *  \retval HIPSPARSE_STATUS_NOT_SUPPORTED \p valueType is a \p hipDataType that hipSPARSE does not
+*          support, or \p idxType is \ref HIPSPARSE_INDEX_16U, which the rocSPARSE backend does not
 *          support.
 */
 HIPSPARSE_EXPORT
@@ -67,9 +68,10 @@ hipsparseStatus_t hipsparseCreateSpVec(hipsparseSpVecDescr_t* spVecDescr,
 *
 *  \retval HIPSPARSE_STATUS_SUCCESS the descriptor was created.
 *  \retval HIPSPARSE_STATUS_INVALID_VALUE an argument is invalid (for example \p spVecDescr is nullptr,
-*          a size is negative, or an array is nullptr when it must hold at least one element) or
-*          \p valueType is not a \p hipDataType.
+*          a size is negative, or an array is nullptr when it must hold at least one element), or
+*          \p idxType, \p idxBase, or \p valueType is not a valid value of its enumeration type.
 *  \retval HIPSPARSE_STATUS_NOT_SUPPORTED \p valueType is a \p hipDataType that hipSPARSE does not
+*          support, or \p idxType is \ref HIPSPARSE_INDEX_16U, which the rocSPARSE backend does not
 *          support.
 */
 HIPSPARSE_EXPORT
@@ -186,10 +188,11 @@ hipsparseStatus_t hipsparseSpVecSetValues(hipsparseSpVecDescr_t spVecDescr, void
 *
 *  \retval HIPSPARSE_STATUS_SUCCESS the descriptor was created.
 *  \retval HIPSPARSE_STATUS_INVALID_VALUE an argument is invalid (for example \p spMatDescr is nullptr,
-*          a size is negative, or an array is nullptr when it must hold at least one element) or
-*          \p valueType is not a \p hipDataType.
+*          a size is negative, or an array is nullptr when it must hold at least one element), or
+*          \p cooIdxType, \p idxBase, or \p valueType is not a valid value of its enumeration type.
 *  \retval HIPSPARSE_STATUS_NOT_SUPPORTED \p valueType is a \p hipDataType that hipSPARSE does not
-*          support.
+*          support, or \p cooIdxType is \ref HIPSPARSE_INDEX_16U, which the rocSPARSE backend does
+*          not support.
 */
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseCreateCoo(hipsparseSpMatDescr_t* spMatDescr,
@@ -213,10 +216,11 @@ hipsparseStatus_t hipsparseCreateCoo(hipsparseSpMatDescr_t* spMatDescr,
 *
 *  \retval HIPSPARSE_STATUS_SUCCESS the descriptor was created.
 *  \retval HIPSPARSE_STATUS_INVALID_VALUE an argument is invalid (for example \p spMatDescr is nullptr,
-*          a size is negative, or an array is nullptr when it must hold at least one element) or
-*          \p valueType is not a \p hipDataType.
+*          a size is negative, or an array is nullptr when it must hold at least one element), or
+*          \p cooIdxType, \p idxBase, or \p valueType is not a valid value of its enumeration type.
 *  \retval HIPSPARSE_STATUS_NOT_SUPPORTED \p valueType is a \p hipDataType that hipSPARSE does not
-*          support.
+*          support, or \p cooIdxType is \ref HIPSPARSE_INDEX_16U, which the rocSPARSE backend does
+*          not support.
 */
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseCreateConstCoo(hipsparseConstSpMatDescr_t* spMatDescr,
@@ -240,10 +244,11 @@ hipsparseStatus_t hipsparseCreateConstCoo(hipsparseConstSpMatDescr_t* spMatDescr
 *
 *  \retval HIPSPARSE_STATUS_SUCCESS the descriptor was created.
 *  \retval HIPSPARSE_STATUS_INVALID_VALUE an argument is invalid (for example \p spMatDescr is nullptr,
-*          a size is negative, or an array is nullptr when it must hold at least one element) or
-*          \p valueType is not a \p hipDataType.
+*          a size is negative, or an array is nullptr when it must hold at least one element), or
+*          \p cooIdxType, \p idxBase, or \p valueType is not a valid value of its enumeration type.
 *  \retval HIPSPARSE_STATUS_NOT_SUPPORTED \p valueType is a \p hipDataType that hipSPARSE does not
-*          support.
+*          support, or \p cooIdxType is \ref HIPSPARSE_INDEX_16U, which the rocSPARSE backend does
+*          not support.
 */
 DEPRECATED_CUDA_11000("The routine will be removed in CUDA 12")
 HIPSPARSE_EXPORT
@@ -267,10 +272,12 @@ hipsparseStatus_t hipsparseCreateCooAoS(hipsparseSpMatDescr_t* spMatDescr,
 *
 *  \retval HIPSPARSE_STATUS_SUCCESS the descriptor was created.
 *  \retval HIPSPARSE_STATUS_INVALID_VALUE an argument is invalid (for example \p spMatDescr is nullptr,
-*          a size is negative, or an array is nullptr when it must hold at least one element) or
-*          \p valueType is not a \p hipDataType.
+*          a size is negative, or an array is nullptr when it must hold at least one element), or
+*          \p csrRowOffsetsType, \p csrColIndType, \p idxBase, or \p valueType is not a valid value
+*          of its enumeration type.
 *  \retval HIPSPARSE_STATUS_NOT_SUPPORTED \p valueType is a \p hipDataType that hipSPARSE does not
-*          support.
+*          support, or \p csrRowOffsetsType or \p csrColIndType is \ref HIPSPARSE_INDEX_16U, which
+*          the rocSPARSE backend does not support.
 */
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseCreateCsr(hipsparseSpMatDescr_t* spMatDescr,
@@ -295,10 +302,12 @@ hipsparseStatus_t hipsparseCreateCsr(hipsparseSpMatDescr_t* spMatDescr,
 *
 *  \retval HIPSPARSE_STATUS_SUCCESS the descriptor was created.
 *  \retval HIPSPARSE_STATUS_INVALID_VALUE an argument is invalid (for example \p spMatDescr is nullptr,
-*          a size is negative, or an array is nullptr when it must hold at least one element) or
-*          \p valueType is not a \p hipDataType.
+*          a size is negative, or an array is nullptr when it must hold at least one element), or
+*          \p csrRowOffsetsType, \p csrColIndType, \p idxBase, or \p valueType is not a valid value
+*          of its enumeration type.
 *  \retval HIPSPARSE_STATUS_NOT_SUPPORTED \p valueType is a \p hipDataType that hipSPARSE does not
-*          support.
+*          support, or \p csrRowOffsetsType or \p csrColIndType is \ref HIPSPARSE_INDEX_16U, which
+*          the rocSPARSE backend does not support.
 */
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseCreateConstCsr(hipsparseConstSpMatDescr_t* spMatDescr,
@@ -323,10 +332,12 @@ hipsparseStatus_t hipsparseCreateConstCsr(hipsparseConstSpMatDescr_t* spMatDescr
 *
 *  \retval HIPSPARSE_STATUS_SUCCESS the descriptor was created.
 *  \retval HIPSPARSE_STATUS_INVALID_VALUE an argument is invalid (for example \p spMatDescr is nullptr,
-*          a size is negative, or an array is nullptr when it must hold at least one element) or
-*          \p valueType is not a \p hipDataType.
+*          a size is negative, or an array is nullptr when it must hold at least one element), or
+*          \p cscColOffsetsType, \p cscRowIndType, \p idxBase, or \p valueType is not a valid value
+*          of its enumeration type.
 *  \retval HIPSPARSE_STATUS_NOT_SUPPORTED \p valueType is a \p hipDataType that hipSPARSE does not
-*          support.
+*          support, or \p cscColOffsetsType or \p cscRowIndType is \ref HIPSPARSE_INDEX_16U, which
+*          the rocSPARSE backend does not support.
 */
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseCreateCsc(hipsparseSpMatDescr_t* spMatDescr,
@@ -351,10 +362,12 @@ hipsparseStatus_t hipsparseCreateCsc(hipsparseSpMatDescr_t* spMatDescr,
 *
 *  \retval HIPSPARSE_STATUS_SUCCESS the descriptor was created.
 *  \retval HIPSPARSE_STATUS_INVALID_VALUE an argument is invalid (for example \p spMatDescr is nullptr,
-*          a size is negative, or an array is nullptr when it must hold at least one element) or
-*          \p valueType is not a \p hipDataType.
+*          a size is negative, or an array is nullptr when it must hold at least one element), or
+*          \p cscColOffsetsType, \p cscRowIndType, \p idxBase, or \p valueType is not a valid value
+*          of its enumeration type.
 *  \retval HIPSPARSE_STATUS_NOT_SUPPORTED \p valueType is a \p hipDataType that hipSPARSE does not
-*          support.
+*          support, or \p cscColOffsetsType or \p cscRowIndType is \ref HIPSPARSE_INDEX_16U, which
+*          the rocSPARSE backend does not support.
 */
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseCreateConstCsc(hipsparseConstSpMatDescr_t* spMatDescr,
@@ -379,10 +392,11 @@ hipsparseStatus_t hipsparseCreateConstCsc(hipsparseConstSpMatDescr_t* spMatDescr
 *
 *  \retval HIPSPARSE_STATUS_SUCCESS the descriptor was created.
 *  \retval HIPSPARSE_STATUS_INVALID_VALUE an argument is invalid (for example \p spMatDescr is nullptr,
-*          a size is negative, or an array is nullptr when it must hold at least one element) or
-*          \p valueType is not a \p hipDataType.
+*          a size is negative, or an array is nullptr when it must hold at least one element), or
+*          \p ellIdxType, \p idxBase, or \p valueType is not a valid value of its enumeration type.
 *  \retval HIPSPARSE_STATUS_NOT_SUPPORTED \p valueType is a \p hipDataType that hipSPARSE does not
-*          support.
+*          support, or \p ellIdxType is \ref HIPSPARSE_INDEX_16U, which the rocSPARSE backend does
+*          not support.
 */
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseCreateBlockedEll(hipsparseSpMatDescr_t* spMatDescr,
@@ -406,10 +420,11 @@ hipsparseStatus_t hipsparseCreateBlockedEll(hipsparseSpMatDescr_t* spMatDescr,
 *
 *  \retval HIPSPARSE_STATUS_SUCCESS the descriptor was created.
 *  \retval HIPSPARSE_STATUS_INVALID_VALUE an argument is invalid (for example \p spMatDescr is nullptr,
-*          a size is negative, or an array is nullptr when it must hold at least one element) or
-*          \p valueType is not a \p hipDataType.
+*          a size is negative, or an array is nullptr when it must hold at least one element), or
+*          \p ellIdxType, \p idxBase, or \p valueType is not a valid value of its enumeration type.
 *  \retval HIPSPARSE_STATUS_NOT_SUPPORTED \p valueType is a \p hipDataType that hipSPARSE does not
-*          support.
+*          support, or \p ellIdxType is \ref HIPSPARSE_INDEX_16U, which the rocSPARSE backend does
+*          not support.
 */
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseCreateConstBlockedEll(hipsparseConstSpMatDescr_t* spMatDescr,
@@ -433,10 +448,12 @@ hipsparseStatus_t hipsparseCreateConstBlockedEll(hipsparseConstSpMatDescr_t* spM
 *
 *  \retval HIPSPARSE_STATUS_SUCCESS the descriptor was created.
 *  \retval HIPSPARSE_STATUS_INVALID_VALUE an argument is invalid (for example \p spMatDescr is nullptr,
-*          a size is negative, or an array is nullptr when it must hold at least one element) or
-*          \p valueType is not a \p hipDataType.
+*          a size is negative, or an array is nullptr when it must hold at least one element), or
+*          \p sellSliceOffsetsType, \p sellColIndType, \p idxBase, or \p valueType is not a valid
+*          value of its enumeration type.
 *  \retval HIPSPARSE_STATUS_NOT_SUPPORTED \p valueType is a \p hipDataType that hipSPARSE does not
-*          support.
+*          support, or \p sellSliceOffsetsType or \p sellColIndType is \ref HIPSPARSE_INDEX_16U,
+*          which the rocSPARSE backend does not support.
 */
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseCreateSlicedEll(hipsparseSpMatDescr_t* spMatDescr,
@@ -463,10 +480,12 @@ hipsparseStatus_t hipsparseCreateSlicedEll(hipsparseSpMatDescr_t* spMatDescr,
 *
 *  \retval HIPSPARSE_STATUS_SUCCESS the descriptor was created.
 *  \retval HIPSPARSE_STATUS_INVALID_VALUE an argument is invalid (for example \p spMatDescr is nullptr,
-*          a size is negative, or an array is nullptr when it must hold at least one element) or
-*          \p valueType is not a \p hipDataType.
+*          a size is negative, or an array is nullptr when it must hold at least one element), or
+*          \p sellSliceOffsetsType, \p sellColIndType, \p idxBase, or \p valueType is not a valid
+*          value of its enumeration type.
 *  \retval HIPSPARSE_STATUS_NOT_SUPPORTED \p valueType is a \p hipDataType that hipSPARSE does not
-*          support.
+*          support, or \p sellSliceOffsetsType or \p sellColIndType is \ref HIPSPARSE_INDEX_16U,
+*          which the rocSPARSE backend does not support.
 */
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseCreateConstSlicedEll(hipsparseConstSpMatDescr_t* spMatDescr,
@@ -493,10 +512,12 @@ hipsparseStatus_t hipsparseCreateConstSlicedEll(hipsparseConstSpMatDescr_t* spMa
 *
 *  \retval HIPSPARSE_STATUS_SUCCESS the descriptor was created.
 *  \retval HIPSPARSE_STATUS_INVALID_VALUE an argument is invalid (for example \p spMatDescr is nullptr,
-*          a size is negative, or an array is nullptr when it must hold at least one element) or
-*          \p valueType is not a \p hipDataType.
+*          a size is negative, or an array is nullptr when it must hold at least one element), or
+*          \p bsrRowPtrType, \p bsrColIndType, \p idxBase, \p valueType, or \p order is not a valid
+*          value of its enumeration type.
 *  \retval HIPSPARSE_STATUS_NOT_SUPPORTED \p valueType is a \p hipDataType that hipSPARSE does not
-*          support.
+*          support, or \p bsrRowPtrType or \p bsrColIndType is \ref HIPSPARSE_INDEX_16U, which the
+*          rocSPARSE backend does not support.
 */
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseCreateBsr(hipsparseSpMatDescr_t* spMatDescr,
@@ -524,10 +545,12 @@ hipsparseStatus_t hipsparseCreateBsr(hipsparseSpMatDescr_t* spMatDescr,
 *
 *  \retval HIPSPARSE_STATUS_SUCCESS the descriptor was created.
 *  \retval HIPSPARSE_STATUS_INVALID_VALUE an argument is invalid (for example \p spMatDescr is nullptr,
-*          a size is negative, or an array is nullptr when it must hold at least one element) or
-*          \p valueType is not a \p hipDataType.
+*          a size is negative, or an array is nullptr when it must hold at least one element), or
+*          \p bsrRowPtrType, \p bsrColIndType, \p idxBase, \p valueType, or \p order is not a valid
+*          value of its enumeration type.
 *  \retval HIPSPARSE_STATUS_NOT_SUPPORTED \p valueType is a \p hipDataType that hipSPARSE does not
-*          support.
+*          support, or \p bsrRowPtrType or \p bsrColIndType is \ref HIPSPARSE_INDEX_16U, which the
+*          rocSPARSE backend does not support.
 */
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseCreateConstBsr(hipsparseConstSpMatDescr_t* spMatDescr,
@@ -898,6 +921,11 @@ hipsparseStatus_t hipsparseCsrSetStridedBatch(hipsparseSpMatDescr_t spMatDescr,
 #if(!defined(CUDART_VERSION) || CUDART_VERSION >= 12000)
 /*! \ingroup generic_module
 *  \brief Get an attribute from a sparse matrix descriptor.
+*
+*  \retval HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
+*  \retval HIPSPARSE_STATUS_INVALID_VALUE \p spMatDescr or \p data is nullptr, \p dataSize does not
+*          match the size of the attribute, or \p attribute is not a valid value of its enumeration
+*          type.
 */
 HIPSPARSE_EXPORT
 HIPSPARSE_EXPORT
@@ -916,6 +944,11 @@ hipsparseStatus_t hipsparseSpMatGetAttribute(hipsparseSpMatDescr_t     spMatDesc
 #if(!defined(CUDART_VERSION) || CUDART_VERSION >= 11030)
 /*! \ingroup generic_module
 *  \brief Set an attribute in a sparse matrix descriptor.
+*
+*  \retval HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
+*  \retval HIPSPARSE_STATUS_INVALID_VALUE \p spMatDescr or \p data is nullptr, \p dataSize does not
+*          match the size of the attribute, or \p attribute is not a valid value of its enumeration
+*          type.
 */
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseSpMatSetAttribute(hipsparseSpMatDescr_t     spMatDescr,
@@ -936,8 +969,8 @@ hipsparseStatus_t hipsparseSpMatSetAttribute(hipsparseSpMatDescr_t     spMatDesc
 *
 *  \retval HIPSPARSE_STATUS_SUCCESS the descriptor was created.
 *  \retval HIPSPARSE_STATUS_INVALID_VALUE an argument is invalid (for example \p dnVecDescr is nullptr,
-*          a size is negative, or an array is nullptr when it must hold at least one element) or
-*          \p valueType is not a \p hipDataType.
+*          a size is negative, or an array is nullptr when it must hold at least one element), or
+*          \p valueType is not a valid value of its enumeration type.
 *  \retval HIPSPARSE_STATUS_NOT_SUPPORTED \p valueType is a \p hipDataType that hipSPARSE does not
 *          support.
 */
@@ -957,8 +990,8 @@ hipsparseStatus_t hipsparseCreateDnVec(hipsparseDnVecDescr_t* dnVecDescr,
 *
 *  \retval HIPSPARSE_STATUS_SUCCESS the descriptor was created.
 *  \retval HIPSPARSE_STATUS_INVALID_VALUE an argument is invalid (for example \p dnVecDescr is nullptr,
-*          a size is negative, or an array is nullptr when it must hold at least one element) or
-*          \p valueType is not a \p hipDataType.
+*          a size is negative, or an array is nullptr when it must hold at least one element), or
+*          \p valueType is not a valid value of its enumeration type.
 *  \retval HIPSPARSE_STATUS_NOT_SUPPORTED \p valueType is a \p hipDataType that hipSPARSE does not
 *          support.
 */
@@ -1056,8 +1089,8 @@ hipsparseStatus_t hipsparseDnVecSetValues(hipsparseDnVecDescr_t dnVecDescr, void
 *
 *  \retval HIPSPARSE_STATUS_SUCCESS the descriptor was created.
 *  \retval HIPSPARSE_STATUS_INVALID_VALUE an argument is invalid (for example \p dnMatDescr is nullptr,
-*          a size is negative, or an array is nullptr when it must hold at least one element) or
-*          \p valueType is not a \p hipDataType.
+*          a size is negative, or an array is nullptr when it must hold at least one element), or
+*          \p valueType or \p order is not a valid value of its enumeration type.
 *  \retval HIPSPARSE_STATUS_NOT_SUPPORTED \p valueType is a \p hipDataType that hipSPARSE does not
 *          support.
 */
@@ -1080,8 +1113,8 @@ hipsparseStatus_t hipsparseCreateDnMat(hipsparseDnMatDescr_t* dnMatDescr,
 *
 *  \retval HIPSPARSE_STATUS_SUCCESS the descriptor was created.
 *  \retval HIPSPARSE_STATUS_INVALID_VALUE an argument is invalid (for example \p dnMatDescr is nullptr,
-*          a size is negative, or an array is nullptr when it must hold at least one element) or
-*          \p valueType is not a \p hipDataType.
+*          a size is negative, or an array is nullptr when it must hold at least one element), or
+*          \p valueType or \p order is not a valid value of its enumeration type.
 *  \retval HIPSPARSE_STATUS_NOT_SUPPORTED \p valueType is a \p hipDataType that hipSPARSE does not
 *          support.
 */

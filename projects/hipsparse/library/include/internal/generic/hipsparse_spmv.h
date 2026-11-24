@@ -67,8 +67,9 @@ extern "C" {
 *  \retval HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
 *  \retval HIPSPARSE_STATUS_NOT_INITIALIZED \p handle is not initialized.
 *  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p alpha, \p matA, \p vecX, \p beta, 
-*          \p vecY, or \p pBufferSizeInBytes is nullptr, \p opA is invalid, or the matrix 
-*          or vector dimensions are incompatible.
+*          \p vecY, or \p pBufferSizeInBytes is nullptr, or the matrix or vector dimensions are
+*          incompatible, or \p opA, \p computeType, or \p alg is not a valid value of its
+*          enumeration type.
 *  \retval HIPSPARSE_STATUS_NOT_SUPPORTED \p computeType or \p alg is currently not supported.
 */
 HIPSPARSE_EXPORT
@@ -134,7 +135,8 @@ hipsparseStatus_t hipsparseSpMV_bufferSize(hipsparseHandle_t           handle,
 *
 *  \retval      HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
 *  \retval      HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p alpha, \p matA, \p x, \p beta, \p y, or
-*               \p externalBuffer pointer is invalid or if \p opA, \p computeType, or \p alg is incorrect.
+*               \p externalBuffer pointer is invalid, or \p opA, \p computeType, or \p alg is not a
+*               valid value of its enumeration type.
 *  \retval      HIPSPARSE_STATUS_NOT_SUPPORTED \p computeType or \p alg is
 *               currently not supported.
 */
@@ -300,7 +302,8 @@ hipsparseStatus_t hipsparseSpMV_preprocess(hipsparseHandle_t           handle,
 *
 *  \retval      HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
 *  \retval      HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p alpha, \p matA, \p x, \p beta, \p y, or
-*               \p externalBuffer pointer is invalid or if \p opA, \p computeType, \p alg is incorrect.
+*               \p externalBuffer pointer is invalid, or \p opA, \p computeType, or \p alg is not a
+*               valid value of its enumeration type.
 *  \retval      HIPSPARSE_STATUS_NOT_SUPPORTED \p computeType or \p alg is
 *               currently not supported.
 */

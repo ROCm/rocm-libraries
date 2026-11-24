@@ -69,7 +69,8 @@ extern "C" {
 *  \retval HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
 *  \retval HIPSPARSE_STATUS_NOT_INITIALIZED \p handle is not initialized.
 *  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p alpha, \p matA, \p matB, \p matC, \p beta, or
-*          \p pBufferSizeInBytes is nullptr, or \p opA or \p opB is invalid.
+*          \p pBufferSizeInBytes is nullptr, or \p opA, \p opB, \p computeType, or \p alg is not a
+*          valid value of its enumeration type.
 *  \retval HIPSPARSE_STATUS_NOT_SUPPORTED \p opA, \p opB, \p computeType, or \p alg is currently not supported.
 */
 HIPSPARSE_EXPORT
@@ -138,7 +139,8 @@ hipsparseStatus_t hipsparseSpMM_bufferSize(hipsparseHandle_t           handle,
 *
 *  \retval      HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
 *  \retval      HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p alpha, \p matA, \p matB, \p matC, \p beta, or
-*               \p externalBuffer pointer is invalid.
+*               \p externalBuffer pointer is invalid, or \p opA, \p opB, \p computeType, or \p alg
+*               is not a valid value of its enumeration type.
 *  \retval      HIPSPARSE_STATUS_NOT_SUPPORTED \p opA, \p opB, \p computeType, or \p alg is
 *               currently not supported.
 */
@@ -343,7 +345,8 @@ hipsparseStatus_t hipsparseSpMM_preprocess(hipsparseHandle_t           handle,
 *
 *  \retval      HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
 *  \retval      HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p alpha, \p matA, \p matB, \p matC, \p beta, or
-*               \p externalBuffer pointer is invalid.
+*               \p externalBuffer pointer is invalid, or \p opA, \p opB, \p computeType, or \p alg
+*               is not a valid value of its enumeration type.
 *  \retval      HIPSPARSE_STATUS_NOT_SUPPORTED \p opA, \p opB, \p computeType, or \p alg is
 *               currently not supported.
 */

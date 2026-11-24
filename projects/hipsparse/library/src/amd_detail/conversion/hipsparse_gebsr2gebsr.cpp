@@ -45,10 +45,13 @@ hipsparseStatus_t hipsparseSgebsr2gebsr_bufferSize(hipsparseHandle_t         han
                                                    int                       colBlockDimC,
                                                    int*                      pBufferSizeInBytes)
 {
+    rocsparse_direction_ backend_dirA{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipDirectionToHCCDirection(dirA, &backend_dirA));
+
     size_t bufSize;
     RETURN_IF_ROCSPARSE_ERROR(
         rocsparse_sgebsr2gebsr_buffer_size((rocsparse_handle)handle,
-                                           hipsparse::hipDirectionToHCCDirection(dirA),
+                                           backend_dirA,
                                            mb,
                                            nb,
                                            nnzb,
@@ -84,10 +87,13 @@ hipsparseStatus_t hipsparseDgebsr2gebsr_bufferSize(hipsparseHandle_t         han
                                                    int                       colBlockDimC,
                                                    int*                      pBufferSizeInBytes)
 {
+    rocsparse_direction_ backend_dirA{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipDirectionToHCCDirection(dirA, &backend_dirA));
+
     size_t bufSize;
     RETURN_IF_ROCSPARSE_ERROR(
         rocsparse_dgebsr2gebsr_buffer_size((rocsparse_handle)handle,
-                                           hipsparse::hipDirectionToHCCDirection(dirA),
+                                           backend_dirA,
                                            mb,
                                            nb,
                                            nnzb,
@@ -122,10 +128,13 @@ hipsparseStatus_t hipsparseCgebsr2gebsr_bufferSize(hipsparseHandle_t         han
                                                    int                       colBlockDimC,
                                                    int*                      pBufferSizeInBytes)
 {
+    rocsparse_direction_ backend_dirA{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipDirectionToHCCDirection(dirA, &backend_dirA));
+
     size_t bufSize;
     RETURN_IF_ROCSPARSE_ERROR(
         rocsparse_cgebsr2gebsr_buffer_size((rocsparse_handle)handle,
-                                           hipsparse::hipDirectionToHCCDirection(dirA),
+                                           backend_dirA,
                                            mb,
                                            nb,
                                            nnzb,
@@ -160,10 +169,13 @@ hipsparseStatus_t hipsparseZgebsr2gebsr_bufferSize(hipsparseHandle_t         han
                                                    int                       colBlockDimC,
                                                    int*                      pBufferSizeInBytes)
 {
+    rocsparse_direction_ backend_dirA{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipDirectionToHCCDirection(dirA, &backend_dirA));
+
     size_t bufSize;
     RETURN_IF_ROCSPARSE_ERROR(
         rocsparse_zgebsr2gebsr_buffer_size((rocsparse_handle)handle,
-                                           hipsparse::hipDirectionToHCCDirection(dirA),
+                                           backend_dirA,
                                            mb,
                                            nb,
                                            nnzb,
@@ -200,8 +212,11 @@ hipsparseStatus_t hipsparseXgebsr2gebsrNnz(hipsparseHandle_t         handle,
                                            int*                      nnzTotalDevHostPtr,
                                            void*                     buffer)
 {
+    rocsparse_direction_ backend_dirA{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipDirectionToHCCDirection(dirA, &backend_dirA));
+
     RETURN_IF_ROCSPARSE_ERROR(rocsparse_gebsr2gebsr_nnz((rocsparse_handle)handle,
-                                                        hipsparse::hipDirectionToHCCDirection(dirA),
+                                                        backend_dirA,
                                                         mb,
                                                         nb,
                                                         nnzb,
@@ -238,8 +253,11 @@ hipsparseStatus_t hipsparseSgebsr2gebsr(hipsparseHandle_t         handle,
                                         int                       colBlockDimC,
                                         void*                     buffer)
 {
+    rocsparse_direction_ backend_dirA{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipDirectionToHCCDirection(dirA, &backend_dirA));
+
     RETURN_IF_ROCSPARSE_ERROR(rocsparse_sgebsr2gebsr((rocsparse_handle)handle,
-                                                     hipsparse::hipDirectionToHCCDirection(dirA),
+                                                     backend_dirA,
                                                      mb,
                                                      nb,
                                                      nnzb,
@@ -278,8 +296,11 @@ hipsparseStatus_t hipsparseDgebsr2gebsr(hipsparseHandle_t         handle,
                                         int                       colBlockDimC,
                                         void*                     buffer)
 {
+    rocsparse_direction_ backend_dirA{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipDirectionToHCCDirection(dirA, &backend_dirA));
+
     RETURN_IF_ROCSPARSE_ERROR(rocsparse_dgebsr2gebsr((rocsparse_handle)handle,
-                                                     hipsparse::hipDirectionToHCCDirection(dirA),
+                                                     backend_dirA,
                                                      mb,
                                                      nb,
                                                      nnzb,
@@ -318,8 +339,11 @@ hipsparseStatus_t hipsparseCgebsr2gebsr(hipsparseHandle_t         handle,
                                         int                       colBlockDimC,
                                         void*                     buffer)
 {
+    rocsparse_direction_ backend_dirA{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipDirectionToHCCDirection(dirA, &backend_dirA));
+
     RETURN_IF_ROCSPARSE_ERROR(rocsparse_cgebsr2gebsr((rocsparse_handle)handle,
-                                                     hipsparse::hipDirectionToHCCDirection(dirA),
+                                                     backend_dirA,
                                                      mb,
                                                      nb,
                                                      nnzb,
@@ -358,8 +382,11 @@ hipsparseStatus_t hipsparseZgebsr2gebsr(hipsparseHandle_t         handle,
                                         int                       colBlockDimC,
                                         void*                     buffer)
 {
+    rocsparse_direction_ backend_dirA{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipDirectionToHCCDirection(dirA, &backend_dirA));
+
     RETURN_IF_ROCSPARSE_ERROR(rocsparse_zgebsr2gebsr((rocsparse_handle)handle,
-                                                     hipsparse::hipDirectionToHCCDirection(dirA),
+                                                     backend_dirA,
                                                      mb,
                                                      nb,
                                                      nnzb,

@@ -50,26 +50,34 @@ hipsparseStatus_t hipsparseSbsrmm(hipsparseHandle_t         handle,
                                   float*                    C,
                                   int                       ldc)
 {
-    return hipsparse::rocSPARSEStatusToHIPStatus(
-        rocsparse_sbsrmm((rocsparse_handle)handle,
-                         hipsparse::hipDirectionToHCCDirection(dirA),
-                         hipsparse::hipOperationToHCCOperation(transA),
-                         hipsparse::hipOperationToHCCOperation(transB),
-                         mb,
-                         n,
-                         kb,
-                         nnzb,
-                         alpha,
-                         (rocsparse_mat_descr)descrA,
-                         bsrValA,
-                         bsrRowPtrA,
-                         bsrColIndA,
-                         blockDim,
-                         B,
-                         ldb,
-                         beta,
-                         C,
-                         ldc));
+    rocsparse_direction_ backend_dirA{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipDirectionToHCCDirection(dirA, &backend_dirA));
+
+    rocsparse_operation_ backend_transA{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipOperationToHCCOperation(transA, &backend_transA));
+
+    rocsparse_operation_ backend_transB{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipOperationToHCCOperation(transB, &backend_transB));
+
+    return hipsparse::rocSPARSEStatusToHIPStatus(rocsparse_sbsrmm((rocsparse_handle)handle,
+                                                                  backend_dirA,
+                                                                  backend_transA,
+                                                                  backend_transB,
+                                                                  mb,
+                                                                  n,
+                                                                  kb,
+                                                                  nnzb,
+                                                                  alpha,
+                                                                  (rocsparse_mat_descr)descrA,
+                                                                  bsrValA,
+                                                                  bsrRowPtrA,
+                                                                  bsrColIndA,
+                                                                  blockDim,
+                                                                  B,
+                                                                  ldb,
+                                                                  beta,
+                                                                  C,
+                                                                  ldc));
 }
 
 hipsparseStatus_t hipsparseDbsrmm(hipsparseHandle_t         handle,
@@ -92,26 +100,34 @@ hipsparseStatus_t hipsparseDbsrmm(hipsparseHandle_t         handle,
                                   double*                   C,
                                   int                       ldc)
 {
-    return hipsparse::rocSPARSEStatusToHIPStatus(
-        rocsparse_dbsrmm((rocsparse_handle)handle,
-                         hipsparse::hipDirectionToHCCDirection(dirA),
-                         hipsparse::hipOperationToHCCOperation(transA),
-                         hipsparse::hipOperationToHCCOperation(transB),
-                         mb,
-                         n,
-                         kb,
-                         nnzb,
-                         alpha,
-                         (rocsparse_mat_descr)descrA,
-                         bsrValA,
-                         bsrRowPtrA,
-                         bsrColIndA,
-                         blockDim,
-                         B,
-                         ldb,
-                         beta,
-                         C,
-                         ldc));
+    rocsparse_direction_ backend_dirA{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipDirectionToHCCDirection(dirA, &backend_dirA));
+
+    rocsparse_operation_ backend_transA{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipOperationToHCCOperation(transA, &backend_transA));
+
+    rocsparse_operation_ backend_transB{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipOperationToHCCOperation(transB, &backend_transB));
+
+    return hipsparse::rocSPARSEStatusToHIPStatus(rocsparse_dbsrmm((rocsparse_handle)handle,
+                                                                  backend_dirA,
+                                                                  backend_transA,
+                                                                  backend_transB,
+                                                                  mb,
+                                                                  n,
+                                                                  kb,
+                                                                  nnzb,
+                                                                  alpha,
+                                                                  (rocsparse_mat_descr)descrA,
+                                                                  bsrValA,
+                                                                  bsrRowPtrA,
+                                                                  bsrColIndA,
+                                                                  blockDim,
+                                                                  B,
+                                                                  ldb,
+                                                                  beta,
+                                                                  C,
+                                                                  ldc));
 }
 
 hipsparseStatus_t hipsparseCbsrmm(hipsparseHandle_t         handle,
@@ -134,11 +150,20 @@ hipsparseStatus_t hipsparseCbsrmm(hipsparseHandle_t         handle,
                                   hipComplex*               C,
                                   int                       ldc)
 {
+    rocsparse_direction_ backend_dirA{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipDirectionToHCCDirection(dirA, &backend_dirA));
+
+    rocsparse_operation_ backend_transA{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipOperationToHCCOperation(transA, &backend_transA));
+
+    rocsparse_operation_ backend_transB{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipOperationToHCCOperation(transB, &backend_transB));
+
     return hipsparse::rocSPARSEStatusToHIPStatus(
         rocsparse_cbsrmm((rocsparse_handle)handle,
-                         hipsparse::hipDirectionToHCCDirection(dirA),
-                         hipsparse::hipOperationToHCCOperation(transA),
-                         hipsparse::hipOperationToHCCOperation(transB),
+                         backend_dirA,
+                         backend_transA,
+                         backend_transB,
                          mb,
                          n,
                          kb,
@@ -176,11 +201,20 @@ hipsparseStatus_t hipsparseZbsrmm(hipsparseHandle_t         handle,
                                   hipDoubleComplex*         C,
                                   int                       ldc)
 {
+    rocsparse_direction_ backend_dirA{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipDirectionToHCCDirection(dirA, &backend_dirA));
+
+    rocsparse_operation_ backend_transA{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipOperationToHCCOperation(transA, &backend_transA));
+
+    rocsparse_operation_ backend_transB{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipOperationToHCCOperation(transB, &backend_transB));
+
     return hipsparse::rocSPARSEStatusToHIPStatus(
         rocsparse_zbsrmm((rocsparse_handle)handle,
-                         hipsparse::hipDirectionToHCCDirection(dirA),
-                         hipsparse::hipOperationToHCCOperation(transA),
-                         hipsparse::hipOperationToHCCOperation(transB),
+                         backend_dirA,
+                         backend_transA,
+                         backend_transB,
                          mb,
                          n,
                          kb,

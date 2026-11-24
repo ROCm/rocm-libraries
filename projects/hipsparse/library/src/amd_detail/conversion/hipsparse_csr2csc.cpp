@@ -43,17 +43,22 @@ hipsparseStatus_t hipsparseScsr2csc(hipsparseHandle_t    handle,
                                     hipsparseAction_t    copyValues,
                                     hipsparseIndexBase_t idxBase)
 {
+    rocsparse_action_ backend_copyValues{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipActionToHCCAction(copyValues, &backend_copyValues));
+
+    rocsparse_index_base_ backend_idxBase{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipBaseToHCCBase(idxBase, &backend_idxBase));
+
     // Determine buffer size
     size_t buffer_size = 0;
-    RETURN_IF_ROCSPARSE_ERROR(
-        rocsparse_csr2csc_buffer_size((rocsparse_handle)handle,
-                                      m,
-                                      n,
-                                      nnz,
-                                      csrSortedRowPtr,
-                                      csrSortedColInd,
-                                      hipsparse::hipActionToHCCAction(copyValues),
-                                      &buffer_size));
+    RETURN_IF_ROCSPARSE_ERROR(rocsparse_csr2csc_buffer_size((rocsparse_handle)handle,
+                                                            m,
+                                                            n,
+                                                            nnz,
+                                                            csrSortedRowPtr,
+                                                            csrSortedColInd,
+                                                            backend_copyValues,
+                                                            &buffer_size));
 
     // Allocate buffer
     void* buffer = nullptr;
@@ -71,20 +76,19 @@ hipsparseStatus_t hipsparseScsr2csc(hipsparseHandle_t    handle,
     }
 
     // Format conversion
-    status = hipsparse::rocSPARSEStatusToHIPStatus(
-        rocsparse_scsr2csc((rocsparse_handle)handle,
-                           m,
-                           n,
-                           nnz,
-                           csrSortedVal,
-                           csrSortedRowPtr,
-                           csrSortedColInd,
-                           cscSortedVal,
-                           cscSortedRowInd,
-                           cscSortedColPtr,
-                           hipsparse::hipActionToHCCAction(copyValues),
-                           hipsparse::hipBaseToHCCBase(idxBase),
-                           buffer));
+    status = hipsparse::rocSPARSEStatusToHIPStatus(rocsparse_scsr2csc((rocsparse_handle)handle,
+                                                                      m,
+                                                                      n,
+                                                                      nnz,
+                                                                      csrSortedVal,
+                                                                      csrSortedRowPtr,
+                                                                      csrSortedColInd,
+                                                                      cscSortedVal,
+                                                                      cscSortedRowInd,
+                                                                      cscSortedColPtr,
+                                                                      backend_copyValues,
+                                                                      backend_idxBase,
+                                                                      buffer));
 
     // Free buffer
     RETURN_IF_HIP_ERROR(hipFree(buffer));
@@ -108,17 +112,22 @@ hipsparseStatus_t hipsparseDcsr2csc(hipsparseHandle_t    handle,
                                     hipsparseAction_t    copyValues,
                                     hipsparseIndexBase_t idxBase)
 {
+    rocsparse_action_ backend_copyValues{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipActionToHCCAction(copyValues, &backend_copyValues));
+
+    rocsparse_index_base_ backend_idxBase{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipBaseToHCCBase(idxBase, &backend_idxBase));
+
     // Determine buffer size
     size_t buffer_size = 0;
-    RETURN_IF_ROCSPARSE_ERROR(
-        rocsparse_csr2csc_buffer_size((rocsparse_handle)handle,
-                                      m,
-                                      n,
-                                      nnz,
-                                      csrSortedRowPtr,
-                                      csrSortedColInd,
-                                      hipsparse::hipActionToHCCAction(copyValues),
-                                      &buffer_size));
+    RETURN_IF_ROCSPARSE_ERROR(rocsparse_csr2csc_buffer_size((rocsparse_handle)handle,
+                                                            m,
+                                                            n,
+                                                            nnz,
+                                                            csrSortedRowPtr,
+                                                            csrSortedColInd,
+                                                            backend_copyValues,
+                                                            &buffer_size));
 
     // Allocate buffer
     void* buffer = nullptr;
@@ -136,20 +145,19 @@ hipsparseStatus_t hipsparseDcsr2csc(hipsparseHandle_t    handle,
     }
 
     // Format conversion
-    status = hipsparse::rocSPARSEStatusToHIPStatus(
-        rocsparse_dcsr2csc((rocsparse_handle)handle,
-                           m,
-                           n,
-                           nnz,
-                           csrSortedVal,
-                           csrSortedRowPtr,
-                           csrSortedColInd,
-                           cscSortedVal,
-                           cscSortedRowInd,
-                           cscSortedColPtr,
-                           hipsparse::hipActionToHCCAction(copyValues),
-                           hipsparse::hipBaseToHCCBase(idxBase),
-                           buffer));
+    status = hipsparse::rocSPARSEStatusToHIPStatus(rocsparse_dcsr2csc((rocsparse_handle)handle,
+                                                                      m,
+                                                                      n,
+                                                                      nnz,
+                                                                      csrSortedVal,
+                                                                      csrSortedRowPtr,
+                                                                      csrSortedColInd,
+                                                                      cscSortedVal,
+                                                                      cscSortedRowInd,
+                                                                      cscSortedColPtr,
+                                                                      backend_copyValues,
+                                                                      backend_idxBase,
+                                                                      buffer));
 
     // Free buffer
     RETURN_IF_HIP_ERROR(hipFree(buffer));
@@ -173,17 +181,22 @@ hipsparseStatus_t hipsparseCcsr2csc(hipsparseHandle_t    handle,
                                     hipsparseAction_t    copyValues,
                                     hipsparseIndexBase_t idxBase)
 {
+    rocsparse_action_ backend_copyValues{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipActionToHCCAction(copyValues, &backend_copyValues));
+
+    rocsparse_index_base_ backend_idxBase{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipBaseToHCCBase(idxBase, &backend_idxBase));
+
     // Determine buffer size
     size_t buffer_size = 0;
-    RETURN_IF_ROCSPARSE_ERROR(
-        rocsparse_csr2csc_buffer_size((rocsparse_handle)handle,
-                                      m,
-                                      n,
-                                      nnz,
-                                      csrSortedRowPtr,
-                                      csrSortedColInd,
-                                      hipsparse::hipActionToHCCAction(copyValues),
-                                      &buffer_size));
+    RETURN_IF_ROCSPARSE_ERROR(rocsparse_csr2csc_buffer_size((rocsparse_handle)handle,
+                                                            m,
+                                                            n,
+                                                            nnz,
+                                                            csrSortedRowPtr,
+                                                            csrSortedColInd,
+                                                            backend_copyValues,
+                                                            &buffer_size));
 
     // Allocate buffer
     void* buffer = nullptr;
@@ -212,8 +225,8 @@ hipsparseStatus_t hipsparseCcsr2csc(hipsparseHandle_t    handle,
                            (rocsparse_float_complex*)cscSortedVal,
                            cscSortedRowInd,
                            cscSortedColPtr,
-                           hipsparse::hipActionToHCCAction(copyValues),
-                           hipsparse::hipBaseToHCCBase(idxBase),
+                           backend_copyValues,
+                           backend_idxBase,
                            buffer));
 
     // Free buffer
@@ -238,17 +251,22 @@ hipsparseStatus_t hipsparseZcsr2csc(hipsparseHandle_t       handle,
                                     hipsparseAction_t       copyValues,
                                     hipsparseIndexBase_t    idxBase)
 {
+    rocsparse_action_ backend_copyValues{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipActionToHCCAction(copyValues, &backend_copyValues));
+
+    rocsparse_index_base_ backend_idxBase{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipBaseToHCCBase(idxBase, &backend_idxBase));
+
     // Determine buffer size
     size_t buffer_size = 0;
-    RETURN_IF_ROCSPARSE_ERROR(
-        rocsparse_csr2csc_buffer_size((rocsparse_handle)handle,
-                                      m,
-                                      n,
-                                      nnz,
-                                      csrSortedRowPtr,
-                                      csrSortedColInd,
-                                      hipsparse::hipActionToHCCAction(copyValues),
-                                      &buffer_size));
+    RETURN_IF_ROCSPARSE_ERROR(rocsparse_csr2csc_buffer_size((rocsparse_handle)handle,
+                                                            m,
+                                                            n,
+                                                            nnz,
+                                                            csrSortedRowPtr,
+                                                            csrSortedColInd,
+                                                            backend_copyValues,
+                                                            &buffer_size));
 
     // Allocate buffer
     void* buffer = nullptr;
@@ -277,8 +295,8 @@ hipsparseStatus_t hipsparseZcsr2csc(hipsparseHandle_t       handle,
                            (rocsparse_double_complex*)cscSortedVal,
                            cscSortedRowInd,
                            cscSortedColPtr,
-                           hipsparse::hipActionToHCCAction(copyValues),
-                           hipsparse::hipBaseToHCCBase(idxBase),
+                           backend_copyValues,
+                           backend_idxBase,
                            buffer));
 
     // Free buffer
@@ -312,6 +330,14 @@ hipsparseStatus_t hipsparseCsr2cscEx2_bufferSize(hipsparseHandle_t     handle,
     rocsparse_datatype_ backend_data_type{};
     RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipDataTypeToHCCDataType(valType, &backend_data_type));
 
+    rocsparse_action_ backend_copyValues{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipActionToHCCAction(copyValues, &backend_copyValues));
+
+    rocsparse_index_base_ backend_idxBase{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipBaseToHCCBase(idxBase, &backend_idxBase));
+
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipCsr2CscAlgCheck(alg));
+
     switch(valType)
     {
     case HIP_R_32F:
@@ -325,24 +351,23 @@ hipsparseStatus_t hipsparseCsr2cscEx2_bufferSize(hipsparseHandle_t     handle,
                                           nnz,
                                           csrRowPtr,
                                           csrColInd,
-                                          hipsparse::hipActionToHCCAction(copyValues),
+                                          backend_copyValues,
                                           pBufferSizeInBytes));
     case HIP_R_8I:
     {
         // Build Source
         rocsparse_const_spmat_descr source;
-        RETURN_IF_ROCSPARSE_ERROR(
-            rocsparse_create_const_csr_descr(&source,
-                                             m,
-                                             n,
-                                             nnz,
-                                             csrRowPtr,
-                                             csrColInd,
-                                             (const int8_t*)csrVal,
-                                             rocsparse_indextype_i32,
-                                             rocsparse_indextype_i32,
-                                             hipsparse::hipBaseToHCCBase(idxBase),
-                                             rocsparse_datatype_i8_r));
+        RETURN_IF_ROCSPARSE_ERROR(rocsparse_create_const_csr_descr(&source,
+                                                                   m,
+                                                                   n,
+                                                                   nnz,
+                                                                   csrRowPtr,
+                                                                   csrColInd,
+                                                                   (const int8_t*)csrVal,
+                                                                   rocsparse_indextype_i32,
+                                                                   rocsparse_indextype_i32,
+                                                                   backend_idxBase,
+                                                                   rocsparse_datatype_i8_r));
 
         // Build target
         rocsparse_spmat_descr target;
@@ -355,7 +380,7 @@ hipsparseStatus_t hipsparseCsr2cscEx2_bufferSize(hipsparseHandle_t     handle,
                                                              (int8_t*)cscVal,
                                                              rocsparse_indextype_i32,
                                                              rocsparse_indextype_i32,
-                                                             hipsparse::hipBaseToHCCBase(idxBase),
+                                                             backend_idxBase,
                                                              rocsparse_datatype_i8_r));
 
         // Create descriptor
@@ -422,38 +447,44 @@ hipsparseStatus_t hipsparseCsr2cscEx2(hipsparseHandle_t     handle,
     rocsparse_datatype_ backend_data_type{};
     RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipDataTypeToHCCDataType(valType, &backend_data_type));
 
+    rocsparse_action_ backend_copyValues{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipActionToHCCAction(copyValues, &backend_copyValues));
+
+    rocsparse_index_base_ backend_idxBase{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipBaseToHCCBase(idxBase, &backend_idxBase));
+
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipCsr2CscAlgCheck(alg));
+
     switch(valType)
     {
     case HIP_R_32F:
-        return hipsparse::rocSPARSEStatusToHIPStatus(
-            rocsparse_scsr2csc((rocsparse_handle)handle,
-                               m,
-                               n,
-                               nnz,
-                               (const float*)csrVal,
-                               csrRowPtr,
-                               csrColInd,
-                               (float*)cscVal,
-                               cscRowInd,
-                               cscColPtr,
-                               hipsparse::hipActionToHCCAction(copyValues),
-                               hipsparse::hipBaseToHCCBase(idxBase),
-                               buffer));
+        return hipsparse::rocSPARSEStatusToHIPStatus(rocsparse_scsr2csc((rocsparse_handle)handle,
+                                                                        m,
+                                                                        n,
+                                                                        nnz,
+                                                                        (const float*)csrVal,
+                                                                        csrRowPtr,
+                                                                        csrColInd,
+                                                                        (float*)cscVal,
+                                                                        cscRowInd,
+                                                                        cscColPtr,
+                                                                        backend_copyValues,
+                                                                        backend_idxBase,
+                                                                        buffer));
     case HIP_R_64F:
-        return hipsparse::rocSPARSEStatusToHIPStatus(
-            rocsparse_dcsr2csc((rocsparse_handle)handle,
-                               m,
-                               n,
-                               nnz,
-                               (const double*)csrVal,
-                               csrRowPtr,
-                               csrColInd,
-                               (double*)cscVal,
-                               cscRowInd,
-                               cscColPtr,
-                               hipsparse::hipActionToHCCAction(copyValues),
-                               hipsparse::hipBaseToHCCBase(idxBase),
-                               buffer));
+        return hipsparse::rocSPARSEStatusToHIPStatus(rocsparse_dcsr2csc((rocsparse_handle)handle,
+                                                                        m,
+                                                                        n,
+                                                                        nnz,
+                                                                        (const double*)csrVal,
+                                                                        csrRowPtr,
+                                                                        csrColInd,
+                                                                        (double*)cscVal,
+                                                                        cscRowInd,
+                                                                        cscColPtr,
+                                                                        backend_copyValues,
+                                                                        backend_idxBase,
+                                                                        buffer));
     case HIP_C_32F:
         return hipsparse::rocSPARSEStatusToHIPStatus(
             rocsparse_ccsr2csc((rocsparse_handle)handle,
@@ -466,8 +497,8 @@ hipsparseStatus_t hipsparseCsr2cscEx2(hipsparseHandle_t     handle,
                                (rocsparse_float_complex*)cscVal,
                                cscRowInd,
                                cscColPtr,
-                               hipsparse::hipActionToHCCAction(copyValues),
-                               hipsparse::hipBaseToHCCBase(idxBase),
+                               backend_copyValues,
+                               backend_idxBase,
                                buffer));
     case HIP_C_64F:
         return hipsparse::rocSPARSEStatusToHIPStatus(
@@ -481,25 +512,24 @@ hipsparseStatus_t hipsparseCsr2cscEx2(hipsparseHandle_t     handle,
                                (rocsparse_double_complex*)cscVal,
                                cscRowInd,
                                cscColPtr,
-                               hipsparse::hipActionToHCCAction(copyValues),
-                               hipsparse::hipBaseToHCCBase(idxBase),
+                               backend_copyValues,
+                               backend_idxBase,
                                buffer));
     case HIP_R_8I:
     {
         // Build Source
         rocsparse_const_spmat_descr source;
-        RETURN_IF_ROCSPARSE_ERROR(
-            rocsparse_create_const_csr_descr(&source,
-                                             m,
-                                             n,
-                                             nnz,
-                                             csrRowPtr,
-                                             csrColInd,
-                                             (const int8_t*)csrVal,
-                                             rocsparse_indextype_i32,
-                                             rocsparse_indextype_i32,
-                                             hipsparse::hipBaseToHCCBase(idxBase),
-                                             rocsparse_datatype_i8_r));
+        RETURN_IF_ROCSPARSE_ERROR(rocsparse_create_const_csr_descr(&source,
+                                                                   m,
+                                                                   n,
+                                                                   nnz,
+                                                                   csrRowPtr,
+                                                                   csrColInd,
+                                                                   (const int8_t*)csrVal,
+                                                                   rocsparse_indextype_i32,
+                                                                   rocsparse_indextype_i32,
+                                                                   backend_idxBase,
+                                                                   rocsparse_datatype_i8_r));
 
         // Build target
         rocsparse_spmat_descr target;
@@ -512,7 +542,7 @@ hipsparseStatus_t hipsparseCsr2cscEx2(hipsparseHandle_t     handle,
                                                              (int8_t*)cscVal,
                                                              rocsparse_indextype_i32,
                                                              rocsparse_indextype_i32,
-                                                             hipsparse::hipBaseToHCCBase(idxBase),
+                                                             backend_idxBase,
                                                              rocsparse_datatype_i8_r));
 
         // Create descriptor

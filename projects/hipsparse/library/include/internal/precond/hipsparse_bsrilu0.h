@@ -289,7 +289,8 @@ hipsparseStatus_t hipsparseZbsrilu02_numericBoost(hipsparseHandle_t handle,
  *  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
  *  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p mb, \p nnzb, \p blockDim, \p descrA,
  *              \p bsrSortedValA, \p bsrSortedRowPtrA, \p bsrSortedColIndA, \p info, or
- *              \p pBufferSizeInBytes pointer is invalid.
+ *              \p pBufferSizeInBytes pointer is invalid, or \p dirA is not a valid value of its
+ *              enumeration type.
  *  \retval     HIPSPARSE_STATUS_INTERNAL_ERROR an internal error occurred.
  *  \retval     HIPSPARSE_STATUS_NOT_SUPPORTED
  *              \ref hipsparseMatrixType_t != \ref HIPSPARSE_MATRIX_TYPE_GENERAL.
@@ -348,7 +349,8 @@ hipsparseStatus_t hipsparseSbsrilu02_bufferSize(hipsparseHandle_t         handle
  *  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
  *  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p mb, \p nnzb, \p blockDim, \p descrA,
  *              \p bsrSortedValA, \p bsrSortedRowPtrA, \p bsrSortedColIndA, \p info, or
- *              \p pBufferSizeInBytes pointer is invalid.
+ *              \p pBufferSizeInBytes pointer is invalid, or \p dirA is not a valid value of its
+ *              enumeration type.
  *  \retval     HIPSPARSE_STATUS_INTERNAL_ERROR an internal error occurred.
  *  \retval     HIPSPARSE_STATUS_NOT_SUPPORTED
  *              \ref hipsparseMatrixType_t != \ref HIPSPARSE_MATRIX_TYPE_GENERAL.
@@ -406,7 +408,8 @@ hipsparseStatus_t hipsparseDbsrilu02_bufferSize(hipsparseHandle_t         handle
  *  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
  *  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p mb, \p nnzb, \p blockDim, \p descrA,
  *              \p bsrSortedValA, \p bsrSortedRowPtrA, \p bsrSortedColIndA, \p info, or
- *              \p pBufferSizeInBytes pointer is invalid.
+ *              \p pBufferSizeInBytes pointer is invalid, or \p dirA is not a valid value of its
+ *              enumeration type.
  *  \retval     HIPSPARSE_STATUS_INTERNAL_ERROR an internal error occurred.
  *  \retval     HIPSPARSE_STATUS_NOT_SUPPORTED
  *              \ref hipsparseMatrixType_t != \ref HIPSPARSE_MATRIX_TYPE_GENERAL.
@@ -464,7 +467,8 @@ hipsparseStatus_t hipsparseCbsrilu02_bufferSize(hipsparseHandle_t         handle
  *  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
  *  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p mb, \p nnzb, \p blockDim, \p descrA,
  *              \p bsrSortedValA, \p bsrSortedRowPtrA, \p bsrSortedColIndA, \p info, or
- *              \p pBufferSizeInBytes pointer is invalid.
+ *              \p pBufferSizeInBytes pointer is invalid, or \p dirA is not a valid value of its
+ *              enumeration type.
  *  \retval     HIPSPARSE_STATUS_INTERNAL_ERROR an internal error occurred.
  *  \retval     HIPSPARSE_STATUS_NOT_SUPPORTED
  *              \ref hipsparseMatrixType_t != \ref HIPSPARSE_MATRIX_TYPE_GENERAL.
@@ -529,7 +533,7 @@ hipsparseStatus_t hipsparseZbsrilu02_bufferSize(hipsparseHandle_t         handle
  *  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
  *  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p mb, \p nnzb, \p blockDim, \p descrA,
  *              \p bsrSortedValA, \p bsrSortedRowPtrA, \p bsrSortedColIndA, \p info, or \p pBuffer pointer
- *              is invalid.
+ *              is invalid, or \p dirA or \p policy is not a valid value of its enumeration type.
  *  \retval     HIPSPARSE_STATUS_INTERNAL_ERROR an internal error occurred.
  *  \retval     HIPSPARSE_STATUS_NOT_SUPPORTED
  *              \ref hipsparseMatrixType_t != \ref HIPSPARSE_MATRIX_TYPE_GENERAL.
@@ -592,7 +596,7 @@ hipsparseStatus_t hipsparseSbsrilu02_analysis(hipsparseHandle_t         handle,
  *  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
  *  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p mb, \p nnzb, \p blockDim, \p descrA,
  *              \p bsrSortedValA, \p bsrSortedRowPtrA, \p bsrSortedColIndA, \p info, or \p pBuffer pointer
- *              is invalid.
+ *              is invalid, or \p dirA or \p policy is not a valid value of its enumeration type.
  *  \retval     HIPSPARSE_STATUS_INTERNAL_ERROR an internal error occurred.
  *  \retval     HIPSPARSE_STATUS_NOT_SUPPORTED
  *              \ref hipsparseMatrixType_t != \ref HIPSPARSE_MATRIX_TYPE_GENERAL.
@@ -654,7 +658,7 @@ hipsparseStatus_t hipsparseDbsrilu02_analysis(hipsparseHandle_t         handle,
  *  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
  *  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p mb, \p nnzb, \p blockDim, \p descrA,
  *              \p bsrSortedValA, \p bsrSortedRowPtrA, \p bsrSortedColIndA, \p info, or \p pBuffer pointer
- *              is invalid.
+ *              is invalid, or \p dirA or \p policy is not a valid value of its enumeration type.
  *  \retval     HIPSPARSE_STATUS_INTERNAL_ERROR an internal error occurred.
  *  \retval     HIPSPARSE_STATUS_NOT_SUPPORTED
  *              \ref hipsparseMatrixType_t != \ref HIPSPARSE_MATRIX_TYPE_GENERAL.
@@ -716,7 +720,7 @@ hipsparseStatus_t hipsparseCbsrilu02_analysis(hipsparseHandle_t         handle,
  *  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
  *  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p mb, \p nnzb, \p blockDim, \p descrA,
  *              \p bsrSortedValA, \p bsrSortedRowPtrA, \p bsrSortedColIndA, \p info, or \p pBuffer pointer
- *              is invalid.
+ *              is invalid, or \p dirA or \p policy is not a valid value of its enumeration type.
  *  \retval     HIPSPARSE_STATUS_INTERNAL_ERROR an internal error occurred.
  *  \retval     HIPSPARSE_STATUS_NOT_SUPPORTED
  *              \ref hipsparseMatrixType_t != \ref HIPSPARSE_MATRIX_TYPE_GENERAL.
@@ -797,7 +801,8 @@ hipsparseStatus_t hipsparseZbsrilu02_analysis(hipsparseHandle_t         handle,
  *
  *  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
  *  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p mb, \p nnzb, \p blockDim, \p descrA,
- *              \p bsrSortedValA_valM, \p bsrSortedRowPtrA, or \p bsrSortedColIndA pointer is invalid.
+ *              \p bsrSortedValA_valM, \p bsrSortedRowPtrA, or \p bsrSortedColIndA pointer is
+ *              invalid, or \p dirA or \p policy is not a valid value of its enumeration type.
  *  \retval     HIPSPARSE_STATUS_ARCH_MISMATCH the device is not supported.
  *  \retval     HIPSPARSE_STATUS_INTERNAL_ERROR an internal error occurred.
  *  \retval     HIPSPARSE_STATUS_NOT_SUPPORTED
@@ -878,7 +883,8 @@ hipsparseStatus_t hipsparseSbsrilu02(hipsparseHandle_t         handle,
  *
  *  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
  *  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p mb, \p nnzb, \p blockDim, \p descrA,
- *              \p bsrSortedValA_valM, \p bsrSortedRowPtrA, or \p bsrSortedColIndA pointer is invalid.
+ *              \p bsrSortedValA_valM, \p bsrSortedRowPtrA, or \p bsrSortedColIndA pointer is
+ *              invalid, or \p dirA or \p policy is not a valid value of its enumeration type.
  *  \retval     HIPSPARSE_STATUS_ARCH_MISMATCH the device is not supported.
  *  \retval     HIPSPARSE_STATUS_INTERNAL_ERROR an internal error occurred.
  *  \retval     HIPSPARSE_STATUS_NOT_SUPPORTED
@@ -958,7 +964,8 @@ hipsparseStatus_t hipsparseDbsrilu02(hipsparseHandle_t         handle,
  *
  *  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
  *  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p mb, \p nnzb, \p blockDim, \p descrA,
- *              \p bsrSortedValA_valM, \p bsrSortedRowPtrA, or \p bsrSortedColIndA pointer is invalid.
+ *              \p bsrSortedValA_valM, \p bsrSortedRowPtrA, or \p bsrSortedColIndA pointer is
+ *              invalid, or \p dirA or \p policy is not a valid value of its enumeration type.
  *  \retval     HIPSPARSE_STATUS_ARCH_MISMATCH the device is not supported.
  *  \retval     HIPSPARSE_STATUS_INTERNAL_ERROR an internal error occurred.
  *  \retval     HIPSPARSE_STATUS_NOT_SUPPORTED
@@ -1038,7 +1045,8 @@ hipsparseStatus_t hipsparseCbsrilu02(hipsparseHandle_t         handle,
  *
  *  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
  *  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p mb, \p nnzb, \p blockDim, \p descrA,
- *              \p bsrSortedValA_valM, \p bsrSortedRowPtrA, or \p bsrSortedColIndA pointer is invalid.
+ *              \p bsrSortedValA_valM, \p bsrSortedRowPtrA, or \p bsrSortedColIndA pointer is
+ *              invalid, or \p dirA or \p policy is not a valid value of its enumeration type.
  *  \retval     HIPSPARSE_STATUS_ARCH_MISMATCH the device is not supported.
  *  \retval     HIPSPARSE_STATUS_INTERNAL_ERROR an internal error occurred.
  *  \retval     HIPSPARSE_STATUS_NOT_SUPPORTED

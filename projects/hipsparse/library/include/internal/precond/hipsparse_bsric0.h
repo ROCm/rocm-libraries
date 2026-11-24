@@ -113,7 +113,7 @@ hipsparseStatus_t
  *  \retval HIPSPARSE_STATUS_NOT_INITIALIZED \p handle is not initialized.
  *  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p descrA, \p bsrValA, \p bsrRowPtrA,
  *          \p bsrColIndA, \p info, or \p pBufferSizeInBytes is nullptr, \p mb, or \p nnzb is negative,
- *          or \p blockDim is invalid.
+ *          or \p blockDim is invalid, or \p dirA is not a valid value of its enumeration type.
  *  \retval HIPSPARSE_STATUS_INTERNAL_ERROR an internal error occurred.
  *  \retval HIPSPARSE_STATUS_NOT_SUPPORTED \ref hipsparseMatrixType_t != \ref HIPSPARSE_MATRIX_TYPE_GENERAL.
  */
@@ -172,7 +172,7 @@ hipsparseStatus_t hipsparseSbsric02_bufferSize(hipsparseHandle_t         handle,
  *  \retval HIPSPARSE_STATUS_NOT_INITIALIZED \p handle is not initialized.
  *  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p descrA, \p bsrValA, \p bsrRowPtrA,
  *          \p bsrColIndA, \p info, or \p pBufferSizeInBytes is nullptr, \p mb, or \p nnzb is negative,
- *          or \p blockDim is invalid.
+ *          or \p blockDim is invalid, or \p dirA is not a valid value of its enumeration type.
  *  \retval HIPSPARSE_STATUS_INTERNAL_ERROR an internal error occurred.
  *  \retval HIPSPARSE_STATUS_NOT_SUPPORTED \ref hipsparseMatrixType_t != \ref HIPSPARSE_MATRIX_TYPE_GENERAL.
  */
@@ -230,7 +230,7 @@ hipsparseStatus_t hipsparseDbsric02_bufferSize(hipsparseHandle_t         handle,
  *  \retval HIPSPARSE_STATUS_NOT_INITIALIZED \p handle is not initialized.
  *  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p descrA, \p bsrValA, \p bsrRowPtrA,
  *          \p bsrColIndA, \p info, or \p pBufferSizeInBytes is nullptr, \p mb, or \p nnzb is negative,
- *          or \p blockDim is invalid.
+ *          or \p blockDim is invalid, or \p dirA is not a valid value of its enumeration type.
  *  \retval HIPSPARSE_STATUS_INTERNAL_ERROR an internal error occurred.
  *  \retval HIPSPARSE_STATUS_NOT_SUPPORTED \ref hipsparseMatrixType_t != \ref HIPSPARSE_MATRIX_TYPE_GENERAL.
  */
@@ -288,7 +288,7 @@ hipsparseStatus_t hipsparseCbsric02_bufferSize(hipsparseHandle_t         handle,
  *  \retval HIPSPARSE_STATUS_NOT_INITIALIZED \p handle is not initialized.
  *  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p descrA, \p bsrValA, \p bsrRowPtrA,
  *          \p bsrColIndA, \p info, or \p pBufferSizeInBytes is nullptr, \p mb, or \p nnzb is negative,
- *          or \p blockDim is invalid.
+ *          or \p blockDim is invalid, or \p dirA is not a valid value of its enumeration type.
  *  \retval HIPSPARSE_STATUS_INTERNAL_ERROR an internal error occurred.
  *  \retval HIPSPARSE_STATUS_NOT_SUPPORTED \ref hipsparseMatrixType_t != \ref HIPSPARSE_MATRIX_TYPE_GENERAL.
  */
@@ -351,7 +351,8 @@ hipsparseStatus_t hipsparseZbsric02_bufferSize(hipsparseHandle_t         handle,
  *
  *  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
  *  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p mb, \p nnzb, \p blockDim, \p descrA,
- *              \p bsrValA, \p bsrRowPtrA, \p bsrColIndA, \p info, or \p pBuffer pointer is invalid.
+ *              \p bsrValA, \p bsrRowPtrA, \p bsrColIndA, \p info, or \p pBuffer pointer is invalid,
+ *              or \p dirA or \p policy is not a valid value of its enumeration type.
  *  \retval     HIPSPARSE_STATUS_INTERNAL_ERROR an internal error occurred.
  *  \retval     HIPSPARSE_STATUS_NOT_SUPPORTED
  *              \ref hipsparseMatrixType_t != \ref HIPSPARSE_MATRIX_TYPE_GENERAL.
@@ -413,7 +414,8 @@ hipsparseStatus_t hipsparseSbsric02_analysis(hipsparseHandle_t         handle,
  *
  *  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
  *  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p mb, \p nnzb, \p blockDim, \p descrA,
- *              \p bsrValA, \p bsrRowPtrA, \p bsrColIndA, \p info, or \p pBuffer pointer is invalid.
+ *              \p bsrValA, \p bsrRowPtrA, \p bsrColIndA, \p info, or \p pBuffer pointer is invalid,
+ *              or \p dirA or \p policy is not a valid value of its enumeration type.
  *  \retval     HIPSPARSE_STATUS_INTERNAL_ERROR an internal error occurred.
  *  \retval     HIPSPARSE_STATUS_NOT_SUPPORTED
  *              \ref hipsparseMatrixType_t != \ref HIPSPARSE_MATRIX_TYPE_GENERAL.
@@ -474,7 +476,8 @@ hipsparseStatus_t hipsparseDbsric02_analysis(hipsparseHandle_t         handle,
  *
  *  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
  *  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p mb, \p nnzb, \p blockDim, \p descrA,
- *              \p bsrValA, \p bsrRowPtrA, \p bsrColIndA, \p info, or \p pBuffer pointer is invalid.
+ *              \p bsrValA, \p bsrRowPtrA, \p bsrColIndA, \p info, or \p pBuffer pointer is invalid,
+ *              or \p dirA or \p policy is not a valid value of its enumeration type.
  *  \retval     HIPSPARSE_STATUS_INTERNAL_ERROR an internal error occurred.
  *  \retval     HIPSPARSE_STATUS_NOT_SUPPORTED
  *              \ref hipsparseMatrixType_t != \ref HIPSPARSE_MATRIX_TYPE_GENERAL.
@@ -535,7 +538,8 @@ hipsparseStatus_t hipsparseCbsric02_analysis(hipsparseHandle_t         handle,
  *
  *  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
  *  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p mb, \p nnzb, \p blockDim, \p descrA,
- *              \p bsrValA, \p bsrRowPtrA, \p bsrColIndA, \p info, or \p pBuffer pointer is invalid.
+ *              \p bsrValA, \p bsrRowPtrA, \p bsrColIndA, \p info, or \p pBuffer pointer is invalid,
+ *              or \p dirA or \p policy is not a valid value of its enumeration type.
  *  \retval     HIPSPARSE_STATUS_INTERNAL_ERROR an internal error occurred.
  *  \retval     HIPSPARSE_STATUS_NOT_SUPPORTED
  *              \ref hipsparseMatrixType_t != \ref HIPSPARSE_MATRIX_TYPE_GENERAL.
@@ -626,7 +630,8 @@ hipsparseStatus_t hipsparseZbsric02_analysis(hipsparseHandle_t         handle,
  *
  *  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
  *  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p mb, \p nnzb, \p blockDim, \p descrA,
- *              \p bsrValA, \p bsrRowPtrA, or \p bsrColIndA pointer is invalid.
+ *              \p bsrValA, \p bsrRowPtrA, or \p bsrColIndA pointer is invalid, or \p dirA or
+ *              \p policy is not a valid value of its enumeration type.
  *  \retval     HIPSPARSE_STATUS_ARCH_MISMATCH the device is not supported.
  *  \retval     HIPSPARSE_STATUS_INTERNAL_ERROR an internal error occurred.
  *  \retval     HIPSPARSE_STATUS_NOT_SUPPORTED
@@ -715,7 +720,8 @@ hipsparseStatus_t hipsparseSbsric02(hipsparseHandle_t         handle,
  *
  *  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
  *  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p mb, \p nnzb, \p blockDim, \p descrA,
- *              \p bsrValA, \p bsrRowPtrA, or \p bsrColIndA pointer is invalid.
+ *              \p bsrValA, \p bsrRowPtrA, or \p bsrColIndA pointer is invalid, or \p dirA or
+ *              \p policy is not a valid value of its enumeration type.
  *  \retval     HIPSPARSE_STATUS_ARCH_MISMATCH the device is not supported.
  *  \retval     HIPSPARSE_STATUS_INTERNAL_ERROR an internal error occurred.
  *  \retval     HIPSPARSE_STATUS_NOT_SUPPORTED
@@ -803,7 +809,8 @@ hipsparseStatus_t hipsparseDbsric02(hipsparseHandle_t         handle,
  *
  *  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
  *  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p mb, \p nnzb, \p blockDim, \p descrA,
- *              \p bsrValA, \p bsrRowPtrA, or \p bsrColIndA pointer is invalid.
+ *              \p bsrValA, \p bsrRowPtrA, or \p bsrColIndA pointer is invalid, or \p dirA or
+ *              \p policy is not a valid value of its enumeration type.
  *  \retval     HIPSPARSE_STATUS_ARCH_MISMATCH the device is not supported.
  *  \retval     HIPSPARSE_STATUS_INTERNAL_ERROR an internal error occurred.
  *  \retval     HIPSPARSE_STATUS_NOT_SUPPORTED
@@ -891,7 +898,8 @@ hipsparseStatus_t hipsparseCbsric02(hipsparseHandle_t         handle,
  *
  *  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
  *  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p mb, \p nnzb, \p blockDim, \p descrA,
- *              \p bsrValA, \p bsrRowPtrA, or \p bsrColIndA pointer is invalid.
+ *              \p bsrValA, \p bsrRowPtrA, or \p bsrColIndA pointer is invalid, or \p dirA or
+ *              \p policy is not a valid value of its enumeration type.
  *  \retval     HIPSPARSE_STATUS_ARCH_MISMATCH the device is not supported.
  *  \retval     HIPSPARSE_STATUS_INTERNAL_ERROR an internal error occurred.
  *  \retval     HIPSPARSE_STATUS_NOT_SUPPORTED

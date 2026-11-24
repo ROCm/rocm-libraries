@@ -149,8 +149,11 @@ hipsparseStatus_t hipsparseGetStream(hipsparseHandle_t handle, hipStream_t* stre
 
 hipsparseStatus_t hipsparseSetPointerMode(hipsparseHandle_t handle, hipsparsePointerMode_t mode)
 {
-    return hipsparse::hipCUSPARSEStatusToHIPStatus(cusparseSetPointerMode(
-        (cusparseHandle_t)handle, hipsparse::hipPointerModeToCudaPointerMode(mode)));
+    cusparsePointerMode_t backend_mode{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipPointerModeToCudaPointerMode(mode, &backend_mode));
+
+    return hipsparse::hipCUSPARSEStatusToHIPStatus(
+        cusparseSetPointerMode((cusparseHandle_t)handle, backend_mode));
 }
 
 hipsparseStatus_t hipsparseGetPointerMode(hipsparseHandle_t handle, hipsparsePointerMode_t* mode)
@@ -180,19 +183,11 @@ hipsparseStatus_t hipsparseCopyMatDescr(hipsparseMatDescr_t dest, const hipspars
 
 hipsparseStatus_t hipsparseSetMatType(hipsparseMatDescr_t descrA, hipsparseMatrixType_t type)
 {
-    switch(type)
-    {
-    case HIPSPARSE_MATRIX_TYPE_GENERAL:
-    case HIPSPARSE_MATRIX_TYPE_SYMMETRIC:
-    case HIPSPARSE_MATRIX_TYPE_HERMITIAN:
-    case HIPSPARSE_MATRIX_TYPE_TRIANGULAR:
-        break;
-    default:
-        return HIPSPARSE_STATUS_INVALID_VALUE;
-    }
+    cusparseMatrixType_t backend_type{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipMatrixTypeToCudaMatrixType(type, &backend_type));
 
-    return hipsparse::hipCUSPARSEStatusToHIPStatus(cusparseSetMatType(
-        (cusparseMatDescr_t)descrA, hipsparse::hipMatrixTypeToCudaMatrixType(type)));
+    return hipsparse::hipCUSPARSEStatusToHIPStatus(
+        cusparseSetMatType((cusparseMatDescr_t)descrA, backend_type));
 }
 
 hipsparseMatrixType_t hipsparseGetMatType(const hipsparseMatDescr_t descrA)
@@ -203,17 +198,11 @@ hipsparseMatrixType_t hipsparseGetMatType(const hipsparseMatDescr_t descrA)
 
 hipsparseStatus_t hipsparseSetMatFillMode(hipsparseMatDescr_t descrA, hipsparseFillMode_t fillMode)
 {
-    switch(fillMode)
-    {
-    case HIPSPARSE_FILL_MODE_LOWER:
-    case HIPSPARSE_FILL_MODE_UPPER:
-        break;
-    default:
-        return HIPSPARSE_STATUS_INVALID_VALUE;
-    }
+    cusparseFillMode_t backend_fillMode{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipFillToCudaFill(fillMode, &backend_fillMode));
 
     return hipsparse::hipCUSPARSEStatusToHIPStatus(
-        cusparseSetMatFillMode((cusparseMatDescr_t)descrA, hipsparse::hipFillToCudaFill(fillMode)));
+        cusparseSetMatFillMode((cusparseMatDescr_t)descrA, backend_fillMode));
 }
 
 hipsparseFillMode_t hipsparseGetMatFillMode(const hipsparseMatDescr_t descrA)
@@ -223,17 +212,11 @@ hipsparseFillMode_t hipsparseGetMatFillMode(const hipsparseMatDescr_t descrA)
 
 hipsparseStatus_t hipsparseSetMatDiagType(hipsparseMatDescr_t descrA, hipsparseDiagType_t diagType)
 {
-    switch(diagType)
-    {
-    case HIPSPARSE_DIAG_TYPE_UNIT:
-    case HIPSPARSE_DIAG_TYPE_NON_UNIT:
-        break;
-    default:
-        return HIPSPARSE_STATUS_INVALID_VALUE;
-    }
+    cusparseDiagType_t backend_diagType{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipDiagonalToCudaDiagonal(diagType, &backend_diagType));
 
-    return hipsparse::hipCUSPARSEStatusToHIPStatus(cusparseSetMatDiagType(
-        (cusparseMatDescr_t)descrA, hipsparse::hipDiagonalToCudaDiagonal(diagType)));
+    return hipsparse::hipCUSPARSEStatusToHIPStatus(
+        cusparseSetMatDiagType((cusparseMatDescr_t)descrA, backend_diagType));
 }
 
 hipsparseDiagType_t hipsparseGetMatDiagType(const hipsparseMatDescr_t descrA)
@@ -244,17 +227,11 @@ hipsparseDiagType_t hipsparseGetMatDiagType(const hipsparseMatDescr_t descrA)
 
 hipsparseStatus_t hipsparseSetMatIndexBase(hipsparseMatDescr_t descrA, hipsparseIndexBase_t base)
 {
-    switch(base)
-    {
-    case HIPSPARSE_INDEX_BASE_ZERO:
-    case HIPSPARSE_INDEX_BASE_ONE:
-        break;
-    default:
-        return HIPSPARSE_STATUS_INVALID_VALUE;
-    }
+    cusparseIndexBase_t backend_base{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipIndexBaseToCudaIndexBase(base, &backend_base));
 
-    return hipsparse::hipCUSPARSEStatusToHIPStatus(cusparseSetMatIndexBase(
-        (cusparseMatDescr_t)descrA, hipsparse::hipIndexBaseToCudaIndexBase(base)));
+    return hipsparse::hipCUSPARSEStatusToHIPStatus(
+        cusparseSetMatIndexBase((cusparseMatDescr_t)descrA, backend_base));
 }
 
 hipsparseIndexBase_t hipsparseGetMatIndexBase(const hipsparseMatDescr_t descrA)

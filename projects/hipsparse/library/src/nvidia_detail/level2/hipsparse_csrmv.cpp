@@ -43,20 +43,22 @@ hipsparseStatus_t hipsparseScsrmv(hipsparseHandle_t         handle,
                                   const float*              beta,
                                   float*                    y)
 {
-    return hipsparse::hipCUSPARSEStatusToHIPStatus(
-        cusparseScsrmv((cusparseHandle_t)handle,
-                       hipsparse::hipOperationToCudaOperation(transA),
-                       m,
-                       n,
-                       nnz,
-                       alpha,
-                       (const cusparseMatDescr_t)descrA,
-                       csrSortedValA,
-                       csrSortedRowPtrA,
-                       csrSortedColIndA,
-                       x,
-                       beta,
-                       y));
+    cusparseOperation_t backend_transA{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipOperationToCudaOperation(transA, &backend_transA));
+
+    return hipsparse::hipCUSPARSEStatusToHIPStatus(cusparseScsrmv((cusparseHandle_t)handle,
+                                                                  backend_transA,
+                                                                  m,
+                                                                  n,
+                                                                  nnz,
+                                                                  alpha,
+                                                                  (const cusparseMatDescr_t)descrA,
+                                                                  csrSortedValA,
+                                                                  csrSortedRowPtrA,
+                                                                  csrSortedColIndA,
+                                                                  x,
+                                                                  beta,
+                                                                  y));
 }
 
 hipsparseStatus_t hipsparseDcsrmv(hipsparseHandle_t         handle,
@@ -73,20 +75,22 @@ hipsparseStatus_t hipsparseDcsrmv(hipsparseHandle_t         handle,
                                   const double*             beta,
                                   double*                   y)
 {
-    return hipsparse::hipCUSPARSEStatusToHIPStatus(
-        cusparseDcsrmv((cusparseHandle_t)handle,
-                       hipsparse::hipOperationToCudaOperation(transA),
-                       m,
-                       n,
-                       nnz,
-                       alpha,
-                       (const cusparseMatDescr_t)descrA,
-                       csrSortedValA,
-                       csrSortedRowPtrA,
-                       csrSortedColIndA,
-                       x,
-                       beta,
-                       y));
+    cusparseOperation_t backend_transA{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipOperationToCudaOperation(transA, &backend_transA));
+
+    return hipsparse::hipCUSPARSEStatusToHIPStatus(cusparseDcsrmv((cusparseHandle_t)handle,
+                                                                  backend_transA,
+                                                                  m,
+                                                                  n,
+                                                                  nnz,
+                                                                  alpha,
+                                                                  (const cusparseMatDescr_t)descrA,
+                                                                  csrSortedValA,
+                                                                  csrSortedRowPtrA,
+                                                                  csrSortedColIndA,
+                                                                  x,
+                                                                  beta,
+                                                                  y));
 }
 
 hipsparseStatus_t hipsparseCcsrmv(hipsparseHandle_t         handle,
@@ -103,20 +107,22 @@ hipsparseStatus_t hipsparseCcsrmv(hipsparseHandle_t         handle,
                                   const hipComplex*         beta,
                                   hipComplex*               y)
 {
-    return hipsparse::hipCUSPARSEStatusToHIPStatus(
-        cusparseCcsrmv((cusparseHandle_t)handle,
-                       hipsparse::hipOperationToCudaOperation(transA),
-                       m,
-                       n,
-                       nnz,
-                       (const cuComplex*)alpha,
-                       (const cusparseMatDescr_t)descrA,
-                       (const cuComplex*)csrSortedValA,
-                       csrSortedRowPtrA,
-                       csrSortedColIndA,
-                       (const cuComplex*)x,
-                       (const cuComplex*)beta,
-                       (cuComplex*)y));
+    cusparseOperation_t backend_transA{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipOperationToCudaOperation(transA, &backend_transA));
+
+    return hipsparse::hipCUSPARSEStatusToHIPStatus(cusparseCcsrmv((cusparseHandle_t)handle,
+                                                                  backend_transA,
+                                                                  m,
+                                                                  n,
+                                                                  nnz,
+                                                                  (const cuComplex*)alpha,
+                                                                  (const cusparseMatDescr_t)descrA,
+                                                                  (const cuComplex*)csrSortedValA,
+                                                                  csrSortedRowPtrA,
+                                                                  csrSortedColIndA,
+                                                                  (const cuComplex*)x,
+                                                                  (const cuComplex*)beta,
+                                                                  (cuComplex*)y));
 }
 
 hipsparseStatus_t hipsparseZcsrmv(hipsparseHandle_t         handle,
@@ -133,9 +139,12 @@ hipsparseStatus_t hipsparseZcsrmv(hipsparseHandle_t         handle,
                                   const hipDoubleComplex*   beta,
                                   hipDoubleComplex*         y)
 {
+    cusparseOperation_t backend_transA{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipOperationToCudaOperation(transA, &backend_transA));
+
     return hipsparse::hipCUSPARSEStatusToHIPStatus(
         cusparseZcsrmv((cusparseHandle_t)handle,
-                       hipsparse::hipOperationToCudaOperation(transA),
+                       backend_transA,
                        m,
                        n,
                        nnz,

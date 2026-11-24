@@ -48,6 +48,12 @@ hipsparseStatus_t hipsparseXcsrgemmNnz(hipsparseHandle_t         handle,
                                        int*                      csrRowPtrC,
                                        int*                      nnzTotalDevHostPtr)
 {
+    rocsparse_operation_ backend_transA{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipOperationToHCCOperation(transA, &backend_transA));
+
+    rocsparse_operation_ backend_transB{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipOperationToHCCOperation(transB, &backend_transB));
+
     // Create matrix info
     rocsparse_mat_info info;
     RETURN_IF_ROCSPARSE_ERROR(rocsparse_create_mat_info(&info));
@@ -89,8 +95,8 @@ hipsparseStatus_t hipsparseXcsrgemmNnz(hipsparseHandle_t         handle,
     // Obtain temporary buffer size
     status = hipsparse::rocSPARSEStatusToHIPStatus(
         rocsparse_zcsrgemm_buffer_size((rocsparse_handle)handle,
-                                       hipsparse::hipOperationToHCCOperation(transA),
-                                       hipsparse::hipOperationToHCCOperation(transB),
+                                       backend_transA,
+                                       backend_transB,
                                        m,
                                        n,
                                        k,
@@ -130,30 +136,30 @@ hipsparseStatus_t hipsparseXcsrgemmNnz(hipsparseHandle_t         handle,
     RETURN_IF_HIP_ERROR(hipMalloc(&temp_buffer, buffer_size));
 
     // Determine nnz
-    status = hipsparse::rocSPARSEStatusToHIPStatus(
-        rocsparse_csrgemm_nnz((rocsparse_handle)handle,
-                              hipsparse::hipOperationToHCCOperation(transA),
-                              hipsparse::hipOperationToHCCOperation(transB),
-                              m,
-                              n,
-                              k,
-                              (rocsparse_mat_descr)descrA,
-                              nnzA,
-                              csrRowPtrA,
-                              csrColIndA,
-                              (rocsparse_mat_descr)descrB,
-                              nnzB,
-                              csrRowPtrB,
-                              csrColIndB,
-                              nullptr,
-                              0,
-                              nullptr,
-                              nullptr,
-                              (rocsparse_mat_descr)descrC,
-                              csrRowPtrC,
-                              nnzTotalDevHostPtr,
-                              info,
-                              temp_buffer));
+    status
+        = hipsparse::rocSPARSEStatusToHIPStatus(rocsparse_csrgemm_nnz((rocsparse_handle)handle,
+                                                                      backend_transA,
+                                                                      backend_transB,
+                                                                      m,
+                                                                      n,
+                                                                      k,
+                                                                      (rocsparse_mat_descr)descrA,
+                                                                      nnzA,
+                                                                      csrRowPtrA,
+                                                                      csrColIndA,
+                                                                      (rocsparse_mat_descr)descrB,
+                                                                      nnzB,
+                                                                      csrRowPtrB,
+                                                                      csrColIndB,
+                                                                      nullptr,
+                                                                      0,
+                                                                      nullptr,
+                                                                      nullptr,
+                                                                      (rocsparse_mat_descr)descrC,
+                                                                      csrRowPtrC,
+                                                                      nnzTotalDevHostPtr,
+                                                                      info,
+                                                                      temp_buffer));
 
     if(pointer_mode == rocsparse_pointer_mode_host)
     {
@@ -199,6 +205,12 @@ hipsparseStatus_t hipsparseScsrgemm(hipsparseHandle_t         handle,
                                     const int*                csrRowPtrC,
                                     int*                      csrColIndC)
 {
+    rocsparse_operation_ backend_transA{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipOperationToHCCOperation(transA, &backend_transA));
+
+    rocsparse_operation_ backend_transB{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipOperationToHCCOperation(transB, &backend_transB));
+
     // Create matrix info
     rocsparse_mat_info info;
     RETURN_IF_ROCSPARSE_ERROR(rocsparse_create_mat_info(&info));
@@ -239,8 +251,8 @@ hipsparseStatus_t hipsparseScsrgemm(hipsparseHandle_t         handle,
     // Obtain temporary buffer size
     status = hipsparse::rocSPARSEStatusToHIPStatus(
         rocsparse_scsrgemm_buffer_size((rocsparse_handle)handle,
-                                       hipsparse::hipOperationToHCCOperation(transA),
-                                       hipsparse::hipOperationToHCCOperation(transB),
+                                       backend_transA,
+                                       backend_transB,
                                        m,
                                        n,
                                        k,
@@ -280,36 +292,35 @@ hipsparseStatus_t hipsparseScsrgemm(hipsparseHandle_t         handle,
     RETURN_IF_HIP_ERROR(hipMalloc(&temp_buffer, buffer_size));
 
     // Perform csrgemm computation
-    status = hipsparse::rocSPARSEStatusToHIPStatus(
-        rocsparse_scsrgemm((rocsparse_handle)handle,
-                           hipsparse::hipOperationToHCCOperation(transA),
-                           hipsparse::hipOperationToHCCOperation(transB),
-                           m,
-                           n,
-                           k,
-                           alpha,
-                           (rocsparse_mat_descr)descrA,
-                           nnzA,
-                           csrValA,
-                           csrRowPtrA,
-                           csrColIndA,
-                           (rocsparse_mat_descr)descrB,
-                           nnzB,
-                           csrValB,
-                           csrRowPtrB,
-                           csrColIndB,
-                           nullptr,
-                           nullptr,
-                           0,
-                           nullptr,
-                           nullptr,
-                           nullptr,
-                           (rocsparse_mat_descr)descrC,
-                           csrValC,
-                           csrRowPtrC,
-                           csrColIndC,
-                           info,
-                           temp_buffer));
+    status = hipsparse::rocSPARSEStatusToHIPStatus(rocsparse_scsrgemm((rocsparse_handle)handle,
+                                                                      backend_transA,
+                                                                      backend_transB,
+                                                                      m,
+                                                                      n,
+                                                                      k,
+                                                                      alpha,
+                                                                      (rocsparse_mat_descr)descrA,
+                                                                      nnzA,
+                                                                      csrValA,
+                                                                      csrRowPtrA,
+                                                                      csrColIndA,
+                                                                      (rocsparse_mat_descr)descrB,
+                                                                      nnzB,
+                                                                      csrValB,
+                                                                      csrRowPtrB,
+                                                                      csrColIndB,
+                                                                      nullptr,
+                                                                      nullptr,
+                                                                      0,
+                                                                      nullptr,
+                                                                      nullptr,
+                                                                      nullptr,
+                                                                      (rocsparse_mat_descr)descrC,
+                                                                      csrValC,
+                                                                      csrRowPtrC,
+                                                                      csrColIndC,
+                                                                      info,
+                                                                      temp_buffer));
 
     if(pointer_mode == rocsparse_pointer_mode_host)
     {
@@ -355,6 +366,12 @@ hipsparseStatus_t hipsparseDcsrgemm(hipsparseHandle_t         handle,
                                     const int*                csrRowPtrC,
                                     int*                      csrColIndC)
 {
+    rocsparse_operation_ backend_transA{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipOperationToHCCOperation(transA, &backend_transA));
+
+    rocsparse_operation_ backend_transB{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipOperationToHCCOperation(transB, &backend_transB));
+
     // Create matrix info
     rocsparse_mat_info info;
     RETURN_IF_ROCSPARSE_ERROR(rocsparse_create_mat_info(&info));
@@ -395,8 +412,8 @@ hipsparseStatus_t hipsparseDcsrgemm(hipsparseHandle_t         handle,
     // Obtain temporary buffer size
     status = hipsparse::rocSPARSEStatusToHIPStatus(
         rocsparse_dcsrgemm_buffer_size((rocsparse_handle)handle,
-                                       hipsparse::hipOperationToHCCOperation(transA),
-                                       hipsparse::hipOperationToHCCOperation(transB),
+                                       backend_transA,
+                                       backend_transB,
                                        m,
                                        n,
                                        k,
@@ -436,36 +453,35 @@ hipsparseStatus_t hipsparseDcsrgemm(hipsparseHandle_t         handle,
     RETURN_IF_HIP_ERROR(hipMalloc(&temp_buffer, buffer_size));
 
     // Perform csrgemm computation
-    status = hipsparse::rocSPARSEStatusToHIPStatus(
-        rocsparse_dcsrgemm((rocsparse_handle)handle,
-                           hipsparse::hipOperationToHCCOperation(transA),
-                           hipsparse::hipOperationToHCCOperation(transB),
-                           m,
-                           n,
-                           k,
-                           alpha,
-                           (rocsparse_mat_descr)descrA,
-                           nnzA,
-                           csrValA,
-                           csrRowPtrA,
-                           csrColIndA,
-                           (rocsparse_mat_descr)descrB,
-                           nnzB,
-                           csrValB,
-                           csrRowPtrB,
-                           csrColIndB,
-                           nullptr,
-                           nullptr,
-                           0,
-                           nullptr,
-                           nullptr,
-                           nullptr,
-                           (rocsparse_mat_descr)descrC,
-                           csrValC,
-                           csrRowPtrC,
-                           csrColIndC,
-                           info,
-                           temp_buffer));
+    status = hipsparse::rocSPARSEStatusToHIPStatus(rocsparse_dcsrgemm((rocsparse_handle)handle,
+                                                                      backend_transA,
+                                                                      backend_transB,
+                                                                      m,
+                                                                      n,
+                                                                      k,
+                                                                      alpha,
+                                                                      (rocsparse_mat_descr)descrA,
+                                                                      nnzA,
+                                                                      csrValA,
+                                                                      csrRowPtrA,
+                                                                      csrColIndA,
+                                                                      (rocsparse_mat_descr)descrB,
+                                                                      nnzB,
+                                                                      csrValB,
+                                                                      csrRowPtrB,
+                                                                      csrColIndB,
+                                                                      nullptr,
+                                                                      nullptr,
+                                                                      0,
+                                                                      nullptr,
+                                                                      nullptr,
+                                                                      nullptr,
+                                                                      (rocsparse_mat_descr)descrC,
+                                                                      csrValC,
+                                                                      csrRowPtrC,
+                                                                      csrColIndC,
+                                                                      info,
+                                                                      temp_buffer));
 
     if(pointer_mode == rocsparse_pointer_mode_host)
     {
@@ -511,6 +527,12 @@ hipsparseStatus_t hipsparseCcsrgemm(hipsparseHandle_t         handle,
                                     const int*                csrRowPtrC,
                                     int*                      csrColIndC)
 {
+    rocsparse_operation_ backend_transA{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipOperationToHCCOperation(transA, &backend_transA));
+
+    rocsparse_operation_ backend_transB{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipOperationToHCCOperation(transB, &backend_transB));
+
     // Create matrix info
     rocsparse_mat_info info;
     RETURN_IF_ROCSPARSE_ERROR(rocsparse_create_mat_info(&info));
@@ -551,8 +573,8 @@ hipsparseStatus_t hipsparseCcsrgemm(hipsparseHandle_t         handle,
     // Obtain temporary buffer size
     status = hipsparse::rocSPARSEStatusToHIPStatus(
         rocsparse_ccsrgemm_buffer_size((rocsparse_handle)handle,
-                                       hipsparse::hipOperationToHCCOperation(transA),
-                                       hipsparse::hipOperationToHCCOperation(transB),
+                                       backend_transA,
+                                       backend_transB,
                                        m,
                                        n,
                                        k,
@@ -594,8 +616,8 @@ hipsparseStatus_t hipsparseCcsrgemm(hipsparseHandle_t         handle,
     // Perform csrgemm computation
     status = hipsparse::rocSPARSEStatusToHIPStatus(
         rocsparse_ccsrgemm((rocsparse_handle)handle,
-                           hipsparse::hipOperationToHCCOperation(transA),
-                           hipsparse::hipOperationToHCCOperation(transB),
+                           backend_transA,
+                           backend_transB,
                            m,
                            n,
                            k,
@@ -667,6 +689,12 @@ hipsparseStatus_t hipsparseZcsrgemm(hipsparseHandle_t         handle,
                                     const int*                csrRowPtrC,
                                     int*                      csrColIndC)
 {
+    rocsparse_operation_ backend_transA{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipOperationToHCCOperation(transA, &backend_transA));
+
+    rocsparse_operation_ backend_transB{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipOperationToHCCOperation(transB, &backend_transB));
+
     // Create matrix info
     rocsparse_mat_info info;
     RETURN_IF_ROCSPARSE_ERROR(rocsparse_create_mat_info(&info));
@@ -708,8 +736,8 @@ hipsparseStatus_t hipsparseZcsrgemm(hipsparseHandle_t         handle,
     // Obtain temporary buffer size
     status = hipsparse::rocSPARSEStatusToHIPStatus(
         rocsparse_zcsrgemm_buffer_size((rocsparse_handle)handle,
-                                       hipsparse::hipOperationToHCCOperation(transA),
-                                       hipsparse::hipOperationToHCCOperation(transB),
+                                       backend_transA,
+                                       backend_transB,
                                        m,
                                        n,
                                        k,
@@ -751,8 +779,8 @@ hipsparseStatus_t hipsparseZcsrgemm(hipsparseHandle_t         handle,
     // Perform csrgemm computation
     status = hipsparse::rocSPARSEStatusToHIPStatus(
         rocsparse_zcsrgemm((rocsparse_handle)handle,
-                           hipsparse::hipOperationToHCCOperation(transA),
-                           hipsparse::hipOperationToHCCOperation(transB),
+                           backend_transA,
+                           backend_transB,
                            m,
                            n,
                            k,
