@@ -984,6 +984,11 @@ what the level below cannot see.
 | 5. GPU numeric | A kernel computes the right result | quick for a published operation's pinned reference lane; otherwise standard |
 | 6. Explicit resource gate | An exhaustive matrix, a compiler or resource qualification | comprehensive or full (see below) |
 
+**Make the test prove the claim.** Each new refusal has a test that asserts the
+error's type and message. Each claim in a docstring, commit message or PR text has a test that
+fails if the claim is false: assert the property claimed (the `align N` of a
+load, not only its vector type). Use real inputs, not stubs.
+
 The quick golden entries lower with the Python engine only. The byte-identity
 gate over the kernel families runs in `tests/run_all.py`, through
 `tools/check_byte_identity.py`
@@ -1069,6 +1074,22 @@ most Q3 to quick.
    pytest entry takes `_ROCKE_INSTALLED_PYTEST_GPU_TEST_LIMIT`
    (`platform/CMakeLists.txt` says why).
 
+**Keep a slow test inside its limits.** The budgets below and the limits of
+every lane that runs a test (pytest `--timeout`, CTest `TIMEOUT`, any
+child-process timeout) hold on the slowest runner the test is enabled for, not
+on a workstation, with the headroom of S2; make the test cheaper rather than
+raise any limit. When a test is slow or near a limit:
+
+1. Measure where its time goes (interpreter and imports, runtime start-up,
+   lowering, compile, launch) before changing it.
+2. Remove the cost at its root: do expensive work once (compile once, share
+   code objects or a cache, one process per group of tests where isolation
+   allows), keep child processes light, and avoid heavy imports.
+3. Only when that is not enough, split the test into smaller tests or entries.
+
+Enable a test on a target only after it has passed there within the stock
+limits.
+
 **Measure before you choose.** In `platform/`, the setup, call and teardown
 times of a file's items (`-q` hides those under 5 ms), and its split over 4 CI
 shards:
@@ -1114,6 +1135,9 @@ log.
 | S1 | One shard key in a sharded entry | 30 s | A key runs whole on one shard; this is half of the 60 s per-item `--timeout` of the `rocke_pytest_<part>` and tiling entries. |
 | S2 | Limit headroom | pytest `--timeout` at least 2× the slowest item; CTest `TIMEOUT` at least 2× the entry's longest run, which is its unsplit run if the entry is in quick | The worst case stays under half of each limit. |
 | S3 | A new non-pytest entry in quick or standard | 1 s | It runs whole on every CI shard. The golden entries and `rocke_optimization_barrier_hip_pair` are existing exceptions. |
+
+To review where a test lives (level, tier, entry, shard keys, budgets), use the
+checklist in [`agents/team_members/test_architect.md`](agents/team_members/test_architect.md).
 
 ### 5.1 Before merging: source backends and installed CI
 
