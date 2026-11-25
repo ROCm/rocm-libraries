@@ -159,6 +159,7 @@ namespace rocsparse
                                   int64_t                   ld,
                                   I*                        nnz_per_row_columns,
                                   I*                        nnz_total_dev_host_ptr,
+                                  rocsparse_pointer_mode    nnz_total_pointer_mode,
                                   rocsparse_order           order)
     {
         ROCSPARSE_ROUTINE_TRACE;
@@ -184,9 +185,7 @@ namespace rocsparse
 
             if(nnz_total_dev_host_ptr != nullptr)
             {
-                rocsparse_pointer_mode mode;
-                RETURN_IF_ROCSPARSE_ERROR(rocsparse_get_pointer_mode(handle, &mode));
-                if(rocsparse_pointer_mode_device == mode)
+                if(nnz_total_pointer_mode == rocsparse_pointer_mode_device)
                 {
                     RETURN_IF_HIP_ERROR(rocsparse_hipMemsetAsync(
                         nnz_total_dev_host_ptr, 0, sizeof(I), handle->stream));
@@ -227,7 +226,8 @@ rocsparse_status rocsparse::nnz_impl(rocsparse_handle          handle,
                                      const T*                  A,
                                      int64_t                   ld,
                                      I*                        nnz_per_row_columns,
-                                     I*                        nnz_total_dev_host_ptr)
+                                     I*                        nnz_total_dev_host_ptr,
+                                     rocsparse_pointer_mode    nnz_total_pointer_mode)
 {
     ROCSPARSE_ROUTINE_TRACE;
 
@@ -244,10 +244,20 @@ rocsparse_status rocsparse::nnz_impl(rocsparse_handle          handle,
                          (const void*&)A,
                          ld,
                          (const void*&)nnz_per_row_columns,
-                         (const void*&)nnz_total_dev_host_ptr);
+                         (const void*&)nnz_total_dev_host_ptr,
+                         nnz_total_pointer_mode);
 
-    const rocsparse_status status = rocsparse::nnz_checkarg(
-        handle, dir, m, n, descr, A, ld, nnz_per_row_columns, nnz_total_dev_host_ptr, order);
+    const rocsparse_status status = rocsparse::nnz_checkarg(handle,
+                                                            dir,
+                                                            m,
+                                                            n,
+                                                            descr,
+                                                            A,
+                                                            ld,
+                                                            nnz_per_row_columns,
+                                                            nnz_total_dev_host_ptr,
+                                                            nnz_total_pointer_mode,
+                                                            order);
     if(status != rocsparse_status_continue)
     {
         RETURN_IF_ROCSPARSE_ERROR(status);
@@ -299,7 +309,7 @@ rocsparse_status rocsparse::nnz_impl(rocsparse_handle          handle,
         //
         // Extract nnz
         //
-        if(handle->pointer_mode == rocsparse_pointer_mode_device)
+        if(nnz_total_pointer_mode == rocsparse_pointer_mode_device)
         {
             RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(
                 nnz_total_dev_host_ptr, d_nnz, sizeof(I), hipMemcpyDeviceToDevice, handle->stream));
@@ -334,7 +344,8 @@ rocsparse_status rocsparse::nnz_impl(rocsparse_handle          handle,
         const TTYPE*              A,                                    \
         int64_t                   ld,                                   \
         ITYPE*                    nnz_per_row_columns,                  \
-        ITYPE*                    nnz_total_dev_host_ptr);
+        ITYPE*                    nnz_total_dev_host_ptr,               \
+        rocsparse_pointer_mode    nnz_total_pointer_mode);
 
 INSTANTIATE(int32_t, int32_t, _Float16);
 INSTANTIATE(int32_t, int32_t, rocsparse_bfloat16);
@@ -361,36 +372,39 @@ extern "C" {
 //
 // Definition of the C-implementation.
 //
-#define CAPI_IMPL(name_, type_)                                                     \
-    rocsparse_status name_(rocsparse_handle          handle,                        \
-                           rocsparse_direction       dir,                           \
-                           rocsparse_int             m,                             \
-                           rocsparse_int             n,                             \
-                           const rocsparse_mat_descr descr,                         \
-                           const type_*              A,                             \
-                           rocsparse_int             ld,                            \
-                           rocsparse_int*            nnz_per_row_columns,           \
-                           rocsparse_int*            nnz_total_dev_host_ptr)        \
-    {                                                                               \
-        try                                                                         \
-        {                                                                           \
-            ROCSPARSE_ROUTINE_TRACE;                                                \
-            RETURN_IF_ROCSPARSE_ERROR(rocsparse::nnz_impl(handle,                   \
-                                                          dir,                      \
-                                                          rocsparse_order_column,   \
-                                                          m,                        \
-                                                          n,                        \
-                                                          descr,                    \
-                                                          A,                        \
-                                                          ld,                       \
-                                                          nnz_per_row_columns,      \
-                                                          nnz_total_dev_host_ptr)); \
-            return rocsparse_status_success;                                        \
-        }                                                                           \
-        catch(...)                                                                  \
-        {                                                                           \
-            RETURN_ROCSPARSE_EXCEPTION();                                           \
-        }                                                                           \
+#define CAPI_IMPL(name_, type_)                                                             \
+    rocsparse_status name_(rocsparse_handle          handle,                                \
+                           rocsparse_direction       dir,                                   \
+                           rocsparse_int             m,                                     \
+                           rocsparse_int             n,                                     \
+                           const rocsparse_mat_descr descr,                                 \
+                           const type_*              A,                                     \
+                           rocsparse_int             ld,                                    \
+                           rocsparse_int*            nnz_per_row_columns,                   \
+                           rocsparse_int*            nnz_total_dev_host_ptr)                \
+    {                                                                                       \
+        try                                                                                 \
+        {                                                                                   \
+            ROCSPARSE_ROUTINE_TRACE;                                                        \
+            const rocsparse_pointer_mode nnz_total_pointer_mode                             \
+                = (handle == nullptr) ? rocsparse_pointer_mode_host : handle->pointer_mode; \
+            RETURN_IF_ROCSPARSE_ERROR(rocsparse::nnz_impl(handle,                           \
+                                                          dir,                              \
+                                                          rocsparse_order_column,           \
+                                                          m,                                \
+                                                          n,                                \
+                                                          descr,                            \
+                                                          A,                                \
+                                                          ld,                               \
+                                                          nnz_per_row_columns,              \
+                                                          nnz_total_dev_host_ptr,           \
+                                                          nnz_total_pointer_mode));         \
+            return rocsparse_status_success;                                                \
+        }                                                                                   \
+        catch(...)                                                                          \
+        {                                                                                   \
+            RETURN_ROCSPARSE_EXCEPTION();                                                   \
+        }                                                                                   \
     }
 
 //
