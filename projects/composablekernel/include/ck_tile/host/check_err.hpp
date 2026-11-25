@@ -149,10 +149,15 @@ CK_TILE_HOST double get_absolute_threshold(const double max_possible_num,
                                                               int>::value,
                   "Warning: Unhandled ComputeDataType for setting up the absolute threshold!");
 
+    // log2(0) = -inf; casting -inf to int is undefined behaviour and in practice yields INT_MIN,
+    // which makes (discrete_expo - mant) overflow to a large positive and pow(2, ...) return +inf.
+    // A zero or NaN reference means no non-zero output is expected, so the threshold is 0.
+    if(!(std::abs(max_possible_num) > 0))
+        return 0;
+
     // Use discrete exponent (floor of log2) to match actual floating-point exponent levels
     // This ensures ULP calculation matches the discrete precision levels of FP representation
-    int discrete_expo =
-        std::floor(static_cast<int>(std::floor(std::log2(std::abs(max_possible_num)))));
+    int discrete_expo = static_cast<int>(std::floor(std::log2(std::abs(max_possible_num))));
     double compute_error = 0;
     if constexpr(is_any_of<ComputeDataType, pk_int4_t, I8, I32, int>::value)
     {
