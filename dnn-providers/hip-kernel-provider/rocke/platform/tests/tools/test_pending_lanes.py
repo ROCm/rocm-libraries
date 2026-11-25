@@ -53,9 +53,9 @@ import pytest
 from _pytest.mark.expression import Expression
 from rocke.assets import platform_root
 from rocke.tests import in_tree_suites
-from rocke.tests import lanes as rocke_lanes
 from rocke.tests.comgr import CompilerBuild
 from rocke.tests.ctest_listing import configure_installed_ctest, list_ctest_entries
+from rocke.tests.lane_mentions import LaneMentionKind, lane_mentions
 from rocke.tests.lanes import (
     COMPREHENSIVE_CASES,
     GFX950_RUNNER,
@@ -1159,25 +1159,17 @@ _LANE_HOMES = frozenset(
 _LANE_TEST_DIRS = ("platform/tests/support/", "platform/tests/tools/")
 
 
-def _python_sources() -> Iterable[tuple[str, ast.Module]]:
-    """Each Python file of the test file roots, relative to the rocke
-    directory, with its syntax tree."""
+def _python_source_paths() -> list[str]:
+    """The relative paths, from the rocke directory, of each Python file of
+    the test file roots."""
+    sources = []
     for root in ("platform", "library"):
         for file in (ROCKE / root).rglob("*.py"):
             parts = file.relative_to(ROCKE).parts
             if "__pycache__" in parts or any(p.startswith("build") for p in parts):
                 continue
-            yield file.relative_to(ROCKE).as_posix(), ast.parse(
-                file.read_text(encoding="utf-8")
-            )
-
-
-def _declares_a_lane(text: str) -> bool:
-    """Whether ``text`` reads as a lane declaration, a known lane or not."""
-    try:
-        return bool(rocke_lanes.lanes_waited_for(text))
-    except ValueError:
-        return True
+            sources.append(file.relative_to(ROCKE).as_posix())
+    return sources
 
 
 def test_tests_state_the_arches_they_need_not_the_runner_lane():
@@ -1185,24 +1177,24 @@ def test_tests_state_the_arches_they_need_not_the_runner_lane():
     ``arch_skip_reason``); which runner lane that waits for, if any, is a fact
     of ``rocke.tests.lanes`` alone, so a runner lane is named only in the lane
     homes, and a hand-written ``waits for ...`` reason nowhere else."""
-    runner_lanes = {
-        name
-        for name, value in vars(rocke_lanes).items()
-        if isinstance(value, Lane) and value.arches
-    }
-    named, hand_written = [], []
-    for path, tree in _python_sources():
-        if path in _LANE_HOMES or path.startswith(_LANE_TEST_DIRS):
-            continue
-        for node in ast.walk(tree):
-            if isinstance(node, ast.Name) and node.id in runner_lanes:
-                named.append(f"{path}:{node.lineno} {node.id}")
-            elif (
-                isinstance(node, ast.Constant)
-                and isinstance(node.value, str)
-                and _declares_a_lane(node.value)
-            ):
-                hand_written.append(f"{path}:{node.lineno}")
+    mentions = lane_mentions(
+        ROCKE,
+        [
+            path
+            for path in _python_source_paths()
+            if path not in _LANE_HOMES and not path.startswith(_LANE_TEST_DIRS)
+        ],
+    )
+    named = [
+        f"{mention.path}:{mention.line} {mention.text}"
+        for mention in mentions
+        if mention.kind is LaneMentionKind.RUNNER_LANE_NAME
+    ]
+    hand_written = [
+        f"{mention.path}:{mention.line}"
+        for mention in mentions
+        if mention.kind is LaneMentionKind.HAND_WRITTEN_DECLARATION
+    ]
     assert not named, (
         "name the arches the case needs (skip_needing_arch / arch_skip_reason) "
         f"instead of a runner lane: {named}"
