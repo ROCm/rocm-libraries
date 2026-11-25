@@ -221,6 +221,9 @@ class GL2Config:
     sizes_sum_zero: bool = False  # K == 0 (SizesSum = 0): the pointer-array dereference is skipped
     inc64: bool = False       # PrefetchGL2Inc64Bit: 64-bit (sgpr pair) addr increment.
     saddr: bool = False       # PrefetchGL2SAddr: sgpr pair base + 32-bit vgpr offset.
+    k_start: int = None       # StreamKLocalStart: a StreamK work item's first unroll
+                              # iteration within its tile; None leaves the K-start
+                              # path off, as for non-StreamK kernels.
 
     @property
     def lc(self):
@@ -557,6 +560,14 @@ CONFIGS = [
     GL2Config("pgr2_guard_taken", [_A(True, 256), _B(False, 256)], cluster=(2, 2),
               loop_counter=2),
 
+    # ---- StreamK. A work item starts StreamKLocalStart unroll iterations into its
+    # tile, so the start address gains kStart*inc before skipPGR, the same shift
+    # its TDM loads take. Mixed layouts so the shift is checked on both K axes,
+    # and MX scales so each tensor scales kStart by its own increment. ----
+    GL2Config("streamk_kstart", [_A(True, 256), _B(False, 256)], cluster=(2, 2), k_start=3),
+    GL2Config("streamk_kstart_mx", [_A(True, 192), _B(True, 192), _MXSA(192), _MXSB(192)],
+              depth_u=256, mx_block=32, cluster=(2, 2), k_start=5),
+
     # ---- SupportUserArgs (see the coverage note at the top). ----
     # Strided launch of a UserArgs kernel (ArgType 0 + TDM wave id in bits 8+):
     # the batch stride still applies.
@@ -614,7 +625,7 @@ CONFIGS = [
 _INC64_CONFIGS = {
     "ab_fp8_mixed_layout", "abmx_fp8", "a_sparse_tlu_mlayout1",
     "gsu4_interleaved", "gsu4_contiguous_rem", "gsu2_mx_cluster",
-    "pgr1_nl2", "pgr3_ntlu", "pgr2_guard_taken",
+    "pgr1_nl2", "pgr3_ntlu", "pgr2_guard_taken", "streamk_kstart", "streamk_kstart_mx",
 }
 CONFIGS += [replace(c, name=f"{c.name}_inc64", inc64=True)
             for c in CONFIGS if c.name in _INC64_CONFIGS]
@@ -630,6 +641,7 @@ _SADDR_CONFIGS = {
     "abmx_fp8_inc64", "gsu4_contiguous_rem_inc64", "pgr1_nl2_inc64", "pgr3_ntlu_inc64",
     "userargs_strided", "userargs_ptr_array", "userargs_ptr_k0",
     "userargs_ptr_array_gsu4_interleaved", "userargs_ptr_array_gsu2_mx",
+    "streamk_kstart", "streamk_kstart_inc64",
 }
 CONFIGS += [replace(c, name=f"{c.name}_saddr", saddr=True)
             for c in CONFIGS if c.name in _SADDR_CONFIGS]
@@ -831,6 +843,9 @@ def build_kernel(cfg, with_prefetch=False):
         # GSU packs the group count and the GSUC bit; SizesSum feeds numIter in the
         # contiguous branch.
         shared += ["GSU", "SizesSum"]
+    if cfg.k_start is not None:
+        assert not cfg.gsu_on, f"{cfg.name}: StreamK forces GlobalSplitU=0"
+        shared += ["StreamKLocalStart"]
     if cfg.user_args:
         assert cfg.batched, f"{cfg.name}: SupportUserArgs needs a batched config"
         assert not (cfg.gsu_on and cfg.sizes_sum_zero), \
@@ -908,9 +923,10 @@ def build_kernel(cfg, with_prefetch=False):
                 body.add(comp.setIncrement(w, kernel, tp))
                 body.add(comp.calculateStartAddr(w, kernel, tp, gsu_iter_sgpr))
     else:
+        k_start_sgpr = None if cfg.k_start is None else "StreamKLocalStart"
         for t, tp in tps:
             body.add(comp.setIncrement(w, kernel, tp))
-            body.add(comp.calculateStartAddr(w, kernel, tp))
+            body.add(comp.calculateStartAddr(w, kernel, tp, kStartSgprName=k_start_sgpr))
 
     # Same guard as the pre-loop GL2 issue in KernelWriter: with LoopCounterL <=
     # PGR there is nothing left to prefetch, so the skip is branched over. It runs
@@ -952,6 +968,8 @@ def build_kernel(cfg, with_prefetch=False):
             idxChar = "I" if t.idx == 0 else "J"
             consts += [(f"StrideMetadata{idxChar}", coal_m), ("StrideMetadataL", coal_m)]
     consts += [("WorkGroup0", 0), ("WorkGroup1", 0), ("WorkGroup2", 0), ("LoopCounterL", cfg.lc)]
+    if cfg.k_start is not None:
+        consts += [("StreamKLocalStart", cfg.k_start)]
     if cfg.batched:                              # programmed batch stride Stride{tc}K
         consts += [(f"Stride{t.tc}K", batch_stride_elems(t, cfg)) for t in cfg.tensors]
     if cfg.gsu_on:
@@ -1256,6 +1274,7 @@ def _footprint_geometry(spec, cfg, stage, batch, group):
         perp_stride = coal
         edge = size_free - 1
     k_iter = gsu_start_iter(cfg, group) + (cfg.skip_iters + stage) * gsu_iter_stride(cfg)
+    k_iter += cfg.k_start or 0
     shift = k_iter * inc_bytes(spec, cfg)
     # a pointer-array base already selects the batch (run_config strips it)
     if cfg.batched and not derefs_ptr_array(spec, cfg):
