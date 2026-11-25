@@ -124,6 +124,8 @@ struct BiasActCase
     ActivationSpec activation;
     /// conv -> ADD(bias) -> activation; false: conv -> activation.
     bool withBias = true;
+    /// The intermediates (convolution output, biased sum) in the data dtype instead of fp32.
+    bool dataDtypeIntermediates = false;
 };
 
 std::ostream& operator<<(std::ostream& os, const BiasActCase& biasActCase)
@@ -252,6 +254,10 @@ std::shared_ptr<Graph> buildGraph(const BiasActCase& biasActCase,
         .set_dilation(biasActCase.dilation)
         .set_convolution_mode(ConvolutionMode::CROSS_CORRELATION);
     auto convOut = graph->conv_fprop(x, w, convAttrs);
+    if(biasActCase.dataDtypeIntermediates)
+    {
+        convOut->set_data_type(biasActCase.dtype);
+    }
 
     auto sum = convOut;
     if(biasActCase.withBias)
@@ -262,6 +268,10 @@ std::shared_ptr<Graph> buildGraph(const BiasActCase& biasActCase,
             .set_compute_data_type(DataType::FLOAT);
         sum = biasActCase.biasFirst ? graph->pointwise(b, convOut, addAttrs)
                                     : graph->pointwise(convOut, b, addAttrs);
+        if(biasActCase.dataDtypeIntermediates)
+        {
+            sum->set_data_type(biasActCase.dtype);
+        }
     }
     auto y = withActivation ? graph->pointwise(sum, activationAttributes(biasActCase.activation))
                             : sum;
@@ -291,11 +301,19 @@ float floatToleranceEpsilons(const BiasActCase& biasActCase)
     return 2.0F * static_cast<float>(terms + 4);
 }
 
-/// HALF / BFLOAT16: the 16-bit tolerances of the conv + bias engine's suite. Both sides keep
-/// the intermediates in fp32 and round once, so the activation adds no rounding of its own.
-float halfAbsoluteTolerance(DataType dtype)
+/// HALF / BFLOAT16: the 16-bit tolerances of the unfused engine's suite when both sides keep
+/// the intermediates in fp32 and round once. With data-dtype intermediates the reference also
+/// rounds the convolution output and the biased sum to 16 bits and the kernel does not, which
+/// moves the result by up to 2^-p of each (p is 11 for HALF and 8 for BFLOAT16; inputs in
+/// [-1, 1], activation slope at most 1.13); the relative tolerance covers it except near zero,
+/// so 2 x 2^-p is added to the absolute one.
+float halfAbsoluteTolerance(const BiasActCase& biasActCase)
 {
-    return 0.001F + (dtype == DataType::HALF ? 1.0F / 2048 : 1.0F / 256);
+    if(!biasActCase.dataDtypeIntermediates)
+    {
+        return 0.001F;
+    }
+    return 0.001F + 2.0F * (biasActCase.dtype == DataType::HALF ? 1.0F / 2048 : 1.0F / 256);
 }
 float halfRelativeTolerance(DataType dtype)
 {
@@ -372,6 +390,24 @@ const std::vector<BiasActCase>& cases()
                 }
             }
         }
+        // The intermediates in the data dtype, with and without the bias.
+        for(const bool withBias : {true, false})
+        {
+            for(const auto& [dtype, prefix] : {std::pair{F16, "F16"}, std::pair{BF16, "Bf16"}})
+            {
+                for(const size_t act : {size_t{0}, size_t{9}}) // Relu, Gelu
+                {
+                    auto narrow = sweepShape;
+                    narrow.dtype = dtype;
+                    narrow.activation = acts[act];
+                    narrow.withBias = withBias;
+                    narrow.dataDtypeIntermediates = true;
+                    narrow.name = std::string(withBias ? "" : "NoBias") + "DataDtypeIntermediates"
+                                  + prefix + acts[act].name;
+                    all.push_back(narrow);
+                }
+            }
+        }
         return all;
     }();
     return s_cases;
@@ -444,7 +480,7 @@ TEST_P(IntegrationGpuHipConvFwdBiasActFmaIgemmRdna, MatchesTheCpuReference)
     {
         registerValidator(context,
                           y,
-                          halfAbsoluteTolerance(biasActCase.dtype),
+                          halfAbsoluteTolerance(biasActCase),
                           halfRelativeTolerance(biasActCase.dtype));
     }
     verifyBuiltGraph(context, 0);
