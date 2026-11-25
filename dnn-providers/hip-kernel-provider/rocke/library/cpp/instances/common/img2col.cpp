@@ -27,7 +27,7 @@
  *       to rocke_b_buffer_load_f16 / rocke_b_buffer_load_vN_f16 and the matching
  *       rocke_b_buffer_store_f16 / rocke_b_buffer_store_vN_f16 store.
  *   No stubbed region remains; the differential harness reports img2col GREEN
- *   (6 configs, bad=0) in both ir --canonical and ll modes against the Python
+ *   (8 configs, bad=0) in both ir --canonical and ll modes against the Python
  *   reference rocke/instances/common/img2col.py.
  */
 #include "rocke/instance_img2col.h"
