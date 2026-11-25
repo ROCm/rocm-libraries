@@ -143,8 +143,20 @@ def arm_kernel(table, arm):
     tile = arm.get("tile", "256x256x256")
     if tile != "256x256x256":
         tm, tn, tk = tile.split("x")
-        return [(vs, ss, vg) for name, vs, ss, vg in table
-                if f"sequence<{tm}, {tn}, {tk}>" in name and "ClusterTileGemmShape" not in name]
+        cm, cn = (int(x) for x in arm.get("cluster", "1x1").split("x"))
+        hits = []
+        for name, vs, ss, vg in table:
+            if f"sequence<{tm}, {tn}, {tk}>" not in name:
+                continue
+            if arm.get("warps", "default") == "2x2" and "sequence<2, 2, 1>" not in name:
+                continue
+            clustered = "ClusterTileGemmShape" in name
+            if (cm * cn > 1) != clustered:
+                continue
+            if clustered and f"ClusterTileGemmShape<ck_tile::sequence<{cm}, {cn}, 1>" not in name:
+                continue
+            hits.append((vs, ss, vg))
+        return hits
     wt, cl, pl = arm["wt"], arm["cluster"], arm.get("place", "default")
     cm, cn = (int(x) for x in cl.split("x"))
     hits = []
@@ -178,7 +190,8 @@ def arm_args(arm, shape, cfg):
 
 def arm_tag(v, arm):
     if arm.get("tile", "256x256x256") != "256x256x256":
-        return f"{v['name']}|t{arm['tile']}|w{arm.get('warps', 'default')}"
+        cl = f"|c{arm['cluster']}" if "cluster" in arm else ""
+        return f"{v['name']}|t{arm['tile']}|w{arm.get('warps', 'default')}{cl}"
     return f"{v['name']}|wt{arm['wt']}|c{arm['cluster']}|{arm.get('place', 'default')}"
 
 

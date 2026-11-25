@@ -1,0 +1,263 @@
+{
+  "_comment": "MX 2048x2048x65536 and 256x2048x2048: smaller 2x2-wave tiles at warp tile 16 (-DCK_EX55_SMALL2X2: 128x128, 128x256, 256x128, 64x128, 64x64) for the current loop (cur) and the read-ahead loop (ra_pf6 / ra_pf4: cluster barriers with the early signal, packed LDS-staged scales, late reads 8 WMMAs in, L2 prefetch 6 / 4), against 256x256 and, for 256x2048x2048, the current loop's small default-wave tiles (cur_all: full instance build). Arms run only on the shapes listed with them.",
+  "default_defines": [
+    "-DCK_EX55_BF16_TDM_ONLY",
+    "-DCK_TILE_GFX125_FP8_K1PERLANE=16",
+    "-DCK_EX55_MX_SCALE_WIDE=1",
+    "-DCK_EX55_A_ROW_PREFETCH=1"
+  ],
+  "variants": [
+    {
+      "name": "cur",
+      "defines": [
+        "-DCK_EX55_FOCUS",
+        "-DCK_EX55_SMALL2X2"
+      ]
+    },
+    {
+      "name": "cur_all",
+      "defines": []
+    },
+    {
+      "name": "ra_pf6",
+      "defines": [
+        "-DCK_EX55_FOCUS",
+        "-DCK_EX55_FOCUS_MIN",
+        "-DCK_EX55_SMALL2X2",
+        "-DCK_EX55_RA=1",
+        "-DCK_EX55_MX_SCALE_LDS=1",
+        "-DCK_EX55_RA_CB=2",
+        "-DCK_EX55_RA_BLOCKB=0",
+        "-DCK_EX55_RA_SPLITA=1",
+        "-DCK_EX55_RA_PACK=1",
+        "-DCK_EX55_RA_LATEAT=8",
+        "-DCK_EX55_RA_GL2=6"
+      ]
+    },
+    {
+      "name": "ra_pf4",
+      "defines": [
+        "-DCK_EX55_FOCUS",
+        "-DCK_EX55_FOCUS_MIN",
+        "-DCK_EX55_SMALL2X2",
+        "-DCK_EX55_RA=1",
+        "-DCK_EX55_MX_SCALE_LDS=1",
+        "-DCK_EX55_RA_CB=2",
+        "-DCK_EX55_RA_BLOCKB=0",
+        "-DCK_EX55_RA_SPLITA=1",
+        "-DCK_EX55_RA_PACK=1",
+        "-DCK_EX55_RA_LATEAT=8",
+        "-DCK_EX55_RA_GL2=4"
+      ]
+    }
+  ],
+  "arms": [
+    {
+      "wt": 16,
+      "cluster": "1x1",
+      "shapes": [
+        [
+          2048,
+          2048,
+          65536
+        ],
+        [
+          256,
+          2048,
+          2048
+        ]
+      ]
+    },
+    {
+      "wt": 16,
+      "cluster": "4x4",
+      "shapes": [
+        [
+          2048,
+          2048,
+          65536
+        ]
+      ]
+    },
+    {
+      "tile": "128x128x256",
+      "warps": "2x2",
+      "wt": 16,
+      "cluster": "1x1",
+      "shapes": [
+        [
+          2048,
+          2048,
+          65536
+        ],
+        [
+          256,
+          2048,
+          2048
+        ]
+      ]
+    },
+    {
+      "tile": "128x128x256",
+      "warps": "2x2",
+      "wt": 16,
+      "cluster": "2x2",
+      "shapes": [
+        [
+          2048,
+          2048,
+          65536
+        ]
+      ]
+    },
+    {
+      "tile": "128x128x256",
+      "warps": "2x2",
+      "wt": 16,
+      "cluster": "4x4",
+      "shapes": [
+        [
+          2048,
+          2048,
+          65536
+        ]
+      ]
+    },
+    {
+      "tile": "128x256x256",
+      "warps": "2x2",
+      "wt": 16,
+      "cluster": "1x1",
+      "shapes": [
+        [
+          2048,
+          2048,
+          65536
+        ],
+        [
+          256,
+          2048,
+          2048
+        ]
+      ]
+    },
+    {
+      "tile": "128x256x256",
+      "warps": "2x2",
+      "wt": 16,
+      "cluster": "2x2",
+      "shapes": [
+        [
+          2048,
+          2048,
+          65536
+        ]
+      ]
+    },
+    {
+      "tile": "256x128x256",
+      "warps": "2x2",
+      "wt": 16,
+      "cluster": "1x1",
+      "shapes": [
+        [
+          2048,
+          2048,
+          65536
+        ],
+        [
+          256,
+          2048,
+          2048
+        ]
+      ]
+    },
+    {
+      "tile": "256x128x256",
+      "warps": "2x2",
+      "wt": 16,
+      "cluster": "2x2",
+      "shapes": [
+        [
+          2048,
+          2048,
+          65536
+        ]
+      ]
+    },
+    {
+      "tile": "64x128x256",
+      "warps": "2x2",
+      "wt": 16,
+      "cluster": "1x1",
+      "shapes": [
+        [
+          2048,
+          2048,
+          65536
+        ],
+        [
+          256,
+          2048,
+          2048
+        ]
+      ]
+    },
+    {
+      "tile": "64x64x256",
+      "warps": "2x2",
+      "wt": 16,
+      "cluster": "1x1",
+      "shapes": [
+        [
+          2048,
+          2048,
+          65536
+        ],
+        [
+          256,
+          2048,
+          2048
+        ]
+      ]
+    },
+    {
+      "tile": "32x128x256",
+      "warps": "default",
+      "shapes": [
+        [
+          256,
+          2048,
+          2048
+        ]
+      ]
+    },
+    {
+      "tile": "32x64x256",
+      "warps": "default",
+      "shapes": [
+        [
+          256,
+          2048,
+          2048
+        ]
+      ]
+    }
+  ],
+  "shapes": [
+    [
+      2048,
+      2048,
+      65536
+    ],
+    [
+      256,
+      2048,
+      2048
+    ]
+  ],
+  "c_dtype": "bf16",
+  "rounds": 5,
+  "warmup": 50,
+  "repeat": 100
+}

@@ -987,6 +987,33 @@ int dispatch_tile(const ck_tile::ArgParser& arg, const std::string& name)
         const std::string cl = arg.get_str("cluster");
         const std::string pl = arg.get_str("place");
         const std::string wt = arg.get_str("wt");
+#if defined(CK_EX55_SMALL2X2)
+        // EXPERIMENT: -DCK_EX55_SMALL2X2 adds smaller 2x2-wave tiles at warp tile 16, for shapes
+        // that 256x256 underfills: 128x128 (clusters 1x1, 2x2, 4x4), 128x256 and 256x128 (1x1,
+        // 2x2), 64x128 and 64x64 (1x1)
+        if(arg.get_str("warps") == "2x2" && wt == "16" && pl == "default")
+        {
+            const std::string t = arg.get_str("tile");
+            if(t == "128x128x256" && cl == "1x1")
+                return run<Instance<128, 128, 256, 2, 2, TdmEpi, CDataType, 16>>(arg, name);
+            if(t == "128x128x256" && cl == "2x2")
+                return run<Instance<128, 128, 256, 2, 2, TdmEpi, CDataType, 16, 2, 2>>(arg, name);
+            if(t == "128x128x256" && cl == "4x4")
+                return run<Instance<128, 128, 256, 2, 2, TdmEpi, CDataType, 16, 4, 4>>(arg, name);
+            if(t == "128x256x256" && cl == "1x1")
+                return run<Instance<128, 256, 256, 2, 2, TdmEpi, CDataType, 16>>(arg, name);
+            if(t == "128x256x256" && cl == "2x2")
+                return run<Instance<128, 256, 256, 2, 2, TdmEpi, CDataType, 16, 2, 2>>(arg, name);
+            if(t == "256x128x256" && cl == "1x1")
+                return run<Instance<256, 128, 256, 2, 2, TdmEpi, CDataType, 16>>(arg, name);
+            if(t == "256x128x256" && cl == "2x2")
+                return run<Instance<256, 128, 256, 2, 2, TdmEpi, CDataType, 16, 2, 2>>(arg, name);
+            if(t == "64x128x256" && cl == "1x1")
+                return run<Instance<64, 128, 256, 2, 2, TdmEpi, CDataType, 16>>(arg, name);
+            if(t == "64x64x256" && cl == "1x1")
+                return run<Instance<64, 64, 256, 2, 2, TdmEpi, CDataType, 16>>(arg, name);
+        }
+#endif
         if(arg.get_str("tile") == "256x256x256" && arg.get_str("warps") == "2x2" &&
            (wt == "16" || wt == "32"))
         {
