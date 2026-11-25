@@ -24,6 +24,7 @@ CPU-only. No GPU, no compile, no hardware access.
 """
 
 import os
+import re
 
 import pytest
 
@@ -55,7 +56,9 @@ def test_r2_subtile_gfx950_emits_assembly():
         assert ".amdgcn_target" in src, f"kernel {base!r}: missing .amdgcn_target"
         assert "gfx950" in src, f"kernel {base!r}: wrong arch in assembly"
         assert base.startswith("Cijk_"), f"kernel {base!r}: unexpected basename prefix"
-        assert "// boundary 16-bit DTL load" in src, f"kernel {base!r}: no tail-loop boundary DTL load"
+        assert re.search(r"^buffer_load_(ushort|u16)\b.*\blds\b", src, re.M), (
+            f"kernel {base!r}: no tail-loop boundary DTL load"
+        )
         assert_no_sgpr_hazards(src, base)
 
 

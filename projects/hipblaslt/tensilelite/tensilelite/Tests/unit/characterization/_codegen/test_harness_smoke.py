@@ -283,6 +283,39 @@ def test_sgpr_hazards_follow_control_flow(src, expected):
     assert len(sgpr_hazards(src)) == expected
 
 
+@pytest.mark.parametrize(
+    "src,expected",
+    [
+        ("v_readfirstlane_b32 s8, v0\ns_nop 3\nbuffer_load_dword v1, v2, s[0:3], s8 offen\n", 1),
+        ("v_readfirstlane_b32 s8, v0\ns_nop 4\nbuffer_load_dword v1, v2, s[0:3], s8 offen\n", 0),
+        ("v_readfirstlane_b32 s0, v0\ns_nop 2\nv_readlane_b32 s1, v1, s0\n", 1),
+        ("v_readfirstlane_b32 s0, v0\ns_nop 3\nv_readlane_b32 s1, v1, s0\n", 0),
+    ],
+    ids=["vmem-4-waits", "vmem-5-waits", "lane-select-3-waits", "lane-select-4-waits"],
+)
+def test_sgpr_hazards_wait_states(src, expected):
+    assert len(sgpr_hazards(src)) == expected
+
+
+def test_sgpr_hazards_resolve_chained_set():
+    src = ".set sgprA, 4\n.set sgprB, sgprA+1\nv_readfirstlane_b32 s5, v0\nv_mov_b32 v1, s[sgprB]\n"
+    assert len(sgpr_hazards(src)) == 1
+
+
+@pytest.mark.parametrize(
+    "src",
+    [
+        "v_readfirstlane_b32 s[sgprA], v0\n",
+        "v_readfirstlane_b32 s5, v0\nv_mov_b32 v1, s[sgprA]\n",
+        ".set sgprA, 5\n.set sgprA, UNDEF\nv_mov_b32 v1, s[sgprA]\n",
+    ],
+    ids=["unknown-writer", "unknown-reader", "undefined-reader"],
+)
+def test_sgpr_hazards_reject_unresolved_operand(src):
+    with pytest.raises(ValueError, match="unresolved SGPR operand"):
+        sgpr_hazards(src)
+
+
 def test_emit_golden_digest(snapshot):
     """Pin the order-invariant golden (kernel identity + emit success).
 
