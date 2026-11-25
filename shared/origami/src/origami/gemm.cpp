@@ -170,10 +170,12 @@ context_t::context_t(const problem_t& problem, const hardware_t& hardware, const
     const size_t groups        = std::max<size_t>(static_cast<size_t>(static_cast<double>(n_cu) / cus_per_group), 1);
     const double per_cu        = std::clamp(static_cast<double>(math::safe_ceil_div(num_wgs, groups)) / cus_per_group,
                                             std::min(spread, 1.0), 1.0);
-    if (per_cu < resident_wgs) {
-      resident_wgs = per_cu;
-      active_cus   = std::min<size_t>(n_cu, static_cast<size_t>(std::llround(static_cast<double>(num_wgs) / per_cu)));
-    }
+    if (per_cu < resident_wgs) resident_wgs = per_cu;
+    // A workgroup that takes more than a CU (by its spread here, or by its occupancy: a 16-wave
+    // workgroup per WGP) keeps all the CUs it runs on active: their traffic is that of as many
+    // CU shares of a tile, as when the kernel is launched with one workgroup per tile.
+    if (resident_wgs < 1.0)
+      active_cus = std::min<size_t>(n_cu, static_cast<size_t>(std::llround(static_cast<double>(num_wgs) / resident_wgs)));
   }
   mem_bw_limited       = compute_mem_bw_from_occupancy(hardware, active_cus);
   write_mem_bw_limited = compute_mem_bw_from_occupancy(hardware, num_output_tiles);

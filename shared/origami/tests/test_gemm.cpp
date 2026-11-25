@@ -391,6 +391,30 @@ TEST_CASE("GEMM: W4A16 Stream-K charges the partials of a split tile", "[gemm][w
   REQUIRE(dense(20) - dense(40) > 5.0 * partial * 96.0 * 256.0 / (128.0 * 128.0));
 }
 
+TEST_CASE("GEMM: a 16-wave kernel shared at one workgroup per WGP takes the time of its data-parallel launch", "[gemm][w4a16]") {
+  // An occupancy of 1 is one workgroup per WGP, two CUs: 8 at a time on gfx1150 however the
+  // kernel is launched.  176 tiles as 176 workgroups or shared whole by 8 are the same work on
+  // the same SIMDs with the same traffic (measured on gfx1150: 0.98 to 1.00).
+  const auto hardware = make_w4a16_gfx1150_hardware();
+  auto latency = [&](size_t launch_grid) {
+    auto problem    = make_problem(2048, 2112, 1984);
+    problem.a_dtype = origami::data_type_t::Int4;
+    problem.a_stride_bytes = ((problem.size.k / 2) + 255) / 256 * 256 + 128;
+    auto config     = make_config(128, 192, 64, 16, 16, 16, false, 1, 1, 0, 0, 3);
+    config.workspace_size            = std::numeric_limits<size_t>::max() / 2;
+    config.workspace_size_per_elem_c = 4;
+    config.launch_grid               = launch_grid;
+    config.reduction_strategy        = origami::reduction_t::tree;
+    origami::tensile_params_t t;
+    t.wave_group_m = 4;
+    t.wave_group_n = 4;
+    t.prefetch_global_read = 2;
+    config.backend = t;
+    return origami::gemm::compute_total_latency(problem, hardware, config);
+  };
+  REQUIRE(latency(8) == Approx(latency(176)).epsilon(0.03));
+}
+
 TEST_CASE("GEMM: compute_timestep_latency", "[gemm]") {
   for (int gpu_arch : test_architectures) {
     DYNAMIC_SECTION("gfx" << gpu_arch << " - timestep latency equals tile latency") {
