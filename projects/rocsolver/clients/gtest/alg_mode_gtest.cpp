@@ -32,7 +32,7 @@
 #include <rocblas/rocblas.h>
 #include <rocsolver/rocsolver.h>
 
-class AlgModeArgCheck : public ::testing::Test
+class checkin_misc_AlgModeArgCheck : public ::testing::Test
 {
 protected:
     rocblas_handle handle = nullptr;
@@ -50,7 +50,7 @@ protected:
 };
 
 // rocsolver_get_alg_mode must return rocblas_status_invalid_handle for a null handle.
-TEST_F(AlgModeArgCheck, get_null_handle)
+TEST_F(checkin_misc_AlgModeArgCheck, get_null_handle)
 {
     rocsolver_alg_mode mode;
     EXPECT_EQ(rocsolver_get_alg_mode(nullptr, rocsolver_function_sytrd_hetrd, &mode),
@@ -59,7 +59,7 @@ TEST_F(AlgModeArgCheck, get_null_handle)
 
 // rocsolver_get_alg_mode must return rocblas_status_invalid_pointer for a null
 // output pointer rather than crashing (GitHub issue #15665).
-TEST_F(AlgModeArgCheck, get_null_mode_pointer)
+TEST_F(checkin_misc_AlgModeArgCheck, get_null_mode_pointer)
 {
     // Verify that a valid call succeeds first (control case).
     rocsolver_alg_mode mode;
@@ -72,7 +72,7 @@ TEST_F(AlgModeArgCheck, get_null_mode_pointer)
 }
 
 // Exercise every supported selector to confirm none crash with a null pointer.
-TEST_F(AlgModeArgCheck, get_null_mode_pointer_all_selectors)
+TEST_F(checkin_misc_AlgModeArgCheck, get_null_mode_pointer_all_selectors)
 {
     const rocsolver_function selectors[] = {
         rocsolver_function_gesvd,
@@ -91,7 +91,7 @@ TEST_F(AlgModeArgCheck, get_null_mode_pointer_all_selectors)
 }
 
 // rocsolver_set_alg_mode must return rocblas_status_invalid_handle for a null handle.
-TEST_F(AlgModeArgCheck, set_null_handle)
+TEST_F(checkin_misc_AlgModeArgCheck, set_null_handle)
 {
     EXPECT_EQ(
         rocsolver_set_alg_mode(nullptr, rocsolver_function_sytrd_hetrd, rocsolver_alg_mode_gpu),
