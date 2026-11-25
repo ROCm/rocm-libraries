@@ -826,6 +826,7 @@ set(_ROCKE_LIBRARY_GPU_TEST_RELPATHS
     "tests/library/tests/test_conv_direct_nongrouped_tf32.py::TestNongroupedF32Gpu::test_one_binary_serves_every_shape"
     "tests/library/tests/test_attention_dense_gfx942_numeric.py"
     "tests/library/tests/test_attention_dense_strict_numeric.py"
+    "tests/library/tests/test_sdpa_declines_gpu.py"
     "tests/library/tests/test_attention_scalar_block_table_numeric.py"
     "tests/library/tests/test_attention_unified_lse_numeric.py"
     "tests/library/tests/test_strided_kv_decode_numeric.py"
