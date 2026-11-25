@@ -529,7 +529,7 @@ TEST_F(TestGpuEngineHeuristicDescriptor, GetEngineHeuristicDescriptorEngineConfi
 
 TEST_F(TestEngineHeuristicDescriptor, GetEngineConfigsRejectsNegativeCount)
 {
-    auto heur = getEngineHeuristicDescriptor();
+    const auto heur = getEngineHeuristicDescriptor();
     const bool findFirst = true;
     ASSERT_NO_THROW(heur->setAttribute(
         HIPDNN_ATTR_ENGINEHEUR_FIND_FIRST_EXT, HIPDNN_TYPE_BOOLEAN, 1, &findFirst));
