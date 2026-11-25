@@ -368,6 +368,9 @@ typedef struct rocke_gfx942_attn2d_build_ctx
      * reused by the post-QK K issue. */
     rocke_value_t* nxt_buf_v;
     bool skip_mask;
+    /* Set while emitting a mask-free phase whose V loads stay inside the
+     * sequence: the V loader then skips the tail bound (v_tail=False). */
+    bool v_no_tail;
     rocke_value_t* m_cur[ROCKE_GFX942_ATTN2D_MAX_REGS_PER_LANE];
     rocke_value_t* l_cur[ROCKE_GFX942_ATTN2D_MAX_REGS_PER_LANE];
     rocke_value_t* acc_cur[ROCKE_GFX942_ATTN2D_MAX_ACCS];

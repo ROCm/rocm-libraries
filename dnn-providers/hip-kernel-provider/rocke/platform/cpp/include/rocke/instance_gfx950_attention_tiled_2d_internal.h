@@ -399,6 +399,9 @@ typedef struct rocke_gfx950_attn2d_build_ctx
     rocke_value_t* ring_pf_tile_v;
     rocke_value_t* ring_next_cur_v;
     bool skip_mask;
+    /* Set while emitting a mask-free phase whose V loads stay inside the
+     * sequence: the V loader then skips the tail bound (v_tail=False). */
+    bool v_no_tail;
     rocke_value_t* m_cur[ROCKE_GFX950_ATTN2D_MAX_REGS_PER_LANE];
     rocke_value_t* l_cur[ROCKE_GFX950_ATTN2D_MAX_REGS_PER_LANE];
     rocke_value_t* acc_cur[ROCKE_GFX950_ATTN2D_MAX_ACCS];

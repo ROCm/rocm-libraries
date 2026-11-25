@@ -889,19 +889,20 @@ void rocke_gfx942_attn2d_issue_v_load_runtime(rocke_gfx942_attn2d_build_ctx_t* c
 
     /* Rows past the sequence load zero (_attention_kv_seq_tail). i64 page
      * copies without global_load_lds K bound per lane, the faster form there. */
-    rocke_kv_v_tile_bound_t v_bound;
-    rocke_kv_v_tile_bound_init(
-        &v_bound,
-        b,
-        ctx->seq_len,
-        kv_tile_idx,
-        ctx->T,
-        ctx->HD,
-        kv_halves_per_call,
-        lane_half_base,
-        NULL,
-        !(ctx->PAGE_COPIES && ctx->I64_KV_ADDR && !ctx->USE_GLOBAL_LOAD_LDS_K),
-        false);
+    rocke_kv_v_tile_bound_t v_bound = {};
+    if(!ctx->v_no_tail)
+        rocke_kv_v_tile_bound_init(
+            &v_bound,
+            b,
+            ctx->seq_len,
+            kv_tile_idx,
+            ctx->T,
+            ctx->HD,
+            kv_halves_per_call,
+            lane_half_base,
+            NULL,
+            !(ctx->PAGE_COPIES && ctx->I64_KV_ADDR && !ctx->USE_GLOBAL_LOAD_LDS_K),
+            false);
 
     for(int call = 0; call < kv_calls_per_tile; ++call)
     {
@@ -946,7 +947,8 @@ void rocke_gfx942_attn2d_issue_v_load_runtime(rocke_gfx942_attn2d_build_ctx_t* c
                    b, ctx->kv_desc, in_names, in_values, 3, &voff, &valid))
                 return;
         }
-        voff = rocke_kv_v_tile_bound_apply(&v_bound, voff, call, NULL, linear_half);
+        if(!ctx->v_no_tail)
+            voff = rocke_kv_v_tile_bound_apply(&v_bound, voff, call, NULL, linear_half);
         rocke_value_t* v_dst = rocke_b_smem_ptr_add(
             b, V_wave_base, rocke_b_const_i64(b, (int64_t)call * v_bytes_per_call_swz));
         rocke_b_async_buffer_load_lds_addr(

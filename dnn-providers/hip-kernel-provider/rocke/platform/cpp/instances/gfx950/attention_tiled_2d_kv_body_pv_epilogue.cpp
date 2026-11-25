@@ -793,7 +793,11 @@ rocke_for_t rocke_gfx950_attn2d_drive_kv_loop(rocke_gfx950_attn2d_build_ctx_t* c
     rocke_value_t* split
         = rocke_b_select(b, rocke_b_cmp_lt(b, split_lo, ctx->tile_end), split_lo, ctx->tile_end);
 
+    /* Its tiles lie inside the sequence: V needs no tail handling there
+     * unless the body also loads the next tile's V. */
+    ctx->v_no_tail = !(ctx->GROUPED_KV2 || ctx->V_DOUBLE_BUF);
     rocke_for_t loop1 = drive_kv_phase(ctx, ctx->tile_start, split, iter_args, "kv_tile_f", true);
+    ctx->v_no_tail = false;
 
     /* The iter-arg names seed the loop's SSA names, so the second loop's must
      * differ from the first's. */
