@@ -72,10 +72,11 @@ option(HIPDNN_ENABLE_KERNEL_INGESTOR "Enable the generic kernel ingestor" OFF)
 option(HIPKERNELPROVIDER_ENABLE_FLYDSL
        "Pack the prebuilt FlyDSL kernels for the kernel ingestor" OFF)
 # The conv engine group (conv/): HIP convolution kernels compiled at runtime through
-# HIPRTC and served by the kernel ingestor. OFF while the group is being built out; with
-# HIPDNN_ENABLE_KERNEL_INGESTOR OFF it builds nothing.
+# HIPRTC and served by the kernel ingestor. ON on this UHD training branch so the UHD
+# pipeline's engine images register the group; with HIPDNN_ENABLE_KERNEL_INGESTOR OFF it
+# builds nothing.
 option(HIPKERNELPROVIDER_ENABLE_CONV
-       "Build the conv engine group for the kernel ingestor" OFF)
+       "Build the conv engine group for the kernel ingestor" ON)
 # Off by default: compiles a sample of conv configs for RDNA chips and their LLVM generic
 # targets with the ROCm clang (minutes, no GPU). Run with `ctest -L conv_generic_compile`.
 option(HIPKERNELPROVIDER_CONV_GENERIC_COMPILE_TEST
@@ -777,6 +778,7 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     # The conv families whose catalogs were not pulled join HKP_PRODUCT_EXCLUDED_BUNDLES,
     # so this must run before hkp_add_packaging() wires the product root.
     if(HIPKERNELPROVIDER_ENABLE_CONV)
+        include("${CMAKE_CURRENT_SOURCE_DIR}/conv/UhdUedIdOverrides.cmake")
         include("${CMAKE_CURRENT_SOURCE_DIR}/conv/ConvContent.cmake")
     endif()
 
@@ -948,6 +950,16 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
                 DESTINATION "${HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR}/${HIPKERNELPROVIDER_DESCRIPTOR_SUBDIR}"
                 PATTERN "${HKP_PACK_STAMP_NAME}" EXCLUDE
                 PATTERN "*.provenance.json.gz" EXCLUDE)
+        # UHD training branch only: the UHD pipeline finds an engine's per-arch root as the
+        # directory holding kpack/, and a shard that packs only embedded_source kernels (the
+        # conv group) writes no archive and so no kpack/. Give each installed shard an empty
+        # one; the loader walks it and finds nothing.
+        install(CODE "
+            file(GLOB _hkp_archs RELATIVE \"${HIPKERNELPROVIDER_DESCRIPTOR_BUILD_DIR}\"
+                 \"${HIPKERNELPROVIDER_DESCRIPTOR_BUILD_DIR}/gfx*\")
+            foreach(_hkp_arch IN LISTS _hkp_archs)
+                file(MAKE_DIRECTORY \"\$ENV{DESTDIR}\${CMAKE_INSTALL_PREFIX}/${HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR}/${HIPKERNELPROVIDER_DESCRIPTOR_SUBDIR}/\${_hkp_arch}/kpack\")
+            endforeach()")
 
         # Same relative layout as the runtime tree, so a reader given this folder as its
         # provenance root finds each descriptor's sidecar at the descriptor's own relative

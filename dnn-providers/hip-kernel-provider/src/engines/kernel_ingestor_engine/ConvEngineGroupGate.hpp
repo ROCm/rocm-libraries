@@ -18,20 +18,22 @@
 namespace hip_kernel_provider::kernel_ingestor_engine
 {
 
-/// The opt-in for the conv engine group (conv/README.md): set to 1/true/on/yes, a build that
-/// ships the group (HIPKERNELPROVIDER_ENABLE_CONV) serves its engines; unset or anything else,
-/// the provider serves exactly what a build without the group serves.
+/// The conv engine group's runtime switch (conv/README.md). On this UHD training branch a
+/// build that ships the group (HIPKERNELPROVIDER_ENABLE_CONV) serves its engines unless the
+/// variable is 0/false/off/no, so the UHD pipeline's corpus, collection and validation
+/// jobs see them without setting it; a false value serves exactly what a build without the
+/// group serves.
 inline constexpr const char* CONV_ENABLE_ENV = "HIP_KERNEL_PROVIDER_ENABLE_CONV";
 
 /// Every engine of the conv group is named with this prefix (descriptors/conv/<family>).
 inline constexpr std::string_view CONV_ENGINE_PREFIX = "hipkernel:CONV_";
 
-/// Whether CONV_ENABLE_ENV is set to a true value.
+/// Whether the group is served: unless CONV_ENABLE_ENV is set to a false value.
 inline bool convEngineGroupEnabled()
 {
     const auto raw = hipdnn_data_sdk::utilities::toLower(
         hipdnn_data_sdk::utilities::trim(hipdnn_data_sdk::utilities::getEnv(CONV_ENABLE_ENV)));
-    return raw == "1" || raw == "true" || raw == "on" || raw == "yes";
+    return !(raw == "0" || raw == "false" || raw == "off" || raw == "no");
 }
 
 /// Takes the conv group's engines out of @p catalog, with the packs that bind them and the

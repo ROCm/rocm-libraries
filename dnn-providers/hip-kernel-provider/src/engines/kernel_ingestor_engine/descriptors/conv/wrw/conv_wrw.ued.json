@@ -1,6 +1,6 @@
 {
   "version": "1.0",
-  "id": "3b9b941c-fca6-5028-b311-9b0cca026c2b",
+  "id": "77d95e29-6450-4043-8e1f-cfb0bafad15b",
   "name": "hipkernel:CONV_WRW",
   "graph_match": {
     "native": "hipkernel.conv_wrw.graph_match"

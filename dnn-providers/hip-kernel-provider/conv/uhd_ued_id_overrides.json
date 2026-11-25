@@ -1,0 +1,240 @@
+{
+  "//": "UHD training branch only: fresh ids for every conv UED, so the UHD pipeline keeps this branch's L2 and L1 measurements apart from datasets collected under earlier descriptors and kernels. The UEDs in git carry the new ids; conv/UhdUedIdOverrides.cmake rewrites the old id in the DVC-stored KDPs of the packed root at configure time. Brad's branch keeps the original ids.",
+  "overrides": {
+    "8a826190-3646-5a3f-9fc2-b6197c6f8017": {
+      "id": "76077155-bcee-45c8-8010-4eeeb5cd93e4",
+      "engine": "hipkernel:CONV_DEPTHWISE_MFMA_BWD",
+      "file": "conv/depthwise_mfma/conv_depthwise_mfma_bwd.ued.json"
+    },
+    "58623da9-396d-52fd-b298-bceae40c905b": {
+      "id": "7435f9ac-db9f-4394-aa81-b32d64c3f9ca",
+      "engine": "hipkernel:CONV_DEPTHWISE_MFMA_FWD",
+      "file": "conv/depthwise_mfma/conv_depthwise_mfma_fwd.ued.json"
+    },
+    "48f3d282-ff70-54d5-ac31-240ebedc8c8b": {
+      "id": "06705373-e23a-48ca-8953-02852b325567",
+      "engine": "hipkernel:CONV_DEPTHWISE_ROWS_BWD",
+      "file": "conv/depthwise_rows/conv_depthwise_rows_bwd.ued.json"
+    },
+    "107cb3ec-9951-5712-8e8d-fe1f518333c3": {
+      "id": "c6688e88-bdbb-4bdc-9599-d7558855a162",
+      "engine": "hipkernel:CONV_DEPTHWISE_ROWS_FWD",
+      "file": "conv/depthwise_rows/conv_depthwise_rows_fwd.ued.json"
+    },
+    "89ac7ece-615a-5ade-a859-e738f6ee6820": {
+      "id": "88623c35-c122-47a6-9c51-089c748aa22a",
+      "engine": "hipkernel:CONV_DEPTHWISE_VALU_BWD",
+      "file": "conv/depthwise_valu/conv_depthwise_valu_bwd.ued.json"
+    },
+    "5554764c-18f6-56a7-ad7d-642e704610e1": {
+      "id": "a1da082c-c2f6-4507-bf47-18e317a4f15b",
+      "engine": "hipkernel:CONV_DEPTHWISE_VALU_FWD",
+      "file": "conv/depthwise_valu/conv_depthwise_valu_fwd.ued.json"
+    },
+    "5462bae3-cc0b-5f05-a9e7-1275528cfe71": {
+      "id": "204c776d-f2d8-444c-af40-db6d113423df",
+      "engine": "hipkernel:CONV_DEPTHWISE_VALU_WRW",
+      "file": "conv/depthwise_valu_wrw/conv_depthwise_valu_wrw.ued.json"
+    },
+    "d8d82507-3ff6-5011-9f2d-a0557da9f59b": {
+      "id": "469ba6f0-f061-4874-9c0b-7ff37cac4fec",
+      "engine": "hipkernel:CONV_DIRECT_BWD",
+      "file": "conv/direct/conv_direct_bwd.ued.json"
+    },
+    "9b778512-a5bc-53ce-b0b2-1b1c545830eb": {
+      "id": "b2bc9eab-35ab-46b4-8592-622b6043dc7f",
+      "engine": "hipkernel:CONV_DIRECT_BWD_TF32",
+      "file": "conv/direct/conv_direct_bwd_tf32.ued.json"
+    },
+    "0801742c-fd7e-5df0-a5d9-724b19c01390": {
+      "id": "86e9a862-1e95-4856-ad6d-82709086e88b",
+      "engine": "hipkernel:CONV_DIRECT_FWD",
+      "file": "conv/direct/conv_direct_fwd.ued.json"
+    },
+    "7ea30680-f7bc-50f1-9725-111e5481a8b3": {
+      "id": "184b7733-6db7-4550-9d6a-cb02b603909d",
+      "engine": "hipkernel:CONV_DIRECT_FWD_TF32",
+      "file": "conv/direct/conv_direct_fwd_tf32.ued.json"
+    },
+    "e00d56c0-45f0-504f-854b-6de133bd9a7c": {
+      "id": "0d459cbd-3594-4d0c-af7c-6430b08907b2",
+      "engine": "hipkernel:CONV_FFT_BWD",
+      "file": "conv/fft/conv_fft_bwd.ued.json"
+    },
+    "5d325d1e-63a7-5f5f-9bd8-dfae72553c13": {
+      "id": "c09d84f3-53b4-4f1d-8b47-5600af588187",
+      "engine": "hipkernel:CONV_FFT_FWD",
+      "file": "conv/fft/conv_fft_fwd.ued.json"
+    },
+    "eb851de6-a58a-5407-9f6f-427b8667ade7": {
+      "id": "6193b3f6-c1ef-4e5e-91a2-d8599c3996fd",
+      "engine": "hipkernel:CONV_FFT_WRW",
+      "file": "conv/fft/conv_fft_wrw.ued.json"
+    },
+    "035d3bf1-2851-5015-9c75-f2613b7d4071": {
+      "id": "893cde03-49a4-4a03-b3db-f1e04f4e0e22",
+      "engine": "hipkernel:CONV_GROUP_BWD",
+      "file": "conv/group/conv_group_bwd.ued.json"
+    },
+    "fe458e8d-817f-5a07-9b50-9f5bbc6e1021": {
+      "id": "3bb4438f-7e4b-442c-a57b-9ae1b65cbe6b",
+      "engine": "hipkernel:CONV_GROUP_BWD_TF32",
+      "file": "conv/group/conv_group_bwd_tf32.ued.json"
+    },
+    "ebca2f9e-0b82-5b43-9c8d-3720c7563f5e": {
+      "id": "b5c43a03-b45c-409b-858a-a341a038c346",
+      "engine": "hipkernel:CONV_GROUP_FWD",
+      "file": "conv/group/conv_group_fwd.ued.json"
+    },
+    "ecf1c14f-b011-5dcf-8cec-ecefb9c5a4c9": {
+      "id": "c91b49af-7838-4eef-b249-5bb243a89a0b",
+      "engine": "hipkernel:CONV_GROUP_FWD_TF32",
+      "file": "conv/group/conv_group_fwd_tf32.ued.json"
+    },
+    "12a9fb82-7939-5661-85a8-52797e29ccd1": {
+      "id": "f662e552-a73e-43c5-86f8-00a5b37d7d47",
+      "engine": "hipkernel:CONV_GROUP_WRW",
+      "file": "conv/group/conv_group_wrw.ued.json"
+    },
+    "83a21bca-7d11-589c-a93c-dc6fcd6e771a": {
+      "id": "3954af55-db9d-426f-b616-52a23207ff70",
+      "engine": "hipkernel:CONV_GROUP_VALU_BWD",
+      "file": "conv/group_valu/conv_group_valu_bwd.ued.json"
+    },
+    "507167d8-672f-5881-864b-90d51d5db681": {
+      "id": "cc53c4a9-9d4d-4dcb-ba38-9bb9ee415b4a",
+      "engine": "hipkernel:CONV_GROUP_VALU_FWD",
+      "file": "conv/group_valu/conv_group_valu_fwd.ued.json"
+    },
+    "42ed130e-589d-5f7f-b78d-66783d601b7b": {
+      "id": "de9cbad0-c3a2-4d77-8842-8ff02e16fbcb",
+      "engine": "hipkernel:CONV_GROUP_VALU_WRW",
+      "file": "conv/group_valu_wrw/conv_group_valu_wrw.ued.json"
+    },
+    "2c407c72-862e-5af2-8c7d-b69c37a08699": {
+      "id": "82b9bc59-fe45-4cf1-914b-f788afdc0639",
+      "engine": "hipkernel:CONV_IGEMM_BWD",
+      "file": "conv/igemm/conv_igemm_bwd.ued.json"
+    },
+    "cba16554-7dac-55a3-aab4-148ef3dd8be5": {
+      "id": "bb031f13-be6f-4fbc-90e9-4959fdaf5d53",
+      "engine": "hipkernel:CONV_IGEMM_BWD_TF32",
+      "file": "conv/igemm/conv_igemm_bwd_tf32.ued.json"
+    },
+    "965f0e4d-9f29-5625-a68e-114f31cfe090": {
+      "id": "f14d0ba0-cd6a-40c9-b3a5-08cfb44e7005",
+      "engine": "hipkernel:CONV_IGEMM_FWD",
+      "file": "conv/igemm/conv_igemm_fwd.ued.json"
+    },
+    "ed54d7a4-55e4-5d8b-a354-b98c5669230e": {
+      "id": "fdf4c527-4fc6-41b1-8da4-bef58e8b2f47",
+      "engine": "hipkernel:CONV_IGEMM_FWD_TF32",
+      "file": "conv/igemm/conv_igemm_fwd_tf32.ued.json"
+    },
+    "c0ba21a8-0fe2-5d0b-9c09-fe129e540ebc": {
+      "id": "fe38f3ba-6350-485e-bc9b-2a9eba345250",
+      "engine": "hipkernel:CONV_IGEMM_NCHW_BWD",
+      "file": "conv/igemm_nchw/conv_igemm_nchw_bwd.ued.json"
+    },
+    "7c03ab36-0cbe-596d-891a-a0c948e85830": {
+      "id": "c8b4e2be-4cc6-4419-be71-bdfeacca59a8",
+      "engine": "hipkernel:CONV_IGEMM_NCHW_BWD_TF32",
+      "file": "conv/igemm_nchw/conv_igemm_nchw_bwd_tf32.ued.json"
+    },
+    "6e768386-3eb7-448e-b7de-fd49a5d81008": {
+      "id": "1c2f87df-c943-4a0e-bc75-bab4ad2877f5",
+      "engine": "hipkernel:CONV_NAIVE_BWD",
+      "file": "conv/naive/conv_naive_bwd.ued.json"
+    },
+    "cca81275-2795-4e6c-be24-a126ce7ff50c": {
+      "id": "ced02b80-3183-4781-8e31-f5280101ac6a",
+      "engine": "hipkernel:CONV_NAIVE_FWD",
+      "file": "conv/naive/conv_naive_fwd.ued.json"
+    },
+    "a89d7e1e-767e-485a-9164-7a2fe03ded2a": {
+      "id": "2eba9807-7e90-4640-9f7a-423eb20483cc",
+      "engine": "hipkernel:CONV_NAIVE_WRW",
+      "file": "conv/naive/conv_naive_wrw.ued.json"
+    },
+    "9fe08154-3520-51e7-ba27-0f0c95a936c3": {
+      "id": "9a41c44d-f3ad-4d78-bf9d-f75fbc908ff4",
+      "engine": "hipkernel:CONV_NARROW_BWD",
+      "file": "conv/narrow/conv_narrow_bwd.ued.json"
+    },
+    "c7a42d91-1c26-5404-b95d-3c33471a16b9": {
+      "id": "ff28bfe0-3314-4f6a-8910-087b75911c63",
+      "engine": "hipkernel:CONV_NARROW_FWD",
+      "file": "conv/narrow/conv_narrow_fwd.ued.json"
+    },
+    "4e40715e-efa1-5bff-9ca5-5e03933f56dd": {
+      "id": "4c4bcaf0-9ef3-469f-943e-c61f984c4c00",
+      "engine": "hipkernel:CONV_NARROW_WRW",
+      "file": "conv/narrow/conv_narrow_wrw.ued.json"
+    },
+    "02134409-467d-5459-8042-f3bbc9ba796b": {
+      "id": "4e46d412-7d61-43a1-bd09-659d350d86ae",
+      "engine": "hipkernel:CONV_SMALLC_BWD",
+      "file": "conv/smallc/conv_smallc_bwd.ued.json"
+    },
+    "994e1c62-3036-5462-aca1-c67661aa84ab": {
+      "id": "f217c6cb-739c-4935-a2dd-1209360e8d40",
+      "engine": "hipkernel:CONV_SMALLC_FWD",
+      "file": "conv/smallc/conv_smallc_fwd.ued.json"
+    },
+    "abbafa58-214d-59ae-a968-0bec9aa15c9c": {
+      "id": "9f73695e-bfac-4d2d-92c9-bace445ac976",
+      "engine": "hipkernel:CONV_STEM_BWD",
+      "file": "conv/stem_bwd/conv_stem_bwd.ued.json"
+    },
+    "023e5412-cf94-56a7-ad94-5636ccc1042f": {
+      "id": "7e5bb7b2-ee57-4c97-8384-f8cae2bf2854",
+      "engine": "hipkernel:CONV_WINOGRAD_BWD",
+      "file": "conv/winograd/conv_winograd_bwd.ued.json"
+    },
+    "118bd583-21e9-573f-a68b-08b5fe8666fa": {
+      "id": "16cd3c75-9892-4c95-a2e2-0f8f275cf9c5",
+      "engine": "hipkernel:CONV_WINOGRAD_BWD_BF16",
+      "file": "conv/winograd/conv_winograd_bwd_bf16.ued.json"
+    },
+    "7e0f5f5e-75b6-51c1-a43c-8127c3239557": {
+      "id": "e68d4745-4e8f-4545-b3c6-9cd08f2c59d1",
+      "engine": "hipkernel:CONV_WINOGRAD_BWD_F43",
+      "file": "conv/winograd/conv_winograd_bwd_f43.ued.json"
+    },
+    "e7d8dd17-9293-5868-8a9d-2caf8d618bf0": {
+      "id": "8347e345-f0e2-469c-93bb-fdea13334156",
+      "engine": "hipkernel:CONV_WINOGRAD_FWD",
+      "file": "conv/winograd/conv_winograd_fwd.ued.json"
+    },
+    "635631a5-5844-578b-8c39-52dbbb1a25c3": {
+      "id": "1ed2bbe7-7cb6-47f6-b0bc-878b6076f785",
+      "engine": "hipkernel:CONV_WINOGRAD_FWD_BF16",
+      "file": "conv/winograd/conv_winograd_fwd_bf16.ued.json"
+    },
+    "1219eae9-a0f4-5529-a15e-cf3e8121086e": {
+      "id": "427f4b50-20a1-4440-8f9b-5081cdefa10d",
+      "engine": "hipkernel:CONV_WINOGRAD_FWD_F43",
+      "file": "conv/winograd/conv_winograd_fwd_f43.ued.json"
+    },
+    "dee486c7-88fc-51cf-a4af-87b59eced2bb": {
+      "id": "28d2385d-2a70-46c5-aee2-892a3c84d876",
+      "engine": "hipkernel:CONV_WINOGRAD_WRW",
+      "file": "conv/winograd/conv_winograd_wrw.ued.json"
+    },
+    "3320abf0-dd9b-533d-a45a-01ffe7b2d5ce": {
+      "id": "db35ce0a-aa08-4787-b6f2-ab6528168a68",
+      "engine": "hipkernel:CONV_WINOGRAD_ND_FWD",
+      "file": "conv/winograd_nd/conv_winograd_nd_fwd.ued.json"
+    },
+    "3b9b941c-fca6-5028-b311-9b0cca026c2b": {
+      "id": "77d95e29-6450-4043-8e1f-cfb0bafad15b",
+      "engine": "hipkernel:CONV_WRW",
+      "file": "conv/wrw/conv_wrw.ued.json"
+    },
+    "9f7db6f4-bfc6-55cf-81b7-118696c1c683": {
+      "id": "4ed1e5eb-3fca-4e0f-b5fd-c08e33533d13",
+      "engine": "hipkernel:CONV_WRW_TF32",
+      "file": "conv/wrw/conv_wrw_tf32.ued.json"
+    }
+  }
+}

@@ -1,6 +1,6 @@
 {
   "version": "1.0",
-  "id": "abbafa58-214d-59ae-a968-0bec9aa15c9c",
+  "id": "9f73695e-bfac-4d2d-92c9-bace445ac976",
   "name": "hipkernel:CONV_STEM_BWD",
   "graph_match": {
     "native": "hipkernel.conv_stem_bwd.graph_match"

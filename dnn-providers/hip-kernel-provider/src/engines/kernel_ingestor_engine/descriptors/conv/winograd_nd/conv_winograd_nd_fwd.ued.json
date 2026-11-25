@@ -1,6 +1,6 @@
 {
   "version": "1.0",
-  "id": "3320abf0-dd9b-533d-a45a-01ffe7b2d5ce",
+  "id": "db35ce0a-aa08-4787-b6f2-ab6528168a68",
   "name": "hipkernel:CONV_WINOGRAD_ND_FWD",
   "graph_match": {
     "native": "hipkernel.conv_winograd_nd_fwd.graph_match"

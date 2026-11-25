@@ -36,14 +36,14 @@ bool isConvEngine(const std::string& name)
     return std::string_view(name).substr(0, CONV_ENGINE_PREFIX.size()) == CONV_ENGINE_PREFIX;
 }
 
-TEST(TestConvEngineGroupGate, EnabledOnlyByATrueValue)
+TEST(TestConvEngineGroupGate, DisabledOnlyByAFalseValue)
 {
-    for(const char* value : {"1", "true", "TRUE", "on", "yes", " 1 "})
+    for(const char* value : {"", "1", "true", "TRUE", "on", "yes", " 1 "})
     {
         const ScopedEnvironmentVariableSetter env(CONV_ENABLE_ENV, value);
         EXPECT_TRUE(convEngineGroupEnabled()) << "'" << value << "'";
     }
-    for(const char* value : {"", "0", "false", "off", "no", "2"})
+    for(const char* value : {"0", "false", "OFF", "no", " 0 "})
     {
         const ScopedEnvironmentVariableSetter env(CONV_ENABLE_ENV, value);
         EXPECT_FALSE(convEngineGroupEnabled()) << "'" << value << "'";
