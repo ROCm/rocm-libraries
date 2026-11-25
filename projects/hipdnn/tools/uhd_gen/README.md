@@ -11,6 +11,9 @@ This tool takes benchmark timing data and produces:
 
 `train --adapter linear_data` produces a RelLin per-configuration linear model and the
 `LinearDataAdapter` artifact instead ([below](#the-linear_data-adapter-rellin)).
+`train --adapter mlp_data` produces an ensemble of small neural networks, for an engine's
+L1 estimate (`--role predict_engine`) or as a catalog ranker (`--role sort_kernel_catalog`),
+and the `MlpDataAdapter` artifact ([below](#the-mlp_data-adapter)).
 
 Promotion installs that pair into a descriptor tree. Every model -- L1 included -- is
 reached through a reference in its owning UED's role map (RFC 0019 §3.1); a UHD never
@@ -180,10 +183,15 @@ with its constant value), so the provenance says what was asked for and what nev
 | `--model-encoding` | No | `model.bin` tree encoding: `split_leaf` (default) or `node_arrays`, for a runtime that predates `split_leaf` (see [The `model.bin` encoding](#the-modelbin-encoding)) |
 | `--leaf-precision` | No | `split_leaf` leaf storage: `float32` (default) or `float64` (exact) |
 | `--early-exit` | No | `auto` (default), `none`, or `TREES:KEEP[,TREES:KEEP...]`: the catalog-ranking early-exit schedule written into `model.bin` (see [Early exit](#early-exit)) |
-| `--adapter` | No | Model family: `tree_data` (default) or `linear_data` (see [The `linear_data` adapter](#the-linear_data-adapter-rellin)). `generate` takes the same flag |
+| `--adapter` | No | Model family: `tree_data` (default), `linear_data` (see [The `linear_data` adapter](#the-linear_data-adapter-rellin)) or `mlp_data` (either role, a catalog ranker for `sort_kernel_catalog`; refuses `--group-by-feature`; see [The `mlp_data` adapter](#the-mlp_data-adapter)). `generate` takes the same flag |
 | `--key-features` | No | `linear_data`: the features whose values together identify a kernel configuration (default: every `$kernel.*` reference in the signature) |
 | `--family-features` | No | `linear_data`: a coarser key whose family fit scores a configuration never seen in training (default: none) |
 | `--ridge` / `--min-rows` | No | `linear_data`: ridge strength (default `1e-2`) and the row count below which a configuration is shrunk harder (default `10`) |
+| `--mlp-hidden` | No | `mlp_data`: comma-separated hidden layer widths of each network (default `64,64`) |
+| `--mlp-members` | No | `mlp_data`: networks in the ensemble (default `3`) |
+| `--mlp-epochs` | No | `mlp_data`: epochs of the cosine schedule; a member stops earlier when its validation loss stops improving (default `300`) |
+| `--mlp-seed` | No | `mlp_data`: seed of the first member; member `k` uses `seed + k` (default `0`) |
+| `--mlp-max-rows` | No | `mlp_data`: subsample a corpus of more rows than this, seeded; `0` uses every row (default `0`) |
 | `--training-arches` | No | Architectures the model was trained on, for §9.2 OOD detection |
 | `--model-version` | No | Semantic version embedded in the model metadata |
 
@@ -218,12 +226,13 @@ fitted on it models the wrong engine behaviour without any number looking wrong.
 
 `promote` copies the descriptor and artifact into the UED's directory — under
 `heuristics/<ued-id>/<role>/<arch>/<metric>/`, or directly under `<arch>/` for a
-metric-less ranker — and binds it under `<role>.<arch>`. `sort_kernel_catalog` and
-`predict_engine` bind a **list** per arch, one UHD per `score.metric` (RFC 0019 §3.1):
-the incoming UHD replaces only the bound UHD of its own metric (read from the bound UHD
-itself, which must therefore be installed in the tree) and otherwise joins the list; a
-single id is converted to a list. `predict_applicable_kernels` stays a single id. It
-preserves other model references and authored knobs.
+metric-less ranker — and binds it under `<role>.<arch>`. Every role binds a **list** per
+arch (RFC 0019 §3.1): `sort_kernel_catalog` and `predict_engine` hold one UHD per
+`score.metric`, and `predict_applicable_kernels`, the candidate generators for future JIT
+spaces, follows the same rule. The incoming UHD replaces only the bound UHD of its own
+metric (a metric-less one replaces the metric-less one; the metric is read from the bound
+UHD itself, which must therefore be installed in the tree) and otherwise joins the list; a
+single id is converted to a list. It preserves other model references and authored knobs.
 
 **One UUID is one model, under every arch key that binds it.** Promoting a model already
 installed elsewhere in the tree for another arch binds the installed copy (no second
@@ -240,7 +249,7 @@ reports), or `--uhd-id METRIC=UUID`. With neither, promotion is refused — a mo
 any other id is one the engine never reads. Because the loader keys on the id, not the
 path, a different model already installed under that id anywhere in the tree is
 **replaced where it lies** (document and artifact, under their existing file names) when
-it is this slot's model: a `tree_data` model of the same `score.metric` whose artifact's
+it is this slot's model: a `tree_data` or `mlp_data` model of the same `score.metric` whose artifact's
 training architectures are all among those being promoted for (`--arch`, or the
 manifest's `training_arches` for `--arch default`). That is how a retrained ASM SDPA
 model replaces the one shipped beside the provider. An installed model under the id that
@@ -260,6 +269,9 @@ It validates everything before writing anything, and refuses rather than half-su
   verifier's structural checks (every offset, vtable, vector, string terminator and nested
   table, as `VerifyGbdtModelBuffer`), the artifact's `features_hash` matching the
   descriptor's, and its `num_features` equal to the `features_signature` slot count; for
+  `linear_data` and `mlp_data`, the same checks on their artifacts (`HLIN` and `HMLP`
+  identifiers, their own verifiers and bounds) -- an `mlp_data` artifact must also name the
+  UHD's `score.metric`, and installs under either role; for
   any other artifact, the declared digest. A `predict_engine` model must not be a grouped
   (two-layer) artifact. A `custom_library` body's `config` must be omitted or empty, as
   the runtime parser requires.
@@ -286,6 +298,10 @@ It validates everything before writing anything, and refuses rather than half-su
   after any `--remove-knob`. The runtime drops any other model and ranks by priority, then
   id (RFC 0019 §6.3 check 2). Problem-side facts such as dtype, head counts or causal
   come from the graph's own columns, never `$kernel.*`;
+- a model that reads bare a feature a valid graph may leave unbound is refused: read it
+  through `value_or_default`, which `python -m uhd_gen rewrite-signature` does for an
+  installed model without retraining (see
+  [Optional features are read through a default](#optional-features-are-read-through-a-default));
 - a `predict_engine` model for a descriptor-backed engine must record
   `trained_against.selector_revision`, which the runtime compares with the engine's
   current selector revision. Every binding `hipdnn_bench` records carries it.
@@ -456,7 +472,7 @@ is.
 |----------|----------|-------------|
 | `--input` | Yes | Benchmark CSV/JSON to evaluate on |
 | `--model-dir` | Yes | A `train --output-dir` result |
-| `--model` | No | Artifact to rank with (default: `model.lgbm` if kept, else the descriptor's `tree_data.artifact` — the file the engine itself loads) |
+| `--model` | No | Artifact to rank with (default: `model.lgbm` if kept, else the descriptor's `tree_data` (or `linear_data` or `mlp_data`) `.artifact` -- the file the engine itself loads) |
 | `--output` | No | Report path (default: `<model-dir>/eval_report.json`) |
 | `--eval-fraction` | No | Fraction of **problems** held out and scored (default: 0.2; `1.0` scores everything and says loudly that the figure is optimistic) |
 | `--seed` | No | Seed for the problem-level split (default: 0), recorded in the report |
@@ -654,6 +670,29 @@ and retain the raw device field — which training then drops on the same eviden
 by the variance rule above, naming it with its value. `device_coverage` in
 `train_manifest.json` records the observed values of every device field either way.
 
+Automatic feature proposals never read a tensor identifier's value. A published name ending
+in `.uid`, such as the `<engine>.bias.uid` a matcher binds so dispatch finds the tensor's
+buffer, labels the tensor and says nothing about the problem, and a corpus fixes it, so a
+model reading the number would score the corpus's label. The proposal reads it as a presence
+flag instead, `{"!=": ["$<engine>.bias.uid", -1]}`. The attention packs of the
+hip-kernel-provider (Flydsl SDPA, the gfx942 and gfx950 dense and unified attention) bind an
+absent optional tensor's uid as -1, so the flag is the matcher's own test and any other
+value, 0 included, is a bound tensor. Not every matcher does: `gfx1151_wmma_attention` binds
+`lse.uid` as the output's uid when stats are off (its `write_lse` says whether they are on)
+and leaves `scale.uid`, `bias.uid`, `sink.uid`, `q_offset.uid`, `page_table.uid` and
+`seq_len_*.uid` unbound when the tensor is absent, and `flydsl_rmsnorm` leaves `inv_rms.uid`
+unbound outside a training graph. A column some rows leave unbound enters a proposal only if
+it is one of hipDNN's optional features, which an engine's namespace never is, so such a
+column is left out of the proposal without an `omitted_proposals` entry. The uid of an
+optional operand of a graph node (`graph.nodes[<i>].<operand>.uid`) is one of those features,
+and the flag reads it through its default,
+`{"!=": [{"value_or_default": ["$graph.nodes[0].bias.uid", -1]}, -1]}`, which is 0 on a row
+that leaves it unbound; it is still the presence flag and never a read of the uid's value.
+`generation_manifest.json` lists each identifier read as a flag under `omitted_proposals`
+with `reason: tensor_identifier` and the flag read instead; with `--feature-search` the entry
+names the flag only when the recipe the search chose reads it. An authored recipe is taken
+as written.
+
 A value a row does not publish is **absent**, never zero and never NaN: a conv-fwd row
 has no `dy`, and pandas fills that hole with NaN, which `evaluate_feature_rows` turns back
 into JSON `null` before the evaluator sees it (a column no row publishes goes over as
@@ -664,6 +703,184 @@ absent input means. Aggregates follow the same rule: "no node of this type" may 
 but "work unknown" stays absent and is never silently 0. Whether a signature is usable on
 a corpus is therefore the evaluator's answer over the published feature maps
 (`check_signature_evaluates`), not a check that every referenced name is published.
+
+### Optional features are read through a default
+
+Some published features are absent on perfectly valid graphs: an optional attribute the graph
+leaves unset (SDPA's `attn_scale_value`, `dropout_probability`, `left_bound`, ...), a field of
+an optional tensor it does not carry (`attn_mask`, `seq_len_q`, ...), an element of a vector
+attribute the node is too low-rank to have (`dilation[1]` of a 1-D convolution), and the work
+features where hipDNN cannot count the work. A model reading one bare cannot score such a
+graph (RFC 0019 §6.7, absent is not zero, and §6.8 item 9). hipDNN lists them, from the schemas' optional fields:
+`hipdnn_uhd_features --optional-features` prints the list, and `--lint` reports the
+references of a signature that read one unguarded. A name does not say its node's type, so
+each node is taken to be any type having every operand the signature reads at it.
+
+- `train` reads every such reference through `value_or_default`, with the default
+  `uhd_gen/optional.py` holds: the API's meaning of "unset" (1.0 for the SDPA scale, 0 for the
+  dropout probability, 1/sqrt(K) for the GDN/KDA scale, the last axis of the input for a
+  BlockScaleQuantize `axis`, the float maximum for a ReLU upper clip, ...) or, where unset has
+  no number, a marker: -1 (an omitted tensor's fields, an unset uid or sequence length, unknown
+  work, an engine-config constraint the config does not pin). A row without the feature trains
+  on the value the runtime will read. A test fails when hipDNN gains an optional attribute
+  the table does not cover.
+- `generate`'s automatic selection keeps a column some rows leave unbound when it is one of
+  those features; any other gap (a rank some rows' tensor lacks) still leaves the column out.
+  `--feature-search` (below) reads each such column through `value_or_default` itself, with
+  the same default.
+- In a `tflops` model the work features may stay bare: where the work is unknown, throughput
+  is too, and reporting nothing there is the right answer.
+- `promote` refuses a model that reads one unguarded, and `hipdnn_validate_descriptors`
+  warns about one.
+
+A model trained before this is migrated without retraining:
+
+```bash
+python -m uhd_gen rewrite-signature <tree>/.../heuristic.uhd.json ... [--role ROLE] [--dry-run]
+    [--feature-evaluator PATH] [--report FILE] [--proof-rows N] [--seed N]
+```
+
+`--role` names the role each model is bound to (default: the role directory in its path;
+a path that names none needs it), `--feature-evaluator` is as for `train`, `--report FILE`
+also writes the JSON report to a file, `--proof-rows N` (default 64) and `--seed N` set the
+random rows the proof uses, and `--dry-run` proves and reports without writing. The JSON
+report goes to stdout, one entry per descriptor, and the exit status is 1 if any descriptor
+fails.
+
+It wraps each unguarded reference, restates `features_hash`, the hash the artifact embeds
+(`tree_data`, `linear_data` and `mlp_data`; the trees, weights and every other value are
+unchanged, which it checks) and the artifact digest the adapter records (`<adapter>.hash`),
+after proving through the evaluator that the features are identical on rows binding every
+reference of the old and the rewritten signature and that a row lacking each wrapped one is
+now scorable. The artifact and then the descriptor are written through temporary files and
+`os.replace`, after the staged artifact passes the loader's checks. An adapter whose artifact
+embeds the hash but that has no rule (`table`) is refused: retrain it.
+A recipe found by `--feature-search` before its optional reads were guarded is rewritten the
+same way, into the form the search writes now: a bare optional column becomes
+`value_or_default` of it wherever it appears in an expression, and a bare uid presence flag
+becomes the guarded flag; a recipe the search wrote now is `already_safe`.
+
+The proof covers only graphs the old model could already score. Graphs that become scorable
+(those lacking a wrapped feature) are outside what the old model trained on: they reach it
+with the default or the marker, which no training row held, and go down whichever branches
+that value selects. A model whose training rows always bound the feature has learnt nothing
+about such graphs, so before promoting a rewritten model, `evaluate` it on rows that lack the
+feature (for example a corpus with the optional `form`s), or retrain it on a corpus that
+includes them.
+
+A ranker's model hash and features hash are inputs to its engine's selector revision, so
+rewriting a `sort_kernel_catalog` model changes it, and the `predict_engine` models recording
+the old one are unavailable until they are restamped or retrained. The report's
+`selector_revision` says whether the rewrite changes it (`changes`) and names the
+`predict_engine` models installed beside the ranker
+(`l1_models_to_restamp_or_retrain`).
+
+### Feature exclusions, `feature-search`, and overriding
+
+**Exclusions.** A proposal (and a search) never reads these published columns, because a model
+that does learns the corpus rather than the cost; each is listed in `omitted_proposals` with its
+`reason`:
+
+| Reason | Columns |
+|---|---|
+| `positional_tensor` | `graph.tensors[<i>].*`: positional copies of a node's tensor roles, which are role-ambiguous (the node-role columns stay) |
+| `derived_numel` | names ending `.numel`: the product of the published dims |
+| `caller_value` | `graph.nodes[<i>].attn_scale_value` and a matcher's `<namespace>.scale`, `.sm_scale` or `.softmax_scale`, each also with a `_bits` or `_value` suffix (not `scale_source`, a mode, nor a tensor of the scale such as `scale.uid`): caller-chosen multipliers, often `1/sqrt(head_dim)`, so a second head_dim to a model |
+| `board_identity` | `device.total_global_mem`: varies only between the pooled boards |
+
+Strides, `dropout_p`/`dropout_probability` and `virtual` are kept. An authored recipe
+(`--features`, `--feature-signature`) is never filtered.
+
+**Search.** `generate --feature-search` replaces the proposal with a search on the training
+rows (never the evaluation slice). It is scored for one metric's label and for the `--adapter`
+model, and every metric of the run shares the recipe it finds, so it takes one `--metric` and
+`--adapter tree_data` or `mlp_data` (not `linear_data`, which fits a per-problem slowdown the
+search does not score). `generate` and `feature-search` take the same `--adapter` spellings,
+`--max-candidates` and `--adapter-pass-budget` (a negative budget is refused), and `--seed`
+means the same in both: the first of three validation seeds, `--seed`, `--seed + 1` and
+`--seed + 2`. The search replaces the proposal's dimension-to-tile pairs with its own grid and
+tier templates, so `--dim-tile` is refused with it. The same search runs on any rows, to read
+what it chooses:
+
+```bash
+python -m uhd_gen feature-search --input train.csv --target tflops \
+    --descriptor-tree ./descriptors --engine hipkernel:my_engine --output-dir ./search
+```
+
+The candidates are the published columns every row binds, and the optional features (see
+"Optional features are read through a default") some rows leave unbound (constant columns drop
+out, and an expression offered twice is one candidate; columns that merely have equal values on
+the rows, as the query and key head counts do on a corpus of equal-head attention, are all kept
+and listed under `candidates.equal_candidates` in the report, because the rows cannot say they
+are one quantity: the backward elimination removes the redundant one), and
+`jsonexpr` expressions over them. The rows that leave an optional column unbound stay in the
+search's rows and take the column's default: every candidate over it, the base column and each
+padding, ratio, stride-order, grid and tier expression, reads it as
+`{"value_or_default": ["$<name>", <default>]}`, so the recipe passes the optional-read lint
+that `train` and `promote` apply (which optional names need the guard follows the run's
+metric, as `hipdnn_uhd_features --lint` decides: a `tflops` model keeps the work features
+bare; `uhd_gen feature-search`, which names no metric, guards them too). The fill
+`d / (ceil_div(d, m) * m)` of an optional dim is read as 1 where the dim is unbound: its default
+pads to 0, which the evaluator's `/` declines on. An optional column
+that holds strings cannot take a default and is left out (`omitted_proposals` reason
+`optional_categorical`). The expressions are: padding (`ceil_div(d, m) * m`, `d / (ceil_div(d, m) * m)`, `d % m`, for
+m in 8..128), ratios of dims of different tensor roles, stride order
+(`{">": ["$q.strides[1]", "$q.strides[2]"]}`: head-major or token-major, for each adjacent pair
+before a tensor's innermost stride; raw strides stay candidates), grid counts
+(`ceil_div(d, t)` of one non-innermost axis of a tensor times the extents of its other
+non-innermost axes, `t` one of the catalog's tile-like integer fields (`block_*`, `tile_*`;
+64 and 128 when it has none), also divided by `$device.cu_count` when that field varies;
+the innermost axis is the one with stride 1, else the last) and, given catalog values, `d` rounded up to each catalog field's tiers
+(`--catalog-values file.json` with `{"field": [values...]}`, or the metadata of the engine's KDP
+kernels in `--descriptor-tree`, which `generate` always reads). More than `--max-candidates`
+(2000, also a `generate` flag) candidates are refused, not sampled. The search is backward elimination scored by
+LightGBM on the log target with 5-fold validation by problem, repeated over three seeds (each seed
+deals the folds anew): each round
+drops the least important 15% (permutation importance; near-duplicate clusters, |corr| > 0.999,
+leave together), it stops after two rounds worse than the best by more than
+`max(spread, 0.002)` or at 8 features, and keeps the smallest round within that tolerance of the
+best. A prune then refits without each feature, weakest first, and removes it unless the score
+rises by more than `max(spread, 0.002)`, until every feature left costs more than that.
+
+Folds hold whole graphs: by default a graph is its `benchmark`, so one measured on two boards is
+never on both sides of a split. `feature-search --group-by` names the columns that together
+identify a graph, in any order; `--group-by benchmark device` makes each board's measurements of
+a benchmark a graph of its own.
+
+With `--adapter mlp_data` (`generate` passes its own adapter and `--mlp-hidden/--mlp-epochs/
+--mlp-max-rows`; `feature-search` takes the adapter but no `--mlp-*` option, so its pass fits
+the defaults; `--adapter` is `tree_data` by default, which runs no MLP pass) a forward pass
+follows, scored by the MLP trainer the model
+will be fitted with (one ensemble member, early stopping on whole graphs) on paired per-fold
+differences. Its folds are one layout of the graphs for every seed (a seed varies the MLP, not
+which graphs are held out), so folds 0-1 (discovery), 2-3 (confirm) and 4 (removal) are disjoint
+sets of graphs. The seeds of a fold score the same graphs, so they are averaged and the standard
+error is taken over the folds. Up to `--adapter-pass-budget` (60, also a `generate` flag) tier,
+grid, pad and ratio features the prune did not keep, best LightGBM gain first (on the rows outside
+the discovery folds) and dealt out across those templates, are tried one at a time: a feature is
+picked if the held-out error on folds 0-1 falls by more than `max(2 standard errors, 0.002)`,
+added only if folds 2-3 agree by more than one standard error (and 0.002), and removed again if
+fold 4, one fold with no spread to estimate, finds it costs no more than 0.002. The LightGBM prune
+can remove what the MLP uses, so the set before the prune (plus the added features) is scored
+too, on folds 2-4, and replaces the pruned set only if it wins by the pick's margin; the report
+records both scores and the choice, and the removal-cost guarantee holds for the pruned set. The report lists every
+candidate's MLP delta and standard error.
+Every recipe entry is checked against `hipdnn_uhd_features` on every row, the rows with unbound
+optional columns included, before it is written. The
+same rows and seeds give the same recipe.
+
+The output directory (`feature_search/` beside the model for `generate`, whose
+`generation_manifest.json` records the report path and a summary under `feature_search`)
+holds `recipe.json`, a features-signature array; `feature_search_report.json`, with the
+candidate counts per template, the candidates whose values are equal on the rows, the
+exclusions, every round (features kept, score and spread),
+the prune's steps, the adapter pass, the final features with each one's removal cost (the MLP's
+for a feature the adapter pass added), and what was dropped and why; and a Markdown summary.
+
+**Overriding.** `--features` or `--feature-signature` is taken as written and skips the
+search. To choose a subset of what the search found, edit `recipe.json` and pass it back as
+`--feature-signature recipe.json`. `--feature-search` together with either, or with
+`--dim-tile`, is an error.
 
 ### Reproducible generation
 
@@ -762,7 +979,9 @@ work count, it falls back to `robustMeanMs`/`min`/uncalibrated with **no** `scor
 — the engine's metric-less default ranker, which is legal (§2.5, §15.1), ranks this
 engine's own catalog just as well, and warns that the score is no longer comparable with
 another engine's; the thorough policy then falls back to the engine's L1 prediction. An
-explicitly requested `--metric tflops` without a work count fails instead.
+explicitly requested `--metric tflops` without a work count fails instead. `mlp_data` has no
+such fallback: a catalog `generate --adapter mlp_data` must pass `--metric`
+([below](#the-mlp_data-adapter)).
 
 `generate` takes the work count from the engine's own published `graph.flops`, which is
 the effective count the runtime computed for the graph it just ran. A corpus that was
@@ -879,6 +1098,26 @@ cannot consume candidate metadata. An engine-level query takes no constraint, so
 `hipdnn_bench` and `uhd_gen generate` for this role: a limited run would be a
 configuration-level query, not an L1 one.
 The example feature set demonstrates the workflow, not an accuracy recommendation.
+
+An engine-level measurement is one graph, so by default each graph is its own
+`hipdnn_bench` process, and an engine whose setup is costly pays it for every graph:
+MIOpen loading its CK grouped-convolution library takes about 11 s of a ~17 s graph on
+gfx1151. `--bench-batch N` hands the bench N graphs at a time as a `--graph-list` (one
+path per line); one process and one handle measure them in turn, each graph with its own
+graph, plan and buffers, and write one JSON line per graph naming it as `graph_path`. A
+batch is killed once it goes `--bench-timeout` seconds without finishing a graph. Graphs a
+batch leaves unanswered (it crashed or stalled on one of them) or answers with a failure
+(an earlier graph may have left the device or handle broken) are measured again one per
+process, so a graph is recorded as failed only when it fails on its own. `--plugin-dir`
+may name the engine's plugin library rather than a directory, so the bench loads only that
+plugin and no other provider's setup. Catalog sweeps (L2) are not batched: a sweep already
+measures every candidate of its graph in one process.
+
+```bash
+hipdnn_bench --graph-list graphs.txt --engine-name MIOPEN_ENGINE \
+    --plugin-dir <plugin dir>/miopen_plugin.dll \
+    --collect-immediate --ranking-metric tflops
+```
 
 Generation preserves supplied graph UUIDs and assigns reproducible IDs to ID-less
 JSON inputs. It records the physical device ID, selector revision, commands,
@@ -1140,7 +1379,13 @@ measurements for a slotted engine (the L2 `sort_kernel_catalog` path): sweep wit
 A slot ranker is trained without `--metric`: a model that declares `score.metric` makes the
 loader drop the engine, and `generate --slot` and `promote` refuse it. `train` defaults
 `--metric` to `tflops` when `--target` is omitted or `tflops`, so give a slot ranker an
-explicit other target, such as `avgTimeMs`.
+explicit other target, such as `avgTimeMs`. An `mlp_data` model always names the metric it
+predicts, so it can never be a slot ranker (a slot has no time of its own, and a slot ranker
+must be metric-less): `generate --adapter mlp_data --slot` is refused before anything is read,
+and `promote` and the packer refuse such a model bound to a slot. Use `tree_data` or
+`linear_data` for slot rankers. A slotted engine's own L1 estimate is another matter: its
+`predict_engine` model names a metric and records every slot's KMD in `trained_against.kmds`
+(a `1.1` UHD), and it may be `mlp_data`.
 
 **Installing.** A slot ranker records its slot in `trained_against.slot` and installs under
 `heuristics/<ued-id>/<slot>/sort_kernel_catalog/<arch>/`; `predict_engine` installs at the
@@ -1209,6 +1454,108 @@ python -m uhd_gen train --adapter linear_data \
     --group-by benchmark device --target avgTimeMs --objective min \
     --output-dir ./uhd_output
 ```
+
+## The `mlp_data` adapter
+
+`python -m uhd_gen train --adapter mlp_data --metric tflops ...` fits an ensemble of small
+fully connected networks to the log of one metric (`MlpDataAdapter`, `mlp_model.fbs`,
+identifier `HMLP`). It serves both roles. With `--role predict_engine` it is one engine's L1
+estimate: the same job a `tree_data` L1 model does, for about 2 us per engine at run time
+where a 500-tree model takes 6-15 us, more as engines' models crowd the CPU cache. Those
+figures are from one Ryzen AI MAX+ 395 core (clang -O3, the portable SSE2 build, median of 7
+runs, one NHWC convolution graph, 77 inputs, three 64-64 networks): 2.0-2.2 us per
+`mlp_data` estimate (about 1.3 us with the opt-in AVX2 path), 6.0-7.0 us for one 500-tree,
+127-leaf model, and 10-15 us per engine when 32 engines' models are scored in turn. Pick it
+when the cost of scoring every engine of a graph matters; compare the two with `evaluate` on
+a held-out corpus first: that evaluation, not this adapter, decides between `mlp_data` and
+`tree_data`. With `--role sort_kernel_catalog` it is a catalog ranker, an ungrouped one like
+a single-layer `tree_data` model (see the end of this section). `--group-by-feature` is
+refused: there is one ensemble per model and no grouped artifact.
+
+What it predicts. The network estimates the **log** of the registered ranking metric
+(`--metric`, default `tflops` as for any L1 model; a non-default `--target` needs `--metric`
+too, since the artifact names the metric it predicts), so the descriptor is the one a
+`tree_data` model of that role has: `objective` the metric's direction, `score: {metric,
+calibrated, transform: log}`, and `mlp_data: {artifact, hash}`. The artifact records the
+metric it predicts and the runtime refuses it when the UHD's `score.metric` differs.
+
+How it fits (`mlp.py`, numpy only: no new dependency, deterministic given its seeds).
+
+- Per engine, every row of its L1 corpus, or every candidate row of a catalog corpus
+  (`--mlp-max-rows` subsamples a larger one). The
+  feature matrix is the one `tree_data` fits, after constant columns are dropped.
+- Inputs: `t = sign(x) * log1p(|x|)` with a missing value at 0, standardized by the column's
+  mean and spread over the training rows. A column that never varies is not an input; a
+  column missing in some but not all rows also contributes a 0/1 missing flag.
+  The inputs are not clamped, so a row outside the training range gets an extrapolated
+  score; run `evaluate` on graphs larger than the training corpus to check how the model
+  extrapolates there.
+- The target is `log(metric)`, standardized (`target_mean`, `target_scale = std + 1e-9`).
+- Each network is `input -> 64 -> SiLU -> 64 -> SiLU -> 1` (`--mlp-hidden`), initialised as
+  PyTorch's `nn.Linear` is, trained on L1 loss by AdamW (rate `3e-3`, weight decay `1e-4`)
+  under cosine annealing over `--mlp-epochs`, in minibatches of 256. A seeded 15% of the
+  rows (of the problems, when the corpus has problem identity) validate; a member stops
+  after 25 epochs without a better validation loss and keeps its best weights.
+- The score is the mean of `--mlp-members` such networks (member `k` seeded `--mlp-seed + k`
+  for its weights, split and shuffles), mapped back by `target_mean + target_scale * mean`.
+  `train_manifest.json` records the fit (`mlp_fit`): widths, seeds, rows, epochs run and each
+  member's held-out loss.
+
+`model.bin` is an `MlpModel`. Loading it checks, in order: the size (at most 64 MiB), the
+digest, the identifier, the FlatBuffers verifier, then the model's bounds -- 1 to 4096
+features, a network input of 1 to 512 values, at most 512 wide layers, 1 to 8 layers per
+network and 1 to 64 networks, every slot in range, finite weights and standardization with
+`scale > 0`, each layer's inputs equal to the last one's outputs and one output at the end --
+then the UHD's `score.metric` and `features_hash`. `artifact.load_mlp_artifact` repeats those
+checks offline with the runtime's reasons, `promote` runs it before installing, and
+`evaluate` scores the shipped bytes through `evaluate._mlp_scorer` (float32 members and a
+double ensemble mean, as the runtime does; a row with an infinite feature scores NaN, which
+the runtime declines). `TestMlpDataAdapter` pins the C++ adapter against the writer on a
+shared fixture. An installed `mlp_data` model and a `tree_data` one may replace each other in
+place for the same slot (`promote`, [above](#promote-arguments)).
+
+As a catalog ranker (`--role sort_kernel_catalog`) the model is trained, evaluated and
+installed like an ungrouped `tree_data` model: `evaluate` ranks the held-out problems'
+candidates by its score and reports the regret against the best candidate, and `promote`
+installs it into the role's slot. Nothing prefers it: whether it is the model to ship is what
+that evaluation decides, against a `tree_data` or `linear_data` one trained on the same
+corpus. `sort_kernel_catalog` ranks the candidates of one problem, so its rows come in
+problems; the early-stopping split therefore holds out whole problems (15% of them, seeded),
+keyed by the first `--group-by` column (the `benchmark` column by default) as the
+`tree_data` trainer's `GroupKFold` keys them, so a candidate is never validated against
+siblings it trained next to. An L1 corpus holds out whole graphs the same way, keyed by its
+`benchmark` column: it has one row per graph and device, so a graph measured on two
+devices never has one device's row train the network and the other's validate it. Only a
+corpus with no problem identity splits by row. `mlp_fit.validation_split` records `group` or
+`row`.
+
+```bash
+python -m uhd_gen train --adapter mlp_data --role predict_engine --metric time \
+    --engine provider:engine7 --input l1_corpus.json \
+    --features graph.flops graph.nodes \
+    --mlp-hidden 64,64 --mlp-members 3 --mlp-epochs 300 \
+    --output-dir ./uhd_l1
+```
+
+**`generate --adapter mlp_data`** trains through `train`, so it holds an `mlp_data` run to
+what `train` needs, and refuses a run that cannot meet it before it measures or reads anything:
+
+- *The metric is forwarded.* `--metric` reaches `train` as `--metric`, not only as the label
+  column and direction it implies, so the artifact names it (`generate --dataset <published>
+  --adapter mlp_data --metric time` writes `score.metric: time`). A `tree_data` run still
+  reaches `train` as `--target`/`--objective`: there `--metric time` only picks the label, and
+  a slot ranker has to stay metric-less.
+- *No `--slot`.* A slot ranker must be metric-less (RFC 0021 §7) and an `mlp_data` model always
+  names a metric, so `--slot` with `--adapter mlp_data` is refused.
+- *No `robustMeanMs` fallback.* A catalog run without `--metric` falls back to the metric-less
+  `robustMeanMs` label when the engine publishes no `graph.flops`, which `mlp_data` cannot
+  train; that is only known after the sweep, so a catalog (`sort_kernel_catalog`) run needs
+  `--metric tflops` or `--metric time` up front. An L1 (`predict_engine`) run keeps its default
+  `tflops`.
+
+A slotted engine's L1 estimate may be `mlp_data` (its `trained_against` carries `kmds`, a `1.1`
+UHD); its slot rankers may not.
+
 ## Output
 
 `train` generates:
@@ -1216,7 +1563,7 @@ python -m uhd_gen train --adapter linear_data \
 ```
 output_dir/
 ├── <stem>.uhd.json     # the UHD: features, objective, score metric, artifact
-├── model.bin           # FlatBuffer GbdtModel for TreeDataAdapter (LinearModel for LinearDataAdapter)
+├── model.bin           # FlatBuffer GbdtModel for TreeDataAdapter (LinearModel for LinearDataAdapter, MlpModel for MlpDataAdapter)
 └── train_manifest.json # training provenance
 ```
 
@@ -1370,7 +1717,8 @@ live in `_generated/`, committed alongside the tool the same way the C++
 _generated/hipdnn_flatbuffers_sdk/data_objects/
 ├── GbdtModel.py, GbdtTree.py, GbdtGroup.py                          # gbdt_model.fbs
 ├── IntegerArray.py, RealArray.py, *Array.py                         # its typed arrays
-└── LinearModel.py, LinearConfig.py, LinearBasisTerm.py              # linear_model.fbs
+├── LinearModel.py, LinearConfig.py, LinearBasisTerm.py              # linear_model.fbs
+└── MlpModel.py, MlpNetwork.py, MlpLayer.py, MlpInput.py             # mlp_model.fbs
 ```
 
 `uhd_gen/__init__.py` prepends that directory to `sys.path`, so `import
@@ -1384,7 +1732,8 @@ does it automatically, and so does the `flatc-hipdnn` pre-commit hook:
 ```bash
 python projects/hipdnn/scripts/run_flatc.py \
     projects/hipdnn/flatbuffers_sdk/schemas/gbdt_model.fbs \
-    projects/hipdnn/flatbuffers_sdk/schemas/linear_model.fbs
+    projects/hipdnn/flatbuffers_sdk/schemas/linear_model.fbs \
+    projects/hipdnn/flatbuffers_sdk/schemas/mlp_model.fbs
 ```
 
 That command emits both the C++ header and these bindings from one invocation, so

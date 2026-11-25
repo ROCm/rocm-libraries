@@ -311,24 +311,34 @@ TEST_P(CPU_UnitTestLibEnvVarUInt64_NONE, LibEnvVar) { this->RunTest(); };
 TEST_P(CPU_UnitTestLibEnvVarString_NONE, LibEnvVar) { this->RunTest(); };
 TEST_P(CPU_UnitTestLibEnvVarWrapper_NONE, LibEnvVar) { this->RunTest(); };
 
-INSTANTIATE_TEST_SUITE_P(Full,
+INSTANTIATE_TEST_SUITE_P(Standard,
                          CPU_UnitTestLibEnvVarGetUnknownVariable_NONE,
                          testing::Values(GetTestParams()));
 
-INSTANTIATE_TEST_SUITE_P(Full,
+INSTANTIATE_TEST_SUITE_P(Standard,
                          CPU_UnitTestLibEnvVarUpdateUnknownVariable_NONE,
                          testing::Values(GetTestParams()));
 
-INSTANTIATE_TEST_SUITE_P(Full,
+INSTANTIATE_TEST_SUITE_P(Standard,
                          CPU_UnitTestLibEnvVarClearUnknownVariable_NONE,
                          testing::Values(GetTestParams()));
 
-INSTANTIATE_TEST_SUITE_P(Full, CPU_UnitTestLibEnvVarRestore_NONE, testing::Values(GetTestParams()));
+INSTANTIATE_TEST_SUITE_P(Standard,
+                         CPU_UnitTestLibEnvVarRestore_NONE,
+                         testing::Values(GetTestParams()));
 
-INSTANTIATE_TEST_SUITE_P(Full, CPU_UnitTestLibEnvVarBool_NONE, testing::Values(GetTestParams()));
+INSTANTIATE_TEST_SUITE_P(Standard,
+                         CPU_UnitTestLibEnvVarBool_NONE,
+                         testing::Values(GetTestParams()));
 
-INSTANTIATE_TEST_SUITE_P(Full, CPU_UnitTestLibEnvVarUInt64_NONE, testing::Values(GetTestParams()));
+INSTANTIATE_TEST_SUITE_P(Standard,
+                         CPU_UnitTestLibEnvVarUInt64_NONE,
+                         testing::Values(GetTestParams()));
 
-INSTANTIATE_TEST_SUITE_P(Full, CPU_UnitTestLibEnvVarString_NONE, testing::Values(GetTestParams()));
+INSTANTIATE_TEST_SUITE_P(Standard,
+                         CPU_UnitTestLibEnvVarString_NONE,
+                         testing::Values(GetTestParams()));
 
-INSTANTIATE_TEST_SUITE_P(Full, CPU_UnitTestLibEnvVarWrapper_NONE, testing::Values(GetTestParams()));
+INSTANTIATE_TEST_SUITE_P(Standard,
+                         CPU_UnitTestLibEnvVarWrapper_NONE,
+                         testing::Values(GetTestParams()));

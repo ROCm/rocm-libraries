@@ -131,8 +131,11 @@ bool isWorkgroupBarrierSignal(const StinkyInstruction& inst) {
 }
 
 bool isClusterBarrierWait(const StinkyInstruction& inst) {
+    // Memory tokens select LDS dependencies; the physical barrier ID still
+    // identifies a cluster rendezvous. Explicit typed waits must remain hard
+    // stops and count toward cluster-token balance and idempotency.
     return isBarrierWithLiteralId(inst, /*wantSignal=*/false, kClusterBarrierId,
-                                  /*rejectMemToken=*/true);
+                                  /*rejectMemToken=*/false);
 }
 
 bool isClusterBarrierSignal(const StinkyInstruction& inst) {
@@ -299,8 +302,33 @@ StinkyInstruction* firstRealInstAfter(StinkyInstruction* anchor) {
     return nullptr;
 }
 
+/// Lift a cluster-signal insertion point above the `s_wait_dscnt` run right in
+/// front of \p anchor. StinkyWaitCntInsertionPass parked those drains for the
+/// instruction at \p anchor, not for the signal, so the signal goes first and
+/// the drain stays next to its consumer. Only `s_wait_dscnt` is stepped over:
+/// it neither reads nor writes SCC, so the gate's `s_cmp` keeps the SCC state
+/// the anchor was chosen for, and stopping at anything else (a label included)
+/// keeps the signal on the same side of every branch target and barrier.
+IRBase* hoistSignalAboveLeadingDsCntWaits(IRBase* anchor) {
+    if (anchor == nullptr) return anchor;
+    auto* anchorInst = dyn_cast<StinkyInstruction>(anchor);
+    if (anchorInst == nullptr || anchorInst->getParent() == nullptr) return anchor;
+    BasicBlock* parent = anchorInst->getParent();
+    IRBase* hoisted = anchor;
+    auto it = BasicBlock::iterator(anchorInst);
+    while (it != parent->begin()) {
+        --it;
+        auto* prev = dyn_cast<StinkyInstruction>(it.getNodePtr());
+        if (prev == nullptr || prev->getUnifiedOpcode() != GFX::s_wait_dscnt) break;
+        hoisted = prev;
+    }
+    return hoisted;
+}
+
+/// The signal goes above the `s_wait_dscnt` run in front of \p anchor.
 void insertClusterBarrierSignalOnlyBefore(IRBase* anchor, AsmIRBuilder& irBuilder,
                                           GfxArchID archId) {
+    anchor = hoistSignalAboveLeadingDsCntWaits(anchor);
     const std::string labelName = kSkipLabelPrefix + makeRandomHash();
 
     const HwInstDesc* cmpDesc = getMCIDByUOp(GFX::s_cmp_eq_u32, archId);
@@ -333,11 +361,13 @@ void insertClusterBarrierSignalOnlyBefore(IRBase* anchor, AsmIRBuilder& irBuilde
 }
 
 /// `s_barrier_signal -3` alone. Used when the wave-0 check already happened at
-/// the loop entrance, so this site must not clobber SCC again.
+/// the loop entrance, so this site must not clobber SCC again. The signal goes
+/// above the `s_wait_dscnt` run in front of \p anchor.
 void insertBareClusterBarrierSignalBefore(IRBase* anchor, AsmIRBuilder& irBuilder,
                                           GfxArchID archId) {
     const HwInstDesc* signalDesc = getMCIDByUOp(GFX::s_barrier_signal, archId);
     assert(signalDesc && "Cluster-barrier signal opcode is not supported on this architecture");
+    anchor = hoistSignalAboveLeadingDsCntWaits(anchor);
     StinkyInstruction* signalInst = irBuilder.create(signalDesc, anchor);
     signalInst->addSrcReg(StinkyRegister(kClusterBarrierId));
     signalInst->addModifier<CommentData>(CommentData{"cluster_barrier signal"});
@@ -464,18 +494,24 @@ bool isFollowedByClusterBarrierHandshakeOrSignal(StinkyInstruction* anchor) {
     return sym == kWaveIdxSymbol || sym == kLoopCounterLSymbol;
 }
 
-/// Forward scan from ``wgSignal`` for its paired ``s_barrier_wait -1`` and
-/// return the first real instruction after that wait.
-IRBase* anchorAfterWorkgroupBarrierPair(StinkyInstruction* wgSignal, IRBase* defaultAnchor) {
+/// Scan only within the hard stop's segment and before the wait being led.
+/// A later WG pair cannot anchor an earlier signal, and labels/branches/calls
+/// end the straight-line proof even though labels are pseudo instructions.
+IRBase* anchorAfterWorkgroupBarrierPair(StinkyInstruction* wgSignal, IRBase* defaultAnchor,
+                                        const IRBase* limit) {
     BasicBlock* parent = wgSignal->getParent();
     if (parent == nullptr) return defaultAnchor;
     for (auto it = std::next(BasicBlock::iterator(wgSignal)); it != parent->end(); ++it) {
+        if (it.getNodePtr() == limit) break;
         auto* inst = dyn_cast<StinkyInstruction>(it.getNodePtr());
+        if (inst != nullptr && isSegmentBoundary(*inst)) break;
         if (inst == nullptr || isPseudoInst(inst)) continue;
         if (isWorkgroupBarrierSignal(*inst)) break;
         if (!isWorkgroupBarrierWait(*inst)) continue;
         for (auto after = std::next(it); after != parent->end(); ++after) {
+            if (after.getNodePtr() == limit) break;
             auto* next = dyn_cast<StinkyInstruction>(after.getNodePtr());
+            if (next != nullptr && isSegmentBoundary(*next)) break;
             if (next == nullptr || isPseudoInst(next)) continue;
             return next;
         }
@@ -484,17 +520,19 @@ IRBase* anchorAfterWorkgroupBarrierPair(StinkyInstruction* wgSignal, IRBase* def
     return defaultAnchor;
 }
 
-/// Forward scan from ``afterWait`` for the next workgroup barrier handshake
-/// (signal then wait).  Returns the first real instruction after that wait, or
-/// ``defaultAnchor`` when the pair is missing or incomplete.
-IRBase* anchorAfterWorkgroupBarrierFollowing(StinkyInstruction* afterWait, IRBase* defaultAnchor) {
+/// Find a complete earlier WG pair after the previous cluster wait. Missing or
+/// out-of-bounds pairs leave the signal co-located with its own wait.
+IRBase* anchorAfterWorkgroupBarrierFollowing(StinkyInstruction* afterWait, IRBase* defaultAnchor,
+                                             const IRBase* limit) {
     BasicBlock* parent = afterWait->getParent();
     if (parent == nullptr) return defaultAnchor;
     for (auto it = std::next(BasicBlock::iterator(afterWait)); it != parent->end(); ++it) {
+        if (it.getNodePtr() == limit) break;
         auto* inst = dyn_cast<StinkyInstruction>(it.getNodePtr());
+        if (inst != nullptr && isSegmentBoundary(*inst)) break;
         if (inst == nullptr || isPseudoInst(inst)) continue;
         if (!isWorkgroupBarrierSignal(*inst)) continue;
-        return anchorAfterWorkgroupBarrierPair(inst, defaultAnchor);
+        return anchorAfterWorkgroupBarrierPair(inst, defaultAnchor, limit);
     }
     return defaultAnchor;
 }
@@ -867,9 +905,9 @@ Rule3SignalAnchor findRule3SignalAnchorByCycleLead(
     // which is where the group is gathered again.
     auto hardStopAnchor = [&](StinkyInstruction* inst) -> IRBase* {
         if (isClusterBarrierWait(*inst))
-            return anchorAfterWorkgroupBarrierFollowing(inst, defaultAnchor);
+            return anchorAfterWorkgroupBarrierFollowing(inst, defaultAnchor, sccLimit(inst));
         if (isWorkgroupBarrierSignal(*inst) && priorWaitAnchors.count(inst) != 0)
-            return anchorAfterWorkgroupBarrierPair(inst, defaultAnchor);
+            return anchorAfterWorkgroupBarrierPair(inst, defaultAnchor, sccLimit(inst));
         return nullptr;
     };
 

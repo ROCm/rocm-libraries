@@ -35,6 +35,12 @@ struct Config
     // row straddling into the next row, which is not contiguous on the A side. Padding the
     // row to 48 keeps every granule whole and costs the MFMA the difference.
     bool row_pad = false;
+    // 2 for fp16 and bf16; 4 for tf32, which is fp32 in memory and a bf16 pair in the MFMA. A
+    // tf32 granule is eight fp32 loaded into registers and split there, each half of the pair
+    // stored as a granule of its own bf16 plane.
+    int elem_bytes = 2;
+
+    constexpr bool is_tf32() const { return elem_bytes == 4; }
 
     constexpr int m_tile() const { return MFMA_M * m_tile16; }
     constexpr int n_tile() const { return MFMA_N * n_tile16; }
@@ -59,7 +65,12 @@ struct Config
 
     // The epilogue stages the output through the larger of the two operand stages, which
     // the widest tiles outgrow; drains() is the number of parts it goes out in.
-    constexpr int out_row() const { return n_tile() + GRANULE; }
+    //
+    // A 16-bit row is padded a granule off the banks; an fp32 row has no room to spare at
+    // the widest tile, so it swizzles instead. Either way an operand element and an output
+    // element are the same bytes -- a tf32 operand is a bf16 in each of two planes -- so the
+    // stage holds one output element per operand element.
+    constexpr int out_row() const { return is_tf32() ? n_tile() : n_tile() + GRANULE; }
     constexpr int stage_cap() const
     {
         return (n_tile() > m_tile() ? n_tile() : m_tile()) * k_chunk;
@@ -76,9 +87,9 @@ struct Config
 
     constexpr int acc_vgprs() const { return wave_m16() * wave_n16() * 4; }
     // Both tiles are double-buffered; see the staging-depth note in kernel.h.
-    constexpr int lds_bytes() const { return 2 * (m_tile() + n_tile()) * k_chunk * 2; }
+    constexpr int lds_bytes() const { return 2 * (m_tile() + n_tile()) * k_chunk * elem_bytes; }
 
-    // 16-byte pieces each tile needs staged, and the passes that takes.
+    // Granules each tile needs staged, and the passes that takes.
     constexpr int a_pieces() const { return m_tile() * granules(); }
     constexpr int b_pieces() const { return n_tile() * granules(); }
     constexpr int a_rounds() const { return a_pieces() / threads(); }

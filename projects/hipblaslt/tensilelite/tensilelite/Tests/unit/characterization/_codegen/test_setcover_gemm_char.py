@@ -35,7 +35,7 @@ _CONFIGS = [
     ("tensilelite/Tests/common/gemm/gfx12/agntab_coverage_gfx1250.yaml", "4b6d8db0315c", "gfx1250", 40, {0: 8}),
     ("tensilelite/Tests/common/gemm/gfx12/subtile_bf16_gfx1250.yaml", "86d095d528dc", "gfx1250", 180, {0: 8}),
     ("tensilelite/Tests/common/gemm/swizzleB.yaml", "86c30091d793", "gfx942", 13824, {0: 2}),
-    ("tensilelite/Tests/common/gemm/gfx950/fp8_mxfp4_bf16_tn_act.yaml", "222b7bb5bfff", "gfx950", 24, {-2: 2, 0: 2}),
+    ("tensilelite/Tests/common/gemm/gfx950/fp8_mxfp4_bf16_tn_act.yaml", "222b7bb5bfff", "gfx950", 24, {0: 2}),
     ("tensilelite/Tests/common/gemm/fp8nfp16mix_hhs.yaml", "f9f0eccb98d0", "gfx942", 5, {0: 5}),
     ("tensilelite/Tests/common/gemm/gfx12/f8b8ss_gfx1250.yaml", "35ae075de6c1", "gfx1250", 8, {0: 4}),
     ("tensilelite/Tests/common/gemm/fp32_nt.yaml", "bb7dea403a47", "gfx942", 1, {0: 1}),

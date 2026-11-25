@@ -24,8 +24,13 @@
  *
  *******************************************************************************/
 
+#include <algorithm>
+#include <array>
+#include <cstdint>
 #include <cstring>
+#include <limits>
 #include <map>
+#include <stdexcept>
 #include <string>
 #include <utility>
 #include <vector>
@@ -517,6 +522,7 @@ namespace
     constexpr size_t fusedWOffset       = fusedMyRankOffset + sizeof(uint32_t);
     constexpr size_t fusedDrainOffset   = fusedWOffset + sizeof(uint32_t);
     constexpr size_t fusedAMOffset      = fusedDrainOffset + sizeof(uint32_t);
+    constexpr size_t fusedNumCuOffset   = fusedAMOffset + sizeof(uint32_t);
 
     template <typename T>
     T packedAt(KernelArguments const& args, size_t offset)
@@ -526,27 +532,34 @@ namespace
         return result;
     }
 
-    KernelInvocation fusedCustomCall()
+    KernelInvocation fusedCustomCall(FusedA2A mode     = FusedA2A::GemmA2A,
+                                     int      fixedWGM = std::numeric_limits<int>::max(),
+                                     void*    myBuf    = nullptr)
     {
         ContractionSolution solution;
         configureProbeKernel(solution, {CustomArgType::uint32, CustomArgSemantic::FusedA2ASegment});
+        solution.problemType.fusedA2A = mode;
 
         auto problem = dummyProblem();
-        problem.setFusedGemmA2A(true);
+        problem.setFusedA2A(mode);
         problem.setWorld(2);
         problem.setFusedA2AExtent(256);
 
         FusedA2APeerFields peer0{};
         peer0[FUSED_A2A_SLOT_FLAG_PTR] = const_cast<char*>(&fusedPeerFlag);
 
+        FusedA2APeerFields peer1{};
+        peer1[FUSED_A2A_SLOT_BUF_PTR] = myBuf;
+
         ContractionInputs inputs;
-        inputs.fusedA2APeers   = {peer0, FusedA2APeerFields{}};
+        inputs.fusedA2APeers   = {peer0, peer1};
         inputs.fusedA2ACounter = const_cast<char*>(&fusedCounter);
         inputs.fusedA2AMyRank  = 1;
         inputs.fusedA2ADrain   = FUSED_A2A_DRAIN_RECV;
 
-        return solution.generateCustomCall<false>(
-            problem, inputs, probeDevice(), StreamKSettings{});
+        auto device     = probeDevice();
+        device.fixedWGM = fixedWGM;
+        return solution.generateCustomCall<false>(problem, inputs, device, StreamKSettings{});
     }
 }
 
@@ -562,4 +575,231 @@ TEST(CustomKernelTest, FusedSegmentPacksEveryField)
     EXPECT_EQ(packedAt<uint32_t>(fused.args, fusedWOffset), 2u);
     EXPECT_EQ(packedAt<uint32_t>(fused.args, fusedDrainOffset), FUSED_A2A_DRAIN_RECV);
     EXPECT_EQ(packedAt<uint32_t>(fused.args, fusedAMOffset), 256u);
+    EXPECT_EQ(packedAt<uint32_t>(fused.args, fusedNumCuOffset),
+              static_cast<uint32_t>(TensileLite::testing::_SPX_CU));
+}
+
+TEST(CustomKernelTest, A2AGemmRejectsANegativeRuntimeWgm)
+{
+    EXPECT_NO_THROW(fusedCustomCall(FusedA2A::A2AGemm));
+    EXPECT_THROW(fusedCustomCall(FusedA2A::A2AGemm, -8), std::runtime_error);
+    EXPECT_NO_THROW(fusedCustomCall(FusedA2A::GemmA2A, -8));
+}
+
+TEST(CustomKernelTest, A2AGemmRejectsAMisalignedA2ABuf)
+{
+    alignas(128) static char buf[256];
+    constexpr int            defaultWGM = std::numeric_limits<int>::max();
+    EXPECT_NO_THROW(fusedCustomCall(FusedA2A::A2AGemm, defaultWGM, buf));
+    EXPECT_THROW(fusedCustomCall(FusedA2A::A2AGemm, defaultWGM, buf + 64), std::runtime_error);
+    EXPECT_NO_THROW(fusedCustomCall(FusedA2A::GemmA2A, defaultWGM, buf + 64));
+}
+
+// The random seed takes exactly one 32-bit slot. Follow it with another argument
+// to verify proper width is used.
+TEST(CustomKernelTest, RndSeedDescriptorPacksThroughCustomCall)
+{
+    ContractionSolution solution;
+    configureProbeKernel(solution, {CustomArgType::uint32, CustomArgSemantic::RNDSeed});
+    solution.customKernel.args.push_back({CustomArgType::uint32, CustomArgSemantic::Padding});
+
+    auto              problem = dummyProblem();
+    auto              device  = probeDevice();
+    ContractionInputs inputs;
+    StreamKSettings   sk;
+
+    auto invocation = solution.generateCustomCall<false>(problem, inputs, device, sk);
+
+    ASSERT_EQ(invocation.args.size(), 2 * sizeof(uint32_t));
+
+    uint32_t padding = 1;
+    std::memcpy(&padding,
+                static_cast<uint8_t const*>(invocation.args.data()) + sizeof(uint32_t),
+                sizeof(padding));
+    EXPECT_EQ(padding, 0u);
+}
+
+static size_t integerArgBytes(CustomArgType type)
+{
+    switch(type)
+    {
+    case CustomArgType::int8:
+    case CustomArgType::uint8:
+        return 1;
+    case CustomArgType::int16:
+    case CustomArgType::uint16:
+        return 2;
+    case CustomArgType::int32:
+    case CustomArgType::uint32:
+        return 4;
+    case CustomArgType::int64:
+    case CustomArgType::uint64:
+        return 8;
+    default:
+        throw std::logic_error("not an integer kernel argument type");
+    }
+}
+
+// Same-typed kernargs are packed without padding, so slot index sits at index * width.
+// Values are zero-extended, which assumes a little-endian host.
+static uint64_t emittedInteger(KernelInvocation const& invocation, size_t index, size_t width)
+{
+    uint64_t value = 0;
+    std::memcpy(&value, static_cast<uint8_t const*>(invocation.args.data()) + index * width, width);
+    return value;
+}
+
+// The byte strides must be computed in integers: a float product rounds to 24 bits.
+static std::array<uint64_t, 4> emittedByteStrides(rocisa::DataType abType,
+                                                  rocisa::DataType cdType,
+                                                  CustomArgType    type,
+                                                  size_t           lda,
+                                                  size_t           ldb,
+                                                  size_t           ldc,
+                                                  size_t           ldd)
+{
+    ContractionProblemGemm problem = ContractionProblemGemm::GEMM_Strides(true,
+                                                                          false,
+                                                                          abType,
+                                                                          abType,
+                                                                          cdType,
+                                                                          cdType,
+                                                                          4,
+                                                                          2,
+                                                                          64,
+                                                                          1,
+                                                                          lda,
+                                                                          -1,
+                                                                          ldb,
+                                                                          -1,
+                                                                          ldc,
+                                                                          -1,
+                                                                          ldd,
+                                                                          -1,
+                                                                          0.0);
+    problem.setComputeInputTypeA(abType);
+    problem.setComputeInputTypeB(abType);
+
+    ContractionSolution solution;
+    configureProbeKernel(solution, {type, CustomArgSemantic::StrideA0Bytes});
+    solution.customKernel.args = {{type, CustomArgSemantic::StrideA0Bytes},
+                                  {type, CustomArgSemantic::StrideB0Bytes},
+                                  {type, CustomArgSemantic::StrideC0Bytes},
+                                  {type, CustomArgSemantic::StrideD0Bytes}};
+
+    AMDGPU            device = probeDevice();
+    ContractionInputs inputs;
+    StreamKSettings   sk;
+    KernelInvocation  invocation = solution.generateCustomCall<false>(problem, inputs, device, sk);
+    size_t width = integerArgBytes(type);
+    EXPECT_EQ(invocation.args.size(), 4 * width);
+    return {emittedInteger(invocation, 0, width),
+            emittedInteger(invocation, 1, width),
+            emittedInteger(invocation, 2, width),
+            emittedInteger(invocation, 3, width)};
+}
+
+TEST(CustomKernelTest, ByteStridesAreExactBeyondTheFloatMantissa)
+{
+    // 2-byte C/D: 2 * 16777219 = 33554438, which a float cannot represent.
+    std::array<uint64_t, 4> bf16 = emittedByteStrides(
+        rocisa::DataType::Float8, rocisa::DataType::BFloat16, CustomArgType::int32, 64, 64, 16777219, 16777219);
+    EXPECT_EQ(bf16[0], 64u);
+    EXPECT_EQ(bf16[1], 64u);
+    EXPECT_EQ(bf16[2], 33554438u);
+    EXPECT_EQ(bf16[3], 33554438u);
+
+    // 1-byte A/B: 2^26 + 4 needs 27 significant bits.
+    constexpr size_t big = (size_t(1) << 26) + 4;
+    std::array<uint64_t, 4> fp8
+        = emittedByteStrides(rocisa::DataType::Float8,
+                             rocisa::DataType::BFloat16,
+                             CustomArgType::int32,
+                             big,
+                             big,
+                             4,
+                             4);
+    EXPECT_EQ(fp8[0], 67108868u);
+    EXPECT_EQ(fp8[1], 67108868u);
+    EXPECT_EQ(fp8[2], 8u);
+    EXPECT_EQ(fp8[3], 8u);
+}
+
+// Byte strides of A, B, C and D when only the given tensor gets a non-trivial leading dimension.
+static std::array<uint64_t, 4> emittedByteStridesWithLd(CustomArgType type, size_t tensor, size_t ld)
+{
+    std::array<size_t, 4> lds = {64, 64, 4, 4};
+    lds[tensor]               = ld;
+    return emittedByteStrides(rocisa::DataType::Float8,
+                              rocisa::DataType::BFloat16,
+                              type,
+                              lds[0],
+                              lds[1],
+                              lds[2],
+                              lds[3]);
+}
+
+// A byte stride must fit the integer type its kernel declares: the largest value is accepted and
+// read back exactly, and one more is rejected.
+TEST(CustomKernelTest, ByteStridesMustFitTheirKernelArgumentType)
+{
+    struct Limit
+    {
+        CustomArgType type;
+        uint64_t      max;
+    };
+    std::array<Limit, 8> const limits = {{{CustomArgType::int8, std::numeric_limits<int8_t>::max()},
+                                          {CustomArgType::uint8, std::numeric_limits<uint8_t>::max()},
+                                          {CustomArgType::int16, std::numeric_limits<int16_t>::max()},
+                                          {CustomArgType::uint16, std::numeric_limits<uint16_t>::max()},
+                                          {CustomArgType::int32, std::numeric_limits<int32_t>::max()},
+                                          {CustomArgType::uint32, std::numeric_limits<uint32_t>::max()},
+                                          {CustomArgType::int64, std::numeric_limits<int64_t>::max()},
+                                          {CustomArgType::uint64, std::numeric_limits<uint64_t>::max()}}};
+
+    for(Limit const& limit : limits)
+    {
+        SCOPED_TRACE("argument type " + std::to_string(static_cast<int>(limit.type)));
+        // A and B have 1-byte elements, C and D have 2-byte elements, and the limits are odd.
+        for(size_t tensor = 0; tensor < 4; tensor++)
+        {
+            SCOPED_TRACE("tensor " + std::to_string(tensor));
+            size_t bytesPerElement = tensor < 2 ? 1 : 2;
+            // size_t(-1) asks GEMM_Strides for the default leading dimension, so it is not usable.
+            size_t largestLd = std::min<uint64_t>(limit.max / bytesPerElement,
+                                                  std::numeric_limits<size_t>::max() - 1);
+            std::array<uint64_t, 4> strides = emittedByteStridesWithLd(limit.type, tensor, largestLd);
+            EXPECT_EQ(strides[tensor], largestLd * bytesPerElement);
+
+            // No larger value fits in size_t for uint64.
+            if(limit.max == std::numeric_limits<uint64_t>::max())
+                continue;
+            size_t overLd = largestLd + 1;
+            EXPECT_GT(overLd * bytesPerElement, limit.max);
+            EXPECT_THROW(emittedByteStridesWithLd(limit.type, tensor, overLd), std::runtime_error);
+        }
+    }
+}
+
+// A byte stride bound to a floating point or boolean kernarg cannot be checked and must be rejected.
+TEST(CustomKernelTest, ByteStridesNeedAnIntegerKernelArgument)
+{
+    for(CustomArgType type : {CustomArgType::float16,
+                              CustomArgType::float32,
+                              CustomArgType::float64,
+                              CustomArgType::boolean})
+    {
+        SCOPED_TRACE("argument type " + std::to_string(static_cast<int>(type)));
+        try
+        {
+            emittedByteStridesWithLd(type, 0, 64);
+            ADD_FAILURE() << "expected std::runtime_error";
+        }
+        catch(std::runtime_error const& e)
+        {
+            EXPECT_NE(std::string(e.what()).find("needs an integer kernel argument"),
+                      std::string::npos)
+                << e.what();
+        }
+    }
 }

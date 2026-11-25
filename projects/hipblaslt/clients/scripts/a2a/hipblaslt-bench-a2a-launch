@@ -12,7 +12,8 @@ any rank does.
 
 Options must precede `--`; everything after it goes to the benchmark. Rank 0
 writes to this process's stdout, the other ranks to <log-dir>/rank<N>.log. When
-a rank exits non-zero the surviving ranks are terminated.
+a rank exits non-zero the surviving ranks are terminated. Each rank gets
+--numa-bind unless --no-numa-bind is given.
 """
 
 from __future__ import annotations
@@ -116,6 +117,12 @@ def main() -> int:
         help="directory for the non-zero ranks' logs (default: cwd)",
     )
     ap.add_argument(
+        "--no-numa-bind",
+        action="store_true",
+        help="do not pass --numa-bind, which makes each rank prefer its device's NUMA "
+        "node; in a container that needs --cap-add SYS_NICE",
+    )
+    ap.add_argument(
         "bench_args", nargs=argparse.REMAINDER, help="benchmark arguments after `--`"
     )
     args = ap.parse_args()
@@ -129,6 +136,14 @@ def main() -> int:
         if args.bench_args and args.bench_args[0] == "--"
         else args.bench_args
     )
+
+    if not args.no_numa_bind and "--numa-bind" not in bench_args:
+        bench_args = [*bench_args, "--numa-bind"]
+        print(
+            "each rank prefers its device's NUMA node (--numa-bind); "
+            "--no-numa-bind turns this off",
+            flush=True,
+        )
 
     bench = resolve_bench(args.bench)
     log_dir = Path(args.log_dir) if args.log_dir else Path.cwd()

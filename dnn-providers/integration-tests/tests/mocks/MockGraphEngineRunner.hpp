@@ -44,6 +44,14 @@ public:
                  VariantPack& variantPack,
                  const BenchmarkSettings& settings),
                 (override));
+
+    MOCK_METHOD(CaptureResult,
+                captureReplay,
+                (GraphSession & session,
+                 VariantPack& variantPack,
+                 const CaptureSettings& settings,
+                 const ReplayHooks& hooks),
+                (override));
 };
 
 } // namespace hipdnn_integration_tests::bundle

@@ -16,6 +16,9 @@ const std::vector<IngestorPack>& ingestorPacks()
     // in a way that matters before main().
     static const std::vector<IngestorPack> s_packs = {
         {"hipkernel:Pointwise", &registerPointwiseSymbols, &resetPointwiseModuleCache},
+        {"hipkernel:StandalonePointwise",
+         &registerStandalonePointwiseSymbols,
+         &resetStandalonePointwiseModuleCache},
         {"hipkernel:ConvFwd", &registerConvFwdSymbols, &resetConvFwdModuleCache},
 #ifdef HIPDNN_ENGINE_FLYDSL
         // Compiled only when FlyDSL staged a shard; see the gate in this directory's
@@ -40,6 +43,18 @@ const std::vector<IngestorPack>& ingestorPacks()
         {"hipkernel:FlydslSdpaCdnaDecode",
          &registerFlydslSdpaCdnaDecodeSymbols,
          &resetFlydslSdpaCdnaDecodeModuleCache},
+        {"hipkernel:FlydslSdpaDropoutMask",
+         &registerFlydslSdpaDropoutMaskSymbols,
+         &resetFlydslSdpaDropoutMaskModuleCache},
+        {"hipkernel:FlydslSdpaHeadPad",
+         &registerFlydslSdpaHeadPadSymbols,
+         &resetFlydslSdpaHeadPadModuleCache},
+        {"hipkernel:FlydslSdpaBwdMerged",
+         &registerFlydslSdpaBwdMergedSymbols,
+         &resetFlydslSdpaBwdMergedModuleCache},
+        {"hipkernel:FlydslSdpaBwdSplit",
+         &registerFlydslSdpaBwdSplitSymbols,
+         &resetFlydslSdpaBwdSplitModuleCache},
 #endif
         {GFX950_ATTENTION_DENSE_ENGINE_NAME,
          &registerGfx950AttentionDenseSymbols,
@@ -53,6 +68,12 @@ const std::vector<IngestorPack>& ingestorPacks()
         {GFX950_ATTENTION_UNIFIED_3D_ENGINE_NAME,
          &registerGfx950AttentionUnified3DSymbols,
          &resetGfx950AttentionUnified3DModuleCache},
+        {GFX942_ATTENTION_UNIFIED_2D_ENGINE_NAME,
+         &registerGfx942AttentionUnified2DSymbols,
+         &resetGfx942AttentionUnified2DModuleCache},
+        {"hipkernel:Gfx950ConvFwdAot",
+         &registerGfx950ConvFwdAotSymbols,
+         &resetGfx950ConvFwdAotModuleCache},
         {GFX942_ATTENTION_DENSE_ENGINE_NAME,
          &registerGfx942AttentionDenseSymbols,
          &resetGfx942AttentionDenseModuleCache},
@@ -65,6 +86,9 @@ const std::vector<IngestorPack>& ingestorPacks()
         {"hipkernel:Gfx950ConvDgradAot",
          &registerGfx950ConvDgradAotSymbols,
          &resetGfx950ConvDgradAotModuleCache},
+        {"hipkernel:Gfx1250ConvDgradAot",
+         &registerGfx1250ConvDgradAotSymbols,
+         &resetGfx1250ConvDgradAotModuleCache},
     };
     return s_packs;
 }

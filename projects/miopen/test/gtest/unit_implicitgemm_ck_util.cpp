@@ -121,8 +121,8 @@ struct StubbedCKArgs
 };
 
 // A DeviceOpType whose GetInstances() returns two instances that share one
-// GetTypeString(). The cache (CachedCKInstanceIndex) must resolve the kernel_id
-// to the first instance (lowest index), the same one FindConvPtrByID returns.
+// GetTypeString(). CKInstances::Find must resolve the kernel_id to the first
+// instance (lowest index), the one a linear search of GetInstances() finds.
 // ordinal records insertion order so a test can tell which instance was picked.
 struct DuplicateTypeDeviceOp
 {
@@ -229,18 +229,21 @@ TEST_P(CPU_UnitTestImplicitGemmCKUtil_NONE, TestParsing)
 #endif
 };
 
-INSTANTIATE_TEST_SUITE_P(Smoke,
+INSTANTIATE_TEST_SUITE_P(Quick,
                          CPU_UnitTestImplicitGemmCKUtil_NONE,
                          testing::ValuesIn(GetTestCases()));
 
-// Regression guard for the instance cache's first-index invariant. When a
-// DeviceOpType enumerates two instances with the same GetTypeString(), the cache
-// must resolve the kernel_id to the first instance -- the one FindConvPtrByID
-// returns -- because invoker construction and workspace sizing still call
-// FindConvPtrByID and the two must agree. Only the first "duplicate_type" instance
-// is supported here, so replacing the index's emplace with a last-index-wins
-// insert would select the unsupported second instance and flip this to false.
-TEST(CPU_UnitTestImplicitGemmCKUtilDuplicateType_NONE, FirstIndexWins)
+using CPU_UnitTestImplicitGemmCKUtilDuplicateType_NONE = ::testing::TestWithParam<int>;
+
+// Regression guard for the instance catalog's first-index invariant. When a
+// DeviceOpType enumerates two instances with the same GetTypeString(), the
+// catalog must resolve the kernel_id to the first instance, so a kernel_id keeps
+// naming the instance a linear search of GetInstances() finds. Applicability,
+// workspace sizing and invoker construction all look it up through the catalog.
+// Only the first "duplicate_type" instance is supported here, so replacing the
+// index's emplace with a last-index-wins insert would select the unsupported
+// second instance and flip this to false.
+TEST_P(CPU_UnitTestImplicitGemmCKUtilDuplicateType_NONE, FirstIndexWins)
 {
 #if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
     const bool success =
@@ -252,10 +255,16 @@ TEST(CPU_UnitTestImplicitGemmCKUtilDuplicateType_NONE, FirstIndexWins)
 #endif
 }
 
+INSTANTIATE_TEST_SUITE_P(Quick,
+                         CPU_UnitTestImplicitGemmCKUtilDuplicateType_NONE,
+                         ::testing::Values(0));
+
+using CPU_UnitTestImplicitGemmCKUtilInstanceCache_NONE = ::testing::TestWithParam<int>;
+
 // GetInstances() must be enumerated once per DeviceOpType and cached: validation
 // of many (kernel, split_k) candidates, across the plain and split-k
 // IsCKArgsSupported overloads and IsCKSplitKSupported, must not re-enumerate.
-TEST(CPU_UnitTestImplicitGemmCKUtilInstanceCache_NONE, GetInstancesEnumeratedOnce)
+TEST_P(CPU_UnitTestImplicitGemmCKUtilInstanceCache_NONE, GetInstancesEnumeratedOnce)
 {
 #if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
     CountingDeviceOps::instanceCalls = 0;
@@ -275,6 +284,10 @@ TEST(CPU_UnitTestImplicitGemmCKUtilInstanceCache_NONE, GetInstancesEnumeratedOnc
     GTEST_SKIP();
 #endif
 }
+
+INSTANTIATE_TEST_SUITE_P(Quick,
+                         CPU_UnitTestImplicitGemmCKUtilInstanceCache_NONE,
+                         ::testing::Values(0));
 
 // =============================================================================
 // Tests for IsCKSplitKSupportedGeneric
@@ -432,14 +445,14 @@ TEST_P(CPU_SplitKGenericTest_NONE, ValidatesSplitKSupport)
 #endif
 }
 
-INSTANTIATE_TEST_SUITE_P(Smoke,
+INSTANTIATE_TEST_SUITE_P(Quick,
                          CPU_SplitKGenericTest_NONE,
                          testing::ValuesIn(GetSplitKGenericTestCases()));
 
 /**
  * @brief Direct unit tests for edge cases and specific scenarios
  */
-class CPU_SplitKGenericDirectTest_NONE : public ::testing::Test
+class CPU_SplitKGenericDirectTest_NONE : public ::testing::TestWithParam<int>
 {
 protected:
     void SetUp() override { StubbedCKArgsWithSplitKValidation::supportedSplitKByKernel.clear(); }
@@ -447,7 +460,7 @@ protected:
     void TearDown() override { StubbedCKArgsWithSplitKValidation::supportedSplitKByKernel.clear(); }
 };
 
-TEST_F(CPU_SplitKGenericDirectTest_NONE, EmptyKernelIdReturnsNotSupported)
+TEST_P(CPU_SplitKGenericDirectTest_NONE, EmptyKernelIdReturnsNotSupported)
 {
 #if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
     StubbedCKArgsWithSplitKValidation::supportedSplitKByKernel["SomeKernel"] = {1, 2, 4};
@@ -462,7 +475,7 @@ TEST_F(CPU_SplitKGenericDirectTest_NONE, EmptyKernelIdReturnsNotSupported)
 #endif
 }
 
-TEST_F(CPU_SplitKGenericDirectTest_NONE, ZeroSplitKValueHandledCorrectly)
+TEST_P(CPU_SplitKGenericDirectTest_NONE, ZeroSplitKValueHandledCorrectly)
 {
 #if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
     const std::string kernelId = "TestKernel";
@@ -480,7 +493,7 @@ TEST_F(CPU_SplitKGenericDirectTest_NONE, ZeroSplitKValueHandledCorrectly)
 #endif
 }
 
-TEST_F(CPU_SplitKGenericDirectTest_NONE, NegativeSplitKValueHandledCorrectly)
+TEST_P(CPU_SplitKGenericDirectTest_NONE, NegativeSplitKValueHandledCorrectly)
 {
 #if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
     const std::string kernelId                                           = "TestKernel";
@@ -497,7 +510,7 @@ TEST_F(CPU_SplitKGenericDirectTest_NONE, NegativeSplitKValueHandledCorrectly)
 #endif
 }
 
-TEST_F(CPU_SplitKGenericDirectTest_NONE, MultipleKernelsWithDifferentSplitKSupport)
+TEST_P(CPU_SplitKGenericDirectTest_NONE, MultipleKernelsWithDifferentSplitKSupport)
 {
 #if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
     const std::string kernel1 = "KernelA";
@@ -534,6 +547,8 @@ TEST_F(CPU_SplitKGenericDirectTest_NONE, MultipleKernelsWithDifferentSplitKSuppo
     GTEST_SKIP();
 #endif
 }
+
+INSTANTIATE_TEST_SUITE_P(Quick, CPU_SplitKGenericDirectTest_NONE, ::testing::Values(0));
 
 } // namespace unit_implicitgemm_ck_util_test
 
@@ -606,7 +621,9 @@ miopen::conv::ProblemDescription MakeElemCount3DConvProblem(miopen::conv::Direct
 
 } // namespace
 
-TEST(CPU_UnitTestImplicitGemmCKUtilLargeTensor_NONE, WrwElementCountOverflowGate)
+using CPU_UnitTestImplicitGemmCKUtilLargeTensor_NONE = ::testing::TestWithParam<int>;
+
+TEST_P(CPU_UnitTestImplicitGemmCKUtilLargeTensor_NONE, WrwElementCountOverflowGate)
 {
     using miopen::conv::Direction;
     using miopen::solver::RequiresLargeTensorCKInstance;
@@ -633,7 +650,7 @@ TEST(CPU_UnitTestImplicitGemmCKUtilLargeTensor_NONE, WrwElementCountOverflowGate
         MakeElemCountConvProblem(Direction::BackwardWeights, 1, 64, 32, 32, 64)));
 }
 
-TEST(CPU_UnitTestImplicitGemmCKUtilLargeTensor_NONE, Wrw3DElementCountOverflowGate)
+TEST_P(CPU_UnitTestImplicitGemmCKUtilLargeTensor_NONE, Wrw3DElementCountOverflowGate)
 {
     using miopen::conv::Direction;
     using miopen::solver::RequiresLargeTensorCKInstance;
@@ -660,3 +677,7 @@ TEST(CPU_UnitTestImplicitGemmCKUtilLargeTensor_NONE, Wrw3DElementCountOverflowGa
     EXPECT_FALSE(RequiresLargeTensorCKInstance(
         MakeElemCount3DConvProblem(Direction::BackwardWeights, 1, 64, 8, 16, 16, 64)));
 }
+
+INSTANTIATE_TEST_SUITE_P(Quick,
+                         CPU_UnitTestImplicitGemmCKUtilLargeTensor_NONE,
+                         ::testing::Values(0));

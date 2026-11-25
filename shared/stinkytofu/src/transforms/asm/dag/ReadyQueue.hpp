@@ -26,6 +26,7 @@
 #include <cmath>
 #include <iostream>  // TODO: don't use iostream.
 #include <map>
+#include <memory>
 #include <queue>
 #include <utility>
 #include <vector>
@@ -82,6 +83,12 @@ struct DAGNode {
     // deadline (earliest in-region matrix consumer), parent-VALU inputs first,
     // then DsReadOrder + WMMA-affinity.
     unsigned dsReadPriority = UINT_MAX;
+    // Earliest in-region matrix consumer of this ds_read, in DAG-node id order.
+    // UINT_MAX means that the load feeds a later region/iteration. The pre-scan owns this
+    // relationship so queue policies do not have to repeat its graph walk.
+    unsigned dsFirstMatrixConsumer = UINT_MAX;
+    // The consumer is reached through a parent VALU, so that VALU must be ready before the WMMA.
+    bool dsConsumerThroughValu = false;
     // True when this VALU/transcendental has a direct matrix DAG successor.
     // CDNA5ReadyQueue holds these behind the WMMA two before their first consumer.
     // Set by the pre-scan in scheduleRegionWithMovableSideEffects.
@@ -169,6 +176,10 @@ class ScheduleAnalysisCache {
         auto it = bbStates_.find(bb);
         return it != bbStates_.end() ? &it->second : nullptr;
     }
+
+    void erase(BasicBlock* bb) {
+        bbStates_.erase(bb);
+    }
 };
 
 class ReadyQueue {
@@ -205,6 +216,21 @@ class ReadyQueue {
     virtual void push(DAGNode* node) = 0;
 
     virtual bool empty() const = 0;
+
+    // Fixed-order issue timing, used by EstimateAsmCyclesPass to replay the final instruction
+    // order. A queue that models timing overrides modelsIssueTiming() and replayIssue(). The
+    // base has no model, so replayIssue does nothing and elapsedCycles stays 0.
+    virtual void replayIssue(const StinkyInstruction& inst) {
+        (void)inst;
+    }
+
+    virtual bool modelsIssueTiming() const {
+        return false;
+    }
+
+    virtual int elapsedCycles() const {
+        return 0;
+    }
 
     // Hook for derived classes to do something when the first group of instructions are ready to
     // issue.
@@ -339,6 +365,10 @@ inline DAGNode* ReadyQueueByDAGid::pickOne() {
     queue.pop();
     return node;
 }
+
+// Arch switch shared by the scheduler and EstimateAsmCyclesPass. Defined in
+// StinkyDAGSchedulerPass.cpp, the only TU that includes each CDNA*.hpp.
+std::unique_ptr<ReadyQueue> chooseReadyQueue(const PassContext& passCtx);
 
 struct MFMAIssueConfig {
     int latency = 0;                // original mfma latency

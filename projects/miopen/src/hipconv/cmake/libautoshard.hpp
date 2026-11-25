@@ -1,5 +1,6 @@
 #pragma once
 
+#include <functional>
 #include <string>
 
 int make_autoshard(std::string const& target_dir,
@@ -9,4 +10,5 @@ int make_autoshard(std::string const& target_dir,
                    char const* config_table_header,
                    char const* kernel_header,
                    int num_configs,
-                   int num_shards);
+                   int num_shards,
+                   std::function<std::string(int)> config_number_to_description);
