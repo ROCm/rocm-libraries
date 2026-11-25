@@ -12,6 +12,7 @@
 #include <gtest/gtest.h>
 
 #include "ck_tile/core.hpp"
+#include "ck_tile/ops/epilogue.hpp"
 #include "ck_tile/ops/gemm.hpp"
 
 namespace {
@@ -220,6 +221,45 @@ TEST(MxGemmTdmScheduledHost, IterateIncrementIsSixtyFourBit)
     const char* why     = Pipe::GetUnsupportedReason(256, 64, K);
     EXPECT_EQ(why, nullptr) << why;
     static_assert(Pipe::GetIterateGlobalIncrement<true>(K) == uint64_t{1} << 32);
+}
+
+// Wide A and B do not imply a wide E. E's element offset is still below the i32 limit here:
+// 33024 x 33024 FP16 has 1.09e9 elements, although its byte size exceeds 2 GiB.
+TEST(MxGemmTdmScheduledHost, MixedWideInputsNarrowOutputIsSupported)
+{
+    using ck_tile::MxGemmHostArgs;
+    using ck_tile::pk_fp4_t;
+    using Traits = ck_tile::MxTdmScheduledGemmTraits<false, false, true, true, false, 0>;
+    using P      = ProblemOf<pk_fp4_t, ck_tile::half_t, 256, 256, 512, 2, 2, 32, 1, 1, Traits>;
+    using Policy = ck_tile::MxGemmPipelineAgBgCrCompTDMScheduledPolicy<>;
+    using Pipe   = PipelineOf<P, Policy>;
+    using K =
+        ck_tile::MxGemmKernel<ck_tile::GemmTile2DNMajorPartitioner<typename Pipe::BlockGemmShape>,
+                              Pipe,
+                              ck_tile::MxTdmStoreEpilogue<Pipe>>;
+
+    constexpr index_t M    = 33024;
+    constexpr index_t N    = 33024;
+    constexpr index_t Kdim = 131072;
+    static_assert(Traits::kWideA && Traits::kWideB && !Traits::kWideD);
+
+    const auto args = K::MakeKernelArgs(MxGemmHostArgs<>{{nullptr},
+                                                         {nullptr},
+                                                         {nullptr},
+                                                         {nullptr},
+                                                         {},
+                                                         nullptr,
+                                                         1,
+                                                         M,
+                                                         N,
+                                                         Kdim,
+                                                         {Kdim},
+                                                         {Kdim},
+                                                         {},
+                                                         N});
+    const char* why = K::GetUnsupportedReason(args);
+    EXPECT_EQ(why, nullptr) << (why ? why : "");
+    EXPECT_TRUE(K::IsSupportedArgument(args)) << (why ? why : "");
 }
 
 // The host picks the kernel of a whole-tile count's parity: TailNumber::One for odd counts, Two

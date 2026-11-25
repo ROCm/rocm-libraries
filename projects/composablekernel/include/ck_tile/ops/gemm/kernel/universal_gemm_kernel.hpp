@@ -278,22 +278,6 @@ struct UniversalGemmKernel
     };
     static constexpr bool LargeTensors = has_large_tensors::value;
 
-    // A pipeline that knows which of its tensors are large may set E's flag on its own with
-    // LargeTensorE; otherwise E follows LargeTensors.
-    struct has_large_tensor_e
-    {
-        template <typename T>
-        using has_large_tensor_e_type = decltype(T::LargeTensorE);
-
-        static constexpr bool value = []() {
-            if constexpr(is_detected<has_large_tensor_e_type, GemmPipeline>{})
-                return GemmPipeline::LargeTensorE;
-            else
-                return LargeTensors;
-        }();
-    };
-    static constexpr bool LargeTensorE = has_large_tensor_e::value;
-
     static constexpr bool ClusterLaunch =
         (TilePartitioner::BlockGemmShape::kclusterM * TilePartitioner::BlockGemmShape::kclusterN *
              TilePartitioner::BlockGemmShape::kclusterK >
@@ -728,12 +712,6 @@ struct UniversalGemmKernel
         return LargeTensors && IsLargeTensorGlobalLoadSupported();
     }
 
-    // UseLargeTensorGlobalLoad for E alone, which LargeTensorE may opt out of.
-    CK_TILE_HOST_DEVICE static constexpr bool UseLargeTensorGlobalStoreE()
-    {
-        return LargeTensorE && IsLargeTensorGlobalLoadSupported();
-    }
-
     // True when the kernel shifts the A and E base pointers by the M tile before building their
     // descriptors, so those descriptors span at most one M tile however large M is. Not virtual:
     // a derived kernel opts in by declaring its own version, which hides this one and is found
@@ -801,7 +779,7 @@ struct UniversalGemmKernel
         // for pipelines that bound-clip on real descriptor extents (TDM), so the divisibility
         // and vector-alignment checks do not apply to them; it is not an opt-out from memory
         // safety. Skipping this one lets a TDM pipeline form a wrapped global address and fault.
-        if constexpr(!UseLargeTensorGlobalLoad() || !UseLargeTensorGlobalStoreE())
+        if constexpr(!UseLargeTensorGlobalLoad())
         {
             auto is_large_tensor = [](auto layout,
                                       index_t rows,
@@ -827,33 +805,25 @@ struct UniversalGemmKernel
             const bool any_large_tensor = [&]() {
                 bool r = false;
 
-                if constexpr(!UseLargeTensorGlobalLoad())
-                {
-                    static_for<0, NumATensor, 1>{}([&](auto i) {
-                        using AiLayout = remove_cvref_t<std::tuple_element_t<i.value, AsLayout>>;
-                        using AiDataType =
-                            remove_cvref_t<std::tuple_element_t<i.value, AsDataType>>;
-                        r = r || is_large_tensor(
-                                     AiLayout{}, m_extent, kargs.K, kargs.stride_As[i], AiDataType{});
-                    });
-                    static_for<0, NumBTensor, 1>{}([&](auto i) {
-                        using BiLayout = remove_cvref_t<std::tuple_element_t<i.value, BsLayout>>;
-                        using BiDataType =
-                            remove_cvref_t<std::tuple_element_t<i.value, BsDataType>>;
-                        r = r || is_large_tensor(
-                                     BiLayout{}, kargs.K, kargs.N, kargs.stride_Bs[i], BiDataType{});
-                    });
-                    static_for<0, NumDTensor, 1>{}([&](auto i) {
-                        using DiLayout = remove_cvref_t<std::tuple_element_t<i.value, DsLayout>>;
-                        using DiDataType =
-                            remove_cvref_t<std::tuple_element_t<i.value, DsDataType>>;
-                        r = r || is_large_tensor(
-                                     DiLayout{}, kargs.M, kargs.N, kargs.stride_Ds[i], DiDataType{});
-                    });
-                }
-                if constexpr(!UseLargeTensorGlobalStoreE())
-                    r = r ||
-                        is_large_tensor(CLayout{}, m_extent, kargs.N, kargs.stride_E, EDataType{});
+                static_for<0, NumATensor, 1>{}([&](auto i) {
+                    using AiLayout   = remove_cvref_t<std::tuple_element_t<i.value, AsLayout>>;
+                    using AiDataType = remove_cvref_t<std::tuple_element_t<i.value, AsDataType>>;
+                    r                = r || is_large_tensor(
+                                 AiLayout{}, m_extent, kargs.K, kargs.stride_As[i], AiDataType{});
+                });
+                static_for<0, NumBTensor, 1>{}([&](auto i) {
+                    using BiLayout   = remove_cvref_t<std::tuple_element_t<i.value, BsLayout>>;
+                    using BiDataType = remove_cvref_t<std::tuple_element_t<i.value, BsDataType>>;
+                    r                = r || is_large_tensor(
+                                 BiLayout{}, kargs.K, kargs.N, kargs.stride_Bs[i], BiDataType{});
+                });
+                static_for<0, NumDTensor, 1>{}([&](auto i) {
+                    using DiLayout   = remove_cvref_t<std::tuple_element_t<i.value, DsLayout>>;
+                    using DiDataType = remove_cvref_t<std::tuple_element_t<i.value, DsDataType>>;
+                    r                = r || is_large_tensor(
+                                 DiLayout{}, kargs.M, kargs.N, kargs.stride_Ds[i], DiDataType{});
+                });
+                r = r || is_large_tensor(CLayout{}, m_extent, kargs.N, kargs.stride_E, EDataType{});
 
                 return r;
             }();
@@ -1579,7 +1549,7 @@ struct UniversalGemmKernel
         const ETensorDesc& e_desc) // Argument order differs from A,B,D to disambiguate overloads
     {
         // Route C through 64-bit global load/store when the large-tensor global path is active.
-        [[maybe_unused]] constexpr bool kCGlobalLoad = UseLargeTensorGlobalStoreE();
+        [[maybe_unused]] constexpr bool kCGlobalLoad = UseLargeTensorGlobalLoad();
 
         // Step 1: Create tensor view for E/C tensor
         const auto& e_tensor_view = make_tensor_view<address_space_enum::global,

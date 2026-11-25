@@ -97,17 +97,17 @@ TEST(MxGemmTdmScheduledLargeCases, WideD)
 // Rows past 2^31 / N = 46092 are sampled: the last tile of rows is.
 TEST(MxGemmTdmScheduledLargeCases, WideDPast2e31Elements)
 {
-    using K = Kernel<pk_fp4_t,
-                     pk_fp4_t,
-                     half_t,
-                     256,
-                     256,
-                     512,
-                     2,
-                     2,
-                     32,
-                     Tu<1, 1>,
-                     ck_tile::MxTdmScheduledGemmTraits<false, false, false, false, true, 0>>;
+    using K             = Kernel<pk_fp4_t,
+                                 pk_fp4_t,
+                                 half_t,
+                                 256,
+                                 256,
+                                 512,
+                                 2,
+                                 2,
+                                 32,
+                                 Tu<1, 1>,
+                                 ck_tile::MxTdmScheduledGemmTraits<false, false, false, false, true, 0>>;
     constexpr index_t M = 46592, N = 46592, K_ = 1024;
     static_assert(static_cast<long_index_t>(M) * N > (long_index_t{1} << 31),
                   "the case is meant to put E's element offsets past the i32 range");
