@@ -74,9 +74,11 @@ const vector<int> large_n_size_range = {64, 98, 130, 220, 400};
 const static vector<gerqf_tuple> very_large_problem_range = {
     {{16384, 16384}, 220},
 };
-const vector<vector<int>> large_batch_matrix_size_range = {{7, 7}, {9, 9}};
+const vector<vector<int>> large_batch_matrix_size_range = {
+    {7, 7},
+};
 
-const vector<int> large_batch_n_size_range = {9};
+const vector<int> large_batch_n_size_range = {7, 129};
 
 Arguments gerqf_setup_arguments(gerqf_tuple tup)
 {
