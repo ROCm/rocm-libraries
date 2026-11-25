@@ -11,7 +11,8 @@ import sys
 
 
 ROOT = Path(__file__).resolve().parents[2]
-REGISTRY = Path(__file__).with_name("changelog-projects.json")
+# Directory names under projects/ that opt into validation and bot PRs.
+OPTED_IN_PROJECTS = ("miopen",)
 SECTIONS = {
     "added": "Added",
     "changed": "Changed",
@@ -24,29 +25,11 @@ SECTIONS = {
 NAME = re.compile(r"[a-z0-9]+(?:-[a-z0-9]+)*\.([a-z]+)\.md")
 
 
-def registered_projects():
-    projects = json.loads(REGISTRY.read_text(encoding="utf-8"))
-    if (
-        not isinstance(projects, list)
-        or any(
-            not isinstance(name, str) or not re.fullmatch(r"[a-z0-9][a-z0-9_-]*", name)
-            for name in projects
-        )
-        or len(set(projects)) != len(projects)
-    ):
-        raise ValueError(
-            f"{REGISTRY}: expected a list of unique project directory names"
-        )
-    return projects
-
-
 def validate_files(paths, project):
     directories = (
         [project.absolute() / "changelog.d"]
         if project is not None
-        else [
-            ROOT / "projects" / name / "changelog.d" for name in registered_projects()
-        ]
+        else [ROOT / "projects" / name / "changelog.d" for name in OPTED_IN_PROJECTS]
     )
     for path in paths:
         path = path.absolute()
@@ -178,7 +161,7 @@ def main():
         parser.error("--project is required for --fold and --check-empty")
     try:
         if args.list_projects:
-            print(json.dumps(registered_projects()))
+            print(json.dumps(OPTED_IN_PROJECTS))
             return 0
         if args.validate:
             validate_files(args.validate, args.project)

@@ -112,8 +112,6 @@ class ChangelogFragmentsTest(unittest.TestCase):
                 self.assertIn(path.name, result.stderr)
 
     def test_validation_only_applies_to_registered_projects(self):
-        registry = self.root / "registry.json"
-        registry.write_text('["example"]', encoding="utf-8")
         paths = []
         for name in ("example", "unregistered"):
             directory = self.root / "projects" / name / "changelog.d"
@@ -122,7 +120,7 @@ class ChangelogFragmentsTest(unittest.TestCase):
             path.write_text("invalid", encoding="utf-8")
             paths.append(path)
         with patch.object(fragments, "ROOT", self.root), patch.object(
-            fragments, "REGISTRY", registry
+            fragments, "OPTED_IN_PROJECTS", ("example",)
         ):
             fragments.validate_files(paths[1:], None)
             with self.assertRaisesRegex(ValueError, "example"):

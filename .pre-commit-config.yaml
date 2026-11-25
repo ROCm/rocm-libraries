@@ -346,7 +346,7 @@ repos:
         name: Changelog assembler self-tests
         entry: python .github/scripts/test_changelog_fragments.py
         language: python
-        files: ^\.github/scripts/((test_)?changelog_fragments\.py|changelog-projects\.json)$
+        files: ^\.github/scripts/(test_)?changelog_fragments\.py$
         pass_filenames: false
 
       - id: kpack-pin-sync

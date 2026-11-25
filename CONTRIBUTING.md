@@ -141,7 +141,7 @@ You can continue working inside your project's folder as you did before the mono
 This process is intended to remain as familiar as possible, though some adjustments may be made to improve efficiency based on feedback.
 
 Projects can opt into the shared [changelog fragment workflow](.github/workflows/changelog-fragments.yml)
-by registering in [`.github/scripts/changelog-projects.json`](.github/scripts/changelog-projects.json).
+by adding their directory name to `OPTED_IN_PROJECTS` in [the shared script](.github/scripts/changelog_fragments.py).
 See the [opt-in checklist](projects/miopen/changelog.d/README.md#opt-in-another-project).
 
 #### Example: hipblaslt Developer
