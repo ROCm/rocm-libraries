@@ -636,6 +636,60 @@ namespace
         EXPECT_EQ(bench_relaunch_failures(0), 0);
     }
 
+    // The whole uniform_check path on real kernels: with uniform summation order off, some
+    // gfx950 solution for bf16 1000 x 1000 x 7777 sums rows in different orders, so the check
+    // must fail at least one solution, and with the order off no failure counts as a failed check.
+    TEST(UniformCheckBench, pre_checkin_UsoOffFailsSomeSolution)
+    {
+        int             device = 0;
+        hipDeviceProp_t props;
+        ASSERT_EQ(hipGetDevice(&device), hipSuccess);
+        ASSERT_EQ(hipGetDeviceProperties(&props, device), hipSuccess);
+        if(strncmp(props.gcnArchName, "gfx950", 6))
+            GTEST_SKIP() << "which solutions fail depends on the gfx950 library";
+
+        Arguments arg{};
+        arg.init();
+        snprintf(arg.function, sizeof(arg.function), "%s", "matmul");
+        arg.a_type = arg.b_type = arg.c_type = arg.d_type = HIP_R_16BF;
+        arg.compute_type                                  = HIPBLAS_COMPUTE_32F;
+        arg.transA = arg.transB = 'N';
+        arg.M[0] = arg.N[0] = arg.lda[0] = arg.ldc[0] = arg.ldd[0] = arg.lde[0] = 1000;
+        arg.K[0] = arg.ldb[0] = 7777;
+        arg.stride_a[0]       = 1000 * 7777;
+        arg.stride_b[0]       = 7777 * 1000;
+        arg.stride_c[0] = arg.stride_d[0] = arg.stride_e[0] = 1000 * 1000;
+        arg.alpha                                           = 1;
+        arg.beta                                            = 0;
+        arg.initialization                                  = hipblaslt_initialization::hpl;
+        arg.uniform_summation_order                         = 0;
+        arg.uniform_check                                   = hipblaslt_uniform_check::row;
+        arg.algo_method                                     = 1;
+        arg.requested_solution_num                          = -1;
+        arg.unit_check                                      = 0;
+
+        const int64_t                  before = hipblaslt_bench_options::verification_failures();
+        ::testing::TestPartResultArray results;
+        {
+            ::testing::ScopedFakeTestPartResultReporter reporter(
+                ::testing::ScopedFakeTestPartResultReporter::INTERCEPT_ONLY_CURRENT_THREAD,
+                &results);
+            testing_matmul(arg);
+        }
+        int uniformFailures = 0;
+        for(int i = 0; i < results.size(); i++)
+        {
+            const auto& r = results.GetTestPartResult(i);
+            if(r.failed()
+               && std::string(r.message()).find("uniform_check failed") != std::string::npos)
+                uniformFailures++;
+            else
+                ADD_FAILURE() << r.message();
+        }
+        EXPECT_GT(uniformFailures, 0);
+        EXPECT_EQ(hipblaslt_bench_options::verification_failures(), before);
+    }
+
     TEST(PreswizzledScaleLayout, smoke_rejects_nontransposed_A)
     {
         Arguments arg{};
