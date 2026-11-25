@@ -117,7 +117,9 @@ a matching remote GPU before marking kernel work done.
       that [`TESTING.md` §5.0.3](TESTING.md#503-choosing-a-tier-and-an-entry-for-a-test)
       gives (standard by default, quick only for smoke). The pull request states
       the tier and a short reason for it; it need not report measurements
-      against the [budgets](TESTING.md#budgets).
+      against the [budgets](TESTING.md#budgets), though the author measures the
+      affected entries as [§5.0.3](TESTING.md#503-choosing-a-tier-and-an-entry-for-a-test)
+      says before choosing the tier.
 - [ ] **[`run_checks.py`](#run-the-checks) green** on the platforms in the
       [testing matrix](#local-testing-matrix-platforms).
 - [ ] **Correctness before speed.** The numeric harness passes within tolerance

@@ -792,7 +792,10 @@ entry, measured with `--durations`.
 
 **How an entry turns on sharding.** `platform/CMakeLists.txt` defines
 `_ROCKE_INSTALLED_PYTEST` as
-`python -m pytest -p rocke.tests.ctest_shard --rocke-shard-from-gtest-env`.
+`python -m pytest -p rocke.tests.ctest_shard --rocke-shard-from-gtest-env`;
+a build that installs the shared C++ engine beside the package appends
+`-p rocke.tests.require_cpp_engine` (the `ROCKE_REQUIRE_CPP_ENGINE` row of
+[`platform/AGENTS.md`](platform/AGENTS.md)'s environment table says what it does).
 Every installed rocKE pytest entry starts its command with this variable,
 except the explicit gates. Use it for each new installed pytest entry. The
 configure stops with an error when an installed entry that runs pytest (its
@@ -1005,11 +1008,19 @@ only:
   add cases to their corpus, not new golden entries;
 - the core refusal and parity contracts of shipped kernel families, including
   their small non-pytest contract binaries within S3;
-- the pinned GPU reference lane of each published operation.
+- the native C++ unit test binaries, each within S3;
+- the oracle-free GPU checks of shipped kernels, `rocke_oracle_free_pytest`;
+- the pinned GPU reference lane of each published operation, with its
+  reference contracts (`rocke_reference_common_pytest`,
+  `rocke_<operation>_reference_unit_pytest`);
+- the builder-surface contract, `rocke_contracts_pytest`;
+- the checks of the test registration itself, `rocke_entry_time_check` and
+  `rocke_pending_lanes_check` (build tree only).
 
-Sweeps, matrices, tuning-space walks, doc examples, tool and runner tests, and
-tests of an unshipped family belong in standard. Which contracts count as core
-for each family is part of the domain test strategy, which refines this list.
+Sweeps, matrices, tuning-space walks, doc examples, tool and runner tests other
+than those two checks, and tests of an unshipped family belong in standard.
+Which contracts count as core for each family is part of the domain test
+strategy, which refines this list.
 State the reason for a quick addition in the pull request.
 
 **standard is the default home of every new test.** Only entries whose command
@@ -1070,10 +1081,15 @@ most Q3 to quick.
    every case, or when many tests of a module share one slow parameter id.
    Parameterize per case, so a sweep is many small keys, not one large one. A
    module fixture is paid on every CI shard that gets an item of the module.
-4. Set pytest `--timeout` and CTest `TIMEOUT` from measured time with the
-   headroom of S2; make a slow test cheaper rather than raise a limit. A GPU
-   pytest entry takes `_ROCKE_INSTALLED_PYTEST_GPU_TEST_LIMIT`
-   (`platform/CMakeLists.txt` says why).
+4. Give a new entry the CTest `TIMEOUT` of its resource class (cpu, toolchain
+   or gpu) from
+   [`platform/tests/cmake/TestTimeouts.cmake`](platform/tests/cmake/TestTimeouts.cmake),
+   which says what each class covers and why the limit is not tuned per entry;
+   `platform/tests/test_engine_linkage.py` fails an entry with no `TIMEOUT` or
+   with any value that file does not set. Set the entry's pytest `--timeout`
+   from measured time with the headroom of S2. A GPU pytest entry ends its
+   command with `_ROCKE_INSTALLED_PYTEST_GPU_TEST_LIMIT`, or with a lower
+   `--timeout` plus the thread method (`platform/CMakeLists.txt` says why).
 
 **Keep a slow test inside its limits.** The budgets below and the limits of
 every lane that runs a test (pytest `--timeout`, CTest `TIMEOUT`, any
@@ -1123,19 +1139,33 @@ log.
 
 #### Budgets
 
-> **Proposed, pending agreement with the owners of the hip-kernel-provider test
-> tiers.** Change them here only. Times are wall time on a CI runner, as the CI
-> log shows it; the Test step of a CI shard has a 30-minute limit.
+Times are wall time on a CI runner, as the CI log shows it; the Test step of a
+CI shard has a 30-minute limit. Q1 and S4 are checked: their values are
+`CI_TIERS` in [`tools/check_entry_times.py`](tools/check_entry_times.py), and the
+quick CTest entry `rocke_entry_time_check` runs its `check`. The check projects
+each tier's shard from the whole-entry times in `tools/entry_times.json`
+(recorded from CI logs, per operating system) and the live CTest registration,
+counting a split entry as an even share, so it checks the average shard; an
+uneven split or per-shard start-up puts CI's slowest shard above it. It fails
+when one entry's share of a shard is over its tier's budget, when a shard is
+over its limit (the budget, or the ceiling `entry_times.json` records for a tier
+already over budget; a ceiling only goes down), or when a committed entry time
+drops out of the projection. An entry with no recorded time is listed but not
+counted until `record` adds it.
+The tool's docstring gives the `check`, `record` and `lower-ceiling` commands.
+The other budgets are proposed, pending agreement with the owners of the
+hip-kernel-provider test tiers, and no check holds them; change them here only.
 
 | Id | Budget | Value | Why |
 |---|---|---|---|
-| Q1 | rocKE's share of the quick shard | 5 min | TheRock targets under 5 min for a whole quick shard; rocKE takes several times that today. |
+| Q1 | rocKE's share of the quick shard | 300 s | TheRock targets under 5 min for a whole quick shard. Checked. |
 | Q2 | One item in a quick entry | 2 s | Almost every quick item is far below it; the few above it take a large share of quick time. |
 | Q3 | A new quick entry, or what one change adds to quick | 15 s | A small fraction of Q1; every entry also pays start-up and collection. |
 | G1 | One new golden case, over all golden entries and LLVM flavors | 0.25 s | `rocke_golden_static`, `rocke_differential_golden_ll` and `rocke_differential_golden_canonical` split across CI shards under `--rocke-shard-from-gtest-env` (by case and by family), but quick runs as one shard, so each case still runs there whole. `rocke_arch_domain_reproducibility` (standard) splits its declaration keys the same way; its toolchain, method and processor checks run on every shard. |
-| S1 | One shard key in a sharded entry | 30 s | A key runs whole on one shard; this is half of the 60 s per-item `--timeout` of the `rocke_pytest_<part>` and tiling entries. |
-| S2 | Limit headroom | pytest `--timeout` at least 2× the slowest item; CTest `TIMEOUT` at least 2× the entry's longest run, which is its unsplit run if the entry is in quick | The worst case stays under half of each limit. |
+| S1 | One shard key in a sharded entry | 30 s | A key runs whole on one shard; this is half of the 60 s per-item `--timeout` of the `rocke_pytest_<part>` and tiling entries. In an entry with a lower `--timeout` (several library entries use 30 s), S2 holds each item to half of it. |
+| S2 | Limit headroom | The slowest item under half its pytest `--timeout`; the entry's longest run, which is its unsplit run if the entry is in quick, under half its CTest `TIMEOUT` | The worst case stays under half of each limit. The CTest `TIMEOUT` is its resource class's limit, so an entry near half of it gets cheaper or splits; the limit does not move. |
 | S3 | A new non-pytest entry in quick or standard | 1 s | It runs whole on every CI shard. The golden entries and `rocke_optimization_barrier_hip_pair` are existing exceptions. |
+| S4 | rocKE's share of one standard shard | 420 s | Keeps rocKE and the rest of the provider under half of the 30-minute step. Checked. |
 
 To review where a test lives (level, tier, entry, shard keys, budgets), use the
 checklist in [`agents/team_members/test_architect.md`](agents/team_members/test_architect.md).
@@ -1461,7 +1491,7 @@ with its reason, owner and expiry. It holds three kinds of record:
 
 | Kind | Records | Expired entry |
 |---|---|---|
-| `PendingTest` | a test file (or one test of it, `node`) waiting for a lane; the file is not known to be broken. Under a lane no CI entry runs yet (a scheduled run, an unlanded PR) it covers every case of the file; under a lane CI lacks (torch, a gfx950 or gfx1250 runner, the C++ engine's Python modules) it covers only the cases that declare that lane where they skip (below). One entry per lane a file's cases wait for; a file under a lane that waits for torch imports torch | warns, and fails only a change that touches the registry or that file (every scheduled run under `--strict-expiry`) |
+| `PendingTest` | a test file (or one test of it, `node`) waiting for a lane; the file is not known to be broken. Under a lane no CI entry runs yet (a scheduled run, an unlanded PR) it covers every case of the file; under a lane CI lacks (torch, a runner for a GPU arch CI does not have, the C++ engine's Python modules; `rocke.tests.lanes` lists them all) it covers only the cases that declare that lane where they skip (below). One entry per lane a file's cases wait for; a file under a lane that waits for torch imports torch | warns, and fails only a change that touches the registry or that file (every scheduled run under `--strict-expiry`) |
 | `MeasuredBudget` | the scratch bytes one test allows one kernel on the compilers it was measured on (`Compilers`: an LLVM major, llvm-project commits, or both; two builds of one major can differ), while its retune is decided; any other compiler gets the strict rule | as `PendingTest` |
 | `QuarantinedTest` | one test known to fail (a flake, or a defect that turns develop red), by item id `<file>::<node name>`; a name without parameters covers all of them, or, with `params`, those whose parameter ids include each of them (one record for one defect across several cases). Needs an issue (`AICK-1234`, `ROCm/<repo>#<n>`, or `none filed yet`); may name the GPU arches and the compilers (`Compilers`) it fails with, to be held out there only; at most `QUARANTINE_CAP` (10) at once | always fails |
 
@@ -1511,7 +1541,11 @@ is stale (its test gone, or its lane's kind no longer true), and no test names
 a runner lane or writes a declaration by hand.
 [`tools/limbo_audit.py`](tools/limbo_audit.py) works per case, from the run
 records (`rocke.tests.run_records`) of the CI lanes: it fails on each case no
-lane ran that no record covers.
+lane ran that no record covers. The docstrings of `rocke.tests.run_records`
+and `tools/limbo_audit.py` give the commands
+that write the records and run the audit. A test that starts pytest over a
+fixture tree of its own passes `fixture_session_environment()` from
+`rocke.tests.run_records` to that process, so its sessions write no records.
 
 **A sweep that checked nothing fails.** The same pytest roots fail a test whose
 subtests all skipped (`rocke.tests.sweep_guard`): skip such a test as a whole
@@ -1753,9 +1787,13 @@ verification. This restriction is confined to reference workers and does not
 change the runtime's behavior for other callers or the legacy Torch test suites.
 
 Each installed operation/architecture pair has its own CTest entry:
-`rocke_<operation>_gpu_<arch>_pytest`, with a timeout of five minutes per
-installed variant. CTest passes `--rocke-reference-operation` and
-`--rocke-reference-arch` to select that architecture's variants; shared
+`rocke_<operation>_gpu_<arch>_pytest`, with the gpu class CTest `TIMEOUT` and
+the GPU per-test limit ([§5.0.3](#503-choosing-a-tier-and-an-entry-for-a-test));
+each request to a reference worker has its own timeout. The
+[GPU reference workflow](library/tests/reference_common/docs/gpu-reference-workflow.md#enroll-provider-test-selection)
+says how the CTest limit covers the variants of one entry. CTest passes
+`--rocke-reference-operation` and `--rocke-reference-arch` to select that
+architecture's variants; shared
 negative checks still run for each selected variant. A different GPU
 lane exits with code 77, recorded by CTest as skipped. On the intended lane,
 missing hardware, missing bundles, and validation errors fail the test.
