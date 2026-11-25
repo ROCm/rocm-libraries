@@ -98,6 +98,23 @@ TEST(VgprMsbTrackerTest, AnInstructionAfterTheLabelDropsTheSNop) {
     EXPECT_FALSE(set.previousWord.has_value());
 }
 
+TEST(VgprMsbTrackerTest, OnlyASetterWithNothingSinceTheLabelDirectlyFollowsIt) {
+    // What InsertVgprMsbPass asks before a setter already in the stream, which
+    // needs the s_nop its own setters get there.
+    VgprMsbTracker tracker;
+    EXPECT_FALSE(tracker.directlyAfterLabel());
+    tracker.label();
+    EXPECT_TRUE(tracker.directlyAfterLabel());
+    tracker.step(kNoWord);
+    EXPECT_FALSE(tracker.directlyAfterLabel()) << "an instruction comes between";
+    tracker.label();
+    tracker.observeSetter(kWordA);
+    EXPECT_FALSE(tracker.directlyAfterLabel()) << "the setter itself comes between";
+    tracker.label();
+    tracker.reset();
+    EXPECT_FALSE(tracker.directlyAfterLabel()) << "a call comes between";
+}
+
 TEST(VgprMsbTrackerTest, AResetForgetsTheWordWithoutAnSNop) {
     VgprMsbTracker tracker;
     tracker.step(needs(kWordA));

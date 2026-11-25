@@ -41,7 +41,8 @@ class Pass;
 /// s_set_vgpr_msb when the required value differs from the current state.
 ///
 /// After a label (branch target), the pass conservatively resets MSB state and
-/// inserts an s_nop before s_set_vgpr_msb to satisfy hardware constraints.
+/// inserts an s_nop before s_set_vgpr_msb to satisfy hardware constraints, a
+/// setter already in the stream that directly follows the label included.
 ///
 /// Under AsmCapsConfig::vgprMsbUnusedSlotsDontCare, a setter nothing has read
 /// since takes the banks a later instruction needs instead of that instruction
@@ -51,8 +52,9 @@ STINKYTOFU_EXPORT std::unique_ptr<Pass> createInsertVgprMsbPass();
 /// Replays the s_set_vgpr_msb setters in \p function, block by block, and
 /// describes the first instruction that runs with a bank other than one it
 /// names, in a slot it depends on, or that names a VGPR through a bank slot
-/// although carriesVgprMsb() gives its class no word; nothing when there is
-/// none. Labels, calls and block starts leave no word known.
+/// although carriesVgprMsb() gives its class no word, or a setter that directly
+/// follows a label with no s_nop before it; nothing when there is none. Labels,
+/// calls and block starts leave no word known.
 ///
 /// InsertVgprMsbPass asserts on it after every run. StinkyTofu keeps
 /// assertions on in Release builds (CMakeLists.txt), so a wrong word stops

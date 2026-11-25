@@ -94,14 +94,16 @@ std::string vgprMsbComment(int word) {
            ", dst: " + std::to_string(decodeVgprMsbForSlot(word, 3));
 }
 
+/// The s_nop an s_set_vgpr_msb that directly follows a label needs, at \p insertBefore.
+void insertLabelNop(AsmIRBuilder& irBuilder, GfxArchID archId, IRBase* insertBefore) {
+    StinkyInstruction* nopInst = irBuilder.create(getMCIDByUOp(GFX::s_nop, archId), insertBefore);
+    nopInst->addSrcReg(StinkyRegister(0));
+}
+
 /// The new s_set_vgpr_msb \p step asks for, at \p insertBefore.
 StinkyInstruction* emitVgprMsb(const VgprMsbStep& step, AsmIRBuilder& irBuilder, GfxArchID archId,
                                IRBase* insertBefore, VgprMsbMode msbMode) {
-    if (step.firstAfterLabel) {
-        StinkyInstruction* nopInst =
-            irBuilder.create(getMCIDByUOp(GFX::s_nop, archId), insertBefore);
-        nopInst->addSrcReg(StinkyRegister(0));
-    }
+    if (step.firstAfterLabel) insertLabelNop(irBuilder, archId, insertBefore);
 
     int combinedSetVal = step.word;
     if (msbMode == VgprMsbMode::Msb16 && step.previousWord.has_value()) {
@@ -223,8 +225,10 @@ class InsertVgprMsbPassImpl : public Pass {
 
                 // A setter already in the stream sets the word like one of ours,
                 // but it is not this pass's to rewrite, and none of ours may go
-                // in front of it.
+                // in front of it. Directly after a label it needs the s_nop ours
+                // get there.
                 if (inst->getUnifiedOpcode() == GFX::s_set_vgpr_msb) {
+                    if (tracker.directlyAfterLabel()) insertLabelNop(irBuilder, archId, inst);
                     tracker.observeSetter(vgprMsbSetterWord(*inst));
                     lastSetter = nullptr;
                     preferredInsertBefore = nullptr;
@@ -279,6 +283,8 @@ std::optional<std::string> firstVgprMsbMismatch(const Function& function) {
     for (const BasicBlock& bb : function) {
         // The low byte of the last s_set_vgpr_msb, or -1 while none is known.
         int word = -1;
+        // Nothing but labels and pseudo instructions since the last label.
+        bool afterLabel = false;
         size_t position = 0;
         for (const IRBase& ir : bb) {
             const auto* inst = dyn_cast<StinkyInstruction>(&ir);
@@ -286,15 +292,14 @@ std::optional<std::string> firstVgprMsbMismatch(const Function& function) {
             ++position;
             if (inst->getUnifiedOpcode() == GFX::LABEL) {
                 word = -1;
+                afterLabel = true;
                 continue;
             }
             if (isPseudoInst(inst)) continue;
+            const bool directlyAfterLabel = afterLabel;
+            afterLabel = false;
             if (isCall(*inst)) {
                 word = -1;
-                continue;
-            }
-            if (inst->getUnifiedOpcode() == GFX::s_set_vgpr_msb) {
-                word = vgprMsbSetterWord(*inst);
                 continue;
             }
 
@@ -302,6 +307,12 @@ std::optional<std::string> firstVgprMsbMismatch(const Function& function) {
                 return "@" + function.getName() + " ^" + bb.getLabel() + " #" +
                        std::to_string(position) + " '" + mnemonicOf(*inst) + "'";
             };
+            if (inst->getUnifiedOpcode() == GFX::s_set_vgpr_msb) {
+                if (directlyAfterLabel)
+                    return where() + " directly follows a label, with no s_nop before it";
+                word = vgprMsbSetterWord(*inst);
+                continue;
+            }
             // A slot keeps whatever bank it last selected, so a class that is
             // given no word and reads a VGPR through one sees a bank chosen for
             // someone else. Refused whatever the word in force: compared with

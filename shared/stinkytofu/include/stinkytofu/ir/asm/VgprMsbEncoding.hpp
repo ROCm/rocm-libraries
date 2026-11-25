@@ -355,6 +355,12 @@ class VgprMsbTracker {
         setterOpen_ = false;
     }
 
+    /// Whether nothing has been stepped since a label, so a setter here, whoever
+    /// placed it, directly follows the label and needs an s_nop before it.
+    bool directlyAfterLabel() const {
+        return current_ == kLabelBegin;
+    }
+
     /// Whether the word in force serves \p required as it stands. True of an
     /// instruction that needs no word.
     bool satisfies(const VgprMsbRequirement& required) const {

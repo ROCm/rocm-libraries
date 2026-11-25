@@ -153,6 +153,35 @@ TEST_F(InsertVgprMsbPassTest, AtTheDefaultNoSetterGoesInFrontOfOneInTheStream) {
     EXPECT_FALSE(firstVgprMsbMismatch(*func).has_value());
 }
 
+// A setter in the stream that directly follows a label gets the s_nop the pass
+// puts before its own there, and only once: a second run finds it in place. The
+// replay check names one without it.
+TEST_F(InsertVgprMsbPassTest, ASetterInTheStreamRightAfterALabelGetsItsSNop) {
+    AsmIRBuilder(*entry, kArch).createLabel("target");
+    StinkyInstruction* existing = createInst(entry, GFX::s_set_vgpr_msb, {}, {});
+    existing->addSrcReg(StinkyRegister(msbWord(1, 0, 0, 1)));
+    createInst(entry, GFX::v_mov_b32, {vgpr(257)}, {vgpr(258)});
+    const std::optional<std::string> missing = firstVgprMsbMismatch(*func);
+    ASSERT_TRUE(missing.has_value());
+    EXPECT_NE(missing->find("directly follows a label"), std::string::npos) << *missing;
+
+    const auto opcodes = [&] {
+        std::vector<uint16_t> found;
+        for (const IRBase& ir : *entry) {
+            if (const auto* inst = dyn_cast<StinkyInstruction>(&ir))
+                found.push_back(inst->getUnifiedOpcode());
+        }
+        return found;
+    };
+    const std::vector<uint16_t> expected{GFX::LABEL, GFX::s_nop, GFX::s_set_vgpr_msb,
+                                         GFX::v_mov_b32};
+    for (int run = 0; run < 2; ++run) {
+        runPass(*func, createInsertVgprMsbPass(), VgprMsbMode::Msb8, VgprMsbPolicy::ExactWord);
+        EXPECT_EQ(opcodes(), expected) << "run " << run;
+        EXPECT_FALSE(firstVgprMsbMismatch(*func).has_value()) << "run " << run;
+    }
+}
+
 TEST_F(InsertVgprMsbPassTest, TheReplayCheckNamesAnInstructionInTheWrongBank) {
     createInst(entry, GFX::v_mov_b32, {vgpr(257)}, {vgpr(258)});
     const std::optional<std::string> unset = firstVgprMsbMismatch(*func);
