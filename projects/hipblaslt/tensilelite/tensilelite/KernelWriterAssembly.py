@@ -10767,7 +10767,10 @@ class KernelWriterAssembly(KernelWriter):
     module.add(SCmpEQU32(src0=loopCounter, src1=hex(idxPgr), comment=comment))
     module.add(SCBranchSCC0(labelName=contLabel.getLabelName(), comment="segment has reads left"))
     module.add(SCmpEQU32(src0=sgpr("A2AShardCounter"), src1=1, comment="last segment?"))
-    module.add(SCBranchSCC1(labelName=skipLabel.getLabelName(), comment=comment))
+    if self.states.postLoopStoreInNll:
+      module.add(self.longBranchScc1(skipLabel, posNeg=1, comment=comment + " (long)"))
+    else:
+      module.add(SCBranchSCC1(labelName=skipLabel.getLabelName(), comment=comment))
     module.add(self.a2aSwitchSegment(kernel, tPA, tPB, stepBack=False))
     module.add(contLabel)
     return module
