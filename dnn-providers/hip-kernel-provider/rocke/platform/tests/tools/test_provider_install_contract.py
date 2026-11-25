@@ -19,7 +19,7 @@ from pathlib import Path
 import pytest
 from rocke.assets import platform_root
 from rocke.tests.cmake_embedding import configure_embedded_rocke
-from rocke.tests.lanes import SOURCE_TREE_CASES, skip_until
+from rocke.tests.lanes import SOURCE_TREE, skip_until
 
 pytestmark = pytest.mark.integration
 
@@ -42,12 +42,12 @@ def rocke() -> Path:
     root = platform_root().parent
     if not (root / "CMakeLists.txt").is_file():
         skip_until(
-            SOURCE_TREE_CASES,
+            SOURCE_TREE,
             reason="rocKE source CMake project is absent from this test artifact",
         )
     if shutil.which("cmake") is None:
         skip_until(
-            SOURCE_TREE_CASES,
+            SOURCE_TREE,
             reason="cmake is required for the source configuration contract",
         )
     return root
@@ -58,7 +58,7 @@ def provider_cmake(rocke: Path) -> str:
     path = rocke.parent / "CMakeLists.txt"
     if not path.is_file():
         skip_until(
-            SOURCE_TREE_CASES,
+            SOURCE_TREE,
             reason="hip-kernel-provider CMake project is absent from this checkout",
         )
     return path.read_text()

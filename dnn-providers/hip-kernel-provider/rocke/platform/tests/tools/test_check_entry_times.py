@@ -12,7 +12,7 @@ import sys
 from pathlib import Path
 
 import pytest
-from rocke.tests.lanes import SOURCE_TREE_CASES, skip_until
+from rocke.tests.lanes import SOURCE_TREE, skip_until
 
 
 def _load_check_module():
@@ -33,7 +33,7 @@ def _load_check_module():
             spec.loader.exec_module(module)
             return module
     skip_until(
-        SOURCE_TREE_CASES,
+        SOURCE_TREE,
         reason="rocke/tools/check_entry_times.py is absent from this platform-only tree",
     )
 

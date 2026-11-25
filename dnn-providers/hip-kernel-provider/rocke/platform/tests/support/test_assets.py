@@ -16,7 +16,7 @@ from rocke.assets import (
     platform_parity_dir,
     platform_root,
 )
-from rocke.tests.lanes import SOURCE_TREE_CASES, skip_until
+from rocke.tests.lanes import SOURCE_TREE, skip_until
 
 
 def test_platform_instances_dir_defaults_to_the_platform_instances_tree(monkeypatch):
@@ -62,7 +62,7 @@ def test_every_locator_override_is_documented():
     environment-variable reference."""
     reference = dsl_docs_dir() / "reference" / "env_flags.md"
     if not reference.is_file():
-        skip_until(SOURCE_TREE_CASES, reason=f"{reference} is absent from this tree")
+        skip_until(SOURCE_TREE, reason=f"{reference} is absent from this tree")
     source = Path(rocke.assets.__file__).read_text(encoding="utf-8")
     overrides = set(
         re.findall(r'os\.(?:environ\.get|getenv)\("(ROCKE_[A-Z_]+)"', source)

@@ -7,7 +7,7 @@ only), and a problem field set to None."""
 from __future__ import annotations
 
 import pytest
-from rocke.tests.lanes import BINDING_LANE, import_or_skip_until
+from rocke.tests.lanes import BUILD_VARIANT, import_or_skip_until
 
 from kernels.common.conv_implicit_gemm import ConvProblem
 from kernels.common.img2col import Img2ColSpec, build_img2col, is_valid_spec
@@ -29,7 +29,7 @@ def test_python_refuses_a_grouped_problem():
 
 
 def test_the_cpp_entry_refuses_a_grouped_problem_like_python():
-    engine = import_or_skip_until("rocke_library_engine", BINDING_LANE)
+    engine = import_or_skip_until("rocke_library_engine", BUILD_VARIANT)
     with pytest.raises(RuntimeError) as refusal:
         engine.img2col_lower_llvm(img2col_spec_to_dict(_GROUPED), arch="gfx950")
     assert _REASON in str(refusal.value)
@@ -47,7 +47,7 @@ def _with_padding_none() -> Img2ColSpec:
 def test_both_engines_refuse_a_problem_field_set_to_none():
     with pytest.raises(TypeError, match="NoneType"):
         build_img2col(_with_padding_none(), arch="gfx950")
-    engine = import_or_skip_until("rocke_library_engine", BINDING_LANE)
+    engine = import_or_skip_until("rocke_library_engine", BUILD_VARIANT)
     with pytest.raises(RuntimeError, match="Unable to cast Python instance"):
         engine.img2col_lower_llvm(
             img2col_spec_to_dict(_with_padding_none()), arch="gfx950"
