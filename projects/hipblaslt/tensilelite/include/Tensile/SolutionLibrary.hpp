@@ -86,7 +86,8 @@ namespace TensileLite
  */
     inline bool isRankingMatchingLibrary(std::string const& predicateType)
     {
-        return predicateType == "GridBasedMatching" || predicateType == "PredictionMatching";
+        return predicateType == "GridBasedMatching" || predicateType == "MeshBasedMatching"
+               || predicateType == "PredictionMatching";
     }
 
     template <typename MySolution, typename MyProblem>

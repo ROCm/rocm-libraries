@@ -73,7 +73,7 @@ for what is actually exercised vs. manual/diagnostic/demo.
 | `analysis/` | (covered via `test_rocke.py`) | - |
 | `benchmark/` | `test_occupancy_targets.py` (the occupancy model on every target rocKE lowers for; gfx908 checked against llc) | - |
 | `support/` | tests of the `rocke.tests` helpers: `test_gpu.py`, `test_ir_validity.py`, `test_arch_marks.py`, `test_universal_gemm.py`, `test_llc.py`, `test_engines.py` | - |
-| `tools/` | `test_arch_domain_artifact.py` (source-only structure/probe units), `test_arch_domain_support.py` (source + installed packaged-column and host-only policy checks), `test_run_all.py`, tool-sidecar units | `rocke_arch_domain_reproducibility` (**CTest**, artifact reproduction through the host toolchain) |
+| `tools/` | `test_arch_domain_artifact.py` (source-only generator/probe units), `test_arch_domain_support.py` (source + installed column-structure and support-policy checks), `test_run_all.py`, tool-sidecar units | `rocke_arch_domain_reproducibility` (**CTest**, artifact reproduction through the host toolchain) |
 | (root) | `test_rocke.py` (multi-layer monolith), `test_rocke_ci_static.py` | - |
 
 > Notes: `instances/rocke_ir_parity_harness.py` supplies the representative corpus
@@ -138,7 +138,9 @@ artifact path.
 ## Execution categories
 
 Four platform-runner categories run here; don't conflate them. Installed
-library CTests add the explicit host-gate category described below.
+library CTests add the explicit host-gate category described below. To choose
+the tier and CTest entry of a new test, see
+[`TESTING.md` §5.0.3](../../TESTING.md#503-choosing-a-tier-and-an-entry-for-a-test).
 
 1. **Default developer pre-merge runner** (`python tests/run_all.py`):
    relative-path guard -> byte-identity gate (`tools/check_byte_identity.py`) ->
@@ -172,10 +174,12 @@ library CTests add the explicit host-gate category described below.
 pytest: the sweep starts external compiler/linker processes, has its own timeout
 and resource contract, and is independent of `ROCKE_BACKEND`. The separate
 `tools/test_arch_domain_support.py` units validate every imported package column's
-records, filename/flavor agreement, and canonical serialization, including flavors
-this host cannot re-probe. They also exercise the comparison policy with synthetic
-records. These checks run without real compiler processes in source pytest and
-installed `rocke_pytest_*` parts, using the source or staged generator respectively.
+records, provenance, wired architecture inventory, declaration coverage, and
+single-line contract layout, including flavors this host cannot re-probe. They
+also pin recorded probe witnesses and `global.load.lds` availability, and
+exercise the comparison policy with synthetic records. These checks run without
+real compiler processes in source pytest and installed `rocke_pytest_runtime_tools`,
+using the source or staged generator respectively.
 
 The same logical gate has two registrations: the build-tree entry invokes the
 source tool and committed source column, while the installed entry invokes a
@@ -291,7 +295,9 @@ builds and installed provider CI.
   efficiency work now that CI supplies execution evidence for the standalone gate.
 ### Library unit and explicit host gates
 
-For new or migrated library cohorts, affordable `test_*.py` discovery is the quick tier.
+For new or migrated library cohorts, affordable `test_*.py` discovery is the
+source-runner default; the CTest tier follows
+[`TESTING.md` §5.0.3](../../TESTING.md#503-choosing-a-tier-and-an-entry-for-a-test).
 Exhaustive or compiler-dependent matrices use non-discovered modules, explicit
 stages in `library/tests/run_all.py`, and separately categorized installed
 CTests. Legacy violations remain tracked as TESTING.md gap G9.
