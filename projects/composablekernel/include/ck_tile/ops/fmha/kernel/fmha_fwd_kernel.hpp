@@ -1603,14 +1603,14 @@ struct FmhaFwdKernel
             }
         }
 
+        [[maybe_unused]] const auto reject = [](const char* reason) {
+            if(ck_tile::EnvIsEnabled(CK_TILE_ENV(CK_TILE_LOGGING)))
+                CK_TILE_ERROR("FMHA fwd ", kPipelineName, ": ", reason);
+            return false;
+        };
+
         if constexpr(kPipelineName == "qr_tdm_fp8_sched")
         {
-            const bool log    = ck_tile::EnvIsEnabled(CK_TILE_ENV(CK_TILE_LOGGING));
-            const auto reject = [&](const char* reason) {
-                if(log)
-                    CK_TILE_ERROR("FMHA fwd qr_tdm_fp8_sched: ", reason);
-                return false;
-            };
             // No head-dim padding: Q/K/V TDM tiles and WMMAs cover exactly the tile head dims.
             if(kargs.hdim_q != FmhaPipeline::kQKHeaddim || kargs.hdim_v != FmhaPipeline::kN1)
                 return reject("hdim_q and hdim_v must equal the tile head dims.");
@@ -1656,12 +1656,15 @@ struct FmhaFwdKernel
                         bits(kargs.batch_stride_q_descale) | bits(kargs.batch_stride_k_descale);
                 if(offsets % FmhaPipeline::kMxQkScaleAlign != 0)
                     return reject("MX Q/K descale pointers and strides must align to a scale row.");
-                if constexpr(kIsGroupMode)
-                {
-                    if(kargs.seqstart_v_scale_ptr == nullptr)
-                        return reject("group mode MX needs seqstart_v_scale_ptr.");
-                }
             }
+        }
+
+        if constexpr((kPipelineName == "qr_tdm" || kPipelineName == "qr_tdm_fp8_sched") &&
+                     QScaleEnum == BlockAttentionQuantScaleEnum::MX && kIsGroupMode)
+        {
+            // Both read seqstart_v_scale_ptr[i_batch] on the device in group mode.
+            if(kargs.seqstart_v_scale_ptr == nullptr)
+                return reject("group mode MX needs seqstart_v_scale_ptr.");
         }
 
         if constexpr(QScaleEnum == BlockAttentionQuantScaleEnum::BLOCKSCALE)
