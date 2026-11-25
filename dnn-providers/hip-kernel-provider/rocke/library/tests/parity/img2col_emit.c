@@ -178,8 +178,10 @@ int main(int argc, char** argv)
     rocke_kernel_def_t* kernel = rocke_build_img2col_new(&b, &spec, "gfx950");
     if(kernel == NULL)
     {
+        /* "builder error: " is the prefix the parity gate reads a refusal
+         * message behind, to compare it with the Python engine's. */
         const char* m = rocke_ir_builder_error(&b);
-        fprintf(stderr, "build failed: %s\n", m ? m : "(no message)");
+        fprintf(stderr, "builder error: %s\n", m ? m : "(no message)");
         rocke_ir_builder_free(&b);
         return 1;
     }

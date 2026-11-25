@@ -701,6 +701,7 @@ REFUSAL_COMPARED_FAMILIES = frozenset(
         "buffer_load_vN",
         "buffer_store_vN",
         "coalesced_loader_async",
+        "img2col",
         "tensor_view_buffer",
     }
 )
