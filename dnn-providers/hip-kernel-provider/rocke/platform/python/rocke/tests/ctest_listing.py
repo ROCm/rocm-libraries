@@ -18,7 +18,7 @@ import subprocess
 from collections.abc import Mapping
 from pathlib import Path
 
-from ..assets import platform_root
+from .platform_build import configure_platform
 
 __all__ = ["configure_installed_ctest", "list_ctest_entries"]
 
@@ -54,20 +54,11 @@ def configure_installed_ctest(
     Nothing is built. A -D in ``cmake_arguments`` overrides the default
     ROCKE_INSTALL_TEST_GPU_REFERENCES=OFF, because CMake keeps the last value."""
     build = scratch / "build"
-    subprocess.run(
-        [
-            "cmake",
-            "-S",
-            str(platform_root()),
-            "-B",
-            str(build),
-            "-DBUILD_TESTING=ON",
-            "-DROCKE_INSTALL_TEST_GPU_REFERENCES=OFF",
-            *cmake_arguments,
-        ],
-        check=True,
-        capture_output=True,
-        text=True,
+    configure_platform(
+        build,
+        "-DBUILD_TESTING=ON",
+        "-DROCKE_INSTALL_TEST_GPU_REFERENCES=OFF",
+        *cmake_arguments,
     )
     ctest_dir = scratch / "installed-ctest"
     ctest_dir.mkdir()

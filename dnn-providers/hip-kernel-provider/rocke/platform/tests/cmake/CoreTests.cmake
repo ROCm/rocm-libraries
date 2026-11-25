@@ -145,6 +145,10 @@ if(BUILD_TESTING)
             "registered")
   endif()
 
+  # The rocke_optimization_barrier_hip_pair and
+  # rocke_coalesced_loader_async_refusals entries and their emitter targets are
+  # kept in step with the rocke-emitter-pair-parity hook in the root
+  # .pre-commit-config.yaml.
   # The binding consumes Python-built IR; this binary exercises the independent
   # C builder as well, including compiler-dependent argument evaluation order.
   set_source_files_properties(instances/parity/optimization_barrier_emit.c

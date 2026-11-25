@@ -483,6 +483,24 @@ repos:
         files: ^dnn-providers/hip-kernel-provider/rocke/platform/(tests/core/test_gemm_spec_dict_binding_parity\.py|cpp/bindings/rocke_engine\.cpp|python/rocke/(assets\.py|core/backend\.py|instances/(__init__|common/[^/]+)\.py))$
         pass_filenames: false
 
+      # The C emitters against their Python twins: the same HIP text
+      # (rocke_optimization_barrier_hip_pair) and the same refusals, with the
+      # same messages (rocke_coalesced_loader_async_refusals). Both entries run
+      # a C program linked with the engine, so the runner builds those two
+      # programs (C++ only: no ROCm, HIP or LLVM) and runs the two entries
+      # through CTest. Needs cmake, ctest and a C++ compiler on PATH. Each
+      # entry's outcome depends on the whole engine in both languages and on
+      # its build, hence the broad file pattern. The runner configures the
+      # platform without the sibling library, so the configure reads no CMake
+      # file outside the platform, and both entries' programs and scripts live
+      # in it.
+      - id: rocke-emitter-pair-parity
+        name: rocKE C and Python emitters agree on HIP text and refusals
+        entry: python -B dnn-providers/hip-kernel-provider/rocke/platform/tools/run_build_tree_ctest.py --target rocke_optimization_barrier_emit --target rocke_coalesced_loader_async_emit --test rocke_optimization_barrier_hip_pair --test rocke_coalesced_loader_async_refusals
+        language: python
+        files: ^dnn-providers/hip-kernel-provider/rocke/platform/(CMakeLists\.txt$|(cmake|cpp|python|tests|tools)/)
+        pass_filenames: false
+
   - repo: https://github.com/cheshirekow/cmake-format-precommit
     rev: v0.6.10
     hooks:
