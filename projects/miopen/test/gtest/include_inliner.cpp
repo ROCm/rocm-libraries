@@ -38,7 +38,9 @@
 MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_INVOKED_FROM_CTEST)
 #endif
 
-TEST(CPU_kernel_inliner_NONE, InlinerTest)
+using CPU_kernel_inliner_NONE = testing::TestWithParam<int>;
+
+TEST_P(CPU_kernel_inliner_NONE, InlinerTest)
 {
 #if WORKAROUND_ISSUE_3647
     if(!miopen::env::enabled(MIOPEN_INVOKED_FROM_CTEST))
@@ -73,3 +75,5 @@ TEST(CPU_kernel_inliner_NONE, InlinerTest)
     EXPECT_EQ(0, Child(asm_src));
     EXPECT_EQ(1, Child(invalid_src));
 }
+
+INSTANTIATE_TEST_SUITE_P(Quick, CPU_kernel_inliner_NONE, testing::Values(0));

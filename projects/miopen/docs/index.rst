@@ -46,9 +46,10 @@ The MIOpen public repository is located at
   .. grid-item-card:: How to
 
     * :doc:`Use the fusion API <./how-to/use-fusion-api>`
-    * :doc:`Log and debug <./how-to/debug-log>`
+    * :doc:`Log and debug MIOpen <./how-to/debug-log>`
     * :doc:`Use the find APIs and immediate mode <./how-to/find-and-immediate>`
     * :doc:`Use NHWC Batch Normalization with PyTorch <./how-to/use-nhwc-batchnorm-in-pytorch>`
+    * :doc:`Use hipDNN forwarding in MIOpen <./how-to/use-hipdnn-forwarding>`
 
   .. grid-item-card:: Samples
 
