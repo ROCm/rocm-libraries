@@ -97,13 +97,16 @@ binding decides everything below:
    <build>/bin/hipdnn_corpus_gen \
      --operation <op> --engine-name <engine> --plugin-dir <abs plugin dir> \
      --output <store>/corpora/<engine>/<device>/<set>/<op> --count <tier count> \
-     [--per-combination 150] \
+     [--per-combination 150] [--max-bytes 4294967296] \
      --seed <unused seed> --bench-path <build>/bin/hipdnn_bench \
      [--exclude-corpus <each active set>/<op>/manifest.json ...] [--keep q.<p>=<v> ...] \
      [--kdp-root <pack or dir>]
    ```
    Pass `--per-combination 150` for `sdpa_fwd` only: its default first pass is too small to
-   hold every form evenly at `--count 2000` ([corpus-facets.md](corpus-facets.md), §2).
+   hold every form evenly at `--count 2000` ([corpus-facets.md](corpus-facets.md), §2). Pass
+   `--max-bytes 4294967296` (4 GiB) for `sdpa_fwd` and `sdpa_bwd`: the archetypes past 32768
+   tokens (long-context decode, video DiT attention) and the 32-head head_dim 256 ones are past
+   the default 256 MiB, so a default set holds none of them (video) or few.
    Exclude every active set of this engine and device; take a seed none of them used. A
    descriptor engine's packs are a source (`--kdp-root` with the engine's installed
    directory); a closed shape set requires them and is not searched. Exit 0 is a set (a
