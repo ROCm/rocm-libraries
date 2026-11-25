@@ -137,12 +137,22 @@ def kernel_table(exe: Path):
 
 
 def arm_kernel(table, arm):
-    """The kernel an arm launches, matched on warp tile, cluster and placement."""
+    """The kernel an arm launches, matched on warp tile, cluster and placement. An arm with a
+    "tile" other than 256x256x256 (CK's default instances, warps "default") matches on its block
+    tile alone (no cluster)."""
+    tile = arm.get("tile", "256x256x256")
+    if tile != "256x256x256":
+        tm, tn, tk = tile.split("x")
+        return [(vs, ss, vg) for name, vs, ss, vg in table
+                if f"sequence<{tm}, {tn}, {tk}>" in name and "ClusterTileGemmShape" not in name]
     wt, cl, pl = arm["wt"], arm["cluster"], arm.get("place", "default")
     cm, cn = (int(x) for x in cl.split("x"))
     hits = []
     for name, vs, ss, vg in table:
         if f"sequence<{wt}, {wt}, 128>" not in name or "256, 256, 256" not in name:
+            continue
+        # -warps=2x2 (4 waves); CK's default 256x256x256 instance has 4x4 waves
+        if "sequence<2, 2, 1>" not in name:
             continue
         clustered = "ClusterTileGemmShape" in name
         if (cm * cn > 1) != clustered:
@@ -157,10 +167,24 @@ def arm_kernel(table, arm):
 
 def arm_args(arm, shape, cfg):
     m, n, k = shape
-    a = [f"-m={m}", f"-n={n}", f"-k={k}", "-tile=256x256x256", "-epilogue=tdm", "-warps=2x2",
-         f"-wt={arm['wt']}", f"-cluster={arm['cluster']}", f"-place={arm.get('place', 'default')}",
+    a = [f"-m={m}", f"-n={n}", f"-k={k}", f"-tile={arm.get('tile', '256x256x256')}",
+         "-epilogue=tdm", f"-warps={arm.get('warps', '2x2')}",
+         f"-cluster={arm.get('cluster', '1x1')}", f"-place={arm.get('place', 'default')}",
          f"-c_dtype={cfg.get('c_dtype', 'bf16')}"]
+    if "wt" in arm:
+        a.append(f"-wt={arm['wt']}")
     return a
+
+
+def arm_tag(v, arm):
+    if arm.get("tile", "256x256x256") != "256x256x256":
+        return f"{v['name']}|t{arm['tile']}|w{arm.get('warps', 'default')}"
+    return f"{v['name']}|wt{arm['wt']}|c{arm['cluster']}|{arm.get('place', 'default')}"
+
+
+def arm_runs(arm, shape):
+    """An arm with "shapes" runs only on those shapes."""
+    return "shapes" not in arm or list(shape) in [list(x) for x in arm["shapes"]]
 
 
 def _amdsmi(args):
@@ -296,7 +320,7 @@ def main():
             continue
         table = kernel_table(exe)
         for arm in cfg["arms"]:
-            tag = f"{v['name']}|wt{arm['wt']}|c{arm['cluster']}|{arm.get('place', 'default')}"
+            tag = arm_tag(v, arm)
             hits = arm_kernel(table, arm)
             if not hits:
                 log(f"SKIP {tag}: no such instance in the binary")
@@ -329,6 +353,8 @@ def main():
             for r in range(rounds):
                 order = plan if r % 2 == 0 else plan[::-1]
                 for p in order:
+                    if not arm_runs(p["arm"], shape):
+                        continue
                     time.sleep(1.0)
                     tainted = False
                     if pair and not o.no_pair_check:
@@ -353,6 +379,8 @@ def main():
     for shape in cfg["shapes"]:
         rows = []
         for p in plan:
+            if not arm_runs(p["arm"], shape):
+                continue
             v = [x for x in res.get((p["tag"], tuple(shape)), []) if x is not None]
             if v:
                 rows.append((statistics.median(v), min(v), max(v), p))
@@ -370,7 +398,7 @@ def main():
     if o.verify_top:
         log("\n== verify (K = 8192) of the best arms")
         for shape, p in best:
-            vshape = [shape[0], shape[1], 8192]
+            vshape = [shape[0], shape[1], min(shape[2], 8192)]
             for mode in ("verify-sparse", "verify-rand"):
                 rc, txt = run([str(p["exe"])] + arm_args(p["arm"], vshape, cfg) + [f"-mode={mode}"],
                               env, o.runner)
