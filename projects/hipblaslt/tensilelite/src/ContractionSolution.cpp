@@ -1542,24 +1542,24 @@ namespace TensileLite
                 {
                     if(problemType.activationComputeDataType == rocisa::DataType::BFloat16)
                     {
-                        args.template append<float>(name.c_str(), 0.f);
+                        args.template append<float>(name, 0.f);
                     }
                     else
                     {
-                        args.append(name.c_str(), 0, problemType.activationComputeDataType);
+                        args.append(name, 0, problemType.activationComputeDataType);
                     }
                 }
                 else
                 {
                     if(problemType.activationComputeDataType == rocisa::DataType::BFloat16)
                     {
-                        args.template append<float>(name.c_str(),
+                        args.template append<float>(name,
                                                     static_cast<float>((*std::get_if<BFloat16>(
                                                         &inputs.activationArgs[i]))));
                     }
                     else
                     {
-                        args.append(name.c_str(),
+                        args.append(name,
                                     inputs.activationArgs[i],
                                     problemType.activationComputeDataType);
                     }
@@ -4221,24 +4221,24 @@ namespace TensileLite
                 {
                     if(problemType.activationComputeDataType == rocisa::DataType::BFloat16)
                     {
-                        args.template append<float>(name.c_str(), 0.f);
+                        args.template append<float>(name, 0.f);
                     }
                     else
                     {
-                        args.append(name.c_str(), 0, problemType.activationComputeDataType);
+                        args.append(name, 0, problemType.activationComputeDataType);
                     }
                 }
                 else
                 {
                     if(problemType.activationComputeDataType == rocisa::DataType::BFloat16)
                     {
-                        args.template append<float>(name.c_str(),
+                        args.template append<float>(name,
                                                     static_cast<float>((*std::get_if<BFloat16>(
                                                         &inputs.activationArgs[i]))));
                     }
                     else
                     {
-                        args.append(name.c_str(),
+                        args.append(name,
                                     inputs.activationArgs[i],
                                     problemType.activationComputeDataType);
                     }
