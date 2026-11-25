@@ -26,16 +26,27 @@ Freshness / stale-build guard:
   produced a false '30 mismatched'). Set ROCKE_PARITY_ALLOW_STALE=1 to downgrade
   the check to a warning if you really must.
 
+For the optional gfx950 dense library binding, ``--gfx950-dense [INDEX ...]``
+instead compares LLVM, serialized IR and verifier diagnostics directly against
+the Python reference, using the library parity emitter's indexed specs. No
+standalone executables are needed. From rocke/, with the local modules built:
+
+  ROCKE_PARITY_BUILD=/path/to/modules PYTHONPATH=library:platform/python \\
+    ROCKE_LLVM_FLAVOR=llvm20 python3 platform/cpp/bindings/prove_parity_binding.py --gfx950-dense
+
 Env:
   ROCKE_PARITY_BUILD       build dir holding rocke_engine*.so  (default /tmp/rocke_parity/build)
   ROCKE_PARITY_EMIT        dir holding the prebuilt standalone emitters (default /tmp/rocke_parity/emit)
   ROCKE_PARITY_ALLOW_STALE if set to 1, a build-id mismatch warns instead of failing
 """
 
+import argparse
 import hashlib
+import importlib.util
 import os
 import subprocess
 import sys
+from pathlib import Path
 
 BUILD = os.environ.get("ROCKE_PARITY_BUILD", "/tmp/rocke_parity/build")
 EMIT = os.environ.get("ROCKE_PARITY_EMIT", "/tmp/rocke_parity/emit")
@@ -1999,6 +2010,75 @@ FAMILIES = [
 ]
 
 
+def compare_gfx950_dense_binding(spec, python_builder):
+    """Compare one actual Gfx950AttentionDenseSpec (e.g. from the dispatcher).
+
+    Pass the Python build_attention_dense, not a binding wrapper. No projection
+    or normalization: the binding receives every field, including optional None.
+    """
+    from dataclasses import asdict
+
+    from rocke.core.ir_serialize import serialize
+    from rocke.core.lower_llvm import _lower_kernel_to_llvm_python
+    from rocke.core.verify import verify
+
+    if rocke_library_engine is None:
+        raise RuntimeError("gfx950 dense parity requires rocke_library_engine")
+    cfg = asdict(spec)
+    arch = "gfx950"
+    kernel = python_builder(spec, arch=arch)
+    native = rocke_library_engine
+    for mode, reference, bound in (
+        ("ir", serialize, native.gfx950_attention_dense_serialize_ir),
+        (
+            "ll",
+            lambda k: _lower_kernel_to_llvm_python(k, arch=arch),
+            native.gfx950_attention_dense_lower_llvm,
+        ),
+    ):
+        want = reference(kernel)
+        got = bound(cfg, arch=arch)
+        if got != want or not want:
+            raise ValueError(
+                f"{mode}: cpp={sha(got)} python={sha(want)} "
+                f"(len {len(got)} vs {len(want)})"
+            )
+    want = [str(diag) for diag in verify(kernel)]
+    got = native.gfx950_attention_dense_verify(cfg, arch=arch)
+    if got != want:
+        raise ValueError(f"verify: cpp={got!r} python={want!r}")
+
+
+def run_gfx950_dense_binding(indices):
+    if rocke_library_engine is None:
+        sys.exit("ROCKE_PARITY_BUILD must contain both engine modules for dense parity")
+    if rocke_library_engine.build_id() != rocke_engine.build_id():
+        sys.exit("stale/mixed build: the two engine modules have different build-ids")
+
+    # Load only this reference table, like the differential batch worker. The
+    # emitter needs _emit_common only for its CLI; neither parity directory
+    # needs to take precedence over the other in sys.path or sys.modules.
+    root = Path(__file__).resolve().parents[3]
+    path = root / "library/tests/parity/attention_dense_gfx950_emit.py"
+    module_spec = importlib.util.spec_from_file_location("_rocke_dense_reference", path)
+    if module_spec is None or module_spec.loader is None:
+        raise ImportError(f"cannot load parity emitter: {path}")
+    reference = importlib.util.module_from_spec(module_spec)
+    module_spec.loader.exec_module(reference)
+    cases = indices or range(len(reference._CONFIGS))
+    passed = 0
+    for idx in cases:
+        spec = reference.spec_for_index(idx)
+        try:
+            compare_gfx950_dense_binding(spec, reference.build_attention_dense)
+        except Exception as exc:
+            print(f"cfg{idx} {spec.kernel_name()}: {exc}", file=sys.stderr)
+        else:
+            passed += 1
+    print(f"gfx950_attention_dense: {passed}/{len(cases)} matched (ir, ll, verify)")
+    return 0 if passed and passed == len(cases) else 1
+
+
 def main():
     so_id, so_ver = _assert_build_id_match()
     print(f"engine build-id: {so_id}  version: {so_ver}  (matches emit dir)")
@@ -2103,4 +2183,13 @@ def main():
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--gfx950-dense",
+        nargs="*",
+        type=int,
+        metavar="INDEX",
+        help="compare dense binding vs. Python for these reference indices (default: all)",
+    )
+    dense = parser.parse_args().gfx950_dense
+    raise SystemExit(main() if dense is None else run_gfx950_dense_binding(dense))

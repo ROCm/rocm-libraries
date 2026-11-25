@@ -27,6 +27,9 @@ namespace py = pybind11;
  * reduce), direct grouped / non-grouped conv, deep fused conv+pool. */
 void register_conv(py::module_& m);
 
+/* rocke_library_engine_gfx950_attention_dense.cpp: grid and persistent attention. */
+void register_gfx950_attention_dense(py::module_& m);
+
 /* rocke_library_engine_img2col.cpp: the img2col family. */
 void register_img2col(py::module_& m);
 
@@ -40,7 +43,7 @@ void register_winograd_fused1d(py::module_& m);
 PYBIND11_MODULE(rocke_library_engine, m)
 {
     m.doc() = "pybind11 binding for the C++ mirrors of the rocke library kernel "
-              "families (convolution). Companion of rocke_engine.";
+              "families (attention and convolution). Companion of rocke_engine.";
 
     /* Same stamps as rocke_engine: the engine archive this module links. */
     m.def(
@@ -62,6 +65,7 @@ PYBIND11_MODULE(rocke_library_engine, m)
         m, "ArchDomainError", PyExc_NotImplementedError);
 
     register_conv(m);
+    register_gfx950_attention_dense(m);
     register_img2col(m);
     register_winograd_fwd(m);
     register_winograd_gemm(m);
