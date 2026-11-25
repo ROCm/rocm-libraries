@@ -8,6 +8,9 @@ Full documentation for hipSOLVER is available at the [hipSOLVER Documentation](h
 ### Resolved issues
 
 * Fixed hipsolverDnXpotrs not setting info, which kept the value it had before the call.
+* Fixed hipsolverSpScsrlsvqr, hipsolverSpDcsrlsvqr, hipsolverSpCcsrlsvqr, hipsolverSpZcsrlsvqr,
+  hipsolverSpScsrlsvchol, and hipsolverSpDcsrlsvchol producing incorrect results when the handle
+  stream is created with hipStreamNonBlocking.
 
 
 ## hipSOLVER 3.8.0 for ROCm 10.2.0
