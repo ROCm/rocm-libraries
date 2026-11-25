@@ -3546,13 +3546,17 @@ double compute_total_latency(const problem_t& problem,
   // a normal stream of the operand's bytes is added to the kernel, once.  It is charged where
   // it was measured, behind a MALL: gfx1150, which has none, times K = 2048 and 4096 as any
   // other K (per-kernel campaign, 2000 timings each).
-  // Stream-K hands out the K iterations of all tiles in order, so workgroup i starts at
-  // i x tiles / workgroups tiles: the workgroups stand at workgroups / gcd(workgroups, tiles)
-  // different K positions (one when each runs whole tiles, the splits when a tile is split evenly).
+  // Which workgroups are in step follows the launch (TensileLite StreamK::Static::computeSplit,
+  // the two-tile schedule).  A grid of fewer workgroups than tiles that does not divide them
+  // streams workgroups + tiles % workgroups tiles and runs the rest whole, one after another
+  // in every workgroup at once: those are read in step.  The streamed tiles (all of them when
+  // the workgroups are not fewer than the tiles) are handed out in order, workgroup i starting
+  // at i x streamed / workgroups tiles: workgroups / gcd(workgroups, streamed) K positions.
   double L_in_step = 0.0;
   if (heuristic_defaults_t::has_measured_tile_terms(device.arch) && device.has_MALL()) {
     const size_t wgs = std::max<size_t>(context.num_wgs, 1), tiles = std::max<size_t>(context.num_output_tiles, 1);
-    const size_t k_positions = wgs / std::gcd(wgs, tiles);
+    const size_t streamed    = (wgs >= tiles) ? tiles : (tiles % wgs == 0) ? 0 : std::min(wgs + tiles % wgs, tiles);
+    const size_t k_positions = streamed > 0 ? wgs / std::gcd(wgs, streamed) : 1;
     constexpr size_t page_bytes = 4096;
     // Bytes of an operand whose vectors are a whole number of pages apart (0 otherwise).
     auto aligned_bytes = [&](size_t given, bool vectors_along_k, size_t other_dim, double elem_bytes) {
@@ -3563,9 +3567,15 @@ double compute_total_latency(const problem_t& problem,
     };
     const double bytes = aligned_bytes(problem.a_stride_bytes, problem.a_transpose == transpose_t::T, M, context.a_bytes) +
                          aligned_bytes(problem.b_stride_bytes, problem.b_transpose != transpose_t::T, N, context.b_bytes);
-    const double dram_bw    = device.mem3_perf_ratio * compute_mem_bw_from_occupancy(device, usable_cus);
-    const double in_step_bw = static_cast<double>(k_positions) * device.mem3_perf_ratio * compute_mem_bw_from_occupancy(device, 1);
-    if (bytes > 0.0 && in_step_bw > 0.0 && in_step_bw < dram_bw) L_in_step = bytes / in_step_bw - bytes / dram_bw;
+    const double dram_bw = device.mem3_perf_ratio * compute_mem_bw_from_occupancy(device, usable_cus);
+    const double cu_bw   = device.mem3_perf_ratio * compute_mem_bw_from_occupancy(device, 1);
+    // Excess of the operand's bytes at the rate of `positions` CUs over the device's.
+    auto wait = [&](double share, size_t positions) {
+      const double bw = static_cast<double>(positions) * cu_bw;
+      return (share > 0.0 && bw > 0.0 && bw < dram_bw) ? share * bytes * (1.0 / bw - 1.0 / dram_bw) : 0.0;
+    };
+    const double streamed_share = static_cast<double>(streamed) / static_cast<double>(tiles);
+    if (bytes > 0.0) L_in_step = wait(1.0 - streamed_share, 1) + wait(streamed_share, k_positions);
   }
 
   total_latency *= clock_ratio;

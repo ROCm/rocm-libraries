@@ -3693,6 +3693,23 @@ TEST_CASE("GEMM: vectors a whole number of pages apart stream slowly when read i
   REQUIRE(latency(8192, tiles) == latency(4096, tiles));
   // A grid that shares the tiles has its workgroups at different K.
   REQUIRE(latency(4096, 20) == latency(4096 - 128, 20));
+  // The two-tile launch: 20 workgroups on these 32 tiles stream 20 + 12 of them, all; on 43
+  // tiles (one row of 32 weight rows x 2752 tokens) they stream 20 + 3 and run the
+  // other 20 whole, one in every workgroup at once, in step: those wait.  40 workgroups stream
+  // all 43.
+  {
+    auto wide = [&](size_t b_stride_bytes, size_t launch_grid) {
+      auto p           = make_problem(32, 43 * 64, 2048);
+      p.a_dtype        = origami::data_type_t::Int4;
+      p.b_stride_bytes = b_stride_bytes;
+      auto c           = config;
+      c.launch_grid    = launch_grid;
+      return origami::gemm::compute_total_latency(p, hardware, c);
+    };
+    const double all = 43.0 * 64.0 * 4096.0 * (1.0 / 42.0e9 - 1.0 / 215.0e9) * 2.9e9;
+    REQUIRE(wide(4096, 20) - wide(4096 - 128, 20) == Approx(all * 20.0 / 43.0).epsilon(0.15));
+    REQUIRE(wide(4096, 40) == wide(4096 - 128, 40));
+  }
   // Measured behind a MALL only: gfx1150 has none and times K = 2048 as any other K.
   const auto gfx1150 = make_w4a16_gfx1150_hardware();
   REQUIRE(latency_on(gfx1150, 4096, tiles) == latency_on(gfx1150, 4096 - 128, tiles));
