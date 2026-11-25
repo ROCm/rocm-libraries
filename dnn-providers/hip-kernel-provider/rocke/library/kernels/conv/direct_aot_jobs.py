@@ -1428,16 +1428,40 @@ _SMALL_C4_STEMS = ((3, 1, 1, (320, 512)),)
 # ((filter, stride, padding, ((cpg, kpg), ...))): too few pixels and
 # channels to fill an implicit-GEMM grid, so the small_c GEMM (any channel
 # count a multiple of 8, the (s, c) runs loaded as 16 B vectors) serves them.
-_SMALL_C_NARROW = ((3, 2, 1, ((32, 32), (32, 128), (64, 64), (64, 128))),)
-WGRAD_SMALL_C_NARROW_ROW_BLOCKS = (8, 16, 32)
+_SMALL_C_NARROW = ((3, 2, 1, ((64, 128),)),)
+# Their configs, per (dtype, cpg, kpg): (small_c tile, row_blocks) as in
+# WGRAD_SMALL_C_CONFIGS, only the measured winners (few pixels, a short
+# pixel split).
+WGRAD_SMALL_C_NARROW_CONFIGS = {
+    ("fp16", 64, 128): (((8, 1, 1, 3, 4, 2, 32, False), (32,)),),
+}
 # Small-K output convolutions (filter, padding, ((cpg, kpg), ...)), stride 1:
 # the 3-channel image outputs of the VAE decoders and super-resolution nets
 # and the 4-channel latent output of the diffusion UNets. They run the
 # small_c kernel on the swapped problem (direct_wgrad_small_k).
 _SMALL_K_OUTS = ((3, 1, ((64, 3), (128, 3), (320, 4))),)
-# Its configs: the small_c tiles (the GEMM is the same shape, with C = kpg),
-# split deeper over the pixels -- an output layer runs at full resolution.
-WGRAD_SMALL_K_ROW_BLOCKS = (512, 2048)
+# Their configs, per (dtype, cpg, kpg): the small_c tiles (the GEMM is the
+# same shape, with C = kpg), split deeper over the pixels -- an output layer
+# runs at full resolution. Only the measured winners.
+_SMALL_K_WIDE = (
+    ((8, 1, 1, 3, 4, 2, 32, False), (512,)),
+    ((8, 1, 1, 3, 4, 4, 32, True), (512,)),
+)
+WGRAD_SMALL_K_CONFIGS = {
+    ("fp16", 64, 3): (((1, 1, 2, 2, 0, 2, 8, False), (512, 2048)),),
+    ("bf16", 128, 3): _SMALL_K_WIDE,
+    ("bf16", 320, 4): _SMALL_K_WIDE,
+}
+
+
+def _small_c_tiles(table, dtype: str, caps):
+    """The (tile, row_blocks) configs of a per-(dtype, cpg, kpg) table for
+    ``caps``; every one of ``dtype``'s when ``caps`` is None."""
+    if caps is not None:
+        return table.get((dtype, caps.cpg, caps.kpg), ())
+    return tuple(c for key, cfgs in table.items() if key[0] == dtype for c in cfgs)
+
+
 # Depthwise wgrad filters (VALU kernel), stride 1 and 2.
 _DW_WGRAD_FILTERS = (3, 5, 7)
 # Dilated 3x3 rows of the non-grouped kernel: (PAD, stride, dil_h, dil_w). The
@@ -2737,13 +2761,11 @@ def _knob_grid(
 
         if ArchTarget.from_gfx(arch).wave_size != 32:
             return
-        narrow = caps is not None and caps.cpg >= 8
-        for (wk, wc, tk, tc, vx, ss, wsr, uw), row_blocks in WGRAD_SMALL_C_CONFIGS:
-            if narrow:
-                # The narrow layers: few pixels, short pixel splits.
-                row_blocks = WGRAD_SMALL_C_NARROW_ROW_BLOCKS
-            elif caps is not None and caps.cpg not in (3, 4):
-                continue
+        configs = WGRAD_SMALL_C_CONFIGS
+        if caps is not None and caps.cpg >= 8:
+            # The narrow layers: few pixels, short pixel splits.
+            configs = _small_c_tiles(WGRAD_SMALL_C_NARROW_CONFIGS, dtype, caps)
+        for (wk, wc, tk, tc, vx, ss, wsr, uw), row_blocks in configs:
             for rb in row_blocks:
                 yield dict(
                     waves_k=wk,
@@ -2761,8 +2783,9 @@ def _knob_grid(
 
         if ArchTarget.from_gfx(arch).wave_size != 32:
             return
-        for (wk, wc, tk, tc, vx, ss, wsr, uw), _ in WGRAD_SMALL_C_CONFIGS:
-            for rb in WGRAD_SMALL_K_ROW_BLOCKS:
+        configs = _small_c_tiles(WGRAD_SMALL_K_CONFIGS, dtype, caps)
+        for (wk, wc, tk, tc, vx, ss, wsr, uw), row_blocks in configs:
+            for rb in row_blocks:
                 yield dict(
                     waves_k=wk,
                     waves_c=wc,
