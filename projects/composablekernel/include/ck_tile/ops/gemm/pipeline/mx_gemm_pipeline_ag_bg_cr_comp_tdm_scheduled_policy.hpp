@@ -36,7 +36,6 @@ enum class MxTdmScheduledReason : int
     ScaleSpan,
     KShort,
     KLong,
-    KTailFull,
     SplitBRead,
     Gl2Distance,
     ClusterDim,
@@ -69,7 +68,6 @@ CK_TILE_HOST_DEVICE constexpr const char* mx_tdm_scheduled_reason_code(MxTdmSche
     case MxTdmScheduledReason::ScaleSpan: return "scale_span";
     case MxTdmScheduledReason::KShort: return "k_short";
     case MxTdmScheduledReason::KLong: return "k_long";
-    case MxTdmScheduledReason::KTailFull: return "k_tail_full";
     case MxTdmScheduledReason::SplitBRead: return "split_b_read";
     case MxTdmScheduledReason::Gl2Distance: return "gl2_distance";
     case MxTdmScheduledReason::ClusterDim: return "cluster_dim";
@@ -110,9 +108,6 @@ CK_TILE_HOST_DEVICE constexpr const char* mx_tdm_scheduled_reason_message(MxTdmS
     case MxTdmScheduledReason::KLong:
         return "K plus the K the loads look ahead (max(gl2_prefetch_distance, 2) + 1 tiles) must "
                "fit in i32";
-    case MxTdmScheduledReason::KTailFull:
-        return "K mod tile_k must be at most tile_k - 128: no instance of this tile_k runs a "
-               "longer K tail";
     case MxTdmScheduledReason::SplitBRead:
         return "SplitBLdsRead needs PrefetchLdsRead and an even N wave repeat";
     case MxTdmScheduledReason::Gl2Distance:
@@ -141,12 +136,15 @@ CK_TILE_HOST_DEVICE constexpr const char* mx_tdm_scheduled_reason_message(MxTdmS
  * TileGemmUniversalTraits plus the code paths that depend on the problem's M, N and K.
  *
  * EdgeM / EdgeN (kPadM / kPadN): the last M (N) tile is partial, its TDM rows clipped and its D
- * vectors masked. WideA / WideB / WideD (LargeTensors if any): A's, B's or D's byte offsets pass
- * 2^31 and are i64. TailSteps: the K steps of a last, partial tile when tile_k does not divide K
- * (0 without one). The edge and wide paths are supersets of the ones they replace (an edge kernel
- * runs whole tiles, a wide one narrow offsets), so one instance serves every problem its traits
- * cover; TailSteps must be the problem's. The parity of the whole-tile count is the pipeline's
- * TailNumber, chosen at run time.
+ * vectors masked. WideA / WideB / WideD: A's, B's or D's offsets pass 2^31, and the pipeline
+ * (A, B) and MxTdmStoreEpilogue (D) rebase their tiles' views at an i64 row offset. They are not
+ * LargeTensors: the kernel's views stay i32. TailSteps: the K steps of a last, partial tile of
+ * fewer K steps than a whole one, run after the loop (0 without one); a partial tile of every K
+ * step (K mod tile_k above tile_k - 128) runs in the loop as a whole tile, zero-filled past K.
+ * The edge and wide paths are
+ * supersets of the ones they replace (an edge kernel runs whole tiles, a wide one narrow offsets),
+ * so one instance serves every problem its traits cover; TailSteps must be the problem's. The
+ * parity of the loop's tile count is the pipeline's TailNumber, chosen at run time.
  * MxTdmScheduledSelectTraits gives the values an M x N x K problem needs.
  */
 template <bool EdgeM_        = false,
@@ -171,7 +169,7 @@ struct MxTdmScheduledGemmTraits : TileGemmUniversalTraits<EdgeM_,
                                                           DataCachePrefetchKind::None,
                                                           DataCachePrefetchKind::None,
                                                           false,
-                                                          WideA_ || WideB_ || WideD_>
+                                                          false>
 {
     static constexpr bool kEdgeM        = EdgeM_;
     static constexpr bool kEdgeN        = EdgeN_;
@@ -208,12 +206,17 @@ MxTdmScheduledSelectTraits(long_index_t M, long_index_t N, long_index_t K)
     const long_index_t span_m   = integer_least_multiple(M, Shape::kM);
     const long_index_t span_n   = integer_least_multiple(N, Shape::kN);
     const long_index_t packed_k = K / k_per_byte;
+    constexpr index_t atom_k    = Shape::WarpTile::at(number<2>{});
+    const long_index_t k_tail   = K % Shape::kK;
     return {M % Shape::kM != 0,
             N % Shape::kN != 0,
             span_m * packed_k > span,
             span_n * packed_k > span,
             span_m * span_n > span,
-            static_cast<index_t>(integer_divide_ceil(K % Shape::kK, 128))};
+            // A partial tile of every K step runs in the loop (the pipeline's GetFullTiles).
+            k_tail > Shape::kK - atom_k
+                ? 0
+                : static_cast<index_t>(integer_divide_ceil(k_tail, atom_k))};
 }
 
 /**

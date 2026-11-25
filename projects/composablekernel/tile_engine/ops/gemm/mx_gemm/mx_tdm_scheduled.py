@@ -76,7 +76,6 @@ REASONS = (
     "scale_span",
     "k_short",
     "k_long",
-    "k_tail_full",
     "split_b_read",
     "gl2_distance",
     "cluster_dim",
@@ -262,7 +261,17 @@ class MxTdmScheduledSpec:
 
     @property
     def tail_steps(self) -> int:
-        return _ceil_div(self.K % self.tile_k, ATOM_K)
+        """The K steps of the K tail (MxTdmScheduledSelectTraits): 0 without one, and 0 for a
+        partial tile of every K step, which the loop runs as a whole tile (full_tiles).
+        """
+        tail = self.K % self.tile_k
+        return 0 if tail > self.tile_k - ATOM_K else _ceil_div(tail, ATOM_K)
+
+    @property
+    def full_tiles(self) -> int:
+        """The K tiles the loop runs (the pipeline's GetFullTiles): the whole tiles, and a
+        partial tile of every K step."""
+        return self.K // self.tile_k + (self.K % self.tile_k > self.tile_k - ATOM_K)
 
     @property
     def edge_m(self) -> bool:
@@ -523,7 +532,8 @@ class MxTdmScheduledSpec:
         """ "ok" if the spec builds, else the code of the first rule broken (GetReason, then
         GetUnsupportedReason for the rules that need M, N and K).
 
-        check_shape: check the rules that need M, N and K (off for a tile-only instance)."""
+        check_shape: check the rules that need M, N and K (off for a tile-only instance).
+        """
         if check_shape:
             if self.M <= 0 or self.N <= 0 or self.K <= 0:
                 return "shape_positive"
@@ -562,9 +572,6 @@ class MxTdmScheduledSpec:
             lookahead = (max(self.gl2_prefetch_distance, 2) + 1) * self.tile_k
             if self.K > I32_SPAN - 1 - lookahead:
                 return "k_long"
-            # An instance's K tail has fewer K steps than a tile (tail_steps < k_steps).
-            if self.K % self.tile_k > self.tile_k - ATOM_K:
-                return "k_tail_full"
         if self.split_b_lds_read and (not self.prefetch_lds_read or rn % 2):
             return "split_b_read"
         if self.gl2_prefetch_distance != 0 and not 2 <= self.gl2_prefetch_distance <= 8:
@@ -656,7 +663,8 @@ def is_default_tuning(tuning: Optional[Dict]) -> bool:
 
 def schedule_tunings() -> List[Dict[str, object]]:
     """Tunings that reach every tile-dependent outcome of validate() (the defaults first): the
-    knobs a tile's validity turns on are SplitBLdsRead, PrefetchLdsRead and InterleaveLdsRegions."""
+    knobs a tile's validity turns on are SplitBLdsRead, PrefetchLdsRead and InterleaveLdsRegions.
+    """
     return [
         normalize_tuning(
             {

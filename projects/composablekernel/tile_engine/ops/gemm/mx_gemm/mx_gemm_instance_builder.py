@@ -232,10 +232,10 @@ struct SelectedKernel {{
         P,
         ck_tile::MxTdmStoreEpilogue<P>>;
 
-    // The pipeline's TailHandler picks the kernel of K's whole-tile count on the host.
+    // The pipeline's TailHandler picks the kernel of the loop's tile count on the host.
     static float launch(const MxGemmHostArgs& args, const ck_tile::stream_config& stream)
     {{
-        const ck_tile::index_t full_tiles = args.K / TileK;
+        const ck_tile::index_t full_tiles = Pipeline::GetFullTiles(args.K);
         return Pipeline::TailHandler(
             [&](auto, auto tail_num) {{
                 return launch_kernel<
