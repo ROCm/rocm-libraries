@@ -7,8 +7,11 @@ Related: [ADR 0037](0037-record-a2agemm-fused-mode.md)
 
 ## Context
 A2AGemm splits a batch of token blocks into peer groups that start on
-different peer shards. A new solution parameter, `A2APeerGroups` (valid `0`-`7`;
-default `0`, the existing rule), caps the number of groups. It is valid only
+different peer shards. The groups become contiguous runs of blocks, and the
+default count changes from develop's min(W−1, count) interleaved groups to
+ceil(count / ceil(count / (W−1))): 8 blocks at W = 8 form 4 groups of 2
+instead of 7. A new solution parameter, `A2APeerGroups` (valid `0`-`7`;
+default `0`, that rule), caps the number of groups. It is valid only
 with `FusedA2A: A2AGemm` and enters the kernel name (`AAPG<k>`) only when
 non-zero, so no existing basename moves. Four goldens change:
 
