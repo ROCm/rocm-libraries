@@ -88,8 +88,9 @@ using BLayout        = ColumnMajor;
 using CLayout        = RowMajor;
 constexpr int kScale = 32; // K elements per scale
 
-#if defined(CK_EX55_MX_SCALE_PREFETCH_DEPTH) || defined(CK_EX55_A_ROW_PREFETCH) || \
-    defined(CK_EX55_MX_SCALE_LDS) || defined(CK_EX55_MX_SCALE_WIDE) || defined(CK_EX55_REFILL)
+#if defined(CK_EX55_MX_SCALE_PREFETCH_DEPTH) || defined(CK_EX55_A_ROW_PREFETCH) ||                \
+    defined(CK_EX55_MX_SCALE_LDS) || defined(CK_EX55_MX_SCALE_WIDE) || defined(CK_EX55_REFILL) || \
+    defined(CK_EX55_RA)
 // EXPERIMENT: -DCK_EX55_MX_SCALE_PREFETCH_DEPTH=N sets the pipeline's MX scale prefetch depth;
 // -DCK_EX55_A_ROW_PREFETCH=1 sets kStreamARowPrefetch; -DCK_EX55_MX_SCALE_LDS=1 sets kMxScaleLds
 // (and the host lays the scales out for it, see swizzle_scales_for_lds); -DCK_EX55_MX_SCALE_WIDE=1
@@ -116,6 +117,19 @@ struct Ex55Policy : ck_tile::GemmPipelineAgBgCrCompTDMV3Policy
 #endif
 #if defined(CK_EX55_A_ROW_PREFETCH)
     [[maybe_unused]] static constexpr bool kStreamARowPrefetch = CK_EX55_A_ROW_PREFETCH != 0;
+#endif
+#if defined(CK_EX55_RA)
+    // -DCK_EX55_RA=1 sets kReadAhead (the read-ahead K loop)
+    [[maybe_unused]] static constexpr bool kReadAhead = CK_EX55_RA != 0;
+#endif
+#if defined(CK_EX55_RA_SPLITA)
+    [[maybe_unused]] static constexpr bool kReadAheadSplitA = CK_EX55_RA_SPLITA != 0;
+#endif
+#if defined(CK_EX55_RA_LATEAT)
+    [[maybe_unused]] static constexpr ck_tile::index_t kReadAheadLateAt = CK_EX55_RA_LATEAT;
+#endif
+#if defined(CK_EX55_RA_BLOCKB)
+    [[maybe_unused]] static constexpr bool kReadAheadBlockB = CK_EX55_RA_BLOCKB != 0;
 #endif
 #if defined(CK_EX55_A_ROW_PREFETCH_DEPTH)
     [[maybe_unused]] static constexpr ck_tile::index_t kStreamARowPrefetchDepth =
@@ -381,9 +395,14 @@ HostOperand make_operand(ck_tile::index_t rows,
             o.q[i]         = ck_tile::type_convert<ADataType>(x);
             o.v[i]         = ck_tile::type_convert<float>(o.q[i]);
         }
+        // DEBUG: CK_EX55_UNIT_SCALES=1 in the environment sets every scale to 1
+        static const bool unit_scales = [] {
+            const char* v = std::getenv("CK_EX55_UNIT_SCALES");
+            return v != nullptr && v[0] == '1';
+        }();
         for(ck_tile::index_t b = 0; b < ks; ++b)
         {
-            const int ex      = de(g);
+            const int ex      = unit_scales ? 0 : de(g);
             o.e[r * ks + b]   = static_cast<int8_t>(ex);
             o.raw[r * ks + b] = ScaleDataType{static_cast<uint8_t>(127 + ex)};
         }
@@ -702,6 +721,24 @@ int run_impl(const ck_tile::ArgParser& arg, const std::string& bench_name)
                             refs[i],
                             gotf,
                             sabs[i]);
+            // DEBUG: CK_EX55_DIAG=1: for the first mismatches, the points whose reference equals
+            // the wrong value (a layout bug shows as a pattern)
+            static const bool diag = [] {
+                const char* v = std::getenv("CK_EX55_DIAG");
+                return v != nullptr && v[0] == '1';
+            }();
+            if(diag && !ok && bad <= 12)
+            {
+                std::printf("  diag m=%d n=%d got=%g matches:", m, n, gotf);
+                int shown = 0;
+                for(size_t j = 0; j < pts.size() && shown < 6; ++j)
+                    if(std::fabs(refs[j] - gotf) < 1e-9 && std::fabs(refs[j]) > 1e-9)
+                    {
+                        std::printf(" (%d,%d)", pts[j].first, pts[j].second);
+                        ++shown;
+                    }
+                std::printf("\n");
+            }
         }
         const bool pass = bad == 0 && (nondeterministic == 0 || k_batch > 1);
         std::printf("{\"type\":\"verify\",\"bench\":\"%s\",\"mode\":\"%s\",\"M\":%d,\"N\":%d,"
@@ -928,6 +965,18 @@ int dispatch_tile(const ck_tile::ArgParser& arg, const std::string& name)
         {
             auto go = [&](auto w_) -> int {
                 constexpr ck_tile::index_t W = decltype(w_)::value;
+#if defined(CK_EX55_FOCUS_MIN)
+                // EXPERIMENT: -DCK_EX55_FOCUS_MIN: only warp tile 16 at clusters 1x1 and 4x4
+                if constexpr(W == 16)
+                {
+                    if(cl == "1x1" && pl == "default")
+                        return run<Instance<256, 256, 256, 2, 2, TdmEpi, CDataType, W>>(arg, name);
+                    if(cl == "4x4" && pl == "default")
+                        return run<Instance<256, 256, 256, 2, 2, TdmEpi, CDataType, W, 4, 4>>(arg,
+                                                                                              name);
+                }
+                return -1;
+#else
                 if(cl == "1x1" && pl == "default")
                     return run<Instance<256, 256, 256, 2, 2, TdmEpi, CDataType, W>>(arg, name);
                 if(cl == "2x1" && pl == "default")
@@ -949,6 +998,7 @@ int dispatch_tile(const ck_tile::ArgParser& arg, const std::string& name)
                     return run<Instance<256, 256, 256, 2, 2, TdmEpi, CDataType, W, 4, 4>>(arg,
                                                                                           name);
                 return -1;
+#endif
             };
             const int rc = wt == "16" ? go(ck_tile::number<16>{}) : go(ck_tile::number<32>{});
             if(rc != -1)

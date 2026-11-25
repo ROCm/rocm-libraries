@@ -1027,7 +1027,570 @@ struct GemmPipelineAgBgCrCompTDMV3 : public GemmPipelineAgBgCrCompTDMV1<Problem,
                 }
             }();
 
-            if constexpr(kSplitBarrier)
+            if constexpr(Policy::kReadAhead)
+            {
+                // EXPERIMENT: read-ahead K loop (see Policy::kReadAhead). Each WMMA operand is
+                // one warp-GEMM fragment (one M or N iteration, one K atom) read from LDS by
+                // its own window; the next K atom's fragments are read while the current one
+                // runs, and each K tile has one workgroup barrier, in its last K atom.
+                static_assert(Policy::kAlternateIssuers, "kReadAhead: alternating issuers");
+                static_assert(kStreamARows && !is_b_load_tr_v,
+                              "kReadAhead: BlockGemm's (MIterPerWarp, MWarp) layout, no transposed "
+                              "LDS reads");
+                static_assert(!kMx || kMxScaleLdsActive,
+                              "kReadAhead: MX scales staged in LDS (Policy::kMxScaleLds)");
+                using WarpGemm            = typename BlockGemm::WarpGemm;
+                constexpr index_t kKAtom  = WarpGemm::kK;
+                constexpr index_t kAtoms  = KPerBlock / kKAtom;
+                constexpr index_t kMI     = BlockGemm::MIterPerWarp;
+                constexpr index_t kNI     = BlockGemm::NIterPerWarp;
+                constexpr index_t kHalf   = kNI / 2;
+                constexpr index_t kAFragM = MPerBlock / kMI;
+                constexpr index_t kBFragN = NPerBlock / kNI;
+                static_assert(kNI % 2 == 0 && kAtoms >= 1 && KPerBlock % kKAtom == 0,
+                              "kReadAhead: an even N iteration count, whole K atoms");
+
+                // stage f's fill (tile t into stage t % 2) from its issuers, whose DRAM windows
+                // then move two K tiles on
+                auto ra_fill = [&](auto f) {
+                    constexpr index_t s = decltype(f)::value;
+                    auto& a_window      = std::get<s>(std::tie(a_copy_dram_window, a_dram_window1));
+                    auto& b_window      = std::get<s>(std::tie(b_copy_dram_window, b_dram_window1));
+                    // MX: the issuers also copy the same tile's scale words into scale ring
+                    // stage s (async loads, published with the data)
+                    if(s == 0 ? is_a_issuer0 : is_a_issuer1)
+                    {
+                        if constexpr(kMx)
+                        {
+                            scales.template issue_a<s>();
+                        }
+                        Base::GlobalPrefetchTDM(tdm_config_a[s], a_copy_lds_windows[f], a_window);
+                        move_tile_window(a_window, a_dram_tile_window_step_stride);
+                    }
+                    if(s == 0 ? is_b_issuer0 : is_b_issuer1)
+                    {
+                        if constexpr(kMx)
+                        {
+                            scales.template issue_b<s>();
+                        }
+                        Base::GlobalPrefetchTDM(tdm_config_b[s], b_copy_lds_windows[f], b_window);
+                        move_tile_window(b_window, b_dram_tile_window_step_stride);
+                    }
+                    if constexpr(kMx)
+                    {
+                        scales.template filled<s>();
+                    }
+                };
+                // own fills landed (TDM and, MX, the scale words' async loads)
+                auto wait_own_fills = [&]() {
+                    if constexpr(kMx)
+                    {
+                        __builtin_amdgcn_s_wait_asynccnt(0);
+                    }
+                    s_wait_tensorcnt<0>();
+                };
+                // MX: the scale ring holds tile t's scales in stage t % 2, like the data (the
+                // state was built for the kMxScaleLds loop, which runs one K tile ahead)
+                if constexpr(kMx)
+                {
+                    using St = remove_cvref_t<decltype(scales)>;
+                    scales.a_glb -= St::kWordsA;
+                    scales.b_glb -= St::kWordsB;
+                }
+                // The scale words of one K atom: kMI of A and kNI of B (one int32, four E8M0
+                // scales, per M or N iteration), read from scale ring stage s.
+                struct AtomScales
+                {
+                    int32_t a[kMI];
+                    int32_t b[kNI];
+                };
+                auto rd_sc = [&](auto s, auto k) {
+                    AtomScales r{};
+                    if constexpr(kMx)
+                    {
+                        using St              = remove_cvref_t<decltype(scales)>;
+                        constexpr index_t kSK = St::kThreadA / kMI; // words per row per tile
+                        static_assert(St::kThreadA == kMI * kSK && St::kThreadB == kNI * kSK &&
+                                          kSK == kAtoms,
+                                      "kReadAhead: one scale word per M or N iteration and K atom");
+                        constexpr index_t si               = decltype(s)::value;
+                        constexpr index_t ki               = decltype(k)::value;
+                        const CK_TILE_LDS_ADDR int32_t* st = scales.ring + si * St::kStageWords;
+                        static_for<0, kMI, 1>{}(
+                            [&](auto m) { r.a[m] = st[scales.a_word0 + m.value * kSK + ki]; });
+                        static_for<0, kNI, 1>{}([&](auto n) {
+                            r.b[n] = st[St::kWordsA + scales.b_word0 + n.value * kSK + ki];
+                        });
+                    }
+                    return r;
+                };
+
+                // one fragment: BlockGemm's A (B) distribution with one M (N) iteration and one
+                // K iteration
+                constexpr auto a_frag_dstr =
+                    make_static_tile_distribution(detail::make_embed_tile_distribution_encoding(
+                        tile_distribution_encoding<
+                            sequence<BlockGemm::NWarp>,
+                            tuple<sequence<1, BlockGemm::MWarp>, sequence<1>>,
+                            tuple<sequence<1, 0>>,
+                            tuple<sequence<1, 0>>,
+                            sequence<1, 2>,
+                            sequence<0, 0>>{},
+                        typename WarpGemm::AWarpDstrEncoding{}));
+                constexpr auto b_frag_dstr =
+                    make_static_tile_distribution(detail::make_embed_tile_distribution_encoding(
+                        tile_distribution_encoding<
+                            sequence<BlockGemm::MWarp>,
+                            tuple<sequence<1, BlockGemm::NWarp>, sequence<1>>,
+                            tuple<sequence<0, 1>>,
+                            tuple<sequence<0, 1>>,
+                            sequence<1, 2>,
+                            sequence<0, 0>>{},
+                        typename WarpGemm::BWarpDstrEncoding{}));
+                auto a_frag_windows = generate_tuple(
+                    [&](auto s) {
+                        return make_tile_window(a_lds_block_views[s],
+                                                make_tuple(number<kAFragM>{}, number<kKAtom>{}),
+                                                {0, 0},
+                                                a_frag_dstr);
+                    },
+                    number<num_lds_buffers>{});
+                auto b_frag_windows = generate_tuple(
+                    [&](auto s) {
+                        return make_tile_window(b_lds_block_views[s],
+                                                make_tuple(number<kBFragN>{}, number<kKAtom>{}),
+                                                {0, 0},
+                                                b_frag_dstr);
+                    },
+                    number<num_lds_buffers>{});
+                // The loop state is kept in native vectors, as the WMMA builtin takes it: the
+                // fragments as <16 x i32>, the accumulators as <8 x float>. Through the tile
+                // tensors, loop-carried accumulators become scalar floats (each WMMA then copies
+                // its accumulator into an aligned register group) and the loop spills.
+                using WarpGemm0 = typename BlockGemm::WarpGemm;
+                static_assert(std::is_same_v<ADataType, fp8_t> && std::is_same_v<BDataType, fp8_t>,
+                              "kReadAhead: fp8 A and B");
+                static_assert(WarpGemm0::kM == 16 && WarpGemm0::kN == 16 && kKAtom == 128 &&
+                                  !BlockGemm::TransposeC,
+                              "kReadAhead: the 16x16x128 warp GEMM, C not transposed");
+                static_assert(
+                    sizeof(typename WarpGemm0::AWarpTensor{}.get_thread_buffer()) == 64 &&
+                        sizeof(typename WarpGemm0::BWarpTensor{}.get_thread_buffer()) == 64 &&
+                        sizeof(typename WarpGemm0::CWarpTensor{}.get_thread_buffer()) == 32,
+                    "kReadAhead: 64-byte A/B fragments, 8 accumulators per lane");
+                // Fragment reads straight into <16 x i32>: each of a fragment's four 16-byte
+                // accesses is a 128-bit LDS load at the lane's offset plus the access's step, the
+                // split tile_window's gfx125 LDS load uses. No fp8 value is formed: as <64 x i8> a
+                // loop-carried fragment takes 64 VGPRs, and pinning it as dwords with an empty asm
+                // forces it into the low 256-VGPR bank (asm operands cannot use the high banks).
+                auto frag_layout = [](const auto& view, auto dstr, auto win) {
+                    using Dstr = decltype(dstr);
+                    using Tr   = typename decltype(win)::Traits;
+                    using SFC  = typename Tr::SFC_Ys;
+                    static_assert(Tr::NumAccess == 4 && Tr::ScalarPerVector == 16 &&
+                                      Tr::PackedSize == 1,
+                                  "kReadAhead: four 16-byte accesses per 8-bit fragment");
+                    const auto& desc = view.get_tensor_descriptor();
+                    array<index_t, 4> step;
+                    static_for<0, 4, 1>{}([&](auto j) {
+                        constexpr auto ys = SFC::get_step_between(number<0>{}, j);
+                        constexpr auto ad = make_tensor_adaptor_coordinate(
+                            Dstr{}.get_ps_ys_to_xs_adaptor(),
+                            container_concat(array<index_t, Dstr::get_num_of_dimension_p()>{0},
+                                             to_array<index_t, ys.size()>(ys)));
+                        step(j) = make_tensor_coordinate(desc, ad.get_bottom_index()).get_offset();
+                        // access j fills bytes 16 j .. 16 j + 15 of the WMMA operand
+                        static_assert(Dstr{}.get_ys_to_d_descriptor().calculate_offset(
+                                          SFC::get_index(j)) == 16 * j.value,
+                                      "kReadAhead: accesses in operand order");
+                    });
+                    const index_t lane =
+                        make_tensor_coordinate(desc, Dstr{}.calculate_index()).get_offset();
+                    return make_tuple(lane, step);
+                };
+                auto read_frag = [](const auto& view, index_t off, const array<index_t, 4>& step) {
+                    const CK_TILE_LDS_ADDR char* p =
+                        reinterpret_cast<const char*>(view.get_buffer_view().p_data_) + off;
+                    int32x4_t v[4];
+                    static_for<0, 4, 1>{}([&](auto j) {
+                        v[j] = *reinterpret_cast<const CK_TILE_LDS_ADDR int32x4_t*>(p + step[j]);
+                    });
+                    const int32x8_t lo =
+                        __builtin_shufflevector(v[0], v[1], 0, 1, 2, 3, 4, 5, 6, 7);
+                    const int32x8_t hi =
+                        __builtin_shufflevector(v[2], v[3], 0, 1, 2, 3, 4, 5, 6, 7);
+                    return __builtin_shufflevector(
+                        lo, hi, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15);
+                };
+                const auto [a_lane, a_step] =
+                    frag_layout(a_lds_block_views[I0{}], a_frag_dstr, a_frag_windows[I0{}]);
+                const auto [b_lane, b_step] =
+                    frag_layout(b_lds_block_views[I0{}], b_frag_dstr, b_frag_windows[I0{}]);
+#if defined(CK_TILE_EXP_RA_LOADTILE)
+                // DEBUG: fragments through load_tile (spills; for checking the raw reads)
+                auto rd_a = [&](auto s, auto k, auto m) {
+                    auto w = a_frag_windows[s];
+                    move_tile_window(w,
+                                     {decltype(m)::value * kAFragM, decltype(k)::value * kKAtom});
+                    auto t = make_static_distributed_tensor<ADataType>(a_frag_dstr);
+                    load_tile(t, w);
+                    int32x16_t f;
+                    __builtin_memcpy(&f, &t.get_thread_buffer(), sizeof(f));
+                    ignore = a_lane;
+                    ignore = a_step;
+                    ignore = read_frag;
+                    return f;
+                };
+                auto rd_b = [&](auto s, auto k, auto n) {
+                    auto w = b_frag_windows[s];
+                    move_tile_window(w,
+                                     {decltype(n)::value * kBFragN, decltype(k)::value * kKAtom});
+                    auto t = make_static_distributed_tensor<BDataType>(b_frag_dstr);
+                    load_tile(t, w);
+                    int32x16_t f;
+                    __builtin_memcpy(&f, &t.get_thread_buffer(), sizeof(f));
+                    ignore = b_lane;
+                    ignore = b_step;
+                    return f;
+                };
+#else
+                auto rd_a = [&](auto s, auto k, auto m) {
+                    const index_t off =
+                        a_lane + a_lds_block_views[s].get_tensor_descriptor().calculate_offset(
+                                     make_multi_index(decltype(m)::value * kAFragM,
+                                                      decltype(k)::value * kKAtom));
+                    return read_frag(a_lds_block_views[s], off, a_step);
+                };
+                auto rd_b = [&](auto s, auto k, auto n) {
+                    const index_t off =
+                        b_lane + b_lds_block_views[s].get_tensor_descriptor().calculate_offset(
+                                     make_multi_index(decltype(n)::value * kBFragN,
+                                                      decltype(k)::value * kKAtom));
+                    return read_frag(b_lds_block_views[s], off, b_step);
+                };
+#endif
+                auto rd_a_all = [&](auto s, auto k) {
+                    return generate_tuple([&](auto m) { return rd_a(s, k, m); }, number<kMI>{});
+                };
+                // A fragments h * kMI / 2 .. + kMI / 2 - 1
+                auto rd_a_half = [&](auto s, auto k, auto h) {
+                    return generate_tuple(
+                        [&](auto j) {
+                            return rd_a(s, k, number<decltype(h)::value*(kMI / 2) + j.value>{});
+                        },
+                        number<kMI / 2>{});
+                };
+                // B fragments n0 .. n0 + kHalf - 1
+                auto rd_b_half = [&](auto s, auto k, auto h) {
+                    return generate_tuple(
+                        [&](auto j) {
+                            return rd_b(s, k, number<decltype(h)::value * kHalf + j.value>{});
+                        },
+                        number<kHalf>{});
+                };
+
+                fp32x8_t acc[kMI][kNI];
+                static_for<0, kMI, 1>{}([&](auto m) {
+                    static_for<0, kNI, 1>{}([&](auto n) { acc[m][n] = fp32x8_t{0}; });
+                });
+
+                // acc(m, n) += A(m) * B(n) for K atom k, with the scales of K atom k (MX)
+                auto wmma = [&](auto m,
+                                auto n,
+                                auto,
+                                const int32x16_t& a,
+                                const int32x16_t& b,
+                                const AtomScales& sc) {
+                    constexpr index_t mi = decltype(m)::value;
+                    constexpr index_t ni = decltype(n)::value;
+                    if constexpr(kMx)
+                    {
+                        const int32_t scale_a = sc.a[mi];
+                        const int32_t scale_b = sc.b[ni];
+#if defined(__gfx125__)
+                        // fp8 (e4m3) A and B, E8M0 scales, as WmmaTraits' scaled intrinsic;
+                        // with the warp GEMM's transposed C, B and its scales go first (as
+                        // WarpGemmAttributeWmma's kTransC path)
+                        if constexpr(Problem::TransposeC)
+                        {
+                            acc[mi][ni] = __builtin_amdgcn_wmma_scale_f32_16x16x128_f8f6f4(
+                                0, b, 0, a, 0, acc[mi][ni], 0, 0, scale_b, 0, 0, scale_a, 0, 0);
+                        }
+                        else
+                        {
+                            acc[mi][ni] = __builtin_amdgcn_wmma_scale_f32_16x16x128_f8f6f4(
+                                0, a, 0, b, 0, acc[mi][ni], 0, 0, scale_a, 0, 0, scale_b, 0, 0);
+                        }
+#else
+                        ignore = scale_a;
+                        ignore = scale_b;
+#endif
+                    }
+                    else
+                    {
+#if defined(__gfx125__)
+                        acc[mi][ni] = Problem::TransposeC
+                                          ? __builtin_amdgcn_wmma_f32_16x16x128_f8f6f4(
+                                                0, b, 0, a, 0, acc[mi][ni])
+                                          : __builtin_amdgcn_wmma_f32_16x16x128_f8f6f4(
+                                                0, a, 0, b, 0, acc[mi][ni]);
+#endif
+                    }
+                    ignore = a;
+                    ignore = b;
+                };
+                // the WMMAs of one half of the N iterations (B-outer, as rocKE's loop)
+                // bh: the kHalf B fragments of half h
+                // WMMAs lo .. hi - 1 of half h, in its (j, m) order
+                auto wmma_half_range = [&](auto h,
+                                           auto k,
+                                           const auto& a,
+                                           const auto& bh,
+                                           const auto& sc,
+                                           auto lo,
+                                           auto hi) {
+                    static_for<0, kHalf, 1>{}([&](auto j) {
+                        static_for<0, kMI, 1>{}([&](auto m) {
+                            constexpr index_t idx = j.value * kMI + m.value;
+                            if constexpr(decltype(lo)::value <= idx && idx < decltype(hi)::value)
+                            {
+                                constexpr auto n = number<decltype(h)::value * kHalf + j.value>{};
+                                wmma(m, n, k, a[m], bh[j], sc);
+                            }
+                        });
+                    });
+                };
+                auto wmma_half =
+                    [&](auto h, auto k, const auto& a, const auto& bh, const auto& sc) {
+                        wmma_half_range(h, k, a, bh, sc, number<0>{}, number<kHalf * kMI>{});
+                    };
+
+                // prologue: tiles 0 and 1 into stages 0 and 1, tile 0's scales, tile 0 published
+                if(is_a_issuer1)
+                {
+                    move_tile_window(a_dram_window1, a_dram_tile_window_step);
+                }
+                if(is_b_issuer1)
+                {
+                    move_tile_window(b_dram_window1, b_dram_tile_window_step);
+                }
+                ra_fill(I0{});
+                if(num_loop > 1)
+                {
+                    ra_fill(I1{});
+                }
+                if(is_a_issuer0 || is_b_issuer0)
+                {
+                    wait_own_fills();
+                }
+                asm volatile("" ::: "memory");
+                __builtin_amdgcn_s_barrier_signal(-1);
+                __builtin_amdgcn_s_barrier_wait(-1);
+                asm volatile("" ::: "memory");
+                __builtin_amdgcn_sched_barrier(0);
+                auto a_cur  = rd_a_all(I0{}, I0{});
+                auto sc_cur = rd_sc(I0{}, I0{});
+                auto b0_cur = rd_b_half(I0{}, I0{}, I0{});
+                auto b1_cur = rd_b_half(I0{}, I0{}, I1{});
+
+                // One K tile t from LDS stage p. Per K atom: the next K atom's A, the first half
+                // of the WMMAs, all of the next K atom's B, the second half. In the last K atom
+                // (when tile t + 1 exists) each wave first drains its LDS reads and its own fill,
+                // and the barrier publishes tile t + 1 and frees stage p for tile t + 2.
+                auto tile = [&](auto p, index_t t, auto has_next) {
+                    constexpr index_t pi    = decltype(p)::value;
+                    constexpr bool kHasNext = decltype(has_next)::value;
+                    ignore                  = pi;
+                    static_for<0, kAtoms, 1>{}([&](auto s) {
+                        constexpr bool kLast = s.value + 1 == kAtoms;
+#if defined(CK_TILE_EXP_RA_SYNC)
+                        // DEBUG: no read-ahead; K atom s's fragments right before its WMMAs
+                        // (no refill race only while no refill is issued, e.g. two K tiles)
+                        {
+                            asm volatile("" ::: "memory");
+                            auto a_s  = rd_a_all(p, s);
+                            auto b0_s = rd_b_half(p, s, I0{});
+                            auto b1_s = rd_b_half(p, s, I1{});
+                            auto sc_s = rd_sc(p, s);
+                            wmma_half(I0{}, s, a_s, b0_s, sc_s);
+                            wmma_half(I1{}, s, a_s, b1_s, sc_s);
+                            if constexpr(kLast && kHasNext)
+                            {
+                                asm volatile("s_wait_dscnt 0x0" ::: "memory");
+                                wait_own_fills();
+                                asm volatile("" ::: "memory");
+                                __builtin_amdgcn_s_barrier_signal(-1);
+                                __builtin_amdgcn_s_barrier_wait(-1);
+                                asm volatile("" ::: "memory");
+                            }
+                            ignore = t;
+                            return;
+                        }
+#endif
+                        if constexpr(kLast && !kHasNext)
+                        {
+                            __builtin_amdgcn_sched_barrier(0);
+                            wmma_half(I0{}, s, a_cur, b0_cur, sc_cur);
+                            wmma_half(I1{}, s, a_cur, b1_cur, sc_cur);
+                        }
+                        else
+                        {
+                            constexpr auto sp = number < kLast ? 1 - pi : pi > {};
+                            constexpr auto sk = number < kLast ? 0 : s.value + 1 > {};
+                            __builtin_amdgcn_sched_barrier(0);
+                            if constexpr(kLast)
+                            {
+                                asm volatile("s_wait_dscnt 0x0" ::: "memory");
+                                wait_own_fills();
+                                asm volatile("" ::: "memory");
+                                __builtin_amdgcn_s_barrier_signal(-1);
+                                __builtin_amdgcn_s_barrier_wait(-1);
+                                asm volatile("" ::: "memory");
+                                if(t + 2 < num_loop)
+                                {
+                                    ra_fill(p);
+                                }
+                                __builtin_amdgcn_sched_barrier(0);
+                            }
+                            // Policy::kReadAheadSplitA: the next K atom's A rows of the first half
+                            // here, the rest after the second half's WMMAs
+                            auto a_nxt0 = [&]() {
+                                if constexpr(Policy::kReadAheadSplitA)
+                                {
+                                    return rd_a_half(sp, sk, I0{});
+                                }
+                                else
+                                {
+                                    return rd_a_all(sp, sk);
+                                }
+                            }();
+                            auto sc_nxt = rd_sc(sp, sk);
+                            __builtin_amdgcn_sched_barrier(0);
+                            wmma_half(I0{}, s, a_cur, b0_cur, sc_cur);
+                            __builtin_amdgcn_sched_barrier(0);
+                            // Policy::kReadAheadBlockB: all of the next K atom's B before the
+                            // second half; otherwise its first half here, its second after
+                            auto b0_nxt = rd_b_half(sp, sk, I0{});
+                            if constexpr(Policy::kReadAheadBlockB)
+                            {
+                                auto b1_nxt = rd_b_half(sp, sk, I1{});
+                                __builtin_amdgcn_sched_barrier(0);
+                                wmma_half(I1{}, s, a_cur, b1_cur, sc_cur);
+                                b1_cur = b1_nxt;
+                            }
+                            else
+                            {
+                                // The late reads (B's second half; with kReadAheadSplitA, A's
+                                // too) after the second half's WMMAs, or, in the K atom before
+                                // the tile's last (whose reads are drained before the barrier),
+                                // Policy::kReadAheadLateAt WMMAs into it when that is >= 0.
+                                constexpr index_t kW = kHalf * kMI;
+                                constexpr index_t kAt =
+                                    (Policy::kReadAheadLateAt >= 0 && s.value + 2 == kAtoms)
+                                        ? (Policy::kReadAheadLateAt < kW ? Policy::kReadAheadLateAt
+                                                                         : kW)
+                                        : kW;
+                                __builtin_amdgcn_sched_barrier(0);
+                                wmma_half_range(
+                                    I1{}, s, a_cur, b1_cur, sc_cur, number<0>{}, number<kAt>{});
+                                __builtin_amdgcn_sched_barrier(0);
+                                auto b1_nxt = rd_b_half(sp, sk, I1{});
+                                auto a_nxt1 = [&]() {
+                                    if constexpr(Policy::kReadAheadSplitA)
+                                    {
+                                        return rd_a_half(sp, sk, I1{});
+                                    }
+                                    else
+                                    {
+                                        return 0;
+                                    }
+                                }();
+                                __builtin_amdgcn_sched_barrier(0);
+                                wmma_half_range(
+                                    I1{}, s, a_cur, b1_cur, sc_cur, number<kAt>{}, number<kW>{});
+                                b1_cur = b1_nxt;
+                                if constexpr(Policy::kReadAheadSplitA)
+                                {
+                                    static_for<0, kMI / 2, 1>{}([&](auto j) {
+                                        a_cur(j)                           = a_nxt0[j];
+                                        a_cur(number<kMI / 2 + j.value>{}) = a_nxt1[j];
+                                    });
+                                }
+                                else
+                                {
+                                    ignore = a_nxt1;
+                                }
+                            }
+                            __builtin_amdgcn_sched_barrier(0);
+                            if constexpr(Policy::kReadAheadBlockB)
+                            {
+                                if constexpr(Policy::kReadAheadSplitA)
+                                {
+                                    auto a_nxt1 = rd_a_half(sp, sk, I1{});
+                                    static_for<0, kMI / 2, 1>{}([&](auto j) {
+                                        a_cur(j)                           = a_nxt0[j];
+                                        a_cur(number<kMI / 2 + j.value>{}) = a_nxt1[j];
+                                    });
+                                }
+                                else
+                                {
+                                    a_cur = a_nxt0;
+                                }
+                            }
+                            else if constexpr(!Policy::kReadAheadSplitA)
+                            {
+                                a_cur = a_nxt0;
+                            }
+                            sc_cur = sc_nxt;
+                            b0_cur = b0_nxt;
+                        }
+                    });
+                };
+
+                using True  = bool_constant<true>;
+                using False = bool_constant<false>;
+                // EXPERIMENT: an even K tile count only (one two-tile loop and a two-tile tail;
+                // a one-tile tail as well costs registers at the merges)
+                if(num_loop % 2 != 0)
+                {
+                    __builtin_trap();
+                }
+                index_t t = amd_wave_read_first_lane(0);
+                while(t + 2 < num_loop)
+                {
+                    tile(I0{}, t, True{});
+                    tile(I1{}, t + 1, True{});
+                    t += 2;
+                }
+                tile(I0{}, t, True{});
+                tile(I1{}, t + 1, False{});
+                // LDS is reused by the epilogue: every read and fill done, every wave here
+                asm volatile("s_wait_dscnt 0x0" ::: "memory");
+                if constexpr(kMx)
+                {
+                    __builtin_amdgcn_s_wait_asynccnt(0);
+                }
+                s_wait_tensorcnt_barrier<0 /*tensorcnt*/, 0 /*lgkmcnt*/>();
+                // the accumulators into the block GEMM's C tile, for the epilogue
+                using CWarpDstr   = typename WarpGemm::CWarpDstr;
+                using CWarpTensor = typename WarpGemm::CWarpTensor;
+                constexpr auto c_y =
+                    to_sequence(CWarpDstr{}.get_ys_to_d_descriptor().get_lengths());
+                constexpr auto c_z = uniform_sequence_gen_t<CWarpDstr::NDimY, 0>{};
+                auto c_block_tile  = block_gemm.MakeCBlockTile();
+                static_for<0, kMI, 1>{}([&](auto m) {
+                    static_for<0, kNI, 1>{}([&](auto n) {
+                        CWarpTensor cw;
+                        __builtin_memcpy(&cw.get_thread_buffer(), &acc[m][n], sizeof(acc[m][n]));
+                        c_block_tile.set_y_sliced_thread_data(
+                            merge_sequences(sequence<m.value, n.value>{}, c_z),
+                            merge_sequences(sequence<1, 1>{}, c_y),
+                            cw.get_thread_buffer());
+                    });
+                });
+                return c_block_tile;
+            }
+            else if constexpr(kSplitBarrier)
             {
                 // Issue the TDM fill of LDS stage f from the issuer's DRAM window, then point the
                 // window at the tile this issuer fills next (two K tiles on).

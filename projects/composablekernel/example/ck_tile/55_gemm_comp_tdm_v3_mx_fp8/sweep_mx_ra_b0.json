@@ -1,0 +1,114 @@
+{
+  "_comment": "B0 4096x4096x65536: comp_tdm_v3 MX baseline against the read-ahead K loop (-DCK_EX55_RA=1, LDS-staged scales, B in halves; sa: A split too) with the late reads of the K atom before a tile's last issued N WMMAs into the second half (_lN); warp tile 16, clusters 1x1 / 4x4.",
+  "default_defines": [
+    "-DCK_EX55_FOCUS",
+    "-DCK_EX55_BF16_TDM_ONLY",
+    "-DCK_TILE_GFX125_FP8_K1PERLANE=16",
+    "-DCK_EX55_MX_SCALE_WIDE=1",
+    "-DCK_EX55_A_ROW_PREFETCH=1",
+    "-DCK_EX55_FOCUS_MIN"
+  ],
+  "variants": [
+    {
+      "name": "base",
+      "defines": []
+    },
+    {
+      "name": "sa",
+      "defines": [
+        "-DCK_EX55_RA=1",
+        "-DCK_EX55_RA_BLOCKB=0",
+        "-DCK_EX55_MX_SCALE_LDS=1",
+        "-DCK_EX55_RA_SPLITA=1"
+      ]
+    },
+    {
+      "name": "sa_l0",
+      "defines": [
+        "-DCK_EX55_RA=1",
+        "-DCK_EX55_RA_BLOCKB=0",
+        "-DCK_EX55_MX_SCALE_LDS=1",
+        "-DCK_EX55_RA_SPLITA=1",
+        "-DCK_EX55_RA_LATEAT=0"
+      ]
+    },
+    {
+      "name": "sa_l8",
+      "defines": [
+        "-DCK_EX55_RA=1",
+        "-DCK_EX55_RA_BLOCKB=0",
+        "-DCK_EX55_MX_SCALE_LDS=1",
+        "-DCK_EX55_RA_SPLITA=1",
+        "-DCK_EX55_RA_LATEAT=8"
+      ]
+    },
+    {
+      "name": "sa_l16",
+      "defines": [
+        "-DCK_EX55_RA=1",
+        "-DCK_EX55_RA_BLOCKB=0",
+        "-DCK_EX55_MX_SCALE_LDS=1",
+        "-DCK_EX55_RA_SPLITA=1",
+        "-DCK_EX55_RA_LATEAT=16"
+      ]
+    },
+    {
+      "name": "sa_l24",
+      "defines": [
+        "-DCK_EX55_RA=1",
+        "-DCK_EX55_RA_BLOCKB=0",
+        "-DCK_EX55_MX_SCALE_LDS=1",
+        "-DCK_EX55_RA_SPLITA=1",
+        "-DCK_EX55_RA_LATEAT=24"
+      ]
+    },
+    {
+      "name": "hlv_l8",
+      "defines": [
+        "-DCK_EX55_RA=1",
+        "-DCK_EX55_RA_BLOCKB=0",
+        "-DCK_EX55_MX_SCALE_LDS=1",
+        "-DCK_EX55_RA_LATEAT=8"
+      ]
+    },
+    {
+      "name": "hlv_l16",
+      "defines": [
+        "-DCK_EX55_RA=1",
+        "-DCK_EX55_RA_BLOCKB=0",
+        "-DCK_EX55_MX_SCALE_LDS=1",
+        "-DCK_EX55_RA_LATEAT=16"
+      ]
+    },
+    {
+      "name": "hlv_l24",
+      "defines": [
+        "-DCK_EX55_RA=1",
+        "-DCK_EX55_RA_BLOCKB=0",
+        "-DCK_EX55_MX_SCALE_LDS=1",
+        "-DCK_EX55_RA_LATEAT=24"
+      ]
+    }
+  ],
+  "arms": [
+    {
+      "wt": 16,
+      "cluster": "1x1"
+    },
+    {
+      "wt": 16,
+      "cluster": "4x4"
+    }
+  ],
+  "shapes": [
+    [
+      4096,
+      4096,
+      65536
+    ]
+  ],
+  "c_dtype": "bf16",
+  "rounds": 5,
+  "warmup": 50,
+  "repeat": 100
+}

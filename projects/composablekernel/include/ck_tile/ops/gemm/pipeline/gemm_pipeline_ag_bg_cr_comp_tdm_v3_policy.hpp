@@ -87,6 +87,25 @@ struct GemmPipelineAgBgCrCompTDMV3Policy : public GemmPipelineAgBgCrCompTDMDefau
     /// two K tiles to arrive (at the cost of one more scale buffer and its rotation moves).
     static constexpr index_t kMxScalePrefetchDepth = 1;
 
+    /// EXPERIMENT: read-ahead K loop. The next K atom's A and B fragments are read from LDS while
+    /// the current K atom's WMMAs run (A before the first half of the N iterations, all of B
+    /// before the second half), and each K tile has one workgroup barrier, in its last K atom,
+    /// after which the issuers of the stage just read refill it. Needs alternating issuers and,
+    /// with MX, kMxScaleLds: the scale ring then holds tile t's scales in stage t % 2, like the
+    /// data, and each K atom's scale words are read from it with the next K atom's A.
+    static constexpr bool kReadAhead = false;
+    /// kReadAhead: true reads all of the next K atom's B before the second half of the WMMAs;
+    /// false reads its first half there and its second half after the second half's WMMAs.
+    static constexpr bool kReadAheadBlockB = true;
+    /// kReadAhead: read the next K atom's A rows of the first half before the first half of the
+    /// WMMAs and the other rows after the second half (fewer registers at the peak; the second
+    /// half's rows then have less time to land).
+    static constexpr bool kReadAheadSplitA = false;
+    /// kReadAhead, B in halves: in the K atom before a K tile's last, issue the late reads (B's
+    /// second half, and A's with kReadAheadSplitA) this many WMMAs into the second half instead
+    /// of after it, so they land before the drain at the barrier (-1: after it, as elsewhere).
+    static constexpr index_t kReadAheadLateAt = -1;
+
     /// Workgroups per CU the register budget assumes (the launch's kBlockPerCu).
     static constexpr index_t kBlockPerCu = 1;
 
