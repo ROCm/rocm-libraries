@@ -52,7 +52,12 @@ def test_the_digest_file_names_exactly_the_pins_the_content_never_holds() -> Non
     """A catalogue installed without its digests (or with stale ones) leaves a pin the gate cannot judge."""
     wanted = {
         row["hash"]: row["spec"]
-        for csv_name in ("sdpa_bwd_reference.csv", "sdpa_bwd_gfx11_reference.csv")
+        for csv_name in (
+            "sdpa_bwd_reference.csv",
+            "sdpa_bwd_gfx11_reference.csv",
+            "sdpa_bwd_gfx942_reference.csv",
+            "sdpa_bwd_gfx90a_reference.csv",
+        )
         for row in _rows(DATA / csv_name)
         if pins.holds_no_shipped_object(Spec.parse(row["spec"]))
     }

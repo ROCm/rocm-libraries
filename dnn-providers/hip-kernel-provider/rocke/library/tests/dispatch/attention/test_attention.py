@@ -36,7 +36,10 @@ _GFX950_DENSE_FEATURES = {
     "sinks",
     "sliding_window",
 }
-_GFX950_DENSE_GRID_BODY_FEATURES = _GFX950_DENSE_FEATURES | {"causal_bottom_right"}
+_GFX950_DENSE_GRID_BODY_FEATURES = _GFX950_DENSE_FEATURES | {
+    "causal_bottom_right",
+    "layout_paged",
+}
 # fp8 KV is validated only on the default-order grid variant.
 _GFX950_DENSE_GRID_FEATURES = _GFX950_DENSE_GRID_BODY_FEATURES | {"fp8"}
 _RDNA_WMMA_FEATURES = {
@@ -74,6 +77,7 @@ EXPECTED_FEATURES = {
         "causal",
         "causal_bottom_right",
         "layout_dense",
+        "layout_paged",
         "lse",
         "sinks",
         "sliding_window",

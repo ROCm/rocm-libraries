@@ -22,7 +22,7 @@ sys.path.insert(0, str(FLYDSL))
 from generators import _instances  # noqa: E402
 from generators import _sdpa_bwd_cdna_build as build  # noqa: E402
 from generators import _sdpa_bwd_nondet as nondet  # noqa: E402
-from generators._sdpa_bwd_spec import Spec  # noqa: E402
+from generators._sdpa_bwd_spec import Spec, family  # noqa: E402
 
 DATA = FLYDSL / "tests" / "data"
 PLAIN = "dq,f16,64,causal,bk,0,1,tail,32,1"
@@ -62,7 +62,7 @@ def write_rows(path: Path, *rows: dict[str, str]) -> Path:
     ("field", "value", "match"),
     [
         ("kind", "flaky", "kind"),
-        ("arch", "gfx90a", "arch"),
+        ("arch", "gfx12-generic", "arch"),
         ("pin_sha256", "abc", "pin_sha256"),
         ("variant_sha256s", sha("a") + ";short", "not a sha256"),
         ("hash", "0" * 12, "not the spec's"),
@@ -118,11 +118,15 @@ def test_the_in_tree_list_matches_the_pins_and_the_hash_reader_of_the_instance_t
     for arch, csv_name in (
         ("gfx950", "sdpa_bwd_reference.csv"),
         ("gfx11-generic", "sdpa_bwd_gfx11_reference.csv"),
+        ("gfx942", "sdpa_bwd_gfx942_reference.csv"),
+        ("gfx90a", "sdpa_bwd_gfx90a_reference.csv"),
     ):
         mine = [r for r in rows if r.arch == arch]
         with (DATA / csv_name).open(newline="", encoding="utf-8") as fh:
             pins = {r["hash"]: r for r in csv.DictReader(fh)}
-        nondet.check(mine, pins, lambda s: arch == "gfx950" and combined(s))
+        nondet.check(
+            mine, pins, lambda s: family(arch, s.dtype) == "cdna" and combined(s)
+        )
     assert _instances._sdpa_bwd_nondeterministic_hashes() == {
         r.hash for r in rows if r.arch == "gfx950"
     }

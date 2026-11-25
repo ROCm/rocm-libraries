@@ -81,6 +81,7 @@ from kernels.attention_rdna4.philox import default_width  # noqa: E402
 from kernels.attention_bwd_cdna.fmha_f32_dsplit_gfx950 import DSplitDkDv  # noqa: E402
 from kernels.attention_bwd_cdna.fmha_f32_perwave_gfx950 import PerWaveDkDv  # noqa: E402
 from kernels.attention_bwd_cdna.fmha_tuning_bwd_dkdv_f32_gfx950 import (
+    EXACT_REFUSED_GFX90A,
     BwdDkDvInputMetadata,
     bwd_dkdv_knobs,
 )  # noqa: E402
@@ -88,7 +89,7 @@ from kernels.attention_bwd_cdna.gfx950_standalone import dualwave  # noqa: E402
 
 import flydsl.compiler as flyc  # noqa: E402
 import flydsl.expr as fx  # noqa: E402
-from flydsl.expr import range_constexpr, rocdl  # noqa: E402
+from flydsl.expr import const_expr, range_constexpr, rocdl  # noqa: E402
 from flydsl.expr import math as fmath  # noqa: E402
 from kernels.attention_bwd_cdna.fmha_bwd_bias_exp_gfx950 import (
     FM_BIAS_EXP,
@@ -118,6 +119,8 @@ def _check_scope(meta, knobs, runtime_axes):
         raise NotImplementedError(
             f"runtime axes {sorted(runtime_axes)}: the fp32 dK/dV kernel builds baked forms only"
         )
+    if knobs.arch == "gfx90a" and not knobs.padded_head:
+        raise ValueError(EXACT_REFUSED_GFX90A)
     if knobs.block_dmodel not in BUILT_TILES:
         raise NotImplementedError(
             f"fp32 dK/dV builds tiles {BUILT_TILES}, got {knobs.block_dmodel}"
@@ -173,10 +176,15 @@ def build_fmha_bwd_dkdv_f32_gfx950_module_primary(meta, knobs, runtime_axes=()):
         fam.bq,
         fam.dsu,
     )  # DSU: resident panels per lane (the whole head dim for per-wave)
+    HALVES = fam.halves
     BLOCK = fam.block
     BLOCK_KV = knobs.block_kv
     LDS_WORDS = layer.lds_words
-    _cache_tag = (KERNEL_NAME, fam.tile, fam.bq, fam.sched, fam.waves)
+    if layer.lds_bytes > fam.lds_limit:
+        raise ValueError(
+            f"tile {fam.tile}, block_q {fam.bq}: {layer.lds_bytes} B of LDS is over the {fam.lds_limit} B cap of {fam.arch}"
+        )
+    _cache_tag = (KERNEL_NAME, fam.tile, fam.bq, fam.sched, fam.waves, fam.arch)
 
     CAUSAL, WINDOW, BIAS, DROPOUT = (
         bool(meta.causal),
@@ -379,7 +387,7 @@ def build_fmha_bwd_dkdv_f32_gfx950_module_primary(meta, knobs, runtime_axes=()):
         }
         glse = f32(LSE, 4)
         gdel = f32(Delta, 4)
-        ops = DeviceOps(lds.buf.ptr, gptrs)
+        ops = DeviceOps(lds.buf.ptr, gptrs, fam.dma_bytes)
 
         # sequence decode: Q side bits 7:0, K side bits 15:8 (shared helpers; dense = bits 0)
         q_len, _, _ = fmha.decode_addressing(
@@ -510,22 +518,40 @@ def build_fmha_bwd_dkdv_f32_gfx950_module_primary(meta, knobs, runtime_axes=()):
                 dK = [st[i] for i in range_constexpr(DSU)]
                 dV = [st[DSU + i] for i in range_constexpr(DSU)]
                 q0 = tile_q0(it, t0)
-                layer.stage(
-                    ops,
-                    L,
-                    q0,
-                    q_last,
-                    q_base,
-                    do_base,
-                    stride_q_seq,
-                    stride_do_seq,
-                    mq,
-                    mv,
-                    q_span,
-                    do_span,
-                )
-                ops.sync()
-                S, Pd = layer.scores(ops, L, K_res, V_res, mq, mv)
+                if const_expr(HALVES == 1):
+                    layer.stage(
+                        ops,
+                        L,
+                        q0,
+                        q_last,
+                        q_base,
+                        do_base,
+                        stride_q_seq,
+                        stride_do_seq,
+                        mq,
+                        mv,
+                        q_span,
+                        do_span,
+                    )
+                    ops.sync()
+                    S, Pd = layer.scores(ops, L, K_res, V_res, mq, mv)
+                else:
+                    stage_h = lambda h: layer.stage(  # noqa: E731
+                        ops,
+                        L,
+                        q0,
+                        q_last,
+                        q_base,
+                        do_base,
+                        stride_q_seq,
+                        stride_do_seq,
+                        mq,
+                        mv,
+                        q_span,
+                        do_span,
+                        h,
+                    )
+                    S, Pd = layer.scores_halves(ops, L, K_res, V_res, stage_h, mq, mv)
                 S, Pd = exchange(ops, L, S, Pd)
 
                 # P = exp2(c S - log2e LSE'), dS = P (dP - Delta); rows past the sequence end are zero. A bias build combines in natural units and scales last, P = exp2((sm_scale S + bias - LSE) log2e), so a lowest-finite bias cannot overflow before the LSE is subtracted
@@ -635,7 +661,10 @@ def build_fmha_bwd_dkdv_f32_gfx950_module_primary(meta, knobs, runtime_axes=()):
                     Pm.append(ps)
                     dS.append(ds)
 
-                layer.accumulate(ops, L, Pm, dS, dK, dV)
+                if const_expr(HALVES == 1):
+                    layer.accumulate(ops, L, Pm, dS, dK, dV)
+                else:
+                    layer.accumulate_halves(ops, L, Pm, dS, dK, dV, stage_h)
                 ops.barrier()
                 loop_results = yield dK + dV
             group_results = yield [loop_results[i] for i in range_constexpr(2 * DSU)]

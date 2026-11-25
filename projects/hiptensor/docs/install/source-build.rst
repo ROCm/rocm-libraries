@@ -27,11 +27,12 @@ including the gfx908, gfx90a, gfx942, and gfx950 GPUs (collectively labeled as g
 Additionally, hipTensor is supported on AMD RDNA GPUs:
  - gfx11-generic: gfx1100, gfx1101, gfx1102, gfx1103, gfx1150, gfx1151, gfx1152 and gfx1153.
  - gfx11-7-generic: gfx1170 and gfx1171.
- - gfx12-generic: gfx1200, gfx1201 and gfx1250.
+ - gfx12-generic: gfx1200, gfx1201, gfx1250 and gfx1251.
 
 .. note::
 
-   Double precision ``FP64`` datatype support requires the gfx90a, gfx942, or gfx950.
+   Double precision ``FP64`` datatype support requires the gfx90a, gfx942, gfx950, gfx1250, or gfx1251.
+   ``FP64`` contractions require the gfx90a, gfx942, gfx950, or gfx1251.
 
 Dependencies
 ============
@@ -134,7 +135,7 @@ Here are the available options to build the hipTensor library, with or without c
         -   **Default value**
     *   -   ``GPU_TARGETS``
         -   Build the code for specific GPU target(s)
-        -   ``gfx908``; ``gfx90a``; ``gfx942``; ``gfx950``; ``gfx1100``; ``gfx1101``; ``gfx1102``; ``gfx1103``; ``gfx1150``; ``gfx1151``; ``gfx1152``; ``gfx1153``; ``gfx11-generic``; ``gfx1170``; ``gfx1171``; ``gfx11-7-generic``; ``gfx1200``; ``gfx1201``; ``gfx1250``; ``gfx1250-strict``; ``gfx12-generic``
+        -   ``gfx908``; ``gfx90a``; ``gfx942``; ``gfx950``; ``gfx1100``; ``gfx1101``; ``gfx1102``; ``gfx1103``; ``gfx1150``; ``gfx1151``; ``gfx1152``; ``gfx1153``; ``gfx11-generic``; ``gfx1170``; ``gfx1171``; ``gfx11-7-generic``; ``gfx1200``; ``gfx1201``; ``gfx1250``; ``gfx1250-strict``; ``gfx1251``; ``gfx12-generic``
     *   -   ``HIPTENSOR_BUILD_TESTS``
         -   Build the tests
         -   ``ON``
@@ -585,11 +586,13 @@ Depending on the resources available to the machine running the selected tests,
 hipTensor test runtimes can last an hour or more. Here are some things you can do to reduce test runtimes:
 
 *  CTest runs the entire test suite, but you can invoke tests individually by name.
-*  Use GoogleTest filters to target specific test cases:
+*  Use GoogleTest filters to target specific test cases. Pass the ``--gtest_filter`` flag or set
+   the ``GTEST_FILTER`` environment variable. ``<test_exe> --help`` lists the hipTensor test
+   options and the GoogleTest flags:
 
    .. code-block:: bash
 
-      <test_exe> --gtest_filter=*name_filter*
+      <test_exe> --gtest_filter='*name_filter*'
 
 *  Manually adjust the test case coverage. Use a text editor to modify the test YAML configs to adjust the test parameter coverage.
 *  Alternatively, use your own YAML config for testing with a reduced parameter set.

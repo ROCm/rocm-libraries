@@ -83,6 +83,7 @@ listed as an accepted hint (the last row).
 | Additive bias (`attn_mask`) | FLOAT, HALF, BF16; rank 1-4, broadcast on size-1 dims | SEM-006 |
 | Diagonal band (`left_bound`, `right_bound`, `diagonal_alignment`; deprecated causal flags) | Yes; bottom-right measured from each batch's live lengths | SEM-001, 003, 004, 005 |
 | Padding (`seq_len_q/kv`, `padding_mask`) | INT32 `[B, 1, 1, 1]`, both; pad rows give `O = 0`, `LSE = -inf` | SEM-008, 010 |
+| Cumulative lengths (`cu_seq_len_q/kv`, forward only) | declined by every reference (CPU dense, GPU dense and ragged); no reference reads them yet | - |
 | Paged K/V (`page_table_k/v`, `max_seq_len_kv`) | K, V or both paged, each with its own block size; table INT32 `[B, 1, ceil(max/block), 1]`; extent inferred as cuDNN does when unset; needs padding | SEM-009 |
 | Ragged tensors (`ragged_offset` on any primary) | native forward for BF16 and FP8 E4M3, any container-valid layout, `seq_len_q/kv` bound as lengths; everything else (other dtypes, bias, sinks, `Max` / `Sum_exp`, ragged Q over non-ragged paged K/V, backward) through the dense rewrite; the dense rewrite declines what it cannot rewrite (RFC 0014 §4.10) | RFC 0014, SEM-026 |
 | Attention sink (`sink_token`) | FLOAT `[1, H_q, 1, 1]` | SEM-022 |

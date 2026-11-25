@@ -389,20 +389,20 @@ using GPU_na_inference_find2_test_FP32 = na_inference_find2_test<float>;
 TEST_P(GPU_na_inference_find2_test_FP16, TestFloat16) { Run(); }
 TEST_P(GPU_na_inference_find2_test_FP32, TestFloat32) { Run(); }
 
-INSTANTIATE_TEST_SUITE_P(Smoke,
+INSTANTIATE_TEST_SUITE_P(Quick,
                          GPU_na_inference_find2_test_FP16,
                          GetSmokeCases(),
                          TestNameGenerator{});
-INSTANTIATE_TEST_SUITE_P(Smoke,
+INSTANTIATE_TEST_SUITE_P(Quick,
                          GPU_na_inference_find2_test_FP32,
                          GetSmokeCases(),
                          TestNameGenerator{});
 
-INSTANTIATE_TEST_SUITE_P(Full,
+INSTANTIATE_TEST_SUITE_P(Comprehensive,
                          GPU_na_inference_find2_test_FP16,
                          GetFullCases(),
                          TestNameGenerator{});
-INSTANTIATE_TEST_SUITE_P(Full,
+INSTANTIATE_TEST_SUITE_P(Comprehensive,
                          GPU_na_inference_find2_test_FP32,
                          GetFullCases(),
                          TestNameGenerator{});

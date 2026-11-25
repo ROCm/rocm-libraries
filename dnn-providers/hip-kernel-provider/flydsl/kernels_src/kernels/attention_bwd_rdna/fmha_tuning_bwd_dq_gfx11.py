@@ -40,9 +40,15 @@ row per rung: (shards Qs, num_waves, block_n). Every row is re-measured on the r
 from dataclasses import dataclass
 
 LADDER = (16, 32, 48, 64, 80, 96, 128, 160, 192, 224, 256)
+MFMA16_LADDER = LADDER + (
+    512,
+)  # hd 257..512 rides one padded 512 rung on gfx90a / gfx942
 LDS_CAP_BYTES = 65536
 ROWS_PER_WAVE = 16
-WARP_SIZE = 32
+WARP_SIZE = 32  # WMMA targets; MFMA16 (`MFMA16_ARCHES`) is wave64
+MFMA16_WARP_SIZE = 64
+MFMA16_ARCHES = ("gfx942", "gfx90a")
+RED_LANE_F32 = 256  # lanes x accumulator elements of one 16-kv tile: 32 x 8 (WMMA) = 64 x 4 (MFMA16)
 ELEM_BYTES = 2
 LDS_PAD = 4  # K, V and K^T row padding (elements): K_STRIDE = tile + 4, KT_STRIDE = block_n + 4
 MAX_WAVES = 16  # a 512-thread workgroup; the register-pressure skeletons stop here
@@ -64,6 +70,23 @@ POLICY = {
     192: (2, 16, 16),
     224: (2, 16, 16),
     256: (4, 16, 16),
+}
+# MFMA16 (wave64): a 16-column Q / dO pack is 2 VGPRs and an accumulator 4, so no rung to 256 needs the contraction shards; 4 waves = 256 threads.
+# (contraction_shards, num_waves, block_n): measured on gfx90a with the dK/dV policy (the dQ kernel moves the total by 2-3 %: block_n 16 at
+# hd 128, 8 waves with block_n 32 at hd >= 160; the 4-wave block_n 32 default holds at hd <= 64); 80-96 follow hd 128, 160-224 follow hd 256.
+POLICY_MFMA16 = {
+    16: (1, 4, 32),
+    32: (1, 4, 32),
+    48: (1, 4, 32),
+    64: (1, 4, 32),
+    80: (1, 4, 16),
+    96: (1, 4, 16),
+    128: (1, 4, 16),
+    160: (1, 8, 32),
+    192: (1, 8, 32),
+    224: (1, 8, 32),
+    256: (1, 8, 32),
+    512: (2, 8, 16),
 }
 DEFAULT_WAVES_PER_EU = 2
 DEFAULT_KT_LDS_LAYOUT = "scalar"
@@ -118,7 +141,9 @@ class BwdDqKnobsGfx11:
 
     @property
     def block_size(self):
-        return self.num_waves * WARP_SIZE
+        return self.num_waves * (
+            MFMA16_WARP_SIZE if self.arch in MFMA16_ARCHES else WARP_SIZE
+        )
 
     @property
     def num_s_accs(self):
@@ -127,15 +152,15 @@ class BwdDqKnobsGfx11:
 
 def lds_bytes(tile, num_waves, shards, block_n, kt_lds_layout):
     """Workgroup LDS of the kernel: the K and V tiles (row-major, `tile + 4` per row), the staged K^T tile (`kt_lds_layout == "staged"`), the
-    cross-shard S/dP reduction buffer. The reduction buffer holds one private slot of `2 * (block_n / 16) * 8` f32 per
-    lane per wave; it lives in the V tile's storage when it fits there (V is dead once GEMM2 is done and K is not), else after the other
+    cross-shard S/dP reduction buffer. The reduction buffer holds one private slot of `2 * (block_n / 16) * RED_LANE_F32` f32
+    (256 per wave: 8 per lane on 32 lanes, 4 per lane on 64) per wave; it lives in the V tile's storage when it fits there (V is dead once GEMM2 is done and K is not), else after the other
     regions. No reduction (one shard) allocates none."""
     k_tile = block_n * (tile + LDS_PAD)
     v_tile = block_n * (tile + LDS_PAD)
     kt_tile = tile * (block_n + LDS_PAD) if kt_lds_layout == "staged" else 0
     red = 0
     if shards > 1:
-        red_bytes = num_waves * 2 * (block_n // 16) * 8 * WARP_SIZE * 4
+        red_bytes = num_waves * 2 * (block_n // 16) * RED_LANE_F32 * 4
         red = 0 if red_bytes <= v_tile * ELEM_BYTES else red_bytes
     return (k_tile + v_tile + kt_tile) * ELEM_BYTES + red
 
@@ -148,7 +173,7 @@ def reduction_aliases_v(tile, num_waves, shards, block_n):
     """Whether the cross-shard reduction buffer shares the V tile's storage (`shards == 1` has no reduction, trivially True)."""
     return (
         shards == 1
-        or num_waves * 2 * (block_n // 16) * 8 * WARP_SIZE * 4
+        or num_waves * 2 * (block_n // 16) * RED_LANE_F32 * 4
         <= block_n * (tile + LDS_PAD) * ELEM_BYTES
     )
 
@@ -159,15 +184,16 @@ def bwd_dq_knobs(arch, dtype, tile, cls, dropout, padded, hdim_qk, hdim_vo, **pi
     if bad:
         raise TypeError(f"unknown dq knob pin(s) {sorted(bad)}; the knobs are {_PINS}")
     why = []
-    if not arch.startswith(("gfx11", "gfx12")):
-        why.append(f"arch {arch!r} is not a gfx11/gfx12 target")
+    if not arch.startswith(("gfx11", "gfx12")) and arch not in MFMA16_ARCHES:
+        why.append(f"arch {arch!r} is not a gfx11/gfx12/MFMA16 target")
     if dtype not in ("f16", "bf16"):
         why.append(f"dtype {dtype!r} is not f16 or bf16")
-    if tile not in LADDER:
-        why.append(f"tile {tile} is not a rung of {LADDER}")
+    ladder = MFMA16_LADDER if arch in MFMA16_ARCHES else LADDER
+    if tile not in ladder:
+        why.append(f"tile {tile} is not a rung of {ladder}")
     if cls not in ("plain", "causal", "bias"):
         why.append(f"class {cls!r}")
-    base = POLICY.get(tile, (1, 8, 32))
+    base = (POLICY_MFMA16 if arch in MFMA16_ARCHES else POLICY).get(tile, (1, 8, 32))
     shards = int(pins.get("contraction_shards", base[0]))
     if shards < 1 or shards & (shards - 1):
         why.append(f"contraction_shards {shards} is not a power of two")

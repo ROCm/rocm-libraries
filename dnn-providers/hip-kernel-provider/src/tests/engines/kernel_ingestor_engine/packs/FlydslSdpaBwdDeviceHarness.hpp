@@ -978,15 +978,40 @@ struct Gradients
     std::vector<double> dbias;
 };
 
+/// Whether the reference of a graph in @p dtype on the device named @p gcnArchName flushes fp16
+/// denormals: gfx90a's MFMA flushes them, so an fp16 backward pass there sees P and dS below
+/// 2^-14 as zero (they approach that for long key sequences). Every other device and dtype is
+/// compared with the exact reference.
+inline bool usesFlushAwareReference(std::string_view gcnArchName, DataType dtype)
+{
+    constexpr std::string_view FLUSHING = "gfx90a";
+    const bool isFlushing
+        = gcnArchName.substr(0, FLUSHING.size()) == FLUSHING
+          && (gcnArchName.size() == FLUSHING.size() || gcnArchName[FLUSHING.size()] == ':');
+    return isFlushing && dtype == DataType::HALF;
+}
+
+/// Narrows @p value to fp16 and zeroes the result when it is a denormal.
+inline double flushedToHalf(double value)
+{
+    constexpr double SMALLEST_NORMAL = 6.103515625e-05; // 2^-14
+    const auto narrowed = static_cast<double>(
+        static_cast<float>(hipdnn_data_sdk::types::half(static_cast<float>(value))));
+    return std::abs(narrowed) < SMALLEST_NORMAL ? 0.0 : narrowed;
+}
+
 /// The backward pass in double precision, from the (rounded) output and statistics the
-/// device is given. dBias is dS, the gradient of the score before its scale.
+/// device is given. dBias is dS, the gradient of the score before its scale. With
+/// @p flushFp16 (``usesFlushAwareReference``), P and dS are narrowed to fp16 with denormals
+/// flushed before the dV, dK and dQ products, as the MFMA sees them; dBias is the exact dS.
 /// Delta = rowsum(dO * O) is formed from that same stored (rounded) output, as the kernels
 /// form it, so no Delta-path rounding term separates this reference from the device and the
 /// tolerance carries none.
 inline Gradients backwardOf(const BwdCase& c,
                             const Inputs& in,
                             const std::vector<double>& o,
-                            const std::vector<float>& lse)
+                            const std::vector<float>& lse,
+                            bool flushFp16 = false)
 {
     const int64_t dv = c.valueDim();
     Gradients grads;
@@ -1035,8 +1060,10 @@ inline Gradients backwardOf(const BwdCase& c,
                               * in.v[at(b, vHead, j, e, c.valueHeadCount(), c.seqKv, dv)];
                     }
                     const bool kept = keeps(c, b, h, row, j);
-                    const double ds = p * ((kept ? dp * dropScale : 0.0) - delta);
+                    const double dsExact = p * ((kept ? dp * dropScale : 0.0) - delta);
+                    const double ds = flushFp16 ? flushedToHalf(dsExact) : dsExact;
                     const double pDropped = kept ? p * dropScale : 0.0;
+                    const double pOperand = flushFp16 ? flushedToHalf(pDropped) : pDropped;
                     for(int64_t e = 0; e < c.headDim; ++e)
                     {
                         const auto qIndex = at(b, h, row, e, c.heads, c.seqQ, c.headDim);
@@ -1047,12 +1074,12 @@ inline Gradients backwardOf(const BwdCase& c,
                     for(int64_t e = 0; e < dv; ++e)
                     {
                         grads.dv[at(b, vHead, j, e, c.valueHeadCount(), c.seqKv, dv)]
-                            += pDropped * in.dO[at(b, h, row, e, c.heads, c.seqQ, dv)];
+                            += pOperand * in.dO[at(b, h, row, e, c.heads, c.seqQ, dv)];
                     }
                     if(c.bias)
                     {
                         // A broadcast axis sums the scores it repeats over.
-                        grads.dbias[biasAt(c, b, h, row, j)] += ds;
+                        grads.dbias[biasAt(c, b, h, row, j)] += dsExact;
                     }
                 }
             }
@@ -1982,7 +2009,12 @@ void expectPlanMatchesReference(const BwdCase& c,
     const auto host = hostStagingOf<T, B>(c);
     const auto& in = host.in;
     const auto& views = host.views;
-    const auto expected = backwardOf(c, in, host.oRounded, host.forward.lse);
+    const auto expected
+        = backwardOf(c,
+                     in,
+                     host.oRounded,
+                     host.forward.lse,
+                     usesFlushAwareReference(packedArchDeviceProperties().gcnArchName, c.dtype));
     const int64_t dqk = c.headDim;
     const int64_t dv = c.valueDim();
     auto device = uploadStaging(host);

@@ -49,11 +49,20 @@ MANIFEST_NAME = "manifest.json"
 # The companion roles that have no pin (``generators/gen_sdpa_bwd_tailzero.py`` is their provenance): the tail-zero object and its V-head variant.
 TAILZERO_ROLES = ("tailzero", "tailzero_hv")
 REFERENCE_CSV = Path(__file__).resolve().parent / "data" / "sdpa_bwd_reference.csv"
+# The split content directories whose objects are their S1 pins byte for byte, and each one's reference.
+PIN_REFERENCE_CSVS = {
+    "gfx11-generic": Path(__file__).resolve().parent
+    / "data"
+    / "sdpa_bwd_gfx11_reference.csv",
+    "gfx90a": Path(__file__).resolve().parent
+    / "data"
+    / "sdpa_bwd_gfx90a_reference.csv",
+    "gfx942": Path(__file__).resolve().parent
+    / "data"
+    / "sdpa_bwd_gfx942_reference.csv",
+}
 EXCEPTIONS_CSV = (
     Path(__file__).resolve().parent / "data" / "sdpa_bwd_pinned_exceptions.csv"
-)
-GFX11_REFERENCE_CSV = (
-    Path(__file__).resolve().parent / "data" / "sdpa_bwd_gfx11_reference.csv"
 )
 # ELF64 header offset of e_flags, and its EF_AMDGPU_MACH field.
 E_FLAGS_OFFSET = 48
@@ -353,9 +362,10 @@ def test_split_rows_are_the_reference_rows(op: str) -> None:
     assert not problems, "rows differ from the reference:\n" + "\n".join(problems)
 
 
-def _gfx11_pin_problems(manifest_path: Path, reference: dict[str, str]) -> list[str]:
-    """Where a gfx11-generic manifest differs from the S1 reference: every row and companion is a reference spec, ships the
-    reference's sha256 (a gfx11 object is its pin byte for byte), and no reference spec of the op's kinds is missing.
+def _arch_pin_problems(manifest_path: Path, reference: dict[str, str]) -> list[str]:
+    """Where a gfx11-generic, gfx90a or gfx942 manifest differs from its S1 reference: every row and companion is a reference spec,
+    ships the reference's sha256 (such an object is its pin byte for byte; a combined row is gated against its pin), and no reference
+    spec of the op's kinds is missing.
 
     The tail-zero companions are exempt: they have no pin, their generator is their provenance (``generators/gen_sdpa_bwd_tailzero.py``).
     """
@@ -372,6 +382,17 @@ def _gfx11_pin_problems(manifest_path: Path, reference: dict[str, str]) -> list[
         shipped.add(spec)
         if spec not in reference:
             problems.append(f"{spec}: not a reference row")
+        elif record.get("ship") == "combined":
+            # A combined dQ + dBias reduce object ships its own bytes; its pin is the build it was gated against.
+            gate = record.get("gates", {}).get("pin_gate", {})
+            if (
+                record.get("pin_sha256") != reference[spec]
+                or gate.get("verdict") != "ok"
+            ):
+                problems.append(
+                    f"{spec}: combined row gated against pin {record.get('pin_sha256')}, "
+                    f"reference {reference[spec]}, gate {gate.get('verdict')}"
+                )
         elif record["sha256"] != reference[spec]:
             problems.append(
                 f"{spec}: ships {record['sha256']}, the pin is {reference[spec]}"
@@ -381,22 +402,23 @@ def _gfx11_pin_problems(manifest_path: Path, reference: dict[str, str]) -> list[
     return problems
 
 
+@pytest.mark.parametrize("arch", PIN_REFERENCE_CSVS)
 @pytest.mark.parametrize("op", SPLIT_KINDS)
-def test_gfx11_split_rows_are_the_reference_pins(op: str) -> None:
-    path = CONTENT / op / "gfx11-generic" / MANIFEST_NAME
+def test_split_rows_are_the_arch_reference_pins(op: str, arch: str) -> None:
+    path = CONTENT / op / arch / MANIFEST_NAME
     if not path.is_file():
-        pytest.skip(f"no {op} gfx11-generic content under {CONTENT}")
+        pytest.skip(f"no {op} {arch} content under {CONTENT}")
     kinds = [SPLIT_KINDS[op]] + (["dbias_reduce,"] if op == "sdpa_bwd_dq" else [])
     reference = {
         spec: sha
         for kind in kinds
-        for spec, sha in _reference_rows(GFX11_REFERENCE_CSV, kind).items()
+        for spec, sha in _reference_rows(PIN_REFERENCE_CSVS[arch], kind).items()
     }
-    problems = _gfx11_pin_problems(path, reference)
+    problems = _arch_pin_problems(path, reference)
     assert not problems, "rows differ from the reference:\n" + "\n".join(problems)
 
 
-def test_a_gfx11_row_that_is_not_its_pin_is_refused(tmp_path: Path) -> None:
+def test_an_arch_row_that_is_not_its_pin_is_refused(tmp_path: Path) -> None:
     path = tmp_path / MANIFEST_NAME
     path.write_text(
         json.dumps(
@@ -412,7 +434,7 @@ def test_a_gfx11_row_that_is_not_its_pin_is_refused(tmp_path: Path) -> None:
         "dbias_reduce,bf16": "b" * 64,
         "dq,bf16,32": "d" * 64,
     }
-    assert _gfx11_pin_problems(path, reference) == [
+    assert _arch_pin_problems(path, reference) == [
         f"dq,bf16,16: ships {'a' * 64}, the pin is {'c' * 64}",
         "ships no row for dq,bf16,32",
     ]
@@ -435,7 +457,7 @@ def test_a_gfx11_tailzero_companion_needs_no_pin_and_a_tuned_row_still_does(
         )
 
     manifest([{"spec": "dq,bf16,16", "sha256": "c" * 64}])
-    assert _gfx11_pin_problems(path, reference) == []
+    assert _arch_pin_problems(path, reference) == []
     # The exemption is the tail-zero role's: a dBias reduce companion without a reference row, or a tuned row without one, is refused.
     manifest(
         [
@@ -443,11 +465,42 @@ def test_a_gfx11_tailzero_companion_needs_no_pin_and_a_tuned_row_still_does(
             {"spec": "dq,bf16,32", "sha256": "d" * 64},
         ]
     )
-    assert _gfx11_pin_problems(path, reference) == ["dq,bf16,32: not a reference row"]
+    assert _arch_pin_problems(path, reference) == ["dq,bf16,32: not a reference row"]
     companions.append({"spec": "dbias_reduce,f16", "sha256": "f" * 64})
     manifest([{"spec": "dq,bf16,16", "sha256": "c" * 64}])
-    assert _gfx11_pin_problems(path, reference) == [
+    assert _arch_pin_problems(path, reference) == [
         "dbias_reduce,f16: not a reference row"
+    ]
+
+
+def test_an_arch_combined_row_needs_its_pin_and_a_green_gate_but_not_the_pin_bytes(
+    tmp_path: Path,
+) -> None:
+    """A combined row ships its own bytes: the reference sha256 is the pin it is gated against, not what it ships."""
+    path = tmp_path / MANIFEST_NAME
+    reference = {"dq,bf16,16": "c" * 64}
+
+    def problems(**record: object) -> list[str]:
+        row = {
+            "spec": "dq,bf16,16",
+            "sha256": "a" * 64,
+            "ship": "combined",
+            "pin_sha256": "c" * 64,
+            "gates": {"pin_gate": {"verdict": "ok"}},
+            **record,
+        }
+        path.write_text(json.dumps({"instances": [row]}), encoding="utf-8")
+        return _arch_pin_problems(path, reference)
+
+    assert problems() == []
+    assert problems(pin_sha256="d" * 64) == [
+        f"dq,bf16,16: combined row gated against pin {'d' * 64}, reference {'c' * 64}, gate ok"
+    ]
+    assert problems(gates={"pin_gate": {"verdict": "red"}}) == [
+        f"dq,bf16,16: combined row gated against pin {'c' * 64}, reference {'c' * 64}, gate red"
+    ]
+    assert problems(gates={}) == [
+        f"dq,bf16,16: combined row gated against pin {'c' * 64}, reference {'c' * 64}, gate None"
     ]
 
 

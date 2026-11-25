@@ -67,7 +67,8 @@
  * workspace region), `dkdv` (dK and dV) and `dq` (dQ and, on a bias graph, dBias; a broadcast
  * dBias lands in the dq slot's scratch and is summed by the dBias reduce kernel, the
  * `dbias_reduce` launch of the `sources` of a row served by the `dq_reduce` dispatch: a
- * standalone object on gfx11, a second kernel of the row's own object on gfx950). The seed
+ * standalone object on gfx11-generic and for the 16-bit rows of gfx942 and gfx90a, a second kernel of the
+ * row's own object on gfx950 and for their fp32 combined rows). The seed
  * and offset of a dropout graph reach the dkdv and dq kernels as pointers: 64-bit device
  * tensors are read in place, every other form is written into the shared region by the prep
  * slot.
@@ -123,6 +124,7 @@ using native::HAS_BIAS_FIELD;
 using native::HEAD_DIM_FIELD;
 using native::INT32_LIMIT;
 using native::LADDER;
+using native::launchAxisFits;
 using native::PADDED_FIELD;
 using native::REDUCE_LAUNCH;
 using native::REDUCE_SYMBOL_FIELD;
@@ -408,7 +410,8 @@ native::WorkspaceLayout provenLayout(const bwd::SdpaBwdProblem& problem, std::st
 /// architecture the engine knows no such rows for.
 std::vector<bwd::HeadDimBand> parityBandsOf(std::string_view arch)
 {
-    if(arch.rfind("gfx11", 0) == 0)
+    // gfx90a and gfx942 ship gfx11-style padded rows for these graphs.
+    if(arch.rfind("gfx11", 0) == 0 || arch.rfind("gfx90a", 0) == 0 || arch.rfind("gfx942", 0) == 0)
     {
         return {bwd::GFX11_PARITY_BANDS.begin(), bwd::GFX11_PARITY_BANDS.end()};
     }
@@ -904,8 +907,10 @@ std::optional<Grid>
         x = facts.numHeads;
         y = blocks(facts.seqLenQ, row.blockM);
     }
-    // x may be as wide as int32; y and z are limited to 65535.
-    if(!x || !y || *x > INT32_LIMIT || *y > GRID_YZ_LIMIT || facts.batch > GRID_YZ_LIMIT)
+    // x may be as wide as int32 workgroups and 32 bits of work-items; y and z are limited to
+    // 65535.
+    if(!x || !y || *x > INT32_LIMIT || !launchAxisFits(*x, blockThreadsOf(slot, row))
+       || *y > GRID_YZ_LIMIT || facts.batch > GRID_YZ_LIMIT)
     {
         return std::nullopt;
     }

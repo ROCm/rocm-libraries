@@ -3,6 +3,8 @@
     "hipkernel:flydsl_sdpa_bwd_merged": [
       {
         "cases": [
+          "hf139x1_b2h2k2v2_512x512_d64_bfp16_none_bshd_biasm4to0_bias2x1x512x512io_told",
+          "hf139x2_b4h2k2v2_512x512_d64_bfp16_none_bshd_biasm4to0_bias4x1x1x512io_told",
           "reg07c_b1h2k2v2_64x96_d128_fp16_none_biasm4to0_bias11io_told"
         ],
         "support": {
@@ -21,6 +23,34 @@
         ],
         "support": {
           "gfx1100": [
+            "linux"
+          ],
+          "gfx1151": [
+            "linux",
+            "windows"
+          ],
+          "gfx90a": [
+            "linux"
+          ],
+          "gfx942": [
+            "linux"
+          ],
+          "gfx950": [
+            "linux"
+          ]
+        }
+      },
+      {
+        "cases": [
+          "hf139x1_b2h2k2v2_512x512_d64_bfp16_none_bshd_biasm4to0_bias2x1x512x512io_told",
+          "hf139x2_b4h2k2v2_512x512_d64_bfp16_none_bshd_biasm4to0_bias4x1x1x512io_told"
+        ],
+        "support": {
+          "gfx1151": [
+            "linux",
+            "windows"
+          ],
+          "gfx942": [
             "linux"
           ],
           "gfx950": [

@@ -348,7 +348,7 @@ while(_engines)
 endwhile()
 
 # The FlyDSL SDPA backward engines, one gpu-reference target per (engine, architecture)
-# the product ships. Split ships gfx950 content and gfx11-generic content, which the pack
+# the product ships. Split ships gfx950, gfx90a, gfx942 and gfx11-generic content, which the pack
 # expands to every gfx11 member this build targets; merged ships gfx950 only. Gated and
 # routed per architecture exactly as the pinned attention targets above: the predicate is
 # the one the census uses, and the entry installs into that architecture's shard so a
@@ -388,6 +388,10 @@ foreach(_hkp_bwd_engine IN ITEMS split merged)
     endforeach()
 endforeach()
 
+# The ASM SDPA forward engine against the GPU reference, on the quick forward bundles. The
+# C++ suite this once named (Smoke/IntegrationGpuSdpaFwdBfp16) no longer builds by default
+# (BUILD_CPP_GRAPH_TESTS), so a filter on it ran zero tests and failed; the bundle suites
+# are always registered, and are named after their folder (quick_SdpaFwd_<layout>).
 if(ENABLE_ASM_SDPA_ENGINE AND HIPDNN_ENABLE_SDPA
    AND TARGET hipdnn_integration_tests AND COMMAND add_external_integration_test_target)
     add_external_integration_test_target(
@@ -397,7 +401,7 @@ if(ENABLE_ASM_SDPA_ENGINE AND HIPDNN_ENABLE_SDPA
         INSTALL_SUBDIR hip_kernel_provider
         REFERENCE_EXECUTOR gpu
         GTEST_FILTER
-            Smoke/IntegrationGpuSdpaFwdBfp16.Correctness/*
+            quick_SdpaFwd_*
         ENVIRONMENT_MODIFICATION
             ${TEST_ENVIRONMENT_MODIFICATION}
     )

@@ -3,9 +3,11 @@
 """gfx950 fused GEMM+A2A (FusedA2A: GemmA2A) codegen characterization.
 
 Checks that a FusedA2A: GemmA2A solution emits the SDMA ring and packet
-instructions and that the result assembles for gfx950. The store path replaces
-the ordinary global-write batch, so a solution that silently fell back to it
-still satisfies every assertion except the SDMA markers.
+instructions, that no instruction reads an SGPR written by v_readfirstlane or
+v_readlane fewer wait states later than gfx950 requires, and that the result
+assembles for gfx950. The store path replaces the ordinary global-write batch,
+so a solution that silently fell back to it still satisfies every assertion
+except the SDMA markers.
 
 Covers tensilelite/Components/SdmaRingEmitter.py, SdmaPacketEmitter.py, and the
 FusedA2A: GemmA2A store path in GlobalWriteBatch.py.
@@ -15,7 +17,7 @@ import os
 
 import pytest
 
-from config_harness import assert_assembles, emit_kernels_from_config
+from config_harness import assert_assembles, assert_no_sgpr_hazards, emit_kernels_from_config
 
 pytestmark = pytest.mark.unit
 
@@ -52,6 +54,7 @@ def test_fused_a2a_gfx950_emits_assembly():
     )
     for base, src, _err in results:
         assert_assembles(src, base)
+        assert_no_sgpr_hazards(src, base)
         assert src and len(src.splitlines()) > 100, (
             f"Kernel {base!r} emitted suspiciously short source"
         )

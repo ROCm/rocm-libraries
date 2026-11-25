@@ -229,10 +229,10 @@ void BundleReferenceValidationHarness::TestBody()
     const auto toleranceFor
         = [&wrapper, &sdpaStatsLabels](const std::string& label,
                                        hipdnn_flatbuffers_sdk::data_objects::DataType dataType) {
-              const float value = tolerance::defaultTolerance(wrapper, dataType);
+              const auto value = tolerance::defaultTolerance(wrapper, dataType);
               return sdpaStatsLabels.count(label) != 0
-                         ? ComparisonTolerance::allCloseMatchingInfinities(value, value)
-                         : ComparisonTolerance::allClose(value, value);
+                         ? ComparisonTolerance::allCloseMatchingInfinities(value.atol, value.rtol)
+                         : ComparisonTolerance::allClose(value.atol, value.rtol);
           };
 
     const std::string contextLine = "Golden data validation ("
