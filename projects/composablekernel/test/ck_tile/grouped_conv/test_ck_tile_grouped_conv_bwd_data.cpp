@@ -138,17 +138,8 @@ TEST(GroupedConvBwdDataIsSupportedArgumentTest, TdmEpilogueRejectsSplitK)
 // 2048 * 1024 * 1024 = 2^31 input elements, one more than a 32-bit int can hold.
 TEST(GroupedConvBwdDataConvParamTest, InputByteAboveInt32Elements)
 {
-    const auto conv_param = conv::ConvParam{3,
-                                            1,
-                                            1,
-                                            1,
-                                            1,
-                                            {1, 1, 1},
-                                            {2048, 1024, 1024},
-                                            {1, 1, 1},
-                                            {1, 1, 1},
-                                            {0, 0, 0},
-                                            {0, 0, 0}};
+    const auto conv_param = conv::ConvParam{
+        3, 1, 1, 1, 1, {1, 1, 1}, {2048, 1024, 1024}, {1, 1, 1}, {1, 1, 1}, {0, 0, 0}, {0, 0, 0}};
     EXPECT_EQ(conv_param.GetInputByte<float>(), std::size_t{8589934592});
 }
 
