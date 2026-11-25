@@ -71,6 +71,10 @@ _GFX = re.compile(r"\bgfx[0-9a-f]+\b")
 # pytest's skip reason for the placeholder case of a test whose parameter set is
 # empty in that run (a parameter set that depends on the GPU, for one).
 _EMPTY_PARAMETER_SET = "got empty parameter set"
+# The placeholder's parameter id (one part of the id of a test with stacked
+# parametrizes); it still names the placeholder when a skip mark of the test or
+# its module gives the skip reason instead.
+_EMPTY_PARAMETER_SET_ID = "NOTSET"
 # How far a test got in a lane, lowest first; a lane keeps the furthest. An
 # unfinished test was to run, but its process ended first (run_records).
 _PROGRESS = ("collected", "deselected", "unfinished", "skipped", "ran")
@@ -122,12 +126,13 @@ TestId = tuple[str, str]  # (source test file, pytest node name)
 @dataclass
 class LaneRun:
     """What one CI lane did with each test: its furthest event and, when it
-    did not run the test, why."""
+    did not run the test, every reason its entries gave for that event (one
+    lane runs several entries, so one test can have several)."""
 
     name: str
     gpu_arch: str | None  # None: the lane had no GPU
     progress: dict[TestId, str] = field(default_factory=dict)
-    reasons: dict[TestId, str] = field(default_factory=dict)
+    reasons: dict[TestId, list[str]] = field(default_factory=dict)
     # Test files skipped whole at collection -> the reason.
     skipped_files: dict[str, str] = field(default_factory=dict)
     # Test files that failed to collect, which fails the lane visibly.
@@ -135,11 +140,15 @@ class LaneRun:
     unmapped: set[str] = field(default_factory=set)
 
     def note(self, test: TestId, event: str, reason: str) -> None:
+        """Keep the furthest event of ``test`` and every reason given for it."""
         current = self.progress.get(test)
-        if current is None or _PROGRESS.index(event) >= _PROGRESS.index(current):
+        if current is not None and _PROGRESS.index(event) < _PROGRESS.index(current):
+            return
+        if event != current:
             self.progress[test] = event
-            if reason:
-                self.reasons[test] = reason
+            self.reasons[test] = []
+        if reason and reason not in self.reasons[test]:
+            self.reasons[test].append(reason)
 
     def ran(self, test: TestId) -> bool:
         return self.progress.get(test) == "ran" or test[0] in self.failed_files
@@ -152,11 +161,19 @@ class LaneRun:
         rather than running it to a skip."""
         return self.progress.get(test) == "deselected"
 
-    def why_not_run(self, test: TestId) -> str:
-        """Why the lane, which collected ``test``, did not run it."""
+    def reasons_not_run(self, test: TestId) -> tuple[str, ...]:
+        """Every reason the lane, which collected ``test``, gave for not
+        running it."""
         if test[0] in self.skipped_files:
-            return self.skipped_files[test[0]]
-        return self.reasons.get(test, "collected, but no run of it was recorded")
+            return (self.skipped_files[test[0]],)
+        return tuple(self.reasons.get(test) or ()) or (
+            "collected, but no run of it was recorded",
+        )
+
+    def why_not_run(self, test: TestId) -> str:
+        """Why the lane, which collected ``test``, did not run it: its reasons,
+        joined."""
+        return " / ".join(self.reasons_not_run(test))
 
 
 def lane_run(
@@ -224,13 +241,14 @@ def _accounted_for(test: TestId, lanes: list[LaneRun]) -> bool:
         return waiting_entry(path, node, None) is not None
     recorded = 0
     for lane in observed:
-        reason = lane.why_not_run(test)
-        if (
+        reasons = lane.reasons_not_run(test)
+        if any(
             waiting_entry(path, node, reason, deselected=lane.deselected(test))
             is not None
+            for reason in reasons
         ):
             recorded += 1
-        elif not _defers(lane, test, reason, lanes):
+        elif not any(_defers(lane, test, reason, lanes) for reason in reasons):
             return False
     return recorded > 0
 
@@ -241,10 +259,15 @@ def _placeholder_of_a_test_that_ran(
     """Whether ``test`` is the placeholder pytest makes where a test's parameter
     set is empty, of a test another case of which ran: no case is missing."""
     path, node = test
-    return (path, node.partition("[")[0]) in ran_functions and all(
-        lane.why_not_run(test).startswith(_EMPTY_PARAMETER_SET)
-        for lane in lanes
-        if lane.collected(test)
+    function, _, parameter_id = node.partition("[")
+    return (path, function) in ran_functions and (
+        _EMPTY_PARAMETER_SET_ID in parameter_id.removesuffix("]").split("-")
+        or all(
+            reason.startswith(_EMPTY_PARAMETER_SET)
+            for lane in lanes
+            if lane.collected(test)
+            for reason in lane.reasons_not_run(test)
+        )
     )
 
 
