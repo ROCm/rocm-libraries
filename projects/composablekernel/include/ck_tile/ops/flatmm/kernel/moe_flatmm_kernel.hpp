@@ -252,7 +252,8 @@ struct MoeFlatmmKernel
     static_assert(DsLayout::size() == DsDataType::size(),
                   "The size of DsLayout and DsDataType should be the same");
 
-    static constexpr bool IsInputGemm = kind != MoeFlatmmKind::kFFN_gemm2;
+    static constexpr MoeFlatmmKind Kind = kind;
+    static constexpr bool IsInputGemm   = kind != MoeFlatmmKind::kFFN_gemm2;
     // A rows are (token, slot) rows, [NumTokens * TopK, K]: gemm2 and its per-slot variant.
     static constexpr bool AGatherPerSlot =
         kind == MoeFlatmmKind::kFFN_gemm2 || kind == MoeFlatmmKind::kFFN_gemm2_per_slot;
@@ -925,11 +926,15 @@ struct MoeFlatmmKernel
         return make_tuple(a_pad_view, views.at(I1), c_pad_view, views.at(I3), views.at(I4));
     }
 
+    // k_begin (gfx1250 MX path only): the K slice starts at this K column; A, B and both scale
+    // windows start there. The views keep the full K, so their strides are unchanged.
     template <typename PadView>
     CK_TILE_DEVICE static auto MakeGemmTileWindows(const PadView& views,
                                                    [[maybe_unused]] const index_t coord_m,
-                                                   const index_t coord_n)
+                                                   const index_t coord_n,
+                                                   [[maybe_unused]] const index_t k_begin = 0)
     {
+        const index_t a_k0          = MXF8F6F4WMMA ? k_begin : 0;
         const auto& a_pad_view      = views.at(number<0>{});
         const auto& b_flat_pad_view = views.at(number<1>{});
         const auto& c_pad_view      = views.at(number<2>{});
@@ -940,7 +945,7 @@ struct MoeFlatmmKernel
                 return make_tile_window(a_pad_view,
                                         make_tuple(number<TilePartitioner::MPerBlock>{},
                                                    number<TilePartitioner::KPerBlock>{}),
-                                        {coord_m, 0}); // NOTE!
+                                        {coord_m, a_k0}); // NOTE!
             }
             else
             {
@@ -959,7 +964,7 @@ struct MoeFlatmmKernel
                                         number<FlatmmPipeline::flatKPerWarp>{}),
                              {static_cast<int>(coord_n / BlockGemmShape::WarpTile::at(I1) /
                                                (isNonInterleaveGateUp ? 1 : 2)),
-                              0});
+                              a_k0 * BlockGemmShape::WarpTile::at(I1)});
 
         const int output_N_offset = IsGateUp ? coord_n / 2 : coord_n;
 
@@ -979,7 +984,7 @@ struct MoeFlatmmKernel
                     make_tuple(
                         number<TilePartitioner::MPerBlock>{},
                         number<TilePartitioner::KPerBlock / (MXScaleBlockK * MXScalePack)>{}),
-                    {coord_m, 0});
+                    {coord_m, a_k0 / (MXScaleBlockK * MXScalePack)});
             }
             else
             {
@@ -1002,7 +1007,7 @@ struct MoeFlatmmKernel
                     make_tuple(
                         number<TilePartitioner::NPerBlock>{},
                         number<TilePartitioner::KPerBlock / (MXScaleBlockK * MXScalePack)>{}),
-                    {coord_n, 0});
+                    {coord_n, a_k0 / (MXScaleBlockK * MXScalePack)});
             }
             else if constexpr(MXF8F6F4MFMA)
             {
@@ -1141,7 +1146,13 @@ struct MoeFlatmmKernel
     }
 
     template <class MoeFlatmmKernelArgs>
-    CK_TILE_DEVICE void operator()(MoeFlatmmKernelArgs kargs, index_t iM, index_t iN) const
+    // One output tile. k_begin / k_len (gfx1250 MX path only) restrict K to the slice
+    // [k_begin, k_begin + k_len), both multiples of KPerBlock; k_len < 0 means all of K.
+    CK_TILE_DEVICE void operator()(MoeFlatmmKernelArgs kargs,
+                                   index_t iM,
+                                   index_t iN,
+                                   [[maybe_unused]] index_t k_begin = 0,
+                                   [[maybe_unused]] index_t k_len   = -1) const
     {
 
         // const auto [iM, iN]   = TilePartitioner{kargs.M, kargs.N}.GetOutputTileIndex(blockIdx.x);
@@ -1200,9 +1211,10 @@ struct MoeFlatmmKernel
             a_ptr, b_flat_ptr, e_ptr, exp_weight_ptr, expert_id, kargs, splitk_batch_offset);
         const auto& gemm_pad_views = MakeGemmPadViews(gemm_tensor_views_tuple);
 
-        auto gemm_tile_windows = MakeGemmTileWindows(gemm_pad_views, coord_m, coord_n);
+        auto gemm_tile_windows = MakeGemmTileWindows(gemm_pad_views, coord_m, coord_n, k_begin);
 
-        const index_t num_loop = TilePartitioner::GetLoopNum(splitk_batch_offset.splitted_k);
+        const index_t num_loop = TilePartitioner::GetLoopNum(
+            MXF8F6F4WMMA && k_len >= 0 ? k_len : splitk_batch_offset.splitted_k);
 
         // Run GEMM cooperatively by whole workgroup.
         const auto& a_block_window       = gemm_tile_windows.at(I0);

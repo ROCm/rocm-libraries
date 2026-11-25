@@ -169,16 +169,9 @@ inline float fp4_at(const ck_tile::HostTensor<ck_tile::pk_fp4_t>& t, std::size_t
                : ck_tile::type_convert<float>(pk.template unpack<>(ck_tile::number<1>{}));
 }
 
-template <ck_tile::MoeFlatmmKind kind,
-          typename ADataType,
-          typename BDataType,
-          typename CDataType,
-          typename HostArgs>
-float launch_mx_moe_gemm(const HostArgs& args,
-                         const ck_tile::stream_config& s,
-                         bool clear_c,
-                         const float* topk_weights = nullptr, // gemm2_per_slot: [tokens, topk]
-                         void* combined            = nullptr)            // gemm2_per_slot: bf16 [tokens, N]
+// MoeFlatmmKernel on the gfx1250 MX pipeline with this example's tile, for one MoE kind.
+template <ck_tile::MoeFlatmmKind kind, typename ADataType, typename BDataType, typename CDataType>
+struct MxMoeKernelTypes
 {
     using Config  = MXMoeFlatmmConfig;
     using Row     = ck_tile::tensor_layout::gemm::RowMajor;
@@ -232,7 +225,21 @@ float launch_mx_moe_gemm(const HostArgs& args,
                                          Config::BlockedXDLN_PerWarp>>;
     using Kernel =
         ck_tile::MoeFlatmmKernel<TilePartitioner, Pipeline, Epilogue, kind, ck_tile::moe::MoeSilu>;
+};
 
+template <ck_tile::MoeFlatmmKind kind,
+          typename ADataType,
+          typename BDataType,
+          typename CDataType,
+          typename HostArgs>
+float launch_mx_moe_gemm(const HostArgs& args,
+                         const ck_tile::stream_config& s,
+                         bool clear_c,
+                         const float* topk_weights = nullptr, // gemm2_per_slot: [tokens, topk]
+                         void* combined            = nullptr)            // gemm2_per_slot: bf16 [tokens, N]
+{
+    using Kernel      = typename MxMoeKernelTypes<kind, ADataType, BDataType, CDataType>::Kernel;
+    using Config      = MXMoeFlatmmConfig;
     const auto kargs  = Kernel::MakeKernelArgs(args);
     const dim3 grids  = Kernel::GridSize(kargs);
     const dim3 blocks = Kernel::BlockSize();
@@ -630,12 +637,15 @@ struct MxMoeLayerCase
     int hidden     = 1024;
     int inter      = 512;
     bool per_slot  = true; // down projection: per-slot + combine, or the atomic gemm2
-    int init       = 0;
-    unsigned seed  = 11939;
-    bool validate  = true;
-    int warmup     = 0;
-    int repeat     = 0;
-    bool verbose   = true;
+    // > 0: the whole layer in one MoeMxFusedKernel launch, the intermediate split into this
+    // many slices per row tile (atomic combine; per_slot is ignored). 0: two kernels.
+    int fused_slices = 0;
+    int init         = 0;
+    unsigned seed    = 11939;
+    bool validate    = true;
+    int warmup       = 0;
+    int repeat       = 0;
+    bool verbose     = true;
 };
 
 struct MxMoeLayerResult
@@ -767,8 +777,10 @@ inline MxMoeLayerResult run_mx_moe_layer(const MxMoeLayerCase& c)
                  SP{static_cast<const ScaleType*>(xs_dev.GetDeviceBuffer()), M},
                  SP{static_cast<const ScaleType*>(w1s_dev.GetDeviceBuffer()), 2 * I},
                  {}};
-    gate_up.e_scale_ptr = mids_dev.GetDeviceBuffer();
-    void* down_out      = c.per_slot ? p_dev.GetDeviceBuffer() : out_dev.GetDeviceBuffer();
+    gate_up.e_scale_ptr     = mids_dev.GetDeviceBuffer();
+    const bool fused        = c.fused_slices > 0;
+    const bool per_slot_out = c.per_slot && !fused;
+    void* down_out          = per_slot_out ? p_dev.GetDeviceBuffer() : out_dev.GetDeviceBuffer();
     Args down{ids,
               sw_dev.GetDeviceBuffer(),
               eids,
@@ -795,19 +807,43 @@ inline MxMoeLayerResult run_mx_moe_layer(const MxMoeLayerCase& c)
     auto run1 = [&](const ck_tile::stream_config& s) {
         return launch_mx_moe_gemm<K::kFFN_gemm1_gate_up_mx_quant, F4, F4, float>(gate_up, s, false);
     };
-    auto run2 = [&](const ck_tile::stream_config& s, bool clear) {
-        return c.per_slot ? launch_mx_moe_gemm<K::kFFN_gemm2_per_slot, F4, F4, float>(
-                                down, s, false, tw, out16_dev.GetDeviceBuffer())
-                          : launch_mx_moe_gemm<K::kFFN_gemm2, F4, F4, float>(down, s, clear);
+    // One launch for the whole layer (fused_slices > 0).
+    using GateUpKernel =
+        typename MxMoeKernelTypes<K::kFFN_gemm1_gate_up_mx_quant, F4, F4, float>::Kernel;
+    using DownKernel = typename MxMoeKernelTypes<K::kFFN_gemm2, F4, F4, float>::Kernel;
+    using Fused      = ck_tile::MoeMxFusedKernel<GateUpKernel, DownKernel>;
+    auto run_fused   = [&](const ck_tile::stream_config& s, bool clear) {
+        const auto fk = Fused::MakeKargs(gate_up, down, c.fused_slices);
+        if(!Fused::IsSupportedArgument(fk))
+            throw std::runtime_error("Arguments not supported by the fused MX MoE kernel");
+        auto clear_out = [&]() {
+            if(clear)
+                HIP_CHECK_ERROR(hipMemsetAsync(
+                    out_dev.GetDeviceBuffer(), 0, out_dev.GetBufferSize(), s.stream_id_));
+        };
+        return ck_tile::launch_kernel_time_mask(
+            s,
+            clear_out,
+            ck_tile::make_kernel<1>(Fused{}, Fused::GridSize(fk), Fused::BlockSize(), 0, fk));
     };
-    run1(ck_tile::stream_config{nullptr, false});
-    run2(ck_tile::stream_config{nullptr, false}, true);
+    auto run2 = [&](const ck_tile::stream_config& s, bool clear) {
+        return per_slot_out ? launch_mx_moe_gemm<K::kFFN_gemm2_per_slot, F4, F4, float>(
+                                  down, s, false, tw, out16_dev.GetDeviceBuffer())
+                            : launch_mx_moe_gemm<K::kFFN_gemm2, F4, F4, float>(down, s, clear);
+    };
+    if(fused)
+        run_fused(ck_tile::stream_config{nullptr, false}, true);
+    else
+    {
+        run1(ck_tile::stream_config{nullptr, false});
+        run2(ck_tile::stream_config{nullptr, false}, true);
+    }
 
     std::vector<uint8_t> mid(std::size_t(T) * topk * I / 2), mid_scale(std::size_t(M) * IB);
     mid_dev.FromDevice(mid.data());
     mids_dev.FromDevice(mid_scale.data());
     std::vector<float> out(std::size_t(T) * H);
-    if(c.per_slot)
+    if(per_slot_out)
     {
         std::vector<ck_tile::bf16_t> ob(out.size());
         out16_dev.FromDevice(ob.data());
@@ -821,8 +857,13 @@ inline MxMoeLayerResult run_mx_moe_layer(const MxMoeLayerCase& c)
     if(c.repeat > 0)
     {
         const ck_tile::stream_config s{nullptr, true, 0, c.warmup, c.repeat, true};
-        res.ms_gate_up = run1(s);
-        res.ms_down    = run2(s, false);
+        if(fused)
+            res.ms_gate_up = run_fused(s, false); // the whole layer; ms_down stays 0
+        else
+        {
+            res.ms_gate_up = run1(s);
+            res.ms_down    = run2(s, false);
+        }
     }
     if(!c.validate)
         return res;
@@ -921,7 +962,7 @@ inline MxMoeLayerResult run_mx_moe_layer(const MxMoeLayerCase& c)
                          dot(&mid_gpu[rc * I], &w2f[(std::size_t(rt.expert[rc]) * H + n) * I], I);
                 }
                 ref[t * H + n] =
-                    c.per_slot
+                    per_slot_out
                         ? ck_tile::type_convert<float>(ck_tile::type_convert<ck_tile::bf16_t>(v))
                         : v;
             }
@@ -934,8 +975,12 @@ inline MxMoeLayerResult run_mx_moe_layer(const MxMoeLayerCase& c)
         ck_tile::check_err(out, ref, "layer output: incorrect results!", 1e-2, 1e-3 * ref_max);
     res.pass = mid_ok && out_ok;
     if(c.verbose)
-        std::cout << "mx_moe layer (" << (c.per_slot ? "per-slot" : "atomic") << "): experts " << E
-                  << ", tokens " << T << ", topk " << topk << ", hidden " << H << ", inter " << I
+        std::cout << "mx_moe layer ("
+                  << (fused          ? "fused, " + std::to_string(c.fused_slices) + " slices"
+                      : per_slot_out ? std::string("per-slot")
+                                     : std::string("atomic"))
+                  << "): experts " << E << ", tokens " << T << ", topk " << topk << ", hidden " << H
+                  << ", inter " << I
                   << "; intermediate values differing from the CPU quantization: "
                   << res.intermediate_mismatch * 100 << "%; output "
                   << (out_ok ? "correct" : "fail") << std::endl;
