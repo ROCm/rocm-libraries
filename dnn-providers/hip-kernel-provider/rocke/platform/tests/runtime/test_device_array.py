@@ -126,9 +126,23 @@ def test_raw_bit_hosts_need_an_element_type():
         DeviceArray(np.zeros(4, np.uint16))
 
 
-def test_element_type_must_match_the_host_width():
-    with pytest.raises(ValueError, match=r"dtype='bf16' is 2 bytes, expected the host"):
-        DeviceArray(np.zeros(4, np.float32), "bf16")
+@pytest.mark.parametrize(
+    "host, dtype, expected",
+    [
+        (np.float16, "bf16", "uint16 or a 2-byte"),
+        (np.float32, "bf16", "uint16 or a 2-byte"),
+        (np.float32, "i32", "int32 or a 4-byte"),
+        (np.int8, "fp16", "float16 or a 2-byte"),
+    ],
+)
+def test_element_type_must_match_the_host_dtype(host, dtype, expected):
+    # float16 data named bf16 has the right width but would be read as bf16 bits.
+    with pytest.raises(
+        ValueError,
+        match=rf"dtype={dtype!r}, host dtype={np.dtype(host)}, expected {expected} "
+        "integer type holding its raw bits",
+    ):
+        DeviceArray(np.zeros(4, host), dtype)
 
 
 def test_view_shape_must_fit_the_host():
@@ -332,6 +346,17 @@ def test_gpu_round_trip_and_tensor_methods():
     np.testing.assert_array_equal(array.read(), host[::-1])
     info = array_info(array)
     assert info.dtype == "bf16" and info.device == array.device
+
+
+@pytest.mark.gpu
+@pytest.mark.parametrize(
+    "host, dtype",
+    [(np.uint16, "bf16"), (np.int16, "fp16"), (np.uint32, "i32"), (np.int8, "fp8e4m3")],
+)
+def test_gpu_a_named_element_type_takes_its_raw_bits(host, dtype):
+    current_device_arch()
+    array = DeviceArray(np.zeros(4, host), dtype)
+    assert array.dtype == dtype and array.element_size() == np.dtype(host).itemsize
 
 
 @pytest.mark.gpu

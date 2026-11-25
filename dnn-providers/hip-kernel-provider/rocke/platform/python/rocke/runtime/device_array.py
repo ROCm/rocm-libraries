@@ -457,7 +457,10 @@ class DeviceArray:
 
     ``dtype`` names the element type the device sees; it defaults from the host
     dtype (``float16`` -> ``"fp16"``, ``int32`` -> ``"i32"``, ...) and must be
-    given for raw-bit hosts such as bf16 (``uint16``). ``shape`` may be narrower
+    given for raw-bit hosts such as bf16 (``uint16``). A given ``dtype`` must
+    match the host dtype (:func:`rocke.numeric.storage.host_dtype`), or the host
+    must be an integer type of the same width holding its raw bits: ``float16``
+    data named ``"bf16"`` is refused. ``shape`` may be narrower
     than the host array along its axes, which views the leading part of each
     axis with the host's strides (e.g. a column slice); it defaults to the host
     shape. :meth:`view` describes the same buffer another way (a transposed or
@@ -519,11 +522,15 @@ class DeviceArray:
         if dtype is None:
             return element_type_of(array_dtype)
         name = dtype_info(dtype).name
-        if host_dtype(name).itemsize != array_dtype.itemsize:
+        expected = host_dtype(name)
+        raw_bits = (
+            array_dtype.kind in "iu" and array_dtype.itemsize == expected.itemsize
+        )
+        if array_dtype != expected and not raw_bits:
             raise ValueError(
-                f"DeviceArray failed - dtype={name!r} is {host_dtype(name).itemsize} "
-                f"bytes, expected the host element size {array_dtype.itemsize} "
-                f"({array_dtype})"
+                f"DeviceArray failed - dtype={name!r}, host dtype={array_dtype}, "
+                f"expected {expected} or a {expected.itemsize}-byte integer type "
+                "holding its raw bits"
             )
         return name
 
