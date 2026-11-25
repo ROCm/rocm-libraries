@@ -23,7 +23,7 @@
  *  type replaced by a renamed version, a retired enumerator, or a changed contract test.
  *  Additions do not increment it. tools/scripts/check_experimental_api.py enforces this.
  */
-#define HIPBLASLT_EXPERIMENTAL_PARTITIONED_GEMM 1
+#define HIPBLASLT_EXPERIMENTAL_PARTITIONED_GEMM 2
 
 #include "hipblaslt/hipblaslt-ext.hpp"
 
@@ -193,9 +193,9 @@ namespace hipblaslt_experimental
         *  \retval HIPBLAS_STATUS_INVALID_VALUE     If `inputs` does not hold one GemmInputs
         * per partition, a required pointer is null, a size is not positive, or the split dimension is smaller than the
         * number of partitions.
-        *  \retval HIPBLAS_STATUS_NOT_SUPPORTED     If a partition's device is not a gfx1250
-        * (the only architecture PartitionedGemm supports), the types or operations are not
-        * supported (conjugate transpose, sub-byte types), or a partition rejects its slice.
+        *  \retval HIPBLAS_STATUS_NOT_SUPPORTED     If a partition's device is neither a gfx1250
+        * nor a gfx950 (the architectures PartitionedGemm supports), the types or operations are
+        * not supported (conjugate transpose, sub-byte types), or a partition rejects its slice.
         */
         HIPBLASLT_EXPORT hipblasStatus_t
             setProblem(int64_t                                       m,

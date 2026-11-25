@@ -22,6 +22,10 @@ Full documentation for hipBLASLt is available at [rocm.docs.amd.com/projects/hip
 * `HIPBLASLT_TUNING_MODE=tune` for the runtime tuning cache. With `HIPBLASLT_TUNING_CACHE_PATH=<file>`, the library benchmarks candidate kernels for an unseen problem at its first `hipblasLtMatmul`, records the winner in the file, and replays it afterwards. `tune` measures candidates the way `hipblaslt-bench` does (warm-up and timed launches over rotating buffers, with an instruction-cache flush), serialises tuning within a process, and bounds each shape's search to five minutes by default (`HIPBLASLT_TUNING_BUDGET_MS_PER_SHAPE`). A search the budget stops records its best candidate as incomplete, which is never slower than the untuned kernel because that kernel is measured first, and tune mode revisits it when a later run can finish or widen the search. Tune mode reports each tuned shape's start and result without needing a log level, and a process in a secure execution context ignores every tuning variable.
 * w4a16 GEMM support on gfx1150: the w4a16 scale modes (`HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_16BF_EXT` through `HIPBLASLT_MATMUL_MATRIX_SCALE_VEC128_16F_ZP_EXT`) now have kernels for bf16 and fp16 activations, both int4 encodings, and group sizes 32, 64, and 128.
 
+### Experimental
+
+* PARTITIONED_GEMM revision 2: `hipblaslt_experimental::PartitionedGemm` also runs on gfx950, where revision 1's `setProblem` returned `HIPBLAS_STATUS_NOT_SUPPORTED`; it still does on every architecture other than gfx1250 and gfx950. The declarations are unchanged, but the contract changed, so code written for revision 1 must check for revision 2. The contract tests (`pre_checkin_partitioned_gemm_contract`) now run on gfx950 too, and the `partitioned_gemm_ext_*_multi_gpu` tests run on two separate GPUs with peer access when there is no DPX GPU.
+
 ### Changed
 
 * The `FusedGemmA2A` TensileLite problem-type parameter and solution predicate are now `FusedA2A` (`Disabled`, `GemmA2A` or `A2AGemm`), and the `tensilelite-client` option `--fused-gemm-a2a=1` is now `--fused-a2a=GemmA2A`. Device libraries and client configuration files from before this change must be regenerated.

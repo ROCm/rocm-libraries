@@ -30,8 +30,8 @@
 #include <hipblaslt/hipblaslt-experimental.h>
 
 #if !defined(HIPBLASLT_EXPERIMENTAL_PARTITIONED_GEMM) \
-    || HIPBLASLT_EXPERIMENTAL_PARTITIONED_GEMM != 1
-#error "This sample is written for revision 1 of hipBLASLt PARTITIONED_GEMM; see the CHANGELOG"
+    || HIPBLASLT_EXPERIMENTAL_PARTITIONED_GEMM != 2
+#error "This sample is written for revision 2 of hipBLASLt PARTITIONED_GEMM; see the CHANGELOG"
 #endif
 
 #include <hip/hip_runtime.h>
@@ -47,11 +47,11 @@
 
 int main(int argc, char** argv)
 {
-    // The header says revision 1; the loaded library must have the same one. A program with a
+    // The header says revision 2; the loaded library must have the same one. A program with a
     // non-experimental path would fall back to it here instead of stopping.
-    if(hipblasLtExperimentalGetFeatureRevision("PARTITIONED_GEMM") != 1)
+    if(hipblasLtExperimentalGetFeatureRevision("PARTITIONED_GEMM") != 2)
     {
-        std::cerr << "The loaded hipBLASLt does not have revision 1 of PARTITIONED_GEMM"
+        std::cerr << "The loaded hipBLASLt does not have revision 2 of PARTITIONED_GEMM"
                   << std::endl;
         return EXIT_FAILURE;
     }
@@ -197,6 +197,8 @@ int main(int argc, char** argv)
     // One hipStreamBatchMemOp per stream, built at setup; the write comes first, so no stream can
     // block another.
     // Both operations are recorded by stream capture, so the join also exists in a graph.
+    // hipStreamBatchMemOp is a beta API that ROCm 7.2 refuses with hipErrorInvalidValue; the
+    // same write and waits then go one by one, which stream capture does not record there.
     ++launch;
     for(int j = 0; j < partitions; j++)
     {
@@ -205,7 +207,18 @@ int main(int argc, char** argv)
         join[j][0].writeValue.value64 = launch;
         for(int i = 1; i < partitions; i++)
             join[j][i].waitValue.value64 = launch;
-        CHECK_HIP_ERROR(hipStreamBatchMemOp(streams[j], partitions, join[j].data(), 0));
+        hipError_t batch = hipStreamBatchMemOp(streams[j], partitions, join[j].data(), 0);
+        if(batch == hipErrorInvalidValue)
+        {
+            static_cast<void>(hipGetLastError());
+            CHECK_HIP_ERROR(hipStreamWriteValue64(streams[j], done[j], launch, 0));
+            for(int i = 0; i < partitions; i++)
+                if(i != j)
+                    CHECK_HIP_ERROR(hipStreamWaitValue64(
+                        streams[j], done[i], launch, hipStreamWaitValueGte, ~uint64_t(0)));
+        }
+        else
+            CHECK_HIP_ERROR(batch);
     }
 
     // The host reads D next, so it waits for the streams.

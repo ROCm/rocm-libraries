@@ -63,8 +63,8 @@ either doesn't match:
 
 .. code-block:: cpp
 
-   #if defined(HIPBLASLT_EXPERIMENTAL_PARTITIONED_GEMM) && HIPBLASLT_EXPERIMENTAL_PARTITIONED_GEMM == 1
-       if(hipblasLtExperimentalGetFeatureRevision("PARTITIONED_GEMM") == 1)
+   #if defined(HIPBLASLT_EXPERIMENTAL_PARTITIONED_GEMM) && HIPBLASLT_EXPERIMENTAL_PARTITIONED_GEMM == 2
+       if(hipblasLtExperimentalGetFeatureRevision("PARTITIONED_GEMM") == 2)
        {
            /* Use the experimental feature. */
        }
@@ -182,12 +182,13 @@ hipblasLtExperimentalGetFeatureRevision()
 Experimental feature PARTITIONED_GEMM
 -------------------------------------
 
-``PartitionedGemm`` is supported on gfx1250 devices only. On any other architecture
-``setProblem`` returns ``HIPBLAS_STATUS_NOT_SUPPORTED``.
+``PartitionedGemm`` is supported on gfx1250 and gfx950 devices; revision 1 supported gfx1250
+only. On any other architecture ``setProblem`` returns ``HIPBLAS_STATUS_NOT_SUPPORTED``.
 
 ``hipblaslt_experimental::PartitionedGemm`` (C++ only) runs one GEMM as slices on the devices of a
 partitioned GPU, for example the two partitions of a DPX card, where each partition is a separate
-HIP device. The caller passes one hipBLASLt handle per partition (created with that partition's
+HIP device. The partitions can also be separate GPUs that can reach each other's memory; the
+slices that are not local then travel over the link between them. The caller passes one hipBLASLt handle per partition (created with that partition's
 device current), and one stream, workspace, and event per partition when it initializes and runs.
 ``SplitDim`` picks the dimension to split (M, N, or the batch). The first ``N - 1`` partitions take
 ``size / N`` rounded up to a 256-byte boundary of every matrix they cut when that changes the

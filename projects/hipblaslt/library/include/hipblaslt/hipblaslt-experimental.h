@@ -22,8 +22,8 @@
  *  #define ROCM_ENABLE_EXPERIMENTAL_APIS 1
  *  #include <hipblaslt/hipblaslt-experimental.h>
  *
- *  #if defined(HIPBLASLT_EXPERIMENTAL_PARTITIONED_GEMM) && HIPBLASLT_EXPERIMENTAL_PARTITIONED_GEMM == 1
- *      if(hipblasLtExperimentalGetFeatureRevision("PARTITIONED_GEMM") == 1) { ... }
+ *  #if defined(HIPBLASLT_EXPERIMENTAL_PARTITIONED_GEMM) && HIPBLASLT_EXPERIMENTAL_PARTITIONED_GEMM == 2
+ *      if(hipblasLtExperimentalGetFeatureRevision("PARTITIONED_GEMM") == 2) { ... }
  *      else { ... fallback ... }
  *  #else
  *      ... fallback ...

@@ -101,15 +101,17 @@ namespace partitioned_gemm_test
         return v;
     }
 
-    // PartitionedGemm is validated on gfx1250 only; the tests skip on any other architecture.
-    inline bool isGfx1250()
+    // PartitionedGemm is supported on gfx1250 and gfx950; the tests of its behavior skip on any
+    // other architecture.
+    inline bool isSupportedArch()
     {
         hipDeviceProp_t props;
         int             device = 0;
         if(hipGetDevice(&device) != hipSuccess
            || hipGetDeviceProperties(&props, device) != hipSuccess)
             return false;
-        return std::strncmp(props.gcnArchName, "gfx1250", 7) == 0;
+        return std::strncmp(props.gcnArchName, "gfx1250", 7) == 0
+               || std::strncmp(props.gcnArchName, "gfx950", 6) == 0;
     }
 
     inline std::vector<half_t> randomHalf(size_t count, unsigned seed)
@@ -337,10 +339,10 @@ namespace partitioned_gemm_test
     }
 } // namespace partitioned_gemm_test
 
-// Skips the rest of the test unless the device is a gfx1250.
-#define SKIP_UNLESS_GFX1250()                                            \
-    do                                                                   \
-    {                                                                    \
-        if(!isGfx1250())                                                 \
-            GTEST_SKIP() << "PartitionedGemm is tested on gfx1250 only"; \
+// Skips the rest of the test unless the device is a gfx1250 or a gfx950.
+#define SKIP_UNLESS_SUPPORTED_ARCH()                                                   \
+    do                                                                                 \
+    {                                                                                  \
+        if(!isSupportedArch())                                                         \
+            GTEST_SKIP() << "PartitionedGemm is supported on gfx1250 and gfx950 only"; \
     } while(0)
