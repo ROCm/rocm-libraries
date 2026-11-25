@@ -31,7 +31,9 @@ recommended stack pins a recent, consistent ROCm:
 > produced on ROCm 7.2. The generated IR must match the loaded COMGR compiler’s
 > LLVM version (§5), and a few kernels behave differently (e.g. a persistent-
 > kernel path that hangs older comgr but compiles cleanly on 7.2). For
-> reproducing the documented numbers, use ROCm 7.2 + PyTorch 2.12.
+> reproducing the documented numbers, use ROCm 7.2 + PyTorch 2.12. For new perf,
+> parity or AOT work in rocm-libraries, use the venv from `rocke/tools/setup_dev_env.py`
+> (see the rocke `BUILDING.md`), which compiles with the same COMGR as CI.
 
 ---
 

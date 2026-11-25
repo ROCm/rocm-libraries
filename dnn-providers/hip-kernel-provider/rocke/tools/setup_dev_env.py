@@ -17,13 +17,13 @@ This script makes the venv's single COMGR the CI one:
    that same LLVM commit (its ``share/therock/therock_manifest.json`` says so);
 3. install ROCm, ROCm torch and the torch device wheel for this GPU, all from
    that one nightly, into a checkout-independent base venv
-   ``<root>/<gfx arch>-llvm-<llvm commit[:8]>/base``; then give this checkout
+   ``<root>/<gfx arch>-<llvm commit[:8]>-<cpXY>/base``; then give this checkout
    its own small venv beside it (``<checkout dir>-<hash>``) that sees the
    base's packages and editable-installs rocKE and its test dependencies, so
    several worktrees share one base without fighting over one editable install;
-4. pin rocKE to that venv's COMGR and HIP runtime (``ROCKE_COMGR_LIB`` /
-   ``ROCKE_HIP_LIB``) for every process that runs the venv's Python, activated
-   or not; torch from the same nightly loads those same files;
+4. pin rocKE to the COMGR and HIP runtime it resolves next to that torch
+   (``ROCKE_COMGR_LIB`` / ``ROCKE_HIP_LIB``) for every process that runs the
+   venv's Python, activated or not; ``deactivate`` restores the previous values;
 5. verify, in the venv, that torch and rocKE load that COMGR and see the GPU.
 
 Usage -- stdout carries only the venv path, progress goes to stderr::
@@ -44,7 +44,7 @@ nightly was built with CI's LLVM the script fails rather than install a near
 match.
 
 Environment: ``ROCKE_VENV_ROOT`` (default ``~/rocke-venvs``) is where venvs
-live; a base venv is several GB, so point it at larger shared storage when the
+live; a base venv is large, so point it at shared storage with room when the
 home quota is small. GITHUB_TOKEN (or GH_TOKEN) lifts the anonymous GitHub API
 rate limit; the TheRock -> LLVM answer is cached under ``<root>/.cache``.
 """
@@ -54,6 +54,7 @@ from __future__ import annotations
 import argparse
 import ctypes
 import hashlib
+import http.client
 import importlib.util
 import json
 import os
@@ -72,6 +73,7 @@ import zlib
 from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import asdict, dataclass
+from email.message import Message
 from pathlib import Path
 
 NIGHTLY_INDEX = "https://nightly.repo.amd.com/rocm/whl-next/"
@@ -149,20 +151,36 @@ def parse_therock_ref(action_yml: str) -> str:
     return match.group(1)
 
 
-def http_get(url: str, headers: dict[str, str] | None = None) -> tuple[int, bytes]:
-    """GET with a few retries on transient network failures."""
-    request = urllib.request.Request(url, headers=headers or {})
+def _fetch(
+    url: str, headers: dict[str, str] | None = None, method: str = "GET"
+) -> tuple[int, Message, bytes]:
+    """(status, headers, body), retrying transient network failures.
+
+    HTTP error statuses are not transient and propagate as ``HTTPError``.
+    """
+    request = urllib.request.Request(url, headers=headers or {}, method=method)
     for attempt in range(3):
         try:
             with urllib.request.urlopen(request, timeout=120) as response:
-                return response.status, response.read()
+                return response.status, response.headers, response.read()
         except urllib.error.HTTPError:
             raise
-        except (urllib.error.URLError, TimeoutError, ConnectionError) as exc:
+        except (
+            urllib.error.URLError,
+            http.client.HTTPException,
+            TimeoutError,
+            ConnectionError,
+        ) as exc:
             if attempt == 2:
                 raise SetupError(f"cannot reach {url}: {exc}") from exc
             time.sleep(2 * (attempt + 1))
     raise AssertionError("unreachable")
+
+
+def http_get(url: str, headers: dict[str, str] | None = None) -> tuple[int, bytes]:
+    """GET with a few retries on transient network failures."""
+    status, _, body = _fetch(url, headers)
+    return status, body
 
 
 def therock_llvm_commit(therock_ref: str) -> str:
@@ -253,19 +271,25 @@ def pick_torch(
 
 
 def _range(url: str, first: int, last: int) -> bytes:
-    request = urllib.request.Request(url, headers={"Range": f"bytes={first}-{last}"})
-    with urllib.request.urlopen(request, timeout=120) as response:
-        if response.status != 206:
-            raise SetupError(f"{url}: server ignored a byte-range request")
-        return response.read()
+    try:
+        status, _, body = _fetch(url, {"Range": f"bytes={first}-{last}"})
+    except urllib.error.HTTPError as exc:
+        raise SetupError(f"{url}: HTTP {exc.code}") from exc
+    if status != 206:
+        raise SetupError(f"{url}: server ignored a byte-range request")
+    return body
 
 
 def _central_directory(url: str) -> Iterator[tuple[str, int, int, int]]:
     """(name, method, compressed size, local header offset) of each file in a
-    remote wheel, read via byte ranges (wheels are up to ~2 GB)."""
-    head = urllib.request.Request(url, method="HEAD")
-    with urllib.request.urlopen(head, timeout=120) as response:
-        size = int(response.headers["Content-Length"])
+    remote wheel, read via byte ranges rather than downloading the wheel."""
+    try:
+        _, headers, _ = _fetch(url, method="HEAD")
+    except urllib.error.HTTPError as exc:
+        raise SetupError(f"{url}: HTTP {exc.code}") from exc
+    if not headers.get("Content-Length"):
+        raise SetupError(f"{url}: no Content-Length, cannot read it by byte ranges")
+    size = int(headers["Content-Length"])
     tail = _range(url, max(0, size - 65536), size - 1)
     eocd = tail.rfind(b"PK\x05\x06")
     if eocd < 0:
@@ -335,11 +359,17 @@ def nightly_llvm(version: str, plat: str, cache: dict) -> str:
             f"{NIGHTLY_INDEX}rocm-sdk-core/rocm_sdk_core-{version}-py3-none-{plat}.whl"
         )
         manifest = json.loads(read_wheel_member(url, MANIFEST))
-        cache[key] = next(
-            s["pin_sha"]
-            for s in manifest["submodules"]
-            if s["submodule_name"] == "llvm-project"
+        llvm = next(
+            (
+                s.get("pin_sha")
+                for s in manifest.get("submodules", [])
+                if s.get("submodule_name") == "llvm-project"
+            ),
+            None,
         )
+        if not llvm:
+            raise SetupError(f"{url}: {MANIFEST} records no llvm-project commit")
+        cache[key] = llvm
     return cache[key]
 
 
@@ -497,29 +527,37 @@ def run(cmd: list[str | Path]) -> None:
         raise SetupError(f"command failed (exit {rc}): {cmd[0]} ... {cmd[-1]}")
 
 
-def venv_query(venv: Path, code: str) -> dict:
-    """Run ``code`` in the venv's Python; it must print one JSON object last."""
+def venv_query(venv: Path, code: str, *, clean_env: bool = False) -> dict:
+    """Run ``code`` in the venv's Python; it must print one JSON object last.
+
+    ``clean_env`` drops any ``ROCKE_COMGR_LIB`` / ``ROCKE_HIP_LIB`` from the
+    caller's environment, so the answer reflects the venv alone.
+    """
+    env = None
+    if clean_env:
+        env = {
+            k: v
+            for k, v in os.environ.items()
+            if k not in ("ROCKE_COMGR_LIB", "ROCKE_HIP_LIB")
+        }
     proc = subprocess.run(
         [str(venv_python(venv)), "-c", code],
         capture_output=True,
         text=True,
         check=False,
+        env=env,
     )
     if proc.returncode:
         raise SetupError(f"venv check failed:\n{proc.stderr.strip()[-2000:]}")
     return json.loads(proc.stdout.strip().splitlines()[-1])
 
 
-_SDK_LIBS = """
-import glob, json, os, _rocm_sdk_core, sysconfig
-root = os.path.dirname(_rocm_sdk_core.__file__)
-pat = {"comgr": ("bin/amd_comgr*.dll", "lib/libamd_comgr.so.*"),
-       "hip": ("bin/amdhip64_*.dll", "lib/libamdhip64.so.*")}
-win = os.name == "nt"
-out = {k: sorted(glob.glob(os.path.join(root, v[0] if win else v[1])), key=len)
-       for k, v in pat.items()}
-out["site"] = sysconfig.get_paths()["purelib"]
-print(json.dumps(out))
+# The runtime files to pin come from rocKE itself (one home for the wheel
+# layout): what it resolves next to the venv's imported torch.
+_RUNTIME_LIBS = """
+import json, sysconfig, torch
+from rocke.runtime.runtime_coexistence import torch_runtime_libs
+print(json.dumps({**torch_runtime_libs(), "site": sysconfig.get_paths()["purelib"]}))
 """
 
 _SITE = """
@@ -585,8 +623,8 @@ def install_base(venv: Path, res: Resolution) -> None:
     run([py, "-m", "pip", "install", "--upgrade", "pip", "setuptools>=61", "wheel"])
     # devel is the ROCM_PATH for the Windows hipDNN superbuild; on Linux the
     # container's /opt/rocm already provides it. --no-cache-dir: these wheels
-    # are ~10 GB installed, and a second copy in the pip cache does not fit a
-    # typical home quota.
+    # are large once installed, and a second copy in the pip cache does not fit
+    # a typical home quota.
     extras = ["libraries", f"device-{res.arch}"] + (["devel"] if IS_WINDOWS else [])
     run(
         [
@@ -602,7 +640,7 @@ def install_base(venv: Path, res: Resolution) -> None:
 def make_overlay(venv: Path, base: Path) -> None:
     """Per-checkout venv that sees ``base``'s packages and editable-installs rocKE.
 
-    The ROCm/torch install is several GB and checkout-independent; rocKE is an
+    The ROCm/torch install is large and checkout-independent; rocKE is an
     editable install of one checkout. Splitting them lets several worktrees share
     one base without re-pointing each other's editable install.
     """
@@ -635,44 +673,97 @@ def make_overlay(venv: Path, base: Path) -> None:
 
 def pin_runtime(venv: Path, checkout: Path, therock_ref: str) -> dict[str, str]:
     """Point rocKE at the venv's COMGR/HIP for every process and every activation."""
-    sdk = venv_query(venv, _SDK_LIBS)
-    if not sdk["comgr"] or not sdk["hip"]:
-        raise SetupError(f"rocm-sdk-core in {venv} has no COMGR/HIP runtime library")
-    env = {"ROCKE_COMGR_LIB": sdk["comgr"][0], "ROCKE_HIP_LIB": sdk["hip"][0]}
+    libs = venv_query(venv, _RUNTIME_LIBS, clean_env=True)
+    if not libs.get("amd_comgr") or not libs.get("amdhip64"):
+        raise SetupError(f"torch in {venv} loads no ROCm COMGR/HIP runtime: {libs}")
+    env = {"ROCKE_COMGR_LIB": libs["amd_comgr"], "ROCKE_HIP_LIB": libs["amdhip64"]}
     # A .pth line starting with "import" runs at interpreter start, so the pin
     # holds for VS Code, Slurm and subprocesses that never source activate. An
     # explicit value in the environment still wins (verify() catches a stale one).
     sets = "; ".join(f"os.environ.setdefault({k!r}, {v!r})" for k, v in env.items())
-    (Path(sdk["site"]) / PTH).write_text(f"import os; {sets}\n", encoding="utf-8")
-    # Activation warns when the checkout's committed CI pin has moved on.
-    rerun = f"python3 {SCRIPT}" if not IS_WINDOWS else f"py -3 {SCRIPT}"
-    show = f"git -C {shlex.quote(str(checkout))} show HEAD:{CI_ENV}"
-    bash = [f"export {k}={shlex.quote(v)}" for k, v in env.items()] + [
-        f'if _rocke_pin=$({show} 2>/dev/null) && ! printf %s "$_rocke_pin" | grep -q {therock_ref}; then',
-        f"  echo '[rocke] CI pin changed since this venv was built; re-run: {rerun}' >&2",
-        "fi",
-        "unset _rocke_pin",
-    ]
-    quoted = str(checkout).replace("'", "''")
-    ps = [f"$env:{k} = '{v.replace(chr(39), chr(39) * 2)}'" for k, v in env.items()] + [
-        f"$_rockePin = git -C '{quoted}' show HEAD:{CI_ENV} 2>$null",
-        f"if ($LASTEXITCODE -eq 0 -and -not ($_rockePin -match '{therock_ref}')) {{",
-        f"  Write-Warning '[rocke] CI pin changed since this venv was built; re-run: {rerun}'",
-        "}",
-        "Remove-Variable _rockePin -ErrorAction SilentlyContinue",
-    ]
+    (Path(libs["site"]) / PTH).write_text(f"import os; {sets}\n", encoding="utf-8")
     scripts = venv / ("Scripts" if IS_WINDOWS else "bin")
-    _write_hook(scripts / "activate", bash)
+    _write_hook(scripts / "activate", _bash_hook(env, checkout, therock_ref))
     if (scripts / "Activate.ps1").is_file():
-        _write_hook(scripts / "Activate.ps1", ps)
+        _write_hook(scripts / "Activate.ps1", _ps_hook(env, checkout, therock_ref))
     return env
 
 
+def _rerun_command() -> str:
+    """This exact interpreter and script: a different Python is a different venv."""
+    return f"{shlex.quote(sys.executable)} {shlex.quote(str(SCRIPT))}"
+
+
+def _bash_hook(env: dict[str, str], checkout: Path, therock_ref: str) -> list[str]:
+    """Export the pin, restore the previous values on ``deactivate``, and warn
+    when the checkout's committed CI pin has moved on."""
+    show = f"git -C {shlex.quote(str(checkout))} show HEAD:{CI_ENV}"
+    return [
+        'if [ -z "${_ROCKE_SAVED-}" ]; then',
+        "    _ROCKE_SAVED=1",
+        '    _ROCKE_HAD_COMGR="${ROCKE_COMGR_LIB+1}"; _ROCKE_OLD_COMGR="${ROCKE_COMGR_LIB-}"',
+        '    _ROCKE_HAD_HIP="${ROCKE_HIP_LIB+1}"; _ROCKE_OLD_HIP="${ROCKE_HIP_LIB-}"',
+        "fi",
+        *(f"export {k}={shlex.quote(v)}" for k, v in env.items()),
+        "eval \"$(declare -f deactivate | sed '1s/^deactivate/_rocke_venv_deactivate/')\"",
+        "deactivate () {",
+        '    _rocke_venv_deactivate "$@"',
+        '    if [ -n "${_ROCKE_SAVED-}" ]; then',
+        '        if [ -n "$_ROCKE_HAD_COMGR" ]; then export ROCKE_COMGR_LIB="$_ROCKE_OLD_COMGR"; else unset ROCKE_COMGR_LIB; fi',
+        '        if [ -n "$_ROCKE_HAD_HIP" ]; then export ROCKE_HIP_LIB="$_ROCKE_OLD_HIP"; else unset ROCKE_HIP_LIB; fi',
+        "        unset _ROCKE_SAVED _ROCKE_HAD_COMGR _ROCKE_OLD_COMGR _ROCKE_HAD_HIP _ROCKE_OLD_HIP",
+        "    fi",
+        '    if [ "${1-}" != nondestructive ]; then unset -f _rocke_venv_deactivate; fi',
+        "}",
+        f'if _rocke_pin=$({show} 2>/dev/null) && ! printf %s "$_rocke_pin" | grep -q {therock_ref}; then',
+        f'    echo "[rocke] CI pin changed since this venv was built; re-run: {_rerun_command()}" >&2',
+        "fi",
+        "unset _rocke_pin",
+    ]
+
+
+def _ps_hook(env: dict[str, str], checkout: Path, therock_ref: str) -> list[str]:
+    """PowerShell twin of :func:`_bash_hook`."""
+
+    def q(text: str) -> str:
+        return "'" + text.replace("'", "''") + "'"
+
+    rerun = f"& {q(sys.executable)} {q(str(SCRIPT))}"
+    return [
+        "if (-not (Test-Path variable:global:_ROCKE_SAVED)) {",
+        "    $global:_ROCKE_SAVED = $true",
+        "    $global:_ROCKE_OLD_COMGR = $env:ROCKE_COMGR_LIB",
+        "    $global:_ROCKE_OLD_HIP = $env:ROCKE_HIP_LIB",
+        "}",
+        *(f"$env:{k} = {q(v)}" for k, v in env.items()),
+        "${function:global:_rocke_venv_deactivate} = ${function:deactivate}",
+        "function global:deactivate([switch] $NonDestructive) {",
+        "    _rocke_venv_deactivate -NonDestructive:$NonDestructive",
+        "    if (Test-Path variable:global:_ROCKE_SAVED) {",
+        "        $env:ROCKE_COMGR_LIB = $global:_ROCKE_OLD_COMGR",
+        "        $env:ROCKE_HIP_LIB = $global:_ROCKE_OLD_HIP",
+        "        Remove-Variable -Scope Global _ROCKE_SAVED, _ROCKE_OLD_COMGR, _ROCKE_OLD_HIP",
+        "    }",
+        "    if (-not $NonDestructive) {",
+        "        Remove-Item function:_rocke_venv_deactivate -ErrorAction SilentlyContinue",
+        "    }",
+        "}",
+        f"$_rockePin = git -C {q(str(checkout))} show HEAD:{CI_ENV} 2>$null",
+        f"if ($LASTEXITCODE -eq 0 -and -not ($_rockePin -match '{therock_ref}')) {{",
+        f"    Write-Warning {q('[rocke] CI pin changed since this venv was built; re-run: ' + rerun)}",
+        "}",
+        "Remove-Variable _rockePin -ErrorAction SilentlyContinue",
+    ]
+
+
 def _write_hook(script: Path, lines: list[str]) -> None:
-    """(Re)place the setup block in an activate script, before any signature block."""
+    """(Re)place the setup block in an activate script, before any signature block.
+
+    Re-running leaves the script byte-identical to the first run.
+    """
     text = script.read_text(encoding="utf-8")
     text = re.sub(
-        rf"\n?{re.escape(HOOK_BEGIN)}.*?{re.escape(HOOK_END)}\n",
+        rf"{re.escape(HOOK_BEGIN)}.*?{re.escape(HOOK_END)}\n",
         "",
         text,
         flags=re.DOTALL,
@@ -764,18 +855,14 @@ def setup() -> Path:
         save_cache(cache_path, cache)
     log(f"CI pin: TheRock {therock_ref[:8]} -> LLVM {llvm[:8]}; GPU arch {arch}")
 
-    group = VENV_ROOT / f"{arch}-llvm-{llvm[:8]}"
+    group = VENV_ROOT / venv_group(arch, llvm)
     base = group / "base"
-    tag = hashlib.sha1(str(checkout.resolve()).encode()).hexdigest()[:6]
-    venv = group / f"{checkout.name}-{tag}"
+    venv = group / checkout_venv_name(checkout)
     with file_lock(VENV_ROOT / f".{group.name}.lock"):
-        stamp = read_stamp(base)
+        stamp = claim_venv(base)
         if stamp is not None:
             log(f"reusing {base} (nightly {stamp['nightly']}, torch {stamp['torch']})")
         else:
-            if base.exists():
-                log(f"removing incomplete venv {base}")
-                shutil.rmtree(base)
             res = resolve_nightly(therock_ref, llvm, arch, cache)
             save_cache(cache_path, cache)
             log(
@@ -784,9 +871,7 @@ def setup() -> Path:
             install_base(base, res)
             stamp = {**asdict(res), "schema": STAMP_SCHEMA}
             write_stamp(base, stamp)
-        if read_stamp(venv) is None:
-            if venv.exists():
-                shutil.rmtree(venv)
+        if claim_venv(venv) is None:
             make_overlay(venv, base)
         env = pin_runtime(venv, checkout, therock_ref)
         # Stamp before verifying: the install is complete either way, and a
@@ -802,18 +887,50 @@ def setup() -> Path:
     return venv
 
 
-def read_stamp(venv: Path) -> dict | None:
-    """The completion stamp of ``venv`` if it is complete and usable here, else None."""
+def venv_group(arch: str, llvm: str) -> str:
+    """Directory shared by every venv for one GPU arch, CI LLVM and Python.
+
+    The Python is part of the key: wheels are per Python version, so a run
+    under another interpreter gets its own venvs instead of an existing one.
+    """
+    # Short on purpose: without Windows long paths every wheel file must fit
+    # under <root>/<group>/base/Lib/site-packages in 259 characters.
+    return f"{arch}-{llvm[:8]}-{python_tag()}"
+
+
+def checkout_venv_name(checkout: Path) -> str:
+    """Per-checkout venv name: readable directory name plus a path hash."""
+    tag = hashlib.sha1(str(checkout.resolve()).encode()).hexdigest()[:6]
+    return f"{checkout.name}-{tag}"
+
+
+def claim_venv(venv: Path) -> dict | None:
+    """The stamp of a complete ``venv`` to reuse, or None when it must be built.
+
+    Only a venv without a stamp (an install that never finished) is removed. A
+    stamped venv that this run cannot use is never deleted: other checkouts and
+    running jobs may depend on it.
+    """
     try:
         stamp = json.loads((venv / STAMP).read_text(encoding="utf-8"))
-    except (OSError, ValueError):
+    except FileNotFoundError:
+        if venv.exists():
+            log(f"removing unfinished venv {venv}")
+            shutil.rmtree(venv)
         return None
-    usable = (
+    except (OSError, ValueError) as exc:
+        raise SetupError(f"cannot read {venv / STAMP}: {exc}") from exc
+    if (
         stamp.get("schema") == STAMP_SCHEMA
         and stamp.get("python") == python_tag()
         and venv_python(venv).is_file()
+    ):
+        return stamp
+    raise SetupError(
+        f"{venv} was built by another setup (stamp {stamp.get('schema')}, Python "
+        f"{stamp.get('python')}) and is not usable from {sys.executable}; it is left "
+        "in place. Remove it yourself if nothing uses it."
     )
-    return stamp if usable else None
 
 
 def write_stamp(venv: Path, stamp: dict) -> None:

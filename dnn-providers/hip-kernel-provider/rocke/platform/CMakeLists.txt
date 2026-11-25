@@ -530,6 +530,15 @@ if(ROCKE_INSTALL_TESTS)
       message(STATUS
               "rocKE: top-level run_checks.py not found; skipping its test-only install")
     endif()
+    # Same for the CI-matched venv setup script and its unit tests.
+    set(_ROCKE_SETUP_DEV_ENV "${CMAKE_CURRENT_SOURCE_DIR}/../tools/setup_dev_env.py")
+    if(EXISTS "${_ROCKE_SETUP_DEV_ENV}")
+      install(FILES "${_ROCKE_SETUP_DEV_ENV}"
+              DESTINATION "${ROCKE_TEST_INSTALL_DIR}/tests/tools")
+    else()
+      message(STATUS
+              "rocKE: top-level setup_dev_env.py not found; skipping its test-only install")
+    endif()
 
     # Test-only implementation shared by the installed support-policy units and
     # arch-domain reproduction gate. Keep it outside the production package:
