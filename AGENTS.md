@@ -80,6 +80,7 @@ All under [`projects/hipdnn/tools/ai/skills/`](projects/hipdnn/tools/ai/skills/)
 | `hipdnn-ingestor-impact` | Checking whether a kernel ingestor change breaks kernel ABI or dispatch at run time while the build stays green, without a full review. |
 | `hipdnn-uhd` | Taking a hipDNN engine through the UHD heuristic lifecycle on the local GPU: generating, training, judging, validating, installing, and triaging heuristics and their training data. |
 | `hipdnn-deep-review` | Reviewing a hipDNN or provider change in depth with parallel agents until its findings close. Its `IMPACT` lane runs the `hipdnn-ingestor-impact` scripts. |
+| `hipdnn-aiter-asm-sdpa-fwd-sync` | Updating the ASM SDPA engine's forward and backward kernels from an AITER release for the GPU archs and directions you choose: tiered plan, apply with generated provenance, engine follow-up and validation. ASM kernels only, never CK. |
 | `hipdnn-codegen` (at [`projects/hipdnn/tools/DescriptorGenerator/.claude/skills/`](projects/hipdnn/tools/DescriptorGenerator/.claude/skills/hipdnn-codegen/SKILL.md)) | Generating operation boilerplate from a YAML config. |
 | `rfc-review` | Reviewing a technical RFC across the structured perspectives. Follow-ups: `rfc-review-compatibility`, `rfc-review-ops`, `rfc-review-security`. |
 | `rfc-backlog` | Turning an RFC into a backlog of Jira stories and tasks. |
@@ -113,6 +114,7 @@ All under [`projects/hipdnn/tools/ai/skills/`](projects/hipdnn/tools/ai/skills/)
 | Skill | Path | Use it when |
 | --- | --- | --- |
 | `worktree-venv` | [`skills/worktree-venv/`](skills/worktree-venv/SKILL.md) | Giving each git worktree its own Python venv for a rocm-libraries package. |
+| `split-to-stack` | [`skills/split-to-stack/`](skills/split-to-stack/SKILL.md) | Splitting an oversized branch, a range of stacked branches, or a whole stack into a linear stack of single-purpose, reviewable branches (plan first; local only unless publishing is requested). |
 
 ## Component entry points
 

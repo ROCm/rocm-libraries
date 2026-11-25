@@ -124,11 +124,11 @@ using float16 = half_float::half;
     TEST_P(GPU_unaryTensorOps_##TEST_TYPE, TestTensorSet) { RunSet(); };                         \
                                                                                                  \
     INSTANTIATE_TEST_SUITE_P(                                                                    \
-        Smoke,                                                                                   \
+        Quick,                                                                                   \
         GPU_unaryTensorOps_##TEST_TYPE,                                                          \
         testing::Combine(testing::Values(std::vector<size_t>{32, 8, 10}), testing::Values(7)));  \
                                                                                                  \
-    INSTANTIATE_TEST_SUITE_P(Full,                                                               \
+    INSTANTIATE_TEST_SUITE_P(Standard,                                                           \
                              GPU_unaryTensorOps_##TEST_TYPE,                                     \
                              testing::Combine(testing::ValuesIn(get_sub_tensor<size_t>()),       \
                                               testing::ValuesIn(get_tensor_offset())));

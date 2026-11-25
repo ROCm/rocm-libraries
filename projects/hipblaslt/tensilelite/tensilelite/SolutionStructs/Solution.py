@@ -46,6 +46,7 @@ from ..Common.DataType import DataType
 from ..Common.ScaleAlphaVec import scaleAlphaSupportsDeviceScalar, scaleAlphaVectorMode
 from ..Common.LdsPaddingLimits import B128_PAD_STEP_BYTES, LDS_PAD_STEP_BYTES, \
                                        ldsBlockError, ldsPadError
+from ..Common.LdsReadPlan import effective_lrvw_tile, fp32_lds_read_bytes
 from ..Components.DecouplePGR import pgrLevelsForTensors, ldsBlocksForPgrLevel, \
                                        dcpLdsSide, \
                                        decoupledOneBlockBoth, decouplePGRBlocks, \
@@ -56,9 +57,10 @@ from ..Components.DecouplePGR import pgrLevelsForTensors, ldsBlocksForPgrLevel, 
                                        pgrAutoPairRequested, \
                                        resolvePrefetchGlobalReadSpecialValues
 from ..Components.TDMFuse import TDM_FUSE_GROUPING, TDM_SCALE_TENSORS, tdmBothTensors, \
-                                       tdmGroupingName, tdmKDimTrackable, tdmLiveScales, \
+                                       tdmGroupingName, tdmKDimStepsInElements, tdmKDimTrackable, tdmLiveScales, \
                                        tdmPairOnEveryWave, \
-                                       tdmPapRejectReason, tdmWavePartition, tdmWaveSeparated
+                                       tdmPapRejectReason, tdmSeparateABDescriptors, tdmWavePartition, \
+                                       tdmWaveSeparated
 from ..Common.TypeValidationErrors import ConfigTypeError
 from ..CustomKernels import isCustomKernelConfig, supportsUserSgprKernargPreload, validateCustomPersistentArgs
 from ..SolutionStructs.LdsPadding import get_fp4_mt_config, get_fp8_mt_config, get_mxs_mt_config, \
@@ -69,7 +71,7 @@ from ..SolutionStructs.LdsPadding import get_fp4_mt_config, get_fp8_mt_config, g
 from ..Common.GlobalParameters import defaultSolution, \
                                             defaultInternalSupportParams, \
                                             globalParameters
-from ..Common.MxScaleLayout import mxFreePhase, mxFreeTile, mxLdsAlign, mxLdsNumBytes, mxTdmTileM
+from ..Common.MxScaleLayout import mxFreePhase, mxFreeTile, mxLdsAlign, mxLdsNumBytes, mxReadVectorWidth, mxTdmTileM
 from ..Common.ValidParameters import validParameters, \
                                             _getExpectedTypes, \
                                             _expectedParamTypes, \
@@ -95,7 +97,7 @@ from .Utilities import TDM_PAD_INTERVAL_LIMIT, isSubtileIterateMode, reject, rou
 from .Validators.MXScaleFormat import validateHostPreSwizzle128x4, validateMXScaleFormatCombination
 from .Validators.Subtile import (subtileStackForTLU1, subtileTLU1StackReason,
                                  validateSubtileGRKPartition)
-from ..Common.Utilities import isMxf4SubtilePath, isSubtileSwizzledTensor, plsinDataTypes, swizzleTensorMaxDepthU
+from ..Common.Utilities import isMxf4SubtilePath, isSubtileSwizzledTensor, plsinDataTypes, swizzleTensorMaxDepthU, SWIZZLE_BLOCK_ROWS
 
 
 def _oneSidedMX(state):
@@ -1490,6 +1492,13 @@ class Solution(collections.abc.Mapping):
     if isgfx950 and (state["ProblemType"]["MXBlockA"] or state["ProblemType"]["MXBlockB"]) and not state["UseSubtileImpl"]:
         reject(state, printRejectionReason, "gfx950 MX requires UseSubtileImpl")
 
+    # The subtile swizzle (K stride = the pre-shuffled block stride, swizzleGeometry layoutK) is validated on
+    # gfx950 only; gfx1250 swizzles go through the swizzled-TDM path (UseSubtileImpl=0, K stride 64 B). The
+    # client pads the K of a swizzled F4 by UseSubtileImpl alone, so do not leave this combination open.
+    if isgfx1250 and state["UseSubtileImpl"] \
+        and (state["ProblemType"]["SwizzleTensorA"] or state["ProblemType"]["SwizzleTensorB"]):
+        reject(state, printRejectionReason, "SwizzleTensor with UseSubtileImpl is validated on gfx950 only")
+
     if state["UseSubtileImpl"]:
       state["VectorWidthA"] = 1
       state["VectorWidthB"] = 1
@@ -2215,6 +2224,20 @@ class Solution(collections.abc.Mapping):
     return divisorName
 
   @staticmethod
+  def _declaredCustomKernelOccupancy(state: dict) -> int:
+    """The CUOccupancy a custom kernel's logic entry declares, else -1.
+
+    Custom kernels skip code generation, so their occupancy comes from the logic
+    file (or, for gfx9, from the resources of their .s; see
+    KernelWriterAssembly.getSourceFileString). Generated kernels always derive
+    theirs: -1 here, set by the kernel writer.
+    """
+    occ = state.get("CUOccupancy", -1)
+    if isCustomKernelConfig(state) and isinstance(occ, int) and not isinstance(occ, bool) and occ > 0:
+      return occ
+    return -1
+
+  @staticmethod
   def _assignCustomKernelParameters(state: dict) -> None:
     """Minimal parameter setup for handwritten custom kernels.
 
@@ -2293,7 +2316,7 @@ class Solution(collections.abc.Mapping):
       state["_GlobalAccumulation"] = 'MultipleBuffer'
     elif state.get("GlobalSplitUAlgorithm", "") == 'MultipleBufferSingleKernel':
       state["_GlobalAccumulation"] = 'MultipleBufferSingleKernel'
-    state["CUOccupancy"]            = -1
+    state["CUOccupancy"]            = Solution._declaredCustomKernelOccupancy(state)
     state["MathClocksUnrolledLoop"] = 0
     state["PackedC0IndicesX"] = []
     state["ThreadTile0"] = 0
@@ -2570,7 +2593,7 @@ class Solution(collections.abc.Mapping):
 
 
     # initial info to be exported for solution prediction
-    state["CUOccupancy"]            = -1
+    state["CUOccupancy"]            = Solution._declaredCustomKernelOccupancy(state)
     state["MathClocksUnrolledLoop"] = 0
 
     # Pin PrefetchGlobalReadA/B before later rules read the scalar loop depth.
@@ -3781,6 +3804,11 @@ class Solution(collections.abc.Mapping):
         reject(state, printRejectionReason, "MIWaveTile0(%u) should be multiple of VectorWidthB(%u)" % (state["MIWaveTile"][1], state["VectorWidthB"]))
         return
 
+      # A full-wave vector already stays in one M half. Keep its original path,
+      # including any later TDM width fallback.
+      if state.get("WaveTileContiguousA") and state["VectorWidthA"] == state["MIWaveTile"][0]:
+        state["WaveTileContiguousA"] = False
+
     if len(problemType["IndicesSummation"]) > 1:
       # not supported with multiple summations, bug is maybe something with
       # how stagger iteration is wrapped when unroll loop exits
@@ -3976,11 +4004,11 @@ class Solution(collections.abc.Mapping):
       if numWaves > 1 and (numWaves & (numWaves - 1)) != 0:
         reject(state, printRejectionReason, f"Wave-separated TDM requires NumWaves={numWaves} to be a power of two")
         return
-      if state["1LDSBuffer"] == -1:
-        state["1LDSBuffer"] = 0
-      if state["1LDSBuffer"] and state["PrefetchGlobalRead"] == 2:
-        reject(state, printRejectionReason, "TDM requires at least 2 LDS buffers for PGR2")
-        return
+
+    # TDM needs at least 2 LDS buffers, so auto (-1) resolves to 0 here.
+    # An explicit or forced 1LDSBuffer=1 is rejected once its value is final.
+    if (state["enableTDMA"] or state["enableTDMB"]) and state["1LDSBuffer"] == -1:
+      state["1LDSBuffer"] = 0
 
     # TDMLoadWaveSync needs the StinkyTofu backend (ScheduleIterAlg=4); reject
     # otherwise. It only matters with TDM in flight and >1 wave; else turn it off.
@@ -4371,17 +4399,13 @@ class Solution(collections.abc.Mapping):
 
     # StinkyTofu expert scheduling mode2 (EnableStinkyTofuESM2) — independent of the rocisa ExpertSchedulingMode rules.
     def evaluateStinkyTofuESM2() -> bool:
-      if not isaInfoMap[isa].archCaps["HasSchedMode"]: return False
-      # stinkytofu does not yet support f64 (double / double-complex) datatypes
-      if state["ProblemType"]["MacDataTypeA"].isDouble() or state["ProblemType"]["MacDataTypeA"].isDoubleComplex(): return False
-      if state["ProblemType"]["MacDataTypeB"].isDouble() or state["ProblemType"]["MacDataTypeB"].isDoubleComplex(): return False
-      if state["ProblemType"]["ComputeDataType"].isDouble() or state["ProblemType"]["ComputeDataType"].isDoubleComplex(): return False
-      return True
+      # Currently on for every data type.
+      return bool(isaInfoMap[isa].archCaps["HasSchedMode"])
 
     # Let WMMAs issue back to back (SCHED_MODE DISABLE_XDL_ARB_STALL).
-    # Skipped for sparse and for persistent (StreamK or DataParallel) kernels.
+    # Skipped for sparse kernels.
     def evaluateDisableXdlArbStall() -> bool:
-      return not state["ProblemType"]["Sparse"] and not isPersistent(state)
+      return not state["ProblemType"]["Sparse"]
 
     # Track VALU source operands on VA_VDST (src-operand WAR hazard).
     def evaluateEnableESM2TrackValuVsrc() -> bool:
@@ -4421,6 +4445,49 @@ class Solution(collections.abc.Mapping):
     if (state["enableLDSTrA"] or state["enableLDSTrB"]) and (not state["1LDSBuffer"] and state["ExpandPointerSwap"]):
       reject(state, printRejectionReason, "Current LDSTrInst implementation does not support 1LDSBuffer=0")
       return
+
+    # TDM requires 1LDSBuffer=0. With a single LDS buffer, the next tile's tensor
+    # loads would write the only buffer while other waves are still reading it.
+    if (state["enableTDMA"] or state["enableTDMB"]) and state["1LDSBuffer"]:
+      reject(state, printRejectionReason, "1LDSBuffer must be 0 for TDM")
+      return
+
+    # Tail folding (fixed at codegen): every kernel whose structure allows it folds a K tail into the
+    # unroll loop -- ceil(K/DepthU) unroll iterations, TDM zero-fills the partial last k-tile -- and
+    # emits no tail loop (NoTailLoop), the way RAP folds (RAP sets its own _TailFolding above). Any
+    # other kernel keeps the tail loop -- this never rejects a kernel. MX scales, sparse metadata and
+    # packed sub-byte types (F4/F6, whose TDM K dim does not step in elements) keep the tail loop.
+    # The K dim step is derived from the TDM address increment (KernelWriterAssembly.tailFoldStepShift),
+    # so A and B must also keep K contiguous at unit stride, unmirrored and unswizzled, with one
+    # power-of-2 element size, and the increments must stay in SGPRs (BufferLoad).
+    if not state["ReuseAcrossPersistent"]:
+      state.pop("_TailFolding", None)
+      du = state["DepthU"]
+      pt = state["ProblemType"]
+      elemBytes = {pt["DataType%s" % tc].numBytes() for tc in ("A", "B")}
+      unsupported = (
+        state["NoTailLoop"]                                        # no K tail to fold
+        or not (state["enableTDMA"] and state["enableTDMB"])       # the K dim lives in the TDM descriptor
+        or state["PrefetchGlobalRead"] not in (1, 2)
+        # PGR1 without a NoLoadLoop and without HalfPLR's TDM disable loads one k-tile past K
+        or (state["SuppressNoLoadLoop"] and not state["HalfPLR"])
+        or isPersistent(state)                                     # DataParallel / StreamK tiles start mid-K
+        or du & (du - 1) != 0
+        or not tdmWaveSeparated(state) or tdmSeparateABDescriptors(state) or tdmPairOnEveryWave(state, "A", "B")
+        or not tdmKDimTrackable(state, allowIterate=True)          # TDMIterateMode walks dim1, K stays in dim0
+        or not tdmKDimStepsInElements(state, allowIterate=True)    # packed sub-byte F4/F6
+        or state["ProblemType"]["MXBlockA"] or state["ProblemType"]["MXBlockB"] or state["ProblemType"]["Sparse"]
+        or state.get("TDMSplit", 0) or state["DirectToVgprA"] or state["DirectToVgprB"]
+        or state.get("UseSubtileImpl", False)
+        or not state["BufferLoad"]                                 # global read increments in VGPRs
+        or pt["SwizzleTensorA"] or pt["SwizzleTensorB"]
+        or pt["UseInitialStridesAB"]                               # runtime (non-unit) K stride
+        or any(pt["IndexAssignments%s" % tc][0] != pt["IndexUnroll"] or pt["IndexUnroll"] in pt["MirrorDims%s" % tc]
+               for tc in ("A", "B"))
+        or len(elemBytes) != 1 or next(iter(elemBytes)) not in (1, 2, 4, 8, 16))
+      if not unsupported:
+        state["_TailFolding"] = True
+        state["NoTailLoop"] = True
 
   @staticmethod
   def rapMaxResidentKTiles(state, problemType, isa, isaInfoMap, packedC0, packedC1):
@@ -4667,11 +4734,20 @@ class Solution(collections.abc.Mapping):
       iterModeMask = state["TDMIterateMode"]
       autoTdmIterateMode = iterModeMask == -1
       if state["TDMInst"] and state["EnableMatrixInstruction"]:
+        contiguousA = state.get("WaveTileContiguousA", False)
+        if contiguousA:
+          # A uses row padding through pad_interval; only B may iterate.
+          state.pop("_TDMIterateModeA", None)
+          if iterModeMask != -1:
+            iterModeMask &= ~1
+            state["TDMIterateMode"] = iterModeMask
         # Stage 1: decide iterate-mode per tensor.
         if iterModeMask == -1:
           state.pop("_TDMIterateModeA", None)
           state.pop("_TDMIterateModeB", None)
           for tc in ["A", "B"]:
+            if tc == "A" and contiguousA:
+              continue
             if not state["UnrollMajorLDS%s" % tc]:
               continue
             vw = state["VectorWidth%s" % tc]
@@ -4708,6 +4784,8 @@ class Solution(collections.abc.Mapping):
         # fits the pad_interval 1024 B limit.
         multiple = 256
         for tc in ["A", "B"]:
+          if tc == "A" and contiguousA:
+            continue
           if state.get("_TDMIterateMode%s" % tc, False):
             continue
           if not state.get("_inputVW%s_was_auto" % tc, False):
@@ -4762,6 +4840,18 @@ class Solution(collections.abc.Mapping):
 
       def getLdsBpe(tc: str) -> float:
         return state["ProblemType"]["DataType%s"%tc].numBytes() if state["ConvertAfterDS"] else state["ProblemType"]["MacDataType%s"%tc].numBytes()
+
+      def fp32LrvwTile(tc: str) -> int:
+        return effective_lrvw_tile(
+            vectorWidth=state[f"VectorWidth{tc}"],
+            unrollMajorLDS=state[f"UnrollMajorLDS{tc}"],
+            macDataTypeBytes=state["ProblemType"][f"MacDataType{tc}"].numBytes(),
+            enableMatrixInstruction=state["EnableMatrixInstruction"],
+            miInputPerThread=state["MIInputPerThread" if tc == "A" else "MIInputPerThreadB"],
+            useF32XEmulation=state["UseF32XEmulation"],
+            useMFMAF32XEmulation=state["UseMFMAF32XEmulation"],
+            useCustomMainLoopSchedule=state["UseCustomMainLoopSchedule"],
+            hasWMMAV3=wmmaV3)
 
       def tdmTileMajorComponentLayout(tc: str, mt: int) -> Tuple[int, int]:
         """Raw equal-component layout used by wave-separated TDM."""
@@ -4880,13 +4970,14 @@ class Solution(collections.abc.Mapping):
                 elif macDtype.numBytes() == 4 and tdm:
                   ldsPad = get_fp32_mt_config(mt, "pad",
                               vw, state[f"LocalReadVectorWidth{tc}"], miwg,
-                              miInputPerThread=state["MIInputPerThread"],
+                              miInputPerThread=state[f"MIInputPerThread{tc}"],
                               miWaveTile=miwt,
                               matrixInstK=state["MatrixInstK"],
                               usesTDM=tdm,
                               xf32EmuPack=state.get("UseF32XEmulation", False),
                               tdmComponentBytes=tdmComponentBytes,
-                              tdmNumComponents=tdmNumComponents)
+                              tdmNumComponents=tdmNumComponents,
+                              lrvwTile=fp32LrvwTile(tc))
               if state[f"DirectToLds{tc}"]:
                 # TODO: Check if there are cases which benefit from padding, currently set to zero by default
                 ldsPad = state["MatrixInstM"] if ldstr else 0
@@ -4975,9 +5066,10 @@ class Solution(collections.abc.Mapping):
           if not state["ProblemType"][f"MXBlock{sub}"]:
             return 0
           if wmmaV3:
+            vectorWidth = mxReadVectorWidth(state, tc) if state.get("WaveTileContiguousA") and tc == "MXSA" else state[f"VectorWidth{sub}"]
             return get_mxs_mt_config(state["MatrixInstK"],
                                       state["ProblemType"][f"MXBlock{sub}"],
-                                      state[f"VectorWidth{sub}"], "pad")
+                                      vectorWidth, "pad")
           return 0
 
         ldsPadMXSA = calcLdsPadPerMxOperand("MXSA")
@@ -5028,9 +5120,12 @@ class Solution(collections.abc.Mapping):
             if val == 0: continue
             err = ldsBlockError(val)
             if err:
+              hint = ("WaveTileContiguousA disables A iterate; reduce DepthU or disable WaveTileContiguousA."
+                      if tc == "A" and state.get("WaveTileContiguousA")
+                      else "Set TDMIterateMode or reduce DepthU / VectorWidth.")
               reject(state, printRejectionReason,
                      f"LdsBlockSizePerPad{tc}={val}: {err} for the TDM pad_interval "
-                     f"field. Set TDMIterateMode or reduce DepthU / VectorWidth.")
+                     f"field. {hint}")
               return
 
       def calcMXSLdsBlockSizePerPad(tc: str, lrvw: int) -> int:
@@ -5042,8 +5137,9 @@ class Solution(collections.abc.Mapping):
           mxBlock = state["ProblemType"]["MXBlock%s"%subTc]
           if not mxBlock:
             return 0
+          vectorWidth = mxReadVectorWidth(state, tc) if state.get("WaveTileContiguousA") and tc == "MXSA" else state["VectorWidth%s"%subTc]
           return get_mxs_mt_config(state["MatrixInstK"], mxBlock,
-                                   state["VectorWidth%s"%subTc], "perBlock")
+                                   vectorWidth, "perBlock")
         return 0
 
       def calcMetadataLdsBlockSizePerPad() -> int:
@@ -5080,6 +5176,23 @@ class Solution(collections.abc.Mapping):
                                                           state.get("enableTDMMetadata", False))
         if state["DirectToLdsMetadata"]:
           LdsBlockSizePerPad = 0
+        # Wave-separated TDM restarts the LDS pad interval at each wave's piece of the
+        # metadata tile, so a piece must not straddle a pad-block boundary (a piece that
+        # starts mid-block but ends within it is fine, e.g. a whole tile under one block).
+        # Auto (-1) shrinks the block to gcd(block, piece); a manual value is rejected.
+        if LdsBlockSizePerPad and state["UnrollMajorLDSMetadata"] and state["TDMInst"] \
+            and tdmWaveSeparated(state):
+          numComp = tdmWavePartition(state, "Metadata")[0]
+          if numComp > 1:
+            pieceBytes = (state["MacroTileMetadata"] // numComp) * int(state["_DepthUMetadata"])
+            if any(start % LdsBlockSizePerPad and start % LdsBlockSizePerPad + pieceBytes > LdsBlockSizePerPad
+                   for start in range(pieceBytes, pieceBytes * numComp, pieceBytes)):
+              if state["LdsBlockSizePerPadMetadata"] == -1:
+                LdsBlockSizePerPad = math.gcd(LdsBlockSizePerPad, pieceBytes)
+              else:
+                reject(state, printRejectionReason,
+                       f"LdsBlockSizePerPadMetadata={LdsBlockSizePerPad} splits "
+                       f"TDM metadata piece {pieceBytes}B")
         return int(LdsBlockSizePerPad)
 
       def calcLdsBlockSizePerPad(tc: str, lrvw: int) -> int:
@@ -5094,9 +5207,10 @@ class Solution(collections.abc.Mapping):
         if LdsBlockSizePerPad == -1:
           if state["EnableMatrixInstruction"] and tmpBpe != 0.75:
             if state["UnrollMajorLDS%s"%tc]:
+              rowStride = 1 if tc == "A" and state.get("WaveTileContiguousA") else state["VectorWidth%s"%tc]
               LdsBlockSizePerPad = roundUpToNearestMultiple(int(state["_DepthU%s"%tc] * tmpBpe), multiple)
-              if state["_DepthU%s"%tc] * tmpBpe * state["VectorWidth%s"%tc] > multiple:
-                LdsBlockSizePerPad = roundUpToNearestMultiple(int(state["_DepthU%s"%tc] * tmpBpe * state["VectorWidth%s"%tc]), multiple)
+              if state["_DepthU%s"%tc] * tmpBpe * rowStride > multiple:
+                LdsBlockSizePerPad = roundUpToNearestMultiple(int(state["_DepthU%s"%tc] * tmpBpe * rowStride), multiple)
             else:
               if state["MatrixInstB"] == 1 and state["MatrixInstM"] == 16:
                 LdsBlockSizePerPad = int(mt * tmpBpe * lrvw)
@@ -5129,15 +5243,18 @@ class Solution(collections.abc.Mapping):
                                             tdmNumComponents=tdmNumComponents)
                   # Same rule as the pad above.
                   elif tmpBpe == 4 and state.get(f"enableTDM{tc}", False):
+                    if state[f"LdsPad{tc}"] == 0:
+                      return 0
                     LdsBlockSizePerPad = get_fp32_mt_config(mt, "perBlock",
                                             state[f"VectorWidth{tc}"], lrvw, miwg,
-                                            miInputPerThread=state["MIInputPerThread"],
+                                            miInputPerThread=state[f"MIInputPerThread{tc}"],
                                             miWaveTile=miwt,
                                             matrixInstK=state["MatrixInstK"],
                                             usesTDM=True,
                                             xf32EmuPack=state.get("UseF32XEmulation", False),
                                             tdmComponentBytes=tdmComponentBytes,
-                                            tdmNumComponents=tdmNumComponents)
+                                            tdmNumComponents=tdmNumComponents,
+                                            lrvwTile=fp32LrvwTile(tc))
               else:
                 LdsBlockSizePerPad = 0
           else:
@@ -5501,6 +5618,48 @@ class Solution(collections.abc.Mapping):
 
       genGRVWA = False
       genGRVWB = False
+      # gfx1250 TDM swizzle (SwizzleTensor{A,B} + TDM + WMMA_V3): the operand is pre-swizzled in
+      # global memory and DMA'd to LDS by TDM, then read compactly by ds_load_b128. It uses the
+      # normal (non-swizzle) GRVW/read derivation and does NOT require DirectToVgpr, so it is
+      # excluded from the DTV-swizzle special width, consistency reject, and DTV gate below. The
+      # gfx942 DTV swizzle path (no TDM) is unaffected.
+      hasWmmaV3     = isaInfoMap[isa].asmCaps["HasWMMA_V3"]
+      swizzleAIsTDM = state["ProblemType"]["SwizzleTensorA"] and bool(state["TDMInst"] & 0x01) and hasWmmaV3
+      swizzleBIsTDM = state["ProblemType"]["SwizzleTensorB"] and bool(state["TDMInst"] & 0x02) and hasWmmaV3
+      # The swizzled-TDM read packs one 16-byte ds_load_b128 per lane-half (innerK = 16 / bpe), and the
+      # host swizzle and kernel geometry are built and validated for F4 (as packed bytes) and 1-/2-byte
+      # elements (F8/BF8, I8, F16, BF16). F6 (0.75B) does not fit the 16-byte K block.
+      for tc, swizzleTcIsTDM in (("A", swizzleAIsTDM), ("B", swizzleBIsTDM)):
+        if swizzleTcIsTDM and not state.get("UseSubtileImpl"):
+          bpeTc = state["ProblemType"][f"DataType{tc}"].numBytes()
+          if bpeTc not in (0.5, 1, 2):
+            reject(state, printRejectionReason, f"SwizzleTensor{tc} with TDM supports F4 and 1-/2-byte data types only (got {bpeTc} bytes)")
+            return
+          # The host swizzle (client DataInitialization and the hipBLASLt user layout) blocks 16 free-dim rows
+          # per nO tile. A taller WMMA operand (32x16x128 = two stacked 16x16x128: MatrixInstM for A,
+          # MatrixInstN for B, which SourceSwap makes the 32-row one) reads two consecutive nO tiles. The
+          # stacked read is implemented without LDSSegmentInterleave (see segment_interleave).
+          miRows = state["MatrixInstM"] if tc == "A" else state["MatrixInstN"]
+          if miRows not in (SWIZZLE_BLOCK_ROWS, 2 * SWIZZLE_BLOCK_ROWS):
+            reject(state, printRejectionReason, f"SwizzleTensor{tc} with TDM requires a {SWIZZLE_BLOCK_ROWS}- or {2 * SWIZZLE_BLOCK_ROWS}-row WMMA {'M' if tc == 'A' else 'N'} (got {miRows})")
+            return
+          # StreamK starts a workgroup mid-tile in K at StreamKLocalStart * GlobalReadIncs; the swizzled-TDM
+          # GlobalReadIncs already carry the MI-row factor (GSU.graIncrements), so no extra scaling is needed.
+          # The swizzled read and host swizzle assume both operands are K-major (TN). Other layouts are
+          # also caught by the generic TDM TileMajor rule today; reject here so that does not stay implicit.
+          if not (state["ProblemType"]["TransposeA"] and not state["ProblemType"]["TransposeB"]):
+            reject(state, printRejectionReason, f"SwizzleTensor{tc} with TDM supports TN only")
+            return
+          # LocalSplitU splits K across wave groups; the swizzled per-wave LDS read offsets do not
+          # account for it (validates wrong, while the same non-swizzled kernel passes).
+          if state["LocalSplitU"] > 1:
+            reject(state, printRejectionReason, f"SwizzleTensor{tc} with TDM does not support LocalSplitU>1 (got {state['LocalSplitU']})")
+            return
+          # Sparse metadata/compressed-K handling is not threaded through the swizzled layout
+          # (validates wrong, while the same non-swizzled kernel passes).
+          if state["ProblemType"]["Sparse"]:
+            reject(state, printRejectionReason, f"SwizzleTensor{tc} with TDM does not support Sparse")
+            return
       # Default GlobalReadVectorWidthA
       if state["EnableMatrixInstruction"]:
         if state["GlobalReadVectorWidthA"] < 0:
@@ -5511,7 +5670,7 @@ class Solution(collections.abc.Mapping):
             else:
               reject(state, printRejectionReason, "GRVWA=-2 is set for skinny MT")
           elif state["GlobalReadVectorWidthA"] == -1:
-            if state["ProblemType"]["SwizzleTensorA"]:
+            if state["ProblemType"]["SwizzleTensorA"] and not swizzleAIsTDM:
               state["GlobalReadVectorWidthA"] = swizzleGeometry(state, "A")["laneSize"]
             elif state["ProblemType"]["DataTypeA"].is6bitFloat():
               state["GlobalReadVectorWidthA"] = 32	  
@@ -5558,7 +5717,7 @@ class Solution(collections.abc.Mapping):
             else:
               reject(state, printRejectionReason, "GRVWB=-2 is set for skinny MT")
           elif state["GlobalReadVectorWidthB"] == -1:
-            if state["ProblemType"]["SwizzleTensorB"]:
+            if state["ProblemType"]["SwizzleTensorB"] and not swizzleBIsTDM:
               state["GlobalReadVectorWidthB"] = swizzleGeometry(state, "B")["laneSize"]
             elif state["ProblemType"]["DataTypeB"].is6bitFloat():
               state["GlobalReadVectorWidthB"] = 32
@@ -5619,7 +5778,8 @@ class Solution(collections.abc.Mapping):
 
       # One lane reads exactly one swizzle row per load, so GRVW is pinned to the lane size.
       for tc in ("A", "B",):
-        if state["ProblemType"][f"SwizzleTensor{tc}"]:
+        swizzleTcIsTDM = swizzleAIsTDM if tc == "A" else swizzleBIsTDM
+        if state["ProblemType"][f"SwizzleTensor{tc}"] and not swizzleTcIsTDM:
           if not state["EnableMatrixInstruction"]:
             reject(state, printRejectionReason, f"Tensor {tc} swizzling supports MI only")
             continue
@@ -5634,20 +5794,87 @@ class Solution(collections.abc.Mapping):
           if GRVW_TC != laneSize:
             reject(state, printRejectionReason, f"SwizzleTensor{tc} doesn't support GRVW{tc} ({GRVW_TC}) != swizzle lane size ({laneSize})")
 
+      # The rejects below guard the gfx1250 swizzled-TDM path only. The gfx942 DirectToVgpr swizzle
+      # path (no TDM) keeps the rules it had before the TDM path existed: a LibraryLogic carries
+      # swizzle-A kernels with VectorWidthA > 1 there, which must stay valid, and its rejects do not
+      # return early, so one derivation still reports every violated rule (characterization tests
+      # pin that multiset). The TDM-only rejects return at once.
       if state["ProblemType"]["SwizzleTensorA"]:
-        # The subtile global-read emitter walks the swizzled A layout itself, so it
-        # does not need A staged through DirectToVgpr the way the classic path does.
+        # The subtile path has its own layout rules; these guard the DTV and swizzled-TDM paths.
         if not state["UseSubtileImpl"]:
-          if not state["DirectToVgprA"]:
+          # VW>1 swizzle-A hits the same VWA-way LDS bank conflict as swizzle-B with VWB>1 (mOStride =
+          # MI_M*DepthU is a multiple of the 256B bank cycle). Break it the same way: a 16B pad per
+          # mO-tile, deposited through TDM iterate-mode. VW==1 stays unpadded and byte-identical.
+          bpeA = state["ProblemType"]["DataTypeA"].numBytes()                # 0.5 for F4 (packed bytes)
+          mOStrideBytes = int(SWIZZLE_BLOCK_ROWS * state["_DepthUA"] * bpeA)  # per-mO LDS tile size
+          if swizzleAIsTDM and state["VectorWidthA"] > 1:
+            state["LdsBlockSizePerPadA"] = mOStrideBytes
+            state["LdsPadA"] = int(16 / bpeA)                                  # 16B = 4-bank shift (ds_load b128 width), in elements
+            assert state["LdsPadA"] * bpeA == 16, "swizzled-TDM A pad must be 16 bytes"
+            if mOStrideBytes > TDM_PAD_INTERVAL_LIMIT:                         # pad_interval covers a smaller block
+              state["_TDMIterateModeA"] = True
+              state["TDMIterateMode"] = state["TDMIterateMode"] | 1            # kernel naming (bit0 = A)
+          elif swizzleAIsTDM:
+            # Swizzle reads from a contiguous, unpadded LDS layout at fixed offsets; any LDS pad shifts
+            # the data out from under those offsets. And the swizzle builds its own TDM descriptor.
+            # An automatic (-1) pad therefore resolves to none; only an explicit pad is rejected.
+            for padParam in ("LdsPadA", "LdsBlockSizePerPadA"):
+              if state[padParam] == -1:
+                state[padParam] = 0
+            if state["LdsPadA"] != 0 or state["LdsBlockSizePerPadA"] != 0:
+              reject(state, printRejectionReason, f"SwizzleTensorA requires LdsPadA==0 and LdsBlockSizePerPadA==0 (got {state['LdsPadA']}, {state['LdsBlockSizePerPadA']})")
+              return
+            if state.get("_TDMIterateModeA", False):
+              reject(state, printRejectionReason, "SwizzleTensorA is incompatible with TDMIterateMode (A); swizzle uses its own TDM descriptor")
+              return
+          # The subtile global-read emitter walks the swizzled A layout itself, so it
+          # does not need A staged through DirectToVgpr the way the classic path does.
+          # gfx1250 swizzled-TDM stages A through LDS via tensor_load_to_lds instead.
+          if not state["DirectToVgprA"] and not swizzleAIsTDM:
             reject(state, printRejectionReason, f"Tensor A swizzling requires DirectToVgprA")
         if not state["ProblemType"]["TransposeA"]:
           reject(state, printRejectionReason, f"Tensor A swizzling supports TN or TT only")
 
       if state["ProblemType"]["SwizzleTensorB"]:
-        # The subtile global-read emitter walks the swizzled B layout itself, so it
-        # does not need B staged through DirectToVgpr the way the classic path does.
+        # The subtile path has its own layout rules; these guard the DTV and swizzled-TDM paths.
         if not state["UseSubtileImpl"]:
-          if not state["DirectToVgprB"]:
+          # VectorWidthB>1 is supported: _localReadSwizzledTDM + lraTileAssignmentSwizzledTDM decompose the
+          # VW-strided N into (nO,nI) so the swizzled read produces the VW-interleaved register layout the
+          # WMMA/acc expect (which also lets the MXSB scale loads widen via the tileSpan). VWB must still
+          # divide MIWaveTile[1] (enforced by the generic VW checks).
+          # VW>1 swizzle-B hits a VWB-way LDS bank conflict: nOStride = MI_N*DepthU is a multiple of
+          # the 256B/64-bank cycle, so a lane crossing into nO+1 aliases the nO lanes' banks. Break it
+          # with a 16B (4-bank) pad per nO-tile. The single-descriptor pad_interval field caps at a
+          # 1024B block, too small for the 4096B nO-tile, so apply the pad via TDM iterate-mode, which
+          # supplies it through the per-iteration LDS write stride (lds_inc = LdsBlockSizePerPad +
+          # LdsPad*bpe) and works for any block size. VW==1 stays unpadded (already conflict-free) and
+          # byte-identical to before. See initTDMDescriptor / _localReadSwizzledTDM for the read match.
+          bpeB = state["ProblemType"]["DataTypeB"].numBytes()                # 0.5 for F4 (packed bytes)
+          nOStrideBytes = int(SWIZZLE_BLOCK_ROWS * state["_DepthUB"] * bpeB)  # per-nO LDS tile size
+          if swizzleBIsTDM and state["VectorWidthB"] > 1:
+            state["LdsBlockSizePerPadB"] = nOStrideBytes
+            state["LdsPadB"] = int(16 / bpeB)                                  # 16B = 4-bank shift (ds_load b128 width), in elements
+            assert state["LdsPadB"] * bpeB == 16, "swizzled-TDM B pad must be 16 bytes"
+            if nOStrideBytes > TDM_PAD_INTERVAL_LIMIT:                         # pad_interval covers a smaller block
+              state["_TDMIterateModeB"] = True
+              state["TDMIterateMode"] = state["TDMIterateMode"] | 2            # kernel naming (bit1 = B)
+          elif swizzleBIsTDM:
+            # Swizzle reads from a contiguous, unpadded LDS layout at fixed offsets; any LDS pad shifts
+            # the data out from under those offsets. And the swizzle builds its own TDM descriptor.
+            # An automatic (-1) pad therefore resolves to none; only an explicit pad is rejected.
+            for padParam in ("LdsPadB", "LdsBlockSizePerPadB"):
+              if state[padParam] == -1:
+                state[padParam] = 0
+            if state["LdsPadB"] != 0 or state["LdsBlockSizePerPadB"] != 0:
+              reject(state, printRejectionReason, f"SwizzleTensorB requires LdsPadB==0 and LdsBlockSizePerPadB==0 (got {state['LdsPadB']}, {state['LdsBlockSizePerPadB']})")
+              return
+            if state.get("_TDMIterateModeB", False):
+              reject(state, printRejectionReason, "SwizzleTensorB is incompatible with TDMIterateMode (B); swizzle uses its own TDM descriptor")
+              return
+          # The subtile global-read emitter walks the swizzled B layout itself, so it
+          # does not need B staged through DirectToVgpr the way the classic path does.
+          # gfx1250 swizzled-TDM stages B through LDS via tensor_load_to_lds instead.
+          if not state["DirectToVgprB"] and not swizzleBIsTDM:
             reject(state, printRejectionReason, f"Tensor B swizzling requires DirectToVgprB")
         if state["ProblemType"]["TransposeB"]:
           reject(state, printRejectionReason, f"Tensor B swizzling supports TN or NN only")
@@ -5974,7 +6201,10 @@ class Solution(collections.abc.Mapping):
 
     # Default GlobalStoreVectorWidth
     if state["StoreVectorWidth"] == -1:
-      if state["SourceSwap"]:
+      if state.get("WaveTileContiguousA") and state["EnableMatrixInstruction"]:
+        # Wider stores would need results from another lane.
+        state["StoreVectorWidth"] = 1 if state["SourceSwap"] else state["MIOutputVectorWidth"]
+      elif state["SourceSwap"]:
         state["StoreVectorWidth"] = state["VectorWidthA"]
       else:
         if state["EnableMatrixInstruction"]:
@@ -5995,6 +6225,14 @@ class Solution(collections.abc.Mapping):
       # own its free0 elements in pairs. The divisibility check below turns an
       # incompatible VectorWidthA into a rejection.
       state["StoreVectorWidth"] = max(state["StoreVectorWidth"], 2)
+
+    if state.get("WaveTileContiguousA") and state["EnableMatrixInstruction"]:
+      nativeStoreWidth = 1 if state["SourceSwap"] else state["MIOutputVectorWidth"]
+      if state["StoreVectorWidth"] > nativeStoreWidth:
+        reject(state, printRejectionReason,
+               "WaveTileContiguousA requires StoreVectorWidth <= %u for direct stores; requested %u"
+               % (nativeStoreWidth, state["StoreVectorWidth"]))
+        return
 
     if state["EnableMatrixInstruction"] and not state["UseSubtileImpl"]:
       if state["SourceSwap"]:
@@ -6783,10 +7021,11 @@ class Solution(collections.abc.Mapping):
       if dtype.numBytes() == 4 and tdm:
         return get_fp32_valid_blocks(mt, state["VectorWidth%s"%tc],
                                      state["LocalReadVectorWidth%s"%tc], miwg,
-                                     state["MIInputPerThread"], miwt, k, tdm,
+                                     state[f"MIInputPerThread{tc}"], miwt, k, tdm,
                                      state.get("UseF32XEmulation", False),
                                      tdmComponentBytes=tdmComponentBytes,
-                                     tdmNumComponents=tdmNumComponents)
+                                     tdmNumComponents=tdmNumComponents,
+                                     lrvwTile=fp32LrvwTile(tc))
       return None
 
     def solverPadStepBytes(tc):
@@ -6798,6 +7037,8 @@ class Solution(collections.abc.Mapping):
       """
       if ldsBpe(tc) == 2 and state.get("enableLDSTr%s"%tc, False):
         return B128_PAD_STEP_BYTES
+      if ldsBpe(tc) == 4 and state.get("enableTDM%s"%tc, False):
+        return max(LDS_PAD_STEP_BYTES, fp32_lds_read_bytes(fp32LrvwTile(tc)))
       return LDS_PAD_STEP_BYTES
 
     # A and B only: metadata has a formula of its own, and calcLdsPad already
@@ -6864,6 +7105,13 @@ class Solution(collections.abc.Mapping):
     # Subtile builds its descriptors elsewhere, so it is not described by this.
     for tc, freeIdx in (("A", 0), ("B", 1)):
       if state["UseSubtileImpl"] or not state.get("_TDMIterateMode%s" % tc, False):
+        continue
+      # A swizzled-TDM operand iterates one MI-row tile at a time (see _emitSwizzleTdmIterateInit),
+      # not tile_dim1 DepthU rows, and the host pads its free dimension to whole MI rows, so this
+      # free-size multiple does not apply.
+      if (state["ProblemType"]["SwizzleTensor%s" % tc]
+          and bool(state["TDMInst"] & (0x01 if tc == "A" else 0x02))
+          and isaInfoMap[isa].asmCaps["HasWMMA_V3"]):
         continue
       # tile_dim1 as the descriptor carries it: rows of DepthU input elements.
       bytesPerRow = int(round(state["DepthU"] * state["ProblemType"]["DataType%s" % tc].numBytes()))
@@ -7135,7 +7383,8 @@ class Solution(collections.abc.Mapping):
       offsetBlk = state["LdsOffsetB"] + ldsNumBytesAlignedB
       # Aligned interleave grows the per-buffer block; keep it only if it still double-buffers
       # within MaxLDS, else disable (a too-tight forced kernel is rejected below, not run baseline).
-      if _segAligned:
+      # Contiguous A uses the paired-buffer budget checked below.
+      if _segAligned and not state.get("WaveTileContiguousA"):
         _ok, _inflated = segAlignedBudget(_segRes["blockSpan"], numLdsBlk, offsetBlk, state["MaxLDS"])
         if _ok:
           offsetBlk = _inflated   # already a power of two -> roundup below is a no-op
@@ -7289,7 +7538,7 @@ class Solution(collections.abc.Mapping):
     # Tight layouts pair each component's ping/pong buffers when supported. Persistent
     # kernels retain their existing unpaired interleave if pairing is unavailable;
     # those that cannot afford the swap-mask SGPRs skip the attempt entirely.
-    if state["LDSSegmentInterleave"] == 1 and not state["TDMSplit"] and not _segAligned \
+    if state["LDSSegmentInterleave"] == 1 and not state["TDMSplit"] and (not _segAligned or state.get("WaveTileContiguousA")) \
         and not (isPersistent(state) and segPersistentKeepsUnpaired(state)):
       _pairedReason = None if state["LDSSegmentBRotate"] else segPairedReason(state)
       if _pairedReason is None:
@@ -7310,6 +7559,14 @@ class Solution(collections.abc.Mapping):
         # Non-persistent auto mode disables interleave when pairing fails. Persistent
         # kernels keep the unpaired interleave offsets, swaps and byte count above.
         state["LDSSegmentInterleave"] = 0
+    # Contiguous A skips the aligned unpaired buffer-stride reservation above.
+    # Reject both a failed pairing attempt and persistent paths that skip it.
+    if state.get("WaveTileContiguousA") and state["LDSSegmentInterleave"] == 1 \
+        and not state["LDSSegInterleaveOffsets"].get("pairedBuffers"):
+      reject(state, printRejectionReason,
+             "WaveTileContiguousA with LDSSegmentInterleave requires paired LDS buffers; "
+             "unpaired fallback is not supported")
+      return
     if state["LDSSegmentInterleave"] == 0 and not state["TDMSplit"]:
       state["LDSSegInterleaveOffsets"] = {}
 
@@ -7645,6 +7902,39 @@ class Solution(collections.abc.Mapping):
       ldsAmaxDBytes = 4 * (num_workItems // half_wave_size) * amaxBPE
       ldsNumBytes += ldsAmaxDBytes
 
+    if state.get("WaveTileContiguousA"):
+      pt = state["ProblemType"]
+      supported = (tuple(state["ISA"]) == (12, 5, 0)
+                   and (state["MatrixInstM"], state["MatrixInstN"]) in
+                       ((16, 16), (16, 32) if state["SourceSwap"] else (32, 16))
+                   and state["MatrixInstBM"] == state["MatrixInstBN"] == 1
+                   and state["WavefrontSize"] == 32 and state["MIWaveGroup"] == [2, 2]
+                   and state["MIArchVgpr"] and state["LocalSplitU"] == 1
+                   and state["TDMInst"] == 3 and not state["TDMSplit"] and not state.get("TDMFuse")
+                   and state["UnrollMajorLDSA"] and state["UnrollMajorLDSB"]
+                   and not state["LDSTrInst"] and not pt["Sparse"]
+                   and not state["StoreRemapVectorWidth"]
+                   and not state.get("UseSubtileImpl"))
+      if pt.get("MXBlockA"):
+        width = mxReadVectorWidth(state, "MXSA")
+        # LRA and DS immediates apply padding separately; their phases must agree.
+        scaleBlock = state["LdsBlockSizePerPadMXSA"]
+        if scaleBlock and state["LdsPadMXSA"]:
+          matrixDim = state["MatrixInstM"]
+          scaleTile = matrixDim * (state["MatrixInstK"] // pt["MXBlockA"])
+          vectors = state["MIWaveTile"][0] // width
+          tileSpan = matrixDim == state["WavefrontSize"] // 2 and vectors >= 2 and vectors % 2 == 0
+          groupTiles = width * (2 if tileSpan else 1)
+          supported &= (scaleTile > 0 and (scaleTile % scaleBlock == 0 or scaleBlock % scaleTile == 0)
+                        and scaleTile * groupTiles % scaleBlock == 0
+                        and scaleTile * state["MIWaveTile"][0] % scaleBlock == 0)
+        supported &= (state["MXScaleFormat"] == "InMemorySwizzle"
+                      and pt.get("MXBlockFreeA", 1) == 1
+                      and not state.get("DirectToVgprMXSA"))
+      if not supported:
+        reject(state, printRejectionReason, "WaveTileContiguousA: unsupported read/store layout or padding phase")
+        return
+
     state["LdsNumBytes"] = ldsNumBytes
     ldsSize = ldsNumBytes
     if ldsSize > state["MaxLDS"]:
@@ -7722,7 +8012,7 @@ class Solution(collections.abc.Mapping):
       # Multiple = WLR-size / input-size = how many iters could be covered by one WLR ?
       wlrMultiple = state["LocalReadVectorWidthA"]//state["MIInputPerThreadA"]
       # NOTE: wlrmultiple can be 0 for new MFMA
-      if not state["ProblemType"]["Sparse"] and not state["UseF32XEmulation"] and not(state["ProblemType"]["DataType"].is8bitFloat() and (state["MatrixInstK"] in [64, 128,])) and (not isaInfoMap[isa].asmCaps["HasWMMA_V3"]):
+      if not state["ProblemType"]["Sparse"] and not state["UseF32XEmulation"] and not((state["ProblemType"]["DataType"].is8bitFloat() or state["ProblemType"]["DataTypeA"].is8bitFloat()) and (state["MatrixInstK"] in [64, 128,])) and (not isaInfoMap[isa].asmCaps["HasWMMA_V3"]):
         if wlrMultiple == 0:
           reject(state, printRejectionReason, "LocalReadVectorWidthA %u is less than MIInputA" % (state["LocalReadVectorWidthA"]))
           return
@@ -7741,7 +8031,7 @@ class Solution(collections.abc.Mapping):
       # Multiple = WLR-size / input-size = how many iters could be covered by one WLR ?
       wlrMultiple = state["LocalReadVectorWidthB"]//state["MIInputPerThreadB"]
       # NOTE: wlrmultiple can be 0 for new MFMA
-      if not state["ProblemType"]["Sparse"] and not state["UseF32XEmulation"] and not(state["ProblemType"]["DataType"].is8bitFloat() and (state["MatrixInstK"] in [64, 128,])) and (not isaInfoMap[isa].asmCaps["HasWMMA_V3"]):
+      if not state["ProblemType"]["Sparse"] and not state["UseF32XEmulation"] and not((state["ProblemType"]["DataType"].is8bitFloat() or state["ProblemType"]["DataTypeB"].is8bitFloat()) and (state["MatrixInstK"] in [64, 128,])) and (not isaInfoMap[isa].asmCaps["HasWMMA_V3"]):
         if wlrMultiple == 0:
           reject(state, printRejectionReason, "LocalReadVectorWidthB %u is less than MIInputB" % (state["LocalReadVectorWidthB"]))
           return

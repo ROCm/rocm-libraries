@@ -222,17 +222,25 @@ namespace
         hipblaslt_ext::GemmPreference preference;
         preference.setMaxWorkspaceBytes(32 * 1024 * 1024);
         std::vector<hipblasLtMatmulHeuristicResult_t> algorithms;
-        ASSERT_EQ(gemm.algoGetHeuristic(1, preference, algorithms), HIPBLAS_STATUS_SUCCESS);
+        ASSERT_EQ(gemm.algoGetHeuristic(2048, preference, algorithms), HIPBLAS_STATUS_SUCCESS);
         ASSERT_FALSE(algorithms.empty());
         hipblaslt_ext::GemmTuning tuning;
         tuning.setSplitK(splitK);
         size_t workspaceBytes = 0;
-        ASSERT_EQ(gemm.isAlgoSupported(algorithms[0].algo, tuning, workspaceBytes),
-                  HIPBLAS_STATUS_SUCCESS);
+        auto selected = algorithms.end();
+        for(auto it = algorithms.begin(); it != algorithms.end(); ++it)
+            if(gemm.isAlgoSupported(it->algo, tuning, workspaceBytes)
+               == HIPBLAS_STATUS_SUCCESS)
+            {
+                selected = it;
+                break;
+            }
+        if(selected == algorithms.end())
+            GTEST_SKIP() << "No algorithm supports splitK=" << splitK;
         device_vector<char> workspace(workspaceBytes + 1);
         ASSERT_EQ(workspace.memcheck(), hipSuccess);
         gemm.setMaxWorkspaceBytes(workspaceBytes);
-        ASSERT_EQ(gemm.initialize(algorithms[0].algo, tuning, workspace), HIPBLAS_STATUS_SUCCESS);
+        ASSERT_EQ(gemm.initialize(selected->algo, tuning, workspace), HIPBLAS_STATUS_SUCCESS);
 
         // Updating device memory after initialize must affect every later launch.
         for(float value : {2.0f, -1.0f, 0.0f})

@@ -706,19 +706,10 @@ def get_docker_options(){
     // collide when several jobs share a node. Bridge networking gives each job its own
     // loopback, and everything we talk to (redis/sccache, registries, github) is outbound.
     if ( params.BUILD_INSTANCES_ONLY ){
-        dockerOpts = "--group-add video --group-add render --cap-add=SYS_PTRACE --security-opt seccomp=unconfined"
+        dockerOpts = "--group-add video --group-add render --cap-add=SYS_PTRACE --security-opt seccomp=unconfined --env HIP_PLATFORM=amd "
     }
     else{ //only add kfd and dri paths if you actually going to run somthing on GPUs
         dockerOpts = "--device=/dev/kfd --device=/dev/dri --group-add video --group-add render --cap-add=SYS_PTRACE --security-opt seccomp=unconfined"
-    }
-    // Dockerfile.compiler builds /llvm-project only for develop/amd-staging. Every other image,
-    // including TheRock and a COMPILER_COMMIT on another version, keeps the installed ROCm clang.
-    def sourceCompiler = params.COMPILER_VERSION == "develop" || params.COMPILER_VERSION == "amd-staging"
-    if (sourceCompiler || params.COMPILER_VERSION == "therock" || params.COMPILER_COMMIT != ""){
-        def hipClangPath = sourceCompiler ? "/llvm-project/build/bin" : "/opt/rocm/llvm/bin"
-    // the  --env COMPRESSED_BUNDLE_FORMAT_VERSION=2 env variable is required when building code with offload-compress flag with
-    // newer clang22 compilers and running with older hip runtima libraries
-        dockerOpts = dockerOpts + " --env HIP_CLANG_PATH='${hipClangPath}' --env COMPRESSED_BUNDLE_FORMAT_VERSION=2 --env HIP_PLATFORM=amd "
     }
     // on some machines the group ids for video and render groups may not be the same as in the docker image!
     def video_id = sh(returnStdout: true, script: 'getent group video | cut -d: -f3')
@@ -1019,7 +1010,7 @@ def cmake_build(Map conf=[:]){
                     if(params.BUILD_PACKAGES || params.BUILD_INSTANCES_ONLY){
                         echo "Build ckProfiler packages"
                         sh 'ninja -j64 package'
-                        sh "mv composablekernel-ckprofiler_*.deb composablekernel-ckprofiler_1.3.0_amd64_${arch_name}.deb"
+                        sh "mv composablekernel-ckprofiler_*.deb composablekernel-ckprofiler_1.4.0_amd64_${arch_name}.deb"
                         stash includes: "composablekernel-ckprofiler**.deb", name: "profiler_package_${arch_name}"
                     }
                 }
@@ -1354,11 +1345,11 @@ def getPytorchTestsCmds() {
         "cd pytorch && USE_ROCM_CK_SDPA=1 PYTORCH_ROCM_ARCH=gfx942 python3 setup.py develop"
     ]
 }
-def getAiterTestsCmds() {
-    return [
+def getAiterTestsCmds(String arch = "") {
+    def cmds = [
         // Pre-compile FlyDSL MoE AOT cache before the tests.
-        "cd /home/jenkins/workspace/aiter && AITER_AOT_IMPORT=1 HIP_VISIBLE_DEVICES=-1 python3 aiter/aot/flydsl/moe.py",
-        "cd /home/jenkins/workspace/aiter && AITER_AOT_IMPORT=1 HIP_VISIBLE_DEVICES=-1 python3 aiter/aot/flydsl/mxfp4_moe.py",
+        "cd /home/jenkins/workspace/aiter && AITER_AOT_IMPORT=1 HIP_VISIBLE_DEVICES=-1 GPU_ARCHS=${arch} python3 aiter/aot/flydsl/moe.py",
+        "cd /home/jenkins/workspace/aiter && AITER_AOT_IMPORT=1 HIP_VISIBLE_DEVICES=-1 GPU_ARCHS=${arch} python3 aiter/aot/flydsl/mxfp4_moe.py",
         "python3 /home/jenkins/workspace/aiter/op_tests/test_gemm_a8w8.py",
         "python3 /home/jenkins/workspace/aiter/op_tests/test_gemm_a8w8_blockscale.py",
         "python3 /home/jenkins/workspace/aiter/op_tests/test_mha.py",
@@ -1369,9 +1360,13 @@ def getAiterTestsCmds() {
         "python3 /home/jenkins/workspace/aiter/op_tests/test_moe_blockscale.py",
         "python3 /home/jenkins/workspace/aiter/op_tests/test_moe_ep.py",
         "python3 /home/jenkins/workspace/aiter/op_tests/test_moe_sorting.py",
-        "python3 /home/jenkins/workspace/aiter/op_tests/test_moe_sorting_mxfp4.py",
         "python3 /home/jenkins/workspace/aiter/op_tests/test_moe_tkw1.py"
     ]
+    // test_moe_sorting_mxfp4.py requires gfx950 and must not run on gfx942
+    if (arch != "gfx942") {
+        cmds << "python3 /home/jenkins/workspace/aiter/op_tests/test_moe_sorting_mxfp4.py"
+    }
+    return cmds
 }
 def getFaTestsCmds() {
     return [
@@ -1731,10 +1726,12 @@ def runDispatcherPerfTests(String compiler, String gpuTarget = "gfx942") {
     def quantDatatype  = "fp8"
     def quantLayout    = "rcr"
     // Stream-K below is tile_engine/ops/gemm_streamk/ (top level), not
-    // tile_engine/ops/gemm/gemm_streamk/. Two paths exist and only the first is
-    // real: it holds the CMakeLists, the instance builder and the benchmark. The
-    // nested one contains a lone configs/default_config.json that nothing in the
-    // tree reads. Edit the top-level tree.
+    // tile_engine/ops/gemm/gemm_streamk/. Two paths exist: the top-level tree is
+    // the native Tile Engine build this lane runs (CMakeLists, instance builder,
+    // benchmark). The nested one holds only configs/default_config.json, which is
+    // the default sweep of the Dispatcher bridge driver
+    // (tile_engine/ops/gemm/streamk_gemm_full_benchmark.py), not of this lane.
+    // Edit the top-level tree to change what this lane builds.
     def execute_cmd = _dispatcherPerfCmd(compiler, gpuTarget, samplingTier, gemmDatatype, gemmLayout, multiLayout, quantDatatype, quantLayout, problemSizes, problemConfigs, multiAbdConfigs, perOpInstances)
     try {
         buildAndTest(setup_args: "NO_CK_BUILD", build_type: 'Release', execute_cmd: execute_cmd)

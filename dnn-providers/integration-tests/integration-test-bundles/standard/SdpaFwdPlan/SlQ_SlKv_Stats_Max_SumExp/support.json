@@ -1,0 +1,112 @@
+{
+  "claims": {
+    "hipkernel:flydsl_sdpa_cdna": [
+      {
+        "cases": [
+          "bf16_13b453ddff25a24b",
+          "bf16_17e7f71fed31a4da",
+          "bf16_20c01892ad194539",
+          "bf16_20c3e11d1cb212cc",
+          "bf16_665d280cdeabb003",
+          "bf16_8b662c9bb786d663",
+          "bf16_92b441bbc7d9b3d8",
+          "bf16_b285a9ead9ec8850",
+          "bf16_b8522377b767b984",
+          "bf16_c068f1c65bb8aad5",
+          "bf16_cb104ae4c8a88d95",
+          "bf16_efbb98fc43cf73d6",
+          "bf16_f806aadc1c582138",
+          "fp16_893d9d3a665d4b9d",
+          "fp16_afaf0e7a76e72a12",
+          "fp16_d79ab1b9a168a7cf"
+        ],
+        "support": {
+          "gfx942": [
+            "linux"
+          ],
+          "gfx950": [
+            "linux"
+          ]
+        }
+      }
+    ],
+    "hipkernel:flydsl_sdpa_cdna_decode": [
+      {
+        "cases": [
+          "bf16_20c3e11d1cb212cc",
+          "bf16_8b662c9bb786d663",
+          "bf16_92b441bbc7d9b3d8",
+          "bf16_efbb98fc43cf73d6",
+          "fp16_893d9d3a665d4b9d",
+          "fp16_afaf0e7a76e72a12",
+          "fp16_d79ab1b9a168a7cf"
+        ],
+        "support": {
+          "gfx942": [
+            "linux"
+          ],
+          "gfx950": [
+            "linux"
+          ]
+        }
+      }
+    ],
+    "hipkernel:flydsl_sdpa_rdna": [
+      {
+        "cases": [
+          "bf16_1257c96df3f0ad7b",
+          "bf16_13b453ddff25a24b",
+          "bf16_17e7f71fed31a4da",
+          "bf16_20c01892ad194539",
+          "bf16_20c3e11d1cb212cc",
+          "bf16_665d280cdeabb003",
+          "bf16_8b662c9bb786d663",
+          "bf16_92b441bbc7d9b3d8",
+          "bf16_b285a9ead9ec8850",
+          "bf16_b8522377b767b984",
+          "bf16_c068f1c65bb8aad5",
+          "bf16_c46ff452fd49e873",
+          "bf16_cb104ae4c8a88d95",
+          "bf16_efbb98fc43cf73d6",
+          "bf16_f806aadc1c582138",
+          "fp16_893d9d3a665d4b9d",
+          "fp16_afaf0e7a76e72a12",
+          "fp16_d79ab1b9a168a7cf"
+        ],
+        "support": {
+          "gfx1151": [
+            "linux",
+            "windows"
+          ]
+        }
+      }
+    ],
+    "hipkernel:flydsl_sdpa_rdna_decode": [
+      {
+        "cases": [
+          "bf16_1257c96df3f0ad7b",
+          "bf16_13b453ddff25a24b",
+          "bf16_20c3e11d1cb212cc",
+          "bf16_8b662c9bb786d663",
+          "bf16_92b441bbc7d9b3d8",
+          "bf16_b285a9ead9ec8850",
+          "bf16_b8522377b767b984",
+          "bf16_c46ff452fd49e873",
+          "bf16_cb104ae4c8a88d95",
+          "bf16_efbb98fc43cf73d6",
+          "bf16_f806aadc1c582138",
+          "fp16_893d9d3a665d4b9d",
+          "fp16_afaf0e7a76e72a12",
+          "fp16_d79ab1b9a168a7cf"
+        ],
+        "support": {
+          "gfx1151": [
+            "linux",
+            "windows"
+          ]
+        }
+      }
+    ]
+  },
+  "version": 1
+}

@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What is RPP
 
-ROCm Performance Primitives — a tensor based vision operations library for images (2D), voxels (3D), and audio, with HOST (CPU/AVX2) and HIP (AMD GPU) backends. The library exposes a C API (`extern "C"`) with opaque handles. Current version: 3.2.0.
+ROCm Performance Primitives — a tensor based vision operations library for images (2D), voxels (3D), and audio, with HOST (CPU/AVX2) and HIP (AMD GPU) backends. The library exposes a C API (`extern "C"`) with opaque handles. Current version: 3.3.0.
 
 ## Build Commands
 
@@ -16,31 +16,25 @@ sudo make install
 
 # CPU-only backend
 cmake ../ -DBACKEND=CPU && make -j$(nproc)
-
-# With audio support (requires FFTS — configure fails if it is not found)
-cmake ../ -DRPP_AUDIO_SUPPORT=ON && make -j$(nproc)
 ```
 
-Key CMake options: `BACKEND=HIP|CPU`, `RPP_AUDIO_SUPPORT=ON`, `CODE_COVERAGE=ON`, `SIMD_ENABLE=1` (default 1), `BUILD_TESTING=ON` (CTest default; gates `utilities/test`), `GPU_TARGETS=gfx908;gfx90a;...` (`AMDGPU_TARGETS` is deprecated; when unset, CMakeLists uses a broad default arch list, so a targeted `GPU_TARGETS` dramatically cuts HIP build time).
+Key CMake options: `BACKEND=HIP|CPU`, `CODE_COVERAGE=ON`, `SIMD_ENABLE=1` (default 1), `BUILD_TESTING=ON` (CTest default; gates `utilities/test`), `GPU_TARGETS=gfx908;gfx90a;...` (`AMDGPU_TARGETS` is deprecated; when unset, CMakeLists uses a broad default arch list, so a targeted `GPU_TARGETS` dramatically cuts HIP build time).
 
 `cmake/CppCheck.cmake` defines an `enable_cppcheck()` macro but nothing invokes it — there is **no** `make cppcheck` target in the current build.
 
 RPP is also built as part of [TheRock](https://github.com/ROCm/TheRock) (`ninja -C build rpp+dist`), which is what produces the released packages. Downstream consumption is `find_package(rpp REQUIRED)` + `target_link_libraries(... rpp::rpp)`; `rpp::rpp` transitively propagates HIP includes/libs and `rpp/rpp.h` pulls in the generated `rpp_backend.h` that defines `RPP_BACKEND_HIP`.
 
-Audio support is driven entirely by the external **FFTS** library — there is no in-house FFT fallback today. `find_package(FFTS QUIET)` at `CMakeLists.txt:196`: on success it force-enables `RPP_AUDIO_SUPPORT`, defines `AUDIO_SUPPORT`, and links `FFTS::FFTS`; on failure an explicit `-DRPP_AUDIO_SUPPORT=ON` is a **hard error** (`CMakeLists.txt:203-204`), and a default configure simply drops audio. The CPU `spectrogram` kernel includes `<ffts/ffts.h>` and calls `ffts_init_1d_real()` / `ffts_init_1d()` directly, with no alternate code path. (A CPU in-house FFT and a rocFFT GPU path are proposed in PR #11496, still open as of 2026-11-09 — re-check this section if that lands.)
+Audio is always built; there is no audio CMake option. The CPU `spectrogram` uses the in-house FFT in `src/include/common/cpu/rpp_cpu_fft.hpp`. The HIP `spectrogram` uses rocFFT, loaded at runtime with `dlopen` (`src/modules/rocfft_dlopen/`), so rocFFT is not a build dependency and is only a soft package dependency. If `librocfft.so.0` cannot be loaded, the HIP spectrogram returns `RPP_ERROR_NOT_IMPLEMENTED`; every other function is unaffected.
 
 ## Running Tests
 
-Under `BUILD_TESTING` the top-level `CMakeLists.txt` adds two directories: `test/` (a pair of cheap, hermetic executables) and `utilities/test/` (the GoogleTest correctness suite). `utilities/test_suite/` is **not** added to the build — it is installed as data to `$ROCM_PATH/share/rpp/test/` and configured standalone from there.
-
-`test/` holds `test_rpp_backend_macro.cpp` (asserts `RPP_BACKEND_HIP` matches the configured `BACKEND`, a guard that regressed before) and `test_handle_lifecycle.cpp`, which interposes HIP symbols from the executable to fault-inject allocation failures — 5 cases on HOST (`rpp_handle_host_*`, `rpp_handle_null`), 10 on HIP, Linux only. Use these for quick sanity; they do not cover kernel correctness.
+Under `BUILD_TESTING` the top-level `CMakeLists.txt` adds `utilities/test/` (the GoogleTest suite). `utilities/test_suite/` is **not** added to the build — it is installed as data to `$ROCM_PATH/share/rpp/test/` and configured standalone from there.
 
 `utilities/test/` is the real correctness suite (`rpp_tests`): every op checked against an independent, host-computed reference model across datatypes, layouts, ROIs, and both backends.
 
 ```bash
 # In-tree, as part of the library build
 cmake ../ -DBUILD_TESTING=ON && make -j$(nproc)
-ctest -R rpp_handle_host_mismatch -VV        # the cheap test/ cases
 cd utilities/test && ctest -j8 --output-on-failure
 
 # Standalone, against an installed RPP
@@ -136,14 +130,13 @@ Consequence for review: any SIMD store that writes past its nominal width (e.g. 
 
 - `api/` — Public C API headers (installed to `$ROCM_PATH/include/rpp/`)
 - `src/modules/tensor/rppt_tensor_*.cpp` — 10 dispatch files (one per operation category), validate inputs then switch on backend + datatype
-- `src/modules/tensor/cpu/kernel/` — CPU kernel implementations (~90 files), heavy AVX2/SSE SIMD
-- `src/modules/tensor/hip/kernel/` — HIP kernel implementations (~87 `.cpp` files, not `.cu`)
+- `src/modules/tensor/cpu/kernel/` — CPU kernel implementations (~95 files), heavy AVX2/SSE SIMD
+- `src/modules/tensor/hip/kernel/` — HIP kernel implementations (~91 `.cpp` files, not `.cu`)
 - `src/include/common/cpu/` — CPU SIMD helpers (load/store, math, interpolation, RNG)
 - `src/include/common/hip/` — HIP device helpers (load/store, math, interpolation, ROI conversion, RNG)
 - `src/include/common/rppt_validate.hpp` — Shared dispatch-layer helpers: `get_layout_params()` (channel/stride params per layout), `check_roi_out_of_bounds()`
 - `src/include/tensor/host_tensor_executors.hpp` — Declares all HOST kernel function prototypes
 - `src/include/tensor/hip_tensor_executors.hpp` — Declares all HIP executor function prototypes
-- `test/` — Two hermetic in-tree executables (backend macro guard, handle lifecycle fault injection)
 - `utilities/test/` — GoogleTest correctness suite: `src/framework/` harness, `src/reference/` independent golden models (`<op>_ref.hpp`), `src/tests/{core,image,misc,voxel}/` the tests
 - `utilities/test_suite/` — Legacy QA suite with C++ test executables, Python runners, and golden reference outputs (installed as data, not built in-tree)
 

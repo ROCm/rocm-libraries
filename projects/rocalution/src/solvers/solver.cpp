@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -810,6 +810,7 @@ namespace rocalution
 
             if(steps < 1)
             {
+                x->Zeros();
                 return;
             }
 
@@ -843,6 +844,7 @@ namespace rocalution
         {
             if(this->iter_ctrl_.GetMaximumIterations() < 1)
             {
+                x->Zeros();
                 return;
             }
 
@@ -854,6 +856,7 @@ namespace rocalution
 
             if(this->iter_ctrl_.InitResidual(std::abs(res)) == false)
             {
+                x->Zeros();
                 log_debug(this, "FixedPoint::SolveZeroSol_()", " #*# end");
                 return;
             }

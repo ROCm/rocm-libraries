@@ -7,6 +7,7 @@ Full documentation for hipTensor is available at [rocm.docs.amd.com/projects/hip
 ### Added
 * Added support for the following new GPU targets:
   * gfx11-7: gfx1170, gfx1171.
+  * gfx12: gfx1251.
 * Added fp64 support to hiptensorPermute for ranks 2-6.
 * Added bf16 support to hiptensorPermute for ranks 2-6, with a bf16 or fp32 scalar type.
 * Added bf16 support to `hiptensorElementwiseTrinaryExecute` for ranks 2-6, with a bf16 or fp32 scalar type, and fp32 scalar support for fp16 tensors. Trinary now accepts the same data type combinations as `hiptensorElementwiseBinaryExecute`.
@@ -21,7 +22,18 @@ Full documentation for hipTensor is available at [rocm.docs.amd.com/projects/hip
 * Reduced build time by compiling library, test, and sample sources that define no GPU kernels for the host only, and by removing the unused CPU reference implementations from `libhiptensor.so`. They are now built only into the test suite's host reference library.
 
 ### Resolved issues
+* Fixed concurrent calls to `hiptensorContract`, `hiptensorContractTrinary`, `hiptensorPermute`, `hiptensorElementwiseBinaryExecute`, `hiptensorElementwiseTrinaryExecute`, and `hiptensorReduce` that select the same kernel crashing, returning another call's result, or returning `HIPTENSOR_STATUS_CK_ERROR`. Plan creation, workspace estimation, and plan cache autotuning are also now safe to call concurrently, and a plan can be executed by several threads at once.
+* Fixed `hiptensorContractTrinary` returning `HIPTENSOR_STATUS_INTERNAL_ERROR` on the first call of a plan created after the same problem was already in the plan cache.
+* Fixed `hiptensorContract` and the other execute functions searching every candidate kernel on each call when the plan cache already holds the plan's kernel.
+* Fixed `HIPTENSOR_AUTOTUNE_MODE_INCREMENTAL` caching the wrong kernel when calls on different problems of the same operation were interleaved. Autotuning counted calls and kept the fastest kernel per operation type, so timings from one problem could select the kernel cached for another. Autotuning is now tracked per problem and handle. A failed `hiptensorContract` or `hiptensorContractTrinary` call is no longer cached as the fastest kernel; autotuning skips the failed candidate and moves on to the next one. Calls that share a plan each run the candidate they were given, and a round caches its kernel only after all of its candidates finish.
+* Fixed `hiptensorPermute` ignoring alpha when a plan first executed with alpha equal to 1 was executed again with another alpha. The plan kept the copy-only kernel of its first call; a call that needs scaling now selects a kernel that scales.
+* Fixed `hiptensorReduce` reporting 0 TFlops/s and 0 GB/s in `HIPTENSOR_LOG_LEVEL_PERF_TRACE` logs.
+* Fixed `hiptensorDestroy` aborting with a double free, or corrupting the heap, after `hiptensorHandleWritePlanCacheToFile` was called on a handle whose plan cache held entries.
+* Fixed a full plan cache growing past its size limit when a new problem was added, and evicting its least recently used entry when an existing problem was updated instead. A new entry now evicts the least recently used one, and updating an existing entry evicts nothing.
 * Fixed `hiptensorElementwiseBinaryExecute` and `hiptensorReduce` treating the alpha, beta, and gamma scalars as 0 when the compute descriptor is `HIPTENSOR_COMPUTE_DESC_16BF`.
+* Fixed hipTensor terminating the application while the library was loading, before `main()`, when the current GPU was unsupported or a HIP device query failed. The device is now checked when `hiptensorCreate` is called on the calling thread's current device: it returns `HIPTENSOR_STATUS_ARCH_MISMATCH` for an unsupported GPU and `HIPTENSOR_STATUS_HIP_ERROR` when HIP initialization or the device query fails, and leaves the handle set to `nullptr`. The error log says whether the architecture or the warp size was rejected. `hiptensorCreate` returns `HIPTENSOR_STATUS_INVALID_VALUE` when `handle` is `nullptr`. hipTensor no longer calls `exit()` when a HIP call fails.
+* Fixed complex contractions reporting a device out-of-memory condition as an unsupported problem. `hiptensorCreatePlan` and `hiptensorContract` now return `HIPTENSOR_STATUS_ALLOC_FAILED` when the scratch buffers for the real and imaginary parts can't be allocated.
+* Fixed `hiptensorReduce`, `hiptensorPermute`, `hiptensorElementwiseBinaryExecute`, and `hiptensorElementwiseTrinaryExecute` launching kernels on the wrong GPU when the current device differs from the one the handle was created on. Like the contraction APIs, they now return `HIPTENSOR_STATUS_ARCH_MISMATCH` in that case.
 
 ## hipTensor 2.5.0 for ROCm 10.2
 
