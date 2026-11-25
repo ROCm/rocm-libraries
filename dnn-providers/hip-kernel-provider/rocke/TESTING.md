@@ -1076,11 +1076,13 @@ only:
   reference contracts (`rocke_reference_common_pytest`,
   `rocke_<operation>_reference_unit_pytest`);
 - the builder-surface contract, `rocke_contracts_pytest`;
-- the checks of the test registration itself, `rocke_entry_time_check` and
-  `rocke_pending_lanes_check` (build tree only).
+- the check of the test registration itself, `rocke_pending_lanes_check`
+  (build tree only).
 
 Sweeps, matrices, tuning-space walks, doc examples, tool and runner tests other
-than those two checks, and tests of an unshipped family belong in standard.
+than that check, and tests of an unshipped family belong in standard. The
+entry-time check, `rocke_entry_time_check`, takes seconds to list and collect
+every split entry, so it runs in standard too.
 Which contracts count as core for each family is part of the domain test
 strategy, which refines this list.
 State the reason for a quick addition in the pull request.
@@ -1230,7 +1232,7 @@ hip-kernel-provider test tiers, and no check holds them; change them here only.
 | S4 | rocKE's share of each standard shard | 420 s | Keeps rocKE and the rest of the provider under half of the 30-minute step. Checked for the slowest shard, not the average. |
 
 [`tools/check_entry_times.py`](tools/check_entry_times.py) enforces Q1 and S4
-(its `CI_TIERS` holds the same values), and the quick CTest entry
+(its `CI_TIERS` holds the same values), and the standard-tier CTest entry
 `rocke_entry_time_check` runs its `check`. It projects every shard from the
 times in `tools/entry_times.json` (recorded from CI logs, per operating system)
 and the live CTest registration. It places the cases of each split entry as CI

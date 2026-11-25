@@ -843,7 +843,7 @@ if(ROCKE_INSTALL_TESTS)
       string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
              "add_test(rocke_entry_time_check python \"${ROCKE_TEST_CTEST_REL}tests/tools/check_entry_times.py\" check --ctest-dir .)\n"
              "set_tests_properties(rocke_entry_time_check PROPERTIES\n"
-             "  LABELS \"ckc;python;host;quick\"\n"
+             "  LABELS \"ckc;python;host;standard\"\n"
              "  ENVIRONMENT \"PYTHONPATH=${_ROCKE_INSTALLED_PYTHONPATH}\"\n"
              "  TIMEOUT ${ROCKE_TEST_TIMEOUT_CPU})\n")
     endif()
