@@ -359,23 +359,16 @@ def _wfmt_source(
 def fwd_rr_format_weights_reference(
     w, C: int, kw16: int = 4, fw: int = 3, nwk: int = 2
 ):
-    """Host reference of the weight format: ``w`` is a KRSC array (numpy or
-    torch, any device); returns the formatted flat array."""
+    """Host reference of the weight format: ``w`` is a KRSC numpy array;
+    returns the formatted flat array."""
+    import numpy as np
+
     K = w.shape[0]
-    flat = w.reshape(K, 3, fw, C)
+    flat = np.asarray(w).reshape(K, 3, fw, C)
     out = []
     for o in range(K * 3 * fw * C // 8):
         k, r, s, c = _wfmt_source(o, C, kw16, fw, nwk)
         out.append(flat[k, r, s, c : c + 8])
-    try:
-        import torch
-
-        if isinstance(w, torch.Tensor):
-            return torch.cat(out)
-    except ImportError:
-        pass
-    import numpy as np
-
     return np.concatenate(out)
 
 
