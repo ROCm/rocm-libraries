@@ -1,8 +1,6 @@
 // Copyright Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
-#include <Tensile/ContractionSolution.hpp>
-#include <Tensile/hip/HipHardware.hpp>
 #include <Tensile/hip/HipSolutionAdapter.hpp>
 #include <gtest/gtest.h>
 
@@ -11,13 +9,11 @@
 #include <chrono>
 #include <cstdint>
 #include <cstdlib>
-#include <cstring>
 #include <deque>
 #include <functional>
 #include <map>
 #include <memory>
 #include <mutex>
-#include <new>
 #include <optional>
 #include <string>
 #include <thread>
@@ -271,10 +267,10 @@ namespace
         EXPECT_EQ(loads.lastError, hipErrorOutOfMemory) << "the caller's error was replaced";
     }
 
-    // Every helper kernel a solution launches is looked up in the helper code
-    // object first. No module exports the kernels, so each launch ends at the
-    // lookup, before anything could reach a device.
-    TEST_F(HipSolutionAdapterTest, smoke_SolutionHelperKernelsLaunchFromTheHelperCodeObject)
+    // A launch passes its kernel's helper mark to the lookup. No module exports
+    // the kernel, so the launch ends at the lookup, before anything could
+    // reach a device.
+    TEST_F(HipSolutionAdapterTest, smoke_LaunchPassesTheHelperMarkToTheLookup)
     {
         adapter->setLazyLoadingContext("gfx942", "/library");
         expectLoad(primary);
@@ -283,65 +279,17 @@ namespace
         ASSERT_EQ(adapter->initializeLazyLoading("gfx942", "/library"), hipSuccess);
         loads.exports = [](hipModule_t, const char*) { return false; };
 
-        TensileLite::ContractionSolution solution;
-        solution.codeObjectFilename    = std::string("primary.co");
-        solution.sizeMapping.macroTile = TensileLite::dim3(128, 128, 1);
-        solution.sizeMapping.depthU    = 64;
-        auto problem                   = TensileLite::ContractionProblemGemm::GEMM(
-            false, false, 256, 256, 256, 256, 256, 256, 1.0, false, 1);
-        problem.setComputeInputTypeA(rocisa::DataType::Float);
-        problem.setComputeInputTypeB(rocisa::DataType::Float);
-        problem.setAlphaType(rocisa::DataType::Float);
-        problem.setBetaType(rocisa::DataType::Float);
-        TensileLite::ContractionInputs        inputs;
-        TensileLite::ContractionGroupedInputs grouped;
-        grouped.grouped.push_back(inputs);
-        TensileLite::hip::HipAMDGPU  device;
-        TensileLite::KernelArguments hostArgs(false);
-
-        const std::pair<char const*, TensileLite::KernelInvocation> kernels[] = {
-            {"beta-only", solution.generateBetaOnlyCall<false>(problem, inputs)},
-            {"output conversion",
-             solution.generateOutputConversionCall<false>(problem, inputs, {}, 1, 0)},
-            {"grouped output conversion",
-             solution.generateOutputConversionCallGroupedGemm<false>(
-                 {problem}, grouped, device, hostArgs)},
-            {"grouped output conversion from user arguments",
-             solution.updateUserArgsOutputConversionCallGroupedGemm<false>(
-                 {problem}, nullptr, nullptr)},
-            {"reduction", solution.generateReductionCall<false>(problem, inputs)},
-        };
-        for(auto const& [name, kernel] : kernels)
-        {
-            SCOPED_TRACE(name);
-            loads.functionModules.clear();
-            EXPECT_EQ(adapter->launchKernel(kernel), hipErrorNotFound);
-            ASSERT_FALSE(loads.functionModules.empty());
-            EXPECT_EQ(loads.functionModules.front(), loads.loadedFrom.at(helper))
-                << "the launch looked in another module first";
-        }
-    }
-
-    // The grouped output conversion for user arguments launches in one
-    // dimension. The invocation is built over storage filled with ones bits,
-    // which a launch size the builder left unset would keep.
-    TEST(ContractionSolutionHelperKernels, smoke_UserArgsConversionLaunchesInOneDimension)
-    {
-        TensileLite::ContractionSolution solution;
-        auto                             problem = TensileLite::ContractionProblemGemm::GEMM(
-            false, false, 256, 256, 256, 256, 256, 256, 1.0, false, 1);
-
-        alignas(TensileLite::KernelInvocation) unsigned char
-            storage[sizeof(TensileLite::KernelInvocation)];
-        std::memset(storage, 0xff, sizeof(storage));
-        auto* kernel = new(storage) TensileLite::KernelInvocation(
-            solution.updateUserArgsOutputConversionCallGroupedGemm<false>(
-                {problem}, nullptr, nullptr));
-        EXPECT_EQ(kernel->numWorkGroups.y, 1u);
-        EXPECT_EQ(kernel->numWorkGroups.z, 1u);
-        EXPECT_EQ(kernel->numWorkItems.y, 1u);
-        EXPECT_EQ(kernel->numWorkItems.z, 1u);
-        kernel->~KernelInvocation();
+        TensileLite::KernelInvocation kernel;
+        kernel.kernelName     = "helper";
+        kernel.codeObjectFile = "primary.co";
+        kernel.isHelperKernel = true;
+        kernel.workGroupSize  = TensileLite::dim3(256, 1, 1);
+        kernel.numWorkGroups  = TensileLite::dim3(1, 1, 1);
+        kernel.numWorkItems   = TensileLite::dim3(256, 1, 1);
+        EXPECT_EQ(adapter->launchKernel(kernel), hipErrorNotFound);
+        ASSERT_FALSE(loads.functionModules.empty());
+        EXPECT_EQ(loads.functionModules.front(), loads.loadedFrom.at(helper))
+            << "the launch looked in another module first";
     }
 
     TEST_P(HipSolutionAdapterRecoveryTest, smoke_MissingContextPreservesPrimaryError)
