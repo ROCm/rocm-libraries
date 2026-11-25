@@ -1248,7 +1248,9 @@ entry that a tier runs has no recorded time; record its time from a CI log with
 `check_entry_times.py record`. The tool's docstring gives the `check`, `record`
 and `lower-ceiling` commands. The check needs a provider install on the
 operating system it judges, because the tier labels and the tests it collects
-exist only there. Run `ctest -R '^rocke_entry_time_check$'` in
+exist only there. So the `windows` column of `entry_times.json` is judged only
+when the check runs on Windows; the entries it has no time for stay untimed
+until a Windows run records them. Run `ctest -R '^rocke_entry_time_check$'` in
 `<install>/bin/hip_kernel_provider`. No pre-commit hook runs it.
 
 To review where a test lives (level, tier, entry, shard keys, budgets), use the
