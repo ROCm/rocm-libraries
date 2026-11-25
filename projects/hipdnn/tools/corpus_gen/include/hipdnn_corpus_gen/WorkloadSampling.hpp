@@ -4,11 +4,13 @@
 #pragma once
 
 #include <hipdnn_corpus_gen/DeterministicRandom.hpp>
+#include <hipdnn_corpus_gen/FeasibleShapeSet.hpp>
 #include <hipdnn_corpus_gen/OperationMetadata.hpp>
 
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <limits>
 #include <optional>
 #include <random>
 #include <string>
@@ -37,16 +39,15 @@ inline int64_t parameterFloor(const Parameter& parameter)
     return 1;
 }
 
-/// Clamps @p value into whatever @p parameter declares, leaving an undeclared side alone.
+/// Clamps @p value into whatever @p parameter declares, leaving an undeclared side alone, and
+/// moves it to the parameter's step (Parameter::step).
 inline int64_t clampToRange(const Parameter& parameter, int64_t value)
 {
-    int64_t clamped = std::max(value, parameterFloor(parameter));
-    if(parameter.range.has_value())
-    {
-        // An undeclared ceiling is stored as int64 max, so this is a no-op there.
-        clamped = std::min(clamped, parameter.range->second);
-    }
-    return clamped;
+    const auto low = parameterFloor(parameter);
+    // An undeclared ceiling is stored as int64 max, so this is a no-op there.
+    const auto high = parameter.range.has_value() ? parameter.range->second
+                                                  : std::numeric_limits<int64_t>::max();
+    return snapToStep(std::clamp(value, low, high), parameter.step, low, high);
 }
 
 /// Reads @p point's value for @p name as an integer, or nullopt if it is not numeric.

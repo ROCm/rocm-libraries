@@ -30,9 +30,25 @@
       "type": "int64",
       "range": [
         8,
-        512
+        576
       ],
-      "description": "Per-head width. 8 and up: narrower is not an attention head, and without a range the search spends half its draws below 16."
+      "common_values": [
+        192,
+        576
+      ],
+      "description": "Per-head width. 8 and up: narrower is not an attention head, and without a range the search spends half its draws below 16. Up to 576 for absorbed MLA's Q and K (value_head_dim mla); a V as wide as Q stays at 512 or less. The common values are the two MLA widths, beside the regime buckets 64, 128 and 256, so the search is seeded where an MLA combination can hold a problem: the constraints admit no other width there, which a walk does not find by stepping."
+    },
+    "value_head_dim": {
+      "type": "enum",
+      "values": [
+        "same",
+        "mla"
+      ],
+      "weights": {
+        "same": 3,
+        "mla": 1
+      },
+      "description": "Width of V, and so of O (and dO, dV), against Q and K's head_dim. same (default): equal, as nearly every model has. mla: 64 narrower, DeepSeek's multi-head latent attention, whose Q and K carry a 64-wide rotary part that V does not -- 192/128 in prefill and training, 576/512 with the latent absorbed in decode. hipDNN requires only Q and K's last dims to agree (SdpaFwdNode Rule 2, SdpaBwdNode Rule 3; O, dO and dV take V's), and ASM SDPA and FlyDSL ship kernels for such pairs. Declared at those two widths only (head_dim 192 or 576): the mla pairs are pinned on purpose to DeepSeek's 192/128 and 576/512, and other unequal Q/K and V widths (128/64, 129/65, or any V an engine's pair buckets take) are deliberately left out of the corpus, so UHD has no data for them. The deepseek_v3 archetypes anchor both pairs."
     },
     "is_causal": {
       "type": "bool",
@@ -51,8 +67,22 @@
       "values": [
         "fp16",
         "bf16",
-        "fp32"
-      ]
+        "fp32",
+        "fp8_e4m3",
+        "fp8_e5m2",
+        "fp8_e4m3_fnuz",
+        "fp8_e5m2_fnuz"
+      ],
+      "weights": {
+        "fp16": 8,
+        "bf16": 8,
+        "fp32": 8,
+        "fp8_e4m3": 1,
+        "fp8_e5m2": 1,
+        "fp8_e4m3_fnuz": 2,
+        "fp8_e5m2_fnuz": 1
+      },
+      "description": "Element type of Q, K and V. fp16, bf16 and fp32 write O in the same type. The four fp8 encodings are graphs with the three per-tensor Q, K and V descales every fp8 plan requires, and with O (and the bias, under the bias form) in bf16, which is what the fp8 plans write; the \"// types\" note under graph_builder has the matrix and where each rule comes from. fp8_e4m3_fnuz is the encoding gfx942 hardware and the shipped ASM kernels use, so it holds twice the weight of the other three. OCP fp8_e4m3 and the two e5m2 encodings are valid hipDNN graphs that the references run and every shipped engine declines; they are declared so a model is not first shown an fp8 type at inference. The weights hold fp8 to about a sixth of the sweep and each of the other three types to about 28%, where each had a third before fp8 was declared. Weighted, dtype splits the first pass's budget rather than multiplying it, as layout, scale, window and value_head_dim do."
     },
     "generate_stats": {
       "type": "bool",
@@ -63,14 +93,18 @@
       "values": [
         "bshd",
         "bhsd",
-        "kv_bhsd"
+        "kv_bhsd",
+        "sbhd",
+        "qkv_packed"
       ],
       "weights": {
         "bshd": 2,
         "bhsd": 1,
-        "kv_bhsd": 1
+        "kv_bhsd": 1,
+        "sbhd": 1,
+        "qkv_packed": 1
       },
-      "description": "Memory order of the attention operands; dims stay (B, H, S, D) and the order lives in the strides. bshd (default) is token-major for every tensor, [S*H*D, D, H*D, 1]. bhsd is head-major for every tensor, [H*S*D, S*D, D, 1]. kv_bhsd is the decode KV cache: Q, O (and dO, dQ) token-major and K, V (and dK, dV) head-major. Statistics stay row-major. Which layouts an engine serves differs a great deal, so this is a declared axis and the engine oracle filters it; it is not part of the regime label. Extents of 1 make layouts alias (with seqlen_q 1 and heads 1, kv_bhsd is bhsd; with seqlen_k 1 and heads_kv 1, it is bshd), so the constraints below leave kv_bhsd out of those points: the same graph would otherwise be listed under two layouts. The ragged form packs tokens through offset tensors and needs token-major strides, so it is declared only with bshd."
+      "description": "Memory order of the attention operands; dims stay (B, H, S, D) and the order lives in the strides. bshd (default) is token-major for every tensor, [S*H*D, D, H*D, 1]. bhsd is head-major for every tensor, [H*S*D, S*D, D, 1]. kv_bhsd is the decode KV cache: Q, O (and dO, dQ) token-major and K, V (and dK, dV) head-major. Statistics stay row-major. Which layouts an engine serves differs a great deal, so this is a declared axis and the engine oracle filters it; it is not part of the regime label. Extents of 1 make layouts alias (with seqlen_q 1 and heads 1, kv_bhsd is bhsd; with seqlen_k 1 and heads_kv 1, it is bshd), so the constraints below leave kv_bhsd out of those points: the same graph would otherwise be listed under two layouts. sbhd is sequence-major, Megatron's [S, B, H, D]: [H*D, D, B*H*D, 1] for every tensor; with one batch, or one row in both sequences, it is bshd, so it is declared only where batch > 1 and a sequence is longer than 1. qkv_packed: Q, K and V (and dQ, dK, dV) are views of one fused QKV projection, a row of heads*head_dim + heads_kv*head_dim + heads_kv*value width per token, so each has [S*R, W, R, 1] for its own width W; O and dO stay token-major. A fused QKV projection is self-attention, so qkv_packed is declared only with seqlen_q == seqlen_k. The ragged form packs tokens through offset tensors and needs token-major strides, so it is declared only with the token-major bshd and qkv_packed."
     },
     "scale": {
       "type": "enum",
@@ -114,7 +148,7 @@
         "bias",
         "sink"
       ],
-      "description": "Which optional attributes and tensors the graph binds (RFC 0019 \u00a76.7, absent is not zero, and \u00a76.8 rule 9: a model must tolerate any optional feature a valid graph leaves unbound). One aspect varies per graph from the plain baseline, so every optional input appears both present and absent without crossing them all. plain states the scale and binds nothing optional; scale_unset leaves the scale unstated; scale_tensor gives it as a pass-by-value tensor; dropout adds Philox dropout with an INT64 seed and offset; padded adds per-batch seq_len_q and seq_len_kv; ragged packs Q, O and the statistics through one offset tensor and K and V through another (compact THD, no length tensors); bias adds an additive [1, 1, seqlen_q, seqlen_k] bias; sink adds one FLOAT sink logit per query head. A --model-shapes file with no `q.form` column reads every row as plain; a column left empty in a row is refused. Every form is an even stratum, and the forms are not weighted (unlike layout, scale and window), so the cut to --count takes each form evenly, as far as the first pass holds it. Without --count the forms declared in fewer combinations get fewer graphs: scale_unset and scale_tensor take inv_sqrt_d only and ragged takes bshd only. --form-floor tops each form up to its count. Interactions: the form decides whether the `scale` facet applies (scale_unset and scale_tensor ignore it, so they are held at inv_sqrt_d) and which `layout` is meaningful (ragged is token-major, bshd only). Every other pairing with layout, window and scale is a valid graph; an engine that serves only some of them is filtered by the oracle."
+      "description": "Which optional attributes and tensors the graph binds (RFC 0019 \u00a76.7, absent is not zero, and \u00a76.8 rule 9: a model must tolerate any optional feature a valid graph leaves unbound). One aspect varies per graph from the plain baseline, so every optional input appears both present and absent without crossing them all. plain states the scale and binds nothing optional; scale_unset leaves the scale unstated; scale_tensor gives it as a pass-by-value tensor; dropout adds Philox dropout with an INT64 seed and offset; padded adds per-batch seq_len_q and seq_len_kv; ragged packs Q, O and the statistics through one offset tensor and K and V through another (compact THD, no length tensors); bias adds an additive [1, 1, seqlen_q, seqlen_k] bias; sink adds one FLOAT sink logit per query head. A --model-shapes file with no `q.form` column reads every row as plain; a column left empty in a row is refused. Every form is an even stratum, and the forms are not weighted (unlike layout, scale and window), so the cut to --count takes each form evenly, as far as the first pass holds it. Without --count the forms declared in fewer combinations get fewer graphs: scale_unset and scale_tensor take inv_sqrt_d only and ragged takes the token-major layouts (bshd, qkv_packed) only. --form-floor tops each form up to its count. Interactions: the form decides whether the `scale` facet applies (scale_unset and scale_tensor ignore it, so they are held at inv_sqrt_d) and which `layout` is meaningful (ragged is token-major: bshd and qkv_packed only). Every other pairing with layout, window and scale is a valid graph; an engine that serves only some of them is filtered by the oracle."
     }
   },
   "stratification_axis": "arithmetic_intensity",
@@ -175,8 +209,8 @@
     "same operation and entirely different problems, which is why they are anchored as separate",
     "archetypes rather than as one range over seqlen_q. Cross attention (more queries than keys)",
     "draws its two sequences from different tensors, so it varies independently of the rest --",
-    "the constraint admits it only under a non-causal mask, and the clause files it under",
-    "'cross' rather than 'append'.",
+    "a causal mask there is anchored top-left, so every query row keeps a key, and the clause",
+    "files it under 'cross' rather than 'append'.",
     "Grouping (mha/gqa/mqa) is the third facet: how many query heads share one KV head decides",
     "how much of the KV cache a wavefront re-reads, which is the whole difference between a",
     "decode that is bandwidth bound and one that is not. It is a label rather than a bucket",
@@ -335,22 +369,6 @@
   ],
   "constraints": [
     {
-      "or": [
-        {
-          "<=": [
-            "$q.seqlen_q",
-            "$q.seqlen_k"
-          ]
-        },
-        {
-          "==": [
-            "$q.is_causal",
-            false
-          ]
-        }
-      ]
-    },
-    {
       "<=": [
         "$q.heads_kv",
         "$q.heads"
@@ -503,6 +521,118 @@
             "$q.layout",
             "bshd"
           ]
+        },
+        {
+          "==": [
+            "$q.layout",
+            "qkv_packed"
+          ]
+        }
+      ]
+    },
+    {
+      "or": [
+        {
+          "==": [
+            "$q.value_head_dim",
+            "same"
+          ]
+        },
+        {
+          "==": [
+            "$q.head_dim",
+            192
+          ]
+        },
+        {
+          "==": [
+            "$q.head_dim",
+            576
+          ]
+        }
+      ]
+    },
+    {
+      "or": [
+        {
+          "==": [
+            "$q.value_head_dim",
+            "mla"
+          ]
+        },
+        {
+          "<=": [
+            "$q.head_dim",
+            512
+          ]
+        }
+      ]
+    },
+    {
+      "or": [
+        {
+          "!=": [
+            "$q.layout",
+            "sbhd"
+          ]
+        },
+        {
+          "and": [
+            {
+              ">": [
+                "$q.batch",
+                1
+              ]
+            },
+            {
+              "or": [
+                {
+                  ">": [
+                    "$q.seqlen_q",
+                    1
+                  ]
+                },
+                {
+                  ">": [
+                    "$q.seqlen_k",
+                    1
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "or": [
+        {
+          "!=": [
+            "$q.layout",
+            "qkv_packed"
+          ]
+        },
+        {
+          "==": [
+            "$q.seqlen_q",
+            "$q.seqlen_k"
+          ]
+        }
+      ]
+    },
+    {
+      "or": [
+        {
+          "!=": [
+            "$q.layout",
+            "qkv_packed"
+          ]
+        },
+        {
+          "==": [
+            "$q.alignment",
+            "top_left"
+          ]
         }
       ]
     }
@@ -545,7 +675,8 @@
       "layout": "bshd",
       "scale": "inv_sqrt_d",
       "window": "none",
-      "form": "plain"
+      "form": "plain",
+      "value_head_dim": "same"
     }
   },
   "// model_shape_defaults": "A model-shape CSV written before one of these parameters was declared has no column for it; the file's rows then mean the default named here. Only these: a parameter with no column and no entry here (alignment, generate_stats, ...) is refused, since filling it in would pass off an unrecorded shape as recorded. The pack `constants` above answer for kernel packs and are not used for shape files.",
@@ -553,11 +684,34 @@
     "form": "plain",
     "layout": "bshd",
     "scale": "inv_sqrt_d",
-    "window": "none"
+    "window": "none",
+    "value_head_dim": "same"
   },
   "graph_builder": {
     "function": "sdpaForward",
     "source": "hipdnn_corpus_gen/GraphBuilders.hpp",
+    "let": [
+      {
+        "name": "head_dim_v",
+        "value": {
+          "if": [
+            {
+              "==": [
+                "$q.value_head_dim",
+                "mla"
+              ]
+            },
+            {
+              "-": [
+                "$q.head_dim",
+                64
+              ]
+            },
+            "$q.head_dim"
+          ]
+        }
+      }
+    ],
     "arguments": [
       {
         "name": "qDims",
@@ -574,14 +728,87 @@
         "kind": "expr",
         "value": [
           {
-            "*": [
+            "if": [
               {
-                "*": [
-                  "$q.seqlen_q",
-                  "$q.heads"
+                "==": [
+                  "$q.layout",
+                  "bhsd"
                 ]
               },
-              "$q.head_dim"
+              {
+                "*": [
+                  {
+                    "*": [
+                      "$q.heads",
+                      "$q.seqlen_q"
+                    ]
+                  },
+                  "$q.head_dim"
+                ]
+              },
+              {
+                "if": [
+                  {
+                    "==": [
+                      "$q.layout",
+                      "sbhd"
+                    ]
+                  },
+                  {
+                    "*": [
+                      "$q.heads",
+                      "$q.head_dim"
+                    ]
+                  },
+                  {
+                    "if": [
+                      {
+                        "==": [
+                          "$q.layout",
+                          "qkv_packed"
+                        ]
+                      },
+                      {
+                        "*": [
+                          "$q.seqlen_q",
+                          {
+                            "+": [
+                              {
+                                "*": [
+                                  {
+                                    "+": [
+                                      "$q.heads",
+                                      "$q.heads_kv"
+                                    ]
+                                  },
+                                  "$q.head_dim"
+                                ]
+                              },
+                              {
+                                "*": [
+                                  "$q.heads_kv",
+                                  "$let.head_dim_v"
+                                ]
+                              }
+                            ]
+                          }
+                        ]
+                      },
+                      {
+                        "*": [
+                          {
+                            "*": [
+                              "$q.seqlen_q",
+                              "$q.heads"
+                            ]
+                          },
+                          "$q.head_dim"
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              }
             ]
           },
           {
@@ -611,9 +838,61 @@
               },
               "$q.head_dim",
               {
-                "*": [
-                  "$q.heads",
-                  "$q.head_dim"
+                "if": [
+                  {
+                    "==": [
+                      "$q.layout",
+                      "sbhd"
+                    ]
+                  },
+                  {
+                    "*": [
+                      {
+                        "*": [
+                          "$q.batch",
+                          "$q.heads"
+                        ]
+                      },
+                      "$q.head_dim"
+                    ]
+                  },
+                  {
+                    "if": [
+                      {
+                        "==": [
+                          "$q.layout",
+                          "qkv_packed"
+                        ]
+                      },
+                      {
+                        "+": [
+                          {
+                            "*": [
+                              {
+                                "+": [
+                                  "$q.heads",
+                                  "$q.heads_kv"
+                                ]
+                              },
+                              "$q.head_dim"
+                            ]
+                          },
+                          {
+                            "*": [
+                              "$q.heads_kv",
+                              "$let.head_dim_v"
+                            ]
+                          }
+                        ]
+                      },
+                      {
+                        "*": [
+                          "$q.heads",
+                          "$q.head_dim"
+                        ]
+                      }
+                    ]
+                  }
                 ]
               }
             ]
@@ -636,22 +915,116 @@
         "kind": "expr",
         "value": [
           {
-            "*": [
+            "if": [
               {
-                "*": [
-                  "$q.seqlen_k",
-                  "$q.heads_kv"
+                "==": [
+                  "$q.layout",
+                  "bhsd"
                 ]
               },
-              "$q.head_dim"
+              {
+                "*": [
+                  {
+                    "*": [
+                      "$q.heads_kv",
+                      "$q.seqlen_k"
+                    ]
+                  },
+                  "$q.head_dim"
+                ]
+              },
+              {
+                "if": [
+                  {
+                    "==": [
+                      "$q.layout",
+                      "kv_bhsd"
+                    ]
+                  },
+                  {
+                    "*": [
+                      {
+                        "*": [
+                          "$q.heads_kv",
+                          "$q.seqlen_k"
+                        ]
+                      },
+                      "$q.head_dim"
+                    ]
+                  },
+                  {
+                    "if": [
+                      {
+                        "==": [
+                          "$q.layout",
+                          "sbhd"
+                        ]
+                      },
+                      {
+                        "*": [
+                          "$q.heads_kv",
+                          "$q.head_dim"
+                        ]
+                      },
+                      {
+                        "if": [
+                          {
+                            "==": [
+                              "$q.layout",
+                              "qkv_packed"
+                            ]
+                          },
+                          {
+                            "*": [
+                              "$q.seqlen_k",
+                              {
+                                "+": [
+                                  {
+                                    "*": [
+                                      {
+                                        "+": [
+                                          "$q.heads",
+                                          "$q.heads_kv"
+                                        ]
+                                      },
+                                      "$q.head_dim"
+                                    ]
+                                  },
+                                  {
+                                    "*": [
+                                      "$q.heads_kv",
+                                      "$let.head_dim_v"
+                                    ]
+                                  }
+                                ]
+                              }
+                            ]
+                          },
+                          {
+                            "*": [
+                              {
+                                "*": [
+                                  "$q.seqlen_k",
+                                  "$q.heads_kv"
+                                ]
+                              },
+                              "$q.head_dim"
+                            ]
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              }
             ]
           },
           {
             "if": [
               {
-                "!=": [
+                "==": [
                   "$q.layout",
-                  "bshd"
+                  "bhsd"
                 ]
               },
               {
@@ -660,22 +1033,101 @@
                   "$q.head_dim"
                 ]
               },
-              "$q.head_dim"
+              {
+                "if": [
+                  {
+                    "==": [
+                      "$q.layout",
+                      "kv_bhsd"
+                    ]
+                  },
+                  {
+                    "*": [
+                      "$q.seqlen_k",
+                      "$q.head_dim"
+                    ]
+                  },
+                  "$q.head_dim"
+                ]
+              }
             ]
           },
           {
             "if": [
               {
-                "!=": [
+                "==": [
                   "$q.layout",
-                  "bshd"
+                  "bhsd"
                 ]
               },
               "$q.head_dim",
               {
-                "*": [
-                  "$q.heads_kv",
-                  "$q.head_dim"
+                "if": [
+                  {
+                    "==": [
+                      "$q.layout",
+                      "kv_bhsd"
+                    ]
+                  },
+                  "$q.head_dim",
+                  {
+                    "if": [
+                      {
+                        "==": [
+                          "$q.layout",
+                          "sbhd"
+                        ]
+                      },
+                      {
+                        "*": [
+                          {
+                            "*": [
+                              "$q.batch",
+                              "$q.heads_kv"
+                            ]
+                          },
+                          "$q.head_dim"
+                        ]
+                      },
+                      {
+                        "if": [
+                          {
+                            "==": [
+                              "$q.layout",
+                              "qkv_packed"
+                            ]
+                          },
+                          {
+                            "+": [
+                              {
+                                "*": [
+                                  {
+                                    "+": [
+                                      "$q.heads",
+                                      "$q.heads_kv"
+                                    ]
+                                  },
+                                  "$q.head_dim"
+                                ]
+                              },
+                              {
+                                "*": [
+                                  "$q.heads_kv",
+                                  "$let.head_dim_v"
+                                ]
+                              }
+                            ]
+                          },
+                          {
+                            "*": [
+                              "$q.heads_kv",
+                              "$q.head_dim"
+                            ]
+                          }
+                        ]
+                      }
+                    ]
+                  }
                 ]
               }
             ]
@@ -690,7 +1142,7 @@
           "$q.batch",
           "$q.heads_kv",
           "$q.seqlen_k",
-          "$q.head_dim"
+          "$let.head_dim_v"
         ]
       },
       {
@@ -698,46 +1150,219 @@
         "kind": "expr",
         "value": [
           {
-            "*": [
+            "if": [
               {
-                "*": [
-                  "$q.seqlen_k",
-                  "$q.heads_kv"
+                "==": [
+                  "$q.layout",
+                  "bhsd"
                 ]
               },
-              "$q.head_dim"
+              {
+                "*": [
+                  {
+                    "*": [
+                      "$q.heads_kv",
+                      "$q.seqlen_k"
+                    ]
+                  },
+                  "$let.head_dim_v"
+                ]
+              },
+              {
+                "if": [
+                  {
+                    "==": [
+                      "$q.layout",
+                      "kv_bhsd"
+                    ]
+                  },
+                  {
+                    "*": [
+                      {
+                        "*": [
+                          "$q.heads_kv",
+                          "$q.seqlen_k"
+                        ]
+                      },
+                      "$let.head_dim_v"
+                    ]
+                  },
+                  {
+                    "if": [
+                      {
+                        "==": [
+                          "$q.layout",
+                          "sbhd"
+                        ]
+                      },
+                      {
+                        "*": [
+                          "$q.heads_kv",
+                          "$let.head_dim_v"
+                        ]
+                      },
+                      {
+                        "if": [
+                          {
+                            "==": [
+                              "$q.layout",
+                              "qkv_packed"
+                            ]
+                          },
+                          {
+                            "*": [
+                              "$q.seqlen_k",
+                              {
+                                "+": [
+                                  {
+                                    "*": [
+                                      {
+                                        "+": [
+                                          "$q.heads",
+                                          "$q.heads_kv"
+                                        ]
+                                      },
+                                      "$q.head_dim"
+                                    ]
+                                  },
+                                  {
+                                    "*": [
+                                      "$q.heads_kv",
+                                      "$let.head_dim_v"
+                                    ]
+                                  }
+                                ]
+                              }
+                            ]
+                          },
+                          {
+                            "*": [
+                              {
+                                "*": [
+                                  "$q.seqlen_k",
+                                  "$q.heads_kv"
+                                ]
+                              },
+                              "$let.head_dim_v"
+                            ]
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              }
             ]
           },
           {
             "if": [
               {
-                "!=": [
+                "==": [
                   "$q.layout",
-                  "bshd"
+                  "bhsd"
                 ]
               },
               {
                 "*": [
                   "$q.seqlen_k",
-                  "$q.head_dim"
+                  "$let.head_dim_v"
                 ]
               },
-              "$q.head_dim"
+              {
+                "if": [
+                  {
+                    "==": [
+                      "$q.layout",
+                      "kv_bhsd"
+                    ]
+                  },
+                  {
+                    "*": [
+                      "$q.seqlen_k",
+                      "$let.head_dim_v"
+                    ]
+                  },
+                  "$let.head_dim_v"
+                ]
+              }
             ]
           },
           {
             "if": [
               {
-                "!=": [
+                "==": [
                   "$q.layout",
-                  "bshd"
+                  "bhsd"
                 ]
               },
-              "$q.head_dim",
+              "$let.head_dim_v",
               {
-                "*": [
-                  "$q.heads_kv",
-                  "$q.head_dim"
+                "if": [
+                  {
+                    "==": [
+                      "$q.layout",
+                      "kv_bhsd"
+                    ]
+                  },
+                  "$let.head_dim_v",
+                  {
+                    "if": [
+                      {
+                        "==": [
+                          "$q.layout",
+                          "sbhd"
+                        ]
+                      },
+                      {
+                        "*": [
+                          {
+                            "*": [
+                              "$q.batch",
+                              "$q.heads_kv"
+                            ]
+                          },
+                          "$let.head_dim_v"
+                        ]
+                      },
+                      {
+                        "if": [
+                          {
+                            "==": [
+                              "$q.layout",
+                              "qkv_packed"
+                            ]
+                          },
+                          {
+                            "+": [
+                              {
+                                "*": [
+                                  {
+                                    "+": [
+                                      "$q.heads",
+                                      "$q.heads_kv"
+                                    ]
+                                  },
+                                  "$q.head_dim"
+                                ]
+                              },
+                              {
+                                "*": [
+                                  "$q.heads_kv",
+                                  "$let.head_dim_v"
+                                ]
+                              }
+                            ]
+                          },
+                          {
+                            "*": [
+                              "$q.heads_kv",
+                              "$let.head_dim_v"
+                            ]
+                          }
+                        ]
+                      }
+                    ]
+                  }
                 ]
               }
             ]
@@ -752,7 +1377,7 @@
           "$q.batch",
           "$q.heads",
           "$q.seqlen_q",
-          "$q.head_dim"
+          "$let.head_dim_v"
         ]
       },
       {
@@ -760,14 +1385,51 @@
         "kind": "expr",
         "value": [
           {
-            "*": [
+            "if": [
               {
-                "*": [
-                  "$q.seqlen_q",
-                  "$q.heads"
+                "==": [
+                  "$q.layout",
+                  "bhsd"
                 ]
               },
-              "$q.head_dim"
+              {
+                "*": [
+                  {
+                    "*": [
+                      "$q.heads",
+                      "$q.seqlen_q"
+                    ]
+                  },
+                  "$let.head_dim_v"
+                ]
+              },
+              {
+                "if": [
+                  {
+                    "==": [
+                      "$q.layout",
+                      "sbhd"
+                    ]
+                  },
+                  {
+                    "*": [
+                      "$q.heads",
+                      "$let.head_dim_v"
+                    ]
+                  },
+                  {
+                    "*": [
+                      {
+                        "*": [
+                          "$q.seqlen_q",
+                          "$q.heads"
+                        ]
+                      },
+                      "$let.head_dim_v"
+                    ]
+                  }
+                ]
+              }
             ]
           },
           {
@@ -781,10 +1443,10 @@
               {
                 "*": [
                   "$q.seqlen_q",
-                  "$q.head_dim"
+                  "$let.head_dim_v"
                 ]
               },
-              "$q.head_dim"
+              "$let.head_dim_v"
             ]
           },
           {
@@ -795,11 +1457,32 @@
                   "bhsd"
                 ]
               },
-              "$q.head_dim",
+              "$let.head_dim_v",
               {
-                "*": [
-                  "$q.heads",
-                  "$q.head_dim"
+                "if": [
+                  {
+                    "==": [
+                      "$q.layout",
+                      "sbhd"
+                    ]
+                  },
+                  {
+                    "*": [
+                      {
+                        "*": [
+                          "$q.batch",
+                          "$q.heads"
+                        ]
+                      },
+                      "$let.head_dim_v"
+                    ]
+                  },
+                  {
+                    "*": [
+                      "$q.heads",
+                      "$let.head_dim_v"
+                    ]
+                  }
                 ]
               }
             ]
@@ -811,6 +1494,17 @@
         "name": "dataType",
         "kind": "dtype_of",
         "source": "$q.dtype"
+      },
+      {
+        "name": "oDataType",
+        "kind": "dtype_of",
+        "source": "$q.dtype",
+        "map": {
+          "fp8_e4m3": "bf16",
+          "fp8_e5m2": "bf16",
+          "fp8_e4m3_fnuz": "bf16",
+          "fp8_e5m2_fnuz": "bf16"
+        }
       },
       {
         "name": "computeDataType",
@@ -1111,7 +1805,13 @@
       {
         "name": "biasDataType",
         "kind": "dtype_of",
-        "source": "$q.dtype"
+        "source": "$q.dtype",
+        "map": {
+          "fp8_e4m3": "bf16",
+          "fp8_e5m2": "bf16",
+          "fp8_e4m3_fnuz": "bf16",
+          "fp8_e5m2_fnuz": "bf16"
+        }
       },
       {
         "name": "sinkDims",
@@ -1132,12 +1832,46 @@
         "name": "sinkDataType",
         "kind": "constant",
         "constant": "float"
+      },
+      {
+        "name": "descaleDims",
+        "kind": "constant",
+        "constant": [
+          1,
+          1,
+          1,
+          1
+        ]
+      },
+      {
+        "name": "descaleStrides",
+        "kind": "constant",
+        "constant": [
+          1,
+          1,
+          1,
+          1
+        ]
+      },
+      {
+        "name": "descaleDataType",
+        "kind": "constant",
+        "constant": "float"
       }
     ],
-    "// types": "Operands carry the declared dtype; accumulation and the score matrix are fp32. Left to default, compute follows io and every fp16/bf16 graph is uniform half precision, which hip-kernel-provider's SdpaFwdPlanBuilder and SdpaBwdPlanBuilder refuse outright ('compute_data_type must be FLOAT') and the ingestor engines decline at graph_match -- a live-engine corpus then admits nothing, indistinguishable from naming an engine that does not exist. The training forward's softmax statistics are fp32.",
-    "// layout": "BSHD (the default): dims stay (B, H, S, D) and the layout lives in the strides, token-major, as the shipped bundles lay them out. Not row-major: strides_of would give BHSD, and rocKE's dense kernels take no stride kernargs -- stride_q_tok is baked as Hq*D -- so their matcher (hasBshdStrides) declines every BHSD graph. AITER serves BSHD too, so the default keeps both engines in the contest. The `layout` parameter adds bhsd (head-major, [H*S*D, S*D, D, 1]) and kv_bhsd (Q/O token-major, K/V head-major, the decode KV cache); the batch stride is the same in both orders, so only the head and sequence strides differ. An engine that serves only some of them is filtered by the oracle, per combination, not by a measurement. The ragged form (forward only) packs tokens through offset tensors whose multiplier is the token stride, so it needs token-major strides and is declared only with bshd; bhsd and kv_bhsd with ragged would address head-major data through a token-packed container.",
+    "// types": [
+      "Operands carry the declared dtype; accumulation and the score matrix are fp32. Left to default, compute follows io and every fp16/bf16 graph is uniform half precision, which hip-kernel-provider's SdpaFwdPlanBuilder and SdpaBwdPlanBuilder refuse outright ('compute_data_type must be FLOAT') and the ingestor engines decline at graph_match -- a live-engine corpus then admits nothing, indistinguishable from naming an engine that does not exist. The training forward's softmax statistics are fp32.",
+      "The dtype matrix, one row per `dtype`: the types of Q, K, V and O, and the operands the graph carries beyond those the `form` adds. Every row has compute type FLOAT and leaves mma_core_mode unset, which every engine accepts (FlyDSL and rocKE take UNSET, HALF or BFLOAT16 on 16-bit graphs, FlyDSL UNSET or FLOAT on fp32, ASM UNSET, HALF or BFLOAT16 on bf16 and UNSET, FP8_E4M3 or FP8_E5M2 on fp8; no combination needs a value), so mma_core_mode is not an axis here.",
+      "fp16, bf16, fp32: Q, K, V and O alike; no further operand. hipDNN's references register all three (SdpaFwdSignatureKey::getPlanBuilders). The ingestor engines require one type across Q, K, V and O (flydsl_sdpa_cdna, rocKE's UnifiedAttentionGraphMatch), so the mixed graph the references also take, fp16 or bf16 in and fp32 out, is not declared.",
+      "fp8_e4m3, fp8_e5m2, fp8_e4m3_fnuz, fp8_e5m2_fnuz: Q, K and V in that encoding, O in bf16, and Descale_Q, Descale_K and Descale_V, each FLOAT, one element ([1, 1, 1, 1]), an ordinary device tensor rather than a pass-by-value one. Each part is a rule of a plan or of the references. The three descales are required for an fp8 input and rejected for any other (isSupportedSdpaFwdNode; SdpaFwdPlanBuilder.cpp checkFp8Descales for ASM). ASM reads them through a device pointer and so refuses a pass-by-value or virtual one (checkDeviceTensor); the references take either, and an ordinary tensor is the one both take. ASM needs one element per descale (isScalarTensor: 'per-tensor scalars'); the references' per-KV-head [B, H_kv, 1, 1] descale is not declared. O is bf16 because ASM writes nothing else for fp8 (getDataTypeIdentifier) and the references take it, as they take an fp8 O in the input's encoding, which needs scale_o and amax_o that no engine here implements. hipDNN's frontend checks no Q, K, V or O type (SdpaFwdNode::pre_validate_node) and its backend only that the node's compute type is set (SdpaFwdOperationDescriptor::finalize): the descales and the bf16 O are what the plans that take fp8 require, and a graph without them is valid and run by none.",
+      "The bias, under the bias form, takes Q's dtype for fp16, bf16 and fp32 and bf16 for fp8: the references take a mask in FLOAT, HALF or BFLOAT16 only (addPlanBuilderAllMasks), and FlyDSL a bias in Q's type or FLOAT. The rest of the operands keep their own types in every row: statistics FLOAT, the scale tensor FLOAT, the sink FLOAT, the lengths and offsets INT32, the dropout seed and offset INT64.",
+      "Not declared on any row: the softmax and output scaling of cuDNN's sdpa_fp8 (Descale_S, Scale_S, Scale_O, Amax_S, Amax_O). ASM declines each (SdpaFwdPlanBuilder.cpp checkFwdUnsupportedFeatures), FlyDSL and rocKE decline any fp8 scaling tensor (FlydslSdpaCdnaCommon, UnifiedAttentionGraphMatch), and only the references implement them (SEM-024 of SdpaSemanticsRegister.md).",
+      "Who serves what: fp8_e4m3_fnuz on gfx942 is the only fp8 row a shipped engine answers (ASM; it declines OCP fp8_e4m3 with 'gfx942 fp8 SDPA requires FP8_E4M3_FNUZ inputs' and takes no e5m2 input, getDataTypeIdentifier), FlyDSL and rocKE serve none, and ASM's forward kernels are bf16 only among the 16-bit rows. The live-engine oracle drops the rows an engine refuses, as it drops forms; the declaration does not."
+    ],
+    "// layout": "BSHD (the default): dims stay (B, H, S, D) and the layout lives in the strides, token-major, as the shipped bundles lay them out. Not row-major: strides_of would give BHSD, and rocKE's dense kernels take no stride kernargs -- stride_q_tok is baked as Hq*D -- so their matcher (hasBshdStrides) declines every BHSD graph. AITER serves BSHD too, so the default keeps both engines in the contest. The `layout` parameter adds bhsd (head-major, [H*S*D, S*D, D, 1]) and kv_bhsd (Q/O token-major, K/V head-major, the decode KV cache), whose batch stride is BSHD's, so only the head and sequence strides differ; sbhd (Megatron's sequence-major order, batch stride H*D) and qkv_packed (Q, K and V as views of one fused QKV projection row, O token-major). value_head_dim mla narrows V, O (and dO, dV) by 64, so their strides use the value width wherever Q's use head_dim. An engine that serves only some of them is filtered by the oracle, per combination, not by a measurement. The ragged form packs tokens through offset tensors whose multiplier is the token stride, so it needs token-major strides and is declared only with bshd and qkv_packed; bhsd, kv_bhsd and sbhd with ragged would address data that is not token-contiguous per sequence through a token-packed container.",
     "// scale": "attnScale is the plain form's stated scale, not left to the schema's optional: rocKE's dense matcher declines a graph with no attn_scale_value (the scale is a required f32 kernarg and guessing 1/sqrt(D) is what it refuses to do), so a corpus that was all scale_unset would empty a rocKE corpus. 1/sqrt(head_dim) is the standard scale and what the shipped bundles carry. The other forms leave it out (scale_unset, scale_tensor) or keep it (the rest), and the live-engine oracle drops the forms an engine refuses, which is how rocKE's corpus stays free of them. The `scale` parameter chooses the stated value for the forms that state one; scale_unset states none and scale_tensor passes the value as a runtime tensor, so a constraint holds the facet at inv_sqrt_d there instead of listing the same graph (or tensors differing only in their default) under three scales. leftBound is declared only for a windowed problem; elsewhere the argument resolves to nothing and the builder leaves the bound unset.",
-    "// form": "One optional aspect per graph, everything else as the plain graph has it. The conventions are hipDNN's own: seq_len_q and seq_len_kv are INT32 [B, 1, 1, 1] (SdpaFwdNode::validateSeqLenTensor); the offset tensors of a ragged operand are INT32 [B+1, 1, 1, 1] (detail::validateIndexTensor; SdpaVllmFormTestGraphs.hpp makeVllmGraph); the sink is one FLOAT logit per query head, [1, Hq, 1, 1] (validateSinkToken); the scale tensor is a single-element pass-by-value tensor (validateScalarParameter), given as a runtime parameter whose default is the plain form's scale; the bias takes Q's dtype and dims [1, 1, seqlen_q, seqlen_k], row-major (the node's ATTN_MASK rule: last two dims equal seq_q and seq_kv, or 1). The dropout seed and offset are INT64 [1, 1, 1, 1] device tensors as the test SDK builds them (RaggedSdpaDensifyTestGraphs.hpp withPhiloxDropout); the frontend states no rule for them, so that one is the test SDK's convention, not a validated one. ragged is makeVllmGraph's compact THD form with a ragged query and KV: Q and O share one offset tensor with multiplier heads*head_dim, the statistics the same tensor with multiplier heads (so ragged statistics are token-major, [seqlen_q*heads, 1, heads, 1], as there), K and V another with multiplier heads_kv*head_dim; no length tensors and no padding mask; the dims stay the padded (B, H, max_len, D) ones. Each multiplier is the tensor's token stride, which the BSHD strides above make heads*head_dim. Facet interactions are constraints, not builder guards: `scale` is held at inv_sqrt_d under scale_unset and scale_tensor, and `ragged` is held to layout bshd. Everything else crosses freely (padded, dropout, bias and sink with every window; padded and ragged with cross attention where the Sq <= Sk rule above allows it), since the frontend validators, the CPU and GPU references and the engine matchers state those as valid or as an engine-level decline, which the oracle filters."
+    "// form": "One optional aspect per graph, everything else as the plain graph has it. The conventions are hipDNN's own: seq_len_q and seq_len_kv are INT32 [B, 1, 1, 1] (SdpaFwdNode::validateSeqLenTensor); the offset tensors of a ragged operand are INT32 [B+1, 1, 1, 1] (detail::validateIndexTensor; SdpaVllmFormTestGraphs.hpp makeVllmGraph); the sink is one FLOAT logit per query head, [1, Hq, 1, 1] (validateSinkToken); the scale tensor is a single-element pass-by-value tensor (validateScalarParameter), given as a runtime parameter whose default is the plain form's scale; the bias takes Q's dtype (bf16 under fp8, see the types note) and dims [1, 1, seqlen_q, seqlen_k], row-major (the node's ATTN_MASK rule: last two dims equal seq_q and seq_kv, or 1). The dropout seed and offset are INT64 [1, 1, 1, 1] device tensors as the test SDK builds them (RaggedSdpaDensifyTestGraphs.hpp withPhiloxDropout); the frontend states no rule for them, so that one is the test SDK's convention, not a validated one. ragged is makeVllmGraph's compact THD form with a ragged query and KV: Q and O share one offset tensor with multiplier heads*head_dim, the statistics the same tensor with multiplier heads (so ragged statistics are token-major, [seqlen_q*heads, 1, heads, 1], as there), K and V another with multiplier heads_kv*head_dim; no length tensors and no padding mask; the dims stay the padded (B, H, max_len, D) ones. Each multiplier is the tensor's token stride, which the BSHD strides above make heads*head_dim. Facet interactions are constraints, not builder guards: `scale` is held at inv_sqrt_d under scale_unset and scale_tensor, and `ragged` is held to the token-major layouts (bshd, qkv_packed). Everything else crosses freely (padded, dropout, bias and sink with every window; padded and ragged with cross attention), since the frontend validators, the CPU and GPU references and the engine matchers state those as valid or as an engine-level decline, which the oracle filters.",
+    "// let": "head_dim_v is V's width, and so O's (and dO's and dV's in the backward): head_dim, or 64 narrower under value_head_dim mla. Named once here; every dims and strides argument reads it as $let.head_dim_v."
   },
   "archetypes": [
     {
@@ -1444,7 +2178,7 @@
     },
     {
       "name": "cross_attention",
-      "note": "more queries than keys, from different tensors: diffusion and encoder-decoder attention over a short text or memory sequence. Bidirectional, since a causal mask is declared only for seqlen_q <= seqlen_k",
+      "note": "more queries than keys, from different tensors: diffusion and encoder-decoder attention over a short text or memory sequence. Bidirectional, as such attention is, and causal too: the mask over more queries than keys anchored top-left, where every query row keeps a key, which exploration alone reaches a few times in thousands of graphs",
       "values": {
         "batch": [
           1,
@@ -1476,7 +2210,287 @@
           160
         ],
         "is_causal": [
+          false,
+          true
+        ]
+      }
+    },
+    {
+      "name": "deepseek_v3_mla_prefill",
+      "source": "DeepSeek-V3 config.json (qk_nope_head_dim 128, qk_rope_head_dim 64, v_head_dim 128, 128 heads)",
+      "note": "multi-head latent attention with the latent expanded: Q and K 192 wide (128 + the 64-wide rotary part), V 128, one KV head per query head; all 128 heads, or the 16 of a tensor-parallel shard (and DeepSeek-V2-Lite)",
+      "values": {
+        "batch": [
+          1,
+          4,
+          8
+        ],
+        "heads": [
+          16,
+          128
+        ],
+        "heads_kv": [
+          "$q.heads"
+        ],
+        "seqlen_q": [
+          2048,
+          4096,
+          8192
+        ],
+        "seqlen_k": [
+          "$q.seqlen_q"
+        ],
+        "head_dim": [
+          192
+        ],
+        "value_head_dim": [
+          "mla"
+        ],
+        "is_causal": [
+          true
+        ]
+      }
+    },
+    {
+      "name": "deepseek_v3_mla_decode",
+      "source": "DeepSeek-V3 config.json (kv_lora_rank 512, qk_rope_head_dim 64); FlashMLA's absorbed decode",
+      "note": "multi-head latent attention with the up-projections absorbed: every query head against the one shared latent KV head, Q and K 576 wide (the 512 latent + the 64-wide rotary part), V the 512 latent",
+      "values": {
+        "batch": [
+          1,
+          8,
+          32,
+          64,
+          128
+        ],
+        "heads": [
+          16,
+          128
+        ],
+        "heads_kv": [
+          1
+        ],
+        "seqlen_q": [
+          1
+        ],
+        "seqlen_k": [
+          1024,
+          4096,
+          16384,
+          32768
+        ],
+        "head_dim": [
+          576
+        ],
+        "value_head_dim": [
+          "mla"
+        ],
+        "is_causal": [
+          true
+        ]
+      }
+    },
+    {
+      "name": "qwen3_next_gqa_d256_prefill",
+      "source": "Qwen3-Next-80B-A3B config.json (16 heads, 2 KV heads, head_dim 256); the 32-head qwen3.5 shapes of dnn-benchmarking's SDPA OOTB corpus (2026-11-24), real-world tier",
+      "note": "grouped-query attention at head_dim 256 and 8 or 16 query heads per KV head, square causal prefill (and training): the head_dim_sweep archetype reaches 256 only with one KV head per query head. 9 of its 24 points fit the default --max-bytes of 256 MiB in fp16; the larger ones need a larger ceiling.",
+      "values": {
+        "batch": [
+          1,
+          2,
+          4
+        ],
+        "heads": [
+          16,
+          32
+        ],
+        "heads_kv": [
+          2
+        ],
+        "seqlen_q": [
+          2048,
+          4096,
+          8192,
+          16384
+        ],
+        "seqlen_k": [
+          "$q.seqlen_q"
+        ],
+        "head_dim": [
+          256
+        ],
+        "is_causal": [
+          true
+        ]
+      }
+    },
+    {
+      "name": "qwen3_next_gqa_d256_decode",
+      "source": "Qwen3-Next-80B-A3B config.json (16 heads, 2 KV heads, head_dim 256); the 32-head qwen3.5 shapes of dnn-benchmarking's SDPA OOTB corpus (2026-11-24), real-world tier",
+      "note": "one query token of the same models against a KV cache of 4096 to 65536 tokens. 8 of its 24 points fit the default --max-bytes of 256 MiB in fp16; the larger ones need a larger ceiling.",
+      "values": {
+        "batch": [
+          1,
+          8,
+          32,
+          64
+        ],
+        "heads": [
+          16,
+          32
+        ],
+        "heads_kv": [
+          2
+        ],
+        "seqlen_q": [
+          1
+        ],
+        "seqlen_k": [
+          4096,
+          16384,
+          65536
+        ],
+        "head_dim": [
+          256
+        ],
+        "is_causal": [
+          true
+        ]
+      }
+    },
+    {
+      "name": "long_context_decode",
+      "source": "Llama 3.1 config.json (32 or 64 heads, 8 KV heads, head_dim 128, 131072-token context) and gpt-oss-120b config.json (64 heads, 8 KV heads, head_dim 64, 131072-token context)",
+      "note": "one token, or four of a speculative step, against a KV cache of 65536 or 131072 tokens: past the decode archetypes' 32768. 4 of its 48 points fit the default --max-bytes of 256 MiB in fp16; the larger ones need a larger ceiling.",
+      "values": {
+        "batch": [
+          1,
+          4,
+          16
+        ],
+        "heads": [
+          32,
+          64
+        ],
+        "heads_kv": [
+          8
+        ],
+        "seqlen_q": [
+          1,
+          4
+        ],
+        "seqlen_k": [
+          65536,
+          131072
+        ],
+        "head_dim": [
+          64,
+          128
+        ],
+        "is_causal": [
+          true
+        ]
+      }
+    },
+    {
+      "name": "shared_kv_head_dim_512",
+      "source": "the dsv4_flash and dsv4_pro shapes of dnn-benchmarking's SDPA OOTB corpus (2026-11-24), real-world tier",
+      "note": "16 to 128 query heads against one 512-wide KV head with V as wide: prefill, chunked prefill against up to 131072 cached tokens, and one- and two-token decode. 42 of its 64 points fit the default --max-bytes of 256 MiB in fp16; the larger ones need a larger ceiling.",
+      "values": {
+        "batch": [
+          1
+        ],
+        "heads": [
+          16,
+          32,
+          64,
+          128
+        ],
+        "heads_kv": [
+          1
+        ],
+        "seqlen_q": [
+          1,
+          2,
+          512,
+          2048
+        ],
+        "seqlen_k": [
+          2048,
+          8192,
+          32768,
+          131072
+        ],
+        "head_dim": [
+          512
+        ],
+        "is_causal": [
+          true
+        ]
+      }
+    },
+    {
+      "name": "video_dit_full_attention",
+      "source": "Wan 2.2 A14B (40 heads, head_dim 128) and LTX-2 (32 heads, head_dim 128) full spatio-temporal attention at the token counts of dnn-benchmarking's SDPA OOTB corpus (2026-11-24), real-world tier",
+      "note": "unmasked attention over a whole video latent, one batch of 16384 to 75600 tokens: past the long_context archetype's 32768. Kept at its recorded size: no point fits the default --max-bytes of 256 MiB (the smallest, in fp16, is about 512 MiB), so a default run reports it never admitted; recorded shapes (--model-shapes) carry these sizes exempt from the ceiling.",
+      "values": {
+        "batch": [
+          1
+        ],
+        "heads": [
+          32,
+          40
+        ],
+        "heads_kv": [
+          "$q.heads"
+        ],
+        "seqlen_q": [
+          16384,
+          30240,
+          48360,
+          75600
+        ],
+        "seqlen_k": [
+          "$q.seqlen_q"
+        ],
+        "head_dim": [
+          128
+        ],
+        "is_causal": [
           false
+        ]
+      }
+    },
+    {
+      "name": "mla_shared_kv_prefill",
+      "source": "DeepSeek-R1 and Kimi-K2 training graphs captured in dnn-benchmarking's SDPA OOTB corpus (2026-11-24) (bwd/captured)",
+      "note": "multi-head latent attention as those training runs record it: every query head against one shared KV head, Q and K 192 wide, V 128; the deepseek_v3_mla_prefill archetype expands the latent to one KV head per query head. 3 of its 4 points fit the default --max-bytes of 256 MiB in fp16; the larger ones need a larger ceiling.",
+      "values": {
+        "batch": [
+          1
+        ],
+        "heads": [
+          64,
+          128
+        ],
+        "heads_kv": [
+          1
+        ],
+        "seqlen_q": [
+          2048,
+          4096
+        ],
+        "seqlen_k": [
+          "$q.seqlen_q"
+        ],
+        "head_dim": [
+          192
+        ],
+        "value_head_dim": [
+          "mla"
+        ],
+        "is_causal": [
+          true
         ]
       }
     }
@@ -1538,7 +2552,8 @@
         128,
         160,
         192,
-        256
+        256,
+        576
       ]
     }
   },
@@ -1548,6 +2563,6 @@
     "exploration": 0.2
   },
   "// archetypes": "Recorded transformer configurations (RFC 0019.13 \u00a712.3). Decode and prefill are the same operation and different problems -- seqlen_q of 1 against a long cache is memory bound, and a square prefill is compute bound -- so each is anchored separately rather than left to a range over seqlen_q.",
-  "// neighbourhood": "head_dim moves among the widths shipped models use rather than scaling, since an interpolated 100 or 144 is not a configuration anyone ships. seqlen_k mirrors seqlen_q at ratios >= 1, which keeps the seqlen_q <= seqlen_k relation satisfied by construction for a causal mask rather than by rejection.",
+  "// neighbourhood": "head_dim moves among the widths shipped models use rather than scaling, since an interpolated 100 or 144 is not a configuration anyone ships; 576 is absorbed MLA's Q and K, which the constraints keep to value_head_dim mla. seqlen_k mirrors seqlen_q at ratios >= 1, the relation of decoder attention (prefill and append); more queries than keys comes from exploration and the cross attention archetype.",
   "// mixture": "Same shares as conv_fwd; see the note there."
 }

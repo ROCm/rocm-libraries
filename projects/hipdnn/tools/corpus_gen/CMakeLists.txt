@@ -66,23 +66,34 @@ if(HIPDNN_BUILD_FRONTEND AND HIPDNN_BUILD_BACKEND)
              "name,q.batch,q.heads,q.heads_kv,q.seqlen_q,q.seqlen_k,q.head_dim,q.is_causal,"
              "q.alignment,q.generate_stats,q.dtype,q.form\n"
              "llama3-70b prefill,1,64,8,4096,4096,128,true,top_left,false,bf16,plain\n")
+        # Six of matmul's bert_base_projection points, recorded workloads in
+        # fp16 row-major.
+        set(_bert_shapes "${CMAKE_CURRENT_BINARY_DIR}/bert_shapes.csv")
+        file(WRITE "${_bert_shapes}"
+             "name,q.M,q.N,q.K,q.dtype,q.a_layout,q.b_layout\n"
+             "bert4,1024,768,768,fp16,row,row\n"
+             "bert16,1024,3072,768,fp16,row,row\n"
+             "bert28,4096,768,768,fp16,row,row\n"
+             "bert40,4096,3072,768,fp16,row,row\n"
+             "bert52,16384,768,768,fp16,row,row\n"
+             "bert64,16384,3072,768,fp16,row,row\n")
         foreach(_run IN ITEMS
                 "without_engine|--without-engine,--operations,${_operations_dir},--operation,matmul,--count,4|0|4"
                 # No --operations: the declarations staged beside the tool.
                 "default_operations|--without-engine,--operation,matmul,--count,4|0|4"
                 "empty|--without-engine,--operations,${_operations_dir},--operation,matmul,--count,4,--keep,q.M=-7|2|0"
                 # With quotas and no --count, the corpus is the quotas alone. The first pass still
-                # runs before the quota is filled, and the forward's default one is about 9000
-                # problems (50 for each of about 180 live combinations of the unweighted
-                # parameters, the form among them), tens of seconds depending on the host:
-                # --per-combination 10 shortens it to about 1800 problems.
+                # runs before the quota is filled, and the forward's default one is about 3000
+                # problems (50 for each of about 60 live combinations of the unweighted
+                # parameters, the form among them), seconds to tens of seconds depending on the
+                # host: --per-combination 10 shortens it to about 600 problems.
                 "regime_quota|--without-engine,--operations,${_operations_dir},--operation,sdpa_fwd,--per-combination,10,--regime-quota,decode_short_mha=3|0|3"
                 # One form axis of eight labels: one graph under each, and nothing else. Each
                 # label is a value of the manifest's own `form` column and a reported quota. The
                 # small --per-combination is as for regime_quota.
                 "form_floor|--without-engine,--operations,${_operations_dir},--operation,sdpa_fwd,--per-combination,10,--form-floor,1|0|8|plain,scale_unset,scale_tensor,dropout,padded,ragged,bias,sink"
-                # The backward declares six of them: no sink token, and no ragged form.
-                "form_floor_sdpa_bwd|--without-engine,--operations,${_operations_dir},--operation,sdpa_bwd,--form-floor,1|0|6|plain,scale_unset,scale_tensor,dropout,padded,bias"
+                # The backward declares seven of them: no sink token.
+                "form_floor_sdpa_bwd|--without-engine,--operations,${_operations_dir},--operation,sdpa_bwd,--form-floor,1|0|7|plain,scale_unset,scale_tensor,dropout,padded,ragged,bias"
                 # Both floors at once, narrowed to one form so that the seven other forms are
                 # short: one graph fills a regime's floor and the form's, so `requested` is the
                 # graphs plus the larger of the two shortfalls (CorpusGenRun.cmake), 24 + 7, not
@@ -92,18 +103,23 @@ if(HIPDNN_BUILD_FRONTEND AND HIPDNN_BUILD_BACKEND)
                 # A sweep with no share still delivers the regimes the quotas name.
                 "regime_quota_without_sweep|--without-engine,--operations,${_operations_dir},--operation,sdpa_fwd,--regime-quota,decode_short_mha=3,--sweep-share,0|0|3"
                 # A keep on enum facets narrows the categorical combinations before the search's
-                # bound: of sdpa_fwd's 6912, the 8 of is_causal x alignment x generate_stats, 2 of
+                # bound: of sdpa_fwd's 53760, the 8 of is_causal x alignment x generate_stats, 2 of
                 # them empty by the declaration and none left unexplored, as manifest.json reports
                 # them (total:constraint_empty:not_explored), and the declared weights of the
                 # weighted facets.
-                "keep_narrows_combinations|--without-engine,--operations,${_operations_dir},--operation,sdpa_fwd,--count,20,--keep,q.form=plain,--keep,q.layout=bshd,--keep,q.scale=inv_sqrt_d,--keep,q.window=none,--keep,q.dtype=fp16|0|20||8:2:0|reports.categorical_weights.sdpa_fwd.layout.bshd=2.0,reports.categorical_weights.sdpa_fwd.scale.inv_sqrt_d=2.0,reports.categorical_weights.sdpa_fwd.window.none=3.0"
+                "keep_narrows_combinations|--without-engine,--operations,${_operations_dir},--operation,sdpa_fwd,--count,20,--keep,q.form=plain,--keep,q.layout=bshd,--keep,q.scale=inv_sqrt_d,--keep,q.window=none,--keep,q.dtype=fp16,--keep,q.value_head_dim=same|0|20||8:2:0|reports.categorical_weights.sdpa_fwd.layout.bshd=2.0,reports.categorical_weights.sdpa_fwd.scale.inv_sqrt_d=2.0,reports.categorical_weights.sdpa_fwd.window.none=3.0"
                 # Past the bound of 1024 the sample holds combinations that can hold a problem
-                # only: of the 6912, 2052 are empty by the declaration, and 3836 of the 4860 that
-                # are not are left out.
-                "combinations_past_the_bound|--without-engine,--operations,${_operations_dir},--operation,sdpa_fwd,--per-combination,2,--count,20|0|20||6912:2052:3836"
+                # only: of the 53760, 19460 are empty by the declaration, and 33276 of the 34300
+                # that are not are left out.
+                "combinations_past_the_bound|--without-engine,--operations,${_operations_dir},--operation,sdpa_fwd,--per-combination,2,--count,20|0|20||53760:19460:33276"
                 # The cut to --count holds every form at about an even share (an eighth), though
-                # fewer combinations can hold some forms than others.
-                "count_cut_keeps_forms_even|--without-engine,--operations,${_operations_dir},--operation,sdpa_fwd,--per-combination,10,--count,400|0|400|||||9:plain:scale_unset:scale_tensor:dropout:padded:ragged:bias:sink"
+                # fewer combinations can hold some forms than others. The weighted dtype splits
+                # the first pass's budget rather than multiplying it, so --per-combination 30
+                # gives the cut the first pass of about 1800 problems it had at 10 with three
+                # unweighted dtypes. At 10 the default seed's cut still held every form at 40 of
+                # 400 or more but scale_unset (42), 6 above the 9% floor (36); 30 keeps the floor
+                # from resting on one seed's margin.
+                "count_cut_keeps_forms_even|--without-engine,--operations,${_operations_dir},--operation,sdpa_fwd,--per-combination,30,--count,400|0|400|||||9:plain:scale_unset:scale_tensor:dropout:padded:ragged:bias:sink"
                 # With --anchor-scaling the declared mixture (80% archetypes and neighbourhood)
                 # holds at a count far above the first pass; without it the first pass's fixed
                 # quotas are diluted by exploration. anchored_share reports the delivered corpus.
@@ -112,13 +128,34 @@ if(HIPDNN_BUILD_FRONTEND AND HIPDNN_BUILD_BACKEND)
                 # A --count far below the first pass cuts it, and anchored_share counts what is
                 # left: the corpus's sweep graphs, not the problems explored before the cut.
                 "anchored_share_counts_the_delivered_corpus|--without-engine,--operations,${_operations_dir},--operation,matmul,--count,100|0|100|||reports.anchored_share.matmul.delivered=100"
+                # anchored_share accounts for each archetype: GPT-3's
+                # projections are past the default --max-bytes at every declared
+                # size, refused by the oracle and never admitted, and the run
+                # says why; the square benchmark fits and is.
+                "each_archetype_is_accounted_for|--without-engine,--operations,${_operations_dir},--operation,matmul,--count,100|0|100|||reports.anchored_share.matmul.archetypes.gpt3_175b_projection.admitted=0,reports.anchored_share.matmul.archetypes.gpt3_175b_projection.refused_by_oracle>=1,reports.anchored_share.matmul.archetypes.gpt3_175b_projection.refused_by_constraints=0,reports.anchored_share.matmul.archetypes.gpt3_175b_projection.held=0,reports.anchored_share.matmul.archetypes.square_benchmark.admitted>=1|||archetype gpt3_175b_projection was never admitted .[0-9]+ drawn.: of [0-9]+ refused points kept. [0-9]+ over --max-bytes"
+                # An archetype whose draws the recorded shapes already hold is
+                # in the corpus under them: counted held, not admitted. The
+                # search starts from the recorded shapes as well as its
+                # skeleton: 76 seeds checked without them, 82 with them.
+                # reports.search splits the oracle queries.
+                "archetype_held_by_model_shapes|--without-engine,--operations,${_operations_dir},--operation,matmul,--keep,q.dtype=fp16,--keep,q.a_layout=row,--keep,q.b_layout=row,--model-shapes,${_bert_shapes},--count,100|0|100|||reports.anchored_share.matmul.archetypes.bert_base_projection.admitted=0,reports.anchored_share.matmul.archetypes.bert_base_projection.held>=1,reports.search.matmul.searched=1,reports.search.matmul.seed_checks>=82,reports.search.matmul.seeds_accepted>=82,reports.search.matmul.walk_checks>=1,reports.search.matmul.oracle_queries>=1"
+                # A quota and a small --count: the archetypes kept through
+                # the cut fit in the room the quota leaves, so the corpus is
+                # --count and the quota is delivered.
+                "quota_within_a_small_count|--without-engine,--operations,${_operations_dir},--operation,sdpa_fwd,--per-combination,10,--regime-quota,decode_short_mha=4,--count,5|0|5|||reports.regime_quota.sdpa_fwd.decode_short_mha.delivered=4"
+                # The cut keeps a graph of every admitted archetype: at
+                # --count 8 it would otherwise drop decode_gemv and
+                # llama3_70b_projection.
+                "the_cut_keeps_each_admitted_archetype|--without-engine,--operations,${_operations_dir},--operation,matmul,--count,8|0|8|||reports.anchored_share.matmul.archetypes.decode_gemv.delivered>=1,reports.anchored_share.matmul.archetypes.llama3_70b_projection.delivered>=1"
                 # A focused search that stops without proof reports the regime not reached, not
-                # saturated, and the short quota exits 3: with the sweep off this seed's search
-                # finds none of cross_long_gqa, a sliver (more than 2048 keys, then more queries).
-                "regime_not_reached|--without-engine,--operations,${_operations_dir},--operation,sdpa_fwd,--regime-quota,cross_long_gqa=1,--regime-quota,decode_short_mha=3,--sweep-share,0,--seed,3|3|3|||reports.regime_quota.sdpa_fwd.cross_long_gqa.saturated=OFF,reports.regime_quota.sdpa_fwd.cross_long_gqa.delivered=0,reports.regime_quota.sdpa_fwd.decode_short_mha.delivered=3"
-                # The model shapes file carries no column for layout, scale or window, so its one
-                # row takes the declared defaults, and the report counts them.
-                "model_shapes|--without-engine,--operations,${_operations_dir},--operation,sdpa_fwd,--model-shapes,${_model_shapes},--count,1,--model-share,1,--sweep-share,0|0|1|||reports.model_shapes.0.rows=1,reports.model_shapes.0.defaulted.layout=1,reports.model_shapes.0.defaulted.scale=1,reports.model_shapes.0.defaulted.window=1"
+                # saturated, and the short quota exits 3: with the sweep off and 100 oracle calls a
+                # combination, this seed's search finds none of cross_long_gqa, a sliver (more
+                # than 2048 keys, then more queries).
+                "regime_not_reached|--without-engine,--operations,${_operations_dir},--operation,sdpa_fwd,--regime-quota,cross_long_gqa=1,--regime-quota,decode_short_mha=3,--sweep-share,0,--seed,1,--budget,100|3|3|||reports.regime_quota.sdpa_fwd.cross_long_gqa.saturated=OFF,reports.regime_quota.sdpa_fwd.cross_long_gqa.delivered=0,reports.regime_quota.sdpa_fwd.decode_short_mha.delivered=3"
+                # The model shapes file carries no column for layout, scale, window or
+                # value_head_dim, so its one row takes the declared defaults, and the report
+                # counts them.
+                "model_shapes|--without-engine,--operations,${_operations_dir},--operation,sdpa_fwd,--model-shapes,${_model_shapes},--count,1,--model-share,1,--sweep-share,0|0|1|||reports.model_shapes.0.rows=1,reports.model_shapes.0.defaulted.layout=1,reports.model_shapes.0.defaulted.scale=1,reports.model_shapes.0.defaulted.window=1,reports.model_shapes.0.defaulted.value_head_dim=1"
                 # The engine path, host-only: every problem is offered to the test plugin's
                 # engine, which serves matmul without a device.
                 "engine|--plugin-dir,${HIPDNN_TEST_PLUGIN_DIR}/default,--engine-name,TEST_GOOD_DEFAULT_ENGINE,--operations,${_operations_dir},--operation,matmul,--count,3|0|3")
@@ -129,8 +166,8 @@ if(HIPDNN_BUILD_FRONTEND AND HIPDNN_BUILD_BACKEND)
             list(GET _fields 3 _graphs)
             list(LENGTH _fields _field_count)
             # The optional fields, in the order CorpusGenRun.cmake names them: forms, combinations,
-            # manifest checks, anchored percent, form mix.
-            foreach(_index IN ITEMS 4 5 6 7 8)
+            # manifest checks, anchored percent, form mix, stderr.
+            foreach(_index IN ITEMS 4 5 6 7 8 9)
                 set(_field_${_index} "")
                 if(_field_count GREATER ${_index})
                     list(GET _fields ${_index} _field_${_index})
@@ -145,6 +182,7 @@ if(HIPDNN_BUILD_FRONTEND AND HIPDNN_BUILD_BACKEND)
                         "-DEXPECTED_MANIFEST=${_field_6}"
                         "-DEXPECTED_ANCHORED_PERCENT=${_field_7}"
                         "-DEXPECTED_FORM_MIX=${_field_8}"
+                        "-DEXPECTED_STDERR=${_field_9}"
                         "-DOUTPUT_DIR=${CMAKE_CURRENT_BINARY_DIR}/${_test}"
                         -P "${CMAKE_CURRENT_SOURCE_DIR}/../cmake/CorpusGenRun.cmake")
             set_tests_properties(${_test} PROPERTIES TIMEOUT 120)
