@@ -9,24 +9,25 @@ the structure of :class:`TestNumericVerification.test_extended_parity` in
 attention harness which is now the correct home for FMHA / Sage / Sparse
 kernel parity checks (those kernels import from ``kernels`` — library layer).
 
-PYTHONPATH is derived from this file's location so the test is portable:
-- ``library/`` (exposes ``builders.*``, ``kernels.*``, ``dispatch.*``)
-- ``platform/python`` (exposes ``rocke.*``)
+The harness imports the ``rocke`` package this test imports, with ``library/``
+(``builders.*``, ``kernels.*``, ``dispatch.*``) on its path
+(``rocke.tests.subprocess_launcher``), in a source checkout and in the installed
+test tree alike.
 """
 
 from __future__ import annotations
 
-import os
 import pathlib
 import subprocess
-import sys
 import unittest
 
 from rocke.runtime.hip_module import get_device_arch
+from rocke.tests.subprocess_launcher import (
+    rocke_python_command,
+    rocke_subprocess_env,
+)
 
-_LIBDIR = pathlib.Path(__file__).resolve().parents[1]  # rocke/library
-_PYDIR = pathlib.Path(__file__).resolve().parents[2] / "platform" / "python"
-_SUBPROC_PYTHONPATH = os.pathsep.join([str(_PYDIR), str(_LIBDIR)])
+_LIBDIR = pathlib.Path(__file__).resolve().parents[1]  # the library root
 
 
 # Detect arch via the rocke HIP runtime. The parity harness subprocess computes
@@ -40,12 +41,12 @@ class TestAttentionParityLibrary(unittest.TestCase):
     """Launch the library attention parity harness and check all cases pass."""
 
     def _run(self, *cmd, timeout=420):
-        env = dict(os.environ)
-        env["PYTHONPATH"] = _SUBPROC_PYTHONPATH
+        env = rocke_subprocess_env(python_paths=[_LIBDIR])
         env["PYTHONDONTWRITEBYTECODE"] = "1"
 
         r = subprocess.run(
-            [sys.executable, *cmd],
+            rocke_python_command(*cmd),
+            check=False,
             cwd=str(_LIBDIR),
             env=env,
             capture_output=True,
