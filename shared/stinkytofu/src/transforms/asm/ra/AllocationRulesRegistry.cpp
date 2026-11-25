@@ -92,7 +92,10 @@ std::vector<std::string> AllocationRulesRegistry::matrixRuleNames() {
     for (const auto& kv : registry().factories) {
         if (!kv.second) continue;
         // Capabilities gate statuses, not rows, so the defaults name every rule.
-        for (const AllocationRule& rule : kv.second(AsmCapsConfig{}).all()) {
+        // Named: all() is a view into the table, and a temporary table would be
+        // freed before the loop reads it.
+        const AllocationRules rules = kv.second(AsmCapsConfig{});
+        for (const AllocationRule& rule : rules.all()) {
             if (rule.role != MatrixRole::None) names.emplace_back(rule.name);
         }
     }
