@@ -147,12 +147,12 @@ struct ConvParam
         return static_cast<std::size_t>(2) * G_ * N_ * K_ * C_ *
                std::accumulate(std::begin(output_spatial_lengths_),
                                std::next(std::begin(output_spatial_lengths_), num_dim_spatial_),
-                               1,
-                               std::multiplies<>()) *
+                               static_cast<std::size_t>(1),
+                               std::multiplies<std::size_t>()) *
                std::accumulate(std::begin(filter_spatial_lengths_),
                                std::next(std::begin(filter_spatial_lengths_), num_dim_spatial_),
-                               1,
-                               std::multiplies<>());
+                               static_cast<std::size_t>(1),
+                               std::multiplies<std::size_t>());
     }
 
     template <typename InDataType>
@@ -163,8 +163,8 @@ struct ConvParam
                (G_ * N_ * C_ *
                 std::accumulate(std::begin(input_spatial_lengths_),
                                 std::next(std::begin(input_spatial_lengths_), num_dim_spatial_),
-                                1,
-                                std::multiplies<>()));
+                                static_cast<std::size_t>(1),
+                                std::multiplies<std::size_t>()));
     }
 
     template <typename WeiDataType>
@@ -175,8 +175,8 @@ struct ConvParam
                (G_ * K_ * C_ *
                 std::accumulate(std::begin(filter_spatial_lengths_),
                                 std::next(std::begin(filter_spatial_lengths_), num_dim_spatial_),
-                                1,
-                                std::multiplies<>()));
+                                static_cast<std::size_t>(1),
+                                std::multiplies<std::size_t>()));
     }
 
     template <typename OutDataType>
