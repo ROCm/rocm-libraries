@@ -42,7 +42,7 @@
 //
 // rocsparse::csrsm is the single-matrix kernel wrapper at the end of
 // csrsm_device.h, kept for this test. The library launches its own batched
-// kernel from level3/refactored/rocsparse_csrsm_solve.cpp. Both only forward to
+// kernel from level3/rocsparse_csrsm_solve.cpp. Both only forward to
 // rocsparse::csrsm_device, which holds the grid-stride loop tested here.
 //
 // The problem is a 16 x 16 lower bidiagonal matrix with 300 right hand sides, so

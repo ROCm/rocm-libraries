@@ -23,7 +23,7 @@
  * ************************************************************************ */
 
 //
-// Device unit tests for rocsparse_spsm (library/src/level3/refactored/).
+// Device unit tests for rocsparse_spsm (library/src/level3/).
 //
 // The generic rocsparse_spsm API solves op(A) * C = alpha * op(B) for a
 // triangular sparse A. The three stages (buffer size, preprocess, compute)

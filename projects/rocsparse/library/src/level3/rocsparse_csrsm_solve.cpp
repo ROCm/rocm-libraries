@@ -30,14 +30,14 @@
 #include "rocsparse_common.hpp"
 #include "rocsparse_utility.hpp"
 
-#include "../../level1/rocsparse_gthr.hpp"
-#include "../../level2/rocsparse_csrsv.hpp"
-#include "../csrsm_device.h"
+#include "../level1/rocsparse_gthr.hpp"
+#include "../level2/rocsparse_csrsv.hpp"
+#include "csrsm_device.h"
 
 #include "internal/level3/rocsparse_csrsm.h"
 #include "rocsparse_csrsm.hpp"
 
-#include "../../level2/rocsparse_csrsv.hpp"
+#include "../level2/rocsparse_csrsv.hpp"
 #include "rocsparse_common.hpp"
 #include "rocsparse_control.hpp"
 #include "rocsparse_grid.hpp"

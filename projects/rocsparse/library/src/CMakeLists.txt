@@ -710,22 +710,22 @@ list(APPEND rocsparse_source
   src/auxiliary/dnmat_transpose/rocsparse_dnmat_transpose.cpp
   src/auxiliary/dnmat_copy_data/rocsparse_dnmat_copy_data.cpp
   src/auxiliary/dnvec_copy_data/rocsparse_dnvec_copy_data.cpp
-  src/level3/refactored/rocsparse_xcsrsm_buffer_size.cpp
-  src/level3/refactored/rocsparse_xcsrsm_analysis.cpp
-  src/level3/refactored/rocsparse_xcsrsm_solve.cpp
-  src/level3/refactored/rocsparse_csrsm_buffer_size.cpp
-  src/level3/refactored/rocsparse_csrsm_analysis.cpp
-  src/level3/refactored/rocsparse_csrsm_solve.cpp
-  src/level3/refactored/rocsparse_cscsm_buffer_size.cpp
-  src/level3/refactored/rocsparse_cscsm_analysis.cpp
-  src/level3/refactored/rocsparse_cscsm_solve.cpp
-  src/level3/refactored/rocsparse_coosm_buffer_size.cpp
-  src/level3/refactored/rocsparse_coosm_analysis.cpp
-  src/level3/refactored/rocsparse_coosm_solve.cpp
-  src/level3/refactored/rocsparse_bsrsm_template_large.cpp
-  src/level3/refactored/rocsparse_spsm.cpp
-  src/level3/refactored/rocsparse_sptrsm_set_input.cpp
-  src/level3/refactored/rocsparse_sptrsm_get_output.cpp
-  src/level3/refactored/rocsparse_sptrsm_buffer_size.cpp
-  src/level3/refactored/rocsparse_sptrsm.cpp
+  src/level3/rocsparse_xcsrsm_buffer_size.cpp
+  src/level3/rocsparse_xcsrsm_analysis.cpp
+  src/level3/rocsparse_xcsrsm_solve.cpp
+  src/level3/rocsparse_csrsm_buffer_size.cpp
+  src/level3/rocsparse_csrsm_analysis.cpp
+  src/level3/rocsparse_csrsm_solve.cpp
+  src/level3/rocsparse_cscsm_buffer_size.cpp
+  src/level3/rocsparse_cscsm_analysis.cpp
+  src/level3/rocsparse_cscsm_solve.cpp
+  src/level3/rocsparse_coosm_buffer_size.cpp
+  src/level3/rocsparse_coosm_analysis.cpp
+  src/level3/rocsparse_coosm_solve.cpp
+  src/level3/rocsparse_bsrsm_template_large.cpp
+  src/level3/rocsparse_spsm.cpp
+  src/level3/rocsparse_sptrsm_set_input.cpp
+  src/level3/rocsparse_sptrsm_get_output.cpp
+  src/level3/rocsparse_sptrsm_buffer_size.cpp
+  src/level3/rocsparse_sptrsm.cpp
 )

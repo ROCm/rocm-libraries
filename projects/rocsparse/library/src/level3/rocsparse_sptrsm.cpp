@@ -24,15 +24,15 @@
 #include "internal/generic/rocsparse_sptrsm.h"
 #include "rocsparse_utility.hpp"
 
-#include "../../conversion/rocsparse_convert_array.hpp"
-#include "../../conversion/rocsparse_convert_scalar.hpp"
+#include "../conversion/rocsparse_convert_array.hpp"
+#include "../conversion/rocsparse_convert_scalar.hpp"
 #include "rocsparse_common.h"
 #include "rocsparse_coosm.hpp"
 #include "rocsparse_csrsm.hpp"
 
 #include "rocsparse_cscsm.hpp"
 
-#include "../rocsparse_sptrsm_descr.hpp"
+#include "rocsparse_sptrsm_descr.hpp"
 
 #include "../level2/rocsparse_diagonal_solve.hpp"
 

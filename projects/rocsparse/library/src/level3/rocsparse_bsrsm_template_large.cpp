@@ -26,9 +26,9 @@
 // __global__ wrappers carrying the grid-stride loops) and the grid sizing helpers
 // live in these two headers so clients/unittests can launch the kernels with a
 // deliberately undersized grid.
-#include "../bsrsm_device.h"
-#include "../bsrsm_device_large.h"
-#include "../rocsparse_bsrsm.hpp"
+#include "bsrsm_device.h"
+#include "bsrsm_device_large.h"
+#include "rocsparse_bsrsm.hpp"
 #include "rocsparse_common.h"
 #include "rocsparse_control.hpp"
 #include "rocsparse_grid.hpp"

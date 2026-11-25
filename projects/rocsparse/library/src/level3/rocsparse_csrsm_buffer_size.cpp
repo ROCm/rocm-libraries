@@ -22,7 +22,7 @@
  *
  * ************************************************************************ */
 
-#include "../../level2/rocsparse_csrsv.hpp"
+#include "../level2/rocsparse_csrsv.hpp"
 #include "rocsparse_csrsm.hpp"
 
 #include "rocsparse_enum_utils.hpp"
