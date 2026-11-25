@@ -339,7 +339,7 @@ def current_shard(
 
 
 def add_shard_argument(
-    parser: argparse.ArgumentParser, help: str, list_help: str
+    parser: argparse.ArgumentParser, *, help: str, list_help: str
 ) -> None:
     """Give a runner's ``parser`` the :data:`ACTIVATION_FLAG` option and the
     :data:`LIST_KEYS_FLAG` option, which every split runner takes

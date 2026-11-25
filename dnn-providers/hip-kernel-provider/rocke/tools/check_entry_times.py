@@ -118,9 +118,11 @@ from rocke.tests.ci_shard import (
     SHARD_ENV,
     WORKER_ENV,
     ShardKeyListing,
-    current_shard,
+    add_shard_argument,
     header_line,
+    list_keys_path,
     place_keys,
+    shard_from_arguments,
 )
 from rocke.tests.ctest_listing import list_ctest_entries
 from rocke.tests.ctest_shard import shard_costs, shard_key
@@ -863,8 +865,9 @@ def _check_runs_here(arguments: argparse.Namespace) -> bool:
 
 
 def _check(arguments: argparse.Namespace) -> int:
-    if arguments.list_shard_keys is not None:
-        return _list_check_case(arguments.list_shard_keys)
+    listing = list_keys_path(arguments)
+    if listing is not None:
+        return _list_check_case(listing)
     if not _check_runs_here(arguments):
         return 0
     entries = _registration(arguments)
@@ -1001,18 +1004,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         help="the operating system whose registration is listed (default: this one)",
     )
     _add_registration_source(check)
-    check.add_argument(
-        ACTIVATION_FLAG,
-        dest="shard_from_gtest_env",
-        action="store_true",
+    add_shard_argument(
+        check,
         help="check only on the CI shard that keeps this check's one case",
-    )
-    check.add_argument(
-        LIST_KEYS_FLAG,
-        dest="list_shard_keys",
-        type=Path,
-        default=None,
-        help="write this check's one case to this path instead of checking",
+        list_help="write this check's one case to this path instead of checking",
     )
     check.set_defaults(run=_check)
 
@@ -1044,16 +1039,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     arguments = parser.parse_args(argv)
     if arguments.run is _check:
-        if arguments.list_shard_keys is not None and not arguments.shard_from_gtest_env:
-            parser.error(f"{LIST_KEYS_FLAG} needs {ACTIVATION_FLAG}")
-        try:
-            arguments.shard = (
-                current_shard(from_gtest=True)
-                if arguments.shard_from_gtest_env
-                else None
-            )
-        except ValueError as error:
-            parser.error(f"rocke-ctest-shard: {error}")
+        arguments.shard = shard_from_arguments(check, arguments)
     return arguments.run(arguments)
 
 
