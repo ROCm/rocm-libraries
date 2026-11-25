@@ -138,7 +138,9 @@ artifact path.
 ## Execution categories
 
 Four platform-runner categories run here; don't conflate them. Installed
-library CTests add the explicit host-gate category described below.
+library CTests add the explicit host-gate category described below. To choose
+the tier and CTest entry of a new test, see
+[`TESTING.md` §5.0.3](../../TESTING.md#503-choosing-a-tier-and-an-entry-for-a-test).
 
 1. **Default developer pre-merge runner** (`python tests/run_all.py`):
    relative-path guard -> byte-identity gate (`tools/check_byte_identity.py`) ->
@@ -293,7 +295,9 @@ builds and installed provider CI.
   efficiency work now that CI supplies execution evidence for the standalone gate.
 ### Library unit and explicit host gates
 
-For new or migrated library cohorts, affordable `test_*.py` discovery is the quick tier.
+For new or migrated library cohorts, affordable `test_*.py` discovery is the
+source-runner default; the CTest tier follows
+[`TESTING.md` §5.0.3](../../TESTING.md#503-choosing-a-tier-and-an-entry-for-a-test).
 Exhaustive or compiler-dependent matrices use non-discovered modules, explicit
 stages in `library/tests/run_all.py`, and separately categorized installed
 CTests. Legacy violations remain tracked as TESTING.md gap G9.

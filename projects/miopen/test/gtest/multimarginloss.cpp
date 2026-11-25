@@ -64,12 +64,12 @@ TEST_P(GPU_MultiMarginLoss_BFP16, Test)
     Verify();
 };
 
-INSTANTIATE_TEST_SUITE_P(Smoke,
+INSTANTIATE_TEST_SUITE_P(Quick,
                          GPU_MultiMarginLoss_FP32,
                          testing::ValuesIn(MultiMarginLossTestConfigs()));
-INSTANTIATE_TEST_SUITE_P(Smoke,
+INSTANTIATE_TEST_SUITE_P(Quick,
                          GPU_MultiMarginLoss_FP16,
                          testing::ValuesIn(MultiMarginLossFp16TestConfigs()));
-INSTANTIATE_TEST_SUITE_P(Smoke,
+INSTANTIATE_TEST_SUITE_P(Quick,
                          GPU_MultiMarginLoss_BFP16,
                          testing::ValuesIn(MultiMarginLossTestConfigs()));

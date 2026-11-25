@@ -243,7 +243,8 @@ section.
 has the full list.
 
 * **Heuristics:** ``CUDNN_HEUR_MODE_A`` and ``CUDNN_HEUR_MODE_INSTANT`` rank by hipDNN's ModeA
-  policy, ``CUDNN_HEUR_MODE_B`` by ModeB, and ``CUDNN_HEUR_MODE_FALLBACK`` by fallback order. Every
+  policy, ``CUDNN_HEUR_MODE_B`` by ModeB, and ``CUDNN_HEUR_MODE_FALLBACK`` by hipDNN's model-free
+  static (fallback) order; each is forwarded as the matching hipDNN backend heuristic mode. Every
   mode returns the same engines, each with its default configuration
   (`Heuristic modes <https://github.com/ROCm/rocm-libraries/blob/develop/projects/hipdnn/docs/KNOWN_DIVERGENCES.md#heuristic-modes>`__).
 * **Handles:** ``OperationGraphBuilder`` needs ``setHandle``; without it ``build()`` returns
@@ -284,14 +285,27 @@ calibrated configuration prediction and falls back to the graph-level prediction
 for each engine. Neither mode benchmarks the graph. Install compatible trained
 models for the selected device architecture.
 
-``HeuristicMode::A`` and ``HeuristicMode::B`` are not backend heuristic modes: the
-frontend turns them into the ``SelectionHeuristic::ModeA`` and
-``SelectionHeuristic::ModeB`` entries of the heuristic descriptor's ordered policy
-list, always preceded by ``SelectionHeuristic::Config`` and followed by
-``SelectionHeuristic::StaticOrdering``. If no applicable engine has a usable
-prediction, the prediction policy declines and ordinary static engine selection
-still runs, so ``graph.create_execution_plans({HeuristicMode::B})`` never fails for
-want of a model. Setting ``HIPDNN_HEUR_POLICY_ORDER`` overrides the whole list.
+``HeuristicMode::A``, ``HeuristicMode::B`` and ``HeuristicMode::FALLBACK`` are
+forwarded to the backend as ``HIPDNN_HEUR_MODE_A``, ``HIPDNN_HEUR_MODE_B`` and
+``HIPDNN_HEUR_MODE_FALLBACK``, and the mode selects the heuristic descriptor's
+ordered policy list: ``SelectionHeuristic::Config``, then
+``SelectionHeuristic::ModeA`` (mode A) or ``SelectionHeuristic::ModeB`` (mode B),
+then ``SelectionHeuristic::StaticOrdering``. ``HeuristicMode::FALLBACK`` is
+model-free: ``SelectionHeuristic::Config``, then ``SelectionHeuristic::StaticOrdering``.
+If no applicable engine has a usable prediction, the prediction policy declines
+and ordinary static engine selection still runs, so
+``graph.create_execution_plans({HeuristicMode::B})`` never fails for want of a
+model; ``A``, ``B`` and ``FALLBACK`` then rank alike. Setting
+``HIPDNN_HEUR_POLICY_ORDER`` overrides the whole list.
+
+cudnn-frontend has no default mode list; hipDNN's default is
+``{HeuristicMode::A}``, so a call that names no mode ranks by prediction where a
+model exists. Pass ``{HeuristicMode::FALLBACK}`` for the static order. A list of
+modes runs one heuristic query per mode, in the order given, and concatenates the
+results, skipping an engine an earlier mode already returned, so
+``{HeuristicMode::A, HeuristicMode::FALLBACK}`` is mode A's ranking. An empty list
+returns ``INVALID_VALUE`` before any query, where cudnn-frontend accepts it and fails
+later, at ``check_support()``.
 
 Both modes rank by one *ranking metric*, ``tflops`` by default: calibrated
 throughput, highest first. ``graph.set_ranking_metric("time")`` ranks by predicted
