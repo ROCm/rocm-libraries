@@ -1341,6 +1341,9 @@ namespace TensileLite
                 = isComplexType(problem.a().dataType()) || isComplexType(problem.b().dataType())
                   || isComplexType(problem.c().dataType()) || isComplexType(problem.d().dataType());
 
+            if(isComplex && problem.outputAmaxD())
+                return rejectFast("AMAX-D output is not supported for complex inputs");
+
             if(!isSupportedInputType(problem.a().dataType())
                || !isSupportedInputType(problem.b().dataType())
                || !isSupportedOutputType(problem.c().dataType())
@@ -1422,19 +1425,19 @@ namespace TensileLite
                         "bias-gradient reduction requires a 2-D tensor or a single batch");
             }
 
-            if(problem.outputAmaxD())
+            if(!problem.highPrecisionAccumulate()
+               && (problem.outputAmaxD() || (problem.useGradient() && problem.useBias())))
             {
-                return rejectFast("AMAX-D output is not supported by the fast path");
-            }
-
-            if(problem.useGradient() && problem.useBias() && !problem.highPrecisionAccumulate())
-            {
-                // These slow-path reductions accumulate in Half or BFloat16,
-                // rounding after each addition. The fast path accumulates in float.
                 const auto typeId = getInputContractionInputsTypeId(problem);
                 if(typeId == TypedGemm_H_H_H::TypeId() || typeId == TypedGemm_B_B_S::TypeId())
+                {
+                    // The slow epilogue rounds to Half or BFloat16; the fast epilogue uses float.
+                    if(problem.outputAmaxD())
+                        return rejectFast("Half/BFloat16 AMAX-D without high-precision "
+                                          "accumulation requires the slow path");
                     return rejectFast("Half/BFloat16 bias-gradient reductions without "
                                       "high-precision accumulation require the slow path");
+                }
             }
 
             if(isFloat8Output && !isFloat8OutputFastPathTypeId(problem))
@@ -2003,6 +2006,11 @@ namespace TensileLite
             auto mTiles = (sizeM / BLOCK_M + (sizeM % BLOCK_M != 0));
             auto kTiles = (sizeK / BLOCK_K + (sizeK % BLOCK_K != 0));
 
+            // Each worker owns one maximum; merge after the parallel region.
+            std::vector<AccumT> threadAmaxD;
+            if(problem.outputAmaxD())
+                threadAmaxD.resize(omp_get_max_threads(), AccumT(0));
+
 // Perform the contraction.
 // Parallelize over the 3 non-reduction dimensions: batch, M, and N.
 // Each thread computes a BLOCK_M x BLOCK_N tile.
@@ -2033,6 +2041,7 @@ namespace TensileLite
                         std::array<MacT, BLOCK_M * BLOCK_K> aReg = {0};
                         std::array<MacT, BLOCK_K * BLOCK_N> bReg = {0};
                         std::array<MacT, BLOCK_M * BLOCK_N> cReg = {0};
+                        AccumT                              tileAmaxD(0);
 
                         if(doContraction && hasMX)
                         {
@@ -2278,6 +2287,19 @@ namespace TensileLite
                                                              actArgs);
                                     }
 
+                                    // Match the slow path: post-activation/gradient,
+                                    // before ScaleD, gate residual and the D cast.
+                                    if constexpr(!TypeInfo<AccumT>::IsComplex)
+                                    {
+                                        if(problem.outputAmaxD())
+                                        {
+                                            AccumT magnitude
+                                                = current > AccumT(0) ? current : -current;
+                                            if(magnitude > tileAmaxD)
+                                                tileAmaxD = magnitude;
+                                        }
+                                    }
+
                                     if(biasGradientFromD)
                                         curBatchWs[idxD] = current;
 
@@ -2296,7 +2318,32 @@ namespace TensileLite
                                 }
                             }
                         }
+                        if constexpr(!TypeInfo<AccumT>::IsComplex)
+                        {
+                            if(problem.outputAmaxD())
+                            {
+                                auto& workerMax = threadAmaxD[omp_get_thread_num()];
+                                if(tileAmaxD > workerMax)
+                                    workerMax = tileAmaxD;
+                            }
+                        }
                     }
+                }
+            }
+
+            if constexpr(!TypeInfo<AccumT>::IsComplex)
+            {
+                if(problem.outputAmaxD())
+                {
+                    AccumT amaxD(0);
+                    for(auto const& workerMax : threadAmaxD)
+                        if(workerMax > amaxD)
+                            amaxD = workerMax;
+                    SetValue<AccumT>(
+                        problem.tensors()[ContractionProblemGemm::TENSOR::AMAXD].dataType(),
+                        amaxD,
+                        inputs.amaxD,
+                        0);
                 }
             }
 
