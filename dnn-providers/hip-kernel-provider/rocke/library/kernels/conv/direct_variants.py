@@ -219,6 +219,9 @@ def per_axis_pad_variants(
                 or (stride == 1 and KH == 1 and PAD == 0 and dil_h == 1)
             )
         ),
+        # An ungrouped forward for dense layers of any filter / stride /
+        # dilation / padding.
+        DIRECT_FWD_FLEX_MFMA: direction == "fwd" and dense,
     }
     missing = [v for v in PER_AXIS_PAD_VARIANTS if v not in shapes]
     if missing:
