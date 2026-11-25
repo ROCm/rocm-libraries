@@ -6,9 +6,10 @@
 #   - gfx950, with the ci:run-gfx950 label or on a manual run;
 #   - Windows CPU, non-blocking and never a required check;
 #   - Windows GPU (gfx1151), only when the lanes themselves change or on a manual run.
-# The plan job picks the GPU lanes, which run as a Linux matrix and a Windows matrix. Every lane
-# installs the TheRock nightly pinned below into a fresh venv, builds the bindings against it,
-# and runs their tests, one step each, with projects/hipblaslt/python/scripts/ci_lane.sh.
+# The plan job (.github/scripts/hipblaslt_python_lanes.py) picks the GPU lanes, which run as a
+# Linux matrix and a Windows matrix. Every lane installs the TheRock nightly pinned below into a
+# fresh venv, builds the bindings against it, and runs their tests, one step each, with
+# projects/hipblaslt/python/scripts/ci_lane.sh.
 name: "Component CI: hipBLASLt Python bindings"
 
 on:
@@ -45,8 +46,13 @@ jobs:
       linux_gpu: ${{ steps.plan.outputs.linux_gpu }}
       windows: ${{ steps.plan.outputs.windows }}
     steps:
-      # GPU runner labels change without notice; the shared config has the current ones.
+      - name: Checkout the lane planner
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+          sparse-checkout: .github/scripts
 
+      # GPU runner labels change without notice; the shared config has the current ones.
       - name: Checkout the shared CI config
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
@@ -54,7 +60,11 @@ jobs:
           path: ci-config
           persist-credentials: false
 
+      - name: Test the lane planner
+        run: python3 .github/scripts/tests/test_hipblaslt_python_lanes.py
+
       - id: plan
+        name: Plan the lanes
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
@@ -62,48 +72,7 @@ jobs:
           EVENT: ${{ github.event_name }}
           ALL_LANES: ${{ inputs.all_lanes }}
           WINDOWS_RUNNER: ${{ inputs.windows_runner }}
-        run: |
-          set -euo pipefail
-          runner() {
-            jq -er --arg family "$1" --arg os "$2" \
-              '.gpu_runner_labels[$family][$os]["test-runs-on"]' ci-config/runner-config-v2.json
-          }
-          gfx942_runner="$(runner gfx94x linux)"
-          gfx950_runner="$(runner gfx950 linux)"
-          gfx1151_runner="$(runner gfx1151 windows)"
-          labels=""
-          # Read the labels now, not from the event, so a re-run after adding one sees it.
-          if [ -n "${PR}" ]; then
-            labels="$(gh api "repos/${REPO}/issues/${PR}/labels" --jq '.[].name')"
-          fi
-          opt_in=false
-          if [ "${ALL_LANES}" = "true" ]; then
-            opt_in=true
-          fi
-          # gfx950 machines are scarce: only the label or a manual run asks for one, not a change
-          # to the lanes.
-          gfx950=false
-          if [ "${EVENT}" = "workflow_dispatch" ] || grep -qx 'ci:run-gfx950' <<<"${labels}"; then
-            gfx950=true
-          fi
-          # One entry per lane. A GPU lane names its device wheel; the CPU lane leaves it empty.
-          linux_gpu="$(jq -cn --argjson gfx950 "${gfx950}" \
-            --arg gfx942_runner "${gfx942_runner}" --arg gfx950_runner "${gfx950_runner}" '
-            [{name: "gfx942", runner: $gfx942_runner, device: "gfx942"}]
-            + if $gfx950 then
-                [{name: "gfx950 (ci:run-gfx950)", runner: $gfx950_runner, device: "gfx950"}]
-              else [] end')"
-          windows="$(jq -cn --arg runner "${WINDOWS_RUNNER}" --argjson gpu "${opt_in}" \
-            --arg gfx1151_runner "${gfx1151_runner}" '
-            [{name: "CPU (non-blocking)", runner: $runner, device: "", require_gpu: ""}]
-            + if $gpu then
-                [{name: "gfx1151 (opt-in)", runner: $gfx1151_runner, device: "gfx1151",
-                  require_gpu: "1"}]
-              else [] end')"
-          echo "linux_gpu=${linux_gpu}" >> "${GITHUB_OUTPUT}"
-          echo "windows=${windows}" >> "${GITHUB_OUTPUT}"
-          echo "Linux GPU lanes: ${linux_gpu}"
-          echo "Windows lanes: ${windows}"
+        run: python3 .github/scripts/hipblaslt_python_lanes.py --config ci-config/runner-config-v2.json
 
   linux-cpu:
     name: Linux CPU
@@ -130,7 +99,7 @@ jobs:
       - name: Install ROCm ${{ env.HIPBLASLT_PY_ROCM_VERSION }}
         run: bash projects/hipblaslt/python/scripts/ci_lane.sh rocm
 
-      - name: Build the bindings
+      - name: Build and install the bindings
         run: bash projects/hipblaslt/python/scripts/ci_lane.sh build
 
       - name: Run the tests
@@ -184,7 +153,7 @@ jobs:
       - name: Install ROCm ${{ env.HIPBLASLT_PY_ROCM_VERSION }} with ${{ matrix.lane.device }}
         run: bash projects/hipblaslt/python/scripts/ci_lane.sh rocm
 
-      - name: Build the bindings
+      - name: Build and install the bindings
         run: bash projects/hipblaslt/python/scripts/ci_lane.sh build
 
       - name: Run the tests
@@ -241,7 +210,7 @@ jobs:
       - name: Install ROCm ${{ env.HIPBLASLT_PY_ROCM_VERSION }}
         run: bash projects/hipblaslt/python/scripts/ci_lane.sh rocm
 
-      - name: Build the bindings
+      - name: Build and install the bindings
         run: bash projects/hipblaslt/python/scripts/ci_lane.sh build
 
       - name: Run the tests

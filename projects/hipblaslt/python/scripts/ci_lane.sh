@@ -14,7 +14,7 @@
 # Usage: ci_lane.sh [venv|rocm|build|test|clean]...
 #   venv   create a fresh venv with pytest
 #   rocm   install the pinned nightly (and the device wheel) into it
-#   build  build and install the bindings against that ROCm
+#   build  compile the bindings against that ROCm and install them (about a minute)
 #   test   run the bindings' tests (only the CPU ones when no device wheel is named)
 #   clean  remove the venv
 #
@@ -113,6 +113,7 @@ step_rocm() {
 
 step_build() {
     use_rocm
+    # Compiles the small _core extension (about a minute) and installs the package.
     venv_tool python -m pip install -v "${package_dir}"
 }
 

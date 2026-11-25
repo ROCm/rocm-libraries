@@ -81,6 +81,7 @@ COMPONENTS = {
         "projects/hipblaslt/library/include/hipblaslt/**",
         "projects/hipblas-common/library/include/**",
         ".github/workflows/component-ci-hipblaslt-python.yml",
+        ".github/scripts/hipblaslt_python_lanes.py",
     ],
 }
 
@@ -108,6 +109,7 @@ EXCLUSION_EXCEPTIONS = {
 # its label or on a manual run.
 HIPBLASLT_PYTHON_ALL_LANES_PATHS = [
     ".github/workflows/component-ci-hipblaslt-python.yml",
+    ".github/scripts/hipblaslt_python_lanes.py",
     "projects/hipblaslt/python/scripts/ci_lane.sh",
 ]
 
