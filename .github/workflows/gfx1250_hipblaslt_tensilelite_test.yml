@@ -70,19 +70,23 @@ jobs:
       pull-requests: read
     outputs:
       run: ${{ steps.gate.outputs.run }}
-      skip_tensilelite: ${{ steps.gate.outputs.skip_tensilelite }}
+      run_hipblaslt: ${{ steps.gate.outputs.run_hipblaslt }}
+      run_tensilelite: ${{ steps.gate.outputs.run_tensilelite }}
     steps:
-      # Only the gate's script and its path rules: the gate runs no PR code.
+      # Only the gate's script, its tests and its path rules: the gate runs no PR code.
       - name: Checkout the gate's script and path rules
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           sparse-checkout: |
             .github/scripts/configure_gfx1250_hw_ci.py
             .github/scripts/ci_utils.py
+            .github/scripts/tests/test_configure_gfx1250_hw_ci.py
             .github/gfx1250-hw-ci-paths.toml
           sparse-checkout-cone-mode: false
           persist-credentials: false
-      - name: Decide whether to run the job and its TensileLite tests
+      - name: Test the gate's decisions
+        run: python3 .github/scripts/tests/test_configure_gfx1250_hw_ci.py
+      - name: Decide which suites to run
         id: gate
         env:
           GH_TOKEN: ${{ github.token }}
@@ -94,20 +98,15 @@ jobs:
           DRAFT: ${{ github.event.pull_request.draft }}
           LABELS: ${{ toJSON(github.event.pull_request.labels.*.name) }}
           CHANGED_FILES: ${{ github.event.pull_request.changed_files }}
-        # Locally: git diff --name-only origin/develop... | python3 .github/scripts/configure_gfx1250_hw_ci.py
-        run: |
-          set -euo pipefail
-          if [ "$EVENT" = "pull_request" ]; then
-            # The files API lists at most 3000 files and rejects very large diffs; the script
-            # then sees fewer files than CHANGED_FILES and runs both suites.
-            gh api --paginate "repos/$REPO/pulls/$PR/files" --jq '.[].filename' \
-              || echo "::warning::could not list PR #$PR's changed files" >&2
-          fi | python3 .github/scripts/configure_gfx1250_hw_ci.py
+          RUN_HIPBLASLT: ${{ inputs.run_hipblaslt }}
+          RUN_TENSILELITE: ${{ inputs.run_tensilelite }}
+        # Locally: python3 .github/scripts/configure_gfx1250_hw_ci.py (compares with origin/develop)
+        run: python3 .github/scripts/configure_gfx1250_hw_ci.py
 
   gfx1250-tests:
     name: gfx1250-strict hipBLASLt + TensileLite
     needs: gate
-    if: needs.gate.outputs.run == 'true' && (github.event_name != 'workflow_dispatch' || inputs.run_hipblaslt || inputs.run_tensilelite)
+    if: needs.gate.outputs.run == 'true'
     # Job-level so a skipped gate (e.g. an unrelated label event) never cancels a
     # running test; a newer push to the same PR does.
     concurrency:
@@ -277,7 +276,7 @@ jobs:
       - name: Run hipBLASLt tests
         id: hipblaslt
         timeout-minutes: 120
-        if: ${{ github.event_name != 'workflow_dispatch' || inputs.run_hipblaslt }}
+        if: ${{ needs.gate.outputs.run_hipblaslt == 'true' }}
         env:
           GTEST_FILTER_ARG: ${{ inputs.hipblaslt_gtest_filter }}
         run: python3 .github/scripts/gfx1250_blas_tests.py hipblaslt --gtest-filter="$GTEST_FILTER_ARG"
@@ -286,7 +285,7 @@ jobs:
         id: tensilelite
         timeout-minutes: 350
         # Runs even if the hipBLASLt build or tests failed, but not if setup did.
-        if: ${{ !cancelled() && steps.strict.outcome == 'success' && needs.gate.outputs.skip_tensilelite != 'true' && (github.event_name != 'workflow_dispatch' || inputs.run_tensilelite) }}
+        if: ${{ !cancelled() && steps.strict.outcome == 'success' && needs.gate.outputs.run_tensilelite == 'true' }}
         env:
           TL_PYTEST_K: ${{ inputs.tensilelite_pytest_k }}
         run: |

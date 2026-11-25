@@ -17,6 +17,7 @@ run = [
     # therock-ref: a bump runs the job, so a compiler change shows up as the SDK warning.
     ".github/actions/ci-env/action.yml",
     ".github/scripts/configure_gfx1250_hw_ci.py",
+    ".github/scripts/tests/test_configure_gfx1250_hw_ci.py",
     ".github/scripts/gfx1250_blas_tests.py",
     ".github/scripts/scrub_test_log.py",
     ".github/gfx1250-hw-ci-paths.toml",
