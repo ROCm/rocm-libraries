@@ -2389,8 +2389,12 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
             if sched_is_ds_load(ds) and not hasAnyDependency(ds, instsToCheck) or sched_is_ds_store(ds):
               numDsInsts += 1
             elif sched_is_waitcnt(ds):
-              if ds.dscnt >= 0 and lastDsCnt == -1:
-                lastDsCnt = ds.dscnt + numDsInsts
+              # ds may be a fixed-value SWaitCnt leaf (e.g. the flipped
+              # syncThreads force-waitcnt0 / navi wait), which has no .dscnt;
+              # read the count off its rocisa view (no-op for a rocisa waitcnt).
+              dsView = sched_rocisa_view(ds)
+              if dsView.dscnt >= 0 and lastDsCnt == -1:
+                lastDsCnt = dsView.dscnt + numDsInsts
 
           if lastDsCnt != numDsInsts:
             if lastDsCnt == -1 or (lastDsCnt >= 0 and lastDsCnt > numDsInsts):

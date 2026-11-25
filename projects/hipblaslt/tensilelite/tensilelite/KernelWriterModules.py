@@ -35,19 +35,30 @@ def tdmWait(states, kernel, tPA, tPB, tensorcnt: int, comment: str) -> Module:
   skipGR = tensorcnt > -1
   vmcnt = 0 if skipGR else -1
   mod = Module()
-  if skipGR:
-    #TODO: remove
-    # numMXSA = kernel["NumLoadsPerpendicularMXSA"] * kernel["NumLoadsCoalescedMXSA"] if kernel["ProblemType"]["MXBlockA"] else 0
-    # numMXSB = kernel["NumLoadsPerpendicularMXSB"] * kernel["NumLoadsCoalescedMXSB"] if kernel["ProblemType"]["MXBlockB"] else 0
-    # numM = 0
-    # if kernel["ProblemType"]["Sparse"] and not kernel["DirectToVgprSparseMetadata"]:
-    #   numM = kernel["NumLoadsPerpendicularMetadata"] * kernel["NumLoadsCoalescedMetadata"]
-    # numGR = 0
-    # if tensorcnt > -1:
-    #   numGR += tensorcnt * (numMXSA + numMXSB + numM)
-    # vmcnt += numGR
-    mod.add(SWaitCnt(vlcnt=vmcnt))
-  mod.add(SWaitTensorcnt(tensorcnt=tensorcnt, comment=comment))
+  #TODO: remove
+  # numMXSA = kernel["NumLoadsPerpendicularMXSA"] * kernel["NumLoadsCoalescedMXSA"] if kernel["ProblemType"]["MXBlockA"] else 0
+  # numMXSB = kernel["NumLoadsPerpendicularMXSB"] * kernel["NumLoadsCoalescedMXSB"] if kernel["ProblemType"]["MXBlockB"] else 0
+  # numM = 0
+  # if kernel["ProblemType"]["Sparse"] and not kernel["DirectToVgprSparseMetadata"]:
+  #   numM = kernel["NumLoadsPerpendicularMetadata"] * kernel["NumLoadsCoalescedMetadata"]
+  # numGR = 0
+  # if tensorcnt > -1:
+  #   numGR += tensorcnt * (numMXSA + numMXSB + numM)
+  # vmcnt += numGR
+  # The TDM global-read wait (s_waitcnt vlcnt=0 + s_wait_tensorcnt) is the real
+  # in-loop wait for TDM kernels. Both carry concrete, fixed counts set at
+  # construction and are never mutated afterwards (this returns a Module, not a
+  # bare SWaitCnt, so the scheduler's waitCode .dscnt rewrite path -- gated on
+  # sched_is_waitcnt(waitCode) -- never touches them), so they can be lowered to
+  # logical leaves right here. maybe_logical_leaf is a no-op off the gfx1250
+  # trial path / outside a region. The leaf-blind waitcnt read sites the flipped
+  # s_waitcnt reaches (KW:2388, SIA.hasHolderInWaitCnt) were routed through
+  # sched_rocisa_view in the 2a step; s_wait_tensorcnt is not a waitcnt and has
+  # no in-tree introspection (DCP text gates run on the final asm string).
+  with logical_region("tdmWait"):
+    if skipGR:
+      mod.add(maybe_logical_leaf(SWaitCnt(vlcnt=vmcnt)))
+    mod.add(maybe_logical_leaf(SWaitTensorcnt(tensorcnt=tensorcnt, comment=comment)))
   return mod
 
 ##############################################################################
@@ -141,14 +152,20 @@ def syncThreads(kernel, archCaps, asmCaps, comment="", skipForceWaitcnt0=False, 
     # The cluster handshake is anchored on workgroup barriers, so a one-wave
     # cluster kernel still needs them.
     if kernel["NumThreads"] > kernel["WavefrontSize"] or kernel.get("ClusterBarrier"):
-        if asmCaps["SeparateVscnt"]:
-            imod.add(SWaitCnt(dscnt=0, comment="extra navi wait"))
-        elif kernel["_ScheduleIterAlg"] == 2 \
-          or kernel["PrefetchGlobalRead"] >= 2 \
-          or skipForceWaitcnt0:
-            imod.addComment("Skip force waitcnt0")
-        elif archCaps["Waitcnt0Disabled"]:
-            imod.add(SWaitCnt(dscnt=0, vlcnt=0, vscnt=0, comment="force waitcnt0"))
+        # These pre-barrier waits are fixed-value (concrete counts, never
+        # mutated after construction), so -- unlike the scheduler's hot-loop
+        # waitCode -- they can be lowered to a logical leaf right here. Flip them
+        # inside the same region as the barrier; maybe_logical_leaf is a no-op
+        # off the gfx1250 trial path / outside a region.
+        with logical_region("syncThreadsBarrier"):
+            if asmCaps["SeparateVscnt"]:
+                imod.add(maybe_logical_leaf(SWaitCnt(dscnt=0, comment="extra navi wait")))
+            elif kernel["_ScheduleIterAlg"] == 2 \
+              or kernel["PrefetchGlobalRead"] >= 2 \
+              or skipForceWaitcnt0:
+                imod.addComment("Skip force waitcnt0")
+            elif archCaps["Waitcnt0Disabled"]:
+                imod.add(maybe_logical_leaf(SWaitCnt(dscnt=0, vlcnt=0, vscnt=0, comment="force waitcnt0")))
 
         _barrier = SBarrier(comment=comment)
         if memoryToken is not None:

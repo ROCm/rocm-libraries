@@ -29,7 +29,7 @@ from rocisa.container import DSModifiers, HolderContainer, replaceHolder
 from rocisa.instruction import SWaitCnt, SWaitAlu, DSStoreB128, DSStoreB64, DSStoreB32
 
 from ..ir import sched_is_tensor_load_to_lds, sched_is_ds_store_b128, sched_is_waitcnt
-from ..ir import sched_is_module
+from ..ir import sched_is_module, sched_rocisa_view
 from ..Common import roundUp, print2
 from ..Common.MxScaleLayout import splatFirst
 from ..Component import SIA
@@ -1305,9 +1305,13 @@ def hasHolderInWaitCnt(module: Item):
             wcList.extend(tmpList)
     elif sched_is_waitcnt(module):
         wcList.append(module)
-        if isinstance(module.dscnt, HolderContainer) or \
-           isinstance(module.kmcnt, HolderContainer) or \
-           isinstance(module.vlcnt, HolderContainer) or \
-           isinstance(module.vscnt, HolderContainer):
+        # A flipped fixed-value SWaitCnt leaf has no count attrs; inspect its
+        # rocisa view for Holder operands (no-op for a rocisa waitcnt). A leaf
+        # only carries concrete counts, so it never reports a Holder here.
+        mv = sched_rocisa_view(module)
+        if isinstance(mv.dscnt, HolderContainer) or \
+           isinstance(mv.kmcnt, HolderContainer) or \
+           isinstance(mv.vlcnt, HolderContainer) or \
+           isinstance(mv.vscnt, HolderContainer):
            hasHolder = True
     return hasHolder, wcList
