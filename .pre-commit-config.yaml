@@ -467,7 +467,7 @@ repos:
       # hip-kernel-provider, which deletes nothing under rocKE, or that only
       # moves rocKE files elsewhere (CI lists a rename by its new path).
       - id: rocke-pending-lanes-on-deletion
-        name: rocKE every test file runs in CI or has a recorded reason (deletions)
+        name: rocKE every test file is assigned to a CI entry or has a recorded reason (deletions)
         entry: &rocke_when_checked_out >-
           python -c "import os, subprocess, sys;
           sys.exit(os.path.exists(sys.argv[1])

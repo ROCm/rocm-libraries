@@ -955,6 +955,8 @@ runs on each pull request to develop that changes rocKE:
   recorded reason, and no CTest entry without the GPU lock selects a test
   module that marks a test `gpu` (or that imports a GPU launch entry point
   and marks none);
+- `rocke-pending-lanes-on-deletion`: `rocke-pending-lanes` for a change that
+  only deletes files it reads;
 - `rocke-compliance`: the files a change adds or edits pass the compliance
   patterns;
 - `rocke-compliance-rules`: when the patterns or their scanner change, the
@@ -964,12 +966,16 @@ runs on each pull request to develop that changes rocKE:
 - `rocke-gemm-spec-dict-binding-parity`: the GEMM spec dicts match the engine
   binding;
 - `rocke-emitter-pair-parity`: the C and Python emitters agree on HIP text and
-  refusals.
+  refusals;
+- `rocke-emitter-pair-files`: the emitter-pair hook's file pattern takes every
+  file its entries read;
+- `rocke-hook-checks`: the hook tools and the hook config pass their tests.
 
-Each hook runs only when a change touches a file it reads. They run at every
-commit after `pre-commit install`; `pre-commit install --hook-type pre-push`
-runs them, with every other hook of the file, at push instead. CI runs every
-hook on each pull request either way.
+Each hook runs only when a change touches a file it reads, except
+`rocke-pending-lanes-on-deletion`, which runs on every change (a git diff when
+nothing is deleted). They run at every commit after `pre-commit install`;
+`pre-commit install --hook-type pre-push` runs them, with every other hook of
+the file, at push instead. CI runs every hook on each pull request either way.
 
 **Which GPUs run tests.** The pull-request job, `therock-multi-arch-ci.yml`,
 selects these GPU families; TheRock's family matrix
