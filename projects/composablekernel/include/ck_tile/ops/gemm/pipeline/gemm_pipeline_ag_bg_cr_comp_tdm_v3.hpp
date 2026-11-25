@@ -519,6 +519,20 @@ struct GemmPipelineAgBgCrCompTDMV3 : public GemmPipelineAgBgCrCompTDMV1<Problem,
                 CK_TILE_LDS_ADDR int32_t* dst = ring + S * kStageWords + kWordsA;
                 copy_words<kWordsB>(b_glb, dst);
             }
+            // kReadAheadSplitLoad: part p of kParts of the operand's words (one wave each)
+            template <index_t S, index_t kParts>
+            CK_TILE_DEVICE void issue_a_part(index_t p)
+            {
+                CK_TILE_LDS_ADDR int32_t* dst = ring + S * kStageWords + p * (kWordsA / kParts);
+                copy_words<kWordsA / kParts>(a_glb + p * (kWordsA / kParts), dst);
+            }
+            template <index_t S, index_t kParts>
+            CK_TILE_DEVICE void issue_b_part(index_t p)
+            {
+                CK_TILE_LDS_ADDR int32_t* dst =
+                    ring + S * kStageWords + kWordsA + p * (kWordsB / kParts);
+                copy_words<kWordsB / kParts>(b_glb + p * (kWordsB / kParts), dst);
+            }
             // after each fill (stage S): the next fill loads the next K tile
             template <index_t S>
             CK_TILE_DEVICE void filled()
@@ -1081,6 +1095,73 @@ struct GemmPipelineAgBgCrCompTDMV3 : public GemmPipelineAgBgCrCompTDMV1<Problem,
                         scales.template filled<s>();
                     }
                 };
+                // Policy::kReadAheadSplitLoad: every wave fills half the rows of one operand
+                // (odd waves A, even waves B, half warp_id / 2) with one TDM load per K tile, and
+                // with MX copies the same half of that operand's scale words, so each wave's own
+                // counters cover its share and no wave issues a whole tile.
+                constexpr bool kSplitLoad = Policy::kReadAheadSplitLoad;
+                static_assert(!kSplitLoad || (BlockSize / get_warp_size() == 4 && !is_a_col_major &&
+                                              !is_b_row_major),
+                              "kReadAheadSplitLoad: 4 waves, A row-major, B column-major");
+                const index_t split_half = amd_wave_read_first_lane(warp_id / 2);
+                const bool split_a       = warp_id % 2 == 1;
+                auto half_dram_window    = [&](const auto& full, auto rows) {
+                    constexpr index_t kRows = decltype(rows)::value;
+                    constexpr auto dstr     = make_static_tile_distribution(
+                        tile_distribution_encoding<sequence<>,
+                                                          tuple<sequence<1, kRows>, sequence<KPerBlock>>,
+                                                          tuple<sequence<1>>,
+                                                          tuple<sequence<0>>,
+                                                          sequence<1, 2>,
+                                                          sequence<1, 0>>{},
+                        bool_constant<true>{});
+                    auto org  = full.get_window_origin();
+                    org(I0{}) = org[I0{}] + split_half * kRows;
+                    return make_tile_window(full.get_bottom_tensor_view(),
+                                            make_tuple(number<kRows>{}, number<KPerBlock>{}),
+                                            org,
+                                            dstr);
+                };
+                auto a_half_dram = half_dram_window(a_copy_dram_window, number<MPerBlock / 2>{});
+                auto b_half_dram = half_dram_window(b_copy_dram_window, number<NPerBlock / 2>{});
+                auto half_lds_windows = [&](const auto& views, auto rows) {
+                    constexpr index_t kRows = decltype(rows)::value;
+                    return generate_tuple(
+                        [&](auto st) {
+                            return make_tile_window(
+                                views[st],
+                                make_tuple(number<kRows>{}, number<KPerBlock>{}),
+                                {split_half * kRows, 0});
+                        },
+                        number<num_lds_buffers>{});
+                };
+                auto a_half_lds    = half_lds_windows(a_lds_block_views, number<MPerBlock / 2>{});
+                auto b_half_lds    = half_lds_windows(b_lds_block_views, number<NPerBlock / 2>{});
+                auto ra_fill_split = [&](auto f) {
+                    constexpr index_t s = decltype(f)::value;
+                    if(split_a)
+                    {
+                        if constexpr(kMx)
+                        {
+                            scales.template issue_a_part<s, 2>(split_half);
+                        }
+                        Base::GlobalPrefetchTDM(tdm_config_a[s], a_half_lds[f], a_half_dram);
+                        move_tile_window(a_half_dram, a_dram_tile_window_step);
+                    }
+                    else
+                    {
+                        if constexpr(kMx)
+                        {
+                            scales.template issue_b_part<s, 2>(split_half);
+                        }
+                        Base::GlobalPrefetchTDM(tdm_config_b[s], b_half_lds[f], b_half_dram);
+                        move_tile_window(b_half_dram, b_dram_tile_window_step);
+                    }
+                    if constexpr(kMx)
+                    {
+                        scales.template filled<s>();
+                    }
+                };
                 // own fills landed (TDM and, MX, the scale words' async loads)
                 auto wait_own_fills = [&]() {
                     if constexpr(kMx)
@@ -1365,23 +1446,170 @@ struct GemmPipelineAgBgCrCompTDMV3 : public GemmPipelineAgBgCrCompTDMV1<Problem,
                         wmma_half_range(h, k, a, bh, sc, number<0>{}, number<kHalf * kMI>{});
                     };
 
+                // Policy::kReadAheadGl2Dist = D > 0: at the top of K tile t every wave of the
+                // cluster prefetches (global_prefetch, L2) its share of the cluster's A rows (odd
+                // waves) or B rows (even waves) of K tile min(t + D, last), one line per lane
+                // from a wave-uniform base, so the TDM fills hit L2; with
+                // Policy::kReadAheadGl2Scales also that tile's scale lines (MX, kMxScaleLds
+                // layout: per row block and K tile, kM (kN) * KPerBlock / 128 contiguous words).
+                // Rows past M or N are not clamped: M and N must be multiples of the cluster's
+                // rows.
+                auto gl2_prefetch = [&](index_t t) {
+                    if constexpr(Policy::kReadAheadGl2Dist > 0)
+                    {
+#if defined(__gfx125__)
+                        constexpr index_t kLine  = 256;
+                        constexpr index_t kWaves = BlockSize / get_warp_size();
+                        constexpr index_t kMCl   = Problem::BlockGemmShape::kclusterM;
+                        constexpr index_t kNCl   = Problem::BlockGemmShape::kclusterN;
+                        constexpr index_t kLpr =
+                            max(index_t{1},
+                                static_cast<index_t>(KPerBlock * sizeof(ADataType)) / kLine);
+                        constexpr index_t kRowsA  = kMCl * MPerBlock * kLpr; // lines
+                        constexpr index_t kRowsB  = kNCl * NPerBlock * kLpr;
+                        constexpr index_t kLanes  = kMCl * kNCl * kWaves / 2 * get_warp_size();
+                        constexpr index_t kNLines = kRowsA > kRowsB ? kRowsA : kRowsB;
+                        const index_t cwx =
+                            UseClusterLaunch
+                                ? amd_wave_read_first_lane(get_cluster_workgroup_id_x())
+                                : 0;
+                        const index_t cwy =
+                            UseClusterLaunch
+                                ? amd_wave_read_first_lane(get_cluster_workgroup_id_y())
+                                : 0;
+                        const auto& a_view = a_dram_block_window_tmp[I0{}].get_bottom_tensor_view();
+                        const auto& b_view = b_dram_block_window_tmp[I0{}].get_bottom_tensor_view();
+                        const auto a_org   = a_dram_block_window_tmp[I0{}].get_window_origin();
+                        const auto b_org   = b_dram_block_window_tmp[I0{}].get_window_origin();
+                        const index_t gw =
+                            amd_wave_read_first_lane((cwx + cwy * kMCl) * kWaves + warp_id);
+                        const bool is_b       = gw % 2 == 0; // wave-uniform
+                        const index_t li0     = (gw / 2) * get_warp_size() + get_lane_id();
+                        const index_t t_ahead = min(t + Policy::kReadAheadGl2Dist, num_loop - 1);
+                        const index_t k_el    = a_org[I1{}] + t_ahead * KPerBlock;
+                        const index_t row0 =
+                            is_b ? b_org[I0{}] - cwy * NPerBlock : a_org[I0{}] - cwx * MPerBlock;
+                        const index_t stride =
+                            is_b ? b_view.get_tensor_descriptor().calculate_offset(
+                                       make_multi_index(1, 0))
+                                 : a_view.get_tensor_descriptor().calculate_offset(
+                                       make_multi_index(1, 0));
+                        const char* base =
+                            is_b ? reinterpret_cast<const char*>(b_view.get_buffer_view().p_data_)
+                                 : reinterpret_cast<const char*>(a_view.get_buffer_view().p_data_);
+                        const index_t n_op = is_b ? kRowsB : kRowsA;
+                        static_for<0, (kNLines + kLanes - 1) / kLanes, 1>{}([&](auto r) {
+                            const index_t li       = (li0 + r.value * kLanes) % n_op;
+                            const index_t row      = row0 + li / kLpr;
+                            const long_index_t off = static_cast<long_index_t>(row) * stride +
+                                                     (li % kLpr) * kLine +
+                                                     k_el * static_cast<index_t>(sizeof(ADataType));
+                            __builtin_amdgcn_global_prefetch(base + off, 9);
+                        });
+                        if constexpr(kMx && Policy::kReadAheadGl2Scales)
+                        {
+                            using St               = remove_cvref_t<decltype(scales)>;
+                            constexpr index_t kSLA = St::kWordsA * 4 / kLine; // lines per tile
+                            constexpr index_t kSLB = St::kWordsB * 4 / kLine;
+                            constexpr index_t kSK  = KPerBlock / Problem::ScaleBlockSize / 4;
+                            const auto& sa_view    = scale_windows.a[I0{}].get_bottom_tensor_view();
+                            const auto& sb_view    = scale_windows.b[I0{}].get_bottom_tensor_view();
+                            const index_t kt_total =
+                                sa_view.get_tensor_descriptor().get_lengths()[I1{}] / kSK;
+                            const index_t kt =
+                                scale_windows.a[I0{}].get_window_origin()[I1{}] / kSK + t_ahead;
+                            const index_t sl  = is_b ? kNCl * kSLB : kMCl * kSLA;
+                            const index_t si  = li0 % sl;
+                            const index_t per = is_b ? kSLB : kSLA;
+                            const index_t blk = row0 / (is_b ? NPerBlock : MPerBlock) + si / per;
+                            const long_index_t soff =
+                                (static_cast<long_index_t>(blk) * kt_total + kt) *
+                                    (is_b ? St::kWordsB : St::kWordsA) * 4 +
+                                (si % per) * kLine;
+                            const char* sbase = is_b ? reinterpret_cast<const char*>(
+                                                           sb_view.get_buffer_view().p_data_)
+                                                     : reinterpret_cast<const char*>(
+                                                           sa_view.get_buffer_view().p_data_);
+                            __builtin_amdgcn_global_prefetch(sbase + soff, 9);
+                        }
+#else
+                        ignore = t;
+#endif
+                    }
+                    else
+                    {
+                        ignore = t;
+                    }
+                };
+
+                // Policy::kReadAheadCluster (cluster launch): the cluster's workgroups meet once
+                // per K tile, before the refill (each signals once, from wave 0, every wave
+                // waits), so their TDM fills of the same tiles are issued together. The signal
+                // follows the workgroup barrier, or with kReadAheadClusterEarly the stage's last
+                // LDS reads in the K atom before the tile's last.
+                constexpr bool kCB      = Policy::kReadAheadCluster && UseClusterLaunch;
+                constexpr bool kCBEarly = kCB && Policy::kReadAheadClusterEarly;
+                static_assert(!kCBEarly || kAtoms >= 2,
+                              "kReadAheadClusterEarly needs two K atoms per K tile");
+                auto cl_signal = [&]() {
+                    if constexpr(kCB)
+                    {
+                        if(warp_id == 0)
+                        {
+                            asm volatile("s_barrier_signal -3" ::: "memory");
+                        }
+                    }
+                };
+                auto cl_wait = [&]() {
+                    if constexpr(kCB)
+                    {
+                        asm volatile("s_barrier_wait -3" ::: "memory");
+                    }
+                };
+                if constexpr(kCB)
+                {
+                    asm volatile("" ::: "memory");
+                    __builtin_amdgcn_s_barrier_signal(-1);
+                    __builtin_amdgcn_s_barrier_wait(-1);
+                    cl_signal();
+                    cl_wait();
+                }
+
                 // prologue: tiles 0 and 1 into stages 0 and 1, tile 0's scales, tile 0 published
-                if(is_a_issuer1)
+                if constexpr(kSplitLoad)
                 {
-                    move_tile_window(a_dram_window1, a_dram_tile_window_step);
+                    // every wave filled both; it waits for its tile-0 fill only (the tile-1 TDM
+                    // load and, MX, its scale words' async loads may stay in flight)
+                    ra_fill_split(I0{});
+                    ra_fill_split(I1{});
+                    if constexpr(kMx)
+                    {
+                        using St                 = remove_cvref_t<decltype(scales)>;
+                        constexpr index_t kAsync = St::kWordsA / 2 / 4 / get_warp_size();
+                        static_assert(St::kWordsA == St::kWordsB, "square scale tiles");
+                        __builtin_amdgcn_s_wait_asynccnt(kAsync);
+                    }
+                    s_wait_tensorcnt<1>();
                 }
-                if(is_b_issuer1)
+                else
                 {
-                    move_tile_window(b_dram_window1, b_dram_tile_window_step);
-                }
-                ra_fill(I0{});
-                if(num_loop > 1)
-                {
-                    ra_fill(I1{});
-                }
-                if(is_a_issuer0 || is_b_issuer0)
-                {
-                    wait_own_fills();
+                    if(is_a_issuer1)
+                    {
+                        move_tile_window(a_dram_window1, a_dram_tile_window_step);
+                    }
+                    if(is_b_issuer1)
+                    {
+                        move_tile_window(b_dram_window1, b_dram_tile_window_step);
+                    }
+                    ra_fill(I0{});
+                    if(num_loop > 1)
+                    {
+                        ra_fill(I1{});
+                    }
+                    if(is_a_issuer0 || is_b_issuer0)
+                    {
+                        wait_own_fills();
+                    }
                 }
                 asm volatile("" ::: "memory");
                 __builtin_amdgcn_s_barrier_signal(-1);
@@ -1401,6 +1629,7 @@ struct GemmPipelineAgBgCrCompTDMV3 : public GemmPipelineAgBgCrCompTDMV1<Problem,
                     constexpr index_t pi    = decltype(p)::value;
                     constexpr bool kHasNext = decltype(has_next)::value;
                     ignore                  = pi;
+                    gl2_prefetch(t);
                     static_for<0, kAtoms, 1>{}([&](auto s) {
                         constexpr bool kLast = s.value + 1 == kAtoms;
 #if defined(CK_TILE_EXP_RA_SYNC)
@@ -1446,9 +1675,21 @@ struct GemmPipelineAgBgCrCompTDMV3 : public GemmPipelineAgBgCrCompTDMV1<Problem,
                                 __builtin_amdgcn_s_barrier_signal(-1);
                                 __builtin_amdgcn_s_barrier_wait(-1);
                                 asm volatile("" ::: "memory");
+                                if constexpr(!kCBEarly)
+                                {
+                                    cl_signal();
+                                }
+                                cl_wait();
                                 if(t + 2 < num_loop)
                                 {
-                                    ra_fill(p);
+                                    if constexpr(kSplitLoad)
+                                    {
+                                        ra_fill_split(p);
+                                    }
+                                    else
+                                    {
+                                        ra_fill(p);
+                                    }
                                 }
                                 __builtin_amdgcn_sched_barrier(0);
                             }
@@ -1474,6 +1715,10 @@ struct GemmPipelineAgBgCrCompTDMV3 : public GemmPipelineAgBgCrCompTDMV1<Problem,
                             if constexpr(Policy::kReadAheadBlockB)
                             {
                                 auto b1_nxt = rd_b_half(sp, sk, I1{});
+                                if constexpr(kCBEarly && kHasNext && s.value + 2 == kAtoms)
+                                {
+                                    cl_signal();
+                                }
                                 __builtin_amdgcn_sched_barrier(0);
                                 wmma_half(I1{}, s, a_cur, b1_cur, sc_cur);
                                 b1_cur = b1_nxt;
@@ -1505,6 +1750,11 @@ struct GemmPipelineAgBgCrCompTDMV3 : public GemmPipelineAgBgCrCompTDMV1<Problem,
                                         return 0;
                                     }
                                 }();
+                                if constexpr(kCBEarly && kHasNext && s.value + 2 == kAtoms &&
+                                             !Policy::kReadAheadBlockB)
+                                {
+                                    cl_signal();
+                                }
                                 __builtin_amdgcn_sched_barrier(0);
                                 wmma_half_range(
                                     I1{}, s, a_cur, b1_cur, sc_cur, number<kAt>{}, number<kW>{});

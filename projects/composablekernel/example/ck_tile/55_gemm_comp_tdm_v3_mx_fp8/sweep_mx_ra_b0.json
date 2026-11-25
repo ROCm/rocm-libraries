@@ -1,5 +1,5 @@
 {
-  "_comment": "B0 4096x4096x65536: comp_tdm_v3 MX baseline against the read-ahead K loop (-DCK_EX55_RA=1, LDS-staged scales, B in halves; sa: A split too) with the late reads of the K atom before a tile's last issued N WMMAs into the second half (_lN); warp tile 16, clusters 1x1 / 4x4.",
+  "_comment": "B0 4096x4096x65536: comp_tdm_v3 MX baseline against the read-ahead K loop with cluster barriers (early signal) and L2 prefetch 6 ahead, with split TDM loads (sp) and the block B order (g1; g1sa: A split too); warp tile 16, clusters 1x1 / 4x4.",
   "default_defines": [
     "-DCK_EX55_FOCUS",
     "-DCK_EX55_BF16_TDM_ONLY",
@@ -14,79 +14,61 @@
       "defines": []
     },
     {
-      "name": "sa",
+      "name": "sa_l8_cb2_pf6",
       "defines": [
         "-DCK_EX55_RA=1",
-        "-DCK_EX55_RA_BLOCKB=0",
         "-DCK_EX55_MX_SCALE_LDS=1",
-        "-DCK_EX55_RA_SPLITA=1"
-      ]
-    },
-    {
-      "name": "sa_l0",
-      "defines": [
-        "-DCK_EX55_RA=1",
+        "-DCK_EX55_RA_CB=2",
+        "-DCK_EX55_RA_GL2=6",
         "-DCK_EX55_RA_BLOCKB=0",
-        "-DCK_EX55_MX_SCALE_LDS=1",
-        "-DCK_EX55_RA_SPLITA=1",
-        "-DCK_EX55_RA_LATEAT=0"
-      ]
-    },
-    {
-      "name": "sa_l8",
-      "defines": [
-        "-DCK_EX55_RA=1",
-        "-DCK_EX55_RA_BLOCKB=0",
-        "-DCK_EX55_MX_SCALE_LDS=1",
         "-DCK_EX55_RA_SPLITA=1",
         "-DCK_EX55_RA_LATEAT=8"
       ]
     },
     {
-      "name": "sa_l16",
+      "name": "sa_l8_cb2_pf6_sp",
       "defines": [
         "-DCK_EX55_RA=1",
-        "-DCK_EX55_RA_BLOCKB=0",
         "-DCK_EX55_MX_SCALE_LDS=1",
+        "-DCK_EX55_RA_CB=2",
+        "-DCK_EX55_RA_GL2=6",
+        "-DCK_EX55_RA_BLOCKB=0",
         "-DCK_EX55_RA_SPLITA=1",
-        "-DCK_EX55_RA_LATEAT=16"
+        "-DCK_EX55_RA_LATEAT=8",
+        "-DCK_EX55_RA_SPLIT=1"
       ]
     },
     {
-      "name": "sa_l24",
+      "name": "sa_cb2_pf6_sp",
       "defines": [
         "-DCK_EX55_RA=1",
-        "-DCK_EX55_RA_BLOCKB=0",
         "-DCK_EX55_MX_SCALE_LDS=1",
+        "-DCK_EX55_RA_CB=2",
+        "-DCK_EX55_RA_GL2=6",
+        "-DCK_EX55_RA_BLOCKB=0",
         "-DCK_EX55_RA_SPLITA=1",
-        "-DCK_EX55_RA_LATEAT=24"
+        "-DCK_EX55_RA_SPLIT=1"
       ]
     },
     {
-      "name": "hlv_l8",
+      "name": "g1_cb2_pf6_sp",
       "defines": [
         "-DCK_EX55_RA=1",
-        "-DCK_EX55_RA_BLOCKB=0",
         "-DCK_EX55_MX_SCALE_LDS=1",
-        "-DCK_EX55_RA_LATEAT=8"
+        "-DCK_EX55_RA_CB=2",
+        "-DCK_EX55_RA_GL2=6",
+        "-DCK_EX55_RA_SPLIT=1"
       ]
     },
     {
-      "name": "hlv_l16",
+      "name": "g1sa_cb2_pf6_sp",
       "defines": [
         "-DCK_EX55_RA=1",
-        "-DCK_EX55_RA_BLOCKB=0",
         "-DCK_EX55_MX_SCALE_LDS=1",
-        "-DCK_EX55_RA_LATEAT=16"
-      ]
-    },
-    {
-      "name": "hlv_l24",
-      "defines": [
-        "-DCK_EX55_RA=1",
-        "-DCK_EX55_RA_BLOCKB=0",
-        "-DCK_EX55_MX_SCALE_LDS=1",
-        "-DCK_EX55_RA_LATEAT=24"
+        "-DCK_EX55_RA_CB=2",
+        "-DCK_EX55_RA_GL2=6",
+        "-DCK_EX55_RA_SPLITA=1",
+        "-DCK_EX55_RA_SPLIT=1"
       ]
     }
   ],

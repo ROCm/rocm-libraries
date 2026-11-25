@@ -125,6 +125,22 @@ struct Ex55Policy : ck_tile::GemmPipelineAgBgCrCompTDMV3Policy
 #if defined(CK_EX55_RA_SPLITA)
     [[maybe_unused]] static constexpr bool kReadAheadSplitA = CK_EX55_RA_SPLITA != 0;
 #endif
+#if defined(CK_EX55_RA_SPLIT)
+    // -DCK_EX55_RA_SPLIT=1: split TDM loads (every wave half of one operand)
+    [[maybe_unused]] static constexpr bool kReadAheadSplitLoad = CK_EX55_RA_SPLIT != 0;
+#endif
+#if defined(CK_EX55_RA_CB)
+    // -DCK_EX55_RA_CB=1: cluster barriers; =2: with the early signal
+    [[maybe_unused]] static constexpr bool kReadAheadCluster      = CK_EX55_RA_CB != 0;
+    [[maybe_unused]] static constexpr bool kReadAheadClusterEarly = CK_EX55_RA_CB == 2;
+#endif
+#if defined(CK_EX55_RA_GL2)
+    // -DCK_EX55_RA_GL2=D: L2 prefetch D K tiles ahead; -DCK_EX55_RA_GL2_SCALES=1: scale lines too
+    [[maybe_unused]] static constexpr ck_tile::index_t kReadAheadGl2Dist = CK_EX55_RA_GL2;
+#endif
+#if defined(CK_EX55_RA_GL2_SCALES)
+    [[maybe_unused]] static constexpr bool kReadAheadGl2Scales = CK_EX55_RA_GL2_SCALES != 0;
+#endif
 #if defined(CK_EX55_RA_LATEAT)
     [[maybe_unused]] static constexpr ck_tile::index_t kReadAheadLateAt = CK_EX55_RA_LATEAT;
 #endif

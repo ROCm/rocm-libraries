@@ -105,6 +105,18 @@ struct GemmPipelineAgBgCrCompTDMV3Policy : public GemmPipelineAgBgCrCompTDMDefau
     /// second half, and A's with kReadAheadSplitA) this many WMMAs into the second half instead
     /// of after it, so they land before the drain at the barrier (-1: after it, as elsewhere).
     static constexpr index_t kReadAheadLateAt = -1;
+    /// kReadAhead: L2 prefetch (global_prefetch) of the K tile this many tiles ahead, split over
+    /// the cluster's waves (0: off); kReadAheadGl2Scales adds its MX scale lines.
+    static constexpr index_t kReadAheadGl2Dist = 0;
+    static constexpr bool kReadAheadGl2Scales  = false;
+    /// kReadAhead with a cluster launch: one cluster barrier per K tile before the refill;
+    /// kReadAheadClusterEarly signals it in the K atom before the tile's last, right after the
+    /// stage's last LDS reads are issued, instead of after the workgroup barrier.
+    static constexpr bool kReadAheadCluster = false;
+    /// kReadAhead: every wave fills half of one operand's rows per K tile (odd waves A, even B)
+    /// with one TDM load, and with MX the same half of its scale words; 4 waves only.
+    static constexpr bool kReadAheadSplitLoad    = false;
+    static constexpr bool kReadAheadClusterEarly = false;
 
     /// Workgroups per CU the register budget assumes (the launch's kBlockPerCu).
     static constexpr index_t kBlockPerCu = 1;

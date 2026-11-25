@@ -1,0 +1,126 @@
+{
+  "_comment": "B0 4096x4096x65536: comp_tdm_v3 MX baseline against the read-ahead K loop (LDS-staged scales, B and A in halves; late reads 8 WMMAs into the half (sa_l8) or after it (sa)) with cluster barriers (cb1: signal after the workgroup barrier, cb2: early signal) and the L2 prefetch 6 ahead (pf6); warp tile 16, clusters 1x1 / 4x4.",
+  "default_defines": [
+    "-DCK_EX55_FOCUS",
+    "-DCK_EX55_BF16_TDM_ONLY",
+    "-DCK_TILE_GFX125_FP8_K1PERLANE=16",
+    "-DCK_EX55_MX_SCALE_WIDE=1",
+    "-DCK_EX55_A_ROW_PREFETCH=1",
+    "-DCK_EX55_FOCUS_MIN"
+  ],
+  "variants": [
+    {
+      "name": "base",
+      "defines": []
+    },
+    {
+      "name": "sa_l8_cb1",
+      "defines": [
+        "-DCK_EX55_RA=1",
+        "-DCK_EX55_RA_BLOCKB=0",
+        "-DCK_EX55_MX_SCALE_LDS=1",
+        "-DCK_EX55_RA_SPLITA=1",
+        "-DCK_EX55_RA_LATEAT=8",
+        "-DCK_EX55_RA_CB=1"
+      ]
+    },
+    {
+      "name": "sa_l8_cb1_pf6",
+      "defines": [
+        "-DCK_EX55_RA=1",
+        "-DCK_EX55_RA_BLOCKB=0",
+        "-DCK_EX55_MX_SCALE_LDS=1",
+        "-DCK_EX55_RA_SPLITA=1",
+        "-DCK_EX55_RA_LATEAT=8",
+        "-DCK_EX55_RA_CB=1",
+        "-DCK_EX55_RA_GL2=6"
+      ]
+    },
+    {
+      "name": "sa_l8_cb2",
+      "defines": [
+        "-DCK_EX55_RA=1",
+        "-DCK_EX55_RA_BLOCKB=0",
+        "-DCK_EX55_MX_SCALE_LDS=1",
+        "-DCK_EX55_RA_SPLITA=1",
+        "-DCK_EX55_RA_LATEAT=8",
+        "-DCK_EX55_RA_CB=2"
+      ]
+    },
+    {
+      "name": "sa_l8_cb2_pf6",
+      "defines": [
+        "-DCK_EX55_RA=1",
+        "-DCK_EX55_RA_BLOCKB=0",
+        "-DCK_EX55_MX_SCALE_LDS=1",
+        "-DCK_EX55_RA_SPLITA=1",
+        "-DCK_EX55_RA_LATEAT=8",
+        "-DCK_EX55_RA_CB=2",
+        "-DCK_EX55_RA_GL2=6"
+      ]
+    },
+    {
+      "name": "sa_cb1",
+      "defines": [
+        "-DCK_EX55_RA=1",
+        "-DCK_EX55_RA_BLOCKB=0",
+        "-DCK_EX55_MX_SCALE_LDS=1",
+        "-DCK_EX55_RA_SPLITA=1",
+        "-DCK_EX55_RA_CB=1"
+      ]
+    },
+    {
+      "name": "sa_cb1_pf6",
+      "defines": [
+        "-DCK_EX55_RA=1",
+        "-DCK_EX55_RA_BLOCKB=0",
+        "-DCK_EX55_MX_SCALE_LDS=1",
+        "-DCK_EX55_RA_SPLITA=1",
+        "-DCK_EX55_RA_CB=1",
+        "-DCK_EX55_RA_GL2=6"
+      ]
+    },
+    {
+      "name": "sa_cb2",
+      "defines": [
+        "-DCK_EX55_RA=1",
+        "-DCK_EX55_RA_BLOCKB=0",
+        "-DCK_EX55_MX_SCALE_LDS=1",
+        "-DCK_EX55_RA_SPLITA=1",
+        "-DCK_EX55_RA_CB=2"
+      ]
+    },
+    {
+      "name": "sa_cb2_pf6",
+      "defines": [
+        "-DCK_EX55_RA=1",
+        "-DCK_EX55_RA_BLOCKB=0",
+        "-DCK_EX55_MX_SCALE_LDS=1",
+        "-DCK_EX55_RA_SPLITA=1",
+        "-DCK_EX55_RA_CB=2",
+        "-DCK_EX55_RA_GL2=6"
+      ]
+    }
+  ],
+  "arms": [
+    {
+      "wt": 16,
+      "cluster": "1x1"
+    },
+    {
+      "wt": 16,
+      "cluster": "4x4"
+    }
+  ],
+  "shapes": [
+    [
+      4096,
+      4096,
+      65536
+    ]
+  ],
+  "c_dtype": "bf16",
+  "rounds": 5,
+  "warmup": 50,
+  "repeat": 100
+}
