@@ -48,6 +48,9 @@ from ._reference_threads import run_reference_pieces
 #: The largest finite OCP e4m3 magnitude.
 _FP8E4M3_MAX = float(np.nanmax(fp8e4m3_decode_table()))
 
+#: The dispatch spec id of each arch's default-grid dense kernel.
+DENSE_GRID_SPEC_ID = {"gfx942": "gfx942_dense", "gfx950": "gfx950_dense_grid"}
+
 #: Max-abs error bound of an attention output per stored element type.
 _ATTENTION_TOLERANCE = {"fp16": 2e-2, "bf16": 4e-2}
 
