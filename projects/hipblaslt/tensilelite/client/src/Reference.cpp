@@ -1167,6 +1167,45 @@ namespace TensileLite
             }
         }
 
+        // Float8/BFloat8 (OCP or fnuz) C/D: the fast path accepts exactly the slow path's
+        // type ids with such an output: Float8/BFloat8 A and B (any mix, MAC on the stored
+        // types) with a C/D of the same family, and Float8 x Half in either order (MAC on
+        // Half or on Float8) with a Float8 C/D. All of them have float alpha/beta and a
+        // float accumulator (SolveCPUTemplates), as solveCPUFast<float> does.
+        bool isFloat8OutputFastPathTypeId(ContractionProblemGemm const& problem)
+        {
+            switch(getInputContractionInputsTypeId(problem))
+            {
+            case TypedGemm_F8_F8_S::TypeId():
+            case TypedGemm_F8_B8_S::TypeId():
+            case TypedGemm_B8_F8_S::TypeId():
+            case TypedGemm_B8_B8_S::TypeId():
+            case TypedGemm_F8B8_F8_S::TypeId():
+            case TypedGemm_F8B8_B8_S::TypeId():
+            case TypedGemm_B8F8_F8_S::TypeId():
+            case TypedGemm_B8F8_B8_S::TypeId():
+            case TypedGemm_HF8_H_FP8_S::TypeId():
+            case TypedGemm_F8H_H_FP8_S::TypeId():
+            case TypedGemm_HF8_FP8_FP8_S::TypeId():
+            case TypedGemm_F8H_FP8_FP8_S::TypeId():
+            case TypedGemm_F8N_F8N_S::TypeId():
+            case TypedGemm_F8N_B8N_S::TypeId():
+            case TypedGemm_B8N_F8N_S::TypeId():
+            case TypedGemm_B8N_B8N_S::TypeId():
+            case TypedGemm_F8B8N_F8N_S::TypeId():
+            case TypedGemm_F8B8N_B8N_S::TypeId():
+            case TypedGemm_B8F8N_F8N_S::TypeId():
+            case TypedGemm_B8F8N_B8N_S::TypeId():
+            case TypedGemm_HF8N_H_FP8_S::TypeId():
+            case TypedGemm_F8NH_H_FP8_S::TypeId():
+            case TypedGemm_HF8N_FP8_FP8_S::TypeId():
+            case TypedGemm_F8NH_FP8_FP8_S::TypeId():
+                return true;
+            default:
+                return false;
+            }
+        }
+
         bool isFastPathEligible(ContractionProblemGemm const& problem)
         {
 
@@ -1189,15 +1228,16 @@ namespace TensileLite
                        || t == rocisa::DataType::Half || t == rocisa::DataType::BFloat16;
             };
 
-            auto isSupportedOutputType = [&](rocisa::DataType t) {
-                return isSupportedFloatingType(t)
-                       || (isInt8Input
-                           && (t == rocisa::DataType::Int8 || t == rocisa::DataType::Int32));
-            };
-
             auto isFloat8Type = [](rocisa::DataType t) {
                 return t == rocisa::DataType::Float8 || t == rocisa::DataType::BFloat8
-                       || t == rocisa::DataType::Float8_fnuz || t == rocisa::DataType::BFloat8_fnuz;
+                       || t == rocisa::DataType::Float8_fnuz
+                       || t == rocisa::DataType::BFloat8_fnuz;
+            };
+
+            auto isSupportedOutputType = [&](rocisa::DataType t) {
+                return isSupportedFloatingType(t) || isFloat8Type(t)
+                       || (isInt8Input
+                           && (t == rocisa::DataType::Int8 || t == rocisa::DataType::Int32));
             };
 
             auto isSupportedInputType = [&](rocisa::DataType t) {
@@ -1224,6 +1264,10 @@ namespace TensileLite
                 return rejectFast(
                     "Scalar scaling before Half-to-Float8 input narrowing requires the slow path");
             }
+
+            // Float8 outputs must also form a type id supported by the slow reference.
+            const bool isFloat8Output = isFloat8Type(problem.c().dataType())
+                                       || isFloat8Type(problem.d().dataType());
 
             if(!isSupportedInputType(problem.a().dataType())
                || !isSupportedInputType(problem.b().dataType())
@@ -1305,6 +1349,11 @@ namespace TensileLite
             if(problem.outputAmaxD())
             {
                 return rejectFast("amaxD");
+            }
+
+            if(isFloat8Output && !isFloat8OutputFastPathTypeId(problem))
+            {
+                return rejectFast("unsupported_float8_output_type_combination");
             }
 
             if(problem.useScaleCD())
@@ -1500,7 +1549,9 @@ namespace TensileLite
         }
 
         // Fast-path write-back with the slow path's output cast, SaturateCast<DstType>
-        // (Int8 output: round half to even from float, then clamp to [-128, 127]).
+        // (Int8 output: round half to even from float, then clamp to [-128, 127];
+        // Float8/BFloat8 output: the type's conversion, round to nearest even and
+        // saturate to the largest finite value).
         template <typename AccumT, typename DstType>
         void storeSaturateCast(void*                      dst,
                                const std::vector<AccumT>& buffer,
@@ -2016,6 +2067,22 @@ namespace TensileLite
             {
                 // float epilogue (I8_I32_S); an int32_t epilogue wrote D directly.
                 storeSaturateCast<AccumT, int32_t>(inputs.d, shadowD, problem.d());
+            }
+            else if(problem.d().dataType() == rocisa::DataType::Float8)
+            {
+                storeSaturateCast<AccumT, TensileLite::Float8>(inputs.d, shadowD, problem.d());
+            }
+            else if(problem.d().dataType() == rocisa::DataType::BFloat8)
+            {
+                storeSaturateCast<AccumT, TensileLite::BFloat8>(inputs.d, shadowD, problem.d());
+            }
+            else if(problem.d().dataType() == rocisa::DataType::Float8_fnuz)
+            {
+                storeSaturateCast<AccumT, TensileLite::Float8_fnuz>(inputs.d, shadowD, problem.d());
+            }
+            else if(problem.d().dataType() == rocisa::DataType::BFloat8_fnuz)
+            {
+                storeSaturateCast<AccumT, TensileLite::BFloat8_fnuz>(inputs.d, shadowD, problem.d());
             }
 
         }
