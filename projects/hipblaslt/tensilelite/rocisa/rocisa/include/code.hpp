@@ -26,6 +26,7 @@
 #include "format.hpp"
 #include "instruction/instruction.hpp"
 
+#include <array>
 #include <cassert>
 #include <cmath>
 #include <cstdint>
@@ -202,6 +203,15 @@ namespace rocisa
         // and the rocisa instruction classes retire.
         std::shared_ptr<Instruction> rocisaInst;
 
+        // Arch the leaf was built for (logical-IR migration). Needed so a deep
+        // copy (clone()) can rebuild an INDEPENDENT logical form from rocisaInst
+        // via the same makeLogicalLeaf path -- see clone() below and cloneLeafDeep
+        // in ToStinkyTofuUtils.cpp. Set by makeLogicalLeaf alongside rocisaInst;
+        // the ISA triple plus the concrete stepping name (StinkyTofuArchName) that
+        // resolveArchId() keys on, so arch-sensitive opcodes rebuild identically.
+        std::array<int, 3> leafArch{};
+        std::string        leafArchName;
+
         LogicalLeaf(std::shared_ptr<stinkytofu::LogicalInstruction> inst,
                     const std::string&                              name = "LogicalLeaf")
             : Item(name)
@@ -211,10 +221,19 @@ namespace rocisa
 
         LogicalLeaf(const LogicalLeaf& other) = default;
 
-        std::shared_ptr<Item> clone() const override
-        {
-            return std::make_shared<LogicalLeaf>(*this);
-        }
+        // Deep clone (logical-IR migration). The wrapped LogicalInstruction is an
+        // intrusive-list node (stinkytofu IRBase): a single node can live in only
+        // ONE list position. The default copy ctor shares logicalInst by
+        // shared_ptr, so two copies of a leaf (e.g. an unrolled loop body that is
+        // deepcopy'd) would share one node; lowering links that node into each
+        // copy's block and the second link steals it from the first, silently
+        // dropping the instruction from the EARLIER copy (observed: the staggerU
+        // wrapIter s_cmp_eq_u32 / s_cselect_b32 chain vanished from the first loop
+        // body). clone() therefore gives the copy its own logical form, rebuilt
+        // from rocisaInst via the makeLogicalLeaf path. Defined out-of-line in
+        // ToStinkyTofuUtils.cpp because the rebuild needs the stinkytofu converter,
+        // whose types are only forward-declared here.
+        std::shared_ptr<Item> clone() const override;
 
         const std::shared_ptr<stinkytofu::LogicalInstruction>& logical() const
         {

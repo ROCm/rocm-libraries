@@ -1696,6 +1696,48 @@ std::shared_ptr<StinkyAsmModule> lowerRocisaModuleViaLogical(
 
 }  // anonymous namespace
 
+namespace rocisa {
+using namespace stinkytofu;
+
+// Deep copy of a logical leaf (logical-IR migration). See LogicalLeaf::clone() in
+// code.hpp for why a shared logicalInst is unsafe: it is an intrusive-list node
+// (IRBase) that can occupy only one list position, so two copies sharing it make
+// the lowering drop the instruction from the earlier copy. Rebuild an INDEPENDENT
+// logical form from the leaf's own rocisa instruction via the exact makeLogicalLeaf
+// path (createLogicalFromRocisa under DeferLeafVgprSymbolicGuard) so the clone
+// lowers byte-identically to the original.
+static LogicalLeaf* cloneLeafDeep(const LogicalLeaf& self) {
+    if (!self.rocisaInst) {
+        // No rocisa origin to rebuild from: keep the prior shallow behaviour
+        // (shared logical form). Leaves built this way are not replicated on the
+        // flipped gfx1250 path, so the sharing hazard does not arise for them.
+        return new LogicalLeaf(self);
+    }
+    const auto asmCaps = rocisa::rocIsa::getInstance().getAsmCaps();
+    const bool hasVgprMsb = asmCap(asmCaps, "HasVgprMSB") != 0;
+    const GfxArchID archId = resolveArchId(self.leafArch, self.leafArchName);
+    // Mirror makeLogicalLeaf exactly: defer symbolic VGPR resolution so the clone's
+    // operands stay as the all-ones placeholder and are bound positionally later.
+    DeferLeafVgprSymbolicGuard deferLeafVgprSymbolic;
+    auto clonedRocisa = std::dynamic_pointer_cast<rocisa::Instruction>(self.rocisaInst->clone());
+    auto freshLogical = createLogicalFromRocisa(*clonedRocisa, asmCaps, hasVgprMsb, archId);
+    // Carry across post-construction state the lowering relies on but that the
+    // rocisa instruction does not encode: the LDS mem token (set via setMemToken
+    // after the leaf was built, see Component._emitLdsRead).
+    if (self.logicalInst && self.logicalInst->memtoken)
+        freshLogical->memtoken = self.logicalInst->memtoken;
+    auto* leaf = new LogicalLeaf(freshLogical, self.name);
+    leaf->rocisaInst = clonedRocisa;
+    leaf->leafArch = self.leafArch;
+    leaf->leafArchName = self.leafArchName;
+    return leaf;
+}
+
+std::shared_ptr<Item> LogicalLeaf::clone() const {
+    return std::shared_ptr<Item>(cloneLeafDeep(*this));
+}
+}  // namespace rocisa
+
 namespace stinkytofu {
 
 //: rocisa's per-instruction GIR facts, in StinkyTofu's shape. Used only by this converter.
@@ -2619,6 +2661,12 @@ void init_stinkytofu(nb::module_ m) {  // NOLINT(misc-use-internal-linkage)
             DeferLeafVgprSymbolicGuard deferLeafVgprSymbolic;
             auto logicalInst = createLogicalFromRocisa(inst, asmCaps, hasVgprMsb, archId);
             auto leaf = std::make_shared<rocisa::LogicalLeaf>(logicalInst, rocisaClassName(inst));
+            // Remember the arch this leaf was built for so LogicalLeaf::clone()
+            // can rebuild an independent logical form from rocisaInst (see
+            // cloneLeafDeep). archArray + archName are exactly what resolveArchId
+            // keyed on above, so the rebuilt leaf is byte-identical.
+            leaf->leafArch = archArray;
+            leaf->leafArchName = archName;
             // Transitional: keep the rocisa instruction this leaf replaced, so
             // rocisa in-tree passes that predate the logical IR (insertDelayAlu)
             // can treat the leaf as that instruction and stay byte-identical to

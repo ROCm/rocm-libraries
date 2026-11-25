@@ -173,18 +173,27 @@ void init_code(nb::module_ m)
     nb::class_<rocisa::LogicalLeaf, rocisa::Item>(m_code, "LogicalLeaf")
         .def("__str__", &rocisa::LogicalLeaf::toString)
         // Lifecycle (logical-IR migration, Phase 2 §7.5): the scheduler deep-copies
-        // items it moves between iteration buckets (deepcopy(item) / deepcopy(src)).
-        // Mirror Module's __deepcopy__ so a bare leaf is deep-copyable: clone the
-        // carrier node (new Item identity, as a rocisa instruction copy would get).
-        // The wrapped LogicalInstruction is shared via shared_ptr, which is safe
-        // while leaves are read-only from Python; an independent copy of the logical
-        // instruction is only needed once mutation accessors exist (Phase 3).
+        // items it moves between iteration buckets (deepcopy(item) / deepcopy(src)),
+        // and a deepcopy'd Module clones each child item via clone(). Route both to
+        // LogicalLeaf::clone(), which deep-copies the wrapped LogicalInstruction
+        // (rebuilt from rocisaInst). Sharing the logicalInst by shared_ptr is NOT
+        // safe: it is an intrusive-list node that can occupy only one list position,
+        // so two copies that share it make the lowering drop the instruction from
+        // the earlier copy (see LogicalLeaf::clone() / cloneLeafDeep).
         .def("__deepcopy__",
-             [](const rocisa::LogicalLeaf& self, nb::dict&) {
-                 return new rocisa::LogicalLeaf(self);
-             })
+             [](const rocisa::LogicalLeaf& self, nb::dict&) { return self.clone(); })
         .def("schedCategory", &rocisa::LogicalLeaf::schedCategory)
         .def("schedOpcodeName", &rocisa::LogicalLeaf::schedOpcodeName)
+        // Transitional rocisa view (logical-IR migration): the original rocisa
+        // instruction this leaf replaced (or None). Exposed so the Python
+        // scheduler's in-path rocisa passes that still read an instruction's raw
+        // shape -- type(x).__name__ / .dst / .srcs / str(x) / isinstance(x, SomeRocisaClass)
+        // -- can unwrap a leaf to the exact instruction it stands in for and stay
+        // byte-identical to the pre-flip rocisa tree (ir.sched_rocisa_view). Mirrors
+        // how the C++ insertDelayAlu pass already consumes rocisaInst. Removed once
+        // those passes move onto the logical IR and the rocisa classes retire.
+        .def_prop_ro("rocisaInst",
+                     [](const rocisa::LogicalLeaf& self) { return self.rocisaInst; })
         // LDS mem-token forwarding (Phase 3 §10.2 A): same signature as rocisa
         // Instruction so a leaf is a drop-in for inst.setMemToken(...).
         .def("setMemToken", &rocisa::LogicalLeaf::setMemToken, nb::arg("token").none())

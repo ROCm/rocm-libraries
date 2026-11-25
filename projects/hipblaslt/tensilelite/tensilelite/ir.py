@@ -302,6 +302,35 @@ def sched_is_register_container(item):
   return isinstance(item, _rocisa_container.RegisterContainer)
 
 
+def sched_rocisa_view(item):
+  """Return the rocisa-instruction *view* of a scheduled tree item.
+
+  Several in-path scheduler/codegen passes still introspect an instruction by its
+  raw rocisa shape -- ``type(x).__name__`` (and ``.startswith`` on it), operand
+  attributes (``.dst`` / ``.srcs`` / ``.a`` / ``.labelName`` ...), ``str(x)`` whose
+  asm text they regex, or ``isinstance(x, SomeConcreteRocisaClass)``. A
+  ``LogicalLeaf`` answers none of these like the rocisa instruction it replaced
+  (``type`` is "LogicalLeaf", it has no ``.dst`` / ``.srcs``, and ``str()`` is
+  not real asm), so such a pass is silently blind to a leaf.
+
+  For a leaf this returns the exact rocisa instruction the leaf stands in for
+  (``LogicalLeaf.rocisaInst``, the clone makeLogicalLeaf stored), so type / operand
+  / text / isinstance introspection is byte-identical to the pre-flip rocisa tree.
+  For a real rocisa instruction (or a leaf with no stored rocisaInst) it returns
+  the item unchanged. This is the Python counterpart of how the C++ insertDelayAlu
+  pass already treats a leaf as its ``rocisaInst``; both retire together once these
+  passes move onto the logical IR.
+
+  Read-only: ``rocisaInst`` is a clone, so mutating the returned object would not
+  reach the leaf. Use only for inspection, never to mutate scheduled state.
+  """
+  if isinstance(item, _LogicalLeaf):
+    ri = item.rocisaInst
+    if ri is not None:
+      return ri
+  return item
+
+
 class _LogicalBackend:
   """Construction backend that builds StinkyTofu logical IR instead of rocisa.
 
@@ -420,11 +449,42 @@ def maybe_logical_leaf(inst):
 # entries in schedCategoryForOpcode. The non-matrix scalar ALUs the same region
 # may emit are already covered below. Subtile stays pure rocisa (the region
 # decorator is gated on UseSubtileImpl).
+# The globalReadIncrementAB region (wrapped in logical_region("globalReadIncrementAB"))
+# advances the TDM descriptor pointers: tdmIncrementAB / tdmIncrementABWaveSperated
+# and their callees (incrementGlobalAddr, graIncrementMask, hplrMaskedIncrement /
+# hplrLastIterCompare, _emitTdmWaveParitySCC, _tdmSplitMultiWaveInc,
+# tailFoldingShrinkTdmKDim, _emitTdmSharedScaleWrappedInc, _tdmIncrementMetadata*).
+# Beyond the scalar ALUs already listed, that block adds s_cmp_eq_u32 (wrapIter
+# test), s_subb_u32 (TDMSplit borrow), s_cmov_b32 (HalfPLR masked inc), s_cmp_le_i32
+# (last-iter compare) and s_bitcmp1_b32 (wave parity / PAP-primed). They fall through
+# schedCategoryForOpcode to Other (same as the rocisa base), so no C++ classification
+# entry is needed.
+#
+# These are SCC producers/consumers (s_cmp_* set SCC; s_cselect_b32 / s_cmov_b32 /
+# s_subb_u32 read SCC/carry), so the staggerU wrapIter block they build is the first
+# flipped region whose instructions flow through the Python scheduler's SCC/sgpr
+# dataflow analysis (postMainLoopBarrierCheckAndReset's wave-divergence guard +
+# _makeSubIterSchedule's hasDependency). That analysis read an item's raw rocisa
+# shape (type(x).__name__, .dst/.srcs, str(x)), which a LogicalLeaf does not answer,
+# so it was silently blind to the leaf-ified chain and dropped it. Fixed by routing
+# every such introspection site through ir.sched_rocisa_view (unwrap a leaf to its
+# transitional rocisaInst), making it byte-identical to the pre-flip tree -- the
+# scheduler-introspection seam extended from "counting/classification" (count.cpp)
+# to "SCC/sgpr dataflow".
+#
+# NOT included (yet): s_add_u64 (the 64-bit "TDM addr += inc"). Its rocisa class
+# SAddU64 is a CompositeInstruction, unlike every opcode migrated so far (simple
+# CommonInstructions). Composite-ness was *ruled out* as the wrapIter-drop cause
+# (removing it did not fix the 71/71 drop; the real cause was the SCC/sgpr seam
+# above, and SAddU64 counts/lowers identically as a leaf via CompositeInstruction-
+# LoweringPass). It is held back only to validate the SCC/sgpr bridge in isolation;
+# re-add it to flip the whole wrapIter once the bridge lands byte-identical.
 _MIGRATED = {
     "SMovB32", "SMovB64", "SLShiftRightB32", "SLShiftLeftB32",
     "SMulI32", "SAddU32", "SAddCU32", "SSubI32", "SSubU32",
     "SAndB32", "SOrB32", "SCSelectB32", "VReadfirstlaneB32",
     "MFMAInstruction", "SMFMAInstruction", "MXMFMAInstruction",
+    "SCmpEQU32", "SSubBU32", "SCMovB32", "SCmpLeI32", "SBitcmp1B32",
 }
 _MIGRATE_ALL = False
 

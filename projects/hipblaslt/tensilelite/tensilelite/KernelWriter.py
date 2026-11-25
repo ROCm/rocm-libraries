@@ -47,6 +47,7 @@ from .ir import BranchInstruction, BufferLoadB128, BufferLoadB192, BufferLoadB32
 from .ir import sched_is_mfma, sched_is_smfma, sched_is_mxmfma, sched_is_tensor_load_to_lds
 from .ir import sched_is_ds_load, sched_is_ds_load_b128, sched_is_ds_store, sched_is_waitcnt
 from .ir import sched_is_nop, sched_is_instruction, sched_is_module, sched_is_register_container
+from .ir import sched_rocisa_view
 from .ir import SSchedulingFence
 from .ir import set_active_version as _set_active_ir_version
 from .ir import set_active_arch_name as _set_active_ir_arch_name
@@ -2059,6 +2060,12 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
       insertedPackM = 0
 
       def hasDependency(lr: DSLoadInstruction, inst: Instruction) -> bool:
+        # Either operand may be a LogicalLeaf inside a flipped region (ds_load /
+        # mfma are migrated); read the rocisa view so .dst / .a / .b / .srcs resolve
+        # byte-identically to the pre-flip tree instead of AttributeError-ing or
+        # silently reporting no operands (sched_rocisa_view).
+        lr = sched_rocisa_view(lr)
+        inst = sched_rocisa_view(inst)
         lrDataReg = lr.dst
 
         if sched_is_mfma(inst):
@@ -12397,11 +12404,17 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
       "SBranch", "SLongBranch", "SLongBranchPositive", "SLongBranchNegative",
     )
 
+    # A flipped region may feed this SCC/sgpr dataflow analysis LogicalLeaf items;
+    # read each item's rocisa view so type-name / .dst / .srcs introspection matches
+    # the rocisa instruction it replaced, instead of being silently blind to the leaf
+    # (sched_rocisa_view). Byte-identical for a pure-rocisa tree.
     def _isConditionalBranch(leaf):
+      leaf = sched_rocisa_view(leaf)
       return isinstance(leaf, BranchInstruction) and \
              type(leaf).__name__ not in unconditionalBranchClassNames
 
     def _writtenSgprNumbers(leaf):
+      leaf = sched_rocisa_view(leaf)
       dst = getattr(leaf, "dst", None)
       if not isinstance(dst, RegisterContainer) or dst.regType != "s" or \
          dst.regName is not None or dst.regIdx < 0:
@@ -12409,6 +12422,7 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
       return range(dst.regIdx, dst.regIdx + max(dst.regNum, 1))
 
     def _readsAnySgprNumber(leaf, numbers):
+      leaf = sched_rocisa_view(leaf)
       for src in (getattr(leaf, "srcs", None) or []):
         if isinstance(src, RegisterContainer) and src.regType == "s" and \
            src.regName is None and src.regIdx >= 0 and \
@@ -12424,16 +12438,18 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
     for idx, (leaf, _leafMod, _leafPos) in enumerate(flatLeaves):
       if not sched_is_instruction(leaf):
         continue
+      # rocisa view of the (possibly leaf) item for all raw type/text introspection.
+      leafView = sched_rocisa_view(leaf)
       if _isConditionalBranch(leaf):
-        endIdx = labelDefIndex.get(getattr(leaf, "labelName", None))
+        endIdx = labelDefIndex.get(getattr(leafView, "labelName", None))
         # A backward branch is a loop back-edge, and a target this tree does not
         # define is not a region that closes at a known point either.
         if sccIsWaveDivergent and endIdx is not None and endIdx > idx:
           guardEndByIndex[idx] = endIdx
         continue
-      className = type(leaf).__name__
+      className = type(leafView).__name__
       if className.startswith(sccCompareClassPrefixes):
-        text = str(leaf)
+        text = str(leafView)
         # ArgType bits 8+ are the released WaveIdx; domain tests mask into a temp, naming it in a comment only.
         sccIsWaveDivergent = "WaveIdx" in text or "sgprArgType" in text or \
             any(int(n) in waveIdSgprs for n in sgprNumberPattern.findall(text))
@@ -12444,7 +12460,7 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
       # v_readfirstlane_b32(vgprSerial) and the parity compare that consumes them.
       written = _writtenSgprNumbers(leaf)
       if written:
-        if isinstance(leaf, VReadfirstlaneB32) and "vgprSerial" in str(leaf):
+        if isinstance(leafView, VReadfirstlaneB32) and "vgprSerial" in str(leafView):
           waveIdSgprs.update(written)
         elif not _readsAnySgprNumber(leaf, waveIdSgprs):
           waveIdSgprs.difference_update(written)
@@ -12580,14 +12596,16 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
       if not sched_is_instruction(item):
         continue
 
-      branchLabelName = getattr(item, "labelName", None)
-      if isinstance(item, BranchInstruction) and branchLabelName is not None and \
+      # rocisa view for raw type/label introspection on a possibly-leaf item.
+      itemView = sched_rocisa_view(item)
+      branchLabelName = getattr(itemView, "labelName", None)
+      if isinstance(itemView, BranchInstruction) and branchLabelName is not None and \
          labelDefIndex.get(branchLabelName, -1) > idx:
         if branchLabelName not in forwardBranchStates:
           forwardBranchStates[branchLabelName] = dict(tokenState)
         else:
           _mergeBranchStates(forwardBranchStates[branchLabelName], tokenState)
-      fallthroughDead = type(item).__name__ in unconditionalEndClassNames
+      fallthroughDead = type(itemView).__name__ in unconditionalEndClassNames
       if _isOptNllEndLabelName(branchLabelName) and branchLabelName not in branchTokenStateSnapshot:
         # Save token state at the first branch to OptNLL_End.
         branchTokenStateSnapshot[branchLabelName] = deepcopy(tokenState)
@@ -12601,7 +12619,7 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
       access = _classifyTokenAccess(item)
       tokens = _getTokenList(item)
       if access is None and tokens:
-        print2(f"[postMainLoopBarrierCheckAndReset] WARNING: instruction {type(item).__name__} has tokens {tokens} but no classified access — barrier may be missing")
+        print2(f"[postMainLoopBarrierCheckAndReset] WARNING: instruction {type(sched_rocisa_view(item)).__name__} has tokens {tokens} but no classified access — barrier may be missing")
       if access is None or not tokens:
         continue
 

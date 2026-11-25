@@ -14011,6 +14011,7 @@ class KernelWriterAssembly(KernelWriter):
                     comment="gra += inc%s%s (upper)"%(tP["tensorChar"], loopChar)))
               graIdx += self.states.rpga
 
+  @_logical_region_method("globalReadIncrementAB")
   def globalReadIncrementAB(self, kernel, tPA, tPB, loopIdx, prefetchIndex):
     imod = Module("globalReadIncrementAB")
     tdmA: bool = kernel["enableTDMA"]
