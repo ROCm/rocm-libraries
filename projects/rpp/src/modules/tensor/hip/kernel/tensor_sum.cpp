@@ -1259,6 +1259,15 @@ RppStatus hip_exec_tensor_sum(T* srcPtr, RpptDescPtr srcDescPtr, U* tensorSumArr
     int gridDim_y = (int)ceil((float)globalThreads_y / LOCAL_THREADS_Y);
     int gridDim_z = (int)ceil((float)globalThreads_z / LOCAL_THREADS_Z);
 
+    // The partial sums are written into the shared HIP scratch, which is a fixed
+    // sizeof(Rpp32f) * 8294400. Each branch below sizes its own write from the
+    // grid, and the 3-channel branches triple it, so check the largest form here
+    // rather than at each of the nine write sites. Exceeding the buffer is a
+    // reachable batch count: 170 images at 8K with three channels, 682 at 4K.
+    constexpr Rpp32u kScratchBufferFloats = 8294400;
+    const Rpp64u partialSumUpperBound = static_cast<Rpp64u>(3) * gridDim_x * gridDim_y * gridDim_z;
+    if (partialSumUpperBound > kScratchBufferFloats) return RPP_ERROR_NOT_ENOUGH_MEMORY;
+
     if ((srcDescPtr->c == 1) && (srcDescPtr->layout == RpptLayout::NCHW)) {
         Rpp32u partialSumArrLength = gridDim_x * gridDim_y * gridDim_z;
         float* partialSumArr;
@@ -1337,6 +1346,15 @@ RppStatus hip_exec_tensor_sum(Rpp8u* srcPtr, RpptDescPtr srcDescPtr, Rpp64u* ten
     int gridDim_y = (int)ceil((float)globalThreads_y / LOCAL_THREADS_Y);
     int gridDim_z = (int)ceil((float)globalThreads_z / LOCAL_THREADS_Z);
 
+    // The partial sums are written into the shared HIP scratch, which is a fixed
+    // sizeof(Rpp32f) * 8294400. Each branch below sizes its own write from the
+    // grid, and the 3-channel branches triple it, so check the largest form here
+    // rather than at each of the nine write sites. Exceeding the buffer is a
+    // reachable batch count: 170 images at 8K with three channels, 682 at 4K.
+    constexpr Rpp32u kScratchBufferFloats = 8294400;
+    const Rpp64u partialSumUpperBound = static_cast<Rpp64u>(3) * gridDim_x * gridDim_y * gridDim_z;
+    if (partialSumUpperBound > kScratchBufferFloats) return RPP_ERROR_NOT_ENOUGH_MEMORY;
+
     if ((srcDescPtr->c == 1) && (srcDescPtr->layout == RpptLayout::NCHW)) {
         Rpp32u partialSumArrLength = gridDim_x * gridDim_y * gridDim_z;
         Rpp32u* partialSumArr;
@@ -1410,6 +1428,15 @@ RppStatus hip_exec_tensor_sum(Rpp8s* srcPtr, RpptDescPtr srcDescPtr, Rpp64s* ten
     int gridDim_x = (int)ceil((float)globalThreads_x / LOCAL_THREADS_X);
     int gridDim_y = (int)ceil((float)globalThreads_y / LOCAL_THREADS_Y);
     int gridDim_z = (int)ceil((float)globalThreads_z / LOCAL_THREADS_Z);
+
+    // The partial sums are written into the shared HIP scratch, which is a fixed
+    // sizeof(Rpp32f) * 8294400. Each branch below sizes its own write from the
+    // grid, and the 3-channel branches triple it, so check the largest form here
+    // rather than at each of the nine write sites. Exceeding the buffer is a
+    // reachable batch count: 170 images at 8K with three channels, 682 at 4K.
+    constexpr Rpp32u kScratchBufferFloats = 8294400;
+    const Rpp64u partialSumUpperBound = static_cast<Rpp64u>(3) * gridDim_x * gridDim_y * gridDim_z;
+    if (partialSumUpperBound > kScratchBufferFloats) return RPP_ERROR_NOT_ENOUGH_MEMORY;
 
     if ((srcDescPtr->c == 1) && (srcDescPtr->layout == RpptLayout::NCHW)) {
         Rpp32u partialSumArrLength = gridDim_x * gridDim_y * gridDim_z;
