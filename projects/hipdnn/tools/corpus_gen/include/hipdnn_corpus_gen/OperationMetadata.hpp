@@ -140,6 +140,7 @@ struct BuilderArgument
         DIRECT, ///< Copy the named `$q.*` value.
         EXPR, ///< Evaluate an expression; arrays yield dims lists.
         STRIDES_OF, ///< Row-major contiguous strides for a previously-named argument.
+        SAME_AS, ///< The value of a previously-named argument (a gradient laid out as its input).
         DTYPE_OF, ///< Map a dtype string to the FlatBuffers DataType enumerator.
         CONSTANT ///< Literal.
     };
@@ -159,7 +160,7 @@ struct BuilderArgument
     /// Per element, the index of its `when` condition; a false condition omits the element,
     /// letting one declaration cover several ranks.
     std::vector<std::optional<size_t>> elementConditions;
-    std::string of; ///< STRIDES_OF
+    std::string of; ///< STRIDES_OF, SAME_AS
     nlohmann::json constant; ///< CONSTANT
 };
 
@@ -168,6 +169,11 @@ struct GraphBuilderSpec
 {
     std::string function;
     std::string source;
+    /// Values derived from the point once and bound as `$let.<name>` before any argument
+    /// resolves: `lets.resolve(i, ...)` binds `letNames[i]`. A let reads `$q.*` and the lets
+    /// declared before it; the arguments read every let.
+    std::vector<std::string> letNames;
+    hipdnn_plugin_sdk::uhd::ExpressionSet lets;
     std::vector<BuilderArgument> arguments;
 };
 
@@ -349,6 +355,13 @@ namespace detail
 inline std::string queryReference(const std::string& text)
 {
     constexpr std::string_view PREFIX = "$q.";
+    return text.rfind(PREFIX, 0) == 0 ? text.substr(PREFIX.size()) : std::string();
+}
+
+/// The `$let.<name>` a reference names, or empty if it is not a graph_builder `let`.
+inline std::string letReference(const std::string& text)
+{
+    constexpr std::string_view PREFIX = "$let.";
     return text.rfind(PREFIX, 0) == 0 ? text.substr(PREFIX.size()) : std::string();
 }
 
@@ -537,6 +550,10 @@ inline std::optional<BuilderArgument::Kind> parseArgumentKind(const std::string&
     {
         return BuilderArgument::Kind::STRIDES_OF;
     }
+    if(text == "same_as")
+    {
+        return BuilderArgument::Kind::SAME_AS;
+    }
     if(text == "dtype_of")
     {
         return BuilderArgument::Kind::DTYPE_OF;
@@ -703,6 +720,70 @@ inline std::vector<RegimeAxis> parseLabelAxes(const nlohmann::json& axes,
         parsed.push_back(std::move(axis));
     }
     return parsed;
+}
+
+/// @brief Compiles `graph_builder.let` into @p spec: an array of `{"name", "value"}`, a §6.2
+/// expression each, bound as `$let.<name>` before the arguments resolve.
+///
+/// An array, not an object: a let reads the `$q.*` parameters and only the lets declared
+/// before it, so declaration order is the resolution order and no cycle can be written.
+inline void parseLets(const nlohmann::json& lets,
+                      const OperationMetadata& metadata,
+                      GraphBuilderSpec& spec,
+                      MetadataLoad& load)
+{
+    if(!lets.is_array())
+    {
+        load.errors.emplace_back("graph_builder 'let' is not an array");
+        return;
+    }
+    std::vector<nlohmann::json> program;
+    for(const auto& let : lets)
+    {
+        const auto name = let.is_object() ? let.value("name", "") : std::string();
+        if(name.empty() || !let.contains("value"))
+        {
+            load.errors.emplace_back("graph_builder 'let' holds an entry without a name or value");
+            continue;
+        }
+        if(std::find(spec.letNames.begin(), spec.letNames.end(), name) != spec.letNames.end())
+        {
+            load.errors.push_back("let '" + name + "' is declared twice");
+            continue;
+        }
+        spec.letNames.push_back(name);
+        program.push_back(let.at("value"));
+    }
+    try
+    {
+        spec.lets = hipdnn_plugin_sdk::uhd::ExpressionSet(program);
+    }
+    catch(const std::exception& error)
+    {
+        load.errors.push_back("graph_builder 'let': " + std::string(error.what()));
+        spec.letNames.clear();
+        return;
+    }
+    for(size_t i = 0; i < spec.letNames.size(); ++i)
+    {
+        const auto before = spec.letNames.begin() + static_cast<std::ptrdiff_t>(i);
+        for(const auto& variable : spec.lets.variables(i))
+        {
+            const auto parameter = queryReference(variable);
+            if(!parameter.empty() && metadata.find(parameter) == nullptr)
+            {
+                load.errors.push_back("let '" + spec.letNames[i]
+                                      + "' references undeclared parameter '" + parameter + "'");
+            }
+            const auto let = letReference(variable);
+            if(!let.empty() && std::find(spec.letNames.begin(), before, let) == before)
+            {
+                // Lets resolve in declaration order: a later let, or this one, is not bound yet.
+                load.errors.push_back("let '" + spec.letNames[i] + "' reads '" + variable
+                                      + "', which is not declared before it");
+            }
+        }
+    }
 }
 
 } // namespace detail
@@ -1027,6 +1108,10 @@ inline MetadataLoad parseOperationMetadata(const nlohmann::json& root)
         {
             load.errors.emplace_back("graph_builder declares no function");
         }
+        if(builder.contains("let"))
+        {
+            detail::parseLets(builder.at("let"), metadata, metadata.graphBuilder, load);
+        }
 
         std::vector<std::string> declared;
         for(const auto& argument : builder.value("arguments", nlohmann::json::array()))
@@ -1146,17 +1231,26 @@ inline MetadataLoad parseOperationMetadata(const nlohmann::json& root)
             };
             checkReference(resolved.source);
             // Variables come from the evaluator, so nested expressions are covered too.
+            const auto& lets = metadata.graphBuilder.letNames;
             for(const auto& variable : resolved.expressions.variables())
             {
                 checkReference(variable);
+                const auto let = detail::letReference(variable);
+                if(!let.empty() && std::find(lets.begin(), lets.end(), let) == lets.end())
+                {
+                    load.errors.push_back("argument '" + resolved.name + "' reads '" + variable
+                                          + "', which graph_builder's 'let' does not declare");
+                }
             }
 
-            if(resolved.kind == BuilderArgument::Kind::STRIDES_OF
+            if((resolved.kind == BuilderArgument::Kind::STRIDES_OF
+                || resolved.kind == BuilderArgument::Kind::SAME_AS)
                && std::find(declared.begin(), declared.end(), resolved.of) == declared.end())
             {
                 // Arguments resolve in declaration order; a forward reference cannot resolve.
-                load.errors.push_back("argument '" + resolved.name + "' takes strides_of '"
-                                      + resolved.of + "', which is not declared before it");
+                load.errors.push_back("argument '" + resolved.name + "' takes "
+                                      + argument.value("kind", "") + " '" + resolved.of
+                                      + "', which is not declared before it");
             }
 
             declared.push_back(resolved.name);

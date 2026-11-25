@@ -226,19 +226,19 @@ TEST(TestShippedGraphsValidate, EverySdpaFormLayoutScaleWindowAndSequenceRelatio
                             {
                                 for(const auto& window : windows)
                                 {
-                                    ProblemPoint given{{"batch", int64_t{2}},
-                                                       {"heads", int64_t{8}},
-                                                       {"heads_kv", int64_t{2}},
-                                                       {"seqlen_q", shape.seqlenQ},
-                                                       {"seqlen_k", shape.seqlenK},
-                                                       {"head_dim", shape.headDim},
-                                                       {"is_causal", shape.causal},
-                                                       {"dtype", dtype},
-                                                       {"form", formValue},
-                                                       {"layout", layout},
-                                                       {"scale", scale},
-                                                       {"window", window},
-                                                       {"value_head_dim", valueHead}};
+                                    const ProblemPoint given{{"batch", int64_t{2}},
+                                                             {"heads", int64_t{8}},
+                                                             {"heads_kv", int64_t{2}},
+                                                             {"seqlen_q", shape.seqlenQ},
+                                                             {"seqlen_k", shape.seqlenK},
+                                                             {"head_dim", shape.headDim},
+                                                             {"is_causal", shape.causal},
+                                                             {"dtype", dtype},
+                                                             {"form", formValue},
+                                                             {"layout", layout},
+                                                             {"scale", scale},
+                                                             {"window", window},
+                                                             {"value_head_dim", valueHead}};
                                     const auto point
                                         = test::withDefaultCategoricals(metadata, given);
                                     const std::string where
@@ -323,21 +323,21 @@ TEST(TestShippedGraphsValidate, EverySdpaFormBuildsAGraphTheFrontendValidates)
                     {
                         for(const bool stats : {true, false})
                         {
-                            ProblemPoint point{{"batch", int64_t{2}},
-                                               {"heads", int64_t{4}},
-                                               {"heads_kv", int64_t{2}},
-                                               {"seqlen_q", int64_t{16}},
-                                               {"seqlen_k", int64_t{32}},
-                                               {"head_dim", int64_t{64}},
-                                               {"is_causal", causal},
-                                               {"alignment", std::string(alignment)},
-                                               {"generate_stats", stats},
-                                               {"dtype", dtype},
-                                               {"form", value},
-                                               {"layout", std::string("bshd")},
-                                               {"scale", std::string("inv_sqrt_d")},
-                                               {"window", std::string("none")},
-                                               {"value_head_dim", std::string("same")}};
+                            const ProblemPoint point{{"batch", int64_t{2}},
+                                                     {"heads", int64_t{4}},
+                                                     {"heads_kv", int64_t{2}},
+                                                     {"seqlen_q", int64_t{16}},
+                                                     {"seqlen_k", int64_t{32}},
+                                                     {"head_dim", int64_t{64}},
+                                                     {"is_causal", causal},
+                                                     {"alignment", std::string(alignment)},
+                                                     {"generate_stats", stats},
+                                                     {"dtype", dtype},
+                                                     {"form", value},
+                                                     {"layout", std::string("bshd")},
+                                                     {"scale", std::string("inv_sqrt_d")},
+                                                     {"window", std::string("none")},
+                                                     {"value_head_dim", std::string("same")}};
                             // The declaration pins the anchor where it makes no difference.
                             if(!detail::satisfiesConstraints(metadata, point))
                             {
@@ -398,6 +398,16 @@ TEST(TestShippedGraphsValidate, EverySdpaDtypeValidatesUnderEveryFormLayoutAndVa
         ASSERT_NE(valueHeads, nullptr) << operation;
 
         std::map<std::string, int64_t> validatedFor;
+        // The tally of a dtype crossed with one facet's value.
+        const auto tally
+            = [](const std::string& dtype, const char* facet, const std::string& value) {
+                  std::string key = "dtype=" + dtype;
+                  key += ' ';
+                  key += facet;
+                  key += '=';
+                  key += value;
+                  return key;
+              };
         for(const auto& shape : shapes)
         {
             for(const auto& dtype : dtypes->values)
@@ -408,17 +418,17 @@ TEST(TestShippedGraphsValidate, EverySdpaDtypeValidatesUnderEveryFormLayoutAndVa
                     {
                         for(const auto& valueHead : valueHeads->values)
                         {
-                            ProblemPoint given{{"batch", int64_t{2}},
-                                               {"heads", int64_t{8}},
-                                               {"heads_kv", int64_t{2}},
-                                               {"seqlen_q", shape.seqlenQ},
-                                               {"seqlen_k", shape.seqlenK},
-                                               {"head_dim", shape.headDim},
-                                               {"is_causal", shape.causal},
-                                               {"dtype", dtype},
-                                               {"form", form},
-                                               {"layout", layout},
-                                               {"value_head_dim", valueHead}};
+                            const ProblemPoint given{{"batch", int64_t{2}},
+                                                     {"heads", int64_t{8}},
+                                                     {"heads_kv", int64_t{2}},
+                                                     {"seqlen_q", shape.seqlenQ},
+                                                     {"seqlen_k", shape.seqlenK},
+                                                     {"head_dim", shape.headDim},
+                                                     {"is_causal", shape.causal},
+                                                     {"dtype", dtype},
+                                                     {"form", form},
+                                                     {"layout", layout},
+                                                     {"value_head_dim", valueHead}};
                             const auto point = test::withDefaultCategoricals(metadata, given);
                             if(!detail::satisfiesConstraints(metadata, point))
                             {
@@ -426,8 +436,8 @@ TEST(TestShippedGraphsValidate, EverySdpaDtypeValidatesUnderEveryFormLayoutAndVa
                             }
                             const std::string where = operation + " " + detail::describe(point);
                             ++validatedFor["dtype=" + dtype];
-                            ++validatedFor["dtype=" + dtype + " form=" + form];
-                            ++validatedFor["dtype=" + dtype + " layout=" + layout];
+                            ++validatedFor[tally(dtype, "form", form)];
+                            ++validatedFor[tally(dtype, "layout", layout)];
                             const auto built = buildGraphFor(metadata, point);
                             ASSERT_TRUE(built.ok()) << where << ": " << built.error;
                             hipdnn_frontend::graph::Graph graph;
@@ -447,12 +457,12 @@ TEST(TestShippedGraphsValidate, EverySdpaDtypeValidatesUnderEveryFormLayoutAndVa
             EXPECT_GT(validatedFor["dtype=" + dtype], 0) << operation << " certified no " << dtype;
             for(const auto& form : forms->values)
             {
-                EXPECT_GT(validatedFor["dtype=" + dtype + " form=" + form], 0)
+                EXPECT_GT(validatedFor[tally(dtype, "form", form)], 0)
                     << operation << " certified no " << dtype << " graph of form " << form;
             }
             for(const auto& layout : layouts->values)
             {
-                EXPECT_GT(validatedFor["dtype=" + dtype + " layout=" + layout], 0)
+                EXPECT_GT(validatedFor[tally(dtype, "layout", layout)], 0)
                     << operation << " certified no " << dtype << " graph of layout " << layout;
             }
         }

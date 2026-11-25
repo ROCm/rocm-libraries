@@ -48,7 +48,7 @@
         "same": 3,
         "mla": 1
       },
-      "description": "Width of V, and so of O (and dO, dV), against Q and K's head_dim. same (default): equal, as nearly every model has. mla: 64 narrower, DeepSeek's multi-head latent attention, whose Q and K carry a 64-wide rotary part that V does not -- 192/128 in prefill and training, 576/512 with the latent absorbed in decode. hipDNN requires only Q and K's last dims to agree (SdpaFwdNode Rule 2, SdpaBwdNode Rule 3; O, dO and dV take V's), and ASM SDPA and FlyDSL ship kernels for such pairs. Declared at those two widths only (head_dim 192 or 576): the other widths the 64 offset gives (128/64, 129/65) are no model's, and the deepseek_v3 archetypes anchor both pairs."
+      "description": "Width of V, and so of O (and dO, dV), against Q and K's head_dim. same (default): equal, as nearly every model has. mla: 64 narrower, DeepSeek's multi-head latent attention, whose Q and K carry a 64-wide rotary part that V does not -- 192/128 in prefill and training, 576/512 with the latent absorbed in decode. hipDNN requires only Q and K's last dims to agree (SdpaFwdNode Rule 2, SdpaBwdNode Rule 3; O, dO and dV take V's), and ASM SDPA and FlyDSL ship kernels for such pairs. Declared at those two widths only (head_dim 192 or 576): the mla pairs are pinned on purpose to DeepSeek's 192/128 and 576/512, and other unequal Q/K and V widths (128/64, 129/65, or any V an engine's pair buckets take) are deliberately left out of the corpus, so UHD has no data for them. The deepseek_v3 archetypes anchor both pairs."
     },
     "is_causal": {
       "type": "bool",
@@ -209,8 +209,8 @@
     "same operation and entirely different problems, which is why they are anchored as separate",
     "archetypes rather than as one range over seqlen_q. Cross attention (more queries than keys)",
     "draws its two sequences from different tensors, so it varies independently of the rest --",
-    "the constraint admits it only under a non-causal mask, and the clause files it under",
-    "'cross' rather than 'append'.",
+    "a causal mask there is anchored top-left, so every query row keeps a key, and the clause",
+    "files it under 'cross' rather than 'append'.",
     "Grouping (mha/gqa/mqa) is the third facet: how many query heads share one KV head decides",
     "how much of the KV cache a wavefront re-reads, which is the whole difference between a",
     "decode that is bandwidth bound and one that is not. It is a label rather than a bucket",
@@ -690,6 +690,28 @@
   "graph_builder": {
     "function": "sdpaForward",
     "source": "hipdnn_corpus_gen/GraphBuilders.hpp",
+    "let": [
+      {
+        "name": "head_dim_v",
+        "value": {
+          "if": [
+            {
+              "==": [
+                "$q.value_head_dim",
+                "mla"
+              ]
+            },
+            {
+              "-": [
+                "$q.head_dim",
+                64
+              ]
+            },
+            "$q.head_dim"
+          ]
+        }
+      }
+    ],
     "arguments": [
       {
         "name": "qDims",
@@ -765,23 +787,7 @@
                               {
                                 "*": [
                                   "$q.heads_kv",
-                                  {
-                                    "if": [
-                                      {
-                                        "==": [
-                                          "$q.value_head_dim",
-                                          "mla"
-                                        ]
-                                      },
-                                      {
-                                        "-": [
-                                          "$q.head_dim",
-                                          64
-                                        ]
-                                      },
-                                      "$q.head_dim"
-                                    ]
-                                  }
+                                  "$let.head_dim_v"
                                 ]
                               }
                             ]
@@ -874,23 +880,7 @@
                           {
                             "*": [
                               "$q.heads_kv",
-                              {
-                                "if": [
-                                  {
-                                    "==": [
-                                      "$q.value_head_dim",
-                                      "mla"
-                                    ]
-                                  },
-                                  {
-                                    "-": [
-                                      "$q.head_dim",
-                                      64
-                                    ]
-                                  },
-                                  "$q.head_dim"
-                                ]
-                              }
+                              "$let.head_dim_v"
                             ]
                           }
                         ]
@@ -1003,23 +993,7 @@
                                   {
                                     "*": [
                                       "$q.heads_kv",
-                                      {
-                                        "if": [
-                                          {
-                                            "==": [
-                                              "$q.value_head_dim",
-                                              "mla"
-                                            ]
-                                          },
-                                          {
-                                            "-": [
-                                              "$q.head_dim",
-                                              64
-                                            ]
-                                          },
-                                          "$q.head_dim"
-                                        ]
-                                      }
+                                      "$let.head_dim_v"
                                     ]
                                   }
                                 ]
@@ -1139,23 +1113,7 @@
                               {
                                 "*": [
                                   "$q.heads_kv",
-                                  {
-                                    "if": [
-                                      {
-                                        "==": [
-                                          "$q.value_head_dim",
-                                          "mla"
-                                        ]
-                                      },
-                                      {
-                                        "-": [
-                                          "$q.head_dim",
-                                          64
-                                        ]
-                                      },
-                                      "$q.head_dim"
-                                    ]
-                                  }
+                                  "$let.head_dim_v"
                                 ]
                               }
                             ]
@@ -1184,23 +1142,7 @@
           "$q.batch",
           "$q.heads_kv",
           "$q.seqlen_k",
-          {
-            "if": [
-              {
-                "==": [
-                  "$q.value_head_dim",
-                  "mla"
-                ]
-              },
-              {
-                "-": [
-                  "$q.head_dim",
-                  64
-                ]
-              },
-              "$q.head_dim"
-            ]
-          }
+          "$let.head_dim_v"
         ]
       },
       {
@@ -1223,23 +1165,7 @@
                       "$q.seqlen_k"
                     ]
                   },
-                  {
-                    "if": [
-                      {
-                        "==": [
-                          "$q.value_head_dim",
-                          "mla"
-                        ]
-                      },
-                      {
-                        "-": [
-                          "$q.head_dim",
-                          64
-                        ]
-                      },
-                      "$q.head_dim"
-                    ]
-                  }
+                  "$let.head_dim_v"
                 ]
               },
               {
@@ -1258,23 +1184,7 @@
                           "$q.seqlen_k"
                         ]
                       },
-                      {
-                        "if": [
-                          {
-                            "==": [
-                              "$q.value_head_dim",
-                              "mla"
-                            ]
-                          },
-                          {
-                            "-": [
-                              "$q.head_dim",
-                              64
-                            ]
-                          },
-                          "$q.head_dim"
-                        ]
-                      }
+                      "$let.head_dim_v"
                     ]
                   },
                   {
@@ -1288,23 +1198,7 @@
                       {
                         "*": [
                           "$q.heads_kv",
-                          {
-                            "if": [
-                              {
-                                "==": [
-                                  "$q.value_head_dim",
-                                  "mla"
-                                ]
-                              },
-                              {
-                                "-": [
-                                  "$q.head_dim",
-                                  64
-                                ]
-                              },
-                              "$q.head_dim"
-                            ]
-                          }
+                          "$let.head_dim_v"
                         ]
                       },
                       {
@@ -1334,23 +1228,7 @@
                                   {
                                     "*": [
                                       "$q.heads_kv",
-                                      {
-                                        "if": [
-                                          {
-                                            "==": [
-                                              "$q.value_head_dim",
-                                              "mla"
-                                            ]
-                                          },
-                                          {
-                                            "-": [
-                                              "$q.head_dim",
-                                              64
-                                            ]
-                                          },
-                                          "$q.head_dim"
-                                        ]
-                                      }
+                                      "$let.head_dim_v"
                                     ]
                                   }
                                 ]
@@ -1365,23 +1243,7 @@
                                   "$q.heads_kv"
                                 ]
                               },
-                              {
-                                "if": [
-                                  {
-                                    "==": [
-                                      "$q.value_head_dim",
-                                      "mla"
-                                    ]
-                                  },
-                                  {
-                                    "-": [
-                                      "$q.head_dim",
-                                      64
-                                    ]
-                                  },
-                                  "$q.head_dim"
-                                ]
-                              }
+                              "$let.head_dim_v"
                             ]
                           }
                         ]
@@ -1403,23 +1265,7 @@
               {
                 "*": [
                   "$q.seqlen_k",
-                  {
-                    "if": [
-                      {
-                        "==": [
-                          "$q.value_head_dim",
-                          "mla"
-                        ]
-                      },
-                      {
-                        "-": [
-                          "$q.head_dim",
-                          64
-                        ]
-                      },
-                      "$q.head_dim"
-                    ]
-                  }
+                  "$let.head_dim_v"
                 ]
               },
               {
@@ -1433,42 +1279,10 @@
                   {
                     "*": [
                       "$q.seqlen_k",
-                      {
-                        "if": [
-                          {
-                            "==": [
-                              "$q.value_head_dim",
-                              "mla"
-                            ]
-                          },
-                          {
-                            "-": [
-                              "$q.head_dim",
-                              64
-                            ]
-                          },
-                          "$q.head_dim"
-                        ]
-                      }
+                      "$let.head_dim_v"
                     ]
                   },
-                  {
-                    "if": [
-                      {
-                        "==": [
-                          "$q.value_head_dim",
-                          "mla"
-                        ]
-                      },
-                      {
-                        "-": [
-                          "$q.head_dim",
-                          64
-                        ]
-                      },
-                      "$q.head_dim"
-                    ]
-                  }
+                  "$let.head_dim_v"
                 ]
               }
             ]
@@ -1481,23 +1295,7 @@
                   "bhsd"
                 ]
               },
-              {
-                "if": [
-                  {
-                    "==": [
-                      "$q.value_head_dim",
-                      "mla"
-                    ]
-                  },
-                  {
-                    "-": [
-                      "$q.head_dim",
-                      64
-                    ]
-                  },
-                  "$q.head_dim"
-                ]
-              },
+              "$let.head_dim_v",
               {
                 "if": [
                   {
@@ -1506,23 +1304,7 @@
                       "kv_bhsd"
                     ]
                   },
-                  {
-                    "if": [
-                      {
-                        "==": [
-                          "$q.value_head_dim",
-                          "mla"
-                        ]
-                      },
-                      {
-                        "-": [
-                          "$q.head_dim",
-                          64
-                        ]
-                      },
-                      "$q.head_dim"
-                    ]
-                  },
+                  "$let.head_dim_v",
                   {
                     "if": [
                       {
@@ -1539,23 +1321,7 @@
                               "$q.heads_kv"
                             ]
                           },
-                          {
-                            "if": [
-                              {
-                                "==": [
-                                  "$q.value_head_dim",
-                                  "mla"
-                                ]
-                              },
-                              {
-                                "-": [
-                                  "$q.head_dim",
-                                  64
-                                ]
-                              },
-                              "$q.head_dim"
-                            ]
-                          }
+                          "$let.head_dim_v"
                         ]
                       },
                       {
@@ -1582,23 +1348,7 @@
                               {
                                 "*": [
                                   "$q.heads_kv",
-                                  {
-                                    "if": [
-                                      {
-                                        "==": [
-                                          "$q.value_head_dim",
-                                          "mla"
-                                        ]
-                                      },
-                                      {
-                                        "-": [
-                                          "$q.head_dim",
-                                          64
-                                        ]
-                                      },
-                                      "$q.head_dim"
-                                    ]
-                                  }
+                                  "$let.head_dim_v"
                                 ]
                               }
                             ]
@@ -1606,23 +1356,7 @@
                           {
                             "*": [
                               "$q.heads_kv",
-                              {
-                                "if": [
-                                  {
-                                    "==": [
-                                      "$q.value_head_dim",
-                                      "mla"
-                                    ]
-                                  },
-                                  {
-                                    "-": [
-                                      "$q.head_dim",
-                                      64
-                                    ]
-                                  },
-                                  "$q.head_dim"
-                                ]
-                              }
+                              "$let.head_dim_v"
                             ]
                           }
                         ]
@@ -1643,23 +1377,7 @@
           "$q.batch",
           "$q.heads",
           "$q.seqlen_q",
-          {
-            "if": [
-              {
-                "==": [
-                  "$q.value_head_dim",
-                  "mla"
-                ]
-              },
-              {
-                "-": [
-                  "$q.head_dim",
-                  64
-                ]
-              },
-              "$q.head_dim"
-            ]
-          }
+          "$let.head_dim_v"
         ]
       },
       {
@@ -1682,23 +1400,7 @@
                       "$q.seqlen_q"
                     ]
                   },
-                  {
-                    "if": [
-                      {
-                        "==": [
-                          "$q.value_head_dim",
-                          "mla"
-                        ]
-                      },
-                      {
-                        "-": [
-                          "$q.head_dim",
-                          64
-                        ]
-                      },
-                      "$q.head_dim"
-                    ]
-                  }
+                  "$let.head_dim_v"
                 ]
               },
               {
@@ -1712,23 +1414,7 @@
                   {
                     "*": [
                       "$q.heads",
-                      {
-                        "if": [
-                          {
-                            "==": [
-                              "$q.value_head_dim",
-                              "mla"
-                            ]
-                          },
-                          {
-                            "-": [
-                              "$q.head_dim",
-                              64
-                            ]
-                          },
-                          "$q.head_dim"
-                        ]
-                      }
+                      "$let.head_dim_v"
                     ]
                   },
                   {
@@ -1739,23 +1425,7 @@
                           "$q.heads"
                         ]
                       },
-                      {
-                        "if": [
-                          {
-                            "==": [
-                              "$q.value_head_dim",
-                              "mla"
-                            ]
-                          },
-                          {
-                            "-": [
-                              "$q.head_dim",
-                              64
-                            ]
-                          },
-                          "$q.head_dim"
-                        ]
-                      }
+                      "$let.head_dim_v"
                     ]
                   }
                 ]
@@ -1773,42 +1443,10 @@
               {
                 "*": [
                   "$q.seqlen_q",
-                  {
-                    "if": [
-                      {
-                        "==": [
-                          "$q.value_head_dim",
-                          "mla"
-                        ]
-                      },
-                      {
-                        "-": [
-                          "$q.head_dim",
-                          64
-                        ]
-                      },
-                      "$q.head_dim"
-                    ]
-                  }
+                  "$let.head_dim_v"
                 ]
               },
-              {
-                "if": [
-                  {
-                    "==": [
-                      "$q.value_head_dim",
-                      "mla"
-                    ]
-                  },
-                  {
-                    "-": [
-                      "$q.head_dim",
-                      64
-                    ]
-                  },
-                  "$q.head_dim"
-                ]
-              }
+              "$let.head_dim_v"
             ]
           },
           {
@@ -1819,23 +1457,7 @@
                   "bhsd"
                 ]
               },
-              {
-                "if": [
-                  {
-                    "==": [
-                      "$q.value_head_dim",
-                      "mla"
-                    ]
-                  },
-                  {
-                    "-": [
-                      "$q.head_dim",
-                      64
-                    ]
-                  },
-                  "$q.head_dim"
-                ]
-              },
+              "$let.head_dim_v",
               {
                 "if": [
                   {
@@ -1852,45 +1474,13 @@
                           "$q.heads"
                         ]
                       },
-                      {
-                        "if": [
-                          {
-                            "==": [
-                              "$q.value_head_dim",
-                              "mla"
-                            ]
-                          },
-                          {
-                            "-": [
-                              "$q.head_dim",
-                              64
-                            ]
-                          },
-                          "$q.head_dim"
-                        ]
-                      }
+                      "$let.head_dim_v"
                     ]
                   },
                   {
                     "*": [
                       "$q.heads",
-                      {
-                        "if": [
-                          {
-                            "==": [
-                              "$q.value_head_dim",
-                              "mla"
-                            ]
-                          },
-                          {
-                            "-": [
-                              "$q.head_dim",
-                              64
-                            ]
-                          },
-                          "$q.head_dim"
-                        ]
-                      }
+                      "$let.head_dim_v"
                     ]
                   }
                 ]
@@ -2280,7 +1870,8 @@
     ],
     "// layout": "BSHD (the default): dims stay (B, H, S, D) and the layout lives in the strides, token-major, as the shipped bundles lay them out. Not row-major: strides_of would give BHSD, and rocKE's dense kernels take no stride kernargs -- stride_q_tok is baked as Hq*D -- so their matcher (hasBshdStrides) declines every BHSD graph. AITER serves BSHD too, so the default keeps both engines in the contest. The `layout` parameter adds bhsd (head-major, [H*S*D, S*D, D, 1]) and kv_bhsd (Q/O token-major, K/V head-major, the decode KV cache), whose batch stride is BSHD's, so only the head and sequence strides differ; sbhd (Megatron's sequence-major order, batch stride H*D) and qkv_packed (Q, K and V as views of one fused QKV projection row, O token-major). value_head_dim mla narrows V, O (and dO, dV) by 64, so their strides use the value width wherever Q's use head_dim. An engine that serves only some of them is filtered by the oracle, per combination, not by a measurement. The ragged form packs tokens through offset tensors whose multiplier is the token stride, so it needs token-major strides and is declared only with bshd and qkv_packed; bhsd, kv_bhsd and sbhd with ragged would address data that is not token-contiguous per sequence through a token-packed container.",
     "// scale": "attnScale is the plain form's stated scale, not left to the schema's optional: rocKE's dense matcher declines a graph with no attn_scale_value (the scale is a required f32 kernarg and guessing 1/sqrt(D) is what it refuses to do), so a corpus that was all scale_unset would empty a rocKE corpus. 1/sqrt(head_dim) is the standard scale and what the shipped bundles carry. The other forms leave it out (scale_unset, scale_tensor) or keep it (the rest), and the live-engine oracle drops the forms an engine refuses, which is how rocKE's corpus stays free of them. The `scale` parameter chooses the stated value for the forms that state one; scale_unset states none and scale_tensor passes the value as a runtime tensor, so a constraint holds the facet at inv_sqrt_d there instead of listing the same graph (or tensors differing only in their default) under three scales. leftBound is declared only for a windowed problem; elsewhere the argument resolves to nothing and the builder leaves the bound unset.",
-    "// form": "One optional aspect per graph, everything else as the plain graph has it. The conventions are hipDNN's own: seq_len_q and seq_len_kv are INT32 [B, 1, 1, 1] (SdpaFwdNode::validateSeqLenTensor); the offset tensors of a ragged operand are INT32 [B+1, 1, 1, 1] (detail::validateIndexTensor; SdpaVllmFormTestGraphs.hpp makeVllmGraph); the sink is one FLOAT logit per query head, [1, Hq, 1, 1] (validateSinkToken); the scale tensor is a single-element pass-by-value tensor (validateScalarParameter), given as a runtime parameter whose default is the plain form's scale; the bias takes Q's dtype (bf16 under fp8, see the types note) and dims [1, 1, seqlen_q, seqlen_k], row-major (the node's ATTN_MASK rule: last two dims equal seq_q and seq_kv, or 1). The dropout seed and offset are INT64 [1, 1, 1, 1] device tensors as the test SDK builds them (RaggedSdpaDensifyTestGraphs.hpp withPhiloxDropout); the frontend states no rule for them, so that one is the test SDK's convention, not a validated one. ragged is makeVllmGraph's compact THD form with a ragged query and KV: Q and O share one offset tensor with multiplier heads*head_dim, the statistics the same tensor with multiplier heads (so ragged statistics are token-major, [seqlen_q*heads, 1, heads, 1], as there), K and V another with multiplier heads_kv*head_dim; no length tensors and no padding mask; the dims stay the padded (B, H, max_len, D) ones. Each multiplier is the tensor's token stride, which the BSHD strides above make heads*head_dim. Facet interactions are constraints, not builder guards: `scale` is held at inv_sqrt_d under scale_unset and scale_tensor, and `ragged` is held to the token-major layouts (bshd, qkv_packed). Everything else crosses freely (padded, dropout, bias and sink with every window; padded and ragged with cross attention), since the frontend validators, the CPU and GPU references and the engine matchers state those as valid or as an engine-level decline, which the oracle filters."
+    "// form": "One optional aspect per graph, everything else as the plain graph has it. The conventions are hipDNN's own: seq_len_q and seq_len_kv are INT32 [B, 1, 1, 1] (SdpaFwdNode::validateSeqLenTensor); the offset tensors of a ragged operand are INT32 [B+1, 1, 1, 1] (detail::validateIndexTensor; SdpaVllmFormTestGraphs.hpp makeVllmGraph); the sink is one FLOAT logit per query head, [1, Hq, 1, 1] (validateSinkToken); the scale tensor is a single-element pass-by-value tensor (validateScalarParameter), given as a runtime parameter whose default is the plain form's scale; the bias takes Q's dtype (bf16 under fp8, see the types note) and dims [1, 1, seqlen_q, seqlen_k], row-major (the node's ATTN_MASK rule: last two dims equal seq_q and seq_kv, or 1). The dropout seed and offset are INT64 [1, 1, 1, 1] device tensors as the test SDK builds them (RaggedSdpaDensifyTestGraphs.hpp withPhiloxDropout); the frontend states no rule for them, so that one is the test SDK's convention, not a validated one. ragged is makeVllmGraph's compact THD form with a ragged query and KV: Q and O share one offset tensor with multiplier heads*head_dim, the statistics the same tensor with multiplier heads (so ragged statistics are token-major, [seqlen_q*heads, 1, heads, 1], as there), K and V another with multiplier heads_kv*head_dim; no length tensors and no padding mask; the dims stay the padded (B, H, max_len, D) ones. Each multiplier is the tensor's token stride, which the BSHD strides above make heads*head_dim. Facet interactions are constraints, not builder guards: `scale` is held at inv_sqrt_d under scale_unset and scale_tensor, and `ragged` is held to the token-major layouts (bshd, qkv_packed). Everything else crosses freely (padded, dropout, bias and sink with every window; padded and ragged with cross attention), since the frontend validators, the CPU and GPU references and the engine matchers state those as valid or as an engine-level decline, which the oracle filters.",
+    "// let": "head_dim_v is V's width, and so O's (and dO's and dV's in the backward): head_dim, or 64 narrower under value_head_dim mla. Named once here; every dims and strides argument reads it as $let.head_dim_v."
   },
   "archetypes": [
     {

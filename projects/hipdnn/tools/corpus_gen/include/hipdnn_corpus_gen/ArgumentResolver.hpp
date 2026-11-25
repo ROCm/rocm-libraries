@@ -68,15 +68,49 @@ inline hipdnn_plugin_sdk::uhd::VariableContext contextFor(const ProblemPoint& po
     return context;
 }
 
+/// A let's resolved value as a binding: a number, a flag or a name.
+inline hipdnn_plugin_sdk::uhd::VariableContext::ValueType
+    bindable(const hipdnn_plugin_sdk::ingestor::jsonexpr::Value& value)
+{
+    if(value.isInt())
+    {
+        return value.asInt();
+    }
+    if(value.isString())
+    {
+        return value.asString();
+    }
+    if(value.isBool())
+    {
+        return value.asBool();
+    }
+    return hipdnn_plugin_sdk::uhd::ExpressionSet::number(value);
+}
+
 } // namespace detail
 
 /// @brief Resolves every argument of @p spec against @p point, in declaration order.
-/// Order matters: `strides_of` reads an argument resolved earlier.
+/// The lets resolve first, in their own order, and bind `$let.*` for the arguments. Order
+/// matters: `strides_of` and `same_as` read an argument resolved earlier.
 inline ArgumentResolution resolveArguments(const GraphBuilderSpec& spec, const ProblemPoint& point)
 {
     ArgumentResolution resolution;
 
-    const auto context = detail::contextFor(point);
+    auto context = detail::contextFor(point);
+    for(size_t i = 0; i < spec.letNames.size(); ++i)
+    {
+        try
+        {
+            context.bind("$let." + spec.letNames[i],
+                         detail::bindable(spec.lets.resolve(i, context)));
+        }
+        catch(const std::exception& error)
+        {
+            // Fail closed (§6.2), as an argument does.
+            resolution.error = "let '" + spec.letNames[i] + "': " + error.what();
+            return resolution;
+        }
+    }
 
     for(const auto& argument : spec.arguments)
     {
@@ -174,6 +208,19 @@ inline ArgumentResolution resolveArguments(const GraphBuilderSpec& spec, const P
             }
             // Row-major contiguous strides (`strides_of`, §4.3.6).
             resolved.value = hipdnn_data_sdk::utilities::generateStrides(*dims);
+            break;
+        }
+
+        case BuilderArgument::Kind::SAME_AS:
+        {
+            const auto* source = resolution.find(argument.of);
+            if(source == nullptr)
+            {
+                resolution.error = "argument '" + argument.name + "': same_as '" + argument.of
+                                   + "', which is not resolved yet";
+                return resolution;
+            }
+            resolved.value = source->value;
             break;
         }
 

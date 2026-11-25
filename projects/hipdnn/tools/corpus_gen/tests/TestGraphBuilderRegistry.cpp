@@ -484,8 +484,8 @@ std::optional<int64_t> fusedQkvRow(const ProblemPoint& point, const std::string&
     {
         return std::nullopt;
     }
-    static const std::set<std::string> views{"q", "k", "v", "dq", "dk", "dv"};
-    if(views.count(name) == 0)
+    static const std::set<std::string> s_views{"q", "k", "v", "dq", "dk", "dv"};
+    if(s_views.count(name) == 0)
     {
         return std::nullopt;
     }
@@ -1316,7 +1316,7 @@ TEST(TestGraphBuilderRegistry, EverySdpaLayoutStridesEachOperandAsItIsNamed)
     // [H*D, D, B*H*D, 1]. qkv_packed views Q, K and V (and dQ, dK, dV) in one fused projection
     // row of R = (8 + 2 + 2) * 64 per token, [S*R, D, R, 1]; O and dO stay token-major.
     constexpr int64_t BATCH = 2;
-    constexpr int64_t ROW = (8 + 2 + 2) * 64;
+    constexpr int64_t ROW = int64_t{8 + 2 + 2} * 64;
     const std::vector<int64_t> tokenQ{int64_t{16} * 8 * 64, 64, int64_t{8} * 64, 1};
     const std::vector<int64_t> headQ{int64_t{8} * 16 * 64, int64_t{16} * 64, 64, 1};
     const std::vector<int64_t> sequenceQ{int64_t{8} * 64, 64, BATCH * 8 * 64, 1};
