@@ -20,7 +20,7 @@ under `HIPKERNELPROVIDER_ENABLE_TESTS`. It holds the rocKE and hip bundles below
 | `rocKE/gfx950_conv_dgrad_aot/` | `hipkernel:Gfx950ConvDgradAot` | `packs/ConvDgradAotNative.cpp` |
 | `rocKE/gfx1250_conv_dgrad_aot/` | `hipkernel:Gfx1250ConvDgradAot` | `packs/ConvDgradAotNative.cpp` (shared with gfx950) |
 | `hip/conv_rdna/` | `hipkernel:hip_conv_fwd_fma_igemm_rdna` | `packs/HipConvFwdFmaIgemmRdnaNative.cpp` (shares `packs/ConvRdnaCommon.cpp`) |
-| `hip/conv_dw3d_rdna/` | `hipkernel:hip_conv_fwd_dw3d_rdna` | `packs/HipConvFwdDw3dRdnaNative.cpp` (shares `packs/ConvRdnaCommon.cpp`) |
+| `hip/conv_dw3d_rdna/` | `hipkernel:hip_conv_fwd_dw3d_rdna` | `packs/HipConvFwdDw3dRdnaNative.cpp` (shares `packs/ConvRdnaCommon.cpp`, `packs/ConvRdnaDw3d.cpp`) |
 
 The `gfx950_attention_dense`, `gfx950_attention_unified_2d`, `gfx950_attention_unified_3d`,
 `gfx942_attention_unified_2d`, `gfx942_attention_unified_3d`, `gfx942_attention_dense`,

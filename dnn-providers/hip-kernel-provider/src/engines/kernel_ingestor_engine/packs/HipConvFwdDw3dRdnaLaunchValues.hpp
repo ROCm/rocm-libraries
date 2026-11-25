@@ -12,6 +12,7 @@
 #include <hipdnn_plugin_sdk/ingestor/SavedDispatch.hpp>
 
 #include "engines/kernel_ingestor_engine/packs/ConvRdnaCommon.hpp"
+#include "engines/kernel_ingestor_engine/packs/ConvRdnaDw3d.hpp"
 
 /**
  * @file HipConvFwdDw3dRdnaLaunchValues.hpp
@@ -26,19 +27,8 @@
 namespace hip_kernel_provider::kernel_ingestor_engine
 {
 
-/// How a depthwise 3D variant tiles the output; the grid depends on it. Dtype, layout, the
-/// specialized filter, H / W stride and dilation are compiled into the variant and only matter
-/// for picking it.
-struct HipConvFwdDw3dRdnaGeometry
-{
-    /// The runtime-parameter kernel (filter, stride and dilation as launch arguments).
-    bool generic = false;
-    /// Output depths and columns per thread (the specialized kernel; the generic one is 1 x 4).
-    int tileD = 1;
-    int tileW = 4;
-    /// NCDHW grid with one (n, k) output volume per blockIdx.y and 64-thread blocks.
-    bool uniformK = false;
-};
+/// How a depthwise 3D variant tiles the output (ConvRdnaDw3d.hpp).
+using HipConvFwdDw3dRdnaGeometry = conv_rdna::dw3d::Geometry;
 
 /// The tensor uids a matched depthwise conv graph binds, in kernel argument order.
 struct HipConvFwdDw3dRdnaBinding
