@@ -103,7 +103,7 @@ def test_one_instruction_is_emitted(arch, bit):
 @pytest.mark.parametrize("arch, bit", ARCHS)
 def test_emits_nothing_when_the_kernel_opts_out(arch, bit):
     """The gate is on the kernel, not the arch, so an arch that declares the bit
-    still emits nothing here. This is the sparse / StreamK path."""
+    still emits nothing here. This is the sparse path."""
     assert len(_emit(_caps_for(arch), disableXdlArbStall=False).items()) == 0
 
 
