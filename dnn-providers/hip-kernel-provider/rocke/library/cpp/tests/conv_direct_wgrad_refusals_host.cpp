@@ -50,6 +50,7 @@ typedef enum
     BASE_W32,
     BASE_IMG,
     BASE_SC,
+    BASE_SK,
 } wgrad_base_t;
 
 /* A spec both validators accept on gfx1250, to change one knob of. */
@@ -66,6 +67,12 @@ static rocke_direct_conv_wgrad_spec_t wgrad_base(wgrad_base_t base)
         p.cpg = 3;
         p.kpg = 32;
     }
+    else if(base == BASE_SK)
+    {
+        p.H = 13;
+        p.cpg = 64;
+        p.kpg = 3;
+    }
     else
     {
         p.H = 8;
@@ -80,8 +87,10 @@ static rocke_direct_conv_wgrad_spec_t wgrad_base(wgrad_base_t base)
         s.waves_k = 2;
         s.waves_c = 2;
     }
-    if(base == BASE_SC)
+    if(base == BASE_SC || base == BASE_SK)
         s.small_c = 1;
+    if(base == BASE_SK)
+        s.small_k = 1;
     return s;
 }
 
@@ -214,6 +223,13 @@ static const wgrad_case_t k_wgrad_cases[] = {
      "gfx1250"},
     /* ---- is_valid_wgrad_spec: the small_c arch gate */
     {"sc_arch", BASE_SC, [](W*) {}, "gfx1151"},
+    /* ---- small_k: _wgrad_image_reason, then _wgrad_small_c_reason */
+    {"sk_need_sc", BASE_W32, [](W* s) { s->small_k = 1; }, "gfx1250"},
+    {"sk_stride", BASE_SK, [](W* s) { s->problem.stride = 2; }, "gfx1250"},
+    {"sk_square", BASE_SK, [](W* s) { s->problem.KW = 5; }, "gfx1250"},
+    {"sk_pad_w", BASE_SK, [](W* s) { s->problem.pad_w = 0; }, "gfx1250"},
+    {"sk_pad", BASE_SK, [](W* s) { s->problem.PAD = 3; }, "gfx1250"},
+    {"sk_cpg", BASE_SK, [](W* s) { s->problem.cpg = 12; }, "gfx1250"},
 };
 
 static const dw_case_t k_dw_cases[] = {
@@ -304,7 +320,7 @@ static void expect_refused(const char* id, bool ok, const char* why, const char*
 
 /* The refusals of a boolean flag: the message itself names the value. */
 static const char* const k_flag_cases[]
-    = {"img_ldsepi_need_img", "sc_and_img", "sc_runtime_channels"};
+    = {"img_ldsepi_need_img", "sc_and_img", "sc_runtime_channels", "sk_need_sc"};
 
 /* The refusals that state the offending value inside the sentence, mostly a
  * measured size against its limit, rather than in a "(got ...)" tail: the
@@ -425,7 +441,7 @@ static void check_dw_cachepolicy(const char* arch, int64_t want)
 int main(void)
 {
     char why[REASON_CAP];
-    const wgrad_base_t bases[] = {BASE_W32, BASE_IMG, BASE_SC};
+    const wgrad_base_t bases[] = {BASE_W32, BASE_IMG, BASE_SC, BASE_SK};
     size_t i;
 
     /* Each case changes one knob of a base spec, so the bases must pass. */

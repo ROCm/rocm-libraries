@@ -2256,6 +2256,12 @@ def test_w32_wgrad_grid_skips_the_spilling_16_wave_register_staged_tiles(w32_job
             ),
             "direct_depthwise_wgrad",
         ),
+        (
+            DirectConvProblem(
+                N=2, H=64, W=64, groups=1, cpg=64, kpg=3, KH=3, KW=3, PAD=1, stride=1
+            ),
+            "direct_wgrad_small_k",
+        ),
     ],
 )
 def test_w32_two_stage_wgrad_plans(w32_cache, problem, variant):
@@ -2323,6 +2329,78 @@ def test_w32_small_c_serves_the_3x3_stems(w32_cache, cpg, kpg, PAD, stride):
     )
     plans, _ = dks.direct_plans(w32_cache, problem, "wgrad", _W32)
     assert any(p.identity.algorithm == "direct_wgrad_small_c" for p in plans)
+
+
+def test_w32_small_k_and_narrow_small_c_rows_are_their_tables(w32_jobs):
+    """The small-K output layers and the narrow stride-2 small_c layers cache
+    exactly the (dtype, cpg, kpg) rows of their config tables, and every
+    capability of either has a row in some dtype."""
+    from kernels.conv import direct_aot_jobs as A
+
+    for variant, table in (
+        ("direct_wgrad_small_k", A.WGRAD_SMALL_K_CONFIGS),
+        ("direct_wgrad_small_c", A.WGRAD_SMALL_C_NARROW_CONFIGS),
+    ):
+        caps = [c for c in dks.DIRECT_CAPABILITIES[variant][1] if c.cpg >= 8]
+        assert caps, variant
+        for c in caps:
+            per_dtype = {
+                dtype: list(A._knob_grid(variant, _W32, dtype, c))
+                for dtype in ("fp16", "bf16")
+            }
+            assert any(per_dtype.values()), (variant, c)
+            for dtype, knobs in per_dtype.items():
+                want = {
+                    (cfg, rb)
+                    for cfg, rbs in table.get((dtype, c.cpg, c.kpg), ())
+                    for rb in rbs
+                }
+                got = {
+                    (
+                        (
+                            k["waves_k"],
+                            k["waves_c"],
+                            k["wave_tiles_k"],
+                            k["wave_tiles_c"],
+                            k["vec_x"],
+                            k["sub_steps"],
+                            k["ws_replicas"],
+                            k["uniform_wave"],
+                        ),
+                        k["row_blocks"],
+                    )
+                    for k in knobs
+                }
+                assert got == want, (variant, dtype, c)
+    # The fp16 enumeration builds the fp16 rows and only those.
+    built = {
+        (j.identity.algorithm, j.identity.cpg, j.identity.kpg)
+        for j in w32_jobs
+        if j.identity.algorithm == "direct_wgrad_small_k"
+    }
+    assert built == {
+        ("direct_wgrad_small_k", cpg, kpg)
+        for dtype, cpg, kpg in A.WGRAD_SMALL_K_CONFIGS
+        if dtype == "fp16"
+    }
+
+
+def test_w32_small_k_serves_only_its_output_layers(w32_cache):
+    """The fp16 3-channel output layer has a small-K binary; a K the cache
+    has no row for (channels are baked) and stride 2 do not."""
+    out = dict(N=2, H=64, W=64, groups=1, cpg=64, KH=3, KW=3, PAD=1)
+    plans, _ = dks.direct_plans(
+        w32_cache, DirectConvProblem(kpg=3, stride=1, **out), "wgrad", _W32
+    )
+    assert any(p.identity.algorithm == "direct_wgrad_small_k" for p in plans)
+    for kpg, stride in ((5, 1), (3, 2)):
+        plans, _ = dks.direct_plans(
+            w32_cache, DirectConvProblem(kpg=kpg, stride=stride, **out), "wgrad", _W32
+        )
+        assert not any(p.identity.algorithm == "direct_wgrad_small_k" for p in plans), (
+            kpg,
+            stride,
+        )
 
 
 def test_w32_small_c_16_wave_tile_has_no_uniform_wave(w32_jobs):
