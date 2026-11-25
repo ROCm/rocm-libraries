@@ -410,7 +410,7 @@ struct HostTensor
     std::size_t get_element_space_size() const
     {
         constexpr index_t PackedSize = ck_tile::numeric_traits<remove_cvref_t<T>>::PackedSize;
-        return mDesc.get_element_space_size() / PackedSize;
+        return (mDesc.get_element_space_size() + PackedSize - 1) / PackedSize;
     }
 
     std::size_t get_element_space_size_in_bytes() const
