@@ -4543,6 +4543,8 @@ namespace
         TruncateAfterFirst = 4,
         BudgetSpent        = 5,
         ScratchAlloc       = 6,
+        Seeding            = 7,
+        FlushCost          = 8,
     };
 
     std::atomic<int> g_injectedTuningFailure{0};
@@ -4633,6 +4635,9 @@ namespace
             if(bytes <= slot.size && !refuse)
                 return slot.ptr;
 
+            // Taken before the calls below, so an error it sees is the caller's.
+            const bool callerErrorPending = hipPeekAtLastError() != hipSuccess;
+
             if(slot.ptr)
                 static_cast<void>(hipFree(slot.ptr));
             slot.ptr  = nullptr;
@@ -4642,8 +4647,11 @@ namespace
             if(hipMalloc(&fresh, refuse ? SIZE_MAX : bytes) != hipSuccess)
             {
                 // The matmul goes on without this search and succeeds, so this
-                // error must not reach the caller's next hipGetLastError.
-                static_cast<void>(hipGetLastError());
+                // error must not reach the caller's next hipGetLastError, unless
+                // it replaced one the caller had: clearing it would then leave
+                // the caller nothing to read.
+                if(!callerErrorPending)
+                    static_cast<void>(hipGetLastError());
                 return deny(Denial::Unavailable);
             }
 
@@ -5465,7 +5473,8 @@ namespace
         if(tuningFailureInjected(TuningFailureStage::Setup)
            || hipMemsetAsync(bytes, 0, layout.total, prob.stream) != hipSuccess)
         {
-            static_cast<void>(hipGetLastError());
+            if(!callerErrorPending)
+                static_cast<void>(hipGetLastError());
             return TuningAttempt::FallbackSetup;
         }
 
@@ -5542,10 +5551,12 @@ namespace
                               prob.scaleAlphaVec,
                               layout.bytesScaleAlphaVec));
 
-            if(!seeded || hipStreamSynchronize(prob.stream) != hipSuccess)
+            if(tuningFailureInjected(TuningFailureStage::Seeding) || !seeded
+               || hipStreamSynchronize(prob.stream) != hipSuccess)
             {
                 // Fall back to a single block rather than abandoning the shape.
-                static_cast<void>(hipGetLastError());
+                if(!callerErrorPending)
+                    static_cast<void>(hipGetLastError());
                 blocks = 1;
             }
         }
@@ -5639,10 +5650,12 @@ namespace
                 return TuningAttempt::FallbackSetup;
 
             search.flush_grid = hipblaslt_bench::flush_icache_grid(props);
-            if(!hipblaslt_bench::flush_cost_us(
+            if(tuningFailureInjected(TuningFailureStage::FlushCost)
+               || !hipblaslt_bench::flush_cost_us(
                    timing.use_gpu_timer, props, events.start, events.stop, stream, timing.flush_us))
             {
-                static_cast<void>(hipGetLastError());
+                if(!callerErrorPending)
+                    static_cast<void>(hipGetLastError());
                 return TuningAttempt::FallbackSetup;
             }
 

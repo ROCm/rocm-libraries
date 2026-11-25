@@ -222,6 +222,29 @@ namespace
         EXPECT_EQ(loads.functionModules.back(), own);
     }
 
+    // A launch starts the lookup in the code object its invocation names. No
+    // module exports the kernel, so the launch ends at the lookup, before
+    // anything could reach a device.
+    TEST_F(HipSolutionAdapterTest, smoke_LaunchPassesTheKernelsCodeObjectToTheLookup)
+    {
+        expectLoad(helper);
+        ASSERT_EQ(adapter->initializeLazyLoading("gfx942", "/library"), hipSuccess);
+        expectLoad(primary);
+        ASSERT_EQ(adapter->loadCodeObjectFile(primary), hipSuccess);
+        loads.exports = [](hipModule_t, const char*) { return false; };
+
+        TensileLite::KernelInvocation kernel;
+        kernel.kernelName     = "kernel";
+        kernel.codeObjectFile = "primary.co";
+        kernel.workGroupSize  = TensileLite::dim3(256, 1, 1);
+        kernel.numWorkGroups  = TensileLite::dim3(1, 1, 1);
+        kernel.numWorkItems   = TensileLite::dim3(256, 1, 1);
+        EXPECT_EQ(adapter->launchKernel(kernel), hipErrorNotFound);
+        ASSERT_FALSE(loads.functionModules.empty());
+        EXPECT_EQ(loads.functionModules.front(), loads.loadedFrom.at(primary))
+            << "the launch looked in another module first";
+    }
+
     TEST_P(HipSolutionAdapterRecoveryTest, smoke_MissingContextPreservesPrimaryError)
     {
         expectLoad(primary, GetParam());
