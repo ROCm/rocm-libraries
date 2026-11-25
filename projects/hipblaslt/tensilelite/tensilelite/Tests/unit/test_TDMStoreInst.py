@@ -1,8 +1,8 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""Unit tests for TDMStoreInst: the store paths the switch picks, EdgeM, EdgeN and NonEdge, solution
-validation, the kernel-name token, the LDS layout, the store modifiers and the emitted TDM block: its C load and the cache
+"""Unit tests for TDMStoreInst: the store paths the switch picks, the one TDM block a final-D store becomes and the
+cascade kernels with per-element outputs keep, solution validation, the kernel-name token, the LDS layout, the store modifiers and the emitted TDM block: its C load and the cache
 hints of C, its fp16 and narrow store vectors, and the waits around it after StinkyTofu."""
 
 import re
@@ -17,7 +17,7 @@ from tensilelite.Common.GlobalParameters import defaultSolution
 from tensilelite.Common.ValidParameters import validParameters
 from tensilelite.Components.GlobalWriteBatch import GlobalWriteBatchWriter
 from tensilelite.Components.TDMStoreInst import DS_OFFSET_MAX, hasEpilogueSideEffects, \
-  TDM_TILE_DIM_MAX, storesFinalD, tdmStoreBlocks, tdmStoreLdsBytes, tdmStoreLdsSplit, tdmStoreModifiers, \
+  TDM_TILE_DIM_MAX, storesFinalD, tdmStoreBlocks, tdmStoreSinglePath, tdmStoreLdsBytes, tdmStoreLdsSplit, tdmStoreModifiers, \
   tdmStoreRejectReason, tdmStoreVectorRejectReason
 from tensilelite.SolutionStructs.Naming import getKernelNameMin
 
@@ -167,8 +167,8 @@ _OUTPUT = "TDMStoreInst supports fp32 D, fp64, complex float and complex double 
   "int32 and int8 D from int32 accumulators, and bf16, fp16, fp8 and bf8 D converted from fp32 accumulators"
 _STREAMK = {"TileProcessingStrategy": "StreamK", "GlobalSplitU": 0}
 _TILE = "TDMStoreInst requires the staged tile's tile_dim0 (data_size units) and tile_dim1 (columns per wave) to fit 16 bits"
-_ADAPTIVE = "TDMStoreInst does not support AdaptiveGemm=1 without per-element outputs beyond C and D: every block of " \
-  "its store-width cascade would be the same TDM block, so AdaptiveGemm=1 would only add copies of it"
+_ADAPTIVE = "TDMStoreInst does not support AdaptiveGemm=1 without per-element outputs beyond C and D: such a kernel " \
+  "stores each beta through one TDM block, with no store-width cascade for AdaptiveGemm=1 to extend"
 _PAP_REASON = "TDMStoreInst does not support PrefetchAcrossPersistent, whichever instructions load A and B: with " \
   "TDM loads the waits for its C load and store would also wait for the next tile's prefetch, which TENSORcnt " \
   "completes before them, and leave the prefetch nothing to hide"
@@ -202,9 +202,9 @@ def test_rejects_unsupported(overrides, reason):
 
 
 def test_adaptive_gemm_1_needs_per_element_outputs():
-  """Without per-element outputs beyond C and D every block of the store-width cascade of AdaptiveGemm=1 is the same
-  TDM block, so the solution is rejected. With one of them, AmaxD here, the edge blocks keep their own code and
-  AdaptiveGemm=1 is accepted."""
+  """Without per-element outputs beyond C and D each beta stores through one TDM block, with no store-width cascade
+  for AdaptiveGemm=1 to extend, so the solution is rejected. With one of them, AmaxD here, the kernel keeps the
+  cascade, its edge blocks keep their own code and AdaptiveGemm=1 is accepted."""
   assert tdmStoreRejectReason(_state(AdaptiveGemm=1)) == _ADAPTIVE
   assert tdmStoreRejectReason(_state(AdaptiveGemm=1, OutputAmaxD=True)) is None
 
@@ -338,6 +338,24 @@ def test_the_switch_picks_blocks_of_the_store_width_cascade(svw):
     assert _blocks(tdm, edge=False, vectorWidths=cascade[:1]) == ({svw} if tdm else set()), tdm
   # With edge blocks the picked set is the whole cascade, at every store vector width.
   assert _blocks(1, vectorWidths=cascade) == set(cascade)
+
+
+@pytest.mark.parametrize("effect", [None, "UseE", "Gradient", "UseGateResidual", "OutputAmaxD"])
+def test_single_path_is_a_final_d_store_with_edge_and_no_side_effects(effect):
+  """With TDMStoreInst on, a final-D store with edge blocks goes to generateBetaModules as one TDM block, unless the
+  kernel has per-element outputs beyond C and D, whose edge blocks keep their masks. A store without edge blocks is
+  one block already, and the partial and atomic stores keep their cascade, as every store does with the switch off."""
+  pt = {"UseE": False, "Gradient": False, "UseGateResidual": False, "OutputAmaxD": False}
+  if effect:
+    pt[effect] = True
+  kernel = lambda tdm, accumulation=None: {"TDMStoreInst": tdm, "_GlobalAccumulation": accumulation,
+                                           "MbskPrefetchMethod": 0, "ProblemType": pt}
+  assert tdmStoreSinglePath(kernel(True), True, False) == (effect is None)
+  assert tdmStoreSinglePath(kernel(True, "MultipleBufferSingleKernel"), True, False) == (effect is None)
+  assert not tdmStoreSinglePath(kernel(True), False, False)
+  assert not tdmStoreSinglePath(kernel(False), True, False)
+  assert not tdmStoreSinglePath(kernel(True, "MultipleBuffer"), True, False)
+  assert not tdmStoreSinglePath(kernel(True), True, True)
 
 
 @pytest.mark.parametrize("accumulation, atomic", [
@@ -537,24 +555,6 @@ def _code(line):
   return line.partition("//")[0].strip()
 
 
-def _outside(asm):
-  """The instructions and labels of the kernel code outside the NonEdge blocks of the direct store and the
-  Then block of the OptNLL store, each from its label to the next global-write label: labels renamed in
-  order of appearance, without the instruction-prefetch hints StinkyTofu places by code offset."""
-  lines, inside = [], False
-  for line in map(_code, re.sub(r"\.amdgpu_metadata.*?\.end_amdgpu_metadata", "", asm, flags=re.S).splitlines()):
-    if line.startswith("label_GW_"):
-      inside = line.endswith(("_GSU1_NonEdge:", "_OptNLL_MB_Then:"))
-    elif inside or line.startswith("s_prefetch_inst_pc_rel"):
-      continue
-    lines.append(line)
-  names, code = {}, []
-  for line in lines:
-    if line and not line.startswith((".", "/*")) and (not line.endswith(":") or line.startswith("label_")):
-      code.append(re.sub(r"\blabel_\w+", lambda m: names.setdefault(m.group(0), "L%u" % len(names)), line))
-  return code
-
-
 # Off has no TDM block, so it is emitted with the default TDMInst only. TDMInst is the load-side
 # instruction count -- a different parameter despite the similar name -- and these pairs cross the two.
 _TDM_TDMINST = [(False, 3)] + [(True, tdmInst) for tdmInst in (0, 3)]
@@ -563,10 +563,10 @@ _TDM_TDMINST = [(False, 3)] + [(True, tdmInst) for tdmInst in (0, 3)]
 @pytest.mark.parametrize("sourceSwap", [False, True])
 @pytest.mark.parametrize("tdm, tdmInst", _TDM_TDMINST)
 def test_emitted_paths_of_the_switch(gp_gfx1250, gfx1250_iim, assembler, capsys, tdm, tdmInst, sourceSwap):
-  """With the switch off every block keeps its buffer_store. With it on, every path of a final-D store --
-  EdgeM, EdgeN and NonEdge -- stores through the TDM block, which reads C from the staged tile, so no block
-  of the direct store keeps a buffer_store of D; the GSU>1 copy of the partials still keeps buffer_store.
-  The block drains tensor_load_to_lds before it reuses the main-loop LDS only when A or B is a TDM load."""
+  """With the switch off every block of the store-width cascade keeps its buffer_store. With it on, each beta of the
+  direct store is one TDM block of the store vector width in place of the NonEdge, EdgeN and EdgeM blocks, which
+  reads C from the staged tile, so no buffer_store of D is left; the GSU>1 copy of the partials keeps its cascade and
+  buffer_store. The block drains tensor_load_to_lds before it reuses the main-loop LDS only when A or B is a TDM load."""
   sol, asm = _emit_asm(gfx1250_iim, assembler, TDMStoreInst=tdm, TDMInst=tdmInst, SourceSwap=sourceSwap)
   assert sol.get("Valid"), capsys.readouterr().out
   assert sol["StoreVectorWidth"] == 8
@@ -574,15 +574,16 @@ def test_emitted_paths_of_the_switch(gp_gfx1250, gfx1250_iim, assembler, capsys,
   stores = _stores(asm)
   for beta in "01":
     direct = stores[("GSU1", beta)]
-    assert sorted(direct["then"], reverse=True) == cascade
-    assert sorted(direct["tdm"], reverse=True) == sorted(_blocks(tdm, vectorWidths=cascade), reverse=True)
-    assert direct["nonEdge"] and direct["nonEdgeTdm"] == bool(tdm), (beta, direct)
-    assert bool(direct["nonEdgeBuffer"]) == bool(direct["buffer"]) == (not tdm), (beta, direct)
+    if tdm:
+      assert direct["then"] == direct["tdm"] == [8] and not direct["nonEdge"] and not direct["buffer"], (beta, direct)
+    else:
+      assert sorted(direct["then"], reverse=True) == cascade and not direct["tdm"], (beta, direct)
+      assert direct["nonEdge"] and not direct["nonEdgeTdm"] and direct["nonEdgeBuffer"], (beta, direct)
   partials = stores[("MB", "0")]
   assert sorted(partials["then"], reverse=True) == cascade and partials["nonEdge"] and not partials["tdm"]
   assert not partials["nonEdgeTdm"]
   if tdm:
-    block = _tdmBlock(asm, "1", {1: 1, 2: 8, 3: 8}[tdm])
+    block = _tdmBlock(asm, "1", 8)
     assert not re.search(r"^\s*buffer_load\S* [^\n]*s\[sgprSrdC:", block, re.M)
     loads = list(re.finditer(r"^\s*tensor_load_to_lds ", block, re.M))
     assert len(loads) == 1 and re.search(r"^\s*ds_load\S* ", block[loads[0].end():], re.M)
@@ -603,35 +604,49 @@ def test_optnll_store_goes_through_the_tdm_block(gp_gfx1250, gfx1250_iim, assemb
   assert bool(optNLL["buffer"]) == (not tdm), optNLL
 
 
-def test_turning_it_on_only_adds_the_tdm_blocks(gp_gfx1250, gfx1250_iim, assembler, capsys):
-  """In a kernel without MultipleBufferSingleKernel, TDMStoreInst adds, drops or moves no global-write label or
-  branch to one, so it never checks the alignment of the columns, and a kernel with it on equals its switched-off
-  twin outside the blocks it stores through the TDM block."""
+def test_turning_it_on_collapses_only_the_direct_store(gp_gfx1250, gfx1250_iim, assembler, capsys):
+  """In a kernel without MultipleBufferSingleKernel, TDMStoreInst replaces the store-width cascade of each beta of the
+  direct store with one TDM block: the NonEdge, EdgeN and EdgeM blocks, their labels and the edge checks that branch
+  to them go, and the block keeps the Then label of the store vector width, like the OptNLL store, so it never checks
+  the alignment of the columns. Every other global-write label, and every branch to one, stays as in the
+  switched-off kernel: the GSU>1 partials keep their cascade and the OptNLL store its block."""
   asms = {}
   for tdm in (False, True):
     sol, asm = _emit_asm(gfx1250_iim, assembler, TDMStoreInst=tdm)
     assert sol.get("Valid"), capsys.readouterr().out
     asms[tdm] = asm
-  for tdm, asm in asms.items():
-    assert _skeleton(asm) == _skeleton(asms[0]), tdm
-  # A byte-level differential of the untouched code is not available here: off and on move every store
-  # block to the TDM block, so there is no region that has to stay identical. _skeleton above is the
-  # property that does survive, and is the one this test exists for: the label and branch structure of
-  # the global write is the same whether the switch is off or on.
+  assert _withoutDirectCascade(asms[True], 8) == _withoutDirectCascade(asms[False], 8)
+  labels, refs = _skeleton(asms[True])
+  assert [l for l in labels if _DIRECT_LABEL.match(l)] == ["label_GW_B%s_FD0_VW8_GSU1_Then:" % b for b in "01"]
+  assert not [n for n in refs if _DIRECT_LABEL.match(n)], refs
+
+
+# A store label of the direct store, GSU1, by beta, vector width and part.
+_DIRECT_LABEL = re.compile(r"label_GW_B(\d)_FD\d_VW(\d+)_GSU1_(\w+?):?$")
+
+
+def _withoutDirectCascade(asm, svw):
+  """_skeleton without the labels of the direct store's cascade that TDMStoreInst drops, every one but the Then label
+  of the store vector width, and without the branches to the direct store's labels and to the end of the global
+  write, which its edge checks and the ends of its blocks take."""
+  labels, refs = _skeleton(asm)
+  dropped = lambda label: (lambda m: m and (int(m.group(2)), m.group(3)) != (svw, "Then"))(_DIRECT_LABEL.match(label))
+  return ([l for l in labels if not dropped(l)],
+          Counter({n: c for n, c in refs.items() if not _DIRECT_LABEL.match(n) and not n.startswith("label_GW_End")}))
 
 
 @pytest.mark.parametrize("tdm", (0, 1))
 def test_sourceswap_store_vector_width_2(gp_gfx1250, gfx1250_iim, assembler, capsys, tdm):
   """With SourceSwap the store vector width is VectorWidthA: MIWaveTile0=2 gives 2, whose only
-  narrower path is VW1, and TDMStoreInst sends both the VW2 and the VW1 path through the TDM block."""
+  narrower path is VW1, and TDMStoreInst stores each beta through one TDM block of width 2 in place of both."""
   sol, asm = _emit_asm(gfx1250_iim, assembler, mi=[16, 16, 32, 1, 1, 2, 8, 4, 1], TDMStoreInst=tdm, SourceSwap=True)
   assert sol.get("Valid"), capsys.readouterr().out
   assert sol["StoreVectorWidth"] == 2
   stores = _stores(asm)
   for beta in "01":
     direct = stores[("GSU1", beta)]
-    assert sorted(direct["then"], reverse=True) == [2, 1]
-    assert sorted(direct["tdm"], reverse=True) == ([2, 1] if tdm else [])
+    assert sorted(direct["then"], reverse=True) == ([2] if tdm else [2, 1])
+    assert direct["tdm"] == ([2] if tdm else [])
 
 
 _FP16 = {"DataType": "H", "MacDataTypeA": "H", "MacDataTypeB": "H", "DestDataType": "H"}
@@ -648,7 +663,7 @@ def test_fp16_c_is_read_back_from_the_staged_tile(gp_gfx1250, gfx1250_iim, assem
 
 
 def test_fp16_with_beta_at_store_vector_width_1(gp_gfx1250, gfx1250_iim, assembler, capsys):
-  """At StoreVectorWidth 1 the switch stores the one masked block through the TDM block, which reads each
+  """At StoreVectorWidth 1 the switch stores each beta through one TDM block of width 1, which reads each
   C element back into its own VGPR: an even one with ds_load_u16, an odd one with ds_load_u16_d16_hi
   into the high half, where readInput puts it."""
   tdm = 1
@@ -698,7 +713,7 @@ def test_store_vector_width_16_splits_32_byte_vectors(gp_gfx1250, gfx1250_iim, a
   assert sol.get("Valid"), capsys.readouterr().out
   assert sol["StoreVectorWidth"] == 16
   for beta, tag, op in (("0", "stage D element", "ds_store_b128"), ("1", "load C element", "ds_load_b128")):
-    lines = [line for line in _tdmBlock(asm, beta, {1: 1, 2: 16, 3: 16}[tdm]).splitlines() if tag in line]
+    lines = [line for line in _tdmBlock(asm, beta, 16).splitlines() if tag in line]
     assert lines and {line.split()[0] for line in lines} == {op}, (beta, lines[:2])
     coords = Counter(re.search(r"%s \((\d+), (\d+)\)" % tag, line).groups() for line in lines)
     assert set(coords.values()) == {2}, (beta, lines[:4])
@@ -713,7 +728,7 @@ def test_wide_vectors_split_into_16_byte_ds_ops(gp_gfx1250, gfx1250_iim, assembl
   assert sol.get("Valid"), capsys.readouterr().out
   assert tdmStoreLdsBytes(sol) == sol["MacroTile0"] * sol["MacroTile1"] * 4
   for beta, tag, op in (("0", "stage D element", "ds_store_b128"), ("1", "load C element", "ds_load_b128")):
-    lines = [line for line in _tdmBlock(asm, beta, {1: 1, 2: 8, 3: 8}[tdm]).splitlines() if tag in line]
+    lines = [line for line in _tdmBlock(asm, beta, 8).splitlines() if tag in line]
     assert lines and {line.split()[0] for line in lines} == {op}, (beta, lines[:2])
     coords = Counter(re.search(r"%s \((\d+), (\d+)\)" % tag, line).groups() for line in lines)
     assert set(coords.values()) == {2}, (beta, lines[:4])
@@ -848,7 +863,7 @@ def test_dynamic_gsu_with_epilogue_vectors(gp_gfx1250, gfx1250_iim, assembler, c
   stores = _stores(asm)
   for beta in "01":
     direct = stores[("GSU1", beta)]
-    assert sorted(direct["tdm"]) == sorted(direct["then"]) and direct["nonEdgeTdm"] == 1 and not direct["buffer"]
+    assert direct["tdm"] == direct["then"] == [8] and not direct["nonEdge"] and not direct["buffer"], (beta, direct)
   optNLL = [path for path in stores if path[0].startswith("OptNLL")]
   assert optNLL and all(stores[path]["tdm"] == [8] for path in optNLL), optNLL
   reduced = [path for path in stores if path[0] == "MBSK"]
@@ -856,7 +871,7 @@ def test_dynamic_gsu_with_epilogue_vectors(gp_gfx1250, gfx1250_iim, assembler, c
   tdmReduced = sol["MbskPrefetchMethod"] == 0
   assert bool(reduced) == (algorithm == "MultipleBufferSingleKernel"), reduced
   assert bool(copies) == (bool(reduced) and tdmReduced), copies
-  assert all((sorted(stores[path]["tdm"]) == sorted(stores[path]["then"]) and stores[path]["nonEdgeTdm"] == 1)
+  assert all((stores[path]["tdm"] == stores[path]["then"] == [8] and not stores[path]["nonEdge"])
              == tdmReduced and not stores[path]["buffer"] for path in reduced), reduced
   assert not any(stores[path]["tdm"] or stores[path]["nonEdgeTdm"] for path in copies), copies
   partials = [path for path in stores if not path[0].startswith(("GSU1", "OptNLL", "MBSK"))]
@@ -868,9 +883,9 @@ def test_dynamic_gsu_with_epilogue_vectors(gp_gfx1250, gfx1250_iim, assembler, c
 
 def test_mbsk_reduced_tile_with_the_switch_on(gp_gfx1250, gfx1250_iim, assembler, capsys):
   """Static GlobalSplitU=2 with MultipleBufferSingleKernel and MbskPrefetchMethod 0: the TDM copy of the reduced
-  tile takes the TDM blocks the GSU == 1 store takes at the tdm, OptNLL_MBSK's being NonEdge, with its descriptor
-  from SrdTD and D staged at the size of D; the buffer_store copy, which a GSU above 2 takes, stores every block
-  with buffer_store to SrdTD, and one GSU check picks the copy. OptNLL_MBSK, which runs at GSU 1 only, without a
+  tile is the one TDM block per beta the GSU == 1 store is, with its descriptor from SrdTD and D staged at the size
+  of D; the buffer_store copy, which a GSU above 2 takes, keeps the store-width cascade and stores every block with
+  buffer_store to SrdTD, and one GSU check picks the copy. OptNLL_MBSK, which runs at GSU 1 only, without a
   reduction, keeps its store."""
   tdm = 1
   sol, asm = _emit_asm(gfx1250_iim, assembler, TDMStoreInst=tdm, GlobalSplitU=2,
@@ -880,7 +895,8 @@ def test_mbsk_reduced_tile_with_the_switch_on(gp_gfx1250, gfx1250_iim, assembler
   for beta in "01":
     reduced, direct, copy = stores[("MBSK", beta)], stores[("GSU1", beta)], stores[("MBSKBuffer", beta)]
     assert (reduced["tdm"], reduced["nonEdgeTdm"], reduced["buffer"]) == (direct["tdm"], direct["nonEdgeTdm"], 0)
-    assert copy["then"] == reduced["then"] and copy["nonEdge"] and not copy["tdm"] and not copy["nonEdgeTdm"]
+    assert reduced["then"] == [8] and sorted(copy["then"], reverse=True) == list(_VECTOR_WIDTHS[0])
+    assert copy["nonEdge"] and not copy["tdm"] and not copy["nonEdgeTdm"]
     assert copy["stores"] and not copy["buffer"]
   assert stores[("OptNLL_MBSK", "0")]["tdm"] == ([8] if tdm else [])
   assert not any(path[0] == "OptNLL_MBSKBuffer" for path in stores)
@@ -904,7 +920,7 @@ def test_mbsk_reduced_tile_keeps_buffer_store_with_prefetch_method_1(gp_gfx1250,
          if path[0] == "MBSK" and (stores[path]["tdm"] or stores[path]["nonEdgeTdm"])]
   assert not tdm, tdm
   assert stores[("OptNLL_MBSK", "0")]["tdm"] == [8]
-  assert stores[("GSU1", "0")]["nonEdgeTdm"] == 1
+  assert stores[("GSU1", "0")]["tdm"] == [8]
   assert "64-bit byte offset from SrdTD" not in asm and "each wave reduces on its own" not in asm
 
 
@@ -1346,32 +1362,30 @@ def _skeleton(asm):
 
 
 @pytest.mark.parametrize("vectors", [False, True])
-def test_store_vector_width_1_stores_the_one_masked_block(gp_gfx1250, gfx1250_iim, assembler, capsys, vectors):
-  """At store vector width 1 the store-width cascade has one masked block, the narrowest and the one of the
-  store vector width at once, so TDMStoreInst stores it through the TDM block. It keeps the labels and
-  branches of the switched-off kernel, which send the M-edge, N-edge-only and corner tiles all to that block, and its
-  NonEdge path goes through the TDM block as well. With bias and ScaleAlphaVec the vectors keep LDS
-  offset 0."""
+def test_store_vector_width_1_stores_one_tdm_block(gp_gfx1250, gfx1250_iim, assembler, capsys, vectors):
+  """At store vector width 1 the store-width cascade of the switched-off kernel has the NonEdge block and one masked
+  block, the narrowest and the one of the store vector width at once, which the M-edge, N-edge-only and corner tiles
+  all reach. TDMStoreInst stores each beta through one TDM block of width 1 in their place, without the edge checks,
+  and keeps the rest of the global write. With bias and ScaleAlphaVec the vectors keep LDS offset 0."""
   kernels = {}
   for tdm in (False, True):
     sol, asm = _emit_asm(gfx1250_iim, assembler, TDMStoreInst=tdm, StoreVectorWidth=1,
                          **({"ProblemType": {"UseBias": 1, "UseScaleAlphaVec": 1}} if vectors else {}))
     assert sol.get("Valid"), capsys.readouterr().out
     assert sol["StoreVectorWidth"] == 1
-    kernels[tdm] = asm
-  for tdm, asm in kernels.items():
-    assert _skeleton(asm) == _skeleton(kernels[0]), tdm
-    stores = _stores(asm)
-    lines = [code for code in map(_code, asm.splitlines())
-             if code and not code.startswith(("s_prefetch_inst_pc_rel", "s_set_vgpr_msb"))]
-    for beta in "01":
-      direct = stores[("GSU1", beta)]
-      assert direct["then"] == [1] and direct["nonEdge"], (tdm, beta, direct)
-      assert direct["tdm"] == ([1] if tdm else []), (tdm, beta, direct)
-      assert direct["nonEdgeTdm"] == bool(tdm) and bool(direct["nonEdgeBuffer"]) == (not tdm), (tdm, beta, direct)
-      end = lines.index("label_GW_B%s_FD0_VW1_GSU1_NonEdgeEnd:" % beta)
-      assert lines[end + 1:end + 3] == ["label_GW_B%s_FD0_VW1_GSU1_%s:" % (beta, part) for part in ("Else", "Then")]
     assert "add lds offset" not in asm
+    kernels[tdm] = asm
+  assert _withoutDirectCascade(kernels[True], 1) == _withoutDirectCascade(kernels[False], 1)
+  off, on = _stores(kernels[False]), _stores(kernels[True])
+  lines = [code for code in map(_code, kernels[False].splitlines())
+           if code and not code.startswith(("s_prefetch_inst_pc_rel", "s_set_vgpr_msb"))]
+  for beta in "01":
+    direct = off[("GSU1", beta)]
+    assert direct["then"] == [1] and direct["nonEdge"] and not direct["tdm"] and direct["nonEdgeBuffer"], (beta, direct)
+    end = lines.index("label_GW_B%s_FD0_VW1_GSU1_NonEdgeEnd:" % beta)
+    assert lines[end + 1:end + 3] == ["label_GW_B%s_FD0_VW1_GSU1_%s:" % (beta, part) for part in ("Else", "Then")]
+    direct = on[("GSU1", beta)]
+    assert direct["then"] == direct["tdm"] == [1] and not direct["nonEdge"] and not direct["buffer"], (beta, direct)
 
 
 def test_solution_checks_the_d_vectors_once_their_widths_are_final(gp_gfx1250, gfx1250_iim, assembler, capsys,
@@ -1414,7 +1428,7 @@ def test_local_split_u_stages_each_element_after_the_lsu_offset(gp_gfx1250, gfx1
   assert len(offsets) == 1 and "valid offset coord%u is zero." % (1 - dim) in asm
   lsuCoord = operands(lines[offsets[0]])[0]
   assert max(i for i, line in enumerate(lines) if "post-lsu local write" in line) < offsets[0]
-  slot = 1 if tdm == 1 else 4
+  slot = 4
   stores = _stores(asm)
   for beta in "01":
     direct = stores[("GSU1", beta)]
