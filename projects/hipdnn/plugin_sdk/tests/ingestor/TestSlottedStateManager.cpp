@@ -1069,7 +1069,7 @@ TEST_F(TestSlottedStateManagerDefault,
        AKernelWhoseLaunchNamesDifferFromItsHandlersIsDroppedFromThatSlotOnly)
 {
     const ScopedLaunchDispatches dispatches;
-    auto recorder
+    const auto recorder
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
     const auto manager
         = makeLaunchManager(twoPrepKernels(),

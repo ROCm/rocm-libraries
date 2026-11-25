@@ -54,7 +54,7 @@ inline std::string asQueryColumns(const ProblemPoint& point, bool namesOnly)
     {
         if(!text.empty())
         {
-            text += ",";
+            text += ',';
         }
         text += namesOnly ? "q." + entry.first : asText(entry.second);
     }
@@ -69,7 +69,7 @@ inline std::string asQueryArgument(const ProblemPoint& point)
     {
         if(!text.empty())
         {
-            text += ",";
+            text += ',';
         }
         text += entry.first + "=" + asText(entry.second);
     }

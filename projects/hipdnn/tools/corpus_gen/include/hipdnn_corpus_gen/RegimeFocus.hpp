@@ -149,8 +149,8 @@ inline void foldEqualities(const OperationMetadata& metadata,
     const auto reference = [](const nlohmann::json& operand) {
         return operand.is_string() ? queryReference(operand.get<std::string>()) : std::string();
     };
-    auto left = reference(operands[0]);
-    auto right = reference(operands[1]);
+    const auto left = reference(operands[0]);
+    const auto right = reference(operands[1]);
     if(left.empty() && right.empty())
     {
         return;

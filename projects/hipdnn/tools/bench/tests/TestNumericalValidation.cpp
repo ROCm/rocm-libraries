@@ -84,12 +84,12 @@ hipdnn_bench::VariantPackPlan inputAndOutputPlan(hipdnn_frontend::DataType outpu
 {
     using hipdnn_frontend::graph::TensorAttributes;
     hipdnn_frontend::graph::Graph graph;
-    auto x = std::make_shared<TensorAttributes>();
+    const auto x = std::make_shared<TensorAttributes>();
     x->set_uid(1).set_name("X").set_dim({2}).set_stride({1}).set_data_type(
         hipdnn_frontend::DataType::FLOAT);
     hipdnn_frontend::graph::PointwiseAttributes square;
     square.set_mode(hipdnn_frontend::PointwiseMode::MUL);
-    auto y = graph.pointwise(x, x, square);
+    const auto y = graph.pointwise(x, x, square);
     y->set_uid(2).set_name("Y").set_dim({2}).set_stride({1}).set_data_type(outputType);
     y->set_output(true);
     return hipdnn_bench::planVariantPack(graph);

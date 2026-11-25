@@ -900,7 +900,7 @@ TEST(TestDescriptorLoader, ResolvesOneUhdPerMetricFromOneArchEntry)
 TEST(TestDescriptorLoader, DisablesAMetricTwoRankersClaimOnOneArch)
 {
     const ScopedSymbols symbols;
-    auto recorder
+    const auto recorder
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
     const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("ranker_collision"));
     auto documents = makeSetDocuments('1', "test:ranker_collision");
@@ -932,7 +932,7 @@ TEST(TestDescriptorLoader, DisablesAMetricTwoRankersClaimOnOneArch)
 /// engine stays loaded.
 TEST(TestDescriptorLoader, DisablesAMetricTwoEnginePredictionsClaimOnOneArch)
 {
-    auto recorder
+    const auto recorder
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
     const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("prediction_collision"));
     auto documents = makeSetDocuments('1', "test:prediction_collision");
@@ -961,7 +961,7 @@ TEST(TestDescriptorLoader, DisablesAMetricTwoEnginePredictionsClaimOnOneArch)
 /// withheld on that arch.
 TEST(TestDescriptorLoader, AMetricLessEnginePredictionWithholdsItsArchitecture)
 {
-    auto recorder
+    const auto recorder
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
     const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("metricless_prediction"));
     auto documents = makeSetDocuments('1', "test:metricless_prediction");
@@ -996,7 +996,7 @@ TEST(TestDescriptorLoader, AMetricLessEnginePredictionWithholdsItsArchitecture)
 /// refuses the UED; a bare string is a one-element list.
 TEST(TestDescriptorLoader, ReadsAScoringRoleAsAListOfDistinctIds)
 {
-    auto recorder
+    const auto recorder
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
     const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("role_list"));
     // makeSetDocuments spells its role as a bare string.
@@ -1053,7 +1053,7 @@ TEST(TestDescriptorLoader, ReadsTheCandidateGeneratorRoleAsAList)
 /// with its model silently unbound.
 TEST(TestDescriptorLoader, RejectsAnEngineSpellingAMetricSuffixedPredictionRole)
 {
-    auto recorder
+    const auto recorder
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
     const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("suffixed_role"));
     writeDocuments(dir.path(), makeSetDocuments('1', "test:valid"));
@@ -1075,7 +1075,7 @@ TEST(TestDescriptorLoader, RejectsAnEngineSpellingAMetricSuffixedPredictionRole)
 /// and the engine falls back to declared order.
 TEST(TestDescriptorLoader, RejectsAUhdScoreCarryingUnits)
 {
-    auto recorder
+    const auto recorder
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
     const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("score_units"));
     auto documents = makeSetDocuments('1', "test:score_units");
@@ -1096,7 +1096,7 @@ TEST(TestDescriptorLoader, RejectsAUhdScoreCarryingUnits)
 /// for criteria nothing implements.
 TEST(TestDescriptorLoader, RejectsAStaticOrderBodyDeclaringCriteria)
 {
-    auto recorder
+    const auto recorder
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
     const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("static_order_order"));
     auto documents = makeSetDocuments('1', "test:static_order");
@@ -1285,7 +1285,7 @@ TEST(TestDescriptorLoader, ResolvesAnArchIndependentKernelFromAnArchSpecificPack
 /// *and* one arch with different contents still poison each other.
 TEST(TestDescriptorLoader, DropsBothWhenOneIdAndArchIsDefinedTwiceWithDifferentContents)
 {
-    auto recorder
+    const auto recorder
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
     const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("arch_conflict"));
     auto documents = makeSetDocuments('1', "test:arch_conflict");
@@ -1304,7 +1304,7 @@ TEST(TestDescriptorLoader, DropsBothWhenOneIdAndArchIsDefinedTwiceWithDifferentC
 /// collide on content like any other repeated key. Unsorted, these would be two packs.
 TEST(TestDescriptorLoader, TreatsArchOrderAsOneKey)
 {
-    auto recorder
+    const auto recorder
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
     const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("arch_order"));
     auto documents = makeSetDocuments('1', "test:arch_order");
@@ -1352,7 +1352,7 @@ TEST(TestDescriptorLoader, ResolvesAStandaloneKernelCoveringPartOfThePacksArch)
 /// file is present and wrong.
 TEST(TestDescriptorLoader, DropsAPackWhoseKernelReachesPastItsArch)
 {
-    auto recorder
+    const auto recorder
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
     const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("arch_reaching"));
     writeDocuments(dir.path(), makeSetDocuments('1', "test:valid"));
@@ -1378,7 +1378,7 @@ TEST(TestDescriptorLoader, DropsAPackWhoseKernelReachesPastItsArch)
 /// shapes are not supposed to mix: a kernel ships arch-independent, or per arch.
 TEST(TestDescriptorLoader, RejectsAKernelDefinedBothArchIndependentlyAndPerArch)
 {
-    auto recorder
+    const auto recorder
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
     const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("arch_ambiguous"));
     auto documents = makeSetDocuments('1', "test:ambiguous");
@@ -1427,7 +1427,7 @@ TEST(TestDescriptorLoader, NarrowsAnInlineKernelToPartOfItsPacksArch)
 /// and fails the file, not every pack that might have bound it.
 TEST(TestDescriptorLoader, RejectsAnInlineKernelReachingPastItsPacksArch)
 {
-    auto recorder
+    const auto recorder
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
     const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("inline_arch_past"));
     auto documents = makeSetDocuments('1', "test:inline_past");
@@ -1445,7 +1445,7 @@ TEST(TestDescriptorLoader, RejectsAnInlineKernelReachingPastItsPacksArch)
 /// never more. Spelled with bare ids, since that is all an authored list may carry.
 TEST(TestDescriptorLoader, TreatsAShorterArchListAsNarrowerThanTheOneContainingIt)
 {
-    auto recorder
+    const auto recorder
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
     {
         const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("arch_narrows"));
@@ -1483,7 +1483,7 @@ TEST(TestDescriptorLoader, TreatsAShorterArchListAsNarrowerThanTheOneContainingI
 /// match no device while looking correct. The message has to name the fix.
 TEST(TestDescriptorLoader, RejectsAnArchCarryingAFeatureSuffix)
 {
-    auto recorder
+    const auto recorder
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
     const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("arch_suffix"));
     auto documents = makeSetDocuments('1', "test:arch_suffix");
@@ -1502,7 +1502,7 @@ TEST(TestDescriptorLoader, RejectsAnArchCarryingAFeatureSuffix)
 /// merely different: a kernel inside the pack's arch is a narrowing and resolves.
 TEST(TestDescriptorLoader, DropsAPackWhoseKernelIsDefinedOnlyForAnotherArch)
 {
-    auto recorder
+    const auto recorder
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
     const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("kernel_other_arch"));
     writeDocuments(dir.path(), makeSetDocuments('1', "test:valid"));
@@ -1595,7 +1595,7 @@ TEST(TestDescriptorLoader, LoadsAnEngineThatOnlyTheDropInRootDefines)
 TEST(TestDescriptorLoader, ValidatesAnEngineComingOnlyFromTheDropInRoot)
 {
     const ScopedSymbols symbols;
-    auto recorder
+    const auto recorder
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
     const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("cross_root_validated"));
     const auto installed = dir.path() / "a";
@@ -1686,7 +1686,7 @@ TEST(TestDescriptorLoader, ReadsTheDescriptorRootsTheEnvironmentNames)
 /// the variable, rather than loading nothing silently.
 TEST(TestDescriptorLoader, IgnoresAnEnvironmentRootThatIsNotADirectory)
 {
-    auto recorder
+    const auto recorder
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_WARN);
     ScopedDescriptorEnvironment environment;
     const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("environment_unusable"));
@@ -1863,7 +1863,7 @@ void useOneArch(Documents& documents)
 /// same generic file in every shard, and each shard is free to format it.
 TEST_P(TestDescriptorLoaderTypedCollision, CollapsesCopiesThatDifferOnlyInBytes)
 {
-    auto recorder
+    const auto recorder
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
     const hipdnn_test_sdk::utilities::ScopedDirectory dir(
         uniqueDirectory("typed_bytes_" + GetParam().name));
@@ -1890,7 +1890,7 @@ TEST_P(TestDescriptorLoaderTypedCollision, CollapsesCopiesThatDifferOnlyInBytes)
 /// whatever needs it is dropped (RFC 0020 §13.2.1).
 TEST_P(TestDescriptorLoaderTypedCollision, DropsTheIdWhenTwoFilesInOneRootDiffer)
 {
-    auto recorder
+    const auto recorder
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
     const hipdnn_test_sdk::utilities::ScopedDirectory dir(
         uniqueDirectory("typed_same_root_" + GetParam().name));
@@ -1915,7 +1915,7 @@ TEST_P(TestDescriptorLoaderTypedCollision, DropsTheIdWhenTwoFilesInOneRootDiffer
 /// at a severity the default log level never shows.
 TEST_P(TestDescriptorLoaderTypedCollision, KeepsTheEarlierRootsDescriptorOverALaterRedefinition)
 {
-    auto recorder
+    const auto recorder
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
     const hipdnn_test_sdk::utilities::ScopedDirectory dir(
         uniqueDirectory("typed_earlier_root_" + GetParam().name));
@@ -2000,7 +2000,7 @@ INSTANTIATE_TEST_SUITE_P(
 /// so a compare that opened them again could not call the copies identical.
 TEST(TestDescriptorLoader, SettlesACollisionWithoutOpeningEitherFile)
 {
-    auto recorder
+    const auto recorder
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
     auto documents = makeSetDocuments('1', "test:no_io");
     const auto& body = documentOfType(documents, ".udd.json");
@@ -2028,7 +2028,7 @@ TEST(TestDescriptorLoader, SettlesACollisionWithoutOpeningEitherFile)
 /// one definition rather than a collision.
 TEST(TestDescriptorLoader, CollapsesCopiesDifferingOnlyInExtensionKeysAndProvenance)
 {
-    auto recorder
+    const auto recorder
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
     const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("extension_keys"));
     auto documents = makeSetDocuments('1', "test:extension_keys");
@@ -2114,7 +2114,7 @@ TEST(TestDescriptorLoader, RejectsAPackTruncatedAsItsKernelsOpenAndKeepsTheSibli
     // The header fails (it has no id) before the text does, and the syntax error still wins,
     // as it does for a whole-document parse. Every other unreadable spelling is an oracle
     // row, which derives the parser's wording at runtime.
-    auto recorder
+    const auto recorder
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
     const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("unreadable_pack"));
     writeDocuments(dir.path(), makeSetDocuments('1', "test:intact"));
@@ -2444,7 +2444,7 @@ TEST(TestDescriptorLoader, DropsAnEngineWhoseOnlyPackDeclaresNoKernels)
 
 TEST(TestDescriptorLoader, DropsAPackWhoseEngineIdNamesNoLoadedEngine)
 {
-    auto recorder
+    const auto recorder
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
     const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("orphan_pack"));
     writeDocuments(dir.path(), makeSetDocuments('1', "test:valid"));
@@ -2654,7 +2654,7 @@ TEST(TestDescriptorLoader, ReadsEachDataArtifactAdapterAsItsOwn)
 TEST(TestDescriptorLoader, CollapsesPerArchCopiesOfAModelHeuristic)
 {
     const ScopedSymbols symbols;
-    auto recorder
+    const auto recorder
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
     const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("model_arch_dupes"));
     for(const std::string arch : {"gfx942", "gfx950"})
@@ -2780,7 +2780,7 @@ TEST(TestDescriptorLoader, RejectsAnObjectiveContradictingTheScoreMetric)
     writeDocuments(dir.path(), documents);
     writeArtifact(dir.path() / "model.bin");
 
-    auto recorder
+    const auto recorder
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
 
     const auto sets = validatedSetsFrom(dir.path());
@@ -2808,7 +2808,7 @@ TEST(TestDescriptorLoader, RejectsStringifiedFeatureExpressions)
     writeDocuments(dir.path(), documents);
     writeArtifact(dir.path() / "model.bin");
 
-    auto recorder
+    const auto recorder
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
 
     const auto sets = validatedSetsFrom(dir.path());
@@ -2821,7 +2821,7 @@ TEST(TestDescriptorLoader, RejectsStringifiedFeatureExpressions)
 TEST(TestDescriptorLoader, WarnsWhenAModelArtifactIsAbsentAndKeepsTheEngine)
 {
     const ScopedSymbols symbols;
-    auto recorder
+    const auto recorder
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_WARN);
     const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("model_absent"));
     writeModelHeuristicSet(dir.path(), "test:model_absent", "never_packaged.bin");
@@ -2866,7 +2866,7 @@ TEST(TestDescriptorLoader, ReplacingUndeclaredWeightsChangesTheEngineModelIdenti
 TEST(TestDescriptorLoader, EscapingModelArtifactIsDisabledWithoutDroppingTheEngine)
 {
     const ScopedSymbols symbols;
-    auto recorder
+    const auto recorder
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
     const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("model_escapes"));
     const auto tree = dir.path() / "tree";
@@ -2920,7 +2920,7 @@ TEST(TestDescriptorLoader, AcceptsAModelArtifactInASubdirectoryOfTheDescriptor)
 TEST(TestDescriptorLoader, DisablesAPredictionModelWhoseArtifactEscapesTheTree)
 {
     const ScopedSymbols symbols;
-    auto recorder
+    const auto recorder
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
     const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("l1_escapes"));
     const auto tree = dir.path() / "tree";
@@ -3006,7 +3006,7 @@ TEST(TestDescriptorLoader, DeclaredEnginePredictionResolvesAndScores)
 TEST(TestDescriptorLoader, DeclaredEnginePredictionNamingADescriptorSetIsRefused)
 {
     const ScopedL1Scorer scorer;
-    auto recorder
+    const auto recorder
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
     const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("declared_l1_prov"));
     const auto refusedId = testUuid('e', '2');
@@ -3064,7 +3064,7 @@ TEST(TestDescriptorLoader, DeclaredEnginePredictionNamingADescriptorSetIsRefused
 TEST(TestDescriptorLoader, DeclaredEnginePredictionTrainedAgainstAnotherBuildIsRefused)
 {
     const ScopedL1Scorer scorer;
-    auto recorder
+    const auto recorder
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
     const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("declared_l1_stale"));
     const std::string revisionA = "test-provider/1.2.3/engine-a-untuned-v1/library-4.5";
@@ -3110,7 +3110,7 @@ TEST(TestDescriptorLoader, DeclaredEnginePredictionTrainedAgainstAnotherBuildIsR
 TEST(TestDescriptorLoader, DeclaredEnginePredictionWithoutASelectorRevisionIsRefused)
 {
     const ScopedL1Scorer scorer;
-    auto recorder
+    const auto recorder
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
     const hipdnn_test_sdk::utilities::ScopedDirectory dir(
         uniqueDirectory("declared_l1_unqualified"));
@@ -3147,7 +3147,7 @@ TEST(TestDescriptorLoader, DeclaredEnginePredictionTrainedOnOtherFeatureSemantic
     using hipdnn_flatbuffers_sdk::data_objects::PredictionStatus;
     using hipdnn_plugin_sdk::heuristics::FEATURE_SEMANTICS_REVISION;
     const ScopedL1Scorer scorer;
-    auto recorder
+    const auto recorder
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
     const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("declared_l1_fsr"));
     const auto newer = FEATURE_SEMANTICS_REVISION + 1;
@@ -3263,7 +3263,7 @@ TEST(TestDescriptorLoader, AModelTrainedOnOtherFeatureSemanticsIsRefusedForEvery
     EXPECT_EQ(bound(load("fsr_current", FEATURE_SEMANTICS_REVISION)), std::make_pair(true, true));
     EXPECT_EQ(bound(load("fsr_absent", std::nullopt)), bound(load("fsr_one", 1)));
 
-    auto recorder
+    const auto recorder
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
     const auto newer = FEATURE_SEMANTICS_REVISION + 1;
     // Kept alive through the ranking below, which reads the tree the set was loaded from.
@@ -3335,7 +3335,7 @@ TEST(TestDescriptorLoader, DeclaredEnginePredictionWithNoTreeInstalledResolvesNo
 TEST(TestDescriptorLoader, AUhdCannotClaimAnEngineRoleOrArch)
 {
     const ScopedL1Scorer scorer;
-    auto recorder
+    const auto recorder
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
     for(const auto* claim : {"engine", "role", "arch"})
     {
@@ -3361,7 +3361,7 @@ TEST(TestDescriptorLoader, AUhdCannotClaimAnEngineRoleOrArch)
 TEST(TestDescriptorLoader, DeclaredEnginePredictionsResolvePerMetric)
 {
     const ScopedL1Scorer scorer;
-    auto recorder
+    const auto recorder
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
     const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("declared_l1_metrics"));
     const auto tflopsId = testUuid('e', 'b');
@@ -3656,7 +3656,7 @@ TEST_P(TestDescriptorLoaderStateManagerOrder, HandsBackOneStateManagerPerValidat
     // Engine i is built over state manager i: off by one, an engine serves its neighbor's
     // kernels while every id it advertises is still correct.
     const ScopedSymbols symbols;
-    auto recorder
+    const auto recorder
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
     const hipdnn_test_sdk::utilities::ScopedDirectory dir(
         uniqueDirectory("state_managers_" + GetParam().name));
@@ -3738,7 +3738,7 @@ TEST(TestDescriptorLoader, ValidationDropsAnEngineNamingAnUnregisteredGraphMatch
 TEST(TestDescriptorLoader, ValidationDropsAnEngineNamingAGraphSymbolAsItsKernelScopeMatcher)
 {
     const ScopedSymbols symbols;
-    auto recorder
+    const auto recorder
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
     const hipdnn_test_sdk::utilities::ScopedDirectory dir(
         uniqueDirectory("kernel_scope_wrong_registry"));
@@ -3762,7 +3762,7 @@ TEST(TestDescriptorLoader, ValidationDropsAnEngineNamingAGraphSymbolAsItsKernelS
 TEST(TestDescriptorLoader, ValidationDropsAnEngineNamingAnUnregisteredDispatchSymbol)
 {
     const ScopedSymbols symbols;
-    auto recorder
+    const auto recorder
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
     const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("unregistered_dispatch"));
     writeDocuments(dir.path(), makeSetDocuments('1', "test:dispatch_check_sibling"));
@@ -3781,7 +3781,7 @@ TEST(TestDescriptorLoader, ValidationDropsAnEngineNamingAnUnregisteredDispatchSy
 TEST(TestDescriptorLoader, UnregisteredScorerDoesNotDisableAnOtherwiseValidEngine)
 {
     const ScopedSymbols symbols;
-    auto recorder
+    const auto recorder
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
     const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("unregistered_score"));
     writeDocuments(dir.path(), makeSetDocuments('1', "test:score_check_sibling"));
@@ -3803,7 +3803,7 @@ TEST(TestDescriptorLoader, UnregisteredScorerDoesNotDisableAnOtherwiseValidEngin
 TEST(TestDescriptorLoader, ReportsHowManyDescriptorSetsWereDropped)
 {
     const ScopedSymbols symbols;
-    auto recorder
+    const auto recorder
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
     const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("drop_count"));
     writeDocuments(dir.path(), makeSetDocuments('1', "test:drop_count_survivor"));
@@ -4224,7 +4224,7 @@ TEST(TestDescriptorLoader, ReadsCommentedDescriptorsAndIgnoresCommentsWhenCompar
 TEST(TestDescriptorLoader, RefusesAUhdRepeatingAKey)
 {
     const ScopedSymbols symbols;
-    auto recorder
+    const auto recorder
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
     const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("uhd_repeated_key"));
     auto documents = makeSetDocuments('1', "test:uhd_repeated_key");
@@ -4268,7 +4268,7 @@ TEST(TestDescriptorLoader, RejectsATrailingComma)
 TEST(TestDescriptorLoader, SkipsAJsonFileThatNamesNoDescriptorType)
 {
     const ScopedSymbols symbols;
-    auto recorder
+    const auto recorder
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_WARN);
     const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("stray_json"));
     writeDocuments(dir.path(), makeSetDocuments('1', "test:intact"));
@@ -4286,7 +4286,7 @@ TEST(TestDescriptorLoader, SkipsAJsonFileThatNamesNoDescriptorType)
 TEST(TestDescriptorLoader, IgnoresAFileWhoseWholeNameIsASuffix)
 {
     const ScopedSymbols symbols;
-    auto recorder
+    const auto recorder
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_WARN);
     const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("bare_suffix"));
     writeDocuments(dir.path(), makeSetDocuments('1', "test:intact"));
@@ -4307,7 +4307,7 @@ TEST(TestDescriptorLoader, IgnoresAFileWhoseWholeNameIsASuffix)
 TEST(TestDescriptorLoader, IgnoresAnUppercasedSuffix)
 {
     const ScopedSymbols symbols;
-    auto recorder
+    const auto recorder
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_WARN);
     const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("uppercase_suffix"));
     writeDocuments(dir.path(), makeSetDocuments('1', "test:intact"));
@@ -4544,7 +4544,7 @@ TEST(TestDescriptorLoader, LoadsAPackWhoseKernelsAreAllReferences)
 
 TEST(TestDescriptorLoader, DropsAPackReferencingAKernelNoFileDefines)
 {
-    auto recorder
+    const auto recorder
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
     const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("ukd_dangling"));
     writeDocuments(dir.path(), makeSetDocuments('1', "test:valid"));
@@ -4565,7 +4565,7 @@ TEST(TestDescriptorLoader, DropsAPackReferencingAKernelNoFileDefines)
 
 TEST(TestDescriptorLoader, DropsAPackNamingTheSameKernelTwice)
 {
-    auto recorder
+    const auto recorder
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
     const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("ukd_duplicate_ref"));
     writeDocuments(dir.path(), makeSetDocuments('1', "test:valid"));
@@ -4590,7 +4590,7 @@ TEST(TestDescriptorLoader, DropsAPackNamingTheSameKernelTwice)
 /// The inline+reference spelling of the same duplicate, rather than ref+ref above.
 TEST(TestDescriptorLoader, DropsAPackWhoseReferencedKernelIsAlsoInline)
 {
-    auto recorder
+    const auto recorder
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
     const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("ukd_ref_and_inline"));
     writeDocuments(dir.path(), makeSetDocuments('1', "test:valid"));
@@ -4599,7 +4599,7 @@ TEST(TestDescriptorLoader, DropsAPackWhoseReferencedKernelIsAlsoInline)
     referenceLastKernel(broken);
     // The standalone document drops in verbatim, `version` and all: one schema in two
     // spellings, so whatever a `.ukd.json` may say, an inline entry may say too.
-    auto inlineAgain = documentOfType(broken, ".ukd.json");
+    const auto inlineAgain = documentOfType(broken, ".ukd.json");
     documentOfType(broken, ".kdp.json")["kernelDescriptors"].push_back(inlineAgain);
     writeDocuments(dir.path(), broken);
 
@@ -4615,7 +4615,7 @@ TEST(TestDescriptorLoader, DropsAPackWhoseReferencedKernelIsAlsoInline)
 
 TEST(TestDescriptorLoader, WarnsAboutAStandaloneKernelNoPackReferences)
 {
-    auto recorder
+    const auto recorder
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_WARN);
     const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("ukd_orphan"));
     auto documents = makeSetDocuments('1', "test:orphan_kernel");
@@ -4671,7 +4671,7 @@ TEST(TestDescriptorLoader, SharesAStandaloneKernelBetweenTwoEngines)
 /// pattern, one catalog map over), so the pack naming that id sees a dangling reference.
 TEST(TestDescriptorLoader, DropsAPackWhoseReferencedKernelConflicts)
 {
-    auto recorder
+    const auto recorder
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
     const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("ukd_conflict"));
     writeDocuments(dir.path(), makeSetDocuments('1', "test:valid"));
@@ -4695,7 +4695,7 @@ TEST(TestDescriptorLoader, DropsAPackWhoseReferencedKernelConflicts)
 
 TEST(TestDescriptorLoader, RejectsAStandaloneKernelWithNoVersion)
 {
-    auto recorder
+    const auto recorder
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
     const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("ukd_missing_version"));
     writeDocuments(dir.path(), makeSetDocuments('1', "test:valid"));
@@ -4716,7 +4716,7 @@ TEST(TestDescriptorLoader, RejectsAStandaloneKernelWithNoVersion)
 /// spellings. A KDP's own `version` does not stand in for its kernels'.
 TEST(TestDescriptorLoader, RejectsAnInlineKernelWithNoVersion)
 {
-    auto recorder
+    const auto recorder
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
     const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("inline_no_version"));
     writeDocuments(dir.path(), makeSetDocuments('1', "test:valid"));
@@ -4742,7 +4742,7 @@ TEST(TestDescriptorLoader, RejectsAnInlineKernelWithNoVersion)
 /// independent.
 TEST(TestDescriptorLoader, SkipsAnInlineKernelDeclaringANewerUkdVersion)
 {
-    auto recorder
+    const auto recorder
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_WARN);
     const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("inline_newer_version"));
     auto documents = makeSetDocuments('1', "test:valid");
@@ -4770,7 +4770,7 @@ TEST(TestDescriptorLoader, SkipsAnInlineKernelDeclaringANewerUkdVersion)
 /// the walk before any parser sees the document.
 TEST(TestDescriptorLoader, SkewOnAnInlineKernelSupersedesItsOtherViolations)
 {
-    auto recorder
+    const auto recorder
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_WARN);
     const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("inline_skew_first"));
     auto documents = makeSetDocuments('1', "test:valid");
@@ -4796,7 +4796,7 @@ TEST(TestDescriptorLoader, SkewOnAnInlineKernelSupersedesItsOtherViolations)
 /// path rather than a second rule written for version skew.
 TEST(TestDescriptorLoader, DropsAPackWhoseInlineKernelsAllDeclareANewerUkdVersion)
 {
-    auto recorder
+    const auto recorder
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
     const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("inline_all_newer"));
     writeDocuments(dir.path(), makeSetDocuments('1', "test:valid"));
@@ -4822,7 +4822,7 @@ TEST(TestDescriptorLoader, DropsAPackWhoseInlineKernelsAllDeclareANewerUkdVersio
 /// defines -- where an inline skew leaves the pack its readable kernels.
 TEST(TestDescriptorLoader, DropsAPackReferencingAStandaloneKernelOfANewerUkdVersion)
 {
-    auto recorder
+    const auto recorder
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
     const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("ukd_newer_version"));
     writeDocuments(dir.path(), makeSetDocuments('1', "test:valid"));
@@ -4874,7 +4874,7 @@ TEST_P(TestDescriptorLoaderPackReadings, WarnsOncePerReadingOfThePack)
 {
     // Each reading of the pack logs each WARN once, so the count tells kernels parsed while
     // streaming (one reading) from kernels parsed again in a second pass (two).
-    auto recorder
+    const auto recorder
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_WARN);
     const hipdnn_test_sdk::utilities::ScopedDirectory dir(
         uniqueDirectory("pack_readings_" + GetParam().name));
@@ -5600,7 +5600,7 @@ TEST_P(TestDescriptorLoaderStreamingOracle, ReadsAPackAsTheWholeDocumentReadingD
     std::optional<KernelDescriptorPack> streamed;
     std::vector<std::string> errors;
     {
-        auto recorder
+        const auto recorder
             = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
         const auto catalog = loadDescriptorCatalog(dir.path());
         ASSERT_LE(catalog.packs.size(), 1u);
@@ -5951,7 +5951,7 @@ TEST(TestDescriptorLoader, RefusesAKernelWithBothOrNeitherOfKernelSourceAndSourc
 {
     for(const bool both : {true, false})
     {
-        auto recorder
+        const auto recorder
             = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
         const hipdnn_test_sdk::utilities::ScopedDirectory dir(
             uniqueDirectory(both ? "both_source_spellings" : "no_source_spelling"));
@@ -5997,7 +5997,7 @@ void writePackagedKernelWithSha256(const std::filesystem::path& where, const std
 /// sends the reader to grep the loader rather than to their own descriptor.
 void expectSha256Rejected(const std::string& digest, const std::string& scratchLabel)
 {
-    auto recorder
+    const auto recorder
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
     const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory(scratchLabel));
     writePackagedKernelWithSha256(dir.path(), digest);
@@ -6041,7 +6041,7 @@ TEST(TestDescriptorLoader, RejectsASha256ThatIsEmpty)
 {
     // requireString already refuses an empty value; the length rule must own the case anyway,
     // in case requireString ever softens.
-    auto recorder
+    const auto recorder
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
     const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("sha256_empty"));
     writePackagedKernelWithSha256(dir.path(), "");
@@ -6093,7 +6093,7 @@ void expectSignatureRejected(const nlohmann::json& signature,
                              const std::string& scratchLabel,
                              const std::string& expectedText)
 {
-    auto recorder
+    const auto recorder
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
     const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory(scratchLabel));
     writePackagedKernelWithSignature(dir.path(), signature);
@@ -6111,7 +6111,7 @@ TEST(TestDescriptorLoader, RejectsAPackagedKernelWithNoSignature)
 {
     // The key is required rather than defaulted because an empty list is a real answer --
     // a kernel that takes no arguments -- and absence must not silently become it.
-    auto recorder
+    const auto recorder
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
     const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("signature_absent"));
     auto packaged = makeSetDocuments('1', "test:signature");
@@ -6262,7 +6262,7 @@ TEST(TestDescriptorLoader, ParsesTheShapeTheDescriptorPackagerEmits)
 /// for the adapter rather than to edit the descriptor.
 TEST(TestDescriptorLoader, RejectsAnHsacoKernelForTheMissingAdapter)
 {
-    auto recorder
+    const auto recorder
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
     const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("hsaco_kernel"));
     writeDocuments(dir.path(), makeSetDocuments('1', "test:valid"));
@@ -6285,7 +6285,7 @@ TEST(TestDescriptorLoader, RejectsAnHsacoKernelForTheMissingAdapter)
 /// one adapter cannot quietly retire the assertion covering the other.
 TEST(TestDescriptorLoader, RejectsARockeBuilderKernelForTheMissingAdapter)
 {
-    auto recorder
+    const auto recorder
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
     const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("rocke_kernel"));
     writeDocuments(dir.path(), makeSetDocuments('1', "test:valid"));
@@ -6401,7 +6401,7 @@ TEST(TestDescriptorLoader, JoinsARelativeLibraryAgainstThePackagerLayout)
 /// the engine load and rank by the fallback forever with the default log level off.
 TEST(TestDescriptorLoader, RejectsAMisspelledOptionalKey)
 {
-    auto recorder
+    const auto recorder
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
     const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("misspelled_optional"));
     writeDocuments(dir.path(), makeSetDocuments('1', "test:valid"));
@@ -6430,7 +6430,7 @@ TEST(TestDescriptorLoader, RejectsAMisspelledOptionalKey)
 /// would bury every real diagnostic in hipdnn_validate_descriptors' report.
 TEST(TestDescriptorLoader, LoadsADescriptorCarryingTrackingFields)
 {
-    auto recorder
+    const auto recorder
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
     const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("tracking_fields"));
     auto documents = makeSetDocuments('1', "test:tracked");
@@ -6803,7 +6803,7 @@ TEST(TestDescriptorLoader, ASlottedKdpHoldsInlineKernelsAtTheirOwnUkdVersions)
 TEST(TestDescriptorLoader, AnInlineUkdLabelled10IsRefusedItsSourcesInsideASlottedKdp)
 {
     const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("slot_ukd_mislabelled"));
-    auto recorder
+    const auto recorder
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_WARN);
     auto documents = makeSlottedDocuments('1', "test:slot_ukd_mislabelled");
     auto& kernel = slotPack(documents, "dkdv").at("kernelDescriptors")[0];
@@ -6864,7 +6864,7 @@ TEST_P(TestDescriptorLoaderSlotRules, RejectsWithAStableMessage)
     const auto& rule = GetParam();
     const hipdnn_test_sdk::utilities::ScopedDirectory dir(
         uniqueDirectory("slot_rule_" + rule.name));
-    auto recorder
+    const auto recorder
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_WARN);
     auto documents = rule.unslottedBase ? makeSetDocuments('1', "test:slot_rule")
                                         : makeSlottedDocuments('1', "test:slot_rule");
@@ -7064,7 +7064,7 @@ INSTANTIATE_TEST_SUITE_P(
 TEST(TestDescriptorLoader, SlottedEngineWithAnEmptySlotWarnsAndStaysRegistered)
 {
     const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("empty_slot"));
-    auto recorder
+    const auto recorder
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_WARN);
     auto documents = makeSlottedDocuments('1', "test:empty_slot");
     eraseSlotPack(documents, "dq");
@@ -7086,7 +7086,7 @@ TEST(TestDescriptorLoader, SlottedEngineWithAnEmptySlotWarnsAndStaysRegistered)
 TEST(TestDescriptorLoader, SlottedEngineWhoseEverySlotIsEmptyStaysRegistered)
 {
     const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("all_slots_empty"));
-    auto recorder
+    const auto recorder
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_WARN);
     auto documents = makeSlottedDocuments('1', "test:all_slots_empty");
     for(const auto* slot : {"prep", "dkdv", "dq"})
@@ -7104,7 +7104,7 @@ TEST(TestDescriptorLoader, SlottedEngineWhoseEverySlotIsEmptyStaysRegistered)
 TEST(TestDescriptorLoader, UnslottedEngineWithNoLoadablePackIsStillDropped)
 {
     const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("unslotted_empty"));
-    auto recorder
+    const auto recorder
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_WARN);
     auto documents = makeSetDocuments('1', "test:unslotted_empty");
     documentOfType(documents, ".kdp.json")["dispatch"] = testUuid('f', 'f');
@@ -7153,7 +7153,7 @@ TEST_P(TestDescriptorLoaderRankerProvenance, DisablesTheRankerAndKeepsTheEngine)
     const auto& testCase = GetParam();
     const hipdnn_test_sdk::utilities::ScopedDirectory dir(
         uniqueDirectory("ranker_provenance_" + testCase.name));
-    auto recorder
+    const auto recorder
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_WARN);
     auto documents = makeSlottedDocuments('1', "test:ranker_provenance_rule");
     auto trained = trainedAgainstWithoutKmd(documents);
@@ -7262,7 +7262,7 @@ INSTANTIATE_TEST_SUITE_P(
 TEST(TestDescriptorLoader, DisablesAnUnslottedEnginesRankerNamingASlot)
 {
     const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("unslotted_slot_prov"));
-    auto recorder
+    const auto recorder
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_WARN);
     auto documents = makeSetDocuments('1', "test:unslotted_slot_prov");
     auto trained = provenanceOf(documents);
@@ -7341,7 +7341,7 @@ class TestDescriptorLoaderSlottedEstimateRefusal
 
 TEST_P(TestDescriptorLoaderSlottedEstimateRefusal, DisablesTheEstimateAndKeepsTheEngine)
 {
-    auto recorder
+    const auto recorder
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_WARN);
     const auto sets = load("estimate_" + GetParam().name, GetParam().edit);
 

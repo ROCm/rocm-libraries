@@ -20,7 +20,7 @@ namespace
 
 OperationMetadata toy()
 {
-    auto load = parseOperationMetadata(nlohmann::json::parse(R"({
+    const auto load = parseOperationMetadata(nlohmann::json::parse(R"({
       "schema_version": "1.0",
       "operation": "toy",
       "parameters": {

@@ -300,7 +300,7 @@ TEST_F(IntegrationSdpaFwdDescriptorLifting, SdpaFwdLiftWithoutFinalization)
 // custom-mask form, which excludes a probability, is SdpaFwdCustomDropoutRoundTrip.
 TEST_F(IntegrationSdpaFwdDescriptorLifting, SdpaFwdWithCompatibleOptionalAttributesViaCApi)
 {
-    auto originalGraph = buildGraph();
+    const auto originalGraph = buildGraph();
 
     auto& subNodes = originalGraph->getSubNodes();
     ASSERT_EQ(subNodes.size(), 1u);
@@ -310,46 +310,46 @@ TEST_F(IntegrationSdpaFwdDescriptorLifting, SdpaFwdWithCompatibleOptionalAttribu
     // Compatible optional input tensors; attention scale is set as a scalar below. The page
     // tables make K and V paged containers, which max_seq_len_kv requires.
 
-    auto attnMask = std::make_shared<TensorAttributes>();
+    const auto attnMask = std::make_shared<TensorAttributes>();
     attnMask->set_uid(K_SDPA_TENSOR_ATTN_MASK_UID)
         .set_name("ATTN_MASK")
         .set_data_type(DataType::FLOAT);
     attnMask->set_dim(toVec(K_SDPA_TENSOR_ATTN_MASK_DIMS))
         .set_stride(toVec(K_SDPA_TENSOR_ATTN_MASK_STRIDES));
 
-    auto seqLenQ = std::make_shared<TensorAttributes>();
+    const auto seqLenQ = std::make_shared<TensorAttributes>();
     seqLenQ->set_uid(K_SDPA_TENSOR_SEQ_LEN_Q_UID)
         .set_name("SEQ_LEN_Q")
         .set_data_type(DataType::INT32);
     seqLenQ->set_dim(toVec(K_SDPA_TENSOR_SEQ_LEN_DIMS))
         .set_stride(toVec(K_SDPA_TENSOR_SEQ_LEN_STRIDES));
 
-    auto seqLenKv = std::make_shared<TensorAttributes>();
+    const auto seqLenKv = std::make_shared<TensorAttributes>();
     seqLenKv->set_uid(K_SDPA_TENSOR_SEQ_LEN_KV_UID)
         .set_name("SEQ_LEN_KV")
         .set_data_type(DataType::INT32);
     seqLenKv->set_dim(toVec(K_SDPA_TENSOR_SEQ_LEN_DIMS))
         .set_stride(toVec(K_SDPA_TENSOR_SEQ_LEN_STRIDES));
 
-    auto pageTableK = std::make_shared<TensorAttributes>();
+    const auto pageTableK = std::make_shared<TensorAttributes>();
     pageTableK->set_uid(K_SDPA_TENSOR_PAGE_TABLE_K_UID)
         .set_name("PAGE_TABLE_K")
         .set_data_type(DataType::INT32);
     pageTableK->set_dim(toVec(K_SDPA_TENSOR_PAGE_TABLE_DIMS))
         .set_stride(toVec(K_SDPA_TENSOR_PAGE_TABLE_STRIDES));
 
-    auto pageTableV = std::make_shared<TensorAttributes>();
+    const auto pageTableV = std::make_shared<TensorAttributes>();
     pageTableV->set_uid(K_SDPA_TENSOR_PAGE_TABLE_V_UID)
         .set_name("PAGE_TABLE_V")
         .set_data_type(DataType::INT32);
     pageTableV->set_dim(toVec(K_SDPA_TENSOR_PAGE_TABLE_DIMS))
         .set_stride(toVec(K_SDPA_TENSOR_PAGE_TABLE_STRIDES));
 
-    auto seed = std::make_shared<TensorAttributes>();
+    const auto seed = std::make_shared<TensorAttributes>();
     seed->set_uid(K_SDPA_TENSOR_SEED_UID).set_name("SEED");
     seed->set_value(int32_t{42});
 
-    auto offset = std::make_shared<TensorAttributes>();
+    const auto offset = std::make_shared<TensorAttributes>();
     offset->set_uid(K_SDPA_TENSOR_OFFSET_UID).set_name("OFFSET");
     offset->set_value(int32_t{0});
 
@@ -478,20 +478,20 @@ TEST_F(IntegrationSdpaFwdDescriptorLifting, SdpaFwdWithCompatibleOptionalAttribu
 // lowers via the C-API, lifts back, and verifies the mask and scale survive.
 TEST_F(IntegrationSdpaFwdDescriptorLifting, SdpaFwdCustomDropoutRoundTrip)
 {
-    auto originalGraph = buildGraph();
+    const auto originalGraph = buildGraph();
 
     auto& subNodes = originalGraph->getSubNodes();
     ASSERT_EQ(subNodes.size(), 1u);
     auto* sdpaNode = dynamic_cast<SdpaFwdNode*>(subNodes[0].get());
     ASSERT_NE(sdpaNode, nullptr);
 
-    auto dropoutMask = std::make_shared<TensorAttributes>();
+    const auto dropoutMask = std::make_shared<TensorAttributes>();
     dropoutMask->set_uid(K_SDPA_TENSOR_DROPOUT_MASK_UID)
         .set_name("DROPOUT_MASK")
         .set_data_type(DataType::UINT8);
     dropoutMask->set_dim(toVec(K_SDPA_TENSOR_Q_DIMS)).set_stride(toVec(K_SDPA_TENSOR_Q_STRIDES));
 
-    auto dropoutScale = std::make_shared<TensorAttributes>();
+    const auto dropoutScale = std::make_shared<TensorAttributes>();
     dropoutScale->set_uid(K_SDPA_TENSOR_DROPOUT_SCALE_UID).set_name("DROPOUT_SCALE");
     dropoutScale->set_value(1.0f / (1.0f - 0.1f));
 
@@ -506,7 +506,7 @@ TEST_F(IntegrationSdpaFwdDescriptorLifting, SdpaFwdCustomDropoutRoundTrip)
     auto rawDesc = originalGraph->get_raw_graph_descriptor();
     ASSERT_NE(rawDesc, nullptr);
 
-    auto liftedGraph = std::make_shared<TestableGraph>();
+    const auto liftedGraph = std::make_shared<TestableGraph>();
     result = liftedGraph->fromBackendDescriptor(rawDesc);
     ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
 

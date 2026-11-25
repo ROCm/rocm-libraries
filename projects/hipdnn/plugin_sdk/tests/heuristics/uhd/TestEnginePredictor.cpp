@@ -164,7 +164,7 @@ protected:
 
 TEST_F(TestEnginePredictor, NativeCustomAndTreeRecoverTheSamePhysicalThroughput)
 {
-    auto native = config(document());
+    const auto native = config(document());
     const auto nativeResult = predict(native);
     ASSERT_EQ(nativeResult.status, PredictionStatus::AVAILABLE);
     EXPECT_EQ(nativeResult.metric, "tflops");

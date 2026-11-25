@@ -475,7 +475,7 @@ std::string programId(const Program& seeds)
 
 TEST(TestSlotProgramBenchmark, ABenchmarkLogsOneRowPerTimedKernelAndOneForTheWinnersProgram)
 {
-    auto recorder
+    const auto recorder
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
     Bench bench;
     bench.benchmarkAndServe();
@@ -510,7 +510,7 @@ TEST(TestSlotProgramBenchmark, ABenchmarkLogsOneRowPerTimedKernelAndOneForTheWin
 
 TEST(TestSlotProgramBenchmark, AKernelThatFailsToLaunchIsLoggedAsAFailedRowWithItsReason)
 {
-    auto recorder
+    const auto recorder
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
     Bench bench;
     bench.fixture().log().failingLaunch.insert(testId(0x22));
@@ -538,7 +538,7 @@ TEST(TestSlotProgramBenchmark, AKernelThatFailsToLaunchIsLoggedAsAFailedRowWithI
 
 TEST(TestSlotProgramBenchmark, AFailedWinnersProgramServesTheReferenceAndIsLoggedAsTheFailingRow)
 {
-    auto recorder
+    const auto recorder
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
     Bench bench;
     bench.clock().failToTime(WINNERS);

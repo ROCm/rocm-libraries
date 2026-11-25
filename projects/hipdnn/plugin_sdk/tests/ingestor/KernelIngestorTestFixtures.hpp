@@ -80,7 +80,7 @@ public:
         if(graphId.has_value())
         {
             const auto uuid = hipdnn_flatbuffers_sdk::utilities::toFlatbufferUuid(*graphId);
-            auto name = _builder.CreateString("test_graph");
+            const auto name = _builder.CreateString("test_graph");
             hipdnn_flatbuffers_sdk::data_objects::GraphBuilder graphBuilder(_builder);
             graphBuilder.add_name(name);
             graphBuilder.add_id(&uuid);
@@ -89,7 +89,7 @@ public:
         }
         else
         {
-            auto name = _builder.CreateString("test_graph");
+            const auto name = _builder.CreateString("test_graph");
             hipdnn_flatbuffers_sdk::data_objects::GraphBuilder graphBuilder(_builder);
             graphBuilder.add_name(name);
             graphBuilder.add_min_required_engine_api_version(versionPtr);
@@ -1006,7 +1006,7 @@ inline hipdnn_flatbuffers_sdk::flatbuffer_utilities::EngineConfigWrapper makeFlo
                                                    knobName.c_str(),
                                                    KnobValue::FloatValue,
                                                    CreateFloatValue(builder, value).Union()));
-    auto knobsVector = builder.CreateVector(knobSettings);
+    const auto knobsVector = builder.CreateVector(knobSettings);
     builder.Finish(CreateEngineConfig(builder, ENGINE_ID.front(), knobsVector));
 
     return hipdnn_flatbuffers_sdk::flatbuffer_utilities::EngineConfigWrapper(
@@ -1024,7 +1024,7 @@ inline hipdnn_flatbuffers_sdk::flatbuffer_utilities::EngineConfigWrapper makeStr
                                 knobName.c_str(),
                                 KnobValue::StringValue,
                                 CreateStringValueDirect(builder, value.c_str()).Union()));
-    auto knobsVector = builder.CreateVector(knobSettings);
+    const auto knobsVector = builder.CreateVector(knobSettings);
     builder.Finish(CreateEngineConfig(builder, ENGINE_ID.front(), knobsVector));
 
     return hipdnn_flatbuffers_sdk::flatbuffer_utilities::EngineConfigWrapper(
@@ -1098,7 +1098,7 @@ inline hipdnn_flatbuffers_sdk::flatbuffer_utilities::EngineConfigWrapper
         knobSettings.push_back(CreateKnobSettingDirect(
             builder, name.c_str(), KnobValue::IntValue, CreateIntValue(builder, value).Union()));
     }
-    auto knobsVector = builder.CreateVector(knobSettings);
+    const auto knobsVector = builder.CreateVector(knobSettings);
     builder.Finish(CreateEngineConfig(builder, ENGINE_ID.front(), knobsVector));
 
     return hipdnn_flatbuffers_sdk::flatbuffer_utilities::EngineConfigWrapper(
@@ -1210,7 +1210,7 @@ inline KernelDescriptor withLaunches(KernelDescriptor kernel, const std::set<std
     for(const auto& launch : launches)
     {
         auto symbol = kernel.name;
-        symbol += "/";
+        symbol += '/';
         symbol += launch;
         kernel.sources.emplace(launch,
                                makeKpackSource("kpack/test.kpack", symbol, launch + "_kernel"));

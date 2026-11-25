@@ -1672,7 +1672,7 @@ private:
         {
             const auto& name = field.first;
             const auto value = field.second;
-            auto existing
+            const auto existing
                 = std::find_if(exact->knobs.begin(), exact->knobs.end(), [&](const auto& setting) {
                       return setting->knob_id == name;
                   });

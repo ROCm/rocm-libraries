@@ -68,7 +68,7 @@ public:
         std::vector<flatbuffers::Offset<fb::FeatureBucket>> bucketOffsets;
         for(const auto& bucket : _buckets)
         {
-            auto boundaries = builder.CreateVector(bucket.boundaries);
+            const auto boundaries = builder.CreateVector(bucket.boundaries);
             bucketOffsets.push_back(
                 fb::CreateFeatureBucket(builder, bucket.featureIdx, boundaries));
         }
@@ -76,7 +76,7 @@ public:
         std::vector<flatbuffers::Offset<fb::TableEntry>> entryOffsets;
         for(const auto& entry : _entries)
         {
-            auto bucketKey = builder.CreateVector(entry.bucketKey);
+            const auto bucketKey = builder.CreateVector(entry.bucketKey);
             entryOffsets.push_back(fb::CreateTableEntry(builder, bucketKey, entry.score));
         }
 
@@ -87,12 +87,12 @@ public:
             archOffsets.push_back(builder.CreateString(arch));
         }
 
-        auto hashOffset = builder.CreateString(_featuresHash);
-        auto bucketsVec = builder.CreateVector(bucketOffsets);
-        auto entriesVec = builder.CreateVector(entryOffsets);
-        auto archesVec = builder.CreateVector(archOffsets);
+        const auto hashOffset = builder.CreateString(_featuresHash);
+        const auto bucketsVec = builder.CreateVector(bucketOffsets);
+        const auto entriesVec = builder.CreateVector(entryOffsets);
+        const auto archesVec = builder.CreateVector(archOffsets);
 
-        auto model = fb::CreateTableModel(
+        const auto model = fb::CreateTableModel(
             builder, _numFeatures, hashOffset, bucketsVec, entriesVec, archesVec);
 
         builder.Finish(model, fileIdentifier);
@@ -189,14 +189,14 @@ TEST_F(TestTableAdapter, FeaturesHashMismatch)
                       .addEntry({0}, 1.0)
                       .build();
 
-    auto adapter = TableAdapter::loadFromBuffer(buffer.data(), buffer.size(), TEST_HASH);
+    const auto adapter = TableAdapter::loadFromBuffer(buffer.data(), buffer.size(), TEST_HASH);
     EXPECT_EQ(adapter, nullptr);
 }
 
 /// RFC 0019 §12: a features_hash mismatch is an error, not a warning, as in TreeDataAdapter.
 TEST_F(TestTableAdapter, TheFeaturesHashCheckReportsAnError)
 {
-    auto recorder
+    const auto recorder
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
 
     auto buffer = TableModelBuilder()
@@ -347,7 +347,7 @@ TEST_F(TestTableAdapter, AModelWhoseTableCannotBeIndexedIsRefused)
     for(auto& testCase : cases)
     {
         SCOPED_TRACE(testCase.name);
-        auto recorder
+        const auto recorder
             = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
         auto buffer = testCase.builder.build();
         EXPECT_EQ(TableAdapter::loadFromBuffer(buffer.data(), buffer.size(), TEST_HASH), nullptr);
@@ -358,14 +358,14 @@ TEST_F(TestTableAdapter, AModelWhoseTableCannotBeIndexedIsRefused)
 
 TEST_F(TestTableAdapter, LoadFromBufferNullBuffer)
 {
-    auto adapter = TableAdapter::loadFromBuffer(nullptr, 100, TEST_HASH);
+    const auto adapter = TableAdapter::loadFromBuffer(nullptr, 100, TEST_HASH);
     EXPECT_EQ(adapter, nullptr);
 }
 
 TEST_F(TestTableAdapter, LoadFromBufferTooSmall)
 {
     const std::array<uint8_t, 3> buffer = {0, 0, 0};
-    auto adapter = TableAdapter::loadFromBuffer(buffer.data(), buffer.size(), TEST_HASH);
+    const auto adapter = TableAdapter::loadFromBuffer(buffer.data(), buffer.size(), TEST_HASH);
     EXPECT_EQ(adapter, nullptr);
 }
 

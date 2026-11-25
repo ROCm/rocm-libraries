@@ -212,14 +212,14 @@ TEST(TestCudnnShimGraphNodes, ReductionWithOutputDimsOnlyValidates)
 {
     fe::graph::Graph graph;
 
-    auto a = graph.tensor(fe::graph::Tensor_attributes{}
-                              .set_dim({8, 8, 8, 8})
-                              .set_stride({512, 1, 64, 8})
-                              .set_data_type(fe::DataType_t::FLOAT));
-    auto c = graph.reduction(a,
-                             fe::graph::Reduction_attributes{}
-                                 .set_mode(fe::ReductionMode_t::MAX)
-                                 .set_compute_data_type(fe::DataType_t::FLOAT));
+    const auto a = graph.tensor(fe::graph::Tensor_attributes{}
+                                    .set_dim({8, 8, 8, 8})
+                                    .set_stride({512, 1, 64, 8})
+                                    .set_data_type(fe::DataType_t::FLOAT));
+    const auto c = graph.reduction(a,
+                                   fe::graph::Reduction_attributes{}
+                                       .set_mode(fe::ReductionMode_t::MAX)
+                                       .set_compute_data_type(fe::DataType_t::FLOAT));
     ASSERT_NE(c, nullptr);
     c->set_output(true).set_data_type(fe::DataType_t::FLOAT).set_dim({1, 1, 1, 1});
 
@@ -235,11 +235,11 @@ TEST(TestCudnnShimGraphNodes, PointwiseIdentityWithTwoInputsValidates)
     fe::graph::Graph graph;
     graph.set_io_data_type(fe::DataType_t::FLOAT).set_compute_data_type(fe::DataType_t::FLOAT);
 
-    auto a = graph.tensor(fe::graph::Tensor_attributes{}
-                              .set_name("a")
-                              .set_dim({1, 4, 4, 4})
-                              .set_stride({64, 16, 4, 1}));
-    auto y = graph.pointwise(
+    const auto a = graph.tensor(fe::graph::Tensor_attributes{}
+                                    .set_name("a")
+                                    .set_dim({1, 4, 4, 4})
+                                    .set_stride({64, 16, 4, 1}));
+    const auto y = graph.pointwise(
         a, a, fe::graph::Pointwise_attributes{}.set_mode(fe::PointwiseMode_t::IDENTITY));
     ASSERT_NE(y, nullptr);
     y->set_output(true);
@@ -488,10 +488,10 @@ TEST(TestCudnnShimGraphNodes, BlockScaleDequantizeValidGraphValidates)
     fe::graph::Graph graph;
     setFloatGraphTypes(graph);
 
-    auto x = hipdnn_shim_test::makeTensor(graph, {2, 64, 32, 32}, {65536, 1024, 32, 1}, 1);
-    auto scale = hipdnn_shim_test::makeTensor(graph, {2, 64, 32, 1}, {2048, 32, 1, 1}, 2);
+    const auto x = hipdnn_shim_test::makeTensor(graph, {2, 64, 32, 32}, {65536, 1024, 32, 1}, 1);
+    const auto scale = hipdnn_shim_test::makeTensor(graph, {2, 64, 32, 1}, {2048, 32, 1, 1}, 2);
 
-    auto y = graph.block_scale_dequantize(
+    const auto y = graph.block_scale_dequantize(
         x,
         scale,
         fe::graph::Block_scale_dequantize_attributes{}.set_block_size(std::vector<int32_t>{32}));

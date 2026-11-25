@@ -44,7 +44,7 @@ public:
     {
         const std::lock_guard<std::mutex> lock(_mutex);
 
-        auto it = _index.find(key);
+        const auto it = _index.find(key);
         if(it == _index.end())
         {
             return std::nullopt;
@@ -63,7 +63,7 @@ public:
     {
         const std::lock_guard<std::mutex> lock(_mutex);
 
-        auto it = _index.find(key);
+        const auto it = _index.find(key);
         if(it == _index.end())
         {
             return std::nullopt;
@@ -77,7 +77,7 @@ public:
     {
         const std::lock_guard<std::mutex> lock(_mutex);
 
-        auto it = _index.find(key);
+        const auto it = _index.find(key);
         if(it != _index.end())
         {
             it->second->second = std::move(value);
@@ -102,7 +102,7 @@ public:
     {
         const std::lock_guard<std::mutex> lock(_mutex);
 
-        if(auto it = _index.find(key); it != _index.end())
+        if(const auto it = _index.find(key); it != _index.end())
         {
             _order.splice(_order.begin(), _order, it->second);
             return false;

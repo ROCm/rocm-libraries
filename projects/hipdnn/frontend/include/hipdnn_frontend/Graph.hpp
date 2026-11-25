@@ -7034,7 +7034,7 @@ public:
         nameInputIfUnset(k, attributes.get_name(), "::K");
         nameInputIfUnset(v, attributes.get_name(), "::V");
 
-        auto o = outputTensor(attributes.get_name() + "::O");
+        const auto o = outputTensor(attributes.get_name() + "::O");
         std::array<std::shared_ptr<TensorAttributes>, 2> ret = {o, nullptr};
 
         attributes.set_q(std::move(q));
@@ -7102,9 +7102,9 @@ public:
         nameInputIfUnset(v, attributes.get_name(), "::V");
         nameInputIfUnset(dO, attributes.get_name(), "::dO");
 
-        auto dq = outputTensor(attributes.get_name() + "::dQ");
-        auto dk = outputTensor(attributes.get_name() + "::dK");
-        auto dv = outputTensor(attributes.get_name() + "::dV");
+        const auto dq = outputTensor(attributes.get_name() + "::dQ");
+        const auto dk = outputTensor(attributes.get_name() + "::dK");
+        const auto dv = outputTensor(attributes.get_name() + "::dV");
 
         attributes.set_q(std::move(q));
         attributes.set_k(std::move(k));

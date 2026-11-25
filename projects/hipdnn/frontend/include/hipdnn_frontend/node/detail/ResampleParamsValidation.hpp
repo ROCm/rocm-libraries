@@ -26,12 +26,18 @@ inline Error validateResampleParam(const std::string& nodeName,
         return {};
     }
 
-    HIPDNN_RETURN_IF_NE(
-        values.size(),
-        spatialRank,
-        ErrorCode::INVALID_VALUE,
-        nodeName + ": " + paramName + " parameter count (" + std::to_string(values.size())
-            + ") must match spatial dimension count (" + std::to_string(spatialRank) + ")");
+    if(values.size() != spatialRank)
+    {
+        std::string message = nodeName;
+        message += ": ";
+        message += paramName;
+        message += " parameter count (";
+        message += std::to_string(values.size());
+        message += ") must match spatial dimension count (";
+        message += std::to_string(spatialRank);
+        message += ')';
+        return {ErrorCode::INVALID_VALUE, std::move(message)};
+    }
 
     for(size_t i = 0; i < values.size(); ++i)
     {

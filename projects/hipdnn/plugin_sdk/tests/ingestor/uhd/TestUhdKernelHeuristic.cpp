@@ -578,7 +578,7 @@ TEST(TestIngestorUhdKernelHeuristic, AnArtifactDeployedAfterAMissIsPickedUp)
 {
     // RFC 0019 §5: an artifact not deployed yet is not cached, so a model being deployed
     // recovers.
-    auto recorder
+    const auto recorder
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
     const hipdnn_test_sdk::utilities::ScopedDirectory dir(
         uniqueDirectory("uhd_kernel_heuristic_late_deploy"));
@@ -619,7 +619,7 @@ static std::string corruptedHash(std::string hash)
 /// restart.
 TEST(TestIngestorUhdKernelHeuristic, ABrokenModelIsReloadedOnlyOnceItsArtifactChanges)
 {
-    auto recorder
+    const auto recorder
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
     const hipdnn_test_sdk::utilities::ScopedDirectory dir(
         uniqueDirectory("uhd_kernel_heuristic_broken_cached"));
@@ -1447,7 +1447,7 @@ TEST(TestIngestorUhdKernelHeuristic, ANegativeThroughputIsReportedAsAnErrorNotSw
 {
     // RFC 0019 §12: a discarded score must be visible. ERROR, not WARN: the number is wrong,
     // not merely out of distribution (§8.3).
-    auto recorder
+    const auto recorder
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
 
     const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("uhd_negative_reported"));
@@ -1478,7 +1478,7 @@ TEST(TestIngestorUhdKernelHeuristic, ANegativeThroughputIsReportedAsAnErrorNotSw
 TEST(TestIngestorUhdKernelHeuristic, APartiallyAffectedRankingSaysTheModelStillDecidedTheRest)
 {
     // One candidate out of range leaves a ranking that is still mostly the model's.
-    auto recorder
+    const auto recorder
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
 
     const hipdnn_test_sdk::utilities::ScopedDirectory dir(
@@ -1536,7 +1536,7 @@ TEST(TestIngestorUhdKernelHeuristic, PerArchModelsRankWithoutADefaultEntry)
 TEST(TestIngestorUhdKernelHeuristic, AnArchNamedModelDoesNotRankAnArchitectureItDoesNotName)
 {
     // §8.3: exact, then `default`, then unavailable. `{"gfx950": X}` does not make X universal.
-    auto recorder
+    const auto recorder
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
 
     const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("uhd_wrong_arch_only"));
@@ -1679,7 +1679,7 @@ TEST_P(TestIngestorUhdProvenance, TheRuntimeReportsWhichOfTheThreeDecided)
     }
     const MatchContext context{graph, 0, properties};
 
-    auto recorder
+    const auto recorder
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
     const auto ranked = heuristic->rankScored(catalogAgainstPriority(2048), context);
 
@@ -1806,7 +1806,7 @@ std::string provenanceOfRanking(
     IEngine<testing::StubHandle, testing::StubSettings, testing::StubContext>& engine,
     uint8_t graphTag)
 {
-    auto recorder
+    const auto recorder
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
 
     const testing::StubHandle handle;
@@ -1858,7 +1858,7 @@ TEST(TestIngestorUhdKernelHeuristic, ABareReferenceSignatureStillSatisfiesTheKno
     const auto properties = gfx942();
     const MatchContext context{graph, 0, properties};
 
-    auto recorder
+    const auto recorder
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
     const auto ranked = heuristic->rankScored(catalogAgainstPriority(2048), context);
 
@@ -2074,7 +2074,7 @@ TEST(TestIngestorUhdKernelHeuristic, AFailedExactModelDoesNotUseDefault)
 /// (default, time), never (gfx942, tflops), and no metric borrows another's `default`.
 TEST(TestIngestorUhdKernelHeuristic, ArchFallbackStaysInsideTheRequestedMetric)
 {
-    auto recorder
+    const auto recorder
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
 
     const hipdnn_test_sdk::utilities::ScopedDirectory tflopsDir(
@@ -2174,7 +2174,7 @@ TEST(TestIngestorUhdKernelHeuristic, ACalibratedTimeModelReportsAscendingMillise
 /// UHD, else the `tflops` one, else declared order; its calibrated ranking stays empty (§4.4).
 TEST(TestIngestorUhdKernelHeuristic, TheDefaultRankerDecidesForAMetricWithNoRankerOfItsOwn)
 {
-    auto recorder
+    const auto recorder
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
 
     const hipdnn_test_sdk::utilities::ScopedDirectory tflopsDir(
@@ -2364,7 +2364,7 @@ TEST(TestIngestorUhdKernelHeuristicGrouped, ExcludingAGroupIsNotReportedAsATrain
 {
     // An excluded group's -infinity is by design, not an out-of-range prediction; §12 reserves
     // ERROR for a broken model.
-    auto recorder
+    const auto recorder
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
 
     const hipdnn_test_sdk::utilities::ScopedDirectory dir(
@@ -2558,7 +2558,7 @@ TEST(TestIngestorUhdKernelHeuristic, PrunedCandidatesOrderInTheObjectivesDirecti
 
 TEST(TestIngestorUhdKernelHeuristic, TheOutOfRangeReportCountsOnlyFullyScoredCandidates)
 {
-    auto recorder
+    const auto recorder
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
     const hipdnn_test_sdk::utilities::ScopedDirectory dir(
         uniqueDirectory("uhd_early_exit_out_of_range"));

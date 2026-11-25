@@ -92,20 +92,21 @@ TEST_F(TestCustomLibraryAdapter, LoadAndScoreProduct)
 
 TEST_F(TestCustomLibraryAdapter, LoadFailsMissingLibrary)
 {
-    auto adapter = CustomLibraryAdapter::load(
+    const auto adapter = CustomLibraryAdapter::load(
         "/nonexistent/path/to/library.so", "some_symbol", 2, TEST_HASH, libraryHash());
     EXPECT_EQ(adapter, nullptr);
 }
 
 TEST_F(TestCustomLibraryAdapter, LoadFailsMissingSymbol)
 {
-    auto adapter = loadScorer("nonexistent_symbol", 2);
+    const auto adapter = loadScorer("nonexistent_symbol", 2);
     EXPECT_EQ(adapter, nullptr);
 }
 
 TEST_F(TestCustomLibraryAdapter, LoadFailsEmptyLibraryPath)
 {
-    auto adapter = CustomLibraryAdapter::load("", "testLinearScorer", 2, TEST_HASH, libraryHash());
+    const auto adapter
+        = CustomLibraryAdapter::load("", "testLinearScorer", 2, TEST_HASH, libraryHash());
     EXPECT_EQ(adapter, nullptr);
 }
 
@@ -119,7 +120,7 @@ TEST_F(TestCustomLibraryAdapter, LoadRefusesALibraryDeclaringNoHash)
 
 TEST_F(TestCustomLibraryAdapter, LoadFailsEmptySymbolName)
 {
-    auto adapter = loadScorer("", 2);
+    const auto adapter = loadScorer("", 2);
     EXPECT_EQ(adapter, nullptr);
 }
 
@@ -134,7 +135,7 @@ TEST_F(TestCustomLibraryAdapter, ScoreThrowsOnFeatureCountMismatch)
 
 TEST_F(TestCustomLibraryAdapter, ScoreBatch)
 {
-    auto adapter = loadScorer("testLinearScorer", 2);
+    const auto adapter = loadScorer("testLinearScorer", 2);
     ASSERT_NE(adapter, nullptr);
 
     const std::vector<std::vector<double>> batch = {{1.0, 2.0}, {3.0, 4.0}, {0.0, 0.0}};

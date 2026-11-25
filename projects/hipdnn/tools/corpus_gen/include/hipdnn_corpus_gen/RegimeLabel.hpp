@@ -54,7 +54,7 @@ inline std::string regimeLabel(const std::vector<RegimeAxis>& axes, const Proble
     {
         if(!label.empty())
         {
-            label += "_";
+            label += '_';
         }
         label += facet.second;
     }

@@ -136,7 +136,7 @@ TEST(TestGraphIdentity, TheContentKeyIsTheSameGraphUnderAnyNameOrId)
 
 TEST(TestGraphIdentity, DifferentGraphsGetDifferentContentKeys)
 {
-    auto other = someGraph();
+    const auto other = someGraph();
     const auto original = stampGraphIdentity(other, "a_graph");
     // Another shape through the same declaration.
     const auto metadata = test::shippedOperation("sdpa_fwd");

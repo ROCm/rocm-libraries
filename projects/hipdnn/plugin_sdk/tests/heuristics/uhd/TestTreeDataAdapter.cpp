@@ -132,7 +132,7 @@ TEST_F(TestTreeDataAdapter, LoadFailsOnHashMismatch)
                       .addTree(makeLeafTree(1.0))
                       .build();
 
-    auto adapter
+    const auto adapter
         = TreeDataAdapter::loadFromBuffer(buffer.data(), buffer.size(), "sha256:different_hash");
 
     EXPECT_EQ(adapter, nullptr);
@@ -189,7 +189,7 @@ TEST_F(TestTreeDataAdapter, LoadFailsOnInvalidBuffer)
 {
     std::vector<uint8_t> garbage = {0x00, 0x01, 0x02, 0x03, 0x04, 0x05};
 
-    auto adapter = TreeDataAdapter::loadFromBuffer(garbage.data(), garbage.size(), TEST_HASH);
+    const auto adapter = TreeDataAdapter::loadFromBuffer(garbage.data(), garbage.size(), TEST_HASH);
 
     EXPECT_EQ(adapter, nullptr);
 }
@@ -198,14 +198,14 @@ TEST_F(TestTreeDataAdapter, LoadFailsOnEmptyBuffer)
 {
     std::vector<uint8_t> empty;
 
-    auto adapter = TreeDataAdapter::loadFromBuffer(empty.data(), 0, TEST_HASH);
+    const auto adapter = TreeDataAdapter::loadFromBuffer(empty.data(), 0, TEST_HASH);
 
     EXPECT_EQ(adapter, nullptr);
 }
 
 TEST_F(TestTreeDataAdapter, LoadFailsOnNullBuffer)
 {
-    auto adapter = TreeDataAdapter::loadFromBuffer(nullptr, 100, TEST_HASH);
+    const auto adapter = TreeDataAdapter::loadFromBuffer(nullptr, 100, TEST_HASH);
 
     EXPECT_EQ(adapter, nullptr);
 }
@@ -214,7 +214,8 @@ TEST_F(TestTreeDataAdapter, LoadFailsOnTooSmallBuffer)
 {
     std::vector<uint8_t> tooSmall = {0x00, 0x00, 0x00, 0x04}; // Just a size prefix
 
-    auto adapter = TreeDataAdapter::loadFromBuffer(tooSmall.data(), tooSmall.size(), TEST_HASH);
+    const auto adapter
+        = TreeDataAdapter::loadFromBuffer(tooSmall.data(), tooSmall.size(), TEST_HASH);
 
     EXPECT_EQ(adapter, nullptr);
 }
@@ -237,7 +238,7 @@ TEST_F(TestTreeDataAdapter, LoadFailsOnWrongFileIdentifier)
     buffer[6] = 'X';
     buffer[7] = 'X';
 
-    auto adapter = TreeDataAdapter::loadFromBuffer(buffer.data(), buffer.size(), TEST_HASH);
+    const auto adapter = TreeDataAdapter::loadFromBuffer(buffer.data(), buffer.size(), TEST_HASH);
 
     EXPECT_EQ(adapter, nullptr);
 }
@@ -538,7 +539,7 @@ TEST_F(TestTreeDataAdapter, BatchScoring)
                       .addTree(makeBinarySplitTree(0, 5.0, 10.0, 20.0))
                       .build();
 
-    auto adapter = TreeDataAdapter::loadFromBuffer(buffer.data(), buffer.size(), TEST_HASH);
+    const auto adapter = TreeDataAdapter::loadFromBuffer(buffer.data(), buffer.size(), TEST_HASH);
     ASSERT_NE(adapter, nullptr);
 
     const std::vector<std::vector<double>> batch = {
@@ -832,7 +833,7 @@ TEST_F(TestTreeDataAdapter, SelfLoopingTreeIsRejectedAtLoad)
     cyclic.defaultLeft = {1, 1};
 
     auto buffer = GbdtModelBuilder().setNumFeatures(1).addTree(cyclic).build();
-    auto adapter = TreeDataAdapter::loadFromBuffer(buffer.data(), buffer.size(), "");
+    const auto adapter = TreeDataAdapter::loadFromBuffer(buffer.data(), buffer.size(), "");
     EXPECT_EQ(adapter, nullptr);
 }
 
@@ -848,7 +849,7 @@ TEST_F(TestTreeDataAdapter, MutuallyRecursiveTreeIsRejectedAtLoad)
     cyclic.defaultLeft = {1, 1};
 
     auto buffer = GbdtModelBuilder().setNumFeatures(1).addTree(cyclic).build();
-    auto adapter = TreeDataAdapter::loadFromBuffer(buffer.data(), buffer.size(), "");
+    const auto adapter = TreeDataAdapter::loadFromBuffer(buffer.data(), buffer.size(), "");
     EXPECT_EQ(adapter, nullptr);
 }
 
@@ -978,7 +979,7 @@ TEST_F(TestTreeDataAdapter, OptionalFlagsPreserveComparisonAndMissingValueBehavi
     double weight = 1.0;
     for(const auto& [defaults, decisions] : modes)
     {
-        auto tree = makeBinarySplitTree(0, 5.0, weight, 2.0 * weight);
+        const auto tree = makeBinarySplitTree(0, 5.0, weight, 2.0 * weight);
         trees.push_back(fb::CreateGbdtTreeDirect(builder,
                                                  &tree.featureIndices,
                                                  &tree.thresholds,
@@ -1034,7 +1035,7 @@ TEST_F(TestTreeDataAdapter, ATreeWhoseParallelArraysDisagreeIsRejected)
     GbdtModelBuilder builder;
     const auto buffer = builder.setNumFeatures(1).addTree(ragged).build();
 
-    auto adapter = TreeDataAdapter::loadFromBuffer(buffer.data(), buffer.size(), "");
+    const auto adapter = TreeDataAdapter::loadFromBuffer(buffer.data(), buffer.size(), "");
     EXPECT_EQ(adapter, nullptr)
         << "a model whose node-parallel arrays have different lengths must be refused "
            "at load, not walked";

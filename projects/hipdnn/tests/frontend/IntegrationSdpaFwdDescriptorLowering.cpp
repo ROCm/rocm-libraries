@@ -492,18 +492,18 @@ TEST_F(IntegrationSdpaFwdDescriptorLowering, SdpaFwdWithStatsRoundTrip)
 // is SdpaFwdWithCustomDropoutRoundTrip.
 TEST_F(IntegrationSdpaFwdDescriptorLowering, SdpaFwdWithOptionalTensorsAndScalars)
 {
-    auto attnMask = std::make_shared<TensorAttributes>();
+    const auto attnMask = std::make_shared<TensorAttributes>();
     attnMask->set_uid(K_SDPA_TENSOR_ATTN_MASK_UID).set_name("ATTN_MASK");
     attnMask->set_data_type(DataType::FLOAT);
     attnMask->set_dim(toVec(K_SDPA_TENSOR_ATTN_MASK_DIMS));
     attnMask->set_stride(toVec(K_SDPA_TENSOR_ATTN_MASK_STRIDES));
 
-    auto seed = std::make_shared<TensorAttributes>();
+    const auto seed = std::make_shared<TensorAttributes>();
     seed->set_uid(K_SDPA_TENSOR_SEED_UID).set_name("SEED").set_data_type(DataType::FLOAT);
     seed->set_dim(toVec(K_SDPA_TENSOR_SCALAR_DIMS));
     seed->set_stride(toVec(K_SDPA_TENSOR_SCALAR_STRIDES));
 
-    auto offset = std::make_shared<TensorAttributes>();
+    const auto offset = std::make_shared<TensorAttributes>();
     offset->set_uid(K_SDPA_TENSOR_OFFSET_UID).set_name("OFFSET").set_data_type(DataType::FLOAT);
     offset->set_dim(toVec(K_SDPA_TENSOR_SCALAR_DIMS));
     offset->set_stride(toVec(K_SDPA_TENSOR_SCALAR_STRIDES));
@@ -595,13 +595,13 @@ TEST_F(IntegrationSdpaFwdDescriptorLowering, SdpaFwdWithOptionalTensorsAndScalar
 // no dropout_probability.
 TEST_F(IntegrationSdpaFwdDescriptorLowering, SdpaFwdWithCustomDropoutRoundTrip)
 {
-    auto dropoutMask = std::make_shared<TensorAttributes>();
+    const auto dropoutMask = std::make_shared<TensorAttributes>();
     dropoutMask->set_uid(K_SDPA_TENSOR_DROPOUT_MASK_UID).set_name("DROPOUT_MASK");
     dropoutMask->set_data_type(DataType::FLOAT);
     dropoutMask->set_dim(toVec(K_SDPA_TENSOR_ATTN_MASK_DIMS));
     dropoutMask->set_stride(toVec(K_SDPA_TENSOR_ATTN_MASK_STRIDES));
 
-    auto dropoutScale = std::make_shared<TensorAttributes>();
+    const auto dropoutScale = std::make_shared<TensorAttributes>();
     dropoutScale->set_uid(K_SDPA_TENSOR_DROPOUT_SCALE_UID).set_name("DROPOUT_SCALE");
     dropoutScale->set_data_type(DataType::FLOAT);
     dropoutScale->set_dim(toVec(K_SDPA_TENSOR_SCALAR_DIMS));

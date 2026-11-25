@@ -714,7 +714,7 @@ TEST(TestIngestorBenchmarkPlan, AWatchdogTimeoutAbortsThePassImmediatelyAndRerun
         return !recorded.empty() && recorded.front().kernelId == id ? 1 : 0;
     };
 
-    auto recorder
+    const auto recorder
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
     const auto first = runComparison();
     const auto firstRecords = candidateRecords(recorder);
@@ -1286,7 +1286,7 @@ TEST(TestIngestorBenchmarkPlan, EqualTimesKeepCandidateOrderPastTheInsertionSort
 /// winner cache keeps only the winner.
 TEST(TestIngestorBenchmarkPlan, EveryTimedCandidateIsLoggedAsAParsableRecord)
 {
-    auto recorder
+    const auto recorder
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
     const BenchmarkTestHandle handle;
     const auto plan = makeDeterministicPlan(
@@ -1331,7 +1331,7 @@ TEST(TestIngestorBenchmarkPlan, ARecordCarriesTheTimesItsSamplesProduced)
 {
     // Identical samples make every statistic equal the sample, so no field can come from
     // the wrong one unnoticed.
-    auto recorder
+    const auto recorder
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
     const BenchmarkTestHandle handle;
     std::vector<TestBenchmarkPlan::Candidate> candidates;
@@ -1353,7 +1353,7 @@ TEST(TestIngestorBenchmarkPlan, EachRecordCarriesItsOwnKernelsTimes)
 {
     // Every kernel times differently, so a record carrying a sibling's statistics, or one
     // set shared by all three, cannot match.
-    auto recorder
+    const auto recorder
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
     const BenchmarkTestHandle handle;
     const auto plan = makeDeterministicPlan(threeCandidates(), handle, {5.0, 1.0, 3.0});
@@ -1382,7 +1382,7 @@ TEST(TestIngestorBenchmarkPlan, ACandidateThatFailedToTimeIsStillLogged)
 {
     // The winner cache omits failed candidates, so this record is the only evidence the
     // pair was tried.
-    auto recorder
+    const auto recorder
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
     const BenchmarkTestHandle handle;
     const auto plan = makeDeterministicPlan(
@@ -1411,7 +1411,7 @@ TEST(TestIngestorBenchmarkPlan, ACandidateThatFailedToTimeIsStillLogged)
 TEST(TestIngestorBenchmarkPlan, NothingIsLoggedWhenLoggingIsOff)
 {
     // Records are per candidate per sweep, so the default path must not build them.
-    auto recorder
+    const auto recorder
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_OFF);
     const BenchmarkTestHandle handle;
     const auto plan = makeDeterministicPlan(threeCandidates(), handle, {5.0, 1.0, 3.0});
@@ -1436,7 +1436,7 @@ std::vector<TestBenchmarkPlan::Candidate> oneCandidateWithFeatures(nlohmann::jso
 
 TEST(TestIngestorBenchmarkPlan, ACandidatesFeatureValuesAppearInItsRecordVerbatim)
 {
-    auto recorder
+    const auto recorder
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
     const BenchmarkTestHandle handle;
     const auto plan = makeDeterministicPlan(
@@ -1470,7 +1470,7 @@ TEST(TestIngestorBenchmarkPlan, ACandidateWithNoFeaturesLogsExactlyTheRecordItAl
 {
     // Asserted as the whole key set: a stray `"features": {}` or an empty `device` would
     // break consumers reading columns by name.
-    auto recorder
+    const auto recorder
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
     const BenchmarkTestHandle handle;
     std::vector<TestBenchmarkPlan::Candidate> candidates;
@@ -1506,7 +1506,7 @@ TEST(TestIngestorBenchmarkPlan, AFailedCandidateStillCarriesItsFeatures)
 {
     // Without features a failed row cannot be placed in feature space and gets dropped,
     // biasing the corpus toward kernels that ran.
-    auto recorder
+    const auto recorder
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
     const BenchmarkTestHandle handle;
     const auto plan = makeDeterministicPlan(
@@ -1570,7 +1570,7 @@ TEST(TestIngestorBenchmarkPlan, BuildPlanGivesEachCandidateItsFeaturesAndTheDevi
     const ScopedDispatchRegistration<StubHandle> dispatch("hipdnn.kernel_ingestor.test.dispatch",
                                                           handler);
 
-    auto recorder
+    const auto recorder
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
 
     const auto manager = makeThreeKernelStubStateManager(BOUND_GRAPH_MATCH_SYMBOL);
@@ -1639,7 +1639,7 @@ TEST(TestIngestorBenchmarkPlan, BuildPlanSpellsItsBenchmarkAndDeviceIdsWhateverT
     const StubWorkspaceHandler handler;
     const ScopedDispatchRegistration<StubHandle> dispatch("hipdnn.kernel_ingestor.test.dispatch",
                                                           handler);
-    auto recorder
+    const auto recorder
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
 
     const auto manager = makeThreeKernelStubStateManager();

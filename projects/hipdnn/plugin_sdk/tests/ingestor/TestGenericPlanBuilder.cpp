@@ -307,7 +307,7 @@ TEST(TestIngestorGenericPlanBuilder, IsApplicableDeclinesWhenTheDeviceResolverTh
 // error.
 TEST(TestIngestorGenericPlanBuilder, IsApplicableDeclinesWhenTheDeviceArchIsUnresolved)
 {
-    auto recorder
+    const auto recorder
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
 
     const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
@@ -1363,7 +1363,7 @@ public:
 /// running.
 TEST(TestIngestorGenericPlanBuilder, FallsBackWhenTheFrontCandidateCannotPrepare)
 {
-    auto recorder
+    const auto recorder
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_WARN);
 
     const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
@@ -2656,7 +2656,7 @@ TEST(TestIngestorGenericPlanBuilder,
 /// facts, written through the same deviceFeatureValues() the extractor binds.
 TEST(TestIngestorGenericPlanBuilderBenchmarkRecord, EveryCandidateRowCarriesTheDeviceFacts)
 {
-    auto recorder
+    const auto recorder
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
     const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
     const ScopedConstantScore constantScore;
@@ -2893,7 +2893,7 @@ TEST(TestIngestorCatalogFeatureParity, TheLiveRankerReadsWhatEnumerationAndTheSw
 {
     // A `sort_kernel_catalog` model is fitted on enumeration pages and sweep rows and scored
     // through the live ranker, so all three must bind every name to the same value.
-    auto recorder
+    const auto recorder
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
     const ScopedSymbols symbols(
         "test.graph", bindEveryTokenShape, "test.kernel", countingFloatKernels);

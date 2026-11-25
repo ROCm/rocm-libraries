@@ -800,7 +800,7 @@ TEST(TestIngestorGenericEngine, AnEvictedRecordStillDecidesBothPlanAndPrediction
         KernelIngestorStateManager<StubHandle>::DEFAULT_CATALOG_CACHE_CAPACITY,
         EngineIdentity{},
         /*winnerCacheCapacity=*/1);
-    auto& manager = *owned;
+    const auto& manager = *owned;
     const StubEngine engine(makeEngineWithKnobs({BLOCK_SIZE}), std::move(owned), resolver);
     StubHandle handle;
     const auto properties = testDeviceProperties();
