@@ -419,13 +419,13 @@ repos:
         pass_filenames: false
 
       # rocKE source-tree gates. Each reads the source checkout (git, the
-      # provider's CTest categories, a configure of the platform), which the
-      # installed test tree does not carry, so their CTest entries exist in the
-      # build tree only; these hooks run them on every change to rocKE. They
-      # import rocke through the platform tests' conftest, hence numpy, and need
-      # pytest 9. numpy is pinned to a release that still supports Python 3.10,
-      # rocKE's oldest. -B and no:cacheprovider keep bytecode and .pytest_cache
-      # out of the tree.
+      # provider's CTest categories, a configure of the platform, or a C++
+      # source as text), which the installed test tree does not carry, so their
+      # CTest entries exist in the build tree only; these hooks run them on a
+      # pull request. They import rocke through the platform tests' conftest,
+      # hence numpy, and need pytest 9. numpy is pinned to a release that still
+      # supports Python 3.10, rocKE's oldest. -B and no:cacheprovider keep
+      # bytecode and .pytest_cache out of the tree.
       # Every test file runs in a CI-run CTest entry or is listed, with its
       # reason, in rocke.tests.pending_lanes (rocke_pending_lanes_check). Needs
       # cmake, ctest and a C++ compiler on PATH. It also reads
@@ -454,6 +454,33 @@ repos:
         language: python
         additional_dependencies: [*rocke_pytest, "numpy==2.2.6"]
         files: ^dnn-providers/hip-kernel-provider/rocke/
+        pass_filenames: false
+
+      # The engines' parity checks need no build. Each fires on what can change
+      # its outcome: the files whose content it compares and the modules it
+      # imports beyond what import rocke loads. A break in import rocke, the
+      # conftest or pytest.ini fails the three hooks above, which run on every
+      # change to rocKE.
+      # data.cpp and arch_specs.json agree on each arch's scalar facts and GEMM
+      # capabilities (rocke_arch_table_engine_parity). assets.py locates both.
+      - id: rocke-arch-table-engine-parity
+        name: rocKE engines' arch tables agree
+        entry: python -B -m pytest -p no:cacheprovider -q dnn-providers/hip-kernel-provider/rocke/platform/tests/core/test_arch_table_engine_parity.py
+        language: python
+        additional_dependencies: [*rocke_pytest, "numpy==2.2.6"]
+        files: ^dnn-providers/hip-kernel-provider/rocke/platform/(tests/core/test_arch_table_engine_parity\.py|cpp/core/arch/data\.cpp|python/rocke/(assets\.py|core/arch/data/arch_specs\.json))$
+        pass_filenames: false
+      # Each GEMM spec dict carries every field of its spec, and the binding
+      # reads exactly the keys it writes (rocke_gemm_spec_dict_binding_parity).
+      # The test imports rocke.instances, whose __init__.py loads most modules
+      # of instances/common; the hook takes that directory whole, so a module
+      # __init__.py starts loading needs no change here.
+      - id: rocke-gemm-spec-dict-binding-parity
+        name: rocKE GEMM spec dicts match the engine binding
+        entry: python -B -m pytest -p no:cacheprovider -q dnn-providers/hip-kernel-provider/rocke/platform/tests/core/test_gemm_spec_dict_binding_parity.py
+        language: python
+        additional_dependencies: [*rocke_pytest, "numpy==2.2.6"]
+        files: ^dnn-providers/hip-kernel-provider/rocke/platform/(tests/core/test_gemm_spec_dict_binding_parity\.py|cpp/bindings/rocke_engine\.cpp|python/rocke/(assets\.py|core/backend\.py|instances/(__init__|common/[^/]+)\.py))$
         pass_filenames: false
 
   - repo: https://github.com/cheshirekow/cmake-format-precommit

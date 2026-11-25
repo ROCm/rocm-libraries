@@ -47,6 +47,9 @@ if(BUILD_TESTING)
         TIMEOUT ${ROCKE_TEST_TIMEOUT_TOOLCHAIN}
         WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/..")
 
+    # The next two entries are kept in step with the
+    # rocke-arch-table-engine-parity and rocke-gemm-spec-dict-binding-parity
+    # hooks in the root .pre-commit-config.yaml.
     # The arch-table parity test reads cpp/core/arch/data.cpp, which the
     # installed test tree does not carry, so CMakeLists.txt keeps it out of the
     # installed pytest cohort; run it here, from the source tree, instead.
