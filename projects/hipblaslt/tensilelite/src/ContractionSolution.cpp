@@ -60,6 +60,7 @@
 #include <random>
 #include <set>
 #include <stdexcept>
+#include <string_view>
 #include <tuple>
 #include <unordered_map>
 
@@ -6634,29 +6635,23 @@ namespace TensileLite
         }
 
         // HIPBLASLT_FORCE_USO_ON: names, once per kernel and clause, each refusal it bypasses.
-        // A thread-local set of (solution, clause, site) keeps repeat launches off the lock.
-        void reportForcedUniformSummationOrder(void const*        solution,
-                                               std::string const& kernel,
+        // token may be null (an untagged refusal).
+        void reportForcedUniformSummationOrder(std::string const& kernel,
                                                char const*        token,
-                                               char const*        where)
+                                               std::string_view   where)
         {
-            if(token == nullptr)
-                token = "Untagged";
-            using Key = std::tuple<void const*, char const*, char const*>;
-            thread_local std::set<Key> seen;
-            const Key                  key{solution, token, where};
-            if(seen.find(key) != seen.end())
-                return;
-            seen.insert(key);
+            const std::string_view tag = token != nullptr ? token : "Untagged";
+            std::string            key;
+            key.append(where).append(1, '|').append(tag).append(1, '|').append(kernel);
 
             static std::mutex            mutex;
             static std::set<std::string> reported;
             std::lock_guard<std::mutex>  lock(mutex);
-            if(!reported.insert(std::string(where) + '|' + token + '|' + kernel).second)
+            if(!reported.insert(std::move(key)).second)
                 return;
             std::cerr << "hipBLASLt warning: HIPBLASLT_FORCE_USO_ON bypassed the uniform "
                          "summation order "
-                      << where << " refusal " << token << " for kernel " << kernel << std::endl;
+                      << where << " refusal " << tag << " for kernel " << kernel << std::endl;
         }
 
         // Statically-knowable reasons a StreamK launch cannot be shown
@@ -6853,7 +6848,7 @@ namespace TensileLite
 
         if(forced)
         {
-            reportForcedUniformSummationOrder(this, kernelName, obstacleToken, "selection");
+            reportForcedUniformSummationOrder(kernelName, obstacleToken, "selection");
             return true;
         }
 
@@ -7148,7 +7143,7 @@ namespace TensileLite
                                                                        &obstacleToken);
         if(!reason.empty() && Debug::Instance().forceUniformSummationOrderOn())
         {
-            reportForcedUniformSummationOrder(this, kernelName, obstacleToken, "launch");
+            reportForcedUniformSummationOrder(kernelName, obstacleToken, "launch");
             return;
         }
         if(!reason.empty())
