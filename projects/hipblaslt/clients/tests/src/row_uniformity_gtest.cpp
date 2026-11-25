@@ -722,6 +722,33 @@ namespace
             return hipblaslt_ext::getSolutionNameFromAlgo(m_handle, algo);
         }
 
+        // The first runnable algorithm whose solution name starts with prefix,
+        // whether or not the library logic picks it for this problem.
+        bool namedAlgo(const std::string& prefix, hipblasLtMatmulHeuristicResult_t& found)
+        {
+            std::vector<hipblasLtMatmulHeuristicResult_t> enumerated;
+            hipblaslt_ext::getAllAlgos(m_handle,
+                                       hipblaslt_ext::GemmType::HIPBLASLT_GEMM,
+                                       m_problem.transA,
+                                       HIPBLAS_OP_N,
+                                       m_problem.abType,
+                                       m_problem.abType,
+                                       m_problem.dType,
+                                       m_problem.dType,
+                                       HIPBLAS_COMPUTE_32F,
+                                       enumerated);
+            std::string unused;
+            for(auto& candidate : enumerated)
+            {
+                if(solutionName(candidate).rfind(prefix, 0) == 0 && runnable(candidate, unused))
+                {
+                    found = candidate;
+                    return true;
+                }
+            }
+            return false;
+        }
+
         // Runs the GEMM with the mode either off or on and, on success, leaves
         // the result in the host copy inspected by firstNonUniformRowOfLastRun.
         hipblasStatus_t run(const hipblasLtMatmulHeuristicResult_t& candidate, bool uniformMode)
@@ -1275,6 +1302,28 @@ namespace
                     << " and smCountTarget=" << problem.smCountTarget;
             }
         }
+
+        // Runs the gfx950 kernel whose name starts with gfx950Kernel with the mode
+        // on, for a problem the library logic leaves to another kernel, and checks
+        // that its rows are uniform. Skipped where the kernel does not exist.
+        void checkNamedAlgoUniform(const Problem& problem, const char* gfx950Kernel)
+        {
+            if(gpuArchName().rfind("gfx950", 0) != 0)
+                GTEST_SKIP() << gfx950Kernel << " is a gfx950 kernel";
+            RowUniformityHarness harness(problem);
+            prepare(harness);
+            if(IsSkipped() || HasFailure())
+                return;
+
+            hipblasLtMatmulHeuristicResult_t candidate{};
+            ASSERT_TRUE(harness.namedAlgo(gfx950Kernel, candidate))
+                << "No runnable " << gfx950Kernel << " algorithm for this problem";
+            ASSERT_EQ(harness.run(candidate, /*uniformMode=*/true), HIPBLAS_STATUS_SUCCESS);
+            const int64_t badRow = harness.firstNonUniformRowOfLastRun();
+            EXPECT_EQ(badRow, -1) << "Row " << badRow << " of D differs bitwise from row 0 for "
+                                  << harness.solutionName(candidate)
+                                  << " with uniform summation order enabled";
+        }
     };
 
     // Uniform summation order keeps a mapping-1 StaggerU on Hybrid StreamK
@@ -1342,20 +1391,21 @@ namespace
     // m odd: the last YTILE = 2 row tile is partial. n * K is past the 160 KB
     // LDS stage, so the last token's tail comes from global memory. A bias of
     // D's type with alpha 0.7: alpha * dot rounds before the bias is added.
+    // The library logic leaves this shape to Tensile, so the test names the kernel.
     TEST_F(RowUniformity_pre_checkin, SkinnyTnF8F16BiasTail_1031x4x41984)
     {
-        checkDefaultPicksUniform({1031,
-                                  4,
-                                  41984,
-                                  HIP_R_8F_E4M3,
-                                  0,
-                                  true,
-                                  HIPBLAS_OP_T,
-                                  HIP_R_16F,
-                                  HIP_R_16F,
-                                  0.7f,
-                                  true},
-                                 "wvSplitKQ_vllm_f8_f16_tn_n4_");
+        checkNamedAlgoUniform({1031,
+                               4,
+                               41984,
+                               HIP_R_8F_E4M3,
+                               0,
+                               true,
+                               HIPBLAS_OP_T,
+                               HIP_R_16F,
+                               HIP_R_16F,
+                               0.7f,
+                               true},
+                              "wvSplitKQ_vllm_f8_f16_tn_n4_");
     }
 
     // OCP FP6 code of halves / 2. Every |halves| <= 8 is exact in both E2M3 and E3M2.

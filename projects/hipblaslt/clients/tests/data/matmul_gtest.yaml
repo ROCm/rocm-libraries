@@ -144,11 +144,12 @@ Tests:
 # Skinny FP8 TN GEMMs with scalar A and B scales that library logic routes to the
 # vLLM wvSplitKQ custom kernels on gfx950: padded leading dimensions they must honor
 # (ldb 2052 and 2056 also keep the tokens off 16-byte boundaries), m not a multiple
-# of the wave tile, n * K past the LDS stage (4 x 41984; 4 x 41008 also ends the
-# staged tokens part way through a wave), K not a multiple of the 1024 bytes a wave
-# loads per step with weight rows off any boundary (lda 1043 and 41011), a scale on
-# only A or only B, n = 5, and general-batched (pointer-array) problems they cannot
-# run, which must fall back to other kernels.
+# of the wave tile, K not a multiple of the 1024 bytes a wave loads per step with
+# weight rows off any boundary (lda 1043), a scale on only A or only B, n = 5, and
+# general-batched (pointer-array) problems they cannot run, which must fall back to
+# other kernels. The logic leaves n * K past the LDS stage (4 x 41984; 4 x 41008 with
+# lda 41011) to Tensile kernels; the TensileLite tests custom_vllm_wvsplitkq_f8_*
+# run the wvSplitKQ kernels there.
 - name: matmul_skinny_f8_tn_dst_bf16
   category: pre_checkin
   function:

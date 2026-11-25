@@ -190,19 +190,30 @@ too, since hipBLASLt accepts a problem without scales in any scale mode, and
 the kernels read a null scale as 1. Problems with an FP32 bias, an activation
 or a scale-alpha vector, scale vectors, or `K % 16 != 0` fall through to the
 libraries they reach today, and the solutions refuse a user split-K or WGM
-override, since the kernels take neither. With or without a bias, the rows
-cover every `n` up to 4, as vLLM does, from m = 9 and K = 1024, where the 64
-lanes of a wave first get 16 bytes of K each; vLLM itself sends any such GEMM
-with M and K multiples of 16 to the kernel.
+override, since the kernels take neither.
+
+The rows were measured on MI355X over decode shapes of current models, a
+power-of-two sweep, and random shapes, each with the weights in cache and
+streamed from HBM, with and without a bias. For each `n` and each cell of
+
+- m: 9 to 1536, 3072, 6144, 12288, 24576, 49152, 98304, and above;
+- K: 1024 to 1280, 2560, 5120, 10240, 20480, and 36864;
+
+a file keeps the kernel where it is at least 3% faster than hipBLASLt's pick
+over the cell's shapes, all of each pick's kernels counted. A bias cell also
+needs its plain cell. Below K = 1024 the 64 lanes of a wave do not each get 16
+bytes of K, and above K = 36864, the largest K measured, and in cells without
+measurements, hipBLASLt keeps its own kernels. No row reaches `n * K` past the
+LDS stage, where the kernels read the last tokens from global memory.
 
 The FP8 Bias logic with BF16 D, which also accepts GEMMs without a bias, tunes
-24 shapes with `n` of 1, 2 or 4 inside the BF16 rows, among them the
-Llama-3.1-70B TP8 decode GEMMs, in both the MI350 file
+24 skinny shapes with `n` of 1, 2 or 4, among them the Llama-3.1-70B decode
+GEMMs, in both the MI350 file
 (`gfx950/gfx950/Equality/gfx950_Cijk_Alik_Bljk_F8BS_BH_BiasSB_HAS_SAB_SAV_UserArgs.yaml`)
 and MI355X's (`gfx950/gfx950_id75a3/Equality/`, same name). MI355X searches its
 own tuned logic first, so there those shapes keep their tuned kernels, with or
 without a bias. On MI350 the files above come first, so these kernels take
-them over.
+over the 20 of them inside the BF16 rows.
 
 ## Tensile metadata
 
