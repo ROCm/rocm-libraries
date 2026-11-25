@@ -1,0 +1,50 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+# gfx1250 static StreamK spatial clusters with PrefetchAcrossPersistent, BF16.
+# Every required cluster shape, PGR 1 and 2, both PAP handoff placements
+# (SIA0 early, SIA4 split release/acquire), with and without a tail loop
+# (ASEM 1 vs DepthU), plus HalfPLR's out-of-line PAP block.
+GlobalParameters:
+  SyncsPerBenchmark: 0
+  MinimumRequiredVersion: 5.0.0
+  NumElementsToValidate: 0
+  Device: 0
+
+BenchmarkProblems:
+  - - {OperationType: GEMM, DataType: b, DestDataType: s, ComputeDataType: s,
+      HighPrecisionAccumulate: true, TransposeA: true, TransposeB: false, UseBeta: true, Batched: true}
+    - BenchmarkCommonParameters: &defaults
+        - KernelLanguage: [Assembly]
+        - MatrixInstruction: [[16, 16, 32, 1, 1, 1, 1, 2, 2]]
+        - DepthU: [64]
+        - TileProcessingStrategy: [StreamK]
+        - WorkAssignment: [StaticGrid]
+        - TDMInst: [3]
+        - WavefrontSize: [32]
+        - WorkGroupMapping: [1]
+        - GlobalSplitU: [0]
+        - StaggerU: [0]
+        - PrefetchLocalRead: [1]
+        - 1LDSBuffer: [0]
+        - ExpandPointerSwap: [false]
+        - StoreRemapVectorWidth: [0]
+        - StreamKFixupTreeReduction: [1]
+        - PrefetchAcrossPersistent: [1]
+      ForkParameters:
+        - ClusterDim: [[2, 2], [4, 4], [4, 1], [1, 4]]
+        - PrefetchGlobalRead: [1, 2]
+        - ScheduleIterAlg: [0, 4]
+        - AssertSummationElementMultiple: [1, 64]
+      BenchmarkFinalParameters: &sizes
+        - ProblemSizes:
+          - Exact: [33, 65, 2, 1031]
+    - BenchmarkCommonParameters: *defaults
+      ForkParameters:
+        - MatrixInstruction: [[16, 16, 32, 1, 1, 2, 2, 2, 2]]
+        - ClusterDim: [[2, 2], [4, 4], [4, 1], [1, 4]]
+        - PrefetchGlobalRead: [2]
+        - ScheduleIterAlg: [4]
+        - HalfPLR: [3]
+        - SuppressNoLoadLoop: [true]
+        - AssertSummationElementMultiple: [1, 64]
+      BenchmarkFinalParameters: *sizes

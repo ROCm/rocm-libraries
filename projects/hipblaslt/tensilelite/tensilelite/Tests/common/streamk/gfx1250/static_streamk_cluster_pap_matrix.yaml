@@ -1,0 +1,56 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+
+# Spatial StreamK clusters with PrefetchAcrossPersistent across the required
+# cluster shapes, both PGR depths and both PAP handoff placements (SIA0 hands
+# off before the next-slice mapping, SIA4 splits release and acquire around
+# it). Sizes cover partial M/N tiles, K tails, one-iteration slices, empty K,
+# batches and many tiles; the two schedules give small and large grids.
+TestParameters:
+  streamk_schedules: [{grid: 48, reduction: tree}, {grid: 128, reduction: tree}]
+  marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941,
+    skip-gfx942, skip-gfx950, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030,
+    skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201, skip-gfx1250-strict]
+GlobalParameters: {Architecture: gfx1250, SyncsPerBenchmark: 0, NumElementsToValidate: -1,
+  KernelTime: false, DataInitTypeA: 3, DataInitTypeB: 3, DataInitTypeC: 3, DataInitTypeD: 2,
+  DataInitTypeAlpha: 2, DataInitTypeBeta: 2, ForceGenerateKernel: true, CpuThreads: 8,
+  PrintLevel: 1, NumWarmups: 1, NumBenchmarks: 1, EnqueuesPerSync: 1, PrintSolutionRejectionReason: true,
+  UniformSummationOrder: 0}
+BenchmarkProblems:
+  - - {OperationType: GEMM, DataType: b, DestDataType: s, ComputeDataType: s,
+      HighPrecisionAccumulate: true, TransposeA: true, TransposeB: false, UseBeta: true, Batched: true}
+    - BenchmarkCommonParameters: &defaults
+        - KernelLanguage: [Assembly]
+        - MatrixInstruction: [[16, 16, 32, 1, 1, 1, 1, 2, 2]]
+        - DepthU: [64]
+        - TileProcessingStrategy: [StreamK]
+        - WorkAssignment: [StaticGrid]
+        - TDMInst: [3]
+        - WavefrontSize: [32]
+        - WorkGroupMapping: [1]
+        - GlobalSplitU: [0]
+        - StaggerU: [0]
+        - PrefetchLocalRead: [1]
+        - ForceDisableShadowInit: [false]
+        - 1LDSBuffer: [0]
+        - ExpandPointerSwap: [false]
+        - StoreRemapVectorWidth: [0]
+        - StreamKFixupTreeReduction: [1]
+        - PrefetchAcrossPersistent: [1]
+      ForkParameters:
+        - ClusterDim: [[2, 2], [4, 4], [4, 1], [1, 4]]
+        - PrefetchGlobalRead: [1, 2]
+        - ScheduleIterAlg: [0, 4]
+      BenchmarkFinalParameters: &sizes
+        - ProblemSizes: [{Exact: [33, 65, 2, 1031]}, {Exact: [64, 96, 2, 65]},
+            {Exact: [96, 96, 3, 0]}, {Exact: [1000, 520, 1, 4100]}, {Exact: [256, 256, 2, 8192]}]
+    # HalfPLR moves the PAP issue into an out-of-line block.
+    - BenchmarkCommonParameters: *defaults
+      ForkParameters:
+        - MatrixInstruction: [[16, 16, 32, 1, 1, 2, 2, 2, 2]]
+        - ClusterDim: [[2, 2], [1, 4]]
+        - PrefetchGlobalRead: [2]
+        - ScheduleIterAlg: [4]
+        - HalfPLR: [3]
+        - SuppressNoLoadLoop: [true]
+      BenchmarkFinalParameters: *sizes
