@@ -334,7 +334,8 @@ static hostbuf gather_field_p2p(const fft_params&      src_params,
             // get pointer to this brick in the per-device buffer
             auto& cur_offset = offsets.emplace(brick.device, static_cast<size_t>(0)).first->second;
             brick_ptr        = local_brick->second.data_offset(cur_offset);
-            cur_offset += brick_elems * elem_size;
+            // slots may be larger than their bricks (in-place with unequal in/out sizes)
+            cur_offset += src_params.buffer_bytes_for_brick(io, i);
         }
 
         // rank 0 needs to receive the data
@@ -426,9 +427,14 @@ static hostbuf gather_field(const fft_params&      src_params,
 {
     const bool  is_input = io == fft_io::fft_io_in;
     const auto& bricks   = (is_input ? src_params.ifields : src_params.ofields).front().bricks;
+    const auto  elem_size
+        = var_size<size_t>(src_params.precision, is_input ? src_params.itype : src_params.otype);
 
-    // MPI_Gatherv needs one buffer per rank
-    const bool use_p2p = multiple_devices_on_rank(bricks);
+    // MPI_Gatherv needs one buffer per rank, with no gap between its bricks
+    bool use_p2p = multiple_devices_on_rank(bricks);
+    for(size_t i = 0; !use_p2p && i < bricks.size(); ++i)
+        use_p2p = src_params.buffer_bytes_for_brick(io, i)
+                  > compute_ptrdiff(bricks[i].length(), bricks[i].stride) * elem_size;
 
     // MPI_Gatherv is more efficient
     return use_p2p ? gather_field_p2p(src_params, io, local_bricks, dest_params)
