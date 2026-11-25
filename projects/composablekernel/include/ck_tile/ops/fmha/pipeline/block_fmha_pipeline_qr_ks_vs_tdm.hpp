@@ -3084,6 +3084,9 @@ struct BlockFmhaPipelineQRKSVSTdm
     {
         static_assert(!kHasLogitsSoftCap && !kHasDropout && !Problem::kProgressiveDsLoadK,
                       "qr_tdm fp8: no softcap, dropout or progressive K (codegen emits none)");
+        static_assert(kNWarp == 1,
+                      "qr_tdm fp8: S stays in registers; an S round trip through LDS would alias "
+                      "the next K buffer in the double-KV arena");
         using Layout = typename Policy::template LdsArenaLayout<Problem>;
         auto* smem_ptrq =
             reinterpret_cast<QDataType*>(static_cast<char*>(smem_arena) + Layout::kQOffset);
@@ -3320,19 +3323,6 @@ struct BlockFmhaPipelineQRKSVSTdm
                              make_tuple(number<kN0>{}, number<kK0>{}),
                              {0, 0},
                              Policy::template MakeKRegTileDistribution<Problem>());
-
-        // S tile in LDS
-        auto s_lds = make_tensor_view<address_space_enum::lds>(
-            reinterpret_cast<SaccDataType*>(reinterpret_cast<char*>(smem_ptrk0) +
-                                            Policy::template GetSmemSizeK<Problem>()),
-            Policy::template MakeSLdsBlockDescriptor<Problem>());
-        auto s_write_lds_window = make_tile_window(
-            s_lds, Policy::template MakeSLdsBlockDescriptor<Problem>().get_lengths(), {0, 0});
-        auto s_read_lds_window =
-            make_tile_window(s_lds,
-                             Policy::template MakeSLdsBlockDescriptor<Problem>().get_lengths(),
-                             {0, 0},
-                             Policy::template MakeSRegTileDistribution<Problem>());
 
         // V tile in LDS (sink-aware start)
         auto v_dram_window =
@@ -3619,20 +3609,7 @@ struct BlockFmhaPipelineQRKSVSTdm
             move_tile_window(bias_dram_window, {0, kN0});
 
             // Gemm1
-            auto s_new = [&]() {
-                if constexpr(kNWarp > 1)
-                {
-                    auto s = cast_tile<SMPLComputeDataType>(s_acc); // S{j}
-
-                    store_tile(s_write_lds_window, s);
-                    block_sync_lds();
-                    return load_tile(s_read_lds_window);
-                }
-                else
-                {
-                    return cast_tile<SMPLComputeDataType>(s_acc); // S{j}
-                }
-            }();
+            auto s_new = cast_tile<SMPLComputeDataType>(s_acc); // S{j}
 
             auto m_local = [&]() { // m_local = rowmax(S{j})
                 if constexpr(kFoldKDescale)
