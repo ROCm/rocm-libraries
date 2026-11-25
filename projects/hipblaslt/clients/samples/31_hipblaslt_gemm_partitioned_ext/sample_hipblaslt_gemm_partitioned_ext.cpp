@@ -211,6 +211,16 @@ int main(int argc, char** argv)
         if(batch == hipErrorInvalidValue)
         {
             static_cast<void>(hipGetLastError());
+            // A graph captured from here would have no join.
+            hipStreamCaptureStatus capture = hipStreamCaptureStatusNone;
+            CHECK_HIP_ERROR(hipStreamIsCapturing(streams[j], &capture));
+            if(capture != hipStreamCaptureStatusNone)
+            {
+                std::cerr << "hipStreamBatchMemOp is refused and stream capture does not record "
+                             "the join without it"
+                          << std::endl;
+                return EXIT_FAILURE;
+            }
             CHECK_HIP_ERROR(hipStreamWriteValue64(streams[j], done[j], launch, 0));
             for(int i = 0; i < partitions; i++)
                 if(i != j)
