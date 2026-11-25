@@ -494,7 +494,8 @@ class GtestRun:
 class FinishedRun(NamedTuple):
     process: GtestRun
     exit_code: int
-    results: Optional[dict]  # parse_gtest_xml()'s result; None if the process wrote no XML
+    # parse_gtest_xml()'s result; None if the process wrote no XML.
+    results: Optional[dict]
 
 
 def parse_test_list(text):

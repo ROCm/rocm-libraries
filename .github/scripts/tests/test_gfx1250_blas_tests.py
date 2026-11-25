@@ -61,7 +61,10 @@ class FilterTest(unittest.TestCase):
         for group in blas.LARGE_MEMORY_GROUPS:
             positive = group.partition("-")[0]
             self.assertTrue(
-                any(positive.startswith(p.rstrip("*")) for p in blas.LARGE_MEMORY_TESTS), group
+                any(
+                    positive.startswith(p.rstrip("*")) for p in blas.LARGE_MEMORY_TESTS
+                ),
+                group,
             )
 
     def test_parse_test_list(self):
@@ -209,7 +212,9 @@ class CompilerCheckTest(unittest.TestCase):
             target.mkdir(parents=True)
             (target / "therock_manifest.json").write_text(json.dumps(manifest))
             with mock.patch("sys.stdout"):
-                self.assertEqual(blas.sdk_compiler_and_therock_commits(tmp), ("a" * 40, "b" * 40))
+                self.assertEqual(
+                    blas.sdk_compiler_and_therock_commits(tmp), ("a" * 40, "b" * 40)
+                )
 
     def test_therock_submodule_pin(self):
         # A TheRock-like repo whose compiler/amd-llvm is a gitlink to a known commit.
