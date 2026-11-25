@@ -744,9 +744,9 @@ ROCSOLVER_KERNEL void __launch_bounds__(STEDC_BDIM)
         I p1 = nps[i];
         I pn = nps[next];
         I pp = nps[prev];
-        I z = zz[map[i]];
-        I zn = zz[map[next]];
-        I zp = zz[map[prev]];
+        S z = zz[map[i]];
+        S zn = zz[map[next]];
+        S zp = zz[map[prev]];
 
         S exn = std::abs(z * zn) / (z * z + zn * zn);
         S exp = std::abs(z * zp) / (z * z + zp * zp);
