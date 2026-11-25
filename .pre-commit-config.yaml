@@ -439,13 +439,25 @@ repos:
         additional_dependencies: [*rocke_pytest, "numpy==2.2.6", "PyYAML==6.0.4"]
         files: ^dnn-providers/hip-kernel-provider/(rocke/|ROCKE_ENGINE_test_categories_external\.yaml$)
         pass_filenames: false
-      # No git-tracked file of rocKE holds a compliance hit (rocke_compliance_pytest).
+      # No git-tracked file of rocKE holds a compliance hit. A hit depends only
+      # on a file's text and the patterns, so rocke-compliance scans the files
+      # a change adds or edits, and rocke-compliance-rules scans the whole tree
+      # (rocke_compliance_pytest) when the patterns or their scanner change, so
+      # a new pattern is held against every file.
       - id: rocke-compliance
-        name: rocKE files pass the compliance patterns
-        entry: python -B -m pytest -p no:cacheprovider -q dnn-providers/hip-kernel-provider/rocke/platform/tests/tools/test_compliance_patterns.py
+        name: rocKE changed files pass the compliance patterns
+        entry: python -B dnn-providers/hip-kernel-provider/rocke/tools/compliance_patterns.py
         language: python
         additional_dependencies: [*rocke_pytest, "numpy==2.2.6"]
         files: ^dnn-providers/hip-kernel-provider/rocke/
+        # The tree scan reads a tracked symlink's target; so does this one.
+        types_or: [file, symlink]
+      - id: rocke-compliance-rules
+        name: rocKE compliance patterns hold, and the whole tree passes them
+        entry: python -B -m pytest -p no:cacheprovider -q dnn-providers/hip-kernel-provider/rocke/platform/tests/tools/test_compliance_patterns.py
+        language: python
+        additional_dependencies: [*rocke_pytest, "numpy==2.2.6"]
+        files: ^dnn-providers/hip-kernel-provider/rocke/(tools/compliance_patterns\.(py|json)|platform/tests/tools/test_compliance_patterns\.py)$
         pass_filenames: false
       # No new torch use under rocKE (rocke_no_torch_check).
       - id: rocke-no-torch
