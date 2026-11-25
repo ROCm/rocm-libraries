@@ -7070,6 +7070,28 @@ void testing_matmul_with_bias(const Arguments& arg,
         if(verifyD)
             for(auto& d : dD)
                 fillWithSentinel(d, To);
+        // uniform_check alone: an element of D the kernel leaves unwritten keeps its row index,
+        // which differs from row 0.
+        else if(ucInputs && !arg.c_equal_d)
+        {
+            const size_t elem = realDataTypeSize(To);
+            if(batchMode == HIPBLASLT_BATCH_MODE_POINTER_ARRAY)
+                for(int b = 0; b < arg.batch_count; b++)
+                    CHECK_HIP_ERROR(uniform_check_fill_row_index_device(
+                        (*dDp)[b].buf(), elem, M[0], N[0], ldd[0], 0, 1, stream));
+            else
+                for(int i = 0; i < gemm_count; i++)
+                    CHECK_HIP_ERROR(uniform_check_fill_row_index_device((*dDp)[i].buf(),
+                                                                        elem,
+                                                                        M[i],
+                                                                        N[i],
+                                                                        ldd[i],
+                                                                        stride_d[i],
+                                                                        num_batches[i],
+                                                                        stream));
+            if(partitionedRun)
+                partitionedRun->checkpoint();
+        }
         if(!verifyOutputs)
             return;
         // E is an input when the gradient reads it, and the bias vector is an output only as a

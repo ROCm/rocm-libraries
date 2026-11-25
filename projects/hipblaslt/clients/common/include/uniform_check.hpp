@@ -34,6 +34,17 @@ hipError_t uniform_check_fill_cols_device(void*       buf,
                                           int64_t     batches,
                                           hipStream_t stream);
 
+// Sets each element of row r to the low bytes of r, so an element a kernel leaves unwritten
+// differs from row 0 of its column. Any element_size.
+hipError_t uniform_check_fill_row_index_device(void*       buf,
+                                               size_t      element_size,
+                                               int64_t     rows,
+                                               int64_t     cols,
+                                               int64_t     ld,
+                                               int64_t     stride,
+                                               int64_t     batches,
+                                               hipStream_t stream);
+
 struct UniformCheckDeviceResult
 {
     unsigned long long bad; // (batch, column) pairs of D with an element that differs

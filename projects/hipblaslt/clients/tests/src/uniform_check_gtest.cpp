@@ -132,6 +132,23 @@ namespace
         }
     }
 
+    TEST(UniformCheck_pre_checkin, FillRowIndexFailsEveryColumn)
+    {
+        for(size_t elem : kSizes)
+        {
+            Matrix m(elem, 37, 5, 41, 41 * 5 + 3, 3);
+            ASSERT_EQ(uniform_check_fill_row_index_device(
+                          m.dev.buf(), elem, m.rows, m.cols, m.ld, m.stride, m.batches, nullptr),
+                      hipSuccess);
+            UniformCheckDeviceResult r = m.check();
+            EXPECT_EQ(r.bad, uint64_t(m.cols * m.batches)) << "elem " << elem;
+            EXPECT_EQ(r.first_row(), 1);
+            EXPECT_EQ(r.first_col(), 0);
+            m.download();
+            EXPECT_EQ(*m.at(2, 36, 4), 36) << "elem " << elem;
+        }
+    }
+
     TEST(UniformCheck_pre_checkin, CheckFindsOneFlippedBit)
     {
         for(size_t elem : kSizes)

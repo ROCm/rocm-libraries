@@ -40,6 +40,28 @@ namespace
         }
     }
 
+    // Byte j of element (r, c) of every batch takes byte j of r.
+    __global__ void row_index_kernel(uint8_t* buf,
+                                     uint64_t elem,
+                                     uint64_t rows,
+                                     uint64_t cols,
+                                     uint64_t ld,
+                                     uint64_t stride,
+                                     uint64_t total)
+    {
+        const uint64_t step = uint64_t(gridDim.x) * blockDim.x;
+        for(uint64_t i = blockIdx.x * uint64_t(blockDim.x) + threadIdx.x; i < total; i += step)
+        {
+            const uint64_t j = i % elem;
+            const uint64_t e = i / elem;
+            const uint64_t r = e % rows;
+            const uint64_t c = (e / rows) % cols;
+            const uint64_t b = e / (rows * cols);
+
+            buf[(b * stride + c * ld + r) * elem + j] = j < 8 ? uint8_t(r >> (8 * j)) : 0;
+        }
+    }
+
     __global__ void reset_kernel(UniformCheckDeviceResult* result)
     {
         *result = {0, kNone};
@@ -202,6 +224,36 @@ hipError_t uniform_check_fill_cols_device(void*       buf,
                                           hipStream_t stream)
 {
     return fill<false>(buf, element_size, rows, cols, ld, stride, batches, stream);
+}
+
+hipError_t uniform_check_fill_row_index_device(void*       buf,
+                                               size_t      element_size,
+                                               int64_t     rows,
+                                               int64_t     cols,
+                                               int64_t     ld,
+                                               int64_t     stride,
+                                               int64_t     batches,
+                                               hipStream_t stream)
+{
+    const uint64_t total
+        = uint64_t(rows) * uint64_t(cols) * uint64_t(batches) * uint64_t(element_size);
+    if(total == 0)
+        return hipSuccess;
+    constexpr int threads = 256;
+    const auto    blocks  = unsigned(std::min<uint64_t>((total + threads - 1) / threads, 65536));
+    hipLaunchKernelGGL(row_index_kernel,
+                       dim3(blocks),
+                       dim3(threads),
+                       0,
+                       stream,
+                       static_cast<uint8_t*>(buf),
+                       uint64_t(element_size),
+                       uint64_t(rows),
+                       uint64_t(cols),
+                       uint64_t(ld),
+                       uint64_t(stride),
+                       total);
+    return hipGetLastError();
 }
 
 hipError_t uniform_check_reset_device(UniformCheckDeviceResult* result, hipStream_t stream)
