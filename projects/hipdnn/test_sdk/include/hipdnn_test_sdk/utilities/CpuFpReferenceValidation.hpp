@@ -7,6 +7,8 @@
 #include <hipdnn_data_sdk/types.hpp>
 #include <hipdnn_data_sdk/utilities/TensorView.hpp>
 #include <hipdnn_flatbuffers_sdk/data_objects/data_types_generated.h>
+#include <hipdnn_test_sdk/utilities/ElementRule.hpp>
+#include <hipdnn_test_sdk/utilities/NonFiniteMask.hpp>
 #include <hipdnn_test_sdk/utilities/ReferenceValidationInterface.hpp>
 #include <hipdnn_test_sdk/utilities/VectorLoggingUtils.hpp>
 #include <hipdnn_test_sdk/utilities/detail/CpuFpReferenceUtilities.hpp>
@@ -14,31 +16,22 @@
 namespace hipdnn_test_sdk::utilities
 {
 
-/// Whether a comparison treats same-signed infinities in the reference and the
-/// implementation as equal.
-///
-/// REJECTED is the default: an unexpected infinity is normally a real defect, most often an
-/// output element the operation never wrote. ACCEPTED is for outputs whose correct value is
-/// infinite on both sides, such as an SDPA forward STATS (log-sum-exp) tensor holding -inf
-/// for every fully masked causal row.
-enum class MatchingInfinities
-{
-    REJECTED,
-    ACCEPTED
-};
-
 template <class T>
 class CpuFpReferenceValidation : public IReferenceValidation
 {
 public:
+    // `nonFiniteMask` is off by default, which keeps the behavior of rejecting every NaN and Inf
+    // (except the same-signed infinities `matchingInfinities` accepts). See NonFiniteMask.
     // NOLINTNEXTLINE(readability-redundant-casting) - cast needed for non-float T types
     CpuFpReferenceValidation(float absoluteTolerance = float(std::numeric_limits<T>::epsilon()),
                              // NOLINTNEXTLINE(readability-redundant-casting)
                              float relativeTolerance = float(std::numeric_limits<T>::epsilon()),
-                             MatchingInfinities matchingInfinities = MatchingInfinities::REJECTED)
+                             MatchingInfinities matchingInfinities = MatchingInfinities::REJECTED,
+                             NonFiniteMask nonFiniteMask = NonFiniteMask{})
         : _absoluteTolerance(absoluteTolerance)
         , _relativeTolerance(relativeTolerance)
         , _matchingInfinities(matchingInfinities)
+        , _nonFiniteMask(nonFiniteMask)
     {
         if(absoluteTolerance < 0.0f || relativeTolerance < 0.0f || std::isnan(absoluteTolerance)
            || std::isnan(relativeTolerance) || std::isinf(absoluteTolerance)
@@ -46,6 +39,7 @@ public:
         {
             throw std::invalid_argument("Tolerances must be finite and non-negative");
         }
+        non_finite_detail::requireSentinelFits<T>(_nonFiniteMask);
     }
 
     ~CpuFpReferenceValidation() override = default;
@@ -68,12 +62,11 @@ public:
 
         std::atomic<bool> result(true);
         std::atomic<size_t> comparedCount(0);
+        std::atomic<size_t> finiteCount(0);
 
         auto validateFunc = [&](const std::vector<int64_t>& indices) {
             using hipdnn_data_sdk::types::fabs;
             using hipdnn_data_sdk::types::isnan;
-            using hipdnn_data_sdk::types::isinf;
-            using hipdnn_data_sdk::types::signbit;
             if(isRagged && raggedLayout->isOutOfBlock(indices))
             {
                 return result.load(std::memory_order_relaxed);
@@ -92,24 +85,35 @@ public:
                 comparedCount.fetch_add(1, std::memory_order_relaxed);
             }
 
-            const bool refIsInf = isinf(refValue);
-            const bool implIsInf = isinf(implValue);
-
-            if(_matchingInfinities == MatchingInfinities::ACCEPTED && refIsInf && implIsInf
-               && signbit(refValue) == signbit(implValue))
+            const auto verdict
+                = classifyElement(refValue, implValue, _nonFiniteMask, _matchingInfinities);
+            if(verdict == ElementVerdict::MATCH)
             {
                 return result.load(std::memory_order_relaxed);
             }
-
-            if(isnan(refValue) || refIsInf || isnan(implValue) || implIsInf)
+            if(verdict == ElementVerdict::UNWRITTEN_REJECT)
             {
                 HIPDNN_SDK_LOG_ERROR(
-                    "NaN or Inf detected at indices "
+                    "Unwritten-output sentinel detected at indices "
+                    << StreamVec(indices)
+                    << ": the implementation element still holds the pre-execute fill.");
+                result.store(false, std::memory_order_relaxed);
+                return result.load(std::memory_order_relaxed);
+            }
+            if(verdict == ElementVerdict::NON_FINITE_REJECT)
+            {
+                HIPDNN_SDK_LOG_ERROR(
+                    "NaN or Inf not accepted at indices "
                     << StreamVec(indices) << ": reference value = " << refValue
                     << ", implementation value = " << implValue
                     << ". This may indicate an output element was not written by the operation.");
                 result.store(false, std::memory_order_relaxed);
                 return result.load(std::memory_order_relaxed);
+            }
+
+            if(_nonFiniteMask.enabled())
+            {
+                finiteCount.fetch_add(1, std::memory_order_relaxed);
             }
 
             auto absDiff = fabs(static_cast<float>(implValue) - static_cast<float>(refValue));
@@ -143,6 +147,13 @@ public:
             return false;
         }
 
+        if(_nonFiniteMask.enabled() && reference.elementCount() > 0 && finiteCount.load() == 0)
+        {
+            HIPDNN_SDK_LOG_ERROR("No finite element in the reference: every compared element is "
+                                 "NaN or Inf, so nothing was graded.");
+            return false;
+        }
+
         return result.load();
     }
 
@@ -150,6 +161,7 @@ private:
     float _absoluteTolerance;
     float _relativeTolerance;
     MatchingInfinities _matchingInfinities;
+    NonFiniteMask _nonFiniteMask;
 };
 
 template <class T>
@@ -228,8 +240,8 @@ public:
 namespace validation_detail
 {
 
-/// Integer element types have no infinity, so the relaxation is reported rather than
-/// silently ignored.
+/// Integer element types have no infinity or NaN, so a relaxation of the non-finite rules is
+/// reported rather than silently ignored.
 inline void rejectMatchingInfinitiesRequest(MatchingInfinities matchingInfinities)
 {
     if(matchingInfinities == MatchingInfinities::ACCEPTED)
@@ -239,48 +251,62 @@ inline void rejectMatchingInfinitiesRequest(MatchingInfinities matchingInfinitie
     }
 }
 
-/// Shared body of createAllCloseValidator and createAllCloseMatchingInfinitiesValidator.
+inline void rejectNonFiniteMaskRequest(const NonFiniteMask& nonFiniteMask)
+{
+    if(nonFiniteMask.enabled())
+    {
+        throw std::runtime_error(
+            "Matching non-finite allClose validator requires a floating point data type");
+    }
+}
+
+/// Shared body of createAllCloseValidator, createAllCloseMatchingInfinitiesValidator and
+/// createAllCloseMatchingNonFiniteValidator.
 inline std::unique_ptr<hipdnn_test_sdk::utilities::IReferenceValidation>
     makeAllCloseValidator(hipdnn_flatbuffers_sdk::data_objects::DataType dataType,
                           float absoluteTolerance,
                           float relativeTolerance,
-                          MatchingInfinities matchingInfinities)
+                          MatchingInfinities matchingInfinities,
+                          const NonFiniteMask& nonFiniteMask)
 {
     switch(dataType)
     {
     case hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT:
         return std::make_unique<CpuFpReferenceValidation<float>>(
-            absoluteTolerance, relativeTolerance, matchingInfinities);
+            absoluteTolerance, relativeTolerance, matchingInfinities, nonFiniteMask);
     case hipdnn_flatbuffers_sdk::data_objects::DataType::HALF:
         return std::make_unique<CpuFpReferenceValidation<hipdnn_data_sdk::types::half>>(
-            absoluteTolerance, relativeTolerance, matchingInfinities);
+            absoluteTolerance, relativeTolerance, matchingInfinities, nonFiniteMask);
     case hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16:
         return std::make_unique<CpuFpReferenceValidation<hipdnn_data_sdk::types::bfloat16>>(
-            absoluteTolerance, relativeTolerance, matchingInfinities);
+            absoluteTolerance, relativeTolerance, matchingInfinities, nonFiniteMask);
     case hipdnn_flatbuffers_sdk::data_objects::DataType::DOUBLE:
         return std::make_unique<CpuFpReferenceValidation<double>>(
-            absoluteTolerance, relativeTolerance, matchingInfinities);
+            absoluteTolerance, relativeTolerance, matchingInfinities, nonFiniteMask);
     // fp8 outputs (cuDNN sdpa_fp8 O) compare their decoded values.
     case hipdnn_flatbuffers_sdk::data_objects::DataType::FP8_E4M3:
         return std::make_unique<CpuFpReferenceValidation<hipdnn_data_sdk::types::fp8_e4m3>>(
-            absoluteTolerance, relativeTolerance, matchingInfinities);
+            absoluteTolerance, relativeTolerance, matchingInfinities, nonFiniteMask);
     case hipdnn_flatbuffers_sdk::data_objects::DataType::FP8_E4M3_FNUZ:
         return std::make_unique<CpuFpReferenceValidation<hipdnn_data_sdk::types::fp8_e4m3_fnuz>>(
-            absoluteTolerance, relativeTolerance, matchingInfinities);
+            absoluteTolerance, relativeTolerance, matchingInfinities, nonFiniteMask);
     case hipdnn_flatbuffers_sdk::data_objects::DataType::FP8_E5M2:
         return std::make_unique<CpuFpReferenceValidation<hipdnn_data_sdk::types::fp8_e5m2>>(
-            absoluteTolerance, relativeTolerance, matchingInfinities);
+            absoluteTolerance, relativeTolerance, matchingInfinities, nonFiniteMask);
     case hipdnn_flatbuffers_sdk::data_objects::DataType::FP8_E5M2_FNUZ:
         return std::make_unique<CpuFpReferenceValidation<hipdnn_data_sdk::types::fp8_e5m2_fnuz>>(
-            absoluteTolerance, relativeTolerance, matchingInfinities);
+            absoluteTolerance, relativeTolerance, matchingInfinities, nonFiniteMask);
     case hipdnn_flatbuffers_sdk::data_objects::DataType::INT8:
         rejectMatchingInfinitiesRequest(matchingInfinities);
+        rejectNonFiniteMaskRequest(nonFiniteMask);
         return std::make_unique<CpuIntReferenceValidation<int8_t>>();
     case hipdnn_flatbuffers_sdk::data_objects::DataType::UINT8:
         rejectMatchingInfinitiesRequest(matchingInfinities);
+        rejectNonFiniteMaskRequest(nonFiniteMask);
         return std::make_unique<CpuIntReferenceValidation<uint8_t>>();
     case hipdnn_flatbuffers_sdk::data_objects::DataType::INT32:
         rejectMatchingInfinitiesRequest(matchingInfinities);
+        rejectNonFiniteMaskRequest(nonFiniteMask);
         return std::make_unique<CpuIntReferenceValidation<int32_t>>();
     case hipdnn_flatbuffers_sdk::data_objects::DataType::BOOLEAN:
         rejectMatchingInfinitiesRequest(matchingInfinities);
@@ -297,8 +323,11 @@ inline std::unique_ptr<hipdnn_test_sdk::utilities::IReferenceValidation>
                             float absoluteTolerance = std::numeric_limits<float>::epsilon(),
                             float relativeTolerance = std::numeric_limits<float>::epsilon())
 {
-    return validation_detail::makeAllCloseValidator(
-        dataType, absoluteTolerance, relativeTolerance, MatchingInfinities::REJECTED);
+    return validation_detail::makeAllCloseValidator(dataType,
+                                                    absoluteTolerance,
+                                                    relativeTolerance,
+                                                    MatchingInfinities::REJECTED,
+                                                    NonFiniteMask{});
 }
 
 /// Builds a validator for an output whose correct value is infinite in the reference and on
@@ -313,8 +342,37 @@ inline std::unique_ptr<hipdnn_test_sdk::utilities::IReferenceValidation>
         float absoluteTolerance,
         float relativeTolerance)
 {
-    return validation_detail::makeAllCloseValidator(
-        dataType, absoluteTolerance, relativeTolerance, MatchingInfinities::ACCEPTED);
+    return validation_detail::makeAllCloseValidator(dataType,
+                                                    absoluteTolerance,
+                                                    relativeTolerance,
+                                                    MatchingInfinities::ACCEPTED,
+                                                    NonFiniteMask{});
+}
+
+/// Builds an allClose validator with the NonFiniteMask on: NaN matches NaN and same-signed
+/// infinities match, those positions are excluded from the tolerance math, every other
+/// non-finite disagreement fails, finite elements compare by atol and rtol as usual, and a
+/// reference with no finite element fails. See NonFiniteMask for the full rules.
+///
+/// `unwrittenSentinelBits` is the storage bit pattern the harness filled the output with
+/// before execute (see payloadNanSentinelBits); an implementation element holding it fails.
+/// Pass std::nullopt when the data type has none (FP8_E4M3), which leaves unwritten-output
+/// detection unavailable.
+///
+/// Throws for integer data types, which have no NaN or infinity to match, and for a sentinel
+/// wider than the data type.
+inline std::unique_ptr<hipdnn_test_sdk::utilities::IReferenceValidation>
+    createAllCloseMatchingNonFiniteValidator(
+        hipdnn_flatbuffers_sdk::data_objects::DataType dataType,
+        float absoluteTolerance,
+        float relativeTolerance,
+        std::optional<uint64_t> unwrittenSentinelBits = std::nullopt)
+{
+    return validation_detail::makeAllCloseValidator(dataType,
+                                                    absoluteTolerance,
+                                                    relativeTolerance,
+                                                    MatchingInfinities::REJECTED,
+                                                    NonFiniteMask::matching(unwrittenSentinelBits));
 }
 
 template <typename T>
