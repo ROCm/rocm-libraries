@@ -290,6 +290,9 @@ struct BlockFmhaPipelineQRKSVSTdm
     // fp8 merges the sink after the loop (MergeSink): a pre-seeded sink would own the max
     // frame and push every real P down the fp8 grid. fp16/bf16 keep the pre-seed.
     static constexpr bool kDeferSink = kHasSink && kIsFp8;
+    // fp8 sums fp32 P (l) beside q(P) (l_quant) for LSE, and for a deferred sink, whose share of
+    // the row is taken against the exact mass (as qr_tdm_fp8_sched does).
+    static constexpr bool kExactRowSum = kStoreLSE || kDeferSink;
 
     static constexpr index_t kScaleBytes        = 4;
     static constexpr index_t kGemm1KPerByte     = kK1 / kScaleBytes;
@@ -893,12 +896,13 @@ struct BlockFmhaPipelineQRKSVSTdm
     // gemm_1 consumes q(P), but l accumulates the unrounded P. Rescaling the numerator by
     // l/sum(q(P)) makes O a weighted mean over exactly the weights gemm_1 used, so a common
     // multiplicative P-rounding error cancels instead of surviving as a gain on the row.
-    // l itself is left alone: it is the mathematical row sum that LSE reports.
-    template <typename RowTile, typename OutputTile>
+    // l itself is left alone: it is the mathematical row sum that LSE reports. kAnyScale: the
+    // fp8 path casts P for every qscale, no_scale included.
+    template <bool kAnyScale = false, typename RowTile, typename OutputTile>
     CK_TILE_DEVICE static void
     CorrectQuantizedMass(const RowTile& l, const RowTile& l_quant, OutputTile& o_acc)
     {
-        if constexpr(kQuantized)
+        if constexpr(kQuantized || kAnyScale)
         {
             constexpr auto spans = OutputTile::get_distributed_spans();
             sweep_tile_span(spans[I0], [&](auto idx0) {
@@ -1026,7 +1030,7 @@ struct BlockFmhaPipelineQRKSVSTdm
     // summed before band mi + 1, so only one band of fp32 P has to outlive the exp2 pass.
     // Both thread buffers are M-outer, so band mi is chunk mi of P and of the row sums.
     // Returns (P, sum of q(P), sum of P): gemm_1 consumes q(P), so it normalizes O; the fp32 sum
-    // of P is only formed when LSE needs it.
+    // of P is only formed when kExactRowSum needs it.
     template <typename Gemm1, typename PComputeTensor>
     CK_TILE_DEVICE static auto MakePForGemm1AndRowSums(const PComputeTensor& p_compute,
                                                        int32_t& p_scale)
@@ -1067,7 +1071,7 @@ struct BlockFmhaPipelineQRKSVSTdm
                     p_src.get_thread_buffer().template get_as<p_bulk_t>(ki));
             });
             // Sum fp32 P before q(P) is decoded, so P need not stay live across the decode.
-            if constexpr(kStoreLSE)
+            if constexpr(kExactRowSum)
                 store_band_sum(rowsum_p, ReduceRowSumLocal(p_band), mi);
 
             // q(P) back to fp32, one packed convert per 8 values, in the cast's buffer order.
@@ -3212,7 +3216,8 @@ struct BlockFmhaPipelineQRKSVSTdm
             SBlockTileType{}, sequence<1>{}, f_max, SMPLComputeDataType{0}));
 
         // init M, L (sink-aware)
-        // l_quant sums q(P), the fp8 P gemm_1 consumes, and normalizes O; l sums fp32 P for LSE.
+        // l_quant sums q(P), the fp8 P gemm_1 consumes, and normalizes O; l sums fp32 P for LSE
+        // and a deferred sink (kExactRowSum).
         auto m                  = MLBlockTileType{};
         [[maybe_unused]] auto l = MLBlockTileType{};
         auto l_quant            = MLBlockTileType{};
@@ -3231,14 +3236,14 @@ struct BlockFmhaPipelineQRKSVSTdm
 #endif
             // The seed stands for exp2(sink_m - m) == 1, so it carries 2^kPShift like the sums.
             set_tile(l_quant, SMPLComputeDataType{kPScaleFactor});
-            if constexpr(kStoreLSE)
+            if constexpr(kExactRowSum)
                 set_tile(l, SMPLComputeDataType{kPScaleFactor});
         }
         else
         {
             set_tile(m, -numeric<SMPLComputeDataType>::infinity());
             clear_tile(l_quant);
-            if constexpr(kStoreLSE)
+            if constexpr(kExactRowSum)
                 clear_tile(l);
         }
 
@@ -3797,7 +3802,7 @@ struct BlockFmhaPipelineQRKSVSTdm
             int32_t p_scale = 0;
             auto p_and_sums = MakePForGemm1AndRowSums<decltype(gemm_1)>(p_compute, p_scale);
             ReduceRowSync(p_and_sums.at(I1), f_sum);
-            if constexpr(kStoreLSE)
+            if constexpr(kExactRowSum)
                 ReduceRowSync(p_and_sums.at(I2), f_sum);
             const auto& p_tile                    = p_and_sums.at(I0);
             const auto& rowsum_p_quant            = p_and_sums.at(I1);
@@ -3821,7 +3826,7 @@ struct BlockFmhaPipelineQRKSVSTdm
                     }
                 }();
                 l_quant(i_idx) = tmp * l_quant[i_idx] + rowsum_p_quant[i_idx];
-                if constexpr(kStoreLSE)
+                if constexpr(kExactRowSum)
                     l(i_idx) = tmp * l[i_idx] + rowsum_p[i_idx];
                 if constexpr(kVFragments)
                 {
@@ -3999,10 +4004,13 @@ struct BlockFmhaPipelineQRKSVSTdm
         } while(i_total_loops < num_total_loop);
 
         s_wait_tensorcnt_barrier<0>();
-        if constexpr(kStoreLSE)
-            MergeSink(m, l_quant, o_acc, sink_v, scale_s, l);
-        else
-            MergeSink(m, l_quant, o_acc, sink_v, scale_s);
+        // A deferred sink takes its share against the exact mass: O is moved from l_quant to l,
+        // then the sink joins l, which normalizes O. Without one, l_quant normalizes O.
+        if constexpr(kDeferSink)
+        {
+            CorrectQuantizedMass<true>(l, l_quant, o_acc);
+            MergeSink(m, l, o_acc, sink_v, scale_s);
+        }
 
         if constexpr(kStoreLSE)
         {
@@ -4034,13 +4042,19 @@ struct BlockFmhaPipelineQRKSVSTdm
         sweep_tile_span(o_spans[I0], [&](auto idx0) {
             constexpr auto i_idx = make_tuple(idx0);
             auto tmp             = [&]() {
+                const auto l_out = [&]() {
+                    if constexpr(kDeferSink)
+                        return l[i_idx];
+                    else
+                        return l_quant[i_idx];
+                }();
                 if constexpr(BiasEnum == BlockAttentionBiasEnum::ELEMENTWISE_BIAS ||
                              FmhaMask::IsMasking)
                 {
-                    return l_quant[i_idx] == 0.f ? 0.f : 1 / l_quant[i_idx];
+                    return l_out == 0.f ? 0.f : 1 / l_out;
                 }
                 else
-                    return 1 / l_quant[i_idx];
+                    return 1 / l_out;
             }();
             if constexpr(kVScaleOnOacc)
             {
