@@ -71,6 +71,7 @@ from rocke.tests.pending_lanes import (
     NO_ISSUE_FILED,
     PENDING,
     QUARANTINE_CAP,
+    QUARANTINE_TREES,
     QUARANTINED,
     Compilers,
     MeasuredBudget,
@@ -82,7 +83,7 @@ from rocke.tests.pending_lanes import (
     waiting_entry,
 )
 from rocke.tests.provider_categories import provider_category_labels
-from rocke.tests.quarantine import skip_quarantined_items
+from rocke.tests.quarantine import register_quarantine, skip_quarantined_items
 from rocke.tests.torch_uses import TorchUseKind, file_kinds, torch_uses_in_python
 
 ROCKE = platform_root().parent
@@ -1053,9 +1054,95 @@ def test_a_quarantine_narrowed_by_params_covers_the_cases_with_all_of_them():
         _quarantined("platform/tests/test_x.py::test_y[a]", params=("a",))
 
 
-def test_only_a_quarantine_tree_skips_quarantined_tests():
-    with pytest.raises(ValueError, match="expected one of"):
+def test_only_a_quarantine_tree_skips_quarantined_tests(request):
+    with pytest.raises(
+        ValueError, match="skip_quarantined_items failed .* expected one of"
+    ):
         skip_quarantined_items([], ROCKE / "platform/python", "platform/python")
+    # register_quarantine checks the tree before it registers anything, so this
+    # session is left as it was.
+    with pytest.raises(
+        ValueError, match="register_quarantine failed .* expected one of"
+    ):
+        register_quarantine(
+            request.config, ROCKE / "platform/python", "platform/python"
+        )
+
+
+def test_a_tiling_test_can_be_quarantined():
+    tiling = "platform/python/rocke/tests/helpers/tiling"
+    assert _quarantined(f"{tiling}/test_x.py::test_y").path == f"{tiling}/test_x.py"
+
+
+def _quarantine_hook_impls(config: pytest.Config) -> list:
+    """The collection hook implementations ``rocke.tests.quarantine`` installed
+    in this session."""
+    return [
+        impl
+        for impl in config.pluginmanager.hook.pytest_collection_modifyitems.get_hookimpls()
+        if type(impl.plugin).__module__ == "rocke.tests.quarantine"
+    ]
+
+
+def test_a_tree_registers_its_quarantine_once(request):
+    """This session's root (``platform/tests``) registered its quarantine; a
+    second registration of the same tree adds no second hook."""
+    registered = _quarantine_hook_impls(request.config)
+    assert len(registered) == 1, registered
+    register_quarantine(request.config, ROCKE / "platform/tests", "platform/tests")
+    assert _quarantine_hook_impls(request.config) == registered
+
+
+def test_a_root_marks_its_items_before_the_quarantine_skips_them(request):
+    """pluggy runs every ``tryfirst`` collection hook before every plain one.
+    The quarantine's hook is plain, and the tiling root's ``gpu`` marking is
+    ``tryfirst``, so a quarantined GPU test is marked ``gpu`` (and selected by
+    ``-m gpu``) before it is skipped."""
+    from rocke.tests.helpers.tiling import conftest as tiling_conftest
+
+    (quarantine_impl,) = _quarantine_hook_impls(request.config)
+    assert not quarantine_impl.tryfirst
+    assert tiling_conftest.pytest_collection_modifyitems.pytest_impl["tryfirst"]
+
+
+def _configured_pytest_root_paths(conftest: Path) -> set[str]:
+    """The tree paths ``conftest`` passes to ``configure_pytest_root``, as its
+    third positional argument or as ``tree_path=``."""
+    if not conftest.is_file():
+        return set()
+    paths = set()
+    for node in ast.walk(ast.parse(conftest.read_text(encoding="utf-8"))):
+        if not (
+            isinstance(node, ast.Call)
+            and getattr(node.func, "id", getattr(node.func, "attr", None))
+            == "configure_pytest_root"
+        ):
+            continue
+        arguments = node.args[2:3] + [
+            keyword.value for keyword in node.keywords if keyword.arg == "tree_path"
+        ]
+        paths.update(
+            argument.value
+            for argument in arguments
+            if isinstance(argument, ast.Constant)
+        )
+    return paths
+
+
+def test_every_quarantine_tree_configures_itself_as_a_pytest_root():
+    """pytest loads only the conftest files on a collected path's own ancestor
+    chain, so a tree skips its quarantined tests, and gets the sweep guard,
+    only when its own ``conftest.py`` calls
+    ``rocke.tests.pytest_roots.configure_pytest_root`` with its path."""
+    unconfigured = [
+        tree
+        for tree in QUARANTINE_TREES
+        if tree not in _configured_pytest_root_paths(ROCKE / tree / "conftest.py")
+    ]
+    assert not unconfigured, (
+        f"quarantine trees whose conftest.py does not call "
+        f"configure_pytest_root with its path: {unconfigured}"
+    )
 
 
 @pytest.mark.skipif(not QUARANTINED, reason="no test is quarantined")

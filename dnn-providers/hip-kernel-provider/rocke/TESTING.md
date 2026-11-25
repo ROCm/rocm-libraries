@@ -1601,12 +1601,13 @@ can never run (a refused request, a state the code cannot build) is not kept
 as a skip: after the owner's review it is left out of the parametrization, or
 the test is deleted.
 
-The pytest roots of `platform/tests` and `library/tests` skip a quarantined test
-with the reason `quarantined: <issue>` (plus `on <arch>` for an arch-scoped entry
-and `with llvm-project <commit>`, or `with LLVM <major>`, for a compiler-scoped
-one), so it stays visible in every report; `ROCKE_QUARANTINE=ignore` runs it to
-debug or fix it. A pending file that fails once its lane runs moves to
-quarantine; it does not stay pending.
+The pytest roots of `platform/tests`, `library/tests` and the tiling tests
+(`platform/python/rocke/tests/helpers/tiling`, which its CI entries collect on
+its own) skip a quarantined test with the reason `quarantined: <issue>` (plus
+`on <arch>` for an arch-scoped entry and `with llvm-project <commit>`, or
+`with LLVM <major>`, for a compiler-scoped one), so it stays visible in every
+report; `ROCKE_QUARANTINE=ignore` runs it to debug or fix it. A pending file
+that fails once its lane runs moves to quarantine; it does not stay pending.
 
 Two checks hold the tree to the registry. The PR gate
 [`platform/tests/tools/test_pending_lanes.py`](platform/tests/tools/test_pending_lanes.py)

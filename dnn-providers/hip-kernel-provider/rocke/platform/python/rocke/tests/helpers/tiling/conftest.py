@@ -13,15 +13,18 @@ the fixture returns, so a launch cannot be written without one.
 from __future__ import annotations
 
 from collections.abc import Callable
+from pathlib import Path
 from typing import TypeVar
 
 import pytest
 
 from rocke.tests.gpu import current_device_arch, current_device_arch_in
 from rocke.tests.lanes import CI_TEST_TOOLS, skip_until
-from rocke.tests.session_gc import use_test_session_gc
+from rocke.tests.pytest_roots import configure_pytest_root
 
 _Fixture = TypeVar("_Fixture", bound=Callable[..., object])
+
+_HERE = Path(__file__).resolve().parent
 
 # The names of the fixtures defined with ``_gpu_fixture``; a test that asks for one is marked gpu.
 _GPU_FIXTURES: set[str] = set()
@@ -34,7 +37,8 @@ def _gpu_fixture(function: _Fixture) -> _Fixture:
 
 
 def pytest_configure(config: pytest.Config) -> None:
-    use_test_session_gc()
+    # The tiling entries collect this tree on its own, so no other root's conftest loads here.
+    configure_pytest_root(config, _HERE, "platform/python/rocke/tests/helpers/tiling")
     config.addinivalue_line(
         "markers", "gpu: launches a kernel on the current GPU (asks for a GPU fixture)"
     )
@@ -44,7 +48,7 @@ def pytest_configure(config: pytest.Config) -> None:
 def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
     # A conftest's collection hook sees every item of the session; only the tiling tree can ask
     # for these fixtures, which are defined here. tryfirst: the mark must be on the item before
-    # -m deselects by it.
+    # -m deselects by it, and before the quarantine (a plain hook) marks its skips.
     for item in items:
         if _GPU_FIXTURES.intersection(getattr(item, "fixturenames", ())):
             item.add_marker(pytest.mark.gpu)

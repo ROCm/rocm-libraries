@@ -83,7 +83,7 @@ or every parameter of one test function, and the issue that tracks the fix
 arches names them, and is held out on those arches only; one that fails only
 when built by some compilers (a defect of one compiler build) names them, and
 is held out only while the loaded COMGR's compiler is one of them. The pytest
-roots of ``platform/tests`` and ``library/tests`` skip it with the reason
+roots of ``QUARANTINE_TREES`` skip it with the reason
 ``quarantined: <issue>`` (``rocke.tests.quarantine``), so it stays visible in
 every report; ``ROCKE_QUARANTINE=ignore`` runs it anyway. Rules stricter than a
 pending entry's hold it: an expired quarantine always fails the check, and at
@@ -354,8 +354,13 @@ class MeasuredBudget:
         return datetime.date.fromisoformat(self.expires)
 
 
-# The pytest roots that skip quarantined tests, relative to the rocke directory.
-QUARANTINE_TREES: tuple[str, ...] = ("platform/tests", "library/tests")
+# The pytest roots that skip quarantined tests, relative to the rocke directory
+# (rocke.tests.pytest_roots).
+QUARANTINE_TREES: tuple[str, ...] = (
+    "platform/tests",
+    "library/tests",
+    "platform/python/rocke/tests/helpers/tiling",
+)
 # At most this many tests are quarantined at once, so quarantine cannot become
 # the backlog: at the cap, a new entry needs one cleared first.
 QUARANTINE_CAP = 10
