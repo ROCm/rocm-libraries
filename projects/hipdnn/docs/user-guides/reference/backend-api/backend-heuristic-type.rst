@@ -52,8 +52,37 @@ metric is ``HIPDNN_ATTR_ENGINEHEUR_RANKING_METRIC_EXT`` (``HIPDNN_TYPE_CHAR``) u
 the ``HIPDNN_HEUR_RANKING_METRIC`` environment variable overrides it, and ``tflops``
 when neither is set. Every configuration the heuristic returns carries that metric,
 so the chosen engine also picks its kernel by it at plan build. The frontend
-requests the modes as the ``SelectionHeuristic::ModeA`` /
-``SelectionHeuristic::ModeB`` entries of the ordered policy list, bracketed by
-``SelectionHeuristic::Config`` and ``SelectionHeuristic::StaticOrdering``, so
-model-free selection still runs when a prediction policy declines, and sets the
-metric from ``Graph::set_ranking_metric()``.
+sets the metric from ``Graph::set_ranking_metric()``.
+
+Heuristic modes
+===============
+
+``HIPDNN_ATTR_ENGINEHEUR_MODE`` (``HIPDNN_TYPE_HEUR_MODE``) is required before the
+heuristic descriptor is finalized. ``hipdnnBackendHeurMode_t`` has these values:
+
+* ``HIPDNN_HEUR_MODE_FALLBACK`` (0): model-free static ordering.
+* ``HIPDNN_HEUR_MODE_A`` (1): ranks by engine predictions alone.
+* ``HIPDNN_HEUR_MODE_B`` (2): prefers configuration predictions and uses engine
+  predictions when necessary.
+* ``HIPDNN_HEUR_MODE_INSTANT``: alias of ``HIPDNN_HEUR_MODE_A``, as cuDNN's
+  ``CUDNN_HEUR_MODE_A`` aliases ``INSTANT``.
+
+The backend resolves the ordered policy list in this order of precedence: the
+``HIPDNN_HEUR_POLICY_ORDER`` environment variable, then the
+``HIPDNN_ATTR_ENGINEHEUR_POLICY_ORDER_EXT`` attribute, then the list the mode selects:
+
+* ``HIPDNN_HEUR_MODE_FALLBACK``: ``SelectionHeuristic::Config``, then
+  ``SelectionHeuristic::StaticOrdering``.
+* ``HIPDNN_HEUR_MODE_A`` / ``HIPDNN_HEUR_MODE_INSTANT``: ``SelectionHeuristic::Config``,
+  ``SelectionHeuristic::ModeA``, then ``SelectionHeuristic::StaticOrdering``.
+* ``HIPDNN_HEUR_MODE_B``: ``SelectionHeuristic::Config``, ``SelectionHeuristic::ModeB``,
+  then ``SelectionHeuristic::StaticOrdering``.
+
+There is no mode-independent built-in list. ``SelectionHeuristic::Config`` runs first,
+so ``HIPDNN_HEUR_CONFIG_PATH`` rules and the exact-match autotune cache win, and
+``SelectionHeuristic::StaticOrdering`` runs last, so model-free selection still runs
+when a prediction policy declines. The frontend maps ``HeuristicMode::A``, ``B`` and
+``FALLBACK`` to ``HIPDNN_HEUR_MODE_A``, ``HIPDNN_HEUR_MODE_B`` and
+``HIPDNN_HEUR_MODE_FALLBACK`` and does not set the policy-order attribute itself.
+Its default mode list is ``{HeuristicMode::A}``, so default engine selection ranks by
+engine predictions where an applicable engine has one.

@@ -172,6 +172,51 @@ For MIOpen version 2.4 and later
 MIOpen's kernel cache directory is versioned, so cached kernels don't collide when upgrading
 from an earlier version.
 
+.. _build-hipdnn-forwarding:
+
+hipDNN forwarding support
+--------------------------------------------------------------------------------------------------------
+
+To build MIOpen so that it can pass some calls to hipDNN, set ``-DMIOPEN_ENABLE_HIPDNN_WRAPPER=On``.
+The default is ``Off`` when you build MIOpen on its own. ROCm builds turn it on by default, and
+``-DMIOPEN_ENABLE_HIPDNN_WRAPPER=Off`` gives the previous single-library build. hipDNN must be
+installed where CMake can find it, for example through ``CMAKE_PREFIX_PATH``.
+
+.. code:: shell
+
+   cmake -DMIOPEN_BACKEND=HIP -DMIOPEN_ENABLE_HIPDNN_WRAPPER=On ..
+
+With this option, MIOpen is built as two libraries instead of one:
+
+* ``libMIOpen.so``: the library your program links against, with the same name and API as before.
+* ``libMIOpen_private.so``: the MIOpen implementation, which ``libMIOpen.so`` depends on.
+
+Always install both libraries from the same build. Mixing versions is not supported.
+
+Programs that link to MIOpen through CMake (``find_package(miopen)``) need no changes. Programs
+that link with a hand-written ``-lMIOpen`` need no changes either: ``libMIOpen.so`` exports the
+whole public API. It also exports the functions that ``miopen/miopen.h`` doesn't declare but that
+earlier single-library builds exported:
+``miopenConvolutionABBackwardWeightsGetWorkSpaceSize``,
+``miopenConvolution{Forward,BackwardData,BackwardWeights}GetWorkSpaceSizeRange``,
+``miopenHiddenGetConvolutionFindMode`` and ``miopenHiddenSetConvolutionFindMode``. Only MIOpen's
+internal C++ symbols, which ``libMIOpen.so`` used to export, are now in ``libMIOpen_private.so``. A
+program that uses them must also link with ``-lMIOpen_private``.
+
+Building with this option doesn't turn forwarding on. To turn it on, see
+:doc:`Use hipDNN forwarding <../how-to/use-hipdnn-forwarding>`.
+
+If you change ``include/miopen/miopen.h``, for example to add a function, regenerate the wrapper's
+derived source files and commit the result. Run this from the repository root:
+
+.. code:: shell
+
+   python3 projects/miopen/script/generate_wrapper_sources.py
+
+These files are committed whether or not you build with this option. A pre-commit hook and
+MIOpen's CI fail when one is out of date or was edited by hand. For details, see the
+"Wrapper sources are generated" section of ``test/gtest/README.md``.
+
 Changing the CMake configuration
 --------------------------------------------------------------------------------------------------------
 

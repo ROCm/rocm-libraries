@@ -120,6 +120,12 @@ def _is_use_cache_file(relpath):
     return False
 
 
+# gzip level of the artifacts. tarfile's default (9) took 137.7 s to pack the 124 gfx942 common
+# artifacts on one core for 397.9 MB; level 4 takes 25.7 s for 443.6 MB (+11.5%). Levels 5 / 6
+# save only 25 / 40 MB more for 5.7 / 20 s more.
+ARTIFACT_COMPRESSLEVEL = 4
+
+
 def compress_output(output_dir, dest_dir=None, name=None):
     """Compress only the files needed for --use-cache into a .tar.gz artifact.
 
@@ -143,7 +149,7 @@ def compress_output(output_dir, dest_dir=None, name=None):
     os.makedirs(dest_dir, exist_ok=True)
     artifact_path = os.path.join(dest_dir, name + ".tar.gz")
     file_count = 0
-    with tarfile.open(artifact_path, "w:gz") as tar:
+    with tarfile.open(artifact_path, "w:gz", compresslevel=ARTIFACT_COMPRESSLEVEL) as tar:
         for root, dirs, files in os.walk(output_dir):
             for f in files:
                 full_path = os.path.join(root, f)

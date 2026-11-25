@@ -4,16 +4,49 @@ Full documentation for rocPRIM is available at [https://rocm.docs.amd.com/projec
 
 ## rocPRIM 5.1.0 for ROCm 10.3.0
 
+### Added
+
+* Added support for large number of segments and large number of items to `rocprim::device_segmented_radix_sort`.
+* Added fixed-size-segments variant for `rocprim::device_segmented_reduce`.
+* Added support for large number of segments to `rocprim::device_segmented_reduce`.
+* Added support for large sizes to `rocprim::device_run_length_encode` and `rocprim::device_run_length_encode_non_trivial_runs`.
+
 ### Changed
 
 * Renamed the CMake option `BUILD_CODE_COVERAGE` to `ROCPRIM_ENABLE_COVERAGE`. The test-only preprocessor define `CODE_COVERAGE` is now `ROCPRIM_ENABLE_COVERAGE`.
 * The configuration summary now prints the coverage setting when `BUILD_TEST` is enabled.
 * Tests no longer set `LLVM_PROFILE_FILE` through CTest. A value set in the environment when running `ctest` is now used. The `coverage_analysis` target still writes profiles to `coverage-report/profraw`.
 
+### Optimizations
+
+* Added autotuned gfx950 (MI355X) configs for the following device algorithms:
+  * `adjacent_find`, `merge`, `partition` (flag, predicate, three-way, two-way flag, two-way predicate), `radix_sort` (block sort), `reduce`, `run_length_encode`, `run_length_encode_non_trivial_runs`, `scan`, `scan_by_key`, `search_n`, `segmented_reduce`, `select` (flag, predicate, predicated flag, unique, unique by key), `transform`, and `transform` (pointer).
+* `block_histogram` uses the __match_any intrinsic.
+
 ### Removed
 
 * Deprecated `BUILD_CODE_COVERAGE`, use `ROCPRIM_ENABLE_COVERAGE` instead.
+
+### Known issues
+
+* TODO: Retune and investigate the gfx950 configs for the following algorithms. Their autotuned configs regressed against the previous configs on MI355X, so they are kept at the previous configs for now:
+  * `adjacent_difference` (`device_adjacent_difference.hpp`).
+  * `adjacent_difference_inplace` (`device_adjacent_difference_inplace.hpp`).
+  * `merge_sort` block sort and block merge (`device_merge_sort_block_sort.hpp`, `device_merge_sort_block_merge.hpp`). These two must be tuned together because they need to cover the same set of targets.
+  * `find_first_of` (`device_find_first_of.hpp`).
+  * `binary_search` (`device_binary_search.hpp`).
+  * `lower_bound` (`device_lower_bound.hpp`).
+  * `upper_bound` (`device_upper_bound.hpp`).
+* TODO: Retune the gfx950 configs for the following algorithms. Their autotuned configs were invalid, so they are kept at the previous configs for now. Retune them after the tuner and benchmark fixes in #15571 are merged:
+  * `histogram` (`device_histogram.hpp`). The benchmark did not pass the tuned config to rocPRIM, so every candidate ran the default config.
+  * `segmented_topk` (`device_segmented_topk_air.hpp`). The benchmark used `k = 0`, so rocPRIM returned without launching a kernel.
+  * `topk` (`device_topk_air.hpp`). Tuned before the fix to `choose_pivot_bin`.
+  * `segmented_radix_sort` (`device_segmented_radix_sort.hpp`). The tuner did not limit the shared memory of the warp sorts, so a config needed more than 64 KiB and broke builds for targets that rocPRIM doesn't recognize. The tuner now checks this limit.
+  * `reduce_by_key` (`device_reduce_by_key.hpp`). Tuned only for integer value types, so floating-point value types got no tuned config. The tuner now also tunes `double`, `float`, and `rocprim::half` values.
+  * `radix_sort` onesweep variant (`device_radix_sort_onesweep.hpp`). The tuner's shared memory check let oversized configs through.
+
 ### Resolved Issues
+
 * Fixed incorrect output in `device_segmented_topk_air.hpp:choose_pivot_bin` when `radix_bits` does not divide the `key` width.
 
 ## rocPRIM 5.0.0 for ROCm 10.2.0

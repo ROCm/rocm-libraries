@@ -19,6 +19,8 @@ MIOPEN_LIB_ENV_VAR(MIOPEN_SYSTEM_DB_PATH)
 
 namespace {
 
+using CPU_ConvAiMetadataND_NONE = ::testing::TestWithParam<int>;
+
 // A metadata file whose `derived_features` key is present but not an array of strings must fail the
 // load with a named cause (MetadataND::LoadDerivedFeatures throws) instead of silently producing an
 // empty list and a later engineered-width mismatch. Redirects MIOPEN_SYSTEM_DB_PATH to a temp dir
@@ -26,7 +28,7 @@ namespace {
 // and the ctor reaches the derived_features parse. CPU only (file load + parse; no device). This
 // file is kept separate from conv_ai_nd_heuristics_test.cpp because gtest_common.hpp and
 // <fdeep/fdeep.hpp> define conflicting `half` type aliases.
-TEST(CPU_ConvAiMetadataND_NONE, ThrowsOnMalformedDerivedFeatures)
+TEST_P(CPU_ConvAiMetadataND_NONE, ThrowsOnMalformedDerivedFeatures)
 {
     namespace fs   = miopen::fs;
     const auto ref = miopen::GetSystemDbPath() / "gfx942_metadata.tn.model";
@@ -52,6 +54,8 @@ TEST(CPU_ConvAiMetadataND_NONE, ThrowsOnMalformedDerivedFeatures)
 
     fs::remove_all(dir);
 }
+
+INSTANTIATE_TEST_SUITE_P(Quick, CPU_ConvAiMetadataND_NONE, ::testing::Values(0));
 
 } // namespace
 
