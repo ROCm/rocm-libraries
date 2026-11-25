@@ -263,7 +263,8 @@ extern "C" {
 *  \retval      rocsparse_status_invalid_pointer \p alpha, \p mat_A, \p mat_B, \p mat_C, \p beta, or
 *               \p buffer_size pointer is invalid.
 *  \retval      rocsparse_status_not_implemented \p trans_A, \p trans_B, \p compute_type, or \p alg is
-*               currently not supported.
+*               currently not supported, or \p mat_A is a BSR matrix and the batch count of \p mat_A,
+*               \p mat_B, or \p mat_C is not 1.
 *  \par Example
 *  This example performs sparse matrix-dense matrix multiplication, \f$C := \alpha \cdot A \cdot B + \beta \cdot C\f$
 *  \snippet example_rocsparse_spmm.cpp doc example
