@@ -416,9 +416,15 @@ bool rocke_direct_conv_32c_is_valid_spec(const rocke_direct_conv_32c_spec_t* spe
  *      block_waves: int = 1
  *      wave_size: int = 64
  *      cpl: int = 1          # channels per lane (1, 2 or 4)
+ *      stride_skip: bool = False   # cpl > 1, stride > 1: output-row accs only
+ *      block_h: int = 0            # cpl > 1: output rows per block (0 = whole image)
  *
  *  cpl > 1 packs `cpl` adjacent channels per lane: cpl-wide vector loads and
  *  stores, taps as packed <2 x f32> FMAs over channel pairs.
+ *  stride_skip reduces the accumulator rows from KH to ceil(KH / stride),
+ *  keeping only slots that will be output rows, so wider tiles fit in registers.
+ *  block_h > 0 splits the image into row blocks (z = n * ceil(Ho / block_h) +
+ *  row block) for launches where whole-image blocks leave most SIMDs idle.
  * ===================================================================== */
 typedef struct rocke_direct_depthwise_spec
 {
@@ -428,6 +434,8 @@ typedef struct rocke_direct_depthwise_spec
     int block_waves; /* default 1  */
     int wave_size; /* default 64 */
     int cpl; /* default 1  */
+    bool stride_skip; /* default false; cpl > 1 and stride > 1 required when true */
+    int block_h; /* default 0; cpl > 1 required when > 0 */
 } rocke_direct_depthwise_spec_t;
 
 rocke_direct_depthwise_spec_t rocke_direct_depthwise_spec_default(void);
@@ -435,6 +443,8 @@ rocke_direct_depthwise_spec_t rocke_direct_depthwise_spec_default(void);
 int rocke_direct_depthwise_threads_per_block(const rocke_direct_depthwise_spec_t* spec);
 /* @property block_ch -> block_waves * wave_size * cpl */
 int rocke_direct_depthwise_block_ch(const rocke_direct_depthwise_spec_t* spec);
+/* @property acc_rows -> ceil(KH / stride) if stride_skip else KH */
+int rocke_direct_depthwise_acc_rows(const rocke_direct_depthwise_spec_t* spec);
 rocke_status_t rocke_direct_depthwise_kernel_name(const rocke_direct_depthwise_spec_t* spec,
                                                   char* out,
                                                   size_t out_cap);

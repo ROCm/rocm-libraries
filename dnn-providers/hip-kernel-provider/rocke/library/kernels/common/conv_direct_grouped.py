@@ -14134,9 +14134,7 @@ def build_direct_depthwise_spatial(
         # are those of a whole-image block; the row loads and the stored
         # output row add y0 back.
         y0 = b.mul(b.mul(b.block_id_y(), b.const_i32(BH)), c_stride_rv)
-        y_end = b.smin(
-            n_iters_v, b.add(y0, b.const_i32((BH - 1) * c_stride_dw + p.KH))
-        )
+        y_end = b.smin(n_iters_v, b.add(y0, b.const_i32((BH - 1) * c_stride_dw + p.KH)))
         n_iters_v = b.sub(y_end, y0)
     n_groups_v = b.div(b.add(n_iters_v, b.const_i32(p.KH - 1)), c_KH)
 

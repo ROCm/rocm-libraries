@@ -1465,15 +1465,25 @@ int rocke_direct_depthwise_block_ch(const rocke_direct_depthwise_spec_t* spec)
     return spec->block_waves * spec->wave_size * spec->cpl;
 }
 
+int rocke_direct_depthwise_acc_rows(const rocke_direct_depthwise_spec_t* spec)
+{
+    /* @property acc_rows -> ceil(KH / stride) if stride_skip else KH */
+    const rocke_direct_conv_problem_t* p = &spec->problem;
+    if(spec->stride_skip)
+        return (p->KH + p->stride - 1) / p->stride;
+    return p->KH;
+}
+
 rocke_status_t rocke_direct_depthwise_kernel_name(const rocke_direct_depthwise_spec_t* spec,
                                                   char* out,
                                                   size_t out_cap)
 {
     char prob_short[128];
-    const char* parts[4];
+    const char* parts[7];
     char bw_buf[24];
     char bwv_buf[24];
     char cpl_buf[24];
+    char bh_buf[24];
     int n_parts = 3;
 
     if(spec == NULL || out == NULL || out_cap == 0)
@@ -1485,7 +1495,8 @@ rocke_status_t rocke_direct_depthwise_kernel_name(const rocke_direct_depthwise_s
         return ROCKE_ERR_VALUE;
     }
     /* kernel_name_join(name, p.short(), f"bw{block_w}", f"bw{block_waves}wv",
-     *                  flags={"bf16": dtype=="bf16"}) */
+     *                  [f"cpl{cpl}"], ["ss"], [f"bh{block_h}"],
+     *                  flags=_scalar_name_flags(dtype)) */
     snprintf(bw_buf, sizeof(bw_buf), "bw%d", spec->block_w);
     snprintf(bwv_buf, sizeof(bwv_buf), "bw%dwv", spec->block_waves);
     parts[0] = prob_short;
@@ -1495,6 +1506,13 @@ rocke_status_t rocke_direct_depthwise_kernel_name(const rocke_direct_depthwise_s
     {
         snprintf(cpl_buf, sizeof(cpl_buf), "cpl%d", spec->cpl);
         parts[n_parts++] = cpl_buf;
+    }
+    if(spec->stride_skip)
+        parts[n_parts++] = "ss";
+    if(spec->block_h)
+    {
+        snprintf(bh_buf, sizeof(bh_buf), "bh%d", spec->block_h);
+        parts[n_parts++] = bh_buf;
     }
     {
         /* flags=_scalar_name_flags(dtype) */
@@ -1664,24 +1682,38 @@ bool rocke_direct_depthwise_is_valid_spec(const rocke_direct_depthwise_spec_t* s
     }
     if(rocke_dconv_depthwise_cpl_reason(spec->cpl, p->groups, p->dtype, reason, reason_cap))
         return false;
-    if(spec->cpl > 1
-       && (spec->cpl * taps > ROCKE_DCONV_DW_MAX_PRELOAD_TAPS
-           || spec->cpl * spec->block_w * p->KH > ROCKE_DCONV_DW_CPL_MAX_ACC))
+    if(spec->stride_skip && (spec->cpl == 1 || p->stride == 1))
     {
-        /* Past these the packed weights or accumulator slots spill. */
-        if(reason && reason_cap > 0)
-        {
-            snprintf(reason,
-                     reason_cap,
-                     "cpl=%d holds %d weights and %d accumulator-rows per lane "
-                     "(max %d / %d)",
-                     spec->cpl,
-                     spec->cpl * taps,
-                     spec->cpl * spec->block_w * p->KH,
-                     ROCKE_DCONV_DW_MAX_PRELOAD_TAPS,
-                     ROCKE_DCONV_DW_CPL_MAX_ACC);
-        }
+        rocke_spec_set_reason(reason, reason_cap, "stride_skip needs cpl > 1 and stride > 1");
         return false;
+    }
+    if(spec->block_h < 0 || (spec->block_h && spec->cpl == 1))
+    {
+        if(reason && reason_cap > 0)
+            snprintf(reason, reason_cap, "block_h %d needs cpl > 1 (and >= 0)", spec->block_h);
+        return false;
+    }
+    {
+        const int acc = rocke_direct_depthwise_acc_rows(spec);
+        if(spec->cpl > 1
+           && (spec->cpl * taps > ROCKE_DCONV_DW_MAX_PRELOAD_TAPS
+               || spec->cpl * spec->block_w * acc > ROCKE_DCONV_DW_CPL_MAX_ACC))
+        {
+            /* Past these the packed weights or accumulator slots spill. */
+            if(reason && reason_cap > 0)
+            {
+                snprintf(reason,
+                         reason_cap,
+                         "cpl=%d holds %d weights and %d accumulator-rows per lane "
+                         "(max %d / %d)",
+                         spec->cpl,
+                         spec->cpl * taps,
+                         spec->cpl * spec->block_w * acc,
+                         ROCKE_DCONV_DW_MAX_PRELOAD_TAPS,
+                         ROCKE_DCONV_DW_CPL_MAX_ACC);
+            }
+            return false;
+        }
     }
     block_ch = rocke_direct_depthwise_block_ch(spec);
     (void)block_ch;

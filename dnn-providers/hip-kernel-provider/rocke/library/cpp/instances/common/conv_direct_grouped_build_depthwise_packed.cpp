@@ -219,6 +219,14 @@ rocke_kernel_def_t* rocke_dconv_build_depthwise_packed(rocke_ir_builder_t* b,
     const int S = p->stride;
     const int KH = p->KH;
     const int KW = p->KW;
+    /* stride_skip (SS): accumulator rows = ceil(KH / S); loop period PER = S * NA. */
+    const bool SS = (spec->stride_skip != 0);
+    const int BH = spec->block_h;
+    const int NA = SS ? (KH + S - 1) / S : KH; /* ceil(KH/S) if SS else KH */
+    const int PER = SS ? S * NA : KH;
+    /* Y0: streaming row index of the first row in a whole-image block (0 for a
+     * row block since y0 is computed at runtime; p->PAD for the whole-image case). */
+    const int Y0 = BH ? 0 : p->PAD;
 
     rocke_attr_set_int(b, &b->kernel->attrs, "max_workgroup_size", THREADS);
     rocke_dconv_params_t params;
@@ -236,7 +244,28 @@ rocke_kernel_def_t* rocke_dconv_build_depthwise_packed(rocke_ir_builder_t* b,
     rocke_value_t* tid = rocke_b_thread_id_x(b);
     rocke_value_t* bx = rocke_b_block_id_x(b);
     rocke_value_t* by = rocke_b_block_id_y(b);
-    rocke_value_t* n = rocke_b_block_id_z(b);
+    /* block_h: z = n * n_h + row_block; decode n and the block's first output row. */
+    rocke_value_t* n;
+    rocke_value_t* y0_v = NULL; /* runtime y0 when BH > 0 */
+    if(BH)
+    {
+        /* Python order: const_i32(BH) -> const_i32(BH-1) -> add(p_Ho,BH-1) -> div
+         * -> block_id_z() -> div(bz,n_h) -> mod(bz,n_h) -> mul(mod,c_bh) -> const_i32(S)
+         * -> mul(inner,S). Use explicit temporaries to enforce left-to-right order. */
+        rocke_value_t* c_bh = rocke_b_const_i32(b, BH);
+        rocke_value_t* n_h
+            = rocke_b_div(b, rocke_b_add(b, params.p_Ho, rocke_b_const_i32(b, BH - 1)), c_bh);
+        rocke_value_t* bz = rocke_b_block_id_z(b);
+        n = rocke_b_div(b, bz, n_h);
+        rocke_value_t* bz_mod = rocke_b_mod(b, bz, n_h);
+        rocke_value_t* inner = rocke_b_mul(b, bz_mod, c_bh);
+        rocke_value_t* c_S = rocke_b_const_i32(b, S);
+        y0_v = rocke_b_mul(b, inner, c_S);
+    }
+    else
+    {
+        n = rocke_b_block_id_z(b);
+    }
     rocke_value_t* q_tile_start = rocke_b_mul(b, bx, rocke_b_const_i32(b, BLOCK_W));
     rocke_value_t* ch = dwp_channel(b, by, tid, THREADS, CPL);
     rocke_value_t* ch_in_range = rocke_b_cmp_lt(b, ch, params.p_groups);
@@ -277,14 +306,34 @@ rocke_kernel_def_t* rocke_dconv_build_depthwise_packed(rocke_ir_builder_t* b,
         }
     }
 
-    /* Streaming loop bounds and column terms as in build_direct_depthwise. */
-    rocke_value_t* c_KH = rocke_b_const_i32(b, KH);
+    /* Streaming loop bounds and column terms as in build_direct_depthwise.
+     * SS: loop period PER = S * NA; BH: n_iters_v is a row-block range. */
+    rocke_value_t* c_KH = rocke_b_const_i32(b, PER);
     rocke_value_t* c_stride_rv = rocke_b_const_i32(b, S);
     rocke_value_t* n_iters_v = rocke_b_add(b, p_Hi, rocke_b_const_i32(b, KH - 1));
-    rocke_value_t* n_fma_groups_v
-        = rocke_b_div(b, rocke_b_add(b, p_Hi, rocke_b_const_i32(b, KH - 1)), c_KH);
-    rocke_value_t* n_groups_v
-        = rocke_b_div(b, rocke_b_add(b, p_Hi, rocke_b_const_i32(b, p->PAD + KH - 1)), c_KH);
+    rocke_value_t* n_fma_groups_v;
+    rocke_value_t* n_groups_v;
+    if(BH)
+    {
+        rocke_value_t* y_end = rocke_b_smin(
+            b, n_iters_v, rocke_b_add(b, y0_v, rocke_b_const_i32(b, (BH - 1) * S + KH)));
+        n_iters_v = rocke_b_sub(b, y_end, y0_v);
+        n_fma_groups_v
+            = rocke_b_div(b, rocke_b_add(b, n_iters_v, rocke_b_const_i32(b, PER - 1)), c_KH);
+        n_groups_v = n_fma_groups_v;
+    }
+    else if(SS)
+    {
+        n_fma_groups_v = rocke_b_div(b, rocke_b_add(b, p_Hi, rocke_b_const_i32(b, PER - 1)), c_KH);
+        n_groups_v = rocke_b_div(
+            b, rocke_b_add(b, p_Hi, rocke_b_const_i32(b, KH - 1 - p->PAD + PER - 1)), c_KH);
+    }
+    else
+    {
+        n_fma_groups_v = rocke_b_div(b, rocke_b_add(b, p_Hi, rocke_b_const_i32(b, KH - 1)), c_KH);
+        n_groups_v
+            = rocke_b_div(b, rocke_b_add(b, p_Hi, rocke_b_const_i32(b, p->PAD + KH - 1)), c_KH);
+    }
 
     /* Distinct input columns in first-tap order. */
     std::vector<int> cols;
@@ -315,29 +364,64 @@ rocke_kernel_def_t* rocke_dconv_build_depthwise_packed(rocke_ir_builder_t* b,
     dwp_col_terms(c, q_tile_start, c_stride_rv, cols);
     c.n_off = rocke_b_mul(b, n, params.p_A_stride_n);
 
-    /* Python: load_row(y) -- raw input vectors of streaming row y. */
+    /* Python: load_row(y) -- raw input vectors of streaming row y.
+     * BH: y is block-local; hi = y0 + y - PAD, bounds-checked on both sides.
+     * No BH: y is absolute (y = PAD + ...), hi = y - PAD >= 0 by construction. */
     auto load_row = [&](rocke_value_t* y, vals_t& out) {
-        rocke_value_t* hi = rocke_b_add(b, y, rocke_b_const_i32(b, -p->PAD));
-        rocke_value_t* row_ok = rocke_b_cmp_lt(b, hi, p_Hi);
+        rocke_value_t* hi;
+        rocke_value_t* row_ok;
+        if(BH)
+        {
+            /* Python: hi = add(add(y0,y), -PAD). Force left-to-right: inner first. */
+            rocke_value_t* inner_hi = rocke_b_add(b, y0_v, y);
+            rocke_value_t* neg_pad = rocke_b_const_i32(b, -p->PAD);
+            hi = rocke_b_add(b, inner_hi, neg_pad);
+            /* Python: land(cmp_ge(hi,0), cmp_lt(hi,Hi)) -- emit ge before lt. */
+            rocke_value_t* ge_hi = rocke_b_cmp_ge(b, hi, c0);
+            rocke_value_t* lt_hi = rocke_b_cmp_lt(b, hi, p_Hi);
+            row_ok = rocke_b_land(b, ge_hi, lt_hi);
+        }
+        else
+        {
+            hi = rocke_b_add(b, y, rocke_b_const_i32(b, -p->PAD));
+            row_ok = rocke_b_cmp_lt(b, hi, p_Hi);
+        }
         dwp_load_cols(c, hi, row_ok, out);
     };
-    /* Python: row_y(grp_iv, j). */
+    /* Python: row_y(grp_iv, j) = grp_iv * PER + Y0 + j. */
     auto row_y = [&](rocke_value_t* grp_iv, int j) {
         rocke_value_t* m = rocke_b_mul(b, grp_iv, c_KH);
-        return rocke_b_add(b, m, rocke_b_const_i32(b, p->PAD + j));
+        return rocke_b_add(b, m, rocke_b_const_i32(b, Y0 + j));
     };
-    /* Python: flush(grp_iv, j, y_j, slots); slots is flat [f * NP + k]. */
+    /* Python: flush(grp_iv, j, y_j, slots); slots is flat [f * NP + k].
+     * SS: only rows where (Y0 + j - (KH-1)) % S == 0 are output rows; skip others.
+     * BH: p_flush_rv is relative to y0, so we add y0_v before dividing. */
     auto flush = [&](rocke_value_t* grp_iv, int j, rocke_value_t* y_j, vals_t& slots) {
+        int rel;
+        int P_FLUSH_j;
+        if(SS)
+        {
+            rel = Y0 + j - (KH - 1);
+            if(rel % S)
+                return; /* not an output row for this j */
+            P_FLUSH_j = (rel / S) % NA;
+        }
+        else
+        {
+            P_FLUSH_j = (Y0 + j + 1) % KH;
+        }
         rocke_value_t* j_valid = rocke_b_cmp_lt(b, y_j, n_iters_v);
-        const int P_FLUSH_j = (p->PAD + j + 1) % KH;
         rocke_value_t* p_flush_rv = rocke_b_add(b, y_j, rocke_b_const_i32(b, -(KH - 1)));
+        if(BH)
+            p_flush_rv = rocke_b_add(b, y0_v, p_flush_rv);
+        bool flush_always = (SS || BH) ? (Y0 + j - (KH - 1) >= 0) : (j >= p->PAD);
         rocke_value_t* flush_ge;
-        rocke_value_t* should_flush;
-        if(j >= p->PAD)
+        if(flush_always)
             flush_ge = j_valid;
         else
             flush_ge = rocke_b_land(b, rocke_b_cmp_lt(b, c0, grp_iv), j_valid);
-        if(S == 1)
+        rocke_value_t* should_flush;
+        if(S == 1 || SS)
         {
             should_flush = flush_ge;
         }
@@ -365,7 +449,8 @@ rocke_kernel_def_t* rocke_dconv_build_depthwise_packed(rocke_ir_builder_t* b,
     int PF = (16 + n_cols - 1) / n_cols;
     if(PF > KH)
         PF = KH;
-    const int n_flat = KH * BLOCK_W;
+    /* NA accumulator rows (ceil(KH/S) with SS, KH otherwise). */
+    const int n_flat = NA * BLOCK_W;
     const int n_acc = n_flat * NP;
     std::vector<std::string> names;
     vals_t inits;
@@ -380,7 +465,7 @@ rocke_kernel_def_t* rocke_dconv_build_depthwise_packed(rocke_ir_builder_t* b,
     for(int k = 0; k < PF; ++k)
     {
         vals_t row;
-        load_row(rocke_b_const_i32(b, p->PAD + k), row);
+        load_row(rocke_b_const_i32(b, Y0 + k), row);
         for(int i = 0; i < n_cols; ++i)
         {
             names.push_back("dwp_a_r" + std::to_string(k) + "_c" + std::to_string(cols[(size_t)i]));
@@ -410,7 +495,8 @@ rocke_kernel_def_t* rocke_dconv_build_depthwise_packed(rocke_ir_builder_t* b,
         for(int k = 0; k < PF; ++k)
             window.emplace_back(fma_loop.iter_vars + n_acc + k * n_cols,
                                 fma_loop.iter_vars + n_acc + (k + 1) * n_cols);
-        for(int j = 0; j < KH; ++j)
+        /* Iterate PER rows per group (= KH normally; = S * ceil(KH/S) with SS). */
+        for(int j = 0; j < PER; ++j)
         {
             rocke_value_t* y_j = row_y(fma_loop.iv, j);
             {
@@ -435,7 +521,20 @@ rocke_kernel_def_t* rocke_dconv_build_depthwise_packed(rocke_ir_builder_t* b,
                     const vals_t& a = a_row[(size_t)col_idx[(size_t)(w_out * S + s_const)]];
                     for(int r_const = 0; r_const < KH; ++r_const)
                     {
-                        const int idx = ((p->PAD + j - r_const + KH) % KH) * BLOCK_W + w_out;
+                        int idx;
+                        if(SS)
+                        {
+                            /* Only accumulate for slot row (Y0 + j - r_const) if it
+                             * is an output row (divisible by S). */
+                            const int rel = Y0 + j - r_const;
+                            if(rel % S)
+                                continue;
+                            idx = ((rel / S) % NA) * BLOCK_W + w_out;
+                        }
+                        else
+                        {
+                            idx = ((Y0 + j - r_const + KH) % KH) * BLOCK_W + w_out;
+                        }
                         const vals_t& w = weights[r_const][s_const];
                         for(int k = 0; k < NP; ++k)
                             slots[(size_t)(idx * NP + k)] = rocke_b_vector_fma(
@@ -474,7 +573,7 @@ rocke_kernel_def_t* rocke_dconv_build_depthwise_packed(rocke_ir_builder_t* b,
     rocke_b_region_enter(b, flush_loop.body);
     {
         vals_t slots(flush_loop.iter_vars, flush_loop.iter_vars + n_acc);
-        for(int j = 0; j < KH; ++j)
+        for(int j = 0; j < PER; ++j)
         {
             rocke_value_t* y_j = row_y(flush_loop.iv, j);
             flush(flush_loop.iv, j, y_j, slots);

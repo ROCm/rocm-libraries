@@ -296,11 +296,48 @@ _SPATIAL_SHAPES: List[_Shape] = [
 # streaming row), a block shorter than the filter, and an 11x11 filter whose
 # prefetch window rotates across block-local row groups.
 _SPATIAL_ROW_BLOCK_CASES: List[Tuple[_Shape, int]] = [
-    (_Shape("sp_bh_k5_N2H37W23_g3", N=2, H=37, W=23, groups=3, cpg=1, KH=5, KW=5, PAD=2), 8),
+    (
+        _Shape(
+            "sp_bh_k5_N2H37W23_g3", N=2, H=37, W=23, groups=3, cpg=1, KH=5, KW=5, PAD=2
+        ),
+        8,
+    ),
     (_Shape("sp_bh_k3s2_N2H29W17_g3", N=2, H=29, W=17, groups=3, cpg=1, stride=2), 4),
-    (_Shape("sp_bh_k7s2_N1H31W13_g5", N=1, H=31, W=13, groups=5, cpg=1, KH=7, KW=7, PAD=3, stride=2), 3),
-    (_Shape("sp_bh_k5_N1H20W40_g3", N=1, H=20, W=40, groups=3, cpg=1, KH=5, KW=5, PAD=2), 1),
-    (_Shape("sp_bh_k11_N1H70W33_g3", N=1, H=70, W=33, groups=3, cpg=1, KH=11, KW=11, PAD=5), 16),
+    (
+        _Shape(
+            "sp_bh_k7s2_N1H31W13_g5",
+            N=1,
+            H=31,
+            W=13,
+            groups=5,
+            cpg=1,
+            KH=7,
+            KW=7,
+            PAD=3,
+            stride=2,
+        ),
+        3,
+    ),
+    (
+        _Shape(
+            "sp_bh_k5_N1H20W40_g3", N=1, H=20, W=40, groups=3, cpg=1, KH=5, KW=5, PAD=2
+        ),
+        1,
+    ),
+    (
+        _Shape(
+            "sp_bh_k11_N1H70W33_g3",
+            N=1,
+            H=70,
+            W=33,
+            groups=3,
+            cpg=1,
+            KH=11,
+            KW=11,
+            PAD=5,
+        ),
+        16,
+    ),
 ]
 
 
