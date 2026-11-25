@@ -2869,12 +2869,16 @@ double compute_tile_latency(const problem_t& problem,
   // of useful problem volume to launched volume; the kernel still pays for
   // the launched volume, so per-iter latency scales by 1/utilization.
   const double utilization = calculate_work_utilization(problem, config);
+  // gfx1250: the edge-waste penalties are applied with a fitted exponent
+  // (GFX1250_FIT2_UTILIZATION_EXPONENT).
+  const double util_exponent =
+      hardware.is_cdna5() ? heuristic_defaults_t::GFX1250_FIT2_UTILIZATION_EXPONENT : 1.0;
   const double effective_tile_penalty =
-      (utilization > 1e-9) ? (1.0 / utilization) : 1.0;
+      (utilization > 1e-9) ? std::pow(1.0 / utilization, util_exponent) : 1.0;
   // The compute terms' penalty leaves out sub-MFMA waste, which L_compute already pays.
   const double compute_utilization = calculate_compute_utilization(problem, config);
   const double compute_tile_penalty =
-      (compute_utilization > 1e-9) ? (1.0 / compute_utilization) : 1.0;
+      (compute_utilization > 1e-9) ? std::pow(1.0 / compute_utilization, util_exponent) : 1.0;
 
   // ---------------------------------------------------------------------------
   // 1. Prologue (PGR first-load stall)
@@ -2902,8 +2906,10 @@ double compute_tile_latency(const problem_t& problem,
                  heuristic_defaults_t::GFX1250_TDM_DRAM_LAT_CLK_PER_BPC * dram_iter_bytes / L_iter;
     }
     // gfx1250 refit: scale of the load-to-use latencies.
-    lat_l2 *= heuristic_defaults_t::GFX1250_FIT_LATENCY_SCALE;
-    lat_dram *= heuristic_defaults_t::GFX1250_FIT_LATENCY_SCALE;
+    lat_l2 *= heuristic_defaults_t::GFX1250_FIT_LATENCY_SCALE *
+              heuristic_defaults_t::GFX1250_FIT2_LATENCY_SCALE;
+    lat_dram *= heuristic_defaults_t::GFX1250_FIT_LATENCY_SCALE *
+                heuristic_defaults_t::GFX1250_FIT2_LATENCY_SCALE;
     const double lat_load = l2_hit * lat_l2 + (1.0 - l2_hit) * lat_dram;
     const double gl2_lead = hardware.is_cdna5()
                                 ? static_cast<double>(std::max(tp.prefetch_gl2, 0)) * L_iter
@@ -2922,7 +2928,9 @@ double compute_tile_latency(const problem_t& problem,
   // On gfx1250 the prologue's prefetch is issued and waited on even when K is shorter than DepthU;
   // the tail loop then loads the window again.
   const bool prologue_any = hardware.is_cdna5() && problem.size.k > 0;
-  const double L_prologue = (k_iters > 0 || prologue_any) ? L_mem + L_latency_first : 0.0;
+  const double L_prologue =
+      ((k_iters > 0 || prologue_any) ? L_mem + L_latency_first : 0.0) *
+      (hardware.is_cdna5() ? heuristic_defaults_t::GFX1250_FIT2_PROLOGUE_SCALE : 1.0);
 
   // ---------------------------------------------------------------------------
   // 2. MainLoop = L_main + L_ngll + L_nll + L_tail + L_pgr_stall + bookkeeping
@@ -2972,7 +2980,8 @@ double compute_tile_latency(const problem_t& problem,
     if (tp.tdm_inst != 0) {
       const double depth = static_cast<double>(pgr);
       const double c1    = L_compute * compute_tile_penalty;
-      const double fixed = heuristic_defaults_t::GFX1250_KITER_FIXED_CLK;
+      const double fixed = heuristic_defaults_t::GFX1250_KITER_FIXED_CLK *
+                           heuristic_defaults_t::GFX1250_FIT2_KITER_FIXED_SCALE;
       const double c_it  = c1 + fixed;
       // Iteration time without a latency stall: what L_main and L_loop_overhead charge per iteration.
       const double T_nostall = std::max({smax(c1, l2_cycles, heuristic_defaults_t::GFX1250_KLOOP_L2_OVERLAP),
@@ -2981,7 +2990,8 @@ double compute_tile_latency(const problem_t& problem,
                                fixed;
       // Loaded latency in cycles at iteration time T: lat0 + clk_per_bpc * bytes / T.
       // (gfx1250 refit: the latencies, lat0 and the throughput-dependent part, are scaled.)
-      const double lat_scale = heuristic_defaults_t::GFX1250_FIT_LATENCY_SCALE;
+      const double lat_scale = heuristic_defaults_t::GFX1250_FIT_LATENCY_SCALE *
+                               heuristic_defaults_t::GFX1250_FIT2_LATENCY_SCALE;
       const double l2_lat0   = lat_scale * heuristic_defaults_t::GFX1250_TDM_L2_LAT0_CLK;
       const double dram_lat0 = lat_scale * heuristic_defaults_t::GFX1250_TDM_DRAM_LAT0_CLK;
       const double l2_load   = lat_scale * heuristic_defaults_t::GFX1250_TDM_L2_LAT_CLK_PER_BPC * l2_iter_bytes;
@@ -3069,11 +3079,12 @@ double compute_tile_latency(const problem_t& problem,
   // measured fixed cost of a K-iteration, which grows with the workgroup's waves.
   const double pgr_loop_overlap =
       (pgr >= 3) ? (1.0 / static_cast<double>(pgr - 1)) : 1.0;
-  const double L_loop_overhead =
-      hardware.is_cdna5()
-          ? heuristic_defaults_t::GFX1250_KITER_FIXED_CLK *
-                static_cast<double>(k_iters)
-          : heuristic_defaults_t::K_ITER_LOOP_OVERHEAD * static_cast<double>(k_iters) * pgr_loop_overlap;
+  const double L_loop_overhead = hardware.is_cdna5()
+                                     ? heuristic_defaults_t::GFX1250_KITER_FIXED_CLK *
+                                           heuristic_defaults_t::GFX1250_FIT2_KITER_FIXED_SCALE *
+                                           static_cast<double>(k_iters)
+                                     : heuristic_defaults_t::K_ITER_LOOP_OVERHEAD *
+                                           static_cast<double>(k_iters) * pgr_loop_overlap;
 
   // A multicast load completes only when every peer has issued it, so cluster peers advance in
   // lockstep through a cluster-barrier handshake at each in-loop tensor load, plus one before
@@ -3208,7 +3219,9 @@ double compute_tile_latency(const problem_t& problem,
     if (!xcd_aligned) weight_tile_total = 1.0;
   }
   // LocalSplitU LDS reduction, charged once per tile (0 when lsu <= 1).
-  const double L_lsu_reduce = compute_lsu_reduction_latency(problem, hardware, config, context);
+  const double L_lsu_reduce =
+      compute_lsu_reduction_latency(problem, hardware, config, context) *
+      (hardware.is_cdna5() ? heuristic_defaults_t::GFX1250_FIT2_LSU_SCALE : 1.0);
   double L_tile_total = (L_prologue + L_mainloop + L_epilogue + L_lsu_reduce) * weight_tile_total;
   // gfx1250: work outside the tile model that every tile round repeats, growing with the output tile and one
   // K-iteration of A and B (time vs tile rounds of real kernels).
@@ -3235,14 +3248,17 @@ double compute_tile_latency(const problem_t& problem,
   // tensor-DMA writes at its bandwidth), matrix pipes and store path, so r of them take one tile's time plus r - 1
   // such busy times (measured up to 4 workgroups per WGP).
   if (wmma_bf16 && wgs_per_cu > 1.0 && k_iters > 0) {
-    const double r     = std::min(wgs_per_cu, heuristic_defaults_t::GFX1250_MAX_MEASURED_RESIDENT_WGS);
+    const double r     = std::min(wgs_per_cu, heuristic_defaults_t::GFX1250_FIT2_MAX_RESIDENT_WGS);
     const double mt_k  = static_cast<double>(MT_K);
     const double lds_b = (static_cast<double>(config.mt.m) * (static_cast<double>(waves.n) + 1.0) +
                           static_cast<double>(config.mt.n) * (static_cast<double>(waves.m) + 1.0)) *
                          mt_k * context.a_bytes;
     const double busy  = lds_b / static_cast<double>(hardware_t::get_lds_read_bytes_per_clk(hardware.arch)) +
                         n_mi / wg_simds * wmma_bf16_issue(wg_wps * r);
-    L_tile_total = (L_tile_total + (r - 1.0) * (busy * static_cast<double>(k_iters) + L_epilogue)) / r;
+    L_tile_total =
+        (L_tile_total + (r - 1.0) * heuristic_defaults_t::GFX1250_FIT2_RESIDENT_BUSY_SCALE *
+                            (busy * static_cast<double>(k_iters) + L_epilogue)) /
+        r;
   }
 
   if (debug) {
@@ -3527,9 +3543,11 @@ double compute_total_latency(const problem_t& problem,
                            static_cast<double>(config.mt.n) * context.b_bytes) *
                           static_cast<double>(config.mt.k) / 1024.0;
     const double occ = static_cast<double>(std::max(config.occupancy, 1));
-    total_latency += h::GFX1250_KERNEL_FIXED_CLK + h::GFX1250_KERNEL_FIXED_CLK_PER_KIB_D * d_kib +
-                     h::GFX1250_KERNEL_FIXED_CLK_PER_KIB_OP * op_kib +
-                     h::GFX1250_KERNEL_FIXED_CLK_PER_LOG2_OCC * std::log2(occ);
+    total_latency +=
+        h::GFX1250_FIT2_KERNEL_FIXED_SCALE *
+            (h::GFX1250_KERNEL_FIXED_CLK + h::GFX1250_KERNEL_FIXED_CLK_PER_KIB_D * d_kib +
+             h::GFX1250_KERNEL_FIXED_CLK_PER_KIB_OP * op_kib) +
+        h::GFX1250_KERNEL_FIXED_CLK_PER_LOG2_OCC * std::log2(occ);
   }
 
   //  5) Add parallel reduction kernel cost (separate kernel launch, 0 if not parallel)

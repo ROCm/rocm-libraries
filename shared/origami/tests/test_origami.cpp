@@ -429,7 +429,17 @@ TEST_CASE("Origami: select_workgroup_mapping keeps the XCC remap off gfx1250", "
 TEST_CASE("origami: negative_occupancy", "[origami]") {
   for (int gpu_arch : test_architectures) {
     DYNAMIC_SECTION("gfx" << gpu_arch << " - test negative occupancy") {
-      auto hardware              = make_hardware(gpu_arch);
+      // gfx1250 with its architecture constants: make_hardware(1250) reuses the gfx950
+      // placeholders, whose bandwidths make the gfx1250 model charge both tiles alike whatever
+      // their M.
+      auto hardware              = gpu_arch == 1250 ? origami::hardware_t::get_hardware_for_arch(
+                                             origami::hardware_t::architecture_t::gfx1250,
+                                             256,
+                                             327680,
+                                             512 * 1024,
+                                             4 << 20,
+                                             2400000)
+                                                    : make_hardware(gpu_arch);
       origami::problem_t problem = {
           .size            = {32, 800000, 16},
           .batch           = 1,

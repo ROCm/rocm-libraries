@@ -3008,13 +3008,22 @@ TEST_CASE("GEMM: gfx1250 multicast cuts the L2 requests of a 256x256 K-loop",
 TEST_CASE("GEMM: co-resident BF16 WMMA workgroups share only LDS and the matrix pipes",
           "[gemm][gfx1250][occupancy]") {
   const auto hw = gfx1250_hardware();
-  auto one      = gfx1250_config(128, 128, 64, 3);
+  auto one      = gfx1250_config(128, 128, 32, 3);
   auto two      = one;
   two.occupancy = 2;
-  // Thousands of tiles: two resident workgroups per WGP hide each other's waits.
+  // Thousands of tiles: two resident workgroups per WGP hide each other's waits, here the fixed
+  // cost of each K-iteration, which is long next to the LDS reads and WMMAs of a DepthU-32
+  // iteration.
   const auto big = make_problem(8192, 8192, 4096);
   REQUIRE(origami::gemm::compute_total_latency(big, hw, two) <
           origami::gemm::compute_total_latency(big, hw, one));
+  // A 256x256x64 tile keeps LDS and the matrix pipes busy for most of its iteration: the second
+  // workgroup queues behind the first and gains nothing.
+  auto one_wide      = gfx1250_config(256, 256, 64, 3);
+  auto two_wide      = one_wide;
+  two_wide.occupancy = 2;
+  REQUIRE(origami::gemm::compute_total_latency(big, hw, two_wide) >
+          origami::gemm::compute_total_latency(big, hw, one_wide));
   // One wave of tiles: no WGP holds a second workgroup; only the per-kernel occupancy cost differs.
   const auto one_wave = make_problem(2048, 2048, 4096);
   REQUIRE(origami::gemm::compute_total_latency(one_wave, hw, two) - origami::gemm::compute_total_latency(one_wave, hw, one) ==
@@ -3178,8 +3187,11 @@ TEST_CASE("GEMM: PrefetchGL2 hides DRAM latency behind the L2", "[gemm][gfx1250]
   const auto problem = make_problem(1024, 1024, 16384);
 
   auto latency = [&](const origami::hardware_t& h, int prefetch_gl2) {
-    auto c                   = gfx1250_config(128, 128, 64);
-    c.tensile().prefetch_gl2 = prefetch_gl2;
+    auto c = gfx1250_config(128, 128, 64);
+    // One stage of global-read prefetch: with two, the K-iteration already covers the load latency
+    // here.
+    c.tensile().prefetch_global_read = 1;
+    c.tensile().prefetch_gl2         = prefetch_gl2;
     return origami::gemm::compute_total_latency(problem, h, c);
   };
   REQUIRE(latency(hw, 2) < latency(hw, 0));

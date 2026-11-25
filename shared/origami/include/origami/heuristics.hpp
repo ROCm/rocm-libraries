@@ -252,6 +252,30 @@ struct heuristic_defaults_t {
   /// applied as its ratio, max(1, S_fit / occ) / max(1, S_dev / occ).
   static constexpr double GFX1250_FIT_EPILOGUE_OCC_SATURATION     = 2.5326976116052373;
   static constexpr double GFX1250_FIT_EPILOGUE_OCC_SATURATION_DEV = 2.0;
+
+  /// Second gfx1250 refit, on the measured top-30 candidates of 2,538 bf16 TN shapes (objective:
+  /// rank correlation with the measured times within a shape, and the pick's regret), checked on
+  /// 602 held-out shapes and on the top-50 candidates of the 200 OOB shapes.  All are applied on
+  /// top of the constants and GFX1250_FIT_* above (1.0 = unchanged for the scales). Scale of the
+  /// fixed cost of a K-iteration (GFX1250_KITER_FIXED_CLK).
+  static constexpr double GFX1250_FIT2_KITER_FIXED_SCALE = 3.0;
+  /// Scale of the per-kernel fixed cost (GFX1250_KERNEL_FIXED_CLK and its per-KiB parts; not the
+  /// occupancy part).
+  static constexpr double GFX1250_FIT2_KERNEL_FIXED_SCALE = 3.0;
+  /// Scale of the K-loop load-to-use latencies, on top of GFX1250_FIT_LATENCY_SCALE.
+  static constexpr double GFX1250_FIT2_LATENCY_SCALE = 0.5;
+  /// Scale of the prologue (first load's memory time and latency): 0 drops the term.
+  static constexpr double GFX1250_FIT2_PROLOGUE_SCALE = 0.0;
+  /// Co-residency: scale of the busy time each further resident workgroup adds, and the most
+  /// resident workgroups per WGP the law is applied to (replaces GFX1250_MAX_MEASURED_RESIDENT_WGS
+  /// there).
+  static constexpr double GFX1250_FIT2_RESIDENT_BUSY_SCALE = 2.0;
+  static constexpr double GFX1250_FIT2_MAX_RESIDENT_WGS    = 2.0;
+  /// Exponent of the edge-waste penalties (1 / utilization)^e of the tile and compute terms (1 =
+  /// full charge).
+  static constexpr double GFX1250_FIT2_UTILIZATION_EXPONENT = 0.5;
+  /// Scale of the LocalSplitU LDS reduction.
+  static constexpr double GFX1250_FIT2_LSU_SCALE = 3.5;
 };
 
 /**
