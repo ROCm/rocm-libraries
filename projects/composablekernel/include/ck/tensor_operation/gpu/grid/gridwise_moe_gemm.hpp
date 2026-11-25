@@ -1800,7 +1800,7 @@ struct GridwiseMoeGemm : public GridwiseGemm_xdl_cshuffle_base<
                                     {
                                         gate *= 16;
                                     }
-                                    gate = math::max(gate, 0.0f);
+                                    gate                    = math::max(gate, 0.0f);
                                     c_thread_buf_fp32(cidx) = gate * gate;
                                 }
                             }
@@ -1912,7 +1912,7 @@ struct GridwiseMoeGemm : public GridwiseGemm_xdl_cshuffle_base<
                                     {
                                         gate = gate * topk_weights.template AsType<float>()[m4];
                                     }
-                                    gate = math::max(gate, 0.0f);
+                                    gate                    = math::max(gate, 0.0f);
                                     c_thread_buf_fp32(cidx) = gate * gate;
                                 }
                             }
@@ -2451,7 +2451,7 @@ struct GridwiseMoeGemm : public GridwiseGemm_xdl_cshuffle_base<
                                     {
                                         gate *= 16;
                                     }
-                                    gate = math::max(gate, 0.0f);
+                                    gate                    = math::max(gate, 0.0f);
                                     c_thread_buf_fp32(cidx) = gate * gate;
                                 }
                             }
@@ -2563,7 +2563,7 @@ struct GridwiseMoeGemm : public GridwiseGemm_xdl_cshuffle_base<
                                     {
                                         gate = gate * topk_weights.template AsType<float>()[m4];
                                     }
-                                    gate = math::max(gate, 0.0f);
+                                    gate                    = math::max(gate, 0.0f);
                                     c_thread_buf_fp32(cidx) = gate * gate;
                                 }
                             }

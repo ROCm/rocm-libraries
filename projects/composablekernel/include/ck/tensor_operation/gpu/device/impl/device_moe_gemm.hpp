@@ -109,7 +109,7 @@ struct DeviceMoeGemm : public DeviceGemmMultipleDSplitKBPreShuffle<ALayout,
     static constexpr auto NXdlPerWave64    = WarpTileConfig64.At(3);
     static constexpr auto NXdlPerWave32    = WarpTileConfig32.At(3);
     static constexpr index_t NumDTensor    = DsDataType::Size();
-    static constexpr bool IsGateUp = (ActivationOP != Activation::relu2);
+    static constexpr bool IsGateUp         = (ActivationOP != Activation::relu2);
     template <typename WarpTileConfig>
     using GridwiseGemmBase =
         GridwiseMoeGemm<ALayout,
