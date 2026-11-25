@@ -59,6 +59,13 @@ FAMILY_MAP = {
         "rj_config": "gfx90a_mi210_kmd.json",
         "cus": [104],
     },
+    # gfx1250, 256 CUs (gfx1250100). rocjitsu's gfx1250 config describes a 4 GPU node of identical
+    # devices. The CU-correction rewrites the shared device block, so each of them reports 256 CUs.
+    "gfx125X-dcgpu": {
+        "arch": "gfx1250",
+        "rj_config": "gfx1250_mi455x_kmd_4gpu.json",
+        "cus": [256],
+    },
 }
 
 # StaticFDBSync's default thread fan-out (min(hw_concurrency, 32)) can deadlock/stall under the
