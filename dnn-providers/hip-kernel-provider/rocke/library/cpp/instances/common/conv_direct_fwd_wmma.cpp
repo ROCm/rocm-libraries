@@ -539,9 +539,7 @@ bool rocke_direct_fwd_wmma_is_valid_spec(const rocke_direct_fwd_wmma_spec_t* spe
     {
         int issuers = spec->phase_split ? 2 * spec->tile_n + 1 : spec->tile_n + 1;
         if(spec->split_barrier || spec->prefetch)
-            ROCKE_SPEC_FAIL(reason,
-                            reason_cap,
-                            "pingpong replaces split_barrier and prefetch");
+            ROCKE_SPEC_FAIL(reason, reason_cap, "pingpong replaces split_barrier and prefetch");
         if(nw % 2 || issuers > nw / 2)
             ROCKE_SPEC_FAIL(reason,
                             reason_cap,
