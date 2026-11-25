@@ -20,6 +20,8 @@ instruction, so optPad stays at lrvw either way, and at or above it the writer
 issues b128s. See test_cap_equals_per_instruction_width_on_every_shipped_type.
 """
 
+import copy
+
 import pytest
 
 from tensilelite.SolutionStructs.LdsPadding import MAX_LOCAL_READ_BYTES
@@ -133,3 +135,77 @@ def test_cap_is_b128():
     LocalWrite side -- this constant and the pad rule must be revisited
     together. b192 does not count: rocisa expands it to b128 + b64."""
     assert MAX_LOCAL_READ_BYTES == 16
+
+
+# ---------------------------------------------------------------------------
+# End to end through Solution: the pad calcLdsPad hands the kernel writer
+# ---------------------------------------------------------------------------
+
+@pytest.fixture
+def _restore_globals():
+    from tensilelite.Common.GlobalParameters import defaultSolution, globalParameters
+    from tensilelite.Common.ValidParameters import validParameters
+    from test_halfplr_streamk_rejects import _PRISTINE_DEFAULT_SOLUTION
+
+    saved = [(d, copy.deepcopy(dict(d)))
+             for d in (globalParameters, validParameters, defaultSolution)]
+    defaultSolution.clear()
+    defaultSolution.update(copy.deepcopy(_PRISTINE_DEFAULT_SOLUTION))
+    yield
+    for d, value in saved:
+        d.clear()
+        d.update(value)
+
+
+def _derive_bf16_tn(arch, assembler, lrvw):
+    """The gfx1151 repro: bf16 TN, MT32x64x32, MI16x16x16, wave32, LdsPad auto."""
+    from tensilelite.Common.Architectures import gfxToIsa
+    from tensilelite.Common.GlobalParameters import assignGlobalParameters
+    from tensilelite.SolutionStructs.Solution import Solution
+    from tensilelite.SolutionStructs.Validators.MatrixInstruction import \
+        matrixInstructionToMIParameters
+    from toolchain_test_helpers import shared_isa_info_map_or_skip
+
+    iim = shared_isa_info_map_or_skip(arch)
+    assignGlobalParameters({}, iim)
+    isa = gfxToIsa(arch)
+    problemType = {
+        "OperationType": "GEMM", "DataType": "B", "DestDataType": "B", "ComputeDataType": "s",
+        "HighPrecisionAccumulate": True, "TransposeA": True, "TransposeB": False,
+        "UseBeta": True, "Batched": True,
+    }
+    mi = [16, 16, 16, 1, 1, 1, 2, 2, 2]
+    params = {
+        "ProblemType": problemType, "ISA": isa, "MatrixInstruction": mi, "WavefrontSize": 32,
+        "WorkGroup": [32, 4, 1], "DepthU": 32, "LocalReadVectorWidth": lrvw,
+        "LdsPadA": -1, "LdsPadB": -1, "LdsBlockSizePerPadA": -1, "LdsBlockSizePerPadB": -1,
+        "KernelLanguage": "Assembly", "PrefetchGlobalRead": 2, "PrefetchLocalRead": 1,
+    }
+    params.update(matrixInstructionToMIParameters(mi, isa, params["WavefrontSize"], problemType,
+                                                  params["WorkGroup"], iim))
+    return Solution(params, False, True, False, assembler, iim)
+
+
+@pytest.mark.parametrize("arch", ["gfx1100", "gfx1151"])
+def test_gfx11_wmma_auto_pad_is_one_instruction_width(_restore_globals, assembler, arch):
+    """32 B/lane rows (two b128 reads). The unclamped pad was 16 elements =
+    32 B = two instruction widths, which leaves the row stride an even
+    multiple of 16 B."""
+    sol = _derive_bf16_tn(arch, assembler, lrvw=16)
+    assert sol["Valid"]
+    assert sol["LocalReadVectorWidthA"] == 16
+    for tc in "AB":
+        assert sol[f"UnrollMajorLDS{tc}"]
+        padBytes = sol[f"LdsPad{tc}"] * 2
+        assert padBytes == MAX_LOCAL_READ_BYTES
+        stride = sol["DepthU"] * 2 + padBytes
+        assert (stride // MAX_LOCAL_READ_BYTES) % 2 == 1
+
+
+def test_single_instruction_row_keeps_its_pad(_restore_globals, assembler):
+    """A row that is one b128 read (lrvw 8 at bf16, readRegs 4) is not
+    clamped, so the MI16x16 doubling after the clamp still gives 2 * lrvw."""
+    sol = _derive_bf16_tn("gfx1201", assembler, lrvw=8)
+    assert sol["Valid"]
+    assert sol["LocalReadVectorWidthA"] == 8
+    assert sol["LdsPadA"] == sol["LdsPadB"] == 16
