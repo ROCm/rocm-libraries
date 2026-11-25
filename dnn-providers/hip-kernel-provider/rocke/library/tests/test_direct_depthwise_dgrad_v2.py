@@ -20,6 +20,7 @@ Run:
 from __future__ import annotations
 
 import ctypes
+from dataclasses import replace
 import unittest
 
 import numpy as np
@@ -159,7 +160,7 @@ class TestDepthwiseDgradSpecs(unittest.TestCase):
 
     def test_wmma_kernels_refuse_per_axis_padding(self):
         # The WMMA convolutions offset columns by PAD, except the forwards
-        # checked at the end.
+        # and the stride-1 dgrad checked at the end.
         from kernels.common.conv_direct_dgrad_wmma import (
             DirectDgradWmmaSpec,
             dgrad_wmma_reason,
@@ -180,10 +181,7 @@ class TestDepthwiseDgradSpecs(unittest.TestCase):
                 N=2, H=H, W=W, groups=1, cpg=C, kpg=K, dtype="bf16", pad_w=pad_w
             )
 
-        cases = (
-            (DirectDgradWmmaSpec, dgrad_wmma_reason, {}),
-            (FwdSmallcWmmaSpec, fwd_smallc_reason, dict(H=32, W=48, C=3, K=64)),
-        )
+        cases = ((FwdSmallcWmmaSpec, fwd_smallc_reason, dict(H=32, W=48, C=3, K=64)),)
         for cls, reason, shape in cases:
             with self.subTest(kernel=cls.__name__):
                 self.assertIsNone(reason(cls(problem=dense(-1, **shape))))
@@ -200,6 +198,16 @@ class TestDepthwiseDgradSpecs(unittest.TestCase):
         )
         self.assertIn(
             "pad_w", fwd_smallk_reason(FwdSmallkWmmaSpec(problem=dense(-2, **shape)))
+        )
+        # The WMMA dgrad offsets columns by PAD_W at stride 1 only.
+        self.assertIsNone(dgrad_wmma_reason(DirectDgradWmmaSpec(problem=dense(0))))
+        self.assertIn(
+            "pad_w", dgrad_wmma_reason(DirectDgradWmmaSpec(problem=dense(-2)))
+        )
+        strided = replace(dense(0), stride=2)
+        self.assertEqual(
+            dgrad_wmma_reason(DirectDgradWmmaSpec(problem=strided, tiles_c=2)),
+            "a column padding of its own serves stride 1 only",
         )
 
     def test_stem_wmma_kernels_refuse_per_axis_padding(self):
