@@ -1,7 +1,7 @@
 # gfx942 bf16 D128 causal prefill: QK lookahead and the `xcd_local` decode
 
-This change adds two opt-in levers to the gfx942 dense prefill kernel for bf16
-D128 causal attention on the persistent grid:
+This case study covers two opt-in levers added to the gfx942 dense prefill
+kernel for bf16 D128 causal attention on the persistent grid:
 
 - `qk_lookahead=True` turns on several changes to the tile body together. It
   double-buffers V^T as well as K, pipelines the tile loop one tile deep,
@@ -201,26 +201,26 @@ faster.
 
 | dtype | B | S | Hkv | qk_lookahead vs gfx942_dense default (%) | qk_lookahead vs AITER RTNA (%) | qk_lookahead vs AITER RTNE (%) | gfx942_dense default vs AITER RTNA (%) | qk_lookahead vs gfx942_dense default (×, range) | qk_lookahead vs AITER RTNA (×, range) | qk_lookahead vs AITER RTNE (×, range) | gfx942_dense default vs AITER RTNA (×, range) |
 |---|---:|---:|---:|---:|---:|---:|---:|---|---|---|---|
-| bf16 | 1 | 1024 | 8 | +33.6% | +37.2% | +43.6% | +3.3% | 1.336× (1.328–1.342) | 1.372× (1.358–1.406) | 1.436× (1.423–1.442) | 1.033× (1.017–1.047) |
-| bf16 | 1 | 1024 | 16 | +35.7% | +40.4% | +45.8% | +3.5% | 1.357× (1.348–1.368) | 1.404× (1.395–1.422) | 1.458× (1.434–1.462) | 1.035× (1.035–1.039) |
-| bf16 | 1 | 2048 | 8 | +28.6% | +10.4% | +16.1% | −14.2% | 1.286× (1.285–1.287) | 1.104× (1.103–1.104) | 1.161× (1.148–1.169) | 0.858× (0.858–0.859) |
-| bf16 | 1 | 2048 | 16 | +33.7% | +10.4% | +15.5% | −18.1% | 1.337× (1.335–1.348) | 1.104× (1.090–1.108) | 1.155× (1.145–1.161) | 0.819× (0.815–0.830) |
-| bf16 | 1 | 4096 | 8 | +36.8% | +5.9% | +10.1% | −22.6% | 1.368× (1.355–1.376) | 1.059× (1.054–1.060) | 1.101× (1.090–1.102) | 0.774× (0.771–0.777) |
-| bf16 | 1 | 4096 | 16 | +36.7% | +4.4% | +8.9% | −23.5% | 1.367× (1.365–1.372) | 1.044× (1.040–1.051) | 1.089× (1.085–1.091) | 0.765× (0.761–0.766) |
-| bf16 | 1 | 8192 | 8 | +37.1% | +6.5% | +10.4% | −22.3% | 1.371× (1.369–1.371) | 1.065× (1.062–1.065) | 1.104× (1.104–1.104) | 0.777× (0.775–0.778) |
-| bf16 | 1 | 8192 | 16 | +38.0% | +5.6% | +9.2% | −23.6% | 1.380× (1.377–1.386) | 1.056× (1.052–1.056) | 1.092× (1.092–1.096) | 0.764× (0.762–0.765) |
-| bf16 | 1 | 16384 | 8 | +46.3% | +12.9% | +18.4% | −22.8% | 1.463× (1.461–1.464) | 1.129× (1.128–1.130) | 1.184× (1.184–1.185) | 0.772× (0.771–0.772) |
-| bf16 | 16 | 4096 | 8 | +30.5% | +1.4% | +5.4% | −22.3% | 1.305× (1.302–1.306) | 1.014× (1.012–1.014) | 1.054× (1.049–1.055) | 0.777× (0.777–0.777) |
-| bf16 | 16 | 4096 | 16 | +39.9% | +0.6% | +4.4% | −28.1% | 1.399× (1.397–1.400) | 1.006× (1.005–1.006) | 1.044× (1.044–1.046) | 0.719× (0.719–0.719) |
-| bf16 | 16 | 8192 | 8 | +27.0% | **−2.3%** | +1.0% | −23.0% | 1.270× (1.267–1.271) | **0.977×** (0.977–0.978) | 1.010× (1.010–1.010) | 0.770× (0.769–0.771) |
-| **geomean** | | | | **+35.2%** | **+10.4%** | **+15.0%** | **−18.4%** | **1.352×** | **1.104×** | **1.150×** | **0.816×** |
+| bf16 | 1 | 1024 | 8 | +33.9% | +32.6% | +39.8% | −0.7% | 1.339× (1.311–1.353) | 1.326× (1.320–1.344) | 1.398× (1.394–1.422) | 0.993× (0.990–1.007) |
+| bf16 | 1 | 1024 | 16 | +36.5% | +34.2% | +41.7% | −1.6% | 1.365× (1.354–1.374) | 1.342× (1.333–1.346) | 1.417× (1.411–1.431) | 0.984× (0.977–0.986) |
+| bf16 | 1 | 2048 | 8 | +30.0% | +8.8% | +13.7% | −15.7% | 1.300× (1.288–1.307) | 1.088× (1.086–1.097) | 1.137× (1.136–1.147) | 0.843× (0.831–0.845) |
+| bf16 | 1 | 2048 | 16 | +33.6% | +10.3% | +13.7% | −18.0% | 1.336× (1.324–1.346) | 1.103× (1.078–1.104) | 1.137× (1.121–1.145) | 0.820× (0.814–0.826) |
+| bf16 | 1 | 4096 | 8 | +35.9% | +4.7% | +8.1% | −22.9% | 1.359× (1.354–1.364) | 1.047× (1.044–1.051) | 1.081× (1.079–1.087) | 0.771× (0.768–0.773) |
+| bf16 | 1 | 4096 | 16 | +37.3% | +4.2% | +8.0% | −24.1% | 1.373× (1.372–1.376) | 1.042× (1.042–1.044) | 1.080× (1.078–1.083) | 0.759× (0.758–0.759) |
+| bf16 | 1 | 8192 | 8 | +36.3% | +5.8% | +10.2% | −22.2% | 1.363× (1.357–1.369) | 1.058× (1.056–1.065) | 1.102× (1.101–1.103) | 0.778× (0.776–0.778) |
+| bf16 | 1 | 8192 | 16 | +36.7% | +5.2% | +9.2% | −23.3% | 1.367× (1.365–1.372) | 1.052× (1.047–1.055) | 1.092× (1.089–1.092) | 0.767× (0.767–0.772) |
+| bf16 | 1 | 16384 | 8 | +46.0% | +13.5% | +19.0% | −22.3% | 1.460× (1.458–1.461) | 1.135× (1.131–1.136) | 1.190× (1.187–1.190) | 0.777× (0.776–0.777) |
+| bf16 | 16 | 4096 | 8 | +29.8% | +2.3% | +5.8% | −21.2% | 1.298× (1.294–1.301) | 1.023× (1.020–1.025) | 1.058× (1.057–1.062) | 0.788× (0.788–0.788) |
+| bf16 | 16 | 4096 | 16 | +39.2% | +1.3% | +5.0% | −27.3% | 1.392× (1.386–1.394) | 1.013× (1.008–1.017) | 1.050× (1.046–1.051) | 0.727× (0.727–0.729) |
+| bf16 | 16 | 8192 | 8 | +29.2% | **−1.7%** | +2.5% | −23.9% | 1.292× (1.288–1.295) | **0.983×** (0.983–0.984) | 1.025× (1.024–1.025) | 0.761× (0.760–0.763) |
+| **geomean** | | | | **+35.3%** | **+9.6%** | **+14.1%** | **−19.0%** | **1.353×** | **1.096×** | **1.141×** | **0.810×** |
 
 At these measured configurations only:
 
 - `qk_lookahead` is faster than the gfx942_dense default on all 12 shapes.
 - It is faster than AITER RTNE, the equal-rounding comparison, on all 12 shapes.
 - It is faster than AITER RTNA on 11 of 12 shapes. It is slower at B=16, S=8192,
-  Hkv=8 (0.977×, −2.3%).
+  Hkv=8 (0.983×, −1.7%).
 
 ### Correctness
 
@@ -237,8 +237,8 @@ grid-stride rounds, non-default softmax scales (`4e-2`), the free knobs
 ## Architecture and configuration gating
 
 Both optimizations are implemented in `library/kernels/gfx942/attention_dense.py`
-on `Gfx942AttentionDenseSpec`; `xcd_local` lives in
-`library/kernels/common/attention_dense_decode.py` as `PersistXcdLocal`.
+on `Gfx942AttentionDenseSpec`; `xcd_local` is `PersistXcdLocal` in the same
+file.
 
 Architecture eligibility is enforced by the existing `arch != "gfx942"` checks in
 `supports_attention_dense(spec, arch=...)` and `build_attention_dense(spec, arch=...)`.
@@ -300,25 +300,22 @@ Harness:
    is the ratio of two medians. Three independent processes ran, with seeds 942,
    943 and 944, and were combined with `--combine`.
 
-Provenance. Every run is at the same clean commit (the harness refuses a dirty
-tree): the change's code commit, before this document was added. Only Markdown
-changed after it. Each run records the SHA-256 of the kernel, spec, decode,
-dispatch and harness sources, and all three runs record the same hashes. LLVM
-flavor `llvm23`.
+Provenance. Every run is on a clean tree (the harness refuses a dirty tree).
+Each run records the SHA-256 of the kernel, spec, decode, dispatch and harness
+sources, and all three runs record the same hashes. LLVM flavor `llvm23`.
 
 ### Benchmark environment and provenance
 
 | Component | Configuration |
 | :--- | :--- |
 | Hardware target | gfx942, 304 CUs |
-| Benchmarked source HEAD | `4f2df197f507d4e37171262947fdc0a482dd067c` (clean working tree, all three runs) |
-| Kernel source SHA-256 | `c1bbcf8ed71c5ec91623a7482b78892458b0f3028a2028db8f94890f8ab027c5` |
+| Kernel source SHA-256 | `93aa9938533556141ac650f65970596921bd679d5245048a85ad3da79928f5c4` |
 | Benchmark harness SHA-256 | `0b1bdde3a98a91e8e022c2d940b2f3cf8698a22c4d5a98018ae65046d6dece05` |
 | ROCm stack | 10.0.0 |
 | HIP | `7.15.26333` |
 | Python | `3.12.3` |
 | NumPy | `2.5.5` |
-| Triton | `3.8.0+amd.rocm7.2.0.git7cb7b059` |
+| Triton | `3.8.0+git4cff872c.rocm10.0.0` |
 | PyTorch (AITER arms) | `2.13.0+rocm10.0.0` |
 | AITER | `97452bc933e571facd206ea01348852ef0c96e97` (clean) |
 | ROCKE compiler backend | Python |

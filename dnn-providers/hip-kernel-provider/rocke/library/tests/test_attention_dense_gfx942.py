@@ -1572,11 +1572,10 @@ def _qkla_spec(**overrides):
 
 
 _QKLA_SCOPE_MESSAGE = (
-    "NOT_YET_IMPLEMENTED: qk_lookahead needs bf16 D128 top-left causal on the "
-    "persistent grid with block_m 256, block_n 64, lds_num_buffers=2, "
-    "v_reg_prefetch, causal_diag_split, lds_row_pad=0, the cfvst V path with its "
-    "swizzle, and no sliding window, sinks, LSE, paging, KV segments, iglp or PV "
-    "priority/fence"
+    "NOT_YET_IMPLEMENTED: qk_lookahead needs the KDB/VPF configuration "
+    "(lds_num_buffers=2, v_reg_prefetch) plus block_m 256, "
+    "causal_diag_split, lds_row_pad=0 and the V swizzle, and no LSE, "
+    "paging, KV segments, iglp or PV priority/fence"
 )
 
 
@@ -1635,6 +1634,43 @@ def test_qk_lookahead_rejects_unsupported_modes(overrides, expected_message):
     assert reason == expected_message
     with pytest.raises(ValueError, match="unsupported gfx942 attention_dense spec"):
         build_attention_dense(_qkla_spec(**overrides), arch="gfx942")
+
+
+_XCD_LOCAL_SPEC = {
+    "persistent": True,
+    "num_persistent": 304,
+    "persist_decode": "xcd_local",
+    "num_query_heads": 32,
+    "num_kv_heads": 8,
+}
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"chiplet_num_xcds": 4},
+        {"num_persistent": 64},
+        {"num_query_heads": 64},
+        {"num_kv_heads": 4},
+    ],
+    ids=["xcds4", "np64", "hq64", "hkv4"],
+)
+def test_xcd_local_rejects_each_unsupported_layout(overrides):
+    """Each xcd_local layout clause rejects a spec on its own, and the message
+    reports the values received."""
+    _spec(**_XCD_LOCAL_SPEC)  # the supported layout is accepted
+    kw = {**_XCD_LOCAL_SPEC, **overrides}
+    expected = (
+        "xcd_local needs chiplet_num_xcds 8, num_persistent 304, num_query_heads 32 "
+        "and num_kv_heads 8 or 16, got "
+        f"chiplet_num_xcds {kw.get('chiplet_num_xcds', 8)}, "
+        f"num_persistent {kw['num_persistent']}, "
+        f"num_query_heads {kw['num_query_heads']}, "
+        f"num_kv_heads {kw['num_kv_heads']}"
+    )
+    with pytest.raises(ValueError) as err:
+        _spec(**kw)
+    assert str(err.value) == expected
 
 
 def test_qk_lookahead_tile_loops_keep_one_lds_handoff_barrier():
@@ -3193,3 +3229,68 @@ def test_run_attention_dense_torch_rejects_cu_seqlens():
             scale=0.1,
             cu_seqlens_q=[0, 128],
         )
+
+
+def _pacer(n_chunks, units):
+    """A _DeadlinePacer over ``units`` = [(name, cost, dead, deps_by_name)] whose
+    emit functions log their names."""
+    from kernels.gfx942.attention_dense import _DeadlinePacer
+
+    log, ids = [], {}
+    pacer = _DeadlinePacer(n_chunks)
+    for name, cost, dead, deps in units:
+        ids[name] = pacer.add(
+            cost, dead, [ids[d] for d in deps], lambda n=name: log.append(n)
+        )
+    return pacer, log
+
+
+def test_deadline_pacer_fills_each_chunk_earliest_deadline_first():
+    """Two chunks share 16 cycles: 8 each, the earlier deadline first."""
+    pacer, log = _pacer(
+        2,
+        [
+            ("late", 4, 1, []),
+            ("early", 4, 0, []),
+            ("mid", 4, 1, []),
+            ("last", 4, 1, []),
+        ],
+    )
+    assert pacer.fill(0) == [
+        1,
+        0,
+    ]  # early (dead 0), then late (dead 1, lower id than mid)
+    assert pacer.fill(1) == [2, 3]
+    assert log == ["early", "late", "mid", "last"]
+
+
+def test_deadline_pacer_places_units_at_their_deadline_past_the_budget():
+    """A unit at its deadline goes in even past the chunk's share (20 / 4 = 5
+    cycles here); a later unit then waits."""
+    pacer, log = _pacer(4, [("later", 4, 3, []), ("due", 16, 0, [])])
+    assert pacer.fill(0) == [1]
+    assert pacer.fill(1) == [0]
+    assert log == ["due", "later"]
+
+
+def test_deadline_pacer_waits_for_dependencies_in_an_earlier_chunk():
+    """A unit whose dependency was placed in this chunk waits for the next one."""
+    pacer, log = _pacer(3, [("sub", 4, 2, []), ("exp", 4, 2, ["sub"])])
+    assert pacer.fill(0) == [0]
+    assert pacer.fill(1) == [1]
+    assert log == ["sub", "exp"]
+
+
+def test_deadline_pacer_takes_at_least_one_unit_per_chunk():
+    """A chunk with a ready unit never stays empty, even past its share."""
+    pacer, _ = _pacer(4, [("only", 40, 3, [])])
+    assert pacer.fill(0) == [0]
+
+
+def test_deadline_pacer_drains_leftovers_in_dependency_order():
+    """Units no chunk took are emitted after the last chunk, dependencies first."""
+    pacer, log = _pacer(1, [("a", 4, 0, []), ("b", 4, 0, ["a"]), ("c", 4, 0, ["b"])])
+    pacer.fill(0)
+    assert log == ["a"]
+    pacer.drain("test units")
+    assert log == ["a", "b", "c"]

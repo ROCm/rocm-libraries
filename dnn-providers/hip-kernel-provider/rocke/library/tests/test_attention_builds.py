@@ -1792,8 +1792,9 @@ class TestAttentionHelpers(unittest.TestCase):
             block_n=64,
             persistent=True,
         )
-        # gqa_pair* pin num_persistent to their own work split (NQB=8, Hkv=8, gqa=4).
-        num_persistent = {"gqa_pair": 64, "gqa_pair_2phase": 128}
+        # gqa_pair* pin num_persistent to their own work split (NQB=8, Hkv=8, gqa=4);
+        # gfx942's xcd_local is defined only on the 304-CTA grid.
+        num_persistent = {"gqa_pair": 64, "gqa_pair_2phase": 128, "xcd_local": 304}
         for arch, K, Spec in (
             ("gfx942", k942, k942.Gfx942AttentionDenseSpec),
             ("gfx950", k950, k950.Gfx950AttentionDenseSpec),
@@ -4736,7 +4737,12 @@ class TestAttentionDenseGfx942RuntimeShapeCollision(unittest.TestCase):
         # (batch, seqlen): window >= keys for the first two, < keys for the rest.
         shapes = ((2, 512), (1, 1024), (1, 2048), (3, 4096))
         grids = [dict(nonpersist_decode=n) for n in sorted(NONPERSIST_DECODES)] + [
-            dict(persistent=True, num_persistent=64, persist_decode=n)
+            dict(
+                persistent=True,
+                # xcd_local is defined only on the 304-CTA grid.
+                num_persistent=304 if n == "xcd_local" else 64,
+                persist_decode=n,
+            )
             for n in sorted(
                 Gfx942AttentionDenseSpec.supported_persist_decodes() - {"auto"}
             )

@@ -194,17 +194,19 @@ from rocke.core.ir import (
     I64,
 )
 from rocke.helpers.attention import mfma_32x32x8_for_dtype
+from rocke.helpers.schedule import DS, MFMA, SALU, VALU, VMEM
 
 # Shared problem/geometry fields live in an architecture-neutral module.
 from kernels.common.attention_dense_decode import (
     NONPERSIST_DECODES,
     PERSIST_DECODES,
+    Decoded,
     DecodeShape,
     PersistBtHkvMinor,
+    PersistDecode,
     PersistHkvMajor,
     PersistHqMinorSwz,
     PersistQbMajor,
-    PersistXcdLocal,
     fastdiv_kernargs,
     make_fastdiv,
 )
@@ -284,6 +286,82 @@ _PV_LOOP_ORDERS = ("d_major", "k_major")
 _O_STORE_WIDTHS = (1, 2, 4)
 # sched_barrier mask: 11 instruction-class bits (__builtin_amdgcn_sched_barrier).
 _SCHED_BARRIER_MASK_MAX = 0x7FF
+
+
+# gfx942-only persistent decode. It is not in the shared PERSIST_DECODES; the
+# gfx942 spec adds it to its own registry
+# (``Gfx942AttentionDenseSpec.persist_decode_registry``), so the shared spec,
+# gfx950 and the C++ spec port do not accept it.
+class PersistXcdLocal(PersistDecode):
+    """gfx942-only persistent decode (``persist_decode="xcd_local"``): XCD-local
+    load balance at NP = 304 = 8 XCDs x 38 CTAs, Hq = 32. XCD ``wi % 8`` owns Q
+    heads ``4*(wi % 8) .. +3`` (so its 1 or 2 kv heads) and walks its own stream
+    ``wi // 8`` (``cta_id // 8 + round * 38``, since ``wi = cta_id + round * 304``);
+    ``wi < W`` iff ``stream < B * NQB * 4``. Per batch, the stream ranks the XCD's
+    ``NQB * 4`` items longest query block first, rotating the 4 heads, and deals
+    the ranks to its 38 CTAs as a snake (odd rounds reversed, a short/long slot
+    permutation, a partial final round), so per-CTA causal cost stays balanced."""
+
+    name = "xcd_local"
+    tag = "xcdlb"
+    fastdiv_divisors = ("nqb",)
+
+    def check(self, spec):
+        if (
+            spec.chiplet_num_xcds != 8
+            or spec.num_persistent != 304
+            or spec.num_query_heads != 32
+            or spec.num_kv_heads not in (8, 16)
+        ):
+            return (
+                f"{self.name} needs chiplet_num_xcds 8, num_persistent 304, "
+                "num_query_heads 32 and num_kv_heads 8 or 16, got "
+                f"chiplet_num_xcds {spec.chiplet_num_xcds}, "
+                f"num_persistent {spec.num_persistent}, "
+                f"num_query_heads {spec.num_query_heads}, "
+                f"num_kv_heads {spec.num_kv_heads}"
+            )
+        return None
+
+    def emit_decode(self, shape, wi):
+        b = shape.b
+        c = b.const_i32
+        owner = b.mod(wi, c(8))  # XCD: 4 Q heads, 1 (Hkv 8) or 2 (Hkv 16) kv heads
+        stream = b.div(wi, c(8))
+        nqb = shape.val("nqb")
+        per_bt = b.mul(nqb, c(4))  # this XCD's work per batch
+        base_jobs = b.div(per_bt, c(38))
+        n_long = b.mod(per_bt, c(38))
+        n_short = b.sub(c(38), n_long)
+        # floor(stream / (NQB*4)) == floor((stream >> 2) / NQB), via the nqb fastdiv.
+        bt = shape.div(b.lshr(stream, c(2)), "nqb")
+        local = b.sub(stream, b.mul(bt, per_bt))
+        rnd = b.div(local, c(38))
+        slot = b.mod(local, c(38))
+        # Capacity-aware 38-worker snake: short/long slot permutation and a
+        # partial final round.
+        base_pos = b.select(
+            b.cmp_lt(slot, n_long), b.add(n_short, slot), b.sub(slot, n_long)
+        )
+        even = b.cmp_eq(b.mod(rnd, c(2)), c(0))
+        full_rank = b.add(
+            b.mul(rnd, c(38)), b.select(even, base_pos, b.sub(c(37), base_pos))
+        )
+        part_rank = b.add(
+            b.mul(base_jobs, c(38)),
+            b.select(even, slot, b.sub(b.sub(n_long, c(1)), slot)),
+        )
+        rank = b.select(b.cmp_lt(rnd, base_jobs), full_rank, part_rank)
+        # Longest query block first, rotating the XCD's 4 local Q heads.
+        qb = b.sub(b.sub(nqb, c(1)), b.lshr(rank, c(2)))
+        lhq = b.mod(rank, c(4))
+        hq = b.add(b.mul(owner, c(4)), lhq)
+        hkv = b.select(
+            b.cmp_eq(shape.val("num_kv_heads"), c(8)),
+            owner,
+            b.add(b.mul(owner, c(2)), b.lshr(lhq, c(1))),
+        )
+        return Decoded(qb, hq, bt, hkv)
 
 
 _GFX942_PERSIST_DECODES = {**PERSIST_DECODES, PersistXcdLocal.name: PersistXcdLocal()}
@@ -1401,23 +1479,17 @@ def supports_attention_dense(
             "causal_diag_split applies only to causal attention without a sliding "
             "window"
         )
+    # qk_lookahead builds on the KDB/VPF configuration. The KDB/VPF gate above
+    # already checks dtype, head size, causal mode, window, sinks, persistent,
+    # CFVST and block_n, so this check covers only the requirements qk_lookahead
+    # adds.
     if spec.qk_lookahead and not (
-        spec.dtype == "bf16"
-        and spec.head_size == 128
-        and spec.block_m == 256
-        and spec.block_n == 64
-        and spec.causal
-        and spec.causal_diag_split
-        and not spec.causal_bottom_right
-        and spec.persistent
-        and _use_kdb(spec)
+        _use_kdb(spec)
         and _use_vpf(spec)
+        and spec.block_m == 256
+        and spec.causal_diag_split
         and spec.lds_row_pad == 0
-        and spec.resolved_use_cfvst()
         and spec.resolved_use_v_swizzle()
-        and not spec.sliding_window
-        and not spec.window_wave_skip
-        and not spec.use_sinks
         and not spec.emit_lse
         and not spec.paged
         and spec.kv_segments == 1
@@ -1426,12 +1498,10 @@ def supports_attention_dense(
         and spec.pv_sched_fence_mask is None
     ):
         return False, (
-            "NOT_YET_IMPLEMENTED: qk_lookahead needs bf16 D128 top-left causal on the "
-            "persistent grid with "
-            "block_m 256, block_n 64, lds_num_buffers=2, v_reg_prefetch, "
-            "causal_diag_split, lds_row_pad=0, the cfvst V path with its swizzle, and "
-            "no sliding window, sinks, LSE, paging, KV segments, iglp or PV "
-            "priority/fence"
+            "NOT_YET_IMPLEMENTED: qk_lookahead needs the KDB/VPF configuration "
+            "(lds_num_buffers=2, v_reg_prefetch) plus block_m 256, "
+            "causal_diag_split, lds_row_pad=0 and the V swizzle, and no LSE, "
+            "paging, KV segments, iglp or PV priority/fence"
         )
     # qk_lookahead runs only on the xcd_local decode (which is legal without it).
     if spec.qk_lookahead and not (
@@ -1569,6 +1639,85 @@ def _emit_o_store(
                 if row_has_key is not None:
                     packed = zero_keyless_row(b, packed, row_has_key, dtype, width)
                 b.global_store_vN(o, addr, packed, width, align=2 * width)
+
+
+class _DeadlinePacer:
+    """qk_lookahead's deadline-first placement of VALU work over a run of MFMA
+    chunks (PV(j)'s tail of the softmax, the row sum and S(j+1)'s scale).
+
+    A unit is ``(cost, dead, deps, fn)``: estimated issue cycles, the last chunk
+    it may go in, the units whose results it reads, and the function that emits
+    it. :meth:`fill` places units in chunk ``si``: the ready ones (every
+    dependency placed in an earlier chunk, so no result is read right after it
+    issues), earliest deadline first, while the chunk holds less than (remaining
+    cost) / (remaining chunks) and at least half of the next unit still fits;
+    plus every ready unit at its deadline, and at least one unit. :meth:`drain`
+    emits what is left after the last chunk, in dependency order."""
+
+    def __init__(self, n_chunks):
+        self.n_chunks = n_chunks
+        self._units = []  # dict(cost, dead, deps, fn, slot)
+
+    def add(self, cost, dead, deps, fn):
+        """Adds a unit and returns its id, for later units' ``deps``."""
+        self._units.append(
+            {"cost": cost, "dead": dead, "deps": deps, "fn": fn, "slot": None}
+        )
+        return len(self._units) - 1
+
+    def fill(self, si):
+        """Emits chunk ``si``'s units; returns their ids in emission order."""
+        U = self._units
+        rem = sum(u["cost"] for u in U if u["slot"] is None)
+        cap = rem / (self.n_chunks - si)
+        ready = [
+            i
+            for i, u in enumerate(U)
+            if u["slot"] is None
+            and all(U[d]["slot"] is not None and U[d]["slot"] < si for d in u["deps"])
+        ]
+        ready.sort(key=lambda i: (U[i]["dead"], i))
+        took = 0
+        placed = []
+        for i in ready:
+            u = U[i]
+            must = u["dead"] <= si
+            if must or (took < cap and took + u["cost"] / 2 <= cap) or took == 0:
+                u["fn"]()
+                u["slot"] = si
+                took += u["cost"]
+                placed.append(i)
+        return placed
+
+    def drain(self, what):
+        """Emits the units no chunk took, once their dependencies are placed;
+        raises if a dependency cycle leaves any (``what`` names them)."""
+        U = self._units
+        left = [i for i, u in enumerate(U) if u["slot"] is None]
+        guard = 0
+        while left and guard < 8:
+            for i in left:
+                u = U[i]
+                if all(U[d]["slot"] is not None for d in u["deps"]):
+                    u["fn"]()
+                    u["slot"] = self.n_chunks
+            left = [i for i, u in enumerate(U) if u["slot"] is None]
+            guard += 1
+        if left:
+            raise AssertionError(f"qk_lookahead: unscheduled {what}")
+
+
+class _VtSlot:
+    """qk_lookahead's V^T slots for one pipeline step: ``r`` holds V(j), which
+    PV(j) reads, and ``w`` receives V(j+1). ``read_base`` caches the per-tile
+    read base; ``read_v`` builds it at the tile's first V read."""
+
+    __slots__ = ("r", "read_base", "w")
+
+    def __init__(self, r=None, w=None):
+        self.r = r
+        self.w = w
+        self.read_base = None
 
 
 def _build_attention_dense_single_buffer(
@@ -1882,14 +2031,12 @@ def _build_attention_dense_single_buffer(
     else:
         V_TOK_PAIRS = V_DIM_PAIRS = V_BLOCKS = V_ITEMS = 0
 
-    # qk_lookahead: the current read / write V^T slot (V(j) is in slot j % 2).
-    V_SLOT = {"r": None, "w": None}
-
-    def _cfvst_store_v(payload):
+    def _cfvst_store_v(payload, w_slot=None):
         """perm_b32 2x2 transpose + contiguous ds_write publishing V_lds[dim, token].
 
         CTA-invariant: reads only the per-tile payload and writes V_lds (a fixed
-        allocation), so it is shared by every work item."""
+        allocation), so it is shared by every work item. ``w_slot`` is the V^T
+        slot to write (qk_lookahead's two-slot ring); ``None`` writes slot 0."""
         for d0, t0, x0, x1 in payload:
             # Each output i32 holds 2 CONSECUTIVE tokens (t0, t0+1) at one fixed dim.
             row_d0 = b.perm_b32(x0, x1, b.const_i32(0x01000504))  # (V[t0,d0], V[t1,d0])
@@ -1912,18 +2059,18 @@ def _build_attention_dense_single_buffer(
                 c0, c1 = t0, t0
             b.smem_store_vN(
                 V_lds,
-                [b.const_i32(0) if V_SLOT["w"] is None else V_SLOT["w"], d0, c0],
+                [b.const_i32(0) if w_slot is None else w_slot, d0, c0],
                 b.bitcast(row_d0, VectorType(dtype, 2)),
                 2,
             )
             b.smem_store_vN(
                 V_lds,
-                [b.const_i32(0) if V_SLOT["w"] is None else V_SLOT["w"], d1, c1],
+                [b.const_i32(0) if w_slot is None else w_slot, d1, c1],
                 b.bitcast(row_d1, VectorType(dtype, 2)),
                 2,
             )
 
-    def read_v(dt, kk):
+    def read_v(dt, kk, vt=None):
         """PV A-operand = V^T[dim, key]. dim=dt*32+lane_m, keys=kk*8+lane_h*4+{0..3}.
 
         cfvst (D128): the 4 keys are CONTIGUOUS in the transposed V_lds[dim, token],
@@ -1938,22 +2085,27 @@ def _build_attention_dense_single_buffer(
         d0 = 2*lane, so (d0 & mask) takes only 8 values), so further conflict work
         belongs there, not on this read.
         naive (D64): element-wise from V_lds[key, dim] (bank-heavy, but D64 is
-        VGPR-bound under cfvst, not LDS-read-bound)."""
-        if USE_CFVST and V_SLOT["r"] is not None and SWZ_V:
+        VGPR-bound under cfvst, not LDS-read-bound).
+        ``vt`` is qk_lookahead's :class:`_VtSlot` for this tile; ``None`` reads
+        slot 0."""
+        r_slot = None if vt is None else vt.r
+        if USE_CFVST and r_slot is not None and SWZ_V:
             # qkla_vdb: one per-tile base (slot + row lane_m + (d_base ^ swizzle)),
             # then (kk*8) by XOR (kk*8 and d_base use disjoint bits, so
             # (kk*8 + d) ^ M == (kk*8) ^ (d ^ M)); dt rows fold into immediates.
-            if V_SLOT.get("rb") is None:
+            if vt.read_base is None:
+                # Built at the tile's first V read, so its instructions are emitted
+                # in that read's scheduling chunk.
                 m = vswz_key(lane_m)
                 sw = b.shl(m, b.const_i32(2))
-                V_SLOT["rb"] = b.add(
+                vt.read_base = b.add(
                     b.add(
-                        b.mul(V_SLOT["r"], b.const_i32(D * V_LDROW)),
+                        b.mul(r_slot, b.const_i32(D * V_LDROW)),
                         b.mul(lane_m, b.const_i32(V_LDROW)),
                     ),
                     b.xor(d_base, sw),
                 )
-            vb = V_SLOT["rb"]
+            vb = vt.read_base
             vx = vb if kk == 0 else b.xor(vb, b.const_i32(kk * 8))
             e = b.add(vx, b.const_i32(dt * 32 * V_LDROW))
             return b.smem_load_vN(
@@ -1969,7 +2121,7 @@ def _build_attention_dense_single_buffer(
                 col = b.xor(key0, s)
             return b.smem_load_vN(
                 V_lds,
-                b.const_i32(0) if V_SLOT["r"] is None else V_SLOT["r"],
+                b.const_i32(0) if r_slot is None else r_slot,
                 dim_row,
                 col,
                 dtype=dtype,
@@ -1983,11 +2135,11 @@ def _build_attention_dense_single_buffer(
             elems.append(b.vec_extract(vv, 0))
         return b.vec_pack(elems, dtype)
 
-    def do_pv(o_acc_in, p_packs):
+    def do_pv(o_acc_in, p_packs, vt=None):
         out = list(o_acc_in)
         for dt, kk in PV_STEPS:
             out[dt] = mfma_32x32x8_for_dtype(
-                b, dtype, read_v(dt, kk), p_packs[kk], out[dt]
+                b, dtype, read_v(dt, kk, vt), p_packs[kk], out[dt]
             )
         return out
 
@@ -2403,7 +2555,7 @@ def _build_attention_dense_single_buffer(
             (f"o{dt}", o0[dt]) for dt in range(D_TILES)
         ]
 
-        def softmax_pv(s, j, m_i, l_i, o_acc, masked):
+        def softmax_pv(s, j, m_i, l_i, o_acc, masked, vt=None):
             """One KV tile's mask -> online softmax -> PV update, shared by the
             single-buffer ``tile_compute`` and the KDB/VPF pipeline so both
             honour the same exp2, fused-rescale and PV scheduling knobs. Returns
@@ -2482,7 +2634,7 @@ def _build_attention_dense_single_buffer(
                 b.sched_barrier(PV_FENCE_MASK)
             if PV_PRIORITY:
                 b.s_setprio(PV_PRIORITY)
-            o_acc = do_pv(o_acc, p_packs)
+            o_acc = do_pv(o_acc, p_packs, vt)
             if PV_PRIORITY:
                 b.s_setprio(0)
             return m_new, l_new, o_acc
@@ -2559,8 +2711,11 @@ def _build_attention_dense_single_buffer(
             make_v_steps,
             make_k_steps,
             v_pub,
+            vt,
         ):
             """qk_lookahead: pipeline step j from its carried scaled scores ``s_sc``.
+            ``vt`` is the step's :class:`_VtSlot` (PV(j) reads ``vt.r``, V(j+1) is
+            stored to ``vt.w``).
 
             Region B (the 32 QK(j+1) MFMAs from ``qk_next``) carries tile j's head:
             the row max (and the causal mask on a diagonal tile), alpha, the O
@@ -2581,11 +2736,11 @@ def _build_attention_dense_single_buffer(
                 # This chunk's region: VALU (addresses, perms), SALU (M0, offsets), the
                 # MFMA, then its LDS and VMEM ops. An LDS op right after an MFMA issues
                 # with no gap; after a VALU op it waits 8 cycles.
-                b.sched_group_barrier(0x002, 64, 0)
-                b.sched_group_barrier(0x004, 32, 0)
-                b.sched_group_barrier(0x008, 1, 0)
-                b.sched_group_barrier(0x080, 16, 0)
-                b.sched_group_barrier(0x010, 8, 0)
+                b.sched_group_barrier(VALU, 64, 0)
+                b.sched_group_barrier(SALU, 32, 0)
+                b.sched_group_barrier(MFMA, 1, 0)
+                b.sched_group_barrier(DS, 16, 0)
+                b.sched_group_barrier(VMEM, 8, 0)
 
             o_acc = list(o_acc)
             st = {}
@@ -2695,19 +2850,8 @@ def _build_attention_dense_single_buffer(
                 s_raw = list(s_out)
                 sv = st["s"]
                 s_flat = [None] * (N_SUB * 16)
-                U = []  # units: dict(cost, dead, deps, fn, slot)
-
-                def add_u(cost, dead, deps, fn):
-                    U.append(
-                        {
-                            "cost": cost,
-                            "dead": dead,
-                            "deps": deps,
-                            "fn": fn,
-                            "slot": None,
-                        }
-                    )
-                    return len(U) - 1
+                pacer = _DeadlinePacer(n_s)
+                add_u = pacer.add
 
                 val = {}
                 for pk in range(PA + 1, KK_STEPS):
@@ -2773,7 +2917,7 @@ def _build_attention_dense_single_buffer(
                     gb = False
                     if dt == 0 and kk + 1 < KK_STEPS:
                         # V reads for the next pack, one pack ahead.
-                        vr[kk + 1] = [read_v(d, kk + 1) for d in range(D_TILES)]
+                        vr[kk + 1] = [read_v(d, kk + 1, vt) for d in range(D_TILES)]
                         gb = True
                     if si in dma_slots:
                         next(k_steps, None)
@@ -2781,43 +2925,9 @@ def _build_attention_dense_single_buffer(
                     if gb:
                         lds_after_mfma()
                     fence()
-                    rem = sum(u["cost"] for u in U if u["slot"] is None)
-                    cap = rem / (n_s - si)
-                    ready = [
-                        i
-                        for i, u in enumerate(U)
-                        if u["slot"] is None
-                        and all(
-                            U[d]["slot"] is not None and U[d]["slot"] < si
-                            for d in u["deps"]
-                        )
-                    ]
-                    ready.sort(key=lambda i: (U[i]["dead"], i))
-                    took = 0
-                    for i in ready:
-                        u = U[i]
-                        must = u["dead"] <= si
-                        if (
-                            must
-                            or (took < cap and took + u["cost"] / 2 <= cap)
-                            or took == 0
-                        ):
-                            u["fn"]()
-                            u["slot"] = si
-                            took += u["cost"]
+                    pacer.fill(si)
                     fence()
-                left = [i for i, u in enumerate(U) if u["slot"] is None]
-                guard = 0
-                while left and guard < 8:
-                    for i in left:
-                        u = U[i]
-                        if all(U[d]["slot"] is not None for d in u["deps"]):
-                            u["fn"]()
-                            u["slot"] = n_s
-                    left = [i for i, u in enumerate(U) if u["slot"] is None]
-                    guard += 1
-                if left:
-                    raise AssertionError("qk_lookahead: unscheduled PV(j) units")
+                pacer.drain("PV(j) units")
                 for _ in k_steps:
                     pass
                 s_next = [
@@ -2828,7 +2938,7 @@ def _build_attention_dense_single_buffer(
 
             # ---- Region B: the head paced over the QK(j+1) MFMAs ----
             n_b = K_STEPS * N_SUB
-            vst_b = v_pub(vals)
+            vst_b = v_pub(vals, vt.w)
             tot_b = (
                 (N_SUB * 16 * C_MSK if masked and causal else 0)
                 + N_SUB * 16 * C_MX
@@ -2865,7 +2975,7 @@ def _build_attention_dense_single_buffer(
                     if i >= n_b // 2 and next(vst_b, "end") != "end":
                         done += C_VST_B
                     if i == n_b - 2:
-                        st["vr0"] = [read_v(dt, 0) for dt in range(D_TILES)]
+                        st["vr0"] = [read_v(dt, 0, vt) for dt in range(D_TILES)]
                     if vld_here:
                         vld_here = False
                         if next(v_steps, "end") != "end":
@@ -3033,15 +3143,15 @@ def _build_attention_dense_single_buffer(
                     payload.append((d0, t0, x0, x1))
                 _cfvst_store_v(payload)
 
-            def v_store_steps(values):
+            def v_store_steps(values, w_slot):
                 """qk_lookahead: store V(j+1) (``values``, its register payload) into
-                V^T slot V_SLOT["w"], one item per step. Per tile 2 bases (rows d0,
+                V^T slot ``w_slot``, one item per step. Per tile 2 bases (rows d0,
                 d0+1 with slot and swizzle folded in), then each item's token offset
                 it*2*WAVES by XOR (disjoint from wave*2's bits, so
                 (wave*2 + c) ^ s == c ^ (wave*2 ^ s))."""
                 d0 = b.mul(lane, b.const_i32(2))
                 w2 = b.mul(wave, b.const_i32(2))
-                slot_e = b.mul(V_SLOT["w"], b.const_i32(D * V_LDROW))
+                slot_e = b.mul(w_slot, b.const_i32(D * V_LDROW))
                 bases = []
                 for r in range(2):
                     dr = d0 if r == 0 else b.add(d0, b.const_i32(1))
@@ -3170,9 +3280,10 @@ def _build_attention_dense_single_buffer(
                     next_kbuf = b.mod(next_j, b.const_i32(K_BUFS))
                     s_next = []
                     k2 = b.smin(b.add(j, b.const_i32(2)), last_j)
-                    V_SLOT["r"] = b.mod(j, b.const_i32(2))
-                    V_SLOT["w"] = b.mod(next_j, b.const_i32(2))
-                    V_SLOT["rb"] = None
+                    vt = _VtSlot(
+                        r=b.mod(j, b.const_i32(2)),
+                        w=b.mod(next_j, b.const_i32(2)),
+                    )
                     m_new, l_new, o_acc, _, s_next = tile_lookahead(
                         j,
                         m_i,
@@ -3185,8 +3296,8 @@ def _build_attention_dense_single_buffer(
                         lambda vals: _cfvst_load_v_pipeline_steps(next_j, vals),
                         lambda: load_pipeline_k_steps(kbuf, k2),
                         v_store_steps,
+                        vt,
                     )
-                    V_SLOT["r"] = V_SLOT["w"] = V_SLOT["rb"] = None
                     b.s_waitcnt(vmcnt=0)
                     b.sync_lds_only()
                     b.scf_yield(m_new, l_new, *o_acc, *s_next)
@@ -3285,12 +3396,11 @@ def _build_attention_dense_single_buffer(
                     [b.vec_extract(acc, i) for i in range(16)]
                     for acc in loop_res[sbase : sbase + N_SUB]
                 ]
-                V_SLOT["r"] = b.mod(last_j, b.const_i32(2))
-                V_SLOT["rb"] = None
+                vt_last = _VtSlot(r=b.mod(last_j, b.const_i32(2)))
             else:
                 s = do_qk(last_kbuf)
-            m_i, l_i, o_acc = softmax_pv(s, last_j, m_i, l_i, o_acc, True)
-            V_SLOT["r"] = V_SLOT["rb"] = None
+                vt_last = None
+            m_i, l_i, o_acc = softmax_pv(s, last_j, m_i, l_i, o_acc, True, vt_last)
             b.sync_lds_only()
 
         elif causal and not SW and DIAG_SPLIT:
