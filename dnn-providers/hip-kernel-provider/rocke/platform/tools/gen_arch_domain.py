@@ -139,7 +139,12 @@ def _bootstrap_sys_path() -> None:
 _bootstrap_sys_path()
 
 from rocke.core.arch import domain as _domain
-from rocke.tests.ci_shard import ACTIVATION_FLAG, current_shard, header_line
+from rocke.tests.ci_shard import (
+    ACTIVATION_FLAG,
+    add_shard_argument,
+    header_line,
+    shard_from_arguments,
+)
 from rocke.tests.host_cpus import available_cpus
 
 SCHEMA = _domain.SCHEMA
@@ -1900,10 +1905,8 @@ def main() -> int:
             "(CTest uses 77 to report a skip; defaults preserve legacy exits)"
         ),
     )
-    ap.add_argument(
-        ACTIVATION_FLAG,
-        dest="shard_from_gtest_env",
-        action="store_true",
+    add_shard_argument(
+        ap,
         help="with --check: check only the declaration keys of this CI shard, "
         "from ROCKE_TEST_SHARD or else GTEST_SHARD_INDEX and GTEST_TOTAL_SHARDS "
         "(rocke.tests.ci_shard); without either, every key",
@@ -1916,10 +1919,7 @@ def main() -> int:
             ap.error("--unvalidated-exit-code must be between 1 and 255")
     if args.shard_from_gtest_env and not args.check:
         ap.error(f"{ACTIVATION_FLAG} requires --check")
-    try:
-        shard = current_shard(from_gtest=True) if args.shard_from_gtest_env else None
-    except ValueError as error:
-        ap.error(f"rocke-ctest-shard: {error}")
+    shard = shard_from_arguments(ap, args)
 
     sys.path.insert(0, str(HERE))
     from check_ir_validity import llvm_tool  # same resolution order, one owner

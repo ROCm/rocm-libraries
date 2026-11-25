@@ -25,12 +25,15 @@ chance. Keys without a cost keep the hash rule, so a run that declares no cost
 splits exactly as before. Every shard of one run places the same keys with the
 same costs, so each key still runs in exactly one shard.
 
-A runner prints :func:`header_line` and :meth:`Shard.split_line`, the lines
-the plugin prints, so one log parser reads both.
+A runner that is not pytest takes the flag with :func:`add_shard_argument`,
+gets its shard with :func:`shard_from_arguments`, and prints
+:func:`header_line` and :meth:`Shard.split_line`, the lines the plugin prints,
+so one log parser reads both.
 """
 
 from __future__ import annotations
 
+import argparse
 import dataclasses
 import hashlib
 import math
@@ -45,6 +48,7 @@ __all__ = [
     "SHARD_ENV",
     "WORKER_ENV",
     "Shard",
+    "add_shard_argument",
     "adopt_worker",
     "check_cost",
     "current_shard",
@@ -53,6 +57,7 @@ __all__ = [
     "parse_shard",
     "place_keys",
     "resolve_shard",
+    "shard_from_arguments",
     "shard_of",
     "unsharded_environment",
 ]
@@ -260,6 +265,35 @@ def current_shard(
     """This run's :class:`Shard` by :func:`resolve_shard`'s rule, or ``None``."""
     resolved = resolve_shard(env, from_gtest)
     return None if resolved is None else Shard(*resolved)
+
+
+def add_shard_argument(parser: argparse.ArgumentParser, help: str) -> None:
+    """Give a runner's ``parser`` the :data:`ACTIVATION_FLAG` option.
+
+    The parsed value is ``shard_from_gtest_env``, which
+    :func:`shard_from_arguments` reads. ``help`` says what the runner's share
+    is.
+    """
+    parser.add_argument(
+        ACTIVATION_FLAG, dest="shard_from_gtest_env", action="store_true", help=help
+    )
+
+
+def shard_from_arguments(
+    parser: argparse.ArgumentParser, arguments: argparse.Namespace
+) -> Shard | None:
+    """The run's :class:`Shard` when ``arguments`` carry :data:`ACTIVATION_FLAG`
+    (from :func:`add_shard_argument`) and a shard is set, else ``None``.
+
+    A malformed or out-of-range shard is a usage error, reported through
+    ``parser`` (exit status 2).
+    """
+    if not arguments.shard_from_gtest_env:
+        return None
+    try:
+        return current_shard(from_gtest=True)
+    except ValueError as error:
+        parser.error(f"rocke-ctest-shard: {error}")
 
 
 # This process's worker identity once adopt_worker() has taken it from the

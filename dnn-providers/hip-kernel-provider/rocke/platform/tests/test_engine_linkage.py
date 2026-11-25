@@ -17,6 +17,7 @@ from unittest.mock import Mock
 import pytest
 from rocke.core import native_engine
 from rocke.portable_ir.src import online
+from rocke.tests.ci_shard import ACTIVATION_FLAG
 from rocke.tests.ctest_listing import configure_installed_ctest, list_ctest_entries
 from rocke.tests.engine_modules import EngineModulesMarker, read_engine_modules_marker
 from rocke.tests.provider_categories import provider_category_labels
@@ -668,6 +669,8 @@ def test_installed_ctest_entries_get_scoped_environment_contracts(
         assert native == native_artifact("rocke_optimization_barrier_emit")
         assert Path(native).name == emitter_filename
         assert command[command.index("--count") + 1] == "17"
+        # Each CI shard compares only the configurations it owns.
+        assert ACTIVATION_FLAG in command
         expected_platform_environment = {
             "PYTHONPATH": ".",
             **expected_artifacts,

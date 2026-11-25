@@ -99,7 +99,11 @@ def main(argv: list[str] | None = None) -> int:
     _add_installed_python_paths()
 
     from rocke.core.ir_golden import drift_hint, golden_case_ids, load_golden
-    from rocke.tests.ci_shard import ACTIVATION_FLAG, current_shard, header_line
+    from rocke.tests.ci_shard import (
+        add_shard_argument,
+        header_line,
+        shard_from_arguments,
+    )
     from rocke_ir_parity_harness import (
         GOLDEN_FLAVORS,
         GOLDEN_NAME,
@@ -108,19 +112,9 @@ def main(argv: list[str] | None = None) -> int:
     )
 
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-    parser.add_argument(
-        ACTIVATION_FLAG,
-        dest="shard_from_gtest_env",
-        action="store_true",
-        help="check only this CI shard's cases",
-    )
+    add_shard_argument(parser, help="check only this CI shard's cases")
     arguments = parser.parse_args(argv)
-    try:
-        shard = (
-            current_shard(from_gtest=True) if arguments.shard_from_gtest_env else None
-        )
-    except ValueError as error:
-        parser.error(f"rocke-ctest-shard: {error}")
+    shard = shard_from_arguments(parser, arguments)
 
     golden = _find_golden()
     flavors = ", ".join(GOLDEN_FLAVORS)

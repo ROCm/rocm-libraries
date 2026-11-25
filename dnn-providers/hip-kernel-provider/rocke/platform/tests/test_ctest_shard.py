@@ -125,6 +125,43 @@ def test_resolve_shard_reads_the_process_environment(monkeypatch):
     assert ctest_shard.resolve_shard(from_gtest=True)[0] == "2/4"
 
 
+def _runner_parser():
+    import argparse
+
+    parser = argparse.ArgumentParser(prog="runner")
+    ci_shard.add_shard_argument(parser, help="check only this shard's share")
+    return parser
+
+
+def test_a_runner_without_the_flag_has_no_shard(monkeypatch):
+    for name in ctest_shard.CHILD_ENV_EXCLUDED:
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("ROCKE_TEST_SHARD", "1/4")
+    parser = _runner_parser()
+    assert ci_shard.shard_from_arguments(parser, parser.parse_args([])) is None
+
+
+def test_a_runner_with_the_flag_takes_the_gtest_shard(monkeypatch):
+    for name in ctest_shard.CHILD_ENV_EXCLUDED:
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("GTEST_TOTAL_SHARDS", "4")
+    monkeypatch.setenv("GTEST_SHARD_INDEX", "3")
+    parser = _runner_parser()
+    shard = ci_shard.shard_from_arguments(parser, parser.parse_args([FLAG]))
+    assert shard == ci_shard.Shard("3/4", "GTEST_SHARD_INDEX=3, GTEST_TOTAL_SHARDS=4")
+
+
+def test_a_runner_reports_a_malformed_shard_as_a_usage_error(monkeypatch, capsys):
+    for name in ctest_shard.CHILD_ENV_EXCLUDED:
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("ROCKE_TEST_SHARD", "4/4")
+    parser = _runner_parser()
+    with pytest.raises(SystemExit) as exit_info:
+        ci_shard.shard_from_arguments(parser, parser.parse_args([FLAG]))
+    assert exit_info.value.code == 2
+    assert "rocke-ctest-shard: shard '4/4' out of range" in capsys.readouterr().err
+
+
 # ------------------------------------------------------------------------- shard rule
 # Shard of each key for n = 2, 3, 4 and 8. The values pin the hash, so that
 # developer runs and CI map a test to the same shard on every change.

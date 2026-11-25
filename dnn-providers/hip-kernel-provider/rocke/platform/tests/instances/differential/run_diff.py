@@ -119,7 +119,13 @@ from golden_store import (  # noqa: E402 -- HERE bootstrap above
     compare,
 )
 from rocke.core.golden_file import rerecord_hint
-from rocke.tests.ci_shard import ACTIVATION_FLAG, Shard, current_shard, header_line
+from rocke.tests.ci_shard import (
+    ACTIVATION_FLAG,
+    Shard,
+    add_shard_argument,
+    header_line,
+    shard_from_arguments,
+)
 from rocke.tests.host_cpus import available_cpus
 from rocke.tests.staged_payload import point_locators_at_staged_payload
 
@@ -1354,10 +1360,8 @@ def main():
         "Python reference hashes, and the flavor is a lowering argument, so "
         "any host can record or check every flavor this way.",
     )
-    ap.add_argument(
-        ACTIVATION_FLAG,
-        dest="shard_from_gtest_env",
-        action="store_true",
+    add_shard_argument(
+        ap,
         help="with --python-only --check-golden: check only the families of this "
         "CI shard, from ROCKE_TEST_SHARD or else GTEST_SHARD_INDEX and "
         "GTEST_TOTAL_SHARDS (rocke.tests.ci_shard); without either, every family",
@@ -1369,10 +1373,7 @@ def main():
         ap.error("--python-only only runs the golden record / check")
     if args.shard_from_gtest_env and not (args.python_only and args.check_golden):
         ap.error(f"{ACTIVATION_FLAG} needs --python-only --check-golden")
-    try:
-        shard = current_shard(from_gtest=True) if args.shard_from_gtest_env else None
-    except ValueError as error:
-        ap.error(f"rocke-ctest-shard: {error}")
+    shard = shard_from_arguments(ap, args)
 
     global PY_REF_ROOT, SHIM_DIR
     if args.pyroot:

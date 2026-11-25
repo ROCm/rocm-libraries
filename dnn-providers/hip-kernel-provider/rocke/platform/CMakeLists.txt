@@ -787,6 +787,9 @@ if(ROCKE_INSTALL_TESTS)
            "  SKIP_RETURN_CODE 77\n"
            "  TIMEOUT ${ROCKE_TEST_TIMEOUT_CPU})\n")
 
+    # Each CI shard compares the HIP emitter configurations it owns
+    # (rocke.tests.ci_shard, imported from the installed package); without the
+    # shard variables it compares them all.
     set(_rocke_barrier_parity_entries "")
     if(TARGET rocke_optimization_barrier_emit)
       rocke_cxx_test_installed_name(_rocke_installed_name
@@ -799,9 +802,12 @@ if(ROCKE_INSTALL_TESTS)
              "--launcher \"${_ROCKE_INSTALLED_PYTHONPATH}/rocke/tests/"
              "subprocess_launcher.py\" --emitter "
              "\"${ROCKE_TEST_CTEST_REL}tests/instances/parity/"
-             "optimization_barrier_emit.py\" --count 17)\n"
+             "optimization_barrier_emit.py\" --count 17 "
+             "--rocke-shard-from-gtest-env)\n"
              "set_tests_properties(rocke_optimization_barrier_hip_pair "
-             "PROPERTIES LABELS \"ckc;python;host;quick\" TIMEOUT ${ROCKE_TEST_TIMEOUT_CPU})\n")
+             "PROPERTIES LABELS \"ckc;python;host;quick\"\n"
+             "  ENVIRONMENT \"PYTHONPATH=${_ROCKE_INSTALLED_PYTHONPATH}\"\n"
+             "  TIMEOUT ${ROCKE_TEST_TIMEOUT_CPU})\n")
     endif()
     # The golden entries below check only their CI shard's share (the
     # rocke.tests.ci_shard rule, the same as the pytest entries'), so each
