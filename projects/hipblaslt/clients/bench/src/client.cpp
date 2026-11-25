@@ -523,9 +523,9 @@ try
          "col_uniform_first_col; a row-major PyTorch X@W reaches hipBLASLt as W^T X^T, so equal "
          "rows of X are equal columns of op(B) and its output rows are columns of D. Check row "
          "and column in separate runs. A failure is reported on stderr and does not stop the "
-         "run. With uniform summation order on, it counts as a failed check for --verify_strict. "
-         "Inputs that sum exactly in any order (rand_int, integer_exact, integer types, ...) get "
-         "a warning, since a pass shows little. Also a YAML key.")
+         "run. With uniform summation order on, a row failure counts as a failed check for "
+         "--verify_strict. Inputs that sum exactly in any order (rand_int, integer_exact, integer "
+         "types, ...) get a warning, since a pass shows little. Also a YAML key.")
 
         ("iters,i",
          value<int32_t>(&arg.iters)->default_value(tuningEnv? 1000 : 10),
