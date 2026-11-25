@@ -880,7 +880,7 @@ void computeRequiredWaits(StinkyInstruction* inst, DataflowState& state,
     // reusing a buffer the store is still reading must drain tensorcnt first. tensor_load_to_lds
     // needs no equivalent here: it WRITES LDS, so its consumers are ordinary UD-chain readers.
     // idx indexes the whole queue, loads included -- TENSORcnt is one in-order FIFO over both
-    // directions (MI400 ISA p97, p206), so skipping a load's slot would under-drain.
+    // directions (gfx1250 ISA guide p97, p206), so skipping a load's slot would under-drain.
     auto scanTensorAntiDeps = [&](const std::vector<int>& anchorTokens) {
         for (const auto& q : state.queues[CK_Tensor]) {
             const int qsize = static_cast<int>(q.ops.size());

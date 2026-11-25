@@ -396,8 +396,8 @@ def emitTDMStoreLoadCElement(gwb, addrCalc, data, vc0) -> Module:
   rule for HHH_WMMA kernels never applies here. A 1-byte element, fp8, bf8 or int8 C at vector width 1, goes to the low byte of its VGPR with
   ds_load_u8, which zero-fills the rest as readInput's byte load does on gfx1250. Only that half is read afterwards -- the beta
   multiply selects it with op_sel -- so it does not matter whether the other half of the VGPR keeps its old value or
-  is zeroed. On gfx1250 it is zeroed: ECC is always on and a VGPR is written a whole DWORD at a time (MI400 Shader
-  Programming Guide 10.1, PDF p299). A DS load reads at most
+  is zeroed. On gfx1250 it is zeroed: ECC is always on and a VGPR is written a whole DWORD at a time (gfx1250 shader
+  programming guide 10.1, PDF p299). A DS load reads at most
   16 bytes, so a wider vector, such as bf16 at store vector width 16, is read 16 bytes at a time.
   """
   module = Module("TDMStoreLoadCElement")

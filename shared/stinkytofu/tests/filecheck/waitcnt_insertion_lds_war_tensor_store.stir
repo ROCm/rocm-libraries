@@ -13,7 +13,7 @@
 # region. Both stores must land before the writer is issued, so the pass must emit
 # s_wait_tensorcnt 0 immediately before the ds_store.
 #
-# Note the counter is NOT dscnt: a tensor op lives on tensorcnt (MI400 ISA p97 -- both
+# Note the counter is NOT dscnt: a tensor op lives on tensorcnt (gfx1250 ISA guide p97 -- both
 # TENSOR_LOAD_TO_LDS and TENSOR_STORE_FROM_LDS map to TENSORcnt), so the DS queue at the writer
 # is empty and no s_wait_dscnt is warranted.
 #
