@@ -107,7 +107,7 @@ Tests:
 # n*(n+1)/2 still fits in int32 (about 4 GiB of float). The trailing packed
 # elements disagree with the host reference. Two device copies need a large GPU.
 - name: spr2_packed_index_overflow
-  category: pre_checkin # stress
+  category: stress
   function: spr2
   precision: *single_precision
   uplo: [ U, L ]
