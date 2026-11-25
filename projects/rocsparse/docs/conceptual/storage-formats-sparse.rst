@@ -370,21 +370,21 @@ ell_col_ind Array of ``mb * ell_width`` elements containing the column indices (
 block_dim   Dimension of each block (integer).
 =========== ================================================================================
 
+The Blocked ELL is similar to the ELL format except that column entries now indicate the location of two dimensional blocks of size
+``block_dim * block_dim`` instead of single matrix entries. ``ell_val`` is a row-major array of ``m`` rows of ``ell_cols`` values,
+and ``ell_col_ind`` is a row-major array of ``mb`` rows of ``ell_width`` block column indices. Entry ``(r, c)`` of the block in
+slot ``e`` of block row ``i`` is ``ell_val[(i * block_dim + r) * ell_cols + e * block_dim + c]``, and its block column is
+``ell_col_ind[i * ell_width + e]``. Block rows with less than ``ell_width`` non-zero blocks are padded with zero blocks
+(``ell_val``) and :math:`-1` (``ell_col_ind``).
+
 When ``block_dim`` divides ``m``, ``ell_val`` has ``mb * ell_width * block_dim * block_dim`` elements.
 Otherwise the last block row is partial and holds only the last ``m - (mb - 1) * block_dim`` rows. Its blocks
 have no rows past row ``m``: those rows are not part of the matrix and have no storage, so ``ell_val`` needs no
 padding rows. Only the last block row can be partial; the matrix always has ``nb`` whole block columns.
 
-:cpp:func:`rocsparse_spmm()` reads ``ell_val`` as a row-major array of ``m`` rows of ``ell_cols`` values and
-``ell_col_ind`` as ``mb`` rows of ``ell_width`` block column indices. Entry ``(r, c)`` of the block in slot ``e``
-of block row ``i`` is ``ell_val[(i * block_dim + r) * ell_cols + e * block_dim + c]``, and its block column is
-``ell_col_ind[i * ell_width + e]``.
-
-The Blocked ELL is similar to the ELL format except that column entries now indicate the location of two dimensional blocks of size
-``block_dim * block_dim`` instead of single matrix entries. The block values can be stored in either row or column ordering.
-Rows with less than ``ell_width`` non-zero blocks are padded with zero blocks (``ell_val``) and :math:`-1` (``ell_col_ind``).
 The following :math:`6 \times 6` matrix and corresponding Blocked ELL structures,
-with :math:`mb = 3`, :math:`nb = 3`, :math:`block_dim = 2`, and :math:`\text{ell_width} = 2`, use zero-based indexing and row ordering for the blocks:
+with :math:`m = 6`, :math:`mb = 3`, :math:`nb = 3`, :math:`\text{block_dim} = 2`, :math:`\text{ell_width} = 2`, and
+:math:`\text{ell_cols} = 4`, use zero-based indexing:
 
 .. math::
 
