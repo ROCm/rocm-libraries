@@ -8,6 +8,7 @@ import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import matplotlib.cm as cm
+import matplotlib.ticker
 import numpy as np
 import yaml
 import sys
@@ -73,6 +74,12 @@ def is_cache_resident(funcname, prec, row, machine_spec_dict):
 
 MARKERS = ('o', 's', '^', 'v', 'D', 'P', 'X', '*', '<', '>')
 
+# Charts are saved as 1920 x 1080 images (Full HD), taller only when the legend needs it, with fonts sized
+# to stay readable at that resolution.
+FIGURE_DPI = 120
+matplotlib.rcParams.update({'font.size': 12, 'axes.titlesize': 15, 'axes.labelsize': 13,
+                            'legend.fontsize': 11})
+
 
 def series_styles(count):
     """Distinct (color, marker) pairs for `count` plotted series."""
@@ -88,8 +95,24 @@ def series_styles(count):
 
 
 def chart_size(count):
-    """Figure size in inches: a fixed plot width, and a height that grows with the number of series."""
-    return (10, max(7.0, 3.0 + 0.3 * count))
+    """
+    Figure size in inches: 16 x 9 (1920 x 1080 at FIGURE_DPI), taller when `count` legend entries
+    would not fit.
+    """
+    return (16, max(9.0, 2.0 + 0.25 * count))
+
+
+def new_chart(count):
+    """
+    Figure and axes for a chart with `count` legend entries. Constrained layout shrinks the plot to fit
+    the legend inside the figure, so every chart keeps the size chart_size gives it.
+    """
+    return plt.subplots(figsize=chart_size(count), layout='constrained')
+
+
+def save_chart(figure, path):
+    figure.savefig(path, dpi=FIGURE_DPI)
+    plt.close(figure)
 
 
 def finish_chart(axes):
@@ -98,10 +121,52 @@ def finish_chart(axes):
     axes.grid(True, which='major', linewidth=0.7, alpha=0.7)
     axes.grid(True, which='minor', linestyle=':', linewidth=0.5, alpha=0.5)
     axes.set_axisbelow(True)
-    axes.legend(fontsize=9, loc='upper left', bbox_to_anchor=(1.01, 1.0), borderaxespad=0.)
+    axes.legend(loc='upper left', bbox_to_anchor=(1.01, 1.0), borderaxespad=0.)
 
 
-def plot_data(title, gflops_dicts1, gflops_dicts2, const_args_dicts, funcname_list, machine_spec_dict, savedir, theo_max, perf_vs_perf, size_arg = 'N', filename_stem=None, rows_dicts1=None):
+def ceiling_range_label(ceilings):
+    """'23,300' for a theoretical maximum, or '4,402-4,611' when per-result clocks make it vary by over 1%."""
+    low, high = min(ceilings), max(ceilings)
+    if high <= low * 1.01:
+        return f"{high:,.0f}"
+    return f"{low:,.0f}-{high:,.0f}"
+
+
+def size_tick_label(value, _position=None):
+    """Problem-size tick: 50M from a million up, 20,480 below, so the axis needs no 1e8 offset."""
+    if abs(value) >= 1e6:
+        return f"{value / 1e6:g}M"
+    return f"{value:,.0f}"
+
+
+SIZE_DIMENSIONS = ('M', 'N', 'K')
+
+
+def size_axis_label(rows_dicts, function_names, fallback):
+    """
+    Problem-size axis label naming the dimensions that equal the plotted size, for example
+    'problem size: M = N = K', or 'problem size: N (M = N for gemv, ger)' when functions differ.
+    rows_dicts holds one {size: row} dict per plotted series, function_names the series' functions.
+    """
+    functions_by_dims = {}
+    for rows, name in zip(rows_dicts, function_names):
+        dims = tuple(d for d in SIZE_DIMENSIONS
+                     if rows and all(d in row and int(row[d]) == size for size, row in rows.items()))
+        if dims:
+            names = functions_by_dims.setdefault(dims, [])
+            if name not in names:
+                names.append(name)
+    if not functions_by_dims:
+        return fallback
+    # the dimensions most functions share name the axis; the others are listed by function
+    ordered = sorted(functions_by_dims.items(), key=lambda item: -len(item[1]))
+    label = "problem size: " + " = ".join(ordered[0][0])
+    if len(ordered) > 1:
+        label += " (" + "; ".join(f"{' = '.join(dims)} for {', '.join(names)}" for dims, names in ordered[1:]) + ")"
+    return label
+
+
+def plot_data(title, gflops_dicts1, gflops_dicts2, const_args_dicts, funcname_list, machine_spec_dict, savedir, theo_max, perf_vs_perf, size_arg = 'N', filename_stem=None, rows_dicts1=None, filename_suffix=''):
     """
     plots gflops data from dictionaries, one plot for each common precision present in all dictionaries.
 
@@ -115,9 +180,13 @@ def plot_data(title, gflops_dicts1, gflops_dicts2, const_args_dicts, funcname_li
         savedir (string): directory where resulting plots will be saved.
         theo_max (string): true for plotting performance versus theoretical maximum performance
         perf_vs_perf (string): true for plotting relative performance of one machine versus another machine
-        size_arg (string): x axis title on plot.
+        size_arg (string): x axis title on plot when the rows do not say which dimensions the size is.
         rows_dicts1 (list[dict{string: dict{int: dict}}]): full CSV rows per precision and size, as given by
             :func:`get_rows_from_file`; used for per-point theoretical maximum and cache-residency markers.
+        filename_suffix (string): added to the file name before the precision, to tell sweeps apart.
+
+    Plain GFLOP/s charts also draw each series' theoretical maximum as a dashed line in the series' color
+    when machine_spec_dict has a bandwidth or compute peaks.
     """
     if len(gflops_dicts1) == 0:
         return
@@ -129,10 +198,14 @@ def plot_data(title, gflops_dicts1, gflops_dicts2, const_args_dicts, funcname_li
         # style only the series this precision actually has
         drawn  = sum(1 for d1, d2 in zip(gflops_dicts1, gflops_dicts2) if prec in d1 and prec in d2)
         styles = iter(series_styles(drawn))
-        figure, axes = plt.subplots(figsize=chart_size(drawn))
+        # one more legend entry for the theoretical maximum key
+        figure, axes = new_chart(drawn + 1)
 
         ratio_max    = 1.0
         any_resident = False
+        any_ceiling  = False
+        drawn_rows   = []
+        drawn_functions = []
         for gflops_dict1, gflops_dict2, funcname, const_args_dict, rows_dict1 in zip(gflops_dicts1, gflops_dicts2, funcname_list, const_args_dicts, rows_dicts1):
             if prec not in gflops_dict1 or prec not in gflops_dict2:
                 continue
@@ -172,8 +245,20 @@ def plot_data(title, gflops_dicts1, gflops_dicts2, const_args_dicts, funcname_li
                 function_label = "z" + funcname
 
             resident = [False] * len(sorted_sizes1)
+            rows = rows_dict1.get(prec, {})
+            drawn_rows.append({size: rows[size] for size in common_sizes if size in rows})
+            drawn_functions.append(funcname)
+            ceiling_note = ''
+            if theo_max != True and perf_vs_perf != True:
+                sizes = [size for size in sorted_sizes1 if size != 0]
+                ceilings = [point_ceiling(funcname, prec, function_label, rows.get(size), machine_spec_dict)
+                            for size in sizes]
+                if sizes and all(ceilings):
+                    any_ceiling = True
+                    axes.plot(sizes, ceilings, '--', color=cur_color, linewidth=1.3, alpha=0.8)
+                    # functions with the same ceiling share one dashed line, so the legend gives the value
+                    ceiling_note = f"  (max {ceiling_range_label(ceilings)})"
             if(theo_max == True):
-                rows = rows_dict1.get(prec, {})
                 ratios = []
                 for size, gf in zip(sorted_sizes1, sorted_gflops1):
                     if size == 0:
@@ -191,7 +276,7 @@ def plot_data(title, gflops_dicts1, gflops_dicts2, const_args_dicts, funcname_li
                 resident = [is_cache_resident(funcname, prec, rows.get(size), machine_spec_dict) for size in sorted_sizes1]
                 ratio_max = max([ratio_max] + ratios)
 
-            function_label = function_label + " :  " + const_args_dict[prec]
+            function_label = function_label + " :  " + const_args_dict[prec] + ceiling_note
 
             axes.plot(sorted_sizes1, sorted_gflops1, '-', color=cur_color, marker=marker,
                       label=function_label)
@@ -212,7 +297,7 @@ def plot_data(title, gflops_dicts1, gflops_dicts2, const_args_dicts, funcname_li
             axes.set_ylabel('gflops / theoretical_maximum_gflops')
             if any_resident:
                 axes.annotate(f"hollow: bytes moved < {CACHE_RESIDENT_FACTOR} x L2 (cache-resident)",
-                              xy=(0.01, 0.01), xycoords='axes fraction', fontsize=8)
+                              xy=(0.01, 0.01), xycoords='axes fraction', fontsize=10)
         elif perf_vs_perf == True:
             axes.axhline(1.0, color='gray', linewidth=1, linestyle='-', zorder=0)
             axes.set_ylabel('gflops / gflops')
@@ -223,11 +308,17 @@ def plot_data(title, gflops_dicts1, gflops_dicts2, const_args_dicts, funcname_li
             axes.set_ylim(ylo - pad, yhi + pad)
         else:
             axes.set_ylabel('gflops')
+            if any_ceiling:
+                # one legend key for every dashed line instead of one entry per function
+                axes.plot([], [], '--', color='gray', linewidth=1.3,
+                          label='theoretical maximum (dashed, in the color of its function)')
 
         if isinstance(size_arg, (list, tuple)):
-            axes.set_xlabel(" equal ".join(str(s) for s in size_arg))
+            fallback = " equal ".join(str(s) for s in size_arg)
         else:
-            axes.set_xlabel(str(size_arg))
+            fallback = str(size_arg)
+        axes.set_xlabel(size_axis_label(drawn_rows, drawn_functions, fallback))
+        axes.xaxis.set_major_formatter(matplotlib.ticker.FuncFormatter(size_tick_label))
 
         finish_chart(axes)
         axes.set_title(title)
@@ -240,13 +331,11 @@ def plot_data(title, gflops_dicts1, gflops_dicts2, const_args_dicts, funcname_li
                 if filename != '':
                     filename += '_'
                 filename += funcname
-        filename += '_' + prec
+        filename += filename_suffix + '_' + prec
         if not os.path.exists(savedir):
             os.makedirs(savedir)
         out_dir = savedir if os.path.isabs(savedir) else os.path.join(os.getcwd(), savedir)
-        # bbox_inches='tight' widens the image to include the legend instead of shrinking the plot
-        figure.savefig(os.path.join(out_dir, filename), dpi=100, bbox_inches='tight')
-        plt.close(figure)
+        save_chart(figure, os.path.join(out_dir, filename))
 
 
 def plot_roofline(dir1, function_names, machine_spec_dict, savedir, title, achievable_bw_frac=None):
@@ -332,7 +421,7 @@ def plot_roofline(dir1, function_names, machine_spec_dict, savedir, title, achie
         x = np.logspace(np.log10(x_lo), np.log10(x_hi), 200)
 
         funcs = sorted({pt['series'] for pt in pts})
-        figure, axes = plt.subplots(figsize=chart_size(len(funcs) + 3))
+        figure, axes = new_chart(len(funcs) + 3)
 
         def roof(bw, pk):
             y = np.full_like(x, np.inf)
@@ -371,11 +460,10 @@ def plot_roofline(dir1, function_names, machine_spec_dict, savedir, title, achie
         axes.set_ylabel('GFLOP/s')
         if any(pt['cache_resident'] for pt in pts):
             axes.annotate(f"hollow: bytes moved < {CACHE_RESIDENT_FACTOR} x L2 (cache-resident)",
-                          xy=(0.01, 0.01), xycoords='axes fraction', fontsize=8)
+                          xy=(0.01, 0.01), xycoords='axes fraction', fontsize=10)
         finish_chart(axes)
         axes.set_title(f"{title}  {prec}")
-        figure.savefig(os.path.join(savedir, f"roofline_{stem}_{prec}"), dpi=100, bbox_inches='tight')
-        plt.close(figure)
+        save_chart(figure, os.path.join(savedir, f"roofline_{stem}_{prec}"))
 
 
 def get_function_name(filename):
@@ -577,8 +665,10 @@ def plot_gemm_by_trans(
     x_axis_label,
     label1,
     label2,
+    filename_suffix='',
 ):
-    """One PNG per (transA, transB) and compute_type: gemm_NN_f32_r.png, etc."""
+    """One PNG per compute_type with a series per (transA, transB): gemm_f32_r.png, etc."""
+    gflops_dicts1, gflops_dicts2, const_args_dicts, rows_dicts1 = [], [], [], []
     for trans_a, trans_b in GEMM_TRANS_PAIRS:
         gflops_dict1 = get_data_from_file(
             csv_a, "hipblas-Gflops", label1, label2, "hipblas-Gflops",
@@ -589,7 +679,6 @@ def plot_gemm_by_trans(
             trans_a=trans_a, trans_b=trans_b,
         )
         if not gflops_dict1 or not gflops_dict2:
-            print(f"skip gemm {trans_a}{trans_b}: no data on one or both sides")
             continue
         const_args_dict = get_const_args_dict(
             csv_a, "hipblas-Gflops", trans_a=trans_a, trans_b=trans_b,
@@ -601,22 +690,58 @@ def plot_gemm_by_trans(
                 const_args_dict[prec] = f"{trans_prefix}, {rest}"
             elif not rest:
                 const_args_dict[prec] = trans_prefix
-        stem = f"gemm_{trans_a}{trans_b}"
-        rows_dict1 = get_rows_from_file(csv_a, label1, label2, trans_a=trans_a, trans_b=trans_b)
-        plot_data(
-            title + f"  transA={trans_a} transB={trans_b}",
-            [gflops_dict1],
-            [gflops_dict2],
-            [const_args_dict],
-            ["gemm"],
-            machine_spec_dict,
-            savedir,
-            theo_max,
-            perf_vs_perf,
-            x_axis_label,
-            filename_stem=stem,
-            rows_dicts1=[rows_dict1],
-        )
+        gflops_dicts1.append(gflops_dict1)
+        gflops_dicts2.append(gflops_dict2)
+        const_args_dicts.append(const_args_dict)
+        rows_dicts1.append(get_rows_from_file(csv_a, label1, label2, trans_a=trans_a, trans_b=trans_b))
+    if not gflops_dicts1:
+        print("skip gemm: no transA/transB combination with data on both sides")
+        return
+    plot_data(
+        title,
+        gflops_dicts1,
+        gflops_dicts2,
+        const_args_dicts,
+        ["gemm"] * len(gflops_dicts1),
+        machine_spec_dict,
+        savedir,
+        theo_max,
+        perf_vs_perf,
+        x_axis_label,
+        filename_stem="gemm",
+        rows_dicts1=rows_dicts1,
+        filename_suffix=filename_suffix,
+    )
+
+
+SWEEPS_FILE = "sweeps.yaml"
+
+
+def sweep_groups(data_dir, function_names):
+    """
+    [(filename suffix, title description, function names)]: the functions grouped by the sweep that
+    produced their results, as benchmark.py records it in sweeps.yaml. A single group with no suffix when
+    every function comes from one sweep, or when the results predate sweeps.yaml.
+    """
+    path = os.path.join(data_dir, SWEEPS_FILE)
+    sweeps = yaml.safe_load(Path(path).read_text()) if os.path.isfile(path) else None
+    groups = {}
+    for name in function_names:
+        sweep = (sweeps or {}).get(name)
+        key = (sweep.get('sizes', 'default'), sweep.get('flush_mb') or 0) if sweep else None
+        groups.setdefault(key, []).append(name)
+    if len(groups) <= 1:
+        return [("", "", list(function_names))]
+    result = []
+    for key, names in groups.items():
+        if key is None:
+            result.append(("_unrecorded", "sweep not recorded", names))
+            continue
+        sizes, flush_mb = key
+        suffix = f"_{sizes}" + (f"_flush{flush_mb:g}" if flush_mb else "")
+        description = f"{sizes} sizes" + (f", --flush-mb {flush_mb:g}" if flush_mb else "")
+        result.append((suffix, description, names))
+    return result
 
 
 def _data_dir(level, tag, *, tag_parent=False, blas_subdir=None):
@@ -776,7 +901,7 @@ if __name__ =='__main__':
     parser.add_argument(
         '--combine-gemm-trans',
         action='store_true',
-        help='Plot all GEMM transA/transB pairs on one chart per compute_type (legacy).',
+        help='Plot gemm as a single series mixing every transA/transB pair (legacy); the default draws one series per pair.',
     )
 
     args = parser.parse_args()
@@ -878,75 +1003,85 @@ if __name__ =='__main__':
     else:
         x_axis_label = f"{args.label1} equal {args.label2}"
 
-    function_names = list(args.function_names)
-    if "gemm" in function_names and not args.combine_gemm_trans:
-        csv_a = os.path.join(dir1, "gemm.csv")
-        csv_b = os.path.join(dir2, "gemm.csv")
-        if os.path.isfile(csv_a) and os.path.isfile(csv_b):
-            plot_gemm_by_trans(
-                csv_a,
-                csv_b,
-                title=title,
-                savedir=savedir,
-                machine_spec_dict=machine_spec_dict,
-                theo_max=args.theo_max,
-                perf_vs_perf=args.perf_vs_perf,
-                x_axis_label=x_axis_label,
-                label1=args.label1,
-                label2=args.label2,
-            )
-        else:
-            print("skip gemm by trans: missing gemm.csv on A or B side")
-        function_names = [f for f in function_names if f != "gemm"]
+    # Separate benchmark.py calls into the same folder (for example the large dense sweeps and the banded
+    # sweeps with --flush-mb) get separate charts.
+    plotted_any = False
+    for filename_suffix, sweep_description, sweep_function_names in sweep_groups(dir1, args.function_names):
+        sweep_title = title + (f"  ({sweep_description})" if sweep_description else "")
+        function_names = list(sweep_function_names)
+        if "gemm" in function_names and not args.combine_gemm_trans:
+            csv_a = os.path.join(dir1, "gemm.csv")
+            csv_b = os.path.join(dir2, "gemm.csv")
+            if os.path.isfile(csv_a) and os.path.isfile(csv_b):
+                plot_gemm_by_trans(
+                    csv_a,
+                    csv_b,
+                    title=sweep_title,
+                    savedir=savedir,
+                    machine_spec_dict=machine_spec_dict,
+                    theo_max=args.theo_max,
+                    perf_vs_perf=args.perf_vs_perf,
+                    x_axis_label=x_axis_label,
+                    label1=args.label1,
+                    label2=args.label2,
+                    filename_suffix=filename_suffix,
+                )
+            else:
+                print("skip gemm by trans: missing gemm.csv on A or B side")
+            function_names = [f for f in function_names if f != "gemm"]
 
-    gflops_dicts1 = []
-    gflops_dicts2 = []
-    const_args_dicts = []
-    funcname_list = []
-    rows_dicts1 = []
+        gflops_dicts1 = []
+        gflops_dicts2 = []
+        const_args_dicts = []
+        funcname_list = []
+        rows_dicts1 = []
 
-    for function_name in function_names:
+        for function_name in function_names:
 
-        output_filename1 = os.path.join(dir1, function_name+".csv")
-        output_filename2   = os.path.join(dir2, function_name+".csv")
+            output_filename1 = os.path.join(dir1, function_name+".csv")
+            output_filename2   = os.path.join(dir2, function_name+".csv")
 
-        if not os.path.isfile(output_filename1) or not os.path.isfile(output_filename2):
-            print(f"skip {function_name}: missing csv on A or B side")
+            if not os.path.isfile(output_filename1) or not os.path.isfile(output_filename2):
+                print(f"skip {function_name}: missing csv on A or B side")
+                continue
+            if not _csv_has_bench_rows(output_filename1) or not _csv_has_bench_rows(output_filename2):
+                print(f"skip {function_name}: no benchmark rows on one or both sides")
+                continue
+
+            gflops_dict1 = get_data_from_file(output_filename1, "hipblas-Gflops", args.label1, args.label2, "hipblas-Gflops")
+            gflops_dict2 = get_data_from_file(output_filename2, "hipblas-Gflops", args.label1, args.label2, "hipblas-Gflops")
+
+            if not gflops_dict1 or not gflops_dict2:
+                print(f"skip {function_name}: empty gflops data")
+                continue
+
+            gflops_dicts1.append(gflops_dict1)
+            gflops_dicts2.append(gflops_dict2)
+            rows_dicts1.append(get_rows_from_file(output_filename1, args.label1, args.label2))
+
+            const_args_dict = get_const_args_dict(output_filename1, "hipblas-Gflops")
+
+            const_args_dicts.append(const_args_dict)
+
+            fn = get_function_name(output_filename1)
+            if not fn:
+                print(f"skip {function_name}: could not parse function name")
+                gflops_dicts1.pop()
+                gflops_dicts2.pop()
+                const_args_dicts.pop()
+                rows_dicts1.pop()
+                continue
+            funcname_list.append(fn)
+
+        if not funcname_list:
             continue
-        if not _csv_has_bench_rows(output_filename1) or not _csv_has_bench_rows(output_filename2):
-            print(f"skip {function_name}: no benchmark rows on one or both sides")
-            continue
+        plotted_any = True
 
-        gflops_dict1 = get_data_from_file(output_filename1, "hipblas-Gflops", args.label1, args.label2, "hipblas-Gflops")
-        gflops_dict2 = get_data_from_file(output_filename2, "hipblas-Gflops", args.label1, args.label2, "hipblas-Gflops")
+        print("plotting for: ", funcname_list)
+        plot_data(sweep_title, gflops_dicts1, gflops_dicts2, const_args_dicts, funcname_list, machine_spec_dict, savedir, args.theo_max, args.perf_vs_perf, x_axis_label, rows_dicts1=rows_dicts1, filename_suffix=filename_suffix)
 
-        if not gflops_dict1 or not gflops_dict2:
-            print(f"skip {function_name}: empty gflops data")
-            continue
-
-        gflops_dicts1.append(gflops_dict1)
-        gflops_dicts2.append(gflops_dict2)
-        rows_dicts1.append(get_rows_from_file(output_filename1, args.label1, args.label2))
-
-        const_args_dict = get_const_args_dict(output_filename1, "hipblas-Gflops")
-
-        const_args_dicts.append(const_args_dict)
-
-        fn = get_function_name(output_filename1)
-        if not fn:
-            print(f"skip {function_name}: could not parse function name")
-            gflops_dicts1.pop()
-            gflops_dicts2.pop()
-            const_args_dicts.pop()
-            rows_dicts1.pop()
-            continue
-        funcname_list.append(fn)
-
-    if not funcname_list:
+    if not plotted_any:
         if "gemm" in args.function_names and not args.combine_gemm_trans:
             raise SystemExit(0)
         print("plot.py: no functions to plot after filtering csvs")
         raise SystemExit(1)
-
-    print("plotting for: ", funcname_list)
-    plot_data(title, gflops_dicts1, gflops_dicts2, const_args_dicts, funcname_list, machine_spec_dict, savedir, args.theo_max, args.perf_vs_perf, x_axis_label, rows_dicts1=rows_dicts1)

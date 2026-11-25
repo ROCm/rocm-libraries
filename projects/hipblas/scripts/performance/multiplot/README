@@ -9,8 +9,21 @@
 # to run benchmarks in blas1/*.yaml files and output results in blas1/my_arch/*.csv files
 ./benchmark_plot.sh --benchmark true  --plot false --level1 true --level2 false --level3 false --tag1 my_arch
 
-# to plot data in blas1/my_arch/*.csv files and output in blas1/my_arch/plot_gflops/*.png
+# to plot data in blas1/my_arch/*.csv files and output in blas1/my_arch/plots_gflops/*.png
 ./benchmark_plot.sh --benchmark false --plot true  --level1 true --level2 false --level3 false --tag1 my_arch
+
+     Charts are 1920 x 1080 images (Full HD), taller only when the legend needs it. The x axis is the problem
+     size and its label names the dimensions that equal it (for example M = N = K for gemm). gemm gets one chart
+     per precision, with a series for each transA/transB combination.
+
+     When machine_spec.yaml has a bandwidth or compute peaks (see the next section), each function's
+     theoretical maximum is drawn as a dashed line in its color, and its legend entry gives the value.
+
+     Results of separate benchmark.py calls into the same folder, for example the large BLAS2 sweeps and the
+     banded BLAS2 sweeps run with --flush-mb, get separate charts: benchmark.py records the size set and
+     --flush-mb of each function in blasL/my_arch/sweeps.yaml, and plot.py adds them to the file names and
+     titles (gemv_ger_large_f32_r.png, gbmv_tbmv_default_flush2048_f32_r.png). Results from a single
+     sweep, or benchmarked without sweeps.yaml, keep one set of charts.
 
 
 ---------------------------------------------------------------------------------------------------------------

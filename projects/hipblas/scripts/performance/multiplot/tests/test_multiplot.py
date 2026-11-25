@@ -429,3 +429,116 @@ def test_plot_modes_are_exclusive_and_need_a_ceiling(data_root):
     spec_file.write_text(yaml.dump({'arch': 'gfx90a', 'theo_max': False}))
     r = _plot(data_root, '-l', 'blas1', '--theo_max', '-f', 'axpy')
     assert r.returncode != 0 and 'no theoretical maximum' in (r.stdout + r.stderr)
+
+
+# ---------- chart readability: theoretical maximum, size axis, sweeps, gemm, image size ----------
+
+def _plot_charts(data_root, monkeypatch, *args):
+    """Run plot.py in this process and return {file name: chart details} for every chart it saves."""
+    import runpy
+    import matplotlib.figure
+    charts = {}
+    def capture(fig, path, *a, **kw):
+        fig.canvas.draw()
+        axes = fig.axes[0]
+        legend = axes.get_legend()
+        width, height = fig.get_size_inches() * kw['dpi']
+        charts[os.path.basename(str(path))] = {
+            'legend': [t.get_text() for t in legend.get_texts()],
+            'xlabel': axes.get_xlabel(),
+            'title': axes.get_title(),
+            'pixels': (round(width), round(height)),
+            'legend_inside': fig.bbox.contains(*legend.get_window_extent().p1),
+        }
+    monkeypatch.setattr(matplotlib.figure.Figure, 'savefig', capture)
+    monkeypatch.setattr(sys, 'argv', ['plot.py', '--base', str(data_root), '--tag1', 'gfx90a', '--tag2', 'gfx90a'] + list(args))
+    try:
+        runpy.run_path(os.path.join(MULTIPLOT_DIR, 'plot.py'), run_name='__main__')
+    except SystemExit as exit_status:
+        assert exit_status.code in (0, None), exit_status
+    return charts
+
+
+def test_gflops_charts_draw_the_theoretical_maximum(data_root, monkeypatch):
+    charts = _plot_charts(data_root, monkeypatch, '-l', 'blas2', '--label1', 'M', '--label2', 'N', '-f', 'gemv', '-f', 'ger')
+    legend = charts['gemv_ger_f32_r']['legend']
+    assert any(l.startswith('theoretical maximum') for l in legend), legend
+    # each function's legend entry gives its ceiling, since functions with the same ceiling share a line
+    assert all('(max ' in l for l in legend if l.startswith(('sgemv', 'sger'))), legend
+
+    # without a bandwidth, peaks or per-function values there is nothing to draw
+    (data_root / 'blas2' / 'gfx90a' / 'machine_spec.yaml').write_text(yaml.dump({'arch': 'gfx90a'}))
+    charts = _plot_charts(data_root, monkeypatch, '-l', 'blas2', '--label1', 'M', '--label2', 'N', '-f', 'gemv', '-f', 'ger')
+    assert not any('theoretical maximum' in l or '(max ' in l for l in charts['gemv_ger_f32_r']['legend'])
+
+
+def test_size_axis_names_the_swept_dimensions():
+    import plot
+    assert plot.size_tick_label(268435456) == '268.435M'
+    assert plot.size_tick_label(50000000) == '50M'
+    assert plot.size_tick_label(20480) == '20,480'
+    square = {1024: {'M': '1024', 'N': '1024', 'K': '1024'}}
+    vector = {1024: {'N': '1024'}}
+    rows_m = {1024: {'M': '1024', 'N': '64'}}
+    assert plot.size_axis_label([square], ['gemm'], 'x') == 'problem size: M = N = K'
+    assert plot.size_axis_label([vector, vector, square], ['symv', 'spmv', 'gemm'], 'x') == \
+        'problem size: N (M = N = K for gemm)'
+    assert plot.size_axis_label([vector, rows_m], ['symv', 'tbmv'], 'x') == 'problem size: N (M for tbmv)'
+    assert plot.size_axis_label([{}], ['axpy'], 'fallback') == 'fallback'
+
+
+def test_charts_are_full_hd_with_the_legend_inside(data_root, monkeypatch):
+    charts = _plot_charts(data_root, monkeypatch, '-l', 'blas1', '-f', 'axpy', '-f', 'dot', '-f', 'scal', '-f', 'nrm2')
+    assert charts
+    for name, chart in charts.items():
+        assert chart['pixels'] == (1920, 1080), name
+        assert chart['legend_inside'], name
+        assert chart['xlabel'] == 'problem size: N', name
+
+
+def test_record_sweeps_keeps_other_functions(tmp_path):
+    sweeps = tmp_path / 'sweeps.yaml'
+    benchmark.record_sweeps(str(sweeps), ['gemv', 'ger'], 'large', None)
+    benchmark.record_sweeps(str(sweeps), ['gbmv'], 'default', 2048)
+    benchmark.record_sweeps(str(sweeps), ['ger'], 'default', None)
+    assert yaml.safe_load(sweeps.read_text()) == {
+        'gemv': {'sizes': 'large', 'flush_mb': 0},
+        'ger': {'sizes': 'default', 'flush_mb': 0},
+        'gbmv': {'sizes': 'default', 'flush_mb': 2048},
+    }
+
+
+def test_each_sweep_gets_its_own_charts(data_root, monkeypatch):
+    blas2 = data_root / 'blas2' / 'gfx90a'
+    args = ('-l', 'blas2', '--label1', 'M', '--label2', 'N', '-f', 'gemv', '-f', 'ger', '-f', 'syr')
+    # results from one sweep, or benchmarked before sweeps.yaml existed, keep one set of charts
+    assert 'gemv_ger_syr_f32_r' in _plot_charts(data_root, monkeypatch, *args)
+
+    benchmark.record_sweeps(str(blas2 / 'sweeps.yaml'), ['gemv', 'ger'], 'large', None)
+    benchmark.record_sweeps(str(blas2 / 'sweeps.yaml'), ['syr'], 'default', 2048)
+    charts = _plot_charts(data_root, monkeypatch, *args)
+    assert {'gemv_ger_large_f32_r', 'syr_default_flush2048_f32_r'} <= set(charts), sorted(charts)
+    assert charts['gemv_ger_large_f32_r']['title'].endswith('(large sizes)')
+    assert charts['syr_default_flush2048_f32_r']['title'].endswith('(default sizes, --flush-mb 2048)')
+    assert not any(l.startswith('ssyr') for l in charts['gemv_ger_large_f32_r']['legend'])
+
+
+def test_gemm_transposes_share_one_chart_per_datatype(tmp_path, monkeypatch):
+    shutil.copytree(os.path.join(MULTIPLOT_DIR, 'blas3', 'gfx90a'), tmp_path / 'blas3' / 'gfx90a')
+    # the checked-in gemm results have one transpose combination (N, T); add the same rows as N, N
+    gemm_csv = tmp_path / 'blas3' / 'gfx90a' / 'gemm.csv'
+    lines = gemm_csv.read_text().splitlines()
+    extra = []
+    for i, line in enumerate(lines[:-1]):
+        if 'hipblas-Gflops' in line:
+            header = line.split(',')
+            data = lines[i + 1].split(',')
+            data[header.index('transB')] = 'N'
+            extra += [line, ','.join(data)]
+    gemm_csv.write_text('\n'.join(lines + extra) + '\n')
+
+    charts = _plot_charts(tmp_path, monkeypatch, '-l', 'blas3', '--label1', 'M', '--label2', 'N', '-f', 'gemm')
+    assert set(charts) == {'gemm_f32_r', 'gemm_f64_r', 'gemm_f32_c', 'gemm_f64_c'}, sorted(charts)
+    sgemm = [l for l in charts['gemm_f32_r']['legend'] if l.startswith('sgemm')]
+    assert len(sgemm) == 2
+    assert any('transA=N, transB=N' in l for l in sgemm) and any('transA=N, transB=T' in l for l in sgemm)

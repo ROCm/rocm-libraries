@@ -301,6 +301,18 @@ def bench_yaml_for_run(input_yaml_file, flush_bytes):
     return flushed
 
 
+def record_sweeps(filename, function_names, sizes, flush_mb):
+    """
+    Record in sweeps.yaml which sweep produced each function's results, keeping the entries of the other
+    functions, so plot.py can chart the results of separate benchmark.py calls into one folder apart.
+    """
+    sweeps = yaml.safe_load(Path(filename).read_text()) if os.path.isfile(filename) else None
+    sweeps = sweeps or {}
+    for function_name in function_names:
+        sweeps[function_name] = {'sizes': sizes, 'flush_mb': flush_mb or 0}
+    Path(filename).write_text(yaml.safe_dump(sweeps, sort_keys=True))
+
+
 def run_command(bench_command, input_yaml_file, output_csv_file, env=None):
 
     output = subprocess.check_output([bench_command,
@@ -369,6 +381,7 @@ if __name__ =='__main__':
         bench_env.pop('HIPBLAS_BENCH_FREQ_ALL', None)
 
     output_filenames = []
+    swept = []
     for function_name in args.function_names:
 
         input_filename = os.path.join(input_dir, function_name+".yaml")
@@ -384,6 +397,9 @@ if __name__ =='__main__':
             if input_filename.endswith('.flush.yaml'):
                 os.remove(input_filename)
         output_filenames.append(output_filename)
+        swept.append(function_name)
+
+    record_sweeps(os.path.join(args.level, args.tag, "sweeps.yaml"), swept, args.sizes, args.flush_mb)
 
     telemetry = {}
     sclk_stats = mclk_stats = None
