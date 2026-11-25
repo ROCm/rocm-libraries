@@ -56,21 +56,13 @@ namespace rocsparse
         ROCSPARSE_ROUTINE_TRACE;
 
         // Quick return if possible
-        if(mb == 0 || nb == 0)
+        if(mb == 0 || nb == 0 || nnzb == 0)
         {
             if(bsc_col_ptr != nullptr)
             {
                 RETURN_IF_ROCSPARSE_ERROR(rocsparse::valset(
                     handle, nb + 1, static_cast<rocsparse_int>(idx_base), bsc_col_ptr));
             }
-
-            return rocsparse_status_success;
-        }
-
-        if(nnzb == 0)
-        {
-            RETURN_IF_ROCSPARSE_ERROR(rocsparse::valset(
-                handle, nb + 1, static_cast<rocsparse_int>(idx_base), bsc_col_ptr));
 
             return rocsparse_status_success;
         }
