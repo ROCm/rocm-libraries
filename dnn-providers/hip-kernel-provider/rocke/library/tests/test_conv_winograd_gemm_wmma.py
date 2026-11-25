@@ -19,6 +19,7 @@ from __future__ import annotations
 import unittest
 
 import numpy as np
+import pytest
 from rocke.numeric import storage
 from rocke.numeric.compare import peak_relative_error
 from rocke.runtime.hip_module import get_device_arch
@@ -238,6 +239,7 @@ _CASES = (
 )
 
 
+@pytest.mark.gpu
 @unittest.skipUnless(not _gpu_skip(), _gpu_skip() or "no GPU")
 class TestGemmGpu(unittest.TestCase):
     def _check(self, dims, dtype, steps):

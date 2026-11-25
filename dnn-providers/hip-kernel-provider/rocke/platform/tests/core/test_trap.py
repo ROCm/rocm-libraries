@@ -259,6 +259,7 @@ _CHILD = textwrap.dedent(
 )
 
 
+@pytest.mark.gpu
 @pytest.mark.parametrize("route", ["llvm", "hipcc"])
 def test_gpu_kernel_runs_to_its_store_when_the_trap_is_not_taken(route):
     arch = current_device_arch()

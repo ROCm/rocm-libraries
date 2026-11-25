@@ -21,6 +21,8 @@ from rocke.helpers import compile_kernel
 from rocke.runtime.hip_module import Runtime, get_device_arch
 from rocke.tests.engines import native_engine_or_skip
 
+pytestmark = pytest.mark.gpu
+
 
 @pytest.fixture(scope="module")
 def arch():

@@ -170,10 +170,17 @@ set(_ROCKE_INSTALLED_PYTEST
 # ${_ROCKE_INSTALLED_PYTEST}: CTest runs a shard's entries one at a time, and
 # the rocke.tests.ctest_workers plugin runs the entry's share in worker
 # processes, each on its own block of the CPUs; the few GPU tests of such an
-# entry share the shard's GPU among the workers. rocke_library_gpu_pytest takes
-# it too, its workers sharing the shard's GPU: its tests compile their kernels
-# on the CPU before they launch them.
+# entry share the shard's GPU among the workers. rocke_library_gpu_pytest and
+# rocke_platform_gpu_pytest take it too, their workers sharing the shard's GPU:
+# their tests compile their kernels on the CPU before they launch them.
 set(_ROCKE_INSTALLED_PYTEST_WORKERS "-p rocke.tests.ctest_workers --rocke-workers 4")
+
+# The marker filter and per-test limit of every rocke_pytest_<part>. The
+# filter leaves out the tests marked gpu, which launch GPU work;
+# rocke_platform_gpu_pytest runs them, with the same per-test limit.
+set(_ROCKE_PLATFORM_PYTEST_MARKERS "not integration and not gpu")
+set(_ROCKE_PLATFORM_PYTEST_GPU_MARKERS "gpu and not integration")
+set(_ROCKE_PLATFORM_PYTEST_ITEM_TIMEOUT "--timeout=60")
 
 # Return the installed-CTestTestfile text that registers rocke_pytest_<part>,
 # one part of the platform pytest suite. The remaining arguments are the part's
@@ -195,7 +202,7 @@ function(rocke_platform_pytest_entry out_var part)
     string(APPEND _pytest_arguments " \"${_pytest_argument}\"")
   endforeach()
   string(CONCAT _entry
-         "add_test(${_test_name} ${_ROCKE_INSTALLED_PYTEST} ${_ROCKE_INSTALLED_PYTEST_WORKERS}${_pytest_arguments} -m \"not integration\" -v -rs --timeout=60)\n"
+         "add_test(${_test_name} ${_ROCKE_INSTALLED_PYTEST} ${_ROCKE_INSTALLED_PYTEST_WORKERS}${_pytest_arguments} -m \"${_ROCKE_PLATFORM_PYTEST_MARKERS}\" -v -rs ${_ROCKE_PLATFORM_PYTEST_ITEM_TIMEOUT})\n"
          "set_tests_properties(${_test_name} PROPERTIES\n"
          "  LABELS \"ckc;python;standard\"\n"
          "  ENVIRONMENT \"\${_rocke_platform_pytest_environment}\"\n"
@@ -1046,7 +1053,7 @@ if(ROCKE_INSTALL_TESTS)
       # categories tier as standard, so the quick tier does not run them.
       list(APPEND _ROCKE_PLATFORM_PYTEST_IGNORE_other test_ctest_shard.py)
       string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
-             "add_test(rocke_ctest_shard_pytest ${_ROCKE_INSTALLED_PYTEST} ${_ROCKE_INSTALLED_PYTEST_WORKERS} \"${ROCKE_TEST_CTEST_REL}tests/test_ctest_shard.py\" -m \"not integration\" -v -rs --timeout=60)\n"
+             "add_test(rocke_ctest_shard_pytest ${_ROCKE_INSTALLED_PYTEST} ${_ROCKE_INSTALLED_PYTEST_WORKERS} \"${ROCKE_TEST_CTEST_REL}tests/test_ctest_shard.py\" -m \"${_ROCKE_PLATFORM_PYTEST_MARKERS}\" -v -rs ${_ROCKE_PLATFORM_PYTEST_ITEM_TIMEOUT})\n"
              "set_tests_properties(rocke_ctest_shard_pytest PROPERTIES\n"
              "  LABELS \"ckc;python;standard\"\n"
              "  ENVIRONMENT \"\${_rocke_platform_pytest_environment}\"\n"
@@ -1072,6 +1079,19 @@ if(ROCKE_INSTALL_TESTS)
       endforeach()
       rocke_platform_pytest_entry(_rocke_pytest_entry other ${_rocke_pytest_other_arguments})
       string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES "${_rocke_pytest_entry}")
+
+      # The platform tests that launch GPU work, the ones marked gpu
+      # (tests/pytest.ini), run in this GPU entry instead of their parts: it
+      # collects tests/ less the library tests and keeps only those tests,
+      # with the parts' per-test limit and the GPU policy, lock and CTest
+      # limit. Not a part: it selects by mark, not by directory.
+      string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
+             "add_test(rocke_platform_gpu_pytest ${_ROCKE_INSTALLED_PYTEST} ${_ROCKE_INSTALLED_PYTEST_WORKERS} \"${ROCKE_TEST_CTEST_REL}tests\" --ignore \"${ROCKE_TEST_CTEST_REL}tests/library\" -m \"${_ROCKE_PLATFORM_PYTEST_GPU_MARKERS}\" -v -rs ${_ROCKE_PLATFORM_PYTEST_ITEM_TIMEOUT} ${_ROCKE_INSTALLED_PYTEST_GPU_TEST_POLICY})\n"
+             "set_tests_properties(rocke_platform_gpu_pytest PROPERTIES\n"
+             "  LABELS \"ckc;python;gpu;standard\"\n"
+             "  ENVIRONMENT \"\${_rocke_platform_pytest_environment}\"\n"
+             "  RESOURCE_LOCK ${_ROCKE_INSTALLED_GPU_RESOURCE_LOCK}\n"
+             "  TIMEOUT ${ROCKE_TEST_TIMEOUT_GPU})\n")
 
       # The tiling package's tests live inside the package
       # (rocke/tests/helpers/tiling), so the rocke_pytest_* parts above, which

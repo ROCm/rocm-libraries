@@ -147,6 +147,7 @@ def test_launch_kernel_timing_drains_on_a_raise(gpu_timer):
         assert rt.log.count("destroy") == 2
 
 
+@pytest.mark.gpu
 @pytest.mark.skipif(not os.path.exists("/dev/kfd"), reason="needs an AMD GPU")
 def test_real_runtime_drains_queued_work_on_a_raise():
     """On HIP: the drain runs against the real runtime and succeeds."""

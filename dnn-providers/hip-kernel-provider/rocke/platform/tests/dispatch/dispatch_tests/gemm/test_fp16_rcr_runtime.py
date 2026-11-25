@@ -13,6 +13,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
+import pytest
 from rocke.dispatch import GemmRequest, dispatch_gemm_fp16
 from rocke.dispatch.gemm import build_kernel
 from rocke.helpers import compile_kernel, make_gemm_manifest, write_artifact
@@ -23,6 +24,8 @@ from rocke.tests.subprocess_launcher import (
     rocke_python_command,
     rocke_subprocess_env,
 )
+
+pytestmark = pytest.mark.gpu
 
 # The runtime body below builds+launches a code object for the device arch, so gate on
 # the exact arch (via the rocke HIP runtime, no torch): on any other device the launch

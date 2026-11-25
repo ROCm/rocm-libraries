@@ -288,6 +288,7 @@ test_categories:
       - "rocke_tiling_pytest"
       - "rocke_library_gpu_pytest"
       - "rocke_tiling_gpu_pytest"
+      - "rocke_platform_gpu_pytest"
       - "rocke_reference_common_pytest"
       - "rocke_[a-z0-9_]+_reference_unit_pytest"
       - "rocke_[a-z0-9_]+_gpu_gfx[0-9a-z]+_pytest"
@@ -355,6 +356,7 @@ test_categories:
     description: "rocKE GPU numeric checks that start at the standard tier, not quick"
     test_patterns:
       - "rocke_tiling_gpu_pytest"
+      - "rocke_platform_gpu_pytest"
       - "rocke_library_gpu_pytest"
       - "rocke_library_attention_gpu_pytest"
       - "rocke_library_attention_bias_gpu_pytest"

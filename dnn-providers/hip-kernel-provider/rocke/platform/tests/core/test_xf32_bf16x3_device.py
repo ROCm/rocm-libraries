@@ -50,12 +50,15 @@ import os
 import subprocess
 import unittest
 
+import pytest
 from rocke.tests.arch_marks import arch_specific
 from rocke.tests.lanes import arch_skip_reason
 from rocke.tests.subprocess_launcher import (
     rocke_python_command,
     rocke_subprocess_env,
 )
+
+pytestmark = pytest.mark.gpu
 
 _ARCH = "gfx950"
 _REQUIRE_ENV = "ROCKE_REQUIRE_GFX950"

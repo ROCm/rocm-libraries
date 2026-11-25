@@ -721,6 +721,7 @@ class TestDgradWmmaPack8Strided(unittest.TestCase):
                 build_direct_dgrad_wmma(spec, "gfx1250")
 
 
+@pytest.mark.gpu
 @unittest.skipUnless(not _gpu_skip(), _gpu_skip() or "no GPU")
 class TestDgradWmmaGpu(unittest.TestCase):
     def _check(self, pkw, knobs):

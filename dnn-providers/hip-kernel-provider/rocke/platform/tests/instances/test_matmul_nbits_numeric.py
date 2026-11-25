@@ -135,6 +135,7 @@ def test_the_optimized_body_is_refused_off_gfx1201():
         build_matmul_nbits(spec, arch="gfx1151")
 
 
+@pytest.mark.gpu
 @pytest.mark.parametrize("name", sorted(_CASES))
 def test_matmul_nbits_matches_the_exact_product_on_gpu(gpu_arch, name):
     case = _CASES[name]

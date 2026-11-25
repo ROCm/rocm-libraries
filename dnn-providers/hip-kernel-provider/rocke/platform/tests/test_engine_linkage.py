@@ -931,7 +931,9 @@ def test_installed_platform_pytest_parts_partition_the_suite(
     when directories are regrouped. Every part keeps the suite's options, labels
     and time limit. rocke_pytest_other ignores tests/test_ctest_shard.py, which
     rocke_ctest_shard_pytest runs with the suite's options and time limit and the
-    standard label."""
+    standard label. The suite's marker filter leaves out the gpu tests, and
+    rocke_platform_gpu_pytest, which is not a part, runs exactly those over the
+    same tree."""
     _, ctest_dir = configure_installed_ctest(
         tmp_path,
         f"-DROCKE_INSTALL_PROVIDER_CTEST_SUBDIR={provider_subdir}",
@@ -948,7 +950,13 @@ def test_installed_platform_pytest_parts_partition_the_suite(
     assert len(plugin_tests) == 1, [test["name"] for test in tests]
     plugin_tests = plugin_tests[0]
     tests_root = ("./" if provider_subdir else "../") + "tests"
-    suite_options = ["-m", "not integration", "-v", "-rs", "--timeout=60"]
+    suite_options = [
+        "-m",
+        "not integration and not gpu",
+        "-v",
+        "-rs",
+        "--timeout=60",
+    ]
     selection_by_part = {}
     for part in parts:
         name, command = part["name"], part["command"]
@@ -1031,6 +1039,23 @@ def test_installed_platform_pytest_parts_partition_the_suite(
             assert owners == ([] if part == "other" else [part]), (part, path)
     for part, path in ignored_files.items():
         assert f"{tests_root}/{path}" in ignored_by_part[part], (part, path)
+
+    [gpu_tests] = [
+        test for test in tests if test["name"] == "rocke_platform_gpu_pytest"
+    ]
+    gpu_selection = [
+        *PYTEST_WITH_SHARD_PLUGIN,
+        *PYTEST_WORKERS,
+        tests_root,
+        "--ignore",
+        f"{tests_root}/library",
+        "-m",
+        "gpu and not integration",
+        "-v",
+        "-rs",
+        "--timeout=60",
+    ]
+    assert gpu_tests["command"][1 : 1 + len(gpu_selection)] == gpu_selection
 
 
 @requires_cmake

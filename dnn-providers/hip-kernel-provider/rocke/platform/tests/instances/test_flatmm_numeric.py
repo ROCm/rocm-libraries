@@ -37,6 +37,8 @@ from rocke.instances.common.flatmm import (
 from rocke.tests.gpu import current_device_arch_in, launch_with_buffers
 from rocke.tests.lanes import skip_needing_arch
 
+pytestmark = pytest.mark.gpu
+
 # The arches this test has run green on; add one once it has.
 _RUN_ARCHES = ("gfx90a", "gfx942", "gfx950")
 

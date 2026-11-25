@@ -263,6 +263,7 @@ _RANDOM_SHAPES = (
 )
 
 
+@pytest.mark.gpu
 @pytest.mark.parametrize("mantissa", ["fp8e4m3", "bf8e5m2"])
 @pytest.mark.parametrize(
     "M, N, K, tile_m, tile_n",
@@ -349,6 +350,7 @@ def _special_case(arch, mantissa):
     return table, a, a_codes, b, b_codes
 
 
+@pytest.mark.gpu
 @pytest.mark.parametrize("mantissa", ["fp8e4m3", "bf8e5m2"])
 def test_mx_gemm_special_values_on_gpu(mx_gpu_arch, mantissa):
     table, a, a_codes, b, b_codes = _special_case(mx_gpu_arch, mantissa)
@@ -368,6 +370,7 @@ def test_mx_gemm_special_values_on_gpu(mx_gpu_arch, mantissa):
     assert not overflows[27, 28] and np.isfinite(got[27, 28])
 
 
+@pytest.mark.gpu
 @pytest.mark.parametrize("mantissa", ["fp8e4m3", "bf8e5m2"])
 def test_mx_gemm_codes_at_the_safe_bound_on_gpu(mx_gpu_arch, mantissa):
     """Every A and B code at the largest code the scaled MFMA takes directly,

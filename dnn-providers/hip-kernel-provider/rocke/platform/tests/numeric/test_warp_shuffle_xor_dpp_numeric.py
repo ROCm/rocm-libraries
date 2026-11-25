@@ -76,6 +76,7 @@ def _run(kernel, values, arch, backend):
         module.unload()
 
 
+@pytest.mark.gpu
 @pytest.mark.parametrize("mask", _GFX9_MASKS)
 def test_mask_reads_xor_lane(arch, backend, mask):
     # Lane-id inputs: lane i must read lane i ^ mask, in every 16-lane row.
@@ -86,6 +87,7 @@ def test_mask_reads_xor_lane(arch, backend, mask):
     np.testing.assert_array_equal(_run(kernel, lanes, arch, backend), lanes ^ mask)
 
 
+@pytest.mark.gpu
 @pytest.mark.parametrize("mask", _GFX9_MASKS)
 def test_mask_moves_f32_bits(arch, backend, mask):
     # f32 goes through an i32 bitcast; the bits must arrive unchanged.
@@ -97,6 +99,7 @@ def test_mask_moves_f32_bits(arch, backend, mask):
     np.testing.assert_array_equal(got, values[np.arange(_WAVE) ^ mask])
 
 
+@pytest.mark.gpu
 @pytest.mark.parametrize(
     "masks",
     [(1, 2, 7, 15), (1, 2, 8, 7), (15, 7, 2, 1)],

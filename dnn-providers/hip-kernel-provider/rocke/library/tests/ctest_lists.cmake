@@ -108,7 +108,7 @@ endforeach()
 # failures outside an individual test item. The exhaustive items of these files
 # run in rocke_library_conv_exhaustive_pytest below instead.
 string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
-       "add_test(rocke_library_conv_pytest ${_ROCKE_INSTALLED_PYTEST} ${_ROCKE_INSTALLED_PYTEST_WORKERS}${_ROCKE_LIBRARY_CONV_TESTS} -m \"not exhaustive\" -v -rs --timeout=30)\n")
+       "add_test(rocke_library_conv_pytest ${_ROCKE_INSTALLED_PYTEST} ${_ROCKE_INSTALLED_PYTEST_WORKERS}${_ROCKE_LIBRARY_CONV_TESTS} -m \"not exhaustive and not gpu\" -v -rs --timeout=30)\n")
 string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
        "set_tests_properties(rocke_library_conv_pytest PROPERTIES\n"
        "  LABELS \"ckc;python;conv;host;standard\"\n"
@@ -382,7 +382,7 @@ foreach(_t ${_ROCKE_LIBRARY_ATTENTION_CPU_TEST_RELPATHS})
          " \"${ROCKE_TEST_CTEST_REL}${_t}\"")
 endforeach()
 string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
-       "add_test(rocke_library_attention_cpu_pytest ${_ROCKE_INSTALLED_PYTEST} ${_ROCKE_INSTALLED_PYTEST_WORKERS}${_ROCKE_LIBRARY_ATTENTION_CPU_TESTS} -v -rs --timeout=30)\n")
+       "add_test(rocke_library_attention_cpu_pytest ${_ROCKE_INSTALLED_PYTEST} ${_ROCKE_INSTALLED_PYTEST_WORKERS}${_ROCKE_LIBRARY_ATTENTION_CPU_TESTS} -m \"not gpu\" -v -rs --timeout=30)\n")
 string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
        "set_tests_properties(rocke_library_attention_cpu_pytest PROPERTIES\n"
        "  LABELS \"ckc;python;attention;host;standard\"\n"
@@ -600,8 +600,8 @@ endif()
 string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
        "add_test(rocke_library_sdpa_pytest ${_ROCKE_INSTALLED_PYTEST} ${_ROCKE_INSTALLED_PYTEST_WORKERS}"
        " \"${ROCKE_TEST_CTEST_REL}tests/library/tests/sdpa\""
-       " --ignore=\"${ROCKE_TEST_CTEST_REL}tests/library/tests/sdpa/test_unified_sdpa_numeric.py\""
-       " --ignore=\"${ROCKE_TEST_CTEST_REL}tests/library/tests/sdpa/test_dense_sdpa_numeric.py\""
+       " --ignore \"${ROCKE_TEST_CTEST_REL}tests/library/tests/sdpa/test_unified_sdpa_numeric.py\""
+       " --ignore \"${ROCKE_TEST_CTEST_REL}tests/library/tests/sdpa/test_dense_sdpa_numeric.py\""
        "${_ROCKE_SDPA_PYTEST_ARGS} -v -rs --timeout=30)\n")
 string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
        "set_tests_properties(rocke_library_sdpa_pytest PROPERTIES\n"
@@ -675,7 +675,7 @@ else()
          "list(APPEND _rocke_library_gdn_pytest_environment\n"
          "     \${_rocke_compiler_tool_environment}\n"
          "     \${_rocke_compiler_requirement_environment})\n"
-         "add_test(rocke_library_gdn_pytest ${_ROCKE_INSTALLED_PYTEST} ${_ROCKE_INSTALLED_PYTEST_WORKERS}${_ROCKE_LIBRARY_GDN_TESTS} -v -rs --timeout=120)\n")
+         "add_test(rocke_library_gdn_pytest ${_ROCKE_INSTALLED_PYTEST} ${_ROCKE_INSTALLED_PYTEST_WORKERS}${_ROCKE_LIBRARY_GDN_TESTS} -m \"not gpu\" -v -rs --timeout=120)\n")
   string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
          "set_tests_properties(rocke_library_gdn_pytest PROPERTIES\n"
          "  LABELS \"ckc;python;gdn;host;standard\"\n"
@@ -776,9 +776,12 @@ string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
 # dense numeric and extended-parity attention tests run only in
 # rocke_library_attention_gpu_pytest above, not again here.
 # Select files rather than the "gpu" pytest marker because several runtime
-# tests lack that marker. Their dependency and architecture checks report
-# skips when the required torch installation or GPU is unavailable; the
-# RDNA WMMA suites skip on devices without a gfx11/gfx12 generic target.
+# tests lack that marker. A file whose other tests run in a host entry is named
+# by its gpu-marked tests' node ids instead: the host entry deselects them with
+# -m "not gpu", so each runs here only. Their dependency and architecture
+# checks report skips when the required torch installation or GPU is
+# unavailable; the RDNA WMMA suites skip on devices without a gfx11/gfx12
+# generic target.
 set(_ROCKE_LIBRARY_GPU_TEST_RELPATHS
     "tests/library/tests/test_conv_fwd_correctness.py"
     "tests/library/tests/test_conv_gradient_correctness.py"
@@ -791,16 +794,29 @@ set(_ROCKE_LIBRARY_GPU_TEST_RELPATHS
     "tests/library/tests/test_conv_dgrad_4c.py"
     "tests/library/tests/test_conv_dgrad_fused_weights.py"
     "tests/library/tests/test_direct_mfma_dgrad_correctness.py"
-    "tests/library/tests/test_direct_dw_fwd_wmma.py"
-    "tests/library/tests/test_direct_fwd_gstream_wmma.py"
-    "tests/library/tests/test_direct_fwd_tapouter_wmma.py"
+    "tests/library/tests/test_direct_dw_fwd_wmma.py::TestDwFwdWmmaGpu"
+    "tests/library/tests/test_direct_fwd_gstream_wmma.py::TestFwdGstreamGpu"
+    "tests/library/tests/test_direct_fwd_tapouter_wmma.py::TestTapOuterGpu"
     "tests/library/tests/test_conv_winograd_fwd_gpu.py"
     "tests/library/tests/test_conv_winograd_fwd_rt_gpu.py"
-    "tests/library/tests/test_conv_winograd_gemm_wmma.py"
+    "tests/library/tests/test_conv_winograd_gemm_wmma.py::TestGemmGpu"
     "tests/library/tests/test_conv_winograd_gen_gpu.py"
     "tests/library/tests/test_conv_winograd_dispatch_gpu.py"
     "tests/library/tests/test_conv_implicit_gemm_numeric.py"
     "tests/library/tests/test_convolution_forward_aot_numeric.py"
+    "tests/library/tests/test_conv_fwd_split_k.py::TestSplitKNumerics"
+    "tests/library/tests/test_conv_fwd_split_k.py::TestSplitKAutoNumerics"
+    "tests/library/tests/test_conv_fwd_split_k.py::TestClusterSplitKNumerics"
+    "tests/library/tests/test_dgrad_stem_wmma.py::TestStemGpu"
+    "tests/library/tests/test_direct_depthwise_fwd_cpl.py::TestDepthwiseFwdCplGpu"
+    "tests/library/tests/test_direct_dgrad_pp_mfma.py::test_dgrad_matches_the_reference"
+    "tests/library/tests/test_direct_dgrad_wmma.py::TestDgradWmmaGpu"
+    "tests/library/tests/test_direct_fwd_flex_mfma.py::test_forward_matches_the_reference"
+    "tests/library/tests/test_direct_fwd_pp_mfma.py::test_forward_matches_the_reference"
+    "tests/library/tests/test_direct_fwd_wmma.py::TestFwdWmmaGpu"
+    "tests/library/tests/test_fwd_small_mfma.py::TestSmallGpu"
+    "tests/library/tests/test_fwd_small_wmma.py::TestSmallGpu"
+    "tests/library/tests/test_streamk_sweep_launch.py::TestStreamKSweepLaunchGpu"
     "tests/library/tests/test_conv_direct_tf32_mfma.py::TestDirectTf32Gpu"
     "tests/library/tests/test_conv_direct_tf32_scalar.py::TestGpuCorrectness"
     # The sweep sampler (test_sweep_candidates), an exhaustive item, runs in
@@ -811,6 +827,7 @@ set(_ROCKE_LIBRARY_GPU_TEST_RELPATHS
     "tests/library/tests/test_attention_scalar_block_table_numeric.py"
     "tests/library/tests/test_attention_unified_lse_numeric.py"
     "tests/library/tests/test_strided_kv_decode_numeric.py"
+    "tests/library/tests/test_strided_kv_decode.py::test_dense_decode_binding_views_device_arrays"
     "tests/library/tests/test_fmha_mfma_free_stride_numeric.py"
     "tests/library/tests/sdpa/test_unified_sdpa_numeric.py"
     "tests/library/tests/sdpa/test_dense_sdpa_numeric.py"
@@ -820,6 +837,7 @@ set(_ROCKE_LIBRARY_GPU_TEST_RELPATHS
     "tests/library/tests/test_gdn_decode_fused_gfx950_numeric.py"
     "tests/library/tests/test_gdn_decode_knobs_gfx950_numeric.py"
     "tests/library/tests/test_kda_decode_gfx950_numeric.py"
+    "tests/library/tests/test_gdn_decode_timing.py::test_value_sets_are_independent_copies"
     "tests/library/tests/test_gfx1250_attention.py"
     "tests/library/tests/test_gfx942_gqa_head_fold_numeric.py"
     "tests/library/tests/test_gfx942_cfvst_i64_kv_addr_numeric.py"

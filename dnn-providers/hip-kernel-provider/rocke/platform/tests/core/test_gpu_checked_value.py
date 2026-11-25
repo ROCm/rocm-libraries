@@ -1349,6 +1349,7 @@ def run_gpu_case(
     return run
 
 
+@pytest.mark.gpu
 @pytest.mark.parametrize("case", ["7"])
 @pytest.mark.parametrize("route", _ROUTES)
 def test_gpu_a_value_meeting_its_facts_runs_to_the_store(run_gpu_case, case, route):
@@ -1356,6 +1357,7 @@ def test_gpu_a_value_meeting_its_facts_runs_to_the_store(run_gpu_case, case, rou
     assert lines == ["launch: completed", "stored: 7"]
 
 
+@pytest.mark.gpu
 @pytest.mark.parametrize("case", ["11,7"])
 @pytest.mark.parametrize("route", _ROUTES)
 def test_gpu_a_value_breaking_its_facts_fails_the_launch(run_gpu_case, case, route):
@@ -1369,6 +1371,7 @@ def test_gpu_a_value_breaking_its_facts_fails_the_launch(run_gpu_case, case, rou
     assert lines[1:] == ["stored: -1", "launch: completed", "stored: 7"]
 
 
+@pytest.mark.gpu
 @pytest.mark.parametrize("case", ["two_waves"])
 @pytest.mark.parametrize("route", _ROUTES)
 def test_gpu_one_wave_breaking_its_facts_does_not_hold_the_other(
@@ -1382,6 +1385,7 @@ def test_gpu_one_wave_breaking_its_facts_does_not_hold_the_other(
     assert lines[1:] == ["first wave stored: [-1]", "second wave stored: [7]"]
 
 
+@pytest.mark.gpu
 @pytest.mark.parametrize("case", ["per_lane"])
 @pytest.mark.parametrize("route", _ROUTES)
 def test_gpu_lanes_breaking_their_facts_stop_and_the_rest_of_the_wave_goes_on(
@@ -1395,6 +1399,7 @@ def test_gpu_lanes_breaking_their_facts_stop_and_the_rest_of_the_wave_goes_on(
     assert lines[1:] == ["even lanes stored: [-1]", "odd lanes stored: [7]"]
 
 
+@pytest.mark.gpu
 def test_gpu_two_streams_with_unread_launches_both_see_the_failure(run_gpu_case):
     """A failing launch on stream a and a passing one on stream b, both queued
     before either wait: the kernel's one word cannot say which failed, so
@@ -1411,6 +1416,7 @@ def test_gpu_two_streams_with_unread_launches_both_see_the_failure(run_gpu_case)
     assert lines[2] == "stream a again: completed", lines
 
 
+@pytest.mark.gpu
 def test_gpu_destroying_a_stream_whose_check_failed_raises_and_still_destroys_it(
     run_gpu_case,
 ):
@@ -1425,6 +1431,7 @@ def test_gpu_destroying_a_stream_whose_check_failed_raises_and_still_destroys_it
     ), lines
 
 
+@pytest.mark.gpu
 def test_gpu_a_word_set_by_a_launch_the_runtime_never_saw_is_not_blamed_on_the_next(
     run_gpu_case,
 ):
@@ -1435,6 +1442,7 @@ def test_gpu_a_word_set_by_a_launch_the_runtime_never_saw_is_not_blamed_on_the_n
     assert lines == ["launch: completed", "stored: 7"]
 
 
+@pytest.mark.gpu
 def test_gpu_after_a_wait_outside_the_runtime_the_explicit_reads_raise(run_gpu_case):
     """After a device synchronize outside the runtime, check_gpu_checks and
     release_pending_for_stream each read the word of the failing launch."""
@@ -1444,16 +1452,19 @@ def test_gpu_after_a_wait_outside_the_runtime_the_explicit_reads_raise(run_gpu_c
     assert lines[1].startswith("release_pending_for_stream: GpuCheckFailed: "), lines
 
 
+@pytest.mark.gpu
 def test_gpu_unloading_a_module_drops_its_unread_words(run_gpu_case):
     lines = run_gpu_case(_RUNTIME_ROUTE, "unload")
     assert lines == ["sync after unload: completed"]
 
 
+@pytest.mark.gpu
 def test_gpu_a_kernel_without_a_check_has_no_word_and_leaves_no_error(run_gpu_case):
     lines = run_gpu_case(_RUNTIME_ROUTE, "unchecked")
     assert lines == ["gpu_check_word: None", "hipGetLastError: 0"]
 
 
+@pytest.mark.gpu
 def test_gpu_a_checked_launch_during_stream_capture_is_refused(run_gpu_case):
     """Nothing reads the word after a graph replay, so the runtime refuses to
     queue a checked kernel on a stream being captured, and queues nothing."""
@@ -1500,6 +1511,7 @@ def test_a_check_comes_before_a_cluster_barrier():
     assert ir.index(store) < ir.index(barrier)
 
 
+@pytest.mark.gpu
 @pytest.mark.skip(
     reason=arch_skip_reason(
         ("gfx1250",), "has not run on gfx1250 hardware yet; enable once it has"

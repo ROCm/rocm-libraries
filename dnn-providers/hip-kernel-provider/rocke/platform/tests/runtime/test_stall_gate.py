@@ -199,6 +199,7 @@ def _busy_launch():
     return rt, rt.prepare_launch(fn, (1, 1, 1), (64, 1, 1), struct.pack("<Q", 0))
 
 
+@pytest.mark.gpu
 @_GPU
 def test_real_gate_times_every_call():
     _rt, run = _busy_launch()
@@ -207,6 +208,7 @@ def test_real_gate_times_every_call():
     assert all(ms > 0 for ms in out)
 
 
+@pytest.mark.gpu
 @_GPU
 def test_real_watchdog_unblocks_a_call_that_waits_on_the_stalled_stream():
     from rocke.runtime.stall_gate import StallGate
@@ -224,6 +226,7 @@ def test_real_watchdog_unblocks_a_call_that_waits_on_the_stalled_stream():
         assert len(time_launches_staged(run, warmup=0, iters=2, gate=gate)) == 2
 
 
+@pytest.mark.gpu
 @_GPU
 def test_real_device_free_inside_the_call_is_a_stall_timeout():
     from rocke.runtime.launcher import DeviceMem
@@ -240,6 +243,7 @@ def test_real_device_free_inside_the_call_is_a_stall_timeout():
         time_launches_staged(run_then_free, warmup=0, iters=1, gate=gate)
 
 
+@pytest.mark.gpu
 @_GPU
 def test_real_garbage_holding_device_memory_is_not_freed_inside_a_sample():
     """The call allocates enough containers for an automatic young-generation

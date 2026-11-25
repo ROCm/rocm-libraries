@@ -326,6 +326,7 @@ def _decode_on_gpu(arch):
         module.unload()
 
 
+@pytest.mark.gpu
 def test_all_codes_decode_to_the_spec_value_on_gpu(gpu_arch):
     got = _decode_on_gpu(gpu_arch)
     for code in range(_CODES):

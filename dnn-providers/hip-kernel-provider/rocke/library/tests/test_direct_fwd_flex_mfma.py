@@ -498,6 +498,7 @@ def _launch_split_reduce(split_c, dtype, p, ws, y):
     )
 
 
+@pytest.mark.gpu
 @pytest.mark.parametrize("dtype", ["bf16", "fp16"])
 @pytest.mark.parametrize(
     "kh,kw,pad,pad_w,stride,dil_h,dil_w,bk,split_c,N,H,W,C,K",

@@ -431,6 +431,7 @@ GPU_WIDTHS = (
 )  # fmt: skip
 
 
+@pytest.mark.gpu
 @pytest.mark.parametrize("route", ["llvm", "hipcc"])
 def test_gpu_copy_is_bit_exact(route):
     arch = _gpu_arch()

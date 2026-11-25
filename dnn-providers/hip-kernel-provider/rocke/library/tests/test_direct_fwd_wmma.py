@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import unittest
 
+import pytest
 from rocke.runtime.hip_module import get_device_arch
 from rocke.tests.lanes import BUILD_VARIANT, arch_skip_reason, import_or_skip_until
 
@@ -1084,6 +1085,7 @@ _CASES = (
 )
 
 
+@pytest.mark.gpu
 @unittest.skipUnless(not _gpu_skip(), _gpu_skip() or "no GPU")
 class TestFwdWmmaGpu(unittest.TestCase):
     def _check(self, pkw, knobs):

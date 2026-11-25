@@ -375,6 +375,7 @@ def _launch(spec, x, w):
     return launch_direct_conv(art, p, (x, w), y, grid=grid, block=block)
 
 
+@pytest.mark.gpu
 @pytest.mark.parametrize("dtype", ["bf16", "fp16"])
 @pytest.mark.parametrize(
     "kh,block_k,C,K",

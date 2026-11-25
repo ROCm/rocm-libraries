@@ -19,6 +19,7 @@ import unittest
 from unittest import mock
 
 import numpy as np
+import pytest
 from rocke.tests.lanes import (
     BUILD_VARIANT,
     arch_skip_reason,
@@ -1523,6 +1524,7 @@ _MFMA_CASES = [
 ]
 
 
+@pytest.mark.gpu
 @unittest.skipIf(_GPU_SKIP, _GPU_SKIP)
 class TestSplitKNumerics(unittest.TestCase):
     def test_cases(self):
@@ -1542,6 +1544,7 @@ class TestSplitKNumerics(unittest.TestCase):
                             )
 
 
+@pytest.mark.gpu
 @unittest.skipIf(_GPU_SKIP, _GPU_SKIP)
 class TestSplitKAutoNumerics(unittest.TestCase):
     """The binary an auto (-1) spec builds, launched at the resolved degree."""
@@ -1602,6 +1605,7 @@ _CLUSTER_CASES = [
 ]
 
 
+@pytest.mark.gpu
 @unittest.skipIf(_GPU_CLUSTER_SKIP, _GPU_CLUSTER_SKIP)
 class TestClusterSplitKNumerics(unittest.TestCase):
     def test_cases(self):

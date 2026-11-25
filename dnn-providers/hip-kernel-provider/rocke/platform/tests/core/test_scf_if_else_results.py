@@ -869,6 +869,7 @@ def _run(blob, kernel_name, x):
     return outputs
 
 
+@pytest.mark.gpu
 @pytest.mark.parametrize("route", ["llvm", "hipcc"])
 def test_gpu_lanes_take_both_branches(route):
     arch = _gpu_arch()

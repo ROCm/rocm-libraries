@@ -34,12 +34,15 @@ import pathlib
 import subprocess
 import unittest
 
+import pytest
 from rocke.runtime.hip_module import get_device_arch
 from rocke.tests.lanes import TICKET, skip_needing_arch, skip_until_reason
 from rocke.tests.subprocess_launcher import (
     rocke_python_command,
     rocke_subprocess_env,
 )
+
+pytestmark = pytest.mark.gpu
 
 _HERE = pathlib.Path(__file__).resolve()
 _LIBRARY_ROOTS = (

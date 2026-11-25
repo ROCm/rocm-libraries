@@ -317,6 +317,7 @@ def test_copy_refuses_other_shapes_types_and_devices():
 # --- on the GPU ----------------------------------------------------------------------------------
 
 
+@pytest.mark.gpu
 def test_gpu_round_trip_and_tensor_methods():
     current_device_arch()
     host = encode(np.arange(12.0).reshape(3, 4), "bf16")
@@ -333,6 +334,7 @@ def test_gpu_round_trip_and_tensor_methods():
     assert info.dtype == "bf16" and info.device == array.device
 
 
+@pytest.mark.gpu
 def test_gpu_column_view_keeps_the_host_strides():
     current_device_arch()
     table = DeviceArray(np.zeros((3, 10), np.int32), shape=(3, 4))
@@ -342,6 +344,7 @@ def test_gpu_column_view_keeps_the_host_strides():
     assert table.info().backed_elements == 30
 
 
+@pytest.mark.gpu
 def test_gpu_view_shares_the_buffer_with_its_own_layout():
     current_device_arch()
     host = np.arange(24, dtype=np.float32).reshape(2, 3, 4)
@@ -359,6 +362,7 @@ def test_gpu_view_shares_the_buffer_with_its_own_layout():
     np.testing.assert_array_equal(view.values(), expected + 100)
 
 
+@pytest.mark.gpu
 def test_gpu_strided_view_keeps_the_view_start():
     current_device_arch()
     host = np.arange(12, dtype=np.int32)
@@ -369,6 +373,7 @@ def test_gpu_strided_view_keeps_the_view_start():
     np.testing.assert_array_equal(host_values(pairs), host[4:].reshape(2, 4).T)
 
 
+@pytest.mark.gpu
 def test_gpu_device_values_of_a_device_array_kind():
     current_device_arch()
     lengths = device_values(
@@ -378,6 +383,7 @@ def test_gpu_device_values_of_a_device_array_kind():
     np.testing.assert_array_equal(host_values(lengths), [3, 1, 2])
 
 
+@pytest.mark.gpu
 def test_gpu_view_defaults_to_dense_strides():
     current_device_arch()
     host = np.arange(12, dtype=np.int32)
@@ -386,6 +392,7 @@ def test_gpu_view_defaults_to_dense_strides():
     np.testing.assert_array_equal(rows.values(), host[6:].reshape(2, 3))
 
 
+@pytest.mark.gpu
 def test_gpu_view_must_stay_inside_the_buffer():
     current_device_arch()
     array = DeviceArray(np.zeros(8, np.float32))
@@ -397,6 +404,7 @@ def test_gpu_view_must_stay_inside_the_buffer():
         array.view((4,), (-1,))
 
 
+@pytest.mark.gpu
 def test_gpu_zeros():
     current_device_arch()
     array = DeviceArray.zeros((2, 3), "fp8e4m3")
@@ -404,6 +412,7 @@ def test_gpu_zeros():
     np.testing.assert_array_equal(array.read(), np.zeros((2, 3), np.uint8))
 
 
+@pytest.mark.gpu
 def test_gpu_write_refuses_another_shape():
     current_device_arch()
     array = DeviceArray(np.zeros(4, np.float32))
@@ -411,6 +420,7 @@ def test_gpu_write_refuses_another_shape():
         array.write(np.zeros(5, np.float32))
 
 
+@pytest.mark.gpu
 def test_gpu_host_values_of_a_column_view():
     current_device_arch()
     host = np.arange(30, dtype=np.int32).reshape(3, 10)
@@ -418,6 +428,7 @@ def test_gpu_host_values_of_a_column_view():
     np.testing.assert_array_equal(host_values(table), host[:, :4])
 
 
+@pytest.mark.gpu
 def test_gpu_device_workspace_matches_a_device_array():
     current_device_arch()
     like = DeviceArray(np.zeros(4, np.float16))
@@ -427,6 +438,7 @@ def test_gpu_device_workspace_matches_a_device_array():
     assert scratch.device == like.device
 
 
+@pytest.mark.gpu
 def test_gpu_copy_and_zero_follow_each_layout():
     current_device_arch()
     host = np.arange(24, dtype=np.float32).reshape(2, 3, 4)
@@ -448,6 +460,7 @@ def test_gpu_copy_and_zero_follow_each_layout():
 # --- torch callers (optional: runs only where torch with a GPU is installed) ---------------------
 
 
+@pytest.mark.gpu
 def test_gpu_torch_tensors_get_torch_values_and_workspaces():
     torch = import_or_skip_until("torch", TICKET)
     if not torch.cuda.is_available():
