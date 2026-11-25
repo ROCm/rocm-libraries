@@ -107,8 +107,8 @@ namespace rocisa
         }
 
         // Same as calling init() for each arch, but probes the assembler
-        // capabilities of all not-yet-initialized ISAs concurrently.  Each
-        // probe is an independent assembler run, so results are unchanged.
+        // capabilities of all not-yet-initialized ISAs concurrently. Each ISA
+        // has its own probe session, so batching does not mix their results.
         void initMany(const nb::iterable& archs,
                       const std::string&  assemblerPath,
                       bool                debug = false)

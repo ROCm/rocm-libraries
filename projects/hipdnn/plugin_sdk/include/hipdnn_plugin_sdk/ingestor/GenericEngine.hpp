@@ -225,8 +225,15 @@ public:
         auto knobs = builder.CreateVector(knobOffsets);
         auto behaviorNotes = builder.CreateVector(_engine.behaviorNotes);
         auto name = builder.CreateString(_engine.name);
+        // Only an authored claim is written; an absent field tells the backend the
+        // engine's numerical behavior is unknown.
+        flatbuffers::Offset<flatbuffers::Vector<int32_t>> numericalNotes;
+        if(_engine.numericalNotes.has_value())
+        {
+            numericalNotes = builder.CreateVector(*_engine.numericalNotes);
+        }
         auto engineDetails = hipdnn_flatbuffers_sdk::data_objects::CreateEngineDetails(
-            builder, _id, knobs, behaviorNotes, name);
+            builder, _id, knobs, behaviorNotes, name, 0, numericalNotes);
         builder.Finish(engineDetails);
 
         // Detached buffer outlives this call; the handle takes ownership.

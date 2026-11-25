@@ -22,6 +22,7 @@ option(BUILD_ADDRESS_SANITIZER "Build with Address Sanitizer enabled" OFF)
 option(BUILD_THREAD_SANITIZER "Build with Thread Sanitizer enabled" OFF)
 include(${CMAKE_CURRENT_SOURCE_DIR}/../cmake/Sanitizers.cmake)
 include(${CMAKE_CURRENT_SOURCE_DIR}/../cmake/WindowsDllStaging.cmake)
+include(${CMAKE_CURRENT_SOURCE_DIR}/../cmake/LongPathManifest.cmake)
 
 option(ENABLE_CLANG_TIDY "Enable Clang-Tidy checks" ON)
 if(NOT ENABLE_CLANG_TIDY)
@@ -401,9 +402,10 @@ if(HIPDNN_SAMPLES_CUDNN_COMPATIBILITY)
     add_hipdnn_cudnn_v8_sample_test(matmul_bias_act_v8 0)
     add_hipdnn_cudnn_v8_sample_test(layernorm_v8 0)
     add_hipdnn_cudnn_v8_sample_test(resample_v8 0)
-    # No provider implements reduction, so this sample always reports Skipped; it starts checking
-    # results when a provider claims the reduction operation.
-    add_hipdnn_cudnn_v8_sample_test(reduction_v8 0)
+    # The sample writes y in fp32, and the MIOpen provider needs x and y in one data type, so it
+    # runs the fp32 reductions only; the fp16 and bf16 variants are skipped.
+    add_hipdnn_cudnn_v8_sample_test(reduction_v8 4
+        "reduction add fp32 [NCHW]" "reduction max fp32 [NCHW]")
 
     # The v8 samples run the heuristics' first engine config, so an engine preference must be
     # refused rather than ignored.
@@ -764,3 +766,4 @@ block(SCOPE_FOR VARIABLES)
             PROPERTIES FIXTURES_REQUIRED hipdnn_clear_miopen_test_cache)
     endif()
 endblock()
+hipdnn_apply_long_path_manifest()

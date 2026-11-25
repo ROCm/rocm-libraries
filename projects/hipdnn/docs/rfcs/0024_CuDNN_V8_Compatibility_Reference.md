@@ -108,7 +108,7 @@ core's immutable value for the built object (RFC §3.3).
 | `CUDNN_BACKEND_OPERATION_RESHAPE_DESCRIPTOR` | **MISSING** | — | `NOT_SUPPORTED` at `OperationBuilder::build()` |
 | `CUDNN_BACKEND_OPERATION_PAGED_CACHE_LOAD_DESCRIPTOR` | `=` | declared only | `NOT_SUPPORTED` at `OperationBuilder::build()` |
 | `CUDNN_BACKEND_OPERATIONGRAPH_DESCRIPTOR` | `=` | implemented (:70-71) | built by `OperationGraphBuilder::build()`: handle required; canonicalize, stable topological sort, lower through `hipdnn_frontend` nodes and packers (RFC §3.4) |
-| `CUDNN_BACKEND_ENGINEHEUR_DESCRIPTOR` | `=` | implemented (:76-77) | one FALLBACK run per graph at enumeration, plus at most one run per mode for A/INSTANT and B with a policy order; never per `EngineHeuristicsBuilder::build()` (RFC §3.5) |
+| `CUDNN_BACKEND_ENGINEHEUR_DESCRIPTOR` | `=` | implemented (:76-77) | one FALLBACK run per graph at enumeration, plus at most one run per mode for A/INSTANT and B; never per `EngineHeuristicsBuilder::build()` (RFC §3.5) |
 | `CUDNN_BACKEND_ENGINE_DESCRIPTOR` | `=` | implemented (:64-65) | dense per-graph index over the enumerated engines, sorted by signed engine ID; `Engine_v8`'s raw descriptor is the graph's cached `ENGINE` (RFC §3.5) |
 | `CUDNN_BACKEND_ENGINECFG_DESCRIPTOR` | `=` | implemented (:61-62) | heuristic results and knob-free configs share the engine's cached default hipDNN config; a config with knob choices builds and finalizes its own at `EngineConfigBuilder::build()` (RFC §3.5) |
 | `CUDNN_BACKEND_KNOB_INFO_DESCRIPTOR` | `=` | implemented (:94-95) | read at `EngineBuilder::build()` and projected onto `cudnnBackendKnobType_t`; no compatibility layer object of this type (RFC §3.5) |
@@ -261,13 +261,12 @@ getter switch `:246-300` has no `HANDLE` or `ENGINE_GLOBAL_COUNT` case.
 | cuDNN identifier | hipDNN | Compatibility layer |
 |---|---|---|
 | `CUDNN_ATTR_ENGINEHEUR_OPERATION_GRAPH` :210 | `=` | forwarded |
-| `CUDNN_ATTR_ENGINEHEUR_MODE` :223; `CUDNN_HEUR_MODE_INSTANT` / `A` / `B` / `FALLBACK` | `=`, but only `HIPDNN_HEUR_MODE_FALLBACK` is accepted; A and B are prediction policies set through `HIPDNN_ATTR_ENGINEHEUR_POLICY_ORDER_EXT` | sent as FALLBACK. `A` and `INSTANT` add the policy order `[Config, ModeA, StaticOrdering]`, `B` `[Config, ModeB, StaticOrdering]`, on at most one extra heuristic per graph and mode; a value outside the enum → `BAD_PARAM` |
+| `CUDNN_ATTR_ENGINEHEUR_MODE` :223; `CUDNN_HEUR_MODE_INSTANT` / `A` / `B` / `FALLBACK` | `=`; the backend accepts `HIPDNN_HEUR_MODE_FALLBACK`, `HIPDNN_HEUR_MODE_A` (alias `HIPDNN_HEUR_MODE_INSTANT`) and `HIPDNN_HEUR_MODE_B` | forwarded as `HIPDNN_HEUR_MODE_A` for `A` and `INSTANT`, `HIPDNN_HEUR_MODE_B` for `B`, `HIPDNN_HEUR_MODE_FALLBACK` for `FALLBACK`. The mode selects the backend policy list: `[Config, ModeA, StaticOrdering]` for `A` and `INSTANT`, `[Config, ModeB, StaticOrdering]` for `B`, `[Config, StaticOrdering]` for `FALLBACK`; at most one heuristic per graph and mode; a value outside the enum → `BAD_PARAM` |
 | `CUDNN_ATTR_ENGINEHEUR_RESULTS` :92, :112 (get) | `=`; fills caller ENGINECFGs in place but leaves them **unfinalized** | not read per build: results are the graph's FALLBACK engines in the mode's cached rank order, each viewing the engine's cached, finalized default hipDNN config; a mode query's configs are read only for their engine IDs; `getEngineConfig(n)` returns the first `n` |
 | `CUDNN_ATTR_ENGINEHEUR_DEVICEPROP` :238, `SM_COUNT_TARGET` :260 | NS | non-null device properties or a positive SM count → `NOT_SUPPORTED`; an SM count of 0 or less is the default and accepted |
 
-Evidence: FALLBACK-only check at
-`projects/hipdnn/backend/src/descriptors/EngineHeuristicDescriptor.cpp:526-531`; policy order set at
-`:487-489`.
+Evidence: mode acceptance and the mode-to-policy-list selection in
+`projects/hipdnn/backend/src/descriptors/EngineHeuristicDescriptor.cpp`.
 
 **Engine and knobs.** Caption: `upstream:include/cudnn_frontend_Engine.h` unless prefixed
 `EC.h` (= `cudnn_frontend_EngineConfig.h`), `EP.h` (= `cudnn_frontend_ExecutionPlan.h`) or `F.h`
@@ -278,7 +277,7 @@ Evidence: FALLBACK-only check at
 | `CUDNN_ATTR_ENGINE_OPERATION_GRAPH` :266 | `=` | forwarded |
 | `CUDNN_ATTR_ENGINE_GLOBAL_INDEX` :279 | `=`, but the value is a 64-bit hash of the engine name | dense `0..N-1` index ↔ hipDNN ID. The engines are those returned by hipDNN's FALLBACK heuristic whose default config finalizes, sorted by **signed** engine ID; enumerated lazily on the first engine query of a graph (needs a HIP device) and cached per graph (RFC §3.5). At `EngineBuilder::build()`, a negative index → `BAD_PARAM`, an index past the count → `NOT_SUPPORTED` |
 | `CUDNN_ATTR_ENGINE_KNOB_INFO` :315 (get) | `=`; get allocates new descriptors | read at `EngineBuilder::build()`; `getSupportedKnobs()` lists the projected knobs |
-| `CUDNN_ATTR_ENGINE_NUMERICAL_NOTE` (EP.h:167, F.h:56) | NS | never queried; synthesized: `NONDETERMINISTIC` unless the engine claims determinism; nothing else (RFC §3.5) |
+| `CUDNN_ATTR_ENGINE_NUMERICAL_NOTE` (EP.h:167, F.h:56) | `=`; get-only | read from hipDNN; an engine that declares none is reported `NONDETERMINISTIC` (RFC §3.5, [RFC 0025](./0025_NumericalNotes.md)); mapped to hipDNN's by name |
 | `CUDNN_ATTR_ENGINE_BEHAVIOR_NOTE` (EP.h:193, F.h:84) | `=`; enumerators differ | read from hipDNN, mapped by name; only `RUNTIME_COMPILATION` exists on both sides |
 | `CUDNN_ATTR_ENGINE_LAYOUT_INFO`, `SM_COUNT_TARGET`, `DEVICEPROP` | NS (`SM_COUNT_TARGET` `≈` `CU_COUNT_TARGET_EXT`) | not read by the builders |
 | `CUDNN_ATTR_KNOB_INFO_TYPE` / `MAXIMUM_VALUE` / `MINIMUM_VALUE` / `STRIDE` :126-150 | `=`; `TYPE` is a string, T! | projected through the v9 compatibility layer's `detail/knob_wrapper.h`; a knob with no cuDNN type, or whose valid values cannot be expressed as min / max / stride, is hidden; when two projectable knobs of one engine map to the same cuDNN type, both are hidden |
@@ -289,7 +288,7 @@ Evidence: FALLBACK-only check at
 | `CUDNN_ATTR_ENGINECFG_WORKSPACE_SIZE` | `=`, get-only | not read by the builders (the plan's workspace size is) |
 | `CUDNN_ATTR_ENGINECFG_INTERMEDIATE_INFO` | NS | not read by the builders |
 
-Evidence: `projects/hipdnn/backend/src/descriptors/EngineDescriptor.cpp:180-188` (numerical note,
+Evidence: `projects/hipdnn/backend/src/descriptors/EngineDescriptor.cpp:201-206` (numerical note served;
 layout info, CU count, device properties → `NOT_SUPPORTED`);
 `projects/hipdnn/backend/src/descriptors/EngineConfigDescriptor.cpp:103-108` (`KNOB_CHOICES` get →
 `NOT_SUPPORTED`).
@@ -335,9 +334,9 @@ by the v9 compatibility layer's existing switch
 | Data types | hipDNN lacks `INT8x4`, `UINT8x4`, `INT8x32`, `FAST_FLOAT_FOR_FP8`, `COMPLEX_FP32`, `COMPLEX_FP64`; hipDNN adds `FP6_*_EXT`, `FP8_*_FNUZ` |
 | Pointwise modes | hipDNN lacks `COS`, `MOD`, `POW` |
 | Convolution mode | same names |
-| Heuristic modes | hipDNN's backend has only `FALLBACK`. The compatibility layer has no converter between `cudnnBackendHeurMode_t` and `HeurMode_t`; the v8 heuristics accept every `cudnnBackendHeurMode_t` mode, run FALLBACK, and send A, B and INSTANT (as A) as a policy order (§1.3) |
+| Heuristic modes | hipDNN's backend has `FALLBACK`, `A` (alias `INSTANT`) and `B`. The compatibility layer has no converter between `cudnnBackendHeurMode_t` and `HeurMode_t`; the v8 heuristics accept every `cudnnBackendHeurMode_t` mode and set the matching hipDNN backend mode (A and INSTANT as `HIPDNN_HEUR_MODE_A`, B as `HIPDNN_HEUR_MODE_B`, FALLBACK as `HIPDNN_HEUR_MODE_FALLBACK`), so the mode selects the policy list rather than a policy order being sent (§1.3) |
 | Behavior notes | shared: `RUNTIME_COMPILATION`. cuDNN-only: `REQUIRES_FILTER_INT8x32_REORDER`, `REQUIRES_BIAS_INT8x32_REORDER`, `SUPPORTS_CUDA_GRAPH_NATIVE_API`, `CUBLASLT_DEPENDENCY`. hipDNN-only: `REQUIRES_LAYOUT_TRANSFORM`, `SUPPORTS_GRAPH_CAPTURE`, `EXTERNAL_LIBRARY_DEPENDENCY`, `SUPPORTS_EXECUTION_PLAN_SERIALIZATION` |
-| Numerical notes | **MISSING** in hipDNN |
+| Numerical notes | same names; in-tree engines report only `NONDETERMINISTIC` ([RFC 0025](./0025_NumericalNotes.md)) |
 | Reduce-tensor ops | same names |
 | Resample modes | hipDNN lacks `NEAREST`, `BILINEAR`. cuDNN's `AVGPOOL`, an alias of `AVGPOOL_INCLUDE_PADDING`, has no hipDNN name; the compatibility layer declares it as the same alias |
 | Padding modes | hipDNN lacks `EDGE_VAL_PAD`; adds `NOT_SET` |
@@ -501,7 +500,7 @@ pins the last column.
 | `EngineConfig_v8` | `ENGINECFG`, `KNOB_CHOICE` ×COUNTS: `KNOB_CHOICE_KNOB_TYPE` (KNOB_TYPE), `KNOB_CHOICE_KNOB_VALUE` (INT64), `ENGINECFG_ENGINE`, `ENGINECFG_KNOB_CHOICES` (BACKEND_DESCRIPTOR) | `ConfigRecord`: engine, knob choices | knob-free: the engine's default `ENGINECFG`; with knob choices: its own `ENGINECFG`, built and finalized at `EngineConfigBuilder::build()` |
 | `ExecutionPlan_v8` | `EXECUTION_PLAN`, temporaries `ENGINE`, `KNOB_CHOICE`: `ENGINE_CONFIG` (set and get), `KERNEL_CACHE`, `HANDLE` (`loadFromJson` only), `JSON_REPRESENTATION` (CHAR, set and get), Get `WORKSPACE_SIZE`; Get on config `ENGINECFG_ENGINE`, `ENGINECFG_KNOB_CHOICES`; Get on engine `GLOBAL_INDEX`, `NUMERICAL_NOTE`, `BEHAVIOR_NOTE`; Get on knob `KNOB_TYPE`, `KNOB_VALUE` | `PlanRecord`: config record, plan, workspace size, tag, notes; a loaded plan's config record holds the JSON's engine index, ID, name, notes, knobs and requested knob choices | the finalized `EXECUTION_PLAN`, built or deserialized |
 | `VariantPack_v8` | `VARIANT_PACK`: `DATA_POINTERS` (VOID_PTR×n), `UNIQUE_IDS` (INT64×n), `WORKSPACE` (VOID_PTR) | `VariantPackRecord` | the finalized `VARIANT_PACK` |
-| Filters | temporary `ENGINE`: Get `ENGINECFG_ENGINE`, `ENGINE_NUMERICAL_NOTE` / `ENGINE_BEHAVIOR_NOTE` (`Filters.h:47-90`) | — | `hasNumericalNote` reads the engine's ID only; `hasBehaviorNote` reads `ENGINE_BEHAVIOR_NOTE` |
+| Filters | temporary `ENGINE`: Get `ENGINECFG_ENGINE`, `ENGINE_NUMERICAL_NOTE` / `ENGINE_BEHAVIOR_NOTE` (`Filters.h:47-90`) | — | `hasNumericalNote` reads `ENGINE_NUMERICAL_NOTE`, `hasBehaviorNote` reads `ENGINE_BEHAVIOR_NOTE`; a failed query answers false |
 | Errata | temporary `TENSOR`: Get the conv op's X/W, X/DW or DX/W tensors, then `TENSOR_DIMENSIONS` | — | reads the operation record's tensor records |
 | find/get plan, cache | `cudnnBackendExecute`, `cudnnGetStream`, CUDA events | — | `cudnnBackendExecute` passthrough; hipDNN profiling-control descriptor for timing; no `cudnnGetStream` |
 

@@ -12,7 +12,7 @@ minimal authored source root.
 and archive (`arch: [<G>]`) into each selected member's folder; no generic-named folder is
 installed. Disk use grows with the number of members.
 
-Copies depend only on the source tree, the generic's spelling, hipcc and the table, so they are
+Copies depend only on the source tree, the generic's spelling, the HIP compiler and the table, so they are
 identical across member folders and separate per-arch builds, and the loader collapses them to
 one entry. Copies from different compilers differ in `provenance`, and the loader drops both.
 
@@ -131,6 +131,15 @@ not a directory is fatal.
 Test roots hold no family folder today. The first family folder added under
 `test_descriptors/` must also gate the test binary's cases: a fixture root that goes
 dormant still leaves cases in that binary that expect its descriptors.
+
+A pack wipes its `OUT_ROOT` before refilling it, so nothing else may write there with a
+rule of its own: the next repack deletes it and no edge restores it. Files that must ship
+in a packed tree without being packed — the ASM SDPA engine's loose L1 models
+(`asm_sdpa/predict_engine/<arch>/`), declared as `HIPKERNELPROVIDER_PRODUCT_STAGE_FILES`
+in the provider's `CMakeLists.txt` — are passed as `STAGE_FILES <src> <dest>` pairs to
+`hkp_wire_pack_target()`, which copies them inside the pack command, after the packer
+and before the stamp, with each `<src>` an input. With production packaging dormant the
+provider stages and installs them itself.
 
 Two rules govern the walk:
 
@@ -415,7 +424,7 @@ still validates a packed `sources`, so a shipped tree can be checked.
 - **Provenance (`hip`, `hsaco`).** `origin_kind` is the shared kind and
   `provenance.sources` is keyed by launch name with each launch's authored identity:
   `{source, entry, build}` for `hip` and `{file, sha256, symbol}` for `hsaco`. The toolchain
-  field is top level as for a single launch (`hipcc_version` for `hip`, none for `hsaco`).
+  field is top level as for a single launch (`hip_version` for `hip`, none for `hsaco`).
   No compiler observed these kernels, so there is **no `effective_spec`** and no consumer
   agreement evidence. A declaration with `metadata_fields` over a `hip` or `hsaco`
   `sources` UKD is refused, exactly as for a single launch; one without them leaves the
@@ -543,11 +552,11 @@ export AMD_COMGR_CACHE_DIR=/tmp/comgr-cache   # RAM disk or local disk
 
 `HKP_PACK_JOBS` is read by a **direct child run** of `hkp_pack`. Inside the build it comes
 from the `PACK_JOBS <n>` argument of each `hkp_wire_pack_target()` call: the test roots
-pass `1`, or `2` for `integration`, the packaging probes pass none, and the production root
-passes `HIPKERNELPROVIDER_PRODUCT_PACK_JOBS`. That cache variable is empty by default, which
-passes none, so the packer uses its default; set it to size the production pool for a large
-catalog on a wide host. The reason is in the `hkp_wire_pack_target()` header in
-`cmake/HkpPackaging.cmake`.
+pass `1`, or `2` for `integration`, and the production root passes
+`HIPKERNELPROVIDER_PRODUCT_PACK_JOBS`. That cache variable is empty by default, which
+passes none, so the packer uses its default; set it to size the production pool for a
+large catalog on a wide host. The packaging probes pass none. The reason is in the
+`hkp_wire_pack_target()` header in `cmake/HkpPackaging.cmake`.
 
 ## rocKE toolchain pins
 
@@ -557,7 +566,7 @@ Two `CACHE` variables, resolved once in `_hkp_resolve_rocke_args()` under
 | Variable | Forwarded as | Reaches | Effect |
 |---|---|---|---|
 | `HIPKERNELPROVIDER_ROCKE_COMGR_LIB` | `ROCKE_COMGR_LIB` | the pack step and the ctest entries | Explicit `libamd_comgr` for the rocKE producer to load. Empty by default (derived from the `amd_comgr` package); set it to override, e.g. on Windows where a System32 `amd_comgr.dll` can shadow the ROCm one. |
-| `HIPKERNELPROVIDER_ROCKE_LLVM_FLAVOR` | `ROCKE_LLVM_FLAVOR` | the pack step only | LLVM IR flavor rocKE lowers to (`llvm20`, `llvm22`, `llvm23`, `llvm24`). Empty by default (derived from the loaded COMGR's LLVM); set it to lower exactly as a catalog was swept -- the gfx950 conv AOT catalogs were measured as `llvm22`. An unrecognized value is only rejected when the pack step runs, not at configure. |
+| `HIPKERNELPROVIDER_ROCKE_LLVM_FLAVOR` | `ROCKE_LLVM_FLAVOR` | the pack step only | LLVM IR flavor rocKE lowers to (`llvm20`, `llvm22`, `llvm23`, `llvm24`). Empty by default (derived from the loaded COMGR's LLVM); set it to lower exactly as a catalog was swept -- the gfx950 conv AOT catalogs were measured as `llvm22`, the gfx1250 dgrad catalog as `llvm24`. The value applies to every catalog the pack step builds, and a catalog refuses an older flavor than its own, so a build that packs both architectures pins `llvm24` (or leaves it derived from an LLVM 24 COMGR). An unrecognized value is only rejected when the pack step runs, not at configure. |
 
 Changing either repacks every rocKE-sourced catalog with a different lowering, so a silent
 loss of the forwarding would repack with whatever rocke derives instead, unnoticed.
@@ -694,8 +703,8 @@ does not guarantee, or a variant with its own known risk.
 ```cmake
 # One integration, a chosen representative set.
 hkp_add_packaging_probe(ARCH gfx950 NAME attention_dense
-    UKDS attention_dense.fp16_d64_hq8_kv1_c1_bm128_bn64.gfx950
-         attention_dense.bf16_d64_hq8_kv1_c1_bm256_bn32.gfx950)
+    UKDS attention_dense.fp16_d64_c1_bm128_bn64.gfx950
+         attention_dense.bf16_d64_c1_bm256_bn32.gfx950)
 ```
 
 - **With `UKDS`**, the probe packs exactly the listed UKDs, selected by UKD `name`. Pick a
@@ -768,7 +777,7 @@ Greedily, the UKD covering the most uncovered pairs is kept, ties broken by sort
 until every pair is covered; the result is deterministic. A group in which no field varies,
 and every group of a kind without a sweep field (`hip`, `hsaco`, `embedded_source`), keeps
 one UKD, the first by sorted `name`. Kept UKDs keep their authored order. The gfx950 dense
-attention KDP (840 UKDs in one group, 7 varying spec fields) keeps 17.
+attention KDP (52 UKDs in one group, 5 varying spec fields) keeps 4.
 
 - **Each value is packed; combinations are not.** The sweep guarantees, say, that some fp16
   UKD and some causal UKD are packed, not that an fp16 causal one is. Breakage specific to
@@ -950,10 +959,10 @@ PYTHONPATH=descriptor-packaging/python:/opt/rocm-kpack/python \
 `HIPKERNELPROVIDER_ROCM_KPACK_DIR`) is the kpack archive reader/writer most of the suite
 round-trips through. Its absence is diagnosed once by the `rocm_kpack_dir` fixture in
 `tests/conftest.py`: every test needing it skips with one message naming the dependency.
-Set `HIPKERNELPROVIDER_KPACK_REQUIRE_ROCM_KPACK=1` (mirroring `_REQUIRE_HIPCC` /
+Set `HIPKERNELPROVIDER_KPACK_REQUIRE_ROCM_KPACK=1` (mirroring `_REQUIRE_HIP_COMPILER` /
 `_REQUIRE_COMGR`) to turn that skip into a hard failure, e.g. in CI.
 
-`-m quick` selects the load-time/pure-unit subset needing neither `hipcc` nor
+`-m quick` selects the load-time/pure-unit subset needing neither the HIP compiler nor
 `rocm_kpack`/comgr.
 
 Every rocKE test lives in `tests/rocke/`, whose own `conftest.py` owns the rocKE

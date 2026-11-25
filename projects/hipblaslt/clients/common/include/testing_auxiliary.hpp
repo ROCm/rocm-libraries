@@ -48,6 +48,7 @@
 #include "unit.hpp"
 #include "utility.hpp"
 #include <limits>
+#include <regex>
 
 void testing_aux_handle_init_bad_arg(const Arguments& arg)
 {
@@ -378,6 +379,7 @@ void testing_aux_mat_set_get_attr(const Arguments& arg)
     // that only some APIs accept.
     for(int32_t order : {int32_t(HIPBLASLT_ORDER_ROW),
                          int32_t(HIPBLASLT_ORDER_COL16_4R8),
+                         int32_t(HIPBLASLT_ORDER_COL256_R128_EXT),
                          int32_t(HIPBLASLT_ORDER_COL)})
     {
         EXPECT_HIPBLAS_STATUS(hipblasLtMatrixLayoutSetAttribute(
@@ -879,6 +881,20 @@ void testing_aux_matmul_set_get_attr(const Arguments& arg)
                                                               &sizeWritten),
                               HIPBLAS_STATUS_SUCCESS);
         ASSERT_TRUE(modeGot == modeSet);
+    }
+
+    for(auto attr : {HIPBLASLT_MATMUL_DESC_A_SCALE_MODE, HIPBLASLT_MATMUL_DESC_B_SCALE_MODE})
+    {
+        uint32_t modeSet = HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_128_4_EXT;
+        uint32_t modeGot = 0xFFFFFFFFu;
+        EXPECT_HIPBLAS_STATUS(
+            hipblasLtMatmulDescSetAttribute(matmul, attr, &modeSet, sizeof(uint32_t)),
+            HIPBLAS_STATUS_SUCCESS);
+        EXPECT_HIPBLAS_STATUS(
+            hipblasLtMatmulDescGetAttribute(
+                matmul, attr, &modeGot, sizeof(uint32_t), &sizeWritten),
+            HIPBLAS_STATUS_SUCCESS);
+        EXPECT_EQ(modeGot, modeSet);
     }
 
     hipStream_t stream;
@@ -4174,6 +4190,30 @@ inline void testing_aux_rocblaslt_rocroller_host_func(const Arguments& arg)
         auto unmarked = algo_with_index(index & 0x7fffffff);
         EXPECT_EQ(isRocRollerSolutionSupported(roc_handle, tiled, &unmarked, &workspace),
                   rocblaslt_status_invalid_value);
+    }
+
+    // A device without block scaling, or one rocRoller does not know, gets no block-scaled
+    // rocRoller kernels rather than an exception.
+    RocblasltContractionProblem blockScaled = tiled;
+    blockScaled.scaleAType                  = blockScaled.scaleBType
+        = RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0;
+    for(const char* arch : {"gfx942", "gfx1100"})
+    {
+        SCOPED_TRACE(arch);
+        hipblasLtHandle_t archHandle;
+        CHECK_HIPBLASLT_ERROR(hipblasLtCreate(&archHandle));
+        auto& archName = ((rocblaslt_handle)archHandle)->properties.gcnArchName;
+        strncpy(archName, arch, sizeof(archName));
+        int count = -1;
+        EXPECT_EQ(getRocRollerBestSolutions((rocblaslt_handle)archHandle,
+                                            blockScaled,
+                                            1,
+                                            &rocroller_result,
+                                            max_workspace_size,
+                                            &count),
+                  rocblaslt_status_success);
+        EXPECT_EQ(count, 0);
+        CHECK_HIPBLASLT_ERROR(hipblasLtDestroy(archHandle));
     }
 
     // Free GPU memory allocations

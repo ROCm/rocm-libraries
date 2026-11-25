@@ -87,6 +87,13 @@ specified.
 
 Callback functions are only supported for transforms that do not use planar format for input or output.
 
+.. note::
+
+   Setting callbacks does not relax the input buffer guarantees described in
+   :ref:`resultplacement`, which continue to hold. Those guarantees cover rocFFT's own writes
+   only, though: a callback handed the address of an input buffer in ``callback_data`` can modify
+   that buffer.
+
 Compiling functions to SPIR-V for JIT callbacks
 -----------------------------------------------
 
@@ -254,7 +261,9 @@ Legacy callback functions and their callback data are passed as
 arrays with exactly one entry.  Function pointer callbacks cannot be
 used on transforms that have :ref:`input or output fields<input_output_fields>`
 specified on the plan description: :cpp:func:`rocfft_execute` returns
-``rocfft_status_invalid_arg_value`` in that case.
+``rocfft_status_invalid_arg_value`` in that case. The specified arrays must
+remain valid until either the execution info is destroyed or callbacks are
+cleared from it.
 
 .. note::
 

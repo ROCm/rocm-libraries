@@ -815,16 +815,16 @@ rocsparse_status rocsparse_extract_descr_default_t::run(rocsparse_handle        
     {
     case rocsparse_format_csr:
     {
-        const_source_ptr_data = source->row_data;
-        const_source_ind_data = source->col_data;
+        const_source_ptr_data = source->const_row_data;
+        const_source_ind_data = source->const_col_data;
         target_ptr_data       = target->row_data;
         target_ind_data       = target->col_data;
         break;
     }
     case rocsparse_format_csc:
     {
-        const_source_ptr_data = source->col_data;
-        const_source_ind_data = source->row_data;
+        const_source_ptr_data = source->const_col_data;
+        const_source_ind_data = source->const_row_data;
         target_ptr_data       = target->col_data;
         target_ind_data       = target->row_data;
         break;

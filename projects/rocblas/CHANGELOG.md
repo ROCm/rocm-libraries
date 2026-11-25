@@ -3,11 +3,12 @@
 rocBLAS documentation is available at
 [https://rocm.docs.amd.com/projects/rocBLAS/en/latest/index.html](https://rocm.docs.amd.com/projects/rocBLAS/en/latest/index.html).
 
-## rocBLAS 5.9.0
+## (Unreleased) rocBLAS 5.9.0
 
 ### Added
 
 * `ROCBLAS_LAYER=0x10` (`rocblas_layer_mode_log_kernel_select`) writes one `rocblas-bench`-replayable line to the trace log for each internal GEMM sub-problem that launches a kernel. Use it to break higher-level Level 3 calls such as `trsm`, `trmm`, and `syrk` into kernels that can be benchmarked individually. The bench function is `gemm_ex`, `gemm_batched_ex`, or `gemm_strided_batched_ex`, matching the sub-problem layout. A trailing comment names the path that ran it (`hipblaslt`, `tensile`, `source`, or `gemv`), the selected kernel or launcher (except for hipBLASLt), the backends it fell back from, and the calling API.
+* CMake `ROCBLAS_TENSILE_ARCH_SKIPLIST` to skip GPU targets during Tensile library generation while still compiling the rocBLAS library for all `GPU_TARGETS`. If every `GPU_TARGETS` entry is skipped, Tensile is invoked with its stub `gfx000` target when that logic exists, but `gfx000` catalogs are never packaged. GEMM on a skipped architecture uses hipBLASLt or source kernels instead of aborting Tensile initialization.
 
 ### Changed
 
@@ -29,8 +30,12 @@ rocBLAS documentation is available at
 * Fix a crash on Windows when rocBLAS cannot find its Tensile library file and the deployment directory name contains a regex escape, such as `x-deploy`. The diagnostic that lists the library files built a `std::regex` from that path and threw `std::regex_error` instead of returning a status. Library filenames are now matched directly, and a missing directory no longer throws from the diagnostic itself.
 * Fix the bandwidth (`rocblas-GB/s`) that `rocblas-bench` reports for `ger`, `her`, `her2`, `hpr`, and `hpr2`, including batched and strided-batched forms. The byte count included the read of `A` but not its write, so the reported bandwidth was about half of what the function moved. `hpmv` also did not scale its vector traffic by the element size.
 * Fix the rocBLAS library build on Python 3.12 when setuptools is not installed. `library/src/merge_archives.py` imported `distutils.spawn`, which that Python release removed from the standard library, so the archive merge step failed before parsing its arguments. The script now locates `ar` with `shutil.which`.
+* Fix Level 3 `trsm`, including batched and strided-batched forms, returning `rocblas_status_success` when an internal kernel launch fails, for example with `hipErrorInvalidKernelFile` when rocBLAS cannot load its own device code. `B` was left unchanged or partly updated. The left-side `n` = 1 path discarded the status of the internal `trsv` substitution, and the blocked solver for large problems discarded the status of its `gemm_ex` updates; both now return it.
+* Fix incorrect results from pointer-batched Level 3 `gemm` and `gemm_ex` (`gemm_batched`, `gemm_batched_ex`) when a leading dimension and `k` are large enough that a column offset overflows a signed 32-bit value inside Tensile or hipBLASLt. Non-batched and strided-batched GEMM already split `k` to stay under that limit. The pointer-batched path issued the whole `k` in one launch. It now uses the same split, and chunks after the first accumulate into `D` with `beta = 1`.
+* Fix Level 3 `dgmm`, including batched and strided-batched forms, failing its kernel launch on gfx942 when `n` or `batch_count` exceeds the 16-bit grid limit (65535). The gfx942 kernel, used for `f32_r` and for `f64_r` and `f32_c` above an `m` threshold, launched with `grid.y = (n - 1) / 32 + 1` and `grid.z = batch_count`. HIP rejects a Y or Z dimension above 65535, so `n` above 2,097,120 or `batch_count` above 65535 never ran. Both dimensions are now capped, and the kernel strides the remaining rows and batches. The general `dgmm` kernel already did this.
+* Fix the hipBLASLt backend treating a workspace as almost unlimited when the extra allocation a solution needs is larger than the workspace still available on the handle. The limit passed to the heuristic was `available - extra`, and that subtraction wrapped. The heuristic could then select an algorithm the workspace cannot hold. The call now returns `rocblas_status_memory_error`, or `rocblas_status_invalid_value` when querying solutions.
 
-## rocBLAS 5.8.0 
+## rocBLAS 5.8.0 for ROCm 10.2.0
 
 ### Added
 

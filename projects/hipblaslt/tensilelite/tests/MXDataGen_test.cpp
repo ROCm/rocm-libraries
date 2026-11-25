@@ -657,4 +657,14 @@ TEST(MXScaleLayoutFormat, MapsScalingFormatToLayout)
     EXPECT_EQ(mxScaleLayoutForFormat(SF::Block_32_UE8M0, "gfx950"), MXScaleLayout::None);
     EXPECT_EQ(mxScaleLayoutForFormat(SF::Block_32_UE8M0, "gfx1250"), MXScaleLayout::GFX1250);
     EXPECT_EQ(mxScaleLayoutForFormat(SF::Block_32_UE4M3, "gfx942"), MXScaleLayout::None);
+    EXPECT_EQ(mxScaleLayoutForFormat(SF::Block_32_UE8M0_128_4_EXT, "gfx950"),
+              MXScaleLayout::Tile128x4);
+}
+
+TEST(MXScaleLayoutInPlace, RejectsTile128x4)
+{
+    std::vector<uint8_t> scale(128 * 4, 127);
+    EXPECT_THROW(
+        applyMXScaleLayoutInPlace(scale.data(), scale.size(), MXScaleLayout::Tile128x4, 128, 4, 32),
+        std::runtime_error);
 }

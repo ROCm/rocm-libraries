@@ -36,12 +36,13 @@
 
 hipblasStatus_t RocBlasLtStatusToHIPStatus(rocblaslt_status_ status);
 
-// The extension API reads A and B as column-major or swizzled, and C and D as column-major only;
-// hipblasLtMatmul rewrites a row-major A or B itself. Returns HIPBLAS_STATUS_NOT_SUPPORTED when any
-// order is ROW, or when C or D is not COL. Callers check order only after the arguments their own
-// validation checks first are present, so a missing handle, descriptor, or pointer keeps its usual
-// status. The layout form returns SUCCESS when any layout is null. The extension API never sends a
-// call to the grouped path, so it checks the order even beside a grouped layout.
+// Matmul reads A and B as column-major or swizzled, and C and D as column-major only; only
+// hipblasLtMatrixTransform reads HIPBLASLT_ORDER_ROW. Returns HIPBLAS_STATUS_NOT_SUPPORTED when
+// any order is ROW, or when C or D is not COL. Callers check order only after the arguments their
+// own validation checks first are present, so a missing handle, descriptor, or pointer keeps its
+// usual status. The layout form returns SUCCESS when any layout is null. Only the C matmul and
+// heuristic send grouped layouts to the grouped path, which has its own order check, so only they
+// skip this check for grouped layouts.
 hipblasStatus_t refuse_unsupported_order(const char*      caller,
                                          hipblasLtOrder_t orderA,
                                          hipblasLtOrder_t orderB,

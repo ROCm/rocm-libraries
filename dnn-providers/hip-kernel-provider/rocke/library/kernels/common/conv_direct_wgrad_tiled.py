@@ -26,6 +26,10 @@ What sets it apart from :func:`build_direct_conv_wgrad` (16x16 per wave):
 * A persistent grid: ``ceil(target_blocks / channel_tiles)`` blocks walk the
   (image, column strip, row segment) list with a stride, accumulate in
   registers across segments, and atomically add once at the end.
+* ``rows_per_seg = 0`` picks the launch from the runtime shape: a segment is
+  a whole strip (all H rows, rounded up to the unroll), and the grid is at
+  most ``target_blocks`` blocks (``floor``, not ``ceil``), so it runs in one
+  round when ``target_blocks`` is the number of blocks the device holds.
 
 dW is fp32; the caller zero-initialises it.
 """
@@ -68,10 +72,12 @@ class DirectWgradTiledSpec:
     wave_c16: int = 2
     waves_k: int = 4
     waves_c: int = 2
+    # Input rows per segment (a multiple of the unroll); 0 = the whole strip
+    # with a one-round grid, both derived from the runtime shape.
     rows_per_seg: int = 30
     prefetch: int = 2
     target_blocks: int = 256
-    # Main-loop unroll override (a multiple of prefetch + 1); 0 = default.
+    # Main-loop unroll override (a multiple of n_buffers); 0 = default.
     row_unroll: int = 0
     # Images packed into one 32-column strip: the MFMA reduction runs over
     # unfold_n images x 32 / unfold_n columns, so a narrow image (W = 40, say)
@@ -82,6 +88,8 @@ class DirectWgradTiledSpec:
     # which halves the atomic count. With ``pingpong`` the second group runs
     # half a row behind the first (one extra barrier at the start), so one
     # group's MFMA phase covers the other's DMA issue and fragment reads.
+    # With ``q_groups == 1`` the two ping-pong groups are the two halves of
+    # the block's waves, which share one row stream.
     q_groups: int = 1
     pingpong: bool = False
 
@@ -115,7 +123,17 @@ class DirectWgradTiledSpec:
         return _WO // self.unfold_n
 
     @property
+    def pingpong_halves(self) -> bool:
+        """Single-group ping-pong: the two groups are the block's wave halves."""
+        return self.pingpong and self.q_groups == 1
+
+    @property
     def n_buffers(self) -> int:
+        # The q_groups == 1 ping-pong keeps one more row buffer: a row's
+        # buffer is then refilled a full step after its reads were issued,
+        # so the reads need not complete before the mid barrier.
+        if self.pingpong_halves:
+            return self.prefetch + 2
         return self.prefetch + 1
 
     @property
@@ -168,7 +186,7 @@ class DirectWgradTiledSpec:
             f"f{p.KH}x{p.KW}p{p.PAD}",
             f"wt{self.wave_k}x{self.wave_c}",
             f"w{self.waves_k}x{self.waves_c}",
-            f"rps{self.rows_per_seg}",
+            f"rps{self.rows_per_seg}" if self.rows_per_seg else "rpsH",
             f"pf{self.prefetch}",
             f"tb{self.target_blocks}",
             flags=flags,
@@ -184,14 +202,16 @@ class DirectWgradTiledSpec:
         return (
             ceil_div(p.N, self.unfold_n)
             * ceil_div(p.Wo, self.strip_w)
-            * ceil_div(p.H, self.rows_per_seg)
+            * (ceil_div(p.H, self.rows_per_seg) if self.rows_per_seg else 1)
         )
 
     def n_splits(self) -> int:
-        return min(
-            ceil_div(self.n_segments(), self.q_groups),
-            ceil_div(self.target_blocks, self.n_channel_tiles()),
-        )
+        tiles = self.n_channel_tiles()
+        if self.rows_per_seg:
+            per_tile = ceil_div(self.target_blocks, tiles)
+        else:
+            per_tile = max(1, self.target_blocks // tiles)
+        return min(ceil_div(self.n_segments(), self.q_groups), per_tile)
 
     def launch_geometry(self):
         return (self.n_channel_tiles() * self.n_splits(), 1, 1), (
@@ -234,8 +254,8 @@ def is_valid_wgrad_tiled_spec(spec: DirectWgradTiledSpec, arch: str = "gfx950"):
         return False, "unfold_n must be 1, 2 or 4"
     if spec.q_groups not in (1, 2):
         return False, "q_groups must be 1 or 2"
-    if spec.pingpong and spec.q_groups != 2:
-        return False, "pingpong needs q_groups == 2"
+    if spec.pingpong_halves and spec.n_waves % 2:
+        return False, "pingpong with q_groups == 1 needs an even wave count"
     if spec.threads_per_block > target.max_threads_per_block:
         return False, "too many threads per block"
     if p.cpg % _VEC or p.kpg % _VEC:
@@ -248,12 +268,14 @@ def is_valid_wgrad_tiled_spec(spec: DirectWgradTiledSpec, arch: str = "gfx950"):
         return False, "row_unroll must be >= 0"
     if spec.target_blocks < 1:
         return False, "target_blocks must be >= 1"
-    if spec.row_unroll % spec.n_buffers:
-        return False, "row_unroll must be a multiple of prefetch + 1"
+    # Before the n_buffers check: prefetch -1 (-2 with the single-group
+    # ping-pong's extra buffer) makes n_buffers 0.
     if spec.prefetch < 1:
         return False, "prefetch must be >= 1"
-    if spec.rows_per_seg <= 0 or spec.rows_per_seg % spec.unroll:
-        return False, f"rows_per_seg must be a positive multiple of {spec.unroll}"
+    if spec.row_unroll % spec.n_buffers:
+        return False, "row_unroll must be a multiple of n_buffers"
+    if spec.rows_per_seg < 0 or spec.rows_per_seg % spec.unroll:
+        return False, f"rows_per_seg must be 0 or a positive multiple of {spec.unroll}"
     if p.KH > 8 or p.KW > 8:
         return False, "filter extent above 8"
     if spec.lds_bytes() > 160 * 1024:
@@ -369,6 +391,7 @@ def build_direct_wgrad_tiled(
     D = spec.prefetch
     NB = spec.n_buffers
     HPB = spec.rows_per_seg
+    AUTO = HPB == 0
     U = spec.unroll
     T_PRO = KH - 1
 
@@ -434,13 +457,23 @@ def build_direct_wgrad_tiled(
     n_ch_tiles = b.mul(b.mul(p_groups, n_k_tiles), n_c_tiles)
     n_q = b.div(b.add(p_Wo, ci(WU - 1)), ci(WU))
     n_ng = b.div(b.add(p_N, ci(UN - 1)), ci(UN))
-    n_hb = b.div(b.add(p_H, ci(HPB - 1)), ci(HPB))
-    total_segs = b.mul(b.mul(n_ng, n_q), n_hb)
+    if AUTO:
+        # One segment per strip: all H rows, the row loop's trip count
+        # rounded up to the unroll.
+        n_rb = b.div(b.add(p_H, ci(U - 1)), ci(U))
+        total_segs = b.mul(n_ng, n_q)
+    else:
+        n_hb = b.div(b.add(p_H, ci(HPB - 1)), ci(HPB))
+        total_segs = b.mul(b.mul(n_ng, n_q), n_hb)
     # Same formula as DirectWgradTiledSpec.n_splits, which sizes the grid.
-    n_splits = b.smin(
-        b.div(b.add(total_segs, ci(spec.q_groups - 1)), ci(spec.q_groups)),
-        b.div(b.add(ci(spec.target_blocks), b.sub(n_ch_tiles, c1)), n_ch_tiles),
-    )
+    seg_splits = b.div(b.add(total_segs, ci(spec.q_groups - 1)), ci(spec.q_groups))
+    if AUTO:
+        per_tile = b.smax(b.div(ci(spec.target_blocks), n_ch_tiles), c1)
+    else:
+        per_tile = b.div(
+            b.add(ci(spec.target_blocks), b.sub(n_ch_tiles, c1)), n_ch_tiles
+        )
+    n_splits = b.smin(seg_splits, per_tile)
 
     # Dispatch deals block ids round-robin over 8 XCDs; renumber so each XCD
     # gets a contiguous run, i.e. the channel tiles of the same segments,
@@ -628,24 +661,73 @@ def build_direct_wgrad_tiled(
     def acc_index(r, s, mi, ni):
         return ((r * KW + s) * WK16 + mi) * WC16 + ni
 
+    def wait_rows(lead: bool):
+        """Before a barrier: lgkm, and the row DMA wait where it is needed.
+
+        With q_groups == 1 the groups share the row buffers and every barrier
+        of the lagging group (1) pairs with the leading group's (0) next one:
+        group 1 must hold its slice of row t + 1 at its mid barrier, which
+        pairs with group 0's row barrier of t + 1. The wait immediates are
+        static, and a per-group branch around them costs the waitcnt pass
+        its LDS-DMA tracking (or, duplicating the loop, the registers), so
+        both groups wait at both barriers.
+        """
+        if spec.pingpong_halves:
+            if lead:
+                # Row t was already waited for at the previous mid barrier
+                # (or, for a segment's first row, before the stagger).
+                b.s_waitcnt(lgkmcnt=0)
+            else:
+                # Both groups wait (a per-group branch costs ~40 VGPRs here).
+                # No lgkm wait: the extra row buffer (n_buffers) covers the
+                # reads still in flight, which the MFMAs then wait for one
+                # fragment at a time.
+                b.s_waitcnt(vmcnt=(D - 1) * N_INSTR)
+        elif lead:
+            b.s_waitcnt(vmcnt=(D - 1) * N_INSTR, lgkmcnt=0)
+        else:
+            b.s_waitcnt(lgkmcnt=0)
+
+    def mid_barrier():
+        """The ping-pong barrier between a group's reads and its MFMAs."""
+        wait_rows(False)
+        b.s_barrier_bare()
+        if QG == 1:
+            b.sched_barrier(0)
+
     def step(buf: int, t: Value, ring, accs, compute: bool, issue):
         """One row: wait, barrier, DMA row t + D, read, MFMA."""
-        b.s_waitcnt(vmcnt=(D - 1) * N_INSTR, lgkmcnt=0)
+        wait_rows(True)
         b.s_barrier_bare()
-        issue((buf + D) % NB, b.add(t, ci(D)))
+        # Ping-pong pins this phase with scheduling fences; there the DMA goes
+        # after the reads, or the waitcnt pass (which cannot tell the X buffer
+        # reads from the new DMA's target) drains the DMAs before every read.
+        late = spec.pingpong_halves
+        if not late:
+            issue((buf + D) % NB, b.add(t, ci(D)))
         newest = [read_frag(dy_bufs[buf], dy_idx[mi]) for mi in range(WK16)]
         ring = ring[1:] + [newest]
+        xf = None
+        if compute:
+            xf = [
+                [read_frag(x_bufs[buf], x_idx[s][ni]) for ni in range(WC16)]
+                for s in range(KW)
+            ]
+        if late:
+            # Pinned after the reads, so its address math and issue run
+            # under the LDS read latency.
+            b.sched_barrier(0)
+            issue((buf + D) % NB, b.add(t, ci(D)))
         if not compute:
+            if late:
+                # Keep two barriers per row: the groups share the buffers, so
+                # the lagging group must stay half a row (not a row) behind.
+                mid_barrier()
             return ring, accs
-        xf = [
-            [read_frag(x_bufs[buf], x_idx[s][ni]) for ni in range(WC16)]
-            for s in range(KW)
-        ]
         if spec.pingpong:
             # The other group's half-step: its reads run under these MFMAs,
             # which take issue priority while they do.
-            b.s_waitcnt(lgkmcnt=0)
-            b.s_barrier_bare()
+            mid_barrier()
             b.s_setprio(1)
         accs = list(accs)
         for r in range(KH):
@@ -658,7 +740,13 @@ def build_direct_wgrad_tiled(
                             b, io_dtype, "16x16x32", dyf[mi], xf[s][ni], accs[i]
                         )
         if spec.pingpong:
+            if QG == 1:
+                b.sched_barrier(0)
             b.s_setprio(0)
+        elif AUTO:
+            # A runtime trip count lets the scheduler sink the MFMAs into the
+            # last rows of the unrolled body; keep each row's MFMAs in its row.
+            b.sched_barrier(0)
         return ring, accs
 
     # ---- persistent segment loop -------------------------------------------
@@ -669,7 +757,10 @@ def build_direct_wgrad_tiled(
         segment left keeps step with the other).
         """
         lane_offs = seg_lane_offsets(n0, b.mul(q, ci(WU)))
-        t_end = ci(T_PRO + HPB)
+        # A whole strip needs no tail cut: the DMAs past the last row are
+        # masked by the row bounds or never read. A constant keeps the
+        # row-loop schedule close to the fixed-rows one.
+        t_end = ci(1 << 30) if AUTO else ci(T_PRO + HPB)
         if valid is not None:
             t_end = b.select(valid, t_end, c0)
 
@@ -678,6 +769,11 @@ def build_direct_wgrad_tiled(
 
         for t in range(D):
             issue(t % NB, ci(t))
+        if spec.pingpong_halves:
+            # Group 1 starts the segment one barrier late, holding row 0.
+            b.s_waitcnt(vmcnt=(D - 1) * N_INSTR)
+            with b.scf_if(b.cmp_eq(pp_grp, c1)):
+                b.s_barrier_bare()
 
         ring = [[zero_frag] * WK16 for _ in range(KH)]
         for t in range(T_PRO):
@@ -689,7 +785,7 @@ def build_direct_wgrad_tiled(
         ]
         row_loop = b.scf_for_iter(
             c0,
-            ci(HPB // U),
+            n_rb if AUTO else ci(HPB // U),
             c1,
             n_iter_args,
             iv_name="rb",
@@ -711,12 +807,35 @@ def build_direct_wgrad_tiled(
         # Drain the dummy tail DMAs before the next segment reuses the buffers.
         b.s_waitcnt(vmcnt=0, lgkmcnt=0)
         b.s_barrier_bare()
+        if spec.pingpong_halves:
+            # Group 0 catches up: both groups leave the segment aligned.
+            with b.scf_if(b.cmp_eq(pp_grp, c0)):
+                b.s_barrier_bare()
         return accs_out
 
-    if spec.pingpong:
+    def seg_origin(seg):
+        """Segment ``seg`` -> (n0, q, h0, h_end): first image, strip, and the
+        row range. Segments run row block fastest, then strip, then image
+        group; in auto mode a segment is a whole strip."""
+        if AUTO:
+            rest, h0 = seg, c0
+        else:
+            hb = b.mod(seg, n_hb)
+            rest = b.div(seg, n_hb)
+            h0 = b.mul(hb, ci(HPB))
+        n0 = b.mul(b.div(rest, n_q), ci(UN))
+        q = b.mod(rest, n_q)
+        h_end = p_H if AUTO else b.smin(b.add(h0, ci(HPB)), p_H)
+        return n0, q, h0, h_end
+
+    # Ping-pong group: the q group, or the half of the block's waves.
+    pp_grp = qg
+    if spec.pingpong_halves:
+        pp_grp = b.div(wave, ci(NW // 2))
+    if spec.pingpong and QG > 1:
         # Group 1 starts one barrier late: from here on its every barrier
         # pairs with group 0's next one, half a row ahead of it.
-        with b.scf_if(b.cmp_eq(qg, c1)):
+        with b.scf_if(b.cmp_eq(pp_grp, c1)):
             b.s_barrier_bare()
     zero_accs = [(f"acc{i}", zero_acc) for i in range(n_acc)]
     if QG == 1:
@@ -729,16 +848,7 @@ def build_direct_wgrad_tiled(
             elide_trailing_barrier=False,
         )
         with seg_loop as (seg, carried):
-            hb = b.mod(seg, n_hb)
-            rest = b.div(seg, n_hb)
-            h0 = b.mul(hb, ci(HPB))
-            accs_out = segment(
-                list(carried),
-                b.mul(b.div(rest, n_q), ci(UN)),
-                b.mod(rest, n_q),
-                h0,
-                b.smin(b.add(h0, ci(HPB)), p_H),
-            )
+            accs_out = segment(list(carried), *seg_origin(seg))
             b.scf_yield(*accs_out)
     else:
         # Group g of block `split` takes virtual split split * QG + g; both
@@ -753,21 +863,13 @@ def build_direct_wgrad_tiled(
         )
         with seg_loop as (segi, carried):
             seg = b.add(b.add(vsplit0, qg), b.mul(segi, n_vsplits))
-            hb = b.mod(seg, n_hb)
-            rest = b.div(seg, n_hb)
-            h0 = b.mul(hb, ci(HPB))
             accs_out = segment(
-                list(carried),
-                b.mul(b.div(rest, n_q), ci(UN)),
-                b.mod(rest, n_q),
-                h0,
-                b.smin(b.add(h0, ci(HPB)), p_H),
-                valid=b.cmp_lt(seg, total_segs),
+                list(carried), *seg_origin(seg), valid=b.cmp_lt(seg, total_segs)
             )
             b.scf_yield(*accs_out)
     accs = list(seg_loop.results)
-    if spec.pingpong:
-        with b.scf_if(b.cmp_eq(qg, c0)):
+    if spec.pingpong and QG > 1:
+        with b.scf_if(b.cmp_eq(pp_grp, c0)):
             b.s_barrier_bare()
 
     # ---- epilogue: atomic add into dW[total_k, KH, KW, cpg] -----------------
