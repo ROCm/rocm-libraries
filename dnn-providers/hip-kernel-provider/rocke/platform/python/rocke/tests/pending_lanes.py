@@ -1479,8 +1479,8 @@ PENDING: tuple[PendingTest, ...] = (
     *_waiting_tests(
         TICKET,
         "it checks a column alias or an all-negative aliased declare, which no "
-        "committed column has yet; triage decides whether it keeps a committed case "
-        "or a fixture",
+        "committed column has yet; it is kept on purpose until the committed data "
+        "has one",
         _PLATFORM,
         _TRIAGE_FOLLOW_UP,
         "2027-01-15",
@@ -1492,9 +1492,9 @@ PENDING: tuple[PendingTest, ...] = (
     ),
     *_waiting_tests(
         TICKET,
-        "its native-engine cases of a concrete MMA op cannot run (native LLVM lowers "
-        "the neutral tile.mma only); triage leaves them out of the parametrization "
-        "after the owner's review",
+        "its native-engine cases of a concrete MMA op do not run (native LLVM lowers "
+        "the neutral tile.mma only); they are kept on purpose until the engine "
+        "supports them",
         _PLATFORM,
         _TRIAGE_FOLLOW_UP,
         "2027-01-15",
@@ -1505,8 +1505,8 @@ PENDING: tuple[PendingTest, ...] = (
     ),
     *_waiting_tests(
         TICKET,
-        "its decode cases at head widths no decode bucket serves cannot run; triage "
-        "leaves them out of the parametrization after the owner's review",
+        "its decode cases at head widths no decode bucket serves do not run; they "
+        "are kept on purpose until a decode bucket serves those widths",
         _LIBRARY,
         _TRIAGE_FOLLOW_UP,
         "2027-01-15",

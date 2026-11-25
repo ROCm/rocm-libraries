@@ -1577,7 +1577,10 @@ of record:
 A record whose expiry is further away than its longest window is refused when
 the registry loads. Reaching the date means re-deciding the record: fix the
 test, move it, or write a new date with the reason; dates are spread so the
-records of one area come due together, not the whole registry at once.
+records of one area come due together, not the whole registry at once. The
+windows and the expiry dates are reviewed at each expiry wave. A daily
+scheduled run (the rocKE merge monitor, outside this repository) runs the
+check with `--strict-expiry`, which fails on every expired record.
 
 **Four lanes.** A lane is what pull-request CI lacks that a test needs
 ([`rocke.tests.lanes`](platform/python/rocke/tests/lanes.py)). The finer
@@ -1586,7 +1589,7 @@ record's issue, not in the lane:
 
 | Lane | Waits for | Examples |
 |---|---|---|
-| `RUNNER_HARDWARE` (`runner-hardware`) | hardware no pull-request runner has: a GPU of an arch outside `PR_RUNNER_ARCHES` (gfx942, gfx1100 to gfx1103), or a second GPU | gfx950, gfx908, gfx90a, gfx115x, gfx1200, gfx1201 and gfx1250 cases; the two-GPU cases (`skip_needing_gpus`) |
+| `RUNNER_HARDWARE` (`runner-hardware`) | hardware no pull-request runner has: a GPU of an arch outside `PR_RUNNER_ARCHES` (gfx942 and gfx1100, the runners' confirmed hardware), or a second GPU | gfx950, gfx908, gfx90a, gfx1101 to gfx1103, gfx115x, gfx1200, gfx1201 and gfx1250 cases; the two-GPU cases (`skip_needing_gpus`) |
 | `BUILD_VARIANT` (`build-variant`) | a build or test environment CI does not provide | the C++ engine's Python modules (pybind11), the shared librocke on the Windows build, hipcc and the LLVM tools, optional packages |
 | `TICKET` (`ticket`) | work the record's issue tracks | CTest entries not added yet, a tier decision, a scheduled run (comprehensive tier, exhaustive cohort: `-m 'not exhaustive'` deselects to this lane), a torch-free rewrite |
 | `SOURCE_TREE` (`source-tree`) | a source checkout (`run_all.py`) | cases that read platform tools, C++ sources, docs or git history; `-m 'not integration'` deselects to this lane |
@@ -1619,7 +1622,8 @@ and says what it needs in plain words; no record can cover it, so in CI
 it shows up in limbo until it is fixed or quarantined. A case that can never run
 (a refused request, a state the code cannot build) is not kept as a skip: after
 the owner's review it is left out of the parametrization, or the test is
-deleted.
+deleted. A case that waits for hardware, engine support or data that has not
+landed is kept on purpose, under a ticket record that says what it waits for.
 
 The pytest roots of `platform/tests`, `library/tests` and the tiling tests
 (`platform/python/rocke/tests/helpers/tiling`, which its CI entries collect on

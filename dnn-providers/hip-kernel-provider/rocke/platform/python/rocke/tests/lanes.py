@@ -114,15 +114,11 @@ class Lane:
 
 _LANE_NAME = re.compile(r"[a-z0-9]+(-[a-z0-9]+)*")
 
-#: The GPU arches of the pull-request CI runners: gfx942 and the gfx110X
-#: family. A case that needs one of them runs on a pull-request runner.
-PR_RUNNER_ARCHES: tuple[str, ...] = (
-    "gfx942",
-    "gfx1100",
-    "gfx1101",
-    "gfx1102",
-    "gfx1103",
-)
+#: The GPU arches the pull-request CI runners are known to have: gfx942 and
+#: gfx1100. A case that needs one of them runs on a pull-request runner; every
+#: other device arch (gfx1101 to gfx1103 included, until a runner is confirmed
+#: to have them) waits for the runner hardware.
+PR_RUNNER_ARCHES: tuple[str, ...] = ("gfx942", "gfx1100")
 
 RUNNER_HARDWARE = Lane(
     "runner-hardware",

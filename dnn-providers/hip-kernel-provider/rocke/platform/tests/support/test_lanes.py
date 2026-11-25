@@ -150,7 +150,8 @@ def test_every_gpu_arch_has_a_pull_request_runner_or_waits_for_the_hardware():
     device_arches = {arch for arch in known_arches() if not arch.endswith("-generic")}
     assert set(PR_RUNNER_ARCHES) | set(RUNNER_HARDWARE.arches) == device_arches
     assert not set(PR_RUNNER_ARCHES) & set(RUNNER_HARDWARE.arches)
-    assert "gfx942" in PR_RUNNER_ARCHES and "gfx950" in RUNNER_HARDWARE.arches
+    assert PR_RUNNER_ARCHES == ("gfx942", "gfx1100")
+    assert {"gfx950", "gfx1101", "gfx1102", "gfx1103"} <= set(RUNNER_HARDWARE.arches)
 
 
 def test_a_case_that_needs_more_gpus_waits_for_the_runner_hardware():
