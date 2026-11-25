@@ -527,6 +527,33 @@ TEST_F(TestGpuEngineHeuristicDescriptor, GetEngineHeuristicDescriptorEngineConfi
     ASSERT_EQ(count, 1);
 }
 
+TEST_F(TestEngineHeuristicDescriptor, GetEngineConfigsRejectsNegativeCount)
+{
+    auto heur = getEngineHeuristicDescriptor();
+    const bool findFirst = true;
+    ASSERT_NO_THROW(heur->setAttribute(
+        HIPDNN_ATTR_ENGINEHEUR_FIND_FIRST_EXT, HIPDNN_TYPE_BOOLEAN, 1, &findFirst));
+    setGraph();
+    setHeuristicMode();
+    EXPECT_CALL(*_mockEnginePluginResourceManager, getApplicableEngineIds(_, true))
+        .WillOnce(Return(std::vector<int64_t>{42}));
+    ASSERT_NO_THROW(heur->finalize());
+
+    const auto config = createDescriptor<EngineConfigDescriptor>();
+    const auto initialConfig = config->asDescriptor<EngineConfigDescriptor>()->toString();
+    std::array<hipdnnBackendDescriptor_t, 1> configs{config.get()};
+    int64_t count = 17;
+    ASSERT_THROW_HIPDNN_STATUS(heur->getAttribute(HIPDNN_ATTR_ENGINEHEUR_RESULTS,
+                                                  HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                                                  -1,
+                                                  &count,
+                                                  configs.data()),
+                               HIPDNN_STATUS_BAD_PARAM);
+    EXPECT_EQ(count, 17);
+    EXPECT_EQ(configs.front(), config.get());
+    EXPECT_EQ(config->asDescriptor<EngineConfigDescriptor>()->toString(), initialConfig);
+}
+
 TEST_F(TestGpuEngineHeuristicDescriptor, GetEngineConfigsWithNullConfig)
 {
     const auto heur = getEngineHeuristicDescriptor();
