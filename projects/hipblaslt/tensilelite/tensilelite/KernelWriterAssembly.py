@@ -18223,7 +18223,7 @@ class KernelWriterAssembly(KernelWriter):
           break
     self.codes.accVgprRead = mapAcctoArchRegs(kernel, self.states.maxLimitAgprs, write=False, spilledVgprBase=spilledVgprBase)
 
-    # ValuC base marker (serialized subtile store reads accs into a small window)
+    # ValuC base marker (serialized subtile store reads accs into a small window).
     fusedStartVgprValu = self.vgprPool.checkOutAligned(1, 4, tag="fusedStore_startVgprValu")
     self.states.c.startVgprValu = fusedStartVgprValu
     module.add(RegSet("v", "vgprValuC", fusedStartVgprValu))
@@ -18397,7 +18397,10 @@ class KernelWriterAssembly(KernelWriter):
       self.vgprs.coord1InMT     = _hoistedIdx["coord1InMT"]
       self.vgprs.coutRowPtrE    = _hoistedIdx["coutRowPtrE"]
       self.vgprs.coutRowPtrBias = _hoistedIdx["coutRowPtrBias"]
-      self.states.subtileHoistedWriteIndices = None
+      # A planning emit that a second emit will replace keeps the hoisted indices
+      # (and, below, their registers) for that second emit.
+      if not self.states.subtileKeepHoistedWriteIndices:
+        self.states.subtileHoistedWriteIndices = None
       # PLSIN numIter<PGR (the fused-store gate sits at 1, below PGR): the PGR>=2
       # preloop takes SkipToNLL for numIter<PGR (e.g. K==DepthU), so
       # the NGLL init-hoist never ran and the hoisted coord VGPRs hold garbage -> the
@@ -18437,6 +18440,9 @@ class KernelWriterAssembly(KernelWriter):
     self.states.subtileStoreStageHighWater = 0
     self.states.subtilePairPackSlot = 0
     self.states.subtileStagedHold = None   # staged store cacheline align: pair held for its line partner
+    self.states.subtilePendingPhase2b = None     # staggered store: buffer_store deferred across batches
+    self.states.subtileCachelineAlignVoffHoisted = None    # woven cacheline align: (arm, addrDVgpr) whose blended voffsets are live
+    self.states.subtileDeferredSrdDIncs = []     # SrdD row advances held behind that store
     self.states.subtileHoistedAddrArm = -1
     self.states.subtileHoistedAddrDVgpr = -1
     self.states.subtileHoistedAddrBlockN = -1
@@ -18537,7 +18543,10 @@ class KernelWriterAssembly(KernelWriter):
     self.states.subtileStoreTt1PerStage = 0
     self.states.subtileStoreTt0PerStage = 0
     module.add(storeModule)
-    self.cleanupGlobalWrite(kernel)
+    if _hoistedIdx and self.states.subtileKeepHoistedWriteIndices:
+      self.states.subtileHoistedCleanupDeferred = True
+    else:
+      self.cleanupGlobalWrite(kernel)
     self.states.bpeCexternal = savedBpeCext
 
     # --- release NLL-local transient SrdD + guard SGPRs, restore PLAIN store state ---
@@ -20500,6 +20509,9 @@ class KernelWriterAssembly(KernelWriter):
     vgprPairPackRing: int = -1    # base of the paired-store pack ring (numPairPackQuads 4-vgpr quads)
     numPairPackQuads: int = 1     # quads in that ring; 1 puts every paired store on vgprBf16Temp
     vgprCachelineAlignTmp: int = -1         # one scratch vgpr for the store cacheline align's blend (storeCachelineAlignEnabled)
+    vgprPairAddrRing: int = -1    # second address register for the woven store cacheline align: a deferred
+                                  # buffer_store reads its pair's address after the next pair's
+                                  # Phase1 has written its own. -1 => every store uses vgprAddrScratch.
 
   class FP8CVTVgprStruct(NamedTuple):
     vgprFp8NanInf: int = -1
@@ -21290,6 +21302,7 @@ class KernelWriterAssembly(KernelWriter):
       cvtVgprStruct  = None
       cvtVgpr        = None
       pairRing       = -1
+      pairAddrRing   = -1
       cachelineAlignTmp        = -1
       # No hoisted lane math until emitSubtileStoreLaneMath below says otherwise; a
       # stale True would make batches skip a computation that never ran.
@@ -21342,6 +21355,10 @@ class KernelWriterAssembly(KernelWriter):
         # off numElementsPerBatch, which has a hard floor at MIWaveTile[0] (see _pairPackQuad).
         pairRing = self.vgprPool.checkOutAligned(4 * (pairQuads - 1), 2, tag="subtilePairPackRing") \
                    if pairQuads > 1 else -1
+        # The woven store cacheline align defers a pair's buffer_store past the next pair's prep, so
+        # that pair's address has to outlive the next Phase1: one more address register.
+        pairAddrRing = self.vgprPool.checkOut(1, tag="subtilePairAddrRing") \
+                       if (permForRing and storeCachelineAlignEnabled(kernel)) else -1
         # The store cacheline align blends in place and needs one temp. Nothing more: any further
         # register here comes off the store batch and can drop it to single elements.
         cachelineAlignTmp = self.vgprPool.checkOut(1, tag="subtileCachelineAlignTmp") \
@@ -21353,6 +21370,7 @@ class KernelWriterAssembly(KernelWriter):
                                                vgprAddrScratch=(cvtVgpr+6) if kernel.get("UseSubtileImpl") else -1, \
                                                vgprPairPackRing=pairRing, \
                                                numPairPackQuads=pairQuads, \
+                                               vgprPairAddrRing=pairAddrRing, \
                                                vgprCachelineAlignTmp=cachelineAlignTmp)
         module.add(self.emitSubtileStoreLaneMath(kernel, cvtVgprStruct))
       elif kernel["ProblemType"]["DestDataType"].isAnyFloat8() and kernel["ProblemType"]["HighPrecisionAccumulate"]:
@@ -21678,6 +21696,8 @@ class KernelWriterAssembly(KernelWriter):
         self.vgprPool.checkIn(cvtVgpr)
         if pairRing >= 0:
           self.vgprPool.checkIn(pairRing)
+        if pairAddrRing >= 0:
+          self.vgprPool.checkIn(pairAddrRing)
         if cachelineAlignTmp >= 0:
           self.vgprPool.checkIn(cachelineAlignTmp)
       # The hoisted values die with the cvtVgpr block.
@@ -22097,6 +22117,9 @@ class KernelWriterAssembly(KernelWriter):
           self.states.subtileWeaveMfmaGroups = deepcopy(_weaveMaster)
           self.states.subtileWeaveEmitted = set()
           self.states.subtileWeavePairCounter = 0
+          self.states.subtilePendingPhase2b = None
+          self.states.subtileCachelineAlignVoffHoisted = None
+          self.states.subtileDeferredSrdDIncs = []
         mulAlpha = self.codes.mulAlphaMultipleBuffer if (kernel["_GlobalAccumulation"] == 'MultipleBuffer' or kernel["_GlobalAccumulation"] == 'MultipleBufferSingleKernel') else self.codes.mulAlphaOther
         codeMulAlpha = deepcopy(mulAlpha) if self.states.serializedStore else None
 

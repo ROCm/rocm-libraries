@@ -595,7 +595,7 @@ defaultBenchmarkCommonParameters = [
     {"DirectToLds": [0]},
     {"DirectToLdsMetadata": [1]},
     {"UseSubtileImpl": [False]},
-    {"StoreCachelineAlign": [False]},
+    {"StoreCachelineAlign": [True]},
     {"A2ASubRounds": [1]},
     {"UseSgprForGRO": [-1]},
     {"UseInstOffsetForGRO": [0]},
