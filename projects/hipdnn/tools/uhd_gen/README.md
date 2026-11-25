@@ -605,7 +605,17 @@ them from the oracle.
 content key, which `hipdnn_bench` reports as `graph_key` and `hipdnn_corpus_gen` records
 as the manifest's `benchmark`: it ignores the graph's name and id, so one graph is one key
 however many names it was written under, and a training set holds each measurement of it
-once.
+once. The key is computed over the graph the bench deserializes, not the file's bytes, so it
+changes when the graph schema does (a new optional attribute, say), even for an unchanged
+file: a corpus generated on one build and measured on another has other ids in its manifests
+than in its rows. A collection's `collection_manifest.json` therefore records, for each graph
+under `graphs`, the `benchmark` the bench reported beside its `source` file (a graph that
+failed records none). `generate --eval-benchmarks` takes a JSON list of benchmark ids, or an
+evaluation slice whose `benchmarks` is one, and holds out exactly the graphs it names. A list
+naming none of the run's graphs is refused, and one naming only some is warned about with the
+count. On collected data both say to rekey the slice, which the hipdnn-uhd skill's
+`eval_slice.py rekey` does from the collections' recorded `benchmark` per file; a published
+dataset has no collections, so there they say to list ids from its CSVs' `benchmark` column.
 
 **Identity columns are read as text on every route.** `benchmark`, `device`, `graph_id`,
 `graph_key` and `device_id` name something; nothing computes with them. Left to inference a device
@@ -1275,8 +1285,13 @@ what training set aside. A run measuring `--graphs` keeps everything it measured
 `measurements.json`; its corpus files hold what training read.
 
 A collected row carries its regime (`regime`, `regime.<facet>`, `regime.operation`) from the
-`manifest.csv` `hipdnn_corpus_gen` wrote beside the graphs. These are envelope columns, never
-features.
+`manifest.csv` `hipdnn_corpus_gen` wrote beside the graphs, looked for in each graph's
+directory and the one above it, as named and with links resolved. These are envelope columns,
+never features. The manifest is joined by graph file (its `file` column, resolved against the
+manifest's directory, to each measured graph's source) and the labels are keyed by the
+benchmark the bench reported for that file, so they attach even when the manifest's ids came
+from another build; the run then warns once with the number of graphs whose ids moved. A
+manifest without a `file` column is joined by its `benchmark` ids.
 
 ### `size`: how many more shapes, and from which regimes
 

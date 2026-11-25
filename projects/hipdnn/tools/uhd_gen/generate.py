@@ -356,6 +356,36 @@ def _eval_benchmarks(path: str) -> set[str]:
     return set(listed)
 
 
+#: Why a hold-out list can name graphs a run measured under other ids.
+MOVED_KEYS = (
+    "A benchmark id is the graph's content key (hipdnn_bench's graph_key), which moves "
+    "with the graph schema, so a slice chosen from a corpus generated on another build "
+    "names other ids for the same files; rekey it against this run's collections with "
+    "the hipdnn-uhd skill's `eval_slice.py rekey`."
+)
+
+
+def _check_held_out(held: set[str], present: set[str], where: str, cause: str) -> None:
+    """Refuse a hold-out list naming none of `present`; warn when it names only some.
+    Both say `cause`: why the list can name ids the run lacks, and what to do."""
+    found = held & present
+    if not found:
+        raise ValueError(
+            f"none of the {len(held)} --eval-benchmarks graphs {where}; there is "
+            f"nothing to evaluate on. {cause}"
+        )
+    if len(found) < len(held):
+        # A silently smaller hold-out is the same failure as an empty one.
+        logger.warning(
+            "%d of the %d --eval-benchmarks graphs are not among this run's rows, so "
+            "only %d are held out. %s",
+            len(held) - len(found),
+            len(held),
+            len(found),
+            cause,
+        )
+
+
 def write_collection(
     stage: Path,
     *,
@@ -1247,49 +1277,96 @@ def _catalog_label(
     return None, "robustMeanMs", False, "robustMeanMs"
 
 
-def read_regime_manifest(manifest: Path) -> dict:
-    """benchmark -> its regime columns, from one `hipdnn_corpus_gen` manifest.csv.
+def _regime_records(manifest: Path) -> list[tuple[str, Path | None, dict]]:
+    """(benchmark, graph file or None, regime columns) of each graph one
+    `hipdnn_corpus_gen` manifest.csv lists; the file is resolved against the manifest's
+    directory, and is None when the manifest has no `file` column.
 
     Facet columns run from after `regime` up to `source`; they become envelope columns
     (`regime`, `regime.<facet>`, `regime.operation`), never features.
     """
-    labels: dict = {}
+    records = []
     with Path(manifest).open(newline="", encoding="utf-8") as handle:
         reader = csv.DictReader(handle)
         columns = reader.fieldnames or []
         if "benchmark" not in columns or "regime" not in columns:
-            return labels
+            return records
         end = (
             columns.index("source")
             if "source" in columns
             else columns.index("regime") + 1
         )
         facets = columns[columns.index("regime") + 1 : end]
+        root = Path(manifest).resolve().parent
         for record in reader:
-            labels[record["benchmark"]] = {
-                "regime": record["regime"],
-                **{f"regime.{facet}": record[facet] for facet in facets},
-                # Two operations may share a regime label, so record which one.
-                **({"regime.operation": record["op"]} if record.get("op") else {}),
-            }
-    return labels
+            named = record.get("file")
+            records.append(
+                (
+                    record["benchmark"],
+                    (root / named).resolve() if named else None,
+                    {
+                        "regime": record["regime"],
+                        **{f"regime.{facet}": record[facet] for facet in facets},
+                        # Two operations may share a regime label, so record which one.
+                        **(
+                            {"regime.operation": record["op"]}
+                            if record.get("op")
+                            else {}
+                        ),
+                    },
+                )
+            )
+    return records
 
 
-def corpus_regimes(graph_paths) -> dict:
-    """Each graph's regime, from its corpus's `manifest.csv`: benchmark -> columns.
+def read_regime_manifest(manifest: Path) -> dict:
+    """benchmark -> its regime columns, from one `hipdnn_corpus_gen` manifest.csv."""
+    return {benchmark: columns for benchmark, _, columns in _regime_records(manifest)}
 
-    Feeds `evaluate`'s per-regime table (RFC 0019.13 §11.2).
+
+def corpus_regimes(graph_inputs: list) -> dict:
+    """Each measured graph's regime, from its corpus's `manifest.csv`: benchmark -> columns.
+
+    Joined by graph file and keyed by the benchmark the bench reported for that file: a
+    benchmark id is a graph content key, which moves with the graph schema, so a corpus
+    generated on another build records other ids for the same files. A manifest without a
+    `file` column is joined by its benchmark ids. The manifest is looked for in each graph's
+    directory and the one above it, both as named and resolved, so a corpus whose graph
+    files link elsewhere still finds its own. Feeds `evaluate`'s per-regime table
+    (RFC 0019.13 §11.2).
     """
+    sources = {
+        Path(graph["source"]): graph["benchmark"]
+        for graph in graph_inputs
+        if graph.get("benchmark")
+    }
+    measured = {source.resolve(): key for source, key in sources.items()}
     labels: dict = {}
+    moved = set()
     for directory in sorted(
         {
             parent
-            for path in graph_paths
-            for parent in (Path(path).parent, Path(path).parent.parent)
+            for source in sources
+            for path in (source, source.resolve())
+            for parent in (path.parent, path.parent.parent)
         }
     ):
-        if (directory / "manifest.csv").is_file():
-            labels.update(read_regime_manifest(directory / "manifest.csv"))
+        if not (directory / "manifest.csv").is_file():
+            continue
+        for recorded, graph, columns in _regime_records(directory / "manifest.csv"):
+            if graph is None:
+                labels[recorded] = columns
+            elif graph in measured:
+                labels[measured[graph]] = columns
+                if measured[graph] != recorded:
+                    moved.add(graph)
+    if moved:
+        logger.warning(
+            "%d graph(s) were measured under another benchmark id than their corpus "
+            "manifest.csv records; their regimes were joined by file. %s",
+            len(moved),
+            MOVED_KEYS,
+        )
     return labels
 
 
@@ -1459,9 +1536,21 @@ def _measure(
                     graph_rows[index][source].extend(collected)
                     graph_names[index].update(names)
         for index, (graph, _, graph_input) in enumerate(chunk):
+            # Each graph's rows come from the response that named it (its own process, or
+            # its `graph_path` in a batch), so their key is the bench's id for this file.
+            keys = {
+                str(row["benchmark"])
+                for source in sources
+                for row in graph_rows[index][source]
+            }
+            if index not in errors and len(keys) != 1:
+                errors[index] = ValueError(
+                    f"hipdnn_bench reported {len(keys)} graph keys for one graph"
+                )
             if index in errors:
                 skip(graph, graph_input, errors[index])
                 continue
+            graph_input["benchmark"] = keys.pop()
             if immediate and not args.collect_only and not any(rows.values()):
                 # The id an opaque engine reads does not vary by graph, so check it on the
                 # first graph rather than after the corpus. Collect-only trains nothing.
@@ -1476,7 +1565,7 @@ def _measure(
             for source in sources:
                 rows[source].extend(graph_rows[index][source])
             published.update(graph_names[index])
-    regimes = corpus_regimes(graphs)
+    regimes = corpus_regimes(graph_inputs)
     for source in sources:
         for row in rows[source]:
             row.update(regimes.get(str(row["benchmark"]), {}))
@@ -1824,12 +1913,14 @@ def _generate_published(
     if args.recall:
         in_eval = pd.Series(True, index=frame.index)
     elif held is not None:
+        _check_held_out(
+            held,
+            set(frame[BENCHMARK_COLUMN].astype(str)),
+            "is in this dataset",
+            "A published dataset's graphs are the ids in its CSV contributions' "
+            "`benchmark` column; list the hold-out from those.",
+        )
         in_eval = frame[BENCHMARK_COLUMN].astype(str).isin(held)
-        if not in_eval.any():
-            raise ValueError(
-                f"none of the {len(held)} --eval-benchmarks graphs is in this dataset; "
-                "there is nothing to evaluate on"
-            )
     else:
         split = split_problems(
             keys, args.eval_fraction, args.seed, finite_values(frame, keys)
@@ -2124,12 +2215,12 @@ def _split_for_training(
     held = _eval_benchmarks(args.eval_benchmarks) if args.eval_benchmarks else None
     eval_corpora = {}
     if held is not None:
-        measured = set(frames[sources[0]][BENCHMARK_COLUMN].astype(str)) & held
-        if not measured:
-            raise ValueError(
-                f"none of the {len(held)} --eval-benchmarks graphs was measured in this "
-                "corpus; there is nothing to evaluate on"
-            )
+        _check_held_out(
+            held,
+            set(frames[sources[0]][BENCHMARK_COLUMN].astype(str)),
+            "was measured in this corpus",
+            MOVED_KEYS,
+        )
         # The graphs scored are exactly the ones named, every row of them on every device:
         # evaluate scores the whole of this file rather than drawing its own split.
         for source in sources:

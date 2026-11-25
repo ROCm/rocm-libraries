@@ -159,7 +159,10 @@ binding decides everything below:
    ```
    `<tree>`: an empty directory for an opaque engine (promote's check refuses a declared id
    already installed in the tree), the per-arch root for a descriptor engine. Several sets:
-   `eval_slice.py holdout` writes their union. A closed shape set: `--recall` instead of
+   `eval_slice.py holdout` writes their union. When the collections came from another build
+   than the set, rekey the slices first (`eval_slice.py rekey`, [data.md](data.md)): training
+   refuses a list naming none of the measured graphs and warns when it names only some.
+   A closed shape set: `--recall` instead of
    `--eval-benchmarks`. `--metric` takes `tflops` or `time` (repeatable, one model each). Train
    one per metric the role binds: the `score.metric` of each UHD the binding names (a bound
    UHD with no `score.metric`, e.g. a `native` adapter, binds none). With none bound, train

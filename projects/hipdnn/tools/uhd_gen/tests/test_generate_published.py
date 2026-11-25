@@ -303,3 +303,45 @@ def test_a_published_dataset_trains_an_mlp_data_model_that_names_its_metric(
         (output / "generation_manifest.json").read_text(encoding="utf-8")
     )
     assert manifest["models"][0]["target"] == "avgTimeMs"
+
+
+@pytest.mark.parametrize(
+    "listed, refused, said",
+    [
+        (["conv_problem_x"], True, "none of the 1 --eval-benchmarks graphs is in"),
+        (
+            [f"conv_problem_{p}" for p in range(10)] + ["conv_problem_x"],
+            False,
+            "1 of the 11 --eval-benchmarks graphs are not among this run's rows",
+        ),
+        ([f"conv_problem_{p}" for p in range(10)], False, None),
+    ],
+    ids=["none_in_the_dataset", "some_not_in_the_dataset", "all_in_the_dataset"],
+)
+def test_a_hold_out_naming_graphs_the_dataset_lacks_says_why(
+    published, evaluator, caplog, listed, refused, said
+):
+    """A published dataset's graphs are the ids its CSVs carry; a list naming none of them
+    is refused and one naming only some is warned about, both pointing at those ids (it
+    has no collections to rekey a slice against). A list naming only them is quiet."""
+    eval_set = published["root"] / "eval.json"
+    eval_set.write_text(json.dumps(listed), encoding="utf-8")
+    code, _ = _generate(
+        published,
+        evaluator,
+        "held",
+        *FEATURES,
+        "--target",
+        "tflops",
+        "--objective",
+        "max",
+        "--eval-benchmarks",
+        str(eval_set),
+    )
+    assert code == (1 if refused else 0)
+    assert "eval_slice.py rekey" not in caplog.text
+    if said is None:
+        assert "--eval-benchmarks graphs are not among" not in caplog.text
+    else:
+        assert said in caplog.text
+        assert "CSV contributions' `benchmark` column" in caplog.text

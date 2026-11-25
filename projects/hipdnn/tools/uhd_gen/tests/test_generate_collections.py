@@ -648,22 +648,57 @@ def test_measurement_options_are_refused_without_a_measurement(
     assert "measures nothing" in caplog.text
 
 
-def test_rows_carry_the_regime_their_corpus_labelled_them_with(world, evaluator):
+@pytest.mark.parametrize(
+    "recorded, file, linked, moved",
+    [
+        # A manifest that names no files is joined by its benchmark ids.
+        ("graph-{}", None, False, 0),
+        ("graph-{}", "{}.json", False, 0),
+        # Generated on another build, whose graph schema gave every graph another
+        # content key: joined by benchmark id, every row lost its regime.
+        ("older-build-key-{}", "{}.json", False, GRAPHS),
+        # hipdnn_corpus_gen writes manifest.csv at the corpus root, one level above the
+        # graphs, naming each as graphs/<name>.
+        ("graph-{}", "graphs/{}.json", False, 0),
+        ("older-build-key-{}", "graphs/{}.json", False, GRAPHS),
+        # Graph files linking into a store elsewhere still find their corpus's manifest.
+        ("older-build-key-{}", "graphs/{}.json", True, GRAPHS),
+    ],
+    ids=[
+        "by_benchmark",
+        "by_file",
+        "by_file_keys_moved",
+        "corpus_gen_layout",
+        "corpus_gen_layout_keys_moved",
+        "corpus_gen_layout_linked",
+    ],
+)
+def test_rows_carry_the_regime_their_corpus_labelled_them_with(
+    world, evaluator, caplog, recorded, file, linked, moved
+):
     """hipdnn_corpus_gen's manifest.csv names each graph's population."""
     import csv
 
-    with (world["graphs"] / "manifest.csv").open(
-        "w", newline="", encoding="utf-8"
-    ) as handle:
+    if linked:
+        store = world["root"] / "elsewhere" / "store"
+        store.mkdir(parents=True)
+        for graph in sorted(world["graphs"].iterdir()):
+            graph.rename(store / graph.name)
+            graph.symlink_to(store / graph.name)
+    directory = world["graphs"]
+    if file and file.startswith("graphs/"):
+        directory = world["graphs"].parent
+    with (directory / "manifest.csv").open("w", newline="", encoding="utf-8") as handle:
         writer = csv.writer(handle)
         writer.writerow(
             ["benchmark", "name", "regime", "phase", "context", "source", "q.size"]
+            + (["file"] if file else [])
         )
         for index in range(GRAPHS):
             phase = "decode" if index % 4 == 0 else "append"
             writer.writerow(
                 [
-                    f"graph-{index}",
+                    recorded.format(index),
                     f"g{index}",
                     f"{phase}_short",
                     phase,
@@ -671,8 +706,18 @@ def test_rows_carry_the_regime_their_corpus_labelled_them_with(world, evaluator)
                     "sweep",
                     index,
                 ]
+                + ([file.format(index)] if file else [])
             )
     collection = _collect(world, "labelled")
+    warnings = [
+        record.getMessage()
+        for record in caplog.records
+        if "measured under another benchmark id" in record.getMessage()
+    ]
+    assert len(warnings) == (1 if moved else 0)
+    assert all(
+        f"{moved} graph(s)" in w and "eval_slice.py rekey" in w for w in warnings
+    )
     rows = json.loads((collection / "corpus.json").read_text(encoding="utf-8"))
     assert {
         r["benchmark"]: (r["regime"], r["regime.phase"], r["regime.context"])
@@ -816,7 +861,7 @@ def test_a_closed_shape_space_trains_on_every_shape_and_reports_recall(
     assert report["holdout_integrity"]["status"] == "recall"
 
 
-def test_a_named_evaluation_set_holds_out_exactly_its_graphs(world, evaluator):
+def test_a_named_evaluation_set_holds_out_exactly_its_graphs(world, evaluator, caplog):
     """`--eval-benchmarks`: the held-out graphs are the ones a corpus fixed when it was made,
     not a fraction drawn from whatever this run happens to train on -- so they stay held out,
     and keep scoring, however the collections grow."""
@@ -849,6 +894,12 @@ def test_a_named_evaluation_set_holds_out_exactly_its_graphs(world, evaluator):
         manifest["eval_benchmarks"]["listed"],
         manifest["eval_benchmarks"]["measured"],
     ) == (5, 4)
+    # A smaller hold-out than the list asked for is said, not silent.
+    assert (
+        "1 of the 5 --eval-benchmarks graphs are not among this run's rows, so only 4 "
+        "are held out" in caplog.text
+    )
+    assert "eval_slice.py rekey" in caplog.text
     # Every named graph measured is scored -- once, on the best measurement of it, as
     # training takes one measurement per shape -- and none trains, whichever GPU took it.
     scored = manifest["models"][0]["eval_problem_keys"]
@@ -859,7 +910,12 @@ def test_a_named_evaluation_set_holds_out_exactly_its_graphs(world, evaluator):
     "contents, extra, message",
     [
         (["graph-1"], ["--recall"], "--recall trains on every one"),
-        (["graph-absent"], [], "none of the 1 --eval-benchmarks graphs was measured"),
+        (
+            ["graph-absent"],
+            [],
+            "none of the 1 --eval-benchmarks graphs was measured in this corpus; "
+            "there is nothing to evaluate on. A benchmark id is the graph's content key",
+        ),
         ([], [], "names no graph"),
     ],
 )
