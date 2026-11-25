@@ -107,7 +107,12 @@ def test_numeric_cohort_routes_to_fold(gfx942, bs):
 
 
 @pytest.mark.parametrize("bs", [16, 32])
-@pytest.mark.parametrize("sq,window", [(2048, 512), (8192, 4096)])
+# The S=8192 cases run a long FP64 host reference: rough gfx942 CI seconds, so
+# the CI shards and their workers share them (rocke.tests.ctest_shard).
+@pytest.mark.parametrize(
+    "sq,window",
+    [(2048, 512), pytest.param(8192, 4096, marks=pytest.mark.rocke_shard_cost(10))],
+)
 @pytest.mark.parametrize("hq,hk", [(32, 8)])
 def test_fold_numeric_vs_fp32_windowed_oracle(gfx942_device, sq, hq, hk, window, bs):
     """Launch the production fold kernel at randn magnitude and assert max_abs

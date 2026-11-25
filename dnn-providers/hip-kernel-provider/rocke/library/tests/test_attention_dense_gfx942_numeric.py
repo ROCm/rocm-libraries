@@ -1121,6 +1121,8 @@ _SWZ_CONFIGS = (
 # keys. interleave only changes the qb_major body, so it rides that order alone. A
 # window of 1024 is at least as long as the keys for some configs and shorter for
 # others, so one binary balances causal work for some launches and not for others.
+# The hq_minor_swz rows run its larger config set; they declare rough gfx942
+# CI seconds so the CI shards and their workers share them (rocke.tests.ctest_shard).
 _PERSIST_ONE_BINARY = [
     pytest.param("fp16", "hkv_major", False, 0, _PERSIST_CONFIGS, id="hkv_major"),
     pytest.param("fp16", "qb_major", False, 0, _PERSIST_CONFIGS, id="qb_major"),
@@ -1128,7 +1130,15 @@ _PERSIST_ONE_BINARY = [
         "fp16", "qb_major", True, 0, _PERSIST_CONFIGS, id="qb_major-interleave"
     ),
     pytest.param("fp16", "bt_hkv_minor", False, 0, _PERSIST_CONFIGS, id="bt_hkv_minor"),
-    pytest.param("fp16", "hq_minor_swz", False, 0, _SWZ_CONFIGS, id="hq_minor_swz"),
+    pytest.param(
+        "fp16",
+        "hq_minor_swz",
+        False,
+        0,
+        _SWZ_CONFIGS,
+        id="hq_minor_swz",
+        marks=pytest.mark.rocke_shard_cost(14),
+    ),
     pytest.param(
         "bf16", "hkv_major", False, 128, _PERSIST_CONFIGS, id="hkv_major-swa128"
     ),
@@ -1143,6 +1153,7 @@ _PERSIST_ONE_BINARY = [
             1024,
             _SWZ_CONFIGS if name == "hq_minor_swz" else _PERSIST_CONFIGS,
             id=f"{name}-swa1024",
+            marks=[pytest.mark.rocke_shard_cost(12)] if name == "hq_minor_swz" else [],
         )
         for name in ("qb_major", "hkv_major", "bt_hkv_minor", "hq_minor_swz")
     ),

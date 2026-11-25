@@ -74,6 +74,28 @@ _ABSORBED = [
 ]
 
 
+# Rough gfx942 seconds of the two long scenarios in each lane that runs them;
+# a scenario's lanes share one shard key, so the CI shards and their workers
+# share these heavy keys (rocke.tests.ctest_shard). The other scenarios take
+# about a second.
+_SCENARIO_SHARD_COSTS = {"sk4096_h128": 7, "many_seqs_h64": 8}
+
+
+def _scenario_params(names: list[str]) -> list:
+    """``names`` as parameters, each heavy one with its shard cost."""
+    return [
+        pytest.param(
+            name,
+            marks=(
+                [pytest.mark.rocke_shard_cost(_SCENARIO_SHARD_COSTS[name])]
+                if name in _SCENARIO_SHARD_COSTS
+                else []
+            ),
+        )
+        for name in names
+    ]
+
+
 def _probe():
     from builders.mla import verify_score_probe_gfx942 as probe
 
@@ -116,11 +138,12 @@ def test_scenario_lists_match_probe_table():
     assert sorted(_ALL_SCENARIOS) == sorted(probe.SCENARIOS)
     assert set(_AGPR_FORCED) <= set(probe.SCENARIOS)
     assert set(_ABSORBED) <= set(probe.SCENARIOS)
+    assert set(_SCENARIO_SHARD_COSTS) <= set(probe.SCENARIOS)
 
 
 @requires_gfx942_gpu
 @pytest.mark.gpu
-@pytest.mark.parametrize("name", _ALL_SCENARIOS)
+@pytest.mark.parametrize("name", _scenario_params(_ALL_SCENARIOS))
 def test_mla_prefill_numeric_dispatched(name):
     assert _run(name) is True, f"{name}: see captured stdout for per-seq residuals"
 
@@ -136,7 +159,7 @@ def test_mla_prefill_numeric_agpr_forced(name):
 
 @requires_gfx942_gpu
 @pytest.mark.gpu
-@pytest.mark.parametrize("name", _ABSORBED)
+@pytest.mark.parametrize("name", _scenario_params(_ABSORBED))
 def test_mla_prefill_numeric_absorbed_query(name):
     assert (
         _run(name, absorbed_query=True) is True

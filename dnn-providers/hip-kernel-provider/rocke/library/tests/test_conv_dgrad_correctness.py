@@ -32,6 +32,7 @@ import unittest
 from concurrent.futures import BrokenExecutor, ProcessPoolExecutor
 
 import numpy as np
+import pytest
 from rocke import compile_kernel
 from rocke.numeric import storage
 from rocke.runtime.hip_module import get_device_arch
@@ -77,6 +78,8 @@ _SKIP_REASON = (
 _MAX_SAMPLE_COMPILE_WORKERS = 32
 
 
+# Each test below declares its rough gfx942 CI seconds, so the CI shards and
+# their workers share these heavy keys (rocke.tests.ctest_shard).
 @unittest.skipUnless(ARCH in _SUPPORTED_ARCHES, _SKIP_REASON)
 class TestConvDgradCorrectness(unittest.TestCase):
     """Every candidate of the sampled dgrad sweep computes the right dX.
@@ -173,6 +176,7 @@ class TestConvDgradCorrectness(unittest.TestCase):
 
     # ---- stride=1 (direct store, no atomics) ---------------------------------
 
+    @pytest.mark.rocke_shard_cost(11)
     def test_fp16_stride1(self):
         """fp16 dgrad, stride=1 — single sub-GEMM, direct-store epilogue."""
         self._verify(
@@ -181,6 +185,7 @@ class TestConvDgradCorrectness(unittest.TestCase):
             split_k=1,
         )
 
+    @pytest.mark.rocke_shard_cost(11)
     def test_bf16_stride1(self):
         """bf16 dgrad, stride=1."""
         self._verify(
@@ -189,6 +194,7 @@ class TestConvDgradCorrectness(unittest.TestCase):
             split_k=1,
         )
 
+    @pytest.mark.rocke_shard_cost(10)
     def test_fp32_stride1(self):
         """fp32 dgrad, stride=1."""
         if ARCH not in _MFMA_ARCHES:
@@ -201,6 +207,7 @@ class TestConvDgradCorrectness(unittest.TestCase):
 
     # ---- pointwise 1x1 (flat-offset fast path) -------------------------------
 
+    @pytest.mark.rocke_shard_cost(13)
     def test_fp16_pointwise_1x1(self):
         """fp16 dgrad, 1x1/stride1/pad0 ungrouped — the flat-offset fast path.
 
@@ -230,6 +237,7 @@ class TestConvDgradCorrectness(unittest.TestCase):
 
     # ---- stride=2 (tilde decomposition, atomic epilogue) ---------------------
 
+    @pytest.mark.rocke_shard_cost(19)
     def test_fp16_stride2(self):
         """fp16 dgrad, stride=2 — tilde decomposition with atomic epilogue."""
         if ARCH not in _MFMA_ARCHES + _WMMA_WAVELET_ARCHES:
@@ -244,6 +252,7 @@ class TestConvDgradCorrectness(unittest.TestCase):
             split_k=1,
         )
 
+    @pytest.mark.rocke_shard_cost(16)
     def test_bf16_stride2(self):
         """bf16 dgrad, stride=2."""
         if ARCH not in _MFMA_ARCHES + _WMMA_WAVELET_ARCHES:
@@ -258,6 +267,7 @@ class TestConvDgradCorrectness(unittest.TestCase):
             split_k=1,
         )
 
+    @pytest.mark.rocke_shard_cost(25)
     def test_bf16_patch_embedding_stride16(self):
         """bf16 dgrad of a 16x16 / stride-16 patch embedding.
 
@@ -279,6 +289,7 @@ class TestConvDgradCorrectness(unittest.TestCase):
 
     # ---- split_k > 1 (atomic epilogue) ---------------------------------------
 
+    @pytest.mark.rocke_shard_cost(31)
     def test_fp16_split_k(self):
         """fp16 dgrad, split_k auto-selected — exercises atomic reduction path."""
         if ARCH not in _MFMA_ARCHES + _WMMA_WAVELET_ARCHES:
@@ -293,6 +304,7 @@ class TestConvDgradCorrectness(unittest.TestCase):
 
     # ---- larger realistic shape ----------------------------------------------
 
+    @pytest.mark.rocke_shard_cost(28)
     def test_fp16_resnet_shape(self):
         """fp16 dgrad, ResNet-style shape N8 H56 W56 C64 K64 R3 S3."""
         self._verify(
@@ -303,6 +315,7 @@ class TestConvDgradCorrectness(unittest.TestCase):
 
     # ---- grouped (grid-per-group on blockIdx.y) ------------------------------
 
+    @pytest.mark.rocke_shard_cost(12)
     def test_fp16_grouped_stride1(self):
         """fp16 grouped dgrad, groups=4 (cpg=kpg=16), stride=1 direct store."""
         self._verify(
@@ -311,6 +324,7 @@ class TestConvDgradCorrectness(unittest.TestCase):
             split_k=1,
         )
 
+    @pytest.mark.rocke_shard_cost(16)
     def test_bf16_grouped_stride1(self):
         """bf16 grouped dgrad, groups=4, stride=1."""
         self._verify(
@@ -319,6 +333,7 @@ class TestConvDgradCorrectness(unittest.TestCase):
             split_k=1,
         )
 
+    @pytest.mark.rocke_shard_cost(15)
     def test_fp16_grouped_stride2(self):
         """fp16 grouped dgrad, groups=4, stride=2 — tilde decomposition path."""
         if ARCH not in _MFMA_ARCHES:
@@ -342,6 +357,7 @@ class TestConvDgradCorrectness(unittest.TestCase):
             split_k=1,
         )
 
+    @pytest.mark.rocke_shard_cost(22)
     def test_fp16_grouped_odd_kpg(self):
         """Non-power-of-two kpg (C=K=48, groups=8 -> cpg=kpg=6): guards against
         the k_sub decode-divisor trap (must divide by kpg, not total K)."""
@@ -351,6 +367,7 @@ class TestConvDgradCorrectness(unittest.TestCase):
             split_k=1,
         )
 
+    @pytest.mark.rocke_shard_cost(35)
     def test_fp16_grouped_split_k(self):
         """fp16 grouped dgrad with split_k>1 — group on y, split_k on z compose;
         even cpg (=16) keeps the packed <2 x f16> atomic pairs in-group."""
@@ -362,6 +379,7 @@ class TestConvDgradCorrectness(unittest.TestCase):
             split_k=-1,
         )
 
+    @pytest.mark.rocke_shard_cost(33)
     def test_bf16_depthwise_large_filter(self):
         """Depthwise (cpg=kpg=1) dgrad: a one-column GEMM per group, every
         operand scalar. A tall, asymmetric filter with per-axis "same"
@@ -374,6 +392,7 @@ class TestConvDgradCorrectness(unittest.TestCase):
             split_k=1,
         )
 
+    @pytest.mark.rocke_shard_cost(39)
     def test_fp16_depthwise_stride2(self):
         """Depthwise dgrad on the stride-2 tilde decomposition path."""
         if ARCH not in _MFMA_ARCHES:

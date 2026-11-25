@@ -1427,7 +1427,7 @@ class TestDirectConvBf16Correctness(unittest.TestCase):
 # Rough gfx942 seconds of the two dgrad cases (kpg=32) whose kernel takes far
 # longer to compile than the others', so the CI shards and their workers share
 # them (rocke.tests.ctest_shard); the other cases take a few seconds each.
-_DGRAD_SHARD_COSTS = {"dg_32c_N2H8W8_g8": 15, "dg_asym_cpg16_kpg32_g4": 40}
+_DGRAD_SHARD_COSTS = {"dg_32c_N2H8W8_g8": 24, "dg_asym_cpg16_kpg32_g4": 34}
 
 
 def _dgrad_case(dtype: str, shape: _Shape):
