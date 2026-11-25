@@ -1,0 +1,596 @@
+{
+  "version": 1,
+  "operation": "SdpaBackward",
+  "description": "SDPA backward with Philox dropout (probability, INT64 seed and offset device tensors) AND padding (both seq_len tensors) over hipkernel:flydsl_sdpa_bwd_split. The harness draws the keep mask over the declared extents (SEM-015; padded and packed graphs follow the declared-extent layout, COVERAGE.md 9.3) and grades the engine against the explicit-mask gradient; a kernel that derives its Philox plane offsets from the live lengths instead disagrees with the oracle for every batch entry shorter than the declared extent. Otherwise as SdpaBackward/FlydslBwdSplitPadded (valid lengths max(1, Sq - i * pad_q) and max(1, Skv - i * pad_kv) for batch index i; masks none, top-left and bottom-right causal) and SdpaBackward/FlydslBwdSplitDropout.",
+  "engine": "hipkernel:flydsl_sdpa_bwd_split",
+  "template": "../../integration-test-bundles/quick/SdpaBackward/Default/graph.template.json",
+  "axes": {
+    "dtype": {
+      "values": [
+        "half",
+        "bfloat16",
+        "float"
+      ]
+    },
+    "layout": {
+      "values": [
+        "bshd",
+        "bhsd"
+      ]
+    },
+    "b": {
+      "values": [
+        1,
+        2,
+        3
+      ]
+    },
+    "hkv": {
+      "values": [
+        1,
+        2,
+        4
+      ]
+    },
+    "group": {
+      "values": [
+        1,
+        1,
+        1,
+        2,
+        4,
+        8,
+        3,
+        5,
+        6,
+        16
+      ]
+    },
+    "hvmul": {
+      "values": [
+        1
+      ]
+    },
+    "hd": {
+      "values": [
+        [
+          16,
+          16
+        ],
+        [
+          32,
+          32
+        ],
+        [
+          64,
+          64
+        ],
+        [
+          64,
+          64
+        ],
+        [
+          96,
+          96
+        ],
+        [
+          128,
+          128
+        ],
+        [
+          128,
+          128
+        ],
+        [
+          136,
+          128
+        ],
+        [
+          192,
+          192
+        ],
+        [
+          256,
+          256
+        ],
+        [
+          320,
+          320
+        ],
+        [
+          512,
+          512
+        ],
+        [
+          192,
+          128
+        ]
+      ]
+    },
+    "sq": {
+      "range": [
+        1,
+        512
+      ],
+      "boundaries": [
+        1,
+        2,
+        16,
+        17,
+        63,
+        64,
+        65,
+        128,
+        129,
+        256,
+        512
+      ]
+    },
+    "skv": {
+      "range": [
+        1,
+        1024
+      ],
+      "boundaries": [
+        1,
+        2,
+        63,
+        64,
+        65,
+        128,
+        129,
+        192,
+        256,
+        512,
+        1024
+      ]
+    },
+    "mask": {
+      "values": [
+        "none",
+        "none",
+        "causal_top_left",
+        "causal_bottom_right"
+      ]
+    },
+    "pad_q": {
+      "values": [
+        0,
+        1,
+        3,
+        17,
+        64
+      ]
+    },
+    "pad_kv": {
+      "values": [
+        0,
+        1,
+        3,
+        17,
+        64
+      ]
+    },
+    "p": {
+      "values": [
+        0.1,
+        0.25,
+        0.5,
+        0.9
+      ]
+    },
+    "seed": {
+      "values": [
+        0,
+        1,
+        12345,
+        305419896,
+        81985529216486895,
+        9223372036854775807,
+        -7
+      ]
+    },
+    "offset": {
+      "values": [
+        0,
+        1,
+        1000,
+        4294967293
+      ]
+    },
+    "scale": {
+      "values": [
+        0.0883883461356163,
+        0.07216878235340118,
+        0.125,
+        0.25,
+        0.5,
+        1.0,
+        4.0,
+        0.0,
+        -0.125,
+        0.0001
+      ]
+    },
+    "domain": {
+      "values": [
+        "default",
+        "narrow",
+        "wide",
+        "positive",
+        "constant",
+        "nonzero",
+        "zeros",
+        "large",
+        "subnormal"
+      ]
+    },
+    "alignment": {
+      "values": [
+        1,
+        2,
+        4,
+        8,
+        16,
+        32,
+        64,
+        128,
+        256
+      ]
+    },
+    "placement": {
+      "values": [
+        "default",
+        "exact",
+        "under"
+      ]
+    }
+  },
+  "derive": {
+    "hv": "hkv * hvmul",
+    "hq": "hkv * hvmul * group",
+    "dqk": "hd[0]",
+    "dv": "hd[1]",
+    "dims_q": "[b, hq, sq, dqk]",
+    "dims_k": "[b, hkv, skv, dqk]",
+    "dims_v": "[b, hv, skv, dv]",
+    "dims_o": "[b, hq, sq, dv]",
+    "dims_lse": "[b, hq, sq, 1]",
+    "row_q": "(hq*dqk if layout == 'bshd' else dqk) + 0",
+    "stride_q": "[sq*row_q, dqk, row_q, 1] if layout == 'bshd' else [hq*sq*row_q, sq*row_q, row_q, 1]",
+    "row_k": "(hkv*dqk if layout == 'bshd' else dqk) + 0",
+    "stride_k": "[skv*row_k, dqk, row_k, 1] if layout == 'bshd' else [hkv*skv*row_k, skv*row_k, row_k, 1]",
+    "row_v": "(hv*dv if layout == 'bshd' else dv) + 0",
+    "stride_v": "[skv*row_v, dv, row_v, 1] if layout == 'bshd' else [hv*skv*row_v, skv*row_v, row_v, 1]",
+    "row_o": "(hq*dv if layout == 'bshd' else dv) + 0",
+    "stride_o": "[sq*row_o, dv, row_o, 1] if layout == 'bshd' else [hq*sq*row_o, sq*row_o, row_o, 1]",
+    "stride_lse": "[hq*sq, sq, 1, 1]",
+    "bottom": "mask == 'causal_bottom_right'",
+    "align": "'BOTTOM_RIGHT' if bottom else 'TOP_LEFT'",
+    "left": "None",
+    "right": "0 if mask in ['causal_top_left', 'causal_bottom_right'] else None",
+    "dom_kind": "'fixed' if domain == 'constant' else ('free' if domain in ['default', 'narrow', 'wide', 'positive'] else domain)",
+    "dom_lo": "-0.01 if domain == 'narrow' else (-8 if domain == 'wide' else (0.25 if domain == 'positive' else (0.5 if domain == 'constant' else -1)))",
+    "dom_hi": "0.01 if domain == 'narrow' else (8 if domain == 'wide' else (4 if domain == 'positive' else (0.5 if domain == 'constant' else 1)))",
+    "dom_value": "0.5 if domain == 'constant' else 0",
+    "dom_scale": "8 if domain == 'large' else 1",
+    "dom_g_lo": "-1 if domain == 'wide' else dom_lo",
+    "dom_g_hi": "1 if domain in ['wide', 'positive'] else dom_hi",
+    "eff_placement": "'exact' if placement == 'under' and alignment < 2 else placement",
+    "lq0": "sq",
+    "lq1": "max(1, sq - pad_q)",
+    "lq2": "max(1, sq - 2 * pad_q)",
+    "lk0": "skv",
+    "lk1": "max(1, skv - pad_kv)",
+    "lk2": "max(1, skv - 2 * pad_kv)",
+    "lens_q": "[lq0] if b == 1 else ([lq0, lq1] if b == 2 else [lq0, lq1, lq2])",
+    "lens_kv": "[lk0] if b == 1 else ([lk0, lk1] if b == 2 else [lk0, lk1, lk2])",
+    "pad_ok": "(mask == 'none') or ((lq0 <= lk0) and (b < 2 or lq1 <= lk1) and (b < 3 or lq2 <= lk2))",
+    "rows_see_a_key": "pad_ok",
+    "dom_mag": "0.5 if domain == 'constant' else (8 if domain in ['large', 'wide'] else (4 if domain == 'positive' else (0.01 if domain == 'narrow' else (0 if domain in ['zeros', 'subnormal'] else 1))))",
+    "s_max": "abs(scale) * dqk * dom_mag * dom_mag + 0"
+  },
+  "constraints": [
+    {
+      "rule": "rows_see_a_key",
+      "reason": "a causal mask needs every valid query row to see a valid key: top-left needs the valid query length to be at most the valid key length, and bottom-right as well (a query row with no key has an LSE of -inf, which the backward kernels do not define); the lengths of a batch entry are the full extents less pad_q or pad_kv per batch index (sequence index 1 and 2 get one and two pads)"
+    },
+    {
+      "rule": "b*hq*sq*skv*(dqk+dv) <= 2**29",
+      "reason": "GPU reference cost ceiling, as SdpaBackward.space.json: the case time is linear above 2**26 and the CPU backward reference is serial, so 2**29 keeps the worst drawn case near 24 s (measured on a gfx942 host for the ASM region space)"
+    },
+    {
+      "rule": "s_max <= (168 if dtype == 'float' else (8388 if dtype == 'half' else 16777))",
+      "reason": "the largest score |S| (bounded by |scale| * dqk * mag^2, plus |bias|) must keep |S| * 2^-24 below a tenth of the dtype's tolerance: the backward computes P = exp(S - LSE) from a given fp32 LSE, and two correct fp32 computations of S differ by |S| * 2^-24, which exp() passes on to P and the gradients. Beyond that bound the oracle cannot tell a correct engine from a wrong one (scale 2^20 with scores near 1e9 gave NaN in every engine that did not produce the LSE itself)"
+    }
+  ],
+  "case": {
+    "values": {
+      "io_data_type": "${dtype}",
+      "tensors": [
+        {
+          "uid": 0,
+          "dims": "${dims_k}",
+          "strides": "${stride_k}",
+          "data_type": "${dtype}",
+          "alignment": 16
+        },
+        {
+          "uid": 1,
+          "dims": "${dims_o}",
+          "strides": "${stride_o}",
+          "data_type": "${dtype}",
+          "alignment": 16
+        },
+        {
+          "uid": 2,
+          "dims": "${dims_q}",
+          "strides": "${stride_q}",
+          "data_type": "${dtype}",
+          "alignment": 16
+        },
+        {
+          "uid": 3,
+          "dims": "${dims_k}",
+          "strides": "${stride_k}",
+          "data_type": "${dtype}",
+          "alignment": 16
+        },
+        {
+          "uid": 4,
+          "dims": "${dims_q}",
+          "strides": "${stride_q}",
+          "data_type": "${dtype}",
+          "alignment": 16
+        },
+        {
+          "uid": 5,
+          "dims": "${dims_v}",
+          "strides": "${stride_v}",
+          "data_type": "${dtype}",
+          "alignment": 16
+        },
+        {
+          "uid": 6,
+          "dims": "${dims_v}",
+          "strides": "${stride_v}",
+          "data_type": "${dtype}",
+          "alignment": 16
+        },
+        {
+          "uid": 7,
+          "dims": "${dims_o}",
+          "strides": "${stride_o}",
+          "data_type": "${dtype}",
+          "alignment": 16
+        },
+        {
+          "uid": 8,
+          "dims": "${dims_lse}",
+          "strides": "${stride_lse}",
+          "data_type": "float",
+          "alignment": 16
+        }
+      ],
+      "attributes": {
+        "compute_data_type": "float",
+        "parameters__alibi_mask": false,
+        "parameters__attn_scale_value": "${scale}",
+        "parameters__causal_mask": false,
+        "parameters__causal_mask_bottom_right": false,
+        "parameters__dropout_probability": null,
+        "parameters__diagonal_alignment": "${align}",
+        "parameters__left_bound": "${left}",
+        "parameters__right_bound": "${right}"
+      }
+    },
+    "metadata": {
+      "purpose": "probe",
+      "validator": "default",
+      "inputs": {
+        "2": {
+          "kind": "${dom_kind}",
+          "lo": "${dom_lo}",
+          "hi": "${dom_hi}",
+          "value": "${dom_value}",
+          "scale": "${dom_scale}"
+        },
+        "0": {
+          "kind": "${dom_kind}",
+          "lo": "${dom_lo}",
+          "hi": "${dom_hi}",
+          "value": "${dom_value}",
+          "scale": "${dom_scale}"
+        },
+        "6": {
+          "kind": "${dom_kind}",
+          "lo": "${dom_g_lo}",
+          "hi": "${dom_g_hi}",
+          "value": "${dom_value}",
+          "scale": 1
+        },
+        "7": {
+          "kind": "${dom_kind}",
+          "lo": "${dom_g_lo}",
+          "hi": "${dom_g_hi}",
+          "value": "${dom_value}",
+          "scale": 1
+        },
+        "9": {
+          "kind": "values",
+          "values": "${lens_kv}",
+          "repeat": false
+        },
+        "10": {
+          "kind": "values",
+          "values": "${lens_q}",
+          "repeat": false
+        },
+        "11": {
+          "kind": "values",
+          "values": "${[offset]}",
+          "repeat": false
+        },
+        "12": {
+          "kind": "values",
+          "values": "${[seed]}",
+          "repeat": false
+        }
+      },
+      "placement": "${eff_placement}",
+      "placement_uid": 2
+    },
+    "node_patches": [
+      {
+        "node": "SdpaBwd_0",
+        "section": "parameters",
+        "set": {
+          "padding_mask": true,
+          "dropout_probability": "${p}"
+        }
+      },
+      {
+        "node": "SdpaBwd_0",
+        "section": "inputs",
+        "set": {
+          "seq_len_q_tensor_uid": 10,
+          "seq_len_kv_tensor_uid": 9,
+          "seed_tensor_uid": 12,
+          "offset_tensor_uid": 11
+        }
+      }
+    ],
+    "tensor_patches": [
+      {
+        "uid": 0,
+        "set": {
+          "alignment": "${alignment}"
+        }
+      },
+      {
+        "uid": 1,
+        "set": {
+          "alignment": "${alignment}"
+        }
+      },
+      {
+        "uid": 2,
+        "set": {
+          "alignment": "${alignment}"
+        }
+      },
+      {
+        "uid": 3,
+        "set": {
+          "alignment": "${alignment}"
+        }
+      },
+      {
+        "uid": 4,
+        "set": {
+          "alignment": "${alignment}"
+        }
+      },
+      {
+        "uid": 5,
+        "set": {
+          "alignment": "${alignment}"
+        }
+      },
+      {
+        "uid": 6,
+        "set": {
+          "alignment": "${alignment}"
+        }
+      },
+      {
+        "uid": 7,
+        "set": {
+          "alignment": "${alignment}"
+        }
+      },
+      {
+        "uid": 8,
+        "set": {
+          "alignment": "${alignment}"
+        }
+      }
+    ],
+    "add_tensors": [
+      {
+        "uid": 9,
+        "name": "z_seq_len_kv",
+        "data_type": "int32",
+        "dims": "${[b, 1, 1, 1]}",
+        "strides": [
+          1,
+          1,
+          1,
+          1
+        ],
+        "alignment": 16,
+        "is_runtime_pass_by_value": false,
+        "ragged_offset_multiplier": 1,
+        "virtual": false
+      },
+      {
+        "uid": 10,
+        "name": "z_seq_len_q",
+        "data_type": "int32",
+        "dims": "${[b, 1, 1, 1]}",
+        "strides": [
+          1,
+          1,
+          1,
+          1
+        ],
+        "alignment": 16,
+        "is_runtime_pass_by_value": false,
+        "ragged_offset_multiplier": 1,
+        "virtual": false
+      },
+      {
+        "uid": 11,
+        "name": "z_zz_offset",
+        "data_type": "int64",
+        "dims": [
+          1,
+          1,
+          1,
+          1
+        ],
+        "strides": [
+          1,
+          1,
+          1,
+          1
+        ],
+        "alignment": 16,
+        "is_runtime_pass_by_value": false,
+        "ragged_offset_multiplier": 1,
+        "virtual": false
+      },
+      {
+        "uid": 12,
+        "name": "z_zz_seed",
+        "data_type": "int64",
+        "dims": [
+          1,
+          1,
+          1,
+          1
+        ],
+        "strides": [
+          1,
+          1,
+          1,
+          1
+        ],
+        "alignment": 16,
+        "is_runtime_pass_by_value": false,
+        "ragged_offset_multiplier": 1,
+        "virtual": false
+      }
+    ]
+  }
+}

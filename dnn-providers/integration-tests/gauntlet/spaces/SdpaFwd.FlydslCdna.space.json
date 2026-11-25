@@ -1,0 +1,127 @@
+{
+  "version": 1,
+  "operation": "SdpaFwd",
+  "description": "SDPA forward over hipkernel:flydsl_sdpa_cdna, the prefill objects of FlyDSL's generic MFMA attention kernel (packs/FlydslSdpaCdnaNative.cpp, FlydslSdpaCdnaCommon.hpp and FlydslSdpaShared.hpp; the 56 gfx950 objects of descriptors/FlyDSL/sdpa_cdna/gfx950/manifest.json), over the region its graph matcher and the catalog accept. Both 16-bit types (every row ships bf16 and f16). Q, K and V, and O, are each BSHD or BHSD (layout_q, layout_kv, layout_o): the kernel takes every operand's batch, sequence and head strides as runtime arguments (servableStrides asks a head-dim stride of 1 and a multiple of 8 elements for every other stride of an extent above 1, which both layouts give for a head size that is a multiple of 8); K and V share one layout because an object reads V through K's strides unless it is a qk_mask object. Grouped-query heads Hq = hkv * group (Hq a multiple of Hkv). (head size, V head size): the exact objects ship 64, 128 and 256 (V as Q and K); the qkm1 objects serve any Q/K head size up to their bucket (64, 128, 256) that is a multiple of 8 (QK_MASK_ALIGN), V of the same width; the vd128 objects serve Q/K head sizes up to 256 (a multiple of 8) with V and O 128 wide. The draws cover each class (8 to 224 by qkm1, 136/160/192/256 over 128 by vd128). A head size of 100, 1 draw in 25, is the decline probe: it is not a multiple of 8, so servableStrides declines a head stride of 100. Masks (mask): none, top-left causal, bottom-right causal, and a sliding window by left_bound with right_bound wr (0 mostly; 1, 16 and 64 only where the diagonal has that room) and either alignment. left_bound has cuDNN semantics (L keeps the L keys ending at the diagonal, diagonal included); resolveMaskBounds passes L - 1 and maskFor turns it into the kernel's window_lo, with the diagonal offset align + right a runtime argument (any_diagonal is the generic family's constant 1, so every object serves any offset). A window with no right bound (left_bound alone) declines in maskFor, because only the causal objects mask at all: it is a probe family (window_no_right), not drawn here. Query rows that would see no key are excluded as in SdpaBackward: the reference gives them a zero row and an LSE of -inf, which the kernel is not described to define (SdpaFwd/FlydslCdnaProbe draws bottom_right_sq_gt_skv). bias (none, none, none, q): the additive attention mask the references grade (attn_mask_tensor_uid through node_patches) in the query's dtype only (servableBias declines a float bias), dims [B or 1, Hq or 1, Sq or 1, Skv] chosen by bcast_b, bcast_h and bcast_q, packed strides with a unit key stride. The bias1 objects exist for the exact head sizes 64, 128 and 256 with V the same, not for the qk_mask or narrow-V ones (no candidate has both has_bias and qk_mask), so a bias is only drawn with those; and the bias rows move as 16-byte vectors, so the key length is a multiple of 8 when a bias is drawn (servableBias: every non-broadcast stride a multiple of 8). stats (off, off, on) adds the FP32 log-sum-exp tensor [b, hq, sq, 1] (stride [hq*sq, sq, 1, 1], declaring the sampled alignment) through add_tensors and sets generate_stats and stats_tensor_uid; the tensors are named bias and stats because import_graph.py numbers tensors by sorted name and a freeze must keep their uids (bias is uid 4, stats is uid 5 with a bias and uid 4 without). The attention sink is not drawn: the catalog ships sink1 objects for head sizes 64 and 128, but the matcher takes only a sink in the query's dtype while the references (isSupportedSdpaSink) grade only a FLOAT sink [1, H, 1, 1], so no graph the engine takes has an oracle; SdpaFwd/FlydslCdnaProbe draws the pair. scale is 2^-64 to 2^20 (isServableScale: positive and at most MAX_SOFTMAX_SCALE = 2^20, the bound at which every FlyDSL SDPA family stays inside f32; 2^20 itself is the upper boundary). The domain axis fills Q, K and V as in the other gfx950 SdpaFwd spaces (large uses scale 8, nan and inf go on V alone at 2^-12 of its elements, only where no mask applies and for an infinity only for bfloat16 with a scale at most 1) and V keeps the range of Q and K: config/hipkernel_flydsl_sdpa.toml grades O of every gauntlet suite by an allclose with atol and rtol 2^-5 instead of the common 1e-2 tolerance, as the engine TOML of SdpaFwd/Gfx950Dense does, and that tolerance was derived from the rounding of P in the bfloat16 P.V product, not measured on these kernels. alignment declares one alignment on Q, K, V and O (and on the bias and the LSE tensor); the shared graph matcher needs 16 bytes from Q, K, V, O and the bias (declaredAlignmentCovers), so alignments 1 to 8 decline whatever the shape, 4 of 9 draws; placement puts the pointers at exactly that alignment (exact) or misaligns Q (placement_uid 1) below it, which passes only if the backend rejects it (under, drawn as exact at alignment 1). The cost ceiling b*hq*sq*skv*dq <= 2**31 is the one of the other SdpaFwd spaces (GPU reference cost ceiling, RFC 0023 section 14, measured on gfx950). Every claim above is what the pack code and the shipped manifest say; no case of this space had been run on a device when it was written.",
+  "engine": "hipkernel:flydsl_sdpa_cdna",
+  "template": "../../integration-test-bundles/quick/SdpaFwd/Default/graph.template.json",
+  "axes": {
+    "dtype": {"values": ["bfloat16", "half"]},
+    "layout_q": {"values": ["bshd", "bhsd"]},
+    "layout_kv": {"values": ["bshd", "bhsd"]},
+    "layout_o": {"values": ["bshd", "bhsd"]},
+    "b": {"values": [1, 2, 3, 4]},
+    "hkv": {"values": [1, 2, 4, 8]},
+    "group": {"values": [1, 2, 4, 8]},
+    "hd": {"values": [[64, 64], [64, 64], [64, 64], [128, 128], [128, 128], [128, 128], [256, 256], [256, 256], [256, 256], [8, 8], [16, 16], [24, 24], [40, 40], [56, 56], [72, 72], [96, 96], [112, 112], [160, 160], [192, 192], [224, 224], [136, 128], [160, 128], [192, 128], [256, 128], [100, 100]]},
+    "sq": {"range": [1, 512], "boundaries": [1, 2, 63, 64, 65, 127, 128, 129, 255, 256, 257, 512]},
+    "skv": {"range": [1, 1024], "boundaries": [1, 7, 8, 63, 64, 65, 128, 129, 1024]},
+    "mask": {"values": ["none", "none", "causal_top_left", "causal_bottom_right", "window"]},
+    "wl": {"range": [1, 512], "boundaries": [1, 2, 16, 17, 64, 65, 128, 256]},
+    "wr": {"values": [0, 0, 0, 1, 16, 64]},
+    "walign": {"values": ["top_left", "bottom_right"]},
+    "bias": {"values": ["none", "none", "none", "q"]},
+    "bcast_b": {"values": [false, true]},
+    "bcast_h": {"values": [false, true]},
+    "bcast_q": {"values": [false, true]},
+    "stats": {"values": ["off", "off", "on"]},
+    "scale": {"values": [5.421010862427522e-20, 0.0625, 0.0883883461356163, 0.125, 0.25, 1.0, 4.0, 16.0, 1048576.0]},
+    "domain": {"values": ["default", "narrow", "wide", "positive", "constant", "nonzero", "zeros", "large", "subnormal", "nan", "inf"]},
+    "alignment": {"values": [1, 2, 4, 8, 16, 32, 64, 128, 256]},
+    "placement": {"values": ["default", "exact", "under"]}
+  },
+  "derive": {
+    "hq": "hkv * group",
+    "dq": "hd[0]",
+    "dv": "hd[1]",
+    "dims_q": "[b, hq, sq, dq]",
+    "dims_k": "[b, hkv, skv, dq]",
+    "dims_v": "[b, hkv, skv, dv]",
+    "dims_o": "[b, hq, sq, dv]",
+    "stride_q": "[sq*hq*dq, dq, hq*dq, 1] if layout_q == 'bshd' else [hq*sq*dq, sq*dq, dq, 1]",
+    "stride_k": "[skv*hkv*dq, dq, hkv*dq, 1] if layout_kv == 'bshd' else [hkv*skv*dq, skv*dq, dq, 1]",
+    "stride_v": "[skv*hkv*dv, dv, hkv*dv, 1] if layout_kv == 'bshd' else [hkv*skv*dv, skv*dv, dv, 1]",
+    "stride_o": "[sq*hq*dv, dv, hq*dv, 1] if layout_o == 'bshd' else [hq*sq*dv, sq*dv, dv, 1]",
+    "bottom": "mask == 'causal_bottom_right' or (mask == 'window' and walign == 'bottom_right')",
+    "align": "'BOTTOM_RIGHT' if bottom else 'TOP_LEFT'",
+    "left": "wl if mask == 'window' else None",
+    "right": "0 if mask in ['causal_top_left', 'causal_bottom_right'] else (wr if mask == 'window' else None)",
+    "right_eff": "0 if right == None else right",
+    "diag": "skv - sq if bottom else 0",
+    "room": "0 if bottom else skv - sq",
+    "rows_see_a_key": "(right == None or diag + right >= 0) and (left == None or sq + diag - left <= skv - 1)",
+    "window_mask": "mask == 'window'",
+    "bias_on": "bias != 'none'",
+    "bias_b": "1 if bcast_b else b",
+    "bias_h": "1 if bcast_h else hq",
+    "bias_q": "1 if bcast_q else sq",
+    "dims_bias": "[bias_b, bias_h, bias_q, skv]",
+    "stride_bias": "[bias_h*bias_q*skv, bias_q*skv, skv, 1]",
+    "stats_uid": "5 if bias_on else 4",
+    "stats_on": "stats == 'on'",
+    "dims_stats": "[b, hq, sq, 1]",
+    "stride_stats": "[hq*sq, sq, 1, 1]",
+    "masked": "mask != 'none'",
+    "nf_ok": "not masked and not (domain == 'inf' and (dtype == 'half' or scale > 1))",
+    "dom_poison": "domain in ['nan', 'inf'] and nf_ok",
+    "dom_kind": "'fixed' if domain == 'constant' else ('special' if dom_poison else ('free' if domain in ['default', 'narrow', 'wide', 'positive', 'nan', 'inf'] else domain))",
+    "dom_lo": "-0.01 if domain == 'narrow' else (-8 if domain == 'wide' else (0.25 if domain == 'positive' else (0.5 if domain == 'constant' else -1)))",
+    "dom_hi": "0.01 if domain == 'narrow' else (8 if domain == 'wide' else (4 if domain == 'positive' else (0.5 if domain == 'constant' else 1)))",
+    "dom_value": "0.5 if domain == 'constant' else 0",
+    "dom_scale": "8 if domain == 'large' else 1",
+    "dom_special": "'inf' if domain == 'inf' else 'nan'",
+    "dom_fraction": "0.000244140625",
+    "dom_validator": "'match_nonfinite' if dom_poison else 'default'",
+    "dom_clean_kind": "'free' if domain in ['nan', 'inf'] else dom_kind",
+    "eff_placement": "'exact' if placement == 'under' and alignment < 2 else placement"
+  },
+  "constraints": [
+    {"rule": "rows_see_a_key", "reason": "a query row with no key under the mask has a zero output row and an LSE of -inf in the references (CpuFpReferenceSdpa.hpp, 'fully masked rows'), which the kernel is not described to define (SdpaFwd/FlydslCdnaProbe draws it as bottom_right_sq_gt_skv); bottom-right causal needs sq <= skv, and a window must reach a key from every row"},
+    {"rule": "mask == 'none' or right_eff <= room", "reason": "maskFor (FlydslSdpaCdnaCommon.hpp) declines a diagonal past Skv - Sq, right > skv - sq - align: the causal objects mask the last KV tile's padding with the same compare, which holds only while every row's diagonal stays inside the keys, so top-left causal needs sq <= skv and a band to the right of the diagonal needs room for it, and bottom-right takes only right 0. SdpaFwd/FlydslCdnaProbe draws top_left_sq_gt_skv and window_right_over"},
+    {"rule": "not bias_on or skv % 8 == 0", "reason": "the bias rows move as 16-byte vectors, so every non-broadcast stride of the bias, which includes the key length, is a multiple of 8 elements (servableBias), and the key length is a multiple of 4 (the kernels read the bias in runs of 4 keys)"},
+    {"rule": "not bias_on or (dq == dv and dq in [64, 128, 256])", "reason": "the shipped bias1 objects are the exact head sizes 64, 128 and 256 with V as Q and K; no object has both a bias and a qk_mask or a narrower V (the manifest's has_bias objects all have qk_mask 0 and head_dim_v = head_dim), so any other head size with a bias is declined by kernel_match (SdpaFwd/FlydslCdnaProbe draws attn_mask_qkm_head)"},
+    {"rule": "b*hq*sq*skv*dq <= 2**31", "reason": "GPU reference cost ceiling (RFC 0023 section 14), kept at 2**31 on measurement (gfx950, 2026-11-02, measure_oracle_cost.py): the largest rung, cost 2**31, ran on the GPU lane in 458 ms (278 ms at 2**21), fit reference_ms = 278 + 8.4e-8 * cost over 6 rungs, r2 0.9995; 60 s is reached only at about 7.1e11. The ceiling is not the budget limit; raising it would make fuzz cases slower"}
+  ],
+  "case": {
+    "values": {
+      "io_data_type": "${dtype}",
+      "tensors": [
+        {"uid": 0, "dims": "${dims_k}", "strides": "${stride_k}", "data_type": "${dtype}"},
+        {"uid": 1, "dims": "${dims_q}", "strides": "${stride_q}", "data_type": "${dtype}"},
+        {"uid": 2, "dims": "${dims_o}", "strides": "${stride_o}", "data_type": "${dtype}"},
+        {"uid": 3, "dims": "${dims_v}", "strides": "${stride_v}", "data_type": "${dtype}"}
+      ],
+      "attributes": {
+        "attributes__attn_scale_value": "${scale}",
+        "attributes__diagonal_alignment": "${align}",
+        "attributes__right_bound": "${right}"
+      }
+    },
+    "metadata": {
+      "purpose": "probe",
+      "validator": "${dom_validator}",
+      "inputs": {
+        "0": {"kind": "${dom_clean_kind}", "lo": "${dom_lo}", "hi": "${dom_hi}", "value": "${dom_value}", "scale": "${dom_scale}", "special": "${dom_special}", "fraction": "${dom_fraction}"},
+        "1": {"kind": "${dom_clean_kind}", "lo": "${dom_lo}", "hi": "${dom_hi}", "value": "${dom_value}", "scale": "${dom_scale}", "special": "${dom_special}", "fraction": "${dom_fraction}"},
+        "3": {"kind": "${dom_kind}", "lo": "${dom_lo}", "hi": "${dom_hi}", "value": "${dom_value}", "scale": "${dom_scale}", "special": "${dom_special}", "fraction": "${dom_fraction}"}
+      },
+      "placement": "${eff_placement}",
+      "placement_uid": 1
+    },
+    "add_tensors": [
+      {"when": "${bias_on}", "uid": 4, "name": "bias", "data_type": "${dtype}", "dims": "${dims_bias}", "strides": "${stride_bias}", "alignment": "${alignment}", "is_runtime_pass_by_value": false, "ragged_offset_multiplier": 1, "virtual": false},
+      {"when": "${stats_on}", "uid": "${stats_uid}", "name": "stats", "data_type": "float", "dims": "${dims_stats}", "strides": "${stride_stats}", "alignment": "${alignment}", "is_runtime_pass_by_value": false, "ragged_offset_multiplier": 1, "virtual": false}
+    ],
+    "node_patches": [
+      {"when": "${bias_on}", "node": "SdpaFwd_0", "section": "inputs", "set": {"attn_mask_tensor_uid": 4}},
+      {"when": "${stats_on}", "node": "SdpaFwd_0", "section": "outputs", "set": {"stats_tensor_uid": "${stats_uid}"}},
+      {"when": "${stats_on}", "node": "SdpaFwd_0", "section": "attributes", "set": {"generate_stats": true}},
+      {"when": "${window_mask}", "node": "SdpaFwd_0", "section": "attributes", "set": {"left_bound": "${left}"}}
+    ],
+    "tensor_patches": [
+      {"uid": 0, "set": {"alignment": "${alignment}"}},
+      {"uid": 1, "set": {"alignment": "${alignment}"}},
+      {"uid": 2, "set": {"alignment": "${alignment}"}},
+      {"uid": 3, "set": {"alignment": "${alignment}"}}
+    ]
+  }
+}

@@ -198,6 +198,99 @@ one of these:
 - **quarantine the bundle** until one of the above lands: exclude it in the
   provider's `test_categories_integration.yaml` with a comment that says why.
 
+### Freeze a fuzz finding
+
+A [fuzz run](running-tests.md#gauntlet-fuzz-runs) writes `failures/<case>/` for each
+`WRONG` and `CRASH`. The folder is outside the bundle root, so later batches never
+reload it. It holds a graph whose tensor UIDs are already in canonical (by-name) order,
+so an import does not renumber tensors and so does not change their per-tensor input
+seeds. Import it with `import_graph.py`, which finds the sweep with the same skeleton
+and appends the case, or reports a duplicate:
+
+```bash
+FAIL=<work-dir>/failures/<case>
+python3 dnn-providers/integration-tests/migration-scripts/import_graph.py \
+    --graph $FAIL/<case>.json \
+    --bundle-dir dnn-providers/integration-tests/integration-test-bundles \
+    --tier quick     # or the tier that fits the cost
+```
+
+`<case>.meta.json` next to the graph carries the data seed and `purpose: regression`,
+so the case replays with the same inputs. Check `$FAIL/replay.txt` for the fill path:
+a failure seen with device-filled inputs reproduces bit for bit only on the same path
+(`HIPDNN_TEST_HOST_INPUT_FILL=1` forces the host fill). Then run the new case with
+`--gtest_filter`, record the engine's decline or fix in the usual way, and keep the
+fuzz finding's `repro.json` in the issue that reports the defect.
+
+When the run used `--shrink`, the finding also has `failures/<case>/shrunk/`. Freeze that graph
+rather than the original: it fails the same way (same outcome class) with the simplest axis
+values the shrink found, so the checked-in case is small and its cause is easier to read. Use
+`$FAIL/shrunk/<case>.json` in the command above; its `<case>.meta.json` sits next to it, and
+`shrunk/axes.json` lists what changed. Keep the original when `axes_changed` is empty (the
+two are then the same sample). The shrunk case is graded under the GTest name its `replay.sh`
+shows, so check that name against the engine TOML's tolerance and skip globs before freezing a
+case whose `dtype` changed.
+
+The finding keeps the alignment it failed at. A space's `alignment` axis writes a
+`tensor_patches` entry into the sweep row, and the failure's graph has that alignment
+baked in. `import_graph.py` compares each tensor's `alignment` with the template's and
+emits a `tensor_patches` entry (`{"uid": N, "set": {"alignment": A}}`) on the new case for
+every tensor that differs, so the frozen case declares the same alignment as the
+finding. A graph that matches an existing case with its patches applied, and has the same
+seed and `inputs`, is reported as a duplicate. `<case>.meta.json` also carries the case's
+`inputs` recipes, `validator`, `placement` and `placement_uid`, with the uids remapped
+together with the graph, and `import_graph.py` copies them into the new case, so the
+frozen case replays the same input values, grading and pointer placement
+([formats](file-formats.md#metadata-sidecar--namemetajson)). A finding from an `under`
+placement keeps `placement: "under"`, so the frozen case still expects `BAD_PARAM` and
+fails until the backend rejects that pointer.
+
+A finding from a space that switches a feature on per sample (an extra output tensor wired
+into the node, a node flag) keeps that too. `import_graph.py` diffs the finding's graph
+against the template's expansion and writes what differs onto the new case:
+[`add_tensors`](file-formats.md#add_tensors-and-node_patches) for the tensors only the
+graph has, `node_patches` for node values that changed (`set`) or keys the graph dropped
+(`remove`), and `tensor_patches` for alignment, as above. When no sweep has the finding's
+skeleton, a graph that has every tensor and node of one sweep's template and only adds
+tensors is appended to that sweep, with the uids the case values address (matched by tensor
+name). Otherwise it creates a template of its own. A difference the fields cannot say, such
+as a node key the template lacks (`set` never inserts a key), fails the import round trip
+and writes nothing. Either way the new case builds the graph that failed, and importing it
+again is reported as a duplicate.
+
+### Add a domain, alignment or placement axis to a space
+
+A space (`gauntlet/spaces/<Op>[.<Name>].space.json`) renders one sweep case per sample
+from its axes. The input-value, alignment and placement axes touch only the case's
+`metadata` and `tensor_patches`, never the graph topology, so each is a few lines of
+the space. Copy `RMSNorm.space.json`, `ResampleFwd.space.json` or `Matmul.Align.space.json` as a
+model; the axes are documented in
+[Gauntlet fuzz runs](running-tests.md#gauntlet-fuzz-runs).
+
+| Step | In the space |
+|---|---|
+| Declare the axis | `"axes"`: `"domain": {"values": ["default", "narrow", ..., "nan", "inf"]}`, `"alignment": {"values": [1, 2, 4, ..., 256]}`, `"placement": {"values": ["default", "exact", "under"]}`. Use these names: the summary's `axis_outcomes` counts outcomes for every axis that lists `values`, so these three appear by name there next to the feature axes. |
+| Mark it `late` if seeds exist | Add `"late": true` to an axis you add to a space whose `--seed` runs you want to keep reproducing: a `late` axis draws from its own stream, so the earlier axes keep their draws (a new axis in the shared stream shifts every later draw, retries included). Late axes must come last: a non-late axis after a late one is a load error. |
+| Derive the recipe | `"derive"`: one expression per recipe field, selecting from the axis, for example `"dom_kind": "'fixed' if domain == 'constant' else ('special' if domain in ['nan', 'inf'] else ...)"`, `dom_lo`, `dom_hi`, `dom_value`, `dom_scale`, `dom_special`, `dom_fraction`, and `"dom_validator": "'match_nonfinite' if domain in ['nan', 'inf'] else 'default'"`. |
+| Render the fills | `case.metadata.inputs`: `"<uid>": {"kind": "${dom_kind}", "lo": "${dom_lo}", "hi": "${dom_hi}", "value": "${dom_value}", "scale": "${dom_scale}", "special": "${dom_special}", "fraction": "${dom_fraction}"}`. Render every field for every kind: fields a kind does not read are ignored, so one expression picks the kind. Keep the non-finite out of an operand that spreads it over many outputs (put `nan`/`inf` on a tensor each output element meets elementwise, as the spaces do) and say why in `description`. Set `"validator": "${dom_validator}"` beside it. |
+| Declare the alignment | `case.tensor_patches`: `{"uid": N, "set": {"alignment": "${alignment}"}}` for each device tensor. The patch may set only `alignment`; `uid` and `alignment` may be `${expr}` strings; a rendered uid must be an integer and the alignment an integer of at least 1. Leave host scalars (an epsilon, a by-value tensor) at the template's value. |
+| Place the pointers | `case.metadata`: `"placement": "${eff_placement}"` and `"placement_uid": N`, with `"eff_placement": "'exact' if placement == 'under' and alignment < 2 else placement"` in `derive` (an `under` placement needs an alignment of at least 2 to be below). `N` is the data operand whose pointer is misaligned; it must be a device buffer of the run, or the case is `UNEXERCISED`. |
+
+| Switch a feature on per sample | `case.add_tensors`: literal tensor objects (an integer `uid`), and `case.node_patches`: `{"node", "section", "set", "remove"}` entries, as in [file-formats](file-formats.md#add_tensors-and-node_patches). Any value may be a `${expr}` string, and an entry may carry `"when": "${expr}"`: it is kept when the expression is true and dropped when false, and the `when` key never reaches the sweep row. A node patch `set` only overwrites keys the node's section already has; read the template for the section (`attributes` for SDPA forward, `parameters` for SDPA backward). A rendered row that is malformed, or that holds a `${` anywhere in these two keys, is an error naming the space. `case.tensor_patches` stays limited to `alignment`. |
+
+`case.metadata` must not set the driver-owned keys `format_version`, `generator`, `seed`
+or `notes` (a load error). Every error in a space names the space.
+
+Then:
+
+1. List the new space's operands in the tables of
+   `gauntlet/test_gauntlet.py` (`PRIMARY_OPERANDS`, `POISONED_OPERANDS`,
+   `PLACEMENT_OPERAND`); `test_every_shipped_space_has_its_operands_listed` fails until
+   each shipped space has an entry.
+2. Run the driver's tests (`python -m pytest -q -p no:cacheprovider dnn-providers/integration-tests/gauntlet/test_gauntlet.py`; they need no GPU), then a short fuzz run with
+   `--filter '^<Op>/<Name>$' --samples 16`, and read the
+   [placement probe results](running-tests.md#reading-an-alignment-or-placement-probe).
+
 ### Disable a reference for a bundle
 
 Set `no_cpu_reference` or `no_gpu_reference` to `true` in the metadata of the

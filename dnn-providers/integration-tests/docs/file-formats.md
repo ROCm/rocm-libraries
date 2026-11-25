@@ -213,6 +213,8 @@ Resolution rules (`IntegrationTestBundle.hpp`):
 | `cases[].metadata` | **yes** | Same schema as a [metadata sidecar](#metadata-sidecar--namemetajson), including `no_cpu_reference`, `no_gpu_reference` and `expected_rejection`. A case without it fails to load. For rule R4, the `golden` object with a `path` of the same case counts as declared golden data. A case with `expected_rejection: true` must not have a `golden` object: that is a load error ([details](#expected-rejection-bundles)). |
 | `cases[].golden` | no | `{"path": "golden/<CaseId>/tensors.dvc"}`. If absent or `null`, the case is graph-only. If present without a string `path`, it is an error. |
 | `cases[].tensor_patches` | no | Structural per-tensor edits applied after placeholder expansion; see below. |
+| `cases[].add_tensors` | no | Literal tensor objects appended to the expanded graph's `tensors[]`; see [`add_tensors`](#add_tensors-and-node_patches). |
+| `cases[].node_patches` | no | Edits to one section of a node (flags, scalars, tensor uids), applied after `add_tensors`; see [`add_tensors` and `node_patches`](#add_tensors-and-node_patches). |
 | `cases[].absent_tensors` | no | Uids of template tensors that this case does not have; see [Optional tensors](#optional-tensors--absent_tensors). Needs sweep `version` 2 and case metadata with `format_version` 2. |
 
 Case ids are handles, not descriptions. `import_graph.py` generates them as
@@ -242,6 +244,75 @@ not carry a baked `value`:
 `set` upserts fields. Then `remove` erases fields. The `uid` must exist in the
 expanded graph. If a tensor keeps `is_runtime_pass_by_value: true` and a `value`,
 it fails validation at load.
+
+A patch can also set a tensor's declared `alignment` (bytes, an integer of at least 1),
+which a template otherwise hard-codes (the quick Matmul template declares 16):
+
+```json
+"tensor_patches": [
+  { "uid": 1, "set": { "alignment": 4 } }
+]
+```
+
+A gauntlet [space](running-tests.md#gauntlet-fuzz-runs) writes this patch from its
+`alignment` axis, and `import_graph.py` writes it back when it freezes a graph whose
+tensor alignment differs from the template's, so a frozen finding keeps the alignment
+it failed at. Pair it with [`placement`](#placement-and-placement_uid) to put the
+device pointers there.
+
+#### `add_tensors` and `node_patches`
+
+These two fields let a case change the graph's *topology* where a template cannot: switch an
+optional input or output on (an extra tensor and the node key that names it) or change a node
+flag. They are meant for generated cases (a gauntlet space switching an SDPA feature per
+sample) but any case can use them. A case that has neither field loads exactly as before.
+
+The harness applies a case's fields in this order, after placeholder expansion and before the
+flatbuffer is built:
+
+1. `add_tensors`
+2. `node_patches`
+3. [`tensor_patches`](#tensor_patches)
+
+So a node patch can wire in a tensor that `add_tensors` added, and a tensor patch can edit
+it. A patch on a uid that nothing has added is an error.
+
+**`add_tensors`** is an array of tensor objects, in the same JSON as a template tensor,
+with no placeholders (the values are final). Each is appended to `tensors[]`. A tensor
+without an integer `uid`, an entry that is not an object, or a `uid` the graph already has (from the
+template or from an earlier entry) is an error.
+
+**`node_patches`** is an array of entries:
+
+| Field | Required | Meaning |
+|---|---|---|
+| `node` | yes | The node to edit: its `name` (a string; it must be unique in `nodes[]`) or its index in `nodes[]` (an integer). An unknown name, an out-of-range index and a name that two nodes share are errors; use the index for the last. |
+| `section` | yes | The object of the node that holds the keys: `attributes`, `parameters`, `inputs` or `outputs`. The node must already have it; a missing section is an error and is never created. Look at the template: SDPA forward keeps its flags under `attributes` and SDPA backward under `parameters`; both keep tensor uids under `inputs` and `outputs`. |
+| `set` | one of `set`, `remove` | Object of key to new value. **Every key must already exist in the section**; setting a key the section lacks is an error, not an insert. A template lists each key of a node, nulls included, so every legal key is there. The harness refuses an unknown key because the JSON-to-flatbuffer converters ignore keys they do not know: a misspelled key would build the unchanged graph, and the case would pass without the feature it asked for. |
+| `remove` | one of `set`, `remove` | Array of key names to erase, after `set` has run. Removing a key the section lacks is an error. |
+
+Any other key in an entry is an error. Every error is an exception that names the sweep
+case and the cause, for example
+`sweep case 'stats_on': node_patches[1]: set key 'generate_stat' is not in the 'attributes'
+section of node 'SdpaFwd_0' (set only overwrites existing keys)`. When a case is loaded to
+run, the harness reports any such failure only as `INVALID_SWEEP_CASE`, as for any other bad
+case.
+
+Example: an SDPA forward case that switches stats on. It adds the log-sum-exp tensor, names
+it in the node's outputs, and sets the flag. The template's `outputs.stats_tensor_uid` and
+`attributes.generate_stats` are `null` and exist, so both `set`s are overwrites:
+
+```json
+"add_tensors": [
+  { "uid": 4, "name": "SdpaFwd_0::Stats", "data_type": "float",
+    "dims": [1, 2, 16, 1], "strides": [32, 16, 1, 1],
+    "alignment": 16, "is_runtime_pass_by_value": false, "virtual": false }
+],
+"node_patches": [
+  { "node": "SdpaFwd_0", "section": "outputs",    "set": { "stats_tensor_uid": 4 } },
+  { "node": "SdpaFwd_0", "section": "attributes", "set": { "generate_stats": true } }
+]
+```
 
 #### Optional tensors — `absent_tensors`
 
@@ -319,7 +390,7 @@ parses it.
 | Field | Type | Effect |
 |---|---|---|
 | `format_version` | int | **Required, `1` or `2`.** Metadata that uses a version-2 feature must use `2`; metadata that uses a version-2 feature with `1` is rejected. A harness rejects a version that it does not know. The version-2 features are the `values` [fill kind](#input-fill-specs), [`aliases`](#tensors-that-share-memory--aliases), [`start_offsets`](#tensors-that-start-past-an-aligned-address--start_offsets) and [`live_rows`](#outputs-with-rows-past-a-live-length--live_rows), and [`absent_tensors`](#optional-tensors--absent_tensors) in a sweep case. |
-| `enforcement_level` | string | `applicability`, `buildable`, or `full` (the default when absent). How far a run must get for a support claim to count as confirmed; see [Support claims](#support-claim-sidecars--namesupportjson-and-supportjson). Any other value rejects the metadata. Not applicable to an expected-rejection bundle: `expected_rejection` overrides it. |
+| `enforcement_level` | string | `applicability`, `buildable`, or `full` (the default when absent). How far a run must get for a support claim to count as confirmed; see [Support claims](#support-claim-sidecars--namesupportjson-and-supportjson). Any other value rejects the metadata. Not applicable to an expected-rejection bundle: `expected_rejection` overrides it. A gauntlet overflow probe sets `buildable` so that nothing is allocated, filled or run. |
 | `minimum_vram_mb` | int | Skip the case when the device has less VRAM. |
 | `gpu_architecture` | string | Golden data is locked to an arch. Skip the case unless the base arch token of the device matches (`gfx942` matches `gfx942:sramecc+:xnack-`, not `gfx940`). If absent, the data is portable. |
 | `seed` | int | Seed for generated inputs. |
@@ -330,6 +401,11 @@ parses it.
 | `no_cpu_reference` | bool | Default `false`. `true`: the CPU reference executor is not an oracle for this bundle. A non-boolean value (`"yes"`, `1`, `null`) rejects the metadata. See [Disabling a reference oracle](#disabling-a-reference-oracle--no_cpu_reference-and-no_gpu_reference). |
 | `no_gpu_reference` | bool | Default `false`. `true`: the GPU reference executor is not an oracle for this bundle. Same type rule. If both flags are `true`, the bundle must declare golden data (rule R4). |
 | `expected_rejection` | bool | Default `false`. `true`: the graph is invalid on purpose and the engine under test must reject it. The harness never executes or compares it. A non-boolean value rejects the metadata. Overrides `enforcement_level`; `no_cpu_reference`, `no_gpu_reference`, `seed` and `inputs` are ignored. See [Expected-rejection bundles](#expected-rejection-bundles). |
+| `purpose` | string | `claim`, `probe` or `regression`; absent when not set. Why the case exists: a graph an engine claims, a legal graph whose expected outcome is "decline with a reason, or accept and be correct", or a frozen fuzz finding. A tag only: it changes no verdict, and the [outcome report](running-tests.md#outcome-report) copies it into each record. Any other value rejects the metadata. A gauntlet probe space may add an `expect` (`declined` or `declined_or_pass`) per case that the fuzz driver, not the binary, judges the outcome against; probe spaces are committed but their cases are never frozen into a checked-in bundle (see [Rejection probes](running-tests.md#gauntlet-fuzz-runs)). |
+| `validator` | string | `default` (when absent) or `match_nonfinite`: how float outputs are graded beyond the tolerance; see [`validator`](#validator). Any other value rejects the metadata. |
+| `placement` | string | `default` (when absent), `exact` or `under`: where the engine run's device pointers sit relative to each tensor's declared `alignment`; see [`placement` and `placement_uid`](#placement-and-placement_uid). Any other value rejects the metadata. |
+| `placement_uid` | int | The tensor `placement: "under"` misaligns. **Required** when `placement` is `under`; ignored by every other placement, so a space can always render it. A non-integer rejects the metadata. |
+| `engine_variant` | object | `{"id": "<candidate id>", "knobs": {"<knob>": <value>}}`; absent when not set (the engine's own pick). Forces the one catalog candidate the engine must build for the case; see [`engine_variant`](#engine_variant--force-one-catalog-candidate). A malformed value rejects the metadata. |
 | `generator`, `generator_version`, `generated_at`, `reference_source`, `reference_source_hash`, `reference_strategy`, `rocm_version`, `operation`, `generation_command`, `notes` | string | Provenance only; no effect on the run. |
 
 A bundle without its metadata is an error. These fields are required:
@@ -339,6 +415,18 @@ A bundle without its metadata is an error. These fields are required:
   requires them. They show a reviewer where the graph and its expected values
   came from.
 
+A case the gauntlet driver writes names its generator and where its axis values came from in the
+provenance fields: `generator` is `gauntlet-fuzz` for a drawn sample or a
+[`--row`](running-tests.md#gauntlet-fuzz-runs) one, and **`gauntlet-pairwise`** for a row of a
+[pairwise run](running-tests.md#pairwise-runs---pairwise) (`--pairwise`, `--generate-only`). The
+`notes` of a pairwise case read `gauntlet-pairwise sample: space <Op>/<Space>, pairwise seed
+<seed>, row <k>, axes {…}` (a repair row says `repair round <r>, row <k>`), so the sweep itself
+records the generator seed that produced it, and the case `id` is `pw<k>`. `seed` is the data
+seed, derived from the space, the pairwise seed and `k`, or the one `--data-seed` gave.
+A pairwise sweep holds the rows built before a [`--pairwise-budget`](running-tests.md#pairwise-runs---pairwise)
+(or `--time-budget`) ended generation: it is then not a covering set. The pairwise report beside it
+says so (`generation_complete: false`) and lists the pairs nothing settled as `budget_exceeded`.
+
 Generators can write extra keys (`config`, `input_range`, …). The harness ignores
 keys that it does not know.
 
@@ -346,36 +434,66 @@ keys that it does not know.
 
 Each entry of `inputs` is a JSON object that tells the harness how to fill one
 input tensor. The harness fills an input tensor that has no entry with the
-default fill for its operation and data type.
+default fill for its operation and data type. A spec replaces that default for its
+tensor only.
 
 ```json
 "inputs": {
-    "3": { "kind": "free", "lo": -2.0, "hi": 2.0, "seed": 17 },
+    "0": { "kind": "nonzero", "lo": -1, "hi": 1 },
+    "2": { "kind": "zeros" },
+    "3": { "kind": "special", "special": "nan", "fraction": 0.05, "seed": 17 },
     "5": { "kind": "fixed", "value": 0.125 },
+    "6": { "kind": "free", "lo": -2.0, "hi": 2.0 },
     "7": { "kind": "values", "values": [64, 32], "repeat": true },
     "9": { "seed": 4 }
 }
 ```
 
-| `kind` | Keys | Fill |
+| `kind` | Keys | Every element is |
 |---|---|---|
-| `free` | `lo`, `hi` (numbers, default `-1` and `1`) | Uniform random values in the range. |
-| `fixed` | `value` (number, default `0`) | One value in every element. |
+| `free` | `lo`, `hi` (numbers, default `-1` and `1`) | Uniform over `[lo, hi]`. |
+| `fixed` | `value` (number, default `0`) | `value`. This is the constant fill. |
 | `values` | `values` (non-empty array of numbers), `repeat` (boolean, default `true`) | The exact numbers given. Needs `format_version` 2. |
+| `nonzero` | `lo`, `hi` (default -1, 1; `lo <= hi`) | A `free` draw that is not zero in the tensor's data type (redrawn while it rounds to zero, then the endpoint of larger magnitude). Unsupported when that endpoint is itself zero in the data type. For integer types the draw is uniform over the integers of `[lo, hi]` that the type can hold, excluding zero; it is unsupported when none remain (a range wholly outside the type, an empty one, or one holding only zero). |
+| `zeros` | none | Zero. Unsupported for `fp8_e8m0`, which has no zero. |
+| `large` | `scale` (**required**, `> 0`) | A magnitude uniform in `[top/2, top]` with a random sign, where `top = min(scale, the data type's largest finite value)`. Never infinite. Integer types need `scale >= 1`. |
+| `subnormal` | none | A subnormal value of the tensor's data type, random sign where signed. Unsupported for integers and for types without subnormals (`fp8_e8m0`). |
+| `special` | `special` (**required**: `"nan"`, `"inf"` or `"-inf"`), `fraction` (**required**, `[0, 1]`), `lo`, `hi` (default -1, 1; `lo <= hi`) | `round(fraction * elements)` elements, and at least one when `fraction > 0`, are the non-finite `special`; the rest are `free` over `[lo, hi]`. Unsupported for integers, and for a value the type lacks (NaN for fp4 and fp6; infinity for fp4, fp6, `fp8_e4m3`, `fp8_e4m3_fnuz`, `fp8_e5m2_fnuz` and `fp8_e8m0`). |
 | absent | — | The default fill. Use this form to set only a `seed`. |
 
-All kinds accept an optional `seed`, an unsigned integer. It replaces the seed
+All kinds accept an optional `seed`, an unsigned 32-bit integer. It replaces the seed
 that the harness derives for this tensor from the metadata `seed`. It has no
-effect on a `values` fill.
+effect on a `values` fill. An entry with a `seed` and no `kind` changes only the seed.
 
-A `kind` that is not one of the names above rejects the metadata. A `kind` that is
-not a string rejects the metadata too. The error message names the input uid and
-the problem. The bundle then registers as a failing test.
+**The parse is strict.** These are metadata errors: an unknown `kind` (there is no
+`constant`; use `fixed`), a `kind` that is not a string, an entry that is not an
+object, an entry with neither `kind` nor `seed`, a field the kind reads that is not a
+finite number in the range of a 32-bit float, a bad `seed`, `lo > hi` (`nonzero`,
+`special`), a `large` without `scale > 0`, and a `special` without a valid `special`
+and a `fraction` in `[0, 1]`. The error message names the input uid and the field;
+the bundle registers as a failing test, and no entry of that case is applied.
 
-Every form also rejects any key outside the ones listed for it above: the absent form
-takes only `seed`. `free` and `fixed` are checked together against their combined key set
-(`lo`, `hi`, `value`, `seed`), so either accepts all four keys regardless of which `kind` is
-given; only a key outside that combined set is rejected.
+Every form also rejects any key outside the ones listed for it. The absent form takes
+only `seed`. The `values` kind takes only `kind`, `values`, `repeat` and `seed`. Every
+other kind is checked against the combined key set (`kind`, `lo`, `hi`, `value`,
+`scale`, `special`, `fraction`, `seed`), so a kind accepts every key of that set
+regardless of which fields it reads; only a key outside the set is rejected. **A key
+of that set that the kind does not read is ignored**, whatever it holds, so a space can
+render every field for every kind and select the kind with one expression.
+
+Whether a data type can hold a kind is known only when the tensor is filled. A kind the
+type cannot hold (the "Unsupported" entries above) makes the case `UNEXERCISED`, never a pass.
+
+**Host and device fills.** The host generates the non-`values` kinds from a per-uid
+generator, so they are deterministic per seed. A tensor of at least 2^14 allocated
+elements whose data type is `float`, `half`, `bfloat16` or one of the four fp8 formats is
+generated on the device instead (`free` also covers `double`): rocRAND draws the uniform
+floats and a kernel turns them into the kind's values in the tensor's data type, so the
+values are not the host's but each kind keeps its contract above, including the exact
+planted share of `special` and its at-least-one guarantee. A `nonzero` draw that rounds to
+zero is redrawn once on the device, then replaced by the endpoint. A tensor of another
+type, a smaller one, or a type that cannot hold the kind is filled by the host, which also
+reports the kind as unsupported.
 
 #### The `values` kind
 
@@ -766,6 +884,134 @@ dimensions`), so it drops the graph from its ranked list. The claimed valid twin
 (sweep case `3_16_128_fp32_ncl_6d8970`) passing in the same lane is the positive control. The other
 lanes (MIOpen, hip-kernel) have no Matmul support, so they reject vacuously.
 
+### `validator`
+
+| Value | Grading |
+|---|---|
+| `default` | The tolerance resolved for each tensor, unchanged: the plain allclose and RMS validators fail on any NaN or Inf. |
+| `match_nonfinite` | Non-finite elements are matched by position; finite elements keep the resolved tolerance. |
+
+`match_nonfinite` classifies each position by the reference and engine values:
+
+- NaN against NaN matches, whatever the payloads and signs. Inf against Inf of the
+  **same sign** matches. A matched position is excluded from the tolerance math.
+- NaN against a finite value, a finite value against Inf, `+Inf` against `-Inf` and NaN
+  against Inf all fail.
+- Finite against finite is graded as usual: `atol + rtol * |reference|` for allclose, the
+  relative RMS error for an RMS tensor. The resolved kind (including a per-tensor
+  [TOML](#per-engine-test-config--configengine_nametoml) override) stays in force.
+- A reference with **no finite element** (every element NaN or Inf) **fails**: with the
+  finite part empty there is nothing to grade, and a vacuous pass would hide garbage on
+  both sides.
+- **Unwritten outputs.** With the mask on, NaN matches NaN, so an element the engine
+  never wrote would pass. The engine run's output buffers are therefore prefilled with a
+  NaN carrying a distinctive payload, and an engine element still holding it fails. The
+  reference's buffers keep the plain NaN sentinel.
+- It applies to `float`, `half`, `bfloat16` and `double` outputs only; every other
+  output (integer, fp8, sub-byte) is graded as under `default`.
+- It exists only on the host. Under `--validator auto` the case's comparison is
+  **forced to the host**, even for a GPU reference's output, as `--validator cpu` does.
+  An explicit `--validator gpu` contradicts it: the case fails before the engine runs, as
+  `UNEXERCISED` at stage `setup`, with a message naming `--validator auto` and
+  `--validator cpu` as the options.
+
+Use it with the `special` fill above, so the case can expect non-finite output.
+
+### `placement` and `placement_uid`
+
+`placement` moves the engine run's device buffers relative to each tensor's declared
+`alignment` N (see [`tensor_patches`](#tensor_patches)). It changes only the **engine
+run**: a reference run is never placed, and nothing is placed when the run has no device
+buffers (a host input policy).
+
+| Value | Engine run's device pointers |
+|---|---|
+| `default` | Where the allocator put them. |
+| `exact` | Every device pointer is aligned to its tensor's N and not to 2N. |
+| `under` | The pointer of `placement_uid` is aligned to N/2 and not to N, so a backend that enforces N must reject it; every other pointer stays where it is. Needs N >= 2 for that tensor. |
+
+`placement_uid` is **required** for `under` (the metadata is rejected without it) and
+ignored for `default` and `exact`. For `under` the case expects the backend to refuse
+that one pointer with `BAD_PARAM`; see [the finished record](#finished-record-fields).
+
+A tensor stays where it is, with an `INFO` log line, when it is a runtime pass-by-value
+scalar (a host pointer), an input of the sub-byte packed set, or has no declared
+alignment. A `placement_uid` that names such a tensor, or no tensor of the run, or an
+`under` tensor with N < 2, cannot be set up: the case is `UNEXERCISED` at stage `setup`.
+
+### `engine_variant` — force one catalog candidate
+
+A case that carries `metadata.engine_variant` is built as exactly one candidate of the engine's
+catalog, not the plan its heuristic ranks first. The [gauntlet driver](running-tests.md#catalog-sweeps---catalog)
+writes one such case per candidate (`--catalog`); the candidates come from
+[`--list-candidates`](#--list-candidates-output).
+
+```json
+"metadata": {"format_version": 1, "...": "...",
+             "engine_variant": {"id": "gfx950_fwd_d128", "knobs": {"kernel_id": "gfx950_fwd_d128", "tile_m": 128}}}
+```
+
+| Key | Type | Meaning |
+|---|---|---|
+| `id` | string | **Required**, non-empty. The candidate's id (the engine's kernel id). It names the candidate in the case's `finished` record (`candidate`); the engine selects by `knobs`, not by `id`. `"default"` means the engine's own heuristic pick, the same plan creation a case without an `engine_variant` gets. |
+| `knobs` | object | The candidate's complete knob tuple, knob name to value, exactly as the listing prints it. Optional (an empty tuple); **must be empty** for `default`. A value is an integer, a finite number or a string (a JSON integer is a knob integer and a JSON real a knob real, so the listing's values select the same candidate when read back); a boolean, `null` or an integer beyond int64 rejects the metadata. |
+
+Any other key, a missing or empty `id`, `knobs` that is not an object, or knobs on `default` reject the
+metadata, so a typo cannot silently run the engine's own pick while the record claims another
+candidate. A candidate is built with `create_execution_plan_ext(engineId, knobs)` on the engine the
+run names with `--test-engine`; without `--test-engine` the case fails with that message.
+
+### Finished-record fields
+
+The harness echoes these into the `finished` record of the
+[outcome report](running-tests.md#outcome-report), so a passing run shows what it was
+asked to do:
+
+| Field | Content |
+|---|---|
+| `inputs` | The recipes the harness parsed from `metadata.inputs`, keyed by uid; absent when the case sets none. |
+| `validator` | `"default"` or `"match_nonfinite"`, as the metadata spells it. |
+| `placement` | `"default"`, `"exact"` or `"under"`. |
+| `placement_uid` | Present when the metadata sets one. |
+| `candidate` | The `id` of the case's `engine_variant` (`"default"` for the engine's own pick). Absent when the case names no `engine_variant`. Not a metadata field: the harness echoes it. |
+| `expected_status` | `"BAD_PARAM"` on a pass that verified a rejection; absent otherwise. |
+| `kernels` | The distinct kernel names the engine reported while the case ran, sorted. From the engine's `kernel: <engine> <kernel>` INFO line, written once per built plan; see [`kernels` in the outcome report](running-tests.md#outcome-report). Absent when the case reported none (it never built a plan, or the engine logs no kernel). Not a metadata field: the harness fills it. |
+| `reference_ms` | Milliseconds of wall time the reference executor took to produce the outputs the case was graded against (`steady_clock` around the reference run, output allocation included). Present only when a reference ran and produced the outputs the engine was compared with, whatever the verdict (`PASS` and `WRONG` both carry it). Absent for golden grading, a decline, and a failure before the oracle. After an automatic GPU-to-CPU fallback it is the CPU run that graded, not the GPU attempt that failed. Not a metadata field: the harness fills it. |
+| `reference_lane` | `"cpu"` or `"gpu"`: the reference that produced the outputs, the one `reference_ms` timed. Present exactly when `reference_ms` is. |
+
+`validator`, `placement` and `placement_uid` are absent from the record of a bundle
+that failed to load, which has no parsed metadata.
+
+**The expected `BAD_PARAM` rule.** A case with `placement: "under"` passes only if the
+engine accepted the graph and the backend then rejected the misaligned pointer of
+`placement_uid` with `BAD_PARAM` for that uid. That is `PASS` at depth `verified` with
+`expected_status: "BAD_PARAM"`, and nothing was compared. Every other result is a
+failure: the backend executed the graph with the pointer below its alignment, the engine
+declined after being handed the graph, or `BAD_PARAM` named another uid or another error.
+
+### `--list-candidates` output
+
+`hipdnn_integration_tests --test-engine <engine> --list-candidates <file> [--gtest_filter=...]` writes
+one JSON object per line for each bundle case the run would execute, and builds and executes
+nothing (exit 0; a case it cannot list has `status: "error"`):
+
+```json
+{"test":"gauntlet_SdpaFwd_Gfx950Dense_fp16_cases.s123","bundle":".../sweep.json#s123","engine":"hipkernel:Gfx950AttentionDense","status":"ok","total":2,"candidates":[{"id":"kern_a","knobs":{"kernel_id":"kern_a","tile_m":64}},{"id":"kern_b","knobs":{"kernel_id":"kern_b","tile_m":128}}],"reason":""}
+```
+
+| Field | Content |
+|---|---|
+| `test` | The GTest name `--gtest_filter` selects on. |
+| `bundle` | `<sweep or graph file>#<case id>`, as in the outcome report. |
+| `engine` | The engine under test. |
+| `status` | `"ok"`: the engine enumerated its catalog, every page read (`getEngineCandidates`, pages of up to 10000). `"not_enumerable"`: the engine cannot enumerate its candidates for this graph (it does not enumerate at all, or it does not take the graph): the catalog is one entry, the engine's own pick, `candidate: "default"`; `candidates` is empty and `reason` says why. `"error"`: the graph did not load or the enumeration broke (a changed total, a repeated id, a page that did not advance); `candidates` is empty and `reason` says why. |
+| `total` | The catalog size the engine reported; equal to `len(candidates)` for `ok`, `0` otherwise. |
+| `candidates` | `[{"id", "knobs"}]` in the engine's order, which is sorted by kernel id, so a candidate's index is stable. `knobs` is its complete knob tuple, which `metadata.engine_variant.knobs` takes back verbatim. |
+| `reason` | Empty for `ok`; otherwise why the listing is not `ok`. |
+
+The file is truncated first and flushed per record, so a crash keeps every earlier line. The
+gauntlet driver reads it ([Catalog sweeps](running-tests.md#catalog-sweeps---catalog)).
+
 ## Golden data — `.tensors.dvc` and `.bin`
 
 Golden tensors are optional. A bundle without them is **graph-only** and is
@@ -954,6 +1200,13 @@ tensors       = ["*::DSCALE", "*::DBIAS"]
 validator     = "rms"
 rms_threshold = 1e-4
 
+[[validator_overrides]]                              # one output's tolerance, gauntlet suites only
+filters   = ["*gauntlet*BatchnormBackward*fp16_*"]
+tensors   = ["*::DX"]
+validator = "allclose"
+atol      = 4e-4
+rtol      = 2e-3
+
 [[test_skips]]
 archs     = ["gfx90a"]   # optional; omit to match every arch
 platforms = ["windows"]                             # optional; omit to match both
@@ -968,7 +1221,7 @@ summation_order = 9.0   # optional; replaces the base coefficient of float conv-
 |---|---|
 | `[meta]` | `version = 1` is required. A missing or unsupported version is a load error. The harness never ignores it silently. |
 | `[[tolerance_overrides]]` | `filters`, `atol` and `rtol` are all required. **Later entries win** when several match. |
-| `[[validator_overrides]]` | Applies when a `filters` glob matches the test **and** a `tensors` glob matches the output tensor's label (its name, or `uid=N` when unnamed). `validator` is `allclose`, `allclose_matching_infinities` or `rms`. `rms_threshold` is required and positive for `rms`, and forbidden for the other two. **Later entries win.** Allclose is the default everywhere. Only this table changes it. Use it for outputs where per-element comparison is the wrong question, not to get more tolerance. See the validators below. |
+| `[[validator_overrides]]` | Applies when a `filters` glob matches the test **and** a `tensors` glob matches the output tensor's label (its name, or `uid=N` when unnamed). `validator` is `allclose`, `allclose_matching_infinities` or `rms`. `rms_threshold` is required and positive for `rms`, and forbidden for the other two. `atol` and `rtol` are optional (either or both) for the two allclose validators, and forbidden for `rms`; each must be a finite, non-negative number. They set that tolerance for the matched tensors only, and they outrank a `[[tolerance_overrides]]` entry (see below). **Later entries win** as a whole: an entry's omitted keys do not inherit an earlier entry's. Allclose is the default everywhere. Only this table changes it. Use it for outputs where per-element comparison is the wrong question, or where one output of a graph needs its own tolerance and the others do not. See the validators below. |
 | `[[test_skips]]` | `filters` and `reason` are required. **The first matching entry wins** — this is the opposite order from the two tables above. `archs` is a substring match against the raw `gcnArchName` (so `gfx11` covers `gfx1100` and `gfx1151`). `platforms` is `linux` / `windows`. The skip message is `[arch <current gcnArchName>] <reason>`. |
 | `[conv_fwd_tolerance.float]` | One key, `summation_order`: a finite positive number that replaces the base coefficient (4) of the summation-order terms of the dynamic tolerance of a float convolution-forward output. No other output type and no other key load. A matching `[[tolerance_overrides]]` entry still replaces the dynamic tolerance whole. Read by bundle tests only. See [Tolerances](tolerances.md#float-outputs). |
 
@@ -1005,6 +1258,24 @@ The two non-default validators:
 Neither validator is defined for integer outputs. If a glob selects an integer
 output, that tensor fails with a message that names the glob. Narrow the glob to
 float outputs.
+
+**Tolerance precedence for one output.** A `[[tolerance_overrides]]` entry sets `atol` and
+`rtol` for every output of the tests it matches. For a tensor graded by `allclose` or
+`allclose_matching_infinities`, the tolerance is resolved in three layers, and each replaces
+the one before it:
+
+1. the default of the operation and data type;
+2. the matching `[[tolerance_overrides]]` entry, if any (both values);
+3. the matching `[[validator_overrides]]` entry's `atol` and `rtol`, each only if the entry
+   spells it.
+
+Only the matched tensor is affected, so a graph's other outputs keep layer 1 or 2. An entry
+that sets neither key leaves the resolution exactly as it was. An `rms` tensor reads neither.
+
+A checked-in bundle must not be relaxed to make a fuzz-found disagreement pass, so entries for
+gauntlet-found numerics are scoped to the gauntlet suites. Their GTest names carry `gauntlet`
+(`gauntlet_<Op>_<Space>_<tag>_cases.s<seed>`), while quick-bundle tests are
+`quick_<Op>_<Variant>.<case id>`; the filter `*gauntlet*<Op>*` matches the former only.
 
 The TOML applies to bundle and C++ graph tests alike, except `[conv_fwd_tolerance.float]`,
 which only bundle tests read: the C++ graph harness does not grade with the dynamic

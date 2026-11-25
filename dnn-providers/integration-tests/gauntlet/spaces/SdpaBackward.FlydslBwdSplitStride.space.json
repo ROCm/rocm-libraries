@@ -1,0 +1,321 @@
+{
+  "version": 1,
+  "operation": "SdpaBackward",
+  "description": "Padded leading strides on hipkernel:flydsl_sdpa_bwd_split, crossed with the declared alignment: BSHD or BHSD (layout), a small shape set, and a `pad` (0 to 31 elements) added to the row stride (the stride between two consecutive sequence positions) of the tensors `pad_on` names: q (Q and dQ), k (K and dK), v (V and dV), o (O and dO), or only the LSE (stats: padded dense strides are served, SS-1, where AOTriton's are not), or all nine tensors. A row stride that is not a multiple of 8 elements is declined (LY-3), as is a declared alignment below 16 bytes (LY-1, SS-3). The pad elements are gap elements that belong to no tensor element; the harness poisons them where the type allows, so a kernel that reads or writes a gap shows as a mismatch. A probe: expect is declined_or_pass on a multiple of 8 and declined otherwise.",
+  "engine": "hipkernel:flydsl_sdpa_bwd_split",
+  "template": "../../integration-test-bundles/quick/SdpaBackward/Default/graph.template.json",
+  "axes": {
+    "dtype": {
+      "values": [
+        "bfloat16",
+        "half"
+      ]
+    },
+    "layout": {
+      "values": [
+        "bshd",
+        "bhsd"
+      ]
+    },
+    "b": {
+      "values": [
+        1,
+        2
+      ]
+    },
+    "hkv": {
+      "values": [
+        1,
+        2
+      ]
+    },
+    "group": {
+      "values": [
+        1,
+        4
+      ]
+    },
+    "sq": {
+      "values": [
+        16,
+        64,
+        128
+      ]
+    },
+    "skv": {
+      "values": [
+        16,
+        64,
+        128
+      ]
+    },
+    "d": {
+      "values": [
+        64,
+        96,
+        128,
+        256
+      ]
+    },
+    "pad": {
+      "values": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        7,
+        8,
+        9,
+        15,
+        16,
+        17,
+        24,
+        31
+      ]
+    },
+    "pad_on": {
+      "values": [
+        "q",
+        "k",
+        "v",
+        "o",
+        "stats",
+        "all"
+      ]
+    },
+    "alignment": {
+      "values": [
+        1,
+        2,
+        4,
+        8,
+        16,
+        32,
+        64,
+        128,
+        256
+      ]
+    },
+    "placement": {
+      "values": [
+        "default",
+        "exact",
+        "under"
+      ]
+    }
+  },
+  "derive": {
+    "hvmul": "1",
+    "hd": "[d, d]",
+    "pad_q": "pad if pad_on in ['q', 'all'] else 0",
+    "pad_k": "pad if pad_on in ['k', 'all'] else 0",
+    "pad_v": "pad if pad_on in ['v', 'all'] else 0",
+    "pad_o": "pad if pad_on in ['o', 'all'] else 0",
+    "pad_stats": "pad if pad_on in ['stats', 'all'] else 0",
+    "hv": "hkv * hvmul",
+    "hq": "hkv * hvmul * group",
+    "dqk": "hd[0]",
+    "dv": "hd[1]",
+    "dims_q": "[b, hq, sq, dqk]",
+    "dims_k": "[b, hkv, skv, dqk]",
+    "dims_v": "[b, hv, skv, dv]",
+    "dims_o": "[b, hq, sq, dv]",
+    "dims_lse": "[b, hq, sq, 1]",
+    "row_q": "(hq*dqk if layout == 'bshd' else dqk) + pad_q",
+    "stride_q": "[sq*row_q, dqk, row_q, 1] if layout == 'bshd' else [hq*sq*row_q, sq*row_q, row_q, 1]",
+    "row_k": "(hkv*dqk if layout == 'bshd' else dqk) + pad_k",
+    "stride_k": "[skv*row_k, dqk, row_k, 1] if layout == 'bshd' else [hkv*skv*row_k, skv*row_k, row_k, 1]",
+    "row_v": "(hv*dv if layout == 'bshd' else dv) + pad_v",
+    "stride_v": "[skv*row_v, dv, row_v, 1] if layout == 'bshd' else [hv*skv*row_v, skv*row_v, row_v, 1]",
+    "row_o": "(hq*dv if layout == 'bshd' else dv) + pad_o",
+    "stride_o": "[sq*row_o, dv, row_o, 1] if layout == 'bshd' else [hq*sq*row_o, sq*row_o, row_o, 1]",
+    "stride_lse": "[hq*(sq + pad_stats), sq + pad_stats, 1, 1]",
+    "left": "None",
+    "right": "None",
+    "align": "'TOP_LEFT'",
+    "scale": "0.0883883461356163",
+    "eff_placement": "'exact' if placement == 'under' and alignment < 2 else placement"
+  },
+  "constraints": [
+    {
+      "rule": "pad > 0 or pad_on == 'all'",
+      "reason": "pad_on names no tensor when pad is 0: every pad_on would render the same packed graph"
+    }
+  ],
+  "expect": "${'declined' if ((pad % 8 != 0 and pad_on != 'stats') or alignment < 16) else 'declined_or_pass'}",
+  "case": {
+    "values": {
+      "io_data_type": "${dtype}",
+      "tensors": [
+        {
+          "uid": 0,
+          "dims": "${dims_k}",
+          "strides": "${stride_k}",
+          "data_type": "${dtype}",
+          "alignment": 16
+        },
+        {
+          "uid": 1,
+          "dims": "${dims_o}",
+          "strides": "${stride_o}",
+          "data_type": "${dtype}",
+          "alignment": 16
+        },
+        {
+          "uid": 2,
+          "dims": "${dims_q}",
+          "strides": "${stride_q}",
+          "data_type": "${dtype}",
+          "alignment": 16
+        },
+        {
+          "uid": 3,
+          "dims": "${dims_k}",
+          "strides": "${stride_k}",
+          "data_type": "${dtype}",
+          "alignment": 16
+        },
+        {
+          "uid": 4,
+          "dims": "${dims_q}",
+          "strides": "${stride_q}",
+          "data_type": "${dtype}",
+          "alignment": 16
+        },
+        {
+          "uid": 5,
+          "dims": "${dims_v}",
+          "strides": "${stride_v}",
+          "data_type": "${dtype}",
+          "alignment": 16
+        },
+        {
+          "uid": 6,
+          "dims": "${dims_v}",
+          "strides": "${stride_v}",
+          "data_type": "${dtype}",
+          "alignment": 16
+        },
+        {
+          "uid": 7,
+          "dims": "${dims_o}",
+          "strides": "${stride_o}",
+          "data_type": "${dtype}",
+          "alignment": 16
+        },
+        {
+          "uid": 8,
+          "dims": "${dims_lse}",
+          "strides": "${stride_lse}",
+          "data_type": "float",
+          "alignment": 16
+        }
+      ],
+      "attributes": {
+        "compute_data_type": "float",
+        "parameters__alibi_mask": false,
+        "parameters__attn_scale_value": "${scale}",
+        "parameters__causal_mask": false,
+        "parameters__causal_mask_bottom_right": false,
+        "parameters__dropout_probability": null,
+        "parameters__diagonal_alignment": "${align}",
+        "parameters__left_bound": "${left}",
+        "parameters__right_bound": "${right}"
+      }
+    },
+    "metadata": {
+      "purpose": "probe",
+      "validator": "default",
+      "inputs": {
+        "2": {
+          "kind": "free",
+          "lo": -1,
+          "hi": 1,
+          "value": 0,
+          "scale": 1
+        },
+        "0": {
+          "kind": "free",
+          "lo": -1,
+          "hi": 1,
+          "value": 0,
+          "scale": 1
+        },
+        "6": {
+          "kind": "free",
+          "lo": -1,
+          "hi": 1,
+          "value": 0,
+          "scale": 1
+        },
+        "7": {
+          "kind": "free",
+          "lo": -1,
+          "hi": 1,
+          "value": 0,
+          "scale": 1
+        }
+      },
+      "placement": "${eff_placement}",
+      "placement_uid": 2
+    },
+    "tensor_patches": [
+      {
+        "uid": 0,
+        "set": {
+          "alignment": "${alignment}"
+        }
+      },
+      {
+        "uid": 1,
+        "set": {
+          "alignment": "${alignment}"
+        }
+      },
+      {
+        "uid": 2,
+        "set": {
+          "alignment": "${alignment}"
+        }
+      },
+      {
+        "uid": 3,
+        "set": {
+          "alignment": "${alignment}"
+        }
+      },
+      {
+        "uid": 4,
+        "set": {
+          "alignment": "${alignment}"
+        }
+      },
+      {
+        "uid": 5,
+        "set": {
+          "alignment": "${alignment}"
+        }
+      },
+      {
+        "uid": 6,
+        "set": {
+          "alignment": "${alignment}"
+        }
+      },
+      {
+        "uid": 7,
+        "set": {
+          "alignment": "${alignment}"
+        }
+      },
+      {
+        "uid": 8,
+        "set": {
+          "alignment": "${alignment}"
+        }
+      }
+    ]
+  }
+}

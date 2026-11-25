@@ -1,0 +1,3467 @@
+#!/usr/bin/env python3
+# Copyright © Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+"""
+Gauntlet fuzz driver (RFC 0023, section 7).
+
+Draws random legal samples from the spaces in ``spaces/``, writes each batch as a concrete
+sweep under ``<work>/bundles/gauntlet/<Op>/<Space>/<dtype>_cases/`` (the template the space
+names, copied as ``graph.template.json``, plus a generated ``sweep.json`` holding the samples
+of that input dtype; ``dtype_tag`` says why the directory is named so), runs the unchanged
+``hipdnn_integration_tests`` binary on it with ``--outcome-report``, and records exactly one
+outcome per sample: ``PASS``, ``DECLINED``, ``WRONG``, ``CRASH``, ``UNCLAIMED_PASS`` or
+``UNEXERCISED``. It does not change what the binary runs.
+
+Synopsis::
+
+    run_gauntlet_fuzz.py --binary BIN [--test-article A] [--test-engine E] [--test-config C]
+        [--work-dir DIR] [--samples N] [--seed S] [--data-seed D] [--filter REGEX]
+        [--time-budget 30m] [--case-timeout 10m] [--batch-size N] [--summary FILE] [--shrink N]
+        [--spaces-dir DIR] [--binary-arg ARG ...]
+    run_gauntlet_fuzz.py --binary BIN ... --row FILE        (one explicit sample, see below)
+    run_gauntlet_fuzz.py --binary BIN ... --pairwise [--seed S] [--pairwise-repair N]
+        [--pairwise-budget 30m]
+        (every row of each space's pairwise covering set, see below)
+    run_gauntlet_fuzz.py --pairwise --generate-only [--seed S] [--work-dir DIR] [--filter REGEX]
+        (write the covering sets as sweeps; no binary)
+    run_gauntlet_fuzz.py --coverage-of WORK_DIR --levels-from REPORT [--first N]
+        (the pair coverage of an earlier run, offline)
+    run_gauntlet_fuzz.py --binary BIN --test-engine E ... --catalog [--catalog-shard i/n]
+        (every candidate the engine can build for each drawn graph, see below)
+
+Control (a flag overrides its environment variable)::
+
+    HIPDNN_FUZZ_SAMPLES      --samples       samples per space (default 32; 0 = unlimited)
+    HIPDNN_FUZZ_SEED         --seed          shape seed of the first sample (default random, printed)
+    HIPDNN_FUZZ_DATA_SEED    --data-seed     input-data seed for every sample (default derived)
+    HIPDNN_FUZZ_FILTER       --filter        regex on <Op>/<Space> (default: every space)
+    HIPDNN_FUZZ_TIME_BUDGET  --time-budget   wall-clock limit, e.g. 30m, 4h (default none)
+    HIPDNN_FUZZ_CASE_TIMEOUT --case-timeout  longest one case may run (default 10m)
+    HIPDNN_FUZZ_SHRINK       --shrink        candidate runs spent shrinking each WRONG/CRASH (default 0 = off)
+
+Sample ``i`` of a space has shape seed ``S + i``; batches are drawn round-robin over the
+spaces. Without ``--samples`` and with ``--time-budget`` (or with ``--samples 0``) the run is
+continuous: fresh seeds every batch until the time budget ends, the sample cap is hit or
+SIGINT arrives (the current batch finishes, then the report is written). A crash costs one
+case, not the run.
+
+``--row FILE`` runs one explicit sample instead of drawing any. The file holds
+``{"space": "<Op>/<Space>", "axes": {<every axis of the space>: value}, "data_seed": N}`` and
+optionally ``"case_id"`` (letters, digits and ``_``; default ``row``). The sample is rendered
+from those axis values (late axes are values like any other), the space's constraints are
+checked again (a violation is a usage error), and the case is written to the same
+``bundles/gauntlet/<Op>/<Space>/<dtype>_cases/`` layout as a drawn one, so its GTest name and
+the engine TOML's grading are what a drawn sample with that case id gets. Give ``"case_id":
+"s123"`` to run the sample ``--seed 123`` drew under its own name. ``--row`` cannot be combined
+with ``--samples``, ``--seed``, ``--data-seed``, ``--filter`` or ``--time-budget`` (the
+``HIPDNN_FUZZ_*`` variables for them are ignored); one case runs and the outcome, summary and
+failure folder are those of any run. The failure folder's ``replay.sh`` replays with ``--row``.
+
+``--shrink N`` shrinks each ``WRONG`` and ``CRASH`` sample once its failure folder is written, after
+the batch it was found in (also in a ``--row`` run). A candidate is the sample with one axis moved
+toward a simpler value (a ``range`` axis binary-searched toward its low end, its declared boundaries
+first; a ``values`` axis to an earlier entry of its list), with the data seed and the case id kept,
+so its GTest name is the finding's. It runs as a one-case batch under ``<work>/shrink/<case>/`` and
+is accepted only if its outcome class is the finding's: ``WRONG`` stays ``WRONG``, ``CRASH`` (hang
+included) stays ``CRASH``. A candidate no constraint allows is skipped and costs nothing; at most N
+candidates run per finding. Candidates never enter ``outcomes.jsonl``, ``samples.jsonl`` or the
+summary counts. ``failures/<case>/shrunk/`` holds ``sweep_row.json`` (a ``--row`` file),
+``axes.json`` (original and shrunk values), the graph and meta, ``outcome.json`` of the last
+accepted candidate and a ``replay.sh`` that replays with ``--row``. ``summary.json`` gives each
+finding ``shrunk: {runs, accepted_steps, axes_changed}``. SIGINT ends a shrink early, keeping the
+best sample so far; the time budget does not.
+
+``--pairwise`` runs a pairwise covering set instead of random samples (``pairwise.py``, RFC 0023
+section 6): per space, rows ``pw0``, ``pw1``, ... in which every value of every axis meets every
+value of every other axis in a legal row where both values matter. ``--seed`` is the generator
+seed (printed when random; the same seed gives the same rows); ``--samples`` does not apply (it
+and ``--row`` are usage errors with ``--pairwise``). A row is an explicit row: its sweep case
+names ``gauntlet-pairwise`` as ``metadata.generator`` and the seed in its notes, its data seed is
+``--data-seed`` or derived from (space, seed, row), and a failure's folder holds a ``row.json`` and
+a ``replay.sh`` that calls ``--row``. After the rows, up to ``--pairwise-repair N`` (default 2)
+rounds build new rows for the tuples that every row drawing them left ``DECLINED`` or
+``UNEXERCISED``, from the levels that passed in the run, until a round builds none.
+``--time-budget`` still ends the run (its coverage is then marked incomplete). ``--pairwise-budget S`` is
+one total wall-clock limit for all pairwise generation of the run (the build of every selected space, then
+the repair rounds; the time spent running rows is not counted), and ``--time-budget`` bounds generation as
+well. The search checks the deadline at every node: at it the build or repair stops, the rows built so far
+run, and every tuple not settled yet is reported ``budget_exceeded`` (not ``unproven``: it counts as not
+covered), with ``generation_complete: false`` in the report and ``pair_coverage`` (``complete`` is false;
+``stopped_because`` ``pairwise-budget``). Without either budget generation is unbounded. Generation
+prints progress to stderr (space, tuples settled of total, rows, seconds) about every 10 s.
+``<work>/pairwise/<Op>_<Space>.json`` reports the levels, the tuple and row counts, the lower
+bound, the ``illegal`` / ``dead`` / ``unproven`` tuples, the repair rounds and the generator's
+timings; ``summary.json`` gets ``mode: "pairwise"`` and a ``pair_coverage`` entry per space.
+
+``--generate-only`` (with ``--pairwise``) writes each space's full row set under
+``<work>/bundles/gauntlet/`` and the reports and runs nothing (``--binary`` is not needed).
+``--coverage-of WORK_DIR --levels-from REPORT`` prints, as JSON, the pair coverage of the samples
+and outcomes of an earlier run (a random one, to compare with a pairwise run) against the levels
+of a pairwise report (a file, or a directory of them); ``--first N`` counts only each space's
+first N samples.
+
+``--catalog`` (it needs ``--test-engine``; not with ``--shrink``) sweeps the engine's catalog: for each
+drawn graph (a fuzz sample, a pairwise row or the ``--row`` sample) the graph is first written as a
+case and the binary runs with ``--list-candidates`` (the run's own engine, article and config flags and
+a gtest filter for the graphs of the batch), which prints, per case, the candidates the engine can
+build for that graph (``status`` ``ok``), a one-entry catalog (``not_enumerable``: an engine that
+cannot enumerate its candidates, so the heuristic pick, candidate ``default``) or the reason it could
+not tell (``error``). The graph then becomes one case per candidate, ``<graph case id>c<k>`` with ``k``
+the candidate's index in the listing (the catalog is sorted by kernel id, so ``k`` is stable), whose
+``metadata.engine_variant`` is ``{"id", "knobs"}`` of that candidate: the binary builds exactly it, not
+the engine's pick (the ``default`` id is the pick). These cases run through the normal batch path, so
+crash isolation, failure folders and ``--shrink``-free replay work per candidate: a candidate failure's
+``replay.sh`` calls ``--row`` on a row file that carries the ``engine_variant``, so a replay forces the
+same candidate. A graph whose listing ended in ``error`` (or listed no candidates, or whose binary died
+or hung while listing it) is ``UNEXERCISED`` with the reason. ``--catalog-shard i/n`` keeps, of each
+graph's candidate list, the candidates whose index ``k`` satisfies ``k % n == i``: running the shards
+``0/n`` .. ``(n-1)/n`` runs every candidate of every graph exactly once (a graph that is ``UNEXERCISED``
+is reported by shard ``0``, where its one entry would be ``k = 0``). The summary's ``catalog`` block
+gives per graph the catalog size and an outcome per candidate id, and per engine the totals. Every
+finished record's ``candidate`` must equal the forced id (``candidate_mismatch``: a failure of the run);
+where the record has ``kernels`` the part of each after its last ``/`` should equal it too
+(``kernel_mismatch``: listed and printed, not a failure, since a log-format difference is not an engine
+bug).
+
+Probe expectations. A space may declare ``expect`` (``space.py``): ``declined`` or ``declined_or_pass`` per
+case, from an expression over the sample's axes. A probe space without ``expect`` expects
+``declined_or_pass``; a case whose ``purpose`` is not ``probe`` has no expectation. ``declined`` is met by
+``DECLINED`` only; ``declined_or_pass`` by ``DECLINED``, ``PASS`` and ``UNCLAIMED_PASS``. ``WRONG`` and
+``CRASH`` always violate it, and so does ``UNEXERCISED``: an accept nothing verified is no evidence. A probe
+case at ``enforcement_level`` ``applicability`` or ``buildable`` that the engine accepted is recorded
+``UNEXERCISED`` with the reason ``accepted above the oracle ceiling``, never ``PASS`` (the binary stops it
+before any comparison). Each record gets ``expect``, ``expectation`` (``met`` or ``violated``) and
+``violation`` (the reason); ``summary.json`` gives each space ``expectations: {met, violated, violations:
+[{case, outcome, expected, reason}]}`` and the report prints them. A violation is a finding to triage; it does
+not change the exit status (only ``WRONG`` and ``CRASH`` do).
+
+Outputs under the work directory: ``outcomes.jsonl`` (one record per sample),
+``samples.jsonl``, ``summary.json``, ``reports/`` and ``logs/`` (per binary invocation) and
+``failures/<case>/`` for every ``WRONG`` and ``CRASH`` (and ``shrink/<case>/`` for the candidate
+runs of ``--shrink``). The exit status is non-zero iff a sample was ``WRONG`` or ``CRASH`` (2 for
+usage and space errors).
+
+One driver per work directory. A run (any mode but ``--coverage-of``) holds ``<work>/.gauntlet.lock``,
+created exclusively with its pid, host, start time and command line, and removes it on exit (normal,
+error or SIGINT). A second driver on that directory exits 2 with ``work dir in use by pid P on host H
+since T``. A lock whose process is dead on this host is taken over with a warning; one from another host
+is never taken over (delete it by hand when no driver is running).
+"""
+
+import argparse
+import contextlib
+import copy
+import datetime
+import hashlib
+import importlib.util
+import json
+import os
+import random
+import re
+import secrets
+import shlex
+import shutil
+import signal
+import socket
+import subprocess
+import sys
+import threading
+import time
+from pathlib import Path
+
+HERE = Path(__file__).resolve().parent
+if str(HERE) not in sys.path:
+    sys.path.insert(0, str(HERE))
+
+import pairwise  # noqa: E402
+import sampler  # noqa: E402
+import space as space_lib  # noqa: E402
+
+MIGRATION_DIR = HERE.parent / "migration-scripts"
+SCRIPTS_DIR = HERE.parent / "scripts"
+DRIVER_PATH = Path(__file__).resolve()
+
+OUTCOMES = ("PASS", "DECLINED", "WRONG", "CRASH", "UNCLAIMED_PASS", "UNEXERCISED")
+FAILING = ("WRONG", "CRASH")
+# What ``reached_execute`` reads: these outcomes ran the plan whatever the stage says, the other
+# outcomes only when they stopped at one of these stages, which come after plan creation.
+EXECUTED_OUTCOMES = ("PASS", "UNCLAIMED_PASS", "WRONG")
+EXECUTED_STAGES = ("execute", "compare")
+DEFAULT_SAMPLES = 32
+DEFAULT_BATCH_SIZE = 16
+DEFAULT_CASE_TIMEOUT = "10m"
+LOG_TAIL_LINES = 200
+LOG_TAIL_BYTES = 32 * 1024
+HOST_FILL_ENV = "HIPDNN_TEST_HOST_INPUT_FILL"
+ZERO_TESTS_MARKER = "Error: zero tests ran"
+NO_DEVICE_MARKER = "No HIP devices available"
+GTEST_FILTER_LINE = re.compile(r"\s*gtest_filter:")
+# The axes a space's input data type is read from, first match wins (see ``dtype_tag``).
+DTYPE_TAG_AXES = ("x_dtype", "dtype")
+POLL_SECONDS = 0.05
+MAX_PRINTED_FINDINGS = 20
+DEFAULT_CANDIDATE = (
+    "default"  # the id of the engine's own pick (the binary's DEFAULT_CANDIDATE_ID)
+)
+MAX_PRINTED_GRAPHS = 20
+
+
+class DriverError(Exception):
+    """A usage or environment error (exit status 2)."""
+
+
+# --------------------------------------------------------------------------
+# Small helpers
+# --------------------------------------------------------------------------
+
+
+def load_bundle_utils():
+    """``migration-scripts/bundle_utils.py``, imported by path (no copy)."""
+    module = sys.modules.get("bundle_utils")
+    if module is not None:
+        return module
+    path = MIGRATION_DIR / "bundle_utils.py"
+    spec = importlib.util.spec_from_file_location("bundle_utils", path)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules["bundle_utils"] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+def load_support_matrix_units():
+    """``scripts/support_matrix_units.py``, imported by path (no copy): the module whose
+    ``apply_case_patches`` applies a sweep case's ``add_tensors``, ``node_patches`` and
+    ``tensor_patches`` as the harness does.
+    """
+    module = sys.modules.get("support_matrix_units")
+    if module is not None:
+        return module
+    path = SCRIPTS_DIR / "support_matrix_units.py"
+    spec = importlib.util.spec_from_file_location("support_matrix_units", path)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules["support_matrix_units"] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+def dtype_tag(sp, sample):
+    """The dtype tag of a sample's input data type (``fp16``, ``bfp16``, ``fp32``), or None.
+
+    An engine's TOML config matches its tolerance, validator and skip globs against the full
+    GTest name ``<suite>.<case>`` (``TomlGuards.hpp`` ``currentTestName()``), and the quick
+    bundles carry the input dtype tag in the case id, as in ``LayernormBackward*fp16_*``.
+    Gauntlet case ids are ``s<seed>``, so the tag goes in the suite, which the harness derives
+    from the sweep directory path (``BundleDiscovery.hpp`` ``deriveSuiteName``). The tag is
+    the sample's ``x_dtype`` when its space has that axis (mixed precision keeps the other
+    tensors apart from the input) and its ``dtype`` otherwise; a space with neither has no tag.
+    Spelling is that of the bundle case ids (``bundle_utils.DTYPE_TOKEN``).
+    """
+    for axis in DTYPE_TAG_AXES:
+        if axis in sp.axes:
+            value = str(sample.axis_values[axis])
+            token = load_bundle_utils().DTYPE_TOKEN.get(value)
+            return token or re.sub(r"[^a-z0-9_]", "_", value.lower())
+    return None
+
+
+def dtype_directory(tag):
+    """The sweep directory name of a dtype tag. The TOML globs read ``fp16_*``, so the
+    directory name, which becomes part of the suite name, keeps an underscore after the tag.
+    """
+    return f"{tag}_cases"
+
+
+_DURATION_PART = re.compile(r"(\d+(?:\.\d+)?)(ms|s|m|h|d)?")
+_DURATION_UNITS = {
+    "ms": 0.001,
+    "s": 1.0,
+    "m": 60.0,
+    "h": 3600.0,
+    "d": 86400.0,
+    None: 1.0,
+}
+
+
+def parse_duration(text):
+    """Seconds for ``30m``, ``4h``, ``1h30m``, ``90`` (seconds), ``0.5s``; None for ``0``/``none``."""
+    text = str(text).strip().lower()
+    if text in ("", "0", "none", "off"):
+        return None
+    pos = 0
+    total = 0.0
+    while pos < len(text):
+        match = _DURATION_PART.match(text, pos)
+        if match is None:
+            raise ValueError(
+                f"invalid duration {text!r} (examples: 90, 30m, 4h, 1h30m)"
+            )
+        total += float(match.group(1)) * _DURATION_UNITS[match.group(2)]
+        pos = match.end()
+    return total if total > 0 else None
+
+
+def json_dump(path, obj):
+    with open(path, "w", encoding="utf-8", newline="\n") as f:
+        json.dump(obj, f, indent=2)
+        f.write("\n")
+
+
+def write_text(path, text):
+    with open(path, "w", encoding="utf-8", newline="\n") as f:
+        f.write(text)
+
+
+def resolve_binary(text):
+    """argv prefix for ``--binary``: a path, a ``.py`` script, or a quoted command line."""
+    path = Path(text)
+    if path.is_file():
+        return [sys.executable, str(path)] if path.suffix == ".py" else [str(path)]
+    parts = shlex.split(text, posix=os.name != "nt")
+    if not parts:
+        raise DriverError("--binary is empty")
+    if parts[0].lower().endswith(".py"):
+        parts.insert(0, sys.executable)
+    elif shutil.which(parts[0]) is None:
+        raise DriverError(f"--binary '{text}': '{parts[0]}' is not an executable file")
+    return parts
+
+
+def kill_tree(proc):
+    """Kill a process and everything it started."""
+    if os.name == "nt":
+        subprocess.run(
+            ["taskkill", "/F", "/T", "/PID", str(proc.pid)],
+            capture_output=True,
+            check=False,
+        )
+    else:
+        try:
+            os.killpg(proc.pid, signal.SIGKILL)  # the child leads its own session
+        except (ProcessLookupError, PermissionError):
+            pass
+    try:
+        proc.kill()
+    except OSError:
+        pass
+    try:
+        proc.wait(timeout=30)
+    except subprocess.TimeoutExpired:
+        pass
+
+
+# An accepted case that a bundle's ``enforcement_level`` stopped before the comparison.
+BELOW_FULL_LEVELS = ("applicability", "buildable")
+ACCEPTED_ABOVE_CEILING = "accepted above the oracle ceiling"
+
+
+def expectation_verdict(expect, outcome, reason):
+    """How a case's outcome stands against its ``expect``: ``None`` when the case has no
+    expectation, ``""`` when it met it, else the reason it did not.
+
+    ``WRONG`` and ``CRASH`` always violate. ``declined`` is met by ``DECLINED`` only;
+    ``declined_or_pass`` also by ``PASS`` and ``UNCLAIMED_PASS`` (the output was verified).
+    ``UNEXERCISED`` meets neither: an engine that accepted a case nothing verified, or a case
+    that never ran, is not evidence either way.
+    """
+    if expect is None:
+        return None
+    if outcome in FAILING:
+        return outcome
+    if outcome == "DECLINED":
+        return ""
+    if outcome == "UNEXERCISED":
+        if reason.startswith(ACCEPTED_ABOVE_CEILING):
+            return ACCEPTED_ABOVE_CEILING
+        return "unexercised: " + (reason or "no reason given")
+    if expect == "declined_or_pass":
+        return ""
+    return "accepted where a decline was expected"
+
+
+def reached_execute(result):
+    """Whether the binary's record says the case built the engine's plan and went on to run it.
+
+    PASS, UNCLAIMED_PASS and WRONG ran it. A CRASH or UNEXERCISED did only when its stage is
+    ``execute`` or ``compare``: one at ``build`` (no plan) or earlier never had a kernel to
+    report, and DECLINED never reached the engine. A result the driver made itself (a hang or
+    a process crash, no ``finished`` record) says nothing about the stage and is not counted.
+    """
+    if result["source"] != "binary" or result["outcome"] == "DECLINED":
+        return False
+    return result["outcome"] in EXECUTED_OUTCOMES or result["stage"] in EXECUTED_STAGES
+
+
+def log_tail(path):
+    """The last lines of a log file, bounded in lines and bytes."""
+    try:
+        with open(path, "rb") as f:
+            f.seek(0, os.SEEK_END)
+            size = f.tell()
+            f.seek(max(0, size - LOG_TAIL_BYTES))
+            data = f.read()
+    except OSError:
+        return ""
+    lines = data.decode("utf-8", errors="replace").splitlines()
+    return "\n".join(lines[-LOG_TAIL_LINES:]) + "\n"
+
+
+_ROCM_VERSION_CACHE = []
+
+
+def rocm_version():
+    """Best-effort ROCm version: env, ``.info/version``, then ``rocm-sdk version``."""
+    if _ROCM_VERSION_CACHE:
+        return _ROCM_VERSION_CACHE[0]
+    found = os.environ.get("ROCM_VERSION") or None
+    if found is None:
+        root = Path(os.environ.get("ROCM_PATH", "/opt/rocm"))
+        try:
+            found = (root / ".info" / "version").read_text(
+                encoding="utf-8"
+            ).strip() or None
+        except OSError:
+            found = None
+    if found is None and shutil.which("rocm-sdk"):
+        try:
+            done = subprocess.run(
+                ["rocm-sdk", "version"],
+                capture_output=True,
+                text=True,
+                timeout=20,
+                check=False,
+            )
+            found = (
+                done.stdout.strip().splitlines()[0]
+                if done.returncode == 0 and done.stdout.strip()
+                else None
+            )
+        except (OSError, subprocess.TimeoutExpired):
+            found = None
+    _ROCM_VERSION_CACHE.append(found)
+    return found
+
+
+def git_sha():
+    try:
+        done = subprocess.run(
+            ["git", "-C", str(HERE), "rev-parse", "HEAD"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    return done.stdout.strip() if done.returncode == 0 and done.stdout.strip() else None
+
+
+class _Raw(str):
+    """A shell fragment that ``_quote`` emits unquoted."""
+
+
+def _quote(token):
+    return str(token) if isinstance(token, _Raw) else shlex.quote(token)
+
+
+def host_input_fill(env=None):
+    value = (os.environ if env is None else env).get(HOST_FILL_ENV, "")
+    return bool(value) and value != "0"
+
+
+# --------------------------------------------------------------------------
+# Running the binary
+# --------------------------------------------------------------------------
+
+
+class ProcResult:
+    """What one binary invocation did."""
+
+    def __init__(self):
+        self.returncode = None
+        self.hung = False
+        self.aborted = False
+        self.records = []
+        self.log_path = None
+
+    @property
+    def started(self):
+        return [r["test"] for r in self.records if r.get("event") == "started"]
+
+    @property
+    def finished(self):
+        return {r["test"]: r for r in self.records if r.get("event") == "finished"}
+
+
+def parse_listing(text):
+    """Full test names from ``--gtest_list_tests`` output."""
+    names = set()
+    suite = None
+    for line in text.splitlines():
+        if not line.strip():
+            continue
+        body = line.split("#", 1)[0].rstrip()
+        if not body:
+            continue
+        if not line.startswith(" "):
+            if body.endswith("."):
+                suite = body
+            continue
+        if suite is not None:
+            names.add(suite + body.strip())
+    return names
+
+
+# --------------------------------------------------------------------------
+# Samples: drawn, explicit and pairwise
+# --------------------------------------------------------------------------
+
+PAIRWISE_GENERATOR = "gauntlet-pairwise"
+DEFAULT_PAIRWISE_REPAIR = 2
+MAX_LISTED_TUPLES = 50
+# Seconds between two progress lines of pairwise generation (stderr).
+PAIRWISE_PROGRESS_INTERVAL = pairwise.DEFAULT_PROGRESS_INTERVAL
+
+
+def is_explicit_row(sample):
+    """Whether a sample was built from given axis values (a ``--row`` file, a pairwise row)
+    and not drawn from a shape seed, or forces a catalog candidate (``CandidateSample``). It has no
+    seed to replay from, so its failure folder keeps a ``row.json`` and ``replay.sh`` calls the
+    driver with ``--row``."""
+    return sample.shape_seed is None or getattr(sample, "variant", None) is not None
+
+
+def engine_variant_json(variant):
+    """``metadata.engine_variant`` of a candidate ``{"id", "knobs"}``: the default candidate is
+    just its id, since it takes no knobs."""
+    if variant["id"] == DEFAULT_CANDIDATE:
+        return {"id": DEFAULT_CANDIDATE}
+    return {"id": variant["id"], "knobs": variant["knobs"]}
+
+
+class CandidateSample(sampler.Sample):
+    """A sample that forces one catalog candidate: the graph sample ``base`` under the case id
+    ``case_id``, its ``metadata.engine_variant`` the candidate ``variant`` (``{"id", "knobs"}``).
+    The axes and seeds are the graph's, so a candidate's outcome compares with its siblings'.
+    """
+
+    def __init__(self, base, case_id, variant):
+        row = copy.deepcopy(base.row)
+        row["id"] = case_id
+        row.setdefault("metadata", {})["engine_variant"] = engine_variant_json(variant)
+        super().__init__(
+            base.space,
+            base.shape_seed,
+            base.data_seed,
+            base.axis_values,
+            row,
+            base.attempts,
+            base.expect,
+        )
+        self.variant = {"id": variant["id"], "knobs": variant.get("knobs", {})}
+
+
+def check_engine_variant(value, where):
+    """The ``{"id", "knobs"}`` of a row file's ``engine_variant``, or a ``DriverError``."""
+    if not isinstance(value, dict) or set(value) - {"id", "knobs"}:
+        raise DriverError(
+            f"{where}: 'engine_variant' must be an object with 'id' and optionally 'knobs'"
+        )
+    ident = value.get("id")
+    if not isinstance(ident, str) or not ident:
+        raise DriverError(f"{where}: 'engine_variant.id' must be a non-empty string")
+    knobs = value.get("knobs", {})
+    if not isinstance(knobs, dict):
+        raise DriverError(f"{where}: 'engine_variant.knobs' must be an object")
+    if ident == DEFAULT_CANDIDATE and knobs:
+        raise DriverError(
+            f"{where}: the '{DEFAULT_CANDIDATE}' candidate is the engine's own pick and takes no knobs"
+        )
+    return {"id": ident, "knobs": knobs}
+
+
+def parse_catalog_shard(text):
+    """``(i, n)`` of ``--catalog-shard i/n``: ``n >= 1`` and ``0 <= i < n``."""
+    match = re.fullmatch(r"\s*(\d+)\s*/\s*(\d+)\s*", str(text))
+    if not match:
+        raise ValueError(f"expected i/n (for example 0/4), got {text!r}")
+    i, n = int(match.group(1)), int(match.group(2))
+    if n < 1 or i >= n:
+        raise ValueError(f"shard {i}/{n} is not a shard (need n >= 1 and 0 <= i < n)")
+    return i, n
+
+
+def shard_candidates(candidates, shard):
+    """``[(k, candidate)]`` of the candidates a shard ``(i, n)`` keeps: those whose index ``k``
+    satisfies ``k % n == i`` (every candidate with no shard). Across the shards ``0..n-1`` each
+    candidate is kept by exactly one."""
+    i, n = shard if shard is not None else (0, 1)
+    return [(k, c) for k, c in enumerate(candidates) if k % n == i]
+
+
+def catalog_from_record(record):
+    """``(status, reason, candidates, engine)`` of one ``--list-candidates`` record: the status
+    ``ok`` (with the candidates, each ``{"id", "knobs"}``, in listing order), ``not_enumerable``
+    (with the single default candidate) or ``error`` (no candidates; the reason says why, also when
+    the record is not one a catalog can be built from)."""
+    status = record.get("status")
+    reason = str(record.get("reason") or "")
+    engine = record.get("engine") if isinstance(record.get("engine"), str) else None
+    if status == "not_enumerable":
+        return (
+            "not_enumerable",
+            reason,
+            [{"id": DEFAULT_CANDIDATE, "knobs": {}}],
+            engine,
+        )
+    if status == "error":
+        return "error", reason or "the binary gave no reason", [], engine
+    if status != "ok":
+        return "error", f"unrecognized listing status {status!r}", [], engine
+    raw = record.get("candidates")
+    if not isinstance(raw, list) or not raw:
+        return "error", "the engine listed no candidates for this graph", [], engine
+    seen = set()
+    candidates = []
+    for c in raw:
+        ident = c.get("id") if isinstance(c, dict) else None
+        knobs = c.get("knobs", {}) if isinstance(c, dict) else None
+        if not isinstance(ident, str) or not ident or not isinstance(knobs, dict):
+            return "error", f"malformed candidate {c!r} in the listing", [], engine
+        if ident == DEFAULT_CANDIDATE or ident in seen:
+            what = (
+                "reserved for the engine's own pick"
+                if ident == DEFAULT_CANDIDATE
+                else "listed twice"
+            )
+            return "error", f"candidate id {ident!r} is {what}", [], engine
+        seen.add(ident)
+        candidates.append({"id": ident, "knobs": knobs})
+    return "ok", reason, candidates, engine
+
+
+def write_sweeps(root, sp, samples):
+    """One sweep directory per input dtype tag (``dtype_tag``) of ``samples`` under
+    ``root/<Op>/<Space>/``, the samples of a tag in the order given. Nothing is removed.
+    """
+    groups = {}
+    for s in samples:
+        groups.setdefault(dtype_tag(sp, s), []).append(s)
+    for tag, group in groups.items():
+        out = root / sp.operation / sp.name
+        if tag is not None:
+            out = out / dtype_directory(tag)
+        out.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(sp.template_path, out / "graph.template.json")
+        json_dump(out / "sweep.json", {"version": 1, "cases": [s.row for s in group]})
+
+
+def pairwise_data_seed(space_id, seed, k):
+    """The data seed of row ``k`` of a space's pairwise set for a pairwise seed: a stable hash,
+    always in ``[0, 2^32)``."""
+    digest = hashlib.sha256(
+        f"gauntlet-pairwise-data-seed:{space_id}:{seed}:{k}".encode()
+    ).digest()
+    return int.from_bytes(digest[:4], "big")
+
+
+def pair_json(pair):
+    """A tuple ``((axisA, valueA), (axisB, valueB))`` as JSON: ``[[axisA, valueA], [axisB, valueB]]``."""
+    return [[pair[0][0], pair[0][1]], [pair[1][0], pair[1][1]]]
+
+
+def pair_key(pair):
+    """A hashable key of a tuple, in the form ``pair_json`` gives as well as the one ``pairwise``
+    returns (``repr`` keeps ``1``, ``True`` and ``1.0`` apart)."""
+    return (pair[0][0], repr(pair[0][1]), pair[1][0], repr(pair[1][1]))
+
+
+def finding_json(finding):
+    return {"pair": pair_json(finding.pair), "detail": finding.detail}
+
+
+class PairwiseSpace:
+    """What a pairwise run keeps of one space: its ``pairwise.build`` result, the row numbers
+    handed out so far, the repair rounds and what they found."""
+
+    def __init__(self, sp, result):
+        self.sp = sp
+        self.result = result
+        self.next_row = 0  # the k of the next row, in ``pw<k>``
+        self.rounds = []  # one dict per repair round
+        self.never_passed = []  # tuples the last round did not retry
+        self.unreachable = {}  # pair key -> Finding: no row of passing levels covers it
+        self.tried = set()  # pair keys of the targets some repair round retried
+        self.repair_rows = 0
+        self.repair_budget_exceeded = (
+            []
+        )  # Findings of the repair round the budget ended
+
+    @property
+    def budget_exceeded(self):
+        """The tuples the generation budget left unsettled, in the build and in repair."""
+        return list(self.result.budget_exceeded) + self.repair_budget_exceeded
+
+    @property
+    def generation_complete(self):
+        return self.result.generation_complete and not self.repair_budget_exceeded
+
+    def sample_rows(self, rows, args, repair_round=None):
+        """The samples of axis-value rows, with the next ids ``pw<k>``. The row records the
+        generator (``metadata.generator``) and the pairwise seed (its notes); its data seed is
+        ``--data-seed`` or derived from (space, seed, k)."""
+        seed = self.result.seed
+        samples = []
+        for values in rows:
+            k = self.next_row
+            self.next_row += 1
+            where = (
+                f"row {k}"
+                if repair_round is None
+                else f"repair round {repair_round}, row {k}"
+            )
+            data_seed = (
+                args.data_seed
+                if args.data_seed is not None
+                else pairwise_data_seed(self.sp.space_id, seed, k)
+            )
+            samples.append(
+                sampler.sample_from_axes(
+                    self.sp,
+                    values,
+                    data_seed,
+                    f"pw{k}",
+                    generator=PAIRWISE_GENERATOR,
+                    origin=f"pairwise seed {seed}, {where}",
+                )
+            )
+        return samples
+
+
+class GenerationBudget:
+    """How long pairwise generation may still take: ``--pairwise-budget`` is one total for every
+    build and repair call of the run (the time spent running rows is not counted), and
+    ``--time-budget`` ends generation too, counted from the start of the run (``run_started``,
+    a reading of ``clock``). ``limits()`` is the ``deadline`` and ``clock`` to give the next
+    ``pairwise.build`` / ``repair`` call (no deadline when nothing bounds it); the call runs
+    under ``charging()``."""
+
+    def __init__(self, pairwise_budget, time_budget, run_started, clock=time.monotonic):
+        self.pairwise_budget = pairwise_budget
+        self.time_budget = time_budget
+        self.run_started = run_started
+        self.clock = clock
+        self.spent = 0.0
+
+    def deadline(self):
+        limits = []
+        if self.pairwise_budget:
+            limits.append(self.clock() + max(0.0, self.pairwise_budget - self.spent))
+        if self.time_budget:
+            limits.append(self.run_started + self.time_budget)
+        return min(limits) if limits else None
+
+    def limits(self):
+        return {"deadline": self.deadline(), "clock": self.clock}
+
+    @contextlib.contextmanager
+    def charging(self):
+        """Count the time of the block against ``--pairwise-budget``."""
+        started = self.clock()
+        try:
+            yield
+        finally:
+            self.spent += self.clock() - started
+
+
+def print_progress(record):
+    """A progress record of ``pairwise.build`` / ``repair`` as a line on stderr."""
+    print(
+        f"  pairwise {record['space']} ({record['phase']}): {record['settled']} of"
+        f" {record['total']} tuples settled, {record['rows']} rows, {record['elapsed']:.0f} s",
+        file=sys.stderr,
+        flush=True,
+    )
+
+
+def build_pairwise(args, spaces, budget):
+    """``{space id: PairwiseSpace}`` for the spaces, built from ``args.seed`` under ``budget`` (a
+    ``GenerationBudget``): a space it ends keeps the rows built and reports the tuples it left
+    unsettled as ``budget_exceeded``; the spaces after it get none."""
+    states = {}
+    for sp in spaces:
+        try:
+            with budget.charging():
+                result = pairwise.build(
+                    sp,
+                    args.seed,
+                    **budget.limits(),
+                    progress=print_progress,
+                    progress_interval=PAIRWISE_PROGRESS_INTERVAL,
+                )
+        except ValueError as e:
+            raise DriverError(f"pairwise: {e}") from None
+        states[sp.space_id] = PairwiseSpace(sp, result)
+        print(
+            f"  pairwise {sp.space_id}: {len(result.rows)} rows (lower bound"
+            f" {result.lower_bound}), {result.tuples_total} tuples, {len(result.illegal)}"
+            f" illegal, {len(result.dead)} dead, {len(result.unproven)} unproven, built in"
+            f" {result.timings['total_s']:.1f} s"
+            + (
+                ""
+                if result.generation_complete
+                else f"; the budget ended it: {len(result.budget_exceeded)} tuples unsettled"
+            ),
+            flush=True,
+        )
+    return states
+
+
+def write_pairwise_report(work, state, args):
+    """``<work>/pairwise/<Op>_<Space>.json``: the levels, the tuple count, the rows, the lower
+    bound, the ``illegal`` / ``dead`` / ``unproven`` tuples with the reason, the
+    ``budget_exceeded`` tuples (left unsettled when the generation budget ended) with
+    ``generation_complete``, the repair rounds and the generator's timings."""
+    r = state.result
+    directory = work / "pairwise"
+    directory.mkdir(parents=True, exist_ok=True)
+    report = {
+        "space": state.sp.space_id,
+        "seed": r.seed,
+        "strength": r.strength,
+        "levels": r.levels,
+        "tuples_total": r.tuples_total,
+        "rows": len(r.rows),
+        "lower_bound": r.lower_bound,
+        "illegal": [finding_json(f) for f in r.illegal],
+        "dead": [finding_json(f) for f in r.dead],
+        "unproven": [finding_json(f) for f in r.unproven],
+        "budget_exceeded": [finding_json(f) for f in state.budget_exceeded],
+        "generation_complete": state.generation_complete,
+        "repair": {
+            "max_rounds": 0 if args.generate_only else args.pairwise_repair,
+            "rows": state.repair_rows,
+            "rounds": state.rounds,
+            "never_passed": [pair_json(p) for p in state.never_passed],
+        },
+        "timings": {
+            k: round(v, 3) if isinstance(v, float) else v for k, v in r.timings.items()
+        },
+    }
+    json_dump(directory / f"{state.sp.operation}_{state.sp.name}.json", report)
+
+
+def coverage_summary(sp, levels, flagged, records, liveness=None):
+    """``pairwise.pair_coverage`` of ``records`` (``(axis values, outcome)``) in the form
+    ``summary.json`` gives it: ``tuples``, the ``illegal`` / ``dead`` / ``unproven`` /
+    ``budget_exceeded`` counts of ``flagged`` (kind -> tuples), ``drawn``, ``passed``,
+    ``declined_only``, ``never_passed`` and the tuples that could still be passed
+    (``not_passed_total``, and the first ``MAX_LISTED_TUPLES`` as ``not_passed``): every tuple of
+    the universe not passed, less the ``illegal`` / ``dead`` / ``unproven`` ones, which no legal
+    row covers or could be shown to. A ``budget_exceeded`` tuple stays among them: nothing
+    settled it."""
+    found = pairwise.pair_coverage(sp, records, levels, liveness)
+    skip = {
+        pair_key(p)
+        for kind in ("illegal", "dead", "unproven")
+        for p in flagged.get(kind, ())
+    }
+    open_ = [p for p in found["not_passed"] if pair_key(p) not in skip]
+    return {
+        "tuples": found["tuples"],
+        "illegal": len(flagged["illegal"]),
+        "dead": len(flagged["dead"]),
+        "unproven": len(flagged["unproven"]),
+        "budget_exceeded": len(flagged.get("budget_exceeded", ())),
+        "drawn": found["drawn"],
+        "passed": found["passed"],
+        "declined_only": found["declined_only"],
+        "never_passed": found["never_passed"],
+        "not_passed_total": len(open_),
+        "not_passed": [pair_json(p) for p in open_[:MAX_LISTED_TUPLES]],
+    }
+
+
+class _RandomSource:
+    """The samples a random run draws for one space: shape seeds ``seed + i``."""
+
+    def __init__(self, sp, args):
+        self.sp = sp
+        self.args = args
+        self.done = 0
+
+    @property
+    def exhausted(self):
+        return bool(self.args.samples) and self.done >= self.args.samples
+
+    def take(self, size):
+        a = self.args
+        if a.samples:
+            size = min(size, a.samples - self.done)
+        samples = [
+            sampler.sample(self.sp, a.seed + self.done + i, a.data_seed)
+            for i in range(size)
+        ]
+        self.done += size
+        return samples
+
+
+class _ListSource:
+    """Samples made beforehand, handed out in order."""
+
+    def __init__(self, samples):
+        self.samples = list(samples)
+        self.cursor = 0
+
+    @property
+    def exhausted(self):
+        return self.cursor >= len(self.samples)
+
+    def take(self, size):
+        taken = self.samples[self.cursor : self.cursor + size]
+        self.cursor += len(taken)
+        return taken
+
+
+def generate_only(args, spaces):
+    """``--pairwise --generate-only``: each space's full row set as sweeps under
+    ``<work>/bundles/gauntlet/<Op>/<Space>/`` (one per dtype tag, as a run writes them) and
+    its pairwise report. No binary runs. Only the space's own earlier sweeps are replaced, so
+    spaces and row counts above ``--batch-size`` all stay."""
+    work = Path(args.work_dir).resolve()
+    root = work / "bundles" / "gauntlet"
+    print(
+        f"gauntlet fuzz: pairwise seed {args.seed}, generate only (replay with --pairwise"
+        f" --generate-only --seed {args.seed}); work dir {work}",
+        flush=True,
+    )
+    budget = GenerationBudget(args.pairwise_budget, args.time_budget, time.monotonic())
+    states = build_pairwise(args, spaces, budget)
+    for sp in spaces:
+        state = states[sp.space_id]
+        samples = state.sample_rows(state.result.rows, args)
+        shutil.rmtree(root / sp.operation / sp.name, ignore_errors=True)
+        write_sweeps(root, sp, samples)
+        write_pairwise_report(work, state, args)
+        print(
+            f"  wrote {len(samples)} rows of {sp.space_id} to {root / sp.operation / sp.name}",
+            flush=True,
+        )
+        if not state.generation_complete:
+            print(
+                f"  WARNING: the pairwise budget ended generation of {sp.space_id}:"
+                f" {len(state.budget_exceeded)} tuples are unsettled (budget_exceeded in the"
+                " report)",
+                flush=True,
+            )
+    print(f"reports: {work / 'pairwise'}", flush=True)
+    return 0
+
+
+def _read_jsonl(path):
+    try:
+        text = Path(path).read_text(encoding="utf-8")
+    except OSError as e:
+        raise DriverError(f"{path}: cannot read the file: {e}") from None
+    return [json.loads(line) for line in text.splitlines() if line.strip()]
+
+
+def load_pairwise_reports(path):
+    """``{space id: report}`` of a pairwise report file, or of every ``*.json`` in a directory."""
+    path = Path(path)
+    files = sorted(path.glob("*.json")) if path.is_dir() else [path]
+    reports = {}
+    for file in files:
+        try:
+            report = json.loads(file.read_text(encoding="utf-8"))
+        except (OSError, ValueError) as e:
+            raise DriverError(
+                f"--levels-from {file}: cannot read a report: {e}"
+            ) from None
+        if (
+            not isinstance(report, dict)
+            or "space" not in report
+            or "levels" not in report
+        ):
+            raise DriverError(
+                f"--levels-from {file}: not a pairwise report (it has no 'space' and 'levels')"
+            )
+        reports[report["space"]] = report
+    if not reports:
+        raise DriverError(f"--levels-from {path}: no pairwise report found")
+    return reports
+
+
+def coverage_of(work_dir, levels_from, first=None, spaces_dir=None):
+    """The pair coverage of an earlier run, offline: ``{space id: coverage_summary + samples}``
+    for each space of the pairwise report(s) at ``levels_from``. Reads the run's
+    ``samples.jsonl`` and ``outcomes.jsonl`` under ``work_dir``; with ``first`` only the first
+    ``first`` samples of each space count. A sample with no outcome record (the run stopped
+    before it) is left out (``with_outcome`` says how many had one). Each space's samples are read
+    in the run's order, so a random run's coverage at N samples is its coverage after N draws.
+    """
+    reports = load_pairwise_reports(levels_from)
+    spaces = {
+        s.space_id: s
+        for s in space_lib.load_spaces(spaces_dir or space_lib.DEFAULT_SPACES_DIR)
+    }
+    work = Path(work_dir)
+    outcomes = {
+        (r["space"], r["case"]): r["outcome"]
+        for r in _read_jsonl(work / "outcomes.jsonl")
+    }
+    drawn = {}
+    for s in _read_jsonl(work / "samples.jsonl"):
+        drawn.setdefault(s["space"], []).append(s)
+    found = {}
+    for space_id, report in reports.items():
+        if space_id not in spaces:
+            raise DriverError(
+                f"--levels-from: no space '{space_id}' in the spaces directory"
+            )
+        sp = spaces[space_id]
+        if list(report["levels"]) != list(sp.axes):
+            raise DriverError(
+                f"--levels-from: the levels of '{space_id}' are for other axes than the"
+                " space has now"
+            )
+        samples = drawn.get(space_id, [])
+        if first is not None:
+            samples = samples[:first]
+        records = [
+            (s["axes"], outcomes[(space_id, s["case"])])
+            for s in samples
+            if (space_id, s["case"]) in outcomes
+        ]
+        flagged = {
+            kind: [f["pair"] for f in report.get(kind, ())]
+            for kind in ("illegal", "dead", "unproven", "budget_exceeded")
+        }
+        found[space_id] = {
+            **coverage_summary(sp, report["levels"], flagged, records),
+            "generation_complete": report.get("generation_complete", True),
+            "samples": len(samples),
+            "with_outcome": len(records),
+        }
+    return found
+
+
+# --------------------------------------------------------------------------
+# One driver per work directory
+# --------------------------------------------------------------------------
+
+LOCK_NAME = ".gauntlet.lock"
+LOCK_READ_TRIES = 20  # a lock file may be read between its creation and its content
+LOCK_READ_PAUSE = 0.05
+LOCK_ATTEMPTS = 10
+LOCK_SHARING_TRIES = (
+    20  # a file another driver has open is refused for a moment on Windows
+)
+LOCK_SHARING_PAUSE = 0.01
+WINDOWS_STILL_ACTIVE = 259
+WINDOWS_PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+WINDOWS_ERROR_INVALID_PARAMETER = 87  # OpenProcess: no process has this id
+
+
+def _windows_process_alive(pid):
+    """Whether a process with this id is running (Windows). ``os.kill`` is no probe there: it
+    terminates the process."""
+    import ctypes
+    from ctypes import wintypes
+
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+    kernel32.OpenProcess.restype = wintypes.HANDLE
+    kernel32.GetExitCodeProcess.argtypes = [
+        wintypes.HANDLE,
+        ctypes.POINTER(wintypes.DWORD),
+    ]
+    kernel32.GetExitCodeProcess.restype = wintypes.BOOL
+    kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+    handle = kernel32.OpenProcess(WINDOWS_PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
+    if not handle:
+        # Only "no such process" says dead; a process we may not open (access denied) lives.
+        return ctypes.get_last_error() != WINDOWS_ERROR_INVALID_PARAMETER
+    try:
+        code = wintypes.DWORD()
+        if not kernel32.GetExitCodeProcess(handle, ctypes.byref(code)):
+            return True
+        return code.value == WINDOWS_STILL_ACTIVE
+    finally:
+        kernel32.CloseHandle(handle)
+
+
+def process_alive(pid):
+    """Whether a process with this id is running on this host; True when that cannot be told."""
+    if os.name == "nt":
+        return _windows_process_alive(pid)
+    try:
+        os.kill(pid, 0)  # signal 0 only checks that the process exists
+    except ProcessLookupError:
+        return False
+    except OSError:  # PermissionError: it exists and is another user's
+        return True
+    return True
+
+
+def _retry_sharing(operation):
+    """``operation()``, again for a short while while it is refused (``PermissionError``): on
+    Windows a file another driver has open for a moment cannot be read, replaced or removed.
+    """
+    for _ in range(LOCK_SHARING_TRIES - 1):
+        try:
+            return operation()
+        except PermissionError:
+            time.sleep(LOCK_SHARING_PAUSE)
+    return operation()
+
+
+def _read_lock_text(path):
+    """The text of the lock file, or None when there is none."""
+    try:
+        return _retry_sharing(lambda: path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return None
+
+
+def _lock_holder(text):
+    """``(pid, host, started)`` of a lock file's text, or None when it is not a lock record."""
+    try:
+        record = json.loads(text)
+        pid, host, started = record["pid"], record["host"], record["started"]
+        record["token"]
+    except (ValueError, TypeError, KeyError):
+        return None
+    if type(pid) is not int or pid <= 0 or not isinstance(host, str):
+        return None
+    return pid, host, started
+
+
+def takeover_claim_path(path, stale_text):
+    """The file whose exclusive creation entitles one driver to take over the lock at ``path``
+    that holds ``stale_text``: one name per stale lock content."""
+    digest = hashlib.sha256(stale_text.encode("utf-8")).hexdigest()[:16]
+    return path.with_name(f"{path.name}.takeover-{digest}")
+
+
+def take_over_stale_lock(path, stale_text, record):
+    """Whether this driver now holds the lock at ``path`` that held ``stale_text``.
+
+    Exactly one driver at a time wins the exclusive claim of that stale content
+    (``takeover_claim_path``); only it goes on. It writes the new record (with its fresh token)
+    to a temporary file and ``os.replace``s the lock with it if the lock still reads
+    ``stale_text``, so the lock never disappears for a third driver to create, and a driver that
+    read the stale lock before another took it over finds the content changed and loses. The
+    re-read that follows must show our own token.
+    """
+    claim = takeover_claim_path(path, stale_text)
+    tmp = path.with_name(f"{path.name}.{record['token']}.tmp")
+    text = json.dumps(record, sort_keys=True)
+    try:
+        os.close(os.open(claim, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644))
+    except (
+        OSError
+    ):  # FileExistsError: another driver is taking this lock over right now
+        return False
+    try:
+        with open(tmp, "w", encoding="utf-8", newline="\n") as f:
+            f.write(text)
+        if _read_lock_text(path) != stale_text:
+            return False
+        _retry_sharing(lambda: os.replace(tmp, path))
+        held = _read_lock_text(path)
+    except OSError:
+        return False
+    finally:
+        tmp.unlink(missing_ok=True)
+        claim.unlink(missing_ok=True)
+    return held == text
+
+
+class WorkDirLock:
+    """``<work>/.gauntlet.lock``, held while a driver writes the work directory.
+
+    Created exclusively, with the pid, host, start time and command line of its owner. Another
+    driver on the same directory gets a ``DriverError``. A lock of a dead process of this host is
+    taken over (with a warning); a lock of another host is never, for its process cannot be seen.
+    """
+
+    def __init__(self, work, argv=()):
+        self.path = Path(work) / LOCK_NAME
+        self.record = {
+            "pid": os.getpid(),
+            "host": socket.gethostname(),
+            "started": datetime.datetime.now(datetime.timezone.utc).strftime(
+                "%Y-%m-%dT%H:%M:%SZ"
+            ),
+            "argv": list(argv),
+            "token": secrets.token_hex(16),
+        }
+        self.held = False
+
+    def __enter__(self):
+        self.acquire()
+        return self
+
+    def __exit__(self, *_exc):
+        self.release()
+
+    def _create(self):
+        try:
+            fd = os.open(self.path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644)
+        except FileExistsError:
+            return False
+        except PermissionError:
+            if os.name != "nt":
+                raise
+            # Windows refuses a name whose deletion is pending: the lock is going away
+            time.sleep(LOCK_SHARING_PAUSE)
+            return False
+        with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as f:
+            f.write(json.dumps(self.record, sort_keys=True))
+        return True
+
+    def _read_holder(self):
+        """``(text, holder)`` of the lock now there; ``(None, None)`` when it is gone."""
+        for _ in range(LOCK_READ_TRIES):
+            text = _read_lock_text(self.path)
+            if text is None:
+                return None, None
+            holder = _lock_holder(text)
+            if holder is not None:
+                return text, holder
+            time.sleep(LOCK_READ_PAUSE)
+        raise DriverError(
+            f"the work dir lock {self.path} is not a lock record; delete it by hand if no"
+            " driver is running"
+        )
+
+    def acquire(self):
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        for _ in range(LOCK_ATTEMPTS):
+            if self._create():
+                self.held = True
+                return
+            text, holder = self._read_holder()
+            if holder is None:
+                continue  # released between our create and our read: try again
+            pid, host, started = holder
+            if host != self.record["host"]:
+                raise DriverError(
+                    f"work dir in use by pid {pid} on host {host} since {started}; that is"
+                    " another host, so the lock is not taken over: delete"
+                    f" {self.path} by hand if no driver is running"
+                )
+            if process_alive(pid):
+                raise DriverError(
+                    f"work dir in use by pid {pid} on host {host} since {started}"
+                )
+            if take_over_stale_lock(self.path, text, self.record):
+                print(
+                    f"run_gauntlet_fuzz.py: warning: took over the lock of pid {pid} (not"
+                    f" running) since {started}",
+                    file=sys.stderr,
+                    flush=True,
+                )
+                self.held = True
+                return
+            time.sleep(LOCK_READ_PAUSE)  # let the driver that is taking it over finish
+        raise DriverError(
+            f"could not take over the stale work dir lock {self.path}: another driver is doing"
+            f" so, or a {LOCK_NAME}.takeover-* file left by one that died blocks it; delete"
+            " that file by hand if no driver is running"
+        )
+
+    def release(self):
+        """Remove the lock, unless it has become another driver's."""
+        if not self.held:
+            return
+        self.held = False
+        text = _read_lock_text(self.path)
+        if text is None:
+            return
+        try:
+            if json.loads(text).get("token") != self.record["token"]:
+                return
+        except (ValueError, AttributeError):
+            return
+        try:
+            _retry_sharing(self.path.unlink)
+        except FileNotFoundError:
+            pass
+
+
+# --------------------------------------------------------------------------
+# The driver
+# --------------------------------------------------------------------------
+
+
+class Fuzz:
+    """One fuzz run: samples, batches, outcomes, fault artifacts, summary."""
+
+    def __init__(self, args, spaces, row_sample=None):
+        self.args = args
+        self.spaces = spaces
+        # The one sample of a --row run (rendered by main); None for a drawing run.
+        self.row_sample = row_sample
+        self.binary_cmd = resolve_binary(args.binary)
+        # Replays run from any directory, so a path to the binary is made absolute.
+        self.binary_text = (
+            str(Path(args.binary).resolve())
+            if Path(args.binary).is_file()
+            else args.binary
+        )
+        self.work = Path(args.work_dir).resolve()
+        self.bundles = self.work / "bundles"
+        self.failures = self.work / "failures"
+        self.logs = self.work / "logs"
+        self.reports = self.work / "reports"
+        self.summary_path = (
+            Path(args.summary).resolve() if args.summary else self.work / "summary.json"
+        )
+        self.results = []
+        self.generated = {}
+        self.engines_seen = {}
+        self.arch_seen = None
+        self.stop = threading.Event()
+        self.abort = threading.Event()
+        self.stop_reason = None
+        self._invocation = 0
+        self._started_at = None
+        self._bu = None
+        self._outcomes_file = None
+        self._samples_file = None
+        # (space id, case id) -> the values of the ``values`` axes the sample drew
+        self._outcome_axes = {}
+        # While a shrink candidate runs: the list its one outcome goes to, instead of the run's
+        # outcomes, counts and failure folders (None otherwise).
+        self._candidate_sink = None
+        # (space, sample, result, record) of each WRONG/CRASH not shrunk yet
+        self._pending_shrink = []
+        # (space id, case id) -> what the shrink of that finding did
+        self._shrunk = {}
+        # (space id, case id) -> every axis value of a pairwise run's sample; no shrink candidate
+        self._coverage_axes = {}
+        # space id -> PairwiseSpace, once a pairwise run has built its rows
+        self._pairwise = {}
+        # The --pairwise-budget / --time-budget account of pairwise generation (set by ``run``)
+        self._generation_budget = None
+        # One entry per graph a catalog run listed (see ``_catalog_batch``), in run order.
+        self._catalog_graphs = []
+        # Candidate cases whose finished record named another candidate than the forced one, and
+        # those whose kernels' ids differ from it; the number of cases that forced a candidate.
+        self._candidate_mismatch = []
+        self._kernel_mismatch = []
+        self._forced = 0
+
+    # -- control ---------------------------------------------------------
+
+    def request_stop(self, abort=False):
+        """Stop after the current batch (or, with ``abort``, kill the binary now)."""
+        self.stop.set()
+        if abort:
+            self.abort.set()
+
+    def _install_signals(self):
+        if threading.current_thread() is not threading.main_thread():
+            return None
+        previous = signal.getsignal(signal.SIGINT)
+
+        def handler(_signum, _frame):
+            if self.stop.is_set():
+                print("\nSIGINT again: killing the running binary", flush=True)
+                self.request_stop(abort=True)
+            else:
+                print(
+                    "\nSIGINT: finishing the current batch, then writing the report",
+                    flush=True,
+                )
+                self.request_stop()
+
+        signal.signal(signal.SIGINT, handler)
+        return previous
+
+    # -- run -------------------------------------------------------------
+
+    def run(self):
+        for d in (self.work, self.logs, self.reports, self.failures):
+            d.mkdir(parents=True, exist_ok=True)
+        self._bu = load_bundle_utils()
+        self._started_at = time.monotonic()
+        self._generation_budget = GenerationBudget(
+            self.args.pairwise_budget, self.args.time_budget, self._started_at
+        )
+        self._started_wall = datetime.datetime.now(datetime.timezone.utc)
+        previous = self._install_signals()
+        self._outcomes_file = open(
+            self.work / "outcomes.jsonl", "w", encoding="utf-8", newline="\n"
+        )
+        self._samples_file = open(
+            self.work / "samples.jsonl", "w", encoding="utf-8", newline="\n"
+        )
+        error = None
+        try:
+            self._print_header()
+            if self.args.catalog:
+                shard = self.args.catalog_shard
+                print(
+                    "  catalog sweep: every candidate of engine"
+                    f" {self.args.test_engine} for each graph"
+                    + (f"; shard {shard[0]}/{shard[1]}" if shard else ""),
+                    flush=True,
+                )
+            self._preflight()
+            if self.row_sample is not None:
+                self._run_row()
+            elif self.args.pairwise:
+                self._run_pairwise()
+            elif self._loop(
+                {sp.space_id: _RandomSource(sp, self.args) for sp in self.spaces}
+            ):
+                self.stop_reason = self.stop_reason or "sample-cap"
+        except BaseException as e:  # noqa: BLE001 - report what we have, then re-raise
+            error = e
+            self.stop_reason = f"error: {e}"
+            raise
+        finally:
+            self._outcomes_file.close()
+            self._samples_file.close()
+            if previous is not None:
+                signal.signal(signal.SIGINT, previous)
+            if self._pairwise:
+                self._write_pairwise_reports()
+            summary = self.summarize()
+            if error is not None:
+                summary["error"] = str(error)
+            json_dump(self.summary_path, summary)
+        self._print_report(summary)
+        return summary["exit_code"]
+
+    def _print_header(self):
+        a = self.args
+        if self.row_sample is not None:
+            print(
+                f"gauntlet fuzz: row {self.row_sample.case_id} of"
+                f" {self.spaces[0].space_id} (axes"
+                f" {json.dumps(self.row_sample.axis_values, sort_keys=True)}, data seed"
+                f" {self.row_sample.data_seed}); work dir {self.work}",
+                flush=True,
+            )
+            return
+        if a.pairwise:
+            print(
+                f"gauntlet fuzz: pairwise seed {a.seed} (replay with --pairwise --seed {a.seed})",
+                flush=True,
+            )
+            print(f"  spaces: {', '.join(s.space_id for s in self.spaces)}", flush=True)
+            print(
+                f"  every row of each space; up to {a.pairwise_repair} repair rounds;"
+                f" batch size {a.batch_size}; work dir {self.work}",
+                flush=True,
+            )
+            if a.time_budget:
+                print(f"  time budget: {a.time_budget:g}s", flush=True)
+            if a.pairwise_budget:
+                print(
+                    f"  pairwise generation budget: {a.pairwise_budget:g}s in total",
+                    flush=True,
+                )
+            return
+        limit = "unlimited" if not a.samples else str(a.samples)
+        print(f"gauntlet fuzz: seed {a.seed} (replay with --seed {a.seed})", flush=True)
+        print(f"  spaces: {', '.join(s.space_id for s in self.spaces)}", flush=True)
+        print(
+            f"  samples per space: {limit}; batch size {a.batch_size}; work dir {self.work}",
+            flush=True,
+        )
+        if a.time_budget:
+            print(f"  time budget: {a.time_budget:g}s", flush=True)
+        if not a.samples and not a.time_budget:
+            print(
+                "  warning: unlimited run without a time budget; stop it with SIGINT",
+                flush=True,
+            )
+
+    def _preflight(self):
+        """Fail fast when the binary cannot run at all (RFC 0023 7.4).
+
+        Lists the tests of the binary on an empty bundle root with the run's own flags and no
+        filter. A healthy binary lists its compiled-in tests and exits 0, or says "Error: zero tests
+        ran." and exits 1 when it has none to list (it got that far, so it is healthy); a bad
+        ``--test-engine`` or ``--test-article``, a missing config or a crash at startup exits
+        non-zero. Without this every batch would die the same way, be bisected down to single
+        cases and be reported as ``load-crash`` with exit status 0.
+        """
+        empty = self.work / "preflight-bundles"
+        empty.mkdir(parents=True, exist_ok=True)
+        log_path, _ = self._next_invocation("preflight")
+        result = self._spawn(self._command("preflight", None, bundles=empty), log_path)
+        text = log_path.read_text(encoding="utf-8", errors="replace")
+        if result.aborted:
+            return
+        # "Error: zero tests ran." (exit 1) is the binary telling us it started, loaded the
+        # plugin and engine and registered nothing: an empty bundle root with no compiled-in
+        # tests, or a GTEST_FILTER in the environment. Startup is proven, so it is healthy.
+        started = result.returncode == 0 or (
+            result.returncode == 1 and ZERO_TESTS_MARKER in text
+        )
+        if result.hung or not started:
+            what = "hung" if result.hung else f"exited with status {result.returncode}"
+            raise DriverError(
+                f"the binary {what} when asked to list its tests with this run's flags, so no"
+                f" sample could run (log {log_path}):\n{log_tail(log_path)}"
+            )
+        if NO_DEVICE_MARKER in text:
+            raise DriverError(
+                "the binary found no HIP device and exited 0 without running anything"
+                f" (log {log_path}):\n{log_tail(log_path)}"
+            )
+
+    def _time_up(self):
+        budget = self.args.time_budget
+        return bool(budget) and time.monotonic() - self._started_at >= budget
+
+    def _loop(self, sources):
+        """Run batches round-robin over the spaces until every source has nothing left (True)
+        or the run is told to stop or its time budget ends (False; ``stop_reason`` says which).
+        ``sources`` maps a space id to its ``take(size)`` source; a space without one is skipped.
+        """
+        a = self.args
+        while True:
+            ran = False
+            for sp in self.spaces:
+                source = sources.get(sp.space_id)
+                if source is None or source.exhausted:
+                    continue
+                if self.stop.is_set():
+                    self.stop_reason = self.stop_reason or "interrupted"
+                    return False
+                if self._time_up():
+                    self.stop_reason = "time-budget"
+                    return False
+                samples = source.take(a.batch_size)
+                before = len(self.results)
+                if a.catalog:
+                    self._execute(sp, self._catalog_batch(sp, samples))
+                else:
+                    self.generated[sp.space_id] = self.generated.get(
+                        sp.space_id, 0
+                    ) + len(samples)
+                    self._write_samples(sp, samples)
+                    self._execute(sp, samples)
+                ran = True
+                self._print_batch(sp, samples, self.results[before:])
+                self._shrink_pending()
+            if not ran:
+                return True
+
+    def _run_row(self):
+        """The one explicit sample of ``--row``: through the same bundle, binary and outcome
+        path as a drawn batch of one."""
+        sp, s = self.spaces[0], self.row_sample
+        before = len(self.results)
+        if self.args.catalog:
+            self._execute(sp, self._catalog_batch(sp, [s]))
+        else:
+            self.generated[sp.space_id] = 1
+            self._write_samples(sp, [s])
+            self._execute(sp, [s])
+        self._shrink_pending()
+        self.stop_reason = self.stop_reason or "row"
+        for result in self.results[before:]:
+            print(
+                f"row {sp.space_id} {result['case']}: {result['outcome']}", flush=True
+            )
+
+    def _write_samples(self, sp, samples):
+        """One ``samples.jsonl`` line per sample; a candidate case names its forced id."""
+        for s in samples:
+            line = {
+                "space": sp.space_id,
+                "case": s.case_id,
+                "shape_seed": s.shape_seed,
+                "data_seed": s.data_seed,
+                "axes": s.axis_values,
+            }
+            variant = getattr(s, "variant", None)
+            if variant is not None:
+                line["engine_variant"] = variant["id"]
+            self._samples_file.write(json.dumps(line) + "\n")
+        self._samples_file.flush()
+
+    # -- catalog ---------------------------------------------------------
+
+    def _catalog_batch(self, sp, samples):
+        """The candidate cases of the graphs ``samples`` (``CandidateSample``, ``<graph>c<k>``),
+        in graph order, for the candidates this run's shard keeps of each graph's catalog. The
+        graphs are listed first (``_list_catalogs``). A graph that could not be listed is
+        finished ``UNEXERCISED`` here, in shard 0 only (its one entry would be ``k = 0``). The
+        run's sample counts and ``samples.jsonl`` count the cases this returns and those graphs.
+        """
+        listed = {}
+        self._list_catalogs(sp, samples, listed)
+        shard = self.args.catalog_shard
+        cases = []
+        for s in samples:
+            status, reason, catalog, engine = listed[s.case_id]
+            if status == "error":
+                if shard is not None and shard[0] != 0:
+                    continue
+                self._catalog_graphs.append(
+                    {
+                        "space": sp.space_id,
+                        "graph": s.case_id,
+                        "status": status,
+                        "reason": reason,
+                        "engine": engine,
+                        "catalog": [],
+                        "selected": [],
+                    }
+                )
+                self.generated[sp.space_id] = self.generated.get(sp.space_id, 0) + 1
+                self._write_samples(sp, [s])
+                self._finish(
+                    sp, s, "UNEXERCISED", "setup", f"catalog listing: {reason}"
+                )
+                continue
+            kept = [
+                CandidateSample(s, f"{s.case_id}c{k}", c)
+                for k, c in shard_candidates(catalog, shard)
+            ]
+            self._catalog_graphs.append(
+                {
+                    "space": sp.space_id,
+                    "graph": s.case_id,
+                    "status": status,
+                    "reason": reason,
+                    "engine": engine,
+                    "catalog": [c["id"] for c in catalog],
+                    "selected": [(c.case_id, c.variant["id"]) for c in kept],
+                }
+            )
+            self.generated[sp.space_id] = self.generated.get(sp.space_id, 0) + len(kept)
+            self._write_samples(sp, kept)
+            cases.extend(kept)
+        return cases
+
+    def _list_catalogs(self, sp, samples, out):
+        """``out[case id] = catalog_from_record(...)`` for every graph of ``samples``: one
+        ``--list-candidates`` run over their bundle. The records the binary wrote before it died
+        or hung count; the graphs it left without one are listed again in halves until the one
+        that kills the listing is alone (``error``), as ``_isolate`` does for a batch.
+        """
+        if not samples:
+            return
+        if self.abort.is_set():
+            for s in samples:
+                out[s.case_id] = (
+                    "error",
+                    "interrupted before the graph was listed",
+                    [],
+                    None,
+                )
+            return
+        self._write_bundle(sp, samples)
+        names = {self._test_name(sp, s): s for s in samples}
+        log_path, listing_path = self._next_invocation("catalog")
+        attempt = self._spawn(
+            self._command("catalog", list(names), candidates=listing_path),
+            log_path,
+            listing_path,
+        )
+        found = {r["test"]: r for r in attempt.records}
+        unresolved = []
+        for name, s in names.items():
+            if name in found:
+                out[s.case_id] = catalog_from_record(found[name])
+            else:
+                unresolved.append(s)
+        if not unresolved:
+            return
+        if attempt.aborted:
+            for s in unresolved:
+                out[s.case_id] = (
+                    "error",
+                    "interrupted before the graph was listed",
+                    [],
+                    None,
+                )
+            return
+        if not (attempt.hung or attempt.returncode != 0):
+            text = log_path.read_text(encoding="utf-8", errors="replace")
+            for s in unresolved:
+                message = self._load_message(
+                    text,
+                    s,
+                    "the binary wrote no listing record for this case (the harness skipped"
+                    " it at load)",
+                )
+                out[s.case_id] = ("error", message, [], None)
+            return
+        if len(unresolved) == 1:
+            what = "hung" if attempt.hung else f"died (exit code {attempt.returncode})"
+            last = [
+                ln.strip()
+                for ln in log_tail(attempt.log_path).splitlines()
+                if ln.strip()
+            ][-3:]
+            out[unresolved[0].case_id] = (
+                "error",
+                f"the binary {what} while listing candidates with only this case in the bundle"
+                + (f"; last output: {' | '.join(last)[:300]}" if last else ""),
+                [],
+                None,
+            )
+            return
+        mid = len(unresolved) // 2
+        self._list_catalogs(sp, unresolved[:mid], out)
+        self._list_catalogs(sp, unresolved[mid:], out)
+
+    def _check_forced(self, sp, sample, variant, result):
+        """A forced candidate's outcome record must say it ran that candidate
+        (``candidate_mismatch``, a failure of the run); its kernels, where it names any, should
+        carry that id after their last ``/`` (``kernel_mismatch``, only listed)."""
+        self._forced += 1
+        forced = variant["id"]
+        reported = result.get("candidate")
+        if reported != forced:
+            self._candidate_mismatch.append(
+                {
+                    "space": sp.space_id,
+                    "case": sample.case_id,
+                    "forced": forced,
+                    "reported": reported,
+                }
+            )
+            print(
+                f"  CANDIDATE MISMATCH: {sp.space_id} {sample.case_id} forced {forced!r}, the"
+                f" outcome record says {reported!r}",
+                flush=True,
+            )
+        kernels = result.get("kernels", [])
+        if forced != DEFAULT_CANDIDATE and any(
+            k.rsplit("/", 1)[-1] != forced for k in kernels
+        ):
+            self._kernel_mismatch.append(
+                {
+                    "space": sp.space_id,
+                    "case": sample.case_id,
+                    "forced": forced,
+                    "kernels": kernels,
+                }
+            )
+            print(
+                f"  kernel mismatch (not a failure): {sp.space_id} {sample.case_id} forced"
+                f" {forced!r}, kernels {kernels}",
+                flush=True,
+            )
+
+    # -- pairwise --------------------------------------------------------
+
+    def _run_pairwise(self):
+        """Every row of each space's pairwise covering set, then up to ``--pairwise-repair`` rounds
+        of new rows for the tuples that were only declined or unexercised. Generation (the build
+        and every repair round) is bounded by ``--pairwise-budget`` and ``--time-budget``: once
+        it is cut, the rows built so far run, no further round starts and the run stops with
+        ``pairwise-budget``."""
+        a = self.args
+        self._pairwise = build_pairwise(a, self.spaces, self._generation_budget)
+        sources = {}
+        for sp in self.spaces:
+            state = self._pairwise[sp.space_id]
+            sources[sp.space_id] = _ListSource(state.sample_rows(state.result.rows, a))
+        self._write_pairwise_reports()
+        if not self._loop(sources):
+            return
+        for round_number in range(1, a.pairwise_repair + 1):
+            if self._generation_cut():
+                break
+            sources = self._repair_round(round_number)
+            if not sources:
+                break
+            if not self._loop(sources):
+                return
+        self.stop_reason = self.stop_reason or (
+            "pairwise-budget" if self._generation_cut() else "pairwise-complete"
+        )
+
+    def _generation_cut(self):
+        """Did the generation budget end the build or a repair round of some space?"""
+        return any(not s.generation_complete for s in self._pairwise.values())
+
+    def _records(self, sp):
+        """``(axis values, outcome)`` of every sample of ``sp`` the run recorded, in run order."""
+        return [
+            (self._coverage_axes[(sp.space_id, r["case"])], r["outcome"])
+            for r in self.results
+            if r["space"] == sp.space_id
+            and (sp.space_id, r["case"]) in self._coverage_axes
+        ]
+
+    def _repair_round(self, round_number):
+        """New rows (one source per space that has some) for the tuples whose every drawing row
+        was declined or unexercised, built from the levels that passed in this run."""
+        a = self.args
+        sources = {}
+        for sp in self.spaces:
+            state = self._pairwise[sp.space_id]
+            result = state.result
+            found = pairwise.repair_targets(
+                sp, self._records(sp), result.levels, result.liveness
+            )
+            targets = [t for t in found.targets if pair_key(t) not in state.unreachable]
+            if not targets:
+                continue
+            budget = self._generation_budget
+            with budget.charging():
+                repair = pairwise.repair(
+                    sp,
+                    a.seed,
+                    targets,
+                    found.allowed,
+                    round_number=round_number,
+                    stubborn=[t for t in targets if pair_key(t) in state.tried],
+                    witness=found.witness,
+                    liveness=result.liveness,
+                    **budget.limits(),
+                    progress=print_progress,
+                    progress_interval=PAIRWISE_PROGRESS_INTERVAL,
+                )
+            state.tried.update(pair_key(t) for t in repair.retried)
+            for finding in repair.unreachable:
+                state.unreachable[pair_key(finding.pair)] = finding
+            state.repair_budget_exceeded.extend(repair.budget_exceeded)
+            first = state.next_row
+            rows = state.sample_rows(repair.rows, a, repair_round=round_number)
+            state.repair_rows += len(rows)
+            state.never_passed = repair.never_passed
+            state.rounds.append(
+                {
+                    "round": round_number,
+                    "targets": len(targets),
+                    "retried": len(repair.retried),
+                    "never_passed": len(repair.never_passed),
+                    "unreachable": len(repair.unreachable),
+                    "budget_exceeded": len(repair.budget_exceeded),
+                    "rows": len(rows),
+                    "first_row": first if rows else None,
+                    "timings": {k: round(v, 3) for k, v in repair.timings.items()},
+                    "unreachable_tuples": [
+                        finding_json(f) for f in repair.unreachable[:MAX_LISTED_TUPLES]
+                    ],
+                }
+            )
+            print(
+                f"  repair round {round_number} {sp.space_id}: {len(targets)} tuples to retry,"
+                f" {len(repair.never_passed)} never passed, {len(repair.unreachable)}"
+                f" unreachable, {len(rows)} rows"
+                + (
+                    ""
+                    if repair.generation_complete
+                    else f"; the budget ended it: {len(repair.budget_exceeded)} tuples unsettled"
+                ),
+                flush=True,
+            )
+            if rows:
+                sources[sp.space_id] = _ListSource(rows)
+        self._write_pairwise_reports()
+        return sources
+
+    def _pair_coverage(self):
+        """``summary.json`` ``pair_coverage``: per space, how much of the tuple universe the run
+        drew and passed (``coverage_summary``), with the rows it ran."""
+        found = {}
+        for sp in self.spaces:
+            state = self._pairwise.get(sp.space_id)
+            if state is None:
+                continue
+            r = state.result
+            flagged = {
+                "illegal": [f.pair for f in r.illegal],
+                "dead": [f.pair for f in r.dead],
+                "unproven": [f.pair for f in r.unproven],
+                "budget_exceeded": [f.pair for f in state.budget_exceeded],
+            }
+            found[sp.space_id] = {
+                **coverage_summary(
+                    sp, r.levels, flagged, self._records(sp), r.liveness
+                ),
+                "rows": len(r.rows),
+                "repair_rows": state.repair_rows,
+                "generation_complete": state.generation_complete,
+                "complete": self.stop_reason == "pairwise-complete"
+                and state.generation_complete,
+            }
+        return found
+
+    def _write_pairwise_reports(self):
+        for state in self._pairwise.values():
+            write_pairwise_report(self.work, state, self.args)
+
+    # -- bundles ---------------------------------------------------------
+
+    def _write_bundle(self, sp, samples):
+        """One sweep directory per input dtype tag (``dtype_tag``), samples in draw order; what
+        an earlier batch left under ``bundles/gauntlet`` is removed first."""
+        root = self.bundles / "gauntlet"
+        if root.exists():
+            shutil.rmtree(root)
+        write_sweeps(root, sp, samples)
+
+    def _test_name(self, sp, sample):
+        """The GTest name the harness registers: the suite of the sweep directory (the
+        sanitized path joined by ``_``, as in ``BundleDiscovery.hpp``) and the case id.
+        """
+        tag = dtype_tag(sp, sample)
+        suite = (
+            sp.suite_name if tag is None else f"{sp.suite_name}_{dtype_directory(tag)}"
+        )
+        return f"{suite}.{re.sub(r'[^A-Za-z0-9_]', '_', sample.case_id)}"
+
+    # -- invoking the binary --------------------------------------------
+
+    def _next_invocation(self, kind):
+        self._invocation += 1
+        stem = f"{self._invocation:05d}-{kind}"
+        return self.logs / f"{stem}.log", self.reports / f"{stem}.jsonl"
+
+    def _command(self, kind, names, report=None, bundles=None, candidates=None):
+        root = self.bundles if bundles is None else bundles
+        cmd = list(self.binary_cmd) + ["--golden-data-dir", str(root)]
+        if report is not None:
+            cmd += ["--outcome-report", str(report)]
+        if candidates is not None:
+            cmd += ["--list-candidates", str(candidates)]
+        if names is not None:
+            cmd.append("--gtest_filter=" + ":".join(names))
+        if kind in ("list", "preflight"):
+            cmd.append("--gtest_list_tests")
+        a = self.args
+        for flag, value in (
+            ("--test-article", a.test_article),
+            ("--test-engine", a.test_engine),
+            ("--test-config", a.test_config),
+        ):
+            if value:
+                cmd += [flag, value]
+        return cmd + list(a.binary_arg)
+
+    def _spawn(self, cmd, log_path, report_path=None):
+        """Run ``cmd`` with a hang watchdog; ``report_path`` is tailed for started/finished."""
+        result = ProcResult()
+        result.log_path = log_path
+        kwargs = {}
+        if os.name == "nt":
+            kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
+        else:
+            kwargs["start_new_session"] = (
+                True  # a terminal SIGINT must not reach the binary
+            )
+        offset = 0
+        pending = b""
+        last_progress = time.monotonic()
+
+        def drain():
+            nonlocal offset, pending, last_progress
+            if report_path is None:
+                return
+            try:
+                with open(report_path, "rb") as f:
+                    f.seek(offset)
+                    data = f.read()
+            except OSError:
+                return
+            offset += len(data)
+            pending += data
+            *lines, pending = pending.split(b"\n")
+            for line in lines:
+                if not line.strip():
+                    continue
+                try:
+                    record = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if isinstance(record, dict) and isinstance(record.get("test"), str):
+                    result.records.append(record)
+                    last_progress = time.monotonic()
+
+        with open(log_path, "wb") as log:
+            proc = subprocess.Popen(
+                cmd,
+                stdin=subprocess.DEVNULL,
+                stdout=log,
+                stderr=subprocess.STDOUT,
+                **kwargs,
+            )
+            while True:
+                rc = proc.poll()
+                drain()
+                if rc is not None:
+                    result.returncode = rc
+                    break
+                if self.abort.is_set():
+                    result.aborted = True
+                    kill_tree(proc)
+                    result.returncode = proc.returncode
+                    break
+                if time.monotonic() - last_progress > self.args.case_timeout:
+                    result.hung = True
+                    kill_tree(proc)
+                    result.returncode = proc.returncode
+                    break
+                try:
+                    proc.wait(POLL_SECONDS)  # returns the moment the binary exits
+                except subprocess.TimeoutExpired:
+                    pass
+        drain()
+        return result
+
+    # -- one batch -------------------------------------------------------
+
+    def _execute(self, sp, samples):
+        """Run ``samples`` of ``sp``; each ends in ``self.results`` exactly once."""
+        if not samples:
+            return
+        if self.abort.is_set():
+            for s in samples:
+                self._finish(
+                    sp, s, "UNEXERCISED", "setup", "interrupted before the case ran"
+                )
+            return
+        self._write_bundle(sp, samples)
+        names = [self._test_name(sp, s) for s in samples]
+        log_path, _ = self._next_invocation("list")
+        listing = self._spawn(self._command("list", names), log_path)
+        listing_text = log_path.read_text(encoding="utf-8", errors="replace")
+        if listing.aborted:
+            for s in samples:
+                self._finish(
+                    sp, s, "UNEXERCISED", "setup", "interrupted before the case ran"
+                )
+            return
+        # Nothing after the zero-tests diagnostic is a test name (it echoes the filter).
+        listed = parse_listing(listing_text.split(ZERO_TESTS_MARKER, 1)[0])
+        # A listing that selects nothing makes the real binary print "Error: zero tests
+        # ran." and exit 1 (main.cpp). That is "nothing registered", answered below per case
+        # with the load message; only a hang, a signal or any other non-zero exit is a crash
+        # while registering, and that is bisected.
+        nothing_registered = ZERO_TESTS_MARKER in listing_text and not listed
+        if listing.hung or (listing.returncode != 0 and not nothing_registered):
+            self._isolate(sp, samples, listing, "while listing tests")
+            return
+        remaining = []
+        for s, name in zip(samples, names):
+            if name in listed:
+                remaining.append(s)
+            else:
+                self._finish(
+                    sp,
+                    s,
+                    "UNEXERCISED",
+                    "setup",
+                    "load: " + self._load_message(listing_text, s),
+                )
+        while remaining:
+            names = [self._test_name(sp, s) for s in remaining]
+            log_path, report_path = self._next_invocation("run")
+            attempt = self._spawn(
+                self._command("run", names, report_path), log_path, report_path
+            )
+            resolved, unresolved = self._classify(sp, remaining, names, attempt)
+            if self.abort.is_set() or attempt.aborted:
+                for s in unresolved:
+                    self._finish(
+                        sp, s, "UNEXERCISED", "setup", "interrupted before the case ran"
+                    )
+                return
+            if not unresolved:
+                return
+            if resolved == 0:
+                if attempt.returncode == 0:
+                    for s in unresolved:
+                        self._finish(
+                            sp, s, "UNEXERCISED", "setup",
+                            "the binary exited 0 without an outcome record for this case",
+                        )  # fmt: skip
+                    return
+                self._isolate(sp, unresolved, attempt, "before any case started")
+                return
+            if attempt.returncode == 0:
+                for s in unresolved:
+                    self._finish(
+                        sp, s, "UNEXERCISED", "setup",
+                        "the binary exited 0 without an outcome record for this case",
+                    )  # fmt: skip
+                return
+            remaining = unresolved  # crash recovery: run the rest again
+
+    def _classify(self, sp, remaining, names, attempt):
+        """Record the outcome of every sample the attempt resolved; return (count, unresolved)."""
+        finished = attempt.finished
+        started = set(attempt.started)
+        tail = None
+        unresolved = []
+        resolved = 0
+        for s, name in zip(remaining, names):
+            record = finished.get(name)
+            if record is not None:
+                self._finish_record(sp, s, record, attempt)
+                resolved += 1
+            elif name in started and not attempt.aborted:
+                tail = tail if tail is not None else log_tail(attempt.log_path)
+                if attempt.hung:
+                    reason = (
+                        f"hang: the case ran longer than the {self.args.case_timeout:g}s case"
+                        " timeout; the process tree was killed"
+                    )
+                    kind = "hang"
+                else:
+                    reason = (
+                        f"the binary died (exit code {attempt.returncode}) after starting the"
+                        " case, before its finished record"
+                    )
+                    kind = "death"
+                self._finish(
+                    sp,
+                    s,
+                    "CRASH",
+                    "execute",
+                    reason,
+                    crash_kind=kind,
+                    log=tail,
+                    attempt=attempt,
+                )
+                resolved += 1
+            else:
+                unresolved.append(s)
+        return resolved, unresolved
+
+    def _isolate(self, sp, samples, attempt, phase):
+        """The binary died or hung with no case started: bisect to the case that does it."""
+        if len(samples) == 1:
+            what = "hung" if attempt.hung else f"died (exit code {attempt.returncode})"
+            last = [
+                ln.strip()
+                for ln in log_tail(attempt.log_path).splitlines()
+                if ln.strip()
+            ][-3:]
+            self._finish(
+                sp, samples[0], "UNEXERCISED", "setup",
+                f"load-crash: the binary {what} {phase} with only this case in the bundle"
+                + (f"; last output: {' | '.join(last)[:300]}" if last else ""),
+            )  # fmt: skip
+            return
+        mid = len(samples) // 2
+        self._execute(sp, samples[:mid])
+        self._execute(sp, samples[mid:])
+
+    @staticmethod
+    def _load_message(
+        listing_text,
+        sample,
+        default="absent from --gtest_list_tests (the harness skipped the case at load)",
+    ):
+        pattern = re.compile(
+            r"(?<![A-Za-z0-9_])" + re.escape(sample.case_id) + r"(?![A-Za-z0-9_])"
+        )
+        # Only what the binary printed before its zero-tests diagnostic can be a load
+        # message; the diagnostic itself echoes the whole --gtest_filter, case ids included.
+        text = listing_text.split(ZERO_TESTS_MARKER, 1)[0]
+        lines = [
+            ln.strip()
+            for ln in text.splitlines()
+            if pattern.search(ln) and not GTEST_FILTER_LINE.match(ln)
+        ]
+        if lines:
+            return " | ".join(lines[:3])[:400]
+        return default
+
+    # -- outcomes --------------------------------------------------------
+
+    def _finish_record(self, sp, sample, record, attempt):
+        outcome = record.get("outcome")
+        reason = record.get("reason") or ""
+        stage = record.get("stage")
+        if outcome not in OUTCOMES:
+            reason = f"unrecognized outcome {outcome!r} in the outcome record. {reason}".strip()
+            outcome = "UNEXERCISED"
+        self._finish(sp, sample, outcome, stage, reason, record=record, attempt=attempt)
+
+    @staticmethod
+    def _accepted_below_full(sample, outcome, reason):
+        """``(outcome, reason)`` of a probe case run below the ``full`` enforcement level.
+
+        An engine that accepted a case whose bundle stops at ``applicability`` or ``buildable``
+        (an overflow probe above the oracle ceiling) reported ``PASS``, but nothing compared its
+        output: the driver records ``UNEXERCISED`` with ``ACCEPTED_ABOVE_CEILING`` instead, so
+        an unverified accept is never a pass (RFC 0023 section 9.1).
+        """
+        level = sample.row.get("metadata", {}).get("enforcement_level")
+        if (
+            sample.expect is not None
+            and level in BELOW_FULL_LEVELS
+            and outcome in ("PASS", "UNCLAIMED_PASS")
+        ):
+            return (
+                "UNEXERCISED",
+                f"{ACCEPTED_ABOVE_CEILING} (enforcement_level={level})",
+            )
+        return outcome, reason
+
+    def _finish(
+        self,
+        sp,
+        sample,
+        outcome,
+        stage,
+        reason,
+        record=None,
+        crash_kind=None,
+        log=None,
+        attempt=None,
+    ):
+        outcome, reason = self._accepted_below_full(sample, outcome, reason)
+        verdict = expectation_verdict(sample.expect, outcome, reason)
+        engine = (record or {}).get("engine")
+        arch = (record or {}).get("arch")
+        result = {
+            "space": sp.space_id,
+            "case": sample.case_id,
+            "test": self._test_name(sp, sample),
+            "shape_seed": sample.shape_seed,
+            "data_seed": sample.data_seed,
+            "outcome": outcome,
+            "stage": stage,
+            "reason": reason,
+            "engine": engine,
+            "arch": arch,
+            "source": "binary" if record is not None else "driver",
+        }
+        if verdict is not None:
+            result["expect"] = sample.expect
+            result["expectation"] = "violated" if verdict else "met"
+            if verdict:
+                result["violation"] = verdict
+        if record is not None:
+            for key in ("purpose", "depth", "origin", "verifier", "platform"):
+                if key in record:
+                    result[key] = record[key]
+            kernels = record.get("kernels")
+            if isinstance(kernels, list) and kernels:
+                result["kernels"] = [str(k) for k in kernels]
+            ref_ms = record.get("reference_ms")
+            if isinstance(ref_ms, (int, float)) and not isinstance(ref_ms, bool):
+                result["reference_ms"] = ref_ms
+                ref_lane = record.get("reference_lane")
+                if isinstance(ref_lane, str):
+                    result["reference_lane"] = ref_lane
+        variant = getattr(sample, "variant", None)
+        if variant is not None:
+            result["forced_candidate"] = variant["id"]
+        if record is not None and isinstance(record.get("candidate"), str):
+            result["candidate"] = record["candidate"]
+        if crash_kind:
+            result["crash_kind"] = crash_kind
+        if self._candidate_sink is not None:
+            # A shrink candidate is classified like any sample but belongs to no count,
+            # record or artifact of the run (see ``_run_candidate``).
+            self._candidate_sink.append((result, record))
+            return
+        if engine:
+            self.engines_seen[engine] = self.engines_seen.get(engine, 0) + 1
+        if arch and self.arch_seen is None:
+            self.arch_seen = arch
+        if variant is not None and record is not None:
+            self._check_forced(sp, sample, variant, result)
+        self._outcome_axes[(sp.space_id, sample.case_id)] = {
+            name: sample.axis_values[name]
+            for name, axis in sp.axes.items()
+            if not axis.is_range and name in sample.axis_values
+        }
+        if self.args.pairwise:
+            # Every axis, range axes too, and never a shrink candidate (they returned above).
+            self._coverage_axes[(sp.space_id, sample.case_id)] = sample.axis_values
+        if outcome in FAILING:
+            # The fault folder exists before the run goes on.
+            result["failure_dir"] = str(self.failures / self._case_dir_name(sp, sample))
+            result["replay"] = self._replay_text(sp, sample)
+            if log is None:
+                log = log_tail(attempt.log_path) if attempt is not None else ""
+            self._write_failure(sp, sample, result, record, log)
+            print(f"  {outcome}: {sp.space_id} {sample.case_id}: {reason}", flush=True)
+            print(f"    artifacts: {result['failure_dir']}", flush=True)
+            print(f"    replay: {result['replay']}", flush=True)
+            if self.args.shrink:
+                self._pending_shrink.append((sp, sample, result, record))
+        self.results.append(result)
+        self._outcomes_file.write(json.dumps(result) + "\n")
+        self._outcomes_file.flush()
+
+    # -- fault artifacts -------------------------------------------------
+
+    def _run_engine(self):
+        if self.args.test_engine:
+            return self.args.test_engine
+        if self.engines_seen:
+            return max(self.engines_seen, key=self.engines_seen.get)
+        return None
+
+    @staticmethod
+    def _freeze_command(graph):
+        """``import_graph.py`` on a failure's graph; absolute paths, so it runs from anywhere."""
+        return shlex.join(
+            [
+                sys.executable,
+                str((MIGRATION_DIR / "import_graph.py").resolve()),
+                "--graph",
+                str(Path(graph).resolve()),
+                "--bundle-dir",
+                str((HERE.parent / "integration-test-bundles").resolve()),
+                "--tier",
+                "quick",
+            ]
+        )
+
+    def _row_spec(self, sp, sample):
+        """The ``--row`` file content that renders ``sample`` again."""
+        spec = {
+            "space": sp.space_id,
+            "axes": sample.axis_values,
+            "data_seed": sample.data_seed,
+            "case_id": sample.case_id,
+        }
+        variant = getattr(sample, "variant", None)
+        if variant is not None:
+            spec["engine_variant"] = {"id": variant["id"], "knobs": variant["knobs"]}
+        return spec
+
+    def _replay_argv(self, sp, sample, work_dir, row_path, as_row=False):
+        a = self.args
+        # A drawn sample replays from its seeds; an explicit row (a --row sample, a pairwise
+        # row) has none, so it replays from the row file the failure folder keeps, and so does
+        # a shrunk sample (``as_row``).
+        if as_row or is_explicit_row(sample):
+            which = ["--row", str(row_path)]
+        else:
+            which = [
+                "--filter", f"^{sp.operation}/{sp.name}$",
+                "--seed", str(sample.shape_seed),
+                "--samples", "1",
+                "--data-seed", str(sample.data_seed),
+                "--time-budget", "0",
+            ]  # fmt: skip
+        argv = [
+            sys.executable, str(DRIVER_PATH),
+            *which,
+            "--case-timeout", f"{a.case_timeout:g}s",
+            "--binary", self.binary_text,
+            "--work-dir", str(work_dir),
+        ]  # fmt: skip
+        for flag, value in (
+            ("--test-article", a.test_article),
+            ("--test-engine", a.test_engine),
+            ("--test-config", a.test_config),
+        ):
+            if value:
+                argv += [flag, value]
+        if Path(a.spaces_dir).resolve() != space_lib.DEFAULT_SPACES_DIR.resolve():
+            argv += ["--spaces-dir", str(Path(a.spaces_dir).resolve())]
+        for extra in a.binary_arg:
+            argv.append(f"--binary-arg={extra}")
+        return argv
+
+    def _replay_env(self):
+        env_set = {
+            k: v
+            for k, v in sorted(os.environ.items())
+            if k.startswith("HIPDNN_")
+            and not k.startswith("HIPDNN_FUZZ_")
+            and k != "HIPDNN_TEST_DUMP_DIR"
+        }
+        env_unset = [] if HOST_FILL_ENV in env_set else [HOST_FILL_ENV]
+        return env_set, env_unset
+
+    def _replay_command(self, argv, env_set, env_unset):
+        prefix = []
+        if env_set or env_unset:
+            prefix = ["env"]
+            for name in env_unset:
+                prefix += ["-u", name]
+            prefix += [f"{k}={v}" for k, v in env_set.items()]
+        return " ".join(_quote(t) for t in prefix + argv)
+
+    def _replay_text(self, sp, sample):
+        env_set, env_unset = self._replay_env()
+        folder = self.failures / self._case_dir_name(sp, sample)
+        return self._replay_command(
+            self._replay_argv(sp, sample, folder / "replay-work", folder / "row.json"),
+            env_set,
+            env_unset,
+        )
+
+    @staticmethod
+    def _case_dir_name(sp, sample):
+        return f"{sp.operation}_{sp.name}_{sample.case_id}"
+
+    def _write_graph_and_meta(
+        self, folder, case, sp, sample, reference_source, notes_prefix
+    ):
+        """``<case>.json`` (the sample's expanded graph, uids canonical when they can be) and
+        ``<case>.meta.json`` in ``folder``; returns the uid map."""
+        bu = self._bu
+        template = json.loads(sp.template_path.read_bytes())
+        expanded = bu.expand(template, sample.row["values"])
+        load_support_matrix_units().apply_case_patches(expanded, sample.row)
+        uid_map = bu.canonical_uid_map_by_name(expanded)
+        graph = bu.remap_graph(expanded, uid_map)
+        json_dump(folder / f"{case}.json", graph)
+
+        meta = dict(sample.row["metadata"])
+        meta["purpose"] = "regression"
+        meta["reference_source"] = (
+            f"gauntlet-fuzz: space {sp.space_id}, {reference_source}"
+        )
+        meta["notes"] = (
+            f"{notes_prefix} {sample.row['metadata'].get('notes', '')}".strip()
+        )
+        meta = bu.remap_meta_inputs(meta, uid_map)
+        json_dump(folder / f"{case}.meta.json", meta)
+        return uid_map
+
+    def _write_replay_script(self, folder, argv, comment, row_file="row.json"):
+        """``replay.sh`` in ``folder``: ``argv`` with its work and row paths relative to the
+        script's own directory; ``comment`` is the header lines."""
+        env_set, env_unset = self._replay_env()
+        script_argv = [
+            (
+                _Raw('"$D/replay-work"')
+                if t == str(folder / "replay-work")
+                else _Raw(f'"$D/{row_file}"') if t == str(folder / row_file) else t
+            )
+            for t in argv
+        ]
+        script_command = self._replay_command(script_argv, env_set, env_unset)
+        script = (
+            "#!/bin/sh\n"
+            f"{comment}"
+            'D=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)\n'
+            f"exec {script_command}\n"
+        )
+        write_text(folder / "replay.sh", script)
+        try:
+            os.chmod(folder / "replay.sh", 0o755)
+        except OSError:
+            pass
+
+    def _write_failure(self, sp, sample, result, record, tail):
+        """``<work>/failures/<case>/``: everything needed to replay or freeze a finding."""
+        case = self._case_dir_name(sp, sample)
+        explicit = is_explicit_row(sample)
+        folder = self.failures / case
+        folder.mkdir(parents=True, exist_ok=True)
+
+        uid_map = self._write_graph_and_meta(
+            folder,
+            case,
+            sp,
+            sample,
+            (
+                f"explicit row (case {sample.case_id})"
+                if explicit
+                else f"shape seed {sample.shape_seed}"
+            ),
+            f"{result['outcome']} found by gauntlet-fuzz.",
+        )
+
+        host_fill = host_input_fill()
+        env_set, env_unset = self._replay_env()
+        argv = self._replay_argv(
+            sp, sample, folder / "replay-work", folder / "row.json"
+        )
+        command = self._replay_command(argv, env_set, env_unset)
+        if explicit:
+            json_dump(folder / "row.json", self._row_spec(sp, sample))
+        engine = result["engine"] or self._run_engine()
+        a = self.args
+        repro = {
+            "tool": "run_gauntlet_fuzz.py",
+            "space": sp.space_id,
+            "space_file": str(sp.path),
+            "space_sha256": sp.space_sha256,
+            "template_file": str(sp.template_path),
+            "template_sha256": sp.template_sha256,
+            "case_id": sample.case_id,
+            "gtest_name": result["test"],
+            "shape_seed": sample.shape_seed,
+            "data_seed": sample.data_seed,
+            "axis_values": sample.axis_values,
+            "row": self._row_spec(sp, sample) if explicit else None,
+            "sweep_row": sample.row,
+            "uids_canonical": all(k == v for k, v in uid_map.items()),
+            "input_fill": {
+                "data_seed": sample.data_seed,
+                "recipes": sample.row["metadata"].get("inputs"),
+                "path": "host" if host_fill else "device",
+                HOST_FILL_ENV: os.environ.get(HOST_FILL_ENV),
+            },
+            "engine": engine,
+            "test_article": a.test_article,
+            "test_config": a.test_config,
+            "arch": result["arch"] or self.arch_seen,
+            "rocm_version": rocm_version(),
+            "git_sha": git_sha(),
+            "binary": a.binary,
+            "driver_flags": {
+                k: (str(v) if isinstance(v, Path) else v) for k, v in vars(a).items()
+            },
+            "driver_argv": list(sys.argv),
+            "hipdnn_env": {
+                k: v for k, v in sorted(os.environ.items()) if k.startswith("HIPDNN_")
+            },
+            "outcome": result["outcome"],
+            "replay": {
+                "argv": argv,
+                "env_set": env_set,
+                "env_unset": env_unset,
+                "command": command,
+            },
+        }
+        json_dump(folder / "repro.json", repro)
+        json_dump(folder / "outcome.json", {"result": result, "record": record})
+        write_text(folder / "log_tail.txt", tail)
+
+        axes_text = json.dumps(sample.axis_values, sort_keys=True)
+        if explicit:
+            what = f"Renders the same explicit row (axes {axes_text}, data seed"
+        else:
+            what = f"Regenerates the same sweep row (shape seed {sample.shape_seed}, data seed"
+        self._write_replay_script(
+            folder,
+            argv,
+            f"# Replay {case}: {result['outcome']} on {engine or 'unknown engine'}.\n"
+            f"# {what} {sample.data_seed}) and runs it alone.\n"
+            f"# Input fill path: {'host' if host_fill else 'device'} ({HOST_FILL_ENV}).\n",
+        )
+        write_text(
+            folder / "replay.txt",
+            f"{command}\n"
+            + (f"axes: {axes_text}\n" if explicit else "")
+            + f"input fill path: {'host' if host_fill else 'device'} ({HOST_FILL_ENV}="
+            f"{os.environ.get(HOST_FILL_ENV)!r})\n"
+            f"freeze: {self._freeze_command(folder / (case + '.json'))}\n",
+        )
+        return folder
+
+    # -- shrinking -------------------------------------------------------
+
+    def _shrink_pending(self):
+        """Shrink the WRONG and CRASH samples the last batch found (``--shrink``)."""
+        pending, self._pending_shrink = self._pending_shrink, []
+        for sp, sample, result, record in pending:
+            if self.stop.is_set():
+                break
+            self._shrink(sp, sample, result, record)
+
+    def _run_candidate(self, sp, candidate, work):
+        """The ``(result, record)`` the binary gives for a candidate sample, run as a one-case
+        batch in the sandbox ``work``: its own bundle root, logs and reports, so the candidate
+        never enters the run's outcomes, samples, counts or failure folders."""
+        saved = (self.bundles, self.logs, self.reports)
+        self.bundles, self.logs, self.reports = (
+            work / "bundles",
+            work / "logs",
+            work / "reports",
+        )
+        self.logs.mkdir(parents=True, exist_ok=True)
+        self.reports.mkdir(parents=True, exist_ok=True)
+        self._candidate_sink = []
+        try:
+            self._execute(sp, [candidate])
+            sink = self._candidate_sink
+        finally:
+            self._candidate_sink = None
+            self.bundles, self.logs, self.reports = saved
+        return sink[0] if sink else (None, None)
+
+    def _shrink(self, sp, sample, result, record):
+        """Reduce a finding's axis values while its outcome class stays the same, then write
+        ``failures/<case>/shrunk/``. The data seed and case id stay, so a candidate runs under
+        the GTest name of the finding's own suite and the engine TOML grades it the same way.
+        """
+        budget = self.args.shrink
+        work = self.work / "shrink" / self._case_dir_name(sp, sample)
+        print(
+            f"  shrinking {sp.space_id} {sample.case_id} (up to {budget} candidate runs)",
+            flush=True,
+        )
+        state = {"runs": 0, "best": (sample, result, record)}
+
+        def oracle(candidate):
+            if state["runs"] >= budget or self.stop.is_set():
+                raise sampler.ShrinkStop
+            state["runs"] += 1
+            got, got_record = self._run_candidate(sp, candidate, work)
+            if got is None or got["outcome"] != result["outcome"]:
+                return False
+            state["best"] = (candidate, got, got_record)
+            return True
+
+        axes, steps = sampler.shrink(
+            sp, sample.axis_values, sample.data_seed, sample.case_id, oracle
+        )
+        final, final_result, final_record = state["best"]
+        changes = {
+            name: [sample.axis_values[name], axes[name]]
+            for name in sp.axes
+            if json.dumps(sample.axis_values[name]) != json.dumps(axes[name])
+        }
+        folder = self._write_shrunk(
+            sp, sample, final, final_result, final_record, state["runs"], steps, changes
+        )
+        self._shrunk[(sp.space_id, sample.case_id)] = {
+            "runs": state["runs"],
+            "accepted_steps": steps,
+            "axes_changed": list(changes),
+            "changes": changes,
+            "replay_script": str(folder / "replay.sh"),
+        }
+
+    def _write_shrunk(
+        self, sp, original, final, final_result, final_record, runs, steps, changes
+    ):
+        """``<work>/failures/<case>/shrunk/``: the shrunk sample as a ``--row`` file, its axis
+        values, graph, meta, outcome and a replay of it."""
+        case = self._case_dir_name(sp, original)
+        folder = self.failures / case / "shrunk"
+        folder.mkdir(parents=True, exist_ok=True)
+        json_dump(folder / "sweep_row.json", self._row_spec(sp, final))
+        json_dump(
+            folder / "axes.json",
+            {
+                "original": original.axis_values,
+                "shrunk": final.axis_values,
+                "changed": list(changes),
+                "data_seed": final.data_seed,
+                "case_id": final.case_id,
+                "runs": runs,
+                "accepted_steps": steps,
+            },
+        )
+        outcome = final_result["outcome"]
+        self._write_graph_and_meta(
+            folder,
+            case,
+            sp,
+            final,
+            f"shrunk explicit row (case {final.case_id})",
+            f"{outcome} found by gauntlet-fuzz, shrunk from the sampled axis values.",
+        )
+        json_dump(
+            folder / "outcome.json", {"result": final_result, "record": final_record}
+        )
+        argv = self._replay_argv(
+            sp, final, folder / "replay-work", folder / "sweep_row.json", as_row=True
+        )
+        engine = final_result["engine"] or self._run_engine()
+        self._write_replay_script(
+            folder,
+            argv,
+            f"# Replay the shrunk {case}: {outcome} on {engine or 'unknown engine'}.\n"
+            f"# Renders the shrunk explicit row (axes {json.dumps(final.axis_values, sort_keys=True)},"
+            f" data seed {final.data_seed}) and runs it alone,\n"
+            f"# as GTest {final_result['test']}.\n"
+            f"# Input fill path: {'host' if host_input_fill() else 'device'} ({HOST_FILL_ENV}).\n",
+            row_file="sweep_row.json",
+        )
+        return folder
+
+    # -- summary ---------------------------------------------------------
+
+    def _print_batch(self, sp, samples, results):
+        counts = {}
+        for r in results:
+            counts[r["outcome"]] = counts.get(r["outcome"], 0) + 1
+        text = ", ".join(f"{k} {counts[k]}" for k in OUTCOMES if k in counts)
+        if is_explicit_row(samples[0]):
+            where = f"rows {samples[0].case_id}..{samples[-1].case_id}"
+        else:
+            where = f"seeds {samples[0].shape_seed}..{samples[-1].shape_seed}"
+        print(f"batch {sp.space_id} {where}: {text}", flush=True)
+
+    def _reason_key(self, reason):
+        """A reason with the work directory, dtype directories and case ids masked, so equal
+        causes group."""
+        text = (reason or "").replace(str(self.work), "<work>")
+        text = re.sub(
+            r"(?<![A-Za-z0-9])[a-z0-9]+_cases(?![A-Za-z0-9_])", "<dtype>_cases", text
+        )
+        return re.sub(r"(?<![A-Za-z0-9_])(?:s|pw)\d+(?![A-Za-z0-9_])", "<case>", text)[
+            :300
+        ]
+
+    def _catalog_summary(self, run_engine):
+        """``summary.json`` ``catalog``: per graph the size of its catalog (``candidates``), the
+        candidate ids this run's shard kept (``selected``) and the outcome of each
+        (``outcomes``: candidate id -> outcome); per engine the graphs, the candidates listed, the
+        cases run and the outcome totals. A graph whose listing failed has no candidates and
+        ``graph_outcome`` ``UNEXERCISED``. ``reconciled`` is true when every selected candidate
+        of every graph got exactly one outcome."""
+        by_case = {(r["space"], r["case"]): r for r in self.results}
+        graphs = []
+        engines = {}
+        reconciled = True
+        for g in self._catalog_graphs:
+            engine = g["engine"] or run_engine
+            e = engines.setdefault(
+                engine,
+                {
+                    "graphs": 0,
+                    "candidates": 0,
+                    "cases": 0,
+                    "unexercised_graphs": 0,
+                    "outcomes": dict.fromkeys(OUTCOMES, 0),
+                },
+            )
+            e["graphs"] += 1
+            entry = {
+                "space": g["space"],
+                "graph": g["graph"],
+                "status": g["status"],
+                "candidates": len(g["catalog"]),
+                "catalog": g["catalog"],
+                "selected": [cid for _, cid in g["selected"]],
+                "outcomes": {},
+            }
+            if g["reason"]:
+                entry["reason"] = g["reason"]
+            if g["status"] == "error":
+                r = by_case.get((g["space"], g["graph"]))
+                entry["graph_outcome"] = r["outcome"] if r else None
+                e["outcomes"]["UNEXERCISED"] += 1
+                e["unexercised_graphs"] += 1
+                reconciled = reconciled and r is not None
+            else:
+                e["candidates"] += len(g["catalog"])
+                for case_id, cid in g["selected"]:
+                    r = by_case.get((g["space"], case_id))
+                    if r is None:
+                        reconciled = False
+                        continue
+                    entry["outcomes"][cid] = r["outcome"]
+                    e["outcomes"][r["outcome"]] += 1
+                    e["cases"] += 1
+            graphs.append(entry)
+        shard = self.args.catalog_shard
+        return {
+            "shard": f"{shard[0]}/{shard[1]}" if shard else None,
+            "graphs": graphs,
+            "engines": engines,
+            "reconciled": reconciled,
+        }
+
+    def summarize(self):
+        run_engine = self._run_engine() or "unknown"
+        engines = {}
+        totals = dict.fromkeys(OUTCOMES, 0)
+        for r in self.results:
+            engine = r["engine"] or run_engine
+            e = engines.setdefault(
+                engine,
+                {
+                    "samples": 0,
+                    "outcomes": dict.fromkeys(OUTCOMES, 0),
+                    "kernels": {},
+                    "kernel_unreported": 0,
+                    "spaces": {},
+                },
+            )
+            sp = e["spaces"].setdefault(
+                r["space"],
+                {
+                    "samples": 0,
+                    "outcomes": dict.fromkeys(OUTCOMES, 0),
+                    "declined_reasons": {},
+                    "unexercised_reasons": {},
+                    "crash_reasons": {},
+                    "wrong": [],
+                    "crash": [],
+                    "expectations": {"met": 0, "violated": 0, "violations": []},
+                },
+            )
+            for bucket in (e, sp):
+                bucket["samples"] += 1
+                bucket["outcomes"][r["outcome"]] += 1
+            totals[r["outcome"]] += 1
+            for kernel in r.get("kernels", ()):
+                e["kernels"][kernel] = e["kernels"].get(kernel, 0) + 1
+            if reached_execute(r) and not r.get("kernels"):
+                e["kernel_unreported"] += 1
+            reason = self._reason_key(r["reason"])
+            if r["outcome"] == "DECLINED":
+                sp["declined_reasons"][reason] = (
+                    sp["declined_reasons"].get(reason, 0) + 1
+                )
+            elif r["outcome"] == "UNEXERCISED":
+                sp["unexercised_reasons"][reason] = (
+                    sp["unexercised_reasons"].get(reason, 0) + 1
+                )
+            elif r["outcome"] == "CRASH":
+                sp["crash_reasons"][reason] = sp["crash_reasons"].get(reason, 0) + 1
+                sp["crash"].append(r["case"])
+            elif r["outcome"] == "WRONG":
+                sp["wrong"].append(r["case"])
+            expectation = r.get("expectation")
+            if expectation is not None:
+                sp["expectations"][expectation] += 1
+                if expectation == "violated":
+                    sp["expectations"]["violations"].append(
+                        {
+                            "case": r["case"],
+                            "outcome": r["outcome"],
+                            "expected": r["expect"],
+                            "reason": r["violation"],
+                        }
+                    )
+        axis_outcomes = {}
+        for r in self.results:
+            axes = self._outcome_axes.get((r["space"], r["case"]), {})
+            for name, value in axes.items():
+                counts = (
+                    axis_outcomes.setdefault(r["space"], {})
+                    .setdefault(name, {})
+                    .setdefault(str(value), dict.fromkeys(OUTCOMES, 0))
+                )
+                counts[r["outcome"]] += 1
+        per_space_results = {}
+        for r in self.results:
+            per_space_results[r["space"]] = per_space_results.get(r["space"], 0) + 1
+        reconciled = per_space_results == {
+            k: v for k, v in self.generated.items() if v
+        } and sum(totals.values()) == sum(self.generated.values())
+        findings = []
+        for r in self.results:
+            if r["outcome"] in FAILING:
+                finding = {
+                    "space": r["space"],
+                    "case": r["case"],
+                    "outcome": r["outcome"],
+                    "reason": r["reason"],
+                    "failure_dir": r.get("failure_dir"),
+                    "replay": r.get("replay"),
+                }
+                shrunk = self._shrunk.get((r["space"], r["case"]))
+                if shrunk is not None:
+                    finding["shrunk"] = {
+                        k: shrunk[k] for k in ("runs", "accepted_steps", "axes_changed")
+                    }
+                findings.append(finding)
+        a = self.args
+        failed = bool(totals["WRONG"] or totals["CRASH"] or self._candidate_mismatch)
+        return {
+            "mode": "pairwise" if a.pairwise else "row" if a.row_spec else "random",
+            "seed": a.seed,
+            "row": a.row_spec,
+            "data_seed": a.data_seed,
+            "samples_per_space": a.samples or None,
+            "continuous": not a.samples and not a.pairwise,
+            "time_budget_seconds": a.time_budget,
+            "shrink_budget": a.shrink,
+            "stopped_because": self.stop_reason,
+            "elapsed_seconds": (
+                round(time.monotonic() - self._started_at, 3) if self._started_at else 0
+            ),
+            "started_at": self._started_wall.isoformat() if self._started_at else None,
+            "binary": a.binary,
+            "test_article": a.test_article,
+            "test_engine": a.test_engine,
+            "test_config": a.test_config,
+            "arch": self.arch_seen,
+            "engine": run_engine,
+            "spaces": [s.space_id for s in self.spaces],
+            "samples": sum(self.generated.values()),
+            "samples_by_space": dict(self.generated),
+            "outcomes": totals,
+            "reconciled": reconciled,
+            "axis_outcomes": axis_outcomes,
+            "engines": engines,
+            "findings": findings,
+            **({"pair_coverage": self._pair_coverage()} if a.pairwise else {}),
+            **({"catalog": self._catalog_summary(run_engine)} if a.catalog else {}),
+            **(
+                {
+                    "candidate_mismatch": self._candidate_mismatch,
+                    "kernel_mismatch": self._kernel_mismatch,
+                }
+                if a.catalog or self._forced
+                else {}
+            ),
+            "work_dir": str(self.work),
+            "exit_code": 1 if failed else 0,
+        }
+
+    def _print_report(self, summary):
+        print("", flush=True)
+        print(
+            f"gauntlet fuzz report (seed {summary['seed']}, stopped: {summary['stopped_because']})"
+        )
+        for engine, e in summary["engines"].items():
+            if e["kernels"] or e["kernel_unreported"]:
+                named = ", ".join(
+                    f"{name} x{n}"
+                    for name, n in sorted(e["kernels"].items(), key=lambda kv: -kv[1])
+                )
+                print(
+                    f"  {engine} kernels: {named or 'none'};"
+                    f" {e['kernel_unreported']} executed without a kernel line"
+                )
+            for space_id, sp in e["spaces"].items():
+                o = sp["outcomes"]
+                print(
+                    f"  {engine} {space_id}: {o['PASS'] + o['UNCLAIMED_PASS']} of {sp['samples']}"
+                    f" passed; {o['DECLINED']} declined; {o['WRONG']} wrong; {o['CRASH']} crashed;"
+                    f" {o['UNEXERCISED']} unexercised"
+                )
+                for title, key in (
+                    ("declined", "declined_reasons"),
+                    ("unexercised", "unexercised_reasons"),
+                    ("crash", "crash_reasons"),
+                ):
+                    for reason, n in sorted(sp[key].items(), key=lambda kv: -kv[1]):
+                        print(f"      {title} x{n}: {reason}")
+                ex = sp["expectations"]
+                if ex["met"] or ex["violated"]:
+                    print(
+                        f"      expectations: {ex['met']} met, {ex['violated']} violated"
+                    )
+                    for v in ex["violations"][:MAX_PRINTED_FINDINGS]:
+                        print(
+                            f"        violated {v['case']}: {v['outcome']}, expected"
+                            f" {v['expected']}: {v['reason']}"
+                        )
+                    if len(ex["violations"]) > MAX_PRINTED_FINDINGS:
+                        print(
+                            f"        ... {len(ex['violations']) - MAX_PRINTED_FINDINGS}"
+                            " more violations in the summary"
+                        )
+        for space_id, cov in summary.get("pair_coverage", {}).items():
+            print(
+                f"  pairwise {space_id}: {cov['tuples']} tuples, {cov['illegal']} illegal,"
+                f" {cov['dead']} dead, {cov['unproven']} unproven"
+                + (
+                    f", {cov['budget_exceeded']} budget exceeded"
+                    if cov["budget_exceeded"]
+                    else ""
+                )
+                + f"; drawn {cov['drawn']},"
+                f" passed {cov['passed']}, declined only {cov['declined_only']}, never passed"
+                f" {cov['never_passed']}; {cov['rows']} rows + {cov['repair_rows']} repair"
+                + (
+                    ""
+                    if cov["generation_complete"]
+                    else " (INCOMPLETE: the pairwise budget ended generation)"
+                )
+                + (
+                    ""
+                    if cov["complete"] or not cov["generation_complete"]
+                    else " (INCOMPLETE: the run stopped early)"
+                )
+            )
+        catalog = summary.get("catalog")
+        if catalog is not None:
+            for engine, e in catalog["engines"].items():
+                counts = ", ".join(f"{k} {n}" for k, n in e["outcomes"].items() if n)
+                print(
+                    f"  catalog {engine}: {e['graphs']} graphs, {e['candidates']} candidates"
+                    f" listed, {e['cases']} run ({counts or 'none'})"
+                    + (
+                        f"; {e['unexercised_graphs']} graphs could not be listed"
+                        if e["unexercised_graphs"]
+                        else ""
+                    )
+                )
+            for g in catalog["graphs"][:MAX_PRINTED_GRAPHS]:
+                counts = {}
+                for outcome in g["outcomes"].values():
+                    counts[outcome] = counts.get(outcome, 0) + 1
+                text = ", ".join(f"{k} {counts[k]}" for k in OUTCOMES if k in counts)
+                if g["status"] == "error":
+                    text = f"{g['graph_outcome']}: {g['reason']}"
+                print(
+                    f"    {g['space']} {g['graph']} [{g['status']}]: {len(g['selected'])} of"
+                    f" {g['candidates']} candidates: {text or 'none run'}"
+                )
+            if len(catalog["graphs"]) > MAX_PRINTED_GRAPHS:
+                print(
+                    f"    ... {len(catalog['graphs']) - MAX_PRINTED_GRAPHS} more graphs in the summary"
+                )
+            if not catalog["reconciled"]:
+                print("  WARNING: a listed candidate has no outcome")
+        for title, key in (
+            ("CANDIDATE MISMATCH", "candidate_mismatch"),
+            ("kernel mismatch (not a failure)", "kernel_mismatch"),
+        ):
+            for m in summary.get(key, [])[:MAX_PRINTED_FINDINGS]:
+                print(f"  {title}: {m['space']} {m['case']} forced {m['forced']!r}")
+        if not summary["reconciled"]:
+            print("  WARNING: outcomes do not add up to samples")
+        shown = summary["findings"][:MAX_PRINTED_FINDINGS]
+        for f in shown:
+            print(f"  {f['outcome']} {f['space']} {f['case']}")
+            print(f"    replay: {f['replay']}")
+            shrunk = self._shrunk.get((f["space"], f["case"]))
+            if shrunk is not None:
+                moved = ", ".join(
+                    f"{name} {json.dumps(old)} -> {json.dumps(new)}"
+                    for name, (old, new) in shrunk["changes"].items()
+                )
+                print(
+                    f"    shrunk: {moved or 'no simpler axis value kept the outcome'}"
+                    f" ({shrunk['runs']} runs, {shrunk['accepted_steps']} steps);"
+                    f" replay: sh {shrunk['replay_script']}"
+                )
+        if len(summary["findings"]) > len(shown):
+            print(
+                f"  ... {len(summary['findings']) - len(shown)} more findings in the summary"
+            )
+        print(f"summary: {self.summary_path}")
+
+
+# --------------------------------------------------------------------------
+# Command line
+# --------------------------------------------------------------------------
+
+
+def _env_default(name, convert, parser):
+    raw = os.environ.get(name)
+    if raw is None or raw == "":
+        return None
+    try:
+        return convert(raw)
+    except ValueError as e:
+        parser.error(f"{name}={raw!r}: {e}")
+
+
+def build_parser():
+    p = argparse.ArgumentParser(
+        prog="run_gauntlet_fuzz.py",
+        description=__doc__,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    p.add_argument(
+        "--binary",
+        help="hipdnn_integration_tests (path, .py script or quoted command); required except"
+        " with --generate-only and --coverage-of",
+    )
+    p.add_argument("--test-article", help="passed to the binary as --test-article")
+    p.add_argument("--test-engine", help="passed to the binary as --test-engine")
+    p.add_argument("--test-config", help="passed to the binary as --test-config")
+    p.add_argument(
+        "--binary-arg",
+        action="append",
+        default=[],
+        help="extra argument for the binary (repeatable)",
+    )
+    p.add_argument(
+        "--work-dir",
+        default="gauntlet-fuzz-work",
+        help="bundles, logs, reports, failures, summary",
+    )
+    p.add_argument(
+        "--dump-dir",
+        help="write every compared case's tensors (inputs, engine and reference outputs, the node) to"
+        " DIR/<test name>/ for offline grading (sets HIPDNN_TEST_DUMP_DIR for the binary; several MB a"
+        " case, so delete it after; see tools/sdpa_bwd_aotriton_check.py)",
+    )
+    p.add_argument(
+        "--spaces-dir",
+        default=str(space_lib.DEFAULT_SPACES_DIR),
+        help="directory of *.space.json",
+    )
+    p.add_argument(
+        "--samples",
+        type=int,
+        help="samples per space (env HIPDNN_FUZZ_SAMPLES; 0 = unlimited)",
+    )
+    p.add_argument(
+        "--seed", type=int, help="shape seed of the first sample (env HIPDNN_FUZZ_SEED)"
+    )
+    p.add_argument(
+        "--data-seed",
+        type=int,
+        help="input-data seed for every sample (env HIPDNN_FUZZ_DATA_SEED)",
+    )
+    p.add_argument("--filter", help="regex on <Op>/<Space> (env HIPDNN_FUZZ_FILTER)")
+    p.add_argument(
+        "--row",
+        metavar="FILE",
+        help="run one explicit sample from a JSON file holding space, axes, data_seed and"
+        " optionally case_id, instead of drawing samples (not with --samples, --seed,"
+        " --data-seed, --filter or --time-budget)",
+    )
+    p.add_argument(
+        "--time-budget",
+        help="wall-clock limit, e.g. 30m, 4h (env HIPDNN_FUZZ_TIME_BUDGET)",
+    )
+    p.add_argument(
+        "--shrink",
+        type=int,
+        metavar="N",
+        help="after a WRONG or CRASH, spend up to N candidate runs shrinking the sample's axis"
+        " values toward simpler ones that keep the outcome class (env HIPDNN_FUZZ_SHRINK;"
+        " default 0 = off); the result goes to failures/<case>/shrunk/",
+    )
+    p.add_argument(
+        "--case-timeout",
+        help=f"hang limit per case (env HIPDNN_FUZZ_CASE_TIMEOUT; default {DEFAULT_CASE_TIMEOUT})",
+    )
+    p.add_argument(
+        "--batch-size",
+        type=int,
+        default=DEFAULT_BATCH_SIZE,
+        help="samples per binary invocation",
+    )
+    p.add_argument(
+        "--pairwise",
+        action="store_true",
+        help="run the pairwise covering set of each space (every value of every axis meets every"
+        " value of every other axis in a legal row where both matter) instead of random samples;"
+        " --seed is the generator seed (not with --row or --samples)",
+    )
+    p.add_argument(
+        "--pairwise-repair",
+        type=int,
+        metavar="N",
+        help=f"with --pairwise: up to N rounds of new rows for the tuples that were only"
+        f" declined or unexercised, built from levels that passed (default {DEFAULT_PAIRWISE_REPAIR})",
+    )
+    p.add_argument(
+        "--pairwise-budget",
+        metavar="DURATION",
+        help="with --pairwise: one total wall-clock limit, e.g. 90s, 30m, for all pairwise"
+        " generation of the run (the build of every selected space, then the repair rounds); the"
+        " rows built when it ends run, the tuples it left unsettled are reported as"
+        " budget_exceeded, and the run's coverage is marked incomplete. --time-budget bounds"
+        " generation too. Progress goes to stderr about every 10 s",
+    )
+    p.add_argument(
+        "--generate-only",
+        action="store_true",
+        help="with --pairwise: write the full row set of each space as sweeps under"
+        " <work-dir>/bundles/gauntlet/ and the pairwise reports, and run no binary"
+        " (--binary is not needed)",
+    )
+    p.add_argument(
+        "--catalog",
+        action="store_true",
+        help="sweep the engine's catalog: per drawn graph (a fuzz sample, a pairwise row or the"
+        " --row sample) list the engine's candidates with the binary's --list-candidates and run"
+        " one case per candidate, forced through metadata.engine_variant, instead of the"
+        " engine's own pick (needs --test-engine; not with --shrink)",
+    )
+    p.add_argument(
+        "--catalog-shard",
+        metavar="i/n",
+        help="with --catalog: of each graph's candidate list keep the candidates whose index k"
+        " satisfies k %% n == i (0 <= i < n); the shards 0/n .. (n-1)/n together run every"
+        " candidate of every graph once",
+    )
+    p.add_argument(
+        "--coverage-of",
+        metavar="WORK_DIR",
+        help="offline: print the pair coverage of the samples and outcomes of an earlier run's"
+        " work directory, against the levels of --levels-from, as JSON; runs nothing",
+    )
+    p.add_argument(
+        "--levels-from",
+        metavar="PATH",
+        help="with --coverage-of: a pairwise report (<work>/pairwise/<Op>_<Space>.json) or a"
+        " directory of them",
+    )
+    p.add_argument(
+        "--first",
+        type=int,
+        metavar="N",
+        help="with --coverage-of: count only the first N samples of each space",
+    )
+    p.add_argument(
+        "--summary", help="summary.json path (default <work-dir>/summary.json)"
+    )
+    return p
+
+
+ROW_KEYS = ("space", "axes", "data_seed", "case_id", "engine_variant")
+
+
+def load_row_file(path):
+    """The validated ``--row`` file: ``{"space", "axes", "data_seed", "case_id"}``, the case id
+    defaulting to ``sampler.DEFAULT_ROW_CASE_ID``. Whether the axes are a legal sample of the
+    space is checked later, against the space (``sampler.sample_from_axes``)."""
+    try:
+        text = Path(path).read_text(encoding="utf-8")
+    except OSError as e:
+        raise DriverError(f"--row {path}: cannot read the file: {e}") from None
+    try:
+        spec = json.loads(text)
+    except ValueError as e:
+        raise DriverError(f"--row {path}: not valid JSON: {e}") from None
+    if not isinstance(spec, dict):
+        raise DriverError(
+            f"--row {path}: expected a JSON object, got {type(spec).__name__}"
+        )
+    unknown = sorted(set(spec) - set(ROW_KEYS))
+    missing = [k for k in ("space", "axes", "data_seed") if k not in spec]
+    if unknown or missing:
+        raise DriverError(
+            f"--row {path}: "
+            + "; ".join(
+                part
+                for part in (
+                    f"unknown keys {unknown}" if unknown else "",
+                    f"missing keys {missing}" if missing else "",
+                )
+                if part
+            )
+            + f" (the keys are {', '.join(ROW_KEYS)}; case_id and engine_variant are optional)"
+        )
+    if not isinstance(spec["space"], str) or not spec["space"]:
+        raise DriverError(f"--row {path}: 'space' must be an <Op>/<Space> string")
+    if not isinstance(spec["axes"], dict):
+        raise DriverError(f"--row {path}: 'axes' must be an object of axis values")
+    try:
+        sampler.check_data_seed(spec["data_seed"])
+    except ValueError as e:
+        raise DriverError(f"--row {path}: {e}") from None
+    if "engine_variant" in spec:
+        spec["engine_variant"] = check_engine_variant(
+            spec["engine_variant"], f"--row {path}"
+        )
+    spec.setdefault("case_id", sampler.DEFAULT_ROW_CASE_ID)
+    return spec
+
+
+def parse_args(argv=None):
+    parser = build_parser()
+    args = parser.parse_args(argv)
+    args.row_spec = None
+    if args.catalog_shard is not None:
+        if not args.catalog:
+            parser.error("--catalog-shard needs --catalog")
+        try:
+            args.catalog_shard = parse_catalog_shard(args.catalog_shard)
+        except ValueError as e:
+            parser.error(f"--catalog-shard: {e}")
+    if args.catalog:
+        if args.coverage_of is not None or args.generate_only:
+            parser.error(
+                "--catalog runs a binary and cannot be combined with --coverage-of or --generate-only"
+            )
+        if not args.test_engine:
+            parser.error(
+                "--catalog lists the candidates of one engine: it needs --test-engine"
+            )
+    if args.coverage_of is not None:
+        if args.levels_from is None:
+            parser.error("--coverage-of needs --levels-from")
+        if args.first is not None and args.first < 1:
+            parser.error("--first must be >= 1")
+        return args
+    if args.levels_from is not None or args.first is not None:
+        parser.error("--levels-from and --first belong to --coverage-of")
+    if args.generate_only and not args.pairwise:
+        parser.error("--generate-only needs --pairwise")
+    if args.pairwise_repair is not None and not args.pairwise:
+        parser.error("--pairwise-repair needs --pairwise")
+    if args.pairwise_budget is not None:
+        if not args.pairwise:
+            parser.error("--pairwise-budget needs --pairwise")
+        try:
+            args.pairwise_budget = parse_duration(args.pairwise_budget)
+        except ValueError as e:
+            parser.error(f"--pairwise-budget: {e}")
+    if args.pairwise and args.row is not None:
+        parser.error(
+            "--pairwise runs a generated set of rows and cannot be combined with --row"
+        )
+    if args.pairwise and args.samples is not None:
+        parser.error(
+            "--pairwise runs every row of the generator and cannot be combined with --samples"
+        )
+    if args.pairwise_repair is None:
+        args.pairwise_repair = DEFAULT_PAIRWISE_REPAIR
+    if args.pairwise_repair < 0:
+        parser.error("--pairwise-repair must be >= 0")
+    if args.binary is None and not args.generate_only:
+        parser.error("the following arguments are required: --binary")
+    if args.row is not None:
+        # The flags, not the HIPDNN_FUZZ_* variables: a variable left in the shell is a default
+        # a one-case run has no use for, not a conflict.
+        clash = [
+            flag
+            for flag, value in (
+                ("--samples", args.samples),
+                ("--seed", args.seed),
+                ("--data-seed", args.data_seed),
+                ("--filter", args.filter),
+                ("--time-budget", args.time_budget),
+            )
+            if value is not None
+        ]
+        if clash:
+            parser.error(
+                f"--row runs one explicit sample and cannot be combined with {', '.join(clash)}"
+            )
+        try:
+            args.row_spec = load_row_file(args.row)
+        except DriverError as e:
+            parser.error(str(e))
+        args.samples = 1
+        args.data_seed = args.row_spec["data_seed"]
+
+    def pick(flag_value, env_name, convert):
+        return (
+            flag_value
+            if flag_value is not None
+            else _env_default(env_name, convert, parser)
+        )
+
+    # Unlike the draw controls, the shrink budget applies to a --row run too.
+    args.shrink = pick(args.shrink, "HIPDNN_FUZZ_SHRINK", int)
+    if args.shrink is None:
+        args.shrink = 0
+    if args.shrink < 0:
+        parser.error("--shrink must be >= 0")
+    if args.catalog and args.shrink:
+        parser.error(
+            "--catalog cannot be combined with --shrink (a shrunk graph has another catalog,"
+            " so the candidate it was found under means nothing there)"
+        )
+
+    if args.row_spec is None:
+        # A pairwise run runs every row of the generator: the sample count is no control of it.
+        args.samples = (
+            None if args.pairwise else pick(args.samples, "HIPDNN_FUZZ_SAMPLES", int)
+        )
+        args.seed = pick(args.seed, "HIPDNN_FUZZ_SEED", int)
+        args.data_seed = pick(args.data_seed, "HIPDNN_FUZZ_DATA_SEED", int)
+        args.filter = pick(args.filter, "HIPDNN_FUZZ_FILTER", str)
+    try:
+        budget = (
+            args.time_budget
+            if args.time_budget is not None
+            else os.environ.get("HIPDNN_FUZZ_TIME_BUDGET")
+        )
+        if args.row_spec is not None:
+            budget = None
+        args.time_budget = parse_duration(budget) if budget else None
+        timeout = (
+            args.case_timeout
+            if args.case_timeout is not None
+            else os.environ.get("HIPDNN_FUZZ_CASE_TIMEOUT")
+        )
+        args.case_timeout = parse_duration(timeout or DEFAULT_CASE_TIMEOUT)
+    except ValueError as e:
+        parser.error(str(e))
+    if args.case_timeout is None:
+        parser.error("--case-timeout must be positive")
+    if args.row_spec is not None:
+        if args.batch_size < 1:
+            parser.error("--batch-size must be >= 1")
+        return args
+    if args.samples is None and not args.pairwise:
+        args.samples = 0 if args.time_budget else DEFAULT_SAMPLES
+    if args.samples is not None and args.samples < 0:
+        parser.error("--samples must be >= 0")
+    if args.batch_size < 1:
+        parser.error("--batch-size must be >= 1")
+    try:
+        if args.seed is None:
+            args.seed = random.SystemRandom().randrange(0, 2**31)
+        sampler.check_shape_seed(args.seed)
+        if args.data_seed is not None:
+            sampler.check_data_seed(args.data_seed)
+    except ValueError as e:
+        parser.error(str(e))
+    return args
+
+
+def select_spaces(args):
+    spaces = space_lib.load_spaces(args.spaces_dir)
+    if args.row_spec is not None:
+        wanted = args.row_spec["space"]
+        spaces = [s for s in spaces if s.space_id == wanted]
+        if not spaces:
+            raise DriverError(
+                f"--row {args.row}: no space '{wanted}' in {args.spaces_dir}"
+            )
+        return spaces
+    if args.filter:
+        try:
+            pattern = re.compile(args.filter)
+        except re.error as e:
+            raise DriverError(
+                f"--filter {args.filter!r} is not a valid regex: {e}"
+            ) from None
+        spaces = [s for s in spaces if pattern.search(s.space_id)]
+    if not spaces:
+        raise DriverError(
+            f"no space in {args.spaces_dir} matches"
+            + (f" --filter {args.filter!r}" if args.filter else "")
+        )
+    return spaces
+
+
+def main(argv=None):
+    args = parse_args(argv)
+    if args.dump_dir:
+        # The binary inherits it: the bundle harness dumps each comparison there (running-tests.md).
+        os.environ["HIPDNN_TEST_DUMP_DIR"] = str(Path(args.dump_dir).resolve())
+    try:
+        if args.coverage_of is not None:
+            report = coverage_of(
+                args.coverage_of, args.levels_from, args.first, args.spaces_dir
+            )
+            print(json.dumps(report, indent=2))
+            return 0
+        spaces = select_spaces(args)
+        row_sample = None
+        if args.row_spec is not None:
+            # Rendered before anything is written, so a row that no sample could be is a usage
+            # error that leaves no work directory behind.
+            row_sample = sampler.sample_from_axes(
+                spaces[0],
+                args.row_spec["axes"],
+                args.row_spec["data_seed"],
+                args.row_spec["case_id"],
+            )
+            if "engine_variant" in args.row_spec:
+                if args.catalog:
+                    raise DriverError(
+                        f"--row {args.row}: the row already forces a candidate"
+                        " (engine_variant), so --catalog has nothing to list"
+                    )
+                row_sample = CandidateSample(
+                    row_sample,
+                    row_sample.case_id,
+                    args.row_spec["engine_variant"],
+                )
+        # Built before the lock is taken, so a usage error leaves no work directory behind.
+        driver = None if args.generate_only else Fuzz(args, spaces, row_sample)
+        # Held by every mode that writes the work directory (not --coverage-of, which reads it).
+        with WorkDirLock(
+            Path(args.work_dir).resolve(),
+            sys.argv[1:] if argv is None else argv,
+        ):
+            if driver is None:
+                return generate_only(args, spaces)
+            return driver.run()
+    except (
+        DriverError,
+        space_lib.SpaceError,
+        sampler.InfeasibleSpaceError,
+        sampler.InvalidRowError,
+    ) as e:
+        print(f"run_gauntlet_fuzz.py: error: {e}", file=sys.stderr)
+        return 2
+
+
+if __name__ == "__main__":
+    sys.exit(main())

@@ -1,0 +1,45 @@
+{
+  "version": 1,
+  "operation": "Matmul",
+  "description": "Probe-only evidence for Matmul on a padded leading stride, crossed with the declared alignment. One fixed float batched matmul (A [3,16,32] x B [3,32,128] = C [3,16,128], row-major, quick Matmul/Default template) whose leading dimension (the row stride, in elements) is the packed one plus `pad` for the tensors `pad_on` names (a, b, c, or all three); the batch stride grows with it, so each batch holds whole rows and the `pad` elements at the end of a row are gap elements that belong to no element. `pad` takes 0 (packed), the odd values 1, 3, 5, 7, 9 and 31, 2, 4 and 12 (4 and 12 are 16-byte multiples of a float, 2 is not), 8 and 16 (32 and 64-byte multiples) and 17, so a leading dimension is a 16-byte multiple only at 0, 4, 8, 12 and 16. It is crossed with the declared alignment of A, B and C (tensor_patches on uids 1, 2, 0, one value for all three) and with the placement of the device pointers, as in Matmul/Align and SdpaFwd/Flash2: exact puts every device pointer at exactly the declared alignment, under misaligns A (placement_uid 1) below it (a PASS then means the backend rejected the pointer), default leaves the pointers where they are; under drawn at alignment 1 is rendered as exact. It exists to show whether MIOpen and hipBLASLt compute the right matrix, or decline, when the leading dimension is not a multiple of the vector width the declared alignment promises. Expected (probed on gfx950): hipBLASLt is PASS at every pad when the declared alignment is 16, whatever the leading dimension, and DECLINED at every other alignment, as in Matmul/Align; MIOpen is DECLINED everywhere, as in Matmul/Align. WRONG, an engine that accepts a padded leading dimension and computes a different matrix, is the finding the space exists to find. pad_on has no effect at pad 0, so every pad_on but 'all' is illegal there.",
+  "template": "../../integration-test-bundles/quick/Matmul/Default/graph.template.json",
+  "axes": {
+    "pad":       {"values": [0, 1, 2, 3, 4, 5, 7, 8, 9, 12, 16, 17, 31]},
+    "pad_on":    {"values": ["a", "b", "c", "all"]},
+    "alignment": {"values": [1, 2, 4, 8, 16, 32, 64, 128, 256]},
+    "placement": {"values": ["default", "exact", "under"]}
+  },
+  "derive": {
+    "lda":  "32 + (pad if pad_on in ['a', 'all'] else 0)",
+    "ldb":  "128 + (pad if pad_on in ['b', 'all'] else 0)",
+    "ldc":  "128 + (pad if pad_on in ['c', 'all'] else 0)",
+    "stride_a": "[16*lda, lda, 1]",
+    "stride_b": "[32*ldb, ldb, 1]",
+    "stride_c": "[16*ldc, ldc, 1]",
+    "eff_placement": "'exact' if placement == 'under' and alignment < 2 else placement"
+  },
+  "constraints": [
+    {"rule": "pad > 0 or pad_on == 'all'", "reason": "pad_on names no tensor when pad is 0: every pad_on would render the same packed graph"}
+  ],
+  "case": {
+    "values": {
+      "io_data_type": "float",
+      "intermediate_data_type": "float",
+      "tensors": [
+        {"uid": 0, "dims": [3, 16, 128], "strides": "${stride_c}", "data_type": "float"},
+        {"uid": 1, "dims": [3, 16, 32], "strides": "${stride_a}", "data_type": "float"},
+        {"uid": 2, "dims": [3, 32, 128], "strides": "${stride_b}", "data_type": "float"}
+      ]
+    },
+    "metadata": {
+      "purpose": "probe",
+      "placement": "${eff_placement}",
+      "placement_uid": 1
+    },
+    "tensor_patches": [
+      {"uid": 0, "set": {"alignment": "${alignment}"}},
+      {"uid": 1, "set": {"alignment": "${alignment}"}},
+      {"uid": 2, "set": {"alignment": "${alignment}"}}
+    ]
+  }
+}

@@ -395,6 +395,7 @@ Otherwise, you test the old tree.
 | `--validator` | `HIPDNN_TEST_VALIDATOR` | `auto` | Where the comparison runs: `auto` (follow the reference), `cpu`, `gpu`. |
 | `--reference-executor` | `HIPDNN_TEST_REFERENCE_EXECUTOR` | `cpu` | Reference for C++ graph tests only. |
 | `--golden-data-dir`, `--gd` | `HIPDNN_TEST_GOLDEN_DATA_DIR` | `<exe>/../lib/integration-test-bundles/` | Bundle root. The path in the flag must exist. The binary does not check the path in the env var up front. |
+| `--outcome-report <file>` | `HIPDNN_TEST_OUTCOME_REPORT` | none | Append one JSON object per line: a `started` record before each bundle test and a `finished` record when it ends. See [Outcome report](#outcome-report). The flag wins over the env var. The binary exits 1 if the file cannot be opened. |
 | `--no-bundles` | `HIPDNN_TEST_ALLOW_BUNDLES` | bundles on | Register only the C++ tests compiled into the binary. If the env var is set, it takes priority over the flag in either direction. |
 | `--enforce-support-claims[=true\|false]` | | on | Fail a test whose claim the engine breaks. See [Support-claim summary](#support-claim-summary). |
 | `--write-support-claims` | | off | Authoring run: record which graphs the engine accepts into sidecars. See [Adding Tests](adding-tests.md#record-claims-with---write-support-claims). |
@@ -402,6 +403,7 @@ Otherwise, you test the old tree.
 | `--fail-on-unsupported` | | off | Fail instead of skip when no engine supports a graph. **C++ graph tests only.** |
 | `--generate-support-matrix[=file]` | | off | Write a markdown matrix. **C++ graph tests only**; on a default build it writes an empty table. |
 | `--capture-bundles <dir>` | | off | Dump compiled-in C++ graph tests as bundle JSON (see [Adding Tests](adding-tests.md#from-an-existing-c-graph-test)). |
+| `--list-candidates <file>` | | off | Write the engine's candidate catalog for every bundle case this run would execute (`--gtest_filter` applies) to `<file>`, one JSON object per line, and exit 0 without building or executing anything. The engine is the one `--test-engine` names. See [`--list-candidates`](file-formats.md#--list-candidates-output). The [gauntlet driver](#catalog-sweeps---catalog) runs it. |
 | `--benchmark` | | off | Time each verified test. See [Time the engine](#4-time-the-engine---benchmark). |
 | `--benchmark-iterations` | | 20 | Timed executions per test. Requires `--benchmark`. |
 | `--benchmark-warmup` | | 30 | Untimed executions before timing. Requires `--benchmark`. |
@@ -426,6 +428,9 @@ The binary refuses these flag combinations (exit 1):
   `HIPDNN_TEST_ALLOW_BUNDLES=0`.
 - `--benchmark-reference` with bundle tests off (`--no-bundles` or
   `HIPDNN_TEST_ALLOW_BUNDLES=0`). The flag measures bundle tests only.
+- `--list-candidates` without `--test-engine`, or together with `--write-support-claims`; and an
+  unwritable listing file. A case the engine cannot list is `status: "error"` in the file, not a
+  failure of the run (exit 0).
 
 `--enforce-support-claims=false` is accepted in every combination. If
 enforcement is only inherited and there is no `--test-engine`, the run
@@ -435,11 +440,21 @@ If the machine has no HIP device, the binary prints
 `No HIP devices available; skipping …` and exits 0 immediately. It does this
 before it reads any other flag.
 
-Bundle inputs of at least 2^14 elements (float, half, bfloat16 and double) are
-generated on the device with rocRAND. Smaller tensors, sub-byte types and fixed
-fills use the host RNG. Device-filled values differ from the host fill's, so a
-failure that you saw with them reproduces bit for bit only on the same path.
+Bundle inputs of at least 2^14 allocated elements are generated on the device with rocRAND:
+`free` fills of float, half, bfloat16 and double, and the `nonzero`, `zeros`, `large`,
+`subnormal` and `special` [kinds](file-formats.md#input-fill-specs) of float, half,
+bfloat16 and the fp8 formats, which a hipRTC kernel shapes from rocRAND's draws. Smaller
+tensors, other types (including every sub-byte type) and `fixed` fills use the host RNG, and a
+kind a data type cannot hold is reported by the host as unsupported. Device-filled values
+differ from the host fill's, so a failure that you saw with them reproduces bit for bit only
+on the same path, which the run's report and its `replay.sh` name.
 Set `HIPDNN_TEST_HOST_INPUT_FILL=1` to force the host fill for every input.
+
+Set `HIPDNN_TEST_DUMP_DIR=<dir>` to keep the tensors of a bundle comparison for grading them offline with another
+tolerance rule. The harness writes every input, the engine's output and the reference's output of the case to
+`<dir>/<test name>/` as raw element-space bytes, with a `manifest.json` (role `input`, `engine` or `ref`; tensor uid
+and name; element size; dims; strides; file), plus the keep mask it drew for a Philox dropout graph (role
+`philox_mask`). Nothing is written when it is unset. Replay one failing row solo with it set to get that case's tensors.
 A build without rocRAND always uses the host fill.
 
 ## `hipdnn_golden_data_tests`
@@ -480,6 +495,830 @@ lane also lists the bundle in `knownReferenceGaps()`
 (`ReferenceOpCoverage.cpp`), the lane registers a **failing** test that names
 both the flag and the gap entry. Remove the gap entry: it would otherwise go
 silently dead.
+
+## Outcome report
+
+`--outcome-report <file>` (or `HIPDNN_TEST_OUTCOME_REPORT`) gives every bundle
+test one outcome per engine, which the pass/fail tally cannot say. A skip can be a
+clean decline or a test that never ran; the report tells them apart. The file is
+JSON Lines, appended to, and flushed after every record, so a crash keeps every
+earlier line. Each registered bundle test writes a `started` record before it runs
+and exactly one `finished` record when it ends: a `SetUp` skip, a bundle that failed
+to load (the synthetic failing test) and a test that threw each get one. A `started`
+with no `finished` is the test the process died in.
+
+```json
+{"event":"started","test":"gauntlet_SdpaFwd_Dense.s913377","bundle":".../sweep.json#s913377"}
+{"event":"finished","test":"gauntlet_SdpaFwd_Dense.s913377","bundle":".../sweep.json#s913377",
+ "engine":"ASM_SDPA_ENGINE","arch":"gfx950","platform":"linux","purpose":"probe",
+ "outcome":"DECLINED","stage":"query","depth":"not-reached","origin":"none","verifier":"none",
+ "reason":"Engine ASM_SDPA_ENGINE does not support this graph (1 output tensor(s), 0 ranked engine(s))"}
+```
+
+`purpose` is the case's [`purpose`](file-formats.md#metadata-sidecar--namemetajson)
+metadata and is absent when the case sets none. `stage` is where the test stopped:
+`graph`, `claim`, `query`, `build`, `execute`, `compare`, `oracle` or `setup`
+(`none` for a pass).
+
+A case that sets `metadata.inputs`, `validator`, `placement` or `placement_uid` echoes them
+into its `finished` record as `inputs`, `validator`, `placement` and `placement_uid`, and a
+pass that verified a rejection adds `"expected_status":"BAD_PARAM"`. The fields are
+described in [Finished-record fields](file-formats.md#finished-record-fields).
+
+The `finished` record of a case that built a plan also carries `"kernels"`: the distinct
+kernel names the engine reported while the case ran, sorted. The SDPA engines (ASM_SDPA,
+HIP_FLASH2, `hipkernel:Gfx950AttentionDense`, `hipkernel:Gfx1151WmmaAttention[Decode]`) write
+one `kernel: <engine> <kernel>` INFO line per built plan; HIP_MLOPS writes none. The harness
+collects the lines between the case's `started` and `finished` records without
+`HIPDNN_LOG_LEVEL` being set: it registers a log callback, raises the global log level to
+`info` for the case and puts the level back at the `finished` record. A level set by
+`HIPDNN_LOG_LEVEL` is restored exactly; with it at `warn` or above the backend's own console
+sink, which that variable creates, prints the engines' INFO lines during the cases. `kernels` is
+absent when the case reported none.
+
+A case that carries [`metadata.engine_variant`](file-formats.md#engine_variant--force-one-catalog-candidate)
+also has `"candidate"` in its `finished` record: the id of the candidate it was asked to build
+(`"default"` for the engine's own pick). The gauntlet driver checks it against the id it forced.
+
+A case graded by a reference executor (not golden data) also carries `"reference_ms"` and
+`"reference_lane"` (`"cpu"` or `"gpu"`): the wall time of the reference run that produced the
+outputs the engine was compared with, and the lane it ran on. After a GPU-to-CPU fallback they
+are the CPU run's. They are absent when no reference ran. The gauntlet driver copies both into
+`outcomes.jsonl`; [measuring the oracle's cost](#measuring-the-oracles-cost) fits them.
+
+| Outcome | Meaning |
+|---|---|
+| `PASS` | The engine accepted the graph and its output matched an oracle. For a case with `placement: "under"` it means instead that the backend rejected the misaligned pointer with `BAD_PARAM` (the record carries `expected_status`); see [reading a placement probe](#reading-an-alignment-or-placement-probe). |
+| `DECLINED` | The support query resolved and the engine is absent from the ranked list, or the engine declined later (`EngineNotApplicableError` while building or running). For a claimed graph the run also fails as `CLAIM_BROKEN`. |
+| `WRONG` | Accepted, ran, and the output did not match the oracle. |
+| `CRASH` | In the ranked list, then failed to build or execute, **including a late `NOT_SUPPORTED`** (accepting a graph is a promise). Also: a hang or a dead process, which only the driver can see. |
+| `UNCLAIMED_PASS` | `PASS` on a graph whose sidecar does not claim this engine, arch and platform. The claim is too narrow. |
+| `UNEXERCISED` | Nothing verified it: a skip rule or guard, the frontend rejected the graph, the support query did not resolve (unknown is never `DECLINED`), no oracle, an oracle or harness error, or a pass that still left a failure on the test record. Never green. |
+
+The report adds no pass or fail rule: it records what the harness already decided.
+A run with no `--outcome-report` writes nothing.
+
+## Gauntlet fuzz runs
+
+A fuzz run draws random legal graphs from a **space** declaration, runs them through
+the unchanged `hipdnn_integration_tests` on one engine, and reports one outcome per
+sample. It is for finding defects an integration test did not think of; it is **not**
+a CTest lane and never runs in CI (RFC 0023). The driver is
+`dnn-providers/integration-tests/gauntlet/run_gauntlet_fuzz.py` (Python 3, standard
+library only).
+
+```bash
+# The lane's own arguments: `ctest -N -V -R '<lane>_quick_suite'` prints them.
+python3 dnn-providers/integration-tests/gauntlet/run_gauntlet_fuzz.py \
+    --binary build/bin/hipdnn_integration_tests \
+    --test-article <path to the provider plugin> \
+    --test-engine  HIP_MLOPS_ENGINE \
+    --test-config  dnn-providers/hip-kernel-provider/config/HIP_MLOPS_ENGINE.toml \
+    --filter '^RMSNorm/' --samples 64 --work-dir gauntlet-runs/hip_mlops
+```
+
+The driver prints the seed it used. Run it again with `--seed` to get the same
+samples. Spaces live in `gauntlet/spaces/` (`<Op>[.<Name>].space.json`); with no
+`--filter` every space runs, and a space whose graphs the engine does not accept
+reports `DECLINED`, not a failure.
+
+**Shipped spaces.** `--filter` matches the id in the first column.
+
+| Space | Engine | Template (quick tier) | Draws |
+|---|---|---|---|
+| `Batchnorm/Default` | `HIP_MLOPS_ENGINE` | `Batchnorm/Default` | forward training, rank 4 or 5, NCHW/NHWC strides |
+| `BatchnormBackward/Default` | `HIP_MLOPS_ENGINE` | `BatchnormBackward/Variant2` | backward with saved mean and inverse variance |
+| `BatchnormInference/Default` | `HIP_MLOPS_ENGINE` | `BatchnormInference/Default` | forward inference, y in x's type or widened to float |
+| `Layernorm/Default` | `HIP_MLOPS_ENGINE` | `Layernorm/Default` | forward training (y, saved mean and inverse variance) |
+| `LayernormBackward/Default` | `HIP_MLOPS_ENGINE` | `LayernormBackward/Variant2` | backward with saved mean and inverse variance |
+| `RMSNorm/Default` | `HIP_MLOPS_ENGINE` | `RMSNorm/Variant4` | forward inference with scale and bias |
+| `RMSNormBackward/Default` | `HIP_MLOPS_ENGINE` | `RMSNormBackward/Default` | backward (dx, dscale, dbias; saved inverse RMS) |
+| `ResampleFwd/Default` | `HIP_MLOPS_ENGINE` | `ResampleFwd/Variant2` | pooling forward, no index output |
+| `SdpaFwd/Default` | `ASM_SDPA_ENGINE` | `SdpaFwd/Default` | SDPA forward, bfloat16, head size 128 or 192, dense or bottom-right causal; `stats` switches the log-sum-exp output on (`add_tensors` and `node_patches`), `window` draws none, top-left causal or a sliding window (`left_bound` through a node patch). The top-left and sliding rows and stats under a mask are decline probes on ASM_SDPA |
+| `SdpaBackward/Default` | `ASM_SDPA_ENGINE` | `SdpaBackward/Default` | SDPA backward on gfx942, half or bfloat16, head size 64, 128 or 192, no/causal/sliding-window masks through `left_bound`/`right_bound`, scale set per sample; grouped-query heads and head size 64 are decline probes; cost ceiling 2**29 (measured) |
+| `SdpaBackward/FlydslBwdSplit` | `hipkernel:flydsl_sdpa_bwd_split` | `SdpaBackward/Default` | SDPA backward over the split engine on gfx942 and gfx90a (also served on gfx950 and gfx11): half, bfloat16 or float, head dims up to 512 (a multiple of 8, equal or different for Q/K and V), any group size, V with its own head count (`hvmul`, 16-bit, head dim 64 or 128), no/causal/window masks, scale zero and negative included; bias, dropout and ragged are other spaces; cost ceiling 2**29; group sizes beyond powers of two (3, 5, 6, 16), a tiny head dim beside one served only by the padded tile-512 row (`hd` pairs such as 8/264 and 512/232), and scales from 1e-4 to 4. Every graded FlyDSL backward space keeps the largest score |S| (bounded by \|scale\| x dqk x the largest input magnitude squared, plus \|bias\|) within \|S\| x 2^-24 <= atol / 10, because the backward computes exp(S - LSE) from a given fp32 LSE and two correct fp32 computations of S differ by about \|S\| x 2^-24; scale 2^20, the matcher's limit, is only built (probe family `scale_limit`) |
+| `SdpaBackward/FlydslBwdSplitBias` | `hipkernel:flydsl_sdpa_bwd_split` | `SdpaBackward/Default` | the same engine with a bias, with and without dBias: the data dtype, or f32 beside 16-bit data (head dim 64 or 128), broadcast over batch, head or (without dBias) query rows, any key length (an unaligned bias pitch without dBias); no mask; the bias row pitch (packed, padded by 1 to 8 elements, or overlapping rows when read-only), bias rank 4, 3 or 2 (right-aligned broadcast), and bias values from +-1 up to +-1000 (inside the same score bound) |
+| `SdpaBackward/FlydslBwdSplitPadded` | `hipkernel:flydsl_sdpa_bwd_split` | `SdpaBackward/Default` | the same engine with `padding_mask` and both `seq_len` tensors: batch entry *i* has valid lengths `max(1, Sq - i*pad_q)` and `max(1, Skv - i*pad_kv)`, given as exact `values` fills (metadata format 2); no/causal masks. O and the LSE come from the harness's forward derivation, which models padding |
+| `SdpaBackward/FlydslBwdSplitDropout` | `hipkernel:flydsl_sdpa_bwd_split` | `SdpaBackward/Default` | the same engine with Philox dropout: a probability, an INT64 seed and an INT64 offset (device tensors, exact `values` fills). The harness draws the keep mask from the seed and offset (SEM-015; `harness/input-init/PhiloxDropout.hpp`), derives O and the LSE over it and grades the engine against the explicit-mask gradient. A WRONG over every probability means the engine's mask bits differ from the contract |
+| `SdpaBackward/FlydslBwdSplitPaddedDropout` | `hipkernel:flydsl_sdpa_bwd_split` | `SdpaBackward/Default` | the same engine with Philox dropout over a padded graph (both `seq_len` tensors): the harness draws the mask over the declared extents (SEM-015), so a kernel that derives its Philox plane offsets from the live lengths disagrees with the oracle; probabilities 0.1 to 0.9, INT64 seed and offset device tensors with exact `values` fills |
+| `SdpaBackward/FlydslBwdSplitLong` | `hipkernel:flydsl_sdpa_bwd_split` | `SdpaBackward/Default` | the same engine with a long key sequence (1025 to 65536) and few query rows: softmax probabilities near 1/Skv fall below 2^-14 from Skv = 16384, where the gfx90a MFMA flushes fp16 subnormals; masks none, bottom-right causal and windows; cost ceiling 2^27 |
+| `SdpaBackward/FlydslBwdSplitRagged` | `hipkernel:flydsl_sdpa_bwd_split` | `SdpaBackward/GauntletRagged` | the same engine on packed (THD) ragged Q, K, V, O, dO, dQ, dK, dV and the LSE, each with its own INT32 element-offset tensor, plus the `seq_len` tensors (PV-3, SS-4, SS-5): exact `values` fills of lengths and offsets, compact (sequences packed back to back) or gapped (each in its padded slot); no/causal masks. The template is the `SdpaBackward/Golden/Ragged` graph with its tensors renumbered to canonical uids, and has no sweep of its own |
+| `SdpaBackward/FlydslBwdSplitStride` | `hipkernel:flydsl_sdpa_bwd_split` | `SdpaBackward/Default` | **padded-stride probe**: a pad on Q/dQ, K/dK, V/dV, O/dO, the LSE or all nine tensors; a row stride that is a multiple of 8 elements is served, anything else (and an alignment below 16 bytes) is declined |
+| `SdpaFwd/Gfx950Dense` | `hipkernel:Gfx950AttentionDense` | `SdpaFwd/Default` | SDPA forward, BSHD, head size 64 or 128 |
+| `SdpaFwd/Gfx1151` | `hipkernel:Gfx1151WmmaAttention` | `SdpaFwd/Default` | SDPA forward, prefill kernel of the gfx1151 WMMA attention pack, **not run on a device**: half or bfloat16, the six shipped head-size pairs (64/64, 96/96, 128/128, 192/128, 256/128, 256/256) and a head size of 100 as decline probe, none, causal (both alignments) and sliding-window masks, `stats` (LSE) and an additive `bias` (FP32 or Q dtype, broadcast over batch, head or query) through `add_tensors` and `node_patches`; draws only what the dispatcher sends to prefill (`seqlen_q` above 64) |
+| `SdpaFwd/Gfx1151Decode` | `hipkernel:Gfx1151WmmaAttentionDecode` | `SdpaFwd/Default` | SDPA forward, decode kernel of the same pack, **not run on a device**: as `SdpaFwd/Gfx1151` with the shipped decode pairs 64/64, 128/128 and 256/256, `seqlen_q` mostly up to 64 and `seqlen_kv` up to 8192; draws only what the dispatcher sends to decode |
+| `SdpaFwd/FlydslCdna` | `hipkernel:flydsl_sdpa_cdna` | `SdpaFwd/Default` | SDPA forward, the generic MFMA prefill objects (gfx950), **not yet run on a device**: half or bfloat16, Q, K/V and O each BSHD or BHSD, grouped-query heads, head size 64, 128 or 256 and the qk_mask and narrow-V (Q/K up to 256, V 128) objects, none, causal (both alignments) and sliding-window masks, `stats` and an additive `bias` (Q dtype, exact head sizes only) through `add_tensors` and `node_patches`; a head size of 100 is the decline probe. The sink objects are probe-only: the references grade a FLOAT sink and the matcher takes the query's dtype |
+| `SdpaFwd/FlydslCdnaDecode` | `hipkernel:flydsl_sdpa_cdna_decode` | `SdpaFwd/Default` | SDPA forward, the split-KV decode objects, **not yet run on a device**: as `SdpaFwd/FlydslCdna` with `seqlen_q` mostly 1 to 128, `seqlen_kv` up to 8192, groups up to 128 query heads per K/V head, head sizes 64, 128, 256 and the MLA bucket (Q/K 512 to 1024, V 512); no bias; a head size of 96 is the decline probe |
+| `SdpaFwd/FlydslDualwave` | `hipkernel:flydsl_sdpa_cdna_dualwave` | `SdpaFwd/Default` | SDPA forward, gfx950's dual-wave kernel, **not yet run on a device**: head size 64 or 128, none, top-left and bottom-right causal masks, `stats` (packed LSE) and a Q-dtype `bias`, sequence lengths around the 256-row tile; no window, no sink; a head size of 256 is the decline probe |
+| `SdpaFwd/Flash2` | `HIP_FLASH2_ENGINE` | `SdpaFwd/Default` | **not a shape space**: one fixed fp16 SDPA forward (BHSD, head size 128, seqlen 256), varying only `alignment` and `placement`; gfx942 builds with `-DENABLE_HIP_FLASH2_ENGINE=ON` only |
+| `SdpaFwd/Flash2Region` | `HIP_FLASH2_ENGINE` | `SdpaFwd/Default` | SDPA forward over the FLASH2 region on gfx942: fp16, head size 64 or 128 (V and O the same), no mask or top-left causal, BSHD or BHSD, grouped-query heads, `seqlen_q` a multiple of 64 above the `useFlash2ForShape` crossover; two decline-probe slices just outside it (below the crossover, `seqlen_q` not a multiple of 64); no stats or mask tensor (the engine declines them) |
+| `Matmul/Align` | none (probes MIOpen and hipBLASLt) | `Matmul/Default` | **not a shape space**: one fixed float batched matmul, varying only `alignment` and `placement` |
+| `Matmul/Stride` | none (probes MIOpen and hipBLASLt) | `Matmul/Default` | **padded-stride probe**: the fixed matmul of `Matmul/Align` with a `pad` (0 to 31 elements) added to the leading dimension of the tensors `pad_on` names, crossed with `alignment` and `placement`. On gfx950 hipBLASLt passes every pad at alignment 16 and declines the other alignments; MIOpen declines everything |
+| `SdpaFwd/AsmStride` | `ASM_SDPA_ENGINE` | `SdpaFwd/Default` | **padded-stride probe**: bfloat16 SDPA forward (head size 128 or 192, BSHD or BHSD, grouped-query heads, dense) over a small shape set, with a `pad` added to the row stride of the tensors `pad_on` names, crossed with `alignment` and `placement`. On gfx950 the engine passes every pad at alignment 16 or more and declines below |
+| `SdpaFwd/Gfx950DenseStride` | `hipkernel:Gfx950AttentionDense` | `SdpaFwd/Default` | **padded-stride probe**: the `SdpaFwd/Gfx950Dense` region over a small shape set, with a `pad` added to the row stride of the tensors `pad_on` names, crossed with `alignment` and `placement`. On gfx950 the engine declines every pad above 0 |
+| `SdpaFwd/FlydslCdnaStride` | `hipkernel:flydsl_sdpa_cdna` | `SdpaFwd/Default` | **padded-stride probe** (head size 64, 96, 128, 256, BSHD or BHSD): the engine takes any row stride that is a multiple of 8 elements, so `expect` is `declined` for every other pad and for a declared alignment below 16 and `declined_or_pass` elsewhere |
+| `SdpaFwd/FlydslDecodeStride` | `hipkernel:flydsl_sdpa_cdna_decode` | `SdpaFwd/Default` | **padded-stride probe**: as `SdpaFwd/FlydslCdnaStride`, and a pad on K or V alone (their strides then differ, which only a qk_mask object reads) is declined whatever the pad |
+| `SdpaFwd/FlydslDualwaveStride` | `hipkernel:flydsl_sdpa_cdna_dualwave` | `SdpaFwd/Default` | **padded-stride probe**: as `SdpaFwd/FlydslDecodeStride`; the dual-wave kernel takes one set of K and V strides |
+| `SdpaFwd/AsmProbe` | `ASM_SDPA_ENGINE` | `SdpaFwd/Default` | **rejection probe** (gfx950): one bfloat16 forward with one `family` per case: dropout (Philox, explicit mask), ALiBi, padding, sequence-length (group) mode, additive mask, paged K/V, sink, block mask, fp8 softmax scales or `descale_q/k/v` on a bf16 graph, row statistics, a device scale tensor, mixed Q/K/V/O dtypes, fp16/fp32, odd dimensions, and `overflow` (a kernel argument past 32 bits, built at `enforcement_level: buildable`). `expect` is `declined` except for odd dimensions and the dtype combinations a future kernel could take |
+| `SdpaBackward/AsmProbe` | `ASM_SDPA_ENGINE` | `SdpaBackward/Default` | **rejection probe**, gfx942 only (the engine declines every backward graph on gfx950, so on gfx950 each case is `DECLINED` at the device gate): the backward attribute set (dropout, ALiBi, padding, sequence lengths, additive mask with and without `dbias`, a baked scale tensor, stats dtype and rank, mixed dtypes, grouped-query heads, head sizes the registry lacks, odd dimensions) and three overflow families |
+| `SdpaBackward/FlydslBwdSplitProbe` | `hipkernel:flydsl_sdpa_bwd_split` | `SdpaBackward/Default` | **rejection probe** (gfx942, gfx90a): one bfloat16 or half backward with one `family` per case: the attributes the matcher declines (dropout mask or scale tensors, ALiBi, sequence lengths without padding, mixed dtypes, a head dim above 512, a bias with a causal or window mask, dBias with a row-broadcast bias or an unaligned stride, a window left bound of 0, a scale above 2**20, padding without its tensors, `Hk != Hv` with a bias or f32 data), the graphs it serves (dropout including probability 0, a baked scale tensor, f32 data, GQA, asymmetric head dims, a bias with and without dBias, an f32 bias with an f32 dBias), and three overflow families (built, never run). An accepted dropout case ends UNEXERCISED: the harness cannot supply the forward's keep mask to a backward graph |
+| `SdpaFwd/Gfx950DenseProbe` | `hipkernel:Gfx950AttentionDense` | `SdpaFwd/Default` | **rejection probe** (gfx950): every attribute the dense kernel cannot apply (masks, bias, dropout including probability 0, paging, sink, scale tensors, fp8, statistics, ALiBi, padding), mixed dtypes, head sizes and head-count pairs the catalog does not ship, odd dimensions, scale limits, `implementation` and `mma_core_mode` values, and overflow (K/V above 2**31 bytes, Q/O above 2**31 elements) |
+| `SdpaFwd/Gfx1151DecodeProbe` | `hipkernel:Gfx1151WmmaAttentionDecode` | `SdpaFwd/Default` | **rejection probe** (gfx1151; authored on a gfx1151 device but **not run yet**): a decode-routed half or bfloat16 forward (head size 64, 128 or 256, `Sq` of 1 to 64) with one `family` per case: graphs the rocKE dispatcher routes to prefill (large `Sq`, or 512 packed rows over a long key range) and head sizes that are not a multiple of 8, above 256 or below the decode bucket's smallest Q/K width, the attributes the engine binds no operand for (dropout, paging, sink, block mask, padding, sequence lengths, fp8 and descales, ALiBi, row statistics, `implementation`), mixed dtypes, bias dtype, key axis, key stride and alignment gates, statistics dtype, flag and alignment gates, a device scale tensor and a non-positive scale, K and V head counts that do not pack, declared alignment below 16, row strides not a multiple of 8, a head-dim stride other than 1, bounds past int32 and overflow. `declined_or_pass` marks what the code lets through: dropout probability 0, a runtime scale tensor, unpacked statistics strides, `mma_core_mode` float, K and V head counts that pack, a V width different from Q's, and queries that see no key |
+| `SdpaFwd/Gfx1151Probe` | `hipkernel:Gfx1151WmmaAttention` | `SdpaFwd/Default` | **rejection probe** (gfx1151; authored on a gfx1151 device but **not run yet**): a prefill-routed half or bfloat16 forward (a shipped head-size pair, `Sq` above 64 with batch * Hq of 12 or more) with one `family` per case: graphs the rocKE dispatcher routes to decode (`Sq` of 1 to 64, few query CTAs, a long key length that a causal or window mask reduces to under 64 * 32 visible keys) which this engine declines, head sizes that are not a multiple of 8 or above 256 (Q/K or V/O), the attributes the engine binds no operand for (dropout, paging, sink, block mask, padding, sequence lengths, fp8 and descales, ALiBi, row statistics), mixed dtypes, bias dtype, rank, key axis, head extent and key stride gates, bias and statistics alignment gates, statistics dtype and flag gates, a device scale tensor and a non-positive scale, declared alignment below 16, row strides not a multiple of 8, a head-dim stride other than 1 and overflow (Q, K, V, O or bias spans of 2**30 elements, dimensions and strides past int32). `declined_or_pass` marks what the code lets through: head sizes the catalog has no pair of, a V width different from Q's, K and V head counts that differ, GQA ratios above 8, odd lengths, an absent scale, unpacked statistics strides, padded bias rows, a short query with no decode bucket, `implementation` and `mma_core_mode` hints, and queries that see no key |
+| `SdpaFwd/FlydslCdnaProbe`, `SdpaFwd/FlydslDecodeProbe`, `SdpaFwd/FlydslDualwaveProbe` | `hipkernel:flydsl_sdpa_cdna`, `hipkernel:flydsl_sdpa_cdna_decode`, `hipkernel:flydsl_sdpa_cdna_dualwave` | `SdpaFwd/Default` | **rejection probes** (gfx950; the three engines share one graph matcher, so the families are the same and the `expect` differs by catalog): every attribute the kernels have no input for (dropout including probability 0, paging, block mask, padding, sequence lengths, fp8 scales and descales, ALiBi, row statistics), bias dtype, key-axis and key-length gates, a sink in the query's dtype versus the FLOAT one the references grade, sink or bias where the object set lacks it, mask forms (top-left with more queries than keys, a window with no right bound or a bottom-right right bound, a window on the dual-wave kernel), scale bounds, mixed dtypes, head sizes and V widths no object ships, odd lengths, and 32-bit overflow at `buildable` (sequence, row stride, padded query tiles, launch grid, bias span, the decode merge kernel's whole-O offset) |
+| `SdpaFwd/Flash2Probe` | `HIP_FLASH2_ENGINE` | `SdpaFwd/Default` | **rejection probe**, gfx942 only (**not run on a device**: every case declines at the gfx950 device gate): the attribute declines, mixed dtypes, odd dimensions, 32-bit dimension limits and the stride-overflow gap (strides are narrowed to `int` with no range check) |
+| `Layernorm/MlopsProbe`, `LayernormBackward/MlopsProbe`, `RMSNorm/MlopsProbe` | `HIP_MLOPS_ENGINE` | `Layernorm/Variant2`, `LayernormBackward/Variant2`, `RMSNorm/Default` | **rejection probes**: mixed dtypes the engine may take (scale, bias, statistics and output in another dtype) and must decline (scale vs bias, mean vs inverse variance, an io dtype outside float/half/bfloat16, `inv_rms` not float), the `dx` dtype gap of LayerNorm backward, an inconsistent `normalized_dim_count`, ranks 2, 3 and 6, declared alignment 1 or 2, odd sizes and overflow. A graph with only one saved statistic is rejected by the backend and is not a probe |
+| `Batchnorm/MlopsProbe`, `BatchnormBackward/MlopsProbe` | `HIP_MLOPS_ENGINE` | `Batchnorm/Variant2`, `BatchnormBackward/Variant2` | **rejection probes**: scale, bias and statistics that are not float, io dtypes outside float/half/bfloat16, `y` (training) or `dy`/`dx` (backward) in another dtype than `x` and running statistics in half (gaps), declared alignment 1 or 2, odd sizes and overflow |
+| `Matmul/Probe` | `HIPBLASLT_ENGINE` (MIOpen declines every matmul) | `Matmul/Default` | **rejection probe**: mixed A/B/C dtypes among float/half/bfloat16, dtypes outside them, transposed (column-major) operands and result, odd M/N/K, rank 2, batch broadcast and permuted-batch strides, declared alignment below 16 and overflow (a dimension, a leading dimension, a batch stride or count past 32 bits) |
+
+
+The engine column is informational (the space's `engine` key). A space's `description`
+says what it draws, why each constraint exists and which tensor each axis touches.
+
+**Padded leading strides (`*Stride` spaces).** The padded-stride probes draw a `pad`, in
+elements, that widens the leading (row) stride of the tensors `pad_on` names; the batch and head
+strides follow, and the `pad` elements after each row are gap elements that belong to no
+element. Strides enter the case through `derive` (a space's `tensor_patches` may set only the
+alignment). The harness fills and compares the elements and never the gaps: a gap element is not
+written by a host fill or by the device fill of the `nonzero`, `zeros`, `large`, `subnormal`
+and `special` kinds (a device fill of a `free` range draws over the whole allocation, gaps
+included, with finite values), the output sentinel and the placement shadows cover the whole
+allocation (the offset of the last element plus one), and the comparison walks the logical
+elements. Each space's `description` states the outcome expected on the engine it probes: every
+padded probe is `PASS` or `DECLINED`, and a `WRONG` is an engine accepting a stride it computes
+wrongly. The spaces are probe-only (`purpose: probe`) and never frozen into a bundle. Because
+their graphs vary, the pairwise completeness test covers them.
+
+**Rejection probes (`expect`).** A probe space (`purpose: probe`) may declare a top-level
+`expect`: `declined` (the engine must not take the graph) or `declined_or_pass` (it may take it,
+and then it must be right), as one of the two strings or a `"${expr}"` evaluated per sample over
+the axes and derived values, so one space can hold families with different expectations. A probe
+space without `expect` expects `declined_or_pass`; a case whose `purpose` is not `probe` has none.
+The driver judges each outcome against it and writes `expect`, `expectation` (`met` or
+`violated`) and `violation` into the record:
+
+| Outcome | `declined` | `declined_or_pass` |
+|---|---|---|
+| `DECLINED` | met | met |
+| `PASS`, `UNCLAIMED_PASS` | violated: `accepted where a decline was expected` | met |
+| `WRONG`, `CRASH` | violated | violated |
+| `UNEXERCISED` | violated: nothing verified the accept (or the case never ran) | violated |
+
+`summary.json` gives each space `expectations: {met, violated, violations: [{case, outcome,
+expected, reason}]}` and the report prints it. A violation is a finding to triage, not a failure
+of the run: the exit status is still non-zero only for `WRONG` and `CRASH`.
+
+A case may also set `metadata.enforcement_level` to `applicability` or `buildable`
+([file-formats](file-formats.md#metadata-sidecar--namemetajson)): the binary then stops after the
+applicability query or after the plans compile, and allocates, fills and executes nothing. That is
+how an **overflow probe** (a dimension or stride that does not fit a 32-bit kernel argument, far
+above what the oracle could compute) runs. An engine that accepts and builds such a case reports
+`PASS` at its enforcement level; the driver records it `UNEXERCISED` with the reason `accepted
+above the oracle ceiling` and counts a violation: an unverified accept is not evidence.
+
+The probe spaces are **gauntlet-only**: their files are committed, but their cases are never
+frozen into a checked-in bundle (a frozen finding is a `purpose: regression` case; an illegal
+graph that an engine must reject is a frontend test, not a probe). One space covers one engine
+family and up to four classes: unsupported attributes (through `add_tensors` and `node_patches`,
+for the attributes a template lacks), mixed dtypes, 32-bit index overflow, and dimensions not
+divisible by 4; non-dense strides are the `*Stride` spaces above.
+
+**Per-engine recipes.** Every SDPA engine runs through the same driver; only the engine name, the
+config, the build and the environment differ. `<build>` is the CMake build directory. All of them
+live in the one `hip_kernel_provider` plugin, so `--test-article` is the same file for all of them
+(relative to `<build>`; the CTest lanes pass `$<TARGET_FILE:hip_kernel_provider>`, see
+`HipdnnIntegrationTestHelpers.cmake`). On Windows plugins sit under `bin/` instead of `lib/`
+(`bin/hipdnn_plugins/engines/hip_kernel_provider.dll`).
+
+| Engine | Spaces | `--test-article` | `--test-engine` | `--test-config` | Required build flags | Arch | Extra env |
+|---|---|---|---|---|---|---|---|
+| ASM_SDPA forward | `SdpaFwd/Default`, `SdpaFwd/AsmProbe` (rejection probe) | `lib/hipdnn_plugins/engines/libhip_kernel_provider.so` | `ASM_SDPA_ENGINE` | `dnn-providers/hip-kernel-provider/config/ASM_SDPA_ENGINE.toml` | `-DHIPDNN_ENABLE_SDPA=ON` (`ENABLE_ASM_SDPA_ENGINE` is ON by default) | gfx942, gfx950 | none |
+| ASM_SDPA backward | `SdpaBackward/Default`, `SdpaBackward/AsmProbe` (rejection probe) | same | `ASM_SDPA_ENGINE` | same | same | gfx942 (the region the space draws; the engine also ships gfx950 backward kernels) | none |
+| FlyDSL SDPA backward (split) | `SdpaBackward/FlydslBwdSplit`, `SdpaBackward/FlydslBwdSplitBias`, `SdpaBackward/FlydslBwdSplitPadded`, `SdpaBackward/FlydslBwdSplitDropout`, `SdpaBackward/FlydslBwdSplitRagged`, `SdpaBackward/FlydslBwdSplitStride`, `SdpaBackward/FlydslBwdSplitProbe` | same | `hipkernel:flydsl_sdpa_bwd_split` | same | same | gfx942, gfx90a, gfx950, gfx11 (written for gfx942 and gfx90a) | none |
+| HIP_FLASH2 | `SdpaFwd/Flash2Region` (the shape space), `SdpaFwd/Flash2` (alignment probe), `SdpaFwd/Flash2Probe` (rejection probe) | same | `HIP_FLASH2_ENGINE` | `dnn-providers/hip-kernel-provider/src/engines/hip_flash2_engine/config/HIP_FLASH2_ENGINE.toml` | `-DENABLE_HIP_FLASH2_ENGINE=ON -DHIPDNN_ENABLE_SDPA=ON` | gfx942 (fp16; the engine declines gfx950) | `HIP_FLASH2_KERNEL_DIR=<build>/dnn-providers/hip-kernel-provider/src/hip_flash2_kernels`, the directory CMake copies the shipped `.co` files to (its path is the cache variable `HIP_FLASH2_KERNEL_DIR_BUILD`). No CTest sets it, and without it every case fails in `hipModuleLoad` |
+| `hipkernel:Gfx950AttentionDense` | `SdpaFwd/Gfx950Dense`, `SdpaFwd/Gfx950DenseProbe` (rejection probe) | same | `hipkernel:Gfx950AttentionDense` | `dnn-providers/hip-kernel-provider/config/hipkernel_Gfx950AttentionDense.toml` | `-DHIPDNN_ENABLE_KERNEL_INGESTOR=ON -DHIPKERNELPROVIDER_ENABLE_ROCKE=ON -DHIPDNN_ENABLE_SDPA=ON -DGPU_TARGETS=gfx950`, and the rocKE descriptors pulled (`dvc pull -r ingestor`; add `-DHIPKERNELPROVIDER_REQUIRE_DVC_DESCRIPTORS=ON` to fail configure on a missing one) | gfx950 | none |
+| `hipkernel:Gfx1151WmmaAttention` (prefill) | `SdpaFwd/Gfx1151` (no device run yet), `SdpaFwd/Gfx1151Probe` (rejection probe, not run yet) | same | `hipkernel:Gfx1151WmmaAttention` | `dnn-providers/hip-kernel-provider/config/hipkernel_Gfx1151WmmaAttention.toml` | as Gfx950, with `-DGPU_TARGETS=gfx1151` | gfx1151 (the descriptors list gfx1100 to gfx1153 and gfx1200/gfx1201; the space's prefill route is the gfx11 rule at 32 to 40 compute units) | none |
+| `hipkernel:Gfx1151WmmaAttentionDecode` | `SdpaFwd/Gfx1151Decode` (no device run yet), `SdpaFwd/Gfx1151DecodeProbe` (rejection probe, not run yet) | same | `hipkernel:Gfx1151WmmaAttentionDecode` | `dnn-providers/hip-kernel-provider/config/hipkernel_Gfx1151WmmaAttentionDecode.toml` | as Gfx950, with `-DGPU_TARGETS=gfx1151` | gfx1151 (as above) | none |
+| `hipkernel:flydsl_sdpa_cdna`, `hipkernel:flydsl_sdpa_cdna_decode`, `hipkernel:flydsl_sdpa_cdna_dualwave` (CDNA, forward only) | `SdpaFwd/FlydslCdna`, `SdpaFwd/FlydslCdnaStride`, `SdpaFwd/FlydslCdnaProbe`; `SdpaFwd/FlydslCdnaDecode`, `SdpaFwd/FlydslDecodeStride`, `SdpaFwd/FlydslDecodeProbe`; `SdpaFwd/FlydslDualwave`, `SdpaFwd/FlydslDualwaveStride`, `SdpaFwd/FlydslDualwaveProbe` (one engine each, in that order) | same | the engine of the row | `dnn-providers/hip-kernel-provider/config/hipkernel_flydsl_sdpa.toml` (one file for the three) | `-DHIPDNN_ENABLE_KERNEL_INGESTOR=ON -DHIPKERNELPROVIDER_ENABLE_FLYDSL=ON -DHIPDNN_ENABLE_SDPA=ON -DGPU_TARGETS=gfx950`, and the gfx950 FlyDSL objects present (DVC content under `descriptors/FlyDSL/<op>/gfx950`; add `-DHIPKERNELPROVIDER_REQUIRE_DVC_DESCRIPTORS=ON` to fail configure on a missing one) | gfx950 (`sdpa_cdna` and `sdpa_cdna_decode` also ship gfx90a and gfx942; the dual-wave engine gfx950 only) | none |
+
+Only `ASM_SDPA_ENGINE`, `HIP_MLOPS_ENGINE` and `hipkernel:Gfx950AttentionDense` have a CTest lane
+(`hip-kernel-provider/src/CMakeLists.txt`); HIP_FLASH2 and the two Gfx1151 engines have none, so their
+TOMLs reach a run only through an explicit `--test-config`. The two Gfx1151 TOMLs name no tolerance
+override or skip: nothing has been run on a gfx1151 device, and none of the Gfx1151 spaces (the two shape
+spaces and the rejection probes) has run: they are checked only by the pytest load, sample and render tests, and every claim in their
+`description` is read from `Gfx1151WmmaAttentionNative.cpp` and the shipped descriptors. The three
+FlyDSL CDNA engines have CTest lanes of their own, generated into the build tree with a TOML that names no
+override (`hip-kernel-provider/src/CMakeLists.txt`); `hipkernel_flydsl_sdpa.toml` is the config of their gauntlet runs
+(its only entries grade O of a `*gauntlet*SdpaFwd*` suite by an allclose of 2^-5, as the dense engine's does), and
+the nine spaces above are checked only by the pytest load, sample and render tests until a gfx950 run. A fuzz run on
+FLASH2 therefore reads:
+
+```bash
+HIP_FLASH2_KERNEL_DIR=build/dnn-providers/hip-kernel-provider/src/hip_flash2_kernels \
+python3 dnn-providers/integration-tests/gauntlet/run_gauntlet_fuzz.py \
+    --binary build/bin/hipdnn_integration_tests \
+    --test-article build/lib/hipdnn_plugins/engines/libhip_kernel_provider.so \
+    --test-engine  HIP_FLASH2_ENGINE \
+    --test-config  dnn-providers/hip-kernel-provider/src/engines/hip_flash2_engine/config/HIP_FLASH2_ENGINE.toml \
+    --filter '^SdpaFwd/Flash2(Region)?$' --samples 64 --work-dir gauntlet-runs/flash2
+```
+
+**Input-value, alignment and placement axes.** Every space except `Matmul/Align`, `SdpaFwd/Flash2`, the `*Stride` spaces and the
+rejection probes (`*Probe`) has a `domain` axis, and every space except the rejection probes has an `alignment` and a `placement` axis
+(a rejection probe fills its inputs with the default `free` range). They render
+case metadata and `tensor_patches` rather than shape values:
+
+| Axis | Values | Renders |
+|---|---|---|
+| `domain` | `default`, `narrow`, `wide`, `positive`, `constant`, `nonzero`, `zeros`, `large`, `subnormal`, `nan`, `inf` | The [`metadata.inputs`](file-formats.md#input-fill-specs) recipe of the space's domain tensor(s), below. `nan` and `inf` also set `validator: "match_nonfinite"`. |
+| `alignment` | `1`, `2`, `4`, `8`, `16`, `32`, `64`, `128`, `256` | A `tensor_patches` entry per device tensor that sets its declared `alignment` (bytes). Host scalars such as epsilon keep the template's value. |
+| `placement` | `default`, `exact`, `under` | `metadata.placement`, with `placement_uid` set to one fixed tensor. `under` is rendered as `exact` when the drawn `alignment` is 1, because nothing is below an alignment of 1; the summary still counts the draw as `under`. |
+
+| `domain` | Recipe of the domain tensor |
+|---|---|
+| `default` | `free` over `[-1, 1]` |
+| `narrow` | `free` over `[-0.01, 0.01]` |
+| `wide` | `free` over `[-8, 8]` |
+| `positive` | `free` over `[0.25, 4]` |
+| `constant` | `fixed` at `0.5` |
+| `nonzero` | `nonzero` over `[-1, 1]` |
+| `zeros` | `zeros` |
+| `large` | `large` with `scale` 32 (8 in the SDPA spaces, 4 in `LayernormBackward` and `RMSNormBackward`) |
+| `subnormal` | `subnormal` |
+| `nan`, `inf` | `special` (`"nan"` or `"inf"`), `fraction` 0.05, planted on tensors chosen so a non-finite element stays local to a few outputs (the space's `description` names them); the case grades with `match_nonfinite` |
+
+A domain a data type cannot hold (`subnormal` on an integer tensor, `inf` on fp8) is
+`UNEXERCISED`, not a failure. In the `SdpaFwd` spaces a non-finite V element reaches a whole
+output column, so most `nan`/`inf` samples with a long kv sequence produce an all
+non-finite reference, which `match_nonfinite` fails by design: expect `WRONG` there
+without an engine defect.
+
+`SdpaBackward/Default` draws neither `nan` nor `inf`: one non-finite element of dO makes the
+softmax-backward term non-finite for its whole row, so `dK` has no finite element and
+`match_nonfinite` fails the reference by design, whichever operand is poisoned (the space's
+`description` gives the citations). Its `wide` and `large` domains widen Q and K only, and its
+`positive` domain keeps V and dO at `[0.25, 1]`; those choices are provisional until an on-device
+run checks the engine tolerances against them.
+
+**SDPA backward with padding, ragged tensors and Philox dropout.** A backward graph's O and LSE
+are inputs, so the harness derives them from a forward before the engine runs
+(`harness/input-init/SdpaBackwardInputs.cpp`). That forward models the scale, the diagonal band,
+ALiBi, an additive mask, padding with `seq_len_q` / `seq_len_kv`, an explicit dropout mask and
+ragged offsets, so those graphs are graded: the spaces `SdpaBackward/FlydslBwdSplitPadded` and
+`SdpaBackward/FlydslBwdSplitRagged` give the lengths and the element offsets as exact `values`
+fills, which makes their rows metadata format 2 (the sampler renders it for any row whose inputs
+hold a `values` recipe). Philox dropout from a probability, a seed and an offset has no
+reference, but SEM-015 pins the mask bits, so the harness draws the keep mask itself
+(`harness/input-init/PhiloxDropout.hpp`, pinned by Random123's Philox4x32-10 known answers),
+derives O and the LSE over it with the scale 1 / (1 - p), and runs the references on the
+explicit-mask form of the graph (`PhiloxBackward.hpp`: a mask, a scale 1 / (1 - p) and a scale
+inverse 1 - p, which makes the gradient the exact one). An engine whose regenerated mask has
+other bits fails every case with a probability above 0, as a WRONG. Philox dropout on a ragged
+graph is not modelled and is reported as unverifiable.
+
+**`late` axes.** `RMSNorm`, `SdpaFwd/Default` and `SdpaFwd/Gfx950Dense` declare their
+`domain`, `alignment` and `placement` axes with `"late": true`; the other spaces declare
+them as ordinary axes. A space draws all its axes from one generator seeded with the shape
+seed, and a draw rejected by a constraint is retried from that generator. Adding an axis
+there would move every later draw, retries included, so `--seed` would no longer reproduce
+the shapes of earlier runs. A `late` axis draws from a stream of its own (shape seed,
+attempt and axis name), so the earlier axes keep their draws: the same seed gives the
+same shape as before, and only the new axes get values. Late axes come last. For the same
+reason a feature axis added to an old space must not be read by a constraint: a constraint
+that a late axis can violate would reject the draw and move the earlier axes. `SdpaFwd/Default`
+gained `stats`, `window`, `wl` and `wr` this way, and its derive chain keeps every window legal
+instead of rejecting one.
+
+Before the first batch the driver lists the binary's tests on an empty bundle root with
+the run's own flags. A healthy binary lists its compiled-in tests (exit 0) or reports
+`Error: zero tests ran.` (exit 1), which also proves it started. If the listing fails any
+other way (a bad `--test-engine` or `--test-article`, a missing config, a crash at
+startup) or the binary reports that it found no HIP device, the driver prints the log
+tail and exits 2 without running a sample, instead of reporting every sample as a load
+crash.
+
+| Variable | Flag | Meaning | Default |
+|---|---|---|---|
+| `HIPDNN_FUZZ_SAMPLES` | `--samples` | Samples per space. `0` is unlimited. | 32 |
+| `HIPDNN_FUZZ_SEED` | `--seed` | Shape seed of the first sample. Sample *i* uses `seed + i`. | random, printed |
+| `HIPDNN_FUZZ_DATA_SEED` | `--data-seed` | Input-data seed (the case's `metadata.seed`) for every sample. | derived from each shape seed |
+| `HIPDNN_FUZZ_FILTER` | `--filter` | Regex on `<Op>/<Space>`. | every space |
+| `HIPDNN_FUZZ_TIME_BUDGET` | `--time-budget` | Wall-clock limit, e.g. `30m`, `4h`. | none |
+| `HIPDNN_FUZZ_CASE_TIMEOUT` | `--case-timeout` | Longest one case may run before it counts as a hang (the driver kills the binary: `CRASH`). | `10m` |
+| `HIPDNN_FUZZ_SHRINK` | `--shrink` | Candidate runs to spend shrinking each `WRONG` or `CRASH` sample (see [Shrinking](#gauntlet-fuzz-runs)). `0` is off. Applies to `--row` runs too. | `0` |
+
+The binary, `--test-article`, `--test-engine` and `--test-config` are flags of the
+driver and are passed through; `--binary-arg` adds any other binary flag. Other flags:
+`--work-dir`, `--batch-size` (samples per binary invocation), `--spaces-dir` and
+`--summary`; `--pairwise`, `--pairwise-repair` and `--generate-only` are described under
+[Pairwise runs](#pairwise-runs---pairwise).
+
+**Continuous mode.** With `--time-budget` and no `--samples`, or with `--samples 0`,
+nothing is pre-built: each batch draws fresh random samples (new seeds, round-robin
+over the spaces) until the budget ends, a `--samples` cap is hit, or you press Ctrl-C.
+The current batch finishes and the report is still written. A crash is logged and the
+run continues.
+
+**One explicit sample (`--row`).** `--row <file>` runs exactly one sample whose axis values
+you give, instead of drawing any. It replays a finding at a modified axis, runs a size
+ladder of chosen shapes, and is what a shrunk finding's `replay.sh` calls. The file is
+JSON:
+
+```json
+{"space": "RMSNorm/Default",
+ "axes": {"dtype": "bfloat16", "x_dtype": "bfloat16", "layout": "nhwc", "ndim": 4, "n": 2,
+          "c": 115, "d3": 1, "h": 2, "w": 256, "k": 2, "domain": "constant",
+          "alignment": 128, "placement": "exact"},
+ "data_seed": 913377, "case_id": "s913377"}
+```
+
+`axes` names every axis of the space, `late` ones included (a late axis is just a value
+here), and nothing else; each value must be one the axis can draw (a listed value, or an
+integer inside its `range`; the `axis_values` of a failure's `repro.json` are such a set). `data_seed` becomes the case's `metadata.seed`. `case_id` is
+optional, letters, digits and `_` only, and defaults to `row`. It is the case's id and so the
+last part of the GTest name: give the id of the drawn sample (`s913377`) to get the name
+that run had. The driver derives the other values, checks the space's constraints again and
+renders the sample as a drawn one is rendered. A row that is not a legal sample (a missing
+or unknown axis, a value the axis cannot draw, a violated constraint) or a file that does not
+parse is a usage error: exit status 2, the reason on stderr, and nothing written.
+
+The case goes to the same layout as a drawn batch of one,
+`bundles/gauntlet/<Op>/<Space>/<tag>_cases/`, so the GTest name
+(`gauntlet_<Op>_<Space>_<tag>_cases.<case_id>`) and the engine TOML tolerances and skip
+globs that match it are those of a drawn sample with that id. The outcome, `outcomes.jsonl`,
+`summary.json` (with `"row"` holding the file's content and `"seed": null`) and the
+failure folder are written as in any run, with the axes in `repro.json` and `replay.txt`,
+and `replay.sh` replays with `--row failures/<case>/row.json`. `--row` cannot be combined
+with `--samples`, `--seed`, `--data-seed`, `--filter` or `--time-budget` (a usage error); the
+`HIPDNN_FUZZ_*` variables for them are ignored. The binary flags, `--spaces-dir`,
+`--work-dir` and `--case-timeout` apply as usual.
+
+**Shrinking (`--shrink N`).** A random sample that fails is rarely the smallest one that does.
+With `--shrink N` the driver, after the batch a `WRONG` or `CRASH` sample was found in (once its
+failure folder is written), spends at most `N` candidate runs on reducing it. A candidate is the
+sample with one axis moved toward a simpler value, the other axes kept:
+
+- a `range` axis is binary-searched toward its low end, its declared `boundaries` below the
+  current value tried first;
+- a `values` axis tries the entries before the current one, first entry first (the list order
+  of a space is "simpler first").
+
+The data seed and the case id stay, so a candidate has the finding's GTest name (a changed
+`dtype` changes the suite's `<tag>_cases` part, exactly as it would for a drawn sample) and the
+engine TOML grades it as it graded the finding. A candidate that violates one of the space's
+constraints is skipped and costs no budget. The axes are visited in the space's order, again and
+again, until a whole pass moves nothing or the budget is spent. A candidate is **accepted only if
+its outcome class equals the finding's**: `WRONG` stays `WRONG`, `CRASH` (a hang included) stays
+`CRASH`; a candidate that passes, is declined, or turns one failure into the other is refused.
+
+Each candidate runs as a one-case batch under `<work-dir>/shrink/<case>/` (its own bundles, logs
+and reports). It never enters `outcomes.jsonl`, `samples.jsonl` or the summary counts, and leaves
+no failure folder. Shrinking is not cut by `--time-budget` (a long budget can overrun by
+`N` runs per finding; a hang costs `--case-timeout` each); Ctrl-C ends it early and keeps the best
+sample so far.
+
+The result goes to `failures/<case>/shrunk/`: `sweep_row.json` (the shrunk sample in the
+`--row` file format), `axes.json` (original and shrunk values, the axes changed, runs spent and
+steps accepted), the shrunk graph and its metadata (`<case>.json`, `<case>.meta.json`, written as
+in the failure folder), `outcome.json` (the last accepted candidate's outcome record) and
+`replay.sh`. `replay.sh` calls the driver with `--row shrunk/sweep_row.json` and the same binary,
+article, engine, config and `HIPDNN_*` environment, so it runs under the shrink run's own GTest
+name and TOML grading. `summary.json` gives each finding `"shrunk": {"runs", "accepted_steps",
+"axes_changed"}` and the console report prints one `shrunk:` line per shrunk finding. When no
+simpler value kept the outcome, `shrunk/` holds the original sample and `axes_changed` is empty.
+
+**Every sample gets one outcome.**
+
+| What happened | Outcome |
+|---|---|
+| A `finished` record | Its outcome. |
+| The binary died with a case `started` and not `finished` | `CRASH`; the rest of the batch runs again. |
+| A case ran past `--case-timeout` | `CRASH` (hang); the rest runs again. |
+| A case written but absent from `--gtest_list_tests` | `UNEXERCISED` (load), with the load message. |
+| The binary died before any case started | The batch is halved and rerun until the registration-killing case is isolated: `UNEXERCISED` (load crash). |
+
+**Outputs** under `--work-dir`: `bundles/` (what the binary was given), `outcomes.jsonl`,
+`samples.jsonl`, `summary.json` (counts per outcome for each engine and space, decline
+and unexercised reasons, findings), `reports/` and `logs/` (one per binary invocation),
+`failures/<case>/` for each `WRONG` and `CRASH` (with `shrunk/` under `--shrink`),
+`shrink/<case>/` (the candidate runs of a shrink) and, for a [pairwise run](#pairwise-runs---pairwise),
+`pairwise/<Op>_<Space>.json`. The exit status is non-zero if any
+sample is `WRONG` or `CRASH`; `UNEXERCISED` samples are listed with their reasons and
+never count as green. A run whose samples are all `DECLINED` or `UNEXERCISED` has not
+tested the engine.
+
+**One driver per work dir.** A run holds `<work-dir>/.gauntlet.lock` while it writes the work dir
+(every mode but `--coverage-of`, which only reads it): a JSON file with the driver's `pid`, `host`,
+start time (`started`), `argv` and a random `token`, created exclusively and removed when the run
+ends, whether it finished, failed or was interrupted. A second driver on the same `--work-dir`
+exits with status 2 and `work dir in use by pid P on host H since T`; use another `--work-dir`
+(run the shards of a [catalog](#catalog-sweeps---catalog) sweep or several pairwise runs in separate
+ones). A lock left by a driver that was killed is taken over, with a warning, when its pid is no
+longer running on this host; the takeover is exclusive, so two drivers that find the same stale lock
+never both proceed. A lock from another host is never taken over, because its process cannot be
+seen from here (a shared network directory): the error says so; delete `.gauntlet.lock` by hand once
+you know no driver is running. [`measure_oracle_cost.py`](#measuring-the-oracles-cost) keeps one
+driver run per rung in its own subdirectory, so it is not affected.
+
+**Sweep directories.** The driver writes one sweep per input data type, under
+`bundles/gauntlet/<Op>/<Space>/<tag>_cases/`, where `<tag>` is `fp32`, `fp16` or `bfp16`
+(a sample's `x_dtype`, or its `dtype` when the space has no `x_dtype`; a space with neither
+axis, such as `Matmul/Align`, has no `<tag>_cases` level). The tag is in the directory,
+and so in the GTest suite name (`gauntlet_RMSNorm_Default_fp16_cases.s123`), because
+an engine's [TOML](file-formats.md#per-engine-test-config--configengine_nametoml)
+tolerance and skip globs match the full test name and the quick bundles carry the dtype
+tag in the case id (`*fp16_*`), while a gauntlet case id is only `s<seed>`.
+
+**Failure artifacts.** `failures/<case>/` is written before the run continues and holds
+the expanded graph (`<case>.json`, tensor UIDs in canonical order), its metadata
+(`<case>.meta.json`, `purpose: regression`), `repro.json` (space, hashes of the space
+and template, shape seed and axis values, data seed, host or device fill, engine, arch,
+ROCm and git versions, flags and `HIPDNN_*` environment), the outcome record, the
+binary's log tail, and `replay.sh`: one command that regenerates the same graph and the
+same input tensors (for a [`--row`](#gauntlet-fuzz-runs) run, `row.json` holds the row it
+replays from). Device-filled inputs differ from the host fill's, so a replay uses
+the fill path of the original run. To turn a finding into a checked-in case, see
+[Freeze a fuzz finding](adding-tests.md#freeze-a-fuzz-finding).
+
+**`summary.json` `axis_outcomes`.** For every axis of a space that lists `values` (the
+`alignment`, `placement` and `domain` axes, and also the feature axes such as `dtype`, `layout`,
+`mask`, `stats`, `window`, `d`) the summary counts outcomes per drawn value:
+`axis_outcomes[<space id>][<axis>][<value as a string>]` is an object with a count for each of
+`PASS`, `DECLINED`, `WRONG`, `CRASH`, `UNCLAIMED_PASS` and `UNEXERCISED`. The value is the
+one drawn, so an `under` that was rendered as `exact` at alignment 1 counts under `under`.
+`range` axes (sizes such as `sq`, `skv`, `n`) have no entry: they draw many distinct integers.
+Read the `PASS` count of each feature value to see that a feature is exercised and passes, not
+only that the run is green. A space has an entry for the axes it declares and no others.
+
+**`summary.json` kernels.** Each engine entry under `engines` has `kernels`, a map from kernel
+name to the number of cases that ran it (a case that built more than one plan counts each
+distinct name once), and `kernel_unreported`: the cases that ran the engine's plan and whose
+`finished` record names no kernel. A case ran the plan when it is `PASS`, `UNCLAIMED_PASS` or
+`WRONG`, or `CRASH`/`UNEXERCISED` at stage `execute` or `compare`. `DECLINED` cases, cases that
+stopped before a plan existed (stage `graph`, `claim`, `query`, `build`, `oracle`, `setup`) and
+the `CRASH` results the driver wrote itself for a hang or a dead process are in neither count.
+An engine that does not log a kernel (HIP_MLOPS) shows all its executed cases as
+`kernel_unreported`; a non-zero `kernel_unreported` for ASM_SDPA, HIP_FLASH2 or a
+`hipkernel:Gfx*Attention*` engine means the engine's `kernel:` line is missing. The record of
+each case in `outcomes.jsonl` carries its `kernels`, so a feature value's PASS count (see
+`axis_outcomes`) can be read against the kernel that ran.
+
+### Writing a space the oracle can judge
+
+A space draws graphs; the harness grades each against a reference with a fixed tolerance per dtype. Draw only graphs whose correct
+answer is stable to the rounding of their own inputs, or a correct engine fails and a wrong one can pass:
+
+- **Bound the work done on rounded inputs.** SDPA backward is given the forward's O and LSE and computes `P = exp(S - LSE)`. Two
+  correct fp32 computations of a score `S` differ by about `|S| x 2^-24`, which `exp()` passes on to P and the gradients. So every
+  graded FlyDSL backward space keeps `|scale| x dqk x mag^2 (+ |bias|) x 2^-24 <= atol / 10`, with `mag` the largest |Q|, |K| its
+  input domain draws (|S| up to 168 for fp32, 8388 for fp16, 16777 for bf16). Beyond that bound a graph is not wrong; it is
+  unjudgeable, and the reference that shares the forward's arithmetic is the only implementation that passes it. The same holds for
+  any backward that consumes saved forward statistics.
+- **Mind amplifiers.** A dropout probability near 1 scales by `1 / (1 - p)` and amplifies rounding by as much (1e3 to 1e4 at
+  p = 0.999 and 0.9999).
+- **Mind the hardware's number formats.** On gfx90a the MFMA flushes fp16 operands below 2^-14 to zero; a space that wants to test
+  something else must not draw fp16 values there (uniform draws near zero do).
+- **Test an extreme parameter with inputs that keep the case judgeable.** The probe family `scale_limit` checks the matcher's
+  largest scale, 2^20, with Q and K magnitudes in [5e-4, 1e-3] (fill kind `large`, scale 1e-3).
+- **Never put a family the engine may accept at `buildable` enforcement.** An accepted case there ends `UNEXERCISED`, which
+  neither `declined` nor `declined_or_pass` allows.
+
+The FlyDSL backward spaces are generated by `gauntlet/generators/flydsl_sdpa_bwd_spaces.py`: change the script, regenerate
+(`python gauntlet/generators/flydsl_sdpa_bwd_spaces.py`), re-pin (`pairwise_pins.json`). A test fails when a shipped space differs
+from the script's output.
+
+### Reports and offline grading
+
+- `python gauntlet/collect_report.py --root <dir> --run <work dir> [--run ...] --out <report dir> [--aot-rule <dir>]` builds a
+  findings folder: `REPORT.md` (what ran, outcome counts), `ISSUES.md` (every problem, worst first, with empty verdict and evidence
+  columns for the triager), `index.json`, and per problem `graphs/<run>/<space>/<case>/` (the graph, `row.json` for `--row`
+  replays, the log slice, `case.md`). It calls `gauntlet/analyze_runs.py`, which also compares a base and a PR run directly.
+- `run_gauntlet_fuzz.py --dump-dir DIR` writes every compared case's tensors there (`HIPDNN_TEST_DUMP_DIR`, see above); several MB
+  a case. `python gauntlet/tools/sdpa_bwd_aotriton_check.py --dumps DIR --out aot_<run>.json` grades them with AOTriton's rule
+  (needs torch on the CPU): against the truth recomputed from Q, K and V and against the backward of the O and LSE the engine was
+  given, a tensor failing only if it misses both. `collect_report.py --aot-rule` adds its verdict to every row and lists only
+  the rows that fail it as issues.
+
+### Pairwise runs (`--pairwise`)
+
+A random run meets some pairs of axis values and misses others, and says nothing about which. A
+**pairwise** run runs, per space, a small covering set in which **every value of every axis meets
+every value of every other axis** in at least one legal row (RFC 0023 section 6). A **pair**, or
+tuple, is one value of one axis together with one value of another.
+
+```bash
+# run the covering sets of two SDPA forward spaces (the seed is the generator's; printed if random)
+python3 dnn-providers/integration-tests/gauntlet/run_gauntlet_fuzz.py \
+    --binary build/bin/hipdnn_integration_tests --test-article <plugin> \
+    --test-engine ASM_SDPA_ENGINE --test-config <its TOML> \
+    --pairwise --seed 7 --filter '^SdpaFwd/Default$' --work-dir gauntlet-runs/pw_fwd
+# write the same rows as sweeps and reports, running nothing (no binary needed)
+python3 .../run_gauntlet_fuzz.py --pairwise --generate-only --seed 7 \
+    --filter '^SdpaFwd/' --work-dir gauntlet-runs/pw_sweeps
+# the pair coverage of an earlier random run, by the same levels
+python3 .../run_gauntlet_fuzz.py --coverage-of gauntlet-runs/random \
+    --levels-from gauntlet-runs/pw_fwd/pairwise --first 190
+```
+
+| Flag | Meaning |
+|---|---|
+| `--pairwise` | Run every row of each selected space's covering set instead of drawing samples. `--seed` is the generator's seed (random and printed if absent; the same seed gives the same rows); `--data-seed` fixes the data seed of every row. `--samples` and `--row` are usage errors with it (`HIPDNN_FUZZ_SAMPLES` is ignored), and `--time-budget` still ends the run. |
+| `--pairwise-repair N` | After the rows, up to `N` rounds of repair rows (default 2; `0` is off), see below. |
+| `--pairwise-budget S` | With `--pairwise`: **one total** wall-clock limit (`90s`, `30m`, ...) for all pairwise generation of the run: the build of every selected space, then the repair rounds. The time spent running rows is not counted. `--time-budget` bounds generation too. With neither, generation is unbounded, as before. See *Bounded generation* below. |
+| `--generate-only` | With `--pairwise`: write each space's full row set and its report, run no binary. `--binary` and the engine flags are not needed. |
+| `--coverage-of DIR` `--levels-from PATH` `--first N` | Offline coverage of a finished run, see below. |
+
+**Levels.** The driver cannot meet every integer of a `range` axis. A `values` axis has its values
+(duplicates, such as the three `none` entries of a weighted list, count once). A `range` axis has
+its declared `boundaries` inside the range plus **one interior value**, drawn from the seed
+strictly between the lowest and the highest boundary and equal to none of them. The ends of the
+range are levels only if they are declared boundaries; a range with no room has no interior level.
+Other interior values stay with random runs. `late` axes are levels like any other.
+
+**Live values.** A value that changes nothing is not met: `wl` while `window` is `none`,
+`heads_d128` while `d` is 64, `under` placement at alignment 1 (it renders as `exact`) and the like.
+A value is **live** in a row when some other level of its axis gives a legal row whose rendered
+case differs (the graph values, tensor patches, added tensors, node patches, input recipes,
+validator and placement; the id, notes and seeds do not count). A pair counts as covered by a row
+only if both values are live in it.
+
+**Pairs no row covers are proven, not dropped.** Each one is reported as
+
+| Kind | Meaning |
+|---|---|
+| `illegal` | no legal row holds both values (a constraint forbids the pair) |
+| `dead` | legal rows hold both, but in each of them at least one of the two is inert (the pair can never be met live) |
+| `unproven` | the exhaustive search for a covering row passed its cap before it decided; the pair is never counted as covered |
+| `budget_exceeded` | not settled at all: the generation budget ended before the generator found a row or a proof. The pair counts as not covered (it stays among the pairs that could still be passed), and `generation_complete` is `false` |
+
+with the reason in the report. The search is exact. It reads what each constraint and each part of
+the rendered case *effectively* reads once the pair is fixed (`d3 if ndim == 5 else 1` reads
+nothing of `d3` for `ndim` 4, so no value of the 3-D window is live there), sets axes depth first
+with forward checking, and searches the axes left after the pair as separate components when no
+constraint ties them. A cap on the nodes it visits per pair (`DEFAULT_EXHAUSTIVE_CAP`) is the
+fallback: a space whose constraints and case tie too many axes together for it reports `unproven`
+pairs instead of guessing. No shipped space does: `unproven` is empty for all of them. The tests
+assert it for every space whose graph varies; the probe-only spaces, whose graph is fixed and
+which vary the alignment and placement alone (`Matmul/Align`, `SdpaFwd/Flash2`), are covered
+completely by their 27 rows. The tests also pin the `illegal` and `dead` sets of every shipped
+space (`gauntlet/pairwise_pins.json`,
+re-pinned in the commit that changes a space's axes, derived values or constraints), prove every
+`illegal` and `dead` pair of the four SDPA forward spaces (`SdpaFwd/Default`,
+`SdpaFwd/Flash2Region`, `SdpaFwd/Gfx950Dense`, `SdpaFwd/Flash2`) by an independent search, and show
+that every other pair of those spaces is covered.
+
+**Bounded generation (`--pairwise-budget`).** Generation is the build of each space's covering set and the repair rounds. For a space whose
+constraints and case tie many axes together, one exhaustive search can take minutes and a space can
+need thousands of them, so `--pairwise-budget S` (or `--time-budget`) bounds it. The deadline is
+checked at every node of the search, not only between pairs, so the run ends at the budget even in
+the middle of a long search. Then:
+
+- the rows built so far are kept and run (a repair round that is cut keeps its rows too); no further
+  repair round starts;
+- every pair the generator had not settled is reported `budget_exceeded` (not `unproven`: `unproven`
+  keeps its meaning of a capped search, and is excluded from `not_passed`; a `budget_exceeded` pair
+  is not), in the report, with `generation_complete: false`;
+- `pair_coverage` for the space has `generation_complete: false`, `complete: false` and a
+  `budget_exceeded` count, `stopped_because` is `pairwise-budget` (or `time-budget` when that cut
+  it), and the console report says `INCOMPLETE: the pairwise budget ended generation`.
+
+The budget is one total: a space that follows one the budget ended gets none, and the repair rounds
+get what the build left. Generation prints progress to stderr at most every 10 s (the space, `build`
+or `repair`, tuples settled of the total, rows built, seconds), also from inside a long search:
+
+```text
+  pairwise SdpaFwd/Gfx1151Probe (build): 957 of 1168 tuples settled, 555 rows, 10 s
+```
+
+A run with a budget that is large enough builds exactly the rows of a run without one. Pick the
+budget from the progress lines of an unbounded `--generate-only` run, which is the cheap way to see
+how long a space needs.
+
+**Rows.** A row is an explicit row: id `pw<k>` (`k` counts from 0 over the main rows and the repair
+rows of the space), `metadata.generator` `gauntlet-pairwise`, the pairwise seed in `notes`
+([`file-formats.md`](file-formats.md), metadata sidecar), data seed derived from (space, seed,
+`k`) unless `--data-seed` is given. Batches, crash isolation, the failure folders, `--shrink` and
+the summary work as for any run. A failure folder has `row.json` and a `replay.sh` that calls
+`--row`, which runs the row under the same GTest name; `repro.json` carries the row and no shape
+seed.
+
+**Repair (`--pairwise-repair N`).** An engine declines many rows of a space (an unsupported
+window, head size or alignment), and a pair that only declining rows drew has tested nothing.
+After the main rows, each round takes the **targets**: the pairs every row that drew them ended
+`DECLINED` or `UNEXERCISED`. It builds new rows for them, from the construction and liveness of
+the generator, using **only the levels that passed**: per axis, the values held by some `PASS` or
+`UNCLAIMED_PASS` row of the run. A target with a value outside them is not retried (the report
+lists it as `never_passed`); a target no row of those levels can cover live is `unreachable` (listed
+with the reason, not tried again). A target an earlier round retried that still did not pass is
+given a row of its own, and the other rows avoid holding it, so a pair that always declines does
+not drag the others down with it. Repair runs up to `N` rounds, and stops when a round builds no
+row. The repair rows are `pw<k>` after the main rows and run through the same batches.
+
+**Report.** `<work-dir>/pairwise/<Op>_<Space>.json`: `levels` (axis to level values),
+`tuples_total`, `rows` (the number of main rows), `lower_bound` (the largest product of two axes'
+level counts: no covering set is smaller), `illegal`, `dead`, `unproven` and `budget_exceeded`
+(each a list of `{"pair": [[axisA, valueA], [axisB, valueB]], "detail"}`), `generation_complete`
+(`false` when the budget cut the build or a repair round), `repair` (`max_rounds`, `rows`, one entry
+per round with `targets`, `retried`, `never_passed`, `unreachable`, `budget_exceeded`, `rows`,
+`first_row`, and the `never_passed` pairs of the last round) and `timings` of the generator
+(`total_s`, `exhaustive_s`, `exhaustive_searches`, `renders`). It is written when the rows are built
+and again at the end.
+
+**`summary.json`.** A pairwise run has `"mode": "pairwise"` (`"random"` and `"row"` otherwise),
+`seed` (the generator seed), no `samples_per_space`, `"continuous": false`, and
+`stopped_because` `pairwise-complete` when every row and repair round ran (or `pairwise-budget`
+when the generation budget cut the build or a repair round, `time-budget`,
+`interrupted`). `pair_coverage[<space id>]` has:
+
+| Field | Meaning |
+|---|---|
+| `tuples` | every pair of levels |
+| `illegal`, `dead`, `unproven`, `budget_exceeded` | the counts above |
+| `drawn` | pairs some sample drew: both values are levels and live in its row (a `range` axis holding a value that is no level draws none) |
+| `passed` | drawn by a `PASS` or `UNCLAIMED_PASS` sample |
+| `declined_only` | drawn, and every sample that drew it was `DECLINED` |
+| `never_passed` | drawn and not passed (`declined_only`, and pairs a `WRONG`, `CRASH` or `UNEXERCISED` sample drew) |
+| `not_passed_total`, `not_passed` | the pairs that could still be passed (everything not passed except the `illegal`, `dead` and `unproven` ones; `budget_exceeded` pairs stay), and the first 50 of them as `[[axisA, valueA], [axisB, valueB]]` |
+| `rows`, `repair_rows` | main rows and repair rows run |
+| `generation_complete` | `false` when `--pairwise-budget` or `--time-budget` ended generation: the rows are only the part of the covering set built in time, and `budget_exceeded` pairs were never settled |
+| `complete` | `false` when the run stopped before every row and repair round ran, or `generation_complete` is `false`; the counts are then partial |
+
+For a complete run, `drawn == tuples - illegal - dead - unproven` (and `budget_exceeded` is 0);
+`passed / tuples` is the number
+to read, with `not_passed` saying what is missing. It is counted from every axis value of every
+row (`range` axes included) and never from a shrink candidate. The console report prints one line
+per space.
+
+**`--generate-only`.** Writes `<work-dir>/bundles/gauntlet/<Op>/<Space>/<tag>_cases/sweep.json`
+(one per dtype tag, as a run writes them, with `graph.template.json`) holding **all** rows of
+each space, however many there are, and the pairwise reports; nothing is run and no repair rows
+exist. Only the selected spaces' own earlier sweeps are replaced. The sweeps are for reading or for
+running with `--golden-data-dir`; they are not part of any CI tier (that needs claims and a tier
+placement, a separate decision).
+
+**Offline coverage of an earlier run.** `--coverage-of WORK_DIR --levels-from PATH [--first N]`
+prints, as JSON, the pair coverage of the `samples.jsonl` and `outcomes.jsonl` of `WORK_DIR`
+(typically a random run) against the levels, and the `illegal`/`dead`/`unproven` pairs, of
+`PATH`: a pairwise report or a directory of them (`<work-dir>/pairwise`). Per space of a report it
+gives the `pair_coverage` fields above (without `rows`, `repair_rows` and `complete`), the report's
+`generation_complete`, and
+`samples` and `with_outcome` (the samples counted and those with an outcome record). `--first N`
+counts only the first `N` samples of each space, so a random run of the same size as a pairwise run
+can be compared with it. The same is `run_gauntlet_fuzz.coverage_of(work_dir, levels_from,
+first=None, spaces_dir=None)`. Random runs have no `pair_coverage` of their own.
+
+**What is tested.** The generator, the driver's pairwise path and the coverage are tested
+(`test_gauntlet.py`, stub binary, no GPU). That no pair is `unproven` is tested for every shipped
+space with a varying graph; that every other pair is covered, and that every `illegal` and `dead`
+pair is so by a search coded apart from the generator, is tested for the SDPA forward spaces; the
+illegal and dead sets of every space are pinned. A brute force over the whole product of small toy
+spaces checks the proofs, including toys that only the effective-reads search and the component
+split settle within a small cap.
+
+### Catalog sweeps (`--catalog`)
+
+A random or pairwise run exercises each graph with the one plan the engine's heuristic picks. An
+engine that can build a graph several ways (the kernel-ingestor engines list one candidate per
+kernel that matches) has candidates that pick never reaches. `--catalog` runs **every candidate
+the engine matches for each drawn graph**, not the pick. It needs `--test-engine`, works with
+random, `--pairwise` and `--row` runs, and cannot be combined with `--shrink`.
+
+```bash
+python3 dnn-providers/integration-tests/gauntlet/run_gauntlet_fuzz.py \
+    --binary build/bin/hipdnn_integration_tests --test-article <plugin> \
+    --test-engine hipkernel:Gfx950AttentionDense --test-config <its TOML> \
+    --filter '^SdpaFwd/Gfx950Dense$' --samples 8 --catalog --work-dir gauntlet-runs/catalog
+# the same sweep split in four runs (on four machines, say): shard 0 of 4 .. shard 3 of 4
+... --catalog --catalog-shard 0/4
+```
+
+**What a run does.** For each batch of drawn graphs (a fuzz sample, a pairwise row, or the
+`--row` sample) the driver first writes the graphs as cases and runs the binary once with
+`--list-candidates` (the run's own engine, article and config flags, and a gtest filter naming
+the batch's graphs). Each graph's [listing record](file-formats.md#--list-candidates-output) says:
+
+| `status` | What the driver does |
+|---|---|
+| `ok` | One case per candidate, `<graph case id>c<k>` (`s123c0`, `s123c1`, ..., `pw4c2`), where `k` is the candidate's index in the listing. The catalog is sorted by kernel id, so `k` is stable. The case is the graph's own case (same axes, same data seed) plus `metadata.engine_variant = {"id", "knobs"}` of the candidate, so the binary builds exactly that candidate and not the heuristic pick. |
+| `not_enumerable` | The engine cannot enumerate its candidates for this graph. A one-entry catalog: the case `<graph>c0` with `engine_variant {"id": "default"}`, the engine's own pick. |
+| `error` | The graph is `UNEXERCISED` (stage `setup`) with the listing's reason, `catalog listing: <reason>`. A graph that lists no candidates, a listing the driver cannot read (a duplicate id, a malformed candidate), and a graph whose listing killed or hung the binary (the driver lists the rest again in halves to isolate it) end the same way. |
+
+The candidate cases run through the normal batch path, so crash isolation, `failures/<case>/`
+folders and the summary work per candidate. A failure folder's `replay.sh` calls the driver with
+`--row` on its `row.json`, which carries the `engine_variant` (id **and** knobs) next to the axes
+and the case id, so the replay forces the same candidate without listing again. `--row` accepts
+`engine_variant` for that reason (a row file that has one cannot be combined with `--catalog`).
+
+**`--catalog-shard i/n`.** Keeps, of each graph's candidate list, the candidates whose index `k`
+satisfies `k % n == i` (`0 <= i < n`). Every shard draws and lists the same graphs, so running the
+shards `0/n` .. `(n-1)/n` runs each candidate of each graph exactly once, none lost and none
+repeated. A graph that could not be listed (`error`) has one entry, at `k = 0`: it is reported by
+shard `0` only. Run the shards with different `--work-dir`s.
+
+**Reconciliation in `summary.json`.** A catalog run adds a `catalog` block and the two checks:
+
+| Key | Content |
+|---|---|
+| `catalog.shard` | `"i/n"`, or `null`. |
+| `catalog.graphs[]` | One entry per graph listed: `space`, `graph` (its case id), `status` (`ok`, `not_enumerable`, `error`), `candidates` (the size of the **whole** catalog), `catalog` (every candidate id, in listing order), `selected` (the ids this shard ran), `outcomes` (candidate id -> `PASS`, `DECLINED`, `WRONG`, `CRASH`, `UNCLAIMED_PASS` or `UNEXERCISED`), `reason`, and for an `error` graph `graph_outcome: "UNEXERCISED"` with no candidates. |
+| `catalog.engines` | Per engine: `graphs`, `candidates` (listed), `cases` (run), `unexercised_graphs` and `outcomes` (the totals by outcome, a graph that could not be listed counted `UNEXERCISED`). |
+| `catalog.reconciled` | True when every selected candidate of every graph has exactly one outcome. The top-level `reconciled` and `samples` count candidate cases (and graphs that could not be listed) in a catalog run. |
+| `candidate_mismatch` | The cases whose `finished` record's `candidate` is not the forced id (`space`, `case`, `forced`, `reported`; `reported` is `null` when the record has none). The force did not reach the engine, so this **fails the run** (exit 1) and is printed as `CANDIDATE MISMATCH`. |
+| `kernel_mismatch` | The cases whose `kernels` include one whose text after its last `/` is not the forced id (`space`, `case`, `forced`, `kernels`). **Listed and printed, not a failure**: a difference between the id and the log line is a log-format question, not an engine bug. Cases with the `default` candidate, and cases that reported no kernel, are not checked. |
+
+`candidate_mismatch` and `kernel_mismatch` are also written, outside a catalog run, by any run that
+forces a candidate (a `--row` file with an `engine_variant`). Each case in `outcomes.jsonl` carries
+`forced_candidate` (the id it forced) and `candidate` (what its record said), and a line of
+`samples.jsonl` names `engine_variant`.
+
+**What is tested.** The listing parse, one case per candidate, a not-enumerable and an erroring
+graph, a listing that kills the binary, the shard split (no candidate lost or repeated, for several
+`n`), the mismatch checks, the pairwise and `--row` paths and the replay of a candidate failure
+(`test_gauntlet.py`, stub binary, no GPU). On a device, the sweep's kernel for each candidate is
+the one `kernels` shows, which the `kernel_mismatch` check reads.
+
+### Measuring the oracle's cost
+
+A space bounds its samples by a cost ceiling (`n * c * hw <= 2**30`, `b*hq*sq*skv*dqk <= 2**31`)
+because the reference an engine is graded against takes time in proportion to that cost. The
+ceiling is a measured number, and `gauntlet/measure_oracle_cost.py` (Python 3, standard library
+only) measures it. It reads each space's cost-ceiling constraint (the `<=` constraint whose
+`reason` says "cost"; a space with two, such as `ResampleFwd/Default`, is measured once per
+constraint), builds a ladder of explicit rows that sweep that expression from small to the
+ceiling with every other axis at a legal value, and runs each rung with the driver's
+[`--row`](#gauntlet-fuzz-runs) on the same binary and engine. It reads the `reference_ms` the
+binary reported for each rung from `outcomes.jsonl` (see [the outcome report](#outcome-report)),
+fits `reference_ms = a + b * cost` by least squares over the `PASS` and `WRONG` rungs that ran a
+reference, and extrapolates the cost at which the reference takes 60 s.
+
+```bash
+python3 dnn-providers/integration-tests/gauntlet/measure_oracle_cost.py \
+    --binary build/bin/hipdnn_integration_tests --test-article <plugin> \
+    --test-engine ASM_SDPA_ENGINE --test-config <its TOML> \
+    --filter '^SdpaBackward/' --pin dtype=half --work-dir gauntlet-runs/oracle_cost
+```
+
+`--binary`, `--test-article`, `--test-engine`, `--test-config`, `--binary-arg`, `--spaces-dir` and
+`--case-timeout` go to the driver as given. `--rungs N` (default 8) and `--ratio R` (default 4)
+set the ladder: the target costs fall by `R` from the ceiling, so the last rung is the largest row
+the space allows. Each rung starts from a legal base row (the sample `--base-seed` draws, default
+1) and lowers, then raises, the axes the cost depends on. `--pin AXIS=VALUE` (a JSON value, else a
+string; repeatable) keeps an axis at a value in every rung, which is how to give an engine a
+dtype or layout it accepts.
+
+The report, on stdout and in `--json` (default `<work-dir>/oracle_cost.json`), has one entry per
+space and cost driver: `cost_driver`, `ceiling`, `points` (each rung's `cost`, `outcome`,
+`reference_ms` and `reference_lane`), `lane`, `fit_points`, `a_ms`, `b_ms_per_cost`, `r2`,
+`cost_at_60s` and `predicted_ms_at_ceiling`. The oracle only runs when the engine does, so an
+engine that declines every rung leaves the space `unmeasured`, and the entry's `reason` is the
+engine's decline. A space is also `unmeasured` when fewer than two distinct costs ran a
+reference, and when it has no cost-ceiling constraint. If the rungs used both lanes the fit uses
+the lane with more rungs. Each rung's driver run is kept under `<work-dir>/<Op>_<Space>_<n>/r<i>/`.
+The tool is tested with the stub binary (`test_gauntlet.py`): a synthetic linear reference time is
+fitted back within 1%.
+
+### Reading an alignment or placement probe
+
+Read `axis_outcomes[...]["alignment"]` against `["placement"]`, or a record's `placement`
+and its `reason`. For `default` and `exact` the case is an ordinary run with the tensors
+declared (and placed) at that alignment:
+
+| Outcome | Meaning |
+|---|---|
+| `PASS` | The engine accepted the declared alignment, and the output matched. |
+| `DECLINED` | The engine does not take a graph that declares this alignment (for example through the version gate). The expected answer for an alignment it does not support; not a defect. |
+| `CRASH` | The engine accepted the graph, then failed to build or execute: for `exact`, for example, it refused a pointer that sits exactly at the alignment the graph declares. |
+| `WRONG` | It ran, and the output did not match the oracle. |
+| `UNEXERCISED` | The harness could not set the case up (the `reason` says why). |
+
+What HIP_MLOPS declines (gfx950 probes, `exact` placement):
+
+| Engine / op | Declines a declared alignment | Evidence |
+|---|---|---|
+| BatchNorm (forward training, backward, inference) | below what its kernels' accesses need: per-channel fp32 tensors need 4, x/y need the vector width times the element size | alignments 1 and 2 decline; 4 and above pass |
+| LayerNorm, RMSNorm, Resample | below, or not a multiple of, a tensor's element size | before the check, a float tensor at alignment 1 or 2 gave garbage output; with it, every alignment passes or declines |
+| ASM_SDPA, Gfx950AttentionDense | below 16 (Q, K, V, O) | alignments 1 to 8 decline, 16 and above pass |
+| hipBLASLt, MIOpen | everything but 16, through the plugin API version gate | only alignment 16 is offered to them |
+
+For `under` the case is written to be refused. The harness misaligns the pointer of
+`placement_uid` to half its declared alignment and the engine must accept the graph and then
+reject that pointer:
+
+| Outcome | Meaning |
+|---|---|
+| `PASS` | **`BAD_PARAM` was returned** for the `placement_uid` tensor; the record has `expected_status: "BAD_PARAM"` and nothing was compared. The backend enforces the declared alignment. |
+| `DECLINED` | The engine is absent from the ranked list for this graph, so the misaligned pointer was never offered to it. It says nothing about alignment enforcement. |
+| `CRASH` | The engine accepted the graph and the backend did not refuse that pointer: it executed the graph (`reason` starts `expected BAD_PARAM for uid N`), declined after accepting it, or failed with another error. A backend that does not enforce the declared alignment lands here. |
+| `UNEXERCISED` | The pointer could not be placed: `placement_uid` is not a device buffer of the run (a by-value scalar, a sub-byte packed input, or not a tensor), or its alignment is below 2. |
+
+Compare the `exact` and `under` rows of one alignment. `exact` `PASS` with `under`
+`PASS` is a backend that honors the declaration. `exact` `PASS` with `under` `CRASH` is one
+that accepts the declaration and ignores it. `DECLINED` in both means the engine's version
+or applicability gate removed that alignment from its support.
+
+Run the driver's own tests with
+`python -m pytest -q -p no:cacheprovider dnn-providers/integration-tests/gauntlet/test_gauntlet.py`
+(CTest: `hipdnn_gauntlet_python_tests`). They use a stub binary and need no GPU.
 
 ## Test tiers
 
@@ -619,6 +1458,13 @@ arithmetic, as it already is at the host site. The
 comparison of a ragged output, or of an output with `live_rows`, runs on the
 host under `auto` and `cpu`. The
 `hipdnn_golden_data_tests` binary replaces the retired `golden-check` mode.
+
+A `[[validator_overrides]]` entry with `validator = "allclose"` or
+`"allclose_matching_infinities"` may also set `atol`, `rtol` or both. They set that tolerance
+for the matched output tensors only, and outrank a `[[tolerance_overrides]]` entry for the same
+test. The engine configs use this for numerics the fuzz driver found, scoped to the gauntlet
+suites (`*gauntlet*<Op>*`) so that a checked-in bundle is graded as before
+([precedence](file-formats.md#per-engine-test-config--configengine_nametoml)).
 
 **SDPA Philox dropout.** No reference can reproduce an engine's random stream, so a
 forward graph with `dropout_probability` is verified through its `rng_dump` output

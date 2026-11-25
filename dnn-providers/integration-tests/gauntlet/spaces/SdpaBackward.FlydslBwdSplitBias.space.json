@@ -1,0 +1,567 @@
+{
+  "version": 1,
+  "operation": "SdpaBackward",
+  "description": "SDPA backward with an additive bias and, on most draws, dBias over hipkernel:flydsl_sdpa_bwd_split on gfx942 and gfx90a (COVERAGE.md 9.1 and 9.2): a rank-4 bias of the data dtype or, beside 16-bit data, f32 with an f32 dBias (BI-2), broadcast over batch and head (BI-1, BI-3) or, without dBias, over query rows; any key length, so the bias row pitch is aligned or not (a 16-bit bias with an unaligned pitch is served by dQ rows that read it directly; with dBias the dBias stride must be a multiple of 16 bytes, BI-9, which the constraint keeps). No mask: a bias with a causal or window mask is declined (MW-10) and drawn by SdpaBackward/FlydslBwdSplitProbe. Head dims in the `hd` axis include 160 and the 256 and 512 tiles. The bias and dBias tensors are named z_attn_mask and z_dbias so that their canonical uids (by sorted name, bundle_utils.canonical_uid_map_by_name) are 9 and 10, after the template's stats. The O and the LSE come from the forward with the graph's own bias (CpuFpReferenceSdpa).",
+  "engine": "hipkernel:flydsl_sdpa_bwd_split",
+  "template": "../../integration-test-bundles/quick/SdpaBackward/Default/graph.template.json",
+  "axes": {
+    "dtype": {
+      "values": [
+        "half",
+        "bfloat16",
+        "float",
+        "half",
+        "bfloat16"
+      ]
+    },
+    "layout": {
+      "values": [
+        "bshd",
+        "bhsd"
+      ]
+    },
+    "b": {
+      "values": [
+        1,
+        2,
+        3
+      ]
+    },
+    "hkv": {
+      "values": [
+        1,
+        2,
+        4
+      ]
+    },
+    "group": {
+      "values": [
+        1,
+        1,
+        1,
+        2,
+        4,
+        8,
+        3,
+        5,
+        6,
+        16
+      ]
+    },
+    "hd": {
+      "values": [
+        [
+          16,
+          16
+        ],
+        [
+          32,
+          32
+        ],
+        [
+          64,
+          64
+        ],
+        [
+          64,
+          64
+        ],
+        [
+          64,
+          64
+        ],
+        [
+          72,
+          72
+        ],
+        [
+          96,
+          96
+        ],
+        [
+          128,
+          128
+        ],
+        [
+          128,
+          128
+        ],
+        [
+          128,
+          128
+        ],
+        [
+          160,
+          160
+        ],
+        [
+          192,
+          192
+        ],
+        [
+          256,
+          256
+        ],
+        [
+          320,
+          320
+        ],
+        [
+          512,
+          512
+        ],
+        [
+          128,
+          64
+        ],
+        [
+          64,
+          128
+        ],
+        [
+          192,
+          128
+        ],
+        [
+          80,
+          80
+        ]
+      ]
+    },
+    "sq": {
+      "range": [
+        1,
+        512
+      ],
+      "boundaries": [
+        1,
+        2,
+        15,
+        16,
+        17,
+        63,
+        64,
+        65,
+        127,
+        128,
+        129,
+        192,
+        256,
+        257,
+        512
+      ]
+    },
+    "skv": {
+      "range": [
+        1,
+        1024
+      ],
+      "boundaries": [
+        1,
+        7,
+        8,
+        9,
+        15,
+        16,
+        17,
+        63,
+        64,
+        65,
+        127,
+        128,
+        129,
+        192,
+        255,
+        256,
+        512,
+        1024
+      ]
+    },
+    "bias_dt": {
+      "values": [
+        "same",
+        "same",
+        "f32"
+      ]
+    },
+    "dbias": {
+      "values": [
+        false,
+        true,
+        true
+      ]
+    },
+    "bcast_b": {
+      "values": [
+        false,
+        true
+      ]
+    },
+    "bcast_h": {
+      "values": [
+        false,
+        true
+      ]
+    },
+    "bcast_q": {
+      "values": [
+        false,
+        false,
+        true
+      ]
+    },
+    "bias_rank": {
+      "values": [
+        4,
+        4,
+        4,
+        3,
+        2
+      ]
+    },
+    "bias_dom": {
+      "values": [
+        "default",
+        "default",
+        "wide",
+        "big"
+      ]
+    },
+    "scale": {
+      "values": [
+        0.0883883461356163,
+        0.07216878235340118,
+        0.125,
+        0.25,
+        0.5,
+        1.0,
+        4.0,
+        0.0,
+        -0.125,
+        0.0001
+      ]
+    },
+    "domain": {
+      "values": [
+        "default",
+        "narrow",
+        "wide",
+        "positive",
+        "constant",
+        "nonzero",
+        "zeros",
+        "large",
+        "subnormal"
+      ]
+    },
+    "alignment": {
+      "values": [
+        1,
+        2,
+        4,
+        8,
+        16,
+        32,
+        64,
+        128,
+        256
+      ]
+    },
+    "placement": {
+      "values": [
+        "default",
+        "exact",
+        "under"
+      ]
+    }
+  },
+  "derive": {
+    "hvmul": "1",
+    "hv": "hkv * hvmul",
+    "hq": "hkv * hvmul * group",
+    "dqk": "hd[0]",
+    "dv": "hd[1]",
+    "dims_q": "[b, hq, sq, dqk]",
+    "dims_k": "[b, hkv, skv, dqk]",
+    "dims_v": "[b, hv, skv, dv]",
+    "dims_o": "[b, hq, sq, dv]",
+    "dims_lse": "[b, hq, sq, 1]",
+    "row_q": "(hq*dqk if layout == 'bshd' else dqk) + 0",
+    "stride_q": "[sq*row_q, dqk, row_q, 1] if layout == 'bshd' else [hq*sq*row_q, sq*row_q, row_q, 1]",
+    "row_k": "(hkv*dqk if layout == 'bshd' else dqk) + 0",
+    "stride_k": "[skv*row_k, dqk, row_k, 1] if layout == 'bshd' else [hkv*skv*row_k, skv*row_k, row_k, 1]",
+    "row_v": "(hv*dv if layout == 'bshd' else dv) + 0",
+    "stride_v": "[skv*row_v, dv, row_v, 1] if layout == 'bshd' else [hv*skv*row_v, skv*row_v, row_v, 1]",
+    "row_o": "(hq*dv if layout == 'bshd' else dv) + 0",
+    "stride_o": "[sq*row_o, dv, row_o, 1] if layout == 'bshd' else [hq*sq*row_o, sq*row_o, row_o, 1]",
+    "stride_lse": "[hq*sq, sq, 1, 1]",
+    "dom_kind": "'fixed' if domain == 'constant' else ('free' if domain in ['default', 'narrow', 'wide', 'positive'] else domain)",
+    "dom_lo": "-0.01 if domain == 'narrow' else (-8 if domain == 'wide' else (0.25 if domain == 'positive' else (0.5 if domain == 'constant' else -1)))",
+    "dom_hi": "0.01 if domain == 'narrow' else (8 if domain == 'wide' else (4 if domain == 'positive' else (0.5 if domain == 'constant' else 1)))",
+    "dom_value": "0.5 if domain == 'constant' else 0",
+    "dom_scale": "8 if domain == 'large' else 1",
+    "dom_g_lo": "-1 if domain == 'wide' else dom_lo",
+    "dom_g_hi": "1 if domain in ['wide', 'positive'] else dom_hi",
+    "eff_placement": "'exact' if placement == 'under' and alignment < 2 else placement",
+    "right": "None",
+    "left": "None",
+    "align": "'TOP_LEFT'",
+    "bias_dtype": "dtype if bias_dt == 'same' else 'float'",
+    "bias_b": "1 if bcast_b else b",
+    "bias_h": "1 if bcast_h else hq",
+    "bias_q": "1 if bcast_q else sq",
+    "pitch": "skv",
+    "dims_bias": "[bias_b, bias_h, bias_q, skv] if bias_rank == 4 else ([bias_h, bias_q, skv] if bias_rank == 3 else [bias_q, skv])",
+    "stride_bias": "[bias_h*bias_q*pitch, bias_q*pitch, pitch, 1] if bias_rank == 4 else ([bias_q*pitch, pitch, 1] if bias_rank == 3 else [pitch, 1])",
+    "dims_dbias": "[bias_b, bias_h, bias_q, skv] if bias_rank == 4 else ([bias_h, bias_q, skv] if bias_rank == 3 else [bias_q, skv])",
+    "bias_lo": "-1 if bias_dom == 'default' else (-8 if bias_dom == 'wide' else -1000)",
+    "bias_hi": "1 if bias_dom == 'default' else (8 if bias_dom == 'wide' else 1000)",
+    "bias_mag": "1 if bias_dom == 'default' else (8 if bias_dom == 'wide' else 1000)",
+    "dom_mag": "0.5 if domain == 'constant' else (8 if domain in ['large', 'wide'] else (4 if domain == 'positive' else (0.01 if domain == 'narrow' else (0 if domain in ['zeros', 'subnormal'] else 1))))",
+    "s_max": "abs(scale) * dqk * dom_mag * dom_mag + bias_mag"
+  },
+  "constraints": [
+    {
+      "rule": "not (dbias and bcast_q)",
+      "reason": "dBias with a bias broadcast over query rows is declined by every engine (BI-4); SdpaBackward/FlydslBwdSplitProbe draws dbias_rowbcast"
+    },
+    {
+      "rule": "not dbias or skv % (8 if dtype != 'float' and bias_dt == 'same' else 4) == 0",
+      "reason": "a dBias stride that is not a multiple of 16 bytes is declined (BI-9, [layout]); the bias itself may have any row pitch on the split engine (9.2), so skv is free without dBias. SdpaBackward/FlydslBwdSplitProbe draws dbias_unaligned"
+    },
+    {
+      "rule": "bias_dt == 'same' or (dbias and dtype != 'float' and dqk == dv and dqk in [64, 80, 96, 128])",
+      "reason": "an f32 bias beside 16-bit Q/K/V is served with an f32 dBias, at head dims 64 and 128 on the split engine (BI-2, 9.2); 80 and 96 are drawn too, because the descriptor listing shows f32-bias dQ rows only at d64, so a decline there is information and an accept must grade"
+    },
+    {
+      "rule": "b*hq*sq*skv*(dqk+dv) <= 2**29",
+      "reason": "GPU reference cost ceiling, as SdpaBackward.space.json: the case time is linear above 2**26 and the CPU backward reference is serial, so 2**29 keeps the worst drawn case near 24 s (measured on a gfx942 host for the ASM region space)"
+    },
+    {
+      "rule": "s_max <= (168 if dtype == 'float' else (8388 if dtype == 'half' else 16777))",
+      "reason": "the largest score |S| (bounded by |scale| * dqk * mag^2, plus |bias|) must keep |S| * 2^-24 below a tenth of the dtype's tolerance: the backward computes P = exp(S - LSE) from a given fp32 LSE, and two correct fp32 computations of S differ by |S| * 2^-24, which exp() passes on to P and the gradients. Beyond that bound the oracle cannot tell a correct engine from a wrong one (scale 2^20 with scores near 1e9 gave NaN in every engine that did not produce the LSE itself)"
+    }
+  ],
+  "case": {
+    "values": {
+      "io_data_type": "${dtype}",
+      "tensors": [
+        {
+          "uid": 0,
+          "dims": "${dims_k}",
+          "strides": "${stride_k}",
+          "data_type": "${dtype}",
+          "alignment": 16
+        },
+        {
+          "uid": 1,
+          "dims": "${dims_o}",
+          "strides": "${stride_o}",
+          "data_type": "${dtype}",
+          "alignment": 16
+        },
+        {
+          "uid": 2,
+          "dims": "${dims_q}",
+          "strides": "${stride_q}",
+          "data_type": "${dtype}",
+          "alignment": 16
+        },
+        {
+          "uid": 3,
+          "dims": "${dims_k}",
+          "strides": "${stride_k}",
+          "data_type": "${dtype}",
+          "alignment": 16
+        },
+        {
+          "uid": 4,
+          "dims": "${dims_q}",
+          "strides": "${stride_q}",
+          "data_type": "${dtype}",
+          "alignment": 16
+        },
+        {
+          "uid": 5,
+          "dims": "${dims_v}",
+          "strides": "${stride_v}",
+          "data_type": "${dtype}",
+          "alignment": 16
+        },
+        {
+          "uid": 6,
+          "dims": "${dims_v}",
+          "strides": "${stride_v}",
+          "data_type": "${dtype}",
+          "alignment": 16
+        },
+        {
+          "uid": 7,
+          "dims": "${dims_o}",
+          "strides": "${stride_o}",
+          "data_type": "${dtype}",
+          "alignment": 16
+        },
+        {
+          "uid": 8,
+          "dims": "${dims_lse}",
+          "strides": "${stride_lse}",
+          "data_type": "float",
+          "alignment": 16
+        }
+      ],
+      "attributes": {
+        "compute_data_type": "float",
+        "parameters__alibi_mask": false,
+        "parameters__attn_scale_value": "${scale}",
+        "parameters__causal_mask": false,
+        "parameters__causal_mask_bottom_right": false,
+        "parameters__dropout_probability": null,
+        "parameters__diagonal_alignment": "TOP_LEFT",
+        "parameters__left_bound": null,
+        "parameters__right_bound": null
+      }
+    },
+    "metadata": {
+      "purpose": "probe",
+      "validator": "default",
+      "inputs": {
+        "2": {
+          "kind": "${dom_kind}",
+          "lo": "${dom_lo}",
+          "hi": "${dom_hi}",
+          "value": "${dom_value}",
+          "scale": "${dom_scale}"
+        },
+        "0": {
+          "kind": "${dom_kind}",
+          "lo": "${dom_lo}",
+          "hi": "${dom_hi}",
+          "value": "${dom_value}",
+          "scale": "${dom_scale}"
+        },
+        "6": {
+          "kind": "${dom_kind}",
+          "lo": "${dom_g_lo}",
+          "hi": "${dom_g_hi}",
+          "value": "${dom_value}",
+          "scale": 1
+        },
+        "7": {
+          "kind": "${dom_kind}",
+          "lo": "${dom_g_lo}",
+          "hi": "${dom_g_hi}",
+          "value": "${dom_value}",
+          "scale": 1
+        },
+        "9": {
+          "kind": "free",
+          "lo": "${bias_lo}",
+          "hi": "${bias_hi}",
+          "value": 0,
+          "scale": 1
+        }
+      },
+      "placement": "${eff_placement}",
+      "placement_uid": 2
+    },
+    "node_patches": [
+      {
+        "node": "SdpaBwd_0",
+        "section": "inputs",
+        "set": {
+          "attn_mask_tensor_uid": 9
+        }
+      },
+      {
+        "when": "${dbias}",
+        "node": "SdpaBwd_0",
+        "section": "outputs",
+        "set": {
+          "dbias_tensor_uid": 10
+        }
+      }
+    ],
+    "tensor_patches": [
+      {
+        "uid": 0,
+        "set": {
+          "alignment": "${alignment}"
+        }
+      },
+      {
+        "uid": 1,
+        "set": {
+          "alignment": "${alignment}"
+        }
+      },
+      {
+        "uid": 2,
+        "set": {
+          "alignment": "${alignment}"
+        }
+      },
+      {
+        "uid": 3,
+        "set": {
+          "alignment": "${alignment}"
+        }
+      },
+      {
+        "uid": 4,
+        "set": {
+          "alignment": "${alignment}"
+        }
+      },
+      {
+        "uid": 5,
+        "set": {
+          "alignment": "${alignment}"
+        }
+      },
+      {
+        "uid": 6,
+        "set": {
+          "alignment": "${alignment}"
+        }
+      },
+      {
+        "uid": 7,
+        "set": {
+          "alignment": "${alignment}"
+        }
+      },
+      {
+        "uid": 8,
+        "set": {
+          "alignment": "${alignment}"
+        }
+      }
+    ],
+    "add_tensors": [
+      {
+        "uid": 9,
+        "name": "z_attn_mask",
+        "data_type": "${bias_dtype}",
+        "dims": "${dims_bias}",
+        "strides": "${stride_bias}",
+        "alignment": "${alignment}",
+        "is_runtime_pass_by_value": false,
+        "ragged_offset_multiplier": 1,
+        "virtual": false
+      },
+      {
+        "when": "${dbias}",
+        "uid": 10,
+        "name": "z_dbias",
+        "data_type": "${bias_dtype}",
+        "dims": "${dims_dbias}",
+        "strides": "${stride_bias}",
+        "alignment": "${alignment}",
+        "is_runtime_pass_by_value": false,
+        "ragged_offset_multiplier": 1,
+        "virtual": false
+      }
+    ]
+  }
+}

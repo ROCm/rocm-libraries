@@ -1,0 +1,93 @@
+{
+  "version": 1,
+  "operation": "BatchnormBackward",
+  "description": "BatchNorm backward (spatial mode, saved mean and inverse variance from the forward pass) in the HIP_MLOPS_ENGINE region: rank 4 or 5, NCHW/NCDHW or NHWC/NDHWC strides, float/half/bfloat16 x, dy and dx with float scale, dscale, dbias and statistics (the backward kernels use a single fp_type for x, dy and dx, BatchNormBwdSpatial.cpp:837-839, although the applicability check would accept differing io dtypes, BatchnormApplicabilityChecks.cpp:65-76), N*H*W > 1, hw and n swept around the kernel-variant thresholds (hw 60/200/512/1024/4096, n 32/64/768) and powers of two +-1. Template: quick BatchnormBackward/Variant2 (saved mean and inv-variance, the full backward tensor set; Default recomputes the statistics and sets no mean/inv-variance). The tuned input ranges of the quick sweep are copied: inv_variance 1.9..2.0 stays positive, as an rsqrt output must. The axis domain (default/narrow/wide/positive/constant/nonzero/zeros/large/subnormal/nan/inf) renders the fills of x (uid 7) and dy (uid 3) in metadata.inputs; default keeps the quick sweep's x -1..1 and dy -0.1..0.1, the other finite domains use the shared table for both; large keeps scale 32 (worst-case half dx stays near 1e4, below 65504, because scale*inv_variance <= 0.2); scale, mean and inv_variance keep their tuned literal ranges. For nan and inf, x and dy stay at their default ranges (a non-finite x or dy element spreads through the channel sums to all of dscale, dbias and dx of its channel) and the special fill (5% of elements, at least one) goes on scale (uid 6): it only multiplies dx, so dscale and dbias stay finite and only the poisoned channels of dx are non-finite; c == 1 would make all of dx non-finite, and match_nonfinite fails a reference with no finite element, so a constraint rejects nan and inf at c == 1. The engine's numerics are graded by the gauntlet-scoped entries of HIP_MLOPS_ENGINE.toml, not narrowed here: dx of half and bfloat16 takes a per-tensor atol/rtol that covers one ulp of |dx| up to the range of the wide, positive and large domains (a few units to about 1e4), and dscale and dbias take a relative-RMS threshold because the engine's reduction order differs from the reference's. Two constraints remain, and they bound the CPU reference's own accuracy rather than the engine's tolerance: its dscale and dbias are one sequential fp32 sum per channel, which stagnates for constant terms beyond n*hw 2**15 and biases for same-sign (positive) terms beyond 2**21 (see each constraint's reason). The validator is match_nonfinite exactly for nan and inf. The last axes, alignment (1..256) and placement (default/exact/under), declare that alignment on every device tensor (tensor_patches on uids 0-7) and place the run's pointers accordingly; under misaligns x (placement_uid 7) and needs alignment >= 2, so eff_placement turns under into exact at alignment 1.",
+  "engine": "HIP_MLOPS_ENGINE",
+  "template": "../../integration-test-bundles/quick/BatchnormBackward/Variant2/graph.template.json",
+  "axes": {
+    "dtype":  {"values": ["float", "half", "bfloat16"]},
+    "layout": {"values": ["nchw", "nhwc"]},
+    "ndim":   {"values": [4, 5]},
+    "n":      {"range": [1, 1024], "boundaries": [1, 2, 3, 4, 5, 31, 32, 33, 64, 65, 768, 769]},
+    "c":      {"range": [1, 512], "boundaries": [1, 2, 3, 4, 5, 16, 17, 32, 33, 64, 65, 128, 129, 256, 257]},
+    "hw":     {"range": [1, 8192], "boundaries": [1, 2, 3, 4, 5, 17, 60, 61, 160, 161, 199, 200, 512, 513, 1024, 1025, 4095, 4096, 4097]},
+    "hs":     {"values": [1, 2, 3, 4, 5, 8, 16, 64]},
+    "ds":     {"values": [1, 2, 3, 4]},
+    "domain": {"values": ["default", "narrow", "wide", "positive", "constant", "nonzero", "zeros", "large", "subnormal", "nan", "inf"]},
+    "alignment": {"values": [1, 2, 4, 8, 16, 32, 64, 128, 256]},
+    "placement": {"values": ["default", "exact", "under"]}
+  },
+  "derive": {
+    "h":       "hs if hw % hs == 0 else 1",
+    "d":       "ds if ndim == 5 and (hw // h) % ds == 0 else 1",
+    "w":       "hw // h // d",
+    "dims_x":  "[n, c, h, w] if ndim == 4 else [n, c, d, h, w]",
+    "dims_p":  "[1, c, 1, 1] if ndim == 4 else [1, c, 1, 1, 1]",
+    "xs_w":    "1 if layout == 'nchw' else c",
+    "xs_h":    "w if layout == 'nchw' else w * c",
+    "xs_d":    "h * w if layout == 'nchw' else h * w * c",
+    "xs_c":    "d * h * w if layout == 'nchw' else 1",
+    "xs_n":    "c * d * h * w",
+    "stride_x": "[xs_n, xs_c, xs_h, xs_w] if ndim == 4 else [xs_n, xs_c, xs_d, xs_h, xs_w]",
+    "ss_w":    "1 if layout == 'nchw' else c",
+    "stride_s": "[c, 1, ss_w, ss_w] if ndim == 4 else [c, 1, ss_w, ss_w, ss_w]",
+    "stride_p": "[c, 1, 1, 1] if ndim == 4 else [c, 1, 1, 1, 1]",
+    "dom_kind":  "'fixed' if domain == 'constant' else 'nonzero' if domain == 'nonzero' else 'zeros' if domain == 'zeros' else 'large' if domain == 'large' else 'subnormal' if domain == 'subnormal' else 'free'",
+    "dom_lo":    "-0.01 if domain == 'narrow' else -8.0 if domain == 'wide' else 0.25 if domain == 'positive' else 0.5 if domain == 'constant' else -1.0",
+    "dom_hi":    "0.01 if domain == 'narrow' else 8.0 if domain == 'wide' else 4.0 if domain == 'positive' else 0.5 if domain == 'constant' else 1.0",
+    "dom_value": "0.5 if domain == 'constant' else 0.0",
+    "dy_lo":     "-0.1 if domain in ['default', 'nan', 'inf'] else dom_lo",
+    "dy_hi":     "0.1 if domain in ['default', 'nan', 'inf'] else dom_hi",
+    "dom_scale": "32.0 if domain == 'large' else 1.0",
+    "dom_special": "'inf' if domain == 'inf' else 'nan'",
+    "dom_fraction": "0.05",
+    "dom_validator": "'match_nonfinite' if domain in ['nan', 'inf'] else 'default'",
+    "pz_kind":   "'special' if domain in ['nan', 'inf'] else 'free'",
+    "eff_placement": "'exact' if placement == 'under' and alignment < 2 else placement"
+  },
+  "constraints": [
+    {"rule": "n * hw > 1", "reason": "backward is a training-mode op, so N * spatial must be > 1 (frontend validateBatchNormTrainingSpatialDimensions via BatchnormBackwardNode.hpp:162; engine BatchnormValidator::checkBwdTensorConfigSupported passes isTraining=true to validateSpatialDimensions, BatchnormApplicabilityChecks.cpp:29,414-437)"},
+    {"rule": "n * c * hw <= 2**24", "reason": "oracle cost ceiling (RFC 0023 section 14), lower than the 2**30 normalization ceiling because the GPU graph executor has no BatchNorm backward plan (GpuReferenceGraphExecutor.hpp:361-362, 'no GPU plan yet'), so the scalar CPU reference (CpuFpReferenceBatchnorm.hpp:296-394, three passes per channel with an index vector per element) is the oracle. Kept at 2**24 on measurement (gfx950, 2026-11-02, measure_oracle_cost.py): CPU lane, the rung at 2**24 took 446 ms, fit reference_ms = 7.2 + 2.6e-5 * cost over 8 rungs, r2 0.9992, 60 s at about 2.3e9, so 2**24 is a 137-fold margin; keeps the extents inside the kernel's int template parameters too (Configuration.hpp proto_config, BatchnormBwdPlan.cpp:248-253)"},
+    {"rule": "not (domain in ['nan', 'inf'] and c == 1)", "reason": "the special fill plants at least one non-finite element per tensor (FillInputs.cpp:494-498), so at c == 1 the only channel of scale is poisoned and every element of dx is non-finite; a reference with no finite element fails under match_nonfinite whatever the engine wrote (docs/file-formats.md, validator section: 'A reference with no finite element ... fails')"},
+    {"rule": "domain != 'constant' or n * hw <= 2**15", "reason": "bounds the CPU reference's own accuracy, not the engine's tolerance: the reference sums dscale and dbias per channel as one sequential fp32 sum (CpuFpReferenceBatchnorm.hpp:353-367; ComputeDataType defaults to MeanVarianceDataType = float, :270-272); N equal terms stagnate once the ulp of the running sum reaches the term, a relative error of up to 2**-24 * N (emulated worst case over the dscale term range 0.38..0.6: 4.5e-4 at N = 32768, 9.7e-4 at 65536, doubling per doubling), against a dscale and dx tolerance of 2e-3 and, in the gauntlet suites, a dscale and dbias rms threshold of 1e-3 (HIP_MLOPS_ENGINE.toml); the engine's parallel reduction is the accurate side (measured on gfx950, seed s1020, N = 2198432: emulating the reference's sequential fp32 sum of the term implied by the engine's dscale reproduces the reference value to all printed digits, 1.129627e6 against the engine's 1.161032e6). No TOML tolerance lifts it: it would widen the engine's tolerance to the reference's own error"},
+    {"rule": "domain != 'positive' or n * hw <= 2**21", "reason": "bounds the CPU reference's own accuracy, not the engine's tolerance: the same sequential fp32 reference sum (CpuFpReferenceBatchnorm.hpp:353-367), for terms of one sign the sum passes 2**22 and rounds every add to a coarse grid, which biases it: emulating the sum of 4096000 uniform(0.25, 4) float terms gives +2.0e-3 against the exact sum, 2.4e-4 at 2**21 and 1.4e-5 or less up to 2**20, against a dbias tolerance of 2e-3 and, in the gauntlet suites, a dscale and dbias rms threshold of 1e-3 (measured on gfx950, seed s8135, float, N = 4096000: reference dbias 8.721585e6, engine 8.703704e6, expected N * mean(dy) = 8.704e6, so the engine is the accurate side). No TOML tolerance lifts it: it would widen the engine's tolerance to the reference's own error"}
+  ],
+  "case": {
+    "values": {
+      "io_data_type": "${dtype}",
+      "tensors": [
+        {"uid": 0, "dims": "${dims_p}", "strides": "${stride_s}", "data_type": "float"},
+        {"uid": 1, "dims": "${dims_p}", "strides": "${stride_s}", "data_type": "float"},
+        {"uid": 2, "dims": "${dims_x}", "strides": "${stride_x}", "data_type": "${dtype}"},
+        {"uid": 3, "dims": "${dims_x}", "strides": "${stride_x}", "data_type": "${dtype}"},
+        {"uid": 4, "dims": "${dims_p}", "strides": "${stride_p}", "data_type": "float"},
+        {"uid": 5, "dims": "${dims_p}", "strides": "${stride_p}", "data_type": "float"},
+        {"uid": 6, "dims": "${dims_p}", "strides": "${stride_p}", "data_type": "float"},
+        {"uid": 7, "dims": "${dims_x}", "strides": "${stride_x}", "data_type": "${dtype}"}
+      ]
+    },
+    "metadata": {
+      "purpose": "probe",
+      "validator": "${dom_validator}",
+      "placement": "${eff_placement}",
+      "placement_uid": 7,
+      "inputs": {
+        "7": {"kind": "${dom_kind}", "lo": "${dom_lo}", "hi": "${dom_hi}", "value": "${dom_value}", "scale": "${dom_scale}", "special": "${dom_special}", "fraction": "${dom_fraction}"},
+        "3": {"kind": "${dom_kind}", "lo": "${dy_lo}", "hi": "${dy_hi}", "value": "${dom_value}", "scale": "${dom_scale}", "special": "${dom_special}", "fraction": "${dom_fraction}"},
+        "6": {"kind": "${pz_kind}", "lo": -0.1, "hi": 0.1, "special": "${dom_special}", "fraction": "${dom_fraction}"},
+        "5": {"kind": "free", "lo": -0.1, "hi": 0.1},
+        "4": {"kind": "free", "lo": 1.9, "hi": 2.0}
+      }
+    },
+    "tensor_patches": [
+      {"uid": 0, "set": {"alignment": "${alignment}"}},
+      {"uid": 1, "set": {"alignment": "${alignment}"}},
+      {"uid": 2, "set": {"alignment": "${alignment}"}},
+      {"uid": 3, "set": {"alignment": "${alignment}"}},
+      {"uid": 4, "set": {"alignment": "${alignment}"}},
+      {"uid": 5, "set": {"alignment": "${alignment}"}},
+      {"uid": 6, "set": {"alignment": "${alignment}"}},
+      {"uid": 7, "set": {"alignment": "${alignment}"}}
+    ]
+  }
+}

@@ -1,0 +1,638 @@
+{
+  "version": 1,
+  "operation": "SdpaBackward",
+  "description": "SDPA backward in the region hipkernel:flydsl_sdpa_bwd_split serves on gfx942 and gfx90a (FlydslSdpaBwdCommon.hpp, FlydslSdpaBwdSplitNative.cpp; COVERAGE.md section 9). Data half, bfloat16 or float (f32 is a native f32 MFMA family on the split engine); Q, K, V, O, dO and the three gradients are each BSHD or BHSD (one layout axis); head dims dqk and dv in the `hd` axis, both up to 512 and a multiple of 8, equal or different (DT-4, DT-5; a dim that is not a multiple of 8 is declined at a compact pitch, LY-3, and drawn by SdpaBackward/FlydslBwdSplitProbe); any group size (DT-6); V with its own head count (hvmul 2 over Hk, no bias, 16-bit, head dim 64 or 128, SH-1); causal top-left and bottom-right and windows in cuDNN's convention (a left bound of 0 is declined, MW-9; the `rows_see_a_key` constraint drops draws where a query row sees no key); scale zero and negative included (SC-1); declared alignment (below 16 bytes the engine declines, LY-1), placed default, exact or below it (expects BAD_PARAM). The O and the LSE are derived from the forward by the harness. Bias, dBias, dropout, ragged tensors and padding are in the companion spaces: SdpaBackward/FlydslBwdSplitBias, and the probe. Written for gfx942 and gfx90a (the arches the PR ports the engine to); the engine also runs on gfx950 and gfx11. Pairwise coverage proves every value pair; random mode is the like-for-like comparison across builds.",
+  "engine": "hipkernel:flydsl_sdpa_bwd_split",
+  "template": "../../integration-test-bundles/quick/SdpaBackward/Default/graph.template.json",
+  "axes": {
+    "dtype": {
+      "values": [
+        "half",
+        "bfloat16",
+        "float"
+      ]
+    },
+    "layout": {
+      "values": [
+        "bshd",
+        "bhsd"
+      ]
+    },
+    "b": {
+      "values": [
+        1,
+        2,
+        3
+      ]
+    },
+    "hkv": {
+      "values": [
+        1,
+        2,
+        4
+      ]
+    },
+    "group": {
+      "values": [
+        1,
+        1,
+        1,
+        2,
+        4,
+        8,
+        3,
+        5,
+        6,
+        16
+      ]
+    },
+    "hvmul": {
+      "values": [
+        1,
+        1,
+        1,
+        1,
+        2
+      ]
+    },
+    "hd": {
+      "values": [
+        [
+          8,
+          8
+        ],
+        [
+          16,
+          16
+        ],
+        [
+          24,
+          24
+        ],
+        [
+          32,
+          32
+        ],
+        [
+          40,
+          40
+        ],
+        [
+          48,
+          48
+        ],
+        [
+          56,
+          56
+        ],
+        [
+          64,
+          64
+        ],
+        [
+          64,
+          64
+        ],
+        [
+          72,
+          72
+        ],
+        [
+          80,
+          80
+        ],
+        [
+          96,
+          96
+        ],
+        [
+          104,
+          104
+        ],
+        [
+          112,
+          112
+        ],
+        [
+          120,
+          120
+        ],
+        [
+          128,
+          128
+        ],
+        [
+          128,
+          128
+        ],
+        [
+          136,
+          136
+        ],
+        [
+          144,
+          144
+        ],
+        [
+          160,
+          160
+        ],
+        [
+          192,
+          192
+        ],
+        [
+          224,
+          224
+        ],
+        [
+          256,
+          256
+        ],
+        [
+          256,
+          256
+        ],
+        [
+          264,
+          264
+        ],
+        [
+          320,
+          320
+        ],
+        [
+          384,
+          384
+        ],
+        [
+          448,
+          448
+        ],
+        [
+          512,
+          512
+        ],
+        [
+          192,
+          128
+        ],
+        [
+          128,
+          64
+        ],
+        [
+          64,
+          128
+        ],
+        [
+          256,
+          128
+        ],
+        [
+          128,
+          192
+        ],
+        [
+          136,
+          128
+        ],
+        [
+          512,
+          256
+        ],
+        [
+          256,
+          512
+        ],
+        [
+          8,
+          264
+        ],
+        [
+          264,
+          8
+        ],
+        [
+          16,
+          320
+        ],
+        [
+          320,
+          16
+        ],
+        [
+          40,
+          384
+        ],
+        [
+          104,
+          448
+        ],
+        [
+          320,
+          256
+        ],
+        [
+          256,
+          320
+        ],
+        [
+          8,
+          512
+        ],
+        [
+          512,
+          8
+        ],
+        [
+          8,
+          224
+        ],
+        [
+          8,
+          232
+        ],
+        [
+          512,
+          224
+        ],
+        [
+          512,
+          232
+        ],
+        [
+          512,
+          264
+        ],
+        [
+          264,
+          512
+        ]
+      ]
+    },
+    "sq": {
+      "range": [
+        1,
+        512
+      ],
+      "boundaries": [
+        1,
+        2,
+        15,
+        16,
+        17,
+        63,
+        64,
+        65,
+        127,
+        128,
+        129,
+        192,
+        256,
+        257,
+        512
+      ]
+    },
+    "skv": {
+      "range": [
+        1,
+        1024
+      ],
+      "boundaries": [
+        1,
+        2,
+        63,
+        64,
+        65,
+        127,
+        128,
+        129,
+        191,
+        192,
+        193,
+        256,
+        257,
+        512,
+        1024
+      ]
+    },
+    "mask": {
+      "values": [
+        "none",
+        "none",
+        "causal_top_left",
+        "causal_bottom_right",
+        "window"
+      ]
+    },
+    "wl": {
+      "range": [
+        1,
+        512
+      ],
+      "boundaries": [
+        1,
+        2,
+        16,
+        17,
+        64,
+        65,
+        128,
+        192,
+        256
+      ]
+    },
+    "wr": {
+      "values": [
+        null,
+        0,
+        1,
+        16,
+        64,
+        128
+      ]
+    },
+    "walign": {
+      "values": [
+        "top_left",
+        "bottom_right"
+      ]
+    },
+    "scale": {
+      "values": [
+        0.0883883461356163,
+        0.07216878235340118,
+        0.125,
+        0.25,
+        0.5,
+        1.0,
+        4.0,
+        0.0,
+        -0.125,
+        0.0001
+      ]
+    },
+    "domain": {
+      "values": [
+        "default",
+        "narrow",
+        "wide",
+        "positive",
+        "constant",
+        "nonzero",
+        "zeros",
+        "large",
+        "subnormal"
+      ]
+    },
+    "alignment": {
+      "values": [
+        1,
+        2,
+        4,
+        8,
+        16,
+        32,
+        64,
+        128,
+        256
+      ]
+    },
+    "placement": {
+      "values": [
+        "default",
+        "exact",
+        "under"
+      ]
+    }
+  },
+  "derive": {
+    "hv": "hkv * hvmul",
+    "hq": "hkv * hvmul * group",
+    "dqk": "hd[0]",
+    "dv": "hd[1]",
+    "dims_q": "[b, hq, sq, dqk]",
+    "dims_k": "[b, hkv, skv, dqk]",
+    "dims_v": "[b, hv, skv, dv]",
+    "dims_o": "[b, hq, sq, dv]",
+    "dims_lse": "[b, hq, sq, 1]",
+    "row_q": "(hq*dqk if layout == 'bshd' else dqk) + 0",
+    "stride_q": "[sq*row_q, dqk, row_q, 1] if layout == 'bshd' else [hq*sq*row_q, sq*row_q, row_q, 1]",
+    "row_k": "(hkv*dqk if layout == 'bshd' else dqk) + 0",
+    "stride_k": "[skv*row_k, dqk, row_k, 1] if layout == 'bshd' else [hkv*skv*row_k, skv*row_k, row_k, 1]",
+    "row_v": "(hv*dv if layout == 'bshd' else dv) + 0",
+    "stride_v": "[skv*row_v, dv, row_v, 1] if layout == 'bshd' else [hv*skv*row_v, skv*row_v, row_v, 1]",
+    "row_o": "(hq*dv if layout == 'bshd' else dv) + 0",
+    "stride_o": "[sq*row_o, dv, row_o, 1] if layout == 'bshd' else [hq*sq*row_o, sq*row_o, row_o, 1]",
+    "stride_lse": "[hq*sq, sq, 1, 1]",
+    "bottom": "mask == 'causal_bottom_right' or (mask == 'window' and walign == 'bottom_right')",
+    "align": "'BOTTOM_RIGHT' if bottom else 'TOP_LEFT'",
+    "left": "wl if mask == 'window' else None",
+    "right": "0 if mask in ['causal_top_left', 'causal_bottom_right'] else (wr if mask == 'window' else None)",
+    "diag": "skv - sq if bottom else 0",
+    "rows_see_a_key": "(right == None or diag + right >= 0) and (left == None or sq + diag - left <= skv - 1)",
+    "dom_kind": "'fixed' if domain == 'constant' else ('free' if domain in ['default', 'narrow', 'wide', 'positive'] else domain)",
+    "dom_lo": "-0.01 if domain == 'narrow' else (-8 if domain == 'wide' else (0.25 if domain == 'positive' else (0.5 if domain == 'constant' else -1)))",
+    "dom_hi": "0.01 if domain == 'narrow' else (8 if domain == 'wide' else (4 if domain == 'positive' else (0.5 if domain == 'constant' else 1)))",
+    "dom_value": "0.5 if domain == 'constant' else 0",
+    "dom_scale": "8 if domain == 'large' else 1",
+    "dom_g_lo": "-1 if domain == 'wide' else dom_lo",
+    "dom_g_hi": "1 if domain in ['wide', 'positive'] else dom_hi",
+    "eff_placement": "'exact' if placement == 'under' and alignment < 2 else placement",
+    "dom_mag": "0.5 if domain == 'constant' else (8 if domain in ['large', 'wide'] else (4 if domain == 'positive' else (0.01 if domain == 'narrow' else (0 if domain in ['zeros', 'subnormal'] else 1))))",
+    "s_max": "abs(scale) * dqk * dom_mag * dom_mag + 0"
+  },
+  "constraints": [
+    {
+      "rule": "rows_see_a_key",
+      "reason": "a query row with no key left under the mask has an LSE of -inf in the derived stats (CpuFpReferenceSdpa.hpp forward, 'fully masked rows'), which is not an input the backward kernels define; SdpaBackward/Default excludes the same samples. A key that no row sees is fine: its dK and dV are zero"
+    },
+    {
+      "rule": "hvmul == 1 or (dtype != 'float' and dqk == dv and dqk in [64, 128])",
+      "reason": "Hk != Hv is served on the split engine for 16-bit data at head dims 64 and 128 only, with no bias and no ragged tensor (COVERAGE.md 9.1 SH-1, table 9.2); SdpaBackward/FlydslBwdSplitProbe draws v_heads, v_heads_f32 and v_heads_bias"
+    },
+    {
+      "rule": "b*hq*sq*skv*(dqk+dv) <= 2**29",
+      "reason": "GPU reference cost ceiling, as SdpaBackward.space.json: the case time is linear above 2**26 and the CPU backward reference is serial, so 2**29 keeps the worst drawn case near 24 s (measured on a gfx942 host for the ASM region space)"
+    },
+    {
+      "rule": "s_max <= (168 if dtype == 'float' else (8388 if dtype == 'half' else 16777))",
+      "reason": "the largest score |S| (bounded by |scale| * dqk * mag^2, plus |bias|) must keep |S| * 2^-24 below a tenth of the dtype's tolerance: the backward computes P = exp(S - LSE) from a given fp32 LSE, and two correct fp32 computations of S differ by |S| * 2^-24, which exp() passes on to P and the gradients. Beyond that bound the oracle cannot tell a correct engine from a wrong one (scale 2^20 with scores near 1e9 gave NaN in every engine that did not produce the LSE itself)"
+    }
+  ],
+  "case": {
+    "values": {
+      "io_data_type": "${dtype}",
+      "tensors": [
+        {
+          "uid": 0,
+          "dims": "${dims_k}",
+          "strides": "${stride_k}",
+          "data_type": "${dtype}",
+          "alignment": 16
+        },
+        {
+          "uid": 1,
+          "dims": "${dims_o}",
+          "strides": "${stride_o}",
+          "data_type": "${dtype}",
+          "alignment": 16
+        },
+        {
+          "uid": 2,
+          "dims": "${dims_q}",
+          "strides": "${stride_q}",
+          "data_type": "${dtype}",
+          "alignment": 16
+        },
+        {
+          "uid": 3,
+          "dims": "${dims_k}",
+          "strides": "${stride_k}",
+          "data_type": "${dtype}",
+          "alignment": 16
+        },
+        {
+          "uid": 4,
+          "dims": "${dims_q}",
+          "strides": "${stride_q}",
+          "data_type": "${dtype}",
+          "alignment": 16
+        },
+        {
+          "uid": 5,
+          "dims": "${dims_v}",
+          "strides": "${stride_v}",
+          "data_type": "${dtype}",
+          "alignment": 16
+        },
+        {
+          "uid": 6,
+          "dims": "${dims_v}",
+          "strides": "${stride_v}",
+          "data_type": "${dtype}",
+          "alignment": 16
+        },
+        {
+          "uid": 7,
+          "dims": "${dims_o}",
+          "strides": "${stride_o}",
+          "data_type": "${dtype}",
+          "alignment": 16
+        },
+        {
+          "uid": 8,
+          "dims": "${dims_lse}",
+          "strides": "${stride_lse}",
+          "data_type": "float",
+          "alignment": 16
+        }
+      ],
+      "attributes": {
+        "compute_data_type": "float",
+        "parameters__alibi_mask": false,
+        "parameters__attn_scale_value": "${scale}",
+        "parameters__causal_mask": false,
+        "parameters__causal_mask_bottom_right": false,
+        "parameters__dropout_probability": null,
+        "parameters__diagonal_alignment": "${align}",
+        "parameters__left_bound": "${left}",
+        "parameters__right_bound": "${right}"
+      }
+    },
+    "metadata": {
+      "purpose": "probe",
+      "validator": "default",
+      "inputs": {
+        "2": {
+          "kind": "${dom_kind}",
+          "lo": "${dom_lo}",
+          "hi": "${dom_hi}",
+          "value": "${dom_value}",
+          "scale": "${dom_scale}"
+        },
+        "0": {
+          "kind": "${dom_kind}",
+          "lo": "${dom_lo}",
+          "hi": "${dom_hi}",
+          "value": "${dom_value}",
+          "scale": "${dom_scale}"
+        },
+        "6": {
+          "kind": "${dom_kind}",
+          "lo": "${dom_g_lo}",
+          "hi": "${dom_g_hi}",
+          "value": "${dom_value}",
+          "scale": 1
+        },
+        "7": {
+          "kind": "${dom_kind}",
+          "lo": "${dom_g_lo}",
+          "hi": "${dom_g_hi}",
+          "value": "${dom_value}",
+          "scale": 1
+        }
+      },
+      "placement": "${eff_placement}",
+      "placement_uid": 2
+    },
+    "node_patches": [],
+    "tensor_patches": [
+      {
+        "uid": 0,
+        "set": {
+          "alignment": "${alignment}"
+        }
+      },
+      {
+        "uid": 1,
+        "set": {
+          "alignment": "${alignment}"
+        }
+      },
+      {
+        "uid": 2,
+        "set": {
+          "alignment": "${alignment}"
+        }
+      },
+      {
+        "uid": 3,
+        "set": {
+          "alignment": "${alignment}"
+        }
+      },
+      {
+        "uid": 4,
+        "set": {
+          "alignment": "${alignment}"
+        }
+      },
+      {
+        "uid": 5,
+        "set": {
+          "alignment": "${alignment}"
+        }
+      },
+      {
+        "uid": 6,
+        "set": {
+          "alignment": "${alignment}"
+        }
+      },
+      {
+        "uid": 7,
+        "set": {
+          "alignment": "${alignment}"
+        }
+      },
+      {
+        "uid": 8,
+        "set": {
+          "alignment": "${alignment}"
+        }
+      }
+    ]
+  }
+}

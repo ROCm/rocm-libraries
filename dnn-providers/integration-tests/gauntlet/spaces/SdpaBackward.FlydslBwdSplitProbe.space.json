@@ -1,0 +1,743 @@
+{
+  "version": 1,
+  "operation": "SdpaBackward",
+  "description": "Probe-only rejection library for hipkernel:flydsl_sdpa_bwd_split on gfx942 and gfx90a, written from the matcher's decline table (COVERAGE.md 9.1 and 9.2; FlydslSdpaBwdCommon.hpp): a legal SDPA backward (bfloat16 or half, head size 128 or 192, BHSD or BSHD, FP32 stats [B,H,Sq,1] as an INPUT, declared alignment 16) with ONE feature per case, named by the `family` axis; every family is a graph the frontend accepts. Families the engine serves expect declined_or_pass: the plain graph, odd dims and head sizes (declined only at a compact pitch, LY-3), dropout probability 0 and Philox dropout, a baked scale tensor, stats rank 1 and 3, f32 data, GQA, asymmetric head dims, head dim 64, a window, padding with both sequence lengths, a bias with and without dBias, an f32 bias with an f32 dBias at head dim 128 (BI-2), a 16-bit bias with an unaligned pitch, V with a head count of its own at head dim 128 (SH-1; at head dim 192 it declines). Families it declines expect declined: a dropout mask or scale tensor (DR-7), ALiBi (MW-12), sequence lengths without padding_mask (PV-2), mixed dtypes and a non-f32 stats tensor (DT-1, DT-3), head dims above 512 (DT-4), a bias with a causal or window mask (MW-10), dBias with a row-broadcast bias (BI-4), an unaligned dBias stride (BI-9), a window left bound of 0 (MW-9), a scale above 2**20 (SC-5), padding_mask without its tensors (PV-2), Hk != Hv with a bias or f32 data (SH-1), and the overflow families: overflow_dim and the v_row and dq_row strides are declined and built, never run; the q_batch, o_batch, dk_batch and dv_head strides of 2**31 elements are served (DT-9 declines only a per-head slab beyond 32-bit byte offsets), so they run at full enforcement and expect declined_or_pass (allocations of 4 to 8 GiB per tensor); ASM's kernarg families are not drawn (no matcher rule behind them). Dropout is served but its gradient needs the forward's keep mask: the harness cannot supply it for a backward graph, so an accepted dropout case ends UNEXERCISED and shows as a violation: the list of those is the known oracle gap, not an engine defect.",
+  "engine": "hipkernel:flydsl_sdpa_bwd_split",
+  "template": "../../integration-test-bundles/quick/SdpaBackward/Default/graph.template.json",
+  "axes": {
+    "family": {
+      "values": [
+        "none",
+        "odd_dims",
+        "odd_head_size",
+        "dropout_philox",
+        "dropout_p0",
+        "dropout_mask",
+        "dropout_scale_inv_only",
+        "alibi",
+        "padding",
+        "seq_len_group",
+        "attn_mask",
+        "attn_mask_dbias",
+        "scale_const",
+        "stats_dt_io",
+        "stats_rank3",
+        "stats_rank1",
+        "dt_q_alt",
+        "dt_k_alt",
+        "dt_v_alt",
+        "dt_o_alt",
+        "dt_do_alt",
+        "dt_dq_alt",
+        "dt_dk_alt",
+        "dt_dv_alt",
+        "dt_all_float",
+        "gqa",
+        "v_heads",
+        "asym_hd",
+        "hd64",
+        "window_hd192",
+        "overflow_stride",
+        "overflow_dim",
+        "hd_over",
+        "bias_causal",
+        "bias_window",
+        "dbias_rowbcast",
+        "bias_f32_dbias",
+        "bias_unaligned_pitch",
+        "dbias_unaligned",
+        "window_left0",
+        "scale_huge",
+        "padding_noseq",
+        "v_heads_bias",
+        "v_heads_f32",
+        "hd_asym_over",
+        "bias_pitch_pad",
+        "bias_overlap",
+        "scale_limit"
+      ]
+    },
+    "shape": {
+      "values": [
+        [
+          1,
+          1,
+          2,
+          64,
+          64,
+          128,
+          "bhsd",
+          "bfloat16"
+        ],
+        [
+          2,
+          2,
+          4,
+          128,
+          256,
+          192,
+          "bshd",
+          "half"
+        ],
+        [
+          1,
+          2,
+          2,
+          64,
+          128,
+          128,
+          "bshd",
+          "bfloat16"
+        ],
+        [
+          2,
+          1,
+          4,
+          128,
+          128,
+          192,
+          "bhsd",
+          "half"
+        ],
+        [
+          2,
+          2,
+          2,
+          256,
+          256,
+          128,
+          "bhsd",
+          "half"
+        ],
+        [
+          1,
+          1,
+          4,
+          64,
+          256,
+          192,
+          "bshd",
+          "bfloat16"
+        ],
+        [
+          2,
+          2,
+          2,
+          128,
+          128,
+          128,
+          "bshd",
+          "bfloat16"
+        ],
+        [
+          1,
+          2,
+          4,
+          64,
+          128,
+          192,
+          "bhsd",
+          "half"
+        ]
+      ]
+    },
+    "band": {
+      "values": [
+        [
+          "none",
+          0,
+          0
+        ],
+        [
+          "causal_top_left",
+          0,
+          0
+        ],
+        [
+          "causal_bottom_right",
+          0,
+          0
+        ],
+        [
+          "window",
+          8,
+          0
+        ],
+        [
+          "window",
+          16,
+          8
+        ],
+        [
+          "window",
+          32,
+          0
+        ]
+      ]
+    },
+    "var": {
+      "values": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7
+      ]
+    }
+  },
+  "derive": {
+    "dtype": "shape[7]",
+    "layout": "shape[6]",
+    "b": "shape[0]",
+    "hkv": "shape[1]",
+    "group": "shape[2]",
+    "sq": "shape[3]",
+    "skv": "shape[4]",
+    "d": "shape[5]",
+    "odd": "[[1, 1, 1, 1, 62], [3, 3, 3, 5, 63], [5, 1, 5, 3, 65], [1, 3, 63, 65, 100], [3, 5, 65, 127, 126], [5, 3, 127, 129, 127], [1, 5, 129, 255, 190], [3, 1, 191, 63, 130]][var % 8]",
+    "ovf": "['q_batch', 'k_head', 'v_row', 'o_batch', 'do_head', 'dq_row', 'dk_batch', 'dv_head'][var] if family == 'overflow_stride' else (['stats_batch', 'stats_head', 'ts_hd128', 'ts_hd192', 'dqacc_seq', 'dqacc_batch', 'stats_batch', 'stats_head'][var] if family == 'overflow_kernarg' else ['batch_dim', 'heads_dim', 'sq_dim', 'skv_dim', 'hd_dim', 'batch_dim', 'heads_dim', 'hd_dim'][var])",
+    "odd_b": "odd[0]",
+    "odd_hkv": "odd[1]",
+    "odd_sq": "odd[2]",
+    "odd_skv": "odd[3]",
+    "odd_d": "odd[4]",
+    "wl": "band[1] if band[0] == 'window' else 8",
+    "wr": "band[2] if band[0] == 'window' else 0",
+    "ov": "family in ['overflow_stride', 'overflow_kernarg', 'overflow_dim']",
+    "ts": "ov and ovf in ['ts_hd128', 'ts_hd192']",
+    "alt": "'half' if dtype == 'bfloat16' else 'bfloat16'",
+    "mk": "(band[0] if band[0] != 'window' else 'none') if family == 'none' else ('causal_top_left' if family == 'bias_causal' else 'none')",
+    "b_e": "odd_b if family == 'odd_dims' else (1 if ts or (ov and ovf == 'stats_head') else (2 if ov else b))",
+    "hkv_e": "(1 if ts else 2) if ov else (odd_hkv if family == 'odd_dims' else (2 if family in ['v_heads', 'v_heads_bias', 'v_heads_f32'] else hkv))",
+    "group_e": "group if family == 'gqa' else 1",
+    "hq": "hkv_e * group_e",
+    "hv": "1 if family in ['v_heads', 'v_heads_bias', 'v_heads_f32'] else hkv_e",
+    "sq_e": "odd_sq if family == 'odd_dims' else ((64 if ts else (2**23 if ov and ovf == 'dqacc_seq' else (2**22 if ov and ovf == 'dqacc_batch' else 2))) if ov else sq)",
+    "skv_e": "(skv + 1 if skv % 8 == 0 else skv) if family in ['bias_unaligned_pitch', 'dbias_unaligned'] else (odd_skv if family == 'odd_dims' else ((64 if ov and ovf in ['dqacc_seq', 'dqacc_batch'] else 2) if ov else skv))",
+    "dqk_e": "520 if family in ['hd_over', 'hd_asym_over'] else (128 if family in ['v_heads_bias', 'v_heads_f32', 'bias_f32_dbias'] else (odd_d if family == 'odd_head_size' else (64 if family == 'hd64' else ((192 if ovf == 'ts_hd192' else 128) if ov else (192 if family in ['window_hd192', 'asym_hd'] else d)))))",
+    "dv_e": "64 if family == 'hd_asym_over' else (128 if family == 'asym_hd' else dqk_e)",
+    "lay": "'bhsd' if ov else layout",
+    "b_d": "2**32 if ov and ovf == 'batch_dim' else b_e",
+    "hq_d": "2**32 if ov and ovf == 'heads_dim' else hq",
+    "hkv_d": "2**32 if ov and ovf == 'heads_dim' else hkv_e",
+    "hv_d": "2**32 if ov and ovf == 'heads_dim' else hv",
+    "sq_d": "2**31 if ov and ovf == 'sq_dim' else sq_e",
+    "skv_d": "2**31 if ov and ovf == 'skv_dim' else skv_e",
+    "dqk_d": "2**31 if ov and ovf == 'hd_dim' else dqk_e",
+    "dv_d": "2**31 if ov and ovf == 'hd_dim' else dv_e",
+    "dims_q": "[b_d, hq_d, sq_d, dqk_d]",
+    "dims_k": "[b_d, hkv_d, skv_d, dqk_d]",
+    "dims_v": "[b_d, hv_d, skv_d, dv_d]",
+    "dims_o": "[b_d, hq_d, sq_d, dv_d]",
+    "k_row": "2**31 if ov and ovf == 'k_row' else (11184811 if ov and ovf == 'ts_hd128' else (33554432 if ov and ovf == 'ts_hd192' else (hkv_e * dqk_e if lay == 'bshd' else dqk_e)))",
+    "k_head": "2**31 if ov and ovf == 'k_head' else (dqk_e if lay == 'bshd' else skv_e * k_row)",
+    "k_batch": "2**31 if ov and ovf == 'k_batch' else (skv_e * hkv_e * dqk_e if lay == 'bshd' else hkv_e * k_head)",
+    "stride_k": "[k_batch, k_head, k_row, 1]",
+    "dt_k": "alt if family == 'dt_k_alt' else ('float' if family in ['dt_all_float', 'v_heads_f32'] else dtype)",
+    "o_row": "2**31 if ov and ovf == 'o_row' else (hq * dv_e if lay == 'bshd' else dv_e)",
+    "o_head": "2**31 if ov and ovf == 'o_head' else (dv_e if lay == 'bshd' else sq_e * o_row)",
+    "o_batch": "2**31 if ov and ovf == 'o_batch' else (sq_e * hq * dv_e if lay == 'bshd' else hq * o_head)",
+    "stride_o": "[o_batch, o_head, o_row, 1]",
+    "dt_o": "alt if family == 'dt_o_alt' else ('float' if family in ['dt_all_float', 'v_heads_f32'] else dtype)",
+    "q_row": "2**31 if ov and ovf == 'q_row' else (hq * dqk_e if lay == 'bshd' else dqk_e)",
+    "q_head": "2**31 if ov and ovf == 'q_head' else (dqk_e if lay == 'bshd' else sq_e * q_row)",
+    "q_batch": "2**31 if ov and ovf == 'q_batch' else (sq_e * hq * dqk_e if lay == 'bshd' else hq * q_head)",
+    "stride_q": "[q_batch, q_head, q_row, 1]",
+    "dt_q": "alt if family == 'dt_q_alt' else ('float' if family in ['dt_all_float', 'v_heads_f32'] else dtype)",
+    "dk_row": "2**31 if ov and ovf == 'dk_row' else (hkv_e * dqk_e if lay == 'bshd' else dqk_e)",
+    "dk_head": "2**31 if ov and ovf == 'dk_head' else (dqk_e if lay == 'bshd' else skv_e * dk_row)",
+    "dk_batch": "2**31 if ov and ovf == 'dk_batch' else (skv_e * hkv_e * dqk_e if lay == 'bshd' else hkv_e * dk_head)",
+    "stride_dk": "[dk_batch, dk_head, dk_row, 1]",
+    "dt_dk": "alt if family == 'dt_dk_alt' else ('float' if family in ['dt_all_float', 'v_heads_f32'] else dtype)",
+    "dq_row": "2**31 if ov and ovf == 'dq_row' else (hq * dqk_e if lay == 'bshd' else dqk_e)",
+    "dq_head": "2**31 if ov and ovf == 'dq_head' else (dqk_e if lay == 'bshd' else sq_e * dq_row)",
+    "dq_batch": "2**31 if ov and ovf == 'dq_batch' else (sq_e * hq * dqk_e if lay == 'bshd' else hq * dq_head)",
+    "stride_dq": "[dq_batch, dq_head, dq_row, 1]",
+    "dt_dq": "alt if family == 'dt_dq_alt' else ('float' if family in ['dt_all_float', 'v_heads_f32'] else dtype)",
+    "dv_row": "2**31 if ov and ovf == 'dv_row' else (hv * dv_e if lay == 'bshd' else dv_e)",
+    "dv_head": "2**31 if ov and ovf == 'dv_head' else (dv_e if lay == 'bshd' else skv_e * dv_row)",
+    "dv_batch": "2**31 if ov and ovf == 'dv_batch' else (skv_e * hv * dv_e if lay == 'bshd' else hv * dv_head)",
+    "stride_dv": "[dv_batch, dv_head, dv_row, 1]",
+    "dt_dv": "alt if family == 'dt_dv_alt' else ('float' if family in ['dt_all_float', 'v_heads_f32'] else dtype)",
+    "v_row": "2**31 if ov and ovf == 'v_row' else (hv * dv_e if lay == 'bshd' else dv_e)",
+    "v_head": "2**31 if ov and ovf == 'v_head' else (dv_e if lay == 'bshd' else skv_e * v_row)",
+    "v_batch": "2**31 if ov and ovf == 'v_batch' else (skv_e * hv * dv_e if lay == 'bshd' else hv * v_head)",
+    "stride_v": "[v_batch, v_head, v_row, 1]",
+    "dt_v": "alt if family == 'dt_v_alt' else ('float' if family in ['dt_all_float', 'v_heads_f32'] else dtype)",
+    "do_row": "2**31 if ov and ovf == 'do_row' else (hq * dv_e if lay == 'bshd' else dv_e)",
+    "do_head": "2**31 if ov and ovf == 'do_head' else (dv_e if lay == 'bshd' else sq_e * do_row)",
+    "do_batch": "2**31 if ov and ovf == 'do_batch' else (sq_e * hq * dv_e if lay == 'bshd' else hq * do_head)",
+    "stride_do": "[do_batch, do_head, do_row, 1]",
+    "dt_do": "alt if family == 'dt_do_alt' else ('float' if family in ['dt_all_float', 'v_heads_f32'] else dtype)",
+    "dims_stats": "[b_e * hq * sq_e] if family == 'stats_rank1' else ([b_d, hq_d, sq_d] if family == 'stats_rank3' else [b_d, hq_d, sq_d, 1])",
+    "stride_stats": "[1] if family == 'stats_rank1' else ([hq * sq_e, sq_e, 1] if family == 'stats_rank3' else ([2**30, sq_e, 1, 1] if ov and ovf == 'stats_batch' else ([hq * sq_e, 2**30, 1, 1] if ov and ovf == 'stats_head' else [hq * sq_e, sq_e, 1, 1])))",
+    "dt_stats": "dtype if family == 'stats_dt_io' else 'float'",
+    "left": "wl if family in ['window_hd192', 'bias_window'] else (0 if family == 'window_left0' else None)",
+    "right": "0 if family == 'alibi' or mk in ['causal_top_left', 'causal_bottom_right'] else (wr if family in ['window_hd192', 'bias_window', 'window_left0'] else None)",
+    "align": "'BOTTOM_RIGHT' if mk == 'causal_bottom_right' else 'TOP_LEFT'",
+    "scale_on": "family == 'scale_const'",
+    "bias_on": "family in ['attn_mask', 'attn_mask_dbias', 'bias_causal', 'bias_window', 'dbias_rowbcast', 'bias_f32_dbias', 'bias_unaligned_pitch', 'dbias_unaligned', 'v_heads_bias', 'bias_pitch_pad', 'bias_overlap']",
+    "dbias_on": "family in ['attn_mask_dbias', 'dbias_rowbcast', 'bias_f32_dbias', 'dbias_unaligned']",
+    "bias_dtype": "'float' if family == 'bias_f32_dbias' else dtype",
+    "bias_q": "1 if family == 'dbias_rowbcast' else sq_e",
+    "bias_skv": "skv_e",
+    "bias_pitch": "bias_skv + [1, 2, 3, 4, 5, 6, 7, 8][var] if family == 'bias_pitch_pad' else (max(1, bias_skv // 2) if family == 'bias_overlap' else bias_skv)",
+    "ovf_served": "family == 'overflow_stride' and var in [0, 3, 6, 7]",
+    "scale_v": "2**21 if family == 'scale_huge' else (2**20 if family == 'scale_limit' else 0.08838834764831843)",
+    "qk_kind": "'large' if family == 'scale_limit' else 'free'",
+    "qk_scale": "0.001 if family == 'scale_limit' else 1",
+    "nseq": "family in ['padding', 'seq_len_group']",
+    "ovf_skv": "skv_d"
+  },
+  "constraints": [
+    {
+      "rule": "ov or b_e * hq * sq_e * skv_e * (dqk_e + dv_e) <= 2**29",
+      "reason": "GPU reference cost ceiling (as SdpaBackward.space.json); the overflow families that are declined are built, never run"
+    },
+    {
+      "rule": "family != 'overflow_stride' or var not in [1, 4]",
+      "reason": "k_head and do_head strides of 2**31 elements are served and correct (checked with HIPDNN_TEST_HOST_INPUT_FILL=1) but the device input fill fails on them (hipModuleLaunchKernel invalid argument), so they would end UNEXERCISED"
+    }
+  ],
+  "expect": "${'declined_or_pass' if family in ['none', 'odd_dims', 'odd_head_size', 'dropout_p0', 'dropout_philox', 'scale_const', 'stats_rank3', 'stats_rank1', 'dt_all_float', 'gqa', 'asym_hd', 'hd64', 'window_hd192', 'padding', 'attn_mask', 'attn_mask_dbias', 'bias_f32_dbias', 'bias_unaligned_pitch', 'v_heads', 'bias_pitch_pad', 'bias_overlap', 'scale_limit'] or ovf_served else 'declined'}",
+  "case": {
+    "values": {
+      "io_data_type": "${dtype}",
+      "tensors": [
+        {
+          "uid": 0,
+          "dims": "${dims_k}",
+          "strides": "${stride_k}",
+          "data_type": "${dt_k}",
+          "alignment": 16
+        },
+        {
+          "uid": 1,
+          "dims": "${dims_o}",
+          "strides": "${stride_o}",
+          "data_type": "${dt_o}",
+          "alignment": 16
+        },
+        {
+          "uid": 2,
+          "dims": "${dims_q}",
+          "strides": "${stride_q}",
+          "data_type": "${dt_q}",
+          "alignment": 16
+        },
+        {
+          "uid": 3,
+          "dims": "${dims_k}",
+          "strides": "${stride_dk}",
+          "data_type": "${dt_dk}",
+          "alignment": 16
+        },
+        {
+          "uid": 4,
+          "dims": "${dims_q}",
+          "strides": "${stride_dq}",
+          "data_type": "${dt_dq}",
+          "alignment": 16
+        },
+        {
+          "uid": 5,
+          "dims": "${dims_v}",
+          "strides": "${stride_dv}",
+          "data_type": "${dt_dv}",
+          "alignment": 16
+        },
+        {
+          "uid": 6,
+          "dims": "${dims_v}",
+          "strides": "${stride_v}",
+          "data_type": "${dt_v}",
+          "alignment": 16
+        },
+        {
+          "uid": 7,
+          "dims": "${dims_o}",
+          "strides": "${stride_do}",
+          "data_type": "${dt_do}",
+          "alignment": 16
+        },
+        {
+          "uid": 8,
+          "dims": "${dims_stats}",
+          "strides": "${stride_stats}",
+          "data_type": "${dt_stats}",
+          "alignment": 16
+        }
+      ],
+      "attributes": {
+        "compute_data_type": "float",
+        "parameters__alibi_mask": false,
+        "parameters__attn_scale_value": "${scale_v}",
+        "parameters__causal_mask": false,
+        "parameters__causal_mask_bottom_right": false,
+        "parameters__dropout_probability": null,
+        "parameters__diagonal_alignment": "${align}",
+        "parameters__left_bound": "${left}",
+        "parameters__right_bound": "${right}"
+      }
+    },
+    "metadata": {
+      "purpose": "probe",
+      "enforcement_level": "${'full' if ovf_served else ('buildable' if ov else 'full')}",
+      "inputs": {
+        "2": {
+          "kind": "${qk_kind}",
+          "lo": -1,
+          "hi": 1,
+          "value": 0,
+          "scale": "${qk_scale}"
+        },
+        "0": {
+          "kind": "${qk_kind}",
+          "lo": -1,
+          "hi": 1,
+          "value": 0,
+          "scale": "${qk_scale}"
+        },
+        "6": {
+          "kind": "free",
+          "lo": -1,
+          "hi": 1,
+          "value": 0,
+          "scale": 1
+        },
+        "7": {
+          "kind": "free",
+          "lo": -1,
+          "hi": 1,
+          "value": 0,
+          "scale": 1
+        }
+      }
+    },
+    "add_tensors": [
+      {
+        "when": "${family == 'dropout_philox'}",
+        "uid": 9,
+        "name": "seed",
+        "data_type": "int32",
+        "dims": [
+          1,
+          1,
+          1,
+          1
+        ],
+        "strides": [
+          1,
+          1,
+          1,
+          1
+        ],
+        "alignment": 16,
+        "is_runtime_pass_by_value": true,
+        "ragged_offset_multiplier": 1,
+        "virtual": false
+      },
+      {
+        "when": "${family == 'dropout_philox'}",
+        "uid": 10,
+        "name": "offset",
+        "data_type": "int32",
+        "dims": [
+          1,
+          1,
+          1,
+          1
+        ],
+        "strides": [
+          1,
+          1,
+          1,
+          1
+        ],
+        "alignment": 16,
+        "is_runtime_pass_by_value": true,
+        "ragged_offset_multiplier": 1,
+        "virtual": false
+      },
+      {
+        "when": "${family == 'dropout_mask'}",
+        "uid": 9,
+        "name": "dropout_mask",
+        "data_type": "float",
+        "dims": "${[1, 1, sq_e, skv_e]}",
+        "strides": "${[sq_e*skv_e, sq_e*skv_e, skv_e, 1]}",
+        "alignment": 16,
+        "is_runtime_pass_by_value": false,
+        "ragged_offset_multiplier": 1,
+        "virtual": false
+      },
+      {
+        "when": "${family == 'dropout_mask'}",
+        "uid": 10,
+        "name": "dropout_scale",
+        "data_type": "float",
+        "dims": [
+          1,
+          1,
+          1,
+          1
+        ],
+        "strides": [
+          1,
+          1,
+          1,
+          1
+        ],
+        "alignment": 16,
+        "is_runtime_pass_by_value": false,
+        "ragged_offset_multiplier": 1,
+        "virtual": false,
+        "value": 1.1111111111111112,
+        "value_type": "Float32Value"
+      },
+      {
+        "when": "${family == 'dropout_mask'}",
+        "uid": 11,
+        "name": "dropout_scale_inv",
+        "data_type": "float",
+        "dims": [
+          1,
+          1,
+          1,
+          1
+        ],
+        "strides": [
+          1,
+          1,
+          1,
+          1
+        ],
+        "alignment": 16,
+        "is_runtime_pass_by_value": false,
+        "ragged_offset_multiplier": 1,
+        "virtual": false,
+        "value": 0.9,
+        "value_type": "Float32Value"
+      },
+      {
+        "when": "${family == 'dropout_scale_inv_only'}",
+        "uid": 9,
+        "name": "dropout_scale_inv",
+        "data_type": "float",
+        "dims": [
+          1,
+          1,
+          1,
+          1
+        ],
+        "strides": [
+          1,
+          1,
+          1,
+          1
+        ],
+        "alignment": 16,
+        "is_runtime_pass_by_value": false,
+        "ragged_offset_multiplier": 1,
+        "virtual": false,
+        "value": 0.9,
+        "value_type": "Float32Value"
+      },
+      {
+        "when": "${family in ['padding', 'seq_len_group']}",
+        "uid": 9,
+        "name": "seq_len_q",
+        "data_type": "int32",
+        "dims": "${[b_e, 1, 1, 1]}",
+        "strides": [
+          1,
+          1,
+          1,
+          1
+        ],
+        "alignment": 16,
+        "is_runtime_pass_by_value": false,
+        "ragged_offset_multiplier": 1,
+        "virtual": false
+      },
+      {
+        "when": "${family in ['padding', 'seq_len_group']}",
+        "uid": 10,
+        "name": "seq_len_kv",
+        "data_type": "int32",
+        "dims": "${[b_e, 1, 1, 1]}",
+        "strides": [
+          1,
+          1,
+          1,
+          1
+        ],
+        "alignment": 16,
+        "is_runtime_pass_by_value": false,
+        "ragged_offset_multiplier": 1,
+        "virtual": false
+      },
+      {
+        "when": "${family == 'scale_const'}",
+        "uid": 9,
+        "name": "scale",
+        "data_type": "float",
+        "dims": [
+          1,
+          1,
+          1,
+          1
+        ],
+        "strides": [
+          1,
+          1,
+          1,
+          1
+        ],
+        "alignment": 16,
+        "is_runtime_pass_by_value": false,
+        "ragged_offset_multiplier": 1,
+        "virtual": false,
+        "value": 0.0883883461356163,
+        "value_type": "Float32Value"
+      },
+      {
+        "when": "${bias_on}",
+        "uid": 9,
+        "name": "attn_mask",
+        "data_type": "${bias_dtype}",
+        "dims": "${[1, 1, bias_q, bias_skv]}",
+        "strides": "${[bias_q*bias_pitch, bias_q*bias_pitch, bias_pitch, 1]}",
+        "alignment": 16,
+        "is_runtime_pass_by_value": false,
+        "ragged_offset_multiplier": 1,
+        "virtual": false
+      },
+      {
+        "when": "${dbias_on}",
+        "uid": 10,
+        "name": "dbias",
+        "data_type": "${bias_dtype}",
+        "dims": "${[1, 1, bias_q, bias_skv]}",
+        "strides": "${[bias_q*bias_skv, bias_q*bias_skv, bias_skv, 1]}",
+        "alignment": 16,
+        "is_runtime_pass_by_value": false,
+        "ragged_offset_multiplier": 1,
+        "virtual": false
+      }
+    ],
+    "node_patches": [
+      {
+        "when": "${family == 'dropout_philox'}",
+        "node": "SdpaBwd_0",
+        "section": "parameters",
+        "set": {
+          "dropout_probability": 0.1
+        }
+      },
+      {
+        "when": "${family == 'dropout_p0'}",
+        "node": "SdpaBwd_0",
+        "section": "parameters",
+        "set": {
+          "dropout_probability": 0.0
+        }
+      },
+      {
+        "when": "${family == 'dropout_philox'}",
+        "node": "SdpaBwd_0",
+        "section": "inputs",
+        "set": {
+          "seed_tensor_uid": 9,
+          "offset_tensor_uid": 10
+        }
+      },
+      {
+        "when": "${family == 'dropout_mask'}",
+        "node": "SdpaBwd_0",
+        "section": "inputs",
+        "set": {
+          "dropout_mask_tensor_uid": 9,
+          "dropout_scale_tensor_uid": 10,
+          "dropout_scale_inv_tensor_uid": 11
+        }
+      },
+      {
+        "when": "${family == 'dropout_scale_inv_only'}",
+        "node": "SdpaBwd_0",
+        "section": "inputs",
+        "set": {
+          "dropout_scale_inv_tensor_uid": 9
+        }
+      },
+      {
+        "when": "${family == 'alibi'}",
+        "node": "SdpaBwd_0",
+        "section": "parameters",
+        "set": {
+          "alibi_mask": true
+        }
+      },
+      {
+        "when": "${family == 'padding'}",
+        "node": "SdpaBwd_0",
+        "section": "parameters",
+        "set": {
+          "padding_mask": true
+        }
+      },
+      {
+        "when": "${family in ['padding', 'seq_len_group']}",
+        "node": "SdpaBwd_0",
+        "section": "inputs",
+        "set": {
+          "seq_len_q_tensor_uid": 9,
+          "seq_len_kv_tensor_uid": 10
+        }
+      },
+      {
+        "when": "${scale_on}",
+        "node": "SdpaBwd_0",
+        "section": "inputs",
+        "set": {
+          "scale_tensor_uid": 9
+        }
+      },
+      {
+        "when": "${scale_on}",
+        "node": "SdpaBwd_0",
+        "section": "parameters",
+        "set": {
+          "attn_scale_value": null
+        }
+      },
+      {
+        "when": "${bias_on}",
+        "node": "SdpaBwd_0",
+        "section": "inputs",
+        "set": {
+          "attn_mask_tensor_uid": 9
+        }
+      },
+      {
+        "when": "${dbias_on}",
+        "node": "SdpaBwd_0",
+        "section": "outputs",
+        "set": {
+          "dbias_tensor_uid": 10
+        }
+      },
+      {
+        "when": "${family == 'padding_noseq'}",
+        "node": "SdpaBwd_0",
+        "section": "parameters",
+        "set": {
+          "padding_mask": true
+        }
+      }
+    ]
+  }
+}

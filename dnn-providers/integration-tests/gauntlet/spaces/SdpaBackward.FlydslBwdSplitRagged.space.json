@@ -1,0 +1,695 @@
+{
+  "version": 1,
+  "operation": "SdpaBackward",
+  "description": "SDPA backward on packed (THD) ragged tensors over hipkernel:flydsl_sdpa_bwd_split (COVERAGE.md 9.1 PV-3, SS-4, SS-5; 9.3 gap rows): Q, K, V, O, dO, dQ, dK, dV and the LSE are ragged, each with its own INT32 [B + 1, 1, 1, 1] element-offset tensor and the seq_len_q / seq_len_kv tensors, as the SdpaBackward/Golden/Ragged bundles declare them (the template is theirs: its tensors are not numbered canonically, so a failure of this space cannot be frozen into a regression bundle by import_graph.py; BSHD strides, LSE packed (T, H)). Batch entry i has valid lengths max(1, Sq - i * pad_q) and max(1, Skv - i * pad_kv); `gaps` packs the sequences back to back (compact) or leaves each in its padded slot (gapped, so gap rows exist between sequences). All offsets and lengths are exact `values` fills (metadata format 2). O and the LSE come from the harness's ragged forward derivation; the references run the dense padded rewrite. Masks none and causal; no bias, dropout or window with ragged (declined by the matcher or not modelled).",
+  "engine": "hipkernel:flydsl_sdpa_bwd_split",
+  "template": "../../integration-test-bundles/quick/SdpaBackward/Golden/Ragged/graph.template.json",
+  "axes": {
+    "dtype": {
+      "values": [
+        "half",
+        "bfloat16",
+        "float"
+      ]
+    },
+    "b": {
+      "values": [
+        1,
+        2,
+        3
+      ]
+    },
+    "hkv": {
+      "values": [
+        1,
+        2,
+        4
+      ]
+    },
+    "group": {
+      "values": [
+        1,
+        1,
+        2,
+        4
+      ]
+    },
+    "hd": {
+      "values": [
+        [
+          16,
+          16
+        ],
+        [
+          32,
+          32
+        ],
+        [
+          64,
+          64
+        ],
+        [
+          64,
+          64
+        ],
+        [
+          96,
+          96
+        ],
+        [
+          128,
+          128
+        ],
+        [
+          128,
+          128
+        ],
+        [
+          192,
+          192
+        ],
+        [
+          128,
+          64
+        ],
+        [
+          64,
+          128
+        ]
+      ]
+    },
+    "sq": {
+      "range": [
+        1,
+        256
+      ],
+      "boundaries": [
+        1,
+        2,
+        16,
+        17,
+        63,
+        64,
+        65,
+        128,
+        129,
+        256
+      ]
+    },
+    "skv": {
+      "range": [
+        1,
+        256
+      ],
+      "boundaries": [
+        1,
+        2,
+        16,
+        17,
+        63,
+        64,
+        65,
+        128,
+        129,
+        256
+      ]
+    },
+    "mask": {
+      "values": [
+        "none",
+        "none",
+        "causal_top_left",
+        "causal_bottom_right"
+      ]
+    },
+    "pad_q": {
+      "values": [
+        0,
+        1,
+        3,
+        17,
+        64
+      ]
+    },
+    "pad_kv": {
+      "values": [
+        0,
+        1,
+        3,
+        17,
+        64
+      ]
+    },
+    "gaps": {
+      "values": [
+        "compact",
+        "gapped"
+      ]
+    },
+    "scale": {
+      "values": [
+        0.0883883461356163,
+        0.07216878235340118,
+        0.125,
+        0.25,
+        0.5,
+        1.0,
+        4.0,
+        0.0,
+        -0.125,
+        0.0001
+      ]
+    },
+    "domain": {
+      "values": [
+        "default",
+        "narrow",
+        "wide",
+        "positive",
+        "constant",
+        "nonzero",
+        "zeros",
+        "large",
+        "subnormal"
+      ]
+    },
+    "alignment": {
+      "values": [
+        1,
+        2,
+        4,
+        8,
+        16,
+        32,
+        64,
+        128,
+        256
+      ]
+    },
+    "placement": {
+      "values": [
+        "default",
+        "exact",
+        "under"
+      ]
+    }
+  },
+  "derive": {
+    "hvmul": "1",
+    "layout": "'bshd'",
+    "hv": "hkv * hvmul",
+    "hq": "hkv * hvmul * group",
+    "dqk": "hd[0]",
+    "dv": "hd[1]",
+    "dims_q": "[b, hq, sq, dqk]",
+    "dims_k": "[b, hkv, skv, dqk]",
+    "dims_v": "[b, hv, skv, dv]",
+    "dims_o": "[b, hq, sq, dv]",
+    "dims_lse": "[b, hq, sq, 1]",
+    "row_q": "(hq*dqk if layout == 'bshd' else dqk) + 0",
+    "stride_q": "[sq*row_q, dqk, row_q, 1] if layout == 'bshd' else [hq*sq*row_q, sq*row_q, row_q, 1]",
+    "row_k": "(hkv*dqk if layout == 'bshd' else dqk) + 0",
+    "stride_k": "[skv*row_k, dqk, row_k, 1] if layout == 'bshd' else [hkv*skv*row_k, skv*row_k, row_k, 1]",
+    "row_v": "(hv*dv if layout == 'bshd' else dv) + 0",
+    "stride_v": "[skv*row_v, dv, row_v, 1] if layout == 'bshd' else [hv*skv*row_v, skv*row_v, row_v, 1]",
+    "row_o": "(hq*dv if layout == 'bshd' else dv) + 0",
+    "stride_o": "[sq*row_o, dv, row_o, 1] if layout == 'bshd' else [hq*sq*row_o, sq*row_o, row_o, 1]",
+    "stride_lse": "[sq * hq, 1, hq, 1]",
+    "dom_kind": "'fixed' if domain == 'constant' else ('free' if domain in ['default', 'narrow', 'wide', 'positive'] else domain)",
+    "dom_lo": "-0.01 if domain == 'narrow' else (-8 if domain == 'wide' else (0.25 if domain == 'positive' else (0.5 if domain == 'constant' else -1)))",
+    "dom_hi": "0.01 if domain == 'narrow' else (8 if domain == 'wide' else (4 if domain == 'positive' else (0.5 if domain == 'constant' else 1)))",
+    "dom_value": "0.5 if domain == 'constant' else 0",
+    "dom_scale": "8 if domain == 'large' else 1",
+    "dom_g_lo": "-1 if domain == 'wide' else dom_lo",
+    "dom_g_hi": "1 if domain in ['wide', 'positive'] else dom_hi",
+    "eff_placement": "'exact' if placement == 'under' and alignment < 2 else placement",
+    "bottom": "mask == 'causal_bottom_right'",
+    "left": "None",
+    "right": "0 if mask in ['causal_top_left', 'causal_bottom_right'] else None",
+    "align": "'BOTTOM_RIGHT' if bottom else 'TOP_LEFT'",
+    "lq0": "sq",
+    "lq1": "max(1, sq - pad_q)",
+    "lq2": "max(1, sq - 2 * pad_q)",
+    "lk0": "skv",
+    "lk1": "max(1, skv - pad_kv)",
+    "lk2": "max(1, skv - 2 * pad_kv)",
+    "lens_q": "[lq0] if b == 1 else ([lq0, lq1] if b == 2 else [lq0, lq1, lq2])",
+    "lens_kv": "[lk0] if b == 1 else ([lk0, lk1] if b == 2 else [lk0, lk1, lk2])",
+    "pad_ok": "(mask == 'none') or ((lq0 <= lk0) and (b < 2 or lq1 <= lk1) and (b < 3 or lq2 <= lk2))",
+    "cq1": "lq0 if gaps == 'compact' else sq",
+    "cq2": "lq0 + lq1 if gaps == 'compact' else 2 * sq",
+    "cq3": "lq0 + lq1 + lq2 if gaps == 'compact' else 3 * sq",
+    "ck1": "lk0 if gaps == 'compact' else skv",
+    "ck2": "lk0 + lk1 if gaps == 'compact' else 2 * skv",
+    "ck3": "lk0 + lk1 + lk2 if gaps == 'compact' else 3 * skv",
+    "f_q": "hq * dqk",
+    "f_k": "hkv * dqk",
+    "f_v": "hv * dv",
+    "f_o": "hq * dv",
+    "f_s": "hq",
+    "off_q": "[0, cq1 * f_q] if b == 1 else ([0, cq1 * f_q, cq2 * f_q] if b == 2 else [0, cq1 * f_q, cq2 * f_q, cq3 * f_q])",
+    "off_k": "[0, ck1 * f_k] if b == 1 else ([0, ck1 * f_k, ck2 * f_k] if b == 2 else [0, ck1 * f_k, ck2 * f_k, ck3 * f_k])",
+    "off_v": "[0, ck1 * f_v] if b == 1 else ([0, ck1 * f_v, ck2 * f_v] if b == 2 else [0, ck1 * f_v, ck2 * f_v, ck3 * f_v])",
+    "off_o": "[0, cq1 * f_o] if b == 1 else ([0, cq1 * f_o, cq2 * f_o] if b == 2 else [0, cq1 * f_o, cq2 * f_o, cq3 * f_o])",
+    "off_do": "[0, cq1 * f_o] if b == 1 else ([0, cq1 * f_o, cq2 * f_o] if b == 2 else [0, cq1 * f_o, cq2 * f_o, cq3 * f_o])",
+    "off_dq": "[0, cq1 * f_q] if b == 1 else ([0, cq1 * f_q, cq2 * f_q] if b == 2 else [0, cq1 * f_q, cq2 * f_q, cq3 * f_q])",
+    "off_dk": "[0, ck1 * f_k] if b == 1 else ([0, ck1 * f_k, ck2 * f_k] if b == 2 else [0, ck1 * f_k, ck2 * f_k, ck3 * f_k])",
+    "off_dv": "[0, ck1 * f_v] if b == 1 else ([0, ck1 * f_v, ck2 * f_v] if b == 2 else [0, ck1 * f_v, ck2 * f_v, ck3 * f_v])",
+    "off_s": "[0, cq1 * f_s] if b == 1 else ([0, cq1 * f_s, cq2 * f_s] if b == 2 else [0, cq1 * f_s, cq2 * f_s, cq3 * f_s])",
+    "rows_see_a_key": "pad_ok",
+    "dom_mag": "0.5 if domain == 'constant' else (8 if domain in ['large', 'wide'] else (4 if domain == 'positive' else (0.01 if domain == 'narrow' else (0 if domain in ['zeros', 'subnormal'] else 1))))",
+    "s_max": "abs(scale) * 192 * dom_mag * dom_mag + 0"
+  },
+  "constraints": [
+    {
+      "rule": "rows_see_a_key",
+      "reason": "a causal mask needs every valid query row to see a valid key (the valid lengths are the padded extents less pad_q or pad_kv per batch index); a query row with no key has an LSE of -inf, which the backward kernels do not define"
+    },
+    {
+      "rule": "b*hq*sq*skv*(dqk+dv) <= 2**29",
+      "reason": "GPU reference cost ceiling, as SdpaBackward.space.json: the case time is linear above 2**26 and the CPU backward reference is serial, so 2**29 keeps the worst drawn case near 24 s (measured on a gfx942 host for the ASM region space)"
+    },
+    {
+      "rule": "s_max <= (168 if dtype == 'float' else (8388 if dtype == 'half' else 16777))",
+      "reason": "the largest score |S| (bounded by |scale| * dqk * mag^2, plus |bias|) must keep |S| * 2^-24 below a tenth of the dtype's tolerance: the backward computes P = exp(S - LSE) from a given fp32 LSE, and two correct fp32 computations of S differ by |S| * 2^-24, which exp() passes on to P and the gradients. Beyond that bound the oracle cannot tell a correct engine from a wrong one (scale 2^20 with scores near 1e9 gave NaN in every engine that did not produce the LSE itself)"
+    }
+  ],
+  "case": {
+    "values": {
+      "io_data_type": "${dtype}",
+      "tensors": [
+        {
+          "uid": 0,
+          "dims": "${dims_k}",
+          "strides": "${stride_k}",
+          "data_type": "${dtype}",
+          "ragged_offset_multiplier": 1
+        },
+        {
+          "uid": 1,
+          "dims": "${dims_o}",
+          "strides": "${stride_o}",
+          "data_type": "${dtype}",
+          "ragged_offset_multiplier": 1
+        },
+        {
+          "uid": 2,
+          "dims": "${dims_q}",
+          "strides": "${stride_q}",
+          "data_type": "${dtype}",
+          "ragged_offset_multiplier": 1
+        },
+        {
+          "uid": 3,
+          "dims": "${dims_k}",
+          "strides": "${stride_k}",
+          "data_type": "${dtype}",
+          "ragged_offset_multiplier": 1
+        },
+        {
+          "uid": 4,
+          "dims": "${dims_q}",
+          "strides": "${stride_q}",
+          "data_type": "${dtype}",
+          "ragged_offset_multiplier": 1
+        },
+        {
+          "uid": 5,
+          "dims": "${dims_v}",
+          "strides": "${stride_v}",
+          "data_type": "${dtype}",
+          "ragged_offset_multiplier": 1
+        },
+        {
+          "uid": 6,
+          "dims": "${dims_v}",
+          "strides": "${stride_v}",
+          "data_type": "${dtype}",
+          "ragged_offset_multiplier": 1
+        },
+        {
+          "uid": 7,
+          "dims": "${dims_o}",
+          "strides": "${stride_o}",
+          "data_type": "${dtype}",
+          "ragged_offset_multiplier": 1
+        },
+        {
+          "uid": 8,
+          "dims": "${dims_lse}",
+          "strides": "${stride_lse}",
+          "data_type": "float",
+          "ragged_offset_multiplier": 1
+        },
+        {
+          "uid": 10,
+          "dims": "${[b, 1, 1, 1]}",
+          "strides": [
+            1,
+            1,
+            1,
+            1
+          ],
+          "data_type": "int32"
+        },
+        {
+          "uid": 11,
+          "dims": "${[b, 1, 1, 1]}",
+          "strides": [
+            1,
+            1,
+            1,
+            1
+          ],
+          "data_type": "int32"
+        },
+        {
+          "uid": 16,
+          "dims": "${[b + 1, 1, 1, 1]}",
+          "strides": [
+            1,
+            1,
+            1,
+            1
+          ],
+          "data_type": "int32"
+        },
+        {
+          "uid": 17,
+          "dims": "${[b + 1, 1, 1, 1]}",
+          "strides": [
+            1,
+            1,
+            1,
+            1
+          ],
+          "data_type": "int32"
+        },
+        {
+          "uid": 18,
+          "dims": "${[b + 1, 1, 1, 1]}",
+          "strides": [
+            1,
+            1,
+            1,
+            1
+          ],
+          "data_type": "int32"
+        },
+        {
+          "uid": 19,
+          "dims": "${[b + 1, 1, 1, 1]}",
+          "strides": [
+            1,
+            1,
+            1,
+            1
+          ],
+          "data_type": "int32"
+        },
+        {
+          "uid": 20,
+          "dims": "${[b + 1, 1, 1, 1]}",
+          "strides": [
+            1,
+            1,
+            1,
+            1
+          ],
+          "data_type": "int32"
+        },
+        {
+          "uid": 21,
+          "dims": "${[b + 1, 1, 1, 1]}",
+          "strides": [
+            1,
+            1,
+            1,
+            1
+          ],
+          "data_type": "int32"
+        },
+        {
+          "uid": 22,
+          "dims": "${[b + 1, 1, 1, 1]}",
+          "strides": [
+            1,
+            1,
+            1,
+            1
+          ],
+          "data_type": "int32"
+        },
+        {
+          "uid": 23,
+          "dims": "${[b + 1, 1, 1, 1]}",
+          "strides": [
+            1,
+            1,
+            1,
+            1
+          ],
+          "data_type": "int32"
+        },
+        {
+          "uid": 24,
+          "dims": "${[b + 1, 1, 1, 1]}",
+          "strides": [
+            1,
+            1,
+            1,
+            1
+          ],
+          "data_type": "int32"
+        }
+      ],
+      "attributes": {
+        "parameters__diagonal_alignment": "${align}",
+        "parameters__left_bound": "${left}",
+        "parameters__right_bound": "${right}"
+      }
+    },
+    "metadata": {
+      "purpose": "probe",
+      "validator": "default",
+      "inputs": {
+        "2": {
+          "kind": "${dom_kind}",
+          "lo": "${dom_lo}",
+          "hi": "${dom_hi}",
+          "value": "${dom_value}",
+          "scale": "${dom_scale}"
+        },
+        "0": {
+          "kind": "${dom_kind}",
+          "lo": "${dom_lo}",
+          "hi": "${dom_hi}",
+          "value": "${dom_value}",
+          "scale": "${dom_scale}"
+        },
+        "6": {
+          "kind": "${dom_kind}",
+          "lo": "${dom_g_lo}",
+          "hi": "${dom_g_hi}",
+          "value": "${dom_value}",
+          "scale": 1
+        },
+        "7": {
+          "kind": "${dom_kind}",
+          "lo": "${dom_g_lo}",
+          "hi": "${dom_g_hi}",
+          "value": "${dom_value}",
+          "scale": 1
+        },
+        "10": {
+          "kind": "values",
+          "values": "${lens_q}",
+          "repeat": false
+        },
+        "11": {
+          "kind": "values",
+          "values": "${lens_kv}",
+          "repeat": false
+        },
+        "16": {
+          "kind": "values",
+          "values": "${off_q}",
+          "repeat": false
+        },
+        "17": {
+          "kind": "values",
+          "values": "${off_k}",
+          "repeat": false
+        },
+        "18": {
+          "kind": "values",
+          "values": "${off_v}",
+          "repeat": false
+        },
+        "19": {
+          "kind": "values",
+          "values": "${off_o}",
+          "repeat": false
+        },
+        "20": {
+          "kind": "values",
+          "values": "${off_do}",
+          "repeat": false
+        },
+        "21": {
+          "kind": "values",
+          "values": "${off_dq}",
+          "repeat": false
+        },
+        "22": {
+          "kind": "values",
+          "values": "${off_dk}",
+          "repeat": false
+        },
+        "23": {
+          "kind": "values",
+          "values": "${off_dv}",
+          "repeat": false
+        },
+        "24": {
+          "kind": "values",
+          "values": "${off_s}",
+          "repeat": false
+        }
+      },
+      "placement": "${eff_placement}",
+      "placement_uid": 2
+    },
+    "node_patches": [
+      {
+        "node": "SdpaBwd_0",
+        "section": "parameters",
+        "set": {
+          "attn_scale_value": "${scale}"
+        }
+      }
+    ],
+    "tensor_patches": [
+      {
+        "uid": 0,
+        "set": {
+          "alignment": "${alignment}"
+        }
+      },
+      {
+        "uid": 1,
+        "set": {
+          "alignment": "${alignment}"
+        }
+      },
+      {
+        "uid": 2,
+        "set": {
+          "alignment": "${alignment}"
+        }
+      },
+      {
+        "uid": 3,
+        "set": {
+          "alignment": "${alignment}"
+        }
+      },
+      {
+        "uid": 4,
+        "set": {
+          "alignment": "${alignment}"
+        }
+      },
+      {
+        "uid": 5,
+        "set": {
+          "alignment": "${alignment}"
+        }
+      },
+      {
+        "uid": 6,
+        "set": {
+          "alignment": "${alignment}"
+        }
+      },
+      {
+        "uid": 7,
+        "set": {
+          "alignment": "${alignment}"
+        }
+      },
+      {
+        "uid": 8,
+        "set": {
+          "alignment": "${alignment}"
+        }
+      },
+      {
+        "uid": 10,
+        "set": {
+          "alignment": "${alignment}"
+        }
+      },
+      {
+        "uid": 11,
+        "set": {
+          "alignment": "${alignment}"
+        }
+      },
+      {
+        "uid": 16,
+        "set": {
+          "alignment": "${alignment}"
+        }
+      },
+      {
+        "uid": 17,
+        "set": {
+          "alignment": "${alignment}"
+        }
+      },
+      {
+        "uid": 18,
+        "set": {
+          "alignment": "${alignment}"
+        }
+      },
+      {
+        "uid": 19,
+        "set": {
+          "alignment": "${alignment}"
+        }
+      },
+      {
+        "uid": 20,
+        "set": {
+          "alignment": "${alignment}"
+        }
+      },
+      {
+        "uid": 21,
+        "set": {
+          "alignment": "${alignment}"
+        }
+      },
+      {
+        "uid": 22,
+        "set": {
+          "alignment": "${alignment}"
+        }
+      },
+      {
+        "uid": 23,
+        "set": {
+          "alignment": "${alignment}"
+        }
+      },
+      {
+        "uid": 24,
+        "set": {
+          "alignment": "${alignment}"
+        }
+      }
+    ]
+  }
+}

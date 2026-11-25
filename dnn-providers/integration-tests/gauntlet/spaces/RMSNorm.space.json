@@ -1,0 +1,90 @@
+{
+  "version": 1,
+  "operation": "RMSNorm",
+  "description": "RMSNorm forward (inference, scale and bias) in the HIP_MLOPS_ENGINE region: rank 4 or 5, NCHW/NCDHW or NHWC/NDHWC strides, float/half/bfloat16, mixed precision with a low-precision x and float y/scale/bias as in the quick sweeps, scale and bias covering a trailing suffix of the dims (leading dims 1). Template: quick RMSNorm/Variant4. The domain axis fills x (uid 4); the nan and inf domains put the special fill on scale and bias (uids 3 and 1), which a normalized element meets only elementwise, and leave x at free(-1,1), because a non-finite x element would spread over its whole normalized row through the mean of squares; every other domain fills scale and bias free(-1,1), the harness default. A scale and bias of fewer than 4 elements (a normalized extent under 4) would be covered whole by the one element the special fill always plants, so y would have no finite element and the non-finite mask fails a reference like that by design; those shapes put the special fill on x instead (a normalized extent under 4 leaves many rows, and a non-finite x element reaches only its own row) and scale and bias stay free(-1,1). The alignment axis declares that alignment on the device tensors y, bias, scale and x (uids 0, 1, 3, 4; epsilon is a host scalar and keeps 16) through tensor_patches, and the placement axis puts the device pointers at exactly that alignment (exact) or misaligns x (placement_uid 4) below it, a case that passes only if the backend rejects it (under, drawn as exact at alignment 1); default leaves the pointers where they are.",
+  "engine": "HIP_MLOPS_ENGINE",
+  "template": "../../integration-test-bundles/quick/RMSNorm/Variant4/graph.template.json",
+  "axes": {
+    "dtype":   {"values": ["float", "half", "bfloat16"]},
+    "x_dtype": {"values": ["float", "half", "bfloat16"]},
+    "layout":  {"values": ["nchw", "nhwc"]},
+    "ndim":    {"values": [4, 5]},
+    "n":       {"range": [1, 8], "boundaries": [1, 2, 8]},
+    "c":       {"range": [1, 256], "boundaries": [1, 2, 3, 64, 128, 256]},
+    "d3":      {"range": [1, 8], "boundaries": [1, 2, 4]},
+    "h":       {"range": [1, 128], "boundaries": [1, 2, 3, 64, 128]},
+    "w":       {"range": [1, 512], "boundaries": [1, 2, 31, 32, 33, 64, 127, 128, 129, 256, 512]},
+    "k":       {"values": [1, 2, 3, 4]},
+    "domain":  {"values": ["default", "narrow", "wide", "positive", "constant", "nonzero", "zeros", "large", "subnormal", "nan", "inf"], "late": true},
+    "alignment": {"values": [1, 2, 4, 8, 16, 32, 64, 128, 256], "late": true},
+    "placement": {"values": ["default", "exact", "under"], "late": true}
+  },
+  "derive": {
+    "d":       "d3 if ndim == 5 else 1",
+    "kh":      "2 if ndim == 4 else 3",
+    "pc":      "c if k <= 1 else 1",
+    "pd":      "d if k <= 2 else 1",
+    "ph":      "h if k <= kh else 1",
+    "pw":      "w",
+    "dims_x":  "[n, c, h, w] if ndim == 4 else [n, c, d, h, w]",
+    "dims_p":  "[1, pc, ph, pw] if ndim == 4 else [1, pc, pd, ph, pw]",
+    "xs_w":    "1 if layout == 'nchw' else c",
+    "xs_h":    "w if layout == 'nchw' else w * c",
+    "xs_d":    "h * w if layout == 'nchw' else h * w * c",
+    "xs_c":    "d * h * w if layout == 'nchw' else 1",
+    "xs_n":    "c * d * h * w",
+    "ps_w":    "1 if layout == 'nchw' else pc",
+    "ps_h":    "pw if layout == 'nchw' else pw * pc",
+    "ps_d":    "ph * pw if layout == 'nchw' else ph * pw * pc",
+    "ps_c":    "pd * ph * pw if layout == 'nchw' else 1",
+    "ps_n":    "pc * pd * ph * pw",
+    "stride_x": "[xs_n, xs_c, xs_h, xs_w] if ndim == 4 else [xs_n, xs_c, xs_d, xs_h, xs_w]",
+    "stride_p": "[ps_n, ps_c, ps_h, ps_w] if ndim == 4 else [ps_n, ps_c, ps_d, ps_h, ps_w]",
+    "poi_m":   "pc * pd * ph * pw",
+    "dom_kind":  "'fixed' if domain == 'constant' else ('special' if domain in ['nan', 'inf'] else ('free' if domain in ['default', 'narrow', 'wide', 'positive'] else domain))",
+    "dom_lo":    "-0.01 if domain == 'narrow' else (-8 if domain == 'wide' else (0.25 if domain == 'positive' else (0.5 if domain == 'constant' else -1)))",
+    "dom_hi":    "0.01 if domain == 'narrow' else (8 if domain == 'wide' else (4 if domain == 'positive' else (0.5 if domain == 'constant' else 1)))",
+    "dom_value": "0.5 if domain == 'constant' else 0",
+    "dom_scale": "32 if domain == 'large' else 1",
+    "dom_special": "'inf' if domain == 'inf' else 'nan'",
+    "dom_fraction": "0.05",
+    "dom_validator": "'match_nonfinite' if domain in ['nan', 'inf'] else 'default'",
+    "dom_x_kind": "'special' if domain in ['nan', 'inf'] and poi_m < 4 else ('free' if domain in ['nan', 'inf'] else dom_kind)",
+    "dom_p_kind": "'special' if domain in ['nan', 'inf'] and poi_m >= 4 else 'free'",
+    "eff_placement": "'exact' if placement == 'under' and alignment < 2 else placement"
+  },
+  "constraints": [
+    {"rule": "k < ndim", "reason": "the first normalized axis must be one of the non-batch axes"},
+    {"rule": "x_dtype == dtype or dtype == 'float'", "reason": "mixed precision keeps float y, scale and bias around a low-precision x, as in the quick sweeps"},
+    {"rule": "n * c * d * h * w <= 2**30", "reason": "oracle cost ceiling (RFC 0023 section 14), kept at 2**30 on measurement (gfx950, 2026-11-02, measure_oracle_cost.py): the oracle chain ran the GPU graph executor's signature-keyed plan (GPU lane; ReferenceOpCoverage.cpp gpuSupportedOps lists only convolution and SDPA because it gates checked-in bundle registration, not the gauntlet chain) and the rung at 2**30 took 163 ms, flat at about 155 ms from 2**16 up (8 rungs)"}
+  ],
+  "case": {
+    "values": {
+      "io_data_type": "${dtype}",
+      "tensors": [
+        {"uid": 0, "dims": "${dims_x}", "strides": "${stride_x}", "data_type": "${dtype}"},
+        {"uid": 1, "dims": "${dims_p}", "strides": "${stride_p}", "data_type": "${dtype}"},
+        {"uid": 2, "dims": [1], "strides": [1], "data_type": "float"},
+        {"uid": 3, "dims": "${dims_p}", "strides": "${stride_p}", "data_type": "${dtype}"},
+        {"uid": 4, "dims": "${dims_x}", "strides": "${stride_x}", "data_type": "${x_dtype}"}
+      ]
+    },
+    "metadata": {
+      "purpose": "probe",
+      "validator": "${dom_validator}",
+      "inputs": {
+        "1": {"kind": "${dom_p_kind}", "lo": -1, "hi": 1, "value": 0, "scale": "${dom_scale}", "special": "${dom_special}", "fraction": "${dom_fraction}"},
+        "3": {"kind": "${dom_p_kind}", "lo": -1, "hi": 1, "value": 0, "scale": "${dom_scale}", "special": "${dom_special}", "fraction": "${dom_fraction}"},
+        "4": {"kind": "${dom_x_kind}", "lo": "${dom_lo}", "hi": "${dom_hi}", "value": "${dom_value}", "scale": "${dom_scale}", "special": "${dom_special}", "fraction": "${dom_fraction}"}
+      },
+      "placement": "${eff_placement}",
+      "placement_uid": 4
+    },
+    "tensor_patches": [
+      {"uid": 0, "set": {"alignment": "${alignment}"}},
+      {"uid": 1, "set": {"alignment": "${alignment}"}},
+      {"uid": 3, "set": {"alignment": "${alignment}"}},
+      {"uid": 4, "set": {"alignment": "${alignment}"}}
+    ]
+  }
+}
