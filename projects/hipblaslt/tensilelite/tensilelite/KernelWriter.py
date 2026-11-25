@@ -45,7 +45,7 @@ from .ir import BranchInstruction, BufferLoadB128, BufferLoadB192, BufferLoadB32
   SCSelectB32, SLShiftLeftB32, SLShiftRightB32, SMFMAInstruction, SMovB32, SMovB64, SNop, SEndpgm, SOrB32, SSetPrior, SSetRegIMM32B32, SSubU32, SWaitCnt, SWaitAlu, \
   SLongBranchPositive, VFmaMixF32, VMadMixF32, VMovB32, VAndB32, VCmpEQU32, VCndMaskB32, VMovB64, VNop, VReadfirstlaneB32, TensorLoadToLds, SCMovB32, SCMovB64, t16
 from .ir import sched_is_mfma, sched_is_smfma, sched_is_mxmfma, sched_is_tensor_load_to_lds
-from .ir import sched_is_ds_load, sched_is_ds_load_b128, sched_is_ds_store, sched_is_waitcnt
+from .ir import sched_is_ds_load, sched_is_ds_load_b128, sched_is_ds_store, sched_is_waitcnt, sched_is_barrier
 from .ir import sched_is_nop, sched_is_instruction, sched_is_module, sched_is_register_container
 from .ir import sched_rocisa_view
 from .ir import SSchedulingFence
@@ -12279,9 +12279,9 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
         if isinstance(item, Module):
           modulesToScan.append(item)
           keptItems.append(item)
-        elif isinstance(item, SBarrier) \
-             and "-3" not in str(item).split("//", 1)[0] \
-             and "PGR bypass sync" not in item.comment:
+        elif sched_is_barrier(item) \
+             and "-3" not in str(sched_rocisa_view(item)).split("//", 1)[0] \
+             and "PGR bypass sync" not in sched_rocisa_view(item).comment:
           # Pass-2 rebuilds only workgroup-scope barriers from token-state
           # transitions, so only those are cleared here. Cluster-scope split
           # barriers (s_barrier_signal/wait -3), e.g. the StreamKMulticast

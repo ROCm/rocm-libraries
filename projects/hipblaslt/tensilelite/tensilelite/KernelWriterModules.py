@@ -25,6 +25,7 @@ from rocisa.container import vgpr, sgpr, accvgpr, Holder, MemTokenData
 from .ir import SBarrier, SBranch, SMovB32, SMovB64, SWaitCnt, SWaitTensorcnt,\
   VAccvgprReadB32, VAccvgprWriteB32, VFmaF32, VFmaF64, VLShiftLeftB64, VMovB32, \
   VMovRelsD2B32, VMulF32, VMulF64, VMulLOU32, VMulPKF16
+from .ir import logical_region, maybe_logical_leaf
 from rocisa.functions import BranchIfNotZero
 
 from .Common.DataType import DataType
@@ -152,6 +153,13 @@ def syncThreads(kernel, archCaps, asmCaps, comment="", skipForceWaitcnt0=False, 
         _barrier = SBarrier(comment=comment)
         if memoryToken is not None:
             _barrier.setMemToken(MemTokenData(memoryToken))
+        # Flip the workgroup sync barrier to a logical leaf (the fixed-value
+        # s_barrier has no deferred .dscnt mutation, so unlike the SWaitCnt it
+        # can be lowered eagerly here -- memtoken is already set above, so the
+        # eager lowering captures it). maybe_logical_leaf is a no-op off the
+        # gfx1250 trial path / outside a region, keeping codegen pure rocisa.
+        with logical_region("syncThreadsBarrier"):
+            _barrier = maybe_logical_leaf(_barrier)
         imod.add(_barrier)
     else:
         imod.addComment("Skip barrier: NumThreads=%s"%(kernel["NumThreads"]) + \

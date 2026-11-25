@@ -275,6 +275,12 @@ def sched_is_waitcnt(item):
           or _leaf_opcode(item) == "SWaitCnt")
 
 
+def sched_is_barrier(item):
+  """True for an s_barrier instruction."""
+  return (isinstance(item, _rocisa_instruction.SBarrier)
+          or _leaf_opcode(item) == "SBarrier")
+
+
 def sched_is_nop(item):
   """True for an s_nop instruction."""
   return (isinstance(item, _rocisa_instruction.SNop)
