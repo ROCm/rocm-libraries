@@ -44,6 +44,7 @@ from kernels.conv.direct_variants import (
     DIRECT_SPLIT_REDUCE as _SPLIT_REDUCE,
     direct_spec_takes_target_wave,
     DIRECT_WGRAD_FOLD as _WGRAD_FOLD,
+    DIRECT_WGRAD_SLAB_FOLD as _WGRAD_SLAB_FOLD,
     DIRECT_WGRAD_FOLDED as _WGRAD_FOLDED,
     PER_AXIS_PAD_VARIANTS,
     direct_wgrad_fold_knobs,
@@ -1063,6 +1064,166 @@ WGRAD_TILED_AUTO = (
     ((2, 2, 2, 2), (3, 4), 1),
     ((2, 2, 2, 2), (3, 4), 4),
 )
+# Tiled wgrad knob sets the AOT grid builds beyond the 3x3 base grid, as label
+# knob strings (name=value-...), and per layer cell
+# "<dtype>-f<KH>x<KW>-p<PAD>x<PAD_W>" the indices of the ones it is offered. They are
+# the points a wider search found to win a layer: four-group / two-group
+# ping-pong at the one-round row fills, one-split dW tiles storing the 16-bit
+# dW, packed fp16 atomics (pk16), fp32 slabs folded by a second launch (slab),
+# the 64-bit rebased batch (l64), packed groups (gpack), 5x5 and 1xN / Nx1
+# filters. The 3x3 base grid above is kept whole.
+WGRAD_TILED_KEPT = (
+    "dw16=true-one_split=true-pingpong=true-pp_sched=true-prefetch=2-q_groups=2-row_tail=true-row_unroll=0-rows_per_seg=0-target_blocks=256-unfold_n=1-wave_c16=2-wave_k16=2-waves_c=2-waves_k=2",
+    "dw16=true-one_split=true-pingpong=true-pp_tight=true-prefetch=2-q_groups=4-row_tail=true-row_unroll=0-rows_per_seg=0-target_blocks=256-unfold_n=2-wave_c16=2-wave_k16=2-waves_c=1-waves_k=2",
+    "dw16=true-one_split=true-pingpong=true-pp_tight=true-prefetch=2-q_groups=4-row_tail=true-row_unroll=0-rows_per_seg=0-target_blocks=256-unfold_n=2-wave_c16=2-wave_k16=2-waves_c=2-waves_k=1",
+    "dw16=true-one_split=true-pingpong=true-pp_tight=true-prefetch=2-q_groups=4-row_tail=true-row_unroll=0-rows_per_seg=0-target_blocks=256-unfold_n=4-wave_c16=2-wave_k16=1-waves_c=1-waves_k=2",
+    "dw16=true-one_split=true-pingpong=true-prefetch=2-q_groups=2-row_tail=true-row_unroll=0-rows_per_seg=0-target_blocks=256-unfold_n=1-wave_c16=1-wave_k16=1-waves_c=2-waves_k=2",
+    "dw16=true-one_split=true-prefetch=2-row_tail=true-row_unroll=0-rows_per_seg=0-target_blocks=256-unfold_n=1-wave_c16=1-wave_k16=2-waves_c=2-waves_k=2",
+    "dw16=true-one_split=true-prefetch=2-row_tail=true-row_unroll=0-rows_per_seg=0-target_blocks=256-unfold_n=2-wave_c16=1-wave_k16=1-waves_c=2-waves_k=2",
+    "dw16=true-one_split=true-prefetch=2-row_tail=true-row_unroll=0-rows_per_seg=0-target_blocks=256-unfold_n=2-wave_c16=1-wave_k16=2-waves_c=2-waves_k=2",
+    "dw16=true-one_split=true-prefetch=2-row_tail=true-row_unroll=0-rows_per_seg=0-target_blocks=256-unfold_n=4-wave_c16=1-wave_k16=1-waves_c=2-waves_k=2",
+    "dw16=true-one_split=true-prefetch=2-row_tail=true-row_unroll=0-rows_per_seg=0-target_blocks=256-unfold_n=4-wave_c16=1-wave_k16=2-waves_c=2-waves_k=2",
+    "dw16=true-one_split=true-prefetch=3-row_tail=true-row_unroll=0-rows_per_seg=0-target_blocks=256-unfold_n=4-wave_c16=1-wave_k16=1-waves_c=2-waves_k=2",
+    "gpack=true-pk16=true-prefetch=2-row_tail=true-row_unroll=0-rows_per_seg=0-target_blocks=256-unfold_n=2-wave_c16=1-wave_k16=1-waves_c=1-waves_k=4",
+    "gpack=true-pk16=true-prefetch=3-row_tail=true-row_unroll=0-rows_per_seg=0-target_blocks=256-unfold_n=2-wave_c16=1-wave_k16=1-waves_c=1-waves_k=4",
+    "gpack=true-prefetch=2-row_tail=true-row_unroll=0-rows_per_seg=0-slab=true-target_blocks=256-unfold_n=1-wave_c16=1-wave_k16=1-waves_c=1-waves_k=4",
+    "gpack=true-prefetch=2-row_tail=true-row_unroll=0-rows_per_seg=0-slab=true-target_blocks=256-unfold_n=2-wave_c16=1-wave_k16=1-waves_c=1-waves_k=4",
+    "gpack=true-prefetch=3-row_tail=true-row_unroll=0-rows_per_seg=0-slab=true-target_blocks=256-unfold_n=2-wave_c16=1-wave_k16=1-waves_c=1-waves_k=4",
+    "l64=true-pingpong=true-pk16=true-prefetch=3-row_tail=true-row_unroll=0-rows_per_seg=0-target_blocks=256-unfold_n=32-wave_c16=2-wave_k16=4-waves_c=4-waves_k=2",
+    "l64=true-pingpong=true-prefetch=2-row_tail=true-row_unroll=4-rows_per_seg=0-target_blocks=256-unfold_n=1-wave_c16=2-wave_k16=2-waves_c=4-waves_k=2",
+    "l64=true-pingpong=true-prefetch=2-row_tail=true-row_unroll=4-rows_per_seg=0-target_blocks=256-unfold_n=2-wave_c16=2-wave_k16=2-waves_c=2-waves_k=4",
+    "l64=true-pingpong=true-prefetch=2-row_tail=true-row_unroll=4-rows_per_seg=0-target_blocks=256-unfold_n=4-wave_c16=2-wave_k16=2-waves_c=2-waves_k=4",
+    "l64=true-pingpong=true-prefetch=2-row_unroll=4-rows_per_seg=0-target_blocks=256-unfold_n=1-wave_c16=2-wave_k16=2-waves_c=2-waves_k=4",
+    "l64=true-pingpong=true-prefetch=2-row_unroll=4-rows_per_seg=164-target_blocks=256-unfold_n=1-wave_c16=2-wave_k16=2-waves_c=4-waves_k=2",
+    "l64=true-pingpong=true-prefetch=3-row_tail=true-row_unroll=0-rows_per_seg=0-target_blocks=256-unfold_n=32-wave_c16=2-wave_k16=4-waves_c=4-waves_k=2",
+    "l64=true-pingpong=true-prefetch=3-row_unroll=0-rows_per_seg=0-target_blocks=256-unfold_n=32-wave_c16=2-wave_k16=4-waves_c=4-waves_k=2",
+    "pingpong=true-pk16=true-pp_tight=true-prefetch=2-q_groups=4-row_tail=true-row_unroll=0-rows_per_seg=0-target_blocks=256-unfold_n=1-wave_c16=1-wave_k16=2-waves_c=2-waves_k=1",
+    "pingpong=true-pk16=true-pp_tight=true-prefetch=2-q_groups=4-row_tail=true-row_unroll=0-rows_per_seg=0-target_blocks=256-unfold_n=2-wave_c16=1-wave_k16=2-waves_c=2-waves_k=1",
+    "pingpong=true-pk16=true-pp_tight=true-prefetch=2-q_groups=4-row_tail=true-row_unroll=0-rows_per_seg=0-target_blocks=256-unfold_n=2-wave_c16=2-wave_k16=2-waves_c=2-waves_k=1",
+    "pingpong=true-pk16=true-pp_tight=true-prefetch=2-q_groups=4-row_tail=true-row_unroll=0-rows_per_seg=0-target_blocks=256-unfold_n=4-wave_c16=2-wave_k16=1-waves_c=1-waves_k=2",
+    "pingpong=true-pk16=true-pp_tight=true-prefetch=2-q_groups=4-row_tail=true-row_unroll=0-rows_per_seg=0-target_blocks=256-unfold_n=4-wave_c16=2-wave_k16=2-waves_c=1-waves_k=2",
+    "pingpong=true-pk16=true-pp_tight=true-prefetch=2-q_groups=4-row_unroll=0-rows_per_seg=129-target_blocks=256-unfold_n=1-wave_c16=2-wave_k16=2-waves_c=2-waves_k=1",
+    "pingpong=true-pk16=true-pp_tight=true-prefetch=2-q_groups=4-row_unroll=0-rows_per_seg=21-target_blocks=252-unfold_n=1-wave_c16=1-wave_k16=2-waves_c=2-waves_k=1",
+    "pingpong=true-pk16=true-pp_tight=true-prefetch=2-q_groups=4-row_unroll=0-rows_per_seg=30-target_blocks=256-unfold_n=2-wave_c16=1-wave_k16=2-waves_c=2-waves_k=1",
+    "pingpong=true-pk16=true-pp_tight=true-prefetch=2-q_groups=4-row_unroll=0-rows_per_seg=30-target_blocks=256-unfold_n=2-wave_c16=2-wave_k16=2-waves_c=2-waves_k=1",
+    "pingpong=true-pk16=true-pp_tight=true-prefetch=2-q_groups=4-row_unroll=0-rows_per_seg=66-target_blocks=256-unfold_n=2-wave_c16=2-wave_k16=2-waves_c=1-waves_k=2",
+    "pingpong=true-pk16=true-prefetch=2-q_groups=2-row_tail=true-row_unroll=0-rows_per_seg=0-target_blocks=1024-unfold_n=2-wave_c16=1-wave_k16=1-waves_c=2-waves_k=2",
+    "pingpong=true-pk16=true-prefetch=2-row_unroll=4-rows_per_seg=0-target_blocks=256-unfold_n=4-wave_c16=2-wave_k16=2-waves_c=2-waves_k=4",
+    "pingpong=true-pk16=true-prefetch=3-row_tail=true-row_unroll=0-rows_per_seg=0-target_blocks=256-unfold_n=4-wave_c16=1-wave_k16=2-waves_c=2-waves_k=4",
+    "pingpong=true-pp_sched=true-prefetch=2-q_groups=2-row_tail=true-row_unroll=0-rows_per_seg=0-slab=true-target_blocks=256-unfold_n=2-wave_c16=2-wave_k16=2-waves_c=2-waves_k=2",
+    "pingpong=true-pp_sched=true-prefetch=3-q_groups=2-row_tail=true-row_unroll=0-rows_per_seg=0-slab=true-target_blocks=256-unfold_n=1-wave_c16=2-wave_k16=2-waves_c=2-waves_k=2",
+    "pingpong=true-pp_tight=true-prefetch=2-q_groups=4-row_tail=true-row_unroll=0-rows_per_seg=0-slab=true-target_blocks=256-unfold_n=1-wave_c16=1-wave_k16=2-waves_c=2-waves_k=1",
+    "pingpong=true-pp_tight=true-prefetch=2-q_groups=4-row_tail=true-row_unroll=0-rows_per_seg=0-slab=true-target_blocks=256-unfold_n=2-wave_c16=1-wave_k16=2-waves_c=2-waves_k=1",
+    "pingpong=true-pp_tight=true-prefetch=2-q_groups=4-row_tail=true-row_unroll=0-rows_per_seg=0-slab=true-target_blocks=256-unfold_n=2-wave_c16=2-wave_k16=2-waves_c=2-waves_k=1",
+    "pingpong=true-pp_tight=true-prefetch=2-q_groups=4-row_tail=true-row_unroll=0-rows_per_seg=0-slab=true-target_blocks=256-unfold_n=4-wave_c16=2-wave_k16=1-waves_c=1-waves_k=2",
+    "pingpong=true-pp_tight=true-prefetch=2-q_groups=4-row_tail=true-row_unroll=0-rows_per_seg=0-slab=true-target_blocks=256-unfold_n=4-wave_c16=2-wave_k16=2-waves_c=1-waves_k=2",
+    "pingpong=true-pp_tight=true-prefetch=2-q_groups=4-row_tail=true-row_unroll=0-rows_per_seg=0-target_blocks=256-unfold_n=2-wave_c16=2-wave_k16=2-waves_c=2-waves_k=1",
+    "pingpong=true-pp_tight=true-prefetch=2-q_groups=4-row_unroll=0-rows_per_seg=30-slab=true-target_blocks=256-unfold_n=2-wave_c16=1-wave_k16=2-waves_c=2-waves_k=1",
+    "pingpong=true-pp_tight=true-prefetch=2-q_groups=4-row_unroll=0-rows_per_seg=30-slab=true-target_blocks=256-unfold_n=2-wave_c16=2-wave_k16=2-waves_c=2-waves_k=1",
+    "pingpong=true-pp_tight=true-prefetch=2-q_groups=4-row_unroll=0-rows_per_seg=30-slab=true-target_blocks=256-unfold_n=4-wave_c16=2-wave_k16=1-waves_c=1-waves_k=2",
+    "pingpong=true-pp_tight=true-prefetch=2-q_groups=4-row_unroll=0-rows_per_seg=30-slab=true-target_blocks=256-unfold_n=4-wave_c16=2-wave_k16=2-waves_c=1-waves_k=2",
+    "pingpong=true-pp_tight=true-prefetch=2-q_groups=4-row_unroll=0-rows_per_seg=33-slab=true-target_blocks=256-unfold_n=1-wave_c16=2-wave_k16=2-waves_c=1-waves_k=2",
+    "pingpong=true-pp_tight=true-prefetch=2-q_groups=4-row_unroll=0-rows_per_seg=33-slab=true-target_blocks=256-unfold_n=2-wave_c16=2-wave_k16=2-waves_c=2-waves_k=1",
+    "pingpong=true-pp_tight=true-prefetch=2-q_groups=4-row_unroll=0-rows_per_seg=39-slab=true-target_blocks=256-unfold_n=1-wave_c16=2-wave_k16=2-waves_c=1-waves_k=2",
+    "pingpong=true-pp_tight=true-prefetch=2-q_groups=4-row_unroll=0-rows_per_seg=39-slab=true-target_blocks=256-unfold_n=2-wave_c16=2-wave_k16=2-waves_c=1-waves_k=2",
+    "pingpong=true-pp_tight=true-prefetch=2-q_groups=4-row_unroll=0-rows_per_seg=48-target_blocks=252-unfold_n=1-wave_c16=2-wave_k16=2-waves_c=2-waves_k=1",
+    "pingpong=true-pp_tight=true-prefetch=2-q_groups=4-row_unroll=0-rows_per_seg=60-slab=true-target_blocks=256-unfold_n=2-wave_c16=2-wave_k16=2-waves_c=2-waves_k=1",
+    "pingpong=true-pp_tight=true-prefetch=2-q_groups=4-row_unroll=0-rows_per_seg=66-slab=true-target_blocks=256-unfold_n=1-wave_c16=2-wave_k16=2-waves_c=1-waves_k=2",
+    "pingpong=true-pp_tight=true-prefetch=2-q_groups=4-row_unroll=0-rows_per_seg=66-slab=true-target_blocks=256-unfold_n=1-wave_c16=2-wave_k16=2-waves_c=2-waves_k=1",
+    "pingpong=true-prefetch=2-row_tail=true-row_unroll=4-rows_per_seg=0-slab=true-target_blocks=256-unfold_n=2-wave_c16=2-wave_k16=2-waves_c=4-waves_k=2",
+    "pingpong=true-prefetch=2-row_tail=true-row_unroll=4-rows_per_seg=0-slab=true-target_blocks=256-unfold_n=4-wave_c16=2-wave_k16=2-waves_c=2-waves_k=4",
+    "pingpong=true-prefetch=2-row_tail=true-row_unroll=4-rows_per_seg=0-target_blocks=256-unfold_n=2-wave_c16=2-wave_k16=2-waves_c=4-waves_k=2",
+    "pingpong=true-prefetch=2-row_tail=true-row_unroll=4-rows_per_seg=0-target_blocks=256-unfold_n=4-wave_c16=2-wave_k16=2-waves_c=2-waves_k=4",
+    "pingpong=true-prefetch=2-row_unroll=0-rows_per_seg=0-target_blocks=256-unfold_n=2-wave_c16=2-wave_k16=2-waves_c=2-waves_k=4",
+    "pingpong=true-prefetch=2-row_unroll=0-rows_per_seg=96-slab=true-target_blocks=256-unfold_n=32-wave_c16=4-wave_k16=2-waves_c=2-waves_k=4",
+    "pingpong=true-prefetch=2-row_unroll=4-rows_per_seg=0-slab=true-target_blocks=256-unfold_n=1-wave_c16=2-wave_k16=2-waves_c=2-waves_k=4",
+    "pingpong=true-prefetch=3-row_tail=true-row_unroll=0-rows_per_seg=0-target_blocks=256-unfold_n=32-wave_c16=2-wave_k16=4-waves_c=4-waves_k=2",
+    "pk16=true-prefetch=2-row_tail=true-row_unroll=0-rows_per_seg=0-target_blocks=512-unfold_n=2-wave_c16=1-wave_k16=1-waves_c=2-waves_k=2",
+    "pk16=true-prefetch=3-row_unroll=4-rows_per_seg=0-target_blocks=512-unfold_n=1-wave_c16=2-wave_k16=2-waves_c=2-waves_k=2",
+    "prefetch=2-row_tail=true-row_unroll=0-rows_per_seg=0-slab=true-target_blocks=1024-unfold_n=2-wave_c16=1-wave_k16=1-waves_c=2-waves_k=2",
+    "prefetch=2-row_tail=true-row_unroll=0-rows_per_seg=0-slab=true-target_blocks=1024-unfold_n=4-wave_c16=1-wave_k16=1-waves_c=2-waves_k=2",
+    "prefetch=2-row_tail=true-row_unroll=0-rows_per_seg=0-slab=true-target_blocks=256-unfold_n=1-wave_c16=1-wave_k16=1-waves_c=2-waves_k=2",
+    "prefetch=2-row_tail=true-row_unroll=0-rows_per_seg=0-slab=true-target_blocks=256-unfold_n=2-wave_c16=1-wave_k16=1-waves_c=2-waves_k=2",
+    "prefetch=2-row_tail=true-row_unroll=0-rows_per_seg=0-slab=true-target_blocks=256-unfold_n=4-wave_c16=1-wave_k16=1-waves_c=2-waves_k=2",
+    "prefetch=2-row_tail=true-row_unroll=0-rows_per_seg=0-slab=true-target_blocks=512-unfold_n=1-wave_c16=1-wave_k16=1-waves_c=2-waves_k=2",
+    "prefetch=2-row_tail=true-row_unroll=0-rows_per_seg=0-slab=true-target_blocks=512-unfold_n=2-wave_c16=1-wave_k16=1-waves_c=2-waves_k=2",
+    "prefetch=2-row_tail=true-row_unroll=0-rows_per_seg=0-slab=true-target_blocks=512-unfold_n=4-wave_c16=1-wave_k16=1-waves_c=2-waves_k=2",
+    "prefetch=2-row_tail=true-row_unroll=0-rows_per_seg=0-slab=true-target_blocks=512-unfold_n=4-wave_c16=1-wave_k16=2-waves_c=2-waves_k=2",
+    "prefetch=2-row_unroll=0-rows_per_seg=0-slab=true-target_blocks=512-unfold_n=1-wave_c16=1-wave_k16=2-waves_c=2-waves_k=2",
+    "prefetch=3-row_tail=true-row_unroll=0-rows_per_seg=0-slab=true-target_blocks=1024-unfold_n=1-wave_c16=1-wave_k16=1-waves_c=2-waves_k=2",
+    "prefetch=3-row_tail=true-row_unroll=0-rows_per_seg=0-slab=true-target_blocks=256-unfold_n=2-wave_c16=1-wave_k16=2-waves_c=2-waves_k=2",
+    "prefetch=3-row_tail=true-row_unroll=0-rows_per_seg=0-slab=true-target_blocks=512-unfold_n=1-wave_c16=1-wave_k16=1-waves_c=2-waves_k=2",
+    "prefetch=3-row_tail=true-row_unroll=0-rows_per_seg=0-slab=true-target_blocks=512-unfold_n=2-wave_c16=1-wave_k16=1-waves_c=2-waves_k=2",
+    "prefetch=3-row_unroll=0-rows_per_seg=0-slab=true-target_blocks=512-unfold_n=1-wave_c16=1-wave_k16=2-waves_c=2-waves_k=2",
+    "prefetch=3-row_unroll=0-rows_per_seg=0-target_blocks=512-unfold_n=1-wave_c16=1-wave_k16=2-waves_c=2-waves_k=2",
+    "prefetch=3-row_unroll=0-rows_per_seg=120-slab=true-target_blocks=256-unfold_n=2-wave_c16=1-wave_k16=1-waves_c=2-waves_k=2",
+    "prefetch=3-row_unroll=0-rows_per_seg=48-slab=true-target_blocks=1024-unfold_n=2-wave_c16=1-wave_k16=1-waves_c=2-waves_k=2",
+    "prefetch=3-row_unroll=4-rows_per_seg=0-slab=true-target_blocks=512-unfold_n=1-wave_c16=2-wave_k16=2-waves_c=2-waves_k=2",
+    "prefetch=5-row_unroll=6-rows_per_seg=30-slab=true-target_blocks=1024-unfold_n=4-wave_c16=1-wave_k16=2-waves_c=2-waves_k=2",
+    "prefetch=5-row_unroll=6-rows_per_seg=30-slab=true-target_blocks=256-unfold_n=1-wave_c16=1-wave_k16=2-waves_c=2-waves_k=2",
+    "prefetch=5-row_unroll=6-rows_per_seg=30-slab=true-target_blocks=512-unfold_n=4-wave_c16=1-wave_k16=2-waves_c=2-waves_k=2",
+    "prefetch=5-row_unroll=6-rows_per_seg=60-target_blocks=510-unfold_n=1-wave_c16=1-wave_k16=2-waves_c=2-waves_k=2",
+)
+WGRAD_TILED_CELL_KEPT = {
+    "bf16-f1x3-p0x0": "76 81 82 85 86 87 88",
+    "bf16-f1x3-p0x1": "76 81 82 85 86 87 88",
+    "bf16-f3x1-p0x0": "22 64 76 81 82 85 86 87 88",
+    "bf16-f3x1-p1x0": "23 64 76 81 82 85 86 87 88",
+    "bf16-f3x3-p0x0": (
+        "4 5 6 7 8 9 13 14 15 17 19 20 21 39 40 41 44 45 46 54 57 58 59 "
+        "60 61 63 67 68 69 70 71 72 73 74 75 76 77 78 79 80 81 85 86 87 "
+        "88"
+    ),
+    "bf16-f3x3-p1x1": (
+        "4 5 6 7 8 9 13 14 15 38 39 40 41 44 45 46 51 52 54 55 56 57 58 "
+        "59 60 61 63 67 68 69 70 71 72 73 74 75 76 77 78 79 80 81 85 86 "
+        "87 88 89"
+    ),
+    "bf16-f5x5-p0x0": "10 71",
+    "bf16-f5x5-p2x2": "10 71",
+    "fp16-f1x3-p0x0": "66 76 81 82 85 86 87 88",
+    "fp16-f1x3-p0x1": "28 63 66 76 81 82 85 86 87 88",
+    "fp16-f3x1-p0x0": "16 64 66 76 81 82 85 86 87 88",
+    "fp16-f3x1-p1x0": "22 23 43 62 64 66 76 81 82 85 86 87 88",
+    "fp16-f3x3-p0x0": (
+        "4 5 6 7 8 9 11 12 13 14 15 17 18 19 20 21 24 25 26 28 31 32 34 "
+        "35 36 39 40 41 44 45 46 47 54 57 58 59 60 61 63 65 66 67 68 69 "
+        "70 71 72 73 74 75 76 77 78 79 80 81 85 86 87 88"
+    ),
+    "fp16-f3x3-p1x1": (
+        "0 1 2 3 4 5 6 7 8 9 11 12 13 14 15 24 25 26 27 29 30 31 32 33 "
+        "34 35 36 37 38 39 40 41 42 43 44 45 46 48 49 50 51 53 54 55 56 "
+        "57 58 59 60 61 63 65 66 67 68 69 70 71 72 73 74 75 76 77 78 79 "
+        "80 81 83 84 85 86 87 88 89"
+    ),
+    "fp16-f5x5-p0x0": "10 71",
+    "fp16-f5x5-p2x2": "10 71",
+}
+
+
+def _wgrad_tiled_knobs(spec: str) -> dict:
+    """The knob dict of a ``name=value-name=value`` knob string."""
+    return {
+        k: True if v == "true" else int(v)
+        for k, v in (part.split("=") for part in spec.split("-"))
+    }
+
+
+def _wgrad_tiled_kept(dtype: str, caps: Optional[DirectCaps]) -> Iterator[dict]:
+    """The tiled wgrad knob sets ``WGRAD_TILED_KEPT`` offers this layer cell."""
+    if caps is None:  # every layer cell
+        ids = " ".join(
+            v for k, v in WGRAD_TILED_CELL_KEPT.items() if k.startswith(dtype)
+        )
+        ids = sorted(set(ids.split()), key=int)
+    else:
+        ids = WGRAD_TILED_CELL_KEPT.get(
+            f"{dtype}-f{caps.KH}x{caps.KW}-p{caps.PAD}x{caps.PAD_W}", ""
+        ).split()
+    for i in ids:
+        yield _wgrad_tiled_knobs(WGRAD_TILED_KEPT[int(i)])
+
+
 # Depthwise LDS-ring wgrad (DwWgradLdsSpec): lanes along columns, prefetch,
 # output rows per segment, workgroups.
 WGRAD_DW_LANES_W = (8, 16, 32)
@@ -1081,6 +1242,20 @@ WGRAD_GATHER_WAVES = ((2, 1), (1, 3), (2, 3), (1, 6), (2, 2))
 WGRAD_GATHER_PREFETCH = (1, 2)
 WGRAD_GATHER_RPS = (8, 16)
 WGRAD_GATHER_BLOCKS = (256, 1024, 2048)
+# Grouped mode (WgradGatherSpec.grouped, cpg == kpg in 8/16, any stride),
+# measured on g32 3x3 s2 wgrads: the (wave_k16, waves_k, prefetch,
+# rows_per_seg, target_blocks) cells that won a layer.
+WGRAD_GATHER_GRP_CPG = (8, 16)
+WGRAD_GATHER_GRP = (
+    (1, 4, 2, 32, 256),
+    (1, 4, 2, 16, 256),
+    (1, 4, 3, 16, 256),
+    (1, 4, 3, 32, 256),
+    (1, 4, 3, 16, 512),
+    (1, 4, 2, 16, 1024),
+    (2, 2, 2, 32, 512),
+    (1, 4, 2, 32, 512),
+)
 # Depthwise wgrad on the batched 4x4x4 MFMA (DwWgradMfmaSpec): (4-column
 # tiles per block, images packed per tile), input rows per unit, staging
 # buffers, workgroups. Measured on gfx950 bf16 7x7 layers (ConvNeXt):
@@ -1737,8 +1912,26 @@ DIRECT_CAPABILITIES: Dict[str, Tuple[str, Tuple[DirectCaps, ...]]] = {
         "wgrad",
         tuple(
             DirectCaps(KH=k, PAD=pad, stride=1, cpg=0, kpg=0)
-            for k in (3,)
+            for k in (3, 5)  # 5x5 on the one-split grid only
             for pad in _col_pads(k)
+        )
+        # The 1x3 / 3x1 layers, "valid" and "same" (per-axis padding).
+        + tuple(
+            DirectCaps(
+                KH=kh,
+                kw=kw,
+                PAD=ph,
+                pad_w=-1 if pw == ph else pw,
+                stride=1,
+                cpg=0,
+                kpg=0,
+            )
+            for kh, kw, ph, pw in (
+                (1, 3, 0, 0),
+                (1, 3, 0, 1),
+                (3, 1, 0, 0),
+                (3, 1, 1, 0),
+            )
         ),
     ),
     # Depthwise wgrad through LDS rings: 3x3 (8 channels x 9 taps of fp32
@@ -2130,6 +2323,23 @@ def _dw_fwd_cpl_arch(arch: str) -> bool:
 def _knob_grid(
     variant: str, arch: str, dtype: str, caps: Optional[DirectCaps] = None
 ) -> Iterator[dict]:
+    if variant != "direct_wgrad_tiled":
+        yield from _knob_grid_base(variant, arch, dtype, caps)
+        return
+    seen = set()
+    if caps is None or (caps.KH, caps.KW) == (3, 3):
+        for knobs in _knob_grid_base(variant, arch, dtype, caps):
+            seen.add(frozenset(knobs.items()))
+            yield knobs
+    for knobs in _wgrad_tiled_kept(dtype, caps):
+        if frozenset(knobs.items()) not in seen:
+            seen.add(frozenset(knobs.items()))
+            yield knobs
+
+
+def _knob_grid_base(
+    variant: str, arch: str, dtype: str, caps: Optional[DirectCaps] = None
+) -> Iterator[dict]:
     if variant == "direct_nongrouped":
         from kernels.common.conv_direct_nongrouped import (
             nongrouped_knobs,
@@ -2489,6 +2699,16 @@ def _knob_grid(
                 rows_per_seg=rps,
                 target_blocks=tb,
             )
+        if caps is None or caps.cpg in WGRAD_GATHER_GRP_CPG:
+            for wk16, wk, pf, rps, tb in WGRAD_GATHER_GRP:
+                yield dict(
+                    wave_k16=wk16,
+                    waves_k=wk,
+                    prefetch=pf,
+                    rows_per_seg=rps,
+                    target_blocks=tb,
+                    grouped=True,
+                )
     elif variant in (_DGRAD_PATCH, _DGRAD_SMALLC):
         from rocke.core.arch import ArchTarget
 
@@ -3052,6 +3272,25 @@ def wgrad_reduce_identity(
     )
 
 
+# Slice counts of the slab fold (few slabs: 2; many: 8)
+WGRAD_SLAB_FOLD_SLICES = (2, 8)
+
+
+def wgrad_slab_fold_identity(
+    arch: str, wave_size: int, out: str, slices: int, dtype: str = DIRECT_DTYPE
+) -> KernelIdentity:
+    """The cached fold of the tiled wgrad's slab scratch (shape-generic)."""
+    return _identity(
+        arch,
+        wave_size,
+        _WGRAD_SLAB_FOLD,
+        "direct_wgrad_helper",
+        _WGRAD_REDUCE_CAPS,
+        {"out": out, "slices": slices},
+        dtype,
+    )
+
+
 def _split_reduce_job(
     arch: str, wave_size: int, split_c: int, dtype: str = DIRECT_DTYPE
 ) -> BuildJob:
@@ -3166,6 +3405,10 @@ def probe_problem(
             stride=caps.stride,
             dtype=dtype,
         )
+    if variant == "direct_wgrad_tiled" and (knobs or {}).get("gpack"):
+        # One group per wave, the group as wide as the wave tile.
+        w = 16 * knobs["wave_k16"]
+        return replace(probe_problem(caps, dtype, None, None), groups=32, cpg=w, kpg=w)
     if variant == "direct_wgrad_dw_cols":
         # The binary bakes C (knob ``channels``): one group per channel.
         return DirectConvProblem(
@@ -3190,6 +3433,21 @@ def probe_problem(
             groups=256,
             cpg=1,
             kpg=1,
+            KH=caps.KH,
+            KW=caps.KW,
+            PAD=caps.PAD,
+            stride=caps.stride,
+            dtype=dtype,
+        )
+    if variant == "direct_wgrad_gather" and (knobs or {}).get("grouped"):
+        # Grouped, cpg == kpg baked, groups runtime: 32 groups.
+        return DirectConvProblem(
+            N=1,
+            H=64,
+            W=64,
+            groups=32,
+            cpg=caps.cpg,
+            kpg=caps.cpg,
             KH=caps.KH,
             KW=caps.KW,
             PAD=caps.PAD,
@@ -3422,6 +3680,8 @@ def _caps_jobs(
     knob_probe = rtc_dgrad or variant in (
         "direct_wgrad_dw_cols",
         "direct_wgrad_dw_mfma",
+        "direct_wgrad_tiled",
+        "direct_wgrad_gather",
     )
     probe = None if knob_probe else probe_problem(caps, dtype, variant)
     for knobs in _knob_grid(variant, arch, dtype, caps):
@@ -3506,6 +3766,10 @@ def _caps_jobs(
                         helper_knobs,
                     )
                 )
+        if variant == "direct_wgrad_tiled" and knobs.get("slab"):
+            for sl in WGRAD_SLAB_FOLD_SLICES:
+                fid = wgrad_slab_fold_identity(arch, wave_size, dtype, sl, dtype)
+                cell.append(_job(fid, _WGRAD_REDUCE_CAPS, json.loads(fid.knobs)))
         if variant in _WGRAD_TWO_STAGE and direct_wgrad_replicas(spec) > 1:
             reduce_id = wgrad_reduce_identity(
                 arch, wave_size, direct_wgrad_replicas(spec), dtype
@@ -3622,6 +3886,26 @@ def direct_job_for_identity(identity: KernelIdentity) -> BuildJob:
                 f"the direct grid cannot build this identity: {identity.label()}"
             )
         return _job(identity, _NO_CAPS, {"split_c": split_c})
+    if (
+        identity.direction == "direct_wgrad_helper"
+        and identity.algorithm == _WGRAD_SLAB_FOLD
+    ):
+        out, slices = knobs.get("out"), knobs.get("slices")
+        rebuilt = (
+            wgrad_slab_fold_identity(
+                identity.arch, identity.wave_size, out, slices, identity.dtype_a
+            )
+            if isinstance(slices, int) and out in DIRECT_DTYPES
+            else None
+        )
+        if (
+            rebuilt is None
+            or replace(rebuilt, llvm_flavor=identity.llvm_flavor) != identity
+        ):
+            raise LookupError(
+                f"the direct grid cannot build this identity: {identity.label()}"
+            )
+        return _job(identity, _WGRAD_REDUCE_CAPS, knobs)
     if identity.direction in ("direct_dgrad_helper", "direct_wgrad_helper"):
         rebuilt = _helper_identity(
             identity.arch,
