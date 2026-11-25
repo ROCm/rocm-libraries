@@ -429,8 +429,10 @@ TEST_F(XFloat32Test, StdFunctions)
 }
 
 // Test Case: type traits of rocwmma_xfloat32
-// rocWMMA classifies xfloat32 through its own traits and must not specialize
-// the std:: type traits ([meta.rqmts]/4), which the MSVC STL rejects.
+// rocWMMA classifies xfloat32 through its own traits in every mode. The std::
+// traits report it as arithmetic, floating point and signed only while the
+// deprecated legacy specializations are enabled, which a rejecting STL (for
+// example, the current MSVC STL) forbids ([meta.rqmts]/4).
 TEST_F(XFloat32Test, TypeTraits)
 {
     EXPECT_TRUE(rocwmma::is_arithmetic<rocwmma_xfloat32>::value);
@@ -440,9 +442,13 @@ TEST_F(XFloat32Test, TypeTraits)
     EXPECT_TRUE(rocwmma::is_floating_point_v<rocwmma_xfloat32>);
     EXPECT_TRUE(rocwmma::is_signed_v<rocwmma_xfloat32>);
 
-    EXPECT_FALSE(std::is_arithmetic<rocwmma_xfloat32>::value);
-    EXPECT_FALSE(std::is_floating_point<rocwmma_xfloat32>::value);
-    EXPECT_FALSE(std::is_signed<rocwmma_xfloat32>::value);
+    constexpr bool legacy = ROCWMMA_LEGACY_STD_TRAIT_SPECIALIZATIONS;
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+    EXPECT_EQ(std::is_arithmetic<rocwmma_xfloat32>::value, legacy);
+    EXPECT_EQ(std::is_floating_point<rocwmma_xfloat32>::value, legacy);
+    EXPECT_EQ(std::is_signed<rocwmma_xfloat32>::value, legacy);
+#pragma clang diagnostic pop
 }
 
 // Test Case: std::numeric_limits<rocwmma_xfloat32>

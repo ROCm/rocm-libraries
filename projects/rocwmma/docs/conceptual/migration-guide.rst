@@ -5,13 +5,13 @@
 
 .. _migration-guide:
 
-==========================
+===========================
 Migration guide for rocWMMA
-==========================
+===========================
 
--------------------------------------------
+--------------------------------------------
 Type-trait migration starting in rocWMMA 3.0
--------------------------------------------
+--------------------------------------------
 
 Use ``rocwmma::is_arithmetic``, ``rocwmma::is_floating_point``, and
 ``rocwmma::is_signed`` when classifying rocWMMA numeric types. Their ``_v``
@@ -103,7 +103,7 @@ generic template definitions and overload selection across translation units.
 These switches do not change HIPRTC's existing owned-trait implementation.
 
 Deprecation diagnostics
-^^^^^^^^^^^^^^^^^^^^^^
+^^^^^^^^^^^^^^^^^^^^^^^
 
 Legacy class specializations carry ``[[deprecated]]`` attributes. Merely
 including rocWMMA or using its owned traits does not emit a migration warning.
