@@ -235,6 +235,56 @@ struct heuristic_defaults_t {
 };
 
 /**
+ * @brief W4A16 (int4 A dequantized to a bf16/fp16 MI type) on gfx1150 and gfx1151: constants of
+ *        the Stream-K launch grid, fit on hipBLASLt kernel times.
+ *
+ * The two architectures run the same kernels on the same ISA, so every constant that describes
+ * the kernels is the same on both.  What differs is read from hardware_t (CUs, SIMDs per CU,
+ * MALL).
+ */
+struct w4a16_params_t {
+  // Legend: the tag at the end of each constant says how its value was obtained.
+  //   [EMPIRICAL] chosen by sweeping it against measured hipBLASLt kernel times;
+  //   [KERNEL]    a property of the kernels of the set, not fitted;
+  //   [DEFAULT]   a fallback for a config that does not carry the value, not fitted.
+
+  // --- Stream-K grid (grid_k_split_aware_w4a16) ---
+  // Waves of a workgroup when the config does not carry its wave layout.
+  static constexpr int DEFAULT_WAVES_PER_WORKGROUP = 4;  // [DEFAULT]
+  // Workgroups with this many waves fill a CU (rules 1 and 4).
+  static constexpr int FULL_CU_WAVES = 16;  // [KERNEL]
+  // Rule 2: K iterations up to which a tile per CU or less stays DP, and up to which it does
+  // when the tiles are more than half the CUs (each workgroup then gets over half a tile).
+  static constexpr size_t SK_SPLIT_MIN_K_ITERS           = 8;  // [EMPIRICAL]
+  static constexpr size_t SK_SPLIT_MIN_K_ITERS_OVER_HALF = 64;  // [EMPIRICAL]
+  // Rules 4 and 6: with a MALL to hold the partials, tiles are shared below this many tiles
+  // per CU (a single row of token tiles up to it).
+  static constexpr size_t SHARED_MAX_TILES_PER_CU = 5;  // [EMPIRICAL]
+  // Above the shared range (or without a MALL): DP for K up to this many iterations.
+  static constexpr size_t MANY_TILES_DP_MAX_K_ITERS = 16;  // [EMPIRICAL]
+  // Rule 4: largest ceil(t) / t that still runs DP: full-CU workgroups, 4-wave (non-token)
+  // ones, and the rest.
+  static constexpr double DP_MAX_WAVE_ROUNDING_FULL_CU = 1.5;  // [EMPIRICAL]
+  static constexpr double DP_MAX_WAVE_ROUNDING_4_WAVES = 1.15;  // [EMPIRICAL]
+  static constexpr double DP_MAX_WAVE_ROUNDING         = 1.06;  // [EMPIRICAL]
+  // Rule 5: token tiles (MT_N at most this) get one workgroup per SIMD of the CU.
+  static constexpr size_t TOKEN_TILE_MAX_N = 48;  // [EMPIRICAL]
+};
+
+/// Whether the W4A16 Stream-K grid rule applies to @p problem on @p hardware.
+inline bool is_w4a16(const problem_t& problem, const hardware_t& hardware) {
+  if (problem.a_dtype != data_type_t::Int4) return false;
+  if (problem.mi_dtype != data_type_t::BFloat16 && problem.mi_dtype != data_type_t::Half) return false;
+  switch (hardware.arch) {
+    case hardware_t::architecture_t::gfx1150:
+    case hardware_t::architecture_t::gfx1151:
+      return true;
+    default:
+      return false;
+  }
+}
+
+/**
  * @brief StreamK=5 hybrid-mode (SK3 static vs SK4 dynamic) selection thresholds.
  *
  * Fit to measured SK5 on(SK4)/off(SK3) sweeps on MI350X (gfx950); see

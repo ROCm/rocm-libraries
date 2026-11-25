@@ -141,6 +141,21 @@ the device, with the kernel asserted as the default pick on its architecture.
 `AddCustomConfig` copies the key from the kernel's `CustomKernel` entry in the
 test YAML.
 
+## Occupancy
+
+A custom kernel skips code generation, so nothing derives its `CUOccupancy`
+(workgroups per CU or WGP), which Origami uses to rank the kernels of a
+Prediction library. A logic entry that uses a custom kernel can declare it:
+a positive `CUOccupancy` there is kept on any architecture. Without one, gfx9
+kernels get it computed from the resources their `.s` declares, and other
+kernels keep `-1`, which the host treats as 1. The gfx1151 and gfx1150 W4A16
+kernels declare the workgroups per WGP that the resources of their `.s` allow
+on that architecture (VGPR file of the SIMD, LDS pool, waves per SIMD; gfx1150
+has a smaller VGPR file than gfx1151, so the same kernel has a lower occupancy
+there). The decode kernels are one-wave workgroups: a WGP holds four SIMDs'
+worth of them, and what caps them at 32 is the LDS they request. Every logic
+entry of a kernel must declare the same value.
+
 ## Adding a new external kernel
 
 The `tensilelite.AddCustomConfig` helper extracts the Tensile-side interface from

@@ -2216,6 +2216,20 @@ class Solution(collections.abc.Mapping):
     return divisorName
 
   @staticmethod
+  def _declaredCustomKernelOccupancy(state: dict) -> int:
+    """The CUOccupancy a custom kernel's logic entry declares, else -1.
+
+    Custom kernels skip code generation, so their occupancy comes from the logic
+    file (or, for gfx9, from the resources of their .s; see
+    KernelWriterAssembly.getSourceFileString). Generated kernels always derive
+    theirs: -1 here, set by the kernel writer.
+    """
+    occ = state.get("CUOccupancy", -1)
+    if isCustomKernelConfig(state) and isinstance(occ, int) and not isinstance(occ, bool) and occ > 0:
+      return occ
+    return -1
+
+  @staticmethod
   def _assignCustomKernelParameters(state: dict) -> None:
     """Minimal parameter setup for handwritten custom kernels.
 
@@ -2294,7 +2308,7 @@ class Solution(collections.abc.Mapping):
       state["_GlobalAccumulation"] = 'MultipleBuffer'
     elif state.get("GlobalSplitUAlgorithm", "") == 'MultipleBufferSingleKernel':
       state["_GlobalAccumulation"] = 'MultipleBufferSingleKernel'
-    state["CUOccupancy"]            = -1
+    state["CUOccupancy"]            = Solution._declaredCustomKernelOccupancy(state)
     state["MathClocksUnrolledLoop"] = 0
     state["PackedC0IndicesX"] = []
     state["ThreadTile0"] = 0
@@ -2571,7 +2585,7 @@ class Solution(collections.abc.Mapping):
 
 
     # initial info to be exported for solution prediction
-    state["CUOccupancy"]            = -1
+    state["CUOccupancy"]            = Solution._declaredCustomKernelOccupancy(state)
     state["MathClocksUnrolledLoop"] = 0
 
     # Pin PrefetchGlobalReadA/B before later rules read the scalar loop depth.
