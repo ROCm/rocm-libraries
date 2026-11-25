@@ -1305,26 +1305,6 @@ int main(int argc, const char* argv[])
             *static_cast<uint64_t*>(word) = 0;
             joinCounters.emplace_back(word, [](void* q) { static_cast<void>(hipHostFree(q)); });
         }
-    // The batch of each device: write its own counter, then wait for every other device's. Built
-    // once; a launch only fills in the launch number. A split run uses all the devices.
-    std::vector<std::vector<hipStreamBatchMemOpParams>> joinOps(joinCounters.size());
-    for(size_t d = 0; d < joinCounters.size(); d++)
-    {
-        auto& ops = joinOps[d];
-        ops.resize(joinCounters.size());
-        ops[0].writeValue.operation = hipStreamMemOpWriteValue64;
-        ops[0].writeValue.address   = joinCounters[d].get();
-        size_t k                    = 1;
-        for(size_t other = 0; other < joinCounters.size(); other++)
-        {
-            if(other == d)
-                continue;
-            ops[k].waitValue.operation = hipStreamMemOpWaitValue64;
-            ops[k].waitValue.address   = joinCounters[other].get();
-            ops[k].waitValue.flags     = hipStreamWaitValueGte;
-            k++;
-        }
-    }
     auto attachFullOutput = [&](ContractionProblem* problem, size_t firstSlot, size_t endSlot) {
         if(problemFactory.numSlices() < 2)
             return;
@@ -1375,6 +1355,7 @@ int main(int argc, const char* argv[])
                 static_cast<void>(hipSetDevice(previous));
             };
             auto&        slots = fullOutputs[d];
+            const bool   clears = slots.size() < endSlot && !(d > 0 && shared(3));
             while(slots.size() < endSlot && !(d > 0 && shared(3)))
             {
                 void* p = nullptr;
@@ -1382,6 +1363,11 @@ int main(int argc, const char* argv[])
                 HIP_CHECK_EXC(hipMemset(p, 0, bytes));
                 slots.emplace_back(p, freeOnDevice);
             }
+            // Only this device's streams are ordered after the clear, and another device writes
+            // into this D (a shared D, or the peer D of OutputPeerD): the clear must be done before
+            // any launch, or it can land on top of that device's results.
+            if(clears)
+                HIP_CHECK_EXC(hipDeviceSynchronize());
             // D keeps the full strides in every slice, so its batches sit at the same distance
             // from the slice's start on every device.
             std::vector<size_t> batchOffsets;
@@ -1807,21 +1793,26 @@ int main(int argc, const char* argv[])
                                     // Join the devices: the next launch starts on every device
                                     // only when this one has finished on all of them, as
                                     // successive launches of an unsplit problem do on one stream.
-                                    // One batch per stream; its write comes first, so no stream
-                                    // can block another.
+                                    // Each stream writes its own counter before it waits for the
+                                    // others, so no stream can block another. Not one
+                                    // hipStreamBatchMemOp: that API is beta, and ROCm 7.2 refuses
+                                    // every batch with hipErrorInvalidValue.
                                     if(!joinSplit || active.size() < 2)
                                         return;
                                     ++joinLaunch;
                                     for(size_t d = 0; d < active.size(); d++)
                                     {
-                                        auto& ops                 = joinOps[d];
-                                        ops[0].writeValue.value64 = joinLaunch;
-                                        for(size_t k = 1; k < active.size(); k++)
-                                            ops[k].waitValue.value64 = joinLaunch;
-                                        HIP_CHECK_EXC(hipStreamBatchMemOp(active[d]->stream,
-                                                                          unsigned(active.size()),
-                                                                          ops.data(),
-                                                                          0));
+                                        auto& stream = active[d]->stream;
+                                        HIP_CHECK_EXC(hipStreamWriteValue64(
+                                            stream, joinCounters[d].get(), joinLaunch, 0));
+                                        for(size_t other = 0; other < active.size(); other++)
+                                            if(other != d)
+                                                HIP_CHECK_EXC(
+                                                    hipStreamWaitValue64(stream,
+                                                                         joinCounters[other].get(),
+                                                                         joinLaunch,
+                                                                         hipStreamWaitValueGte,
+                                                                         ~uint64_t(0)));
                                     }
                                 };
 
