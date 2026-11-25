@@ -55,7 +55,7 @@ def test_python_refuses_a_3d_problem():
 
 
 def test_the_cpp_entry_refuses_a_3d_problem_like_python():
-    engine = import_or_skip_until("rocke_library_engine", BINDING_LANE)
+    engine = import_or_skip_until("rocke_library_engine", BUILD_VARIANT)
     with pytest.raises(RuntimeError) as refusal:
         engine.img2col_lower_llvm(img2col_spec_to_dict(_THREE_D), arch="gfx950")
     assert _THREE_D_REASON in str(refusal.value)
