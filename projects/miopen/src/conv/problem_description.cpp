@@ -364,8 +364,12 @@ void ProblemDescription::SetupFloats(ExecutionContext& ctx) const
 {
     if(IsFp32() || IsFp16() || IsBfp16() || IsInt8() || IsFp8() || IsBfp8())
     {
-        ctx.general_compile_options +=
+        // Callers may run this more than once on the same context (the find-db hit path does).
+        // Appending the same defines again changes the build options and so the kernel cache key.
+        const auto params =
             GetDataTypeKernelParams(GetInDataType(), ctx.GetStream().GetDeviceName());
+        if(ctx.general_compile_options.find(params) == std::string::npos)
+            ctx.general_compile_options += params;
         return;
     }
 
