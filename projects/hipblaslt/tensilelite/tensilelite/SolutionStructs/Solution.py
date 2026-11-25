@@ -2952,8 +2952,6 @@ class Solution(collections.abc.Mapping):
           reject(state, printRejectionReason, "PrefetchAcrossPersistent NLL path not supported with sparse")
         if state["StoreRemapVectorWidth"]:
           reject(state, printRejectionReason, "PrefetchAcrossPersistent NLL path not supported with StoreRemap")
-        if state["LocalSplitU"] > 1:
-          reject(state, printRejectionReason, "PrefetchAcrossPersistent not supported with LocalSplitU epilogue LDS overwrite")
       if state["DebugPersistentKernelLoopForever"] and not hasStaticAssignment(state):
         # Mode 4 exits via KernelEnd in graWorkGroup, so the flag would no-op.
         reject(state, printRejectionReason,
@@ -7434,6 +7432,7 @@ class Solution(collections.abc.Mapping):
     # if User want to control the LDS usage, we may open this para in the future
     ldsNumBytesReduction = state["LocalSplitU"] * state["MacroTile0"] * state["MacroTile1"] * int(state["ProblemType"]["ComputeDataType"].numBytes()) if state["LocalSplitU"] > 1 else 0
     state["LocalSplitUReuseLDS"] = 1
+    state["LdsOffsetLSU"] = 0
     if ldsNumBytesReduction > state["MaxLDS"]:
       state["LocalSplitUReuseLDS"] = math.ceil(ldsNumBytesReduction / state["MaxLDS"])
       # reserve all the LDS to LSU.
@@ -7536,6 +7535,17 @@ class Solution(collections.abc.Mapping):
 
     # lds size is the greater of the two
     ldsNumBytes = max(ldsNumBytesAB, ldsNumBytesReduction, ldsNumBytesOccupancy)
+    # With PAP the next tile's prefetched A/B banks are live while the epilogue
+    # runs, so the LocalSplitU reduction scratch, which otherwise starts at LDS 0,
+    # is placed after every compute bank instead of overlapping them.
+    if state["PrefetchAcrossPersistent"] and state["LocalSplitU"] > 1:
+      if state["LocalSplitUReuseLDS"] > 1:
+        reject(state, printRejectionReason,
+               "PrefetchAcrossPersistent with LocalSplitU needs the whole reduction in LDS (LocalSplitUReuseLDS=%u)"
+               % state["LocalSplitUReuseLDS"])
+        return
+      state["LdsOffsetLSU"] = int(math.ceil(ldsNumBytesAB / 16) * 16)
+      ldsNumBytes = max(state["LdsOffsetLSU"] + ldsNumBytesReduction, ldsNumBytesOccupancy)
 
     if state["NumElementsPerBatchStore"] == -1:
       if ldsNumBytes > 32768 or \

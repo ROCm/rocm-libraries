@@ -2349,18 +2349,141 @@ def test_pap_epilogue_lds_overwrite_rejected(_gp_gfx1250, gfx1250_iim, assembler
     assert reason + " epilogue LDS overwrite" in out
 
 
-@pytest.mark.parametrize("wave_group, waves", [([1, 1], 2), ([2, 2], 8)])
-def test_pap_epilogue_local_split_u_rejected(_gp_gfx1250, gfx1250_iim, assembler, capsys,
-                                           wave_group, waves):
-    params = _make_params(gfx1250_iim, mi=_MI_W4[:-2] + wave_group,
-                          PrefetchAcrossPersistent=1)
-    params["LocalSplitU"] = 2
-    params["WorkGroup"][2] = 2
-    sol = Solution(params, False, True, False, assembler, gfx1250_iim)
-    out = capsys.readouterr().out
+def _lsu_params(gfx1250_iim, lsu, **overrides):
+    params = _make_params(gfx1250_iim, **overrides)
+    params["LocalSplitU"] = lsu
+    params["WorkGroup"] = params["WorkGroup"][:2] + [lsu]
+    return params
+
+
+def _lsu_derive(gfx1250_iim, assembler, capsys, lsu, **overrides):
+    sol = Solution(_lsu_params(gfx1250_iim, lsu, **overrides), False, True, False,
+                   assembler, gfx1250_iim)
+    return sol, capsys.readouterr().out
+
+
+def _lsu_scratch_model(compute_end, sol):
+    """Reference model: [start, end) of the PAP LocalSplitU reduction scratch.
+
+    The prefetched next-tile banks span [0, compute_end); the reduction holds
+    LocalSplitU partial MT0 x MT1 tiles of the compute type after them.
+    """
+    start = (compute_end + 15) // 16 * 16
+    size = (sol["LocalSplitU"] * sol["MacroTile0"] * sol["MacroTile1"]
+            * int(sol["ProblemType"]["ComputeDataType"].numBytes()))
+    return start, start + size
+
+
+_LSU_CASES = [
+    pytest.param(dict(mi=_MI_W4[:-2] + [2, 2]), {}, id="mxf8f4-wg2x2"),
+    pytest.param(dict(mi=[16, 16, 32, 1, 1, 2, 2, 2, 2], DepthU=128, SuppressNoLoadLoop=False),
+                 dict(_BF16_VECTOR_EPILOGUE, UseBias=1, UseScaleAlphaVec=1), id="bf16-bias-sav"),
+]
+
+
+@pytest.mark.parametrize("common, pt", _LSU_CASES)
+def test_pap_local_split_u_scratch_follows_compute_banks(_gp_gfx1250, gfx1250_iim, assembler,
+                                                         capsys, common, pt):
+    """PAP keeps the next tile's banks live through the epilogue, so the LSU
+    reduction is placed after them, and vector scratch after the reduction."""
+    compute_pt = {k: v for k, v in pt.items() if k not in ("UseBias", "UseScaleAlphaVec")}
+    ref, out = _lsu_derive(gfx1250_iim, assembler, capsys, 1, PrefetchAcrossPersistent=1,
+                           ProblemType=compute_pt, **common)
+    assert ref.get("Valid"), out
+    sol, out = _lsu_derive(gfx1250_iim, assembler, capsys, 2, PrefetchAcrossPersistent=1,
+                           ProblemType=pt, **common)
+    assert sol.get("Valid"), out
+    assert "epilogue LDS overwrite" not in out
+    # Without LSU or vector scratch, a PAP kernel occupies exactly its compute banks.
+    start, end = _lsu_scratch_model(ref["LdsNumBytes"], sol)
+    assert sol["LdsOffsetLSU"] == start
+    if pt:
+        assert sol["_SeparateEpilogueLds"]
+        assert sol["LdsOffsetBias"] == (end + 15) // 16 * 16
+        assert sol["LdsNumBytes"] > sol["LdsOffsetBias"]
+    else:
+        assert sol["LdsNumBytes"] == end
+    assert sol["LdsNumBytes"] <= sol["MaxLDS"]
+
+
+def test_pap_local_split_u_rejects_reduction_that_cannot_fit(_gp_gfx1250, gfx1250_iim, assembler,
+                                                             capsys):
+    """A reduction chunked over LDS (LocalSplitUReuseLDS > 1) would have to
+    reuse the live banks, so it is refused with a printed reason."""
+    sol, out = _lsu_derive(gfx1250_iim, assembler, capsys, 2, PrefetchAcrossPersistent=1,
+                           mi=_BF16_VECTOR_MI, DepthU=128, SuppressNoLoadLoop=False,
+                           ProblemType=_BF16_VECTOR_EPILOGUE)
     assert not sol.get("Valid")
-    assert sol["NumWaves"] == waves
-    assert "LocalSplitU epilogue LDS overwrite" in out
+    assert "LocalSplitU needs the whole reduction in LDS" in out
+
+
+def test_local_split_u_scratch_unchanged_without_pap(_gp_gfx1250, gfx1250_iim, assembler, capsys):
+    sol, out = _lsu_derive(gfx1250_iim, assembler, capsys, 2, PrefetchAcrossPersistent=0)
+    assert sol.get("Valid"), out
+    assert sol["LdsOffsetLSU"] == 0
+
+
+def _emit_solution_asm(sol, assembler):
+    """Assembly text for an already derived solution. CPU-only."""
+    import shutil
+    import rocisa
+    from tensilelite.Common.Types import DebugConfig
+    from tensilelite.KernelWriterAssembly import KernelWriterAssembly
+    from tensilelite.SolutionStructs.Naming import getKernelFileBase
+    from tensilelite.create_library.run import (generateKernelObjectsFromSolutions,
+                                                  processKernelSource)
+    from rocisa_test_state import preserve_rocisa_kernel_state
+
+    with preserve_rocisa_kernel_state():
+        kwa = KernelWriterAssembly(assembler, DebugConfig())
+        pieces = []
+        for kernel in generateKernelObjectsFromSolutions([sol]):
+            ri = rocisa.rocIsa.getInstance()
+            ri.init(tuple(kernel["ISA"]), shutil.which("amdclang++") or "/usr/bin/amdclang++")
+            ri.setKernel(tuple(kernel["ISA"]), kernel["WavefrontSize"])
+            kernel.duplicate = False
+            kernel["BaseName"] = getKernelFileBase(False, kernel)
+            src = processKernelSource(kwa, ri.getData(), ri.getOutputOptions(), False, kernel).src
+            if isinstance(src, (bytes, bytearray)):
+                src = src.decode(errors="replace")
+            pieces.append(src or "")
+    return "\n".join(pieces)
+
+
+def _section(asm, begin, end):
+    lo = asm.index(begin)
+    return asm[lo:asm.index(end, lo)]
+
+
+@pytest.mark.parametrize("pap", [0, 1])
+def test_pap_local_split_u_reduction_addresses_skip_compute_banks(
+        _gp_gfx1250, gfx1250_iim, assembler, capsys, pap):
+    """With PAP every LSU ds_store/ds_load is based at LdsOffsetLSU; without
+    PAP no base add is emitted (the reduction still starts at LDS 0)."""
+    sol, out = _lsu_derive(gfx1250_iim, assembler, capsys, 2, PrefetchAcrossPersistent=pap)
+    assert sol.get("Valid"), out
+    asm = _emit_solution_asm(sol, assembler)
+    offset = sol["LdsOffsetLSU"]
+    assert (offset > 0) == bool(pap)
+    write = _section(asm, "LocalSplitU: local write 1/1", "LocalSplitU: local read 1/1")
+    read = _section(asm, "LocalSplitU: local read 1/1", "LocalSplitU: global write indices")
+    size = 2 * sol["MacroTile0"] * sol["MacroTile1"] * 4
+    for section, op in ((write, "ds_store"), (read, "ds_load")):
+        first = section.index(op)
+        bases = re.findall(r"v_add_nc_u32 v(\d+), (0x[0-9a-f]+), v\1\s+// addr \+= LdsOffsetLSU",
+                           section[:first])
+        accesses = re.findall(r"^%s_b(?:32|64|128) .*$" % op, section, re.M)
+        assert accesses
+        if pap:
+            assert len(bases) == 1 and int(bases[0][1], 16) == offset, section[:first]
+            # Every reduction access uses the rebased address register.
+            assert all(re.search(r"\bv%s\b" % bases[0][0], a) for a in accesses), accesses
+        else:
+            assert not bases
+        # Immediates stay inside the scratch the solution reserved.
+        imms = [int(m) for a in accesses for m in re.findall(r"offset:(\d+)", a)]
+        assert max(imms, default=0) < size
+    assert offset + size <= sol["LdsNumBytes"]
 
 
 @pytest.mark.parametrize("problem", [
