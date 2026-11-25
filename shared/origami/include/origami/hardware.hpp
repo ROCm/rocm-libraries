@@ -360,6 +360,9 @@ class ORIGAMI_EXPORT hardware_t {
       case architecture_t::gfx1201:
         return {5.74, 1.21875121875121875122 * 2.41, 0.464, 2, std::make_tuple(0, 0.17, 0), 1.5, 2, 64 * 1024};
       case architecture_t::gfx1170:
+        // gfx1170: measured on gfx1170 hardware: L2 and DRAM read bandwidth (TB/s), per-WG
+        // bandwidth ramp, 32 KiB L1 per CU; no MALL.
+        return {1.5696, NO_MALL_AVAILABLE, 0.140156, 2, std::make_tuple(0, 0.26025, 0), 1.5, 2, 32 * 1024};
       case architecture_t::gfx1171: {
         // TODO: Double-check gfx117x constants when measured values are available.
         auto c            = get_arch_constants(architecture_t::gfx1201);

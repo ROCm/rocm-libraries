@@ -1968,6 +1968,49 @@ TEST_CASE("gfx950 pci_chip_id id75a0 vs id75a8", "[hardware]") {
   REQUIRE(hw_v2.pci_chip_id.value() == 0x75a8);
 }
 
+TEST_CASE("gfx1170 architecture constants are measured values", "[hardware]") {
+  using origami::hardware_t;
+  const auto c      = hardware_t::get_arch_constants(hardware_t::architecture_t::gfx1170);
+  const auto c1201  = hardware_t::get_arch_constants(hardware_t::architecture_t::gfx1201);
+  const auto c1171  = hardware_t::get_arch_constants(hardware_t::architecture_t::gfx1171);
+
+  // gfx1170: measured L2 and DRAM read bandwidth, per-WG bandwidth ramp, no MALL, 32 KiB L1.
+  REQUIRE(c.mem1_perf_ratio == 1.5696);
+  REQUIRE(c.mem2_perf_ratio == hardware_t::NO_MALL_AVAILABLE);
+  REQUIRE(c.mem3_perf_ratio == 0.140156);
+  REQUIRE(c.parallel_mi_cu == 2);
+  REQUIRE(c.mem_bw_per_wg_coefficients == std::make_tuple(0.0, 0.26025, 0.0));
+  REQUIRE(c.mem_clock_ratio == 1.5);
+  REQUIRE(c.simds_per_cu == 2);
+  REQUIRE(c.l1_capacity == 32 * 1024);
+  REQUIRE(c.mem1_perf_ratio != c1201.mem1_perf_ratio);
+  REQUIRE(c.mem3_perf_ratio != c1201.mem3_perf_ratio);
+
+  // gfx1171 keeps the gfx1201 values, without a MALL.
+  REQUIRE(c1171.mem1_perf_ratio == c1201.mem1_perf_ratio);
+  REQUIRE(c1171.mem1_perf_ratio == 5.74);
+  REQUIRE(c1171.mem3_perf_ratio == c1201.mem3_perf_ratio);
+  REQUIRE(c1171.mem3_perf_ratio == 0.464);
+  REQUIRE(c1171.mem2_perf_ratio == hardware_t::NO_MALL_AVAILABLE);
+  REQUIRE(c1171.parallel_mi_cu == c1201.parallel_mi_cu);
+  REQUIRE(c1171.mem_bw_per_wg_coefficients == c1201.mem_bw_per_wg_coefficients);
+  REQUIRE(c1171.mem_clock_ratio == c1201.mem_clock_ratio);
+  REQUIRE(c1171.simds_per_cu == c1201.simds_per_cu);
+  REQUIRE(c1171.l1_capacity == c1201.l1_capacity);
+
+  // The hardware object scales the gfx1170 bandwidths by the clock.
+  const auto hw = hardware_t::get_hardware_for_arch(hardware_t::architecture_t::gfx1170,
+                                                    8,                 // N_CU
+                                                    64 * 1024,         // lds_capacity
+                                                    512 * 1024,        // rf_capacity
+                                                    1 * 1024 * 1024,   // L2_capacity
+                                                    3'193'000);        // compute_clock_khz
+  REQUIRE(hw.NUM_XCD == 1);
+  REQUIRE(hw.parallel_mi_cu == 2);
+  REQUIRE(hw.l1_capacity == 32 * 1024);
+  REQUIRE(hw.mem1_perf_ratio * hw.compute_clock_ghz == Catch::Approx(1569.6));
+}
+
 TEST_CASE("gfx1250 WGP count selects the 6-XCD part", "[hardware]") {
   using origami::hardware_t;
   const auto arch = hardware_t::architecture_t::gfx1250;
