@@ -1599,7 +1599,9 @@ class PersistentLoop(Component):
                        and writer.papTdmSupportsIncrementalUpdate(kernel))
         # Multicast: release this workgroup's bank before the scalar setup so
         # peers' arrivals overlap it; only the cluster wait gates the issue.
-        if lateHandoff and persistentSpatialCluster(kernel) and not isStreamKSpatialCluster(kernel):
+        # A StreamK cluster may then find an empty next slice and skip the
+        # issue; prefetchClassicLoads completes the phase on that path too.
+        if lateHandoff and persistentSpatialCluster(kernel):
             module.add(assignment.persistentClusterPrefetchRelease(writer, kernel))
             handoff = lambda: assignment.persistentClusterPrefetchAcquire(writer, kernel)
         if not lateHandoff:
@@ -1871,7 +1873,16 @@ class PersistentLoop(Component):
         if emptyNext is not None:
             if saveBank:
                 module.add(writer.papTdmSaveLdsBank(kernel))
-            module.add(emptyNext)
+            if beforeIssue is not None and persistentSpatialCluster(kernel):
+                # The cluster release already signalled before the setup.
+                # Wait on the empty path too so every arrive has its wait.
+                done = Label(writer.labels.getNameInc("PapEmptyNextSliceDone"), "")
+                module.add(SBranch(labelName=done.getLabelName()))
+                module.add(emptyNext)
+                module.add(beforeIssue())
+                module.add(done)
+            else:
+                module.add(emptyNext)
         if snapshotLoopCounter:
             module.add(VReadfirstlaneB32(dst=sgpr(loopCounterName), src=vgpr(previous), comment="restore LoopCounter after PAP"))
             module.add(VReadfirstlaneB32(dst=sgpr("OrigLoopCounter"), src=vgpr(previous + 1), comment="restore OrigLoopCounter after PAP"))
