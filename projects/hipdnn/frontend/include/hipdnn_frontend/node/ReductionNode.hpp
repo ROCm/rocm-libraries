@@ -3,6 +3,7 @@
 #pragma once
 
 #include "Node.hpp"
+#include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
 #include <hipdnn_frontend/Error.hpp>
 #include <hipdnn_frontend/attributes/GraphAttributes.hpp>
 #include <hipdnn_frontend/attributes/ReductionAttributes.hpp>
@@ -88,6 +89,29 @@ public:
     Error infer_properties_node() override
     {
         HIPDNN_CHECK_ERROR(attributes.fill_from_context(graph_attributes));
+
+        auto y = attributes.get_y();
+        if(!y)
+        {
+            return {ErrorCode::ATTRIBUTE_NOT_SET,
+                    "ReductionNode missing output Y for setting properties"};
+        }
+
+        // Y's dims are not inferred from X: a reduction must reduce at least one dimension.
+        HIPDNN_RETURN_IF_TRUE(y->get_dim().empty(),
+                              ErrorCode::INVALID_VALUE,
+                              "ReductionNode " + attributes.get_name() + ": output Y '"
+                                  + y->get_name()
+                                  + "' dims must be set because a reduction must reduce at "
+                                    "least one dimension");
+
+        if(y->get_stride().empty())
+        {
+            const auto& yDims = y->get_dim();
+            y->set_stride(hipdnn_data_sdk::utilities::generateStrides(
+                yDims, hipdnn_data_sdk::utilities::strideOrderNhwc(yDims.size())));
+        }
+
         return {};
     }
 

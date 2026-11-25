@@ -54,7 +54,7 @@ This table lists all operations supported in hipDNN:
    * - Batchnorm Training
      - ``FP16``, ``BFP16``, ``FP32``
      - NCL, NLC, NCHW, NHWC, NCDHW, NDHWC
-     - Spatial mode only¹, no running stats⁴
+     - Spatial mode only¹, optional running stats⁴
    * - Batchnorm Training + Activation
      - ``FP16``, ``BFP16``, ``FP32``
      - NCL, NLC, NCHW, NHWC, NCDHW, NDHWC
@@ -153,7 +153,7 @@ Operation notes
   - **Batchnorm Training + Activation**: Combines batchnorm training with forward activation.
   - **Convolution Forward + (Bias) + Activation**: Combines convolution forward, optional bias addition, and forward activation.
 
-- ⁴ **Batchnorm Training Running Statistics**: Batchnorm training only supports computing batch statistics (mean and inverse variance) without updating running statistics.
+- ⁴ **Batchnorm Training Running Statistics**: Batchnorm training can update running statistics. Supply the previous running mean and variance (read-only inputs), the momentum and the next running mean and variance (write-only outputs). All five must be present together; hipDNN rejects a partial set of running statistics, or running statistics without the momentum, when the graph is built. A momentum given without the running statistics is ignored, as in cuDNN. Training that updates running statistics also requires the saved mean and inverse variance as non-virtual outputs, and so does Batchnorm Training + Activation. Training without running statistics or a fused activation can leave both saved statistics virtual, and then they are not computed, or make both non-virtual outputs; the plugin declines a graph that outputs only one of them.
 - ⁶ **Convolution Backward Output Dimensions**: Convolution Dgrad requires explicit ``dx`` dimensions matching the original forward input tensor. Convolution Wgrad requires explicit ``dw`` dimensions matching the original forward weights tensor. These dimensions aren't inferred from ``dy`` and the other convolution tensors because floor division in the forward spatial formula can make multiple input or kernel shapes map to the same output-gradient shape. Output strides may still be inferred once explicit dimensions are present.
 
 - **Activation Functions (fused)**: Supports ReLU, Clipped ReLU (with configurable upper clip), and CLAMP (with a configurable lower clip and an optional upper clip). Leaky ReLU (non-zero ``relu_lower_clip_slope``), Sigmoid and Tanh are not supported when fused onto a producer op; use a standalone activation node for those.

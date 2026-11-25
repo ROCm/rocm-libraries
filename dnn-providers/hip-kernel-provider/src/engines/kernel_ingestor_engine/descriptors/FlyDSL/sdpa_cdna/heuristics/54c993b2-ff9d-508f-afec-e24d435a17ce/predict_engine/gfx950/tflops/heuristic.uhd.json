@@ -680,7 +680,7 @@
         "revision": "1.0"
       }
     ],
-    "selector_revision": "generic-untuned-v1/916d51f66650784c4dd98805423af6d1bd493cb212b98be8590c8f06c9693d80",
+    "selector_revision": "generic-untuned-v1/ec6621f06654e2baa290525bea5eba20a4c261c339b61300f249f2cd99f48ac7",
     "feature_semantics_revision": 1
   },
   "objective": "max",
