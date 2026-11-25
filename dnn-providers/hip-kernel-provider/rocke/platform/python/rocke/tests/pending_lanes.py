@@ -1032,7 +1032,6 @@ PENDING: tuple[PendingTest, ...] = (
         "library/tests/sdpa/test_dense_sdpa_binding.py",
         "library/tests/sdpa/test_sdpa_bwd_case_table.py",
         "library/tests/sdpa/test_sdpa_case_table.py",
-        "library/tests/sdpa/test_sdpa_reference.py",
         "library/tests/sdpa/test_unified_sdpa_binding.py",
         "library/tests/test_attention_builds.py",
         "library/tests/test_strided_kv_decode.py",
