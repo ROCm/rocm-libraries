@@ -608,8 +608,7 @@ if(ROCKE_INSTALL_TESTS)
               PATTERN "__pycache__" EXCLUDE
               REGEX "\\.pyc$" EXCLUDE
               PATTERN "*.c" EXCLUDE
-              PATTERN "reference_bundles" EXCLUDE
-              PATTERN "check_torch_reference.py" EXCLUDE)
+              PATTERN "reference_bundles" EXCLUDE)
 
     else()
       message(WARNING

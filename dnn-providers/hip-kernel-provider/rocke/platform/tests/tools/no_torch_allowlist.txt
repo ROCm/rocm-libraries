@@ -42,9 +42,6 @@ library/builders/gfx950/qwen3_30b_a3b/03_decode_attention.py: import torch_api t
 library/dispatch/sdpa/bind_shared.py: torch_interop
 library/kernels/common/attention_bwd_comgr.py: import
 library/kernels/common/attention_unified.py: import torch_api torch_interop torch_object
-library/tests/conv_reference/check_torch_reference.py: import importorskip torch_object
-library/tests/conv_reference/cli.py: import
-library/tests/conv_reference/torch_reference.py: import torch_object
 library/tests/ctest_lists.cmake: config
 library/tests/dispatch/attention/test_gfx1151_attention_dispatch_numeric.py: torch_interop
 library/tests/sdpa/binding_harness.py: import torch_api torch_object
@@ -57,8 +54,6 @@ library/tests/sdpa/test_sdpa_case_table.py: importorskip
 library/tests/sdpa/test_sdpa_reference.py: importorskip torch_object
 library/tests/sdpa/test_unified_sdpa_binding.py: importorskip torch_object
 library/tests/sdpa/test_unified_sdpa_numeric.py: importorskip
-library/tests/sdpa_reference/check_torch_reference.py: import importorskip torch_api torch_object
-library/tests/sdpa_reference/torch_reference.py: import torch_api torch_object
 library/tests/test_attention_builds.py: importorskip
 library/tests/test_attention_bwd_bench.py: importorskip torch_object
 library/tests/test_attention_unified_lse_numeric.py: importorskip torch_api torch_object

@@ -194,7 +194,7 @@ parts:
 
 | File | Declares |
 |---|---|
-| `cli.py` | `OPERATION`, a `reference_common.cli.ReferenceOperation` naming the contract, architectures, manifest reference description, `Metric`, and an optional `TorchReference` for offline Torch cross-checks; module aliases for its `qualify`, `load_bundle`, `manifest_key`, `verify_case`, and `main` |
+| `cli.py` | `OPERATION`, a `reference_common.cli.ReferenceOperation` naming the contract, architectures, manifest reference description, and `Metric`; module aliases for its `qualify`, `load_bundle`, `manifest_key`, `verify_case`, and `main` |
 | `worker.py` | `run(request, output)`, which passes a `WorkerOperation` with the adapter's launch call and the frozen replay-argument binding to `reference_common.worker.run_case`, with the requested variant's adapter in source mode and only the processor package in replay mode |
 | `test_<operation>_pinned_reference.py` | A `reference_bundle` fixture from `select_bundle` and the tests from `pinned_reference_tests`, with a negative-control perturbation that exceeds the comparison limit in the operation's metric |
 
@@ -322,22 +322,11 @@ target, launch metadata, and payload digests. Inputs and answer tensors are not
 shipped. The generated `qualification-lock.json` is a candidate trust anchor,
 not an automatically approved replacement for the committed lock.
 
-For convolution, optionally add `--torch-reference` to the qualification command
-in a separate offline environment with Torch installed. This checks CPU Torch
-float64 and float32 answers as well as NumPy and includes their bounds in the
-certificate. A CPU Torch build suffices. SDPA also accepts `--torch-reference`
-for CPU Torch float64/float32 SDPA, or `--torch-reference cuda` for the matching
-ROCm GPU. Both operations set B to the largest measured baseline error bound
-against all enabled references. No fixed percentage margin is reserved; the
+Both operations set B to the measured baseline error bound against the
+independent NumPy reference. No fixed percentage margin is reserved; the
 comparison limit C is rounded strictly below T-B, so D<=C implies D+B<T.
-The NumPy–Torch gap remains diagnostic. Existing published bundles retain
-their old authenticated limits until replaced through this workflow. See the [SDPA contract](../../sdpa_reference/docs/sdpa-test-reference.md#optional-torch-reference-agreement-during-qualification)
-for scope and reference-only auditing. The
-convolution oracle-only audit is:
-
-```bash
-python -m pytest library/tests/conv_reference/check_torch_reference.py -v
-```
+Existing published bundles retain their old authenticated limits until replaced
+through this workflow.
 
 Review every case's target, geometry, grid, epilogue, output determinism, oracle
 agreement, and remaining error budget. For coverage additions, check that the

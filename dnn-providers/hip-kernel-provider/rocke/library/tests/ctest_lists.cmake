@@ -371,7 +371,6 @@ set(_ROCKE_LIBRARY_ATTENTION_CPU_TEST_RELPATHS
     "tests/library/tests/test_strided_kv_decode.py"
     "tests/library/tests/test_strided_kv_lds.py"
     "tests/library/tests/test_attention_flops.py"
-    "tests/library/tests/test_sdpa_torch_reference.py"
     "tests/library/tests/test_verify_dsl_docs_attention.py"
     # One host-only test of test_attention_builds.py (signature/params
     # mirroring); the rest of the file runs in
