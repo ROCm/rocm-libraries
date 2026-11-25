@@ -44,6 +44,8 @@ problem:
     value: true
   - type: UseGateResidual
     value: true
+  - type: GateMulOnly
+    value: false
   - type: DataTypeE
     value: Half
   - type: StridedBatched

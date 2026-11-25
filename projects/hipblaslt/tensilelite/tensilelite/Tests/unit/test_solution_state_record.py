@@ -242,6 +242,12 @@ def test_fixtures_cover_the_predicate_families():
     assert some(
         lambda s: problem(s).get("UseGateResidual") and "GateResidualDataTypeList" not in problem(s)
     ), "no gate residual with the default type list"
+    assert some(lambda s: problem(s).get("GateMulOnly")), "no GateMulOnly"
+    for value in (False, True):
+        assert any(
+            {"type": "GateMulOnly", "value": value} in payload["problem"]["value"]
+            for payload in payloads.values()
+        ), f"no GateMulOnly predicate set to {value}"
 
     assert some(
         lambda s: tuple(s["ISA"]) == (9, 5, 0)

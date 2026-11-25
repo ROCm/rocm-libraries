@@ -109,7 +109,7 @@ class BoundIndex:
 
 class ProblemType:
     StateKeys = ['operationIdentifier', 'transA', 'transB', 'computeInputTypeA', 'computeInputTypeB', 'aType', 'bType', 'cType', 'dType', 'eType', 'computeType',
-                 'useBeta', 'useBias', 'biasSrcWhiteList', 'useE', 'useGateResidual', 'gateResidualDataTypeWhiteList', 'useScaleAB', 'useScaleCD', 'useScaleAlphaVec', 'biasDataTypeWhiteList',
+                 'useBeta', 'useBias', 'biasSrcWhiteList', 'useE', 'useGateResidual', 'gateMulOnly', 'gateResidualDataTypeWhiteList', 'useScaleAB', 'useScaleCD', 'useScaleAlphaVec', 'biasDataTypeWhiteList',
                  'highPrecisionAccumulate', 'useInitialStridesAB', 'useInitialStridesCD', 'stridedBatched', 'groupedGemm',
                  'useGradient', 'activationType', 'activationArgLength', 'activationComputeDataType', 'activationNoGuard',
                  'sparse', 'f32XdlMathOp', 'supportDeviceUserArguments', 'outputAmaxD', 'outputPeerD', 'swizzleTensorA', 'swizzleTensorB', 'metadataLayout',
@@ -282,6 +282,7 @@ class ProblemType:
             rv.useE = d['UseE']
 
         rv.useGateResidual = False
+        rv.gateMulOnly = bool(d.get('GateMulOnly', False))
         rv.gateResidualDataTypeWhiteList = []
         rv.setConstStrideGate = []
         if 'UseGateResidual' in d:
@@ -484,6 +485,8 @@ class ProblemType:
             predicates.append(ProblemPredicate("UseBias", value=self.useBias))
             predicates.append(ProblemPredicate("UseE", value=self.useE))
             predicates.append(ProblemPredicate("UseGateResidual", value=self.useGateResidual))
+            if self.useGateResidual:
+                predicates.append(ProblemPredicate("GateMulOnly", value=self.gateMulOnly))
             predicates.append(ProblemPredicate("DataTypeE", value=self.eType))
             predicates.append(ProblemPredicate("StridedBatched", value=self.stridedBatched))
             predicates.append(ProblemPredicate("GroupedGemm", value=self.groupedGemm))

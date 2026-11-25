@@ -2283,18 +2283,29 @@ class GlobalWriteBatchWriter:
           # Default fallback: use DestDataType as the gate dtype.
           gateList = [self.kernel["ProblemType"]["DestDataType"]]
 
+        gateMulOnly = self.kernel["ProblemType"]["GateMulOnly"]
+
         def _emit_gate_fma():
-          """Concrete G1 body: ValuC = gate*ValuC + gate."""
+          """Concrete G1 body: ValuC = gate*ValuC + gate, or gate*ValuC with GateMulOnly."""
           fmaMod = Module("GateFMA")
           for vi in range(0, self.gwvw):
             sumIdxV = self.ss.elementSumIdx[elementIdx] + vi
             vgprIdx = sumIdxV - self.parentWriter.states.c.startVgprValu
             if ((vi + 1) == self.gwvw) and ((self.gwvw % 2) == 1):
-              fmaMod.add(VFmaF32(dst=vgpr("ValuC+%d"%vgprIdx), src0=vgpr(dataGate + vi),
-                src1=vgpr("ValuC+%d"%vgprIdx), src2=vgpr(dataGate + vi),
-                comment="GateResidual: acc = gate*acc + gate (vi=%d)"%vi))
+              if gateMulOnly:
+                fmaMod.add(VMulF32(dst=vgpr("ValuC+%d"%vgprIdx), src0=vgpr(dataGate + vi),
+                  src1=vgpr("ValuC+%d"%vgprIdx),
+                  comment="GateMul: acc = gate*acc (vi=%d)"%vi))
+              else:
+                fmaMod.add(VFmaF32(dst=vgpr("ValuC+%d"%vgprIdx), src0=vgpr(dataGate + vi),
+                  src1=vgpr("ValuC+%d"%vgprIdx), src2=vgpr(dataGate + vi),
+                  comment="GateResidual: acc = gate*acc + gate (vi=%d)"%vi))
             elif vi % 2 == 1:
               assert (self.gwvw % 2 == 0)
+            elif gateMulOnly:
+              fmaMod.add(VMulPKF32(dst=vgpr("ValuC+%d"%vgprIdx, 2), src0=vgpr(dataGate + vi, 2),
+                src1=vgpr("ValuC+%d"%vgprIdx, 2),
+                comment="GateMul packed: acc = gate*acc (vi=%d,%d)"%(vi, vi+1)))
             else:
               fmaMod.add(VFmaPKF32(dst=vgpr("ValuC+%d"%vgprIdx, 2), src0=vgpr(dataGate + vi, 2),
                 src1=vgpr("ValuC+%d"%vgprIdx, 2), src2=vgpr(dataGate + vi, 2),

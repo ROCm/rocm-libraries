@@ -1012,6 +1012,7 @@ namespace TensileLite
 
             record.useE = d.truthy("UseE", false);
 
+            record.gateMulOnly     = d.truthy("GateMulOnly", false);
             record.useGateResidual = false;
             if(d.has("UseGateResidual"))
             {
@@ -1126,6 +1127,8 @@ namespace TensileLite
             rv.push_back(withValue<UseBiasCheck>(r.useBias));
             rv.push_back(withValue<UseEEqual>(r.useE));
             rv.push_back(withValue<UseGateResidualCheck>(r.useGateResidual));
+            if(r.useGateResidual)
+                rv.push_back(withValue<GateMulOnlyEqual>(r.gateMulOnly));
             rv.push_back(withValue<DataTypeEEqual>(r.eType));
             rv.push_back(withValue<StridedBatchedEqual>(r.stridedBatched));
             rv.push_back(withValue<GroupedGemmEqual>(r.groupedGemm));

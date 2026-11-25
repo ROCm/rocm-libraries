@@ -2926,6 +2926,46 @@ namespace TensileLite
                 }
             };
 
+            // A gate kernel computes either gate*x + gate or gate*x; a gate problem needs the same one.
+            struct GateMulOnlyEqual
+                : public Predicate_CRTP<GateMulOnlyEqual, ContractionProblemGemm>
+            {
+                enum
+                {
+                    HasIndex = false,
+                    HasValue = true
+                };
+                bool value;
+
+                GateMulOnlyEqual() = default;
+                GateMulOnlyEqual(bool value)
+                    : value(value)
+                {
+                }
+
+                static std::string Type()
+                {
+                    return "GateMulOnly";
+                }
+
+                virtual bool operator()(ContractionProblemGemm const& problem) const override
+                {
+                    return !problem.useGateResidual() || problem.gateMulOnly() == value;
+                }
+
+                virtual bool debugEval(ContractionProblemGemm const& problem,
+                                       std::ostream&                 stream) const override
+                {
+                    bool               rv = (*this)(problem);
+                    std::ostringstream details;
+                    details << "prob_gate=" << problem.useGateResidual()
+                            << ", prob_mulOnly=" << problem.gateMulOnly()
+                            << ", sol_mulOnly=" << value;
+                    PredicateDebugger::printRow(stream, rv, this->type(), details.str());
+                    return rv;
+                }
+            };
+
             struct UseEEqual : public Predicate_CRTP<UseEEqual, ContractionProblemGemm>
             {
                 enum

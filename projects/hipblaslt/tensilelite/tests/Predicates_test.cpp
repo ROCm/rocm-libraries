@@ -539,6 +539,40 @@ TEST(Predicates, PeerDCheck_OnlyMatchesTheKindOfKernelTheProblemAsksFor)
 }
 
 // ----------------------------------------------------------------------------
+// GateMulOnlyEqual: a gate problem runs only kernels with its gate arithmetic (gate*x + gate or
+// gate*x); a problem without a gate does not care.
+// ----------------------------------------------------------------------------
+TEST(Predicates, GateMulOnlyEqual_MatchesTheGateArithmeticOfAGateProblem)
+{
+    using namespace TensileLite;
+    using Predicates::Contraction::GateMulOnlyEqual;
+
+    auto plain
+        = ContractionProblemGemm::GEMM(false, true, 256, 256, 256, 256, 256, 256, 1.0, false, 1);
+    auto residual = plain;
+    residual.setUseGateResidual(true);
+    auto mul = residual;
+    mul.setGateMulOnly(true);
+    EXPECT_FALSE(residual.gateMulOnly());
+    EXPECT_TRUE(mul.gateMulOnly());
+    EXPECT_FALSE(residual == mul);
+
+    GateMulOnlyEqual mulKernel(true), residualKernel(false);
+    EXPECT_TRUE(mulKernel(plain));
+    EXPECT_TRUE(residualKernel(plain));
+    EXPECT_FALSE(mulKernel(residual));
+    EXPECT_TRUE(residualKernel(residual));
+    EXPECT_TRUE(mulKernel(mul));
+    EXPECT_FALSE(residualKernel(mul));
+    EXPECT_EQ(GateMulOnlyEqual::Type(), "GateMulOnly");
+
+    std::ostringstream stream;
+    EXPECT_FALSE(residualKernel.debugEval(mul, stream));
+    EXPECT_NE(stream.str().find("prob_mulOnly=1"), std::string::npos);
+    EXPECT_NE(stream.str().find("sol_mulOnly=0"), std::string::npos);
+}
+
+// ----------------------------------------------------------------------------
 // StrideAMultiple / StrideBMultiple: strides are in elements.
 // ----------------------------------------------------------------------------
 

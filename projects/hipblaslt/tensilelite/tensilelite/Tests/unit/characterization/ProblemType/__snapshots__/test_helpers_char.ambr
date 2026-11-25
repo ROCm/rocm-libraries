@@ -19,6 +19,7 @@
     'DestDataType',
     'F32XdlMathOp',
     'FusedA2A',
+    'GateMulOnly',
     'Gradient',
     'GroupedGemm',
     'HighPrecisionAccumulate',
@@ -126,6 +127,9 @@
     ]),
     'FusedA2A': list([
       'str',
+    ]),
+    'GateMulOnly': list([
+      'bool',
     ]),
     'Gradient': list([
       'bool',

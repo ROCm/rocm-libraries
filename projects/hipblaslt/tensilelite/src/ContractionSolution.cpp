@@ -4787,7 +4787,7 @@ namespace TensileLite
         name += "_VW" + std::to_string(vw);
         if(problemType.useGateResidual)
         {
-            name += "_GateR";
+            name += problemType.gateMulOnly ? "_GateM" : "_GateR";
         }
         return name;
     }

@@ -1602,8 +1602,8 @@ namespace TensileLite
            << "C: " << cTensor << ",\n"
            << "D: " << dTensor << "\n";
         if(m_useGateResidual)
-            rv << "GateResidual: " << m_tensors[ContractionProblemGemm::TENSOR::GATE_RESIDUAL]
-               << "\n";
+            rv << (m_gateMulOnly ? "GateMul: " : "GateResidual: ")
+               << m_tensors[ContractionProblemGemm::TENSOR::GATE_RESIDUAL] << "\n";
         return rv.str();
     }
 

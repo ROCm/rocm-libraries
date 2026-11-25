@@ -101,6 +101,7 @@ problemType.useBias=1
 problemType.biasSrcWhiteList=[3]
 problemType.useE=false
 problemType.useGateResidual=false
+problemType.gateMulOnly=false
 problemType.gateResidualDataTypeWhiteList=[]
 problemType.useScaleAB=""
 problemType.useScaleCD=false

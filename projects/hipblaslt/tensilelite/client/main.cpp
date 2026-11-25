@@ -421,6 +421,7 @@ namespace TensileLite
                 ("device-scalar-alpha",       po::value<bool>(), "Override the runtime alpha mode; defaults to the scalar bit in use-scaleAlphaVec.")
                 ("bias-type-args",            po::value<std::vector<rocisa::DataType>>()->default_value(std::vector<rocisa::DataType>(1, rocisa::DataType::None), "[]"), "Bias data type args.")
                 ("use-gate-residual",         po::value<bool>()->default_value(false), "Use gate residual.")
+                ("gate-mul-only",             po::value<bool>()->default_value(false), "With the gate: D = gate * result (no '+ gate').")
                 ("gate-type-args",            po::value<std::vector<rocisa::DataType>>()->default_value(std::vector<rocisa::DataType>(1, rocisa::DataType::None), "[]"), "Gate residual data type args.")
                 ("factor-dim-args",           po::value<std::vector<int>>()->default_value(std::vector<int>(1, 0), "[]"), "factor dimensions args.")
                 ("icache-flush-args",         po::value<std::vector<bool>>()->default_value(std::vector<bool>(1, false), "[]"), "ICache flush args.")

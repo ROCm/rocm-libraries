@@ -741,6 +741,8 @@ def writeClientConfigIni(forBenchmark, problemSizes, biasTypeArgs, factorDimArgs
         param('bias-source',   problemType.biasSrcWhiteList[0])
         param('use-e', problemType.useE)
         param('use-gate-residual', problemType.useGateResidual)
+        if problemType.gateMulOnly: # only when on, so the config text of other problems is unchanged
+            param('gate-mul-only', problemType.gateMulOnly)
         param('output-amaxD', problemType.outputAmaxD)
         if problemType.outputPeerD: # only when on, so the config text of other problems is unchanged
             param('output-peerD', problemType.outputPeerD)
