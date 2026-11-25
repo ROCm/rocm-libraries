@@ -947,9 +947,11 @@ PENDING: tuple[PendingTest, ...] = (
         "platform/tests/tools/test_gen_arch_domain_cpp.py",
         "platform/tests/tools/test_gen_cxx_keywords_cpp.py",
         "platform/tests/tools/test_golden_tool.py",
+        "platform/tests/tools/test_precommit_hooks.py",
         "platform/tests/tools/test_run_all.py",
         "platform/tests/tools/test_run_build_tree_ctest.py",
         "platform/tests/tools/test_run_checks.py",
+        "platform/tests/tools/test_run_hook_on_deletion.py",
     ),
     *_waiting(
         BUILD_VARIANT,
