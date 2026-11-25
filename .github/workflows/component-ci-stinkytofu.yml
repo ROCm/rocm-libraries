@@ -99,6 +99,12 @@ jobs:
         with:
           python-version: "3.12"
 
+      - name: Install requirements
+        run: |
+          choco source disable -n=chocolatey
+          choco source add -n=internal -s http://nexus-service.nexus-ns.svc.cluster.local:8081/repository/choco-group/ --priority=1
+          choco install --no-progress -y ninja --version 1.13.2
+
       - name: Setup ROCm
         uses: ./.github/actions/setup-rocm-windows
         with:
