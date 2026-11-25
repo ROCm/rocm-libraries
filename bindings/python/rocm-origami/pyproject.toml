@@ -1,0 +1,72 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+
+[build-system]
+requires = [
+    "scikit-build-core>=0.10",
+    "nanobind>=2.0.0",
+    "packaging>=24.0"
+]
+build-backend = "scikit_build_core.build"
+
+# NOTE: Building this package requires a ROCm install. The native Origami
+# library (liborigami + its CMake package) is first-class in ROCm, so a ROCm
+# install provides it.
+
+[project]
+name = "rocm-origami"
+dynamic = ["version", "dependencies", "optional-dependencies"]
+description = "Analytical GEMM Solution Selection"
+readme = "README.md"
+requires-python = ">=3.12"
+license = {text = "MIT"}
+authors = [
+    {name = "Advanced Micro Devices, Inc."}
+]
+[tool.scikit-build]
+experimental = true
+wheel.packages = ["src/origami"]
+wheel.py-api = "cp312"
+cmake.version = ">=3.26"
+build.verbose = true
+cmake.source-dir = "."
+build-dir = "build/{state}-{wheel_tag}"
+cmake.build-type = "Release"
+metadata.version.provider = "build_metadata"
+metadata.version.provider-path = "."
+metadata.dependencies.provider = "build_metadata"
+metadata.dependencies.provider-path = "."
+metadata.optional-dependencies.provider = "build_metadata"
+metadata.optional-dependencies.provider-path = "."
+sdist.exclude = [
+    "build/*",
+    "*.egg-info/*",
+    "PYTHON_BUILD_LAYOUT_PLAN.md",
+    "SHARED_LIBRARY_ROLLOUT_PLAN.md",
+]
+wheel.exclude = [
+    "*.md",
+    "*.sh",
+    "tests/*",
+    "bin/origami/tests/**",
+    "csrc/*",
+    "**/__pycache__",
+    "**/*.pyc",
+    "**/liborigami.so*",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+markers = [
+    "slow: marks tests as slow (deselect with '-m \"not slow\"')",
+    "integration: marks tests as integration tests that require hardware",
+    "regression: marks tests as ranking regression tests",
+]
+addopts = [
+    "-ra",
+    "--strict-markers",
+]

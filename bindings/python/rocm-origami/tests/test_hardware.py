@@ -27,8 +27,8 @@ class Tile:
 def enumerate_tiles_half_lds(
     mi: MI,
     *,
-    datatype_size: int,   # bytes/element (fp16/bf16=2)
-    lds_bytes: int,       # total LDS bytes available
+    datatype_size: int,  # bytes/element (fp16/bf16=2)
+    lds_bytes: int,  # total LDS bytes available
 ) -> List[Tile]:
     """
     Generate tiles by incrementing each tile dim in MI-sized steps:
@@ -94,22 +94,21 @@ def test_hardware_for_arch_gfx950():
         lds_capacity=64 * 1024,
         rf_capacity=512 * 1024,
         L2_capacity=32 * 1024 * 1024,
-        compute_clock_khz=2100000
+        compute_clock_khz=2100000,
     )
-    
+
     # Verify basic properties
     assert hardware.N_CU == 304
     assert hardware.lds_capacity == 64 * 1024
     assert hardware.rf_capacity == 512 * 1024
     assert hardware.L2_capacity == 32 * 1024 * 1024
     assert hardware.compute_clock_ghz == pytest.approx(2.1, rel=1e-6)
-    
+
     # Verify architecture-specific constants were applied
     assert hardware.NUM_XCD == 8
     assert hardware.parallel_mi_cu == 4
     # mem1_perf_ratio is calculated based on clock speeds, not a direct constant
     assert hardware.mem1_perf_ratio > 0
-    
 
 
 @pytest.mark.integration
@@ -143,15 +142,15 @@ def test_hardware_for_arch_gfx942():
         lds_capacity=64 * 1024,
         rf_capacity=512 * 1024,
         L2_capacity=24 * 1024 * 1024,
-        compute_clock_khz=1700000
+        compute_clock_khz=1700000,
     )
-    
+
     # Verify basic properties
     assert hardware.N_CU == 228
     assert hardware.lds_capacity == 64 * 1024
     assert hardware.L2_capacity == 24 * 1024 * 1024
     assert hardware.compute_clock_ghz == pytest.approx(1.7, rel=1e-6)
-    
+
     # Verify architecture-specific constants
     assert hardware.NUM_XCD == 8
     assert hardware.parallel_mi_cu == 4
@@ -166,13 +165,13 @@ def test_hardware_for_arch_gfx90a():
         lds_capacity=64 * 1024,
         rf_capacity=512 * 1024,
         L2_capacity=8 * 1024 * 1024,
-        compute_clock_khz=1700000
+        compute_clock_khz=1700000,
     )
-    
+
     # Verify basic properties
     assert hardware.N_CU == 110
     assert hardware.lds_capacity == 64 * 1024
-    
+
     # Verify architecture-specific constants
     assert hardware.NUM_XCD == 1
     assert hardware.parallel_mi_cu == 4
@@ -187,7 +186,7 @@ def test_hardware_for_arch_gfx1200():
         lds_capacity=128 * 1024,
         rf_capacity=512 * 1024,
         L2_capacity=4 * 1024 * 1024,
-        compute_clock_khz=2700000
+        compute_clock_khz=2700000,
     )
 
     # Verify basic properties
@@ -208,13 +207,13 @@ def test_hardware_for_arch_gfx1201():
         lds_capacity=128 * 1024,
         rf_capacity=512 * 1024,
         L2_capacity=6 * 1024 * 1024,
-        compute_clock_khz=2500000
+        compute_clock_khz=2500000,
     )
-    
+
     # Verify basic properties
     assert hardware.N_CU == 60
     assert hardware.lds_capacity == 128 * 1024
-    
+
     # Verify architecture-specific constants
     assert hardware.NUM_XCD == 1
     assert hardware.parallel_mi_cu == 2
@@ -230,20 +229,18 @@ def test_enumerate_tiles_with_hardware():
         lds_capacity=64 * 1024,
         rf_capacity=512 * 1024,
         L2_capacity=32 * 1024 * 1024,
-        compute_clock_khz=2100000
+        compute_clock_khz=2100000,
     )
-    
+
     # MI350 typical bf16/fp16 inst
     mi = MI(m=16, n=16, k=32)
     tiles = enumerate_tiles_half_lds(
-        mi,
-        datatype_size=2,
-        lds_bytes=hardware.lds_capacity
+        mi, datatype_size=2, lds_bytes=hardware.lds_capacity
     )
-    
+
     # Verify we got some tiles
     assert len(tiles) > 0
-    
+
     # All tiles should fit in half LDS
     for tile in tiles:
         assert tile.bytes_ab <= hardware.lds_capacity
@@ -259,20 +256,20 @@ def test_enumerate_tiles_mi350_example():
     # MI350 typical bf16/fp16 inst
     mi = MI(m=16, n=16, k=32)
     tiles = enumerate_tiles_half_lds(mi, datatype_size=2, lds_bytes=64 * 1024)
-    
+
     # Verify results
     assert len(tiles) > 0
     print(f"{len(tiles)} tiles under half LDS ({(64*1024)//2} bytes)")
-    
+
     # Check some properties of the generated tiles
     for tile in tiles:
         # Verify bytes_ab calculation
         expected_bytes = 2 * tile.MT_K * (tile.MT_M + tile.MT_N)
         assert tile.bytes_ab == expected_bytes
-        
+
         # Verify it fits in budget
         assert tile.bytes_ab <= 64 * 1024
-        
+
         # Verify dimensions are multiples of MI
         assert tile.MT_M % 16 == 0
         assert tile.MT_N % 16 == 0
@@ -283,20 +280,22 @@ def test_enumerate_tiles_mi350_example():
 def test_tile_enumeration_empty_cases():
     """Test edge cases for tile enumeration."""
     mi = MI(m=16, n=16, k=32)
-    
+
     # Very small LDS should produce few or no tiles
     tiles = enumerate_tiles_half_lds(mi, datatype_size=2, lds_bytes=1024)
     # With 1024 bytes budget and smallest tile = 2 * 32 * (16 + 16) = 2048 bytes
     # We expect 0 tiles
     assert len(tiles) == 0
-    
+
     # Invalid inputs should raise errors
     with pytest.raises(ValueError):
-        enumerate_tiles_half_lds(MI(m=0, n=16, k=32), datatype_size=2, lds_bytes=64*1024)
-    
+        enumerate_tiles_half_lds(
+            MI(m=0, n=16, k=32), datatype_size=2, lds_bytes=64 * 1024
+        )
+
     with pytest.raises(ValueError):
-        enumerate_tiles_half_lds(mi, datatype_size=0, lds_bytes=64*1024)
-    
+        enumerate_tiles_half_lds(mi, datatype_size=0, lds_bytes=64 * 1024)
+
     with pytest.raises(ValueError):
         enumerate_tiles_half_lds(mi, datatype_size=2, lds_bytes=0)
 
@@ -306,15 +305,15 @@ def test_different_datatypes():
     """Test tile enumeration with different datatype sizes."""
     mi = MI(m=16, n=16, k=32)
     lds_bytes = 64 * 1024
-    
+
     # FP32 (4 bytes)
     tiles_fp32 = enumerate_tiles_half_lds(mi, datatype_size=4, lds_bytes=lds_bytes)
-    
+
     # FP16/BF16 (2 bytes)
     tiles_fp16 = enumerate_tiles_half_lds(mi, datatype_size=2, lds_bytes=lds_bytes)
-    
+
     # FP8 (1 byte)
     tiles_fp8 = enumerate_tiles_half_lds(mi, datatype_size=1, lds_bytes=lds_bytes)
-    
+
     # More tiles should fit with smaller datatypes
     assert len(tiles_fp8) > len(tiles_fp16) > len(tiles_fp32)

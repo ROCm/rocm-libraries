@@ -44,9 +44,10 @@ def is_dtype_supported(arch_name: str, dtype: str) -> bool:
     hardware = HARDWARE[arch_name]
     return len(get_matrix_instructions(hardware, dtype)) > 0
 
+
 def load_problem_sizes() -> list[tuple[int, int, int, int]]:
     """Load problem sizes from CSV file.
-    
+
     Returns:
         List of (m, n, k, batch) tuples.
     """
@@ -93,9 +94,14 @@ def create_problem(
 def config_to_tuple(config: origami.config_t) -> tuple:
     """Convert config_t to a compact tuple."""
     return (
-        config.mt.m, config.mt.n, config.mt.k,
-        config.mi.m, config.mi.n, config.mi.k,
-        config.occupancy, config.workgroup_mapping,
+        config.mt.m,
+        config.mt.n,
+        config.mt.k,
+        config.mi.m,
+        config.mi.n,
+        config.mi.k,
+        config.occupancy,
+        config.workgroup_mapping,
     )
 
 
@@ -103,9 +109,14 @@ def result_to_config_tuple(result: origami.prediction_result_t) -> list[int]:
     """Convert prediction result to a config tuple [mt_m, mt_n, mt_k, mi_m, mi_n, mi_k, occ, wgm]."""
     cfg = result.config
     return [
-        cfg.mt.m, cfg.mt.n, cfg.mt.k,
-        cfg.mi.m, cfg.mi.n, cfg.mi.k,
-        cfg.occupancy, cfg.workgroup_mapping,
+        cfg.mt.m,
+        cfg.mt.n,
+        cfg.mt.k,
+        cfg.mi.m,
+        cfg.mi.n,
+        cfg.mi.k,
+        cfg.occupancy,
+        cfg.workgroup_mapping,
     ]
 
 
@@ -116,13 +127,14 @@ def generate_rankings(
     transB: origami.transpose_t = origami.transpose_t.N,
 ) -> dict[str, list[list[int]]]:
     """Generate rankings for all test problem sizes.
-    
+
     Returns a dict mapping problem_key -> list of config tuples.
     Each config tuple is [mt_m, mt_n, mt_k, mi_m, mi_n, mi_k, occ, wgm].
     """
     hardware = HARDWARE[arch_name]
     configs = create_config_list(
-        hardware, dtype,
+        hardware,
+        dtype,
         mt_sizes=[16, 32, 48, 96, 128, 192, 224, 256, 336, 448, 512],
         depth_unroll=[16, 32, 64, 128, 512, 1024],
         occupancy_values=[1, 2],
@@ -136,7 +148,9 @@ def generate_rankings(
     for m, n, k, batch in TEST_PROBLEM_SIZES:
         problem = create_problem(m, n, k, dtype, batch, transA, transB)
         try:
-            ranked = origami.select_topk_configs(problem, hardware, configs, TOP_K, origami.model_t.gemm)
+            ranked = origami.select_topk_configs(
+                problem, hardware, configs, TOP_K, origami.model_t.gemm
+            )
             if ranked:
                 key = f"{m}x{n}x{k}x{batch}"
                 rankings[key] = [result_to_config_tuple(r) for r in ranked]
@@ -160,13 +174,13 @@ def get_baseline_path(arch_name: str) -> Path:
 @lru_cache(maxsize=None)
 def load_arch_baseline(arch_name: str) -> dict | None:
     """Load and cache the full baseline for an architecture.
-    
+
     Returns the parsed YAML dict, or None if file doesn't exist.
     """
     path = get_baseline_path(arch_name)
     if not path.exists():
         return None
-    
+
     with open(path, "r") as f:
         return yaml.load(f, Loader=SafeLoader)
 
@@ -185,7 +199,7 @@ def load_baseline(
     baseline = load_arch_baseline(arch_name)
     if baseline is None:
         return None
-    
+
     try:
         return baseline[dtype][transpose_key(transA, transB)]
     except KeyError:
@@ -202,32 +216,39 @@ def save_baseline(
     """Save rankings to the architecture's YAML baseline file."""
     BASELINE_DIR.mkdir(parents=True, exist_ok=True)
     path = get_baseline_path(arch_name)
-    
+
     if path.exists():
         with open(path, "r") as f:
             baseline = yaml.load(f, Loader=SafeLoader) or {}
     else:
         baseline = {}
-    
+
     if dtype not in baseline:
         baseline[dtype] = {}
     baseline[dtype][transpose_key(transA, transB)] = rankings
-    
+
     # Write with compact format: flow style for problem entries, sorted keys
     # Custom representer to use flow style for the innermost lists (config lists per problem)
     class CompactDumper(SafeDumper):
         pass
-    
+
     def represent_problem_configs(dumper, data):
         # Use flow style for list of config lists (the value under each problem key)
-        return dumper.represent_sequence('tag:yaml.org,2002:seq', data, flow_style=True)
-    
+        return dumper.represent_sequence("tag:yaml.org,2002:seq", data, flow_style=True)
+
     # Apply flow style to lists that contain lists (problem -> [[config], [config], ...])
     CompactDumper.add_representer(list, represent_problem_configs)
-    
+
     with open(path, "w") as f:
-        yaml.dump(baseline, f, Dumper=CompactDumper, default_flow_style=False, sort_keys=True, width=1000)
-    
+        yaml.dump(
+            baseline,
+            f,
+            Dumper=CompactDumper,
+            default_flow_style=False,
+            sort_keys=True,
+            width=1000,
+        )
+
     # Clear cache so subsequent loads see the updated file
     load_arch_baseline.cache_clear()
 
@@ -248,13 +269,15 @@ def compare_rankings(
             continue
 
         curr_configs = current[problem_key]
-        
+
         if len(curr_configs) != len(base_configs):
             differences.append(
                 f"{problem_key}: Different rank count (curr={len(curr_configs)}, base={len(base_configs)})"
             )
 
-        for rank_idx, (curr_cfg, base_cfg) in enumerate(zip(curr_configs, base_configs)):
+        for rank_idx, (curr_cfg, base_cfg) in enumerate(
+            zip(curr_configs, base_configs)
+        ):
             if curr_cfg != base_cfg:
                 differences.append(
                     f"{problem_key} rank {rank_idx}: Config mismatch\n"
@@ -294,7 +317,9 @@ class TestRankingRegression:
         current = generate_rankings(arch_name, dtype, transA, transB)
 
         if not current:
-            pytest.skip(f"No valid configs generated for {arch_name}/{dtype}/{trans_str}")
+            pytest.skip(
+                f"No valid configs generated for {arch_name}/{dtype}/{trans_str}"
+            )
 
         if generate_baseline:
             save_baseline(arch_name, dtype, transA, transB, current)

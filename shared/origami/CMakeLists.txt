@@ -7,14 +7,17 @@ project(Origami VERSION 1.0.0 LANGUAGES CXX)
 
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 
-include(dependencies)
-
-rocm_setup_version(VERSION ${PROJECT_VERSION})
-
-option(ORIGAMI_BUILD_SHARED_LIBS "Build Origami libraries as shared vs static." ON)
-option(ORIGAMI_ENABLE_PYTHON "Enable Python bindings." OFF)
+option(ORIGAMI_BUILD_SHARED_LIBS "Build shared libraries." ON)
 option(ORIGAMI_BUILD_TESTING "Build tests." OFF)
 option(ORIGAMI_ENABLE_FETCH "Auto-fetch dependencies with FetchContent" ON)
+
+if(ORIGAMI_BUILD_TESTING OR BUILD_TESTING)
+    enable_testing()
+endif()
+
+set(CPACK_RESOURCE_FILE_LICENSE "${PROJECT_SOURCE_DIR}/LICENSE.md")
+include(dependencies)
+rocm_setup_version(VERSION ${PROJECT_VERSION})
 
 find_package(hip REQUIRED)
 
@@ -55,9 +58,13 @@ elseif(WIN32)
         "the ROCm llvm/bin directory) to embed version info.")
 endif()
 
-set(BUILD_SHARED_LIBS "${ORIGAMI_BUILD_SHARED_LIBS}")
-add_library(origami)
-if(WIN32 AND BUILD_SHARED_LIBS AND _origami_have_version_rc)
+if(ORIGAMI_BUILD_SHARED_LIBS)
+    set(ORIGAMI_LIBRARY_TYPE SHARED)
+else()
+    set(ORIGAMI_LIBRARY_TYPE STATIC)
+endif()
+add_library(origami ${ORIGAMI_LIBRARY_TYPE})
+if(WIN32 AND ORIGAMI_LIBRARY_TYPE STREQUAL "SHARED" AND _origami_have_version_rc)
     target_sources(origami PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/version.rc")
 endif()
 
@@ -76,12 +83,8 @@ include(GenerateExportHeader)
 generate_export_header(origami
     BASE_NAME ORIGAMI
     EXPORT_MACRO_NAME ORIGAMI_EXPORT
-    EXPORT_FILE_NAME "${PROJECT_BINARY_DIR}/include/origami/origami_export.h"
-    STATIC_DEFINE ORIGAMI_STATIC
+    EXPORT_FILE_NAME "${CMAKE_CURRENT_BINARY_DIR}/include/origami/origami_export.h"
 )
-if(NOT BUILD_SHARED_LIBS)
-    target_compile_definitions(origami PUBLIC ORIGAMI_STATIC)
-endif()
 
 add_library(origami-headers INTERFACE)
 add_library(roc::origami-headers ALIAS origami-headers)
@@ -93,7 +96,7 @@ target_sources(origami-headers
     FILE_SET HEADERS
     BASE_DIRS
         "${CMAKE_CURRENT_SOURCE_DIR}/include"
-        "${PROJECT_BINARY_DIR}/include"
+        "${CMAKE_CURRENT_BINARY_DIR}/include"
     FILES
         "${CMAKE_CURRENT_SOURCE_DIR}/include/origami/attention.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/include/origami/gemm.hpp"
@@ -106,7 +109,7 @@ target_sources(origami-headers
         "${CMAKE_CURRENT_SOURCE_DIR}/include/origami/types.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/include/origami/simulator/tensilelite/formocast.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/include/origami/simulator/tensilelite/formocast_simulator.hpp"
-        "${PROJECT_BINARY_DIR}/include/origami/origami_export.h"
+        "${CMAKE_CURRENT_BINARY_DIR}/include/origami/origami_export.h"
 )
 target_include_directories(
     origami-headers INTERFACE $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
@@ -136,12 +139,7 @@ target_sources(
 
 target_link_libraries(origami PRIVATE hip::host)
 
-if(ORIGAMI_ENABLE_PYTHON)
-    add_subdirectory(python)
-endif()
-
 if(ORIGAMI_BUILD_TESTING OR BUILD_TESTING)
-    enable_testing()
     add_subdirectory(tests)
 endif()
 

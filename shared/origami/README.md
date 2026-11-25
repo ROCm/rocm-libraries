@@ -1,77 +1,30 @@
 # Origami: Analytical Solution Selection for GEMM Kernels
 
-**Origami** provides a fast, analytical, deterministic methodology to select optimal GEMM configuration (such as tile size) for out-of-the-box GEMM performance. Origami estimates performance by sweeping over candidate configs (tile sizes and mapping) to select the optimal configuration based on **compute** and **memory latencies**.
+Origami predicts GEMM kernel performance and ranks candidate configurations.
+The native library builds independently of Python. Its Python bindings live in
+[bindings/python/rocm-origami](../../bindings/python/rocm-origami).
 
-## Documentation
+Native headers, implementation, and tests remain in `include/`, `src/`, and
+`tests/` under this directory.
 
-- [Quick Start Guide](#quick-start-guide)
-  - [Prerequisites](#prerequisites)
-  - [Install](#install)
-- [API Example](#api-example)
-  - [Python API](#python-api)
-  - [C++ API](#c-api)
-- [Supported GPUs](#supported-gpus)
-- [Build and Install](#build-and-install)
-  - [Python](#build-and-install-origami-python)
-  - [C++](#build-and-install-origami-c)
-  - [CMake Options](#cmake-options)
-  - [Origami Tests](#origami-tests)
-- [Debug Logging](#debug-logging)
-  - [Text Log](#text-log)
-  - [CSV Log](#csv-log)
-  - [Environment Variables](#environment-variables)
-- [Contribute](#contribute)
-- [How to Cite](#how-to-cite)
+## Build and test
 
-## Quick Start Guide
+Use an installed ROCm development environment through `CMAKE_PREFIX_PATH`:
 
-### Prerequisites
-
-**ROCm/HIP**: This package requires ROCm/HIP to be installed on your system. ROCm cannot be installed via pip and must be installed separately. See the [ROCm Quick Start Guide](https://rocm.docs.amd.com/en/latest/deploy/linux/quick_start.html) for installation instructions. Ensure `CMAKE_PREFIX_PATH` includes your ROCm install (default: `/opt/rocm`).
-
-### Install
-
-```bash
-pip install git+https://github.com/ROCm/rocm-libraries.git#subdirectory=shared/origami/python
+```sh
+cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release \
+  -DCMAKE_PREFIX_PATH=/opt/rocm -DORIGAMI_BUILD_TESTING=ON
+cmake --build build
+ctest --test-dir build --output-on-failure
+cmake --install build --prefix /path/to/install
 ```
 
-## API Example
+`ORIGAMI_BUILD_SHARED_LIBS` defaults to `ON`. Explicit static consumers remain
+supported. `ORIGAMI_BUILD_TESTING` defaults to `OFF`, and
+`ORIGAMI_ENABLE_FETCH` controls dependency fetching. The native build has no
+Python options and installs no Python package.
 
-### Python API
-
-```python
-import origami
-
-# Get hardware information for device 0
-hardware = origami.get_hardware_for_device(0)
-
-# Create a problem description
-problem = origami.problem_t()
-problem.size = origami.dim3_t(2048, 2048, 2048)  # M, N, K dimensions
-problem.batch = 1
-problem.a_transpose = origami.transpose_t.T
-problem.b_transpose = origami.transpose_t.N
-problem.a_dtype = origami.data_type_t.Half
-problem.b_dtype = origami.data_type_t.Half
-problem.c_dtype = origami.data_type_t.Half
-problem.d_dtype = origami.data_type_t.Half
-problem.mi_dtype = origami.data_type_t.Half
-problem.a_mx_block_size = 0
-problem.b_mx_block_size = 0
-
-# Create candidate configurations
-configs = []
-config = origami.config_t()
-config.mt = origami.dim3_t(256, 256, 64)  # Macro tile dimensions
-config.mi = origami.dim3_t(16, 16, 32)    # Matrix instruction dimensions
-config.occupancy = 4
-configs.append(config)
-
-# Select best configuration
-best_result = origami.select_config(problem, hardware, configs)
-print(f"Best latency: {best_result.latency}")
-print(f"Best config: MT=({best_result.config.mt.m}, {best_result.config.mt.n}, {best_result.config.mt.k})")
-```
+## API example
 
 ### C++ API
 
@@ -158,160 +111,6 @@ int main() {
 | gfx1250 | TBA | ✔️ | |
 
 For more information on GPU hardware specifications, check out [ROCm documentation](https://rocm.docs.amd.com/en/latest/reference/gpu-arch-specs.html).
-
-## Build and Install
-
-### Build and Install Origami (Python)
-
-Origami provides Python bindings that allow you to use Origami's functionality directly from Python.
-
-#### Installation
-
-Install directly from the rocm-libraries repository (this could take some time due to the size of the rocm-libraries repo):
-
-```bash
-pip install git+https://github.com/ROCm/rocm-libraries.git#subdirectory=shared/origami/python
-```
-
-To efficiently install directly from the rocm-libraries repository use do the following:
-
-```bash
-TEMP_DIR=$(mktemp -d)
-git clone --no-checkout --filter=blob:none --sparse https://github.com/ROCm/rocm-libraries.git $TEMP_DIR
-git -C $TEMP_DIR sparse-checkout set shared/origami
-git -C $TEMP_DIR checkout develop
-pip install $TEMP_DIR/shared/origami/python -v
-rm -rf $TEMP_DIR
-```
-
-If you have already cloned the repository:
-
-```bash
-cd shared/origami/python
-pip install -e .
-```
-
-The build system uses `pyproject.toml` with scikit-build-core, which integrates with CMake for building the Python bindings.
-
-#### CMake Build (Alternative)
-
-When building with CMake, you'll need to manually install the Python dependencies listed in `shared/origami/python/requirements.txt`:
-
-```bash
-pip install -r shared/origami/python/requirements.txt
-```
-
-Build Python bindings using CMake from the `shared/origami` directory:
-
-```bash
-cd shared/origami
-
-# configure with python bindings and tests enabled 
-cmake -S . -B build/ \
-  -DCMAKE_PREFIX_PATH=/opt/rocm \
-  -DCMAKE_CXX_COMPILER=/opt/rocm/bin/amdclang++ \
-  -DCMAKE_INSTALL_PREFIX=/opt/rocm \
-  -DORIGAMI_ENABLE_PYTHON=ON \
-  -DORIGAMI_BUILD_TESTING=ON
-
-# build 
-cmake --build build/ --parallel
-
-# run tests
-cd build/
-ctest --output-on-failure
-```
-
-### Build and Install Origami (C++)
-
-Build the C++ library from the `shared/origami` directory:
-
-```bash
-cd shared/origami
-
-# configure
-cmake -S . -B build/ \
-  -DCMAKE_PREFIX_PATH=/opt/rocm \
-  -DCMAKE_CXX_COMPILER=/opt/rocm/bin/amdclang++ \
-  -DCMAKE_INSTALL_PREFIX=/opt/rocm
-
-# build
-cmake --build build/ --parallel
-```
-
-After configuring and building, run the following command to install:
-
-```bash
-# install
-cmake --install build/
-```
-
-### CMake Options
-
-| Option | Description | Default |
-|--------|-------------|---------|
-| `ORIGAMI_BUILD_SHARED_LIBS` | Build shared libraries | `ON` |
-| `ORIGAMI_ENABLE_PYTHON` | Enable Python bindings | `OFF` |
-| `ORIGAMI_BUILD_TESTING` | Enable Python binding tests | `OFF` |
-| `ORIGAMI_ENABLE_FETCH` | Auto-fetch dependencies with FetchContent | `ON` |
-
-
-## Origami Tests
-
-### Build and Run All Tests
-
-Build with both C++ and Python tests enabled:
-
-```bash
-cd shared/origami
-
-cmake -S . -B build/ \
-  -DCMAKE_PREFIX_PATH=/opt/rocm \
-  -DCMAKE_CXX_COMPILER=/opt/rocm/bin/amdclang++ \
-  -DORIGAMI_BUILD_TESTING=ON \
-  -DORIGAMI_ENABLE_PYTHON=ON
-
-cmake --build build/ --parallel
-
-cd build/
-ctest --output-on-failure
-```
-
-> [!NOTE]
-> Python tests are automatically added when `ORIGAMI_BUILD_TESTING=ON` and `ORIGAMI_ENABLE_PYTHON=ON`.
-
-### Running Specific Tests
-
-Run only C++ tests:
-
-```bash
-./build/tests/origami-tests
-```
-
-Run a specific C++ test by name:
-
-```bash
-./build/tests/origami-tests "Origami: select_config_mnk unit test"
-```
-
-Run only Python tests (from `shared/origami/python`):
-
-```bash
-pip install -e .
-python -m pytest tests/ -v
-```
-
-Run Python tests excluding slow tests:
-
-```bash
-python -m pytest tests/ -m "not slow"
-```
-
-Run selector tests (requires torch):
-
-```bash
-python -m pytest tests/test_selector.py -v
-```
 
 ## Debug Logging
 

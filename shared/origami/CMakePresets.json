@@ -1,0 +1,21 @@
+{
+  "version": 6,
+  "configurePresets": [
+    {
+      "name": "default:release",
+      "displayName": "Configure release build with installation to /opt/rocm",
+      "toolchainFile": "${sourceDir}/cmake/toolchains/rocm-clang.cmake",
+      "binaryDir": "${sourceDir}/build",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "CMAKE_INSTALL_PREFIX": "/opt/rocm"
+      }
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "default:release",
+      "configurePreset": "default:release"
+    }
+  ]
+}
