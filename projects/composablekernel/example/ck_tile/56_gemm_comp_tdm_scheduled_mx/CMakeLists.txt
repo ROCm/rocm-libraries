@@ -12,9 +12,15 @@ if(GPU_TARGETS MATCHES "gfx125")
   set_property(TARGET ${EXAMPLE_COMP_TDM_SCHEDULED_MX} PROPERTY HIP_ARCHITECTURES ${_comp_tdm_scheduled_mx_archs})
   # Expert scheduling mode, no post-RA machine scheduler, and register class priority over
   # globalness in the greedy allocator. The machine scheduler stays on, steered by the pipeline's
-  # hot loop hints.
+  # hot loop hints; CK_TDM_SCHEDULED_SOURCE_ORDER turns it off and keeps the source order as the
+  # schedule.
+  option(CK_TDM_SCHEDULED_SOURCE_ORDER "comp_tdm_scheduled: source order schedule, misched off" OFF)
   target_compile_options(${EXAMPLE_COMP_TDM_SCHEDULED_MX} PRIVATE
       "SHELL:-mllvm -amdgpu-expert-scheduling-mode")
+  if(CK_TDM_SCHEDULED_SOURCE_ORDER)
+    target_compile_options(${EXAMPLE_COMP_TDM_SCHEDULED_MX} PRIVATE
+        "SHELL:-mllvm -enable-misched=false" -DCK_TILE_TDM_SCHEDULED_SOURCE_ORDER=1)
+  endif()
   target_compile_options(${EXAMPLE_COMP_TDM_SCHEDULED_MX} PRIVATE
       "SHELL:-mllvm -enable-post-misched=false"
       "SHELL:-mllvm -greedy-regclass-priority-trumps-globalness")

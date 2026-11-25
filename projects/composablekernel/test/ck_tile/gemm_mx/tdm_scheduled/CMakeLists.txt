@@ -31,8 +31,14 @@ add_gtest_executable(test_ck_tile_mx_gemm_tdm_scheduled_large_cases test_mx_gemm
 
 # The scheduling options of example 56, so the tests check the code the example times: expert
 # scheduling mode, no post-RA machine scheduler, and register class priority over globalness in
-# the greedy allocator. The machine scheduler stays on, steered by the pipeline's hot loop hints.
+# the greedy allocator. The machine scheduler stays on, steered by the pipeline's hot loop hints;
+# CK_TDM_SCHEDULED_SOURCE_ORDER turns it off and keeps the source order as the schedule.
+option(CK_TDM_SCHEDULED_SOURCE_ORDER "comp_tdm_scheduled: source order schedule, misched off" OFF)
 set(MX_TDM_SCHEDULED_SCHED_OPTIONS "SHELL:-mllvm -amdgpu-expert-scheduling-mode")
+if(CK_TDM_SCHEDULED_SOURCE_ORDER)
+    list(APPEND MX_TDM_SCHEDULED_SCHED_OPTIONS "SHELL:-mllvm -enable-misched=false"
+                                               -DCK_TILE_TDM_SCHEDULED_SOURCE_ORDER=1)
+endif()
 list(APPEND MX_TDM_SCHEDULED_SCHED_OPTIONS "SHELL:-mllvm -enable-post-misched=false"
                                            "SHELL:-mllvm -greedy-regclass-priority-trumps-globalness")
 foreach(test_target test_ck_tile_mx_gemm_tdm_scheduled_host test_ck_tile_mx_gemm_tdm_scheduled_host_ref
