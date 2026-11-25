@@ -114,6 +114,43 @@ TEST(pre_checkin_partitioned_gemm_contract, StorePeerDNeedsTwoDifferentDs)
     EXPECT_EQ(setReplicated(gemm, SplitDim::N, in), HIPBLAS_STATUS_INVALID_VALUE);
 }
 
+// With storePeerD each partition must also store its slice into the other partition's D. A kernel
+// without that second store would leave the peer D unwritten and still report success, so it is
+// never used for such a problem: the heuristic leaves it out, and isAlgoSupported and initialize
+// refuse it. The heuristic never gives a plain problem a kernel with the second store, so a plain
+// problem's algorithm is one without it.
+TEST(pre_checkin_partitioned_gemm_contract, StorePeerDRefusesKernelsWithoutThePeerStore)
+{
+    SKIP_UNLESS_SUPPORTED_ARCH();
+    auto              parts = onDeviceZero(2);
+    auto              gemm  = makeGemm(parts);
+    Operands          op;
+    ReplicatedBuffers buffers(parts, op);
+
+    ASSERT_EQ(setReplicated(gemm, SplitDim::N, buffers.inputs()), HIPBLAS_STATUS_SUCCESS);
+    GemmPreference pref;
+    pref.setMaxWorkspaceBytes(Partitions::kWorkspace);
+    gemm.setMaxWorkspaceBytes(Partitions::kWorkspace);
+    std::vector<hipblasLtMatmulHeuristicResult_t> plain;
+    ASSERT_EQ(gemm.algoGetHeuristic(1, pref, plain), HIPBLAS_STATUS_SUCCESS);
+    if(plain.empty())
+        GTEST_SKIP() << "no algorithm for the test problem on this device";
+
+    auto in       = buffers.inputs();
+    in.storePeerD = true;
+    ASSERT_EQ(setReplicated(gemm, SplitDim::N, in), HIPBLAS_STATUS_SUCCESS);
+    std::vector<size_t> workspaceBytes;
+    EXPECT_NE(gemm.isAlgoSupported(plain[0].algo, workspaceBytes), HIPBLAS_STATUS_SUCCESS);
+    EXPECT_NE(gemm.initialize(plain[0].algo, parts.workspaces(), true, parts.streams),
+              HIPBLAS_STATUS_SUCCESS);
+
+    std::vector<hipblasLtMatmulHeuristicResult_t> peer;
+    ASSERT_EQ(gemm.algoGetHeuristic(8, pref, peer), HIPBLAS_STATUS_SUCCESS);
+    for(auto const& result : peer)
+        EXPECT_NE(std::memcmp(&result.algo, &plain[0].algo, sizeof(result.algo)), 0)
+            << "the heuristic returned the plain problem's algorithm for storePeerD";
+}
+
 TEST(pre_checkin_partitioned_gemm_contract, RejectsWrongPointerCounts)
 {
     SKIP_UNLESS_SUPPORTED_ARCH();
