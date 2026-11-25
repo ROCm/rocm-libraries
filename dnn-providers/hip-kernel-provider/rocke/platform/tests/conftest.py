@@ -19,6 +19,13 @@ _PYROOT = _ROCKE / "python"
 if str(_PYROOT) not in sys.path:
     sys.path.insert(0, str(_PYROOT))
 
+# A session started from a git hook inherits the hook's GIT_DIR and
+# GIT_INDEX_FILE, which would point every git command a test runs, even in a
+# scratch directory, at the repository being committed to.
+from rocke.tests.git_environment import drop_inherited_git_repository_variables
+
+drop_inherited_git_repository_variables()
+
 
 def pytest_addoption(parser):
     # tools/test_pending_lanes.py: a scheduled run fails on any expired entry;
