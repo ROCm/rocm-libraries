@@ -7187,13 +7187,25 @@ void testing_matmul_with_bias(const Arguments& arg,
             auto*        dResult = dUniformResult->as<UniformCheckDeviceResult>();
             void*        flags   = dUniformFlags->buf();
             const size_t elem    = realDataTypeSize(To);
-            CHECK_HIP_ERROR(uniform_check_reset_device(dResult, stream));
-            if(batchMode == HIPBLASLT_BATCH_MODE_POINTER_ARRAY)
-                for(int b = 0; b < arg.batch_count; b++)
-                    CHECK_HIP_ERROR(check(
-                        (*dDp)[b].buf(), elem, M[0], N[0], ldd[0], 0, 1, flags, dResult, stream));
-            else
-                for(int i = 0; i < gemm_count; i++)
+            // One GEMM of a group at a time, so the first difference names its GEMM.
+            const int groups     = batchMode == HIPBLASLT_BATCH_MODE_POINTER_ARRAY ? 1 : gemm_count;
+            int       failedGemm = -1;
+            for(int i = 0; i < groups; i++)
+            {
+                CHECK_HIP_ERROR(uniform_check_reset_device(dResult, stream));
+                if(batchMode == HIPBLASLT_BATCH_MODE_POINTER_ARRAY)
+                    for(int b = 0; b < arg.batch_count; b++)
+                        CHECK_HIP_ERROR(check((*dDp)[b].buf(),
+                                              elem,
+                                              M[0],
+                                              N[0],
+                                              ldd[0],
+                                              0,
+                                              1,
+                                              flags,
+                                              dResult,
+                                              stream));
+                else
                     CHECK_HIP_ERROR(check((*dDp)[i].buf(),
                                           elem,
                                           M[i],
@@ -7204,8 +7216,17 @@ void testing_matmul_with_bias(const Arguments& arg,
                                           flags,
                                           dResult,
                                           stream));
-            CHECK_HIP_ERROR(hipMemcpyAsync(&h, dResult, sizeof(h), hipMemcpyDeviceToHost, stream));
-            CHECK_HIP_ERROR(hipStreamSynchronize(stream));
+                UniformCheckDeviceResult g;
+                CHECK_HIP_ERROR(
+                    hipMemcpyAsync(&g, dResult, sizeof(g), hipMemcpyDeviceToHost, stream));
+                CHECK_HIP_ERROR(hipStreamSynchronize(stream));
+                if(g.bad && failedGemm < 0)
+                {
+                    failedGemm = i;
+                    h.first    = g.first;
+                }
+                h.bad += g.bad;
+            }
             if(h.bad)
             {
                 std::ostringstream msg;
@@ -7213,8 +7234,10 @@ void testing_matmul_with_bias(const Arguments& arg,
                     << solution_description(
                            handle, heuristicResult[sol].algo, sol, heuristicResult.size(), true)
                     << ": " << h.bad << " " << lines << " of D are not uniform;"
-                    << " the first difference is at row " << h.first_row() << ", column "
-                    << h.first_col();
+                    << " the first difference is";
+                if(gemm_count > 1)
+                    msg << " in GEMM " << failedGemm;
+                msg << " at row " << h.first_row() << ", column " << h.first_col();
 #ifdef GOOGLE_TEST
                 ADD_FAILURE() << msg.str();
 #else
