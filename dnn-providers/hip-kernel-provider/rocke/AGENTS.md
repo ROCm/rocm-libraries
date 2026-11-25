@@ -124,7 +124,8 @@ Non-package assets resolve through `rocke.assets` (`platform_root()`,
   `tempfile`, `os.cpu_count()`, `pathlib`, `shutil.which` — no `/tmp`, `nproc`, `sudo`.
 - **No torch** — existing uses are being removed, and their allowlist
   (`platform/tests/tools/no_torch_allowlist.txt`) only shrinks. Until a test's
-  use is removed, it declares torch with `import_or_skip_until("torch", TORCH_IN_CI)`.
+  use is removed, it declares torch under a pending record that names the torch
+  follow-up ticket (AICK-3408 / AICK-3409).
   Rule: [`TESTING.md` §6](TESTING.md#6-invariants--contracts).
 - **No build artifacts in git** — never commit `build*/`, `_deps/`, `*.a`/`*.o`/`*.so`,
   `*.egg-info/`, `__pycache__/`. Always build out-of-tree on a local filesystem.
