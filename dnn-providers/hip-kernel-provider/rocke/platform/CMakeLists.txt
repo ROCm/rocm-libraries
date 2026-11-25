@@ -407,14 +407,24 @@ include("${CMAKE_CURRENT_SOURCE_DIR}/tests/cmake/TestTimeouts.cmake")
 # stall the method prints the test's stack under its name (the -v line) and
 # ends the pytest process; rocke.tests.ctest_workers names a worker that ended
 # so, and rocke.tests.run_records records the tests it did not run as
-# unfinished. An entry with no per-test limit of its own puts
-# _ROCKE_INSTALLED_PYTEST_GPU_TEST_LIMIT at the end of its command; one with a
-# lower limit adds only the method. Every GPU entry also takes the CTest
-# resource lock _ROCKE_INSTALLED_GPU_RESOURCE_LOCK, so a parallel ctest -j
-# never runs two of them at once on the one GPU.
-set(_ROCKE_INSTALLED_PYTEST_GPU_TIMEOUT_METHOD "--timeout-method=thread")
+# unfinished. Two limits of the method remain: the rest of that process's
+# tests do not run, and a stall inside a native call that holds the Python GIL
+# stops the method's timer thread too, so only the entry's CTest limit ends it,
+# without the test's name.
+#
+# The rocke.tests.item_time_limit plugin keeps one per-test limit for every
+# test of the entry but one that declares its slowest measured CI time (the
+# rocke_measured_seconds mark), which gets twice that time; a pytest.mark.timeout
+# above the entry's limit is a usage error. An entry with no per-test limit of
+# its own puts _ROCKE_INSTALLED_PYTEST_GPU_TEST_LIMIT at the end of its
+# command; one with a lower limit adds only _ROCKE_INSTALLED_PYTEST_GPU_TEST_POLICY,
+# the plugin and the method. Every GPU entry also takes the CTest resource lock
+# _ROCKE_INSTALLED_GPU_RESOURCE_LOCK, so a parallel ctest -j never runs two of
+# them at once on the one GPU.
+set(_ROCKE_INSTALLED_PYTEST_GPU_TEST_POLICY
+    "-p rocke.tests.item_time_limit --timeout-method=thread")
 set(_ROCKE_INSTALLED_PYTEST_GPU_TEST_LIMIT
-    "--timeout=${ROCKE_TEST_ITEM_TIMEOUT_GPU} ${_ROCKE_INSTALLED_PYTEST_GPU_TIMEOUT_METHOD}")
+    "--timeout=${ROCKE_TEST_ITEM_TIMEOUT_GPU} ${_ROCKE_INSTALLED_PYTEST_GPU_TEST_POLICY}")
 set(_ROCKE_INSTALLED_GPU_RESOURCE_LOCK "rocke_gpu")
 
 # C++ test targets are orchestrated from tests/CMakeLists.txt and registered in
@@ -1110,7 +1120,7 @@ if(ROCKE_INSTALL_TESTS)
              "  LABELS \"ckc;python\"\n"
              "  ENVIRONMENT \"\${_rocke_tiling_pytest_environment}\"\n"
              "  TIMEOUT ${ROCKE_TEST_TIMEOUT_TOOLCHAIN})\n"
-             "add_test(rocke_tiling_gpu_pytest ${_rocke_package_pytest_launcher} \"${_ROCKE_TILING_TESTS}\" ${_rocke_package_pytest_options} ${_ROCKE_INSTALLED_PYTEST_GPU_TIMEOUT_METHOD} -m gpu)\n"
+             "add_test(rocke_tiling_gpu_pytest ${_rocke_package_pytest_launcher} \"${_ROCKE_TILING_TESTS}\" ${_rocke_package_pytest_options} ${_ROCKE_INSTALLED_PYTEST_GPU_TEST_POLICY} -m gpu)\n"
              "set_tests_properties(rocke_tiling_gpu_pytest PROPERTIES\n"
              "  LABELS \"ckc;python;gpu\"\n"
              "  ENVIRONMENT \"\${_rocke_tiling_pytest_environment}\"\n"

@@ -17,9 +17,11 @@ from unittest.mock import Mock
 import pytest
 from rocke.core import native_engine
 from rocke.portable_ir.src import online
+from rocke.tests import item_time_limit
 from rocke.tests.ci_shard import ACTIVATION_FLAG
 from rocke.tests.ctest_listing import configure_installed_ctest, list_ctest_entries
 from rocke.tests.engine_modules import EngineModulesMarker, read_engine_modules_marker
+from rocke.tests.lanes import SOURCE_TREE, skip_until
 from rocke.tests.provider_categories import provider_category_labels
 
 PLATFORM = Path(__file__).resolve().parents[1]
@@ -28,6 +30,7 @@ PLATFORM = Path(__file__).resolve().parents[1]
 def load_driver(name, path):
     spec = importlib.util.spec_from_file_location(name, path)
     module = importlib.util.module_from_spec(spec)
+    sys.modules[name] = module  # a dataclass of the module resolves its module
     spec.loader.exec_module(module)
     return module
 
@@ -372,6 +375,20 @@ def gpu_test_limit() -> float:
     return float(seconds)
 
 
+def test_the_gpu_per_test_limit_is_at_most_half_the_smallest_shard_budget():
+    """A stalled GPU test runs to its per-test limit before it fails. The limit
+    is at most half the smallest rocKE share of a CI shard
+    (tools/check_entry_times.py, CI_TIERS), so one stall leaves the shard time
+    for the rest of its tests; a slower test raises only its own limit, with
+    the rocke_measured_seconds mark."""
+    script = PLATFORM.parent / "tools" / "check_entry_times.py"
+    if not script.is_file():
+        skip_until(SOURCE_TREE, reason="tools/ is absent from the installed tree")
+    entry_times = load_driver("rocke_check_entry_times", script)
+    smallest_budget = min(tier.budget_seconds for tier in entry_times.CI_TIERS)
+    assert gpu_test_limit() <= smallest_budget / 2
+
+
 def entry_property(test: dict, name: str):
     """The value of the CTest property ``name`` of the listed entry ``test``,
     or None."""
@@ -404,10 +421,11 @@ def test_every_gpu_pytest_entry_limits_each_test(
     """A GPU pytest entry without a per-test limit runs a stalled test into its
     CTest limit, and the CI log never names the test. Each one passes a
     --timeout (pytest keeps the last) of at most ROCKE_TEST_ITEM_TIMEOUT_GPU,
-    itself at most half the entry's CTest TIMEOUT, and pytest-timeout's thread
-    method, the one that interrupts a stall inside a HIP or COMGR call. Each
-    takes the rocke_gpu resource lock, so a parallel ctest never runs two of
-    them on the one GPU at once."""
+    itself at most half the entry's CTest TIMEOUT, pytest-timeout's thread
+    method, the one that interrupts a stall inside a HIP or COMGR call, and the
+    rocke.tests.item_time_limit plugin, so only a measured time raises one
+    test's limit. Each takes the rocke_gpu resource lock, so a parallel ctest
+    never runs two of them on the one GPU at once."""
     _, ctest_dir = configure_installed_ctest(
         tmp_path,
         f"-DROCKE_INSTALL_PROVIDER_CTEST_SUBDIR={provider_subdir}",
@@ -431,6 +449,12 @@ def test_every_gpu_pytest_entry_limits_each_test(
         ]
         assert timeouts and timeouts[-1] <= limit, (name, timeouts)
         assert "--timeout-method=thread" in command, name
+        plugins = [
+            command[index + 1]
+            for index, argument in enumerate(command[:-1])
+            if argument == "-p"
+        ]
+        assert item_time_limit.PLUGIN_NAME in plugins, (name, plugins)
         assert limit <= float(entry_property(test, "TIMEOUT")) / 2, name
         assert entry_property(test, "RESOURCE_LOCK") == ["rocke_gpu"], name
 

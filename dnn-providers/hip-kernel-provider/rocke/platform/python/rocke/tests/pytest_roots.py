@@ -24,6 +24,7 @@ import pytest
 
 from .ctest_shard import register_shard_cost_marker
 from .ctest_workers import register_run_alone_marker
+from .item_time_limit import register_measured_seconds_marker
 from .quarantine import register_quarantine
 from .session_gc import use_test_session_gc
 from .sweep_guard import register_sweep_guard
@@ -35,14 +36,16 @@ def configure_pytest_root(
     config: pytest.Config, tree_root: Path, tree_path: str
 ) -> None:
     """Apply the test session's garbage collector setting
-    (``rocke.tests.session_gc``), declare the shard-cost and run-alone marks for
-    runs that do not load the ``rocke.tests.ctest_shard`` and
-    ``rocke.tests.ctest_workers`` plugins, fail a sweep whose subtests all
+    (``rocke.tests.session_gc``), declare the shard-cost, run-alone and
+    measured-seconds marks for runs that do not load the
+    ``rocke.tests.ctest_shard``, ``rocke.tests.ctest_workers`` and
+    ``rocke.tests.item_time_limit`` plugins, fail a sweep whose subtests all
     skipped (``rocke.tests.sweep_guard``) and skip the quarantined tests under
     ``tree_root`` (``rocke.tests.quarantine``); ``tree_path`` is ``tree_root``
     relative to the rocke directory, one of ``pending_lanes.QUARANTINE_TREES``."""
     use_test_session_gc()
     register_shard_cost_marker(config)
     register_run_alone_marker(config)
+    register_measured_seconds_marker(config)
     register_sweep_guard(config)
     register_quarantine(config, tree_root, tree_path)
