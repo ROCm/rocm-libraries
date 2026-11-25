@@ -19,7 +19,17 @@ from pathlib import Path
 from ..assets import platform_root
 from .host_cpus import available_cpus
 
-__all__ = ["build_platform_targets", "configure_platform"]
+__all__ = ["build_platform_targets", "configure_platform", "generator_arguments"]
+
+
+def generator_arguments(build_root: Path) -> list[str]:
+    """The generator argument of a configure into ``build_root``: ``-GNinja``
+    for a fresh tree when ``ninja`` is on PATH, else none. An existing tree
+    keeps its generator, which CMake cannot change; a fresh tree without Ninja
+    gets CMake's default."""
+    if (build_root / "CMakeCache.txt").exists() or shutil.which("ninja") is None:
+        return []
+    return ["-GNinja"]
 
 
 def configure_platform(
@@ -28,11 +38,10 @@ def configure_platform(
     """Configure the platform source tree into ``build_root`` for ``config``,
     with this interpreter as the one its build steps and CTest entries run.
 
-    A fresh tree uses Ninja when it is on PATH; an existing tree keeps its
-    generator, which CMake cannot change. A -D in ``cmake_arguments`` overrides
-    a default above, because CMake keeps the last value. CMake's progress goes
-    nowhere; its errors reach stderr. Raises ``subprocess.CalledProcessError``
-    when the configure fails."""
+    :func:`generator_arguments` picks the generator. A -D in
+    ``cmake_arguments`` overrides a -D this function passes, because CMake
+    keeps the last value. CMake's progress goes nowhere; its errors reach
+    stderr. Raises ``subprocess.CalledProcessError`` when the configure fails."""
     command = [
         "cmake",
         "-S",
@@ -41,10 +50,9 @@ def configure_platform(
         str(build_root),
         f"-DCMAKE_BUILD_TYPE={config}",
         f"-DPython3_EXECUTABLE={sys.executable}",
+        *generator_arguments(build_root),
+        *cmake_arguments,
     ]
-    if not (build_root / "CMakeCache.txt").exists() and shutil.which("ninja"):
-        command.append("-GNinja")
-    command += cmake_arguments
     subprocess.run(command, check=True, stdout=subprocess.DEVNULL)
 
 
