@@ -164,7 +164,7 @@ struct ArchetypeTally
     std::string name;
 
     /// Draws that fit a combination and were put to the checks, a repeat of a point already
-    /// judged there aside; one the caller holds counts here and in none of the outcomes below.
+    /// judged there aside. Each lands in exactly one of the outcomes below.
     int64_t drawn = 0;
     int64_t refusedByConstraints = 0;
 
@@ -173,20 +173,23 @@ struct ArchetypeTally
     int64_t refusedByOracle = 0;
     int64_t admitted = 0;
 
+    /// Admitted by the checks but already held by the caller (another source, such as a
+    /// recorded workload or a kernel pack, supplies the point), so the point is in the corpus
+    /// under that source rather than this archetype's.
+    int64_t held = 0;
+
     /// The first points the oracle refused, at most @ref MAX_REFUSED_KEPT, so a caller can say
     /// why: one point does not tell a size ceiling from an engine declining the rest.
     static constexpr size_t MAX_REFUSED_KEPT = 16;
     std::vector<ProblemPoint> refused;
 };
 
-/// Where an exploration's oracle queries went, and what each combination's first search found
-/// from the seeds it was given.
+/// What each combination's first search found from the seeds it was given, and where its
+/// oracle queries went. Every oracle query over every pass is counted in
+/// ProblemCorpus::constraintAdmissions (the declared constraints put each to the oracle);
+/// memoized answers are not queries.
 struct SearchAccount
 {
-    /// Every oracle query, over every pass: archetype and neighbourhood draws, the searches and
-    /// their growth. Memoized answers are not queries.
-    int64_t oracleQueries = 0;
-
     /// Combinations whose first pass ran a search.
     int64_t searched = 0;
 
@@ -311,7 +314,8 @@ inline uint64_t tieKey(uint64_t seed, size_t index)
 /// (applied again until the value is in range), which keeps it a bijection of [0, total).
 /// Unlike a stride through the product, it ties no digit of the mixed-radix index to another:
 /// even a stride coprime to the product moves some digits together, and sdpa_fwd's 23040
-/// combinations walked at a stride of 14239 held 1 scale_unset combination where 56 were due,
+/// combinations, before the fp8 dtypes,
+/// walked at a stride of 14239 held 1 scale_unset combination where 56 were due,
 /// because the one scale that form admits was a value of the digit the stride had tied to it.
 /// Keyed by the seed, a given seed revisits the same combinations and another seed reaches
 /// others, so regenerating a corpus under a new seed widens what the sample has covered.
@@ -906,6 +910,19 @@ inline std::vector<Shape> takingTurns(const std::vector<std::vector<Shape>>& sou
     return seeds;
 }
 
+/// The shape of @p point over @p numericParameters, in that order; a parameter the point does
+/// not hold reads as 1.
+inline Shape shapeOf(const ProblemPoint& point, const std::vector<std::string>& numericParameters)
+{
+    Shape shape;
+    shape.reserve(numericParameters.size());
+    for(const auto& name : numericParameters)
+    {
+        shape.push_back(integerAt(point, name).value_or(1));
+    }
+    return shape;
+}
+
 /// The cross product of declared regime buckets and common values (§4.3.2, §4.3.5), used to
 /// seed the search: these combinations are realistic by construction, unlike independent draws.
 /// Parameters with neither take their floor and are left to the walk. Strided to @p limit;
@@ -1400,7 +1417,6 @@ inline ProblemCorpus exploreProblemSpace(const OperationMetadata& metadata,
             else
             {
                 ++corpus.constraintAdmissions;
-                ++corpus.search.oracleQueries;
                 verdict = admits(point);
             }
             memo.emplace(shape, verdict);
@@ -1443,7 +1459,6 @@ inline ProblemCorpus exploreProblemSpace(const OperationMetadata& metadata,
             else if(!isHeld(categorical))
             {
                 ++corpus.constraintAdmissions;
-                ++corpus.search.oracleQueries;
                 if(admits(categorical))
                 {
                     result.problems.push_back(categorical);
@@ -1489,7 +1504,6 @@ inline ProblemCorpus exploreProblemSpace(const OperationMetadata& metadata,
                 return Verdict::CONSTRAINT;
             }
             ++corpus.constraintAdmissions;
-            ++corpus.search.oracleQueries;
             if(!admits(point))
             {
                 return Verdict::ORACLE;
@@ -1556,8 +1570,10 @@ inline ProblemCorpus exploreProblemSpace(const OperationMetadata& metadata,
                     tally.refused.push_back(*drawn);
                 }
                 break;
-            case Verdict::REPEATED:
             case Verdict::HELD:
+                ++tally.held;
+                break;
+            case Verdict::REPEATED:
             default:
                 break;
             }
@@ -1651,13 +1667,7 @@ inline ProblemCorpus exploreProblemSpace(const OperationMetadata& metadata,
         // it started would begin in one corner. Neighbourhood points sit beside the archetypes;
         // they go last, still put to the oracle as points the search reached.
         const auto shapeOf = [&corpus](const ProblemPoint& point) {
-            Shape shape;
-            shape.reserve(corpus.numericParameters.size());
-            for(const auto& name : corpus.numericParameters)
-            {
-                shape.push_back(detail::integerAt(point, name).value_or(1));
-            }
-            return shape;
+            return detail::shapeOf(point, corpus.numericParameters);
         };
         std::vector<Shape> archetypeShapes;
         archetypeShapes.reserve(anchored.size());
@@ -1948,13 +1958,7 @@ inline ProblemCorpus exploreProblemSpace(const OperationMetadata& metadata,
         anchoredShapes.reserve(result.problems.size());
         for(const auto& point : result.problems)
         {
-            Shape shape;
-            shape.reserve(dimensions);
-            for(const auto& name : corpus.numericParameters)
-            {
-                shape.push_back(detail::integerAt(point, name).value_or(1));
-            }
-            anchoredShapes.push_back(std::move(shape));
+            anchoredShapes.push_back(detail::shapeOf(point, corpus.numericParameters));
         }
         const auto consider = [&](const Shape& shape) {
             for(size_t d = 0; d < dimensions; ++d)

@@ -328,20 +328,71 @@ TEST(TestRegimeFocus, ARegimeTheEngineDoesNotServeIsNotReachedRatherThanSaturate
 TEST(TestRegimeFocus, ARegimeInACorpusWhoseEveryCombinationIsEmptyIsSaturated)
 {
     // The ragged form is declared only with bshd, so every combination of these two keeps is
-    // empty: nothing is left to search, which is a proof. The bound covers every combination
-    // the two keeps leave (seven dtypes since fp8), so the search can enumerate them all.
+    // empty: nothing is left to search, which is a proof. The two keeps leave 1344 combinations
+    // (seven dtypes since fp8), past the default bound of 1024, where the sample holds only
+    // combinations that can hold a problem, here none: the proof is the count of empty ones.
     const auto metadata = shippedSdpa();
     std::string error;
     const auto focus = compileRegimeFocus(metadata, "decode_long_mha", error);
     ASSERT_TRUE(focus.has_value()) << error;
     auto request = focusRequest();
-    request.maxCombinations = 4096;
+    request.maxCombinations = ExplorationRequest{}.maxCombinations;
+    ASSERT_EQ(request.maxCombinations, 1024U);
     request.keep = {{"form", "ragged"}, {"layout", "bhsd"}};
 
     const auto found = exploreRegime(metadata, *focus, request, 10, SERVES_EVERYTHING, {}, {});
 
     EXPECT_TRUE(found.problems.empty());
     EXPECT_TRUE(found.saturated);
+}
+
+TEST(TestRegimeFocus, PastTheBoundTheFocusSearchesTheMainPassSampleForItsSeed)
+{
+    // The forward's 53760 combinations are past the bound, so the lanes are a sample; under
+    // the request's seed it is the main pass's sample, and another seed samples others.
+    const auto metadata = shippedSdpa();
+    std::string error;
+    const auto focus = compileRegimeFocus(metadata, "decode_long_mha", error);
+    ASSERT_TRUE(focus.has_value()) << error;
+
+    const auto lanesSearched = [&](uint64_t seed) {
+        const auto request = focusedSearchRequest(seed);
+        size_t total = 0;
+        const auto sample = detail::categoricalCombinations(
+            metadata.parameters,
+            request.maxCombinations,
+            request.seed,
+            total,
+            [&metadata](const ProblemPoint& combination) {
+                return !detail::excludedByCategoricals(metadata, combination);
+            },
+            request.keep);
+        EXPECT_GT(total, request.maxCombinations);
+        std::set<std::string> sampled;
+        for(const auto& combination : sample)
+        {
+            sampled.insert(detail::describe(combination));
+        }
+        std::set<std::string> searched;
+        const ProblemOracle record = [&](const ProblemPoint& point) {
+            ProblemPoint lane;
+            for(const auto& [name, value] : sample.front())
+            {
+                lane[name] = point.at(name);
+            }
+            const auto key = detail::describe(lane);
+            EXPECT_EQ(sampled.count(key), 1U) << "seed " << seed << " searched " << key;
+            searched.insert(key);
+            return true;
+        };
+        exploreRegime(metadata, *focus, request, 40, record, {}, {});
+        return searched;
+    };
+
+    const auto one = lanesSearched(1);
+    const auto two = lanesSearched(2);
+    ASSERT_FALSE(one.empty());
+    EXPECT_NE(one, two);
 }
 
 TEST(TestRegimeFocus, ARegimeTheDeclaredConstraintsExcludeIsSaturatedWithoutAskingTheEngine)
