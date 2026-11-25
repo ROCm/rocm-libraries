@@ -203,7 +203,9 @@ void printHelp(const char* program)
         << "                         is returned only when every one saturates (exit 0,\n"
         << "                         with a warning) and otherwise fails (exit 3).\n"
         << "                         0 (default) takes what the first pass finds. The\n"
-        << "                         per-combination count is --per-combination.\n"
+        << "                         per-combination count is --per-combination. Each\n"
+        << "                         served edge kept and one graph per admitted archetype\n"
+        << "                         count against it ahead of the source shares.\n"
         << "  --per-combination <n>  First-pass problems per categorical combination\n"
         << "                         (default 50). Where a declaration weights the values\n"
         << "                         of a parameter (sdpa_fwd, sdpa_bwd) it is the mean\n"
@@ -227,11 +229,14 @@ void printHelp(const char* program)
         << "  --kdp-root <path>      A *.kdp.json pack, or a directory of them (repeatable)\n"
         << "  --model-shapes <csv>   Recorded shapes as q.<parameter> columns (repeatable). A\n"
         << "                         file with no column for a parameter the operation lists\n"
-        << "                         in model_shape_defaults (form, layout, scale, window)\n"
-        << "                         reads every row as the listed value (plain, bshd, ...)\n"
+        << "                         in model_shape_defaults (form, layout, scale, window,\n"
+        << "                         value_head_dim) reads every row as the listed value\n"
+        << "                         (plain, bshd, ...)\n"
         << "  --model-share <f>      Share of the corpus per source; a share of 0\n"
-        << "  --kernel-share <f>     excludes that source rather than deferring it\n"
-        << "  --sweep-share <f>\n"
+        << "  --kernel-share <f>     excludes that source rather than deferring it. With\n"
+        << "  --sweep-share <f>      --count, each served edge kept and one sweep graph\n"
+        << "                         per admitted archetype are taken ahead of the shares,\n"
+        << "                         which cut what is left\n"
         << "  --keep q.<p>=<v>       Keep only problems with this facet. Repeatable:\n"
         << "                         different parameters conjoin, the same parameter\n"
         << "                         repeated widens it (q.head_dim=64 q.head_dim=128).\n"
@@ -629,6 +634,7 @@ nlohmann::json deliveredAnchoredShare(const std::vector<hipdnn_corpus_gen::PoolE
                              {"refused_by_constraints", tally.refusedByConstraints},
                              {"refused_by_oracle", tally.refusedByOracle},
                              {"admitted", tally.admitted},
+                             {"held", tally.held},
                              {"delivered", deliveredOf[i]}};
     }
     return nlohmann::json{
@@ -652,9 +658,14 @@ std::string whyNeverAdmitted(const hipdnn_corpus_gen::ArchetypeTally& tally,
     {
         return "no explored combination it fits was given points";
     }
+    const auto constraintRefusals
+        = tally.refusedByConstraints > 0
+              ? std::to_string(tally.refusedByConstraints) + " broke a declared constraint"
+              : std::string();
     if(tally.refused.empty())
     {
-        return "every draw broke a declared constraint or repeated a point";
+        // Neither admitted, held nor refused by the oracle: every draw broke a constraint.
+        return "every draw broke a declared constraint";
     }
     struct Class
     {
@@ -686,6 +697,10 @@ std::string whyNeverAdmitted(const hipdnn_corpus_gen::ArchetypeTally& tally,
         }
     }
     std::string reasons = "of " + std::to_string(tally.refused.size()) + " refused points kept";
+    if(!constraintRefusals.empty())
+    {
+        reasons = constraintRefusals + "; " + reasons;
+    }
     const auto add = [&reasons](const Class& found, const std::string& what) {
         if(found.count > 0)
         {
@@ -747,6 +762,124 @@ void printQueryTiming(const std::string& operation,
                  perQuery(timing.buildSeconds),
                  perQuery(timing.loadSeconds),
                  perQuery(timing.askSeconds));
+}
+
+/// The search account's manifest report, also said on stderr.
+nlohmann::json reportSearchAccount(const hipdnn_corpus_gen::ProblemCorpus& corpus)
+{
+    const auto& account = corpus.search;
+    std::cerr << corpus.operation << ": " << corpus.constraintAdmissions
+              << " oracle queries; first searches of " << account.searched
+              << " combinations checked " << account.seedChecks << " seeds ("
+              << account.seedsAccepted << " accepted), " << account.drawChecks
+              << " foothold draws (" << account.drawsAccepted << " accepted), "
+              << account.walkChecks << " walk steps; " << account.noSeedAccepted
+              << " accepted no seed, of which " << account.recoveredByDraws
+              << " found a foothold by drawing\n";
+    return nlohmann::json{{"oracle_queries", corpus.constraintAdmissions},
+                          {"searched", account.searched},
+                          {"seed_checks", account.seedChecks},
+                          {"seeds_accepted", account.seedsAccepted},
+                          {"draw_checks", account.drawChecks},
+                          {"draws_accepted", account.drawsAccepted},
+                          {"walk_checks", account.walkChecks},
+                          {"no_seed_accepted", account.noSeedAccepted},
+                          {"recovered_by_draws", account.recoveredByDraws},
+                          {"found_nothing", account.foundNothing}};
+}
+
+/// An archetype is a workload the declaration names; one with no point in the corpus is said,
+/// with the reason, rather than left to be noticed missing. One whose admitted draws another
+/// source already holds is in the corpus under that source.
+void warnNeverAdmitted(const hipdnn_corpus_gen::ProblemCorpus& corpus,
+                       const hipdnn_corpus_gen::OperationMetadata& metadata,
+                       int64_t maxBytes)
+{
+    if(metadata.mixture.isExplorationOnly())
+    {
+        return;
+    }
+    for(const auto& tally : corpus.archetypes)
+    {
+        if(tally.admitted == 0 && tally.held == 0)
+        {
+            std::cerr << "\n  WARNING: archetype " << tally.name << " was never admitted ("
+                      << tally.drawn << " drawn): " << whyNeverAdmitted(tally, metadata, maxBytes);
+        }
+    }
+}
+
+/// What the exploration of @p corpus reached, on stderr: the distinct feasible points and the
+/// cells the corpus spreads them over, the declared constraints' verdicts where they refused
+/// any or admitted none, what a bound left unexplored, and the archetypes never admitted.
+void reportExploration(const hipdnn_corpus_gen::ProblemCorpus& corpus,
+                       const hipdnn_corpus_gen::OperationMetadata& metadata,
+                       bool searched,
+                       int64_t maxBytes)
+{
+    for(const auto& combination : corpus.combinations)
+    {
+        if(combination.stats.distinct > 0)
+        {
+            std::cerr << "\n    " << hipdnn_corpus_gen::detail::describe(combination.categorical)
+                      << ": " << combination.stats.distinct << " distinct feasible, "
+                      << combination.stats.cellsOccupied << "/" << combination.stats.cells
+                      << " cells";
+        }
+    }
+    if(searched && (corpus.constraintRejections > 0 || corpus.constraintAdmissions == 0))
+    {
+        std::cerr << " [constraints admitted " << corpus.constraintAdmissions << ", refused "
+                  << corpus.constraintRejections << "]";
+    }
+    for(const auto& skipped : corpus.skippedCombinations)
+    {
+        std::cerr << "\n  " << skipped;
+    }
+    warnNeverAdmitted(corpus, metadata, maxBytes);
+}
+
+/// One graph of each admitted archetype is kept through the cut, as the served edges are: an
+/// archetype is a workload the declaration names, and a cut to @p count would otherwise drop
+/// the rarer ones. Each one's first admitted point, within the room @p count leaves past
+/// @p quotas and what @p reserved already holds, so the corpus never outgrows it; when not all
+/// fit, @p seed picks which. Without a count (0) nothing is cut.
+void reserveArchetypes(const hipdnn_corpus_gen::ProblemCorpus& corpus,
+                       int64_t count,
+                       const std::map<std::string, int64_t>& quotas,
+                       uint64_t seed,
+                       std::set<std::string>& reserved)
+{
+    if(count <= 0)
+    {
+        return;
+    }
+    int64_t room = count - static_cast<int64_t>(reserved.size());
+    for(const auto& quota : quotas)
+    {
+        room -= quota.second;
+    }
+    std::vector<std::optional<ProblemPoint>> firstAdmitted(corpus.archetypes.size());
+    for(const auto& combination : corpus.combinations)
+    {
+        for(size_t i = 0; i < combination.archetypeOf.size(); ++i)
+        {
+            auto& first = firstAdmitted[combination.archetypeOf[i]];
+            if(!first.has_value())
+            {
+                first = combination.problems[i];
+            }
+        }
+    }
+    const hipdnn_corpus_gen::detail::ScatteredOrder order(firstAdmitted.size(), seed);
+    for(size_t step = 0; step < firstAdmitted.size() && room > 0; ++step)
+    {
+        const auto& first = firstAdmitted[order(step)];
+        if(first.has_value() && reserved.insert(hipdnn_corpus_gen::detail::describe(*first)).second)
+        {
+            --room;
+        }
+    }
 }
 
 int runGenerator(const std::vector<std::string>& args)
@@ -1530,26 +1663,7 @@ int runGenerator(const std::vector<std::string>& args)
                 {"constraint_empty",
                  static_cast<int64_t>(result.corpus.categoricalConstraintEmpty)},
                 {"not_explored", static_cast<int64_t>(result.corpus.categoricalNotExplored)}};
-            const auto& account = result.corpus.search;
-            searchAccount[result.operation]
-                = nlohmann::json{{"oracle_queries", account.oracleQueries},
-                                 {"searched", account.searched},
-                                 {"seed_checks", account.seedChecks},
-                                 {"seeds_accepted", account.seedsAccepted},
-                                 {"draw_checks", account.drawChecks},
-                                 {"draws_accepted", account.drawsAccepted},
-                                 {"walk_checks", account.walkChecks},
-                                 {"no_seed_accepted", account.noSeedAccepted},
-                                 {"recovered_by_draws", account.recoveredByDraws},
-                                 {"found_nothing", account.foundNothing}};
-            std::cerr << result.operation << ": " << account.oracleQueries
-                      << " oracle queries; first searches of " << account.searched
-                      << " combinations checked " << account.seedChecks << " seeds ("
-                      << account.seedsAccepted << " accepted), " << account.drawChecks
-                      << " foothold draws (" << account.drawsAccepted << " accepted), "
-                      << account.walkChecks << " walk steps; " << account.noSeedAccepted
-                      << " accepted no seed, of which " << account.recoveredByDraws
-                      << " found a foothold by drawing\n";
+            searchAccount[result.operation] = reportSearchAccount(result.corpus);
         }
         else
         {
@@ -1565,39 +1679,7 @@ int runGenerator(const std::vector<std::string>& args)
             std::cerr << " (" << result.buildFailures
                       << " failed to build: " << result.firstBuildError << ")";
         }
-        // Distinct feasible points reached, and cells the corpus spreads them over.
-        for(const auto& combination : result.corpus.combinations)
-        {
-            if(combination.stats.distinct > 0)
-            {
-                std::cerr << "\n    "
-                          << hipdnn_corpus_gen::detail::describe(combination.categorical) << ": "
-                          << combination.stats.distinct << " distinct feasible, "
-                          << combination.stats.cellsOccupied << "/" << combination.stats.cells
-                          << " cells";
-            }
-        }
-        if(searched
-           && (result.corpus.constraintRejections > 0 || result.corpus.constraintAdmissions == 0))
-        {
-            std::cerr << " [constraints admitted " << result.corpus.constraintAdmissions
-                      << ", refused " << result.corpus.constraintRejections << "]";
-        }
-        for(const auto& skipped : result.corpus.skippedCombinations)
-        {
-            std::cerr << "\n  " << skipped;
-        }
-        // An archetype is a workload the declaration names; one with no point in the corpus is
-        // said, with the reason, rather than left to be noticed missing.
-        for(const auto& tally : result.corpus.archetypes)
-        {
-            if(tally.admitted == 0 && !metadata.mixture.isExplorationOnly())
-            {
-                std::cerr << "\n  WARNING: archetype " << tally.name << " was never admitted ("
-                          << tally.drawn
-                          << " drawn): " << whyNeverAdmitted(tally, metadata, options.maxBytes);
-            }
-        }
+        reportExploration(result.corpus, metadata, searched, options.maxBytes);
         // Sweep shortfalls are reported only if the corpus ends up short after selection.
         for(const auto& reason : result.corpus.shortfall)
         {
@@ -1740,45 +1822,12 @@ int runGenerator(const std::vector<std::string>& args)
                     .at(result.operation + "|" + hipdnn_corpus_gen::detail::describe(entry.point))
                     .key;
             });
-        // One graph of each admitted archetype is kept through the cut, as the served edges
-        // are: an archetype is a workload the declaration names, and a cut to --count would
-        // otherwise drop the rarer ones. Each one's first admitted point, within the room
-        // --count leaves past the quotas and the edges, so the corpus never outgrows it; when
-        // not all fit, the seed picks which. Without --count nothing is cut.
-        if(options.count > 0)
-        {
-            int64_t room = options.count - static_cast<int64_t>(reserved.size());
-            if(quotas != quotasFor.end())
-            {
-                for(const auto& quota : quotas->second)
-                {
-                    room -= quota.second;
-                }
-            }
-            std::vector<std::optional<ProblemPoint>> firstAdmitted(result.corpus.archetypes.size());
-            for(const auto& combination : result.corpus.combinations)
-            {
-                for(size_t i = 0; i < combination.archetypeOf.size(); ++i)
-                {
-                    auto& first = firstAdmitted[combination.archetypeOf[i]];
-                    if(!first.has_value())
-                    {
-                        first = combination.problems[i];
-                    }
-                }
-            }
-            const hipdnn_corpus_gen::detail::ScatteredOrder order(firstAdmitted.size(),
-                                                                  request.seed);
-            for(size_t step = 0; step < firstAdmitted.size() && room > 0; ++step)
-            {
-                const auto& first = firstAdmitted[order(step)];
-                if(first.has_value()
-                   && reserved.insert(hipdnn_corpus_gen::detail::describe(*first)).second)
-                {
-                    --room;
-                }
-            }
-        }
+        reserveArchetypes(result.corpus,
+                          options.count,
+                          quotas != quotasFor.end() ? quotas->second
+                                                    : std::map<std::string, int64_t>{},
+                          request.seed,
+                          reserved);
 
         // Spread a cut over categorical combinations as well as regimes.
         for(auto& pool : pools)

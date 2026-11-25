@@ -229,18 +229,101 @@ TEST(TestProblemSpace, TheWalkAlsoStartsFromAnAdmittedArchetype)
 {
     // An engine that serves one exact M, as kernels for one recorded shape do, which only the
     // archetype names. Walks start from at most `restarts` (8) footholds; were the 9 accepted
-    // skeleton shapes taken first, none would start on the island, and it would hold the
-    // archetype's one point. Taking turns, a walk starts there and moves along N.
+    // skeleton shapes, or the 9 accepted pooled shapes, taken first, none would start on the
+    // island, and it would hold the archetype's one point. Taking turns, a walk starts there
+    // and moves along N.
     const auto metadata
         = twoIslands("[1, 2, 4]",
                      "[1, 2, 4]",
                      R"([{ "name": "recorded", "values": { "M": [1050], "N": [2000] } }])");
     ExplorationRequest request;
+    for(int64_t m = 1; m <= 3; ++m)
+    {
+        for(int64_t n = 1; n <= 3; ++n)
+        {
+            request.seedPoints.push_back(ProblemPoint{{"M", m}, {"N", n}});
+        }
+    }
     request.pointsPerCombination = 40;
     request.budgetPerCombination = 8000;
     request.seed = 3;
     const auto corpus = exploreProblemSpace(metadata, request, smallAndAnIsland(4, 4, 1050, 8));
     EXPECT_GE(widthsAt(corpus, 1050).size(), 10U) << "no walk started at the archetype";
+}
+
+TEST(TestProblemSpace, PooledSeedsTakeTheSameCategoricalFirstEachShapeOnceUpToTheLimit)
+{
+    const auto seed = [](int64_t extent, const std::string& dtype) {
+        detail::SeedShape shape{{}, {extent, extent}};
+        if(!dtype.empty())
+        {
+            shape.categorical["dtype"] = dtype;
+        }
+        return shape;
+    };
+    const std::vector<detail::SeedShape> pooled{
+        seed(1, "fp16"), seed(2, "fp32"), seed(3, ""), seed(2, "fp16"), seed(4, "fp16")};
+    const ProblemPoint fp32{{"dtype", std::string("fp32")}};
+
+    // Recorded under fp32, or under no dtype, first; then the rest; {2, 2} once.
+    EXPECT_EQ(detail::pooledSeeds(pooled, fp32, 10),
+              (std::vector<Shape>{{2, 2}, {3, 3}, {1, 1}, {4, 4}}));
+    EXPECT_EQ(detail::pooledSeeds(pooled, fp32, 3), (std::vector<Shape>{{2, 2}, {3, 3}, {1, 1}}));
+}
+
+TEST(TestProblemSpace, TheSearchAccountSaysWhereEachFirstSearchFoundItsFootholds)
+{
+    // fp32 is served only at the pooled shape's M; fp16 only at M of 2000 or more, which no
+    // given seed holds and a log-uniform draw reaches; bf16 not at all.
+    const auto metadata = metadataFor(R"({
+      "schema_version": "1.0",
+      "operation": "toy",
+      "parameters": {
+        "M":     { "type": "int64" },
+        "N":     { "type": "int64" },
+        "dtype": { "type": "enum", "values": ["fp32", "fp16", "bf16"] }
+      },
+      "stratification_axis": "working_set",
+      "regimes": {},
+      "graph_builder": { "function": "f", "source": "x.hpp", "arguments": [] }
+    })");
+    int64_t asked = 0;
+    const ProblemOracle oracle = [&asked](const ProblemPoint& point) {
+        ++asked;
+        const auto dtype = std::get<std::string>(point.at("dtype"));
+        const auto m = std::get<int64_t>(point.at("M"));
+        return (dtype == "fp32" && m == 777) || (dtype == "fp16" && m >= 2000);
+    };
+    ExplorationRequest request;
+    request.pointsPerCombination = 20;
+    request.budgetPerCombination = 2000;
+    request.seed = 5;
+    request.seedPoints = {ProblemPoint{{"M", int64_t{777}}, {"N", int64_t{64}}}};
+
+    const auto corpus = exploreProblemSpace(metadata, request, oracle);
+    const auto& account = corpus.search;
+
+    EXPECT_EQ(corpus.constraintAdmissions, asked) << "every oracle query, and only those";
+    EXPECT_EQ(account.searched, 3);
+    // The pooled shape is fp32's foothold; fp16 and bf16 accepted no given seed, and of those
+    // fp16 found one by drawing and bf16 nothing.
+    EXPECT_GE(account.seedsAccepted, 1);
+    EXPECT_EQ(account.noSeedAccepted, 2);
+    EXPECT_EQ(account.recoveredByDraws, 1);
+    EXPECT_EQ(account.foundNothing, 1);
+    EXPECT_GT(account.drawsAccepted, 0);
+    EXPECT_GT(account.drawChecks, account.drawsAccepted);
+    EXPECT_GT(account.walkChecks, 0);
+    // The checks split each first search's oracle calls: given seeds, draws, walk steps.
+    int64_t calls = 0;
+    int64_t givenSeeds = 0;
+    for(const auto& combination : corpus.combinations)
+    {
+        calls += combination.stats.oracleCalls;
+        givenSeeds += combination.stats.callerSeedAttempts;
+    }
+    EXPECT_EQ(account.seedChecks, givenSeeds);
+    EXPECT_EQ(account.seedChecks + account.drawChecks + account.walkChecks, calls);
 }
 
 TEST(TestProblemSpace, TheWalkStartsFromAcrossTheSkeletonNotItsFirstCorner)
@@ -992,6 +1075,81 @@ TEST(TestProblemSpace, EveryArchetypeIsDrawnOnceEvenWhereItsShareRoundsToNone)
               1);
 }
 
+TEST(TestProblemSpace, AnArchetypeDrawIsAdmittedHeldOrRefusedAndCountedOnce)
+{
+    // One archetype the caller already holds, one that breaks the declared N <= M, one the
+    // engine refuses and one it serves: each draw lands in one outcome.
+    const auto metadata = metadataFor(R"({
+      "schema_version": "1.0",
+      "operation": "toy",
+      "parameters": {
+        "M":    { "type": "int64" },
+        "N":    { "type": "int64" },
+        "mode": { "type": "enum", "values": ["a", "b", "c", "d"] }
+      },
+      "stratification_axis": "working_set",
+      "regimes": {},
+      "graph_builder": { "function": "f", "source": "x.hpp", "arguments": [] },
+      "constraints": [ { "<=": ["$q.N", "$q.M"] } ],
+      "archetypes": [
+        { "name": "held",    "values": { "M": [100],  "N": [100] } },
+        { "name": "broken",  "values": { "M": [10],   "N": [500] } },
+        { "name": "refused", "values": { "M": [3000], "N": [100] } },
+        { "name": "served",  "values": { "M": [200],  "N": [50] } }],
+      "mixture": { "archetypes": 0.4, "neighbourhood": 0.0, "exploration": 0.6 }
+    })");
+    const ProblemOracle not3000
+        = [](const ProblemPoint& point) { return std::get<int64_t>(point.at("M")) != 3000; };
+    const ProblemOracle held = [](const ProblemPoint& point) {
+        return std::get<int64_t>(point.at("M")) == 100 && std::get<int64_t>(point.at("N")) == 100;
+    };
+    ExplorationRequest request;
+    request.pointsPerCombination = 10;
+    request.budgetPerCombination = 400;
+    request.seed = 6;
+    const auto corpus = exploreProblemSpace(metadata, request, not3000, held);
+    ASSERT_EQ(corpus.archetypes.size(), 4U);
+
+    for(const auto& tally : corpus.archetypes)
+    {
+        EXPECT_GT(tally.drawn, 0) << tally.name;
+        EXPECT_EQ(tally.drawn,
+                  tally.refusedByConstraints + tally.refusedByOracle + tally.admitted + tally.held)
+            << tally.name;
+    }
+    const auto& heldTally = corpus.archetypes[0];
+    EXPECT_EQ(heldTally.held, heldTally.drawn);
+    EXPECT_EQ(heldTally.admitted, 0) << "the caller's point is not the search's";
+    const auto& broken = corpus.archetypes[1];
+    EXPECT_EQ(broken.refusedByConstraints, broken.drawn);
+    EXPECT_TRUE(broken.refused.empty()) << "the oracle was never asked";
+    const auto& refused = corpus.archetypes[2];
+    EXPECT_EQ(refused.refusedByOracle, refused.drawn);
+    EXPECT_GE(corpus.archetypes[3].admitted, 1);
+}
+
+TEST(TestProblemSpace, ACombinationWhoseArchetypeDrawsAreAllRefusedSaysSoNotThatNoneDescribesIt)
+{
+    const auto metadata = sixteenCombinations(R"([
+        { "name": "refused", "values": { "M": [3000], "N": [100] } }])");
+    const ProblemOracle not3000
+        = [](const ProblemPoint& point) { return std::get<int64_t>(point.at("M")) != 3000; };
+    ExplorationRequest request;
+    request.pointsPerCombination = 10;
+    request.budgetPerCombination = 400;
+    request.seed = 6;
+    const auto corpus = exploreProblemSpace(metadata, request, not3000);
+
+    const auto said = [&corpus](const std::string& words) {
+        const auto& skipped = corpus.skippedCombinations;
+        return std::count_if(skipped.begin(), skipped.end(), [&words](const std::string& line) {
+            return line.find(words) != std::string::npos;
+        });
+    };
+    EXPECT_EQ(said("drawn, all refused"), 16);
+    EXPECT_EQ(said("no declared archetype describes"), 0);
+}
+
 TEST(TestProblemSpace, AnchorScalingNeverShrinksTheFixedQuotasAndNeedsATarget)
 {
     // max(pointsPerCombination, target / combinations): a target the first pass already covers,
@@ -1532,18 +1690,18 @@ TEST_P(TestShippedSdpaConstraints, KeepOnlyProblemsThatAreDistinctAndHaveKeys)
         std::string valueHeadDim = "same";
     };
     const auto admits = [&](const Candidate& c) {
-        ProblemPoint point{{"batch", c.batch},
-                           {"heads", c.heads},
-                           {"heads_kv", c.headsKv},
-                           {"seqlen_q", c.seqlenQ},
-                           {"seqlen_k", c.seqlenK},
-                           {"head_dim", c.headDim},
-                           {"value_head_dim", c.valueHeadDim},
-                           {"is_causal", c.causal},
-                           {"alignment", c.alignment},
-                           {"dtype", std::string("fp16")},
-                           {"layout", c.layout},
-                           {"window", c.window}};
+        const ProblemPoint point{{"batch", c.batch},
+                                 {"heads", c.heads},
+                                 {"heads_kv", c.headsKv},
+                                 {"seqlen_q", c.seqlenQ},
+                                 {"seqlen_k", c.seqlenK},
+                                 {"head_dim", c.headDim},
+                                 {"value_head_dim", c.valueHeadDim},
+                                 {"is_causal", c.causal},
+                                 {"alignment", c.alignment},
+                                 {"dtype", std::string("fp16")},
+                                 {"layout", c.layout},
+                                 {"window", c.window}};
         return detail::satisfiesConstraints(metadata,
                                             test::withDefaultCategoricals(metadata, point));
     };
@@ -1616,18 +1774,18 @@ TEST(TestProblemSpace, TheShippedSdpaFacetInteractionsRefuseWhatIsDegenerateAndA
     };
     const auto admitsFor = [](const std::string& operation, const Candidate& c) {
         const auto metadata = test::shippedOperation(operation);
-        ProblemPoint point{{"batch", int64_t{2}},
-                           {"heads", int64_t{8}},
-                           {"heads_kv", int64_t{2}},
-                           {"seqlen_q", c.seqlenQ},
-                           {"seqlen_k", c.seqlenK},
-                           {"head_dim", int64_t{64}},
-                           {"is_causal", c.causal},
-                           {"dtype", std::string("fp16")},
-                           {"form", c.form},
-                           {"layout", c.layout},
-                           {"scale", c.scale},
-                           {"window", c.window}};
+        const ProblemPoint point{{"batch", int64_t{2}},
+                                 {"heads", int64_t{8}},
+                                 {"heads_kv", int64_t{2}},
+                                 {"seqlen_q", c.seqlenQ},
+                                 {"seqlen_k", c.seqlenK},
+                                 {"head_dim", int64_t{64}},
+                                 {"is_causal", c.causal},
+                                 {"dtype", std::string("fp16")},
+                                 {"form", c.form},
+                                 {"layout", c.layout},
+                                 {"scale", c.scale},
+                                 {"window", c.window}};
         return detail::satisfiesConstraints(metadata,
                                             test::withDefaultCategoricals(metadata, point));
     };
