@@ -387,7 +387,8 @@ built from this file ([TheRock#5230](https://github.com/ROCm/TheRock/pull/5230))
 are what CI actually runs. A pull request to this repository gets the `standard` tier in Multi-Arch
 CI, because TheRock treats any rocm-libraries change as a submodule change. On gfx950, hipBLASLt
 tests run only for a pull request that touches `projects/hipblaslt/`, and they get the same tier as
-gfx94X. Scheduled nightly runs get `comprehensive`. The hipBLASLt ASAN lane drives
+gfx94X. Such a pull request also runs the hipSPARSELt tests on gfx950, because hipSPARSELt builds on
+hipBLASLt. Scheduled nightly runs get `comprehensive`. The hipBLASLt ASAN lane drives
 `hipblaslt-test` directly through [`test/therock/test_hipblaslt.py`](../../test/therock/test_hipblaslt.py)
 with these filters:
 
@@ -712,8 +713,8 @@ tracked as a gap.
 **Trusted gate.** A failure here is a real problem with the change.
 
 - Build on both platforms, which includes the `TensileLogic --check-all` library logic validation
-- Client GTest `standard` tier on gfx94X-dcgpu (Linux) and gfx110X (Windows), and `quick` tier on
-  gfx950-dcgpu (Linux), through Multi-Arch CI
+- Client GTest `standard` tier on gfx94X-dcgpu and gfx950-dcgpu (Linux) and gfx110X (Windows),
+  through Multi-Arch CI
 - The Math CI client suite on gfx90a, gfx942, gfx950 and gfx12, plus the multi-GPU cases on two
   gfx950 GPUs
 - The Math CI sensitive-word scan, the job named `static-analysis`
