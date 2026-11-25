@@ -438,8 +438,9 @@ repos:
       # Every test file is assigned to a CI CTest entry or is listed, with its
       # reason, in rocke.tests.pending_lanes (rocke_pending_lanes_check). An
       # assigned file runs only in a CI job that builds rocKE. The hook also
-      # checks that no host CTest entry runs a test that launches GPU work
-      # (test_gpu_work_placement.py), as rocke_pending_lanes_check does. Needs
+      # runs test_gpu_work_placement.py, as rocke_pending_lanes_check does: no
+      # CTest entry without the GPU lock selects a test module that marks a
+      # test gpu, or that imports a GPU launch entry point and marks none. Needs
       # cmake, ctest and a C++ compiler on PATH. It also reads
       # shared/ctest/parse_ctest_categories.py, but a change to that file alone
       # cannot trigger it: CI checks out only the directories a change touches,

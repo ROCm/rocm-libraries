@@ -952,7 +952,9 @@ runs on each pull request to develop that changes rocKE:
 
 - `rocke-library-reach`: platform's imports of the library packages only shrink;
 - `rocke-pending-lanes`: every test file is assigned to a CI entry or has a
-  recorded reason, and no host CTest entry runs a GPU test;
+  recorded reason, and no CTest entry without the GPU lock selects a test
+  module that marks a test `gpu` (or that imports a GPU launch entry point
+  and marks none);
 - `rocke-compliance`: the files a change adds or edits pass the compliance
   patterns;
 - `rocke-compliance-rules`: when the patterns or their scanner change, the
@@ -1237,7 +1239,7 @@ hip-kernel-provider test tiers, and no check holds them; change them here only.
 times in `tools/entry_times.json` (recorded from CI logs, per operating system)
 and the live CTest registration. It places the cases of each split entry as CI
 does: it collects a pytest entry's tests, and every other split runner (the
-golden runners, `rocke_optimization_barrier_hip_pair`) lists its cases under
+non-pytest entries of G1 and S3) lists its cases under
 `--rocke-list-shard-keys` (`rocke.tests.ci_shard.LIST_KEYS_FLAG`, which
 `add_shard_argument` gives a runner with its shard flag). It places their shard
 keys by their `rocke_shard_cost` marks and the hash, and spreads each shard's
@@ -1259,8 +1261,9 @@ until a Windows run records them. Run `ctest -R '^rocke_entry_time_check$'` in
 kernel launch) carries the `gpu` mark. The host CTest entries deselect it, and
 only a GPU entry runs it: a GPU entry takes the CTest resource lock `rocke_gpu`,
 so a parallel `ctest -j` never runs two of them at once on the one GPU.
-`platform/tests/tools/test_gpu_work_placement.py` refuses a host entry that
-runs a GPU test. A GPU pytest entry limits each test to 120 s
+`platform/tests/tools/test_gpu_work_placement.py` refuses an entry without the
+lock that selects a module marking a test `gpu`, or one importing a GPU launch
+entry point with no test marked; its docstring says what it does not see. A GPU pytest entry limits each test to 120 s
 (`ROCKE_TEST_ITEM_TIMEOUT_GPU` in `platform/tests/cmake/TestTimeouts.cmake`),
 or to its own lower `--timeout`. A test slower than half of that declares its
 slowest measured CI time with `@pytest.mark.rocke_measured_seconds(seconds)`,
@@ -1672,8 +1675,9 @@ works per file. It fails when:
   literal, or a module-level name bound to one) and has no `RUNNER_HARDWARE`
   or whole-file record;
 - a test names the runner lane, or writes a lane reason by hand: a skip reason
-  written at the skip that says "waits for", or names CI or a runner, without
-  the lane helpers;
+  written at the skip that says "waits for" or "waiting on", or names CI or a
+  runner, without the lane helpers, or any string that reads as a lane
+  declaration;
 - an expired record this change touches (the hook's diff base is
   `ROCKE_CHANGE_BASE`, else pre-commit's `--from-ref`, else the merge base with
   origin/develop).
