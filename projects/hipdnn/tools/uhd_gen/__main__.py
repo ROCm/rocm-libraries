@@ -747,6 +747,25 @@ def _resolve_linear_score(args: argparse.Namespace, immediate: bool) -> None:
     args.objective = args.objective or "max"
 
 
+def _require_rows_provenance(recorded: dict, measured: dict, what: str) -> None:
+    """`recorded`, a provenance snapshot, must name the contract the rows were measured
+    under (`hard_provenance`). Their `codegen_revision` is the rows' own: a snapshot that
+    records another one is warned about."""
+    from .provenance import CODEGEN_REVISION, hard_provenance
+
+    if hard_provenance(recorded) != hard_provenance(measured):
+        raise ValueError(f"{what} differs from immediate engine binding")
+    codegen = recorded.get(CODEGEN_REVISION)
+    if codegen is not None and codegen != measured.get(CODEGEN_REVISION):
+        logger.warning(
+            "%s records %s %r, the rows were measured with %r; the model records the rows'",
+            what,
+            CODEGEN_REVISION,
+            codegen,
+            measured.get(CODEGEN_REVISION),
+        )
+
+
 def _immediate_training_rows(
     args: argparse.Namespace, input_path: Path
 ) -> tuple[pd.DataFrame, dict, dict]:
@@ -769,7 +788,9 @@ def _immediate_training_rows(
             f"--group-by-feature is not supported for {ROLE}: a grouped "
             "artifact has no engine-level (per-row) scoring contract"
         )
-    df, binding = training_binding(read_corpus(input_path), args.engine)
+    df, binding, warning = training_binding(read_corpus(input_path), args.engine)
+    if warning:
+        logger.warning("%s", warning)
     # RFC 0019 §13.2: a pick checked wrong is never a label; null is unknown.
     wrong = known_wrong(df)
     if wrong.any():
@@ -785,21 +806,19 @@ def _immediate_training_rows(
         )
     trained_against = binding["trained_against"]
     if args.provenance:
-        recorded = validate_provenance(
-            json.loads(Path(args.provenance).read_text(encoding="utf-8"))
+        _require_rows_provenance(
+            validate_provenance(
+                json.loads(Path(args.provenance).read_text(encoding="utf-8"))
+            ),
+            trained_against,
+            "recorded provenance",
         )
-        if recorded != trained_against:
-            raise ValueError(
-                "recorded provenance differs from immediate engine binding"
-            )
     elif args.descriptor_tree:
-        recorded = snapshot_provenance(
-            Path(args.descriptor_tree), args.engine, args.arch
+        _require_rows_provenance(
+            snapshot_provenance(Path(args.descriptor_tree), args.engine, args.arch),
+            trained_against,
+            "descriptor provenance",
         )
-        if recorded != trained_against:
-            raise ValueError(
-                "descriptor provenance differs from immediate engine binding"
-            )
     if args.group_by is not None and args.group_by != ["benchmark", "device"]:
         raise ValueError(
             "L1 training groups must be benchmark device, never engine/candidate rows"
@@ -837,11 +856,15 @@ def _catalog_training_rows(
     Rows with no measurement, a collection error or a pick checked wrong are dropped, as
     `evaluate` and `knobs` drop them, so the tools agree on which rows exist."""
     from .immediate import LABEL_STATISTIC
-    from .provenance import snapshot_provenance, validate_provenance
+    from .provenance import hard_provenance, snapshot_provenance, validate_provenance
 
     if args.provenance:
-        trained_against = validate_provenance(
-            json.loads(Path(args.provenance).read_text(encoding="utf-8"))
+        # An L2 ranker records no codegen revision (RFC 0019.13): a snapshot copied from a
+        # runtime binding carries one, which would make the UHD 1.2.
+        trained_against = hard_provenance(
+            validate_provenance(
+                json.loads(Path(args.provenance).read_text(encoding="utf-8"))
+            )
         )
     elif args.descriptor_tree:
         arch = (
@@ -1301,7 +1324,7 @@ def _fit_mlp(
 
 
 def _run_train(args: argparse.Namespace) -> int:
-    from .provenance import record_feature_semantics
+    from .provenance import minimum_uhd_version, record_feature_semantics
     from .immediate import ROLE, check_signature_evaluates, validate_signature
 
     immediate = args.role == ROLE
@@ -1506,8 +1529,7 @@ def _run_train(args: argparse.Namespace) -> int:
         if not args.keep_lgbm:
             lgbm_path.unlink()
     descriptor = {
-        # Slot provenance (`slot`, or `kmds` for a slotted engine's L1 model) is a 1.1 feature.
-        "version": "1.1" if {"slot", "kmds"} & set(trained_against) else "1.0",
+        "version": minimum_uhd_version(trained_against),
         "id": uhd_id,
         "name": args.name,
         "adapter": args.adapter,

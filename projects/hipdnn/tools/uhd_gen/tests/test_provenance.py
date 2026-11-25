@@ -10,9 +10,12 @@ import pytest
 from uhd_gen.provenance import (
     ProvenanceError,
     compare_provenance,
+    hard_provenance,
     record_feature_semantics,
     require_feature_semantics,
+    shared_provenance,
     snapshot_provenance,
+    uhd_version_refusal,
     validate_provenance,
 )
 
@@ -210,6 +213,58 @@ def test_a_stale_selector_revision_is_refused_rather_than_scored():
     compare_provenance(trained, {"selector_revision": "aiter-fwd-1"})
     with pytest.raises(ProvenanceError, match="selector_revision"):
         compare_provenance(trained, {"selector_revision": "aiter-fwd-2"})
+
+
+def test_another_compilers_code_objects_are_warned_about_not_refused(caplog):
+    """The runtime binds a model whose codegen_revision differs, and warns."""
+    trained = {"selector_revision": "aiter-fwd-1", "codegen_revision": "cg-A"}
+    compare_provenance(trained, {**trained})
+    assert "codegen_revision" not in caplog.text
+    # A model that records none, as every shipped FlyDSL one, is not checked.
+    compare_provenance({"selector_revision": "aiter-fwd-1"}, {**trained})
+    assert "codegen_revision" not in caplog.text
+    compare_provenance(trained, {**trained, "codegen_revision": "cg-B"})
+    assert "'cg-A'" in caplog.text and "'cg-B'" in caplog.text
+    with pytest.raises(ProvenanceError, match="selector_revision"):
+        compare_provenance(
+            trained, {"selector_revision": "aiter-fwd-2", "codegen_revision": "cg-A"}
+        )
+
+
+@pytest.mark.parametrize(
+    "revisions, shared",
+    [
+        (("cg-A", "cg-A"), "cg-A"),
+        (("cg-A", "cg-B"), None),
+        (("cg-A", None), None),
+        ((None, None), None),
+    ],
+    ids=["one_compiler", "two_compilers", "one_unrecorded", "none_recorded"],
+)
+def test_a_codegen_revision_is_shared_only_when_every_snapshot_records_it(
+    revisions, shared
+):
+    snapshots = [
+        {"selector_revision": "r", **({"codegen_revision": c} if c else {})}
+        for c in revisions
+    ]
+    provenance, warning = shared_provenance(snapshots)
+    assert provenance == {
+        "selector_revision": "r",
+        **({"codegen_revision": shared} if shared else {}),
+    }
+    assert (warning is not None) == (len(set(revisions)) > 1)
+    assert hard_provenance(snapshots[0]) == {"selector_revision": "r"}
+
+
+def test_snapshots_that_differ_beyond_their_codegen_revision_share_nothing():
+    with pytest.raises(ProvenanceError, match="beyond its codegen_revision"):
+        shared_provenance(
+            [
+                {"selector_revision": "r1", "codegen_revision": "cg-A"},
+                {"selector_revision": "r2", "codegen_revision": "cg-A"},
+            ]
+        )
 
 
 def test_feature_semantics_absent_means_revision_1_and_a_mismatch_names_both():
@@ -546,15 +601,24 @@ def _patched(base, patch):
     ids=lambda row: row["name"],
 )
 def test_slot_provenance_is_refused_like_the_loader_refuses_it(row):
-    """The corpus the runtime parser and the packer also run: `trained_against` rows."""
-    trained = _patched(_SLOT_CORPUS["bases"][row["base"]], row["patch"])[
-        "trained_against"
-    ]
+    """The corpus the runtime parser and the packer also run: `trained_against` rows,
+    including the UHD version each member needs (`uhd_version_refusal`, which promote
+    applies)."""
+    document = _patched(_SLOT_CORPUS["bases"][row["base"]], row["patch"])
+    trained = document["trained_against"]
+
+    def check():
+        validated = validate_provenance(trained)
+        refusal = uhd_version_refusal(document["version"], trained)
+        if refusal is not None:
+            raise ProvenanceError(refusal)
+        return validated
+
     if not row.get("reject"):
-        assert validate_provenance(trained) == trained
+        assert check() == trained
         return
     with pytest.raises(ProvenanceError, match=row.get("uhd_gen")):
-        validate_provenance(trained)
+        check()
 
 
 def test_a_slot_ranker_may_omit_the_optional_slot_member():
