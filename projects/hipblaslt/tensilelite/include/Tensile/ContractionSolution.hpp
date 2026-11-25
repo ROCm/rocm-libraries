@@ -495,6 +495,7 @@ namespace TensileLite
         int                    streamKAtomic              = 0;
         size_t                 synchronizerSizePerWG      = 0;
         int                    TDMInst                    = 0;
+        int                    TDMFuse                    = 0;
         int                    temporalHintA              = 0;
         int                    temporalHintB              = 0;
         int                    temporalHintD              = 0;
@@ -531,10 +532,10 @@ namespace TensileLite
                                    : nonTemporalB;
         }
 
+        // TH 3 is LU (last use, non-temporal) on loads but WB (high-priority temporal, kept dirty) on stores.
         int cacheHintD() const
         {
-            return hasTemporalHint ? (temporalHintD == 1 || temporalHintD == 3 ? 4 : 0)
-                                   : NonTemporalD;
+            return hasTemporalHint ? (temporalHintD == 1 ? 4 : 0) : NonTemporalD;
         }
 
         bool hasDynamicAssignment() const

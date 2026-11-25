@@ -64,6 +64,28 @@ static const tensile_params_t& tparams(const config_t& config) {
   return config.has_tensile_params() ? config.tensile() : kDefaultTensile;
 }
 
+// TemporalHint of an operand's global reads as the kernel emits it (gfx1250 TH field).  With
+// TDMFuse 0 one tensor_load_to_lds per wave moves both A and B, and TensileLite keeps the hint only
+// when TemporalHintA == TemporalHintB (Components/NonTemporal.py tdmCacheModifiers), else the
+// default TH_RT.  A hint the config does not carry comes from the cache_hints code (>= 4: NT).
+static int load_temporal_hint(const config_t& config, bool b_operand) {
+  const tensile_params_t& tp = tparams(config);
+  const int ta = tp.temporal_hint_a >= 0 ? tp.temporal_hint_a : (config.cache_hints_a >= 4 ? 1 : 0);
+  const int tb = tp.temporal_hint_b >= 0 ? tp.temporal_hint_b : (config.cache_hints_b >= 4 ? 1 : 0);
+  if ((tp.tdm_inst & 3) == 3 && tp.tdm_fuse == 0) return ta == tb ? ta : 0;
+  return b_operand ? tb : ta;
+}
+
+// TemporalHint of the D stores (and of parallel-reduction partials, which take the D store code).
+static int store_temporal_hint(const config_t& config) {
+  const int td = tparams(config).temporal_hint_d;
+  return td >= 0 ? td : (config.cache_hints_d >= 4 ? 1 : 0);
+}
+
+// gfx1250 has no MALL, so its L2 takes the near-cache half of a hint: NT, LU, NT_RT and NT_HT loads
+// keep their lines at the low retention priority, RT, HT and RT_NT at the regular one.
+static bool l2_low_priority_load(int th) { return th == 1 || th == 3 || th == 4 || th == 6; }
+
 // Threads per wavefront of the kernel: the WavefrontSize it was built with when the config
 // carries it, otherwise the architecture's default.
 static size_t kernel_wavefront_size(const hardware_t& hardware, const config_t& config) {
@@ -1048,12 +1070,44 @@ cache_hit_rates_t estimate_l2_hit_cdna5(const problem_t& problem,
   const double b_load = b_unique * traffic.b_iter_bytes;
   const double load   = a_load + b_load;
   if (unique_bytes) *unique_bytes = load;
-  auto hit = [&](double tiles, double own, double other) {
+  // Retention by TemporalHint (L2 retention microbenchmark): a regular line (RT, HT) keeps its
+  // reuse whatever low-priority fills (NT, LU) arrive, so a low-priority operand does not count
+  // against a regular one's residency. A low-priority line that S tiles read in lockstep loses a
+  // share f x lambda x S^-alpha of the later reads, f being the share of the domain's fills that
+  // are regular, or low-priority and read by no other tile (an operand read by S < 2 tiles counts
+  // (2 - S) of its fills as such).
+  using h          = heuristic_defaults_t;
+  const bool a_low = l2_low_priority_load(load_temporal_hint(config, false));
+  const bool b_low = l2_low_priority_load(load_temporal_hint(config, true));
+  auto unshared    = [&](double tiles) { return std::clamp(2.0 - requests / tiles, 0.0, 1.0); };
+
+  auto hit = [&](double tiles,
+                 double own,
+                 double other,
+                 bool own_low,
+                 bool other_low,
+                 double other_tiles) {
     if (!(own > 0.0)) return 0.0;
-    const double residency = std::min(l2_capacity / (own + other * own / load), 1.0);
-    return residency * std::max(1.0 - tiles / requests, 0.0);
+    const double competing = (other_low && !own_low) ? 0.0 : other * own / load;
+    const double residency = std::min(l2_capacity / (own + competing), 1.0);
+    double share           = std::max(1.0 - tiles / requests, 0.0);
+    if (own_low && share > 0.0) {
+      const double sharers = requests / tiles;
+      const double loss =
+          other_low
+              ? (own * unshared(tiles) + (other > 0.0 ? other * unshared(other_tiles) : 0.0)) /
+                    load * h::GFX1250_L2_LOW_SHARE_LOSS_NT *
+                    std::pow(sharers, -h::GFX1250_L2_LOW_SHARE_LOSS_NT_EXP)
+              : other / load * h::GFX1250_L2_LOW_SHARE_LOSS_RT *
+                    std::pow(sharers, -h::GFX1250_L2_LOW_SHARE_LOSS_RT_EXP);
+      share *= std::max(1.0 - loss, 0.0);
+    }
+    return residency * share;
   };
-  return {hit(a_unique, a_load, b_load), hit(b_unique, b_load, a_load), 0.0, 0.0};
+  return {hit(a_unique, a_load, b_load, a_low, b_low, b_unique),
+          hit(b_unique, b_load, a_load, b_low, a_low, a_unique),
+          0.0,
+          0.0};
 }
 
 /* ---------------------------------------------------------------------------------------- */
@@ -1794,7 +1848,8 @@ static double soft_min(double x, double y, double sharpness) {
 //      blocks, at the measured tensor-DMA (or per-lane) bandwidths.
 //   3. Multicast clusters cut the L2 request bytes.  Every peer still receives its whole tile,
 //      so *delivery_floor bounds the time from below at the measured multicast delivery rates.
-//   4. TemporalHint is not modeled: no isolated measurement explains its effect on GEMMs.
+//   4. TemporalHint: low-priority (NT, LU) operands lose part of their cross-tile reuse and
+//      refetch the rest of the DRAM block of narrow rows (estimate_l2_hit_cdna5 and below).
 // Load latency is charged by compute_tile_latency from *l2_hit_rate, *l2_cycles and the per-
 // iteration bytes; *dram_cycles is the DRAM read time alone.
 static double compute_memory_latency_cdna5(const problem_t& problem,
@@ -1849,20 +1904,23 @@ static double compute_memory_latency_cdna5(const problem_t& problem,
   double Ld_b_l2        = cus * b_l2_wg * std::min(1.0, problem.size.n * context.b_bytes / 128.0);
   double Ld_dram        = cus * ((1.0 - H_a) * traffic.a_iter_bytes * traffic.a_cl_share +
                                 (1.0 - H_b) * traffic.b_iter_bytes * traffic.b_cl_share);
-  // TH_LOAD_NT on both tensor-DMA operands: a row narrower than the DRAM block leaves the rest of the block for
-  // the next K-iterations, which L2 keeps only while little other traffic arrives.
-  if (tdm && (tparams(config).tdm_inst & 3) == 3 && config.cache_hints_a >= 4 &&
-      config.cache_hints_b >= 4 && cus > 0.0) {
+  // A low-priority (NT, LU) tensor-DMA operand: a row narrower than the DRAM block leaves the rest
+  // of the block for the next K-iterations, which L2 keeps only while little other traffic arrives.
+  const bool a_low = l2_low_priority_load(load_temporal_hint(config, false));
+  const bool b_low = l2_low_priority_load(load_temporal_hint(config, true));
+  if (tdm && (tparams(config).tdm_inst & 3) == 3 && (a_low || b_low) && cus > 0.0) {
     const double block = static_cast<double>(h::GFX1250_DRAM_BLOCK_BYTES);
     const double D1    = cus * (a_l2_wg + b_l2_wg) / static_cast<double>(1 << 20);
-    auto refetch = [&](double row) {
+
+    auto refetch = [&](double row, bool low) {
       double f = 1.0;
-      for (int j = 1; row > 0.0 && j < static_cast<int>(block / row); ++j)
+      for (int j = 1; low && row > 0.0 && j < static_cast<int>(block / row); ++j)
         f += 1.0 / (1.0 + std::pow(h::GFX1250_TDM_NT_REFETCH_D0_MIB / (j * D1), h::GFX1250_TDM_NT_REFETCH_N));
       return f;
     };
-    Ld_dram = cus * ((1.0 - H_a) * traffic.a_iter_bytes * traffic.a_cl_share * refetch(a_row) +
-                     (1.0 - H_b) * traffic.b_iter_bytes * traffic.b_cl_share * refetch(b_row));
+    Ld_dram =
+        cus * ((1.0 - H_a) * traffic.a_iter_bytes * traffic.a_cl_share * refetch(a_row, a_low) +
+               (1.0 - H_b) * traffic.b_iter_bytes * traffic.b_cl_share * refetch(b_row, b_low));
   }
 
   // Tensor DMA, measured with tensor loads on gfx1250: a row holds a WGP's DMA path for
@@ -2074,42 +2132,114 @@ static double compute_epilogue_latency_cdna5(const problem_t& problem,
 
   const double writers = static_cast<double>(std::max<size_t>(context.active_cus, 1));
   size_t vw            = vw_full;
-  // Without SourceSwap a 16 B-lane store instruction writes 32 B into each of 16 columns: each instruction
-  // takes longer, the device ceiling is lower (both per TemporalHintD), and a column that is not a whole
-  // number of 128 B lines touches more lines than it fills.
-  const bool d_nt = config.cache_hints_d >= 4;
+  // Without SourceSwap a 16 B-lane store instruction writes 32 B into each of 16 columns: each
+  // instruction takes longer, the device ceiling is lower (both per TemporalHintD), and a tile
+  // column of more than a line that is not a whole number of 128 B lines touches more lines than it
+  // fills.  A column under a line shares its lines with the next tiles' columns and costs only the
+  // instruction's line requests (store_layout).
+  const int d_th        = store_temporal_hint(config);
   auto nonswap_line_eff = [&](double col_bytes) {
     const double line = static_cast<double>(h::CACHE_LINE_BYTES);
-    if (std::fmod(col_bytes, line) == 0.0) return 1.0;
+    if (std::fmod(col_bytes, line) == 0.0 || col_bytes < line) return 1.0;
     double touched = 0.0;
     for (double o = 0.0; o < line; o += h::GFX1250_NONSWAP_STORE_COLUMN_BYTES)
       touched += std::ceil((o + col_bytes) / line);
     return (col_bytes / line) / (touched / (line / h::GFX1250_NONSWAP_STORE_COLUMN_BYTES));
   };
-  // Cycles to store `elems` elements of `elem_bytes` from one WGP at full width (lanes of min(vw x bytes, 16 B));
-  // `rows`: the tile's rows (M) for the non-SourceSwap D layout, 0 for the SourceSwap layout.
-  auto store_clk = [&](double elems, double elem_bytes, size_t rows = 0) {
+  // Share of a non-SourceSwap instruction's line requests beyond one contiguous run.  Its 32 B
+  // column chunks sit M elements apart (D's leading dimension is taken as M): from a pitch of one
+  // line up each takes its own line (16 lines, the fitted case); a narrower pitch packs them into
+  // fewer lines, down to inst_bytes / 128 B (4) for one contiguous run, which stores like the
+  // SourceSwap layout.  Lines are averaged over the instruction start offsets in the matrix
+  // (16-column groups, 32 B row blocks).
+  auto nonswap_sep = [&](double inst_bytes, double elem_bytes) {
+    const double line  = static_cast<double>(h::CACHE_LINE_BYTES);
+    const double chunk = h::GFX1250_NONSWAP_STORE_COLUMN_BYTES;
+    const double pitch = static_cast<double>(M) * elem_bytes;
+    const int cols     = static_cast<int>(inst_bytes / chunk);
+    const double lmin  = inst_bytes / line;
+    if (pitch >= line || !(cols > lmin)) return 1.0;
+    double lines = 0.0;
+    int starts   = 0;
+    for (int g = 0; g < 8; ++g)
+      for (double r = 0.0; r < pitch; r += chunk, ++starts) {
+        double last = -1.0;
+        for (int c = 0; c < cols; ++c) {
+          const double s     = std::fmod(g * cols * pitch + r, line) + c * pitch;
+          const double first = std::max(std::floor(s / line), last + 1.0);
+          const double end   = std::floor((s + chunk - 1.0) / line);
+          if (end >= first) {
+            lines += end - first + 1.0;
+            last = end;
+          }
+        }
+      }
+    return std::clamp((lines / starts - lmin) / (cols - lmin), 0.0, 1.0);
+  };
+  // SourceSwap stores by TemporalHintD (D-store microbenchmark): a wave's instruction takes longer
+  // under NT, HT and WB than under RT; and under RT, HT and WB a 16 B-lane store stream meets a
+  // lower device ceiling where a tile's column chunk (`rows` elements of `elem_bytes`, columns M
+  // elements apart, tile rows MT_M apart) covers whole 128 B lines but only half of a 256 B block.
+  // NT stores write such blocks without the fill.
+  auto th_inst_extra_clk = [&](int th) {
+    return th == 1   ? h::GFX1250_STORE_INST_EXTRA_CLK_NT
+           : th == 2 ? h::GFX1250_STORE_INST_EXTRA_CLK_HT
+           : th == 3 ? h::GFX1250_STORE_INST_EXTRA_CLK_WB
+                     : 0.0;
+  };
+  auto half_block_share = [&](size_t rows, double elem_bytes) {
+    const size_t block = h::GFX1250_DRAM_BLOCK_BYTES, line = h::CACHE_LINE_BYTES;
+    const size_t chunk = static_cast<size_t>(static_cast<double>(rows) * elem_bytes);
+    const size_t col   = static_cast<size_t>(static_cast<double>(M) * elem_bytes);
+    const size_t row0  = static_cast<size_t>(static_cast<double>(MT_M) * elem_bytes);
+    // Measured for columns 0 or 128 B off the block (a column offset that walks through 64 and
+    // 192 B is not).
+    if (chunk == 0 || chunk % line || col % line || row0 % line) return 0.0;
+    size_t half = 0;
+    for (size_t c = 0; c < 8; ++c)
+      for (size_t r = 0; r < 2; ++r) {
+        const size_t o = (c * col + r * row0) % block;
+        half += o % line == 0 && (o != 0 || chunk % block != 0);
+      }
+    return static_cast<double>(half) / 16.0;
+  };
+  // Cycles to store `elems` elements of `elem_bytes` from one WGP at full width (lanes of min(vw x
+  // bytes, 16 B)) with TemporalHint `th`; `rows`: the tile's rows (M), 0 outside the D layout;
+  // `nonswap_layout`: the non-SourceSwap D layout.
+  auto store_clk = [&](double elems, double elem_bytes, size_t rows, bool nonswap_layout, int th) {
     if (!(elems > 0.0)) return 0.0;
     const double lane_bytes = std::min(static_cast<double>(vw) * elem_bytes,
                                        static_cast<double>(h::EPILOGUE_BYTES_PER_VECTORIZED_STORE));
     const double inst_bytes = lanes * lane_bytes;
     const double bytes      = elems * elem_bytes;
-    const bool nonswap      = rows > 0 && lane_bytes == h::EPILOGUE_BYTES_PER_VECTORIZED_STORE;
-    const double extra_clk  = !nonswap ? 0.0
-                              : d_nt   ? h::GFX1250_NONSWAP_STORE_EXTRA_CLK_NT
+    const bool nonswap     = nonswap_layout && lane_bytes == h::EPILOGUE_BYTES_PER_VECTORIZED_STORE;
+    const double extra_clk = !nonswap  ? (nonswap_layout ? 0.0 : th_inst_extra_clk(th))
+                             : th == 1 ? h::GFX1250_NONSWAP_STORE_EXTRA_CLK_NT
                                        : h::GFX1250_NONSWAP_STORE_EXTRA_CLK_RT;
-    const double peak       = !nonswap ? h::GFX1250_STORE_PEAK_B_PER_CLK
-                              : d_nt   ? h::GFX1250_NONSWAP_STORE_PEAK_B_PER_CLK_NT
+    const double peak      = !nonswap  ? h::GFX1250_STORE_PEAK_B_PER_CLK
+                             : th == 1 ? h::GFX1250_NONSWAP_STORE_PEAK_B_PER_CLK_NT
                                        : h::GFX1250_NONSWAP_STORE_PEAK_B_PER_CLK_RT;
+    // Non-SourceSwap: the extra time and the lower ceiling apply to the share of line requests
+    // beyond a run.
+    const double sep = nonswap ? nonswap_sep(inst_bytes, elem_bytes) : 1.0;
+    const double ceiling =
+        sep < 1.0 ? 1.0 / ((1.0 - sep) / h::GFX1250_STORE_PEAK_B_PER_CLK + sep / peak) : peak;
     // The wave and WGP rates are the WGP's own (the same on the 8- and 6-XCD parts); only the
     // device ceiling scales with the part's DRAM peak.
     const double wgp_rate =  // B/clk
-        1.0 / ((h::GFX1250_STORE_INST_CLK + extra_clk + inst_bytes / h::GFX1250_STORE_WAVE_B_PER_CLK) /
+        1.0 / ((h::GFX1250_STORE_INST_CLK + sep * extra_clk +
+                inst_bytes / h::GFX1250_STORE_WAVE_B_PER_CLK) /
                    (waves * inst_bytes) +
                1.0 / h::GFX1250_STORE_WGP_B_PER_CLK);
-    double device = soft_min(writers * wgp_rate, peak * scale, h::GFX1250_STORE_SHARPNESS);
-    if (nonswap) device *= nonswap_line_eff(static_cast<double>(rows) * elem_bytes);
-    return bytes / (device / writers);
+    double device = soft_min(writers * wgp_rate, ceiling * scale, h::GFX1250_STORE_SHARPNESS);
+    if (nonswap)
+      return bytes / (device * nonswap_line_eff(static_cast<double>(rows) * elem_bytes) / writers);
+    const double half =
+        (!nonswap_layout && th != 1 && lane_bytes == h::EPILOGUE_BYTES_PER_VECTORIZED_STORE)
+            ? half_block_share(rows, elem_bytes)
+            : 0.0;
+    const double half_device = std::min(device, h::GFX1250_STORE_HALF_BLOCK_PEAK_B_PER_CLK * scale);
+    return bytes * ((1.0 - half) / device + half / half_device) * writers;
   };
   // Extra time of a wave's edge-path store instruction of `lane_bytes` per lane, cycles.
   auto edge_extra_clk = [&](double lane_bytes) {
@@ -2132,7 +2262,7 @@ static double compute_epilogue_latency_cdna5(const problem_t& problem,
     // The D store path with elements of `elem_bytes`: the full-width store in the kernel's lane layout plus,
     // on an edge path, the extra time of each edge-path store instruction (lanes of min(ew x bytes, 16 B)).
     auto store_path_clk = [&](double elem_bytes) {
-      double clk = store_clk(elems, elem_bytes, nonswap ? tm : 0);
+      double clk = store_clk(elems, elem_bytes, tm, nonswap, d_th);
       if (m_path || tn < MT_N) {
         const double lane_bytes = std::min(static_cast<double>(ew) * elem_bytes,
                                            static_cast<double>(h::EPILOGUE_BYTES_PER_VECTORIZED_STORE));
@@ -2156,8 +2286,9 @@ static double compute_epilogue_latency_cdna5(const problem_t& problem,
     const double partials   = n_partials * elems * ws;
     const double owners     = std::max(writers / static_cast<double>(context.splitting_factor), 1.0);
     const double read_bw    = std::min(h::GFX1250_LANE_LOAD_WGP_B_PER_CLK, h::GFX1250_LANE_LOAD_L2_B_PER_CLK / owners);
-    return store_clk(elems, ws) + (h::GFX1250_DRAM_LATENCY_CLK + n_partials * h::GFX1250_SK_FIXUP_HANDSHAKE_CLK +
-                                   partials / read_bw + t);
+    return store_clk(elems, ws, 0, false, 0) +
+           (h::GFX1250_DRAM_LATENCY_CLK + n_partials * h::GFX1250_SK_FIXUP_HANDSHAKE_CLK +
+            partials / read_bw + t);
   };
 
   // A grid within one wave finishes with its slowest tile; a longer one averages the tile types.

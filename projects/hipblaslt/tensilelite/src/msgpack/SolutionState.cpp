@@ -1741,6 +1741,7 @@ namespace TensileLite
             s.HalfPLR              = int(d.integer("HalfPLR", 0));
             s.PrefetchGL2          = int(d.integer("PrefetchGL2", 0));
             s.TDMInst              = int(d.integer("TDMInst", 0));
+            s.TDMFuse              = int(d.integer("TDMFuse", 0));
             s.Multicast            = int(d.truthy("Multicast", false));
             assignSequence(d["ClusterDim"], s.clusterDim);
             // Rejects the StreamKAtomic of a state that is not StreamK.

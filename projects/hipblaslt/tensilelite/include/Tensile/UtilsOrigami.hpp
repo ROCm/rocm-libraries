@@ -160,6 +160,10 @@ namespace TensileLite
                 .half_plr                    = sm.HalfPLR,
                 .multicast                   = sm.Multicast != 0,
                 .adaptive_gemm               = sm.adaptiveGemm,
+                .temporal_hint_a             = sm.hasTemporalHint ? sm.temporalHintA : -1,
+                .temporal_hint_b             = sm.hasTemporalHint ? sm.temporalHintB : -1,
+                .temporal_hint_d             = sm.hasTemporalHint ? sm.temporalHintD : -1,
+                .tdm_fuse                    = sm.TDMFuse,
             },
         };
     }

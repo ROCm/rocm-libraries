@@ -327,13 +327,14 @@ ORIGAMI_EXPORT dim4_t count_unique_tiles_timestep(const dim4_t& grid,
  * context.wgm.wgm, the workgroup mapping: slab width, negative for column-major slabs; 0 is
  * priced as 1).  A cluster kernel overrides it with its column-major cluster slab.
  * @param unique_bytes If set, receives the A + B bytes of the domain's distinct tiles.
+ * The operands' TemporalHints set their L2 retention class (see load_temporal_hint in gemm.cpp).
  * @return (L2 A, L2 B, MALL A, MALL B) hit rates; there is no MALL, so its rates are 0.
  */
-cache_hit_rates_t estimate_l2_hit_cdna5(const problem_t& problem,
-                                        const hardware_t& hardware,
-                                        const config_t& config,
-                                        const context_t& context,
-                                        double* unique_bytes = nullptr);
+ORIGAMI_EXPORT cache_hit_rates_t estimate_l2_hit_cdna5(const problem_t& problem,
+                                                       const hardware_t& hardware,
+                                                       const config_t& config,
+                                                       const context_t& context,
+                                                       double* unique_bytes = nullptr);
 
 /**
  * @brief Compute the number of matrix instructions required to compute a single MT_MXMT_NXMT_K

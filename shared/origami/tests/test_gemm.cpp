@@ -3367,3 +3367,87 @@ TEST_CASE("GEMM: gfx1250 ranking prices the WGM the host launches", "[gemm][gfx1
   }
   REQUIRE(discriminates);
 }
+
+TEST_CASE("GEMM: gfx1250 TemporalHint as the kernel emits it, by L2 retention class",
+          "[gemm][gfx1250][cache-hints]") {
+  const auto hw = gfx1250_hardware();
+  auto with     = [](origami::config_t c, int tha, int thb, int tdm_fuse) {
+    c.tensile().temporal_hint_a = tha;
+    c.tensile().temporal_hint_b = thb;
+    c.tensile().tdm_fuse        = tdm_fuse;
+    return c;
+  };
+  auto hits = [&](const origami::problem_t& p, const origami::config_t& c) {
+    origami::gemm::context_t ctx(p, hw, c);
+    return origami::gemm::estimate_l2_hit_cdna5(p, hw, c, ctx, nullptr);
+  };
+  const auto base = gfx1250_config(256, 256, 64, 3);
+  // One tile column: no tile reuses an A slab (A streams), every tile reads the same B slab.
+  const auto skinny = make_problem(256 * 256, 256, 8192);
+  const auto rt     = hits(skinny, with(base, 0, 0, 0));
+  REQUIRE(std::get<1>(rt) > 0.9);
+
+  // TDMFuse 0: A and B share one tensor_load_to_lds, which carries a hint only when both agree.
+  for (int tha = 0; tha < 8; ++tha)
+    for (int thb = 0; thb < 8; ++thb)
+      if (tha != thb) REQUIRE(hits(skinny, with(base, tha, thb, 0)) == rt);
+  // NT and LU lines are low priority: the shared B slab loses part of its reuse to the streaming A
+  // fills; HT and RT_NT keep the regular priority (the L2 is gfx1250's near cache).
+  const auto nt = hits(skinny, with(base, 1, 1, 0));
+  REQUIRE(std::get<1>(nt) < std::get<1>(rt) - 0.01);
+  REQUIRE(hits(skinny, with(base, 3, 3, 0)) == nt);
+  REQUIRE(hits(skinny, with(base, 2, 2, 0)) == rt);
+  REQUIRE(hits(skinny, with(base, 5, 5, 0)) == rt);
+  // TH 3 is a value of its own: the config does not equal its TH 1 twin.
+  REQUIRE_FALSE(with(base, 3, 3, 0) == with(base, 1, 1, 0));
+  REQUIRE(with(base, 3, 3, 0).hash() != with(base, 1, 1, 0).hash());
+  // A config without raw hints takes the cache_hints code (>= 4: NT).
+  auto coded          = base;
+  coded.cache_hints_a = coded.cache_hints_b = 4;
+  REQUIRE(hits(skinny, coded) == nt);
+
+  // Separate A and B loads (TDMFuse 1): a regular B next to a low-priority A keeps its reuse, a
+  // low-priority B next to regular A fills loses more of it than next to low-priority ones.
+  const auto b_reg = hits(skinny, with(base, 1, 0, 1));
+  REQUIRE(std::get<1>(b_reg) == Approx(std::get<1>(rt)));
+  const auto b_low = hits(skinny, with(base, 0, 1, 1));
+  REQUIRE(std::get<1>(b_low) < std::get<1>(nt));
+
+  // Lockstep reuse of a square grid: both operands shared by many tiles, nothing streams, so NT
+  // keeps it.
+  const auto square = make_problem(8192, 8192, 8192);
+  const auto sq_rt = hits(square, with(base, 0, 0, 0)), sq_nt = hits(square, with(base, 1, 1, 0));
+  REQUIRE(std::get<0>(sq_nt) == Approx(std::get<0>(sq_rt)));
+  REQUIRE(std::get<1>(sq_nt) == Approx(std::get<1>(sq_rt)));
+}
+
+TEST_CASE("GEMM: gfx1250 TemporalHintD on the SourceSwap D store", "[gemm][gfx1250][cache-hints]") {
+  const auto hw = gfx1250_hardware();
+  auto epi      = [&](const origami::problem_t& p, origami::config_t c, int thd, size_t gwvw) {
+    c.gwvw_d                    = gwvw;
+    c.tensile().temporal_hint_d = thd;
+    origami::gemm::context_t ctx(p, hw, c);
+    return origami::gemm::compute_epilogue_latency(p, hw, c, ctx);
+  };
+  // 64-row tiles: each column chunk is one 128 B line, half of a 256 B block.  With 16 B lanes RT,
+  // HT and WB stores meet the half-block ceiling and NT stores do not; with whole blocks (M x 2 B a
+  // multiple of 256, 256-row tiles) an NT store instruction only takes a little longer.
+  const auto p64  = gfx1250_config(64, 256, 64, 3);
+  const auto p256 = gfx1250_config(256, 256, 64, 3);
+  const auto prob = make_problem(8192, 8192, 64);
+  REQUIRE(epi(prob, p64, 0, 8) > 1.05 * epi(prob, p64, 1, 8));
+  REQUIRE(epi(prob, p256, 1, 8) > epi(prob, p256, 0, 8));
+  REQUIRE(epi(prob, p256, 1, 8) < 1.03 * epi(prob, p256, 0, 8));
+  // A column 128 B off the block puts the 256-row tiles on half blocks too.
+  const auto odd = make_problem(8192 + 64, 8192, 64);
+  REQUIRE(epi(odd, p256, 0, 8) > epi(odd, p256, 1, 8));
+  // HT and WB stores take longer per instruction (most visible with 2 B lanes); WB (TH 3) is not NT
+  // (TH 1).
+  REQUIRE(epi(prob, p256, 3, 1) > epi(prob, p256, 2, 1));
+  REQUIRE(epi(prob, p256, 2, 1) > epi(prob, p256, 0, 1));
+  REQUIRE(epi(prob, p256, 3, 1) > 1.1 * epi(prob, p256, 1, 1));
+  // Without a raw hint the cache_hints code decides.
+  auto coded          = p64;
+  coded.cache_hints_d = 4;
+  REQUIRE(epi(prob, coded, -1, 8) == Approx(epi(prob, p64, 1, 8)));
+}

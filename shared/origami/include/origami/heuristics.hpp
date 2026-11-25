@@ -164,6 +164,26 @@ struct heuristic_defaults_t {
   /// (D0 in MiB; fitted to a tensor-DMA stride microbenchmark).
   static constexpr double GFX1250_TDM_NT_REFETCH_D0_MIB = 34.2;
   static constexpr double GFX1250_TDM_NT_REFETCH_N      = 1.6;
+  /// L2 retention of low-priority (TH NT / LU) lines that S workgroups of an L2 domain read in
+  /// lockstep: a share f x LOSS x S^-EXP of the later reads misses, f being the share of the
+  /// domain's fills that are low-priority and read by no other workgroup (_NT), or regular (RT /
+  /// HT, _RT).  Regular lines lose no reuse to low-priority fills (fitted to an L2 retention
+  /// microbenchmark under the GL2C counters: tensor loads of a shared set next to a streaming set,
+  /// each with its own TH; rms 0.06 / 0.02 of the survival).
+  static constexpr double GFX1250_L2_LOW_SHARE_LOSS_NT     = 1.023;
+  static constexpr double GFX1250_L2_LOW_SHARE_LOSS_NT_EXP = 0.778;
+  static constexpr double GFX1250_L2_LOW_SHARE_LOSS_RT     = 1.201;
+  static constexpr double GFX1250_L2_LOW_SHARE_LOSS_RT_EXP = 0.409;
+  /// Extra time of one wave's SourceSwap D store instruction under TemporalHintD NT / HT / WB over
+  /// RT, cycles; and the device ceiling of RT / HT / WB stores with 16 B lanes onto 256 B blocks a
+  /// column chunk covers only half of (whole 128 B lines), B/clk, which NT stores do not meet
+  /// (fitted to a D-store microbenchmark: column-major tiles, 2-16 B lanes, leading dimension on
+  /// and off the 256 B block, under the GL2C counters).
+  static constexpr double GFX1250_STORE_INST_EXTRA_CLK_NT = 0.88 * 2.4;   // 2.112 clk (0.88 ns)
+  static constexpr double GFX1250_STORE_INST_EXTRA_CLK_HT = 5.53 * 2.4;   // 13.272 clk (5.53 ns)
+  static constexpr double GFX1250_STORE_INST_EXTRA_CLK_WB = 11.42 * 2.4;  // 27.408 clk (11.42 ns)
+  static constexpr double GFX1250_STORE_HALF_BLOCK_PEAK_B_PER_CLK =
+      5051.0 / 2.4;  // 2104.6 B/clk (5051 B/ns)
   /// Extra time of one wave's edge-path store instruction over the full-width store, measured inside real BF16 TN
   /// kernels (AdaptiveGemm twins on M-remainder grids), cycles: M-edge path by lane bytes
   /// (2, 4, 8, 16 B), and the full-width N-only edge path.
