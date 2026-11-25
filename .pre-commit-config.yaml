@@ -403,6 +403,13 @@ repos:
         files: ^projects/rocsparse/scripts/(merge_coverage_info|test_merge_coverage_info)\.py$
         pass_filenames: false
 
+      # The rocke-* hooks below set no stages, so they run at whichever hook
+      # type is installed and in CI's default stage. To run the hooks when you
+      # push rather than at each commit, install them with
+      #   pre-commit install --hook-type pre-push
+      # instead of plain pre-commit install; this moves every hook of this
+      # file, not only rocKE's, to push time. CI runs every hook on each pull
+      # request either way.
       # rocKE layering ratchet: platform's imports of the library packages
       # (kernels, builders, dispatch, benchmarks) may only shrink. It audits
       # the source tree, so the installed rocke_pytest CTest skips it; this
