@@ -26,17 +26,17 @@ _BUILD_ID_SCRIPTS = ("rocke_build_id.cmake", "generate_rocke_build_id.cmake")
 
 def _build_id_generator(test: unittest.TestCase) -> tuple[Path, tuple[str, ...]]:
     """The source tree's ``platform/cmake`` directory and the build-ID generator
-    scripts in it; skip ``test`` without them, as waiting for the source-tree
-    run, or without CMake."""
+    scripts in it; skip ``test`` without them, or without CMake, as waiting
+    for the source-tree run."""
     source_cmake = Path(online._platform_root()) / "cmake"
     reason = (
         "needs CMake and the build-ID generator scripts of a source tree "
         "(platform/cmake)"
     )
-    if not all((source_cmake / name).is_file() for name in _BUILD_ID_SCRIPTS):
+    if not shutil.which("cmake") or not all(
+        (source_cmake / name).is_file() for name in _BUILD_ID_SCRIPTS
+    ):
         skip_until(SOURCE_TREE, reason=reason)
-    if not shutil.which("cmake"):
-        test.skipTest(reason)
     return source_cmake, _BUILD_ID_SCRIPTS
 
 
