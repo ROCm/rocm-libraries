@@ -17,6 +17,13 @@ engine:
   - use_transposed_mask_limit
   - use_transposed_invariant_hoist
   heuristic: native
+  heuristics:
+    sort_kernel_catalog:
+      gfx942:
+      - a2e549a1-351b-4124-8eab-9543fd9c1d59
+      - 9dfd3fbe-af53-4e82-ab3f-1edf1b800333
+  trained_catalog_sha256:
+    gfx942: 9885ca1a3195b820f6b58433a8acabe247cc62d80c269c52f2e3e4c0a6046862
 kmd_fields:
 - name: dtype
   type: string

@@ -171,7 +171,9 @@ struct ForcedClass
 };
 
 /// Every kernel class the catalog ships, forced once on a prefill shape with B > 1 and
-/// Sq != Skv; then cold cases the engine's own ranking serves. For short prefill (1 < Sq <= 64,
+/// Sq != Skv; then cold cases the engine's own ranking serves. With the trained rankers bound,
+/// a cold case accepts any kernel of its graph's cell. The expectations below are the native
+/// score's, which decides when the rankers were not pulled: for short prefill (1 < Sq <= 64,
 /// bf16 at every ratio, fp16 GQA) a narrow kernel; otherwise rocKE's production stack, which
 /// the catalog ships in every cell.
 std::vector<KnobCase> knobCases()
@@ -461,7 +463,23 @@ TEST_P(IntegrationGpuGfx942AttentionUnified2DKnobs,
             << "Captured logs:\n"
             << recorder.getRecordedLogsAsString();
     }
-    EXPECT_NE(std::find(expectedIds.begin(), expectedIds.end(), *selected), expectedIds.end())
+    // Cold: a trained ranker bound for this arch picks whichever kernel of the graph's cell it
+    // ranks fastest, so only the cell is pinned (the CPU reference below still checks the
+    // launch); one that could not rank fell back to declared kernel order, which is a failure
+    // unless the pack left the ranker out because its model.bin was never pulled. Without a
+    // trained ranker the native score decides, and the case's expected class is pinned.
+    const auto decidedBy = testCase.knobs.empty() ? detail::rankingDecidedBy(ENGINE, recorder)
+                                                  : std::optional<std::string>{};
+    if(testCase.knobs.empty())
+    {
+        testing::expectRankerDecided(decidedBy,
+                                     detail::boundRankerLeftOutAsUnpulled(ENGINE),
+                                     recorder.getRecordedLogsAsString());
+    }
+    const auto acceptedIds = decidedBy.has_value()
+                                 ? kernelIdsFor({testCase.name, testCase.shape, {}, {}})
+                                 : expectedIds;
+    EXPECT_NE(std::find(acceptedIds.begin(), acceptedIds.end(), *selected), acceptedIds.end())
         << "selected " << *selected << ". Captured logs:\n"
         << recorder.getRecordedLogsAsString();
 

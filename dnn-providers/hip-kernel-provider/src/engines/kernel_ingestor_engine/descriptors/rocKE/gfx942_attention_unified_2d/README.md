@@ -58,6 +58,39 @@ plan's workspace (`packs/Gfx942AttentionUnified2DGeometry.hpp`).
 - Fixed in every variant: no sliding window, no sinks, no ALiBi, no softcap, no fp8, 32-bit K/V
   addressing (K/V larger than 0x7FFF0000 bytes is declined).
 
+## Trained ranker
+
+On gfx942 the catalog is ranked by trained `sort_kernel_catalog` models, one per metric
+(`tflops`, `time`), bound in the UED's role map as `"gfx942": [<tflops id>, <time id>]` beside
+the native scorer (`default`), which stays the fallback when the models are not pulled. The
+runtime ranks by `tflops` unless `HIPDNN_HEUR_RANKING_METRIC` names another metric. The models
+are under `heuristics/7bd1634d-b1dc-4486-a2e6-7e576b327258/sort_kernel_catalog/gfx942/<metric>/`:
+`heuristic.uhd.json` in git, `model.bin` in DVC (`model.bin.dvc`).
+
+- Trained on 3200 bottom-right SDPA graphs (2880 trained, 320 held out), every kernel of the
+  graph's cell timed on gfx942 (`hipdnn_corpus_gen`, `hipdnn_bench`, `uhd_gen`; the
+  `hipdnn-uhd` skill). The searched part of the shape space is all append (Sq < Skv):
+  `sdpa_fwd` allows bottom-right alignment only for Sq < Skv. Equal-length prefill came in
+  through `--model-shapes`: the stage 7 sweep's 401 shapes plus seeded synthetic Sq = Skv
+  shapes, weighted toward short-context MHA and MQA, where a first round lost to native.
+- Validated on the held-out graphs (never trained on): both models pick the fastest kernel
+  more often than the native scorer and lower its mean regret in nearly every regime; a few
+  graphs run slower than with the native pick. Stage V on gfx942 (`validate_l2.py`,
+  `decide.py l2 --baseline native`): the runtime reads each model, no winner record decides,
+  and the regret gate passes. The PR that shipped them gives the measured ratios.
+- The engine config binds the ids (`engine.heuristics`) and records the fingerprint of the
+  catalog they were trained on (`engine.trained_catalog_sha256`).
+  `tests/test_trained_rankers.py` in the IngestorGenerator fails when the shipped KDP no
+  longer matches: any kernel added, removed, renamed or changed needs a retrain (the skill's
+  `generate.md`), then the new ids and
+  `tools/catalog_fingerprint.py <this bundle>/artifacts/<pack>.kdp.json` in both configs.
+  `TestGfx942AttentionUnified2DModelBinding` (census) fails the build when the runtime would
+  refuse a bound model.
+- A build without `dvc pull -r ingestor` on a `model.bin.dvc` packs the bundle without that
+  model: the pack warns, the model's UHD does not ship, and the engine ranks with the native
+  scorer. Release builds set `HIPKERNELPROVIDER_REQUIRE_DVC_DESCRIPTORS=ON`, which makes it an
+  error.
+
 ## Files
 
 | File | In | Notes |
@@ -67,11 +100,12 @@ plan's workspace (`packs/Gfx942AttentionUnified2DGeometry.hpp`).
 | `gfx942_attention_unified_2d.udd.json` | git | dispatch symbol |
 | `gfx942_attention_unified_2d.ued.json` | git | engine, knobs `tile_size`, `num_warps`, `block_m_per_warp`, `use_mfma_32x32x8`, `use_transposed_qk_32x32`, `use_k_sliced_ring`, `use_q_direct_global`, `use_conflict_free_v_store`, `use_transposed_mask_limit`, `use_transposed_invariant_hoist` |
 | `gfx942_attention_unified_2d.uhd.json` | git | native selector |
+| `heuristics/7bd1634d-b1dc-4486-a2e6-7e576b327258/sort_kernel_catalog/gfx942/{tflops,time}/` | git + DVC | trained rankers: `heuristic.uhd.json` in git, `model.bin` in DVC (`model.bin.dvc`) |
 | `kernel_dtype_matches_graph.umd.json` | git | dtype matcher |
 
 ## Notes
 
-- Fetch `artifacts/` with `dvc pull -r ingestor artifacts.dvc`. See `../../README.md`.
+- Fetch `artifacts/` and the trained rankers with `dvc pull -r ingestor artifacts.dvc heuristics/7bd1634d-b1dc-4486-a2e6-7e576b327258/sort_kernel_catalog/gfx942/*/model.bin.dvc`. See `../../README.md`.
 - The native symbols (`hipkernel.gfx942_attention_unified_2d.*`) are registered in
   `packs/Gfx942AttentionUnified2DNative.cpp`.
 - Changing the KDP changes its md5. Update the `.dvc` pointer in the same commit.
