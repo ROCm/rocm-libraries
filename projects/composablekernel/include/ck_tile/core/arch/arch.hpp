@@ -1610,10 +1610,13 @@ namespace detail {
 // inline asm, so wait_asyncmark() emits no wait for those loads and LDS could be read before
 // they land. Wait on the hardware counter as well. N counts instructions here and marks in
 // wait_asyncmark(); every mark covers at least one instruction, so this wait is never looser.
+// Once the loads are compiler builtins on gfx1250 (the macro 0 or removed), this emits nothing
+// and can be deleted.
 template <index_t N>
 CK_TILE_DEVICE void wait_inline_asm_async_loads()
 {
-#if defined(__gfx125__) && CK_TILE_USE_AMD_LDS_DIRECT_LOAD_INLINE_ASM
+#if defined(__gfx125__) && defined(CK_TILE_USE_AMD_LDS_DIRECT_LOAD_INLINE_ASM) && \
+    CK_TILE_USE_AMD_LDS_DIRECT_LOAD_INLINE_ASM
     __builtin_amdgcn_s_wait_asynccnt(N);
 #endif
 }
