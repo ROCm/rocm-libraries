@@ -9,6 +9,7 @@
  *   _reject_mask_semantics                 rocke_attn_unified_reject_mask_semantics
  *   _reject_mask_on_arch                   (static)
  *   _reject_lse                            (static)
+ *   _reject_additive_bias                  rocke_attn_unified_reject_additive_bias
  *   _reject_fp8_format_arch_mismatch       rocke_attn_unified_reject_fp8_format_arch_mismatch
  *   supports_native_unified_attention_tiled
  *                                          rocke_unified_attention_supports_tiled_2d
@@ -158,6 +159,17 @@ static bool reject_lse(const rocke_unified_attention_problem_t* p,
         return true;
     }
     return false;
+}
+
+bool rocke_attn_unified_reject_additive_bias(const rocke_unified_attention_problem_t* p,
+                                             const char* arch,
+                                             char* reason,
+                                             size_t reason_cap)
+{
+    if(!p->use_additive_bias || rocke_unified_attn_additive_bias_arch(arch))
+        return false;
+    gate_reason(reason, reason_cap, "additive bias is only implemented on gfx942 and gfx950");
+    return true;
 }
 
 bool rocke_attn_unified_reject_fp8_format_arch_mismatch(const rocke_unified_attention_problem_t* p,
@@ -320,11 +332,8 @@ bool rocke_unified_attention_supports_tiled_2d(const rocke_unified_attention_pro
         gate_reason(reason, reason_cap, "gfx1250 tiled 2D does not support softcap yet");
         return false;
     }
-    if(p->use_additive_bias && !streq(arch, "gfx950"))
-    {
-        gate_reason(reason, reason_cap, "additive bias is only implemented on gfx950");
+    if(rocke_attn_unified_reject_additive_bias(p, arch, reason, reason_cap))
         return false;
-    }
     if(streq(arch, "gfx1250"))
     {
         gate_reason(reason, reason_cap, "gfx1250 tiled 2D is not ported to C++");
@@ -367,11 +376,8 @@ bool rocke_unified_attention_supports_tiled_3d(const rocke_unified_attention_pro
        || reject_mask_on_arch(p, arch, reason, reason_cap)
        || rocke_attn_unified_reject_fp8_format_arch_mismatch(p, arch, reason, reason_cap))
         return false;
-    if(p->use_additive_bias && !streq(arch, "gfx950"))
-    {
-        gate_reason(reason, reason_cap, "additive bias is only implemented on gfx950");
+    if(rocke_attn_unified_reject_additive_bias(p, arch, reason, reason_cap))
         return false;
-    }
     if(streq(arch, "gfx942") && rocke_unified_attn_enable_i64_kv_addr_3d(p, arch))
     {
         gate_reason(reason,

@@ -185,8 +185,8 @@ typedef struct rocke_unified_attention_3d_tiled_spec
      * (0 = causal, R > 0 = R keys ahead, -1 = unbounded). */
     bool causal_top_left; /* False */
     int right_bound; /* 0 */
-    /* gfx950 only (the gfx942 spec validator rejects it). Appends four kernel
-     * params. Kept last: inserting a field moves every later one (abi.h). */
+    /* Appends four kernel params (not with strided KV). Kept last: inserting a
+     * field moves every later one (abi.h). */
     bool use_additive_bias; /* False */
 } rocke_unified_attention_3d_tiled_spec_t;
 

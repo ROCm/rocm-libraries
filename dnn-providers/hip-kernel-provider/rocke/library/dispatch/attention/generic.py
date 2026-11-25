@@ -69,7 +69,8 @@ _UNIFIED_CAPABILITY = Capability(
     # between each sequence's KV and query lengths (bottom-right); top-left
     # cross-length selects the ``causal_top_left`` kernel variant on gfx950 and
     # the scalar kernel elsewhere (tiled gates reject it off gfx950). Additive
-    # bias runs on the tiled kernels only; the tiled gate limits it to gfx950.
+    # bias runs on the tiled kernels only; the tiled gate limits it to
+    # ADDITIVE_BIAS_TILED_ARCHES.
     supports_features=ATTENTION_FEATURES | {"attn_bias"},
 )
 # Both unified paths write the optional LSE output; each path's own gate (run

@@ -1227,6 +1227,13 @@ const char* rocke_unified_attn_kv_storage_dtype(const rocke_unified_attention_pr
     return p->use_fp8 ? "fp8e4m3" : NULL;
 }
 
+/* ------------------------------------------------- additive_bias_arch */
+
+bool rocke_unified_attn_additive_bias_arch(const char* arch)
+{
+    return arch_is(arch, "gfx942") || arch_is(arch, "gfx950");
+}
+
 /* ------------------------------------------------- select_2d_waves_per_eu */
 
 /* Python: _select_2d_waves_per_eu(problem). Returns false (Python None) only on
@@ -1457,7 +1464,6 @@ static rocke_attention_tiled_2d_spec_t
     s.has_softcap = (p->softcap > 0);
     s.use_alibi = p->use_alibi;
     s.use_qq_bias = p->use_qq_bias;
-    s.use_additive_bias = p->use_additive_bias; /* gfx950 only, like the Python tail */
     s.num_seqs = p->num_seqs;
     return s;
 }
@@ -1513,6 +1519,8 @@ static rocke_attention_tiled_2d_spec_t
     s.use_register_pv = enable_register_pv(p, arch);
     s.use_fp8_mfma_qk = rocke_unified_attn_enable_fp8_mfma_qk(p, arch, 0, 0);
     s.use_i64_kv_addr = enable_i64_kv_addr(p);
+    /* _additive_bias_spec_fields: only the arches whose spec declares it. */
+    s.use_additive_bias = p->use_additive_bias && rocke_unified_attn_additive_bias_arch(arch);
     return s;
 }
 

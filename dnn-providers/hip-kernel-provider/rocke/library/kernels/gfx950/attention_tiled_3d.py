@@ -244,11 +244,7 @@ class UnifiedAttention3DTiledSpec:
 
     def __post_init__(self):
         require_bool("emit_lse", self.emit_lse)
-        if type(self.use_additive_bias) is not bool:
-            raise ValueError(
-                "use_additive_bias must be a bool, got "
-                f"{type(self.use_additive_bias).__name__}"
-            )
+        require_bool("use_additive_bias", self.use_additive_bias)
         if self.num_segments < 1:
             raise ValueError("num_segments must be >= 1")
         if self.kv_layout not in ("paged", "strided"):

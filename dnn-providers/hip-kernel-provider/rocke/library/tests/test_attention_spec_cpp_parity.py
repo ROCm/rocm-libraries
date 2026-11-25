@@ -318,7 +318,7 @@ def test_3d_hook_rejects_other_arch_and_bad_fields(engine, arch):
     with pytest.raises(NotImplementedError, match=arch):
         hook(p, other)
     biased = hook(dict(p, use_additive_bias=True), arch)
-    assert biased["use_additive_bias"] is (arch == "gfx950")
+    assert biased["use_additive_bias"] is True
     band = dict(p, causal_top_left=True, right_bound=-1)
     if arch == "gfx950":
         spec = hook(band, arch)

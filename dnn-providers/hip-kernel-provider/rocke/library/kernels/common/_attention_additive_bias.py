@@ -1,7 +1,7 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
-"""Additive attention bias for the gfx950 tiled 2D and 3D split-KV kernels and the
-gfx950 and gfx942 dense kernels.
+"""Additive attention bias for the gfx942 and gfx950 tiled 2D and 3D split-KV
+kernels and the gfx950 and gfx942 dense kernels.
 
 The fp32 bias is read at element
 ``seq*batch_stride + q_head*head_stride + q_row*sq_stride + col`` (Sk stride 1;
@@ -34,6 +34,10 @@ from dataclasses import dataclass
 from typing import Any
 
 from rocke.core.ir import F32, I32, I64, IRBuilder, PtrType, Value
+
+# Arches whose tiled 2D and 3D split-KV kernels implement the additive bias; the one
+# list every arch gate, spec build and dispatch candidate reads.
+ADDITIVE_BIAS_TILED_ARCHES = ("gfx942", "gfx950")
 
 # Stride params in ABI order, after the pointer. Shared by the kernel params and
 # the host launcher signature, which packs kernargs by position.

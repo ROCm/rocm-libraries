@@ -21,6 +21,7 @@ from kernels.common.attention_unified import (
     _canonical_arch_for_selection,
     _gfx942_4warp_fast,
     _mask_label,
+    _reject_additive_bias,
     _reject_fp8_format_arch_mismatch,
     _reject_lse,
     _reject_mask_on_arch,
@@ -261,8 +262,9 @@ def _expected_tiled_2d(p: UnifiedAttentionProblem, arch: str):
             return rejected
         if p.softcap > 0:
             return False, "gfx1250 tiled 2D does not support softcap yet"
-        if p.use_additive_bias:
-            return False, "additive bias is only implemented on gfx950"
+        rejected = _reject_additive_bias(p, canon)
+        if rejected is not None:
+            return rejected
         return False, "gfx1250 tiled 2D is not ported to C++"
     return _python_gate(supports_native_unified_attention_tiled, p, arch)
 

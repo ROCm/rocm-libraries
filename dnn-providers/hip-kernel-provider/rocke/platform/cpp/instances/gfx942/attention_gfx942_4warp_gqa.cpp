@@ -1378,6 +1378,12 @@ static rocke_kernel_def_t*
                  "-1e30 max sentinel, no l == 0 guard, fixed 17-argument ABI)");
         return NULL;
     }
+    if(spec->use_additive_bias)
+    {
+        /* This body has no score-bias path; the selectors never route bias here. */
+        fwg_fail(b, ROCKE_ERR_NOTIMPL, "4-warp GQA kernel does not support additive bias");
+        return NULL;
+    }
     if(spec->use_i64_kv_addr)
     {
         fwg_fail(b,

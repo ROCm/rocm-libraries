@@ -406,8 +406,7 @@ rocke_unified_attention_3d_tiled_spec_t
      * non-default one (Python's gfx942 spec class has no such field). */
     s.causal_top_left = p->causal_top_left;
     s.right_bound = p->right_bound;
-    /* Python's tail: additive bias is a gfx950 3D spec field only. */
-    if(arch_is(arch, "gfx950"))
-        s.use_additive_bias = p->use_additive_bias;
+    /* _additive_bias_spec_fields: only the arches whose spec declares it. */
+    s.use_additive_bias = p->use_additive_bias && rocke_unified_attn_additive_bias_arch(arch);
     return s;
 }

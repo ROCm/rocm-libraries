@@ -211,8 +211,8 @@ or are link-resolved-but-forward-declared; the byte-identity path is unaffected.
 
 **Subsystem:** `library/kernels/common/_attention_additive_bias.py`, the `attention_dense` family
 
-The gfx950 unified tiled 2D and 3D split-KV kernels build additive bias in both
-engines (`instance_attention_additive_bias_internal.h` mirrors
+The gfx942 and gfx950 unified tiled 2D and 3D split-KV kernels build additive
+bias in both engines (`instance_attention_additive_bias_internal.h` mirrors
 `_attention_additive_bias.py`), pinned by bias-on cases in
 `rocke_ir_parity_harness.py` and the representative-IR goldens.
 

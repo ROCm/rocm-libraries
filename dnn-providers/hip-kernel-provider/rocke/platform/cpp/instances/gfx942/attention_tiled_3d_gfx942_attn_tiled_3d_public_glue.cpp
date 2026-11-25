@@ -157,13 +157,6 @@ bool rocke_unified_attention_3d_tiled_spec_validate(
                         upper);
         return false;
     }
-    /* The gfx942 Python spec has no additive-bias field, so this message has no
-     * Python counterpart: only a hand-built C spec can carry one. */
-    if(s->use_additive_bias)
-    {
-        rocke_i_set_err(b, ROCKE_ERR_VALUE, "use_additive_bias is not implemented on gfx942 yet");
-        return false;
-    }
     if(s->num_segments < 1)
     {
         rocke_i_set_err(b, ROCKE_ERR_VALUE, "num_segments must be >= 1");
@@ -173,6 +166,11 @@ bool rocke_unified_attention_3d_tiled_spec_validate(
        && !rocke_attn3d_streq(s->kv_layout, "strided"))
     {
         rocke_i_set_err(b, ROCKE_ERR_VALUE, "kv_layout must be 'paged' or 'strided'");
+        return false;
+    }
+    if(rocke_attn3d_strided_kv(s) && s->use_additive_bias)
+    {
+        rocke_i_set_err(b, ROCKE_ERR_VALUE, "strided KV does not support use_additive_bias");
         return false;
     }
     if(rocke_attn3d_strided_kv(s)
@@ -322,6 +320,7 @@ int rocke_unified_attention_3d_tiled_spec_kernel_name(
      *   else "", "sinks" if use_sinks else "",
      *   "sw<sw>" if sw>0 else "", "softcap" if has_softcap else "",
      *   "alibi" if use_alibi else "", "qqb" if use_qq_bias else "",
+     *   "addb" if use_additive_bias else "",
      *   "wkv" if use_wide_kv_load else "",
      *   "dg" if use_decode_grid else "",
      *   "kvcp<policy>" if kv_cache_policy != "all" else "",
@@ -394,6 +393,10 @@ int rocke_unified_attention_3d_tiled_spec_kernel_name(
     if(s->use_qq_bias)
     {
         parts[np++] = "qqb";
+    }
+    if(s->use_additive_bias)
+    {
+        parts[np++] = "addb";
     }
     if(s->use_wide_kv_load)
     {
@@ -663,6 +666,7 @@ bool rocke_gfx942_attn_tiled_3d_config_from_spec(
     out->USE_SINKS = spec->use_sinks;
     out->USE_ALIBI = spec->use_alibi;
     out->USE_QQ_BIAS = spec->use_qq_bias;
+    out->USE_ADDITIVE_BIAS = spec->use_additive_bias;
     out->KV_FP8
         = (spec->kv_storage_dtype != NULL && rocke_attn3d_streq(spec->kv_storage_dtype, "fp8e4m3"));
     out->KV_BYTES = out->KV_FP8 ? 1 : 2;

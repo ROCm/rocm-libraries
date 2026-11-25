@@ -470,10 +470,10 @@ def test_gfx942_spec_matches_python(engine):
 _PY_ONLY_3D_SPEC_FIELDS: dict[str, dict[str, str]] = {"gfx942": {}, "gfx950": {}}
 
 
-# The C 3D spec struct both arches share carries the gfx950 mask band and additive
-# bias.
+# The C 3D spec struct both arches share carries the gfx950 mask band; Python's
+# gfx942 spec class has neither it nor emit_lse.
 _CPP_ONLY_3D_SPEC_FIELDS = {
-    "gfx942": {"causal_top_left", "right_bound", "emit_lse", "use_additive_bias"},
+    "gfx942": {"causal_top_left", "right_bound", "emit_lse"},
     "gfx950": set(),
 }
 

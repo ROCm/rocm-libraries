@@ -12,6 +12,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Mapping, Optional, Tuple
 
+from kernels.common._attention_additive_bias import ADDITIVE_BIAS_TILED_ARCHES
 from kernels.common.attention_split_kv_reduce import split_kv_reduce_spec
 from kernels.common.attention_unified import (
     _GFX942_4WARP_LSE_REFUSAL,
@@ -134,13 +135,18 @@ def _mask_fields(problem: UnifiedAttentionProblem, arch: str) -> dict:
     return fields
 
 
-def additive_bias_geometry_ok(arch: str, knobs: Mapping[str, object]) -> bool:
+def additive_bias_geometry_ok(
+    arch: str, knobs: Mapping[str, object], builder_kind: str = "tiled"
+) -> bool:
     """Whether a tiled geometry, named by its fixed codepath ``knobs``, has an
     additive-bias site. The one rule behind both the candidate's declared
-    ``attn_bias`` feature and the spec build: gfx950 only, and not the
-    non-transposed 32x32 path (``use_mfma_32x32`` without
-    ``use_transposed_qk_32x32``)."""
-    if arch != "gfx950":
+    ``attn_bias`` feature and the spec build: an arch of
+    ``ADDITIVE_BIAS_TILED_ARCHES``, not the 4-warp GQA builder, and not a 32x32
+    atom path (gfx942's 32x32x8, or gfx950's non-transposed 32x32:
+    ``use_mfma_32x32`` without ``use_transposed_qk_32x32``)."""
+    if arch not in ADDITIVE_BIAS_TILED_ARCHES:
+        return False
+    if builder_kind == "gfx942_4warp_gqa" or knobs.get("use_mfma_32x32x8"):
         return False
     return not (
         knobs.get("use_mfma_32x32") and not knobs.get("use_transposed_qk_32x32")
@@ -148,17 +154,23 @@ def additive_bias_geometry_ok(arch: str, knobs: Mapping[str, object]) -> bool:
 
 
 def _bias_fields(
-    problem: UnifiedAttentionProblem, arch: str, knobs: Mapping[str, object]
+    problem: UnifiedAttentionProblem,
+    arch: str,
+    knobs: Mapping[str, object],
+    builder_kind: str = "tiled",
 ) -> dict:
-    """Additive-bias spec field; only the gfx950 tiled specs declare it, and
-    bias-off passes nothing so those specs are unchanged."""
+    """Additive-bias spec field; only the tiled specs of
+    ``ADDITIVE_BIAS_TILED_ARCHES`` declare it, and bias-off passes nothing so
+    those specs are unchanged."""
     if not problem.use_additive_bias:
         return {}
-    if arch != "gfx950":
-        raise ValueError(f"additive bias is gfx950-only, got {arch}")
-    if not additive_bias_geometry_ok(arch, knobs):
+    if arch not in ADDITIVE_BIAS_TILED_ARCHES:
         raise ValueError(
-            "additive bias is not emitted on the non-transposed 32x32 path"
+            f"additive bias is {'/'.join(ADDITIVE_BIAS_TILED_ARCHES)}-only, got {arch}"
+        )
+    if not additive_bias_geometry_ok(arch, knobs, builder_kind):
+        raise ValueError(
+            "additive bias is not emitted on the 4-warp GQA or 32x32 atom paths"
         )
     return {"use_additive_bias": True}
 
@@ -259,7 +271,7 @@ def make_explicit_attention_2d_spec(
     spec = spec_type(
         **_semantic_fields(problem, config.builder_kind),
         **_mask_fields(problem, arch),
-        **_bias_fields(problem, arch, knobs),
+        **_bias_fields(problem, arch, knobs, config.builder_kind),
         num_warps=int(config.num_warps),
         block_m_per_warp=int(config.block_m_per_warp),
         tile_size=int(tile_size),
@@ -292,15 +304,15 @@ def make_explicit_attention_2d_spec(
         ),
         use_k_sliced_ring=bool(getattr(spec, "use_k_sliced_ring", False)),
         use_d256_fast=config.builder_kind == "gfx942_4warp_gqa",
+        # gfx942's gate refuses bias off the narrow path (x8, 4-warp GQA);
+        # gfx950's declares the kwarg but never reads it.
+        use_additive_bias=problem.use_additive_bias,
     )
     if arch == "gfx942":
         support_kwargs.update(
             ring_depth=int(getattr(spec, "ring_depth", 3)),
             k_slice_hd=int(getattr(spec, "k_slice_hd", 32)),
         )
-    # Not passed on gfx950 either: supports_tiled_2d declares use_additive_bias
-    # but never reads it (_bias_fields already raises for non-gfx950, so this
-    # kwarg would only be a second, redundant copy of that rule).
     ok, why = supports(**support_kwargs)
     if not ok:
         raise ValueError(f"unsupported explicit 2D attention config: {why}")
@@ -380,8 +392,8 @@ def make_explicit_attention_3d_specs(
         kv_storage_dtype=segment.kv_storage_dtype,
         arch=arch,
         # Not passed: supports_tiled_3d declares use_additive_bias but never
-        # reads it (_bias_fields already raises for non-gfx950, so this kwarg
-        # would only be a second, redundant copy of that rule).
+        # reads it (_bias_fields already raises outside ADDITIVE_BIAS_TILED_ARCHES, so
+        # this kwarg would only be a second, redundant copy of that rule).
     )
     if not ok:
         raise ValueError(f"unsupported explicit 3D attention config: {why}")

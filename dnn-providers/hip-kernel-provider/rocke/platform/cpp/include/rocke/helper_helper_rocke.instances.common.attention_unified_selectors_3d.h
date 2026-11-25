@@ -80,9 +80,9 @@ bool rocke_unified_attn_kv_lds_swizzle_3d(const rocke_unified_attention_problem_
 
 /* Python: attention_spec_builder._tiled_3d_spec_from_problem(problem, arch) for
  * the gfx942 / gfx950 generic path (_spec_generic_3d). gfx1250 (its own resolver,
- * no C++ gfx1250 tiled 3D) and a NULL arch return the default spec. The
- * gfx950-only Python field use_additive_bias has no slot in the C spec. The
- * caller validates the spec
+ * no C++ gfx1250 tiled 3D) and a NULL arch return the default spec.
+ * use_additive_bias is set only on the arches that implement it
+ * (rocke_unified_attn_additive_bias_arch). The caller validates the spec
  * (rocke_unified_attention_3d_tiled_spec_validate), as Python's spec class does
  * when it is constructed. */
 rocke_unified_attention_3d_tiled_spec_t

@@ -83,6 +83,10 @@ static int make_spec(int idx, rocke_attention_tiled_2d_spec_t* s)
         s->has_waves_per_eu = false;
         s->waves_per_eu = 0;
         break;
+    case 9: /* Additive bias: both engines refuse it (BOTH_REJECTED). */
+        set_shape(s, 128, 32, 32, 8, "bf16", 0, 1, 32);
+        s->use_additive_bias = true;
+        break;
     default:
         return -1;
     }

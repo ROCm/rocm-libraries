@@ -501,8 +501,8 @@ bound. `use_attn_bias=True` adds the `attn_bias` feature and requires an
 `attn_bias_dtype` is `"f32"` (default) or `"q"` (the Q dtype). Broadcast,
 expanded, permuted, and row-padded views are accepted without copies; invalid
 dtype, rank, extent, or key stride raises `ValueError`. (This contract is the
-RDNA WMMA candidates'; the gfx950 unified 2D/3D path also takes a bias, f32
-only, and needs a pinned tuning spec that declares `attn_bias` -- see
+RDNA WMMA candidates'; the gfx942 and gfx950 unified 2D/3D paths also take a
+bias, f32 only, and need a pinned tuning spec that declares `attn_bias` -- see
 `AttentionRequest.use_attn_bias`'s comment in `common.py`.) `emit_lse=True`
 requires a caller-owned FP32 `lse` tensor; direct dispatch accepts
 `[B,Hq,Sq]`, `[Hq,total_q]`, and layout-shaped forms, while the hipDNN graph

@@ -15,6 +15,7 @@ from typing import Callable, Mapping, Optional
 from rocke.dispatch.core import Capability, KernelCandidate, ShapeRange
 from rocke.dispatch.tuning import make_tuned_candidate
 
+from .axes import _CODEPATH_KNOBS
 from .common import (
     ATTENTION_ABI_VERSION,
     ATTENTION_FEATURES,
@@ -29,6 +30,7 @@ from .common import (
     _unified_path_coverage,
 )
 from .dense_rules import DenseSpace, DenseSupports
+from .tuning_specs import additive_bias_geometry_ok
 from .unified_rules import TUNING_ALGORITHM, AttentionGeometryVariant, unified_space
 
 # The dense selectors. gfx942's tuned candidate has a space covering both bodies
@@ -60,12 +62,18 @@ def _tuning_precheck(variant: AttentionGeometryVariant):
     return precheck
 
 
-def make_tuning_candidate(
-    variant: AttentionGeometryVariant, extra_features: frozenset = frozenset()
-) -> KernelCandidate:
-    """One unified tuning candidate. ``extra_features`` are request features the
-    arch module declares for this variant's geometry on top of the common ones
-    (e.g. ``attn_bias``)."""
+def _variant_features(variant: AttentionGeometryVariant) -> frozenset:
+    """Request features of a variant's geometry beyond the common ones: additive
+    bias exactly where the spec build accepts it (``additive_bias_geometry_ok``,
+    the rule ``_bias_fields`` enforces)."""
+    knobs = _CODEPATH_KNOBS.get((variant.arch, variant.codepath), {})
+    if additive_bias_geometry_ok(variant.arch, knobs, variant.builder_kind):
+        return frozenset({"attn_bias"})
+    return frozenset()
+
+
+def make_tuning_candidate(variant: AttentionGeometryVariant) -> KernelCandidate:
+    """One unified tuning candidate."""
 
     def build(spec, arch):
         from .tuning_specs import validate_explicit_fp8_encoding
@@ -130,7 +138,7 @@ def make_tuning_candidate(
                 if variant.builder_kind == "gfx942_4warp_gqa"
                 else ATTENTION_FEATURES | {"lse"}
             )
-            | frozenset(extra_features),
+            | _variant_features(variant),
         ),
         space=unified_space(variant),
         base=_tuning_problem,

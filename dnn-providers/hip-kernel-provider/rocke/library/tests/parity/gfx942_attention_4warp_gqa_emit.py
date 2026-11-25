@@ -138,6 +138,27 @@ _CONFIGS = {
         tile_size=32,
         waves_per_eu=None,
     ),
+    # Additive bias: the body has no score-bias site, so both engines refuse it
+    # (BOTH_REJECTED) instead of building a kernel that drops the bias.
+    9: dict(
+        _ROUTE,
+        head_size=128,
+        block_size=32,
+        num_query_heads=32,
+        num_kv_heads=8,
+        dtype="bf16",
+        sliding_window=0,
+        num_seqs=1,
+        tile_size=32,
+        use_additive_bias=True,
+    ),
+}
+
+# Configs both engines must reject, with the reason each one pins: run_diff
+# requires the regex in both engines' stderr (BOTH_REJECTED alone accepts any
+# reason, a typo included).
+_EXPECTED_REJECTIONS = {
+    9: r"4-warp GQA kernel does not support additive bias",
 }
 
 

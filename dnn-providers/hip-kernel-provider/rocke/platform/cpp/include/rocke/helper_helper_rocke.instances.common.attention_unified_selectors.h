@@ -10,6 +10,7 @@
  *   rocke_unified_attn_select_2d_num_warps       (_select_2d_num_warps)
  *   rocke_unified_attn_select_2d_block_m_per_warp(_select_2d_block_m_per_warp)
  *   rocke_unified_attn_kv_storage_dtype          (_kv_storage_dtype)
+ *   rocke_unified_attn_additive_bias_arch        (ADDITIVE_BIAS_TILED_ARCHES)
  *   rocke_unified_attn_magic_div                 (_magic_div)
  *   rocke_unified_attn_magic_div_mod             (_magic_div_mod)
  *   rocke_unified_attn_q_descriptor              (_q_descriptor)
@@ -97,6 +98,11 @@ int rocke_unified_attn_select_2d_block_m_per_warp(const rocke_unified_attention_
 /* Python: _kv_storage_dtype(problem) -> Optional[str].
  * Returns the literal "fp8e4m3" when use_fp8, else NULL (the Python None). */
 const char* rocke_unified_attn_kv_storage_dtype(const rocke_unified_attention_problem_t* p);
+
+/* ADDITIVE_BIAS_TILED_ARCHES (_attention_additive_bias.py): the arches whose
+ * tiled 2D and 3D split-KV kernels implement the additive bias. `arch` is
+ * canonical; NULL is false. */
+bool rocke_unified_attn_additive_bias_arch(const char* arch);
 
 /* Python: _select_2d_waves_per_eu(problem, arch) -> Optional[int].
  * Writes the selected waves_per_eu into *out_wpe and returns true when the

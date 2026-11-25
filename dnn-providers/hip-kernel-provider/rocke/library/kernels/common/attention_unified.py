@@ -65,6 +65,7 @@ from rocke.helpers.transforms import (
 )
 
 from ._attention_additive_bias import (
+    ADDITIVE_BIAS_TILED_ARCHES,
     ADDITIVE_BIAS_INDEX_LIMIT,
     append_additive_bias_signature,
     check_additive_bias_reach,
@@ -572,6 +573,27 @@ _LSE_ARCHES = ("gfx942", "gfx950")
 _LSE_PATHS = {"3d": "split-KV", "tiled 2D": "tiled 2D"}
 
 
+def _reject_additive_bias(
+    problem: UnifiedAttentionProblem, arch: str
+) -> Optional[Tuple[bool, str]]:
+    """The additive bias exists in the tiled 2D and split-KV kernels of
+    ``ADDITIVE_BIAS_TILED_ARCHES`` only."""
+    if problem.use_additive_bias and arch not in ADDITIVE_BIAS_TILED_ARCHES:
+        return False, (
+            "additive bias is only implemented on "
+            + " and ".join(ADDITIVE_BIAS_TILED_ARCHES)
+        )
+    return None
+
+
+def _additive_bias_spec_fields(problem: UnifiedAttentionProblem, arch: str) -> dict:
+    """``use_additive_bias`` for the specs and ``supports_tiled_*`` of the arches
+    that declare it; the other arches' do not, so they get nothing."""
+    if arch in ADDITIVE_BIAS_TILED_ARCHES:
+        return {"use_additive_bias": problem.use_additive_bias}
+    return {}
+
+
 def _reject_lse(
     problem: UnifiedAttentionProblem, arch: str, path: str
 ) -> Optional[Tuple[bool, str]]:
@@ -604,7 +626,10 @@ _GFX942_4WARP_LSE_REFUSAL = (
 def _scalar_additive_bias_refusal(kind: str) -> str:
     """Why the scalar ``kind`` ("2D" or "3D") kernel refuses an additive-bias
     problem: it has no bias score site, so it would drop the bias silently."""
-    return f"scalar {kind} kernel: additive bias runs on the gfx950 tiled kernels only"
+    return (
+        f"scalar {kind} kernel: additive bias runs on the "
+        f"{'/'.join(ADDITIVE_BIAS_TILED_ARCHES)} tiled kernels only"
+    )
 
 
 def supports_native_unified_attention(
@@ -684,8 +709,9 @@ def supports_native_unified_attention_tiled(
         return rejected
     if arch == "gfx1250" and problem.softcap > 0:
         return False, "gfx1250 tiled 2D does not support softcap yet"
-    if problem.use_additive_bias and arch != "gfx950":
-        return False, "additive bias is only implemented on gfx950"
+    rejected = _reject_additive_bias(problem, arch)
+    if rejected is not None:
+        return rejected
     _, _, supports_tiled_2d = _tiled_2d_impl(arch)
     gfx942_bf16_wide = _enable_gfx942_bf16_flash(problem, arch)
     if gfx942_bf16_wide:
@@ -712,6 +738,7 @@ def supports_native_unified_attention_tiled(
             use_transposed_qk_32x32=True,
             use_k_single_buffer=single_k,
             use_conflict_free_v_store=use_cfvst,
+            use_additive_bias=problem.use_additive_bias,
             # This branch reaches gfx942's gate too, so it needs the same ring
             # parameters as the general path below, or the estimate here sizes a
             # different kernel than _tiled_spec_from_problem builds. Reachable
@@ -765,11 +792,9 @@ def supports_native_unified_attention_tiled(
             if arch == "gfx942"
             else {}
         ),
-        # Additive bias is gfx950-only for now. Passed only for gfx950 for the same
-        # reason as above: no other arch's supports_tiled_2d declares it.
-        **(
-            {"use_additive_bias": problem.use_additive_bias} if arch == "gfx950" else {}
-        ),
+        # Passed only where the arch's supports_tiled_2d declares it, for the
+        # same reason as above.
+        **_additive_bias_spec_fields(problem, arch),
     )
 
 
@@ -792,8 +817,9 @@ def supports_native_unified_attention_3d_tiled(
     rejected = _reject_fp8_format_arch_mismatch(problem, arch)
     if rejected is not None:
         return rejected
-    if problem.use_additive_bias and arch != "gfx950":
-        return False, "additive bias is only implemented on gfx950"
+    rejected = _reject_additive_bias(problem, arch)
+    if rejected is not None:
+        return rejected
     # Rejected here rather than by the spec, so auto dispatch falls back to 2D.
     if arch == "gfx942" and _enable_i64_kv_addr_3d(problem, arch):
         return False, (
@@ -812,9 +838,7 @@ def supports_native_unified_attention_3d_tiled(
         q_dtype=problem.q_dtype,
         kv_storage_dtype=_kv_storage_dtype(problem),
         arch=arch,
-        **(
-            {"use_additive_bias": problem.use_additive_bias} if arch == "gfx950" else {}
-        ),
+        **_additive_bias_spec_fields(problem, arch),
     )
 
 

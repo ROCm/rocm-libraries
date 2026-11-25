@@ -1,9 +1,10 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
-"""A gfx950 ``AttentionRequest(use_attn_bias=True)`` reaches the unified kernels.
+"""A gfx942/gfx950 ``AttentionRequest(use_attn_bias=True)`` reaches the unified
+kernels.
 
 CPU-only: routing, tuning candidates and the explicit binding (with a stub
-runner). The numeric check is ``test_attention_additive_bias_gfx950_numeric.py``.
+runner). The numeric check is ``test_attention_additive_bias_numeric.py``.
 """
 
 from __future__ import annotations
@@ -27,6 +28,7 @@ from dispatch.attention.common import (
 from dispatch.attention.tuning_specs import (
     ExplicitAttention2DConfig,
     ExplicitAttention3DConfig,
+    _bias_fields,
     make_explicit_attention_2d_spec,
     make_explicit_attention_3d_specs,
 )
@@ -53,7 +55,8 @@ def _req(arch="gfx950", **kw) -> AttentionRequest:
         "hdim_v": 128,
         "arch": arch,
         "dtype": "bf16",
-        "mask_type": 1,
+        # Bottom-right causal: the mask every arch's unified kernels implement.
+        "mask_type": 2,
         "num_cus": 256,
         "use_attn_bias": True,
     }
@@ -68,6 +71,7 @@ def _candidate(prefix: str):
 
 
 def _pinned(candidate, **kw) -> AttentionRequest:
+    kw.setdefault("arch", candidate.capability.arches[0])
     return _req(algorithm=candidate.algorithm, spec_id=candidate.spec_id, **kw)
 
 
@@ -77,12 +81,14 @@ class TestRouting(unittest.TestCase):
         self.assertTrue(_tuning_problem(_req()).use_additive_bias)
         self.assertFalse(attention_problem(_req(use_attn_bias=False)).use_additive_bias)
 
-    def test_gfx950_prefill_and_decode_admit_bias(self):
-        for path, kw in (
-            ("2d", {}),
-            ("3d", {"seqlen_q": 1, "seqlen_k": 8192}),
+    def test_prefill_and_decode_admit_bias(self):
+        for arch, path, kw in (
+            (arch, path, kw)
+            for arch in ("gfx942", "gfx950")
+            for path, kw in (("2d", {}), ("3d", {"seqlen_q": 1, "seqlen_k": 8192}))
         ):
-            with self.subTest(path=path):
+            with self.subTest(arch=arch, path=path):
+                kw = {"arch": arch, **kw}
                 result = dispatch_attention(_req(**kw))
                 self.assertEqual(result.candidate.name, f"attention_unified_{path}")
                 self.assertEqual(result.spec.path, path)
@@ -127,9 +133,12 @@ class TestRouting(unittest.TestCase):
                 _req(attn_bias_dtype="q"),
                 r"attention_unified_2d: [^;]*f32 additive bias only",
             ),
-            "gfx942": (
-                _req(arch="gfx942"),
-                r"attention_unified_2d: [^;]*additive bias is only implemented on gfx950",
+            "gfx1250": (
+                _req(arch="gfx1250"),
+                (
+                    r"attention_unified_2d: [^;]*additive bias is only implemented "
+                    r"on gfx942 and gfx950"
+                ),
             ),
             # gfx950 decodes fp8 K/V as OCP; declaring fnuz-quantised K/V here
             # is a format mismatch that must be refused with or without bias
@@ -182,6 +191,9 @@ class TestTuningCandidates(unittest.TestCase):
             "attention_gfx950_u2d_narrow_nw2_mw16_t4xb_llvm",
             "attention_gfx950_u2d_transposed32_nw2_mw32_t2xb_llvm",
             "attention_gfx950_u3d_splitkv_seg16_t1xb",
+            "attention_gfx942_u2d_narrow_nw2_mw16_t4xb_llvm",
+            "attention_gfx942_u2d_narrow_nw2_mw32_t1xb_llvm",
+            "attention_gfx942_u3d_splitkv_seg16_t1xb",
         ):
             candidate = _candidate(prefix)
             with self.subTest(candidate=candidate.name):
@@ -202,10 +214,29 @@ class TestTuningCandidates(unittest.TestCase):
                 self.assertEqual(plain.tuning_id, spec.tuning_id)
                 self.assertNotEqual(plain.cache_key(), spec.cache_key())
 
+    def test_bias_off_gfx942_identity_omits_the_field(self):
+        # gfx942 tuning ids and kernel cache keys were stored before its specs
+        # had the field, so a bias-off key leaves it out; gfx950's keys were
+        # stored with it and keep it.
+        for prefix, has_field in (
+            ("attention_gfx942_u2d_narrow_nw2_mw16_t4xb_llvm", False),
+            ("attention_gfx942_u3d_splitkv_seg16_t1xb", False),
+            ("attention_gfx950_u2d_narrow_nw2_mw16_t4xb_llvm", True),
+        ):
+            candidate = _candidate(prefix)
+            with self.subTest(candidate=candidate.name):
+                plain = candidate.select_spec(_pinned(candidate, use_attn_bias=False))
+                names = {name for name, _ in plain.cache_key()[4]}
+                self.assertEqual("use_additive_bias" in names, has_field)
+                biased = candidate.select_spec(_pinned(candidate))
+                self.assertIn(("use_additive_bias", "True"), set(biased.cache_key()[4]))
+
     def test_non_bias_geometries_refuse_bias(self):
         for prefix in (
             "attention_gfx950_u2d_wide32_nw2_mw32_t2xb_llvm",
-            "attention_gfx942_u2d_narrow_nw1_mw16_t1xb_llvm",
+            "attention_gfx942_u2d_wide32x8_nw2_mw32_t2xb_llvm",
+            "attention_gfx942_u2d_transposed_x8_nw2_mw32_t2xb_llvm",
+            "attention_gfx942_u2d_gfx942_4warp",
         ):
             candidate = _candidate(prefix)
             with self.subTest(candidate=candidate.name):
@@ -219,14 +250,34 @@ class TestTuningCandidates(unittest.TestCase):
                 )
                 self.assertTrue(ok, why)
 
-    def test_explicit_spec_is_gfx950_only(self):
+    def test_explicit_spec_on_gfx942_and_gfx950_only(self):
         problem = replace(attention_problem(_req()), use_additive_bias=True)
         config = ExplicitAttention2DConfig(
             num_warps=1, block_m_per_warp=16, tile_policy="1x"
         )
-        spec = make_explicit_attention_2d_spec(problem, config, arch="gfx950")
-        self.assertTrue(spec.use_additive_bias)
-        with self.assertRaisesRegex(ValueError, "gfx950-only"):
+        for arch in ("gfx942", "gfx950"):
+            with self.subTest(arch=arch):
+                spec = make_explicit_attention_2d_spec(problem, config, arch=arch)
+                self.assertTrue(spec.use_additive_bias)
+        with self.assertRaisesRegex(ValueError, "gfx942/gfx950-only"):
+            _bias_fields(problem, "gfx1201", {})
+
+    def test_explicit_gfx942_4warp_spec_refuses_bias(self):
+        # An explicit 4-warp GQA spec with bias is rejected up front, not by
+        # build_gfx942_4warp_gqa at build time. The same config without bias is
+        # accepted.
+        problem = attention_problem(
+            _req(arch="gfx942", hdim_q=256, hdim_v=256, nhead_k=2)
+        )
+        config = ExplicitAttention2DConfig(
+            num_warps=1,
+            block_m_per_warp=32,
+            tile_policy="64",
+            builder_kind="gfx942_4warp_gqa",
+        )
+        plain = replace(problem, use_additive_bias=False)
+        make_explicit_attention_2d_spec(plain, config, arch="gfx942")
+        with self.assertRaisesRegex(ValueError, "4-warp GQA or 32x32 atom paths"):
             make_explicit_attention_2d_spec(problem, config, arch="gfx942")
 
     def test_spec_build_applies_the_shared_bias_geometry_rule(self):
@@ -241,21 +292,20 @@ class TestTuningCandidates(unittest.TestCase):
         # shared rule must be what raises.
         with self.assertRaisesRegex(
             ValueError,
-            "additive bias is not emitted on the non-transposed 32x32 path",
+            "additive bias is not emitted on the 4-warp GQA or 32x32 atom paths",
         ):
             make_explicit_attention_2d_spec(problem, config, arch="gfx950")
 
     def test_declared_bias_support_matches_the_kernel(self):
-        # _variant_features (gfx950_unified.py) declares "every gfx950
-        # geometry except wide32 takes a bias" as a fact about the kernel,
-        # but the kernel is what actually decides that (the spec rejects bias
-        # on the non-transposed 32x32 path). test_attention.py's frozen-
-        # feature test re-derives the same rule from the candidate name
-        # (``"_wide32_" not in candidate.name``), so it agrees with the code
-        # by construction. Build each variant's own explicit spec directly
-        # (bypassing capability/admits) and check it against the kernel
-        # builder's own verdict, not the name.
+        # candidate._variant_features declares which geometries take a bias as a
+        # fact about the kernel, but the kernel is what actually decides that
+        # (the spec rejects bias on the 32x32 atom paths). test_attention.py's
+        # frozen-feature test re-derives the same rule from the candidate name,
+        # so it agrees with the code by construction. Build each variant's own
+        # explicit spec directly (bypassing capability/admits) and check it
+        # against the kernel builder's own verdict, not the name.
         from dispatch.attention.axes import _CODEPATH_KNOBS
+        from dispatch.attention.gfx942_unified import GFX942_TUNING_VARIANTS
         from dispatch.attention.gfx950_unified import GFX950_TUNING_VARIANTS
 
         def build(problem, variant):
@@ -272,7 +322,7 @@ class TestTuningCandidates(unittest.TestCase):
                     tile_policy=variant.tile_policy,
                     knobs=fixed_knobs,
                 )
-                make_explicit_attention_3d_specs(problem, config, arch="gfx950")
+                make_explicit_attention_3d_specs(problem, config, arch=variant.arch)
             else:
                 config = ExplicitAttention2DConfig(
                     num_warps=variant.num_warps,
@@ -282,40 +332,48 @@ class TestTuningCandidates(unittest.TestCase):
                     builder_kind=variant.builder_kind,
                     knobs=fixed_knobs,
                 )
-                make_explicit_attention_2d_spec(problem, config, arch="gfx950")
+                make_explicit_attention_2d_spec(problem, config, arch=variant.arch)
 
         bias_problem = replace(attention_problem(_req()), use_additive_bias=True)
         plain_problem = replace(attention_problem(_req()), use_additive_bias=False)
-        self.assertTrue(GFX950_TUNING_VARIANTS)
-        compared = Counter()
-        for variant in GFX950_TUNING_VARIANTS:
-            candidate = _candidate(variant.candidate_name)
-            declared = "attn_bias" in candidate.capability.supports_features
-            with self.subTest(candidate=candidate.name):
-                try:
-                    build(plain_problem, variant)
-                except ValueError:
-                    # This default shape/geometry combination isn't buildable
-                    # at all (e.g. an LDS/tile-size budget miss unrelated to
-                    # bias); it can't tell us anything about bias support.
-                    continue
-                try:
-                    build(bias_problem, variant)
-                    kernel_accepts = True
-                except ValueError:
-                    kernel_accepts = False
-                self.assertEqual(
-                    kernel_accepts,
-                    declared,
-                    f"declared attn_bias={declared} but the kernel "
-                    f"{'accepted' if kernel_accepts else 'refused'} a bias spec",
-                )
-                compared[variant.codepath] += 1
-        # The skip above must not empty a code path: each one, including the
-        # wide32 path that refuses bias, has to be compared at least once.
-        for codepath in ("narrow", "transposed32", "wide32", "splitkv"):
-            with self.subTest(codepath=codepath):
-                self.assertGreater(compared[codepath], 0)
+        for arch, variants in (
+            ("gfx942", GFX942_TUNING_VARIANTS),
+            ("gfx950", GFX950_TUNING_VARIANTS),
+        ):
+            self.assertTrue(variants)
+            compared = Counter()
+            for variant in variants:
+                candidate = _candidate(variant.candidate_name)
+                declared = "attn_bias" in candidate.capability.supports_features
+                with self.subTest(candidate=candidate.name):
+                    try:
+                        build(plain_problem, variant)
+                    except ValueError:
+                        # This default shape/geometry combination isn't buildable
+                        # at all (e.g. an LDS/tile-size budget miss unrelated to
+                        # bias); it can't tell us anything about bias support.
+                        continue
+                    try:
+                        build(bias_problem, variant)
+                        kernel_accepts = True
+                    except ValueError:
+                        kernel_accepts = False
+                    self.assertEqual(
+                        kernel_accepts,
+                        declared,
+                        f"declared attn_bias={declared} but the kernel "
+                        f"{'accepted' if kernel_accepts else 'refused'} a bias spec",
+                    )
+                    compared[variant.codepath] += 1
+            # The skip above must not empty a code path: each one, including
+            # the ones that refuse bias, has to be compared at least once.
+            paths = {
+                "gfx942": ("narrow", "wide32x8", "transposed_x8", "splitkv"),
+                "gfx950": ("narrow", "transposed32", "wide32", "splitkv"),
+            }[arch]
+            for codepath in paths:
+                with self.subTest(arch=arch, codepath=codepath):
+                    self.assertGreater(compared[codepath], 0)
 
 
 class TestBinding(unittest.TestCase):
@@ -336,6 +394,17 @@ class TestBinding(unittest.TestCase):
         tensors["attn_bias"] = bias
         self.candidate.bound_torch(self.req, self.spec, tensors).launch()
         return self.captured
+
+    def test_binds_on_gfx942(self):
+        candidate = _candidate("attention_gfx942_u2d_narrow_nw2_mw16_t4xb_llvm")
+        req = _pinned(candidate)
+        spec = candidate.select_spec(req)
+        tensors = _paged_tensors()
+        bias = _Tensor((1, 1, 1, 1024), "torch.float32")
+        tensors["attn_bias"] = bias
+        candidate.bound_torch(req, spec, tensors).launch()
+        self.assertIs(self.captured["additive_bias"], bias)
+        self.assertTrue(self.captured["tuning_spec"].kernel_spec.use_additive_bias)
 
     def test_binds_bias_and_derives_strides(self):
         cases = {

@@ -554,11 +554,7 @@ class UnifiedAttention2DTiledSpec:
             )
         if self.lse_layout != "token_major" and not self.emit_lse:
             raise ValueError(f"lse_layout={self.lse_layout!r} requires emit_lse")
-        if type(self.use_additive_bias) is not bool:
-            raise ValueError(
-                "use_additive_bias must be a bool, got "
-                f"{type(self.use_additive_bias).__name__}"
-            )
+        require_bool("use_additive_bias", self.use_additive_bias)
         if self.kq_lds_pad_halves < 0:
             raise ValueError(
                 "KQ LDS pad width failed - "

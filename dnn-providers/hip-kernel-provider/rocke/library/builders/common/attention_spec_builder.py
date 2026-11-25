@@ -18,6 +18,7 @@ from dataclasses import replace
 
 from kernels.common.attention_unified import (
     UnifiedAttentionProblem,
+    _additive_bias_spec_fields,
     _has_score_bias,
     _enable_combo_2d,
     _enable_early_v_schedule,
@@ -200,8 +201,9 @@ def _base_2d_generic_fields(problem: UnifiedAttentionProblem, arch: str) -> dict
     ``use_softmax_mfma_interleave`` / ``softmax_interleave_mode`` /
     ``use_k_single_buffer``) and the D256 fast-route override are NOT here -- they
     are the arch-unique tail that lives in ``_spec_gfx950_generic``. Every field
-    below is declared by all the 2D spec classes, so splatting this dict is
-    byte-identical to the inline construction it replaces.
+    below is declared by all the 2D spec classes (``use_additive_bias`` only by
+    those of ``ADDITIVE_BIAS_TILED_ARCHES``, and only for them is it passed), so
+    splatting this dict is byte-identical to the inline construction it replaces.
     """
     combo = _enable_combo_2d(problem, arch)
     combo_no_sw = combo and problem.sliding_window == 0
@@ -245,6 +247,7 @@ def _base_2d_generic_fields(problem: UnifiedAttentionProblem, arch: str) -> dict
         use_register_pv=_enable_register_pv(problem, arch),
         use_fp8_mfma_qk=_enable_fp8_mfma_qk(problem, arch),
         use_i64_kv_addr=_enable_i64_kv_addr(problem),
+        **_additive_bias_spec_fields(problem, arch),
     )
 
 
@@ -298,11 +301,9 @@ def _spec_gfx950_generic(problem: UnifiedAttentionProblem, arch: str):
     if _enable_k_single_buffer(problem, arch):
         _schedule_fields["use_k_single_buffer"] = True
     # Shared base fields + the gfx950-only schedule tail (disjoint keys).
-    # Additive bias is gfx950-only for now, so it lives in the tail too.
     _spec = UnifiedAttention2DTiledSpec(
         **_base_2d_generic_fields(problem, arch),
         **_schedule_fields,
-        use_additive_bias=problem.use_additive_bias,
         causal_top_left=problem.causal_top_left,
         right_bound=problem.right_bound,
     )
@@ -398,10 +399,7 @@ def _spec_generic_3d(problem: UnifiedAttentionProblem, arch: str):
         use_wide_kv_load=_enable_gfx942_3d_wide_kv_load(problem, arch),
         use_i64_kv_addr=_enable_i64_kv_addr_3d(problem, arch),
         use_decode_grid=_use_decode_grid(problem, arch),
-        # Additive bias is gfx950-only for now; gfx942's spec has no such field.
-        **(
-            {"use_additive_bias": problem.use_additive_bias} if arch == "gfx950" else {}
-        ),
+        **_additive_bias_spec_fields(problem, arch),
         **(
             {
                 "kv_cache_policy": _kv_cache_policy_3d(problem, arch),

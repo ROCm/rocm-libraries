@@ -141,6 +141,7 @@ bool rocke_gfx942_attn2d_build_ctx_init(rocke_gfx942_attn2d_build_ctx_t* ctx,
     ctx->USE_SINKS = spec->use_sinks;
     ctx->USE_ALIBI = spec->use_alibi;
     ctx->USE_QQ_BIAS = spec->use_qq_bias;
+    ctx->USE_ADDITIVE_BIAS = spec->use_additive_bias;
 
     ctx->TRANSPOSED_SCALAR_STATE = spec->use_transposed_scalar_state;
     ctx->TRANSPOSED_INVARIANT_HOIST = spec->use_transposed_invariant_hoist;
@@ -172,20 +173,6 @@ bool rocke_gfx942_attn2d_build_ctx_init(rocke_gfx942_attn2d_build_ctx_t* ctx,
     ctx->CONFLICT_FREE_V_STORE = CONFLICT_FREE_V_STORE;
     ctx->K_SINGLE_BUF = spec->use_k_single_buffer;
     const bool K_SLICED_RING = spec->use_k_sliced_ring;
-    /* This shared narrow/default-geometry driver has no additive-bias score
-     * site (that lives only in the gfx950-specific ctx-init/driver). Reject
-     * rather than silently build an ordinary kernel under a biased name --
-     * the real check this mirrors (`rocke_attention_tiled_2d_spec_validate`,
-     * gfx942/attention_tiled_2d.cpp) is unreachable from this build path. */
-    if(spec->use_additive_bias)
-    {
-        b->status = ROCKE_ERR_VALUE;
-        snprintf(b->err,
-                 ROCKE_ERR_MSG_CAP,
-                 "use_additive_bias: the narrow/default tiled-2D driver does not "
-                 "emit additive bias");
-        return false;
-    }
     ctx->K_SLICED_RING = K_SLICED_RING;
     ctx->K_SLICED_LDSSEQ = spec->use_k_sliced_ldsseq;
     ctx->USE_IGLP_OPT = spec->use_iglp_opt;
@@ -361,6 +348,9 @@ bool rocke_gfx942_attn2d_build_ctx_init(rocke_gfx942_attn2d_build_ctx_t* ctx,
         ctx->num_qh_p = rocke_b_param(b, "num_query_heads", rocke_i32(), NULL);
         ctx->num_kv_p = rocke_b_param(b, "num_kv_heads", rocke_i32(), NULL);
         ctx->sliding_window_p = rocke_b_param(b, "sliding_window", rocke_i32(), NULL);
+        /* Appended only when on, so the bias-off ABI and IR are unchanged. */
+        if(spec->use_additive_bias)
+            ctx->additive_bias = rocke_declare_additive_bias_params(b);
         /* Appended LAST and only when requested, so the LSE-off ABI is unchanged. */
         if(spec->emit_lse)
         {
@@ -1012,6 +1002,7 @@ void rocke_gfx942_attn2d_emit_licm_hoist(rocke_gfx942_attn2d_build_ctx_t* ctx)
         ctx->hoist_in_warp_row[reg] = row;
         ctx->hoist_q_pos[reg] = qp_r;
         ctx->hoist_q_head[reg] = qh_r;
+        ctx->hoist_qh_r[reg] = qh_r;
         ctx->hoist_row_mask[reg] = row_ok;
         ctx->hoist_state_row[reg] = causal_lim;
     }

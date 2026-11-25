@@ -198,11 +198,11 @@ class AttentionRequest(OperatorRequest):
     # Dense additive attention bias ``[B|1, H|1, Sq|1, Sk]`` (unit-stride keys)
     # added to the scaled scores; ``attn_bias_dtype`` is "f32" or "q" (the Q
     # dtype) on the RDNA WMMA candidates. A candidate must declare the
-    # "attn_bias" feature. The gfx950 unified 2D/3D path also serves this: it
-    # takes an f32 bias only (q_dtype bias is refused there), needs a pinned
-    # tuning spec that declares attn_bias plus ``tensors["attn_bias"]`` to
-    # bind (every gfx950 geometry except the non-transposed wide32 path
-    # declares it; see gfx950_unified.py's _variant_features).
+    # "attn_bias" feature. The gfx942 and gfx950 unified 2D/3D paths also serve
+    # this: they take an f32 bias only (q_dtype bias is refused there), need a
+    # pinned tuning spec that declares attn_bias plus ``tensors["attn_bias"]``
+    # to bind (every geometry declares it except the 32x32 atom paths and the
+    # gfx942 4-warp GQA builder; see candidate.py's _variant_features).
     use_attn_bias: bool = False
     attn_bias_dtype: str = "f32"
     kv_layout: str = "paged"  # "paged" | "strided" (non-paged decode)
@@ -1003,6 +1003,19 @@ class AttentionSpec:
         return kernel_name_join(*parts)
 
 
+def identity_omit_names(spec_type: type) -> tuple:
+    """Fields a spec class lists in ``_IDENTITY_OMIT_WHEN_OFF``: added after
+    stored ids existed, so identity payloads leave them out while they are off."""
+    return tuple(getattr(spec_type, "_IDENTITY_OMIT_WHEN_OFF", ()))
+
+
+def _identity_omitted(spec) -> frozenset:
+    """The ``_IDENTITY_OMIT_WHEN_OFF`` fields of ``spec`` that are off."""
+    return frozenset(
+        name for name in identity_omit_names(type(spec)) if not getattr(spec, name)
+    )
+
+
 def _dense_kernel_module(arch: str):
     if arch == "gfx950":
         from kernels.gfx950 import attention_dense
@@ -1098,6 +1111,8 @@ class AttentionTuningSpec:
             # ones stored before the fields existed. The RDNA WMMA prefill
             # ``dense_q`` / ``seqused_q`` layout options (from the request's fields
             # of the same names) are left out the same way while they are off.
+            # _identity_omitted does the same for the fields a spec class lists.
+            omitted = _identity_omitted(spec)
             return tuple(
                 (f.name, repr(getattr(spec, f.name)))
                 for f in fields(spec)
@@ -1106,6 +1121,7 @@ class AttentionTuningSpec:
                     and not getattr(spec, f.name)
                 )
                 and not (f.name == "lse_layout" and spec.lse_layout == "token_major")
+                and f.name not in omitted
             )
 
         return (

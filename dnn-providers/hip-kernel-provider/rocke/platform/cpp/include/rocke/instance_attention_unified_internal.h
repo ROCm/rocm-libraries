@@ -323,6 +323,12 @@ bool rocke_attn_unified_reject_mask_semantics(const rocke_unified_attention_prob
                                               char* reason,
                                               size_t reason_cap);
 
+/* _reject_additive_bias(problem, arch). */
+bool rocke_attn_unified_reject_additive_bias(const rocke_unified_attention_problem_t* p,
+                                             const char* arch,
+                                             char* reason,
+                                             size_t reason_cap);
+
 /* _reject_fp8_format_arch_mismatch(problem, arch). */
 bool rocke_attn_unified_reject_fp8_format_arch_mismatch(const rocke_unified_attention_problem_t* p,
                                                         const char* arch,

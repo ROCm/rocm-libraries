@@ -95,7 +95,7 @@ typedef struct rocke_unified_attention_problem
     bool causal_top_left; /* default false (bottom-right diagonal)       */
     int right_bound; /* default 0 (causal); -1 = unbounded           */
     bool emit_lse; /* default false; FP32 LSE output, split-KV only */
-    /* gfx950 tiled kernels only; the scalar path refuses it. Kept last:
+    /* gfx942/gfx950 tiled kernels only; the scalar path refuses it. Kept last:
      * inserting a field moves every later one (abi.h). */
     bool use_additive_bias; /* default false                                */
 } rocke_unified_attention_problem_t;

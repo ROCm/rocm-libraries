@@ -193,9 +193,9 @@ typedef struct rocke_attention_tiled_2d_spec
      * (0 = causal, R > 0 = R keys ahead, -1 = unbounded). */
     bool causal_top_left; /* False */
     int right_bound; /* 0 */
-    /* gfx950 only (on gfx942, rocke_gfx942_attn2d_build_ctx_init rejects it).
-     * Adds four kernel params, before lse_ptr. Kept last: inserting a field
-     * moves every later one (abi.h). */
+    /* Adds four kernel params, before lse_ptr. gfx942: narrow 16x16 path only
+     * (rocke_attention_tiled_2d_spec_validate rejects 32x32x8 and register-PV).
+     * Kept last: inserting a field moves every later one (abi.h). */
     bool use_additive_bias; /* False */
 } rocke_attention_tiled_2d_spec_t;
 

@@ -331,11 +331,8 @@ _CONFIGS = {
         use_conflict_free_v_store=True,
         use_i64_kv_addr=True,
     ),
-    # idx51: additive bias on gfx942; both engines reject it (BOTH_REJECTED).
-    # The gfx942 Python spec has no use_additive_bias field at all, so this
-    # raises TypeError at construction. The C twin's spec validator rejects it
-    # on the build path, and the ctx-init refuses it for a caller that skips
-    # the validator.
+    # idx51-58: additive bias. idx51: on the narrow 16x16 path with sinks and a
+    # sliding window (MHA).
     51: dict(
         head_size=64,
         block_size=32,
@@ -347,17 +344,117 @@ _CONFIGS = {
         has_softcap=False,
         use_additive_bias=True,
     ),
+    # idx52: the narrow 16x16 path (GQA, mw16).
+    52: dict(
+        head_size=128,
+        block_size=16,
+        num_query_heads=16,
+        num_kv_heads=4,
+        dtype="bf16",
+        use_sinks=False,
+        sliding_window=0,
+        has_softcap=False,
+        use_additive_bias=True,
+        num_seqs=3,
+        num_warps=2,
+        tile_size=32,
+    ),
+    # idx53: the narrow path with two M atoms per warp (mw32).
+    53: dict(
+        head_size=64,
+        block_size=32,
+        num_query_heads=32,
+        num_kv_heads=8,
+        dtype="fp16",
+        use_sinks=False,
+        sliding_window=0,
+        has_softcap=False,
+        use_additive_bias=True,
+        num_warps=4,
+        block_m_per_warp=32,
+        tile_size=64,
+    ),
+    # idx54: composed with ALiBi, QQ bias, softcap, sinks and a sliding window (the ALiBi
+    # slope replaces the hoisted query head).
+    54: dict(
+        head_size=64,
+        block_size=32,
+        num_query_heads=32,
+        num_kv_heads=8,
+        dtype="fp16",
+        use_sinks=True,
+        sliding_window=512,
+        has_softcap=True,
+        use_alibi=True,
+        use_qq_bias=True,
+        use_additive_bias=True,
+    ),
+    # idx55: D256 on the narrow path.
+    55: dict(
+        head_size=256,
+        block_size=16,
+        num_query_heads=8,
+        num_kv_heads=8,
+        dtype="bf16",
+        use_sinks=False,
+        sliding_window=0,
+        has_softcap=False,
+        use_additive_bias=True,
+    ),
+    # idx56, 57: additive bias with paths that do not emit it (32x32x8, register-PV); both
+    # engines reject these (BOTH_REJECTED).
+    56: dict(
+        head_size=128,
+        block_size=32,
+        num_query_heads=8,
+        num_kv_heads=1,
+        dtype="bf16",
+        use_sinks=False,
+        sliding_window=0,
+        has_softcap=False,
+        use_additive_bias=True,
+        num_warps=2,
+        block_m_per_warp=32,
+        tile_size=32,
+        use_mfma_32x32x8=True,
+        use_transposed_qk_32x32=True,
+    ),
+    57: dict(
+        head_size=64,
+        block_size=32,
+        num_query_heads=32,
+        num_kv_heads=8,
+        dtype="bf16",
+        use_sinks=False,
+        sliding_window=0,
+        has_softcap=False,
+        use_additive_bias=True,
+        use_register_pv=True,
+    ),
+    # idx58: the narrow path with the LSE output (the bias params come before
+    # lse_ptr).
+    58: dict(
+        head_size=128,
+        block_size=16,
+        num_query_heads=16,
+        num_kv_heads=4,
+        dtype="bf16",
+        use_sinks=False,
+        sliding_window=0,
+        has_softcap=False,
+        use_additive_bias=True,
+        num_warps=2,
+        tile_size=32,
+        emit_lse=True,
+    ),
 }
 
 # Configs both engines must reject, with the reason each one pins: run_diff
 # requires the regex in both engines' stderr (BOTH_REJECTED alone accepts any
 # reason, a typo included).
 _EXPECTED_REJECTIONS = {
-    # The Python gfx942 spec has no bias field, so Python fails on the keyword.
-    51: (
-        r"unexpected keyword argument 'use_additive_bias'"
-        r"|use_additive_bias is not implemented on gfx942"
-    ),
+    56: r"use_additive_bias on gfx942 supports only the narrow 16x16 path",
+    57: r"use_additive_bias on gfx942 supports only the narrow 16x16 path",
 }
 
 # D64 fp16 flash prefill with the transposed VALU stack (scalar state,

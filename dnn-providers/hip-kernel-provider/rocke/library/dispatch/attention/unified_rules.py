@@ -46,6 +46,7 @@ from .common import (
     AttentionRequest,
     AttentionTuningSpec,
     attention_problem,
+    identity_omit_names,
 )
 from .tuning_specs import (
     ExplicitAttention2DConfig,
@@ -361,11 +362,15 @@ class UnifiedSpace(WavesPerEuSpace):
             # The LSE output fields are outputs the caller selects, not defaults
             # that knobs are a delta against: keeping them out of the kernel and
             # the split-KV reduce defaults leaves every config_key, and so every
-            # stored pin, as before the fields existed.
+            # stored pin, as before the fields existed. A field the spec class
+            # omits from its identity while off (see identity_omit_names) is off
+            # in every declared default, so it stays out too.
             "kernel": {
                 name: value
                 for name, value in _declared_defaults(type(kernel.kernel_spec))
-                if name not in recorded and name not in _LSE_OUTPUT_FIELDS
+                if name not in recorded
+                and name not in _LSE_OUTPUT_FIELDS
+                and name not in identity_omit_names(type(kernel.kernel_spec))
             },
             "reduce": (
                 None
