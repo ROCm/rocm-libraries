@@ -113,7 +113,8 @@ const vector<int> large_batch_n_size_range = {
 };
 
 const vector<vector<int64_t>> large_batch_size_range_64 = {
-    {33, 33},
+    {15, 15},
+    {129, 129},
 };
 
 const vector<int64_t> large_batch_n_size_range_64 = {
