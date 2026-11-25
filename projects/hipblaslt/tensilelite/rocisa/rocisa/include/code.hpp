@@ -270,6 +270,23 @@ namespace rocisa
         void                          setMemToken(const std::shared_ptr<MemTokenData>& token);
         std::shared_ptr<MemTokenData> getMemToken() const;
 
+        // Mutable waitcnt accessors (logical-IR migration, §7.5 -- first MUTABLE
+        // leaf). The hot-loop s_waitcnt is built with a placeholder dscnt, then
+        // the scheduler rewrites waitCode.dscnt and appends to waitCode.comment
+        // AFTER the leaf exists (KernelWriter._makeSubIterSchedule: KW:2002/2408/
+        // 3054/3051). Every leaf before this was read-only; a waitcnt leaf must
+        // instead accept post-construction mutation. Writes update the wrapped
+        // logical instruction's swaitcnt[3] / comment (what the logical lowering
+        // emits) AND mirror onto rocisaInst so clone() (cloneLeafDeep rebuilds
+        // from rocisaInst) and sched_rocisa_view stay faithful. Defined
+        // out-of-line in ToStinkyTofuUtils.cpp (LogicalInstruction is complete
+        // there). Exposed to Python as the ``.dscnt`` / ``.comment`` properties so
+        // a leaf is a drop-in for the rocisa SWaitCnt at those mutation sites.
+        int         getWaitDscnt() const;
+        void        setWaitDscnt(int v);
+        std::string getLeafComment() const;
+        void        setLeafComment(const std::string& c);
+
         std::string toString() const override
         {
             return name;

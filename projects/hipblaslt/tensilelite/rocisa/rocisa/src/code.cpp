@@ -197,7 +197,19 @@ void init_code(nb::module_ m)
         // LDS mem-token forwarding (Phase 3 §10.2 A): same signature as rocisa
         // Instruction so a leaf is a drop-in for inst.setMemToken(...).
         .def("setMemToken", &rocisa::LogicalLeaf::setMemToken, nb::arg("token").none())
-        .def("getMemToken", &rocisa::LogicalLeaf::getMemToken);
+        .def("getMemToken", &rocisa::LogicalLeaf::getMemToken)
+        // Mutable waitcnt properties (logical-IR migration, §7.5 -- first mutable
+        // leaf). The scheduler rewrites waitCode.dscnt and appends to
+        // waitCode.comment after the leaf is built, so expose them as read/write
+        // properties forwarding to the wrapped logical instruction (and mirrored
+        // onto rocisaInst). A waitcnt leaf is then a drop-in for the rocisa
+        // SWaitCnt at KernelWriter._makeSubIterSchedule's .dscnt / .comment sites.
+        .def_prop_rw("dscnt",
+                     &rocisa::LogicalLeaf::getWaitDscnt,
+                     &rocisa::LogicalLeaf::setWaitDscnt)
+        .def_prop_rw("comment",
+                     &rocisa::LogicalLeaf::getLeafComment,
+                     &rocisa::LogicalLeaf::setLeafComment);
 
     nb::class_<rocisa::Module, rocisa::Item>(m_code, "Module")
         .def(nb::init<const std::string&>(), nb::arg("name") = "")

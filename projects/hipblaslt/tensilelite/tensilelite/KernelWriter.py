@@ -48,6 +48,7 @@ from .ir import sched_is_mfma, sched_is_smfma, sched_is_mxmfma, sched_is_tensor_
 from .ir import sched_is_ds_load, sched_is_ds_load_b128, sched_is_ds_store, sched_is_waitcnt, sched_is_barrier
 from .ir import sched_is_nop, sched_is_instruction, sched_is_module, sched_is_register_container
 from .ir import sched_rocisa_view
+from .ir import logical_region, maybe_logical_leaf
 from .ir import SSchedulingFence
 from .ir import set_active_version as _set_active_ir_version
 from .ir import set_active_arch_name as _set_active_ir_arch_name
@@ -4432,9 +4433,14 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
             pointerLRCode.add(self.localReadSwapOffsets(kernel, internalPointerSwap, tPM))
 
       # we initiate dscnt to 0, then assigning it correct value in makeSubIterSchedule()
-      waitCode = self._wait(kernel, tensorParametersA, tensorParametersB, \
-          -1, 0, 0, \
-          "wait for prior local read local write")
+      # Flip this non-TDM hot-loop s_waitcnt to a mutable LogicalLeaf (its .dscnt
+      # is rewritten by the scheduler later via the leaf's property, see §7.5).
+      # _wait here always returns a bare SWaitCnt (skipGlobalRead=-1 never routes
+      # to tdmWait); maybe_logical_leaf flips it only while the region is active.
+      with logical_region("hotLoopWait"):
+        waitCode = maybe_logical_leaf(self._wait(kernel, tensorParametersA, tensorParametersB, \
+            -1, 0, 0, \
+            "wait for prior local read local write"))
       # DirectToVgpr case, wait for global read as well as local read/write
       if kernel["DirectToVgprA"] or kernel["DirectToVgprB"]:
         # not generate wait here
@@ -5371,9 +5377,12 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
         pointerLRCode.addComment1("local read init pointers b")
         pointerLRCode.add(self.localReadInitPointers(kernel, tensorParametersA, tensorParametersB))
       if self.getConditionToSkipLocalReadWriteWait(kernel, u):
-        waitCode = self._wait(kernel, tensorParametersA, tensorParametersB, \
-            -1, 0, 0, \
-            "wait for prior local read local write")
+        # Flip the non-TDM hot-loop s_waitcnt to a mutable LogicalLeaf (see the
+        # matching site in noLoadLoopBody); scheduler rewrites .dscnt afterwards.
+        with logical_region("hotLoopWait"):
+          waitCode = maybe_logical_leaf(self._wait(kernel, tensorParametersA, tensorParametersB, \
+              -1, 0, 0, \
+              "wait for prior local read local write"))
 
       luIdx = u % self.states.numVgprBuffer # local to use for MACs
       if kernel["EnableMatrixInstruction"]:

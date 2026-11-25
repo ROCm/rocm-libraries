@@ -236,6 +236,35 @@ std::shared_ptr<MemTokenData> LogicalLeaf::getMemToken() const {
     if (!logicalInst || !logicalInst->memtoken) return nullptr;
     return std::make_shared<MemTokenData>(*logicalInst->memtoken);
 }
+
+// Mutable waitcnt accessors (logical-IR migration, §7.5 -- first mutable leaf).
+// swaitcnt is {vlcnt,vscnt,dlcnt,dscnt,kmcnt,maxLgkmcnt,maxVmcnt}; dscnt is [3].
+// Writes update the logical form (what the lowering emits) and mirror onto the
+// rocisa instruction so clone()/sched_rocisa_view see the rewritten value.
+int LogicalLeaf::getWaitDscnt() const {
+    if (logicalInst && logicalInst->swaitcnt) return (*logicalInst->swaitcnt)[3];
+    if (const auto* w = dynamic_cast<const SWaitCnt*>(rocisaInst.get())) return w->dscnt;
+    return -1;
+}
+
+void LogicalLeaf::setWaitDscnt(int v) {
+    if (logicalInst) {
+        if (!logicalInst->swaitcnt)
+            logicalInst->swaitcnt = std::array<int, 7>{-1, -1, -1, -1, -1, -1, -1};
+        (*logicalInst->swaitcnt)[3] = v;
+    }
+    if (auto* w = dynamic_cast<SWaitCnt*>(rocisaInst.get())) w->dscnt = v;
+}
+
+std::string LogicalLeaf::getLeafComment() const {
+    if (logicalInst) return logicalInst->comment;
+    return rocisaInst ? rocisaInst->comment : std::string();
+}
+
+void LogicalLeaf::setLeafComment(const std::string& c) {
+    if (logicalInst) logicalInst->comment = c;
+    if (rocisaInst) rocisaInst->comment = c;
+}
 }  // namespace rocisa
 
 namespace {
