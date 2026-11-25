@@ -38,8 +38,7 @@ loads of C. _emitNonatomicAdd stages the D of every batch with emitTDMStoreStagi
 runs after the last batch, or after the CompactLoopStore loop.
 generateBetaModules picks the blocks with tdmStoreBlocks; Solution checks a configuration
 with tdmStoreRejectReason and its store vectors with tdmStoreVectorRejectReason, and reserves the staged tile with
-tdmStoreLdsBytes, at _TDMStoreLdsOffset after the epilogue vectors, over the main-loop buffers
-(_TDMStoreOverMainLoop).
+tdmStoreLdsBytes, at _TDMStoreLdsOffset after the epilogue vectors, over the main-loop buffers.
 """
 
 from math import log2
@@ -94,9 +93,9 @@ def tdmStoreRejectReason(state):
   before the epilogue; with TDM loads they are tensor_load_to_lds, and a wave's TENSORcnt completes in issue order,
   so the s_wait_tensorcnt 0 of the C load and of the store would also wait for that prefetch and leave it nothing
   to hide. That case motivates the reject, which applies whichever instructions load A and B, so TDMStoreInst has
-  a single rule for PrefetchAcrossPersistent, and the staged tile always lies over the main-loop buffers
-  (_TDMStoreOverMainLoop). ReuseAcrossPersistent keeps A in VGPRs from one tile to the next, so the
-  staged tile overwrites nothing it reuses.
+  a single rule for PrefetchAcrossPersistent, and the staged tile always lies over the main-loop buffers.
+  ReuseAcrossPersistent keeps A in VGPRs from one tile to the next, so the staged tile overwrites nothing it
+  reuses.
   The block also computes the elements outside D and bounds only the C loads and the D store, so
   besides C and D the epilogue may only read the epilogue vectors, bias, ScaleAlphaVec and ScaleAB along
   M or N, which the staged tile follows in LDS, and scalars such as ScaleC and ScaleD. With per-element
@@ -288,17 +287,16 @@ def emitTDMStoreSetup(gwb) -> Module:
   """Fence the main-loop LDS when the staged tile lies over it, and compute this thread's byte address
   in the staged D tile.
 
-  The tile is staged M-contiguous from LDS offset _TDMStoreLdsOffset, after the epilogue vectors. When it
-  lies over the main-loop buffers (_TDMStoreOverMainLoop), every wave must be done with them, including
-  in-flight tensor_load_to_lds, before the staged tile is written.
+  The tile is staged M-contiguous from LDS offset _TDMStoreLdsOffset, after the epilogue vectors. It lies
+  over the main-loop buffers, so every wave must be done with them, including in-flight tensor_load_to_lds,
+  before the staged tile is written.
   """
   module = Module("TDMStoreSetup")
   kw = gwb.parentWriter
-  if gwb.kernel["_TDMStoreOverMainLoop"]:
-    # enableTDMMetadata requires TDMInst > 0 (enableTDMA or enableTDMB), so the metadata load is drained too.
-    if gwb.kernel["enableTDMA"] or gwb.kernel["enableTDMB"]:
-      module.add(SWaitTensorcnt(tensorcnt=0, comment="drain tensor_load_to_lds before reusing its LDS"))
-    module.add(kw._syncThreads(gwb.kernel, "all waves are done with the main-loop LDS"))
+  # enableTDMMetadata requires TDMInst > 0 (enableTDMA or enableTDMB), so the metadata load is drained too.
+  if gwb.kernel["enableTDMA"] or gwb.kernel["enableTDMB"]:
+    module.add(SWaitTensorcnt(tensorcnt=0, comment="drain tensor_load_to_lds before reusing its LDS"))
+  module.add(kw._syncThreads(gwb.kernel, "all waves are done with the main-loop LDS"))
   base = gwb.tdmStoreLdsBase
   mt0 = gwb.kernel["MacroTile0"]
   module.add(SMulI32(dst=sgpr(gwb.tmpS01), src0=sgpr("WorkGroup1"), src1=gwb.kernel["MacroTile1"], comment="wg1*MT1"))
@@ -350,9 +348,10 @@ def _handoffBarriersLds(kernel):
   """Whether the persistent tile handoff already ends with a workgroup barrier, so the TDM flush adds none.
 
   This mirrors the predicate in WorkAssignment.splitPersistentTileHandoff, which is where the handoff
-  decides whether to emit one. Both guard the same hazard: a slow wave still reading the staged tile when
-  the next tile writes LDS. Where the handoff emits the barrier, a second one here orders nothing and only
-  costs a wait on every tile.
+  decides whether to emit one, for the kernels TDMStoreInst accepts: the handoff also drops its epilogue-vector
+  term with PrefetchAcrossPersistent, which tdmStoreRejectReason rejects. Both guard the same hazard: a slow
+  wave still reading the staged tile when the next tile writes LDS. Where the handoff emits the barrier, a
+  second one here orders nothing and only costs a wait on every tile.
 
   The queue term holds for a DynamicWorkQueue kernel: DynamicWorkQueue.closeLoop emits both phases of the
   handoff before its back-edge, and the next work item is checked for exhaustion only after re-entry, so
@@ -365,7 +364,7 @@ def _handoffBarriersLds(kernel):
     return False
   tdm = (kernel.get("enableTDMA", False) or kernel.get("enableTDMB", False)) \
     and kernel["NumThreads"] > kernel["WavefrontSize"]
-  epilogue = kernel.get("_PersistentVectorEpilogueLds", False) and not kernel["PrefetchAcrossPersistent"]
+  epilogue = kernel.get("_PersistentVectorEpilogueLds", False)
   cluster = persistentSpatialCluster(kernel) and kernel.get("ClusterBarrier", True)
   queue = kernel.get("WorkAssignment") == "DynamicWorkQueue"
   return bool(tdm or epilogue or cluster or queue)

@@ -7909,7 +7909,6 @@ class Solution(collections.abc.Mapping):
     # PrefetchAcrossPersistent, whose next tile's loads would write them during the epilogue.
     tdmStoreBytes = tdmStoreLdsBytes(state)
     assert not (tdmStoreBytes and state["PrefetchAcrossPersistent"])
-    state["_TDMStoreOverMainLoop"] = bool(tdmStoreBytes)
     liveEnd = state["LdsOffsetBias"] + epilogueSize if epilogueSize else 0
     state["_TDMStoreLdsOffset"] = int(math.ceil(liveEnd / 256) * 256) if tdmStoreBytes else 0
     assert not tdmStoreBytes or state["_TDMStoreLdsOffset"] >= liveEnd

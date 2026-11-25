@@ -1135,7 +1135,7 @@ def test_staged_tile_token():
   from types import SimpleNamespace
   from tensilelite.Components.TDMStoreInst import _stagedTileToken
   states = SimpleNamespace(memTokenLdsBuffer0=0, memTokenEpilogue=7)
-  gwb = SimpleNamespace(kernel={"_TDMStoreOverMainLoop": True}, parentWriter=SimpleNamespace(states=states))
+  gwb = SimpleNamespace(kernel={}, parentWriter=SimpleNamespace(states=states))
   assert _stagedTileToken(gwb) == 0
 
 
@@ -1312,14 +1312,13 @@ _VECTORS = {"ProblemType": {"UseBias": 1, "UseScaleAlphaVec": 1}}
 @pytest.mark.parametrize("overrides", [{}, dict(_VECTORS, GlobalSplitU=-1), dict(_VECTORS, StreamK=3)],
                          ids=["plain", "gsu-1_vectors", "sk3_vectors"])
 def test_staged_tile_over_main_loop_property(gp_gfx1250, gfx1250_iim, assembler, capsys, overrides):
-  """The staged tile lies over the main-loop buffers (_TDMStoreOverMainLoop):
+  """The staged tile lies over the main-loop buffers:
   it starts at 0, or at the first 256-byte boundary after the epilogue vectors, and the setup fences the
   main-loop LDS. TDMStoreInst off reserves no tile."""
   for tdm in (False, True):
     sol, asm = _emit_asm(gfx1250_iim, assembler, TDMStoreInst=tdm, **deepcopy(overrides))
     assert sol.get("Valid"), capsys.readouterr().out
     offset = sol["_TDMStoreLdsOffset"]
-    assert sol["_TDMStoreOverMainLoop"] == bool(tdm), tdm
     if not tdm:
       assert offset == 0 and tdmStoreLdsBytes(sol) == 0
       continue
@@ -1606,7 +1605,7 @@ def test_store_vector_widths_3_and_6_are_staged_whole_or_rejected(gp_gfx1250, gf
   states = SimpleNamespace(bpeCexternalGSU1=bpe, bpr=4, c=SimpleNamespace(startVgprValu=0),
                            memTokenLdsBuffer0=0, memTokenEpilogue=0)
   gwb = SimpleNamespace(parentWriter=SimpleNamespace(states=states), gwvw=svw, tdmStoreLdsBase=10, tmpVgpr=11,
-                        kernel={"MacroTile0": 256, "_TDMStoreOverMainLoop": True,
+                        kernel={"MacroTile0": 256,
                                 "ProblemType": {"DestDataType": DataType(dest)}})
 
   def whole(emit):
@@ -1662,7 +1661,7 @@ def test_staging_adds_each_fold_once_per_batch(gp_gfx1250, gfx1250_iim):
   states = SimpleNamespace(bpeCexternalGSU1=bpe, bpr=4, c=SimpleNamespace(startVgprValu=0),
                            memTokenLdsBuffer0=0, memTokenEpilogue=0)
   gwb = SimpleNamespace(parentWriter=SimpleNamespace(states=states), gwvw=1, tdmStoreLdsBase=base, tmpVgpr=tmp,
-                        kernel={"MacroTile0": mt0, "_TDMStoreOverMainLoop": True,
+                        kernel={"MacroTile0": mt0,
                                 "ProblemType": {"DestDataType": DataType("s")}})
   # Columns 62 and 63 lie below 64 KiB, 64 to 66 in the first fold and 130 in the second; then 63, which needs
   # none and leaves the second fold in tmpVgpr, and 64, which needs the first again.

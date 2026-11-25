@@ -402,7 +402,6 @@
       '_SeparateEpilogueLds',
       '_StinkyTofuOptLevel',
       '_TDMStoreLdsOffset',
-      '_TDMStoreOverMainLoop',
       '_UseSgprForGRO',
       '_VectorStore',
       '_WorkspaceSizePerElemBias',

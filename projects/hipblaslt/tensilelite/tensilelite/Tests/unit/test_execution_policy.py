@@ -380,7 +380,8 @@ def test_handoff_fences_lds(strategy, assignment, overrides, fences):
     """The persistent tile handoff ends with a workgroup barrier with TDM loads on more than one
     wave, with the epilogue vectors in LDS, in a spatial cluster or with the dynamic work queue; the
     TDM flush relies on it and emits none of its own. _handoffBarriersLds mirrors the predicate of
-    WorkAssignment.splitPersistentTileHandoff, and the rows below pin it.
+    WorkAssignment.splitPersistentTileHandoff for the kernels TDMStoreInst accepts, which have
+    PrefetchAcrossPersistent off, and the rows below pin it.
 
     The DynamicWorkQueue row is True: DynamicWorkQueue.closeLoop emits both phases of the handoff
     before its back-edge and checks the next work item only after re-entry, so every tile ends with
@@ -391,17 +392,17 @@ def test_handoff_fences_lds(strategy, assignment, overrides, fences):
     the queue and hybrid rows exercise those assignments under StreamK.
     """
     kernel = {"TileProcessingStrategy": strategy, "WorkAssignment": assignment, "ClusterDim": [1, 1],
-              "NumThreads": 128, "WavefrontSize": 32, "PrefetchAcrossPersistent": 0,
-              "enableTDMA": True, "enableTDMB": True}
+              "NumThreads": 128, "WavefrontSize": 32, "enableTDMA": True, "enableTDMB": True}
     kernel.update(overrides)
     assert _handoffBarriersLds(kernel) == fences
 
 
 def test_handoff_barriers_lds_mirrors_split_persistent_tile_handoff(gfx1250_iim):
     """_handoffBarriersLds against the barrier WorkAssignment.splitPersistentTileHandoff emits, over its inputs: TDM
-    loads of A, of B or of both (TDMInst 1, 2 and 3) on one wave or four, the epilogue vectors in LDS with and without
-    PrefetchAcrossPersistent, a spatial cluster with and without ClusterBarrier, DebugPersistentKernelLoopForever and
-    each assignment. Where it reports a barrier every arm of the handoff emits one. Outside
+    loads of A, of B or of both (TDMInst 1, 2 and 3) on one wave or four, the epilogue vectors in LDS, a spatial
+    cluster with and without ClusterBarrier, DebugPersistentKernelLoopForever and each assignment, with
+    PrefetchAcrossPersistent off, as in every kernel TDMStoreInst accepts. Where it reports a barrier every arm of
+    the handoff emits one. Outside
     DebugPersistentKernelLoopForever it reports the barrier of the static arm (StaticGrid, and the static arm of
     Hybrid) or of the queue (DynamicWorkQueue), and where a Hybrid kernel has none the queue fences its dynamic arm.
     With DebugPersistentKernelLoopForever it reports none, so the flush keeps its own. The handoff of a spatial cluster
@@ -430,12 +431,12 @@ def test_handoff_barriers_lds_mirrors_split_persistent_tile_handoff(gfx1250_iim)
 
     arms = {"StaticGrid": [StaticGrid], "DynamicWorkQueue": [DynamicWorkQueue], "Hybrid": [StaticGrid, DynamicWorkQueue]}
     checked = 0
-    for assignment, (tdmA, tdmB), waves, vectors, pap, (clusterDim, clusterBarrier), debug in itertools.product(
-            arms, ((False, False), (True, False), (False, True), (True, True)), (1, 4), (False, True), (0, 1),
+    for assignment, (tdmA, tdmB), waves, vectors, (clusterDim, clusterBarrier), debug in itertools.product(
+            arms, ((False, False), (True, False), (False, True), (True, True)), (1, 4), (False, True),
             (([1, 1], True), ([2, 1], True), ([2, 1], False)), (False, True)):
         kernel = {"TileProcessingStrategy": "StreamK", "WorkAssignment": assignment, "ClusterDim": clusterDim,
                   "ClusterBarrier": clusterBarrier, "NumThreads": 32 * waves, "WavefrontSize": 32,
-                  "PrefetchAcrossPersistent": pap, "enableTDMA": tdmA, "enableTDMB": tdmB,
+                  "PrefetchAcrossPersistent": 0, "enableTDMA": tdmA, "enableTDMB": tdmB,
                   "_PersistentVectorEpilogueLds": vectors, "DebugPersistentKernelLoopForever": debug}
         fences = _handoffBarriersLds(kernel)
         if debug:
@@ -450,4 +451,4 @@ def test_handoff_barriers_lds_mirrors_split_persistent_tile_handoff(gfx1250_iim)
                 assert _hybridStaticArmOnly(kernel) and emitted[1], kernel
         checked += 1
     # Without a cluster with and without the debug loop, and the two cluster settings without it.
-    assert checked == 3 * 4 * 2 * 2 * 2 * (2 + 2)
+    assert checked == 3 * 4 * 2 * 2 * (2 + 2)
