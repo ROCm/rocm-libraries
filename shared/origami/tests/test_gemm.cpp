@@ -415,6 +415,39 @@ TEST_CASE("GEMM: a 16-wave kernel shared at one workgroup per WGP takes the time
   REQUIRE(latency(8) == Approx(latency(176)).epsilon(0.03));
 }
 
+TEST_CASE("GEMM: on gfx1150 a workgroup alone on its WGP is not twice as fast", "[gemm][w4a16]") {
+  // 8 and 16 tiles of an 8-wave kernel at one workgroup per tile: alone on a WGP a workgroup has
+  // twice the SIMDs, but its memory time does not shrink.  Measured: 1.65 to 1.9x on gfx1150
+  // (K loop of memory and compute as a soft maximum), 1.9 to 2.1x on gfx1151 (full overlap).
+  auto ratio = [&](const origami::hardware_t& hardware, size_t wgps) {
+    auto latency = [&](size_t tiles) {
+      auto problem    = make_problem(96 * tiles, 256, 8064);
+      problem.a_dtype = origami::data_type_t::Int4;
+      problem.a_stride_bytes = ((problem.size.k / 2) + 255) / 256 * 256 + 128;
+      auto config     = make_config(96, 256, 64, 16, 16, 16, false, 1, 2, 0, 0, 3);
+      config.workspace_size            = std::numeric_limits<size_t>::max() / 2;
+      config.workspace_size_per_elem_c = 4;
+      config.launch_grid               = tiles;
+      config.reduction_strategy        = origami::reduction_t::tree;
+      origami::tensile_params_t t;
+      t.wave_group_m = 2;
+      t.wave_group_n = 4;
+      t.prefetch_global_read = 2;
+      config.backend = t;
+      return origami::gemm::compute_total_latency(problem, hardware, config) -
+             origami::heuristic_defaults_t::KERNEL_LAUNCH_OVERHEAD;
+    };
+    return latency(2 * wgps) / latency(wgps);
+  };
+  const double gfx1150 = ratio(make_w4a16_gfx1150_hardware(), 8);
+  const double gfx1151 = ratio(make_w4a16_gfx1151_hardware(), 20);
+  CAPTURE(gfx1150, gfx1151);
+  REQUIRE(gfx1150 > 1.65);
+  REQUIRE(gfx1150 < 1.92);
+  REQUIRE(gfx1151 > 1.9);
+  REQUIRE(gfx1151 < 2.1);
+}
+
 TEST_CASE("GEMM: compute_timestep_latency", "[gemm]") {
   for (int gpu_arch : test_architectures) {
     DYNAMIC_SECTION("gfx" << gpu_arch << " - timestep latency equals tile latency") {

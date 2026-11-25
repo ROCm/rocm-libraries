@@ -266,6 +266,21 @@ struct heuristic_defaults_t {
     }
   }
 
+  /// Soft-maximum sharpness with which the memory and the compute time of a K loop overlap; 0
+  /// where they overlap fully (the loop takes the larger of the two).
+  /// gfx1150 [MEASURED]: the eight 8-wave W4A16 kernels with 8 workgroups (each alone on a WGP,
+  /// on its four SIMDs) against 16 (two per WGP), one tile each, K 3968 and 8064: alone a
+  /// workgroup is 1.65 to 1.9x faster, not 2x, because its memory time, which does not shrink,
+  /// is then half or more of its compute.  A sharpness of 3 gives both launches within 7% (a
+  /// plain maximum has the 16 right and the 8 6 to 22% under), and brings the per-kernel
+  /// campaigns from 0.90 to 0.93 of measured to 0.97 to 0.99; 2.5 to 4 fit alike.
+  /// gfx1151: the same measurement gives 1.9 to 2.1x and the plain maximum is within 7% on
+  /// both launches (its memory is three times faster, behind a MALL): full overlap.
+  static constexpr double GFX1150_KLOOP_OVERLAP = 3.0;
+  static constexpr double kloop_overlap_sharpness(hardware_t::architecture_t arch) noexcept {
+    return arch == hardware_t::architecture_t::gfx1150 ? GFX1150_KLOOP_OVERLAP : 0.0;
+  }
+
   /// Time a workgroup spends on a tile outside its K loop (argument and address set-up,
   /// reduction and store), in compute cycles; 0 where it has not been measured.  Fitted to the
   /// same dot2 kernel timings as the round trip above: the time left at zero K iterations.

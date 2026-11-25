@@ -2879,6 +2879,14 @@ double compute_tile_latency(const problem_t& problem,
   double L_main = additive_iter
       ? (L_mem_stream + L_compute_stream_eff)
       : std::max(L_mem_stream, L_compute_stream_eff);
+  // Where it is measured, the memory stream and the compute of the K loop overlap as a soft
+  // maximum (as on gfx1250 below): a loop whose memory time is a good part of its compute time
+  // takes more than the larger of the two.
+  if (!additive_iter && wg_costs) {
+    const double sharpness = heuristic_defaults_t::kloop_overlap_sharpness(hardware.arch);
+    const double hi = std::max(L_mem_stream, L_compute_stream_eff), lo = std::min(L_mem_stream, L_compute_stream_eff);
+    if (sharpness > 0.0 && hi > 0.0) L_main = hi * std::pow(1.0 + std::pow(lo / hi, sharpness), 1.0 / sharpness);
+  }
   L_main += L_setup;
   // gfx1250: the math overlaps the L2 and the DRAM read times as soft maxima, as measured on a K-loop of
   // tensor loads, LDS reads and WMMAs, and multicast delivery bounds the loop from below.
