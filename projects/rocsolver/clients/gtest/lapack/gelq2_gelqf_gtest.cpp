@@ -75,8 +75,8 @@ const static vector<gelqf_tuple> very_large_problem_range = {
     {{16384, 16384}, 220},
 };
 const vector<vector<int>> large_batch_matrix_size_range = {
-    {7, 7},
-    {17, 17},
+    {15, 15},
+    {129, 129},
 };
 
 const vector<int> large_batch_n_size_range = {33};
