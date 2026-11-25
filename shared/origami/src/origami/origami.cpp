@@ -941,6 +941,10 @@ std::vector<prediction_result_t> rank_configs(const problem_t& problem,
                                               model_t model) {
   rank_options_t options;
   options.analytical_model = model;
+  // The model_t overload asks for an analytical model by name, and its callers (select_config,
+  // compute_perf_gflops, rocRoller, Python) read `latency`. Pin the mode so
+  // ORIGAMI_INFERENCE_MODE cannot turn their results into NN scores or make them throw.
+  options.inference = inference_mode_t::analytical;
   return rank_configs(problem, hardware, configs, options);
 }
 

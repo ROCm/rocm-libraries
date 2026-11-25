@@ -150,17 +150,36 @@ bool tilewright_weights_available() {
   } while (0)
 
 TEST_CASE("NN: nn_inference_requested follows the resolved mode", "[nn]") {
-  ScopedEnvVar mode("ORIGAMI_INFERENCE_MODE", "analytical");
-  REQUIRE_FALSE(origami::nn::nn_inference_requested());
-  REQUIRE_FALSE(origami::nn::nn_inference_requested(origami::inference_mode_t::analytical));
-  REQUIRE(origami::nn::nn_inference_requested(origami::inference_mode_t::nn));
-  REQUIRE(origami::nn::nn_inference_requested(origami::inference_mode_t::nn_fallback));
+  using origami::inference_mode_t;
+  using origami::nn::nn_inference_requested;
 
-  // The environment override applies to a call that asked for the default.
-  mode.set("nn_fallback");
-  REQUIRE(origami::nn::nn_inference_requested());
-  mode.set("nn");
-  REQUIRE(origami::nn::nn_inference_requested());
+  ScopedEnvVar mode("ORIGAMI_INFERENCE_MODE", "analytical");
+  REQUIRE_FALSE(nn_inference_requested());
+  REQUIRE_FALSE(nn_inference_requested(inference_mode_t::from_env));
+  REQUIRE_FALSE(nn_inference_requested(inference_mode_t::analytical));
+  REQUIRE(nn_inference_requested(inference_mode_t::nn));
+  REQUIRE(nn_inference_requested(inference_mode_t::nn_fallback));
+
+  // The environment applies to a call that did not choose a mode, and only to that call.
+  for (const char* value : {"nn_fallback", "nn"}) {
+    DYNAMIC_SECTION("ORIGAMI_INFERENCE_MODE=" << value) {
+      mode.set(value);
+      REQUIRE(nn_inference_requested());
+      REQUIRE(nn_inference_requested(inference_mode_t::from_env));
+      // An explicit analytical request is not overridden.
+      REQUIRE_FALSE(nn_inference_requested(inference_mode_t::analytical));
+      REQUIRE(nn_inference_requested(inference_mode_t::nn));
+      REQUIRE(nn_inference_requested(inference_mode_t::nn_fallback));
+    }
+  }
+
+  // An empty or unrecognized value means analytical.
+  for (const char* value : {"", "nn_fallbak", "NN"}) {
+    DYNAMIC_SECTION("ORIGAMI_INFERENCE_MODE='" << value << "'") {
+      mode.set(value);
+      REQUIRE_FALSE(nn_inference_requested());
+    }
+  }
 }
 
 TEST_CASE("NN: a missing index lookup is cached", "[nn][tilewright]") {
@@ -212,10 +231,78 @@ TEST_CASE("NN: a rejected manifest shared by two stems gives no model for either
 TEST_CASE("NN: rank_options_t defaults", "[nn]") {
   origami::rank_options_t options;
   REQUIRE(options.analytical_model == origami::model_t::gemm);
-  REQUIRE(options.inference == origami::inference_mode_t::analytical);
+  // The default defers to ORIGAMI_INFERENCE_MODE; it is not a request for analytical.
+  REQUIRE(options.inference == origami::inference_mode_t::from_env);
   REQUIRE(options.nn_backend == origami::nn_backend_t::auto_select);
   REQUIRE(options.nn_model == origami::nn::invalid_handle);
   REQUIRE(options.library_models == nullptr);
+}
+
+TEST_CASE("NN: ORIGAMI_INFERENCE_MODE applies only to a call that did not choose a mode",
+          "[nn][tilewright]") {
+  using origami::inference_mode_t;
+
+  const FixtureModel fixture;
+  REQUIRE(fixture.handle() >= 0);
+
+  const auto hardware = make_hardware(950);
+  auto problem = make_problem(1024, 3072, 2048, origami::transpose_t::T, origami::transpose_t::N);
+  std::vector<origami::config_t> configs = {
+      fixture_config(128, 128, 64),
+      fixture_config(256, 256, 32),
+  };
+
+  const auto expect_analytical = [](const std::vector<origami::prediction_result_t>& results) {
+    REQUIRE_FALSE(results.empty());
+    for (const auto& r : results) {
+      REQUIRE(std::isfinite(r.latency));
+      REQUIRE(std::isnan(r.score));
+    }
+  };
+  const auto expect_nn = [](const std::vector<origami::prediction_result_t>& results) {
+    REQUIRE_FALSE(results.empty());
+    REQUIRE(std::isfinite(results.front().score));
+    for (const auto& r : results) REQUIRE(std::isnan(r.latency));
+  };
+
+  ScopedEnvVar mode("ORIGAMI_INFERENCE_MODE", "nn_fallback");
+  for (const char* value : {"nn_fallback", "nn"}) {
+    DYNAMIC_SECTION("ORIGAMI_INFERENCE_MODE=" << value) {
+      mode.set(value);
+
+      // A call that did not choose a mode follows the environment.
+      expect_nn(origami::rank_configs(problem, hardware, configs, fixture.options(inference_mode_t::from_env)));
+
+      // An explicit analytical request does not, although a model is available.
+      expect_analytical(
+          origami::rank_configs(problem, hardware, configs, fixture.options(inference_mode_t::analytical)));
+
+      // The model_t overload and everything built on it keeps returning a latency.
+      expect_analytical(origami::rank_configs(problem, hardware, configs));
+      expect_analytical(origami::rank_configs(problem, hardware, configs, origami::model_t::gemm));
+      REQUIRE(std::isfinite(origami::select_config(problem, hardware, configs).latency));
+    }
+  }
+}
+
+TEST_CASE("NN: the model_t overload does not throw when ORIGAMI_INFERENCE_MODE=nn finds no model",
+          "[nn]") {
+  const auto hardware                    = make_hardware(950);
+  const auto problem                     = make_problem(1024, 1024, 1024);
+  std::vector<origami::config_t> configs = {make_config(128, 128, 32)};
+
+  ScopedEnvVar mode("ORIGAMI_INFERENCE_MODE", "nn");
+
+  // A caller that did not choose a mode asked for ML through the environment, and gets the
+  // error that mode documents.
+  REQUIRE_THROWS_AS(origami::rank_configs(problem, hardware, configs, origami::rank_options_t{}),
+                    std::runtime_error);
+
+  // The model_t overload and select_config ask for an analytical model by name.
+  REQUIRE_NOTHROW(origami::rank_configs(problem, hardware, configs));
+  const auto selected = origami::select_config(problem, hardware, configs);
+  REQUIRE(std::isfinite(selected.latency));
+  REQUIRE(std::isfinite(origami::rank_configs(problem, hardware, configs).front().latency));
 }
 
 TEST_CASE("NN: rank_configs rank_options_t matches model_t overload", "[nn]") {

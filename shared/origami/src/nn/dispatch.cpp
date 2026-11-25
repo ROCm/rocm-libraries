@@ -135,8 +135,12 @@ model_handle_t resolve_model_handle(const rank_options_t& options) {
 }
 
 rank_options_t resolve_rank_options(rank_options_t options) {
-  if (const char* mode = std::getenv("ORIGAMI_INFERENCE_MODE")) {
-    if (options.inference == inference_mode_t::analytical) {
+  // Only a caller that did not choose a mode reads the environment. An explicit request,
+  // analytical included, is left alone. After this block `inference` is never from_env, so
+  // callers can compare it against analytical to mean "skip the NN".
+  if (options.inference == inference_mode_t::from_env) {
+    options.inference = inference_mode_t::analytical;
+    if (const char* mode = std::getenv("ORIGAMI_INFERENCE_MODE")) {
       if (std::string(mode) == "nn") {
         options.inference = inference_mode_t::nn;
       } else if (std::string(mode) == "nn_fallback") {

@@ -828,11 +828,16 @@ struct staggerU_t {
 
 /**
  * @brief How rank_configs chooses between analytical and ML inference.
+ *
+ * Only `from_env` reads ORIGAMI_INFERENCE_MODE. The other three values are explicit requests
+ * and are never overridden by the environment.
  */
 enum class inference_mode_t : std::uint8_t {
-  analytical,   ///< Roofline latency model (default)
+  analytical,   ///< Roofline latency model, whatever the environment says
   nn,           ///< ML only; error if no model resolved
   nn_fallback,  ///< ML if model available; else analytical
+  from_env,     ///< Not chosen by the caller (default): ORIGAMI_INFERENCE_MODE=nn or nn_fallback
+                ///< selects that mode; unset or any other value means analytical
 };
 
 /**
@@ -851,8 +856,9 @@ struct rank_options_t {
   /// Analytical model when inference == analytical, or on nn_fallback miss.
   model_t analytical_model = model_t::gemm;
 
-  /// Inference backend selection (analytical vs ML).
-  inference_mode_t inference = inference_mode_t::analytical;
+  /// Inference backend selection (analytical vs ML). The default defers to
+  /// ORIGAMI_INFERENCE_MODE and is analytical when that is unset.
+  inference_mode_t inference = inference_mode_t::from_env;
 
   /// ML backend selection (tilewright vs ES). Ignored when inference == analytical.
   nn_backend_t nn_backend = nn_backend_t::auto_select;

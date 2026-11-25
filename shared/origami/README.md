@@ -422,18 +422,18 @@ A manifest is rejected, with a message on stderr, when its `feature_names_hash` 
 
 `origami::nn::unload_model(handle)` is safe to call while another thread is still ranking with that model: the model stays alive until the ranking call returns. Unloading drops the cached lookup for that handle, so the next lookup loads the model again. Cached misses are not cleared.
 
-`origami::nn::nn_inference_requested(mode)` returns whether `rank_configs` would use ML for a call that requests `mode`, after the `ORIGAMI_INFERENCE_MODE` override is applied. Callers such as hipBLASLt use it to defer loading weights until a call can use them.
+`origami::nn::nn_inference_requested(mode)` returns whether `rank_configs` would use ML for a call that requests `mode`. Only `inference_mode_t::from_env`, the default, reads `ORIGAMI_INFERENCE_MODE`; an explicit mode is taken as given. Callers such as hipBLASLt use it to defer loading weights until a call can use them.
 
 
 ### Runtime Configuration
 
-NN routing is controlled by `rank_options_t` fields and environment variables. Explicit `rank_options_t` values take precedence over environment defaults.
+NN routing is controlled by `rank_options_t` fields and environment variables. Explicit `rank_options_t` values take precedence over environment defaults. `rank_options_t::inference` defaults to `inference_mode_t::from_env`, which means the caller did not choose a mode. Only that value reads `ORIGAMI_INFERENCE_MODE`. An explicit `analytical`, `nn` or `nn_fallback` is never overridden.
 
 #### Inference mode
 
 | `ORIGAMI_INFERENCE_MODE` | Behavior |
 |--------------------------|----------|
-| *(unset)* or `analytical` | Analytical roofline model (default) |
+| *(unset)*, `analytical`, empty or unrecognized | Analytical roofline model (default) |
 | `nn` | ML ranking only; throws if no model resolves or inference fails |
 | `nn_fallback` | ML when a model is available; otherwise analytical |
 
@@ -446,7 +446,7 @@ Each `prediction_result_t` returned by `rank_configs` carries the ranking in one
 | Analytical model | Estimated time, lower is better | NaN |
 | NN model | NaN | Model score, higher is better; unitless and may be negative |
 
-An entry the NN model did not score has both fields NaN and is listed after the scored ones, in input order. Do not pass a score to `compute_perf_gflops`. Because `ORIGAMI_INFERENCE_MODE` is applied inside `rank_configs`, code that reads `latency` from `rank_configs` or `select_config` gets NaN when it runs with that variable set to `nn` or `nn_fallback` and a model resolves. Check `score` as well, or leave the variable unset.
+An entry the NN model did not score has both fields NaN and is listed after the scored ones, in input order. Do not pass a score to `compute_perf_gflops`. `ORIGAMI_INFERENCE_MODE` affects only a call that did not choose a mode, that is, one that passes a default-constructed `rank_options_t` or `inference_mode_t::from_env`. Such a call gets NaN `latency` when the variable is `nn` or `nn_fallback` and a model resolves, so check `score` as well. A call that passes `inference_mode_t::analytical`, and the `model_t` overload of `rank_configs` together with `select_config`, `select_topk_configs` and `compute_perf_gflops`, always use the analytical model and always return a latency, whatever the variable says.
 
 #### Backend selection
 
@@ -475,7 +475,7 @@ Only one directory is searched. When a hint directory is given, `ORIGAMI_NN_WEIG
 
 ### hipBLASLt Integration
 
-The default inference mode is analytical, so hipBLASLt reaches the tilewright path only when `ORIGAMI_INFERENCE_MODE` is `nn` or `nn_fallback`. `PredictionLibrary` does not parse any weights while a logic file loads. It records the logic stem and directory, and loads the model on the first ranking call whose resolved inference mode is `nn` or `nn_fallback`. A missing manifest is cached as a failed lookup for the life of the process, so place the weights before the first lookup. `PredictionLibrary` skips results that have neither a latency nor a score, and if no scored result gives a supported solution it falls back to the unscored ones in input order, as the analytical path does when it rejects every candidate.
+hipBLASLt passes a default-constructed `rank_options_t`, so its mode comes from `ORIGAMI_INFERENCE_MODE` and is analytical when the variable is unset. It reaches the tilewright path only when the variable is `nn` or `nn_fallback`. `PredictionLibrary` does not parse any weights while a logic file loads. It records the logic stem and directory, and loads the model on the first ranking call whose resolved inference mode is `nn` or `nn_fallback`. A missing manifest is cached as a failed lookup for the life of the process, so place the weights before the first lookup. `PredictionLibrary` skips results that have neither a latency nor a score, and if no scored result gives a supported solution it falls back to the unscored ones in input order, as the analytical path does when it rejects every candidate.
 
 Example: run hipblaslt-bench with tilewright NN fallback on gfx950 bf16 TN layout:
 
