@@ -158,7 +158,21 @@ namespace rocisa
             auto inst = std::dynamic_pointer_cast<Instruction>(item);
             if(!inst)
             {
-                continue;
+                // A LogicalLeaf (logical-IR migration) is an Item, not an
+                // Instruction, so it would otherwise be skipped -- its destination
+                // registers would not be tracked and it would not advance the
+                // dependency windows, changing the s_delay_alu placement versus the
+                // lazy rocisa->logical path. Treat the leaf as the rocisa
+                // instruction it replaced so delay-alu analysis is byte-identical.
+                // Transitional: drops out once insertDelayAlu moves onto logical IR.
+                if(auto leaf = std::dynamic_pointer_cast<LogicalLeaf>(item))
+                {
+                    inst = leaf->rocisaInst;
+                }
+                if(!inst)
+                {
+                    continue;
+                }
             }
 
             DelayALUType alu_type = _getDelayAluType(inst);

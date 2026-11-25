@@ -43,10 +43,11 @@ struct AsmSetSymbolInfo {
 };
 
 /// Walk all basic blocks in program order and collect `.set` symbol definitions
-/// from `AsmDirective` (SET) IR. Resolves values that are decimal/hex literals
-/// or refer to earlier symbols (no expression arithmetic). Output values are
-/// signed int64; large unsigned 32-bit constants (e.g. 0xffffffff) are stored
-/// as their 64-bit magnitude.
+/// from `AsmDirective` (SET) IR. Resolves values that are decimal/hex literals,
+/// refer to earlier symbols, or are a sum/difference of those (e.g. symbol+offset
+/// like `vgprBase+34`, which rocisa uses for two-level VGPR base definitions).
+/// Output values are signed int64; large unsigned 32-bit constants (e.g.
+/// 0xffffffff) are stored as their 64-bit magnitude.
 ///
 /// When a symbol is defined more than once, `definitionCount` reflects that and
 /// `value` is the last definition (flat map semantics).

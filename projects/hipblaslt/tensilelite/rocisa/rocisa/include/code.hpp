@@ -48,6 +48,12 @@ namespace stinkytofu
 
 namespace rocisa
 {
+    // Forward declaration so LogicalLeaf can keep a shared_ptr to the rocisa
+    // instruction it replaced (transitional, see LogicalLeaf::rocisaInst). The
+    // full definition lives in instruction/instruction.hpp, which includes this
+    // header; a shared_ptr to an incomplete type is fine for storage/copy.
+    struct Instruction;
+
     struct Label : public Item
     {
         std::variant<std::string, int> label;
@@ -185,6 +191,16 @@ namespace rocisa
     struct LogicalLeaf : public Item
     {
         std::shared_ptr<stinkytofu::LogicalInstruction> logicalInst;
+
+        // Transitional (logical-IR migration): the original rocisa instruction
+        // this leaf replaced. Kept ONLY so rocisa in-tree passes that predate the
+        // logical IR -- notably insertDelayAlu -- can still treat a leaf as the
+        // rocisa instruction it stands in for (reading preStr()/dst/src registers),
+        // byte-identically to the lazy rocisa->logical path. Set by makeLogicalLeaf;
+        // may be null for leaves built another way, in which case such passes skip
+        // the leaf as before. Removed once those passes move onto the logical IR
+        // and the rocisa instruction classes retire.
+        std::shared_ptr<Instruction> rocisaInst;
 
         LogicalLeaf(std::shared_ptr<stinkytofu::LogicalInstruction> inst,
                     const std::string&                              name = "LogicalLeaf")

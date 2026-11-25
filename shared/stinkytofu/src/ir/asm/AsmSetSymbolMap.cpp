@@ -86,6 +86,16 @@ bool parseAsmSetNumericToken(const std::string& s, int64_t& out) {
     return true;
 }
 
+/// Resolve a `.set` right-hand side to an integer. Three forms are accepted:
+///   * a bare decimal/hex literal (optionally signed),
+///   * a single identifier referring to another `.set` symbol (resolved
+///     recursively, with cycle detection), and
+///   * a sum/difference of the above, e.g. `vgprBase+34` or `A-B+2`.
+/// rocisa defines VGPR bases two levels deep with offset arithmetic
+/// (`.set vgprValuB_X0_I0, vgprValuB_X0_I0_BASE+0`, `.set ..._BASE, vgprBase+34`),
+/// so symbol+offset support is required to resolve VGPR names; SGPR `.set` are
+/// plain literals and keep resolving via the first fast path. Returns false if
+/// any term is unresolvable, which (as before) leaves the symbol unresolved.
 bool resolveAsmSetRhs(const std::string& valstr,
                       const std::unordered_map<std::string, std::string>& raw,
                       std::unordered_set<std::string>& expanding, int depth, int64_t& out) {
@@ -93,15 +103,47 @@ bool resolveAsmSetRhs(const std::string& valstr,
     if (depth > kMaxDepth) return false;
     const std::string t = trimAsmToken(valstr);
     if (t.empty()) return false;
+
+    // Fast path: a bare literal (handles its own leading sign and hex).
     if (parseAsmSetNumericToken(t, out)) return true;
-    if (!isAsmSetIdentifier(t)) return false;
-    if (expanding.contains(t)) return false;
-    auto it = raw.find(t);
-    if (it == raw.end()) return false;
-    expanding.insert(t);
-    const bool ok = resolveAsmSetRhs(it->second, raw, expanding, depth + 1, out);
-    expanding.erase(t);
-    return ok;
+
+    // Fast path: a single symbol reference, resolved recursively.
+    if (isAsmSetIdentifier(t)) {
+        if (expanding.contains(t)) return false;
+        auto it = raw.find(t);
+        if (it == raw.end()) return false;
+        expanding.insert(t);
+        const bool ok = resolveAsmSetRhs(it->second, raw, expanding, depth + 1, out);
+        expanding.erase(t);
+        return ok;
+    }
+
+    // General case: a sum/difference of terms, each a literal or a symbol.
+    // Identifiers never contain '+'/'-' and a literal carries no interior sign,
+    // so splitting on top-level '+'/'-' is unambiguous; each term's own leading
+    // sign (if any) is consumed here and reapplied, then the unsigned remainder
+    // is resolved recursively.
+    int64_t total = 0;
+    size_t i = 0;
+    const size_t n = t.size();
+    while (i < n) {
+        int sign = 1;
+        if (t[i] == '+') {
+            ++i;
+        } else if (t[i] == '-') {
+            sign = -1;
+            ++i;
+        }
+        const size_t start = i;
+        while (i < n && t[i] != '+' && t[i] != '-') ++i;
+        const std::string term = trimAsmToken(t.substr(start, i - start));
+        if (term.empty()) return false;  // dangling or doubled operator
+        int64_t termVal = 0;
+        if (!resolveAsmSetRhs(term, raw, expanding, depth + 1, termVal)) return false;
+        total += sign * termVal;
+    }
+    out = total;
+    return true;
 }
 
 static int32_t int64ToInt32ForValuLiteral(int64_t v) {

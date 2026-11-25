@@ -85,6 +85,35 @@ def active_version():
   return _active_version.get()
 
 
+# Concrete arch/stepping name (StinkyTofuArchName, e.g. "gfx1250-strict") being
+# generated in the current context, set by KernelWriter alongside the ISA. Some
+# steppings share an ISA triple (gfx1250 v0/v1 are both 12,5,0) but resolve to
+# distinct GfxArchIDs via resolveArchId(arch, archName); an empty name means the
+# base triple. A logical leaf built by makeLogicalLeaf MUST resolve its archId
+# with the SAME name the lazy converter (toStinkyTofuModule / ToStinkyAsmPass)
+# uses, otherwise an arch-sensitive opcode (e.g. MFMA/WMMA on a colliding
+# stepping) lowers differently than the rocisa it replaces. A ContextVar, like
+# _active_version, so it is correct under Parallel.py's thread backends.
+_active_arch_name: ContextVar = ContextVar("tensilelite_ir_active_arch_name", default="")
+
+
+def set_active_arch_name(name):
+  """Record the concrete arch/stepping name (StinkyTofuArchName) for the current
+  context so logical leaves resolve the same archId as the lazy converter.
+  Returns a token usable with reset_active_arch_name()."""
+  return _active_arch_name.set(str(name) if name else "")
+
+
+def reset_active_arch_name(token):
+  """Restore the arch name recorded before the matching set_active_arch_name()."""
+  _active_arch_name.reset(token)
+
+
+def active_arch_name():
+  """The concrete arch/stepping name recorded for the current context, or ""."""
+  return _active_arch_name.get()
+
+
 # Whether the current context is inside a region whose dispatched instructions
 # should build logical IR (for a logical-capable ISA). A ContextVar, like
 # _active_version, so nesting and Parallel.py's thread backends stay correct.
@@ -290,7 +319,7 @@ class _LogicalBackend:
 
     def _build(*args, **kwargs):
       inst = real(*args, **kwargs)
-      return _rocisa.makeLogicalLeaf(inst, _active_version.get())
+      return _rocisa.makeLogicalLeaf(inst, _active_version.get(), _active_arch_name.get())
 
     return _build
 
@@ -354,7 +383,7 @@ def maybe_logical_leaf(inst):
       and _region_active.get()
       and not _kernel_logical_disabled.get()
       and _trial_enabled()):
-    return _rocisa.makeLogicalLeaf(inst, _active_version.get())
+    return _rocisa.makeLogicalLeaf(inst, _active_version.get(), _active_arch_name.get())
   return inst
 
 
@@ -384,10 +413,18 @@ def maybe_logical_leaf(inst):
 # are deliberately NOT migrated and stay rocisa; the logical passes treat them as
 # lane-reset boundaries. Opcodes used only by not-yet-migrated siblings (e.g.
 # s_mul_hi in tdmApplyTileKOffset) are added when those methods join a region.
+# The mfma region (mfmaIter, wrapped in logical_region("mfma")) emits the matrix
+# ops directly as MFMA/SMFMA/MXMFMA; each lowers to a self-contained logical leaf
+# (concrete acc/a/b operands, no deferred Holder/memToken). The three rocisa
+# classes override only schedCategory (-> MFMA); the leaf matches via the MFMA
+# entries in schedCategoryForOpcode. The non-matrix scalar ALUs the same region
+# may emit are already covered below. Subtile stays pure rocisa (the region
+# decorator is gated on UseSubtileImpl).
 _MIGRATED = {
     "SMovB32", "SMovB64", "SLShiftRightB32", "SLShiftLeftB32",
     "SMulI32", "SAddU32", "SAddCU32", "SSubI32", "SSubU32",
     "SAndB32", "SOrB32", "SCSelectB32", "VReadfirstlaneB32",
+    "MFMAInstruction", "SMFMAInstruction", "MXMFMAInstruction",
 }
 _MIGRATE_ALL = False
 

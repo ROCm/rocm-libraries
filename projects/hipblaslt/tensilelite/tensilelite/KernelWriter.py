@@ -49,6 +49,7 @@ from .ir import sched_is_ds_load, sched_is_ds_load_b128, sched_is_ds_store, sche
 from .ir import sched_is_nop, sched_is_instruction, sched_is_module, sched_is_register_container
 from .ir import SSchedulingFence
 from .ir import set_active_version as _set_active_ir_version
+from .ir import set_active_arch_name as _set_active_ir_arch_name
 from .ir import set_kernel_logical_disabled as _set_kernel_logical_disabled
 from rocisa.register import RegisterPool
 from rocisa.enum import RegisterType, DataTypeEnum, HighBitSel
@@ -7909,7 +7910,8 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
       if debugLogical:
         t_logical_start = time.perf_counter()
         logical_ir_str = rocisa.dumpLogicalModuleText(moduleKernelBody.body,
-                                                      self.states.version, "kernel_name")
+                                                      self.states.version, "kernel_name",
+                                                      str(globalParameters.get("StinkyTofuArchName") or ""))
         t_logical_end = time.perf_counter()
         print2(f"StinkyTofu dumpLogicalModuleText: {t_logical_end - t_logical_start:.4f}s")
 
@@ -8035,6 +8037,12 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
     # later setKernel calls (e.g. activation codegen); see rocIsa::setForceScaledWMMA.
     _stArchName = globalParameters.get("StinkyTofuArchName") or ""
     ti.setForceScaledWMMA(_stArchName == "gfx1250-strict")
+    # Record the concrete stepping for the instruction facade too, so logical
+    # leaves built during emission (makeLogicalLeaf) resolve the same archId as
+    # the lazy converter (toStinkyTofuModule uses moduleOptions.ArchName, which is
+    # this same StinkyTofuArchName). Without this an arch-sensitive opcode (MFMA/
+    # WMMA on a colliding stepping) lowers differently as a leaf than as rocisa.
+    _set_active_ir_arch_name(_stArchName)
 
     self.consts = ConstValues()
     self.states = StateValues(version=version, kernel=kernel, kernelName=getKernelNameMin(kernel, self.debugConfig.splitGSU))

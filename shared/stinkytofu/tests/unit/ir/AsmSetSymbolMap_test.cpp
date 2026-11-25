@@ -185,4 +185,75 @@ TEST_F(AsmSetSymbolMapTest, ResolvesRangeNameAgainstTheOperandWidth) {
     EXPECT_EQ(load->getDestRegs()[0].reg.idx, 16u);
 }
 
+// A `.set` whose value is `symbol + offset` must evaluate the arithmetic.
+// rocisa emits exactly this for register bases; a bare-literal-only resolver
+// silently leaves the symbol unresolved.
+TEST_F(AsmSetSymbolMapTest, ResolvesSymbolPlusOffsetRhs) {
+    BasicBlock* bb = block("entry");
+    appendSetDirective(bb, "vgprBase", "58");
+    appendSetDirective(bb, "vgprTmp", "vgprBase+10");
+
+    std::unordered_map<std::string, int64_t> values;
+    collectAsmSetSymbolValues(*func, values);
+    EXPECT_EQ(values["vgprBase"], 58);
+    EXPECT_EQ(values["vgprTmp"], 68);
+}
+
+// rocisa defines VGPR bases two levels deep: the name points at a `_BASE`
+// symbol, which itself is `vgprBase + offset`. Both links are symbol+offset.
+TEST_F(AsmSetSymbolMapTest, ResolvesTwoLevelSymbolOffsetChain) {
+    BasicBlock* bb = block("entry");
+    appendSetDirective(bb, "vgprBase", "58");
+    appendSetDirective(bb, "vgprValuB_X0_I0_BASE", "vgprBase+34");
+    appendSetDirective(bb, "vgprValuB_X0_I0", "vgprValuB_X0_I0_BASE+0");
+
+    std::unordered_map<std::string, int64_t> values;
+    collectAsmSetSymbolValues(*func, values);
+    EXPECT_EQ(values["vgprValuB_X0_I0_BASE"], 92);
+    EXPECT_EQ(values["vgprValuB_X0_I0"], 92);
+}
+
+TEST_F(AsmSetSymbolMapTest, SymbolOffsetSupportsSubtraction) {
+    BasicBlock* bb = block("entry");
+    appendSetDirective(bb, "vgprHi", "100");
+    appendSetDirective(bb, "vgprLo", "vgprHi-30");
+
+    std::unordered_map<std::string, int64_t> values;
+    collectAsmSetSymbolValues(*func, values);
+    EXPECT_EQ(values["vgprLo"], 70);
+}
+
+// Exactly the WMMA reuse bug: the same name is rebound to a different base
+// (via symbol+offset) partway through, so two operands that print identically
+// must resolve to different indices depending on where they sit.
+TEST_F(AsmSetSymbolMapTest, PositionalSymbolOffsetRedefinition) {
+    BasicBlock* bb = block("entry");
+    appendSetDirective(bb, "vgprBase", "12");
+    appendSetDirective(bb, "vgprValuB_X0_I0_BASE", "vgprBase+10");
+    appendSetDirective(bb, "vgprValuB_X0_I0", "vgprValuB_X0_I0_BASE+0");
+    StinkyInstruction* first =
+        addVAdd(bb, namedReg("v", 0, 1, "vgprValuB_X0_I0+0"), vgpr(1), vgpr(2));
+    appendSetDirective(bb, "vgprValuB_X0_I0_BASE", "20");
+    appendSetDirective(bb, "vgprValuB_X0_I0", "vgprValuB_X0_I0_BASE+0");
+    StinkyInstruction* second =
+        addVAdd(bb, namedReg("v", 0, 1, "vgprValuB_X0_I0+0"), vgpr(1), vgpr(2));
+
+    EXPECT_EQ(resolveSymbolicOperands(*func, fixes), 2u);
+    EXPECT_EQ(first->getDestRegs()[0].reg.idx, 22u);   // vgprBase(12) + 10
+    EXPECT_EQ(second->getDestRegs()[0].reg.idx, 20u);  // rebound to 20
+}
+
+// An unresolvable term (unknown base symbol) must leave the operand untouched,
+// exactly as a bare unknown name does -- the arithmetic path must not invent a
+// value (e.g. treating the missing base as 0).
+TEST_F(AsmSetSymbolMapTest, LeavesSymbolOffsetWithUnknownBaseAlone) {
+    BasicBlock* bb = block("entry");
+    appendSetDirective(bb, "vgprTmp", "vgprUnknown+4");
+    StinkyInstruction* add = addVAdd(bb, namedReg("v", 7, 1, "vgprTmp"), vgpr(1), vgpr(2));
+
+    EXPECT_EQ(resolveSymbolicOperands(*func, fixes), 0u);
+    EXPECT_EQ(add->getDestRegs()[0].reg.idx, 7u);
+    EXPECT_TRUE(fixes.empty());
+}
+
 }  // namespace

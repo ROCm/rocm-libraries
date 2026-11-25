@@ -12486,6 +12486,7 @@ class KernelWriterAssembly(KernelWriter):
   ##############################################################################
   # MFMA Iteration
   ##############################################################################
+  @_logical_region_method("mfma")
   def mfmaIter(self, kernel, tPA, tPB, u, innerUnroll, vregSetIdx, unrollLoopIdx = 0, unrollIdx = 0, tail = False, firstIter = False, postShiftK = Module()):
     imod = Module("mi")
     shiftK = Module("shiftK")
