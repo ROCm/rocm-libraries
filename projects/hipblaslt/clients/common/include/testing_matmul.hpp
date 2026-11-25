@@ -7141,6 +7141,8 @@ void testing_matmul_with_bias(const Arguments& arg,
         CHECK_HIP_ERROR(dUniformResult->memcheck());
         CHECK_HIP_ERROR(dUniformFlags->memcheck());
     }
+    // How many solutions the uniform check ran on; a case that checked none skips at the end.
+    size_t ucChecked = 0;
     // void, since CHECK_HIP_ERROR returns from it under gtest.
     auto checkUniform = [&](size_t sol, UniformCheckResult& row) {
         if(arg.uniform_check == hipblaslt_uniform_check::none)
@@ -7150,6 +7152,7 @@ void testing_matmul_with_bias(const Arguments& arg,
             row.status = UniformCheckResult::Status::skip;
             return;
         }
+        ++ucChecked;
         // Runs check, a uniform_check_*_device function, over every D; lines names what it
         // counts.
         auto checkDirection = [&](auto check, const char* lines, UniformCheckDeviceResult& h) {
@@ -8633,4 +8636,11 @@ void testing_matmul_with_bias(const Arguments& arg,
     // The stream is destroyed by stream_owner after the device buffers (see its declaration).
     CHECK_HIP_ERROR(hipEventDestroy(event_gpu_time_start_owner.release()));
     CHECK_HIP_ERROR(hipEventDestroy(event_gpu_time_end_owner.release()));
+
+#ifdef GOOGLE_TEST
+    // A uniform_check case that checked no solution would otherwise pass while testing nothing.
+    if(arg.uniform_check != hipblaslt_uniform_check::none && ucChecked == 0)
+        GTEST_SKIP() << "uniform_check checked no solution"
+                     << (ucSkip.empty() ? std::string() : ": " + ucSkip);
+#endif
 }
