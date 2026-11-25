@@ -199,7 +199,7 @@ namespace
     };
 } // namespace
 
-TEST(StreamKLaunchSummaryTest, UniformSummationStaggerRespectsPersistentCapability)
+TEST(StreamKLaunchSummaryTest, UniformSummationTurnsStaggerOff)
 {
     struct Case
     {
@@ -211,11 +211,11 @@ TEST(StreamKLaunchSummaryTest, UniformSummationStaggerRespectsPersistentCapabili
         size_t                 expectedStagger;
     };
     const Case cases[] = {
-        {TileProcessingStrategy::None, false, true, 1, 1, 16},
+        {TileProcessingStrategy::None, false, true, 1, 1, 0},
         {TileProcessingStrategy::DataParallel, false, true, 1, 1, 0},
         {TileProcessingStrategy::StreamK, false, true, 1, 1, 0},
-        {TileProcessingStrategy::DataParallel, true, true, 1, 1, 16},
-        {TileProcessingStrategy::StreamK, true, true, 1, 1, 16},
+        {TileProcessingStrategy::DataParallel, true, true, 1, 1, 0},
+        {TileProcessingStrategy::StreamK, true, true, 1, 1, 0},
         {TileProcessingStrategy::StreamK, true, true, 0, 1, 0},
         {TileProcessingStrategy::None, false, false, 1, 1, 0},
         {TileProcessingStrategy::StreamK, false, true, 1, 0, 16},
