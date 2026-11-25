@@ -1214,7 +1214,8 @@ namespace
         // device, CU count or kernel name, so it follows the logic files
         // instead of copying them, and rather than on
         // uniformSummationOrderSupported(), which is the filter under test. A
-        // problem with no pick is skipped.
+        // problem the mode leaves without a pick fails; one with no pick either
+        // way is skipped.
         void checkDefaultPicksUniform(const Problem& problem)
         {
             RowUniformityHarness harness(problem);
@@ -1228,9 +1229,10 @@ namespace
             const auto candidates = harness.candidateAlgos(enumeratedCount, /*sweepBudget=*/0);
 
             hipblasLtMatmulHeuristicResult_t pickOff{};
-            if(harness.defaultPick(/*uniformMode=*/false, pickOff))
+            const bool        hasPickOff = harness.defaultPick(/*uniformMode=*/false, pickOff);
+            const std::string nameOff = hasPickOff ? harness.solutionName(pickOff) : std::string();
+            if(hasPickOff)
             {
-                const std::string nameOff = harness.solutionName(pickOff);
                 std::string       unresolved;
                 const auto        solution = solutionForAlgo(pickOff, unresolved);
                 ASSERT_TRUE(solution) << "Cannot tell whether " << nameOff
@@ -1262,7 +1264,13 @@ namespace
             }
 
             if(candidates.empty())
-                GTEST_SKIP() << "No heuristic pick for this problem on " << gpuArchName();
+            {
+                ASSERT_FALSE(hasPickOff)
+                    << "With the mode off the default pick is " << nameOff
+                    << ", but with the mode on the heuristic offers nothing this test can run";
+                GTEST_SKIP() << "No heuristic pick for this problem on " << gpuArchName()
+                             << ", with the mode on or off";
+            }
 
             for(const auto& candidate : candidates)
             {
