@@ -65,8 +65,9 @@ common = [
     "projects/composablekernel/vars/*",
     "projects/composablekernel/groovy/*",
 
-    # Workflows that are not TheRock CI. Changing one of these cannot affect a
-    # TheRock build or test, so there is no reason to burn runners on it.
+    # Workflows/actions that are not TheRock CI. Changing one of these cannot
+    # affect a TheRock build or test, so there is no reason to burn runners on it.
+    ".github/actions/ci-runners/*",
     ".github/workflows/auto-retry-failed.yml",
     ".github/workflows/clang-tidy.yml",
     ".github/workflows/close-stale-prs.yml",
