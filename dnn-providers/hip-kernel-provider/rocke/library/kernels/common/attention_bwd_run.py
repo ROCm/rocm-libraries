@@ -417,9 +417,14 @@ def check_attn_dense_bwd_tensors(
 
 
 def _build_dense(spec, *, arch):
-    """The dense family's main kernel (per-arch builder, imported lazily)."""
+    """The dense family's main kernel (per-arch builder, imported lazily;
+    an arch with no dense backward is refused before the import)."""
     import importlib
 
+    from kernels.common.attention_dense_bwd_spec import DENSE_BWD_ARCHS
+
+    if arch not in DENSE_BWD_ARCHS:
+        raise ValueError(f"arch={arch!r} not in {DENSE_BWD_ARCHS}")
     mod = importlib.import_module(f"kernels.{arch}.attention_dense_bwd")
     return mod.build_attention_dense_bwd(spec, arch=arch)
 
