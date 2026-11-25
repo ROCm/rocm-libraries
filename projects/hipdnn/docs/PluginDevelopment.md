@@ -17,6 +17,7 @@
     - [Accessing Knob Settings in Your Plugin](#accessing-knob-settings-in-your-plugin)
   - [Reporting Numerical Notes](#reporting-numerical-notes)
   - [Saving Execution Plans from Ingestor Engines](#saving-execution-plans-from-ingestor-engines)
+  - [Execution contract for engines](#execution-contract-for-engines)
 - [Plugin Architecture](#plugin-architecture)
 - [Plugin Loading](#plugin-loading)
 - [How to Test Plugins](#how-to-test-plugins)
@@ -463,8 +464,18 @@ A provider that builds plans with the generic kernel ingestor can let users save
 - **Save the chosen plan.** `IPlan::saveablePlan()` gives the single-kernel plan to save. A `BenchmarkPlan` returns one only after its first execute has chosen a kernel.
 - **Export the hooks.** Export the three hooks listed under [Plugin API](#plugin-api). Tell your own plans apart from the plans of your other engines in the save hook, for example by the plan type.
 - **Report the note.** Report `HIPDNN_BEHAVIOR_NOTE_SUPPORTS_EXECUTION_PLAN_SERIALIZATION` only for an engine that can save every plan. Every kernel must be a single-launch kernel with a source kind that the save hook accepts. Every dispatch handler must return true from `supportsSaving`.
-- **Report SUPPORTS_GRAPH_CAPTURE only for a capture-safe engine.** Report `HIPDNN_BEHAVIOR_NOTE_SUPPORTS_GRAPH_CAPTURE` only when `execute` only enqueues work on the handle's stream, with default settings (benchmarking off), including on the first execute of a plan. `execute` must not synchronize the host, wait on an event, allocate or free memory, call a synchronous memcpy, read device memory on the host, or unload a module. For a kernel ingestor engine, declare the `supports_graph_capture` tag in `behavior_notes` of the descriptor.
+- **Report SUPPORTS_GRAPH_CAPTURE only for a capture-safe engine.** Report `HIPDNN_BEHAVIOR_NOTE_SUPPORTS_GRAPH_CAPTURE` only when `execute` only enqueues work on the handle's stream, with default settings (benchmarking off), including on the first execute of a plan. `execute` must not synchronize the host, wait on an event, allocate or free memory, call a synchronous memcpy, read device memory on the host, or unload a module. For a kernel ingestor engine, declare the `supports_graph_capture` tag in `behavior_notes` of the descriptor. See [Execution contract for engines](#execution-contract-for-engines).
 - **Keep the note and the hooks in agreement.** The frontend's `to_binary()` includes the plan for every engine that reports the note, and fails if that save fails, with no fallback to the graph only.
+
+### Execution contract for engines
+
+Engines are expected to be graph-capture capable by default. Applications record `execute` in a HIP graph, so an engine that allocates memory or synchronizes breaks their capture.
+
+- **Do not allocate or synchronize outside the caller's buffers.** At every stage (support queries, workspace queries, plan build, `execute`, plan serialization and destruction), a provider allocates no device or pinned host memory beyond the variant pack and the workspace, and does not synchronize the host with the device or a stream. Another thread may be capturing while a plan is built or destroyed. Handle creation can hold persistent library state, never scratch memory or workspace.
+- **Load code objects at build.** Load kernel code objects when the plan is built or deserialized, not in `execute`.
+- **Time only in benchmarking paths.** The only exceptions are benchmarking and autotune timing paths (`global.benchmarking`, `Graph::autotune()`, the timed-execute and profiling APIs), which can synchronize and allocate timing memory, and the integrations described in the last bullet.
+- **Report the note.** An engine that meets this contract reports `HIPDNN_BEHAVIOR_NOTE_SUPPORTS_GRAPH_CAPTURE` (see [Saving Execution Plans from Ingestor Engines](#saving-execution-plans-from-ingestor-engines)).
+- **Document library behavior you cannot control.** Where a provider integrates a library whose behavior hipDNN cannot control (for example MIOpen), the allocation, synchronization or capture behavior that library imposes is documented in that provider's section, and its engines do not report `SUPPORTS_GRAPH_CAPTURE` unless they capture. Behavior not documented there is a violation.
 
 ## Plugin Architecture
 
