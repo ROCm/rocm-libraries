@@ -300,13 +300,17 @@ GOLDENS: tuple[Golden, ...] = (
         "mla_prefill_gfx942_ir_sha256.json",
         "test_mla_prefill_gfx942_golden.py",
     ),
-    # Read by the library test and by the C++ test rocke_attention_dense_spec.
+    # One generator records the shared and concrete native host contracts.
     Golden(
         name="attention_dense_spec_vectors",
-        files=("platform/tests/golden/attention_dense_spec_vectors.json",),
+        files=(
+            "platform/tests/golden/attention_dense_spec_vectors.json",
+            "platform/tests/golden/attention_dense_gfx950_spec_vectors.json",
+        ),
         checked_by=(
             "library/tests/test_attention_dense_spec_vectors.py",
             "platform/tests/instances/test_attention_dense_spec.cpp",
+            "platform/tests/instances/test_attention_dense_gfx950_spec.cpp",
         ),
         record=(
             RecordStep(

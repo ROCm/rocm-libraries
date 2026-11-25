@@ -1393,10 +1393,10 @@ def _gfx950_build():
 
 def test_gfx950_contract_matches_current_python():
     recorded = json.loads(GFX950_VECTORS.read_text(encoding="utf-8"))
-    current = _gfx950_build()
+    current = stamp_fingerprint(_gfx950_build())
     assert recorded == current, (
-        f"gfx950 native contract drift: regenerate {GFX950_VECTORS.name} with "
-        f"python {Path(__file__).name} --regenerate and run rocke_attention_dense_gfx950_spec"
+        f"gfx950 native contract drift: review, then run `{rerecord_command(GOLDEN_NAME)}` "
+        "from the rocke directory and rerun rocke_attention_dense_gfx950_spec"
     )
 
 
@@ -1453,7 +1453,9 @@ if __name__ == "__main__":
         VECTORS.write_text(_dump(stamp_fingerprint(_build())), encoding="utf-8")
         print(f"wrote {VECTORS}")
         gfx950_data = _gfx950_build()
-        GFX950_VECTORS.write_text(_dump(gfx950_data), encoding="utf-8")
+        GFX950_VECTORS.write_text(
+            _dump(stamp_fingerprint(gfx950_data)), encoding="utf-8"
+        )
         supported = [c for c in gfx950_data["cases"] if c["expect"]["supports"]]
         print(
             f"wrote {GFX950_VECTORS}: {len(gfx950_data['cases'])} cases, "
