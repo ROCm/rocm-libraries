@@ -31,11 +31,16 @@ from rocke.tests.subprocess_launcher import rocke_subprocess_env
 _CHILD_TIMEOUT_SECONDS = 120
 
 
-def _run_pytest(tree: Path, records: Path | None, *arguments: str) -> None:
+def _run_pytest(
+    tree: Path, records: Path | None, *arguments: str, first_plugin: str = ""
+) -> None:
     """Run pytest over ``tree`` with the plugin loaded through the environment,
-    writing into ``records`` (None: the variable unset)."""
+    writing into ``records`` (None: the variable unset). ``first_plugin``
+    names a module of ``tree`` to load before it."""
     environment = rocke_subprocess_env()
-    environment["PYTEST_PLUGINS"] = "rocke.tests.run_records"
+    environment["PYTEST_PLUGINS"] = ",".join(
+        filter(None, (first_plugin, "rocke.tests.run_records"))
+    )
     environment.pop(RECORDS_DIR_ENV, None)
     if records is not None:
         environment[RECORDS_DIR_ENV] = str(records)
@@ -255,6 +260,59 @@ def test_a_marker_deselection_declares_the_lane_whose_marker_rejects_it(tmp_path
         ("test_sweep", skip_until_reason(TICKET, reason=reason)),
         ("test_gpu_sweep", reason),
         ("test_on_gpu", reason),
+    }
+
+
+def test_a_deselection_names_the_expressions_without_pytests_matchers(tmp_path):
+    """pytest's -m / -k matchers are private: where they cannot be imported,
+    the plugin still loads and records each deselection with the expressions
+    given, as plain text."""
+    tree = tmp_path / "tree"
+    tree.mkdir()
+    _write(
+        tree,
+        "hide_matchers.py",
+        """
+        import sys
+
+        # What a pytest that moved its matchers looks like to the plugin,
+        # from before the plugin loads.
+        sys.modules["_pytest.mark.expression"] = None
+        """,
+    )
+    _write(
+        tree,
+        "test_filtered.py",
+        """
+        import pytest
+
+        @pytest.mark.integration
+        def test_marked():
+            pass
+
+        def test_named():
+            pass
+
+        def test_kept():
+            pass
+        """,
+    )
+    records = tmp_path / "records"
+    _run_pytest(
+        tree,
+        records,
+        "-m",
+        "not integration",
+        "-k",
+        "not named",
+        first_plugin="hide_matchers",
+    )
+    reason = "deselected by -m 'not integration' or -k 'not named'"
+    assert {
+        (node, why) for _, node, event, why in _events(records) if event == "deselected"
+    } == {("test_marked", reason), ("test_named", reason)}
+    assert ("test_kept", "ran") in {
+        (node, event) for _, node, event, _ in _events(records)
     }
 
 
