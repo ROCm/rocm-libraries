@@ -1577,11 +1577,12 @@ struct UnMerge
 // range check of that coordinate fails. Unlike a separate compare, this needs the 32-bit unsigned
 // range to be big enough: a poisoned coordinate must not wrap back into [0, length).
 //
-// The poison is the smallest value that moves the smallest lower coordinate of a legitimate row
-// (-left_pad, negative when the input is padded) to length: poison = length + max(0, left_pad). It
-// is a runtime value, and not a big constant, so that a poisoned coordinate stays close to the
-// range of the tensor and its offset (coordinate * stride) does not overflow the 32-bit offset
-// arithmetic of the descriptor.
+// The poison is the smallest value that moves the smallest lower coordinate of a legitimate row to
+// length (forward / backward weight: the smallest coordinate is -left_pad, so
+// poison = length + max(0, left_pad), see ConvFwdDataImplicitGemmInTransform::Poison; backward
+// data: see ConvBwdDataImplicitGemmOutTransform::Poison). It is a runtime value, and not a big
+// constant, so that a poisoned coordinate stays close to the range of the tensor and its offset
+// (coordinate * stride) does not overflow the 32-bit offset arithmetic of the descriptor.
 //
 // It is added once for a padding row or a padding column and twice for a padding row and column.
 // The lower side is guaranteed by the value of the poison. On the upper side the largest lower
@@ -1594,31 +1595,54 @@ struct UnMerge
 // padding.
 // This is a limit on index values, not on bytes, so it does not depend on the data type (unlike
 // the 2GB limit, which is in bytes and is therefore not enough for 8-bit types).
-__host__ __device__ constexpr uint32_t GetConvPaddingPoison(index_t first_spatial_length,
-                                                            index_t left_pad)
-{
-    return static_cast<uint32_t>(first_spatial_length) +
-           (left_pad > 0 ? static_cast<uint32_t>(left_pad) : 0u);
-}
 
 // Host check of the upper side, see above. min_lower_index is the smallest lower coordinate of a
-// legitimate row, max_lower_index the largest one.
+// legitimate row, max_lower_index the largest one. The coordinates of a descriptor are moved by
+// adding the difference of the new and of the old lower index (UpdateLowerIndex), and a kernel can
+// move from the largest (poisoned) coordinate back to the smallest one, so the whole range of the
+// coordinate, not only its largest value, must fit in 32 bits.
 __host__ constexpr bool IsConvPaddingPoisonRangeSupported(long_index_t first_spatial_length,
                                                           long_index_t min_lower_index,
                                                           long_index_t max_lower_index)
 {
-    const long_index_t poison = first_spatial_length + (min_lower_index < 0 ? -min_lower_index : 0);
-    return max_lower_index + 2 * poison <= (long_index_t{1} << 31) - 1;
+    const long_index_t below  = min_lower_index < 0 ? -min_lower_index : 0;
+    const long_index_t poison = first_spatial_length + below;
+    // the poisoned coordinate must stay below 2^31, and so must its distance to the smallest
+    // coordinate (the kernels move a coordinate by the difference of the two)
+    return max_lower_index + 2 * poison + below <= (long_index_t{1} << 31) - 1;
 }
 
 // Host check of the whole custom input transform of a convolution (forward A matrix, backward
-// weight B matrix): the poison range (see IsConvPaddingPoisonRangeSupported) and the offset of the
-// poisoned coordinates. The offset is the sum over the dimensions of coordinate * stride in 32-bit
-// arithmetic, so a poisoned coordinate (up to the largest coordinate plus twice the poison) times
-// the stride of the first spatial dimension, plus the other terms, must stay below 2^31, otherwise
-// the offset computation of a padding row overflows. The padded GEMM lengths are the ones of the
-// descriptor: m_padded over (n, o_0..), k_padded over (f_0.., c). The strides are the ones of the
-// input tensor, in elements.
+// weight B matrix). It returns true if the transform gives the same result as the generic chain
+// of Pad / Embed / Merge transforms and if no 32-bit computation of the transform and of the
+// descriptor overflows. It checks two conditions:
+//
+//  1. The poison range of the first spatial dimension, see IsConvPaddingPoisonRangeSupported: the
+//     largest lower coordinate plus twice the poison must be below 2^31, otherwise a poisoned
+//     coordinate wraps back into the input and a GEMM padding row / column is read as real data.
+//
+//  2. The offset of the lower coordinates. The descriptor computes the offset of the input as
+//       n * n_stride + sum_d(x_d * spatial_stride[d]) + c * c_stride
+//     in 32-bit signed arithmetic, so the sum of the terms must be below 2^31, also for the
+//     poisoned coordinates (far outside the tensor) of the padding rows and columns, which the
+//     2GB check of the tensor size does not bound. The coordinates are also moved: the descriptor
+//     adds the difference of the new and of the old offset, which can go from the largest
+//     (poisoned) coordinate to the smallest one (-left_pad). So each term counts with the whole
+//     range of its coordinate, from -left_pad to the largest value, times its stride. A bound is
+//     computed for each of the two kinds of GEMM positions that can have a large coordinate (see
+//     below) and the larger one is used. It is an upper bound, not the exact maximum, so a few
+//     supported problems may be rejected, but an accepted problem does not overflow.
+//
+// The GEMM row is m = (n * Ho + ho) * Wo + wo (n = batch, the output indices are o_d) and the GEMM
+// column is k = (f0 * F1 * ... + f1 * ...) * C + c. The lower coordinate of dimension d is
+// o_d * stride_d + f_d * dilation_d - left_pad_d.
+//
+// Arguments: N is the batch size (per workgroup if the batch is split), the lengths and the other
+// arrays are the ones of the convolution. The padded GEMM lengths are the ones of the descriptor:
+// m_padded over (n, o_0..), k_padded over (f_0.., c). The strides are the ones of the input tensor
+// in elements (n_stride for the batch, spatial_stride per dimension and c_stride for the
+// channels). Only the first spatial dimension is poisoned, the other dimensions only enter the
+// offset.
 template <index_t NDim>
 __host__ bool
 IsConvInputTransformRangeSupported(long_index_t N,
@@ -1637,6 +1661,8 @@ IsConvInputTransformRangeSupported(long_index_t N,
 {
     const auto abs_value = [](long_index_t x) { return x < 0 ? -x : x; };
 
+    // prod_out = Ho * Wo * ... (the number of GEMM rows per batch), filter_rest = the divisor of k
+    // that separates the filter index of the first dimension: C * F1 * F2 * ...
     long_index_t prod_out    = 1;
     long_index_t filter_rest = C;
     for(index_t d = 0; d < NDim; ++d)
@@ -1644,35 +1670,51 @@ IsConvInputTransformRangeSupported(long_index_t N,
         prod_out *= out_length[d];
         filter_rest *= d > 0 ? filter[d] : 1;
     }
+    // number of rows with the same first output index: Wo * ... (all dimensions but the first)
     const long_index_t out_rest = prod_out / out_length[0];
 
-    // the last quotient of k is the filter index of the first dimension
+    // The filter index of the first dimension is the last quotient of k. The padded columns
+    // (k >= K) continue the sequence, so f0 can be larger than the filter size - 1, up to the
+    // value of the last padded column. That is the largest filter index multiplied by the dilation.
     const long_index_t f0_max = (k_padded - 1) / filter_rest;
 
+    // Condition 1: the largest lower coordinate of the first dimension, without the poison. It
+    // comes from the last output index and the largest filter index (possibly in a padded column).
     const long_index_t max0 = (out_length[0] - 1) * stride[0] + f0_max * dilation[0] - left_pad[0];
     if(!IsConvPaddingPoisonRangeSupported(in_length[0], -left_pad[0], max0))
     {
         return false;
     }
+    // same poison as ConvFwdDataImplicitGemmInTransform::Poison
     const long_index_t poison = in_length[0] + (left_pad[0] > 0 ? left_pad[0] : 0);
 
-    // terms of the offset that do not depend on the case below: channel and the other dimensions
+    // Condition 2. The terms of the offset that are the same in both cases below: the largest
+    // channel (the channel is the fastest index of k and is never poisoned) and the other spatial
+    // dimensions (not poisoned either, but their coordinate times the stride must fit). For each
+    // dimension the range of the coordinate is used: from the smallest (-left_pad) to the largest.
     long_index_t others = (C - 1) * abs_value(c_stride);
     for(index_t d = 1; d < NDim; ++d)
     {
         const long_index_t max_d =
             (out_length[d] - 1) * stride[d] + (filter[d] - 1) * dilation[d] - left_pad[d];
-        others += std::max(abs_value(max_d), abs_value(left_pad[d])) * abs_value(spatial_stride[d]);
+        others += (std::max<long_index_t>(max_d, 0) + std::max<long_index_t>(left_pad[d], 0)) *
+                  abs_value(spatial_stride[d]);
     }
 
-    // Rows inside M (n < N) with a padding column (k >= K): the first dimension has any output
-    // index and one poison.
+    // Case 1: real rows (m < M, so the batch n <= N - 1) with a padding column (k >= K). The first
+    // output index can be anything, up to Ho - 1, and the first coordinate has one poison (the
+    // column's). The range of the first coordinate is from -left_pad to max0 + poison.
     const long_index_t case_columns =
         (N - 1) * abs_value(n_stride) +
-        std::max(max0 + poison, abs_value(left_pad[0])) * abs_value(spatial_stride[0]) + others;
+        (std::max<long_index_t>(max0 + poison, 0) + std::max<long_index_t>(left_pad[0], 0)) *
+            abs_value(spatial_stride[0]) +
+        others;
 
-    // Padding rows (m >= M): n is the quotient past N and the first output index is small (it is
-    // limited by the number of padding rows, m_padded - N * prod_out), with up to two poisons.
+    // Case 2: padding rows (m >= M). The batch n is the quotient past N, up to the one of the last
+    // padded row, and the first output index is small, because there are only
+    // m_padded - N * prod_out padding rows (they fill the end of the last batch). The first
+    // coordinate has the row's poison, and also the column's if the column is a padding column
+    // too, so two poisons are used. If there are no padding rows this case does not exist.
     const long_index_t padding_rows = m_padded - N * prod_out;
     long_index_t case_rows          = 0;
     if(padding_rows > 0)
@@ -1682,9 +1724,13 @@ IsConvInputTransformRangeSupported(long_index_t N,
         const long_index_t coord0 =
             o0_max * stride[0] + f0_max * dilation[0] - left_pad[0] + 2 * poison;
         case_rows = n_max * abs_value(n_stride) +
-                    std::max(coord0, abs_value(left_pad[0])) * abs_value(spatial_stride[0]) +
+                    (std::max<long_index_t>(coord0, 0) + std::max<long_index_t>(left_pad[0], 0)) *
+                        abs_value(spatial_stride[0]) +
                     others;
     }
+    // The other combinations are not larger than these two: a real row with a real column has a
+    // coordinate inside the tensor or at most as far out as the padding of the convolution, which
+    // is covered by max0 without a poison.
     return std::max(case_columns, case_rows) <= (long_index_t{1} << 31) - 1;
 }
 
@@ -1706,10 +1752,11 @@ IsConvInputTransformRangeSupported(long_index_t N,
  * invalid by adding a large value to the Ho coordinate (the M part to the term that only depends
  * on m, the K part to the term that only depends on k), so that the unsigned range check fails.
  * A poisoned coordinate must never wrap back into [0, Ho). The poison is the smallest value that
- * moves the smallest Ho coordinate of a legitimate row to Ho, see GetConvPaddingPoison, and the
- * largest coordinate plus twice the poison must stay below 2^31. It is a limit on index values,
- * not on bytes, so it does not depend on the data type. See IsConvPaddingPoisonRangeSupported and
- * IsMergedOutPaddingRangeSupported, which the device op checks on the host.
+ * moves the smallest Ho coordinate of a legitimate row to Ho, see the comment above
+ * IsConvPaddingPoisonRangeSupported, and the largest coordinate plus twice the poison must stay
+ * below 2^31. It is a limit on index values, not on bytes, so it does not depend on the data type.
+ * See IsConvPaddingPoisonRangeSupported and IsMergedOutPaddingRangeSupported, which the device op
+ * checks on the host.
  *
  * Indices must be non-negative and below 2^31 (magic division limitation).
  */
@@ -1734,10 +1781,11 @@ struct ConvBwdDataImplicitGemmOutTransform
     index_t MPad_, KPad_;
     Tuple<index_t, index_t, index_t> up_lengths_; // K0_, MPadded, K1_;
 
-    // Poison of the padding rows / columns, see GetConvPaddingPoison. The smallest Ho coordinate of
-    // a legitimate row is IHTildeSliceBegin_ - ydot * |HRatio_|, with ydot the largest ydot index
-    // (it includes the rows added by the padding of GemmK). Computed from the stored lengths with
-    // the magic division of the K merge, so that no member is added.
+    // Poison of the padding rows / columns, see the comment above
+    // IsConvPaddingPoisonRangeSupported. The smallest Ho coordinate of a legitimate row is
+    // IHTildeSliceBegin_ - ydot * |HRatio_|, with ydot the largest ydot index (it includes the rows
+    // added by the padding of GemmK). Computed from the stored lengths with the magic division of
+    // the K merge, so that no member is added.
     __host__ __device__ constexpr uint32_t Poison() const
     {
         const uint32_t ydot_max =
@@ -2008,10 +2056,11 @@ struct ConvBwdDataImplicitGemmOutTransform
  * each of them can be hoisted or shared independently of the other. The lower index of a padding
  * row / column is therefore meaningless. A poisoned coordinate must never wrap back into
  * [0, length). The poison is the smallest value that moves the smallest first spatial lower
- * coordinate of a legitimate row to length, see GetConvPaddingPoison, and the largest coordinate
- * plus twice the poison must stay below 2^31. It is a limit on index values, not on bytes, so it
- * does not depend on the data type. See IsConvPaddingPoisonRangeSupported and
- * IsPaddingRangeSupported, which the device op checks on the host.
+ * coordinate of a legitimate row to length, see the comment above
+ * IsConvPaddingPoisonRangeSupported, and the largest coordinate plus twice the poison must stay
+ * below 2^31. It is a limit on index values, not on bytes, so it does not depend on the data type.
+ * See IsConvPaddingPoisonRangeSupported and IsConvInputTransformRangeSupported, which the device op
+ * checks on the host.
  */
 template <index_t NDimSpatial>
 struct ConvFwdDataImplicitGemmInTransform
@@ -2042,10 +2091,15 @@ struct ConvFwdDataImplicitGemmInTransform
     index_t m_valid_;
     index_t k_valid_;
 
-    // Poison of the padding rows / columns, see GetConvPaddingPoison
+    // Poison of the padding rows / columns, see the comment above
+    // IsConvPaddingPoisonRangeSupported. The smallest first spatial lower coordinate of a
+    // legitimate row is -left_pad, so the poison that moves it to the length of the dimension is
+    // length + max(0, left_pad).
     __host__ __device__ constexpr uint32_t Poison() const
     {
-        return GetConvPaddingPoison(in_lengths_[Number<0>{}], left_pads_[Number<0>{}]);
+        const index_t left_pad = left_pads_[Number<0>{}];
+        return static_cast<uint32_t>(in_lengths_[Number<0>{}]) +
+               (left_pad > 0 ? static_cast<uint32_t>(left_pad) : 0u);
     }
 
     __host__ __device__ constexpr ConvFwdDataImplicitGemmInTransform() = default;
@@ -2227,27 +2281,6 @@ struct ConvFwdDataImplicitGemmInTransform
                                     static_cast<uint32_t>(in_lengths_[d]));
         });
         return mask;
-    }
-
-    // The poison of the padding rows / columns is only reliable if the first spatial lower
-    // coordinates stay in the range described at IsConvPaddingPoisonRangeSupported.
-    __host__ bool IsPaddingRangeSupported() const
-    {
-        long_index_t filter_rest = -static_cast<long_index_t>(nC_); // C
-        if constexpr(NDimSpatial > 1)
-        {
-            static_for<1, NDimSpatial, 1>{}(
-                [&](auto d) { filter_rest *= -static_cast<long_index_t>(neg_filter_lengths_[d]); });
-        }
-        // the filter index of the first spatial dimension is the last quotient of k
-        const long_index_t max_filter_idx = (up_lengths_[Number<1>{}] - 1) / filter_rest;
-        const long_index_t out0     = -static_cast<long_index_t>(neg_out_lengths_[Number<0>{}]);
-        const long_index_t left_pad = left_pads_[Number<0>{}];
-        const long_index_t max_lower_index = (out0 - 1) * conv_strides_[Number<0>{}] +
-                                             max_filter_idx * conv_dilations_[Number<0>{}] -
-                                             left_pad;
-        return IsConvPaddingPoisonRangeSupported(
-            in_lengths_[Number<0>{}], -left_pad, max_lower_index);
     }
 
     __host__ __device__ static constexpr bool IsKnownAtCompileTime() { return false; }

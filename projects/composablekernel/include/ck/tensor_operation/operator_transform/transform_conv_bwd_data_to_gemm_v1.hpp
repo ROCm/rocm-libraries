@@ -46,9 +46,11 @@ struct TransformConvBwdDataToGemm_v1
     static constexpr bool CustomTensorTransformBwdData = std::is_same_v<IndexType, index_t>;
 
     // Opt-in: the Ho / Wo bounds and the GEMM M / K padding are handled by the custom transform
-    // itself (see ConvBwdDataImplicitGemmOutTransform) instead of by outer Pad transforms.
+    // itself (see ConvBwdDataImplicitGemmOutTransform) instead of by outer Pad transforms. There
+    // is no 3D version of the custom transform, so the 3D descriptors always use the outer Pad
+    // transforms.
     static constexpr bool MergePaddingInCustomTransform =
-        MergeOutPadding && CustomTensorTransformBwdData;
+        MergeOutPadding && CustomTensorTransformBwdData && NDimSpatial == 2;
 
     template <index_t N>
     using NumberType =
@@ -185,8 +187,11 @@ struct TransformConvBwdDataToGemm_v1
 
             long_index_t bound = n_max * abs_value(NStrideTensorA_);
             bound += (static_cast<long_index_t>(K_) - 1) * abs_value(KStrideTensorA_);
-            bound += std::max<long_index_t>(HTilde_ + 2 * poison, -min_ho) * abs_value(HoStride_);
-            bound += std::max<long_index_t>(WTilde_, max_xdot * ratio_w) * abs_value(WoStride_);
+            // the range of the coordinates (from the smallest to the largest, the kernels move a
+            // coordinate by the difference of two of them), times the stride
+            bound +=
+                (HTilde_ + 2 * poison + std::max<long_index_t>(-min_ho, 0)) * abs_value(HoStride_);
+            bound += (WTilde_ + max_xdot * ratio_w) * abs_value(WoStride_);
             return bound <= (long_index_t{1} << 31) - 1;
         }
     }

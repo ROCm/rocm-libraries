@@ -14,6 +14,8 @@
 #include "ck/tensor_description/multi_index_transform_helper.hpp"
 #include "ck/tensor_operation/operator_transform/transform_conv_bwd_data_to_gemm_v1.hpp"
 #include "ck/tensor_operation/operator_transform/transform_conv_bwd_weight_to_gemm_v2.hpp"
+#include "ck/tensor_operation/operator_transform/transform_conv_fwd_to_gemm.hpp"
+#include "ck/tensor_operation/gpu/device/impl/split_k_offset_utils.hpp"
 
 using namespace ck;
 
@@ -390,8 +392,87 @@ struct ForwardConvCase
 };
 
 // Input descriptor (N, spatial..., C) of one group of an N spatial G C tensor
+// Moving a coordinate (the UpdateLowerIndex path the kernels use to walk the descriptor) must agree
+// with building the coordinate from scratch: same offset, same validity. The walk is random with a
+// fixed seed and the steps go forward and backward, change several dimensions at once and include
+// jumps across the whole length of a dimension (between the smallest and the largest lower
+// coordinates). It is not exhaustive. Returns the number of mismatches.
+template <typename Desc>
+int64_t CountCoordinateMoveMismatches(const Desc& desc, int steps, uint32_t seed)
+{
+    constexpr index_t N = Desc::GetNumOfDimension();
+    std::array<index_t, N> lengths{};
+    static_for<0, N, 1>{}([&](auto i) { lengths[i] = desc.GetLength(i); });
+
+    const auto to_index = [&](const std::array<index_t, N>& a) {
+        MultiIndex<N> idx;
+        static_for<0, N, 1>{}([&](auto i) { idx(i) = a[i]; });
+        return idx;
+    };
+
+    std::mt19937 rng(seed);
+    const auto pick = [&](index_t length) {
+        const index_t options[] = {0,
+                                   1,
+                                   -1,
+                                   2,
+                                   -2,
+                                   3,
+                                   -3,
+                                   8,
+                                   -8,
+                                   16,
+                                   -16,
+                                   length / 2,
+                                   -(length / 2),
+                                   length - 1,
+                                   -(length - 1)};
+        return options[rng() % (sizeof(options) / sizeof(options[0]))];
+    };
+
+    std::array<index_t, N> current{};
+    auto coordinate    = make_tensor_coordinate(desc, to_index(current));
+    int64_t mismatches = 0;
+    for(int step = 0; step < steps; ++step)
+    {
+        std::array<index_t, N> delta{}, next{};
+        bool inside = true;
+        for(index_t i = 0; i < N; ++i)
+        {
+            delta[i] = pick(lengths[i]);
+            next[i]  = current[i] + delta[i];
+            inside &= next[i] >= 0 && next[i] < lengths[i];
+        }
+        if(!inside)
+        {
+            continue;
+        }
+        current = next;
+        move_tensor_coordinate(
+            desc, coordinate, make_tensor_coordinate_step(desc, to_index(delta)));
+        const auto fresh = make_tensor_coordinate(desc, to_index(current));
+        const bool valid_moved =
+            coordinate_has_valid_offset_assuming_visible_index_is_valid(desc, coordinate);
+        const bool valid_fresh =
+            coordinate_has_valid_offset_assuming_visible_index_is_valid(desc, fresh);
+        if(valid_moved != valid_fresh ||
+           (valid_fresh && long_index_t{coordinate.GetOffset()} != long_index_t{fresh.GetOffset()}))
+        {
+            if(mismatches++ < 3)
+            {
+                ADD_FAILURE() << "moving the coordinate disagrees with a new one at step " << step
+                              << ": moved valid=" << valid_moved
+                              << " offset=" << coordinate.GetOffset()
+                              << ", new valid=" << valid_fresh << " offset=" << fresh.GetOffset();
+            }
+        }
+    }
+    return mismatches;
+}
+
 template <index_t NDim>
-auto MakeInputDescriptor(const ForwardConvCase<NDim>& cfg)
+auto MakeInputDescriptor(const ForwardConvCase<NDim>& cfg,
+                         const std::array<index_t, NDim + 2>* strides_override = nullptr)
 {
     std::array<index_t, NDim + 2> lengths{};
     std::array<index_t, NDim + 2> strides{};
@@ -406,6 +487,10 @@ auto MakeInputDescriptor(const ForwardConvCase<NDim>& cfg)
         stride *= cfg.In[d];
     }
     strides[0] = stride;
+    if(strides_override != nullptr)
+    {
+        strides = *strides_override;
+    }
     if constexpr(NDim == 1)
         return make_naive_tensor_descriptor(make_tuple(lengths[0], lengths[1], lengths[2]),
                                             make_tuple(strides[0], strides[1], strides[2]));
@@ -926,8 +1011,6 @@ TEST(TensorDescriptorFunctorsIntegration, ForwardConvInputTransformMatchesGeneri
         // very large positive lower indices; only hi == 0 / wi == 0 is valid
         {1, 1, {4, 4}, {1, 1}, {1 << 28, 1 << 28}, {1, 1}, {0, 0}, {1 << 30, 1 << 30}},
         {1, 1, {4, 4}, {1, 1}, {1 << 28, 1 << 28}, {1, 1}, {0, 0}, {7 << 28, 7 << 28}},
-        // second dimension down to -(2^31 - 1)
-        {1, 1, {4, 4}, {1, 1}, {1 << 28, 1 << 28}, {1, 1}, {1 << 29, kIndexMax}, {0, 0}},
         // large extents: Hi = 2^29, Wi = kIndexMax, filter taps reaching Hi - 1 and Hi
         {1,
          1,
@@ -1007,8 +1090,8 @@ struct BwdDataCase
     index_t G = 1;
 };
 
-template <typename IndexType, bool MergeOutPadding = false>
-auto MakeBwdDataADescriptor(const BwdDataCase& c, index_t ytilde, index_t xtilde)
+template <typename IndexType, bool MergeOutPadding = false, bool SplitConvN = false>
+auto MakeBwdDataTransformer(const BwdDataCase& c, index_t ytilde, index_t xtilde)
 {
     namespace ctc   = ck::tensor_layout::convolution;
     using Transform = ck::tensor_operation::TransformConvBwdDataToGemm_v1<
@@ -1024,7 +1107,7 @@ auto MakeBwdDataADescriptor(const BwdDataCase& c, index_t ytilde, index_t xtilde
         ctc::NHWGK,
         ctc::GKYXC,
         ctc::NHWGC,
-        false,
+        SplitConvN,
         float,
         float,
         1,
@@ -1061,7 +1144,13 @@ auto MakeBwdDataADescriptor(const BwdDataCase& c, index_t ytilde, index_t xtilde
                      conv_dilations,
                      left_pads,
                      right_pads,
-                     tildes}
+                     tildes};
+}
+
+template <typename IndexType, bool MergeOutPadding = false, bool SplitConvN = false>
+auto MakeBwdDataADescriptor(const BwdDataCase& c, index_t ytilde, index_t xtilde)
+{
+    return MakeBwdDataTransformer<IndexType, MergeOutPadding, SplitConvN>(c, ytilde, xtilde)
         .MakeADescriptor_AK0_M_AK1();
 }
 
@@ -1130,6 +1219,7 @@ void CheckBwdDataOutTransformMatchesGeneric(const BwdDataCase& c)
             }
             EXPECT_EQ(mismatches, 0);
             EXPECT_GT(valid_count, 0);
+            EXPECT_EQ(CountCoordinateMoveMismatches(custom, 3000, 21), 0);
         }
     }
 }
@@ -1181,7 +1271,9 @@ struct BwdWeightCase
 };
 
 template <index_t NDim, bool Custom>
-auto MakeBwdWeightBDescriptor(const BwdWeightCase<NDim>& c)
+auto MakeBwdWeightDescriptors(const BwdWeightCase<NDim>& c,
+                              const std::array<index_t, NDim + 3>* input_strides = nullptr,
+                              bool use_full_batch_kindex                         = false)
 {
     using Transform = ck::tensor_operation::TransformConvBwdWeightToGemmV2<
         NDim,
@@ -1230,6 +1322,10 @@ auto MakeBwdWeightBDescriptor(const BwdWeightCase<NDim>& c)
         in_strides[1] *= c.In[d];
         out_strides[1] *= out[d];
     }
+    if(input_strides != nullptr)
+    {
+        in_strides = *input_strides;
+    }
 
     return Transform::template MakeABCGridDescriptor_A_K0_M_K1_B_K0_N_K1_C_M_N<NDim>(
         c.N,
@@ -1245,11 +1341,20 @@ auto MakeBwdWeightBDescriptor(const BwdWeightCase<NDim>& c)
         c.Dilation,
         c.PadLeft,
         c.PadRight,
-        c.BatchK)[Number<1>{}];
+        c.BatchK,
+        false,
+        use_full_batch_kindex);
+}
+
+template <index_t NDim, bool Custom>
+auto MakeBwdWeightBDescriptor(const BwdWeightCase<NDim>& c,
+                              const std::array<index_t, NDim + 3>* input_strides = nullptr)
+{
+    return MakeBwdWeightDescriptors<NDim, Custom>(c, input_strides)[Number<1>{}];
 }
 
 template <index_t NDim>
-void CheckBwdWeightBTransformMatchesGeneric(const BwdWeightCase<NDim>& c)
+void CheckBwdWeightBTransformMatchesGeneric(const BwdWeightCase<NDim>& c, bool require_valid = true)
 {
     SCOPED_TRACE("N=" + std::to_string(c.N) + " G=" + std::to_string(c.G) +
                  " C=" + std::to_string(c.C) + " In0=" + std::to_string(c.In[0]) +
@@ -1291,7 +1396,11 @@ void CheckBwdWeightBTransformMatchesGeneric(const BwdWeightCase<NDim>& c)
         }
     }
     EXPECT_EQ(mismatches, 0);
-    EXPECT_GT(valid_count, 0);
+    if(require_valid)
+    {
+        EXPECT_GT(valid_count, 0);
+    }
+    EXPECT_EQ(CountCoordinateMoveMismatches(custom, 3000, 22), 0);
 }
 
 } // namespace
@@ -1356,15 +1465,20 @@ TEST(TensorDescriptorFunctorsIntegration, ConvPaddingPoisonRangeLimit)
     constexpr long_index_t max_wrap = (long_index_t{1} << 31) - 1;
 
     // the poison is length + max(0, left_pad), and max_lower_index + 2 * poison must be below 2^31
-    EXPECT_EQ(GetConvPaddingPoison(8, 0), 8u);
-    EXPECT_EQ(GetConvPaddingPoison(8, 5), 13u);
-    EXPECT_EQ(GetConvPaddingPoison(8, -5), 8u);
+    const auto fwd_poison = [](index_t length, index_t left_pad) {
+        const ForwardConvCase<1> cfg{1, 1, {length}, {1}, {1}, {1}, {left_pad}, {0}};
+        const std::array<index_t, 1> out{static_cast<index_t>(OutputLengths(cfg)[0])};
+        return MakeCustomTransform<1>(cfg, out, out[0], 1).Poison();
+    };
+    EXPECT_EQ(fwd_poison(8, 0), 8u);
+    EXPECT_EQ(fwd_poison(8, 5), 13u);
 
     EXPECT_TRUE(IsConvPaddingPoisonRangeSupported(8, 0, max_wrap - 16));
     EXPECT_FALSE(IsConvPaddingPoisonRangeSupported(8, 0, max_wrap - 15));
-    // a left pad increases the poison
-    EXPECT_TRUE(IsConvPaddingPoisonRangeSupported(8, -5, max_wrap - 26));
-    EXPECT_FALSE(IsConvPaddingPoisonRangeSupported(8, -5, max_wrap - 25));
+    // a left pad increases the poison, and the range of the coordinate: poison = 13, and the
+    // smallest coordinate is 5 below 0
+    EXPECT_TRUE(IsConvPaddingPoisonRangeSupported(8, -5, max_wrap - 31));
+    EXPECT_FALSE(IsConvPaddingPoisonRangeSupported(8, -5, max_wrap - 30));
     // a negative left pad (positive lower index) does not
     EXPECT_TRUE(IsConvPaddingPoisonRangeSupported(8, 5, max_wrap - 16));
     // a big input and a big pad
@@ -1424,10 +1538,11 @@ TEST(TensorDescriptorFunctorsIntegration, ConvPaddingPoisonRangeLimit)
     EXPECT_TRUE(wrw_supported({1 << 26, 1}, {1, 1}, {1 << 26, 1}, {1, 1}, {0, 0}, {8, 1}));
     EXPECT_FALSE(wrw_supported({1 << 27, 1}, {1, 1}, {1 << 27, 1}, {1, 1}, {0, 0}, {8, 1}));
     // ... also with a left pad, which increases the poison
+    // (the range of the coordinate is from -left_pad to 2 poisons + the largest one: about 2^28)
     EXPECT_TRUE(wrw_supported(
-        {1 << 26, 1}, {1, 1}, {(1 << 26) + (1 << 26), 1}, {1, 1}, {1 << 26, 0}, {8, 1}));
+        {1 << 26, 1}, {1, 1}, {(1 << 26) + (1 << 26), 1}, {1, 1}, {1 << 26, 0}, {4, 1}));
     EXPECT_FALSE(wrw_supported(
-        {1 << 26, 1}, {1, 1}, {(1 << 26) + (1 << 26), 1}, {1, 1}, {1 << 26, 0}, {16, 1}));
+        {1 << 26, 1}, {1, 1}, {(1 << 26) + (1 << 26), 1}, {1, 1}, {1 << 26, 0}, {8, 1}));
 
     // fwd: padding position (m = M, k = k_pad) of an input with a 1x1 filter. m >= M and
     // k >= K, so both poisons are added: 2 * poison, with poison = length + left_pad.
@@ -1437,7 +1552,24 @@ TEST(TensorDescriptorFunctorsIntegration, ConvPaddingPoisonRangeLimit)
             const std::array<index_t, 1> out{static_cast<index_t>(out64[0])};
             const index_t M      = out[0];
             const auto transform = MakeCustomTransform<1>(cfg, out, M + 1, 192);
-            supported            = transform.IsPaddingRangeSupported();
+            // channel-first packed tensor (N = C = 1): spatial stride 1
+            supported = IsConvInputTransformRangeSupported<1>(cfg.N,
+                                                              cfg.C,
+                                                              {cfg.In[0]},
+                                                              {cfg.Filter[0]},
+                                                              {out[0]},
+                                                              {cfg.Stride[0]},
+                                                              {cfg.Dilation[0]},
+                                                              {cfg.PadLeft[0]},
+                                                              M + 1,
+                                                              192,
+                                                              cfg.In[0],
+                                                              {1},
+                                                              cfg.In[0]);
+            if(!supported)
+            {
+                return false; // not evaluated: the transform is not meant to be used then
+            }
             return transform.IsValidUpperIndexMappedToValidLowerIndex(make_tuple(M, k_pad));
         };
 
@@ -1462,18 +1594,17 @@ TEST(TensorDescriptorFunctorsIntegration, ConvPaddingPoisonRangeLimit)
 
     // upper side: a 1x1 filter with a huge dilation. The padded K columns (k >= K) get f0 > 0 and
     // therefore a lower coordinate f0 * dilation. With the dilation 2^28 - 1 and f0 = 16 the
-    // coordinate is 2^32 - 16, and the two poisons (2 * 8) wrap it to 0, inside the input. The
-    // generic chain would report this padding as invalid.
+    // coordinate is 2^32 - 16, and the two poisons (2 * 8) would wrap it to 0, inside the input:
+    // the padding would be read as real data. The host check rejects this problem.
     {
         bool supported = false;
         EXPECT_FALSE(fwd_padding_valid({1, 1, {8}, {1}, {1}, {1 << 20}, {0}, {0}}, 16, supported));
         EXPECT_TRUE(supported);
 
+        // rejected by the host check (the transform is not evaluated for it)
         supported = true;
-        const bool valid =
-            fwd_padding_valid({1, 1, {8}, {1}, {1}, {(1 << 28) - 1}, {0}, {0}}, 16, supported);
+        fwd_padding_valid({1, 1, {8}, {1}, {1}, {(1 << 28) - 1}, {0}, {0}}, 16, supported);
         EXPECT_FALSE(supported);
-        EXPECT_TRUE(valid) << "the padding of this problem is reported as valid";
     }
     {
         bool supported = false;
@@ -1496,7 +1627,9 @@ namespace {
 // map to the right lower index, and no offset term or sum may leave the range of int32. Returns
 // the result of the host check.
 template <index_t NDim>
-bool CheckConvInputRangeLimit(const ForwardConvCase<NDim>& cfg, bool first_dim_innermost)
+bool CheckConvInputRangeLimit(const ForwardConvCase<NDim>& cfg,
+                              bool first_dim_innermost,
+                              bool compare_positions = true)
 {
     SCOPED_TRACE(Describe(cfg));
 
@@ -1508,7 +1641,11 @@ bool CheckConvInputRangeLimit(const ForwardConvCase<NDim>& cfg, bool first_dim_i
     int64_t filter_size = 1;
     for(index_t d = 0; d < NDim; ++d)
     {
-        EXPECT_GE(out64[d], 1);
+        if(out64[d] < 1)
+        {
+            ADD_FAILURE() << "the test problem has an empty output";
+            return false;
+        }
         out[d] = static_cast<index_t>(out64[d]);
         prod_out *= out64[d];
         filter_size *= cfg.Filter[d];
@@ -1550,14 +1687,13 @@ bool CheckConvInputRangeLimit(const ForwardConvCase<NDim>& cfg, bool first_dim_i
                                                                     n_stride,
                                                                     spatial_stride,
                                                                     c_stride);
-    if(!supported)
+    if(!supported || !compare_positions)
     {
-        return false;
+        return supported;
     }
 
     const auto transform = MakeCustomTransform<NDim>(
         cfg, out, static_cast<index_t>(m_padded), static_cast<index_t>(k_padded));
-    EXPECT_TRUE(transform.IsPaddingRangeSupported());
 
     int64_t mismatches = 0;
     int64_t overflows  = 0;
@@ -1622,6 +1758,21 @@ bool CheckConvInputRangeLimit(const ForwardConvCase<NDim>& cfg, bool first_dim_i
     }
     EXPECT_EQ(mismatches, 0) << "an accepted problem has a wrong padding or lower index";
     EXPECT_EQ(overflows, 0) << "an accepted problem overflows the offset computation";
+
+    // the (M, K) descriptor of the transform on an input tensor with the strides of the host check
+    std::array<index_t, NDim + 2> strides{};
+    strides[0] = static_cast<index_t>(n_stride);
+    for(index_t d = 0; d < NDim; ++d)
+    {
+        strides[1 + d] = static_cast<index_t>(spatial_stride[d]);
+    }
+    strides[NDim + 1] = static_cast<index_t>(c_stride);
+    const auto desc   = transform_tensor_descriptor(
+        MakeInputDescriptor<NDim>(cfg, &strides),
+        make_tuple(transform),
+        make_tuple(typename arithmetic_sequence_gen<0, NDim + 2, 1>::type{}),
+        make_tuple(Sequence<0, 1>{}));
+    EXPECT_EQ(CountCoordinateMoveMismatches(desc, 3000, 25), 0);
     return true;
 }
 
@@ -1638,7 +1789,7 @@ MakeLargeReachCase(index_t channels, index_t filter0, int64_t dilation0, index_t
     {
         cfg.In[d]       = d == 0 ? 8 : 3;
         cfg.Filter[d]   = d == 0 ? filter0 : 2;
-        cfg.Stride[d]   = 1;
+        cfg.Stride[d]   = d == 0 ? 1 : 2;
         cfg.Dilation[d] = 1;
         cfg.PadLeft[d]  = d == 0 ? left_pad0 : 1;
         cfg.PadRight[d] = d == 0 ? 0 : 1;
@@ -1660,7 +1811,7 @@ TEST(TensorDescriptorFunctorsIntegration, ConvInputTransformRangeLimitWithFilter
     // Wi + left_pad. The documented limit is max_lower + 2 * poison <= 2^31 - 1.
     const auto first_dimension = [&](auto ndim) {
         constexpr index_t NDim = decltype(ndim)::value;
-        for(const index_t filter0 : {3, 7})
+        for(const index_t filter0 : {2, 3, 4, 7, 8, 15, 16})
         {
             for(const index_t channels : {8, 40})
             {
@@ -1680,7 +1831,7 @@ TEST(TensorDescriptorFunctorsIntegration, ConvInputTransformRangeLimitWithFilter
                     const int64_t wo     = wi + left_pad;
                     const int64_t poison = wi + left_pad;
                     // largest f0_max * D for which the poison range holds
-                    const int64_t max_reach = limit - (wo - 1) + left_pad - 2 * poison;
+                    const int64_t max_reach = limit - (wo - 1) - 2 * poison;
                     const int64_t d_max     = max_reach / f0_max;
 
                     // far from the limit, and a margin below it for the terms of the offset that
@@ -1693,8 +1844,22 @@ TEST(TensorDescriptorFunctorsIntegration, ConvInputTransformRangeLimitWithFilter
                             << "F=" << filter0 << " C=" << channels << " D=" << dilation
                             << " left_pad=" << left_pad;
                     }
+                    // Closest accepted problem below the limit of the poison range. The host check
+                    // also covers the other terms of the offset, so it stops accepting a bit below
+                    // the limit. CheckConvInputRangeLimit then compares every row and column of the
+                    // GEMM padding, including the positions where both are padding (two poisons on
+                    // the largest filter index), so this is where a wrap around would show.
+                    bool accepted_below_limit = false;
+                    for(int64_t dilation = d_max;
+                        dilation > d_max - 100000 && !accepted_below_limit;
+                        --dilation)
+                    {
+                        accepted_below_limit = CheckConvInputRangeLimit<NDim>(
+                            MakeLargeReachCase<NDim>(channels, filter0, dilation, left_pad), true);
+                    }
+                    EXPECT_TRUE(accepted_below_limit);
                     // just above the limit of the poison range: always rejected
-                    for(const int64_t dilation : {d_max + 1, d_max + 1000})
+                    for(const int64_t dilation : {d_max + 1})
                     {
                         EXPECT_FALSE(CheckConvInputRangeLimit<NDim>(
                             MakeLargeReachCase<NDim>(channels, filter0, dilation, left_pad), true))
@@ -1705,6 +1870,34 @@ TEST(TensorDescriptorFunctorsIntegration, ConvInputTransformRangeLimitWithFilter
             }
         }
     };
+    // A big left pad (the poison is Wi + left_pad and Wo is about left_pad): the host check only,
+    // the output would be too big to compare every position. The limit moves with the pad.
+    const auto big_pad = [&](auto ndim) {
+        constexpr index_t NDim = decltype(ndim)::value;
+        for(const index_t filter0 : {3, 8, 16})
+        {
+            const index_t left_pad    = 1 << 20;
+            const int64_t channels    = 8;
+            const int64_t filter_rest = channels << (NDim - 1);
+            const int64_t k_padded    = (filter_rest * filter0 + 63) / 64 * 64;
+            const int64_t f0_max      = (k_padded - 1) / filter_rest;
+            const int64_t poison      = 8 + left_pad;
+            const int64_t max_reach   = limit - (8 + left_pad - 1) - 2 * poison;
+            const int64_t d_max       = max_reach / f0_max;
+            EXPECT_TRUE(CheckConvInputRangeLimit<NDim>(
+                MakeLargeReachCase<NDim>(channels, filter0, (max_reach - 65536) / f0_max, left_pad),
+                true,
+                false))
+                << "F=" << filter0;
+            EXPECT_FALSE(CheckConvInputRangeLimit<NDim>(
+                MakeLargeReachCase<NDim>(channels, filter0, d_max + 1, left_pad), true, false))
+                << "F=" << filter0;
+        }
+    };
+    big_pad(std::integral_constant<index_t, 1>{});
+    big_pad(std::integral_constant<index_t, 2>{});
+    big_pad(std::integral_constant<index_t, 3>{});
+
     first_dimension(std::integral_constant<index_t, 1>{});
     first_dimension(std::integral_constant<index_t, 2>{});
     first_dimension(std::integral_constant<index_t, 3>{});
@@ -1713,7 +1906,7 @@ TEST(TensorDescriptorFunctorsIntegration, ConvInputTransformRangeLimitWithFilter
     // stride in 32 bit, so (F - 1) * D must stay below 2^31 whatever the other terms are.
     const auto last_dimension = [&](auto ndim) {
         constexpr index_t NDim = decltype(ndim)::value;
-        for(const index_t filter_last : {3, 7})
+        for(const index_t filter_last : {2, 3, 4, 7, 8, 15, 16})
         {
             const auto make = [&](int64_t dilation) {
                 ForwardConvCase<NDim> cfg{};
@@ -1721,7 +1914,8 @@ TEST(TensorDescriptorFunctorsIntegration, ConvInputTransformRangeLimitWithFilter
                 cfg.C = 64; // K is a multiple of the GEMM block: no padded columns
                 for(index_t d = 0; d < NDim; ++d)
                 {
-                    cfg.In[d]       = 8;
+                    // the clamped right pad of the rejected probes loses up to F - 2 elements
+                    cfg.In[d]       = d == NDim - 1 ? 32 : 8;
                     cfg.Filter[d]   = d == NDim - 1 ? filter_last : 1;
                     cfg.Stride[d]   = 1;
                     cfg.Dilation[d] = d == NDim - 1 ? static_cast<index_t>(dilation) : 1;
@@ -1738,8 +1932,10 @@ TEST(TensorDescriptorFunctorsIntegration, ConvInputTransformRangeLimitWithFilter
                 EXPECT_TRUE(CheckConvInputRangeLimit<NDim>(make(dilation), false))
                     << "F=" << filter_last << " D=" << dilation;
             }
-            for(const int64_t dilation : {limit / (filter_last - 1) + 1})
+            // the dilation that gives (F - 1) * D > 2^31 - 1 is not an index for F = 2
+            if(filter_last > 2)
             {
+                const int64_t dilation = limit / (filter_last - 1) + 1;
                 EXPECT_FALSE(CheckConvInputRangeLimit<NDim>(make(dilation), false))
                     << "F=" << filter_last << " D=" << dilation;
             }
@@ -1748,4 +1944,1543 @@ TEST(TensorDescriptorFunctorsIntegration, ConvInputTransformRangeLimitWithFilter
     last_dimension(std::integral_constant<index_t, 1>{});
     last_dimension(std::integral_constant<index_t, 2>{});
     last_dimension(std::integral_constant<index_t, 3>{});
+}
+
+// =============================================================================
+// Backward data merged padding: filters, strides and dilations, and the range limits
+// =============================================================================
+
+namespace {
+
+// Output (A matrix) of a bwd-data problem with N = G = 1, C = K = 8 and a 1 wide W dimension. The
+// H dimension is the one that is varied: filter y, stride, dilation, pads.
+BwdDataCase MakeBwdDataTallCase(index_t hi,
+                                index_t y,
+                                index_t stride,
+                                index_t dilation,
+                                index_t left_pad,
+                                index_t right_pad,
+                                index_t groups = 1)
+{
+    BwdDataCase c{};
+    c.N = 1;
+    c.G = groups;
+    c.C = c.K = 8;
+    c.Hi      = hi;
+    c.Wi      = 1;
+    c.Y       = y;
+    c.X       = 1;
+    c.StrideH = stride;
+    c.StrideW = c.DilationW = 1;
+    c.DilationH             = dilation;
+    c.LeftPadH              = left_pad;
+    c.RightPadH             = right_pad;
+    c.LeftPadW = c.RightPadW = 0;
+    return c;
+}
+
+// Result of CheckBwdDataMergedPadding
+struct BwdDataMergedResult
+{
+    bool supported;
+    int64_t mismatches;
+    int64_t positions;
+};
+
+// Compares the A descriptor of the merged padding custom transform against the generic chain for
+// one (ytilde, xtilde) group, if the host check IsMergedOutPaddingRangeSupported accepts the
+// problem (the transform is not meant to be used otherwise). All positions are compared if
+// exhaustive, else the first rows / columns, the last rows / columns (where the GEMM padding is)
+// and random ones, with every K1 index.
+template <bool SplitConvN = false>
+BwdDataMergedResult
+CheckBwdDataMergedPadding(const BwdDataCase& c, index_t ytilde, index_t xtilde, bool exhaustive)
+{
+    const auto transformer = MakeBwdDataTransformer<index_t, true, SplitConvN>(c, ytilde, xtilde);
+    const auto custom      = transformer.MakeADescriptor_AK0_M_AK1();
+    const index_t k0       = custom.GetLength(Number<0>{});
+    const index_t m        = custom.GetLength(Number<1>{});
+    const index_t k1       = custom.GetLength(Number<2>{});
+
+    BwdDataMergedResult result{transformer.IsMergedOutPaddingRangeSupported(m), 0, 0};
+    if(!result.supported)
+    {
+        return result;
+    }
+
+    const auto generic = MakeBwdDataADescriptor<long_index_t, false, SplitConvN>(c, ytilde, xtilde);
+    EXPECT_EQ(k0, static_cast<index_t>(generic.GetLength(Number<0>{})));
+    EXPECT_EQ(m, static_cast<index_t>(generic.GetLength(Number<1>{})));
+    EXPECT_EQ(k1, static_cast<index_t>(generic.GetLength(Number<2>{})));
+
+    const auto check = [&](index_t i0, index_t i1, index_t i2) {
+        const auto idx = make_multi_index(i0, i1, i2);
+        const auto cc  = make_tensor_coordinate(custom, idx);
+        const auto gc  = make_tensor_coordinate(generic, idx);
+        const bool cv  = coordinate_has_valid_offset(custom, cc);
+        const bool gv  = coordinate_has_valid_offset(generic, gc);
+        ++result.positions;
+        if(cv != gv || (cv && cc.GetOffset() != gc.GetOffset()))
+        {
+            if(result.mismatches++ < 3)
+            {
+                ADD_FAILURE() << "(" << i0 << "," << i1 << "," << i2 << ") custom valid=" << cv
+                              << " offset=" << cc.GetOffset() << ", generic valid=" << gv
+                              << " offset=" << gc.GetOffset();
+            }
+        }
+    };
+
+    std::vector<index_t> k0_list, m_list;
+    if(exhaustive)
+    {
+        for(index_t i = 0; i < k0; ++i)
+        {
+            k0_list.push_back(i);
+        }
+        for(index_t i = 0; i < m; ++i)
+        {
+            m_list.push_back(i);
+        }
+    }
+    else
+    {
+        std::mt19937 rng(13);
+        for(index_t i = 0; i < 4 && i < k0; ++i)
+        {
+            k0_list.push_back(i);
+            k0_list.push_back(k0 - 1 - i);
+        }
+        for(index_t i = 0; i < 4 && i < m; ++i)
+        {
+            m_list.push_back(i);
+        }
+        for(index_t i = 0; i < 160 && i < m; ++i)
+        {
+            m_list.push_back(m - 1 - i);
+        }
+        for(int i = 0; i < 40; ++i)
+        {
+            k0_list.push_back(static_cast<index_t>(rng() % k0));
+            m_list.push_back(static_cast<index_t>(rng() % m));
+        }
+    }
+    for(const index_t i0 : k0_list)
+    {
+        for(const index_t i1 : m_list)
+        {
+            for(index_t i2 = 0; i2 < k1; ++i2)
+            {
+                check(i0, i1, i2);
+            }
+        }
+    }
+    EXPECT_EQ(CountCoordinateMoveMismatches(custom, 3000, 23), 0);
+    return result;
+}
+
+// All (ytilde, xtilde) groups of a problem (the ones with filter taps, as in the device op)
+template <typename F>
+void ForEachBwdDataGroup(const BwdDataCase& c, F&& f)
+{
+    const index_t y_tilde = c.StrideH / math::gcd(c.StrideH, c.DilationH);
+    const index_t x_tilde = c.StrideW / math::gcd(c.StrideW, c.DilationW);
+    for(index_t ytilde = 0; ytilde < y_tilde; ++ytilde)
+    {
+        for(index_t xtilde = 0; xtilde < x_tilde; ++xtilde)
+        {
+            if(ytilde < c.Y && xtilde < c.X)
+            {
+                f(ytilde, xtilde);
+            }
+        }
+    }
+}
+
+} // namespace
+
+TEST(TensorDescriptorFunctorsIntegration, BackwardDataMergedPaddingWithFilters)
+{
+    // filters 1..16 (odd and even, with the other dimension's filter of the opposite parity most
+    // of the time), strides and dilations of both dimensions, groups 1 and 3, and pads that keep
+    // the output non empty. These problems are small: the host check must accept all of them and
+    // every position of every group is compared with the generic chain.
+    const index_t strides[][2]   = {{1, 1}, {2, 1}, {1, 3}, {3, 2}, {2, 2}};
+    const index_t dilations[][2] = {{1, 1}, {2, 1}, {1, 2}, {2, 3}};
+    const index_t left_pads[]    = {0, 1, 3};
+    int64_t positions            = 0;
+    for(index_t y = 1; y <= 16; ++y)
+    {
+        BwdDataCase c{};
+        c.N = 2;
+        c.C = c.K   = 8;
+        c.G         = y % 3 == 0 ? 3 : 1;
+        c.Y         = y;
+        c.X         = (y * 7) % 16 + 1;
+        c.StrideH   = strides[y % 5][0];
+        c.StrideW   = strides[y % 5][1];
+        c.DilationH = dilations[y % 4][0];
+        c.DilationW = dilations[(y + 1) % 4][1];
+        c.LeftPadH  = left_pads[y % 3];
+        c.LeftPadW  = left_pads[(y + 1) % 3];
+        c.Hi        = 9 + y % 4;
+        c.Wi        = 9 + (y + 2) % 4;
+        // right pads so that Ho and Wo are at least 1 (and a bit more for some)
+        c.RightPadH = std::max<index_t>(0, c.DilationH * (c.Y - 1) + 1 - c.Hi - c.LeftPadH) + y % 3;
+        c.RightPadW = std::max<index_t>(0, c.DilationW * (c.X - 1) + 1 - c.Wi - c.LeftPadW) + y % 2;
+
+        SCOPED_TRACE("N=2 G=" + std::to_string(c.G) + " In=" + std::to_string(c.Hi) + "x" +
+                     std::to_string(c.Wi) + " Filter=" + std::to_string(c.Y) + "x" +
+                     std::to_string(c.X) + " Stride=" + std::to_string(c.StrideH) + "x" +
+                     std::to_string(c.StrideW) + " Dilation=" + std::to_string(c.DilationH) + "x" +
+                     std::to_string(c.DilationW) + " Pad=" + std::to_string(c.LeftPadH) + "," +
+                     std::to_string(c.LeftPadW) + "," + std::to_string(c.RightPadH) + "," +
+                     std::to_string(c.RightPadW));
+        ForEachBwdDataGroup(c, [&](index_t ytilde, index_t xtilde) {
+            SCOPED_TRACE("ytilde=" + std::to_string(ytilde) + " xtilde=" + std::to_string(xtilde));
+            const auto result = CheckBwdDataMergedPadding(c, ytilde, xtilde, true);
+            EXPECT_TRUE(result.supported);
+            EXPECT_EQ(result.mismatches, 0);
+            positions += result.positions;
+        });
+    }
+    EXPECT_GT(positions, 0);
+}
+
+TEST(TensorDescriptorFunctorsIntegration, BackwardData3dHasNoMergedPaddingLimit)
+{
+    // There is no 3D custom transform with merged padding: the 3D descriptors use the outer Pad
+    // transforms, so the range check of the merged padding must not apply to them, even if the
+    // opt-in flag is set (as the device op does for the wavelet direct load kernels) and the H
+    // dimension is big enough for the 2D check to reject it.
+    namespace ctc   = ck::tensor_layout::convolution;
+    using Transform = ck::tensor_operation::TransformConvBwdDataToGemm_v1<
+        3,
+        ck::tensor_operation::device::ConvolutionBackwardDataSpecialization::Default,
+        8,
+        8,
+        64,
+        64,
+        32,
+        true,
+        true,
+        ctc::NDHWGK,
+        ctc::GKZYXC,
+        ctc::NDHWGC,
+        false,
+        float,
+        float,
+        1,
+        index_t,
+        false,
+        true>;
+
+    const index_t hi = 1 << 27;
+    const std::array<index_t, 6> a_lengths{1, 1, 8, 1, hi, 1};
+    const std::array<index_t, 6> a_strides{8, 8 * hi, 1, 8 * hi, 8, 8};
+    const std::array<index_t, 6> b_lengths{1, 8, 8, 1, 1, 1};
+    const std::array<index_t, 6> b_strides{64, 64, 1, 8, 8, 8};
+    const std::array<index_t, 6> c_lengths{1, 1, 8, 1, hi, 1};
+    const std::array<index_t, 6> c_strides{8, 8 * hi, 1, 8 * hi, 8, 8};
+    const std::array<index_t, 3> ones{1, 1, 1};
+    const std::array<index_t, 3> zeros{0, 0, 0};
+    const Transform transformer{a_lengths,
+                                a_strides,
+                                b_lengths,
+                                b_strides,
+                                c_lengths,
+                                c_strides,
+                                ones,
+                                ones,
+                                zeros,
+                                zeros,
+                                zeros};
+    EXPECT_TRUE(transformer.IsMergedOutPaddingRangeSupported(index_t{1} << 27));
+}
+
+TEST(TensorDescriptorFunctorsIntegration, BackwardDataMergedPaddingRangeLimit)
+{
+    // The poison is added to the Ho coordinate: Ho + (the largest ydot, with the ydot of the padded
+    // GemmK columns, times the ydot step). The host check must accept ordinary problems and reject
+    // the ones where a poisoned coordinate or its offset (coordinate * stride) is out of range.
+    // Every accepted problem is compared with the generic chain on the first and last rows /
+    // columns, where the GEMM padding is, and on random positions. A wrap around or an overflow of
+    // the 32-bit offset shows up as a mismatch of the validity or of the offset.
+
+    // 1. a tall output: Ho = Hi, 1x1 filter, stride 1
+    for(const int log_hi : {10, 20, 24})
+    {
+        const auto c      = MakeBwdDataTallCase(1 << log_hi, 1, 1, 1, 0, 0);
+        const auto result = CheckBwdDataMergedPadding(c, 0, 0, false);
+        EXPECT_TRUE(result.supported) << "Hi = 2^" << log_hi;
+        EXPECT_EQ(result.mismatches, 0) << "Hi = 2^" << log_hi;
+    }
+    {
+        // around the limit of the offset of a poisoned coordinate (Ho + 2 poisons) * HoStride_,
+        // an accepted problem must be exact
+        int accepted = 0;
+        for(int step = 0; step <= 15; ++step)
+        {
+            // Ho is not a multiple of the block size, so that there are padding rows as well as
+            // padding columns (K = 8 is padded to the block size too): two poisons
+            const auto c = MakeBwdDataTallCase((1 << 25) + step * (1 << 21) + 5, 1, 1, 1, 0, 0);
+            const auto result = CheckBwdDataMergedPadding(c, 0, 0, false);
+            EXPECT_EQ(result.mismatches, 0) << "Hi = " << c.Hi;
+            accepted += result.supported;
+        }
+        EXPECT_GT(accepted, 0);
+    }
+    {
+        // above the limit: a poisoned Ho coordinate times HoStride_ would pass 2^31
+        const auto c           = MakeBwdDataTallCase(1 << 27, 1, 1, 1, 0, 0);
+        const auto transformer = MakeBwdDataTransformer<index_t, true>(c, 0, 0);
+        EXPECT_FALSE(transformer.IsMergedOutPaddingRangeSupported(int64_t{1} << 27));
+    }
+
+    // 2. big dilations (the filter taps, and the padded columns, reach far outside the tensor) for
+    // several filter sizes, odd and even, with stride 1 and 2. The right pad is the one that keeps
+    // Ho = Hi / stride.
+    for(const index_t y : {2, 3, 4, 7, 8, 15, 16})
+    {
+        for(const index_t stride : {1, 2})
+        {
+            SCOPED_TRACE("Y=" + std::to_string(y) + " stride=" + std::to_string(stride));
+            const auto make_case = [&](int64_t dilation) {
+                const int64_t right_pad = std::min<int64_t>(dilation * (y - 1), kIndexMax);
+                return MakeBwdDataTallCase(8,
+                                           y,
+                                           stride,
+                                           static_cast<index_t>(dilation),
+                                           0,
+                                           static_cast<index_t>(right_pad));
+            };
+            const auto output_length = [&](const BwdDataCase& c) {
+                return (int64_t(c.Hi) + c.LeftPadH + c.RightPadH -
+                        int64_t(c.DilationH) * (c.Y - 1) - 1) /
+                           c.StrideH +
+                       1;
+            };
+
+            // moderate dilations are accepted
+            for(const int64_t dilation : {int64_t{1}, int64_t{1} << 10, int64_t{1} << 16})
+            {
+                const auto c = make_case(dilation);
+                ASSERT_GE(output_length(c), 1);
+                ForEachBwdDataGroup(c, [&](index_t ytilde, index_t xtilde) {
+                    const auto result = CheckBwdDataMergedPadding(c, ytilde, xtilde, false);
+                    EXPECT_TRUE(result.supported) << "dilation=" << dilation;
+                    EXPECT_EQ(result.mismatches, 0) << "dilation=" << dilation;
+                });
+            }
+
+            // around the limit the host check decides, and an accepted problem must be exact
+            int accepted = 0;
+            for(int step = 0; step < 24; ++step)
+            {
+                const int64_t dilation = (int64_t{1} << 20) + step * (int64_t{1} << 17);
+                const auto c           = make_case(dilation);
+                if(output_length(c) < 1)
+                {
+                    continue;
+                }
+                ForEachBwdDataGroup(c, [&](index_t ytilde, index_t xtilde) {
+                    const auto result = CheckBwdDataMergedPadding(c, ytilde, xtilde, false);
+                    EXPECT_EQ(result.mismatches, 0) << "dilation=" << dilation;
+                    accepted += result.supported;
+                });
+            }
+            EXPECT_GT(accepted, 0);
+
+            // a dilation of 2^26 is rejected (the right pad of the larger filters is clamped)
+            const auto c = make_case(int64_t{1} << 26);
+            if(output_length(c) >= 1)
+            {
+                bool any_rejected = false;
+                ForEachBwdDataGroup(c, [&](index_t ytilde, index_t xtilde) {
+                    const auto transformer =
+                        MakeBwdDataTransformer<index_t, true>(c, ytilde, xtilde);
+                    const auto desc = transformer.MakeADescriptor_AK0_M_AK1();
+                    any_rejected |=
+                        !transformer.IsMergedOutPaddingRangeSupported(desc.GetLength(Number<1>{}));
+                });
+                EXPECT_TRUE(any_rejected);
+            }
+        }
+    }
+}
+
+// =============================================================================
+// Backward data merged padding: groups, strides, the W dimension and big left pads
+// =============================================================================
+
+TEST(TensorDescriptorFunctorsIntegration, BackwardDataMergedPaddingRangeLimitMoreCases)
+{
+    // 1. groups: the strides of the output tensor (and so the offsets) depend on G, a tall output
+    // up to the limit
+    for(const index_t groups : {1, 3})
+    {
+        int accepted = 0;
+        for(const int log_hi : {10, 20, 22, 23, 24})
+        {
+            const auto c      = MakeBwdDataTallCase((1 << log_hi) + 5, 1, 1, 1, 0, 0, groups);
+            const auto result = CheckBwdDataMergedPadding(c, 0, 0, false);
+            EXPECT_EQ(result.mismatches, 0) << "G=" << groups << " Hi = 2^" << log_hi;
+            accepted += result.supported;
+        }
+        EXPECT_GE(accepted, 3) << "G=" << groups;
+    }
+
+    // 2. strides 1, 2 and 3 with filters 3 and 4 (several (ytilde, xtilde) groups)
+    for(const index_t stride : {1, 2, 3})
+    {
+        for(const index_t y : {3, 4})
+        {
+            for(const int log_hi : {10, 20})
+            {
+                const auto c = MakeBwdDataTallCase((1 << log_hi) + 5, y, stride, 1, 1, 1);
+                ForEachBwdDataGroup(c, [&](index_t ytilde, index_t xtilde) {
+                    const auto result = CheckBwdDataMergedPadding(c, ytilde, xtilde, false);
+                    EXPECT_TRUE(result.supported);
+                    EXPECT_EQ(result.mismatches, 0) << "stride=" << stride << " Y=" << y;
+                });
+            }
+        }
+    }
+
+    // 3. the W dimension: Ho = 1 and a wide output. The poison is on Ho only, Wo is a plain
+    // coordinate, but its stride and the batch stride (= Wo * K) grow with it.
+    const auto wide_case = [](index_t wi, index_t x, index_t dilation, index_t right_pad) {
+        BwdDataCase c{};
+        c.N = c.G = 1;
+        c.C = c.K = 8;
+        c.Hi = c.Y = 1;
+        c.Wi       = wi;
+        c.X        = x;
+        c.StrideH = c.StrideW = c.DilationH = 1;
+        c.DilationW                         = dilation;
+        c.LeftPadH = c.LeftPadW = c.RightPadH = 0;
+        c.RightPadW                           = right_pad;
+        return c;
+    };
+    for(const int log_wi : {10, 20, 24})
+    {
+        const auto c      = wide_case(1 << log_wi, 1, 1, 0);
+        const auto result = CheckBwdDataMergedPadding(c, 0, 0, false);
+        // the host check is conservative for the biggest ones (the padding of the GemmK adds up to
+        // GemmKPerBlock ydot steps to the poison, which is multiplied by the huge H stride)
+        EXPECT_TRUE(result.supported || log_wi > 20) << "Wi = 2^" << log_wi;
+        EXPECT_EQ(result.mismatches, 0) << "Wi = 2^" << log_wi;
+    }
+    {
+        // the output has 2^30 elements: the padding rows (n = N) would be at an offset of 2^30 and
+        // the other terms add up to more than 2^31
+        const auto c           = wide_case(1 << 27, 1, 1, 0);
+        const auto transformer = MakeBwdDataTransformer<index_t, true>(c, 0, 0);
+        EXPECT_FALSE(transformer.IsMergedOutPaddingRangeSupported(int64_t{1} << 27));
+    }
+    // filters 2 .. 16 in the W dimension with a big dilation
+    for(const index_t x : {2, 3, 4, 7, 8, 15, 16})
+    {
+        for(const index_t dilation : {1, 1 << 10, 1 << 16, 1 << 20})
+        {
+            const auto c = wide_case(
+                8,
+                x,
+                dilation,
+                static_cast<index_t>(std::min<int64_t>(int64_t(dilation) * (x - 1), kIndexMax)));
+            ForEachBwdDataGroup(c, [&](index_t ytilde, index_t xtilde) {
+                const auto result = CheckBwdDataMergedPadding(c, ytilde, xtilde, false);
+                EXPECT_EQ(result.mismatches, 0) << "X=" << x << " dilation=" << dilation;
+                if(dilation <= (1 << 16))
+                {
+                    EXPECT_TRUE(result.supported) << "X=" << x << " dilation=" << dilation;
+                }
+            });
+        }
+    }
+
+    // 4. big left pads: Ho is about the left pad
+    for(const int log_pad : {10, 16, 20, 23})
+    {
+        const auto c      = MakeBwdDataTallCase(8, 3, 1, 1, 1 << log_pad, 0);
+        const auto result = CheckBwdDataMergedPadding(c, 0, 0, false);
+        // Only the first 2^3 rows of such a problem are real (the rest of the output is padding),
+        // and the host check bounds the batch of the padding rows by the smallest possible
+        // number of real rows, so it rejects the biggest pads
+        EXPECT_TRUE(result.supported || log_pad > 20) << "left pad = 2^" << log_pad;
+        EXPECT_EQ(result.mismatches, 0) << "left pad = 2^" << log_pad;
+    }
+}
+
+// =============================================================================
+// Backward weight B matrix: filters 1..16 and the range limits of the host check
+// (TransformConvBwdWeightToGemmV2::IsCustomTransformPaddingRangeSupported)
+// =============================================================================
+
+namespace {
+
+template <index_t NDim>
+using WrwCustomTransform = ck::tensor_operation::TransformConvBwdWeightToGemmV2<
+    NDim,
+    32,
+    32,
+    8,
+    2,
+    1,
+    ck::tensor_operation::device::ConvolutionBackwardWeightSpecialization::Default,
+    index_t,
+    false,
+    true>;
+
+// Checks the host check of a packed channel-first input (N C spatial...: the innermost spatial
+// dimension is the first or the last one, the one whose coordinates reach farthest) and, if the
+// problem is accepted, every position of the B descriptor [K0, GemmN, K1] against an int64
+// reference: GemmK = k0 * K1 + k1 is (n, o...), GemmN is (f..., c). Returns the host check.
+template <index_t NDim>
+bool CheckBwdWeightBRangeLimit(const BwdWeightCase<NDim>& c,
+                               bool first_dim_innermost,
+                               bool compare_positions = true)
+{
+    SCOPED_TRACE("N=" + std::to_string(c.N) + " C=" + std::to_string(c.C) +
+                 " In0=" + std::to_string(c.In[0]) + " Filter0=" + std::to_string(c.Filter[0]) +
+                 " Dilation0=" + std::to_string(c.Dilation[0]) +
+                 " PadLeft0=" + std::to_string(c.PadLeft[0]) +
+                 " innermost=" + (first_dim_innermost ? "first" : "last"));
+
+    constexpr int64_t limit = std::numeric_limits<index_t>::max();
+
+    std::array<int64_t, NDim> out64{};
+    std::array<index_t, NDim> out{};
+    int64_t prod_out = 1, prod_filter = 1;
+    for(index_t d = 0; d < NDim; ++d)
+    {
+        out64[d] = (int64_t(c.In[d]) + c.PadLeft[d] + c.PadRight[d] -
+                    int64_t(c.Dilation[d]) * (c.Filter[d] - 1) - 1) /
+                       c.Stride[d] +
+                   1;
+        if(out64[d] < 1)
+        {
+            ADD_FAILURE() << "the test problem has an empty output";
+            return false;
+        }
+        out[d] = static_cast<index_t>(out64[d]);
+        prod_out *= out64[d];
+        prod_filter *= c.Filter[d];
+    }
+
+    std::array<index_t, NDim + 3> in_strides{};
+    int64_t acc = 1;
+    for(index_t i = 0; i < NDim; ++i)
+    {
+        const index_t d   = first_dim_innermost ? i : NDim - 1 - i;
+        in_strides[3 + d] = static_cast<index_t>(acc);
+        acc *= c.In[d];
+    }
+    if(acc * c.C * c.N > limit)
+    {
+        ADD_FAILURE() << "the test input is too big";
+        return false;
+    }
+    in_strides[2] = static_cast<index_t>(acc);
+    in_strides[1] = static_cast<index_t>(acc * c.C);
+    in_strides[0] = 0;
+
+    // padded GemmK (a multiple of K0PerBlock * K1 * BatchK = 16 * BatchK) and GemmN (32)
+    const auto round_up         = [](int64_t x, int64_t m) { return (x + m - 1) / m * m; };
+    const int64_t gemm_k_pad    = round_up(c.N * prod_out, 16 * c.BatchK);
+    const int64_t gemm_n_padded = round_up(c.C * prod_filter, 32);
+
+    const bool supported = WrwCustomTransform<NDim>::IsCustomTransformPaddingRangeSupported(
+        c.N,
+        c.C,
+        c.In,
+        c.Filter,
+        out,
+        in_strides,
+        c.Stride,
+        c.Dilation,
+        c.PadLeft,
+        static_cast<index_t>(gemm_k_pad),
+        static_cast<index_t>(gemm_n_padded));
+    if(!supported || !compare_positions)
+    {
+        return supported;
+    }
+
+    const auto custom = MakeBwdWeightBDescriptor<NDim, true>(c, &in_strides);
+    const index_t k0  = custom.GetLength(Number<0>{});
+    const index_t n   = custom.GetLength(Number<1>{});
+    const index_t k1  = custom.GetLength(Number<2>{});
+    EXPECT_EQ(int64_t(k0) * k1, gemm_k_pad);
+    EXPECT_EQ(n, gemm_n_padded);
+
+    int64_t mismatches = 0;
+    for(index_t i0 = 0; i0 < k0; ++i0)
+    {
+        for(index_t i1 = 0; i1 < n; ++i1)
+        {
+            for(index_t i2 = 0; i2 < k1; ++i2)
+            {
+                const int64_t m = int64_t(i0) * k1 + i2;
+                const int64_t k = i1;
+
+                std::array<int64_t, NDim> o{}, f{}, in_idx{};
+                int64_t q = m;
+                for(index_t d = NDim - 1; d >= 0; --d)
+                {
+                    o[d] = q % out64[d];
+                    q /= out64[d];
+                }
+                const int64_t batch = q;
+                q                   = k;
+                const int64_t ch    = q % c.C;
+                q /= c.C;
+                for(index_t d = NDim - 1; d >= 1; --d)
+                {
+                    f[d] = q % c.Filter[d];
+                    q /= c.Filter[d];
+                }
+                f[0] = q;
+
+                bool valid     = m < c.N * prod_out && k < c.C * prod_filter;
+                int64_t offset = batch * in_strides[1] + ch * in_strides[2];
+                for(index_t d = 0; d < NDim; ++d)
+                {
+                    in_idx[d] = o[d] * c.Stride[d] + f[d] * c.Dilation[d] - c.PadLeft[d];
+                    valid &= in_idx[d] >= 0 && in_idx[d] < c.In[d];
+                    offset += in_idx[d] * in_strides[3 + d];
+                }
+
+                const auto cc = make_tensor_coordinate(custom, make_multi_index(i0, i1, i2));
+                const bool cv = coordinate_has_valid_offset(custom, cc);
+                if(cv != valid || (valid && cc.GetOffset() != offset))
+                {
+                    if(mismatches++ < 3)
+                    {
+                        ADD_FAILURE() << "(" << i0 << "," << i1 << "," << i2
+                                      << ") custom valid=" << cv << " offset=" << cc.GetOffset()
+                                      << ", reference valid=" << valid << " offset=" << offset;
+                    }
+                }
+            }
+        }
+    }
+    EXPECT_EQ(mismatches, 0) << "an accepted problem has a wrong padding or offset";
+    EXPECT_EQ(CountCoordinateMoveMismatches(custom, 3000, 24), 0);
+    return true;
+}
+
+// First spatial dimension of length 8 whose filter (F taps, dilation D) reaches far out of the
+// input; the right pad is such that Wo = Wi + left_pad. The other dimensions are small.
+template <index_t NDim>
+BwdWeightCase<NDim>
+MakeWrwLargeReachCase(index_t channels, index_t filter0, int64_t dilation0, index_t left_pad0)
+{
+    BwdWeightCase<NDim> c{};
+    c.N      = 1;
+    c.C      = channels;
+    c.K      = 8;
+    c.BatchK = 1;
+    for(index_t d = 0; d < NDim; ++d)
+    {
+        c.In[d]       = d == 0 ? 8 : 3;
+        c.Filter[d]   = d == 0 ? filter0 : 2;
+        c.Stride[d]   = d == 0 ? 1 : 2;
+        c.Dilation[d] = d == 0 ? static_cast<index_t>(dilation0) : 1;
+        c.PadLeft[d]  = d == 0 ? left_pad0 : 1;
+        c.PadRight[d] =
+            d == 0 ? static_cast<index_t>(std::min<int64_t>(dilation0 * (filter0 - 1), kIndexMax))
+                   : 1;
+    }
+    return c;
+}
+
+} // namespace
+
+TEST(TensorDescriptorFunctorsIntegration, BackwardWeightWithFilters)
+{
+    // filters 1..16 (odd and even) in 1D, 2D and 3D with strides, dilations, pads, batch splits and
+    // groups; every position of the B descriptor is compared with the generic chain
+    const index_t strides[]   = {1, 2, 3};
+    const index_t dilations[] = {1, 2};
+    const index_t left_pads[] = {0, 1, 3};
+    const auto right_pad =
+        [](index_t in, index_t filter, index_t dilation, index_t left, index_t extra) {
+            return std::max<index_t>(0, dilation * (filter - 1) + 1 - in - left) + extra;
+        };
+    for(index_t y = 1; y <= 16; ++y)
+    {
+        {
+            BwdWeightCase<1> c{};
+            c.N        = 1 + y % 2;
+            c.C        = 3 + y % 5;
+            c.K        = 8;
+            c.In       = {20 + y % 3};
+            c.Filter   = {y};
+            c.Stride   = {strides[y % 3]};
+            c.Dilation = {dilations[y % 2]};
+            c.PadLeft  = {left_pads[y % 3]};
+            c.PadRight = {right_pad(c.In[0], y, c.Dilation[0], c.PadLeft[0], y % 3)};
+            c.BatchK   = 1 + y % 3;
+            c.G        = y % 2 ? 3 : 1;
+            CheckBwdWeightBTransformMatchesGeneric<1>(c, false);
+        }
+        {
+            BwdWeightCase<2> c{};
+            const index_t other = 1 + (y * 5) % 4;
+            c.N                 = 1 + y % 2;
+            c.C                 = 3 + y % 5;
+            c.K                 = 8;
+            c.In                = {18 + y % 3, 6 + y % 4};
+            c.Filter = y % 2 ? std::array<index_t, 2>{y, other} : std::array<index_t, 2>{other, y};
+            c.Stride = {strides[y % 3], strides[(y + 1) % 3]};
+            c.Dilation = {dilations[y % 2], dilations[(y + 1) % 2]};
+            c.PadLeft  = {left_pads[y % 3], left_pads[(y + 1) % 3]};
+            c.PadRight = {right_pad(c.In[0], c.Filter[0], c.Dilation[0], c.PadLeft[0], y % 3),
+                          right_pad(c.In[1], c.Filter[1], c.Dilation[1], c.PadLeft[1], y % 2)};
+            c.BatchK   = 1 + y % 3;
+            c.G        = y % 2 ? 1 : 3;
+            CheckBwdWeightBTransformMatchesGeneric<2>(c, false);
+        }
+        {
+            BwdWeightCase<3> c{};
+            c.N        = 1 + y % 2;
+            c.C        = 3 + y % 5;
+            c.K        = 8;
+            c.In       = {18 + y % 3, 5 + y % 2, 5};
+            c.Filter   = y % 3 == 0   ? std::array<index_t, 3>{y, 2, 1}
+                         : y % 3 == 1 ? std::array<index_t, 3>{1, y, 2}
+                                      : std::array<index_t, 3>{2, 1, y};
+            c.Stride   = {strides[y % 3], strides[(y + 1) % 3], strides[(y + 2) % 3]};
+            c.Dilation = {dilations[y % 2], dilations[(y + 1) % 2], 1};
+            c.PadLeft  = {left_pads[y % 3], left_pads[(y + 1) % 3], left_pads[(y + 2) % 3]};
+            c.PadRight = {right_pad(c.In[0], c.Filter[0], c.Dilation[0], c.PadLeft[0], y % 3),
+                          right_pad(c.In[1], c.Filter[1], c.Dilation[1], c.PadLeft[1], y % 2),
+                          right_pad(c.In[2], c.Filter[2], c.Dilation[2], c.PadLeft[2], 0)};
+            c.BatchK   = 1 + y % 3;
+            c.G        = y % 2 ? 3 : 1;
+            CheckBwdWeightBTransformMatchesGeneric<3>(c, false);
+        }
+    }
+}
+
+TEST(TensorDescriptorFunctorsIntegration, BackwardWeightRangeLimitWithFilters)
+{
+    constexpr int64_t limit = std::numeric_limits<index_t>::max();
+
+    // First spatial dimension: the same limit as the forward A matrix (max_lower + 2 * poison <=
+    // 2^31 - 1, where max_lower comes from the filter index of the last padded GemmN column)
+    const auto first_dimension = [&](auto ndim) {
+        constexpr index_t NDim = decltype(ndim)::value;
+        for(const index_t filter0 : {2, 3, 4, 7, 8, 15, 16})
+        {
+            for(const index_t channels : {8, 40})
+            {
+                for(const index_t left_pad : {0, 5})
+                {
+                    const int64_t filter_rest = int64_t(channels) << (NDim - 1);
+                    const int64_t n_padded =
+                        (filter_rest * filter0 + 31) / 32 * 32; // GemmN padded to NPerBlock
+                    const int64_t f0_max    = (n_padded - 1) / filter_rest;
+                    const int64_t wi        = 8;
+                    const int64_t wo        = wi + left_pad;
+                    const int64_t poison    = wi + left_pad;
+                    const int64_t max_reach = limit - (wo - 1) - 2 * poison;
+                    const int64_t d_max     = max_reach / f0_max;
+
+                    for(const int64_t dilation :
+                        {int64_t{1}, int64_t{1} << 20, (max_reach - 65536) / f0_max})
+                    {
+                        EXPECT_TRUE(CheckBwdWeightBRangeLimit<NDim>(
+                            MakeWrwLargeReachCase<NDim>(channels, filter0, dilation, left_pad),
+                            true))
+                            << "F=" << filter0 << " C=" << channels << " D=" << dilation
+                            << " left_pad=" << left_pad;
+                    }
+                    // the closest accepted problem below the limit: every position, including
+                    // the ones where the GemmK row and the GemmN column are both padding
+                    bool accepted_below_limit = false;
+                    for(int64_t dilation = d_max;
+                        dilation > d_max - 100000 && !accepted_below_limit;
+                        --dilation)
+                    {
+                        accepted_below_limit = CheckBwdWeightBRangeLimit<NDim>(
+                            MakeWrwLargeReachCase<NDim>(channels, filter0, dilation, left_pad),
+                            true);
+                    }
+                    EXPECT_TRUE(accepted_below_limit);
+                    EXPECT_FALSE(CheckBwdWeightBRangeLimit<NDim>(
+                        MakeWrwLargeReachCase<NDim>(channels, filter0, d_max + 1, left_pad), true))
+                        << "F=" << filter0 << " C=" << channels << " left_pad=" << left_pad;
+                }
+            }
+        }
+    };
+    // A big left pad (the poison is Wi + left_pad and Wo is about left_pad): the host check only,
+    // the GemmK would be too big to compare every position. The limit moves with the pad.
+    const auto big_pad = [&](auto ndim) {
+        constexpr index_t NDim = decltype(ndim)::value;
+        for(const index_t filter0 : {3, 8, 16})
+        {
+            const index_t left_pad    = 1 << 20;
+            const int64_t channels    = 8;
+            const int64_t filter_rest = channels << (NDim - 1);
+            const int64_t n_padded    = (filter_rest * filter0 + 31) / 32 * 32;
+            const int64_t f0_max      = (n_padded - 1) / filter_rest;
+            const int64_t poison      = 8 + left_pad;
+            const int64_t max_reach   = limit - (8 + left_pad - 1) - 2 * poison;
+            const int64_t d_max       = max_reach / f0_max;
+            EXPECT_TRUE(CheckBwdWeightBRangeLimit<NDim>(
+                MakeWrwLargeReachCase<NDim>(
+                    channels, filter0, (max_reach - 65536) / f0_max, left_pad),
+                true,
+                false))
+                << "F=" << filter0;
+            EXPECT_FALSE(CheckBwdWeightBRangeLimit<NDim>(
+                MakeWrwLargeReachCase<NDim>(channels, filter0, d_max + 1, left_pad), true, false))
+                << "F=" << filter0;
+        }
+    };
+    big_pad(std::integral_constant<index_t, 1>{});
+    big_pad(std::integral_constant<index_t, 2>{});
+    big_pad(std::integral_constant<index_t, 3>{});
+
+    first_dimension(std::integral_constant<index_t, 1>{});
+    first_dimension(std::integral_constant<index_t, 2>{});
+    first_dimension(std::integral_constant<index_t, 3>{});
+
+    // Last spatial dimension: only its coordinate times its stride (1) has to fit
+    const auto last_dimension = [&](auto ndim) {
+        constexpr index_t NDim = decltype(ndim)::value;
+        for(const index_t filter_last : {2, 3, 4, 7, 8, 15, 16})
+        {
+            const auto make = [&](int64_t dilation) {
+                BwdWeightCase<NDim> c{};
+                c.N      = 1;
+                c.C      = 64; // GemmN is a multiple of the block: no padded columns
+                c.K      = 8;
+                c.BatchK = 1;
+                for(index_t d = 0; d < NDim; ++d)
+                {
+                    c.In[d]       = d == NDim - 1 ? 32 : 8;
+                    c.Filter[d]   = d == NDim - 1 ? filter_last : 1;
+                    c.Stride[d]   = 1;
+                    c.Dilation[d] = d == NDim - 1 ? static_cast<index_t>(dilation) : 1;
+                    c.PadLeft[d]  = 0;
+                    c.PadRight[d] = d == NDim - 1 ? static_cast<index_t>(std::min<int64_t>(
+                                                        dilation * (filter_last - 1), kIndexMax))
+                                                  : 0;
+                }
+                return c;
+            };
+            for(const int64_t dilation :
+                {int64_t{1}, int64_t{1} << 20, (int64_t{1} << 30) / (filter_last - 1)})
+            {
+                EXPECT_TRUE(CheckBwdWeightBRangeLimit<NDim>(make(dilation), false))
+                    << "F=" << filter_last << " D=" << dilation;
+            }
+            // the dilation that gives (F - 1) * D > 2^31 - 1 is not an index for F = 2
+            if(filter_last > 2)
+            {
+                EXPECT_FALSE(
+                    CheckBwdWeightBRangeLimit<NDim>(make(limit / (filter_last - 1) + 1), false))
+                    << "F=" << filter_last;
+            }
+        }
+    };
+    last_dimension(std::integral_constant<index_t, 1>{});
+    last_dimension(std::integral_constant<index_t, 2>{});
+    last_dimension(std::integral_constant<index_t, 3>{});
+}
+
+// =============================================================================
+// Forward: the host check of the transform (TransformConvFwdToGemm) reads the problem from its
+// members; it must give the same result as IsConvInputTransformRangeSupported called with the
+// problem description
+// =============================================================================
+
+namespace {
+
+template <index_t NDim>
+std::pair<bool, bool> FwdTransformHostCheck(const ForwardConvCase<NDim>& cfg,
+                                            bool first_dim_innermost)
+{
+    using Transform = ck::tensor_operation::TransformConvFwdToGemm<
+        NDim,
+        ck::tensor_operation::device::ConvolutionForwardSpecialization::Default,
+        false,
+        float,
+        float,
+        1,
+        index_t,
+        false,
+        true>;
+
+    const auto out64 = OutputLengths(cfg);
+    std::array<index_t, NDim> out{};
+    int64_t prod_out = 1, prod_filter = 1;
+    for(index_t d = 0; d < NDim; ++d)
+    {
+        if(out64[d] < 1)
+        {
+            ADD_FAILURE() << "the test problem has an empty output";
+            return {false, false};
+        }
+        out[d] = static_cast<index_t>(out64[d]);
+        prod_out *= out64[d];
+        prod_filter *= cfg.Filter[d];
+    }
+    const int64_t m_padded = (cfg.N * prod_out + 63) / 64 * 64;
+    const int64_t k_padded = (cfg.C * prod_filter + 63) / 64 * 64;
+
+    // G N C spatial... input (channel-first packed), G K C filter... weight, G N K spatial...
+    // output (any packed layout: the host check does not read them)
+    std::array<index_t, NDim + 3> a_len{}, a_str{}, b_len{}, b_str{}, c_len{}, c_str{};
+    std::array<long_index_t, NDim> spatial_stride{};
+    int64_t acc = 1;
+    for(index_t i = 0; i < NDim; ++i)
+    {
+        const index_t d   = first_dim_innermost ? i : NDim - 1 - i;
+        spatial_stride[d] = acc;
+        a_str[3 + d]      = static_cast<index_t>(acc);
+        acc *= cfg.In[d];
+    }
+    if(acc * cfg.C * cfg.N > int64_t{std::numeric_limits<index_t>::max()})
+    {
+        ADD_FAILURE() << "the test input is too big";
+        return {false, false};
+    }
+    a_len[0] = b_len[0] = c_len[0] = 1;
+    a_len[1] = c_len[1] = cfg.N;
+    a_len[2] = b_len[2] = cfg.C;
+    b_len[1] = c_len[2] = 8;
+    a_str[0]            = static_cast<index_t>(acc * cfg.C * cfg.N);
+    a_str[1]            = static_cast<index_t>(acc * cfg.C);
+    a_str[2]            = static_cast<index_t>(acc);
+    for(index_t d = 0; d < NDim; ++d)
+    {
+        a_len[3 + d] = cfg.In[d];
+        b_len[3 + d] = cfg.Filter[d];
+        c_len[3 + d] = out[d];
+        b_str[3 + d] = 1;
+        c_str[3 + d] = 1;
+    }
+    b_str[0] = b_str[1] = b_str[2] = 1;
+    c_str[0] = c_str[1] = c_str[2] = 1;
+
+    const Transform transform{a_len,
+                              a_str,
+                              b_len,
+                              b_str,
+                              c_len,
+                              c_str,
+                              cfg.Stride,
+                              cfg.Dilation,
+                              cfg.PadLeft,
+                              cfg.PadRight};
+
+    const auto to_long = [](const std::array<index_t, NDim>& a) {
+        std::array<long_index_t, NDim> r{};
+        for(index_t d = 0; d < NDim; ++d)
+        {
+            r[d] = a[d];
+        }
+        return r;
+    };
+    const bool expected = IsConvInputTransformRangeSupported<NDim>(cfg.N,
+                                                                   cfg.C,
+                                                                   to_long(cfg.In),
+                                                                   to_long(cfg.Filter),
+                                                                   to_long(out),
+                                                                   to_long(cfg.Stride),
+                                                                   to_long(cfg.Dilation),
+                                                                   to_long(cfg.PadLeft),
+                                                                   m_padded,
+                                                                   k_padded,
+                                                                   a_str[1],
+                                                                   spatial_stride,
+                                                                   a_str[2]);
+    return {transform.IsCustomTransformPaddingRangeSupported(static_cast<index_t>(m_padded),
+                                                             static_cast<index_t>(k_padded)),
+            expected};
+}
+
+} // namespace
+
+TEST(TensorDescriptorFunctorsIntegration, ForwardTransformHostCheckMatchesDescription)
+{
+    constexpr int64_t limit = std::numeric_limits<index_t>::max();
+
+    // The dilation of one dimension is searched (by bisection, on the description based check)
+    // where the host check flips from accepting to rejecting; the check of the transform must agree
+    // with it right before, at and after the flip, so that a wrongly read member (a swapped
+    // dimension, a missing pad, the wrong stride, the batch) changes the result.
+    const auto run = [&](auto ndim) {
+        constexpr index_t NDim = decltype(ndim)::value;
+        const auto make = [&](bool first, index_t filter, int64_t dilation, index_t left_pad) {
+            ForwardConvCase<NDim> cfg{};
+            cfg.N             = 3;
+            cfg.C             = first ? 8 : 64;
+            const index_t big = first ? 0 : NDim - 1;
+            for(index_t d = 0; d < NDim; ++d)
+            {
+                cfg.In[d]       = d == big ? (1 << 20) : 2;
+                cfg.Filter[d]   = d == big ? filter : 2;
+                cfg.Stride[d]   = d == big ? 1 : 2;
+                cfg.Dilation[d] = d == big ? static_cast<index_t>(dilation) : 1;
+                cfg.PadLeft[d]  = d == big ? left_pad : 1;
+                cfg.PadRight[d] =
+                    d == big
+                        ? static_cast<index_t>(std::min<int64_t>(dilation * (filter - 1), limit))
+                        : 1;
+            }
+            return cfg;
+        };
+        for(const bool first : {true, false})
+        {
+            for(const index_t filter : {3, 8, 16})
+            {
+                for(const index_t left_pad : {0, 5, 1 << 20})
+                {
+                    if(!first && left_pad != 0)
+                    {
+                        continue;
+                    }
+                    // largest dilation accepted by the description based check
+                    int64_t lo = 1, hi = limit / (filter - 1);
+                    ASSERT_TRUE(
+                        FwdTransformHostCheck<NDim>(make(first, filter, lo, left_pad), first)
+                            .second);
+                    while(lo < hi)
+                    {
+                        const int64_t mid = lo + (hi - lo + 1) / 2;
+                        if(FwdTransformHostCheck<NDim>(make(first, filter, mid, left_pad), first)
+                               .second)
+                        {
+                            lo = mid;
+                        }
+                        else
+                        {
+                            hi = mid - 1;
+                        }
+                    }
+                    for(int64_t dilation = lo - 2; dilation <= lo + 2; ++dilation)
+                    {
+                        const auto cfg    = make(first, filter, dilation, left_pad);
+                        const auto result = FwdTransformHostCheck<NDim>(cfg, first);
+                        EXPECT_EQ(result.first, result.second)
+                            << "F=" << filter << " left_pad=" << left_pad << " D=" << dilation
+                            << " first=" << first;
+                        EXPECT_EQ(result.second, dilation <= lo);
+                    }
+                }
+            }
+        }
+    };
+    run(std::integral_constant<index_t, 1>{});
+    run(std::integral_constant<index_t, 2>{});
+    run(std::integral_constant<index_t, 3>{});
+}
+
+// =============================================================================
+// Backward weight: the static host check of the transform must give the same result as
+// IsConvInputTransformRangeSupported called with the problem description (GemmK is N * prod(O),
+// GemmN is C * prod(F), see the B descriptor)
+// =============================================================================
+
+TEST(TensorDescriptorFunctorsIntegration, BackwardWeightHostCheckMatchesDescription)
+{
+    constexpr int64_t limit = std::numeric_limits<index_t>::max();
+
+    const auto run = [&](auto ndim) {
+        constexpr index_t NDim = decltype(ndim)::value;
+        const auto make = [&](bool first, index_t filter, int64_t dilation, index_t left_pad) {
+            BwdWeightCase<NDim> c{};
+            c.N               = 3;
+            c.C               = first ? 8 : 64;
+            c.K               = 8;
+            c.BatchK          = 2;
+            const index_t big = first ? 0 : NDim - 1;
+            for(index_t d = 0; d < NDim; ++d)
+            {
+                c.In[d]       = d == big ? (1 << 20) : 2;
+                c.Filter[d]   = d == big ? filter : 2;
+                c.Stride[d]   = d == big ? 2 : 3;
+                c.Dilation[d] = d == big ? static_cast<index_t>(dilation) : 1;
+                c.PadLeft[d]  = d == big ? left_pad : 1;
+                c.PadRight[d] =
+                    d == big
+                        ? static_cast<index_t>(std::min<int64_t>(dilation * (filter - 1), limit))
+                        : 1;
+            }
+            return c;
+        };
+        // {wrapper, description based}
+        const auto checks = [&](const BwdWeightCase<NDim>& c, bool first) {
+            std::array<int64_t, NDim> out64{};
+            std::array<index_t, NDim> out{};
+            int64_t prod_out = 1, prod_filter = 1;
+            for(index_t d = 0; d < NDim; ++d)
+            {
+                out64[d] = (int64_t(c.In[d]) + c.PadLeft[d] + c.PadRight[d] -
+                            int64_t(c.Dilation[d]) * (c.Filter[d] - 1) - 1) /
+                               c.Stride[d] +
+                           1;
+                EXPECT_GE(out64[d], 1);
+                out[d] = static_cast<index_t>(out64[d]);
+                prod_out *= out64[d];
+                prod_filter *= c.Filter[d];
+            }
+            std::array<index_t, NDim + 3> in_strides{};
+            std::array<long_index_t, NDim> spatial_stride{};
+            int64_t acc = 1;
+            for(index_t i = 0; i < NDim; ++i)
+            {
+                const index_t d   = first ? i : NDim - 1 - i;
+                in_strides[3 + d] = static_cast<index_t>(acc);
+                spatial_stride[d] = acc;
+                acc *= c.In[d];
+            }
+            EXPECT_LE(acc * c.C * c.N, limit);
+            in_strides[2] = static_cast<index_t>(acc);
+            in_strides[1] = static_cast<index_t>(acc * c.C);
+
+            const auto round_up      = [](int64_t x, int64_t m) { return (x + m - 1) / m * m; };
+            const int64_t gemm_k_pad = round_up(c.N * prod_out, 16 * c.BatchK);
+            const int64_t gemm_n_pad = round_up(c.C * prod_filter, 32);
+            const auto to_long       = [](const std::array<index_t, NDim>& a) {
+                std::array<long_index_t, NDim> r{};
+                for(index_t d = 0; d < NDim; ++d)
+                {
+                    r[d] = a[d];
+                }
+                return r;
+            };
+            const bool wrapper = WrwCustomTransform<NDim>::IsCustomTransformPaddingRangeSupported(
+                c.N,
+                c.C,
+                c.In,
+                c.Filter,
+                out,
+                in_strides,
+                c.Stride,
+                c.Dilation,
+                c.PadLeft,
+                static_cast<index_t>(gemm_k_pad),
+                static_cast<index_t>(gemm_n_pad));
+            const bool expected = IsConvInputTransformRangeSupported<NDim>(c.N,
+                                                                           c.C,
+                                                                           to_long(c.In),
+                                                                           to_long(c.Filter),
+                                                                           to_long(out),
+                                                                           to_long(c.Stride),
+                                                                           to_long(c.Dilation),
+                                                                           to_long(c.PadLeft),
+                                                                           gemm_k_pad,
+                                                                           gemm_n_pad,
+                                                                           in_strides[1],
+                                                                           spatial_stride,
+                                                                           in_strides[2]);
+            return std::make_pair(wrapper, expected);
+        };
+        for(const bool first : {true, false})
+        {
+            for(const index_t filter : {3, 8, 16})
+            {
+                for(const index_t left_pad : {0, 5, 1 << 20})
+                {
+                    if(!first && left_pad != 0)
+                    {
+                        continue;
+                    }
+                    int64_t lo = 1, hi = limit / (filter - 1);
+                    ASSERT_TRUE(checks(make(first, filter, lo, left_pad), first).second);
+                    while(lo < hi)
+                    {
+                        const int64_t mid = lo + (hi - lo + 1) / 2;
+                        if(checks(make(first, filter, mid, left_pad), first).second)
+                        {
+                            lo = mid;
+                        }
+                        else
+                        {
+                            hi = mid - 1;
+                        }
+                    }
+                    for(int64_t dilation = lo - 2; dilation <= lo + 2; ++dilation)
+                    {
+                        const auto result = checks(make(first, filter, dilation, left_pad), first);
+                        EXPECT_EQ(result.first, result.second)
+                            << "F=" << filter << " left_pad=" << left_pad << " D=" << dilation
+                            << " first=" << first;
+                        EXPECT_EQ(result.second, dilation <= lo);
+                    }
+                }
+            }
+        }
+    };
+    run(std::integral_constant<index_t, 1>{});
+    run(std::integral_constant<index_t, 2>{});
+    run(std::integral_constant<index_t, 3>{});
+}
+
+// =============================================================================
+// Randomized problems (fixed seed): all the custom transforms against the generic chain
+// =============================================================================
+
+TEST(TensorDescriptorFunctorsIntegration, RandomizedCustomTransformsMatchGeneric)
+{
+    std::mt19937 rng(20241125);
+    const auto rnd = [&](index_t lo, index_t hi) {
+        return lo + static_cast<index_t>(rng() % static_cast<uint32_t>(hi - lo + 1));
+    };
+    // right pad that keeps the output non empty, plus a random extra
+    const auto right_pad = [&](index_t in, index_t filter, index_t dilation, index_t left) {
+        return std::max<index_t>(0, dilation * (filter - 1) + 1 - in - left) + rnd(0, 3);
+    };
+
+    // forward A matrix
+    const auto forward = [&](auto ndim, int iterations) {
+        constexpr index_t NDim = decltype(ndim)::value;
+        for(int it = 0; it < iterations; ++it)
+        {
+            ForwardConvCase<NDim> cfg{};
+            cfg.N = rnd(1, 3);
+            cfg.C = rnd(1, 9);
+            cfg.G = rnd(0, 1) ? 3 : 1;
+            for(index_t d = 0; d < NDim; ++d)
+            {
+                cfg.In[d]       = rnd(1, NDim == 3 ? 5 : 9);
+                cfg.Filter[d]   = rnd(1, NDim == 3 ? 4 : 8);
+                cfg.Stride[d]   = rnd(1, 3);
+                cfg.Dilation[d] = rnd(1, 3);
+                cfg.PadLeft[d]  = rnd(0, 4);
+                cfg.PadRight[d] =
+                    right_pad(cfg.In[d], cfg.Filter[d], cfg.Dilation[d], cfg.PadLeft[d]);
+            }
+            CheckForwardConvInputTransformMatchesGeneric<NDim>(cfg);
+        }
+    };
+    forward(std::integral_constant<index_t, 1>{}, 25);
+    forward(std::integral_constant<index_t, 2>{}, 25);
+    forward(std::integral_constant<index_t, 3>{}, 8);
+
+    // backward weight B matrix
+    const auto backward_weight = [&](auto ndim, int iterations) {
+        constexpr index_t NDim = decltype(ndim)::value;
+        for(int it = 0; it < iterations; ++it)
+        {
+            BwdWeightCase<NDim> c{};
+            c.N      = rnd(1, 3);
+            c.C      = rnd(1, 9);
+            c.K      = 8;
+            c.G      = rnd(0, 1) ? 3 : 1;
+            c.BatchK = rnd(1, 3);
+            for(index_t d = 0; d < NDim; ++d)
+            {
+                c.In[d]       = rnd(1, NDim == 3 ? 5 : 9);
+                c.Filter[d]   = rnd(1, NDim == 3 ? 4 : 8);
+                c.Stride[d]   = rnd(1, 3);
+                c.Dilation[d] = rnd(1, 3);
+                c.PadLeft[d]  = rnd(0, 4);
+                c.PadRight[d] = right_pad(c.In[d], c.Filter[d], c.Dilation[d], c.PadLeft[d]);
+            }
+            CheckBwdWeightBTransformMatchesGeneric<NDim>(c, false);
+        }
+    };
+    backward_weight(std::integral_constant<index_t, 1>{}, 25);
+    backward_weight(std::integral_constant<index_t, 2>{}, 25);
+    backward_weight(std::integral_constant<index_t, 3>{}, 8);
+
+    // backward data A matrix with the merged padding (2D)
+    for(int it = 0; it < 30; ++it)
+    {
+        BwdDataCase c{};
+        c.N         = rnd(1, 3);
+        c.C         = 8;
+        c.K         = 8 * rnd(1, 2);
+        c.G         = rnd(0, 1) ? 3 : 1;
+        c.Y         = rnd(1, 8);
+        c.X         = rnd(1, 8);
+        c.Hi        = rnd(1, 12);
+        c.Wi        = rnd(1, 12);
+        c.StrideH   = rnd(1, 3);
+        c.StrideW   = rnd(1, 3);
+        c.DilationH = rnd(1, 3);
+        c.DilationW = rnd(1, 3);
+        c.LeftPadH  = rnd(0, 4);
+        c.LeftPadW  = rnd(0, 4);
+        c.RightPadH = right_pad(c.Hi, c.Y, c.DilationH, c.LeftPadH);
+        c.RightPadW = right_pad(c.Wi, c.X, c.DilationW, c.LeftPadW);
+        ForEachBwdDataGroup(c, [&](index_t ytilde, index_t xtilde) {
+            const auto result = CheckBwdDataMergedPadding(c, ytilde, xtilde, true);
+            EXPECT_TRUE(result.supported);
+            EXPECT_EQ(result.mismatches, 0);
+        });
+    }
+}
+
+// =============================================================================
+// Backward data merged padding with split N. The transform splits N when the output or the input
+// tensor is bigger than 2GB: N_ is then the batch of one workgroup (a divisor of N, or 1) and the
+// descriptors describe N_ batches. (The xdl v3 op that uses the merged padding instantiates the
+// transform without split N today; this checks that the merged padding follows N_ if it is
+// enabled.)
+// =============================================================================
+
+TEST(TensorDescriptorFunctorsIntegration, BackwardDataMergedPaddingSplitN)
+{
+    struct SplitCase
+    {
+        index_t n, hi, expected_n;
+    };
+    // 1x1 filter, stride 1, 8 channels, float tensors (4 bytes):
+    //  N = 4, 4200 x 4200 : 2.3 GB, split in 2 workgroups of 2 batches
+    //  N = 6, 3500 x 3500 : 2.3 GB, split in 2 workgroups of 3 batches
+    //  N = 5, 4096 x 4096 : 2.7 GB, no divisor of 5 found, 1 batch per workgroup
+    //  N = 4, 2048 x 2048 : 0.5 GB, no split
+    const SplitCase cases[] = {{4, 4200, 2}, {6, 3500, 3}, {5, 4096, 1}, {4, 2048, 4}};
+    for(const auto& sc : cases)
+    {
+        for(const index_t groups : {1, 3})
+        {
+            BwdDataCase c{};
+            c.N = sc.n;
+            c.G = groups;
+            c.C = c.K = 8;
+            c.Hi = c.Wi = sc.hi;
+            c.Y = c.X = 1;
+            c.StrideH = c.StrideW = c.DilationH = c.DilationW = 1;
+            c.LeftPadH = c.LeftPadW = c.RightPadH = c.RightPadW = 0;
+
+            // with G groups the tensor has G times more elements, so more batches are split
+            const auto transformer = MakeBwdDataTransformer<index_t, true, true>(c, 0, 0);
+            if(groups == 1)
+            {
+                EXPECT_EQ(transformer.N_, sc.expected_n) << "N=" << sc.n << " Hi=" << sc.hi;
+            }
+            else
+            {
+                EXPECT_LE(transformer.N_, sc.expected_n) << "N=" << sc.n << " Hi=" << sc.hi;
+                EXPECT_EQ(sc.n % transformer.N_, 0);
+            }
+
+            const auto result = CheckBwdDataMergedPadding<true>(c, 0, 0, false);
+            EXPECT_TRUE(result.supported) << "N=" << sc.n << " Hi=" << sc.hi << " G=" << groups;
+            EXPECT_EQ(result.mismatches, 0) << "N=" << sc.n << " Hi=" << sc.hi << " G=" << groups;
+        }
+    }
+}
+
+// =============================================================================
+// Backward weight: split-K offset hack with the custom B descriptor. When the hack is eligible
+// (SplitKHackEligibility) the device op shifts the B pointer by ElementSpaceSize / k_batch for
+// each K batch and the kernel indexes the first batch of the descriptor only. The custom B must
+// take the same eligibility decision as the generic chain (so the custom transform does not
+// enable or disable the hack) and, when the hack is on, the shifted view must give the same
+// elements as the descriptor of the whole GemmK.
+// =============================================================================
+
+namespace {
+
+template <index_t NDim>
+struct SplitKLayouts;
+
+template <>
+struct SplitKLayouts<1>
+{
+    using In  = ck::tensor_layout::convolution::NWGC;
+    using Wei = ck::tensor_layout::convolution::GKXC;
+    using Out = ck::tensor_layout::convolution::NWGK;
+};
+
+template <>
+struct SplitKLayouts<2>
+{
+    using In  = ck::tensor_layout::convolution::NHWGC;
+    using Wei = ck::tensor_layout::convolution::GKYXC;
+    using Out = ck::tensor_layout::convolution::NHWGK;
+};
+
+template <>
+struct SplitKLayouts<3>
+{
+    using In  = ck::tensor_layout::convolution::NDHWGC;
+    using Wei = ck::tensor_layout::convolution::GKZYXC;
+    using Out = ck::tensor_layout::convolution::NDHWGK;
+};
+
+// Returns whether the split-K hack is eligible
+template <index_t NDim>
+bool CheckSplitKHackWithCustomB(BwdWeightCase<NDim> c, index_t k_batch)
+{
+    SCOPED_TRACE("N=" + std::to_string(c.N) + " G=" + std::to_string(c.G) +
+                 " C=" + std::to_string(c.C) + " In0=" + std::to_string(c.In[0]) +
+                 " Filter0=" + std::to_string(c.Filter[0]) +
+                 " Stride0=" + std::to_string(c.Stride[0]) + " KBatch=" + std::to_string(k_batch));
+    c.BatchK = k_batch;
+
+    // the descriptors of the device op (full K batch index)
+    const auto custom  = MakeBwdWeightDescriptors<NDim, true>(c, nullptr, true);
+    const auto generic = MakeBwdWeightDescriptors<NDim, false>(c, nullptr, true);
+
+    std::array<index_t, NDim> out{};
+    index_t out_prod = 1;
+    for(index_t d = 0; d < NDim; ++d)
+    {
+        out[d] = (c.In[d] + c.PadLeft[d] + c.PadRight[d] - c.Dilation[d] * (c.Filter[d] - 1) - 1) /
+                     c.Stride[d] +
+                 1;
+        out_prod *= out[d];
+    }
+
+    using Layouts                  = SplitKLayouts<NDim>;
+    using Eligibility              = ck::tensor_operation::device::SplitKHackEligibility<NDim,
+                                                                                         typename Layouts::In,
+                                                                                         typename Layouts::Wei,
+                                                                                         typename Layouts::Out>;
+    constexpr index_t k_block_size = 16; // K0PerBlock * K1 of the transform
+    const bool eligible_custom     = Eligibility::Check(
+        custom[Number<0>{}], custom[Number<1>{}], k_batch, c.N, out, k_block_size);
+    const bool eligible_generic = Eligibility::Check(
+        generic[Number<0>{}], generic[Number<1>{}], k_batch, c.N, out, k_block_size);
+    EXPECT_EQ(eligible_custom, eligible_generic)
+        << "the custom B changes the eligibility of the split-K hack";
+    if(!eligible_custom)
+    {
+        return false;
+    }
+
+    const auto& b          = custom[Number<1>{}];
+    const index_t k0_total = b.GetLength(Number<0>{});
+    const index_t n        = b.GetLength(Number<1>{});
+    const index_t k1       = b.GetLength(Number<2>{});
+    EXPECT_EQ(k0_total % k_batch, 0);
+    const index_t k0_batch = k0_total / k_batch;
+    // the stride of the pointer shift of the device op
+    const long_index_t stride_b = b.GetElementSpaceSize() / k_batch;
+
+    int64_t mismatches = 0;
+    for(index_t kb = 0; kb < k_batch; ++kb)
+    {
+        for(index_t k0 = 0; k0 < k0_batch; ++k0)
+        {
+            for(index_t i1 = 0; i1 < n; ++i1)
+            {
+                for(index_t i2 = 0; i2 < k1; ++i2)
+                {
+                    const auto whole =
+                        make_tensor_coordinate(b, make_multi_index(kb * k0_batch + k0, i1, i2));
+                    const auto first = make_tensor_coordinate(b, make_multi_index(k0, i1, i2));
+                    const bool whole_valid = coordinate_has_valid_offset(b, whole);
+                    const bool first_valid = coordinate_has_valid_offset(b, first);
+                    if(whole_valid != first_valid ||
+                       (whole_valid && long_index_t{whole.GetOffset()} !=
+                                           kb * stride_b + long_index_t{first.GetOffset()}))
+                    {
+                        if(mismatches++ < 3)
+                        {
+                            ADD_FAILURE() << "batch " << kb << " (" << k0 << "," << i1 << "," << i2
+                                          << "): whole valid=" << whole_valid
+                                          << " offset=" << whole.GetOffset()
+                                          << ", shifted valid=" << first_valid
+                                          << " offset=" << first.GetOffset() << " + " << kb << " * "
+                                          << stride_b;
+                        }
+                    }
+                }
+            }
+        }
+    }
+    EXPECT_EQ(mismatches, 0);
+    return true;
+}
+
+} // namespace
+
+TEST(TensorDescriptorFunctorsIntegration, BackwardWeightSplitKHackWithCustomB)
+{
+    // {N, C, K, In, Filter, Stride, Dilation, PadLeft, PadRight, BatchK (unused), G}
+    struct Case2d
+    {
+        BwdWeightCase<2> c;
+        index_t k_batch;
+        bool eligible;
+    };
+    const auto make2d = [](index_t n,
+                           index_t ch,
+                           std::array<index_t, 2> in,
+                           std::array<index_t, 2> filter,
+                           std::array<index_t, 2> stride,
+                           std::array<index_t, 2> pad,
+                           index_t groups) {
+        BwdWeightCase<2> c{};
+        c.N        = n;
+        c.C        = ch;
+        c.K        = 32; // GemmM is a multiple of MPerBlock (the hack needs a compact A)
+        c.In       = in;
+        c.Filter   = filter;
+        c.Stride   = stride;
+        c.Dilation = {1, 1};
+        c.PadLeft  = pad;
+        c.PadRight = pad;
+        c.BatchK   = 1;
+        c.G        = groups;
+        return c;
+    };
+    const Case2d cases[] = {
+        // 1x1, stride 1, pad 0: GemmK = N * Hi * Wi, the input is read as it is stored
+        {make2d(4, 32, {4, 4}, {1, 1}, {1, 1}, {0, 0}, 1), 2, true},
+        {make2d(4, 32, {4, 4}, {1, 1}, {1, 1}, {0, 0}, 1), 4, true},
+        {make2d(6, 32, {4, 4}, {1, 1}, {1, 1}, {0, 0}, 1), 3, true},
+        {make2d(2, 64, {8, 4}, {1, 1}, {1, 1}, {0, 0}, 1), 2, true},
+        // 2x2 stride 2 pad 0: the patches do not overlap, the im2col is a permutation of the input
+        {make2d(4, 8, {8, 8}, {2, 2}, {2, 2}, {0, 0}, 1), 2, true},
+        // not eligible: overlapping filter, strided 1x1, C not a multiple of GemmN block, groups,
+        // N not divisible by the K batch, GemmK padded, one K batch
+        {make2d(4, 32, {4, 4}, {3, 3}, {1, 1}, {1, 1}, 1), 2, false},
+        {make2d(4, 32, {8, 8}, {1, 1}, {2, 2}, {0, 0}, 1), 2, false},
+        {make2d(4, 8, {4, 4}, {1, 1}, {1, 1}, {0, 0}, 1), 2, false},
+        {make2d(4, 32, {4, 4}, {1, 1}, {1, 1}, {0, 0}, 3), 2, false},
+        {make2d(3, 32, {4, 4}, {1, 1}, {1, 1}, {0, 0}, 1), 2, false},
+        {make2d(4, 32, {5, 5}, {1, 1}, {1, 1}, {0, 0}, 1), 2, false},
+        {make2d(4, 32, {4, 4}, {1, 1}, {1, 1}, {0, 0}, 1), 1, false},
+    };
+    for(const auto& tc : cases)
+    {
+        EXPECT_EQ(CheckSplitKHackWithCustomB<2>(tc.c, tc.k_batch), tc.eligible);
+    }
+
+    // 1D and 3D, 1x1 stride 1 pad 0
+    {
+        BwdWeightCase<1> c{};
+        c.N        = 4;
+        c.C        = 32;
+        c.K        = 32;
+        c.In       = {16};
+        c.Filter   = {1};
+        c.Stride   = {1};
+        c.Dilation = {1};
+        c.PadLeft = c.PadRight = {0};
+        c.BatchK               = 1;
+        EXPECT_TRUE((CheckSplitKHackWithCustomB<1>(c, 2)));
+        EXPECT_TRUE((CheckSplitKHackWithCustomB<1>(c, 4)));
+        c.Filter  = {3};
+        c.PadLeft = c.PadRight = {1};
+        EXPECT_FALSE((CheckSplitKHackWithCustomB<1>(c, 2)));
+    }
+    {
+        BwdWeightCase<3> c{};
+        c.N        = 4;
+        c.C        = 32;
+        c.K        = 32;
+        c.In       = {2, 2, 4};
+        c.Filter   = {1, 1, 1};
+        c.Stride   = {1, 1, 1};
+        c.Dilation = {1, 1, 1};
+        c.PadLeft = c.PadRight = {0, 0, 0};
+        c.BatchK               = 1;
+        EXPECT_TRUE((CheckSplitKHackWithCustomB<3>(c, 2)));
+        EXPECT_TRUE((CheckSplitKHackWithCustomB<3>(c, 4)));
+    }
 }
