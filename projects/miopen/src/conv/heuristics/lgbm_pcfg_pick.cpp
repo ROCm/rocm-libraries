@@ -259,7 +259,7 @@ RankedConfigs RankBucketCached(const std::string& solver_name,
 // The grouped-conv XDLOPS solvers ship a two-tower kernel-tuning-net (KTN)
 // perf-config predictor (the *_input_encoder model plus a precomputed config-embedding
 // table that replaces the former *_kernel_config_encoder),
-// run inside the solver's own GetDefaultPerformanceConfig on gfx90a/gfx942/gfx950
+// run inside the solver's own GetDefaultPerformanceConfig on gfx90a/gfx942/gfx950/gfx1250
 // (see PerformanceConfig...::IsModelApplicable). The two-tower takes precedence
 // there; the LGBM perf-config picker is the fallback for solvers/architectures
 // the two-tower does not cover. This predicate mirrors that model's coverage so
@@ -270,7 +270,7 @@ bool TwoTowerCoversSolver(const std::string& solver_name, const std::string& gfx
     if(common::LgbmOnly())
         return false;
     const bool arch_covered = gfx_id.starts_with("gfx90a") || gfx_id.starts_with("gfx942") ||
-                              gfx_id.starts_with("gfx950");
+                              gfx_id.starts_with("gfx950") || gfx_id.starts_with("gfx1250");
     if(!arch_covered)
         return false;
     static const std::array<const char*, 6> kTwoTowerSolvers = {

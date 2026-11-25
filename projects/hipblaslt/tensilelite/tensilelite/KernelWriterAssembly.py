@@ -76,7 +76,7 @@ from .ir import BranchInstruction, BufferLoadB128, BufferLoadB32, \
 from .Component import Component, TensorDataMover, GL2Prefetch
 from .Components.TensorDataMover import TensorDataMoverLoad
 from .Common.MxScaleLayout import mxFreePhase, mxFreeTile, mxIssueTpList, mxLdsKStride, mxReadVectorWidth, mxTdmTile0, mxTdmTileM, \
-  mxLraFreeShift, mxSegmentSplit
+  mxLraFreeShift, mxSegmentSplit, mxsbRotateSplit
 from .Components.LraTileAssignment import mx2dFreeOffset
 from .Components.GL2Prefetch import GL2PrefetchLoad
 from .Components.ClusterLoad import ClusterLoadTDM
@@ -7454,6 +7454,11 @@ class KernelWriterAssembly(KernelWriter):
       module.add(VAddU32(dst=vgpr("LocalReadAddrB+1"), src0=sgpr("BRotateLRDelta"), src1=vgpr("LocalReadAddrB+0"), \
                          comment="B-rotate: other component"))
       return module
+    if tc == "MXSB" and mxsbRotateSplit(kernel):
+      assert numLra == 2, "LDSSegmentBRotate: split MXSB needs exactly 2 local-read addresses"
+      module.add(VAddU32(dst=vgpr("LocalReadAddrMXSB+1"), src0=sgpr("MXSBRotateLRDelta"), \
+                         src1=vgpr("LocalReadAddrMXSB+0"), comment="MXSB-rotate: other vIdx half"))
+      return module
     windows = (kernel.get("LDSSegInterleaveOffsets") or {}).get("readAddressWindows" + tc)
     if windows is not None:
       assert len(windows) == numLra and windows[0] == 0
@@ -7575,6 +7580,23 @@ class KernelWriterAssembly(KernelWriter):
           module.add(SMulI32(dst=pairSgpr, src0=pairSgpr, src1=compStride, comment="B-rotate: pair * S"))
           module.add(VAddU32(dst=vgpr("LocalReadAddrB+0"), src0=pairSgpr, src1=vgpr("LocalReadAddrB+0"), \
                              comment="B-rotate: pair 1 reads the other component first"))
+      if tc == "MXSB" and mxsbRotateSplit(kernel):
+        # Split MXSB: vIdx half h reads +h at the in-half immediate (localReadMX). The scales
+        # follow the rotated B halves: pair p needs +0 = root + p*H and +1 = +0 + H - p*2H.
+        halfStride = Component.LocalRead.find(self).getMxsbRotateHalfStride(kernel)
+        with self.allocTmpSgpr(1, tag="mxsbRotatePair") as tmpSgprInfo:
+          pairSgpr = sgpr(tmpSgprInfo.idx)
+          module.add(VReadfirstlaneB32(dst=pairSgpr, src=vgpr("Serial"), comment="MXSB-rotate: tId"))
+          module.add(SLShiftRightB32(dst=pairSgpr, shiftHex=log2(kernel["WavefrontSize"]), src=pairSgpr, \
+                                     comment="MXSB-rotate: wave id"))
+          module.add(SAndB32(dst=pairSgpr, src0=pairSgpr, src1=1, comment="MXSB-rotate: pair = wave id & 1"))
+          module.add(SMulI32(dst=sgpr("MXSBRotateLRDelta"), src0=pairSgpr, src1=2 * halfStride, \
+                             comment="MXSB-rotate: pair * 2H"))
+          module.add(SSubU32(dst=sgpr("MXSBRotateLRDelta"), src0=halfStride, \
+                             src1=sgpr("MXSBRotateLRDelta"), comment="MXSB-rotate: H - pair*2H"))
+          module.add(SMulI32(dst=pairSgpr, src0=pairSgpr, src1=halfStride, comment="MXSB-rotate: pair * H"))
+          module.add(VAddU32(dst=vgpr("LocalReadAddrMXSB+0"), src0=pairSgpr, src1=vgpr("LocalReadAddrMXSB+0"), \
+                             comment="MXSB-rotate: pair 1 reads the other vIdx half first"))
 
     if tP["isA"]:
       numVgpr = self.states.a.numVgprLocalReadAddr
@@ -14868,19 +14890,10 @@ class KernelWriterAssembly(KernelWriter):
     if tc == "Metadata" and kernel["enableTDMMetadata"]:
       comp: TensorDataMoverLoad = TensorDataMoverLoad.find(self)
       comp.setMemToken([self.states.ldsTensorTokenIdx])
-      if self.isTdmWaveSeparated(kernel):
-        skipMetadataLabel = Label(self.labels.getNameInc("TdmMetadataSkipOddWave"), "")
-        guardedLoad = Module("tdmMetadataWSGuardedLoad")
-        self._emitTdmWaveParitySCCAuto(guardedLoad, kernel, comment="metadata WaveSeparated: check wave parity (odd -> skip load)",
-                                      tmpTag="tdmMetadataIssueParity")
-        guardedLoad.add(SCBranchSCC1(labelName=skipMetadataLabel.getLabelName(), comment="odd wave: skip metadata load"))
-        guardedLoad.add(comp.issueLoad("tdmMetadataGroup0", "tdmMetadataGroup1", None, None,
-                                       tensor=self.tdmLoadModifiers(kernel, tc)))
-        guardedLoad.add(skipMetadataLabel)
-        imod.add(guardedLoad)
-      else:
-        imod.add(comp.issueLoad("tdmMetadataGroup0", "tdmMetadataGroup1", None, None,
-                                tensor=self.tdmLoadModifiers(kernel, tc)))
+      # Wave-separated: odd waves hold a NULL descriptor (initTDMDescriptor), so the load
+      # is issued unconditionally on every wave and moves nothing on the odd ones.
+      imod.add(comp.issueLoad("tdmMetadataGroup0", "tdmMetadataGroup1", None, None,
+                              tensor=self.tdmLoadModifiers(kernel, tc)))
       return imod 
 
     if tc == "B" and kernel["enableTDMB"]:
@@ -16701,6 +16714,8 @@ class KernelWriterAssembly(KernelWriter):
       numLra = self.states.b.numVgprLocalReadAddr
     elif tP["isM"]:
       numLra = self.states.m.numVgprLocalReadAddr
+    elif tP["isMXSB"] and mxsbRotateSplit(kernel):
+      numLra = self.states.mxsb.numVgprLocalReadAddr
 
     module.add(self._lraFanOut(kernel, tc, numLra))
 
@@ -25140,6 +25155,17 @@ class KernelWriterAssembly(KernelWriter):
                                  strideRefName=strideRefName,
                                  remainRowsSgpr=remainRowsSgpr)
 
+    if waveSepMetadata:
+      # Only even waves carry metadata (see the numComp / partition assert above), so
+      # odd waves get a NULL descriptor (Group0 count = 0: no memory is copied, no
+      # atomic_barrier sent). Every wave then issues the same tensor_load_to_lds and the
+      # per-load wave-parity branch is gone. initOperands wrote Group0+0 as plain 1, so
+      # clearing the dword only changes count. SCC is consumed right after the compare.
+      self._emitTdmWaveParitySCCAuto(mod, kernel, comment="metadata WaveSeparated: odd wave carries no metadata",
+                                     tmpTag="tdmMetadataNullParity")
+      mod.add(SCMovB32(dst=sgpr(f"{descSgprName(0)}+0"), src=0,
+                       comment="odd wave: NULL metadata descriptor (count = 0)"))
+
     return mod
 
   def tdmWaveLdsAddr(self, kernel, tc: str, numComp: int, pieceBytes: int, ldsConstOffset: int,
@@ -26985,6 +27011,14 @@ class KernelWriterAssembly(KernelWriter):
     mod = Module("GL2 Prefetch Addresses Calculation")
     comp = GL2PrefetchLoad.find(self)
     tpList = self.gl2PrefetchTpList(kernel, tPA, tPB)
+
+    # A StreamK work item starts StreamKLocalStart iterations into its tile, like
+    # the TDM K-offset (tdmApplyTileKOffset); DP-only kernels always start at 0.
+    if isPersistent(kernel) and not isPersistentDataParallel(kernel):
+      for tp in tpList:
+        mod.add(comp.setIncrement(self, kernel, tp))
+        mod.add(comp.calculateStartAddr(self, kernel, tp, kStartSgprName="StreamKLocalStart"))
+      return mod
 
     if not comp.isGSUEnabled(kernel):
       for tp in tpList:

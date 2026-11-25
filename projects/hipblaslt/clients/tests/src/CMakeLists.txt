@@ -24,6 +24,7 @@ target_sources(hipblaslt-test
         ${CMAKE_CURRENT_SOURCE_DIR}/math_gtest.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/scale_buffer_size_gtest.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/auxiliary_gtest.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/check_numerics_flag_gtest.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/heuristic_workspace_gtest.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/grouped_matmul_gtest.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/data_type_names_gtest.cpp

@@ -63,6 +63,8 @@ double test_prob;
 double emulation_prob;
 // Probability of running unit tests
 double unittest_prob;
+// Probability of verifying that a transform left its input buffer alone
+double input_preservation_prob;
 // Modifier for probability of running tests with complex interleaved data
 double complex_interleaved_prob_factor;
 // Modifier for probability of running tests with real data
@@ -348,11 +350,10 @@ int main(int argc, char* argv[])
     const auto opt_ngpus
         = app.add_option("--ngpus",
                          gpus_per_rank,
-                         "Maximum number of GPUs per process to be considered (cannot exceed 1 if "
-                         "mp_lib == mpi). An upper bound of "
+                         "Maximum number of GPUs per process to be considered. An upper bound of "
                              + std::to_string(upper_bound_gpus_per_rank)
                              + " is enforced. The number of GPUs must not exceed the available "
-                               "device count.")
+                               "device count (on each rank if mp_lib == mpi).")
               ->option_text("Default value is 1 if mp_lib == mpi; all visible "
                             "devices are considered if mp_lib == none")
               ->check(CLI::PositiveNumber);
@@ -369,6 +370,11 @@ int main(int argc, char* argv[])
                    "emulation_prob is used directly when test_prob is 1 and scaled down by the "
                    "ratio of 1D test count to 2D or 3D test count as test_prob approaches 0.")
         ->default_val(1.0)
+        ->check(CLI::Range(0.0, 1.0));
+    app.add_option("--input_preservation_prob",
+                   input_preservation_prob,
+                   "Probability of checking that an out-of-place transform left its input intact")
+        ->default_val(0.1)
         ->check(CLI::Range(0.0, 1.0));
     app.add_option("--real_prob",
                    real_prob_factor,
@@ -412,6 +418,7 @@ int main(int argc, char* argv[])
                    "--nrand",
                    "--callback_prob",
                    "--very_large_prob",
+                   "--input_preservation_prob",
                    "--R")
         ->each([&](const std::string& emulationtype) {
             // Emulation test suites focus on well-established software paths; we are looking for
@@ -427,6 +434,10 @@ int main(int argc, char* argv[])
 
             // Very large transforms are not an emulation test target.
             very_large_prob_factor = 0;
+
+            // Whether a transform preserves its input is a property of the
+            // software, and confirming it costs two extra copies of the input.
+            input_preservation_prob = 0;
 
             if(emulationtype == emulation_quick)
             {
@@ -508,8 +519,7 @@ int main(int argc, char* argv[])
         {
             if(!*opt_ngpus)
                 gpus_per_rank = 1;
-            else if(gpus_per_rank > 1)
-                throw std::invalid_argument("--ngpus must be 1 if mp_lib == mpi (see --help)");
+            gpus_per_rank = std::min(gpus_per_rank, upper_bound_gpus_per_rank);
             if(mp_launch.empty())
                 throw std::invalid_argument(
                     "--mp_launch must be specified if mp_lib == mpi (see --help)");
