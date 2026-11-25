@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2022-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2022-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -149,20 +149,43 @@ rocsparse_status rocsparse::sparse_to_csr_to_sparse(rocsparse_handle            
             RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_internal_error);
         }
         }
+        RETURN_ROCSPARSE_ERROR_IF(rocsparse_status_type_mismatch,
+                                  (csr_nnz > std::numeric_limits<int32_t>::max()
+                                   && (row_type == rocsparse_indextype_i32)));
+
         //
         // Get intermediate descriptor.
         //
         void* TEMP_row__ = nullptr;
         void* TEMP_col__ = nullptr;
         void* TEMP_val__ = nullptr;
+
+        // descr_ frees the arrays only once the intermediate is attached to it.
+        struct free_unattached_t
+        {
+            void** arrays[3];
+            bool   attached;
+            ~free_unattached_t()
+            {
+                if(attached)
+                {
+                    return;
+                }
+                for(void** array : arrays)
+                {
+                    if(*array != nullptr)
+                    {
+                        static_cast<void>(rocsparse_hipFree(*array));
+                    }
+                }
+            }
+        } free_unattached{{&TEMP_row__, &TEMP_col__, &TEMP_val__}, false};
+
         if(csr_m > 0)
         {
             RETURN_IF_HIP_ERROR(rocsparse_hipMalloc(
                 &TEMP_row__, rocsparse::indextype_sizeof(row_type) * (csr_m + 1)));
         }
-        RETURN_ROCSPARSE_ERROR_IF(rocsparse_status_type_mismatch,
-                                  (csr_nnz > std::numeric_limits<int32_t>::max()
-                                   && (row_type == rocsparse_indextype_i32)));
 
         if(csr_nnz > 0)
         {
@@ -183,10 +206,17 @@ rocsparse_status rocsparse::sparse_to_csr_to_sparse(rocsparse_handle            
                                                              source_->idx_base,
                                                              source_->data_type));
 
+        // rocsparse_mat_descr_are_same requires the intermediate to match the source; the
+        // storage mode stays sorted because the conversion kernels need sorted input.
+        intermediate->descr->type      = source_->descr->type;
+        intermediate->descr->fill_mode = source_->descr->fill_mode;
+        intermediate->descr->diag_type = source_->descr->diag_type;
+
         //
         // Attach the intermediate.
         //
-        descr_->m_intermediate = intermediate;
+        descr_->m_intermediate   = intermediate;
+        free_unattached.attached = true;
         rocsparse_sparse_to_sparse_descr intermediate_descr;
         RETURN_IF_ROCSPARSE_ERROR(rocsparse_create_sparse_to_sparse_descr(
             &intermediate_descr, source_, intermediate, rocsparse_sparse_to_sparse_alg_default));

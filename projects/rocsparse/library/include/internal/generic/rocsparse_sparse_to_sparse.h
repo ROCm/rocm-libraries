@@ -57,7 +57,15 @@ extern "C" {
 *  \retval      rocsparse_status_invalid_value if any required enumeration is invalid.
 *  \retval      rocsparse_status_invalid_pointer \p mat_A, \p mat_B, or \p buffer_size_in_bytes
 *               pointer is invalid.
-*  \retval      rocsparse_status_not_implemented the conversion is not supported for the formats or data types of \p source and \p target.
+*  \retval      rocsparse_status_invalid_size the block grid of a BSR \p target does not match a
+*               BSR \p source with another block dimension or direction, see the BSR note of
+*               \ref rocsparse_sparse_to_sparse.
+*  \retval      rocsparse_status_not_implemented the conversion is not supported for the formats or data types of \p source and \p target,
+*               or a BSR to BSR conversion with another block dimension or direction is refused,
+*               see the BSR note of \ref rocsparse_sparse_to_sparse.
+*  \retval      rocsparse_status_type_mismatch the intermediate CSR matrix of a BSR to BSR
+*               conversion does not fit the 32-bit index types of \p source, see the BSR note
+*               of \ref rocsparse_sparse_to_sparse.
 */
 ROCSPARSE_EXPORT
 rocsparse_status rocsparse_sparse_to_sparse_buffer_size(rocsparse_handle                 handle,
@@ -246,6 +254,29 @@ rocsparse_status rocsparse_sparse_to_sparse_buffer_size(rocsparse_handle        
 *
 *  \note
 *  This routine does not support batched computation.
+*
+*  \note
+*  A conversion from BSR to BSR with a different block dimension, or with a different block
+*  direction and blocks larger than 1 x 1, goes through an intermediate CSR matrix and requires
+*  \ref rocsparse_sparse_to_sparse_permissive, unless the source has no blocks. The target block
+*  row (column) count must be the source block row (column) count times the source block
+*  dimension, divided by the target block dimension and rounded up; otherwise
+*  \ref rocsparse_status_invalid_size is returned. Such a conversion of a source with blocks
+*  returns \ref rocsparse_status_not_implemented without
+*  \ref rocsparse_sparse_to_sparse_permissive, when the source and target index types or
+*  value types differ, for unsorted storage, for \ref rocsparse_datatype_i8_r,
+*  \ref rocsparse_datatype_u8_r, \ref rocsparse_datatype_u32_r, \ref rocsparse_datatype_f16_r
+*  and \ref rocsparse_datatype_bf16_r values, and for a source block dimension larger than 256.
+*  It returns \ref rocsparse_status_type_mismatch when the intermediate CSR matrix does not fit
+*  the 32-bit index types of the source. These statuses are returned by
+*  \ref rocsparse_sparse_to_sparse_buffer_size for the
+*  \ref rocsparse_sparse_to_sparse_stage_analysis stage.
+*
+*  \note
+*  When the conversion goes through an intermediate CSR matrix, the source is read when
+*  \ref rocsparse_sparse_to_sparse_buffer_size is called for the
+*  \ref rocsparse_sparse_to_sparse_stage_analysis stage, and not read again after that call.
+*  Neither the analysis stage nor the compute stage sees changes made to the source after it.
 *
 *  @param[in]
 *  handle       handle to the rocSPARSE library context queue.
