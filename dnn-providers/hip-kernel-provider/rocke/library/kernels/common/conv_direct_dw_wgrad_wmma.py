@@ -60,10 +60,18 @@ from kernels.common.conv_direct_grouped import (
     DirectConvProblem,
     _buf_load_vN,
     _io_type,
+    I32_MAX,
     dilation_reason,
+    problem_dims_reason,
     emit_direct_params,
     pad_w_reason,
 )
+from kernels.common.conv_direct_wgrad_wmma import (
+    wgrad_wmma_dest_bytes_reason,
+    wgrad_wmma_lds_reason,
+    wgrad_wmma_wave_shape_reason,
+)
+from kernels.common.conv_fwd_wmma_gate import wmma_fwd_op, wmma_fwd_tensor_bytes_reason
 
 DW_WGRAD_WMMA_CH = 8  # channels per wave (the 8-wide K group of a lane half)
 
@@ -170,6 +178,9 @@ class DwWgradWmmaSpec:
 def dw_wgrad_wmma_reason(spec: DwWgradWmmaSpec) -> str:
     """Why a spec cannot be built ("" when it can); arch-independent rules."""
     p = spec.problem
+    why = problem_dims_reason(p)
+    if why is not None:
+        return why
     if p.dtype not in ("fp16", "bf16"):
         return f"unsupported dtype {p.dtype!r}; expected fp16 or bf16"
     if p.cpg != 1 or p.kpg != 1:
@@ -185,6 +196,11 @@ def dw_wgrad_wmma_reason(spec: DwWgradWmmaSpec) -> str:
         return why
     if spec.pad_h < 0 or spec.pad_w < 0 or p.Ho < 1 or p.Wo < 1:
         return "degenerate geometry"
+    # The kernel keeps byte offsets in i32 and masks lanes with an offset of
+    # I32_MAX, which is past the buffer only while the buffer is smaller.
+    why = wmma_fwd_tensor_bytes_reason(p)
+    if why is not None:
+        return why
     if spec.wave_size != 32:
         return "the WMMA 16x16x32 lane maps are wave32"
     if spec.waves < 1 or spec.waves > 16:
@@ -195,6 +211,11 @@ def dw_wgrad_wmma_reason(spec: DwWgradWmmaSpec) -> str:
         return f"rows must be a positive even number (got {spec.rows})"
     if spec.target_blocks < 1 or spec.ws_replicas < 1:
         return "target_blocks and ws_replicas must be >= 1"
+    why = wgrad_wmma_dest_bytes_reason(
+        4 * spec.ws_replicas * p.groups * p.KH * p.KW, "fp32 replicated scratch"
+    )
+    if why is not None:
+        return why
     steps = spec.rows // 2 * spec.tile_q // 4 * spec.tiles
     if steps > 1024:
         return f"{steps} unrolled WMMAs per item exceed 1024 (smaller rows / tile_q)"
@@ -216,24 +237,19 @@ def is_valid_dw_wgrad_wmma_spec(
     why = dw_wgrad_wmma_reason(spec)
     if why:
         return False, why
-    if target.wave_size != 32:
-        return False, f"wave32 kernel (got {arch}, wave{target.wave_size})"
-    ab = "bf16" if spec.problem.dtype == "bf16" else "f16"
-    if not target.mma.has_shape(
-        family="wmma", a_dtype=ab, b_dtype=ab, c_dtype="fp32", m=16, n=16, k=32
-    ):
-        return False, f"missing wmma 16x16x32 {ab} on {arch}"
+    why = wgrad_wmma_wave_shape_reason(target, arch, spec.problem.dtype)
+    if why is not None:
+        return False, why
     if spec.threads_per_block > target.max_threads_per_block:
         return False, f"{spec.threads_per_block} threads > hardware cap on {arch}"
-    if spec.lds_bytes > target.lds_capacity_bytes:
-        return False, f"LDS {spec.lds_bytes} B > {target.lds_capacity_bytes} on {arch}"
+    why = wgrad_wmma_lds_reason(spec.lds_bytes, target, arch)
+    if why is not None:
+        return False, why
     return True, "ok"
 
 
 def build_dw_wgrad_wmma(spec: DwWgradWmmaSpec, arch: str = "gfx1250") -> KernelDef:
     """Build the one-hot WMMA depthwise wgrad kernel (see the module docstring)."""
-    from rocke.core.arch import ArchTarget
-
     # One validation: is_valid_dw_wgrad_wmma_spec runs dw_wgrad_wmma_reason.
     ok, why = is_valid_dw_wgrad_wmma_spec(spec, arch=arch)
     if not ok:
@@ -250,10 +266,7 @@ def build_dw_wgrad_wmma(spec: DwWgradWmmaSpec, arch: str = "gfx1250") -> KernelD
     NRB, NS = spec.n_rb, spec.n_s
     KK = KH * KW
     io_type = _io_type(p.dtype)
-    ab = "bf16" if p.dtype == "bf16" else "f16"
-    wmma_op = ArchTarget.from_gfx(arch).mma.op_for_shape(
-        family="wmma", a_dtype=ab, b_dtype=ab, c_dtype="fp32", m=16, n=16, k=32
-    )
+    wmma_op = wmma_fwd_op(p.dtype, arch)
 
     b = IRBuilder(spec.kernel_name())
     b.kernel.attrs["max_workgroup_size"] = THREADS
@@ -269,7 +282,7 @@ def build_dw_wgrad_wmma(spec: DwWgradWmmaSpec, arch: str = "gfx1250") -> KernelD
     c2 = b.const_i32(2)
     c8 = b.const_i32(8)
     c16 = b.const_i32(16)
-    oob = b.const_i32((1 << 30) - 1)  # past every in-range byte offset
+    oob = b.const_i32((1 << 31) - 1)  # >= num_records: every masked lane reads 0
 
     tid = b.thread_id_x()
     c32 = b.const_i32(32)

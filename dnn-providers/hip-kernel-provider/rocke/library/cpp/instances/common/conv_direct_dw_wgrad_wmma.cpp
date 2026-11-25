@@ -174,6 +174,8 @@ extern "C" bool rocke_direct_dw_wgrad_wmma_reason(const rocke_direct_dw_wgrad_wm
                                                   size_t cap)
 {
     const rocke_direct_conv_problem_t* p = &spec->problem;
+    if(rocke_direct_problem_dims_reason(p, reason, cap))
+        return true;
     if(!problem_dtype_ok(p))
     {
         char rep[64];
@@ -213,6 +215,10 @@ extern "C" bool rocke_direct_dw_wgrad_wmma_reason(const rocke_direct_dw_wgrad_wm
         rocke_spec_set_reason(reason, cap, "degenerate geometry");
         return true;
     }
+    /* byte offsets are i32 and masked lanes use INT32_MAX, which is past the
+     * buffer only while the buffer is smaller than that. */
+    if(!rocke_wmma_fwd_tensor_bytes_ok(p, reason, cap))
+        return true;
     if(spec->wave_size != 32)
     {
         rocke_spec_set_reason(reason, cap, "the WMMA 16x16x32 lane maps are wave32");
@@ -240,6 +246,11 @@ extern "C" bool rocke_direct_dw_wgrad_wmma_reason(const rocke_direct_dw_wgrad_wm
         rocke_spec_set_reason(reason, cap, "target_blocks and ws_replicas must be >= 1");
         return true;
     }
+    if(rocke_dwg::wgrad_wmma_dest_bytes_over(4LL * spec->ws_replicas * p->groups * p->KH * p->KW,
+                                             "fp32 replicated scratch",
+                                             reason,
+                                             cap))
+        return true;
     const long long steps
         = (long long)(spec->rows / 2) * spec->tile_q / 4 * rocke_direct_dw_wgrad_wmma_tiles(spec);
     if(steps > ROCKE_DW_WGRAD_WMMA_MAX_STEPS)
@@ -278,19 +289,8 @@ extern "C" bool
         return false;
     if(rocke_direct_dw_wgrad_wmma_reason(spec, reason, reason_cap))
         return false;
-    if(target->wave_size != 32)
-    {
-        rocke_spec_set_reasonf(
-            reason, reason_cap, "wave32 kernel (got %s, wave%d)", arch, target->wave_size);
+    if(!rocke_dwg::wgrad_wmma_wave_shape_ok(target, arch, problem_is_bf16(p), reason, reason_cap))
         return false;
-    }
-    const char* ab = problem_is_bf16(p) ? "bf16" : "f16";
-    if(!rocke_mma_catalog_has_shape(
-           rocke_archtarget_mma(target), "wmma", ab, ab, "fp32", 16, 16, ROCKE_FWD_WMMA_K))
-    {
-        rocke_spec_set_reasonf(reason, reason_cap, "missing wmma 16x16x32 %s on %s", ab, arch);
-        return false;
-    }
     const int threads = rocke_direct_dw_wgrad_wmma_threads_per_block(spec);
     if(threads > rocke_archtarget_max_threads_per_block(target))
     {
@@ -298,13 +298,9 @@ extern "C" bool
             reason, reason_cap, "%d threads > hardware cap on %s", threads, arch);
         return false;
     }
-    const long lds = rocke_direct_dw_wgrad_wmma_lds_bytes(spec);
-    if(lds > target->lds_capacity_bytes)
-    {
-        rocke_spec_set_reasonf(
-            reason, reason_cap, "LDS %ld B > %d on %s", lds, target->lds_capacity_bytes, arch);
+    if(rocke_dwg::wgrad_wmma_lds_over(
+           rocke_direct_dw_wgrad_wmma_lds_bytes(spec), target, arch, reason, reason_cap))
         return false;
-    }
     rocke_spec_set_reason(reason, reason_cap, "ok");
     return true;
 }
@@ -394,7 +390,7 @@ extern "C" rocke_kernel_def_t* rocke_build_direct_dw_wgrad_wmma(
     V c2 = e.ci(2);
     V c8 = e.ci(8);
     V c16 = e.ci(16);
-    V oob = e.ci((1 << 30) - 1); /* past every in-range byte offset */
+    V oob = e.ci(INT32_MAX); /* >= num_records: every masked lane reads 0 */
 
     V tid = rocke_b_thread_id_x(b);
     V c32 = e.ci(32);

@@ -47,11 +47,14 @@ from kernels.common.conv_direct_grouped import (
     _io_type,
     channel_totals_reason,
     dilation_reason,
+    problem_dims_reason,
     emit_direct_params,
     one_padding_reason,
 )
+from kernels.common.conv_fwd_wmma_gate import wmma_fwd_op
 from kernels.common.conv_direct_wgrad_wmma import (
     wgrad_wmma_arch_reason,
+    wgrad_wmma_dest_bytes_reason,
     wgrad_wmma_lds_reason,
 )
 
@@ -60,10 +63,6 @@ _TILE = 16  # channels per wave (WMMA M = N)
 _KSTEP = 32  # output columns per WMMA (WMMA K)
 _PAD_CH = 8  # LDS row padding (channels) against bank conflicts
 _DUMMY = 8  # elements past each buffer: the padding lanes' copy target
-# The kernel's LDS budget, not the arch capacity: the ceiling its knob grid
-# was tuned under (stages x one staged dY and X row). The arch's own capacity
-# (ArchTarget.lds_capacity_bytes) is checked as well.
-_LDS_BUDGET = 160 * 1024
 
 
 @dataclass(frozen=True)
@@ -156,12 +155,19 @@ def is_valid_grouped_wgrad_wmma_spec(spec: GroupedWgradWmmaSpec, arch: str = "gf
     why = dilation_reason(p)
     if why is not None:
         return False, why
+    why = problem_dims_reason(p)
+    if why is not None:
+        return False, why
     if p.cpg != p.kpg or p.cpg not in (4, 8):
         return False, "cpg = kpg in (4, 8)"
     if p.dtype not in ("fp16", "bf16"):
         return False, "fp16/bf16 only"
     if p.stride != 1:
         return False, "stride 1 only"
+    if p.Ho < 1 or p.Wo < 1:
+        return False, f"empty output {p.Ho}x{p.Wo}"
+    if p.PAD < 0:
+        return False, f"PAD >= 0 (got {p.PAD})"
     if p.PAD > p.KH - 1 or p.PAD > p.KW - 1:
         return False, "PAD <= K - 1"
     why = one_padding_reason(p)  # the kernel offsets columns by PAD
@@ -179,9 +185,12 @@ def is_valid_grouped_wgrad_wmma_spec(spec: GroupedWgradWmmaSpec, arch: str = "gf
         return False, "target_blocks >= 1"
     if spec.stages not in (2, 3, 4):
         return False, "stages in 2..4"
+    why = wgrad_wmma_dest_bytes_reason(spec.workspace_bytes(), "fp32 partial slots")
+    if why is not None:
+        return False, why
     why, target = wgrad_wmma_arch_reason(arch, p.dtype)
     if why is None:
-        why = wgrad_wmma_lds_reason(spec.lds_bytes(), _LDS_BUDGET, target, arch)
+        why = wgrad_wmma_lds_reason(spec.lds_bytes(), target, arch)
     if why is not None:
         return False, why
     return True, "ok"
@@ -205,6 +214,7 @@ def build_grouped_wgrad_wmma(
     PRE = KH - 1  # dY rows a unit needs before its first input row
     CH8 = BC // 8  # 16-byte chunks per staged pixel
     io_type = _io_type(p.dtype)
+    wmma_op = wmma_fwd_op(p.dtype, arch)
 
     b = IRBuilder(spec.kernel_name())
     b.kernel.attrs["max_workgroup_size"] = T
@@ -333,9 +343,7 @@ def build_grouped_wgrad_wmma(
         return b.vec_concat(lo, hi)
 
     def wmma(a: Value, bb: Value, acc: Value) -> Value:
-        if p.dtype == "bf16":
-            return b.wmma_gfx1250_f32_16x16x32_bf16(a, bb, acc)
-        return b.wmma_gfx1250_f32_16x16x32_f16(a, bb, acc)
+        return b.mma(wmma_op, a, bb, acc)
 
     zero_acc = b.zero_vec_f32(8)
     zero_frag = b.zero_vec(io_type, 16)

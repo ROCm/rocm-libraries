@@ -444,17 +444,23 @@ static void check_wmma_arch_gates(void)
     t.lds_capacity_bytes = 1024;
     why[0] = '\0';
     expect_refused("wmma_gate_lds_capacity",
-                   !rocke_dwg::wgrad_wmma_lds_over(2048, 4096, &t, "gfxX", why, sizeof why),
+                   !rocke_dwg::wgrad_wmma_lds_over(2048, &t, "gfxX", why, sizeof why),
                    why,
                    "LDS 2048 B > 1024 on gfxX");
-    why[0] = '\0';
-    expect_refused("wmma_gate_lds_budget",
-                   !rocke_dwg::wgrad_wmma_lds_over(8192, 4096, &t, "gfxX", why, sizeof why),
-                   why,
-                   "LDS 8192 B > 4 KiB");
-    if(rocke_dwg::wgrad_wmma_lds_over(1024, 4096, &t, "gfxX", why, sizeof why))
+    if(rocke_dwg::wgrad_wmma_lds_over(1024, &t, "gfxX", why, sizeof why))
     {
         fprintf(stderr, "FAIL wmma_gate_lds_fits: refused (%s)\n", why);
+        ++g_failures;
+    }
+    why[0] = '\0';
+    expect_refused("wmma_gate_dest_bytes",
+                   !rocke_dwg::wgrad_wmma_dest_bytes_over(
+                       4295065600LL, "fp32 replicated scratch", why, sizeof why),
+                   why,
+                   "fp32 replicated scratch of 4295065600 B exceeds the 32-bit buffer size");
+    if(rocke_dwg::wgrad_wmma_dest_bytes_over(2147483647LL, "fp32 dW", why, sizeof why))
+    {
+        fprintf(stderr, "FAIL wmma_gate_dest_bytes_fits: refused (%s)\n", why);
         ++g_failures;
     }
 }

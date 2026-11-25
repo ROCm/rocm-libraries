@@ -2526,7 +2526,8 @@ def _wgrad_pp_spec(idx: int):
 # gfx1250 and gfx950, wide / shallow and narrow shapes, the defaults spelled
 # out (the original kernel name), a one-load unroll; then no unroll, no
 # slices, no cols, negative cols and a 2048-thread block (slices * cols past
-# 1024), which both engines must reject. Follows the 7 auto/pp configs.
+# 1024), which both engines must reject. Follows the 7 tiled wgrad
+# ping-pong configs.
 # ---------------------------------------------------------------------------
 _FOLD_KNOB_CFG_BASE = 371
 

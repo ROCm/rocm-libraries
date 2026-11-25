@@ -22,6 +22,7 @@
 #include "rocke/helper_rocke.helpers.spec.h" /* rocke_kernel_name_join */
 #include "rocke/instance_conv_direct_grouped_internal.h" /* rocke_dconv_emit_params */
 #include "rocke/instance_conv_direct_wgrad_internal.hpp"
+#include "rocke/instance_conv_fwd_wmma_gate_internal.h" /* rocke_wmma_fwd_op_id */
 
 using namespace rocke_dwg;
 
@@ -33,9 +34,6 @@ constexpr int kTile = 16; /* channels per wave (WMMA M = N) */
 constexpr int kKStep = 32; /* output columns per WMMA (WMMA K) */
 constexpr int kPadCh = 8; /* LDS row padding (channels) against bank conflicts */
 constexpr int kDummy = 8; /* elements past each buffer: the padding lanes' copy target */
-/* The kernel's LDS budget, not the arch capacity: the ceiling its knob grid
- * was tuned under. The arch's own capacity is checked as well. */
-constexpr long long kLdsBudget = 160 * 1024;
 
 const char* bf16_flag[1] = {"bf16"};
 
@@ -129,10 +127,12 @@ extern "C" long long
     return rocke_direct_conv_problem_total_k(&s->problem);
 }
 
-extern "C" long rocke_grouped_wgrad_wmma_workspace_bytes(const rocke_grouped_wgrad_wmma_spec_t* s)
+extern "C" long long
+    rocke_grouped_wgrad_wmma_workspace_bytes(const rocke_grouped_wgrad_wmma_spec_t* s)
 {
-    return (long)rocke_grouped_wgrad_wmma_n_partitions(s) * rocke_grouped_wgrad_wmma_fold_taps(s)
-           * rocke_direct_conv_problem_total_k(&s->problem) * 4;
+    return (long long)rocke_grouped_wgrad_wmma_n_partitions(s)
+           * rocke_grouped_wgrad_wmma_fold_taps(s) * rocke_direct_conv_problem_total_k(&s->problem)
+           * 4;
 }
 
 extern "C" void rocke_grouped_wgrad_wmma_launch_geometry(const rocke_grouped_wgrad_wmma_spec_t* s,
@@ -190,6 +190,8 @@ extern "C" bool rocke_grouped_wgrad_wmma_is_valid_spec(const rocke_grouped_wgrad
         rocke_spec_set_reason(reason, reason_cap, msg);
         return false;
     }
+    if(rocke_direct_problem_dims_reason(p, reason, reason_cap))
+        return false;
     const char* why = NULL;
     if(p->cpg != p->kpg || (p->cpg != 4 && p->cpg != 8))
     {
@@ -202,6 +204,20 @@ extern "C" bool rocke_grouped_wgrad_wmma_is_valid_spec(const rocke_grouped_wgrad
     else if(p->stride != 1)
     {
         why = "stride 1 only";
+    }
+    else if(rocke_direct_conv_problem_Ho(p) < 1 || rocke_direct_conv_problem_Wo(p) < 1)
+    {
+        snprintf(msg,
+                 sizeof msg,
+                 "empty output %lldx%lld",
+                 (long long)rocke_direct_conv_problem_Ho(p),
+                 (long long)rocke_direct_conv_problem_Wo(p));
+        why = msg;
+    }
+    else if(p->PAD < 0)
+    {
+        snprintf(msg, sizeof msg, "PAD >= 0 (got %d)", p->PAD);
+        why = msg;
     }
     else if(p->PAD > p->KH - 1 || p->PAD > p->KW - 1)
     {
@@ -240,12 +256,14 @@ extern "C" bool rocke_grouped_wgrad_wmma_is_valid_spec(const rocke_grouped_wgrad
         rocke_spec_set_reason(reason, reason_cap, why);
         return false;
     }
+    if(wgrad_wmma_dest_bytes_over(
+           rocke_grouped_wgrad_wmma_workspace_bytes(s), "fp32 partial slots", reason, reason_cap))
+        return false;
     const rocke_archtarget_t* target
         = wgrad_wmma_arch_target(arch, problem_is_bf16(p), reason, reason_cap);
     if(target == NULL)
         return false;
-    if(wgrad_wmma_lds_over(
-           rocke_grouped_wgrad_wmma_lds_bytes(s), kLdsBudget, target, arch, reason, reason_cap))
+    if(wgrad_wmma_lds_over(rocke_grouped_wgrad_wmma_lds_bytes(s), target, arch, reason, reason_cap))
         return false;
     rocke_spec_set_reason(reason, reason_cap, "ok");
     return true;
@@ -293,7 +311,9 @@ rocke_kernel_def_t* build_grouped(rocke_ir_builder_t* b,
     const int CH8 = BC / 8; /* 16-byte chunks per staged pixel */
     const bool bf16 = problem_is_bf16(&p);
     const rocke_type_t* io_type = bf16 ? rocke_bf16() : rocke_f16();
-    const char* wmma_op = bf16 ? "wmma_gfx1250_f32_16x16x32_bf16" : "wmma_gfx1250_f32_16x16x32_f16";
+    const char* wmma_op = rocke_wmma_fwd_op_id(b, p.dtype, arch, "build_grouped_wgrad_wmma");
+    if(wmma_op == NULL)
+        return NULL;
 
     rocke_attr_set_int(b, &b->kernel->attrs, "max_workgroup_size", T);
     rocke_attr_set_bool(b, &b->kernel->attrs, "lds_alias_scopes", true);

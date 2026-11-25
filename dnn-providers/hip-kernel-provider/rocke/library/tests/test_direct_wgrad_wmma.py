@@ -73,14 +73,26 @@ class TestWgradWmmaSpec(unittest.TestCase):
             (dict(groups=2), {}, "groups == 1 only"),
             (dict(dtype="fp32"), {}, "fp16/bf16 only"),
             (dict(stride=2), {}, "stride 1 only"),
+            (dict(PAD=-1, H=12, W=40), dict(tdm=True), "PAD >= 0 (got -1)"),
             (dict(PAD=3), {}, "PAD <= K - 1"),
             (dict(KH=1, KW=3), {}, "PAD <= K - 1"),
+            (dict(C=8192, K=8192), {}, "fp32 dW of 2415919104 B exceeds the 32-bit"),
             (dict(KH=3, KW=1), {}, "PAD <= K - 1"),
             # The kernel offsets columns by PAD: a different column padding
             # is refused.
             (dict(pad_w=0), {}, "one padding for both axes (got PAD=1x0)"),
             (dict(C=36), {}, "multiples of 8"),
             ({}, dict(waves_k=3, waves_c=1), "2, 4, 8 or 16 waves"),
+            ({}, dict(waves_k=-1, waves_c=-2), "waves_k and waves_c >= 1"),
+            ({}, dict(waves_k=0, waves_c=4), "waves_k and waves_c >= 1"),
+            ({}, dict(waves_k=4, waves_c=0), "waves_k and waves_c >= 1"),
+            # Both rules hit: the dW-size rule comes first (the C++ engine
+            # runs the same order).
+            (
+                dict(C=8192, K=8192),
+                dict(waves_k=0),
+                "fp32 dW of 2415919104 B exceeds the 32-bit",
+            ),
             ({}, dict(tiles_k=3), "tiles_k / tiles_c"),
             ({}, dict(q_steps=3), "q_steps in (1, 2)"),
             ({}, dict(waves_k=2, waves_c=2, rows=3, tdm=True), "spread evenly"),
@@ -90,7 +102,8 @@ class TestWgradWmmaSpec(unittest.TestCase):
             ({}, dict(stages=9), "stages in 2..8"),
             ({}, dict(target_blocks=0), "target_blocks >= 1"),
             ({}, dict(tiles_k=4, tiles_c=4), "VGPRs"),
-            ({}, dict(waves_k=4, waves_c=4, rows=4, stages=8), "300 KiB"),
+            # Past the arch's LDS capacity (gfx1250: 320 KiB).
+            ({}, dict(waves_k=4, waves_c=4, rows=4, stages=8), "B > 327680 on gfx1250"),
         )
         for pkw, knobs, needle in cases:
             with self.subTest(pkw=pkw, knobs=knobs):
@@ -240,12 +253,17 @@ class TestWgradWmmaEngines(unittest.TestCase):
             (dict(dtype="fp32"), {}),
             (dict(stride=2), {}),
             (dict(PAD=3), {}),
+            (dict(PAD=-1, H=12, W=40), dict(tdm=True)),
+            (dict(C=8192, K=8192), {}),
+            ({}, dict(waves_k=-1, waves_c=-2)),
             (dict(KH=3, KW=1), {}),
             (dict(pad_w=0), {}),
             (dict(C=36), {}),
             (dict(K=12), {}),
             ({}, dict(waves_k=3, waves_c=1)),
             ({}, dict(waves_k=0)),
+            ({}, dict(waves_k=4, waves_c=0)),
+            (dict(C=8192, K=8192), dict(waves_k=0)),
             ({}, dict(tiles_c=0)),
             ({}, dict(q_steps=0)),
             ({}, dict(waves_k=2, waves_c=2, rows=3, tdm=True)),
@@ -343,3 +361,18 @@ class TestWgradWmmaEngines(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+@pytest.mark.parametrize(
+    "kw, why",
+    [
+        (dict(C=0, K=0), "cpg must be >= 1"),
+        (dict(N=0), "N must be >= 1"),
+        (dict(W=2, PAD=0), "empty output"),
+        (dict(H=2, PAD=0), "empty output"),
+    ],
+)
+def test_refuses_empty_problems(kw, why):
+    spec = DirectWgradWmmaSpec(problem=_problem(**kw))
+    ok, got = is_valid_direct_wgrad_wmma_spec(spec, "gfx1250")
+    assert not ok and why in got

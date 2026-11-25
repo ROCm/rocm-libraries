@@ -83,6 +83,37 @@ def test_direct_parse_keeps_flags_before_mode():
     assert (problem.KH, problem.KW, problem.PAD, problem.stride) == (3, 3, 1, 1)
 
 
+def test_direct_explicit_directions_override_a_zero_forw():
+    """``--run-from-cache --directions wgrad`` with ``-F 0`` still lists the
+    case (under the requested direction); without the override it has none."""
+    from benchmarks.common.benchmark_direct_conv import (
+        _case_direction,
+        parse_miopen_cmd_direct,
+    )
+
+    cmd = "MIOpenDriver convfp16 " + _FLAGS.format(g=64, f=0)
+    _, _, forw = parse_miopen_cmd_direct(cmd, ("wgrad",))
+    assert forw == 0
+    assert _case_direction(forw, None) is None
+    assert _case_direction(forw, ()) is None
+    assert _case_direction(forw, ("wgrad", "fwd")) == "wgrad"
+    assert _case_direction(1, None) == "fwd"
+
+
+def test_direct_run_directions_helper():
+    """One rule for the run directions: the requested ones, else the -F one,
+    else none (the dilation check and both main() branches read it)."""
+    from benchmarks.common.benchmark_direct_conv import _run_directions
+
+    assert _run_directions(0, None) == ()
+    assert _run_directions(0, ()) == ()
+    assert _run_directions(0, ("wgrad",)) == ("wgrad",)
+    assert _run_directions(1, ("wgrad", "fwd")) == ("wgrad", "fwd")
+    assert _run_directions(1, None) == ("fwd",)
+    assert _run_directions(2, None) == ("dgrad",)
+    assert _run_directions(4, []) == ("wgrad",)
+
+
 @pytest.mark.parametrize("kw", ["conv", "convfp32"])
 def test_direct_parse_reads_fp32_from_its_own_keyword(kw):
     from benchmarks.common.benchmark_direct_conv import parse_miopen_cmd_direct
@@ -149,6 +180,45 @@ def test_direct_parse_refuses_column_padding_for_strided_depthwise_wgrad():
 
     with pytest.raises(ValueError, match="one padding for both axes"):
         parse_miopen_cmd_direct(_DW_1X31.format(u=2, f=4))
+
+
+def test_direct_parse_padding_gate_follows_requested_directions():
+    """--run-from-cache --directions overrides -F, so the per-axis padding
+    gate checks the directions that will run, not the -F one."""
+    from benchmarks.common.benchmark_direct_conv import parse_miopen_cmd_direct
+
+    # -F 1 (fwd) alone refuses the depthwise 1x31 column padding at stride 1 ...
+    with pytest.raises(ValueError, match="one padding for both axes"):
+        parse_miopen_cmd_direct(_DW_1X31.format(u=1, f=1))
+    # ... a wgrad run of the same command keeps it,
+    problem, _, _ = parse_miopen_cmd_direct(_DW_1X31.format(u=1, f=1), ("wgrad",))
+    assert problem.pad_w == 15
+    # and a -F 4 command that is also asked for fwd is refused again.
+    with pytest.raises(ValueError, match="one padding for both axes"):
+        parse_miopen_cmd_direct(_DW_1X31.format(u=1, f=4), ("wgrad", "fwd"))
+    # The default (no directions) is unchanged.
+    assert parse_miopen_cmd_direct(_DW_1X31.format(u=1, f=4))[0].pad_w == 15
+
+
+_DILATED = (
+    "MIOpenDriver convfp16 -n 2 -c 64 -H 20 -W 20 -k 64 -y 3 -x 3 "
+    "-p 2 -q 2 -u 1 -v 1 -l 2 -j 2 -g 1 -F {f}"
+)
+
+
+def test_direct_parse_dilation_gate_follows_requested_directions():
+    """--run-from-cache --directions overrides -F, so the dilation gate
+    checks the directions that will run, not the -F one."""
+    from benchmarks.common.benchmark_direct_conv import parse_miopen_cmd_direct
+
+    # -F 1 (fwd) is fine, but a wgrad run of the same command is refused,
+    parse_miopen_cmd_direct(_DILATED.format(f=1))
+    with pytest.raises(ValueError, match="dilated convolution only"):
+        parse_miopen_cmd_direct(_DILATED.format(f=1), ("wgrad",))
+    # and a -F 4 command that is asked for fwd only parses.
+    with pytest.raises(ValueError, match="dilated convolution only"):
+        parse_miopen_cmd_direct(_DILATED.format(f=4))
+    parse_miopen_cmd_direct(_DILATED.format(f=4), ("fwd",))
 
 
 def test_per_axis_pad_variants_name_every_per_axis_variant():

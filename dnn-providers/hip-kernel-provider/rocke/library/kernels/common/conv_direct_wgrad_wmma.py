@@ -50,11 +50,14 @@ from rocke.helpers.spec import ceil_div
 
 from kernels.common.conv_direct_grouped import (
     DirectConvProblem,
+    I32_MAX,
     _io_type,
     dilation_reason,
+    problem_dims_reason,
     emit_direct_params,
     one_padding_reason,
 )
+from kernels.common.conv_fwd_wmma_gate import wmma_ab_dtype, wmma_fwd_op
 
 _WAVE = 32
 _TILE = 16  # WMMA M = N
@@ -62,10 +65,6 @@ _KSTEP = 32  # output columns per WMMA (WMMA K)
 _PAD_CH = 8  # LDS row padding (channels) against bank conflicts
 _DUMMY = 8  # elements past each buffer: the padding lanes' copy target
 _VGPR_BUDGET = 480  # accumulators + fragments a wave may hold (512-VGPR file)
-# The kernel's LDS budget, not the arch capacity: the ceiling its knob grid
-# was tuned under (stages x rows of staged dY and X rows). The arch's own
-# capacity (ArchTarget.lds_capacity_bytes) is checked as well.
-_LDS_BUDGET = 300 * 1024
 
 
 @dataclass(frozen=True)
@@ -177,6 +176,20 @@ class DirectWgradWmmaSpec:
         return self.stages * self.rows * (per_stage + dummies) * 2
 
 
+def wgrad_wmma_wave_shape_reason(target, arch: str, dtype: str) -> str | None:
+    """Why ``target`` (the ArchTarget of ``arch``) lacks what every WMMA wgrad
+    kernel needs (None when it has it): wave32 and the WMMA 16x16x32 shape of
+    ``dtype``. The depthwise kernel stops here; it needs no TDM."""
+    if target.wave_size != _WAVE:
+        return f"wave32 kernel (got {arch}, wave{target.wave_size})"
+    ab = wmma_ab_dtype(dtype)
+    if not target.mma.has_shape(
+        family="wmma", a_dtype=ab, b_dtype=ab, c_dtype="fp32", m=16, n=16, k=_KSTEP
+    ):
+        return f"missing wmma 16x16x32 {ab} on {arch}"
+    return None
+
+
 def wgrad_wmma_arch_reason(arch: str, dtype: str):
     """Why the dense and grouped WMMA wgrad kernels cannot run on ``arch``
     (None when they can), from its ArchTarget capabilities: wave32, the WMMA
@@ -190,23 +203,26 @@ def wgrad_wmma_arch_reason(arch: str, dtype: str):
         target = ArchTarget.from_gfx(arch)
     except KeyError as e:
         return str(e), None
-    if target.wave_size != _WAVE:
-        return f"wave32 kernel (got {arch}, wave{target.wave_size})", target
-    ab = "bf16" if dtype == "bf16" else "f16"
-    if not target.mma.has_shape(
-        family="wmma", a_dtype=ab, b_dtype=ab, c_dtype="fp32", m=16, n=16, k=_KSTEP
-    ):
-        return f"missing wmma 16x16x32 {ab} on {arch}", target
+    why = wgrad_wmma_wave_shape_reason(target, arch, dtype)
+    if why is not None:
+        return why, target
     if not target.memory.has_tdm:
         return f"no TDM (nor ds_load_tr16_b128) on {arch}", target
     return None, target
 
 
-def wgrad_wmma_lds_reason(lds: int, budget: int, target, arch: str) -> str | None:
-    """Why ``lds`` bytes of staging do not fit: over the kernel's ``budget``
-    or over the arch's LDS capacity (None when they fit)."""
-    if lds > budget:
-        return f"LDS {lds} B > {budget // 1024} KiB"
+def wgrad_wmma_dest_bytes_reason(nbytes: int, what: str) -> str | None:
+    """Why the fp32 destination (``what``, ``nbytes`` bytes) cannot be
+    addressed: the kernels keep it behind a 32-bit buffer descriptor and
+    ``D_bytes`` kernarg, so a larger one wraps its byte offsets."""
+    if nbytes > I32_MAX:
+        return f"{what} of {nbytes} B exceeds the 32-bit buffer size"
+    return None
+
+
+def wgrad_wmma_lds_reason(lds: int, target, arch: str) -> str | None:
+    """Why ``lds`` bytes of staging do not fit the arch's LDS capacity (None
+    when they fit). Tuning ceilings belong to the AOT grid, not here."""
     if lds > target.lds_capacity_bytes:
         return f"LDS {lds} B > {target.lds_capacity_bytes} on {arch}"
     return None
@@ -215,6 +231,9 @@ def wgrad_wmma_lds_reason(lds: int, budget: int, target, arch: str) -> str | Non
 def is_valid_direct_wgrad_wmma_spec(spec: DirectWgradWmmaSpec, arch: str = "gfx1250"):
     p = spec.problem
     why = dilation_reason(p)
+    if why is not None:
+        return False, why
+    why = problem_dims_reason(p)
     if why is not None:
         return False, why
     why, target = wgrad_wmma_arch_reason(arch, p.dtype)
@@ -226,6 +245,10 @@ def is_valid_direct_wgrad_wmma_spec(spec: DirectWgradWmmaSpec, arch: str = "gfx1
         return False, "fp16/bf16 only"
     if p.stride != 1:
         return False, "stride 1 only"
+    if p.Ho < 1 or p.Wo < 1:
+        return False, f"empty output {p.Ho}x{p.Wo}"
+    if p.PAD < 0:
+        return False, f"PAD >= 0 (got {p.PAD})"
     if p.PAD > p.KH - 1 or p.PAD > p.KW - 1:
         return False, "PAD <= K - 1"
     why = one_padding_reason(p)  # the kernel offsets columns by PAD
@@ -233,6 +256,13 @@ def is_valid_direct_wgrad_wmma_spec(spec: DirectWgradWmmaSpec, arch: str = "gfx1
         return False, why
     if p.total_c % 8 or p.total_k % 8:
         return False, "C and K must be multiples of 8 (16-byte chunks)"
+    why = wgrad_wmma_dest_bytes_reason(
+        4 * p.total_k * p.KH * p.KW * p.total_c, "fp32 dW"
+    )
+    if why is not None:
+        return False, why
+    if spec.waves_k < 1 or spec.waves_c < 1:
+        return False, "waves_k and waves_c >= 1"
     if spec.waves_k * spec.waves_c not in (2, 4, 8, 16):
         return False, "2, 4, 8 or 16 waves"
     if spec.tiles_k not in (1, 2, 4) or spec.tiles_c not in (1, 2, 4):
@@ -254,7 +284,7 @@ def is_valid_direct_wgrad_wmma_spec(spec: DirectWgradWmmaSpec, arch: str = "gfx1
         return False, "target_blocks >= 1"
     if spec.vgprs() > _VGPR_BUDGET:
         return False, f"~{spec.vgprs()} VGPRs of accumulators and fragments"
-    why = wgrad_wmma_lds_reason(spec.lds_bytes(), _LDS_BUDGET, target, arch)
+    why = wgrad_wmma_lds_reason(spec.lds_bytes(), target, arch)
     if why is not None:
         return False, why
     return True, "ok"
@@ -278,6 +308,7 @@ def build_direct_wgrad_wmma(
     NS = D * G  # row slots: slot d * G + g holds row g of stage d
     PRE = KH - 1  # ring steps before a unit's first input row
     io_type = _io_type(p.dtype)
+    wmma_op = wmma_fwd_op(p.dtype, arch)
     b = IRBuilder(spec.kernel_name())
     b.kernel.attrs["max_workgroup_size"] = T
     b.kernel.attrs["lds_alias_scopes"] = True
@@ -541,11 +572,7 @@ def build_direct_wgrad_wmma(
         return b.vec_concat(lo, hi)
 
     def wmma(a: Value, bb: Value, acc: Value) -> Value:
-        if p.dtype == "bf16":
-            op = "wmma_gfx1250_f32_16x16x32_bf16"
-        else:
-            op = "wmma_gfx1250_f32_16x16x32_f16"
-        return b.mma(op, a, bb, acc)
+        return b.mma(wmma_op, a, bb, acc)
 
     def acc_i(r, s, tk, tc):
         return ((r * KW + s) * TK + tk) * TC + tc

@@ -173,7 +173,8 @@ static int make_4c_bf16_cfg(int idx, rocke_direct_conv_4c_spec_t* s4, const char
 #define WGRAD_STEM_CFG_BASE 356
 #define WGRAD_AUTO_CFG_BASE 359
 #define WGRAD_PP_CFG_BASE 364
-/* DwWgradFoldSpec block shapes (cols / slices / unroll) follow the 7 auto/pp configs. */
+/* DwWgradFoldSpec block shapes (cols / slices / unroll) follow the 7 tiled
+ * wgrad ping-pong configs. */
 #define FOLD_KNOB_CFG_BASE 371
 
 /* Problem helper mirroring prob() in the Python _dw_wgrad_spec: N=2, H=9,

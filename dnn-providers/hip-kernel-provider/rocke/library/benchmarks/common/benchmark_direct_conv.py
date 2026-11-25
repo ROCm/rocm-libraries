@@ -175,11 +175,14 @@ _MIOPEN_DTYPE_MAP = {
 }
 
 
-def parse_miopen_cmd_direct(cmd: str):
+def parse_miopen_cmd_direct(cmd: str, directions: "tuple[str, ...] | None" = None):
     """Parse a MIOpenDriver command string into a ``DirectConvProblem``.
 
     Supports 2-D NHWC forward (F=1), dgrad (F=2) and wgrad (F=4) convolutions.
     Raises ``ValueError`` for unsupported cases (int8, 3-D, NCHW).
+    ``directions`` are the directions a run will actually launch (``--run-from-cache
+    --directions`` overrides the ``-F`` one); the dilation and per-axis padding
+    gates below apply to each of them. The default is the ``-F`` direction.
     Returns ``(problem, dtype, forw)`` where ``dtype`` is ``"fp16"``, ``"bf16"``,
     ``"fp32"`` or ``"tf32"`` and ``forw`` is the raw MIOpen ``-F`` value. The
     plain fp32 driver (``conv``/``convfp32``) is ``"fp32"``, or ``"tf32"`` with
@@ -295,7 +298,12 @@ def parse_miopen_cmd_direct(cmd: str):
     # Dilated: direct_nongrouped, direct_fwd_wmma, direct_fwd_tapouter_wmma
     # (forward) and direct_dgrad_wmma compute one; this benchmark takes
     # ungrouped forward and dgrad problems.
-    if dilated and (miopen_args.forw not in (1, 2) or groups != 1):
+    run_dirs = _run_directions(miopen_args.forw, directions)
+    if dilated and (
+        any(d not in ("fwd", "dgrad") for d in run_dirs)
+        or (not directions and miopen_args.forw not in (1, 2))
+        or groups != 1
+    ):
         raise ValueError(
             f"the direct conv benchmark runs a dilated convolution only forward / "
             f"dgrad and ungrouped (got -l {miopen_args.dH} -j {miopen_args.dW}, "
@@ -322,8 +330,7 @@ def parse_miopen_cmd_direct(cmd: str):
     # padding for both axes.
     from kernels.conv.direct_variants import per_axis_pad_variants
 
-    direction = _miopen_forw_to_direction(miopen_args.forw)
-    pad_w_ok = direction is not None and bool(
+    pad_w_ok = bool(run_dirs) and all(
         per_axis_pad_variants(
             direction,
             groups=groups,
@@ -336,6 +343,7 @@ def parse_miopen_cmd_direct(cmd: str):
             dil_w=miopen_args.dW,
             one_d=one_d,
         )
+        for direction in run_dirs
     )
     if miopen_args.pH != miopen_args.pW and not pad_w_ok:
         raise ValueError(
@@ -2974,6 +2982,23 @@ def _miopen_forw_to_direction(forw: int) -> "str | None":
     return _FORW_TO_DIR.get(forw & 7)
 
 
+def _run_directions(forw: int, req_dirs) -> "tuple[str, ...]":
+    """The directions a parsed MIOpen case runs: every explicitly requested
+    ``--directions`` entry (``_run_from_cache`` launches each whatever ``-F``
+    says), else the ``-F`` mapping, else none."""
+    if req_dirs:
+        return tuple(req_dirs)
+    d = _miopen_forw_to_direction(forw)
+    return () if d is None else (d,)
+
+
+def _case_direction(forw: int, req_dirs) -> "str | None":
+    """The direction a parsed MIOpen case is listed under: the first of
+    ``_run_directions``, or None when ``-F`` maps to none."""
+    dirs = _run_directions(forw, req_dirs)
+    return dirs[0] if dirs else None
+
+
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
@@ -3304,6 +3329,13 @@ def main() -> int:
 
     from kernels.common.conv_direct_grouped import DirectConvProblem
 
+    # --run-from-cache --directions launches those directions whatever -F says.
+    try:
+        req_dirs = _cache_directions(args) if args.run_from_cache else None
+    except ValueError as e:
+        print(f"error: --directions: {e}", file=sys.stderr)
+        return 2
+
     # Build list of (problem, dtype) cases.
     cases: list  # List[Tuple[DirectConvProblem, str]]
     if args.miopen_file is not None:
@@ -3315,8 +3347,8 @@ def main() -> int:
             if not line or line.startswith("#"):
                 continue
             try:
-                prob, dt, forw = parse_miopen_cmd_direct(line)
-                direction = _miopen_forw_to_direction(forw)
+                prob, dt, forw = parse_miopen_cmd_direct(line, req_dirs)
+                direction = _case_direction(forw, req_dirs)
                 if direction is None:
                     print(
                         f"[skip] {path}:{lineno}: -F={forw} maps to no supported direction",
@@ -3331,11 +3363,11 @@ def main() -> int:
             return 2
     elif args.miopen_cmd is not None:
         try:
-            prob, dt, forw = parse_miopen_cmd_direct(args.miopen_cmd)
+            prob, dt, forw = parse_miopen_cmd_direct(args.miopen_cmd, req_dirs)
         except ValueError as e:
             print(f"error: --miopen-cmd: {e}", file=sys.stderr)
             return 2
-        direction = _miopen_forw_to_direction(forw)
+        direction = _case_direction(forw, req_dirs)
         if direction is None:
             print(
                 f"error: --miopen-cmd: -F={forw} maps to no supported direction "

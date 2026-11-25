@@ -37,7 +37,7 @@
 #  22  rejected by both engines: dilation 2x2
 #  23  rejected by both engines: PAD 3 on a 3x3 filter
 #  24  rejected by both engines: C 36 (not a multiple of 8)
-#  25  rejected by both engines: LDS past 300 KiB (16 waves, rows 4, 8 stages)
+#  25  rejected by both engines: LDS past capacity (16 waves, rows 4, 8 stages)
 #  26  rejected by both engines: PAD 1 with column padding 0 (one padding only)
 #  27  rejected by both engines: 3x1 filter with PAD 1 (PAD > KW - 1)
 from dataclasses import replace

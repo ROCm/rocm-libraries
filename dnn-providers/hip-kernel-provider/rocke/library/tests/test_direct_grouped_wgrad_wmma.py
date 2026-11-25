@@ -102,6 +102,7 @@ _REJECTED = (
     (dict(kpg=8), {}, "cpg = kpg in (4, 8)"),
     (dict(dtype="fp32"), {}, "fp16/bf16 only"),
     (dict(stride=2), {}, "stride 1 only"),
+    (dict(PAD=-1), {}, "PAD >= 0 (got -1)"),
     (dict(PAD=3), {}, "PAD <= K - 1"),
     (dict(KW=1, PAD=1), {}, "PAD <= K - 1"),
     (dict(KH=1, KW=3, PAD=1), {}, "PAD <= K - 1"),
@@ -110,6 +111,12 @@ _REJECTED = (
     (dict(C=24), {}, "C must be a multiple of 16 (whole packed tiles)"),
     (dict(dil=2), {}, "this direct conv kernel has no dilation (got 2x2)"),
     (dict(C=8 * 2**28), {}, "must fit in i32"),  # groups * cpg past i32
+    # The partial slots (fp32) past the 32-bit buffer size.
+    (
+        dict(N=64, H=32, W=32, cpg=8, C=16384),
+        dict(rows_per_chunk=1, target_blocks=1048576),
+        "fp32 partial slots of 9663676416 B exceeds the 32-bit buffer size",
+    ),
     ({}, dict(waves_c=3), "waves_c in (1, 2, 4, 8)"),
     ({}, dict(waves_c=0), "waves_c in (1, 2, 4, 8)"),
     ({}, dict(q_steps=0), "q_steps in 1..4"),
@@ -118,7 +125,6 @@ _REJECTED = (
     ({}, dict(target_blocks=0), "target_blocks >= 1"),
     ({}, dict(stages=1), "stages in 2..4"),
     ({}, dict(stages=5), "stages in 2..4"),
-    ({}, dict(waves_c=8, q_steps=4, stages=4), "B > 160 KiB"),  # LDS
 )
 
 
@@ -143,8 +149,8 @@ def test_rejects(pkw, knobs, reason):
 
 def test_arch_gate_reads_capabilities():
     """The arch gate reads ArchTarget capabilities (wave32, WMMA 16x16x32;
-    TDM in the next test), not the arch name; the LDS check takes the smaller
-    of the kernel's budget and the arch's capacity."""
+    TDM in the next test), not the arch name; the LDS check is the arch's
+    capacity alone."""
     from types import SimpleNamespace
 
     from kernels.common.conv_direct_wgrad_wmma import wgrad_wmma_lds_reason
@@ -156,11 +162,8 @@ def test_arch_gate_reads_capabilities():
     assert why == "missing wmma 16x16x32 bf16 on gfx1201"
     assert "gfx0" in is_valid_grouped_wgrad_wmma_spec(spec, "gfx0")[1]
     small = SimpleNamespace(lds_capacity_bytes=1024)
-    assert (
-        wgrad_wmma_lds_reason(2048, 4096, small, "gfxX") == "LDS 2048 B > 1024 on gfxX"
-    )
-    assert wgrad_wmma_lds_reason(8192, 4096, small, "gfxX") == "LDS 8192 B > 4 KiB"
-    assert wgrad_wmma_lds_reason(1024, 4096, small, "gfxX") is None
+    assert wgrad_wmma_lds_reason(2048, small, "gfxX") == "LDS 2048 B > 1024 on gfxX"
+    assert wgrad_wmma_lds_reason(1024, small, "gfxX") is None
 
 
 def test_arch_gate_refuses_a_target_without_tdm(monkeypatch):
@@ -191,6 +194,16 @@ def test_arch_gate_refuses_a_target_without_tdm(monkeypatch):
 def test_one_padding_accepts_a_matching_column_padding():
     """An explicit column padding equal to PAD is the same problem."""
     spec = GroupedWgradWmmaSpec(problem=_problem(pad_w=1))
+    assert is_valid_grouped_wgrad_wmma_spec(spec, "gfx1250") == (True, "ok")
+
+
+def test_largest_lds_knobs_fit_gfx1250():
+    """The validator checks LDS against the arch's capacity only: the knobs'
+    largest footprint fits gfx1250's 320 KiB."""
+    from rocke.core.arch import ArchTarget
+
+    spec = GroupedWgradWmmaSpec(problem=_problem(), waves_c=8, q_steps=4, stages=4)
+    assert spec.lds_bytes() <= ArchTarget.from_gfx("gfx1250").lds_capacity_bytes
     assert is_valid_grouped_wgrad_wmma_spec(spec, "gfx1250") == (True, "ok")
 
 
@@ -379,3 +392,25 @@ def test_fold_accepts_1024_threads():
             True,
             "ok",
         )
+
+
+@pytest.mark.parametrize(
+    "kw, why",
+    [
+        (dict(cpg=0, C=0), "must be >= 1"),
+        (dict(N=0), "N must be >= 1"),
+        (dict(W=2, PAD=0), "empty output"),
+        (dict(H=2, PAD=0), "empty output"),
+    ],
+)
+def test_refuses_empty_problems(kw, why):
+    try:
+        prob = _problem(**kw)
+    except ZeroDivisionError:  # C // cpg with cpg=0
+        prob = DirectConvProblem(
+            N=2, H=19, W=45, groups=16, cpg=0, kpg=0, KH=3, KW=3, PAD=1, dtype="bf16"
+        )
+    ok, got = is_valid_grouped_wgrad_wmma_spec(
+        GroupedWgradWmmaSpec(problem=prob), "gfx1250"
+    )
+    assert not ok and why in got

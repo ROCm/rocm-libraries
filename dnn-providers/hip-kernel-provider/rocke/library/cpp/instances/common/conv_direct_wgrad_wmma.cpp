@@ -26,6 +26,7 @@
 #include "rocke/helper_rocke.helpers.spec.h" /* rocke_kernel_name_join, rocke_ceil_div */
 #include "rocke/instance_conv_direct_grouped_internal.h" /* rocke_dconv_emit_params */
 #include "rocke/instance_conv_direct_wgrad_internal.hpp" /* build_new, lower_to_llvm */
+#include "rocke/instance_conv_fwd_wmma_gate_internal.h" /* rocke_wmma_fwd_op_id */
 #include "rocke/ir_internal.h" /* rocke_i_set_err_msg */
 #include "rocke/lower_llvm.h"
 
@@ -36,9 +37,6 @@
 #define WGW_PAD_CH 8 /* default LDS row padding (channels) */
 #define WGW_DUMMY 8 /* elements past each buffer: the padding lanes' copy target */
 #define WGW_VGPR_BUDGET 480 /* accumulators + fragments a wave may hold */
-/* The kernel's LDS budget, not the arch capacity: the ceiling its knob grid
- * was tuned under. The arch's own capacity is checked as well. */
-#define WGW_LDS_BUDGET (300 * 1024)
 
 namespace
 {
@@ -252,7 +250,8 @@ bool rocke_direct_wgrad_wmma_is_valid_spec(const rocke_direct_wgrad_wmma_spec_t*
     if(arch == NULL)
         arch = "gfx1250";
     const rocke_direct_conv_problem_t* p = &spec->problem;
-    if(rocke_direct_dilation_reason(p, reason, reason_cap))
+    if(rocke_direct_dilation_reason(p, reason, reason_cap)
+       || rocke_direct_problem_dims_reason(p, reason, reason_cap))
         return false;
     const rocke_archtarget_t* target = rocke_dwg::wgrad_wmma_arch_target(
         arch, rocke_dwg::problem_is_bf16(p), reason, reason_cap);
@@ -273,6 +272,20 @@ bool rocke_direct_wgrad_wmma_is_valid_spec(const rocke_direct_wgrad_wmma_spec_t*
         rocke_spec_set_reason(reason, reason_cap, "stride 1 only");
         return false;
     }
+    if(rocke_direct_conv_problem_Ho(p) < 1 || rocke_direct_conv_problem_Wo(p) < 1)
+    {
+        rocke_spec_set_reasonf(reason,
+                               reason_cap,
+                               "empty output %lldx%lld",
+                               (long long)rocke_direct_conv_problem_Ho(p),
+                               (long long)rocke_direct_conv_problem_Wo(p));
+        return false;
+    }
+    if(p->PAD < 0)
+    {
+        rocke_spec_set_reasonf(reason, reason_cap, "PAD >= 0 (got %d)", p->PAD);
+        return false;
+    }
     if(p->PAD > p->KH - 1 || p->PAD > p->KW - 1)
     {
         rocke_spec_set_reason(reason, reason_cap, "PAD <= K - 1");
@@ -285,6 +298,17 @@ bool rocke_direct_wgrad_wmma_is_valid_spec(const rocke_direct_wgrad_wmma_spec_t*
     {
         rocke_spec_set_reason(
             reason, reason_cap, "C and K must be multiples of 8 (16-byte chunks)");
+        return false;
+    }
+    if(rocke_dwg::wgrad_wmma_dest_bytes_over(4LL * rocke_direct_conv_problem_total_k(p) * p->KH
+                                                 * p->KW * rocke_direct_conv_problem_total_c(p),
+                                             "fp32 dW",
+                                             reason,
+                                             reason_cap))
+        return false;
+    if(spec->waves_k < 1 || spec->waves_c < 1)
+    {
+        rocke_spec_set_reason(reason, reason_cap, "waves_k and waves_c >= 1");
         return false;
     }
     int nw = spec->waves_k * spec->waves_c;
@@ -344,12 +368,8 @@ bool rocke_direct_wgrad_wmma_is_valid_spec(const rocke_direct_wgrad_wmma_spec_t*
         rocke_spec_set_reason(reason, reason_cap, msg);
         return false;
     }
-    if(rocke_dwg::wgrad_wmma_lds_over(rocke_direct_wgrad_wmma_lds_bytes(spec),
-                                      WGW_LDS_BUDGET,
-                                      target,
-                                      arch,
-                                      reason,
-                                      reason_cap))
+    if(rocke_dwg::wgrad_wmma_lds_over(
+           rocke_direct_wgrad_wmma_lds_bytes(spec), target, arch, reason, reason_cap))
         return false;
     rocke_spec_set_reason(reason, reason_cap, "ok");
     return true;
@@ -1005,8 +1025,9 @@ rocke_kernel_def_t* rocke_build_direct_wgrad_wmma(rocke_ir_builder_t* b,
     c.io_type = rocke_b_io_ir_type(b, wgw_dtype(spec));
     if(c.io_type == NULL)
         return NULL;
-    c.wmma_op
-        = wgw_is_bf16(spec) ? "wmma_gfx1250_f32_16x16x32_bf16" : "wmma_gfx1250_f32_16x16x32_f16";
+    c.wmma_op = rocke_wmma_fwd_op_id(b, wgw_dtype(spec), arch, "build_direct_wgrad_wmma");
+    if(c.wmma_op == NULL)
+        return NULL;
 
     rocke_attr_set_int(b, &b->kernel->attrs, "max_workgroup_size", c.T);
     rocke_attr_set_bool(b, &b->kernel->attrs, "lds_alias_scopes", true);

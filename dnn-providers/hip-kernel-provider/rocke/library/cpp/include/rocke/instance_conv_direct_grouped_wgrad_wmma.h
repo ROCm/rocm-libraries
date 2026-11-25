@@ -74,7 +74,7 @@ int rocke_grouped_wgrad_wmma_n_partitions(const rocke_grouped_wgrad_wmma_spec_t*
 /* fold_taps() = KH * KW * cpg; fold_channels() = K. */
 int rocke_grouped_wgrad_wmma_fold_taps(const rocke_grouped_wgrad_wmma_spec_t* spec);
 long long rocke_grouped_wgrad_wmma_fold_channels(const rocke_grouped_wgrad_wmma_spec_t* spec);
-long rocke_grouped_wgrad_wmma_workspace_bytes(const rocke_grouped_wgrad_wmma_spec_t* spec);
+long long rocke_grouped_wgrad_wmma_workspace_bytes(const rocke_grouped_wgrad_wmma_spec_t* spec);
 void rocke_grouped_wgrad_wmma_launch_geometry(const rocke_grouped_wgrad_wmma_spec_t* spec,
                                               int grid[3],
                                               int block[3]);

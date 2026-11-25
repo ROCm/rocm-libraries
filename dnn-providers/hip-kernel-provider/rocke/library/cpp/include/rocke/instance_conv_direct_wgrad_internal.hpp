@@ -419,11 +419,10 @@ inline std::vector<std::string> iter_names(const char* prefix, size_t n)
     return out;
 }
 
-/* kernels.common.conv_direct_wgrad_wmma.wgrad_wmma_arch_reason on a known
- * target: true when the dense and grouped WMMA wgrad kernels run on it
- * (wave32, the WMMA 16x16x32 shape of the dtype, TDM, which marks the gfx1250
- * class that has ds_load_tr16_b128), else false with `reason` set. */
-inline bool wgrad_wmma_target_ok(
+/* kernels.common.conv_direct_wgrad_wmma.wgrad_wmma_wave_shape_reason: true
+ * when `target` is wave32 and has the WMMA 16x16x32 shape of the dtype, else
+ * false with `reason` set. The depthwise kernel stops here (no TDM). */
+inline bool wgrad_wmma_wave_shape_ok(
     const rocke_archtarget_t* target, const char* arch, bool bf16, char* reason, size_t reason_cap)
 {
     if(target->wave_size != 32)
@@ -439,6 +438,18 @@ inline bool wgrad_wmma_target_ok(
         rocke_spec_set_reasonf(reason, reason_cap, "missing wmma 16x16x32 %s on %s", ab, arch);
         return false;
     }
+    return true;
+}
+
+/* kernels.common.conv_direct_wgrad_wmma.wgrad_wmma_arch_reason on a known
+ * target: true when the dense and grouped WMMA wgrad kernels run on it
+ * (wgrad_wmma_wave_shape_ok and TDM, which marks the gfx1250 class that has
+ * ds_load_tr16_b128), else false with `reason` set. */
+inline bool wgrad_wmma_target_ok(
+    const rocke_archtarget_t* target, const char* arch, bool bf16, char* reason, size_t reason_cap)
+{
+    if(!wgrad_wmma_wave_shape_ok(target, arch, bf16, reason, reason_cap))
+        return false;
     if(!target->memory.has_tdm)
     {
         rocke_spec_set_reasonf(reason, reason_cap, "no TDM (nor ds_load_tr16_b128) on %s", arch);
@@ -462,24 +473,33 @@ inline const rocke_archtarget_t*
 }
 
 /* kernels.common.conv_direct_wgrad_wmma.wgrad_wmma_lds_reason: true (with
- * `reason` set) when `lds` bytes exceed the kernel's `budget` or the arch's
- * LDS capacity. */
+ * `reason` set) when `lds` bytes exceed the arch's LDS capacity. Tuning
+ * ceilings belong to the AOT grid, not here. */
 inline bool wgrad_wmma_lds_over(long long lds,
-                                long long budget,
                                 const rocke_archtarget_t* target,
                                 const char* arch,
                                 char* reason,
                                 size_t reason_cap)
 {
-    if(lds > budget)
-    {
-        rocke_spec_set_reasonf(reason, reason_cap, "LDS %lld B > %lld KiB", lds, budget / 1024);
-        return true;
-    }
     if(lds > target->lds_capacity_bytes)
     {
         rocke_spec_set_reasonf(
             reason, reason_cap, "LDS %lld B > %d on %s", lds, target->lds_capacity_bytes, arch);
+        return true;
+    }
+    return false;
+}
+
+/* kernels.common.conv_direct_wgrad_wmma.wgrad_wmma_dest_bytes_reason: true
+ * (with `reason` set) when the fp32 destination `what` of `nbytes` bytes
+ * exceeds the 32-bit buffer size (D_bytes kernarg, i32 byte offsets). */
+inline bool
+    wgrad_wmma_dest_bytes_over(long long nbytes, const char* what, char* reason, size_t reason_cap)
+{
+    if(nbytes > 2147483647LL)
+    {
+        rocke_spec_set_reasonf(
+            reason, reason_cap, "%s of %lld B exceeds the 32-bit buffer size", what, nbytes);
         return true;
     }
     return false;
