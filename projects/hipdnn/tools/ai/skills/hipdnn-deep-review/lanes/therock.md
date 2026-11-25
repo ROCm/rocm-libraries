@@ -22,7 +22,7 @@ git clone -q --filter=blob:none https://github.com/ROCm/TheRock "$T" && git -C "
 When the block stops, the lane returns `STOP: <reason>`. Later blocks begin with `. ./env.sh;
 T=$(cat "$SCRATCH/ROCK/T"); ROCK_REF=$(cat "$SCRATCH/ROCK/ref"); ROCK_REF_BASE=$(cat "$SCRATCH/ROCK/ref-base")` and set `PYTHONPATH` themselves.
 **Helper drift.** Every TheRock function or field this lane names is checked at the pin before use; a missing one makes the block print
-`HELPER-DRIFT: <fn> not found in TheRock $ROCK_REF` to stderr (a check that finds every name prints one line listing them), and the lane reports an IMPORTANT finding (kind `process`): "lanes/therock.md
+`HELPER-DRIFT: <fn> not found in TheRock $ROCK_REF` to stderr (only the tier drift check, **Tier**, prints a line listing every name when all resolve), and the lane reports an IMPORTANT finding (kind `process`): "lanes/therock.md
 names `<fn>`, which TheRock `<pin>` lacks; update the skill", naming any replacement it used.
 
 Each line the final `grep -v` leaves must check out another repository; a TheRock ref there is a finding. When `$ROCK_REF_BASE` differs from
@@ -92,12 +92,10 @@ python3 "$T/test_tools/determine_rocm_test_dependencies.py" --changed-projects "
   run (run-all, nightly). A change to exported CMake config, `*Config.cmake.in` or installed headers has no PR-CI install check: record
   that and name the run that covers it.
 - A new `dnn-providers/<dir>` without an `_EXTERNAL_SUBTREE_ALIASES` entry makes the resolver raise: a TheRock-side change (section 5).
-- On a dispatch, a `test:<job>` label matches one job key exactly: `test:hipdnn` runs no provider, integration, samples or install job.
+- A `test:<job>` label limits which test jobs run on a PR the same way it does for a dispatch (`TEST_LABEL_GROUPS` in `fetch_test_configurations.py` maps each label to its jobs): `test:hipdnn` runs no provider, integration, samples or install job.
 
 **Families.** Covered families = the caller's families ∩ families whose `tests_on_trigger` contains the current trigger − the job's
-`exclude_family`. The caller's families, and any per-family tier, come from rocm-libraries' `.github/workflows/therock-multi-arch-ci.yml`,
-which passes them into TheRock: read it with `git -C "$CLONE" show "$HEAD:.github/workflows/therock-multi-arch-ci.yml"`, and at `$BASE`
-too when the PR changes it. Triggers: `pull_request` → `presubmit`, `push` → `postsubmit`, `schedule` → `nightly`. `workflow_dispatch` tests
+`exclude_family`, after TheRock's `_apply_external_family_overrides` (`configure_multi_arch_ci.py`) merges in the caller workflow's per-family settings. The caller's families, and any per-family tier, come from rocm-libraries' `.github/workflows/therock-multi-arch-ci.yml`: the `$HEAD` version governs this PR's CI, so read it with `git -C "$CLONE" show "$HEAD:.github/workflows/therock-multi-arch-ci.yml"`; read `$BASE` too only to see what the PR changes. Triggers: `pull_request` → `presubmit`, `push` → `postsubmit`, `schedule` → `nightly`. `workflow_dispatch` tests
 every requested family (tier: see **Tier**). A family outside that set does not test unless a dispatch requests it or the PR carries
 the labels `ci:<family>` and `ci:test:<family>` (`$T/docs/development/ci_behavior_manipulation.md`). Quote the setup job's `tests
 disabled (...)` lines.
@@ -113,14 +111,14 @@ and reading the code identifies no replacement, the tier prediction is `UNVERIFI
 . ./env.sh; T=$(cat "$SCRATCH/ROCK/T"); ROCK_REF=$(cat "$SCRATCH/ROCK/ref"); G=$T/build_tools/github_actions
 ok=; miss=
 for fn in _determine_test_type:configure_multi_arch_ci.py test_type_for_family:amdgpu_family_matrix.py \
-    is_external_repo_ci_only_change:configure_ci_path_filters.py; do
+    is_external_repo_ci_only_change:configure_ci_path_filters.py _apply_external_family_overrides:configure_multi_arch_ci.py; do
   if "$GREP" -qw "${fn%%:*}" "$G/${fn#*:}" 2>/dev/null; then ok="$ok ${fn%%:*}"
   else miss=1; echo "HELPER-DRIFT: ${fn%%:*} not found in TheRock $ROCK_REF" >&2; fi
 done
 [ -n "$miss" ] || echo "Tier helpers found in TheRock $ROCK_REF:$ok"
 ```
 
-Once CI has run, first find which families' `Test` jobs ran (not skipped); a family's `Configure test matrix (<family>)` job log is
+Once CI has run, use the latest TheRock Multi-Arch CI run on the PR's head commit; first find which families' `Test` jobs ran (not skipped) — a family counts as testing only if its GPU `Test` jobs ran, since a CPU-only job on that family does not count; a family's `Configure test matrix (<family>)` job log is
 authoritative for the tier only for those, because configure jobs also run, and print a tier, for families whose tests are off. `test_runner.py` `build_ctest_command` runs `-L ^<tier>$` and excludes
 `<tier>_exclude` and `<tier>_therock_ci_exclude`. Tier labels come from each project's test category YAMLs (`*test_categories*.yaml`; registering a test in them is owned by `BUILD`: hand it off, do not file it)
 and cascade upward: a `quick` test also carries `standard`, `comprehensive` and `full`. hipDNN core puts every test in `quick`.

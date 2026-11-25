@@ -114,6 +114,7 @@ TIER_HELPERS = {
     "_determine_test_type": "configure_multi_arch_ci.py",
     "test_type_for_family": "amdgpu_family_matrix.py",
     "is_external_repo_ci_only_change": "configure_ci_path_filters.py",
+    "_apply_external_family_overrides": "configure_multi_arch_ci.py",
 }
 
 
@@ -159,6 +160,16 @@ def test_tier_drift_check_lists_every_helper_when_all_present(tmp_path):
 
 def test_tier_drift_check_reports_exactly_the_missing_helper(tmp_path):
     missing = "is_external_repo_ci_only_change"
+    helpers = {n: f for n, f in TIER_HELPERS.items() if n != missing}
+    r = _run_tier_drift(tmp_path, helpers)
+    drift = re.findall(
+        r"^HELPER-DRIFT: (\S+) not found in TheRock (\S+)$", r.stderr, re.M
+    )
+    assert drift == [(missing, FAKE_PIN)], r.stderr
+
+
+def test_tier_drift_check_reports_missing_family_override_helper(tmp_path):
+    missing = "_apply_external_family_overrides"
     helpers = {n: f for n, f in TIER_HELPERS.items() if n != missing}
     r = _run_tier_drift(tmp_path, helpers)
     drift = re.findall(
