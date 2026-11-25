@@ -1,0 +1,18 @@
+# Integration test configuration for hipkernel:hip_conv_fwd_bias_act_dw3d_rdna
+# Filters use GTest-style globs: * matches any sequence of characters
+
+[meta]
+version = 1
+
+# The engine serves conv_fprop -> [ADD(bias) ->] activation on the gfx11 and gfx12 RDNA targets:
+# the depthwise 3-D convolutions of hipkernel:hip_conv_fwd_dw3d_rdna, a bias of one value per
+# output channel in the data dtype, virtual intermediates, and the activations RELU_FWD (clips
+# and slope), SIGMOID_FWD, TANH_FWD, ELU_FWD, GELU_FWD, GELU_APPROX_TANH_FWD, SWISH_FWD,
+# SOFTPLUS_FWD and IDENTITY in fp32 compute. It declines anything else, and the harness skips a
+# declined case.
+#
+# No arch [[test_skips]] entry: the engine's pack ships only for RDNA targets, so another device
+# declines through the ordinary path (see hipkernel_hip_conv_fwd_fma_igemm_rdna.toml).
+#
+# No reference-gap skip for the bias-first 16-bit cases (`*_f25first_*`, see
+# MIOPEN_ENGINE.toml): they are all dense convolutions, which this engine declines.
