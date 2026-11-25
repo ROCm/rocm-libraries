@@ -1981,6 +1981,13 @@ _CONFIGS[121] = {**_CONFIGS[59], "use_i64_kv_addr": True}
 # cfg48 with one 64-token page per tile: the page base stays in soffset
 # without prefetching (grouped KV2 carries no page ids).
 _CONFIGS[122] = {**_CONFIGS[48], "block_size": 64}
+# cfg85 with V double buffered (K double buffered too): the mask-free first
+# phase still bounds V, since the body also loads the next tile's V.
+_CONFIGS[123] = {
+    **_CONFIGS[85],
+    "use_k_single_buffer": False,
+    "use_v_double_buffer": True,
+}
 
 
 def _spec(idx: int) -> UnifiedAttention2DTiledSpec:

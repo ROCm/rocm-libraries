@@ -2061,6 +2061,11 @@ static int make_spec(int idx, rocke_attention_tiled_2d_spec_t* s)
         make_spec(48, s);
         s->block_size = 64;
         break;
+    case 123: /* cfg85 with V double buffered: phase 1 still bounds V. */
+        make_spec(85, s);
+        s->use_k_single_buffer = false;
+        s->use_v_double_buffer = true;
+        break;
     default:
         return -1;
     }
