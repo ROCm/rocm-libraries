@@ -59,6 +59,9 @@ def _state(**overrides):
     "StreamKAtomic": 0,
     "PrefetchAcrossPersistent": 0,
     "ReuseAcrossPersistent": 0,
+    "SuppressNoLoadLoop": False,
+    "TDMInst": 3,
+    "HalfPLR": 0,
     "GlobalSplitU": 1,
     "GlobalSplitUAlgorithm": "MultipleBuffer",
     "AdaptiveGemmGSUA": 0,
@@ -169,6 +172,9 @@ _STREAMK = {"TileProcessingStrategy": "StreamK", "GlobalSplitU": 0}
 _TILE = "TDMStoreInst requires the staged tile's tile_dim0 (data_size units) and tile_dim1 (columns per wave) to fit 16 bits"
 _ADAPTIVE = "TDMStoreInst does not support AdaptiveGemm=1 without per-element outputs beyond C and D: such a kernel " \
   "stores each beta through one TDM block, with no store-width cascade for AdaptiveGemm=1 to extend"
+_SNLL_REASON = "TDMStoreInst does not support SuppressNoLoadLoop with TDM loads outside HalfPLR and " \
+  "ReuseAcrossPersistent: the last PrefetchGlobalRead iterations then zero only the buffer SRD limits, so their " \
+  "tensor_load_to_lds still read past K"
 _PAP_REASON = "TDMStoreInst does not support PrefetchAcrossPersistent, whichever instructions load A and B: with " \
   "TDM loads the waits for its C load and store would also wait for the next tile's prefetch, which TENSORcnt " \
   "completes before them, and leave the prefetch nothing to hide"
@@ -207,6 +213,19 @@ def test_adaptive_gemm_1_needs_per_element_outputs():
   cascade, its edge blocks keep their own code and AdaptiveGemm=1 is accepted."""
   assert tdmStoreRejectReason(_state(AdaptiveGemm=1)) == _ADAPTIVE
   assert tdmStoreRejectReason(_state(AdaptiveGemm=1, OutputAmaxD=True)) is None
+
+
+def test_suppress_no_load_loop_is_rejected_only_with_tdm_loads_it_does_not_disarm():
+  """A SuppressNoLoadLoop set without HalfPLR or ReuseAcrossPersistent zeroes only the buffer SRD limits in the last
+  PrefetchGlobalRead iterations, so with TDM loads their tensor_load_to_lds still read past K: TDMStoreInst is
+  rejected there. With buffer loads (TDMInst 0) the SRD limit disarms them, and HalfPLR and ReuseAcrossPersistent
+  zero the enable words of their TDM descriptors, so those stay accepted."""
+  assert tdmStoreRejectReason(_state(SuppressNoLoadLoop=True)) == _SNLL_REASON
+  assert tdmStoreRejectReason(_state(SuppressNoLoadLoop=True, TDMInst=0)) is None
+  assert tdmStoreRejectReason(_state(SuppressNoLoadLoop=True, HalfPLR=1)) is None
+  assert tdmStoreRejectReason(_state(SuppressNoLoadLoop=True, TileProcessingStrategy="DataParallel", GlobalSplitU=0,
+                                     ReuseAcrossPersistent=1)) is None
+  assert tdmStoreRejectReason(_state()) is None
 
 
 @pytest.mark.parametrize("overrides", [
@@ -1174,12 +1193,39 @@ _FP8_FP32D = {"DataType": "F8", "MacDataTypeA": "F8", "MacDataTypeB": "F8", "Des
 
 def test_rap_with_tdm_store_generates(gp_gfx1250, gfx1250_iim, assembler, capsys):
   """ReuseAcrossPersistent keeps A in VGPRs from one DataParallel tile to the next: the RAP candidate, fp32 D
-  from fp8 inputs at MT64x256, generates within the register budget at every tdm."""
+  from fp8 inputs at MT64x256, generates within the register budget at every tdm. RAP runs with SuppressNoLoadLoop,
+  whose last iterations zero the enable words of its TDM descriptors, so the SuppressNoLoadLoop reject leaves it."""
   tdm = 1
   sol, asm = _emit_asm(gfx1250_iim, assembler, mi=[16, 16, 128, 1, 1, 2, 8, 2, 2], TDMStoreInst=tdm,
                        ProblemType=_FP8_FP32D, **_RAP)
   assert sol.get("Valid"), capsys.readouterr().out
-  assert sol["ReuseAcrossPersistent"] and asm and "tensor_store_from_lds " in asm
+  assert sol["ReuseAcrossPersistent"] and sol["SuppressNoLoadLoop"] and asm and "tensor_store_from_lds " in asm
+
+
+def test_halfplr_with_tdm_store_generates(gp_gfx1250, gfx1250_iim, assembler, capsys):
+  """HalfPLR sets SuppressNoLoadLoop and zeroes the enable words of its TDM descriptors in the last
+  PrefetchGlobalRead iterations, so TDMStoreInst takes it: the kernel generates, and its TDM block drains
+  tensor_load_to_lds before it stages D."""
+  sol, asm = _emit_asm(gfx1250_iim, assembler, TDMStoreInst=True, HalfPLR=1)
+  assert sol.get("Valid"), capsys.readouterr().out
+  assert sol["HalfPLR"] and sol["SuppressNoLoadLoop"] and "tensor_store_from_lds " in asm
+  assert re.search(r"^\s*s_cmov_b32 s\[sgprtdm[A-Z]+Group0\+0\], 0\b", asm, re.M), "no TDM enable word is zeroed"
+  assert asm.index("drain tensor_load_to_lds before reusing its LDS") < asm.index("stage D element")
+
+
+def test_solution_rejects_tdm_store_with_suppress_no_load_loop_on_tdm_loads(gp_gfx1250, gfx1250_iim, assembler, capsys):
+  """A SuppressNoLoadLoop set without HalfPLR or ReuseAcrossPersistent survives with buffer loads, PrefetchGlobalRead 1
+  and GlobalSplitU 1, and its last iteration zeroes only the SRD limits: the kernel generates without TDMStoreInst,
+  with its TDM loads, and Solution rejects it with TDMStoreInst, with the reason."""
+  overrides = dict(SuppressNoLoadLoop=True, PrefetchGlobalRead=1)
+  sol, asm = _emit_asm(gfx1250_iim, assembler, TDMStoreInst=False, **overrides)
+  assert sol.get("Valid"), capsys.readouterr().out
+  assert sol["SuppressNoLoadLoop"] and sol["TDMInst"] == 3 and not sol["HalfPLR"] and "tensor_load_to_lds " in asm
+  assert "Set limit to 0 for last PGR iteration(s)" in asm
+  assert not re.search(r"^\s*s_cmov_b32 s\[sgprtdm[A-Z]+Group0\+0\], 0\b", asm, re.M)
+  sol, _ = _emit_asm(gfx1250_iim, assembler, TDMStoreInst=True, **overrides)
+  out = capsys.readouterr().out
+  assert not sol.get("Valid") and _SNLL_REASON in out, out
 
 
 @pytest.mark.parametrize("streamk", [0, 3])

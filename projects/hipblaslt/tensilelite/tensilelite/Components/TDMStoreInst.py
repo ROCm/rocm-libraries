@@ -102,6 +102,12 @@ def tdmStoreRejectReason(state):
   a single rule for PrefetchAcrossPersistent, and the staged tile always lies over the main-loop buffers.
   ReuseAcrossPersistent keeps A in VGPRs from one tile to the next, so the staged tile overwrites nothing it
   reuses.
+  SuppressNoLoadLoop runs the last PrefetchGlobalRead iterations in the main loop and disarms their loads in place.
+  HalfPLR and ReuseAcrossPersistent, which set it, zero the enable words of their TDM descriptors. A
+  SuppressNoLoadLoop set otherwise, which Solution keeps only with buffer loads, PrefetchGlobalRead 1 and
+  GlobalSplitU 1 or -1, zeroes only the buffer SRD limits, so its tensor_load_to_lds still run, past K. The block
+  drains them before it stages D, but TDMStoreInst does not take that load configuration: it is rejected with TDM
+  loads (TDMInst > 0) outside HalfPLR and ReuseAcrossPersistent, and accepted with buffer loads.
   The block also computes the elements outside D and bounds only the C loads and the D store, so
   besides C and D the epilogue may only read the epilogue vectors, bias, ScaleAlphaVec and ScaleAB along
   M or N, which the staged tile follows in LDS, and scalars such as ScaleC and ScaleD. With per-element
@@ -165,6 +171,10 @@ def tdmStoreRejectReason(state):
     return "TDMStoreInst does not support PrefetchAcrossPersistent, whichever instructions load A and B: with TDM " \
            "loads the waits for its C load and store would also wait for the next tile's prefetch, which TENSORcnt " \
            "completes before them, and leave the prefetch nothing to hide"
+  if state["SuppressNoLoadLoop"] and state["TDMInst"] and not (state["HalfPLR"] or state["ReuseAcrossPersistent"]):
+    return "TDMStoreInst does not support SuppressNoLoadLoop with TDM loads outside HalfPLR and ReuseAcrossPersistent: " \
+           "the last PrefetchGlobalRead iterations then zero only the buffer SRD limits, so their tensor_load_to_lds " \
+           "still read past K"
   if len(state["PackedC0IndicesX"]) != 1 or len(state["PackedC1IndicesX"]) != 1:
     return "TDMStoreInst requires one free index per operand, not packed free indices"
   if _tileDim0(state) > TDM_TILE_DIM_MAX or _waveColumns(state) > TDM_TILE_DIM_MAX:
