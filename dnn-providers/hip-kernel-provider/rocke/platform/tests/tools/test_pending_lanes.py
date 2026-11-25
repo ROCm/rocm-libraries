@@ -83,6 +83,7 @@ from rocke.tests.pending_lanes import (
     measured_budget_kernels,
     measured_scratch_allowance,
     tree_test_files,
+    utc_today,
     waiting_entry,
 )
 from rocke.tests.provider_categories import provider_category_labels
@@ -503,7 +504,7 @@ def listing_breaches(pending: Iterable[PendingTest]) -> list[str]:
 
 
 def _days_from_today(days: int) -> str:
-    return (_utc_today() + datetime.timedelta(days=days)).isoformat()
+    return (utc_today() + datetime.timedelta(days=days)).isoformat()
 
 
 def _pending(path: str, lane: Lane, **overrides: object) -> PendingTest:
@@ -743,14 +744,20 @@ class Change:
 
 
 def change_base() -> str | None:
-    """The commit this change is checked against: ``ROCKE_CHANGE_BASE``, else
-    the ``--from-ref`` of the pre-commit run (``PRE_COMMIT_FROM_REF``, which CI
-    sets to the pull request's base), else the merge base with origin/develop;
-    None when none resolves."""
-    explicit = os.environ.get("ROCKE_CHANGE_BASE") or os.environ.get(
-        "PRE_COMMIT_FROM_REF"
+    """The commit this change is checked against: where it forks from
+    ``ROCKE_CHANGE_BASE``, else from the ``--from-ref`` of the pre-commit run
+    (``PRE_COMMIT_FROM_REF``; in CI, the tip of the pull request's base
+    branch), else from origin/develop; None when none resolves. The fork
+    point, so that the base's own newer edits are not counted as this
+    change's; a base with no fork point with HEAD (a tree) is taken as is."""
+    base = (
+        os.environ.get("ROCKE_CHANGE_BASE")
+        or os.environ.get("PRE_COMMIT_FROM_REF")
+        or "origin/develop"
     )
-    return explicit or _git("merge-base", "HEAD", "origin/develop")
+    return _git("merge-base", base, "HEAD") or (
+        base if _git("rev-parse", "--verify", "--quiet", base) else None
+    )
 
 
 def _git(*arguments: str) -> str | None:
@@ -785,30 +792,38 @@ def current_change() -> Change | None:
     base = change_base()
     if not base:
         return None
-    names = _git("diff", "--name-only", "--relative", base)
-    diff = _git("diff", "-U0", "--relative", base, "--", PENDING_LANES_MODULE)
+    options = ("--no-ext-diff", "--no-color", "--relative")
+    names = _git("diff", *options, "--name-only", base)
+    diff = _git("diff", *options, "-U0", base, "--", PENDING_LANES_MODULE)
     if names is None or diff is None:
         return None
     lines, gaps = registry_line_changes(diff)
     return Change(frozenset(names.splitlines()), lines, gaps)
 
 
-# The registry helpers that build one record per trailing argument, by the
-# number of leading arguments every record shares.
-_GROUP_HELPERS = {"_waiting": 5, "_measured": 3, "_quarantined": 4}
-
-
 def _lines_of(node: ast.AST) -> set[int]:
     return set(range(node.lineno, node.end_lineno + 1))
+
+
+def _shared_argument_counts(module: ast.Module) -> dict[str, int]:
+    """Each function of ``module`` that takes its records as ``*args`` -> the
+    number of positional arguments before them, which every record shares."""
+    return {
+        node.name: len(node.args.posonlyargs) + len(node.args.args)
+        for node in module.body
+        if isinstance(node, ast.FunctionDef) and node.args.vararg is not None
+    }
 
 
 def record_lines(source: str, registry_name: str) -> list[frozenset[int]]:
     """The source lines of each record of the registry tuple ``registry_name``
     in ``source``, in order: a record written alone, all its lines; one of a
     group helper's records, the helper's shared arguments and its own."""
+    module = ast.parse(source)
+    shared_counts = _shared_argument_counts(module)
     statement = next(
         node
-        for node in ast.parse(source).body
+        for node in module.body
         if isinstance(node, ast.AnnAssign)
         and getattr(node.target, "id", None) == registry_name
     )
@@ -818,7 +833,14 @@ def record_lines(source: str, registry_name: str) -> list[frozenset[int]]:
             spans.append(frozenset(_lines_of(element)))
             continue
         call = element.value
-        shared_count = _GROUP_HELPERS[call.func.id]
+        helper = getattr(call.func, "id", None)
+        if helper not in shared_counts:
+            raise ValueError(
+                f"record_lines failed - {registry_name} unpacks a call of "
+                f"{helper!r}, expected a function of the module that takes its "
+                "records as *args"
+            )
+        shared_count = shared_counts[helper]
         shared = {call.lineno}.union(
             *(_lines_of(argument) for argument in call.args[:shared_count]),
             *(_lines_of(keyword.value) for keyword in call.keywords),
@@ -842,6 +864,9 @@ def touches(change: Change, path: str, lines: frozenset[int]) -> bool:
 
 @dataclass(frozen=True)
 class ExpiredRecord:
+    """An expired registry record: how a message names it, its test file and
+    its lines in the registry module."""
+
     label: str
     path: str  # the test file
     lines: frozenset[int]  # its lines in the registry module
@@ -881,6 +906,10 @@ PENDING: tuple = (
         "2026-01-01",
     ),
 )
+
+
+def _waiting(lane, reason, team, issue, expires, *paths):
+    pass
 """
 
 
@@ -935,12 +964,19 @@ def test_a_zero_context_diff_names_the_lines_it_changes():
     assert registry_line_changes(diff) == (frozenset({10, 11, 12, 41}), {60})
 
 
-def test_the_change_base_follows_the_pre_commit_from_ref(monkeypatch):
+def test_the_change_base_is_the_fork_point_of_the_first_base_given(monkeypatch):
+    head = _git("rev-parse", "HEAD")
+    tree = _git("rev-parse", "HEAD^{tree}")
+    if head is None or tree is None:
+        pytest.skip("this checkout is not a git work tree")
     monkeypatch.delenv("ROCKE_CHANGE_BASE", raising=False)
-    monkeypatch.setenv("PRE_COMMIT_FROM_REF", "origin/develop~3")
-    assert change_base() == "origin/develop~3"
-    monkeypatch.setenv("ROCKE_CHANGE_BASE", "abc123")
-    assert change_base() == "abc123"
+    monkeypatch.setenv("PRE_COMMIT_FROM_REF", "HEAD")
+    assert change_base() == head
+    # ROCKE_CHANGE_BASE comes first; a tree has no fork point and is kept.
+    monkeypatch.setenv("ROCKE_CHANGE_BASE", tree)
+    assert change_base() == tree
+    monkeypatch.setenv("ROCKE_CHANGE_BASE", "no-such-ref-for-this-test")
+    assert change_base() is None
 
 
 def _fail_or_report_expired(
@@ -949,11 +985,15 @@ def _fail_or_report_expired(
     """Fail on the expired records of the registry tuple ``registry_name``
     that :func:`expiry_failures` says fail this run; report the rest as a
     warning. ``label`` names a record in the message."""
-    today = _utc_today()
+    today = utc_today()
     source = (ROCKE / PENDING_LANES_MODULE).read_text(encoding="utf-8")
     spans = record_lines(source, registry_name)
     records = list(records)
-    assert len(spans) == len(records), (registry_name, len(spans), len(records))
+    assert len(spans) == len(records), (
+        f"{registry_name} holds {len(records)} records, but its source spells "
+        f"{len(spans)}: record_lines no longer reads the registry the way it is "
+        "written"
+    )
     expired = [
         ExpiredRecord(label(record), record.path, lines)
         for record, lines in zip(records, spans)
@@ -964,7 +1004,8 @@ def _fail_or_report_expired(
     strict = request.config.getoption("--strict-expiry")
     failing = expiry_failures(expired, current_change(), strict=strict)
     assert not failing, (
-        f"expired {registry_name} entries this change touches; re-decide them "
+        f"expired {registry_name} entries this change touches, or any under "
+        "--strict-expiry; re-decide them "
         f"(a new expiry at most {PENDING_MAX_DAYS} days away, or clear them): "
         f"{failing}"
     )
@@ -973,10 +1014,6 @@ def _fail_or_report_expired(
     )
     print(message)
     warnings.warn(message, stacklevel=2)
-
-
-def _utc_today() -> datetime.date:
-    return datetime.datetime.now(datetime.timezone.utc).date()
 
 
 def test_every_pending_entry_is_current(request):
@@ -993,7 +1030,10 @@ def test_every_pending_entry_is_current(request):
     )
     assert not gone, f"tests listed but gone: {gone}"
     _fail_or_report_expired(
-        request, "PENDING", PENDING, lambda p: f"{p.path} ({p.lane.name})"
+        request,
+        "PENDING",
+        PENDING,
+        lambda p: f"{p.path}{'::' + p.node if p.node else ''} ({p.lane.name})",
     )
 
 
@@ -1355,7 +1395,7 @@ def quarantine_breaches(
 
 
 def test_a_quarantine_fails_when_expired_listed_twice_or_over_the_cap():
-    today = _utc_today()
+    today = utc_today()
     current = _quarantined("library/tests/test_x.py::test_y")
     assert quarantine_breaches([current], today) == []
     expired = _quarantined("library/tests/test_x.py::test_z", expires="2026-01-01")
@@ -1381,14 +1421,21 @@ def test_a_quarantine_fails_when_expired_listed_twice_or_over_the_cap():
 
 
 # The files that may name the runner lane or write a lane declaration by hand:
-# the lanes module, the registry, and the tests of both.
+# the lanes module, the registry, and the tests of the test helpers (which
+# assert the reasons the helpers write) and of the registry.
 _LANE_HOMES = frozenset(
     {
         "platform/python/rocke/tests/lanes.py",
         "platform/python/rocke/tests/pending_lanes.py",
     }
 )
-_LANE_TEST_DIRS = ("platform/tests/support/", "platform/tests/tools/")
+_LANE_TESTS = (
+    "platform/tests/support/",
+    "platform/tests/tools/test_limbo_audit.py",
+    "platform/tests/tools/test_pending_lanes.py",
+)
+# Out-of-tree build directories a developer may have made under a root.
+_BUILD_DIR = re.compile(r"build([-_].*)?")
 
 
 def _python_sources() -> Iterable[tuple[str, ast.Module]]:
@@ -1397,10 +1444,10 @@ def _python_sources() -> Iterable[tuple[str, ast.Module]]:
     for root in ("platform", "library"):
         for file in (ROCKE / root).rglob("*.py"):
             parts = file.relative_to(ROCKE).parts
-            if "__pycache__" in parts or any(p.startswith("build") for p in parts):
+            if "__pycache__" in parts or any(_BUILD_DIR.fullmatch(p) for p in parts):
                 continue
             path = file.relative_to(ROCKE).as_posix()
-            if path in _LANE_HOMES or path.startswith(_LANE_TEST_DIRS):
+            if path in _LANE_HOMES or path.startswith(_LANE_TESTS):
                 continue
             yield path, ast.parse(file.read_text(encoding="utf-8"))
 
@@ -1442,7 +1489,8 @@ def _written_text(node: ast.AST) -> str:
 def hand_written_lane_reasons(tree: ast.Module) -> list[int]:
     """The lines of the skips in ``tree`` whose written reason says what CI
     lacks (:data:`_LANE_WORDS`) instead of naming a lane through
-    ``rocke.tests.lanes``, or reads as a lane declaration."""
+    ``rocke.tests.lanes``, or reads as a lane declaration. A reason held in a
+    variable or a constant is not read."""
     lines = []
     for node in ast.walk(tree):
         if not isinstance(node, ast.Call):
@@ -1478,12 +1526,14 @@ def test_a_hand_written_lane_reason_is_found():
 
 
 def test_tests_state_the_arches_they_need_not_the_runner_lane():
-    """A test names the arches it needs (``skip_needing_arch`` or
-    ``arch_skip_reason``); that this waits for the runner hardware is a fact
-    of ``rocke.tests.lanes`` alone, so the runner lane is named only in the
-    lane homes. A skip says what CI lacks only through the lane helpers: a
-    hand-written ``waits for ...`` reason, or one about CI or a runner, is
-    refused everywhere else."""
+    """A test names the arches or the GPU count it needs (``skip_needing_arch``,
+    ``arch_skip_reason``, ``skip_needing_gpus``); that this waits for the
+    runner hardware is a fact of ``rocke.tests.lanes`` alone, so the runner
+    lane is named only in the lane homes and their tests. A skip says what CI
+    lacks only through the lane helpers: a hand-written ``waits for ...``
+    reason, or one about CI or a runner, is refused everywhere else. Only a
+    reason written at the skip is read; one passed through a variable is not
+    seen here (the limbo audit sees its case)."""
     runner_lanes = {
         name
         for name, value in vars(rocke_lanes).items()
@@ -1678,7 +1728,7 @@ def test_every_record_names_a_team_that_owns_its_test():
 
 
 def test_every_quarantined_test_is_current():
-    breaches = quarantine_breaches(QUARANTINED, _utc_today())
+    breaches = quarantine_breaches(QUARANTINED, utc_today())
     assert not breaches, breaches
     gone = [
         entry.test_id

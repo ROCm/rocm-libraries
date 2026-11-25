@@ -6,9 +6,11 @@ helpers write that declaration."""
 from __future__ import annotations
 
 import pytest
+from rocke.core.arch.target import known_arches
 from rocke.tests.lanes import (
     BUILD_VARIANT,
     LANES,
+    PR_RUNNER_ARCHES,
     RUNNER_HARDWARE,
     SOURCE_TREE,
     TICKET,
@@ -18,6 +20,7 @@ from rocke.tests.lanes import (
     lanes_waited_for,
     runner_lanes_for,
     skip_needing_arch,
+    skip_needing_gpus,
     skip_until,
     skip_until_installed,
     skip_until_reason,
@@ -141,8 +144,27 @@ def test_a_module_that_is_installed_but_fails_to_import_is_not_a_lane_wait(
         import_or_skip_until("engine_missing_a_dependency", BUILD_VARIANT)
 
 
+def test_every_gpu_arch_has_a_pull_request_runner_or_waits_for_the_hardware():
+    """The device arches split into those a pull-request runner has and those
+    the runner hardware lane waits for; a generic target is neither."""
+    device_arches = {arch for arch in known_arches() if not arch.endswith("-generic")}
+    assert set(PR_RUNNER_ARCHES) | set(RUNNER_HARDWARE.arches) == device_arches
+    assert not set(PR_RUNNER_ARCHES) & set(RUNNER_HARDWARE.arches)
+    assert "gfx942" in PR_RUNNER_ARCHES and "gfx950" in RUNNER_HARDWARE.arches
+
+
+def test_a_case_that_needs_more_gpus_waits_for_the_runner_hardware():
+    with pytest.raises(pytest.skip.Exception) as skipped:
+        skip_needing_gpus(2, reason="needs two GPUs, found one")
+    assert skipped.value.msg == "waits for runner-hardware: needs two GPUs, found one"
+    for count in (1, True, 2.0):
+        with pytest.raises(ValueError, match="expected an integer of at least 2"):
+            skip_needing_gpus(count, reason="x")
+
+
 def test_a_case_waits_for_runner_hardware_only_when_no_ci_runner_has_its_arch():
     assert runner_lanes_for(("gfx950",)) == (RUNNER_HARDWARE,)
+    assert runner_lanes_for(("gfx908",)) == (RUNNER_HARDWARE,)
     assert runner_lanes_for(("gfx950", "gfx1250")) == (RUNNER_HARDWARE,)
     assert runner_lanes_for(("gfx1151", "gfx1201")) == (RUNNER_HARDWARE,)
     assert runner_lanes_for(("gfx90a",)) == (RUNNER_HARDWARE,)

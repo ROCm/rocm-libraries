@@ -145,6 +145,7 @@ __all__ = [
     "measured_scratch_allowance",
     "quarantined_test",
     "tree_test_files",
+    "utc_today",
     "waiting_entry",
 ]
 
@@ -160,6 +161,11 @@ QUARANTINE_MAX_DAYS = 30
 _ISSUE = re.compile(r"[A-Z][A-Z0-9]+-[0-9]+|ROCm/[A-Za-z0-9._-]+#[0-9]+")
 
 
+# The issue of the records written before any issue tracked them: the test
+# system epic's follow-up for triaging every CI test, which re-decides each.
+_TRIAGE_FOLLOW_UP = "AICK-3410"
+
+
 def _require_test_path(kind: str, path: str) -> None:
     if not path.endswith(".py") or path.startswith("/"):
         raise ValueError(
@@ -168,7 +174,8 @@ def _require_test_path(kind: str, path: str) -> None:
         )
 
 
-def _utc_today() -> datetime.date:
+def utc_today() -> datetime.date:
+    """Today's date in UTC, against which records expire."""
     return datetime.datetime.now(datetime.timezone.utc).date()
 
 
@@ -209,7 +216,7 @@ def _require_recorded(
             f"{kind} failed - {subject}, expires={expires!r}, expected an ISO "
             "date (YYYY-MM-DD)"
         ) from None
-    latest = _utc_today() + datetime.timedelta(days=max_days)
+    latest = utc_today() + datetime.timedelta(days=max_days)
     if expiry > latest:
         raise ValueError(
             f"{kind} failed - {subject}, expires={expires!r}, expected at most "
@@ -683,7 +690,7 @@ PENDING: tuple[PendingTest, ...] = (
         "registered only in comprehensive-tier entries (runner contract, worker "
         "integration); triage proposes the standard tier",
         _LIBRARY,
-        "AICK-3410",
+        _TRIAGE_FOLLOW_UP,
         "2027-01-15",
         "library/tests/test_library_test_tiers.py",
         whole_file=True,
@@ -735,7 +742,7 @@ PENDING: tuple[PendingTest, ...] = (
         "its exhaustive cases are deselected in CI (-m 'not exhaustive'); no job runs "
         "the exhaustive cohort yet",
         _LIBRARY,
-        "AICK-3410",
+        _TRIAGE_FOLLOW_UP,
         "2027-01-15",
         "library/tests/test_convolution_forward_aot_packaging.py",
         "library/tests/test_kernel_label.py",
@@ -746,7 +753,7 @@ PENDING: tuple[PendingTest, ...] = (
         "the sweep sampler runs only in rocke_library_conv_sweep_gpu_pytest, a "
         "comprehensive-tier entry",
         _LIBRARY,
-        "AICK-3410",
+        _TRIAGE_FOLLOW_UP,
         "2027-01-15",
         node="TestNongroupedF32Gpu::test_sweep_candidates",
     ),
@@ -756,7 +763,7 @@ PENDING: tuple[PendingTest, ...] = (
         "the invariant sweep runs only in "
         "rocke_library_attention_cache_key_sweep_pytest, a comprehensive-tier entry",
         _LIBRARY,
-        "AICK-3410",
+        _TRIAGE_FOLLOW_UP,
         "2027-01-15",
         node="test_key_matches_build_identity",
     ),
@@ -767,7 +774,7 @@ PENDING: tuple[PendingTest, ...] = (
         "rocke_library_attention_biased_mixes_gpu_pytest, a comprehensive-tier entry, "
         "and need gfx950",
         _LIBRARY,
-        "AICK-3410",
+        _TRIAGE_FOLLOW_UP,
         "2027-01-15",
         node="test_modifier_mixes",
     ),
@@ -786,7 +793,7 @@ PENDING: tuple[PendingTest, ...] = (
         "registered only in rocke_tiling_visualization_pytest, a slow, low-importance "
         "comprehensive-tier entry; no scheduled job runs that tier yet",
         _PLATFORM,
-        "AICK-3410",
+        _TRIAGE_FOLLOW_UP,
         "2027-01-15",
         "platform/python/rocke/tests/helpers/tiling/visualization/test_auto_pipeline.py",
         "platform/python/rocke/tests/helpers/tiling/visualization/test_block_diagram.py",
@@ -801,7 +808,7 @@ PENDING: tuple[PendingTest, ...] = (
         "rocke/heuristics/tests/requirements.txt (without them the cases skip, "
         "waiting for build-variant)",
         _PLATFORM,
-        "AICK-3410",
+        _TRIAGE_FOLLOW_UP,
         "2027-01-15",
         "platform/python/rocke/heuristics/tests/test_data_pipeline.py",
         "platform/python/rocke/heuristics/tests/test_evaluate.py",
@@ -846,7 +853,7 @@ PENDING: tuple[PendingTest, ...] = (
         "source-tree only: it reads cpp/, tools/ or dsl_docs/, or needs a native "
         "build, so the install leaves it out or it skips there; run_all.py runs it",
         _LIBRARY,
-        "AICK-3410",
+        _TRIAGE_FOLLOW_UP,
         "2027-01-26",
         "library/tests/test_attention_bwd_counted_sync.py",
         "library/tests/test_attention_bwd_resources.py",
@@ -859,7 +866,7 @@ PENDING: tuple[PendingTest, ...] = (
         "git history, which the installed test tree omits) skip in CI; run_all.py "
         "runs them",
         _LIBRARY,
-        "AICK-3410",
+        _TRIAGE_FOLLOW_UP,
         "2027-01-26",
         "library/tests/test_reference_common.py",
     ),
@@ -868,7 +875,7 @@ PENDING: tuple[PendingTest, ...] = (
         "source-tree only: it reads cpp/, tools/ or dsl_docs/, or needs a native "
         "build, so the install leaves it out or it skips there; run_all.py runs it",
         _PLATFORM,
-        "AICK-3410",
+        _TRIAGE_FOLLOW_UP,
         "2027-01-22",
         "platform/python/rocke/benchmark/perf/tests/test_wavescope_pmc.py",
         "platform/tests/instances/differential/test_canonical_text.py",
@@ -890,7 +897,7 @@ PENDING: tuple[PendingTest, ...] = (
         "every test carries the integration marker (pytestmark), which the installed "
         "entries deselect with -m 'not integration'; run_all.py runs it",
         _PLATFORM,
-        "AICK-3410",
+        _TRIAGE_FOLLOW_UP,
         "2027-01-22",
         "platform/tests/tools/test_provider_install_contract.py",
         "platform/tests/tools/test_sdpa_asset_cmake_contract.py",
@@ -902,7 +909,7 @@ PENDING: tuple[PendingTest, ...] = (
         "git history, which the installed test tree omits) skip in CI; run_all.py "
         "runs them",
         _PLATFORM,
-        "AICK-3410",
+        _TRIAGE_FOLLOW_UP,
         "2027-01-22",
         "platform/python/rocke/portable_ir/tests/test_freshness.py",
         "platform/python/rocke/tests/helpers/tiling/mma/test_mma_dtypes.py",
@@ -931,7 +938,7 @@ PENDING: tuple[PendingTest, ...] = (
         "C++ engine parity checks that need the rocke_engine module; every case skips "
         "without it, until TheRock's build environment has pybind11",
         _LIBRARY,
-        "AICK-3410",
+        _TRIAGE_FOLLOW_UP,
         "2027-02-02",
         "library/tests/test_selector_cpp_parity.py",
     ),
@@ -940,7 +947,7 @@ PENDING: tuple[PendingTest, ...] = (
         "its cases that lower through the C++ engine's shared library (librocke) skip "
         "where the build installs none (the Windows provider build)",
         _LIBRARY,
-        "AICK-3410",
+        _TRIAGE_FOLLOW_UP,
         "2027-02-02",
         "library/tests/test_attention_bwd_lds_alignment.py",
         "library/tests/test_attention_ir_cpp_parity.py",
@@ -953,7 +960,7 @@ PENDING: tuple[PendingTest, ...] = (
         "build them; its cases that read the code object need llvm-objdump, which the "
         "CI test step does not put on PATH",
         _LIBRARY,
-        "AICK-3410",
+        _TRIAGE_FOLLOW_UP,
         "2027-02-02",
         "library/tests/test_attention_tiled_3d_kv_cache_policy.py",
         "library/tests/test_conv_direct_nongrouped_tf32.py",
@@ -966,7 +973,7 @@ PENDING: tuple[PendingTest, ...] = (
         "rocke_library_engine) skip in CI, whose build's Python has no pybind11 to "
         "build them",
         _LIBRARY,
-        "AICK-3410",
+        _TRIAGE_FOLLOW_UP,
         "2027-02-02",
         "library/tests/test_attention_tiled_3d_kv_lds_swizzle.py",
         "library/tests/test_attention_tiled_3d_running_max.py",
@@ -992,7 +999,7 @@ PENDING: tuple[PendingTest, ...] = (
         "build them; its cases that lower through the C++ engine's shared library "
         "(librocke) skip where the build installs none (the Windows provider build)",
         _LIBRARY,
-        "AICK-3410",
+        _TRIAGE_FOLLOW_UP,
         "2027-02-02",
         "library/tests/test_conv_direct_grouped_backend_parity.py",
     ),
@@ -1001,7 +1008,7 @@ PENDING: tuple[PendingTest, ...] = (
         "its cases that read code objects need llvm-objdump, which the CI test step "
         "does not put on PATH",
         _LIBRARY,
-        "AICK-3410",
+        _TRIAGE_FOLLOW_UP,
         "2027-02-02",
         "library/tests/test_attention_tiled_3d_reduce_lds.py",
     ),
@@ -1011,7 +1018,7 @@ PENDING: tuple[PendingTest, ...] = (
         "(rocke_library_engine) skip in CI, whose build's Python has no pybind11 to "
         "build it",
         _LIBRARY,
-        "AICK-3410",
+        _TRIAGE_FOLLOW_UP,
         "2027-02-02",
         "library/tests/test_dgrad_stem_wmma.py",
         "library/tests/test_direct_dgrad_wmma.py",
@@ -1029,7 +1036,7 @@ PENDING: tuple[PendingTest, ...] = (
         "build them; its cases that lower through the C++ engine's shared library "
         "(librocke) skip where the build installs none (the Windows provider build)",
         _PLATFORM,
-        "AICK-3410",
+        _TRIAGE_FOLLOW_UP,
         "2027-01-29",
         "platform/tests/core/test_arch_domain_lane.py",
         "platform/tests/core/test_gfx950_scaled_mfma.py",
@@ -1044,7 +1051,7 @@ PENDING: tuple[PendingTest, ...] = (
         "rocke_library_engine) skip in CI, whose build's Python has no pybind11 to "
         "build them",
         _PLATFORM,
-        "AICK-3410",
+        _TRIAGE_FOLLOW_UP,
         "2027-01-29",
         "platform/tests/core/test_f64_mma.py",
         "platform/tests/instances/test_gemm_tdm_padding.py",
@@ -1058,7 +1065,7 @@ PENDING: tuple[PendingTest, ...] = (
         "its cases that lower through the C++ engine's shared library (librocke) skip "
         "where the build installs none (the Windows provider build)",
         _PLATFORM,
-        "AICK-3410",
+        _TRIAGE_FOLLOW_UP,
         "2027-02-05",
         "platform/python/rocke/tests/helpers/tiling/mma/test_mma_dtypes.py",
         "platform/python/rocke/tests/helpers/tiling/mma/test_mma_issuable_pairs.py",
@@ -1135,7 +1142,7 @@ PENDING: tuple[PendingTest, ...] = (
         "where the build installs none (the Windows provider build); its cases need "
         "jsonschema or llc, which the CI test environment lacks",
         _PLATFORM,
-        "AICK-3410",
+        _TRIAGE_FOLLOW_UP,
         "2027-02-05",
         "platform/tests/core/test_debug_info.py",
     ),
@@ -1146,7 +1153,7 @@ PENDING: tuple[PendingTest, ...] = (
         "read the code object need llvm-objdump, which the CI test step does not put "
         "on PATH",
         _PLATFORM,
-        "AICK-3410",
+        _TRIAGE_FOLLOW_UP,
         "2027-02-05",
         "platform/tests/core/test_nontemporal_lowering.py",
         "platform/tests/core/test_trap.py",
@@ -1156,7 +1163,7 @@ PENDING: tuple[PendingTest, ...] = (
         "its cases that load the shared librocke (the portable-IR C ABI) skip where "
         "the build installs none (the Windows provider build)",
         _PLATFORM,
-        "AICK-3410",
+        _TRIAGE_FOLLOW_UP,
         "2027-01-29",
         "platform/python/rocke/portable_ir/tests/test_abi.py",
         "platform/python/rocke/portable_ir/tests/test_guard.py",
@@ -1166,7 +1173,7 @@ PENDING: tuple[PendingTest, ...] = (
         BUILD_VARIANT,
         "its cases need jsonschema or llc, which the CI test environment lacks",
         _PLATFORM,
-        "AICK-3410",
+        _TRIAGE_FOLLOW_UP,
         "2027-01-29",
         "platform/tests/analysis/test_lds_serialization.py",
     ),
@@ -1174,7 +1181,7 @@ PENDING: tuple[PendingTest, ...] = (
         BUILD_VARIANT,
         "its figure cases need matplotlib, which the CI test environment lacks",
         _PLATFORM,
-        "AICK-3410",
+        _TRIAGE_FOLLOW_UP,
         "2027-01-29",
         "platform/python/rocke/tests/helpers/tiling/test_lds_conflict.py",
     ),
@@ -1183,7 +1190,7 @@ PENDING: tuple[PendingTest, ...] = (
         "its occupancy cases build code objects with llc and read them with "
         "llvm-readelf, which the CI test step does not put on PATH",
         _PLATFORM,
-        "AICK-3410",
+        _TRIAGE_FOLLOW_UP,
         "2027-01-29",
         "platform/python/rocke/benchmark/perf/tests/test_cli.py",
         "platform/python/rocke/benchmark/perf/tests/test_occupancy.py",
@@ -1226,7 +1233,7 @@ PENDING: tuple[PendingTest, ...] = (
         "its device cases need gfx950, which no CI GPU stage has (AICK-3411); its "
         "device cases need gfx1250, which no CI GPU stage has",
         _LIBRARY,
-        "AICK-3410",
+        _TRIAGE_FOLLOW_UP,
         "2027-02-19",
         "library/tests/test_conv_dgrad_correctness.py",
         "library/tests/test_conv_dgrad_depthwise_windowed.py",
@@ -1251,7 +1258,7 @@ PENDING: tuple[PendingTest, ...] = (
         "runners: the gfx942 reference entry deselects them, and theirs exit on the "
         "CI runners",
         _LIBRARY,
-        "AICK-3410",
+        _TRIAGE_FOLLOW_UP,
         "2027-02-19",
         "library/tests/test_sdpa_pinned_reference.py",
     ),
@@ -1259,7 +1266,7 @@ PENDING: tuple[PendingTest, ...] = (
         RUNNER_HARDWARE,
         "its device cases need gfx1250, which no CI GPU stage has",
         _LIBRARY,
-        "AICK-3410",
+        _TRIAGE_FOLLOW_UP,
         "2027-02-19",
         "library/tests/test_conv_fwd_correctness.py",
         "library/tests/test_conv_winograd_dispatch_gpu.py",
@@ -1293,7 +1300,7 @@ PENDING: tuple[PendingTest, ...] = (
         "WMMA split-K wgrad: its atomics are not enabled on gfx942, so it runs on "
         "gfx1250",
         _LIBRARY,
-        "AICK-3410",
+        _TRIAGE_FOLLOW_UP,
         "2027-02-19",
         node="TestConvWgradCorrectness::test_split_k_wmma",
     ),
@@ -1303,7 +1310,7 @@ PENDING: tuple[PendingTest, ...] = (
         "WMMA split-K wgrad: its atomics are not enabled on gfx942, so it runs on "
         "gfx1250",
         _LIBRARY,
-        "AICK-3410",
+        _TRIAGE_FOLLOW_UP,
         "2027-02-19",
         node="TestConvWgradCorrectness::test_grouped_split_k_wmma",
     ),
@@ -1313,7 +1320,7 @@ PENDING: tuple[PendingTest, ...] = (
         "WMMA split-K wgrad: its atomics are not enabled on gfx942, so it runs on "
         "gfx1250",
         _LIBRARY,
-        "AICK-3410",
+        _TRIAGE_FOLLOW_UP,
         "2027-02-19",
         node="TestConvWgradCorrectness::test_wide_tile_spec_at_degree_cap_gfx1250",
     ),
@@ -1321,7 +1328,7 @@ PENDING: tuple[PendingTest, ...] = (
         RUNNER_HARDWARE,
         "its device cases need gfx1151, gfx1200 or gfx1201, which no CI GPU stage has",
         _LIBRARY,
-        "AICK-3410",
+        _TRIAGE_FOLLOW_UP,
         "2027-02-19",
         "library/tests/dispatch/attention/test_gfx1151_attention_dispatch_numeric.py",
         "library/tests/test_wmma_fmha_fwd_v2_features.py",
@@ -1332,7 +1339,7 @@ PENDING: tuple[PendingTest, ...] = (
         "its device cases need gfx950, which no CI GPU stage has (AICK-3411); its "
         "device cases need gfx1250, which no CI GPU stage has",
         _PLATFORM,
-        "AICK-3410",
+        _TRIAGE_FOLLOW_UP,
         "2027-02-16",
         "platform/python/rocke/tests/helpers/tiling/mma/test_mma_k_coupling.py",
     ),
@@ -1355,7 +1362,7 @@ PENDING: tuple[PendingTest, ...] = (
         RUNNER_HARDWARE,
         "its device cases need gfx1250, which no CI GPU stage has",
         _PLATFORM,
-        "AICK-3410",
+        _TRIAGE_FOLLOW_UP,
         "2027-02-16",
         "platform/tests/core/test_gpu_checked_value.py",
         "platform/tests/instances/test_gfx1250_mixed_scaled_gemm_numeric.py",
@@ -1370,7 +1377,7 @@ PENDING: tuple[PendingTest, ...] = (
         RUNNER_HARDWARE,
         "its device case runs on gfx1151 or gfx1201 only, which no CI GPU stage has",
         _PLATFORM,
-        "AICK-3410",
+        _TRIAGE_FOLLOW_UP,
         "2027-02-16",
         "platform/tests/instances/test_matmul_nbits_numeric.py",
     ),
@@ -1379,7 +1386,7 @@ PENDING: tuple[PendingTest, ...] = (
         "its GPU cases compile for gfx90a only (39 cases in these files); they pass "
         "on a gfx90a node",
         _PLATFORM,
-        "AICK-3410",
+        _TRIAGE_FOLLOW_UP,
         "2027-02-16",
         "platform/python/rocke/tests/helpers/tiling/kernels/test_tiling_gemm_interleaved_demo.py",
         "platform/python/rocke/tests/helpers/tiling/kernels/test_tiling_gemm_manual_demo.py",
@@ -1391,7 +1398,7 @@ PENDING: tuple[PendingTest, ...] = (
         RUNNER_HARDWARE,
         "its GPU case checks gfx90a instructions on gfx90a only",
         _PLATFORM,
-        "AICK-3410",
+        _TRIAGE_FOLLOW_UP,
         "2027-02-16",
         "platform/tests/core/test_u8_arith.py",
         "platform/tests/numeric/test_gfx90a_mfma_ops.py",
@@ -1410,7 +1417,7 @@ PENDING: tuple[PendingTest, ...] = (
         RUNNER_HARDWARE,
         "its device cases need gfx1151, gfx1200 or gfx1201, which no CI GPU stage has",
         _PLATFORM,
-        "AICK-3410",
+        _TRIAGE_FOLLOW_UP,
         "2027-02-16",
         "platform/tests/instances/test_attention_fwd_ext_numeric.py",
     ),
@@ -1418,7 +1425,7 @@ PENDING: tuple[PendingTest, ...] = (
         RUNNER_HARDWARE,
         "its case follows a change of the current device, which needs two GPUs",
         _PLATFORM,
-        "AICK-3410",
+        _TRIAGE_FOLLOW_UP,
         "2027-02-16",
         "platform/tests/support/test_gpu.py",
     ),
@@ -1426,7 +1433,7 @@ PENDING: tuple[PendingTest, ...] = (
         RUNNER_HARDWARE,
         "its gfx1151 cases need a gfx1151 GPU, which no CI GPU stage has",
         _PLATFORM,
-        "AICK-3410",
+        _TRIAGE_FOLLOW_UP,
         "2027-02-16",
         "platform/tests/instances/test_rocke_numeric.py",
     ),
@@ -1448,7 +1455,6 @@ _LLVM_24_CI = Compilers(llvm_major=24, llvm_commits=(_LLVM_24_CI_COMMIT,))
 _LLVM_24_ROCM_INSTALL = Compilers(
     llvm_major=24, llvm_commits=(_LLVM_24_ROCM_INSTALL_COMMIT,)
 )
-_SPILL_RETUNE_ISSUE = "AICK-3410"
 _SPILL_RETUNE_EXPIRES = "2026-12-31"
 
 
@@ -1464,7 +1470,7 @@ def _measured(
             compilers,
             reason,
             _LIBRARY,
-            _SPILL_RETUNE_ISSUE,
+            _TRIAGE_FOLLOW_UP,
             _SPILL_RETUNE_EXPIRES,
         )
         for kernel_name, scratch_bytes in allowances

@@ -1564,7 +1564,9 @@ Every test that the CI entries do not run normally is recorded in one data modul
 Each record names its reason, the GitHub team that owns the test (`team`, one of
 `TEAMS`, a CODEOWNERS team of its path) and the issue that tracks it (`issue`, a
 Jira id or `ROCm/<repo>#<n>`). A record without a filed issue is refused: file
-one first. It holds three kinds of record:
+one first. The records written before an issue tracked them name AICK-3410, the
+follow-up that triages every CI test and re-decides each. It holds three kinds
+of record:
 
 | Kind | Records | Longest expiry | Expired record |
 |---|---|---|---|
@@ -1584,7 +1586,7 @@ record's issue, not in the lane:
 
 | Lane | Waits for | Examples |
 |---|---|---|
-| `RUNNER_HARDWARE` (`runner-hardware`) | hardware no pull-request runner has: a GPU other than gfx942 and gfx110X, or a second GPU | gfx950, gfx90a, gfx1151, gfx1200, gfx1201 and gfx1250 cases; the two-GPU cases |
+| `RUNNER_HARDWARE` (`runner-hardware`) | hardware no pull-request runner has: a GPU of an arch outside `PR_RUNNER_ARCHES` (gfx942, gfx1100 to gfx1103), or a second GPU | gfx950, gfx908, gfx90a, gfx115x, gfx1200, gfx1201 and gfx1250 cases; the two-GPU cases (`skip_needing_gpus`) |
 | `BUILD_VARIANT` (`build-variant`) | a build or test environment CI does not provide | the C++ engine's Python modules (pybind11), the shared librocke on the Windows build, hipcc and the LLVM tools, optional packages |
 | `TICKET` (`ticket`) | work the record's issue tracks | CTest entries not added yet, a tier decision, a scheduled run (comprehensive tier, exhaustive cohort: `-m 'not exhaustive'` deselects to this lane), a torch-free rewrite |
 | `SOURCE_TREE` (`source-tree`) | a source checkout (`run_all.py`) | cases that read platform tools, C++ sources, docs or git history; `-m 'not integration'` deselects to this lane |
@@ -1612,8 +1614,8 @@ helpers and the missing-tool helpers (`rocke.tests.compiler_tools`,
 `rocke.tests.llc`) `BUILD_VARIANT` (a module that is installed but fails to
 import is a defect, not a wait); the source-tree helpers `SOURCE_TREE`. A skip
 for any other reason (a defect, a configuration refused on its own arch, a
-missing installed artifact, a platform or tool a developer machine lacks) names
-no lane and says what it needs in plain words; no record can cover it, so in CI
+missing installed artifact, a platform a developer machine lacks) names no lane
+and says what it needs in plain words; no record can cover it, so in CI
 it shows up in limbo until it is fixed or quarantined. A case that can never run
 (a refused request, a state the code cannot build) is not kept as a skip: after
 the owner's review it is left out of the parametrization, or the test is
@@ -1640,7 +1642,8 @@ works per file. It fails when:
   literal, or a module-level name bound to one) and has no `RUNNER_HARDWARE`
   or whole-file record;
 - a test names the runner lane, or writes a lane reason by hand: a skip reason
-  that says "waits for", or names CI or a runner, without the lane helpers;
+  written at the skip that says "waits for", or names CI or a runner, without
+  the lane helpers;
 - an expired record this change touches (the hook's diff base is
   `ROCKE_CHANGE_BASE`, else pre-commit's `--from-ref`, else the merge base with
   origin/develop).

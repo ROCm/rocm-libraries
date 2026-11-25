@@ -6,8 +6,8 @@
 A lane is what pull-request CI lacks that a test needs, one of four kinds
 (:data:`LANES`):
 
-- ``runner-hardware``: a GPU of an arch no pull-request runner has (gfx942 and
-  gfx110X have one), or a second GPU;
+- ``runner-hardware``: a GPU of an arch no pull-request runner has
+  (:data:`PR_RUNNER_ARCHES` have one), or a second GPU;
 - ``build-variant``: a build or test environment CI does not provide (the C++
   engine's Python modules, the shared librocke on the Windows build, optional
   packages and LLVM tools in the test step);
@@ -34,7 +34,9 @@ which the run records keep and the limbo audit reads back
 configuration, a module that is installed but fails to import) names no lane,
 and no registry entry can account for it: it stays in limbo until it is fixed
 or quarantined. ``platform/tests/tools/test_pending_lanes.py`` holds the tree
-to this: no test names the runner lane or writes a lane reason by hand. The
+to this: outside this module, the registry and the tests of both, no test names
+the runner lane or writes a lane reason by hand (a reason it can read: a
+literal at the skip). The
 shared helpers declare for their callers (``rocke.tests.gpu``,
 ``rocke.tests.engines``, ``rocke.tests.compiler_tools``, ...), and a case a CI
 entry deselects by a lane's marker (``exhaustive``, ``integration``) is
@@ -61,6 +63,7 @@ from ..core.arch.target import known_arches
 __all__ = [
     "BUILD_VARIANT",
     "LANES",
+    "PR_RUNNER_ARCHES",
     "REQUIRE_CPP_ENGINE_ENV",
     "RUNNER_HARDWARE",
     "SOURCE_TREE",
@@ -72,6 +75,7 @@ __all__ = [
     "lanes_waited_for",
     "runner_lanes_for",
     "skip_needing_arch",
+    "skip_needing_gpus",
     "skip_until",
     "skip_until_installed",
     "skip_until_reason",
@@ -110,11 +114,25 @@ class Lane:
 
 _LANE_NAME = re.compile(r"[a-z0-9]+(-[a-z0-9]+)*")
 
+#: The GPU arches of the pull-request CI runners: gfx942 and the gfx110X
+#: family. A case that needs one of them runs on a pull-request runner.
+PR_RUNNER_ARCHES: tuple[str, ...] = (
+    "gfx942",
+    "gfx1100",
+    "gfx1101",
+    "gfx1102",
+    "gfx1103",
+)
+
 RUNNER_HARDWARE = Lane(
     "runner-hardware",
-    "hardware no pull-request CI runner has: a GPU of an arch other than gfx942 "
-    "and gfx110X, or a second GPU",
-    arches=("gfx90a", "gfx950", "gfx1151", "gfx1200", "gfx1201", "gfx1250"),
+    "hardware no pull-request CI runner has: a GPU of an arch other than "
+    f"{', '.join(PR_RUNNER_ARCHES)}, or a second GPU",
+    arches=tuple(
+        arch
+        for arch in known_arches()
+        if arch not in PR_RUNNER_ARCHES and not arch.endswith("-generic")
+    ),
 )
 BUILD_VARIANT = Lane(
     "build-variant",
@@ -288,6 +306,20 @@ def skip_needing_arch(arches: Collection[str], reason: str) -> NoReturn:
     raise pytest.skip.Exception(
         arch_skip_reason(arches, reason), allow_module_level=True
     )
+
+
+def skip_needing_gpus(count: int, reason: str) -> NoReturn:
+    """Skip the running case (or module) that needs ``count`` GPUs and finds
+    fewer, for ``reason``, as waiting for :data:`RUNNER_HARDWARE`: every
+    pull-request runner has one GPU."""
+    __tracebackhide__ = True  # pytest reports the skip at the caller
+    if isinstance(count, bool) or not isinstance(count, int) or count < 2:
+        raise ValueError(
+            f"skip_needing_gpus failed - count={count!r}, expected an integer of "
+            "at least 2: a case that needs one GPU states its arches instead "
+            "(skip_needing_arch)"
+        )
+    skip_until(RUNNER_HARDWARE, reason=reason)
 
 
 def lanes_waited_for(skip_reason: str) -> tuple[Lane, ...]:

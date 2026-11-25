@@ -15,10 +15,9 @@ import pytest
 from rocke.core.arch import known_arches
 from rocke.tests.gpu import current_device_arch, current_device_arch_in
 from rocke.tests.lanes import (
-    RUNNER_HARDWARE,
     lanes_waited_for,
     runner_lanes_for,
-    skip_until,
+    skip_needing_gpus,
     skip_until_reason,
 )
 
@@ -44,7 +43,7 @@ def test_reports_the_only_devices_arch():
 
 def test_follows_a_change_of_current_device():
     if hip.get_device_count() < 2:
-        skip_until(RUNNER_HARDWARE, reason="needs two GPUs")
+        skip_needing_gpus(2, reason="needs two GPUs")
     previous = hip.current_device()
     try:
         _select_device(1)
