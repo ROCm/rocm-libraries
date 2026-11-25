@@ -190,7 +190,7 @@ class RmsNormOverride(OpOverride):
                 },
                 input.device,
             )
-            self.note_aot(key, weightless=1 if weightless else 0)
+            self.note_aot(key, entry["engine"], weightless=1 if weightless else 0)
             return y
         except NotApplicable as na:  # engine can't serve this call -> native
             self.note_native(key, str(na))

@@ -5,8 +5,9 @@
 hipdnn_torch.base -- the generic op-override machinery.
 
 :class:`OpOverride` monkeypatches one ``torch.nn.functional`` entry point to route
-onto the hipDNN engine, with everything the three concrete overrides
-(:mod:`~hipdnn_torch.linear`, :mod:`~hipdnn_torch.rmsnorm`, :mod:`~hipdnn_torch.sdpa`)
+onto the hipDNN engine, with everything the concrete overrides
+(:mod:`~hipdnn_torch.linear`, :mod:`~hipdnn_torch.conv`, :mod:`~hipdnn_torch.layernorm`,
+:mod:`~hipdnn_torch.rmsnorm`, :mod:`~hipdnn_torch.activation`, :mod:`~hipdnn_torch.sdpa`)
 share:
 
   * ``install()`` / ``uninstall()`` -- patch/restore the functional symbol
@@ -14,8 +15,13 @@ share:
     that module; ``nn.Module`` forwards resolve the functional by attribute lookup
     at call time, so one patch catches them all);
   * a per-shape graph cache and the identical build -> pin-the-engine ->
-    ``check_support`` -> ``build_plans`` sequence, factored into :meth:`_cached_graph`;
-  * hard-pinned execution (:meth:`_execute`);
+    ``check_support`` -> ``build_plans`` sequence, factored into :meth:`_cached_graph`.
+    A miss runs under ``state.lock`` (double-checked after acquiring it) because the
+    handle is one process-global resource every installed override and thread
+    shares; a cache hit never takes the lock;
+  * hard-pinned execution (:meth:`_execute`), which also binds the handle to
+    torch's current CUDA stream under ``state.lock``, before executing, when that
+    stream differs from the one last bound;
   * the **native fallback with logging** the whole layer exists to give you: every
     call the engine can't claim goes back to real PyTorch, is counted, and is
     logged with the *reason* -- either the failed gate predicate or the caught
@@ -25,11 +31,18 @@ share:
 A concrete override subclasses this, sets :attr:`op_name`, and implements:
 
   * ``_call(self, real, *args, **kwargs)`` -- the drop-in replacement. It gates,
-    then either builds/executes a graph (calling :meth:`note_aot`) or defers to
-    ``real(...)`` (calling :meth:`note_native` with a reason).
+    then either builds/executes a graph (calling :meth:`note_aot` with the graph
+    entry's ``engine``) or defers to ``real(...)`` (calling :meth:`note_native`
+    with a reason).
   * ``_graph(self, ...)`` -- build and return a hipDNN ``Graph`` with tensors, the
     op, and the output uid set (but NOT yet ``build_operation_graph``'d);
     :meth:`_cached_graph` finalises and caches it.
+
+Census keys for an op that can run under autograd carry a prefix: ``GRAD_PREFIX``
+("grad ") marks a grad-eligible forward row, ``BWD_PREFIX`` ("bwd ") marks a
+backward row. :meth:`OpOverride.totals` sums every row NOT prefixed ``bwd ``;
+:meth:`OpOverride.bwd_totals` sums only the ``bwd `` rows, so forward and backward
+coverage can be read -- and gated on -- independently.
 """
 
 import logging
@@ -51,10 +64,25 @@ _KNOWN_ENGINES = (
 )
 _ID_TO_NAME = {_bootstrap._fnv1a64(n): n for n in _KNOWN_ENGINES}
 
+#: Census-key prefix for a grad-eligible forward row (the call may run a backward).
+GRAD_PREFIX = "grad "
+#: Census-key prefix for a backward row.
+BWD_PREFIX = "bwd "
 
-def _engine_name(hipdnn, engine_id) -> str:
-    """Best-effort id -> engine name: local table, then the bindings' registry,
-    then the raw hex id."""
+
+def _engine_name(hipdnn, engine_id, handle=None) -> str:
+    """Best-effort id -> engine name: the ``handle``'s own registry first
+    (resolves a co-loaded plugin engine via ``hipdnnGetEngineNameById_ext``; a
+    wheel without ``Handle.engine_id_to_name`` is caught and skipped), then the
+    local table, then the bindings' module-level registry (built-ins only), then
+    the raw hex id."""
+    if handle is not None:
+        try:
+            got = handle.engine_id_to_name(engine_id)
+            if got:
+                return got
+        except Exception:  # noqa: BLE001 -- old wheel, no Handle method
+            pass
     name = _ID_TO_NAME.get(engine_id)
     if name:
         return name
@@ -87,7 +115,6 @@ class OpOverride:
         self._nope_cache = {}  # graph-key -> reason, for shapes the engine rejects
         self._census = {}  # census-key -> {"aot": int, "native": int, **extras}
         self._fallbacks = {}  # reason -> count (the "gaps" tally)
-        self._last_engine = None  # winning engine name from the last _cached_graph
         self.state = None  # bootstrap.State, set on install()
 
     # -- convenience --------------------------------------------------------
@@ -109,8 +136,8 @@ class OpOverride:
 
     # -- graph build / execute (shared across every op) ---------------------
     def _cached_graph(self, key, build, describe):
-        """Return a cached ``{"graph", "ws"}`` for ``key``; on a miss, call
-        ``build()`` (subclass returns a wired-but-unbuilt ``Graph``), run the
+        """Return a cached ``{"graph", "ws", "engine"}`` for ``key``; on a miss,
+        call ``build()`` (subclass returns a wired-but-unbuilt ``Graph``), run the
         shared finalise sequence, and cache it. ``describe`` is a short shape
         string for the not-applicable message.
 
@@ -126,89 +153,117 @@ class OpOverride:
         re-running the (non-trivial) ``build_operation_graph`` /
         ``get_ranked_engine_ids`` probe on every call would be wasteful. The
         rejection reason is cached and re-raised immediately on later calls, so
-        each such shape probes once and then falls back cheaply."""
+        each such shape probes once and then falls back cheaply.
+
+        **Locking:** a cache hit (``_graph_cache`` or ``_nope_cache``) takes no
+        lock. A miss runs the whole build sequence under ``self.state.lock``,
+        re-checking both caches right after acquiring it -- another thread may
+        have finished the same build while this one waited for the lock -- since
+        ``build_operation_graph`` .. ``build_plans`` can mutate shared
+        plugin-handle state and the handle is one process-global resource."""
         entry = self._graph_cache.get(key)
         if entry is not None:
-            self._last_engine = entry["engine"]
             return entry
         nope = self._nope_cache.get(key)
         if nope is not None:
             raise NotApplicable(nope)
 
         st = self.state
-        try:
-            g = build()
+        with st.lock:
+            entry = self._graph_cache.get(key)
+            if entry is not None:
+                return entry
+            nope = self._nope_cache.get(key)
+            if nope is not None:
+                raise NotApplicable(nope)
 
-            err = g.build_operation_graph(st.handle)
-            if err.is_bad():
-                raise NotApplicable(f"build_operation_graph: {err.get_message()}")
-
-            # No engine claiming the graph is a clean decline, not an error. Most
-            # backends signal that with an empty ranking; some (this gfx1151
-            # nightly's binding) instead RAISE "Failed to get ranked engine ids:
-            # No engine configurations available for the graph". Translate either
-            # form to NotApplicable so the op's fallback ladder (e.g. linear's
-            # fused-bias -> matmul-only rung) runs instead of aborting to full
-            # native -- an unclaimed fused graph must not sink the matmul.
             try:
-                ranked = g.get_ranked_engine_ids([st.hipdnn.HeuristicMode.FALLBACK])
-            except (
-                Exception
-            ) as err:  # noqa: BLE001 -- ranking probe failure == no engine
-                raise NotApplicable(f"get_ranked_engine_ids raised: {err}")
-            if not ranked:
-                raise NotApplicable(f"no engine applicable for {describe}")
+                g = build()
 
-            if st.select_mode == "default":
-                # Hand the graph to hipDNN and let it select across every loaded
-                # engine. The backend Config policy (HIPDNN_HEUR_CONFIG_PATH)
-                # participates here, so a rule file can decide the engine per
-                # graph/shape without any code change.
-                err = g.create_execution_plans([st.hipdnn.HeuristicMode.FALLBACK])
+                err = g.build_operation_graph(st.handle)
                 if err.is_bad():
-                    raise NotApplicable(f"create_execution_plans: {err.get_message()}")
-            else:  # force: pin the configured engine, bypassing ranking
-                if st.engine_id not in ranked:
-                    raise NotApplicable(
-                        f"{st.engine_name} not applicable for {describe}"
-                    )
-                err = g.create_execution_plan_ext(st.engine_id)
+                    raise NotApplicable(f"build_operation_graph: {err.get_message()}")
+
+                # No engine claiming the graph is a clean decline, not an error. Most
+                # backends signal that with an empty ranking; some (this gfx1151
+                # nightly's binding) instead RAISE "Failed to get ranked engine ids:
+                # No engine configurations available for the graph". Translate either
+                # form to NotApplicable so the op's fallback ladder (e.g. linear's
+                # fused-bias -> matmul-only rung) runs instead of aborting to full
+                # native -- an unclaimed fused graph must not sink the matmul.
+                try:
+                    ranked = g.get_ranked_engine_ids([st.hipdnn.HeuristicMode.FALLBACK])
+                except (
+                    Exception
+                ) as err:  # noqa: BLE001 -- ranking probe failure == no engine
+                    raise NotApplicable(f"get_ranked_engine_ids raised: {err}")
+                if not ranked:
+                    raise NotApplicable(f"no engine applicable for {describe}")
+
+                if st.select_mode == "default":
+                    # Hand the graph to hipDNN and let it select across every loaded
+                    # engine. The backend Config policy (HIPDNN_HEUR_CONFIG_PATH)
+                    # participates here, so a rule file can decide the engine per
+                    # graph/shape without any code change.
+                    err = g.create_execution_plans([st.hipdnn.HeuristicMode.FALLBACK])
+                    if err.is_bad():
+                        raise NotApplicable(
+                            f"create_execution_plans: {err.get_message()}"
+                        )
+                else:  # force: pin the configured engine, bypassing ranking
+                    if st.engine_id not in ranked:
+                        raise NotApplicable(
+                            f"{st.engine_name} not applicable for {describe}"
+                        )
+                    err = g.create_execution_plan_ext(st.engine_id)
+                    if err.is_bad():
+                        raise NotApplicable(
+                            f"create_execution_plan_ext: {err.get_message()}"
+                        )
+
+                err = g.check_support()
                 if err.is_bad():
-                    raise NotApplicable(
-                        f"create_execution_plan_ext: {err.get_message()}"
+                    raise NotApplicable(f"check_support: {err.get_message()}")
+                err = g.build_plans()
+                if err.is_bad():
+                    raise NotApplicable(f"build_plans: {err.get_message()}")
+
+                # Ground-truth winner of the (built) plan -- the engine that will run.
+                try:
+                    engine = _engine_name(
+                        st.hipdnn, g.get_execution_plan_engine_id(), st.handle
                     )
+                except Exception:  # noqa: BLE001 -- fall back to the pinned name
+                    engine = st.engine_name if st.select_mode == "force" else "?"
+            except NotApplicable as na:
+                self._nope_cache[key] = str(na)
+                raise
 
-            err = g.check_support()
-            if err.is_bad():
-                raise NotApplicable(f"check_support: {err.get_message()}")
-            err = g.build_plans()
-            if err.is_bad():
-                raise NotApplicable(f"build_plans: {err.get_message()}")
-
-            # Ground-truth winner of the (built) plan -- the engine that will run.
-            try:
-                engine = _engine_name(st.hipdnn, g.get_execution_plan_engine_id())
-            except Exception:  # noqa: BLE001 -- fall back to the pinned name
-                engine = st.engine_name if st.select_mode == "force" else "?"
-        except NotApplicable as na:
-            self._nope_cache[key] = str(na)
-            raise
-
-        entry = {"graph": g, "ws": g.get_workspace_size(), "engine": engine}
-        self._graph_cache[key] = entry
-        self._last_engine = engine
-        return entry
+            entry = {"graph": g, "ws": g.get_workspace_size(), "engine": engine}
+            self._graph_cache[key] = entry
+            return entry
 
     def _execute(self, entry, variant_pack, device) -> None:
-        """Allocate the workspace (if any) and run the pinned plan. ``variant_pack``
-        maps uid -> device pointer (int); the workspace is an int pointer, 0 == none."""
+        """Allocate the workspace (if any), bind the handle to torch's current
+        CUDA stream if it changed, and run the pinned plan, all under
+        ``self.state.lock`` (the handle is one process-global resource).
+        ``variant_pack`` maps uid -> device pointer (int); the workspace is an
+        int pointer, 0 == none."""
         st = self.state
         ws = entry["ws"]
         workspace = (
             st.torch.empty(ws, dtype=st.torch.uint8, device=device) if ws > 0 else None
         )
         ws_ptr = workspace.data_ptr() if workspace is not None else 0
-        err = entry["graph"].execute(st.handle, variant_pack, ws_ptr)
+        with st.lock:
+            sid = st.torch.cuda.current_stream(device).cuda_stream
+            if sid != st.bound_stream:
+                try:
+                    st.handle.set_stream(sid)
+                except Exception as ex:  # noqa: BLE001 -- treat as a decline
+                    raise NotApplicable(f"set_stream: {ex}")
+                st.bound_stream = sid
+            err = entry["graph"].execute(st.handle, variant_pack, ws_ptr)
         if err.is_bad():
             raise NotApplicable(f"execute: {err.get_message()}")
 
@@ -216,25 +271,46 @@ class OpOverride:
     def _row(self, key) -> dict:
         return self._census.setdefault(key, {"aot": 0, "native": 0})
 
-    def note_aot(self, key, **extras) -> None:
-        """Count a call served by the engine. ``extras`` are extra integer
-        counters folded into the row (e.g. ``biased=1``, ``weightless=1``). The
-        winning engine name from the just-run :meth:`_cached_graph` is recorded in
-        the row's ``engines`` set so ``default`` runs show *which* engine served
-        each shape."""
-        row = self._row(key)
-        row["aot"] += 1
-        if self._last_engine:
-            row.setdefault("engines", set()).add(self._last_engine)
-        for name, val in extras.items():
-            row[name] = row.get(name, 0) + int(val)
+    def _locked(self, update) -> None:
+        """Run ``update()`` under ``self.state.lock``; unlocked when
+        ``self.state`` is ``None`` (a CPU test constructs an override with no
+        bootstrap)."""
+        if self.state is None:
+            update()
+        else:
+            with self.state.lock:
+                update()
+
+    def note_aot(self, key, engine, **extras) -> None:
+        """Count a call served by the engine. ``engine`` is the name the
+        winning :meth:`_cached_graph` entry recorded at build time
+        (``entry["engine"]``); when truthy it is added to the row's ``engines``
+        set so ``default`` runs show *which* engine served each shape. ``extras``
+        are extra integer counters folded into the row (e.g. ``biased=1``,
+        ``weightless=1``). Counters update under ``self.state.lock`` so counts
+        asserted under concurrent calls are exact."""
+
+        def _update():
+            row = self._row(key)
+            row["aot"] += 1
+            if engine:
+                row.setdefault("engines", set()).add(engine)
+            for name, val in extras.items():
+                row[name] = row.get(name, 0) + int(val)
+
+        self._locked(_update)
 
     def note_native(self, key, reason, level=logging.INFO) -> None:
         """Count + log a native fallback. ``reason`` is a short human string (the
         failed gate or the exception); it is tallied for :meth:`format_report`.
-        Gate declines log at INFO, unexpected exceptions at WARNING."""
-        self._row(key)["native"] += 1
-        self._fallbacks[reason] = self._fallbacks.get(reason, 0) + 1
+        Gate declines log at INFO, unexpected exceptions at WARNING. Counters
+        update under ``self.state.lock`` as :meth:`note_aot` does."""
+
+        def _update():
+            self._row(key)["native"] += 1
+            self._fallbacks[reason] = self._fallbacks.get(reason, 0) + 1
+
+        self._locked(_update)
         log.log(level, "%s -> native fallback [%s]: %s", self.op_name, key, reason)
 
     # -- install / uninstall ------------------------------------------------
@@ -270,19 +346,33 @@ class OpOverride:
         return {k: dict(v) for k, v in self._census.items()}
 
     def totals(self):
-        aot = sum(r["aot"] for r in self._census.values())
-        native = sum(r["native"] for r in self._census.values())
+        aot = sum(
+            r["aot"] for k, r in self._census.items() if not k.startswith(BWD_PREFIX)
+        )
+        native = sum(
+            r["native"] for k, r in self._census.items() if not k.startswith(BWD_PREFIX)
+        )
+        return aot, native
+
+    def bwd_totals(self):
+        aot = sum(r["aot"] for k, r in self._census.items() if k.startswith(BWD_PREFIX))
+        native = sum(
+            r["native"] for k, r in self._census.items() if k.startswith(BWD_PREFIX)
+        )
         return aot, native
 
     def fallback_reasons(self) -> dict:
         return dict(self._fallbacks)
 
     def format_report(self) -> str:
-        """Human-readable per-shape census + the ranked fallback-reason tally."""
+        """Human-readable per-shape census + the ranked fallback-reason tally.
+        Prints a ``BWD TOTAL`` line (summing the ``bwd `` rows, see
+        :meth:`bwd_totals`) only when the census holds any backward row."""
         if not self._census:
             return f"{self.op_name}: (no intercepted calls)"
 
         aot, native = self.totals()
+        bwd_rows = [k for k in self._census if k.startswith(BWD_PREFIX)]
         extras = sorted(
             {
                 k
@@ -302,6 +392,11 @@ class OpOverride:
                 f"  {key:34s}  aot={row['aot']:5d}  native={row['native']:5d}{tail}"
             )
         lines.append(f"  {'TOTAL':34s}  aot={aot:5d}  native={native:5d}")
+        if bwd_rows:
+            bwd_aot, bwd_native = self.bwd_totals()
+            lines.append(
+                f"  {'BWD TOTAL':34s}  aot={bwd_aot:5d}  native={bwd_native:5d}"
+            )
         if self._fallbacks:
             lines.append("  fallback reasons (why calls went native -- gaps to close):")
             for reason, cnt in sorted(self._fallbacks.items(), key=lambda kv: -kv[1]):

@@ -278,7 +278,7 @@ class _ConvFpropOverride(OpOverride):
                 # native epilogue; reshape to [1,K,1,...] to broadcast over spatial.
                 y = y + bias.reshape(1, k, *([1] * sr))
                 extras["biased"] = 1
-            self.note_aot(key, **extras)
+            self.note_aot(key, entry["engine"], **extras)
             return y
         except NotApplicable as na:  # hipDNN could not serve this shape -> native
             self.note_native(key, str(na))

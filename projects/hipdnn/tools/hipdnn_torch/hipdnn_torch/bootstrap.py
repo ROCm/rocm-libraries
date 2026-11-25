@@ -84,6 +84,7 @@ import ctypes
 import glob
 import os
 import sys
+import threading
 
 # torch dtype name -> hipDNN DataType enum name, by *exact* format correspondence
 # (the torch name states the format). Resolved defensively at bootstrap() time with
@@ -139,7 +140,9 @@ class BootstrapError(RuntimeError):
 
 class State:
     """Everything the overrides need after a successful bootstrap. Treat as
-    read-only."""
+    read-only, with one exception: ``bound_stream`` is updated by ``base._execute``
+    under ``lock`` when torch's current CUDA stream changes, to track which stream
+    the handle is bound to."""
 
     __slots__ = (
         "torch",
@@ -149,10 +152,21 @@ class State:
         "engine_name",
         "dtype_map",
         "select_mode",
+        "lock",
+        "bound_stream",
     )
 
     def __init__(
-        self, torch, hipdnn, handle, engine_id, engine_name, dtype_map, select_mode
+        self,
+        torch,
+        hipdnn,
+        handle,
+        engine_id,
+        engine_name,
+        dtype_map,
+        select_mode,
+        lock,
+        bound_stream,
     ):
         self.torch = torch
         self.hipdnn = hipdnn
@@ -161,6 +175,8 @@ class State:
         self.engine_name = engine_name
         self.dtype_map = dtype_map
         self.select_mode = select_mode
+        self.lock = lock
+        self.bound_stream = bound_stream
 
 
 _state = None  # cached State after the first successful bootstrap()
@@ -372,6 +388,8 @@ def bootstrap() -> State:
         engine_name=engine_name,
         dtype_map=dtype_map,
         select_mode=select_mode,
+        lock=threading.Lock(),
+        bound_stream=0,
     )
     return _state
 

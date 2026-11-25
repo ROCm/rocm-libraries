@@ -108,7 +108,7 @@ class _ActivationOverride(OpOverride):
                 {self._A_UID: input.data_ptr(), self._C_UID: y.data_ptr()},
                 input.device,
             )
-            self.note_aot(key)
+            self.note_aot(key, entry["engine"])
             return y
         except NotApplicable as na:  # engine can't serve this shape -> native
             self.note_native(key, str(na))

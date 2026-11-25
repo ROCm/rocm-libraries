@@ -237,7 +237,7 @@ class LinearOverride(OpOverride):
                         },
                         input.device,
                     )
-                    self.note_aot(key, biased=1, fused=1)
+                    self.note_aot(key, entry["engine"], biased=1, fused=1)
                     return _finish(y)
                 except NotApplicable as na:
                     # No engine served the fused epilogue for this shape -> degrade
@@ -286,7 +286,7 @@ class LinearOverride(OpOverride):
                 extras["biased"] = 1
                 if fuse:  # we tried to fuse and fell back to matmul here
                     extras["fused_declined"] = 1
-            self.note_aot(key, **extras)
+            self.note_aot(key, entry["engine"], **extras)
             return _finish(y)
         except NotApplicable as na:  # engine can't serve this shape -> native
             self.note_native(key, str(na))

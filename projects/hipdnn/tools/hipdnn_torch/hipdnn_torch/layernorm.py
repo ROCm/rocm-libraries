@@ -210,7 +210,10 @@ class LayerNormOverride(OpOverride):
                 input.device,
             )
             self.note_aot(
-                key, weightless=1 if weightless else 0, biasless=1 if biasless else 0
+                key,
+                entry["engine"],
+                weightless=1 if weightless else 0,
+                biasless=1 if biasless else 0,
             )
             return y
         except NotApplicable as na:  # engine can't serve this call -> native
