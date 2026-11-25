@@ -93,7 +93,7 @@ extern "C" __global__ void LayernormBwdRef(LayernormBwdArgs args)
     }
 
     auto sum_dy_scale = static_cast<COMPUTE_TYPE>(0.0);
-    auto sum_dy_scale_x = static_cast<COMPUTE_TYPE>(0.0);
+    auto sum_dy_scale_xc = static_cast<COMPUTE_TYPE>(0.0);
 
     for(unsigned int i = lid; i < INNER_SIZE; i += LOCAL_SIZE)
     {
@@ -102,11 +102,11 @@ extern "C" __global__ void LayernormBwdRef(LayernormBwdArgs args)
         auto pdy_pscale = static_cast<COMPUTE_TYPE>(dy[idx]) * static_cast<COMPUTE_TYPE>(scale[i]);
 
         sum_dy_scale += pdy_pscale;
-        sum_dy_scale_x += pdy_pscale * static_cast<COMPUTE_TYPE>(x[idx]);
+        sum_dy_scale_xc += pdy_pscale * (static_cast<COMPUTE_TYPE>(x[idx]) - pmean);
     }
 
     ltmp1[lid] = sum_dy_scale;
-    ltmp2[lid] = sum_dy_scale_x;
+    ltmp2[lid] = sum_dy_scale_xc;
     __syncthreads();
     for(unsigned int i = LOCAL_SIZE >> 1; i > 0; i >>= 1)
     {
@@ -119,10 +119,10 @@ extern "C" __global__ void LayernormBwdRef(LayernormBwdArgs args)
     }
 
     sum_dy_scale = ltmp1[0];
-    sum_dy_scale_x = ltmp2[0];
+    sum_dy_scale_xc = ltmp2[0];
     constexpr COMPUTE_TYPE pscale = static_cast<COMPUTE_TYPE>(1.0 / INNER_SIZE);
-    auto a = prstd * prstd * prstd * pscale * (sum_dy_scale_x - sum_dy_scale * pmean);
-    auto b = prstd * sum_dy_scale * pscale - a * pmean;
+    auto a = prstd * prstd * prstd * pscale * sum_dy_scale_xc;
+    auto b = prstd * sum_dy_scale * pscale;
 
     for(unsigned int i = lid; i < INNER_SIZE; i += LOCAL_SIZE)
     {
@@ -131,7 +131,7 @@ extern "C" __global__ void LayernormBwdRef(LayernormBwdArgs args)
         auto pdy = static_cast<COMPUTE_TYPE>(dy[idx]);
         auto pscale = static_cast<COMPUTE_TYPE>(scale[i]);
 
-        auto value = prstd * pdy * pscale - a * static_cast<COMPUTE_TYPE>(x[idx]) - b;
+        auto value = prstd * pdy * pscale - a * (static_cast<COMPUTE_TYPE>(x[idx]) - pmean) - b;
         dx[idx] = static_cast<X_TYPE>(value);
     }
 }

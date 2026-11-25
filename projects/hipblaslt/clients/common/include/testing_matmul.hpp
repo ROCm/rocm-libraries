@@ -142,6 +142,19 @@ hipblasLtOrder_t orderForDatatype(hipDataType datatype)
     }
 }
 
+// gfx950 ships the F4 subtile swizzle (K padded to 32 B); other archs follow the enum (64 B).
+inline bool swizzleDeviceIsGfx950()
+{
+    static const bool isGfx950 = [] {
+        int device = 0;
+        hipDeviceProp_t props;
+        return hipGetDevice(&device) == hipSuccess
+               && hipGetDeviceProperties(&props, device) == hipSuccess
+               && !strncmp(props.gcnArchName, "gfx950", 6);
+    }();
+    return isGfx950;
+}
+
 void calculateKforSwizzling(
     hipDataType datatype, const Arguments& arg, size_t& MiK, size_t& MiKv, size_t& PackK)
 {
@@ -194,6 +207,23 @@ void calculateKforSwizzling(
     }
 
     PackK = 16 / MiKv / realDataTypeSize(datatype);
+}
+
+// K blocks (MiK * PackK) that K is rounded up to a multiple of: 2 for F4 off gfx950 (64 B).
+inline size_t swizzleKBlockMultiple(hipDataType datatype)
+{
+    return (static_cast<int>(datatype) == HIP_R_4F_E2M1 && !swizzleDeviceIsGfx950()) ? 2 : 1;
+}
+
+// K padding unit in elements. gfx950 F4 keeps its original value.
+size_t swizzledKPadUnitElements(hipDataType datatype, const Arguments& arg)
+{
+    size_t MiK = 0, MiKv = 0, PackK = 0;
+    calculateKforSwizzling(datatype, arg, MiK, MiKv, PackK);
+    size_t unit = MiK * PackK * swizzleKBlockMultiple(datatype);
+    if(static_cast<int>(datatype) == HIP_R_4F_E2M1 && !swizzleDeviceIsGfx950())
+        unit *= 2;
+    return unit;
 }
 
 template <typename T,
@@ -403,7 +433,8 @@ void swizzle_tensor(T*               dst,
     const size_t K1  = MiK / MiKv;
     const size_t MK  = MiK * PackK;
     const size_t nMo = (m_n + MiM_N - 1) / MiM_N;
-    const size_t nKo = (k + MK - 1) / MK;
+    const size_t nKo = ((k + MK - 1) / MK + swizzleKBlockMultiple(datatype) - 1)
+                       / swizzleKBlockMultiple(datatype) * swizzleKBlockMultiple(datatype);
 #pragma omp parallel for collapse(2) schedule(static)
     for(size_t bb = 0; bb < b; bb++)
         for(size_t mo = 0; mo < nMo; mo++)
@@ -578,7 +609,8 @@ hipError_t swizzle_operand_device(HipDeviceBuffer& dBuf,
     const size_t K1         = MiK / MiKv;
     const size_t MK         = MiK * PackK;
     const size_t nMo        = (m_n + 15) / 16;
-    const size_t nKo        = (kElems + MK - 1) / MK;
+    const size_t kMult      = swizzleKBlockMultiple(datatype);
+    const size_t nKo        = ((kElems + MK - 1) / MK + kMult - 1) / kMult * kMult;
     const size_t total      = b * nMo * 16 * nKo * MK;
     const size_t outBytes   = total * elemBytes;
     const size_t blockBytes = dBuf.getNumBytes() / block_count;
@@ -2874,9 +2906,8 @@ void testing_matmul_with_bias(const Arguments& arg,
         stride_da[i] = stride_a[i];
         if(do_swizzle_a)
         {
-            size_t MiM = 16, MiK = 0, __ = 0, PackK = 0;
-            calculateKforSwizzling(TiA, arg, MiK, __, PackK);
-            size_t  K_block = MiK * PackK;
+            size_t MiM = 16;
+            size_t  K_block = swizzledKPadUnitElements(TiA, arg);
             int64_t stride_swizzle
                 = ((M[i] + MiM - 1) / MiM) * MiM * ((K[i] + K_block - 1) / K_block) * K_block;
             if(do_batched[i] && stride_a[i] != 0)
@@ -2905,9 +2936,8 @@ void testing_matmul_with_bias(const Arguments& arg,
         stride_db[i] = stride_b[i];
         if(do_swizzle_b)
         {
-            size_t MiN = 16, MiK = 0, __ = 0, PackK = 0;
-            calculateKforSwizzling(TiB, arg, MiK, __, PackK);
-            size_t  K_block = MiK * PackK;
+            size_t MiN = 16;
+            size_t  K_block = swizzledKPadUnitElements(TiB, arg);
             int64_t stride_swizzle
                 = ((N[i] + MiN - 1) / MiN) * MiN * ((K[i] + K_block - 1) / K_block) * K_block;
             if(do_batched[i] && stride_b[i] != 0)
@@ -3579,6 +3609,12 @@ void testing_matmul_with_bias(const Arguments& arg,
                 case HIPBLASLT_EPILOGUE_GELU_BIAS:
                     epilogue[i] = HIPBLASLT_EPILOGUE_GELU_AUX_BIAS;
                     break;
+                case HIPBLASLT_EPILOGUE_SWISH_EXT:
+                    epilogue[i] = HIPBLASLT_EPILOGUE_SWISH_AUX_EXT;
+                    break;
+                case HIPBLASLT_EPILOGUE_SWISH_BIAS_EXT:
+                    epilogue[i] = HIPBLASLT_EPILOGUE_SWISH_AUX_BIAS_EXT;
+                    break;
                 case HIPBLASLT_EPILOGUE_CLAMP_EXT:
                     epilogue[i] = HIPBLASLT_EPILOGUE_CLAMP_AUX_EXT;
                     break;
@@ -3743,8 +3779,11 @@ void testing_matmul_with_bias(const Arguments& arg,
 
             // Naming: dX is in GPU (device) memory. hK is in CPU (host) memory
             // MX operands are generated on the host, so they keep their host copy.
-            hA.emplace_back(TiA, fast_check_only && !isBlockScaling(arg.scaleA) ? 0 : size_A[i]);
-            hB.emplace_back(TiB, fast_check_only && !isBlockScaling(arg.scaleB) ? 0 : size_B[i]);
+            // synchronize(dX, hX) copies the whole padded device buffer, so hX must cover it.
+            const size_t hostElemsA = do_swizzle_a ? std::max(size_A[i], size_dA[i]) : size_A[i];
+            const size_t hostElemsB = do_swizzle_b ? std::max(size_B[i], size_dB[i]) : size_B[i];
+            hA.emplace_back(TiA, fast_check_only && !isBlockScaling(arg.scaleA) ? 0 : hostElemsA);
+            hB.emplace_back(TiB, fast_check_only && !isBlockScaling(arg.scaleB) ? 0 : hostElemsB);
             // With c_equal_d, hC restores the shared C/D buffer before each solution.
             hC.emplace_back(To, fast_check_only && !arg.c_equal_d ? 0 : size_C[i]);
             hD_gold.emplace_back(To, size_D_copy[i]);
@@ -3857,8 +3896,8 @@ void testing_matmul_with_bias(const Arguments& arg,
                 }
 
                 // Naming: dX is in GPU (device) memory. hK is in CPU (host) memory
-                hA.emplace_back(TiA, size_A[i]);
-                hB.emplace_back(TiB, size_B[i]);
+                hA.emplace_back(TiA, do_swizzle_a ? std::max(size_A[i], size_dA[i]) : size_A[i]);
+                hB.emplace_back(TiB, do_swizzle_b ? std::max(size_B[i], size_dB[i]) : size_B[i]);
                 hC.emplace_back(To, size_C[i]);
                 hD_gold.emplace_back(To, size_D_copy[i]);
                 hD_1.emplace_back(To, size_D_copy[i]);

@@ -25,12 +25,15 @@
 
 #include <algorithm>
 #include <array>
+#include <cassert>
 #include <iostream>
 #include <iterator>
+#include <limits>
 #include <optional>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
+#include <utility>
 #include <vector>
 
 #define DEBUG_TYPE "InsertWaitAluPass"
@@ -43,6 +46,7 @@
 #include "stinkytofu/hardware/ArchHelper.hpp"
 #include "stinkytofu/hardware/HWModel.hpp"
 #include "stinkytofu/hardware/HwReg.hpp"
+#include "stinkytofu/ir/asm/OperandHalves.hpp"
 #include "stinkytofu/ir/asm/RegHalfKeyer.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
 #include "stinkytofu/ir/asm/StinkyModifiers.hpp"
@@ -54,9 +58,8 @@ using namespace stinkytofu;
 struct WaitAluContext {
     InsertWaitAluOptions opts;
     const HWModel::WaitHide* waitHide = nullptr;
-    // Saturation point for VgprStamp::xdlSince, so the age stays finite and the analysis
-    // converges.
-    unsigned xdlSinceCap = 0;
+    // Saturation point for every stamp age, so the ages stay finite and the analysis converges.
+    unsigned ageCap = 0;
 };
 
 // TEMP HACK gate. When true, suppress the va_vdst wait for the VGPR-source (RAW)
@@ -155,10 +158,6 @@ inline const char* vaPipeName(VaPipe p) {
     return "?";
 }
 
-inline const char* counterName(CounterType c) {
-    return c == CT_VA_VDST ? "va_vdst" : "vm_vsrc";
-}
-
 inline const char* eventName(WaitEventType e) {
     switch (e) {
         case EV_VGPR_CSMACC_WRITE:
@@ -180,30 +179,99 @@ inline const char* eventName(WaitEventType e) {
     }
 }
 
-// Render one WaitHide entry for the debug banner; 0 reads as off.
+// Render one WaitHide count for the debug banner; 0 reads as off.
 inline std::string waitHideStr(int v) {
     return v > 0 ? std::to_string(v) : std::string("0(off)");
 }
 
-// True when the count meets the arch entry, with step scaling it into the entry's units.
-inline bool waitHideSatisfied(unsigned count, unsigned step, int required) {
-    if (required <= 0) return false;
-    return count >= static_cast<unsigned>(required) * step;
+using Hide = HWModel::WaitHide::Hide;
+using RoleHide = HWModel::WaitHide::RoleHide;
+using RuleSet = HWModel::WaitHide::RuleSet;
+using HideForm = HWModel::WaitHide::Form;
+
+// A stamp's role: the producer wrote the VGPR (dst) or read it (src).
+enum Role : uint8_t {
+    ROLE_DST = 0,
+    ROLE_SRC = 1,
+    NUM_ROLES = 2,
+};
+
+inline const char* roleName(Role r) {
+    return r == ROLE_DST ? "dst" : "src";
 }
 
-// Row matching a form's cost latency and destination width, or nullptr if none.
-inline const HWModel::WaitHide::Form* waitHideForm(const HWModel::WaitHide& wh, int costLatency,
-                                                   int dstVgprs) {
-    for (const auto& form : wh.forms)
-        if (form.costLatency == costLatency && form.dstVgprs == dstVgprs) return &form;
-    return nullptr;
+// Producer classes whose mixed rule carries its own "VALUs after the lead" counter.
+enum HideClass : uint8_t {
+    CLASS_XDL = 0,
+    CLASS_CSMACC = 1,
+    CLASS_DPMACC = 2,
+    NUM_HIDE_CLASSES = 3,
+};
+
+inline HideClass hideClassOfPipe(VaPipe p) {
+    switch (p) {
+        case PIPE_XDL:
+            return CLASS_XDL;
+        case PIPE_DPMACC:
+            return CLASS_DPMACC;
+        default:
+            return CLASS_CSMACC;
+    }
 }
 
-// Largest value xdlSince is compared against, at the largest step it can take.
-inline unsigned computeXdlSinceCap(const HWModel::WaitHide& wh) {
+inline VaPipe pipeOfHideClass(HideClass c) {
+    switch (c) {
+        case CLASS_XDL:
+            return PIPE_XDL;
+        case CLASS_DPMACC:
+            return PIPE_DPMACC;
+        default:
+            return PIPE_CSMACC;
+    }
+}
+
+inline const RoleHide& roleRules(const RuleSet& rs, Role r) {
+    return (r == ROLE_SRC && rs.src.any()) ? rs.src : rs.dst;
+}
+
+// Row matching a form's cost latency, destination width and scaling, or nullptr if none. A
+// scaled op with no scaled row takes the unscaled one.
+inline const HideForm* waitHideForm(const HWModel::WaitHide& wh, int costLatency, int dstVgprs,
+                                    bool scaled) {
+    const HideForm* unscaled = nullptr;
+    for (const auto& form : wh.forms) {
+        if (form.costLatency != costLatency || form.dstVgprs != dstVgprs) continue;
+        if (form.scaled == scaled) return &form;
+        if (!form.scaled) unscaled = &form;
+    }
+    return scaled ? unscaled : nullptr;
+}
+
+// Visit every rule set of the table.
+template <typename Fn>
+inline void forEachRuleSet(const HWModel::WaitHide& wh, Fn&& fn) {
+    for (const auto& form : wh.forms) {
+        fn(form.xdl);
+        fn(form.csmacc);
+    }
+    fn(wh.noLatchCsmacc);
+    fn(wh.dpmacc);
+}
+
+template <typename Fn>
+inline void forEachHide(const RoleHide& rh, Fn&& fn) {
+    fn(rh.wmma);
+    fn(rh.mix);
+    fn(rh.valu);
+}
+
+// Saturation point of every age: past it every rule is met, so the analysis converges.
+inline unsigned computeAgeCap(const HWModel::WaitHide& wh) {
     int maxHide = 0;
-    for (const auto& form : wh.forms)
-        maxHide = std::max({maxHide, form.csmaccVaVdst, form.xdlVaVdst});
+    forEachRuleSet(wh, [&](const RuleSet& rs) {
+        for (const RoleHide* rh : {&rs.dst, &rs.src})
+            forEachHide(*rh, [&](const Hide& h) { maxHide = std::max(maxHide, h.lead + h.tail); });
+    });
     return 2 * static_cast<unsigned>(maxHide);
 }
 
@@ -250,24 +318,6 @@ inline bool hasMatrixScalePair(const StinkyInstruction& inst) {
     return mc == MicrocodeFormat::MC_VOP3PX2 || mc == MicrocodeFormat::MC_VOP3PX3;
 }
 
-// Walk `regs`, skipping non-VGPR ones, and invoke fn(vgprIdx, half) for each
-// VGPR. halfFn maps an operand's position (VGPR-only) to its True16 half
-// selector, so fn may act at half-word (LOW/HIGH) granularity. Callers pass a
-// single operand list (getSrcRegs or getDestRegs) — never both, since src and
-// dst use different half selectors. Shared by producer stamping and consumer
-// probing.
-template <typename HalfFn, typename Fn>
-inline void forEachVGPR(const std::vector<StinkyRegister>& regs, HalfFn&& halfFn, Fn&& fn) {
-    size_t opIdx = 0;
-    for (const auto& reg : regs) {
-        if (reg.dataType != StinkyRegister::Type::Register) continue;
-        if (reg.reg.type != RegType::V) continue;
-        HighBitSel half = halfFn(opIdx);
-        ++opIdx;
-        for (uint16_t off = 0; off < reg.reg.num; ++off) fn(reg.reg.idx + off, half);
-    }
-}
-
 inline int wmmaDstVgprs(const StinkyInstruction& inst) {
     for (const auto& r : inst.getDestRegs())
         if (r.dataType == StinkyRegister::Type::Register && r.reg.type == RegType::V)
@@ -290,23 +340,6 @@ inline bool writesExec(const StinkyInstruction& inst) {
 
 inline bool isWaitAluInst(const StinkyInstruction& inst) {
     return inst.getUnifiedOpcode() == GFX::s_wait_alu;
-}
-
-// ---------------------------------------------------------------------------
-// True16 half-selectors
-// ---------------------------------------------------------------------------
-
-// True16 half-selector for dest operand index `destIdx` (only operand 0 and 1
-// can have a True16 dst-half). Falls through to NONE without modifier.
-inline HighBitSel destHalfSel(const True16Modifiers* mod, size_t destIdx) {
-    if (!mod) return HighBitSel::NONE;
-    if (destIdx == 0) return mod->getDst0();
-    if (destIdx == 1) return mod->getDst1();
-    return HighBitSel::NONE;
-}
-
-inline HighBitSel srcHalfSel(const True16Modifiers* mod, size_t srcIdx) {
-    return mod ? mod->getSrc(srcIdx) : HighBitSel::NONE;
 }
 
 // ---------------------------------------------------------------------------
@@ -354,8 +387,32 @@ inline unsigned maxEmittableWait(CounterType c) {
 // WaitcntBrackets — per-pipe/per-FIFO scoreboard with per-VGPR stamps
 // ---------------------------------------------------------------------------
 
+// One hazard role of a VGPR: its newest producer per pipe and the AgeClock readings taken when
+// it stamped. The rules compare ages, which survive a merge.
+struct RoleStamp {
+    static constexpr unsigned kNotMet = ~0u;
+    std::array<unsigned, NUM_VA_PIPE> ord = {};
+    // This producer's ticket in the shared VA order.
+    unsigned ordShared = 0;
+    // Shared ticket just before the nearest anchor issued after this producer, or 0 until one has.
+    unsigned nextAnchorShared = 0;
+    // AgeClock readings when this producer stamped.
+    unsigned matrixAt = 0;
+    unsigned valuAt = 0;
+    // VALU reading when the class's mixed-rule lead was met; set only by a join, otherwise the
+    // clock's ring answers (valuAfterLead).
+    std::array<unsigned, NUM_HIDE_CLASSES> valuAtLead = {kNotMet, kNotMet, kNotMet};
+
+    // Whether the stamp names a producer at all, live or retired.
+    bool hasProducer() const {
+        for (int p = 0; p < NUM_VA_PIPE; ++p)
+            if (ord[p] != 0) return true;
+        return false;
+    }
+};
+
 struct VgprStamp {
-    std::array<unsigned, NUM_VA_PIPE> vaOrd = {};
+    std::array<RoleStamp, NUM_ROLES> role = {};
     unsigned vmOrdLds = 0;
     unsigned vmOrdTex = 0;
     // Both vm ordinals from one flat_*.
@@ -363,17 +420,41 @@ struct VgprStamp {
     // Oldest op holding a ticket in both classes that issued after this producer; 0 when none.
     unsigned anchorLds = 0;
     unsigned anchorTex = 0;
-    // This producer's ticket in the shared VA order.
-    unsigned vaOrdShared = 0;
-    // Shared ticket just before the nearest anchor issued after this producer, or 0 until one has.
-    unsigned nextAnchorShared = 0;
-    // Matrix-op steps since this producer stamped, saturating at xdlSinceCap. An age, not
-    // a position: a merge rebases positions, and an age survives that.
-    unsigned xdlSince = 0;
-    // An op outside the modeled set issued after this producer stamped, which breaks the hide
-    // below. Monotone, so a join can only ever set it.
-    bool unmodeledSince = false;
 };
+
+// The counters ages are measured against; the ring keeps the VALU reading per matrix ordinal.
+struct AgeClock {
+    static constexpr unsigned kRing = 64;
+    unsigned matrix = 0;
+    unsigned valu = 0;
+    std::array<unsigned, kRing> valuAtMatrix = {};
+
+    void tickMatrix(unsigned inc) {
+        for (unsigned u = matrix + 1; u <= matrix + inc; ++u) valuAtMatrix[u % kRing] = valu;
+        matrix += inc;
+    }
+};
+
+enum class HideKind { Wmma, Mix, Valu };
+
+inline const Hide& hideOf(const RoleHide& rh, HideKind k) {
+    switch (k) {
+        case HideKind::Wmma:
+            return rh.wmma;
+        case HideKind::Mix:
+            return rh.mix;
+        default:
+            return rh.valu;
+    }
+}
+
+// A producer that still forces a consumer's va_vdst wait; collected for the tracker's bounds.
+struct Blocker {
+    const RoleStamp* rs;
+    Role r;
+    VaPipe p;
+};
+using Blockers = std::vector<Blocker>;
 
 class WaitcntBrackets {
    public:
@@ -393,29 +474,170 @@ class WaitcntBrackets {
         return scores.size();
     }
 
-    // Whether these counts are the form already latched.
-    bool sameXdlForm(unsigned inc, int hideXdl, int hideCsmacc) const {
-        return inc == xdlInc && hideXdl == xdlHideXdl && hideCsmacc == xdlHideCsmacc;
+    // Whether `form` at step `inc` is the form already latched.
+    bool sameXdlForm(unsigned inc, const HideForm* form) const {
+        return inc == xdlInc && form == form_;
     }
 
-    // Latch this matrix op's hide counts, or note a second form so the rules switch off.
+    // Latch this matrix op's form, or note a second form so the form rules switch off.
     void latchXdlForm(const StinkyInstruction& inst, unsigned inc) {
-        const auto* form =
-            ctx->waitHide == nullptr
-                ? nullptr
-                : waitHideForm(*ctx->waitHide, inst.latencyCycles, wmmaDstVgprs(inst));
-        const int hideXdl = form != nullptr ? form->xdlVaVdst : 0;
-        const int hideCsmacc = form != nullptr ? form->csmaccVaVdst : 0;
+        const HideForm* form = ctx->waitHide == nullptr
+                                   ? nullptr
+                                   : waitHideForm(*ctx->waitHide, inst.latencyCycles,
+                                                  wmmaDstVgprs(inst), hasMatrixScalePair(inst));
         if (!xdlIncSeen) {
-            // One kernel issues one form, so the first op's counts stand for the kernel.
+            // One kernel issues one form, so the first op's row stands for the kernel.
             xdlInc = inc;
-            xdlHideXdl = hideXdl;
-            xdlHideCsmacc = hideCsmacc;
+            form_ = form;
             xdlIncSeen = true;
-        } else if (!sameXdlForm(inc, hideXdl, hideCsmacc)) {
-            // A second form: disable both rules rather than pick one.
+        } else if (!sameXdlForm(inc, form)) {
+            // A second form: disable the form rules rather than pick one.
             xdlFormMixed = true;
         }
+    }
+
+    // The rules in force for producers in pipe `p`; nullptr = always wait. A CSMACC producer
+    // takes the no-latch rules until a form is latched, a TRANS producer always.
+    const RuleSet* rulesFor(VaPipe p) const {
+        if (ctx->waitHide == nullptr) return nullptr;
+        const bool formRules = xdlIncSeen && !xdlFormMixed && form_ != nullptr;
+        switch (p) {
+            case PIPE_XDL:
+                return formRules ? &form_->xdl : nullptr;
+            case PIPE_CSMACC:
+                return formRules ? &form_->csmacc : &ctx->waitHide->noLatchCsmacc;
+            case PIPE_DPMACC:
+                return &ctx->waitHide->dpmacc;
+            case PIPE_TRANS:
+                return &ctx->waitHide->noLatchCsmacc;
+            default:
+                return nullptr;
+        }
+    }
+
+    // Ages of a stamp, each saturating at the age cap so the analysis converges.
+    unsigned cap(unsigned age) const {
+        return std::min(ctx->ageCap, age);
+    }
+    unsigned matrixSince(const RoleStamp& rs) const {
+        return cap(clock.matrix - rs.matrixAt);
+    }
+    unsigned valuSince(const RoleStamp& rs) const {
+        return cap(clock.valu - rs.valuAt);
+    }
+    // VALUs issued after the lead (`leadUnits` matrix ordinals) was met; 0 before that. Past
+    // the ring the cap stands in: by then every rule with a matrix count is met anyway.
+    unsigned valuAfterLead(const RoleStamp& rs, HideClass c, unsigned leadUnits) const {
+        if (leadUnits == 0) return valuSince(rs);
+        const unsigned leadOrd = rs.matrixAt + leadUnits;
+        if (clock.matrix < leadOrd) return 0;
+        if (rs.valuAtLead[c] != RoleStamp::kNotMet) return cap(clock.valu - rs.valuAtLead[c]);
+        if (clock.matrix - leadOrd < AgeClock::kRing)
+            return cap(clock.valu - clock.valuAtMatrix[leadOrd % AgeClock::kRing]);
+        return ctx->ageCap;
+    }
+
+    // Tail slots the VALUs issued after this producer fill for rule `t` of kind `k`: a mixed
+    // rule counts them only after its lead, a no-order rule from the producer.
+    unsigned tailCount(const RoleStamp& rs, HideKind k, const Hide& t, HideClass c) const {
+        switch (k) {
+            case HideKind::Wmma:
+                return 0;
+            case HideKind::Mix:
+                return valuAfterLead(rs, c, static_cast<unsigned>(t.lead) * xdlInc);
+            default:
+                return valuSince(rs);
+        }
+    }
+
+    // `t` is met: the lead matrix ops issued, then matrix ops (`slots` each) and VALUs fill the
+    // tail; a VALU-only rule counts VALUs alone. Monotone in every age.
+    bool hideSatisfied(const RoleStamp& rs, HideKind k, const Hide& t, HideClass c,
+                       int slots) const {
+        if (!t.on()) return false;
+        const unsigned leadOrd = static_cast<unsigned>(t.lead) * xdlInc;
+        const unsigned ms = matrixSince(rs);
+        if (ms < leadOrd) return false;
+        const unsigned matrixSlots =
+            k == HideKind::Valu
+                ? 0
+                : (ms - leadOrd) / xdlInc * static_cast<unsigned>(std::max(slots, 0));
+        return matrixSlots + tailCount(rs, k, t, c) >= static_cast<unsigned>(t.tail);
+    }
+
+    // Any rule of the role is met.
+    bool roleHidden(const RoleStamp& rs, const RoleHide& rh, HideClass c, int slots) const {
+        for (HideKind k : {HideKind::Wmma, HideKind::Mix, HideKind::Valu})
+            if (hideSatisfied(rs, k, hideOf(rh, k), c, slots)) return true;
+        return false;
+    }
+
+    // Fewest `op`s until some rule of `rh` hides `rs`; -1 if none ever does. Bounds
+    // countUntilFree's scan; hideSatisfied decides.
+    int stepsUntilHidden(const RoleStamp& rs, const RoleHide& rh, HideClass c, int slots,
+                         WaitAluHideOp op) const {
+        const bool wmma = op == WaitAluHideOp::Wmma;
+        const unsigned step = xdlInc;
+        const unsigned fill = static_cast<unsigned>(std::max(slots, 0));
+        // Tail slots one op fills: a matrix op `fill`, a VALU one.
+        const unsigned perStep = wmma ? fill : 1u;
+        const unsigned ms = matrixSince(rs);
+        int best = -1;
+        auto consider = [&](int n) {
+            if (n >= 0 && (best < 0 || n < best)) best = n;
+        };
+        auto ceilDiv = [](unsigned a, unsigned b) { return static_cast<int>((a + b - 1) / b); };
+        auto remaining = [](unsigned have, unsigned need) {
+            return need > have ? need - have : 0u;
+        };
+        if (rh.wmma.on() && wmma)
+            consider(ceilDiv(remaining(ms, static_cast<unsigned>(rh.wmma.lead) * step), step));
+        if (rh.mix.on()) {
+            const Hide& t = rh.mix;
+            const unsigned leadOrd = static_cast<unsigned>(t.lead) * step;
+            const unsigned tail = static_cast<unsigned>(t.tail);
+            if (ms >= leadOrd) {
+                const unsigned have =
+                    (ms - leadOrd) / step * fill + tailCount(rs, HideKind::Mix, t, c);
+                if (have >= tail)
+                    consider(0);
+                else if (perStep > 0)
+                    consider(ceilDiv(tail - have, perStep));
+            } else if (wmma) {
+                // To the lead first; the op that meets it and everything after fill the tail.
+                const int toLead = ceilDiv(leadOrd - ms, step);
+                const unsigned past = static_cast<unsigned>(toLead) * step - (leadOrd - ms);
+                const unsigned have = past / step * fill;
+                if (have >= tail)
+                    consider(toLead);
+                else if (perStep > 0)
+                    consider(toLead + ceilDiv(tail - have, perStep));
+            }
+        }
+        if (rh.valu.on()) {
+            const unsigned need = remaining(valuSince(rs), static_cast<unsigned>(rh.valu.tail));
+            if (need == 0)
+                consider(0);
+            else if (!wmma)
+                consider(static_cast<int>(need));
+        }
+        return best;
+    }
+
+    // The mixed rule's remainder for `rs`: matrix ops short of the lead, then tail slots left
+    // once it is met. {-1, 0} when the role has no mixed rule.
+    std::pair<int, int> mixGap(const RoleStamp& rs, const RoleHide& rh, HideClass c,
+                               int slots) const {
+        if (!rh.mix.on()) return {-1, 0};
+        const Hide& t = rh.mix;
+        const unsigned step = xdlInc;
+        const unsigned leadOrd = static_cast<unsigned>(t.lead) * step;
+        const unsigned ms = matrixSince(rs);
+        if (ms < leadOrd) return {static_cast<int>((leadOrd - ms + step - 1) / step), t.tail};
+        const unsigned have = (ms - leadOrd) / step * static_cast<unsigned>(std::max(slots, 0)) +
+                              tailCount(rs, HideKind::Mix, t, c);
+        const unsigned tail = static_cast<unsigned>(t.tail);
+        return {0, have >= tail ? 0 : static_cast<int>(tail - have)};
     }
 
     // Per-queue rebasing data for one join, filled before any stamp is touched.
@@ -458,28 +680,78 @@ class WaitcntBrackets {
             strictDom = true;
     }
 
-    // Join the per-stamp ages. Keep the fewer matrix ops: the harder one to satisfy.
-    static void mergeStampAge(VgprStamp& s, const VgprStamp* o, bool myVa, bool oVa,
-                              bool& strictDom) {
-        // A path with no VA producer carries no age.
-        if (!oVa) return;
-        if (!myVa) {
-            if (s.xdlSince != o->xdlSince || s.unmodeledSince != o->unmodeledSince)
-                strictDom = true;
-            s.xdlSince = o->xdlSince;
-            s.unmodeledSince = o->unmodeledSince;
+    // Each hide class's mixed-rule lead per role, in matrix ordinals; 0 without a mixed rule.
+    using LeadUnits = std::array<std::array<unsigned, NUM_ROLES>, NUM_HIDE_CLASSES>;
+    LeadUnits leadUnits() const {
+        LeadUnits leads{};
+        for (int c = 0; c < NUM_HIDE_CLASSES; ++c) {
+            const RuleSet* set = rulesFor(pipeOfHideClass(static_cast<HideClass>(c)));
+            if (set == nullptr) continue;
+            for (int r = 0; r < NUM_ROLES; ++r) {
+                const Hide& mix = roleRules(*set, static_cast<Role>(r)).mix;
+                if (mix.lead > 0 && mix.tail > 0)
+                    leads[c][r] = static_cast<unsigned>(mix.lead) * xdlInc;
+            }
+        }
+        return leads;
+    }
+
+    // One role stamp's ages as the rules read them; what a join compares and carries.
+    struct Ages {
+        unsigned matrix = 0;
+        unsigned valu = 0;
+        std::array<unsigned, NUM_HIDE_CLASSES> afterLead = {};
+    };
+    Ages agesOf(const RoleStamp& rs, Role r, const LeadUnits& leads) const {
+        Ages a{matrixSince(rs), valuSince(rs), {}};
+        for (int c = 0; c < NUM_HIDE_CLASSES; ++c)
+            a.afterLead[c] =
+                leads[c][r] == 0 ? 0 : valuAfterLead(rs, static_cast<HideClass>(c), leads[c][r]);
+        return a;
+    }
+    // Store `a` as readings of clock `at`. A met lead keeps its reading (the ring it would read
+    // predates the join); an unmet one stays unmet, its ordinal is still ahead.
+    static void writeAges(RoleStamp& rs, const Ages& a, const AgeClock& at, Role r,
+                          const LeadUnits& leads) {
+        rs.matrixAt = at.matrix - std::min(a.matrix, at.matrix);
+        rs.valuAt = at.valu - std::min(a.valu, at.valu);
+        for (int c = 0; c < NUM_HIDE_CLASSES; ++c) {
+            const unsigned lead = leads[c][r];
+            rs.valuAtLead[c] = lead != 0 && a.matrix >= lead
+                                   ? at.valu - std::min(a.afterLead[c], at.valu)
+                                   : RoleStamp::kNotMet;
+        }
+    }
+
+    // Join one role's ages: the smaller of each; only a smaller age reports strictDom.
+    void mergeStampAge(RoleStamp& s, const RoleStamp* o, bool myVa, bool oVa, Role r,
+                       const WaitcntBrackets& other, const AgeClock& merged, const LeadUnits& leads,
+                       bool& strictDom) const {
+        Ages mine = myVa ? agesOf(s, r, leads) : Ages{};
+        if (oVa) {
+            const Ages theirs = other.agesOf(*o, r, leads);
+            if (!myVa) {
+                // The ordinal merge reports an arriving producer; a stamp without one never
+                // reads its ages.
+                mine = theirs;
+            } else {
+                auto takeMin = [&](unsigned& m, unsigned t, const char* what) {
+                    if (t < m) {
+                        PASS_DEBUG(std::cerr << "[InsertWaitAlu]   widen slot=" << what << " " << m
+                                             << "->" << t << "\n");
+                        m = t;
+                        strictDom = true;
+                    }
+                };
+                takeMin(mine.matrix, theirs.matrix, "matrixSince");
+                takeMin(mine.valu, theirs.valu, "vSince");
+                for (int c = 0; c < NUM_HIDE_CLASSES; ++c)
+                    takeMin(mine.afterLead[c], theirs.afterLead[c], "valuAfterLead");
+            }
+        } else if (!myVa) {
             return;
         }
-        if (o->unmodeledSince && !s.unmodeledSince) {
-            s.unmodeledSince = true;
-            strictDom = true;
-        }
-        if (o->xdlSince < s.xdlSince) {
-            PASS_DEBUG(std::cerr << "[InsertWaitAlu]   widen slot=xdlSince " << s.xdlSince << "->"
-                                 << o->xdlSince << "\n");
-            s.xdlSince = o->xdlSince;
-            strictDom = true;
-        }
+        writeAges(s, mine, merged, r, leads);
     }
 
     // Join the latched form; paths that disagree are a mixed kernel.
@@ -488,30 +760,33 @@ class WaitcntBrackets {
         const bool wasMixed = xdlFormMixed;
         const bool wasSeen = xdlIncSeen;
         xdlFormMixed = xdlFormMixed || other.xdlFormMixed ||
-                       (xdlIncSeen && other.xdlIncSeen &&
-                        !sameXdlForm(other.xdlInc, other.xdlHideXdl, other.xdlHideCsmacc));
+                       (xdlIncSeen && other.xdlIncSeen && !sameXdlForm(other.xdlInc, other.form_));
         if (!xdlIncSeen && other.xdlIncSeen) {
             xdlInc = other.xdlInc;
-            xdlHideXdl = other.xdlHideXdl;
-            xdlHideCsmacc = other.xdlHideCsmacc;
+            form_ = other.form_;
         }
         xdlIncSeen = xdlIncSeen || other.xdlIncSeen;
         if (xdlFormMixed != wasMixed || xdlIncSeen != wasSeen) strictDom = true;
     }
 
-    // Record this op against every stamp already written. This op is not its own follower,
-    // so the stamps it writes are reset to zero below, after this.
+    // Move the clock for this op; an anchor pipe also anchors the stamps that have none yet.
     void noteIssue(VaPipe pipe, unsigned inc) {
-        if (pipe != PIPE_XDL && pipe != PIPE_DPMACC && pipe != PIPE_TRANS) return;
-        for (auto& [k, s] : scores) {
-            if (pipe == PIPE_XDL)
-                s.xdlSince = std::min(ctx->xdlSinceCap, s.xdlSince + inc);
-            else
-                // Outside the modeled set: mark every live producer so the hide declines.
-                s.unmodeledSince = true;
-            // vaUB counts this op, so vaUB - inc is the ticket before it. First anchor wins.
-            if (isAnchorPipe(pipe) && s.nextAnchorShared == 0) s.nextAnchorShared = vaUB - inc;
+        switch (pipe) {
+            case PIPE_XDL:
+                clock.tickMatrix(inc);
+                break;
+            case PIPE_CSMACC:
+            case PIPE_DPMACC:
+                ++clock.valu;
+                break;
+            default:
+                break;
         }
+        if (!isAnchorPipe(pipe)) return;
+        // vaUB counts this op, so vaUB - inc is the ticket before it. First anchor wins.
+        for (auto& [k, s] : scores)
+            for (RoleStamp& rs : s.role)
+                if (rs.nextAnchorShared == 0) rs.nextAnchorShared = vaUB - inc;
     }
 
     // An op holding a ticket in both classes anchors every older producer. First anchor wins.
@@ -534,8 +809,6 @@ class WaitcntBrackets {
     void onProducer(WaitEventType ev, const StinkyInstruction& inst, const VGPRHalfKeyer& keyer) {
         CounterType ct = counterFromEvent(ev);
 
-        const True16Modifiers* true16Mod = inst.getModifier<True16Modifiers>();
-
         if (ct == CT_VA_VDST) {
             VaPipe pipe = vaPipeOfEvent(ev);
             unsigned inc = hasMatrixScalePair(inst) ? 2u : 1u;
@@ -550,25 +823,27 @@ class WaitcntBrackets {
                                  << " ub=" << vaPipeUB[pipe] << " lb=" << vaPipeLB[pipe] << "]"
                                  << " (mnemonic=" << inst.getHwInstDesc()->mnemonic << ")\n");
 
-            auto stampVA = [&](unsigned idx, HighBitSel half) {
+            // A write stamps the dst role, a read the src role; the other role keeps its producer.
+            auto stampVA = [&](unsigned idx, HighBitSel half, Role r) {
                 RegKey k = keyer.producerKey(idx, half);
-                VgprStamp& s = scores[k];
-                s.vaOrd[pipe] = ord;
-                s.vaOrdShared = vaUB;
-                s.xdlSince = 0;
-                s.nextAnchorShared = 0;
-                s.unmodeledSince = false;
+                RoleStamp& rs = scores[k].role[r];
+                if (r == ROLE_DST) rs.ord.fill(0);
+                rs.ord[pipe] = ord;
+                rs.ordShared = vaUB;
+                rs.nextAnchorShared = 0;
+                rs.matrixAt = clock.matrix;
+                rs.valuAt = clock.valu;
+                rs.valuAtLead.fill(RoleStamp::kNotMet);
                 PASS_DEBUG(std::cerr << "[InsertWaitAlu]     stamp va v" << k.idx << "("
-                                     << halfName(k.half) << ") [pipe=" << vaPipeName(pipe)
-                                     << " ord=" << ord << "]\n");
+                                     << halfName(k.half) << "," << roleName(r)
+                                     << ") [pipe=" << vaPipeName(pipe) << " ord=" << ord << "]\n");
             };
             if (ctx->opts.enableESM2TrackValuVsrc)
-                forEachVGPR(
-                    inst.getSrcRegs(), [&](size_t i) { return srcHalfSel(true16Mod, i); },
-                    [&](unsigned idx, HighBitSel half) { stampVA(idx, half); });
-            forEachVGPR(
-                inst.getDestRegs(), [&](size_t i) { return destHalfSel(true16Mod, i); },
-                [&](unsigned idx, HighBitSel half) { stampVA(idx, half); });
+                forEachVgprHalf(inst, OperandSide::Src, [&](unsigned idx, HighBitSel half) {
+                    stampVA(idx, half, ROLE_SRC);
+                });
+            forEachVgprHalf(inst, OperandSide::Dst,
+                            [&](unsigned idx, HighBitSel half) { stampVA(idx, half, ROLE_DST); });
             return;
         }
 
@@ -606,15 +881,13 @@ class WaitcntBrackets {
                                  << "]\n");
         };
         // VM_VSRC tracks in-flight VMEM reads, which are always full DWORD.
-        forEachVGPR(
-            inst.getSrcRegs(), [](size_t) { return HighBitSel::NONE; },
-            [&](unsigned idx, HighBitSel half) { stampVM(idx, half); });
+        forEachVgprHalf(inst, OperandSide::Src,
+                        [&](unsigned idx, HighBitSel) { stampVM(idx, HighBitSel::NONE); });
     }
 
     // Probe each VGPR operand for hazards and accumulate the wait.
-    void onConsumer(const StinkyInstruction& inst, const VGPRHalfKeyer& keyer, Wait& wait) const {
-        const True16Modifiers* true16Mod = inst.getModifier<True16Modifiers>();
-
+    void onConsumer(const StinkyInstruction& inst, const VGPRHalfKeyer& keyer, Wait& wait,
+                    Blockers* blockers = nullptr) const {
         // TEMP HACK: drop the src RAW va_vdst for valu->global_load and valu->global_prefetch
         // (prefetch lacks IF_GLOBALLoad, so classify it separately). Safe: the DAG already
         // spaces the vaddr producer >=32 cycles (CDNA5 isVmemAddrHazardConsumer covers it).
@@ -622,24 +895,22 @@ class WaitcntBrackets {
                                        (isGLOBALLoad(inst) || isGlobalPrefetch(inst));
 
         if (!suppressSrcVaVdst) {
-            forEachVGPR(
-                inst.getSrcRegs(), [&](size_t i) { return srcHalfSel(true16Mod, i); },
-                [&](unsigned idx, HighBitSel half) {
-                    keyer.forEachConsumerKey(idx, half, [&](RegKey k) {
-                        determineWait(CT_VA_VDST, k, wait, "src(RAW)");
-                    });
+            forEachVgprHalf(inst, OperandSide::Src, [&](unsigned idx, HighBitSel half) {
+                keyer.forEachConsumerKey(idx, half, [&](RegKey k) {
+                    determineVaWait(k, ROLE_DST, wait, "src(RAW)", blockers);
                 });
+            });
         }
 
-        forEachVGPR(
-            inst.getDestRegs(), [&](size_t i) { return destHalfSel(true16Mod, i); },
-            [&](unsigned idx, HighBitSel half) {
-                keyer.forEachConsumerKey(
-                    idx, half, [&](RegKey k) { determineWait(CT_VA_VDST, k, wait, "dst(WAW)"); });
-                // WAR on VM_VSRC: writer-vs-in-flight-VMEM-read uses full DWORD.
-                RegKey full{RegType::V, idx, RegHalf::NONE};
-                determineWait(CT_VM_VSRC, full, wait, "dst(WAR)");
+        forEachVgprHalf(inst, OperandSide::Dst, [&](unsigned idx, HighBitSel half) {
+            keyer.forEachConsumerKey(idx, half, [&](RegKey k) {
+                determineVaWait(k, ROLE_DST, wait, "dst(WAW)", blockers);
+                determineVaWait(k, ROLE_SRC, wait, "dst(WAR)", blockers);
             });
+            // WAR on VM_VSRC: writer-vs-in-flight-VMEM-read uses full DWORD.
+            RegKey full{RegType::V, idx, RegHalf::NONE};
+            determineVmWait(full, wait, "dst(WAR)");
+        });
     }
 
     // Same-class reads after this one satisfy its wait; clears a satisfied class's liveness.
@@ -648,8 +919,8 @@ class WaitcntBrackets {
         if (ctx->waitHide == nullptr) return false;
         const int reqLds = ctx->waitHide->vmVsrcLds;
         const int reqTex = ctx->waitHide->vmVsrcTex;
-        const bool hidLds = liveLds && waitHideSatisfied(fLds, 1, reqLds);
-        const bool hidTex = liveTex && waitHideSatisfied(fTex, 1, reqTex);
+        const bool hidLds = liveLds && countMet(fLds, reqLds);
+        const bool hidTex = liveTex && countMet(fTex, reqTex);
         if (s.pairedFlat && liveLds && liveTex) {
             if (!hidLds && !hidTex) return false;
             PASS_DEBUG(std::cerr << "[InsertWaitAlu]     skip vm_vsrc (flat) [LDS=" << fLds << "/"
@@ -677,8 +948,7 @@ class WaitcntBrackets {
         const unsigned fLds = vmFifoUB[FIFO_LDS] - s.anchorLds;
         const unsigned fTex = vmFifoUB[FIFO_TEX] - s.anchorTex;
         // Each class is tested against its own count.
-        if (!waitHideSatisfied(fLds, 1, ctx->waitHide->vmVsrcLds) &&
-            !waitHideSatisfied(fTex, 1, ctx->waitHide->vmVsrcTex))
+        if (!countMet(fLds, ctx->waitHide->vmVsrcLds) && !countMet(fTex, ctx->waitHide->vmVsrcTex))
             return false;
         PASS_DEBUG(std::cerr << "[InsertWaitAlu]     skip vm_vsrc (anchor LDS ord=" << s.anchorLds
                              << " TEX ord=" << s.anchorTex << ") [LDS=" << fLds << "/"
@@ -708,23 +978,11 @@ class WaitcntBrackets {
         return f;
     }
 
-    // Nothing outside the modeled set issued after this stamp. Per stamp, not machine state.
-    static bool modeledPipesOnlySince(const VgprStamp& s) {
-        return !s.unmodeledSince;
-    }
-
     // Whether the shared VA order may supply this stamp's follower count.
-    static bool sharedCountApplies(const VgprStamp& s) {
+    static bool sharedCountApplies(const RoleStamp& rs) {
         for (int p = 0; p < NUM_VA_PIPE; ++p)
-            if (s.vaOrd[p] != 0 && !isCountablePipe(static_cast<VaPipe>(p))) return false;
+            if (rs.ord[p] != 0 && !isCountablePipe(static_cast<VaPipe>(p))) return false;
         return true;
-    }
-
-    // Whether the stamp names a VA producer at all, live or retired.
-    static bool hasVaProducer(const VgprStamp& s) {
-        for (int p = 0; p < NUM_VA_PIPE; ++p)
-            if (s.vaOrd[p] != 0) return true;
-        return false;
     }
 
     // Whether the stamp names a VM reader at all, live or retired.
@@ -732,115 +990,137 @@ class WaitcntBrackets {
         return s.vmOrdLds != 0 || s.vmOrdTex != 0;
     }
 
-    // Follower count for this stamp on pipe p; ~0u when intervening ops satisfy it.
-    unsigned vaPipeFollowers(const VgprStamp& s, VaPipe p) const {
-        unsigned followers = vaPipeUB[p] - s.vaOrd[p];
-        if (ctx->waitHide == nullptr || xdlFormMixed) return followers;
+    // Follower count for this role's producer on pipe p; ~0u when a rule in force is met.
+    unsigned vaPipeFollowers(const RoleStamp& rs, Role r, VaPipe p) const {
+        unsigned followers = vaPipeUB[p] - rs.ord[p];
+        if (ctx->waitHide == nullptr) return followers;
+        const RuleSet* set = rulesFor(p);
+        const HideClass c = hideClassOfPipe(p);
+        const bool hidByRules =
+            set != nullptr && roleHidden(rs, roleRules(*set, r), c, set->wmmaSlots);
         if (p == PIPE_XDL) {
-            if (waitHideSatisfied(followers, xdlInc, xdlHideXdl)) {
-                PASS_DEBUG(std::cerr
-                           << "[InsertWaitAlu]     skip va_vdst [XDL followers=" << followers
-                           << " >= " << xdlHideXdl << "*" << xdlInc << "]\n");
+            if (hidByRules) {
+                PASS_DEBUG(std::cerr << "[InsertWaitAlu]     skip va_vdst [XDL " << roleName(r)
+                                     << " matrix-ops=" << matrixSince(rs) << " valus="
+                                     << tailCount(rs, HideKind::Mix, roleRules(*set, r).mix, c)
+                                     << "]\n");
                 return ~0u;
             }
             // Ops from the anchor onward are ordered behind this producer; live keeps it in frame.
-            if (ctx->opts.xdlCountFromNextWmma && sharedCountApplies(s) &&
-                s.nextAnchorShared > vaLB && vaUB - s.nextAnchorShared > followers) {
+            if (!xdlFormMixed && ctx->opts.xdlCountFromNextWmma && sharedCountApplies(rs) &&
+                rs.nextAnchorShared > vaLB && vaUB - rs.nextAnchorShared > followers) {
                 PASS_DEBUG(std::cerr << "[InsertWaitAlu]     va_vdst from next-wmma ["
-                                     << (vaUB - s.nextAnchorShared) << " vs per-pipe " << followers
+                                     << (vaUB - rs.nextAnchorShared) << " vs per-pipe " << followers
                                      << "]\n");
-                followers = vaUB - s.nextAnchorShared;
+                followers = vaUB - rs.nextAnchorShared;
             }
+            return followers;
         }
         if (p == PIPE_CSMACC) {
-            const unsigned since = s.xdlSince;
             // Count from the producer's own ticket in the shared order.
-            if (ctx->opts.sharedOrderCountFollowers && sharedCountApplies(s) &&
-                s.vaOrdShared != 0 && !waitHideSatisfied(since, xdlInc, xdlHideCsmacc)) {
+            if (!xdlFormMixed && ctx->opts.sharedOrderCountFollowers && sharedCountApplies(rs) &&
+                rs.ordShared != 0 && !hidByRules) {
                 PASS_DEBUG(std::cerr << "[InsertWaitAlu]     va_vdst from shared order ["
-                                     << (vaUB - s.vaOrdShared) << " vs per-pipe " << followers
+                                     << (vaUB - rs.ordShared) << " vs per-pipe " << followers
                                      << "]\n");
-                return vaUB - s.vaOrdShared;
+                return vaUB - rs.ordShared;
             }
-            if (!modeledPipesOnlySince(s)) {
-                PASS_DEBUG(std::cerr << "[InsertWaitAlu]     no-skip va_vdst (other "
-                                        "units outstanding) [CSMACC matrix-ops="
-                                     << since << "]\n");
-            } else if (waitHideSatisfied(since, xdlInc, xdlHideCsmacc)) {
-                PASS_DEBUG(std::cerr << "[InsertWaitAlu]     skip va_vdst [CSMACC matrix-ops="
-                                     << since << " >= " << xdlHideCsmacc << "*" << xdlInc << "]\n");
-                return ~0u;
-            }
+        }
+        if (hidByRules) {
+            PASS_DEBUG(std::cerr << "[InsertWaitAlu]     skip va_vdst [" << vaPipeName(p) << " "
+                                 << roleName(r) << " matrix-ops=" << matrixSince(rs)
+                                 << " valus=" << valuSince(rs) << "/"
+                                 << tailCount(rs, HideKind::Mix, roleRules(*set, r).mix, c)
+                                 << "]\n");
+            return ~0u;
         }
         return followers;
     }
 
-    // Wait needed for this reg's VA producers.
-    unsigned vaFollowers(const VgprStamp& s) const {
+    // Wait needed for this role's producers; `blockers` collects the live ones no rule hides.
+    unsigned vaFollowers(const RoleStamp& rs, Role r, Blockers* blockers) const {
         // The weaker count stops the per-pipe floor rising, so test the shared floor instead.
         if ((ctx->opts.sharedOrderCountFollowers || ctx->opts.xdlCountFromNextWmma) &&
-            hasVaProducer(s) && (s.vaOrdShared == 0 || s.vaOrdShared <= vaLB)) {
+            rs.hasProducer() && (rs.ordShared == 0 || rs.ordShared <= vaLB)) {
             PASS_DEBUG(std::cerr << "[InsertWaitAlu]     drained by shared order [ord="
-                                 << s.vaOrdShared << " vaLB=" << vaLB << "]\n");
+                                 << rs.ordShared << " vaLB=" << vaLB << "]\n");
             return ~0u;
         }
         unsigned f = ~0u;
-        for (int p = 0; p < NUM_VA_PIPE; ++p)
-            if (s.vaOrd[p] && s.vaOrd[p] > vaPipeLB[p])
-                f = std::min(f, vaPipeFollowers(s, static_cast<VaPipe>(p)));
+        for (int p = 0; p < NUM_VA_PIPE; ++p) {
+            if (!rs.ord[p] || rs.ord[p] <= vaPipeLB[p]) continue;
+            const unsigned pf = vaPipeFollowers(rs, r, static_cast<VaPipe>(p));
+            if (pf != ~0u && blockers != nullptr)
+                blockers->push_back({&rs, r, static_cast<VaPipe>(p)});
+            f = std::min(f, pf);
+        }
         return f;
     }
 
-    // Accumulate the wait for the hazard on VGPR `k` against counter `c`.
-    void determineWait(CounterType c, const RegKey& k, Wait& wait, const char* role) const {
+    // Accumulate the va_vdst wait for the hazard on VGPR `k` against its `r`-role producer.
+    void determineVaWait(const RegKey& k, Role r, Wait& wait, const char* role,
+                         Blockers* blockers) const {
         auto it = scores.find(k);
         if (it == scores.end()) {
-            PASS_DEBUG(std::cerr << "[InsertWaitAlu]     no-wait " << counterName(c) << " on v"
-                                 << k.idx << "(" << halfName(k.half) << "," << role
-                                 << ") [no stamp]\n");
+            PASS_DEBUG(std::cerr << "[InsertWaitAlu]     no-wait va_vdst on v" << k.idx << "("
+                                 << halfName(k.half) << "," << role << ") [no stamp]\n");
             return;
         }
-        const VgprStamp& s = it->second;
-
-        if (c == CT_VM_VSRC) {
-            // Wait for live FIFO producers.
-            bool liveLds = s.vmOrdLds && s.vmOrdLds > vmFifoLB[FIFO_LDS];
-            bool liveTex = s.vmOrdTex && s.vmOrdTex > vmFifoLB[FIFO_TEX];
-            if (!liveLds && !liveTex) {
-                PASS_DEBUG(std::cerr << "[InsertWaitAlu]     no-wait vm_vsrc on v" << k.idx << "("
-                                     << halfName(k.half) << "," << role << ")" << vmStateStr(&s)
-                                     << " → drained (no wait)\n");
-                return;
-            }
-            unsigned f = vmFollowers(s);
-            if (f == kNoWait) {  // no live FIFO constrains it (drained or hidden by depth)
-                PASS_DEBUG(std::cerr << "[InsertWaitAlu]     no-wait vm_vsrc on v" << k.idx << "("
-                                     << halfName(k.half) << "," << role << ")" << vmStateStr(&s)
-                                     << " → hidden/drained (no wait)\n");
-                return;
-            }
-            unsigned chosen = (f > 0) ? std::min(f, maxEmittableWait(c)) : 0u;
-            addWait(wait, c, chosen);
-            PASS_DEBUG(std::cerr << "[InsertWaitAlu]     wait hit vm_vsrc on v" << k.idx << "("
-                                 << halfName(k.half) << "," << role << ")" << vmStateStr(&s)
-                                 << " f=" << f << " → wait=" << chosen << "\n");
+        const RoleStamp& rs = it->second.role[r];
+        if (!rs.hasProducer()) {
+            PASS_DEBUG(std::cerr << "[InsertWaitAlu]     no-wait va_vdst on v" << k.idx << "("
+                                 << halfName(k.half) << "," << role << ") [no " << roleName(r)
+                                 << " producer]\n");
             return;
         }
 
         // Wait for live pipe producers.
-        unsigned f = vaFollowers(s);
+        unsigned f = vaFollowers(rs, r, blockers);
         if (f == ~0u) {  // no live producer in any pipe
             PASS_DEBUG(std::cerr << "[InsertWaitAlu]     no-wait va_vdst on v" << k.idx << "("
-                                 << halfName(k.half) << "," << role << ")" << vaStateStr(&s)
+                                 << halfName(k.half) << "," << role << ")" << vaStateStr(&rs, r)
                                  << " → no live producer\n");
             return;
         }
-        unsigned chosen = std::min(f, maxEmittableWait(c));
-        addWait(wait, c, chosen);
+        unsigned chosen = std::min(f, maxEmittableWait(CT_VA_VDST));
+        addWait(wait, CT_VA_VDST, chosen);
 
-        PASS_DEBUG(std::cerr << "[InsertWaitAlu]     wait hit " << counterName(c) << " on v"
-                             << k.idx << "(" << halfName(k.half) << "," << role << ")"
-                             << vaStateStr(&s) << " f=" << f << " → wait=" << chosen << "\n");
+        PASS_DEBUG(std::cerr << "[InsertWaitAlu]     wait hit va_vdst on v" << k.idx << "("
+                             << halfName(k.half) << "," << role << ")" << vaStateStr(&rs, r)
+                             << " f=" << f << " → wait=" << chosen << "\n");
+    }
+
+    // Accumulate the vm_vsrc wait for the hazard on VGPR `k`.
+    void determineVmWait(const RegKey& k, Wait& wait, const char* role) const {
+        auto it = scores.find(k);
+        if (it == scores.end()) {
+            PASS_DEBUG(std::cerr << "[InsertWaitAlu]     no-wait vm_vsrc on v" << k.idx << "("
+                                 << halfName(k.half) << "," << role << ") [no stamp]\n");
+            return;
+        }
+        const VgprStamp& s = it->second;
+
+        // Wait for live FIFO producers.
+        bool liveLds = s.vmOrdLds && s.vmOrdLds > vmFifoLB[FIFO_LDS];
+        bool liveTex = s.vmOrdTex && s.vmOrdTex > vmFifoLB[FIFO_TEX];
+        if (!liveLds && !liveTex) {
+            PASS_DEBUG(std::cerr << "[InsertWaitAlu]     no-wait vm_vsrc on v" << k.idx << "("
+                                 << halfName(k.half) << "," << role << ")" << vmStateStr(&s)
+                                 << " → drained (no wait)\n");
+            return;
+        }
+        unsigned f = vmFollowers(s);
+        if (f == kNoWait) {  // no live FIFO constrains it (drained or hidden by depth)
+            PASS_DEBUG(std::cerr << "[InsertWaitAlu]     no-wait vm_vsrc on v" << k.idx << "("
+                                 << halfName(k.half) << "," << role << ")" << vmStateStr(&s)
+                                 << " → hidden/drained (no wait)\n");
+            return;
+        }
+        unsigned chosen = (f > 0) ? std::min(f, maxEmittableWait(CT_VM_VSRC)) : 0u;
+        addWait(wait, CT_VM_VSRC, chosen);
+        PASS_DEBUG(std::cerr << "[InsertWaitAlu]     wait hit vm_vsrc on v" << k.idx << "("
+                             << halfName(k.half) << "," << role << ")" << vmStateStr(&s)
+                             << " f=" << f << " → wait=" << chosen << "\n");
     }
 
     void applyWaitcnt(CounterType c, unsigned count) {
@@ -892,6 +1172,12 @@ class WaitcntBrackets {
 
         mergeXdlForm(other, strictDom);
 
+        // The clock after the join: the larger reading of each; the ring stays this side's.
+        AgeClock merged = clock;
+        merged.matrix = std::max(clock.matrix, other.clock.matrix);
+        merged.valu = std::max(clock.valu, other.clock.valu);
+        const LeadUnits leads = leadUnits();
+
         // Shared VA order: widen like a pipe, keeping the shift for the stamps below.
         unsigned myShiftShared = 0, otherShiftShared = 0;
         const unsigned myOldFloorShared = vaLB, otherOldFloorShared = other.vaLB;
@@ -927,70 +1213,83 @@ class WaitcntBrackets {
         for (auto& [k, s] : scores) {
             auto it = other.scores.find(k);
             const VgprStamp* o = (it != other.scores.end()) ? &it->second : nullptr;
-            // Taken before the ordinal merge below, which can zero a stamp's last ordinal.
-            const bool myVa = hasVaProducer(s);
-            const bool oVa = o && hasVaProducer(*o);
+            // Each role joins on its own; a dst stamp never meets a src stamp.
+            for (int r = 0; r < NUM_ROLES; ++r) {
+                RoleStamp& rs = s.role[r];
+                const RoleStamp* ors = o ? &o->role[r] : nullptr;
+                // Taken before the ordinal merge below, which can zero a stamp's last ordinal.
+                const bool myVa = rs.hasProducer();
+                const bool oVa = ors && ors->hasProducer();
+                // Merge each pipe's ordinal independently.
+                for (int p = 0; p < NUM_VA_PIPE; ++p) {
+                    mergeSlotOrd(rs.ord[p], ors ? ors->ord[p] : 0, myShift[p], otherShift[p],
+                                 myOldFloor[p], otherOldFloor[p], strictDom,
+                                 vaPipeName(static_cast<VaPipe>(p)));
+                }
+                mergeSlotOrd(rs.ordShared, ors ? ors->ordShared : 0, myShiftShared,
+                             otherShiftShared, myOldFloorShared, otherOldFloorShared, strictDom,
+                             "ordShared");
+                // An anchor holds only if every path carrying a producer issued one.
+                const unsigned wasNextAnchor = rs.nextAnchorShared;
+                if (myVa && oVa) {
+                    if (rs.nextAnchorShared == 0 || ors->nextAnchorShared == 0) {
+                        rs.nextAnchorShared = 0;
+                    } else {
+                        mergeSlotOrd(rs.nextAnchorShared, ors->nextAnchorShared, myShiftShared,
+                                     otherShiftShared, myOldFloorShared, otherOldFloorShared,
+                                     strictDom, "nextAnchorShared");
+                    }
+                } else if (oVa) {
+                    // The merged ordinals came from the other side, so its anchor comes too.
+                    rs.nextAnchorShared = rebase(ors->nextAnchorShared, otherShiftShared,
+                                                 otherOldFloorShared, "nextAnchorShared");
+                } else if (rs.nextAnchorShared != 0) {
+                    rs.nextAnchorShared += myShiftShared;
+                }
+                // Report a loss: it tightens the wait, so successors must be reprocessed too.
+                if ((wasNextAnchor == 0) != (rs.nextAnchorShared == 0)) strictDom = true;
+                mergeStampAge(rs, ors, myVa, oVa, static_cast<Role>(r), other, merged, leads,
+                              strictDom);
+            }
             const bool myVm = hasVmProducer(s);
             const bool oVm = o && hasVmProducer(*o);
-            // Merge each pipe's ordinal independently.
-            for (int p = 0; p < NUM_VA_PIPE; ++p) {
-                mergeSlotOrd(s.vaOrd[p], o ? o->vaOrd[p] : 0, myShift[p], otherShift[p],
-                             myOldFloor[p], otherOldFloor[p], strictDom,
-                             vaPipeName(static_cast<VaPipe>(p)));
-            }
             mergeSlotOrd(s.vmOrdLds, o ? o->vmOrdLds : 0, vm.myShift[FIFO_LDS],
                          vm.otherShift[FIFO_LDS], vm.myFloor[FIFO_LDS], vm.otherFloor[FIFO_LDS],
                          strictDom, "vmLds");
             mergeSlotOrd(s.vmOrdTex, o ? o->vmOrdTex : 0, vm.myShift[FIFO_TEX],
                          vm.otherShift[FIFO_TEX], vm.myFloor[FIFO_TEX], vm.otherFloor[FIFO_TEX],
                          strictDom, "vmTex");
-            mergeSlotOrd(s.vaOrdShared, o ? o->vaOrdShared : 0, myShiftShared, otherShiftShared,
-                         myOldFloorShared, otherOldFloorShared, strictDom, "vaOrdShared");
-            // An anchor holds only if every path carrying a producer issued one.
-            const unsigned wasNextAnchor = s.nextAnchorShared;
-            if (myVa && oVa) {
-                if (s.nextAnchorShared == 0 || o->nextAnchorShared == 0) {
-                    s.nextAnchorShared = 0;
-                } else {
-                    mergeSlotOrd(s.nextAnchorShared, o->nextAnchorShared, myShiftShared,
-                                 otherShiftShared, myOldFloorShared, otherOldFloorShared, strictDom,
-                                 "nextAnchorShared");
-                }
-            } else if (oVa) {
-                // The merged ordinals came from the other side, so its anchor comes too.
-                s.nextAnchorShared = rebase(o->nextAnchorShared, otherShiftShared,
-                                            otherOldFloorShared, "nextAnchorShared");
-            } else if (s.nextAnchorShared != 0) {
-                s.nextAnchorShared += myShiftShared;
-            }
-            // Report a loss: it tightens the wait, so successors must be reprocessed too.
-            if ((wasNextAnchor == 0) != (s.nextAnchorShared == 0)) strictDom = true;
-            mergeStampAge(s, o, myVa, oVa, strictDom);
             mergeStampVm(s, o, myVm, oVm, vm, strictDom);
         }
+        clock = merged;
 
         return strictDom;
     }
 
    public:
-    // Debug-only VA snapshot.
-    std::string vaStateStr(const VgprStamp* s) const {
+    // Debug-only VA snapshot of one role.
+    std::string vaStateStr(const RoleStamp* rs, Role r = ROLE_DST) const {
         std::string out;
         for (int p = 0; p < NUM_VA_PIPE; ++p) {
             out += " [";
             out += vaPipeName(static_cast<VaPipe>(p));
             out += " ub=" + std::to_string(vaPipeUB[p]) + " lb=" + std::to_string(vaPipeLB[p]);
-            if (s) {
-                unsigned ord = s->vaOrd[p];
+            if (rs) {
+                unsigned ord = rs->ord[p];
                 bool live = ord && ord > vaPipeLB[p];
                 out += " ord=" + std::to_string(ord) + " live=" + std::to_string(live);
                 if (live) out += " f=" + std::to_string(vaPipeUB[p] - ord);
             }
             out += "]";
         }
-        if (s) {
-            out += " [since=" + std::to_string(s->xdlSince);
-            out += " unmodeled=" + std::to_string(s->unmodeledSince) + "]";
+        if (rs) {
+            const Ages a = agesOf(*rs, r, leadUnits());
+            out += " [matrix=" + std::to_string(a.matrix);
+            out += " v=" + std::to_string(a.valu);
+            out += " afterLead=" + std::to_string(a.afterLead[CLASS_XDL]) + "/" +
+                   std::to_string(a.afterLead[CLASS_CSMACC]) + "/" +
+                   std::to_string(a.afterLead[CLASS_DPMACC]);
+            out += "]";
         }
         return out;
     }
@@ -1026,6 +1325,12 @@ class WaitcntBrackets {
             noteIssue(PIPE_XDL, xdlInc);
             return;
         }
+        if (op == WaitAluHideOp::Valu) {
+            ++vaPipeUB[PIPE_CSMACC];
+            ++vaUB;
+            noteIssue(PIPE_CSMACC, 1);
+            return;
+        }
         ++vmUB;
         if (op != WaitAluHideOp::Tex) ++vmFifoUB[FIFO_LDS];
         if (op != WaitAluHideOp::Lds) ++vmFifoUB[FIFO_TEX];
@@ -1034,8 +1339,7 @@ class WaitcntBrackets {
     // Take `o`'s latched WMMA form, if it has one.
     void copyFormFrom(const WaitcntBrackets& o) {
         xdlInc = o.xdlInc;
-        xdlHideXdl = o.xdlHideXdl;
-        xdlHideCsmacc = o.xdlHideCsmacc;
+        form_ = o.form_;
         xdlIncSeen = o.xdlIncSeen;
         xdlFormMixed = o.xdlFormMixed;
     }
@@ -1048,6 +1352,11 @@ class WaitcntBrackets {
         unsigned n = 0;
         for (int P = 0; P < NUM_VA_PIPE; ++P) n += a[P];
         return n;
+    }
+
+    // True when the follower count meets the arch entry; 0 is off.
+    static bool countMet(unsigned count, int required) {
+        return required > 0 && count >= static_cast<unsigned>(required);
     }
 
     // Shift both into the widened frame, keep the later.
@@ -1087,13 +1396,14 @@ class WaitcntBrackets {
     // VA_VDST per-pipe UB/LB.
     std::array<unsigned, NUM_VA_PIPE> vaPipeUB = {};
     std::array<unsigned, NUM_VA_PIPE> vaPipeLB = {};
-    // Hide counts of this kernel's form, latched on the first XDL op.
-    int xdlHideXdl = 0;
-    int xdlHideCsmacc = 0;
-    // Ordinal step of the latched form, for scaling both hide thresholds.
+    // The clock every stamp's ages are measured against.
+    AgeClock clock;
+    // This kernel's form row, latched on the first XDL op (nullptr: a form without a row).
+    const HideForm* form_ = nullptr;
+    // Ordinal step of the latched form, for scaling the matrix-op counts.
     unsigned xdlInc = 1;
     bool xdlIncSeen = false;
-    // Set when a second matrix-op form issues; a mixed kernel falls back to the per-pipe count.
+    // Set when a second matrix-op form issues; a mixed kernel runs without the form rules.
     bool xdlFormMixed = false;
     // VM_VSRC aggregate UB/LB.
     unsigned vmUB = 0;
@@ -1114,27 +1424,31 @@ GfxArchID setupWaitAluContext(WaitAluContext& ctx, VGPRHalfKeyer& keyer,
     const auto* archInfo = ArchHelper::getInstance().getArchInfo(archId);
     const bool hasD16 = archInfo && archInfo->hasD16Writes32BitVgpr();
     keyer = VGPRHalfKeyer(hasD16);
-    ctx.waitHide = &passCtx.getHWModel().waitHide;
-    ctx.xdlSinceCap = computeXdlSinceCap(*ctx.waitHide);
+    ctx.waitHide = ctx.opts.ignoreWaitHide ? nullptr : &passCtx.getHWModel().waitHide;
+    ctx.ageCap = ctx.waitHide == nullptr ? 0u : computeAgeCap(*ctx.waitHide);
+    // Past the cap every rule with a matrix count is met, so the ring only has to reach it.
+    assert(ctx.ageCap <= AgeClock::kRing && "wait-hide age cap exceeds the age ring");
     PASS_DEBUG(std::cerr << "[InsertWaitAlu] run arch=gfx" << arch[0] << arch[1] << arch[2]
                          << " hasD16Writes32BitVgpr=" << hasD16 << "\n");
-    PASS_DEBUG(std::cerr << "[InsertWaitAlu] waitHide" << " forms=" << ctx.waitHide->forms.size()
-                         << " vmVsrcLds=" << waitHideStr(ctx.waitHide->vmVsrcLds)
-                         << " vmVsrcTex=" << waitHideStr(ctx.waitHide->vmVsrcTex)
-                         << " vmVsrcBridge=" << waitHideStr(ctx.waitHide->vmVsrcBridge)
-                         << " [xdlSinceCap=" << ctx.xdlSinceCap << "]\n");
+    PASS_DEBUG(if (ctx.waitHide != nullptr) std::cerr
+                   << "[InsertWaitAlu] waitHide" << " forms=" << ctx.waitHide->forms.size()
+                   << " vmVsrcLds=" << waitHideStr(ctx.waitHide->vmVsrcLds)
+                   << " vmVsrcTex=" << waitHideStr(ctx.waitHide->vmVsrcTex) << " vmVsrcBridge="
+                   << waitHideStr(ctx.waitHide->vmVsrcBridge) << " [ageCap=" << ctx.ageCap << "]\n";
+               else std::cerr << "[InsertWaitAlu] waitHide ignored (plain mode 2)\n");
     PASS_DEBUG(std::cerr << "[InsertWaitAlu] sharedOrder"
                          << " countFollowers=" << ctx.opts.sharedOrderCountFollowers
                          << " xdlFromNextWmma=" << ctx.opts.xdlCountFromNextWmma << "\n");
     return archId;
 }
 
+// `blockers`, when given, collects the producers whose va_vdst wait survives the rules.
 Wait computeWaitForInst(const StinkyInstruction& inst, const WaitcntBrackets& sb,
-                        const VGPRHalfKeyer& keyer) {
+                        const VGPRHalfKeyer& keyer, Blockers* blockers = nullptr) {
     Wait wait;
 
     // Step 1: scoreboard probes on every VGPR operand of `inst`.
-    sb.onConsumer(inst, keyer, wait);
+    sb.onConsumer(inst, keyer, wait, blockers);
 
     // Step 2: skip VA_VDST for VALU consumers
     if (isVectorALU(inst) || isTranscendental(inst) || isMatrixInstruction(inst)) {
@@ -1600,18 +1914,44 @@ WaitAluNeed WaitAluTracker::query(const StinkyInstruction& inst) const {
     return need;
 }
 
-// The most `op`s any hide of the arch needs; past it, more of them hide nothing.
-static int maxHideOps(const WaitAluContext& ctx, WaitAluHideOp op) {
+// The most reads of `op`'s class the vm_vsrc rules need; past it, more of them hide nothing.
+static int maxVmHideOps(const WaitAluContext& ctx, WaitAluHideOp op) {
     if (ctx.waitHide == nullptr) return 0;
     const HWModel::WaitHide& wh = *ctx.waitHide;
-    if (op == WaitAluHideOp::Wmma) {
-        int n = 0;
-        for (const auto& form : wh.forms) n = std::max({n, form.xdlVaVdst, form.csmaccVaVdst});
-        return n;
-    }
     const int lds = op == WaitAluHideOp::Tex ? 0 : wh.vmVsrcLds;
     const int tex = op == WaitAluHideOp::Lds ? 0 : wh.vmVsrcTex;
     return std::max({lds, tex, 0});
+}
+
+// Upper bound on countUntilFree's scan: the most `op`s any blocker needs; -1 when one never hides.
+static int hideBound(const WaitcntBrackets& sb, const Blockers& blockers, WaitAluHideOp op) {
+    int bound = 0;
+    for (const Blocker& b : blockers) {
+        const RuleSet* set = sb.rulesFor(b.p);
+        if (set == nullptr) return -1;
+        const int n = sb.stepsUntilHidden(*b.rs, roleRules(*set, b.r), hideClassOfPipe(b.p),
+                                          set->wmmaSlots, op);
+        if (n < 0) return -1;
+        bound = std::max(bound, n);
+    }
+    return bound;
+}
+
+// The mixed hide covering every blocker: largest lead and tail, fewest slots; -1 when one has none.
+static WaitAluMixGap mixGapBound(const WaitcntBrackets& sb, const Blockers& blockers) {
+    WaitAluMixGap gap{0, 0, std::numeric_limits<int>::max()};
+    for (const Blocker& b : blockers) {
+        const RuleSet* set = sb.rulesFor(b.p);
+        if (set == nullptr) return {};
+        const auto [lead, tail] =
+            sb.mixGap(*b.rs, roleRules(*set, b.r), hideClassOfPipe(b.p), set->wmmaSlots);
+        if (lead < 0) return {};
+        gap.leadWmmas = std::max(gap.leadWmmas, lead);
+        gap.tailSlots = std::max(gap.tailSlots, tail);
+        gap.wmmaSlots = std::min(gap.wmmaSlots, std::max(set->wmmaSlots, 0));
+    }
+    if (blockers.empty()) gap.wmmaSlots = 1;
+    return gap;
 }
 
 // Latch `formWmma`'s form on `sb` the way the walk would on its first issue, if `sb` has none.
@@ -1621,17 +1961,35 @@ static void latchFormIfUnset(WaitcntBrackets& sb, const StinkyInstruction* formW
     sb.latchXdlForm(*formWmma, hasMatrixScalePair(*formWmma) ? 2u : 1u);
 }
 
-// Bare ops of `op`'s kind issued on a copy of `start` until `inst` no longer needs the counter
-// they hide; -1 past the arch's largest hide count. `formWmma` as in latchFormIfUnset.
+// Bare ops of `op`'s kind on a copy of `start` until `inst` needs no wait on their counter; -1
+// when none does. `formWmma` as in latchFormIfUnset.
 static int countUntilFree(const WaitcntBrackets& start, const StinkyInstruction& inst,
                           const WaitAluContext& ctx, const VGPRHalfKeyer& keyer, WaitAluHideOp op,
                           const StinkyInstruction* formWmma) {
     if (isPseudoInst(&inst) || isWaitAluInst(inst) || isCall(inst)) return 0;
-    const CounterType c = op == WaitAluHideOp::Wmma ? CT_VA_VDST : CT_VM_VSRC;
+    const bool va = op == WaitAluHideOp::Wmma || op == WaitAluHideOp::Valu;
+    const CounterType c = va ? CT_VA_VDST : CT_VM_VSRC;
     if (isNoWait(computeWaitForInst(inst, start, keyer), c)) return 0;
     WaitcntBrackets sb = start;
     latchFormIfUnset(sb, formWmma);
-    const int maxOps = maxHideOps(ctx, op);
+    int maxOps = 0;
+    if (!va) {
+        maxOps = maxVmHideOps(ctx, op);
+    } else {
+        Blockers blockers;
+        const Wait latched = computeWaitForInst(inst, sb, keyer, &blockers);
+        if (isNoWait(latched, c)) {
+            // The latch alone freed it; the first op confirms.
+            maxOps = 1;
+        } else if (blockers.empty()) {
+            // A drain no bare op satisfies (an EXEC writer with work in flight).
+            return -1;
+        } else {
+            maxOps = hideBound(sb, blockers, op);
+            if (maxOps < 0) return -1;
+            maxOps = std::max(maxOps, 1);
+        }
+    }
     for (int n = 1; n <= maxOps; ++n) {
         sb.countBareOp(op);
         if (isNoWait(computeWaitForInst(inst, sb, keyer), c)) return n;
@@ -1639,6 +1997,31 @@ static int countUntilFree(const WaitcntBrackets& start, const StinkyInstruction&
     return -1;
 }
 
+// The mixed hide `inst` still owes on a copy of `start`. Both counts 0 when it needs no va_vdst;
+// {1, 0} when latching `formWmma`'s form alone frees it (that WMMA has to issue).
+static WaitAluMixGap mixGapUntilFree(const WaitcntBrackets& start, const StinkyInstruction& inst,
+                                     const VGPRHalfKeyer& keyer,
+                                     const StinkyInstruction* formWmma) {
+    if (isPseudoInst(&inst) || isWaitAluInst(inst) || isCall(inst)) return {0, 0, 1};
+    if (isNoWait(computeWaitForInst(inst, start, keyer), CT_VA_VDST)) return {0, 0, 1};
+    WaitcntBrackets sb = start;
+    latchFormIfUnset(sb, formWmma);
+    Blockers blockers;
+    if (isNoWait(computeWaitForInst(inst, sb, keyer, &blockers), CT_VA_VDST)) return {1, 0, 1};
+    if (blockers.empty()) return {};
+    return mixGapBound(sb, blockers);
+}
+
+// A fresh scoreboard with `producer` just issued, the form taken from `live` or `formWmma`.
+static WaitcntBrackets afterProducer(const WaitAluContext& ctx, const WaitcntBrackets& live,
+                                     const VGPRHalfKeyer& keyer, const StinkyInstruction& producer,
+                                     const StinkyInstruction* formWmma) {
+    WaitcntBrackets sb(ctx);
+    if (live.formLatched()) sb.copyFormFrom(live);
+    latchFormIfUnset(sb, formWmma);
+    stepInstruction(sb, producer, keyer);
+    return sb;
+}
 int WaitAluTracker::untilFree(const StinkyInstruction& inst, WaitAluHideOp op,
                               const StinkyInstruction* formWmma) const {
     return countUntilFree(impl_->sb, inst, impl_->ctx, impl_->keyer, op, formWmma);
@@ -1647,11 +2030,20 @@ int WaitAluTracker::untilFree(const StinkyInstruction& inst, WaitAluHideOp op,
 int WaitAluTracker::requiredGap(const StinkyInstruction& producer,
                                 const StinkyInstruction& consumer, WaitAluHideOp op,
                                 const StinkyInstruction* formWmma) const {
-    WaitcntBrackets sb(impl_->ctx);
-    if (impl_->sb.formLatched()) sb.copyFormFrom(impl_->sb);
-    latchFormIfUnset(sb, formWmma);
-    stepInstruction(sb, producer, impl_->keyer);
-    return countUntilFree(sb, consumer, impl_->ctx, impl_->keyer, op, nullptr);
+    return countUntilFree(afterProducer(impl_->ctx, impl_->sb, impl_->keyer, producer, formWmma),
+                          consumer, impl_->ctx, impl_->keyer, op, nullptr);
+}
+
+WaitAluMixGap WaitAluTracker::untilFreeMixed(const StinkyInstruction& inst,
+                                             const StinkyInstruction* formWmma) const {
+    return mixGapUntilFree(impl_->sb, inst, impl_->keyer, formWmma);
+}
+
+WaitAluMixGap WaitAluTracker::requiredGapMixed(const StinkyInstruction& producer,
+                                               const StinkyInstruction& consumer,
+                                               const StinkyInstruction* formWmma) const {
+    return mixGapUntilFree(afterProducer(impl_->ctx, impl_->sb, impl_->keyer, producer, formWmma),
+                           consumer, impl_->keyer, nullptr);
 }
 
 void WaitAluTracker::commit(const StinkyInstruction& inst) {
