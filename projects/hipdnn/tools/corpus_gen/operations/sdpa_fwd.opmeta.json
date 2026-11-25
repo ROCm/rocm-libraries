@@ -2289,6 +2289,210 @@
           true
         ]
       }
+    },
+    {
+      "name": "qwen3_next_gqa_d256_prefill",
+      "source": "Qwen3-Next-80B-A3B config.json (16 heads, 2 KV heads, head_dim 256); the 32-head qwen3.5 shapes of dnn-benchmarking's SDPA OOTB corpus (2026-11-24), real-world tier",
+      "note": "grouped-query attention at head_dim 256 and 8 or 16 query heads per KV head, square causal prefill (and training): the head_dim_sweep archetype reaches 256 only with one KV head per query head. 9 of its 24 points fit the default --max-bytes of 256 MiB in fp16; the larger ones need a larger ceiling.",
+      "values": {
+        "batch": [
+          1,
+          2,
+          4
+        ],
+        "heads": [
+          16,
+          32
+        ],
+        "heads_kv": [
+          2
+        ],
+        "seqlen_q": [
+          2048,
+          4096,
+          8192,
+          16384
+        ],
+        "seqlen_k": [
+          "$q.seqlen_q"
+        ],
+        "head_dim": [
+          256
+        ],
+        "is_causal": [
+          true
+        ]
+      }
+    },
+    {
+      "name": "qwen3_next_gqa_d256_decode",
+      "source": "Qwen3-Next-80B-A3B config.json (16 heads, 2 KV heads, head_dim 256); the 32-head qwen3.5 shapes of dnn-benchmarking's SDPA OOTB corpus (2026-11-24), real-world tier",
+      "note": "one query token of the same models against a KV cache of 4096 to 65536 tokens. 8 of its 24 points fit the default --max-bytes of 256 MiB in fp16; the larger ones need a larger ceiling.",
+      "values": {
+        "batch": [
+          1,
+          8,
+          32,
+          64
+        ],
+        "heads": [
+          16,
+          32
+        ],
+        "heads_kv": [
+          2
+        ],
+        "seqlen_q": [
+          1
+        ],
+        "seqlen_k": [
+          4096,
+          16384,
+          65536
+        ],
+        "head_dim": [
+          256
+        ],
+        "is_causal": [
+          true
+        ]
+      }
+    },
+    {
+      "name": "long_context_decode",
+      "source": "Llama 3.1 config.json (32 or 64 heads, 8 KV heads, head_dim 128, 131072-token context) and gpt-oss-120b config.json (64 heads, 8 KV heads, head_dim 64, 131072-token context)",
+      "note": "one token, or four of a speculative step, against a KV cache of 65536 or 131072 tokens: past the decode archetypes' 32768. 4 of its 48 points fit the default --max-bytes of 256 MiB in fp16; the larger ones need a larger ceiling.",
+      "values": {
+        "batch": [
+          1,
+          4,
+          16
+        ],
+        "heads": [
+          32,
+          64
+        ],
+        "heads_kv": [
+          8
+        ],
+        "seqlen_q": [
+          1,
+          4
+        ],
+        "seqlen_k": [
+          65536,
+          131072
+        ],
+        "head_dim": [
+          64,
+          128
+        ],
+        "is_causal": [
+          true
+        ]
+      }
+    },
+    {
+      "name": "shared_kv_head_dim_512",
+      "source": "the dsv4_flash and dsv4_pro shapes of dnn-benchmarking's SDPA OOTB corpus (2026-11-24), real-world tier",
+      "note": "16 to 128 query heads against one 512-wide KV head with V as wide: prefill, chunked prefill against up to 131072 cached tokens, and one- and two-token decode. 42 of its 64 points fit the default --max-bytes of 256 MiB in fp16; the larger ones need a larger ceiling.",
+      "values": {
+        "batch": [
+          1
+        ],
+        "heads": [
+          16,
+          32,
+          64,
+          128
+        ],
+        "heads_kv": [
+          1
+        ],
+        "seqlen_q": [
+          1,
+          2,
+          512,
+          2048
+        ],
+        "seqlen_k": [
+          2048,
+          8192,
+          32768,
+          131072
+        ],
+        "head_dim": [
+          512
+        ],
+        "is_causal": [
+          true
+        ]
+      }
+    },
+    {
+      "name": "video_dit_full_attention",
+      "source": "Wan 2.2 A14B (40 heads, head_dim 128) and LTX-2 (32 heads, head_dim 128) full spatio-temporal attention at the token counts of dnn-benchmarking's SDPA OOTB corpus (2026-11-24), real-world tier",
+      "note": "unmasked attention over a whole video latent, one batch of 16384 to 75600 tokens: past the long_context archetype's 32768. Kept at its recorded size: no point fits the default --max-bytes of 256 MiB (the smallest, in fp16, is about 512 MiB), so a default run reports it never admitted; recorded shapes (--model-shapes) carry these sizes exempt from the ceiling.",
+      "values": {
+        "batch": [
+          1
+        ],
+        "heads": [
+          32,
+          40
+        ],
+        "heads_kv": [
+          "$q.heads"
+        ],
+        "seqlen_q": [
+          16384,
+          30240,
+          48360,
+          75600
+        ],
+        "seqlen_k": [
+          "$q.seqlen_q"
+        ],
+        "head_dim": [
+          128
+        ],
+        "is_causal": [
+          false
+        ]
+      }
+    },
+    {
+      "name": "mla_shared_kv_prefill",
+      "source": "DeepSeek-R1 and Kimi-K2 training graphs captured in dnn-benchmarking's SDPA OOTB corpus (2026-11-24) (bwd/captured)",
+      "note": "multi-head latent attention as those training runs record it: every query head against one shared KV head, Q and K 192 wide, V 128; the deepseek_v3_mla_prefill archetype expands the latent to one KV head per query head. 3 of its 4 points fit the default --max-bytes of 256 MiB in fp16; the larger ones need a larger ceiling.",
+      "values": {
+        "batch": [
+          1
+        ],
+        "heads": [
+          64,
+          128
+        ],
+        "heads_kv": [
+          1
+        ],
+        "seqlen_q": [
+          2048,
+          4096
+        ],
+        "seqlen_k": [
+          "$q.seqlen_q"
+        ],
+        "head_dim": [
+          192
+        ],
+        "value_head_dim": [
+          "mla"
+        ],
+        "is_causal": [
+          true
+        ]
+      }
     }
   ],
   "neighbourhood": {
