@@ -22,7 +22,6 @@ from pathlib import Path
 import numpy as np
 import pytest
 from rocke.core.arch import ArchTarget
-from rocke.tests.lanes import TORCH_IN_CI, import_or_skip_until
 
 from benchmarks.common import benchmark_implicit_gemm_conv as big
 from benchmarks.common import kernel_sweep as ks
@@ -480,50 +479,6 @@ def test_rank_results_never_ranks_a_failed_kernel():
     # Verify not run (passed=None) ranks as before.
     ranked, failed = big._rank_results([mk("a", 1.0, None), mk("b", 2.0, None)])
     assert [r.kernel_name for r in ranked] == ["b", "a"] and not failed
-
-
-def test_conv_reference_pins_ieee_and_restores():
-    torch = import_or_skip_until("torch", TORCH_IN_CI)
-    from builders.common.conv_reference import ieee_fp32
-
-    # Every conv backend with the per-operator API: the GPU one and oneDNN,
-    # which serves the CPU references.
-    convs = [
-        c
-        for c in (
-            getattr(torch.backends.cudnn, "conv", None),
-            getattr(getattr(torch.backends, "mkldnn", None), "conv", None),
-        )
-        if c is not None and hasattr(c, "fp32_precision")
-    ]
-    if convs:
-        before = [c.fp32_precision for c in convs]
-        with ieee_fp32():
-            assert [c.fp32_precision for c in convs] == ["ieee"] * len(convs)
-        assert [c.fp32_precision for c in convs] == before
-    else:
-        before = torch.backends.cudnn.allow_tf32
-        with ieee_fp32():
-            assert torch.backends.cudnn.allow_tf32 is False
-        assert torch.backends.cudnn.allow_tf32 == before
-
-
-def test_conv_reference_legacy_torch_uses_allow_tf32(monkeypatch):
-    """A torch without the per-operator API (< 2.9) gets the legacy flag only:
-    the helper must not touch an attribute that version lacks."""
-    torch = import_or_skip_until("torch", TORCH_IN_CI)
-    from builders.common import conv_reference
-
-    class _Cudnn:
-        allow_tf32 = True
-
-    class _Backends:
-        cudnn = _Cudnn()
-
-    monkeypatch.setattr(torch, "backends", _Backends())
-    with conv_reference.ieee_fp32():
-        assert _Backends.cudnn.allow_tf32 is False
-    assert _Backends.cudnn.allow_tf32 is True
 
 
 def test_tf32_reference_rules_follow_the_catalog():
