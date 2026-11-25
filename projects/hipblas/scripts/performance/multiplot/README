@@ -39,7 +39,8 @@
          --clock-scale <f>    multiplies the compute peaks (sclk during run / sclk_peak_mhz)
          --mclk-scale <f>     multiplies the bandwidth (mclk during run / mclk_max_mhz)
          --auto-clock-scale   runs hipblas-bench with HIPBLAS_BENCH_FREQ=1, so each result reports the clocks
-                              sampled while its timed calls ran (hipblas-bench must be built with amd-smi).
+                              sampled while its timed calls ran (needs a hipblas-bench with HIPBLAS_BENCH_FREQ
+                              support, built with amd-smi).
                               The ceiling of each result is scaled by its own lowest-avg-freq (the slowest
                               XCD) / sclk_peak_mhz and avg-MCLK / mclk_max_mhz; the roofline lines use the
                               medians over all results. Needs sclk_peak_mhz / mclk_max_mhz; an explicit
@@ -51,6 +52,14 @@
      cache bandwidth, not memory bandwidth. Use --sizes large (blas1/large, blas2/large; about 0.8 GB and up per
      call) or --flush-mb <MiB> (hipblas-bench rotates through copies of the inputs so they are evicted between
      calls) to measure memory bandwidth on parts with a large L2.
+
+     Choosing --flush-mb: hipblas-bench makes MiB / (bytes of a call's operands) copies, rounded up, and
+     uses a different copy on each call. Set it larger than all the cache an operand can stay in: L2 plus,
+     where the GPU has one, the memory-side last-level cache (Infinity Cache / MALL). About twice their
+     combined size is a safe choice; a smaller value leaves the operands of small problems in cache.
+     Problems whose operands are already as large as MiB are not copied. Larger values only cost device
+     memory and setup time: hipblas-bench uses at most 90% of the free device memory and warns when the
+     request does not fit.
 
 # to run benchmarks, no need to run it a second time if you have run it above
 ./benchmark_plot.sh --benchmark true  --plot false --level1 true --level2 false --level3 false --tag1 my_arch

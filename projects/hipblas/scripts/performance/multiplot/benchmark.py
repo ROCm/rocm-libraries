@@ -396,8 +396,8 @@ if __name__ =='__main__':
         telemetry['mclk_mhz'] = mclk_stats
         telemetry['perf_level'] = getspecs.getperflevel(args.device_number, cuda)
         if not sclk_stats and not mclk_stats:
-            print("Warning: hipblas-bench reported no clocks; build it with amd-smi for --auto-clock-scale."
-                  " Clock scales left at 1.0")
+            print("Warning: hipblas-bench reported no clocks; --auto-clock-scale needs a hipblas-bench with"
+                  " HIPBLAS_BENCH_FREQ support, built with amd-smi. Clock scales left at 1.0")
         elif (sclk_stats and not (args.sclk_peak_mhz or machine_file.get('sclk_peak_mhz'))) or \
              (mclk_stats and not (args.mclk_max_mhz or machine_file.get('mclk_max_mhz'))):
             print("Warning: --auto-clock-scale needs --sclk-peak-mhz / --mclk-max-mhz to turn clocks into scales")
