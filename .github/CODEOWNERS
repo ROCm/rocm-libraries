@@ -230,7 +230,6 @@
 /projects/hipsparselt/library/include/              @ROCm/hipsparselt-reviewers @ROCm/hipsparselt-docs-reviewers
 
 /projects/miopen/CHANGELOG.md                       @ROCm/miopen-reviewers @ROCm/miopen-docs-reviewers
-/projects/miopen/changelog.d/                       @ROCm/miopen-reviewers @ROCm/miopen-docs-reviewers
 /projects/miopen/**/.readthedocs.yaml               @ROCm/miopen-reviewers @ROCm/miopen-docs-reviewers
 /projects/miopen/docs/                              @ROCm/miopen-reviewers @ROCm/miopen-docs-reviewers
 
