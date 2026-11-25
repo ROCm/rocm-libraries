@@ -397,7 +397,7 @@
   ],
   "features_hash": "sha256:fd219b52c91def81",
   "trained_against": {
-    "selector_revision": "hip-kernel-provider/asm-sdpa/845f42f6d0b4cbf2",
+    "selector_revision": "hip-kernel-provider/asm-sdpa/cf08eb37569f130e",
     "feature_semantics_revision": 1
   },
   "objective": "max",
