@@ -110,8 +110,9 @@ def _problem(dtype, q_len, kv_len, num_blocks, bs, head_size):
     )
 
 
-def _branch_spec(problem, branch, bs, arch):
-    """The tuning spec that pins ``branch`` of the epilogue on ``arch``."""
+def _canonical_branch_spec(problem, branch, bs, arch):
+    """``(spec, why, spec_id, knobs)``: the tuning spec that pins ``branch`` of
+    the epilogue on ``arch``, or ``None`` and the reason the rules refuse it."""
     from dispatch.attention.unified_rules import canonicalize_tuning_spec
 
     if arch == "gfx942":
@@ -127,11 +128,20 @@ def _branch_spec(problem, branch, bs, arch):
     variant = next(v for v in variants if v.spec_id == spec_id)
     knobs = {"use_transposed_scalar_state": True} if branch.endswith("_s1") else {}
     spec, why = canonicalize_tuning_spec(problem, variant, knobs)
+    return spec, why, spec_id, knobs
+
+
+def _branch_spec(problem, branch, bs, arch):
+    """The tuning spec that pins ``branch`` of the epilogue on ``arch``."""
+    spec, why, spec_id, knobs = _canonical_branch_spec(problem, branch, bs, arch)
     if spec is None and problem.head_size == 256:
-        reason = f"{spec_id} {knobs} does not take D256 here: {why} (runs on gfx950)"
-        # D256 fits the LDS of gfx950 only; there a refusal is a defect.
-        if arch != "gfx950":
-            skip_needing_arch(("gfx950",), reason=reason)
+        reason = f"{spec_id} {knobs} does not take D256 here: {why}"
+        # Only gfx950's LDS holds D256 tiles, so elsewhere a case gfx950 takes
+        # waits for gfx950. Even there the 2x-block tiles at page size 64
+        # exceed the LDS budget, so those cases refuse on gfx950 too.
+        gfx950_spec = _canonical_branch_spec(problem, branch, bs, "gfx950")[0]
+        if arch != "gfx950" and gfx950_spec is not None:
+            skip_needing_arch(("gfx950",), reason=f"{reason} (runs on gfx950)")
         pytest.skip(reason)
     assert spec is not None, f"{spec_id} {knobs}: {why}"
     return spec
