@@ -17,6 +17,7 @@ import torch.utils.checkpoint as _checkpoint
 from hipdnn_torch.sdpa import (
     NotApplicable,
     SdpaOverride,
+    _autocast_cast_needed,
     _dropout_advance,
     _grad_route,
     _needs_do_copy,
@@ -148,6 +149,31 @@ def test_grad_route_mask_requires_grad_at_dropout_whatever_grad_mode():
         **_route_kwargs(grad_enabled=False, sdp_choice="EFFICIENT"),
     )
     assert (route, reason) == ("native", "grad: attn_mask requires grad")
+
+
+def test_grad_route_mask_requires_grad_override_wins_over_mask_attribute():
+    # Simulates autocast's differentiable .to() cast under no_grad: the cast
+    # copy's own requires_grad reads False even though the user's original
+    # mask carries it. The caller-supplied override must still force native,
+    # not the (stale) attribute on the tensor actually passed in -- otherwise
+    # a reentrant checkpoint's no-grad first pass would route differently
+    # from its grad-enabled recompute (M9/D1).
+    q, k, v = _qkv(requires_grad=False)
+    mask = _FakeTensor((128, 128), requires_grad=False, floating=True)
+    route, reason = _grad_route(
+        q, k, v, mask, 0.0, **_route_kwargs(grad_enabled=True, mask_requires_grad=True)
+    )
+    assert (route, reason) == ("native", "grad: attn_mask requires grad")
+
+
+def test_grad_route_mask_requires_grad_override_false_does_not_force_native():
+    q, k, v = _qkv(requires_grad=True)
+    mask = _FakeTensor((128, 128), requires_grad=True, floating=True)
+    route, reason = _grad_route(
+        q, k, v, mask, 0.0, **_route_kwargs(grad_enabled=True, mask_requires_grad=False)
+    )
+    assert route == "grad"
+    assert reason == ""
 
 
 def test_grad_route_bool_mask_never_requires_grad_check():
@@ -602,3 +628,203 @@ def test_function_forward_execute_failure_counts_nothing_and_propagates():
 
     assert ov.aot_calls == []
     assert ov.native_calls == []
+
+
+# --------------------------------------------------------------------------- #
+# _autocast_cast_needed: per-tensor cast-selection decision                   #
+# --------------------------------------------------------------------------- #
+def test_autocast_cast_needed_cuda_floating_not_target_needs_cast():
+    assert (
+        _autocast_cast_needed(
+            is_cuda=True, is_floating=True, is_fp64=False, is_target_dtype=False
+        )
+        is True
+    )
+
+
+def test_autocast_cast_needed_already_target_untouched():
+    assert (
+        _autocast_cast_needed(
+            is_cuda=True, is_floating=True, is_fp64=False, is_target_dtype=True
+        )
+        is False
+    )
+
+
+def test_autocast_cast_needed_fp64_untouched():
+    assert (
+        _autocast_cast_needed(
+            is_cuda=True, is_floating=True, is_fp64=True, is_target_dtype=False
+        )
+        is False
+    )
+
+
+def test_autocast_cast_needed_non_floating_untouched():
+    assert (
+        _autocast_cast_needed(
+            is_cuda=True, is_floating=False, is_fp64=False, is_target_dtype=False
+        )
+        is False
+    )
+
+
+def test_autocast_cast_needed_non_cuda_untouched():
+    assert (
+        _autocast_cast_needed(
+            is_cuda=False, is_floating=True, is_fp64=False, is_target_dtype=False
+        )
+        is False
+    )
+
+
+# --------------------------------------------------------------------------- #
+# SdpaOverride._autocast_cast: casting + version-tolerant lookups             #
+# --------------------------------------------------------------------------- #
+class _FakeDtype:
+    def __init__(self, name):
+        self.name = name
+
+    def __repr__(self):
+        return f"<dtype {self.name}>"
+
+
+_FP32 = _FakeDtype("fp32")
+_BF16 = _FakeDtype("bf16")
+_FP64 = _FakeDtype("fp64")
+_BOOL = _FakeDtype("bool")
+
+
+class _FakeAutocastTensor:
+    """Minimal duck-typed tensor for ``_autocast_cast``: ``.dtype``,
+    ``.is_cuda``, ``.is_floating_point()``, and a ``.to(dtype)`` that returns a
+    NEW instance, so a cast is observable by identity."""
+
+    def __init__(self, dtype, is_cuda=True, floating=True):
+        self.dtype = dtype
+        self.is_cuda = is_cuda
+        self._floating = floating
+
+    def is_floating_point(self):
+        return self._floating
+
+    def to(self, dtype):
+        return _FakeAutocastTensor(dtype, is_cuda=self.is_cuda, floating=self._floating)
+
+
+class _FakeTorchAutocast:
+    """Modern (device-generic) autocast API stand-in."""
+
+    float64 = _FP64
+
+    def __init__(self, enabled=True, target=_BF16):
+        self._enabled = enabled
+        self._target = target
+
+    def is_autocast_enabled(self, device_type=None):
+        return self._enabled
+
+    def get_autocast_dtype(self, device_type=None):
+        return self._target
+
+
+class _FakeTorchOldAutocastAPI:
+    """Pre-device-generic autocast API stand-in: no ``device_type`` argument,
+    and ``get_autocast_dtype`` does not exist at all (only the deprecated
+    ``get_autocast_gpu_dtype``)."""
+
+    float64 = _FP64
+
+    def __init__(self, enabled=True, target=_BF16):
+        self._enabled = enabled
+        self._target = target
+
+    def is_autocast_enabled(self):
+        return self._enabled
+
+    def get_autocast_gpu_dtype(self):
+        return self._target
+
+
+def test_autocast_cast_disabled_leaves_everything_untouched():
+    ov = SdpaOverride()
+    torch_stub = _FakeTorchAutocast(enabled=False)
+    q = _FakeAutocastTensor(_FP32)
+    k = _FakeAutocastTensor(_FP32)
+    v = _FakeAutocastTensor(_BF16)
+    mask = _FakeAutocastTensor(_FP32)
+    out_q, out_k, out_v, out_mask = ov._autocast_cast(torch_stub, q, k, v, mask)
+    assert out_q is q
+    assert out_k is k
+    assert out_v is v
+    assert out_mask is mask
+
+
+def test_autocast_cast_mixed_dtype_casts_only_what_needs_it():
+    # fp32 q/k + bf16 v under bf16 autocast: only q/k cast (the mixed-dtype
+    # case -- a cast decided from q alone would wrongly also touch v).
+    ov = SdpaOverride()
+    torch_stub = _FakeTorchAutocast(enabled=True, target=_BF16)
+    q = _FakeAutocastTensor(_FP32)
+    k = _FakeAutocastTensor(_FP32)
+    v = _FakeAutocastTensor(_BF16)
+    out_q, out_k, out_v, out_mask = ov._autocast_cast(torch_stub, q, k, v, None)
+    assert out_q is not q and out_q.dtype is _BF16
+    assert out_k is not k and out_k.dtype is _BF16
+    assert out_v is v  # already the target dtype: untouched
+    assert out_mask is None
+
+
+def test_autocast_cast_fp64_untouched():
+    ov = SdpaOverride()
+    torch_stub = _FakeTorchAutocast(enabled=True, target=_BF16)
+    q = _FakeAutocastTensor(_FP64)
+    out_q, out_k, out_v, out_mask = ov._autocast_cast(torch_stub, q, None, None, None)
+    assert out_q is q
+    assert out_k is None
+    assert out_v is None
+    assert out_mask is None
+
+
+def test_autocast_cast_bool_mask_untouched():
+    ov = SdpaOverride()
+    torch_stub = _FakeTorchAutocast(enabled=True, target=_BF16)
+    q = _FakeAutocastTensor(_FP32)
+    mask = _FakeAutocastTensor(_BOOL, floating=False)
+    out_q, _out_k, _out_v, out_mask = ov._autocast_cast(torch_stub, q, None, None, mask)
+    assert out_q is not q
+    assert out_mask is mask
+
+
+def test_autocast_cast_non_cuda_untouched():
+    ov = SdpaOverride()
+    torch_stub = _FakeTorchAutocast(enabled=True, target=_BF16)
+    q = _FakeAutocastTensor(_FP32, is_cuda=False)
+    out_q, _out_k, _out_v, _out_mask = ov._autocast_cast(
+        torch_stub, q, None, None, None
+    )
+    assert out_q is q
+
+
+def test_autocast_cast_version_tolerant_fallback_old_api():
+    # Older torch: is_autocast_enabled()/get_autocast_gpu_dtype() take no
+    # device argument at all; get_autocast_dtype does not exist.
+    ov = SdpaOverride()
+    torch_stub = _FakeTorchOldAutocastAPI(enabled=True, target=_BF16)
+    q = _FakeAutocastTensor(_FP32)
+    out_q, _out_k, _out_v, _out_mask = ov._autocast_cast(
+        torch_stub, q, None, None, None
+    )
+    assert out_q.dtype is _BF16
+
+
+def test_autocast_cast_missing_api_disables_entirely():
+    class _NoAutocastTorch:
+        float64 = _FP64
+
+    ov = SdpaOverride()
+    q = _FakeAutocastTensor(_FP32)
+    out_q, _out_k, _out_v, _out_mask = ov._autocast_cast(
+        _NoAutocastTorch(), q, None, None, None
+    )
+    assert out_q is q

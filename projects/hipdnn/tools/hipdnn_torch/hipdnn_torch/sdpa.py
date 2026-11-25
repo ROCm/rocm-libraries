@@ -38,6 +38,16 @@ stream capture, or a torch without ``_fused_sdp_choice``) sends the call native
 instead. A grad-eligible call under ``torch.compile`` tracing also goes native; a
 plain call is unaffected.
 
+Under CUDA autocast, every CUDA floating operand (Q, K, V, a float ``attn_mask``)
+that is not fp64 and not already the autocast dtype is cast to it (a differentiable
+``.to()``, so grads return in each operand's own input dtype) before gating, the
+census key, ``_grad_route`` and graph building -- on both the plain and
+grad-eligible paths, so this override sees exactly what native autocast SDPA would
+see. A bool mask is never cast (never floating) and is materialized to the additive
+bias from the *cast* query's dtype. Native fallbacks are called with the original,
+uncast arguments: they run inside the same autocast context, so native's own
+dispatch casts them.
+
 Every torch SDPA parameter is translated into the graph:
 
   * **scale** (or ``1/sqrt(Dqk)`` from the *actual* Dqk) -> ``set_attn_scale``.
@@ -175,6 +185,13 @@ def _unpack_philox(state):
     return int(seed_t.item()), int(offset_t.item()) + int(intragraph_t.item())
 
 
+def _autocast_cast_needed(is_cuda, is_floating, is_fp64, is_target_dtype) -> bool:
+    """Whether an SDPA operand must be cast to the autocast target dtype under
+    CUDA autocast: CUDA, floating point, not already fp64 (autocast never
+    touches fp64), and not already the target dtype."""
+    return is_cuda and is_floating and not is_fp64 and not is_target_dtype
+
+
 def _grad_route(
     q,
     k,
@@ -189,6 +206,7 @@ def _grad_route(
     sdp_choice,
     ck_preferred,
     compiling,
+    mask_requires_grad=None,
 ):
     """Every native-routing decline that needs no graph probe, as one pure
     ``(route, reason)`` decision, so ``_call`` only drives it and the two probes
@@ -202,12 +220,23 @@ def _grad_route(
     grad-eligibility. Tensors are duck-typed (``.shape``, ``.stride()``,
     ``.data_ptr()``, ``.requires_grad``, ``.dtype``, ``.is_floating_point()``), so
     tests drive this with fakes, no torch needed.
+
+    ``mask_requires_grad``, when given, overrides reading ``attn_mask``'s own
+    ``requires_grad`` here: under autocast, a differentiable ``.to()`` cast
+    performed under ``no_grad`` silently drops ``requires_grad`` on the cast
+    copy even when the caller's original mask carries it, which would
+    otherwise route a reentrant checkpoint's no-grad first pass differently
+    from its grad-enabled recompute. ``_call`` passes the *original* mask's
+    ``requires_grad`` here for exactly that reason.
     """
+    if mask_requires_grad is None:
+        mask_requires_grad = (
+            attn_mask is not None
+            and attn_mask.is_floating_point()
+            and attn_mask.requires_grad
+        )
     mask_requires_grad = (
-        attn_mask is not None
-        and attn_mask.is_floating_point()
-        and attn_mask.requires_grad
-        and (grad_enabled or dropout_p > 0)
+        mask_requires_grad and attn_mask is not None and (grad_enabled or dropout_p > 0)
     )
     grad_eligible = dropout_p > 0 or (
         grad_enabled and (q.requires_grad or k.requires_grad or v.requires_grad)
@@ -457,6 +486,49 @@ class SdpaOverride(OpOverride):
         if query.dtype not in self.state.dtype_map:
             return False, f"dtype {self._tok(query.dtype)} not graph-mappable"
         return True, ""
+
+    def _autocast_cast(self, torch, query, key, value, attn_mask):
+        """Under CUDA autocast, cast every CUDA floating operand (query, key,
+        value, a float ``attn_mask``) that needs it (:func:`_autocast_cast_needed`)
+        to the autocast dtype with a differentiable ``.to()``; a bool mask and
+        ``None`` pass through unchanged. Returns ``(query, key, value,
+        attn_mask)``, cast or not."""
+        if not self._autocast_enabled(torch):
+            return query, key, value, attn_mask
+        target = self._autocast_target_dtype(torch)
+
+        def _cast(t):
+            if t is None:
+                return t
+            needed = _autocast_cast_needed(
+                t.is_cuda,
+                t.is_floating_point(),
+                t.dtype == torch.float64,
+                t.dtype == target,
+            )
+            return t.to(target) if needed else t
+
+        return _cast(query), _cast(key), _cast(value), _cast(attn_mask)
+
+    @staticmethod
+    def _autocast_enabled(torch):
+        fn = getattr(torch, "is_autocast_enabled", None)
+        if fn is None:
+            return False
+        try:
+            return bool(fn("cuda"))
+        except TypeError:  # pre-device-generic torch: bare call means CUDA
+            return bool(fn())
+
+    @staticmethod
+    def _autocast_target_dtype(torch):
+        fn = getattr(torch, "get_autocast_dtype", None)
+        if fn is None:
+            return torch.get_autocast_gpu_dtype()
+        try:
+            return fn("cuda")
+        except TypeError:  # pre-device-generic torch: bare call means CUDA
+            return fn()
 
     @staticmethod
     def _safe_bool(fn):
@@ -809,17 +881,21 @@ class SdpaOverride(OpOverride):
             )
 
         torch = self.state.torch
+        cast_query, cast_key, cast_value, cast_attn_mask = self._autocast_cast(
+            torch, query, key, value, attn_mask
+        )
+
         # Census dims are best-effort; guard the shape reads for exotic call sites.
         try:
-            sq = int(query.shape[-2])
-            skv = int(key.shape[-2])
-            d = int(query.shape[-1])
+            sq = int(cast_query.shape[-2])
+            skv = int(cast_key.shape[-2])
+            d = int(cast_query.shape[-1])
         except Exception as ex:  # noqa: BLE001
             _reraise_checkpoint_stop(torch, ex)
             return _native()
-        base_key = f"Sq={sq},Skv={skv},D={d},dtype={self._tok(query.dtype)}"
+        base_key = f"Sq={sq},Skv={skv},D={d},dtype={self._tok(cast_query.dtype)}"
 
-        ok, reason = self._gate(query)
+        ok, reason = self._gate(cast_query)
         if not ok:
             self.note_native(base_key, reason)
             return _native()
@@ -838,10 +914,10 @@ class SdpaOverride(OpOverride):
         if dropout_p:
             sdp_choice = self._sdp_choice(
                 torch,
-                query,
-                key,
-                value,
-                attn_mask,
+                cast_query,
+                cast_key,
+                cast_value,
+                cast_attn_mask,
                 dropout_p,
                 is_causal,
                 scale,
@@ -849,11 +925,21 @@ class SdpaOverride(OpOverride):
             )
             ck_preferred = self._ck_preferred(torch)
 
+        # Read from the ORIGINAL attn_mask, not the cast one: under autocast a
+        # differentiable .to() performed under no_grad drops requires_grad on
+        # the cast copy even when the user's own mask carries it, which would
+        # otherwise route the no-grad first pass of a reentrant checkpoint
+        # differently from its grad-enabled recompute.
+        mask_requires_grad = (
+            attn_mask is not None
+            and attn_mask.is_floating_point()
+            and attn_mask.requires_grad
+        )
         route, native_reason = _grad_route(
-            query,
-            key,
-            value,
-            attn_mask,
+            cast_query,
+            cast_key,
+            cast_value,
+            cast_attn_mask,
             dropout_p,
             grad_enabled=grad_enabled,
             deterministic=deterministic,
@@ -862,6 +948,7 @@ class SdpaOverride(OpOverride):
             sdp_choice=sdp_choice,
             ck_preferred=ck_preferred,
             compiling=compiling,
+            mask_requires_grad=mask_requires_grad,
         )
 
         if route == "native":
@@ -869,15 +956,22 @@ class SdpaOverride(OpOverride):
             return _native()
         if route == "plain":
             return self._call_plain(
-                _native, query, key, value, attn_mask, is_causal, scale, base_key
+                _native,
+                cast_query,
+                cast_key,
+                cast_value,
+                cast_attn_mask,
+                is_causal,
+                scale,
+                base_key,
             )
         return self._call_grad(
             real,
             _native,
-            query,
-            key,
-            value,
-            attn_mask,
+            cast_query,
+            cast_key,
+            cast_value,
+            cast_attn_mask,
             dropout_p,
             is_causal,
             scale,
