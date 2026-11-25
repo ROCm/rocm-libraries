@@ -3209,7 +3209,7 @@ s_waitcnt_vscnt null 0                             // wait for data store
 label_SK_SkipFlagReset:
 label_Fixup_E0:
 
-/* edge=0, allocate 1 sgpr. perBatchTmpS=1 perBatchMaskS=0 perElementMaskS=0 elementsPerBatch=2 */
+/* edge=0, allocate 1 sgpr. perBatchTmpS=1 perBatchMaskS=0 perElementMaskS=0 elementsPerBatch=78 */
 s_mov_b64 s[sgprSrdWS:sgprSrdWS+1], s[sgprAddressWS:sgprAddressWS+1]
 s_mov_b32 s[sgprSrdWS+2], BufferOOB
 s_mov_b32 s[sgprSrdWS+3], Srd127_96
@@ -3222,7 +3222,7 @@ s_addc_u32 s[sgprSrdWS+1], s[sgprSrdWS+1], s61     // add hi (offset high word +
 
 /******************************************/
 /* Fixup Batch #0 (d1,d0,vc1,vc0) =       */
-/*      (0,0,0,0:vw1); (0,1,0,0:vw1)      */
+/*      (0,0,0,0:vw1); (0,1,0,0:vw1); (4,0,0,0:vw1); (4,1,0,0:vw1); (8,0,0,0:vw1); (8,1,0,0:vw1); (12,0,0,0:vw1); (12,1,0,0:vw1); (16,0,0,0:vw1); (16,1,0,0:vw1); (20,0,0,0:vw1); (20,1,0,0:vw1) */
 /******************************************/
 
 /* calc coords, apply mask, and issue loads (if necessary) */
@@ -3231,119 +3231,64 @@ s_mov_b32 s64, 0                                   // Init sgpr offset
 buffer_load_b32 v95, v75, s[sgprSrdWS:sgprSrdWS+3], s64 offen offset:0 glc slc // load WS
 s_add_u32 s64, s64, 512                            // Inc sgpr offset
 buffer_load_b32 v96, v75, s[sgprSrdWS:sgprSrdWS+3], s64 offen offset:0 glc slc // load WS
+s_add_u32 s64, s64, 512                            // Inc sgpr offset
+buffer_load_b32 v97, v75, s[sgprSrdWS:sgprSrdWS+3], s64 offen offset:0 glc slc // load WS
+s_add_u32 s64, s64, 512                            // Inc sgpr offset
+buffer_load_b32 v98, v75, s[sgprSrdWS:sgprSrdWS+3], s64 offen offset:0 glc slc // load WS
+s_add_u32 s64, s64, 512                            // Inc sgpr offset
+buffer_load_b32 v99, v75, s[sgprSrdWS:sgprSrdWS+3], s64 offen offset:0 glc slc // load WS
+s_add_u32 s64, s64, 512                            // Inc sgpr offset
+buffer_load_b32 v100, v75, s[sgprSrdWS:sgprSrdWS+3], s64 offen offset:0 glc slc // load WS
+s_add_u32 s64, s64, 512                            // Inc sgpr offset
+buffer_load_b32 v101, v75, s[sgprSrdWS:sgprSrdWS+3], s64 offen offset:0 glc slc // load WS
+s_add_u32 s64, s64, 512                            // Inc sgpr offset
+buffer_load_b32 v102, v75, s[sgprSrdWS:sgprSrdWS+3], s64 offen offset:0 glc slc // load WS
+s_add_u32 s64, s64, 512                            // Inc sgpr offset
+buffer_load_b32 v103, v75, s[sgprSrdWS:sgprSrdWS+3], s64 offen offset:0 glc slc // load WS
+s_add_u32 s64, s64, 512                            // Inc sgpr offset
+buffer_load_b32 v104, v75, s[sgprSrdWS:sgprSrdWS+3], s64 offen offset:0 glc slc // load WS
+s_add_u32 s64, s64, 512                            // Inc sgpr offset
+buffer_load_b32 v105, v75, s[sgprSrdWS:sgprSrdWS+3], s64 offen offset:0 glc slc // load WS
+s_add_u32 s64, s64, 512                            // Inc sgpr offset
+buffer_load_b32 v106, v75, s[sgprSrdWS:sgprSrdWS+3], s64 offen offset:0 glc slc // load WS
 
 /* apply mask, calc new C and issue writes */
 
-s_waitcnt vmcnt(1)                                 // wait C (interleaved) 1 = 2 - 0 - 1
+s_waitcnt vmcnt(11)                                // wait C (interleaved) 11 = 12 - 0 - 1
 v_add_f32 v[vgprValuC+0], v[vgprValuC+0], v95      // accum partials
 
-s_waitcnt vmcnt(0)                                 // wait C (interleaved) 0 = 2 - 1 - 1
+s_waitcnt vmcnt(10)                                // wait C (interleaved) 10 = 12 - 1 - 1
 v_add_f32 v[vgprValuC+1], v[vgprValuC+1], v96      // accum partials
-s_nop 0                                            // 1 wait state required when next inst writes vgprs held by previous dwordx4 store inst
-/* optSingleColVgpr=1 optSharedColVgpr=0 optSGPRUsage=BufferLoad_Mask optSrdIncForRow=1 */
 
-/******************************************/
-/* Fixup Batch #1 (d1,d0,vc1,vc0) =       */
-/*      (4,0,0,0:vw1); (4,1,0,0:vw1)      */
-/******************************************/
+s_waitcnt vmcnt(9)                                 // wait C (interleaved) 9 = 12 - 2 - 1
+v_add_f32 v[vgprValuC+2], v[vgprValuC+2], v97      // accum partials
 
-/* calc coords, apply mask, and issue loads (if necessary) */
-s_add_u32 s64, s64, 512                            // Inc sgpr offset
-buffer_load_b32 v95, v75, s[sgprSrdWS:sgprSrdWS+3], s64 offen offset:0 glc slc // load WS
-s_add_u32 s64, s64, 512                            // Inc sgpr offset
-buffer_load_b32 v96, v75, s[sgprSrdWS:sgprSrdWS+3], s64 offen offset:0 glc slc // load WS
+s_waitcnt vmcnt(8)                                 // wait C (interleaved) 8 = 12 - 3 - 1
+v_add_f32 v[vgprValuC+3], v[vgprValuC+3], v98      // accum partials
 
-/* apply mask, calc new C and issue writes */
+s_waitcnt vmcnt(7)                                 // wait C (interleaved) 7 = 12 - 4 - 1
+v_add_f32 v[vgprValuC+4], v[vgprValuC+4], v99      // accum partials
 
-s_waitcnt vmcnt(1)                                 // wait C (interleaved) 1 = 2 - 0 - 1
-v_add_f32 v[vgprValuC+2], v[vgprValuC+2], v95      // accum partials
+s_waitcnt vmcnt(6)                                 // wait C (interleaved) 6 = 12 - 5 - 1
+v_add_f32 v[vgprValuC+5], v[vgprValuC+5], v100     // accum partials
 
-s_waitcnt vmcnt(0)                                 // wait C (interleaved) 0 = 2 - 1 - 1
-v_add_f32 v[vgprValuC+3], v[vgprValuC+3], v96      // accum partials
-s_nop 0                                            // 1 wait state required when next inst writes vgprs held by previous dwordx4 store inst
-/* optSingleColVgpr=1 optSharedColVgpr=0 optSGPRUsage=BufferLoad_Mask optSrdIncForRow=1 */
+s_waitcnt vmcnt(5)                                 // wait C (interleaved) 5 = 12 - 6 - 1
+v_add_f32 v[vgprValuC+6], v[vgprValuC+6], v101     // accum partials
 
-/******************************************/
-/* Fixup Batch #2 (d1,d0,vc1,vc0) =       */
-/*      (8,0,0,0:vw1); (8,1,0,0:vw1)      */
-/******************************************/
+s_waitcnt vmcnt(4)                                 // wait C (interleaved) 4 = 12 - 7 - 1
+v_add_f32 v[vgprValuC+7], v[vgprValuC+7], v102     // accum partials
 
-/* calc coords, apply mask, and issue loads (if necessary) */
-s_add_u32 s64, s64, 512                            // Inc sgpr offset
-buffer_load_b32 v95, v75, s[sgprSrdWS:sgprSrdWS+3], s64 offen offset:0 glc slc // load WS
-s_add_u32 s64, s64, 512                            // Inc sgpr offset
-buffer_load_b32 v96, v75, s[sgprSrdWS:sgprSrdWS+3], s64 offen offset:0 glc slc // load WS
+s_waitcnt vmcnt(3)                                 // wait C (interleaved) 3 = 12 - 8 - 1
+v_add_f32 v[vgprValuC+8], v[vgprValuC+8], v103     // accum partials
 
-/* apply mask, calc new C and issue writes */
+s_waitcnt vmcnt(2)                                 // wait C (interleaved) 2 = 12 - 9 - 1
+v_add_f32 v[vgprValuC+9], v[vgprValuC+9], v104     // accum partials
 
-s_waitcnt vmcnt(1)                                 // wait C (interleaved) 1 = 2 - 0 - 1
-v_add_f32 v[vgprValuC+4], v[vgprValuC+4], v95      // accum partials
+s_waitcnt vmcnt(1)                                 // wait C (interleaved) 1 = 12 - 10 - 1
+v_add_f32 v[vgprValuC+10], v[vgprValuC+10], v105   // accum partials
 
-s_waitcnt vmcnt(0)                                 // wait C (interleaved) 0 = 2 - 1 - 1
-v_add_f32 v[vgprValuC+5], v[vgprValuC+5], v96      // accum partials
-s_nop 0                                            // 1 wait state required when next inst writes vgprs held by previous dwordx4 store inst
-/* optSingleColVgpr=1 optSharedColVgpr=0 optSGPRUsage=BufferLoad_Mask optSrdIncForRow=1 */
-
-/******************************************/
-/* Fixup Batch #3 (d1,d0,vc1,vc0) =       */
-/*      (12,0,0,0:vw1); (12,1,0,0:vw1)    */
-/******************************************/
-
-/* calc coords, apply mask, and issue loads (if necessary) */
-s_add_u32 s64, s64, 512                            // Inc sgpr offset
-buffer_load_b32 v95, v75, s[sgprSrdWS:sgprSrdWS+3], s64 offen offset:0 glc slc // load WS
-s_add_u32 s64, s64, 512                            // Inc sgpr offset
-buffer_load_b32 v96, v75, s[sgprSrdWS:sgprSrdWS+3], s64 offen offset:0 glc slc // load WS
-
-/* apply mask, calc new C and issue writes */
-
-s_waitcnt vmcnt(1)                                 // wait C (interleaved) 1 = 2 - 0 - 1
-v_add_f32 v[vgprValuC+6], v[vgprValuC+6], v95      // accum partials
-
-s_waitcnt vmcnt(0)                                 // wait C (interleaved) 0 = 2 - 1 - 1
-v_add_f32 v[vgprValuC+7], v[vgprValuC+7], v96      // accum partials
-s_nop 0                                            // 1 wait state required when next inst writes vgprs held by previous dwordx4 store inst
-/* optSingleColVgpr=1 optSharedColVgpr=0 optSGPRUsage=BufferLoad_Mask optSrdIncForRow=1 */
-
-/******************************************/
-/* Fixup Batch #4 (d1,d0,vc1,vc0) =       */
-/*      (16,0,0,0:vw1); (16,1,0,0:vw1)    */
-/******************************************/
-
-/* calc coords, apply mask, and issue loads (if necessary) */
-s_add_u32 s64, s64, 512                            // Inc sgpr offset
-buffer_load_b32 v95, v75, s[sgprSrdWS:sgprSrdWS+3], s64 offen offset:0 glc slc // load WS
-s_add_u32 s64, s64, 512                            // Inc sgpr offset
-buffer_load_b32 v96, v75, s[sgprSrdWS:sgprSrdWS+3], s64 offen offset:0 glc slc // load WS
-
-/* apply mask, calc new C and issue writes */
-
-s_waitcnt vmcnt(1)                                 // wait C (interleaved) 1 = 2 - 0 - 1
-v_add_f32 v[vgprValuC+8], v[vgprValuC+8], v95      // accum partials
-
-s_waitcnt vmcnt(0)                                 // wait C (interleaved) 0 = 2 - 1 - 1
-v_add_f32 v[vgprValuC+9], v[vgprValuC+9], v96      // accum partials
-s_nop 0                                            // 1 wait state required when next inst writes vgprs held by previous dwordx4 store inst
-/* optSingleColVgpr=1 optSharedColVgpr=0 optSGPRUsage=BufferLoad_Mask optSrdIncForRow=1 */
-
-/******************************************/
-/* Fixup Batch #5 (d1,d0,vc1,vc0) =       */
-/*      (20,0,0,0:vw1); (20,1,0,0:vw1)    */
-/******************************************/
-
-/* calc coords, apply mask, and issue loads (if necessary) */
-s_add_u32 s64, s64, 512                            // Inc sgpr offset
-buffer_load_b32 v95, v75, s[sgprSrdWS:sgprSrdWS+3], s64 offen offset:0 glc slc // load WS
-s_add_u32 s64, s64, 512                            // Inc sgpr offset
-buffer_load_b32 v96, v75, s[sgprSrdWS:sgprSrdWS+3], s64 offen offset:0 glc slc // load WS
-
-/* apply mask, calc new C and issue writes */
-
-s_waitcnt vmcnt(1)                                 // wait C (interleaved) 1 = 2 - 0 - 1
-v_add_f32 v[vgprValuC+10], v[vgprValuC+10], v95    // accum partials
-
-s_waitcnt vmcnt(0)                                 // wait C (interleaved) 0 = 2 - 1 - 1
-v_add_f32 v[vgprValuC+11], v[vgprValuC+11], v96    // accum partials
+s_waitcnt vmcnt(0)                                 // wait C (interleaved) 0 = 12 - 11 - 1
+v_add_f32 v[vgprValuC+11], v[vgprValuC+11], v106   // accum partials
 s_nop 0                                            // 1 wait state required when next inst writes vgprs held by previous dwordx4 store inst
 s_mul_i32 s61, s[sgprskTiles], s[sgprItersPerTile]
 s_mul_i32 s64, s[sgprSKItersPerWG], s[sgprskGrid]

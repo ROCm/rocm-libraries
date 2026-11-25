@@ -4687,7 +4687,7 @@ s_waitcnt_vscnt null 0                             // wait for data store
 label_SK_SkipFlagReset:
 label_Fixup_E0:
 
-/* edge=0, allocate 1 sgpr. perBatchTmpS=1 perBatchMaskS=0 perElementMaskS=0 elementsPerBatch=4 */
+/* edge=0, allocate 1 sgpr. perBatchTmpS=1 perBatchMaskS=0 perElementMaskS=0 elementsPerBatch=58 */
 s_mov_b64 s[sgprSrdWS:sgprSrdWS+1], s[sgprAddressWS:sgprAddressWS+1]
 s_mov_b32 s[sgprSrdWS+2], BufferOOB
 s_mov_b32 s[sgprSrdWS+3], Srd127_96
@@ -4700,842 +4700,590 @@ s_addc_u32 s[sgprSrdWS+1], s[sgprSrdWS+1], s11     // add hi (offset high word +
 
 /******************************************/
 /* Fixup Batch #0 (d1,d0,vc1,vc0) =       */
-/*      (0,0,0,0:vw1); (0,1,0,0:vw1); (0,2,0,0:vw1); (0,3,0,0:vw1) */
+/*      (0,0,0,0:vw1); (0,1,0,0:vw1); (0,2,0,0:vw1); (0,3,0,0:vw1); (0,4,0,0:vw1); (1,0,0,0:vw1); (1,1,0,0:vw1); (1,2,0,0:vw1); (1,3,0,0:vw1); (1,4,0,0:vw1); (2,0,0,0:vw1); (2,1,0,0:vw1); (2,2,0,0:vw1); (2,3,0,0:vw1); (2,4,0,0:vw1); (3,0,0,0:vw1); (3,1,0,0:vw1); (3,2,0,0:vw1); (3,3,0,0:vw1); (3,4,0,0:vw1); (4,0,0,0:vw1); (4,1,0,0:vw1); (4,2,0,0:vw1); (4,3,0,0:vw1); (4,4,0,0:vw1); (5,0,0,0:vw1); (5,1,0,0:vw1); (5,2,0,0:vw1); (5,3,0,0:vw1); (5,4,0,0:vw1); (6,0,0,0:vw1); (6,1,0,0:vw1); (6,2,0,0:vw1); (6,3,0,0:vw1); (6,4,0,0:vw1); (7,0,0,0:vw1); (7,1,0,0:vw1); (7,2,0,0:vw1); (7,3,0,0:vw1); (7,4,0,0:vw1); (8,0,0,0:vw1); (8,1,0,0:vw1); (8,2,0,0:vw1); (8,3,0,0:vw1); (8,4,0,0:vw1); (9,0,0,0:vw1); (9,1,0,0:vw1); (9,2,0,0:vw1); (9,3,0,0:vw1); (9,4,0,0:vw1); (10,0,0,0:vw1); (10,1,0,0:vw1); (10,2,0,0:vw1); (10,3,0,0:vw1); (10,4,0,0:vw1); (11,0,0,0:vw1); (11,1,0,0:vw1); (11,2,0,0:vw1) */
 /******************************************/
 
 /* calc coords, apply mask, and issue loads (if necessary) */
 v_lshlrev_b32 v134, 2, v[vgprSerial]               // v134 = v[vgprSerial] * 4
 s_mov_b32 s64, 0                                   // Init sgpr offset
-buffer_load_b32 v139, v134, s[sgprSrdWS:sgprSrdWS+3], s64 offen offset:0 glc slc // load WS
+buffer_load_b32 v193, v134, s[sgprSrdWS:sgprSrdWS+3], s64 offen offset:0 glc slc // load WS
 s_add_u32 s64, s64, 1024                           // Inc sgpr offset
-buffer_load_b32 v140, v134, s[sgprSrdWS:sgprSrdWS+3], s64 offen offset:0 glc slc // load WS
+buffer_load_b32 v194, v134, s[sgprSrdWS:sgprSrdWS+3], s64 offen offset:0 glc slc // load WS
 s_add_u32 s64, s64, 1024                           // Inc sgpr offset
-buffer_load_b32 v141, v134, s[sgprSrdWS:sgprSrdWS+3], s64 offen offset:0 glc slc // load WS
+buffer_load_b32 v195, v134, s[sgprSrdWS:sgprSrdWS+3], s64 offen offset:0 glc slc // load WS
 s_add_u32 s64, s64, 1024                           // Inc sgpr offset
-buffer_load_b32 v142, v134, s[sgprSrdWS:sgprSrdWS+3], s64 offen offset:0 glc slc // load WS
+buffer_load_b32 v196, v134, s[sgprSrdWS:sgprSrdWS+3], s64 offen offset:0 glc slc // load WS
+s_add_u32 s64, s64, 1024                           // Inc sgpr offset
+buffer_load_b32 v197, v134, s[sgprSrdWS:sgprSrdWS+3], s64 offen offset:0 glc slc // load WS
+s_add_u32 s64, s64, 1024                           // Inc sgpr offset
+buffer_load_b32 v198, v134, s[sgprSrdWS:sgprSrdWS+3], s64 offen offset:0 glc slc // load WS
+s_add_u32 s64, s64, 1024                           // Inc sgpr offset
+buffer_load_b32 v199, v134, s[sgprSrdWS:sgprSrdWS+3], s64 offen offset:0 glc slc // load WS
+s_add_u32 s64, s64, 1024                           // Inc sgpr offset
+buffer_load_b32 v200, v134, s[sgprSrdWS:sgprSrdWS+3], s64 offen offset:0 glc slc // load WS
+s_add_u32 s64, s64, 1024                           // Inc sgpr offset
+buffer_load_b32 v201, v134, s[sgprSrdWS:sgprSrdWS+3], s64 offen offset:0 glc slc // load WS
+s_add_u32 s64, s64, 1024                           // Inc sgpr offset
+buffer_load_b32 v202, v134, s[sgprSrdWS:sgprSrdWS+3], s64 offen offset:0 glc slc // load WS
+s_add_u32 s64, s64, 1024                           // Inc sgpr offset
+buffer_load_b32 v203, v134, s[sgprSrdWS:sgprSrdWS+3], s64 offen offset:0 glc slc // load WS
+s_add_u32 s64, s64, 1024                           // Inc sgpr offset
+buffer_load_b32 v204, v134, s[sgprSrdWS:sgprSrdWS+3], s64 offen offset:0 glc slc // load WS
+s_add_u32 s64, s64, 1024                           // Inc sgpr offset
+buffer_load_b32 v205, v134, s[sgprSrdWS:sgprSrdWS+3], s64 offen offset:0 glc slc // load WS
+s_add_u32 s64, s64, 1024                           // Inc sgpr offset
+buffer_load_b32 v206, v134, s[sgprSrdWS:sgprSrdWS+3], s64 offen offset:0 glc slc // load WS
+s_add_u32 s64, s64, 1024                           // Inc sgpr offset
+buffer_load_b32 v207, v134, s[sgprSrdWS:sgprSrdWS+3], s64 offen offset:0 glc slc // load WS
+s_add_u32 s64, s64, 1024                           // Inc sgpr offset
+buffer_load_b32 v208, v134, s[sgprSrdWS:sgprSrdWS+3], s64 offen offset:0 glc slc // load WS
+s_add_u32 s64, s64, 1024                           // Inc sgpr offset
+buffer_load_b32 v209, v134, s[sgprSrdWS:sgprSrdWS+3], s64 offen offset:0 glc slc // load WS
+s_add_u32 s64, s64, 1024                           // Inc sgpr offset
+buffer_load_b32 v210, v134, s[sgprSrdWS:sgprSrdWS+3], s64 offen offset:0 glc slc // load WS
+s_add_u32 s64, s64, 1024                           // Inc sgpr offset
+buffer_load_b32 v211, v134, s[sgprSrdWS:sgprSrdWS+3], s64 offen offset:0 glc slc // load WS
+s_add_u32 s64, s64, 1024                           // Inc sgpr offset
+buffer_load_b32 v212, v134, s[sgprSrdWS:sgprSrdWS+3], s64 offen offset:0 glc slc // load WS
+s_add_u32 s64, s64, 1024                           // Inc sgpr offset
+buffer_load_b32 v213, v134, s[sgprSrdWS:sgprSrdWS+3], s64 offen offset:0 glc slc // load WS
+s_add_u32 s64, s64, 1024                           // Inc sgpr offset
+buffer_load_b32 v214, v134, s[sgprSrdWS:sgprSrdWS+3], s64 offen offset:0 glc slc // load WS
+s_add_u32 s64, s64, 1024                           // Inc sgpr offset
+buffer_load_b32 v215, v134, s[sgprSrdWS:sgprSrdWS+3], s64 offen offset:0 glc slc // load WS
+s_add_u32 s64, s64, 1024                           // Inc sgpr offset
+buffer_load_b32 v217, v134, s[sgprSrdWS:sgprSrdWS+3], s64 offen offset:0 glc slc // load WS
+s_add_u32 s64, s64, 1024                           // Inc sgpr offset
+buffer_load_b32 v218, v134, s[sgprSrdWS:sgprSrdWS+3], s64 offen offset:0 glc slc // load WS
+s_add_u32 s64, s64, 1024                           // Inc sgpr offset
+buffer_load_b32 v219, v134, s[sgprSrdWS:sgprSrdWS+3], s64 offen offset:0 glc slc // load WS
+s_add_u32 s64, s64, 1024                           // Inc sgpr offset
+buffer_load_b32 v220, v134, s[sgprSrdWS:sgprSrdWS+3], s64 offen offset:0 glc slc // load WS
+s_add_u32 s64, s64, 1024                           // Inc sgpr offset
+buffer_load_b32 v221, v134, s[sgprSrdWS:sgprSrdWS+3], s64 offen offset:0 glc slc // load WS
+s_add_u32 s64, s64, 1024                           // Inc sgpr offset
+buffer_load_b32 v222, v134, s[sgprSrdWS:sgprSrdWS+3], s64 offen offset:0 glc slc // load WS
+s_add_u32 s64, s64, 1024                           // Inc sgpr offset
+buffer_load_b32 v223, v134, s[sgprSrdWS:sgprSrdWS+3], s64 offen offset:0 glc slc // load WS
+s_add_u32 s64, s64, 1024                           // Inc sgpr offset
+buffer_load_b32 v224, v134, s[sgprSrdWS:sgprSrdWS+3], s64 offen offset:0 glc slc // load WS
+s_add_u32 s64, s64, 1024                           // Inc sgpr offset
+buffer_load_b32 v225, v134, s[sgprSrdWS:sgprSrdWS+3], s64 offen offset:0 glc slc // load WS
+s_add_u32 s64, s64, 1024                           // Inc sgpr offset
+buffer_load_b32 v226, v134, s[sgprSrdWS:sgprSrdWS+3], s64 offen offset:0 glc slc // load WS
+s_add_u32 s64, s64, 1024                           // Inc sgpr offset
+buffer_load_b32 v227, v134, s[sgprSrdWS:sgprSrdWS+3], s64 offen offset:0 glc slc // load WS
+s_add_u32 s64, s64, 1024                           // Inc sgpr offset
+buffer_load_b32 v228, v134, s[sgprSrdWS:sgprSrdWS+3], s64 offen offset:0 glc slc // load WS
+s_add_u32 s64, s64, 1024                           // Inc sgpr offset
+buffer_load_b32 v229, v134, s[sgprSrdWS:sgprSrdWS+3], s64 offen offset:0 glc slc // load WS
+s_add_u32 s64, s64, 1024                           // Inc sgpr offset
+buffer_load_b32 v230, v134, s[sgprSrdWS:sgprSrdWS+3], s64 offen offset:0 glc slc // load WS
+s_add_u32 s64, s64, 1024                           // Inc sgpr offset
+buffer_load_b32 v231, v134, s[sgprSrdWS:sgprSrdWS+3], s64 offen offset:0 glc slc // load WS
+s_add_u32 s64, s64, 1024                           // Inc sgpr offset
+buffer_load_b32 v232, v134, s[sgprSrdWS:sgprSrdWS+3], s64 offen offset:0 glc slc // load WS
+s_add_u32 s64, s64, 1024                           // Inc sgpr offset
+buffer_load_b32 v233, v134, s[sgprSrdWS:sgprSrdWS+3], s64 offen offset:0 glc slc // load WS
+s_add_u32 s64, s64, 1024                           // Inc sgpr offset
+buffer_load_b32 v234, v134, s[sgprSrdWS:sgprSrdWS+3], s64 offen offset:0 glc slc // load WS
+s_add_u32 s64, s64, 1024                           // Inc sgpr offset
+buffer_load_b32 v235, v134, s[sgprSrdWS:sgprSrdWS+3], s64 offen offset:0 glc slc // load WS
+s_add_u32 s64, s64, 1024                           // Inc sgpr offset
+buffer_load_b32 v236, v134, s[sgprSrdWS:sgprSrdWS+3], s64 offen offset:0 glc slc // load WS
+s_add_u32 s64, s64, 1024                           // Inc sgpr offset
+buffer_load_b32 v237, v134, s[sgprSrdWS:sgprSrdWS+3], s64 offen offset:0 glc slc // load WS
+s_add_u32 s64, s64, 1024                           // Inc sgpr offset
+buffer_load_b32 v238, v134, s[sgprSrdWS:sgprSrdWS+3], s64 offen offset:0 glc slc // load WS
+s_add_u32 s64, s64, 1024                           // Inc sgpr offset
+buffer_load_b32 v239, v134, s[sgprSrdWS:sgprSrdWS+3], s64 offen offset:0 glc slc // load WS
+s_add_u32 s64, s64, 1024                           // Inc sgpr offset
+buffer_load_b32 v240, v134, s[sgprSrdWS:sgprSrdWS+3], s64 offen offset:0 glc slc // load WS
+s_add_u32 s64, s64, 1024                           // Inc sgpr offset
+buffer_load_b32 v241, v134, s[sgprSrdWS:sgprSrdWS+3], s64 offen offset:0 glc slc // load WS
+s_add_u32 s64, s64, 1024                           // Inc sgpr offset
+buffer_load_b32 v242, v134, s[sgprSrdWS:sgprSrdWS+3], s64 offen offset:0 glc slc // load WS
+s_add_u32 s64, s64, 1024                           // Inc sgpr offset
+buffer_load_b32 v243, v134, s[sgprSrdWS:sgprSrdWS+3], s64 offen offset:0 glc slc // load WS
+s_add_u32 s64, s64, 1024                           // Inc sgpr offset
+buffer_load_b32 v244, v134, s[sgprSrdWS:sgprSrdWS+3], s64 offen offset:0 glc slc // load WS
+s_add_u32 s64, s64, 1024                           // Inc sgpr offset
+buffer_load_b32 v245, v134, s[sgprSrdWS:sgprSrdWS+3], s64 offen offset:0 glc slc // load WS
+s_add_u32 s64, s64, 1024                           // Inc sgpr offset
+buffer_load_b32 v246, v134, s[sgprSrdWS:sgprSrdWS+3], s64 offen offset:0 glc slc // load WS
+s_add_u32 s64, s64, 1024                           // Inc sgpr offset
+buffer_load_b32 v247, v134, s[sgprSrdWS:sgprSrdWS+3], s64 offen offset:0 glc slc // load WS
+s_add_u32 s64, s64, 1024                           // Inc sgpr offset
+buffer_load_b32 v248, v134, s[sgprSrdWS:sgprSrdWS+3], s64 offen offset:0 glc slc // load WS
+s_add_u32 s64, s64, 1024                           // Inc sgpr offset
+buffer_load_b32 v249, v134, s[sgprSrdWS:sgprSrdWS+3], s64 offen offset:0 glc slc // load WS
+s_add_u32 s64, s64, 1024                           // Inc sgpr offset
+buffer_load_b32 v250, v134, s[sgprSrdWS:sgprSrdWS+3], s64 offen offset:0 glc slc // load WS
+s_add_u32 s64, s64, 1024                           // Inc sgpr offset
+buffer_load_b32 v251, v134, s[sgprSrdWS:sgprSrdWS+3], s64 offen offset:0 glc slc // load WS
 v_mov_b32 v[vgprValuC+135], v[vgprValuC+0]         // copy MI out reg to vreg[0]
 v_mov_b32 v[vgprValuC+136], v[vgprValuC+8]         // copy MI out reg to vreg[1]
 v_mov_b32 v[vgprValuC+137], v[vgprValuC+16]        // copy MI out reg to vreg[2]
 v_mov_b32 v[vgprValuC+138], v[vgprValuC+24]        // copy MI out reg to vreg[3]
+v_mov_b32 v[vgprValuC+139], v[vgprValuC+32]        // copy MI out reg to vreg[4]
+v_mov_b32 v[vgprValuC+140], v[vgprValuC+1]         // copy MI out reg to vreg[5]
+v_mov_b32 v[vgprValuC+141], v[vgprValuC+9]         // copy MI out reg to vreg[6]
+v_mov_b32 v[vgprValuC+142], v[vgprValuC+17]        // copy MI out reg to vreg[7]
+v_mov_b32 v[vgprValuC+143], v[vgprValuC+25]        // copy MI out reg to vreg[8]
+v_mov_b32 v[vgprValuC+144], v[vgprValuC+33]        // copy MI out reg to vreg[9]
+v_mov_b32 v[vgprValuC+145], v[vgprValuC+2]         // copy MI out reg to vreg[10]
+v_mov_b32 v[vgprValuC+146], v[vgprValuC+10]        // copy MI out reg to vreg[11]
+v_mov_b32 v[vgprValuC+147], v[vgprValuC+18]        // copy MI out reg to vreg[12]
+v_mov_b32 v[vgprValuC+148], v[vgprValuC+26]        // copy MI out reg to vreg[13]
+v_mov_b32 v[vgprValuC+149], v[vgprValuC+34]        // copy MI out reg to vreg[14]
+v_mov_b32 v[vgprValuC+150], v[vgprValuC+3]         // copy MI out reg to vreg[15]
+v_mov_b32 v[vgprValuC+151], v[vgprValuC+11]        // copy MI out reg to vreg[16]
+v_mov_b32 v[vgprValuC+152], v[vgprValuC+19]        // copy MI out reg to vreg[17]
+v_mov_b32 v[vgprValuC+153], v[vgprValuC+27]        // copy MI out reg to vreg[18]
+v_mov_b32 v[vgprValuC+154], v[vgprValuC+35]        // copy MI out reg to vreg[19]
+v_mov_b32 v[vgprValuC+155], v[vgprValuC+4]         // copy MI out reg to vreg[20]
+v_mov_b32 v[vgprValuC+156], v[vgprValuC+12]        // copy MI out reg to vreg[21]
+v_mov_b32 v[vgprValuC+157], v[vgprValuC+20]        // copy MI out reg to vreg[22]
+v_mov_b32 v[vgprValuC+158], v[vgprValuC+28]        // copy MI out reg to vreg[23]
+v_mov_b32 v[vgprValuC+159], v[vgprValuC+36]        // copy MI out reg to vreg[24]
+v_mov_b32 v[vgprValuC+160], v[vgprValuC+5]         // copy MI out reg to vreg[25]
+v_mov_b32 v[vgprValuC+161], v[vgprValuC+13]        // copy MI out reg to vreg[26]
+v_mov_b32 v[vgprValuC+162], v[vgprValuC+21]        // copy MI out reg to vreg[27]
+v_mov_b32 v[vgprValuC+163], v[vgprValuC+29]        // copy MI out reg to vreg[28]
+v_mov_b32 v[vgprValuC+164], v[vgprValuC+37]        // copy MI out reg to vreg[29]
+v_mov_b32 v[vgprValuC+165], v[vgprValuC+6]         // copy MI out reg to vreg[30]
+v_mov_b32 v[vgprValuC+166], v[vgprValuC+14]        // copy MI out reg to vreg[31]
+v_mov_b32 v[vgprValuC+167], v[vgprValuC+22]        // copy MI out reg to vreg[32]
+v_mov_b32 v[vgprValuC+168], v[vgprValuC+30]        // copy MI out reg to vreg[33]
+v_mov_b32 v[vgprValuC+169], v[vgprValuC+38]        // copy MI out reg to vreg[34]
+v_mov_b32 v[vgprValuC+170], v[vgprValuC+7]         // copy MI out reg to vreg[35]
+v_mov_b32 v[vgprValuC+171], v[vgprValuC+15]        // copy MI out reg to vreg[36]
+v_mov_b32 v[vgprValuC+172], v[vgprValuC+23]        // copy MI out reg to vreg[37]
+v_mov_b32 v[vgprValuC+173], v[vgprValuC+31]        // copy MI out reg to vreg[38]
+v_mov_b32 v[vgprValuC+174], v[vgprValuC+39]        // copy MI out reg to vreg[39]
+v_mov_b32 v[vgprValuC+175], v[vgprValuC+40]        // copy MI out reg to vreg[40]
+v_mov_b32 v[vgprValuC+176], v[vgprValuC+48]        // copy MI out reg to vreg[41]
+v_mov_b32 v[vgprValuC+177], v[vgprValuC+56]        // copy MI out reg to vreg[42]
+v_mov_b32 v[vgprValuC+178], v[vgprValuC+64]        // copy MI out reg to vreg[43]
+v_mov_b32 v[vgprValuC+179], v[vgprValuC+72]        // copy MI out reg to vreg[44]
+v_mov_b32 v[vgprValuC+180], v[vgprValuC+41]        // copy MI out reg to vreg[45]
+v_mov_b32 v[vgprValuC+181], v[vgprValuC+49]        // copy MI out reg to vreg[46]
+v_mov_b32 v[vgprValuC+182], v[vgprValuC+57]        // copy MI out reg to vreg[47]
+v_mov_b32 v[vgprValuC+183], v[vgprValuC+65]        // copy MI out reg to vreg[48]
+v_mov_b32 v[vgprValuC+184], v[vgprValuC+73]        // copy MI out reg to vreg[49]
+v_mov_b32 v[vgprValuC+185], v[vgprValuC+42]        // copy MI out reg to vreg[50]
+v_mov_b32 v[vgprValuC+186], v[vgprValuC+50]        // copy MI out reg to vreg[51]
+v_mov_b32 v[vgprValuC+187], v[vgprValuC+58]        // copy MI out reg to vreg[52]
+v_mov_b32 v[vgprValuC+188], v[vgprValuC+66]        // copy MI out reg to vreg[53]
+v_mov_b32 v[vgprValuC+189], v[vgprValuC+74]        // copy MI out reg to vreg[54]
+v_mov_b32 v[vgprValuC+190], v[vgprValuC+43]        // copy MI out reg to vreg[55]
+v_mov_b32 v[vgprValuC+191], v[vgprValuC+51]        // copy MI out reg to vreg[56]
+v_mov_b32 v[vgprValuC+192], v[vgprValuC+59]        // copy MI out reg to vreg[57]
 
 /* apply mask, calc new C and issue writes */
 v_mov_b32 v130, 0xffff0000                         // mask for pack two bfloat16 element to 32bit
 v_mov_b32 v131, 0x7fff0000                         // fp32 Nan
 v_mov_b32 v132, 0x7fff                             // rounding bias for bfloat16
 
-s_waitcnt vmcnt(3)                                 // wait C (interleaved) 3 = 4 - 0 - 1
-v_add_f32 v[vgprValuC+135], v[vgprValuC+135], v139 // accum partials
+s_waitcnt vmcnt(57)                                // wait C (interleaved) 57 = 58 - 0 - 1
+v_add_f32 v[vgprValuC+135], v[vgprValuC+135], v193 // accum partials
 
-s_waitcnt vmcnt(2)                                 // wait C (interleaved) 2 = 4 - 1 - 1
-v_add_f32 v[vgprValuC+136], v[vgprValuC+136], v140 // accum partials
+s_waitcnt vmcnt(56)                                // wait C (interleaved) 56 = 58 - 1 - 1
+v_add_f32 v[vgprValuC+136], v[vgprValuC+136], v194 // accum partials
 
-s_waitcnt vmcnt(1)                                 // wait C (interleaved) 1 = 4 - 2 - 1
-v_add_f32 v[vgprValuC+137], v[vgprValuC+137], v141 // accum partials
+s_waitcnt vmcnt(55)                                // wait C (interleaved) 55 = 58 - 2 - 1
+v_add_f32 v[vgprValuC+137], v[vgprValuC+137], v195 // accum partials
 
-s_waitcnt vmcnt(0)                                 // wait C (interleaved) 0 = 4 - 3 - 1
-v_add_f32 v[vgprValuC+138], v[vgprValuC+138], v142 // accum partials
+s_waitcnt vmcnt(54)                                // wait C (interleaved) 54 = 58 - 3 - 1
+v_add_f32 v[vgprValuC+138], v[vgprValuC+138], v196 // accum partials
+
+s_waitcnt vmcnt(53)                                // wait C (interleaved) 53 = 58 - 4 - 1
+v_add_f32 v[vgprValuC+139], v[vgprValuC+139], v197 // accum partials
+
+s_waitcnt vmcnt(52)                                // wait C (interleaved) 52 = 58 - 5 - 1
+v_add_f32 v[vgprValuC+140], v[vgprValuC+140], v198 // accum partials
+
+s_waitcnt vmcnt(51)                                // wait C (interleaved) 51 = 58 - 6 - 1
+v_add_f32 v[vgprValuC+141], v[vgprValuC+141], v199 // accum partials
+
+s_waitcnt vmcnt(50)                                // wait C (interleaved) 50 = 58 - 7 - 1
+v_add_f32 v[vgprValuC+142], v[vgprValuC+142], v200 // accum partials
+
+s_waitcnt vmcnt(49)                                // wait C (interleaved) 49 = 58 - 8 - 1
+v_add_f32 v[vgprValuC+143], v[vgprValuC+143], v201 // accum partials
+
+s_waitcnt vmcnt(48)                                // wait C (interleaved) 48 = 58 - 9 - 1
+v_add_f32 v[vgprValuC+144], v[vgprValuC+144], v202 // accum partials
+
+s_waitcnt vmcnt(47)                                // wait C (interleaved) 47 = 58 - 10 - 1
+v_add_f32 v[vgprValuC+145], v[vgprValuC+145], v203 // accum partials
+
+s_waitcnt vmcnt(46)                                // wait C (interleaved) 46 = 58 - 11 - 1
+v_add_f32 v[vgprValuC+146], v[vgprValuC+146], v204 // accum partials
+
+s_waitcnt vmcnt(45)                                // wait C (interleaved) 45 = 58 - 12 - 1
+v_add_f32 v[vgprValuC+147], v[vgprValuC+147], v205 // accum partials
+
+s_waitcnt vmcnt(44)                                // wait C (interleaved) 44 = 58 - 13 - 1
+v_add_f32 v[vgprValuC+148], v[vgprValuC+148], v206 // accum partials
+
+s_waitcnt vmcnt(43)                                // wait C (interleaved) 43 = 58 - 14 - 1
+v_add_f32 v[vgprValuC+149], v[vgprValuC+149], v207 // accum partials
+
+s_waitcnt vmcnt(42)                                // wait C (interleaved) 42 = 58 - 15 - 1
+v_add_f32 v[vgprValuC+150], v[vgprValuC+150], v208 // accum partials
+
+s_waitcnt vmcnt(41)                                // wait C (interleaved) 41 = 58 - 16 - 1
+v_add_f32 v[vgprValuC+151], v[vgprValuC+151], v209 // accum partials
+
+s_waitcnt vmcnt(40)                                // wait C (interleaved) 40 = 58 - 17 - 1
+v_add_f32 v[vgprValuC+152], v[vgprValuC+152], v210 // accum partials
+
+s_waitcnt vmcnt(39)                                // wait C (interleaved) 39 = 58 - 18 - 1
+v_add_f32 v[vgprValuC+153], v[vgprValuC+153], v211 // accum partials
+
+s_waitcnt vmcnt(38)                                // wait C (interleaved) 38 = 58 - 19 - 1
+v_add_f32 v[vgprValuC+154], v[vgprValuC+154], v212 // accum partials
+
+s_waitcnt vmcnt(37)                                // wait C (interleaved) 37 = 58 - 20 - 1
+v_add_f32 v[vgprValuC+155], v[vgprValuC+155], v213 // accum partials
+
+s_waitcnt vmcnt(36)                                // wait C (interleaved) 36 = 58 - 21 - 1
+v_add_f32 v[vgprValuC+156], v[vgprValuC+156], v214 // accum partials
+
+s_waitcnt vmcnt(35)                                // wait C (interleaved) 35 = 58 - 22 - 1
+v_add_f32 v[vgprValuC+157], v[vgprValuC+157], v215 // accum partials
+
+s_waitcnt vmcnt(34)                                // wait C (interleaved) 34 = 58 - 23 - 1
+v_add_f32 v[vgprValuC+158], v[vgprValuC+158], v217 // accum partials
+
+s_waitcnt vmcnt(33)                                // wait C (interleaved) 33 = 58 - 24 - 1
+v_add_f32 v[vgprValuC+159], v[vgprValuC+159], v218 // accum partials
+
+s_waitcnt vmcnt(32)                                // wait C (interleaved) 32 = 58 - 25 - 1
+v_add_f32 v[vgprValuC+160], v[vgprValuC+160], v219 // accum partials
+
+s_waitcnt vmcnt(31)                                // wait C (interleaved) 31 = 58 - 26 - 1
+v_add_f32 v[vgprValuC+161], v[vgprValuC+161], v220 // accum partials
+
+s_waitcnt vmcnt(30)                                // wait C (interleaved) 30 = 58 - 27 - 1
+v_add_f32 v[vgprValuC+162], v[vgprValuC+162], v221 // accum partials
+
+s_waitcnt vmcnt(29)                                // wait C (interleaved) 29 = 58 - 28 - 1
+v_add_f32 v[vgprValuC+163], v[vgprValuC+163], v222 // accum partials
+
+s_waitcnt vmcnt(28)                                // wait C (interleaved) 28 = 58 - 29 - 1
+v_add_f32 v[vgprValuC+164], v[vgprValuC+164], v223 // accum partials
+
+s_waitcnt vmcnt(27)                                // wait C (interleaved) 27 = 58 - 30 - 1
+v_add_f32 v[vgprValuC+165], v[vgprValuC+165], v224 // accum partials
+
+s_waitcnt vmcnt(26)                                // wait C (interleaved) 26 = 58 - 31 - 1
+v_add_f32 v[vgprValuC+166], v[vgprValuC+166], v225 // accum partials
+
+s_waitcnt vmcnt(25)                                // wait C (interleaved) 25 = 58 - 32 - 1
+v_add_f32 v[vgprValuC+167], v[vgprValuC+167], v226 // accum partials
+
+s_waitcnt vmcnt(24)                                // wait C (interleaved) 24 = 58 - 33 - 1
+v_add_f32 v[vgprValuC+168], v[vgprValuC+168], v227 // accum partials
+
+s_waitcnt vmcnt(23)                                // wait C (interleaved) 23 = 58 - 34 - 1
+v_add_f32 v[vgprValuC+169], v[vgprValuC+169], v228 // accum partials
+
+s_waitcnt vmcnt(22)                                // wait C (interleaved) 22 = 58 - 35 - 1
+v_add_f32 v[vgprValuC+170], v[vgprValuC+170], v229 // accum partials
+
+s_waitcnt vmcnt(21)                                // wait C (interleaved) 21 = 58 - 36 - 1
+v_add_f32 v[vgprValuC+171], v[vgprValuC+171], v230 // accum partials
+
+s_waitcnt vmcnt(20)                                // wait C (interleaved) 20 = 58 - 37 - 1
+v_add_f32 v[vgprValuC+172], v[vgprValuC+172], v231 // accum partials
+
+s_waitcnt vmcnt(19)                                // wait C (interleaved) 19 = 58 - 38 - 1
+v_add_f32 v[vgprValuC+173], v[vgprValuC+173], v232 // accum partials
+
+s_waitcnt vmcnt(18)                                // wait C (interleaved) 18 = 58 - 39 - 1
+v_add_f32 v[vgprValuC+174], v[vgprValuC+174], v233 // accum partials
+
+s_waitcnt vmcnt(17)                                // wait C (interleaved) 17 = 58 - 40 - 1
+v_add_f32 v[vgprValuC+175], v[vgprValuC+175], v234 // accum partials
+
+s_waitcnt vmcnt(16)                                // wait C (interleaved) 16 = 58 - 41 - 1
+v_add_f32 v[vgprValuC+176], v[vgprValuC+176], v235 // accum partials
+
+s_waitcnt vmcnt(15)                                // wait C (interleaved) 15 = 58 - 42 - 1
+v_add_f32 v[vgprValuC+177], v[vgprValuC+177], v236 // accum partials
+
+s_waitcnt vmcnt(14)                                // wait C (interleaved) 14 = 58 - 43 - 1
+v_add_f32 v[vgprValuC+178], v[vgprValuC+178], v237 // accum partials
+
+s_waitcnt vmcnt(13)                                // wait C (interleaved) 13 = 58 - 44 - 1
+v_add_f32 v[vgprValuC+179], v[vgprValuC+179], v238 // accum partials
+
+s_waitcnt vmcnt(12)                                // wait C (interleaved) 12 = 58 - 45 - 1
+v_add_f32 v[vgprValuC+180], v[vgprValuC+180], v239 // accum partials
+
+s_waitcnt vmcnt(11)                                // wait C (interleaved) 11 = 58 - 46 - 1
+v_add_f32 v[vgprValuC+181], v[vgprValuC+181], v240 // accum partials
+
+s_waitcnt vmcnt(10)                                // wait C (interleaved) 10 = 58 - 47 - 1
+v_add_f32 v[vgprValuC+182], v[vgprValuC+182], v241 // accum partials
+
+s_waitcnt vmcnt(9)                                 // wait C (interleaved) 9 = 58 - 48 - 1
+v_add_f32 v[vgprValuC+183], v[vgprValuC+183], v242 // accum partials
+
+s_waitcnt vmcnt(8)                                 // wait C (interleaved) 8 = 58 - 49 - 1
+v_add_f32 v[vgprValuC+184], v[vgprValuC+184], v243 // accum partials
+
+s_waitcnt vmcnt(7)                                 // wait C (interleaved) 7 = 58 - 50 - 1
+v_add_f32 v[vgprValuC+185], v[vgprValuC+185], v244 // accum partials
+
+s_waitcnt vmcnt(6)                                 // wait C (interleaved) 6 = 58 - 51 - 1
+v_add_f32 v[vgprValuC+186], v[vgprValuC+186], v245 // accum partials
+
+s_waitcnt vmcnt(5)                                 // wait C (interleaved) 5 = 58 - 52 - 1
+v_add_f32 v[vgprValuC+187], v[vgprValuC+187], v246 // accum partials
+
+s_waitcnt vmcnt(4)                                 // wait C (interleaved) 4 = 58 - 53 - 1
+v_add_f32 v[vgprValuC+188], v[vgprValuC+188], v247 // accum partials
+
+s_waitcnt vmcnt(3)                                 // wait C (interleaved) 3 = 58 - 54 - 1
+v_add_f32 v[vgprValuC+189], v[vgprValuC+189], v248 // accum partials
+
+s_waitcnt vmcnt(2)                                 // wait C (interleaved) 2 = 58 - 55 - 1
+v_add_f32 v[vgprValuC+190], v[vgprValuC+190], v249 // accum partials
+
+s_waitcnt vmcnt(1)                                 // wait C (interleaved) 1 = 58 - 56 - 1
+v_add_f32 v[vgprValuC+191], v[vgprValuC+191], v250 // accum partials
+
+s_waitcnt vmcnt(0)                                 // wait C (interleaved) 0 = 58 - 57 - 1
+v_add_f32 v[vgprValuC+192], v[vgprValuC+192], v251 // accum partials
 v_mov_b32 v[vgprValuC+0], v[vgprValuC+135]         // copy vreg[0] to MI out reg
 v_mov_b32 v[vgprValuC+8], v[vgprValuC+136]         // copy vreg[1] to MI out reg
 v_mov_b32 v[vgprValuC+16], v[vgprValuC+137]        // copy vreg[2] to MI out reg
 v_mov_b32 v[vgprValuC+24], v[vgprValuC+138]        // copy vreg[3] to MI out reg
+v_mov_b32 v[vgprValuC+32], v[vgprValuC+139]        // copy vreg[4] to MI out reg
+v_mov_b32 v[vgprValuC+1], v[vgprValuC+140]         // copy vreg[5] to MI out reg
+v_mov_b32 v[vgprValuC+9], v[vgprValuC+141]         // copy vreg[6] to MI out reg
+v_mov_b32 v[vgprValuC+17], v[vgprValuC+142]        // copy vreg[7] to MI out reg
+v_mov_b32 v[vgprValuC+25], v[vgprValuC+143]        // copy vreg[8] to MI out reg
+v_mov_b32 v[vgprValuC+33], v[vgprValuC+144]        // copy vreg[9] to MI out reg
+v_mov_b32 v[vgprValuC+2], v[vgprValuC+145]         // copy vreg[10] to MI out reg
+v_mov_b32 v[vgprValuC+10], v[vgprValuC+146]        // copy vreg[11] to MI out reg
+v_mov_b32 v[vgprValuC+18], v[vgprValuC+147]        // copy vreg[12] to MI out reg
+v_mov_b32 v[vgprValuC+26], v[vgprValuC+148]        // copy vreg[13] to MI out reg
+v_mov_b32 v[vgprValuC+34], v[vgprValuC+149]        // copy vreg[14] to MI out reg
+v_mov_b32 v[vgprValuC+3], v[vgprValuC+150]         // copy vreg[15] to MI out reg
+v_mov_b32 v[vgprValuC+11], v[vgprValuC+151]        // copy vreg[16] to MI out reg
+v_mov_b32 v[vgprValuC+19], v[vgprValuC+152]        // copy vreg[17] to MI out reg
+v_mov_b32 v[vgprValuC+27], v[vgprValuC+153]        // copy vreg[18] to MI out reg
+v_mov_b32 v[vgprValuC+35], v[vgprValuC+154]        // copy vreg[19] to MI out reg
+v_mov_b32 v[vgprValuC+4], v[vgprValuC+155]         // copy vreg[20] to MI out reg
+v_mov_b32 v[vgprValuC+12], v[vgprValuC+156]        // copy vreg[21] to MI out reg
+v_mov_b32 v[vgprValuC+20], v[vgprValuC+157]        // copy vreg[22] to MI out reg
+v_mov_b32 v[vgprValuC+28], v[vgprValuC+158]        // copy vreg[23] to MI out reg
+v_mov_b32 v[vgprValuC+36], v[vgprValuC+159]        // copy vreg[24] to MI out reg
+v_mov_b32 v[vgprValuC+5], v[vgprValuC+160]         // copy vreg[25] to MI out reg
+v_mov_b32 v[vgprValuC+13], v[vgprValuC+161]        // copy vreg[26] to MI out reg
+v_mov_b32 v[vgprValuC+21], v[vgprValuC+162]        // copy vreg[27] to MI out reg
+v_mov_b32 v[vgprValuC+29], v[vgprValuC+163]        // copy vreg[28] to MI out reg
+v_mov_b32 v[vgprValuC+37], v[vgprValuC+164]        // copy vreg[29] to MI out reg
+v_mov_b32 v[vgprValuC+6], v[vgprValuC+165]         // copy vreg[30] to MI out reg
+v_mov_b32 v[vgprValuC+14], v[vgprValuC+166]        // copy vreg[31] to MI out reg
+v_mov_b32 v[vgprValuC+22], v[vgprValuC+167]        // copy vreg[32] to MI out reg
+v_mov_b32 v[vgprValuC+30], v[vgprValuC+168]        // copy vreg[33] to MI out reg
+v_mov_b32 v[vgprValuC+38], v[vgprValuC+169]        // copy vreg[34] to MI out reg
+v_mov_b32 v[vgprValuC+7], v[vgprValuC+170]         // copy vreg[35] to MI out reg
+v_mov_b32 v[vgprValuC+15], v[vgprValuC+171]        // copy vreg[36] to MI out reg
+v_mov_b32 v[vgprValuC+23], v[vgprValuC+172]        // copy vreg[37] to MI out reg
+v_mov_b32 v[vgprValuC+31], v[vgprValuC+173]        // copy vreg[38] to MI out reg
+v_mov_b32 v[vgprValuC+39], v[vgprValuC+174]        // copy vreg[39] to MI out reg
+v_mov_b32 v[vgprValuC+40], v[vgprValuC+175]        // copy vreg[40] to MI out reg
+v_mov_b32 v[vgprValuC+48], v[vgprValuC+176]        // copy vreg[41] to MI out reg
+v_mov_b32 v[vgprValuC+56], v[vgprValuC+177]        // copy vreg[42] to MI out reg
+v_mov_b32 v[vgprValuC+64], v[vgprValuC+178]        // copy vreg[43] to MI out reg
+v_mov_b32 v[vgprValuC+72], v[vgprValuC+179]        // copy vreg[44] to MI out reg
+v_mov_b32 v[vgprValuC+41], v[vgprValuC+180]        // copy vreg[45] to MI out reg
+v_mov_b32 v[vgprValuC+49], v[vgprValuC+181]        // copy vreg[46] to MI out reg
+v_mov_b32 v[vgprValuC+57], v[vgprValuC+182]        // copy vreg[47] to MI out reg
+v_mov_b32 v[vgprValuC+65], v[vgprValuC+183]        // copy vreg[48] to MI out reg
+v_mov_b32 v[vgprValuC+73], v[vgprValuC+184]        // copy vreg[49] to MI out reg
+v_mov_b32 v[vgprValuC+42], v[vgprValuC+185]        // copy vreg[50] to MI out reg
+v_mov_b32 v[vgprValuC+50], v[vgprValuC+186]        // copy vreg[51] to MI out reg
+v_mov_b32 v[vgprValuC+58], v[vgprValuC+187]        // copy vreg[52] to MI out reg
+v_mov_b32 v[vgprValuC+66], v[vgprValuC+188]        // copy vreg[53] to MI out reg
+v_mov_b32 v[vgprValuC+74], v[vgprValuC+189]        // copy vreg[54] to MI out reg
+v_mov_b32 v[vgprValuC+43], v[vgprValuC+190]        // copy vreg[55] to MI out reg
+v_mov_b32 v[vgprValuC+51], v[vgprValuC+191]        // copy vreg[56] to MI out reg
+v_mov_b32 v[vgprValuC+59], v[vgprValuC+192]        // copy vreg[57] to MI out reg
 s_nop 0                                            // 1 wait state required when next inst writes vgprs held by previous dwordx4 store inst
 /* optSingleColVgpr=1 optSharedColVgpr=0 optSGPRUsage=BufferLoad_Mask optSrdIncForRow=1 */
 
 /******************************************/
 /* Fixup Batch #1 (d1,d0,vc1,vc0) =       */
-/*      (0,4,0,0:vw1); (1,0,0,0:vw1); (1,1,0,0:vw1); (1,2,0,0:vw1) */
+/*      (11,3,0,0:vw1); (11,4,0,0:vw1); (12,0,0,0:vw1); (12,1,0,0:vw1); (12,2,0,0:vw1); (12,3,0,0:vw1); (12,4,0,0:vw1); (13,0,0,0:vw1); (13,1,0,0:vw1); (13,2,0,0:vw1); (13,3,0,0:vw1); (13,4,0,0:vw1); (14,0,0,0:vw1); (14,1,0,0:vw1); (14,2,0,0:vw1); (14,3,0,0:vw1); (14,4,0,0:vw1); (15,0,0,0:vw1); (15,1,0,0:vw1); (15,2,0,0:vw1); (15,3,0,0:vw1); (15,4,0,0:vw1) */
 /******************************************/
 
 /* calc coords, apply mask, and issue loads (if necessary) */
 s_add_u32 s64, s64, 1024                           // Inc sgpr offset
-buffer_load_b32 v139, v134, s[sgprSrdWS:sgprSrdWS+3], s64 offen offset:0 glc slc // load WS
+buffer_load_b32 v157, v134, s[sgprSrdWS:sgprSrdWS+3], s64 offen offset:0 glc slc // load WS
 s_add_u32 s64, s64, 1024                           // Inc sgpr offset
-buffer_load_b32 v140, v134, s[sgprSrdWS:sgprSrdWS+3], s64 offen offset:0 glc slc // load WS
+buffer_load_b32 v158, v134, s[sgprSrdWS:sgprSrdWS+3], s64 offen offset:0 glc slc // load WS
 s_add_u32 s64, s64, 1024                           // Inc sgpr offset
-buffer_load_b32 v141, v134, s[sgprSrdWS:sgprSrdWS+3], s64 offen offset:0 glc slc // load WS
+buffer_load_b32 v159, v134, s[sgprSrdWS:sgprSrdWS+3], s64 offen offset:0 glc slc // load WS
 s_add_u32 s64, s64, 1024                           // Inc sgpr offset
-buffer_load_b32 v142, v134, s[sgprSrdWS:sgprSrdWS+3], s64 offen offset:0 glc slc // load WS
-v_mov_b32 v[vgprValuC+135], v[vgprValuC+32]        // copy MI out reg to vreg[4]
-v_mov_b32 v[vgprValuC+136], v[vgprValuC+1]         // copy MI out reg to vreg[5]
-v_mov_b32 v[vgprValuC+137], v[vgprValuC+9]         // copy MI out reg to vreg[6]
-v_mov_b32 v[vgprValuC+138], v[vgprValuC+17]        // copy MI out reg to vreg[7]
+buffer_load_b32 v160, v134, s[sgprSrdWS:sgprSrdWS+3], s64 offen offset:0 glc slc // load WS
+s_add_u32 s64, s64, 1024                           // Inc sgpr offset
+buffer_load_b32 v161, v134, s[sgprSrdWS:sgprSrdWS+3], s64 offen offset:0 glc slc // load WS
+s_add_u32 s64, s64, 1024                           // Inc sgpr offset
+buffer_load_b32 v162, v134, s[sgprSrdWS:sgprSrdWS+3], s64 offen offset:0 glc slc // load WS
+s_add_u32 s64, s64, 1024                           // Inc sgpr offset
+buffer_load_b32 v163, v134, s[sgprSrdWS:sgprSrdWS+3], s64 offen offset:0 glc slc // load WS
+s_add_u32 s64, s64, 1024                           // Inc sgpr offset
+buffer_load_b32 v164, v134, s[sgprSrdWS:sgprSrdWS+3], s64 offen offset:0 glc slc // load WS
+s_add_u32 s64, s64, 1024                           // Inc sgpr offset
+buffer_load_b32 v165, v134, s[sgprSrdWS:sgprSrdWS+3], s64 offen offset:0 glc slc // load WS
+s_add_u32 s64, s64, 1024                           // Inc sgpr offset
+buffer_load_b32 v166, v134, s[sgprSrdWS:sgprSrdWS+3], s64 offen offset:0 glc slc // load WS
+s_add_u32 s64, s64, 1024                           // Inc sgpr offset
+buffer_load_b32 v167, v134, s[sgprSrdWS:sgprSrdWS+3], s64 offen offset:0 glc slc // load WS
+s_add_u32 s64, s64, 1024                           // Inc sgpr offset
+buffer_load_b32 v168, v134, s[sgprSrdWS:sgprSrdWS+3], s64 offen offset:0 glc slc // load WS
+s_add_u32 s64, s64, 1024                           // Inc sgpr offset
+buffer_load_b32 v169, v134, s[sgprSrdWS:sgprSrdWS+3], s64 offen offset:0 glc slc // load WS
+s_add_u32 s64, s64, 1024                           // Inc sgpr offset
+buffer_load_b32 v170, v134, s[sgprSrdWS:sgprSrdWS+3], s64 offen offset:0 glc slc // load WS
+s_add_u32 s64, s64, 1024                           // Inc sgpr offset
+buffer_load_b32 v171, v134, s[sgprSrdWS:sgprSrdWS+3], s64 offen offset:0 glc slc // load WS
+s_add_u32 s64, s64, 1024                           // Inc sgpr offset
+buffer_load_b32 v172, v134, s[sgprSrdWS:sgprSrdWS+3], s64 offen offset:0 glc slc // load WS
+s_add_u32 s64, s64, 1024                           // Inc sgpr offset
+buffer_load_b32 v173, v134, s[sgprSrdWS:sgprSrdWS+3], s64 offen offset:0 glc slc // load WS
+s_add_u32 s64, s64, 1024                           // Inc sgpr offset
+buffer_load_b32 v174, v134, s[sgprSrdWS:sgprSrdWS+3], s64 offen offset:0 glc slc // load WS
+s_add_u32 s64, s64, 1024                           // Inc sgpr offset
+buffer_load_b32 v175, v134, s[sgprSrdWS:sgprSrdWS+3], s64 offen offset:0 glc slc // load WS
+s_add_u32 s64, s64, 1024                           // Inc sgpr offset
+buffer_load_b32 v176, v134, s[sgprSrdWS:sgprSrdWS+3], s64 offen offset:0 glc slc // load WS
+s_add_u32 s64, s64, 1024                           // Inc sgpr offset
+buffer_load_b32 v177, v134, s[sgprSrdWS:sgprSrdWS+3], s64 offen offset:0 glc slc // load WS
+s_add_u32 s64, s64, 1024                           // Inc sgpr offset
+buffer_load_b32 v178, v134, s[sgprSrdWS:sgprSrdWS+3], s64 offen offset:0 glc slc // load WS
+v_mov_b32 v[vgprValuC+135], v[vgprValuC+67]        // copy MI out reg to vreg[58]
+v_mov_b32 v[vgprValuC+136], v[vgprValuC+75]        // copy MI out reg to vreg[59]
+v_mov_b32 v[vgprValuC+137], v[vgprValuC+44]        // copy MI out reg to vreg[60]
+v_mov_b32 v[vgprValuC+138], v[vgprValuC+52]        // copy MI out reg to vreg[61]
+v_mov_b32 v[vgprValuC+139], v[vgprValuC+60]        // copy MI out reg to vreg[62]
+v_mov_b32 v[vgprValuC+140], v[vgprValuC+68]        // copy MI out reg to vreg[63]
+v_mov_b32 v[vgprValuC+141], v[vgprValuC+76]        // copy MI out reg to vreg[64]
+v_mov_b32 v[vgprValuC+142], v[vgprValuC+45]        // copy MI out reg to vreg[65]
+v_mov_b32 v[vgprValuC+143], v[vgprValuC+53]        // copy MI out reg to vreg[66]
+v_mov_b32 v[vgprValuC+144], v[vgprValuC+61]        // copy MI out reg to vreg[67]
+v_mov_b32 v[vgprValuC+145], v[vgprValuC+69]        // copy MI out reg to vreg[68]
+v_mov_b32 v[vgprValuC+146], v[vgprValuC+77]        // copy MI out reg to vreg[69]
+v_mov_b32 v[vgprValuC+147], v[vgprValuC+46]        // copy MI out reg to vreg[70]
+v_mov_b32 v[vgprValuC+148], v[vgprValuC+54]        // copy MI out reg to vreg[71]
+v_mov_b32 v[vgprValuC+149], v[vgprValuC+62]        // copy MI out reg to vreg[72]
+v_mov_b32 v[vgprValuC+150], v[vgprValuC+70]        // copy MI out reg to vreg[73]
+v_mov_b32 v[vgprValuC+151], v[vgprValuC+78]        // copy MI out reg to vreg[74]
+v_mov_b32 v[vgprValuC+152], v[vgprValuC+47]        // copy MI out reg to vreg[75]
+v_mov_b32 v[vgprValuC+153], v[vgprValuC+55]        // copy MI out reg to vreg[76]
+v_mov_b32 v[vgprValuC+154], v[vgprValuC+63]        // copy MI out reg to vreg[77]
+v_mov_b32 v[vgprValuC+155], v[vgprValuC+71]        // copy MI out reg to vreg[78]
+v_mov_b32 v[vgprValuC+156], v[vgprValuC+79]        // copy MI out reg to vreg[79]
 
 /* apply mask, calc new C and issue writes */
 v_mov_b32 v130, 0xffff0000                         // mask for pack two bfloat16 element to 32bit
 v_mov_b32 v131, 0x7fff0000                         // fp32 Nan
 v_mov_b32 v132, 0x7fff                             // rounding bias for bfloat16
 
-s_waitcnt vmcnt(3)                                 // wait C (interleaved) 3 = 4 - 0 - 1
-v_add_f32 v[vgprValuC+135], v[vgprValuC+135], v139 // accum partials
-
-s_waitcnt vmcnt(2)                                 // wait C (interleaved) 2 = 4 - 1 - 1
-v_add_f32 v[vgprValuC+136], v[vgprValuC+136], v140 // accum partials
-
-s_waitcnt vmcnt(1)                                 // wait C (interleaved) 1 = 4 - 2 - 1
-v_add_f32 v[vgprValuC+137], v[vgprValuC+137], v141 // accum partials
-
-s_waitcnt vmcnt(0)                                 // wait C (interleaved) 0 = 4 - 3 - 1
-v_add_f32 v[vgprValuC+138], v[vgprValuC+138], v142 // accum partials
-v_mov_b32 v[vgprValuC+32], v[vgprValuC+135]        // copy vreg[4] to MI out reg
-v_mov_b32 v[vgprValuC+1], v[vgprValuC+136]         // copy vreg[5] to MI out reg
-v_mov_b32 v[vgprValuC+9], v[vgprValuC+137]         // copy vreg[6] to MI out reg
-v_mov_b32 v[vgprValuC+17], v[vgprValuC+138]        // copy vreg[7] to MI out reg
-s_nop 0                                            // 1 wait state required when next inst writes vgprs held by previous dwordx4 store inst
-/* optSingleColVgpr=1 optSharedColVgpr=0 optSGPRUsage=BufferLoad_Mask optSrdIncForRow=1 */
-
-/******************************************/
-/* Fixup Batch #2 (d1,d0,vc1,vc0) =       */
-/*      (1,3,0,0:vw1); (1,4,0,0:vw1); (2,0,0,0:vw1); (2,1,0,0:vw1) */
-/******************************************/
-
-/* calc coords, apply mask, and issue loads (if necessary) */
-s_add_u32 s64, s64, 1024                           // Inc sgpr offset
-buffer_load_b32 v139, v134, s[sgprSrdWS:sgprSrdWS+3], s64 offen offset:0 glc slc // load WS
-s_add_u32 s64, s64, 1024                           // Inc sgpr offset
-buffer_load_b32 v140, v134, s[sgprSrdWS:sgprSrdWS+3], s64 offen offset:0 glc slc // load WS
-s_add_u32 s64, s64, 1024                           // Inc sgpr offset
-buffer_load_b32 v141, v134, s[sgprSrdWS:sgprSrdWS+3], s64 offen offset:0 glc slc // load WS
-s_add_u32 s64, s64, 1024                           // Inc sgpr offset
-buffer_load_b32 v142, v134, s[sgprSrdWS:sgprSrdWS+3], s64 offen offset:0 glc slc // load WS
-v_mov_b32 v[vgprValuC+135], v[vgprValuC+25]        // copy MI out reg to vreg[8]
-v_mov_b32 v[vgprValuC+136], v[vgprValuC+33]        // copy MI out reg to vreg[9]
-v_mov_b32 v[vgprValuC+137], v[vgprValuC+2]         // copy MI out reg to vreg[10]
-v_mov_b32 v[vgprValuC+138], v[vgprValuC+10]        // copy MI out reg to vreg[11]
-
-/* apply mask, calc new C and issue writes */
-v_mov_b32 v130, 0xffff0000                         // mask for pack two bfloat16 element to 32bit
-v_mov_b32 v131, 0x7fff0000                         // fp32 Nan
-v_mov_b32 v132, 0x7fff                             // rounding bias for bfloat16
-
-s_waitcnt vmcnt(3)                                 // wait C (interleaved) 3 = 4 - 0 - 1
-v_add_f32 v[vgprValuC+135], v[vgprValuC+135], v139 // accum partials
-
-s_waitcnt vmcnt(2)                                 // wait C (interleaved) 2 = 4 - 1 - 1
-v_add_f32 v[vgprValuC+136], v[vgprValuC+136], v140 // accum partials
-
-s_waitcnt vmcnt(1)                                 // wait C (interleaved) 1 = 4 - 2 - 1
-v_add_f32 v[vgprValuC+137], v[vgprValuC+137], v141 // accum partials
-
-s_waitcnt vmcnt(0)                                 // wait C (interleaved) 0 = 4 - 3 - 1
-v_add_f32 v[vgprValuC+138], v[vgprValuC+138], v142 // accum partials
-v_mov_b32 v[vgprValuC+25], v[vgprValuC+135]        // copy vreg[8] to MI out reg
-v_mov_b32 v[vgprValuC+33], v[vgprValuC+136]        // copy vreg[9] to MI out reg
-v_mov_b32 v[vgprValuC+2], v[vgprValuC+137]         // copy vreg[10] to MI out reg
-v_mov_b32 v[vgprValuC+10], v[vgprValuC+138]        // copy vreg[11] to MI out reg
-s_nop 0                                            // 1 wait state required when next inst writes vgprs held by previous dwordx4 store inst
-/* optSingleColVgpr=1 optSharedColVgpr=0 optSGPRUsage=BufferLoad_Mask optSrdIncForRow=1 */
-
-/******************************************/
-/* Fixup Batch #3 (d1,d0,vc1,vc0) =       */
-/*      (2,2,0,0:vw1); (2,3,0,0:vw1); (2,4,0,0:vw1); (3,0,0,0:vw1) */
-/******************************************/
-
-/* calc coords, apply mask, and issue loads (if necessary) */
-s_add_u32 s64, s64, 1024                           // Inc sgpr offset
-buffer_load_b32 v139, v134, s[sgprSrdWS:sgprSrdWS+3], s64 offen offset:0 glc slc // load WS
-s_add_u32 s64, s64, 1024                           // Inc sgpr offset
-buffer_load_b32 v140, v134, s[sgprSrdWS:sgprSrdWS+3], s64 offen offset:0 glc slc // load WS
-s_add_u32 s64, s64, 1024                           // Inc sgpr offset
-buffer_load_b32 v141, v134, s[sgprSrdWS:sgprSrdWS+3], s64 offen offset:0 glc slc // load WS
-s_add_u32 s64, s64, 1024                           // Inc sgpr offset
-buffer_load_b32 v142, v134, s[sgprSrdWS:sgprSrdWS+3], s64 offen offset:0 glc slc // load WS
-v_mov_b32 v[vgprValuC+135], v[vgprValuC+18]        // copy MI out reg to vreg[12]
-v_mov_b32 v[vgprValuC+136], v[vgprValuC+26]        // copy MI out reg to vreg[13]
-v_mov_b32 v[vgprValuC+137], v[vgprValuC+34]        // copy MI out reg to vreg[14]
-v_mov_b32 v[vgprValuC+138], v[vgprValuC+3]         // copy MI out reg to vreg[15]
-
-/* apply mask, calc new C and issue writes */
-v_mov_b32 v130, 0xffff0000                         // mask for pack two bfloat16 element to 32bit
-v_mov_b32 v131, 0x7fff0000                         // fp32 Nan
-v_mov_b32 v132, 0x7fff                             // rounding bias for bfloat16
-
-s_waitcnt vmcnt(3)                                 // wait C (interleaved) 3 = 4 - 0 - 1
-v_add_f32 v[vgprValuC+135], v[vgprValuC+135], v139 // accum partials
-
-s_waitcnt vmcnt(2)                                 // wait C (interleaved) 2 = 4 - 1 - 1
-v_add_f32 v[vgprValuC+136], v[vgprValuC+136], v140 // accum partials
-
-s_waitcnt vmcnt(1)                                 // wait C (interleaved) 1 = 4 - 2 - 1
-v_add_f32 v[vgprValuC+137], v[vgprValuC+137], v141 // accum partials
-
-s_waitcnt vmcnt(0)                                 // wait C (interleaved) 0 = 4 - 3 - 1
-v_add_f32 v[vgprValuC+138], v[vgprValuC+138], v142 // accum partials
-v_mov_b32 v[vgprValuC+18], v[vgprValuC+135]        // copy vreg[12] to MI out reg
-v_mov_b32 v[vgprValuC+26], v[vgprValuC+136]        // copy vreg[13] to MI out reg
-v_mov_b32 v[vgprValuC+34], v[vgprValuC+137]        // copy vreg[14] to MI out reg
-v_mov_b32 v[vgprValuC+3], v[vgprValuC+138]         // copy vreg[15] to MI out reg
-s_nop 0                                            // 1 wait state required when next inst writes vgprs held by previous dwordx4 store inst
-/* optSingleColVgpr=1 optSharedColVgpr=0 optSGPRUsage=BufferLoad_Mask optSrdIncForRow=1 */
-
-/******************************************/
-/* Fixup Batch #4 (d1,d0,vc1,vc0) =       */
-/*      (3,1,0,0:vw1); (3,2,0,0:vw1); (3,3,0,0:vw1); (3,4,0,0:vw1) */
-/******************************************/
-
-/* calc coords, apply mask, and issue loads (if necessary) */
-s_add_u32 s64, s64, 1024                           // Inc sgpr offset
-buffer_load_b32 v139, v134, s[sgprSrdWS:sgprSrdWS+3], s64 offen offset:0 glc slc // load WS
-s_add_u32 s64, s64, 1024                           // Inc sgpr offset
-buffer_load_b32 v140, v134, s[sgprSrdWS:sgprSrdWS+3], s64 offen offset:0 glc slc // load WS
-s_add_u32 s64, s64, 1024                           // Inc sgpr offset
-buffer_load_b32 v141, v134, s[sgprSrdWS:sgprSrdWS+3], s64 offen offset:0 glc slc // load WS
-s_add_u32 s64, s64, 1024                           // Inc sgpr offset
-buffer_load_b32 v142, v134, s[sgprSrdWS:sgprSrdWS+3], s64 offen offset:0 glc slc // load WS
-v_mov_b32 v[vgprValuC+135], v[vgprValuC+11]        // copy MI out reg to vreg[16]
-v_mov_b32 v[vgprValuC+136], v[vgprValuC+19]        // copy MI out reg to vreg[17]
-v_mov_b32 v[vgprValuC+137], v[vgprValuC+27]        // copy MI out reg to vreg[18]
-v_mov_b32 v[vgprValuC+138], v[vgprValuC+35]        // copy MI out reg to vreg[19]
-
-/* apply mask, calc new C and issue writes */
-v_mov_b32 v130, 0xffff0000                         // mask for pack two bfloat16 element to 32bit
-v_mov_b32 v131, 0x7fff0000                         // fp32 Nan
-v_mov_b32 v132, 0x7fff                             // rounding bias for bfloat16
-
-s_waitcnt vmcnt(3)                                 // wait C (interleaved) 3 = 4 - 0 - 1
-v_add_f32 v[vgprValuC+135], v[vgprValuC+135], v139 // accum partials
-
-s_waitcnt vmcnt(2)                                 // wait C (interleaved) 2 = 4 - 1 - 1
-v_add_f32 v[vgprValuC+136], v[vgprValuC+136], v140 // accum partials
-
-s_waitcnt vmcnt(1)                                 // wait C (interleaved) 1 = 4 - 2 - 1
-v_add_f32 v[vgprValuC+137], v[vgprValuC+137], v141 // accum partials
-
-s_waitcnt vmcnt(0)                                 // wait C (interleaved) 0 = 4 - 3 - 1
-v_add_f32 v[vgprValuC+138], v[vgprValuC+138], v142 // accum partials
-v_mov_b32 v[vgprValuC+11], v[vgprValuC+135]        // copy vreg[16] to MI out reg
-v_mov_b32 v[vgprValuC+19], v[vgprValuC+136]        // copy vreg[17] to MI out reg
-v_mov_b32 v[vgprValuC+27], v[vgprValuC+137]        // copy vreg[18] to MI out reg
-v_mov_b32 v[vgprValuC+35], v[vgprValuC+138]        // copy vreg[19] to MI out reg
-s_nop 0                                            // 1 wait state required when next inst writes vgprs held by previous dwordx4 store inst
-/* optSingleColVgpr=1 optSharedColVgpr=0 optSGPRUsage=BufferLoad_Mask optSrdIncForRow=1 */
-
-/******************************************/
-/* Fixup Batch #5 (d1,d0,vc1,vc0) =       */
-/*      (4,0,0,0:vw1); (4,1,0,0:vw1); (4,2,0,0:vw1); (4,3,0,0:vw1) */
-/******************************************/
-
-/* calc coords, apply mask, and issue loads (if necessary) */
-s_add_u32 s64, s64, 1024                           // Inc sgpr offset
-buffer_load_b32 v139, v134, s[sgprSrdWS:sgprSrdWS+3], s64 offen offset:0 glc slc // load WS
-s_add_u32 s64, s64, 1024                           // Inc sgpr offset
-buffer_load_b32 v140, v134, s[sgprSrdWS:sgprSrdWS+3], s64 offen offset:0 glc slc // load WS
-s_add_u32 s64, s64, 1024                           // Inc sgpr offset
-buffer_load_b32 v141, v134, s[sgprSrdWS:sgprSrdWS+3], s64 offen offset:0 glc slc // load WS
-s_add_u32 s64, s64, 1024                           // Inc sgpr offset
-buffer_load_b32 v142, v134, s[sgprSrdWS:sgprSrdWS+3], s64 offen offset:0 glc slc // load WS
-v_mov_b32 v[vgprValuC+135], v[vgprValuC+4]         // copy MI out reg to vreg[20]
-v_mov_b32 v[vgprValuC+136], v[vgprValuC+12]        // copy MI out reg to vreg[21]
-v_mov_b32 v[vgprValuC+137], v[vgprValuC+20]        // copy MI out reg to vreg[22]
-v_mov_b32 v[vgprValuC+138], v[vgprValuC+28]        // copy MI out reg to vreg[23]
-
-/* apply mask, calc new C and issue writes */
-v_mov_b32 v130, 0xffff0000                         // mask for pack two bfloat16 element to 32bit
-v_mov_b32 v131, 0x7fff0000                         // fp32 Nan
-v_mov_b32 v132, 0x7fff                             // rounding bias for bfloat16
-
-s_waitcnt vmcnt(3)                                 // wait C (interleaved) 3 = 4 - 0 - 1
-v_add_f32 v[vgprValuC+135], v[vgprValuC+135], v139 // accum partials
-
-s_waitcnt vmcnt(2)                                 // wait C (interleaved) 2 = 4 - 1 - 1
-v_add_f32 v[vgprValuC+136], v[vgprValuC+136], v140 // accum partials
-
-s_waitcnt vmcnt(1)                                 // wait C (interleaved) 1 = 4 - 2 - 1
-v_add_f32 v[vgprValuC+137], v[vgprValuC+137], v141 // accum partials
-
-s_waitcnt vmcnt(0)                                 // wait C (interleaved) 0 = 4 - 3 - 1
-v_add_f32 v[vgprValuC+138], v[vgprValuC+138], v142 // accum partials
-v_mov_b32 v[vgprValuC+4], v[vgprValuC+135]         // copy vreg[20] to MI out reg
-v_mov_b32 v[vgprValuC+12], v[vgprValuC+136]        // copy vreg[21] to MI out reg
-v_mov_b32 v[vgprValuC+20], v[vgprValuC+137]        // copy vreg[22] to MI out reg
-v_mov_b32 v[vgprValuC+28], v[vgprValuC+138]        // copy vreg[23] to MI out reg
-s_nop 0                                            // 1 wait state required when next inst writes vgprs held by previous dwordx4 store inst
-/* optSingleColVgpr=1 optSharedColVgpr=0 optSGPRUsage=BufferLoad_Mask optSrdIncForRow=1 */
-
-/******************************************/
-/* Fixup Batch #6 (d1,d0,vc1,vc0) =       */
-/*      (4,4,0,0:vw1); (5,0,0,0:vw1); (5,1,0,0:vw1); (5,2,0,0:vw1) */
-/******************************************/
-
-/* calc coords, apply mask, and issue loads (if necessary) */
-s_add_u32 s64, s64, 1024                           // Inc sgpr offset
-buffer_load_b32 v139, v134, s[sgprSrdWS:sgprSrdWS+3], s64 offen offset:0 glc slc // load WS
-s_add_u32 s64, s64, 1024                           // Inc sgpr offset
-buffer_load_b32 v140, v134, s[sgprSrdWS:sgprSrdWS+3], s64 offen offset:0 glc slc // load WS
-s_add_u32 s64, s64, 1024                           // Inc sgpr offset
-buffer_load_b32 v141, v134, s[sgprSrdWS:sgprSrdWS+3], s64 offen offset:0 glc slc // load WS
-s_add_u32 s64, s64, 1024                           // Inc sgpr offset
-buffer_load_b32 v142, v134, s[sgprSrdWS:sgprSrdWS+3], s64 offen offset:0 glc slc // load WS
-v_mov_b32 v[vgprValuC+135], v[vgprValuC+36]        // copy MI out reg to vreg[24]
-v_mov_b32 v[vgprValuC+136], v[vgprValuC+5]         // copy MI out reg to vreg[25]
-v_mov_b32 v[vgprValuC+137], v[vgprValuC+13]        // copy MI out reg to vreg[26]
-v_mov_b32 v[vgprValuC+138], v[vgprValuC+21]        // copy MI out reg to vreg[27]
-
-/* apply mask, calc new C and issue writes */
-v_mov_b32 v130, 0xffff0000                         // mask for pack two bfloat16 element to 32bit
-v_mov_b32 v131, 0x7fff0000                         // fp32 Nan
-v_mov_b32 v132, 0x7fff                             // rounding bias for bfloat16
-
-s_waitcnt vmcnt(3)                                 // wait C (interleaved) 3 = 4 - 0 - 1
-v_add_f32 v[vgprValuC+135], v[vgprValuC+135], v139 // accum partials
-
-s_waitcnt vmcnt(2)                                 // wait C (interleaved) 2 = 4 - 1 - 1
-v_add_f32 v[vgprValuC+136], v[vgprValuC+136], v140 // accum partials
-
-s_waitcnt vmcnt(1)                                 // wait C (interleaved) 1 = 4 - 2 - 1
-v_add_f32 v[vgprValuC+137], v[vgprValuC+137], v141 // accum partials
-
-s_waitcnt vmcnt(0)                                 // wait C (interleaved) 0 = 4 - 3 - 1
-v_add_f32 v[vgprValuC+138], v[vgprValuC+138], v142 // accum partials
-v_mov_b32 v[vgprValuC+36], v[vgprValuC+135]        // copy vreg[24] to MI out reg
-v_mov_b32 v[vgprValuC+5], v[vgprValuC+136]         // copy vreg[25] to MI out reg
-v_mov_b32 v[vgprValuC+13], v[vgprValuC+137]        // copy vreg[26] to MI out reg
-v_mov_b32 v[vgprValuC+21], v[vgprValuC+138]        // copy vreg[27] to MI out reg
-s_nop 0                                            // 1 wait state required when next inst writes vgprs held by previous dwordx4 store inst
-/* optSingleColVgpr=1 optSharedColVgpr=0 optSGPRUsage=BufferLoad_Mask optSrdIncForRow=1 */
-
-/******************************************/
-/* Fixup Batch #7 (d1,d0,vc1,vc0) =       */
-/*      (5,3,0,0:vw1); (5,4,0,0:vw1); (6,0,0,0:vw1); (6,1,0,0:vw1) */
-/******************************************/
-
-/* calc coords, apply mask, and issue loads (if necessary) */
-s_add_u32 s64, s64, 1024                           // Inc sgpr offset
-buffer_load_b32 v139, v134, s[sgprSrdWS:sgprSrdWS+3], s64 offen offset:0 glc slc // load WS
-s_add_u32 s64, s64, 1024                           // Inc sgpr offset
-buffer_load_b32 v140, v134, s[sgprSrdWS:sgprSrdWS+3], s64 offen offset:0 glc slc // load WS
-s_add_u32 s64, s64, 1024                           // Inc sgpr offset
-buffer_load_b32 v141, v134, s[sgprSrdWS:sgprSrdWS+3], s64 offen offset:0 glc slc // load WS
-s_add_u32 s64, s64, 1024                           // Inc sgpr offset
-buffer_load_b32 v142, v134, s[sgprSrdWS:sgprSrdWS+3], s64 offen offset:0 glc slc // load WS
-v_mov_b32 v[vgprValuC+135], v[vgprValuC+29]        // copy MI out reg to vreg[28]
-v_mov_b32 v[vgprValuC+136], v[vgprValuC+37]        // copy MI out reg to vreg[29]
-v_mov_b32 v[vgprValuC+137], v[vgprValuC+6]         // copy MI out reg to vreg[30]
-v_mov_b32 v[vgprValuC+138], v[vgprValuC+14]        // copy MI out reg to vreg[31]
-
-/* apply mask, calc new C and issue writes */
-v_mov_b32 v130, 0xffff0000                         // mask for pack two bfloat16 element to 32bit
-v_mov_b32 v131, 0x7fff0000                         // fp32 Nan
-v_mov_b32 v132, 0x7fff                             // rounding bias for bfloat16
-
-s_waitcnt vmcnt(3)                                 // wait C (interleaved) 3 = 4 - 0 - 1
-v_add_f32 v[vgprValuC+135], v[vgprValuC+135], v139 // accum partials
-
-s_waitcnt vmcnt(2)                                 // wait C (interleaved) 2 = 4 - 1 - 1
-v_add_f32 v[vgprValuC+136], v[vgprValuC+136], v140 // accum partials
-
-s_waitcnt vmcnt(1)                                 // wait C (interleaved) 1 = 4 - 2 - 1
-v_add_f32 v[vgprValuC+137], v[vgprValuC+137], v141 // accum partials
-
-s_waitcnt vmcnt(0)                                 // wait C (interleaved) 0 = 4 - 3 - 1
-v_add_f32 v[vgprValuC+138], v[vgprValuC+138], v142 // accum partials
-v_mov_b32 v[vgprValuC+29], v[vgprValuC+135]        // copy vreg[28] to MI out reg
-v_mov_b32 v[vgprValuC+37], v[vgprValuC+136]        // copy vreg[29] to MI out reg
-v_mov_b32 v[vgprValuC+6], v[vgprValuC+137]         // copy vreg[30] to MI out reg
-v_mov_b32 v[vgprValuC+14], v[vgprValuC+138]        // copy vreg[31] to MI out reg
-s_nop 0                                            // 1 wait state required when next inst writes vgprs held by previous dwordx4 store inst
-/* optSingleColVgpr=1 optSharedColVgpr=0 optSGPRUsage=BufferLoad_Mask optSrdIncForRow=1 */
-
-/******************************************/
-/* Fixup Batch #8 (d1,d0,vc1,vc0) =       */
-/*      (6,2,0,0:vw1); (6,3,0,0:vw1); (6,4,0,0:vw1); (7,0,0,0:vw1) */
-/******************************************/
-
-/* calc coords, apply mask, and issue loads (if necessary) */
-s_add_u32 s64, s64, 1024                           // Inc sgpr offset
-buffer_load_b32 v139, v134, s[sgprSrdWS:sgprSrdWS+3], s64 offen offset:0 glc slc // load WS
-s_add_u32 s64, s64, 1024                           // Inc sgpr offset
-buffer_load_b32 v140, v134, s[sgprSrdWS:sgprSrdWS+3], s64 offen offset:0 glc slc // load WS
-s_add_u32 s64, s64, 1024                           // Inc sgpr offset
-buffer_load_b32 v141, v134, s[sgprSrdWS:sgprSrdWS+3], s64 offen offset:0 glc slc // load WS
-s_add_u32 s64, s64, 1024                           // Inc sgpr offset
-buffer_load_b32 v142, v134, s[sgprSrdWS:sgprSrdWS+3], s64 offen offset:0 glc slc // load WS
-v_mov_b32 v[vgprValuC+135], v[vgprValuC+22]        // copy MI out reg to vreg[32]
-v_mov_b32 v[vgprValuC+136], v[vgprValuC+30]        // copy MI out reg to vreg[33]
-v_mov_b32 v[vgprValuC+137], v[vgprValuC+38]        // copy MI out reg to vreg[34]
-v_mov_b32 v[vgprValuC+138], v[vgprValuC+7]         // copy MI out reg to vreg[35]
-
-/* apply mask, calc new C and issue writes */
-v_mov_b32 v130, 0xffff0000                         // mask for pack two bfloat16 element to 32bit
-v_mov_b32 v131, 0x7fff0000                         // fp32 Nan
-v_mov_b32 v132, 0x7fff                             // rounding bias for bfloat16
-
-s_waitcnt vmcnt(3)                                 // wait C (interleaved) 3 = 4 - 0 - 1
-v_add_f32 v[vgprValuC+135], v[vgprValuC+135], v139 // accum partials
-
-s_waitcnt vmcnt(2)                                 // wait C (interleaved) 2 = 4 - 1 - 1
-v_add_f32 v[vgprValuC+136], v[vgprValuC+136], v140 // accum partials
-
-s_waitcnt vmcnt(1)                                 // wait C (interleaved) 1 = 4 - 2 - 1
-v_add_f32 v[vgprValuC+137], v[vgprValuC+137], v141 // accum partials
-
-s_waitcnt vmcnt(0)                                 // wait C (interleaved) 0 = 4 - 3 - 1
-v_add_f32 v[vgprValuC+138], v[vgprValuC+138], v142 // accum partials
-v_mov_b32 v[vgprValuC+22], v[vgprValuC+135]        // copy vreg[32] to MI out reg
-v_mov_b32 v[vgprValuC+30], v[vgprValuC+136]        // copy vreg[33] to MI out reg
-v_mov_b32 v[vgprValuC+38], v[vgprValuC+137]        // copy vreg[34] to MI out reg
-v_mov_b32 v[vgprValuC+7], v[vgprValuC+138]         // copy vreg[35] to MI out reg
-s_nop 0                                            // 1 wait state required when next inst writes vgprs held by previous dwordx4 store inst
-/* optSingleColVgpr=1 optSharedColVgpr=0 optSGPRUsage=BufferLoad_Mask optSrdIncForRow=1 */
-
-/******************************************/
-/* Fixup Batch #9 (d1,d0,vc1,vc0) =       */
-/*      (7,1,0,0:vw1); (7,2,0,0:vw1); (7,3,0,0:vw1); (7,4,0,0:vw1) */
-/******************************************/
-
-/* calc coords, apply mask, and issue loads (if necessary) */
-s_add_u32 s64, s64, 1024                           // Inc sgpr offset
-buffer_load_b32 v139, v134, s[sgprSrdWS:sgprSrdWS+3], s64 offen offset:0 glc slc // load WS
-s_add_u32 s64, s64, 1024                           // Inc sgpr offset
-buffer_load_b32 v140, v134, s[sgprSrdWS:sgprSrdWS+3], s64 offen offset:0 glc slc // load WS
-s_add_u32 s64, s64, 1024                           // Inc sgpr offset
-buffer_load_b32 v141, v134, s[sgprSrdWS:sgprSrdWS+3], s64 offen offset:0 glc slc // load WS
-s_add_u32 s64, s64, 1024                           // Inc sgpr offset
-buffer_load_b32 v142, v134, s[sgprSrdWS:sgprSrdWS+3], s64 offen offset:0 glc slc // load WS
-v_mov_b32 v[vgprValuC+135], v[vgprValuC+15]        // copy MI out reg to vreg[36]
-v_mov_b32 v[vgprValuC+136], v[vgprValuC+23]        // copy MI out reg to vreg[37]
-v_mov_b32 v[vgprValuC+137], v[vgprValuC+31]        // copy MI out reg to vreg[38]
-v_mov_b32 v[vgprValuC+138], v[vgprValuC+39]        // copy MI out reg to vreg[39]
-
-/* apply mask, calc new C and issue writes */
-v_mov_b32 v130, 0xffff0000                         // mask for pack two bfloat16 element to 32bit
-v_mov_b32 v131, 0x7fff0000                         // fp32 Nan
-v_mov_b32 v132, 0x7fff                             // rounding bias for bfloat16
-
-s_waitcnt vmcnt(3)                                 // wait C (interleaved) 3 = 4 - 0 - 1
-v_add_f32 v[vgprValuC+135], v[vgprValuC+135], v139 // accum partials
-
-s_waitcnt vmcnt(2)                                 // wait C (interleaved) 2 = 4 - 1 - 1
-v_add_f32 v[vgprValuC+136], v[vgprValuC+136], v140 // accum partials
-
-s_waitcnt vmcnt(1)                                 // wait C (interleaved) 1 = 4 - 2 - 1
-v_add_f32 v[vgprValuC+137], v[vgprValuC+137], v141 // accum partials
-
-s_waitcnt vmcnt(0)                                 // wait C (interleaved) 0 = 4 - 3 - 1
-v_add_f32 v[vgprValuC+138], v[vgprValuC+138], v142 // accum partials
-v_mov_b32 v[vgprValuC+15], v[vgprValuC+135]        // copy vreg[36] to MI out reg
-v_mov_b32 v[vgprValuC+23], v[vgprValuC+136]        // copy vreg[37] to MI out reg
-v_mov_b32 v[vgprValuC+31], v[vgprValuC+137]        // copy vreg[38] to MI out reg
-v_mov_b32 v[vgprValuC+39], v[vgprValuC+138]        // copy vreg[39] to MI out reg
-s_nop 0                                            // 1 wait state required when next inst writes vgprs held by previous dwordx4 store inst
-/* optSingleColVgpr=1 optSharedColVgpr=0 optSGPRUsage=BufferLoad_Mask optSrdIncForRow=1 */
-
-/******************************************/
-/* Fixup Batch #10 (d1,d0,vc1,vc0) =      */
-/*      (8,0,0,0:vw1); (8,1,0,0:vw1); (8,2,0,0:vw1); (8,3,0,0:vw1) */
-/******************************************/
-
-/* calc coords, apply mask, and issue loads (if necessary) */
-s_add_u32 s64, s64, 1024                           // Inc sgpr offset
-buffer_load_b32 v139, v134, s[sgprSrdWS:sgprSrdWS+3], s64 offen offset:0 glc slc // load WS
-s_add_u32 s64, s64, 1024                           // Inc sgpr offset
-buffer_load_b32 v140, v134, s[sgprSrdWS:sgprSrdWS+3], s64 offen offset:0 glc slc // load WS
-s_add_u32 s64, s64, 1024                           // Inc sgpr offset
-buffer_load_b32 v141, v134, s[sgprSrdWS:sgprSrdWS+3], s64 offen offset:0 glc slc // load WS
-s_add_u32 s64, s64, 1024                           // Inc sgpr offset
-buffer_load_b32 v142, v134, s[sgprSrdWS:sgprSrdWS+3], s64 offen offset:0 glc slc // load WS
-v_mov_b32 v[vgprValuC+135], v[vgprValuC+40]        // copy MI out reg to vreg[40]
-v_mov_b32 v[vgprValuC+136], v[vgprValuC+48]        // copy MI out reg to vreg[41]
-v_mov_b32 v[vgprValuC+137], v[vgprValuC+56]        // copy MI out reg to vreg[42]
-v_mov_b32 v[vgprValuC+138], v[vgprValuC+64]        // copy MI out reg to vreg[43]
-
-/* apply mask, calc new C and issue writes */
-v_mov_b32 v130, 0xffff0000                         // mask for pack two bfloat16 element to 32bit
-v_mov_b32 v131, 0x7fff0000                         // fp32 Nan
-v_mov_b32 v132, 0x7fff                             // rounding bias for bfloat16
-
-s_waitcnt vmcnt(3)                                 // wait C (interleaved) 3 = 4 - 0 - 1
-v_add_f32 v[vgprValuC+135], v[vgprValuC+135], v139 // accum partials
-
-s_waitcnt vmcnt(2)                                 // wait C (interleaved) 2 = 4 - 1 - 1
-v_add_f32 v[vgprValuC+136], v[vgprValuC+136], v140 // accum partials
-
-s_waitcnt vmcnt(1)                                 // wait C (interleaved) 1 = 4 - 2 - 1
-v_add_f32 v[vgprValuC+137], v[vgprValuC+137], v141 // accum partials
-
-s_waitcnt vmcnt(0)                                 // wait C (interleaved) 0 = 4 - 3 - 1
-v_add_f32 v[vgprValuC+138], v[vgprValuC+138], v142 // accum partials
-v_mov_b32 v[vgprValuC+40], v[vgprValuC+135]        // copy vreg[40] to MI out reg
-v_mov_b32 v[vgprValuC+48], v[vgprValuC+136]        // copy vreg[41] to MI out reg
-v_mov_b32 v[vgprValuC+56], v[vgprValuC+137]        // copy vreg[42] to MI out reg
-v_mov_b32 v[vgprValuC+64], v[vgprValuC+138]        // copy vreg[43] to MI out reg
-s_nop 0                                            // 1 wait state required when next inst writes vgprs held by previous dwordx4 store inst
-/* optSingleColVgpr=1 optSharedColVgpr=0 optSGPRUsage=BufferLoad_Mask optSrdIncForRow=1 */
-
-/******************************************/
-/* Fixup Batch #11 (d1,d0,vc1,vc0) =      */
-/*      (8,4,0,0:vw1); (9,0,0,0:vw1); (9,1,0,0:vw1); (9,2,0,0:vw1) */
-/******************************************/
-
-/* calc coords, apply mask, and issue loads (if necessary) */
-s_add_u32 s64, s64, 1024                           // Inc sgpr offset
-buffer_load_b32 v139, v134, s[sgprSrdWS:sgprSrdWS+3], s64 offen offset:0 glc slc // load WS
-s_add_u32 s64, s64, 1024                           // Inc sgpr offset
-buffer_load_b32 v140, v134, s[sgprSrdWS:sgprSrdWS+3], s64 offen offset:0 glc slc // load WS
-s_add_u32 s64, s64, 1024                           // Inc sgpr offset
-buffer_load_b32 v141, v134, s[sgprSrdWS:sgprSrdWS+3], s64 offen offset:0 glc slc // load WS
-s_add_u32 s64, s64, 1024                           // Inc sgpr offset
-buffer_load_b32 v142, v134, s[sgprSrdWS:sgprSrdWS+3], s64 offen offset:0 glc slc // load WS
-v_mov_b32 v[vgprValuC+135], v[vgprValuC+72]        // copy MI out reg to vreg[44]
-v_mov_b32 v[vgprValuC+136], v[vgprValuC+41]        // copy MI out reg to vreg[45]
-v_mov_b32 v[vgprValuC+137], v[vgprValuC+49]        // copy MI out reg to vreg[46]
-v_mov_b32 v[vgprValuC+138], v[vgprValuC+57]        // copy MI out reg to vreg[47]
-
-/* apply mask, calc new C and issue writes */
-v_mov_b32 v130, 0xffff0000                         // mask for pack two bfloat16 element to 32bit
-v_mov_b32 v131, 0x7fff0000                         // fp32 Nan
-v_mov_b32 v132, 0x7fff                             // rounding bias for bfloat16
-
-s_waitcnt vmcnt(3)                                 // wait C (interleaved) 3 = 4 - 0 - 1
-v_add_f32 v[vgprValuC+135], v[vgprValuC+135], v139 // accum partials
-
-s_waitcnt vmcnt(2)                                 // wait C (interleaved) 2 = 4 - 1 - 1
-v_add_f32 v[vgprValuC+136], v[vgprValuC+136], v140 // accum partials
-
-s_waitcnt vmcnt(1)                                 // wait C (interleaved) 1 = 4 - 2 - 1
-v_add_f32 v[vgprValuC+137], v[vgprValuC+137], v141 // accum partials
-
-s_waitcnt vmcnt(0)                                 // wait C (interleaved) 0 = 4 - 3 - 1
-v_add_f32 v[vgprValuC+138], v[vgprValuC+138], v142 // accum partials
-v_mov_b32 v[vgprValuC+72], v[vgprValuC+135]        // copy vreg[44] to MI out reg
-v_mov_b32 v[vgprValuC+41], v[vgprValuC+136]        // copy vreg[45] to MI out reg
-v_mov_b32 v[vgprValuC+49], v[vgprValuC+137]        // copy vreg[46] to MI out reg
-v_mov_b32 v[vgprValuC+57], v[vgprValuC+138]        // copy vreg[47] to MI out reg
-s_nop 0                                            // 1 wait state required when next inst writes vgprs held by previous dwordx4 store inst
-/* optSingleColVgpr=1 optSharedColVgpr=0 optSGPRUsage=BufferLoad_Mask optSrdIncForRow=1 */
-
-/******************************************/
-/* Fixup Batch #12 (d1,d0,vc1,vc0) =      */
-/*      (9,3,0,0:vw1); (9,4,0,0:vw1); (10,0,0,0:vw1); (10,1,0,0:vw1) */
-/******************************************/
-
-/* calc coords, apply mask, and issue loads (if necessary) */
-s_add_u32 s64, s64, 1024                           // Inc sgpr offset
-buffer_load_b32 v139, v134, s[sgprSrdWS:sgprSrdWS+3], s64 offen offset:0 glc slc // load WS
-s_add_u32 s64, s64, 1024                           // Inc sgpr offset
-buffer_load_b32 v140, v134, s[sgprSrdWS:sgprSrdWS+3], s64 offen offset:0 glc slc // load WS
-s_add_u32 s64, s64, 1024                           // Inc sgpr offset
-buffer_load_b32 v141, v134, s[sgprSrdWS:sgprSrdWS+3], s64 offen offset:0 glc slc // load WS
-s_add_u32 s64, s64, 1024                           // Inc sgpr offset
-buffer_load_b32 v142, v134, s[sgprSrdWS:sgprSrdWS+3], s64 offen offset:0 glc slc // load WS
-v_mov_b32 v[vgprValuC+135], v[vgprValuC+65]        // copy MI out reg to vreg[48]
-v_mov_b32 v[vgprValuC+136], v[vgprValuC+73]        // copy MI out reg to vreg[49]
-v_mov_b32 v[vgprValuC+137], v[vgprValuC+42]        // copy MI out reg to vreg[50]
-v_mov_b32 v[vgprValuC+138], v[vgprValuC+50]        // copy MI out reg to vreg[51]
-
-/* apply mask, calc new C and issue writes */
-v_mov_b32 v130, 0xffff0000                         // mask for pack two bfloat16 element to 32bit
-v_mov_b32 v131, 0x7fff0000                         // fp32 Nan
-v_mov_b32 v132, 0x7fff                             // rounding bias for bfloat16
-
-s_waitcnt vmcnt(3)                                 // wait C (interleaved) 3 = 4 - 0 - 1
-v_add_f32 v[vgprValuC+135], v[vgprValuC+135], v139 // accum partials
-
-s_waitcnt vmcnt(2)                                 // wait C (interleaved) 2 = 4 - 1 - 1
-v_add_f32 v[vgprValuC+136], v[vgprValuC+136], v140 // accum partials
-
-s_waitcnt vmcnt(1)                                 // wait C (interleaved) 1 = 4 - 2 - 1
-v_add_f32 v[vgprValuC+137], v[vgprValuC+137], v141 // accum partials
-
-s_waitcnt vmcnt(0)                                 // wait C (interleaved) 0 = 4 - 3 - 1
-v_add_f32 v[vgprValuC+138], v[vgprValuC+138], v142 // accum partials
-v_mov_b32 v[vgprValuC+65], v[vgprValuC+135]        // copy vreg[48] to MI out reg
-v_mov_b32 v[vgprValuC+73], v[vgprValuC+136]        // copy vreg[49] to MI out reg
-v_mov_b32 v[vgprValuC+42], v[vgprValuC+137]        // copy vreg[50] to MI out reg
-v_mov_b32 v[vgprValuC+50], v[vgprValuC+138]        // copy vreg[51] to MI out reg
-s_nop 0                                            // 1 wait state required when next inst writes vgprs held by previous dwordx4 store inst
-/* optSingleColVgpr=1 optSharedColVgpr=0 optSGPRUsage=BufferLoad_Mask optSrdIncForRow=1 */
-
-/******************************************/
-/* Fixup Batch #13 (d1,d0,vc1,vc0) =      */
-/*      (10,2,0,0:vw1); (10,3,0,0:vw1); (10,4,0,0:vw1); (11,0,0,0:vw1) */
-/******************************************/
-
-/* calc coords, apply mask, and issue loads (if necessary) */
-s_add_u32 s64, s64, 1024                           // Inc sgpr offset
-buffer_load_b32 v139, v134, s[sgprSrdWS:sgprSrdWS+3], s64 offen offset:0 glc slc // load WS
-s_add_u32 s64, s64, 1024                           // Inc sgpr offset
-buffer_load_b32 v140, v134, s[sgprSrdWS:sgprSrdWS+3], s64 offen offset:0 glc slc // load WS
-s_add_u32 s64, s64, 1024                           // Inc sgpr offset
-buffer_load_b32 v141, v134, s[sgprSrdWS:sgprSrdWS+3], s64 offen offset:0 glc slc // load WS
-s_add_u32 s64, s64, 1024                           // Inc sgpr offset
-buffer_load_b32 v142, v134, s[sgprSrdWS:sgprSrdWS+3], s64 offen offset:0 glc slc // load WS
-v_mov_b32 v[vgprValuC+135], v[vgprValuC+58]        // copy MI out reg to vreg[52]
-v_mov_b32 v[vgprValuC+136], v[vgprValuC+66]        // copy MI out reg to vreg[53]
-v_mov_b32 v[vgprValuC+137], v[vgprValuC+74]        // copy MI out reg to vreg[54]
-v_mov_b32 v[vgprValuC+138], v[vgprValuC+43]        // copy MI out reg to vreg[55]
-
-/* apply mask, calc new C and issue writes */
-v_mov_b32 v130, 0xffff0000                         // mask for pack two bfloat16 element to 32bit
-v_mov_b32 v131, 0x7fff0000                         // fp32 Nan
-v_mov_b32 v132, 0x7fff                             // rounding bias for bfloat16
-
-s_waitcnt vmcnt(3)                                 // wait C (interleaved) 3 = 4 - 0 - 1
-v_add_f32 v[vgprValuC+135], v[vgprValuC+135], v139 // accum partials
-
-s_waitcnt vmcnt(2)                                 // wait C (interleaved) 2 = 4 - 1 - 1
-v_add_f32 v[vgprValuC+136], v[vgprValuC+136], v140 // accum partials
-
-s_waitcnt vmcnt(1)                                 // wait C (interleaved) 1 = 4 - 2 - 1
-v_add_f32 v[vgprValuC+137], v[vgprValuC+137], v141 // accum partials
-
-s_waitcnt vmcnt(0)                                 // wait C (interleaved) 0 = 4 - 3 - 1
-v_add_f32 v[vgprValuC+138], v[vgprValuC+138], v142 // accum partials
-v_mov_b32 v[vgprValuC+58], v[vgprValuC+135]        // copy vreg[52] to MI out reg
-v_mov_b32 v[vgprValuC+66], v[vgprValuC+136]        // copy vreg[53] to MI out reg
-v_mov_b32 v[vgprValuC+74], v[vgprValuC+137]        // copy vreg[54] to MI out reg
-v_mov_b32 v[vgprValuC+43], v[vgprValuC+138]        // copy vreg[55] to MI out reg
-s_nop 0                                            // 1 wait state required when next inst writes vgprs held by previous dwordx4 store inst
-/* optSingleColVgpr=1 optSharedColVgpr=0 optSGPRUsage=BufferLoad_Mask optSrdIncForRow=1 */
-
-/******************************************/
-/* Fixup Batch #14 (d1,d0,vc1,vc0) =      */
-/*      (11,1,0,0:vw1); (11,2,0,0:vw1); (11,3,0,0:vw1); (11,4,0,0:vw1) */
-/******************************************/
-
-/* calc coords, apply mask, and issue loads (if necessary) */
-s_add_u32 s64, s64, 1024                           // Inc sgpr offset
-buffer_load_b32 v139, v134, s[sgprSrdWS:sgprSrdWS+3], s64 offen offset:0 glc slc // load WS
-s_add_u32 s64, s64, 1024                           // Inc sgpr offset
-buffer_load_b32 v140, v134, s[sgprSrdWS:sgprSrdWS+3], s64 offen offset:0 glc slc // load WS
-s_add_u32 s64, s64, 1024                           // Inc sgpr offset
-buffer_load_b32 v141, v134, s[sgprSrdWS:sgprSrdWS+3], s64 offen offset:0 glc slc // load WS
-s_add_u32 s64, s64, 1024                           // Inc sgpr offset
-buffer_load_b32 v142, v134, s[sgprSrdWS:sgprSrdWS+3], s64 offen offset:0 glc slc // load WS
-v_mov_b32 v[vgprValuC+135], v[vgprValuC+51]        // copy MI out reg to vreg[56]
-v_mov_b32 v[vgprValuC+136], v[vgprValuC+59]        // copy MI out reg to vreg[57]
-v_mov_b32 v[vgprValuC+137], v[vgprValuC+67]        // copy MI out reg to vreg[58]
-v_mov_b32 v[vgprValuC+138], v[vgprValuC+75]        // copy MI out reg to vreg[59]
-
-/* apply mask, calc new C and issue writes */
-v_mov_b32 v130, 0xffff0000                         // mask for pack two bfloat16 element to 32bit
-v_mov_b32 v131, 0x7fff0000                         // fp32 Nan
-v_mov_b32 v132, 0x7fff                             // rounding bias for bfloat16
-
-s_waitcnt vmcnt(3)                                 // wait C (interleaved) 3 = 4 - 0 - 1
-v_add_f32 v[vgprValuC+135], v[vgprValuC+135], v139 // accum partials
-
-s_waitcnt vmcnt(2)                                 // wait C (interleaved) 2 = 4 - 1 - 1
-v_add_f32 v[vgprValuC+136], v[vgprValuC+136], v140 // accum partials
-
-s_waitcnt vmcnt(1)                                 // wait C (interleaved) 1 = 4 - 2 - 1
-v_add_f32 v[vgprValuC+137], v[vgprValuC+137], v141 // accum partials
-
-s_waitcnt vmcnt(0)                                 // wait C (interleaved) 0 = 4 - 3 - 1
-v_add_f32 v[vgprValuC+138], v[vgprValuC+138], v142 // accum partials
-v_mov_b32 v[vgprValuC+51], v[vgprValuC+135]        // copy vreg[56] to MI out reg
-v_mov_b32 v[vgprValuC+59], v[vgprValuC+136]        // copy vreg[57] to MI out reg
-v_mov_b32 v[vgprValuC+67], v[vgprValuC+137]        // copy vreg[58] to MI out reg
-v_mov_b32 v[vgprValuC+75], v[vgprValuC+138]        // copy vreg[59] to MI out reg
-s_nop 0                                            // 1 wait state required when next inst writes vgprs held by previous dwordx4 store inst
-/* optSingleColVgpr=1 optSharedColVgpr=0 optSGPRUsage=BufferLoad_Mask optSrdIncForRow=1 */
-
-/******************************************/
-/* Fixup Batch #15 (d1,d0,vc1,vc0) =      */
-/*      (12,0,0,0:vw1); (12,1,0,0:vw1); (12,2,0,0:vw1); (12,3,0,0:vw1) */
-/******************************************/
-
-/* calc coords, apply mask, and issue loads (if necessary) */
-s_add_u32 s64, s64, 1024                           // Inc sgpr offset
-buffer_load_b32 v139, v134, s[sgprSrdWS:sgprSrdWS+3], s64 offen offset:0 glc slc // load WS
-s_add_u32 s64, s64, 1024                           // Inc sgpr offset
-buffer_load_b32 v140, v134, s[sgprSrdWS:sgprSrdWS+3], s64 offen offset:0 glc slc // load WS
-s_add_u32 s64, s64, 1024                           // Inc sgpr offset
-buffer_load_b32 v141, v134, s[sgprSrdWS:sgprSrdWS+3], s64 offen offset:0 glc slc // load WS
-s_add_u32 s64, s64, 1024                           // Inc sgpr offset
-buffer_load_b32 v142, v134, s[sgprSrdWS:sgprSrdWS+3], s64 offen offset:0 glc slc // load WS
-v_mov_b32 v[vgprValuC+135], v[vgprValuC+44]        // copy MI out reg to vreg[60]
-v_mov_b32 v[vgprValuC+136], v[vgprValuC+52]        // copy MI out reg to vreg[61]
-v_mov_b32 v[vgprValuC+137], v[vgprValuC+60]        // copy MI out reg to vreg[62]
-v_mov_b32 v[vgprValuC+138], v[vgprValuC+68]        // copy MI out reg to vreg[63]
-
-/* apply mask, calc new C and issue writes */
-v_mov_b32 v130, 0xffff0000                         // mask for pack two bfloat16 element to 32bit
-v_mov_b32 v131, 0x7fff0000                         // fp32 Nan
-v_mov_b32 v132, 0x7fff                             // rounding bias for bfloat16
-
-s_waitcnt vmcnt(3)                                 // wait C (interleaved) 3 = 4 - 0 - 1
-v_add_f32 v[vgprValuC+135], v[vgprValuC+135], v139 // accum partials
-
-s_waitcnt vmcnt(2)                                 // wait C (interleaved) 2 = 4 - 1 - 1
-v_add_f32 v[vgprValuC+136], v[vgprValuC+136], v140 // accum partials
-
-s_waitcnt vmcnt(1)                                 // wait C (interleaved) 1 = 4 - 2 - 1
-v_add_f32 v[vgprValuC+137], v[vgprValuC+137], v141 // accum partials
-
-s_waitcnt vmcnt(0)                                 // wait C (interleaved) 0 = 4 - 3 - 1
-v_add_f32 v[vgprValuC+138], v[vgprValuC+138], v142 // accum partials
-v_mov_b32 v[vgprValuC+44], v[vgprValuC+135]        // copy vreg[60] to MI out reg
-v_mov_b32 v[vgprValuC+52], v[vgprValuC+136]        // copy vreg[61] to MI out reg
-v_mov_b32 v[vgprValuC+60], v[vgprValuC+137]        // copy vreg[62] to MI out reg
-v_mov_b32 v[vgprValuC+68], v[vgprValuC+138]        // copy vreg[63] to MI out reg
-s_nop 0                                            // 1 wait state required when next inst writes vgprs held by previous dwordx4 store inst
-/* optSingleColVgpr=1 optSharedColVgpr=0 optSGPRUsage=BufferLoad_Mask optSrdIncForRow=1 */
-
-/******************************************/
-/* Fixup Batch #16 (d1,d0,vc1,vc0) =      */
-/*      (12,4,0,0:vw1); (13,0,0,0:vw1); (13,1,0,0:vw1); (13,2,0,0:vw1) */
-/******************************************/
-
-/* calc coords, apply mask, and issue loads (if necessary) */
-s_add_u32 s64, s64, 1024                           // Inc sgpr offset
-buffer_load_b32 v139, v134, s[sgprSrdWS:sgprSrdWS+3], s64 offen offset:0 glc slc // load WS
-s_add_u32 s64, s64, 1024                           // Inc sgpr offset
-buffer_load_b32 v140, v134, s[sgprSrdWS:sgprSrdWS+3], s64 offen offset:0 glc slc // load WS
-s_add_u32 s64, s64, 1024                           // Inc sgpr offset
-buffer_load_b32 v141, v134, s[sgprSrdWS:sgprSrdWS+3], s64 offen offset:0 glc slc // load WS
-s_add_u32 s64, s64, 1024                           // Inc sgpr offset
-buffer_load_b32 v142, v134, s[sgprSrdWS:sgprSrdWS+3], s64 offen offset:0 glc slc // load WS
-v_mov_b32 v[vgprValuC+135], v[vgprValuC+76]        // copy MI out reg to vreg[64]
-v_mov_b32 v[vgprValuC+136], v[vgprValuC+45]        // copy MI out reg to vreg[65]
-v_mov_b32 v[vgprValuC+137], v[vgprValuC+53]        // copy MI out reg to vreg[66]
-v_mov_b32 v[vgprValuC+138], v[vgprValuC+61]        // copy MI out reg to vreg[67]
-
-/* apply mask, calc new C and issue writes */
-v_mov_b32 v130, 0xffff0000                         // mask for pack two bfloat16 element to 32bit
-v_mov_b32 v131, 0x7fff0000                         // fp32 Nan
-v_mov_b32 v132, 0x7fff                             // rounding bias for bfloat16
-
-s_waitcnt vmcnt(3)                                 // wait C (interleaved) 3 = 4 - 0 - 1
-v_add_f32 v[vgprValuC+135], v[vgprValuC+135], v139 // accum partials
-
-s_waitcnt vmcnt(2)                                 // wait C (interleaved) 2 = 4 - 1 - 1
-v_add_f32 v[vgprValuC+136], v[vgprValuC+136], v140 // accum partials
-
-s_waitcnt vmcnt(1)                                 // wait C (interleaved) 1 = 4 - 2 - 1
-v_add_f32 v[vgprValuC+137], v[vgprValuC+137], v141 // accum partials
-
-s_waitcnt vmcnt(0)                                 // wait C (interleaved) 0 = 4 - 3 - 1
-v_add_f32 v[vgprValuC+138], v[vgprValuC+138], v142 // accum partials
-v_mov_b32 v[vgprValuC+76], v[vgprValuC+135]        // copy vreg[64] to MI out reg
-v_mov_b32 v[vgprValuC+45], v[vgprValuC+136]        // copy vreg[65] to MI out reg
-v_mov_b32 v[vgprValuC+53], v[vgprValuC+137]        // copy vreg[66] to MI out reg
-v_mov_b32 v[vgprValuC+61], v[vgprValuC+138]        // copy vreg[67] to MI out reg
-s_nop 0                                            // 1 wait state required when next inst writes vgprs held by previous dwordx4 store inst
-/* optSingleColVgpr=1 optSharedColVgpr=0 optSGPRUsage=BufferLoad_Mask optSrdIncForRow=1 */
-
-/******************************************/
-/* Fixup Batch #17 (d1,d0,vc1,vc0) =      */
-/*      (13,3,0,0:vw1); (13,4,0,0:vw1); (14,0,0,0:vw1); (14,1,0,0:vw1) */
-/******************************************/
-
-/* calc coords, apply mask, and issue loads (if necessary) */
-s_add_u32 s64, s64, 1024                           // Inc sgpr offset
-buffer_load_b32 v139, v134, s[sgprSrdWS:sgprSrdWS+3], s64 offen offset:0 glc slc // load WS
-s_add_u32 s64, s64, 1024                           // Inc sgpr offset
-buffer_load_b32 v140, v134, s[sgprSrdWS:sgprSrdWS+3], s64 offen offset:0 glc slc // load WS
-s_add_u32 s64, s64, 1024                           // Inc sgpr offset
-buffer_load_b32 v141, v134, s[sgprSrdWS:sgprSrdWS+3], s64 offen offset:0 glc slc // load WS
-s_add_u32 s64, s64, 1024                           // Inc sgpr offset
-buffer_load_b32 v142, v134, s[sgprSrdWS:sgprSrdWS+3], s64 offen offset:0 glc slc // load WS
-v_mov_b32 v[vgprValuC+135], v[vgprValuC+69]        // copy MI out reg to vreg[68]
-v_mov_b32 v[vgprValuC+136], v[vgprValuC+77]        // copy MI out reg to vreg[69]
-v_mov_b32 v[vgprValuC+137], v[vgprValuC+46]        // copy MI out reg to vreg[70]
-v_mov_b32 v[vgprValuC+138], v[vgprValuC+54]        // copy MI out reg to vreg[71]
-
-/* apply mask, calc new C and issue writes */
-v_mov_b32 v130, 0xffff0000                         // mask for pack two bfloat16 element to 32bit
-v_mov_b32 v131, 0x7fff0000                         // fp32 Nan
-v_mov_b32 v132, 0x7fff                             // rounding bias for bfloat16
-
-s_waitcnt vmcnt(3)                                 // wait C (interleaved) 3 = 4 - 0 - 1
-v_add_f32 v[vgprValuC+135], v[vgprValuC+135], v139 // accum partials
-
-s_waitcnt vmcnt(2)                                 // wait C (interleaved) 2 = 4 - 1 - 1
-v_add_f32 v[vgprValuC+136], v[vgprValuC+136], v140 // accum partials
-
-s_waitcnt vmcnt(1)                                 // wait C (interleaved) 1 = 4 - 2 - 1
-v_add_f32 v[vgprValuC+137], v[vgprValuC+137], v141 // accum partials
-
-s_waitcnt vmcnt(0)                                 // wait C (interleaved) 0 = 4 - 3 - 1
-v_add_f32 v[vgprValuC+138], v[vgprValuC+138], v142 // accum partials
-v_mov_b32 v[vgprValuC+69], v[vgprValuC+135]        // copy vreg[68] to MI out reg
-v_mov_b32 v[vgprValuC+77], v[vgprValuC+136]        // copy vreg[69] to MI out reg
-v_mov_b32 v[vgprValuC+46], v[vgprValuC+137]        // copy vreg[70] to MI out reg
-v_mov_b32 v[vgprValuC+54], v[vgprValuC+138]        // copy vreg[71] to MI out reg
-s_nop 0                                            // 1 wait state required when next inst writes vgprs held by previous dwordx4 store inst
-/* optSingleColVgpr=1 optSharedColVgpr=0 optSGPRUsage=BufferLoad_Mask optSrdIncForRow=1 */
-
-/******************************************/
-/* Fixup Batch #18 (d1,d0,vc1,vc0) =      */
-/*      (14,2,0,0:vw1); (14,3,0,0:vw1); (14,4,0,0:vw1); (15,0,0,0:vw1) */
-/******************************************/
-
-/* calc coords, apply mask, and issue loads (if necessary) */
-s_add_u32 s64, s64, 1024                           // Inc sgpr offset
-buffer_load_b32 v139, v134, s[sgprSrdWS:sgprSrdWS+3], s64 offen offset:0 glc slc // load WS
-s_add_u32 s64, s64, 1024                           // Inc sgpr offset
-buffer_load_b32 v140, v134, s[sgprSrdWS:sgprSrdWS+3], s64 offen offset:0 glc slc // load WS
-s_add_u32 s64, s64, 1024                           // Inc sgpr offset
-buffer_load_b32 v141, v134, s[sgprSrdWS:sgprSrdWS+3], s64 offen offset:0 glc slc // load WS
-s_add_u32 s64, s64, 1024                           // Inc sgpr offset
-buffer_load_b32 v142, v134, s[sgprSrdWS:sgprSrdWS+3], s64 offen offset:0 glc slc // load WS
-v_mov_b32 v[vgprValuC+135], v[vgprValuC+62]        // copy MI out reg to vreg[72]
-v_mov_b32 v[vgprValuC+136], v[vgprValuC+70]        // copy MI out reg to vreg[73]
-v_mov_b32 v[vgprValuC+137], v[vgprValuC+78]        // copy MI out reg to vreg[74]
-v_mov_b32 v[vgprValuC+138], v[vgprValuC+47]        // copy MI out reg to vreg[75]
-
-/* apply mask, calc new C and issue writes */
-v_mov_b32 v130, 0xffff0000                         // mask for pack two bfloat16 element to 32bit
-v_mov_b32 v131, 0x7fff0000                         // fp32 Nan
-v_mov_b32 v132, 0x7fff                             // rounding bias for bfloat16
-
-s_waitcnt vmcnt(3)                                 // wait C (interleaved) 3 = 4 - 0 - 1
-v_add_f32 v[vgprValuC+135], v[vgprValuC+135], v139 // accum partials
-
-s_waitcnt vmcnt(2)                                 // wait C (interleaved) 2 = 4 - 1 - 1
-v_add_f32 v[vgprValuC+136], v[vgprValuC+136], v140 // accum partials
-
-s_waitcnt vmcnt(1)                                 // wait C (interleaved) 1 = 4 - 2 - 1
-v_add_f32 v[vgprValuC+137], v[vgprValuC+137], v141 // accum partials
-
-s_waitcnt vmcnt(0)                                 // wait C (interleaved) 0 = 4 - 3 - 1
-v_add_f32 v[vgprValuC+138], v[vgprValuC+138], v142 // accum partials
-v_mov_b32 v[vgprValuC+62], v[vgprValuC+135]        // copy vreg[72] to MI out reg
-v_mov_b32 v[vgprValuC+70], v[vgprValuC+136]        // copy vreg[73] to MI out reg
-v_mov_b32 v[vgprValuC+78], v[vgprValuC+137]        // copy vreg[74] to MI out reg
-v_mov_b32 v[vgprValuC+47], v[vgprValuC+138]        // copy vreg[75] to MI out reg
-s_nop 0                                            // 1 wait state required when next inst writes vgprs held by previous dwordx4 store inst
-/* optSingleColVgpr=1 optSharedColVgpr=0 optSGPRUsage=BufferLoad_Mask optSrdIncForRow=1 */
-
-/******************************************/
-/* Fixup Batch #19 (d1,d0,vc1,vc0) =      */
-/*      (15,1,0,0:vw1); (15,2,0,0:vw1); (15,3,0,0:vw1); (15,4,0,0:vw1) */
-/******************************************/
-
-/* calc coords, apply mask, and issue loads (if necessary) */
-s_add_u32 s64, s64, 1024                           // Inc sgpr offset
-buffer_load_b32 v139, v134, s[sgprSrdWS:sgprSrdWS+3], s64 offen offset:0 glc slc // load WS
-s_add_u32 s64, s64, 1024                           // Inc sgpr offset
-buffer_load_b32 v140, v134, s[sgprSrdWS:sgprSrdWS+3], s64 offen offset:0 glc slc // load WS
-s_add_u32 s64, s64, 1024                           // Inc sgpr offset
-buffer_load_b32 v141, v134, s[sgprSrdWS:sgprSrdWS+3], s64 offen offset:0 glc slc // load WS
-s_add_u32 s64, s64, 1024                           // Inc sgpr offset
-buffer_load_b32 v142, v134, s[sgprSrdWS:sgprSrdWS+3], s64 offen offset:0 glc slc // load WS
-v_mov_b32 v[vgprValuC+135], v[vgprValuC+55]        // copy MI out reg to vreg[76]
-v_mov_b32 v[vgprValuC+136], v[vgprValuC+63]        // copy MI out reg to vreg[77]
-v_mov_b32 v[vgprValuC+137], v[vgprValuC+71]        // copy MI out reg to vreg[78]
-v_mov_b32 v[vgprValuC+138], v[vgprValuC+79]        // copy MI out reg to vreg[79]
-
-/* apply mask, calc new C and issue writes */
-v_mov_b32 v130, 0xffff0000                         // mask for pack two bfloat16 element to 32bit
-v_mov_b32 v131, 0x7fff0000                         // fp32 Nan
-v_mov_b32 v132, 0x7fff                             // rounding bias for bfloat16
-
-s_waitcnt vmcnt(3)                                 // wait C (interleaved) 3 = 4 - 0 - 1
-v_add_f32 v[vgprValuC+135], v[vgprValuC+135], v139 // accum partials
-
-s_waitcnt vmcnt(2)                                 // wait C (interleaved) 2 = 4 - 1 - 1
-v_add_f32 v[vgprValuC+136], v[vgprValuC+136], v140 // accum partials
-
-s_waitcnt vmcnt(1)                                 // wait C (interleaved) 1 = 4 - 2 - 1
-v_add_f32 v[vgprValuC+137], v[vgprValuC+137], v141 // accum partials
-
-s_waitcnt vmcnt(0)                                 // wait C (interleaved) 0 = 4 - 3 - 1
-v_add_f32 v[vgprValuC+138], v[vgprValuC+138], v142 // accum partials
-v_mov_b32 v[vgprValuC+55], v[vgprValuC+135]        // copy vreg[76] to MI out reg
-v_mov_b32 v[vgprValuC+63], v[vgprValuC+136]        // copy vreg[77] to MI out reg
-v_mov_b32 v[vgprValuC+71], v[vgprValuC+137]        // copy vreg[78] to MI out reg
-v_mov_b32 v[vgprValuC+79], v[vgprValuC+138]        // copy vreg[79] to MI out reg
+s_waitcnt vmcnt(21)                                // wait C (interleaved) 21 = 22 - 0 - 1
+v_add_f32 v[vgprValuC+135], v[vgprValuC+135], v157 // accum partials
+
+s_waitcnt vmcnt(20)                                // wait C (interleaved) 20 = 22 - 1 - 1
+v_add_f32 v[vgprValuC+136], v[vgprValuC+136], v158 // accum partials
+
+s_waitcnt vmcnt(19)                                // wait C (interleaved) 19 = 22 - 2 - 1
+v_add_f32 v[vgprValuC+137], v[vgprValuC+137], v159 // accum partials
+
+s_waitcnt vmcnt(18)                                // wait C (interleaved) 18 = 22 - 3 - 1
+v_add_f32 v[vgprValuC+138], v[vgprValuC+138], v160 // accum partials
+
+s_waitcnt vmcnt(17)                                // wait C (interleaved) 17 = 22 - 4 - 1
+v_add_f32 v[vgprValuC+139], v[vgprValuC+139], v161 // accum partials
+
+s_waitcnt vmcnt(16)                                // wait C (interleaved) 16 = 22 - 5 - 1
+v_add_f32 v[vgprValuC+140], v[vgprValuC+140], v162 // accum partials
+
+s_waitcnt vmcnt(15)                                // wait C (interleaved) 15 = 22 - 6 - 1
+v_add_f32 v[vgprValuC+141], v[vgprValuC+141], v163 // accum partials
+
+s_waitcnt vmcnt(14)                                // wait C (interleaved) 14 = 22 - 7 - 1
+v_add_f32 v[vgprValuC+142], v[vgprValuC+142], v164 // accum partials
+
+s_waitcnt vmcnt(13)                                // wait C (interleaved) 13 = 22 - 8 - 1
+v_add_f32 v[vgprValuC+143], v[vgprValuC+143], v165 // accum partials
+
+s_waitcnt vmcnt(12)                                // wait C (interleaved) 12 = 22 - 9 - 1
+v_add_f32 v[vgprValuC+144], v[vgprValuC+144], v166 // accum partials
+
+s_waitcnt vmcnt(11)                                // wait C (interleaved) 11 = 22 - 10 - 1
+v_add_f32 v[vgprValuC+145], v[vgprValuC+145], v167 // accum partials
+
+s_waitcnt vmcnt(10)                                // wait C (interleaved) 10 = 22 - 11 - 1
+v_add_f32 v[vgprValuC+146], v[vgprValuC+146], v168 // accum partials
+
+s_waitcnt vmcnt(9)                                 // wait C (interleaved) 9 = 22 - 12 - 1
+v_add_f32 v[vgprValuC+147], v[vgprValuC+147], v169 // accum partials
+
+s_waitcnt vmcnt(8)                                 // wait C (interleaved) 8 = 22 - 13 - 1
+v_add_f32 v[vgprValuC+148], v[vgprValuC+148], v170 // accum partials
+
+s_waitcnt vmcnt(7)                                 // wait C (interleaved) 7 = 22 - 14 - 1
+v_add_f32 v[vgprValuC+149], v[vgprValuC+149], v171 // accum partials
+
+s_waitcnt vmcnt(6)                                 // wait C (interleaved) 6 = 22 - 15 - 1
+v_add_f32 v[vgprValuC+150], v[vgprValuC+150], v172 // accum partials
+
+s_waitcnt vmcnt(5)                                 // wait C (interleaved) 5 = 22 - 16 - 1
+v_add_f32 v[vgprValuC+151], v[vgprValuC+151], v173 // accum partials
+
+s_waitcnt vmcnt(4)                                 // wait C (interleaved) 4 = 22 - 17 - 1
+v_add_f32 v[vgprValuC+152], v[vgprValuC+152], v174 // accum partials
+
+s_waitcnt vmcnt(3)                                 // wait C (interleaved) 3 = 22 - 18 - 1
+v_add_f32 v[vgprValuC+153], v[vgprValuC+153], v175 // accum partials
+
+s_waitcnt vmcnt(2)                                 // wait C (interleaved) 2 = 22 - 19 - 1
+v_add_f32 v[vgprValuC+154], v[vgprValuC+154], v176 // accum partials
+
+s_waitcnt vmcnt(1)                                 // wait C (interleaved) 1 = 22 - 20 - 1
+v_add_f32 v[vgprValuC+155], v[vgprValuC+155], v177 // accum partials
+
+s_waitcnt vmcnt(0)                                 // wait C (interleaved) 0 = 22 - 21 - 1
+v_add_f32 v[vgprValuC+156], v[vgprValuC+156], v178 // accum partials
+v_mov_b32 v[vgprValuC+67], v[vgprValuC+135]        // copy vreg[58] to MI out reg
+v_mov_b32 v[vgprValuC+75], v[vgprValuC+136]        // copy vreg[59] to MI out reg
+v_mov_b32 v[vgprValuC+44], v[vgprValuC+137]        // copy vreg[60] to MI out reg
+v_mov_b32 v[vgprValuC+52], v[vgprValuC+138]        // copy vreg[61] to MI out reg
+v_mov_b32 v[vgprValuC+60], v[vgprValuC+139]        // copy vreg[62] to MI out reg
+v_mov_b32 v[vgprValuC+68], v[vgprValuC+140]        // copy vreg[63] to MI out reg
+v_mov_b32 v[vgprValuC+76], v[vgprValuC+141]        // copy vreg[64] to MI out reg
+v_mov_b32 v[vgprValuC+45], v[vgprValuC+142]        // copy vreg[65] to MI out reg
+v_mov_b32 v[vgprValuC+53], v[vgprValuC+143]        // copy vreg[66] to MI out reg
+v_mov_b32 v[vgprValuC+61], v[vgprValuC+144]        // copy vreg[67] to MI out reg
+v_mov_b32 v[vgprValuC+69], v[vgprValuC+145]        // copy vreg[68] to MI out reg
+v_mov_b32 v[vgprValuC+77], v[vgprValuC+146]        // copy vreg[69] to MI out reg
+v_mov_b32 v[vgprValuC+46], v[vgprValuC+147]        // copy vreg[70] to MI out reg
+v_mov_b32 v[vgprValuC+54], v[vgprValuC+148]        // copy vreg[71] to MI out reg
+v_mov_b32 v[vgprValuC+62], v[vgprValuC+149]        // copy vreg[72] to MI out reg
+v_mov_b32 v[vgprValuC+70], v[vgprValuC+150]        // copy vreg[73] to MI out reg
+v_mov_b32 v[vgprValuC+78], v[vgprValuC+151]        // copy vreg[74] to MI out reg
+v_mov_b32 v[vgprValuC+47], v[vgprValuC+152]        // copy vreg[75] to MI out reg
+v_mov_b32 v[vgprValuC+55], v[vgprValuC+153]        // copy vreg[76] to MI out reg
+v_mov_b32 v[vgprValuC+63], v[vgprValuC+154]        // copy vreg[77] to MI out reg
+v_mov_b32 v[vgprValuC+71], v[vgprValuC+155]        // copy vreg[78] to MI out reg
+v_mov_b32 v[vgprValuC+79], v[vgprValuC+156]        // copy vreg[79] to MI out reg
 s_nop 0                                            // 1 wait state required when next inst writes vgprs held by previous dwordx4 store inst
 s_mul_i32 s11, s[sgprskTiles], s[sgprItersPerTile]
 s_mul_i32 s61, s[sgprSKItersPerWG], s[sgprskGrid]
