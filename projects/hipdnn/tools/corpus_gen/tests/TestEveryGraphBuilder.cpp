@@ -482,22 +482,22 @@ struct FormExpectation
     std::set<std::string> removedScalars;
     size_t forwardTensors;
     size_t backwardTensors;
-    std::set<std::string> backwardAddedRoles = {};
-    std::set<std::string> backwardAddedScalars = {};
+    std::set<std::string> backwardAddedRoles;
+    std::set<std::string> backwardAddedScalars;
 };
 
 std::vector<FormExpectation> formExpectations()
 {
     return {
-        {"plain", {}, {}, {}, 5, 9},
-        {"scale_unset", {}, {}, {"attn_scale_value"}, 5, 9},
-        {"scale_tensor", {"scale"}, {}, {"attn_scale_value"}, 6, 10},
-        {"dropout", {"seed", "offset"}, {"dropout_probability"}, {}, 7, 11},
-        {"padded", {"seq_len_q", "seq_len_kv"}, {"padding_mask"}, {}, 7, 11},
+        {"plain", {}, {}, {}, 5, 9, {}, {}},
+        {"scale_unset", {}, {}, {"attn_scale_value"}, 5, 9, {}, {}},
+        {"scale_tensor", {"scale"}, {}, {"attn_scale_value"}, 6, 10, {}, {}},
+        {"dropout", {"seed", "offset"}, {"dropout_probability"}, {}, 7, 11, {}, {}},
+        {"padded", {"seq_len_q", "seq_len_kv"}, {"padding_mask"}, {}, 7, 11, {}, {}},
         // The offsets go on the tensors, not the node; the backward also binds the lengths.
         {"ragged", {}, {}, {}, 7, 13, {"seq_len_q", "seq_len_kv"}, {"padding_mask"}},
-        {"bias", {"attn_mask"}, {}, {}, 6, 10},
-        {"sink", {"sink_token"}, {}, {}, 6, 0},
+        {"bias", {"attn_mask"}, {}, {}, 6, 10, {}, {}},
+        {"sink", {"sink_token"}, {}, {}, 6, 0, {}, {}},
     };
 }
 
@@ -1005,15 +1005,15 @@ namespace
 
 const std::vector<std::string>& legacyDtypes()
 {
-    static const std::vector<std::string> dtypes{"fp16", "bf16", "fp32"};
-    return dtypes;
+    static const std::vector<std::string> s_dtypes{"fp16", "bf16", "fp32"};
+    return s_dtypes;
 }
 
 const std::vector<std::string>& fp8Dtypes()
 {
-    static const std::vector<std::string> dtypes{
+    static const std::vector<std::string> s_dtypes{
         "fp8_e4m3", "fp8_e5m2", "fp8_e4m3_fnuz", "fp8_e5m2_fnuz"};
-    return dtypes;
+    return s_dtypes;
 }
 
 bool isFp8Dtype(const std::string& dtype)

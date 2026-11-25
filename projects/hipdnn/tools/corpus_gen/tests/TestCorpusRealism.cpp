@@ -400,7 +400,7 @@ TEST(TestCorpusRealism, EveryShippedMirrorKeepsItsArchetypesProportion)
 }
 
 /// The shipped attention declarations: the forward, and the backward whose problem space is
-/// the same one without the window and the softmax statistics.
+/// the same one without the softmax statistics and the sink form.
 class TestShippedSdpaRealism : public ::testing::TestWithParam<std::string>
 {
 };
@@ -414,9 +414,9 @@ TEST_P(TestShippedSdpaRealism, CorpusCoversHeadDimsLayoutsAndSequenceRelationsAM
 
     // The default first pass: 50 points for each live combination of the unweighted parameters
     // (is_causal, alignment, form, and dtype in the backward and generate_stats in the forward),
-    // about 2700 rows in the backward. The forward weights dtype, which splits the budget where
-    // an unweighted one multiplied it by three, so it takes 150 to keep the 8900 rows the shares
-    // below were measured on, enough that they are not noise.
+    // about 4200 rows in the backward. The forward weights dtype, which splits the budget where
+    // an unweighted one multiplied it by three, so it takes 150 to reach about 9500 rows, enough
+    // that the shares below are not noise.
     ExplorationRequest request;
     request.seed = 9;
     request.pointsPerCombination = GetParam() == "sdpa_fwd" ? 150 : 50;

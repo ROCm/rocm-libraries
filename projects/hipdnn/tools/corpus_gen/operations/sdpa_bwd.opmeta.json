@@ -47,7 +47,7 @@
         "same": 3,
         "mla": 1
       },
-      "description": "Width of V, and so of O (and dO, dV), against Q and K's head_dim. same (default): equal, as nearly every model has. mla: 64 narrower, DeepSeek's multi-head latent attention, whose Q and K carry a 64-wide rotary part that V does not -- 192/128 in prefill and training, 576/512 with the latent absorbed in decode. hipDNN requires only Q and K's last dims to agree (SdpaFwdNode Rule 2, SdpaBwdNode Rule 3; O, dO and dV take V's), and ASM SDPA and FlyDSL ship kernels for such pairs. The backward declares the training pair only (head_dim 192): the absorbed 576/512 form is an inference rewrite no training step runs, and the other widths the 64 offset gives (128/64, 129/65) are no model's. The deepseek_v3_mla_prefill archetype anchors it."
+      "description": "Width of V, and so of O (and dO, dV), against Q and K's head_dim. same (default): equal, as nearly every model has. mla: 64 narrower, DeepSeek's multi-head latent attention, whose Q and K carry a 64-wide rotary part that V does not -- 192/128 in prefill and training, 576/512 with the latent absorbed in decode. hipDNN requires only Q and K's last dims to agree (SdpaFwdNode Rule 2, SdpaBwdNode Rule 3; O, dO and dV take V's), and ASM SDPA and FlyDSL ship kernels for such pairs. The backward declares the training pair only (head_dim 192): the absorbed 576/512 form is an inference rewrite no training step runs. The mla pair is pinned on purpose to DeepSeek's 192/128, and other unequal Q/K and V widths (128/64, 129/65, or any V an engine's pair buckets take) are deliberately left out of the corpus, so UHD has no data for them. The deepseek_v3_mla_prefill archetype anchors it."
     },
     "is_causal": {
       "type": "bool",
@@ -59,7 +59,7 @@
         "top_left",
         "bottom_right"
       ],
-      "description": "Which corner the causal diagonal is anchored at. Only a distinct problem where the mask is causal and seqlen_q < seqlen_k; the constraint below pins it to top_left everywhere else, so the sweep does not spend half its budget measuring each shape twice. An engine that serves one anchor and refuses the other is removed from a comparison by the corpus rather than by a measurement, which is why this is a declared axis rather than a fixed choice."
+      "description": "Which corner the diagonal is anchored at. Only a distinct problem where the mask is causal or windowed and seqlen_q < seqlen_k; the constraint below pins it to top_left everywhere else, so the sweep does not spend half its budget measuring each shape twice. An engine that serves one anchor and refuses the other is removed from a comparison by the corpus rather than by a measurement, which is why this is a declared axis rather than a fixed choice."
     },
     "dtype": {
       "type": "enum",
@@ -190,8 +190,8 @@
     "same operation and entirely different problems, which is why they are anchored as separate",
     "archetypes rather than as one range over seqlen_q. Cross attention (more queries than keys)",
     "draws its two sequences from different tensors, so it varies independently of the rest --",
-    "the constraint admits it only under a non-causal mask, and the clause files it under",
-    "'cross' rather than 'append'.",
+    "a causal mask there is anchored top-left, so every query row keeps a key, and the clause",
+    "files it under 'cross' rather than 'append'.",
     "Grouping (mha/gqa/mqa) is the third facet: how many query heads share one KV head decides",
     "how much of the KV cache a wavefront re-reads, which is the whole difference between a",
     "decode that is bandwidth bound and one that is not. It is a label rather than a bucket",
@@ -613,6 +613,28 @@
   "graph_builder": {
     "function": "sdpaBackward",
     "source": "hipdnn_corpus_gen/GraphBuilders.hpp",
+    "let": [
+      {
+        "name": "head_dim_v",
+        "value": {
+          "if": [
+            {
+              "==": [
+                "$q.value_head_dim",
+                "mla"
+              ]
+            },
+            {
+              "-": [
+                "$q.head_dim",
+                64
+              ]
+            },
+            "$q.head_dim"
+          ]
+        }
+      }
+    ],
     "arguments": [
       {
         "name": "qDims",
@@ -688,23 +710,7 @@
                               {
                                 "*": [
                                   "$q.heads_kv",
-                                  {
-                                    "if": [
-                                      {
-                                        "==": [
-                                          "$q.value_head_dim",
-                                          "mla"
-                                        ]
-                                      },
-                                      {
-                                        "-": [
-                                          "$q.head_dim",
-                                          64
-                                        ]
-                                      },
-                                      "$q.head_dim"
-                                    ]
-                                  }
+                                  "$let.head_dim_v"
                                 ]
                               }
                             ]
@@ -797,23 +803,7 @@
                           {
                             "*": [
                               "$q.heads_kv",
-                              {
-                                "if": [
-                                  {
-                                    "==": [
-                                      "$q.value_head_dim",
-                                      "mla"
-                                    ]
-                                  },
-                                  {
-                                    "-": [
-                                      "$q.head_dim",
-                                      64
-                                    ]
-                                  },
-                                  "$q.head_dim"
-                                ]
-                              }
+                              "$let.head_dim_v"
                             ]
                           }
                         ]
@@ -926,23 +916,7 @@
                                   {
                                     "*": [
                                       "$q.heads_kv",
-                                      {
-                                        "if": [
-                                          {
-                                            "==": [
-                                              "$q.value_head_dim",
-                                              "mla"
-                                            ]
-                                          },
-                                          {
-                                            "-": [
-                                              "$q.head_dim",
-                                              64
-                                            ]
-                                          },
-                                          "$q.head_dim"
-                                        ]
-                                      }
+                                      "$let.head_dim_v"
                                     ]
                                   }
                                 ]
@@ -1062,23 +1036,7 @@
                               {
                                 "*": [
                                   "$q.heads_kv",
-                                  {
-                                    "if": [
-                                      {
-                                        "==": [
-                                          "$q.value_head_dim",
-                                          "mla"
-                                        ]
-                                      },
-                                      {
-                                        "-": [
-                                          "$q.head_dim",
-                                          64
-                                        ]
-                                      },
-                                      "$q.head_dim"
-                                    ]
-                                  }
+                                  "$let.head_dim_v"
                                 ]
                               }
                             ]
@@ -1107,23 +1065,7 @@
           "$q.batch",
           "$q.heads_kv",
           "$q.seqlen_k",
-          {
-            "if": [
-              {
-                "==": [
-                  "$q.value_head_dim",
-                  "mla"
-                ]
-              },
-              {
-                "-": [
-                  "$q.head_dim",
-                  64
-                ]
-              },
-              "$q.head_dim"
-            ]
-          }
+          "$let.head_dim_v"
         ]
       },
       {
@@ -1146,23 +1088,7 @@
                       "$q.seqlen_k"
                     ]
                   },
-                  {
-                    "if": [
-                      {
-                        "==": [
-                          "$q.value_head_dim",
-                          "mla"
-                        ]
-                      },
-                      {
-                        "-": [
-                          "$q.head_dim",
-                          64
-                        ]
-                      },
-                      "$q.head_dim"
-                    ]
-                  }
+                  "$let.head_dim_v"
                 ]
               },
               {
@@ -1181,23 +1107,7 @@
                           "$q.seqlen_k"
                         ]
                       },
-                      {
-                        "if": [
-                          {
-                            "==": [
-                              "$q.value_head_dim",
-                              "mla"
-                            ]
-                          },
-                          {
-                            "-": [
-                              "$q.head_dim",
-                              64
-                            ]
-                          },
-                          "$q.head_dim"
-                        ]
-                      }
+                      "$let.head_dim_v"
                     ]
                   },
                   {
@@ -1211,23 +1121,7 @@
                       {
                         "*": [
                           "$q.heads_kv",
-                          {
-                            "if": [
-                              {
-                                "==": [
-                                  "$q.value_head_dim",
-                                  "mla"
-                                ]
-                              },
-                              {
-                                "-": [
-                                  "$q.head_dim",
-                                  64
-                                ]
-                              },
-                              "$q.head_dim"
-                            ]
-                          }
+                          "$let.head_dim_v"
                         ]
                       },
                       {
@@ -1257,23 +1151,7 @@
                                   {
                                     "*": [
                                       "$q.heads_kv",
-                                      {
-                                        "if": [
-                                          {
-                                            "==": [
-                                              "$q.value_head_dim",
-                                              "mla"
-                                            ]
-                                          },
-                                          {
-                                            "-": [
-                                              "$q.head_dim",
-                                              64
-                                            ]
-                                          },
-                                          "$q.head_dim"
-                                        ]
-                                      }
+                                      "$let.head_dim_v"
                                     ]
                                   }
                                 ]
@@ -1288,23 +1166,7 @@
                                   "$q.heads_kv"
                                 ]
                               },
-                              {
-                                "if": [
-                                  {
-                                    "==": [
-                                      "$q.value_head_dim",
-                                      "mla"
-                                    ]
-                                  },
-                                  {
-                                    "-": [
-                                      "$q.head_dim",
-                                      64
-                                    ]
-                                  },
-                                  "$q.head_dim"
-                                ]
-                              }
+                              "$let.head_dim_v"
                             ]
                           }
                         ]
@@ -1326,23 +1188,7 @@
               {
                 "*": [
                   "$q.seqlen_k",
-                  {
-                    "if": [
-                      {
-                        "==": [
-                          "$q.value_head_dim",
-                          "mla"
-                        ]
-                      },
-                      {
-                        "-": [
-                          "$q.head_dim",
-                          64
-                        ]
-                      },
-                      "$q.head_dim"
-                    ]
-                  }
+                  "$let.head_dim_v"
                 ]
               },
               {
@@ -1356,42 +1202,10 @@
                   {
                     "*": [
                       "$q.seqlen_k",
-                      {
-                        "if": [
-                          {
-                            "==": [
-                              "$q.value_head_dim",
-                              "mla"
-                            ]
-                          },
-                          {
-                            "-": [
-                              "$q.head_dim",
-                              64
-                            ]
-                          },
-                          "$q.head_dim"
-                        ]
-                      }
+                      "$let.head_dim_v"
                     ]
                   },
-                  {
-                    "if": [
-                      {
-                        "==": [
-                          "$q.value_head_dim",
-                          "mla"
-                        ]
-                      },
-                      {
-                        "-": [
-                          "$q.head_dim",
-                          64
-                        ]
-                      },
-                      "$q.head_dim"
-                    ]
-                  }
+                  "$let.head_dim_v"
                 ]
               }
             ]
@@ -1404,23 +1218,7 @@
                   "bhsd"
                 ]
               },
-              {
-                "if": [
-                  {
-                    "==": [
-                      "$q.value_head_dim",
-                      "mla"
-                    ]
-                  },
-                  {
-                    "-": [
-                      "$q.head_dim",
-                      64
-                    ]
-                  },
-                  "$q.head_dim"
-                ]
-              },
+              "$let.head_dim_v",
               {
                 "if": [
                   {
@@ -1429,23 +1227,7 @@
                       "kv_bhsd"
                     ]
                   },
-                  {
-                    "if": [
-                      {
-                        "==": [
-                          "$q.value_head_dim",
-                          "mla"
-                        ]
-                      },
-                      {
-                        "-": [
-                          "$q.head_dim",
-                          64
-                        ]
-                      },
-                      "$q.head_dim"
-                    ]
-                  },
+                  "$let.head_dim_v",
                   {
                     "if": [
                       {
@@ -1462,23 +1244,7 @@
                               "$q.heads_kv"
                             ]
                           },
-                          {
-                            "if": [
-                              {
-                                "==": [
-                                  "$q.value_head_dim",
-                                  "mla"
-                                ]
-                              },
-                              {
-                                "-": [
-                                  "$q.head_dim",
-                                  64
-                                ]
-                              },
-                              "$q.head_dim"
-                            ]
-                          }
+                          "$let.head_dim_v"
                         ]
                       },
                       {
@@ -1505,23 +1271,7 @@
                               {
                                 "*": [
                                   "$q.heads_kv",
-                                  {
-                                    "if": [
-                                      {
-                                        "==": [
-                                          "$q.value_head_dim",
-                                          "mla"
-                                        ]
-                                      },
-                                      {
-                                        "-": [
-                                          "$q.head_dim",
-                                          64
-                                        ]
-                                      },
-                                      "$q.head_dim"
-                                    ]
-                                  }
+                                  "$let.head_dim_v"
                                 ]
                               }
                             ]
@@ -1529,23 +1279,7 @@
                           {
                             "*": [
                               "$q.heads_kv",
-                              {
-                                "if": [
-                                  {
-                                    "==": [
-                                      "$q.value_head_dim",
-                                      "mla"
-                                    ]
-                                  },
-                                  {
-                                    "-": [
-                                      "$q.head_dim",
-                                      64
-                                    ]
-                                  },
-                                  "$q.head_dim"
-                                ]
-                              }
+                              "$let.head_dim_v"
                             ]
                           }
                         ]
@@ -1566,23 +1300,7 @@
           "$q.batch",
           "$q.heads",
           "$q.seqlen_q",
-          {
-            "if": [
-              {
-                "==": [
-                  "$q.value_head_dim",
-                  "mla"
-                ]
-              },
-              {
-                "-": [
-                  "$q.head_dim",
-                  64
-                ]
-              },
-              "$q.head_dim"
-            ]
-          }
+          "$let.head_dim_v"
         ]
       },
       {
@@ -1605,23 +1323,7 @@
                       "$q.seqlen_q"
                     ]
                   },
-                  {
-                    "if": [
-                      {
-                        "==": [
-                          "$q.value_head_dim",
-                          "mla"
-                        ]
-                      },
-                      {
-                        "-": [
-                          "$q.head_dim",
-                          64
-                        ]
-                      },
-                      "$q.head_dim"
-                    ]
-                  }
+                  "$let.head_dim_v"
                 ]
               },
               {
@@ -1635,23 +1337,7 @@
                   {
                     "*": [
                       "$q.heads",
-                      {
-                        "if": [
-                          {
-                            "==": [
-                              "$q.value_head_dim",
-                              "mla"
-                            ]
-                          },
-                          {
-                            "-": [
-                              "$q.head_dim",
-                              64
-                            ]
-                          },
-                          "$q.head_dim"
-                        ]
-                      }
+                      "$let.head_dim_v"
                     ]
                   },
                   {
@@ -1662,23 +1348,7 @@
                           "$q.heads"
                         ]
                       },
-                      {
-                        "if": [
-                          {
-                            "==": [
-                              "$q.value_head_dim",
-                              "mla"
-                            ]
-                          },
-                          {
-                            "-": [
-                              "$q.head_dim",
-                              64
-                            ]
-                          },
-                          "$q.head_dim"
-                        ]
-                      }
+                      "$let.head_dim_v"
                     ]
                   }
                 ]
@@ -1696,42 +1366,10 @@
               {
                 "*": [
                   "$q.seqlen_q",
-                  {
-                    "if": [
-                      {
-                        "==": [
-                          "$q.value_head_dim",
-                          "mla"
-                        ]
-                      },
-                      {
-                        "-": [
-                          "$q.head_dim",
-                          64
-                        ]
-                      },
-                      "$q.head_dim"
-                    ]
-                  }
+                  "$let.head_dim_v"
                 ]
               },
-              {
-                "if": [
-                  {
-                    "==": [
-                      "$q.value_head_dim",
-                      "mla"
-                    ]
-                  },
-                  {
-                    "-": [
-                      "$q.head_dim",
-                      64
-                    ]
-                  },
-                  "$q.head_dim"
-                ]
-              }
+              "$let.head_dim_v"
             ]
           },
           {
@@ -1742,23 +1380,7 @@
                   "bhsd"
                 ]
               },
-              {
-                "if": [
-                  {
-                    "==": [
-                      "$q.value_head_dim",
-                      "mla"
-                    ]
-                  },
-                  {
-                    "-": [
-                      "$q.head_dim",
-                      64
-                    ]
-                  },
-                  "$q.head_dim"
-                ]
-              },
+              "$let.head_dim_v",
               {
                 "if": [
                   {
@@ -1775,45 +1397,13 @@
                           "$q.heads"
                         ]
                       },
-                      {
-                        "if": [
-                          {
-                            "==": [
-                              "$q.value_head_dim",
-                              "mla"
-                            ]
-                          },
-                          {
-                            "-": [
-                              "$q.head_dim",
-                              64
-                            ]
-                          },
-                          "$q.head_dim"
-                        ]
-                      }
+                      "$let.head_dim_v"
                     ]
                   },
                   {
                     "*": [
                       "$q.heads",
-                      {
-                        "if": [
-                          {
-                            "==": [
-                              "$q.value_head_dim",
-                              "mla"
-                            ]
-                          },
-                          {
-                            "-": [
-                              "$q.head_dim",
-                              64
-                            ]
-                          },
-                          "$q.head_dim"
-                        ]
-                      }
+                      "$let.head_dim_v"
                     ]
                   }
                 ]
@@ -1825,1212 +1415,43 @@
       },
       {
         "name": "dODims",
-        "kind": "expr",
-        "value": [
-          "$q.batch",
-          "$q.heads",
-          "$q.seqlen_q",
-          {
-            "if": [
-              {
-                "==": [
-                  "$q.value_head_dim",
-                  "mla"
-                ]
-              },
-              {
-                "-": [
-                  "$q.head_dim",
-                  64
-                ]
-              },
-              "$q.head_dim"
-            ]
-          }
-        ]
+        "kind": "same_as",
+        "of": "oDims"
       },
       {
         "name": "dOStrides",
-        "kind": "expr",
-        "value": [
-          {
-            "if": [
-              {
-                "==": [
-                  "$q.layout",
-                  "bhsd"
-                ]
-              },
-              {
-                "*": [
-                  {
-                    "*": [
-                      "$q.heads",
-                      "$q.seqlen_q"
-                    ]
-                  },
-                  {
-                    "if": [
-                      {
-                        "==": [
-                          "$q.value_head_dim",
-                          "mla"
-                        ]
-                      },
-                      {
-                        "-": [
-                          "$q.head_dim",
-                          64
-                        ]
-                      },
-                      "$q.head_dim"
-                    ]
-                  }
-                ]
-              },
-              {
-                "if": [
-                  {
-                    "==": [
-                      "$q.layout",
-                      "sbhd"
-                    ]
-                  },
-                  {
-                    "*": [
-                      "$q.heads",
-                      {
-                        "if": [
-                          {
-                            "==": [
-                              "$q.value_head_dim",
-                              "mla"
-                            ]
-                          },
-                          {
-                            "-": [
-                              "$q.head_dim",
-                              64
-                            ]
-                          },
-                          "$q.head_dim"
-                        ]
-                      }
-                    ]
-                  },
-                  {
-                    "*": [
-                      {
-                        "*": [
-                          "$q.seqlen_q",
-                          "$q.heads"
-                        ]
-                      },
-                      {
-                        "if": [
-                          {
-                            "==": [
-                              "$q.value_head_dim",
-                              "mla"
-                            ]
-                          },
-                          {
-                            "-": [
-                              "$q.head_dim",
-                              64
-                            ]
-                          },
-                          "$q.head_dim"
-                        ]
-                      }
-                    ]
-                  }
-                ]
-              }
-            ]
-          },
-          {
-            "if": [
-              {
-                "==": [
-                  "$q.layout",
-                  "bhsd"
-                ]
-              },
-              {
-                "*": [
-                  "$q.seqlen_q",
-                  {
-                    "if": [
-                      {
-                        "==": [
-                          "$q.value_head_dim",
-                          "mla"
-                        ]
-                      },
-                      {
-                        "-": [
-                          "$q.head_dim",
-                          64
-                        ]
-                      },
-                      "$q.head_dim"
-                    ]
-                  }
-                ]
-              },
-              {
-                "if": [
-                  {
-                    "==": [
-                      "$q.value_head_dim",
-                      "mla"
-                    ]
-                  },
-                  {
-                    "-": [
-                      "$q.head_dim",
-                      64
-                    ]
-                  },
-                  "$q.head_dim"
-                ]
-              }
-            ]
-          },
-          {
-            "if": [
-              {
-                "==": [
-                  "$q.layout",
-                  "bhsd"
-                ]
-              },
-              {
-                "if": [
-                  {
-                    "==": [
-                      "$q.value_head_dim",
-                      "mla"
-                    ]
-                  },
-                  {
-                    "-": [
-                      "$q.head_dim",
-                      64
-                    ]
-                  },
-                  "$q.head_dim"
-                ]
-              },
-              {
-                "if": [
-                  {
-                    "==": [
-                      "$q.layout",
-                      "sbhd"
-                    ]
-                  },
-                  {
-                    "*": [
-                      {
-                        "*": [
-                          "$q.batch",
-                          "$q.heads"
-                        ]
-                      },
-                      {
-                        "if": [
-                          {
-                            "==": [
-                              "$q.value_head_dim",
-                              "mla"
-                            ]
-                          },
-                          {
-                            "-": [
-                              "$q.head_dim",
-                              64
-                            ]
-                          },
-                          "$q.head_dim"
-                        ]
-                      }
-                    ]
-                  },
-                  {
-                    "*": [
-                      "$q.heads",
-                      {
-                        "if": [
-                          {
-                            "==": [
-                              "$q.value_head_dim",
-                              "mla"
-                            ]
-                          },
-                          {
-                            "-": [
-                              "$q.head_dim",
-                              64
-                            ]
-                          },
-                          "$q.head_dim"
-                        ]
-                      }
-                    ]
-                  }
-                ]
-              }
-            ]
-          },
-          1
-        ]
+        "kind": "same_as",
+        "of": "oStrides"
       },
       {
         "name": "dqDims",
-        "kind": "expr",
-        "value": [
-          "$q.batch",
-          "$q.heads",
-          "$q.seqlen_q",
-          "$q.head_dim"
-        ]
+        "kind": "same_as",
+        "of": "qDims"
       },
       {
         "name": "dqStrides",
-        "kind": "expr",
-        "value": [
-          {
-            "if": [
-              {
-                "==": [
-                  "$q.layout",
-                  "bhsd"
-                ]
-              },
-              {
-                "*": [
-                  {
-                    "*": [
-                      "$q.heads",
-                      "$q.seqlen_q"
-                    ]
-                  },
-                  "$q.head_dim"
-                ]
-              },
-              {
-                "if": [
-                  {
-                    "==": [
-                      "$q.layout",
-                      "sbhd"
-                    ]
-                  },
-                  {
-                    "*": [
-                      "$q.heads",
-                      "$q.head_dim"
-                    ]
-                  },
-                  {
-                    "if": [
-                      {
-                        "==": [
-                          "$q.layout",
-                          "qkv_packed"
-                        ]
-                      },
-                      {
-                        "*": [
-                          "$q.seqlen_q",
-                          {
-                            "+": [
-                              {
-                                "*": [
-                                  {
-                                    "+": [
-                                      "$q.heads",
-                                      "$q.heads_kv"
-                                    ]
-                                  },
-                                  "$q.head_dim"
-                                ]
-                              },
-                              {
-                                "*": [
-                                  "$q.heads_kv",
-                                  {
-                                    "if": [
-                                      {
-                                        "==": [
-                                          "$q.value_head_dim",
-                                          "mla"
-                                        ]
-                                      },
-                                      {
-                                        "-": [
-                                          "$q.head_dim",
-                                          64
-                                        ]
-                                      },
-                                      "$q.head_dim"
-                                    ]
-                                  }
-                                ]
-                              }
-                            ]
-                          }
-                        ]
-                      },
-                      {
-                        "*": [
-                          {
-                            "*": [
-                              "$q.seqlen_q",
-                              "$q.heads"
-                            ]
-                          },
-                          "$q.head_dim"
-                        ]
-                      }
-                    ]
-                  }
-                ]
-              }
-            ]
-          },
-          {
-            "if": [
-              {
-                "==": [
-                  "$q.layout",
-                  "bhsd"
-                ]
-              },
-              {
-                "*": [
-                  "$q.seqlen_q",
-                  "$q.head_dim"
-                ]
-              },
-              "$q.head_dim"
-            ]
-          },
-          {
-            "if": [
-              {
-                "==": [
-                  "$q.layout",
-                  "bhsd"
-                ]
-              },
-              "$q.head_dim",
-              {
-                "if": [
-                  {
-                    "==": [
-                      "$q.layout",
-                      "sbhd"
-                    ]
-                  },
-                  {
-                    "*": [
-                      {
-                        "*": [
-                          "$q.batch",
-                          "$q.heads"
-                        ]
-                      },
-                      "$q.head_dim"
-                    ]
-                  },
-                  {
-                    "if": [
-                      {
-                        "==": [
-                          "$q.layout",
-                          "qkv_packed"
-                        ]
-                      },
-                      {
-                        "+": [
-                          {
-                            "*": [
-                              {
-                                "+": [
-                                  "$q.heads",
-                                  "$q.heads_kv"
-                                ]
-                              },
-                              "$q.head_dim"
-                            ]
-                          },
-                          {
-                            "*": [
-                              "$q.heads_kv",
-                              {
-                                "if": [
-                                  {
-                                    "==": [
-                                      "$q.value_head_dim",
-                                      "mla"
-                                    ]
-                                  },
-                                  {
-                                    "-": [
-                                      "$q.head_dim",
-                                      64
-                                    ]
-                                  },
-                                  "$q.head_dim"
-                                ]
-                              }
-                            ]
-                          }
-                        ]
-                      },
-                      {
-                        "*": [
-                          "$q.heads",
-                          "$q.head_dim"
-                        ]
-                      }
-                    ]
-                  }
-                ]
-              }
-            ]
-          },
-          1
-        ]
+        "kind": "same_as",
+        "of": "qStrides"
       },
       {
         "name": "dkDims",
-        "kind": "expr",
-        "value": [
-          "$q.batch",
-          "$q.heads_kv",
-          "$q.seqlen_k",
-          "$q.head_dim"
-        ]
+        "kind": "same_as",
+        "of": "kDims"
       },
       {
         "name": "dkStrides",
-        "kind": "expr",
-        "value": [
-          {
-            "if": [
-              {
-                "==": [
-                  "$q.layout",
-                  "bhsd"
-                ]
-              },
-              {
-                "*": [
-                  {
-                    "*": [
-                      "$q.heads_kv",
-                      "$q.seqlen_k"
-                    ]
-                  },
-                  "$q.head_dim"
-                ]
-              },
-              {
-                "if": [
-                  {
-                    "==": [
-                      "$q.layout",
-                      "kv_bhsd"
-                    ]
-                  },
-                  {
-                    "*": [
-                      {
-                        "*": [
-                          "$q.heads_kv",
-                          "$q.seqlen_k"
-                        ]
-                      },
-                      "$q.head_dim"
-                    ]
-                  },
-                  {
-                    "if": [
-                      {
-                        "==": [
-                          "$q.layout",
-                          "sbhd"
-                        ]
-                      },
-                      {
-                        "*": [
-                          "$q.heads_kv",
-                          "$q.head_dim"
-                        ]
-                      },
-                      {
-                        "if": [
-                          {
-                            "==": [
-                              "$q.layout",
-                              "qkv_packed"
-                            ]
-                          },
-                          {
-                            "*": [
-                              "$q.seqlen_k",
-                              {
-                                "+": [
-                                  {
-                                    "*": [
-                                      {
-                                        "+": [
-                                          "$q.heads",
-                                          "$q.heads_kv"
-                                        ]
-                                      },
-                                      "$q.head_dim"
-                                    ]
-                                  },
-                                  {
-                                    "*": [
-                                      "$q.heads_kv",
-                                      {
-                                        "if": [
-                                          {
-                                            "==": [
-                                              "$q.value_head_dim",
-                                              "mla"
-                                            ]
-                                          },
-                                          {
-                                            "-": [
-                                              "$q.head_dim",
-                                              64
-                                            ]
-                                          },
-                                          "$q.head_dim"
-                                        ]
-                                      }
-                                    ]
-                                  }
-                                ]
-                              }
-                            ]
-                          },
-                          {
-                            "*": [
-                              {
-                                "*": [
-                                  "$q.seqlen_k",
-                                  "$q.heads_kv"
-                                ]
-                              },
-                              "$q.head_dim"
-                            ]
-                          }
-                        ]
-                      }
-                    ]
-                  }
-                ]
-              }
-            ]
-          },
-          {
-            "if": [
-              {
-                "==": [
-                  "$q.layout",
-                  "bhsd"
-                ]
-              },
-              {
-                "*": [
-                  "$q.seqlen_k",
-                  "$q.head_dim"
-                ]
-              },
-              {
-                "if": [
-                  {
-                    "==": [
-                      "$q.layout",
-                      "kv_bhsd"
-                    ]
-                  },
-                  {
-                    "*": [
-                      "$q.seqlen_k",
-                      "$q.head_dim"
-                    ]
-                  },
-                  "$q.head_dim"
-                ]
-              }
-            ]
-          },
-          {
-            "if": [
-              {
-                "==": [
-                  "$q.layout",
-                  "bhsd"
-                ]
-              },
-              "$q.head_dim",
-              {
-                "if": [
-                  {
-                    "==": [
-                      "$q.layout",
-                      "kv_bhsd"
-                    ]
-                  },
-                  "$q.head_dim",
-                  {
-                    "if": [
-                      {
-                        "==": [
-                          "$q.layout",
-                          "sbhd"
-                        ]
-                      },
-                      {
-                        "*": [
-                          {
-                            "*": [
-                              "$q.batch",
-                              "$q.heads_kv"
-                            ]
-                          },
-                          "$q.head_dim"
-                        ]
-                      },
-                      {
-                        "if": [
-                          {
-                            "==": [
-                              "$q.layout",
-                              "qkv_packed"
-                            ]
-                          },
-                          {
-                            "+": [
-                              {
-                                "*": [
-                                  {
-                                    "+": [
-                                      "$q.heads",
-                                      "$q.heads_kv"
-                                    ]
-                                  },
-                                  "$q.head_dim"
-                                ]
-                              },
-                              {
-                                "*": [
-                                  "$q.heads_kv",
-                                  {
-                                    "if": [
-                                      {
-                                        "==": [
-                                          "$q.value_head_dim",
-                                          "mla"
-                                        ]
-                                      },
-                                      {
-                                        "-": [
-                                          "$q.head_dim",
-                                          64
-                                        ]
-                                      },
-                                      "$q.head_dim"
-                                    ]
-                                  }
-                                ]
-                              }
-                            ]
-                          },
-                          {
-                            "*": [
-                              "$q.heads_kv",
-                              "$q.head_dim"
-                            ]
-                          }
-                        ]
-                      }
-                    ]
-                  }
-                ]
-              }
-            ]
-          },
-          1
-        ]
+        "kind": "same_as",
+        "of": "kStrides"
       },
       {
         "name": "dvDims",
-        "kind": "expr",
-        "value": [
-          "$q.batch",
-          "$q.heads_kv",
-          "$q.seqlen_k",
-          {
-            "if": [
-              {
-                "==": [
-                  "$q.value_head_dim",
-                  "mla"
-                ]
-              },
-              {
-                "-": [
-                  "$q.head_dim",
-                  64
-                ]
-              },
-              "$q.head_dim"
-            ]
-          }
-        ]
+        "kind": "same_as",
+        "of": "vDims"
       },
       {
         "name": "dvStrides",
-        "kind": "expr",
-        "value": [
-          {
-            "if": [
-              {
-                "==": [
-                  "$q.layout",
-                  "bhsd"
-                ]
-              },
-              {
-                "*": [
-                  {
-                    "*": [
-                      "$q.heads_kv",
-                      "$q.seqlen_k"
-                    ]
-                  },
-                  {
-                    "if": [
-                      {
-                        "==": [
-                          "$q.value_head_dim",
-                          "mla"
-                        ]
-                      },
-                      {
-                        "-": [
-                          "$q.head_dim",
-                          64
-                        ]
-                      },
-                      "$q.head_dim"
-                    ]
-                  }
-                ]
-              },
-              {
-                "if": [
-                  {
-                    "==": [
-                      "$q.layout",
-                      "kv_bhsd"
-                    ]
-                  },
-                  {
-                    "*": [
-                      {
-                        "*": [
-                          "$q.heads_kv",
-                          "$q.seqlen_k"
-                        ]
-                      },
-                      {
-                        "if": [
-                          {
-                            "==": [
-                              "$q.value_head_dim",
-                              "mla"
-                            ]
-                          },
-                          {
-                            "-": [
-                              "$q.head_dim",
-                              64
-                            ]
-                          },
-                          "$q.head_dim"
-                        ]
-                      }
-                    ]
-                  },
-                  {
-                    "if": [
-                      {
-                        "==": [
-                          "$q.layout",
-                          "sbhd"
-                        ]
-                      },
-                      {
-                        "*": [
-                          "$q.heads_kv",
-                          {
-                            "if": [
-                              {
-                                "==": [
-                                  "$q.value_head_dim",
-                                  "mla"
-                                ]
-                              },
-                              {
-                                "-": [
-                                  "$q.head_dim",
-                                  64
-                                ]
-                              },
-                              "$q.head_dim"
-                            ]
-                          }
-                        ]
-                      },
-                      {
-                        "if": [
-                          {
-                            "==": [
-                              "$q.layout",
-                              "qkv_packed"
-                            ]
-                          },
-                          {
-                            "*": [
-                              "$q.seqlen_k",
-                              {
-                                "+": [
-                                  {
-                                    "*": [
-                                      {
-                                        "+": [
-                                          "$q.heads",
-                                          "$q.heads_kv"
-                                        ]
-                                      },
-                                      "$q.head_dim"
-                                    ]
-                                  },
-                                  {
-                                    "*": [
-                                      "$q.heads_kv",
-                                      {
-                                        "if": [
-                                          {
-                                            "==": [
-                                              "$q.value_head_dim",
-                                              "mla"
-                                            ]
-                                          },
-                                          {
-                                            "-": [
-                                              "$q.head_dim",
-                                              64
-                                            ]
-                                          },
-                                          "$q.head_dim"
-                                        ]
-                                      }
-                                    ]
-                                  }
-                                ]
-                              }
-                            ]
-                          },
-                          {
-                            "*": [
-                              {
-                                "*": [
-                                  "$q.seqlen_k",
-                                  "$q.heads_kv"
-                                ]
-                              },
-                              {
-                                "if": [
-                                  {
-                                    "==": [
-                                      "$q.value_head_dim",
-                                      "mla"
-                                    ]
-                                  },
-                                  {
-                                    "-": [
-                                      "$q.head_dim",
-                                      64
-                                    ]
-                                  },
-                                  "$q.head_dim"
-                                ]
-                              }
-                            ]
-                          }
-                        ]
-                      }
-                    ]
-                  }
-                ]
-              }
-            ]
-          },
-          {
-            "if": [
-              {
-                "==": [
-                  "$q.layout",
-                  "bhsd"
-                ]
-              },
-              {
-                "*": [
-                  "$q.seqlen_k",
-                  {
-                    "if": [
-                      {
-                        "==": [
-                          "$q.value_head_dim",
-                          "mla"
-                        ]
-                      },
-                      {
-                        "-": [
-                          "$q.head_dim",
-                          64
-                        ]
-                      },
-                      "$q.head_dim"
-                    ]
-                  }
-                ]
-              },
-              {
-                "if": [
-                  {
-                    "==": [
-                      "$q.layout",
-                      "kv_bhsd"
-                    ]
-                  },
-                  {
-                    "*": [
-                      "$q.seqlen_k",
-                      {
-                        "if": [
-                          {
-                            "==": [
-                              "$q.value_head_dim",
-                              "mla"
-                            ]
-                          },
-                          {
-                            "-": [
-                              "$q.head_dim",
-                              64
-                            ]
-                          },
-                          "$q.head_dim"
-                        ]
-                      }
-                    ]
-                  },
-                  {
-                    "if": [
-                      {
-                        "==": [
-                          "$q.value_head_dim",
-                          "mla"
-                        ]
-                      },
-                      {
-                        "-": [
-                          "$q.head_dim",
-                          64
-                        ]
-                      },
-                      "$q.head_dim"
-                    ]
-                  }
-                ]
-              }
-            ]
-          },
-          {
-            "if": [
-              {
-                "==": [
-                  "$q.layout",
-                  "bhsd"
-                ]
-              },
-              {
-                "if": [
-                  {
-                    "==": [
-                      "$q.value_head_dim",
-                      "mla"
-                    ]
-                  },
-                  {
-                    "-": [
-                      "$q.head_dim",
-                      64
-                    ]
-                  },
-                  "$q.head_dim"
-                ]
-              },
-              {
-                "if": [
-                  {
-                    "==": [
-                      "$q.layout",
-                      "kv_bhsd"
-                    ]
-                  },
-                  {
-                    "if": [
-                      {
-                        "==": [
-                          "$q.value_head_dim",
-                          "mla"
-                        ]
-                      },
-                      {
-                        "-": [
-                          "$q.head_dim",
-                          64
-                        ]
-                      },
-                      "$q.head_dim"
-                    ]
-                  },
-                  {
-                    "if": [
-                      {
-                        "==": [
-                          "$q.layout",
-                          "sbhd"
-                        ]
-                      },
-                      {
-                        "*": [
-                          {
-                            "*": [
-                              "$q.batch",
-                              "$q.heads_kv"
-                            ]
-                          },
-                          {
-                            "if": [
-                              {
-                                "==": [
-                                  "$q.value_head_dim",
-                                  "mla"
-                                ]
-                              },
-                              {
-                                "-": [
-                                  "$q.head_dim",
-                                  64
-                                ]
-                              },
-                              "$q.head_dim"
-                            ]
-                          }
-                        ]
-                      },
-                      {
-                        "if": [
-                          {
-                            "==": [
-                              "$q.layout",
-                              "qkv_packed"
-                            ]
-                          },
-                          {
-                            "+": [
-                              {
-                                "*": [
-                                  {
-                                    "+": [
-                                      "$q.heads",
-                                      "$q.heads_kv"
-                                    ]
-                                  },
-                                  "$q.head_dim"
-                                ]
-                              },
-                              {
-                                "*": [
-                                  "$q.heads_kv",
-                                  {
-                                    "if": [
-                                      {
-                                        "==": [
-                                          "$q.value_head_dim",
-                                          "mla"
-                                        ]
-                                      },
-                                      {
-                                        "-": [
-                                          "$q.head_dim",
-                                          64
-                                        ]
-                                      },
-                                      "$q.head_dim"
-                                    ]
-                                  }
-                                ]
-                              }
-                            ]
-                          },
-                          {
-                            "*": [
-                              "$q.heads_kv",
-                              {
-                                "if": [
-                                  {
-                                    "==": [
-                                      "$q.value_head_dim",
-                                      "mla"
-                                    ]
-                                  },
-                                  {
-                                    "-": [
-                                      "$q.head_dim",
-                                      64
-                                    ]
-                                  },
-                                  "$q.head_dim"
-                                ]
-                              }
-                            ]
-                          }
-                        ]
-                      }
-                    ]
-                  }
-                ]
-              }
-            ]
-          },
-          1
-        ]
+        "kind": "same_as",
+        "of": "vStrides"
       },
       {
         "name": "statsDims",
@@ -3341,7 +1762,8 @@
     ],
     "// layout": "BSHD (the default): dims stay (B, H, S, D) and the layout lives in the strides, token-major, as the shipped bundles lay them out. Not row-major: strides_of would give BHSD, and rocKE's dense kernels take no stride kernargs -- stride_q_tok is baked as Hq*D -- so their matcher (hasBshdStrides) declines every BHSD graph. AITER serves BSHD too, so the default keeps both engines in the contest. The `layout` parameter adds bhsd (head-major, [H*S*D, S*D, D, 1]) and kv_bhsd (Q/O token-major, K/V head-major, the decode KV cache), whose batch stride is BSHD's, so only the head and sequence strides differ; sbhd (Megatron's sequence-major order, batch stride H*D) and qkv_packed (Q, K and V as views of one fused QKV projection row, O token-major). value_head_dim mla narrows V, O (and dO, dV) by 64, so their strides use the value width wherever Q's use head_dim. An engine that serves only some of them is filtered by the oracle, per combination, not by a measurement.",
     "// scale": "attnScale is the plain form's stated scale, not left to the schema's optional: rocKE's dense matcher declines a graph with no attn_scale_value (the scale is a required f32 kernarg and guessing 1/sqrt(D) is what it refuses to do), so a corpus that was all scale_unset would empty a rocKE corpus. 1/sqrt(head_dim) is the standard scale and what the shipped bundles carry. The other forms leave it out (scale_unset, scale_tensor) or keep it (the rest), and the live-engine oracle drops the forms an engine refuses, which is how rocKE's corpus stays free of them. The `scale` parameter chooses the stated value for the forms that state one; scale_unset states none and scale_tensor passes the value as a runtime tensor, so a constraint holds the facet at inv_sqrt_d there instead of listing the same graph (or tensors differing only in their default) under three scales.",
-    "// form": "One optional aspect per graph, everything else as the plain graph has it. The conventions are hipDNN's own: SdpaBwdNode requires seq_len_q and seq_len_kv, INT32 [B, 1, 1, 1], when padding_mask is set (detail::validateIndexTensor, Rule 9); the scale tensor is a single-element pass-by-value tensor (validateScalarParameter, Rule 10b), given as a runtime parameter whose default is the plain form's scale; the bias takes Q's dtype and dims [1, 1, seqlen_q, seqlen_k], row-major (Rule 7: last two dims equal seq_q and seq_kv, or 1), and dbias stays unset. The dropout seed and offset are INT64 [1, 1, 1, 1] device tensors as the test SDK builds the forward's (RaggedSdpaDensifyTestGraphs.hpp withPhiloxDropout); the frontend states no rule for them and no explicit dropout mask is needed, so that one is the test SDK's convention, not a validated one. There is no kernel_catalog here to hold a plain constant, and no sink form: the backward schema has no sink token. ragged is cuDNN's THD backward: Q, O, dO, dQ and the statistics share one INT32 [B+1, 1, 1, 1] offset tensor and K, V, dK and dV another, each multiplier the tensor's token stride (the statistics packed token-major, [seqlen_q*heads, 1, heads, 1], as the forward writes them), with seq_len_q, seq_len_kv and the padding mask beside them (SdpaBwdNode Rule 9). The lengths are not optional here: FlyDSL's backward, the engine that serves ragged, declines offsets without them (checkVarlen), while the forward's compact THD form (the test SDK's makeVllmGraph) has none. Facet interactions are constraints, not builder guards: `scale` is held at inv_sqrt_d under scale_unset and scale_tensor, and `ragged` to the token-major layouts (bshd, qkv_packed). Everything else crosses freely (padded, dropout and bias with every layout and window), since the frontend validators, the CPU and GPU references and the engine matchers state those as valid or as an engine-level decline, which the oracle filters."
+    "// form": "One optional aspect per graph, everything else as the plain graph has it. The conventions are hipDNN's own: SdpaBwdNode requires seq_len_q and seq_len_kv, INT32 [B, 1, 1, 1], when padding_mask is set (detail::validateIndexTensor, Rule 9); the scale tensor is a single-element pass-by-value tensor (validateScalarParameter, Rule 10b), given as a runtime parameter whose default is the plain form's scale; the bias takes Q's dtype and dims [1, 1, seqlen_q, seqlen_k], row-major (Rule 7: last two dims equal seq_q and seq_kv, or 1), and dbias stays unset. The dropout seed and offset are INT64 [1, 1, 1, 1] device tensors as the test SDK builds the forward's (RaggedSdpaDensifyTestGraphs.hpp withPhiloxDropout); the frontend states no rule for them and no explicit dropout mask is needed, so that one is the test SDK's convention, not a validated one. There is no kernel_catalog here to hold a plain constant, and no sink form: the backward schema has no sink token. ragged is cuDNN's THD backward: Q, O, dO, dQ and the statistics share one INT32 [B+1, 1, 1, 1] offset tensor and K, V, dK and dV another, each multiplier the tensor's token stride (the statistics packed token-major, [seqlen_q*heads, 1, heads, 1], as the forward writes them), with seq_len_q, seq_len_kv and the padding mask beside them (SdpaBwdNode Rule 9). The lengths are not optional here: FlyDSL's backward, the engine that serves ragged, declines offsets without them (checkVarlen), while the forward's compact THD form (the test SDK's makeVllmGraph) has none. Facet interactions are constraints, not builder guards: `scale` is held at inv_sqrt_d under scale_unset and scale_tensor, and `ragged` to the token-major layouts (bshd, qkv_packed). Everything else crosses freely (padded, dropout and bias with every layout and window), since the frontend validators, the CPU and GPU references and the engine matchers state those as valid or as an engine-level decline, which the oracle filters.",
+    "// let": "head_dim_v is V's width, and so O's (and dO's and dV's in the backward): head_dim, or 64 narrower under value_head_dim mla. Named once here; every dims and strides argument reads it as $let.head_dim_v."
   },
   "archetypes": [
     {
@@ -3409,6 +1831,7 @@
     },
     {
       "name": "gpt3_175b_prefill",
+      "note": "kept at its recorded size, which needs a larger --max-bytes than the default 256 MiB: the backward's eight full tensors make its smallest point (batch 1, 2048 tokens, fp16) about 385 MiB, so no point fits the default and a default run reports it never admitted",
       "values": {
         "batch": [
           1,
@@ -3618,7 +2041,7 @@
     {
       "name": "deepseek_v3_mla_prefill",
       "source": "DeepSeek-V3 config.json (qk_nope_head_dim 128, qk_rope_head_dim 64, v_head_dim 128, 128 heads)",
-      "note": "multi-head latent attention as it trains, the latent expanded: Q and K 192 wide (128 + the 64-wide rotary part), V 128, one KV head per query head; all 128 heads, or the 16 of a tensor-parallel shard (and DeepSeek-V2-Lite)",
+      "note": "multi-head latent attention as it trains, the latent expanded: Q and K 192 wide (128 + the 64-wide rotary part), V 128, one KV head per query head; all 128 heads, or the 16 of a tensor-parallel shard (and DeepSeek-V2-Lite). Kept at its recorded size: the 128-head points need a larger --max-bytes than the default 256 MiB (the smallest, batch 1 at 2048 tokens in fp16, is about 641 MiB), and under the default at most three 16-head points fit (batch 1 and 2 at 2048 tokens, batch 1 at 4096)",
       "values": {
         "batch": [
           1,

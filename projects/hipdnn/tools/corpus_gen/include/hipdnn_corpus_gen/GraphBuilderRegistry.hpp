@@ -1058,7 +1058,7 @@ inline const std::map<std::string, BuilderAdapter>& builderRegistry()
                      error = detail::applySdpaRaggedOffsets(resolved,
                                                             "sdpaBackward",
                                                             form,
-                                                            {&t[0], &t[3], &t[4], &t[5], &t[6]},
+                                                            {t.data(), &t[3], &t[4], &t[5], &t[6]},
                                                             {&t[1], &t[2], &t[7], &t[8]},
                                                             operands);
                  }
