@@ -154,6 +154,11 @@ class LayerNormOverride(OpOverride):
             self.note_native(key, reason)
             return _native()
 
+        reason = self._grad_stop(input, weight, bias)
+        if reason:
+            self.note_native(key, reason)
+            return _native()
+
         e = float(eps) if eps is not None else 1e-5
         weightless = weight is None
         biasless = bias is None

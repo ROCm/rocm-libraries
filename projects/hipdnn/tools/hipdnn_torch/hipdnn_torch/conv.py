@@ -207,6 +207,11 @@ class _ConvFpropOverride(OpOverride):
             self.note_native(key, reason)
             return _native()
 
+        reason = self._grad_stop(input, weight, bias)
+        if reason:
+            self.note_native(key, reason)
+            return _native()
+
         # A wrong-rank input or an unrecognised padding string cannot be turned
         # into conv tensors at all -- a construction failure, not a capability
         # judgement -- so it falls back cleanly.

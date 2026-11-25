@@ -26,7 +26,12 @@ share:
     call the engine can't claim goes back to real PyTorch, is counted, and is
     logged with the *reason* -- either the failed gate predicate or the caught
     exception. That per-reason tally (:meth:`format_report`) is the actionable
-    "what is hipDNN still missing" list.
+    "what is hipDNN still missing" list;
+  * :meth:`_grad_stop`, the training-mode native-routing stop every override
+    except :class:`~hipdnn_torch.sdpa.SdpaOverride` calls after its own gate:
+    under grad mode, any non-``None`` operand that requires grad routes the
+    whole call native, since this layer builds no backward graph for anything
+    but SDPA and autograd must still get a real ``grad_fn`` for the others.
 
 A concrete override subclasses this, sets :attr:`op_name`, and implements:
 
@@ -133,6 +138,20 @@ class OpOverride:
         # float32->f32, float16->f16, bfloat16->bf16, float8_e4m3fn->f8_e4m3fn
         name = name.replace("bfloat", "bf").replace("float", "f")
         return name
+
+    def _grad_stop(self, *tensors) -> str | None:
+        """Native-routing stop for every op except SDPA: under grad mode,
+        a non-``None`` operand that requires grad means a backward would have
+        to run through this op, and this override never builds one. Checked in
+        that order -- ``is_grad_enabled()`` first, since a parameter keeps
+        ``requires_grad`` under ``no_grad``/``inference_mode`` and must not
+        stop a call that cannot backward anyway."""
+        if not self.state.torch.is_grad_enabled():
+            return None
+        for t in tensors:
+            if t is not None and t.requires_grad:
+                return "autograd: grad enabled and operand requires grad (no backward)"
+        return None
 
     # -- graph build / execute (shared across every op) ---------------------
     def _cached_graph(self, key, build, describe):

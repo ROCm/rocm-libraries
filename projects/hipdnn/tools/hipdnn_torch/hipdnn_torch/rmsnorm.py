@@ -144,6 +144,11 @@ class RmsNormOverride(OpOverride):
             self.note_native(key, reason)
             return _native()
 
+        reason = self._grad_stop(input, weight)
+        if reason:
+            self.note_native(key, reason)
+            return _native()
+
         # eps=None -> torch's own default (finfo eps), so the baked value matches.
         e = float(eps) if eps is not None else float(torch.finfo(dtype).eps)
         weightless = weight is None

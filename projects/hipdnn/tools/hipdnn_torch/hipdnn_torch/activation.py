@@ -86,6 +86,11 @@ class _ActivationOverride(OpOverride):
             self.note_native(key, reason)
             return native()
 
+        reason = self._grad_stop(input)
+        if reason:
+            self.note_native(key, reason)
+            return native()
+
         mode = self._mode(**mode_kwargs)
         if isinstance(mode, str):  # unsupported variant -> native, with a reason
             self.note_native(key, mode)

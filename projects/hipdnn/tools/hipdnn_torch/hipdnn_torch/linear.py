@@ -180,6 +180,11 @@ class LinearOverride(OpOverride):
             self.note_native(key, reason)
             return _native()
 
+        reason = self._grad_stop(input, weight, bias)
+        if reason:
+            self.note_native(key, reason)
+            return _native()
+
         try:
             a_dims, a_str, b_dims, b_str, c_dims, rank1 = self._operands(
                 input, weight, n, k

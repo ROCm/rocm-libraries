@@ -57,11 +57,14 @@ def _contig_strides(shape):
 class _FakeTensor:
     """Minimal tensor: just the attributes the gates + helpers read."""
 
-    def __init__(self, shape, dtype=F16, is_cuda=True, stride=None):
+    def __init__(
+        self, shape, dtype=F16, is_cuda=True, stride=None, requires_grad=False
+    ):
         self._shape = tuple(shape)
         self.dtype = dtype
         self.is_cuda = is_cuda
         self._stride = tuple(stride) if stride is not None else _contig_strides(shape)
+        self.requires_grad = requires_grad
 
     @property
     def shape(self):
@@ -70,21 +73,33 @@ class _FakeTensor:
     def dim(self):
         return len(self._shape)
 
+    def numel(self):
+        n = 1
+        for d in self._shape:
+            n *= d
+        return n
+
     def stride(self, i=None):
         return self._stride if i is None else self._stride[i]
 
 
-def _fake_torch():
-    return SimpleNamespace(float16=F16, bfloat16=BF16, float32=F32)
+def _fake_torch(grad_enabled=True):
+    return SimpleNamespace(
+        float16=F16,
+        bfloat16=BF16,
+        float32=F32,
+        is_grad_enabled=lambda: grad_enabled,
+    )
 
 
-def _make(cls):
+def _make(cls, grad_enabled=True):
     """Construct an override with just enough fake ``state`` for the gate/helpers.
     ``dtype_map`` mirrors bootstrap's (f16/bf16/f32 are graph-mappable); only
-    membership is checked by the gate."""
+    membership is checked by the gate. ``grad_enabled`` feeds the fake
+    ``torch.is_grad_enabled()`` that ``_grad_stop`` reads."""
     ov = cls()
     ov.state = SimpleNamespace(
-        torch=_fake_torch(),
+        torch=_fake_torch(grad_enabled),
         dtype_map={F16: "HALF", BF16: "BFLOAT16", F32: "FLOAT"},
     )
     return ov
@@ -128,6 +143,137 @@ def test_gate_routes_unmappable_dtype_to_native(cls, call):
     ok, reason = call(ov, _FakeTensor((8, 128, 4, 4), INT8))
     assert not ok
     assert "not graph-mappable" in reason
+
+
+# --------------------------------------------------------------------------- #
+# non-SDPA ops decline under grad so autograd keeps a real grad_fn           #
+# --------------------------------------------------------------------------- #
+_AUTOGRAD_REASON = "autograd: grad enabled and operand requires grad (no backward)"
+
+
+class _GradStopProbe(BaseException):
+    """Raised by the ``_grad_stop`` spy in :func:`_grad_stop_reason` to cut
+    ``_call()`` short right after the real ``_grad_stop`` runs, carrying its
+    reason (or ``None``). A ``BaseException`` (not ``Exception``) so it is
+    never swallowed by a ``_call``'s own ``except Exception`` fallback
+    handler -- the "did not stop" branch needs no further fake graph-build
+    state (dtype_map's ``finfo``, a handle, a lock, ...) past this point."""
+
+    def __init__(self, reason):
+        super().__init__(reason)
+        self.reason = reason
+
+
+def _grad_stop_reason(ov, invoke):
+    """Drive ``invoke(ov)`` (which calls ``ov._call(...)``), spying on
+    ``ov._grad_stop`` so the real check runs against the real operands the
+    call site passes it, then raises to stop right there. Returns the reason
+    the real ``_grad_stop`` returned (or ``None``); asserts the call site
+    actually reaches it."""
+    real_grad_stop = ov._grad_stop
+
+    def _spy(*tensors):
+        raise _GradStopProbe(real_grad_stop(*tensors))
+
+    ov._grad_stop = _spy
+    try:
+        invoke(ov)
+    except _GradStopProbe as probe:
+        return probe.reason
+    raise AssertionError("ov._call() never reached _grad_stop")
+
+
+def _run_linear(grad_enabled, input_rg, weight_rg):
+    ov = _make(LinearOverride, grad_enabled)
+    input = _FakeTensor((4, 8), requires_grad=input_rg)
+    weight = _FakeTensor((16, 8), requires_grad=weight_rg)
+    bias = _FakeTensor((16,))
+    return _grad_stop_reason(
+        ov, lambda ov: ov._call(lambda *a, **k: "native", input, weight, bias)
+    )
+
+
+def _run_conv(grad_enabled, input_rg, weight_rg):
+    ov = _make(Conv2dFpropOverride, grad_enabled)
+    input = _FakeTensor((1, 4, 8, 8), requires_grad=input_rg)
+    weight = _FakeTensor((4, 4, 3, 3), requires_grad=weight_rg)
+    bias = _FakeTensor((4,))
+    return _grad_stop_reason(
+        ov, lambda ov: ov._call(lambda *a, **k: "native", input, weight, bias)
+    )
+
+
+def _run_layernorm(grad_enabled, input_rg, weight_rg):
+    ov = _make(LayerNormOverride, grad_enabled)
+    input = _FakeTensor((4, 8), requires_grad=input_rg)
+    weight = _FakeTensor((8,), requires_grad=weight_rg)
+    bias = _FakeTensor((8,))
+    return _grad_stop_reason(
+        ov,
+        lambda ov: ov._call(lambda *a, **k: "native", input, (8,), weight, bias),
+    )
+
+
+def _run_rmsnorm(grad_enabled, input_rg, weight_rg):
+    ov = _make(RmsNormOverride, grad_enabled)
+    input = _FakeTensor((4, 8), requires_grad=input_rg)
+    weight = _FakeTensor((8,), requires_grad=weight_rg)
+    return _grad_stop_reason(
+        ov, lambda ov: ov._call(lambda *a, **k: "native", input, (8,), weight)
+    )
+
+
+def _run_silu(grad_enabled, input_rg, weight_rg):
+    ov = _make(SiluOverride, grad_enabled)
+    input = _FakeTensor((4, 8), requires_grad=input_rg)
+    return _grad_stop_reason(ov, lambda ov: ov._call(lambda *a, **k: "native", input))
+
+
+def _run_gelu(grad_enabled, input_rg, weight_rg):
+    ov = _make(GeluOverride, grad_enabled)
+    input = _FakeTensor((4, 8), requires_grad=input_rg)
+    return _grad_stop_reason(ov, lambda ov: ov._call(lambda *a, **k: "native", input))
+
+
+# (name, run, has_second_operand) -- silu/gelu take only ``input``, so the
+# "only weight requires grad" case below is parametrized over the other four.
+_GRAD_STOP_OPS = [
+    ("linear", _run_linear, True),
+    ("conv2d", _run_conv, True),
+    ("layer_norm", _run_layernorm, True),
+    ("rms_norm", _run_rmsnorm, True),
+    ("silu", _run_silu, False),
+    ("gelu", _run_gelu, False),
+]
+
+
+@pytest.mark.parametrize("name, run, has_second_operand", _GRAD_STOP_OPS)
+def test_grad_stop_fires_when_input_requires_grad(name, run, has_second_operand):
+    assert run(True, True, False) == _AUTOGRAD_REASON
+
+
+@pytest.mark.parametrize("name, run", [(n, r) for n, r, has2 in _GRAD_STOP_OPS if has2])
+def test_grad_stop_fires_when_only_weight_requires_grad(name, run):
+    assert run(True, False, True) == _AUTOGRAD_REASON
+
+
+@pytest.mark.parametrize("name, run, has_second_operand", _GRAD_STOP_OPS)
+def test_grad_stop_passes_when_grad_disabled(name, run, has_second_operand):
+    assert run(False, True, True) is None
+
+
+@pytest.mark.parametrize("name, run, has_second_operand", _GRAD_STOP_OPS)
+def test_grad_stop_passes_when_nothing_requires_grad(name, run, has_second_operand):
+    assert run(True, False, False) is None
+
+
+def test_sdpa_gate_path_ignores_requires_grad():
+    # SDPA has no _grad_stop call in its path: its only pre-routing stop
+    # is _gate, which must keep passing a requires_grad input through, unlike
+    # the six ops above whose _call stops on it via _grad_stop.
+    ov = _make(SdpaOverride)
+    ok, reason = ov._gate(_FakeTensor((2, 8, 128, 64), requires_grad=True))
+    assert ok, reason
 
 
 # --------------------------------------------------------------------------- #
