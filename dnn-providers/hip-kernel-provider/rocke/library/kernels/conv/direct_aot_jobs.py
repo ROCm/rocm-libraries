@@ -182,7 +182,7 @@ DW_BLOCK_WAVES = (1, 2, 4)
 # grid y): a few-image launch of whole-image blocks leaves most SIMDs idle
 # (C=3 640-wide, N7: 112 blocks); the KH - stride halo rows each block
 # re-reads cost ~(KH - 1) / block_h more input traffic.
-DW_SPATIAL_BLOCK_H = (8, 16, 32, 64, 96, 128, 160, 240)
+DW_SPATIAL_BLOCK_H = (128, 160)
 # Output-stationary depthwise forward. Widths and heights of 7 and 14 tile the
 # 7/14/28/56-wide feature maps of the common CNN stages without a ragged edge;
 # the spec validator drops the tiles that overflow the register budget and the
@@ -205,14 +205,14 @@ DW_TILED_CPL = 2
 # Packed row-streaming forward with stride_skip (stride > 1 only): output-row
 # accumulators only, so the wider tiles that cut the column halo re-read fit.
 DW_FWD_SS_GRID = (
-    (2, (2, 4, 7, 8, 14, 16), (1, 2, 4)),
-    (4, (4, 7), (1, 2)),
+    (2, (2, 4, 7), (1, 2, 4)),
+    (4, (4,), (1, 2)),
 )
 # Packed row-streaming forward in row blocks (cpl 2; stride_skip at stride >
 # 1): (block_h values, block_w values, block_waves values). Few-image or
 # short-map launches of whole-image blocks hide too little of the row
 # stream's latency.
-DW_FWD_ROWBLOCK_GRID = ((4, 7, 14), (2, 4, 8), (1, 2, 4))
+DW_FWD_ROWBLOCK_GRID = ((14,), (4,), (1,))
 
 # Column-streamed depthwise forward. It keeps only ``block_h*block_w + KH`` f32
 # live per lane instead of ``KH*KW + KH*block_w``, so its sweet spot sits at far
@@ -451,7 +451,6 @@ DGRAD_WMMA_KNOBS = (
     (1, 4, 1, 4, 32, 1, 32, 3, True),
     (1, 4, 1, 8, 16, 2, 32, 2, False),
     (1, 4, 1, 8, 16, 2, 32, 2, True),
-    (1, 4, 2, 2, 8, 2, 32, 2, False),
     (1, 4, 2, 2, 8, 2, 32, 2, True),
     (1, 4, 2, 4, 16, 1, 32, 2, False),
     (1, 4, 2, 8, 16, 2, 32, 2, False),
@@ -474,17 +473,13 @@ DGRAD_WMMA_KNOBS = (
     (1, 4, 8, 4, 32, 1, 32, 2, True),
     (1, 4, 8, 4, 64, 1, 32, 2, True),
     (1, 7, 2, 7, 28, 1, 32, 2, False),
-    (1, 7, 2, 7, 28, 1, 32, 2, True),
     (1, 8, 1, 2, 8, 4, 32, 2, False),
     (1, 8, 1, 2, 8, 4, 32, 2, True),
     (1, 8, 1, 2, 8, 4, 32, 3, False),
     (1, 8, 1, 2, 8, 4, 32, 3, True),
     (1, 8, 1, 4, 16, 2, 32, 2, False),
     (1, 8, 1, 4, 16, 2, 32, 2, True),
-    (1, 8, 2, 2, 8, 4, 32, 2, False),
     (1, 8, 2, 2, 8, 4, 32, 2, True),
-    (1, 8, 2, 4, 8, 2, 32, 2, False),
-    (1, 8, 2, 4, 8, 2, 32, 2, True),
     (1, 8, 2, 4, 16, 2, 32, 2, False),
     (1, 8, 2, 4, 16, 2, 32, 2, True),
     (2, 2, 2, 4, 16, 1, 64, 2, True),
@@ -624,10 +619,6 @@ DGRAD_WMMA_STRIDED_KNOBS = (
     (4, 2, 2, 6, 16, 1, 32, 2, False),
     (1, 4, 2, 2, 8, 2, 32, 2, False),
     (1, 4, 2, 2, 8, 2, 32, 2, True),
-    (1, 8, 2, 2, 8, 4, 32, 2, False),
-    (1, 8, 2, 2, 8, 4, 32, 2, True),
-    (1, 8, 2, 4, 8, 2, 32, 2, False),
-    (1, 8, 2, 4, 8, 2, 32, 2, True),
 )
 # 2x2 stride 2 (patch merge): every phase is a 1x1, all four share one B
 # fragment, so wider channel blocks pay off.
@@ -691,12 +682,8 @@ FWD_WMMA_KNOBS = (
     (1, 4, 4, 6, 32, 1, 32, 2, True, True, False, False, False),
     (1, 4, 4, 6, 32, 1, 32, 2, True, True, True, False, False),
     (1, 5, 4, 5, 40, 1, 32, 2, True, True, True, False, False),
-    (1, 7, 2, 7, 28, 1, 32, 2, False, False, False, False, False),
     (1, 7, 2, 7, 28, 1, 32, 2, True, False, False, False, False),
-    (1, 8, 2, 2, 8, 4, 32, 2, False, False, False, False, False),
     (1, 8, 2, 2, 8, 4, 32, 2, True, False, False, False, False),
-    (1, 8, 2, 4, 8, 2, 32, 2, False, False, False, False, False),
-    (1, 8, 2, 4, 8, 2, 32, 2, True, False, False, False, False),
     (1, 8, 4, 6, 24, 4, 32, 2, True, True, True, False, False),
     (1, 8, 4, 6, 32, 1, 32, 2, True, True, True, False, False),
     (1, 8, 4, 8, 16, 1, 32, 2, True, True, True, False, False),
