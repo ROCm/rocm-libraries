@@ -3,7 +3,10 @@
 
 """Inverse band, tile classifier and mask policies of the attention backward.
 
-Family glue for the backward kernels (Python-only, no C++ twin).  The forward
+Family glue for the backward kernels.  The C++ twin of everything below but
+``HostInt`` (no C object) is
+``helper_rocke.instances.common._attention_bwd_band.h``; the pair
+``tests/parity/attention_bwd_band_emit`` holds the two byte-identical.  The forward
 band (``rocke.helpers.attention_band``) is imported, never edited: the keep
 rule is the frozen one,
 

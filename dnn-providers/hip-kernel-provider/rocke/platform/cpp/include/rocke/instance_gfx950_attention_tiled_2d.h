@@ -3,7 +3,7 @@
  *
  * rocke/instance_gfx950_attention_tiled_2d.h -- PUBLIC C99 surface for the gfx950
  * (CDNA4 / MI355X) WIDE-ATOM tiled-2D unified-attention kernel INSTANCE BUILDER
- * (rocke/instances/gfx950/attention_tiled_2d.py, 3818 LOC).
+ * (library/kernels/gfx950/attention_tiled_2d.py).
  *
  *   Python (gfx950/attention_tiled_2d.py)            C99 (this header)
  *   ------------------------------------------- --------------------------------------------------

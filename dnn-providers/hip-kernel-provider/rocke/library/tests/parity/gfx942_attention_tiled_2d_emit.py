@@ -331,14 +331,12 @@ _CONFIGS = {
         use_conflict_free_v_store=True,
         use_i64_kv_addr=True,
     ),
-    # idx20: additive bias on gfx942; both engines reject it (BOTH_REJECTED).
+    # idx51: additive bias on gfx942; both engines reject it (BOTH_REJECTED).
     # The gfx942 Python spec has no use_additive_bias field at all, so this
-    # raises TypeError at construction. The C twin's spec_validate() rejects
-    # it too, but nothing in the provider tree calls that function on the
-    # real build path (rocke_build_unified_attention_2d_tiled_scalar ->
-    # rocke_gfx942_attn2d_build_ctx_init); the reject this config pins lives
-    # in the ctx-init itself.
-    20: dict(
+    # raises TypeError at construction. The C twin's spec validator rejects it
+    # on the build path, and the ctx-init refuses it for a caller that skips
+    # the validator.
+    51: dict(
         head_size=64,
         block_size=32,
         num_query_heads=32,
@@ -350,7 +348,7 @@ _CONFIGS = {
         use_additive_bias=True,
     ),
     # Fast paged-KV descriptor (bounded V tail per call).
-    21: dict(
+    52: dict(
         head_size=64,
         block_size=32,
         num_query_heads=64,
@@ -366,7 +364,7 @@ _CONFIGS = {
     # Page copies whose copy spans pages (one 8-warp copy is two 16-token pages
     # of head size 32): each copy's page comes from the wave, and each lane sits
     # at the same row of its page in every copy.
-    22: dict(
+    53: dict(
         head_size=32,
         block_size=16,
         num_query_heads=32,
@@ -386,12 +384,704 @@ _CONFIGS = {
 # reason, a typo included).
 _EXPECTED_REJECTIONS = {
     # The Python gfx942 spec has no bias field, so Python fails on the keyword.
-    20: r"unexpected keyword argument 'use_additive_bias'|does not emit additive bias",
+    51: (
+        r"unexpected keyword argument 'use_additive_bias'"
+        r"|use_additive_bias is not implemented on gfx942"
+    ),
 }
-# cfg22 with i64 K/V (one resource per page), and cfg11 with i64 K/V: copies
+# cfg53 with i64 K/V (one resource per page), and cfg11 with i64 K/V: copies
 # that end mid-row on a per-page resource.
-_CONFIGS[23] = {**_CONFIGS[22], "use_i64_kv_addr": True}
-_CONFIGS[24] = {**_CONFIGS[11], "use_i64_kv_addr": True}
+_CONFIGS[54] = {**_CONFIGS[53], "use_i64_kv_addr": True}
+_CONFIGS[55] = {**_CONFIGS[11], "use_i64_kv_addr": True}
+
+# D64 fp16 flash prefill with the transposed VALU stack (scalar state,
+# invariant hoist, mask-once, mask-limit), non-ring.
+_CONFIGS[20] = dict(
+    head_size=64,
+    block_size=64,
+    num_query_heads=32,
+    num_kv_heads=8,
+    dtype="fp16",
+    use_sinks=False,
+    sliding_window=0,
+    has_softcap=False,
+    num_seqs=1,
+    num_warps=4,
+    waves_per_eu=2,
+    tile_size=64,
+    block_m_per_warp=32,
+    use_mfma_32x32x8=True,
+    use_transposed_qk_32x32=True,
+    use_transposed_scalar_state=True,
+    use_transposed_invariant_hoist=True,
+    use_transposed_mask_once=True,
+    use_transposed_mask_limit=True,
+    use_conflict_free_v_store=True,
+    use_q_direct_global=True,
+    kv_cache_policy="all",
+)
+
+# D128 bf16 wide flash (nw2, single-buffered K) with the VALU stack.
+_CONFIGS[21] = dict(
+    head_size=128,
+    block_size=64,
+    num_query_heads=32,
+    num_kv_heads=8,
+    dtype="bf16",
+    use_sinks=False,
+    sliding_window=0,
+    has_softcap=False,
+    num_seqs=1,
+    num_warps=2,
+    waves_per_eu=2,
+    tile_size=64,
+    block_m_per_warp=32,
+    use_mfma_32x32x8=True,
+    use_transposed_qk_32x32=True,
+    use_transposed_scalar_state=True,
+    use_transposed_invariant_hoist=True,
+    use_transposed_mask_once=True,
+    use_transposed_mask_limit=True,
+    use_k_single_buffer=True,
+    kv_cache_policy="all",
+)
+
+# Mask-limit from the per-iteration invariants (no hoist), with sinks and
+# NQK=6 so VALID_ROWS < BLOCK_M folds the row guard into the threshold.
+_CONFIGS[22] = dict(
+    head_size=64,
+    block_size=32,
+    num_query_heads=12,
+    num_kv_heads=2,
+    dtype="bf16",
+    use_sinks=True,
+    sliding_window=0,
+    has_softcap=False,
+    num_warps=4,
+    block_m_per_warp=32,
+    tile_size=64,
+    use_mfma_32x32x8=True,
+    use_transposed_qk_32x32=True,
+    use_transposed_scalar_state=True,
+    use_transposed_mask_once=True,
+    use_transposed_mask_limit=True,
+)
+
+# Invariant hoist alone, with ALiBi (hoisted slope), QQ bias (hoisted
+# query position) and a sliding window (hoisted causal limit).
+_CONFIGS[23] = dict(
+    head_size=128,
+    block_size=32,
+    num_query_heads=8,
+    num_kv_heads=1,
+    dtype="bf16",
+    use_sinks=True,
+    sliding_window=1024,
+    has_softcap=False,
+    use_alibi=True,
+    use_qq_bias=True,
+    num_warps=2,
+    block_m_per_warp=32,
+    tile_size=32,
+    use_mfma_32x32x8=True,
+    use_transposed_qk_32x32=True,
+    use_transposed_invariant_hoist=True,
+)
+
+# Hoist + mask-once together (hoist wins) with ALiBi and NQK=6.
+_CONFIGS[24] = dict(
+    head_size=64,
+    block_size=32,
+    num_query_heads=12,
+    num_kv_heads=2,
+    dtype="fp16",
+    use_sinks=False,
+    sliding_window=0,
+    has_softcap=True,
+    use_alibi=True,
+    num_warps=4,
+    block_m_per_warp=32,
+    tile_size=64,
+    use_mfma_32x32x8=True,
+    use_transposed_qk_32x32=True,
+    use_transposed_scalar_state=True,
+    use_transposed_invariant_hoist=True,
+    use_transposed_mask_once=True,
+)
+
+# Plain transposed path with ALiBi: the slope is loaded inline per tile.
+_CONFIGS[25] = dict(
+    head_size=64,
+    block_size=32,
+    num_query_heads=32,
+    num_kv_heads=8,
+    dtype="fp16",
+    use_sinks=False,
+    sliding_window=0,
+    has_softcap=False,
+    use_alibi=True,
+    num_warps=4,
+    block_m_per_warp=32,
+    tile_size=64,
+    use_mfma_32x32x8=True,
+    use_transposed_qk_32x32=True,
+)
+
+# D64 fp16 flash prefill on the sliced-K ring: depth 3, 16-wide slices
+# (4 groups, so the default slot map reuses slot 0 and drains on reuse).
+_CONFIGS[26] = dict(
+    head_size=64,
+    block_size=64,
+    num_query_heads=32,
+    num_kv_heads=8,
+    dtype="fp16",
+    use_sinks=False,
+    sliding_window=0,
+    has_softcap=False,
+    num_seqs=1,
+    waves_per_eu=2,
+    num_warps=4,
+    block_m_per_warp=32,
+    tile_size=64,
+    use_mfma_32x32x8=True,
+    use_transposed_qk_32x32=True,
+    use_conflict_free_v_store=True,
+    use_k_sliced_ring=True,
+    use_transposed_scalar_state=True,
+    use_transposed_invariant_hoist=True,
+    use_transposed_mask_once=True,
+    use_transposed_mask_limit=True,
+    k_slice_hd=16,
+    use_q_direct_global=True,
+    kv_cache_policy="all",
+)
+
+# D128 fp16 flash prefill on the depth-2 ring (32-wide slices, 4 groups).
+_CONFIGS[27] = dict(
+    head_size=128,
+    block_size=64,
+    num_query_heads=32,
+    num_kv_heads=8,
+    dtype="fp16",
+    use_sinks=False,
+    sliding_window=0,
+    has_softcap=False,
+    num_seqs=1,
+    waves_per_eu=2,
+    num_warps=4,
+    block_m_per_warp=32,
+    tile_size=64,
+    use_mfma_32x32x8=True,
+    use_transposed_qk_32x32=True,
+    use_conflict_free_v_store=True,
+    use_k_sliced_ring=True,
+    use_transposed_scalar_state=True,
+    use_transposed_invariant_hoist=True,
+    use_transposed_mask_once=True,
+    use_transposed_mask_limit=True,
+    ring_depth=2,
+    kv_cache_policy="all",
+)
+
+# D128 bf16 depth-3 ring with the CK LdsSeq slot map (4 groups).
+_CONFIGS[28] = dict(
+    head_size=128,
+    block_size=32,
+    num_query_heads=32,
+    num_kv_heads=8,
+    dtype="bf16",
+    use_sinks=False,
+    sliding_window=0,
+    has_softcap=False,
+    num_warps=4,
+    block_m_per_warp=32,
+    tile_size=64,
+    use_mfma_32x32x8=True,
+    use_transposed_qk_32x32=True,
+    use_conflict_free_v_store=True,
+    use_k_sliced_ring=True,
+    use_transposed_scalar_state=True,
+    use_transposed_invariant_hoist=True,
+    use_transposed_mask_once=True,
+    use_transposed_mask_limit=True,
+    use_k_sliced_ldsseq=True,
+)
+
+# D64 bf16 depth-3 ring, 32-wide slices (2 groups) with the LdsSeq map,
+# sinks and the iglp sched barrier.
+_CONFIGS[29] = dict(
+    head_size=64,
+    block_size=16,
+    num_query_heads=16,
+    num_kv_heads=2,
+    dtype="bf16",
+    use_sinks=True,
+    sliding_window=0,
+    has_softcap=False,
+    num_warps=4,
+    block_m_per_warp=32,
+    tile_size=64,
+    use_mfma_32x32x8=True,
+    use_transposed_qk_32x32=True,
+    use_conflict_free_v_store=True,
+    use_k_sliced_ring=True,
+    use_k_sliced_ldsseq=True,
+    use_iglp_opt=True,
+)
+
+# D128 fp16 depth-3 ring on the plain transposed path (no VALU stack),
+# with softcap and a sliding window.
+_CONFIGS[30] = dict(
+    head_size=128,
+    block_size=64,
+    num_query_heads=8,
+    num_kv_heads=8,
+    dtype="fp16",
+    use_sinks=False,
+    sliding_window=512,
+    has_softcap=True,
+    num_warps=4,
+    block_m_per_warp=32,
+    tile_size=64,
+    use_mfma_32x32x8=True,
+    use_transposed_qk_32x32=True,
+    use_conflict_free_v_store=True,
+    use_k_sliced_ring=True,
+)
+
+# Causal mask phase split on the D64 fp16 mask-limit flash spec (the
+# unmasked phase drops the mask-limit compare).
+_CONFIGS[31] = dict(
+    head_size=64,
+    block_size=64,
+    num_query_heads=32,
+    num_kv_heads=8,
+    dtype="fp16",
+    use_sinks=False,
+    sliding_window=0,
+    has_softcap=False,
+    num_seqs=1,
+    num_warps=4,
+    waves_per_eu=2,
+    tile_size=64,
+    block_m_per_warp=32,
+    use_mfma_32x32x8=True,
+    use_transposed_qk_32x32=True,
+    use_transposed_scalar_state=True,
+    use_transposed_invariant_hoist=True,
+    use_transposed_mask_once=True,
+    use_transposed_mask_limit=True,
+    use_conflict_free_v_store=True,
+    use_q_direct_global=True,
+    kv_cache_policy="all",
+    use_causal_mask_phase_split=True,
+)
+
+# Causal mask phase split on the narrow 16x16 path, sinks + softcap.
+_CONFIGS[32] = dict(
+    head_size=128,
+    block_size=32,
+    num_query_heads=32,
+    num_kv_heads=8,
+    dtype="bf16",
+    use_sinks=True,
+    sliding_window=0,
+    has_softcap=True,
+    use_causal_mask_phase_split=True,
+)
+
+# Causal mask phase split on the D128 fp16 depth-2 ring flash spec.
+_CONFIGS[33] = dict(
+    head_size=128,
+    block_size=64,
+    num_query_heads=32,
+    num_kv_heads=8,
+    dtype="fp16",
+    use_sinks=False,
+    sliding_window=0,
+    has_softcap=False,
+    num_seqs=1,
+    waves_per_eu=2,
+    num_warps=4,
+    block_m_per_warp=32,
+    tile_size=64,
+    use_mfma_32x32x8=True,
+    use_transposed_qk_32x32=True,
+    use_conflict_free_v_store=True,
+    use_k_sliced_ring=True,
+    use_transposed_scalar_state=True,
+    use_transposed_invariant_hoist=True,
+    use_transposed_mask_once=True,
+    use_transposed_mask_limit=True,
+    ring_depth=2,
+    kv_cache_policy="all",
+    use_causal_mask_phase_split=True,
+)
+
+# Causal mask phase split with a sliding window: guarded off (one loop).
+_CONFIGS[34] = dict(
+    head_size=64,
+    block_size=128,
+    num_query_heads=16,
+    num_kv_heads=4,
+    dtype="bf16",
+    use_sinks=False,
+    sliding_window=4096,
+    has_softcap=False,
+    use_causal_mask_phase_split=True,
+)
+
+# V read straight from HBM on the plain transposed-x8 PV.
+_CONFIGS[35] = dict(
+    head_size=64,
+    block_size=32,
+    num_query_heads=32,
+    num_kv_heads=8,
+    dtype="fp16",
+    use_sinks=False,
+    sliding_window=0,
+    has_softcap=False,
+    use_alibi=True,
+    num_warps=4,
+    block_m_per_warp=32,
+    tile_size=64,
+    use_mfma_32x32x8=True,
+    use_transposed_qk_32x32=True,
+    use_v_hbm_direct=True,
+)
+
+# V read straight from HBM on the narrow 16x16 PV.
+_CONFIGS[36] = dict(
+    head_size=64,
+    block_size=32,
+    num_query_heads=16,
+    num_kv_heads=4,
+    dtype="bf16",
+    use_sinks=False,
+    sliding_window=0,
+    has_softcap=False,
+    use_v_hbm_direct=True,
+)
+
+# V read straight from HBM on the transposed-x8 conflict-free-V PV.
+_CONFIGS[37] = dict(
+    head_size=64,
+    block_size=32,
+    num_query_heads=32,
+    num_kv_heads=8,
+    dtype="fp16",
+    use_sinks=False,
+    sliding_window=0,
+    has_softcap=False,
+    num_warps=4,
+    block_m_per_warp=32,
+    tile_size=64,
+    use_mfma_32x32x8=True,
+    use_transposed_qk_32x32=True,
+    use_conflict_free_v=True,
+    use_v_hbm_direct=True,
+)
+
+# V read straight from HBM on the D128 bf16 wide flash spec.
+_CONFIGS[38] = dict(
+    head_size=128,
+    block_size=64,
+    num_query_heads=32,
+    num_kv_heads=8,
+    dtype="bf16",
+    use_sinks=False,
+    sliding_window=0,
+    has_softcap=False,
+    num_seqs=1,
+    num_warps=2,
+    waves_per_eu=2,
+    tile_size=64,
+    block_m_per_warp=32,
+    use_mfma_32x32x8=True,
+    use_transposed_qk_32x32=True,
+    use_transposed_scalar_state=True,
+    use_transposed_invariant_hoist=True,
+    use_transposed_mask_once=True,
+    use_transposed_mask_limit=True,
+    use_k_single_buffer=True,
+    kv_cache_policy="all",
+    use_v_hbm_direct=True,
+)
+
+# V read straight from HBM with the causal mask phase split and sinks.
+_CONFIGS[39] = dict(
+    head_size=64,
+    block_size=32,
+    num_query_heads=32,
+    num_kv_heads=8,
+    dtype="fp16",
+    use_sinks=True,
+    sliding_window=0,
+    has_softcap=False,
+    num_warps=4,
+    block_m_per_warp=32,
+    tile_size=64,
+    use_mfma_32x32x8=True,
+    use_transposed_qk_32x32=True,
+    use_v_hbm_direct=True,
+    use_causal_mask_phase_split=True,
+)
+
+# The selector's D64 fp16 flash prefill spec on a cache past the i32 voffset
+# range: the depth-3 ring loads each K slice through a 64-bit block base.
+_CONFIGS[40] = dict(
+    head_size=64,
+    block_size=16,
+    dtype="fp16",
+    num_query_heads=32,
+    num_kv_heads=8,
+    use_sinks=False,
+    sliding_window=0,
+    has_softcap=False,
+    num_seqs=1,
+    waves_per_eu=2,
+    num_warps=4,
+    block_m_per_warp=32,
+    tile_size=64,
+    use_mfma_32x32x8=True,
+    use_transposed_qk_32x32=True,
+    use_conflict_free_v_store=True,
+    use_k_sliced_ring=True,
+    use_transposed_scalar_state=True,
+    use_transposed_invariant_hoist=True,
+    use_transposed_mask_once=True,
+    use_transposed_mask_limit=True,
+    k_slice_hd=16,
+    use_q_direct_global=True,
+    kv_cache_policy="all",
+    use_i64_kv_addr=True,
+)
+
+# D128 fp16 depth-2 ring (32-wide slices) with i64 K/V addressing.
+_CONFIGS[41] = dict(
+    head_size=128,
+    block_size=64,
+    dtype="fp16",
+    num_query_heads=32,
+    num_kv_heads=8,
+    use_sinks=False,
+    sliding_window=0,
+    has_softcap=False,
+    num_seqs=1,
+    waves_per_eu=2,
+    num_warps=4,
+    block_m_per_warp=32,
+    tile_size=64,
+    use_mfma_32x32x8=True,
+    use_transposed_qk_32x32=True,
+    use_conflict_free_v_store=True,
+    use_k_sliced_ring=True,
+    use_transposed_scalar_state=True,
+    use_transposed_invariant_hoist=True,
+    use_transposed_mask_once=True,
+    use_transposed_mask_limit=True,
+    ring_depth=2,
+    kv_cache_policy="all",
+    use_i64_kv_addr=True,
+)
+
+# D64 bf16 depth-3 ring on the plain transposed path with i64 K/V addressing
+# and K copied by global_load_lds (the 64-bit K pointer, not the resource).
+_CONFIGS[42] = dict(
+    head_size=64,
+    block_size=32,
+    dtype="bf16",
+    num_query_heads=32,
+    num_kv_heads=8,
+    use_sinks=False,
+    sliding_window=0,
+    has_softcap=False,
+    num_seqs=1,
+    waves_per_eu=2,
+    num_warps=4,
+    block_m_per_warp=32,
+    tile_size=64,
+    use_mfma_32x32x8=True,
+    use_transposed_qk_32x32=True,
+    use_conflict_free_v_store=True,
+    use_k_sliced_ring=True,
+    k_slice_hd=16,
+    use_q_direct_global=True,
+    kv_cache_policy="all",
+    use_i64_kv_addr=True,
+    use_global_load_lds_k=True,
+)
+
+# D128 fp16 depth-3 ring, 8-wide slices, with i64 K/V addressing.
+_CONFIGS[43] = dict(
+    head_size=128,
+    block_size=32,
+    dtype="fp16",
+    num_query_heads=32,
+    num_kv_heads=8,
+    use_sinks=False,
+    sliding_window=0,
+    has_softcap=False,
+    num_seqs=1,
+    waves_per_eu=2,
+    num_warps=4,
+    block_m_per_warp=32,
+    tile_size=64,
+    use_mfma_32x32x8=True,
+    use_transposed_qk_32x32=True,
+    use_conflict_free_v_store=True,
+    use_k_sliced_ring=True,
+    use_transposed_scalar_state=True,
+    use_transposed_invariant_hoist=True,
+    use_transposed_mask_once=True,
+    use_transposed_mask_limit=True,
+    k_slice_hd=8,
+    kv_cache_policy="all",
+    use_i64_kv_addr=True,
+)
+
+# bf16 h64/kv8 D64 fast paged-KV descriptor (its only admitted geometry).
+_CONFIGS[44] = dict(
+    head_size=64,
+    block_size=32,
+    num_query_heads=64,
+    num_kv_heads=8,
+    dtype="bf16",
+    use_sinks=True,
+    sliding_window=0,
+    has_softcap=False,
+    num_warps=4,
+    block_m_per_warp=32,
+    tile_size=64,
+    use_mfma_32x32x8=True,
+    use_transposed_qk_32x32=True,
+    use_transposed_scalar_state=True,
+    use_transposed_mask_once=True,
+    use_transposed_mask_limit=True,
+    use_fast_paged_kv_desc=True,
+)
+
+# Mask-limit path with the early-V schedule.
+_CONFIGS[45] = dict(
+    head_size=64,
+    block_size=32,
+    num_query_heads=12,
+    num_kv_heads=2,
+    dtype="bf16",
+    use_sinks=True,
+    sliding_window=0,
+    has_softcap=False,
+    num_warps=4,
+    block_m_per_warp=32,
+    tile_size=64,
+    use_mfma_32x32x8=True,
+    use_transposed_qk_32x32=True,
+    use_transposed_scalar_state=True,
+    use_transposed_mask_once=True,
+    use_transposed_mask_limit=True,
+    use_early_v_schedule=True,
+)
+
+# Depth-3 ring with the unsplit conflict-free V store.
+_CONFIGS[46] = dict(
+    head_size=128,
+    block_size=64,
+    num_query_heads=8,
+    num_kv_heads=8,
+    dtype="fp16",
+    use_sinks=False,
+    sliding_window=512,
+    has_softcap=True,
+    num_warps=4,
+    block_m_per_warp=32,
+    tile_size=64,
+    use_mfma_32x32x8=True,
+    use_transposed_qk_32x32=True,
+    use_conflict_free_v_store=True,
+    use_k_sliced_ring=True,
+    use_conflict_free_v_store_split=False,
+)
+
+# Conflict-free V through the CK V-LDS layout, V via LDS.
+_CONFIGS[47] = dict(
+    head_size=64,
+    block_size=32,
+    num_query_heads=12,
+    num_kv_heads=2,
+    dtype="bf16",
+    use_sinks=True,
+    sliding_window=0,
+    has_softcap=False,
+    num_warps=4,
+    block_m_per_warp=32,
+    tile_size=64,
+    use_mfma_32x32x8=True,
+    use_transposed_qk_32x32=True,
+    use_transposed_scalar_state=True,
+    use_transposed_mask_once=True,
+    use_transposed_mask_limit=True,
+    use_conflict_free_v=True,
+)
+
+# Conflict-free V with the plain V-LDS layout.
+_CONFIGS[48] = dict(
+    head_size=64,
+    block_size=32,
+    num_query_heads=12,
+    num_kv_heads=2,
+    dtype="bf16",
+    use_sinks=True,
+    sliding_window=0,
+    has_softcap=False,
+    num_warps=4,
+    block_m_per_warp=32,
+    tile_size=64,
+    use_mfma_32x32x8=True,
+    use_transposed_qk_32x32=True,
+    use_transposed_scalar_state=True,
+    use_transposed_mask_once=True,
+    use_transposed_mask_limit=True,
+    use_conflict_free_v=True,
+    use_conflict_free_v_ck_vlds=False,
+)
+
+# Depth-3 ring with QK/PV sched_group_barrier pinning.
+_CONFIGS[49] = dict(
+    head_size=128,
+    block_size=64,
+    num_query_heads=8,
+    num_kv_heads=8,
+    dtype="fp16",
+    use_sinks=False,
+    sliding_window=512,
+    has_softcap=True,
+    num_warps=4,
+    block_m_per_warp=32,
+    tile_size=64,
+    use_mfma_32x32x8=True,
+    use_transposed_qk_32x32=True,
+    use_conflict_free_v_store=True,
+    use_k_sliced_ring=True,
+    use_qk_pv_sched_group_barrier=True,
+)
+
+# bf16 D128 decode selector spec on the Q-major grid.
+_CONFIGS[50] = dict(
+    head_size=128,
+    block_size=16,
+    num_query_heads=32,
+    num_kv_heads=8,
+    dtype="bf16",
+    use_sinks=False,
+    sliding_window=0,
+    has_softcap=False,
+    num_seqs=256,
+    waves_per_eu=2,
+    use_register_pv=True,
+    tile_size=64,
+    use_i64_kv_addr=True,
+    use_q_major_grid=True,
+)
 
 
 def _kernel(idx: int):
