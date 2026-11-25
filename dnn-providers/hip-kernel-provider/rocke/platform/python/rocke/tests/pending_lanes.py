@@ -1037,7 +1037,6 @@ PENDING: tuple[PendingTest, ...] = (
         "library/tests/test_attention_builds.py",
         "library/tests/test_benchmark_tf32_plumbing.py",
         "library/tests/test_conv_batch_and_miopen_parse.py",
-        "library/tests/test_extended_parity_attention.py",
         "library/tests/test_strided_kv_decode.py",
     ),
     *_waiting(
@@ -1046,7 +1045,6 @@ PENDING: tuple[PendingTest, ...] = (
         "rocKE platform; torch in the CI test environment or a numpy reference",
         "2027-01-31",
         "platform/tests/instances/test_gfx1250_qwen_integration.py",
-        "platform/tests/instances/test_rocke_numeric.py",
         "platform/tests/runtime/test_device_array.py",
         "platform/tests/test_rocke.py",
     ),
@@ -1066,6 +1064,16 @@ PENDING: tuple[PendingTest, ...] = (
         "platform/tests/instances/test_flatmm_numeric.py",
         "platform/tests/instances/test_gfx950_grouped_gemm.py",
         "platform/tests/numeric/test_warp_shuffle_xor_dpp_numeric.py",
+    ),
+    PendingTest(
+        "platform/tests/instances/test_rocke_numeric.py",
+        TORCH_IN_CI,
+        "FusedMoeForward takes torch tensors, so its forward parity case skips "
+        "without torch in the CI test environment",
+        "rocKE platform; torch in the CI test environment or FusedMoeForward on "
+        "DeviceArray",
+        "2027-01-31",
+        node="TestNumericVerification::test_moe_e2e_forward",
     ),
     PendingTest(
         "library/tests/test_conv_dgrad_correctness.py",

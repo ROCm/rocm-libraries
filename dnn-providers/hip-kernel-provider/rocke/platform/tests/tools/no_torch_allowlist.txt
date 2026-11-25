@@ -28,7 +28,6 @@ library/benchmarks/gfx950/attention/prefill/benchmark_prefill2d_traces.py: impor
 library/benchmarks/gfx950/attention/prefill/dense_prefill_table_sweep.py: import torch_api torch_object
 library/benchmarks/gfx950/conv_dgrad/run_one_dgrad.py: import torch_object
 library/builders/common/conv_reference.py: import torch_object
-library/builders/common/parity_fmha_extended.py: import torch_api torch_object
 library/builders/common/torch_flash_reference.py: import torch_object
 library/builders/gfx1151/attention/survey.py: import torch_api torch_object
 library/builders/gfx1250/attention/aiter_ua2_runner.py: import torch_api torch_object
@@ -67,7 +66,6 @@ library/tests/test_attention_unified_lse_numeric.py: importorskip torch_api torc
 library/tests/test_attention_workspace.py: torch_api torch_object
 library/tests/test_benchmark_tf32_plumbing.py: importorskip torch_object
 library/tests/test_conv_batch_and_miopen_parse.py: importorskip torch_object
-library/tests/test_extended_parity_attention.py: import
 library/tests/test_strided_kv_decode.py: importorskip torch_object
 library/tests/test_strided_kv_decode_numeric.py: importorskip torch_api torch_object
 platform/dsl_docs/development/verify_dsl_docs.py: import torch_api torch_object
@@ -78,7 +76,7 @@ platform/dsl_docs/optimization/utilities/tools/stage1_benchmark/benchmark_triton
 platform/pyproject.toml: config
 platform/python/rocke/examples/common/distribution_2d_add_demo.py: import torch_api torch_object
 platform/python/rocke/examples/common/distribution_reduce_demo.py: import torch_api torch_object
-platform/python/rocke/examples/common/parity_extended_kernels.py: import torch_api torch_object
+platform/python/rocke/examples/common/parity_extended_kernels.py: import torch_object
 platform/python/rocke/examples/gfx1250/qwen3_30b_a3b/qwen3_30b_a3b_integration.py: import torch_object
 platform/python/rocke/examples/gfx950/fused_mega_moe/reproduce_levels.py: import torch_api torch_object
 platform/python/rocke/examples/gfx950/gemm_perf_skinny_decode/scripts/03_correctness.py: import torch_object
