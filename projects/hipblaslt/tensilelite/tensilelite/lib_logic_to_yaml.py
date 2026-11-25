@@ -88,6 +88,9 @@ CLIENT_PARAMETER_OVERRIDES = {
     #   init-a / init-b fall back to DataInitTypeAB only when the type is -1,
     "init-a": "DataInitTypeA",
     "init-b": "DataInitTypeB",
+    #   init-scaleA / init-scaleB follow init-a / init-b only when the type is -1,
+    "init-scaleA": "DataInitTypeScaleA",
+    "init-scaleB": "DataInitTypeScaleB",
     #   init-beta is forced to Zero when the problem has no beta,
     "init-beta": "DataInitTypeBeta",
     #   num-elements-to-validate takes max() with the Winner variant only when

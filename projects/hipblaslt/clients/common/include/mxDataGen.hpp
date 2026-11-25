@@ -69,8 +69,8 @@ inline uint32_t mxSeedIndex(bool isMatrixA, int64_t batch, int64_t batchStride)
 // are placed at the requested leading dimension with zero padding. The leading dimension must be
 // at least the stored row count, and non-positive dimensions throw before writing.
 // With K along the stored columns (non-transposed A or transposed B), K must be a multiple of
-// the scale block. A partial block makes getAlignedFloat read past the packed buffer, so
-// integer_exact throws before writing.
+// the scale block for every initMethod but maf1_0. A partial block would make getAlignedFloat
+// read past the generated data and scales, so it throws before writing.
 std::vector<float> generateMXInput(hipDataType            dataType,
                                    hipDataType            scaleType,
                                    void*                  data,

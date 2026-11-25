@@ -77,6 +77,9 @@ class DataInitName(Enum):
   TrigIndAbsSin = 25
   TrigIndAbsCos = 26
   UniformLowPrecision = 27
+  Maf1_0 = 28
+  Maf2_0 = 29
+  Maf2_0UnitScale = 30
 
 class ClientLogLevel(Enum):
   Error = 0
@@ -667,6 +670,10 @@ def dataInitParams(problemType):
 
     if initA == -1: initA = globalParameters['DataInitTypeAB']
     if initB == -1: initB = globalParameters['DataInitTypeAB']
+    # MAF1.0 scales A and B by 0.5 each; an unset scale follows its operand, otherwise Two.
+    maf1_0 = DataInitName.Maf1_0.value
+    if initScaleA == -1: initScaleA = maf1_0 if initA == maf1_0 else DataInitName.Two.value
+    if initScaleB == -1: initScaleB = maf1_0 if initB == maf1_0 else DataInitName.Two.value
 
     return [('init-a',             DataInitName(initA).name),
             ('init-b',             DataInitName(initB).name),

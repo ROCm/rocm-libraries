@@ -20,6 +20,7 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <cstdlib>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
@@ -590,6 +591,368 @@ TEST(DataInitializationMXReuse, NoSwizzleSolutionDoesNotLeakIntoNextPreswizzle)
 
 namespace
 {
+    // Exposes the CPU initialization and the pristine CPU copy of a tensor.
+    class CPUInputProbe : public TensileLite::Client::DataInitialization
+    {
+    public:
+        using DataInitialization::DataInitialization;
+        using DataInitialization::initializeCPUInputs;
+
+        std::vector<uint8_t> cpuBytes(int tensor, rocisa::DataType type, size_t bytes) const
+        {
+            auto const* data = static_cast<uint8_t const*>(
+                m_vdata[tensor].pristine.at(type).cpuInput.valid.get());
+            return {data, data + bytes};
+        }
+
+        // Replaces the pristine CPU copy of a tensor with one that has `slack` bytes of
+        // `sentinel` past the size the client allocates, so a write past the end lands where the
+        // test can see it. Returns the allocated size.
+        size_t guardCPUTail(int tensor, rocisa::DataType type, size_t slack, uint8_t sentinel)
+        {
+            auto&        pristine = m_vdata[tensor].pristine.at(type);
+            size_t const bytes    = TensileLite::multiplyElementSize(
+                pristine.maxElements, DataTypeInfo::Get(type).elementSize);
+            auto* guarded = static_cast<uint8_t*>(std::malloc(bytes + slack));
+            std::memset(guarded, sentinel, bytes + slack);
+            pristine.cpuInput.valid = std::shared_ptr<void>(guarded, [](void* p) { std::free(p); });
+            return bytes;
+        }
+    };
+
+    template <typename T>
+    std::vector<uint8_t> asBytes(std::vector<T> const& values)
+    {
+        auto const* data = reinterpret_cast<uint8_t const*>(values.data());
+        return {data, data + values.size() * sizeof(T)};
+    }
+}
+
+// mx-data-generator=1 fills non-MX FP8 A/B through generateMXInput, which writes codes meant for
+// a block scale and drops the scale. The MAF modes prescribe non-block-scaled FP8 data of their
+// own, so those sides must come out exactly as initArray writes them.
+TEST(DataInitializationMafNonMX, GeneratorFlagKeepsTheMafData)
+{
+    using namespace TensileLite::Client;
+    auto args = makeMinimalClientArgs(/*mxScaleFormat=*/0); // non-MX FP8 A and B
+    setOption(args, "mx-data-generator", 1);
+    setOption(args, "init-a", InitMode::Maf2_0);
+    setOption(args, "init-b", InitMode::Maf1_0);
+    ClientProblemFactory factory(args);
+    CPUInputProbe        dataInit(args, factory);
+    auto const&          gemm = dynamic_cast<ContractionProblemGemm const&>(*factory.problems()[0]);
+    dataInit.initializeCPUInputs(gemm);
+
+    std::vector<TensileLite::Float8> a(gemm.a().totalAllocatedElements());
+    std::vector<TensileLite::Float8> b(gemm.b().totalAllocatedElements());
+    DataInitialization::initArrayMaf2_0(a.data(), a.size(), ContractionProblemGemm::TENSOR::A);
+    DataInitialization::initArrayMaf1_0(
+        b.data(), gemm.b().sizes(), gemm.b().strides(), ContractionProblemGemm::TENSOR::B);
+    auto const f8 = rocisa::DataType::Float8;
+    EXPECT_EQ(dataInit.cpuBytes(ContractionProblemGemm::TENSOR::A, f8, a.size()), asBytes(a));
+    EXPECT_EQ(dataInit.cpuBytes(ContractionProblemGemm::TENSOR::B, f8, b.size()), asBytes(b));
+}
+
+// Maf2_0 E8M0 scales are 2^(k - 11), k ~ Binomial(21, 0.5): half of them are at most 2^-1
+// (byte 0x7E). With two free elements per scaling tile the client keeps one draw per tile; the
+// tile maximum would leave only a quarter at or below 0x7E. Checks the scales the client writes.
+TEST(DataInitializationMafScaleTiles, Maf2_0KeepsTheBinomialScalesWithFreeBlocks)
+{
+    using namespace TensileLite::Client;
+    auto args = makeMXLaunchArgs({{128, 128, 1, 512}});
+    setOption(args, "mx-a-free-block", 2);
+    for(auto const* name : {"init-a", "init-b", "init-mx-a", "init-mx-b"})
+        setOption(args, name, InitMode::Maf2_0);
+    ClientProblemFactory factory(args);
+    CPUInputProbe        dataInit(args, factory);
+    auto const&          gemm = dynamic_cast<ContractionProblemGemm const&>(*factory.problems()[0]);
+    dataInit.initializeCPUInputs(gemm);
+
+    auto const scales = dataInit.cpuBytes(ContractionProblemGemm::TENSOR::MXSA,
+                                          gemm.mxsa().dataType(),
+                                          gemm.mxsa().totalAllocatedBytes());
+    size_t     drawn = 0, atMostHalf = 0;
+    for(uint8_t s : scales)
+        if(s != 0) // K-block padding stays 0; binomial scales are 0x74..0x89
+        {
+            drawn++;
+            atMostHalf += s <= 0x7E;
+        }
+    ASSERT_GE(drawn, 512u);
+    EXPECT_NEAR(double(atMostHalf) / drawn, 0.5, 0.08);
+}
+
+// MAF1.0 scales A and B by 0.5 each (hipBLASLt's maf1_0 does the same). With scalar scaling on, a
+// Maf1_0 operand's scale defaults to 0.5 instead of the client default of 2, while an explicit
+// init-scaleA/B and every other operand init keep 2.
+TEST(DataInitializationMafScales, Maf1_0ScalesDefaultToHalf)
+{
+    using namespace TensileLite::Client;
+    auto scales = [](InitMode a, InitMode b, bool explicitScaleB) {
+        auto args = makeMinimalClientArgs(/*mxScaleFormat=*/0);
+        setOption(args, "use-scaleAB", std::string("Scalar"));
+        setOption(args, "init-a", a);
+        setOption(args, "init-b", b);
+        if(explicitScaleB)
+            setOption(args, "init-scaleB", InitMode::Two);
+        ClientProblemFactory factory(args);
+        CPUInputProbe        dataInit(args, factory);
+        auto const& gemm = dynamic_cast<ContractionProblemGemm const&>(*factory.problems()[0]);
+        dataInit.initializeCPUInputs(gemm);
+
+        std::array<float, 2> values{};
+        for(int s = 0; s < 2; s++)
+        {
+            int const tensor = s == 0 ? ContractionProblemGemm::TENSOR::SCALEA
+                                      : ContractionProblemGemm::TENSOR::SCALEB;
+            EXPECT_EQ(gemm.tensors()[tensor].dataType(), rocisa::DataType::Float);
+            auto const bytes = dataInit.cpuBytes(tensor, rocisa::DataType::Float, sizeof(float));
+            std::memcpy(&values[s], bytes.data(), sizeof(float));
+        }
+        return values;
+    };
+    EXPECT_EQ(scales(InitMode::Maf1_0, InitMode::Maf1_0, false),
+              (std::array<float, 2>{0.5f, 0.5f}));
+    EXPECT_EQ(scales(InitMode::Maf1_0, InitMode::Maf1_0, true), (std::array<float, 2>{0.5f, 2.0f}));
+    EXPECT_EQ(scales(InitMode::Random, InitMode::Maf2_0, false),
+              (std::array<float, 2>{2.0f, 2.0f}));
+}
+
+// hipBLASLt fills each pointer-array batch as its own matrix, seeded A/B/C + 3 * batch. In
+// pointer-array mode the client must draw the same data: batch b of each tensor equals a Maf2_0
+// fill of one batch with seed index tensor + 3 * b. The first A value of batch 1 is the one
+// hipblaslt-bench draws there, 0.914811 (thread 0 starts at element 0 for any thread count).
+TEST(DataInitializationMafPointerArray, Maf2_0SeedsEachBatchLikeHipblaslt)
+{
+    using namespace TensileLite::Client;
+    auto args = makeMinimalClientArgs(/*mxScaleFormat=*/0);
+    for(auto const* name : {"type",
+                            "a-type",
+                            "b-type",
+                            "c-type",
+                            "d-type",
+                            "alpha-type",
+                            "beta-type",
+                            "compute-input-type-A",
+                            "compute-input-type-B",
+                            "f32-xdl-math-op",
+                            "activation-compute-type"})
+        setOption(args, name, rocisa::DataType::Double);
+    setOption(args, "problem-size", std::vector<std::vector<size_t>>{{4, 3, 2, 5}});
+    setOption(args, "batch-mode", 1);
+    for(auto const* name : {"init-a", "init-b", "init-c"})
+        setOption(args, name, InitMode::Maf2_0);
+    ClientProblemFactory factory(args);
+    CPUInputProbe        dataInit(args, factory);
+    auto const&          gemm = dynamic_cast<ContractionProblemGemm const&>(*factory.problems()[0]);
+    ASSERT_EQ(gemm.batchMode(), ContractionProblemGemm::BATCHMODE::POINTER_ARRAY);
+    dataInit.initializeCPUInputs(gemm);
+
+    auto const& batch = gemm.batchIndices().at(0);
+    for(int tensor : {ContractionProblemGemm::TENSOR::A,
+                      ContractionProblemGemm::TENSOR::B,
+                      ContractionProblemGemm::TENSOR::C})
+    {
+        auto const&  desc = gemm.tensors()[tensor];
+        size_t const dim  = tensor == ContractionProblemGemm::TENSOR::A   ? batch.a
+                            : tensor == ContractionProblemGemm::TENSOR::B ? batch.b
+                                                                          : batch.c;
+        ASSERT_EQ(desc.sizes()[dim], 2u);
+        size_t const batchElements = desc.totalAllocatedElements() - desc.strides()[dim];
+        auto const   bytes         = dataInit.cpuBytes(
+            tensor, rocisa::DataType::Double, desc.totalAllocatedElements() * sizeof(double));
+        std::vector<double> data(desc.totalAllocatedElements());
+        std::memcpy(data.data(), bytes.data(), bytes.size());
+        for(size_t b = 0; b < 2; b++)
+        {
+            std::vector<double> expected(batchElements);
+            DataInitialization::initArrayMaf2_0(expected.data(), batchElements, tensor + 3 * b);
+            std::vector<double> const got(data.begin() + b * desc.strides()[dim],
+                                          data.begin() + b * desc.strides()[dim] + batchElements);
+            EXPECT_EQ(got, expected) << "tensor " << tensor << " batch " << b;
+            if(tensor == ContractionProblemGemm::TENSOR::A && b == 1)
+                EXPECT_NEAR(got[0], 0.914811, 5e-7);
+        }
+    }
+}
+
+// The per-batch byte offset must be exact past 2^24 elements. A batch stride of 2^24 + 3 FP8
+// elements rounds to 2^24 + 4 in float, which would leave batch 1's first byte unwritten and
+// write one byte past the allocation; the CPU copy carries a sentinel tail to see that.
+TEST(DataInitializationMafPointerArray, Maf2_0BatchOffsetIsExactPast2To24Elements)
+{
+    using namespace TensileLite::Client;
+    size_t const batchStride = (size_t(1) << 24) + 3;
+    auto         args        = makeMinimalClientArgs(/*mxScaleFormat=*/0); // non-MX FP8 A and B
+    setOption(args, "problem-size", std::vector<std::vector<size_t>>{{4, 3, 2, 5}});
+    setOption(args, "batch-mode", 1);
+    setOption(args, "a-strides", std::vector<std::vector<size_t>>{{1, 4, batchStride}});
+    setOption(args, "init-a", InitMode::Maf2_0);
+    ClientProblemFactory factory(args);
+    CPUInputProbe        dataInit(args, factory);
+    auto const&          gemm = dynamic_cast<ContractionProblemGemm const&>(*factory.problems()[0]);
+    ASSERT_EQ(gemm.batchMode(), ContractionProblemGemm::BATCHMODE::POINTER_ARRAY);
+    auto const&  a   = gemm.a();
+    size_t const dim = gemm.batchIndices().at(0).a;
+    ASSERT_EQ(a.dataType(), rocisa::DataType::Float8);
+    ASSERT_EQ(a.sizes()[dim], 2u);
+    ASSERT_EQ(a.strides()[dim], batchStride);
+    size_t const  slack    = 64;
+    uint8_t const sentinel = 0xA5;
+    size_t const  allocated
+        = dataInit.guardCPUTail(ContractionProblemGemm::TENSOR::A, a.dataType(), slack, sentinel);
+    ASSERT_EQ(allocated, a.totalAllocatedElements());
+    dataInit.initializeCPUInputs(gemm);
+
+    size_t const batchElements = allocated - batchStride;
+    auto const   bytes
+        = dataInit.cpuBytes(ContractionProblemGemm::TENSOR::A, a.dataType(), allocated + slack);
+    for(size_t i = allocated; i < bytes.size(); i++)
+        ASSERT_EQ(bytes[i], sentinel)
+            << "written " << i - allocated << " bytes past the allocation";
+    for(size_t b = 0; b < 2; b++)
+    {
+        std::vector<TensileLite::Float8> expected(batchElements);
+        DataInitialization::initArrayMaf2_0(
+            expected.data(), batchElements, ContractionProblemGemm::TENSOR::A + 3 * b);
+        std::vector<uint8_t> const got(bytes.begin() + b * batchStride,
+                                       bytes.begin() + b * batchStride + batchElements);
+        EXPECT_EQ(got, asBytes(expected)) << "batch " << b;
+    }
+}
+
+// Maf2_0UnitScale selected through the client options, with two batches of A and a broadcast B
+// (batch stride 0). Each batch of each operand must hold generateMXInput's maf2_0_unit_scale draw
+// for its own seed index, as hipBLASLt seeds it (A: 3 * batch; B: 1, batch 0 for every batch),
+// and every block scale must be 1.0 (E8M0 0x7F; padding stays 0). A wrong mode mapping or batch
+// index changes the bytes.
+TEST(DataInitializationMafUnitScale, BatchedAndBroadcastOperandsGetTheirOwnDraws)
+{
+    using namespace TensileLite::Client;
+    auto args = makeMXLaunchArgs({{64, 64, 2, 128}});
+    // TN: both operands keep K along the stored rows (transposed A, non-transposed B).
+    setOption(args, "problem-identifier", std::string("Contraction_l_Alik_Bljk_Cijk_Dijk"));
+    setOption(args, "b-strides", std::vector<std::vector<size_t>>{{1, 128, 0}});
+    for(auto const* name : {"init-a", "init-b", "init-mx-a", "init-mx-b"})
+        setOption(args, name, InitMode::Maf2_0UnitScale);
+    ClientProblemFactory factory(args);
+    CPUInputProbe        dataInit(args, factory);
+    auto const&          gemm = dynamic_cast<ContractionProblemGemm const&>(*factory.problems()[0]);
+    ASSERT_TRUE(gemm.transA());
+    ASSERT_FALSE(gemm.transB());
+    ASSERT_EQ(gemm.b().strides()[2], 0u);
+    dataInit.initializeCPUInputs(gemm);
+
+    struct Side
+    {
+        int  data, scale;
+        bool isMatrixA, transposed;
+    };
+    std::vector<std::vector<uint8_t>> batchesOfA;
+    for(Side s : {Side{ContractionProblemGemm::TENSOR::A,
+                       ContractionProblemGemm::TENSOR::MXSA,
+                       true,
+                       gemm.transA()},
+                  Side{ContractionProblemGemm::TENSOR::B,
+                       ContractionProblemGemm::TENSOR::MXSB,
+                       false,
+                       gemm.transB()}})
+    {
+        auto const&  desc   = gemm.tensors()[s.data];
+        size_t const rows   = desc.sizes()[0];
+        size_t const cols   = desc.sizes()[1];
+        size_t const ld     = desc.strides()[1];
+        size_t const extent = ld * (cols - 1) + rows;
+        size_t const stride = desc.strides()[2];
+        auto const   data = dataInit.cpuBytes(s.data, desc.dataType(), desc.totalAllocatedBytes());
+        for(size_t b = 0; b < desc.sizes()[2]; b++)
+        {
+            std::vector<uint8_t> expected(extent), scale(extent);
+            generateMXInput(HIP_R_8F_E4M3,
+                            HIP_R_8F_UE8M0,
+                            expected.data(),
+                            scale.data(),
+                            rows,
+                            cols,
+                            ld,
+                            s.transposed,
+                            s.isMatrixA ? 32 : 1,
+                            s.isMatrixA ? 1 : 32,
+                            s.isMatrixA,
+                            MXScaleLayout::None,
+                            "maf2_0_unit_scale",
+                            -1.0f,
+                            1.0f,
+                            "maf2_0_unit_scale",
+                            (s.isMatrixA ? 0 : 1) + 3 * (stride == 0 ? 0 : b));
+            std::vector<uint8_t> const got(data.begin() + b * stride,
+                                           data.begin() + b * stride + extent);
+            EXPECT_EQ(got, expected) << (s.isMatrixA ? "A" : "B") << " batch " << b;
+            if(s.isMatrixA)
+                batchesOfA.push_back(got);
+        }
+
+        auto const& scaleDesc = gemm.tensors()[s.scale];
+        auto const  scales
+            = dataInit.cpuBytes(s.scale, scaleDesc.dataType(), scaleDesc.totalAllocatedBytes());
+        size_t unit = 0;
+        for(uint8_t v : scales)
+        {
+            ASSERT_TRUE(v == 0x7F || v == 0x00) << (s.isMatrixA ? "A" : "B") << " scale " << int(v);
+            unit += v == 0x7F;
+        }
+        size_t const perBatch = rows * cols / 32;
+        EXPECT_GT(unit, 0u);
+        EXPECT_EQ(unit % perBatch, 0u) << (s.isMatrixA ? "A" : "B");
+    }
+    ASSERT_EQ(batchesOfA.size(), 2u);
+    EXPECT_NE(batchesOfA[0], batchesOfA[1]) << "the two batches of A must be drawn apart";
+}
+
+// B is K = 32 (one MX block) by N = 2 with a leading dimension of 64, so the client allocates
+// 64 + 32 = 96 bytes. The generated data must stay inside them; a generator buffer of
+// ldb * N = 128 bytes would spill 32 bytes past the end.
+class DataInitializationMXPaddedLd : public ::testing::TestWithParam<TensileLite::Client::InitMode>
+{
+};
+
+TEST_P(DataInitializationMXPaddedLd, StaysInsideTheAllocation)
+{
+    using namespace TensileLite::Client;
+    auto args = makeMXLaunchArgs({{32, 2, 1, 32}});
+    setOption(args, "b-strides", std::vector<std::vector<size_t>>{{1, 64, 128}});
+    for(auto const* name : {"init-a", "init-b", "init-mx-a", "init-mx-b"})
+        setOption(args, name, GetParam());
+    ClientProblemFactory factory(args);
+    CPUInputProbe        dataInit(args, factory);
+    auto const&          gemm = dynamic_cast<ContractionProblemGemm const&>(*factory.problems()[0]);
+    ASSERT_EQ(gemm.b().totalAllocatedBytes(), 96u);
+
+    constexpr uint8_t sentinel = 0xA5;
+    constexpr size_t  slack    = 64;
+    size_t const      bytes    = dataInit.guardCPUTail(
+        ContractionProblemGemm::TENSOR::B, gemm.b().dataType(), slack, sentinel);
+    ASSERT_EQ(bytes, 96u);
+    dataInit.initializeCPUInputs(gemm);
+
+    auto const guarded
+        = dataInit.cpuBytes(ContractionProblemGemm::TENSOR::B, gemm.b().dataType(), bytes + slack);
+    size_t written = 0;
+    for(size_t i = bytes; i < guarded.size(); i++)
+        written += guarded[i] != sentinel;
+    EXPECT_EQ(written, 0u) << "bytes written past the " << bytes << "-byte allocation";
+}
+
+INSTANTIATE_TEST_SUITE_P(Modes,
+                         DataInitializationMXPaddedLd,
+                         ::testing::Values(TensileLite::Client::InitMode::RandomNarrow,
+                                           TensileLite::Client::InitMode::Maf1_0,
+                                           TensileLite::Client::InitMode::Maf2_0,
+                                           TensileLite::Client::InitMode::Maf2_0UnitScale),
+                         [](auto const& info) { return TensileLite::Client::ToString(info.param); });
+
+namespace
+{
     // Exposes the host-side source of each tensor so the staged upload can be checked.
     class SwizzleProbe : public TensileLite::Client::DataInitialization
     {
@@ -1139,6 +1502,43 @@ TEST(VaryMXScaleFreeTiles, KeepsZeroNaNAndClampsToFiniteRange)
     EXPECT_EQ(s[3], 0xFE); // 0xFE + 1 clamps to 0xFE
 }
 
+TEST(VaryMXScaleFreeTiles, SkipsMafScales)
+{
+    using TensileLite::Client::InitMode;
+    // A random scale init varies the E8 tiles when the free-dim block is above one.
+    EXPECT_TRUE(dt::shouldVaryMXScaleFreeTiles(InitMode::Random, InitMode::Random, 2, true));
+    EXPECT_FALSE(dt::shouldVaryMXScaleFreeTiles(InitMode::Random, InitMode::Random, 1, true));
+    EXPECT_FALSE(dt::shouldVaryMXScaleFreeTiles(InitMode::Random, InitMode::Random, 2, false));
+    // MAF data keeps its prescribed scales (e.g. MAF1.0's 0x7E would become 0x7C).
+    for(auto mode : {InitMode::Maf1_0, InitMode::Maf2_0, InitMode::Maf2_0UnitScale})
+        EXPECT_FALSE(dt::shouldVaryMXScaleFreeTiles(mode, InitMode::Random, 2, true))
+            << TensileLite::Client::ToString(mode);
+}
+
+// The free-dim downsample keeps each tile's largest E8 scale, except for the MAF modes, whose
+// scales are prescribed and would be skewed by the maximum; those keep the first of each tile.
+TEST(DownsampleMXScaleFreeDim, MafKeepsTheFirstScaleOfEachTile)
+{
+    using TensileLite::Client::InitMode;
+    EXPECT_TRUE(dt::takeMXScaleTileMax(InitMode::Random, true));
+    EXPECT_FALSE(dt::takeMXScaleTileMax(InitMode::Random, false));
+    for(auto mode : {InitMode::Maf1_0, InitMode::Maf2_0, InitMode::Maf2_0UnitScale})
+    {
+        EXPECT_FALSE(dt::takeMXScaleTileMax(mode, true)) << TensileLite::Client::ToString(mode);
+        std::vector<uint8_t> const src = {0x70, 0x80, 0x85, 0x75}; // 2 tiles x 2 rows, 1 K-block
+        std::vector<uint8_t>       dst(2, 0);
+        dt::downsampleMXScaleFreeDim(dst.data(),
+                                     src.data(),
+                                     /*compactFreeDim=*/4,
+                                     /*kBlocks=*/1,
+                                     /*mxBlockFree=*/2,
+                                     /*elemBytes=*/1,
+                                     /*kFast=*/true,
+                                     dt::takeMXScaleTileMax(mode, true));
+        EXPECT_EQ(dst, (std::vector<uint8_t>{0x70, 0x85})) << TensileLite::Client::ToString(mode);
+    }
+}
+
 
 // ---------------------------------------------------------------------------
 //  Swizzled operand (SwizzleTensorA/B): K block per architecture, K padding,
@@ -1437,6 +1837,168 @@ TEST(SwizzledStaging, RejectsAnUnpackedSubByteLeadingDimension)
 }
 
 #endif // HIPBLASLT_ENABLE_MXDATAGENERATOR
+
+// Maf1_0 fills element (i, j, b) of a padded 3 x 4 x 2 tensor (ld 5, batch stride 23) with
+// sin (A) or cos (other tensors) of the logical index i + 3 * j + 12 * b, ScaleA/ScaleB with
+// 0.5, and leaves the padding alone.
+TEST(Maf1_0Init, LogicalIndexOverPaddedLayout)
+{
+    using TensileLite::Client::DataInitialization;
+    std::vector<size_t> const sizes{3, 4, 2};
+    std::vector<size_t> const strides{1, 5, 23};
+    size_t const              allocated = 1 + 2 * 1 + 3 * 5 + 1 * 23;
+    for(size_t tensor : {size_t(ContractionProblemGemm::TENSOR::A),
+                         size_t(ContractionProblemGemm::TENSOR::B),
+                         size_t(ContractionProblemGemm::TENSOR::C),
+                         size_t(ContractionProblemGemm::TENSOR::SCALEA),
+                         size_t(ContractionProblemGemm::TENSOR::SCALEB)})
+    {
+        SCOPED_TRACE("tensor " + std::to_string(tensor));
+        std::vector<double> array(allocated, 42.0);
+        DataInitialization::initArrayMaf1_0(array.data(), sizes, strides, tensor);
+        std::vector<bool> written(allocated, false);
+        for(size_t b = 0; b < 2; b++)
+            for(size_t j = 0; j < 4; j++)
+                for(size_t i = 0; i < 3; i++)
+                {
+                    double const x = double(i + 3 * j + 12 * b);
+                    double const expected
+                        = tensor == ContractionProblemGemm::TENSOR::A ? std::sin(x)
+                          : tensor == ContractionProblemGemm::TENSOR::SCALEA
+                                  || tensor == ContractionProblemGemm::TENSOR::SCALEB
+                              ? 0.5
+                              : std::cos(x);
+                    size_t const offset = i + 5 * j + 23 * b;
+                    EXPECT_EQ(array[offset], expected) << i << "," << j << "," << b;
+                    written[offset] = true;
+                }
+        for(size_t k = 0; k < allocated; k++)
+            if(!written[k])
+                EXPECT_EQ(array[k], 42.0) << "padding " << k;
+    }
+}
+
+// A zero-stride batch dimension shares one matrix across batches. Maf1_0 must write it once, with
+// batch 0's values, rather than racing batches with different values into the same storage.
+TEST(Maf1_0Init, BroadcastDimensionHoldsFirstBatch)
+{
+    using TensileLite::Client::DataInitialization;
+    std::vector<size_t> const sizes{3, 4, 2};
+    std::vector<size_t> const strides{1, 3, 0};
+    for(int rep = 0; rep < 20; rep++)
+    {
+        std::vector<double> array(12, 42.0);
+        DataInitialization::initArrayMaf1_0(
+            array.data(), sizes, strides, ContractionProblemGemm::TENSOR::A);
+        for(size_t k = 0; k < array.size(); k++)
+            ASSERT_EQ(array[k], std::sin(double(k))) << "rep " << rep << ", element " << k;
+    }
+}
+
+// Overlapping nonzero strides: with sizes {3, 4, 2} and strides {1, 3, 6} batch 1 starts inside
+// batch 0, so indices 6 and 12 (and others) share an element. The fill must be deterministic, with
+// the later logical index winning, not a race between OpenMP workers.
+TEST(Maf1_0Init, OverlappingStridesKeepTheLastIndex)
+{
+    using TensileLite::Client::DataInitialization;
+    std::vector<size_t> const sizes{3, 4, 2};
+    std::vector<size_t> const strides{1, 3, 6};
+    std::vector<double>       expected(18, 42.0);
+    for(size_t idx = 0; idx < 24; idx++)
+        expected[idx % 3 + (idx / 3) % 4 * 3 + idx / 12 * 6] = std::sin(double(idx));
+    for(int rep = 0; rep < 20; rep++)
+    {
+        std::vector<double> array(18, 42.0);
+        DataInitialization::initArrayMaf1_0(
+            array.data(), sizes, strides, ContractionProblemGemm::TENSOR::A);
+        ASSERT_EQ(array, expected) << "rep " << rep;
+    }
+}
+
+// Each value is rounded once from double. sin(11446) = -0.923828140... lies just past the BF16
+// midpoint -0.923828125, which is where rounding to float first lands (and would then tie to
+// even, -0.921875).
+TEST(Maf1_0Init, RoundsOnceFromDouble)
+{
+    using TensileLite::Client::DataInitialization;
+    TensileLite::BFloat16 bf;
+    DataInitialization::initArrayMaf1_0(&bf, {1}, {1}, ContractionProblemGemm::TENSOR::A);
+    EXPECT_EQ(bf.data, 0x0000);
+    std::vector<TensileLite::BFloat16> row(11447);
+    DataInitialization::initArrayMaf1_0(
+        row.data(), {row.size()}, {1}, ContractionProblemGemm::TENSOR::A);
+    EXPECT_EQ(row[11446].data, 0xbf6d);
+    EXPECT_EQ(float(row[1]), 0.83984375f); // sin(1) = 0.84147 -> 0x3f57
+
+    // OCP E4M3: sin(1) -> 0.8125, sin(2) -> 0.9375; cos(0) = 1.
+    std::vector<TensileLite::Float8> f8(3);
+    DataInitialization::initArrayMaf1_0(f8.data(), {3}, {1}, ContractionProblemGemm::TENSOR::A);
+    EXPECT_EQ(float(f8[1]), 0.8125f);
+    EXPECT_EQ(float(f8[2]), 0.9375f);
+    DataInitialization::initArrayMaf1_0(f8.data(), {3}, {1}, ContractionProblemGemm::TENSOR::B);
+    EXPECT_EQ(float(f8[0]), 1.0f);
+
+    std::vector<float> f32(2);
+    DataInitialization::initArrayMaf1_0(f32.data(), {2}, {1}, ContractionProblemGemm::TENSOR::C);
+    EXPECT_EQ(f32[1], static_cast<float>(std::cos(1.0)));
+}
+
+// Maf2_0 rounds each double draw once to BF16. The Double fill of the same tensor draws the same
+// values, so every BF16 element must equal its double rounded to nearest even, computed here
+// without going through float. About one draw in 2^17 lands where rounding to float first
+// changes the result; 4M draws hit a few dozen, and must hit one or the check proves nothing.
+TEST(Maf2_0Init, RoundsOnceToBF16)
+{
+    using TensileLite::Client::DataInitialization;
+    size_t const                       n = size_t(1) << 22;
+    std::vector<double>                d(n);
+    std::vector<TensileLite::BFloat16> bf(n);
+    DataInitialization::initArrayMaf2_0(d.data(), n, ContractionProblemGemm::TENSOR::A);
+    DataInitialization::initArrayMaf2_0(bf.data(), n, ContractionProblemGemm::TENSOR::A);
+    // Nearest even with 8 significant bits; dividing by a power of two is exact.
+    auto bf16 = [](double v) {
+        if(v == 0)
+            return v;
+        double const ulp = std::ldexp(1.0, std::ilogb(v) - 7);
+        return std::nearbyint(v / ulp) * ulp;
+    };
+    size_t wrong = 0, viaFloatDiffers = 0;
+    for(size_t k = 0; k < n; k++)
+    {
+        double const once = bf16(d[k]);
+        if(static_cast<double>(float(bf[k])) != once)
+            wrong++;
+        if(bf16(static_cast<float>(d[k])) != once)
+            viaFloatDiffers++;
+    }
+    EXPECT_EQ(wrong, 0u);
+    EXPECT_GT(viaFloatDiffers, 0u);
+}
+
+TEST(Maf1_0Init, UnsupportedTypesThrow)
+{
+    using TensileLite::Client::DataInitialization;
+    int32_t i32 = 0;
+    EXPECT_THROW(DataInitialization::initArrayMaf1_0(&i32, {1}, {1}, 0), std::runtime_error);
+    std::complex<float> c32;
+    EXPECT_THROW(DataInitialization::initArrayMaf1_0(&c32, {1}, {1}, 0), std::runtime_error);
+    using TensileLite::Client::InitMode;
+    EXPECT_THROW(DataInitialization::getValue<float>(InitMode::Maf1_0), std::runtime_error);
+}
+
+TEST(Maf1_0Init, NameRoundTrips)
+{
+    using TensileLite::Client::InitMode;
+    EXPECT_EQ(static_cast<int>(InitMode::Maf1_0), 28);
+    EXPECT_EQ(TensileLite::Client::ToString(InitMode::Maf1_0), "Maf1_0");
+    InitMode           mode = InitMode::Zero;
+    std::istringstream in("Maf1_0");
+    in >> mode;
+    EXPECT_EQ(mode, InitMode::Maf1_0);
+    std::istringstream num("28");
+    num >> mode;
+    EXPECT_EQ(mode, InitMode::Maf1_0);
+}
 
 // =============================================================================
 //   Section 5 — TensileLite::hip::CopyTensorVoid

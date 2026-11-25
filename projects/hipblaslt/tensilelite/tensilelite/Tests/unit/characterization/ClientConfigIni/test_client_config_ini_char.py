@@ -384,6 +384,22 @@ class TestDataInitParams:
         assert result["init-mx-a"] == "Zero"
         assert result["init-mx-b"] == "Zero"
 
+    def test_scale_ab_follow_maf1_0_operands(self, monkeypatch):
+        """DataInitTypeScaleA/B=-1: Maf1_0 (scale 0.5) for a Maf1_0 operand, otherwise Two."""
+        self._set_keys(monkeypatch, DataInitTypeA=28, DataInitTypeB=3,
+                       DataInitTypeScaleA=-1, DataInitTypeScaleB=-1)
+        result = dict(CW.dataInitParams(self._make_pt()))
+        assert result["init-scaleA"] == "Maf1_0"
+        assert result["init-scaleB"] == "Two"
+
+    def test_scale_ab_explicit_overrides_maf1_0(self, monkeypatch):
+        """An explicit DataInitTypeScaleA/B is kept even for a Maf1_0 operand."""
+        self._set_keys(monkeypatch, DataInitTypeA=-1, DataInitTypeB=-1, DataInitTypeAB=28,
+                       DataInitTypeScaleA=2, DataInitTypeScaleB=-1)
+        result = dict(CW.dataInitParams(self._make_pt()))
+        assert result["init-scaleA"] == "Two"
+        assert result["init-scaleB"] == "Maf1_0"
+
 
 # ===========================================================================
 # 4. writeClientConfigIni -- plain GEMM (lines 572-731)
@@ -1009,7 +1025,7 @@ class TestDataInitNameEnum:
     def test_all_enum_values_have_names(self):
         """All defined enum values resolve to a string name."""
         for val in [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15,
-                    16, 17, 18, 19, 20, 21, 23, 24, 25, 26, 27]:
+                    16, 17, 18, 19, 20, 21, 23, 24, 25, 26, 27, 28, 29, 30]:
             name = CW.DataInitName(val).name
             assert isinstance(name, str) and len(name) > 0
 
@@ -1018,6 +1034,9 @@ class TestDataInitNameEnum:
         assert CW.DataInitName(0).name == "Zero"
         assert CW.DataInitName(3).name == "Random"
         assert CW.DataInitName(27).name == "UniformLowPrecision"
+        assert CW.DataInitName(28).name == "Maf1_0"
+        assert CW.DataInitName(29).name == "Maf2_0"
+        assert CW.DataInitName(30).name == "Maf2_0UnitScale"
 
 
 # ===========================================================================
