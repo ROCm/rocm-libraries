@@ -36,37 +36,107 @@
 
 /* ============================================================================================ */
 // Random number generator
-using rocblas_rng_t = std::mt19937;
 
-extern rocblas_rng_t   g_rocblas_seed;
-extern std::thread::id g_main_thread_id;
+// Random number engine for the client test data (SplitMix64). Its state is one 64-bit word, so it
+// is cheap to seed; the parallel fills reseed it for every block of elements they write.
+// Satisfies UniformRandomBitGenerator, so it works with the std:: distributions.
+class rocblas_rng_t
+{
+public:
+    using result_type = uint64_t;
 
+    explicit rocblas_rng_t(uint64_t seed = 0)
+        : m_state(seed)
+    {
+    }
+
+    static constexpr result_type min()
+    {
+        return 0;
+    }
+
+    static constexpr result_type max()
+    {
+        return ~result_type(0);
+    }
+
+    result_type operator()()
+    {
+        uint64_t z = (m_state += 0x9e3779b97f4a7c15ull);
+        z          = (z ^ (z >> 30)) * 0xbf58476d1ce4e5b9ull;
+        z          = (z ^ (z >> 27)) * 0x94d049bb133111ebull;
+        return z ^ (z >> 31);
+    }
+
+private:
+    uint64_t m_state;
+};
+
+// The fixed seed every random sequence starts from
+extern const rocblas_rng_t g_rocblas_seed;
+
+// Engine used by the random generators below. It is thread_local so that threads never share
+// engine state. Every thread starts from g_rocblas_seed; the parallel fills reseed it per block.
 extern thread_local rocblas_rng_t t_rocblas_rng;
-extern thread_local int           t_rocblas_rand_idx;
 
-// optimized helper
+// Reset the calling thread's random sequence (mainly to ensure repeatability of failures in a given
+// suite)
+inline void rocblas_seedrand()
+{
+    t_rocblas_rng = g_rocblas_seed;
+}
+
+// Seeding for one parallel fill, done through each thread's own engine (t_rocblas_rng). The fill
+// draws one seed from the calling thread's random sequence when it starts, and every thread
+// reseeds its t_rocblas_rng from that seed and the position of each block it writes. The values
+// therefore do not depend on which thread writes a block, so a fill produces the same data for any
+// number of OpenMP threads and any schedule. The calling thread also writes blocks, which reseeds
+// its engine, so its random sequence is restored when the fill ends: the next fill continues from
+// the same point whatever the thread count.
+class rocblas_parallel_fill_seeder
+{
+public:
+    rocblas_parallel_fill_seeder()
+        : m_seed(t_rocblas_rng())
+        , m_saved(t_rocblas_rng)
+    {
+    }
+
+    ~rocblas_parallel_fill_seeder()
+    {
+        t_rocblas_rng = m_saved;
+    }
+
+    rocblas_parallel_fill_seeder(const rocblas_parallel_fill_seeder&) = delete;
+    rocblas_parallel_fill_seeder& operator=(const rocblas_parallel_fill_seeder&) = delete;
+
+    // Call in the parallel loop, before generating the values of block `block` of batch `batch`:
+    // reseeds the calling thread's t_rocblas_rng
+    void reseed_thread_rng(uint64_t batch, uint64_t block) const
+    {
+        t_rocblas_rng = rocblas_rng_t(mix(mix(m_seed ^ batch) ^ block));
+    }
+
+private:
+    static uint64_t mix(uint64_t x)
+    {
+        return rocblas_rng_t(x)();
+    }
+
+    uint64_t      m_seed;
+    rocblas_rng_t m_saved;
+};
+
+// Number of vector elements generated from one block seed
+constexpr int64_t rocblas_fill_block_size = 4096;
+
+// Random integer in [1, 10] from t_rocblas_rng
 float rocblas_uniform_int_1_10();
 
 void rocblas_uniform_int_1_10_run_float(float* ptr, size_t num);
 void rocblas_uniform_int_1_10_run_double(double* ptr, size_t num);
 void rocblas_uniform_int_1_10_run_float_complex(rocblas_float_complex* ptr, size_t num);
 void rocblas_uniform_int_1_10_run_double_complex(rocblas_double_complex* ptr, size_t num);
-
-// For the main thread, we use g_rocblas_seed; for other threads, we start with a different seed but
-// deterministically based on the thread id's hash function.
-inline rocblas_rng_t get_seed()
-{
-    auto tid = std::this_thread::get_id();
-    return tid == g_main_thread_id ? g_rocblas_seed
-                                   : rocblas_rng_t(std::hash<std::thread::id>{}(tid));
-}
-
-// Reset the seed (mainly to ensure repeatability of failures in a given suite)
-inline void rocblas_seedrand()
-{
-    t_rocblas_rng      = get_seed();
-    t_rocblas_rand_idx = 0;
-}
 
 /* ============================================================================================ */
 /*! \brief  Random number generator which generates NaN values */
