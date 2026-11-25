@@ -1,0 +1,124 @@
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+#
+# Launch-surface profile of hipkernel:AttentionGeneralBwd. Not a generator config: the
+# engine's generator config is configs/attention_general_bwd.yaml, emitted by
+# dnn-providers/hip-kernel-provider/descriptor-packaging/tools/general_bwd_catalog.py, and
+# the generator loader refuses a launch_surface: block there.
+#
+#     python tools/launch_surface.py configs/attention_general_bwd.profile.yaml --check
+#
+# kmd_fields is the union of the prep and main slots' KMD fields. The C++ restates the
+# Python launch contract through the generated headers (AttentionGeneralBwd*.generated.hpp,
+# written by general_bwd_constants.py), and the replay corpus written by
+# general_bwd_corpus.py is the oracle for every surface.
+
+engine:
+  name: hipkernel:AttentionGeneralBwd
+provider_root: dnn-providers/hip-kernel-provider
+kmd_fields:
+- {name: dtype, type: string}
+- {name: head_size, type: int}
+- {name: seq_mode, type: string}
+- {name: stage_vec, type: int}
+- {name: worklist, type: bool}
+- {name: rows_per_cta, type: int}
+- {name: narrow_vec, type: int}
+- {name: dkv_mode, type: string}
+- {name: mask_class, type: string}
+- {name: dq_mode, type: string}
+- {name: head_pack, type: bool}
+- {name: lb_mirror, type: bool}
+- {name: lb_interleave, type: bool}
+- {name: tuning_key, type: string}
+- {name: main_block_n, type: int}
+- {name: main_worklist, type: bool}
+- {name: main_static_scale, type: string}
+
+launch_surface:
+  - name: lowering
+    python_source: dispatch/attention_bwd/hipdnn.py:from_hipdnn_graph
+    cpp_mirror: dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/packs/AttentionGeneralBwdMatch.hpp:lowerGraph
+    kmd_fields: []
+    guard: >
+      A graph that is not a single SdpaBackward node is not matched (silently). Any graph
+      the lowering cannot read declines LOWERING with a logged reason, including ragged
+      offset tables the lowering does not consume, missing / virtual / pass-by-value or
+      ragged offset tables, and stats alignment below 4.
+    test: dnn-providers/hip-kernel-provider/src/tests/engines/kernel_ingestor_engine/packs/TestAttentionGeneralBwdMatch.cpp
+
+  - name: applicability
+    python_source: kernels/common/attention_bwd_plan.py:_request_checks
+    cpp_mirror: dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/packs/AttentionGeneralBwdMatch.hpp:requestChecks
+    kmd_fields: []
+    guard: >
+      Checks run in attn_bwd_support's order and the first failure declines with its
+      reason code, logged by the graph match. Integer rules saturate in 128-bit arithmetic,
+      so extents near 2^63 decline on the rule Python declines them on. Padding declines
+      NOT_YET_DECLARED through the engine policy.
+    test: dnn-providers/hip-kernel-provider/src/tests/engines/kernel_ingestor_engine/packs/TestAttentionGeneralBwdMatch.cpp
+
+  - name: spec_resolution
+    python_source: kernels/common/attention_bwd_plan.py:_resolve_plan
+    cpp_mirror: dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/packs/AttentionGeneralBwdGeometry.hpp:resolvePlan
+    kmd_fields: [dtype, head_size, seq_mode, stage_vec, worklist, rows_per_cta, narrow_vec, dkv_mode, mask_class, dq_mode, head_pack, lb_mirror, lb_interleave, tuning_key, main_block_n, main_worklist, main_static_scale]
+    guard: >
+      The tuned-table entry (exact key, then fill and kv-bucket wildcards) or the class
+      default names exactly one generated catalog row; every runtime plan value (load
+      balance order, mirror pairing with its num_cus guard, work list, head packing, scale
+      multipliers, head split) is bound from the request and the device CU count. Any
+      failure declines INSTANCE_UNAVAILABLE.
+    test: dnn-providers/hip-kernel-provider/src/tests/engines/kernel_ingestor_engine/packs/TestAttentionGeneralBwdGeometry.cpp
+
+  - name: grid
+    python_source: kernels/common/attention_bwd_aux.py:attn_bwd_prep_grid
+    cpp_mirror: dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/packs/AttentionGeneralBwdGeometry.hpp:launchesOf
+    kmd_fields: [rows_per_cta, main_block_n, dkv_mode, dq_mode]
+    guard: >
+      Prep and convert grids are (ceil(S_max/rows_per_cta), heads, B); the main grid comes
+      from the plan's kN0 and head units; the split dQ grid from attn_bwd_dq_grid's port.
+      A grid or block that does not fit 32 bits declines INSTANCE_UNAVAILABLE.
+    test: dnn-providers/hip-kernel-provider/src/tests/engines/kernel_ingestor_engine/packs/TestAttentionGeneralBwdGeometry.cpp
+
+  - name: block
+    python_source: kernels/common/attention_bwd_aux.py:attn_bwd_convert_grid
+    cpp_mirror: dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/packs/AttentionGeneralBwdGeometry.hpp:launchPlan
+    kmd_fields: [head_size, stage_vec]
+    guard: >
+      Block sizes are the catalog row's generated thread counts for the prep, main,
+      convert and split dQ kernels.
+    test: dnn-providers/hip-kernel-provider/src/tests/engines/kernel_ingestor_engine/packs/TestAttentionGeneralBwdReplay.cpp
+
+  - name: workspace
+    python_source: kernels/common/attention_bwd_plan.py:attn_bwd_workspace_layout
+    cpp_mirror: dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/packs/AttentionGeneralBwdGeometry.hpp:workspaceLayoutOf
+    kmd_fields: [dkv_mode, dq_mode, main_worklist, main_block_n]
+    guard: >
+      Each fp32 section is rounded to 256 bytes and the work list is sized for the pinned
+      kN0. proveWorkspace() declines LOWERING in the graph match on any overlap, misaligned
+      offset or region past ws.bytes; prepare() refuses ws.* tokens that disagree with the
+      recomputed layout.
+    test: dnn-providers/hip-kernel-provider/src/tests/engines/kernel_ingestor_engine/packs/TestAttentionGeneralBwdGeometry.cpp
+
+  - name: kernargs
+    python_source: kernels/common/attention_bwd.py:attn_bwd_params
+    cpp_mirror: dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/packs/AttentionGeneralBwdNative.cpp:bindKernargs
+    kmd_fields: []
+    guard: >
+      Kernargs are emitted in the generated ABI order of rocke.attn_bwd.v3 per launch kind;
+      a missing, extra or wrong-kind value fails the plan, an i32 value out of range fails
+      prepare(), and every launch's named argument list is checked against the packaged
+      signature by requireSignatureMatch. launch() checks each real pointer against the
+      alignment the graph declares.
+    test: dnn-providers/hip-kernel-provider/src/tests/engines/kernel_ingestor_engine/packs/TestAttentionGeneralBwdSignature.cpp
+
+  - name: matcher
+    python_source: dispatch/attention_bwd/hipdnn.py:main_fields
+    cpp_mirror: dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/packs/AttentionGeneralBwdNative.cpp:attentionGeneralBwdKernelMatches
+    kmd_fields: [dtype, head_size, seq_mode, stage_vec, worklist, rows_per_cta, narrow_vec, dkv_mode, mask_class, dq_mode, head_pack, lb_mirror, lb_interleave, tuning_key, main_block_n, main_worklist, main_static_scale]
+    guard: >
+      kernel_match encodes every slot field of the candidate and returns false unless each
+      equals the token the graph match bound; a missing field or unknown value never
+      matches and is logged once. prepare() refuses a kernel whose fields or launch symbols
+      differ from the plan's.
+    test: dnn-providers/hip-kernel-provider/src/tests/engines/kernel_ingestor_engine/packs/TestAttentionGeneralBwdMatch.cpp

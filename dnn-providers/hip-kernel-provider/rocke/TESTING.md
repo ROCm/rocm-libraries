@@ -707,6 +707,16 @@ their presence in the source tree nor their installation makes them gated.
 Coverage gaps in [§7](#7-current-state-vs-target-the-gap-registry-wip) therefore
 need to be checked against both registration and the selected CI tier.
 
+**Advisory-wrapper source tests.**
+[`library/tests/test_static_analysis_checks.py`](library/tests/test_static_analysis_checks.py)
+covers the non-blocking pre-push wrapper in `tools/static_analysis/` (see the
+[guide](docs/static-analysis.md)); it runs under `--noconftest`, so it needs no
+kernel or GPU fixtures. The root `pre-commit.yml` workflow runs it from a source
+checkout, in its own virtual environment, when the wrapper or its wiring changes
+(the step lists which files); a failing test fails that job. It does not run the
+advisory hooks on PR code or enforce analyzer findings, and it is not part of
+installed-artifact CTest.
+
 Installed library GPU selection includes attention tests, but their Torch and
 architecture gates can still skip all numeric execution. The pinned SDPA lane
 uses an independently qualified bundle to run its enrolled cases without Torch.
@@ -1279,11 +1289,20 @@ it changes skip/fail semantics.
 
 The current installed compiler-tool contract is:
 
-| Runtime environment | Compiler paths injected | MLA compiler checks required |
+| Runtime environment | Compiler paths injected | Compiler checks required |
 |---|---:|---:|
 | Linux with `ROCM_PATH` | yes | yes |
 | Linux without `ROCM_PATH` | no | no |
 | Windows | no Unix-derived paths | no inferred requirement |
+
+Every `rocke_pytest_*` part, the three tiling entries, `rocke_library_mla_pytest`
+and `rocke_library_attention_cpu_pytest` take the compiler paths;
+`rocke_library_mla_pytest` and
+`rocke_library_attention_cpu_pytest` also take the requirement. The attention CPU
+entry needs the paths and the requirement for the reduce-LDS comgr cases in
+`test_attention_tiled_3d_reduce_lds.py`, which otherwise skip silently on a missing
+`llvm-objdump` instead of failing. Both entries' tests apply the requirement through
+one helper, `require_tools_or_skip` in `library/tests/_compiler_test_utils.py`.
 
 The table describes values added by the generated manifest. CTest still passes
 through its parent process environment, so a caller that explicitly exports
@@ -1309,10 +1328,11 @@ python -m pytest \
 The test reads the standalone and provider-layout generated manifests through
 CTest, rejects duplicate variable names, and compares the complete environments
 of every `rocke_pytest_*` part, the three tiling entries (`rocke_tiling_pytest`,
-`rocke_tiling_visualization_pytest` and `rocke_tiling_gpu_pytest`) and
-`rocke_library_mla_pytest` with and without a synthetic `ROCM_PATH`. Keep the
-expectations independently constructed rather than reusing the production CMake
-lists; otherwise production and test can repeat the same mistake.
+`rocke_tiling_visualization_pytest` and `rocke_tiling_gpu_pytest`),
+`rocke_library_mla_pytest` and `rocke_library_attention_cpu_pytest` with and
+without a synthetic `ROCM_PATH`. Keep the expectations independently constructed
+rather than reusing the production CMake lists; otherwise production and test
+can repeat the same mistake.
 
 ### 5.2 Single-arch tests: `arch_specific`
 

@@ -101,12 +101,8 @@ static rocke_value_t* rocke__q_offset(rocke_attn_unified_build_ctx_t* ctx,
  *                         iv_name="kpos")
  *   with loop as (kpos, (m_val, l_val, acc_val)):
  *       score = _emit_qk_score(...)
- *       band_ok = _scalar_band_ok(b, p, context_len, query_pos, kpos):
- *           ok = cmp_le(kpos, context_len + query_pos)
- *           if sliding_window > 0:
- *               dist = sub(add(context_len, query_pos), kpos)
- *               ok = land(ok, cmp_lt(dist, const_i32(sliding_window)))
- *       score = select(band_ok, score, neg_inf)
+ *       band_ok = _scalar_band_ok(b, p, context_len, query_pos, kpos)
+ *       score = select(band_ok, score, neg_inf)      (when band_ok)
  *       new_m_raw = fmax(m_val, score)
  *       new_m = select(fcmp("ogt", new_m_raw, neg_inf), new_m_raw, zero_f)
  *       alpha = exp2(m_val - new_m)
@@ -152,7 +148,7 @@ void rocke_attn_unified_emit_3d_segment_loop(rocke_attn_unified_build_ctx_t* ctx
     acc_val = loop.iter_vars ? loop.iter_vars[2] : NULL;
 
     score = rocke_unified_attn_emit_qk_score(b,
-                                             &ctx->sel_p,
+                                             ctx->p,
                                              ctx->dtype,
                                              ctx->abi_query,
                                              ctx->abi_key,
@@ -166,19 +162,13 @@ void rocke_attn_unified_emit_3d_segment_loop(rocke_attn_unified_build_ctx_t* ctx
                                              ctx->abi_scale,
                                              ctx->rcp_ln2);
 
-    /* band_ok = _scalar_band_ok(...): the causal (right) bound, then the
-     * sliding-window (left) bound when sliding_window > 0. This builder supports
-     * only the default mask (bottom-right causal, right_bound 0). */
-    band_ok = rocke_b_cmp_le(b, kpos, rocke_b_add(b, ctx->context_len, ctx->query_pos));
-    if(ctx->p->sliding_window > 0)
+    /* Every mask, the default one included: the right (causal) bound, and the
+     * left (sliding-window) bound whenever sliding_window > 0. */
+    band_ok = rocke_attn_unified_scalar_band_ok(ctx, kpos);
+    if(band_ok != NULL)
     {
-        rocke_value_t* dist
-            = rocke_b_sub(b, rocke_b_add(b, ctx->context_len, ctx->query_pos), kpos);
-        rocke_value_t* sw_ok
-            = rocke_b_cmp_lt(b, dist, rocke_b_const_i32(b, ctx->p->sliding_window));
-        band_ok = rocke_b_land(b, band_ok, sw_ok);
+        score = rocke_b_select(b, band_ok, score, ctx->neg_inf);
     }
-    score = rocke_b_select(b, band_ok, score, ctx->neg_inf);
 
     /* A fully masked segment (or masked leading keys) keeps m at -inf: use 0 as
      * the exponent reference so alpha/prob are 0, not exp2(-inf - -inf) = NaN,
@@ -192,7 +182,7 @@ void rocke_attn_unified_emit_3d_segment_loop(rocke_attn_unified_build_ctx_t* ctx
     new_l = rocke_b_fadd(b, rocke_b_fmul(b, l_val, alpha), prob);
 
     vv = rocke_unified_attn_emit_v_load(b,
-                                        &ctx->sel_p,
+                                        ctx->p,
                                         ctx->dtype,
                                         ctx->abi_value,
                                         ctx->abi_block_tables,
@@ -358,21 +348,17 @@ void rocke_attn_unified_emit_reduce_max_loop(rocke_attn_unified_build_ctx_t* ctx
     rocke_ir_builder_t* b = ctx->b;
     rocke_iter_arg_t iter_args[1];
     rocke_for_t max_loop;
-    rocke_value_t *seg, *mx, *idx, *mv;
+    rocke_value_t *seg, *mx, *idx, *mv, *lo, *hi, *step;
     rocke_value_t* yields[1];
 
     iter_args[0].name = "mx";
     iter_args[0].init = ctx->neg_inf;
 
-    max_loop = rocke_b_scf_for_iter(b,
-                                    rocke_b_const_i32(b, 0),
-                                    rocke_b_const_i32(b, ctx->num_segments),
-                                    rocke_b_const_i32(b, 1),
-                                    iter_args,
-                                    1,
-                                    "seg",
-                                    false,
-                                    true);
+    /* Sequenced: Python emits the bounds in argument order. */
+    lo = rocke_b_const_i32(b, 0);
+    hi = rocke_b_const_i32(b, ctx->num_segments);
+    step = rocke_b_const_i32(b, 1);
+    max_loop = rocke_b_scf_for_iter(b, lo, hi, step, iter_args, 1, "seg", false, true);
 
     rocke_b_region_enter(b, max_loop.body);
 
@@ -421,6 +407,7 @@ void rocke_attn_unified_emit_reduce_combine_loop(rocke_attn_unified_build_ctx_t*
     rocke_iter_arg_t iter_args[2];
     rocke_for_t red;
     rocke_value_t *ref, *seg, *den, *acc, *idx, *mv, *lv, *factor, *den2, *out_idx, *ov, *acc2;
+    rocke_value_t *lo, *hi, *step;
     rocke_value_t* yields[2];
 
     /* Once, before the loop. Python evaluates select's operands left to right:
@@ -433,15 +420,11 @@ void rocke_attn_unified_emit_reduce_combine_loop(rocke_attn_unified_build_ctx_t*
     iter_args[1].name = "acc";
     iter_args[1].init = ctx->zero_f;
 
-    red = rocke_b_scf_for_iter(b,
-                               rocke_b_const_i32(b, 0),
-                               rocke_b_const_i32(b, ctx->num_segments),
-                               rocke_b_const_i32(b, 1),
-                               iter_args,
-                               2,
-                               "seg2",
-                               false,
-                               true);
+    /* Sequenced: Python emits the bounds in argument order. */
+    lo = rocke_b_const_i32(b, 0);
+    hi = rocke_b_const_i32(b, ctx->num_segments);
+    step = rocke_b_const_i32(b, 1);
+    red = rocke_b_scf_for_iter(b, lo, hi, step, iter_args, 2, "seg2", false, true);
 
     rocke_b_region_enter(b, red.body);
 

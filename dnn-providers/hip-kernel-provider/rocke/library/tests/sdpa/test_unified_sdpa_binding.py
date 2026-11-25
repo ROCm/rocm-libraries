@@ -46,11 +46,30 @@ def fake_kernel(plan, req):
     for b, n in enumerate(used):
         k_pages.append(kt["k"][table[b].long()].reshape(-1, *kt["k"].shape[2:])[:n])
         v_pages.append(kt["v"][table[b].long()].reshape(-1, *kt["v"].shape[2:])[:n])
+    bias = None
+    if plan.bias is not None:
+        args = plan.bias.kernel_args()
+        db, dh, dq, _ = plan.bias.src.shape
+        bias = (
+            torch.as_strided(
+                args["additive_bias"],
+                (db, dh, dq, req.s_kv),
+                (
+                    args["additive_bias_batch_stride"],
+                    args["additive_bias_head_stride"],
+                    args["additive_bias_sq_stride"],
+                    1,
+                ),
+            )
+            .double()
+            .numpy()
+        )
     o, lse = sdpa_reference(
         kt["q"].double().numpy(),
         torch.cat(k_pages).double().numpy(),
         torch.cat(v_pages).double().numpy(),
         scale=float(req.scale),
+        bias=bias,
         left_bound=hipdnn_left_to_window(req.left_bound),
         right_bound=req.right_bound,
         top_left=req.diagonal == "top_left",
@@ -454,3 +473,66 @@ def test_the_cpu_table_binds_k_and_v_both_in_place_and_copied():
         if seen == {True, False}:
             return
     pytest.fail(f"the CPU case table binds K only with k_inplace in {seen}")
+
+
+# --- additive bias: in-place choice and refusals ---------------------------------
+
+
+def _bias_plan(bias_dtype="float32", dims=(2, 4, 8, 8), bias_tensor=None, **extra):
+    from dispatch.sdpa import SdpaBias
+
+    req_dtype = {"float32": "fp32", "float16": "fp16", "bfloat16": "bf16"}[bias_dtype]
+    req = make_request(d=64, bias=SdpaBias(packed(dims, req_dtype)))
+    tensors = {n: strided_tensor(getattr(req, n)) for n in ("q", "k", "v", "o")}
+    if bias_tensor is None:
+        bias_tensor = torch.randn(*dims).to(getattr(torch, bias_dtype))
+    tensors["bias"] = bias_tensor
+    tensors.update(extra)
+    return _LaunchPlan(req, tensors), tensors["bias"]
+
+
+def test_an_f32_bias_is_used_in_place():
+    plan, bias = _bias_plan("float32")
+    assert plan.bias.ws is None
+    args = plan.bias.kernel_args()
+    assert args["additive_bias"].data_ptr() == bias.data_ptr()
+    assert args["additive_bias_sq_stride"] == 8
+
+
+@pytest.mark.parametrize("dtype", ["float16", "bfloat16"])
+def test_a_half_precision_bias_is_converted_into_an_f32_workspace(dtype):
+    plan, bias = _bias_plan(dtype)
+    assert plan.bias.ws is not None and plan.bias.ws.dtype == torch.float32
+    plan.pack()
+    assert torch.equal(plan.bias.ws, bias.float())
+
+
+def test_a_bias_key_dim_of_one_is_expanded_into_the_workspace():
+    plan, bias = _bias_plan("float32", dims=(1, 1, 8, 1))
+    assert plan.bias.ws.shape == (1, 1, 8, 8)
+    plan.pack()
+    assert torch.equal(plan.bias.ws, bias.expand(1, 1, 8, 8))
+
+
+def test_a_bias_that_is_not_key_contiguous_is_copied_not_refused():
+    wide = torch.randn(2, 4, 8, 16)[..., ::2]
+    plan, _ = _bias_plan("float32", bias_tensor=wide)
+    assert plan.bias.ws is not None
+    plan.pack()
+    assert torch.equal(plan.bias.ws, wide)
+
+
+def test_a_request_with_a_bias_needs_the_bias_tensor():
+    from dispatch.sdpa import SdpaBias
+
+    req = make_request(d=64, bias=SdpaBias(packed((2, 4, 8, 8), "fp32")))
+    tensors = {n: strided_tensor(getattr(req, n)) for n in ("q", "k", "v", "o")}
+    with pytest.raises(ValueError, match="no 'bias'"):
+        _LaunchPlan(req, tensors)
+
+
+def test_a_bias_of_the_wrong_dtype_or_shape_is_refused():
+    with pytest.raises(ValueError, match="must be"):
+        _bias_plan("float32", bias_tensor=torch.randn(2, 4, 8, 8).half())
+    with pytest.raises(ValueError, match="not the request's dims"):
+        _bias_plan("float32", bias_tensor=torch.randn(2, 4, 8, 9))

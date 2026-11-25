@@ -4,17 +4,18 @@
 """Per-arch capability checks for the attention backward kernels.
 
 Every backward module asks this file, never the raw catalog, whether a lever is
-legal on a target. The facts come from :class:`rocke.core.arch.ArchTarget`
-(wave size, LDS capacity, MMA atoms, register file split, ``has_ds_read_tr``,
-``has_async_lds``) plus a few facts the catalog does not carry yet and that are
-recorded here as explicit tables:
+legal on a target. The hardware facts come from the attention capability table
+shared with the forward kernels, :mod:`rocke.helpers.attention_arch_caps`
+(LDS-DMA widths, the transpose-read width, the 16x16 MMA atoms, native fp32
+global atomic add, and the inline-asm MFMA mnemonics and hazard wait states).
+This module adds the backward's policy on top of it:
 
-* the LDS-DMA (``buffer_load ... lds``) widths in dwords per lane: one dword on
-  gfx942, one, three or four dwords on gfx950, none on RDNA;
-* the transpose-read width: only the 64-bit ``ds_read_tr16_b64`` is used by the
-  backward (gfx950 only); the 128-bit form is never legal here;
-* native no-return fp32 global atomic add (``global_atomic_add_f32`` without a
-  compare-and-swap loop) per arch.
+* the arches the backward targets (:data:`BWD_ARCHES`); every check refuses
+  any other arch with the backward's own message;
+* fp16 / bf16 operands only;
+* the legal wave counts and ``agpr_alloc`` values;
+* the 128-bit transpose read is never legal here, though it may exist;
+* the barrier fence and the default asm tail ``s_nop``.
 
 Every check raises :class:`ValueError` *before* any IR is emitted, so a caller
 that validates a geometry first never leaves a half-built kernel behind.
@@ -26,8 +27,9 @@ from dataclasses import dataclass
 from functools import cache
 from types import MappingProxyType
 
-from rocke.core.arch import ArchTarget
 from rocke.core.arch.target import MmaOp
+from rocke.helpers import attention_arch_caps as _caps
+from rocke.helpers.attention_arch_caps import ASM_MFMA_VALU_LEAD_WAIT_STATES
 
 __all__ = [
     "BWD_ARCHES",
@@ -63,24 +65,6 @@ BWD_ARCHES = ("gfx942", "gfx950", "gfx1151", "gfx1201")
 # invalidations on the work-group-processor targets.
 BWD_BARRIER_FENCE = "compiler"
 
-# LDS-DMA widths in dwords per lane (``raw_ptr_buffer_load_lds``). The catalog has
-# only ``has_async_lds``; the width is a per-arch fact kept here until the core
-# catalog grows a field for it.
-_LDS_DMA_DWORDS = {
-    "gfx942": (1,),
-    "gfx950": (1, 3, 4),
-    "gfx1151": (),
-    "gfx1201": (),
-}
-
-# Native no-return fp32 global atomic add (no compare-and-swap expansion).
-_NATIVE_FP32_ATOMIC_ADD = {
-    "gfx942": True,
-    "gfx950": True,
-    "gfx1151": True,
-    "gfx1201": True,
-}
-
 _WAVES = {"mfma": (1, 2, 4, 8), "wmma": (1, 2, 4)}
 
 _DTYPES = {"fp16": "fp16", "f16": "fp16", "bf16": "bf16"}
@@ -91,6 +75,13 @@ def _norm_dtype(dtype: str) -> str:
         return _DTYPES[dtype]
     except KeyError:
         raise ValueError(f"backward operand dtype must be fp16 or bf16, got {dtype!r}")
+
+
+def _gate(arch: str) -> None:
+    if arch not in BWD_ARCHES:
+        raise ValueError(
+            f"attention backward does not target {arch!r}; known: {BWD_ARCHES}"
+        )
 
 
 @dataclass(frozen=True)
@@ -118,27 +109,21 @@ class BwdArchCaps:
 @cache
 def bwd_arch_caps(arch: str) -> BwdArchCaps:
     """Return the backward capability record of ``arch`` (a gfx id)."""
-    if arch not in BWD_ARCHES:
-        raise ValueError(
-            f"attention backward does not target {arch!r}; known: {BWD_ARCHES}"
-        )
-    t = ArchTarget.from_gfx(arch)
-    path = "mfma" if t.has_mfma else "wmma"
-    agprs = int(t.limits.agprs)
-    dma = _LDS_DMA_DWORDS[arch] if t.memory.has_async_lds else ()
+    _gate(arch)
+    c = _caps.attn_arch_caps(arch)
     return BwdArchCaps(
         arch=arch,
-        wave_size=int(t.wave_size),
-        matrix_path=path,
-        lds_capacity_bytes=int(t.lds_capacity_bytes),
-        lds_dma_dwords=dma,
-        has_tr_read_b64=bool(t.memory.has_ds_read_tr),
+        wave_size=c.wave_size,
+        matrix_path=c.matrix_path,
+        lds_capacity_bytes=c.lds_capacity_bytes,
+        lds_dma_dwords=c.lds_dma_dwords,
+        has_tr_read_b64=c.has_tr_read_b64,
         has_tr_read_b128=False,
-        has_agprs=agprs > 0,
-        arch_vgprs=int(t.limits.vgprs) - agprs,
-        agprs=agprs,
-        native_fp32_atomic_add=_NATIVE_FP32_ATOMIC_ADD[arch],
-        legal_waves=_WAVES[path],
+        has_agprs=c.has_agprs,
+        arch_vgprs=c.arch_vgprs,
+        agprs=c.agprs,
+        native_fp32_atomic_add=c.native_fp32_atomic_add,
+        legal_waves=_WAVES[c.matrix_path],
     )
 
 
@@ -149,19 +134,8 @@ def bwd_atoms(arch: str, dtype: str) -> tuple[MmaOp, ...]:
     32x32 atoms are excluded on purpose: ``kM0 = 16`` cannot fill them and the
     register C-to-A relabel is proven only for the 16x16 atoms.
     """
-    caps = bwd_arch_caps(arch)
-    dt = _norm_dtype(dtype)
-    family = "mma" if caps.matrix_path == "mfma" else "wmma"
-    ops = ArchTarget.from_gfx(arch).mma.enumerate(
-        family=family, a_dtype=dt, b_dtype=dt, c_dtype="fp32", m=16, n=16
-    )
-    out = sorted(
-        (op for op in ops if op.wave_size == caps.wave_size and op.a_frag_len > 0),
-        key=lambda op: op.k,
-    )
-    if not out:
-        raise ValueError(f"no 16x16 {dt} MMA atom on {arch}")
-    return tuple(out)
+    _gate(arch)
+    return _caps.attn_atoms(arch, _norm_dtype(dtype))
 
 
 def select_bwd_atom(arch: str, dtype: str, k: int = 16) -> MmaOp:
@@ -170,18 +144,14 @@ def select_bwd_atom(arch: str, dtype: str, k: int = 16) -> MmaOp:
     ``k = 16`` exists everywhere; ``k = 32`` is native only on gfx950. A gfx942
     K=32 step is issued as two 16x16x16 instructions by the caller instead.
     """
-    for op in bwd_atoms(arch, dtype):
-        if op.k == k:
-            return op
-    raise ValueError(
-        f"no native 16x16x{k} {_norm_dtype(dtype)} atom on {arch} "
-        f"(available K: {[op.k for op in bwd_atoms(arch, dtype)]})"
-    )
+    _gate(arch)
+    return _caps.select_attn_atom(arch, _norm_dtype(dtype), k)
 
 
 def wide_k_atom_available(arch: str, dtype: str) -> bool:
     """True when the native 16x16x32 atom exists (gfx950)."""
-    return any(op.k == 32 for op in bwd_atoms(arch, dtype))
+    _gate(arch)
+    return _caps.wide_k_atom_available(arch, _norm_dtype(dtype))
 
 
 def check_waves(arch: str, waves: int) -> None:
@@ -193,24 +163,14 @@ def check_waves(arch: str, waves: int) -> None:
 
 
 def check_lds_bytes(arch: str, nbytes: int) -> None:
-    caps = bwd_arch_caps(arch)
-    if nbytes < 0 or nbytes > caps.lds_capacity_bytes:
-        raise ValueError(
-            f"LDS footprint {nbytes} B exceeds the {arch} capacity "
-            f"{caps.lds_capacity_bytes} B"
-        )
+    _gate(arch)
+    _caps.check_lds_bytes(arch, nbytes)
 
 
 def check_lds_dma_width(arch: str, dwords: int) -> None:
     """Raise unless an LDS-DMA copy of ``dwords`` per lane is legal on ``arch``."""
-    caps = bwd_arch_caps(arch)
-    if not caps.lds_dma_dwords:
-        raise ValueError(f"{arch} has no global-to-LDS DMA path")
-    if dwords not in caps.lds_dma_dwords:
-        raise ValueError(
-            f"LDS-DMA width of {dwords} dword(s) is not legal on {arch}; "
-            f"legal widths: {caps.lds_dma_dwords}"
-        )
+    _gate(arch)
+    _caps.check_lds_dma_width(arch, dwords)
 
 
 def check_transpose_read(arch: str, bits: int) -> None:
@@ -220,85 +180,48 @@ def check_transpose_read(arch: str, bits: int) -> None:
     form is refused on every arch: the backward never routes a transposed
     operand through it.
     """
-    caps = bwd_arch_caps(arch)
+    _gate(arch)
     if bits == 128:
         raise ValueError(
             "ds_read_tr16_b128 is not used by the attention backward (only the "
             "64-bit transpose read is legal)"
         )
-    if bits != 64:
-        raise ValueError(f"unsupported transpose-read width {bits}")
-    if not caps.has_tr_read_b64:
-        raise ValueError(f"{arch} has no ds_read_tr16_b64")
+    _caps.check_transpose_read(arch, bits)
 
 
 _AGPR_ALLOC = (None, "backend", (0, 0), (128, 128), (192, 192), (256, 256))
-
-# MFMA mnemonics of the inline-asm G1 / G3 route, per (atom K, dtype); the
-# 16x16x32 atom exists on gfx950 only (see the arch atom table).
-_MFMA_ASM = {
-    (16, "fp16"): "v_mfma_f32_16x16x16_f16",
-    (16, "bf16"): "v_mfma_f32_16x16x16_bf16",
-    (32, "fp16"): "v_mfma_f32_16x16x32_f16",
-    (32, "bf16"): "v_mfma_f32_16x16x32_bf16",
-}
 
 # s_nop after each inline-asm MFMA cluster, per atom K. An asm MFMA is opaque
 # to the backend's hazard recognizer, so the cluster itself must cover its
 # result latency (the next cluster's srcC, the epilogue's AGPR read) and the
 # read window of its A / B sources (a later write of those VGPRs). The legal
-# range is asm_tail_nop_min..15 (the ISA wait-state table, below); the largest
-# s_nop stays the default until a timed sweep picks a value in that range.
+# range is asm_tail_nop_min..ASM_TAIL_NOP_MAX (the ISA wait-state table, in
+# rocke.helpers.attention_arch_caps); the largest s_nop stays the default until
+# a timed sweep picks a value in that range.
 AGPR_ASM_TAIL_NOP = MappingProxyType({16: 15, 32: 15})
-
-# Passes of the XDL MFMA atoms of the inline-asm route (the backend's own
-# scheduling model): every 16x16 f16 / bf16 atom on gfx942 and gfx950 is a
-# 4-pass XDL op.
-_XDL_PASSES = MappingProxyType({16: 4, 32: 4})
-
-# Wait states the ISA requires after a VALU write of a VGPR before an MFMA
-# reads it (any source); an inline-asm MFMA hides this from the backend too,
-# so every cluster of the asm route opens with them (``s_nop 1``).
-ASM_MFMA_VALU_LEAD_WAIT_STATES = 2
 
 
 def mfma_result_wait_states(arch: str, atom_k: int) -> int:
-    """Wait states the ISA requires between an XDL MFMA of the asm route and
-    a dependent read of its result that is not the next MFMA's full-overlap
-    srcC: a VALU / VMEM / LDS / export read or a VALU write of the result, an
-    MFMA reading it as srcA / srcB, or a partially overlapping srcC. The
-    largest of those is the VALU / memory read, ``passes + 3`` on gfx942 and
-    ``passes + 4`` on gfx950 (2-pass atoms excepted; the route has none). A
-    full-overlap srcC chain needs none, and the srcC write-after-read window
-    (3 for a 4-pass op) is shorter.
+    """Wait states the ISA requires before a dependent read of an asm MFMA's
+    result; see :func:`rocke.helpers.attention_arch_caps.mfma_result_wait_states`.
     """
-    caps = bwd_arch_caps(arch)
-    if not caps.has_agprs or arch not in ("gfx942", "gfx950"):
-        raise ValueError(f"no asm MFMA hazard table for {arch}")
-    passes = _XDL_PASSES[atom_k]
-    return passes + 3 + (arch == "gfx950" and passes != 2)
+    _gate(arch)
+    return _caps.mfma_result_wait_states(arch, atom_k)
 
 
 def asm_tail_nop_min(arch: str, dtype: str, atom_k: int) -> int:
-    """Smallest legal ``s_nop`` count after an inline-asm MFMA cluster.
-
-    ``s_nop n`` gives ``n + 1`` wait states, and the instruction right after
-    the cluster may read the last MFMA's result, so the floor is the ISA's
-    result wait states minus one (gfx942: 6, gfx950: 7, both atoms). It does
-    not depend on the cluster size (the last MFMA has no slack).
+    """Smallest legal ``s_nop`` count after an inline-asm MFMA cluster
+    (gfx942: 6, gfx950: 7, both atoms); see
+    :func:`rocke.helpers.attention_arch_caps.asm_tail_nop_min`.
     """
-    mfma_asm_mnemonic(arch, dtype, atom_k)
-    return mfma_result_wait_states(arch, atom_k) - 1
+    _gate(arch)
+    return _caps.asm_tail_nop_min(arch, dtype, atom_k)
 
 
 def check_asm_tail_nop(arch: str, dtype: str, atom_k: int, nop: int) -> None:
     """Raise unless ``s_nop nop`` covers the asm cluster's result hazards."""
-    lo = asm_tail_nop_min(arch, dtype, atom_k)
-    if not isinstance(nop, int) or isinstance(nop, bool) or not lo <= nop <= 15:
-        raise ValueError(
-            f"asm tail s_nop {nop!r} is not legal on {arch} for the 16x16x{atom_k} "
-            f"{dtype} atom; legal: {lo}..15 (ISA MFMA result wait states)"
-        )
+    _gate(arch)
+    _caps.check_asm_tail_nop(arch, dtype, atom_k, nop)
 
 
 def mfma_asm_mnemonic(arch: str, dtype: str, atom_k: int) -> str:
@@ -306,14 +229,8 @@ def mfma_asm_mnemonic(arch: str, dtype: str, atom_k: int) -> str:
 
     Raises unless the atom is legal on ``arch`` (an MFMA target with that K).
     """
-    caps = bwd_arch_caps(arch)
-    if not caps.has_agprs:
-        raise ValueError(f"{arch} has no AGPRs; the asm MFMA route is MFMA-only")
-    if (atom_k, dtype) not in _MFMA_ASM:
-        raise ValueError(f"no asm MFMA for atom K {atom_k} and {dtype}")
-    if atom_k == 32 and arch != "gfx950":
-        raise ValueError("the 16x16x32 MFMA atom is gfx950-only")
-    return _MFMA_ASM[(atom_k, dtype)]
+    _gate(arch)
+    return _caps.mfma_asm_mnemonic(arch, dtype, atom_k)
 
 
 def check_agpr_alloc(arch: str, agpr_alloc: tuple[int, int] | str | None) -> None:

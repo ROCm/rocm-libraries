@@ -4,10 +4,12 @@ Each HKP_PINNED_ATTENTION_ENGINES row in src/CMakeLists.txt names the GTEST_FILT
 variable its engine's external integration check (and GPU-reference target in
 src/integration_tests/) passes, and the ../CMakeLists.txt variable holding its
 hipkernel_*_test_categories_integration.yaml, from which the check's CTest suites take
-theirs under YAML categorization, one per category. Both must name the same bundles, so
-editing one without the other fails here. Rows sharing a YAML must share a filter, and
-every attention categories YAML must be some row's. Each attention knob suite in
-src/integration_tests/CMakeLists.txt pins engines the table names.
+theirs under YAML categorization, one per category. An engine whose entry is written out
+by hand names the same two variables in HKP_HANDWRITTEN_ATTENTION_ENGINES. Both must name
+the same bundles, so editing one without the other fails here. Rows sharing a YAML must
+share a filter, and every attention categories YAML must be some row's or pair's. Each
+attention knob suite in src/integration_tests/CMakeLists.txt pins engines the table
+names.
 
 A pattern is "<tier>_<bundle>", <tier> one of the four bundle tier directories or "*"
 for all of them. Each category selects every bundle the CMake filter does at each tier
@@ -31,6 +33,7 @@ INTEGRATION_CMAKE = PROVIDER / "src/integration_tests/CMakeLists.txt"
 KNOB_SUITES_DIR = PROVIDER / "src/integration_tests/kernel_ingestor_engine"
 PACKS = PROVIDER / "src/tests/engines/kernel_ingestor_engine/packs"
 TABLE = "HKP_PINNED_ATTENTION_ENGINES"
+HANDWRITTEN = "HKP_HANDWRITTEN_ATTENTION_ENGINES"
 ROW_FIELDS = 6
 
 
@@ -56,10 +59,22 @@ def categories_yaml(var):
     return names[0]
 
 
+def handwritten_engines():
+    """HKP_HANDWRITTEN_ATTENTION_ENGINES' pairs: filter variable, categories YAML variable."""
+    text = SRC_CMAKE.read_text(encoding="utf-8")
+    calls = re.findall(rf"\bset\(\s*{HANDWRITTEN}\s([^)]*)\)", text)
+    assert len(calls) == 1, f"{SRC_CMAKE}: {HANDWRITTEN} set {len(calls)} times"
+    fields = re.sub(r"#[^\n]*", "", calls[0]).split()
+    assert fields and len(fields) % 2 == 0, f"{SRC_CMAKE}: {HANDWRITTEN} {fields}"
+    return [(fields[i], fields[i + 1]) for i in range(0, len(fields), 2)]
+
+
 def yaml_filters():
-    """{categories YAML: {filter variables of the rows naming it}}."""
+    """{categories YAML: {filter variables of the rows and pairs naming it}}."""
     pairs = {}
     for *_, filter_var, _toml, yaml_var in pinned_engines():
+        pairs.setdefault(categories_yaml(yaml_var), set()).add(filter_var)
+    for filter_var, yaml_var in handwritten_engines():
         pairs.setdefault(categories_yaml(yaml_var), set()).add(filter_var)
     return pairs
 

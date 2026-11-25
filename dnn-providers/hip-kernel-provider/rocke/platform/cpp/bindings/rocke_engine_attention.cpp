@@ -30,9 +30,11 @@
 #include <vector>
 
 #include "family_glue.hpp"
+#include "rocke/error.hpp"
 
 extern "C" {
 #include "rocke/helper_helper_rocke.instances.common.attention_unified_selectors.h"
+#include "rocke/helper_helper_rocke.instances.common.attention_unified_selectors_3d.h"
 #include "rocke/instance_attention_unified.h"
 #include "rocke/instance_fmha_appendkv.h"
 #include "rocke/instance_fmha_bwd.h"
@@ -42,6 +44,7 @@ extern "C" {
 #include "rocke/instance_fmha_paged_prefill.h"
 #include "rocke/instance_fmha_splitkv_decode.h"
 #include "rocke/instance_fmha_varlen.h"
+#include "rocke/instance_gfx942_attention_4warp_gqa.h"
 #include "rocke/instance_gfx942_attention_tiled_2d.h"
 #include "rocke/instance_gfx942_attention_tiled_3d.h"
 #include "rocke/instance_gfx950_attention_tiled_2d.h"
@@ -88,6 +91,37 @@ bool a_str(const py::dict& d, const char* key, std::string& out)
         return true;
     }
     return false;
+}
+
+[[noreturn]] void raise_not_implemented(const std::string& msg)
+{
+    PyErr_SetString(PyExc_NotImplementedError, msg.c_str());
+    throw py::error_already_set();
+}
+
+/* A Python spec/problem field the C struct has no slot for. Its default is
+ * accepted (so asdict() of a default spec still lowers); any other value would
+ * be silently dropped, so it is rejected instead. dflt_none: the Python default
+ * is None (dflt is then ignored). */
+struct unported_field
+{
+    const char* key;
+    bool dflt_none;
+    double dflt;
+};
+
+void reject_unported(const py::dict& d, const char* binding, const unported_field* fields, size_t n)
+{
+    for(size_t i = 0; i < n; ++i)
+    {
+        const unported_field& f = fields[i];
+        if(!d.contains(f.key) || d[f.key].is_none())
+            continue;
+        if(!f.dflt_none && d[f.key].cast<double>() == f.dflt)
+            continue;
+        raise_not_implemented(std::string(binding) + ": " + f.key
+                              + " is not yet ported to the C++ engine");
+    }
 }
 
 /* Lifetime helper for any const char* fields pulled from the dict. */
@@ -205,8 +239,18 @@ rocke_fmha_common_spec_t common_of(const py::dict& d, Store& st)
 
 /* ===================== attention_unified (scalar 2d) ==================== */
 
+/* use_fp8 has a C slot, but the scalar builder does not emit the fp8 K/V path
+ * the Python builder does, so it is treated as unported here. */
+const unported_field k_au_unported[] = {
+    {"use_fp8", false, 0},
+    {"fp8_fnuz", false, 0},
+    {"target_ctas", false, 0},
+};
+
 rocke_unified_attention_problem_t au_build(const py::dict& d, Store& st)
 {
+    reject_unported(
+        d, "attention_unified", k_au_unported, sizeof(k_au_unported) / sizeof(k_au_unported[0]));
     rocke_unified_attention_problem_t p = rocke_unified_attention_problem_default();
     p.head_size = a_int(d, "head_size", p.head_size);
     p.block_size = a_int(d, "block_size", p.block_size);
@@ -219,9 +263,25 @@ rocke_unified_attention_problem_t au_build(const py::dict& d, Store& st)
     p.sliding_window = a_int(d, "sliding_window", p.sliding_window);
     p.softcap = a_double(d, "softcap", p.softcap);
     p.use_sinks = a_bool(d, "use_sinks", p.use_sinks);
+    p.use_alibi = a_bool(d, "use_alibi", p.use_alibi);
+    p.use_qq_bias = a_bool(d, "use_qq_bias", p.use_qq_bias);
+    p.num_cus = a_int(d, "num_cus", p.num_cus);
+    p.num_kv_blocks = a_int(d, "num_kv_blocks", p.num_kv_blocks);
+    p.causal_top_left = a_bool(d, "causal_top_left", p.causal_top_left);
+    p.right_bound = a_int(d, "right_bound", p.right_bound);
+    if(d.contains("waves_per_eu") && !d["waves_per_eu"].is_none())
+    {
+        p.waves_per_eu_set = true;
+        p.waves_per_eu = d["waves_per_eu"].cast<int>();
+    }
+    p.use_additive_bias = a_bool(d, "use_additive_bias", p.use_additive_bias);
     std::string v;
     if(a_str(d, "dtype", v))
         p.dtype = st.keep(v);
+    if(a_str(d, "q_dtype", v))
+        p.q_dtype = st.keep(v);
+    if(a_str(d, "compile_backend", v))
+        p.compile_backend = st.keep(v);
     return p;
 }
 
@@ -783,8 +843,10 @@ std::vector<std::string> sage_verify(const py::dict& d, const std::string& arch)
 /* ===================== gfx942 / gfx950 tiled-2d ======================== */
 
 /* gfx950 lse_layout: absent or "token_major" keeps the default. */
-static bool t2d_lse_head_major(const py::dict& d)
+static bool t2d_lse_head_major(const py::dict& d, bool current)
 {
+    if(!d.contains("lse_layout") || d["lse_layout"].is_none())
+        return current;
     std::string layout = "token_major";
     a_str(d, "lse_layout", layout);
     if(layout != "token_major" && layout != "head_major")
@@ -792,27 +854,23 @@ static bool t2d_lse_head_major(const py::dict& d)
     return layout == "head_major";
 }
 
-rocke_attention_tiled_2d_spec_t t2d_build(const py::dict& d, Store& st)
+/* Overlay every spec field present in `d` onto `s` (absent or None keeps the
+ * current value), so a dict built with asdict(spec) reaches the builder whole. */
+void t2d_read(const py::dict& d, Store& st, rocke_attention_tiled_2d_spec_t& s)
 {
-    /* The KQ slab pad and the KQ XOR swizzle exist only in the Python builder;
-     * the C spec has no field for either, so lowering them here would silently
-     * emit an unpadded, unswizzled K read. The spec is valid, the C++ path is
-     * not written: NotImplementedError, as the Python style guide assigns.
-     * Every set pad is refused, also one the spec would lay out as no pad:
-     * this binding sees only the knob dict, and such a pad changes nothing,
-     * so a caller drops the knob. */
-    for(const char* python_only : {"use_kq_lds_pad", "use_kq_xor_swizzle"})
+    /* The KQ XOR swizzle exists only in the Python builder; the C spec has no
+     * field for it, so lowering it here would silently emit an unswizzled K
+     * read. The spec is valid, the C++ path is not written:
+     * NotImplementedError, as the Python style guide assigns. Every set
+     * swizzle is refused: this binding sees only the knob dict. */
+    if(a_bool(d, "use_kq_xor_swizzle", false))
     {
-        if(a_bool(d, python_only, false))
-        {
-            const std::string message = std::string("rocke_engine tiled-2d: ") + python_only
-                                        + "=True is not implemented in the C++ engine; build"
-                                          " this spec with the Python engine or set it to False";
-            PyErr_SetString(PyExc_NotImplementedError, message.c_str());
-            throw py::error_already_set();
-        }
+        PyErr_SetString(PyExc_NotImplementedError,
+                        "rocke_engine tiled-2d: use_kq_xor_swizzle=True is not implemented in "
+                        "the C++ engine; build this spec with the Python engine or set it to "
+                        "False");
+        throw py::error_already_set();
     }
-    rocke_attention_tiled_2d_spec_t s = rocke_attention_tiled_2d_spec_default();
     s.head_size = a_int(d, "head_size", s.head_size);
     s.block_size = a_int(d, "block_size", s.block_size);
     s.num_query_heads = a_int(d, "num_query_heads", s.num_query_heads);
@@ -820,9 +878,9 @@ rocke_attention_tiled_2d_spec_t t2d_build(const py::dict& d, Store& st)
     s.use_sinks = a_bool(d, "use_sinks", s.use_sinks);
     s.sliding_window = a_int(d, "sliding_window", s.sliding_window);
     s.has_softcap = a_bool(d, "has_softcap", s.has_softcap);
-    /* extended gfx950 flag stack (harmless defaults on gfx942) */
     s.use_qq_bias = a_bool(d, "use_qq_bias", s.use_qq_bias);
     s.use_alibi = a_bool(d, "use_alibi", s.use_alibi);
+    s.use_additive_bias = a_bool(d, "use_additive_bias", s.use_additive_bias);
     s.num_warps = a_int(d, "num_warps", s.num_warps);
     s.num_seqs = a_int(d, "num_seqs", s.num_seqs);
     if(d.contains("tile_size") && !d["tile_size"].is_none())
@@ -835,66 +893,71 @@ rocke_attention_tiled_2d_spec_t t2d_build(const py::dict& d, Store& st)
         s.has_waves_per_eu = true;
         s.waves_per_eu = d["waves_per_eu"].cast<int>();
     }
-    s.block_m_per_warp = a_int(d, "block_m_per_warp", s.block_m_per_warp);
-    s.use_fp8_mfma_pv = a_bool(d, "use_fp8_mfma_pv", s.use_fp8_mfma_pv);
     s.use_fp8_mfma_qk = a_bool(d, "use_fp8_mfma_qk", s.use_fp8_mfma_qk);
-    s.use_i64_kv_addr = a_bool(d, "use_i64_kv_addr", s.use_i64_kv_addr);
+    s.use_fp8_mfma_pv = a_bool(d, "use_fp8_mfma_pv", s.use_fp8_mfma_pv);
     s.use_register_pv = a_bool(d, "use_register_pv", s.use_register_pv);
+    s.use_v_double_buffer = a_bool(d, "use_v_double_buffer", s.use_v_double_buffer);
+    s.kv_ring_depth = a_int(d, "kv_ring_depth", s.kv_ring_depth);
+    s.use_staggered_iter_wait = a_bool(d, "use_staggered_iter_wait", s.use_staggered_iter_wait);
+    s.use_q_reread = a_bool(d, "use_q_reread", s.use_q_reread);
+    s.use_q_direct_reg = a_bool(d, "use_q_direct_reg", s.use_q_direct_reg);
+    s.use_sched_barrier = a_bool(d, "use_sched_barrier", s.use_sched_barrier);
+    s.sched_barrier_mask = a_int(d, "sched_barrier_mask", s.sched_barrier_mask);
+    s.use_softmax_mfma_interleave
+        = a_bool(d, "use_softmax_mfma_interleave", s.use_softmax_mfma_interleave);
+    s.softmax_interleave_mode = a_int(d, "softmax_interleave_mode", s.softmax_interleave_mode);
+    s.softmax_interleave_groups
+        = a_int(d, "softmax_interleave_groups", s.softmax_interleave_groups);
+    s.block_m_per_warp = a_int(d, "block_m_per_warp", s.block_m_per_warp);
     s.use_mfma_32x32 = a_bool(d, "use_mfma_32x32", s.use_mfma_32x32);
+    s.use_mfma_32x32x8 = a_bool(d, "use_mfma_32x32x8", s.use_mfma_32x32x8);
     s.use_transposed_qk_32x32 = a_bool(d, "use_transposed_qk_32x32", s.use_transposed_qk_32x32);
     s.use_transposed_scalar_state
         = a_bool(d, "use_transposed_scalar_state", s.use_transposed_scalar_state);
     s.use_transposed_invariant_hoist
         = a_bool(d, "use_transposed_invariant_hoist", s.use_transposed_invariant_hoist);
     s.use_transposed_mask_once = a_bool(d, "use_transposed_mask_once", s.use_transposed_mask_once);
-    s.use_grouped_kv2_softmax = a_bool(d, "use_grouped_kv2_softmax", s.use_grouped_kv2_softmax);
-    s.use_early_v_schedule = a_bool(d, "use_early_v_schedule", s.use_early_v_schedule);
-    s.use_fast_paged_kv_desc = a_bool(d, "use_fast_paged_kv_desc", s.use_fast_paged_kv_desc);
-    s.use_qblock_reverse = a_bool(d, "use_qblock_reverse", s.use_qblock_reverse);
-    s.emit_lse = a_bool(d, "emit_lse", s.emit_lse);
-    s.lse_head_major = t2d_lse_head_major(d);
-    /* Every other field the C struct shares with the Python spec. A field left
-     * out here silently keeps its C default, so the native builder would build
-     * a different kernel (e.g. gfx942 x8 transposed specs fail validation
-     * without use_mfma_32x32x8). */
-    s.use_mfma_32x32x8 = a_bool(d, "use_mfma_32x32x8", s.use_mfma_32x32x8);
-    s.use_q_major_grid = a_bool(d, "use_q_major_grid", s.use_q_major_grid);
     s.use_transposed_half_local_pv
         = a_bool(d, "use_transposed_half_local_pv", s.use_transposed_half_local_pv);
-    s.use_transposed_mask_limit
-        = a_bool(d, "use_transposed_mask_limit", s.use_transposed_mask_limit);
     s.use_mfma32_skip_legacy_qreg
         = a_bool(d, "use_mfma32_skip_legacy_qreg", s.use_mfma32_skip_legacy_qreg);
+    s.use_transposed_mask_limit
+        = a_bool(d, "use_transposed_mask_limit", s.use_transposed_mask_limit);
+    s.use_grouped_kv2_softmax = a_bool(d, "use_grouped_kv2_softmax", s.use_grouped_kv2_softmax);
+    s.use_fast_paged_kv_desc = a_bool(d, "use_fast_paged_kv_desc", s.use_fast_paged_kv_desc);
+    s.use_i64_kv_addr = a_bool(d, "use_i64_kv_addr", s.use_i64_kv_addr);
+    s.use_early_v_schedule = a_bool(d, "use_early_v_schedule", s.use_early_v_schedule);
     s.use_agpr_alloc_zero = a_bool(d, "use_agpr_alloc_zero", s.use_agpr_alloc_zero);
-    s.use_k_single_buffer = a_bool(d, "use_k_single_buffer", s.use_k_single_buffer);
     s.use_conflict_free_v = a_bool(d, "use_conflict_free_v", s.use_conflict_free_v);
-    s.use_conflict_free_v_ck_vlds
-        = a_bool(d, "use_conflict_free_v_ck_vlds", s.use_conflict_free_v_ck_vlds);
+    s.use_qblock_reverse = a_bool(d, "use_qblock_reverse", s.use_qblock_reverse);
+    s.emit_lse = a_bool(d, "emit_lse", s.emit_lse);
+    s.lse_head_major = t2d_lse_head_major(d, s.lse_head_major);
     s.use_conflict_free_v_store
         = a_bool(d, "use_conflict_free_v_store", s.use_conflict_free_v_store);
     s.use_conflict_free_v_store_split
         = a_bool(d, "use_conflict_free_v_store_split", s.use_conflict_free_v_store_split);
-    s.use_global_load_lds_k = a_bool(d, "use_global_load_lds_k", s.use_global_load_lds_k);
-    s.use_iglp_opt = a_bool(d, "use_iglp_opt", s.use_iglp_opt);
-    s.use_k_sliced_ldsseq = a_bool(d, "use_k_sliced_ldsseq", s.use_k_sliced_ldsseq);
+    s.use_conflict_free_v_ck_vlds
+        = a_bool(d, "use_conflict_free_v_ck_vlds", s.use_conflict_free_v_ck_vlds);
+    s.use_k_single_buffer = a_bool(d, "use_k_single_buffer", s.use_k_single_buffer);
     s.use_k_sliced_ring = a_bool(d, "use_k_sliced_ring", s.use_k_sliced_ring);
-    s.use_q_direct_global = a_bool(d, "use_q_direct_global", s.use_q_direct_global);
+    s.ring_depth = a_int(d, "ring_depth", s.ring_depth);
+    s.k_slice_hd = a_int(d, "k_slice_hd", s.k_slice_hd);
+    s.use_k_sliced_ldsseq = a_bool(d, "use_k_sliced_ldsseq", s.use_k_sliced_ldsseq);
+    s.use_iglp_opt = a_bool(d, "use_iglp_opt", s.use_iglp_opt);
     s.use_qk_pv_sched_group_barrier
         = a_bool(d, "use_qk_pv_sched_group_barrier", s.use_qk_pv_sched_group_barrier);
-    s.k_slice_hd = a_int(d, "k_slice_hd", s.k_slice_hd);
-    s.ring_depth = a_int(d, "ring_depth", s.ring_depth);
-    s.use_q_direct_reg = a_bool(d, "use_q_direct_reg", s.use_q_direct_reg);
-    s.use_q_reread = a_bool(d, "use_q_reread", s.use_q_reread);
-    s.use_sched_barrier = a_bool(d, "use_sched_barrier", s.use_sched_barrier);
-    s.use_softmax_mfma_interleave
-        = a_bool(d, "use_softmax_mfma_interleave", s.use_softmax_mfma_interleave);
-    s.use_staggered_iter_wait = a_bool(d, "use_staggered_iter_wait", s.use_staggered_iter_wait);
-    s.use_v_double_buffer = a_bool(d, "use_v_double_buffer", s.use_v_double_buffer);
-    s.kv_ring_depth = a_int(d, "kv_ring_depth", s.kv_ring_depth);
-    s.sched_barrier_mask = a_int(d, "sched_barrier_mask", s.sched_barrier_mask);
-    s.softmax_interleave_groups
-        = a_int(d, "softmax_interleave_groups", s.softmax_interleave_groups);
-    s.softmax_interleave_mode = a_int(d, "softmax_interleave_mode", s.softmax_interleave_mode);
+    s.use_q_direct_global = a_bool(d, "use_q_direct_global", s.use_q_direct_global);
+    s.use_global_load_lds_k = a_bool(d, "use_global_load_lds_k", s.use_global_load_lds_k);
+    s.use_q_major_grid = a_bool(d, "use_q_major_grid", s.use_q_major_grid);
+    s.use_kq_lds_pad = a_bool(d, "use_kq_lds_pad", s.use_kq_lds_pad);
+    s.kq_lds_pad_halves = a_int(d, "kq_lds_pad_halves", s.kq_lds_pad_halves);
+    s.use_mask_phase_split = a_bool(d, "use_mask_phase_split", s.use_mask_phase_split);
+    s.use_v_hbm_direct = a_bool(d, "use_v_hbm_direct", s.use_v_hbm_direct);
+    s.use_k_hbm_direct = a_bool(d, "use_k_hbm_direct", s.use_k_hbm_direct);
+    s.use_causal_mask_phase_split
+        = a_bool(d, "use_causal_mask_phase_split", s.use_causal_mask_phase_split);
+    s.causal_top_left = a_bool(d, "causal_top_left", s.causal_top_left);
+    s.right_bound = a_int(d, "right_bound", s.right_bound);
     std::string v;
     if(a_str(d, "dtype", v))
         s.dtype = st.keep(v);
@@ -902,6 +965,12 @@ rocke_attention_tiled_2d_spec_t t2d_build(const py::dict& d, Store& st)
         s.kv_storage_dtype = st.keep(v);
     if(a_str(d, "kv_cache_policy", v))
         s.kv_cache_policy = st.keep(v);
+}
+
+rocke_attention_tiled_2d_spec_t t2d_build(const py::dict& d, Store& st)
+{
+    rocke_attention_tiled_2d_spec_t s = rocke_attention_tiled_2d_spec_default();
+    t2d_read(d, st, s);
     return s;
 }
 
@@ -961,6 +1030,53 @@ std::vector<std::string> t942_verify(const py::dict& d, const std::string& arch)
         rocke_ir_builder_free(&b);
         throw std::runtime_error(m);
     }
+    std::vector<std::string> out = ver_kernel(k);
+    rocke_ir_builder_free(&b);
+    return out;
+}
+
+/* build_gfx942_4warp_gqa over the shared tiled-2D spec. Throws on a build
+ * failure; on success the caller owns (and frees) b. */
+rocke_kernel_def_t* t942_4w_build(const py::dict& d, const std::string& arch, rocke_ir_builder_t* b)
+{
+    require_arch(arch);
+    Store st;
+    rocke_attention_tiled_2d_spec_t s = t2d_build(d, st);
+    rocke_kernel_def_t* k = rocke_build_gfx942_4warp_gqa(b, &s, arch.c_str());
+    if(!k || !rocke_ir_builder_ok(b))
+    {
+        std::string m
+            = std::string("gfx942_attention_4warp_gqa build failed: ") + rocke_ir_builder_error(b);
+        rocke_ir_builder_free(b);
+        throw std::runtime_error(m);
+    }
+    return k;
+}
+std::string t942_4w_lower(const py::dict& d, const std::string& arch)
+{
+    rocke_ir_builder_t b;
+    rocke_kernel_def_t* k = t942_4w_build(d, arch, &b);
+    auto guard = rocke_bindings::own_builder(&b, rocke_ir_builder_free);
+    char* ll = nullptr;
+    char err[ROCKE_ERR_MSG_CAP];
+    err[0] = '\0';
+    rocke_status_t s2 = rocke_lower_kernel_to_llvm_ex(
+        k, resolve_python_llvm_flavor(), arch.c_str(), &ll, err, sizeof err);
+    guard.reset();
+    return take_ll(s2, ll, err, "rocke_engine.gfx942_attention_4warp_gqa_lower_llvm");
+}
+std::string t942_4w_serialize(const py::dict& d, const std::string& arch)
+{
+    rocke_ir_builder_t b;
+    rocke_kernel_def_t* k = t942_4w_build(d, arch, &b);
+    std::string out = ser_kernel(k, "rocke_engine.gfx942_attention_4warp_gqa_serialize_ir");
+    rocke_ir_builder_free(&b);
+    return out;
+}
+std::vector<std::string> t942_4w_verify(const py::dict& d, const std::string& arch)
+{
+    rocke_ir_builder_t b;
+    rocke_kernel_def_t* k = t942_4w_build(d, arch, &b);
     std::vector<std::string> out = ver_kernel(k);
     rocke_ir_builder_free(&b);
     return out;
@@ -1033,38 +1149,26 @@ rocke_attention_tiled_2d_spec_t fkv_build(const py::dict& d, Store& st)
 {
     rocke_attention_tiled_2d_spec_t s = rocke_attention_tiled_2d_spec_default();
     /* make_base() defaults from the standalone emitter */
-    s.head_size = a_int(d, "head_size", 64);
-    s.block_size = a_int(d, "block_size", 32);
-    s.num_query_heads = a_int(d, "num_query_heads", 64);
-    s.num_kv_heads = a_int(d, "num_kv_heads", 8);
-    s.use_sinks = a_bool(d, "use_sinks", false);
-    s.sliding_window = a_int(d, "sliding_window", 0);
-    s.has_softcap = a_bool(d, "has_softcap", false);
-    s.num_warps = a_int(d, "num_warps", 4);
+    s.head_size = 64;
+    s.block_size = 32;
+    s.num_query_heads = 64;
+    s.num_kv_heads = 8;
+    s.dtype = "bf16";
+    s.use_sinks = false;
+    s.sliding_window = 0;
+    s.has_softcap = false;
+    s.num_warps = 4;
     s.has_waves_per_eu = true;
-    s.waves_per_eu = a_int(d, "waves_per_eu", 2);
+    s.waves_per_eu = 2;
     s.has_tile_size = true;
-    s.tile_size = a_int(d, "tile_size", 64);
-    s.block_m_per_warp = a_int(d, "block_m_per_warp", 32);
-    s.use_mfma_32x32 = a_bool(d, "use_mfma_32x32", true);
-    s.use_transposed_qk_32x32 = a_bool(d, "use_transposed_qk_32x32", true);
-    s.use_transposed_scalar_state = a_bool(d, "use_transposed_scalar_state", true);
-    s.use_transposed_mask_once = a_bool(d, "use_transposed_mask_once", true);
-    s.use_fast_paged_kv_desc = a_bool(d, "use_fast_paged_kv_desc", true);
-    /* additive per-config flags */
-    s.use_transposed_half_local_pv
-        = a_bool(d, "use_transposed_half_local_pv", s.use_transposed_half_local_pv);
-    s.use_mfma32_skip_legacy_qreg
-        = a_bool(d, "use_mfma32_skip_legacy_qreg", s.use_mfma32_skip_legacy_qreg);
-    s.use_agpr_alloc_zero = a_bool(d, "use_agpr_alloc_zero", s.use_agpr_alloc_zero);
-    s.use_grouped_kv2_softmax = a_bool(d, "use_grouped_kv2_softmax", s.use_grouped_kv2_softmax);
-    s.emit_lse = a_bool(d, "emit_lse", s.emit_lse);
-    s.lse_head_major = t2d_lse_head_major(d);
-    std::string v;
-    if(a_str(d, "dtype", v))
-        s.dtype = st.keep(v);
-    else
-        s.dtype = "bf16";
+    s.tile_size = 64;
+    s.block_m_per_warp = 32;
+    s.use_mfma_32x32 = true;
+    s.use_transposed_qk_32x32 = true;
+    s.use_transposed_scalar_state = true;
+    s.use_transposed_mask_once = true;
+    s.use_fast_paged_kv_desc = true;
+    t2d_read(d, st, s);
     return s;
 }
 std::string fkv_lower(const py::dict& d, const std::string& arch)
@@ -1149,6 +1253,7 @@ rocke_unified_attention_3d_tiled_spec_t t3d_build(const py::dict& d, Store& st)
     s.has_softcap = a_bool(d, "has_softcap", s.has_softcap);
     s.use_alibi = a_bool(d, "use_alibi", s.use_alibi);
     s.use_qq_bias = a_bool(d, "use_qq_bias", s.use_qq_bias);
+    s.use_additive_bias = a_bool(d, "use_additive_bias", s.use_additive_bias);
     s.num_seqs = a_int(d, "num_seqs", s.num_seqs);
     s.use_invariant_hoist = a_bool(d, "use_invariant_hoist", s.use_invariant_hoist);
     s.use_wide_kv_load = a_bool(d, "use_wide_kv_load", s.use_wide_kv_load);
@@ -1166,6 +1271,8 @@ rocke_unified_attention_3d_tiled_spec_t t3d_build(const py::dict& d, Store& st)
     s.use_decode_grid = a_bool(d, "use_decode_grid", s.use_decode_grid);
     s.use_kv_lds_swizzle = a_bool(d, "use_kv_lds_swizzle", s.use_kv_lds_swizzle);
     s.use_wave_page_id_load = a_bool(d, "use_wave_page_id_load", s.use_wave_page_id_load);
+    s.causal_top_left = a_bool(d, "causal_top_left", s.causal_top_left);
+    s.right_bound = a_int(d, "right_bound", s.right_bound);
     s.emit_lse = a_bool(d, "emit_lse", s.emit_lse);
     std::string v;
     if(a_str(d, "dtype", v))
@@ -1174,47 +1281,22 @@ rocke_unified_attention_3d_tiled_spec_t t3d_build(const py::dict& d, Store& st)
         s.kv_storage_dtype = st.keep(v);
     if(a_str(d, "kv_cache_policy", v))
         s.kv_cache_policy = st.keep(v);
+    if(a_str(d, "kv_layout", v))
+        s.kv_layout = st.keep(v);
     return s;
-}
-
-bool t3d_strided(const py::dict& d)
-{
-    std::string layout = "paged";
-    a_str(d, "kv_layout", layout);
-    if(layout != "paged" && layout != "strided")
-        throw py::value_error("kv_layout must be 'paged' or 'strided'");
-    return layout == "strided";
 }
 
 /* gfx942 3d: the emitter prints the segment, then the reduce derived from it
  * (head_size / num_query_heads / num_kv_heads / dtype / num_segments, plus
  * emit_lse), concatenated. */
-static std::string t3d942_segment_ll(const py::dict& d,
-                                     const rocke_unified_attention_3d_tiled_spec_t& s,
+static std::string t3d942_segment_ll(const rocke_unified_attention_3d_tiled_spec_t& s,
                                      const char* target)
 {
     char* ll = nullptr;
     char err[ROCKE_ERR_MSG_CAP];
     err[0] = '\0';
-    if(!t3d_strided(d))
-    {
-        rocke_status_t status = rocke_build_unified_attention_3d_tiled_gfx942_lower_to_llvm(
-            &s, target, resolve_python_llvm_flavor(), &ll, err, sizeof err);
-        return take_ll(status, ll, err, "rocke_engine.gfx942_attention_tiled_3d_lower_llvm");
-    }
-    rocke_ir_builder_t b;
-    rocke_ir_builder_init(&b, "attention_tiled_3d_segment");
-    rocke_kernel_def_t* k = rocke_build_unified_attention_3d_tiled_strided_gfx942(&b, &s, target);
-    if(!k || !rocke_ir_builder_ok(&b))
-    {
-        std::string message = rocke_ir_builder_error(&b);
-        rocke_ir_builder_free(&b);
-        throw std::runtime_error(message);
-    }
-    auto guard = rocke_bindings::own_builder(&b, rocke_ir_builder_free);
-    rocke_status_t status = rocke_lower_kernel_to_llvm_ex(
-        k, resolve_python_llvm_flavor(), target, &ll, err, sizeof err);
-    guard.reset();
+    rocke_status_t status = rocke_build_unified_attention_3d_tiled_gfx942_lower_to_llvm(
+        &s, target, resolve_python_llvm_flavor(), &ll, err, sizeof err);
     return take_ll(status, ll, err, "rocke_engine.gfx942_attention_tiled_3d_lower_llvm");
 }
 
@@ -1224,7 +1306,7 @@ std::string t3d942_lower(const py::dict& d, const std::string& arch)
     Store st;
     rocke_unified_attention_3d_tiled_spec_t s = t3d_build(d, st);
     const char* target = arch.c_str();
-    std::string out = t3d942_segment_ll(d, s, target);
+    std::string out = t3d942_segment_ll(s, target);
     rocke_unified_attention_reduce_tiled_spec_t r
         = rocke_unified_attention_reduce_tiled_spec_default();
     r.head_size = s.head_size;
@@ -1254,9 +1336,7 @@ std::string t3d942_serialize(const py::dict& d, const std::string& arch)
     kname[0] = '\0';
     rocke_unified_attention_3d_tiled_spec_kernel_name(&s, kname, sizeof kname);
     rocke_ir_builder_init(&b, kname);
-    rocke_kernel_def_t* k
-        = (t3d_strided(d) ? rocke_build_unified_attention_3d_tiled_strided_gfx942
-                          : rocke_build_unified_attention_3d_tiled_gfx942)(&b, &s, arch.c_str());
+    rocke_kernel_def_t* k = rocke_build_unified_attention_3d_tiled_gfx942(&b, &s, arch.c_str());
     if(!k || !rocke_ir_builder_ok(&b))
     {
         std::string m
@@ -1278,9 +1358,7 @@ std::vector<std::string> t3d942_verify(const py::dict& d, const std::string& arc
     kname[0] = '\0';
     rocke_unified_attention_3d_tiled_spec_kernel_name(&s, kname, sizeof kname);
     rocke_ir_builder_init(&b, kname);
-    rocke_kernel_def_t* k
-        = (t3d_strided(d) ? rocke_build_unified_attention_3d_tiled_strided_gfx942
-                          : rocke_build_unified_attention_3d_tiled_gfx942)(&b, &s, arch.c_str());
+    rocke_kernel_def_t* k = rocke_build_unified_attention_3d_tiled_gfx942(&b, &s, arch.c_str());
     if(!k || !rocke_ir_builder_ok(&b))
     {
         std::string m
@@ -1305,9 +1383,7 @@ std::string t3d950_lower(const py::dict& d, const std::string& arch)
     {
         rocke_ir_builder_t b;
         rocke_ir_builder_init(&b, "attention_tiled_3d_segment");
-        rocke_kernel_def_t* k
-            = (t3d_strided(d) ? rocke_build_unified_attention_3d_tiled_strided_gfx950
-                              : rocke_build_unified_attention_3d_tiled_gfx950)(&b, &s, a);
+        rocke_kernel_def_t* k = rocke_build_unified_attention_3d_tiled_gfx950(&b, &s, a);
         if(!k || !rocke_ir_builder_ok(&b))
         {
             std::string m = std::string("gfx950_attention_tiled_3d segment build failed: ")
@@ -1366,9 +1442,7 @@ std::string t3d950_serialize(const py::dict& d, const std::string& arch)
     const char* a = arch.c_str();
     rocke_ir_builder_t b;
     rocke_ir_builder_init(&b, "attention_tiled_3d_segment");
-    rocke_kernel_def_t* k
-        = (t3d_strided(d) ? rocke_build_unified_attention_3d_tiled_strided_gfx950
-                          : rocke_build_unified_attention_3d_tiled_gfx950)(&b, &s, a);
+    rocke_kernel_def_t* k = rocke_build_unified_attention_3d_tiled_gfx950(&b, &s, a);
     if(!k || !rocke_ir_builder_ok(&b))
     {
         std::string m
@@ -1388,9 +1462,7 @@ std::vector<std::string> t3d950_verify(const py::dict& d, const std::string& arc
     const char* a = arch.c_str();
     rocke_ir_builder_t b;
     rocke_ir_builder_init(&b, "attention_tiled_3d_segment");
-    rocke_kernel_def_t* k
-        = (t3d_strided(d) ? rocke_build_unified_attention_3d_tiled_strided_gfx950
-                          : rocke_build_unified_attention_3d_tiled_gfx950)(&b, &s, a);
+    rocke_kernel_def_t* k = rocke_build_unified_attention_3d_tiled_gfx950(&b, &s, a);
     if(!k || !rocke_ir_builder_ok(&b))
     {
         std::string m
@@ -1418,10 +1490,19 @@ void reg3(py::module_& m,
 
 /* ===================== spec_from_problem ===================== */
 
-/* Convert a Python UnifiedAttentionProblem dict to the C struct. */
-static rocke_unified_attn_problem_t problem_dict_to_c(const py::dict& d, Store& st)
+/* UnifiedAttentionProblem fields the C++ selectors do not read yet; each one
+ * steers selection in Python, so accepting them would silently diverge. */
+static const unported_field k_problem_unported[] = {
+    {"fp8_fnuz", false, 0},
+    {"target_ctas", false, 0},
+    {"compile_backend", true, 0},
+};
+
+/* Convert every field of a Python UnifiedAttentionProblem dict to the C
+ * struct. */
+static rocke_unified_attention_problem_t problem_fields_from_dict(const py::dict& d, Store& st)
 {
-    rocke_unified_attn_problem_t p{};
+    rocke_unified_attention_problem_t p{};
     p.total_q = a_int(d, "total_q", 0);
     p.num_seqs = a_int(d, "num_seqs", 0);
     p.num_query_heads = a_int(d, "num_query_heads", 0);
@@ -1435,9 +1516,17 @@ static rocke_unified_attn_problem_t problem_dict_to_c(const py::dict& d, Store& 
     p.use_sinks = a_bool(d, "use_sinks", false);
     p.use_alibi = a_bool(d, "use_alibi", false);
     p.use_qq_bias = a_bool(d, "use_qq_bias", false);
+    p.use_additive_bias = a_bool(d, "use_additive_bias", false);
     p.use_fp8 = a_bool(d, "use_fp8", false);
+    p.fp8_fnuz = a_bool(d, "fp8_fnuz", false);
     p.num_cus = a_int(d, "num_cus", 120);
+    p.target_ctas = a_int(d, "target_ctas", 0);
+    p.waves_per_eu_set = d.contains("waves_per_eu") && !d["waves_per_eu"].is_none();
+    p.waves_per_eu = a_int(d, "waves_per_eu", 0);
     p.num_kv_blocks = a_int(d, "num_kv_blocks", 0);
+    p.causal_top_left = a_bool(d, "causal_top_left", false);
+    p.right_bound = a_int(d, "right_bound", 0);
+    p.emit_lse = a_bool(d, "emit_lse", false);
     std::string v;
     if(a_str(d, "dtype", v))
         p.dtype = st.keep(v);
@@ -1445,13 +1534,25 @@ static rocke_unified_attn_problem_t problem_dict_to_c(const py::dict& d, Store& 
         p.dtype = "bf16";
     if(a_str(d, "q_dtype", v))
         p.q_dtype = st.keep(v);
+    if(a_str(d, "compile_backend", v))
+        p.compile_backend = st.keep(v);
     return p;
 }
 
+/* As problem_fields_from_dict, for the tiled spec selector: rejects the
+ * fields it does not read yet. */
+static rocke_unified_attention_problem_t problem_dict_to_c(const py::dict& d, Store& st)
+{
+    reject_unported(d,
+                    "attn_tiled_spec_from_problem",
+                    k_problem_unported,
+                    sizeof(k_problem_unported) / sizeof(k_problem_unported[0]));
+    return problem_fields_from_dict(d, st);
+}
+
 /* Convert a rocke_attention_tiled_2d_spec_t back to a Python dict so the
- * parity harness can compare specs field-by-field. Returns only the fields
- * the Python _tiled_spec_from_problem populates (same field names as the
- * Python UnifiedAttention2DTiledSpec dataclass). */
+ * parity harness can compare specs field-by-field. Every field of the C struct
+ * is returned, under its Python UnifiedAttention2DTiledSpec name. */
 static py::dict spec_to_dict(const rocke_attention_tiled_2d_spec_t& s)
 {
     py::dict d;
@@ -1465,48 +1566,278 @@ static py::dict spec_to_dict(const rocke_attention_tiled_2d_spec_t& s)
     d["has_softcap"] = s.has_softcap;
     d["use_alibi"] = s.use_alibi;
     d["use_qq_bias"] = s.use_qq_bias;
+    d["use_additive_bias"] = s.use_additive_bias;
     d["num_seqs"] = s.num_seqs;
     d["num_warps"] = s.num_warps;
     d["waves_per_eu"] = s.has_waves_per_eu ? py::cast(s.waves_per_eu) : py::none();
     d["kv_storage_dtype"]
         = s.kv_storage_dtype ? py::cast(std::string(s.kv_storage_dtype)) : py::none();
+    d["use_fp8_mfma_qk"] = s.use_fp8_mfma_qk;
+    d["use_fp8_mfma_pv"] = s.use_fp8_mfma_pv;
+    d["use_register_pv"] = s.use_register_pv;
+    d["use_v_double_buffer"] = s.use_v_double_buffer;
+    d["kv_ring_depth"] = s.kv_ring_depth;
+    d["use_staggered_iter_wait"] = s.use_staggered_iter_wait;
+    d["use_q_reread"] = s.use_q_reread;
+    d["use_q_direct_reg"] = s.use_q_direct_reg;
+    d["use_sched_barrier"] = s.use_sched_barrier;
+    d["sched_barrier_mask"] = s.sched_barrier_mask;
+    d["use_softmax_mfma_interleave"] = s.use_softmax_mfma_interleave;
+    d["softmax_interleave_mode"] = s.softmax_interleave_mode;
+    d["softmax_interleave_groups"] = s.softmax_interleave_groups;
     d["tile_size"] = s.has_tile_size ? py::cast(s.tile_size) : py::none();
     d["block_m_per_warp"] = s.block_m_per_warp;
     d["use_mfma_32x32"] = s.use_mfma_32x32;
+    d["use_mfma_32x32x8"] = s.use_mfma_32x32x8;
     d["use_transposed_qk_32x32"] = s.use_transposed_qk_32x32;
-    d["use_transposed_half_local_pv"] = s.use_transposed_half_local_pv;
     d["use_transposed_scalar_state"] = s.use_transposed_scalar_state;
+    d["use_transposed_invariant_hoist"] = s.use_transposed_invariant_hoist;
     d["use_transposed_mask_once"] = s.use_transposed_mask_once;
-    d["use_transposed_mask_limit"] = s.use_transposed_mask_limit;
+    d["use_transposed_half_local_pv"] = s.use_transposed_half_local_pv;
     d["use_mfma32_skip_legacy_qreg"] = s.use_mfma32_skip_legacy_qreg;
-    d["use_v_double_buffer"] = s.use_v_double_buffer;
-    d["use_early_v_schedule"] = s.use_early_v_schedule;
-    d["use_sched_barrier"] = s.use_sched_barrier;
+    d["use_transposed_mask_limit"] = s.use_transposed_mask_limit;
+    d["use_grouped_kv2_softmax"] = s.use_grouped_kv2_softmax;
     d["use_fast_paged_kv_desc"] = s.use_fast_paged_kv_desc;
-    d["use_register_pv"] = s.use_register_pv;
     d["use_i64_kv_addr"] = s.use_i64_kv_addr;
+    d["use_early_v_schedule"] = s.use_early_v_schedule;
+    d["use_agpr_alloc_zero"] = s.use_agpr_alloc_zero;
+    d["use_conflict_free_v"] = s.use_conflict_free_v;
+    d["use_conflict_free_v_store"] = s.use_conflict_free_v_store;
+    d["use_conflict_free_v_store_split"] = s.use_conflict_free_v_store_split;
+    d["use_conflict_free_v_ck_vlds"] = s.use_conflict_free_v_ck_vlds;
     d["use_k_single_buffer"] = s.use_k_single_buffer;
-    d["use_fp8_mfma_qk"] = s.use_fp8_mfma_qk;
+    d["use_k_sliced_ring"] = s.use_k_sliced_ring;
+    d["ring_depth"] = s.ring_depth;
+    d["k_slice_hd"] = s.k_slice_hd;
+    d["use_k_sliced_ldsseq"] = s.use_k_sliced_ldsseq;
+    d["use_iglp_opt"] = s.use_iglp_opt;
+    d["use_qk_pv_sched_group_barrier"] = s.use_qk_pv_sched_group_barrier;
+    d["use_q_direct_global"] = s.use_q_direct_global;
+    d["kv_cache_policy"]
+        = s.kv_cache_policy ? py::cast(std::string(s.kv_cache_policy)) : py::none();
+    d["use_global_load_lds_k"] = s.use_global_load_lds_k;
+    d["use_q_major_grid"] = s.use_q_major_grid;
+    d["use_kq_lds_pad"] = s.use_kq_lds_pad;
+    d["kq_lds_pad_halves"] = s.kq_lds_pad_halves;
+    d["use_mask_phase_split"] = s.use_mask_phase_split;
+    d["use_v_hbm_direct"] = s.use_v_hbm_direct;
+    d["use_k_hbm_direct"] = s.use_k_hbm_direct;
+    d["use_causal_mask_phase_split"] = s.use_causal_mask_phase_split;
+    d["causal_top_left"] = s.causal_top_left;
+    d["right_bound"] = s.right_bound;
+    d["use_qblock_reverse"] = s.use_qblock_reverse;
     d["emit_lse"] = s.emit_lse;
-    if(s.lse_head_major)
-        d["lse_layout"] = "head_major";
+    d["lse_layout"] = s.lse_head_major ? "head_major" : "token_major";
     return d;
 }
 
-py::dict attn_tiled_spec_from_problem(const py::dict& d, const std::string& arch)
+/* Run a spec validator (the port of a spec class __post_init__) and raise what
+ * Python would: NotImplementedError for ROCKE_ERR_NOTIMPL, else ValueError. */
+template <class Fn>
+static void raise_if_spec_invalid(const char* who, Fn&& validate)
+{
+    rocke_ir_builder_t b;
+    rocke_status_t code = ROCKE_OK;
+    std::string err;
+    if(rocke_ir_builder_init(&b, who) != ROCKE_OK)
+        throw std::runtime_error(std::string(who) + ": builder init failed");
+    try
+    {
+        if(!validate(&b))
+        {
+            const char* m = rocke_ir_builder_error(&b);
+            code = rocke_ir_builder_status(&b);
+            err = (m != nullptr && *m != '\0') ? m : "spec validation failed";
+        }
+    }
+    catch(const ckc::Error& e)
+    {
+        code = e.code();
+        err = e.what();
+    }
+    rocke_ir_builder_free(&b);
+    if(err.empty())
+        return;
+    if(code == ROCKE_ERR_NOTIMPL)
+        raise_not_implemented(err);
+    throw py::value_error(err);
+}
+
+/* Python attention_unified._tiled_spec_from_problem: build the spec (Python
+ * validates it in the spec class __post_init__), then resolve its LDS budget.
+ * ``hook_arch`` is the one arch the calling hook serves. */
+py::dict attn_tiled_spec_from_problem(const py::dict& d,
+                                      const std::string& arch,
+                                      const std::string& hook_arch)
 {
     require_arch(arch);
+    if(arch != hook_arch)
+        raise_not_implemented("attn_tiled_spec_from_problem: this hook builds only the " + hook_arch
+                              + " spec (got " + arch + ")");
     Store st;
-    rocke_unified_attn_problem_t p = problem_dict_to_c(d, st);
+    rocke_unified_attention_problem_t p = problem_dict_to_c(d, st);
     const char* a = arch.c_str();
     rocke_attention_tiled_2d_spec_t spec = rocke_unified_attn_tiled_spec_from_problem(&p, a);
-    /* Run the LDS-budget resolver (mirrors the Python _resolve_lds_budget call
-     * that attention_unified._tiled_spec_from_problem makes after building the spec). */
-    char reason[256] = {};
-    rocke_unified_attn_set_resolved_arch(a);
-    rocke_unified_attn_resolve_lds_budget(&spec, reason, sizeof(reason));
-    rocke_unified_attn_set_resolved_arch(NULL);
+    /* Output contract, not a tuning choice (Python's wrapper sets it). */
+    if(p.emit_lse)
+        spec.emit_lse = true;
+    if(arch == "gfx942")
+        raise_if_spec_invalid("attn_tiled_spec_from_problem", [&](rocke_ir_builder_t* b) {
+            return rocke_attention_tiled_2d_spec_validate(b, &spec);
+        });
+    char reason[2048] = {};
+    if(!rocke_unified_attn_resolve_lds_budget(&spec, a, reason, sizeof(reason)))
+        throw std::runtime_error(reason);
     return spec_to_dict(spec);
+}
+
+/* Every public tiled-2D selector on one problem, keyed by the Python selector's
+ * name without its leading underscore, so a parity test can compare each one
+ * with Python on any arch, not only the arches C++ assembles a spec for. */
+static py::dict tiled_2d_selectors(const py::dict& d, const std::string& arch)
+{
+    Store st;
+    const rocke_unified_attention_problem_t p = problem_fields_from_dict(d, st);
+    const rocke_unified_attention_problem_t* pp = &p;
+    const char* a = arch.c_str();
+    py::dict r;
+    r["select_2d_tile_size"] = rocke_unified_attn_select_2d_tile_size(pp, a);
+    r["select_2d_num_warps"] = rocke_unified_attn_select_2d_num_warps(pp, a);
+    r["select_2d_block_m_per_warp"] = rocke_unified_attn_select_2d_block_m_per_warp(pp, a);
+    int wpe = 0;
+    r["select_2d_waves_per_eu"]
+        = rocke_unified_attn_select_2d_waves_per_eu(pp, a, &wpe) ? py::cast(wpe) : py::none();
+    const char* kv = rocke_unified_attn_kv_storage_dtype(pp);
+    r["kv_storage_dtype"] = kv ? py::cast(std::string(kv)) : py::none();
+
+    r["enable_combo_2d"] = rocke_unified_attn_enable_combo_2d(pp, a);
+    r["enable_transposed_qk_32x32"] = rocke_unified_attn_enable_transposed_qk_32x32(pp, a);
+    r["enable_mfma_32x32"] = rocke_unified_attn_enable_mfma_32x32(pp, a);
+    r["enable_transposed_half_local_pv"]
+        = rocke_unified_attn_enable_transposed_half_local_pv(pp, a);
+    r["enable_register_pv"] = rocke_unified_attn_enable_register_pv(pp, a);
+    r["enable_single_batch_combo"] = rocke_unified_attn_enable_single_batch_combo(pp, a);
+    r["enable_transposed_subflags"] = rocke_unified_attn_enable_transposed_subflags(pp, a);
+    r["enable_d128_small_tile"] = rocke_unified_attn_enable_d128_small_tile(pp, a);
+    r["enable_softmax_mfma_interleave"] = rocke_unified_attn_enable_softmax_mfma_interleave(pp, a);
+    r["enable_v_double_buffer"] = rocke_unified_attn_enable_v_double_buffer(pp, a);
+    r["enable_early_v_schedule"] = rocke_unified_attn_enable_early_v_schedule(pp, a);
+
+    r["gfx942_4warp_fast"] = rocke_unified_attn_gfx942_4warp_fast(pp, a);
+    r["enable_gfx942_fp16_flash"] = rocke_unified_attn_enable_gfx942_fp16_flash(pp, a);
+    r["enable_gfx942_bf16_flash"] = rocke_unified_attn_enable_gfx942_bf16_flash(pp, a);
+    r["enable_gfx942_d128_smalltile_doublek"]
+        = rocke_unified_attn_enable_gfx942_d128_smalltile_doublek(pp, a);
+    r["gfx942_bf16_wide_tile_size"] = rocke_unified_attn_gfx942_bf16_wide_tile_size(pp, a);
+    int nw = 0;
+    bool single_k = false;
+    rocke_unified_attn_gfx942_bf16_wide_geometry(pp, a, &nw, &single_k);
+    r["gfx942_bf16_wide_geometry"] = py::make_tuple(nw, single_k);
+    r["gfx942_bf16_wide_use_cfvst"] = rocke_unified_attn_gfx942_bf16_wide_use_cfvst(pp);
+    r["gfx942_flash_use_cfvst"] = rocke_unified_attn_gfx942_flash_use_cfvst(pp);
+    r["gfx942_flash_use_single_buffer"] = rocke_unified_attn_gfx942_flash_use_single_buffer(pp);
+    r["enable_gfx942_flash_mask_limit"] = rocke_unified_attn_enable_gfx942_flash_mask_limit(pp, a);
+    r["enable_gfx942_flash_k_sliced_ring"]
+        = rocke_unified_attn_enable_gfx942_flash_k_sliced_ring(pp, a);
+    r["select_gfx942_flash_ring_depth"] = rocke_unified_attn_select_gfx942_flash_ring_depth(pp, a);
+    r["select_gfx942_flash_k_slice_hd"] = rocke_unified_attn_select_gfx942_flash_k_slice_hd(pp);
+    r["select_gfx942_flash_num_warps"] = rocke_unified_attn_select_gfx942_flash_num_warps(pp, a);
+    return r;
+}
+
+static py::dict spec_3d_to_dict(const rocke_unified_attention_3d_tiled_spec_t& s)
+{
+    py::dict d;
+    d["head_size"] = s.head_size;
+    d["block_size"] = s.block_size;
+    d["num_query_heads"] = s.num_query_heads;
+    d["num_kv_heads"] = s.num_kv_heads;
+    d["dtype"] = s.dtype ? std::string(s.dtype) : std::string("");
+    d["use_sinks"] = s.use_sinks;
+    d["sliding_window"] = s.sliding_window;
+    d["has_softcap"] = s.has_softcap;
+    d["num_segments"] = s.num_segments;
+    d["use_alibi"] = s.use_alibi;
+    d["use_qq_bias"] = s.use_qq_bias;
+    d["num_seqs"] = s.num_seqs;
+    d["waves_per_eu"] = s.has_waves_per_eu ? py::cast(s.waves_per_eu) : py::none();
+    d["kv_storage_dtype"]
+        = s.kv_storage_dtype ? py::cast(std::string(s.kv_storage_dtype)) : py::none();
+    d["tile_size_override"]
+        = s.has_tile_size_override ? py::cast(s.tile_size_override) : py::none();
+    d["use_invariant_hoist"] = s.use_invariant_hoist;
+    d["use_wide_kv_load"] = s.use_wide_kv_load;
+    d["use_i64_kv_addr"] = s.use_i64_kv_addr;
+    d["use_decode_grid"] = s.use_decode_grid;
+    d["kv_cache_policy"]
+        = s.kv_cache_policy ? py::cast(std::string(s.kv_cache_policy)) : py::none();
+    d["use_kv_lds_swizzle"] = s.use_kv_lds_swizzle;
+    d["use_wave_page_id_load"] = s.use_wave_page_id_load;
+    d["kv_layout"] = std::string(s.kv_layout ? s.kv_layout : "paged");
+    d["use_additive_bias"] = s.use_additive_bias;
+    d["emit_lse"] = s.emit_lse;
+    d["causal_top_left"] = s.causal_top_left;
+    d["right_bound"] = s.right_bound;
+    return d;
+}
+
+/* Python attention_unified._tiled_3d_spec_from_problem: build the 3D spec (Python
+ * validates it in the spec class __post_init__). ``hook_arch`` is the one arch
+ * the calling hook serves. */
+static py::dict attn_tiled_3d_spec_from_problem(const py::dict& d,
+                                                const std::string& arch,
+                                                const std::string& hook_arch)
+{
+    require_arch(arch);
+    if(arch != hook_arch)
+        raise_not_implemented("attn_tiled_3d_spec_from_problem: this hook builds only the "
+                              + hook_arch + " spec (got " + arch + ")");
+    Store st;
+    rocke_unified_attention_problem_t p = problem_fields_from_dict(d, st);
+    if(p.num_kv_heads <= 0 || p.num_query_heads % p.num_kv_heads != 0)
+        throw py::value_error("num_query_heads must be divisible by num_kv_heads");
+    rocke_unified_attention_3d_tiled_spec_t spec
+        = rocke_unified_attn_tiled_3d_spec_from_problem(&p, arch.c_str());
+    raise_if_spec_invalid("attn_tiled_3d_spec_from_problem", [&](rocke_ir_builder_t* b) {
+        return arch == "gfx950" ? rocke_gfx950_unified_attention_3d_tiled_spec_validate(b, &spec)
+                                : rocke_unified_attention_3d_tiled_spec_validate(b, &spec);
+    });
+    return spec_3d_to_dict(spec);
+}
+
+static py::dict config_2d_to_dict(const rocke_attention_2d_config_t& c)
+{
+    py::dict d;
+    d["BLOCK_M"] = c.block_m;
+    d["BLOCK_Q"] = c.block_q;
+    d["TILE_SIZE"] = c.tile_size;
+    d["num_warps"] = c.num_warps;
+    d["num_stages"] = c.num_stages;
+    d["waves_per_eu"] = c.waves_per_eu;
+    return d;
+}
+
+static py::dict config_3d_to_dict(const rocke_attention_3d_config_t& c)
+{
+    py::dict d;
+    d["TILE_SIZE"] = c.tile_size;
+    d["NUM_SEGMENTS_PER_SEQ"] = c.num_segments_per_seq;
+    d["num_warps"] = c.num_warps;
+    d["num_stages"] = c.num_stages;
+    d["waves_per_eu"] = c.waves_per_eu;
+    return d;
+}
+
+[[noreturn]] static void raise_bad_problem(const char* fn)
+{
+    throw py::value_error(std::string(fn)
+                          + ": invalid problem (num_query_heads must be divisible by "
+                            "num_kv_heads, and the 2D program count must be positive)");
+}
+
+static py::tuple supports_result(bool ok, const char* reason)
+{
+    return py::make_tuple(ok, std::string(reason));
 }
 
 void register_attention(py::module_& m)
@@ -1519,6 +1850,7 @@ void register_attention(py::module_& m)
     reg3(m, "sparse_attention", &sparse_lower, &sparse_serialize, &sparse_verify);
     reg3(m, "sage_attention", &sage_lower, &sage_serialize, &sage_verify);
     reg3(m, "gfx942_attention_tiled_2d", &t942_lower, &t942_serialize, &t942_verify);
+    reg3(m, "gfx942_attention_4warp_gqa", &t942_4w_lower, &t942_4w_serialize, &t942_4w_verify);
     reg3(m, "gfx950_attention_tiled_2d", &t950_lower, &t950_serialize, &t950_verify);
     reg3(m, "gfx950_attention_tiled_2d_fastkv_regp", &fkv_lower, &fkv_serialize, &fkv_verify);
     reg3(m, "gfx942_attention_tiled_3d", &t3d942_lower, &t3d942_serialize, &t3d942_verify);
@@ -1527,11 +1859,187 @@ void register_attention(py::module_& m)
     m.def(
         "gfx950_attn_tiled_spec_from_problem",
         [](const py::dict& d, const std::string& arch) {
-            return attn_tiled_spec_from_problem(d, arch);
+            return attn_tiled_spec_from_problem(d, arch, "gfx950");
         },
         py::arg("problem"),
         py::arg("arch"),
         "Run the gfx950 tiled-2D selector on a UnifiedAttentionProblem dict "
         "and return the assembled spec as a dict (mirrors "
-        "attention_spec_builder._tiled_spec_from_problem).");
+        "attention_unified._tiled_spec_from_problem).");
+    m.def(
+        "gfx942_attn_tiled_spec_from_problem",
+        [](const py::dict& d, const std::string& arch) {
+            return attn_tiled_spec_from_problem(d, arch, "gfx942");
+        },
+        py::arg("problem"),
+        py::arg("arch"),
+        "Run the gfx942 tiled-2D selector on a UnifiedAttentionProblem dict "
+        "and return the assembled spec as a dict (mirrors "
+        "attention_unified._tiled_spec_from_problem: raises ValueError where the "
+        "spec fails validation, RuntimeError where its LDS budget cannot be met).");
+    m.def(
+        "unified_attention_resolve_lds_budget",
+        [](const py::dict& d, const std::string& arch) {
+            require_arch(arch);
+            Store st;
+            rocke_attention_tiled_2d_spec_t spec = t2d_build(d, st);
+            char reason[2048] = {};
+            if(!rocke_unified_attn_resolve_lds_budget(&spec, arch.c_str(), reason, sizeof(reason)))
+                throw std::runtime_error(reason);
+            return spec_to_dict(spec);
+        },
+        py::arg("spec"),
+        py::arg("arch"),
+        "attention_unified._resolve_lds_budget(spec, arch) on a tiled-2D spec dict: the "
+        "resolved spec as a dict, or RuntimeError when no lever fits.");
+    m.def("unified_attention_tiled_2d_selectors",
+          &tiled_2d_selectors,
+          py::arg("problem"),
+          py::arg("arch"),
+          "Every public C++ tiled-2D selector on a UnifiedAttentionProblem dict, "
+          "keyed by the Python selector name without its leading underscore.");
+
+    for(const char* a : {"gfx942", "gfx950"})
+    {
+        std::string hook_arch(a);
+        m.def((hook_arch + "_attn_tiled_3d_spec_from_problem").c_str(),
+              [hook_arch](const py::dict& d, const std::string& arch) {
+                  return attn_tiled_3d_spec_from_problem(d, arch, hook_arch);
+              },
+              py::arg("problem"),
+              py::arg("arch"),
+              "Run the tiled-3D selectors on a UnifiedAttentionProblem dict and return "
+              "the assembled spec as a dict (mirrors "
+              "attention_unified._tiled_3d_spec_from_problem).");
+    }
+    m.def(
+        "unified_attention_select_path",
+        [](const py::dict& d) {
+            Store st;
+            rocke_unified_attention_problem_t p = problem_fields_from_dict(d, st);
+            const char* path = rocke_unified_attention_problem_select_path(&p);
+            if(path == NULL)
+                raise_bad_problem("unified_attention_select_path");
+            return std::string(path);
+        },
+        py::arg("problem"),
+        "UnifiedAttentionProblem.select_path() on a problem dict: '2d' or '3d'.");
+    m.def(
+        "unified_attention_select_2d",
+        [](const py::dict& d) {
+            Store st;
+            rocke_unified_attention_problem_t p = problem_fields_from_dict(d, st);
+            rocke_attention_2d_config_t c{};
+            if(!rocke_unified_attention_problem_select_2d(&p, &c))
+                raise_bad_problem("unified_attention_select_2d");
+            return config_2d_to_dict(c);
+        },
+        py::arg("problem"),
+        "UnifiedAttentionProblem.select_2d() as an Attention2DConfig field dict.");
+    m.def(
+        "unified_attention_select_3d",
+        [](const py::dict& d) {
+            Store st;
+            rocke_unified_attention_problem_t p = problem_fields_from_dict(d, st);
+            rocke_attention_3d_config_t attn{};
+            rocke_attention_3d_config_t reduce{};
+            if(!rocke_unified_attention_problem_select_3d(&p, &attn, &reduce))
+                raise_bad_problem("unified_attention_select_3d");
+            return py::make_tuple(config_3d_to_dict(attn), config_3d_to_dict(reduce));
+        },
+        py::arg("problem"),
+        "UnifiedAttentionProblem.select_3d() as two Attention3DConfig field dicts.");
+    m.def(
+        "unified_attention_supports_scalar",
+        [](const py::dict& d, const std::string& arch) {
+            Store st;
+            rocke_unified_attention_problem_t p = problem_fields_from_dict(d, st);
+            char reason[1024] = {};
+            bool ok
+                = rocke_unified_attention_supports_scalar(&p, arch.c_str(), reason, sizeof(reason));
+            return supports_result(ok, reason);
+        },
+        py::arg("problem"),
+        py::arg("arch"),
+        "supports_native_unified_attention(problem, arch) -> (ok, reason).");
+    m.def(
+        "unified_attention_supports_tiled_2d",
+        [](const py::dict& d, const std::string& arch) {
+            Store st;
+            rocke_unified_attention_problem_t p = problem_fields_from_dict(d, st);
+            char reason[1024] = {};
+            bool ok = rocke_unified_attention_supports_tiled_2d(
+                &p, arch.c_str(), reason, sizeof(reason));
+            return supports_result(ok, reason);
+        },
+        py::arg("problem"),
+        py::arg("arch"),
+        "supports_native_unified_attention_tiled(problem, arch) -> (ok, reason).");
+    m.def(
+        "gfx942_attention_tiled_2d_supports_spec",
+        [](const py::dict& d, const std::string& arch) {
+            Store st;
+            rocke_attention_tiled_2d_spec_t s = t2d_build(d, st);
+            char reason[1024] = {};
+            bool ok = rocke_gfx942_attention_tiled_2d_supports_spec(
+                &s, arch.c_str(), reason, sizeof(reason));
+            return supports_result(ok, reason);
+        },
+        py::arg("spec"),
+        py::arg("arch"),
+        "gfx942 supports_tiled_2d_spec(spec, arch) -> (ok, reason).");
+    m.def(
+        "gfx942_attention_4warp_gqa_supports_spec",
+        [](const py::dict& d, const std::string& arch) {
+            Store st;
+            rocke_attention_tiled_2d_spec_t s = t2d_build(d, st);
+            char reason[1024] = {};
+            bool ok = rocke_gfx942_attention_4warp_gqa_supports_spec(
+                &s, arch.c_str(), reason, sizeof(reason));
+            return supports_result(ok, reason);
+        },
+        py::arg("spec"),
+        py::arg("arch"),
+        "gfx942 supports_gfx942_4warp_gqa_spec(spec, arch) -> (ok, reason).");
+    m.def(
+        "gfx942_gqa_fold_eligible",
+        [](int head_size,
+           int num_queries_per_kv,
+           int sliding_window,
+           const std::string& dtype,
+           int block_size) {
+            return rocke_gfx942_gqa_fold_eligible(
+                head_size, num_queries_per_kv, sliding_window, dtype.c_str(), block_size);
+        },
+        py::arg("head_size"),
+        py::arg("num_queries_per_kv"),
+        py::arg("sliding_window"),
+        py::arg("dtype"),
+        py::arg("block_size"),
+        "gfx942_gqa_fold_eligible(...) -> bool.");
+    m.def(
+        "gfx942_4warp_launch_grid",
+        [](const py::dict& d) {
+            Store st;
+            rocke_unified_attention_problem_t p = problem_fields_from_dict(d, st);
+            int grid[3] = {0, 0, 0};
+            if(!rocke_gfx942_4warp_launch_grid(&p, grid))
+                raise_bad_problem("gfx942_4warp_launch_grid");
+            return py::make_tuple(grid[0], grid[1], grid[2]);
+        },
+        py::arg("problem"),
+        "gfx942_4warp_launch_grid(problem) -> (x, y, z).");
+    m.def(
+        "unified_attention_supports_tiled_3d",
+        [](const py::dict& d, const std::string& arch) {
+            Store st;
+            rocke_unified_attention_problem_t p = problem_fields_from_dict(d, st);
+            char reason[1024] = {};
+            bool ok = rocke_unified_attention_supports_tiled_3d(
+                &p, arch.c_str(), reason, sizeof(reason));
+            return supports_result(ok, reason);
+        },
+        py::arg("problem"),
+        py::arg("arch"),
+        "supports_native_unified_attention_3d_tiled(problem, arch) -> (ok, reason).");
 }

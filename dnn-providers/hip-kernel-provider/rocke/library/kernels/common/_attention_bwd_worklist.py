@@ -3,7 +3,9 @@
 
 """CTA work decode of the KV-parallel attention backward main kernels.
 
-Family glue for the backward kernels (Python-only, no C++ twin). Everything
+Family glue for the backward kernels. C++ twin:
+``platform/cpp/include/rocke/helper_rocke.instances.common._attention_bwd_worklist.h``,
+which lists what stays Python (the host-only helpers). Everything
 here emits CTA-uniform integer IR through the builder it is handed and only
 calls integer methods of ``IRBuilder``, so the duck-typed host evaluator of the
 tests can execute it.

@@ -16,7 +16,8 @@
  *   rocke_gfx942_attention_tiled_3d_issue_k_load          (lines 604-617)
  *   rocke_gfx942_attention_tiled_3d_issue_v_load          (lines 619-632)
  *   rocke_gfx942_attention_tiled_3d_issue_wide_load       (lines 645-658)
- *   rocke_gfx942_attention_tiled_3d_issue_fp8_dequant_loads (lines 669-701)
+ *   rocke_gfx942_attention_tiled_3d_fp8_chunk_offsets, _issue_fp8_loads,
+ *     _store_fp8_dequant, _zero_fp8_v_rows_past_sequence (fp8 K/V)
  *   rocke_gfx942_attention_tiled_3d_issue_k               (lines 705-711)
  *   rocke_gfx942_attention_tiled_3d_issue_v               (lines 713-719)
  *   + the wave page-id window helpers (_load_page_id_window,
@@ -38,6 +39,7 @@
 #include <stdio.h> /* snprintf */
 #include <string.h>
 
+#include "rocke/instance_attention_kv_seq_tail_internal.h"
 #include "rocke/instance_gfx942_attention_tiled_3d_internal.h"
 
 /* ============================================================ *
@@ -843,6 +845,23 @@ void rocke_gfx942_attention_tiled_3d_issue_v_load(rocke_gfx942_attention_tiled_3
     rocke_value_t* buf_off_i64 = rocke_b_zext(B, buf_off_i32, rocke_i64());
     rocke_value_t* V_buf_base = rocke_b_smem_ptr_add(B, ctx->V_lds_addr, buf_off_i64);
 
+    /* Paged V rows past the sequence load zero (_attention_kv_seq_tail); strided
+     * offsets are bounded already. */
+    const bool v_tail = !ctx->strided_kv;
+    rocke_kv_v_tile_bound_t v_bound;
+    if(v_tail)
+        rocke_kv_v_tile_bound_init(&v_bound,
+                                   B,
+                                   ctx->seq_len,
+                                   kv_tile_idx,
+                                   CFG.T,
+                                   CFG.HD,
+                                   KV_HALVES_PER_CALL,
+                                   ctx->lane_half_base,
+                                   NULL,
+                                   true,
+                                   true);
+
     for(call = 0; call < kv_calls_per_tile; ++call)
     {
         rocke_value_t* linear_half
@@ -880,6 +899,8 @@ void rocke_gfx942_attention_tiled_3d_issue_v_load(rocke_gfx942_attention_tiled_3
                 rocke_gfx942_attention_tiled_3d_kv_src_linear(ctx, linear_half),
                 ctx->kv_head_idx);
         }
+        if(v_tail)
+            voff = rocke_kv_v_tile_bound_apply(&v_bound, voff, call, NULL, linear_half);
         rocke_value_t* v_dst = rocke_b_smem_ptr_add(
             B, V_buf_base, rocke_b_const_i64(B, (int64_t)call * bytes_per_call));
         rocke_b_async_buffer_load_lds_addr(
@@ -1054,6 +1075,9 @@ void rocke_gfx942_attention_tiled_3d_issue_wide_load(
     rocke_value_t* lds = is_value ? ctx->V_lds : ctx->K_lds;
     int call;
 
+    /* V rows past the sequence read its last row instead. */
+    rocke_value_t* last_row
+        = is_value ? rocke_kv_last_row_in_sequence(B, ctx->seq_len, kv_tile_idx, CFG.T) : NULL;
     for(call = 0; call < wide_chunks_per_thread; ++call)
     {
         rocke_value_t* chunk_call = rocke_b_const_i32(B, call);
@@ -1062,6 +1086,8 @@ void rocke_gfx942_attention_tiled_3d_issue_wide_load(
         rocke_value_t* linear_half = rocke_b_mul(B, chunk_id, rocke_b_const_i32(B, WIDE_ELEMS));
         rocke_value_t* row = rocke_b_div(B, linear_half, rocke_b_const_i32(B, HD));
         rocke_value_t* col = rocke_b_mod(B, linear_half, rocke_b_const_i32(B, HD));
+        /* The global row it is read from; the LDS row stays `row`. */
+        rocke_value_t* src_row = is_value ? rocke_b_smin(B, row, last_row) : row;
         rocke_value_t* elem_off;
         rocke_mem_opts_t opts = ROCKE_MEM_OPTS_INIT;
         if(page_id != NULL)
@@ -1071,15 +1097,21 @@ void rocke_gfx942_attention_tiled_3d_issue_wide_load(
             rocke_value_t* blk_e = rocke_b_mul(B, tok_e, rocke_b_const_i32(B, CFG.BS));
             rocke_value_t* page_base = rocke_gfx942_attention_tiled_3d_tile_base(
                 ctx, page_id, kv_tile_idx, blk_e, tok_e);
-            rocke_value_t* row_off = rocke_b_mul(B, row, tok_e);
+            rocke_value_t* row_off = rocke_b_mul(B, src_row, tok_e);
             rocke_value_t* head_off = rocke_b_mul(B, ctx->kv_head_idx, rocke_b_const_i32(B, HD));
             rocke_value_t* in_page = rocke_b_add(B, rocke_b_add(B, row_off, head_off), col);
             elem_off = rocke_b_add(B, page_base, in_page);
         }
         else
         {
+            rocke_value_t* src_half = linear_half;
+            if(is_value)
+            {
+                rocke_value_t* hd = rocke_b_const_i32(B, HD);
+                src_half = rocke_b_add(B, rocke_b_mul(B, src_row, hd), col);
+            }
             rocke_value_t* voff
-                = rocke__paged_kv_offset(ctx, kv_tile_idx, linear_half, ctx->kv_head_idx);
+                = rocke__paged_kv_offset(ctx, kv_tile_idx, src_half, ctx->kv_head_idx);
             elem_off = rocke_b_div(B, voff, rocke_b_const_i32(B, KV_BYTES));
         }
         rocke_value_t* vec;
@@ -1094,45 +1126,80 @@ void rocke_gfx942_attention_tiled_3d_issue_wide_load(
     }
 }
 
-/* _issue_fp8_dequant_loads(kv_tile_idx, buf_idx, lds_token) -- lines 669-701.
- * is_value: false => "K" (key, k_scale, K_lds), true => "V".
- *
- * The dequant chain (dequant_fp8x8_to_dtype, helpers/attention.py:722-757) is
- * inlined here byte-for-byte: split <8 x fp8> into two <4 x fp8> quads ->
- * cvt_pk_f32_fp8x4 each -> fmul by scale -> cast_f32_to(dtype) -> vec_pack. */
-void rocke_gfx942_attention_tiled_3d_issue_fp8_dequant_loads(
+/* _fp8_chunk_offsets(kv_tile_idx): (offset, row, col) of each of a tile's
+ * per-thread fp8 chunks; the offsets carry the tile's page lookup. */
+void rocke_gfx942_attention_tiled_3d_fp8_chunk_offsets(
     rocke_gfx942_attention_tiled_3d_build_ctx_t* ctx,
-    bool is_value,
     rocke_value_t* kv_tile_idx,
-    rocke_value_t* buf_idx)
+    rocke_value_t** voff,
+    rocke_value_t** row,
+    rocke_value_t** col)
 {
     const int HD = CFG.HD;
     const int THREADS = CFG.THREADS;
     const int fp8_elems_per_chunk = CFG.fp8_elems_per_chunk;
-    const int fp8_chunks_per_thread = CFG.fp8_chunks_per_thread;
-    const rocke_type_t* dtype = CFG.dtype;
-    rocke_value_t* scale = is_value ? ctx->v_scale_p : ctx->k_scale_p;
-    rocke_value_t* lds = is_value ? ctx->V_lds : ctx->K_lds;
-    rocke_value_t* src = is_value ? ctx->value : ctx->key;
-    int call, i;
+    int call;
 
-    for(call = 0; call < fp8_chunks_per_thread; ++call)
+    for(call = 0; call < CFG.fp8_chunks_per_thread; ++call)
     {
         rocke_value_t* chunk_call = rocke_b_const_i32(B, call);
         rocke_value_t* chunk_thr = rocke_b_const_i32(B, THREADS);
         rocke_value_t* chunk_mul = rocke_b_mul(B, chunk_call, chunk_thr);
         rocke_value_t* chunk_id = rocke_b_add(B, chunk_mul, ctx->tid);
-        rocke_value_t* row
-            = rocke_b_div(B, chunk_id, rocke_b_const_i32(B, HD / fp8_elems_per_chunk));
+        rocke_value_t* r = rocke_b_div(B, chunk_id, rocke_b_const_i32(B, HD / fp8_elems_per_chunk));
         rocke_value_t* col_mod
             = rocke_b_mod(B, chunk_id, rocke_b_const_i32(B, HD / fp8_elems_per_chunk));
-        rocke_value_t* col = rocke_b_mul(B, col_mod, rocke_b_const_i32(B, fp8_elems_per_chunk));
-        rocke_value_t* lhf_mul = rocke_b_mul(B, row, rocke_b_const_i32(B, HD));
-        rocke_value_t* linear_half_first = rocke_b_add(B, lhf_mul, col);
-        rocke_value_t* voff
-            = rocke__paged_kv_offset(ctx, kv_tile_idx, linear_half_first, ctx->kv_head_idx);
-        rocke_value_t* fp8_vec = rocke_b_global_load_vN(
-            B, src, voff, rocke_fp8e4m3(), fp8_elems_per_chunk, fp8_elems_per_chunk);
+        rocke_value_t* c = rocke_b_mul(B, col_mod, rocke_b_const_i32(B, fp8_elems_per_chunk));
+        rocke_value_t* lhf_mul = rocke_b_mul(B, r, rocke_b_const_i32(B, HD));
+        rocke_value_t* linear_half_first = rocke_b_add(B, lhf_mul, c);
+        voff[call] = rocke__paged_kv_offset(ctx, kv_tile_idx, linear_half_first, ctx->kv_head_idx);
+        row[call] = r;
+        col[call] = c;
+    }
+}
+
+/* _issue_fp8_loads(chunks, lds_token): is_value selects key/value. */
+void rocke_gfx942_attention_tiled_3d_issue_fp8_loads(
+    rocke_gfx942_attention_tiled_3d_build_ctx_t* ctx,
+    bool is_value,
+    rocke_value_t* const* voff,
+    rocke_value_t** loaded)
+{
+    rocke_value_t* src = is_value ? ctx->value : ctx->key;
+    int call;
+
+    for(call = 0; call < CFG.fp8_chunks_per_thread; ++call)
+    {
+        loaded[call] = rocke_b_global_load_vN(
+            B, src, voff[call], rocke_fp8e4m3(), CFG.fp8_elems_per_chunk, CFG.fp8_elems_per_chunk);
+    }
+}
+
+/* _store_fp8_dequant(loaded, chunks, buf_idx, lds_token): fp8 -> dtype -> LDS.
+ * is_value: false => "K" (k_scale, K_lds), true => "V".
+ *
+ * The dequant chain (dequant_fp8x8_to_dtype, helpers/attention.py:722-757) is
+ * inlined here byte-for-byte: split <8 x fp8> into two <4 x fp8> quads ->
+ * cvt_pk_f32_fp8x4 each -> fmul by scale -> cast_f32_to(dtype) -> vec_pack. */
+void rocke_gfx942_attention_tiled_3d_store_fp8_dequant(
+    rocke_gfx942_attention_tiled_3d_build_ctx_t* ctx,
+    bool is_value,
+    rocke_value_t* const* loaded,
+    rocke_value_t* const* loaded_row,
+    rocke_value_t* const* loaded_col,
+    rocke_value_t* buf_idx)
+{
+    const int fp8_elems_per_chunk = CFG.fp8_elems_per_chunk;
+    const rocke_type_t* dtype = CFG.dtype;
+    rocke_value_t* scale = is_value ? ctx->v_scale_p : ctx->k_scale_p;
+    rocke_value_t* lds = is_value ? ctx->V_lds : ctx->K_lds;
+    int call, i;
+
+    for(call = 0; call < CFG.fp8_chunks_per_thread; ++call)
+    {
+        rocke_value_t* fp8_vec = loaded[call];
+        rocke_value_t* row = loaded_row[call];
+        rocke_value_t* col = loaded_col[call];
 
         /* dequant_fp8x8_to_dtype inline (attention.py:748-757) */
         rocke_value_t* lo_comps[4];
@@ -1180,6 +1247,37 @@ void rocke_gfx942_attention_tiled_3d_issue_fp8_dequant_loads(
     }
 }
 
+/* _zero_fp8_v_rows_past_sequence(chunks, buf_idx, kv_tile_idx): zero the LDS
+ * rows of a V tile past the sequence, on its last tile only. */
+void rocke_gfx942_attention_tiled_3d_zero_fp8_v_rows_past_sequence(
+    rocke_gfx942_attention_tiled_3d_build_ctx_t* ctx,
+    rocke_value_t* const* row,
+    rocke_value_t* const* col,
+    rocke_value_t* buf_idx,
+    rocke_value_t* kv_tile_idx)
+{
+    rocke_value_t* rows = rocke_kv_rows_in_sequence(B, ctx->seq_len, kv_tile_idx, CFG.T);
+    rocke_if_t last = rocke_b_scf_if(B, rocke_b_cmp_lt(B, rows, rocke_b_const_i32(B, CFG.T)));
+    int call;
+
+    rocke_b_region_enter(B, last.then_region);
+    {
+        rocke_value_t* zero = rocke_b_zero_vec(B, CFG.dtype, CFG.fp8_elems_per_chunk);
+        for(call = 0; call < CFG.fp8_chunks_per_thread; ++call)
+        {
+            rocke_value_t* idxs[3];
+            rocke_if_t past = rocke_b_scf_if(B, rocke_b_cmp_ge(B, row[call], rows));
+            rocke_b_region_enter(B, past.then_region);
+            idxs[0] = buf_idx;
+            idxs[1] = row[call];
+            idxs[2] = col[call];
+            rocke_b_smem_store_vN(B, ctx->V_lds, idxs, 3, zero, CFG.fp8_elems_per_chunk);
+            rocke_b_region_leave(B);
+        }
+    }
+    rocke_b_region_leave(B);
+}
+
 /* _issue_k(tile_idx, buf_idx, page_id) -- lines 705-711. */
 void rocke_gfx942_attention_tiled_3d_issue_k(rocke_gfx942_attention_tiled_3d_build_ctx_t* ctx,
                                              rocke_value_t* tile_idx,
@@ -1188,7 +1286,13 @@ void rocke_gfx942_attention_tiled_3d_issue_k(rocke_gfx942_attention_tiled_3d_bui
 {
     if(CFG.KV_FP8)
     {
-        rocke_gfx942_attention_tiled_3d_issue_fp8_dequant_loads(ctx, false, tile_idx, buf_idx);
+        rocke_value_t* voff[ROCKE_GFX942_ATTN_3D_FP8_MAX_CHUNKS];
+        rocke_value_t* row[ROCKE_GFX942_ATTN_3D_FP8_MAX_CHUNKS];
+        rocke_value_t* col[ROCKE_GFX942_ATTN_3D_FP8_MAX_CHUNKS];
+        rocke_value_t* loaded[ROCKE_GFX942_ATTN_3D_FP8_MAX_CHUNKS];
+        rocke_gfx942_attention_tiled_3d_fp8_chunk_offsets(ctx, tile_idx, voff, row, col);
+        rocke_gfx942_attention_tiled_3d_issue_fp8_loads(ctx, false, voff, loaded);
+        rocke_gfx942_attention_tiled_3d_store_fp8_dequant(ctx, false, loaded, row, col, buf_idx);
     }
     else if(CFG.WIDE_KV)
     {
@@ -1206,9 +1310,14 @@ void rocke_gfx942_attention_tiled_3d_issue_v(rocke_gfx942_attention_tiled_3d_bui
                                              rocke_value_t* buf_idx,
                                              rocke_value_t* page_id)
 {
+    /* fp8 V is issued by the KV loop itself (its offsets are computed before QK). */
     if(CFG.KV_FP8)
     {
-        rocke_gfx942_attention_tiled_3d_issue_fp8_dequant_loads(ctx, true, tile_idx, buf_idx);
+        if(B->status == ROCKE_OK)
+        {
+            snprintf(B->err, (size_t)ROCKE_ERR_MSG_CAP, "_issue_v: fp8 V is issued by the KV loop");
+            B->status = ROCKE_ERR_VALUE;
+        }
     }
     else if(CFG.WIDE_KV)
     {

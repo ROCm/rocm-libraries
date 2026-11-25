@@ -50,12 +50,16 @@ __all__ = [
     "small_tile_grids",
 ]
 
-# CDNA: four SIMDs per CU, a 512-entry unified (arch VGPR + AGPR) file per lane
-# with an 8-register allocation granule, at most 8 waves per SIMD.
+# CDNA compute-unit facts (attn_bwd_occupancy refuses every other target): four
+# SIMDs per CU, an 8-register allocation granule, at most 8 waves per SIMD. The
+# arch tables do not carry these three yet. The unified (arch VGPR + AGPR)
+# register file per lane does come from them: ArchTarget.limits.vgprs, read
+# through attn_bwd_arch_facts as arch_vgprs + agprs.
 _SIMDS_PER_CU = 4
-_UNIFIED_REGS = 512
 _REG_GRANULE = 8
 _MAX_WAVES_PER_SIMD = 8
+# The grid names check_lds_route_grid accepts.
+_GRID_NAMES = ("warp_grid_g02", "warp_grid_g13")
 
 
 def grid_waves(grid) -> int:
@@ -105,10 +109,13 @@ def check_lds_route_grid(
     """Legality of a non-natural G0 / G2 (``gname = "warp_grid_g02"``) or G1 /
     G3 (``"warp_grid_g13"``) grid over its ``rows x cols`` tile.
 
-    Raises ``ValueError``: the grid is not one of the CTA's grids (message
-    "must be ..."), it needs the LDS route ("needs pt_route='lds'"), or it does
-    not split the tile into whole 16x16 atoms ("does not divide its ...").
+    Raises ``ValueError``: ``gname`` is not one of the two grid names, the
+    grid is not one of the CTA's grids (message "must be ..."), it needs the
+    LDS route ("needs pt_route='lds'"), or it does not split the tile into
+    whole 16x16 atoms ("does not divide its ...").
     """
+    if gname not in _GRID_NAMES:
+        raise ValueError(f"gname must be one of {_GRID_NAMES}, not {gname!r}")
     g = tuple(grid)
     alt = (2, waves // 2)
     legal = g02_grids(waves) if gname == "warp_grid_g02" else g13_grids(waves)
@@ -222,7 +229,8 @@ def attn_bwd_occupancy(spec, arch: str) -> AttnBwdOccupancy:
     est = register_estimates(spec, arch)
     used = max(est["arch_vgpr"] + est["agpr"], 1)
     used = -(-used // _REG_GRANULE) * _REG_GRANULE
-    per_simd = min(_MAX_WAVES_PER_SIMD, _UNIFIED_REGS // used)
+    unified_regs = facts.arch_vgprs + facts.agprs  # ArchTarget.limits.vgprs
+    per_simd = min(_MAX_WAVES_PER_SIMD, unified_regs // used)
     by_regs = _waves_per_simd(_wgs_by_slots(per_simd, w), w)
     lds = lds_footprint_bytes(spec, arch)
     wgs_lds = facts.lds_capacity_bytes // lds if lds > 0 else _MAX_WAVES_PER_SIMD * 4

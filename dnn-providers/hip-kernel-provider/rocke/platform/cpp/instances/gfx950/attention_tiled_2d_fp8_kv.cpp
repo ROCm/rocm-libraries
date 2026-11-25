@@ -51,7 +51,9 @@
  *   the dead ones.
  */
 
+#include "rocke/helper_rocke.helpers.attention_arch_caps.h"
 #include "rocke/helper_rocke.helpers.transforms.h"
+#include "rocke/instance_attention_kv_seq_tail_internal.h"
 #include "rocke/instance_gfx950_attention_tiled_2d_internal.h"
 #include "rocke/ir.h"
 
@@ -61,7 +63,8 @@
  *  The fp8 K/V loader scalars are computed in the Python prologue but are not
  *  carried as ctx fields. They are pure functions of ctx geometry ints, so we
  *  recompute them here exactly as the prologue does. Mirrors:
- *    fp8_dword_candidates  [(4,16),(3,12),(1,4)] clamped to ASYNC_LDS_MAX_DWORDS
+ *    the gfx950 LDS-DMA widths of the attention capability table, widest
+ *    first, clamped to ASYNC_LDS_MAX_DWORDS (bytes_per_lane = 4 * dwords)
  *    pick first (dwords,bytes_per_lane) s.t. tile_bytes % (THREADS*bpl)==0
  *  This is the K_FP8_DWORDS / K_BYTES_PER_LANE pick reused by the FP8 async
  *  loader (FP8_DWORDS_PER_LANE = K_FP8_DWORDS, FP8_BYTES_PER_LANE =
@@ -81,8 +84,7 @@ typedef struct
 static rocke_attn2d_fp8_dma_t rocke_attn2d_fp8_dma_pick(const rocke_gfx950_attn2d_build_ctx_t* ctx)
 {
     rocke_attn2d_fp8_dma_t out;
-    static const int cand_d[3] = {4, 3, 1};
-    static const int cand_by[3] = {16, 12, 4};
+    rocke_attn_arch_caps_t caps;
     int tile_bytes = ctx->T * ctx->HD; /* 1 byte per fp8 element */
     int i;
 
@@ -93,18 +95,24 @@ static rocke_attn2d_fp8_dma_t rocke_attn2d_fp8_dma_pick(const rocke_gfx950_attn2
     out.calls_per_tile = 0;
     out.valid = false;
 
-    for(i = 0; i < 3; ++i)
+    if(!rocke_attn_arch_caps("gfx950", &caps, NULL, 0))
     {
+        return out;
+    }
+    for(i = caps.n_lds_dma_dwords - 1; i >= 0; --i)
+    {
+        const int dwords = caps.lds_dma_dwords[i];
+        const int bytes_per_lane = 4 * dwords;
         int payload;
-        if(cand_d[i] > ctx->ASYNC_LDS_MAX_DWORDS)
+        if(dwords > ctx->ASYNC_LDS_MAX_DWORDS)
         {
             continue;
         }
-        payload = ctx->THREADS * cand_by[i];
+        payload = ctx->THREADS * bytes_per_lane;
         if(payload > 0 && tile_bytes >= payload && (tile_bytes % payload) == 0)
         {
-            out.dwords = cand_d[i];
-            out.bytes_per_lane = cand_by[i];
+            out.dwords = dwords;
+            out.bytes_per_lane = bytes_per_lane;
             out.elems_per_call = payload;
             out.bytes_per_call = payload;
             out.calls_per_tile = tile_bytes / payload;
@@ -400,6 +408,9 @@ void rocke_gfx950_attn2d_issue_fp8_dequant_loads(rocke_gfx950_attn2d_build_ctx_t
     lds = is_v ? ctx->V_lds : ctx->K_lds;
     src = is_v ? ctx->value : ctx->key;
 
+    /* V rows past the sequence read its last row instead. */
+    rocke_value_t* v_last_row
+        = is_v ? rocke_kv_last_row_in_sequence(b, ctx->seq_len, kv_tile_idx, ctx->T) : NULL;
     for(call = 0; call < chunks_per_thread; ++call)
     {
         rocke_value_t* chunk_call = rocke_b_const_i32(b, call);
@@ -411,8 +422,10 @@ void rocke_gfx950_attn2d_issue_fp8_dequant_loads(rocke_gfx950_attn2d_build_ctx_t
          * explicitly so C arg-eval order does not reorder value creation. */
         rocke_value_t* col_mod = rocke_b_mod(b, chunk_id, rocke_b_const_i32(b, cols_per_row));
         rocke_value_t* col = rocke_b_mul(b, col_mod, rocke_b_const_i32(b, CHUNK));
+        /* V: the global row it is read from; the LDS row stays `row`. */
+        rocke_value_t* src_row = is_v ? rocke_b_smin(b, row, v_last_row) : row;
         rocke_value_t* linear_half_first
-            = rocke_b_add(b, rocke_b_mul(b, row, rocke_b_const_i32(b, ctx->HD)), col);
+            = rocke_b_add(b, rocke_b_mul(b, src_row, rocke_b_const_i32(b, ctx->HD)), col);
         rocke_value_t* voff = rocke_attn2d_fp8_kv_voff(ctx, kv_tile_idx, linear_half_first, NULL);
         rocke_value_t* fp8_vec
             = rocke_b_global_load_vN(b, src, voff, rocke_fp8e4m3(), CHUNK, CHUNK);
@@ -627,6 +640,8 @@ void rocke_gfx950_attn2d_issue_v_fp8_mfma_stripe(rocke_gfx950_attn2d_build_ctx_t
     chunks_per_thread = total_chunks / ctx->THREADS;
     cols_per_row = ctx->HD / CHUNK; /* HD // fp8_elems_per_chunk */
 
+    /* Rows past the sequence read its last row instead. */
+    rocke_value_t* last_row = rocke_kv_last_row_in_sequence(b, ctx->seq_len, kv_tile_idx, ctx->T);
     for(call = 0; call < chunks_per_thread; ++call)
     {
         rocke_value_t* chunk_call = rocke_b_const_i32(b, call);
@@ -638,8 +653,10 @@ void rocke_gfx950_attn2d_issue_v_fp8_mfma_stripe(rocke_gfx950_attn2d_build_ctx_t
          * C's right-to-left arg eval does not allocate const(CHUNK) first. */
         rocke_value_t* col_mod = rocke_b_mod(b, chunk_id, rocke_b_const_i32(b, cols_per_row));
         rocke_value_t* col = rocke_b_mul(b, col_mod, rocke_b_const_i32(b, CHUNK));
+        /* The global row it is read from; the LDS row stays `token`. */
+        rocke_value_t* src_token = rocke_b_smin(b, token, last_row);
         rocke_value_t* linear_first
-            = rocke_b_add(b, rocke_b_mul(b, token, rocke_b_const_i32(b, ctx->HD)), col);
+            = rocke_b_add(b, rocke_b_mul(b, src_token, rocke_b_const_i32(b, ctx->HD)), col);
         rocke_value_t* voff = rocke_attn2d_fp8_kv_voff(ctx, kv_tile_idx, linear_first, NULL);
         rocke_value_t* fp8_vec
             = rocke_b_global_load_vN(b, ctx->value, voff, rocke_fp8e4m3(), CHUNK, CHUNK);
