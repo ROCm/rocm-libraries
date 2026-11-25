@@ -114,19 +114,24 @@ def test_resolve_settings_auto_clock_scale():
     settings = benchmark.resolve_settings(_args(sclk_peak_mhz=2000, mclk_max_mhz=1000), {}, sclk, mclk)
     assert settings['clock_scale'] == pytest.approx(0.75)
     assert settings['mclk_scale'] == pytest.approx(0.9)
-    # explicit scale wins over samples
-    settings = benchmark.resolve_settings(_args(sclk_peak_mhz=2000, clock_scale=0.5), {}, sclk, mclk)
+    assert settings['per_result_sclk'] and settings['per_result_mclk']
+    # an explicit scale wins over the reported clocks
+    settings = benchmark.resolve_settings(_args(sclk_peak_mhz=2000, mclk_max_mhz=1000, clock_scale=0.5),
+                                          {}, sclk, mclk)
     assert settings['clock_scale'] == 0.5
-    # samples without a reference clock leave the scale at 1
+    assert settings['per_result_mclk'] and not settings['per_result_sclk']
+    # clocks without a reference clock leave the scale at 1
     settings = benchmark.resolve_settings(_args(), {}, sclk, mclk)
     assert settings['clock_scale'] == 1.0 and settings['mclk_scale'] == 1.0
+    assert not settings['per_result_sclk'] and not settings['per_result_mclk']
 
 
 def test_write_machine_spec_effective_values(tmp_path, monkeypatch):
     monkeypatch.setattr(benchmark, 'detect_cuda', lambda: False)
     monkeypatch.setattr(benchmark.getspecs, 'getgfx', lambda dev, cuda: 'gfx_test')
     settings = {'gbps': 20000, 'peak_gflops': {'f64': 4000}, 'clock_scale': 0.9,
-                'mclk_scale': 0.5, 'partitions': 2, 'l2_mb': 100}
+                'mclk_scale': 0.5, 'partitions': 2, 'l2_mb': 100, 'per_result_sclk': True,
+                'per_result_mclk': False}
     spec_file = tmp_path / 'machine_spec.yaml'
     benchmark.write_machine_spec_yaml(str(spec_file), settings=settings, telemetry={'perf_level': 'HIGH'})
     spec = yaml.safe_load(spec_file.read_text())
@@ -137,6 +142,7 @@ def test_write_machine_spec_effective_values(tmp_path, monkeypatch):
     assert spec['saxpy'] == pytest.approx(5000 / 6)
     assert spec['theo_max'] is True
     assert spec['perf_level'] == 'HIGH'
+    assert spec['per_result_sclk'] is True and 'per_result_mclk' not in spec
 
 
 def test_write_machine_spec_unknown_arch_without_gbps(tmp_path, monkeypatch):
@@ -159,56 +165,51 @@ def test_load_machine_file_rejects_unknown_keys(tmp_path):
         benchmark.load_machine_file(str(bad))
 
 
-def test_clock_sampler_parsing_and_summary():
-    assert benchmark.ClockSampler._mhz('1500 MHz') == 1500.0
-    assert benchmark.ClockSampler._mhz('1350') == 1350.0
-    assert benchmark.ClockSampler._mhz('N/A') is None
-    summary = benchmark.ClockSampler.summary([1.0, 3.0, 2.0])
+def test_clock_summary():
+    summary = benchmark.clock_summary([1.0, 3.0, 2.0])
     assert summary['median'] == 2.0 and summary['count'] == 3
-    assert benchmark.ClockSampler.summary([]) is None
+    assert benchmark.clock_summary([]) is None
 
 
-def _sample(sclk, activity):
-    return {'sclk': sclk, 'sclk_min': sclk, 'sclk_max': sclk, 'mclk': 1000.0, 'activity': activity,
-            'fclk': None, 'power': None, 'hotspot': None}
+def test_result_clocks():
+    assert perf_model.result_clocks({'lowest-avg-freq': '1500.5', 'avg-MCLK': '1900'}) == (1500.5, 1900.0)
+    # hipblas-bench prints 0 when amd-smi had no reading
+    assert perf_model.result_clocks({'lowest-avg-freq': '0', 'avg-MCLK': 'nan?'}) == (None, None)
+    assert perf_model.result_clocks({'N': '10'}) == (None, None)
 
 
-def test_clock_sampler_keeps_only_busy_samples():
-    samples = [_sample(50.0, 0.0), _sample(1600.0, 98.0), _sample(1400.0, 75.0), _sample(400.0, 10.0)]
-    busy, have_activity = benchmark.ClockSampler.busy_samples(samples)
-    assert have_activity
-    assert [smp['sclk'] for smp in busy] == [1600.0, 1400.0]
-    # without activity readings nothing can be filtered
-    no_activity = [_sample(50.0, None), _sample(1600.0, None)]
-    busy, have_activity = benchmark.ClockSampler.busy_samples(no_activity)
-    assert not have_activity and busy == no_activity
-
-
-# amd-smi metric -c -u -p -t --csv layout: several GFX clock domains, list-valued columns,
-# memory clock reported as uclk_* with mem_0_clk N/A (values are made up)
-SMI_MULTI_DOMAIN = (
-    'gpu,gfx_activity,umc_activity,vcn_activity,socket_power,gfx_0_clk,gfx_0_min_clk,gfx_1_clk,'
-    'gfx_1_min_clk,gfx_2_clk,gfx_3_clk,mem_0_clk,fclk_0_clk,uclk_aid_aid_0,uclk_aid_aid_1,hotspot\n'
-    '0,90,7,"[\'N/A\', \'N/A\']",900,1000,100,1100,100,1200,1300,N/A,800,700,700,60\n'
+# hipblas-bench output with HIPBLAS_BENCH_FREQ: clock columns follow the timing columns
+BENCH_WITH_CLOCKS = (
+    'function,compute_type,N,alpha,incx,incy,hipblas-Gflops,hipblas-GB/s,hipblas-us,lowest-avg-freq,'
+    'lowest-median-freq,avg-MCLK,median-MCLK,\n'
+    'axpy,f32_c,1024,(1,0),1,1,10, 20, 30, 1500, 1490, 900, 900, \n'
+    'function,compute_type,N,alpha,incx,incy,hipblas-Gflops,hipblas-GB/s,hipblas-us,lowest-avg-freq,'
+    'lowest-median-freq,avg-MCLK,median-MCLK,\n'
+    'axpy,f32_c,2048,(1,0),1,1,10, 20, 30, 1300, 1290, 0, 0, \n'
 )
 
 
-def test_parse_smi_metrics_multi_domain():
-    sample = benchmark.parse_smi_metrics(SMI_MULTI_DOMAIN, 0)
-    assert sample['sclk'] == pytest.approx(1150.0)       # mean of the four domains
-    assert sample['sclk_min'] == 1000.0 and sample['sclk_max'] == 1300.0
-    assert sample['mclk'] == 700.0                        # from uclk_* since mem_0_clk is N/A
-    assert sample['activity'] == 90.0
-    assert sample['fclk'] == 800.0 and sample['power'] == 900.0 and sample['hotspot'] == 60.0
+def test_bench_clocks_reads_every_result(tmp_path):
+    out = tmp_path / 'axpy.csv'
+    out.write_text(BENCH_WITH_CLOCKS)
+    sclk, mclk = benchmark.bench_clocks([str(out), str(tmp_path / 'missing.csv')])
+    assert sclk == [1500.0, 1300.0]
+    assert mclk == [900.0]          # the second result had no memory clock
 
 
-def test_parse_smi_metrics_single_clocks_and_other_gpus():
-    text = 'gpu,gfx_activity,gfx_0_clk,mem_0_clk\n0,50,1500,1200\n1,99,900,900\n'
-    sample = benchmark.parse_smi_metrics(text, 0)
-    assert sample['sclk'] == 1500.0 and sample['mclk'] == 1200.0 and sample['activity'] == 50.0
-    assert benchmark.parse_smi_metrics(text, 1)['sclk'] == 900.0
-    assert benchmark.parse_smi_metrics(text, 2) is None
-    assert benchmark.parse_smi_metrics('', 0) is None
+def test_machine_ceilings_use_the_clocks_of_each_result():
+    import plot
+    spec = {'GBps': 2000, 'GBps_effective': 1000, 'peak_gflops': {'f32': 20000},
+            'peak_gflops_effective': {'f32': 7500}, 'sclk_peak_mhz': 2000, 'mclk_max_mhz': 1000,
+            'partitions': 2, 'per_result_sclk': True, 'per_result_mclk': True}
+    row = {'lowest-avg-freq': '1000', 'avg-MCLK': '500'}
+    assert plot.machine_ceilings(spec, row) == (pytest.approx(500), {'f32': pytest.approx(5000)})
+    # a result without clocks, or no row, uses the run-wide values
+    assert plot.machine_ceilings(spec, {'N': '1'}) == (1000, {'f32': 7500})
+    assert plot.machine_ceilings(spec) == (1000, {'f32': 7500})
+    # an explicit --clock-scale leaves per_result_sclk unset, so the row's engine clock is ignored
+    fixed = dict(spec, per_result_sclk=False)
+    assert plot.machine_ceilings(fixed, row) == (pytest.approx(500), {'f32': 7500})
 
 
 def test_flush_yaml_injection(tmp_path):
@@ -340,6 +341,8 @@ def test_plot_roofline_writes_csv_and_figures(data_root):
     dgemv = [row for row in rows if row['function'] == 'gemv' and row['compute_type'] == 'f64_r']
     assert dgemv and all(float(row['ceiling']) == 300 for row in dgemv)
     assert any(row['cache_resident'] == 'True' for row in rows)
+    # results benchmarked without HIPBLAS_BENCH_FREQ have no clocks
+    assert all(row['sclk_mhz'] == '' and row['mclk_mhz'] == '' for row in rows)
 
 
 def test_plot_draws_every_precision_any_function_has(tmp_path):

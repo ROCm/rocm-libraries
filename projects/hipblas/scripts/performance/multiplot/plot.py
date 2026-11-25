@@ -21,16 +21,30 @@ import perf_model
 CACHE_RESIDENT_FACTOR = 4
 
 
-def machine_ceilings(machine_spec_dict):
-    """(bandwidth GB/s, {peak key: GFLOP/s}) after clock and partition scaling."""
+def machine_ceilings(machine_spec_dict, row=None):
+    """
+    (bandwidth GB/s, {peak key: GFLOP/s}) after clock and partition scaling. With per-result clocks
+    (benchmark.py --auto-clock-scale) the clocks reported with row scale the published values;
+    otherwise, or for a row without clocks, the run-wide scales in machine_spec.yaml apply.
+    """
     gbps = machine_spec_dict.get('GBps_effective', machine_spec_dict.get('GBps'))
     peaks = machine_spec_dict.get('peak_gflops_effective') or None
+    if row is None:
+        return gbps, peaks
+    partitions = machine_spec_dict.get('partitions') or 1
+    sclk, mclk = perf_model.result_clocks(row)
+    sclk_peak = machine_spec_dict.get('sclk_peak_mhz')
+    if machine_spec_dict.get('per_result_sclk') and sclk and sclk_peak and machine_spec_dict.get('peak_gflops'):
+        peaks = {k: v * sclk / sclk_peak / partitions for k, v in machine_spec_dict['peak_gflops'].items()}
+    mclk_max = machine_spec_dict.get('mclk_max_mhz')
+    if machine_spec_dict.get('per_result_mclk') and mclk and mclk_max and machine_spec_dict.get('GBps'):
+        gbps = machine_spec_dict['GBps'] * mclk / mclk_max / partitions
     return gbps, peaks
 
 
 def point_ceiling(funcname, prec, function_label, row, machine_spec_dict):
     """Roofline ceiling for one result; falls back to the per-function constant in machine_spec.yaml."""
-    gbps, peaks = machine_ceilings(machine_spec_dict)
+    gbps, peaks = machine_ceilings(machine_spec_dict, row)
     if row is not None:
         ceiling = perf_model.ceiling_gflops(funcname, prec, row, gbps, peaks)
         if ceiling:
@@ -47,7 +61,7 @@ def is_cache_resident(funcname, prec, row, machine_spec_dict):
     l2_mb = machine_spec_dict.get('l2_mb')
     if not l2_mb or row is None:
         return False
-    gbps, peaks = machine_ceilings(machine_spec_dict)
+    gbps, peaks = machine_ceilings(machine_spec_dict, row)
     ai = perf_model.intensity(funcname, prec, row)
     if not gbps or ai is None:
         return False
@@ -264,6 +278,7 @@ def plot_roofline(dir1, function_names, machine_spec_dict, savedir, title, achie
             if ai is None:
                 continue
             gflops = float(row['hipblas-Gflops'])
+            sclk, mclk = perf_model.result_clocks(row)
             points.setdefault(prec, []).append({
                 'function': funcname,
                 'transA': row.get('transA', ''), 'transB': row.get('transB', ''),
@@ -271,9 +286,10 @@ def plot_roofline(dir1, function_names, machine_spec_dict, savedir, title, achie
                 'M': row.get('M', ''), 'N': row.get('N', ''), 'K': row.get('K', ''),
                 'ai': ai,
                 'gflops': gflops,
-                'ceiling': perf_model.ceiling_gflops(funcname, prec, row, gbps, peaks),
+                'ceiling': perf_model.ceiling_gflops(funcname, prec, row, *machine_ceilings(machine_spec_dict, row)),
                 'footprint_bytes': perf_model.footprint_bytes(funcname, prec, row),
                 'cache_resident': is_cache_resident(funcname, prec, row, machine_spec_dict),
+                'sclk_mhz': sclk or '', 'mclk_mhz': mclk or '',
             })
 
     if not points:
@@ -294,7 +310,7 @@ def plot_roofline(dir1, function_names, machine_spec_dict, savedir, title, achie
     stem = "_".join(function_names)
     with open(os.path.join(savedir, f"roofline_{stem}.csv"), 'w') as csv_out:
         columns = ['function', 'compute_type', 'transA', 'transB', 'M', 'N', 'K', 'ai', 'gflops', 'ceiling',
-                   'pct_of_ceiling', 'footprint_bytes', 'cache_resident']
+                   'pct_of_ceiling', 'footprint_bytes', 'cache_resident', 'sclk_mhz', 'mclk_mhz']
         csv_out.write(",".join(columns) + "\n")
         for prec in sorted(points):
             for pt in points[prec]:
@@ -326,8 +342,9 @@ def plot_roofline(dir1, function_names, machine_spec_dict, savedir, title, achie
                 y = np.minimum(y, pk)
             return y
 
+        per_result = machine_spec_dict.get('per_result_sclk') or machine_spec_dict.get('per_result_mclk')
         axes.plot(x, roof(gbps, peak), color='black', linewidth=2,
-                  label=f"ceiling ({gbps or '-'} GB/s, {peak or '-'} GFLOP/s)")
+                  label=f"ceiling{' at median clocks' if per_result else ''} ({gbps or '-'} GB/s, {peak or '-'} GFLOP/s)")
         if (gbps_published and gbps_published != gbps) or (peak_published and peak_published != peak):
             axes.plot(x, roof(gbps_published, peak_published), color='gray', linestyle='--', linewidth=1,
                       label="published ceiling (before clock / partition scaling)")
