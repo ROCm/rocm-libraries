@@ -17,7 +17,7 @@ import shutil
 
 import pytest
 from rocke.assets import platform_tools_dir
-from rocke.tests.lanes import SOURCE_TREE_CASES, skip_until_reason
+from rocke.tests.lanes import SOURCE_TREE, skip_until_reason
 from rocke.tests.platform_build import configure_platform
 
 RUNNER = platform_tools_dir() / "run_build_tree_ctest.py"
@@ -27,7 +27,7 @@ pytestmark = [
     pytest.mark.skipif(
         not RUNNER.exists(),
         reason=skip_until_reason(
-            SOURCE_TREE_CASES,
+            SOURCE_TREE,
             reason="runs a platform tool, which an installed test layout omits",
         ),
     ),
