@@ -136,7 +136,9 @@ flatbuffers::FlatBufferBuilder buildFullyAttributedPointwiseGraph()
 } // namespace
 
 /// The pattern compiles at load, the set validates, and the engine answers applicability
-/// through the compiled pattern.
+/// through the compiled pattern. Both the engine makeEngine() builds from the set and the one
+/// built over the shared state the loader validated, which is the state the provider serves
+/// (scanDescriptorSets()), answer through it.
 TEST_P(TestPointwiseDeclarativeMatch, EngineApplicabilityFollowsThePattern)
 {
     // One staged shard of the shipped set: every descriptor of it sits beside its packs.
@@ -166,11 +168,15 @@ TEST_P(TestPointwiseDeclarativeMatch, EngineApplicabilityFollowsThePattern)
         properties.gcnArchName = pack.arch.front();
     }
     const FixedDeviceResolver resolver(std::move(properties));
-    const auto engine = makeEngine<Handle, Settings, Context>(sets.front().set, resolver);
+    const auto fromSet = makeEngine<Handle, Settings, Context>(sets.front().set, resolver);
+    const auto fromLoadedState = makeEngine<Handle, Settings, Context>(
+        sets.front().set, sets.front().stateManager->sharedState(), resolver);
     const GraphFixture fixture(GetParam().build());
     Handle handle;
 
-    EXPECT_EQ(engine->isApplicable(handle, fixture.context().graph), GetParam().applicable);
+    EXPECT_EQ(fromSet->isApplicable(handle, fixture.context().graph), GetParam().applicable);
+    EXPECT_EQ(fromLoadedState->isApplicable(handle, fixture.context().graph),
+              GetParam().applicable);
 }
 
 INSTANTIATE_TEST_SUITE_P(

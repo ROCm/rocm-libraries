@@ -177,9 +177,13 @@ namespace detail
 /// What decides what a pattern matches and publishes, as JSON. where() is excluded.
 /// Two patterns are equal exactly when their identities are equal.
 ///
-/// Nodes and candidates keep authored order and variables keep sorted order. Opcode, edge
-/// and attribute names come from the single op-schema registry, so a name identifies the
-/// same entry its schema pointer does. matchOrder() and rootOpcodes() derive from nodes and
+/// Nodes keep authored order and variables keep sorted order. Candidates are sorted by
+/// opcode, and a node's attributes and each candidate's attributes are sorted by name. A
+/// graph node's attributes table belongs to one opcode, so at most one `one_of` member can
+/// match it, and member order cannot change what a node matches or publishes; it decides
+/// only the order of those lists. A `one_of` lists each opcode once. Opcode, edge and
+/// attribute names come from the single op-schema registry, so a name identifies the same
+/// entry its schema pointer does. matchOrder() and rootOpcodes() derive from nodes and
 /// variables, so they are not part of it.
 inline nlohmann::json compiledPatternIdentity(const CompiledGraphPattern& pattern)
 {
@@ -211,6 +215,9 @@ inline nlohmann::json compiledPatternIdentity(const CompiledGraphPattern& patter
         {
             attributes.push_back({{"token", attribute.token}, {"optional", attribute.optional}});
         }
+        std::sort(attributes.begin(), attributes.end(), [](const auto& lhs, const auto& rhs) {
+            return lhs.at("token") < rhs.at("token");
+        });
         auto candidates = nlohmann::json::array();
         for(const auto& candidate : node.candidates)
         {
@@ -219,12 +226,16 @@ inline nlohmann::json compiledPatternIdentity(const CompiledGraphPattern& patter
             {
                 candidateAttributes.push_back(std::string(attribute->name));
             }
+            std::sort(candidateAttributes.begin(), candidateAttributes.end());
             candidates.push_back({{"opcode", std::string(candidate.schema->opcode)},
                                   {"operands", edgeNames(candidate.operands)},
                                   {"results", edgeNames(candidate.results)},
                                   {"unnamed_optional", edgeNames(candidate.unnamedOptionalEdges)},
                                   {"attributes", std::move(candidateAttributes)}});
         }
+        std::sort(candidates.begin(), candidates.end(), [](const auto& lhs, const auto& rhs) {
+            return lhs.at("opcode") < rhs.at("opcode");
+        });
         nodes.push_back({{"id", node.id},
                          {"operands", variableNames(node.operandVariables)},
                          {"results", variableNames(node.resultVariables)},

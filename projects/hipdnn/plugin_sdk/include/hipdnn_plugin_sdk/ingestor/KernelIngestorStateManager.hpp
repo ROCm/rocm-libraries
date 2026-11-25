@@ -182,14 +182,14 @@ constexpr size_t alignSharedWorkspace(size_t sharedBytes)
 /// shared size rounded up to SHARED_WORKSPACE_ALIGNMENT.
 inline constexpr const char* SCRATCH_OFFSET_TOKEN = "ws.scratch_offset";
 
-namespace detail
-{
-
-/// An engine's GraphMatch with the native arm's symbol replaced by the function it names.
+/// An engine's GraphMatch as KernelIngestorSharedState holds it, with the native arm's symbol
+/// replaced by the function it names:
+///  - std::monostate: no `graph_match`.
+///  - GraphMatchFn: the `native` arm, resolved through GraphMatchRegistry.
+///  - CompiledGraphPattern: the declarative `nodes` arm. Never null.
+/// Introduced in hipdnn_plugin_sdk 1.2.0.
 using ResolvedGraphMatch
     = std::variant<std::monostate, GraphMatchFn, std::shared_ptr<const CompiledGraphPattern>>;
-
-} // namespace detail
 
 /// The part of an engine's kernel-ingestor state that never changes once built: its
 /// schema, resolved matchers and dispatches, packs, every kernel's precomputed
@@ -390,7 +390,7 @@ public:
 
     /// The engine's graph_match, either arm, with a native symbol resolved to its function.
     /// Introduced in hipdnn_plugin_sdk 1.2.0.
-    const detail::ResolvedGraphMatch& graphMatch() const
+    const ResolvedGraphMatch& graphMatch() const
     {
         return _graphMatch;
     }
@@ -403,8 +403,8 @@ public:
     }
 
 private:
-    static detail::ResolvedGraphMatch resolveGraphMatch(GraphMatch graphMatch,
-                                                        const std::string& describedBy)
+    static ResolvedGraphMatch resolveGraphMatch(GraphMatch graphMatch,
+                                                const std::string& describedBy)
     {
         if(const auto* native = std::get_if<NativeGraphMatch>(&graphMatch))
         {
@@ -953,7 +953,7 @@ private:
     std::string _sharedWorkspaceToken;
     std::unordered_map<DescriptorId, ResolvedMatcher, DescriptorIdHash> _matchers;
     std::unordered_map<DescriptorId, ResolvedDispatch<THandle>, DescriptorIdHash> _dispatches;
-    detail::ResolvedGraphMatch _graphMatch;
+    ResolvedGraphMatch _graphMatch;
     /// Every kernel-scoped matcher whose symbol also names a CandidateFilterFn, in the
     /// order the packs first list them. Resolved at construction, like the matchers: the
     /// registry is immutable once the provider loaded, and absence means no refinement.
@@ -3209,7 +3209,7 @@ private:
     const std::unordered_map<DescriptorId, ResolvedMatcher, DescriptorIdHash>& _matchers;
     const std::unordered_map<DescriptorId, ResolvedDispatch<THandle>, DescriptorIdHash>&
         _dispatches;
-    const detail::ResolvedGraphMatch& _graphMatch;
+    const ResolvedGraphMatch& _graphMatch;
     /// Keyed by slot: an unslotted engine's catalogs under the empty slot, a slotted engine's
     /// one entry per slot name.
     mutable LruCache<CatalogKey, Catalog, CatalogKeyHash> _catalogCache;

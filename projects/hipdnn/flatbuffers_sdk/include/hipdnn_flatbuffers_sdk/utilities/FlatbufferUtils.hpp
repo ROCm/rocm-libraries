@@ -258,6 +258,9 @@ inline float extractFiniteFloatFromTensorValue(const data_objects::TensorAttribu
         [paramName](auto value) { return detail::finiteFloat(value, paramName); });
 }
 
+/// As the TensorAttributesT overload, read from a serialized tensor. Also throws
+/// std::runtime_error when @p tensorAttr is null.
+/// Introduced in hipdnn_flatbuffers_sdk 0.3.0.
 inline float extractFiniteFloatFromTensorValue(const data_objects::TensorAttributes* tensorAttr,
                                                const char* paramName)
 {

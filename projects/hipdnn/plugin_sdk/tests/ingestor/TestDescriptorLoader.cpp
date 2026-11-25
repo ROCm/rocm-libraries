@@ -2440,8 +2440,8 @@ INSTANTIATE_TEST_SUITE_P(
                       }}),
     [](const ::testing::TestParamInfo<ViolationCase>& info) { return info.param.name; });
 
-/// The pattern compiles while the file is read, and the state manager probe accepts the
-/// compiled form.
+/// The pattern compiles while the file is read, and the state manager the loader builds
+/// serves that compiled pattern, the same instance the engine descriptor holds.
 TEST(TestDescriptorLoader, LoadsAnEngineWhoseGraphMatchIsADeclarativePattern)
 {
     const ScopedSymbols symbols;
@@ -2458,6 +2458,13 @@ TEST(TestDescriptorLoader, LoadsAnEngineWhoseGraphMatchIsADeclarativePattern)
     EXPECT_TRUE(sets.front().set.engine.graphMatchNativeSymbol.empty());
     EXPECT_EQ(pattern->nodeCount(), 1u);
     EXPECT_EQ(pattern->rootOpcodes(), std::vector<std::string>{"pointwise"});
+
+    ASSERT_NE(sets.front().stateManager, nullptr);
+    const auto& served = sets.front().stateManager->sharedState()->graphMatch();
+    const auto* servedPattern = std::get_if<std::shared_ptr<const CompiledGraphPattern>>(&served);
+    ASSERT_NE(servedPattern, nullptr) << "the loader-built state manager serves no pattern";
+    EXPECT_EQ(*servedPattern, pattern);
+    EXPECT_EQ(sets.front().stateManager->sharedState()->graphMatchFn(), nullptr);
 }
 
 TEST(TestDescriptorLoader, CarriesTheNativeGraphMatchSymbol)
@@ -2572,11 +2579,12 @@ TEST(TestDescriptorLoader, MakeStateManagerServesEitherArmThroughEngineGraphMatc
 }
 
 /// A symbol cannot carry a `nodes` pattern, so the symbol overload refuses a pattern engine
-/// rather than serve it with no graph_match. A braced `{}` binds to that overload too; the
-/// explicit opt-out is an empty GraphMatch.
+/// rather than serve it with no graph_match or with a native match in its place. A braced
+/// `{}` binds to that overload too; the explicit opt-out is an empty GraphMatch.
 TEST(TestDescriptorLoader, MakeStateManagerStringOverloadRefusesAPatternEngine)
 {
     const ScopedSymbols symbols;
+    const ScopedNativeGraphMatch nativeGraphMatch;
     const auto set = loadPatternSet("string_refuses_pattern");
     ASSERT_NE(set.engine.graphMatchPattern, nullptr);
     ASSERT_TRUE(set.engine.graphMatchNativeSymbol.empty());
@@ -2608,6 +2616,11 @@ TEST(TestDescriptorLoader, MakeStateManagerStringOverloadRefusesAPatternEngine)
     {
         SCOPED_TRACE("braced");
         expectRefused([&set] { makeStateManager<LoaderHandle>(set, {}); });
+    }
+    {
+        // The symbol resolves, so only the pattern guard can refuse it.
+        SCOPED_TRACE("a registered native symbol");
+        expectRefused([&set] { makeStateManager<LoaderHandle>(set, NATIVE_GRAPH_MATCH_SYMBOL); });
     }
 
     const auto optedOut = makeStateManager<LoaderHandle>(set, GraphMatch{});
@@ -6289,6 +6302,11 @@ const std::string NORM_SET_PATTERN = R"([{"kind": "op", "id": "norm",
     "op": {"one_of": ["rmsnorm", "layernorm"]},
     "operands": {"x": "$x"}, "results": {"y": "$y"}}])";
 
+/// NORM_SET_PATTERN with its `one_of` members listed in the other order.
+const std::string NORM_SET_REORDERED_PATTERN = R"([{"kind": "op", "id": "norm",
+    "op": {"one_of": ["layernorm", "rmsnorm"]},
+    "operands": {"x": "$x"}, "results": {"y": "$y"}}])";
+
 struct PatternVariant
 {
     std::string name;
@@ -6315,9 +6333,6 @@ std::vector<PatternVariant> patternVariants()
         {"renamed_node", R"([{"kind": "op", "id": "sum", "op": "pointwise",
             "operands": {"in_0": "$a", "in_1": "$b"}, "results": {"out_0": "$y"}}])"},
         {"opcode_set", NORM_SET_PATTERN},
-        {"opcode_set_reordered", R"([{"kind": "op", "id": "norm",
-            "op": {"one_of": ["layernorm", "rmsnorm"]},
-            "operands": {"x": "$x"}, "results": {"y": "$y"}}])"},
         {"opcode_set_member_replaced", R"([{"kind": "op", "id": "norm",
             "op": {"one_of": ["rmsnorm", "batchnorm"]},
             "operands": {"x": "$x"}, "results": {"y": "$y"}}])"},
@@ -6396,6 +6411,21 @@ TEST(TestDescriptorLoader, PatternEqualityAgreesWithTheSelectorRevision)
             EXPECT_EQ(*lhs == *rhs, sameRevision) << lhsName << " vs " << rhsName;
         }
     }
+}
+
+/// At most one `one_of` member can match a graph node, so the order members are listed in
+/// cannot change what a pattern matches or publishes. Reordering them keeps the pattern equal
+/// and keeps the selector revision a model was trained against.
+TEST(TestDescriptorLoader, OpcodeSetMemberOrderLeavesPatternAndSelectorRevisionUnchanged)
+{
+    const auto authored = compileRevisionPattern(NORM_SET_PATTERN);
+    const auto reordered = compileRevisionPattern(NORM_SET_REORDERED_PATTERN);
+
+    EXPECT_TRUE(*authored == *reordered);
+    EXPECT_EQ(detail::compiledPatternIdentity(*authored),
+              detail::compiledPatternIdentity(*reordered));
+    EXPECT_EQ(engineSelectorRevision(revisionSet({}, authored)),
+              engineSelectorRevision(revisionSet({}, reordered)));
 }
 
 /// A launch name is `^[a-z][a-z0-9_]*$`: underscores and digits after the first letter are
