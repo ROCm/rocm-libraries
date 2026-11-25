@@ -190,9 +190,8 @@ set(ROCSPARSE_UNIT_TEST_DEVICE_SOURCES
   unit_test_internal_common_dense_grids.cpp
   # --- Block-index arithmetic of the remaining common launches [AISPARSE-700] -
   # Appended after the AISPARSE-699 leaf above, same reasoning. Needs
-  # rocsparse_valset.cpp (already listed), rocsparse_singularity.cpp and the two
-  # rocsparse_dense_transpose*.cpp compiled in (appended to
-  # ROCSPARSE_UNIT_TEST_DEVICE_LIB_SOURCES below).
+  # rocsparse_valset.cpp (already listed) and rocsparse_singularity.cpp compiled
+  # in (appended to ROCSPARSE_UNIT_TEST_DEVICE_LIB_SOURCES below).
   unit_test_internal_common_large_grids.cpp
   unit_test_internal_common_bsr_ind.cpp
   unit_test_internal_infostructs.cpp
@@ -353,9 +352,7 @@ set(ROCSPARSE_UNIT_TEST_DEVICE_SOURCES
   unit_test_internal_level2_csrmv_default_dispatch.cpp
 )
 
-if(BUILD_WITH_SPSORT)
-  list(APPEND ROCSPARSE_UNIT_TEST_DEVICE_SOURCES unit_test_host_conversion_spsort.cpp)
-endif()
+list(APPEND ROCSPARSE_UNIT_TEST_DEVICE_SOURCES unit_test_host_conversion_spsort.cpp)
 
 # Host building-block library translation units under test by the
 # unit_test_internal_hostblocks_*.cpp files. Compiled into the device (GPU) test binary
@@ -400,8 +397,6 @@ set(ROCSPARSE_UNIT_TEST_DEVICE_LIB_SOURCES
   # [AISPARSE-700], same hidden-visibility reason. rocsparse_valset.cpp is
   # already listed above.
   ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/common/rocsparse_singularity.cpp
-  ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/common/rocsparse_dense_transpose.cpp
-  ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/common/rocsparse_dense_transpose_back.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/common/rocsparse_argdescr.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/auxiliary/rocsparse_error.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/auxiliary/rocsparse_auxiliary.cpp

@@ -492,9 +492,7 @@ namespace rocsparse
               uint32_t WF_SIZE,
               bool     SLEEP,
               bool     CHUNKED,
-#ifdef ROCSPARSE_WITH_TRSM_REFACTORING
-              bool A_OP_CONJUGATE,
-#endif
+              bool     A_OP_CONJUGATE,
               typename I,
               typename J,
               typename T>
@@ -564,12 +562,10 @@ namespace rocsparse
 
             // Local value this lane operates with
             T local_val = rocsparse::nontemporal_load(csr_val + j * csr_val_inc);
-#ifdef ROCSPARSE_WITH_TRSM_REFACTORING
             if constexpr(A_OP_CONJUGATE)
             {
                 local_val = rocsparse::conj(local_val);
             }
-#endif
 
             // Check for numerical zero
             if(local_val == static_cast<T>(0) && local_col == row

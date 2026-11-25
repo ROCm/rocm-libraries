@@ -27,8 +27,6 @@
 
 #include "rocsparse_spsort.hpp"
 
-#if defined(ROCSPARSE_WITH_SPSORT)
-
 template <>
 bool rocsparse::enum_utils::is_invalid(rocsparse_spsort_alg value_)
 {
@@ -221,5 +219,3 @@ catch(...)
     RETURN_ROCSPARSE_EXCEPTION();
 }
 // LCOV_EXCL_STOP
-
-#endif

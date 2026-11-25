@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
-* Copyright (C) 2024-2025 Advanced Micro Devices, Inc. All rights Reserved.
+* Copyright (C) 2024-2026 Advanced Micro Devices, Inc. All rights Reserved.
 *
 * Permission is hereby granted, free of charge, to any person obtaining a copy
 * of this software and associated documentation files (the "Software"), to deal
@@ -88,9 +88,7 @@ namespace rocsparse_reproducibility_utils
     TEST_LABEL_PRINT_SPECIALIZE(rocsparse_dense_to_sparse_alg);
     TEST_LABEL_PRINT_SPECIALIZE(rocsparse_gtsv_interleaved_alg);
     TEST_LABEL_PRINT_SPECIALIZE(rocsparse_gpsv_interleaved_alg);
-#if defined(ROCSPARSE_WITH_SPSORT)
     TEST_LABEL_PRINT_SPECIALIZE(rocsparse_spsort_alg);
-#endif
 
 #undef TEST_LABEL_PRINT_SPECIALIZE
 

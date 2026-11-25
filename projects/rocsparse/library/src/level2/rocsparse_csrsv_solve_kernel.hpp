@@ -59,11 +59,8 @@ namespace rocsparse
                                               uint32_t                          blocksize,
                                               uint32_t                          wfsize,
                                               bool                              sleep,
-#ifdef ROCSPARSE_WITH_TRSM_REFACTORING
-                                              bool conjugate,
-#endif
-                                              rocsparse_indextype i_type_,
-                                              rocsparse_indextype j_type_,
-                                              rocsparse_datatype  a_type_);
-
+                                              bool                              conjugate,
+                                              rocsparse_indextype               i_type_,
+                                              rocsparse_indextype               j_type_,
+                                              rocsparse_datatype                a_type_);
 }

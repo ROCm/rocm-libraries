@@ -34,8 +34,6 @@
 #ifndef ROCSPARSE_CONFIG_H
 #define ROCSPARSE_CONFIG_H
 
-/* rocSPARSE 5.2 */
-#cmakedefine ROCSPARSE_WITH_TRSM_REFACTORING
-#cmakedefine ROCSPARSE_WITH_SPSORT
+/* Build-time feature flags baked in at compile time. */
 
 #endif /* ROCSPARSE_CONFIG_H */

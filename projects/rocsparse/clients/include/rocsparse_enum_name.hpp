@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2024-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2024-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -235,14 +235,12 @@ const char* rocsparse_gtsv_interleaved_alg_name(rocsparse_gtsv_interleaved_alg v
 ///
 const char* rocsparse_gpsv_interleaved_alg_name(rocsparse_gpsv_interleaved_alg value);
 
-#if defined(ROCSPARSE_WITH_SPSORT)
 ///
 /// @brief Get the litteral name of the enumeration.
 /// @param[in] value value of the enumeration.
 /// @return The litteral name of the enumeration.
 ///
 const char* rocsparse_spsort_alg_name(rocsparse_spsort_alg value);
-#endif
 
 ///
 /// @brief Get the litteral name of the enumeration.
@@ -544,7 +542,6 @@ inline const char* rocsparse_enum_name(rocsparse_gpsv_interleaved_alg value)
     return rocsparse_gpsv_interleaved_alg_name(value);
 }
 
-#if defined(ROCSPARSE_WITH_SPSORT)
 ///
 /// @brief Get the litteral name of the enumeration.
 /// @param[in] value value of the enumeration.
@@ -554,4 +551,3 @@ inline const char* rocsparse_enum_name(rocsparse_spsort_alg value)
 {
     return rocsparse_spsort_alg_name(value);
 }
-#endif

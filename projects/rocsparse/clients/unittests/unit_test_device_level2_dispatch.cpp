@@ -1325,7 +1325,6 @@ namespace
                         "sptrsm device f32 alpha");
     }
 
-#if defined(ROCSPARSE_WITH_TRSM_REFACTORING)
     // Batched solves are supported, batch counts of A and X that differ from the one of
     // Y and a batch of Y with a zero stride are rejected.
     TEST_F(L2DeviceSptrsmMisc, mismatched_batches_are_rejected)
@@ -1359,7 +1358,6 @@ namespace
         ASSERT_EQ(rocsparse_dnmat_set_strided_batch(Y.desc.d, 2, 0), rocsparse_status_success);
         expect_rejected(rocsparse_sptrsm_stage_compute);
     }
-#endif
 
     // ----- csrsm --------------------------------------------------------------------------
 
@@ -1381,14 +1379,12 @@ namespace
                                   {1, op_n, op_n, up, un, reuse},
                                   {1, op_n, op_c, up, nu, force},
                                   {65, op_t, op_t, lo, un, reuse}};
-#if defined(ROCSPARSE_WITH_TRSM_REFACTORING)
-        // The refactored solve starts with a block size of 512 and shifts it to the
+        // The solve starts with a block size of 512 and shifts it to the
         // smallest power of two that is >= nrhs and >= 64: nrhs = 65 above, 129, 257 and
         // 513 select the block sizes 128 to 1024.
         v.push_back({129, op_t, op_n, up, un, force});
         v.push_back({257, op_n, op_t, lo, nu, force});
         v.push_back({513, op_t, op_t, up, un, force});
-#endif
         return v;
     }
 

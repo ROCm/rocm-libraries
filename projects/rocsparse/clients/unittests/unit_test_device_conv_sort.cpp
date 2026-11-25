@@ -76,7 +76,6 @@ namespace
         return c;
     }
 
-#if defined(ROCSPARSE_WITH_SPSORT)
     constexpr auto alg_def = rocsparse_spsort_alg_default;
     constexpr auto alg_rdx = rocsparse_spsort_alg_radix_sort;
     constexpr auto stg_ana = rocsparse_spsort_stage_analysis;
@@ -570,7 +569,6 @@ namespace
         ASSERT_EQ(rocsparse_coo_set_strided_batch(src, 2, nnz), st_ok);
         EXPECT_EQ(bsz(src, dst, stg_cmp), st_ok);
     }
-#endif // ROCSPARSE_WITH_SPSORT
 
     // ------------------------------------------------------------------
     // Legacy sort routines

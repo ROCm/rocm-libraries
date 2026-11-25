@@ -25,8 +25,6 @@
 
 #include "rocsparse-types.h"
 
-#if defined(ROCSPARSE_WITH_SPSORT)
-
 #include "internal/generic/rocsparse_spsort.h"
 #include "rocsparse_enum_utils.hpp"
 
@@ -66,5 +64,3 @@ namespace rocsparse
                                             rocsparse_const_spmat_descr source,
                                             rocsparse_const_spmat_descr target);
 }
-
-#endif

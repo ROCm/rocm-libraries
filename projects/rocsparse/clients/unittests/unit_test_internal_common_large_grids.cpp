@@ -23,14 +23,12 @@
  * ************************************************************************ */
 
 //
-// Regression tests for the block-index arithmetic of the three remaining
+// Regression tests for the block-index arithmetic of the remaining
 // common-helper launches hardened by AISPARSE-700:
 //
 //   rocsparse::valset                            (rocsparse_valset.cpp)
 //   rocsparse::singularity_get_async /
 //   rocsparse::singularity_get_position_async    (rocsparse_singularity.cpp)
-//   rocsparse::dense_transpose_strided_batched /
-//   rocsparse::dense_transpose_back_*            (rocsparse_dense_transpose*.cpp)
 //
 // FOCUS. Each of these sized grid.x from an int64_t count -- correctly -- and
 // then formed the element/row index in the kernel as
@@ -41,15 +39,14 @@
 // evaluated in 32-bit unsigned arithmetic and wraps at 2^32 NO MATTER what type
 // the result is assigned to. In valset the result was assigned to an int64_t
 // (launch_valset always passes an int64_t length, so the kernel's index template
-// parameter was only ever deduced as int64_t) and in the transposes to an
-// int64_t in the >INT32_MAX dispatch, and it wrapped anyway. In singularity the
-// index was `const auto`, which deduces plain unsigned int. None of the three
-// had a grid-stride loop, so there was also nothing to recover the tail past a
-// clamped grid.
+// parameter was only ever deduced as int64_t), and it wrapped anyway. In
+// singularity the index was `const auto`, which deduces plain unsigned int.
+// Neither had a grid-stride loop, so there was also nothing to recover the tail
+// past a clamped grid.
 //
 // WHY THESE THRESHOLDS ARE NOT TESTED DIRECTLY. The wrap needs 2^32 elements:
-// 17.2 GB for an int32_t valset array, 4 billion matrix rows for the transposes,
-// 4 billion batch entries for singularity. None of that fits the 15 GB gfx1201,
+// 17.2 GB for an int32_t valset array, 4 billion batch entries for
+// singularity. None of that fits the 15 GB gfx1201,
 // and the smallest machine that could hold it is not the machine CI runs on.
 // What IS reachable -- and what the fix actually consists of -- is the pairing of
 //
@@ -72,19 +69,16 @@
 // in this file: the largest allocation is 5000 int64_t, so every case runs on
 // every GPU.
 //
-// TARGET: rocsparse_valset.cpp, rocsparse_singularity.cpp and the two
-// rocsparse_dense_transpose*.cpp are compiled into rocsparse-unit-test-device
-// (ROCSPARSE_UNIT_TEST_DEVICE_LIB_SOURCES) because librocsparse hides these
-// symbols; the tests launch real kernels, so this is the GPU binary, not the
-// host-only rocsparse-unit-test.
+// TARGET: rocsparse_valset.cpp and rocsparse_singularity.cpp are compiled into
+// rocsparse-unit-test-device (ROCSPARSE_UNIT_TEST_DEVICE_LIB_SOURCES) because
+// librocsparse hides these symbols; the tests launch real kernels, so this is
+// the GPU binary, not the host-only rocsparse-unit-test.
 //
 #include "unit_test_utils.hpp"
 
 #include "unit_test_grid_clamp.hpp"
 
 // Internal declarations of the helpers under test.
-#include "rocsparse_dense_transpose.hpp"
-#include "rocsparse_dense_transpose_back.hpp"
 #include "rocsparse_singular_info_t.hpp"
 #include "rocsparse_singularity.hpp"
 #include "rocsparse_valset.hpp"
@@ -321,181 +315,5 @@ TEST_F(LargeGrids, singularity_get_position_async_grid_stride)
             << "markers2position did not resolve batch entry " << i << " with grid.x clamped to "
             << clamped_grid_x << " blocks (batch_count=" << singularity_batch_count
             << ", 1024 threads/block)";
-    }
-}
-
-// ---------------------------------------------------------------------------
-// dense_transpose / dense_transpose_back
-//
-// Both tile 32 rows per block. With the limit shrunk to 3 blocks one sweep
-// covers 96 rows, so m = 500 needs 6 sweeps and 81% of the rows are transposed
-// only by the stride loop. n is deliberately not a multiple of the 32-wide tile
-// so the column tail guards stay exercised.
-// ---------------------------------------------------------------------------
-
-namespace
-{
-    constexpr int64_t t_m = 500;
-    constexpr int64_t t_n = 70;
-
-    // A column-major m x n matrix with a value that identifies its position.
-    std::vector<float> make_matrix(int64_t rows, int64_t cols, int64_t ld, float bias)
-    {
-        std::vector<float> a(static_cast<size_t>(ld) * cols, 0.0f);
-        for(int64_t j = 0; j < cols; ++j)
-        {
-            for(int64_t i = 0; i < rows; ++i)
-            {
-                a[i + ld * j] = bias + static_cast<float>(i) + 1000.0f * static_cast<float>(j);
-            }
-        }
-        return a;
-    }
-}
-
-// B (n x m, ldb = n) = alpha * A^T, with A m x n, lda = m.
-TEST_F(LargeGrids, dense_transpose_grid_stride)
-{
-    const float alpha = 2.0f;
-
-    const std::vector<float> h_A = make_matrix(t_m, t_n, t_m, 0.0f);
-    device_vector<float>     d_A(h_A);
-    device_vector<float>     d_B(std::vector<float>(static_cast<size_t>(t_n) * t_m, -1.0f));
-    ASSERT_NE(d_A.ptr, nullptr);
-    ASSERT_NE(d_B.ptr, nullptr);
-
-    {
-        ScopedMaxGridSizeX clamp(handle, clamped_grid_x);
-        ASSERT_EQ(rocsparse::dense_transpose(handle,
-                                             rocsparse_pointer_mode_host,
-                                             t_m,
-                                             t_n,
-                                             rocsparse_datatype_f32_r,
-                                             &alpha,
-                                             rocsparse_datatype_f32_r,
-                                             d_A.ptr,
-                                             t_m,
-                                             rocsparse_datatype_f32_r,
-                                             d_B.ptr,
-                                             t_n),
-                  rocsparse_status_success);
-        UT_CHECK_HIP(hipDeviceSynchronize());
-    }
-
-    const std::vector<float> got = to_host(d_B);
-    for(int64_t i = 0; i < t_m; ++i)
-    {
-        for(int64_t j = 0; j < t_n; ++j)
-        {
-            ASSERT_FLOAT_EQ(got[j + t_n * i], alpha * h_A[i + t_m * j])
-                << "dense_transpose missed row " << i << " column " << j
-                << " with grid.x clamped to " << clamped_grid_x << " blocks (m=" << t_m
-                << ", 32 rows/block)";
-        }
-    }
-}
-
-// The same launch with a batch on grid.y, so the row stride loop has to be
-// correct for every batch entry rather than only the first.
-//
-// Host pointer mode deliberately. In device pointer mode the kernel computes the
-// per-batch scalar as `alpha + i * alpha_stride` AFTER dereferencing the pointer,
-// i.e. it adds the batch offset to the scalar VALUE instead of indexing the
-// array. That is pre-existing, unrelated to the block indexing this ticket is
-// about, and untouched here; a test using device pointer mode with batch_count
-// > 1 would be asserting on it.
-TEST_F(LargeGrids, dense_transpose_strided_batched_grid_stride)
-{
-    constexpr int64_t batch_count = 3;
-    const float       alpha       = 2.0f;
-
-    const int64_t A_stride = t_m * t_n;
-    const int64_t B_stride = t_n * t_m;
-
-    std::vector<float> h_A(static_cast<size_t>(A_stride) * batch_count);
-    for(int64_t b = 0; b < batch_count; ++b)
-    {
-        const std::vector<float> block = make_matrix(t_m, t_n, t_m, 100.0f * b);
-        std::copy(block.begin(), block.end(), h_A.begin() + b * A_stride);
-    }
-
-    device_vector<float> d_A(h_A);
-    device_vector<float> d_B(
-        std::vector<float>(static_cast<size_t>(B_stride) * batch_count, -1.0f));
-    ASSERT_NE(d_A.ptr, nullptr);
-    ASSERT_NE(d_B.ptr, nullptr);
-
-    {
-        ScopedMaxGridSizeX clamp(handle, clamped_grid_x);
-        ASSERT_EQ(rocsparse::dense_transpose_strided_batched(handle,
-                                                             rocsparse_pointer_mode_host,
-                                                             batch_count,
-                                                             t_m,
-                                                             t_n,
-                                                             rocsparse_datatype_f32_r,
-                                                             &alpha,
-                                                             /*alpha_stride=*/0,
-                                                             rocsparse_datatype_f32_r,
-                                                             d_A.ptr,
-                                                             t_m,
-                                                             A_stride,
-                                                             rocsparse_datatype_f32_r,
-                                                             d_B.ptr,
-                                                             t_n,
-                                                             B_stride),
-                  rocsparse_status_success);
-        UT_CHECK_HIP(hipDeviceSynchronize());
-    }
-
-    const std::vector<float> got = to_host(d_B);
-    for(int64_t b = 0; b < batch_count; ++b)
-    {
-        for(int64_t i = 0; i < t_m; ++i)
-        {
-            for(int64_t j = 0; j < t_n; ++j)
-            {
-                ASSERT_FLOAT_EQ(got[b * B_stride + j + t_n * i],
-                                alpha * h_A[b * A_stride + i + t_m * j])
-                    << "dense_transpose_strided_batched missed batch " << b << " row " << i
-                    << " column " << j << " with grid.x clamped to " << clamped_grid_x << " blocks";
-            }
-        }
-    }
-}
-
-// B (m x n, ldb = m) = A^T, with A n x m, lda = n.
-TEST_F(LargeGrids, dense_transpose_back_grid_stride)
-{
-    const std::vector<float> h_A = make_matrix(t_n, t_m, t_n, 0.0f);
-    device_vector<float>     d_A(h_A);
-    device_vector<float>     d_B(std::vector<float>(static_cast<size_t>(t_m) * t_n, -1.0f));
-    ASSERT_NE(d_A.ptr, nullptr);
-    ASSERT_NE(d_B.ptr, nullptr);
-
-    {
-        ScopedMaxGridSizeX clamp(handle, clamped_grid_x);
-        ASSERT_EQ(rocsparse::dense_transpose_back(handle,
-                                                  t_m,
-                                                  t_n,
-                                                  rocsparse_datatype_f32_r,
-                                                  d_A.ptr,
-                                                  t_n,
-                                                  rocsparse_datatype_f32_r,
-                                                  d_B.ptr,
-                                                  t_m),
-                  rocsparse_status_success);
-        UT_CHECK_HIP(hipDeviceSynchronize());
-    }
-
-    const std::vector<float> got = to_host(d_B);
-    for(int64_t i = 0; i < t_m; ++i)
-    {
-        for(int64_t j = 0; j < t_n; ++j)
-        {
-            ASSERT_FLOAT_EQ(got[i + t_m * j], h_A[j + t_n * i])
-                << "dense_transpose_back missed row " << i << " column " << j
-                << " with grid.x clamped to " << clamped_grid_x << " blocks (m=" << t_m
-                << ", 32 rows/block)";
-        }
     }
 }

@@ -227,8 +227,6 @@ namespace rocsparse
             {
             case rocsparse_format_csc:
             {
-#ifdef ROCSPARSE_WITH_TRSM_REFACTORING
-
                 const auto op_csr = (trans_A == rocsparse_operation_none)
                                         ? rocsparse_operation_transpose
                                         : rocsparse_operation_none;
@@ -243,11 +241,6 @@ namespace rocsparse
 
                 if(has_trm_info == false)
                 {
-#else
-                auto csrsm_info = matA->info->get_csrsm_info();
-                if(csrsm_info->get(trans_A, matA->descr->fill_mode) == nullptr)
-                {
-#endif
                     RETURN_IF_ROCSPARSE_ERROR(
                         rocsparse::cscsm_analysis(handle,
                                                   nrhs,

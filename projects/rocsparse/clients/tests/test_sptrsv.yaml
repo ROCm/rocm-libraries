@@ -861,7 +861,7 @@ Tests:
 
 # Same regression, conjugate-transposed with a complex type. In addition to the
 # transposed value gather (AISPARSE-649) and the batched solve (AISPARSE-655),
-# this path conjugates the gathered values through conjugate_strided_batched. A
+# the solve kernel conjugates the gathered values on the fly (A_OP_CONJUGATE). A
 # complex precision is used so the conjugation is exercised, not a no-op.
 - name: sptrsv_batched_large_grid
   category: nightly

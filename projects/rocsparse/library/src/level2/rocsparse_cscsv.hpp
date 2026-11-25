@@ -94,19 +94,8 @@ namespace rocsparse
         _rocsparse_spmat_descr mat_csr;
         rocsparse::build_csr_from_csc(*A, mat_csr, descr_csr);
 
-#ifdef ROCSPARSE_WITH_TRSM_REFACTORING
         RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrsv_solve_buffer_size(
             handle, rocsparse::cscsv_operation_to_csr(trans), &mat_csr, x, y, buffer_size));
-#else
-        // conjugate_transpose runs as a non-transposed CSR solve with on-the-fly
-        // conjugation, which needs the same extra buffer space as transposition.
-        const rocsparse_operation trans_csr = (trans == rocsparse_operation_conjugate_transpose)
-                                                  ? rocsparse_operation_transpose
-                                                  : rocsparse::cscsv_operation_to_csr(trans);
-
-        RETURN_IF_ROCSPARSE_ERROR(
-            rocsparse::csrsv_solve_buffer_size(handle, trans_csr, &mat_csr, x, y, buffer_size));
-#endif
         return rocsparse_status_success;
     }
 

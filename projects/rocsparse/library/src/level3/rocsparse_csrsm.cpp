@@ -22,7 +22,7 @@
  *
  * ************************************************************************ */
 #include "internal/level3/rocsparse_csrsm.h"
-#include "rocsparse_csrsm.hpp"
+#include "refactored/rocsparse_csrsm.hpp"
 
 #include "rocsparse_common.hpp"
 #include "rocsparse_control.hpp"

@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2024-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2024-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -161,9 +161,7 @@ DEF(rocsparse_gpsv_interleaved_alg,
     rocsparse_gpsv_interleaved_alg_default,
     rocsparse_gpsv_interleaved_alg_qr);
 
-#if defined(ROCSPARSE_WITH_SPSORT)
 DEF(rocsparse_spsort_alg, rocsparse_spsort_alg_default, rocsparse_spsort_alg_radix_sort);
-#endif
 
 #define CASE(VALUE)               \
     case VALUE:                   \
@@ -599,7 +597,6 @@ bool rocsparse_gpsv_interleaved_alg_from_name(rocsparse_gpsv_interleaved_alg val
     return false;
 }
 
-#if defined(ROCSPARSE_WITH_SPSORT)
 bool rocsparse_spsort_alg_from_name(rocsparse_spsort_alg value, const char* name)
 {
     for(auto v : rocsparse_spsort_alg_st::all)
@@ -612,7 +609,6 @@ bool rocsparse_spsort_alg_from_name(rocsparse_spsort_alg value, const char* name
     }
     return false;
 }
-#endif
 
 #undef CASE
 #undef RETURN_INVALID
@@ -664,9 +660,7 @@ bool convert(int& v, const char* enum_type, const char* value)
     DEF(rocsparse_dense_to_sparse_alg);
     DEF(rocsparse_gtsv_interleaved_alg);
     DEF(rocsparse_gpsv_interleaved_alg);
-#if defined(ROCSPARSE_WITH_SPSORT)
     DEF(rocsparse_spsort_alg);
-#endif
     return false;
 }
 
@@ -714,9 +708,7 @@ bool get_size(uint64_t& v, const char* enum_type)
     DEF(rocsparse_dense_to_sparse_alg);
     DEF(rocsparse_gtsv_interleaved_alg);
     DEF(rocsparse_gpsv_interleaved_alg);
-#if defined(ROCSPARSE_WITH_SPSORT)
     DEF(rocsparse_spsort_alg);
-#endif
     return false;
 }
 
@@ -763,9 +755,7 @@ const char* get_name(const char* enum_type, uint64_t index)
     DEF(rocsparse_dense_to_sparse_alg);
     DEF(rocsparse_gtsv_interleaved_alg);
     DEF(rocsparse_gpsv_interleaved_alg);
-#if defined(ROCSPARSE_WITH_SPSORT)
     DEF(rocsparse_spsort_alg);
-#endif
     return nullptr;
 }
 

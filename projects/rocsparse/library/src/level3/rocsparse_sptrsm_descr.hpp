@@ -45,9 +45,7 @@ protected:
     float                                  m_local_host_alpha_value[4];
     rocsparse_solve_mode                   m_solve_mode{rocsparse_solve_mode_triangular};
     rocsparse_diagonal_modifier            m_diagonal_modifier{rocsparse_diagonal_modifier_none};
-#if defined(ROCSPARSE_WITH_TRSM_REFACTORING)
-    int64_t m_batch_count{};
-#endif
+    int64_t                                m_batch_count{};
 
 public:
     void* get_local_host_alpha()
@@ -72,10 +70,8 @@ public:
     rocsparse_sptrsm_stage get_stage() const;
     rocsparse_sptrsm_alg   get_alg() const;
 
-#if defined(ROCSPARSE_WITH_TRSM_REFACTORING)
     void    set_batch_count(int64_t);
     int64_t get_batch_count() const;
-#endif
 
     int64_t             get_nrhs() const;
     rocsparse_operation get_operation_A() const;

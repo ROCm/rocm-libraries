@@ -120,8 +120,6 @@ option(BUILD_WITH_ROCBLAS "Enable building rocSPARSE with rocBLAS" ON)
 option(BUILD_WITH_ROCTX "Enable building rocSPARSE with rocTX" ON)
 option(BUILD_WITH_OFFLOAD_COMPRESS
        "Enable offload compression during compilation" ON)
-option(BUILD_WITH_SPSORT "Build rocsparse_spsort and the rocsparse_spsort_descr auxiliary routines for the COO, CSR, and CSC formats" ON)
-option(BUILD_WITH_TRSM_REFACTORING "Build rocSPARSE with the refactored triangular solve (SpTRSM/SpSM) implementation" ON)
 
 # Clients utilize rocsparse fortran API and a fortran compiler
 if( NOT BUILD_FORTRAN_CLIENTS )

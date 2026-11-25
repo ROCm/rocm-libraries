@@ -26,8 +26,6 @@
 
 #include "rocsparse-types.h"
 #include "rocsparse_conjugate.hpp"
-#include "rocsparse_dense_transpose.hpp"
-#include "rocsparse_dense_transpose_back.hpp"
 #include "rocsparse_valset.hpp"
 
 //

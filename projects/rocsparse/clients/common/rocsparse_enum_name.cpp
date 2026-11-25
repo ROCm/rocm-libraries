@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2024-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2024-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -358,7 +358,6 @@ const char* rocsparse_gpsv_interleaved_alg_name(rocsparse_gpsv_interleaved_alg v
     RETURN_INVALID;
 }
 
-#if defined(ROCSPARSE_WITH_SPSORT)
 const char* rocsparse_spsort_alg_name(rocsparse_spsort_alg value)
 {
     switch(value)
@@ -368,7 +367,6 @@ const char* rocsparse_spsort_alg_name(rocsparse_spsort_alg value)
     }
     RETURN_INVALID;
 }
-#endif
 
 #undef CASE
 #undef RETURN_INVALID
