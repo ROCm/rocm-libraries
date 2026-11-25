@@ -196,7 +196,8 @@ inline void partition(const Config& cfg, const ConvParams& layer, DgradPlan& pla
         for(int s = 0; s < n; ++s)
         {
             const int taps = plan.segs[s].nr * plan.segs[s].nc;
-            est[s]         = taps == 0 ? zero_cycles() : taps * chunks * STEP_CYCLES + STORE_CYCLES;
+            est[s]         = taps == 0 ? zero_cycles()
+                                       : static_cast<double>(taps) * chunks * STEP_CYCLES + STORE_CYCLES;
             total += tiles[s] * est[s];
             whole_units &= tiles[s] >= XCDS;
         }
@@ -208,11 +209,14 @@ inline void partition(const Config& cfg, const ConvParams& layer, DgradPlan& pla
         // Finds the least finishing time whose units fit.
         auto claims = [&](int s, int wgs) { return tiles[s] >= MIN_ROUNDS * wgs; };
         auto need   = [&](int s, double t) {
-            const int rounds = std::max(static_cast<int>(t / est[s]), 1);
-            const int wgs    = std::min((tiles[s] + rounds - 1) / rounds, tiles[s]);
-            int units        = std::max((wgs + size[s] - 1) / size[s], 1);
-            const int frac =
-                static_cast<int>(std::ceil(tiles[s] * est[s] / std::max(t, 1.0) / size[s] - 1e-9));
+            // Clamped before the conversion to int, which is undefined past INT32_MAX.
+            const int rounds =
+                std::max(static_cast<int>(std::min(t / est[s], double(INT32_MAX))), 1);
+            const int wgs  = std::min((tiles[s] + rounds - 1) / rounds, tiles[s]);
+            int units      = std::max((wgs + size[s] - 1) / size[s], 1);
+            const int frac = static_cast<int>(
+                std::min(std::ceil(tiles[s] * est[s] / std::max(t, 1.0) / size[s] - 1e-9),
+                         double(INT32_MAX)));
             if(frac >= 1 && frac < units && claims(s, frac * size[s]))
                 units = frac;
             return units;
@@ -441,7 +445,8 @@ inline DgradPlan dgrad_plan(const Config& cfg, const ConvParams& layer, int cu_c
         const int taps  = plan.max_taps();
         for(int pieces = 1; pieces <= chunks; ++pieces)
         {
-            if(chunks % pieces != 0 || (limit == full && pieces == 1) || tiles * pieces > cu_count)
+            if(chunks % pieces != 0 || (limit == full && pieces == 1) ||
+               static_cast<int64_t>(tiles) * pieces > cu_count)
                 continue;
             const int steps = split_steps(cfg, taps, chunks, pieces);
             if(steps < best_steps)
@@ -493,6 +498,9 @@ inline bool phases_fit(const Config& cfg, const ConvParams& layer)
     const DgradPlan plan = dgrad_phases(layer);
     if(plan.n_phases == 0 || plan.phases[0].taps() == 0 || plan_ftiles(plan) > MAX_FTILES)
         return false;
+    // LayerPars::out_hw, dX's pixels per image, is an int.
+    if(static_cast<int64_t>(layer.dims == 3 ? layer.d : 1) * layer.h * layer.w > INT32_MAX)
+        return false;
     const ConvParams par = as_fprop(layer);
     for(int f = 0; f < plan.n_phases; ++f)
     {
@@ -508,8 +516,12 @@ inline bool phases_fit(const Config& cfg, const ConvParams& layer)
         sub.stride_w   = 1;
         if(layer.stride_h * layer.stride_w > 1)
             sub.dilation_h = sub.dilation_w = 1;
-        // dX rows lie stride_h rows apart, or in a conv3d up to two depth strides of planes.
-        int64_t row_advance = static_cast<int64_t>(layer.stride_h) * layer.w;
+        // A phase's dX rows lie stride_h rows apart in an image and h - (extent - 1) * stride_h
+        // rows apart across images, a whole image at extent 1.
+        //
+        // In a conv3d they lie up to two depth strides of planes apart.
+        const int64_t wrap  = layer.h - static_cast<int64_t>(g.h.extent - 1) * layer.stride_h;
+        int64_t row_advance = std::max<int64_t>(layer.stride_h, wrap) * layer.w;
         if(layer.dims == 3)
         {
             sub.kd         = std::max(g.d.taps, 1);
@@ -607,8 +619,9 @@ inline LayerPars phased_pars(const Config& cfg,
     pars.rows = pars.phases[0].rows;
 
     // Each segment's positions in filter tiles, then its first again; weights at its tap (r, s).
-    int q = 0, ft = 0, copy = 0;
-    pars.n_segs = plan.n_segs;
+    int q = 0, ft = 0;
+    int64_t copy = 0;
+    pars.n_segs  = plan.n_segs;
     for(int s = 0; s < plan.n_segs; ++s)
     {
         const auto& rc = plan.segs[s];
@@ -652,7 +665,7 @@ inline LayerPars phased_pars(const Config& cfg,
         sg.seq0         = seq0;
         sg.taps         = rc.nr * rc.nc;
         sg.tiles        = tiles;
-        sg.copy0        = copy;
+        sg.copy0        = static_cast<int>(copy);
         sg.wg0          = rc.wg0;
         sg.wgs          = rc.wgs;
         sg.runs         = runs;
@@ -661,7 +674,9 @@ inline LayerPars phased_pars(const Config& cfg,
         sg.wg_q         = rc.wgs / runs;
         sg.wg_r         = rc.wgs % runs;
         sg.dyn          = rc.dyn;
-        copy += plan.pieces * plan.x_tiles(cfg, layer.n, rc.phase) * cfg.x_tile() * k_pad;
+        if(plan.split)
+            copy += static_cast<int64_t>(plan.pieces) * plan.x_tiles(cfg, layer.n, rc.phase) *
+                    cfg.x_tile() * k_pad;
     }
     return pars;
 }

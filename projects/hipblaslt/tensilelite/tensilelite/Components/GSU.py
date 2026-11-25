@@ -34,6 +34,7 @@ from rocisa.functions import scalarStaticMultiply64, scalarUInt32DivideAndRemain
 
 from ..Common import ceilDivide, log2, print2, INDEX_CHARS
 from ..Common.MxScaleLayout import mxFreeTile, mulScaleRows
+from ..Common.Utilities import SWIZZLE_BLOCK_ROWS
 from ..Component import Component
 from ..AsmStoreState import StoreState, VectorDataTypes
 from ..AsmAddressCalculation import AddrCalculation
@@ -228,6 +229,13 @@ class GSUOff(GSU):
         stride = writer.strideRef(tc, dimIdx)
         isMirrorIdx = dimIdx in kernel["ProblemType"]["MirrorDims%s"%tc]
         m = int(kernel["_DepthU%s"%tc] * tP["bpeGR"])
+        # Swizzled-TDM operand: one K step of DepthU spans MI rows of the pre-swizzled layout,
+        # so the per-iteration advance is MI * DepthU * bpe (same factor GSUOn.graIncrements
+        # applies). Persistent data-parallel kernels select GSUOff (SingleBuffer), so without
+        # it the TDM address advances by a single row's worth and every K step re-reads the
+        # wrong data.
+        if tP.get("isSwizzledTDM"):
+          m *= SWIZZLE_BLOCK_ROWS     # the host swizzle blocks 16 rows whatever the WMMA shape
         if isMirrorIdx:
           m = -m
 
