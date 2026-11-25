@@ -189,13 +189,15 @@ def arm_args(arm, shape, cfg):
          f"-epilogue={arm.get('epilogue', 'tdm')}", f"-k_batch={arm.get('k_batch', 1)}",
          f"-warps={arm.get('warps', '2x2')}",
          f"-cluster={arm.get('cluster', '1x1')}", f"-place={arm.get('place', 'default')}",
-         f"-c_dtype={cfg.get('c_dtype', 'bf16')}"]
+         f"-c_dtype={arm.get('c_dtype', cfg.get('c_dtype', 'bf16'))}"]
     if "wt" in arm:
         a.append(f"-wt={arm['wt']}")
     return a
 
 
 def arm_tag(v, arm):
+    if "c_dtype" in arm:
+        return f"{arm_tag(v, {k: x for k, x in arm.items() if k != 'c_dtype'})}|{arm['c_dtype']}"
     if arm.get("epilogue", "tdm") != "tdm" or arm.get("k_batch", 1) != 1:
         base = arm_tag(v, {k: x for k, x in arm.items() if k not in ("epilogue", "k_batch")})
         return f"{base}|{arm.get('epilogue', 'tdm')}|kb{arm.get('k_batch', 1)}"

@@ -371,14 +371,15 @@ double tflops(const Problem3& p, double ms)
 
 struct DeviceBuffers
 {
-    void* a  = nullptr;
-    void* b  = nullptr;
-    void* sa = nullptr;
-    void* sb = nullptr;
-    void* c  = nullptr;
+    void* a     = nullptr;
+    void* b     = nullptr;
+    void* sa    = nullptr;
+    void* sb    = nullptr;
+    void* c     = nullptr;
+    void* c_out = nullptr; // -c_dtype=f32acc_bf16: the bf16 C converted from the f32 C
     ~DeviceBuffers()
     {
-        for(void* p : {a, b, sa, sb, c})
+        for(void* p : {a, b, sa, sb, c, c_out})
             if(p != nullptr)
                 (void)hipFree(p);
     }
@@ -484,11 +485,24 @@ constexpr unsigned ex_type_hash()
     return h;
 }
 
+// -c_dtype=f32acc_bf16: the f32 C (split-K partials added with native f32 atomics) to bf16
+__global__ void
+f32_to_bf16(const float* __restrict__ in, ck_tile::bf16_t* __restrict__ out, size_t n)
+{
+    const size_t i = blockIdx.x * static_cast<size_t>(blockDim.x) + threadIdx.x;
+    if(i < n)
+        out[i] = ck_tile::type_convert<ck_tile::bf16_t>(in[i]);
+}
+
 template <typename Inst>
 int run_impl(const ck_tile::ArgParser& arg, const std::string& bench_name)
 {
     using Kernel    = typename Inst::Kernel;
     using CDataType = typename Inst::CDataType;
+    // f32 C: the kernel accumulates into f32, a conversion pass writes the bf16 output, which the
+    // checks read (OutT)
+    constexpr bool kF32Acc = std::is_same_v<CDataType, float>;
+    using OutT             = std::conditional_t<kF32Acc, ck_tile::bf16_t, CDataType>;
     const Problem3 p{arg.get_int("m"), arg.get_int("n"), arg.get_int("k")};
     const std::string mode = arg.get_str("mode");
     const uint64_t seed    = arg.get_uint64("seed");
@@ -603,6 +617,9 @@ int run_impl(const ck_tile::ArgParser& arg, const std::string& bench_name)
     BENCH_HIP_CHECK(hipMemcpy(d.sa, sa_dev.data(), sa_dev.size(), hipMemcpyHostToDevice));
     BENCH_HIP_CHECK(hipMemcpy(d.sb, sb_dev.data(), sb_dev.size(), hipMemcpyHostToDevice));
     BENCH_HIP_CHECK(hipMemset(d.c, 0, c_elems * sizeof(CDataType)));
+    if constexpr(kF32Acc)
+        BENCH_HIP_CHECK(hipMalloc(&d.c_out, c_elems * sizeof(OutT)));
+    void* const out_buf = kF32Acc ? d.c_out : d.c;
 
     const ck_tile::MxGemmHostArgs<1, 1, 0> args({static_cast<const void*>(d.a)},
                                                 {static_cast<const void*>(d.sa)},
@@ -644,6 +661,9 @@ int run_impl(const ck_tile::ArgParser& arg, const std::string& bench_name)
         else
             ck_tile::launch_kernel(ck_tile::stream_config{stream, false},
                                    ck_tile::make_kernel<1>(Kernel{}, grids, blocks, 0, kargs));
+        if constexpr(kF32Acc)
+            f32_to_bf16<<<static_cast<unsigned>((c_elems + 255) / 256), 256, 0, stream>>>(
+                static_cast<const float*>(d.c), static_cast<ck_tile::bf16_t*>(d.c_out), c_elems);
     };
 
     if(is_verify)
@@ -652,7 +672,7 @@ int run_impl(const ck_tile::ArgParser& arg, const std::string& bench_name)
         const std::string c = arg.get_str("check");
         const bool full     = c == "full" || (c == "auto" && static_cast<double>(p.M) * p.N * p.K <=
                                                              8589934592.0); // 2^33
-        std::vector<CDataType> out(c_elems), first(c_elems);
+        std::vector<OutT> out(c_elems), first(c_elems);
         size_t nondeterministic = 0;
         for(int l = 0; l < launches; ++l)
         {
@@ -661,10 +681,10 @@ int run_impl(const ck_tile::ArgParser& arg, const std::string& bench_name)
             BENCH_HIP_CHECK(hipGetLastError());
             BENCH_HIP_CHECK(hipDeviceSynchronize());
             BENCH_HIP_CHECK(
-                hipMemcpy(out.data(), d.c, c_elems * sizeof(CDataType), hipMemcpyDeviceToHost));
+                hipMemcpy(out.data(), out_buf, c_elems * sizeof(OutT), hipMemcpyDeviceToHost));
             if(l == 0)
                 first = out;
-            else if(std::memcmp(first.data(), out.data(), c_elems * sizeof(CDataType)) != 0)
+            else if(std::memcmp(first.data(), out.data(), c_elems * sizeof(OutT)) != 0)
                 ++nondeterministic;
         }
 
@@ -725,21 +745,20 @@ int run_impl(const ck_tile::ArgParser& arg, const std::string& bench_name)
         const double ref_s =
             std::chrono::duration<double>(std::chrono::steady_clock::now() - t_ref).count();
 
-        constexpr double u  = unit_roundoff<CDataType>();
+        constexpr double u  = unit_roundoff<OutT>();
         size_t bad          = 0;
         size_t exact_points = 0;
         double max_abs      = 0;
         for(size_t i = 0; i < pts.size(); ++i)
         {
             const auto [m, n]       = pts[i];
-            const CDataType got     = first[static_cast<size_t>(m) * p.N + n];
+            const OutT got          = first[static_cast<size_t>(m) * p.N + n];
             const double gotf       = ck_tile::type_convert<float>(got);
             const double err        = std::fabs(gotf - refs[i]);
-            const bool exact_sparse = sparse && sabs[i] <= sparse_exact_limit<CDataType>();
+            const bool exact_sparse = sparse && sabs[i] <= sparse_exact_limit<OutT>();
             exact_points += exact_sparse;
-            const bool ok = exact_sparse
-                                ? ck_tile::bit_cast<uint16_t>(got) == c_bits<CDataType>(refs[i])
-                                : err <= std::fabs(refs[i]) * u + k_batch * sabs[i] * u;
+            const bool ok = exact_sparse ? ck_tile::bit_cast<uint16_t>(got) == c_bits<OutT>(refs[i])
+                                         : err <= std::fabs(refs[i]) * u + k_batch * sabs[i] * u;
             max_abs       = std::max(max_abs, err);
             if(!ok && bad++ < 5)
                 std::printf("mismatch m=%d n=%d ref=%.9g got=%.9g sum|terms|=%.6g\n",
@@ -1199,8 +1218,11 @@ template <typename CDataType>
 int dispatch_epilogue(const ck_tile::ArgParser& arg, const std::string& name)
 {
     const std::string epi = arg.get_str("epilogue");
-    if(epi == "tdm")
-        return dispatch_tile<true, CDataType>(arg, name);
+    if constexpr(!std::is_same_v<CDataType, float>) // f32 C: CShuffle (split-K) only
+    {
+        if(epi == "tdm")
+            return dispatch_tile<true, CDataType>(arg, name);
+    }
 #if !defined(CK_EX55_BF16_TDM_ONLY) || defined(CK_EX55_FOCUS_CSHUFFLE)
     // EXPERIMENT: -DCK_EX55_FOCUS_CSHUFFLE also builds the CShuffle epilogue (split-K, -k_batch)
     // with -DCK_EX55_BF16_TDM_ONLY / the focus set
@@ -1231,6 +1253,12 @@ int dispatch(const ck_tile::ArgParser& arg)
 #endif
     if(c == "bf16")
         return dispatch_epilogue<ck_tile::bf16_t>(arg, name);
+#if defined(CK_EX55_F32ACC)
+    // EXPERIMENT: -DCK_EX55_F32ACC: -c_dtype=f32acc_bf16, f32 C (native f32 atomics for split-K)
+    // converted to the bf16 output by a second pass inside each timed launch
+    if(c == "f32acc_bf16")
+        return dispatch_epilogue<float>(arg, name);
+#endif
     std::printf("unknown -c_dtype=%s (fp16, bf16)\n", c.c_str());
     return 2;
 }
