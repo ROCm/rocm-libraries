@@ -118,6 +118,9 @@ try
     if(!handle)
         return rocblas_status_invalid_handle;
 
+    if(!mode)
+        return rocblas_status_invalid_pointer;
+
     std::shared_ptr<void> handle_ptr;
     ROCBLAS_CHECK(rocblas_internal_get_data_ptr(handle, handle_ptr));
     rocsolver_handle_data handle_data = (rocsolver_handle_data)handle_ptr.get();
