@@ -769,8 +769,9 @@ hipblasStatus_t hipblasLtGetArchName(char** archName);
  * names the call and the HIP error.
  *
  *  When \p handle is not NULL and the status is not \p HIPBLAS_STATUS_SUCCESS,
- * \p *handle is set to NULL and must not be passed to hipblasLtDestroy(). The
- * call passes any device memory it allocated to hipFree() before it returns.
+ * \p *handle must not be passed to hipblasLtDestroy(). A failed HIP call
+ * leaves \p *handle NULL, and the call passes any device memory it allocated
+ * to hipFree() before it returns.
  */
 HIPBLASLT_EXPORT
 hipblasStatus_t hipblasLtCreate(hipblasLtHandle_t* handle);

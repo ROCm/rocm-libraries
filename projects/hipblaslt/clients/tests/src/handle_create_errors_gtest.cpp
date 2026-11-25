@@ -58,30 +58,42 @@ namespace
            || hipStreamBeginCapture(stream, hipStreamCaptureModeGlobal) != hipSuccess)
             std::exit(kChildFailed);
 
-        hipblasLtHandle_t other     = nullptr;
-        const auto        created   = hipblasLtCreate(&other);
-        const auto        destroyed = hipblasLtDestroy(handle);
-        void*             probe2    = nullptr;
-        const bool allowed = hipMalloc(&probe2, 256) == hipSuccess || hipFree(probe) == hipSuccess;
+        hipblasLtHandle_t other         = nullptr;
+        const auto        created       = hipblasLtCreate(&other);
+        const auto        destroyed     = hipblasLtDestroy(handle);
+        void*             probe2        = nullptr;
+        const bool        mallocAllowed = hipMalloc(&probe2, 256) == hipSuccess;
+        const bool        freeAllowed   = hipFree(probe) == hipSuccess;
 
         hipGraph_t graph = nullptr;
         static_cast<void>(hipStreamEndCapture(stream, &graph));
         if(graph != nullptr)
             static_cast<void>(hipGraphDestroy(graph));
         static_cast<void>(hipGetLastError());
-        std::fprintf(stderr,
-                     "during capture: hipblasLtCreate returned %d, hipblasLtDestroy returned %d\n",
-                     int(created),
-                     int(destroyed));
-        if(allowed)
-            std::exit(kChildCaptureAllowed);
 
-        if(created == HIPBLAS_STATUS_SUCCESS || other != nullptr
-           || destroyed == HIPBLAS_STATUS_SUCCESS)
+        if(mallocAllowed)
+            static_cast<void>(hipFree(probe2));
+        if(!freeAllowed)
+            static_cast<void>(hipFree(probe));
+        const bool otherLeftSet = created != HIPBLAS_STATUS_SUCCESS && other != nullptr;
+        if(created == HIPBLAS_STATUS_SUCCESS)
+            static_cast<void>(hipblasLtDestroy(other));
+        const auto retried
+            = destroyed == HIPBLAS_STATUS_SUCCESS ? destroyed : hipblasLtDestroy(handle);
+        static_cast<void>(hipStreamDestroy(stream));
+        std::fprintf(stderr,
+                     "during capture: hipblasLtCreate returned %d, hipblasLtDestroy returned %d; "
+                     "after capture: hipblasLtDestroy returned %d\n",
+                     int(created),
+                     int(destroyed),
+                     int(retried));
+
+        if(mallocAllowed || freeAllowed)
+            std::exit(kChildCaptureAllowed);
+        if(created == HIPBLAS_STATUS_SUCCESS || otherLeftSet || destroyed == HIPBLAS_STATUS_SUCCESS
+           || retried != HIPBLAS_STATUS_SUCCESS)
             std::exit(kChildFailed);
-        const auto retried = hipblasLtDestroy(handle);
-        std::fprintf(stderr, "after capture: hipblasLtDestroy returned %d\n", int(retried));
-        std::exit(retried == HIPBLAS_STATUS_SUCCESS ? kChildReturnedStatus : kChildFailed);
+        std::exit(kChildReturnedStatus);
     }
 
     TEST(HandleCreateErrors, smoke_CreateWithNoVisibleDeviceReturnsStatus)
