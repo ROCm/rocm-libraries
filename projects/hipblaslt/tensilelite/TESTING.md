@@ -504,7 +504,8 @@ TensileLite is exercised by both of hipBLASLt's CI systems (see
 overview). The Math CI job that matters most for TensileLite is **`preliminary`**, the functional gate
 for TensileLite, which runs two stages on gfx12, gfx90a, gfx942, and gfx950. (Since September 2026 it
 also has a two-GPU gfx950 node, which skips both stages and runs only the multi-GPU `tox -e comm`
-tests.)
+tests: the fused GEMM plus all-to-all configs and the `--split-devices` configs, both under
+`Tests/common/comm/gfx950/`.)
 
 As of the Aug-26 2026 `rocJenkins` reorder (`bc21df82`, AIHPBLAS-4431), the stage order is: first
 `tox -e unit -- tensilelite/Tests/unit`, which carries no marker filter and therefore runs the entire unit

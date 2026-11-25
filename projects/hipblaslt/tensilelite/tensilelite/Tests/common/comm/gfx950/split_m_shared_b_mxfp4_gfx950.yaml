@@ -1,0 +1,81 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+# MXFP4 GEMM split along M over two gfx950 GPUs (SplitDevices: 2), with B and its MX scales shared:
+# both devices read the last device's B and scales, and the other device validates against that
+# device's data. With MXScaleFormat 1 every device lays its scales out again for the first solution
+# of each problem (the layout depends on the solution's MFMA K), after the reference inputs were
+# redirected; both solutions must validate on both devices. The subtile kernels that read this
+# layout support only the 16x16x128 MFMA, so the two solutions differ in their macro tile.
+# MXDataGenerator False: the generator gives every device the same B and scales, so the other
+# device would pass against its own copy; the random init gives each device its own.
+# M = 1000 and 1001 leave a slice whose scales are not swizzled, next to the swizzled shared B.
+TestParameters:
+  marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201, skip-gfx1250, skip-gfx1250-strict] # gfx950 only
+
+GlobalParameters:
+  PrintSolutionRejectionReason: True
+  Architecture: gfx950
+  SplitDevices: 2
+  SplitDim: M
+  SplitPlacementB: Shared
+  BoundsCheck: 0
+  CpuThreads: 1
+  DataInitTypeA: 3
+  DataInitTypeB: 3
+  DataInitTypeC: 3
+  DataInitTypeD: 0
+  DataInitTypeMXSA: 3
+  DataInitTypeMXSB: 3
+  DataInitTypeAlpha: 1
+  DataInitTypeBeta: 1
+  MXScaleFormat: 1
+  MXDataGenerator: False
+  NumBenchmarks: 1
+  SyncsPerBenchmark: 1
+  EnqueuesPerSync: 3
+  KernelTime: False
+  NumElementsToValidate: -1
+  NumWarmups: 0
+  ValidationMaxToPrint: 4
+  ValidationPrintValids: False
+
+BenchmarkProblems:
+  -
+    - # MXFP4 TN, BF16 D, batched
+      OperationType: GEMM
+      DataType: F4
+      DestDataType: b
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      MXBlockA: 32
+      MXBlockB: 32
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+
+    - InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 128, 1, 1, 4, 4, 2, 2] # MT 128x128
+          - [16, 16, 128, 1, 1, 2, 2, 2, 2] # MT 64x64
+        - DepthU: [256]
+        - AssertSummationElementMultiple: [32]
+        - LocalReadVectorWidth: [32]
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - ScheduleIterAlg: [3]
+        - 1LDSBuffer: [0]
+        - DirectToLds: [0]
+        - TileProcessingStrategy: ["None"]
+        - WorkAssignment: [StaticGrid]
+        - UseSubtileImpl: [True]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [256, 256, 1, 256]
+          - Exact: [512, 256, 2, 512]
+          - Exact: [1000, 256, 1, 256]
+          - Exact: [1001, 256, 1, 256]
