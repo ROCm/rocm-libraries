@@ -856,7 +856,7 @@ namespace
         // general one for every block dimension on a wave32 GPU, the specialised
         // 2x2 .. 32x32 ones on wave64) must write alpha * A * x without reading y.
         //
-        // Known defect: on a wave64 GPU the float-only 5x5 and 8x8 kernels
+        // Known defect (AISPARSE-1212): on a wave64 GPU the float-only 5x5 and 8x8 kernels
         // (sbsrxmvn_5x5_device / sbsrxmvn_8x8_device) compute beta * y[row] without
         // the beta == 0 guard the other kernels have, so the NaN in y survives in every
         // entry. Found by reading the kernels, not observed on wave64 hardware. Those
@@ -898,7 +898,7 @@ namespace
                                                      true);
         if(known_nan && !::testing::Test::HasFailure())
             GTEST_SKIP() << "the wave64 float 5x5 / 8x8 bsrmv kernels read y when beta == 0 "
-                            "(known library defect); every other case passed";
+                            "(known library defect, AISPARSE-1212); every other case passed";
     }
 
     TEST_F(L2DeviceBsrmv, empty_matrix_scales_y_by_beta)
