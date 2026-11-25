@@ -3,7 +3,8 @@
 
 """Softmax-gradient VALU levers of the attention backward main kernel.
 
-Family glue (Python-only, like the rest of the backward body). Each lever is a
+Family glue (C++ twin: ``helper_rocke.instances.common._attention_bwd_valu.h``,
+byte-identical by ``tests/parity/attention_bwd_valu_emit``). Each lever is a
 defaulted :class:`~kernels.common.attention_bwd.AttnBwdSpec` field whose
 default emits the shipped code; this module holds their emitters so the body
 keeps one small hook per lever.
