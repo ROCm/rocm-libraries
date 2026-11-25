@@ -14,11 +14,11 @@ from __future__ import annotations
 
 import re
 import shutil
-import subprocess
 from pathlib import Path
 
 import pytest
 from rocke.assets import platform_root
+from rocke.tests.cmake_embedding import configure_embedded_rocke
 
 pytestmark = pytest.mark.integration
 
@@ -55,23 +55,16 @@ def provider_cmake(rocke: Path) -> str:
 
 
 def _configure(rocke: Path, build: Path, *options: str) -> str:
-    """Configure rocke/ and return the text of every generated install script."""
-    result = subprocess.run(
-        [
-            "cmake",
-            "-S",
-            str(rocke),
-            "-B",
-            str(build),
-            "-DROCKE_BUILD_PYENV=OFF",
-            # GNUInstallDirs picks lib64 on native 64-bit Fedora/RHEL; pin it so the
-            # lib/... destinations asserted below do not depend on the host.
-            "-DCMAKE_INSTALL_LIBDIR=lib",
-            *options,
-        ],
-        capture_output=True,
-        check=False,
-        text=True,
+    """Configure rocke/ inside a wrapper project, as the provider embeds it, and
+    return the text of every generated install script."""
+    result = configure_embedded_rocke(
+        rocke,
+        build,
+        "-DROCKE_BUILD_PYENV=OFF",
+        # GNUInstallDirs picks lib64 on native 64-bit Fedora/RHEL; pin it so the
+        # lib/... destinations asserted below do not depend on the host.
+        "-DCMAKE_INSTALL_LIBDIR=lib",
+        *options,
     )
     assert result.returncode == 0, result.stdout + result.stderr
     scripts = sorted(build.rglob("cmake_install.cmake"))
