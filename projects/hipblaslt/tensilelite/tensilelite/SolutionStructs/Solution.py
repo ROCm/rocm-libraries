@@ -3140,8 +3140,10 @@ class Solution(collections.abc.Mapping):
         # workgroup can then start in the second half of a group, so each tile
         # reads its own scale dword, byte-rotated so its half lands in byte 0,
         # through address registers set up for the runtime start parity
-        # (TileInfo.perTileScale, lraTileAssignmentScaleSwizzled).  fp4/fp6 stay
-        # even: the per-tile read is implemented for the dual-period path only.
+        # (TileInfo.perTileScale, lraTileAssignmentScaleSwizzled), on both the
+        # dual-period (DepthU=128) and single-period (DepthU=256) paths.  fp4/fp6
+        # stay even: the per-tile read is wired for the 8-bit-float data/GR
+        # geometry only and has not been ported to the 4-/6-bit packing.
         is8bitMX = (state["ProblemType"]["DataTypeA"].is8bitFloat()
                     and state["ProblemType"]["DataTypeB"].is8bitFloat())
         def _miWaveTileDimOk(d):
