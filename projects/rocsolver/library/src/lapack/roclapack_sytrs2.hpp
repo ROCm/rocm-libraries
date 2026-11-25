@@ -815,9 +815,8 @@ static rocblas_status sytrs2_inner_template(rocblas_handle handle,
         static_assert(std::is_pointer_v<decltype(A_arg)> == std::is_pointer_v<decltype(B_arg)>,
                       "mismatch of A,B types");
 
-        bool constexpr BATCHED
-            = std::is_pointer_v<std::remove_reference_t<
-                  decltype(A_arg[0])>> || std::is_array_v<std::remove_reference_t<decltype(A_arg[0])>>;
+        bool constexpr BATCHED = std::is_pointer_v<std::remove_reference_t<decltype(A_arg[0])>>
+            || std::is_array_v<std::remove_reference_t<decltype(A_arg[0])>>;
         bool constexpr STRIDED = !BATCHED;
 
         auto const pfree_saved = pfree;

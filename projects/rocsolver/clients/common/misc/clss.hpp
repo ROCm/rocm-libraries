@@ -158,8 +158,8 @@ public:
     // elements of the original sequences)
     //
 
-    [[maybe_unused]] auto operator()(T const* a, I size_a, T const* b, I size_b, S tol)
-        -> /**! Size of subsequences */ I
+    [[maybe_unused]] auto
+        operator()(T const* a, I size_a, T const* b, I size_b, S tol) -> /**! Size of subsequences */ I
     {
         std::lock_guard<std::mutex> lock(m_);
 
@@ -212,8 +212,8 @@ public:
     // \return size of subsequences (equals the maximal number of matching
     // elements of the original sequences)
     //
-    [[maybe_unused]] auto operator()(T* a, I size_a, T* b, I size_b, S tol)
-        -> /**! Size of subsequences */ I
+    [[maybe_unused]] auto
+        operator()(T* a, I size_a, T* b, I size_b, S tol) -> /**! Size of subsequences */ I
     {
         return this->operator()(const_cast<T const*>(a), size_a, const_cast<T const*>(b), size_b,
                                 tol);
@@ -236,8 +236,8 @@ public:
     // elements of the original sequences)
     //
     template <typename J, typename = typename std::enable_if<std::is_integral<J>::value>::type>
-    [[maybe_unused]] auto operator()(T const* a, J size_a, T const* b, J size_b, S tol)
-        -> /**! Size of subsequences */ I
+    [[maybe_unused]] auto
+        operator()(T const* a, J size_a, T const* b, J size_b, S tol) -> /**! Size of subsequences */ I
     {
         return this->operator()(a, static_cast<I>(size_a), b, static_cast<I>(size_b), tol);
     }
@@ -259,8 +259,8 @@ public:
     // elements of the original sequences)
     //
     template <typename J, typename = typename std::enable_if<std::is_integral<J>::value>::type>
-    [[maybe_unused]] auto operator()(T* a, J size_a, T* b, J size_b, S tol)
-        -> /**! Size of subsequences */ I
+    [[maybe_unused]] auto
+        operator()(T* a, J size_a, T* b, J size_b, S tol) -> /**! Size of subsequences */ I
     {
         return this->operator()(const_cast<T const*>(a), static_cast<I>(size_a),
                                 const_cast<T const*>(b), static_cast<I>(size_b), tol);
@@ -276,8 +276,9 @@ public:
     // \return size of subsequences (equals the maximal number of matching
     // elements of the original sequences)
     //
-    [[maybe_unused]] auto operator()(const std::vector<T>& a, const std::vector<T>& b, S tol)
-        -> /**! Size of subsequences */ I
+    [[maybe_unused]] auto operator()(const std::vector<T>& a,
+                                     const std::vector<T>& b,
+                                     S tol) -> /**! Size of subsequences */ I
     {
         return this->operator()(a.data(), a.size(), b.data(), b.size(), tol);
     }
@@ -476,8 +477,10 @@ private:
     }
 
     /// Recursive implementation with memoization
-    auto clss_implr(T const* a, I sa, T const* b, I sb)
-        -> std::tuple</* acc distance */ S, /* size */ I, /* next */ I>
+    auto clss_implr(T const* a,
+                    I sa,
+                    T const* b,
+                    I sb) -> std::tuple</* acc distance */ S, /* size */ I, /* next */ I>
     {
         //
         // Base case: at least one of the sequences is empty
@@ -574,8 +577,10 @@ private:
         return std::make_tuple(dist, size, next_index);
     }
 
-    auto extract_subsequences(T const* a, I size_a, T const* b, I size_b)
-        -> /* || sseq_a_ - sseq_b_ ||_inf */ S
+    auto extract_subsequences(T const* a,
+                              I size_a,
+                              T const* b,
+                              I size_b) -> /* || sseq_a_ - sseq_b_ ||_inf */ S
     {
         S inf_norm = std::numeric_limits<S>::infinity();
         I sa = size_a - I(1);
@@ -649,9 +654,8 @@ private:
                 ia = sa - ja;
                 ib = sb - jb;
 
-                os << ""
-                   << ":: :: Indices: (" << ia << ", " << ib << ") :: Elements: (" << sseq_a_[i]
-                   << ", " << sseq_b_[i] << ") :: (acc dist = " << memo_dist(ja, jb)
+                os << "" << ":: :: Indices: (" << ia << ", " << ib << ") :: Elements: ("
+                   << sseq_a_[i] << ", " << sseq_b_[i] << ") :: (acc dist = " << memo_dist(ja, jb)
                    << ", size = " << memo_size(ja, jb) << ")\n";
                 ++i;
             }
