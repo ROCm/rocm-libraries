@@ -4993,8 +4993,9 @@ Tests:
 
 # The side operands, with the epilogue that reads them.
 # Runtime on gfx942: 4 cases, about 4 s.
+# Keep in the quick tier for the HOST_ASAN regression reported in ROCM-34728.
 - name: matmul_fast_check_placement_epilogue
-  category: pre_checkin
+  category: smoke
   function:
     matmul:
       - *single_precision

@@ -135,9 +135,9 @@ Public entry-point changes touch two hand-written headers: `include/miopen/miope
 Read `test/gtest/README.md` before changing tests. Use independent references, datatype-appropriate tolerances, explicit device eligibility, and boundary/regression coverage. Record filters, device, datatype, skips, and performance effects for solver/kernel changes.
 
 - **GoogleTest/GoogleMock:** `MIOPEN_TEST_DISCRETE=ON` builds per-file `test_<source-stem>` binaries with individual CTest discovery. `OFF` builds `miopen_gtest`; its CTest shard entries need `-DGTEST_PARALLEL_LEVEL=<n>`, otherwise they get an empty `GTEST_TOTAL_SHARDS` and fail at startup. YAML tier suites (`*_suite`) run `miopen_gtest`, so use them only in combined mode; CMake currently registers them in discrete mode too, where they cannot run. Solver-name CTest filters apply to discrete discovery, not combined shard names.
-- **Naming:** suites follow `CPU_..._<TYPE>`/`GPU_..._<TYPE>`; parameterized prefixes start with `Smoke`, `Standard`, `Full`, `Perf`, or `Unit`. Keep suites unique across files. `test/gtest/check_names.py` (run via `miopen_gtest_check` on the combined test list) rejects GPU+`NONE`; `test/utils/gtest_formating_checks.py` is the source-level check.
+- **Naming:** suites follow `CPU_..._<TYPE>`/`GPU_..._<TYPE>`; a parameterized prefix names the `test_categories.yaml` tier that first selects it: `Quick`, `Standard`, `Comprehensive`, or `Full` (also used for suites no tier runs), optionally followed by a variant suffix (`StandardNhwc`). Tiers select by prefix, so moving a test to another tier means renaming its prefix. Parameterless tests are still `TEST_P` + `INSTANTIATE_TEST_SUITE_P(<Tier>, Suite, ::testing::Values(0))`; plain `TEST`/`TEST_F` run in no tier and are allowed only for the `HipdnnShim` surface (see `test/gtest/README.md`). Keep suites unique across files. `test/gtest/check_names.py` (run via `miopen_gtest_check` on the combined test list) rejects other prefixes and GPU+`NONE`; `test/utils/gtest_formating_checks.py` is the source-level check.
 - **Legacy tests:** `CHECK` prints `FAILED` and continues; `EXPECT`, `EXPECT_EQUAL`, and `STATUS` abort. CTest also rejects failure text. `add_custom_test(<test-name> ... COMMAND ...)` takes a positional name.
-- **Selection:** ordinary discovery/shards default to Smoke FP32/NONE. `MIOPEN_TEST_ALL` broadens prefixes, not datatype selection; choose datatype flags or explicit filters. YAML tiers ignore those flags (`quick` runs all compiled `Smoke/*` datatypes plus unprefixed `CPU_*` suites) and carry their own architecture exclusions in `test_categories.yaml`; even full has exclusions.
+- **Selection:** ordinary discovery/shards default to Quick FP32/NONE. `MIOPEN_TEST_ALL` broadens prefixes, not datatype selection; choose datatype flags or explicit filters. YAML tiers ignore those flags and select by prefix only (`quick` runs all compiled `Quick*/*` datatypes; each higher tier adds its own prefix) and carry their own architecture exclusions in `test_categories.yaml`; even full has exclusions.
 - **Time budgets:** YAML tiers have per-tier timeouts (`execution_settings` in `test/gtest/test_categories.yaml`, including `timeout_multiplier`); `ffm-*` run a fixed list on a tight runtime budget. When adding or broadening tests in a tier, estimate the added runtime and keep it within budget. Move slow cases to a higher tier; follow the existing comment-and-ticket convention for necessary exclusions, not exclusions solely to make CI green.
 - **Isolation:** direct binaries and YAML tier suites may not set a test DB path; export isolated DB/cache paths. Unsupported-device skips do not prove a solver works on that device.
 - **Empty selections:** CTest exits 0 when a `-R`/`-L` selection matches nothing. Pass `--no-tests=error` to targeted runs.
@@ -146,7 +146,7 @@ From a configured build directory:
 
 ```sh
 # Combined mode:
-./bin/miopen_gtest --gtest_filter='CPU_PerfConfigGroupWrwDeterministic_NONE.*'
+./bin/miopen_gtest --gtest_filter='Quick/CPU_PerfConfigGroupWrwDeterministic_NONE.*'
 # Tier labels: quick, standard, comprehensive, full. -L is a regex; anchor it, because
 # `quick` and `full` also match the ffm-quick/ffm-full suite.
 ctest -N -L '^quick$'
@@ -156,7 +156,7 @@ ctest --output-on-failure --no-tests=error -L '^quick$' -LE ex_gpu
 # test_categories.yaml, often a family name (gfx1100 -> ex_gpu_gfx110X).
 ctest --output-on-failure --no-tests=error -L '^quick$' -L '^ex_gpu_gfx110X$'
 # Discrete mode (naive solvers apply to every GPU; many solvers skip unsupported ones):
-./bin/test_unit_conv_solver_ConvDirectNaiveConvFwd --gtest_filter='Smoke/*FP32*'
+./bin/test_unit_conv_solver_ConvDirectNaiveConvFwd --gtest_filter='Quick/*FP32*'
 # Driver; keep reference verification enabled (-V 0 disables it):
 ./bin/MIOpenDriver conv -W 32 -H 32 -c 3 -k 32 -x 5 -y 5 -p 2 -q 2 -s 0 -F 1
 ```
@@ -194,7 +194,7 @@ python3 script/check_public_abi.py check-plugin <plugin.so> --private-lib <libMI
 ctest --test-dir build --output-on-failure --no-tests=error -L forwarding_parity
 ```
 
-Preserve the public SONAME/C symbol contract; wrappers must not export `_impl` names or hard-link the hipDNN backend. Source/ELF gates do not prove numerical behavior or complete ABI layout compatibility. Forwarding parity uses public APIs, `HipdnnShim` naming, and meaningful `parity_*` properties; reuse its harness without duplicate registrations or silently expanded divergence allowances. Parameterized shim tests still need an allowed tier prefix (e.g. `Smoke`); put `HipdnnShim` in the suite name.
+Preserve the public SONAME/C symbol contract; wrappers must not export `_impl` names or hard-link the hipDNN backend. Source/ELF gates do not prove numerical behavior or complete ABI layout compatibility. Forwarding parity uses public APIs, `HipdnnShim` naming, and meaningful `parity_*` properties; reuse its harness without duplicate registrations or silently expanded divergence allowances. Parameterized shim tests still need an allowed tier prefix (e.g. `Quick`); put `HipdnnShim` in the suite name.
 
 CI spans Jenkins and GitHub workflows (see Important Files); local green tests do not replace hardware/datatype coverage. `codecov.yml` sets exclusions, not a fixed local coverage threshold. Update relevant docs/release notes for user-visible changes. Narrative docs use reStructuredText; Sphinx invokes Doxygen. Follow the documentation build workflow in `README.md`.
 
