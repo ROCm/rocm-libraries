@@ -1,9 +1,6 @@
 // Copyright Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
-// hipblasLtCreate and hipblasLtDestroy report a failed HIP call as a status
-// instead of ending the process.
-
 #include "testing_multi_gpu.hpp"
 
 #include <gtest/gtest.h>
@@ -55,11 +52,11 @@ namespace
         void*             probe  = nullptr;
         if(hipblasLtCreate(&handle) != HIPBLAS_STATUS_SUCCESS
            || hipMalloc(&probe, 256) != hipSuccess)
-            std::_Exit(kChildFailed);
+            std::exit(kChildFailed);
         hipStream_t stream = nullptr;
         if(hipStreamCreateWithFlags(&stream, hipStreamNonBlocking) != hipSuccess
            || hipStreamBeginCapture(stream, hipStreamCaptureModeGlobal) != hipSuccess)
-            std::_Exit(kChildFailed);
+            std::exit(kChildFailed);
 
         hipblasLtHandle_t other     = nullptr;
         const auto        created   = hipblasLtCreate(&other);
@@ -77,14 +74,14 @@ namespace
                      int(created),
                      int(destroyed));
         if(allowed)
-            std::_Exit(kChildCaptureAllowed);
+            std::exit(kChildCaptureAllowed);
 
         if(created == HIPBLAS_STATUS_SUCCESS || other != nullptr
            || destroyed == HIPBLAS_STATUS_SUCCESS)
-            std::_Exit(kChildFailed);
+            std::exit(kChildFailed);
         const auto retried = hipblasLtDestroy(handle);
         std::fprintf(stderr, "after capture: hipblasLtDestroy returned %d\n", int(retried));
-        std::_Exit(retried == HIPBLAS_STATUS_SUCCESS ? kChildReturnedStatus : kChildFailed);
+        std::exit(retried == HIPBLAS_STATUS_SUCCESS ? kChildReturnedStatus : kChildFailed);
     }
 
     TEST(HandleCreateErrors, smoke_CreateWithNoVisibleDeviceReturnsStatus)

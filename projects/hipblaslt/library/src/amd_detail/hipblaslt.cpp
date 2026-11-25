@@ -823,8 +823,9 @@ try
                 continue;
             if(hipError_t e = hipFree(*buffer); e != hipSuccess)
             {
+                const auto status = hip_error_to_hipblas_status(__func__, call, e);
                 rocblaslt::Debug::Instance().markerStop();
-                return hip_error_to_hipblas_status(__func__, call, e);
+                return status;
             }
             *buffer = nullptr;
         }
