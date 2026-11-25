@@ -23,7 +23,8 @@ What we cover today:
 * Dtype ``f16`` (matches the upstream CK Tile example, which only
   instantiates ``half_t``).
 * 2D spatial conv (``NHWC + KRSC``, single group ``G == 1``). 1D / 3D
-  / multi-group is a v2 extension.
+  / multi-group is a v2 extension; :func:`is_valid_spec` refuses 3-D and
+  grouped problems.
 * Padding ``pH`` / ``pW`` and dilation ``dH`` / ``dW`` from
   :class:`ConvProblem`.
 
@@ -134,6 +135,11 @@ def is_valid_spec(spec: Img2ColSpec, arch: str = "gfx950") -> Tuple[bool, str]:
         return False, (
             f"groups {groups} unsupported (img2col covers single-group "
             "convolution only)"
+        )
+    if spec.problem.is_3d:
+        return False, (
+            f"img2col failed - is_3d={spec.problem.is_3d}, expected a 2-D "
+            "problem (img2col covers 2-D convolution only)"
         )
     if spec.vec_k not in (1, 2, 4, 8):
         return False, f"vec_k must be one of {{1, 2, 4, 8}} (got {spec.vec_k})"

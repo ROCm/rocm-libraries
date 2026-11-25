@@ -52,6 +52,7 @@ extern "C" {
  *   - ArchTarget.from_gfx(arch); KeyError -> (False, str(e))
  *   - dtype must be "f16"
  *   - problem.groups must be 1
+ *   - problem must not be 3-D (is_3d false)
  *   - vec_k in {1, 2, 4, 8}
  *   - block_tile_k % vec_k == 0
  *   - block_size > 0

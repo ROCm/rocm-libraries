@@ -66,8 +66,7 @@ def _spec(idx: int) -> Img2ColSpec:
             vec_k=4,
         )
     if idx == 7:
-        # 3-D: both engines build the depth axis through the shared conv
-        # descriptor and must emit the same kernel.
+        # 3-D: both engines' spec checks refuse it (2-D only).
         return Img2ColSpec(
             problem=ConvProblem(
                 N=1, Hi=8, Wi=8, C=16, K=16, Y=3, X=3, Di=4, Z=3, sD=1, pD=0, dD=1

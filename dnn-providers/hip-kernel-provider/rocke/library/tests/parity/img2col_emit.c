@@ -126,7 +126,7 @@ static int make_spec(int idx, rocke_img2col_spec_t* spec)
         spec->block_tile_k = 128;
         spec->vec_k = 4;
         break;
-    case 7: /* 3-D: both engines must emit the same kernel */
+    case 7: /* 3-D: both engines' spec checks refuse it (2-D only) */
         p.N = 1;
         p.Hi = 8;
         p.Wi = 8;

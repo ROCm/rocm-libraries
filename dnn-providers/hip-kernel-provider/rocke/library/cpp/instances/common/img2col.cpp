@@ -106,6 +106,17 @@ bool rocke_img2col_is_valid_spec(const rocke_img2col_spec_t* spec,
         return false;
     }
 
+    /* if spec.problem.is_3d: ... (the flag is true on this path, so Python's
+     * rendering of it is the fixed text "True") */
+    if(rocke_conv_problem_is_3d(&spec->problem))
+    {
+        rocke_img2col_set_reason(reason,
+                                 reason_cap,
+                                 "img2col failed - is_3d=True, expected a 2-D problem "
+                                 "(img2col covers 2-D convolution only)");
+        return false;
+    }
+
     /* if spec.vec_k not in (1, 2, 4, 8): ... */
     if(spec->vec_k != 1 && spec->vec_k != 2 && spec->vec_k != 4 && spec->vec_k != 8)
     {
