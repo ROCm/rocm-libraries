@@ -61,12 +61,31 @@ Tests:
   block_dim: [1, 5, 9, 13]
   alpha_beta: *alpha_beta_range_quick
   transA: [rocsparse_operation_none]
-  transB: [rocsparse_operation_none, rocsparse_operation_transpose]
+  transB: [rocsparse_operation_none, rocsparse_operation_transpose, rocsparse_operation_conjugate_transpose]
   baseA: [rocsparse_index_base_zero]
   direction: [rocsparse_direction_row]
   matrix: [rocsparse_matrix_random]
   spmm_alg: [rocsparse_spmm_alg_bsr]
   orderB: [rocsparse_order_column]
+  orderC: [rocsparse_order_column]
+
+- name: spmm_bsr
+  category: quick
+  function: spmm_bsr
+  indextype: *i32
+  precision: *single_double_precisions_complex
+  M: [97]
+  N: [23]
+  K: [131]
+  block_dim: [2, 7, 33]
+  alpha_beta: *alpha_beta_range_quick
+  transA: [rocsparse_operation_none]
+  transB: [rocsparse_operation_conjugate_transpose]
+  baseA: [rocsparse_index_base_one]
+  direction: [rocsparse_direction_column]
+  matrix: [rocsparse_matrix_random]
+  spmm_alg: [rocsparse_spmm_alg_bsr]
+  orderB: [rocsparse_order_column, rocsparse_order_row]
   orderC: [rocsparse_order_column]
 
 - name: spmm_bsr

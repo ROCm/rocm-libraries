@@ -40,6 +40,7 @@ namespace rocsparse
               typename T>
     ROCSPARSE_KERNEL(BSR_BLOCK_DIM* BLK_SIZE_Y)
     void bsrmm_large_blockdim_kernel_ext(bool                nn,
+                                         bool                conj_B,
                                          rocsparse_direction direction,
                                          J                   mb,
                                          J                   n,
@@ -72,6 +73,7 @@ namespace rocsparse
         rocsparse::
             bsrmm_large_blockdim_device_ext<BSR_BLOCK_DIM, BLK_SIZE_Y, UNROLL_SIZE_Y, GRID_STRIDE>(
                 nn,
+                conj_B,
                 direction,
                 mb,
                 n,
@@ -129,9 +131,8 @@ namespace rocsparse
     template <typename T, typename I, typename J, typename A, typename B, typename C>
     rocsparse_status bsrmm_template_large_ext(bool                nn,
                                               rocsparse_handle    handle,
+                                              bool                conj_B,
                                               rocsparse_direction dir,
-                                              rocsparse_operation trans_A,
-                                              rocsparse_operation trans_B,
                                               J                   mb,
                                               J                   n,
                                               J                   kb,
@@ -179,6 +180,7 @@ namespace rocsparse
             0,                                                                               \
             stream,                                                                          \
             nn,                                                                              \
+            conj_B,                                                                          \
             dir,                                                                             \
             mb,                                                                              \
             n,                                                                               \
@@ -241,9 +243,8 @@ namespace rocsparse
     template rocsparse_status rocsparse::bsrmm_template_large_ext( \
         bool                      nn,                              \
         rocsparse_handle          handle,                          \
+        bool                      conj_B,                          \
         rocsparse_direction       dir,                             \
-        rocsparse_operation       trans_A,                         \
-        rocsparse_operation       trans_B,                         \
         J                         mb,                              \
         J                         n,                               \
         J                         kb,                              \

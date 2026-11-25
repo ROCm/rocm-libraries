@@ -39,6 +39,7 @@ namespace rocsparse
               typename B,
               typename C>
     ROCSPARSE_DEVICE_ILF void bsrmm_large_blockdim_device_ext(bool                nn,
+                                                              bool                conj_B,
                                                               rocsparse_direction direction,
                                                               J                   Mb,
                                                               J                   N,
@@ -103,12 +104,16 @@ namespace rocsparse
                             if(nn)
                             {
                                 shared_B[BSR_BLOCK_DIM * (BLK_SIZE_Y * l + tidy) + tidx]
-                                    = dense_B[block_dim * block_col + tidx + cols[l] * ldb];
+                                    = rocsparse::conj_val(
+                                        dense_B[block_dim * block_col + tidx + cols[l] * ldb],
+                                        conj_B);
                             }
                             else
                             {
                                 shared_B[BSR_BLOCK_DIM * (BLK_SIZE_Y * l + tidy) + tidx]
-                                    = dense_B[cols[l] + ldb * (block_dim * block_col + tidx)];
+                                    = rocsparse::conj_val(
+                                        dense_B[cols[l] + ldb * (block_dim * block_col + tidx)],
+                                        conj_B);
                             }
                         }
                     }
@@ -231,13 +236,17 @@ namespace rocsparse
                                     if(nn)
                                     {
                                         shared_B[BSR_BLOCK_DIM * (BLK_SIZE_Y * l + tidy) + tidx]
-                                            = dense_B[block_dim * block_col + tidx + cols[l] * ldb];
+                                            = rocsparse::conj_val(dense_B[block_dim * block_col
+                                                                          + tidx + cols[l] * ldb],
+                                                                  conj_B);
                                     }
                                     else
                                     {
                                         shared_B[BSR_BLOCK_DIM * (BLK_SIZE_Y * l + tidy) + tidx]
-                                            = dense_B[cols[l]
-                                                      + ldb * (block_dim * block_col + tidx)];
+                                            = rocsparse::conj_val(
+                                                dense_B[cols[l]
+                                                        + ldb * (block_dim * block_col + tidx)],
+                                                conj_B);
                                     }
                                 }
                             }
