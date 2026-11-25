@@ -115,11 +115,6 @@ class TunerArgs:
     """Size in bytes for the problem/data to tune with.
     """
 
-    sizes: Optional[List[int]] = None
-    """Sizes in bytes to benchmark every candidate at. The score is the geometric mean
-    over all sizes and benchmark cases. Defaults to [size].
-    """
-
     max_fevals: int = 100
     """Maximum number of function evaluations for the tuning strategy
     """
@@ -137,12 +132,6 @@ class TunerArgs:
     """Which existing configs to also benchmark: "current" (the config the library
     picks for this arch), "fallback" (the config of the generic target), "both" or
     "skip".
-    """
-
-    noise_retries: int = 1
-    """How many times to re-run a config whose benchmark hit primbench's noise timeout.
-    Configs that still time out are recorded in the cache and dropped by the config
-    generator.
     """
 
     save_metadata: bool = False
@@ -182,7 +171,6 @@ class BaseTuner(ABC):
             )
         self.device_id = 0
         self.bytes_size = args.size
-        self.sizes = args.sizes if args.sizes else [args.size]
         self.output_dir = Path(args.output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)
         self.simulation_mode = args.simulation_mode
@@ -208,7 +196,6 @@ class BaseTuner(ABC):
             self.arch_name = args.arch_name
             self.gpu_name = "generic"
         self.tune_baseline = args.tune_baseline
-        self.noise_retries = args.noise_retries
         self.max_fevals = args.max_fevals
         self.save_metadata = args.save_metadata
         self.strategy = args.strategy
@@ -241,7 +228,6 @@ class BaseTuner(ABC):
                 default_output_dir=defaults.output_dir,
                 default_strategy=defaults.strategy,
                 default_tune_baseline=defaults.tune_baseline,
-                default_noise_retries=defaults.noise_retries,
             )
             .parse_args()
             ._get_kwargs()
@@ -415,7 +401,7 @@ class BaseTuner(ABC):
     ) -> None:
         """Performs auto-tuning for a specific type combination."""
         print(f"\nTuning for {' '.join([str(x) for x in types.values()])}")
-        print(f"Using sizes: {', '.join(str(s) for s in self.sizes)} bytes")
+        print(f"Using size: {self.bytes_size} bytes")
         self._get_case_results_dir(types).mkdir(parents=True, exist_ok=True)
         strategy_print_message = (
             f"Using strategy: {self.strategy if self.strategy else 'brute_force'}"
@@ -501,8 +487,6 @@ class BaseTuner(ABC):
             "algo_type": self.algo_type,
             "algo_name": self.algo_name,
             "config": config,
-            "sizes": self.sizes,
-            "noise_retries": self.noise_retries,
             "case_results_dir": str(self._get_case_results_dir(types).resolve()),
             **types,
         }
@@ -578,7 +562,7 @@ class BaseTuner(ABC):
         self, cache_file: str | pathlib.Path, types: Dict[str, Any]
     ) -> List[str]:
         """Returns the cache keys of the configs whose per-case results (written by the
-        wrapper, see _get_case_results_dir) still show primbench's noise timeout."""
+        wrapper, see _get_case_results_dir) show primbench's noise timeout."""
         with open(cache_file, "r") as f:
             cache = json.load(f)["cache"]
         keys = list(self._get_tune_params(types).keys())
@@ -587,17 +571,15 @@ class BaseTuner(ABC):
         for cache_key, entry in cache.items():
             # Same file names as the wrapper: <name>=<value>_..._size<bytes>.json
             prefix = "_".join(f"{k}={entry.get(k)}" for k in keys)
-            for size in self.sizes:
-                path = case_results_dir / f"{prefix}_size{size}.json"
-                if path.exists() and '"noise_timeout":true' in path.read_text():
-                    noise_timeouts.append(cache_key)
-                    break
+            path = case_results_dir / f"{prefix}_size{self.bytes_size}.json"
+            if path.exists() and '"noise_timeout":true' in path.read_text():
+                noise_timeouts.append(cache_key)
         return noise_timeouts
 
     def _get_case_results_dir(self, types: Dict[str, Any]) -> Path:
         """Return the directory for the per-case primbench JSON of each candidate.
         The cache only stores the combined score, so selection rules that need each
-        case and size (worst case against develop, per-size winners) read these."""
+        case (worst case against develop) read these."""
         cache_name = self._get_cache_file_name(types).removesuffix("_cache.json")
         return self.output_dir / "cases" / cache_name
 
@@ -645,13 +627,13 @@ class BaseTuner(ABC):
             if baselines is not None:
                 self._write_cache_annotation(cache_file, "baselines", baselines)
 
-            # Record the configs that still hit the noise timeout after the retries in
-            # the wrapper, so the config generator drops them.
+            # Record the configs that hit the noise timeout, so the config generator
+            # drops them.
             noise_timeouts = self._find_noise_timeouts(cache_file, types)
             if noise_timeouts:
                 print(
-                    f"Dropping {len(noise_timeouts)} config(s) that still hit the noise "
-                    f"timeout after {self.noise_retries} retries: {noise_timeouts}"
+                    f"Dropping {len(noise_timeouts)} config(s) that hit the noise "
+                    f"timeout: {noise_timeouts}"
                 )
             self._write_cache_annotation(cache_file, "noise_timeouts", noise_timeouts)
 

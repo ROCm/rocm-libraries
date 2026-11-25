@@ -37,7 +37,6 @@ class Parser:
         default_output_dir: str = "../output",
         default_strategy: Optional[str] = None,
         default_tune_baseline: Optional[str] = None,
-        default_noise_retries: Optional[int] = None,
     ):
         parser = argparse.ArgumentParser()
 
@@ -68,14 +67,6 @@ class Parser:
             "config the library picks for this arch, 'fallback' is the config of the "
             "generic target, 'both' runs both, 'skip' runs neither "
             f"(default: {default_tune_baseline or 'current'})",
-        )
-        parser.add_argument(
-            "--noise-retries",
-            type=int,
-            default=default_noise_retries,
-            help="How many times to re-run a config whose benchmark hit primbench's noise "
-            "timeout. Configs that still time out are dropped by the config generator "
-            f"(default: {default_noise_retries if default_noise_retries is not None else 1})",
         )
         parser.add_argument(
             "--strategy",

@@ -45,11 +45,7 @@ IPT = [2**i for i in range(17)]
 class Tuner(BaseTuner):
     @classmethod
     def _get_default_args(cls) -> TunerArgs:
-        # The small sizes exercise the odd-even kernel (used below ~201K items).
-        return TunerArgs(
-            algo_full_name="device_merge_sort_block_merge",
-            sizes=[256 * 1024, 8 * 1024**2, 128 * 1024**2],
-        )
+        return TunerArgs(algo_full_name="device_merge_sort_block_merge")
 
     def __init__(self, args: TunerArgs) -> None:
         super().__init__(args)

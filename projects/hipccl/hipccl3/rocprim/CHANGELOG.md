@@ -12,9 +12,7 @@ Full documentation for rocPRIM is available at [https://rocm.docs.amd.com/projec
 * Added support for large sizes to `rocprim::device_run_length_encode` and `rocprim::device_run_length_encode_non_trivial_runs`.
 * Added the following options to the kernel tuner (`tuning/`):
   * `--tune-baseline {skip,current,fallback,both}` (default `current`) benchmarks the config rocPRIM currently picks for the tuned GPU, the config of the generic target, or both. The config generator keeps the faster of these unless the tuned config beats it by more than `--baseline-margin` (default 0.05).
-  * `--noise-retries` (default 1) re-runs a config whose benchmark hit the noise timeout. Configs that still time out are dropped by the config generator.
-  * `TunerArgs.sizes` benchmarks each config at several input sizes. `merge_sort_block_merge` is tuned at 256 KiB, 8 MiB, and 128 MiB, so the odd-even kernel is also measured.
-  * The results of each benchmark case are saved to `<output_dir>/cases/`.
+  * The results of each benchmark case are saved to `<output_dir>/cases/`. The config generator drops configs whose benchmark hit the noise timeout.
   * `--default-tuning keep` in the config generator (the new default) keeps the config the existing header uses for unknown targets.
 
 ### Changed

@@ -13,23 +13,11 @@
 #include <cstdint>
 // Include std::log and std::exp for the score.
 #include <cmath>
-#include <fstream>
-#include <sstream>
 #include <string>
-#include <vector>
 
 // Expands a tune parameter (a macro defined by kernel tuner) to its text, for file names.
 #define TUNING_STRINGIFY_IMPL(x) #x
 #define TUNING_STRINGIFY(x) TUNING_STRINGIFY_IMPL(x)
-
-// Returns whether any case in a primbench JSON output hit the noise timeout.
-inline bool tuning_has_noise_timeout(const std::string& json_path)
-{
-    std::ifstream     file(json_path);
-    std::stringstream contents;
-    contents << file.rdbuf();
-    return contents.str().find("\"noise_timeout\":true") != std::string::npos;
-}
 {% endblock %}
 
 {% block extern_c_wrapper %}
@@ -58,8 +46,8 @@ extern "C" float {{algo_type}}_{{algo_name}}_wrapper(
     using benchmark_type = {{algo_type}}_{{algo_name}}_benchmark<key_type, value_type, config>;
     {% endblock %}
 
-    // Per-case results of this candidate are written to
-    // <case_results_dir>/<config>_size<bytes>.json, one file per size.
+    // The per-case results of this candidate are written to
+    // <case_results_dir>/<config>_size<bytes>.json.
     const std::string case_results_prefix = std::string("{{ case_results_dir }}/")
     {% for name in config %}
         + "{{ name }}=" + TUNING_STRINGIFY({{ config[name] }}){% if not loop.last %} + "_"{% endif %}
@@ -67,63 +55,37 @@ extern "C" float {{algo_type}}_{{algo_name}}_wrapper(
     {% endfor %}
         ;
 
-    // primbench uses one input size per executor, so run every queued case once per size.
-    const std::vector<size_t> sizes = { {{ sizes | join(", ") }} };
-    (void)bytes_size; // The sizes are rendered into the wrapper instead.
+    {% block primbench_settings %}
+    auto settings = primbench::settings();
+    settings.json_out = case_results_prefix + "_size" + std::to_string(bytes_size) + ".json";
+    settings.max_warming_secs = 90;
+    settings.max_cooling_secs = 90;
+    settings.size = bytes_size;
+    settings.skip_header = true;
+    {% endblock %}
 
-    // If a case hits primbench's noise timeout, all cases of that size are re-run up to
-    // noise_retries times. If it still times out, the tuner drops this config.
-    constexpr int noise_retries = {{ noise_retries }};
+    {% block primbench_args %}
+    char* args[] = { "benchmark-executable" /* primbench requires an executable name for exposing --help */ };
+    {% endblock %}
 
-    std::vector<double> all_bytes_per_second;
-    for(const size_t size : sizes)
-    {
-        const std::string json_out = case_results_prefix + "_size" + std::to_string(size) + ".json";
-        std::vector<double> size_bytes_per_second;
-        for(int attempt = 0;; attempt++)
-        {
-            {% block primbench_settings %}
-            auto settings = primbench::settings();
-            settings.json_out = json_out;
-            settings.max_warming_secs = 90;
-            settings.max_cooling_secs = 90;
-            settings.size = size;
-            settings.skip_header = true;
-            {% endblock %}
+    {% block primbench_executor %}
+    auto executor = primbench::executor(1, args, settings);
+    {% endblock %}
 
-            {% block primbench_args %}
-            char* args[] = { "benchmark-executable" /* primbench requires an executable name for exposing --help */ };
-            {% endblock %}
+    {% block benchmark_queue %}
+    executor.queue<benchmark_type>();
+    {% endblock %}
 
-            {% block primbench_executor %}
-            auto executor = primbench::executor(1, args, settings);
-            {% endblock %}
-
-            {% block benchmark_queue %}
-            executor.queue<benchmark_type>();
-            {% endblock %}
-
-            executor.run();
-
-            size_bytes_per_second = executor.get_all_bytes_per_second();
-            if(attempt >= noise_retries || !tuning_has_noise_timeout(json_out))
-            {
-                break;
-            }
-            std::cout << "Noise timeout, retrying (" << attempt + 1 << "/" << noise_retries
-                      << ")" << std::endl;
-        }
-        all_bytes_per_second.insert(all_bytes_per_second.end(),
-                                    size_bytes_per_second.begin(),
-                                    size_bytes_per_second.end());
-    }
+    // primbench exits the process if run() is called more than once, so each candidate
+    // runs once. The tuner drops configs whose cases hit the noise timeout.
+    executor.run();
 
     {% block get_time %}
-    // Geometric mean of ms/GiB over all sizes and queued benchmarks, so every size and
-    // shape counts equally. With a single size and benchmark this is just its time.
+    // Geometric mean of ms/GiB over all queued benchmarks, so every shape counts equally.
+    // With a single benchmark this is just its time.
     double log_sum = 0;
     double n       = 0;
-    for(const double& x : all_bytes_per_second)
+    for(const double& x : executor.get_all_bytes_per_second())
     {
         log_sum += std::log((1000.0 * primbench::GiB) / x);
         n++;
