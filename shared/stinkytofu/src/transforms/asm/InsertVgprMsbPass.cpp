@@ -303,8 +303,11 @@ std::optional<std::string> firstVgprMsbMismatch(const Function& function) {
                        std::to_string(position) + " '" + mnemonicOf(*inst) + "'";
             };
             // A slot keeps whatever bank it last selected, so a class that is
-            // given no word and read a VGPR through one would see a bank chosen
-            // for someone else.
+            // given no word and reads a VGPR through one sees a bank chosen for
+            // someone else. Refused whatever the word in force: compared with
+            // it, one gap in carriesVgprMsb() would stop only the kernels whose
+            // banks happen to differ there, not every kernel that uses the
+            // instruction.
             if (!carriesVgprMsb(*inst)) {
                 if (hasSlottedVgprOperand(*inst))
                     return where() +

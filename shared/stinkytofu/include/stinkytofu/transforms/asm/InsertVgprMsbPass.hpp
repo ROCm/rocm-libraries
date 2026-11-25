@@ -50,8 +50,9 @@ STINKYTOFU_EXPORT std::unique_ptr<Pass> createInsertVgprMsbPass();
 
 /// Replays the s_set_vgpr_msb setters in \p function, block by block, and
 /// describes the first instruction that runs with a bank other than one it
-/// names, in a slot it depends on; nothing when there is none. Labels, calls
-/// and block starts leave no word known.
+/// names, in a slot it depends on, or that names a VGPR through a bank slot
+/// although carriesVgprMsb() gives its class no word; nothing when there is
+/// none. Labels, calls and block starts leave no word known.
 ///
 /// InsertVgprMsbPass asserts on it after every run. StinkyTofu keeps
 /// assertions on in Release builds (CMakeLists.txt), so a wrong word stops
