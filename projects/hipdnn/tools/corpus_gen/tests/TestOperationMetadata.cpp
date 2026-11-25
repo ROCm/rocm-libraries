@@ -504,4 +504,51 @@ TEST(TestOperationMetadata, AModelShapeDefaultMustBeADeclaredValueOfAnEnumParame
               std::string::npos);
 }
 
+TEST(TestOperationMetadata, ADtypeMapRespellsTheSourcesValuesForItsOwnArgumentOnly)
+{
+    // inputDataType is argument 2 and computeDataType 3 of the worked example.
+    auto declaration = layernormMetadata();
+    declaration["graph_builder"]["arguments"][2]["map"] = {{"fp16", "bf16"}, {"fp32", "fp16"}};
+    const auto load = parseOperationMetadata(declaration);
+    ASSERT_TRUE(load.ok()) << (load.errors.empty() ? "" : load.errors.front());
+    const auto& arguments = load.metadata->graphBuilder.arguments;
+    EXPECT_EQ(arguments[2].dtypeMap,
+              (std::map<std::string, std::string>{{"fp16", "bf16"}, {"fp32", "fp16"}}));
+    EXPECT_TRUE(arguments[3].dtypeMap.empty());
+
+    const auto spelled = [&load](const char* dtype, size_t argument) {
+        const auto resolved
+            = resolveArguments(load.metadata->graphBuilder,
+                               ProblemPoint{{"batch", int64_t{4}},
+                                            {"seq_len", int64_t{512}},
+                                            {"hidden_dim", int64_t{1024}},
+                                            {"dtype", std::string(dtype)},
+                                            {"forward_phase", std::string("TRAINING")}});
+        EXPECT_TRUE(resolved.ok()) << resolved.error;
+        return std::get<std::string>(resolved.arguments[argument].value);
+    };
+    EXPECT_EQ(spelled("fp16", 2), "bf16");
+    EXPECT_EQ(spelled("fp32", 2), "fp16");
+    EXPECT_EQ(spelled("bf16", 2), "bf16") << "a value the map does not list is its own spelling";
+    EXPECT_EQ(spelled("fp16", 3), "fp16") << "the map belongs to one argument";
+}
+
+TEST(TestOperationMetadata, ADtypeMapThatCouldNotApplyIsRefusedAtLoad)
+{
+    const auto errorFor = [](size_t argument, const nlohmann::json& map) {
+        auto declaration = layernormMetadata();
+        declaration["graph_builder"]["arguments"][argument]["map"] = map;
+        const auto load = parseOperationMetadata(declaration);
+        return load.errors.empty() ? std::string() : load.errors.front();
+    };
+
+    // A value the source does not declare would never match, and read as a typo that changes
+    // nothing.
+    EXPECT_NE(errorFor(2, {{"fp64", "bf16"}}).find("does not declare"), std::string::npos);
+    // A target that is not a name, and a map on an argument that is not dtype_of.
+    EXPECT_NE(errorFor(2, {{"fp16", 3}}).find("not a dtype name"), std::string::npos);
+    EXPECT_NE(errorFor(2, nlohmann::json::array()).find("'map'"), std::string::npos);
+    EXPECT_NE(errorFor(0, {{"fp16", "bf16"}}).find("'map'"), std::string::npos);
+}
+
 } // namespace hipdnn_corpus_gen

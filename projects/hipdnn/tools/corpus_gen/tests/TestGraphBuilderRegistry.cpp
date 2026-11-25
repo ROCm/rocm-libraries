@@ -472,6 +472,33 @@ TEST(TestGraphBuilderRegistry, AConvolutionNodeCarriesItsOwnStrideDilationAndPad
     EXPECT_EQ(values(attributes->post_padding()), (std::vector<int64_t>{3, 1}));
 }
 
+namespace
+{
+
+/// The elements per token of the fused QKV projection @p name is a view of, when @p point lays
+/// Q, K and V (and their gradients) out that way: Q's heads, then K's, then V's, at V's width.
+std::optional<int64_t> fusedQkvRow(const ProblemPoint& point, const std::string& name)
+{
+    const auto layout = point.find("layout");
+    if(layout == point.end() || std::get<std::string>(layout->second) != "qkv_packed")
+    {
+        return std::nullopt;
+    }
+    static const std::set<std::string> views{"q", "k", "v", "dq", "dk", "dv"};
+    if(views.count(name) == 0)
+    {
+        return std::nullopt;
+    }
+    const auto integer = [&point](const char* key) { return std::get<int64_t>(point.at(key)); };
+    const auto headDim = integer("head_dim");
+    const auto valueHead = point.find("value_head_dim");
+    const bool mla = valueHead != point.end() && std::get<std::string>(valueHead->second) == "mla";
+    const auto valueDim = mla ? headDim - 64 : headDim;
+    return (integer("heads") + integer("heads_kv")) * headDim + integer("heads_kv") * valueDim;
+}
+
+} // namespace
+
 TEST(TestGraphBuilderRegistry, EveryShippedTensorIsPackedInItsLayout)
 {
     // A stride derived from an unfloored extent (224 at stride 2 is 111.5 wide before the
@@ -532,10 +559,19 @@ TEST(TestGraphBuilderRegistry, EveryShippedTensorIsPackedInItsLayout)
                 const std::vector<int64_t> dims(tensor->dims()->begin(), tensor->dims()->end());
                 const std::vector<int64_t> strides(tensor->strides()->begin(),
                                                    tensor->strides()->end());
+                const auto name = tensor->name()->str();
+                const auto row = fusedQkvRow(point, name);
+                if(row.has_value())
+                {
+                    // A view of one fused QKV projection: its rows step over the others' heads.
+                    ASSERT_EQ(dims.size(), 4U) << name;
+                    EXPECT_EQ(strides, (std::vector<int64_t>{dims[2] * *row, dims[3], *row, 1}))
+                        << metadata.operation << " " << name << " " << detail::describe(point);
+                    continue;
+                }
                 ASSERT_TRUE(isPacked(dims, strides))
-                    << metadata.operation << " tensor '" << tensor->name()->str()
-                    << "' is not packed, " << detail::describe(point)
-                    << "\n  dims:    " << ::testing::PrintToString(dims)
+                    << metadata.operation << " tensor '" << name << "' is not packed, "
+                    << detail::describe(point) << "\n  dims:    " << ::testing::PrintToString(dims)
                     << "\n  strides: " << ::testing::PrintToString(strides);
             }
         }
@@ -1276,46 +1312,117 @@ SdpaScaleAndBand scaleAndBand(const GraphBytes& bytes)
 TEST(TestGraphBuilderRegistry, EverySdpaLayoutStridesEachOperandAsItIsNamed)
 {
     // BSHD = [S*H*D, D, H*D, 1]; BHSD = [H*S*D, S*D, D, 1]. kv_bhsd is the decode KV cache: the
-    // query side token-major and the key/value side head-major, in both directions.
+    // query side token-major and the key/value side head-major, in both directions. SBHD =
+    // [H*D, D, B*H*D, 1]. qkv_packed views Q, K and V (and dQ, dK, dV) in one fused projection
+    // row of R = (8 + 2 + 2) * 64 per token, [S*R, D, R, 1]; O and dO stay token-major.
+    constexpr int64_t BATCH = 2;
+    constexpr int64_t ROW = (8 + 2 + 2) * 64;
     const std::vector<int64_t> tokenQ{int64_t{16} * 8 * 64, 64, int64_t{8} * 64, 1};
     const std::vector<int64_t> headQ{int64_t{8} * 16 * 64, int64_t{16} * 64, 64, 1};
+    const std::vector<int64_t> sequenceQ{int64_t{8} * 64, 64, BATCH * 8 * 64, 1};
+    const std::vector<int64_t> packedQ{int64_t{16} * ROW, 64, ROW, 1};
     const std::vector<int64_t> tokenKv{int64_t{32} * 2 * 64, 64, int64_t{2} * 64, 1};
     const std::vector<int64_t> headKv{int64_t{2} * 32 * 64, int64_t{32} * 64, 64, 1};
+    const std::vector<int64_t> sequenceKv{int64_t{2} * 64, 64, BATCH * 2 * 64, 1};
+    const std::vector<int64_t> packedKv{int64_t{32} * ROW, 64, ROW, 1};
 
     struct Layout
     {
         std::string name;
         const std::vector<int64_t>& query;
+        const std::vector<int64_t>& output;
         const std::vector<int64_t>& keyValue;
     };
-    const std::vector<Layout> layouts{
-        {"bshd", tokenQ, tokenKv}, {"bhsd", headQ, headKv}, {"kv_bhsd", tokenQ, headKv}};
+    const std::vector<Layout> layouts{{"bshd", tokenQ, tokenQ, tokenKv},
+                                      {"bhsd", headQ, headQ, headKv},
+                                      {"kv_bhsd", tokenQ, tokenQ, headKv},
+                                      {"sbhd", sequenceQ, sequenceQ, sequenceKv},
+                                      {"qkv_packed", packedQ, tokenQ, packedKv}};
 
     for(const std::string operation : {"sdpa_fwd", "sdpa_bwd"})
     {
         const auto metadata = test::shippedOperation(operation);
-        const std::vector<std::string> queryTensors
-            = operation == "sdpa_fwd" ? std::vector<std::string>{"q", "o"}
-                                      : std::vector<std::string>{"q", "o", "dO", "dq"};
+        const std::vector<std::string> queryTensors = operation == "sdpa_fwd"
+                                                          ? std::vector<std::string>{"q"}
+                                                          : std::vector<std::string>{"q", "dq"};
+        const std::vector<std::string> outputTensors = operation == "sdpa_fwd"
+                                                           ? std::vector<std::string>{"o"}
+                                                           : std::vector<std::string>{"o", "dO"};
         const std::vector<std::string> keyValueTensors
             = operation == "sdpa_fwd" ? std::vector<std::string>{"k", "v"}
                                       : std::vector<std::string>{"k", "v", "dk", "dv"};
+        const auto* declared = metadata.find("layout");
+        ASSERT_NE(declared, nullptr) << operation;
+        ASSERT_EQ(declared->values.size(), layouts.size()) << operation << ": a layout untested";
 
         for(const auto& layout : layouts)
         {
             const auto built = buildGraphFor(metadata, attentionPoint(metadata, layout.name));
             ASSERT_TRUE(built.ok()) << operation << " " << layout.name << ": " << built.error;
             const auto strides = stridesByName(built.bytes);
-            for(const auto& name : queryTensors)
-            {
-                EXPECT_EQ(strides.at(name), layout.query)
-                    << operation << " " << layout.name << " " << name;
-            }
-            for(const auto& name : keyValueTensors)
-            {
-                EXPECT_EQ(strides.at(name), layout.keyValue)
-                    << operation << " " << layout.name << " " << name;
-            }
+            const auto expect
+                = [&](const std::vector<std::string>& names, const std::vector<int64_t>& expected) {
+                      for(const auto& name : names)
+                      {
+                          EXPECT_EQ(strides.at(name), expected)
+                              << operation << " " << layout.name << " " << name;
+                      }
+                  };
+            expect(queryTensors, layout.query);
+            expect(outputTensors, layout.output);
+            expect(keyValueTensors, layout.keyValue);
+        }
+    }
+}
+
+TEST(TestGraphBuilderRegistry, AnMlaValueHeadNarrowsVAndOAndTheirGradientsBy64)
+{
+    // DeepSeek's prefill shape: Q and K 192 wide, V (so O, dO and dV) 128. The strides follow
+    // each tensor's own width.
+    for(const std::string operation : {"sdpa_fwd", "sdpa_bwd"})
+    {
+        const auto metadata = test::shippedOperation(operation);
+        auto point = attentionPoint(metadata, "bshd");
+        point["head_dim"] = int64_t{192};
+        point["value_head_dim"] = std::string("mla");
+        const auto built = buildGraphFor(metadata, point);
+        ASSERT_TRUE(built.ok()) << operation << ": " << built.error;
+
+        std::map<std::string, std::vector<int64_t>> dims;
+        for(const auto* tensor : *asGraph(built.bytes)->tensors())
+        {
+            dims[tensor->name()->str()]
+                = std::vector<int64_t>(tensor->dims()->begin(), tensor->dims()->end());
+        }
+        const auto strides = stridesByName(built.bytes);
+        const std::vector<std::pair<std::string, std::vector<int64_t>>> expected
+            = operation == "sdpa_fwd"
+                  ? std::vector<std::pair<std::string, std::vector<int64_t>>>{{"q",
+                                                                               {2, 8, 16, 192}},
+                                                                              {"k",
+                                                                               {2, 2, 32, 192}},
+                                                                              {"v",
+                                                                               {2, 2, 32, 128}},
+                                                                              {"o",
+                                                                               {2, 8, 16, 128}}}
+                  : std::vector<std::pair<std::string, std::vector<int64_t>>>{
+                        {"q", {2, 8, 16, 192}},
+                        {"k", {2, 2, 32, 192}},
+                        {"v", {2, 2, 32, 128}},
+                        {"o", {2, 8, 16, 128}},
+                        {"dO", {2, 8, 16, 128}},
+                        {"dq", {2, 8, 16, 192}},
+                        {"dk", {2, 2, 32, 192}},
+                        {"dv", {2, 2, 32, 128}}};
+        for(const auto& [name, shape] : expected)
+        {
+            EXPECT_EQ(dims.at(name), shape) << operation << " " << name;
+            const int64_t width = shape[3];
+            const int64_t heads = shape[1];
+            const int64_t sequence = shape[2];
+            EXPECT_EQ(strides.at(name),
+                      (std::vector<int64_t>{sequence * heads * width, width, heads * width, 1}))
+                << operation << " " << name;
         }
     }
 }
@@ -1412,22 +1519,25 @@ TEST(TestGraphBuilderRegistry, JitterIsNeverTheStandardScaleAndSpreadsOverTheSha
 
 TEST(TestGraphBuilderRegistry, ASlidingWindowWritesItsLeftBoundAndNoWindowWritesNone)
 {
-    const auto metadata = test::shippedOperation("sdpa_fwd");
     const std::vector<std::pair<std::string, std::optional<int64_t>>> cases{
         {"none", std::nullopt}, {"local_128", 128}, {"local_1024", 1024}, {"local_4096", 4096}};
-    for(const auto& [window, expected] : cases)
+    for(const std::string operation : {"sdpa_fwd", "sdpa_bwd"})
     {
-        auto point = attentionPoint(metadata, "bshd");
-        point["is_causal"] = true;
-        point["seqlen_k"] = int64_t{16};
-        point["window"] = window;
-        const auto built = buildGraphFor(metadata, point);
-        ASSERT_TRUE(built.ok()) << window << ": " << built.error;
-        const auto node = scaleAndBand(built.bytes);
-        EXPECT_EQ(node.left, expected) << window;
-        // The causal right bound is the mask's, not the window's.
-        ASSERT_TRUE(node.right.has_value()) << window;
-        EXPECT_EQ(*node.right, 0) << window;
+        const auto metadata = test::shippedOperation(operation);
+        for(const auto& [window, expected] : cases)
+        {
+            auto point = attentionPoint(metadata, "bshd");
+            point["is_causal"] = true;
+            point["seqlen_k"] = int64_t{16};
+            point["window"] = window;
+            const auto built = buildGraphFor(metadata, point);
+            ASSERT_TRUE(built.ok()) << operation << " " << window << ": " << built.error;
+            const auto node = scaleAndBand(built.bytes);
+            EXPECT_EQ(node.left, expected) << operation << " " << window;
+            // The causal right bound is the mask's, not the window's.
+            ASSERT_TRUE(node.right.has_value()) << operation << " " << window;
+            EXPECT_EQ(*node.right, 0) << operation << " " << window;
+        }
     }
 }
 

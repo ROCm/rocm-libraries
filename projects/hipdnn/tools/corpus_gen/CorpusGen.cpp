@@ -135,7 +135,15 @@ struct Options
     /// declarations express, and engine refusals correlate with performance axes.
     bool withoutEngine = false;
 
-    ExplorationRequest exploration;
+    /// Anchor scaling is on unless --no-anchor-scaling: with fixed quotas, a --count past the
+    /// first pass is filled by exploration, and an operation with few categorical combinations
+    /// (matmul's 12, a norm's 9) came out a quarter anchored at --count 2000 against its
+    /// declared four fifths, its K and hidden widths mostly ones no model has.
+    ExplorationRequest exploration = [] {
+        ExplorationRequest request;
+        request.anchorScaling = true;
+        return request;
+    }();
 
     /// Where the kernel pool comes from: `*.kdp.json` packs, or directories holding them.
     std::vector<std::filesystem::path> packRoots;
@@ -219,11 +227,12 @@ void printHelp(const char* program)
         << "                         of its first-pass count and its share of --count (by\n"
         << "                         weight where values are weighted), so the declared\n"
         << "                         mixture holds at a large --count instead of diluting\n"
-        << "                         into exploration. Default off (fixed quotas).\n"
-        << "                         manifest.json's anchored_share reports, with or\n"
-        << "                         without it, the share of the sweep's graphs in the\n"
-        << "                         corpus (after the --count cut) drawn from archetypes\n"
-        << "                         or their neighbourhood\n"
+        << "                         into exploration. The default.\n"
+        << "  --no-anchor-scaling    Fixed quotas instead: past the first pass, --count is\n"
+        << "                         filled by exploration alone. manifest.json's\n"
+        << "                         anchored_share reports, either way, the share of the\n"
+        << "                         sweep's graphs in the corpus (after the --count cut)\n"
+        << "                         drawn from archetypes or their neighbourhood\n"
         << "  --kdp-root <path>      A *.kdp.json pack, or a directory of them (repeatable)\n"
         << "  --model-shapes <csv>   Recorded shapes as q.<parameter> columns (repeatable). A\n"
         << "                         file with no column for a parameter the operation lists\n"
@@ -358,6 +367,10 @@ ParseOutcome parseArguments(const std::vector<std::string>& args, Options& optio
         else if(arg == "--anchor-scaling")
         {
             options.exploration.anchorScaling = true;
+        }
+        else if(arg == "--no-anchor-scaling")
+        {
+            options.exploration.anchorScaling = false;
         }
         else if(arg == "--kdp-root" || arg == "--kdp")
         {

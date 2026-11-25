@@ -141,6 +141,48 @@ TEST(TestCorpusRealism, MostOfTheShippedConvolutionCorpusLooksLikeRealLayers)
         << " shapes resemble a layer; the uniform search this replaces managed 0.04%";
 }
 
+TEST(TestCorpusRealism, EveryConvolutionPopulationIsAnchoredAndA3dProblemIsNeverThe2dOne)
+{
+    // A combination's archetype quota is a fifth of its first-pass count, fewer anchors than a
+    // convolution declares archetypes. A round that began at the first declared archetype never
+    // reached the depthwise, grouped and 3-D ones declared last (1 depthwise graph in 2000), and
+    // the 2-D archetypes, whose depth is 1, filled the 3-D half of the corpus with the 2-D
+    // problem in five-dimensional tensors. Every population is now anchored, and a 3-D problem
+    // has a depth or a depth filter above 1.
+    for(const std::string operation :
+        {"conv_fwd", "conv_bwd_data", "conv_bwd_weights", "conv_bias_activation"})
+    {
+        ExplorationRequest request;
+        request.pointsPerCombination = 20;
+        request.seed = 11;
+        const auto corpus
+            = exploreProblemSpace(test::shippedOperation(operation), request, ACCEPT_EVERYTHING);
+
+        size_t depthwise = 0;
+        size_t grouped = 0;
+        size_t volumetric = 0;
+        for(const auto& point : corpus.anchoredPoints())
+        {
+            const auto groups = at(point, "groups");
+            depthwise += groups > 1 && groups == at(point, "C") ? 1 : 0;
+            grouped += groups > 1 && groups < at(point, "C") ? 1 : 0;
+            volumetric
+                += std::get<std::string>(point.at("spatial")) == "3d" && at(point, "D") > 1 ? 1 : 0;
+        }
+        EXPECT_GT(depthwise, 0U) << operation << " anchors no depthwise convolution";
+        EXPECT_GT(grouped, 0U) << operation << " anchors no grouped convolution";
+        EXPECT_GT(volumetric, 0U) << operation << " anchors no 3-D convolution over a depth";
+        for(const auto& point : corpus.problems())
+        {
+            if(std::get<std::string>(point.at("spatial")) == "3d")
+            {
+                EXPECT_TRUE(at(point, "D") > 1 || at(point, "T") > 1)
+                    << operation << " " << detail::describe(point);
+            }
+        }
+    }
+}
+
 TEST(TestCorpusRealism, TheCorpusStillContainsShapesNobodyDeclared)
 {
     // A corpus of only anchors teaches only the anchors; §5.4 keeps an exploration share.
@@ -339,7 +381,8 @@ TEST(TestCorpusRealism, EveryShippedMirrorKeepsItsArchetypesProportion)
 
         std::mt19937_64 rng(31);
         size_t total = 0;
-        const auto combinations = detail::categoricalCombinations(metadata.parameters, 64, total);
+        const auto combinations
+            = detail::categoricalCombinations(metadata.parameters, 64, 0, total);
         for(const auto& archetype : metadata.archetypes)
         {
             for(const auto& combination : combinations)
@@ -412,10 +455,13 @@ TEST_P(TestShippedSdpaRealism, CorpusCoversHeadDimsLayoutsAndSequenceRelationsAM
     const auto metadata = test::shippedOperation(GetParam());
 
     // The default first pass: 50 points for each live combination of the unweighted parameters
-    // (is_causal, alignment, dtype, form and, in the forward, generate_stats), about 8900 rows in
-    // the forward and 2700 in the backward, enough that the shares below are not noise.
+    // (is_causal, alignment, form, and dtype in the backward and generate_stats in the forward),
+    // about 2700 rows in the backward. The forward weights dtype, which splits the budget where
+    // an unweighted one multiplied it by three, so it takes 150 to keep the 8900 rows the shares
+    // below were measured on, enough that they are not noise.
     ExplorationRequest request;
     request.seed = 9;
+    request.pointsPerCombination = GetParam() == "sdpa_fwd" ? 150 : 50;
     const auto problems = exploreProblemSpace(metadata, request, ACCEPT_EVERYTHING).problems();
     ASSERT_GT(problems.size(), GetParam() == "sdpa_fwd" ? 5000U : 1500U);
 
@@ -435,8 +481,13 @@ TEST_P(TestShippedSdpaRealism, CorpusCoversHeadDimsLayoutsAndSequenceRelationsAM
         if(q > k)
         {
             ++cross;
-            EXPECT_FALSE(std::get<bool>(point.at("is_causal")))
-                << "a causal mask with more queries than keys";
+            // A causal mask over more queries than keys is anchored top-left, where every
+            // query row keeps a key.
+            if(std::get<bool>(point.at("is_causal")))
+            {
+                EXPECT_EQ(std::get<std::string>(point.at("alignment")), "top_left")
+                    << "a bottom-right causal mask with more queries than keys";
+            }
         }
         layouts.insert(std::get<std::string>(point.at("layout")));
     }
@@ -456,43 +507,76 @@ TEST_P(TestShippedSdpaRealism, CorpusCoversHeadDimsLayoutsAndSequenceRelationsAM
     EXPECT_GT(share(wide), SDPA_WIDE_SHARE) << "most rows should be heads of D >= 32";
     EXPECT_GT(share(square), SDPA_SQUARE_SHARE) << "prefill is the dominant case";
     EXPECT_GT(cross, 0U) << "no cross attention";
-    EXPECT_EQ(layouts, (std::set<std::string>{"bhsd", "bshd", "kv_bhsd"}));
+    EXPECT_EQ(layouts, (std::set<std::string>{"bhsd", "bshd", "kv_bhsd", "qkv_packed", "sbhd"}));
 }
 
 TEST_P(TestShippedSdpaRealism, ArchetypesAnchorCrossAttentionAndTheHeadWidthsOfRealModels)
 {
     // The anchors are what a large corpus is mostly made of, so they must themselves hold the
-    // cross-attention and the head widths the model-pinned archetypes (D of 64 and 128) lack.
+    // cross-attention (causal too: exploration alone reached it in 2 of 2000 forward graphs), the
+    // head widths the model-pinned archetypes (D of 64 and 128) lack, and every MLA pair the
+    // declaration admits: with none anchored, the MLA rows took whatever width the search drew.
     const auto metadata = test::shippedOperation(GetParam());
+    const std::set<int64_t> mlaWidths
+        = GetParam() == "sdpa_fwd" ? std::set<int64_t>{192, 576} : std::set<int64_t>{192};
 
     std::mt19937_64 rng(11);
     std::set<int64_t> headDims;
+    std::set<int64_t> mlaAnchored;
     size_t cross = 0;
+    size_t causalCross = 0;
     for(const bool causal : {true, false})
     {
-        const auto categorical = test::withDefaultCategoricals(
-            metadata, ProblemPoint{{"dtype", std::string("bf16")}, {"is_causal", causal}});
-        for(const auto& archetype : metadata.archetypes)
+        for(const std::string valueHead : {"same", "mla"})
         {
-            for(int i = 0; i < 40; ++i)
+            const auto categorical
+                = test::withDefaultCategoricals(metadata,
+                                                ProblemPoint{{"dtype", std::string("bf16")},
+                                                             {"is_causal", causal},
+                                                             {"value_head_dim", valueHead}});
+            for(const auto& archetype : metadata.archetypes)
             {
-                const auto drawn = detail::drawFromArchetype(metadata, archetype, categorical, rng);
-                if(!drawn.has_value())
+                // Enough that each of head_dim_sweep's eleven widths is drawn under either mask.
+                for(int i = 0; i < 100; ++i)
                 {
-                    continue; // the archetype fixes the other mask
+                    const auto drawn
+                        = detail::drawFromArchetype(metadata, archetype, categorical, rng);
+                    if(!drawn.has_value())
+                    {
+                        continue; // the archetype fixes the other mask or value width
+                    }
+                    const bool admitted = detail::satisfiesConstraints(metadata, *drawn);
+                    if(valueHead == "mla")
+                    {
+                        // Every archetype is tried for an MLA combination; those that are not
+                        // an MLA model draw widths the declaration refuses, which are dropped.
+                        if(admitted)
+                        {
+                            EXPECT_EQ(mlaWidths.count(at(*drawn, "head_dim")), 1U)
+                                << archetype.name << " anchors MLA at head_dim "
+                                << at(*drawn, "head_dim");
+                            mlaAnchored.insert(at(*drawn, "head_dim"));
+                        }
+                        continue;
+                    }
+                    EXPECT_TRUE(admitted)
+                        << archetype.name
+                        << " draws a point the declaration's own constraints refuse";
+                    headDims.insert(at(*drawn, "head_dim"));
+                    const bool isCross = at(*drawn, "seqlen_q") > at(*drawn, "seqlen_k");
+                    cross += isCross ? 1 : 0;
+                    causalCross += isCross && causal ? 1 : 0;
                 }
-                EXPECT_TRUE(detail::satisfiesConstraints(metadata, *drawn))
-                    << archetype.name << " draws a point the declaration's own constraints refuse";
-                headDims.insert(at(*drawn, "head_dim"));
-                cross += at(*drawn, "seqlen_q") > at(*drawn, "seqlen_k") ? 1 : 0;
             }
         }
     }
     EXPECT_GT(cross, 0U) << "no archetype anchors cross attention";
+    EXPECT_GT(causalCross, 0U) << "no archetype anchors causal cross attention";
     for(const int64_t width : {40, 48, 80, 96, 112, 160, 192, 256})
     {
         EXPECT_EQ(headDims.count(width), 1U) << "no archetype anchors head_dim " << width;
     }
+    EXPECT_EQ(mlaAnchored, mlaWidths) << "an MLA pair no archetype anchors";
 }
 
 INSTANTIATE_TEST_SUITE_P(SdpaDeclarations,

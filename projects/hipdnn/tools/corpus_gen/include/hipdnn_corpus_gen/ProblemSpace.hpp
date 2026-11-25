@@ -10,6 +10,7 @@
 #include <hipdnn_corpus_gen/WorkloadSampling.hpp>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstdint>
 #include <functional>
@@ -227,19 +228,92 @@ struct ProblemCorpus
 namespace detail
 {
 
+/// A reproducible pseudo-random key for part @p index under @p seed (splitmix64): the tie-break
+/// of apportion, so equal remainders are not always settled in favour of the earliest parts,
+/// which the enumeration order would turn into a bias toward the first value of the leading
+/// parameters; also the round function of ScatteredOrder.
+inline uint64_t tieKey(uint64_t seed, size_t index)
+{
+    uint64_t z = seed + 0x9e3779b97f4a7c15ULL * (static_cast<uint64_t>(index) + 1);
+    z = (z ^ (z >> 30)) * 0xbf58476d1ce4e5b9ULL;
+    z = (z ^ (z >> 27)) * 0x94d049bb133111ebULL;
+    return z ^ (z >> 31);
+}
+
+/// A bijection of [0, @p total) chosen by @p seed, the order a product too large to take whole
+/// is walked in: a balanced Feistel network over the bits of the smallest even power of two at
+/// least @p total, each round keyed by tieKey of the seed and the round number, cycle-walked
+/// (applied again until the value is in range), which keeps it a bijection of [0, total).
+/// Unlike a stride through the product, it ties no digit of the mixed-radix index to another:
+/// even a stride coprime to the product moves some digits together, and sdpa_fwd's 23040
+/// combinations walked at a stride of 14239 held 1 scale_unset combination where 56 were due,
+/// because the one scale that form admits was a value of the digit the stride had tied to it.
+/// Keyed by the seed, a given seed revisits the same combinations and another seed reaches
+/// others, so regenerating a corpus under a new seed widens what the sample has covered.
+class ScatteredOrder
+{
+public:
+    ScatteredOrder(size_t total, uint64_t seed)
+        : _total(total)
+    {
+        while(_halfBits < 32 && (uint64_t{1} << (2 * _halfBits)) < total)
+        {
+            ++_halfBits;
+        }
+        _halfMask = (uint64_t{1} << _halfBits) - 1;
+        for(size_t round = 0; round < ROUNDS; ++round)
+        {
+            _roundKeys[round] = tieKey(seed, round);
+        }
+    }
+
+    /// The combination index visited at @p step, for a step below the total.
+    size_t operator()(size_t step) const
+    {
+        uint64_t value = step;
+        do
+        {
+            value = permute(value);
+        } while(value >= _total);
+        return static_cast<size_t>(value);
+    }
+
+private:
+    static constexpr size_t ROUNDS = 4;
+
+    uint64_t permute(uint64_t value) const
+    {
+        uint64_t left = value >> _halfBits;
+        uint64_t right = value & _halfMask;
+        for(const auto key : _roundKeys)
+        {
+            const uint64_t mixed = left ^ (tieKey(key, static_cast<size_t>(right)) & _halfMask);
+            left = right;
+            right = mixed;
+        }
+        return (left << _halfBits) | right;
+    }
+
+    size_t _total;
+    uint64_t _halfBits = 1;
+    uint64_t _halfMask = 1;
+    std::array<uint64_t, ROUNDS> _roundKeys{};
+};
+
 /// The cross product of every categorical parameter's declared values that @p keep admits, at
 /// most @p limit of it plus whatever keeps every admitted value present; @p total receives the
 /// full size of the admitted product, 0 when @p keep admits no value of some parameter.
 ///
 /// Past the limit the product is sampled, not cut to a prefix (a prefix keeps only the first
 /// values of the earliest parameters), and each value the sample missed gets a combination of
-/// its own, so a model trained on the corpus has seen every value (§5.2). The sample steps
-/// through the product by a stride coprime to its size, so it visits distinct combinations in a
-/// fixed, scattered order: an even stride aliases with the mixed-radix index and leaves whole
-/// value triples out (sdpa_fwd's 6912 combinations at a stride of 6.75 have no kv_bhsd, jitter,
-/// local_4096 one). @p live, when given, says which combinations can hold a problem (see
+/// its own, so a model trained on the corpus has seen every value (§5.2). The sample walks the
+/// product in a pseudo-random order @p seed chooses (ScatteredOrder), so it visits distinct
+/// combinations spread over every pair of values rather than along whichever digits a stride
+/// ties together. @p live, when given, says which combinations can hold a problem (see
 /// excludedByCategoricals): only those are sampled, so the limit is spent on combinations that
-/// count. Declaration order keeps the result reproducible.
+/// count. The order is a function of the product and @p seed, so a seed reproduces its sample
+/// and different seeds sample different combinations. Within the limit, @p seed is unused:
+/// the whole product is enumerated in order.
 ///
 /// @p constraintEmpty, when given, receives how many combinations of the admitted product @p
 /// live refuses, counted over the whole product and not only the part the sample walks: past
@@ -251,6 +325,7 @@ namespace detail
 inline std::vector<ProblemPoint>
     categoricalCombinations(const std::vector<Parameter>& parameters,
                             size_t limit,
+                            uint64_t seed,
                             size_t& total,
                             const std::function<bool(const ProblemPoint&)>& live = {},
                             const std::vector<KeepClause>& keep = {},
@@ -313,28 +388,15 @@ inline std::vector<ProblemPoint>
         return combinations;
     }
 
-    // The stride nearest the golden ratio of the product that shares no factor with it, so the
-    // walk index * stride % total is a permutation of the product.
-    size_t stride
-        = std::max<size_t>(1, static_cast<size_t>(static_cast<double>(total) * 0.6180339887));
-    while(std::gcd(stride, total) != 1)
-    {
-        ++stride;
-    }
-    // The walk's product index after @p step strides, by repeated addition modulo the total so
-    // a large product cannot overflow.
-    const auto next = [&](size_t index) {
-        return index >= total - stride ? index - (total - stride) : index + stride;
-    };
+    const ScatteredOrder order(total, seed);
     const auto counts = [&live](const ProblemPoint& point) { return !live || live(point); };
 
     combinations.reserve(limit);
     size_t visited = 0;
-    size_t cursor = 0;
     size_t empty = 0;
-    for(; visited < total && combinations.size() < limit; ++visited, cursor = next(cursor))
+    for(; visited < total && combinations.size() < limit; ++visited)
     {
-        auto point = at(cursor);
+        auto point = at(order(visited));
         if(counts(point))
         {
             combinations.push_back(std::move(point));
@@ -346,10 +408,9 @@ inline std::vector<ProblemPoint>
     }
     if(constraintEmpty != nullptr)
     {
-        auto ahead = cursor;
-        for(size_t step = visited; step < total; ++step, ahead = next(ahead))
+        for(size_t step = visited; step < total; ++step)
         {
-            empty += counts(at(ahead)) ? 0 : 1;
+            empty += counts(at(order(step))) ? 0 : 1;
         }
         *constraintEmpty = empty;
     }
@@ -369,10 +430,9 @@ inline std::vector<ProblemPoint>
                 continue;
             }
             bool found = false;
-            auto ahead = cursor;
-            for(size_t step = visited; step < total && !found; ++step, ahead = next(ahead))
+            for(size_t step = visited; step < total && !found; ++step)
             {
-                auto point = at(ahead);
+                auto point = at(order(step));
                 if(point.at(name) == value && counts(point))
                 {
                     combinations.push_back(std::move(point));
@@ -587,18 +647,6 @@ inline std::vector<double> combinationSizes(const OperationMetadata& metadata,
         *converged = change < 1e-6;
     }
     return sizes;
-}
-
-/// A reproducible pseudo-random key for part @p index under @p seed (splitmix64): the tie-break
-/// of apportion, so equal remainders are not always settled in favour of the earliest parts,
-/// which the enumeration order would turn into a bias toward the first value of the leading
-/// parameters.
-inline uint64_t tieKey(uint64_t seed, size_t index)
-{
-    uint64_t z = seed + 0x9e3779b97f4a7c15ULL * (static_cast<uint64_t>(index) + 1);
-    z = (z ^ (z >> 30)) * 0xbf58476d1ce4e5b9ULL;
-    z = (z ^ (z >> 27)) * 0x94d049bb133111ebULL;
-    return z ^ (z >> 31);
 }
 
 /// Splits @p total into whole parts in proportion to @p sizes. The parts sum to @p total exactly
@@ -1088,6 +1136,7 @@ inline ProblemCorpus exploreProblemSpace(const OperationMetadata& metadata,
     const auto combinations = detail::categoricalCombinations(
         metadata.parameters,
         request.maxCombinations,
+        request.seed,
         totalCombinations,
         [&metadata](const ProblemPoint& combination) {
             return !detail::excludedByCategoricals(metadata, combination);
@@ -1284,12 +1333,24 @@ inline ProblemCorpus exploreProblemSpace(const OperationMetadata& metadata,
                 = static_cast<size_t>(std::max(0.0, metadata.mixture.neighbourhood * total));
         }
 
-        // Capped so archetypes the engine declines cannot consume the whole budget.
+        // Capped so archetypes the engine declines cannot consume the whole budget. Each
+        // combination starts the round at an archetype of its own. A combination's quota is a
+        // fifth of its first-pass count, often fewer anchors than there are archetypes, and a
+        // round that always began at the first declared one never reached the rest: conv_fwd's
+        // quota of 10 over 28 archetypes left its depthwise, grouped and 3-D ones (21 to 27)
+        // undrawn, 1 depthwise graph in 2000. Keyed past the combinations' apportion keys
+        // (tieKey(seed, index)), so the two orders are not the same draw.
         const size_t archetypeAttempts = archetypeQuota * 20;
+        const size_t firstArchetype
+            = metadata.archetypes.empty()
+                  ? 0
+                  : static_cast<size_t>(detail::tieKey(request.seed, combinations.size() + index)
+                                        % metadata.archetypes.size());
         for(size_t attempt = 0; attempt < archetypeAttempts && anchored.size() < archetypeQuota;
             ++attempt)
         {
-            const auto& archetype = metadata.archetypes[attempt % metadata.archetypes.size()];
+            const auto& archetype
+                = metadata.archetypes[(firstArchetype + attempt) % metadata.archetypes.size()];
             const auto drawn = detail::drawFromArchetype(metadata, archetype, categorical, rng);
             if(!drawn.has_value())
             {
