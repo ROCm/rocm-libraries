@@ -73,7 +73,8 @@ const std::vector<hipdnn_plugin_sdk::ingestor::KernelArgument>&
     kernelSignature(bool generic, bool hasBias = false);
 
 /// Launches the kernel over the grid of @p problem and @p geometry (set by the caller).
-/// @p bias is given exactly when the kernel was built with DW_HAS_BIAS.
+/// @p hasBias is set exactly when the kernel was built with DW_HAS_BIAS; @p bias is then
+/// passed after `y` whatever its value, so the argument list always matches the kernel's.
 void launch(const compilation::IRunnableKernel& kernel,
             hipStream_t stream,
             const void* x,
@@ -81,7 +82,8 @@ void launch(const compilation::IRunnableKernel& kernel,
             void* y,
             const ConvProblem& problem,
             const Geometry& geometry,
-            const void* bias = nullptr);
+            const void* bias = nullptr,
+            bool hasBias = false);
 
 /// The problem and geometry values of a saved launch: `n`, `c`, `k`, per spatial axis (`_d`,
 /// `_h`, `_w`) `in_`, `filter_`, `out_`, `pad_`, `stride_`, `dilation_`, and the geometry

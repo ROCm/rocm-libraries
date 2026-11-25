@@ -465,7 +465,8 @@ public:
                      y.ptr,
                      dw.launch().problem,
                      dw.launch().geometry,
-                     b.ptr);
+                     b.ptr,
+                     /*hasBias=*/true);
     }
 
 private:

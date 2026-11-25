@@ -58,7 +58,8 @@ constexpr std::string_view UNIFORM_K_VALUE = "uniform_k";
 
 // The filters (depth, height, width) the bundles have specialized variants for, each with H / W
 // stride 1 and 2 and H / W dilation 1. Must match the variants of
-// configs/hip_conv_fwd_dw3d_rdna.yaml.
+// configs/hip_conv_fwd_dw3d_rdna.yaml and of the bundles built with the same variants
+// (configs/hip_conv_fwd_bias_dw3d_rdna.yaml).
 constexpr std::array<std::array<int, 3>, 4> SPECIALIZED_FILTERS{
     {{3, 3, 3}, {5, 5, 5}, {3, 1, 1}, {1, 3, 3}}};
 
@@ -287,7 +288,8 @@ void launch(const compilation::IRunnableKernel& kernel,
             void* y,
             const ConvProblem& p,
             const Geometry& geometry,
-            const void* bias)
+            const void* bias,
+            bool hasBias)
 {
     const auto run = [&](auto&&... buffers) {
         if(geometry.generic)
@@ -335,7 +337,7 @@ void launch(const compilation::IRunnableKernel& kernel,
                       p.pad[2],
                       p.dilation[0]);
     };
-    if(bias != nullptr)
+    if(hasBias)
     {
         run(x, w, y, bias);
     }
