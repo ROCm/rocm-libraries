@@ -105,7 +105,8 @@ const static vector<geqrf_tuple<I>> very_large_problem_range = {
     {{220, 220}, 16384},
 };
 const vector<vector<int>> large_batch_size_range = {
-    {33, 33},
+    {15, 15},
+    {129, 129},
 };
 
 const vector<int> large_batch_n_size_range = {
