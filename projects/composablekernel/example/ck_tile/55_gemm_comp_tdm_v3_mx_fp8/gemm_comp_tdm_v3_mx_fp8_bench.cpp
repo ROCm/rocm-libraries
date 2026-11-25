@@ -982,7 +982,12 @@ int dispatch_tile(const ck_tile::ArgParser& arg, const std::string& name)
     //   -cluster=1x1                  no cluster
     //   -cluster=2x1|4x1 -place=default|8x4   B shared along M (8x4: XCD-region placement)
     //   -cluster=2x2|4x4              A and B shared (CK's cluster partitioner)
-    if constexpr(TdmEpi)
+#if defined(CK_EX55_FOCUS_CSHUFFLE)
+    constexpr bool kFocusEpi = true; // both epilogues (CShuffle for split-K)
+#else
+    constexpr bool kFocusEpi = TdmEpi;
+#endif
+    if constexpr(kFocusEpi)
     {
         const std::string cl = arg.get_str("cluster");
         const std::string pl = arg.get_str("place");
@@ -1196,7 +1201,9 @@ int dispatch_epilogue(const ck_tile::ArgParser& arg, const std::string& name)
     const std::string epi = arg.get_str("epilogue");
     if(epi == "tdm")
         return dispatch_tile<true, CDataType>(arg, name);
-#if !defined(CK_EX55_BF16_TDM_ONLY)
+#if !defined(CK_EX55_BF16_TDM_ONLY) || defined(CK_EX55_FOCUS_CSHUFFLE)
+    // EXPERIMENT: -DCK_EX55_FOCUS_CSHUFFLE also builds the CShuffle epilogue (split-K, -k_batch)
+    // with -DCK_EX55_BF16_TDM_ONLY / the focus set
     if(epi == "cshuffle")
         return dispatch_tile<false, CDataType>(arg, name);
 #endif

@@ -137,6 +137,12 @@ def kernel_table(exe: Path):
 
 
 def arm_kernel(table, arm):
+    want_tdm = arm.get("epilogue", "tdm") == "tdm"
+    table = [t for t in table if ("TdmEpilogue" in t[0]) == want_tdm]
+    return _arm_kernel(table, arm)
+
+
+def _arm_kernel(table, arm):
     """The kernel an arm launches, matched on warp tile, cluster and placement. An arm with a
     "tile" other than 256x256x256 (CK's default instances, warps "default") matches on its block
     tile alone (no cluster)."""
@@ -180,7 +186,8 @@ def arm_kernel(table, arm):
 def arm_args(arm, shape, cfg):
     m, n, k = shape
     a = [f"-m={m}", f"-n={n}", f"-k={k}", f"-tile={arm.get('tile', '256x256x256')}",
-         "-epilogue=tdm", f"-warps={arm.get('warps', '2x2')}",
+         f"-epilogue={arm.get('epilogue', 'tdm')}", f"-k_batch={arm.get('k_batch', 1)}",
+         f"-warps={arm.get('warps', '2x2')}",
          f"-cluster={arm.get('cluster', '1x1')}", f"-place={arm.get('place', 'default')}",
          f"-c_dtype={cfg.get('c_dtype', 'bf16')}"]
     if "wt" in arm:
@@ -189,6 +196,9 @@ def arm_args(arm, shape, cfg):
 
 
 def arm_tag(v, arm):
+    if arm.get("epilogue", "tdm") != "tdm" or arm.get("k_batch", 1) != 1:
+        base = arm_tag(v, {k: x for k, x in arm.items() if k not in ("epilogue", "k_batch")})
+        return f"{base}|{arm.get('epilogue', 'tdm')}|kb{arm.get('k_batch', 1)}"
     if arm.get("tile", "256x256x256") != "256x256x256":
         cl = f"|c{arm['cluster']}" if "cluster" in arm else ""
         return f"{v['name']}|t{arm['tile']}|w{arm.get('warps', 'default')}{cl}"
