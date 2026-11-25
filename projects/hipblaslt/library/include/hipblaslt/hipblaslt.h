@@ -762,6 +762,14 @@ hipblasStatus_t hipblasLtGetArchName(char** archName);
  *
  *  \retval HIPBLAS_STATUS_SUCCESS The allocation completed successfully.
  *  \retval HIPBLAS_STATUS_INVALID_VALUE \p handle == NULL.
+ *  \retval HIPBLAS_STATUS_ALLOC_FAILED A device or host allocation failed.
+ *  \retval HIPBLAS_STATUS_NOT_INITIALIZED The current device is not valid.
+ *  \retval HIPBLAS_STATUS_INTERNAL_ERROR Another HIP call failed, for example
+ * because no device is visible. With \p HIPBLASLT_LOG_LEVEL=1 the error log
+ * names the call and the HIP error.
+ *
+ *  On any status other than \p HIPBLAS_STATUS_SUCCESS, nothing stays allocated
+ * and \p handle must not be passed to hipblasLtDestroy().
  */
 HIPBLASLT_EXPORT
 hipblasStatus_t hipblasLtCreate(hipblasLtHandle_t* handle);
@@ -783,6 +791,10 @@ hipblasStatus_t hipblasLtCreate(hipblasLtHandle_t* handle);
  *  \retval HIPBLAS_STATUS_SUCCESS The hipBLASLt context was successfully
  * destroyed. \retval HIPBLAS_STATUS_NOT_INITIALIZED The hipBLASLt library was
  * not initialized. \retval HIPBLAS_STATUS_INVALID_VALUE \p handle == NULL.
+ *  \retval HIPBLAS_STATUS_INTERNAL_ERROR Freeing the handle's device memory
+ * failed. A HIP error that maps to a more specific status returns that status
+ * instead. Either way the handle is still valid, so hipblasLtDestroy() can be
+ * called again.
  */
 HIPBLASLT_EXPORT
 hipblasStatus_t hipblasLtDestroy(const hipblasLtHandle_t handle);

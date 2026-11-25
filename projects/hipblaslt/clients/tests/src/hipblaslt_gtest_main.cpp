@@ -40,6 +40,13 @@ namespace hipblaslt_bench
 }
 #endif
 
+#ifndef _WIN32
+namespace hipblaslt_handle_create_errors
+{
+    int run_no_device_child();
+}
+#endif
+
 #include <cstdlib>
 #include <cstring>
 #include <string>
@@ -245,6 +252,10 @@ static void hipblaslt_gtest_run_child(int argc, char** argv)
 #if HIPBLASLT_HAS_GEMM_A2A_FUSION
     if(!strcmp(argv[1], "--a2a-rank-child"))
         std::exit(hipblaslt_bench::run_rank_child());
+#endif
+#ifndef _WIN32
+    if(!strcmp(argv[1], "--handle-create-no-device-child"))
+        std::exit(hipblaslt_handle_create_errors::run_no_device_child());
 #endif
 }
 
