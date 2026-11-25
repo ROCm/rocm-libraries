@@ -13,8 +13,8 @@ alone:
 * the literal tables between the arch's ``BEGIN``/``END GENERATED`` markers of
   ``generators/_instances.py`` (``ARCH_OUTPUTS``);
 * the arch's reference CSV in ``tests/data``: per pinned object its hash, Spec key, sha256
-  and resource row, which the compare tool and the generators' pin checks read, and for gfx950
-  its ``rmir_scan`` (``clean`` or ``exception``, from the S1 manifest; a gfx950 row with neither is refused);
+  and resource row, which the compare tool and the generators' pin checks read, and for gfx950, gfx942 and gfx90a
+  its ``rmir_scan`` (``clean`` or ``exception``, from the S1 manifest; a row of those arches with neither is refused);
 
 **Tree-built pins.** A row the sweep never built (a catalogue row added in this tree) is installed with
 
@@ -59,20 +59,23 @@ sys.path.insert(0, str(FLYDSL))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from generators._sdpa_bwd_spec import (  # noqa: E402
     GENERIC_KERNELS,
-    FEATURE_KNOBS,
     GENERIC_TABLE_KNOBS,
     GFX950,
     KERNELS,
     KNOBS,
+    KNOBS_CDNA9,
+    OPTIONAL_TABLE_KNOBS,
     STR_KNOBS,
     UNSET_INT,
     UNSET_WORD,
     Spec,
+    family,
     rung_below,
 )
 from gen_descriptors import rne_pin_problem  # noqa: E402
 from sdpa_bwd_s1 import (  # noqa: E402
     RMIR_CLEAN,
+    RMIR_ARCHES,
     RMIR_COLUMN,
     RMIR_SCANS,
     pin_columns,
@@ -92,6 +95,14 @@ class ArchOutputs:
         str, tuple[str, ...]
     ]  # kernel -> the perf columns after the head fields
     reference_csv: str
+    # Mixed-family arch (gfx942, gfx90a): the perf columns of the rows built by the CDNA family (fp32); ``columns`` then
+    # holds the RDNA-family (16-bit) rows'. None: every row has ``columns``.
+    cdna_columns: dict[str, tuple[str, ...]] | None = None
+
+    def columns_of(self, spec: Spec) -> tuple[str, ...]:
+        if self.cdna_columns is not None and family(spec.arch, spec.dtype) == "cdna":
+            return self.cdna_columns[spec.kernel]
+        return self.columns[spec.kernel]
 
 
 ARCH_OUTPUTS = {
@@ -107,6 +118,16 @@ ARCH_OUTPUTS = {
         GENERIC_TABLE_KNOBS,
         "sdpa_bwd_gfx11_reference.csv",
     ),
+    **{
+        arch: ArchOutputs(
+            f"SDPA_BWD_{arch.upper()}_TABLES",
+            GENERIC_KERNELS,
+            KNOBS_CDNA9,
+            f"sdpa_bwd_{arch}_reference.csv",
+            cdna_columns=KNOBS,
+        )
+        for arch in ("gfx942", "gfx90a")
+    },
 }
 
 
@@ -146,11 +167,11 @@ def read_pins(
     (arch,) = arches
     if arch not in ARCH_OUTPUTS:
         raise SystemExit(f"no instance table for arch {arch!r}")
-    if arch == GFX950:
+    if arch in RMIR_ARCHES:
         unscanned = [h for h, r in pins.items() if r.get(RMIR_COLUMN) not in RMIR_SCANS]
         if unscanned:
             raise SystemExit(
-                f"{len(unscanned)} gfx950 rows record no {RMIR_COLUMN} ({'/'.join(RMIR_SCANS)}): {sorted(unscanned)[:6]}"
+                f"{len(unscanned)} {arch} rows record no {RMIR_COLUMN} ({'/'.join(RMIR_SCANS)}): {sorted(unscanned)[:6]}"
             )
     pins, dropped = prune_floor_twins(pins)
     counts = {kernel: 0 for kernel in ARCH_OUTPUTS[arch].kernels}
@@ -231,9 +252,13 @@ def print_dropped(dropped: list[tuple[dict, dict]]) -> None:
 def table_row(spec: Spec, columns: tuple[str, ...]) -> str:
     """The table row of @p spec: its columns in order, the unset spellings where the policy decides.
 
-    The trailing feature columns (``FEATURE_KNOBS``) are left out of a row that sets none of them, so a row of the existing
-    objects reads as it always did.
+    The trailing optional columns (``OPTIONAL_TABLE_KNOBS``) are left out of a row that sets none of them, so a row of the existing
+    objects reads as it always did. A knob of @p spec with no column is an error.
     """
+    if unlisted := set(spec.knobs) - set(columns):
+        raise SystemExit(
+            f"{spec.key()} sets knobs {sorted(unlisted)}, which have no column in the {spec.arch} table"
+        )
     perf = []
     for name in columns:
         value = getattr(spec, name)
@@ -242,7 +267,7 @@ def table_row(spec: Spec, columns: tuple[str, ...]) -> str:
         )
     while (
         perf
-        and columns[len(perf) - 1] in FEATURE_KNOBS
+        and columns[len(perf) - 1] in OPTIONAL_TABLE_KNOBS
         and getattr(spec, columns[len(perf) - 1]) is None
     ):
         perf.pop()
@@ -277,7 +302,7 @@ def render_tables(arch: str, pins: dict[str, dict]) -> str:
     for kernel in out.kernels:
         specs = sorted(by_kind[kernel], key=Spec.key)
         lines.append(f'    "{kernel}": (  # {len(specs)} rows')
-        lines += [table_row(spec, out.columns[kernel]) for spec in specs]
+        lines += [table_row(spec, out.columns_of(spec)) for spec in specs]
         lines.append("    ),")
     lines += ["}", "# fmt: on", end]
     return "\n".join(lines)

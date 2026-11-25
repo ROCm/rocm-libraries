@@ -3310,6 +3310,49 @@ TEST_F(TestIngestorGenericPlanBuilderShortlistLimit, NarrowsASlottedEnginesSelec
         << "with the limit widened to 2, the slot falls through to slot_128";
 }
 
+/// setSlotProgramBenchmark must count the shortlist limit in `narrowed`, as it already does
+/// the knob filter and workspace limit: with benchmarking on and a limit below the slot's
+/// catalog size, a measured record only covers the shortlisted candidates and must not be
+/// saved as if it covered the whole catalog. Reverting the shortlist term out of `narrowed`
+/// makes this fail, since the record would then be written.
+TEST_F(TestIngestorGenericPlanBuilderShortlistLimit, SlottedBenchmarkUnderTheLimitSavesNoRecord)
+{
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const WorkspaceEqualsBlockSizeHandler handler;
+    const ScopedDispatchRegistration<TestHandle> dispatch("test.dispatch", handler);
+    const auto manager = makeOneSlotTwoKernelStateManager();
+    const auto engine = makeEngineWithKnobs({});
+    const TestDeviceResolver resolver;
+    const BenchmarkPlanBuilder builder(engine, *manager, resolver);
+
+    flatbuffers::FlatBufferBuilder fbb;
+    const auto benchmarkConfig
+        = makeIntKnobEngineConfig(fbb, hipdnn_plugin_sdk::BENCHMARKING_KNOB_NAME, 1);
+    const TestGraph graph(makeGraphId(0xF6));
+    const auto properties = testDeviceProperties();
+    const TestHandle handle;
+
+    setLimit("1");
+    KnobFilterSettings settings;
+    builder.initializeExecutionSettings(handle, graph, benchmarkConfig, settings);
+    ASSERT_TRUE(settings.ingestorSettings.benchmarkingEnabled);
+    ASSERT_EQ(settings.ingestorSettings.shortlistLimit, std::optional<size_t>(1))
+        << "the slot has two candidates; the limit must sit below that";
+
+    BenchmarkContext context;
+    context.setExecutionSettings(settings);
+    builder.buildPlan(handle, graph, benchmarkConfig, context);
+    std::vector<std::byte> workspace(context.plan().getWorkspaceSize(handle));
+    context.plan().execute(handle, nullptr, 0U, workspace.data());
+
+    WinnerKey slotKey = winnerKeyFor(graph, properties);
+    slotKey.slot = "only";
+    EXPECT_FALSE(manager->winnerFor(slotKey).has_value())
+        << "a shortlist-limited measurement must not be saved as the slot's winner record";
+    EXPECT_FALSE(manager->programFor(winnerKeyFor(graph, properties)).has_value())
+        << "a shortlist-limited measurement must not be saved as the program record either";
+}
+
 /// predictConfiguration must name the same kernel buildPlan actually serves under a
 /// limit: both apply applyShortlistLimit to the same filtered catalog before ranking, so
 /// a benchmark record taken under the limit (shortlisting kernel_64, kernel_128) cannot

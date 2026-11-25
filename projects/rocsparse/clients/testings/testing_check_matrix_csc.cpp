@@ -77,11 +77,7 @@ void testing_check_matrix_csc(const Arguments& arg)
     // Create rocsparse handle
     rocsparse_local_handle handle;
 
-    // init_csc builds the CSR arrays of the transpose, which stores the other triangle.
-    Arguments arg_csc = arg;
-    arg_csc.uplo      = (uplo == rocsparse_fill_mode_lower) ? rocsparse_fill_mode_upper
-                                                            : rocsparse_fill_mode_lower;
-    rocsparse_matrix_factory<T> matrix_factory(arg_csc);
+    rocsparse_matrix_factory<T> matrix_factory(arg);
 
     // Allocate host memory for CSC matrix
     host_vector<rocsparse_int> hcsc_col_ptr;

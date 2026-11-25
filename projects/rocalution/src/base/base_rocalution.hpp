@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2018-2023 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -129,6 +129,27 @@ namespace rocalution
         // template ValueType
         template <typename ValueType2>
         ROCALUTION_EXPORT void CloneBackend(const BaseRocalution<ValueType2>& src); /**< \private */
+
+        /** \brief Move the object to the backend of another object
+      * \details
+      * Unlike \p CloneBackend, \p MoveToBackend keeps the parallel manager of the object.
+      * It places an object that has its own parallel manager, such as a \p GlobalMatrix
+      * of another level of a multigrid hierarchy, on the backend of \p src.
+      *
+      * @param[in]
+      * src Object, to whose backend the object is moved.
+      *
+      * \par Example
+      * \code{.cpp}
+      *   GlobalMatrix<ValueType> coarse(pm_coarse);
+      *   GlobalMatrix<ValueType> fine(pm_fine);
+      *
+      *   // coarse is on the backend of fine, and keeps pm_coarse
+      *   coarse.MoveToBackend(fine);
+      * \endcode
+      */
+        ROCALUTION_EXPORT
+        void MoveToBackend(const BaseRocalution<ValueType>& src);
 
         /** \brief Print object information
       * \details

@@ -260,8 +260,9 @@ The hermetic suite
 changes only logic YAML triggers no TensileLite lane, and the build-wired `--check-all` is scoped to
 the architectures that pull-request builds target. `Component CI: hipBLASLt Logic Corpus`
 ([`component-ci-logic-corpus.yml`](../../../.github/workflows/component-ci-logic-corpus.yml)) closes
-both gaps. It runs on any change under `Tensile/Logic/`, the `TensileLogic` validators, or the corpus
-test plumbing, and runs `tox -e logic-corpus`: `TensileLogic --check-all --strict-known-bugs`, then
+both gaps. It runs on any change under `Tensile/Logic/`, the `TensileLogic` validators, the corpus
+test plumbing, or the SolutionUID codec (`tensilelite/SolutionIdGen.py`), and runs
+`tox -e logic-corpus`: `TensileLogic --check-all --strict-known-bugs`, then
 every `@needs_logic_corpus` test with `HIPBLASLT_REQUIRE_LOGIC_CORPUS=1`. The check covers the
 architectures whose logic the change touched, whether or not a pull-request build targets them, and
 the whole corpus when a validator or `known_bugs.yaml` changed or on a manual run. (The whole corpus
@@ -615,6 +616,48 @@ kernel source linked directly into hipBLASLt (`HIPBLASLT_ENABLE_ROCROLLER`), not
 TensileLite's Python code generator. That is very likely the architecturally correct answer, but it
 means TensileLite's own Python unit/characterization suite has no coverage at all for a rocRoller-only
 change; see the corrected rows in Known Risks and Gaps below.
+
+### CPU reference GEMM tests
+
+The C++ reference has two numerical suites: gtests in `tensilelite-tests` and
+the `CPUGemm.*` cases registered for `cpu-gemm-driver`. The driver validates D
+and AMAX-D against its own scalar GEMM. Its cases cover fast and slow paths,
+data types, transposes, scaling, bias, activation and batching.
+
+Both executables and their CTest registrations install under
+`bin/hipblaslt-tensilelite/`. TheRock's TensileLite job runs that installed suite
+in the standard tier and reports through the required `Multi-Arch CI Summary`.
+The driver tiers are defined in
+[`tests/cpu_gemm_test_categories.yaml`](tests/cpu_gemm_test_categories.yaml).
+The pinned TheRock selector omits the C++ stage for quick-tier runs.
+
+Run the driver cases from either the build tree or an installed test package:
+
+```bash
+ctest --test-dir <build>/tensilelite/tests -L '^standard$' -R '^CPUGemm\.' \
+    --parallel 1 --output-on-failure --no-tests=error
+ctest --test-dir <install>/bin/hipblaslt-tensilelite -L '^standard$' -R '^CPUGemm\.' \
+    --parallel 1 --output-on-failure --no-tests=error
+```
+
+Each ordinary driver case has one registration, with an OpenMP thread limit of
+8. Each AMAX-D case has three configurations: the original name uses limit 8,
+and `_Threads1` and `_Threads3` select limits 1 and 3. CTest sets both
+`OMP_THREAD_LIMIT` and `OMP_NUM_THREADS`, disables dynamic teams, and accounts
+for the requested processors when scheduling tests. Limits constrain the
+reference's explicit request for 64 threads; they are numerical test settings,
+not measurements of the team used by every reference call.
+
+The Int8 option-rejection cases require exit code 1 and their expected diagnostic
+through [`CheckCpuGemmFailure.cmake`](tests/cmake/CheckCpuGemmFailure.cmake).
+The checker installs alongside the suite, so unrelated argument or runtime errors
+fail these cases in both the build tree and installed package.
+
+Math CI's `coverage-cpp` environment continues running the build-tree cases
+with coverage instrumentation. That overlap already exists for the gtests:
+Math CI collects coverage while TheRock validates the installed artifact and
+supplies the required gate. Multiple category labels on a driver registration
+do not cause repeated execution within one CTest invocation.
 
 ### Where these tests actually run
 

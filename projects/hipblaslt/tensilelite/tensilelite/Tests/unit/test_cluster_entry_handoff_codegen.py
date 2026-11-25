@@ -53,10 +53,11 @@ def test_cluster_entry_handoff_codegen(kernels, sia, clone):
             assert instructions[first_load - 1] == "s_barrier_wait -3", name
             assert "For stream-k / persistent loop" in source
         else:
-            # The LDS-token rebuild removes the prefetch join, so the entry
-            # handoff must precede the early signal in the cloned or main loop.
+            # The LDS-token rebuild removes the prefetch join. The cycle lead
+            # plants the entry handshake earlier, so the first load is preceded
+            # by the zero-iter wait and the shadow-init skip.
             assert instructions[first_load - 3:first_load] == [
-                "s_barrier_wait -3", "s_barrier_signal -1", "s_barrier_wait -1",
+                "s_barrier_wait -3", "s_cbranch_scc1 label_ShadowInitStart", "s_barrier_wait -3",
             ], name
             assert "For stream-k / persistent loop" not in source
         entry_wait = max(i for i in range(first_load)
@@ -97,7 +98,14 @@ def test_nonpersistent_cluster_entry_reuses_prefetch_join(tmp_path, sia, depth_u
                     if line.startswith(("s_", "v_", "tensor_", "ds_", "global_", "buffer_"))]
     first_load = next(i for i, line in enumerate(instructions)
                       if line.startswith("tensor_load_to_lds"))
-    if depth_u == 128:
+    if depth_u == 128 and sia == 4:
+        # PLR0 still waits before the first load. The cycle lead plants the
+        # handshake earlier than those three instructions.
+        assert instructions[first_load - 3:first_load] == [
+            "s_cmp_eq_u32 s[sgprLoopCounterL], 0", "s_cbranch_scc1 label_ShadowInitStart",
+            "s_barrier_wait -3",
+        ], name
+    elif depth_u == 128:
         assert instructions[first_load - 3:first_load] == [
             "s_barrier_wait -3", "s_barrier_signal -1", "s_barrier_wait -1",
         ], name

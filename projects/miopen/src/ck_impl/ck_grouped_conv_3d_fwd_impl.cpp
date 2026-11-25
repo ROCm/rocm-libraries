@@ -503,20 +503,10 @@ ck_impl_3d_fwd_get_all_kernel_type_strings(CKKernelListHandle** out_handle)
 {
     return ck_impl_try_catch([&]() {
         CK_IMPL_THROW_IF_NULL(out_handle, CK_IMPL_STATUS_BAD_PARAM, "Null out_handle");
-        auto result = std::make_unique<CKKernelListHandle>();
-
-        auto bilinear_ptrs = DeviceOpGFwdBilinearPtrs<float>::GetInstances();
-        auto scale_ptrs    = DeviceOpGFwdScalePtrs<float>::GetInstances();
-        auto default_ptrs  = DeviceOpGFwdDefaultPtrs<float>::GetInstances();
-
-        result->kernels.reserve(bilinear_ptrs.size() + scale_ptrs.size() + default_ptrs.size());
-
-        for(const auto& ptr : bilinear_ptrs)
-            result->kernels.push_back(ptr->GetTypeString());
-        for(const auto& ptr : scale_ptrs)
-            result->kernels.push_back(ptr->GetTypeString());
-        for(const auto& ptr : default_ptrs)
-            result->kernels.push_back(ptr->GetTypeString());
+        auto result     = std::make_unique<CKKernelListHandle>();
+        result->kernels = miopen::solver::CKTypeStrings<DeviceOpGFwdBilinearPtrs<float>,
+                                                        DeviceOpGFwdScalePtrs<float>,
+                                                        DeviceOpGFwdDefaultPtrs<float>>();
 
         *out_handle = result.release();
     });

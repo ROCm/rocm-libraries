@@ -707,6 +707,51 @@ namespace
         return A;
     }
 
+    // c (1 + 2 sum_{k = 1}^{degree} (-q)^k T_k(Z)) r, the Chebyshev series of 1 / x on
+    // [a, b] with c = 1 / sqrt(a b), q = (1 - sqrt(a / b)) / (1 + sqrt(a / b)) and
+    // Z = (A - (a + b) / 2) / ((b - a) / 2), through T_k(Z) r = 2 Z T_k-1(Z) r - T_k-2(Z) r
+    template <typename T>
+    std::vector<T> chebyshev_series(const Csr<T>& A, T a, T b, int degree, const std::vector<T>& r)
+    {
+        const int            n = A.n;
+        const std::vector<T> D = dense(A);
+        const T              q = (1 - std::sqrt(a / b)) / (1 + std::sqrt(a / b));
+        const T              c = 1 / std::sqrt(a * b);
+        const auto           Z = [&](const std::vector<T>& x) {
+            std::vector<T> y = dense_apply(D, n, x);
+            for(int i = 0; i < n; ++i)
+            {
+                y[i] = (y[i] - (a + b) / 2 * x[i]) / ((b - a) / 2);
+            }
+            return y;
+        };
+
+        std::vector<T> z(n);
+        for(int i = 0; i < n; ++i)
+        {
+            z[i] = c * r[i];
+        }
+        std::vector<T> previous    = r;
+        std::vector<T> current     = Z(r);
+        T              coefficient = 2 * c;
+        for(int k = 1; k <= degree; ++k)
+        {
+            coefficient *= -q;
+            for(int i = 0; i < n; ++i)
+            {
+                z[i] += coefficient * current[i];
+            }
+            std::vector<T> next = Z(current);
+            for(int i = 0; i < n; ++i)
+            {
+                next[i] = 2 * next[i] - previous[i];
+            }
+            previous = std::move(current);
+            current  = std::move(next);
+        }
+        return z;
+    }
+
     // 2 x 2 blocks on the diagonal
     template <typename T>
     Csr<T> block_diagonal(int blocks)
@@ -739,7 +784,7 @@ namespace
     }
 
     // Block i of the Schwarz preconditioners owns the rows [i size, (i + 1) size),
-    // the last one up to n, and is extended by the overlap on both sides
+    // the last one up to n, and is extended by the overlap on both sides within [0, n)
     struct SchwarzBlock
     {
         int pos;
@@ -754,7 +799,7 @@ namespace
         for(int i = 0; i < nb; ++i)
         {
             const int begin = std::max(0, i * size - overlap);
-            const int end   = i == nb - 1 ? n : (i + 1) * size + overlap;
+            const int end   = i == nb - 1 ? n : std::min(n, (i + 1) * size + overlap);
             blocks.push_back({begin, end - begin, i * size - begin});
         }
         return blocks;
@@ -815,16 +860,16 @@ namespace
     }
 
     // Exact solvers for the blocks of the block preconditioners
-    template <typename T>
+    template <typename T, template <typename, typename, typename> class Exact = rocalution::LU>
     struct ExactSolvers
     {
         explicit ExactSolvers(int count)
         {
             for(int i = 0; i < count; ++i)
             {
-                lu.push_back(std::make_unique<rocalution::LU<Matrix<T>, Vector<T>, T>>());
-                lu.back()->Verbose(0);
-                pointers.push_back(lu.back().get());
+                solvers.push_back(std::make_unique<Exact<Matrix<T>, Vector<T>, T>>());
+                solvers.back()->Verbose(0);
+                pointers.push_back(solvers.back().get());
             }
         }
 
@@ -833,8 +878,8 @@ namespace
             return pointers.data();
         }
 
-        std::vector<std::unique_ptr<rocalution::LU<Matrix<T>, Vector<T>, T>>> lu;
-        std::vector<Solver<T>*>                                               pointers;
+        std::vector<std::unique_ptr<Exact<Matrix<T>, Vector<T>, T>>> solvers;
+        std::vector<Solver<T>*>                                      pointers;
     };
 
     // The colors of the multicolored preconditioners, from the matrix on the
@@ -887,7 +932,8 @@ namespace
     }
 
     // The independent set of the multi-elimination, from the matrix on the
-    // backend b, after checking that it is independent and maximal
+    // backend b, after checking that it is a permutation, and that the set is
+    // independent and maximal in the pattern of A + A^T
     template <typename T>
     std::vector<int> independent_set(Backend b, const Csr<T>& A, int& size)
     {
@@ -897,16 +943,31 @@ namespace
         M->MaximalIndependentSet(size, &perm);
         const std::vector<int> p = values_of(perm);
 
+        std::vector<int> sorted = p;
+        std::sort(sorted.begin(), sorted.end());
+        std::vector<int> identity(A.n);
+        std::iota(identity.begin(), identity.end(), 0);
+        EXPECT_EQ(sorted, identity) << "not a permutation";
+        if(sorted != identity)
+        {
+            return p;
+        }
+
+        const Csr<T> At = transposed(A);
         for(int i = 0; i < A.n; ++i)
         {
             bool coupled_to_set = false;
-            for(PtrType k = A.row_offset[i]; k < A.row_offset[i + 1]; ++k)
+            for(const Csr<T>* B : {&A, &At})
             {
-                const int j = A.col[k];
-                if(i != j && p[j] < size)
+                for(PtrType k = B->row_offset[i]; k < B->row_offset[i + 1]; ++k)
                 {
-                    coupled_to_set = true;
-                    EXPECT_GE(p[i], size) << "rows " << i << " and " << j << " are both in the set";
+                    const int j = B->col[k];
+                    if(i != j && p[j] < size)
+                    {
+                        coupled_to_set = true;
+                        EXPECT_GE(p[i], size)
+                            << "rows " << i << " and " << j << " are both in the set";
+                    }
                 }
             }
             EXPECT_TRUE(p[i] < size || coupled_to_set) << "row " << i << " could join the set";
@@ -1105,9 +1166,9 @@ namespace
             return P::backend;
         }
 
-        std::unique_ptr<Matrix<T>> make(const Csr<T>& ref) const
+        std::unique_ptr<Matrix<T>> make(const Csr<T>& ref, Format f = {rocalution::CSR, 1}) const
         {
-            return make_local_matrix(P::backend, ref);
+            return make_local_matrix(P::backend, ref, f);
         }
     };
 }
@@ -1182,8 +1243,8 @@ TYPED_TEST(preconditioners, sgs_is_the_symmetric_gauss_seidel_sweep)
     rocalution::SGS<Matrix<T>, Vector<T>, T> p;
     p.SetOperator(*A);
     p.Build();
+    expect_near(apply(p, *A, r), symmetric_gauss_seidel(ref, r), scaled_tol<T>(1e-14));
 
-    // ResetOperator extracts the diagonal, Build its inverse
     p.ResetOperator(*A);
     expect_near(apply(p, *A, r), symmetric_gauss_seidel(ref, r), scaled_tol<T>(1e-14));
 
@@ -1192,8 +1253,6 @@ TYPED_TEST(preconditioners, sgs_is_the_symmetric_gauss_seidel_sweep)
     move(other(this->backend()), p, *A);
     const std::vector<T> moved = apply(p, *A, r);
     expect_near(moved, built, scaled_tol<T>(1e-14));
-
-    KNOWN_BUG("Build scales by the inverse diagonal instead of the diagonal");
     expect_near(built, symmetric_gauss_seidel(ref, r), scaled_tol<T>(1e-14));
     expect_near(moved, symmetric_gauss_seidel(ref, r), scaled_tol<T>(1e-14));
 }
@@ -1237,9 +1296,12 @@ TYPED_TEST(preconditioners, reset_operator_switches_to_another_matrix)
     using T                      = typename TypeParam::value_type;
     const Csr<T>         ref     = nonsymmetric<T>(10);
     const Csr<T>         changed = transformed(ref, [](int, int, T v) { return 2 * v + 1; });
+    const Csr<T>         larger  = nonsymmetric<T>(12);
     const std::vector<T> r       = rhs<T>(ref.n);
+    const std::vector<T> r_large = rhs<T>(larger.n);
     auto                 A       = this->make(ref);
     auto                 B       = this->make(changed);
+    auto                 C       = this->make(larger);
 
     // The base class only replaces the operator
     rocalution::ILU<Matrix<T>, Vector<T>, T> ilu;
@@ -1249,14 +1311,29 @@ TYPED_TEST(preconditioners, reset_operator_switches_to_another_matrix)
     ilu.Build();
     expect_near(apply(ilu, *B, r), lu_solve(ilu_levels(changed, 0), r), scaled_tol<T>(1e-13));
 
-    rocalution::Jacobi<Matrix<T>, Vector<T>, T> p;
-    p.SetOperator(*A);
-    p.Build();
-    p.ResetOperator(*B);
-    const std::vector<T> z = apply(p, *B, r);
+    rocalution::Jacobi<Matrix<T>, Vector<T>, T> jacobi_p;
+    rocalution::GS<Matrix<T>, Vector<T>, T>     gs_p;
+    rocalution::SGS<Matrix<T>, Vector<T>, T>    sgs_p;
 
-    KNOWN_BUG("Jacobi, GS and SGS ResetOperator rebuild from the old operator");
-    expect_near(z, jacobi(changed, r), scaled_tol<T>(1e-14));
+    const std::vector<std::tuple<std::string, Solver<T>*, Reference<T>>> cases = {
+        {"Jacobi", &jacobi_p, jacobi<T>},
+        {"GS", &gs_p, gauss_seidel<T>},
+        {"SGS", &sgs_p, symmetric_gauss_seidel<T>},
+    };
+
+    for(const auto& [name, p, reference] : cases)
+    {
+        SCOPED_TRACE(name);
+        p->SetOperator(*A);
+        p->Build();
+        p->ResetOperator(*B);
+        expect_near(apply(*p, *B, r), reference(changed, r), scaled_tol<T>(1e-14));
+
+        // Another size and pattern, so the copy of the operator, its analysis, the
+        // diagonal and the work vector are set up again
+        p->ResetOperator(*C);
+        expect_near(apply(*p, *C, r_large), reference(larger, r_large), scaled_tol<T>(1e-14));
+    }
 }
 
 TYPED_TEST(preconditioners, ilu0_of_a_tridiagonal_matrix_solves_exactly)
@@ -1432,10 +1509,6 @@ TYPED_TEST(preconditioners, iterative_triangular_solves_reach_the_direct_solve)
 
     for(auto& c : direct_cases(ref))
     {
-        if(c.name == "SGS")
-        {
-            continue;
-        }
         SCOPED_TRACE(c.name);
         c.p->SetSolverDescriptor(descr);
         c.p->SetOperator(*A);
@@ -1453,10 +1526,6 @@ TYPED_TEST(preconditioners, build_of_a_built_preconditioner_takes_the_new_values
 
     for(auto& c : direct_cases(changed))
     {
-        if(c.name == "SGS")
-        {
-            continue;
-        }
         SCOPED_TRACE(c.name);
         auto A = this->make(ref);
         c.p->SetOperator(*A);
@@ -1468,7 +1537,8 @@ TYPED_TEST(preconditioners, build_of_a_built_preconditioner_takes_the_new_values
     }
 }
 
-// ResetOperator, unlike Build, scales by the diagonal
+// ResetOperator analyses its copy of the operator again for the iterative triangular
+// solves
 TYPED_TEST(preconditioners, iterative_sgs_reaches_the_direct_solve)
 {
     using T                  = typename TypeParam::value_type;
@@ -1501,7 +1571,7 @@ TYPED_TEST(preconditioners, built_preconditioners_move_to_the_other_backend)
         SCOPED_TRACE(alg);
         for(auto& c : direct_cases(ref))
         {
-            if(c.name == "SGS" || c.name == "ILUT" || c.name == "IC")
+            if(c.name == "ILUT" || c.name == "IC")
             {
                 continue;
             }
@@ -1570,8 +1640,6 @@ TYPED_TEST(preconditioners, built_ilu_moves_to_its_own_backend)
     expect_near(apply(p, *A, r), lu_solve(ilu_levels(ref, 0), r), loose_tol<T>(1e-11));
 }
 
-// ResetOperator scales by the diagonal, unlike the buggy Build, so it is the
-// starting point of the moves
 TYPED_TEST(preconditioners, sgs_moves_with_its_factors_and_its_diagonal)
 {
     using T                  = typename TypeParam::value_type;
@@ -1589,20 +1657,29 @@ TYPED_TEST(preconditioners, sgs_moves_with_its_factors_and_its_diagonal)
         p.SetOperator(*A);
         p.Build();
         p.Build();
-        p.ResetOperator(*A);
-        expect_near(apply(p, *A, r), symmetric_gauss_seidel(ref, r), tolerance);
 
-        for(Backend to : {this->backend(), other(this->backend()), this->backend()})
+        // The moves start from the state of a Build and of a ResetOperator
+        for(bool reset : {false, true})
         {
-            SCOPED_TRACE("moved to the " + backend_name(to));
-            move(to, p, *A);
+            SCOPED_TRACE(reset ? "after ResetOperator" : "after Build");
+            if(reset)
+            {
+                p.ResetOperator(*A);
+            }
             expect_near(apply(p, *A, r), symmetric_gauss_seidel(ref, r), tolerance);
+
+            for(Backend to : {this->backend(), other(this->backend()), this->backend()})
+            {
+                SCOPED_TRACE("moved to the " + backend_name(to));
+                move(to, p, *A);
+                expect_near(apply(p, *A, r), symmetric_gauss_seidel(ref, r), tolerance);
+            }
         }
     }
 }
 
 // A move to the backend the preconditioner is on, and of ILUT from the accelerator to
-// the host. SGS has its own test.
+// the host
 TYPED_TEST(preconditioners, built_preconditioners_move_to_their_own_backend)
 {
     using T                  = typename TypeParam::value_type;
@@ -1614,10 +1691,6 @@ TYPED_TEST(preconditioners, built_preconditioners_move_to_their_own_backend)
         SCOPED_TRACE(alg);
         for(auto& c : direct_cases(ref))
         {
-            if(c.name == "SGS")
-            {
-                continue;
-            }
             SCOPED_TRACE(c.name);
             auto A = this->make(ref);
             c.p->SetSolverDescriptor(descr);
@@ -1852,9 +1925,6 @@ TYPED_TEST(preconditioners, fsai_factor_lives_on_an_external_pattern)
     p.Build();
     expect_near(apply(p, *A, r), fsai(ref, pattern(tridiagonal), r), scaled_tol<T>(1e-13));
 
-    KNOWN_BUG("a row of the pattern with only the diagonal keeps the pattern value unless the "
-              "row of the matrix starts at the diagonal");
-
     Csr<T> identity(12);
     for(int i = 0; i < 12; ++i)
     {
@@ -1982,16 +2052,63 @@ TYPED_TEST(preconditioners, aichebyshev_approximates_the_inverse)
     p.SetOperator(*A);
     p.Build();
     const std::vector<T> z = apply(p, *A, r);
-
-    KNOWN_BUG("the series starts from A instead of I, Z scales only the diagonal and the "
-              "coefficients are halved");
     expect_near(z, exact_solve(ref, r), 1e-4);
+}
+
+// The error bound above cannot tell the degree; at a low order the last term is large, so
+// the series itself pins the degree p + 1 and every coefficient
+TYPED_TEST(preconditioners, aichebyshev_of_a_low_order_is_its_chebyshev_series)
+{
+    using T                  = typename TypeParam::value_type;
+    const Csr<T>         ref = toeplitz<T>(12);
+    const std::vector<T> r   = rhs<T>(ref.n);
+    auto                 A   = this->make(ref);
+
+    for(int order : {1, 2, 3})
+    {
+        SCOPED_TRACE("order " + std::to_string(order));
+        rocalution::AIChebyshev<Matrix<T>, Vector<T>, T> p;
+        p.Set(order, 2.0, 6.0);
+        p.SetOperator(*A);
+        p.Build();
+        expect_near(apply(p, *A, r),
+                    chebyshev_series(ref, static_cast<T>(2), static_cast<T>(6), order + 1, r),
+                    scaled_tol<T>(1e-13));
+    }
+}
+
+// A = [[0, 1], [-2, 3]] has the eigenvalues 1 and 2 and stores no entry at (0, 0), so the
+// shift and the constant term of the series reach row 0 only through an entry the build adds
+TYPED_TEST(preconditioners, aichebyshev_of_a_matrix_without_a_stored_diagonal_entry)
+{
+    using T = typename TypeParam::value_type;
+    Csr<T> ref(2);
+    ref.add(1, static_cast<T>(1));
+    ref.end_row();
+    ref.add(0, static_cast<T>(-2));
+    ref.add(1, static_cast<T>(3));
+    ref.end_row();
+    const std::vector<T> r = rhs<T>(ref.n);
+    auto                 A = this->make(ref);
+
+    KNOWN_BUG("AIChebyshev adds the shift and the constant term only to stored diagonal entries");
+    for(int order : {1, 2, 3})
+    {
+        SCOPED_TRACE("order " + std::to_string(order));
+        rocalution::AIChebyshev<Matrix<T>, Vector<T>, T> p;
+        p.Set(order, 1.0, 2.0);
+        p.SetOperator(*A);
+        p.Build();
+        expect_near(apply(p, *A, r),
+                    chebyshev_series(ref, static_cast<T>(1), static_cast<T>(2), order + 1, r),
+                    scaled_tol<T>(1e-13));
+    }
 }
 
 // GMRES(30) solves a system of 12 unknowns with any invertible preconditioner, so the
 // solves cannot see a stale or unmoved preconditioner. Its action after the build is
-// compared after every step instead, which compares the library with itself and holds
-// also for the buggy AIChebyshev series.
+// compared after every step instead; aichebyshev_approximates_the_inverse checks the
+// action itself.
 TYPED_TEST(preconditioners, aichebyshev_preconditions_gmres_after_a_rebuild_and_moves)
 {
     using T                  = typename TypeParam::value_type;
@@ -2038,8 +2155,23 @@ TYPED_TEST(preconditioners, as_adds_the_weighted_block_solves)
     const std::vector<T> r   = rhs<T>(ref.n);
     auto                 A   = this->make(ref);
 
-    for(const auto& [nb, overlap] :
-        std::vector<std::pair<int, int>>{{1, 0}, {2, 0}, {2, 1}, {2, 3}, {3, 0}, {4, 0}})
+    // With 4 blocks of 3 rows, an overlap of 2 puts rows 4 and 7 in three blocks, and an
+    // overlap of 4 puts rows 5 and 6 in all four and clips the second block at the first
+    // row and the third at the last. 12 blocks of one row are as many as the rows allow
+    for(const auto& [nb, overlap] : std::vector<std::pair<int, int>>{{1, 0},
+                                                                     {1, 2},
+                                                                     {2, 0},
+                                                                     {2, 1},
+                                                                     {2, 3},
+                                                                     {3, 0},
+                                                                     {3, 1},
+                                                                     {3, 2},
+                                                                     {4, 0},
+                                                                     {4, 1},
+                                                                     {4, 2},
+                                                                     {4, 4},
+                                                                     {12, 0},
+                                                                     {12, 1}})
     {
         SCOPED_TRACE(std::to_string(nb) + " blocks, overlap " + std::to_string(overlap));
         ExactSolvers<T>                         local(nb);
@@ -2049,16 +2181,6 @@ TYPED_TEST(preconditioners, as_adds_the_weighted_block_solves)
         p.Build();
         expect_near(apply(p, *A, r), additive_schwarz(ref, nb, overlap, r), scaled_tol<T>(1e-13));
     }
-
-    KNOWN_BUG("a block between two others halves the weights of its left overlap twice and "
-              "those of its right overlap not at all");
-
-    ExactSolvers<T>                         local(3);
-    rocalution::AS<Matrix<T>, Vector<T>, T> p;
-    p.Set(3, 1, local.get());
-    p.SetOperator(*A);
-    p.Build();
-    expect_near(apply(p, *A, r), additive_schwarz(ref, 3, 1, r), scaled_tol<T>(1e-13));
 }
 
 TYPED_TEST(preconditioners, ras_takes_each_row_from_the_block_that_owns_it)
@@ -2068,8 +2190,19 @@ TYPED_TEST(preconditioners, ras_takes_each_row_from_the_block_that_owns_it)
     const std::vector<T> r   = rhs<T>(ref.n);
     auto                 A   = this->make(ref);
 
-    for(const auto& [nb, overlap] : std::vector<std::pair<int, int>>{
-            {1, 0}, {2, 0}, {2, 1}, {2, 3}, {3, 0}, {3, 1}, {3, 2}, {4, 1}})
+    for(const auto& [nb, overlap] : std::vector<std::pair<int, int>>{{1, 0},
+                                                                     {1, 2},
+                                                                     {2, 0},
+                                                                     {2, 1},
+                                                                     {2, 3},
+                                                                     {3, 0},
+                                                                     {3, 1},
+                                                                     {3, 2},
+                                                                     {4, 1},
+                                                                     {4, 2},
+                                                                     {4, 4},
+                                                                     {12, 0},
+                                                                     {12, 1}})
     {
         SCOPED_TRACE(std::to_string(nb) + " blocks, overlap " + std::to_string(overlap));
         ExactSolvers<T>                          local(nb);
@@ -2090,22 +2223,48 @@ TYPED_TEST(preconditioners, schwarz_blocks_cover_the_rows_beyond_a_multiple_of_t
     const std::vector<T> r   = rhs<T>(ref.n);
     auto                 A   = this->make(ref);
 
-    KNOWN_BUG("the last n % nb rows belong to no block");
+    // The last block owns the rows beyond the multiple, also after blocks between two others,
+    // without an overlap that would reach them, and with 3 of them for 5 blocks
+    for(const auto& [nb, overlap] :
+        std::vector<std::pair<int, int>>{{2, 1}, {3, 1}, {4, 0}, {4, 2}, {5, 1}})
+    {
+        SCOPED_TRACE(std::to_string(nb) + " blocks, overlap " + std::to_string(overlap));
+        ExactSolvers<T>                         as_local(nb);
+        rocalution::AS<Matrix<T>, Vector<T>, T> as;
+        as.Set(nb, overlap, as_local.get());
+        as.SetOperator(*A);
+        as.Build();
+        expect_near(apply(as, *A, r), additive_schwarz(ref, nb, overlap, r), scaled_tol<T>(1e-13));
 
-    ExactSolvers<T>                         as_local(2);
-    rocalution::AS<Matrix<T>, Vector<T>, T> as;
-    as.Set(2, 1, as_local.get());
-    as.SetOperator(*A);
-    as.Build();
-    expect_near(apply(as, *A, r), additive_schwarz(ref, 2, 1, r), scaled_tol<T>(1e-13));
+        ExactSolvers<T>                          ras_local(nb);
+        rocalution::RAS<Matrix<T>, Vector<T>, T> ras;
+        ras.Set(nb, overlap, ras_local.get());
+        ras.SetOperator(*A);
+        ras.Build();
+        expect_near(apply(ras, *A, r, 9.0),
+                    restricted_additive_schwarz(ref, nb, overlap, r),
+                    scaled_tol<T>(1e-13));
+    }
+}
 
-    ExactSolvers<T>                          ras_local(2);
-    rocalution::RAS<Matrix<T>, Vector<T>, T> ras;
-    ras.Set(2, 1, ras_local.get());
-    ras.SetOperator(*A);
-    ras.Build();
-    expect_near(
-        apply(ras, *A, r, 9.0), restricted_additive_schwarz(ref, 2, 1, r), scaled_tol<T>(1e-13));
+// The setup runs in the child, since Set allocates what only the Clear of a built AS
+// frees
+TYPED_TEST(preconditioners, schwarz_preconditioners_need_a_row_per_block)
+{
+    using T          = typename TypeParam::value_type;
+    const Csr<T> ref = nonsymmetric<T>(12);
+
+    using AS = rocalution::AS<Matrix<T>, Vector<T>, T>;
+    EXPECT_ASSERT_DEATH(
+        {
+            auto            A = this->make(ref);
+            ExactSolvers<T> local(13);
+            AS              p;
+            p.Set(13, 0, local.get());
+            p.SetOperator(*A);
+            p.Build();
+        },
+        "num_blocks_ <= n");
 }
 
 TYPED_TEST(preconditioners, schwarz_preconditioners_move_and_take_a_new_configuration)
@@ -2205,6 +2364,20 @@ TYPED_TEST(preconditioners, multicolored_sgs_is_the_sgs_of_the_color_ordering)
                     permuted_solve(ref, colors.perm, r, symmetric_gauss_seidel<T>),
                     scaled_tol<T>(1e-14));
     }
+
+    // A copy of a COO operator is permuted in COO. Without the decomposition, the triangular
+    // solves need LAnalyse and UAnalyse, which COO does not implement
+    {
+        SCOPED_TRACE("decomposition of a COO operator");
+        auto coo = this->make(ref, {rocalution::COO, 1});
+        rocalution::MultiColoredSGS<Matrix<T>, Vector<T>, T> p;
+        p.SetDecomposition(true);
+        p.SetOperator(*coo);
+        p.Build();
+        expect_near(apply(p, *coo, r),
+                    permuted_solve(ref, colors.perm, r, symmetric_gauss_seidel<T>),
+                    scaled_tol<T>(1e-14));
+    }
 }
 
 TYPED_TEST(preconditioners, multicolored_gs_is_the_backward_sweep_of_the_color_ordering)
@@ -2242,6 +2415,19 @@ TYPED_TEST(preconditioners, multicolored_gs_without_decomposition_is_not_impleme
         "preconditioner_multicolored_gs\\.cpp");
 }
 
+// Without decomposition, the build applies the relaxation to the matrix
+TYPED_TEST(preconditioners, multicolored_relaxation_without_decomposition_is_set_before_the_build)
+{
+    using T = typename TypeParam::value_type;
+    auto A  = this->make(nonsymmetric<T>(12));
+
+    rocalution::MultiColoredSGS<Matrix<T>, Vector<T>, T> p;
+    p.SetDecomposition(false);
+    p.SetOperator(*A);
+    p.Build();
+    EXPECT_ASSERT_DEATH(p.SetRelaxation(static_cast<T>(1.5)), "decomp_ == true");
+}
+
 TYPED_TEST(preconditioners, multicolored_relaxation_is_ssor)
 {
     using T                     = typename TypeParam::value_type;
@@ -2251,7 +2437,7 @@ TYPED_TEST(preconditioners, multicolored_relaxation_is_ssor)
     const Coloring       colors = multicoloring(this->backend(), ref);
     const T              omega  = 1.5;
 
-    std::vector<std::vector<T>> sgs;
+    std::vector<std::pair<std::string, std::vector<T>>> sgs;
     for(bool decomposition : {true, false})
     {
         rocalution::MultiColoredSGS<Matrix<T>, Vector<T>, T> p;
@@ -2259,7 +2445,17 @@ TYPED_TEST(preconditioners, multicolored_relaxation_is_ssor)
         p.SetDecomposition(decomposition);
         p.SetOperator(*A);
         p.Build();
-        sgs.push_back(apply(p, *A, r));
+        sgs.emplace_back(decomposition ? "decomposition" : "triangular solves", apply(p, *A, r));
+    }
+
+    // With decomposition, the solve applies the relaxation, so it can be set after the build
+    {
+        rocalution::MultiColoredSGS<Matrix<T>, Vector<T>, T> p;
+        p.SetDecomposition(true);
+        p.SetOperator(*A);
+        p.Build();
+        p.SetRelaxation(omega);
+        sgs.emplace_back("decomposition, relaxation set after the build", apply(p, *A, r));
     }
 
     rocalution::MultiColoredGS<Matrix<T>, Vector<T>, T> gs;
@@ -2268,14 +2464,10 @@ TYPED_TEST(preconditioners, multicolored_relaxation_is_ssor)
     gs.Build();
     const std::vector<T> gs_z = apply(gs, *A, r);
 
-    KNOWN_BUG("the sweeps divide by omega instead of multiplying, the middle step scales by "
-              "omega / (2 - omega) instead of (2 - omega) / omega, and the triangular solves "
-              "ignore omega");
-
-    for(size_t k = 0; k < sgs.size(); ++k)
+    for(const auto& [variant, z] : sgs)
     {
-        SCOPED_TRACE(k == 0 ? "decomposition" : "triangular solves");
-        expect_near(sgs[k],
+        SCOPED_TRACE(variant);
+        expect_near(z,
                     permuted_solve(ref,
                                    colors.perm,
                                    r,
@@ -2297,8 +2489,8 @@ TYPED_TEST(preconditioners, multicolored_relaxation_is_ssor)
 
 // GMRES(30) solves a system of 12 unknowns with any invertible preconditioner, so the
 // solves cannot see a stale or unmoved preconditioner. Its action after the build is
-// compared after the solve, a rebuild and the moves instead, which compares the library
-// with itself and holds also for the buggy relaxed sweeps.
+// compared after the solve, a rebuild and the moves instead; multicolored_relaxation_is_ssor
+// checks the action itself.
 TYPED_TEST(preconditioners, relaxed_multicolored_gauss_seidel_preconditions_gmres)
 {
     using T                  = typename TypeParam::value_type;
@@ -2432,21 +2624,9 @@ TYPED_TEST(preconditioners, multicolored_blocks_apply_in_every_format)
                     tol<T>());
     };
 
-    const bool hip = this->backend() == Backend::Accelerator;
     for(const Format& f : formats())
     {
-        const bool ignores_output = hip && (f.id == rocalution::HYB || f.id == rocalution::DENSE);
-        if(!ignores_output)
-        {
-            check(f);
-        }
-    }
-
-    if(hip)
-    {
-        KNOWN_BUG("HIP HYB and DENSE ApplyAdd ignore the output");
-        check(Format{rocalution::HYB, 1});
-        check(Format{rocalution::DENSE, 1});
+        check(f);
     }
 }
 
@@ -2490,9 +2670,29 @@ TYPED_TEST(preconditioners, multicolored_preconditioners_rebuild_from_new_values
                     scaled_tol<T>(1e-14));
     }
 
-    KNOWN_BUG("ReBuildNumeric without decomposition calls PermuteBackward, which leaves the COO "
-              "entries unsorted, so the conversion back to CSR fails an assert");
-    expect_in_child([&] {
+    // Without decomposition, the rebuild applies the relaxation to the new values
+    {
+        const T                                              omega = 1.5;
+        auto                                                 A     = this->make(ref);
+        rocalution::MultiColoredSGS<Matrix<T>, Vector<T>, T> sgs;
+        sgs.SetRelaxation(omega);
+        sgs.SetDecomposition(false);
+        sgs.SetOperator(*A);
+        sgs.Build();
+        A->CopyFromCSR(changed.row_offset.data(), changed.col.data(), changed.val.data());
+        sgs.ReBuildNumeric();
+        expect_near(apply(sgs, *A, r),
+                    permuted_solve(changed,
+                                   colors.perm,
+                                   r,
+                                   [&](const Csr<T>& B, const std::vector<T>& b) {
+                                       return ssor(B, omega, b);
+                                   }),
+                    scaled_tol<T>(1e-13));
+    }
+
+    // ReBuildNumeric without decomposition goes through PermuteBackward
+    {
         auto                                                 A = this->make(ref);
         rocalution::MultiColoredILU<Matrix<T>, Vector<T>, T> ilu;
         ilu.Set(1);
@@ -2502,12 +2702,13 @@ TYPED_TEST(preconditioners, multicolored_preconditioners_rebuild_from_new_values
         A->CopyFromCSR(changed.row_offset.data(), changed.col.data(), changed.val.data());
         ilu.ReBuildNumeric();
         expect_near(apply(ilu, *A, r), permuted_solve(changed, colors2.perm, r, ilu1), tol<T>());
-    });
+    }
 }
 
 // Nodes 0 to 3 and nodes 4 to 7 are independent sets, so the greedy coloring keeps the
-// order: the permutation is the identity, and the PermuteBackward of ReBuildNumeric
-// leaves the COO entries sorted, which a known bug of Permute breaks otherwise
+// order and the permutation is the identity: the result is the ILU(0) solve of the matrix
+// itself, before and after ReBuildNumeric. PermuteBackward then moves no entries, so
+// multicolored_preconditioners_rebuild_from_new_values tests it with a real permutation
 TYPED_TEST(preconditioners, multicolored_ilu_without_decomposition_rebuilds_from_new_values)
 {
     using T          = typename TypeParam::value_type;
@@ -2682,6 +2883,47 @@ TYPED_TEST(preconditioners, multielimination_with_an_exact_schur_solve_is_exact)
         EXPECT_EQ(p.GetLevel(), level);
         expect_near(apply(p, *A, r), exact_solve(ref, r), tol<T>());
     }
+
+    // A copy of a COO operator is permuted in COO. Its Schur complement stays in COO, and LU
+    // needs LUAnalyse, which COO does not implement, so the Schur complement is inverted
+    auto coo = this->make(ref, {rocalution::COO, 1});
+    for(int level : {0, 1, 2, 3})
+    {
+        SCOPED_TRACE("COO operator, level " + std::to_string(level));
+        rocalution::Inversion<Matrix<T>, Vector<T>, T> inversion;
+        inversion.Verbose(0);
+        rocalution::MultiElimination<Matrix<T>, Vector<T>, T> p;
+        p.Set(inversion, level);
+        p.SetOperator(*coo);
+        p.Build();
+        EXPECT_EQ(p.GetSizeDiagBlock(), size);
+        EXPECT_EQ(p.GetLevel(), level);
+        expect_near(apply(p, *coo, r), exact_solve(ref, r), tol<T>());
+    }
+}
+
+// Row i + 1 of the lower triangle of nonsymmetric(12) couples to row i, but row i not to row
+// i + 1. The set is independent in both directions, so D is still diagonal and the solve is
+// exact.
+TYPED_TEST(preconditioners, multielimination_of_a_nonsymmetric_pattern_is_exact)
+{
+    using T                = typename TypeParam::value_type;
+    const Csr<T> ref       = filtered(nonsymmetric<T>(12), [](int i, int j, T) { return j <= i; });
+    const std::vector<T> r = rhs<T>(ref.n);
+    auto                 A = this->make(ref);
+
+    int size = 0;
+    independent_set(this->backend(), ref, size);
+    EXPECT_GT(size, 0);
+
+    rocalution::LU<Matrix<T>, Vector<T>, T> lu;
+    lu.Verbose(0);
+    rocalution::MultiElimination<Matrix<T>, Vector<T>, T> p;
+    p.Set(lu, 1);
+    p.SetOperator(*A);
+    p.Build();
+    EXPECT_EQ(p.GetSizeDiagBlock(), size);
+    expect_near(apply(p, *A, r), exact_solve(ref, r), tol<T>());
 }
 
 // The Schur complement keeps the entries above the drop-off and its diagonal
@@ -2775,13 +3017,9 @@ TYPED_TEST(preconditioners, multielimination_blocks_apply_in_every_format_and_mo
         expect_near(apply(p, *A, r), exact_solve(ref, r), tol<T>());
     };
 
-    const bool hip = this->backend() == Backend::Accelerator;
     for(const Format& f : formats())
     {
-        if(!(hip && (f.id == rocalution::HYB || f.id == rocalution::DENSE)))
-        {
-            check(f);
-        }
+        check(f);
     }
 
     {
@@ -2797,13 +3035,6 @@ TYPED_TEST(preconditioners, multielimination_blocks_apply_in_every_format_and_mo
         expect_near(apply(p, *B, r), exact_solve(ref, r), tol<T>());
         move(this->backend(), p, *B);
         expect_near(apply(p, *B, r), exact_solve(ref, r), tol<T>());
-    }
-
-    if(hip)
-    {
-        KNOWN_BUG("HIP HYB and DENSE ApplyAdd ignore the output");
-        check(Format{rocalution::HYB, 1});
-        check(Format{rocalution::DENSE, 1});
     }
 }
 
@@ -2925,6 +3156,27 @@ TYPED_TEST(preconditioners, saddle_point_solves_the_two_diagonal_blocks)
     expect_near(apply(p, *A, r), expected, scaled_tol<T>(1e-13));
     move(this->backend(), p, *A);
     expect_near(apply(p, *A, r), expected, scaled_tol<T>(1e-13));
+
+    // A copy of a COO operator is permuted in COO. K and S stay in COO, and LU needs
+    // LUAnalyse, which COO does not implement, so they are inverted
+    {
+        SCOPED_TRACE("COO operator");
+        auto                                           coo = this->make(ref, {rocalution::COO, 1});
+        rocalution::Inversion<Matrix<T>, Vector<T>, T> k_inversion;
+        rocalution::Inversion<Matrix<T>, Vector<T>, T> s_inversion;
+        k_inversion.Verbose(0);
+        s_inversion.Verbose(0);
+        rocalution::DiagJacobiSaddlePointPrecond<Matrix<T>, Vector<T>, T> q;
+        q.Set(k_inversion, s_inversion);
+        q.SetOperator(*coo);
+        q.Build();
+        expect_near(apply(q, *coo, r), expected, scaled_tol<T>(1e-13));
+
+        move(other(this->backend()), q, *coo);
+        expect_near(apply(q, *coo, r), expected, scaled_tol<T>(1e-13));
+        move(this->backend(), q, *coo);
+        expect_near(apply(q, *coo, r), expected, scaled_tol<T>(1e-13));
+    }
 }
 
 TYPED_TEST(preconditioners, multielimination_and_saddle_point_rebuild)
@@ -3015,15 +3267,14 @@ TYPED_TEST(preconditioners, block_preconditioner_takes_a_permutation_and_a_last_
     const std::vector<int> perm  = {5, 0, 7, 2, 9, 4, 11, 6, 1, 8, 3, 10};
 
     // The permuted matrix, P A P^T, is split into the blocks
-    {
-        ExactSolvers<T>                                          local(3);
+    auto expect_permuted_blocks = [&](Matrix<T>& op, Solver<T>** local) {
         rocalution::BlockPreconditioner<Matrix<T>, Vector<T>, T> p;
-        auto                                                     P = make_local_vector(*A, perm);
-        p.Set(3, sizes.data(), local.get());
+        auto                                                     P = make_local_vector(op, perm);
+        p.Set(3, sizes.data(), local);
         p.SetPermutation(*P);
-        p.SetOperator(*A);
+        p.SetOperator(op);
         p.Build();
-        expect_near(apply(p, *A, r),
+        expect_near(apply(p, op, r),
                     permuted_solve(ref,
                                    perm,
                                    r,
@@ -3035,8 +3286,8 @@ TYPED_TEST(preconditioners, block_preconditioner_takes_a_permutation_and_a_last_
         for(Backend to : {other(this->backend()), this->backend()})
         {
             SCOPED_TRACE("moved to the " + backend_name(to));
-            move(to, p, *A);
-            expect_near(apply(p, *A, r),
+            move(to, p, op);
+            expect_near(apply(p, op, r),
                         permuted_solve(ref,
                                        perm,
                                        r,
@@ -3045,6 +3296,19 @@ TYPED_TEST(preconditioners, block_preconditioner_takes_a_permutation_and_a_last_
                                        }),
                         scaled_tol<T>(1e-13));
         }
+    };
+    {
+        ExactSolvers<T> local(3);
+        expect_permuted_blocks(*A, local.get());
+    }
+
+    // A copy of a COO operator is permuted in COO, and its blocks stay in COO. LU needs
+    // LUAnalyse, which COO does not implement, so the blocks are inverted
+    {
+        SCOPED_TRACE("COO operator");
+        auto                                   coo = this->make(ref, {rocalution::COO, 1});
+        ExactSolvers<T, rocalution::Inversion> local(3);
+        expect_permuted_blocks(*coo, local.get());
     }
 
     // The last diagonal block is replaced by an external matrix

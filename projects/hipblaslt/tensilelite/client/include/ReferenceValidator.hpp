@@ -45,6 +45,8 @@ namespace TensileLite
     namespace Client
     {
 
+        class ClientProblemFactory;
+
         class ReferenceValidator : public RunListener
         {
         public:
@@ -127,12 +129,24 @@ namespace TensileLite
                 return m_referenceInputs[card];
             }
 
+            void setSplit(ClientProblemFactory const* split)
+            {
+                m_split = split;
+            }
+
         protected:
             // Allow lifecycle tests to observe validation without device transfers.
             virtual void validateSlots(std::vector<size_t> const& slots);
 
         private:
             void allocateResultBuffer(size_t bytes);
+
+            // The problem device `card` runs: its slice under --split-devices, else m_problem.
+            ContractionProblem* deviceProblem(size_t card) const;
+
+            // --split-devices: point every non-owner device's reference A or B (the shared
+            // operand) at the owner's host data, the data the kernels read.
+            void redirectSharedInputs();
 
             bool shouldSkipNullTensor(const std::string& tensorName,
                                       bool hasNullPointer,
@@ -146,6 +160,12 @@ namespace TensileLite
             std::shared_ptr<uint8_t> m_cpuResultBuffer;
 
             ContractionProblem* m_problem = nullptr;
+
+            ClientProblemFactory const* m_split = nullptr;
+
+            // The unsplit operand is shared: every device validates against the owner's data.
+            bool m_sharedA = false;
+            bool m_sharedB = false;
 
             bool m_enabled;
             FusedA2A m_fusedA2A              = FusedA2A::Disabled;

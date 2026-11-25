@@ -203,4 +203,4 @@ TEST_P(GPU_FindModeTrustVerify_FP16, TrustVerifyTest)
 #endif
 }
 
-INSTANTIATE_TEST_SUITE_P(Smoke, GPU_FindModeTrustVerify_FP16, testing::ValuesIn(ConvTestCases()));
+INSTANTIATE_TEST_SUITE_P(Quick, GPU_FindModeTrustVerify_FP16, testing::ValuesIn(ConvTestCases()));

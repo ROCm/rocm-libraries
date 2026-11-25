@@ -4,6 +4,16 @@
       "gfx1100": [
         "linux"
       ],
+      "gfx1151": [
+        "linux",
+        "windows"
+      ],
+      "gfx90a": [
+        "linux"
+      ],
+      "gfx942": [
+        "linux"
+      ],
       "gfx950": [
         "linux"
       ]

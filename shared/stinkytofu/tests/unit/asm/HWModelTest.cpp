@@ -192,18 +192,31 @@ TEST(HWModelDsIssue, UnmodelledShareIsInert) {
         << "an arch that does not model pipe sharing must keep the ISA cost";
 }
 
-// The lookup key must stay unique and gfx1250v0 must keep mirroring gfx1250; no numbers pinned.
+// The lookup key must stay unique, src rules must not be stricter than dst ones, and gfx1250v0
+// must keep mirroring gfx1250; no numbers pinned.
 TEST(HWModel, Gfx1250WaitHideFormTable) {
     const HWModel& hw = hwModelForArch(kGfx1250);
 
-    // Two rows sharing a {costLatency, dstVgprs} key would make the lookup order-dependent.
+    // Two rows sharing a {costLatency, dstVgprs, scaled} key would make the lookup
+    // order-dependent.
     for (size_t i = 0; i < hw.waitHide.forms.size(); ++i) {
         for (size_t j = i + 1; j < hw.waitHide.forms.size(); ++j) {
             const auto& a = hw.waitHide.forms[i];
             const auto& b = hw.waitHide.forms[j];
-            EXPECT_FALSE(a.costLatency == b.costLatency && a.dstVgprs == b.dstVgprs)
-                << "duplicate key: latency " << a.costLatency << " dst " << a.dstVgprs;
+            EXPECT_FALSE(a.costLatency == b.costLatency && a.dstVgprs == b.dstVgprs &&
+                         a.scaled == b.scaled)
+                << "duplicate key: latency " << a.costLatency << " dst " << a.dstVgprs << " scaled "
+                << a.scaled;
         }
+    }
+
+    for (const auto& form : hw.waitHide.forms) {
+        // No mixed rule without a lead: the pass counts a mixed rule's VALUs from the lead on.
+        for (const auto* rs : {&form.xdl, &form.csmacc})
+            for (const auto* rh : {&rs->dst, &rs->src})
+                if (rh->mix.on()) {
+                    EXPECT_GT(rh->mix.lead, 0) << "lead-less mixed rule";
+                }
     }
 
     // A deliberate alias, not an accidental fallthrough.
@@ -211,12 +224,11 @@ TEST(HWModel, Gfx1250WaitHideFormTable) {
     ASSERT_EQ(v0.waitHide.forms.size(), hw.waitHide.forms.size());
     EXPECT_EQ(v0.waitHide.vmVsrcLds, hw.waitHide.vmVsrcLds);
     EXPECT_EQ(v0.waitHide.vmVsrcTex, hw.waitHide.vmVsrcTex);
-    for (size_t i = 0; i < hw.waitHide.forms.size(); ++i) {
-        EXPECT_EQ(v0.waitHide.forms[i].costLatency, hw.waitHide.forms[i].costLatency);
-        EXPECT_EQ(v0.waitHide.forms[i].dstVgprs, hw.waitHide.forms[i].dstVgprs);
-        EXPECT_EQ(v0.waitHide.forms[i].xdlVaVdst, hw.waitHide.forms[i].xdlVaVdst);
-        EXPECT_EQ(v0.waitHide.forms[i].csmaccVaVdst, hw.waitHide.forms[i].csmaccVaVdst);
-    }
+    EXPECT_EQ(v0.waitHide.vmVsrcBridge, hw.waitHide.vmVsrcBridge);
+    EXPECT_TRUE(v0.waitHide.noLatchCsmacc == hw.waitHide.noLatchCsmacc);
+    EXPECT_TRUE(v0.waitHide.dpmacc == hw.waitHide.dpmacc);
+    for (size_t i = 0; i < hw.waitHide.forms.size(); ++i)
+        EXPECT_TRUE(v0.waitHide.forms[i] == hw.waitHide.forms[i]) << "row " << i;
 }
 
 // archName disambiguates steppings sharing a triple (gfx1250 vs gfx1250v0).
