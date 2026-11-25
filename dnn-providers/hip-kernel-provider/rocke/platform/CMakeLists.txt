@@ -839,9 +839,10 @@ if(ROCKE_INSTALL_TESTS)
 
     # Would every entry of this registration fit its CI shard budget? Run
     # from the CTest directory, the check lists the registration there.
+    # It is one case of its own, so a sharded tier runs it on one shard only.
     if(EXISTS "${_ROCKE_ENTRY_TIME_CHECK}")
       string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
-             "add_test(rocke_entry_time_check python \"${ROCKE_TEST_CTEST_REL}tests/tools/check_entry_times.py\" check --ctest-dir .)\n"
+             "add_test(rocke_entry_time_check python \"${ROCKE_TEST_CTEST_REL}tests/tools/check_entry_times.py\" check --ctest-dir . --rocke-shard-from-gtest-env)\n"
              "set_tests_properties(rocke_entry_time_check PROPERTIES\n"
              "  LABELS \"ckc;python;host;standard\"\n"
              "  ENVIRONMENT \"PYTHONPATH=${_ROCKE_INSTALLED_PYTHONPATH}\"\n"

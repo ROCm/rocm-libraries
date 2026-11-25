@@ -118,6 +118,8 @@ from rocke.tests.ci_shard import (
     SHARD_ENV,
     WORKER_ENV,
     ShardKeyListing,
+    current_shard,
+    header_line,
     place_keys,
 )
 from rocke.tests.ctest_listing import list_ctest_entries
@@ -166,6 +168,12 @@ _COLLECTION_TIMEOUT_SECONDS = 600.0
 # share instead of the whole selection.
 _SHARE_VARIABLES = (SHARD_ENV, WORKER_ENV, GTEST_INDEX_ENV, GTEST_TOTAL_ENV)
 _PYTEST_MODULE = ("-m", "pytest")
+# `check` is the one case of its own CTest entry, so a sharded CI tier runs it
+# on the shard place_keys gives this key, not on every shard. A lone key lands
+# on its hash shard whatever its cost; the unit cost makes it a declared key,
+# placed by the cost rule like a `rocke_shard_cost` mark.
+_CHECK_KEY = "rocke_entry_time_check"
+_CHECK_COSTS = {_CHECK_KEY: 1.0}
 
 
 @dataclasses.dataclass(frozen=True)
@@ -835,7 +843,30 @@ def _column_of(entry_times: Mapping[str, Mapping], column: str, command: str) ->
     return {column: entry_times[column]}
 
 
+def _list_check_case(path: Path) -> int:
+    """Write the check's one case to ``path`` (``LIST_KEYS_FLAG``)."""
+    ShardKeyListing({_CHECK_KEY: _CHECK_KEY}, costs=_CHECK_COSTS).write(path)
+    return 0
+
+
+def _check_runs_here(arguments: argparse.Namespace) -> bool:
+    """Whether this run of ``check`` checks: always without the shard flag;
+    with it, only on the shard that keeps the check's key. With the flag it
+    prints the shard lines the other split runs print."""
+    if not arguments.shard_from_gtest_env:
+        return True
+    print(header_line(arguments.shard))
+    if arguments.shard is None:
+        return True
+    print(arguments.shard.split_line([_CHECK_KEY], _CHECK_COSTS))
+    return _CHECK_KEY in arguments.shard.keeps([_CHECK_KEY], _CHECK_COSTS)
+
+
 def _check(arguments: argparse.Namespace) -> int:
+    if arguments.list_shard_keys is not None:
+        return _list_check_case(arguments.list_shard_keys)
+    if not _check_runs_here(arguments):
+        return 0
     entries = _registration(arguments)
     entry_times = load_entry_times(arguments.entry_times)
     column = _column_of(entry_times, arguments.column, "check")
@@ -970,6 +1001,19 @@ def main(argv: Sequence[str] | None = None) -> int:
         help="the operating system whose registration is listed (default: this one)",
     )
     _add_registration_source(check)
+    check.add_argument(
+        ACTIVATION_FLAG,
+        dest="shard_from_gtest_env",
+        action="store_true",
+        help="check only on the CI shard that keeps this check's one case",
+    )
+    check.add_argument(
+        LIST_KEYS_FLAG,
+        dest="list_shard_keys",
+        type=Path,
+        default=None,
+        help="write this check's one case to this path instead of checking",
+    )
     check.set_defaults(run=_check)
 
     record = commands.add_parser(
@@ -999,6 +1043,17 @@ def main(argv: Sequence[str] | None = None) -> int:
     list_keys.set_defaults(run=_list_keys)
 
     arguments = parser.parse_args(argv)
+    if arguments.run is _check:
+        if arguments.list_shard_keys is not None and not arguments.shard_from_gtest_env:
+            parser.error(f"{LIST_KEYS_FLAG} needs {ACTIVATION_FLAG}")
+        try:
+            arguments.shard = (
+                current_shard(from_gtest=True)
+                if arguments.shard_from_gtest_env
+                else None
+            )
+        except ValueError as error:
+            parser.error(f"rocke-ctest-shard: {error}")
     return arguments.run(arguments)
 
 

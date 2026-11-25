@@ -37,7 +37,13 @@ def _load_check_module():
 check = _load_check_module()
 # The check puts the rocke package on the path, so these follow it.
 import rocke
-from rocke.tests.ci_shard import ACTIVATION_FLAG, ShardKeyListing, shard_of
+from rocke.tests.ci_shard import (
+    ACTIVATION_FLAG,
+    LIST_KEYS_FLAG,
+    ShardKeyListing,
+    place_keys,
+    shard_of,
+)
 from rocke.tests.ctest_workers import WORKERS_OPTION, worker_keys
 
 QUICK, STANDARD = check.CI_TIERS
@@ -968,6 +974,129 @@ def test_times_dropped_from_names_registered_entries_only() -> None:
         "data"
     )
     assert check.times_dropped_from(entries, committed, _column()) == [dropped]
+
+
+# The line a run that checks prints first; a shard that leaves the check to
+# another shard prints only the shard lines.
+CHECKED = "linux quick (1 shard(s))"
+
+
+def _check_entry(tmp_path: Path) -> check.RegisteredEntry:
+    """The check's own entry as its registration runs it, against a
+    registration that does not exist: listing its case must not read it."""
+    command = [sys.executable, str(Path(check.__file__).resolve()), "check"]
+    command += ["--listing", str(tmp_path / "absent.json"), ACTIVATION_FLAG]
+    listed = _test("rocke_entry_time_check", ["standard"], command)
+    [entry] = check.registered_entries([listed])
+    return entry
+
+
+def test_the_check_lists_its_one_case_through_its_registered_command(
+    tmp_path,
+) -> None:
+    keys = check.collect_entry_keys(_check_entry(tmp_path))
+    case = "rocke_entry_time_check"
+    assert dict(keys.key_of_case) == {case: case}
+    assert set(keys.costs) == {case}
+    placed = place_keys(keys.key_of_case.values(), 4, keys.costs)[case]
+    per_shard = check.split_entry_shard_seconds(12.0, 4, keys=keys)
+    assert per_shard == tuple(12.0 if i == placed else 0.0 for i in range(4))
+
+
+def _run_check(tmp_path: Path, monkeypatch, capsys, **shard_variables) -> str:
+    """The output of a check run with the shard flag under ``shard_variables``
+    and no other shard variable."""
+    for name in ("GTEST_SHARD_INDEX", "GTEST_TOTAL_SHARDS", "ROCKE_TEST_SHARD"):
+        monkeypatch.delenv(name, raising=False)
+    for name, value in shard_variables.items():
+        monkeypatch.setenv(name, value)
+    listing, times = _write_inputs(tmp_path, 20.0)
+    argv = [*_data_options(times), "check", "--column", "linux"]
+    capsys.readouterr()
+    assert check.main([*argv, "--listing", str(listing), ACTIVATION_FLAG]) == 0
+    return capsys.readouterr().out
+
+
+def _placed_shard(tmp_path: Path) -> int:
+    keys = check.collect_entry_keys(_check_entry(tmp_path))
+    [shard] = place_keys(keys.key_of_case.values(), 4, keys.costs).values()
+    return shard
+
+
+@pytest.mark.parametrize(
+    "shard_variables",
+    [{}, {"GTEST_SHARD_INDEX": "0", "GTEST_TOTAL_SHARDS": "1"}],
+    ids=["unsharded", "one-shard-tier"],
+)
+def test_an_unsharded_or_one_shard_run_checks(
+    tmp_path, monkeypatch, capsys, shard_variables: dict
+) -> None:
+    assert CHECKED in _run_check(tmp_path, monkeypatch, capsys, **shard_variables)
+
+
+def test_a_four_shard_tier_checks_on_the_one_shard_that_keeps_the_check(
+    tmp_path, monkeypatch, capsys
+) -> None:
+    placed = _placed_shard(tmp_path)
+    checked = []
+    for index in range(4):
+        out = _run_check(
+            tmp_path,
+            monkeypatch,
+            capsys,
+            GTEST_SHARD_INDEX=str(index),
+            GTEST_TOTAL_SHARDS="4",
+        )
+        split = "/".join("1" if i == placed else "0" for i in range(4))
+        kept = int(index == placed)
+        assert f"rocke-ctest-shard: {index}/4 (GTEST_SHARD_INDEX={index}" in out
+        assert f"rocke-ctest-shard {index}/4: split {split} of 1; kept {kept}" in out
+        if CHECKED in out:
+            checked.append(index)
+    assert checked == [placed]
+
+
+def test_rocke_test_shard_wins_over_the_gtest_pair(
+    tmp_path, monkeypatch, capsys
+) -> None:
+    placed = _placed_shard(tmp_path)
+    other = (placed + 1) % 4
+    gtest = {"GTEST_SHARD_INDEX": str(other), "GTEST_TOTAL_SHARDS": "4"}
+    run = {"ROCKE_TEST_SHARD": f"{placed}/4", **gtest}
+    assert CHECKED in _run_check(tmp_path, monkeypatch, capsys, **run)
+    gtest = {"GTEST_SHARD_INDEX": str(placed), "GTEST_TOTAL_SHARDS": "4"}
+    skip = {"ROCKE_TEST_SHARD": f"{other}/4", **gtest}
+    assert CHECKED not in _run_check(tmp_path, monkeypatch, capsys, **skip)
+
+
+@pytest.mark.parametrize(
+    "flags, shard_variables, message",
+    [
+        (
+            [LIST_KEYS_FLAG, "keys.json"],
+            {},
+            f"{LIST_KEYS_FLAG} needs {ACTIVATION_FLAG}",
+        ),
+        (
+            [ACTIVATION_FLAG],
+            {"GTEST_SHARD_INDEX": "4", "GTEST_TOTAL_SHARDS": "4"},
+            "rocke-ctest-shard: GTEST_SHARD_INDEX='4' is not in 0..3",
+        ),
+    ],
+    ids=["list-without-shard-flag", "bad-gtest-pair"],
+)
+def test_check_refuses_a_listing_or_shard_it_cannot_use(
+    tmp_path, monkeypatch, capsys, flags, shard_variables, message
+) -> None:
+    for name in ("GTEST_SHARD_INDEX", "GTEST_TOTAL_SHARDS", "ROCKE_TEST_SHARD"):
+        monkeypatch.delenv(name, raising=False)
+    for name, value in shard_variables.items():
+        monkeypatch.setenv(name, value)
+    argv = ["check", "--listing", str(tmp_path / "absent.json"), *flags]
+    with pytest.raises(SystemExit) as refused:
+        check.main(argv)
+    assert refused.value.code == 2
+    assert message in capsys.readouterr().err
 
 
 def test_check_judges_only_the_column_of_the_listed_registration(
