@@ -488,12 +488,11 @@ string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
        "  RESOURCE_LOCK rocke_counted_sync_gate\n"
        "  TIMEOUT ${ROCKE_TEST_TIMEOUT_COUNTED_COMPILER_GATE})\n")
 
-# DSA lightning-indexer CPU tests (no GPU: validator, dispatch wiring, and the
-# Python-lowered IR-sha golden). Same staged-library PYTHONPATH as the conv
-# lane. The on-GPU numeric tests are enrolled in the GPU lane below.
+# DSA lightning-indexer CPU tests (no GPU: validator and dispatch wiring; the
+# emitted IR is pinned by the corpus family lightning_indexer, checked by
+# rocke_golden_static). Same staged-library PYTHONPATH as the conv lane. The on-GPU numeric tests are enrolled in the GPU lane below.
 set(_ROCKE_LIBRARY_DSA_TEST_RELPATHS
     "tests/library/tests/test_dsa_indexer_gfx942_spec.py"
-    "tests/library/tests/test_dsa_indexer_golden.py"
     "tests/library/tests/dispatch/dsa/test_gfx942_wiring.py"
     "tests/library/tests/dispatch/dsa/test_gfx950_wiring.py")
 set(_ROCKE_LIBRARY_DSA_TESTS "")
