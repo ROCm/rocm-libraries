@@ -58,7 +58,7 @@ def _spec(idx: int) -> Img2ColSpec:
             vec_k=4,
         )
     if idx == 6:
-        # Grouped: both engines refuse it (the descriptor has no group axis).
+        # Grouped: both engines' spec checks refuse it (single group only).
         return Img2ColSpec(
             problem=ConvProblem(N=2, Hi=16, Wi=16, C=32, K=32, Y=3, X=3, groups=2),
             block_tile_m=8,
@@ -66,7 +66,8 @@ def _spec(idx: int) -> Img2ColSpec:
             vec_k=4,
         )
     if idx == 7:
-        # 3-D: the depth axis goes through the shared conv descriptor.
+        # 3-D: both engines build the depth axis through the shared conv
+        # descriptor and must emit the same kernel.
         return Img2ColSpec(
             problem=ConvProblem(
                 N=1, Hi=8, Wi=8, C=16, K=16, Y=3, X=3, Di=4, Z=3, sD=1, pD=0, dD=1

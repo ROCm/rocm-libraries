@@ -51,6 +51,7 @@ extern "C" {
  * Python (img2col.py:is_valid_spec):
  *   - ArchTarget.from_gfx(arch); KeyError -> (False, str(e))
  *   - dtype must be "f16"
+ *   - problem.groups must be 1
  *   - vec_k in {1, 2, 4, 8}
  *   - block_tile_k % vec_k == 0
  *   - block_size > 0

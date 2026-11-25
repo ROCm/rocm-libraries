@@ -129,6 +129,12 @@ def is_valid_spec(spec: Img2ColSpec, arch: str = "gfx950") -> Tuple[bool, str]:
     wave_size = target.wave_size
     if spec.dtype != "f16":
         return False, f"unsupported dtype {spec.dtype!r} (only f16 in v1)"
+    if spec.problem.groups != 1:
+        groups = spec.problem.groups
+        return False, (
+            f"groups {groups} unsupported (img2col covers single-group "
+            "convolution only)"
+        )
     if spec.vec_k not in (1, 2, 4, 8):
         return False, f"vec_k must be one of {{1, 2, 4, 8}} (got {spec.vec_k})"
     if spec.block_tile_k % spec.vec_k != 0:

@@ -49,6 +49,7 @@ set(_ROCKE_LIBRARY_CONV_TEST_RELPATHS
     "tests/library/tests/test_conv_dgrad_spec_policy.py"
     "tests/library/tests/test_streamk_sweep_launch.py"
     "tests/library/tests/test_conv_build_signatures.py"
+    "tests/library/tests/test_img2col_spec.py"
     "tests/library/tests/test_conv_aot_grid_limits.py"
     "tests/library/tests/test_dgrad_stem_wmma.py"
     "tests/library/tests/test_fwd_small_wmma.py"

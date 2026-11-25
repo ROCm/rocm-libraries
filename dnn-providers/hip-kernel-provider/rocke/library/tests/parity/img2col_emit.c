@@ -113,7 +113,7 @@ static int make_spec(int idx, rocke_img2col_spec_t* spec)
         spec->block_tile_k = 128;
         spec->vec_k = 4;
         break;
-    case 6: /* grouped: both engines refuse it (the descriptor has no group axis) */
+    case 6: /* grouped: both engines' spec checks refuse it (single group only) */
         p.N = 2;
         p.Hi = 16;
         p.Wi = 16;
@@ -126,7 +126,7 @@ static int make_spec(int idx, rocke_img2col_spec_t* spec)
         spec->block_tile_k = 128;
         spec->vec_k = 4;
         break;
-    case 7: /* 3-D: the depth axis goes through the shared conv descriptor */
+    case 7: /* 3-D: both engines must emit the same kernel */
         p.N = 1;
         p.Hi = 8;
         p.Wi = 8;

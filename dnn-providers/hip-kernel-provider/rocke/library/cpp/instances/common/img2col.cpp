@@ -95,6 +95,17 @@ bool rocke_img2col_is_valid_spec(const rocke_img2col_spec_t* spec,
         return false;
     }
 
+    /* if spec.problem.groups != 1: ... */
+    if(spec->problem.groups != 1)
+    {
+        snprintf(buf,
+                 sizeof(buf),
+                 "groups %d unsupported (img2col covers single-group convolution only)",
+                 spec->problem.groups);
+        rocke_img2col_set_reason(reason, reason_cap, buf);
+        return false;
+    }
+
     /* if spec.vec_k not in (1, 2, 4, 8): ... */
     if(spec->vec_k != 1 && spec->vec_k != 2 && spec->vec_k != 4 && spec->vec_k != 8)
     {
