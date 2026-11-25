@@ -38,11 +38,12 @@ def _splitPairs(pristine, free):
 
 
 def rankSplits(pristine, free, deriveProbe, asmCaps, tier2=True, topK=search.TIER2_COUNT,
-               **options):
+               accept=None, **options):
   """Search every split pair `free` allows, from its own starting derivation; one ranking.
 
   `deriveProbe(state)` derives a copy of `pristine` with the pair stated and returns the
-  derived state, or None when Solution refuses it.  `options` go to `search.search`.
+  derived state, or None when Solution refuses it.  `accept` is `search.search`'s, given the
+  candidate's params with its split pair.  `options` go to `search.search`.
   """
   searched = set(free) - set(space.SPLIT_PARAMS)
   merged = AutoResult(None)
@@ -54,7 +55,10 @@ def rankSplits(pristine, free, deriveProbe, asmCaps, tier2=True, topK=search.TIE
       merged.rejected["split"] += 1
       merged.examples.setdefault("split", "Solution refuses %s" % split)
       continue
-    result = search.search(probe, searched, asmCaps, tier2=tier2, topK=topK, **options)
+    splitAccept = None if accept is None else (
+        lambda params, split=split: accept(dict(params, **split)))
+    result = search.search(probe, searched, asmCaps, tier2=tier2, topK=topK, accept=splitAccept,
+                           **options)
     for item in result.ranked + result.refused:
       item.params.update(split)
     merged.ranked.extend(result.ranked)

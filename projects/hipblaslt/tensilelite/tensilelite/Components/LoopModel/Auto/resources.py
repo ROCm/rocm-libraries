@@ -3,13 +3,16 @@
 """How many GPRs a LoopModel candidate needs, and whether that fits.
 
 COUNTED, NOT ALIGNED: the operand rings as the writer sizes them (`operandValu`), the tail
-loop's A/B slabs where they outgrow those rings, and the accumulator.
+loop's A/B slabs where they outgrow those rings, and the accumulator.  The one alignment counted
+is the MX scale region's (`mxScaleRegion`), which moves the accumulator and everything above it.
 
-UNDER STINKYTOFU ALLOCATION THE COUNT IS A LOWER BOUND: nothing is added for the registers
-outside the rings.  The allocator folds some of them (the LDS swap and GL2 prefetch addresses,
-Serial) into ring slots idle at the time and keeps the rest (the local-read addresses, the
-alignment of wide operands), so the declared count sits 0..~10 above this one on the gfx1250
-MXF8 family.
+UNDER STINKYTOFU ALLOCATION THE COUNT IS THE TOP OF THE B RING: the allocator keeps every WMMA
+operand (the accumulator, A, B) where the writer put them (`ProducerPinMatrix`), so what the
+writer lays out below B stays counted -- the address blocks between the accumulator and A and
+the bank pad before B (`belowRingVgprs`).  What it lays out above B (the LDS swap and GL2
+prefetch addresses, Serial) the allocator folds into idle registers; the declared count sits
+0..4 above this one on the gfx1250 MXF8 family, and a kernel whose B ring ends past the limit
+is refused however little else it holds.
 
 WITHOUT IT THE COUNT IS A LOWER BOUND TOO: it adds the writer blocks outside the rings that every
 such kernel holds (`nonRingVgprs`).  The writer's layout sits a few registers above that, and the
@@ -27,6 +30,8 @@ from ..Registers import operandValu
 
 #: The operands whose tail-loop slabs the writer reserves together (KernelWriter's tailEnd).
 TAIL_OPERANDS = ("A", "B")
+#: The `nonRingVgprs` blocks the writer lays out between the accumulator and the A ring.
+_BELOW_A = ("GlobalReadOffset", "LocalWriteAddr", "LocalReadAddr")
 
 
 @dataclass(frozen=True)
@@ -38,10 +43,12 @@ class GprCount:
   sgpr: int
   maxVgpr: int
   maxSgpr: int
+  scaleAlignment: int = 0  #: VGPRs `mxScaleRegion` adds to the MX scale rings
 
   @property
   def vgpr(self) -> int:
-    return sum(self.operands.values()) + self.tailReserve + self.accumulator + self.fixedVgpr
+    return (sum(self.operands.values()) + self.tailReserve + self.accumulator + self.fixedVgpr
+            + self.scaleAlignment)
 
   @property
   def fits(self) -> bool:
@@ -50,9 +57,11 @@ class GprCount:
   def reason(self):
     """Why it does not fit, or None."""
     if self.vgpr > self.maxVgpr:
-      return ("needs %d VGPRs (%s, tail reserve %d, accumulator %d, fixed %d) but the target has %d"
+      return ("needs %d VGPRs (%s, scale alignment %d, tail reserve %d, accumulator %d, fixed %d) "
+              "but the target has %d"
               % (self.vgpr, ", ".join("%s %d" % kv for kv in self.operands.items()),
-                 self.tailReserve, self.accumulator, self.fixedVgpr, self.maxVgpr))
+                 self.scaleAlignment, self.tailReserve, self.accumulator, self.fixedVgpr,
+                 self.maxVgpr))
     if self.sgpr > self.maxSgpr:
       return "needs %d SGPRs but the target has %d" % (self.sgpr, self.maxSgpr)
     return None
@@ -96,14 +105,19 @@ def _packsA(kernel) -> bool:
       and not kernel.get("enableLDSTrA")
 
 
+def bankPadB(kernel, costs, ringA) -> int:
+  """VGPRs between an A ring of `ringA` and the B ring (none counted after a packed A ring)."""
+  return 2 - ringA % 2 if costs.vgprBankPadsB and not _packsA(kernel) else 0
+
+
 def nonRingVgprs(kernel, costs, operands=None) -> dict:
   """The writer's VGPR blocks outside the rings and the accumulator that every such kernel
   allocates, by block: a LOWER bound -- the other alignment, global-to-LDS staging, pack
   temporaries and the registers the store code adds to the pool are left out.  `operands` (the
   ring sizes) adds the bank padding between the A and B rings."""
   blocks = {"Serial": 1}
-  if costs.vgprBankPadsB and operands is not None and not _packsA(kernel):
-    blocks["BankPadB"] = 2 - int(operands.get("A", 0)) % 2
+  if operands is not None and bankPadB(kernel, costs, int(operands.get("A", 0))):
+    blocks["BankPadB"] = bankPadB(kernel, costs, int(operands.get("A", 0)))
   for tc in _tensors(kernel):
     side = _side(tc)
     tdm = bool(kernel.get("enableTDM" + side))
@@ -131,10 +145,44 @@ def nonRingVgprs(kernel, costs, operands=None) -> dict:
   return blocks
 
 
+def _offBank(costs, end) -> int:
+  """VGPRs the writer skips after a block ending at `end` before the next one: on to the other
+  bank pair under `vgprBankPadsB`, else to an even VGPR (KernelWriter's `_alignMXSB`, and the
+  same rule between the A and B rings)."""
+  return 2 - end % 2 if costs.vgprBankPadsB else end % 2
+
+
+def mxScaleRegion(kernel, costs, scales) -> int:
+  """VGPRs below the accumulator, for MX scale rings of `scales` (`{"MXSA": n, "MXSB": n}`) laid
+  out as the writer does (`_layoutMXScaleVgprs`): a dummy pair when only one side has scales,
+  MXSB moved off MXSA's bank, and the accumulator on an even VGPR.  MXScaleVgprInterleave never
+  moves the accumulator, and a TDM-fed scale has no pack or G2L block, so neither is counted."""
+  pt = kernel["ProblemType"]
+  hasA, hasB = bool(pt.get("MXBlockA")), bool(pt.get("MXBlockB"))
+  end = 2 if hasA != hasB else 0
+  if hasA:
+    end += int(scales.get("MXSA", 0))
+  if hasB:
+    end += _offBank(costs, end) + int(scales.get("MXSB", 0))
+  return end + end % 2
+
+
+def belowRingVgprs(kernel, costs, operands=None) -> int:
+  """The writer blocks laid out below the B ring outside the rings and the scale region: the
+  addresses between the accumulator and A, rounded to an even VGPR, and with `operands` the
+  bank pad between the A and B rings."""
+  blocks = nonRingVgprs(kernel, costs, operands)
+  below = sum(count for name, count in blocks.items() if name.startswith(_BELOW_A))
+  return below + below % 2 + blocks.get("BankPadB", 0)
+
+
 def fixedVgpr(kernel, costs, operands=None) -> int:
-  """VGPRs counted for everything outside the rings and the accumulator: none when StinkyTofu
-  allocates VGPRs, else the writer blocks every such kernel holds (`nonRingVgprs`)."""
-  return 0 if allocatorPacksVgprs(kernel) else sum(nonRingVgprs(kernel, costs, operands).values())
+  """VGPRs counted for everything outside the rings and the accumulator: when StinkyTofu
+  allocates VGPRs, what the writer lays out below the pinned B ring (`belowRingVgprs`), else the
+  writer blocks every such kernel holds (`nonRingVgprs`)."""
+  if allocatorPacksVgprs(kernel):
+    return belowRingVgprs(kernel, costs, operands)
+  return sum(nonRingVgprs(kernel, costs, operands).values())
 
 
 def gprCount(kernel, theta, S, costs) -> GprCount:
@@ -152,6 +200,7 @@ def gprCount(kernel, theta, S, costs) -> GprCount:
       if operand.name in TAIL_OPERANDS:
         tailSlabs += max(1, _geometry.free_tiles(theta, operand) * _geometry.frag_regs(theta, operand))
   rings = sum(operands.get(name, 0) for name in TAIL_OPERANDS)
+  scales = sum(count for name, count in operands.items() if name.startswith("MXS"))
   splits = split_factors(kernel) or (1, 1, 1, 1)
   splitOperands = int(splits[0] > 1 or splits[2] > 1) + int(splits[1] > 1 or splits[3] > 1)
   return GprCount(
@@ -162,4 +211,5 @@ def gprCount(kernel, theta, S, costs) -> GprCount:
       sgpr=costs.fixedSgpr + costs.sgprPerSplitOperand * splitOperands,
       maxVgpr=costs.maxVgpr,
       maxSgpr=costs.maxSgpr,
+      scaleAlignment=mxScaleRegion(kernel, costs, operands) - scales,
   )

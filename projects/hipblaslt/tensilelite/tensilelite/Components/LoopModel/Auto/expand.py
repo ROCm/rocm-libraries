@@ -13,8 +13,6 @@ from . import space
 from .derive import rankSplits
 
 KEY = "LoopModelAutoSelect"
-#: Candidates ranked per slot asked for.
-REFILL = 4
 
 
 def count(params):
@@ -40,8 +38,10 @@ def expandFork(pristine, n, build, asmCaps, emits=None):
   free).
 
   `build(state)` returns the Solution for a state, or None when Solution refuses it;
-  `emits(solution)` says whether the kernel writer emits it.  A candidate either refuses is
-  skipped, counted in `result.rejected`, and the next one in the ranking takes its place.
+  `emits(solution)` says whether the kernel writer emits it.  The search asks both of each
+  candidate as it reaches it, in ranking order, and stops once `n` pass; one either refuses is
+  counted in `result.rejected` and the next one in the ranking takes its place.  Near the VGPR
+  budget most of a tied band can fail to emit.
   """
   pristine = copy.deepcopy(pristine)
   pristine[KEY] = 0
@@ -53,26 +53,24 @@ def expandFork(pristine, n, build, asmCaps, emits=None):
     built = build(state)
     return None if built is None else dict(built._state)
 
-  # Spare candidates refill the slots of refused ones; near the VGPR budget most of a tied
-  # band can fail to emit.
-  result = rankSplits(pristine, set(free), deriveProbe, asmCaps, topK=REFILL * n)
+  def accept(params):
+    state = copy.deepcopy(pristine)
+    state.update(params)
+    solution = build(state)
+    if solution is None:
+      return "build"
+    if emits is not None and not emits(solution):
+      return "emit"
+    return None
+
+  result = rankSplits(pristine, set(free), deriveProbe, asmCaps, topK=n, accept=accept)
   choices = []
   for item in result.ranked:
     if len(choices) >= n:
       break
     chosen = {name: value for name, value in item.params.items() if name in free}
-    if chosen in choices:
-      continue
-    state = copy.deepcopy(pristine)
-    state.update(item.params)
-    solution = build(state)
-    if solution is None:
-      result.rejected["build"] += 1
-      continue
-    if emits is not None and not emits(solution):
-      result.rejected["emit"] += 1
-      continue
-    choices.append(chosen)
+    if chosen not in choices:
+      choices.append(chosen)
   return choices, result
 
 

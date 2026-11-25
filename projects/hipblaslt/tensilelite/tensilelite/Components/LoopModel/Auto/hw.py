@@ -15,8 +15,8 @@ copied rather than re-derived so the search and the scheduler agree on what a cy
 The WMMA pipe is modelled the way `WmmaQueueTimeline` models it: each WMMA occupies the matrix
 queue for its latency, back to back, and everything else co-issues in that shadow.
 
-`dsEffectiveLatency`, `asmDsLatency`, `asmTdmLatency`, `tdmLatency` and the register terms below
-are CALIBRATED on measured kernels, not copied: see `calibration` for the data each came from.
+`dsEffectiveLatency`, `asmDsLatency`, `asmTdmLatency`, `tdmLatency`, `tdmRowCycles` and the
+register terms below are CALIBRATED on measured kernels, not copied: see `calibration` for the data each came from.
 `dsEffectiveLatency` (300) is far above StinkyTofu's per-instruction ds_load latency (56) because
 it prices a load under the steady loop's whole traffic, not an idle LDS pipe.
 """
@@ -37,6 +37,18 @@ class Gfx1250Costs:
   #: ds_load latency by bytes per lane.  Instructions.def: ds_load_b128 {1, 56}; DS format 52.
   dsLatency: dict = field(default_factory=lambda: {16: 56})
   dsDefaultLatency: int = 52
+  #: ds_loads retired per cycle past the queue depth, and the cap on a burst's drain, by bytes
+  #: per lane.  Instructions.def .dsThroughput / .dsMaxDrain: b128/b96 {2, 255}, b64 {4, 131},
+  #: b32 and narrower {4, 120} (HWModel's dsLoadDefault* fallback).
+  dsThroughput: dict = field(default_factory=lambda: {16: 2, 12: 2})
+  dsDefaultThroughput: int = 4
+  dsMaxDrain: dict = field(default_factory=lambda: {16: 255, 12: 255, 8: 131})
+  dsDefaultMaxDrain: int = 120
+  #: computeDynamicDrainLatency clamps the waves sharing the return queue to 1..4.
+  dsDrainWaves: tuple = (1, 4)
+  #: HWModel.barrier.signalToWaitLatency: every wave's last read of an LDS buffer has to pass
+  #: the s_barrier before a tensor load may overwrite it.
+  barrierSignalToWait: int = 11
   #: LDS return rate in cycles per ds_load, the DAG scheduler's `DsReadCyclesPerLoad` default.
   dsCyclesPerLoad: int = 6
   #: HWModel.lds.readQueueDepth -- ds_loads one wave may have in flight before it stalls.
@@ -50,6 +62,10 @@ class Gfx1250Costs:
   #: Tiers 0 and 2: tensor_load_to_lds issue to data in LDS, timed from where GIR places the
   #: load -- later than StinkyTofu schedules it, so below the hardware latency.  CALIBRATED.
   tdmLatency: int = 800
+  #: Tier 0's legal window: hardware tensor_load_to_lds issue to landing, per macro-tile row the
+  #: trip's tensor loads move (MT0 + MT1 when both operands use TDM), whatever the row's bytes.
+  #: CALIBRATED (see `calibration`).
+  tdmRowCycles: float = 2.2
   #: Tiers 0 and 2: issue cycles of one tensor_load_to_lds, its descriptor's scalar setup
   #: (~70 SALU per load) included.  CALIBRATED (see `calibration`).
   tdmIssueCycles: int = 40
@@ -60,8 +76,6 @@ class Gfx1250Costs:
   #: Per-trip overhead outside the WMMA shadow: loop branch, s_barrier signal/wait, waitcnts.
   #: HWModel.barrier.signalToWaitLatency (11) + jumpOverheadCycles (6).
   tripOverhead: int = 17
-  #: Steady-body instructions before the I-cache starts to miss.  CALIBRATED.
-  icacheBodyInstructions: int = 16384
   #: Register file.  VGPRs are counted without alignment: StinkyTofuRegisterAllocation packs.
   maxVgpr: int = 1024
   maxSgpr: int = 106
@@ -80,6 +94,12 @@ class Gfx1250Costs:
 
   def dsLoadLatency(self, bytesPerLane) -> int:
     return self.dsLatency.get(int(bytesPerLane), self.dsDefaultLatency)
+
+  def dsLoadThroughput(self, bytesPerLane) -> int:
+    return self.dsThroughput.get(int(bytesPerLane), self.dsDefaultThroughput)
+
+  def dsLoadMaxDrain(self, bytesPerLane) -> int:
+    return self.dsMaxDrain.get(int(bytesPerLane), self.dsDefaultMaxDrain)
 
 
 GFX1250 = Gfx1250Costs()
@@ -140,7 +160,14 @@ calibration = {
         "8x10, BF16 16x16x32 8x8 and 4x4; 14-24 kernels each, measured twice, 2026-11-19) "
         "rank at a mean +0.41 within-variant Spearman (+0.19 without), flat from 600 up, "
         "and the 40 above stay at +0.51."),
-    "icacheBodyInstructions": "not yet calibrated on hardware; P5",
+    "tdmRowCycles": (
+        "ATT on one gfx1250 card (2026-11-24), release of a stalled s_wait_tensorcnt minus the "
+        "issue of the load it retires, steady loop, 13 captures with >= 100 samples: 128x128 "
+        "tiles (MXF8 K256 33 KB and BF16 K64 16 KB loads) land in 590-628 cycles, BF16 256x256 "
+        "in 985, F8 K128 and MXF8 K256 256x320 (72 and 148 KB a trip) in 1207-1337.  Same rows, "
+        "twice the bytes, same latency; 64 to 5120 workgroups (problem size) leave it within "
+        "40 cycles.  A fit through the origin, 2.21 per row, is within 65 cycles of all but "
+        "BF16 256x256 (-146).  Scripts: ~/lm_scratch/t50/tdmlat.py, latfit.py, tr3.sh."),
 }
 
 

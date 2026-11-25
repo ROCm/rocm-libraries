@@ -7,7 +7,8 @@ Three tiers, each asked of fewer candidates than the one before:
   tier 0  every (order, register) pair, from the nest alone (`perf.NestWalk`, `perf.sideCost`):
           VGPRs, whether each ring is long enough to be correct, and the ds_load latency each
           unit leaves exposed.  The two operands' register choices are independent here, so
-          each order keeps only its best few joint choices under budget.
+          each order keeps only its best few joint choices under budget.  An MX kernel's
+          scale rings are the one count asked of θ (`_ScaleRings`), once per distinct ring.
   tier 1  the best tier-0 candidates through Solution's and the writer's checks and θ
           (`evaluate.tier1`), with the exact register count.
   tier 2  the tier-1 survivors lowered to GIR, the last feasibility gate, and simulated
@@ -26,6 +27,7 @@ full kernel emit per candidate, so Solution derivation does not run it.
 
 import time
 from collections import Counter
+from dataclasses import replace
 from typing import NamedTuple
 
 from . import evaluate, hw, perf, resources, space
@@ -46,16 +48,64 @@ MAX_COPIES = 6
 MAX_TIER1 = 400
 
 
-def _sideOptions(kernel, walk, side, free, pinned, costs, rho, mx):
+def _validChoices(kernel, walk, side, free, pinned, costs, rho, mx):
+  """`[(SideCost, SideChoice)]` for every choice whose ring is long enough to be correct."""
   options = []
   for choice in space.sideChoices(walk.shapes[side], side, free, pinned):
     cost = perf.sideCost(kernel, walk, side, choice, costs, rho, mx)
     if cost is not None:
       options.append((cost, choice))
+  return options
+
+
+class _ScaleRings:
+  """θ's MX scale ring for one loop order's side choices, asked once per `(side, VgprGroup,
+  VgprAlloc, ClusterLocalRead)`: θ sizes it from those and the order alone, not from the side's
+  PLR or the other side's choice, so a fixed ring-valid partner stands in for the other side."""
+
+  #: Partners tried before a choice keeps tier 0's estimate.
+  PARTNERS = 4
+
+  def __init__(self, state, order, kernel, valid, costs, asmCaps):
+    self.state, self.order, self.kernel = state, order, kernel
+    self.costs, self.asmCaps = costs, asmCaps
+    self.partners = {side: [choice for _cost, choice in valid[side][:self.PARTNERS]]
+                     for side in ("A", "B")}
+    self.known = {}
+
+  def __call__(self, side, choice):
+    """VGPRs of `side`'s scale ring under `choice`, or None when θ could not size it."""
+    key = (side, choice.vg, choice.va, choice.clr)
+    if key not in self.known:
+      self.known[key] = None
+      for partner in self.partners["B" if side == "A" else "A"]:
+        registers = (space.RegisterChoice(choice, partner) if side == "A"
+                     else space.RegisterChoice(partner, choice))
+        ev = evaluate.tier1(self.state, self.order, registers, self.costs, self.asmCaps,
+                            orderedKernel=self.kernel)
+        if ev.gpr is not None:
+          self.known[key] = int(ev.gpr.operands.get("MXS" + side, 0))
+          break
+    return self.known[key]
+
+
+def _sideOptions(kernel, walk, side, costs, trip, options, scale=None):
+  if scale is not None:
+    exact = []
+    for cost, choice in options:
+      regs = scale(side, choice)
+      exact.append((cost if regs is None else replace(cost, regs=cost.ring + regs), choice))
+    options = exact
+  # A window's shortfall counts only beyond the least the copies rule charges any body.
+  floor = max(0.0, costs.tdmLatency - trip)
+  landing = perf.tdmLandingLatency(kernel, costs)
+  def short(cost):
+    alone = perf.tdmWindowExposed([cost.tdm], landing, trip / float(walk.wmmas))
+    return alone if alone > floor else 0.0
   # A choice another matches or beats on every count is never needed; of equals, the first in
   # canonical order stays.
   def counts(cost):
-    return (cost.regs, cost.exposed, cost.units, cost.copies)
+    return (cost.regs, cost.exposed, cost.units, cost.copies, short(cost))
 
   options.sort(key=lambda item: (counts(item[0]), item[1]))
   front = []
@@ -72,7 +122,7 @@ class Tier0(NamedTuple):
   score: float      #: cycles per trip
   units: int        #: units both operands load per trip
   copies: int       #: steady-body copies
-  vgpr: int         #: operand-ring VGPRs
+  vgpr: int         #: VGPRs besides the accumulator and `resources.fixedVgpr` of the state
   order: space.OrderChoice
   registers: space.RegisterChoice
 
@@ -111,27 +161,45 @@ def _walks(state, free, rejected, examples):
                 key=lambda item: item[0])
 
 
-def _tier0(state, free, costs, budget, keep=PER_ORDER):
-  """Every order's best joint register choices, best first: `[(score, vgpr, order, regs)]`."""
+def _tier0(state, free, costs, budget, keep=PER_ORDER, asmCaps=None):
+  """Every order's best joint register choices, best first: `[(score, vgpr, order, regs)]`.
+
+  With `asmCaps` an MX kernel's scale rings are θ's (`_ScaleRings`); without, tier 0's
+  estimate."""
   pt = state["ProblemType"]
   mx = bool(pt.get("MXBlockA") or pt.get("MXBlockB"))
   rejected, examples, out = Counter(), {}, []
   for order, kernel, walk in _walks(state, free, rejected, examples):
-    cWmma, cLds, rho, loads = perf.orderCore(kernel, walk, costs)
+    cWmma, cLds, rho, _loads = perf.orderCore(kernel, walk, costs)
+    perPosition = max(cWmma, cLds) / float(walk.wmmas)
     tdm = perf.tensorLoads(kernel) * costs.tdmIssueCycles
-    sideA = _sideOptions(kernel, walk, "A", free, state, costs, rho, mx)
-    sideB = _sideOptions(kernel, walk, "B", free, state, costs, rho, mx)
+    landing = perf.tdmLandingLatency(kernel, costs)
+    slabs = perf.tailSlabs(kernel)
+    valid = {side: _validChoices(kernel, walk, side, free, state, costs, rho, mx)
+             for side in ("A", "B")}
+    scale = (_ScaleRings(state, order, kernel, valid, costs, asmCaps)
+             if mx and asmCaps is not None else None)
+    sideA = _sideOptions(kernel, walk, "A", costs, max(cWmma, cLds), valid["A"], scale)
+    sideB = _sideOptions(kernel, walk, "B", costs, max(cWmma, cLds), valid["B"], scale)
     joint = []
     for costA, choiceA in sideA:
       for costB, choiceB in sideB:
-        regs = costA.regs + costB.regs
+        # The tail loop's slabs reuse the A and B rings and reserve only what they outgrow; that
+        # total grows with each side's registers, so the sorted B list can stop on it.  The
+        # writer's padding (`resources.gprCount`) does not, so it only skips a pair.
+        regs = costA.regs + costB.regs + max(0, slabs - costA.ring - costB.ring)
         if regs > budget:
           break
+        scaleA, scaleB = costA.regs - costA.ring, costB.regs - costB.ring
+        regs += (resources.bankPadB(kernel, costs, costA.ring) - scaleA - scaleB
+                 + resources.mxScaleRegion(kernel, costs, {"MXSA": scaleA, "MXSB": scaleB}))
+        if regs > budget:
+          continue
         copies = _lcm(costA.copies, costB.copies)
-        body = (walk.wmmas + loads) * copies
-        icache = max(0.0, body - costs.icacheBodyInstructions) / copies * 0.25
         score = (max(cWmma, cLds) + costA.exposed + costB.exposed + tdm
-                 + perf.tdmExposed(cWmma, cLds, copies, costs) + costs.tripOverhead + icache)
+                 + perf.tdmExposed(cWmma, cLds, copies, costs, (costA.tdm, costB.tdm), perPosition,
+                                  landing)
+                 + costs.tripOverhead)
         joint.append(Tier0(score, costA.units + costB.units, copies, regs, order,
                            space.RegisterChoice(choiceA, choiceB)))
     if not joint:
@@ -146,7 +214,8 @@ def _tier0(state, free, costs, budget, keep=PER_ORDER):
 
 
 def search(state, free, asmCaps, costs=None, tier2=True, topK=TIER2_COUNT,
-           perOrder=TIER2_PER_ORDER, band=None, maxLowerings=MAX_LOWERINGS, tier0PerOrder=PER_ORDER):
+           perOrder=TIER2_PER_ORDER, band=None, maxLowerings=MAX_LOWERINGS, tier0PerOrder=PER_ORDER,
+           accept=None):
   """Pick the free LoopModel parameters of `state` (a resolved Solution state).
 
   `free` names the parameters the user left at -1; every other searched parameter keeps the
@@ -156,6 +225,10 @@ def search(state, free, asmCaps, costs=None, tier2=True, topK=TIER2_COUNT,
   choices it scores (None: no cap).  With `band` set the
   search keeps every candidate whose tier-0 score is within that fraction of the best, rather
   than stopping at `topK`; `maxLowerings` still bounds it.
+
+  `accept(params)` is a last check on each candidate that passes the tiers: it returns the stage
+  that refuses it, or None.  A refused candidate is counted under that stage and takes no place
+  in the ranking, so the next one is tried.
   """
   from ..Theta import loopModelTargetFor
   costs = costs or hw.costsFor(state.get("ISA")) or hw.GFX1250
@@ -164,7 +237,7 @@ def search(state, free, asmCaps, costs=None, tier2=True, topK=TIER2_COUNT,
   accumulator = int(state["MIWaveTile"][0]) * int(state["MIWaveTile"][1]) * max(
       1, int(state["MatrixInstM"]) * int(state["MatrixInstN"]) // int(state["WavefrontSize"]))
   budget = costs.maxVgpr - resources.fixedVgpr(state, costs) - accumulator
-  candidates, rejected, examples = _tier0(state, free, costs, budget, tier0PerOrder)
+  candidates, rejected, examples = _tier0(state, free, costs, budget, tier0PerOrder, asmCaps)
   result = AutoResult(None, rejected=rejected, examples=examples)
   result.searched = len(candidates) + sum(rejected.values())
 
@@ -216,6 +289,13 @@ def search(state, free, asmCaps, costs=None, tier2=True, topK=TIER2_COUNT,
         continue
     else:
       perOrderCount[order] += 1
+    if accept is not None:
+      stage = accept(item.params)
+      if stage is not None:
+        result.rejected[stage] += 1
+        result.examples.setdefault(stage, " ".join("%s=%s" % kv
+                                                   for kv in sorted(item.params.items())))
+        continue
     ranked.append(item)
 
   ranked.sort(key=Ranked.key)

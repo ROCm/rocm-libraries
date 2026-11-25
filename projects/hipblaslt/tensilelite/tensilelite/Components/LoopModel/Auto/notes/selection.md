@@ -44,7 +44,7 @@ at 3144 cycles).
 does not emit: 16 of 22 MXF8 band candidates and 27 of 48 F8 ones go past 1024 VGPRs in
 StinkyTofu's allocation, though tier 1 counts them under the budget.  The current set held only
 4 kernels for F8.  `LoopModelAutoSelect: N` therefore emits each candidate and refills from the
-ranking (`expand.REFILL`).
+ranking (`expand.expandFork`).
 
 ## The per-order cap
 

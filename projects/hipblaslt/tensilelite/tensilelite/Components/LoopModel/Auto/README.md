@@ -23,6 +23,7 @@ Notes that go deeper than this README:
 - [notes/exposed-ds-latency.md](notes/exposed-ds-latency.md): how the exposed ds_load latency is computed, step by step, on the tuned kernel.
 - [notes/score.md](notes/score.md): the tier-0 score, term by term.
 - [notes/selection.md](notes/selection.md): which candidates to benchmark, measured against the alternatives, and why the per-order cap stays.
+- [notes/schedule-vs-model.md](notes/schedule-vs-model.md): **read before changing the model to fit a benchmark.** When perf and score disagree, the emitted schedule is a suspect too; how to tell, and a re-scheduled kernel that proves it (+10%).
 
 ## Quick start
 
@@ -39,7 +40,7 @@ ForkParameters:
   # ... any searched parameter left at -1 or not mentioned is free
 ```
 
-**Benchmark the N best** by setting `LoopModelAutoSelect: [N]` with N > 1. Before solutions are built, `BenchmarkProblems._generateForkedSolutions` replaces each such fork with the search's N best candidates (`expand.expandFork`). Each candidate is stated, with `LoopModelAutoSelect: 0`, so the run builds and times all N and the GPU picks among them. The candidates are ranked as in Derive mode, by tier 0 and checked by tiers 1 and 2, so the first is Derive mode's winner. Each candidate is also emitted, CPU only, as tier 3 does (`expand.emittedLoop`). One that Solution refuses or the writer cannot emit, typically StinkyTofu's allocation going past 1024 VGPRs, is counted as `build` or `emit` and replaced by the next in the ranking; the search ranks 4 candidates per slot asked for (`expand.REFILL`). The candidates are not re-ranked by tier 3. On the MXF8 example N = 8 skips 16 that do not emit and takes about 35 s per fork before the build.
+**Benchmark the N best** by setting `LoopModelAutoSelect: [N]` with N > 1. Before solutions are built, `BenchmarkProblems._generateForkedSolutions` replaces each such fork with the search's N best candidates (`expand.expandFork`). Each candidate is stated, with `LoopModelAutoSelect: 0`, so the run builds and times all N and the GPU picks among them. The candidates are ranked as in Derive mode, by tier 0 and checked by tiers 1 and 2, so the first is Derive mode's winner. Each candidate is also emitted, CPU only, as tier 3 does (`expand.emittedLoop`). One that Solution refuses or the writer cannot emit, typically StinkyTofu's allocation going past 1024 VGPRs, is counted as `build` or `emit` and replaced by the next in the ranking. The search asks both checks of each candidate as soon as it lowers (`search.search`'s `accept`) and stops once N pass, so it lowers and emits only the candidates it reaches. The candidates are not re-ranked by tier 3. On the MXF8 example N = 8 skips 16 that do not emit and takes about 35 s per fork before the build. With the inner order free, N = 16 lowers 16 and emits 16, and takes 104 s: emitting is 85 s (5.3 s a kernel), lowering 12 s and tier 0 7 s.
 
 ```yaml
 ForkParameters:
@@ -93,21 +94,20 @@ This is `search._tier0`, using `perf.NestWalk`, `perf.sideCost` and `perf.orderC
 1. **Enumerate loop orders** (`space.orderChoices`). Two parameter sets that produce the same `LoopOrder` word and factors are one order. Nests that differ only by a factor of 1 are also merged (`search._walks`), and a spelling without an extent-1 axis represents the nest when one exists.
 2. **Walk the nest.** For one trip of the steady loop, `NestWalk` lists every WMMA in order. For each operand unit it records the first and last WMMA that uses it. A unit is the tiles one prefetch loads, or a VgprGroup sub-unit of them.
 3. **Check each ring for correctness** (`NestWalk.distances`). A CLR=0 ring of `VgprAlloc` buffers hands out slots in first-use order. A unit's load wants to issue `PLR` units early, but cannot issue before the last WMMA reading the unit that held its slot. That is the use-to-load (write-after-read) dependency. If the slot is not free by the unit's own first use, the ring would read the wrong tile. The choice is refused, as GIR would refuse it with WRONG SOURCE. Otherwise the walk gives each unit's load-to-use distance in WMMAs.
-4. **Count VGPRs.** Each operand's ring needs `unit / VG × VA × (fragment registers + 1 for the MX scale when MX)` VGPRs. Registers are counted without alignment, because StinkyTofu's register allocator packs them. The budget is `1024 − fixed − accumulator`.
+4. **Count VGPRs.** Each operand's ring needs `unit / VG × VA × fragment registers` VGPRs. An MX kernel's scale rings are asked of θ (`_ScaleRings`), once per distinct (order, side, VG, VA, CLR), because θ packs scale carriers and sizes a scale ring by the tiles its operand's ring covers; without the target the estimate is one VGPR per tile per buffer. Registers are counted without alignment, because StinkyTofu's register allocator packs them. The budget is `1024 − fixed − accumulator`.
 5. **Price each operand** (`sideCost`, `NestWalk.exposure`): the exposed ds latency is the time the WMMAs wait on the operand's loads on an in-order clock. A unit waits `max(0, latency − distance × WMMA cycles)`, less the waits that already passed while its load was in flight, so a burst of late refills pays about one latency rather than one each. [notes/exposed-ds-latency.md](notes/exposed-ds-latency.md) works it through on the tuned kernel.
 6. **Keep the useful choices per operand** (`_sideOptions`). Only choices that no other choice beats on registers, exposure, units and copies together are kept.
 7. **Pair A with B under the budget and score each pair:**
 
    ```text
-   score = max(C_wmma, C_lds) + exposed_A + exposed_B + tdm + tdmExposed + tripOverhead + icache
+   score = max(C_wmma, C_lds) + exposed_A + exposed_B + tdm + tdmExposed + tripOverhead
    ```
 
    - `C_wmma` is WMMAs per trip × the WMMA's matrix-queue cycles.
    - `C_lds` is ds_loads per trip × the LDS return rate.
    - `tdm` is tensor loads per trip (`perf.tensorLoads`: one per storage region of each descriptor set, so 2 unsplit and 3 or 4 split) × `tdmIssueCycles`. It is the same for every order of one split pair, so it only ranks the split pairs against each other.
-   - `tdmExposed` (`perf.tdmExposed`) is the tensor-load latency the trip leaves showing: all of `tdmLatency` for a one-copy steady body, which drains `tensorcnt` every trip, and `tdmLatency` less one trip otherwise. See [notes/score.md](notes/score.md#why-a-one-copy-body-pays-the-whole-tensor-load-latency).
+   - `tdmExposed` (`perf.tdmExposed`) is the tensor-load latency the trip leaves showing: all of `tdmLatency` for a one-copy steady body, which drains `tensorcnt` every trip, and `tdmLatency` less one trip otherwise. It is never less than what the operands' legal windows leave: from the return of the last read of the LDS buffer a load overwrites (StinkyTofu's ds drain plus the barrier) to the first read of what it fills, as the walk and PLR place them, timed with the hardware landing latency (`tdmRowCycles` per macro-tile row). Of the measured variants only F8 16×16×64 8×10 has a window shorter than its landing, and ATT confirms it stalls about 400 cycles a trip. See [notes/score.md](notes/score.md#the-legal-tensor-load-window).
    - `tripOverhead` covers the branch and barrier.
-   - `icache` applies only when the unrolled body exceeds the I-cache threshold.
 
    [notes/score.md](notes/score.md) gives each term's formula and the tuned kernel's 1377.
 8. **Rank.** Each order keeps its 16 best pairs (`PER_ORDER`). All are sorted by the `Tier0` tuple: score, then fewer units loaded per trip, then fewer steady-body copies, then fewer VGPRs, then canonical order.
@@ -130,7 +130,7 @@ A refused candidate is counted as `gir`. A candidate whose steady body would nee
 
 The lowered body is also simulated (`perf.simulate`). Those cycles are **reported, not ranked on**, because they ordered measured kernels worse than tier 0 did. The simulation charges each tensor load `tdmIssueCycles`, makes a `ds_load` of an LDS generation wait for the tensor load filling it (`tdmLatency` after issue), and makes that load wait for the last read of the buffer's previous generation. A generation is the shared ref's `gdelta` plus the steady copies before it.
 
-Lowering is about 0.6 s per candidate, nearly all of the search time. Derive mode therefore asks for the winner alone (`topK=1`) and stops at the first candidate that lowers. It continues only through candidates tied with that one on score, units and copies, because the ranking breaks those ties on the exact VGPR count, which only tier 1 knows. The result is the same winner as a full ranking.
+Lowering is about 0.6 s per candidate, nearly all of the search time. Derive mode therefore asks for the winner alone (`topK=1`) and stops at the first candidate that lowers. It continues only through candidates tied with that one on score, units and copies, because the ranking breaks those ties on the exact VGPR count, which only tier 1 knows. The result is the same winner as a full ranking. `LoopModelAutoSelect: N` stops the same way at N candidates that also build and emit.
 
 ### Step 6: Derive the winner for real
 
@@ -191,7 +191,7 @@ The tuned kernel is defined as follows:
 
 **Ring check.** A's ring of 3 with PLR 2 gives distances [80, 40, 80, 40]. B's ring of 2 with PLR 1 gives 40 for each unit. A ring of 1 buffer for A is refused, because a slot is refilled before its tile's second use. So is VG 4 with PLR 4 and VA 5. GIR refuses exactly the same rings.
 
-**Budget.** The rings take A 192, B 160, MX scales 12 + 10, the accumulator 640 and fixed registers 10, for exactly 1024. The emitted kernel uses `.amdhsa_next_free_vgpr` 1023. One more A buffer (VA 4) is over budget. WFN 1 needs 1184 VGPRs (1193 in the real kernel) and is refused.
+**Budget.** The rings take A 192, B 160 and MX scales 12 + 5 (θ's), laid out in 20, plus the accumulator 640, the 6 address VGPRs below A and the 2-VGPR pad before B: 1020, the top of the B ring in the writer's layout. The emitted kernel uses `.amdhsa_next_free_vgpr` 1023. One more A buffer (VA 4) is over budget. WFN 1 needs 1184 VGPRs (1193 in the real kernel) and is refused.
 
 **Score.** At 8 cycles per WMMA, `C_wmma` is 160 × 8 = 1280; `C_lds` is smaller. Every distance × 8 is at least the 300-cycle effective latency, so nothing is exposed, and the two tensor loads cost 2 × 40. The body has 3 copies, so one 1280-cycle trip covers the 800-cycle tensor-load latency: 1280 + 0 + 0 + 80 + 0 + 17 = **1377**. That is the floor, and with the register parameters free the tuned kernel is alone at it; the one-copy choices that also expose nothing (A CLR 1) pay the full 800.
 
@@ -219,6 +219,9 @@ Tier 3 ranks the 27 at Spearman +0.90 against GFLOPS. Its three fastest predicti
 | `dsLatency` | 56 for `ds_load_b128` | copied from StinkyTofu `Gfx1250Instructions.def` |
 | `dsCyclesPerLoad` | 6 | copied from StinkyTofu, the DAG scheduler's `DsReadCyclesPerLoad` |
 | `dsQueueDepth` | 16 | copied from StinkyTofu `HWModel` `lds.readQueueDepth` |
+| `dsThroughput` / `dsMaxDrain` | 2 / 255 for `ds_load_b128`, 4 / 131 for b64, 4 / 120 otherwise | copied from StinkyTofu `Gfx1250Instructions.def` |
+| `barrierSignalToWait` | 11 | copied from StinkyTofu `HWModel` `barrier.signalToWaitLatency` |
+| `tdmRowCycles` | 2.2 | **measured** with ATT: tensor-load issue to landing per macro-tile row, 13 kernels from 128×128 to 256×320 |
 | `tripOverhead` | 17 | copied from StinkyTofu: barrier signal-to-wait 11 + jump 6 |
 | `dsEffectiveLatency` | 300 | **fitted** to 17 measured kernels |
 | `asmDsLatency` / `asmTdmLatency` | 250 / 2500 | **fitted** to 27 measured kernels |
@@ -226,7 +229,7 @@ Tier 3 ranks the 27 at Spearman +0.90 against GFLOPS. Its three fastest predicti
 | `tdmLatency` | 800 | **fitted** for tier 2 to 40 measured kernels; a latency from GIR's load position, not the hardware's. Tier 0's one-copy term uses it too: 600 and up rank 6 data-type / tile variants within 0.02 of the best |
 | `fixedVgpr`, `fixedSgpr` | 10, 86 | fitted to emitted kernels' register counts |
 
-`perf.drainLatency` reimplements StinkyTofu's `computeDynamicDrainLatency`. It is used as a floor under `dsEffectiveLatency`.
+`perf.drainLatency` reimplements StinkyTofu's `computeDynamicDrainLatency`, per-width throughput, cap and wave clamp included. It is used as a floor under `dsEffectiveLatency`, and alone for the read return that opens a tensor load's legal window.
 
 The fitted latencies come from one MI family and may not carry over to other data types or tile sizes.
 
@@ -234,7 +237,7 @@ The fitted latencies come from one MI family and may not carry over to other dat
 
 **Tier 0's 300-cycle latency is not ds latency.** With StinkyTofu's own LDS numbers instead, tier 0 exposes nothing on any of the 27 measured kernels: about 158 loads × 6 cycles is less than 1280 WMMA cycles, and even the shortest distance, 20 WMMAs, covers 56 cycles. Every kernel then scores the 1377 floor. The tie-break would pick PLRA1/VAA2 (measured 8.67) over the tuned kernel (9.33).
 
-**The missing dependency is the tensor load (TDM).** A `ds_load` can only read a K-slice after its `tensor_load_to_lds` has landed in LDS and the barrier has passed. The next tensor load cannot overwrite that LDS buffer until the `ds_load`s reading it complete. Tier 2 models both steps from GIR's dependences, and tiers 0 and 2 charge each tensor load's issue. Neither sees the wait depth that decides the cost (below); tier 0 approximates it from the steady-body copies only (`tdmExposed`).
+**The missing dependency is the tensor load (TDM).** A `ds_load` can only read a K-slice after its `tensor_load_to_lds` has landed in LDS and the barrier has passed. The next tensor load cannot overwrite that LDS buffer until the `ds_load`s reading it complete. Tier 2 models both steps from GIR's dependences, and tiers 0 and 2 charge each tensor load's issue. Neither sees the wait depth that decides the cost (below); tier 0 approximates it from the steady-body copies and the legal window the parameters leave (`tdmExposed`).
 
 Removing the waits from tier 3's simulation shows the effect, at StinkyTofu's ds latency of 56:
 
@@ -264,12 +267,12 @@ The widening has not been shown to be needed. With it turned off, the same kerne
 
 Tier 0 represents each walk by a clean spelling when one exists. For 17 of the config's 150 walks the first spelling in canonical order is degenerate though a clean one exists: `MMKNKN` (M1, N10, K1) walks the same tiles as `MKN` (M1, N1, K1), and `MKN` is the one searched. The other 16 degenerate walks can only be spelled degenerately. `LoopIters` is 2, so any word with two K letters splits K into 2 × 1. The tuned kernel's `KKNMNM` (M2, N2, K1) is not degenerate.
 
-The tier 0 register count also lacks θ's K-step floor: an operand always holds at least one K-step of its tiles (`free_tiles` × fragment VGPRs) for the tail loop. Adding the floor makes tier 0's operand data count match θ on 99.8% of choices. The remainder are the degenerate units above.
+Tier 0 counts the tail loop's reserve the way tier 1 does: the A and B slabs (`perf.tailSlabs`, each operand's wave-tile tiles × fragment VGPRs) reuse the A and B rings, and a pair adds only what the slabs outgrow them by. On the MXF8 8×10 config it matches tier 1's `tailReserve` on all 1014 tier-0 candidates (0 on 888, 16 to 64 on the rest), and tier 0's A and B rings match tier 1's on all of them. The MX scale rings were the remaining gap: one VGPR per tile per slot was 0 to 112 VGPRs under θ's MXSA and 10 under to 9 over its MXSB. Emitted kernels follow θ (a candidate θ counts 51 more scale VGPRs declares 48 more), so tier 0 now asks θ: 5261 distinct rings, about 8 s of the config's 25 s search, after which tier 0's count equals tier 1's on all 400 candidates tier 1 may see and tier 1 refuses none for budget (7 before).
 
 **Other gaps:**
 
 - **Register refill timing.** Tier 0 frees a ring slot one WMMA position after its last reader. It does not add cycle-level operand-read time or hazard wait states, and a stalled WMMA does not delay the slots it frees.
-- **StinkyTofu reschedules.** The real load-to-use distances differ from the walk's.
+- **StinkyTofu reschedules.** The real load-to-use distances differ from the walk's, sometimes for the worse. 14 of the MXF8 8×10 top 50 lose 400–1100 cycles a trip to `s_wait_tensorcnt` because a fused scale read is hoisted early or the TDM wait is fenced before its first reader. The parameters leave room, and hand-moving those instructions in one of them removed the stall (+10%). Tier 0 is right not to charge it. See [notes/schedule-vs-model.md](notes/schedule-vs-model.md).
 - **Small wave tiles.** With a 4×4 wave tile a trip (32 WMMAs) is far shorter than the tensor-load latency. `tdmExposed` still charges a one-copy body 256 more than a multi-copy one (800 vs 544 on BF16 4×4), and that is backwards there: the one-copy kernels with both operands resident (CLR 1) run at 0.97 PF against 0.79 for every multi-copy kernel tier 0 ties at its best. They score 20% above the best and so are never benchmarked; tier 2 ranks them first (408–422 cycles against 832). See [notes/selection.md](notes/selection.md). BF16 4×4 is ranked backwards by every tier (tier 0 −0.63, tier 3 −0.18): its slowest kernels prefetch all of the next trip's A and B past v255 and switch `s_set_vgpr_msb` inside the WMMA chain, which no tier models.
 - **TDM split ranking.** Tiers 0 and 2 rank a split below its unsplit kernel by the extra loads' issue only. One of the 13 measured splits is faster than its unsplit kernel (WFM1 PLR4/1 with B split, +11%), because splitting changed its emitted waits from `tensorcnt 0, 0` to `3, 1`. Only tier 3 sees that.
 - **Calibration coverage.** The constants have been checked on one MI family only.
@@ -356,7 +359,7 @@ These run in this order for gfx1250 (`shared/stinkytofu/src/pipeline/backend/Gfx
   - Tier 1 runs the exact Solution checks and the VGPR count.
   - Tier 2 is the GIR correctness gate.
   - Tier 3 times the emitted loop (`asmsim`).
-- **Score**: tier 0's cycles per trip, `max(cWmma, cLds) + exposedA + exposedB + tdm + tdmExposed + tripOverhead + icache`.
+- **Score**: tier 0's cycles per trip, `max(cWmma, cLds) + exposedA + exposedB + tdm + tdmExposed + tripOverhead`.
 - **Exposure**: the load latency a unit's load-to-use distance does not hide. It is added per operand.
 - **Side options (`_sideOptions`)**: one operand's register choices that no other choice beats on registers, exposure, units and copies together, a Pareto filter.
 - **Finalist**: a top-ranked candidate Derive mode tries to build for real.

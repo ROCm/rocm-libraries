@@ -21,7 +21,9 @@ dependences.  StinkyTofu's scheduler still reorders after GIR, so this prices th
 Both tiers charge each tensor_load_to_lds its issue (`tdmIssueCycles`, `tensorLoads` per trip);
 tier 2 also makes a ds_load of an LDS generation wait for the tensor_load filling it, and that
 load wait for the last read of the buffer's previous generation.  The s_wait_tensorcnt depth
-StinkyTofu emits is set on the scheduled loop, so neither tier sees it; tier 3 does.
+StinkyTofu emits is set on the scheduled loop, so neither tier sees it; tier 3 does.  Tier 0
+charges at least the latency the legal window leaves (`NestWalk.tdmWindow`), which a schedule
+can only shorten.
 """
 
 from dataclasses import dataclass, field
@@ -88,24 +90,62 @@ def tensorLoads(kernel):
   return sum(sets)
 
 
-def tdmExposed(cWmma, cLds, copies, costs):
-  """tensor_load_to_lds latency a trip leaves exposed, from its steady-body copies.
+def tdmExposed(cWmma, cLds, copies, costs, windows=(), perPosition=0.0, landing=None):
+  """tensor_load_to_lds latency a trip leaves exposed: the larger of what its steady-body copies
+  and its operands' legal windows (`tdmWindowExposed`) leave.  `perPosition` is the trip's
+  cycles per WMMA position, `max(cWmma, cLds) / wmmas`: an LDS-bound trip spreads them out.
+  The windows are timed with the hardware `landing` latency (`tdmLandingLatency`), the copies
+  with the calibrated `tdmLatency`.
 
   The wait depth is set after scheduling (StinkyWaitCntInsertionPass): a one-copy body waits
   for s_wait_tensorcnt 0 every trip, a fraction of a trip after the load it retires issued, so
   nearly all the latency shows; a longer body keeps each load in flight about one trip.
   """
-  return max(0.0, costs.tdmLatency - (max(cWmma, cLds) if copies > 1 else 0.0))
+  copied = max(0.0, costs.tdmLatency - (max(cWmma, cLds) if copies > 1 else 0.0))
+  landing = costs.tdmLatency if landing is None else landing
+  return max(copied, tdmWindowExposed(windows, landing, perPosition))
 
 
-def drainLatency(costs, latency, loads, waves):
-  """StinkyTofu `computeDynamicDrainLatency`: one burst of `loads` ds_loads, `waves` resident."""
+def tdmWindowExposed(windows, latency, perPosition):
+  """Cycles per trip the WMMAs wait on tensor loads issued and retired at the edges of their
+  legal windows (`NestWalk.tdmWindow`), however the schedule places them.
+
+  `windows` holds one `(free, need, ret)` per TDM operand: each load issues `ret` cycles after
+  the read at `free`, once that read has returned.  One in-order clock: a wait delays every
+  later WMMA, and a load issued before it keeps landing through it.
+  """
+  waits, total = [], 0.0
+  for free, need, ret in sorted((w for w in windows if w is not None), key=lambda w: w[1]):
+    before = sum(wait for at, wait in waits if at <= free)
+    wait = max(0.0, free * perPosition + ret + before + latency
+               - (need * perPosition + total))
+    waits.append((need, wait))
+    total += wait
+  return total
+
+
+def drainLatency(costs, latency, loads, waves, bytesPerLane=16):
+  """StinkyTofu `computeDynamicDrainLatency`: one burst of `loads` ds_loads `bytesPerLane` wide,
+  `waves` resident sharing the return queue."""
+  low, high = costs.dsDrainWaves
+  waves = min(high, max(low, int(waves)))
   depth = costs.dsQueueDepth
   if depth <= 0 or loads <= 1:
-    return latency
-  if loads <= depth:
-    return latency + (loads - 1) * waves
-  return latency + (depth - 1) * waves + (loads - depth) * waves / 2
+    drain = latency
+  elif loads <= depth:
+    drain = latency + (loads - 1) * waves
+  else:
+    drain = latency + (depth - 1) * waves \
+        + (loads - depth) * waves // costs.dsLoadThroughput(bytesPerLane)
+  return min(drain, costs.dsLoadMaxDrain(bytesPerLane))
+
+
+def tdmLandingLatency(kernel, costs):
+  """Hardware cycles from a trip's tensor loads issuing to the last landing: `tdmRowCycles`
+  per macro-tile row they move."""
+  rows = sum(int(kernel.get("MacroTile" + index, 0) or 0)
+             for side, index in (("A", "0"), ("B", "1")) if kernel.get("enableTDM" + side))
+  return costs.tdmRowCycles * rows
 
 
 def _readOperands(theta):
@@ -151,19 +191,19 @@ def estimate(kernel, theta, S, costs, target=None):
     distance[name] = steps * perStep * perWmma
     service = burst[name] * costs.dsCyclesPerLoad
     queueing = rho / (2.0 * (1.0 - rho)) * service
-    effective[name] = drainLatency(costs, latency[name], burst[name], waves) + queueing
+    effective[name] = drainLatency(costs, latency[name], burst[name], waves,
+                                   _readBytesPerLane(kernel, operand)) + queueing
     exposed[name] = max(0.0, effective[name] - distance[name]) * units[name] \
         if not name.startswith("MXS") else 0.0
 
   copies = _geometry.ring_trip_copies(theta, S)
   body = (wmmas + sum(loads.values())) * copies
-  icache = max(0.0, body - costs.icacheBodyInstructions) / float(max(1, copies)) * 0.25
   stall = sum(exposed.values())
   core = max(cWmma, cLds)
-  total = core + stall + costs.tripOverhead + icache
+  total = core + stall + costs.tripOverhead
   bound = "latency" if stall > 0.25 * core else ("lds" if cLds > cWmma else "wmma")
   return PerfEstimate(total, bound, cWmma, cLds, exposed, distance, effective, loads, body,
-                      {"rho": rho, "copies": copies, "icache": icache, "wmmas": wmmas})
+                      {"rho": rho, "copies": copies, "wmmas": wmmas})
 
 
 # --- tier 0: the nest walk, priced before θ is built --------------------------------------------
@@ -262,8 +302,30 @@ class NestWalk:
       total += wait
     return sum(wait for _at, wait in waits[2 * n:])
 
-  def _stream(self, side, vg, steps, buffers):
-    """`[(issued, first)]` WMMA positions of the units of three consecutive trips."""
+  def tdmWindow(self, side, vg, steps, buffers, depth):
+    """`(free, need)`: WMMA positions, from the start of the trip that uses K chunk c, of the
+    last ds_load of the chunk whose LDS buffer c's tensor_load overwrites, and of the first
+    ds_load of c; None when the ring is too small to be correct (`distances`).
+
+    In a ring of `depth` buffers chunk c overwrites chunk c-depth: its load can issue once
+    those reads have returned (write-after-read) and must land by c's first read
+    (read-after-write).  PLR moves both ends alike.  Which trip the loop issues the load in
+    (`PrefetchGlobalRead`) is the schedule's choice, so it does not bound the window.
+    """
+    depth = max(1, int(depth))
+    chunk = depth + 1
+    stream = self._stream(side, vg, steps, buffers, chunk + 1)
+    if not stream:
+      return None
+    n = len(self.uses(side, vg))
+    issued = [at for at, _first in stream]
+    start = chunk * self.wmmas
+    need = min(issued[chunk * n:(chunk + 1) * n])
+    free = max(issued[(chunk - depth) * n:(chunk - depth + 1) * n])
+    return free - start, need - start
+
+  def _stream(self, side, vg, steps, buffers, trips=3):
+    """`[(issued, first)]` WMMA positions of the units of `trips` consecutive trips."""
     uses = self.uses(side, vg)
     n = len(uses)
     if n == 0:
@@ -275,7 +337,7 @@ class NestWalk:
       return first + shift, last + shift
 
     out = []
-    for g in range(3 * n):
+    for g in range(trips * n):
       first, _last = at(g)
       issued = at(g - steps)[0] if steps > 0 else first
       if buffers is not None:
@@ -294,11 +356,38 @@ class SideCost:
   copies: int
   steps: int
   units: int     #: units (VG sub-units) loaded per trip, each paying the latency once
+  #: `NestWalk.tdmWindow` of its tensor load plus the cycles its last read takes to return
+  #: (`(free, need, ret)`), None without TDM
+  tdm: tuple = None
+  #: `regs` less the MX scale ring: the operand ring the tail loop's slab can reuse
+  ring: int = 0
+
+
+def tailSlabs(kernel):
+  """VGPRs the tail loop's A and B slabs hold together: each operand's wave-tile tiles times
+  its fragment registers (`resources.gprCount`'s tail slabs)."""
+  pt = kernel["ProblemType"]
+  slabs = 0
+  for side, tiles in (("A", kernel["MIWaveTile"][0]), ("B", kernel["MIWaveTile"][1])):
+    dataType = pt.get("DataType" + side) or pt["DataType"]
+    slabs += max(1, int(tiles) * max(1, int(kernel["MIInputPerThread" + side])
+                                     * dataType.numBytes() // 4))
+  return slabs
+
+
+def ldsDepth(kernel, side):
+  """The LDS buffers `side`'s tensor loads rotate through."""
+  depth = int(kernel.get("LDSBuffer" + side, -1) or -1)
+  return depth if depth > 0 else int(kernel.get("NumLdsBlk", 2) or 2)
 
 
 def sideCost(kernel, walk, side, choice, costs, rho, mx):
   """Tier 0: one operand's VGPRs and exposed ds latency per trip under `choice`, or None when
-  its ring is too small to be correct (`NestWalk.distances`)."""
+  its ring is too small to be correct (`NestWalk.distances`).
+
+  The MX scale ring is estimated at one VGPR per tile per buffer; θ's carrier packing and
+  coverage-following depth can put it tens of VGPRs off either way, so the search replaces it
+  with θ's count when it has the target (`search._ScaleRings`)."""
   shape = walk.shapes[side]
   pt = kernel["ProblemType"]
   dataType = pt.get("DataType" + side) or pt["DataType"]
@@ -310,9 +399,9 @@ def sideCost(kernel, walk, side, choice, costs, rho, mx):
   perTile = max(1, ceil(fragRegs * 4 / bytesPerLane))
   # The unit's own drain is a floor; under the loop's load the effective latency dominates it.
   waves = max(1, int(kernel.get("NumThreads", 128)) // int(kernel.get("WavefrontSize", 32)))
-  latency = max(costs.dsEffectiveLatency,
-                drainLatency(costs, costs.dsLoadLatency(bytesPerLane), perBuffer * perTile,
-                             waves))
+  drain = drainLatency(costs, costs.dsLoadLatency(bytesPerLane), perBuffer * perTile, waves,
+                       bytesPerLane)
+  latency = max(costs.dsEffectiveLatency, drain)
   steps = choice.plr if choice.clr else max(0, min(choice.plr, choice.va - 1))
   perWmma = wmmaCycles(kernel, costs)
   buffers = None if choice.clr else choice.va
@@ -322,7 +411,12 @@ def sideCost(kernel, walk, side, choice, costs, rho, mx):
   exposed = walk.exposure(side, choice.vg, steps, buffers, latency, perWmma)
   from math import gcd
   copies = 1 if choice.clr else choice.va // gcd(choice.va, max(1, shape.positions))
-  return SideCost(regs, exposed, copies, steps, len(distances))
+  window = None
+  if kernel.get("enableTDM" + side):
+    edges = walk.tdmWindow(side, choice.vg, steps, buffers, ldsDepth(kernel, side))
+    window = edges and edges + (drain + costs.barrierSignalToWait,)
+  return SideCost(regs, exposed, copies, steps, len(distances), window,
+                  perBuffer * choice.va * fragRegs)
 
 
 def orderCore(kernel, walk, costs):
