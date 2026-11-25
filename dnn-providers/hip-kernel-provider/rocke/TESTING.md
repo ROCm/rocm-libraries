@@ -936,8 +936,8 @@ inputs); re-check them when that pin moves.
 | `therock-multi-arch-ci-nightly.yml` | the nightly schedule | comprehensive | 4 | no |
 | `hipdnn-superbuild-ci.yml` | a pull request that changes hipDNN or provider files other than docs, and its own nightly schedule | `full`, then entries without a tier label | n/a (one job per OS) | no |
 
-No rocm-libraries CI job builds rocKE, so no rocKE CTest entry, installed or
-build-tree, runs in CI (⚠ [G11](#72-platform-quality-gaps-question-b)). TheRock's
+The "Builds rocKE" column is why no rocKE CTest entry runs in CI
+([What CI checks today](#what-ci-checks-today)). TheRock's
 flag `THEROCK_FLAG_HIPKERNELPROVIDER_ENABLE_ROCKE` is off by default, and no
 workflow under `.github/workflows/` passes it in its `external_repo` input. The
 hipDNN superbuild configures with `--preset hipdnn-dev-all`, which leaves the provider's
@@ -948,8 +948,18 @@ and the superbuild runs the build-tree entries (the test binaries and Python
 checks that `platform/tests/cmake/` and `library/cpp/tests/` register). The
 source-tree checks of a pull request run instead as pre-commit hooks of the
 repository root `.pre-commit-config.yaml`, which the `pre-commit.yml` workflow
-runs on each pull request to develop that changes rocKE: `rocke-pending-lanes`,
-`rocke-compliance` and `rocke-no-torch`.
+runs on each pull request to develop that changes rocKE:
+
+- `rocke-library-reach`: platform's imports of the library packages only shrink;
+- `rocke-pending-lanes`: every test file is assigned to a CI entry or has a
+  recorded reason;
+- `rocke-compliance`: the compliance patterns;
+- `rocke-no-torch`: no new torch use;
+- `rocke-arch-table-engine-parity`: the two engines' arch tables agree;
+- `rocke-gemm-spec-dict-binding-parity`: the GEMM spec dicts match the engine
+  binding;
+- `rocke-emitter-pair-parity`: the C and Python emitters agree on HIP text and
+  refusals (lands with the hook change that adds it to the config).
 
 **Which GPUs run tests.** The pull-request job, `therock-multi-arch-ci.yml`,
 selects these GPU families; TheRock's family matrix
@@ -964,8 +974,8 @@ run. A family's tests include rocKE's entries only in a job that builds rocKE.
 | gfx110X (gfx1100-gfx1103) | Windows | yes | every trigger |
 | gfx90a | Linux | no | none in rocm-libraries CI |
 
-So pull-request CI tests only gfx942 (Linux) and gfx110X (Windows). rocKE's
-gfx950 runs outside this CI are tracked in AICK-3411.
+[What CI checks today](#what-ci-checks-today) gives what this means for a pull
+request.
 
 **Dependency on TheRock.** Item sharding needs two TheRock behaviours.
 TheRock exports `GTEST_SHARD_INDEX` and `GTEST_TOTAL_SHARDS` to every CTest

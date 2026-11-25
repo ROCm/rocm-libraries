@@ -81,7 +81,7 @@ if(BUILD_TESTING)
 
     # The next three entries are kept in step with the rocke-* hooks in the
     # root .pre-commit-config.yaml.
-    # Every test file runs in a CI-run entry or is listed, with its reason, in
+    # Every test file is assigned to a CI entry or is listed, with its reason, in
     # rocke.tests.pending_lanes. The check configures this source tree and reads
     # the provider categories, which the installed test tree does not carry.
     # The registration it audits is the same on every platform, so it runs
