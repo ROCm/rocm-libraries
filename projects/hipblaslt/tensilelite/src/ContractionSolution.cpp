@@ -3793,6 +3793,17 @@ namespace TensileLite
 
         rv.clusterDim = sizeMapping.clusterDim;
 
+        // The HIP driver rejects a cluster launch whose grid is not divisible by
+        // clusterDim, so round a non-persistent grid up as generateSingleCall
+        // does. The kernel exits on the padded work-groups.
+        if((rv.clusterDim.x > 1 || rv.clusterDim.y > 1) && !sizeMapping.isPersistent())
+        {
+            rv.numWorkGroups.x = RoundUpToMultiple(rv.numWorkGroups.x, rv.clusterDim.x);
+            rv.numWorkGroups.y = RoundUpToMultiple(rv.numWorkGroups.y, rv.clusterDim.y);
+            rv.numWorkItems.x  = rv.workGroupSize.x * rv.numWorkGroups.x;
+            rv.numWorkItems.y  = rv.workGroupSize.y * rv.numWorkGroups.y;
+        }
+
         rv.sharedMemBytes = 0;
 
         packCustomArgs<T_Debug>(rv, customKernel.args, problem, inputs, hardware, launch, schedule);
