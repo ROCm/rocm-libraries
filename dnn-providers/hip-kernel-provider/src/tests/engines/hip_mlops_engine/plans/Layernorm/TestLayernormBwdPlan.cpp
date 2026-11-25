@@ -592,3 +592,14 @@ TEST(TestLayernormBwdPlan, CompileWithUnsupportedDimensionThrows)
 
     EXPECT_THROW(plan.compile(mockCompiler, deviceProps), hipdnn_plugin_sdk::HipdnnPluginException);
 }
+
+TEST(TestLayernormBwdPlan, CompileWithThreadCountAtLimitThrows)
+{
+    const MockKernelCompiler mockCompiler;
+
+    // 4194304 blocks of 1024 threads reach 2^32 threads
+    auto [fbb, plan] = createPlanFromGraph({4, 1, 1, 1}, {4194304, 4, 1, 1});
+    auto deviceProps = createTestDeviceProps();
+
+    EXPECT_THROW(plan.compile(mockCompiler, deviceProps), hipdnn_plugin_sdk::HipdnnPluginException);
+}

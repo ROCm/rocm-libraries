@@ -113,6 +113,29 @@ LayernormBwdPlan::LayernormBwdPlan(LayernormBwdParams&& params)
     _localSize = LayernormBwdParams::MAX_LOCAL_SIZE;
 }
 
+std::vector<KernelLaunchShape> LayernormBwdPlan::launchShapes(int64_t outerSize,
+                                                              int64_t innerSize,
+                                                              int64_t stride,
+                                                              int64_t localSize,
+                                                              bool isParallel,
+                                                              int64_t parallelSize)
+{
+    std::vector<KernelLaunchShape> shapes{{"LayernormBwd", outerSize * stride, localSize}};
+    if(isParallel)
+    {
+        shapes.push_back({"LayernormBwdScaleBiasParallel",
+                          align(parallelSize * innerSize, localSize),
+                          localSize});
+        shapes.push_back(
+            {"LayernormBwdScaleBiasReduceSum", align(innerSize, localSize), localSize});
+    }
+    else
+    {
+        shapes.push_back({"LayernormBwdScaleBias", align(innerSize, localSize), localSize});
+    }
+    return shapes;
+}
+
 size_t LayernormBwdPlan::getWorkspaceSize([[maybe_unused]] const Handle& handle) const
 {
     auto const deviceProperties
@@ -161,14 +184,6 @@ void LayernormBwdPlan::compile(const IKernelCompiler& kernelCompiler,
     const std::string scaleBiasTypeString = getKernelParamTypeString(scaleBiasDataType);
     const std::string meanInvVarianceTypeString = getKernelParamTypeString(meanInvVarianceDataType);
 
-    const int64_t gridSize = _outerSize * _stride;
-    if(gridSize >= UINT32_MAX)
-    {
-        throw hipdnn_plugin_sdk::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-                                                       "Unsupported number of workgroups: "
-                                                           + std::to_string(gridSize));
-    }
-
     _isParallel = isParallel(deviceProperties,
                              static_cast<size_t>(_localSize),
                              static_cast<size_t>(_innerSize),
@@ -178,6 +193,17 @@ void LayernormBwdPlan::compile(const IKernelCompiler& kernelCompiler,
                                                               static_cast<size_t>(_innerSize),
                                                               static_cast<size_t>(_outerSize))
                                             : 0;
+
+    const auto shapes = launchShapes(_outerSize,
+                                     _innerSize,
+                                     _stride,
+                                     _localSize,
+                                     _isParallel,
+                                     static_cast<int64_t>(parallelSize));
+    for(const auto& shape : shapes)
+    {
+        checkLaunchFitsThreadLimit(shape);
+    }
 
     // Prepare compilation options
     KernelCompileOptions options(_params.x(), deviceProperties);
@@ -197,7 +223,7 @@ void LayernormBwdPlan::compile(const IKernelCompiler& kernelCompiler,
     _runnableKernels[0]->setBlockSize(static_cast<unsigned int>(_localSize),
                                       static_cast<unsigned int>(1),
                                       static_cast<unsigned int>(1));
-    _runnableKernels[0]->setGridSize(static_cast<unsigned int>(gridSize),
+    _runnableKernels[0]->setGridSize(static_cast<unsigned int>(shapes[0].blocks),
                                      static_cast<unsigned int>(1),
                                      static_cast<unsigned int>(1));
 
@@ -209,17 +235,15 @@ void LayernormBwdPlan::compile(const IKernelCompiler& kernelCompiler,
         _runnableKernels[1]->setBlockSize(static_cast<unsigned int>(_localSize),
                                           static_cast<unsigned int>(1),
                                           static_cast<unsigned int>(1));
-        _runnableKernels[1]->setGridSize(
-            static_cast<unsigned int>(align(parallelSize * static_cast<size_t>(_innerSize),
-                                            static_cast<size_t>(_localSize))),
-            static_cast<unsigned int>(1),
-            static_cast<unsigned int>(1));
+        _runnableKernels[1]->setGridSize(static_cast<unsigned int>(shapes[1].blocks),
+                                         static_cast<unsigned int>(1),
+                                         static_cast<unsigned int>(1));
 
         _runnableKernels.push_back(_compiledProgram->getKernel("LayernormBwdScaleBiasReduceSum"));
         _runnableKernels[2]->setBlockSize(static_cast<unsigned int>(_localSize),
                                           static_cast<unsigned int>(1),
                                           static_cast<unsigned int>(1));
-        _runnableKernels[2]->setGridSize(static_cast<unsigned int>(align(_innerSize, _localSize)),
+        _runnableKernels[2]->setGridSize(static_cast<unsigned int>(shapes[2].blocks),
                                          static_cast<unsigned int>(1),
                                          static_cast<unsigned int>(1));
     }
@@ -231,7 +255,7 @@ void LayernormBwdPlan::compile(const IKernelCompiler& kernelCompiler,
         _runnableKernels[1]->setBlockSize(static_cast<unsigned int>(_localSize),
                                           static_cast<unsigned int>(1),
                                           static_cast<unsigned int>(1));
-        _runnableKernels[1]->setGridSize(static_cast<unsigned int>(align(_innerSize, _localSize)),
+        _runnableKernels[1]->setGridSize(static_cast<unsigned int>(shapes[1].blocks),
                                          static_cast<unsigned int>(1),
                                          static_cast<unsigned int>(1));
     }

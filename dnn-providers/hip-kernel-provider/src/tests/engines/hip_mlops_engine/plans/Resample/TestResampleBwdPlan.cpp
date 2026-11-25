@@ -384,6 +384,24 @@ TEST(TestResampleBwdPlan, CompileRejectsUnsupportedWorkgroups)
     EXPECT_THROW(plan.compile(mockCompiler, deviceProps), hipdnn_plugin_sdk::HipdnnPluginException);
 }
 
+// 2^32 dx elements is 2^24 blocks: below UINT32_MAX blocks, but 2^32 threads.
+TEST(TestResampleBwdPlan, CompileRejectsBlockCountReachingThreadLimit)
+{
+    auto [fbb, plan]
+        = createPlanFromCustomGraph(createCustomResampleBwdGraph({1, 1, 65536, 65536},
+                                                                 {4294967296, 4294967296, 65536, 1},
+                                                                 {1, 1, 65536, 65536},
+                                                                 {4294967296, 4294967296, 65536, 1},
+                                                                 {0, 0},
+                                                                 {0, 0},
+                                                                 {1, 1},
+                                                                 {1, 1}));
+    auto deviceProps = createTestDeviceProps();
+
+    const MockKernelCompiler mockCompiler;
+    EXPECT_THROW(plan.compile(mockCompiler, deviceProps), hipdnn_plugin_sdk::HipdnnPluginException);
+}
+
 TEST(TestResampleBwdPlan, CompileRejectsUnsupportedIndexDataType)
 {
     auto [fbb, plan] = createPlanFromCustomGraph(

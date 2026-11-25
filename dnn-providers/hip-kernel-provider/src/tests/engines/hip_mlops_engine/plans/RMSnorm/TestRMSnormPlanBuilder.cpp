@@ -241,6 +241,17 @@ TEST_F(TestRMSnormPlanBuilder, IsApplicableReturnsTrueForValidInferenceActivatio
     EXPECT_TRUE(_planBuilder.isApplicable(_dummyHandle, graph));
 }
 
+// RMSnorm launches one block of 256 threads per row: 16777215 rows is 2^32 - 256 threads.
+TEST_F(TestRMSnormPlanBuilder, IsApplicableReturnsTrueForRowCountAtThreadLimit)
+{
+    auto builder
+        = hipdnn_test_sdk::utilities::createValidRMSNormGraph({2, 1, 1, 1}, {16777215, 2, 1, 1});
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
+
+    EXPECT_TRUE(_planBuilder.isApplicable(_dummyHandle, graph));
+}
+
 TEST_F(TestRMSnormPlanBuilder, IdentityActivationIsApplicable)
 {
     auto const builder = createRMSnormActivationTestGraph(
@@ -254,6 +265,36 @@ TEST_F(TestRMSnormPlanBuilder, IdentityActivationIsApplicable)
         builder.GetBufferPointer(), builder.GetSize());
 
     EXPECT_TRUE(_planBuilder.isApplicable(_dummyHandle, graph));
+}
+
+TEST_F(TestRMSnormPlanBuilder, IsApplicableReturnsFalseForRowCountOverThreadLimit)
+{
+    auto builder
+        = hipdnn_test_sdk::utilities::createValidRMSNormGraph({2, 1, 1, 1}, {16777216, 2, 1, 1});
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
+
+    EXPECT_FALSE(_planBuilder.isApplicable(_dummyHandle, graph));
+}
+
+TEST_F(TestRMSnormPlanBuilder, IsApplicableReturnsTrueForRowCountAtThreadLimitActivation)
+{
+    auto builder = hipdnn_test_sdk::utilities::createValidRMSNormActivationGraph(
+        {2, 1, 1, 1}, {16777215, 2, 1, 1});
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
+
+    EXPECT_TRUE(_planBuilder.isApplicable(_dummyHandle, graph));
+}
+
+TEST_F(TestRMSnormPlanBuilder, IsApplicableReturnsFalseForRowCountOverThreadLimitActivation)
+{
+    auto builder = hipdnn_test_sdk::utilities::createValidRMSNormActivationGraph(
+        {2, 1, 1, 1}, {16777216, 2, 1, 1});
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
+
+    EXPECT_FALSE(_planBuilder.isApplicable(_dummyHandle, graph));
 }
 
 TEST_F(TestRMSnormPlanBuilder, BackwardReluIsNotApplicable)

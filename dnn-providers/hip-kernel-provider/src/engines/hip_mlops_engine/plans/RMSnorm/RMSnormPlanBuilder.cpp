@@ -5,6 +5,7 @@
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
 
 #include "RMSnormApplicabilityChecks.hpp"
+#include "RMSnormCommon.hpp"
 #include "RMSnormFwdPlan.hpp"
 #include "RMSnormPlanBuilder.hpp"
 
@@ -64,6 +65,29 @@ void forwardActivationCheckTensors(
             "Rmsnorm forward x input must not be virtual, y output tensor must be virtual, inverse "
             "RMS output tensor must not be virtual");
     }
+}
+
+bool launchShapesFitThreadLimit(
+    const hipdnn_flatbuffers_sdk::data_objects::RMSNormAttributes& fwdAttr,
+    const std::unordered_map<int64_t,
+                             const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
+        tensorMap)
+{
+    const ProblemDescription problem(&findTensorAttributes(tensorMap, fwdAttr.x_tensor_uid()),
+                                     &findTensorAttributes(tensorMap, fwdAttr.scale_tensor_uid()),
+                                     Direction::FORWARD);
+    for(const auto& shape : RMSnormFwdPlan::launchShapes(problem.outerSize(), problem.stride()))
+    {
+        if(!launchFitsThreadLimit(shape.blocks, shape.threadsPerBlock))
+        {
+            HIPDNN_PLUGIN_LOG_INFO("RMSnorm forward kernel "
+                                   << shape.kernelName << " needs " << shape.blocks << " blocks x "
+                                   << shape.threadsPerBlock
+                                   << " threads, which reaches the 2^32 thread limit");
+            return false;
+        }
+    }
+    return true;
 }
 
 } // namespace
@@ -129,7 +153,8 @@ bool RMSnormPlanBuilder::isApplicable(
             return false;
         }
 
-        return true;
+        return launchShapesFitThreadLimit(*node.attributes_as_RMSNormAttributes(),
+                                          opGraph.getTensorMap());
     }
     case 2: // Forward fused activation (forward + activation)
     {
@@ -176,7 +201,8 @@ bool RMSnormPlanBuilder::isApplicable(
             return false;
         }
 
-        return true;
+        return launchShapesFitThreadLimit(*opGraph.getNode(0).attributes_as_RMSNormAttributes(),
+                                          opGraph.getTensorMap());
     }
     default:
     {

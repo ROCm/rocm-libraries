@@ -227,12 +227,12 @@ public:
     //   - Stage 1 (backward values):
     //       For each batch position b:
     //           For each element dy_b_n, x_b_n, scale_n (n = 1, 2, ..., N):
-    //               sum_dy_scale_x_n = sum_dy_scale_x_{n-1} + dy_b_n * scale_n * x_b_n
+    //               sum_dy_scale_xc_n = sum_dy_scale_xc_{n-1} + dy_b_n * scale_n * (x_b_n - mean_b)
     //               sum_dy_scale_n = sum_dy_scale_{n-1} + dy_b_n * scale_n
-    //           a = rstd_b * rstd_b * rstd_b * (sum_dy_scale_x - sum_dy_scale * mean_b) / N
-    //           b = rstd_b * sum_dy_scale / N - a * mean_b
+    //           a = rstd_b * rstd_b * rstd_b * sum_dy_scale_xc / N
+    //           b = rstd_b * sum_dy_scale / N
     //           For each element dy_b_n, x_b_n, dx_b_n (n = 1, 2, ..., N):
-    //               dx_b_n = rstd_b * dy_b_n * scale_n - a * x_b_n - b
+    //               dx_b_n = rstd_b * dy_b_n * scale_n - a * (x_b_n - mean_b) - b
     //   - Stage 2 (backward weights):
     //       For each normalized position n:
     //           For each element dy_n_b, x_n_b, mean_b, rstd_b (b = 1, 2, ...):
@@ -374,21 +374,6 @@ public:
             const int64_t dxBatchOffset = hipdnn_test_sdk::detail::flatOffset(
                 batchIndices.data(), dxStrides.data(), batchDimCount);
 
-            auto sumDyScaleX = static_cast<ComputeDataType>(0.0);
-            auto sumDyScale = static_cast<ComputeDataType>(0.0);
-            for(size_t element = 0; element < normElementCount; ++element)
-            {
-                const auto dyVal
-                    = static_cast<ComputeDataType>(dyBase[dyBatchOffset + dyNormOffsets[element]]);
-                const auto scaleVal
-                    = static_cast<ComputeDataType>(scaleBase[scaleNormOffsets[element]]);
-                const auto xVal
-                    = static_cast<ComputeDataType>(xBase[xBatchOffset + xNormOffsets[element]]);
-
-                sumDyScaleX += dyVal * scaleVal * xVal;
-                sumDyScale += dyVal * scaleVal;
-            }
-
             ComputeDataType meanVal;
             ComputeDataType rstdVal;
             if(meanBase == nullptr)
@@ -409,10 +394,8 @@ public:
             batchMean[statIdx] = meanVal;
             batchRstd[statIdx] = rstdVal;
 
-            const auto a = rstdVal * rstdVal * rstdVal * (sumDyScaleX - sumDyScale * meanVal)
-                           / static_cast<ComputeDataType>(normalizedDimsSize);
-            const auto b = rstdVal * sumDyScale / static_cast<ComputeDataType>(normalizedDimsSize)
-                           - a * meanVal;
+            auto sumDyScaleXc = static_cast<ComputeDataType>(0.0);
+            auto sumDyScale = static_cast<ComputeDataType>(0.0);
             for(size_t element = 0; element < normElementCount; ++element)
             {
                 const auto dyVal
@@ -421,7 +404,22 @@ public:
                     = static_cast<ComputeDataType>(scaleBase[scaleNormOffsets[element]]);
                 const auto xVal
                     = static_cast<ComputeDataType>(xBase[xBatchOffset + xNormOffsets[element]]);
-                const auto dxVal = rstdVal * dyVal * scaleVal - a * xVal - b;
+
+                sumDyScaleXc += dyVal * scaleVal * (xVal - meanVal);
+                sumDyScale += dyVal * scaleVal;
+            }
+
+            auto a = rstdVal * rstdVal * rstdVal * sumDyScaleXc
+                     / static_cast<ComputeDataType>(normalizedDimsSize);
+            auto b = rstdVal * sumDyScale / static_cast<ComputeDataType>(normalizedDimsSize);
+            for(size_t element = 0; element < normElementCount; ++element)
+            {
+                auto dyVal
+                    = static_cast<ComputeDataType>(dyBase[dyBatchOffset + dyNormOffsets[element]]);
+                auto scaleVal = static_cast<ComputeDataType>(scaleBase[scaleNormOffsets[element]]);
+                auto xVal
+                    = static_cast<ComputeDataType>(xBase[xBatchOffset + xNormOffsets[element]]);
+                auto dxVal = rstdVal * dyVal * scaleVal - a * (xVal - meanVal) - b;
                 dxBase[dxBatchOffset + dxNormOffsets[element]] = static_cast<DxDataType>(dxVal);
             }
         };

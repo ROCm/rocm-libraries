@@ -79,3 +79,39 @@ TEST(TestCheckedNarrowToInt, BelowIntMinThrows)
     auto const underMin = static_cast<int64_t>(INT_MIN) - 1;
     EXPECT_THROW(checkedNarrowToInt(underMin, "dim"), hipdnn_plugin_sdk::HipdnnPluginException);
 }
+
+TEST(TestLaunchFitsThreadLimit, BlocksTimesThreadsAtUint32MaxFits)
+{
+    EXPECT_TRUE(launchFitsThreadLimit(4194303, 1024));
+    EXPECT_TRUE(launchFitsThreadLimit(16777215, 256));
+    EXPECT_TRUE(launchFitsThreadLimit(1, UINT32_MAX));
+}
+
+TEST(TestLaunchFitsThreadLimit, BlocksTimesThreadsReaching2To32DoesNotFit)
+{
+    EXPECT_FALSE(launchFitsThreadLimit(4194304, 1024));
+    EXPECT_FALSE(launchFitsThreadLimit(16777216, 256));
+    EXPECT_FALSE(launchFitsThreadLimit(2, int64_t{1} << 31));
+}
+
+TEST(TestLaunchFitsThreadLimit, EmptyLaunchDoesNotFit)
+{
+    EXPECT_FALSE(launchFitsThreadLimit(0, 256));
+    EXPECT_FALSE(launchFitsThreadLimit(256, 0));
+}
+
+TEST(TestLaunchFitsThreadLimit, ProductOverflowingInt64DoesNotFit)
+{
+    EXPECT_FALSE(launchFitsThreadLimit(INT64_MAX, 1024));
+}
+
+TEST(TestCheckLaunchFitsThreadLimit, ThrowsWhenLaunchDoesNotFit)
+{
+    EXPECT_THROW(checkLaunchFitsThreadLimit({"kernel", 4194304, 1024}),
+                 hipdnn_plugin_sdk::HipdnnPluginException);
+}
+
+TEST(TestCheckLaunchFitsThreadLimit, DoesNotThrowWhenLaunchFits)
+{
+    EXPECT_NO_THROW(checkLaunchFitsThreadLimit({"kernel", 4194303, 1024}));
+}
