@@ -547,6 +547,13 @@ rocke_status_t rocke_wgrad_conv_spec_kernel_name(const rocke_implicit_gemm_conv_
     flag_on[n_flags] = rocke_conv_data_is_tf32(s->mma_dtype) ? 1 : 0;
     n_flags++;
 
+    /* Guard: WGRAD_NAME_MAX_FLAGS is the capacity of flag_names[]/flag_on[].
+     * If a new flag is ever added without bumping the constant, n_flags exceeds
+     * the array bound before we reach this point. Fail loudly rather than
+     * silently overwriting the stack. */
+    if(n_flags > WGRAD_NAME_MAX_FLAGS)
+        return ROCKE_ERR_VALUE;
+
     return rocke_kernel_name_join(
         s->name, parts, 5, flag_names, flag_on, n_flags, out, out_cap, NULL);
 }

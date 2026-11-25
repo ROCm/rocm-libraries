@@ -632,9 +632,12 @@ class WgradConvSpec:
     #        in their own branch (RegTransposeTileLoader guard).
     # (Modes 1 / 2 / 4 are not built; mode 3 keeps its number so the tag
     # stays stable.)
-    # The prefetch issued on the last step lies at or past the slice end; it
-    # is masked to the buffer resource's out-of-range sentinel and reads zero,
-    # so no load leaves the slice.
+    # The prefetch issued on the last step of the FINAL slice lies at or past
+    # the total K end; it is masked to the buffer resource's out-of-range
+    # sentinel and reads zero. For non-final slices the last prefetch lands
+    # on the next slice's first tile, which is still below total K and is
+    # therefore in-bounds; it is never stored (the loop exits), so no dW
+    # corruption results.
     #
     # Not ``register_prefetch`` (tag "rpf": the compv3 + prefetch_addr loop
     # with carried offsets on the CoalescedTileLoader slots) and not
@@ -649,11 +652,16 @@ class WgradConvSpec:
     # reg_transpose only: decode each micro-tile's first K_wg position
     # (n, ho, wo) once and step the other 7 instead of running the magic-
     # number decode for every one of the 8 K columns (A and B). When Wo is a
-    # multiple of 8 (and the slice starts 8-aligned, which tile_k >= 8 makes
-    # it), the 8 positions of a micro-tile share (n, ho) and only wo moves, so
-    # the per-column cost is one embed and a bounds check; otherwise a
-    # wave-uniform branch takes the per-column decode, so every problem stays
-    # correct. Tag "ras". Default False: byte-identical when off.
+    # multiple of 8 AND the slice's first K column (k0 = slice_start) satisfies
+    # k0 % 8 == 0, the 8 positions of a micro-tile share (n, ho) and only wo
+    # moves, so the per-column cost is one embed and a bounds check. The
+    # 8-alignment of slice_start is guaranteed because wg_K_padded (see
+    # :meth:`wg_K_padded`) rounds K_wg up to a multiple of tile_k * split_k
+    # before launch, so each slice is tile_k elements deep, and tile_k >= 8 is
+    # a prerequisite of this knob; thus slice_start = slice_index * tile_k
+    # satisfies slice_start % 8 == 0. Otherwise a wave-uniform branch takes the
+    # per-column decode, so every problem stays correct. Tag "ras". Default
+    # False: byte-identical when off.
     regt_addr_step: bool = False
 
     # WMMA split-K atomic epilogue (16-bit dW) only: pair the two lanes that

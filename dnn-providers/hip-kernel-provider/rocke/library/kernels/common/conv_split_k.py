@@ -249,16 +249,19 @@ _WGRAD_SPLIT_POLICY: dict[str, WgradSplitPolicy] = {
 
 
 def _gfx12_rdna_wgrad_split_policy(arch: str) -> WgradSplitPolicy:
-    """The gfx12 RDNA (gfx1200 / gfx1201) wgrad split-K policy.
+    """The gfx12 RDNA (gfx1200 / gfx1201 / gfx12-generic) wgrad split-K policy.
 
     The CK formula (two CTAs per CU, no slice-depth floor) for an ungrouped
     launch, except that a launch of fewer than ``num_cus / 4`` tiles fills to
     one CTA per CU: measured on gfx1201 over the swept split-K degree curves
     of ungrouped wgrad rows, one CTA per CU lands nearer the best degree on
     small base grids, while from 16 tiles up halving the degree lost (deep-K,
-    narrow-dW rows). Grouped launches keep the grouped CK formula. The 16-bit
-    packed-atomic accuracy caps are those of every policy
-    (:func:`atomic_rounding_degree_cap`); the f32 workspace has none.
+    narrow-dW rows). The same thresholds are used for gfx1200 (32 CUs) and
+    gfx12-generic (64 CUs, the larger of the two parts; see
+    :data:`rocke.helpers.split_k.ARCH_NUM_CUS`). Grouped launches keep the
+    grouped CK formula. The 16-bit packed-atomic accuracy caps are those of
+    every policy (:func:`atomic_rounding_degree_cap`); the f32 workspace has
+    none.
     """
     cus = arch_num_cus(arch)
     return WgradSplitPolicy(

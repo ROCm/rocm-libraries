@@ -289,6 +289,41 @@ class TestWmmaAtomicPair(unittest.TestCase):
             ident.stable_hash(), replace(ident, wmma_atomic_pair=False).stable_hash()
         )
 
+    def test_identity_supports_problem_refuses_odd_wg_n(self):
+        """Split-K wgrad identity refuses a grouped fp16 problem with an odd dW row.
+
+        The packed <2 x fp16> atomic needs an even dW row length wg_N = Y*X*cpg;
+        an odd wg_N makes the pair misaddress silently. The
+        ``identity_supports_problem`` gate must reject this case before the
+        binary is offered to the launcher.
+        """
+        from kernels.common._conv_implicit_gemm_common import ConvProblem
+        from kernels.conv.kernel_identity import (
+            KernelIdentity,
+            identity_supports_problem,
+        )
+
+        # Three groups, C=3*3=9 -> cpg=3, K=3*8=24 -> kpg=8 (divisible by
+        # vector_size_a=8), Y=X=1 -> wg_N = 1*1*3 = 3 (odd).
+        # vector_size_b=1 is compatible with any cpg.
+        odd_wg_n = ConvProblem(N=1, Hi=4, Wi=4, C=9, K=24, Y=1, X=1, groups=3)
+        # label: v8x1x1 = vector_size_a=8, vector_size_b=1, vector_size_c=1
+        lab = (
+            "wgrad-implicit_gemm-fp16-2d-t64x64x32-w1x4-a16x16x16-v8x1x1-mem-"
+            "default-grp-sk2-wave32-gfx1201-llvm24"
+        )
+        ident = KernelIdentity.from_label(lab)
+        self.assertEqual(ident.split_k, 2)
+        ok, why = identity_supports_problem(ident, odd_wg_n)
+        self.assertFalse(ok, f"expected refusal, got ok (why={why!r})")
+        self.assertIn("even dW row", why)
+
+        # Verify that an even-wg_N grouped problem is accepted.
+        # C=12, groups=3 -> cpg=4, K=24 -> kpg=8; wg_N = 1*1*4 = 4 (even).
+        even_wg_n = ConvProblem(N=1, Hi=4, Wi=4, C=12, K=24, Y=1, X=1, groups=3)
+        ok_even, _ = identity_supports_problem(ident, even_wg_n)
+        self.assertTrue(ok_even, "even-wg_N grouped split-K should be accepted")
+
 
 class TestXRun(unittest.TestCase):
     def _spec(self, **kw):

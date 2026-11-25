@@ -147,8 +147,10 @@ class KernelIdentity:
     # Left out of the hash while False, like prefetch_addr.
     prefetch_global_regs: bool = False
     # fwd ImplicitGemmConvSpec.regt_prefetch (the wgrad register-prefetch
-    # loops share it): the register-prefetch K loop mode (0 off, 1 single
-    # LDS buffer). Left out of the hash at 0.
+    # loops share this field): the register-prefetch K loop mode.
+    #   fwd:   0 = off, 1 = single LDS buffer.
+    #   wgrad: 0 = off, 3 = register-prefetch (modes 1 / 2 / 4 are not built).
+    # Left out of the hash at 0.
     regt_prefetch: int = 0
     # dgrad only (DgradConvSpec.uniform_k_decode): the per-tile reduction
     # decode K loop. Left out of the hash while False, like prefetch_addr.
@@ -587,6 +589,11 @@ def identity_supports_problem(
     # 16-bit dW that is a packed <2 x dtype> atomic, which needs an even
     # dW row (wg_N = [Z*]Y*X*cpg) and store width; on an odd row it
     # misaddresses silently. Ask the same predicate the spec validator uses.
+    # ``hasattr(problem, "Y")`` is a defensive guard; for implicit wgrad
+    # (``not is_direct``) the only problem type is ``ConvProblem``, which
+    # always has ``Y``. Auto-degree (``split_k==-1``) is resolved to a
+    # concrete degree before building, so an identity always has split_k > 1
+    # for any split-K binary.
     if (
         identity.direction == "wgrad"
         and not identity.is_direct
@@ -765,6 +772,14 @@ def identity_supports_problem(
 #: reads (directly, or through ``_grid_fits`` / ``_group_merge_fits`` /
 #: :func:`dgrad_sub_gemms`). ``is_direct`` is a property over ``algorithm``
 #: and stands in for it.
+#:
+#: ``wave_size`` was added to cover the split-K wgrad and dgrad atomic-epilogue
+#: gates (wave32 wgrad uses the WMMA atomic that calls
+#: ``wgrad_atomic_epilogue_available``; wave64 dgrad split-K is similarly
+#: gated). Cache records written before ``wave_size`` was tracked carry the
+#: field's default (``0``) when re-loaded via :meth:`KernelIdentity.from_dict`,
+#: which yields a different stable hash and so they simply never match the
+#: identity of the binary on disk -- they are invalidated, not misused.
 IDENTITY_CAPABILITY_FIELDS = (
     "llvm_flavor",
     "direction",
