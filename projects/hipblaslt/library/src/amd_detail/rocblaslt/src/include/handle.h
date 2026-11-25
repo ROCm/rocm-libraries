@@ -282,15 +282,11 @@ struct _rocblaslt_handle
     uint32_t device_comm_world    = 0;
     uint32_t device_comm_channels = 0;
 
-    // Completion flags: device_comm_channels independent regions per rank, never
-    // passed in nor readable by the caller. device_comm_peer_flags[j] is rank j's
-    // region as addressed from this process, and is one of three kinds. Entry
-    // device_comm_rank is this handle's own allocation, which it frees. A peer in
-    // another process is an IPC mapping this handle owns and closes, which is what
-    // device_comm_peer_flags_mapped[j] marks. A peer in this process is its raw
-    // device pointer, borrowed from the handle that allocated it.
-    void* device_comm_peer_flags[HIPBLASLT_DEVICE_COMM_MAX_WORLD]        = {};
-    bool  device_comm_peer_flags_mapped[HIPBLASLT_DEVICE_COMM_MAX_WORLD] = {};
+    // Completion flags: device_comm_channels independent regions per rank.
+    // device_comm_peer_flags[j] is rank j's region as addressed from this
+    // process. The caller allocated and mapped every entry and keeps them alive;
+    // the handle only borrows them.
+    void* device_comm_peer_flags[HIPBLASLT_DEVICE_COMM_MAX_WORLD] = {};
 #endif
 };
 

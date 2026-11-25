@@ -165,7 +165,7 @@ typedef enum {
   HIPBLASLT_FUSION_A2A_RECV_PTRS = 13, /**<Required on an epilogue; not used on a prologue. Host array of ``world`` pointers in rank order; entry ``j`` is the address, in this process, of rank ``j``'s receive buffer. The buffer holds ``world * N * (AM / world)`` elements of D's type, laid out ``[source, token, feature]`` with feature contiguous and the unpadded ``N`` as the source stride. Data type: ``void* const*``.*/
   HIPBLASLT_FUSION_A2A_EXTENT = 14, /**<Required on an epilogue; optional on a prologue. ``AM``, the number of leading free-0 (feature) positions of D that are redistributed; the per-rank shard is ``AM / world``. Must be positive and divide by ``world``. This participates in solution selection, so it has the same standing as M, N, and K: setting it after ``hipblasLtMatmulAlgoGetHeuristic`` invalidates the returned algo. On a prologue it is ``AK``, the number of leading K positions gathered, defaulting to K; it must equal K in this release. Data type: ``int64_t``.*/
   HIPBLASLT_FUSION_A2A_COMPLETION_MODE = 15, /**<Optional. How receive completion is established. ``HIPBLASLT_A2A_COMPLETION_IN_KERNEL_FULL`` is the only accepted value in this release, and the default. Data type: ``hipblasLtA2ACompletionMode_t``.*/
-  HIPBLASLT_FUSION_COMM_CHANNEL = 16, /**<Optional, default ``0``. Which of the communicator's ``nChannels`` flag regions this operation uses. Concurrent operations need distinct channels and disjoint queue sets; those on different streams additionally need separate handles, since a ``hipblasLtHandle_t`` is not safe for concurrent use across multiple HIP streams. Reuse requires every rank's previous operation on the channel to have retired, which a stream sync does not establish; recv buffers carry the same requirement. Epilogue and prologue operations share the channels, so the reuse rule applies across both. Every rank of one launch group must pass the same channel, which the library cannot verify. Data type: ``uint32_t``.*/
+  HIPBLASLT_FUSION_COMM_CHANNEL = 16, /**<Optional, default ``0``. Which of the communicator's ``nChannels`` flag channels this operation uses. Concurrent operations need distinct channels and disjoint queue sets; those on different streams additionally need separate handles, since a ``hipblasLtHandle_t`` is not safe for concurrent use across multiple HIP streams. Reuse requires every rank's previous operation on the channel to have retired, which a stream sync does not establish; recv buffers carry the same requirement. Epilogue and prologue operations share the channels, so the reuse rule applies across both. Every rank of one launch group must pass the same channel, which the library cannot verify. Data type: ``uint32_t``.*/
   HIPBLASLT_FUSION_A2A_PEER_B_PTRS = 17, /**<Required on a prologue. Host array of ``world`` pointers in rank order; entry ``j`` is the address, in this process, of rank ``j``'s B. The entry ``j == rank`` is not used and may be null; this rank's B is the one passed to ``hipblasLtMatmul``, and it must be the allocation every peer holds as its entry ``rank``, which the library does not check. Each rank's B holds ``world * N * (K / world)`` elements of B's type laid out ``[destination, token, k]`` with k contiguous; block ``d`` is the part rank ``d`` consumes. The B layout passed to the matmul is nominal (``K x N``, column-major, ``ldb == K``) and does not describe this memory. This is the layout of an epilogue's receive buffer with ``AM == K``, so B can be allocated and IPC-mapped the same way. Every rank's B must be written and visible to its peers before any rank launches, which the library does not establish: for example, each rank synchronizes the stream that writes its B and then joins a host barrier. Once this rank's stream is synchronized after the call, its B may be overwritten. Data type: ``void* const*``.*/
   HIPBLASLT_FUSION_A2A_GATHER_BUFFER = 18, /**<Required on a prologue. Device buffer of at least ``N * K`` elements of B's type that receives the blocks gathered from the other ranks. Its base must be 128-byte aligned and it must not overlap A, B, C, or D. Its contents after the call are undefined. Data type: ``void*``.*/
 } hipblasLtFusionAttribute_t;
@@ -233,36 +233,9 @@ typedef struct hipblasLtFusionDescriptor* hipblasLtFusionDescriptor_t;
 #define HIPBLASLT_DEVICE_COMM_MAX_WORLD 8
 
 /*! \ingroup types_module
- *  \brief Caller-supplied allgather used to register a device communicator.
- *
- *  \details
- *  A true allgather: rank ``r``'s \p sendbuf (\p bytesPerRank bytes) must land at
- *  ``recvbuf + r * bytesPerRank`` on every rank, and \p recvbuf must be readable on return.
- *  The payload is opaque; the caller must not interpret or reorder it.
- *
- *  The library performs no rendezvous of its own, which is why one entry point covers both
- *  deployment shapes: across processes this is ``MPI_Allgather`` or a ``torch.distributed``
- *  store, and within one process it is rank-indexed storage plus a barrier. Only at
- *  ``world == 1``, with nothing to collect, does it degenerate to a memcpy of \p sendbuf.
- *
- *  Returning before every rank has contributed does not deadlock but fails registration: a
- *  slot no rank has written cannot pass validation.
- *
- *  @param[in]
- *  userData      the pointer passed to ``hipblasLtSetDeviceComm``, verbatim.
- *  @param[in]
- *  sendbuf       this rank's contribution, \p bytesPerRank bytes.
- *  @param[out]
- *  recvbuf       receives ``world * bytesPerRank`` bytes in rank order.
- *  @param[in]
- *  bytesPerRank  size of each rank's contribution.
- *
- *  \retval HIPBLAS_STATUS_SUCCESS the exchange completed and \p recvbuf is readable.
+ *  \brief Alignment, in bytes, every flag region passed to ``hipblasLtSetDeviceComm`` must have.
  */
-typedef hipblasStatus_t (*hipblasLtDeviceCommAllgatherFn)(void*       userData,
-                                                          const void* sendbuf,
-                                                          void*       recvbuf,
-                                                          size_t      bytesPerRank);
+#define HIPBLASLT_DEVICE_COMM_FLAG_ALIGNMENT 64
 #endif
 
 /*! \ingroup types_module
@@ -925,25 +898,61 @@ hipblasStatus_t hipblasLtCheckNumericsDrain(hipblasLtHandle_t handle,
 
 #if HIPBLASLT_HAS_GEMM_A2A_FUSION
 /*! \ingroup library_module
+ *  \brief Size of the flag region one rank of a device communicator needs.
+ *
+ *  \details
+ *  Each rank owns one flag region of this size, which the caller allocates and every peer then
+ *  addresses; see ``hipblasLtSetDeviceComm``. The size is a property of the kernels the library
+ *  was built with, so query it rather than hard-coding it.
+ *
+ *  @param[in]
+ *  nChannels   number of independent channels the region holds; at least ``1``.
+ *  @param[out]
+ *  bytes       receives the region's size in bytes.
+ *
+ *  \retval HIPBLAS_STATUS_SUCCESS       \p bytes holds the size.
+ *  \retval HIPBLAS_STATUS_INVALID_VALUE \p nChannels is zero or \p bytes is NULL.
+ */
+HIPBLASLT_EXPORT
+hipblasStatus_t hipblasLtDeviceCommFlagBytes(uint32_t nChannels, size_t* bytes);
+
+/*! \ingroup library_module
  *  \brief Register this handle's view of a device communicator.
  *
  *  \details
- *  A collective fused epilogue or prologue needs to know which rank it is, how many peers it has, and where
- *  those peers' library-owned flag regions live. This call establishes all three: it allocates
- *  this device's flag state as \p nChannels independent regions and exchanges the peer addresses
- *  through \p allgather. That state is invisible to the caller and its lifetime follows the
- *  handle.
+ *  A collective fused epilogue or prologue needs to know which rank it is, how many peers it has,
+ *  and where each peer's flag region lives. This call records all three. The caller allocates
+ *  the flag regions and makes them addressable across the group, with whatever transport it
+ *  already uses for the receive buffers or peer B: RCCL symmetric windows
+ *  (``ncclGetPeerDevicePointer``), rocSHMEM (``rocshmem_ptr``), or HIP IPC. The library performs
+ *  no rendezvous, allocation or mapping of its own, and the same entry point serves ranks that
+ *  are threads of one process and ranks that are separate processes.
  *
- *  The call is collective, forming one communicator per group. Every rank calls it on its own
- *  handle, it blocks until all of them have reached it, and the library may invoke \p allgather
- *  more than once, always in the same order on every rank. It may be made at most once per
- *  handle, which makes \p world immutable: \p world participates in solution selection, so
- *  changing communicators means destroying the handle. Registration is optional but is not a
- *  fallback - a collective stage on a handle with no communicator fails at ``hipblasLtMatmul``
- *  rather than degrading to an unfused GEMM.
+ *  Each rank owns one region of ``hipblasLtDeviceCommFlagBytes(nChannels)`` bytes, holding
+ *  \p nChannels independent channels. A region must
  *
- *  Both deployment shapes use this one entry point; whether the ranks are threads of one process
- *  or separate processes, only \p allgather differs.
+ *  - be resident on its owner's device, and allocated fine-grained or uncached
+ *    (``hipDeviceMallocFinegrained``, ``hipDeviceMallocUncached``, or a VMM allocation of type
+ *    ``hipMemAllocationTypeUncached``): peers write it (copy engines or kernel stores) while
+ *    the owner's kernel polls it;
+ *  - be aligned to ``HIPBLASLT_DEVICE_COMM_FLAG_ALIGNMENT`` bytes;
+ *  - be zero-filled, and every write to it complete, before the first collective that uses it;
+ *  - not be written by the caller while a collective that uses it is in flight on any rank.
+ *    The kernel sets each flag back to zero when a collective completes, so another handle
+ *    can register the same region later. If a collective does not complete, stop all ranks
+ *    and zero-fill the region again before a handle registers it; and
+ *  - outlive every handle that registered it, and every collective launched on those handles.
+ *
+ *  Every rank must register with the same \p world and \p nChannels, and \p peerFlags must
+ *  name the same regions on every rank, each as addressed from that rank's process. The
+ *  library checks only that this rank's own entry is device memory on the handle's device; it
+ *  cannot verify the rest. A mismatch does not return an error: a peer can write past the end
+ *  of a smaller region and corrupt memory on the GPU that owns it.
+ *
+ *  Registration may be made at most once per handle, which makes \p world immutable: \p world
+ *  participates in solution selection, so changing communicators means destroying the handle.
+ *  Registration is optional but is not a fallback - a collective stage on a handle with no
+ *  communicator fails at ``hipblasLtMatmul`` rather than degrading to an unfused GEMM.
  *
  *  @param[in]
  *  handle      hipBLASLt library context. Must not already carry a communicator.
@@ -952,34 +961,28 @@ hipblasStatus_t hipblasLtCheckNumericsDrain(hipblasLtHandle_t handle,
  *  @param[in]
  *  world       number of ranks in the group; ``1`` to ``HIPBLASLT_DEVICE_COMM_MAX_WORLD``.
  *  @param[in]
- *  nChannels   number of independent flag regions to allocate, one per concurrent operation.
- *              Must be at least ``1``, and must agree across ranks. See
- *              ``HIPBLASLT_FUSION_COMM_CHANNEL``.
+ *  nChannels   number of independent channels in each region, one per concurrent operation.
+ *              Must be at least ``1``. See ``HIPBLASLT_FUSION_COMM_CHANNEL``.
  *  @param[in]
- *  allgather   caller-supplied allgather; must not be NULL.
- *  @param[in]
- *  userData    passed back to \p allgather verbatim; never dereferenced by the library.
+ *  peerFlags   host array of \p world pointers in rank order; entry ``j`` is the address, from
+ *              this rank's device, of rank ``j``'s flag region, and entry \p rank is this rank's
+ *              own. Peer entries must already be accessible from this rank's device, through
+ *              peer access, an IPC mapping, or a VMM access descriptor. The library copies the
+ *              entries, so the array need not outlive the call.
  *
  *  \retval HIPBLAS_STATUS_SUCCESS         the communicator is registered on this handle.
  *  \retval HIPBLAS_STATUS_NOT_INITIALIZED \p handle is null / uninitialized.
  *  \retval HIPBLAS_STATUS_INVALID_VALUE   \p rank is not less than \p world, \p world is outside
- *                                         its range, \p nChannels is zero, \p allgather is NULL,
- *                                         this handle already carries a communicator, or the
- *                                         ranks disagree about \p world or \p nChannels.
- *  \retval HIPBLAS_STATUS_ALLOC_FAILED    the flag regions could not be allocated.
- *  \retval HIPBLAS_STATUS_NOT_SUPPORTED   a peer's flag region cannot be addressed from this
- *                                         rank's device: it is in another process and cannot be
- *                                         mapped into this one, or peer access to its device is
- *                                         unavailable.
- *  Any other status is one the caller's \p allgather returned, propagated unchanged.
+ *                                         its range, \p nChannels is zero, \p peerFlags or one of
+ *                                         its entries is NULL or misaligned, or this handle
+ *                                         already carries a communicator.
  */
 HIPBLASLT_EXPORT
-hipblasStatus_t hipblasLtSetDeviceComm(hipblasLtHandle_t              handle,
-                                       uint32_t                       rank,
-                                       uint32_t                       world,
-                                       uint32_t                       nChannels,
-                                       hipblasLtDeviceCommAllgatherFn allgather,
-                                       void*                          userData);
+hipblasStatus_t hipblasLtSetDeviceComm(hipblasLtHandle_t handle,
+                                       uint32_t          rank,
+                                       uint32_t          world,
+                                       uint32_t          nChannels,
+                                       void* const*      peerFlags);
 #endif
 
 /*! \ingroup library_module
