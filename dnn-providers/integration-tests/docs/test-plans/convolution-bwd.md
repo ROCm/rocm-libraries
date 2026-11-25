@@ -7,7 +7,7 @@ any engine: the sweep describes the problem space, and each engine's support
 claims decide which cases it runs. Forward convolution and weight gradient have
 their own plans ([convolution-fwd.md](convolution-fwd.md), `convolution-wrw.md`).
 
-The plan follows RFC 0021 (Per-Op Test Plans) and the [methodology](methodology.md).
+The plan follows RFC 0022 (Per-Op Test Plans) and the [methodology](methodology.md).
 See [the test-plans index](README.md) for the level definitions.
 
 Dgrad shares its parameters with the forward convolution, but not its
@@ -92,14 +92,18 @@ says whether the verification references can judge the feature today (§6); the
 **Earliest level** column is the lowest level that holds a case of it (`Q`
 quick, `PR`, `N` nightly, `F` full; `—` means the sweep cannot express it yet).
 
-**Oracle.** There is **no GPU reference for dgrad**
-(`GpuReferenceGraphExecutor.cpp` declines `ConvolutionBwdAttributes`). Every
-dgrad case is judged by the CPU reference (`CpuFpReferenceConvolution::dgrad`),
-which registers dy, w, dx = fp32/fp32/fp32, fp16/fp16/fp16 and bf16/bf16/bf16
-with fp32 compute, addresses every tensor through its own strides, and accepts
-only `CROSS_CORRELATION`. A case the engine accepts and no oracle can judge
+**Oracle.** Two references judge dgrad, in the harness's `auto` order (golden data,
+then the GPU reference, then the CPU reference). The GPU reference
+(`GpuConvolutionBwdPlan.hpp`) and the CPU reference
+(`CpuFpReferenceConvolution::dgrad`) both register dy, w, dx = fp32/fp32/fp32,
+fp16/fp16/fp16 and bf16/bf16/bf16 with fp32 compute, address every tensor through
+its own strides, take pre and post padding separately, and accept only
+`CROSS_CORRELATION`. A case the engine accepts and no oracle can judge
 **fails** ("no oracle can verify this bundle"), so oracle gaps show up as
-failures, not skips.
+failures, not skips. In the tables, "GPU, CPU ref" means either reference can
+judge the feature, and the GPU reference is the one that runs. The fused-graph rows
+of §2.5 still name the CPU reference only: no engine executes a fused dgrad yet, so
+the GPU path for them is unmeasured.
 
 **Legality** is declared once, in `conv_bwd_plan.legal()`, and copies
 `ConvolutionDgradNode::pre_validate_node`: equal ranks, `C % G == 0`,
@@ -112,31 +116,31 @@ generator never writes an illegal graph.
 
 | Id | Feature | Values to cover | Oracle | Earliest level |
 |---|---|---|---|---|
-| F1 | Spatial rank | 1D, 2D, 3D; 4D (6-dim tensors) as a probe | CPU ref | Q (1D–3D), PR (4D) |
-| F2 | Batch N | 1, 2, 3, 8, 32, 64, 128, 256 | CPU ref | Q |
-| F3 | Output channels C/G (what dgrad writes) | 1, 3, 4, odd below 16 (5, 7, 13), 8–32, 40–256, > 256, not a multiple of 8 | CPU ref | Q |
-| F4 | Reduction channels K/G (what dgrad sums) | 1, 2, 3, 4, 7, odd (17, 21), 8–32, 40–256, > 256 (320, 2048) | CPU ref | Q |
-| F5 | Channel ratio | K/G = C/G; K/G = 2·C/G and 4·C/G (reduction-heavy: the backward of a 1×1 expansion); C/G = 4·K/G (output-heavy); small C/G with large K/G (4 / 320: latent `conv_in`); large C/G with tiny K/G (128 / 3, 2, 4, 21: output heads) | CPU ref | Q |
-| F6 | Groups | dense; grouped with C/G = K/G = 4, 8, 16, 24, 32 (ResNeXt); grouped with K/G ≠ C/G (8 / 16, 4 / 320, 8 / 1); group counts 2, 3, 4, 5, 8, 16, 32; depthwise multiplier 1, 2, 4 | CPU ref | Q |
-| F7 | Filter | 1, 2, 3, 4, 5, 7, 10, 11, 16, 31; non-square 1×3, 3×1, 3×5, 1×3×3, 3×1×1; filter equal to dx; filter larger than dx | CPU ref | Q |
-| F8 | Stride phases | s = 1; `f % s = 0` (f = s, f = 2s); `f % s ≠ 0` (3/2, 7/2, 5/2, 16/8); `f < s` (1/2, 3/4); gcd(s, d) > 1 (s 2, d 2); coprime s, d (s 2, d 3); per-dimension stride | CPU ref | Q |
-| F9 | Dilation | 1, 2, 3, 5, 12; per dimension | CPU ref | Q |
-| F10 | Transposed padding | full (pad 0 on a filter > 1); positive (the usual "same" padding); negative (padding larger than the dilated filter) | CPU ref | Q |
-| F11 | Asymmetric padding | pre 0 / post 1 and pre 1 / post 0 with a stride-2 even filter | CPU ref takes pre and post separately; no CPU test covers asymmetric dgrad (I6) | Q (probe) |
-| F12 | Output extent | dy spatial 1 (filter equal to dx); dy larger than dx (even filter, pad 1); dx width at most 8 and 4; dx 16×48 with a 5×5 filter; odd wide dx (32×109); 1×1 dx; extreme aspect 1×256. **Inferred dx dims are illegal** (frontend rejects them): a frontend unit test, not a sweep case. | CPU ref | Q |
-| F13 | `conv_mode` | `CROSS_CORRELATION`, `CONVOLUTION` | **none**: the CPU ref rejects `CONVOLUTION` for dgrad, there is no GPU ref (I6) | Q (probe) |
-| F37 | dx elements no tap reaches | stride phases with no taps (`f < s`, gcd(s, d) > 1); a floor remainder: dx's last rows lie past the last window. The engine must write 0 there; the harness prefills outputs with a NaN sentinel, so an unwritten element fails. | CPU ref | Q |
+| F1 | Spatial rank | 1D, 2D, 3D; 4D (6-dim tensors) as a probe | GPU, CPU ref | Q (1D–3D), PR (4D) |
+| F2 | Batch N | 1, 2, 3, 8, 32, 64, 128, 256 | GPU, CPU ref | Q |
+| F3 | Output channels C/G (what dgrad writes) | 1, 3, 4, odd below 16 (5, 7, 13), 8–32, 40–256, > 256, not a multiple of 8 | GPU, CPU ref | Q |
+| F4 | Reduction channels K/G (what dgrad sums) | 1, 2, 3, 4, 7, odd (17, 21), 8–32, 40–256, > 256 (320, 2048) | GPU, CPU ref | Q |
+| F5 | Channel ratio | K/G = C/G; K/G = 2·C/G and 4·C/G (reduction-heavy: the backward of a 1×1 expansion); C/G = 4·K/G (output-heavy); small C/G with large K/G (4 / 320: latent `conv_in`); large C/G with tiny K/G (128 / 3, 2, 4, 21: output heads) | GPU, CPU ref | Q |
+| F6 | Groups | dense; grouped with C/G = K/G = 4, 8, 16, 24, 32 (ResNeXt); grouped with K/G ≠ C/G (8 / 16, 4 / 320, 8 / 1); group counts 2, 3, 4, 5, 8, 16, 32; depthwise multiplier 1, 2, 4 | GPU, CPU ref | Q |
+| F7 | Filter | 1, 2, 3, 4, 5, 7, 10, 11, 16, 31; non-square 1×3, 3×1, 3×5, 1×3×3, 3×1×1; filter equal to dx; filter larger than dx | GPU, CPU ref | Q |
+| F8 | Stride phases | s = 1; `f % s = 0` (f = s, f = 2s); `f % s ≠ 0` (3/2, 7/2, 5/2, 16/8); `f < s` (1/2, 3/4); gcd(s, d) > 1 (s 2, d 2); coprime s, d (s 2, d 3); per-dimension stride | GPU, CPU ref | Q |
+| F9 | Dilation | 1, 2, 3, 5, 12; per dimension | GPU, CPU ref | Q |
+| F10 | Transposed padding | full (pad 0 on a filter > 1); positive (the usual "same" padding); negative (padding larger than the dilated filter) | GPU, CPU ref | Q |
+| F11 | Asymmetric padding | pre 0 / post 1 and pre 1 / post 0 with a stride-2 even filter | GPU, CPU ref take pre and post separately; no reference test covers asymmetric dgrad (I6) | Q (probe) |
+| F12 | Output extent | dy spatial 1 (filter equal to dx); dy larger than dx (even filter, pad 1); dx width at most 8 and 4; dx 16×48 with a 5×5 filter; odd wide dx (32×109); 1×1 dx; extreme aspect 1×256. **Inferred dx dims are illegal** (frontend rejects them): a frontend unit test, not a sweep case. | GPU, CPU ref | Q |
+| F13 | `conv_mode` | `CROSS_CORRELATION`, `CONVOLUTION` | **none**: both references reject `CONVOLUTION` for dgrad (I6) | Q (probe) |
+| F37 | dx elements no tap reaches | stride phases with no taps (`f < s`, gcd(s, d) > 1); a floor remainder: dx's last rows lie past the last window. The engine must write 0 there; the harness prefills outputs with a NaN sentinel, so an unwritten element fails. | GPU, CPU ref | Q |
 
 ### 2.2 Memory layout and tensor kind
 
 | Id | Feature | Values to cover | Oracle | Earliest level |
 |---|---|---|---|---|
-| F14 | Layout | channels-first and channels-last for each rank (NCL, NLC, NCHW, NHWC, NCDHW, NDHWC), for dy, w and dx together | CPU ref | Q |
-| F15 | Mixed layouts | dy, w and dx in different orders: all six non-uniform combinations | CPU ref | PR |
-| F16 | Non-packed strides | padded rows (`fast`), padded channel stride (`chan`), padded plane (`plane`) on dy and dx | CPU ref | PR |
+| F14 | Layout | channels-first and channels-last for each rank (NCL, NLC, NCHW, NHWC, NCDHW, NDHWC), for dy, w and dx together | GPU, CPU ref | Q |
+| F15 | Mixed layouts | dy, w and dx in different orders: all six non-uniform combinations | GPU, CPU ref | PR |
+| F16 | Non-packed strides | padded rows (`fast`), padded channel stride (`chan`), padded plane (`plane`) on dy and dx | GPU, CPU ref | PR |
 | F17 | Alignment | a base pointer at exactly the declared alignment with an offset (the methodology's rule) | **not run**: I3 | — |
-| F18 | 64-bit indexing | dx and dy with more than 2³¹ elements (X3) | CPU ref | F |
-| F35 | Override shape | `is_override_shape_enabled` on an explicitly shaped graph | CPU ref | PR |
+| F18 | 64-bit indexing | dx and dy with more than 2³¹ elements (X3) | GPU, CPU ref | F |
+| F35 | Override shape | `is_override_shape_enabled` on an explicitly shaped graph | GPU, CPU ref | PR |
 
 Every tensor is a device tensor: a dgrad input that is a constant or a runtime
 scalar is not a valid graph.
@@ -156,9 +160,9 @@ dy and w are uniform in [−1, 1] by default, so sums cancel.
 
 | Id | Feature | Values to cover | Oracle | Earliest level |
 |---|---|---|---|---|
-| F21 | Input distribution | uniform [−1, 1]; zero dy (dx must be exactly 0); constant dy = w = 1 (dx counts the taps, so a wrong phase split is visible as an integer error); large (dy, w uniform in [0, a], `a = √(½ · max / A)`); tiny (fp32/bf16 ±1e-20, fp16 ±3e-3) | CPU ref | PR |
+| F21 | Input distribution | uniform [−1, 1]; zero dy (dx must be exactly 0); constant dy = w = 1 (dx counts the taps, so a wrong phase split is visible as an integer error); large (dy, w uniform in [0, a], `a = √(½ · max / A)`); tiny (fp32/bf16 ±1e-20, fp16 ±3e-3) | GPU, CPU ref | PR |
 | F22 | Special values | NaN and ±Inf in dy or w | needs I4 and a matching-infinities validator | — |
-| F23 | Accumulation length | A from 1 (depthwise, stride 2) to 186,624 (filter larger than dx, 3D); long reductions come from a large K (K 512, A 4,608; K 2048, A 18,432) or a large filter | CPU ref | N |
+| F23 | Accumulation length | A from 1 (depthwise, stride 2) to 186,624 (filter larger than dx, 3D); long reductions come from a large K (K 512, A 4,608; K 2048, A 18,432) or a large filter | GPU, CPU ref | N |
 | F24 | Determinism | bitwise-identical repeats when a deterministic plan is requested | C++ test (I5) | — |
 
 ### 2.5 Fusions
@@ -556,7 +560,7 @@ only in full, and the others hold the evidence for the defects of §4.5.
 | Estimate | Value |
 |---|---|
 | FLOP per case | quick ≤ 14 M, PR ≤ 1.9 G (the three M cases), nightly ≤ 7.3 G, full 116 G (X2) |
-| Oracle | CPU reference only, multi-threaded (`hardware_concurrency`). It sets the cost of nightly and full: X and the largest R cases take seconds each. |
+| Oracle | GPU reference, with the CPU reference as the fallback (§2). All 2,429 executed cases of the measurement run below were judged by the GPU reference. All 6,543 cases ran serially in 18 min (gfx942) and 21 min (gfx90a). |
 | Compile and solver search | paid once per unique shape on a cold cache |
 | Device memory | X1 ≈ 0.4 GB, X3 ≈ 13 GB (fp16), so `minimum_vram_mb` is set on those cases |
 
@@ -564,54 +568,52 @@ only in full, and the others hold the evidence for the defects of §4.5.
 
 **Which cases execute.** T9 and T11 come from serial runs (one test at a time,
 chunks of 100 tests per process) of all 6,543 generated cases with the MIOpen
-plugin, the only engine that runs dgrad today, at the default tolerances:
+plugin, the only engine that runs dgrad today, with the engine TOML's dgrad
+tolerance classes (§6):
 
 | Architecture | OK | Skipped | Failed | Crashed | Wall time |
 |---|---|---|---|---|---|
-| gfx90a (MI250) | 1,872 | 3,912 | 745 | 14 | 26 min |
-| gfx942 (MI325X) | 2,160 | 3,914 | 457 | 12 | 25 min |
+| gfx90a (MI250) | 2,429 | 4,114 | 0 | 0 | 21 min |
+| gfx942 (MI325X) | 2,429 | 4,114 | 0 | 0 | 18 min |
 
 - No fused graph executed on either architecture (3,387 cases, all four
-  topologies), and F11, F13, F19, F30, F31 and F35 never executed.
+  topologies), and F11, F13, F15, F19, F20, F30, F31 and F35 never executed. The
+  plugin declines them, or the graph is outside what it computes correctly.
 - Every plain-dgrad class of §3 executed on both, except the asymmetric-padding
-  classes S10 and S11 (and their L forms) and the 4D class S76, which the plugin
-  declines.
-- No plain-dgrad case failed beyond the numerical floor: the 538 (gfx90a) and 272
-  (gfx942) claim cases that failed did so only because the default tolerance is
-  below the floor of their reduction length (§6). The engine TOML's classes by
-  accumulation length cover them.
+  classes S10, S11, L10 and L11, the 4D class S76, and the 64-bit class X3, which
+  the plugin declines. F16 (non-packed strides) executes for 53 of 109 cases (the
+  channels-first ones); the plugin declines the rest.
+- Every executed case was judged by the GPU reference (`[ VERIFIER ] gpu_ref`).
+- Without the TOML classes, 593 (gfx90a) and 295 (gfx942) of the 3,132 cases of the
+  current set fail at the default tolerance, every one by the numerical floor of its
+  reduction length (§6). With them, the measurement run above and the current set
+  below pass.
 
 **The current set.** All 3,132 cases, serial, with the MIOpen plugin and the
 engine TOML:
 
 | Architecture | OK | Skipped | Failed | Crashed | Wall time |
 |---|---|---|---|---|---|
-| gfx90a (MI250) | 2,474 | 501 | 142 | 15 | 31 min |
-| gfx942 (MI325X) | 2,460 | 503 | 156 | 13 | 26 min |
+| gfx90a (MI250) | 2,429 | 703 | 0 | 0 | 21 min |
+| gfx942 (MI325X) | 2,429 | 703 | 0 | 0 | 18 min |
 
-No claim case fails on either architecture; every failure is a probe, and each
-is a graph the MIOpen plugin accepts and then fails on:
-
-| Graph | gfx90a | gfx942 | What happens |
-|---|---|---|---|
-| F20 mixed dy, w, dx types | 85 of 109 accepted: 13 crash, 53 fail at execute, 19 run with no oracle | 83 of 109: 13, 51, 19 | The plugin accepts whenever MIOpen offers a solution. Execute returns `miopenStatusBadParm` or `miopenStatusUnknownError`; the 3D cases then fault the device (error 700). dy fp32 with w fp16 runs, and no reference registers that type triple. Only fp16 with an fp16 compute type is declined. |
-| F15 mixed layouts | 61 of 65 executed are wrong | 62 of 65 | Output disagrees with the CPU reference by the full output magnitude; the same graphs in one layout pass. |
-| F16 non-packed strides | 9 of 103 executed are wrong | 22 of 103 | Wrong output, up to 1e35 in some channel-stride cases. |
-| X3, 64-bit indexing | 2 of 2 fail | 2 of 2 | `miopenStatusUnknownError`; on gfx90a then an illegal memory access. |
-
-They are left failing, not skipped, so each shows in every run until the plugin
-declines the graph or MIOpen computes it correctly. Claims are harvested from
-these runs: 2,028 claim cases on each of gfx90a and gfx942 (linux), every claim
-case that executed; the other 34 claim cases are `dact` with the ReLU family,
-which no engine executes.
+Every skip is a graph the MIOpen plugin declines ("does not support this graph"):
+the mixed-type (F20), mixed-layout (F15), non-packed channels-last (part of F16),
+above-2³¹-element (X3) and the other graphs listed above. Before the plugin's
+decline rules (ALMIOPEN-3008) these probes were accepted and then failed or
+computed wrongly; they now show as skips, so a regression of a decline shows as an
+`unclaimed_support` or a failure. Claims are harvested from these runs: 2,028
+claim cases on each of gfx90a and gfx942 (linux), every claim case that executed;
+the other 34 claim cases are `dact` with the ReLU family, which no engine
+executes.
 
 ---
 
 ## 5. Golden reference
 
 The selection follows [methodology §4.2](methodology.md#42-which-cases-should-be-golden).
-Dgrad needs golden data more than most ops: with no GPU reference, every case has
-one live oracle. Cases are generated by PyTorch on CPU
+Dgrad needs golden data more than most ops: the GPU and CPU references are the only
+oracles, and no dgrad case has golden data. Cases are generated by PyTorch on CPU
 (`torch.nn.grad.conv{1,2,3}d_input`), with the backward pointwise ops applied in
 PyTorch for the fused cases, and record `forward_source`.
 
@@ -648,7 +650,7 @@ beside the sweep.
 
 | Item | Rule |
 |---|---|
-| Verification | `auto`: golden → GPU reference → CPU reference. For dgrad the GPU step always declines, so `auto` is the CPU reference until golden data exists. |
+| Verification | `auto`: golden → GPU reference → CPU reference. For dgrad the GPU reference judges every executed case (§4.5); the CPU reference is the fallback where the GPU one declines, and golden data takes precedence once it exists. |
 | Tolerance | `TestTolerances.hpp` `conv::getToleranceBwd`: fp32 8.5e-6, fp16 and bf16 2e-2, used as atol and rtol; no `double` value. The absolute error between two correct implementations grows with the accumulation length A (§1), so an engine that runs long reductions needs tolerance classes by A in its TOML, calibrated from observed error and never loosened to make a case pass. |
 | Support claims | Enforced. Only `claim` cases are recorded (§4.2). |
 
@@ -656,13 +658,12 @@ These features need reference or harness work before their cases can be judged
 or run. The generator emits their cases now; they are unclaimed until the work
 lands.
 
-| Feature | Gap | Needed | RFC 0021 |
+| Feature | Gap | Needed | RFC 0022 |
 |---|---|---|---|
-| All dgrad cases | No GPU reference for `ConvolutionBwdAttributes`: every case has a single live oracle, and large cases cost seconds on the CPU. | A GPU dgrad reference. | I6 |
-| F13 `CONVOLUTION` | The CPU reference rejects it; no GPU reference. An accepting engine fails "no oracle". | Flip the filter in the reference; until then golden G11. | I6 |
-| F19, F20 | The CPU reference registers only the three uniform core triples. | Register the types, or golden data. | I6, I7 |
-| F26 elu, gelu, gelu-tanh, swish, softplus backward | The CPU pointwise reference implements only relu, sigmoid and tanh backward. | Implement them; until then golden G14. | I6 |
-| F11 | No CPU test covers asymmetric dgrad. | Add one; golden G12. | I6 |
+| F13 `CONVOLUTION` | Both references reject it. An accepting engine fails "no oracle". | Flip the filter in the references; until then golden G11. | I6 |
+| F19, F20 | The references register only the three uniform core triples. | Register the types, or golden data. | I6, I7 |
+| F26 elu, gelu, gelu-tanh, swish, softplus backward | The CPU and GPU pointwise references implement only relu, sigmoid and tanh backward. | Implement them; until then golden G14. | I6 |
+| F11 | No reference test covers asymmetric dgrad. | Add one; golden G12. | I6 |
 | F21 subnormal, zero-excluded, sparse; F22 | Fill recipes are `free` and `fixed` only. | Value-domain control; a matching-infinities validator. | I4 |
 | F17; F24, F32–F34 | Allocator pointers are 256-byte aligned; bundles run one execution. | Exact placement; repeat-and-compare. | I3, I5 |
 | `purpose` | The harness ignores the tag. | The harvester skips probes. | I2 |
@@ -675,7 +676,7 @@ A change that renames ids updates the TOML globs in the same pull request.
 
 ## 7. Exhaustive mode
 
-Dgrad has an exhaustive mode: a separate tool (RFC 0021 §14) that reads the
+Dgrad has an exhaustive mode: a separate tool (RFC 0022 §14) that reads the
 declarations in `conv_bwd_plan.py`.
 
 | Declaration | Where | Content |
