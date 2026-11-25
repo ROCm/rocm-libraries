@@ -16,12 +16,12 @@ import os
 from unittest import mock
 
 import pytest
-from rocke.tests.lanes import BUILD_VARIANT, skip_until
 from rocke.core.arch import domain as arch_domain
 from rocke.core.ir import KernelDef, Region
 from rocke.core.llvm_profile import measured_flavor_for_llvm
 from rocke.helpers.compile import compile_kernel, lower_kernel_for_comgr
 from rocke.runtime.comgr import loaded_compiler_info
+from rocke.tests.lanes import BUILD_VARIANT, skip_until
 
 
 def _require_a_comgr_that_rejects_gfx1154() -> None:
