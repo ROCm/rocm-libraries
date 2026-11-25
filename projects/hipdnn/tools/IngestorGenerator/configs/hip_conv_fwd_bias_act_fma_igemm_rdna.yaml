@@ -1,6 +1,6 @@
 # Source of truth for the shipped hipkernel:hip_conv_fwd_bias_act_fma_igemm_rdna catalog: a
-# forward convolution followed by a per-output-channel bias ADD and a forward activation, for the
-# gfx11 (RDNA3/3.5) and gfx12 (RDNA4) targets. It is the FMA implicit-GEMM kernel of
+# forward convolution followed by an optional per-output-channel bias ADD and a forward
+# activation, for the gfx11 (RDNA3/3.5) and gfx12 (RDNA4) targets. It is the FMA implicit-GEMM kernel of
 # hipkernel:hip_conv_fwd_fma_igemm_rdna (../conv_rdna/kernels/ConvFwdFmaIgemm.cpp, shared with
 # that bundle) built with its bias and activation epilogues (CONV_HAS_BIAS, CONV_HAS_ACT). The
 # activation is a kernel argument, so there is one kernel per dtype x layout x output-channel
@@ -9,8 +9,9 @@
 # The native matcher (HipConvFwdBiasActFmaIgemmRdnaNative.cpp) admits a conv_fprop node whose
 # virtual output feeds a pointwise ADD with a bias of one value per output channel, whose
 # virtual output feeds RELU_FWD, SIGMOID_FWD, TANH_FWD, ELU_FWD, GELU_FWD, GELU_APPROX_TANH_FWD,
-# SWISH_FWD, SOFTPLUS_FWD or IDENTITY, and picks the tile from the output channels per group,
-# so each graph has one candidate.
+# SWISH_FWD, SOFTPLUS_FWD or IDENTITY, or a conv_fprop node whose virtual output feeds the
+# activation directly, and picks the tile from the output channels per group, so each graph has
+# one candidate.
 
 dialect: packaged
 authored_subpath: hip/conv_bias_act_rdna

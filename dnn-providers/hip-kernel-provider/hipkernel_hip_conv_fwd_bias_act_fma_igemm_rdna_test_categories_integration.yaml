@@ -6,9 +6,10 @@
 #
 # Pinned to hipkernel:hip_conv_fwd_bias_act_fma_igemm_rdna via --test-engine. Selects the shared
 # integration-test-bundles/<tier>/ConvolutionFwdPointwise/Default (conv -> activation) and
-# Variant2 (conv -> bias ADD -> activation) sweeps. Engine pinning and support claims do the rest: a claimed case the engine declines
-# fails its lane, an unclaimed one it declines (depthwise, narrow groups, a bias of another shape
-# or dtype) skips, and an unclaimed one it accepts runs and is reported as unclaimed support.
+# Variant2 (conv -> bias ADD -> activation) sweeps. Engine pinning and support claims do the
+# rest: a claimed case the engine declines fails its lane, an unclaimed one it declines
+# (depthwise, narrow groups, a bias of another shape or dtype) skips, and an unclaimed one it
+# accepts runs and is reported as unclaimed support.
 # Tiers cascade: standard runs quick + standard, comprehensive runs quick + standard +
 # comprehensive; only "full" runs the full-tier bundles.
 

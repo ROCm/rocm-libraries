@@ -196,7 +196,9 @@ std::optional<ConvEpilogueMatch> matchConvBiasActivation(const MatchContext& con
         const auto& node = context.graph.getNodeWrapper(i);
         // The kernels accumulate the convolution and apply the activation in fp32, so a graph
         // that asks for another compute type for either is declined rather than computed at a
-        // different precision.
+        // different precision. The ADD's compute type is not checked: the kernels add the bias
+        // in fp32, at least as precise as any type the ADD asks for, and the 16-bit bias graphs
+        // of the shared bundles ask for the data dtype there.
         if(node.attributesType() == data_objects::NodeAttributes::ConvolutionFwdAttributes
            && node.computeDataType() == data_objects::DataType::FLOAT)
         {

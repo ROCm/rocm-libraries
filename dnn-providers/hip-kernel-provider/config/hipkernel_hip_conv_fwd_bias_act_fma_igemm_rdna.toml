@@ -6,9 +6,9 @@ version = 1
 
 # The engine serves conv_fprop -> ADD(bias) -> activation and conv_fprop -> activation on the
 # gfx11 and gfx12 RDNA targets: the convolutions of hipkernel:hip_conv_fwd_fma_igemm_rdna, a bias
-# of one value per output channel in the data dtype, virtual intermediates, and the activations RELU_FWD (clips and
-# slope), SIGMOID_FWD, TANH_FWD, ELU_FWD, GELU_FWD, GELU_APPROX_TANH_FWD, SWISH_FWD,
-# SOFTPLUS_FWD and IDENTITY in fp32 compute. It declines anything else, and the harness skips a
+# of one value per output channel in the data dtype, virtual intermediates, and the activations
+# RELU_FWD (clips and slope), SIGMOID_FWD, TANH_FWD, ELU_FWD, GELU_FWD, GELU_APPROX_TANH_FWD,
+# SWISH_FWD, SOFTPLUS_FWD and IDENTITY in fp32 compute. It declines anything else, and the harness skips a
 # declined case.
 #
 # No arch [[test_skips]] entry: the engine's pack ships only for RDNA targets, so another device
