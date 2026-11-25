@@ -4,7 +4,7 @@
 """The benchmark client writes its results CSV only when something reads it.
 
 BenchmarkProblems asks the client for a results CSV only if the config has a
-LibraryLogic section, uses the Ductile backend, or enables ForceResultsFile;
+LibraryLogic section, uses a backend that reads benchmark results, or enables ForceResultsFile;
 otherwise ClientParameters.ini sets no-results-file. Without the CSV, a rerun into the same output directory
 benchmarks again (the CSV is the "already benchmarked" marker).
 """
@@ -40,33 +40,19 @@ def _restore_gp():
         globalParameters.update(saved)
 
 
-@pytest.mark.parametrize(
-    "hasLibraryLogic, backendName, expected",
-    [
-        (True, "tensile", True),
-        (False, "ductile", True),
-        (True, "ductile", True),
-        (False, "tensile", False),
-    ],
-)
-def test_results_file_consumed(hasLibraryLogic, backendName, expected):
-    assert bp._resultsFileConsumed(hasLibraryLogic, backendName) is expected
-
-
 # ---------------------------------------------------------------------------
 # BenchmarkProblems.main with a stubbed benchmark step
 # ---------------------------------------------------------------------------
 def _run_main(tmp_path, monkeypatch, backend=None, forceRedo=False, **mainKwargs):
     """Run main with a stubbed benchmark step that writes requested client outputs.
 
-    Returns the 2_BenchmarkData directory and the writeResultsFile value of each
-    stubbed benchmark step run.
+    Returns the 2_BenchmarkData directory and the arguments passed to each benchmark step.
     """
     resultsFileBase = str(tmp_path / "1_BenchmarkProblems" / "00_Final" / "data" / "benchmark")
-    writeResultsFiles = []
+    steps = []
 
     def fakeBenchmarkProblemType(**kwargs):
-        writeResultsFiles.append(kwargs["writeResultsFile"])
+        steps.append(kwargs)
         os.makedirs(os.path.dirname(resultsFileBase), exist_ok=True)
         with open(resultsFileBase + ".yaml", "w") as f:
             f.write("solutions\n")
@@ -99,35 +85,43 @@ def _run_main(tmp_path, monkeypatch, backend=None, forceRedo=False, **mainKwargs
         probSolMap={},
         **mainKwargs,
     )
-    return outputPath / BENCHMARK_DATA_DIR, writeResultsFiles
+    return outputPath / BENCHMARK_DATA_DIR, steps
 
 
 @pytest.mark.parametrize(
-    "hasLibraryLogic, backend, expected",
+    "hasLibraryLogic, backend, readsResults",
     [
-        (True, None, True),
+        (True, None, False),
         (False, {"Name": "Ductile", "Config": {}}, True),
+        (False, {"Name": "custom"}, True),
         (False, None, False),
         (False, {"Name": "tensile"}, False),
     ],
 )
 @pytest.mark.parametrize("forceResultsFile", [False, True])
 def test_main_asks_for_results_only_when_consumed(
-    tmp_path, monkeypatch, hasLibraryLogic, backend, expected, forceResultsFile
+    tmp_path, monkeypatch, hasLibraryLogic, backend, readsResults, forceResultsFile
 ):
     monkeypatch.setitem(globalParameters, "ForceResultsFile", forceResultsFile)
-    _, writeResultsFiles = _run_main(
+    from tensilelite.backends.ductile_backend import DuctileBackend
+
+    # Exercise the default backend capability under a name unknown to the CSV policy.
+    monkeypatch.setitem(bp.BackendFactory._backends, "custom", DuctileBackend)
+    dataPath, (step,) = _run_main(
         tmp_path, monkeypatch, backend=backend, hasLibraryLogic=hasLibraryLogic
     )
 
-    assert writeResultsFiles == [expected or forceResultsFile]
+    expectCSV = hasLibraryLogic or readsResults or forceResultsFile
+    assert step["writeResultsFile"] is expectCSV
+    assert (step["stepBatch"] is None) is readsResults
+    assert (dataPath / (PROBLEM_TYPE_NAME + "_00_00.csv")).is_file() is expectCSV
 
 
 def test_main_default_writes_results(tmp_path, monkeypatch):
     """A caller that does not say whether LibraryLogic runs keeps the results CSV."""
-    _, writeResultsFiles = _run_main(tmp_path, monkeypatch)
+    _, (step,) = _run_main(tmp_path, monkeypatch)
 
-    assert writeResultsFiles == [True]
+    assert step["writeResultsFile"] is True
 
 
 def test_main_removes_stale_results_csv_when_none_written(tmp_path, monkeypatch):
@@ -196,7 +190,9 @@ def test_write_benchmark_files_results_policy(
     monkeypatch.setattr(bp, "HelperKernelObjectsMemo", lambda *args: lambda solution: [])
     monkeypatch.setattr(bp, "KernelWriterAssembly", lambda *args: None)
     monkeypatch.setattr(bp, "cmdLineArchsFor", lambda *args: ["gfx950"])
-    monkeypatch.setattr(bp, "writeSolutionsAndKernels", lambda *args, **kwargs: ([], None))
+    monkeypatch.setattr(bp, "prepareSolutionsAndKernels", lambda *args, **kwargs: object())
+    monkeypatch.setattr(bp, "generateBenchmarkKernels", lambda *args: None)
+    monkeypatch.setattr(bp, "finishSolutionsAndKernels", lambda *args: ([], None))
     monkeypatch.setattr(bp, "getSolutionNameMin", lambda *args: "solution")
     monkeypatch.setattr(bp, "getKernelNameMin", lambda *args: "kernel")
     monkeypatch.setattr(
