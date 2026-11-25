@@ -13,14 +13,13 @@ blocks the host, by the watchdog.
 from __future__ import annotations
 
 import gc
-import os
 import weakref
 
 import pytest
 from rocke.runtime.stall_gate import StallTimeout, time_launches_staged
+from rocke.tests.gpu import current_device_arch
 
 _STREAM = 5
-_GPU = pytest.mark.skipif(not os.path.exists("/dev/kfd"), reason="needs an AMD GPU")
 
 
 class _FakeEvent:
@@ -172,18 +171,17 @@ def test_the_callers_collector_setting_survives_a_raise(caller_enabled):
 
 
 def _busy_launch():
-    """A launch of a one-instruction kernel, or skip when none can be built."""
+    """A launch of a one-instruction kernel on the current GPU, or skip when
+    there is no GPU or no kernel can be built."""
     import struct
 
-    from rocke.runtime.hip_module import Runtime, get_device_arch
+    from rocke.runtime.hip_module import Runtime
 
+    arch = current_device_arch()
     try:
         from rocke.runtime.comgr import build_hsaco_from_llvm_ir
     except Exception as e:  # noqa: BLE001  # pragma: no cover - environment dependent
         pytest.skip(f"comgr unavailable: {e}")
-    arch = get_device_arch()
-    if not arch:
-        pytest.skip("no HIP device")
     ir = (
         'target triple = "amdgcn-amd-amdhsa"\n'
         "define amdgpu_kernel void @nop(ptr addrspace(1) %p) {\n"
@@ -200,7 +198,6 @@ def _busy_launch():
 
 
 @pytest.mark.gpu
-@_GPU
 def test_real_gate_times_every_call():
     _rt, run = _busy_launch()
     out = time_launches_staged(run, warmup=2, iters=5)
@@ -209,7 +206,6 @@ def test_real_gate_times_every_call():
 
 
 @pytest.mark.gpu
-@_GPU
 def test_real_watchdog_unblocks_a_call_that_waits_on_the_stalled_stream():
     from rocke.runtime.stall_gate import StallGate
 
@@ -227,7 +223,6 @@ def test_real_watchdog_unblocks_a_call_that_waits_on_the_stalled_stream():
 
 
 @pytest.mark.gpu
-@_GPU
 def test_real_device_free_inside_the_call_is_a_stall_timeout():
     from rocke.runtime.launcher import DeviceMem
     from rocke.runtime.stall_gate import StallGate
@@ -244,7 +239,6 @@ def test_real_device_free_inside_the_call_is_a_stall_timeout():
 
 
 @pytest.mark.gpu
-@_GPU
 def test_real_garbage_holding_device_memory_is_not_freed_inside_a_sample():
     """The call allocates enough containers for an automatic young-generation
     collection, which would free the cycle's buffer on the stalled stream."""

@@ -11,13 +11,13 @@ fake-runtime tests need no GPU; the last test runs on one when present.
 
 from __future__ import annotations
 
-import os
 import sys
 from unittest import mock
 
 import pytest
 import rocke.runtime.launcher as L
 from rocke.runtime.hip_module import HipError
+from rocke.tests.gpu import current_device_arch
 
 # The fake runtime's stream: a nonzero handle is used as-is (stream 0 would
 # resolve through torch). It is not a real HIP stream.
@@ -148,9 +148,9 @@ def test_launch_kernel_timing_drains_on_a_raise(gpu_timer):
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(not os.path.exists("/dev/kfd"), reason="needs an AMD GPU")
 def test_real_runtime_drains_queued_work_on_a_raise():
     """On HIP: the drain runs against the real runtime and succeeds."""
+    current_device_arch()
     rt = L._runtime()
     try:
         nbytes = 64 << 20
