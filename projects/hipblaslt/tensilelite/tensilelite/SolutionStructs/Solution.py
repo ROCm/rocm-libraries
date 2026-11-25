@@ -4381,9 +4381,9 @@ class Solution(collections.abc.Mapping):
       return bool(isaInfoMap[isa].archCaps["HasSchedMode"])
 
     # Let WMMAs issue back to back (SCHED_MODE DISABLE_XDL_ARB_STALL).
-    # Skipped for sparse and for persistent (StreamK or DataParallel) kernels.
+    # Skipped for sparse kernels.
     def evaluateDisableXdlArbStall() -> bool:
-      return not state["ProblemType"]["Sparse"] and not isPersistent(state)
+      return not state["ProblemType"]["Sparse"]
 
     # Track VALU source operands on VA_VDST (src-operand WAR hazard).
     def evaluateEnableESM2TrackValuVsrc() -> bool:

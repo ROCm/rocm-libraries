@@ -455,6 +455,9 @@ TEST(multi_gpu_validate, catch_validation_errors)
     }
 }
 
+// Multi-rank tokens run in MPI runs only, and single-rank tokens in single-process runs only:
+// add a multi-rank token only if (part of) the root cause of the issue it covers is exclusive
+// to multi-process logic, and cover any other part with single-rank tokens.
 static const auto multi_gpu_tokens = {
     // clang-format off
 
@@ -496,6 +499,18 @@ static const auto multi_gpu_tokens = {
     "complex_forward_len_8_16384_double_op_batch_1_ifield_brick_lower_0_0_0_upper_1_4_16384_stride_65536_16384_1_dev_0_brick_lower_0_4_0_upper_1_8_16384_stride_65536_16384_1_dev_0_ofield_brick_lower_0_0_0_upper_1_8_8192_stride_65536_8192_1_dev_0_brick_lower_0_0_8192_upper_1_8_16384_stride_65536_8192_1_dev_1",
     // same, with padded input strides
     "complex_forward_len_8_16384_double_op_batch_1_ifield_brick_lower_0_0_0_upper_1_4_16384_stride_65544_16386_1_dev_0_brick_lower_0_4_0_upper_1_8_16384_stride_65544_16386_1_dev_0_ofield_brick_lower_0_0_0_upper_1_8_8192_stride_65536_8192_1_dev_0_brick_lower_0_0_8192_upper_1_8_16384_stride_65536_8192_1_dev_1",
+    // multi-process with a rank owning output bricks only: lone input brick on rank 0
+    // (device 0 on every rank, so that MPI runs with a single device per rank include them)
+    "complex_forward_len_64_128_single_op_batch_1_ifield_brick_lower_0_0_0_upper_1_64_128_stride_8192_128_1_dev_0_ofield_brick_lower_0_0_0_upper_1_32_128_stride_4096_128_1_dev_0_brick_lower_0_32_0_upper_1_64_128_stride_4096_128_1_rank_1_dev_0",
+    // multi-process with a rank owning input bricks only: lone output brick on rank 0
+    "complex_forward_len_64_128_single_op_batch_1_ifield_brick_lower_0_0_0_upper_1_64_64_stride_4096_64_1_dev_0_brick_lower_0_0_64_upper_1_64_128_stride_4096_64_1_rank_1_dev_0_ofield_brick_lower_0_0_0_upper_1_64_128_stride_8192_128_1_dev_0",
+    "real_forward_len_64_128_single_op_batch_1_ifield_brick_lower_0_0_0_upper_1_32_128_stride_4096_128_1_dev_0_brick_lower_0_32_0_upper_1_64_128_stride_4096_128_1_rank_1_dev_0_ofield_brick_lower_0_0_0_upper_1_64_65_stride_4160_65_1_dev_0",
+    // several input and output bricks on the same device, redistributed between them
+    "complex_forward_len_64_128_single_op_batch_1_ifield_brick_lower_0_0_0_upper_1_32_128_stride_4096_128_1_dev_0_brick_lower_0_32_0_upper_1_64_128_stride_4096_128_1_dev_0_ofield_brick_lower_0_0_0_upper_1_64_64_stride_4096_64_1_dev_0_brick_lower_0_0_64_upper_1_64_128_stride_4096_64_1_dev_0",
+    // multi-process with several bricks per rank on both sides, so ranks exchange several blocks
+    "complex_forward_len_64_128_single_op_batch_1_ifield_brick_lower_0_0_0_upper_1_16_128_stride_2048_128_1_dev_0_brick_lower_0_16_0_upper_1_32_128_stride_2048_128_1_dev_0_brick_lower_0_32_0_upper_1_48_128_stride_2048_128_1_rank_1_dev_0_brick_lower_0_48_0_upper_1_64_128_stride_2048_128_1_rank_1_dev_0_ofield_brick_lower_0_0_0_upper_1_64_32_stride_2048_32_1_dev_0_brick_lower_0_0_32_upper_1_64_64_stride_2048_32_1_dev_0_brick_lower_0_0_64_upper_1_64_96_stride_2048_32_1_rank_1_dev_0_brick_lower_0_0_96_upper_1_64_128_stride_2048_32_1_rank_1_dev_0",
+    // same, with one output brick per rank
+    "real_forward_len_64_128_single_op_batch_1_ifield_brick_lower_0_0_0_upper_1_16_128_stride_2048_128_1_dev_0_brick_lower_0_16_0_upper_1_32_128_stride_2048_128_1_dev_0_brick_lower_0_32_0_upper_1_48_128_stride_2048_128_1_rank_1_dev_0_brick_lower_0_48_0_upper_1_64_128_stride_2048_128_1_rank_1_dev_0_ofield_brick_lower_0_0_0_upper_1_64_33_stride_2112_33_1_dev_0_brick_lower_0_0_33_upper_1_64_65_stride_2048_32_1_rank_1_dev_0",
     // clang-format on
 };
 
@@ -557,56 +572,38 @@ std::vector<fft_params> param_generator_multi_gpu_adhoc()
     for(auto& p : param_generator_token(test_prob, multi_gpu_bluestein_tokens()))
         all_params.push_back(std::move(p));
 
-    // check if fields use more bricks than we can support
-    auto too_many_bricks = [=](const std::vector<fft_params::fft_field>& fields, size_t maxBricks) {
-        for(const auto& f : fields)
-        {
-            if(f.bricks.size() > maxBricks)
-                return true;
-
-            // also remove a test case if it uses a numbered device
-            // that isn't available
-            if(std::any_of(f.bricks.begin(), f.bricks.end(), [=](const fft_params::fft_brick& b) {
-                   return b.device >= static_cast<int>(gpus_per_rank);
-               }))
-                return true;
-        }
-        return false;
+    // check if fields use ranks or devices that aren't available
+    auto unavailable_bricks = [=](const std::vector<fft_params::fft_field>& fields) {
+        return std::any_of(fields.begin(), fields.end(), [=](const fft_params::fft_field& f) {
+            return std::any_of(
+                f.bricks.begin(), f.bricks.end(), [=](const fft_params::fft_brick& b) {
+                    return b.device >= static_cast<int>(gpus_per_rank) || b.rank >= mp_ranks;
+                });
+        });
     };
 
-    // remove test cases where we don't have enough ranks/devices for
-    // the number of bricks
+    auto single_rank = [](const fft_params& params) {
+        std::set<int> ranks;
+        for(const auto* fields : {&params.ifields, &params.ofields})
+            for(const auto& f : *fields)
+                for(const auto& b : f.bricks)
+                    ranks.insert(b.rank);
+        return ranks.size() < 2;
+    };
+
     all_params.erase(std::remove_if(all_params.begin(),
                                     all_params.end(),
                                     [=](const fft_params& params) {
-                                        size_t maxBricks = mp_lib == fft_params::fft_mp_lib_mpi
-                                                               ? mp_ranks
-                                                               : gpus_per_rank;
-                                        return too_many_bricks(params.ifields, maxBricks)
-                                               || too_many_bricks(params.ofields, maxBricks);
+                                        return unavailable_bricks(params.ifields)
+                                               || unavailable_bricks(params.ofields)
+                                               || (mp_lib == fft_params::fft_mp_lib_mpi
+                                                   && single_rank(params));
                                     }),
                      all_params.end());
 
-    // set all bricks in a field to rank-0, to change an MPI test
-    // case to single-proc
-    auto set_rank_0 = [](std::vector<fft_params::fft_field>& fields) {
-        for(auto& f : fields)
-        {
-            for(auto& b : f.bricks)
-                b.rank = 0;
-        }
-    };
-
     // modify the remaining test cases to use the current multi-GPU lib
     for(auto& params : all_params)
-    {
         params.mp_lib = mp_lib;
-        if(mp_lib == fft_params::fft_mp_lib_none)
-        {
-            set_rank_0(params.ifields);
-            set_rank_0(params.ofields);
-        }
-    }
     return all_params;
 }
 
