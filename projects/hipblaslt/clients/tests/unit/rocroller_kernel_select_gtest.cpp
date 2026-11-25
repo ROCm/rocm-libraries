@@ -6,9 +6,9 @@
 // The relative include avoids shadowing the clients' utility.hpp with the
 // library's internal header of the same name.
 
+#include "../../../library/src/amd_detail/rocblaslt/src/include/rocroller_buffer_limit.hpp"
 #include "../../../library/src/amd_detail/rocblaslt/src/include/rocroller_kernel_fields.hpp"
 #include "../../../library/src/amd_detail/rocblaslt/src/include/rocroller_kernel_select.hpp"
-#include "../../../library/src/amd_detail/rocblaslt/src/include/rocroller_selected.hpp"
 #include "../../../library/src/amd_detail/rocblaslt/src/rocroller/include/solution_selection.hpp"
 
 #include <Tensile/AMDGPU.hpp>
@@ -76,6 +76,13 @@ namespace
     constexpr RocRollerSelectedTile t64sk{64, 64, 128, false, true, false, false, 2};
     constexpr RocRollerSelectedTile t256{256, 256, 128, false, false, false, false, 2};
     constexpr RocRollerSelectedTile t48{48, 48, 128, false, false, false, false, 2};
+
+    // The tile as recorded in unbuildable_configs.def.
+    RocRollerSelectedTile unbuildable(RocRollerSelectedTile tile)
+    {
+        tile.unbuildable = true;
+        return tile;
+    }
 
     auto always = [](size_t) { return true; };
     auto never  = [](size_t) { return false; };
@@ -419,4 +426,40 @@ TEST(HostUnitRocRollerKernelSelect, smoke_KeptProblemOwnsScalarsAndDropsBuffers)
     EXPECT_NE(kept.A, static_cast<const void*>(&a));
     EXPECT_EQ(kept.stream, nullptr);
     EXPECT_EQ(kept.workspace, nullptr);
+}
+
+// rocRoller passes over a tile it fails to build, so the walk passes over a
+// recorded one and keeps the kernel of the next tile.
+TEST(HostUnitRocRollerKernelSelect, smoke_PassesOverAnUnbuildableTile)
+{
+    const auto r = walk({unbuildable(t256), t16}, {k16});
+    EXPECT_EQ(r.picks, (std::vector<size_t>{0}));
+    EXPECT_EQ(r.stop, RocRollerWalkStop::Exhausted);
+}
+
+// rocRoller never runs a configuration it fails to build, so a checked-in
+// kernel for a recorded tile is passed over too.
+TEST(HostUnitRocRollerKernelSelect, smoke_AnUnbuildableTileIsPassedOverEvenWithAKernel)
+{
+    const auto r = walk({unbuildable(t16), t32}, {k16, k32}, 1);
+    EXPECT_EQ(r.picks, (std::vector<size_t>{1}));
+}
+
+// A tile that is neither recorded nor checked in still ends the walk, after
+// the recorded tiles before it.
+TEST(HostUnitRocRollerKernelSelect, smoke_AnUnrecordedTileWithoutAKernelStillStops)
+{
+    const auto r = walk({unbuildable(t32), t256, t16}, {k16});
+    EXPECT_TRUE(r.picks.empty());
+    EXPECT_EQ(r.stop, RocRollerWalkStop::NoKernel);
+    EXPECT_EQ(r.stopTile, 1u);
+}
+
+// A recorded tile keeps nothing, so it does not count toward the request.
+TEST(HostUnitRocRollerKernelSelect, smoke_AnUnbuildableTileDoesNotCountTowardTheRequest)
+{
+    const auto r = walk({unbuildable(t256), t32, t16}, {k16, k32}, 1);
+    EXPECT_EQ(r.picks, (std::vector<size_t>{1}));
+    EXPECT_EQ(r.stop, RocRollerWalkStop::CountReached);
+    EXPECT_EQ(r.stopTile, 2u);
 }
