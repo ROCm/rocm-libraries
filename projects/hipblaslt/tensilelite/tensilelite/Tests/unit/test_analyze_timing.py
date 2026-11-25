@@ -504,6 +504,25 @@ def test_synchronizer_contexts_have_one_parent_and_valid_reports(
     assert sum(group.total_ms for group in build_purpose_hierarchy(timings)) == pytest.approx(10.0)
 
 
+@pytest.mark.parametrize("category", [
+    "pre_solution_mx_side_host_regenerate",
+    "pre_solution_mx_side_swizzle_rebuild",
+    "pre_solution_mx_side_cache_hit",
+])
+def test_mx_host_and_gpu_outcomes_are_known_input_categories(category):
+    timings = {name: [1.0] for name in (
+        "python_benchmark_problems", "python_client_execution", "pre_solution",
+        "pre_solution_listener.DataInitialization", "pre_solution_mx_init_data", category,
+    )}
+    tree = timings_to_tree(timings)
+    assert tree["unknown_categories"] == {}
+    groups = {group.name: group for group in build_purpose_hierarchy(timings)}
+    assert groups[G_INPUT].total_ms == pytest.approx(1.0)
+    assert category in TestPurposeHierarchy._names(groups[G_INPUT])
+    back = tree_to_timings(tree)
+    assert sum(back[category]) == pytest.approx(1.0)
+
+
 class TestTimingTree:
     """timings_to_tree / tree_to_timings: the tiered dict of a run's results."""
 
@@ -601,8 +620,8 @@ class TestPurposeHierarchy:
         "solve_cpu_fast": [140.0],
         "pre_solution": [200.0],
         "pre_solution_listener.ReferenceValidator": [120.0],
-        "cpu_reference_gemm_per_solution": [110.0],
-        "solve_cpu_fast_per_solution": [105.0],
+        "cpu_reference_gemm_per_solution_inputs_changed": [110.0],
+        "solve_cpu_fast_per_solution_inputs_changed": [105.0],
         "pre_solution_listener.DataInitialization": [60.0],
         "validate_warmups": [180.0],
         "validate_warmups_listener.SynchronizerValidator": [100.0],
@@ -626,7 +645,7 @@ class TestPurposeHierarchy:
 
         # The reference GEMM is one group even though it is called from two different places.
         assert {"cpu_reference_gemm", "solve_cpu_fast", "pre_solution_listener.ReferenceValidator",
-                "cpu_reference_gemm_per_solution"} <= self._names(groups[G_REFERENCE])
+                "cpu_reference_gemm_per_solution_inputs_changed"} <= self._names(groups[G_REFERENCE])
         assert "cpu_data_init" in self._names(groups[G_INPUT])
         assert "pre_solution_listener.DataInitialization" in self._names(groups[G_INPUT])
         assert "validate_warmups_listener.SynchronizerValidator" in self._names(groups[G_VALIDATION])
