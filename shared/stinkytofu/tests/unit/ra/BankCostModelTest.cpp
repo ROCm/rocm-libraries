@@ -9,6 +9,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <vector>
 
 #include "AllocationTestUtils.hpp"
@@ -62,6 +63,13 @@ void call(BasicBlock* bb) {
     inst->addSrcReg(StinkyRegister("s", 32, 2));
 }
 
+/// An s_set_vgpr_msb already in the stream, setting \p word, or with no literal.
+void setter(BasicBlock* bb, std::optional<int> word) {
+    StinkyInstruction* inst =
+        AsmIRBuilder(*bb, kRaTestArch).create(getMCIDByUOp(GFX::s_set_vgpr_msb, kRaTestArch));
+    if (word.has_value()) inst->addSrcReg(StinkyRegister(*word));
+}
+
 /// Each value's bank under \p colouring.
 std::vector<uint8_t> banksOf(const Function& function, const AllocationResult& colouring) {
     std::vector<uint8_t> banks(function.ssaArena().valueCount() + 1, kUnknownBank);
@@ -73,17 +81,8 @@ std::vector<uint8_t> banksOf(const Function& function, const AllocationResult& c
     return banks;
 }
 
-/// The s_set_vgpr_msb InsertVgprMsbPass inserts into \p function.
-double emittedSwitches(Function& function) {
-    PassManager pm;
-    registerAllAnalyses(pm.getAnalysisManager());
-    pm.setGemmTileConfig(function.getGemmTileConfig());
-    AsmCapsConfig caps;
-    caps.vgprMsbMode = VgprMsbMode::Msb16;
-    pm.setAsmCapsConfig(caps);
-    pm.addPass(createInsertVgprMsbPass());
-    pm.run(function);
-
+/// The s_set_vgpr_msb in \p function.
+double setterCount(const Function& function) {
     double count = 0;
     for (const BasicBlock& bb : function) {
         for (const IRBase& ir : bb) {
@@ -92,6 +91,20 @@ double emittedSwitches(Function& function) {
         }
     }
     return count;
+}
+
+/// The s_set_vgpr_msb InsertVgprMsbPass inserts into \p function.
+double emittedSwitches(Function& function) {
+    const double before = setterCount(function);
+    PassManager pm;
+    registerAllAnalyses(pm.getAnalysisManager());
+    pm.setGemmTileConfig(function.getGemmTileConfig());
+    AsmCapsConfig caps;
+    caps.vgprMsbMode = VgprMsbMode::Msb16;
+    pm.setAsmCapsConfig(caps);
+    pm.addPass(createInsertVgprMsbPass());
+    pm.run(function);
+    return setterCount(function) - before;
 }
 
 std::unique_ptr<Function> newFunction() {
@@ -153,6 +166,45 @@ TEST(BankCostModelTest, AnUnliftedFunctionIsPricedAtItsOwnRegisters) {
     build(*emitted);
     EXPECT_EQ(model.cost({}), emittedSwitches(*emitted));
     EXPECT_EQ(model.cost({}), 3.0);
+}
+
+TEST(BankCostModelTest, ASetterInTheStreamSetsTheWordTheNextWmmaMeets) {
+    // The pass keeps the word a setter in its input sets, so the first WMMA,
+    // which needs exactly that word, costs nothing; the second's src1 moves to
+    // bank 3 and switches.
+    const auto build = [](Function& function) {
+        BasicBlock* entry = function.createBasicBlock("entry");
+        setter(entry, encodeVgprMsbForSlot(0, 1) + encodeVgprMsbForSlot(1, 2));
+        wmma(entry, /*dst=*/0, /*a=*/256, /*b=*/512, /*c=*/0);
+        wmma(entry, /*dst=*/8, /*a=*/264, /*b=*/776, /*c=*/8);
+    };
+    std::unique_ptr<Function> priced = newFunction();
+    build(*priced);
+    const VgprMsbStreamModel model(*priced, detectLoops(*priced));
+
+    std::unique_ptr<Function> emitted = newFunction();
+    build(*emitted);
+    EXPECT_EQ(model.cost({}), emittedSwitches(*emitted));
+    EXPECT_EQ(model.cost({}), 1.0);
+}
+
+TEST(BankCostModelTest, ASetterInTheStreamWithNoLiteralLeavesNoWordKnown) {
+    // The second WMMA needs the word the first one's setter set, but a setter
+    // with no literal leaves no word known, so it switches.
+    const auto build = [](Function& function) {
+        BasicBlock* entry = function.createBasicBlock("entry");
+        wmma(entry, /*dst=*/0, /*a=*/256, /*b=*/512, /*c=*/0);
+        setter(entry, std::nullopt);
+        wmma(entry, /*dst=*/8, /*a=*/264, /*b=*/520, /*c=*/8);
+    };
+    std::unique_ptr<Function> priced = newFunction();
+    build(*priced);
+    const VgprMsbStreamModel model(*priced, detectLoops(*priced));
+
+    std::unique_ptr<Function> emitted = newFunction();
+    build(*emitted);
+    EXPECT_EQ(model.cost({}), emittedSwitches(*emitted));
+    EXPECT_EQ(model.cost({}), 2.0);
 }
 
 TEST(BankCostModelTest, ASwitchInALoopWeighsTenTimesOneOutside) {

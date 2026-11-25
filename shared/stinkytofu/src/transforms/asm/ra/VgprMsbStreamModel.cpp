@@ -39,18 +39,32 @@ VgprMsbStreamModel::VgprMsbStreamModel(const Function& function, const std::vect
             weight *= kBankCostLoopWeight;
 
         // Walked as InsertVgprMsbPass walks it, so the segments are where its
-        // tracker forgets the word.
+        // tracker forgets the word or takes one from a setter in the stream.
         uint32_t previous = kNoEvent;
+        std::optional<std::array<uint8_t, 4>> inForce;
         for (const IRBase& ir : bb) {
             const auto* inst = dyn_cast<StinkyInstruction>(&ir);
             if (inst == nullptr) continue;
             if (inst->getUnifiedOpcode() == GFX::LABEL) {
                 previous = kNoEvent;
+                inForce.reset();
                 continue;
             }
             if (isPseudoInst(inst)) continue;
             if (isCall(*inst)) {
                 previous = kNoEvent;
+                inForce.reset();
+                continue;
+            }
+            if (inst->getUnifiedOpcode() == GFX::s_set_vgpr_msb) {
+                previous = kNoEvent;
+                inForce.reset();
+                const int word = vgprMsbSetterWord(*inst);
+                if (word < 0) continue;
+                inForce.emplace();
+                for (size_t slot = 0; slot < inForce->size(); ++slot)
+                    (*inForce)[slot] =
+                        static_cast<uint8_t>(decodeVgprMsbForSlot(word, static_cast<int>(slot)));
                 continue;
             }
             if (!carriesVgprMsb(*inst)) continue;
@@ -72,6 +86,7 @@ VgprMsbStreamModel::VgprMsbStreamModel(const Function& function, const std::vect
 
             event.weight = weight;
             event.previous = previous;
+            if (previous == kNoEvent) event.inForce = inForce;
             const auto index = static_cast<uint32_t>(events_.size());
             if (previous != kNoEvent) events_[previous].next = index;
             for (size_t slot = 0; slot < event.value.size(); ++slot) {
@@ -113,8 +128,7 @@ double VgprMsbStreamModel::useWeight(SSAValueID value) const {
 bool VgprMsbStreamModel::switchesAt(uint32_t index, std::span<const uint8_t> bankOfValue,
                                     std::span<const SSAValueID> moved, uint8_t bank) const {
     const Event& event = events_[index];
-    if (event.previous == kNoEvent) return true;
-    const Event& before = events_[event.previous];
+    if (event.previous == kNoEvent && !event.inForce.has_value()) return true;
     const auto slotBank = [&](const Event& of, size_t slot) -> uint8_t {
         const SSAValueID value = of.value[slot];
         if (value == kInvalidSSAValueID) return of.fixed[slot];
@@ -122,7 +136,9 @@ bool VgprMsbStreamModel::switchesAt(uint32_t index, std::span<const uint8_t> ban
         return bankIn(bankOfValue, value);
     };
     for (size_t slot = 0; slot < event.value.size(); ++slot) {
-        if (slotBank(event, slot) != slotBank(before, slot)) return true;
+        const uint8_t before = event.previous == kNoEvent ? (*event.inForce)[slot]
+                                                          : slotBank(events_[event.previous], slot);
+        if (slotBank(event, slot) != before) return true;
     }
     return false;
 }

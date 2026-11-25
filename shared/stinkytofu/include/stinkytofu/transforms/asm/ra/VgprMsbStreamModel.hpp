@@ -12,6 +12,7 @@
 
 #include <array>
 #include <cstdint>
+#include <optional>
 #include <span>
 #include <vector>
 
@@ -24,11 +25,13 @@ namespace stinkytofu {
 
 /// Built once, from the function in the order the insertion pass will see it.
 ///
-/// An event is an instruction that carries a bank word. A block start, a label
-/// or a call leaves no word known, so it begins a segment, and the first event
-/// of a segment always switches. Each slot of an event is the bank of a value
-/// (unit 0 of a lifted operand), a fixed bank (an operand not lifted), or bank 0
-/// where the instruction has no operand, as the word itself holds it.
+/// An event is an instruction that carries a bank word. A block start, a label,
+/// a call or a setter already in the stream begins a segment. The first event of
+/// a segment switches unless a setter's word serves it, since the pass keeps the
+/// word such a setter sets; the others leave no word known. Each slot of an
+/// event is the bank of a value (unit 0 of a lifted operand), a fixed bank (an
+/// operand not lifted), or bank 0 where the instruction has no operand, as the
+/// word itself holds it.
 ///
 /// Whether event j switches depends only on j and the event before it in its
 /// segment, so moving a value's bank changes only its uses and the event after
@@ -56,6 +59,9 @@ class STINKYTOFU_EXPORT VgprMsbStreamModel final : public BankCostModel {
         /// The event before and after this one in its segment.
         uint32_t previous = kNoEvent;
         uint32_t next = kNoEvent;
+        /// For the first event of a segment, the bank of each slot of the word a
+        /// setter already in the stream left in force; nothing when none is.
+        std::optional<std::array<uint8_t, 4>> inForce;
     };
 
     /// Does \p event switch, with the values in \p moved in \p bank and the rest
