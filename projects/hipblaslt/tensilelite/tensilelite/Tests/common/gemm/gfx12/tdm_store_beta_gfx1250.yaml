@@ -548,6 +548,7 @@ BenchmarkProblems:
   ########################################
   # ReuseAcrossPersistent keeps A in VGPRs from one DataParallel tile to the next, and its count of
   # resident K tiles leaves the VGPR of the staged tile's address: fp32 D from fp8 inputs at MT64x256.
+  # The N=262144 size gives each workgroup of the persistent grid several tiles.
   ########################################
   -
     -
@@ -585,3 +586,4 @@ BenchmarkProblems:
         - ProblemSizes:
           - Exact: [64, 65792, 1, 256]
           - Exact: [61, 65792, 1, 256]
+          - Exact: [64, 262144, 1, 256]
