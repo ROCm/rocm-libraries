@@ -154,8 +154,10 @@ extern "C" {
  *     (rocke_fused_moe_forward_*, rocke_fused_moe_host_preshuffle_b,
  *     rocke_fused_moe_build_per_expert_problems, rocke_fmoe_dtype_*) are
  *     removed; it redefined rocke_fmoe_forward_spec_t and
- *     rocke_grouped_gemm_problem_t with other layouts. */
-#define ROCKE_ABI_VERSION 23
+ *     rocke_grouped_gemm_problem_t with other layouts.
+ * 24: rocke_direct_dgrad_wmma_spec_t gained pingpong, pp_group, row_ring and
+ *     tap_ring at its end, which changes its size. */
+#define ROCKE_ABI_VERSION 24
 
 /* Wire ABI: the CBOR recipe/bundle/guard vocabulary this engine understands.
  * 2: list-tagged ("l") kernel attrs such as cluster_dims; level-1 engines drop them.

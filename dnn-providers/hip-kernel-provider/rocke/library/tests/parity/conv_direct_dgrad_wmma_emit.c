@@ -396,6 +396,167 @@ static int make_cfg(int idx, rocke_direct_dgrad_wmma_spec_t* s, const char** arc
         s->tiles_p = 3;
         s->pack_groups = 8;
         return 0;
+    case 38: /* fp16, 3x1 PAD 1x0 (per-axis padding), 2x1 waves, 8-wide tiles, 3 stages, prefetch */
+        s->problem = make_problem(3, 1, "fp16", 1);
+        s->problem.KW = 1;
+        s->problem.pad_w = 0;
+        s->waves_c = 2;
+        s->waves_p = 1;
+        s->tiles_c = 4;
+        s->tiles_p = 4;
+        s->tile_w = 8;
+        s->stages = 3;
+        s->prefetch = true;
+        s->sched = "iterative-ilp";
+        return 0;
+    case 39: /* bf16, 1x3 PAD 0x1 (per-axis padding), 2x1 waves, 8-wide tiles, 3 stages, prefetch */
+        s->problem = make_problem(1, 0, "bf16", 1);
+        s->problem.KW = 3;
+        s->problem.pad_w = 1;
+        s->waves_c = 2;
+        s->waves_p = 1;
+        s->tiles_c = 4;
+        s->tiles_p = 4;
+        s->tile_w = 8;
+        s->stages = 3;
+        s->prefetch = true;
+        s->sched = "iterative-ilp";
+        return 0;
+    case 40: /* bf16, pingpong, 2x4 waves, 4x8 tiles */
+        s->problem = make_problem(3, 1, "bf16", 1);
+        s->waves_c = 2;
+        s->waves_p = 4;
+        s->tiles_c = 4;
+        s->tiles_p = 8;
+        s->pingpong = true;
+        return 0;
+    case 41: /* fp16, PAD 0 pingpong pp_group 2, tile_w 28 (4x7 tiles), iterative-ilp */
+        s->problem = make_problem(3, 0, "fp16", 1);
+        s->waves_c = 2;
+        s->waves_p = 4;
+        s->tiles_c = 4;
+        s->tiles_p = 7;
+        s->tile_w = 28;
+        s->pingpong = true;
+        s->pp_group = 2;
+        s->sched = "iterative-ilp";
+        return 0;
+    case 42: /* bf16, pingpong, 2 images of 32-wide tiles, iterative-ilp */
+        s->problem = make_problem(3, 1, "bf16", 1);
+        s->waves_c = 2;
+        s->waves_p = 4;
+        s->tiles_c = 4;
+        s->tiles_p = 8;
+        s->tile_w = 32;
+        s->tile_n = 2;
+        s->pingpong = true;
+        s->sched = "iterative-ilp";
+        return 0;
+    case 43: /* fp16, pingpong + tap_ring, ck 64, 3 stages, pp_group 2, iterative-ilp */
+        s->problem = make_problem(3, 1, "fp16", 1);
+        s->waves_c = 2;
+        s->waves_p = 4;
+        s->tiles_c = 4;
+        s->tiles_p = 8;
+        s->ck = 64;
+        s->stages = 3;
+        s->pingpong = true;
+        s->pp_group = 2;
+        s->tap_ring = true;
+        s->sched = "iterative-ilp";
+        return 0;
+    case 44: /* bf16, pingpong + tap_ring, ck 64, 3 stages, pp_group 2, tile_w 32 */
+        s->problem = make_problem(3, 1, "bf16", 1);
+        s->waves_c = 2;
+        s->waves_p = 4;
+        s->tiles_c = 4;
+        s->tiles_p = 8;
+        s->tile_w = 32;
+        s->ck = 64;
+        s->stages = 3;
+        s->pingpong = true;
+        s->pp_group = 2;
+        s->tap_ring = true;
+        s->sched = "iterative-ilp";
+        return 0;
+    case 45: /* bf16, pingpong + row_ring, 8x2 tiles (256-channel block), 2 stages */
+        s->problem = make_problem(3, 1, "bf16", 1);
+        s->problem.cpg = 256;
+        s->waves_c = 2;
+        s->waves_p = 4;
+        s->tiles_c = 8;
+        s->tiles_p = 2;
+        s->pingpong = true;
+        s->row_ring = true;
+        s->sched = "iterative-ilp";
+        return 0;
+    case 46: /* fp16, pingpong + tap_ring on a 1x3 PAD 0x1 filter, ragged kpg 40, 3 stages */
+        s->problem = make_problem(1, 0, "fp16", 1);
+        s->problem.KW = 3;
+        s->problem.pad_w = 1;
+        s->problem.kpg = 40;
+        s->waves_c = 2;
+        s->waves_p = 2;
+        s->tiles_c = 2;
+        s->tiles_p = 4;
+        s->stages = 3;
+        s->pingpong = true;
+        s->tap_ring = true;
+        return 0;
+    case 47: /* bf16, pingpong + row_ring 5x5 PAD 2, pp_group 2 */
+        s->problem = make_problem(5, 2, "bf16", 1);
+        s->waves_c = 1;
+        s->waves_p = 4;
+        s->tiles_c = 4;
+        s->tiles_p = 4;
+        s->pingpong = true;
+        s->pp_group = 2;
+        s->row_ring = true;
+        return 0;
+    case 48: /* fp16, unpacked kpg 36 (not a multiple of 8), 1x4 waves */
+        s->problem = make_problem(3, 1, "fp16", 1);
+        s->problem.kpg = 36;
+        s->waves_c = 1;
+        s->waves_p = 4;
+        s->tiles_c = 4;
+        s->tiles_p = 4;
+        return 0;
+    case 49: /* rejected by both engines: pingpong with prefetch */
+        s->problem = make_problem(3, 1, "bf16", 1);
+        s->pingpong = true;
+        s->prefetch = true;
+        return 0;
+    case 50: /* rejected by both engines: tap_ring without pingpong */
+        s->problem = make_problem(3, 1, "bf16", 1);
+        s->tap_ring = true;
+        return 0;
+    case 51: /* rejected by both engines: row_ring with tap_ring */
+        s->problem = make_problem(3, 1, "bf16", 1);
+        s->pingpong = true;
+        s->row_ring = true;
+        s->tap_ring = true;
+        return 0;
+    case 52: /* rejected by both engines: pp_group 2 without pingpong */
+        s->problem = make_problem(3, 1, "bf16", 1);
+        s->pp_group = 2;
+        return 0;
+    case 53: /* rejected by both engines: a column padding of its own at stride 2 */
+        s->problem = make_problem(3, 1, "bf16", 2);
+        s->problem.pad_w = 0;
+        s->waves_c = 1;
+        s->waves_p = 4;
+        s->tiles_c = 2;
+        s->tiles_p = 4;
+        return 0;
+    case 54: /* rejected by both engines: pingpong with an odd wave count (1x3 waves) */
+        s->problem = make_problem(3, 1, "bf16", 1);
+        s->waves_c = 1;
+        s->waves_p = 3;
+        s->tiles_c = 4;
+        s->tiles_p = 4;
+        s->tile_w = 12;
+        s->pingpong = true;
+        return 0;
     default:
         return -1;
     }

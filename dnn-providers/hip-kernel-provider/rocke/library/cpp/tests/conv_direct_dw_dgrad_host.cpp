@@ -78,12 +78,15 @@
 #include "rocke/instance_conv_winograd_gemm_wmma.h"
 #include "rocke/lower_llvm.h"
 
-/* Layout canary, as in test_mma_catalog_lookup.cpp: growing
- * rocke_direct_fwd_wmma_spec_t fails the build here until ROCKE_ABI_VERSION in
+/* Layout canaries, as in test_mma_catalog_lookup.cpp: growing
+ * rocke_direct_fwd_wmma_spec_t or rocke_direct_dgrad_wmma_spec_t fails the build here until ROCKE_ABI_VERSION in
  * rocke/abi.h moves with it. 64-bit only. */
 #if INTPTR_MAX == INT64_MAX
 static_assert(sizeof(rocke_direct_fwd_wmma_spec_t) == 152 && ROCKE_ABI_VERSION >= 8,
               "rocke_direct_fwd_wmma_spec_t changed size: bump ROCKE_ABI_VERSION in "
+              "rocke/abi.h, then update this pin");
+static_assert(sizeof(rocke_direct_dgrad_wmma_spec_t) == 144 && ROCKE_ABI_VERSION >= 24,
+              "rocke_direct_dgrad_wmma_spec_t changed size: bump ROCKE_ABI_VERSION in "
               "rocke/abi.h, then update this pin");
 #endif
 
@@ -285,8 +288,9 @@ static void check_wmma_padding(const char* kernel, Spec spec, Valid is_valid)
     CHECK(strstr(reason, "pad_w") != NULL, "%s reason names pad_w: %s", kernel, reason);
 }
 
-/* The direct and small-K WMMA forwards offset columns by PAD_W: they take a
- * column padding that differs from PAD, and still refuse pad_w below -1. */
+/* The direct and small-K WMMA forwards and the stride-1 WMMA dgrad offset
+ * columns by PAD_W: they take a column padding that differs from PAD, and
+ * still refuse pad_w below -1. */
 template <typename Spec, typename Valid>
 static void check_wmma_per_axis_padding(const char* kernel, Spec spec, Valid is_valid)
 {
@@ -313,7 +317,7 @@ static void test_wmma_kernels_refuse_per_axis_padding(void)
     check_wmma_per_axis_padding("direct_fwd_wmma", fwd, rocke_direct_fwd_wmma_is_valid_spec);
     rocke_direct_dgrad_wmma_spec_t dgrad = rocke_direct_dgrad_wmma_spec_default();
     dgrad.problem = dense_problem(13, 21, 64, 96);
-    check_wmma_padding("direct_dgrad_wmma", dgrad, rocke_direct_dgrad_wmma_is_valid_spec);
+    check_wmma_per_axis_padding("direct_dgrad_wmma", dgrad, rocke_direct_dgrad_wmma_is_valid_spec);
     rocke_fwd_smallc_wmma_spec_t smallc = rocke_fwd_smallc_wmma_spec_default();
     smallc.problem = dense_problem(32, 48, 3, 64);
     check_wmma_padding("fwd_smallc_wmma", smallc, rocke_fwd_smallc_wmma_is_valid_spec);

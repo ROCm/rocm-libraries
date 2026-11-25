@@ -472,6 +472,7 @@ def conv_direct_dgrad_wmma_spec_to_dict(spec: Any) -> Dict[str, Any]:
             KH=p.KH,
             KW=p.KW,
             PAD=p.PAD,
+            pad_w=p.pad_w,
             stride=p.stride,
             dil_h=p.dil_h,
             dil_w=p.dil_w,
@@ -492,6 +493,10 @@ def conv_direct_dgrad_wmma_spec_to_dict(spec: Any) -> Dict[str, Any]:
         pack_groups=spec.pack_groups,
         split_barrier=spec.split_barrier,
         wave_epilogue=spec.wave_epilogue,
+        pingpong=spec.pingpong,
+        pp_group=spec.pp_group,
+        row_ring=spec.row_ring,
+        tap_ring=spec.tap_ring,
     )
 
 

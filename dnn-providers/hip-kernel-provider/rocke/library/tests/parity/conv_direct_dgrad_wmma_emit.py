@@ -49,6 +49,23 @@
 #  35  fp16, stride 2 pack_groups 2, 1x4 waves, 2x4 tiles, prefetch + iterative-ilp
 #  36  bf16, stride 2 pack_groups 4, 1x2 waves, 2x4 tiles
 #  37  fp16, stride 2 pack_groups 8, 1x4 waves, 2x3 tiles
+#  38  fp16, 3x1 PAD 1x0 (per-axis padding), 2x1 waves, 8-wide tiles, 3 stages, prefetch
+#  39  bf16, 1x3 PAD 0x1 (per-axis padding), 2x1 waves, 8-wide tiles, 3 stages, prefetch
+#  40  bf16, pingpong, 2x4 waves, 4x8 tiles
+#  41  fp16, PAD 0 pingpong pp_group 2, tile_w 28 (4x7 tiles), iterative-ilp
+#  42  bf16, pingpong, 2 images of 32-wide tiles, iterative-ilp
+#  43  fp16, pingpong + tap_ring, ck 64, 3 stages, pp_group 2, iterative-ilp
+#  44  bf16, pingpong + tap_ring, ck 64, 3 stages, pp_group 2, tile_w 32
+#  45  bf16, pingpong + row_ring, 8x2 tiles (256-channel block), 2 stages
+#  46  fp16, pingpong + tap_ring on a 1x3 PAD 0x1 filter, ragged kpg 40, 3 stages
+#  47  bf16, pingpong + row_ring 5x5 PAD 2, pp_group 2
+#  48  fp16, unpacked kpg 36 (not a multiple of 8), 1x4 waves
+#  49  rejected by both engines: pingpong with prefetch
+#  50  rejected by both engines: tap_ring without pingpong
+#  51  rejected by both engines: row_ring with tap_ring
+#  52  rejected by both engines: pp_group 2 without pingpong
+#  53  rejected by both engines: a column padding of its own at stride 2
+#  54  rejected by both engines: pingpong with an odd wave count (1x3 waves)
 from dataclasses import replace
 
 from _emit_common import run_emit
@@ -510,6 +527,208 @@ def _spec(idx: int):
                 tiles_c=2,
                 tiles_p=3,
                 pack_groups=8,
+            ),
+            "gfx1250",
+        ),
+        38: (
+            S(
+                problem=replace(_p(dtype="fp16"), KW=1, pad_w=0),
+                waves_c=2,
+                waves_p=1,
+                tiles_c=4,
+                tiles_p=4,
+                tile_w=8,
+                stages=3,
+                prefetch=True,
+                sched="iterative-ilp",
+            ),
+            "gfx1250",
+        ),
+        39: (
+            S(
+                problem=replace(_p(KH=1, PAD=0), KW=3, pad_w=1),
+                waves_c=2,
+                waves_p=1,
+                tiles_c=4,
+                tiles_p=4,
+                tile_w=8,
+                stages=3,
+                prefetch=True,
+                sched="iterative-ilp",
+            ),
+            "gfx1250",
+        ),
+        40: (
+            S(
+                problem=_p(),
+                waves_c=2,
+                waves_p=4,
+                tiles_c=4,
+                tiles_p=8,
+                pingpong=True,
+            ),
+            "gfx1250",
+        ),
+        41: (
+            S(
+                problem=_p(PAD=0, dtype="fp16"),
+                waves_c=2,
+                waves_p=4,
+                tiles_c=4,
+                tiles_p=7,
+                tile_w=28,
+                pingpong=True,
+                pp_group=2,
+                sched="iterative-ilp",
+            ),
+            "gfx1250",
+        ),
+        42: (
+            S(
+                problem=_p(),
+                waves_c=2,
+                waves_p=4,
+                tiles_c=4,
+                tiles_p=8,
+                tile_w=32,
+                tile_n=2,
+                pingpong=True,
+                sched="iterative-ilp",
+            ),
+            "gfx1250",
+        ),
+        43: (
+            S(
+                problem=_p(dtype="fp16"),
+                waves_c=2,
+                waves_p=4,
+                tiles_c=4,
+                tiles_p=8,
+                ck=64,
+                stages=3,
+                pingpong=True,
+                pp_group=2,
+                tap_ring=True,
+                sched="iterative-ilp",
+            ),
+            "gfx1250",
+        ),
+        44: (
+            S(
+                problem=_p(),
+                waves_c=2,
+                waves_p=4,
+                tiles_c=4,
+                tiles_p=8,
+                tile_w=32,
+                ck=64,
+                stages=3,
+                pingpong=True,
+                pp_group=2,
+                tap_ring=True,
+                sched="iterative-ilp",
+            ),
+            "gfx1250",
+        ),
+        45: (
+            S(
+                problem=_p(cpg=256),
+                waves_c=2,
+                waves_p=4,
+                tiles_c=8,
+                tiles_p=2,
+                pingpong=True,
+                row_ring=True,
+                sched="iterative-ilp",
+            ),
+            "gfx1250",
+        ),
+        46: (
+            S(
+                problem=replace(_p(KH=1, PAD=0, dtype="fp16", kpg=40), KW=3, pad_w=1),
+                waves_c=2,
+                waves_p=2,
+                tiles_c=2,
+                tiles_p=4,
+                stages=3,
+                pingpong=True,
+                tap_ring=True,
+            ),
+            "gfx1250",
+        ),
+        47: (
+            S(
+                problem=_p(KH=5, PAD=2),
+                waves_c=1,
+                waves_p=4,
+                tiles_c=4,
+                tiles_p=4,
+                pingpong=True,
+                pp_group=2,
+                row_ring=True,
+            ),
+            "gfx1250",
+        ),
+        48: (
+            S(
+                problem=_p(dtype="fp16", kpg=36),
+                waves_c=1,
+                waves_p=4,
+                tiles_c=4,
+                tiles_p=4,
+            ),
+            "gfx1250",
+        ),
+        49: (
+            S(
+                problem=_p(),
+                pingpong=True,
+                prefetch=True,
+            ),
+            "gfx1250",
+        ),
+        50: (
+            S(
+                problem=_p(),
+                tap_ring=True,
+            ),
+            "gfx1250",
+        ),
+        51: (
+            S(
+                problem=_p(),
+                pingpong=True,
+                row_ring=True,
+                tap_ring=True,
+            ),
+            "gfx1250",
+        ),
+        52: (
+            S(
+                problem=_p(),
+                pp_group=2,
+            ),
+            "gfx1250",
+        ),
+        53: (
+            S(
+                problem=replace(_p(stride=2), pad_w=0),
+                waves_c=1,
+                waves_p=4,
+                tiles_c=2,
+                tiles_p=4,
+            ),
+            "gfx1250",
+        ),
+        54: (
+            S(
+                problem=_p(),
+                waves_c=1,
+                waves_p=3,
+                tiles_c=4,
+                tiles_p=4,
+                tile_w=12,
+                pingpong=True,
             ),
             "gfx1250",
         ),
