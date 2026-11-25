@@ -913,6 +913,8 @@ no other process of this entry exists meanwhile; its lines are prefixed with
 another option that needs one process runs in one process. The workers of
 entries that a parallel `ctest -j` runs at once take their CPU blocks from a
 rotation the entry picks from its process id, so they mostly land apart.
+Why this plugin and not pytest-xdist:
+[`platform/tests/worker_processes_decision.md`](platform/tests/worker_processes_decision.md).
 
 **The explicit gates are never sharded.** `rocke_library_counted_structural_gate`
 and `rocke_library_counted_compiler_gate` do not use `_ROCKE_INSTALLED_PYTEST`.
