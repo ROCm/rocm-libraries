@@ -433,13 +433,18 @@ repos:
       # cmake, ctest and a C++ compiler on PATH. It also reads
       # shared/ctest/parse_ctest_categories.py, but a change to that file alone
       # cannot trigger it: CI checks out only the directories a change touches,
-      # so the hook's own files under rocke/ would be missing.
+      # so the hook's own files under rocke/ would be missing. It reads
+      # Python, JSON, YAML and ini files, and the configure reads CMake files
+      # and lists C/C++ sources and reference files; no check, configure step
+      # or glob reads rocKE's documentation, so a change to it alone skips the
+      # hook.
       - id: rocke-pending-lanes
         name: rocKE every test file runs in CI or has a recorded reason
         entry: python -B -m pytest -p no:cacheprovider -q dnn-providers/hip-kernel-provider/rocke/platform/tests/tools/test_pending_lanes.py dnn-providers/hip-kernel-provider/rocke/platform/tests/tools/test_limbo_audit.py
         language: python
         additional_dependencies: *rocke_dependencies
         files: ^dnn-providers/hip-kernel-provider/(rocke/|ROCKE_ENGINE_test_categories_external\.yaml$)
+        exclude: ^dnn-providers/hip-kernel-provider/rocke/(.*\.mdc?|(.*/)?\.clinerules)$
         pass_filenames: false
       # No git-tracked file of rocKE holds a compliance hit. A hit depends only
       # on a file's text and the patterns, so rocke-compliance scans the files
@@ -461,20 +466,23 @@ repos:
         additional_dependencies: *rocke_dependencies
         files: ^dnn-providers/hip-kernel-provider/rocke/(tools/compliance_patterns\.(py|json)|platform/tests/tools/test_compliance_patterns\.py)$
         pass_filenames: false
-      # No new torch use under rocKE (rocke_no_torch_check).
+      # No new torch use under rocKE (rocke_no_torch_check). The check reads
+      # Python files, requirements and pyproject.toml files, CMake files and
+      # its allowlist; importing rocke adds ini and JSON files. A change to
+      # any other file cannot change its outcome, so it skips the hook.
       - id: rocke-no-torch
         name: rocKE adds no torch use
         entry: python -B -m pytest -p no:cacheprovider -q dnn-providers/hip-kernel-provider/rocke/platform/tests/tools/test_no_torch.py
         language: python
         additional_dependencies: *rocke_dependencies
-        files: ^dnn-providers/hip-kernel-provider/rocke/
+        files: ^dnn-providers/hip-kernel-provider/rocke/.*\.(py|toml|txt|cmake|ini|json)$
         pass_filenames: false
 
       # The engines' parity checks need no build. Each fires on what can change
       # its outcome: the files whose content it compares and the modules it
       # imports beyond what import rocke loads. A break in import rocke, the
-      # conftest or pytest.ini fails the three hooks above, which run on every
-      # change to rocKE.
+      # conftest or pytest.ini fails rocke-pending-lanes above, which runs on
+      # every change to rocKE but its documentation.
       # data.cpp and arch_specs.json agree on each arch's scalar facts and GEMM
       # capabilities (rocke_arch_table_engine_parity). assets.py locates both.
       - id: rocke-arch-table-engine-parity
