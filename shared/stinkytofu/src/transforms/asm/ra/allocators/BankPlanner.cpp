@@ -194,8 +194,10 @@ class Planner {
         return static_cast<uint8_t>(*block.hintBase / kVgprBankSize);
     }
 
-    /// Pinned blocks sit where their hints are, and capped blocks under their
-    /// ceiling: banks they take room in and that the model prices as known.
+    /// Pinned blocks sit where their hints are, and capped blocks in bank 0:
+    /// banks they take room in and that the model prices as known. A ceiling
+    /// comes from an operand field with no bank selector, so it lies in bank 0;
+    /// a block capped higher could sit in any bank below it, and stays undecided.
     void fixBlocks() {
         for (const Block& block : blocks_) {
             if (block.regClass != RegType::V) continue;

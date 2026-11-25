@@ -1267,6 +1267,10 @@ Expected<AllocationResult> runGreedyPlacement(const AllocationContext& context, 
         planRefusal = withoutFunctionName(context.function, result.getError());
     }
 
+    // Without the plan this is the run quadrant=any makes, folding retry
+    // included, so a refused plan leaves the kernel the colouring it has
+    // without one. A planned run without folding would be neither, so none is
+    // tried.
     Greedy greedy(context, followHints, policy, mayFold, /*mayPlan=*/false);
     Expected<AllocationResult> first = greedy.run();
     Expected<AllocationResult> result =
