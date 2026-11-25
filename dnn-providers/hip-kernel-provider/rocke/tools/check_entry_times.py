@@ -37,9 +37,13 @@ check would run::
 
     python check_entry_times.py check --ctest-dir .
 
-``check`` also fails when a registered entry has a time in the committed
-``entry_times.json`` but none in the ``--entry-times`` file it projects from, so
-a time cannot drop out of the projection unnoticed.
+``check`` judges one operating system: the one it runs on, or ``--column``.
+The registration it lists is that system's, so another system's column cannot
+be judged from it. ``check`` also fails when an entry a CI tier runs has no
+time in that column, so a new entry cannot count as 0 s, and when a registered
+entry has a time in the committed ``entry_times.json`` but none in the
+``--entry-times`` file it projects from, so a time cannot drop out of the
+projection unnoticed.
 
 Refresh one operating system's times from ``ctest -V`` logs of CI test jobs (any
 tier, any shard; the median over the logs is kept, and entries the logs do not
@@ -83,10 +87,12 @@ __all__ = [
     "TierVerdict",
     "entry_seconds_from_ctest_logs",
     "evaluate_tiers",
+    "host_column",
     "load_entry_times",
     "lowered_ceiling",
     "registered_entries",
     "times_dropped_from",
+    "untimed_entries",
 ]
 
 ENTRY_TIMES_PATH = Path(__file__).with_name("entry_times.json")
@@ -121,6 +127,11 @@ CI_TIERS = (
 )
 
 
+def host_column() -> str:
+    """The ``entry_times.json`` column of the operating system this runs on."""
+    return "windows" if sys.platform == "win32" else "linux"
+
+
 @dataclasses.dataclass(frozen=True)
 class RegisteredEntry:
     """One CTest entry as CI selects and shards it."""
@@ -146,7 +157,6 @@ class TierVerdict:
     column: str
     tier: TierLayout
     seconds_per_shard: dict[str, float]
-    unmeasured: tuple[str, ...]
     ceiling_seconds: float | None = None
 
     @property
@@ -241,7 +251,9 @@ def evaluate_tiers(
     entry_times: Mapping[str, Mapping],
     tiers: Sequence[TierLayout] = CI_TIERS,
 ) -> list[TierVerdict]:
-    """Project every tier's shard on every operating system column."""
+    """Project every tier's shard on every operating system column of
+    ``entry_times``. An entry without a time in a column is left out of that
+    column's projection: :func:`untimed_entries` names it."""
     entries = list(entries)
     verdicts = []
     for column, recorded in entry_times.items():
@@ -260,13 +272,31 @@ def evaluate_tiers(
                         for entry in in_tier
                         if entry.name in whole_seconds
                     },
-                    unmeasured=tuple(
-                        sorted(e.name for e in in_tier if e.name not in whole_seconds)
-                    ),
                     ceiling_seconds=ceilings.get(tier.label),
                 )
             )
     return verdicts
+
+
+def untimed_entries(
+    entries: Iterable[RegisteredEntry],
+    entry_times: Mapping[str, Mapping],
+    tiers: Sequence[TierLayout] = CI_TIERS,
+) -> list[str]:
+    """One failure per column and entry that a CI tier runs and the column has
+    no time for: such an entry would otherwise count as 0 s."""
+    in_ci = sorted(
+        {entry.name for entry in entries if any(entry.runs_in(t) for t in tiers)}
+    )
+    return [
+        f"{column}: {name} has no time in the data, so no shard counts it; run "
+        f"it in a CI job and record its time from the job's `ctest -V` log: "
+        f"check_entry_times.py record --column {column} --source "
+        f'"<which jobs and dates>" LOG...'
+        for column, recorded in entry_times.items()
+        for name in in_ci
+        if name not in recorded["seconds"]
+    ]
 
 
 def times_dropped_from(
@@ -369,19 +399,26 @@ def _write_entry_times(entry_times: Mapping, path: Path) -> None:
     path.write_text(json.dumps(entry_times, indent=2) + "\n", encoding="utf-8")
 
 
+def _column_of(entry_times: Mapping[str, Mapping], column: str, command: str) -> dict:
+    """``{column: its data}``, or a refusal naming the columns there are."""
+    if column not in entry_times:
+        raise KeyError(
+            f"{command} failed - column={column!r}, expected one of "
+            f"{sorted(entry_times)}"
+        )
+    return {column: entry_times[column]}
+
+
 def _check(arguments: argparse.Namespace) -> int:
     entries = _registration(arguments)
     entry_times = load_entry_times(arguments.entry_times)
-    verdicts = evaluate_tiers(entries, entry_times)
-    breaches = times_dropped_from(
+    column = _column_of(entry_times, arguments.column, "check")
+    breaches = untimed_entries(entries, column)
+    breaches += times_dropped_from(
         entries, load_entry_times(arguments.committed_times), entry_times
     )
-    for verdict in verdicts:
+    for verdict in evaluate_tiers(entries, column):
         print(verdict.summary())
-        if verdict.unmeasured:
-            print(
-                f"  not in {arguments.entry_times.name}: {', '.join(verdict.unmeasured)}"
-            )
         breaches += verdict.breaches()
     for breach in breaches:
         print(f"FAIL {breach}")
@@ -406,17 +443,16 @@ def _record(arguments: argparse.Namespace) -> int:
 
 def _lower_ceiling(arguments: argparse.Namespace) -> int:
     entry_times = load_entry_times(arguments.entry_times)
-    if arguments.column not in entry_times:
-        raise KeyError(
-            f"lower-ceiling failed - column={arguments.column!r}, expected one of "
-            f"{sorted(entry_times)}"
-        )
+    column = _column_of(entry_times, arguments.column, "lower-ceiling")
     [tier] = [t for t in CI_TIERS if t.label == arguments.tier]
-    [verdict] = evaluate_tiers(
-        _registration(arguments),
-        {arguments.column: entry_times[arguments.column]},
-        tiers=[tier],
-    )
+    entries = _registration(arguments)
+    untimed = untimed_entries(entries, column, tiers=[tier])
+    if untimed:
+        raise ValueError(
+            f"lower-ceiling failed - {tier.label} untimed entries={len(untimed)}, "
+            "expected 0 before a ceiling moves; " + "; ".join(untimed)
+        )
+    [verdict] = evaluate_tiers(entries, column, tiers=[tier])
     lowered = lowered_ceiling(verdict)
     ceilings = entry_times[arguments.column]["ceilings"]
     if lowered is None:
@@ -449,6 +485,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     commands = parser.add_subparsers(dest="command", required=True)
 
     check = commands.add_parser("check", help="fail if a tier would exceed its limit")
+    check.add_argument(
+        "--column",
+        default=host_column(),
+        help="the operating system whose registration is listed (default: this one)",
+    )
     _add_registration_source(check)
     check.set_defaults(run=_check)
 

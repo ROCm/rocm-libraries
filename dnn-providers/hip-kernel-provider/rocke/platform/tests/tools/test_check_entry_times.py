@@ -161,19 +161,33 @@ def test_a_tier_within_budget_has_no_breaches() -> None:
     assert _verdict(verdicts, STANDARD).shard_seconds == 400.0
 
 
-def test_excluded_and_unmeasured_entries_do_not_count() -> None:
+def test_excluded_entries_do_not_count() -> None:
     entries = check.registered_entries(
-        [
-            _test("rocke_gpu_only", ["quick", check.EXCLUDED_LABEL], WHOLE_COMMAND),
-            _test("rocke_new_entry", ["quick"], WHOLE_COMMAND),
-        ]
+        [_test("rocke_gpu_only", ["quick", check.EXCLUDED_LABEL], WHOLE_COMMAND)]
     )
     verdict = _verdict(
         check.evaluate_tiers(entries, _column(rocke_gpu_only=900.0)), QUICK
     )
     assert verdict.seconds_per_shard == {}
-    assert verdict.unmeasured == ("rocke_new_entry",)
     assert verdict.breaches() == []
+    assert check.untimed_entries(entries, _column()) == []
+
+
+def test_an_entry_a_tier_runs_without_a_time_fails_once_per_column() -> None:
+    entries = check.registered_entries(
+        [
+            _test("rocke_new_entry", ["quick", "standard"], WHOLE_COMMAND),
+            _test("rocke_unlabelled", ["comprehensive"], WHOLE_COMMAND),
+        ]
+    )
+    assert check.untimed_entries(entries, _column(rocke_new_entry=1.0)) == []
+    untimed = (
+        "linux: rocke_new_entry has no time in the data, so no shard counts it; "
+        "run it in a CI job and record its time from the job's `ctest -V` log: "
+        'check_entry_times.py record --column linux --source "<which jobs and '
+        'dates>" LOG...'
+    )
+    assert check.untimed_entries(entries, _column()) == [untimed]
 
 
 # Lines in the form a CI job log shows `ctest -V` output: a timestamp, then the
@@ -267,9 +281,72 @@ def test_check_exits_nonzero_exactly_when_a_tier_is_over_budget(
     tmp_path, capsys, seconds: float, exit_code: int
 ) -> None:
     listing, times = _write_inputs(tmp_path, seconds)
-    argv = [*_data_options(times), "check", "--listing", str(listing)]
+    argv = [
+        *_data_options(times),
+        "check",
+        "--column",
+        "linux",
+        "--listing",
+        str(listing),
+    ]
     assert check.main(argv) == exit_code
     assert ("FAIL linux quick" in capsys.readouterr().out) == bool(exit_code)
+
+
+def test_check_fails_a_new_entry_until_its_time_is_recorded(tmp_path, capsys) -> None:
+    listing, times = _write_inputs(tmp_path, 20.0)
+    listing.write_text(
+        json.dumps(
+            _listing(
+                _test("rocke_golden_static", ["quick"], WHOLE_COMMAND),
+                _test("rocke_new_entry", ["standard"], WHOLE_COMMAND),
+            )
+        ),
+        encoding="utf-8",
+    )
+    argv = [*_data_options(times), "check", "--column", "linux"]
+    argv += ["--listing", str(listing)]
+    assert check.main(argv) == 1
+    assert "FAIL linux: rocke_new_entry has no time in the data" in (
+        capsys.readouterr().out
+    )
+    log = tmp_path / "new_entry.log"
+    log.write_text(
+        " 1/1 Test   #1: rocke_new_entry ....   Passed    0.50 sec\n",
+        encoding="utf-8",
+    )
+    record = ["--entry-times", str(times), "record", "--column", "linux"]
+    assert check.main([*record, "--source", "test log", str(log)]) == 0
+    assert check.main(argv) == 0
+
+
+def test_check_judges_only_the_column_of_the_listed_registration(
+    tmp_path, capsys
+) -> None:
+    """An entry registered on one operating system only has no time in the
+    other's column; that column is judged on its own registration."""
+    listing, times = _write_inputs(tmp_path, 20.0)
+    both = {
+        "linux": {"source": "test data", "seconds": {"rocke_golden_static": 20.0}},
+        "windows": {"source": "test data", "seconds": {}},
+    }
+    times.write_text(json.dumps(both), encoding="utf-8")
+
+    def check_column(column: str) -> int:
+        argv = [*_data_options(times), "check", "--column", column]
+        return check.main([*argv, "--listing", str(listing)])
+
+    assert check_column("linux") == 0
+    assert "windows" not in capsys.readouterr().out
+    assert check_column("windows") == 1
+    assert "FAIL windows: rocke_golden_static has no time" in capsys.readouterr().out
+    with pytest.raises(KeyError, match="check failed - column='macos', expected one"):
+        check_column("macos")
+
+
+def test_the_default_column_is_this_operating_system() -> None:
+    expected = "windows" if sys.platform == "win32" else "linux"
+    assert check.host_column() == expected
 
 
 def test_record_fills_a_new_column_from_logs(tmp_path) -> None:
@@ -320,7 +397,14 @@ def test_check_fails_when_the_projection_drops_a_committed_time(
     listing, committed = _write_inputs(tmp_path, 30.0)
     projected = tmp_path / "projected.json"
     projected.write_text(json.dumps(_column()), encoding="utf-8")
-    argv = [*_data_options(projected, committed), "check", "--listing", str(listing)]
+    argv = [
+        *_data_options(projected, committed),
+        "check",
+        "--column",
+        "linux",
+        "--listing",
+        str(listing),
+    ]
     assert check.main(argv) == 1
     assert "FAIL linux: rocke_golden_static has a committed time" in (
         capsys.readouterr().out
@@ -454,6 +538,28 @@ def test_lower_ceiling_removes_a_ceiling_once_the_tier_fits(tmp_path) -> None:
     lower = [*options, "lower-ceiling", "--column", "linux", "--tier", "standard"]
     assert check.main([*lower, *source]) == 0
     assert "ceilings" not in json.loads(times.read_text())["linux"]
+
+
+def test_lower_ceiling_refuses_while_an_entry_has_no_time(tmp_path) -> None:
+    options, _, times = _write_standard_inputs(tmp_path, 2000.0, 560.0)
+    listing = tmp_path / "untimed.json"
+    listing.write_text(
+        json.dumps(
+            _listing(
+                _test("rocke_pytest_core", ["standard"], SPLIT_COMMAND),
+                _test("rocke_new_entry", ["standard"], WHOLE_COMMAND),
+            )
+        ),
+        encoding="utf-8",
+    )
+    lower = [*options, "lower-ceiling", "--column", "linux", "--tier", "standard"]
+    with pytest.raises(
+        ValueError,
+        match="lower-ceiling failed - standard untimed entries=1, expected 0 "
+        "before a ceiling moves; linux: rocke_new_entry",
+    ):
+        check.main([*lower, "--listing", str(listing)])
+    assert json.loads(times.read_text())["linux"]["ceilings"] == {"standard": 560.0}
 
 
 def test_lower_ceiling_refuses_an_unknown_column(tmp_path) -> None:
