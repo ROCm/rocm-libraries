@@ -24,6 +24,8 @@ from rocke.tests.ctest_listing import (
     PROVIDER_CTEST_SUBDIR,
     configure_installed_ctest,
     list_ctest_entries,
+    list_installed_ctest_entries,
+    python_on_path_environment,
 )
 from rocke.tests.engine_modules import EngineModulesMarker, read_engine_modules_marker
 from rocke.tests.lanes import SOURCE_TREE, skip_until
@@ -205,7 +207,7 @@ def test_installed_pytest_entries_run_the_ctest_shard_plugin(
     has_library = (
         PLATFORM.parent / "library" / "tests" / "ctest_lists.cmake"
     ).is_file()
-    tests = list_ctest_entries(ctest_dir)
+    tests = list_installed_ctest_entries(ctest_dir, tmp_path)
     pytest_entries = {test["name"]: test for test in tests if runs_pytest(test)}
 
     expected_names = {
@@ -347,8 +349,9 @@ def test_every_entry_sets_a_resource_class_timeout(tmp_path, provider_subdir):
         tmp_path, f"-DROCKE_INSTALL_PROVIDER_CTEST_SUBDIR={provider_subdir}"
     )
     limits = set(resource_class_timeouts().values())
+    environment = python_on_path_environment(tmp_path)
     for tree in (ctest_dir, build):
-        tests = list_ctest_entries(tree)
+        tests = list_ctest_entries(tree, env=environment)
         assert tests, tree
         timeouts = {
             test["name"]: next(
@@ -439,7 +442,7 @@ def test_every_gpu_pytest_entry_limits_each_test(
     limit = gpu_test_limit()
     gpu_entries = {
         test["name"]: test
-        for test in list_ctest_entries(ctest_dir)
+        for test in list_installed_ctest_entries(ctest_dir, tmp_path)
         if runs_pytest(test) and "gpu" in (entry_property(test, "LABELS") or [])
     }
     assert "rocke_tiling_gpu_pytest" in gpu_entries, sorted(gpu_entries)
@@ -552,7 +555,7 @@ def test_pytest_entries_require_the_cpp_engine_where_it_is_installed(
     _, ctest_dir = configure_installed_ctest(tmp_path, *cmake_arguments)
     pytest_entries = {
         test["name"]: test["command"]
-        for test in list_ctest_entries(ctest_dir)
+        for test in list_installed_ctest_entries(ctest_dir, tmp_path)
         if runs_pytest(test)
     }
     assert pytest_entries
@@ -665,7 +668,7 @@ def test_installed_ctest_entries_get_scoped_environment_contracts(
     ).is_file()
 
     for rocm_path in (None, tmp_path / "synthetic-rocm"):
-        ctest_env = dict(os.environ)
+        ctest_env = python_on_path_environment(tmp_path)
         if rocm_path is None:
             ctest_env.pop("ROCM_PATH", None)
         else:
@@ -947,7 +950,7 @@ def test_installed_platform_pytest_parts_partition_the_suite(
             for part, path in ignored_files.items()
         ),
     )
-    tests = list_ctest_entries(ctest_dir)
+    tests = list_installed_ctest_entries(ctest_dir, tmp_path)
     parts = [test for test in tests if test["name"].startswith("rocke_pytest_")]
     plugin_tests = [
         test for test in tests if test["name"] == "rocke_ctest_shard_pytest"
@@ -1082,7 +1085,7 @@ def test_installed_platform_pytest_parts_keep_the_suite_tier_labels(tmp_path):
     the quick tier. Another category keeps rocke_library_gdn_pytest and
     rocke_library_conv_fwd_aot_packaging_pytest in the ffm-quick tier."""
     _, ctest_dir = configure_installed_ctest(tmp_path)
-    names = [test["name"] for test in list_ctest_entries(ctest_dir)]
+    names = [test["name"] for test in list_installed_ctest_entries(ctest_dir, tmp_path)]
     parts = [name for name in names if name.startswith("rocke_pytest_")]
     assert parts, "no rocke_pytest_ parts are registered"
     tiling_entries = [
@@ -1150,7 +1153,7 @@ def test_every_installed_entry_runs_in_a_ci_tier(tmp_path):
     _, ctest_dir = configure_installed_ctest(
         tmp_path, f"-DROCKE_INSTALL_PROVIDER_CTEST_SUBDIR={PROVIDER_CTEST_SUBDIR}"
     )
-    names = [test["name"] for test in list_ctest_entries(ctest_dir)]
+    names = [test["name"] for test in list_installed_ctest_entries(ctest_dir, tmp_path)]
     labels = provider_category_labels(names, tmp_path)
     untiered = sorted(
         name

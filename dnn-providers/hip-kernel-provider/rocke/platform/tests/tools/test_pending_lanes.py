@@ -53,7 +53,11 @@ import pytest
 from rocke.assets import platform_root
 from rocke.tests import in_tree_suites
 from rocke.tests.comgr import CompilerBuild
-from rocke.tests.ctest_listing import configure_installed_ctest, list_ctest_entries
+from rocke.tests.ctest_listing import (
+    configure_installed_ctest,
+    list_ctest_entries,
+    list_installed_ctest_entries,
+)
 from rocke.tests.entry_selection import (
     InstallLayout,
     Layout,
@@ -132,20 +136,6 @@ def run_by_another_test() -> dict[str, str]:
     return runners
 
 
-def _python_on_path(scratch: Path) -> dict[str, str]:
-    """An environment in which the bare ``python`` that installed entries run
-    resolves, to this interpreter when no ``python`` is on PATH."""
-    environment = dict(os.environ)
-    if shutil.which("python") is None:
-        interpreter_dir = scratch / "python-bin"
-        interpreter_dir.mkdir()
-        (interpreter_dir / "python").symlink_to(sys.executable)
-        environment["PATH"] = os.pathsep.join(
-            [str(interpreter_dir), environment.get("PATH", "")]
-        )
-    return environment
-
-
 def ci_selected_files(scratch: Path) -> set[str]:
     """The test files, relative to the rocke directory, that pull-request and
     push CI run."""
@@ -164,7 +154,7 @@ def ci_selected_files(scratch: Path) -> set[str]:
     trees: list[tuple[list[dict], str, Layout]] = [
         (list_ctest_entries(build), "", SourceLayout()),
         (
-            list_ctest_entries(installed_ctest, env=_python_on_path(scratch)),
+            list_installed_ctest_entries(installed_ctest, scratch),
             f"bin/{PROVIDER_CTEST_SUBDIR}/",
             install,
         ),

@@ -48,7 +48,7 @@ from rocke.tests.ctest_listing import (
     GPU_RESOURCE_LOCK,
     PROVIDER_CTEST_SUBDIR,
     configure_installed_ctest,
-    list_ctest_entries,
+    list_installed_ctest_entries,
 )
 from rocke.tests.entry_selection import (
     InstallLayout,
@@ -349,12 +349,10 @@ def test_no_installed_host_entry_runs_gpu_tests(tmp_path):
     build, ctest_dir = configure_installed_ctest(
         tmp_path, f"-DROCKE_INSTALL_PROVIDER_CTEST_SUBDIR={PROVIDER_CTEST_SUBDIR}"
     )
-    entries = list_ctest_entries(ctest_dir)
-    # CTest leaves out the command of a program it cannot find; this check
-    # needs the commands of the Python entries.
+    entries = list_installed_ctest_entries(ctest_dir, tmp_path)
     assert any(
         runs_pytest(entry.get("command", [])) for entry in entries
-    ), "CTest listed no pytest command: is python on PATH?"
+    ), "CTest listed no pytest command"
     breaches = placement_breaches(
         entries, InstallLayout.of_build_tree(build), f"bin/{PROVIDER_CTEST_SUBDIR}/"
     )
