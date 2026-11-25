@@ -40,19 +40,10 @@ _KDA_AUTO_TILES = sorted(
     {d.tile for (gate, _, _), d in AUTO_DEFAULTS.items() if gate == "kda"}
 )
 
-
-def _device_is_gfx950() -> bool:
-    if not torch.cuda.is_available():
-        return False
-    try:
-        return ARCH in torch.cuda.get_device_properties(0).gcnArchName
-    except Exception:
-        return False
+from _gpu_gate import requires_gpu
 
 
-requires_gfx950 = pytest.mark.skipif(
-    not _device_is_gfx950(), reason=f"needs a {ARCH} device"
-)
+requires_gfx950 = requires_gpu(ARCH)
 
 
 @pytest.fixture(scope="module")

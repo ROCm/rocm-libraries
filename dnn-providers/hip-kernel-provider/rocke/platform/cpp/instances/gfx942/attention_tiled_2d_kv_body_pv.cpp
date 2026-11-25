@@ -853,7 +853,10 @@ rocke_for_t rocke_gfx942_attn2d_drive_kv_loop(rocke_gfx942_attn2d_build_ctx_t* c
         iargs_u[i].name = names_u[i];
         iargs_u[i].init = ctx->iter_args[i];
     }
+    /* Its tiles lie inside the sequence: V needs no tail handling there. */
+    ctx->v_no_tail = true;
     rocke_for_t ph1 = rocke__run_kv_phase(ctx, ctx->tile_start, split, iargs_u, "kv_tile_u", true);
+    ctx->v_no_tail = false;
     for(int i = 0; i < ctx->iter_args_count; ++i)
         iargs[i].init = ph1.op->results[i];
     return rocke__run_kv_phase(ctx, split, ctx->tile_end, iargs, "kv_tile", false);

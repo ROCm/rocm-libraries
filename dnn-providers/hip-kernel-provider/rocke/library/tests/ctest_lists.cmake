@@ -246,7 +246,8 @@ endif()
 # exports a rocKE source tree, so they skip in the installed tree with that
 # reason; rocke_library_attention_strided_ab_dryrun below runs them in a build
 # tree), the tiled-2D spec validators' refusals (their engine-comparison cases
-# skip here, where rocke_engine is not built), and the backward-test memo bound in
+# skip here, where rocke_engine is not built), the gfx942 sliced-K ring's slice width
+# and refusals (test_attn_k_slice_hd.py), and the backward-test memo bound in
 # tests/conftest.py.
 # File-list style (same pattern as conv_pytest) so PYTHONPATH resolves rocke/
 # correctly from the installed tree.
@@ -280,6 +281,7 @@ set(_ROCKE_LIBRARY_ATTENTION_CPU_TEST_RELPATHS
     "tests/library/tests/test_attention_tiled_2d_mask_type.py"
     "tests/library/tests/test_attention_tiled_2d_head_counts_gfx942.py"
     "tests/library/tests/test_attn_tiled_2d_gfx950_k_lds_read.py"
+    "tests/library/tests/test_attn_k_slice_hd.py"
     "tests/library/tests/test_attention_tiled_3d_decode_split.py"
     "tests/library/tests/test_attention_3d_workspace_i32_guard.py"
     "tests/library/tests/test_attention_tiled_3d_kv_cache_policy.py"
@@ -303,6 +305,8 @@ set(_ROCKE_LIBRARY_ATTENTION_CPU_TEST_RELPATHS
     "tests/library/tests/test_fmha_mfma_free_stride.py"
     "tests/library/tests/test_sdpa_free_stride_layouts.py"
     "tests/library/tests/test_bwd_memo_bound.py"
+    "tests/library/tests/test_attention_bwd_dq_refusal_rows.py"
+    "tests/library/tests/test_attention_bwd_layout_spill_rows.py"
     "tests/library/tests/oracle_free/test_contracts.py"
     "tests/library/tests/oracle_free/test_permutation_contracts.py"
     "tests/library/tests/test_attention_dense_gfx942.py"
@@ -731,6 +735,7 @@ set(_ROCKE_LIBRARY_GPU_TEST_RELPATHS
     "tests/library/tests/test_gfx942_cfvst_i64_kv_addr_numeric.py"
     "tests/library/tests/test_gfx942_4wgqa_bounds_numeric.py"
     "tests/library/tests/test_attention_gfx942_kv_pages.py"
+    "tests/library/tests/test_attention_kv_tail_numeric.py"
     "tests/library/tests/test_attention_tiled_runtime_shape_numeric.py"
     "tests/library/tests/test_attention_tiled_3d_kv_lds_swizzle.py"
     "tests/library/tests/test_attention_tiled_3d_running_max.py"

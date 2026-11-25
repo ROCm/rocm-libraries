@@ -12,6 +12,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from kernels.common._attention_kv_seq_tail import OUT_OF_RANGE_OFFSET
 from rocke.core.ir import I32, I64, IRBuilder, Value
 
 
@@ -61,4 +62,4 @@ def strided_kv_offset(
     offset = b.add(b.mul(safe_token, p.token), b.mul(dim, b.const_i32(2)))
     # The binding limits span to 0x7fff0000 bytes. An out-of-range buffer load
     # supplies zero to LDS without reading adjacent heads/batches or stale KV.
-    return b.select(valid, offset, b.const_i32(0x7FFFFFFF))
+    return b.select(valid, offset, b.const_i32(OUT_OF_RANGE_OFFSET))
