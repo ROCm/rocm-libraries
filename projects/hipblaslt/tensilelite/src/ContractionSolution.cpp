@@ -4517,7 +4517,7 @@ namespace TensileLite
             }
         }
 
-        if constexpr(std::is_same<KA, KernelArguments>::value)
+        if constexpr(!std::is_same<KA, KernelArgumentsCounter>::value)
         {
             numWorkGroups.y = 1;
             numWorkGroups.z = 1;

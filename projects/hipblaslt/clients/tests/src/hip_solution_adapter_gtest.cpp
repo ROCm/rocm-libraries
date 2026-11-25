@@ -11,11 +11,13 @@
 #include <chrono>
 #include <cstdint>
 #include <cstdlib>
+#include <cstring>
 #include <deque>
 #include <functional>
 #include <map>
 #include <memory>
 #include <mutex>
+#include <new>
 #include <optional>
 #include <string>
 #include <thread>
@@ -297,7 +299,7 @@ namespace
         TensileLite::hip::HipAMDGPU  device;
         TensileLite::KernelArguments hostArgs(false);
 
-        std::pair<char const*, TensileLite::KernelInvocation> kernels[] = {
+        const std::pair<char const*, TensileLite::KernelInvocation> kernels[] = {
             {"beta-only", solution.generateBetaOnlyCall<false>(problem, inputs)},
             {"output conversion",
              solution.generateOutputConversionCall<false>(problem, inputs, {}, 1, 0)},
@@ -309,20 +311,37 @@ namespace
                  {problem}, nullptr, nullptr)},
             {"reduction", solution.generateReductionCall<false>(problem, inputs)},
         };
-        for(auto& [name, kernel] : kernels)
+        for(auto const& [name, kernel] : kernels)
         {
             SCOPED_TRACE(name);
-            // Fixed launch sizes: only the lookup is under test, and the
-            // user-arguments conversion leaves its y and z sizes unset.
-            kernel.workGroupSize = TensileLite::dim3(256, 1, 1);
-            kernel.numWorkGroups = TensileLite::dim3(1, 1, 1);
-            kernel.numWorkItems  = TensileLite::dim3(256, 1, 1);
             loads.functionModules.clear();
             EXPECT_EQ(adapter->launchKernel(kernel), hipErrorNotFound);
             ASSERT_FALSE(loads.functionModules.empty());
             EXPECT_EQ(loads.functionModules.front(), loads.loadedFrom.at(helper))
                 << "the launch looked in another module first";
         }
+    }
+
+    // The grouped output conversion for user arguments launches in one
+    // dimension. The invocation is built over storage filled with ones bits,
+    // which a launch size the builder left unset would keep.
+    TEST(ContractionSolutionHelperKernels, smoke_UserArgsConversionLaunchesInOneDimension)
+    {
+        TensileLite::ContractionSolution solution;
+        auto                             problem = TensileLite::ContractionProblemGemm::GEMM(
+            false, false, 256, 256, 256, 256, 256, 256, 1.0, false, 1);
+
+        alignas(TensileLite::KernelInvocation) unsigned char
+            storage[sizeof(TensileLite::KernelInvocation)];
+        std::memset(storage, 0xff, sizeof(storage));
+        auto* kernel = new(storage) TensileLite::KernelInvocation(
+            solution.updateUserArgsOutputConversionCallGroupedGemm<false>(
+                {problem}, nullptr, nullptr));
+        EXPECT_EQ(kernel->numWorkGroups.y, 1u);
+        EXPECT_EQ(kernel->numWorkGroups.z, 1u);
+        EXPECT_EQ(kernel->numWorkItems.y, 1u);
+        EXPECT_EQ(kernel->numWorkItems.z, 1u);
+        kernel->~KernelInvocation();
     }
 
     TEST_P(HipSolutionAdapterRecoveryTest, smoke_MissingContextPreservesPrimaryError)
