@@ -1478,6 +1478,7 @@ PENDING: tuple[PendingTest, ...] = (
         _TRIAGE_FOLLOW_UP,
         "2027-01-29",
         "platform/tests/core/test_compile_target_with_this_hosts_compiler.py",
+        "platform/tests/support/test_cmake_file_api.py",
         "platform/tests/tools/test_run_all.py",
     ),
     *_waiting_tests(

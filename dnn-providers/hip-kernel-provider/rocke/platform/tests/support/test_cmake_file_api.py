@@ -4,7 +4,8 @@
 
 ``rocke.tests.cmake_file_api`` asks a configure for the replies and reads them.
 The cases configure a small real project (no compiler: LANGUAGES NONE) that
-includes a CMake file from inside its tree and one from beside it.
+includes a CMake file from inside its tree and one from beside it, with the
+generator a fresh platform tree gets (``rocke.tests.platform_build``).
 """
 
 from __future__ import annotations
@@ -14,8 +15,8 @@ import subprocess
 
 import pytest
 from rocke.tests.cmake_file_api import read_codemodel, request_codemodel
-
-pytestmark = pytest.mark.skipif(shutil.which("cmake") is None, reason="CMake required")
+from rocke.tests.lanes import BUILD_VARIANT, skip_until
+from rocke.tests.platform_build import generator_arguments
 
 PROJECT = """\
 cmake_minimum_required(VERSION 3.16)
@@ -41,9 +42,25 @@ def configured(tmp_path_factory):
     for name in ("base.txt", "top.txt", "other.txt"):
         (source / name).write_text("text\n")
     build = scratch / "build"
+    generator = generator_arguments(build)
+    # The tree is fresh, so no generator argument means ninja is not on PATH.
+    if shutil.which("cmake") is None or not generator:
+        skip_until(
+            BUILD_VARIANT,
+            reason="needs cmake and ninja on PATH: it configures with Ninja, the "
+            "generator a fresh platform tree gets",
+        )
     request_codemodel(build)
     subprocess.run(
-        ["cmake", "-S", str(source), "-B", str(build), "-DCMAKE_BUILD_TYPE=Release"],
+        [
+            "cmake",
+            "-S",
+            str(source),
+            "-B",
+            str(build),
+            "-DCMAKE_BUILD_TYPE=Release",
+            *generator,
+        ],
         check=True,
         capture_output=True,
     )
