@@ -5,6 +5,7 @@
 
 #include <hipdnn_flatbuffers_sdk/data_objects/engine_details_generated.h>
 #include <hipdnn_plugin_sdk/BehaviorNote.h>
+#include <hipdnn_plugin_sdk/PluginException.hpp>
 
 namespace hipblaslt_plugin
 {
@@ -76,9 +77,12 @@ void HipblasltEngine::initializeExecutionContext(
         if(planBuilder->isApplicable(handle, opGraph))
         {
             planBuilder->buildPlan(handle, opGraph, executionContext);
-            break;
+            return;
         }
     }
+
+    throw hipdnn_plugin_sdk::HipdnnPluginException(
+        HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR, "No hipBLASLt plan builder applies to the graph");
 }
 
 void HipblasltEngine::addPlanBuilder(std::unique_ptr<IPlanBuilder> planBuilder)

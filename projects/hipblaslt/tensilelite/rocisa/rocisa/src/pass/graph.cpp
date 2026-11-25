@@ -292,9 +292,10 @@ namespace rocisa
                     auto  smov     = std::static_pointer_cast<SMovB32>(entry.item);
                     auto& dst      = *smov->dst;
                     auto& gprValue = smov->srcs[0];
-                    if(typeid(dst) != typeid(EXEC))
+                    // Special-register moves (EXEC, VCC, etc.) remain intact.
+                    // They can appear here through an ordinary SGPR source.
+                    if(auto gpr = dynamic_cast<RegisterContainer*>(&dst))
                     {
-                        auto gpr = dynamic_cast<RegisterContainer*>(&dst);
                         if(gpr->regIdx == idx && gprValue == assignValue)
                         {
                             if(!smov->comment.empty())

@@ -26,6 +26,8 @@
 
 #include <gtest/gtest.h>
 
+#include "multi_process_child.hpp"
+
 #include <miopen/filesystem.hpp>
 #include <miopen/db.hpp>
 #include <miopen/db_record.hpp>
@@ -38,6 +40,7 @@
 
 #include <array>
 #include <cstdio>
+#include <iostream>
 #include <fstream>
 #include <mutex>
 #include <limits>
@@ -100,10 +103,6 @@ struct ArgsHelper
     static constexpr const char* id_arg        = "mp-test-child";
     static constexpr const char* path_arg      = "mp-test-child-path";
     static constexpr const char* db_class_arg  = "mp-test-child-db-class";
-
-    // Exact gtest filter for spawning child worker processes.
-    // Must match the CPU_PerfDb_ChildWorker_NONE.ProcessWork test case
-    static constexpr const char* child_worker_filter = "CPU_PerfDb_ChildWorker_NONE.ProcessWork";
 
     struct db_class
     {
@@ -993,11 +992,8 @@ public:
             // clang-format off
             for(auto i = 0u; i < DBMultiThreadedTestWork::threads_count; ++i)
             {
-                // Use --gtest_filter to run only the child worker test in spawned process
                 auto args =
-                    std::string{"--reset-sharding"
-                    " --gtest_filter="} + ArgsHelper::child_worker_filter +
-                    " --" + ArgsHelper::write_arg +
+                    std::string{"--"} + ArgsHelper::write_arg +
                     " --" + ArgsHelper::id_arg + " " + std::to_string(id++) +
                     " --" + ArgsHelper::path_arg + " " + temp_file.Path() +
                     " --" + ArgsHelper::db_class_arg + " " + ArgsHelper::db_class::Get<TDb>();
@@ -1083,12 +1079,9 @@ public:
             // clang-format off
             for(auto i = 0u; i < DBMultiThreadedTestWork::threads_count; ++i)
             {
-                // Use --gtest_filter to run only the child worker test in spawned process
                 // Note: no --write flag for read test
                 auto args =
-                    std::string{"--reset-sharding"
-                    " --gtest_filter="} + ArgsHelper::child_worker_filter +
-                    " --" + ArgsHelper::id_arg + " " + std::to_string(id++) +
+                    std::string{"--"} + ArgsHelper::id_arg + " " + std::to_string(id++) +
                     " --" + ArgsHelper::path_arg + " " + temp_file +
                     " --" + ArgsHelper::db_class_arg + " " + ArgsHelper::db_class::Get<TDb>();
 
@@ -1438,9 +1431,8 @@ public:
     }
 };
 
-std::string GetArg(const std::string& name)
+std::string GetArg(const std::vector<std::string>& args, const std::string& name)
 {
-    const auto& args  = testing::internal::GetArgvs();
     const auto target = "--" + name;
 
     for(size_t i = 1; i + 1 < args.size(); ++i)
@@ -1451,9 +1443,8 @@ std::string GetArg(const std::string& name)
     return "";
 }
 
-bool HasFlag(const std::string& name)
+bool HasFlag(const std::vector<std::string>& args, const std::string& name)
 {
-    const auto& args  = testing::internal::GetArgvs();
     const auto target = "--" + name;
 
     for(size_t i = 1; i < args.size(); ++i)
@@ -1464,54 +1455,65 @@ bool HasFlag(const std::string& name)
     return false;
 }
 
-bool IsChildProcessMode() { return !GetArg(ArgsHelper::id_arg).empty(); }
-
-class CPU_PerfDb_ChildWorker_NONE : public ::testing::Test
+// Entry point of the worker processes started by DbMultiProcessTest and DbMultiProcessReadTest.
+// main() calls it before InitGoogleTest() (see multi_process_child.hpp), so a worker does the db
+// work and exits without registering any test or touching the GPU. Failed gtest assertions in the
+// work are recorded in the ad hoc test result and turn into exit code 1, which the parent checks.
+std::optional<int> RunPerfDbChildProcess(int argc, char** argv)
 {
-protected:
-    void SetUp() override
+    const std::vector<std::string> args(argv, argv + argc);
+    const auto id_value = GetArg(args, ArgsHelper::id_arg);
+    if(id_value.empty())
+        return std::nullopt;
+
+    try
     {
-        if(!IsChildProcessMode())
+        const auto logs_root = GetArg(args, ArgsHelper::logs_path_arg);
+        if(!logs_root.empty())
+            thread_logs_root() = logs_root;
+
+        if(HasFlag(args, "all"))
         {
-            GTEST_SKIP() << "Not in child process mode (no --" << ArgsHelper::id_arg << " arg)";
+            full_set()                                = true;
+            DBMultiThreadedTestWork::threads_count    = 32;
+            DBMultiThreadedTestWork::common_part_size = 128;
+            DBMultiThreadedTestWork::unique_part_size = 128;
+        }
+
+        const auto db_class = GetArg(args, ArgsHelper::db_class_arg);
+        const auto db_path  = GetArg(args, ArgsHelper::path_arg);
+        const int id        = std::stoi(id_value);
+        const bool write    = HasFlag(args, ArgsHelper::write_arg);
+
+        if(db_class == ArgsHelper::db_class::db)
+            DbMultiProcessTest<PlainTextDb>::WorkItem(id, db_path, write);
+        else if(db_class == ArgsHelper::db_class::ramdb)
+            DbMultiProcessTest<RamDb>::WorkItem(id, db_path, write);
+        else
+        {
+            std::cerr << "perfdb worker: unknown --" << ArgsHelper::db_class_arg << " '" << db_class
+                      << "'" << std::endl;
+            return 1;
         }
     }
-};
-
-// cppcheck false positive: TEST_F inside anonymous namespace with complex fixture definitions.
-// Known issue: https://trac.cppcheck.net/ticket/9160 (wontfix).
-// Same workaround used in conv_ai_3d_heuristics.cpp.
-// cppcheck-suppress syntaxError
-TEST_F(CPU_PerfDb_ChildWorker_NONE, ProcessWork)
-{
-    std::string logs_root = GetArg(ArgsHelper::logs_path_arg);
-    if(!logs_root.empty())
-        thread_logs_root() = logs_root;
-
-    if(HasFlag("all"))
+    catch(const std::exception& ex)
     {
-        full_set()                                = true;
-        DBMultiThreadedTestWork::threads_count    = 32;
-        DBMultiThreadedTestWork::common_part_size = 128;
-        DBMultiThreadedTestWork::unique_part_size = 128;
+        std::cerr << "perfdb worker " << id_value << " failed: " << ex.what() << std::endl;
+        return 1;
     }
 
-    std::string db_class = GetArg(ArgsHelper::db_class_arg);
-    std::string db_path  = GetArg(ArgsHelper::path_arg);
-    int id               = std::stoi(GetArg(ArgsHelper::id_arg));
-    bool write           = HasFlag(ArgsHelper::write_arg);
-
-    if(db_class == ArgsHelper::db_class::db)
-    {
-        DbMultiProcessTest<PlainTextDb>::WorkItem(id, db_path, write);
-    }
-    else if(db_class == ArgsHelper::db_class::ramdb)
-    {
-        DbMultiProcessTest<RamDb>::WorkItem(id, db_path, write);
-    }
+    return testing::UnitTest::GetInstance()->ad_hoc_test_result().Failed() ? 1 : 0;
 }
 
-class CPU_PerfDb_NONE : public ::testing::Test
+bool RegisterPerfDbChildProcess()
+{
+    miopen::test::child_process_main() = &RunPerfDbChildProcess;
+    return true;
+}
+
+[[maybe_unused]] const bool perfdb_child_registered = RegisterPerfDbChildProcess();
+
+class CPU_PerfDb_NONE : public testing::TestWithParam<int>
 {
 protected:
     TempFile temp_file{"miopen.tests.perfdb"};
@@ -1564,10 +1566,16 @@ protected:
     }
 };
 
-TEST_F(CPU_PerfDb_NONE, RamDb_AllTests) { DbTests<RamDb>(); }
+// cppcheck false positive: TEST_F inside anonymous namespace with complex fixture definitions.
+// Known issue: https://trac.cppcheck.net/ticket/9160 (wontfix).
+// Same workaround used in conv_ai_3d_heuristics.cpp.
+// cppcheck-suppress syntaxError
+TEST_P(CPU_PerfDb_NONE, RamDb_AllTests) { DbTests<RamDb>(); }
 
-TEST_F(CPU_PerfDb_NONE, PlainTextDb_AllTests) { DbTests<PlainTextDb>(); }
+TEST_P(CPU_PerfDb_NONE, PlainTextDb_AllTests) { DbTests<PlainTextDb>(); }
 
-TEST_F(CPU_PerfDb_NONE, MultiFileDb_AllTests) { MultiFileDbTests(); }
+TEST_P(CPU_PerfDb_NONE, MultiFileDb_AllTests) { MultiFileDbTests(); }
+
+INSTANTIATE_TEST_SUITE_P(Standard, CPU_PerfDb_NONE, testing::Values(0));
 
 } // anonymous namespace

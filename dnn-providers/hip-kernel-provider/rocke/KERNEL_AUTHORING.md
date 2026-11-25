@@ -113,6 +113,11 @@ a matching remote GPU before marking kernel work done.
       **new** family/case adds an entry, an intended emission change **re-blesses**
       it, an inert change touches no golden. [`run_checks.py`](#run-the-checks)
       picks all of this up automatically.
+- [ ] **Placed in CI.** Each new or moved test runs in a CTest entry at the tier
+      that [`TESTING.md` §5.0.3](TESTING.md#503-choosing-a-tier-and-an-entry-for-a-test)
+      gives (standard by default, quick only for smoke). The pull request states
+      the tier and a short reason for it; it need not report measurements
+      against the [budgets](TESTING.md#budgets).
 - [ ] **[`run_checks.py`](#run-the-checks) green** on the platforms in the
       [testing matrix](#local-testing-matrix-platforms).
 - [ ] **Correctness before speed.** The numeric harness passes within tolerance
@@ -512,8 +517,12 @@ A new shape/cohort must land in **both** the benchmark set and the test set.
 4. **Build/smoke coverage.** If the shape exercises a new build path, add it to
    [test_attention_builds.py](library/tests/test_attention_builds.py) or the
    closest architecture-specific builder test under `library/tests/`.
-5. **Run** `pytest library/tests` (add `platform/tests` if platform was touched);
-   GPU numeric lanes need a HIP-visible device.
+5. **Run** `python library/tests/run_all.py --require-compiler-gate` for the
+   complete required library host verdict (`--pytest-only` is focused iteration);
+   add the platform runner if platform code was touched. Run
+   `python library/tests/run_all.py --gpu-only` for the applicable GPU-marked files,
+   or `python tools/run_checks.py --steps numeric --op <family>` for the
+   standalone differential numeric lane, on a HIP-visible device.
 
 ### F. Parity and golden re-bless
 

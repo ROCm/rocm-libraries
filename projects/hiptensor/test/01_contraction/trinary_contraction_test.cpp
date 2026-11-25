@@ -580,17 +580,21 @@ namespace hiptensor
             mTotalGFlops          = 0.0;
             mMeasuredTFlopsPerSec = 0.0;
 
-            size_t sizeA = std::accumulate(descA->mLengths.begin(), descA->mLengths.end(),
-                                           hiptensorDataTypeSize(ADataType),
+            size_t sizeA = std::accumulate(descA->mLengths.begin(),
+                                           descA->mLengths.end(),
+                                           size_t(hiptensorDataTypeSize(ADataType)),
                                            std::multiplies<size_t>());
-            size_t sizeB = std::accumulate(descB->mLengths.begin(), descB->mLengths.end(),
-                                           hiptensorDataTypeSize(BDataType),
+            size_t sizeB = std::accumulate(descB->mLengths.begin(),
+                                           descB->mLengths.end(),
+                                           size_t(hiptensorDataTypeSize(BDataType)),
                                            std::multiplies<size_t>());
-            size_t sizeC = std::accumulate(descC->mLengths.begin(), descC->mLengths.end(),
-                                           hiptensorDataTypeSize(CDataType),
+            size_t sizeC = std::accumulate(descC->mLengths.begin(),
+                                           descC->mLengths.end(),
+                                           size_t(hiptensorDataTypeSize(CDataType)),
                                            std::multiplies<size_t>());
-            size_t sizeE = std::accumulate(descE->mLengths.begin(), descE->mLengths.end(),
-                                           hiptensorDataTypeSize(EDataType),
+            size_t sizeE = std::accumulate(descE->mLengths.begin(),
+                                           descE->mLengths.end(),
+                                           size_t(hiptensorDataTypeSize(EDataType)),
                                            std::multiplies<size_t>());
 
             mTotalGBytes = (sizeA + sizeB + sizeC + sizeE) / 1e9;

@@ -127,10 +127,20 @@ extern "C" {
  *     rocke_unified_attention_3d_tiled_spec_t gained emit_lse, each a bool in
  *     its old tail padding: sizes unchanged, but an old caller leaves that byte
  *     unset.
- * 18: rocke_dw_wgrad_fold_spec_t gained cols, slices and unroll at its end,
+ * 18: rocke_rdna_attn_params_t gained block_table_v mid-struct and k_ptr,
+ *     v_ptr and live_rows at its end, which changes its size and field
+ *     offsets; rocke_wmma_fmha_fwd_v2_spec_t gained dense_q and seqused_q in
+ *     the padding after page_block_size (its size and offsets are unchanged).
+ * 19: rocke_coalesced_tile_loader_t gained has_col_xor and col_xor[4] at its
+ *     end (after elem_dtype), which changes its size.
+ * 20: rocke_mx_gemm_spec_t lost per_input_row and now declares the
+ *     workgroup tile (block_tile_m, block_tile_n) right after M, N, K, which
+ *     changes its size and the offsets of its fields; rocke_mx_gemm_block_size
+ *     returns long long (it returned int), which changes its signature.
+ * 21: rocke_dw_wgrad_fold_spec_t gained cols, slices and unroll at its end,
  *     which changes its size (16 -> 32 bytes on a 64-bit host) and the
  *     struct-return of rocke_dw_wgrad_fold_spec_default(). */
-#define ROCKE_ABI_VERSION 18
+#define ROCKE_ABI_VERSION 21
 
 /* Wire ABI: the CBOR recipe/bundle/guard vocabulary this engine understands.
  * 2: list-tagged ("l") kernel attrs such as cluster_dims; level-1 engines drop them.

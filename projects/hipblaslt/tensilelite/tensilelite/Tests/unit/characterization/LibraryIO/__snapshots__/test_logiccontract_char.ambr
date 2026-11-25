@@ -5,6 +5,7 @@
     'CUCount': 228,
     'DefaultSolution': dict({
       '1LDSBuffer': 0,
+      'A2ASubRounds': 1,
       'ActivationAlt': False,
       'ActivationFuncCall': True,
       'ActivationFused': True,
@@ -140,6 +141,7 @@
       'StaggerUMapping': 0,
       'StaggerUStride': 256,
       'StinkyTofuRegisterAllocation': 0,
+      'StoreCachelineAlign': False,
       'StorePriorityOpt': False,
       'StoreRemapVectorWidth': 0,
       'StoreSyncOpt': 0,
@@ -189,6 +191,7 @@
       'WaveSeparateGlobalReadB': 0,
       'WaveSeparateGlobalReadMetadata': 0,
       'WaveSplitK': False,
+      'WaveTileContiguousA': False,
       'WavefrontSize': -1,
       'WorkAssignment': 'StaticGrid',
       'WorkGroup': list([
@@ -264,6 +267,7 @@
     'CUCount': None,
     'DefaultSolution': dict({
       '1LDSBuffer': 0,
+      'A2ASubRounds': 1,
       'ActivationAlt': False,
       'ActivationFuncCall': True,
       'ActivationFused': True,
@@ -399,6 +403,7 @@
       'StaggerUMapping': 0,
       'StaggerUStride': 256,
       'StinkyTofuRegisterAllocation': 0,
+      'StoreCachelineAlign': False,
       'StorePriorityOpt': False,
       'StoreRemapVectorWidth': 0,
       'StoreSyncOpt': 0,
@@ -448,6 +453,7 @@
       'WaveSeparateGlobalReadB': 0,
       'WaveSeparateGlobalReadMetadata': 0,
       'WaveSplitK': False,
+      'WaveTileContiguousA': False,
       'WavefrontSize': -1,
       'WorkAssignment': 'StaticGrid',
       'WorkGroup': list([
@@ -511,6 +517,7 @@
     'CUCount': None,
     'DefaultSolution': dict({
       '1LDSBuffer': 0,
+      'A2ASubRounds': 1,
       'ActivationAlt': False,
       'ActivationFuncCall': True,
       'ActivationFused': True,
@@ -646,6 +653,7 @@
       'StaggerUMapping': 0,
       'StaggerUStride': 256,
       'StinkyTofuRegisterAllocation': 0,
+      'StoreCachelineAlign': False,
       'StorePriorityOpt': False,
       'StoreRemapVectorWidth': 0,
       'StoreSyncOpt': 0,
@@ -695,6 +703,7 @@
       'WaveSeparateGlobalReadB': 0,
       'WaveSeparateGlobalReadMetadata': 0,
       'WaveSplitK': False,
+      'WaveTileContiguousA': False,
       'WavefrontSize': -1,
       'WorkAssignment': 'StaticGrid',
       'WorkGroup': list([
@@ -773,6 +782,7 @@
     'CUCount': None,
     'DefaultSolution': dict({
       '1LDSBuffer': 0,
+      'A2ASubRounds': 1,
       'ActivationAlt': False,
       'ActivationFuncCall': True,
       'ActivationFused': True,
@@ -908,6 +918,7 @@
       'StaggerUMapping': 0,
       'StaggerUStride': 256,
       'StinkyTofuRegisterAllocation': 0,
+      'StoreCachelineAlign': False,
       'StorePriorityOpt': False,
       'StoreRemapVectorWidth': 0,
       'StoreSyncOpt': 0,
@@ -957,6 +968,7 @@
       'WaveSeparateGlobalReadB': 0,
       'WaveSeparateGlobalReadMetadata': 0,
       'WaveSplitK': False,
+      'WaveTileContiguousA': False,
       'WavefrontSize': -1,
       'WorkAssignment': 'StaticGrid',
       'WorkGroup': list([
@@ -1052,6 +1064,7 @@
     'CUCount': None,
     'DefaultSolution': dict({
       '1LDSBuffer': 0,
+      'A2ASubRounds': 1,
       'ActivationAlt': False,
       'ActivationFuncCall': True,
       'ActivationFused': True,
@@ -1187,6 +1200,7 @@
       'StaggerUMapping': 0,
       'StaggerUStride': 256,
       'StinkyTofuRegisterAllocation': 0,
+      'StoreCachelineAlign': False,
       'StorePriorityOpt': False,
       'StoreRemapVectorWidth': 0,
       'StoreSyncOpt': 0,
@@ -1236,6 +1250,7 @@
       'WaveSeparateGlobalReadB': 0,
       'WaveSeparateGlobalReadMetadata': 0,
       'WaveSplitK': False,
+      'WaveTileContiguousA': False,
       'WavefrontSize': -1,
       'WorkAssignment': 'StaticGrid',
       'WorkGroup': list([
@@ -1311,6 +1326,7 @@
     'CUCount': None,
     'DefaultSolution': dict({
       '1LDSBuffer': 0,
+      'A2ASubRounds': 1,
       'ActivationAlt': False,
       'ActivationFuncCall': True,
       'ActivationFused': True,
@@ -1446,6 +1462,7 @@
       'StaggerUMapping': 0,
       'StaggerUStride': 256,
       'StinkyTofuRegisterAllocation': 0,
+      'StoreCachelineAlign': False,
       'StorePriorityOpt': False,
       'StoreRemapVectorWidth': 0,
       'StoreSyncOpt': 0,
@@ -1495,6 +1512,7 @@
       'WaveSeparateGlobalReadB': 0,
       'WaveSeparateGlobalReadMetadata': 0,
       'WaveSplitK': False,
+      'WaveTileContiguousA': False,
       'WavefrontSize': -1,
       'WorkAssignment': 'StaticGrid',
       'WorkGroup': list([
@@ -1584,6 +1602,7 @@
     'CUCount': None,
     'DefaultSolution': dict({
       '1LDSBuffer': 0,
+      'A2ASubRounds': 1,
       'ActivationAlt': False,
       'ActivationFuncCall': True,
       'ActivationFused': True,
@@ -1719,6 +1738,7 @@
       'StaggerUMapping': 0,
       'StaggerUStride': 256,
       'StinkyTofuRegisterAllocation': 0,
+      'StoreCachelineAlign': False,
       'StorePriorityOpt': False,
       'StoreRemapVectorWidth': 0,
       'StoreSyncOpt': 0,
@@ -1768,6 +1788,7 @@
       'WaveSeparateGlobalReadB': 0,
       'WaveSeparateGlobalReadMetadata': 0,
       'WaveSplitK': False,
+      'WaveTileContiguousA': False,
       'WavefrontSize': -1,
       'WorkAssignment': 'StaticGrid',
       'WorkGroup': list([
@@ -1846,6 +1867,7 @@
     'CUCount': 228,
     'DefaultSolution': dict({
       '1LDSBuffer': 0,
+      'A2ASubRounds': 1,
       'ActivationAlt': False,
       'ActivationFuncCall': True,
       'ActivationFused': True,
@@ -1981,6 +2003,7 @@
       'StaggerUMapping': 0,
       'StaggerUStride': 256,
       'StinkyTofuRegisterAllocation': 0,
+      'StoreCachelineAlign': False,
       'StorePriorityOpt': False,
       'StoreRemapVectorWidth': 0,
       'StoreSyncOpt': 0,
@@ -2030,6 +2053,7 @@
       'WaveSeparateGlobalReadB': 0,
       'WaveSeparateGlobalReadMetadata': 0,
       'WaveSplitK': False,
+      'WaveTileContiguousA': False,
       'WavefrontSize': -1,
       'WorkAssignment': 'StaticGrid',
       'WorkGroup': list([
@@ -2108,6 +2132,7 @@
     'CUCount': None,
     'DefaultSolution': dict({
       '1LDSBuffer': 0,
+      'A2ASubRounds': 1,
       'ActivationAlt': False,
       'ActivationFuncCall': True,
       'ActivationFused': True,
@@ -2243,6 +2268,7 @@
       'StaggerUMapping': 0,
       'StaggerUStride': 256,
       'StinkyTofuRegisterAllocation': 0,
+      'StoreCachelineAlign': False,
       'StorePriorityOpt': False,
       'StoreRemapVectorWidth': 0,
       'StoreSyncOpt': 0,
@@ -2292,6 +2318,7 @@
       'WaveSeparateGlobalReadB': 0,
       'WaveSeparateGlobalReadMetadata': 0,
       'WaveSplitK': False,
+      'WaveTileContiguousA': False,
       'WavefrontSize': -1,
       'WorkAssignment': 'StaticGrid',
       'WorkGroup': list([
@@ -2358,6 +2385,7 @@
     'CUCount': None,
     'DefaultSolution': dict({
       '1LDSBuffer': 0,
+      'A2ASubRounds': 1,
       'ActivationAlt': False,
       'ActivationFuncCall': True,
       'ActivationFused': True,
@@ -2493,6 +2521,7 @@
       'StaggerUMapping': 0,
       'StaggerUStride': 256,
       'StinkyTofuRegisterAllocation': 0,
+      'StoreCachelineAlign': False,
       'StorePriorityOpt': False,
       'StoreRemapVectorWidth': 0,
       'StoreSyncOpt': 0,
@@ -2542,6 +2571,7 @@
       'WaveSeparateGlobalReadB': 0,
       'WaveSeparateGlobalReadMetadata': 0,
       'WaveSplitK': False,
+      'WaveTileContiguousA': False,
       'WavefrontSize': -1,
       'WorkAssignment': 'StaticGrid',
       'WorkGroup': list([
@@ -2620,6 +2650,7 @@
     'CUCount': None,
     'DefaultSolution': dict({
       '1LDSBuffer': 0,
+      'A2ASubRounds': 1,
       'ActivationAlt': False,
       'ActivationFuncCall': True,
       'ActivationFused': True,
@@ -2755,6 +2786,7 @@
       'StaggerUMapping': 0,
       'StaggerUStride': 256,
       'StinkyTofuRegisterAllocation': 0,
+      'StoreCachelineAlign': False,
       'StorePriorityOpt': False,
       'StoreRemapVectorWidth': 0,
       'StoreSyncOpt': 0,
@@ -2804,6 +2836,7 @@
       'WaveSeparateGlobalReadB': 0,
       'WaveSeparateGlobalReadMetadata': 0,
       'WaveSplitK': False,
+      'WaveTileContiguousA': False,
       'WavefrontSize': -1,
       'WorkAssignment': 'StaticGrid',
       'WorkGroup': list([
@@ -2881,6 +2914,7 @@
     'CUCount': None,
     'DefaultSolution': dict({
       '1LDSBuffer': 0,
+      'A2ASubRounds': 1,
       'ActivationAlt': False,
       'ActivationFuncCall': True,
       'ActivationFused': True,
@@ -3016,6 +3050,7 @@
       'StaggerUMapping': 0,
       'StaggerUStride': 256,
       'StinkyTofuRegisterAllocation': 0,
+      'StoreCachelineAlign': False,
       'StorePriorityOpt': False,
       'StoreRemapVectorWidth': 0,
       'StoreSyncOpt': 0,
@@ -3065,6 +3100,7 @@
       'WaveSeparateGlobalReadB': 0,
       'WaveSeparateGlobalReadMetadata': 0,
       'WaveSplitK': False,
+      'WaveTileContiguousA': False,
       'WavefrontSize': -1,
       'WorkAssignment': 'StaticGrid',
       'WorkGroup': list([

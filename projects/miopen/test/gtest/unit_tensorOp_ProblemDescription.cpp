@@ -193,6 +193,6 @@ using CPU_TensorOpProblemDescription_NONE = TestTensorOpPD;
 
 TEST_P(CPU_TensorOpProblemDescription_NONE, TensorOpProblemDescription) { this->RunTest(); };
 
-INSTANTIATE_TEST_SUITE_P(Full,
+INSTANTIATE_TEST_SUITE_P(Standard,
                          CPU_TensorOpProblemDescription_NONE,
                          testing::ValuesIn(TestTensorOpPD::GetTestCases()));

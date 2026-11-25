@@ -387,6 +387,8 @@ TEST(TestGfx950AttentionUnified2DMatchers, DeclinesEveryOptionalFeatureTheKernel
     withExtra("scale tensor", [](auto& b) { b.add_scale_tensor_uid(EXTRA_UID); });
     withExtra("seq_len_q tensor", [](auto& b) { b.add_seq_len_q_tensor_uid(EXTRA_UID); });
     withExtra("seq_len_kv tensor", [](auto& b) { b.add_seq_len_kv_tensor_uid(EXTRA_UID); });
+    withExtra("cu_seq_len_q tensor", [](auto& b) { b.add_cu_seq_len_q_tensor_uid(EXTRA_UID); });
+    withExtra("cu_seq_len_kv tensor", [](auto& b) { b.add_cu_seq_len_kv_tensor_uid(EXTRA_UID); });
     withExtra("seed tensor", [](auto& b) { b.add_seed_tensor_uid(EXTRA_UID); });
     withExtra("offset tensor", [](auto& b) { b.add_offset_tensor_uid(EXTRA_UID); });
     withExtra("dropout mask", [](auto& b) { b.add_dropout_mask_tensor_uid(EXTRA_UID); });
@@ -820,6 +822,30 @@ TEST(TestGfx950AttentionUnified2DMatchers, DeclinesARecordWithoutAValidEmitLse)
     auto kernel = makeKernel(KernelSpec{});
     kernel.metadata.erase("emit_lse");
     EXPECT_FALSE(matchesKernel(Graph(GraphSpec{}), kernel));
+}
+
+TEST(TestGfx950AttentionUnified2DMatchers, ComputeDataTypeMustBeServedByFloatAccumulation)
+{
+    // The kernels accumulate and keep the softmax statistics in FLOAT, which meets an unset,
+    // FLOAT, HALF or BFLOAT16 compute type; a wider or non-floating one asks for a computation
+    // they do not perform.
+    for(const auto computeType : {data_objects::DataType::UNSET,
+                                  data_objects::DataType::FLOAT,
+                                  data_objects::DataType::HALF,
+                                  data_objects::DataType::BFLOAT16})
+    {
+        auto spec = GraphSpec{};
+        spec.computeDataType = computeType;
+        EXPECT_TRUE(graphMatches(spec)) << data_objects::EnumNameDataType(computeType);
+    }
+    for(const auto computeType : {data_objects::DataType::DOUBLE,
+                                  data_objects::DataType::INT32,
+                                  data_objects::DataType::FP8_E4M3})
+    {
+        auto spec = GraphSpec{};
+        spec.computeDataType = computeType;
+        EXPECT_FALSE(graphMatches(spec)) << data_objects::EnumNameDataType(computeType);
+    }
 }
 
 } // namespace hip_kernel_provider::kernel_ingestor_engine::testing

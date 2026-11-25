@@ -541,6 +541,10 @@ namespace rocalution
                                  BaseVector<int64_t>*         global_col);
 
     private:
+        // End of the strictly lower part of row ai, the position of its diagonal. The rows of
+        // a factor can store zeros above the diagonal.
+        PtrType LLDiagonal_(int ai) const;
+
         MatrixCSR<ValueType, int, PtrType> mat_;
 
         bool L_diag_unit_;

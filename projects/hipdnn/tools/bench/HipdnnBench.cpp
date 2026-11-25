@@ -442,32 +442,23 @@ public:
                                                                    : addDevice(tensor.bytes);
     }
 
+    /// Copies @p image into @p pointer, @p tensor's memory.
+    static bool upload(const hipdnn_bench::TensorRequirement& tensor,
+                       void* pointer,
+                       const std::vector<uint8_t>& image)
+    {
+        if(tensor.storage == hipdnn_bench::TensorStorage::HOST)
+        {
+            std::memcpy(pointer, image.data(), image.size());
+            return true;
+        }
+        return hipMemcpy(pointer, image.data(), image.size(), hipMemcpyHostToDevice) == hipSuccess;
+    }
+
 private:
     std::vector<void*> _devicePointers;
     std::vector<std::vector<std::byte>> _hostBlocks;
 };
-
-hipdnn_frontend::Error allocateVariantPack(const hipdnn_bench::VariantPackPlan& plan,
-                                           PackBuffers& buffers,
-                                           std::unordered_map<int64_t, void*>& variantPack)
-{
-    if(!plan.error.empty())
-    {
-        return {hipdnn_frontend::ErrorCode::INVALID_VALUE, plan.error};
-    }
-    for(const auto& tensor : plan.tensors)
-    {
-        void* pointer = buffers.add(tensor);
-        if(pointer == nullptr)
-        {
-            return {hipdnn_frontend::ErrorCode::HIPDNN_BACKEND_ERROR,
-                    "Out of device memory for '" + tensor.name + "' ("
-                        + std::to_string(tensor.bytes) + " bytes)"};
-        }
-        variantPack[tensor.uid] = pointer;
-    }
-    return {};
-}
 
 std::string knobValue(const KnobSetting& setting)
 {
@@ -633,61 +624,6 @@ hipdnn_bench::CandidateOutcome outcomeOf(const AutotuneResult& result,
     return outcome;
 }
 
-/// @brief Writes the validation fill into every input buffer of @p variantPack.
-///
-/// Results keep their zero fill so a kernel that writes nothing is detectable. Types this
-/// build cannot encode exactly also keep zeros rather than risk filling NaNs. The inputs in
-/// @p positive -- read by an operation undefined on negative values -- are filled positive.
-///
-/// @p fills keeps each input's image (a function of seed, uid and size) across one problem's
-/// candidates, uploaded afresh into each candidate's buffers, so a kernel that scribbles on an
-/// input cannot pass its damage on.
-hipdnn_frontend::Error fillGraphInputs(const hipdnn_bench::VariantPackPlan& plan,
-                                       const std::unordered_map<int64_t, void*>& variantPack,
-                                       uint64_t seed,
-                                       const std::set<int64_t>& positive,
-                                       std::map<int64_t, std::vector<uint8_t>>& fills)
-{
-    for(const auto& tensor : plan.tensors)
-    {
-        const auto buffer = variantPack.find(tensor.uid);
-        if(tensor.produced || buffer == variantPack.end())
-        {
-            continue; // A result, or something not in the pack at all.
-        }
-        const auto bytes = static_cast<size_t>(tensor.bytes);
-        auto cached = fills.find(tensor.uid);
-        // Empty is the declined-type answer and is reused as such; a size that moved between
-        // candidates is not the same image, so it is generated again rather than reused.
-        if(cached == fills.end() || (!cached->second.empty() && cached->second.size() != bytes))
-        {
-            cached = fills
-                         .insert_or_assign(
-                             tensor.uid,
-                             hipdnn_bench::detail::inputFillImage(tensor.dataType,
-                                                                  bytes,
-                                                                  seed,
-                                                                  tensor.uid,
-                                                                  positive.count(tensor.uid) != 0))
-                         .first;
-        }
-        const auto& image = cached->second;
-        if(image.empty())
-        {
-            continue;
-        }
-        if(tensor.storage == hipdnn_bench::TensorStorage::HOST)
-        {
-            std::memcpy(buffer->second, image.data(), image.size());
-            continue;
-        }
-        HIPDNN_CHECK_ERROR(
-            hipError(hipMemcpy(buffer->second, image.data(), image.size(), hipMemcpyHostToDevice),
-                     "Could not fill a candidate's input"));
-    }
-    return {};
-}
-
 /// @brief Runs one candidate once, untimed, and copies back every non-virtual tensor it
 ///        wrote (hipdnn_bench::crossCheckedOutputs), for the RFC 0019 §13.2 cross-check.
 ///
@@ -703,6 +639,7 @@ hipdnn_frontend::Error
                            std::map<int64_t, hipdnn_bench::TensorDescription>& tensors,
                            std::map<int64_t, std::vector<uint8_t>>& images,
                            const std::set<int64_t>& positive,
+                           const hipdnn_bench::DeclaredContents& declared,
                            std::map<int64_t, std::vector<uint8_t>>& fills)
 {
     BenchGraph graph;
@@ -715,9 +652,15 @@ hipdnn_frontend::Error
     const auto plan = hipdnn_bench::planVariantPack(graph);
     PackBuffers buffers;
     std::unordered_map<int64_t, void*> variantPack;
-    HIPDNN_CHECK_ERROR(allocateVariantPack(plan, buffers, variantPack));
-    HIPDNN_CHECK_ERROR(fillGraphInputs(
-        plan, variantPack, hipdnn_bench::detail::graphFillSeed(graphBytes), positive, fills));
+    HIPDNN_CHECK_ERROR(hipdnn_bench::allocateVariantPack(plan, buffers, variantPack, declared));
+    HIPDNN_CHECK_ERROR(
+        hipdnn_bench::fillGraphInputs(plan,
+                                      variantPack,
+                                      buffers,
+                                      hipdnn_bench::detail::graphFillSeed(graphBytes),
+                                      positive,
+                                      declared,
+                                      fills));
     int64_t workspaceSize = 0;
     HIPDNN_CHECK_ERROR(graph.get_workspace_size(workspaceSize));
     void* workspace = workspaceSize > 0 ? buffers.addDevice(workspaceSize) : nullptr;
@@ -749,6 +692,7 @@ hipdnn_frontend::Error collectImmediate(hipdnnHandle_t handle,
                                         const Options& options,
                                         const std::vector<KnobSetting>& settings,
                                         hipStream_t stream,
+                                        const hipdnn_bench::DeclaredContents& declared,
                                         nlohmann::json& output)
 {
     // The engine's ordinary selection for this metric is what an L1 label in it measures.
@@ -758,8 +702,8 @@ hipdnn_frontend::Error collectImmediate(hipdnnHandle_t handle,
 
     PackBuffers buffers;
     std::unordered_map<int64_t, void*> variantPack;
-    HIPDNN_CHECK_ERROR(
-        allocateVariantPack(hipdnn_bench::planVariantPack(graph), buffers, variantPack));
+    HIPDNN_CHECK_ERROR(hipdnn_bench::allocateVariantPack(
+        hipdnn_bench::planVariantPack(graph), buffers, variantPack, declared));
     int64_t workspaceSize = 0;
     HIPDNN_CHECK_ERROR(graph.get_workspace_size(workspaceSize));
     output["workspace_bytes"] = workspaceSize;
@@ -865,6 +809,7 @@ hipdnn_frontend::Error collectImmediate(hipdnnHandle_t handle,
 int runEngineMode(hipdnnHandle_t handle,
                   BenchGraph& graph,
                   const std::string& graphKey,
+                  const hipdnn_bench::DeclaredContents& declared,
                   const Options& options,
                   const std::string& graphPath = {})
 {
@@ -979,7 +924,7 @@ int runEngineMode(hipdnnHandle_t handle,
     {
         if(collect)
         {
-            error = collectImmediate(handle, graph, options, settings, stream, output);
+            error = collectImmediate(handle, graph, options, settings, stream, declared, output);
         }
         else
         {
@@ -1008,6 +953,8 @@ struct LoadedGraph
     /// Inputs the validation fill keeps positive (an operation undefined on negatives reads
     /// them).
     std::set<int64_t> positiveReads;
+    /// Inputs written as the graph declares them (hipdnn_bench::declaredContents).
+    hipdnn_bench::DeclaredContents declared;
     /// The file's bytes, and whether they are JSON, for a sweep's validation re-runs.
     std::vector<uint8_t> bytes;
     bool json = false;
@@ -1058,24 +1005,24 @@ std::optional<std::string> loadGraph(hipdnnHandle_t handle,
     }
     try
     {
+        // One parse of the graph serves its key's bytes, the positive reads and the declared
+        // contents.
+        std::vector<uint8_t> serialized;
         if(looksLikeJson)
         {
-            std::vector<uint8_t> serialized;
             const auto written = graph.serialize(serialized);
             if(!written.is_good())
             {
                 return "Could not serialize " + path + ": " + written.get_message();
             }
-            loaded.key = hipdnn_bench::graphContentKey(serialized.data(), serialized.size());
-            loaded.positiveReads
-                = hipdnn_bench::positiveDomainReads(serialized.data(), serialized.size());
         }
-        else
-        {
-            loaded.key = hipdnn_bench::graphContentKey(graphBytes.data(), graphBytes.size());
-            loaded.positiveReads
-                = hipdnn_bench::positiveDomainReads(graphBytes.data(), graphBytes.size());
-        }
+        const auto& keyed = looksLikeJson ? serialized : graphBytes;
+        loaded.key = hipdnn_bench::graphContentKey(keyed.data(), keyed.size());
+        const auto wrapper
+            = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper::fromSerializedBlob(
+                keyed.data(), keyed.size());
+        loaded.positiveReads = hipdnn_bench::positiveDomainReads(wrapper.getGraph());
+        loaded.declared = hipdnn_bench::declaredContents(wrapper.getGraph());
     }
     catch(const std::exception& error)
     {
@@ -1106,7 +1053,9 @@ int runGraphList(hipdnnHandle_t handle, const Options& options)
             const auto unread = loadGraph(handle, path, options.engineMode, graph, loaded);
             if(!unread)
             {
-                allMeasured &= runEngineMode(handle, graph, loaded.key, options, path) == 0;
+                allMeasured
+                    &= runEngineMode(handle, graph, loaded.key, loaded.declared, options, path)
+                       == 0;
                 continue;
             }
             failure = *unread;
@@ -1182,11 +1131,12 @@ int runBench(const std::vector<std::string>& args)
     }
     const auto& graphKey = loaded.key;
     const auto& positiveReads = loaded.positiveReads;
+    const auto& declared = loaded.declared;
     const auto& graphBytes = loaded.bytes;
     const bool looksLikeJson = loaded.json;
     if(options.engineMode != EngineMode::NONE)
     {
-        return runEngineMode(handle, graph, graphKey, options);
+        return runEngineMode(handle, graph, graphKey, declared, options);
     }
 
     std::vector<KnobSetting> pinned;
@@ -1279,8 +1229,8 @@ int runBench(const std::vector<std::string>& args)
 
     PackBuffers buffers;
     std::unordered_map<int64_t, void*> variantPack;
-    const auto allocated
-        = allocateVariantPack(hipdnn_bench::planVariantPack(graph), buffers, variantPack);
+    const auto allocated = hipdnn_bench::allocateVariantPack(
+        hipdnn_bench::planVariantPack(graph), buffers, variantPack, declared);
     if(allocated.is_bad())
     {
         std::cerr << allocated.get_message() << "\n";
@@ -1394,6 +1344,7 @@ int runBench(const std::vector<std::string>& args)
                                                     tensors,
                                                     captured.images,
                                                     positiveReads,
+                                                    declared,
                                                     fills);
             captured.executed = ran.is_good();
             if(!ran.is_good())

@@ -1,6 +1,7 @@
 // Copyright Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
+#include "ClientArgsTestUtils.hpp"
 #include "ClientProblemFactory.hpp"
 #include "DataInitialization.hpp"
 #include "DataInitializationHelpers.hpp"
@@ -48,6 +49,8 @@ using TensileLite::PerformanceMetric;
 using TensileLite::TensorDescriptor;
 using TensileLite::Client::isMXProblem;
 using TensileLite::Client::isMXTensor;
+using TensileLite::TestUtils::makeMinimalClientArgs;
+using TensileLite::TestUtils::setOption;
 
 // Shorthand for the production helper namespace under test (MX builds only).
 #if HIPBLASLT_ENABLE_MXDATAGENERATOR
@@ -55,12 +58,6 @@ namespace dt = TensileLite::Client::detail;
 #endif
 namespace
 {
-    template <typename T>
-    void setOption(TensileLite::Client::po::variables_map& args, std::string const& name, T value)
-    {
-        args[name].value() = std::move(value);
-    }
-
     // -----------------------------------------------------------------------
     // Helper: build a ContractionProblemGemm with the requested A/B dtypes.
     // Mirrors tests/MXScalePadding_test.cpp::makeMXProblem so the geometry
@@ -103,74 +100,6 @@ namespace
                                 /*padScaleTensorFreeDim=*/true, mxBlockFreeB);
         return problem;
     }
-
-    TensileLite::Client::po::variables_map makeMinimalClientArgs(int mxScaleFormat)
-    {
-        using namespace TensileLite::Client;
-
-        po::variables_map args;
-        setOption(args, "problem-identifier", std::string("Contraction_l_Ailk_Bljk_Cijk_Dijk"));
-        setOption(args, "problem-size", std::vector<std::vector<size_t>>{{128, 128, 1, 512}});
-        setOption(args, "strided-batched", true);
-        setOption(args, "batch-mode", 0);
-        setOption(args, "grouped-gemm", false);
-        setOption(args, "sparse", 0);
-        setOption(args, "high-precision-accumulate", false);
-        setOption(args, "kernel-language", KernelLanguage::Any);
-        setOption(args, "performance-metric", PerformanceMetric::DeviceEfficiency);
-        setOption(args, "deterministic-mode", false);
-        setOption(args, "c-equal-d", false);
-        setOption(args, "type", rocisa::DataType::Float8);
-        setOption(args, "a-type", rocisa::DataType::Float8);
-        setOption(args, "b-type", rocisa::DataType::Float8);
-        setOption(args, "c-type", rocisa::DataType::Float);
-        setOption(args, "d-type", rocisa::DataType::Float);
-        setOption(args, "alpha-type", rocisa::DataType::Float);
-        setOption(args, "beta-type", rocisa::DataType::Float);
-        setOption(args, "compute-input-type-A", rocisa::DataType::Float8);
-        setOption(args, "compute-input-type-B", rocisa::DataType::Float8);
-        setOption(args, "f32-xdl-math-op", rocisa::DataType::Float);
-        setOption(args, "activation-compute-type", rocisa::DataType::Float);
-        // Deliberately 0 here (not 32): these only control whether
-        // ClientProblemFactory calls setMXScaleA/B on the *internal dummy*
-        // problem it builds for sizing purposes (see ClientProblemFactory.cpp),
-        // which is unrelated to the `problem` object this test passes directly
-        // into referenceNeedsPerSolutionRecompute(). When non-zero here, the
-        // DataInitialization ctor's storage-geometry computation for the
-        // swizzled MX-scale tensor indexes problem.freeIndicesA()[0] /
-        // freeIndicesB()[0] on that dummy problem without a bounds check; for
-        // the minimal synthetic problem-size/identifier used here those
-        // indices can be empty, which segfaults (only reachable on real
-        // hardware, so it stays hidden behind GTEST_SKIP() on any other arch).
-        // m_mxScaleFormat (checked by referenceNeedsPerSolutionRecompute) is
-        // read directly from "mx-scale-format" below, independent of these.
-        setOption(args, "mx-a-block", 0);
-        setOption(args, "mx-b-block", 0);
-        setOption(args, "mx-a-type", rocisa::DataType::E8);
-        setOption(args, "mx-b-type", rocisa::DataType::E8);
-        setOption(args, "mx-scale-format", mxScaleFormat);
-        setOption(args, "fused-gemm-a2a", false);
-        setOption(args, "metadata-layout", 0);
-        setOption(args, "a-ops", TensileLite::TensorOps{});
-        setOption(args, "b-ops", TensileLite::TensorOps{});
-        setOption(args, "c-ops", TensileLite::TensorOps{});
-        setOption(args, "d-ops", TensileLite::TensorOps{});
-        setOption(args, "use-gradient", false);
-        setOption(args, "output-amaxD", false);
-        setOption(args, "use-scaleAB", std::string());
-        setOption(args, "use-scaleCD", false);
-        setOption(args, "use-bias", 0);
-        setOption(args, "bias-source", static_cast<int>(ContractionProblemGemm::TENSOR::D));
-        setOption(args, "use-scaleAlphaVec", 0);
-        setOption(args, "device-idx", 0);
-        setOption(args, "num-elements-to-validate", 0);
-        setOption(args, "pristine-on-gpu", true);
-        setOption(args, "prune-mode", TensileLite::Client::PruneSparseMode::PruneRandom);
-        setOption(args, "rotating-buffer-size", 0);
-        setOption(args, "rotating-buffer-mode", 0);
-        setOption(args, "bounds-check", TensileLite::Client::BoundsCheckMode::Disable);
-        return args;
-    }
 } // namespace
 
 TEST(ClientAlphaMode, ScalarSupportDefaultsToScalarAndAllowsRuntimeOverride)
@@ -204,6 +133,37 @@ TEST(ClientAlphaMode, RejectsReservedScalarOnlyAndUnknownSupportModes)
         setOption(args, "use-scaleAlphaVec", modes);
         EXPECT_THROW(TensileLite::Client::ClientProblemFactory factory(args), std::invalid_argument);
     }
+}
+
+// A random alpha or beta is drawn once for the problem and again for the launch, so a
+// draw of +-1 here must not restrict the problem to a value-specialized solution: the
+// launch would then throw "Alpha value X doesn't match that set in problem".
+TEST(ClientScalarRestriction, RandomAlphaAndBetaAreUnrestricted)
+{
+    auto args = makeMinimalClientArgs(0);
+    setOption(args, "init-alpha", TensileLite::Client::InitMode::Random);
+    setOption(args, "init-beta", TensileLite::Client::InitMode::Random);
+    // Each draw is in [-1000, 1000]; 4000 problems draw +-1 with probability 1 - e^-8.
+    for(int i = 0; i < 4000; ++i)
+    {
+        TensileLite::Client::ClientProblemFactory factory(args);
+        auto problem = std::dynamic_pointer_cast<ContractionProblemGemm>(factory.problems()[0]);
+        ASSERT_NE(problem, nullptr);
+        ASSERT_EQ(problem->alphaRestriction(), TensileLite::ScalarValue::Any) << "problem " << i;
+        ASSERT_EQ(problem->betaRestriction(), TensileLite::ScalarValue::Any) << "problem " << i;
+    }
+}
+
+TEST(ClientScalarRestriction, FixedAlphaAndBetaKeepTheirRestriction)
+{
+    auto args = makeMinimalClientArgs(0);
+    setOption(args, "init-alpha", TensileLite::Client::InitMode::One);
+    setOption(args, "init-beta", TensileLite::Client::InitMode::One);
+    TensileLite::Client::ClientProblemFactory factory(args);
+    auto problem = std::dynamic_pointer_cast<ContractionProblemGemm>(factory.problems()[0]);
+    ASSERT_NE(problem, nullptr);
+    EXPECT_EQ(problem->alphaRestriction(), TensileLite::ScalarValue::One);
+    EXPECT_EQ(problem->betaRestriction(), TensileLite::ScalarValue::One);
 }
 
 TEST(ClientProblemFactoryDefaults, DisablesOmittedOptionalOutputsAndScales)
@@ -625,6 +585,82 @@ TEST(DataInitializationMXReuse, NoSwizzleSolutionDoesNotLeakIntoNextPreswizzle)
     ASSERT_NE(run(noSwizzle), swizzled) << "the layouts must differ for this test to be meaningful";
     EXPECT_EQ(run(preswizzle), swizzled);
     EXPECT_TRUE(dataInit.preswizzledA());
+    dataInit.postProblem();
+}
+
+namespace
+{
+    // Exposes the host-side source of each tensor so the staged upload can be checked.
+    class SwizzleProbe : public TensileLite::Client::DataInitialization
+    {
+    public:
+        using DataInitialization::DataInitialization;
+
+        const void* cpuSource(int tensor) const
+        {
+            return m_vdata[tensor].pristine.begin()->second.cpuInput.valid.get();
+        }
+    };
+
+    std::vector<uint8_t> readDevice(const void* ptr, size_t bytes)
+    {
+        std::vector<uint8_t> out(bytes);
+        HIP_CHECK_EXC(hipMemcpy(out.data(), ptr, bytes, hipMemcpyDeviceToHost));
+        return out;
+    }
+} // namespace
+
+// SwizzleTensorA/B: prepareGPUInputs allocates the padded buffer, stages the source into the
+// swizzled layout and uploads it (a second call reuses the cached staging).
+TEST(DataInitializationSwizzle, UploadsTheStagedLayoutForAAndB)
+{
+    using TensileLite::Client::detail::stageSwizzledTensor;
+    using TensileLite::Client::detail::swizzleStageGeometry;
+
+    // The default solution is not a subtile one: K is padded to 64 bytes whatever the device.
+    const bool padTo64Bytes = true;
+
+    auto args = makeMXLaunchArgs({{48, 40, 1, 100}});
+    setOption(args, "mx-a-block", 0);
+    setOption(args, "mx-b-block", 0);
+    setOption(args, "mx-scale-format", 0);
+    // Swizzled operands are K-fastest (TN): A is [K, M], B is [K, N].
+    setOption(args, "problem-identifier", std::string("Contraction_l_Alik_Bljk_Cijk_Dijk"));
+    setOption(args, "swizzle-tensor-a", true);
+    setOption(args, "swizzle-tensor-b", true);
+    TensileLite::Client::ClientProblemFactory factory(args);
+    SwizzleProbe                              dataInit(args, factory);
+    ContractionSolution                       solution;
+    auto*                                     problem = factory.problems()[0].get();
+    auto const& gemm = dynamic_cast<ContractionProblemGemm const&>(*problem);
+    ASSERT_TRUE(gemm.swizzleTensorA());
+    ASSERT_TRUE(gemm.swizzleTensorB());
+
+    dataInit.preProblem(problem);
+    dataInit.preSolution(&solution);
+    for(int pass = 0; pass < 2; ++pass) // the second pass takes the cached-staging path
+    {
+        auto const inputs = dataInit.prepareGPUInputs(problem);
+        auto const* gemmInputs
+            = dynamic_cast<TensileLite::ContractionInputs const*>(inputs.get());
+        ASSERT_NE(gemmInputs, nullptr);
+        struct
+        {
+            int                     tensor;
+            const void*             device;
+            TensorDescriptor const& desc;
+        } const tensors[] = {{ContractionProblemGemm::TENSOR::A, gemmInputs->a, gemm.a()},
+                             {ContractionProblemGemm::TENSOR::B, gemmInputs->b, gemm.b()}};
+        for(auto const& t : tensors)
+        {
+            const auto geom     = swizzleStageGeometry(t.desc, padTo64Bytes);
+            auto       expected = stageSwizzledTensor(t.desc, dataInit.cpuSource(t.tensor), geom);
+            auto       got      = readDevice(t.device, expected.getNumBytes());
+            EXPECT_EQ(std::memcmp(got.data(), expected.as<void>(), got.size()), 0)
+                << "tensor " << t.tensor << " pass " << pass;
+        }
+    }
+    dataInit.postSolution();
     dataInit.postProblem();
 }
 #endif
@@ -1101,6 +1137,303 @@ TEST(VaryMXScaleFreeTiles, KeepsZeroNaNAndClampsToFiniteRange)
     EXPECT_EQ(s[1], 0xFF);
     EXPECT_EQ(s[2], 0x01); // 0x01 + 0
     EXPECT_EQ(s[3], 0xFE); // 0xFE + 1 clamps to 0xFE
+}
+
+
+// ---------------------------------------------------------------------------
+//  Swizzled operand (SwizzleTensorA/B): K block per architecture, K padding,
+//  allocation size and the host-side staging into [nO, kO, kM, nI, kI].
+// ---------------------------------------------------------------------------
+namespace
+{
+    using TensileLite::Client::detail::calculateKforSwizzling;
+    using TensileLite::Client::detail::getSwizzledTensorNumAllocatedElements;
+    using TensileLite::Client::detail::stageSwizzledTensor;
+    using TensileLite::Client::detail::swizzleStageGeometry;
+    using TensileLite::Client::detail::swizzledPaddedKUnit;
+    using TensileLite::Client::detail::swizzledKPadsTo64Bytes;
+
+    constexpr size_t kMi = 16; // swizzled free-dimension block (MiM / MiN)
+
+    // Element (n, k) of a [N, K] row-major operand with leading dimension ld and batch stride bs.
+    uint8_t srcByte(size_t b, size_t n, size_t k, size_t ld, size_t bs)
+    {
+        return uint8_t(1 + (b * bs + n * ld + k) % 251);
+    }
+
+    struct SwizzleCase
+    {
+        rocisa::DataType dtype;
+        size_t           bytes; // element bytes (whole bytes only)
+        size_t           k, n, batches, ld, bs;
+    };
+
+    // Stage a descriptor of dtype with the source filled by srcByte and return the staged bytes.
+    std::vector<uint8_t> stageCase(const SwizzleCase& c, bool padTo64Bytes, size_t& padK)
+    {
+        // The kernel sees [K, free, batch]: dim0 = K (fastest).
+        TensorDescriptor desc("a", c.dtype, {c.k, c.n, c.batches}, {1, c.ld, c.bs});
+        const auto       g = swizzleStageGeometry(desc, padTo64Bytes);
+        padK               = g.paddedShape[1];
+
+        std::vector<uint8_t> src(((c.batches - 1) * c.bs + (c.n - 1) * c.ld + c.k) * c.bytes, 0);
+        for(size_t b = 0; b < c.batches; ++b)
+            for(size_t n = 0; n < c.n; ++n)
+                for(size_t k = 0; k < c.k; ++k)
+                    for(size_t j = 0; j < c.bytes; ++j)
+                        src[(b * c.bs + n * c.ld + k) * c.bytes + j]
+                            = uint8_t(srcByte(b, n, k, c.ld, c.bs) + j);
+
+        auto                 staged = stageSwizzledTensor(desc, src.data(), g);
+        std::vector<uint8_t> out(staged.getNumBytes());
+        std::memcpy(out.data(), staged.as<void>(), out.size());
+        return out;
+    }
+
+    // Independent model of the host layout for 1-byte elements: [nO, kO, kM, nI, kI] with a
+    // 16-byte kI block, kM = 2 lane groups (gfx1250 32 B swz granule) over a padK-wide row.
+    size_t swizzledOffset(size_t n, size_t k, size_t padK)
+    {
+        const size_t nO = n / kMi, nI = n % kMi;
+        const size_t kBlock = k / 16, kI = k % 16;
+        const size_t kO = kBlock / 2, kM = kBlock % 2;
+        const size_t KO = padK / 32;
+        return (((nO * KO + kO) * 2 + kM) * kMi + nI) * 16 + kI;
+    }
+} // namespace
+
+TEST(SwizzledPaddedK, Gfx942KeepsItsSwizzleKBlock)
+{
+    EXPECT_EQ(swizzledPaddedKUnit(64, 1.0f, false), 64u);
+    EXPECT_EQ(swizzledPaddedKUnit(32, 2.0f, false), 32u);
+    EXPECT_EQ(swizzledPaddedKUnit(128, 0.5f, false), 128u);
+}
+
+TEST(SwizzledPaddedK, Gfx1250PadsToSixtyFourBytes)
+{
+    EXPECT_EQ(swizzledPaddedKUnit(32, 1.0f, true), 64u);  // F8: 32 B swizzle block -> 64 elements
+    EXPECT_EQ(swizzledPaddedKUnit(16, 2.0f, true), 32u);  // BF16
+    EXPECT_EQ(swizzledPaddedKUnit(64, 0.5f, true), 128u); // F4: byte-packed, 64 B = 128 elements
+    EXPECT_EQ(swizzledPaddedKUnit(256, 1.0f, true), 256u) << "a larger block is never narrowed";
+}
+
+TEST(SwizzledPaddedK, FollowsTheSwizzlePathOfTheKernel)
+{
+    // Only the subtile swizzle of F4 (gfx950 MXF4) pads K to its 32-byte block; every other swizzle
+    // path (TDM, classic) and every other type pads to 64 bytes.
+    EXPECT_FALSE(swizzledKPadsTo64Bytes(rocisa::DataType::Float4, true));
+    EXPECT_TRUE(swizzledKPadsTo64Bytes(rocisa::DataType::Float4, false));
+    for(auto dtype : {rocisa::DataType::Float8, rocisa::DataType::BFloat8, rocisa::DataType::Int8,
+                      rocisa::DataType::BFloat16, rocisa::DataType::Half})
+    {
+        EXPECT_TRUE(swizzledKPadsTo64Bytes(dtype, true)) << int(dtype);
+        EXPECT_TRUE(swizzledKPadsTo64Bytes(dtype, false)) << int(dtype);
+    }
+
+    // F4, K = 40 elements (20 B): 64 elements (32 B) for the subtile swizzle, 128 (64 B) otherwise.
+    TensorDescriptor desc("a", rocisa::DataType::Float4, {40, 16, 1});
+    EXPECT_EQ(swizzleStageGeometry(desc, swizzledKPadsTo64Bytes(rocisa::DataType::Float4, true))
+                  .paddedShape[1],
+              32u);
+    EXPECT_EQ(swizzleStageGeometry(desc, swizzledKPadsTo64Bytes(rocisa::DataType::Float4, false))
+                  .paddedShape[1],
+              64u);
+}
+
+TEST(SwizzledKBlock, IsTheSameOnEveryArchitecture)
+{
+    // One K block per data type everywhere (the gfx942 one): gfx1250 only differs in how K is padded,
+    // and the flattened (kO, kM) index makes the staged bytes independent of the block size.
+    struct Row
+    {
+        rocisa::DataType dtype;
+        size_t           mik;
+    };
+    const Row rows[] = {{rocisa::DataType::Half, 16},
+                        {rocisa::DataType::BFloat16, 16},
+                        {rocisa::DataType::Int8, 32},
+                        {rocisa::DataType::Float8, 32},
+                        {rocisa::DataType::BFloat8, 32},
+                        {rocisa::DataType::Float4, 32}};
+    for(const auto& r : rows)
+    {
+        size_t MiK = 0, MiKv = 0, PackK = 0;
+        calculateKforSwizzling(r.dtype, MiK, MiKv, PackK);
+        EXPECT_EQ(MiK, r.mik) << int(r.dtype);
+    }
+    size_t MiK = 0, MiKv = 0, PackK = 0;
+    EXPECT_THROW(calculateKforSwizzling(rocisa::DataType::None, MiK, MiKv, PackK),
+                 std::runtime_error);
+}
+
+TEST(SwizzledAllocation, SameWithAndWithoutThe64ByteKPaddingForEveryK)
+{
+    // 1- and 2-byte types: the swizzle K block is already 64 bytes, so padding K to 64 bytes (gfx1250)
+    // changes nothing. (F4 is the exception: gfx942/gfx950 keep their 32-byte padding, see the F4 test.)
+    for(auto dtype : {rocisa::DataType::Float8, rocisa::DataType::BFloat16, rocisa::DataType::Half,
+                      rocisa::DataType::Int8})
+    {
+        for(size_t k = 1; k <= 300; k += 7)
+        {
+            TensorDescriptor desc("a", dtype, {k, 20, 1});
+            size_t           MiK = 0, MiKv = 0, PackK = 0;
+            calculateKforSwizzling(dtype, MiK, MiKv, PackK);
+            EXPECT_EQ(getSwizzledTensorNumAllocatedElements(desc, kMi, MiK, PackK, false),
+                      getSwizzledTensorNumAllocatedElements(desc, kMi, MiK, PackK, true))
+                << int(dtype) << " K=" << k;
+        }
+    }
+}
+
+TEST(SwizzledAllocation, PadsFreeDimAndKAndHonoursTheBatchStride)
+{
+    size_t MiK = 0, MiKv = 0, PackK = 0;
+    calculateKforSwizzling(rocisa::DataType::Float8, MiK, MiKv, PackK);
+    // K=100 -> 128, N=20 -> 32: one batch is 4096 elements.
+    EXPECT_EQ(getSwizzledTensorNumAllocatedElements(
+                  TensorDescriptor("a", rocisa::DataType::Float8, {100, 20, 1}), kMi, MiK, PackK, true),
+              4096u);
+    // Batched, dense: batches follow each other.
+    EXPECT_EQ(getSwizzledTensorNumAllocatedElements(
+                  TensorDescriptor("a", rocisa::DataType::Float8, {100, 20, 3}, {1, 100, 2000}),
+                  kMi, MiK, PackK, true),
+              std::max<size_t>(4096 * 3, 2000 * 2 + 4096));
+    // A batch stride wider than the padded batch is kept (the kernel steps by it).
+    EXPECT_EQ(getSwizzledTensorNumAllocatedElements(
+                  TensorDescriptor("a", rocisa::DataType::Float8, {100, 20, 3}, {1, 100, 8192}),
+                  kMi, MiK, PackK, true),
+              8192u * 2 + 4096);
+}
+
+TEST(SwizzledStaging, Gfx1250MatchesTheHostLayoutModel)
+{
+    for(size_t k : {size_t(32), size_t(33), size_t(64), size_t(100), size_t(200)})
+    {
+        for(size_t n : {size_t(16), size_t(20), size_t(40)})
+        {
+            SwizzleCase c{rocisa::DataType::Float8, 1, k, n, 1, k, 0};
+            size_t      padK = 0;
+            auto        out  = stageCase(c, true, padK);
+            ASSERT_EQ(padK % 64, 0u) << "K is padded to 64 bytes";
+            ASSERT_GE(padK, k);
+            const size_t paddedN = (n + kMi - 1) / kMi * kMi;
+            ASSERT_EQ(out.size(), paddedN * padK);
+            std::vector<uint8_t> expect(out.size(), 0);
+            for(size_t r = 0; r < n; ++r)
+                for(size_t kk = 0; kk < k; ++kk)
+                    expect[swizzledOffset(r, kk, padK)] = srcByte(0, r, kk, k, 0);
+            EXPECT_EQ(out, expect) << "K=" << k << " N=" << n;
+        }
+    }
+}
+
+TEST(SwizzledStaging, IdenticalBytesWithAndWithoutThe64ByteKPadding)
+{
+    // gfx942 swizzles in 64-byte K blocks, gfx1250 kernels read 32-byte ones; flattening (kO, kM) gives
+    // the same bytes once K is padded the same way, and for the 1- and 2-byte types the swizzle K block
+    // is already 64 B, so the 64-byte padding flag (gfx1250) changes nothing.
+    struct Row
+    {
+        rocisa::DataType dtype;
+        size_t           bytes;
+    };
+    for(const Row r : {Row{rocisa::DataType::Float8, 1}, Row{rocisa::DataType::BFloat8, 1},
+                       Row{rocisa::DataType::Int8, 1}, Row{rocisa::DataType::BFloat16, 2},
+                       Row{rocisa::DataType::Half, 2}})
+    {
+        for(size_t k : {size_t(40), size_t(64), size_t(150), size_t(256)})
+        {
+            SwizzleCase c{r.dtype, r.bytes, k, 24, 1, k, 0};
+            size_t      pad942 = 0, pad1250 = 0;
+            auto        a = stageCase(c, false, pad942);
+            auto        b = stageCase(c, true, pad1250);
+            EXPECT_EQ(pad942, pad1250) << int(r.dtype) << " K=" << k;
+            EXPECT_EQ(a, b) << int(r.dtype) << " K=" << k;
+        }
+    }
+}
+
+TEST(SwizzledStaging, BatchesSitAtTheSourceBatchStrideAndKeepTheLeadingDimension)
+{
+    // ld (160) > K (100) and a batch stride wider than one padded batch (128 * 32 = 4096).
+    SwizzleCase c{rocisa::DataType::Float8, 1, 100, 20, 3, 160, 5000};
+    size_t      padK = 0;
+    auto        out  = stageCase(c, true, padK);
+    ASSERT_EQ(padK, 128u);
+    ASSERT_EQ(out.size(), 2 * 5000u + 32 * 128u);
+    for(size_t b = 0; b < c.batches; ++b)
+        for(size_t n = 0; n < c.n; ++n)
+            for(size_t k = 0; k < c.k; ++k)
+                ASSERT_EQ(out[b * c.bs + swizzledOffset(n, k, padK)], srcByte(b, n, k, c.ld, c.bs))
+                    << "b=" << b << " n=" << n << " k=" << k;
+    // The gap between one batch's padded data and the next batch is zero.
+    for(size_t i = 32 * 128; i < 5000; ++i)
+        ASSERT_EQ(out[i], 0) << i;
+}
+
+TEST(SwizzledStaging, TwoByteElementsUseSixteenByteKBlocks)
+{
+    // BF16: one 16-byte block is 8 elements; K pads to 32 elements (64 B).
+    TensorDescriptor desc("a", rocisa::DataType::BFloat16, {20, 16, 1}); // K=20, N=16
+    const auto       g = swizzleStageGeometry(desc, true);
+    EXPECT_EQ(g.paddedShape[0], 16u);
+    EXPECT_EQ(g.paddedShape[1], 32u);
+    EXPECT_EQ(g.totalNative, 16u * 32u);
+    EXPECT_FALSE(g.isSubByte);
+}
+
+TEST(SwizzledStaging, SubByteElementsStageAsBytes)
+{
+    // F4 is staged as packed bytes. K=40 elements = 20 bytes: gfx1250 pads K to 64 bytes
+    // (128 elements), gfx942/gfx950 keep their 32-byte padding (64 elements).
+    TensorDescriptor desc("a", rocisa::DataType::Float4, {40, 16, 1});
+    const auto       g1250 = swizzleStageGeometry(desc, true);
+    const auto       g942  = swizzleStageGeometry(desc, false);
+    EXPECT_TRUE(g1250.isSubByte);
+    EXPECT_EQ(g1250.effUnrolled, 20u);
+    EXPECT_EQ(g1250.paddedShape[1], 64u);
+    EXPECT_EQ(g942.paddedShape[1], 32u);
+    EXPECT_EQ(g1250.totalNative, 16u * 128u) << "native elements: 16 rows x 64 B x 2";
+    EXPECT_EQ(g942.totalNative, 16u * 64u);
+
+    // With K already a whole 64 bytes the two stage the same bytes.
+    TensorDescriptor full("a", rocisa::DataType::Float4, {128, 16, 1});
+    const auto       f1250 = swizzleStageGeometry(full, true);
+    const auto       f942  = swizzleStageGeometry(full, false);
+    EXPECT_EQ(f1250.totalNative, f942.totalNative);
+    std::vector<uint8_t> src(16 * 64);
+    for(size_t i = 0; i < src.size(); ++i)
+        src[i] = uint8_t(1 + i % 251);
+    auto a = stageSwizzledTensor(full, src.data(), f1250);
+    auto b = stageSwizzledTensor(full, src.data(), f942);
+    ASSERT_EQ(a.getNumBytes(), b.getNumBytes());
+    EXPECT_EQ(std::memcmp(a.as<void>(), b.as<void>(), a.getNumBytes()), 0);
+}
+
+TEST(SwizzledStaging, RejectsAStrideThatCannotHoldAPaddedBatch)
+{
+    // One padded batch is 4096 elements, but the batches are only 2000 apart: the kernel would step
+    // into the previous batch's data.
+    TensorDescriptor desc("a", rocisa::DataType::Float8, {100, 20, 3}, {1, 100, 2000});
+    try
+    {
+        swizzleStageGeometry(desc, true);
+        FAIL() << "expected the batch stride check to throw";
+    }
+    catch(const std::runtime_error& e)
+    {
+        EXPECT_NE(std::string(e.what()).find("batch stride 2000 is smaller"), std::string::npos)
+            << e.what();
+    }
+    // A single batch has no stride to violate.
+    TensorDescriptor one("a", rocisa::DataType::Float8, {100, 20, 1}, {1, 100, 2000});
+    EXPECT_NO_THROW(swizzleStageGeometry(one, true));
+}
+
+TEST(SwizzledStaging, RejectsAnUnpackedSubByteLeadingDimension)
+{
+    TensorDescriptor desc("a", rocisa::DataType::Float4, {64, 16, 1}, {1, 80, 0});
+    EXPECT_THROW(swizzleStageGeometry(desc, true), std::runtime_error);
 }
 
 #endif // HIPBLASLT_ENABLE_MXDATAGENERATOR

@@ -198,7 +198,7 @@ TEST_P(CPU_BatchNormSpatialVectorSize_NONE, GeneratedConfigsNeverExceedMax)
     }
 }
 
-INSTANTIATE_TEST_SUITE_P(Smoke,
+INSTANTIATE_TEST_SUITE_P(Quick,
                          CPU_BatchNormSpatialVectorSize_NONE,
                          ::testing::ValuesIn(GetShapes()),
                          [](const ::testing::TestParamInfo<Shape>& info) {

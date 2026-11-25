@@ -8,11 +8,16 @@ Full documentation for RPP is available at [https://rocm.docs.amd.com/projects/r
 
 - rocFFT acceleration for the HIP audio spectrogram, with plan caching. rocFFT is loaded at runtime with `dlopen` and is not a build dependency. It is packaged as a soft dependency (`Recommends` on Debian, `Suggests` on RPM). If `librocfft.so.0` cannot be loaded, the HIP spectrogram returns `RPP_ERROR_NOT_IMPLEMENTED`. All other functions are unaffected.
 - An in-house CPU FFT for the audio spectrogram. This replaces the FFTS dependency.
+- Support for gfx1251
 
 ### Changed
 
 - Audio augmentations are now always enabled. The `RPP_AUDIO_SUPPORT` CMake option has been removed.
 - `rppt_spectrogram` returns `RPP_ERROR_INVALID_ARGUMENTS` when `power` is not 1 or 2, when `windowLength` or `windowStep` is not positive, or when `nfft` is nonzero and smaller than `windowLength`.
+
+### Removed
+
+- The standalone handle and backend-macro tests under `test/` have been merged into the GoogleTest suite in `utilities/test/`, and the `test/` directory has been removed. The HIP allocation-failure fault-injection cases were not carried over.
 
 ## RPP 3.2.0 for ROCm 10.2.0
 

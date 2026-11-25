@@ -430,6 +430,7 @@ def _hazard(dtype, atom_k, consumer, nop, seed):
     )
 
 
+@pytest.mark.gpu
 @device
 @pytest.mark.parametrize("dtype", ["fp16", "bf16"])
 @pytest.mark.parametrize("atom_k", _atoms(ARCH))
@@ -455,6 +456,7 @@ def test_negative_control_fires_and_the_isa_floor_is_bitwise(dtype, atom_k):
     assert (-1 in wrong) == _NEGATIVE_CONTROL_FIRES[ARCH], wrong
 
 
+@pytest.mark.gpu
 @device
 @pytest.mark.parametrize("dtype", ["fp16", "bf16"])
 @pytest.mark.parametrize("atom_k", _atoms(ARCH))
@@ -489,6 +491,7 @@ def _run(dtype, shape, atom_k, asm_nop, asm_cluster="k_step", asm_zero=False):
     )  # fmt: skip
 
 
+@pytest.mark.gpu
 @device
 @pytest.mark.parametrize("asm_cluster", _CLUSTERS)
 @pytest.mark.parametrize("dtype", ["fp16", "bf16"])
@@ -508,6 +511,7 @@ def test_asm_cluster_is_bitwise_the_intrinsic_gemm(dtype, atom_k, shape, asm_clu
         ), f"{asm_cluster} s_nop {nop}: differs from the intrinsics"
 
 
+@pytest.mark.gpu
 @device
 @pytest.mark.parametrize("asm_cluster", _CLUSTERS)
 @pytest.mark.parametrize("dtype", ["fp16", "bf16"])
