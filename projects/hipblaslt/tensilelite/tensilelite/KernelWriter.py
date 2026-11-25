@@ -279,9 +279,10 @@ class StateValues:
   # symbol's textual scope, and the second copy sits after the first in the file,
   # so the first copy must hold its UNDEFs back and let the second emit them.
   rapDeferSgprUndef: bool                = False
-  # True while RAP emits the reuse copy, which must not move A/MXSA at all: the
-  # data it needs is already sitting in the resident registers.
-  rapDropAResidentLoads: bool            = False
+  # True while RAP emits the reuse copy, which must not move the resident operand
+  # and its scales at all: the data it needs is already sitting in the resident
+  # registers. rapSkipsResidentLoads says which tensors that covers.
+  rapDropResidentLoads: bool             = False
   # True while PAP's next-tile prefetch is being emitted, which is the one window
   # where WorkGroup2 names the next tile rather than the current one. The A
   # silencing above has to relax there: the next tile may be in another batch, and
@@ -4154,13 +4155,18 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
       doReadB = doReadB or (hasLiveLdsData and doNext)
       doReadM = doReadM or (hasLiveLdsData and doNext)
       doReadM = doReadM and (kernel["ProblemType"]["Sparse"] and not kernel["DirectToVgprSparseMetadata"])
+      # RAP: the resident operand reads into its own k-tile's buffer set and skips
+      # the reads the reuse copy already holds; past the last resident k-tile no
+      # operand reads, since the section the lookahead feeds does not exist.
       rapIdxA = self.rapResidentBufferIdx(kernel, "A", u + pflr, plrIdx)
       rapIdxMXSA = self.rapResidentBufferIdx(kernel, "MXSA", u + pflr, plrIdx)
-      doReadA = doReadA and rapIdxA is not None and not self.states.rapDropAResidentLoads
-      doReadMXSA = doReadMXSA and rapIdxMXSA is not None and not self.states.rapDropAResidentLoads
+      rapIdxB = self.rapResidentBufferIdx(kernel, "B", u + pflr, plrIdx)
+      rapIdxMXSB = self.rapResidentBufferIdx(kernel, "MXSB", u + pflr, plrIdx)
       rapPastBlock = self.rapLookaheadLeavesBlock(kernel, u + pflr)
-      doReadB = doReadB and not rapPastBlock
-      doReadMXSB = doReadMXSB and not rapPastBlock
+      doReadA = doReadA and not rapPastBlock and not self.rapSkipsResidentLoads(kernel, "A")
+      doReadMXSA = doReadMXSA and not rapPastBlock and not self.rapSkipsResidentLoads(kernel, "MXSA")
+      doReadB = doReadB and not rapPastBlock and not self.rapSkipsResidentLoads(kernel, "B")
+      doReadMXSB = doReadMXSB and not rapPastBlock and not self.rapSkipsResidentLoads(kernel, "MXSB")
       if ((hasLiveLdsData and doNext) or (self.states.numItersPLR == 0 and uIdx == 0)) and not self.states.lockLdsReadTokenSwap:
         # swap LR buffer token only when the LR buffer actually changes
         self.states.ldsReadTokenIdx = self._nextLdsToken(self.states.ldsReadTokenIdx)
@@ -4228,7 +4234,7 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
             pack[1].add(packCodeM)
         if doReadMXSB:
           localReadsB.addComment1("local read mxsb")
-          bufferIdx = plrIdx*self.states.numIterPerCoalescedReadMXSB
+          bufferIdx = rapIdxMXSB*self.states.numIterPerCoalescedReadMXSB
           if self.states.packDTVB or self.states.convDTVB:
             # DTV + pack or input conversion case, offset bufferIdx for local read packing instructions
             bufferIdx = plrIdxDTV*self.states.numIterPerCoalescedReadMXSB + vregSetIdxLR * kernel["LoopIters"]
@@ -4239,7 +4245,7 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
           pack[packStoreIdx*self.states.numIterPerCoalescedReadMXSB].add(packCodeMXSB)
         if doReadB:
           localReadsB.addComment1("local read b")
-          bufferIdx = plrIdx*self.states.numIterPerCoalescedReadB
+          bufferIdx = rapIdxB*self.states.numIterPerCoalescedReadB
           if self.states.packDTVB or self.states.convDTVB:
             # DTV + pack or input conversion case, offset bufferIdx for local read packing instructions
             bufferIdx = plrIdxDTV*self.states.numIterPerCoalescedReadB + vregSetIdxLR * kernel["LoopIters"]
@@ -5018,13 +5024,18 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
       doReadB = doReadB or (hasLiveLdsData and doNext)
       doReadM = doReadM or (hasLiveLdsData and doNext)
       doReadM = doReadM and (kernel["ProblemType"]["Sparse"] and not kernel["DirectToVgprSparseMetadata"])
+      # RAP: the resident operand reads into its own k-tile's buffer set and skips
+      # the reads the reuse copy already holds; past the last resident k-tile no
+      # operand reads, since the section the lookahead feeds does not exist.
       rapIdxA = self.rapResidentBufferIdx(kernel, "A", u + pflr, plrIdx)
       rapIdxMXSA = self.rapResidentBufferIdx(kernel, "MXSA", u + pflr, plrIdx)
-      doReadA = doReadA and rapIdxA is not None and not self.states.rapDropAResidentLoads
-      doReadMXSA = doReadMXSA and rapIdxMXSA is not None and not self.states.rapDropAResidentLoads
+      rapIdxB = self.rapResidentBufferIdx(kernel, "B", u + pflr, plrIdx)
+      rapIdxMXSB = self.rapResidentBufferIdx(kernel, "MXSB", u + pflr, plrIdx)
       rapPastBlock = self.rapLookaheadLeavesBlock(kernel, u + pflr)
-      doReadB = doReadB and not rapPastBlock
-      doReadMXSB = doReadMXSB and not rapPastBlock
+      doReadA = doReadA and not rapPastBlock and not self.rapSkipsResidentLoads(kernel, "A")
+      doReadMXSA = doReadMXSA and not rapPastBlock and not self.rapSkipsResidentLoads(kernel, "MXSA")
+      doReadB = doReadB and not rapPastBlock and not self.rapSkipsResidentLoads(kernel, "B")
+      doReadMXSB = doReadMXSB and not rapPastBlock and not self.rapSkipsResidentLoads(kernel, "MXSB")
       # Prefetch reads for next loop target LDS1; current iteration reads target LDS0
       if hasLiveLdsData and doNext and not self.states.lockLdsReadTokenSwap:
         # swap LR buffer
@@ -5109,7 +5120,7 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
             PackCodeAAllIters[uIdx].add(packCodeMXSA)
         if doReadMXSB:
           emittedReadsB.addComment1("local read mxsb")
-          bufferIdx = plrIdx*self.states.numIterPerCoalescedReadMXSB
+          bufferIdx = rapIdxMXSB*self.states.numIterPerCoalescedReadMXSB
           if self.states.packDTVB or self.states.convDTVB:
             # DTV + pack or input conversion case, offset bufferIdx for local read packing instructions
             bufferIdx = plrIdxDTV*self.states.numIterPerCoalescedReadMXSB + vregSetIdxLR * kernel["LoopIters"]
@@ -5132,7 +5143,7 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
           pack[plrIdxM].add(packCodeM)
         if doReadB:
           emittedReadsB.addComment1("local read b")
-          bufferIdx = plrIdx*self.states.numIterPerCoalescedReadB
+          bufferIdx = rapIdxB*self.states.numIterPerCoalescedReadB
           if self.states.packDTVB or self.states.convDTVB:
             # DTV + pack or input conversion case, offset bufferIdx for local read packing instructions
             bufferIdx = plrIdxDTV*self.states.numIterPerCoalescedReadB + vregSetIdxLR * kernel["LoopIters"]
@@ -6216,8 +6227,8 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
               prefetchReadsB = Module("prefetch local reads B set")
               # The prologue prefetch is a third read site, separate from the loop
               # body and the NGLL/NLL drain, and it needs the same RAP gate: the
-              # reuse copy already has A resident.
-              if iui*self.states.numReadsIterCoalescedA < kernel["InnerUnroll"] and not self.states.rapDropAResidentLoads:
+              # reuse copy already has the resident operand.
+              if iui*self.states.numReadsIterCoalescedA < kernel["InnerUnroll"] and not self.rapSkipsResidentLoads(kernel, "A"):
                 prefetchReadsA.addComment1("local read prefetch a")
                 localReadCodeA, packCodeA, packPreA = self.localReadDo(kernel, plrIdx*self.states.numIterPerCoalescedReadA, iui*self.states.numReadsIterCoalescedA, espi, tensorParametersA)
                 prefetchReadsA.add(localReadCodeA)
@@ -6232,14 +6243,14 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
                   packPrePrefetchA.add(packCodeA)
                 else:
                   pack[plrIdx].add(packCodeA)
-              if kernel["ProblemType"]["MXBlockA"] and not self.states.rapDropAResidentLoads:
+              if kernel["ProblemType"]["MXBlockA"] and not self.rapSkipsResidentLoads(kernel, "MXSA"):
                 if iui*self.states.numReadsIterCoalescedMXSA < kernel["InnerUnroll"]:
                   prefetchReadsA.addComment1("local read prefetch mxsa")
                   localReadCodeMXSA, packCodeMXSA, packPreMXSA = self.localReadDo(kernel, plrIdx*self.states.numIterPerCoalescedReadMXSA, iui*self.states.numReadsIterCoalescedMXSA, espi, tensorParametersA["MX"])
                   prefetchReadsA.add(localReadCodeMXSA)
                   pack[plrIdx].add(packPreMXSA)
                   pack[plrIdx].add(packCodeMXSA)
-              if kernel["ProblemType"]["MXBlockB"]:
+              if kernel["ProblemType"]["MXBlockB"] and not self.rapSkipsResidentLoads(kernel, "MXSB"):
                 if iui*self.states.numReadsIterCoalescedMXSB < kernel["InnerUnroll"]:
                   prefetchReadsB.addComment1("local read prefetch mxsb")
                   localReadCodeMXSB, packCodeMXSB, packPreMXSB = self.localReadDo(kernel, plrIdx*self.states.numIterPerCoalescedReadMXSB, iui*self.states.numReadsIterCoalescedMXSB, espi, tensorParametersB["MX"])
@@ -6255,7 +6266,7 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
                   # no packPre scheduling support for M
                   pack[plrIdx].add(packPreM)
                   pack[plrIdx].add(packCodeM)
-              if iui*self.states.numReadsIterCoalescedB < kernel["InnerUnroll"]:
+              if iui*self.states.numReadsIterCoalescedB < kernel["InnerUnroll"] and not self.rapSkipsResidentLoads(kernel, "B"):
                 prefetchReadsB.addComment1("local read prefetch b")
                 localReadCodeB, packCodeB, packPreB = self.localReadDo(kernel, plrIdx*self.states.numIterPerCoalescedReadB, iui*self.states.numReadsIterCoalescedB, espi, tensorParametersB)
                 prefetchReadsB.add(localReadCodeB)
@@ -6602,9 +6613,10 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
     rapOwnsWholeRange = kernel["ReuseAcrossPersistent"]
     if rapOwnsWholeRange:
       # The last body copy reads one k-tile ahead, as every copy does, but there is
-      # no k-tile after it: A and its scales are dropped by rapResidentBufferIdx,
-      # while B's reads are issued and never consumed. Drain them here, because
-      # ValuB goes back to the pool below and the store writes those registers --
+      # no k-tile after it: the resident operand and its scales are dropped by
+      # rapResidentBufferIdx, while the other operand's reads are issued and never
+      # consumed. Drain them here, because its Valu block goes back to the pool
+      # below and the store writes those registers --
       # a load still in flight would land on top of store data. The backend cannot
       # be relied on for this: the store's use is a physical-register reuse, not a
       # value dependence.
@@ -6960,13 +6972,15 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
       module.add(self.removeStaggerAB(kernel, tensorParametersA, tensorParametersB))
 
     module.add(VNop(self.states.miVALUInstrDataHazard, "Add v_nop before releasing ValuA/B"))
-    reclaimStart, reclaimSize = self.rapReclaimableValuABRange(kernel)
-    self.vgprPool.add(reclaimStart, reclaimSize, "ValuAB")
-    module.addComment1("Tail: add ValuA/B vgpr buffer [%u...%u) to pool" % \
-        (reclaimStart, self.states.lastValuAB))
-    if kernel["ReuseAcrossPersistent"]:
-      module.addComment1("RAP: ValuA vgpr [%u...%u) held resident across persistent iterations" % \
-          (self.states.a.startVgprValu, reclaimStart))
+    reclaimRanges = self.rapReclaimableValuABRanges(kernel)
+    for reclaimStart, reclaimSize in reclaimRanges:
+      self.vgprPool.add(reclaimStart, reclaimSize, "ValuAB")
+      module.addComment1("Tail: add ValuA/B vgpr buffer [%u...%u) to pool" % \
+          (reclaimStart, self.rapPoolRangeEnd(reclaimStart, reclaimSize, self.states.lastValuAB, self.states.lastValuAB)))
+    residentAB = self.rapResidentValuABRange(kernel)
+    if residentAB is not None:
+      module.addComment1("RAP: Valu%s vgpr [%u...%u) held resident across persistent iterations" % \
+          ((self.rapResidentTcs(kernel)[0],) + residentAB))
     if not self.isPrefetchAcrossPersistentEnabled(kernel):
       self.vgprPool.add(self.states.lastValuAB , \
           self.states.lastVgprForReads - self.states.lastValuAB, "address vgpr")
@@ -7520,13 +7534,18 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
       module.add(self._syncThreads(kernel, "tailloopInNll: wait until LR done, sync LDS0", memoryToken=self._tailLoopBarrierTokens(kernel)))
 
     if self.states.lastValuMXSAB:
-      mxsStart, mxsSize = self.rapReclaimableValuMXSABRange(kernel)
-      self.vgprPool.add(mxsStart, mxsSize, "ValuMXSAB")
-      module.addComment1("Tail: add ValuA/B vgpr buffer [%u...%u) to pool" % \
-          (mxsStart, self.states.lastValuMXSAB))
+      mxsRanges = self.rapReclaimableValuMXSABRanges(kernel)
+      for mxsStart, mxsSize in mxsRanges:
+        self.vgprPool.add(mxsStart, mxsSize, "ValuMXSAB")
+        module.addComment1("Tail: add ValuA/B vgpr buffer [%u...%u) to pool" % \
+            (mxsStart, self.rapPoolRangeEnd(mxsStart, mxsSize, self.states.lastValuMXSAB, self.states.lastValuMXSAB)))
       if kernel["ReuseAcrossPersistent"]:
-        module.addComment1("RAP: ValuMXSA vgpr [%u...%u) held resident across persistent iterations" % \
-            (self.states.mxsa.startVgprValu, mxsStart))
+        # The resident scale block's own bounds; for MXSA the withheld prefix also
+        # covers whatever sits below it.
+        mxsTc = self.rapResidentTcs(kernel)[1]
+        mxsState = getattr(self.states, mxsTc.lower())
+        module.addComment1("RAP: Valu%s vgpr [%u...%u) held resident across persistent iterations" % \
+            (mxsTc, mxsState.startVgprValu, mxsState.startVgprValu + mxsState.numVgprValu))
 
     if self.do["executeToLoopEnd"]:
       module.add(self.functionEnd(kernel, addLabel=False))
@@ -8880,14 +8899,14 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
         # pack or input conversion DTV case, need double buffer (LoopIters * 2)
         numVgprBufferA = self.states.numVgprBuffer if not (self.states.packDTVA or self.states.convDTVA) else kernel["LoopIters"] * 2
         numVgprBufferB = self.states.numVgprBuffer if not (self.states.packDTVB or self.states.convDTVB) else kernel["LoopIters"] * 2
-        # RAP gives A and its MX scales a buffer set per iteration of every
-        # resident k-tile rather than one per prefetch slot, so the whole K extent
-        # is addressable at once: rapResidentBufferIdx numbers them k-tile *
-        # LoopIters + u, which outruns the prefetch slots whenever
-        # PrefetchLocalRead + 1 < LoopIters without ClusterLocalRead. B is
-        # untouched: it is still reloaded every tile.
-        if kernel["ReuseAcrossPersistent"]:
-          numVgprBufferA = kernel["LoopIters"] * self.rapResidentKTiles(kernel)
+        # RAP gives the resident operand and its MX scales a buffer set per
+        # iteration of every resident k-tile rather than one per prefetch slot, so
+        # the whole K extent is addressable at once: rapResidentBufferIdx numbers
+        # them k-tile * LoopIters + u, which outruns the prefetch slots whenever
+        # PrefetchLocalRead + 1 < LoopIters without ClusterLocalRead. The other
+        # operand is untouched: it is still reloaded every tile.
+        numVgprBufferA = self.rapResidentBufferSets(kernel, "A", numVgprBufferA)
+        numVgprBufferB = self.rapResidentBufferSets(kernel, "B", numVgprBufferB)
         valuBlocks  = self.states.numVgprBuffer * kernel["InnerUnroll"] # for Sparse
         valuBlocksA = (1.5 if kernel["HalfPLRA"] else numVgprBufferA) * kernel["InnerUnroll"]
         valuBlocksB = (1.5 if kernel["HalfPLRB"] else numVgprBufferB) * kernel["InnerUnroll"]
@@ -9691,6 +9710,11 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
 
       vgprIdx = (vgprIdx+1)//2*2
       self.states.lastValuMXSAB = vgprIdx
+      # The WMMA scale operands have no s_set_vgpr_msb field, so a resident scale
+      # block, which grows with the resident k-tiles, has to end below v256.
+      if "MXSB" in self.rapResidentTcs(kernel):
+        assert self.states.mxsb.startVgprValu + self.states.mxsb.numVgprValu <= 256, \
+          "ReuseAcrossPersistent: the resident MXSB block runs past v255"
 
       if mxsPlan:
         # The accumulators start here (c.startVgprValu below).
@@ -9873,7 +9897,7 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
       # start to one operand width guarantees that, because 256 is a multiple of
       # it. Aligning to a fixed larger constant instead would waste registers the
       # store stage needs.
-      if kernel["ReuseAcrossPersistent"]:
+      if "A" in self.rapResidentTcs(kernel):
         operandVgprs = max(1, int(kernel["MIInputPerThreadA"] * tensorParametersA["bpe"] // self.states.bpr))
         vgprIdx = ((vgprIdx + operandVgprs - 1)//operandVgprs)*operandVgprs
 
@@ -9919,6 +9943,13 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
           vgprIdx = ((vgprIdx+1)//2)*2
       else:
         vgprIdx = ((vgprIdx+1)//2)*2
+
+      # RAP: a resident B block spans the whole K extent too, so it gets the same
+      # operand-width alignment as a resident A block above, applied after the
+      # bank adjustment so the start only moves up.
+      if "B" in self.rapResidentTcs(kernel):
+        operandVgprs = max(1, int(kernel["MIInputPerThreadB"] * tensorParametersB["bpe"] // self.states.bpr))
+        vgprIdx = ((vgprIdx + operandVgprs - 1)//operandVgprs)*operandVgprs
 
       self.states.b.startVgprValu = vgprIdx
       vgprIdx += self.states.b.numVgprValu

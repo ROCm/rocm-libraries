@@ -2632,8 +2632,9 @@
       'head': list([
         0,
         1,
+        2,
       ]),
-      'len': 2,
+      'len': 3,
       'type': 'list',
     }),
     'SFCWGM': dict({
