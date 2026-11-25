@@ -500,16 +500,18 @@ std::vector<float> generateData(T                           dgen,
         throw std::runtime_error(
             "integer_exact MX data with swizzled scales requires K along the stored rows");
 
-    // Non-K-major integer_exact (non-transposed A, transposed B) realigns through
-    // getAlignedFloat. A partial trailing K block makes that helper form a data index one
-    // past the packed buffer (rows=64, cols=33, block 32 indexes 2112 of 2112 elements).
-    // Refuse before generating or writing. The helper repair is a separate change; rand_int
-    // on the base branch has the same indexing and stays out of scope here.
-    if(integerExact && isMatrixA != isTranspose && elementsPerMXBlock > 0
+    // With K along the columns (non-transposed A, transposed B) every method but Maf1_0
+    // realigns through getAlignedFloat, which relabels the generator's blocks along the rows
+    // as K blocks. A partial trailing K block needs rows * ceil(K / block) scales where the
+    // generator emits ceil(rows / block) * K, so the helper indexes past both buffers
+    // (rows=64, cols=33, block 32 reads data index 2112 of 2112 elements). Refuse before
+    // generating or writing either output.
+    bool const maf1_0 = std::holds_alternative<DGen::Maf1_0>(opt.initMode);
+    if(!maf1_0 && isMatrixA != isTranspose && elementsPerMXBlock > 0
        && static_cast<size_t>(sizes[1]) % static_cast<size_t>(elementsPerMXBlock) != 0)
-        throw std::runtime_error(
-            "integer_exact MX data with K along the columns requires K to be a multiple of "
-            + std::to_string(elementsPerMXBlock) + ", got " + std::to_string(sizes[1]));
+        throw std::runtime_error("MX data with K along the columns requires K to be a multiple of "
+                                 + std::to_string(elementsPerMXBlock) + ", got "
+                                 + std::to_string(sizes[1]));
 
     dgen.setSeed(seed);
     dgen.generate(sizes, {1, sizes[0]}, opt);
@@ -631,7 +633,6 @@ std::vector<float> generateData(T                           dgen,
     // sin/cos(i + j * row) code, and every block has the same scale. getAlignedFloat's reordering
     // only exists to pair runs of data with their block scale, so it would just move elements
     // away from their index; keep the generator's layout and reference instead.
-    bool const maf1_0 = std::holds_alternative<DGen::Maf1_0>(opt.initMode);
     if((isMatrixA && isTranspose) || (!isMatrixA && !isTranspose) || maf1_0)
     {
         // For (1) transposed matrixA and (2) non-transposed matrixB,

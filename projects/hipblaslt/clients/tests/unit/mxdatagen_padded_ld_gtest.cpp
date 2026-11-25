@@ -189,4 +189,68 @@ TEST(HostUnitMXDataGenPaddedLd, smoke_LeadingDimensionBelowTheRowsIsRefused)
     EXPECT_EQ(unwrittenFrom(scale, 0), 0u);
 }
 
+// With K along the columns (non-transposed A, transposed B), a partial trailing K block needs
+// rows * ceil(K / block) scales, but the generator blocks along the rows and emits
+// ceil(rows / block) * K. Realigning would read past the generated data and scales (64 rows,
+// K = 33, ld 128 reads data index 2112 of 2112), so every method that realigns refuses the shape
+// before writing either buffer. maf1_0 keeps the generator's layout and stays in bounds.
+TEST(HostUnitMXDataGenPaddedLd, smoke_PartialKBlockAlongTheColumnsIsRefused)
+{
+    uint64_t const    rows = 64, k = 33;
+    hipDataType const types[] = {HIP_R_8F_E4M3,
+                                 HIP_R_8F_E5M2,
+                                 HIP_R_6F_E2M3,
+                                 HIP_R_6F_E3M2,
+                                 static_cast<hipDataType>(HIP_R_4F_E2M1)};
+    for(hipDataType type : types)
+        for(char const* method : {"hpl",
+                                  "norm_dist",
+                                  "rand_int",
+                                  "uniform_low_precision",
+                                  "maf2_0",
+                                  "maf2_0_unit_scale"})
+            for(uint64_t ld : {rows, uint64_t(128)})
+                for(bool isMatrixA : {true, false})
+                {
+                    size_t const bits = elementBits(type);
+                    if(bits == 6 && std::string(method) == "maf2_0_unit_scale")
+                        continue; // unit scale has no FP6 row
+                    SCOPED_TRACE(std::string(method) + " type " + std::to_string(int(type)) + " ld "
+                                 + std::to_string(ld)
+                                 + (isMatrixA ? " non-transposed A" : " transposed B"));
+                    std::vector<uint8_t> data(packedBytes(ld * (k - 1) + rows, bits) + kSlack,
+                                              kUnwritten);
+                    std::vector<uint8_t> scale(rows * ((k + kBlock - 1) / kBlock) + kSlack,
+                                               kUnwritten);
+                    EXPECT_THROW(generateMXInput(type,
+                                                 HIP_R_8U,
+                                                 data.data(),
+                                                 scale.data(),
+                                                 rows,
+                                                 k,
+                                                 ld,
+                                                 /*isTranspose=*/!isMatrixA,
+                                                 isMatrixA ? 1 : kBlock,
+                                                 isMatrixA ? kBlock : 1,
+                                                 isMatrixA,
+                                                 MXScaleLayout::None,
+                                                 method,
+                                                 -1.0f,
+                                                 1.0f,
+                                                 "",
+                                                 /*seedIndex=*/0),
+                                 std::runtime_error);
+                    EXPECT_EQ(unwrittenFrom(data, 0), 0u);
+                    EXPECT_EQ(unwrittenFrom(scale, 0), 0u);
+                }
+
+    for(hipDataType type : types)
+    {
+        SCOPED_TRACE("maf1_0 type " + std::to_string(int(type)));
+        Generated const g = generate(type, "maf1_0", rows, k, 128, /*isTranspose=*/false);
+        EXPECT_EQ(g.ref.size(), 128 * k);
+        EXPECT_EQ(unwrittenFrom(g.data, packedBytes(128 * (k - 1) + rows, elementBits(type))), 0u);
+    }
+}
+
 #endif // HIPBLASLT_ENABLE_MXDATAGENERATOR
