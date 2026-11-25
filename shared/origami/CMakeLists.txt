@@ -165,12 +165,20 @@ if(ORIGAMI_ENABLE_NN)
                 "${CMAKE_CURRENT_SOURCE_DIR}/src/nn/twrec/rank.cpp"
     )
 
-    find_package(yaml-cpp 0.8 QUIET CONFIG)
-    if(NOT yaml-cpp_FOUND)
+    # Take yaml-cpp from, in order: a target an earlier project in this build already
+    # defined (rocRoller fetches its own copy), an installed package, a fetched copy.
+    # Both yaml-cpp trees define the CMake target "yaml-cpp", so a second copy in one
+    # build fails at configure time with "add_library cannot create target".
+    if(NOT TARGET yaml-cpp::yaml-cpp)
+        find_package(yaml-cpp 0.8 QUIET CONFIG)
+    endif()
+    if(NOT TARGET yaml-cpp::yaml-cpp)
         if(ORIGAMI_ENABLE_FETCH)
             include(FetchContent)
+            # Same FetchContent name as rocRoller. Whichever project declares it first
+            # wins, and the other reuses that copy instead of adding the target twice.
             FetchContent_Declare(
-                yaml-cpp
+                yaml_cpp
                 GIT_REPOSITORY https://github.com/jbeder/yaml-cpp.git
                 GIT_TAG yaml-cpp-0.9.0 # 56e3bb550c91fd7005566f19c079cb7a503223cf
                 GIT_SHALLOW TRUE
@@ -181,12 +189,17 @@ if(ORIGAMI_ENABLE_NN)
                     OR CMAKE_POLICY_VERSION_MINIMUM VERSION_LESS 3.5)
                 set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
             endif()
-            # yaml-cpp follows BUILD_SHARED_LIBS, which is ON for a shared origami.
-            # A shared yaml-cpp would be a dependency of liborigami that is not in
-            # origami-targets, and install(EXPORT) fails at generate time. Link the
-            # fetched copy in statically (position independent by default) instead.
-            set(YAML_BUILD_SHARED_LIBS OFF CACHE BOOL "Build the fetched yaml-cpp statically" FORCE)
-            FetchContent_MakeAvailable(yaml-cpp)
+            block(SCOPE_FOR VARIABLES)
+                # yaml-cpp follows BUILD_SHARED_LIBS, which is ON for a shared origami.
+                # A shared yaml-cpp would be a dependency of liborigami that is not in
+                # origami-targets, and install(EXPORT) fails at generate time. Link the
+                # fetched copy in statically (position independent by default) instead.
+                # Set in this scope only, so it does not change other projects' yaml-cpp.
+                # option() honors an existing normal variable only under CMP0077 NEW.
+                set(CMAKE_POLICY_DEFAULT_CMP0077 NEW)
+                set(YAML_BUILD_SHARED_LIBS OFF)
+                FetchContent_MakeAvailable(yaml_cpp)
+            endblock()
         else()
             message(FATAL_ERROR "yaml-cpp not found (set ORIGAMI_ENABLE_FETCH=ON to auto-fetch)")
         endif()
