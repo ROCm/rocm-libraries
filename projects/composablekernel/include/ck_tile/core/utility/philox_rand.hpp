@@ -97,32 +97,28 @@ class philox
 
     CK_TILE_HOST_DEVICE uint2 mulhilo32(const unsigned int a, const unsigned int b) const
     {
-#if defined(__gfx1250__)
-        // gfx1250 lowers the 64-bit product below to v_mul_u64, which is several times
-        // slower than a v_mul_lo_u32 + v_mul_hi_u32 pair. Same result.
-        return make_uint2(a * b, __umulhi(a, b));
-#else
         uint2* res;
         unsigned long long tmp;
         tmp = static_cast<unsigned long long>(a) * b;
         res = reinterpret_cast<uint2*>(&tmp);
         return *res;
-#endif
     }
 
 #if defined(__gfx1250__)
     // gfx1250: v_mad_u64_u32 returns the lo and the hi word of the 32x32 product in one
-    // instruction, at about the cost of a single v_mul_hi_u32. The compiler does not select it
-    // (a 64-bit product lowers to v_mul_u64, a * b + __umulhi(a, b) to v_mul_lo_u32 +
-    // v_mul_hi_u32), hence the inline asm. The multiplier is an immediate operand, so there is no
-    // extra move. Not volatile, so the compiler can still schedule/CSE it. The result is a 2 x
-    // 32-bit vector instead of a 64-bit integer so that the xors in philox_single_round stay
-    // 32-bit and fuse into v_xor3_b32. Same result as mulhilo32(M, b).
+    // instruction, at about the cost of a single v_mul_hi_u32. The compiler does not select it for
+    // a plain 64-bit product (it uses v_mul_u64 or v_mul_lo_u32 and v_mul_hi_u32 instead), but it
+    // does select v_mad_nc_u64_u32 for a product plus an addend it cannot fold. The empty asm hides
+    // the zero addend from the optimizer and emits nothing, so the compiler still schedules the
+    // multiply itself and handles the hazards around it. The result is taken as 2 x 32-bit so that
+    // the xors in philox_single_round stay 32-bit and fuse into v_xor3_b32. Same result as
+    // mulhilo32(M, b).
     template <unsigned int M>
     CK_TILE_DEVICE uint2 mulhilo32_const(const unsigned int b) const
     {
-        uint32x2_t p;
-        asm("v_mad_u64_u32 %0, null, %1, %2, 0" : "=v"(p) : "C"(M), "v"(b));
+        uint64_t z = 0;
+        asm("" : "+s"(z));
+        const uint32x2_t p = __builtin_bit_cast(uint32x2_t, uint64_t(M) * b + z);
         return make_uint2(p[0], p[1]);
     }
 #endif
