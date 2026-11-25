@@ -9,20 +9,21 @@ declarations actually link for which gfx target, and commits the answer as
 artifact that is not gated drifts from its generator, and a stale availability
 table is worse than none because it is trusted.
 
-Two gates fail for different reasons and run under different schedulers:
+Artifact checks and the real-toolchain gate have separate responsibilities:
 
-* **Structure** is the pytest coverage in this file. It needs no LLVM, GPU, or
-  built C++ engine. It reads the committed JSON and checks it against the decl
-  table it claims to describe, catching an intrinsic key added, renamed, or
-  removed while the artifact still looks authoritative.
+* **Structure** is the source and installed pytest coverage in
+  ``test_arch_domain_support.py``. It reads every committed column, checks its
+  records, wired architecture inventory, declaration coverage and single-line
+  contract layout. These checks need no GPU or built C++ engine.
 
 * **Regeneration** is the dedicated ``rocke_arch_domain_reproducibility`` CTest.
-  When the host has the exact compiler build recorded in the column, it
-  re-probes the toolchain and asserts the committed measurements reproduce
-  cell-for-cell. A different compiler build is explicitly unvalidated: an LLVM
-  major is not a stable intrinsic-availability contract. It is the only check
-  that can catch a wrong measurement rather than a missing one. Its external compiler processes,
-  timeout, resource policy, and skip result do not belong in the unit-test pool.
+  With a matching LLVM flavor, it re-probes the toolchain and checks monotonic
+  support: every formerly working cell must still work. Gains and improved
+  classification pass and are reported. Degraded negative measurements and
+  remaining no-data cells are reported without claiming their qualification.
+  Compiler identity and diagnostic wording are provenance, not reasons to skip
+  or fail the comparison. Its external compiler processes, timeout, resource
+  policy, and environmental skip result do not belong in the unit-test pool.
 
 A host can only ever measure its own LLVM, so a flavor with no matching
 toolchain is skipped, never failed — "we did not get an answer" must not be
@@ -30,8 +31,11 @@ recorded as "the answer is no". Same reason the artifact distinguishes
 ``arch_absent`` (the target genuinely cannot lower it) from ``target_unsupported``,
 ``toolchain_crash`` and ``toolchain_timeout`` (no data).
 
-This file contains **source-tree** unit and structure tests and is excluded
-from the installed test tree by ``CMakeLists.txt``. The regeneration CTest has
+This file contains **source-tree** generator and compiler-probe unit tests and
+is excluded from the installed test tree by ``CMakeLists.txt``. Column-structure
+checks and host-only comparison-policy controls live in
+``test_arch_domain_support.py`` and run in source and installed pytest without a
+compiler sweep. The regeneration CTest has
 both build-tree and installed-artifact registrations; CMake stages a test-only
 copy of the generator and its discovery helpers for the latter. Keep both
 registrations and the packaged helper list in step if either path is renamed.
@@ -56,8 +60,8 @@ from importlib.resources import files as resource_files
 from pathlib import Path
 from unittest import mock
 
-from rocke.core.isa.backend import wired_arches
-from rocke.core.lower_llvm import _resolve_llvm_flavor
+from rocke.core.lower_llvm import _datalayout_for_flavor, _resolve_llvm_flavor
+from rocke.tests.arch_marks import COVERED_ARCHES
 
 _HERE = Path(__file__).resolve().parent
 _ROCKE = _HERE.parents[1]  # tests/tools -> platform
@@ -79,20 +83,6 @@ import _bounded_run as B
 import gen_arch_domain as G
 from _hostcaps import available_cpus
 
-_STATUSES = {
-    G.STATUS_OK,
-    G.STATUS_NAME_ABSENT,
-    G.STATUS_ARCH_ABSENT,
-    G.STATUS_TARGET_UNSUPPORTED,
-    G.STATUS_TOOLCHAIN_CRASH,
-    G.STATUS_TOOLCHAIN_TIMEOUT,
-    G.STATUS_PROBE_ERROR,
-}
-
-# Every status except `ok` is a claim about something that went wrong, and a
-# claim with no diagnostic behind it cannot be acted on by whoever hits it.
-_NEEDS_EVIDENCE = _STATUSES - {G.STATUS_OK}
-
 
 def _columns() -> list[tuple[str, Path]]:
     """Committed artifacts as ``(flavor, path)``, flavor taken from the name."""
@@ -102,29 +92,8 @@ def _columns() -> list[tuple[str, Path]]:
     return out
 
 
-class ArchDomainArtifactStructureTest(unittest.TestCase):
-    """Checks that need no toolchain, so they run on every host."""
-
-    def test_at_least_one_column_is_committed(self):
-        self.assertTrue(_columns(), f"no arch-domain artifact under {_DATA}")
-
-    def test_columns_are_well_formed(self):
-        for flavor, path in _columns():
-            with self.subTest(flavor=flavor):
-                doc = json.loads(path.read_text())
-                self.assertEqual(doc.get("schema"), G.SCHEMA)
-
-                # Provenance must agree with the filename: a column filed under
-                # the wrong LLVM vintage is a real measurement attributed to a
-                # toolchain that never produced it, and nothing downstream can
-                # tell.
-                tc = doc.get("toolchain", {})
-                self.assertEqual(tc.get("flavor"), flavor)
-                clang_flavor = G.flavor_of_clang(tc.get("clang", ""))
-                if clang_flavor is not None:
-                    self.assertEqual(clang_flavor, flavor, tc.get("clang"))
-
-                self.assertEqual(sorted(tc.get("arches", [])), sorted(wired_arches()))
+class DeclarationTableTest(unittest.TestCase):
+    """Generator declaration merging is separate from column structure."""
 
     def test_llvm24_changes_only_the_named_barrier_declarations(self):
         llvm23 = G._decl_table("llvm23")
@@ -141,116 +110,6 @@ class ArchDomainArtifactStructureTest(unittest.TestCase):
             },
         )
         self.assertTrue(all("addrspace(15)" in llvm24[key] for key in changed))
-
-    def test_every_decl_key_is_covered_on_every_wired_arch(self):
-        """The drift this file exists to catch: a decl key the artifact has no
-        opinion on, in JSON that is still valid and still looks authoritative.
-
-        Enforced asymmetrically, for the same reason the artifact separates
-        ``arch_absent`` from ``target_unsupported``:
-
-        * a **stale** key -- in the artifact, gone from the decl table -- is
-          always a defect, caught on every column from any host.
-        * an **unmeasured** key can only be answered on a host running that
-          flavor's toolchain, so full coverage is required of this host's
-          flavor and reported as a named skip for the rest.
-        """
-        host = _resolve_llvm_flavor()
-        arches = sorted(wired_arches())
-        for flavor, path in _columns():
-            with self.subTest(flavor=flavor):
-                doc = json.loads(path.read_text())
-                expected = set(G._decl_table(flavor))
-                got = set(doc["keys"])
-                for key, row in doc["keys"].items():
-                    self.assertEqual(sorted(row), arches, key)
-                self.assertEqual(
-                    sorted(got - expected),
-                    [],
-                    f"{path.name} measures keys the decl table no longer has "
-                    "-- re-run tools/gen_arch_domain.py and commit the result",
-                )
-                missing = sorted(expected - got)
-                if not missing:
-                    continue
-                why = (
-                    f"{path.name} has no answer for {len(missing)} decl "
-                    f"key(s): {missing} -- re-run tools/gen_arch_domain.py on "
-                    f"a {flavor} toolchain and commit the result"
-                )
-                # Raised *inside* `subTest`, which records against this column
-                # without re-raising, so every later column is still checked --
-                # a stale key must not be masked by an earlier column's missing
-                # measurement.
-                if flavor == host:
-                    self.fail(why)
-                self.skipTest(why)
-
-    def test_every_cell_carries_an_actionable_answer(self):
-        for flavor, path in _columns():
-            doc = json.loads(path.read_text())
-            for key, row in doc["keys"].items():
-                for arch, cell in row.items():
-                    with self.subTest(flavor=flavor, key=key, arch=arch):
-                        status = cell.get("status")
-                        self.assertIn(status, _STATUSES)
-                        # `probe_error` means our own probe module was
-                        # malformed -- a defect in the generator rather than a
-                        # fact about the toolchain, so it must never survive
-                        # into a committed column.
-                        self.assertNotEqual(status, G.STATUS_PROBE_ERROR)
-                        self.assertEqual(cell.get("verified_on"), flavor)
-                        if status in _NEEDS_EVIDENCE:
-                            self.assertTrue(cell.get("evidence"), "no diagnostic")
-
-    def test_every_column_records_how_it_was_measured(self):
-        """`clang` says which compiler answered, not which question it was asked.
-
-        One toolchain build reports ``ok`` or not for the same key depending on
-        the probe's optimisation level, because -O3 can delete the call being
-        probed -- so a column carrying only the compiler identity cannot be
-        told apart from one measured the wrong way. Asserted on the committed
-        artifact, so a host with no toolchain can still make the check.
-        """
-        for flavor, path in _columns():
-            with self.subTest(flavor=flavor):
-                tc = json.loads(path.read_text())["toolchain"]
-                self.assertIsInstance(tc.get("generator"), int)
-                self.assertGreaterEqual(tc["generator"], G.GENERATOR)
-                self.assertIn(
-                    "-O0",
-                    tc.get("probe_cflags", []),
-                    "column measured without -O0: the IR pipeline can delete "
-                    "the probed call, so its `ok` cells prove nothing",
-                )
-                self.assertGreater(tc.get("probe_timeout_s", 0), 0)
-
-
-class ArchDomainProcessorSupportTest(unittest.TestCase):
-    """Each column says, per target, whether its compiler accepts the name."""
-
-    def test_every_column_records_which_processor_names_its_compiler_accepts(self):
-        for flavor, path in _columns():
-            with self.subTest(flavor=flavor):
-                doc = json.loads(path.read_text())
-                processors = doc.get("processors", {})
-                self.assertEqual(sorted(processors), sorted(doc["toolchain"]["arches"]))
-                for arch, entry in processors.items():
-                    self.assertIsInstance(entry.get("accepted"), bool, arch)
-                    if not entry["accepted"]:
-                        self.assertTrue(entry.get("evidence"), arch)
-
-    def test_a_processor_its_compiler_rejects_has_no_measured_cell(self):
-        """The two answers agree: a name the compiler rejects was never probed
-        successfully for any declaration."""
-        for flavor, path in _columns():
-            doc = json.loads(path.read_text())
-            for arch, entry in doc.get("processors", {}).items():
-                if entry["accepted"]:
-                    continue
-                for key, row in doc["keys"].items():
-                    with self.subTest(flavor=flavor, arch=arch, key=key):
-                        self.assertNotEqual(row[arch]["status"], G.STATUS_OK)
 
 
 class AvailableCpusTest(unittest.TestCase):
@@ -348,63 +207,6 @@ class AvailableCpusTest(unittest.TestCase):
             G._nonnegative_jobs("-1")
 
 
-class DriftTest(unittest.TestCase):
-    """What an applicable ``--check`` treats as drift.
-
-    The caller rejects a compiler-provenance mismatch before probing. Once the
-    exact recorded compiler is present, every artifact field is load-bearing.
-    """
-
-    def _doc(self, **toolchain) -> str:
-        tc = {
-            "flavor": "llvm22",
-            "clang": "AMD clang version 22.0.0git (... roc-7.2.4 26084 abc)",
-            "arches": ["gfx942"],
-            "generator": G.GENERATOR,
-            "probe_cflags": ["-O0", "-nogpulib"],
-            "probe_timeout_s": 60,
-        }
-        tc.update(toolchain)
-        return json.dumps(
-            {
-                "schema": G.SCHEMA,
-                "toolchain": tc,
-                "keys": {"a.b": {"gfx942": {"status": G.STATUS_OK}}},
-                "canonical": {},
-            }
-        )
-
-    def test_a_different_compiler_build_is_drift_when_compared(self):
-        other = "AMD clang version 22.0.0git (... roc-7.2.0 26014 def)"
-        why = G._drift(self._doc(), self._doc(clang=other))
-        self.assertIsNotNone(why)
-        self.assertIn("toolchain", why)
-
-    def test_a_changed_measurement_is_drift_and_says_which(self):
-        fresh = json.loads(self._doc())
-        fresh["keys"]["a.b"]["gfx942"]["status"] = G.STATUS_ARCH_ABSENT
-        why = G._drift(self._doc(), json.dumps(fresh))
-        self.assertIsNotNone(why)
-        self.assertIn("a.b/gfx942", why)
-        self.assertIn(G.STATUS_ARCH_ABSENT, why)
-
-    def test_a_changed_probe_method_is_drift_even_with_identical_cells(self):
-        """The `-O0` case. Same clang, same cells, different question -- and
-        the cells are identical only because nobody re-ran them yet."""
-        for field, value in (
-            ("probe_cflags", ["-nogpulib"]),
-            ("probe_timeout_s", 5),
-            ("generator", G.GENERATOR + 1),
-        ):
-            with self.subTest(field=field):
-                why = G._drift(self._doc(), self._doc(**{field: value}))
-                self.assertIsNotNone(why, field)
-                self.assertIn("toolchain", why)
-
-    def test_an_unreadable_column_is_drift_not_a_crash(self):
-        self.assertIn("not valid JSON", G._drift("{oops", self._doc()))
-
-
 class NameDiscoveryBatchTest(unittest.TestCase):
     _A = "declare float @llvm.fabs.f32(float)"
     _B = "declare i32 @llvm.amdgcn.example(i32)"
@@ -415,9 +217,10 @@ class NameDiscoveryBatchTest(unittest.TestCase):
             "declare i32 @llvm.amdgcn.example(i32) #1\n"
         )
         completed = mock.Mock(returncode=0, stdout=output, stderr="")
-        with tempfile.TemporaryDirectory() as td, mock.patch.object(
-            G, "run_bounded", return_value=completed
-        ) as run:
+        with (
+            tempfile.TemporaryDirectory() as td,
+            mock.patch.object(G, "run_bounded", return_value=completed) as run,
+        ):
             verdicts = G._name_exists_many(
                 "opt", [("fabs", self._A), ("example", self._B)], Path(td)
             )
@@ -430,9 +233,10 @@ class NameDiscoveryBatchTest(unittest.TestCase):
     def test_alias_keys_share_one_declaration_query(self):
         output = "declare float @llvm.fabs.f32(float) #0\n"
         completed = mock.Mock(returncode=0, stdout=output, stderr="")
-        with tempfile.TemporaryDirectory() as td, mock.patch.object(
-            G, "run_bounded", return_value=completed
-        ) as run:
+        with (
+            tempfile.TemporaryDirectory() as td,
+            mock.patch.object(G, "run_bounded", return_value=completed) as run,
+        ):
             verdicts = G._name_exists_many(
                 "opt", [("fabs", self._A), ("fabs-alias", self._A)], Path(td)
             )
@@ -445,9 +249,10 @@ class NameDiscoveryBatchTest(unittest.TestCase):
         failed = mock.Mock(returncode=1, stdout="", stderr="bad combined module")
         a = mock.Mock(returncode=0, stdout=self._A + " #0\n", stderr="")
         b = mock.Mock(returncode=0, stdout=self._B + " #0\n", stderr="")
-        with tempfile.TemporaryDirectory() as td, mock.patch.object(
-            G, "run_bounded", side_effect=(failed, a, b)
-        ) as run:
+        with (
+            tempfile.TemporaryDirectory() as td,
+            mock.patch.object(G, "run_bounded", side_effect=(failed, a, b)) as run,
+        ):
             verdicts = G._name_exists_many(
                 "opt", [("fabs", self._A), ("example", self._B)], Path(td)
             )
@@ -625,9 +430,12 @@ class PositiveBatchTest(unittest.TestCase):
             "unsupported": G.STATUS_TARGET_UNSUPPORTED,
             "supported": G.STATUS_OK,
         }
-        with tempfile.TemporaryDirectory() as td, mock.patch.object(
-            G, "_target_preflight", return_value=(G.STATUS_OK, "")
-        ) as probe:
+        with (
+            tempfile.TemporaryDirectory() as td,
+            mock.patch.object(
+                G, "_target_preflight", return_value=(G.STATUS_OK, "")
+            ) as probe,
+        ):
             retried = G._retry_target_preflights(
                 "clang", path, Path(td), preflight, expected
             )
@@ -876,9 +684,9 @@ class AssemblerCheckTest(unittest.TestCase):
         # The fused scale-and-convert links for gfx942 once its flag operand is
         # a constant, and the object then holds a gfx950-only instruction. Use
         # the combined-module builder so this pins the optimized batch path.
-        from check_ir_validity import _llvm_tool
+        from check_ir_validity import llvm_tool
 
-        clang = _llvm_tool("clang")
+        clang = llvm_tool("clang")
         if clang is None or not G._llvm_mc_beside(clang).is_file():
             self.skipTest("no clang with an llvm-mc beside it on this host")
         decl = G._decl_table(_resolve_llvm_flavor())["amdgcn.cvt.scalef32.pk.f32.fp8"]
@@ -889,7 +697,7 @@ class AssemblerCheckTest(unittest.TestCase):
             path.write_text(module)
             results = {
                 arch: G._probe(clang, path, arch, Path(scratch) / f"{arch}.o")
-                for arch in ("gfx942", "gfx950")
+                for arch in COVERED_ARCHES
             }
         self.assertEqual(results["gfx950"], (G.STATUS_OK, ""))
         status, evidence = results["gfx942"]
@@ -1082,51 +890,35 @@ class ProbeWitnessTest(unittest.TestCase):
         self.assertIsNone(spec.literal_ints)
         self.assertIsNone(spec.imm_int)
 
-    def test_recorded_witnesses_match_every_positive_special_cell(self):
+    def test_ldexp_probe_keeps_both_operands_variable(self):
+        """A constant exponent would ask a weaker question than the baseline."""
+        key = "ldexp.f32.i32"
+        expected_contract = {
+            "version": 1,
+            "return_type": "float",
+            "operands": [
+                {"type": "float", "source": "argument"},
+                {"type": "i32", "source": "argument"},
+            ],
+        }
+        call = "call float @llvm.ldexp.f32.i32(float %a0, i32 %a1)"
         for flavor, path in _columns():
-            doc = json.loads(path.read_text())
-            expected = {
-                (key, arch)
-                for key, witness in G._IMMARG_WITNESSES.items()
-                for arch, cell in doc["keys"].get(key, {}).items()
-                if cell["status"] == G.STATUS_OK
-            }
-            actual = {
-                (key, arch)
-                for key, row in doc["keys"].items()
-                for arch, cell in row.items()
-                if "probe_imm" in cell
-            }
-            self.assertEqual(actual, expected, flavor)
-            for key, arch in sorted(actual):
-                cell = doc["keys"][key][arch]
-                self.assertEqual(cell["probe_imm"], G._IMMARG_WITNESSES[key])
-
-    def test_global_load_lds_is_available_on_cdna_and_not_on_rdna(self):
-        """The case that motivated the sweep, pinned in both directions.
-
-        The intrinsic takes a per-lane transfer size, legal at 1/2/4 on CDNA
-        and also 16 on gfx950, and it is on a live path (builder entry point,
-        handler in both engines, production instance), so an all-`arch_absent`
-        row is a false negative. RDNA really cannot lower it, and must still
-        say so after the full sweep.
-        """
-        for flavor, path in _columns():
-            row = json.loads(path.read_text())["keys"].get("global.load.lds")
-            if row is None:
-                continue
-            for arch, cell in sorted(row.items()):
-                if cell["status"] in (
-                    G.STATUS_TARGET_UNSUPPORTED,
-                    G.STATUS_TOOLCHAIN_CRASH,
-                    G.STATUS_TOOLCHAIN_TIMEOUT,
+            with self.subTest(flavor=flavor):
+                spec = G._probe_spec(key, G._decl_table(flavor)[key])
+                self.assertIsNone(spec.literal_ints)
+                self.assertIsNone(spec.imm_int)
+                self.assertEqual(G._probe_contract(spec), expected_contract)
+                doc = json.loads(path.read_text())
+                self.assertEqual(doc["probe_contracts"][key], expected_contract)
+                layout = _datalayout_for_flavor(flavor)
+                for text, why in (
+                    G._probe_module(spec.decl, layout),
+                    G._batch_probe_module([spec], layout),
                 ):
-                    continue  # no data, not an answer
-                expect = (
-                    G.STATUS_OK if arch.startswith("gfx9") else G.STATUS_ARCH_ABSENT
-                )
-                with self.subTest(flavor=flavor, arch=arch):
-                    self.assertEqual(cell["status"], expect)
+                    self.assertEqual(why, "")
+                    self.assertEqual(text.count(call), 1)
+                    self.assertIn("float %a0, i32 %a1)", text)
+                    self.assertIn("store volatile float %r", text)
 
 
 class RefusalTest(unittest.TestCase):
@@ -1139,6 +931,8 @@ class RefusalTest(unittest.TestCase):
     Driven through `main()` with stub tools, because the policy under test is
     "what do we do when the toolchain does not answer".
     """
+
+    ARCH = "gfx942"
 
     def _stub(self, name: str, body: str) -> str:
         root = Path(tempfile.mkdtemp())
@@ -1176,6 +970,9 @@ sys.exit(1)
     # `_name_exists` recognises a resolved intrinsic.
     _OPT_RESOLVES = """
 import sys
+if "--version" in sys.argv:
+    print("stub opt")
+    sys.exit(0)
 src = sys.argv[-1]
 for line in open(src):
     if line.startswith("declare "):
@@ -1215,13 +1012,13 @@ for line in open(src):
             "--out",
             str(out),
             "--arch",
-            "gfx942",
+            self.ARCH,
             "--only",
             "fabs",
             *extra_args,
         ]
         with (
-            mock.patch.object(V, "_llvm_tool", lambda n: tools.get(n)),
+            mock.patch.object(V, "llvm_tool", lambda n: tools.get(n)),
             mock.patch.object(sys, "argv", argv),
         ):
             return G.main()
@@ -1287,8 +1084,9 @@ for line in open(src):
         # Pin the flavor so the earlier clang-vs-rocke check passes on any host
         # and the run reaches the pairing check.
         for extra in ((), ("--check", "--unvalidated-exit-code", "77")):
-            with self.subTest(adapter=bool(extra)), mock.patch.dict(
-                os.environ, {"ROCKE_LLVM_FLAVOR": "llvm22"}
+            with (
+                self.subTest(adapter=bool(extra)),
+                mock.patch.dict(os.environ, {"ROCKE_LLVM_FLAVOR": "llvm22"}),
             ):
                 rc = self._run(tools, out, *extra)
                 self.assertEqual(rc, 2, "two vintages measured one column")
@@ -1321,34 +1119,615 @@ for line in open(src):
         self.assertEqual(rc, 77)
         self.assertFalse(out.exists())
 
-    def test_ctest_skips_a_column_from_a_different_compiler_build(self):
-        """One LLVM major does not make development builds interchangeable."""
+    def _baseline_from_other_compiler(self) -> tuple[Path, dict[str, str]]:
+        """Measure with stub tools, then change only the recorded provenance."""
         out = Path(tempfile.mkdtemp()) / "column.json"
         self.addCleanup(shutil.rmtree, out.parent, True)
-        blessed = "AMD clang version 22.0.0git (blessed-build)"
-        host = "AMD clang version 22.0.0git"
-        out.write_text(json.dumps({"toolchain": {"clang": blessed}}))
         tools = {
             "clang": self._clang_with_accepting_assembler(self._CLANG_ACCEPTS),
             "opt": self._stub("opt", self._OPT_RESOLVES_AND_IDENTIFIES),
         }
+        with mock.patch.dict(os.environ, {"ROCKE_LLVM_FLAVOR": "llvm22"}):
+            self.assertEqual(self._run(tools, out, "--only", "fabs.f32"), 0)
+        doc = json.loads(out.read_text())
+        self.assertEqual(doc["keys"]["fabs.f32"][self.ARCH]["status"], G.STATUS_OK)
+        doc["toolchain"]["clang"] = "AMD clang version 22.0.0git (blessed-build)"
+        out.write_text(json.dumps(doc))
+        return out, tools
+
+    def test_cli_writes_compact_columns_and_check_preserves_expanded_input(self):
+        out, tools = self._baseline_from_other_compiler()
+        with mock.patch.dict(os.environ, {"ROCKE_LLVM_FLAVOR": "llvm22"}):
+            self.assertEqual(self._run(tools, out, "--only", "fabs.f32"), 0)
+        canonical = out.read_text()
+        doc = json.loads(canonical)
+        self.assertEqual(canonical, G._serialize_column(doc))
+        self.assertIn('    "fabs.f32": {"operands":', canonical)
+        expanded = json.dumps(doc, indent=4) + "\n"
+        out.write_text(expanded)
+        with (
+            mock.patch.dict(os.environ, {"ROCKE_LLVM_FLAVOR": "llvm22"}),
+            mock.patch.object(
+                G, "_compare_support", wraps=G._compare_support
+            ) as compare,
+        ):
+            self.assertEqual(self._run(tools, out, "--only", "fabs.f32", "--check"), 0)
+        self.assertEqual(compare.call_args.args, (expanded, canonical))
+        self.assertEqual(out.read_text(), expanded, "check reformatted its reference")
+
+    def test_ctest_compares_a_different_compiler_build_and_passes(self):
+        out, tools = self._baseline_from_other_compiler()
+        before = out.read_text()
         stdout = io.StringIO()
         with (
             mock.patch.dict(os.environ, {"ROCKE_LLVM_FLAVOR": "llvm22"}),
             mock.patch("sys.stdout", stdout),
+            mock.patch.object(G, "_probe", wraps=G._probe) as probe,
         ):
             rc = self._run(
                 tools,
                 out,
+                "--only",
+                "fabs.f32",
                 "--check",
                 "--unvalidated-exit-code",
                 "77",
             )
 
-        self.assertEqual(rc, 77)
-        self.assertIn("UNVALIDATED", stdout.getvalue())
-        self.assertIn(blessed, stdout.getvalue())
-        self.assertIn(host, stdout.getvalue())
+        self.assertEqual(rc, 0)
+        self.assertGreater(probe.call_count, 0, "skipped the measurement")
+        self.assertIn("SUPPORT OK", stdout.getvalue())
+        self.assertIn("(blessed-build)", stdout.getvalue())
+        self.assertIn("this host : AMD clang version 22.0.0git", stdout.getvalue())
+        self.assertNotIn("UNVALIDATED", stdout.getvalue())
+        self.assertEqual(out.read_text(), before, "--check re-blessed provenance")
+
+    def test_ctest_different_compiler_build_still_fails_on_measurement_drift(self):
+        """A new compiler rejecting a previously accepted intrinsic is a failure."""
+        out, tools = self._baseline_from_other_compiler()
+        before = out.read_text()
+        tools["clang"] = self._clang_with_accepting_assembler(
+            """
+import sys
+if "--version" in sys.argv:
+    print("AMD clang version 22.0.0git")
+    sys.exit(0)
+if "@llvm.fabs.f32(" in open(sys.argv[-1]).read():
+    sys.stderr.write("error: Cannot select: intrinsic %llvm.fabs.f32\\n")
+    sys.exit(1)
+sys.exit(0)
+"""
+        )
+        stdout = io.StringIO()
+        with (
+            mock.patch.dict(os.environ, {"ROCKE_LLVM_FLAVOR": "llvm22"}),
+            mock.patch("sys.stdout", stdout),
+            mock.patch.object(G, "_probe", wraps=G._probe) as probe,
+        ):
+            rc = self._run(
+                tools,
+                out,
+                "--only",
+                "fabs.f32",
+                "--check",
+                "--unvalidated-exit-code",
+                "77",
+            )
+
+        self.assertEqual(rc, 1, "measurement drift must fail, not pass or skip")
+        self.assertGreater(probe.call_count, 0, "skipped the measurement")
+        self.assertIn(f"fabs.f32/{self.ARCH}: ok -> arch_absent", stdout.getvalue())
+        self.assertIn("(blessed-build)", stdout.getvalue())
+        self.assertIn("this host : AMD clang version 22.0.0git", stdout.getvalue())
+        self.assertNotIn("UNVALIDATED", stdout.getvalue())
+        self.assertEqual(out.read_text(), before, "--check changed the baseline")
+
+    def _check_transition_with_stub(self, before_status: str, clang_body: str):
+        out, tools = self._baseline_from_other_compiler()
+        doc = json.loads(out.read_text())
+        doc["keys"]["fabs.f32"][self.ARCH].update(
+            status=before_status, evidence="recorded probe diagnostic"
+        )
+        out.write_text(json.dumps(doc))
+        before = out.read_text()
+        tools["clang"] = self._clang_with_accepting_assembler(clang_body)
+        stdout = io.StringIO()
+        with (
+            mock.patch.dict(os.environ, {"ROCKE_LLVM_FLAVOR": "llvm22"}),
+            mock.patch("sys.stdout", stdout),
+            mock.patch.object(G, "_probe", wraps=G._probe) as probe,
+        ):
+            rc = self._run(
+                tools,
+                out,
+                "--only",
+                "fabs.f32",
+                "--check",
+                "--unvalidated-exit-code",
+                "77",
+            )
+        self.assertEqual(rc, 0, stdout.getvalue())
+        self.assertGreater(probe.call_count, 0, "skipped the measurement")
+        self.assertEqual(out.read_text(), before, "--check changed the baseline")
+        return stdout.getvalue()
+
+    def test_ctest_allows_support_gain_from_a_different_compiler_build(self):
+        text = self._check_transition_with_stub(
+            G.STATUS_ARCH_ABSENT, self._CLANG_ACCEPTS
+        )
+        self.assertIn(
+            f"SUPPORT GAIN: 1 -- fabs.f32/{self.ARCH}: arch_absent -> ok", text
+        )
+        self.assertIn("SUPPORT OK", text)
+
+    def test_ctest_allows_unknown_to_unavailable(self):
+        body = """
+import sys
+if "--version" in sys.argv:
+    print("AMD clang version 22.0.0git")
+    sys.exit(0)
+if "@llvm.fabs.f32(" in open(sys.argv[-1]).read():
+    sys.stderr.write("error: Cannot select: intrinsic %llvm.fabs.f32\\n")
+    sys.exit(1)
+sys.exit(0)
+"""
+        text = self._check_transition_with_stub(G.STATUS_TOOLCHAIN_CRASH, body)
+        self.assertIn("MEASUREMENT IMPROVED: 1", text)
+        self.assertIn("toolchain_crash -> arch_absent", text)
+        self.assertIn("SUPPORT OK", text)
+
+    def test_ctest_reports_degraded_negative_measurement(self):
+        body = """
+import sys
+if "--version" in sys.argv:
+    print("AMD clang version 22.0.0git")
+    sys.exit(0)
+if "@llvm.fabs.f32(" in open(sys.argv[-1]).read():
+    sys.stderr.write("PLEASE submit a bug report\\n")
+    sys.exit(1)
+sys.exit(0)
+"""
+        text = self._check_transition_with_stub(G.STATUS_ARCH_ABSENT, body)
+        self.assertIn("MEASUREMENT DEGRADED: 1", text)
+        self.assertIn("NO-DATA (not qualified): 1", text)
+        self.assertIn("SUPPORT OK", text)
+
+    def test_cli_rejects_unusable_live_provenance_before_any_probe(self):
+        out, tools = self._baseline_from_other_compiler()
+        before = out.read_text()
+        for tool in ("clang", "opt"):
+            for identity in (None, "", " \t", "(unknown)"):
+                for mode in (
+                    (),
+                    ("--check",),
+                    ("--check", "--unvalidated-exit-code", "77"),
+                ):
+                    with self.subTest(tool=tool, identity=identity, mode=mode):
+
+                        def identify(exe):
+                            return (
+                                identity if exe == tools[tool] else "vendor tool banner"
+                            )
+
+                        stdout = io.StringIO()
+                        with (
+                            mock.patch.dict(
+                                os.environ, {"ROCKE_LLVM_FLAVOR": "llvm22"}
+                            ),
+                            mock.patch("sys.stdout", stdout),
+                            mock.patch.object(G, "tool_identity", side_effect=identify),
+                            mock.patch.object(G, "_target_preflight") as preflight,
+                            mock.patch.object(G, "_name_exists_many") as names,
+                            mock.patch.object(G, "_schedule_probes") as schedule,
+                        ):
+                            rc = self._run(tools, out, "--only", "fabs.f32", *mode)
+                        self.assertEqual(rc, 1)
+                        self.assertIn(f"host {tool}", stdout.getvalue())
+                        self.assertIn(repr(identity), stdout.getvalue())
+                        preflight.assert_not_called()
+                        names.assert_not_called()
+                        schedule.assert_not_called()
+                        self.assertEqual(out.read_text(), before)
+        silent = self._clang_with_accepting_assembler("import sys\nsys.exit(0)\n")
+        missing = out.with_name("missing.json")
+        for mode in ((), ("--check", "--unvalidated-exit-code", "77")):
+            with mock.patch.dict(os.environ, {"ROCKE_LLVM_FLAVOR": "llvm22"}):
+                self.assertEqual(
+                    self._run({**tools, "clang": silent}, missing, *mode), 1
+                )
+            self.assertFalse(missing.exists())
+
+    def test_cli_validates_produced_records_before_write_or_compare(self):
+        out, tools = self._baseline_from_other_compiler()
+        before = out.read_text()
+        original_probe = G._probe
+
+        def missing_evidence(clang, path, arch, destination, **kwargs):
+            if path.stem == "target_preflight":
+                return original_probe(clang, path, arch, destination, **kwargs)
+            return G.STATUS_ARCH_ABSENT, ""
+
+        for mode in ((), ("--check",), ("--check", "--unvalidated-exit-code", "77")):
+            for damage in ("processor", "evidence"):
+                with self.subTest(mode=mode, damage=damage):
+                    stdout = io.StringIO()
+                    with contextlib.ExitStack() as stack:
+                        stack.enter_context(
+                            mock.patch.dict(os.environ, {"ROCKE_LLVM_FLAVOR": "llvm22"})
+                        )
+                        stack.enter_context(mock.patch("sys.stdout", stdout))
+                        if damage == "processor":
+                            stack.enter_context(
+                                mock.patch.object(
+                                    G,
+                                    "_processor_support",
+                                    return_value={self.ARCH: {"accepted": False}},
+                                )
+                            )
+                        else:
+                            stack.enter_context(
+                                mock.patch.object(
+                                    G, "_probe", side_effect=missing_evidence
+                                )
+                            )
+                        rc = self._run(tools, out, "--only", "fabs.f32", *mode)
+                    self.assertEqual(rc, 1)
+                    self.assertIn("current", stdout.getvalue())
+                    self.assertIn("evidence", stdout.getvalue())
+                    self.assertNotIn("SUPPORT OK", stdout.getvalue())
+                    self.assertEqual(out.read_text(), before)
+                    missing = out.with_name("missing-final.json")
+                    with (
+                        mock.patch.dict(os.environ, {"ROCKE_LLVM_FLAVOR": "llvm22"}),
+                        mock.patch.object(G, "_processor_support", return_value={}),
+                    ):
+                        self.assertEqual(
+                            self._run(tools, missing, "--only", "fabs.f32", *mode), 1
+                        )
+                    self.assertFalse(missing.exists())
+
+    def test_cli_arch_absent_requires_accepted_processor_before_probing(self):
+        out, tools = self._baseline_from_other_compiler()
+        doc = json.loads(out.read_text())
+        doc["keys"]["fabs.f32"][self.ARCH].update(
+            status=G.STATUS_ARCH_ABSENT, evidence="architecture diagnostic"
+        )
+        doc["processors"][self.ARCH] = {
+            "accepted": False,
+            "evidence": "processor diagnostic",
+        }
+        out.write_text(json.dumps(doc))
+        before = out.read_text()
+        stdout = io.StringIO()
+        with (
+            mock.patch.dict(os.environ, {"ROCKE_LLVM_FLAVOR": "llvm22"}),
+            mock.patch("sys.stdout", stdout),
+            mock.patch.object(G, "_target_preflight") as preflight,
+        ):
+            rc = self._run(tools, out, "--only", "fabs.f32", "--check")
+        self.assertEqual(rc, 1)
+        self.assertIn(
+            "status 'arch_absent' requires an accepted processor", stdout.getvalue()
+        )
+        self.assertNotIn("SUPPORT GAIN", stdout.getvalue())
+        preflight.assert_not_called()
+        self.assertEqual(out.read_text(), before)
+
+    def test_cli_compares_effective_questions_on_every_positive_path(self):
+        out, tools = self._baseline_from_other_compiler()
+        with mock.patch.dict(os.environ, {"ROCKE_LLVM_FLAVOR": "llvm22"}):
+            self.assertEqual(self._run(tools, out, "--only", "readfirstlane"), 0)
+        original = out.read_text()
+        tools["opt"] = self._stub(
+            "opt",
+            self._OPT_RESOLVES_AND_IDENTIFIES.replace(
+                'line.rstrip() + " #0"',
+                'line.rstrip().replace("readfirstlane.i32(i32)", "readfirstlane.i32(i32 immarg)") + " #0"',
+            ),
+        )
+        original_probe = G._probe
+        for path_kind in ("single", "batch", "split", "retry"):
+            with self.subTest(path_kind=path_kind):
+                doc = json.loads(original)
+                if path_kind == "single":
+                    del doc["keys"]["readfirstlane.i64"]
+                    del doc["probe_contracts"]["readfirstlane.i64"]
+                out.write_text(json.dumps(doc))
+                before = out.read_text()
+                paths = []
+                failed_once = set()
+
+                def probe(clang, path, arch, destination, **kwargs):
+                    if path.stem == "target_preflight":
+                        return original_probe(clang, path, arch, destination, **kwargs)
+                    paths.append(path.stem)
+                    if path_kind == "split" and path.stem.startswith("batch."):
+                        return G.STATUS_ARCH_ABSENT, "split control"
+                    if path_kind == "retry" and path.stem not in failed_once:
+                        failed_once.add(path.stem)
+                        return G.STATUS_TOOLCHAIN_CRASH, "retry control"
+                    return original_probe(clang, path, arch, destination, **kwargs)
+
+                stdout = io.StringIO()
+                keep = out.parent / path_kind
+                with (
+                    mock.patch.dict(os.environ, {"ROCKE_LLVM_FLAVOR": "llvm22"}),
+                    mock.patch("sys.stdout", stdout),
+                    mock.patch.object(G, "_probe", side_effect=probe),
+                ):
+                    rc = self._run(
+                        tools,
+                        out,
+                        "--only",
+                        (
+                            "readfirstlane.i32"
+                            if path_kind == "single"
+                            else "readfirstlane"
+                        ),
+                        "--check",
+                        "--keep-ir",
+                        str(keep),
+                    )
+                self.assertEqual(rc, 1)
+                self.assertIn("positive probe contract changed", stdout.getvalue())
+                self.assertNotIn("intrinsic coverage changed", stdout.getvalue())
+                if path_kind != "single":
+                    self.assertTrue(any(name.startswith("batch.") for name in paths))
+                if path_kind in ("single", "split", "retry"):
+                    self.assertIn("readfirstlane.i32", paths)
+                if path_kind == "retry":
+                    self.assertGreater(paths.count("readfirstlane.i32"), 1)
+                self.assertIn("i32 0", (keep / "readfirstlane.i32.ll").read_text())
+                self.assertEqual(out.read_text(), before)
+
+    def test_cli_rejects_missing_baseline_metadata_without_rewriting(self):
+        for field in ("processors", "verified_on"):
+            with self.subTest(field=field):
+                out, tools = self._baseline_from_other_compiler()
+                doc = json.loads(out.read_text())
+                if field == "processors":
+                    del doc["processors"]
+                else:
+                    del doc["keys"]["fabs.f32"][self.ARCH]["verified_on"]
+                out.write_text(json.dumps(doc))
+                before = out.read_text()
+                stdout = io.StringIO()
+                with (
+                    mock.patch.dict(os.environ, {"ROCKE_LLVM_FLAVOR": "llvm22"}),
+                    mock.patch("sys.stdout", stdout),
+                ):
+                    rc = self._run(
+                        tools,
+                        out,
+                        "--only",
+                        "fabs.f32",
+                        "--check",
+                        "--unvalidated-exit-code",
+                        "77",
+                    )
+                self.assertEqual(
+                    rc, 1, "incomplete baseline must fail, not pass or skip"
+                )
+                self.assertIn(field, stdout.getvalue())
+                self.assertEqual(out.read_text(), before)
+
+    def test_cli_rejects_invalid_provenance_diagnostics_and_witnesses(self):
+        for field in ("clang", "cell evidence", "probe_imm", "processor evidence"):
+            with self.subTest(field=field):
+                out, tools = self._baseline_from_other_compiler()
+                doc = json.loads(out.read_text())
+                cell = doc["keys"]["fabs.f32"][self.ARCH]
+                if field == "clang":
+                    del doc["toolchain"]["clang"]
+                else:
+                    # These are otherwise accepted support gains, so failure
+                    # must come from the malformed record, not the transition.
+                    cell.update(
+                        status=G.STATUS_ARCH_ABSENT, evidence="probe diagnostic"
+                    )
+                    if field == "cell evidence":
+                        del cell["evidence"]
+                    elif field == "probe_imm":
+                        cell["probe_imm"] = "invalid-witness"
+                    else:
+                        cell["status"] = G.STATUS_TARGET_UNSUPPORTED
+                        doc["processors"][self.ARCH] = {"accepted": False}
+                out.write_text(json.dumps(doc))
+                before = out.read_text()
+                stdout = io.StringIO()
+                with (
+                    mock.patch.dict(os.environ, {"ROCKE_LLVM_FLAVOR": "llvm22"}),
+                    mock.patch("sys.stdout", stdout),
+                ):
+                    rc = self._run(
+                        tools,
+                        out,
+                        "--only",
+                        "fabs.f32",
+                        "--check",
+                        "--unvalidated-exit-code",
+                        "77",
+                    )
+                self.assertEqual(
+                    rc, 1, "malformed baseline must fail, not pass or skip"
+                )
+                self.assertIn(field.split()[-1], stdout.getvalue())
+                self.assertIn("baseline", stdout.getvalue())
+                self.assertNotIn("SUPPORT OK", stdout.getvalue())
+                self.assertEqual(
+                    out.read_text(), before, "--check rewrote the baseline"
+                )
+
+    def test_cli_validates_baseline_before_provenance_and_scheduling(self):
+        out, tools = self._baseline_from_other_compiler()
+        valid = json.loads(out.read_text())
+        missing = object()
+        for name, path, value, diagnostic in (
+            ("invalid JSON", (), "{oops", "baseline column is not valid JSON"),
+            ("non-object", (), [], "baseline column is not a JSON object"),
+            (
+                "null toolchain",
+                ("toolchain",),
+                None,
+                "baseline toolchain is not a mapping",
+            ),
+            ("null keys", ("keys",), None, "baseline keys is not a mapping"),
+            (
+                "null row",
+                ("keys", "fabs.f32"),
+                None,
+                "baseline architecture row is not a mapping",
+            ),
+            (
+                "null cell",
+                ("keys", "fabs.f32", self.ARCH),
+                None,
+                "baseline cell is not a mapping",
+            ),
+            (
+                "missing status",
+                ("keys", "fabs.f32", self.ARCH, "status"),
+                missing,
+                "baseline invalid status None",
+            ),
+            (
+                "unknown compiler",
+                ("toolchain", "clang"),
+                "(unknown)",
+                "got '(unknown)'",
+            ),
+            (
+                "mismatched compiler",
+                ("toolchain", "clang"),
+                "AMD clang version 20.0.0git",
+                "expected column flavor 'llvm22'",
+            ),
+            (
+                "contradictory processor",
+                ("processors", self.ARCH),
+                {"accepted": False, "evidence": "processor diagnostic"},
+                "status 'ok' requires an accepted processor",
+            ),
+        ):
+            with self.subTest(damage=name):
+                doc = json.loads(json.dumps(valid))
+                if path:
+                    parent = doc
+                    for field in path[:-1]:
+                        parent = parent[field]
+                    if value is missing:
+                        del parent[path[-1]]
+                    else:
+                        parent[path[-1]] = value
+                else:
+                    doc = value
+                text = value if name == "invalid JSON" else json.dumps(doc)
+                out.write_text(text)
+                stdout = io.StringIO()
+                with (
+                    mock.patch.dict(os.environ, {"ROCKE_LLVM_FLAVOR": "llvm22"}),
+                    mock.patch("sys.stdout", stdout),
+                    mock.patch.object(
+                        G, "_target_preflight", wraps=G._target_preflight
+                    ) as preflight,
+                    mock.patch.object(
+                        G, "_schedule_probes", wraps=G._schedule_probes
+                    ) as schedule,
+                ):
+                    rc = self._run(
+                        tools,
+                        out,
+                        "--only",
+                        "fabs.f32",
+                        "--check",
+                        "--unvalidated-exit-code",
+                        "77",
+                    )
+                self.assertEqual(rc, 1, "invalid input must fail, not skip")
+                self.assertIn(diagnostic, stdout.getvalue())
+                self.assertIn("failures:", stdout.getvalue())
+                self.assertNotIn("SUPPORT OK", stdout.getvalue())
+                preflight.assert_not_called()
+                schedule.assert_not_called()
+                self.assertEqual(out.read_text(), text, "--check rewrote the baseline")
+
+    def test_observation_summary_is_bounded_unless_verbose(self):
+        out, tools = self._baseline_from_other_compiler()
+        before = out.read_text()
+        for count in (0, 5, 8):
+            changes = {
+                kind: [f"{kind}-case-{i}" for i in range(count)]
+                for kind in G._compare_support(before, before).changes
+            }
+            for verbose in (False, True):
+                with self.subTest(count=count, verbose=verbose):
+                    stdout = io.StringIO()
+                    with (
+                        mock.patch.dict(os.environ, {"ROCKE_LLVM_FLAVOR": "llvm22"}),
+                        mock.patch("sys.stdout", stdout),
+                        mock.patch.object(
+                            G,
+                            "_compare_support",
+                            return_value=G._SupportComparison([], changes),
+                        ),
+                    ):
+                        rc = self._run(
+                            tools,
+                            out,
+                            "--only",
+                            "fabs.f32",
+                            "--check",
+                            *(("--verbose",) if verbose else ()),
+                        )
+                    text = stdout.getvalue()
+                    self.assertEqual(rc, 0)
+                    self.assertIn("SUPPORT OK", text)
+                    for kind in changes:
+                        for index in range(count):
+                            if verbose or index < 5:
+                                self.assertIn(f"{kind}-case-{index}", text)
+                            else:
+                                self.assertNotIn(f"{kind}-case-{index}", text)
+                    self.assertEqual(
+                        text.count(f"(+{count - 5} more)"),
+                        len(changes) if count > 5 and not verbose else 0,
+                    )
+                    self.assertEqual(out.read_text(), before)
+
+    def test_failure_summary_reports_total_and_omitted_count(self):
+        out, tools = self._baseline_from_other_compiler()
+        before = out.read_text()
+        empty = {kind: [] for kind in G._compare_support(before, before).changes}
+        for count in (0, 5, 8):
+            with self.subTest(count=count):
+                failures = [f"summary-case-{i}" for i in range(count)]
+                stdout = io.StringIO()
+                with (
+                    mock.patch.dict(os.environ, {"ROCKE_LLVM_FLAVOR": "llvm22"}),
+                    mock.patch("sys.stdout", stdout),
+                    mock.patch.object(
+                        G,
+                        "_compare_support",
+                        return_value=G._SupportComparison(failures, empty),
+                    ),
+                ):
+                    rc = self._run(tools, out, "--only", "fabs.f32", "--check")
+                text = stdout.getvalue()
+                self.assertEqual(rc, 1 if count else 0)
+                if count:
+                    self.assertIn(f"failures: {count}", text)
+                else:
+                    self.assertIn("SUPPORT OK", text)
+                    self.assertNotIn("FAIL:", text)
+                for index in range(min(count, 5)):
+                    self.assertIn(f"summary-case-{index}", text)
+                for index in range(5, count):
+                    self.assertNotIn(f"summary-case-{index}", text)
+                if count > 5:
+                    self.assertIn(f"(+{count - 5} more)", text)
+                else:
+                    self.assertNotIn(" more)", text)
+                self.assertEqual(out.read_text(), before)
 
     def test_ctest_can_translate_a_missing_column_to_a_skip(self):
         """A measured flavor with no baseline is unvalidated, not green."""
@@ -1382,6 +1761,10 @@ for line in open(src):
                 self.assertEqual(G.flavor_of_clang(banner), flavor)
 
 
+class RefusalGfx950Test(RefusalTest):
+    ARCH = "gfx950"
+
+
 @unittest.skipUnless(
     hasattr(os, "killpg"), "needs POSIX process groups to tell what survived"
 )
@@ -1396,6 +1779,8 @@ class ProbeTimeoutTest(unittest.TestCase):
     The stub stands in for that driver: it starts a child that never exits,
     records both pids, and never exits itself.
     """
+
+    ARCH = "gfx942"
 
     _HANGS_WITH_A_CHILD = """
 import os, subprocess, sys, time
@@ -1496,7 +1881,7 @@ while True:
             status, _ = G._probe(
                 clang,
                 scratch / "probe.ll",
-                "gfx942",
+                self.ARCH,
                 scratch / "probe.hsaco",
                 timeout=60,
             )
@@ -1555,7 +1940,7 @@ while True:
             status, _ = G._assemble(
                 clang,
                 scratch / "probe.ll",
-                "gfx942",
+                self.ARCH,
                 scratch / "probe.hsaco",
                 timeout=60,
             )
@@ -1613,6 +1998,22 @@ except KeyboardInterrupt:
         self.assertEqual(self._survivors(pids), [], "outlived the interrupt")
 
 
+class ProbeTimeoutGfx950Test(ProbeTimeoutTest):
+    ARCH = "gfx950"
+
+
+def _staged_generator_tools(cmake: str) -> set[str]:
+    block = re.search(
+        r"install\(\s*FILES((?:\s+\"[^\"]+\")+)\s+"
+        r'DESTINATION "\$\{ROCKE_TEST_INSTALL_DIR\}/tests/arch_domain"\)',
+        cmake,
+    )
+    assert block, "no install() of the arch-domain generator"
+    staged = {Path(f).name for f in re.findall(r'"([^"]+)"', block.group(1))}
+    assert "gen_arch_domain.py" in staged, "gen_arch_domain.py is not staged"
+    return staged
+
+
 class InstalledGeneratorTest(unittest.TestCase):
     """The installed reproduction CTest runs a staged copy of the generator.
 
@@ -1623,14 +2024,7 @@ class InstalledGeneratorTest(unittest.TestCase):
 
     def test_every_helper_a_staged_tool_imports_is_staged_with_it(self):
         cmake = (_ROCKE / "CMakeLists.txt").read_text()
-        block = re.search(
-            r"install\(FILES((?:\s+\"[^\"]+\")+)\s+"
-            r'DESTINATION "\$\{ROCKE_TEST_INSTALL_DIR\}/tests/arch_domain"\)',
-            cmake,
-        )
-        self.assertIsNotNone(block, "no install() of the arch-domain generator")
-        staged = {Path(f).name for f in re.findall(r'"([^"]+)"', block.group(1))}
-        self.assertIn("gen_arch_domain.py", staged)
+        staged = _staged_generator_tools(cmake)
         for name in sorted(staged):
             tree = ast.parse((_ROCKE / "tools" / name).read_text())
             for node in ast.walk(tree):
@@ -1646,6 +2040,41 @@ class InstalledGeneratorTest(unittest.TestCase):
                         with self.subTest(tool=name, helper=helper):
                             self.assertIn(helper, staged)
 
+    def test_support_policy_tests_and_generator_are_staged(self):
+        cmake = (_ROCKE / "CMakeLists.txt").read_text()
+        self.assertTrue((_HERE / "test_arch_domain_support.py").is_file())
+        self.assertNotRegex(
+            cmake, r'PATTERN\s+"test_arch_domain_support\.py"\s+EXCLUDE'
+        )
+        self.assertIn('install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/tests/"', cmake)
+        self.assertIn("gen_arch_domain.py", _staged_generator_tools(cmake))
+
+    def test_staged_tool_inventory_accepts_cmake_formatting(self):
+        files = (
+            ' "${CMAKE_CURRENT_SOURCE_DIR}/tools/gen_arch_domain.py"'
+            '\n "${CMAKE_CURRENT_SOURCE_DIR}/tools/_bounded_run.py"'
+            '\n DESTINATION "${ROCKE_TEST_INSTALL_DIR}/tests/arch_domain")'
+        )
+        for spacing in ("", "\n    "):
+            with self.subTest(spacing=spacing):
+                self.assertEqual(
+                    _staged_generator_tools(f"install({spacing}FILES{files}"),
+                    {"gen_arch_domain.py", "_bounded_run.py"},
+                )
+
+    def test_staged_tool_inventory_requires_generator_and_destination(self):
+        cmake = (
+            'install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/tools/gen_arch_domain.py"'
+            ' "${CMAKE_CURRENT_SOURCE_DIR}/tools/_bounded_run.py"'
+            ' DESTINATION "${ROCKE_TEST_INSTALL_DIR}/tests/arch_domain")'
+        )
+        for old, new, message in (
+            ("gen_arch_domain.py", "other.py", "gen_arch_domain.py is not staged"),
+            ("/tests/arch_domain", "/tests/other", "no install"),
+        ):
+            with self.subTest(old=old), self.assertRaisesRegex(AssertionError, message):
+                _staged_generator_tools(cmake.replace(old, new))
+
 
 class PartialSweepTest(unittest.TestCase):
     """A filtered sweep must never land on the committed column.
@@ -1659,6 +2088,8 @@ class PartialSweepTest(unittest.TestCase):
     a bad invocation fails at once rather than after a full sweep.
     """
 
+    ARCH = "gfx942"
+
     def _run(self, *args: str) -> int:
         with mock.patch.object(sys, "argv", [str(_TOOL), *args]):
             return G.main()
@@ -1669,8 +2100,8 @@ class PartialSweepTest(unittest.TestCase):
     def test_a_filtered_sweep_without_an_out_refuses(self):
         for args in (
             ("--only", "fabs"),
-            ("--arch", "gfx942"),
-            ("--only", "fabs", "--arch", "gfx942"),
+            ("--arch", self.ARCH),
+            ("--only", "fabs", "--arch", self.ARCH),
         ):
             with self.subTest(args=args):
                 before = self._snapshot()
@@ -1697,14 +2128,18 @@ class PartialSweepTest(unittest.TestCase):
         """
         out = Path(tempfile.mkdtemp()) / "column.json"
         self.addCleanup(shutil.rmtree, out.parent, True)
-        argv = [str(_TOOL), "--out", str(out), "--only", "fabs", "--arch", "gfx942"]
+        argv = [str(_TOOL), "--out", str(out), "--only", "fabs", "--arch", self.ARCH]
         import check_ir_validity as V
 
         with (
-            mock.patch.object(V, "_llvm_tool", lambda _n: None),
+            mock.patch.object(V, "llvm_tool", lambda _n: None),
             mock.patch.object(sys, "argv", argv),
         ):
             self.assertEqual(G.main(), 0, "the guard swallowed a well-formed probe")
+
+
+class PartialSweepGfx950Test(PartialSweepTest):
+    ARCH = "gfx950"
 
 
 class CTestExitTest(unittest.TestCase):
@@ -1715,7 +2150,7 @@ class CTestExitTest(unittest.TestCase):
 
         argv = [str(_TOOL), "--check", "--unvalidated-exit-code", "77"]
         with (
-            mock.patch.object(V, "_llvm_tool", return_value=None),
+            mock.patch.object(V, "llvm_tool", return_value=None),
             mock.patch.object(sys, "argv", argv),
         ):
             self.assertEqual(G.main(), 77)
@@ -1725,9 +2160,11 @@ class CTestExitTest(unittest.TestCase):
             ("--check", "--unvalidated-exit-code", "0"),
             ("--unvalidated-exit-code", "77"),
         ):
-            with self.subTest(args=args), mock.patch.object(
-                sys, "argv", [str(_TOOL), *args]
-            ), self.assertRaises(SystemExit):
+            with (
+                self.subTest(args=args),
+                mock.patch.object(sys, "argv", [str(_TOOL), *args]),
+                self.assertRaises(SystemExit),
+            ):
                 G.main()
 
 
@@ -1745,9 +2182,11 @@ class ValidityGateTest(unittest.TestCase):
 
         self.assertIn("-O0", V.COMPILE_CFLAGS)
         self.assertIn("-O0", G.PROBE_CFLAGS)
-        argv = V._compile_argv("clang", Path("m.ll"), "gfx942", Path("m.hsaco"))
-        self.assertIn("-O0", argv)
-        self.assertNotIn("-O3", argv)
+        for arch in COVERED_ARCHES:
+            with self.subTest(arch=arch):
+                argv = V._compile_argv("clang", Path("m.ll"), arch, Path("m.hsaco"))
+                self.assertIn("-O0", argv)
+                self.assertNotIn("-O3", argv)
 
     def test_a_bundled_comgr_does_not_send_the_lookup_to_path(self):
         """A comgr bundled with another package (the ROCm torch wheel) has no LLVM
@@ -1783,7 +2222,7 @@ class ValidityGateTest(unittest.TestCase):
                     return_value=str(fake_comgr),
                 ),
             ):
-                found = V._llvm_tool("clang")
+                found = V.llvm_tool("clang")
         self.assertIsNotNone(found)
         self.assertTrue(
             any(
@@ -1804,7 +2243,7 @@ class ValidityGateTest(unittest.TestCase):
         import check_ir_validity as V
 
         self.assertTrue(
-            V._target_unsupported("clang: error: invalid target ID 'gfx1250'")
+            V.target_unsupported("clang: error: invalid target ID 'gfx1250'")
         )
         # The same wording routes to `target_unsupported` in the generator.
         self.assertEqual(
@@ -1818,7 +2257,7 @@ class ValidityGateTest(unittest.TestCase):
             "error: invalid use of a non-immediate operand",
         ):
             with self.subTest(diag=diag):
-                self.assertFalse(V._target_unsupported(diag))
+                self.assertFalse(V.target_unsupported(diag))
 
     def test_an_instance_gated_on_a_newer_llvm_is_not_a_lowering_failure(self):
         """The corpus is flavor-wide; a host is not.
@@ -1848,6 +2287,7 @@ class ValidityGateTest(unittest.TestCase):
         for exc in (
             NotImplementedError("no handler for op 'tile.frobnicate'"),
             NotImplementedError("unsupported dtype combination"),
+            ValueError("tensor_load_to_lds requires a target with tdm, got gfx942"),
             ValueError("tensor_load_to_lds requires a target with tdm, got gfx950"),
         ):
             with self.subTest(exc=str(exc)):
@@ -1940,6 +2380,7 @@ class ValidityGateTest(unittest.TestCase):
         for other in (
             NotImplementedError("op 'tile.nope' has no lowering handler"),
             ValueError("requires gfx1250, got gfx942"),
+            ValueError("requires gfx1250, got gfx950"),
             KeyError("llvm23"),
         ):
             with self.subTest(exc=other):

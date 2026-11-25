@@ -50,9 +50,6 @@ set(rocsolver_lapack_source
   lapack/roclapack_getrs.cpp
   lapack/roclapack_getrs_batched.cpp
   lapack/roclapack_getrs_strided_batched.cpp
-  lapack/roclapack_getrs_npvt.cpp
-  lapack/roclapack_getrs_npvt_batched.cpp
-  lapack/roclapack_getrs_npvt_strided_batched.cpp
   lapack/roclapack_gesv.cpp
   lapack/roclapack_gesv_batched.cpp
   lapack/roclapack_gesv_strided_batched.cpp
@@ -506,6 +503,11 @@ endif()
 
 if(OPTIMAL)
   target_compile_definitions(rocsolver PRIVATE OPTIMAL)
+endif()
+
+# Feature flag: larfg setting tau=2 when norm(x)=0.
+if(ROCSOLVER_ENABLE_LARFG_TAU2)
+  target_compile_definitions(rocsolver PRIVATE ROCSOLVER_ENABLE_LARFG_TAU2)
 endif()
 
 if(ROCSOLVER_USE_INTERNAL_BLAS)

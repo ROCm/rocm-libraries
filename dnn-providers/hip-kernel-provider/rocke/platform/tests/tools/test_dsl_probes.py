@@ -13,18 +13,23 @@ import warnings
 from dataclasses import dataclass
 
 import pytest
-from rocke.assets import dsl_docs_dir
 from rocke.core.arch import domain as arch_domain
 from rocke.core.ir import F16, I32, IRBuilder, PtrType
 from rocke.core.lower_llvm import ArchDomainWarning, lower_kernel_to_llvm
+from rocke.tests.arch_marks import arch_specific
+from rocke.tests.source_tree import require_dsl_docs
 
 _ARCH, _FLAVOR = "gfx942", "llvm22"
 
+_target_lacks_tr16 = arch_specific(
+    ("gfx942",),
+    reason="the probes need a target that lacks ds.read.tr16.b64; gfx942 lacks it",
+)
+
 
 def _load(name):
-    path = dsl_docs_dir() / "optimization/utilities/tools/dsl_probes" / f"{name}.py"
-    if not path.is_file():
-        pytest.skip("dsl_probes source tools are absent from this test layout")
+    probes = require_dsl_docs() / "optimization" / "utilities" / "tools" / "dsl_probes"
+    path = probes / f"{name}.py"
     spec = importlib.util.spec_from_file_location(f"rocke_test_{name}", path)
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
@@ -72,6 +77,7 @@ def _assert_target_failures(output, marker, labels):
         assert _ARCH in line and "ds.read.tr16.b64" in line, line
 
 
+@_target_lacks_tr16
 def test_isa_inspect_fails_each_entry_for_the_requested_target(domain_lane, capsys):
     probe = _load("probe_isa_inspect")
     entries = [(n, _transpose_read_kernel(n)) for n in ("first", "second")]
@@ -81,6 +87,7 @@ def test_isa_inspect_fails_each_entry_for_the_requested_target(domain_lane, caps
     _assert_target_failures(capsys.readouterr().out, "BUILD-FAIL", ("first", "second"))
 
 
+@_target_lacks_tr16
 def test_occupancy_fails_each_entry_for_the_requested_target(domain_lane, capsys):
     probe = _load("probe_occupancy")
     entries = [(n, _transpose_read_kernel(n), 1) for n in ("first", "second")]
@@ -89,6 +96,7 @@ def test_occupancy_fails_each_entry_for_the_requested_target(domain_lane, capsys
     _assert_target_failures(capsys.readouterr().out, "BUILD-FAIL", ("first", "second"))
 
 
+@_target_lacks_tr16
 def test_lowering_compare_fails_each_entry_for_the_requested_target(
     domain_lane, capsys, tmp_path
 ):
@@ -103,6 +111,7 @@ class _Spec:
     variant: int = 0
 
 
+@_target_lacks_tr16
 def test_config_sweep_fails_each_variant_for_the_requested_target(domain_lane, capsys):
     probe = _load("probe_config_sweep")
     rows = probe.probe_config_sweep(
@@ -120,6 +129,7 @@ def test_config_sweep_fails_each_variant_for_the_requested_target(domain_lane, c
     assert capsys.readouterr().out.count("BUILD-FAIL") == 2
 
 
+@_target_lacks_tr16
 def test_intrinsic_counts_skips_unsupported_entry_and_restores_warning_policy(
     domain_lane, capsys
 ):

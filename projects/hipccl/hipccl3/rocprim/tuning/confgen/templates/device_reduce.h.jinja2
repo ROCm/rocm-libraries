@@ -8,8 +8,7 @@ class key_type
 {%- endblock %}
 
 {% block config_guard scoped %}
-    ({% if not type.key_type.is_floating %}!{% endif %}bool(rocprim::is_floating_point<key_type>::value)
-    && (sizeof(key_type) <= {{ type.key_type.size }})
+    ({{ mk_type_trait_guard(type.key_type) }}(sizeof(key_type) <= {{ type.key_type.size }})
     {% if type.key_type.size_min > 0 %}&& (sizeof(key_type) > {{ type.key_type.size_min }}){% endif %})
 {%- endblock %}
 

@@ -24,7 +24,8 @@ drivers live under `library/` (`library -> platform` one-way):
 
 - `library/kernels/gfx950/gdn_decode.py` -- shared spec, validator and emitter
 - `library/builders/gfx950/gdn/gdn_decode.py` -- host driver and independent fp32 reference
-- `library/builders/gfx950/gdn/tune.py` -- exhaustive GDN/KDA tile sweep
+- `library/benchmarks/gfx950/gdn/decode_table_sweep.py` -- every registered (tile x knob) configuration per shape at the chosen `--sweep-level` (default `production`: `waves_per_eu` 0 and 4 only; `full`: the dispatcher lists every legal configuration, tens of thousands per shape, so the tool requires `--tuning-sample N` and times a random sample of `N` per tile), timed cold against `auto`
+- `library/benchmarks/gfx950/gdn/decode_defaults_report.py` -- advisory per-case `auto` default from the sweep's rows
 - `library/benchmarks/gfx950/gdn/benchmark_gdn_decode.py` -- GDN benchmark
 - `library/benchmarks/gfx950/gdn/benchmark_kda_decode.py` -- KDA benchmark
 - `library/dispatch/gdn/` -- request, candidates and `dispatch_gdn_decode`
@@ -83,13 +84,14 @@ boundary. `lower_bound` controls the fused KDA sigmoid gate.
 The remaining spec fields carry head geometry, `dtype`, `state_dtype`,
 `use_qk_l2norm`, the two fusion flags `fuse_conv` and `fuse_out_norm`, and
 three tiling knobs: `num_warps`, `warp_threads_k` and `blocks_per_v_dim`.
-`simple=True` selects the one-thread-per-state-row reference body. Ten
+`simple=True` selects the one-thread-per-state-row reference body. Eleven
 performance knobs (`state_load_hint`, `state_store_hint`, `dpp_reduce`,
 `xcd_remap`, `stream_rows`, `interleave_cols`, `conv_once`, `norm_gate_once`,
-`out_lds`, `waves_per_eu`) change how the warp-tiled body computes (the two
-state hints and `waves_per_eu` also apply to the reference body); each
-defaults to the code emitted before it existed, and `auto` turns on a measured
-stack of them per case. Their rules live in
+`out_lds`, `waves_per_eu`, `row_loads`) change how the warp-tiled body
+computes (the two state hints and `waves_per_eu` also apply to the reference
+body); each defaults to the code emitted before it existed, and `auto` turns
+on a stack of them per case (`row_loads`, the single-wave `fuse_conv`
+load order, is never in it). Their rules live in
 [`ALGORITHM.md` §4.10](../../../library/builders/gfx950/gdn/ALGORITHM.md).
 
 `is_valid_spec(spec, arch)` rejects unbuildable configurations before IR
@@ -159,12 +161,16 @@ which fused requests need. The table, its provenance and the fallback when a
 case's tile is illegal live once in
 [`ALGORITHM.md` §4.6](../../../library/builders/gfx950/gdn/ALGORITHM.md#46-registry-and-tile-selection).
 An explicit `spec_id`, such as `nw4_wtk16_bpv8`, selects an exact legal tile for
-benchmarking or replay.
+benchmarking or replay. The two tools above measure that space and re-derive the
+per-case defaults
+([README, Measure and re-tune defaults](../../../library/builders/gfx950/gdn/README.md#measure-and-re-tune-defaults)).
 
 Each registered tile is a tuned candidate (the shared `rocke.dispatch.tuning`
 template) whose knob space holds the performance knobs: every (tile x knob)
 configuration is listed by `dispatch_gdn_decode_all` and pinnable by
-`spec_id` plus `tuning_id` / `tuning_knobs`. A bare `spec_id` pin runs the
+`spec_id` plus `tuning_id` / `tuning_knobs`; on single-wave `fuse_conv` tiles
+each knob set is also listed, at each `waves_per_eu` value, in the
+`row_loads` order `auto` does not choose there. A bare `spec_id` pin runs the
 tile's base configuration, and `auto`'s configuration is one of these. The
 sweep levels and the pin and scope rules are in
 [`ALGORITHM.md` §4.6](../../../library/builders/gfx950/gdn/ALGORITHM.md#46-registry-and-tile-selection).
@@ -206,7 +212,12 @@ PYTHONPATH=library:platform/python python3 -m pytest \
   library/tests/test_gdn_decode_knobs.py \
   library/tests/dispatch/gdn/test_gfx950_wiring.py \
   library/tests/dispatch/gdn/test_gfx950_registry.py \
-  library/tests/dispatch/gdn/test_tuning_contract.py
+  library/tests/dispatch/gdn/test_tuning_contract.py \
+  library/tests/dispatch/gdn/test_gate_rules.py \
+  library/tests/test_gdn_decode_timing.py \
+  library/tests/test_gdn_decode_table_sweep.py \
+  library/tests/test_gdn_decode_defaults_report.py \
+  library/tests/test_kda_decode_benchmark.py
 ```
 
 The on-device output and recurrent-state checks are in

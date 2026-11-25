@@ -32,14 +32,24 @@ def _copy_fixture(tmp_path, fixture):
     return dst
 
 
-def _run(source_root, tmp_path, hipcc, rocm_kpack_dir, arches=(ARCH,)):
+def _run(
+    source_root,
+    tmp_path,
+    hip_compiler,
+    rocm_kpack_dir,
+    arches=(ARCH,),
+    hip_path=None,
+    device_lib_path=None,
+):
     return run_pipeline(
         source_root=source_root,
         arches=list(arches),
         out_root=tmp_path / "out",
-        hipcc=hipcc,
+        hip_compiler=hip_compiler,
         rocm_kpack_dir=rocm_kpack_dir,
         inter_root=tmp_path / "inter",
+        hip_path=hip_path,
+        device_lib_path=device_lib_path,
     )
 
 
@@ -558,9 +568,23 @@ def test_rocke_compile_variant_real(tmp_path, rocke_available, rocke_ukd):
 
 
 def test_rocke_compiles_and_packs(
-    tmp_path, rocke_fixture, hipcc, rocm_kpack_dir, rocke_available, rocke_ukd
+    tmp_path,
+    rocke_fixture,
+    hip_compiler,
+    hip_path,
+    device_lib_path,
+    rocm_kpack_dir,
+    rocke_available,
+    rocke_ukd,
 ):
-    _run(rocke_fixture, tmp_path, hipcc, rocm_kpack_dir)
+    _run(
+        rocke_fixture,
+        tmp_path,
+        hip_compiler,
+        rocm_kpack_dir,
+        hip_path=hip_path,
+        device_lib_path=device_lib_path,
+    )
     shipped = read_shipped(tmp_path / "out" / ARCH / "attention.kdp.json")
     ukd = shipped["kernelDescriptors"][0]
     ks = ukd["kernel_source"]
@@ -608,14 +632,28 @@ def test_rocke_compiles_and_packs(
 
 
 def test_rocke_symbol_capture_differs_from_builder(
-    tmp_path, rocke_fixture, hipcc, rocm_kpack_dir, rocke_available, rocke_ukd
+    tmp_path,
+    rocke_fixture,
+    hip_compiler,
+    hip_path,
+    device_lib_path,
+    rocm_kpack_dir,
+    rocke_available,
+    rocke_ukd,
 ):
     from kernels.gfx950.attention_dense import (
         AttentionDenseSpec,
         build_attention_dense,
     )
 
-    _run(rocke_fixture, tmp_path, hipcc, rocm_kpack_dir)
+    _run(
+        rocke_fixture,
+        tmp_path,
+        hip_compiler,
+        rocm_kpack_dir,
+        hip_path=hip_path,
+        device_lib_path=device_lib_path,
+    )
     ukd = _read(tmp_path / "out" / ARCH / "attention.kdp.json")["kernelDescriptors"][0]
     symbol = ukd["kernel_source"]["symbol"]
     expected = build_attention_dense(
@@ -626,12 +664,26 @@ def test_rocke_symbol_capture_differs_from_builder(
 
 
 def test_rocke_arch_scoping(
-    tmp_path, rocke_fixture, hipcc, rocm_kpack_dir, rocke_available
+    tmp_path,
+    rocke_fixture,
+    hip_compiler,
+    hip_path,
+    device_lib_path,
+    rocm_kpack_dir,
+    rocke_available,
 ):
     """A gfx950-scoped rocke UKD under a gfx942+gfx950 KDP packs only for gfx950;
     targeting gfx942 excludes the UKD before compile, so the gfx950-only builder
     is never invoked and no gfx942 shard is produced."""
-    _run(rocke_fixture, tmp_path, hipcc, rocm_kpack_dir, arches=["gfx942", ARCH])
+    _run(
+        rocke_fixture,
+        tmp_path,
+        hip_compiler,
+        rocm_kpack_dir,
+        arches=["gfx942", ARCH],
+        hip_path=hip_path,
+        device_lib_path=device_lib_path,
+    )
     # gfx950 shard has the packed rocke UKD.
     assert (tmp_path / "out" / ARCH / "attention.kdp.json").exists()
     shipped = read_shipped(tmp_path / "out" / ARCH / "attention.kdp.json")
@@ -777,7 +829,7 @@ def test_rocke_toc_key_collision_is_detected(tmp_path, monkeypatch, rocm_kpack_d
             source_root=root,
             arches=[ARCH],
             out_root=tmp_path / "out",
-            hipcc="hipcc-not-invoked",
+            hip_compiler="compiler-not-invoked",
             rocm_kpack_dir=rocm_kpack_dir,
             inter_root=tmp_path / "inter",
         )
@@ -954,7 +1006,7 @@ def test_generic_target_records_compile_target_per_shard(
     }
     for shard, (generic, ids) in expected.items():
         inter = pipeline.compile_intermediate(
-            flat, root, shard, "hipcc-not-invoked", tmp_path / "inter" / shard
+            flat, root, shard, "compiler-not-invoked", tmp_path / "inter" / shard
         )
         records = [u for k in inter.kdps for u in k.ukds]
         assert {u.id for u in records} == ids
@@ -989,7 +1041,7 @@ def test_generic_target_provenance_names_the_compile_target(
         source_root=root,
         arches=["gfx1151", "gfx1201"],
         out_root=tmp_path / "out",
-        hipcc="hipcc-not-invoked",
+        hip_compiler="compiler-not-invoked",
         rocm_kpack_dir=rocm_kpack_dir,
         inter_root=tmp_path / "inter",
     )
@@ -1018,3 +1070,127 @@ def test_generic_target_provenance_names_the_compile_target(
         "kernelDescriptors"
     ][0]
     assert native_ukd["provenance"]["compile_target"] == "gfx1151"
+
+
+# A producer whose kernels state launch facts. A kernel stating parameter facts
+# or an exact workgroup size is checked on the host before each launch only by
+# rocke's KernelLauncher.from_artifact; a packed code object carries none of
+# those rows and the ingestor launches it with its own geometry, so the packer
+# must refuse it rather than ship it with its checks gone.
+_CONTRACT_PRODUCER = """
+    import dataclasses
+
+    from rocke.core.ir import I32, IRBuilder, PtrType, F32
+    from rocke.helpers import KernelModule
+
+    @dataclasses.dataclass
+    class FactSpec:
+        n: int
+
+    def _kernel(name, *, fact=False, workgroup_size=False):
+        b = IRBuilder(name)
+        if workgroup_size:
+            b.kernel.attrs["workgroup_size"] = 64
+        b.param("out", PtrType(F32, "global"))
+        b.param("n", I32, ge=1) if fact else b.param("n", I32)
+        b.ret()
+        return b.kernel
+
+    def is_valid_spec(spec: FactSpec, *, arch="gfx950"):
+        return True, ""
+
+    def build_with_a_fact(spec: FactSpec, *, arch="gfx950"):
+        return _kernel("states_a_fact", fact=True)
+
+    def build_with_a_workgroup_size(spec: FactSpec, *, arch="gfx950"):
+        return _kernel("states_a_workgroup_size", workgroup_size=True)
+
+    def build_module_with_a_fact(spec: FactSpec, *, arch="gfx950"):
+        return KernelModule(
+            primary=_kernel("plain_primary"),
+            companions={"merge": _kernel("fact_companion", fact=True)},
+        )
+
+    def build_without_facts(spec: FactSpec, *, arch="gfx950"):
+        return _kernel("states_nothing")
+
+    def build_with_a_gpu_check(spec: FactSpec, *, arch="gfx950"):
+        b = IRBuilder("checks_on_the_gpu")
+        out = b.param("out", PtrType(I32, "global"))
+        cu = b.param("cu", PtrType(I32, "global"), readonly=True)
+        loaded = b.readfirstlane(b.global_load(cu, b.const_i32(0), I32))
+        b.global_store(out, b.const_i32(0), b.gpu_checked_value(loaded, ge=0, le=100))
+        b.ret()
+        return b.kernel
+"""
+
+
+_FACTS_REASON = (
+    "parameters carry facts, which a launch from a code object or from a launch "
+    "plan does not check"
+)
+_WORKGROUP_SIZE_REASON = (
+    "the kernel states an exact workgroup size, which a code object does not "
+    "carry, so a launch from the code object alone would not check its block"
+)
+
+
+@pytest.mark.quick
+@pytest.mark.parametrize(
+    ("builder", "kernel_name", "reason"),
+    [
+        ("build_with_a_fact", "states_a_fact", _FACTS_REASON),
+        (
+            "build_with_a_workgroup_size",
+            "states_a_workgroup_size",
+            _WORKGROUP_SIZE_REASON,
+        ),
+        ("build_module_with_a_fact", "fact_companion", _FACTS_REASON),
+    ],
+)
+def test_a_kernel_stating_launch_facts_is_refused_before_it_is_compiled(
+    tmp_path, rocke_importable, builder, kernel_name, reason
+):
+    """The refusal names the builder, the kernel and what it states, and comes
+    before any compile: no code object is written."""
+    src = _write_stub_pkg(tmp_path, _CONTRACT_PRODUCER, pkg="stubpkg_contract")
+    with pytest.raises(HkpPackError) as raised:
+        compile_rocke_variant(src, builder, {"n": 1}, ARCH, tmp_path / "co")
+    assert str(raised.value) == (
+        f"builder '{builder}' @ {ARCH} returned kernel '{kernel_name}': {reason} -- "
+        "launch it through KernelLauncher.from_artifact instead of packing it"
+    )
+    assert not (tmp_path / "co").exists()
+
+
+@pytest.mark.quick
+def test_a_kernel_checking_a_value_on_the_gpu_is_refused_before_it_is_compiled(
+    tmp_path, rocke_importable
+):
+    """A gpu_checked_value reports a false fact only through the kernel's
+    GPU-check word, which the ingestor does not read: refused, before any
+    compile."""
+    src = _write_stub_pkg(tmp_path, _CONTRACT_PRODUCER, pkg="stubpkg_gpu_check")
+    with pytest.raises(HkpPackError) as raised:
+        compile_rocke_variant(
+            src, "build_with_a_gpu_check", {"n": 1}, ARCH, tmp_path / "co"
+        )
+    assert str(raised.value) == (
+        f"builder 'build_with_a_gpu_check' @ {ARCH} returned kernel "
+        "'checks_on_the_gpu': only rocke's runtime reads this kernel's GPU-check "
+        "word, so a false gpu_checked_value fact would go unseen -- launch it "
+        "through KernelLauncher.from_artifact instead of packing it"
+    )
+    assert not (tmp_path / "co").exists()
+
+
+def test_a_kernel_stating_no_launch_facts_still_packs(
+    tmp_path, rocke_available, rocke_importable
+):
+    """The same producer's fact-free kernel compiles through comgr and packs."""
+    src = _write_stub_pkg(tmp_path, _CONTRACT_PRODUCER, pkg="stubpkg_contract_ok")
+    co, symbol, _observations = compile_rocke_variant(
+        src, "build_without_facts", {"n": 1}, ARCH, tmp_path / "co"
+    )
+    assert symbol == "states_nothing"
+    assert co.read_bytes()[:4] == b"\x7fELF"

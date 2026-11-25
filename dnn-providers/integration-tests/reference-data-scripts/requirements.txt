@@ -5,3 +5,7 @@
 # or a CPU-only wheel for local development:
 #   pip install torch
 torch
+
+# generate_sdpa_bwd_bundles.py --calibrate (the magnitude estimates behind the
+# SdpaBackward tolerance classes). Generating the bundles needs no third-party package.
+numpy

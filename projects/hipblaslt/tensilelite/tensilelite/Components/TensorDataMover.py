@@ -6,11 +6,11 @@ from typing import Mapping, Optional
 from rocisa.code import Module, Label
 from rocisa.instruction import SMovB32, SMovB64, SOrB32, SAndB32, SLShiftLeftB32, SLShiftLeftB64, \
     SLShiftRightB32, SAddU32, SAddCU32, SMulI32, SBranch, SCBranchSCC1, SCSelectB32, TensorLoadToLds, \
-    VReadfirstlaneB32
+    VReadfirstlaneB32, SSubU32
 from rocisa.container import sgpr, vgpr, RegisterContainer, ContinuousRegister, MemTokenData, TENSORModifiers
 from rocisa.functions import scalarMultiply64Bpe
 from math import log2, ceil, prod
-from ..Common.MxScaleLayout import mxFreeTile, mulScaleRows, mxTdmMSplitStride, mxTdmTileM
+from ..Common.MxScaleLayout import mxFreeTile, mulScaleRows, mxTdmMSplitStride, mxTdmTileM, mxSegmentSplit
 # from ..KernelWriterAssembly import KernelWriterAssembly
 
 
@@ -71,6 +71,21 @@ class TensorDataMoverLoad(TensorDataMover):
         mod.add(gsucLabelEnd)
         return mod
 
+    @staticmethod
+    def swizzledTileStride(tp: Mapping, dstSgprIdx: int, mt: int, bpe: float) -> Module:
+        """Bytes between consecutive macro-tiles of a swizzled-TDM operand.
+
+        The host lays the operand out densely as [tile/MI, paddedK/swzK, ..., MI, ...] with
+        paddedK = alignUp(SizeL, padK) and ignores the leading-dimension stride, so one
+        macro-tile spans MT * paddedK elements rather than MT * Stride{tc}{free}.
+        """
+        mod = Module("swizzled-TDM tile stride")
+        padK = tp["swzGeom"].padK
+        mod.add(SAddU32(sgpr(dstSgprIdx), sgpr("SizeL"), padK - 1, f"paddedK = SizeL + padK({padK})-1"))
+        mod.add(SAndB32(sgpr(dstSgprIdx), sgpr(dstSgprIdx), hex(0xFFFFFFFF & ~(padK - 1)), "paddedK = alignUp(SizeL, padK)"))
+        mod.add(SMulI32(sgpr(dstSgprIdx), sgpr(dstSgprIdx), round(mt * bpe), f"swizzled tile stride = paddedK * MT({mt}) * bpe({bpe})"))
+        return mod
+
     def calculateStartAddr(self, writer: "KernelWriterAssembly", kernel: Mapping, tp: Mapping, sgprAddr: int | str) -> Module:
         mod = Module()
         tc: str = tp["tensorChar"]
@@ -123,6 +138,8 @@ class TensorDataMoverLoad(TensorDataMover):
                     mod.add(SMulI32(sgpr(tmpSgprIdx), sgpr(tmpSgprIdx), round(mt), f"stride *= MT({mt})"))
                 else:
                     mod.add(SMovB32(sgpr(tmpSgprIdx), mt, f"stride = MT({mt})"))
+            elif tp.get("isSwizzledTDM"):
+                mod.add(self.swizzledTileStride(tp, tmpSgprIdx, mt, bpe))
             else:
                 mod.add(SMulI32(sgpr(tmpSgprIdx), tileStride, round(mt * bpe), f"stride * MT({mt}) * bpe({bpe})"))
             mod.addModuleAsFlatItems(writer.s_mul_u64_u32(sgpr(tmpSgprIdx), sgpr(tmpSgprIdx+1), sgpr(tmpSgprIdx), sgpr(sgprWorkgroupName), comment="*= wgId"))
@@ -150,13 +167,19 @@ class TensorDataMoverLoad(TensorDataMover):
             if kernel["GlobalSplitU"] > 0 or kernel["GlobalSplitU"] == -1:
                 gsuOffsetSgprIdx = waveOffsetSgprIdx
                 mod.add(self.gsuIterOffset(writer, kernel, tc, gsuOffsetSgprIdx))
-                mod.add(SMulI32(sgpr(gsuOffsetSgprIdx), sgpr(gsuOffsetSgprIdx), gsuOffsetBytes, f"gsuOffset = gsuIterOffset * DepthU({depthU}) * bpe({bpe})"))
-                if "MXS" in tc:
-                    mod.add(self.mulScaleKRowPitch(writer, kernel, tc, tIdx, gsuOffsetSgprIdx,
-                                                   "MXS: scale GSU offset by the K-row pitch"))
-                elif tlu:
-                    unrollStride = writer.strideRef(tc, unrollSummation[-1])
-                    mod.add(SMulI32(sgpr(gsuOffsetSgprIdx), sgpr(gsuOffsetSgprIdx), unrollStride, "tlu=1, scale GSU offset by unroll stride"))
+                if tp.get("isSwizzledTDM"):
+                    # Swizzled tensor is contiguous in K at MI_dim*DepthU stride (matches the per-iter
+                    # GlobalReadIncs); K-chunk start = gsuIterOffset * MI_dim*DepthU*bpe, no tlu/MXS scaling.
+                    geom = tp["swzGeom"]
+                    mod.add(SMulI32(sgpr(gsuOffsetSgprIdx), sgpr(gsuOffsetSgprIdx), geom.kIterBytes(), f"swizzle: gsuOffset = gsuIterOffset * MI({geom.mi})*DepthU({geom.depthU})*bpe({geom.bpe})"))
+                else:
+                    mod.add(SMulI32(sgpr(gsuOffsetSgprIdx), sgpr(gsuOffsetSgprIdx), gsuOffsetBytes, f"gsuOffset = gsuIterOffset * DepthU({depthU}) * bpe({bpe})"))
+                    if "MXS" in tc:
+                        mod.add(self.mulScaleKRowPitch(writer, kernel, tc, tIdx, gsuOffsetSgprIdx,
+                                                       "MXS: scale GSU offset by the K-row pitch"))
+                    elif tlu:
+                        unrollStride = writer.strideRef(tc, unrollSummation[-1])
+                        mod.add(SMulI32(sgpr(gsuOffsetSgprIdx), sgpr(gsuOffsetSgprIdx), unrollStride, "tlu=1, scale GSU offset by unroll stride"))
                 mod.add(SAddU32(sgpr(tmpSgprIdx), sgpr(tmpSgprIdx), sgpr(gsuOffsetSgprIdx), "+= gsuOffset"))
                 mod.add(SAddCU32(sgpr(tmpSgprIdx+1), sgpr(tmpSgprIdx+1), 0, "+= gsuOffset carry"))
             mod.add(SAddU32(sgpr(sgprAddr), sgpr(tmpSgprIdx), sgpr(sgprAddr), "+= baseAddr(lo)"))
@@ -222,7 +245,7 @@ class TensorDataMoverLoad(TensorDataMover):
         mod.addComment(f"TDM wave separated calc start addr of {tc}")
 
         with writer.allocTmpSgpr(3, tag="TensorDataMoverLoadWaveSeparated_tmpSgprRes") as tmpSgprRes:
-            numComp, compShift = tdmWaveComponents(kernel, tc)
+            numComp, compShift, compOffset = tdmWaveComponents(kernel, tc)
             tmpSgprIdx = tmpSgprRes.idx
             waveOffsetSgprIdx = tmpSgprRes.idx + 2
             mod.add(SMovB64(sgpr(tmpSgprIdx, 2), 0))
@@ -237,11 +260,18 @@ class TensorDataMoverLoad(TensorDataMover):
                     mtScale = mxTdmTileM(mt, mxTile)
                     mod.add(SMulI32(sgpr(tmpSgprIdx), sgpr(sgprWorkgroupName), round(mxUnit * mtScale * bpe), f"wgId * mxUnit({mxUnit}) * (MT({mt})/MXBlockFree({mxTile})) * bpe({bpe})"))
             else:
-                mod.add(SMulI32(sgpr(tmpSgprIdx), tileStride, round(mt * bpe), f"tileStride * MT({mt}) * bpe({bpe})"))
+                if tp.get("isSwizzledTDM"):
+                    mod.add(self.swizzledTileStride(tp, tmpSgprIdx, mt, bpe))
+                else:
+                    mod.add(SMulI32(sgpr(tmpSgprIdx), tileStride, round(mt * bpe), f"tileStride * MT({mt}) * bpe({bpe})"))
                 mod.addModuleAsFlatItems(writer.s_mul_u64_u32(sgpr(tmpSgprIdx), sgpr(tmpSgprIdx+1), sgpr(tmpSgprIdx), sgpr(sgprWorkgroupName), comment="*= wgId"))
             #add wave offset
             if compShift is None:
                 mod.add(SMovB32(sgpr(waveOffsetSgprIdx), 0, "wCompId = 0 (one wave carries this tensor)"))
+            elif compOffset:
+                mod.add(SSubU32(sgpr(waveOffsetSgprIdx), sgpr(waveIdxSgpr), compOffset, f"wCompId = WaveIdx - {compOffset}"))
+                if compShift:
+                    mod.add(SLShiftRightB32(sgpr(waveOffsetSgprIdx), compShift, sgpr(waveOffsetSgprIdx), f"wCompId >>= {compShift}"))
             elif compShift == 0:
                 mod.add(SMovB32(sgpr(waveOffsetSgprIdx), sgpr(waveIdxSgpr), f"wCompId = WaveIdx = fTid // wavelen({wavelen})"))
             else:
@@ -250,7 +280,7 @@ class TensorDataMoverLoad(TensorDataMover):
                 mxDU = kernel["DepthU"] // kernel["ProblemType"][f"MXBlock{subTc}"]
                 numMxKGroups = mxDU // mxUnit
                 mxTile = mxFreeTile(kernel, tc)
-                if numMxKGroups >= numComp:
+                if numMxKGroups >= numComp and not mxSegmentSplit(kernel, tc):
                     # K-splitting: offset by stride to next k_group
                     scale = numMxKGroups // numComp
                     mod.add(SMulI32(sgpr(waveOffsetSgprIdx), sgpr(waveOffsetSgprIdx), (mxUnit * numMxKGroups // numComp), f"woffset = wCompId * mxUnit({mxUnit}) * numMxKGroups({numMxKGroups}) // numComp({numComp})"))
@@ -262,6 +292,22 @@ class TensorDataMoverLoad(TensorDataMover):
                     # (extra comps are 0-wide via dim0).
                     mSplit = mxTdmMSplitStride(mt, mxTile, numComp)
                     mod.add(SMulI32(sgpr(waveOffsetSgprIdx), sgpr(waveOffsetSgprIdx), round(mSplit * mxUnit * bpe), f"woffset = wCompId * mSplit({mSplit}) * mxUnit({mxUnit}) * bpe({bpe})"))
+            elif tp.get("isSwizzledTDM"):
+                # Swizzled-B: host buffer is nO-major with row stride0 = MI_N*paddedK (elements),
+                # paddedK = roundup(SizeL, padK). Component wCompId loads rowsPerComp nO rows ->
+                # woffset = wCompId * rowsPerComp * MI_N * paddedK * bpe.
+                geom        = tp["swzGeom"]                 # SwizzledTdmGeometry.compGlobalOffsetBytes
+                swzMiN      = geom.mi
+                padK        = geom.padK
+                rowsPerComp, swzReplicate = geom.compRows(numComp)
+                if swzReplicate:
+                    rowsPerComp = 0  # every component loads the whole tile from the WG base
+                with writer.allocTmpSgpr(1, tag="swzWSglobal") as swzTmp:
+                    pk = swzTmp.idx
+                    mod.add(SAddU32(sgpr(pk), sgpr("SizeL"), padK - 1, "paddedK = SizeL + padK-1"))
+                    mod.add(SAndB32(sgpr(pk), sgpr(pk), hex(0xFFFFFFFF & ~(padK - 1)), "paddedK &= ~(padK-1)"))
+                    mod.add(SMulI32(sgpr(pk), sgpr(pk), round(swzMiN * rowsPerComp * bpe), f"stride0*rowsPerComp*bpe = MI_N*paddedK*{rowsPerComp}*{bpe}"))
+                    mod.add(SMulI32(sgpr(waveOffsetSgprIdx), sgpr(waveOffsetSgprIdx), sgpr(pk), "woffset = wCompId * rowsPerComp * MI_N*paddedK*bpe"))
             else:
                 mod.add(SMulI32(sgpr(waveOffsetSgprIdx), sgpr(waveOffsetSgprIdx), round(tile1Size // numComp * bpe // tdmSplit), f"woffset = wCompId * mt // numComp({numComp}) * bpe({bpe}) // tdmSplit({tdmSplit})"))
                 mod.add(SMulI32(sgpr(waveOffsetSgprIdx), sgpr(waveOffsetSgprIdx), tdmSeparateStride, f"woffset *= tdmSeparateStride"))
@@ -271,13 +317,19 @@ class TensorDataMoverLoad(TensorDataMover):
             if kernel["GlobalSplitU"] > 0 or kernel["GlobalSplitU"] == -1:
                 gsuOffsetSgprIdx = waveOffsetSgprIdx
                 mod.add(self.gsuIterOffset(writer, kernel, tc, gsuOffsetSgprIdx))
-                mod.add(SMulI32(sgpr(gsuOffsetSgprIdx), sgpr(gsuOffsetSgprIdx), gsuOffsetBytes, f"gsuOffset = gsuIterOffset * DepthU({depthU}) * bpe({bpe})"))
-                if "MXS" in tc:
-                    mod.add(self.mulScaleKRowPitch(writer, kernel, tc, tIdx, gsuOffsetSgprIdx,
-                                                   "MXS: scale GSU offset by the K-row pitch"))
-                elif tlu:
-                    unrollStride = writer.strideRef(tc, unrollSummation[-1])
-                    mod.add(SMulI32(sgpr(gsuOffsetSgprIdx), sgpr(gsuOffsetSgprIdx), unrollStride, "tlu=1, scale GSU offset by unroll stride"))
+                if tp.get("isSwizzledTDM"):
+                    # Swizzled tensor is contiguous in K at MI_dim*DepthU stride (matches the per-iter
+                    # GlobalReadIncs); K-chunk start = gsuIterOffset * MI_dim*DepthU*bpe, no tlu/MXS scaling.
+                    geom = tp["swzGeom"]
+                    mod.add(SMulI32(sgpr(gsuOffsetSgprIdx), sgpr(gsuOffsetSgprIdx), geom.kIterBytes(), f"swizzle: gsuOffset = gsuIterOffset * MI({geom.mi})*DepthU({geom.depthU})*bpe({geom.bpe})"))
+                else:
+                    mod.add(SMulI32(sgpr(gsuOffsetSgprIdx), sgpr(gsuOffsetSgprIdx), gsuOffsetBytes, f"gsuOffset = gsuIterOffset * DepthU({depthU}) * bpe({bpe})"))
+                    if "MXS" in tc:
+                        mod.add(self.mulScaleKRowPitch(writer, kernel, tc, tIdx, gsuOffsetSgprIdx,
+                                                       "MXS: scale GSU offset by the K-row pitch"))
+                    elif tlu:
+                        unrollStride = writer.strideRef(tc, unrollSummation[-1])
+                        mod.add(SMulI32(sgpr(gsuOffsetSgprIdx), sgpr(gsuOffsetSgprIdx), unrollStride, "tlu=1, scale GSU offset by unroll stride"))
                 mod.add(SAddU32(sgpr(tmpSgprIdx), sgpr(tmpSgprIdx), sgpr(gsuOffsetSgprIdx), "+= gsuOffset"))
                 mod.add(SAddCU32(sgpr(tmpSgprIdx+1), sgpr(tmpSgprIdx+1), 0, "+= gsuOffset carry"))
             if dstGroup0 is not None:

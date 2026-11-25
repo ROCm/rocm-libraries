@@ -251,9 +251,30 @@ def mint_ids(
     ids["ued"] = take(engine.ued["id"] if engine else None)
     ids["kernel_match"] = take(engine.kernel_match_umd["id"] if engine else None)
     if config.engine.has_heuristic:
-        ids["uhd"] = take(engine.uhd["id"] if engine and engine.uhd else None)
+        # engine.uhd's first entry is always the native fallback this config
+        # regenerates; any trailing entries are promoted-model ids a human
+        # applied from a packet, not newly minted. They are carried through
+        # unchanged (ids[("uhd_promoted", i)]) rather than dropped, since
+        # nothing here can regenerate a trained ranker.
+        ids["uhd"] = take(engine.uhd[0]["id"] if engine and engine.uhd else None)
+        for index, promoted_doc in enumerate(
+            engine.uhd[1:] if engine and engine.uhd else ()
+        ):
+            promoted_id = promoted_doc["id"]
+            if promoted_id in claimed:
+                raise ValueError(
+                    f"promoted UHD id {promoted_id!r} collides with another "
+                    "descriptor's id"
+                )
+            claimed.add(promoted_id)
+            ids[("uhd_promoted", index)] = promoted_id
     if not config.is_slotted:
         ids["udd"] = take(engine.udd["id"] if engine and engine.udd else None)
+        # A pack-named dispatch has no prior-id source of its own yet (the engine
+        # bundle holds one UDD, not a collection keyed by dispatch name), so each
+        # one mints fresh every run, same as before this function tracked ids.
+        for dispatch in config.pack_dispatches[1:]:
+            ids[("udd", dispatch)] = take(None)
 
     prior_packs = {kdp.name: kdp for kdp in prior.kdps} if prior else {}
 
@@ -373,7 +394,8 @@ def mint_ids(
             ids[slot] = take(None)
     for slot in dropped:
         ids[slot] = take(None)
-    assert len(set(ids.values())) == len(ids), "mint_ids assigned an id twice"
+    if len(set(ids.values())) != len(ids):
+        raise ValueError("mint_ids assigned an id twice")
     return ids
 
 
@@ -458,13 +480,32 @@ def build_ued(config: IngestorConfig, ids: dict) -> dict:
         "graph_match": {"native": config.graph_match_symbol},
         "metadata": ids["kmd"],
     }
+    bindings = config.engine.heuristics
     if config.engine.has_heuristic:
         # RFC 0019 §3.1: the loader rejects a bare top-level `heuristic` pointer.
-        ued["sort_kernel_catalog"] = {"default": ids["uhd"]}
+        # A promoted model's id, carried through from the prior bundle, rides
+        # after the native fallback (prior_ids.py's EngineDocs.uhd ordering);
+        # regenerating must not silently switch the engine back to the fallback.
+        promoted = [
+            ids[k]
+            for k in sorted(
+                k for k in ids if isinstance(k, tuple) and k[0] == "uhd_promoted"
+            )
+        ]
+        default = [ids["uhd"], *promoted] if promoted else ids["uhd"]
+        # Arch entries follow `default`, where `uhd_gen promote` inserts them.
+        ued["sort_kernel_catalog"] = {
+            "default": default,
+            **bindings.get("sort_kernel_catalog", {}),
+        }
     if config.engine.knobs:
         ued["knobs"] = list(config.engine.knobs)
     if config.engine.behavior_notes:
         ued["behavior_notes"] = list(config.engine.behavior_notes)
+    # `promote` appends a new role at the end of the document.
+    for role, arches in bindings.items():
+        if role != "sort_kernel_catalog":
+            ued[role] = dict(arches)
     return ued
 
 
@@ -496,13 +537,28 @@ def _build_slotted_ued(config: IngestorConfig, ids: dict) -> dict:
     return ued
 
 
-def build_udd(config: IngestorConfig, ids: dict) -> dict:
+def build_udd(config: IngestorConfig, ids: dict, dispatch: str = "") -> dict:
+    """The UDD of the engine's own dispatch handler, or of the one a pack's
+    ``dispatch`` names."""
+    if not dispatch:
+        return {
+            "version": "1.0",
+            "id": ids["udd"],
+            "name": f"{config.engine.local_name} dispatch",
+            "dispatch_symbol": config.dispatch_symbol,
+        }
     return {
         "version": "1.0",
-        "id": ids["udd"],
-        "name": f"{config.engine.local_name} dispatch",
-        "dispatch_symbol": config.dispatch_symbol,
+        "id": ids[("udd", dispatch)],
+        "name": f"{config.engine.local_name} {dispatch} dispatch",
+        "dispatch_symbol": f"{config.native_symbol_namespace}.{dispatch}_dispatch",
     }
+
+
+def udd_filename(config: IngestorConfig, dispatch: str = "") -> str:
+    """The UDD file of ``dispatch`` ("" for the engine's own handler)."""
+    slug = config.engine.slug
+    return f"{slug}.udd.json" if not dispatch else f"{slug}_{dispatch}.udd.json"
 
 
 def build_slot_udd(config: IngestorConfig, slot: SlotSpec, ids: dict) -> dict:
@@ -589,8 +645,9 @@ def _check_metadata_resolved(
     ``kernel_source.spec``.
 
     An absent knob takes the KMD ``default_value`` as its catalog key while the
-    binary was built from the builder dataclass's default. Mandatory fields are
-    left to the config loader.
+    binary was built from the builder dataclass's default, unless the KMD field
+    declares ``builder_default`` (the two defaults are the same value). Mandatory
+    fields are left to the config loader.
     """
     # A prebuilt hsaco object has no spec to pin a knob in; only metadata decides.
     prebuilt = kernel.kernel_source.kind == KERNEL_SOURCE_KIND_HSACO
@@ -610,10 +667,15 @@ def _check_metadata_resolved(
         )
 
     spec = kernel.kernel_source.spec or {}
+    # A `builder_default` field is declared to share its default with the
+    # builder's dataclass, so leaving it out of both layers decides it.
     undeclared = sorted(
         f.name
         for f in config.kmd_fields
-        if not f.is_mandatory and f.name not in metadata and spec.get(f.name) is None
+        if not f.is_mandatory
+        and not f.builder_default
+        and f.name not in metadata
+        and spec.get(f.name) is None
     )
     if undeclared:
         where = (
@@ -835,8 +897,14 @@ def build_kdp(
     pack: PackSpec,
     ids: dict,
     seen_metadata: dict | None = None,
+    generated_from: dict | None = None,
 ) -> dict:
     """One pack's KDP.
+
+    ``generated_from`` (see `codegen.provenance`) is stamped as
+    ``provenance.generated_from`` when given. It names the inputs a generation
+    came from and changes with every commit, so it is opt-in: a render without
+    it stays a pure function of the config.
 
     ``seen_metadata`` carries de-duplication state across the packs of one
     engine; pass the same dict to every ``build_kdp`` call for a config.
@@ -935,6 +1003,8 @@ def build_kdp(
             "metadata": metadata,
             "priority": kernel.priority,
         }
+        if kernel.provenance:
+            entry["provenance"] = dict(kernel.provenance)
         # hkp_pack validates the kernel's own arch for hsaco and rejects a
         # wildcard, so the inherited pack arch is stated on the descriptor.
         if kernel.kernel_source.kind == KERNEL_SOURCE_KIND_HSACO:
@@ -981,7 +1051,9 @@ def build_kdp(
         "matchers": matchers,
         "engine": ids["ued"],
         "dispatch": (
-            ids[_slot_key("udd", config, slot)] if slot is not None else ids["udd"]
+            ids[_slot_key("udd", config, slot)]
+            if slot is not None
+            else ids[("udd", pack.dispatch)] if pack.dispatch else ids["udd"]
         ),
         # Declared once per pack, after minting, since every kernel shares one
         # engine, KMD and field partition. A reader resolves a kernel's own
@@ -992,6 +1064,8 @@ def build_kdp(
     }
     if slot is not None:
         kdp["slot"] = slot.name
+    if generated_from:
+        kdp["provenance"]["generated_from"] = dict(generated_from)
     if pack.arch:
         kdp["arch"] = list(pack.arch)
     elif config.is_packaged:
@@ -1003,7 +1077,10 @@ def build_kdp(
 
 
 def build_kdp_documents(
-    config: IngestorConfig, ids: dict, seed: dict | None = None
+    config: IngestorConfig,
+    ids: dict,
+    seed: dict | None = None,
+    generated_from: dict | None = None,
 ) -> list:
     """Every pack's KDP, ``[(pack, document), ...]``, de-duplicated engine-wide
     (per slot for a slotted engine). The single de-duplication scope; see
@@ -1012,12 +1089,18 @@ def build_kdp_documents(
     ``seed`` pre-fills the de-duplication state with the kernels of sibling
     bundles of the same engine (see `resolve_ids`); it is copied, not mutated.
     Siblings are single-pack and unslotted, so the seed lands in the unslotted
-    scope."""
+    scope. ``generated_from`` is stamped on every KDP (see `build_kdp`)."""
     seen_by_scope: dict = {"": copy.deepcopy(seed)} if seed else {}
     return [
         (
             pack,
-            build_kdp(config, pack, ids, seen_by_scope.setdefault(pack.slot, {})),
+            build_kdp(
+                config,
+                pack,
+                ids,
+                seen_by_scope.setdefault(pack.slot, {}),
+                generated_from,
+            ),
         )
         for pack in config.packs
     ]
@@ -1092,12 +1175,12 @@ def _check_sibling_mode(config: IngestorConfig) -> None:
             "is its own pack root, so a satellite's engine, dispatch and matcher "
             "references could not resolve there."
         )
-    if config.is_multi_pack:
+    if config.has_operation_matchers:
         raise prior_ids.NotOverridable(
-            "sibling bundles need a single-pack bundle: a multi-pack engine's "
-            "operation matcher names a symbol only that bundle's own Native.cpp "
-            "registers. Another bundle of this engine, named to the run or found "
-            "beside this one in the provider tree, puts the config in sibling mode."
+            "sibling bundles need a bundle without operation matchers: a matcher "
+            "names a symbol only that bundle's own Native.cpp registers. Another "
+            "bundle of this engine, named to the run or found beside this one in "
+            "the provider tree, puts the config in sibling mode."
         )
 
 
@@ -1109,8 +1192,11 @@ def resolve_ids(
     *,
     fresh: bool = False,
     also_from: Path | None = None,
+    generated_from: dict | None = None,
 ) -> IdResolution:
     """Find this bundle's previous version, assign every id, and build the KDPs.
+
+    ``generated_from`` is stamped on every KDP built here (see `build_kdp`).
 
     ``ids_from`` is the previous version of this bundle and is strict: any
     problem reading it raises. Without it, ``output_dir / config.descriptor_dir``
@@ -1145,7 +1231,7 @@ def resolve_ids(
                 "to reuse them"
             )
         ids = mint_ids(config)
-        kdp_documents = build_kdp_documents(config, ids)
+        kdp_documents = build_kdp_documents(config, ids, generated_from=generated_from)
         report = _report(config, ids, kdp_documents, None, None, None, None)
         return IdResolution(
             ids=ids,
@@ -1202,9 +1288,11 @@ def resolve_ids(
         engine_id = engine.ued["id"]
         match_id = engine.kernel_match_umd["id"]
         if use_own:
-            own = prior_ids.read_prior_bundle(own_root, engine_id, match_id)
+            own = prior_ids.read_prior_bundle(
+                own_root, engine_id, match_id, home_root=home_root
+            )
         siblings = [
-            prior_ids.read_prior_bundle(root, engine_id, match_id)
+            prior_ids.read_prior_bundle(root, engine_id, match_id, home_root=home_root)
             for root in sibling_roots
         ]
         bundles = [bundle for bundle in (own, *siblings) if bundle is not None]
@@ -1232,12 +1320,20 @@ def resolve_ids(
                         f"{kdp.path}: slot {kdp.slot!r} is not a slot of the UED "
                         f"{engine.ued['id']} (slots: {sorted(engine.slots)})"
                     )
-                home_udd = engine.slots[kdp.slot].udd if engine.slots else engine.udd
-                if kdp.dispatch != home_udd["id"]:
-                    raise ValueError(
-                        f"{kdp.path}: dispatch {kdp.dispatch} is not the home's UDD "
-                        f"{home_udd['id']}"
-                    )
+                if engine.slots:
+                    # A slot has exactly one dispatch handler (RFC 0021 §4): every KDP
+                    # naming it must agree on the slot's own UDD.
+                    home_udd = engine.slots[kdp.slot].udd
+                    if kdp.dispatch != home_udd["id"]:
+                        raise ValueError(
+                            f"{kdp.path}: dispatch {kdp.dispatch} is not the home's "
+                            f"UDD {home_udd['id']}"
+                        )
+                # An unslotted engine's packs may each name their own dispatch (e.g.
+                # "split_c"), each with its own UDD: `read_prior_bundle` has already
+                # resolved every KDP's `dispatch` to a real UDD under this bundle
+                # (prior_ids._check_each_dispatch_resolves), so there is nothing further
+                # to check here beyond that resolution.
                 if sibling_roots and kdp.operation_umd_id is not None:
                     raise ValueError(
                         f"{kdp.path} carries a graph-scope operation matcher, which "
@@ -1296,7 +1392,10 @@ def resolve_ids(
                 )
             else:
                 supplement = prior_ids.read_prior_bundle(
-                    also_from, engine.ued["id"], engine.kernel_match_umd["id"]
+                    also_from,
+                    engine.ued["id"],
+                    engine.kernel_match_umd["id"],
+                    home_root=home_root,
                 )
         except ValueError as e:
             warnings.append(f"{also_from} is ignored as a source of ids: {e}")
@@ -1363,7 +1462,10 @@ def resolve_ids(
                 build_kernel_match_umd(config, ids),
                 engine.kernel_match_umd,
             ),
-            "uhd": (build_uhd(config, ids), engine.uhd),
+            # The home's "default" may be a list (native fallback + a promoted
+            # model); only the native fallback, always first, is what this
+            # engine's own config regenerates.
+            "uhd": (build_uhd(config, ids), engine.uhd[0] if engine.uhd else None),
         }
         for name, (generated, home_doc) in built.items():
             if generated != home_doc:
@@ -1374,7 +1476,7 @@ def resolve_ids(
                     f"through completion and through specialization_contract.kmd_id."
                 )
 
-    kdp_documents = build_kdp_documents(config, ids, seed)
+    kdp_documents = build_kdp_documents(config, ids, seed, generated_from)
     report = _report(
         config,
         ids,
@@ -1415,7 +1517,7 @@ def _report(
                 engine.kmd,
                 engine.udd,
                 engine.kernel_match_umd,
-                engine.uhd,
+                *(engine.uhd or ()),
                 *(d for slot in engine.slots.values() for d in (slot.kmd, slot.uhd)),
             )
             if doc
@@ -1594,8 +1696,7 @@ class IngestorGenerator:
             files = [
                 f"{ddir}/{slug}.kmd.json",
                 f"{ddir}/{slug}.ued.json",
-                f"{ddir}/{slug}.udd.json",
-            ]
+            ] + [f"{ddir}/{udd_filename(config, d)}" for d in config.pack_dispatches]
             if config.engine.has_heuristic:
                 files.append(f"{ddir}/{slug}.uhd.json")
         files.append(f"{ddir}/kernel_dtype_matches_graph.umd.json")
@@ -1695,7 +1796,11 @@ class IngestorGenerator:
             else:
                 write_json(f"{ddir}/{slug}.kmd.json", build_kmd(config, ids))
                 write_json(f"{ddir}/{slug}.ued.json", build_ued(config, ids))
-                write_json(f"{ddir}/{slug}.udd.json", build_udd(config, ids))
+                for dispatch in config.pack_dispatches:
+                    write_json(
+                        f"{ddir}/{udd_filename(config, dispatch)}",
+                        build_udd(config, ids, dispatch),
+                    )
                 uhd = build_uhd(config, ids)
                 if uhd is not None:
                     write_json(f"{ddir}/{slug}.uhd.json", uhd)

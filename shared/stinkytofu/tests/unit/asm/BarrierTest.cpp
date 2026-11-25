@@ -141,6 +141,9 @@ class BarrierTest : public ::testing::Test {
 TEST_F(BarrierTest, LegalizeBarrier_Gfx1250_ExpandsToSignalAndWait) {
     StinkyInstruction* barrier = createSBarrier();
     ASSERT_NE(barrier, nullptr);
+    const GirActionData action{
+        17, 9, GirActionKind::Other, {GirAccessData{false, 3, 2, 1, -1, -1, true}}};
+    barrier->addModifier<GirActionData>(action);
 
     // Before legalization: exactly one s_barrier in the block.
     EXPECT_EQ(countByMnemonic("s_barrier"), 1);
@@ -172,6 +175,17 @@ TEST_F(BarrierTest, LegalizeBarrier_Gfx1250_ExpandsToSignalAndWait) {
         << "Second legalized instruction should be s_barrier_wait";
     EXPECT_TRUE(isSplitBarrierAllWave(*result.last))
         << "s_barrier_wait should carry -1 (all-wave) operand";
+
+    // One logical GIR action may legalize into multiple physical instructions. Every
+    // realization carries the complete record; GirFrameAnalysis de-duplicates accesses by id.
+    for (StinkyInstruction* half : {result.first, result.last}) {
+        const GirActionData* actual = half->getModifier<GirActionData>();
+        ASSERT_NE(actual, nullptr);
+        EXPECT_EQ(actual->actionId, action.actionId);
+        EXPECT_EQ(actual->anchorAction, action.anchorAction);
+        EXPECT_EQ(actual->kind, action.kind);
+        EXPECT_EQ(actual->accesses, action.accesses);
+    }
 }
 
 // Three independent memory-token groups are emitted into one block.
@@ -285,4 +299,43 @@ TEST_F(BarrierTest, TokenGrouped_PassesPreserveOrderWithinGroup) {
     EXPECT_LT(getPos(g2_wait), getPos(g2_dsLoad1)) << "g2: s_barrier_wait must precede ds_load1";
     EXPECT_LT(getPos(g2_wait), getPos(g2_tensorLoad1))
         << "g2: s_barrier_wait must precede tensor_load1";
+}
+
+TEST_F(BarrierTest, TensorContractSurvivesLegacyBarrierLegalization) {
+    auto* barrier = createSBarrier();
+    ASSERT_NE(barrier, nullptr);
+    barrier->addModifier<MemTokenData>(MemTokenData{{1}});
+    barrier->addModifier<SWaitTensorCntData>(SWaitTensorCntData{2});
+    AsmIRBuilder builder(*bb, arch);
+    auto legalized = legalizeBarrier(barrier, builder, arch);
+    ASSERT_NE(legalized.first, nullptr);
+    ASSERT_NE(legalized.last, nullptr);
+    ASSERT_NE(legalized.first->getModifier<SWaitTensorCntData>(), nullptr);
+    EXPECT_EQ(legalized.first->getModifier<SWaitTensorCntData>()->tlcnt, 2);
+    EXPECT_EQ(legalized.last->getModifier<SWaitTensorCntData>(), nullptr);
+}
+
+TEST_F(BarrierTest, TensorContractPinsBarrierAgainstDisjointProducer) {
+    AsmIRBuilder builder(*bb, arch);
+    auto makeLoad = [&](int token) {
+        auto* load = builder.create(getMCIDByUOp(GFX::tensor_load_to_lds, arch));
+        load->addSrcReg(StinkyRegister("s", 0, 4));
+        load->addSrcReg(StinkyRegister("s", 4, 8));
+        load->addModifier<MemTokenData>(MemTokenData{{token}});
+        return load;
+    };
+    auto* before = makeLoad(0);
+    auto* signal = createSBarrierSignal(-1, {1});
+    signal->addModifier<SWaitTensorCntData>(SWaitTensorCntData{1});
+    createSBarrierWait(-1, {1});
+    auto* after = makeLoad(2);
+    runPasses();
+    EXPECT_TRUE(hasSideEffect(*signal));
+    std::vector<const StinkyInstruction*> order;
+    for (auto& ir : *bb)
+        if (auto* inst = dyn_cast<StinkyInstruction>(&ir)) order.push_back(inst);
+    EXPECT_LT(std::find(order.begin(), order.end(), before),
+              std::find(order.begin(), order.end(), signal));
+    EXPECT_LT(std::find(order.begin(), order.end(), signal),
+              std::find(order.begin(), order.end(), after));
 }

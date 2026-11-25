@@ -817,8 +817,10 @@ def case_block_scale_gemm() -> Result:
     B_f32 = torch.randn(K, N, dtype=torch.float32, device="cuda") * 0.3
     A_fp8 = A_f32.to(torch.float8_e4m3fn)
     B_fp8 = B_f32.to(torch.float8_e4m3fn)
-    a_scale = torch.full((M, 1), 1.5, dtype=torch.float32, device="cuda")
-    b_scale = torch.full((1, N), 0.7, dtype=torch.float32, device="cuda")
+    # A scale per row and B scale per column, each different, so an output
+    # scaled with another row's or column's scale misses the reference.
+    a_scale = 1.0 + torch.rand(M, 1, dtype=torch.float32, device="cuda")
+    b_scale = 0.5 + 0.5 * torch.rand(1, N, dtype=torch.float32, device="cuda")
     C = torch.zeros(M, N, dtype=torch.float32, device="cuda")
     _launch(
         launcher,
@@ -849,7 +851,9 @@ def case_mx_gemm() -> Result:
     _require_ocp_fp8_arch("mx_gemm")
     M = N = 32
     K = 64  # 2 MX blocks
-    spec = MxGemmSpec(M=M, N=N, K=K, mantissa_dtype="fp8e4m3")
+    spec = MxGemmSpec(
+        M=M, N=N, K=K, block_tile_m=32, block_tile_n=128, mantissa_dtype="fp8e4m3"
+    )
     kernel = build_mx_gemm(spec, arch=_ARCH)
     art = _compile(kernel)
     launcher = KernelLauncher(
@@ -862,8 +866,9 @@ def case_mx_gemm() -> Result:
     B_f32 = torch.randn(K, N, dtype=torch.float32, device="cuda") * 0.3
     A_fp8 = A_f32.to(torch.float8_e4m3fn)
     B_fp8 = B_f32.to(torch.float8_e4m3fn)
-    # MX shared-exponent E8M0 byte: bias=127. e=127 => scale 1.0.
-    a_scale = torch.full((M, K // 32), 127, dtype=torch.uint8, device="cuda").to(
+    # MX shared-exponent E8M0 byte: bias=127. e=127 => scale 1.0. Both scale
+    # tensors are K-major: (K / 32, M) and (K / 32, N).
+    a_scale = torch.full((K // 32, M), 127, dtype=torch.uint8, device="cuda").to(
         torch.int8
     )
     b_scale = torch.full((K // 32, N), 127, dtype=torch.uint8, device="cuda").to(

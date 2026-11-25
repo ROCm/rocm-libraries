@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -413,6 +413,17 @@ GENERATE_P_TEST_CASES(parameterized_local_vector_test, testing_asum, asum)
 // Test for LocalVector::Amax(ValueType& value) const
 GENERATE_P_TEST_CASES(parameterized_local_vector_test, testing_amax, amax)
 
+// Host-only and cheap: run in every tier, including the emulation tiers used by CI
+TEST(local_vector_amax_ties, host_float)
+{
+    TEST_CASE(testing_amax_ties, float, true);
+}
+
+TEST(local_vector_amax_ties, host_double)
+{
+    TEST_CASE(testing_amax_ties, double, true);
+}
+
 // Test for LocalVector::Prolongation
 GENERATE_P_TEST_CASES(parameterized_local_vector_test, testing_prolongation, prolongation)
 
@@ -448,6 +459,16 @@ TEST_F(local_vector_test, extract_coarse_mapping_int)
 GENERATE_P_TEST_CASES(parameterized_local_vector_test,
                       testing_move_to_host_async,
                       move_to_host_async)
+
+// Test for LocalVector::MoveToHostAsync followed by LocalVector::Sync
+GENERATE_P_TEST_CASES_DEVICE(parameterized_local_vector_test,
+                             testing_move_to_host_async_sync,
+                             move_to_host_async_sync)
+
+// Test for LocalVector::MoveToAcceleratorAsync followed by LocalVector::Sync
+GENERATE_P_TEST_CASES_DEVICE(parameterized_local_vector_test,
+                             testing_move_to_accelerator_async_sync,
+                             move_to_accelerator_async_sync)
 
 INSTANTIATE_TEST_CASE_P(local_vector,
                         parameterized_local_vector_test,

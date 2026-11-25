@@ -722,6 +722,7 @@ endif()
 function(unpack_db db_bzip2_file)
     get_filename_component(__fname ${db_bzip2_file} NAME_WLE)
     add_custom_command(OUTPUT ${KERNELS_BINARY_DIR}/${__fname}
+                       DEPENDS ${db_bzip2_file}
                        COMMAND ${UNZIPPER} -dc -k ${db_bzip2_file} > ${KERNELS_BINARY_DIR}/${__fname})
     string(REPLACE "." "_" __tname ${__fname})
     add_custom_target(generate_${__tname} ALL DEPENDS ${KERNELS_BINARY_DIR}/${__fname})
@@ -730,7 +731,7 @@ function(unpack_db db_bzip2_file)
 
     if(NOT MIOPEN_USE_SQLITE_PERFDB AND __extension STREQUAL ".db")
         add_custom_command(OUTPUT ${KERNELS_BINARY_DIR}/${__fname}.txt
-                           DEPENDS sqlite2txt generate_${__tname}
+                           DEPENDS sqlite2txt generate_${__tname} ${KERNELS_BINARY_DIR}/${__fname}
                            COMMAND $<TARGET_FILE:sqlite2txt> ${KERNELS_BINARY_DIR}/${__fname} ${KERNELS_BINARY_DIR}/${__fname}.txt
         )
         add_custom_target(generate_${__tname}_txt ALL DEPENDS ${KERNELS_BINARY_DIR}/${__fname}.txt)
@@ -788,7 +789,7 @@ endfunction()
 # The default behaviour when no list of AMDGPU targets is supplied should be to
 # install for all targets; this was the behaviour before MIOPEN_INSTALL_GPU_DATABASES
 # was added.
-set(ALL_GPU_DATABASES gfx900 gfx906 gfx908 gfx90a gfx942 gfx950 gfx1030 gfx1100 gfx1102 gfx1151 gfx1200 gfx1201)
+set(ALL_GPU_DATABASES gfx900 gfx906 gfx908 gfx90a gfx942 gfx950 gfx1030 gfx1100 gfx1101 gfx1102 gfx1151 gfx1200 gfx1201 gfx1250)
 set(MIOPEN_INSTALL_GPU_DATABASES "${ALL_GPU_DATABASES}" CACHE LIST "List of AMDGPU targets for which to install databases")
 
 # This list should be updated when a new KDB file is added to the project

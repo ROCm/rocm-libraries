@@ -253,7 +253,11 @@ def test_backend_rejects_invalid_contract_even_if_catalog_injected(
         k=128,
         scales=("e4m3", "e8m0", 32),
     )
-    invalid = replace(atom, **{field: value})
+    invalid = (
+        replace(atom, dst=replace(atom.dst, dtype=value))
+        if field == "c_dtype"
+        else replace(atom, **{field: value})
+    )
     monkeypatch.setattr(MmaCatalog, "by_op_id", lambda self, op_id: invalid)
     with pytest.raises(ValueError, match="unsupported scaled WMMA backend contract"):
         gfx1250_scaled_wmma(atom.op_id)
@@ -284,10 +288,19 @@ def test_backend_rejects_invalid_scale_combination_even_if_catalog_injected(
     )
     invalid = replace(
         atom,
-        a_dtype=normalize_dtype(a),
-        b_dtype=normalize_dtype(b),
-        a_scale_dtype=sa,
-        b_scale_dtype=sb,
+        srcs=(
+            replace(
+                atom.srcs[0],
+                dtype=normalize_dtype(a),
+                scale=replace(atom.srcs[0].scale, dtype=sa),
+            ),
+            replace(
+                atom.srcs[1],
+                dtype=normalize_dtype(b),
+                scale=replace(atom.srcs[1].scale, dtype=sb),
+            ),
+            atom.srcs[2],
+        ),
     )
     monkeypatch.setattr(MmaCatalog, "by_op_id", lambda self, op_id: invalid)
     with pytest.raises(ValueError, match="matrix/scale format combination"):

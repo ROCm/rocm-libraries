@@ -34,6 +34,7 @@ from rocisa.functions import scalarStaticMultiply64, scalarUInt32DivideAndRemain
 
 from ..Common import ceilDivide, log2, print2, INDEX_CHARS
 from ..Common.MxScaleLayout import mxFreeTile, mulScaleRows
+from ..Common.Utilities import SWIZZLE_BLOCK_ROWS
 from ..Component import Component
 from ..AsmStoreState import StoreState, VectorDataTypes
 from ..AsmAddressCalculation import AddrCalculation
@@ -228,6 +229,13 @@ class GSUOff(GSU):
         stride = writer.strideRef(tc, dimIdx)
         isMirrorIdx = dimIdx in kernel["ProblemType"]["MirrorDims%s"%tc]
         m = int(kernel["_DepthU%s"%tc] * tP["bpeGR"])
+        # Swizzled-TDM operand: one K step of DepthU spans MI rows of the pre-swizzled layout,
+        # so the per-iteration advance is MI * DepthU * bpe (same factor GSUOn.graIncrements
+        # applies). Persistent data-parallel kernels select GSUOff (SingleBuffer), so without
+        # it the TDM address advances by a single row's worth and every K step re-reads the
+        # wrong data.
+        if tP.get("isSwizzledTDM"):
+          m *= SWIZZLE_BLOCK_ROWS     # the host swizzle blocks 16 rows whatever the WMMA shape
         if isMirrorIdx:
           m = -m
 
@@ -954,11 +962,7 @@ class GSUOn(GSU):
             # Use VGPR up to next occupancy threshold:
             maxVgprs, occupancy = writer.getMaxRegsForOccupancy(kernel["NumThreads"], writer.vgprPool.size(), writer.sgprPool.size(), \
                 writer.getLdsSize(kernel), writer.agprPool.size(), writer.states.doubleVgpr)
-            # Set occupancy limit for register pools
-            # TODO: Support gfx12 and gfx117x
-            if kernel["ISA"][0] != 12 and kernel["ISA"][:2] != (11, 7):
-                writer.vgprPool.setOccupancyLimit(writer.states.regCaps["MaxVgpr"], writer.states.regCaps["PhysicalMaxVgpr"] // occupancy)
-                writer.sgprPool.setOccupancyLimit(writer.states.regCaps["MaxSgpr"], writer.states.regCaps["PhysicalMaxSgpr"] // occupancy)
+            writer.setOccupancyLimits(kernel, maxVgprs, occupancy)
 
             if ss.numVgprsPerElement:
                 numElementsPerBatch = numVgprAvailable // ss.numVgprsPerElement
@@ -2372,7 +2376,7 @@ class GSUOn(GSU):
         # "MultipleBufferSingleKernel" means only SrdD will be workspace pointer while SrdC will be initialized to correct batch matrix address from pointer array (AddressC)      
         if((kernel["_GlobalAccumulation"] == 'MultipleBuffer') or (kernel["_GlobalAccumulation"] == 'MultipleBufferSingleKernel')):
             with writer.allocTmpSgpr(1, tag="initializeSrd_tmpSgprGSU") as tmpSgprGSU:
-                module.add(SAndB32(dst=sgpr(tmpSgprGSU.idx), src0=sgpr("GSU"), src1=hex(0x3FFF), comment="Restore GSU"))
+                module.add(SAndB32(dst=sgpr(tmpSgprGSU.idx), src0=sgpr("GSU"), src1=writer.gsuMaskHex(kernel), comment="Restore GSU"))
                 module.add(SCmpEQU32(src0=sgpr(tmpSgprGSU.idx), src1=1, comment="GSU == 1 ?"))
                 module.add(SCBranchSCC1(labelName=ArgTypeCheckLabel.getLabelName(), comment="Handling General Batched GEMM SRD initialization"))
                 if((kernel["_GlobalAccumulation"] == 'MultipleBuffer') or (kernel["_GlobalAccumulation"] == 'MultipleBufferSingleKernel' and ch == "D")):

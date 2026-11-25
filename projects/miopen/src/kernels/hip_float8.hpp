@@ -46,9 +46,9 @@
 
 #define USE_SIMPLER_HIP_F8x8 0
 
-// FP8 configuration macros. In host builds these come from config.h
-// (included transitively). In kernel builds the solver passes them
-// via -D compiler flags. Fallback defaults match CMake defaults.
+// FP8 configuration macros. Kernel builds get them as -D compiler flags from the solver, which
+// picks the exponent bias for the target device. Host code starts from these defaults and can
+// switch the exponent bias at run time with set_hip_f8_ieee_exponent_bias().
 #ifndef MIOPEN_FP8_CLIPPING
 #define MIOPEN_FP8_CLIPPING 1
 #endif
@@ -82,13 +82,38 @@ enum class hip_f8_rounding_mode
     stochastic
 };
 
+#if(defined(__HIP_DEVICE_COMPILE__) && __HIP_DEVICE_COMPILE__) || defined(__HIPCC_RTC__)
+#define MIOPEN_FP8_HOST_RUNTIME_FORMAT 0
+#else
+#define MIOPEN_FP8_HOST_RUNTIME_FORMAT 1
+#endif
+
+#ifndef __HIPCC_RTC__
+// One host binary can drive devices that use different FP8 formats, so the host picks the
+// exponent bias at run time. Set it from miopen::UsesIeeeExponentBias(device name) before
+// converting values for a device. Declared in device passes too, so host code in HIP sources
+// compiles there, but device code reads the -D value.
+inline bool& host_ieee_exponent_bias()
+{
+    static bool value = MIOPEN_FP8_IEEE_EXPONENT_BIAS != 0;
+    return value;
+}
+
+inline void set_hip_f8_ieee_exponent_bias(bool ieee) { host_ieee_exponent_bias() = ieee; }
+#endif
+
+inline MIOPEN_HIP_HOST_DEVICE bool get_hip_f8_ieee_exponent_bias()
+{
+#if MIOPEN_FP8_HOST_RUNTIME_FORMAT
+    return host_ieee_exponent_bias();
+#else
+    return MIOPEN_FP8_IEEE_EXPONENT_BIAS != 0;
+#endif
+}
+
 inline MIOPEN_HIP_HOST_DEVICE bool get_hip_f8_bias_mode()
 {
-#if MIOPEN_FP8_IEEE_EXPONENT_BIAS
-    return false;
-#else
-    return true;
-#endif
+    return !get_hip_f8_ieee_exponent_bias();
 }
 
 template <typename T>
@@ -482,12 +507,10 @@ inline MIOPEN_HIP_HOST_DEVICE bool operator>(const miopen_f8::hip_f8<T>& lhs,
 template <miopen_f8::hip_f8_type T>
 inline MIOPEN_HIP_HOST_DEVICE miopen_f8::hip_f8<T> fabs(miopen_f8::hip_f8<T> v)
 {
-#if !MIOPEN_FP8_IEEE_EXPONENT_BIAS
     // Preserve "universal" nan.
     // Otherwise it will be converted to valid 0.
-    if(v.data == 0x80)
+    if(!miopen_f8::get_hip_f8_ieee_exponent_bias() && v.data == 0x80)
         return v;
-#endif
     v.data = v.data & 0x7f;
     return v;
 }
@@ -512,25 +535,25 @@ public:
     static MIOPEN_HIP_HOST_DEVICE miopen_f8::hip_f8<miopen_f8::hip_f8_type::fp8> epsilon()
     {
         return miopen_f8::Generate<miopen_f8::hip_f8<miopen_f8::hip_f8_type::fp8>>(
-            MIOPEN_FP8_IEEE_EXPONENT_BIAS ? 0x20 : 0x28); // 0.125
+            miopen_f8::get_hip_f8_ieee_exponent_bias() ? 0x20 : 0x28); // 0.125
     }
 
     static MIOPEN_HIP_HOST_DEVICE miopen_f8::hip_f8<miopen_f8::hip_f8_type::fp8> quiet_NaN()
     {
         return miopen_f8::Generate<miopen_f8::hip_f8<miopen_f8::hip_f8_type::fp8>>(
-            MIOPEN_FP8_IEEE_EXPONENT_BIAS ? 0x7c : 0x80);
+            miopen_f8::get_hip_f8_ieee_exponent_bias() ? 0x7c : 0x80);
     }
 
     static MIOPEN_HIP_HOST_DEVICE miopen_f8::hip_f8<miopen_f8::hip_f8_type::fp8> signaling_NaN()
     {
         return miopen_f8::Generate<miopen_f8::hip_f8<miopen_f8::hip_f8_type::fp8>>(
-            MIOPEN_FP8_IEEE_EXPONENT_BIAS ? 0x79 : 0x80);
+            miopen_f8::get_hip_f8_ieee_exponent_bias() ? 0x79 : 0x80);
     }
 
     static MIOPEN_HIP_HOST_DEVICE miopen_f8::hip_f8<miopen_f8::hip_f8_type::fp8> max()
     {
         return miopen_f8::Generate<miopen_f8::hip_f8<miopen_f8::hip_f8_type::fp8>>(
-            MIOPEN_FP8_IEEE_EXPONENT_BIAS ? 0x77 : 0x7f); // 240
+            miopen_f8::get_hip_f8_ieee_exponent_bias() ? 0x77 : 0x7f); // 240
     }
 
     static MIOPEN_HIP_HOST_DEVICE miopen_f8::hip_f8<miopen_f8::hip_f8_type::fp8> min()
@@ -553,25 +576,25 @@ public:
     static MIOPEN_HIP_HOST_DEVICE miopen_f8::hip_f8<miopen_f8::hip_f8_type::bf8> epsilon()
     {
         return miopen_f8::Generate<miopen_f8::hip_f8<miopen_f8::hip_f8_type::bf8>>(
-            MIOPEN_FP8_IEEE_EXPONENT_BIAS ? 0x34 : 0x38); // 0.25
+            miopen_f8::get_hip_f8_ieee_exponent_bias() ? 0x34 : 0x38); // 0.25
     }
 
     static MIOPEN_HIP_HOST_DEVICE miopen_f8::hip_f8<miopen_f8::hip_f8_type::bf8> quiet_NaN()
     {
         return miopen_f8::Generate<miopen_f8::hip_f8<miopen_f8::hip_f8_type::bf8>>(
-            MIOPEN_FP8_IEEE_EXPONENT_BIAS ? 0x7e : 0x80);
+            miopen_f8::get_hip_f8_ieee_exponent_bias() ? 0x7e : 0x80);
     }
 
     static MIOPEN_HIP_HOST_DEVICE miopen_f8::hip_f8<miopen_f8::hip_f8_type::bf8> signaling_NaN()
     {
         return miopen_f8::Generate<miopen_f8::hip_f8<miopen_f8::hip_f8_type::bf8>>(
-            MIOPEN_FP8_IEEE_EXPONENT_BIAS ? 0x7d : 0x80);
+            miopen_f8::get_hip_f8_ieee_exponent_bias() ? 0x7d : 0x80);
     }
 
     static MIOPEN_HIP_HOST_DEVICE miopen_f8::hip_f8<miopen_f8::hip_f8_type::bf8> max()
     {
         return miopen_f8::Generate<miopen_f8::hip_f8<miopen_f8::hip_f8_type::bf8>>(
-            MIOPEN_FP8_IEEE_EXPONENT_BIAS ? 0x7b : 0x7f); // 57344
+            miopen_f8::get_hip_f8_ieee_exponent_bias() ? 0x7b : 0x7f); // 57344
     }
 
     static MIOPEN_HIP_HOST_DEVICE miopen_f8::hip_f8<miopen_f8::hip_f8_type::bf8> min()

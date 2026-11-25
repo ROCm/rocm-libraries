@@ -99,15 +99,13 @@ struct PassFeatureConfig {
         int dsReadQueueDepth = 0;
         int dsReadDrainLatency = 0;
         int tensorLoadWmmaSpace = 0;
-        /// WMMA issue queue: max WMMAs outstanding in the matrix pipe (the pipe buffers
-        /// ~8 on gfx1250). A WMMA is appended whenever fewer are outstanding, instead
-        /// of waiting for the previous one to finish. 1 = the single-window model.
-        int wmmaQueueDepth = 1;
         /// Cycles of queued WMMA work that must remain before a non-WMMA pick (ds_load,
         /// filler, tensor_load) may issue; below it, and with room in the queue, the next
         /// ready WMMA goes first so the pipe never runs dry. Picks the scheduler is forced
         /// to make (a promoted barrier) are not held. < 0 = automatic: one WMMA short of a full
-        /// queue, (wmmaQueueDepth - 1) x the next WMMA's latency. 0 = off; ignored at depth 1.
+        /// queue, (queue depth - 1) x the next WMMA's latency. The queue depth comes from
+        /// each matrix opcode's hardware descriptor. 0 = the queue model is off (the
+        /// single-window model: a WMMA waits for the previous one to finish).
         int wmmaQueueCoverCycles = 0;
         /// How many WMMAs one refill issues once the queue drops below the refill line
         /// (wmmaQueueCoverCycles). Fixed: wmmaBatchSize of them. Dynamic: as many as it takes
@@ -116,8 +114,12 @@ struct PassFeatureConfig {
         /// Fixed mode: WMMAs per refill. <= 0 is treated as 1.
         int wmmaBatchSize = 1;
         /// Dynamic mode: queued cover (cycles) a refill fills up to. 0 = a full queue
-        /// (wmmaQueueDepth * the WMMA latency).
+        /// (queue depth * the WMMA latency).
         int wmmaRefillToCycles = 0;
+        /// Extra modeled cycles required between a queue-fill-held ds_load's return and its first
+        /// matrix consumer. The production backend supplies the resolved scheduling-policy value;
+        /// direct pass users may leave it at 0 for no additional safety margin.
+        int queueFillSafetyMarginCycles = 0;
         /// Spread ds_loads over the region's WMMA batches: each batch takes the region's even share
         /// (see DsSpreadPacer), and a load issues only while the ds queue has a free credit. Off =
         /// ds_loads issue as soon as they are ready and a credit is free.
@@ -202,26 +204,27 @@ struct AsmCapsConfig {
 
     /// rocisa archCaps `RequiresXCntForVolatileVMEM`. False on the standalone
     /// path, which has no rocisa to ask.
-    /// When set alone (without `enableXnackReplay`), Gfx1250HazardPass only
-    /// inserts atomic drains (Rule 4a). See Gfx1250HazardPass for the full
+    /// When set alone (without `enableXnackReplay`), Gfx1250XnackHazardPass only
+    /// inserts atomic drains (Rule 4a). See Gfx1250XnackHazardPass for the full
     /// rule set (Rules 1–4).
     bool requiresXCntForVolatileVMEM = false;
 
-    /// Enable full XNACK replay protection in Gfx1250HazardPass:
+    /// Enable full XNACK replay protection in Gfx1250XnackHazardPass:
     ///   - Source-clobber checks: SMEM Rule 3, FLAT Rule 2
     ///   - Boundary drains: ForeverSleep, ScalarPrefetch, VgprMsb
     ///   - Atomic drains: Rule 4a (implies `requiresXCntForVolatileVMEM`)
     /// When false, all of the above are skipped; only Rule 4a remains
     /// active if `requiresXCntForVolatileVMEM` is set independently.
-    /// See Gfx1250HazardPass for the complete rule definitions.
+    /// See Gfx1250XnackHazardPass for the complete rule definitions.
     ///
-    /// The four SW instruction-prefetch passes read the same flag for the drain
-    /// before each prefetch, so a caller gets replay protection from both passes
-    /// or from neither. There is deliberately no third "unspecified" state: a
-    /// caller that leaves this false gets no gfx1250 replay protection anywhere,
-    /// which is what Gfx1250HazardPass has always done with it. Every in-tree
-    /// entry point sets it -- `Backend::configurePassManager` from
-    /// `ModuleOptions`, and `stinkytofu-opt` from its `--arch` target ID.
+    /// The relative SW instruction-prefetch passes read the same flag for the
+    /// drain before a prefetch that would follow an open SMEM group, so a caller
+    /// gets replay protection from both passes or from neither. There is
+    /// deliberately no third "unspecified" state: a caller that leaves this false
+    /// gets no gfx1250 replay protection anywhere, which is what
+    /// Gfx1250XnackHazardPass has always done with it. Every in-tree entry point
+    /// sets it -- `Backend::configurePassManager` from `ModuleOptions`, and
+    /// `stinkytofu-opt` from its `--arch` target ID.
     bool enableXnackReplay = false;
 };
 }  // namespace stinkytofu

@@ -25,6 +25,7 @@
  *******************************************************************************/
 
 #include "DataInitialization.hpp"
+#include "SwizzleStaging.hpp"
 
 #if HIPBLASLT_ENABLE_MXDATAGENERATOR
 #include <mxDataGen.hpp>
@@ -43,9 +44,12 @@
 #include <algorithm>
 #include <atomic>
 #include <cstring>
+#include <exception>
+#include <functional>
 #include <iostream>
 #include <list>
 #include <map>
+#include <numeric>
 #include <tuple>
 
 namespace TensileLite
@@ -116,10 +120,20 @@ namespace TensileLite
 
         using BitWidth        = uint8_t;
         using Size            = uint64_t;
-        using SwizzleCacheKey = std::tuple<BitWidth, Size, Size>;
+        // Key includes the tensor index so A and B (which can share dtype+sizes on a square
+        // problem) get distinct swizzle entries instead of aliasing each other's data, plus the
+        // batch count, batch stride and leading dimension that shape the staged buffer, and the K padding
+        // unit (the selected kernel decides it: see swizzledKPadsTo64Bytes).
+        using SwizzleCacheKey = std::tuple<size_t, BitWidth, Size, Size, Size, Size, Size, Size>;
         using SwizzleCacheVal = ::Tensor::Manipulation::Tensor;
         using SwizzleCache    = LRUCache<SwizzleCacheKey, SwizzleCacheVal>;
         static thread_local SwizzleCache g_swizzleCache;
+
+        // Each rotating copy starts on a 256-byte boundary.
+        static size_t rotatingBytes(size_t bytes)
+        {
+            return RoundUpToMultiple<size_t>(bytes, 256);
+        }
 
         BitWidth toBitWidth(rocisa::DataType datatype)
         {
@@ -354,55 +368,6 @@ namespace TensileLite
             }
 
             return stream;
-        }
-
-        void calculateKforSwizzling(rocisa::DataType datatype,
-                                    size_t&          MiK,
-                                    size_t&          MiKv,
-                                    size_t&          PackK)
-        {
-            switch(datatype)
-            {
-            case rocisa::DataType::Float:
-                MiK  = 4;
-                MiKv = 1;
-                break;
-            case rocisa::DataType::Double:
-                MiK  = 4;
-                MiKv = 1;
-                break;
-            case rocisa::DataType::XFloat32:
-                MiK  = 8;
-                MiKv = 2;
-                break;
-            case rocisa::DataType::Half:
-            case rocisa::DataType::BFloat16:
-                MiK  = 16;
-                MiKv = 4;
-                break;
-            case rocisa::DataType::Int8:
-            case rocisa::DataType::Float8_fnuz:
-            case rocisa::DataType::BFloat8_fnuz:
-            case rocisa::DataType::Float8BFloat8_fnuz:
-            case rocisa::DataType::BFloat8Float8_fnuz:
-            case rocisa::DataType::Float8:
-            case rocisa::DataType::BFloat8:
-            case rocisa::DataType::Float8BFloat8:
-            case rocisa::DataType::BFloat8Float8:
-            case rocisa::DataType::E8:
-            case rocisa::DataType::E5M3:
-                MiK  = 32;
-                MiKv = 8;
-                break;
-            case rocisa::DataType::Float4:
-                MiK  = 32;
-                MiKv = 16;
-                break;
-            default:
-                throw std::runtime_error("unsupported datatype for swizzling");
-            }
-
-            PackK = 16 / MiKv / rocisa::GetElementSize(datatype);
         }
 
         template <typename T>
@@ -917,21 +882,6 @@ namespace TensileLite
             return stream;
         }
 
-        size_t getSwizzledTensorNumAllocatedElements(const TensorDescriptor& desc,
-                                                     size_t                  miM_N,
-                                                     size_t                  miK,
-                                                     size_t                  packK)
-        {
-            // TODO: currently [0][1] = k, (m or n) is based on TN, need to make this generic in the future
-            const auto k         = desc.sizes()[0];
-            const auto m_n       = desc.sizes()[1];
-            const auto b         = desc.sizes()[2];
-            const auto swizzleK  = miK * packK;
-            const auto paddedM_N = DGen::roundUp(m_n, miM_N);
-            const auto paddedK   = DGen::roundUp(k, swizzleK);
-            return paddedM_N * paddedK * b;
-        }
-
         size_t getSwizzledMXTensorNumAllocatedElements(const TensorDescriptor& desc,
                                                        size_t                  dimk,
                                                        bool                    unrollMajor)
@@ -954,6 +904,39 @@ namespace TensileLite
                 return 1.0;
 
             return 1.5;
+        }
+
+        // Padded bytes of each tensor that createRotatingInput copies for a problem. Slots follow
+        // the constructor's layout, with A2A_BUF after METADATA, and each is padded like the copies.
+        // Shared by the sizing in the constructor and by getRotatingSize so that the pool reserved
+        // for a problem is exactly what its copies need.
+        template <typename IsPresent>
+        static std::vector<size_t> getRotatingTensorSizes(ContractionProblemGemm const& problem,
+                                                          IsPresent const&              isPresent)
+        {
+            std::vector<size_t> sizes(ContractionProblemGemm::TENSOR::METADATA + 2, 0);
+            for(int32_t t : {ContractionProblemGemm::TENSOR::A,
+                             ContractionProblemGemm::TENSOR::B,
+                             ContractionProblemGemm::TENSOR::C,
+                             ContractionProblemGemm::TENSOR::D,
+                             ContractionProblemGemm::TENSOR::E,
+                             ContractionProblemGemm::TENSOR::SCALEA,
+                             ContractionProblemGemm::TENSOR::SCALEB,
+                             ContractionProblemGemm::TENSOR::BIAS,
+                             ContractionProblemGemm::TENSOR::SCALEALPHAVEC,
+                             ContractionProblemGemm::TENSOR::METADATA,
+                             ContractionProblemGemm::TENSOR::A2A_BUF})
+            {
+                if(t == ContractionProblemGemm::TENSOR::C && !problem.beta())
+                    continue;
+                if(!isPresent(t))
+                    continue;
+                size_t const slot = t == ContractionProblemGemm::TENSOR::A2A_BUF
+                                        ? ContractionProblemGemm::TENSOR::METADATA + 1
+                                        : t;
+                sizes[slot] = rotatingBytes(problem.tensors()[t].totalAllocatedBytes());
+            }
+            return sizes;
         }
 
         DataInitialization::DataInitialization(po::variables_map const&    args,
@@ -1052,9 +1035,9 @@ namespace TensileLite
                             //TODO: support more swizzle types,
                             //      currently, if A then it means MiM = 16, if B then it means MiN = 16
                             size_t MiM_N = 16, MiK = 0, MiKv = 0, PackK = 0;
-                            calculateKforSwizzling(dataType, MiK, MiKv, PackK);
-                            numAllocatedElements = getSwizzledTensorNumAllocatedElements(
-                                problem.tensors()[i], MiM_N, MiK, PackK);
+                            detail::calculateKforSwizzling(dataType, MiK, MiKv, PackK);
+                            numAllocatedElements = detail::getSwizzledTensorNumAllocatedElements(
+                                problem.tensors()[i], MiM_N, MiK, PackK, /*padTo64Bytes=*/true);
                             numAllocatedBytes = multiplyElementSize(
                                 numAllocatedElements, rocisa::GetElementSize(dataType));
                         }
@@ -1250,12 +1233,21 @@ namespace TensileLite
                           << ToString(m_vdata[i].init) << std::endl;
             }
 
-            // Rotating buffer sizes must match post-bounds-check pristine.maxElements (e.g. guard
-            // page round-up). vec_rm was previously built before that adjustment, undersizing pools.
+            // The first rotating slot holds the pristine inputs, so it must match the post-bounds-check
+            // pristine.maxElements (e.g. guard page round-up). The rotating copies are instead sized
+            // per problem, as prepareRotatingGPUOutput copies only the problem's own tensors.
             if(m_rotatingBuffer)
             {
                 m_rm.reset();
                 bool isRMInitPost = false;
+                // A tensor with a pristine buffer is the one that has a non-null input pointer.
+                std::function<std::vector<size_t>(ContractionProblemGemm const&)> getCopySizes
+                    = [&](ContractionProblemGemm const& problem) {
+                    return getRotatingTensorSizes(problem, [&](int32_t t) {
+                        auto it = m_vdata[t].pristine.find(problem.tensors()[t].dataType());
+                        return it != m_vdata[t].pristine.end() && it->second.maxElements != 0;
+                    });
+                };
                 for(auto const& p : problemFactory.problems())
                 {
                     if(auto ptr = dynamic_cast<ContractionProblemGemm const*>(p.get()))
@@ -1264,7 +1256,8 @@ namespace TensileLite
                         const ContractionProblemGemm& problem = *ptr;
                         for(size_t i = 0; i < problem.tensors().size(); i++)
                         {
-                            if(i > ContractionProblemGemm::TENSOR::METADATA)
+                            if(i > ContractionProblemGemm::TENSOR::METADATA
+                               && i != ContractionProblemGemm::TENSOR::A2A_BUF)
                                 continue;
                             auto dataType = problem.tensors()[i].dataType();
                             auto  it      = m_vdata[i].pristine.find(dataType);
@@ -1280,14 +1273,15 @@ namespace TensileLite
                             }
                             size_t const bytes = multiplyElementSize(
                                 it->second.maxElements, DataTypeInfo::Get(dataType).elementSize);
-                            vec_rm.push_back(bytes);
+                            vec_rm.push_back(rotatingBytes(bytes));
                         }
                         if(!isRMInitPost)
                         {
                             m_rm          = std::make_shared<RotatingMemory>(vec_rm.size());
                             isRMInitPost = true;
                         }
-                        m_rm->addRotatingSize(vec_rm);
+                        m_rm->addRotatingSize(getCopySizes(problem));
+                        m_rm->raiseOriginalSizes(vec_rm);
                     }
                     else if(auto ptr = dynamic_cast<ContractionProblemGroupedGemm const*>(p.get()))
                     {
@@ -1298,7 +1292,8 @@ namespace TensileLite
                             std::vector<size_t> tmp_rm;
                             for(size_t i = 0; i < problem.tensors().size(); i++)
                             {
-                                if(i > ContractionProblemGemm::TENSOR::METADATA)
+                                if(i > ContractionProblemGemm::TENSOR::METADATA
+                                   && i != ContractionProblemGemm::TENSOR::A2A_BUF)
                                     continue;
                                 auto dataType = problem.tensors()[i].dataType();
                                 auto  it      = m_vdata[i].pristine.find(dataType);
@@ -1314,7 +1309,7 @@ namespace TensileLite
                                 }
                                 size_t const bytes = multiplyElementSize(
                                     it->second.maxElements, DataTypeInfo::Get(dataType).elementSize);
-                                tmp_rm.push_back(bytes);
+                                tmp_rm.push_back(rotatingBytes(bytes));
                             }
                             if(vec_rm.empty())
                             {
@@ -1550,7 +1545,7 @@ namespace TensileLite
                         std::shared_ptr<void> ptr;
                         if(m_rotatingBuffer)
                         {
-                            auto mem = m_rm->getRotatingMemory();
+                            auto const& mem = m_rm->getRotatingMemory();
                             if(tensorIdx <= ContractionProblemGemm::TENSOR::METADATA)
                                 ptr = mem[0][tensorIdx].data;
                             else
@@ -1669,10 +1664,10 @@ namespace TensileLite
                         //TODO: support more swizzle types,
                         //      currently, if A then it means MiM = 16, if B then it means MiN = 16
                         size_t MiM_N = 16, MiK = 0, MiKv = 0, PackK = 0;
-                        calculateKforSwizzling(problem.tensors()[i].dataType(), MiK, MiKv, PackK);
+                        detail::calculateKforSwizzling(problem.tensors()[i].dataType(), MiK, MiKv, PackK);
                         padding = pUnit.maxElements
-                                  - getSwizzledTensorNumAllocatedElements(
-                                      problem.tensors()[i], MiM_N, MiK, PackK);
+                                  - detail::getSwizzledTensorNumAllocatedElements(
+                                      problem.tensors()[i], MiM_N, MiK, PackK, /*padTo64Bytes=*/true);
                     }
                 }
                 padding = multiplyElementSize(
@@ -2021,20 +2016,6 @@ namespace TensileLite
                   "or add a mapping in initModeToMXMethod.");
         }
 
-        static bool isRandomLikeInitMode(InitMode mode)
-        {
-            switch(mode)
-            {
-            case InitMode::Random:
-            case InitMode::RandomNarrow:
-            case InitMode::RandomNegPosLimited:
-            case InitMode::UniformLowPrecision:
-                return true;
-            default:
-                return false;
-            }
-        }
-
         static bool isConstantScaleInitMode(InitMode mode)
         {
             switch(mode)
@@ -2057,7 +2038,7 @@ namespace TensileLite
         {
             if(dataInit == scaleInit)
                 return true;
-            return isRandomLikeInitMode(dataInit) && isConstantScaleInitMode(scaleInit);
+            return IsRandomLike(dataInit) && isConstantScaleInitMode(scaleInit);
         }
 
         // generateMXInput emits scales packed for the unpadded data K, but setMXScaleA/B
@@ -2250,10 +2231,6 @@ namespace TensileLite
                   auto dataInitMode  = m_vdata[dataTensorEnum].init;
                   auto scaleInitMode = m_vdata[scaleTensorEnum].init;
 
-                  std::memset(pristineScale.cpuInput.valid.get(),
-                              0x00,
-                              scaleDesc.totalAllocatedBytes());
-
                   hipDataType const hipDataT = hipMxDataTypeForDataGenerator(dataDesc.dataType());
                   hipDataType const hipScaleT = hipMxScaleTypeForDataGenerator(scaleEltType);
 
@@ -2275,6 +2252,9 @@ namespace TensileLite
                   size_t const compactFree   = dataDesc.sizes()[freeIdx];
                   size_t const scaleElemSize = DataTypeInfo::Get(scaleDesc.dataType()).elementSize;
                   bool const   kFast         = (boundIdx == 0);
+                  // Bytes generateMXInput emits per batch, before K-block padding.
+                  size_t const naturalBytes
+                      = ((rows + mxBlock - 1) / mxBlock) * cols * scaleElemSize;
 
                   // Free-dim extent of one scaling tile. At 1 tiledFree ==
                   // compactFree and no staging buffer is allocated, so this
@@ -2289,18 +2269,21 @@ namespace TensileLite
                   // K-block), which is larger than the tiled scale tensor, so it
                   // cannot write straight into scalePtr.
                   std::vector<uint8_t> mxFreeStaging;
-                  if(mxBlockFree > 1)
+                  if(mxBlockFree > 1 && !descriptorsUnchanged)
                       mxFreeStaging.assign(compactFree * compactKBlocks * scaleElemSize, 0x00);
 
                   if(abFromInitArray && mxBlockFree > 1)
                       throw std::runtime_error(
                           "mx-data-generator=0 is not supported with MXBlockFree > 1");
 
-                  // Per-batch scales in generateMXInput's natural (pre-swizzle, unpadded)
-                  // order; only used when the generator is bypassed.
-                  std::vector<std::vector<uint8_t>> naturalScales;
-                  if(abFromInitArray)
+                  // With unchanged descriptors (a later solution needing a swizzle the
+                  // cached copy does not have), the data and canonical scale are
+                  // already in cpuInput.valid.
+                  if(!descriptorsUnchanged && abFromInitArray)
                   {
+                      std::memset(pristineScale.cpuInput.valid.get(),
+                                  0x00,
+                                  scaleDesc.totalAllocatedBytes());
                       initArray(dataDesc.dataType(),
                                 dataInitMode,
                                 pristineData.cpuInput.valid.get(),
@@ -2311,26 +2294,16 @@ namespace TensileLite
                       // in the generated layout.
                       std::vector<uint8_t> initScale(scaleDesc.totalAllocatedBytes());
                       initArray(scaleDesc.dataType(), scaleInitMode, initScale.data(), scaleDesc);
-                      size_t const naturalBytes
-                          = ((rows + mxBlock - 1) / mxBlock) * cols * scaleElemSize;
-                      naturalScales.resize(batchCount);
                       for(size_t b = 0; b < batchCount; b++)
                       {
-                          uint8_t const* src     = initScale.data() + b * scaleBatchStrideBytes;
-                          auto&          natural = naturalScales[b];
-                          natural.resize(naturalBytes);
-                          if(kFast)
-                          {
-                              for(size_t f = 0; f < compactFree; f++)
-                                  std::memcpy(natural.data() + f * compactKBlocks * scaleElemSize,
-                                              src + f * paddedKBlocks * scaleElemSize,
-                                              compactKBlocks * scaleElemSize);
-                          }
-                          else
-                          {
-                              std::memcpy(natural.data(), src, naturalBytes);
-                          }
-
+                          auto const natural = naturalMXScaleFromCanonical(
+                              initScale.data() + b * scaleBatchStrideBytes,
+                              naturalBytes,
+                              kFast,
+                              compactFree,
+                              compactKBlocks,
+                              paddedKBlocks,
+                              scaleElemSize);
                           auto* scalePtr = static_cast<uint8_t*>(pristineScale.cpuInput.valid.get())
                                            + b * scaleBatchStrideBytes;
                           std::memcpy(scalePtr, natural.data(), naturalBytes);
@@ -2339,8 +2312,11 @@ namespace TensileLite
                                   scalePtr, compactFree, compactKBlocks, paddedKBlocks, scaleElemSize);
                       }
                   }
-                  else
+                  else if(!descriptorsUnchanged)
                   {
+                      std::memset(pristineScale.cpuInput.valid.get(),
+                                  0x00,
+                                  scaleDesc.totalAllocatedBytes());
                       for(size_t b = 0; b < batchCount; b++)
                       {
                           auto* dataPtr = static_cast<uint8_t*>(pristineData.cpuInput.valid.get())
@@ -2376,7 +2352,7 @@ namespace TensileLite
                                                        kFast,
                                                        unsignedExponentScale);
                           if(mxBlockFree > 1 && unsignedExponentScale
-                             && isRandomLikeInitMode(scaleInitMode))
+                             && IsRandomLike(scaleInitMode))
                               varyMXScaleFreeTiles(scalePtr, tiledFree, compactKBlocks, kFast);
                           if(kFast)
                               restrideMXScaleBufferKFast(
@@ -2384,8 +2360,10 @@ namespace TensileLite
                       }
                   }
 
-                  // When the kernel needs a swizzled scale, populate gpuInput.valid
-                  // with that layout; cpuInput.valid stays canonical for the CPU
+                  // When the kernel needs a swizzled scale, build it in gpuInput.valid
+                  // by applying generateMXInput's swizzle to the canonical scale
+                  // (generation is seeded, so this matches regenerating with the
+                  // layout); the cpuInput.valid copy stays canonical for the CPU
                   // reference.
                   if(swizzleLayout != MXScaleLayout::None && pristineScale.gpuInput.valid)
                   {
@@ -2483,54 +2461,41 @@ namespace TensileLite
                       }
                       else
                       {
+                          // An exception escaping an OpenMP region terminates the
+                          // process, so keep the first one and rethrow after the loop.
+                          std::exception_ptr swizzleError;
+#pragma omp parallel for if(batchCount > 1)
                           for(size_t b = 0; b < batchCount; b++)
                           {
-                              auto* scalePtr = gpuScaleBuf.data() + b * scaleBatchStrideBytes;
-                              if(abFromInitArray)
+                              try
                               {
-                                  // Same swizzle and arguments generateMXInput applies to
-                                  // its natural scales.
-                                  auto const&          natural = naturalScales[b];
-                                  std::vector<uint8_t> swizzled;
-                                  if(swizzleLayout == MXScaleLayout::GFX950)
-                                  {
-                                      size_t const mnExtent
-                                          = (kBlocksSw > 0 && natural.size() % kBlocksSw == 0)
-                                                ? natural.size() / kBlocksSw
-                                                : mnExtentSw;
-                                      swizzled = DGen::preSwizzleScalesGFX950(
-                                          natural, {mnExtent, kBlocksSw});
-                                  }
-                                  else
-                                  {
-                                      swizzled = DGen::preSwizzleScalesGFX1250(
-                                          natural, cols, (rows + mxBlock - 1) / mxBlock, mxBlock);
-                                  }
-                                  std::memcpy(scalePtr, swizzled.data(), swizzled.size());
+                                  auto const natural = naturalMXScaleFromCanonical(
+                                      static_cast<uint8_t const*>(
+                                          pristineScale.cpuInput.valid.get())
+                                          + b * scaleBatchStrideBytes,
+                                      naturalBytes,
+                                      kFast,
+                                      compactFree,
+                                      compactKBlocks,
+                                      paddedKBlocks,
+                                      scaleElemSize);
+                                  auto const swizzled = swizzleNaturalMXScale(
+                                      natural, swizzleLayout, rows, cols, mxBlock, kIsRows);
+                                  std::memcpy(gpuScaleBuf.data() + b * scaleBatchStrideBytes,
+                                              swizzled.data(),
+                                              swizzled.size());
                               }
-                              else
+                              catch(...)
                               {
-                                  auto* dataPtr
-                                      = static_cast<uint8_t*>(pristineData.cpuInput.valid.get())
-                                        + b * dataBatchStrideBytes;
-                                  generateMXInput(hipDataT,
-                                                  hipScaleT,
-                                                  dataPtr,
-                                                  scalePtr,
-                                                  rows,
-                                                  cols,
-                                                  stride,
-                                                  transposed,
-                                                  isMatrixA ? mxBlock : 1,
-                                                  isMatrixA ? 1 : mxBlock,
-                                                  isMatrixA,
-                                                  swizzleLayout,
-                                                  initModeToMXMethod(dataInitMode),
-                                                  -1.0f,
-                                                  1.0f,
-                                                  initModeToMXMethod(scaleInitMode));
+#pragma omp critical(mxScaleSwizzleError)
+                                  {
+                                      if(!swizzleError)
+                                          swizzleError = std::current_exception();
+                                  }
                               }
                           }
+                          if(swizzleError)
+                              std::rethrow_exception(swizzleError);
                       }
                       HIP_CHECK_EXC(hipMemcpy(pristineScale.gpuInput.valid.get(),
                                               gpuScaleBuf.data(),
@@ -2877,9 +2842,10 @@ namespace TensileLite
                             //TODO: support more swizzle types,
                             //      currently, if A then it means MiM = 16, if B then it means MiN = 16
                             size_t MiM_N = 16, MiK = 0, MiKv = 0, PackK = 0;
-                            calculateKforSwizzling(desc.dataType(), MiK, MiKv, PackK);
+                            detail::calculateKforSwizzling(desc.dataType(), MiK, MiKv, PackK);
                             swizzlePadding
-                                = getSwizzledTensorNumAllocatedElements(desc, MiM_N, MiK, PackK)
+                                = detail::getSwizzledTensorNumAllocatedElements(
+                                      desc, MiM_N, MiK, PackK, /*padTo64Bytes=*/true)
                                   - desc.totalAllocatedElements();
                         }
 
@@ -3136,51 +3102,33 @@ namespace TensileLite
                 if(needSwizzle)
                 {
                     using Tensor = Tensor::Manipulation::Tensor;
-                    size_t MiM_N = 16, MiK = 0, MiKv = 0, PackK = 0;
-                    calculateKforSwizzling(desc.dataType(), MiK, MiKv, PackK);
-                    auto unrolledSize = desc.sizes()[0];
-                    auto tiledSize    = desc.sizes()[1];
+                    // The K padding follows the selected kernel (subtile swizzle of F4: 32 B, else 64 B); with
+                    // no solution yet (first call of a problem) use the 64 B layout, the next call restages.
+                    const bool subtileSwizzle
+                        = m_currentSolution != nullptr && m_currentSolution->sizeMapping.useSubtileImpl;
+                    const bool padTo64Bytes
+                        = detail::swizzledKPadsTo64Bytes(desc.dataType(), subtileSwizzle);
+                    const auto geom = detail::swizzleStageGeometry(desc, padTo64Bytes);
 
-                    // Sub-byte types (e.g. FP4 = 0.5 bytes/elem) need special handling:
-                    // The swizzle reshape/permute operates on byte-granularity tensors, so
-                    // we convert element counts to byte counts and treat each byte as one
-                    // "element" for the reshape dimensions.
-                    bool  isSubByte     = (desc.elementBytes() < 1.0f);
-                    float effectiveElem = isSubByte ? 1.0f : desc.elementBytes();
-                    size_t effUnrolled  = isSubByte
-                        ? multiplyElementSize(unrolledSize, desc.elementBytes())
-                        : unrolledSize;
-                    size_t effMiK  = isSubByte
-                        ? size_t(MiK * PackK * desc.elementBytes()) : MiK;
-                    size_t effMiKv = isSubByte
-                        ? size_t(MiKv * PackK * desc.elementBytes()) : MiKv;
-                    size_t effPackK = isSubByte ? size_t(1) : PackK;
-
-                    ::Tensor::Manipulation::Shape paddedShape{
-                        DGen::roundUp(tiledSize, MiM_N),
-                        DGen::roundUp(effUnrolled, effMiK * effPackK)};
-                    auto swizzleKey
-                        = std::make_tuple(toBitWidth(desc.dataType()), unrolledSize, tiledSize);
-
-                    // Convert byte-granularity flat size back to native element count
-                    // for the GPU copy (e.g. FP4: 2 elements per byte)
-                    auto flatToNativeElems = [&](size_t flatSize) -> size_t {
-                        return isSubByte
-                            ? size_t(flatSize / desc.elementBytes())
-                            : flatSize;
-                    };
+                    auto swizzleKey = std::make_tuple(i,
+                                                      toBitWidth(desc.dataType()),
+                                                      geom.unrolledSize,
+                                                      geom.tiledSize,
+                                                      Size(geom.numBatch),
+                                                      Size(geom.batchStride),
+                                                      Size(geom.srcLd),
+                                                      Size(geom.padUnitK));
 
                     if(g_swizzleCache.count(swizzleKey))
                     {
                         if(swizzleKey != g_swizzleCache.back())
                         {
-                            Tensor& permuted = g_swizzleCache.at(swizzleKey);
-                            ptr = copyInputBuffers(
-                                desc,
-                                p.gpuInput.valid.get(),
-                                permuted.as<void>(),
-                                flatToNativeElems(permuted.getDesc().flattenSize()),
-                                hipMemcpyHostToDevice);
+                            Tensor& staged = g_swizzleCache.at(swizzleKey);
+                            ptr            = copyInputBuffers(desc,
+                                                   p.gpuInput.valid.get(),
+                                                   staged.as<void>(),
+                                                   geom.totalNative,
+                                                   hipMemcpyHostToDevice);
                         }
                         else
                         {
@@ -3189,26 +3137,14 @@ namespace TensileLite
                     }
                     else
                     {
-                        auto tmpTensor = Tensor({tiledSize, effUnrolled}, effectiveElem);
-                        memcpy(tmpTensor.as<void>(),
-                               p.cpuInput.valid.get(),
-                               tmpTensor.getNumBytes());
-                        uint64_t padVal{};
-                        auto     paddedTensor = ::Tensor::Manipulation::pad(
-                            tmpTensor, paddedShape, &padVal, effectiveElem);
-                        paddedTensor.reshape({paddedShape[0] / MiM_N,
-                                              MiM_N,
-                                              paddedShape[1] / (effMiK * effPackK),
-                                              effMiK / effMiKv,
-                                              effMiKv * effPackK});
-                        Tensor permuted = permute(paddedTensor, {0, 2, 3, 1, 4});
-                        ptr             = copyInputBuffers(
-                            desc,
-                            p.gpuInput.valid.get(),
-                            permuted.as<void>(),
-                            flatToNativeElems(permuted.getDesc().flattenSize()),
-                            hipMemcpyHostToDevice);
-                        g_swizzleCache.emplace(swizzleKey, std::move(permuted));
+                        Tensor staged
+                            = detail::stageSwizzledTensor(desc, p.cpuInput.valid.get(), geom);
+                        ptr = copyInputBuffers(desc,
+                                               p.gpuInput.valid.get(),
+                                               staged.as<void>(),
+                                               geom.totalNative,
+                                               hipMemcpyHostToDevice);
+                        g_swizzleCache.emplace(swizzleKey, std::move(staged));
                     }
                 }
                 else if(needMXSwizzle)
@@ -3232,8 +3168,14 @@ namespace TensileLite
                     {
                         // The selected kernel explicitly wants canonical scales, so
                         // uploading cpuInput.valid must also invalidate any prior
-                        // "gpuInput.valid is swizzled" cache state for this tensor.
+                        // "gpuInput.valid is swizzled" cache state for this tensor,
+                        // including the MFMA K that lets preSolution skip re-init.
                         m_mxSwizzledDescriptor.erase(i);
+                        if(isMXSA)
+                            m_mxPreswizzledA = false;
+                        if(isMXSB)
+                            m_mxPreswizzledB = false;
+                        m_mxPreswizzleMiK = -1;
                         ptr = copyInputBuffers(desc,
                                                p.gpuInput.valid.get(),
                                                p.cpuInput.valid.get(),
@@ -3364,6 +3306,7 @@ namespace TensileLite
             inputs->Synchronizer  = (void*)ptrs[ContractionProblemGemm::TENSOR::Synchronizer];
             inputs->amaxD         = (void*)ptrs[ContractionProblemGemm::TENSOR::AMAXD];
             inputs->compressed    = (void*)ptrs[ContractionProblemGemm::TENSOR::COMPRESSED];
+            inputs->a2aBuf        = (void*)ptrs[ContractionProblemGemm::TENSOR::A2A_BUF];
 
             inputs->batchA    = (void**)batchPtrs[ContractionProblemGemm::TENSOR::A];
             inputs->batchB    = (void**)batchPtrs[ContractionProblemGemm::TENSOR::B];
@@ -3548,61 +3491,43 @@ namespace TensileLite
             return result;
         }
 
+        static bool hasInput(ContractionInputs const& inputs, int32_t tensor)
+        {
+            switch(tensor)
+            {
+            case ContractionProblemGemm::TENSOR::A:
+                return inputs.a != nullptr;
+            case ContractionProblemGemm::TENSOR::B:
+                return inputs.b != nullptr;
+            case ContractionProblemGemm::TENSOR::C:
+                return inputs.c != nullptr;
+            case ContractionProblemGemm::TENSOR::D:
+                return inputs.d != nullptr;
+            case ContractionProblemGemm::TENSOR::E:
+                return inputs.e != nullptr;
+            case ContractionProblemGemm::TENSOR::SCALEA:
+                return inputs.scaleA != nullptr;
+            case ContractionProblemGemm::TENSOR::SCALEB:
+                return inputs.scaleB != nullptr;
+            case ContractionProblemGemm::TENSOR::BIAS:
+                return inputs.bias != nullptr;
+            case ContractionProblemGemm::TENSOR::SCALEALPHAVEC:
+                return inputs.scaleAlphaVec != nullptr;
+            case ContractionProblemGemm::TENSOR::METADATA:
+                return inputs.metadata != nullptr;
+            case ContractionProblemGemm::TENSOR::A2A_BUF:
+                return inputs.a2aBuf != nullptr;
+            default:
+                return false;
+            }
+        }
+
         size_t getRotatingSize(ContractionProblemGemm const& problem,
                                ContractionInputs const&      inputs)
         {
-            size_t rotatingSize = 0;
-            if(inputs.a != nullptr)
-            {
-                rotatingSize
-                    += problem.tensors()[ContractionProblemGemm::TENSOR::A].totalAllocatedBytes();
-            }
-            if(inputs.b != nullptr)
-            {
-                rotatingSize
-                    += problem.tensors()[ContractionProblemGemm::TENSOR::B].totalAllocatedBytes();
-            }
-            if(inputs.c != nullptr && problem.beta())
-            {
-                rotatingSize
-                    += problem.tensors()[ContractionProblemGemm::TENSOR::C].totalAllocatedBytes();
-            }
-            if(inputs.d != nullptr)
-            {
-                rotatingSize
-                    += problem.tensors()[ContractionProblemGemm::TENSOR::D].totalAllocatedBytes();
-            }
-            if(inputs.e != nullptr)
-            {
-                rotatingSize
-                    += problem.tensors()[ContractionProblemGemm::TENSOR::E].totalAllocatedBytes();
-            }
-            if(inputs.scaleA != nullptr)
-            {
-                rotatingSize += problem.tensors()[ContractionProblemGemm::TENSOR::SCALEA]
-                                    .totalAllocatedBytes();
-            }
-            if(inputs.scaleB != nullptr)
-            {
-                rotatingSize += problem.tensors()[ContractionProblemGemm::TENSOR::SCALEB]
-                                    .totalAllocatedBytes();
-            }
-            if(inputs.bias != nullptr)
-            {
-                rotatingSize += problem.tensors()[ContractionProblemGemm::TENSOR::BIAS]
-                                    .totalAllocatedBytes();
-            }
-            if(inputs.scaleAlphaVec != nullptr)
-            {
-                rotatingSize += problem.tensors()[ContractionProblemGemm::TENSOR::SCALEALPHAVEC]
-                                    .totalAllocatedBytes();
-            }
-            if(inputs.metadata != nullptr)
-            {
-                rotatingSize += problem.tensors()[ContractionProblemGemm::TENSOR::METADATA]
-                                    .totalAllocatedBytes();
-            }
-            return rotatingSize;
+            std::vector<size_t> sizes = getRotatingTensorSizes(
+                problem, [&](int32_t t) { return hasInput(inputs, t); });
+            return std::accumulate(sizes.begin(), sizes.end(), size_t(0));
         }
 
         void* copyRotatingInput(
@@ -3612,7 +3537,7 @@ namespace TensileLite
                 return nullptr;
             void* dstPos = (void*)((uint8_t*)dst + dstOffset);
             HIP_CHECK_EXC(hipMemcpyAsync(dstPos, src, length, hipMemcpyDeviceToDevice, stream));
-            dstOffset += length;
+            dstOffset += rotatingBytes(length);
             return dstPos;
         }
 
@@ -3685,9 +3610,16 @@ namespace TensileLite
                 problem.tensors()[ContractionProblemGemm::TENSOR::METADATA].totalAllocatedBytes(),
                 offset,
                 stream);
+            newInputs.a2aBuf = copyRotatingInput(
+                newInputs.a2aBuf,
+                rotatingPtr,
+                problem.tensors()[ContractionProblemGemm::TENSOR::A2A_BUF].totalAllocatedBytes(),
+                offset,
+                stream);
             for(auto t : {ContractionProblemGemm::TENSOR::D,
                           ContractionProblemGemm::TENSOR::E,
-                          ContractionProblemGemm::TENSOR::BIAS})
+                          ContractionProblemGemm::TENSOR::BIAS,
+                          ContractionProblemGemm::TENSOR::A2A_BUF})
                 newInputs.maxElements[t] = problem.tensors()[t].totalAllocatedElements();
             return newInputs;
         }
@@ -3743,8 +3675,8 @@ namespace TensileLite
                 }
                 else
                 {
-                    auto    mem    = m_rm->getRotatingMemory();
-                    int64_t offset = 0;
+                    auto const& mem    = m_rm->getRotatingMemory();
+                    int64_t     offset = 0;
                     for(size_t i = 0; i < rotatingNum; i++)
                     {
                         ContractionInputs newInputs = *castInputs;
@@ -3818,7 +3750,7 @@ namespace TensileLite
                     ContractionGroupedInputs newInputs;
                     newInputs.ws = castInputs->ws;
                     std::vector<size_t> offsets(ContractionProblemGemm::TENSOR::METADATA, 0);
-                    auto                mem = m_rm->getRotatingMemory();
+                    auto const&         mem = m_rm->getRotatingMemory();
                     for(size_t i = 0; i < castInputs->grouped.size(); i++)
                     {
                         auto&             problem        = groupedProblem->gemms[i];

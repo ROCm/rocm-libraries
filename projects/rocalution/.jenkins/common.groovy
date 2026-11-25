@@ -27,10 +27,10 @@ def runCompileCommand(platform, project, boolean sameOrg=false)
     platform.runCommand(this, command)
 }
 
-def runTestCommand (platform, project, gfilter)
+def runTestCommand (platform, project, gfilter, boolean hmmTests = true)
 {
     def hmmTestCommand= ''
-    if (platform.jenkinsLabel.contains('gfx90a'))
+    if (hmmTests && platform.jenkinsLabel.contains('gfx90a'))
     {
         hmmTestCommand = """
                             HSA_XNACK=0 GTEST_LISTENER=NO_PASS_LINE_IN_LOG  ./rocalution-test --gtest_output=xml:test_detail_hmm_xnack_off.xml --gtest_color=yes --gtest_filter=**
@@ -39,9 +39,16 @@ def runTestCommand (platform, project, gfilter)
     }
 
     String sudo = auxiliary.sudo(platform.jenkinsLabel)
+    // rocalution-unit-test and rocalution-unit-test-lifecycle are built next to
+    // rocalution-test whenever install.sh builds the library and the clients
+    // together. The lifecycle binary covers init and shutdown, which the main
+    // unit-test process never does. They run first, so their results are in the
+    // log even when rocalution-test fails and set -e stops the step.
     def command = """#!/usr/bin/env bash
-                    set -x
+                    set -ex
                     cd ${project.paths.project_build_prefix}/build/release/clients/staging
+                    ${sudo} LD_LIBRARY_PATH=/opt/rocm/hcc/lib GTEST_LISTENER=NO_PASS_LINE_IN_LOG ./rocalution-unit-test --gtest_output=xml:test_detail_unit.xml --gtest_color=yes
+                    ${sudo} LD_LIBRARY_PATH=/opt/rocm/hcc/lib GTEST_LISTENER=NO_PASS_LINE_IN_LOG ./rocalution-unit-test-lifecycle --gtest_output=xml:test_detail_lifecycle.xml --gtest_color=yes
                     ${sudo} LD_LIBRARY_PATH=/opt/rocm/hcc/lib GTEST_LISTENER=NO_PASS_LINE_IN_LOG ./rocalution-test --gtest_output=xml --gtest_color=yes #--gtest_filter=${gfilter}-*known_bug*
                     ${hmmTestCommand}
                 """
@@ -55,29 +62,19 @@ def runCoverageCommand (platform, project, gfilter, String dirmode = "release")
     String repoUrl
     (commitSha, repoUrl) = util.getGitHubCommitInformation(project.paths.project_src_prefix)
 
-    withCredentials([string(credentialsId: "mathlibs-codecov-token-rocalution", variable: 'CODECOV_TOKEN')])
+    withCredentials([string(credentialsId: "mathlibs-codecov-token-rocm-libraries", variable: 'CODECOV_TOKEN')])
     {
         def command = """#!/usr/bin/env bash
-                    set -x
+                    set -ex
                     cd ${project.paths.project_build_prefix}/build/${dirmode}
                     export LD_LIBRARY_PATH=/opt/rocm/lib/
                     export ROCALUTION_CODE_COVERAGE=1
                     GTEST_LISTENER=NO_PASS_LINE_IN_LOG make coverage_cleanup coverage GTEST_FILTER=${gfilter}-*known_bug*
-                    curl -Os https://uploader.codecov.io/latest/linux/codecov
-                    chmod +x codecov
-                    ./codecov -v -U \$http_proxy -t ${CODECOV_TOKEN} --file lcoverage/main_coverage.info --name rocALUTION --sha ${commitSha}
+                    /usr/local/bin/codecov -v -U \$http_proxy -t ${CODECOV_TOKEN} --file coverage-report/coverage.info --name rocm-libraries --flags rocALUTION --sha ${commitSha}
                 """
 
         platform.runCommand(this, command)
     }
-
-    publishHTML([allowMissing: false,
-                alwaysLinkToLastBuild: false,
-                keepAll: false,
-                reportDir: "${project.paths.project_build_prefix}/build/${dirmode}/lcoverage",
-                reportFiles: "index.html",
-                reportName: "Code coverage report",
-                reportTitles: "Code coverage report"])
 }
 
 def runPackageCommand(platform, project, jobName, label='')

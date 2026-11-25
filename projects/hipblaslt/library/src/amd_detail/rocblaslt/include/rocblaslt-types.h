@@ -208,7 +208,9 @@ typedef enum rocblaslt_pointer_mode_
     rocblaslt_pointer_mode_host   = 0, /**< scalar pointers are in host memory. */
     rocblaslt_pointer_mode_device = 1, /**< scalar pointers are in device memory. */
     rocblaslt_pointer_mode_alpha_device_vector_beta_host
-    = 4 /** alpha pointer targets a device memory vector of length equal to the number of rows of matrix D, and beta is a single value in host memory. */
+    = 4, /** alpha pointer targets a device memory vector of length equal to the number of rows of matrix D, and beta is a single value in host memory. */
+    rocblaslt_pointer_mode_alpha_device_scalar_beta_host_ext
+    = 1000 /** alpha pointer targets a single value in device memory, and beta is a single value in host memory. */
 } rocblaslt_pointer_mode;
 
 /*! \ingroup types_module
@@ -270,7 +272,8 @@ typedef enum rocblaslt_status_
     rocblaslt_status_not_initialized         = 10, /**< descriptor has not been initialized. */
     rocblaslt_status_type_mismatch           = 11, /**< index types do not match. */
     rocblaslt_status_requires_sorted_storage = 12, /**< sorted storage required. */
-    rocblaslt_status_continue                = 13  /**< nothing preventing function to proceed. */
+    rocblaslt_status_continue                = 13, /**< nothing preventing function to proceed. */
+    rocblaslt_status_not_supported           = 14  /**< no algorithm supports the problem. */
 } rocblaslt_status;
 
 /*! \ingroup types_module
@@ -401,12 +404,15 @@ typedef enum rocblaslt_matmul_desc_attributes_
     ROCBLASLT_MATMUL_DESC_COMPUTE_INPUT_TYPE_B_EXT,
     ROCBLASLT_MATMUL_DESC_EPILOGUE_ACT_ARG0_EXT,
     ROCBLASLT_MATMUL_DESC_EPILOGUE_ACT_ARG1_EXT,
-    ROCBLASLT_MATMUL_DESC_STREAMK_TILE_SCHEDULING_EXT    = 104,
-    ROCBLASLT_MATMUL_DESC_UNIFORM_SUMMATION_ORDER_EXT    = 105,
+    ROCBLASLT_MATMUL_DESC_STREAMK_TILE_SCHEDULING_EXT = 104,
+    ROCBLASLT_MATMUL_DESC_UNIFORM_SUMMATION_ORDER_EXT = 105,
 #if HIPBLASLT_HAS_GEMM_A2A_FUSION
-    ROCBLASLT_MATMUL_DESC_FUSED_EPILOGUE                 = 106,
+    ROCBLASLT_MATMUL_DESC_FUSED_EPILOGUE = 106,
 #endif
-    ROCBLASLT_MATMUL_DESC_A_INT4_ENCODING_EXT            = 107,
+    ROCBLASLT_MATMUL_DESC_A_INT4_ENCODING_EXT = 107,
+#if HIPBLASLT_HAS_GEMM_A2A_FUSION
+    ROCBLASLT_MATMUL_DESC_FUSED_PROLOGUE = 108,
+#endif
     ROCBLASLT_MATMUL_DESC_MAX,
 } rocblaslt_matmul_desc_attributes;
 
@@ -536,6 +542,8 @@ struct RocblasltContractionProblem
         Block_32_F16_ZP,
         Block_64_F16_ZP,
         Block_128_F16_ZP,
+        // E8M0 per 32 K elements, shuffled in 128-row by 4-K-block tiles.
+        Block_32_UE8M0_128_4_EXT,
     };
 
     hipblasOperation_t trans_a;
@@ -612,6 +620,9 @@ struct RocblasltContractionProblem
     const void*   scaleD;
     const void*   scaleE;
     const void*   scaleAlphaVec;
+    // scaleAlphaVec aliases alpha for both device pointer modes. This flag
+    // distinguishes a single per-tensor scalar from the existing row vector.
+    bool          deviceScalarAlpha = false;
     ScalingFormat scaleAType;
     ScalingFormat scaleBType;
 
@@ -632,6 +643,8 @@ struct RocblasltContractionProblem
     // threaded through a 60-argument constructor that every caller spells out.
     // HIPBLASLT_MATMUL_DESC_A_INT4_ENCODING_EXT. Set after construction, like streamKFlags.
     int32_t     int4EncodingA = 0;
+    // Second D buffer: every D tile is also stored there (OutputPeerD kernels only).
+    void*       dPeer = nullptr;
     void*       streamKFlags = nullptr;
     bool        swizzleA;
     bool        swizzleB;
@@ -663,9 +676,10 @@ struct RocblasltContractionProblem
     bool adaptive_sm_count = false;
 
 #if HIPBLASLT_HAS_GEMM_A2A_FUSION
-    // The four below are set post-construction, not through the constructor.
-    // fused_epilogue and fused_a2a_peer_flag are non-owning.
-    const struct hipblasLtFusedEpilogueDescriptor* fused_epilogue      = nullptr;
+    // The five below are set post-construction, not through the constructor.
+    // fused_epilogue, fused_prologue and fused_a2a_peer_flag are non-owning.
+    const struct hipblasLtFusionDescriptor*        fused_epilogue      = nullptr;
+    const struct hipblasLtFusionDescriptor*        fused_prologue      = nullptr;
     uint32_t                                       fused_a2a_world     = 0;
     uint32_t                                       fused_a2a_rank      = 0;
     void* const*                                   fused_a2a_peer_flag = nullptr;
@@ -743,20 +757,48 @@ struct RocblasltContractionProblem
 };
 
 #if HIPBLASLT_HAS_GEMM_A2A_FUSION
-// Fields of hipblasLtFusedEpilogueDescriptor, flattened for this layer.
+// Fields of hipblasLtFusionDescriptor, flattened for this layer.
 struct RocblasltFusedEpilogueInfo
 {
-    bool                         hasA2APrefix      = false;
+    enum class Mode
+    {
+        Disabled,
+        GemmA2A,
+        A2AGemm,
+    };
+
+    Mode                         mode              = Mode::Disabled;
     const hipblasLtSdmaQueue_t*  a2aSdmaQueues     = nullptr;
     void* const*                 a2aRecvPtrs       = nullptr;
+    void* const*                 a2aPeerBPtrs      = nullptr;
+    size_t                       a2aPeerBCount     = 0;
+    void*                        a2aGatherBuffer   = nullptr;
     int64_t                      a2aExtent         = 0;
     hipblasLtA2ACompletionMode_t a2aCompletionMode = HIPBLASLT_A2A_COMPLETION_IN_KERNEL_FULL;
     uint32_t                     commChannel       = 0;
+    // A descriptor carries stages of the side it is not attached to, or both
+    // sides carry an all-to-all.
+    bool misattached = false;
 };
 
-// Returns false when desc is nullptr.
-bool rocblaslt_resolve_fused_epilogue(const struct hipblasLtFusedEpilogueDescriptor* desc,
-                                      RocblasltFusedEpilogueInfo&                    out);
+// Returns false when both descriptors are nullptr.
+bool rocblaslt_resolve_fused_epilogue(const struct hipblasLtFusionDescriptor* epilogue,
+                                      const struct hipblasLtFusionDescriptor* prologue,
+                                      RocblasltFusedEpilogueInfo&             out);
+
+// Returns false unless prob requests a fused all-to-all.
+inline bool rocblaslt_resolve_fused_a2a(const RocblasltContractionProblem& prob,
+                                        RocblasltFusedEpilogueInfo&        out)
+{
+    return rocblaslt_resolve_fused_epilogue(prob.fused_epilogue, prob.fused_prologue, out)
+           && out.mode != RocblasltFusedEpilogueInfo::Mode::Disabled;
+}
+
+// Every rejection is reported as rocblaslt_status_invalid_value.
+rocblaslt_status rocblaslt_validate_fused_epilogue_dispatch(rocblaslt_handle        handle,
+                                                            rocblaslt_matmul_desc   matmulDesc,
+                                                            rocblaslt_matrix_layout matB,
+                                                            rocblaslt_matrix_layout matD);
 #endif
 
 namespace rocblaslt
@@ -827,5 +869,8 @@ namespace rocblaslt
         void* scaleAlphaVec = nullptr;
         void* aux           = nullptr;
         void* amaxD         = nullptr;
+        void* dPeer         = nullptr;
+        // Keep this layout in sync with hipblaslt_ext::GemmInputs::GemmInputsImpl.
+        bool deviceScalarAlpha = false;
     };
 } // End of namespace rocblaslt

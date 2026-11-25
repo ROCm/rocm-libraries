@@ -59,14 +59,11 @@ Writing
    has is refused: rebase onto develop first.
 9. Nothing is written if a log was rejected or any sidecar is refused (see
    support_sidecar.py).  verify_support_claims.py checks the result.
-10. After writing any sidecar, --write re-renders the committed
-    SUPPORT_MATRIX_OVERVIEW.md, so the claims and the overview go in one
-    commit.  If that render fails, the sidecars stay written and the exit
-    status is 1.
+   SUPPORT_MATRIX_OVERVIEW.md is not re-rendered: it is refreshed apart
+   from claim changes (docs/support-matrix.md).
 
-Exit status: 0 on success, 1 if any log was rejected, a sidecar was
-refused or the overview could not be re-rendered, 2 on a usage error or
-when a run or develop cannot be fetched.
+Exit status: 0 on success, 1 if any log was rejected or a sidecar was
+refused, 2 on a usage error or when a run or develop cannot be fetched.
 """
 
 from __future__ import annotations
@@ -94,7 +91,6 @@ from typing import (
 )
 
 from support_claim_schema import VALID_PLATFORMS
-from support_features import feature_matrix
 from support_sidecar import (
     BUNDLE_DIR,
     Claim,
@@ -131,6 +127,10 @@ NIGHTLY_WORKFLOW = "therock-multi-arch-ci-nightly.yml"
 DEFAULT_JOBS = r"Test \w+provider\b"  # every provider's engines, on every GPU
 FETCHED_CONCLUSIONS = ("success", "failure")
 NIGHTLY_PAGE = 50
+# A run's jobs are listed this many per page. GitHub answers HTTP 502 after
+# about 10 s when a page of 100 jobs of a multi-arch run (hundreds of jobs)
+# takes longer to build; a page of 30, its default, does not.
+JOBS_PAGE = 30
 INTEGRATION_TESTS = Path(__file__).resolve().parent.parent
 
 # GitHub starts each chunk of a job log with a UTF-8 BOM.
@@ -736,7 +736,7 @@ def fetch_run(
         raise FetchError(f"run {run_id} is {status}, not completed")
     listing = gh(
         [
-            f"repos/{REPO}/actions/runs/{run_id}/jobs?per_page=100",
+            f"repos/{REPO}/actions/runs/{run_id}/jobs?per_page={JOBS_PAGE}",
             "--paginate",
             "--jq",
             ".jobs[] | {id, name, conclusion}",
@@ -888,26 +888,11 @@ def plan_claims(cells: Sequence[Cell], root: Path, git: Git) -> Dict[Path, Chang
     return plan
 
 
-def refresh_overview(root: Path) -> int:
-    """Re-render ``root``'s committed overview; 0 on success."""
-    overview = root / feature_matrix.DEFAULT_OVERVIEW_PATH.name
-    argv = ["--bundles-dir", str(root / BUNDLE_DIR)]
-    try:
-        return feature_matrix.main([*argv, "--output", str(overview)])
-    except OSError as exc:
-        print(f"error: {exc}", file=sys.stderr)
-        return 1
-
-
-Overview = Callable[[Path], int]
-
-
 def main(
     argv: Optional[Sequence[str]] = None,
     gh: Gh = run_gh,
     root: Path = INTEGRATION_TESTS,
     git: Git = run_git,
-    overview: Overview = refresh_overview,
 ) -> int:
     parser = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
@@ -1040,13 +1025,6 @@ def main(
         )
     added = sum(change.added for change in plan.values())
     print(f"{len(plan)} sidecars {verb}, +{added} claims", file=sys.stderr)
-    if args.write and plan and overview(root) != 0:
-        print(
-            "error: the sidecars are written but the overview is stale;"
-            f" regenerate it with: {feature_matrix.REGEN_COMMAND}",
-            file=sys.stderr,
-        )
-        return 1
     return 0
 
 

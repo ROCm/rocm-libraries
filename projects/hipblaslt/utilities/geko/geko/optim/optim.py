@@ -40,6 +40,7 @@ import geko.library as library
 from geko.bench.utils import is_built_custom_library
 from geko.config_generator import config_generator as cg
 from geko.config_generator.load_input_config import apply_input_config_defaults, resolve_mx_defaults
+from geko.config_generator.constants import HARDWARE_MAP
 from geko.constants import GEMM_FIELDS, canonical_arch, runtime_env
 from geko.schemas import GemmConfig
 from geko.concurrency.runner import Runner, Worker
@@ -343,17 +344,34 @@ def run(
                 "PYTHONPATH": tensile_pythonpath(hipblaslt_path),
                 **runtime_env((tuning_config.get("LibraryLogic") or {}).get("ArchitectureName")),
             }
+            cu_count = HARDWARE_MAP.get(tuning_config.get("Backend", {}).get("Arch"), {}).get("CUs")
+            if cu_count is not None:
+                env["CU"] = str(cu_count)
+
             with open(self.build_dir / f"{self.config_name}-tensilelite.log", "w") as f:
+                tensile_cmd = [
+                    hipblaslt_path / "tensilelite/tensilelite/bin/Tensile",
+                    self.config,
+                    self.build_dir,
+                    "--prebuilt-client",
+                    client_build_dir / "tensilelite/client/tensilelite-client",
+                    "--client-lock",
+                    (tuning_dir / f"gpulock_{self.device}").resolve(),
+                ]
+                # Tensile sizes its pool from this process's CPU affinity.
+                # GEKO_CPU_SLICES is a comma-separated list of taskset ranges,
+                # one per visible device, so concurrent jobs do not each inherit
+                # the full mask. taskset is Linux-only.
+                cpu_slices = [
+                    s.strip()
+                    for s in os.environ.get("GEKO_CPU_SLICES", "").split(",")
+                    if s.strip()
+                ]
+                if cpu_slices and os.name != "nt":
+                    cpu_slice = cpu_slices[self.device % len(cpu_slices)]
+                    tensile_cmd = ["taskset", "-c", cpu_slice, *tensile_cmd]
                 proc = subprocess.Popen(
-                    [
-                        hipblaslt_path / "tensilelite/tensilelite/bin/Tensile",
-                        self.config,
-                        self.build_dir,
-                        "--prebuilt-client",
-                        client_build_dir / "tensilelite/client/tensilelite-client",
-                        "--client-lock",
-                        (tuning_dir / f"gpulock_{self.device}").resolve(),
-                    ],
+                    tensile_cmd,
                     env=os.environ | env,
                     stdout=f,
                     stderr=subprocess.STDOUT,
@@ -421,7 +439,7 @@ def analyze(
     devices: Sequence[int] | None = None,
     error_thr: float = 0.03,
     up_thr: float = 1.03,
-    duration: float = 1.0,
+    duration: float = 0.5,
     beta: bool = False,
     log_summary: str | Path = None,
     verify: bool = True,
@@ -453,8 +471,9 @@ def analyze(
             Defaults to 0.03.
         up_thr (float, optional): Minimum performance improvement ratio threshold.
             Defaults to 1.03.
-        duration (float, optional): Benchmark duration in seconds.
-            Defaults to 1.0.
+        duration (float, optional): Measurement time in seconds of each
+            benchmark (adaptive timing is always used).
+            Defaults to 0.5.
         beta (bool, optional): Whether to use non-zero beta values.
             Defaults to False.
         log_summary (str | Path, optional): CSV file with GEMM contribution to

@@ -15,6 +15,7 @@
 #include <cstdint>
 #include <cstring>
 #include <numeric>
+#include <optional>
 #include <random>
 #include <string>
 #include <vector>
@@ -52,8 +53,12 @@ namespace
         bool    totalRowsHint = false;
         // Also set the average rows and cols hints.
         bool averageHints = false;
-        // Second call with these shapes (each no larger than in groups); needs !fixedM.
-        std::vector<GroupShape> rerun;
+        // Further calls, one per entry, with these shapes (each no larger than in groups);
+        // needs !fixedM.
+        std::vector<std::vector<GroupShape>> reruns;
+        // Before each further call, leave an error the caller has not read, which the call
+        // must neither fail on nor clear.
+        bool callerErrorPending = false;
     };
 
     constexpr size_t kWorkspace = size_t{64} << 20;
@@ -106,10 +111,15 @@ namespace
         return upload(narrow);
     }
 
+    // A NaN in both FP16 and BF16, which no call in these tests computes.
+    constexpr uint16_t kUnwritten = 0x7FFF;
+
     // One grouped matrix: per-group shape and ld, packed into one buffer.
     struct GroupedMatrix
     {
         std::vector<int64_t> rows, cols, ld;
+        // Columns allocated per group; cols may shrink after init.
+        std::vector<int64_t> allocCols;
         std::vector<size_t> offset;
         std::vector<uint16_t> hostData;
         // Device copy of hostData, with the same layout. This is what hipBLASLt reads and writes.
@@ -125,8 +135,9 @@ namespace
                   hipDataType                 type,
                   std::mt19937&               rng)
         {
-            rows = r;
-            cols = c;
+            rows      = r;
+            cols      = c;
+            allocCols = c;
             ld.resize(r.size());
             offset.resize(r.size());
             size_t total = 0;
@@ -150,6 +161,33 @@ namespace
         float at(hipDataType type, size_t g, int64_t i, int64_t j) const
         {
             return toFloat(type, hostData[offset[g] + size_t(j * ld[g] + i)]);
+        }
+
+        // Fills the device copy with kUnwritten, so a launch's output holds only what that
+        // launch wrote, not what an earlier one did.
+        void resetToUnwritten()
+        {
+            EXPECT_EQ(hipMemsetD16(deviceData, kUnwritten, hostData.size()), hipSuccess);
+        }
+
+        // Every element of out (a device copy of the matrix) outside the first r[g] rows of
+        // the first c[g] columns of each group, ld padding and earlier, larger shapes
+        // included, still holds kUnwritten.
+        void expectWrittenOnlyInside(const std::vector<uint16_t>& out,
+                                     const std::vector<int64_t>&  r,
+                                     const std::vector<int64_t>&  c) const
+        {
+            int written = 0;
+            for(size_t g = 0; g < r.size(); g++)
+                for(int64_t j = 0; j < allocCols[g]; j++)
+                    for(int64_t i = 0; i < ld[g]; i++)
+                    {
+                        size_t e = offset[g] + size_t(j * ld[g] + i);
+                        if((i >= r[g] || j >= c[g]) && out[e] != kUnwritten && written++ < 5)
+                            ADD_FAILURE() << "group " << g << ": (" << i << "," << j
+                                          << ") outside the output was written";
+                    }
+            EXPECT_EQ(written, 0);
         }
 
         GroupedMatrix()                                = default;
@@ -421,6 +459,17 @@ namespace
             return p;
         }
 
+        // Filled with ones, so a kernel that reads a grouped record past the last group gets
+        // invalid pointers and faults, rather than finding zeros or a stale record left by an
+        // earlier allocation at the same address.
+        void* allocWorkspace()
+        {
+            void* ws = nullptr;
+            EXPECT_EQ(hipMalloc(&ws, kWorkspace), hipSuccess);
+            EXPECT_EQ(hipMemset(ws, 0xFF, kWorkspace), hipSuccess);
+            return keep(ws);
+        }
+
         hipblasLtMatrixLayout_t makeLayout(hipDataType                 type,
                                            int                         groupCount,
                                            const std::vector<int64_t>* rows,
@@ -474,14 +523,15 @@ namespace
             const bool transA = tc.opA != HIPBLAS_OP_N;
             const bool transB = tc.opB != HIPBLAS_OP_N;
 
-            // Buffers and leading dimensions fit the larger of the two calls' shapes.
+            // Buffers and leading dimensions fit the largest shapes of all calls.
             std::vector<int64_t> capM = m, capN = n, capK = k;
-            for(size_t g = 0; g < tc.rerun.size(); g++)
-            {
-                capM[g] = std::max(capM[g], tc.rerun[g].m);
-                capN[g] = std::max(capN[g], tc.rerun[g].n);
-                capK[g] = std::max(capK[g], tc.rerun[g].k);
-            }
+            for(const auto& shapes : tc.reruns)
+                for(size_t g = 0; g < shapes.size(); g++)
+                {
+                    capM[g] = std::max(capM[g], shapes[g].m);
+                    capN[g] = std::max(capN[g], shapes[g].n);
+                    capK[g] = std::max(capK[g], shapes[g].k);
+                }
             GroupedMatrix A, B, C, D;
             A.init(transA ? capK : capM, transA ? capM : capK, tc.fixedM, tc.type, rng);
             B.init(transB ? capN : capK, transB ? capK : capN, tc.fixedM, tc.type, rng);
@@ -628,12 +678,11 @@ namespace
                 GTEST_SKIP() << "No grouped solution in the loaded library";
             ASSERT_LE(result.workspaceSize, kWorkspace);
 
-            void* ws = nullptr;
-            ASSERT_EQ(hipMalloc(&ws, kWorkspace), hipSuccess);
-            keep(ws);
+            void* ws = allocWorkspace();
 
             ASSERT_EQ(hipStreamCreate(&stream), hipSuccess);
             auto matmulAndCheck = [&]() {
+                D.resetToUnwritten();
                 ASSERT_EQ(hipblasLtMatmul(handle,
                                           desc,
                                           alphaArg,
@@ -684,18 +733,19 @@ namespace
                         }
                     EXPECT_EQ(mismatches, 0);
                 }
+                D.expectWrittenOnlyInside(out, m, n);
             };
             matmulAndCheck();
 
-            if(!tc.rerun.empty())
+            // New shapes go straight into the device arrays the layouts point to; the
+            // heuristic is not run again.
+            for(const auto& shapes : tc.reruns)
             {
-                // New shapes go straight into the device arrays the layouts point to; the
-                // heuristic is not run again.
                 for(int g = 0; g < groups; g++)
                 {
-                    m[g] = tc.rerun[g].m;
-                    n[g] = tc.rerun[g].n;
-                    k[g] = tc.rerun[g].k;
+                    m[g] = shapes[g].m;
+                    n[g] = shapes[g].n;
+                    k[g] = shapes[g].k;
                 }
                 auto rewrite = [&](hipblasLtMatrixLayout_t           layout,
                                    hipblasLtMatrixLayoutAttribute_t attr,
@@ -724,7 +774,15 @@ namespace
                     rewrite(layout, rowsAttr, m);
                     rewrite(layout, colsAttr, n);
                 }
+                if(tc.callerErrorPending)
+                {
+                    void* unused = nullptr;
+                    ASSERT_EQ(hipMalloc(&unused, SIZE_MAX), hipErrorOutOfMemory);
+                }
                 matmulAndCheck();
+                if(tc.callerErrorPending)
+                    EXPECT_EQ(hipGetLastError(), hipErrorOutOfMemory)
+                        << "the call consumed the caller's error";
             }
         }
 
@@ -749,11 +807,24 @@ namespace
 
         // MX grouped GEMM, D = alpha * (sA . A)^T (sB . B) + beta * C, with A K x M and B K x N
         // per group, against a host reference. The values make every product and sum exact
-        // in FP32, so D must equal the reference rounded to outType.
-        void runMX(hipDataType                    elemType,
-                   hipDataType                    outType,
-                   hipblasLtMatmulMatrixScale_t   mode,
-                   const std::vector<GroupShape>& shapes)
+        // in FP32, so D must equal the reference rounded to outType. With launchAs set, the
+        // algo found for mode is launched with the descriptor switched to launchAs, and
+        // hipblasLtMatmul must refuse it.
+        void runMX(hipDataType                                 elemType,
+                   hipDataType                                 outType,
+                   hipblasLtMatmulMatrixScale_t                mode,
+                   const std::vector<GroupShape>&              shapes,
+                   std::optional<hipblasLtMatmulMatrixScale_t> launchAs = std::nullopt)
+        {
+            runMX(elemType, elemType, outType, mode, shapes, launchAs);
+        }
+
+        void runMX(hipDataType                                 typeA,
+                   hipDataType                                 typeB,
+                   hipDataType                                 outType,
+                   hipblasLtMatmulMatrixScale_t                mode,
+                   const std::vector<GroupShape>&              shapes,
+                   std::optional<hipblasLtMatmulMatrixScale_t> launchAs = std::nullopt)
         {
             const bool preSwizzled  = mode == HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_32_8_EXT;
             const MXScaleMode scale = mxScaleMode(mode);
@@ -771,14 +842,14 @@ namespace
             }
 
             MXOperand A, B;
-            A.init(k, m, elemType, scale, pad, preSwizzled, rng);
-            B.init(k, n, elemType, scale, pad, preSwizzled, rng);
+            A.init(k, m, typeA, scale, pad, preSwizzled, rng);
+            B.init(k, n, typeB, scale, pad, preSwizzled, rng);
             GroupedMatrix C, D;
             C.init(m, n, false, outType, rng);
             D.init(m, n, false, outType, rng);
 
-            auto layA = makeLayout(elemType, groups, &k, &m, &k, HIPBLASLT_INTEGER_WIDTH_32);
-            auto layB = makeLayout(elemType, groups, &k, &n, &k, HIPBLASLT_INTEGER_WIDTH_32);
+            auto layA = makeLayout(typeA, groups, &k, &m, &k, HIPBLASLT_INTEGER_WIDTH_32);
+            auto layB = makeLayout(typeB, groups, &k, &n, &k, HIPBLASLT_INTEGER_WIDTH_32);
             auto layC = makeLayout(outType, groups, &m, &n, &C.ld, HIPBLASLT_INTEGER_WIDTH_32);
             auto layD = makeLayout(outType, groups, &m, &n, &D.ld, HIPBLASLT_INTEGER_WIDTH_32);
 
@@ -827,27 +898,38 @@ namespace
                 GTEST_SKIP() << "No grouped MX solution in the loaded library";
             EXPECT_TRUE(isMXKernel(hipblaslt_ext::getKernelNameFromAlgo(handle, result.algo)));
 
-            void* ws = nullptr;
-            ASSERT_EQ(hipMalloc(&ws, kWorkspace), hipSuccess);
-            keep(ws);
+            void* ws = allocWorkspace();
             const float alpha = 2.f, beta = 1.f;
-            ASSERT_EQ(hipblasLtMatmul(handle,
-                                      desc,
-                                      &alpha,
-                                      A.ptrArray,
-                                      layA,
-                                      B.ptrArray,
-                                      layB,
-                                      &beta,
-                                      C.ptrArray,
-                                      layC,
-                                      D.ptrArray,
-                                      layD,
-                                      &result.algo,
-                                      ws,
-                                      kWorkspace,
-                                      nullptr),
-                      HIPBLAS_STATUS_SUCCESS);
+            auto        launch = [&] {
+                return hipblasLtMatmul(handle,
+                                       desc,
+                                       &alpha,
+                                       A.ptrArray,
+                                       layA,
+                                       B.ptrArray,
+                                       layB,
+                                       &beta,
+                                       C.ptrArray,
+                                       layC,
+                                       D.ptrArray,
+                                       layD,
+                                       &result.algo,
+                                       ws,
+                                       kWorkspace,
+                                       nullptr);
+            };
+            if(launchAs)
+            {
+                for(auto attr :
+                    {HIPBLASLT_MATMUL_DESC_A_SCALE_MODE, HIPBLASLT_MATMUL_DESC_B_SCALE_MODE})
+                    ASSERT_EQ(
+                        hipblasLtMatmulDescSetAttribute(desc, attr, &*launchAs, sizeof(*launchAs)),
+                        HIPBLAS_STATUS_SUCCESS);
+                EXPECT_EQ(launch(), HIPBLAS_STATUS_INVALID_VALUE);
+                return;
+            }
+            D.resetToUnwritten();
+            ASSERT_EQ(launch(), HIPBLAS_STATUS_SUCCESS);
             ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
 
             std::vector<uint16_t> out(D.hostData.size());
@@ -876,6 +958,7 @@ namespace
                     }
                 EXPECT_EQ(mismatches, 0);
             }
+            D.expectWrittenOnlyInside(out, m, n);
         }
     };
 
@@ -931,7 +1014,20 @@ namespace
         Case tc;
         tc.opA    = HIPBLAS_OP_T;
         tc.groups = {{64, 64, 32}, {48, 32, 64}, {96, 80, 16}, {32, 16, 32}};
-        tc.rerun  = {{16, 64, 8}, {48, 0, 64}, {5, 3, 0}, {32, 16, 31}};
+        tc.reruns = {{{16, 64, 8}, {48, 0, 64}, {5, 3, 0}, {32, 16, 31}}};
+        run(tc);
+    }
+
+    // An error the caller left unread is not the record pack's launch failure: each call
+    // with the launch setup reused succeeds, and leaves the error for the caller to read.
+    TEST_F(GroupedMatmul, smoke_CallerErrorPendingIsNotALaunchFailure)
+    {
+        Case tc;
+        // T/N has grouped solutions on gfx942 and gfx950; N/N has none on gfx950.
+        tc.opA                = HIPBLAS_OP_T;
+        tc.groups             = {{64, 48, 32}, {17, 5, 64}, {33, 70, 40}};
+        tc.reruns             = {tc.groups, tc.groups};
+        tc.callerErrorPending = true;
         run(tc);
     }
 
@@ -963,7 +1059,7 @@ namespace
         tc.opA           = HIPBLAS_OP_T;
         tc.totalColsHint = true;
         tc.groups        = {{80, 70, 32}, {80, 70, 32}, {80, 70, 32}, {80, 70, 32}};
-        tc.rerun         = {{80, 0, 32}, {80, 270, 32}, {80, 3, 32}, {80, 7, 32}};
+        tc.reruns        = {{{80, 0, 32}, {80, 270, 32}, {80, 3, 32}, {80, 7, 32}}};
         run(tc);
     }
 
@@ -1003,6 +1099,64 @@ namespace
         run(tc);
     }
 
+    // count groups of uneven shapes; one in five is empty (M = 0 or N = 0) and some have
+    // K = 0. Grouped kernels on 64-lane waves search the groups 64 at a time, loading up to
+    // 384 per round trip, so 65 groups cross the first boundary and 385 or more both. Group 0
+    // is not empty: lanes past the last group read group 0's sizes, so a workgroup wrongly
+    // resolved past the last group writes something only if group 0 has tiles.
+    std::vector<GroupShape> unevenGroups(int count)
+    {
+        std::vector<GroupShape> groups;
+        for(int g = 0; g < count; g++)
+            groups.push_back({g % 10 == 1 ? 0 : 8 * (1 + g % 7),
+                              g % 10 == 5 ? 0 : 8 * (1 + g / 7 % 5),
+                              g % 13 == 7 ? 0 : 16 * (1 + g % 3)});
+        return groups;
+    }
+
+    // count groups, all through one heuristic call: its host time grows with the group count.
+    // The first call has equal groups, so the grid sized from the max-rows and max-cols hints
+    // has exactly one workgroup per tile and no surplus workgroup can cover a tile that
+    // another missed. The same launch then runs unevenGroups(count), which fits within the
+    // hints, then only the first and only the last group non-empty, so most workgroups have
+    // no tile and must write nothing. Alpha and beta are per group, so a tile computed with
+    // another group's arguments also gets that group's scalars.
+    Case manyGroups(int count)
+    {
+        Case tc;
+        tc.opA     = HIPBLAS_OP_T;
+        tc.scalars = Scalars::DevicePerGroup;
+        tc.groups.assign(count, {56, 40, 48});
+        tc.reruns.push_back(unevenGroups(count));
+        for(int nonEmpty : {0, count - 1})
+        {
+            std::vector<GroupShape> shapes(count, {0, 40, 48});
+            shapes[nonEmpty] = {56, 40, 48};
+            tc.reruns.push_back(shapes);
+        }
+        return tc;
+    }
+
+    TEST_F(GroupedMatmul, smoke_Fp16TN65Groups)
+    {
+        Case tc;
+        tc.opA    = HIPBLAS_OP_T;
+        tc.groups = unevenGroups(65);
+        run(tc);
+    }
+
+    TEST_F(GroupedMatmul, smoke_Fp16TN400Groups)
+    {
+        run(manyGroups(400));
+    }
+
+    // 400 groups already cross both boundaries; 1000 add more round trips per search at
+    // several times the host-reference cost, so they run outside the smoke tier.
+    TEST_F(GroupedMatmul, pre_checkin_Fp16TN1000Groups)
+    {
+        run(manyGroups(1000));
+    }
+
     // MXFP8 and MXFP4 with per-group scale tensors; K below and between multiples of the
     // kernels' 256 unroll, an empty group, and K = 0.
     const std::vector<GroupShape> kMXShapes = {
@@ -1035,6 +1189,28 @@ namespace
               kMXShapes);
     }
 
+    // An MoE layer's layout: 385 groups (experts) of the same M, few tokens (N) each, and
+    // many groups without tokens. Group 0 has tokens, as in unevenGroups.
+    TEST_F(GroupedMatmul, smoke_MXFP8TNPreSwizzled385Groups)
+    {
+        std::vector<GroupShape> shapes;
+        for(int g = 0; g < 385; g++)
+            shapes.push_back({64, g % 3 == 1 ? 0 : 1 + g % 17, 128});
+        runMX(
+            HIP_R_8F_E4M3, HIP_R_16BF, HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_32_8_EXT, shapes);
+    }
+
+    // A pre-swizzled algo reads its scales in the 32x8 layout, so packed scales must
+    // not launch it.
+    TEST_F(GroupedMatmul, smoke_MXPackedScalesRefuseAPreSwizzledAlgo)
+    {
+        runMX(HIP_R_8F_E4M3,
+              HIP_R_16BF,
+              HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_32_8_EXT,
+              kMXShapes,
+              HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_UE8M0);
+    }
+
     // MXFP4 with a UE4M3 or UE5M3 scale for every 16 values; skips where the library has no
     // grouped kernels for these modes (gfx950 has none).
     TEST_F(GroupedMatmul, smoke_MXFP4TNVec16UE4M3)
@@ -1045,6 +1221,25 @@ namespace
     TEST_F(GroupedMatmul, smoke_MXFP4TNVec16UE5M3)
     {
         runMX(HIP_R_4F_E2M1, HIP_R_16BF, HIPBLASLT_MATMUL_MATRIX_SCALE_VEC16_UE5M3_EXT, kMXShapes);
+    }
+
+    // Mixed MXFP4 A x MXFP8 B (MoE: MXFP4 expert weights, MXFP8 tokens), and the reverse.
+    TEST_F(GroupedMatmul, smoke_MXFP4xMXFP8TNPreSwizzled)
+    {
+        runMX(HIP_R_4F_E2M1,
+              HIP_R_8F_E4M3,
+              HIP_R_16BF,
+              HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_32_8_EXT,
+              kMXShapes);
+    }
+
+    TEST_F(GroupedMatmul, smoke_MXFP8xMXFP4TNPreSwizzled)
+    {
+        runMX(HIP_R_8F_E4M3,
+              HIP_R_4F_E2M1,
+              HIP_R_16BF,
+              HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_32_8_EXT,
+              kMXShapes);
     }
 
     // With the same FP8 layouts, the MX scale modes select only MX kernels and the scalar
@@ -1110,6 +1305,10 @@ namespace
                       layout, HIPBLASLT_MATRIX_LAYOUT_BATCH_MODE, &mode, sizeof(mode), &written),
                   HIPBLAS_STATUS_SUCCESS);
         EXPECT_EQ(mode, HIPBLASLT_BATCH_MODE_GROUPED);
+        int32_t grouped = HIPBLASLT_BATCH_MODE_GROUPED;
+        EXPECT_EQ(hipblasLtMatrixLayoutSetAttribute(
+                      layout, HIPBLASLT_MATRIX_LAYOUT_BATCH_MODE, &grouped, sizeof(grouped)),
+                  HIPBLAS_STATUS_SUCCESS);
         int32_t strided = HIPBLASLT_BATCH_MODE_STRIDED;
         EXPECT_EQ(hipblasLtMatrixLayoutSetAttribute(
                       layout, HIPBLASLT_MATRIX_LAYOUT_BATCH_MODE, &strided, sizeof(strided)),
@@ -1162,13 +1361,29 @@ namespace
         // A regular layout cannot be switched to grouped mode or given grouped arrays.
         hipblasLtMatrixLayout_t regular = nullptr;
         ASSERT_EQ(hipblasLtMatrixLayoutCreate(&regular, HIP_R_16F, 8, 8, 8), HIPBLAS_STATUS_SUCCESS);
-        int32_t grouped = HIPBLASLT_BATCH_MODE_GROUPED;
         EXPECT_EQ(hipblasLtMatrixLayoutSetAttribute(
                       regular, HIPBLASLT_MATRIX_LAYOUT_BATCH_MODE, &grouped, sizeof(grouped)),
                   HIPBLAS_STATUS_INVALID_VALUE);
         EXPECT_EQ(hipblasLtMatrixLayoutSetAttribute(
                       regular, HIPBLASLT_GROUPED_MATRIX_LAYOUT_ROWS_ARRAY, &rowsArray, sizeof(rowsArray)),
                   HIPBLAS_STATUS_INVALID_VALUE);
+        // Out-of-range batch modes are rejected and leave the mode unchanged.
+        for(int32_t badMode : {3, 7, -1})
+            EXPECT_EQ(hipblasLtMatrixLayoutSetAttribute(
+                          regular, HIPBLASLT_MATRIX_LAYOUT_BATCH_MODE, &badMode, sizeof(badMode)),
+                      HIPBLAS_STATUS_INVALID_VALUE);
+        EXPECT_EQ(hipblasLtMatrixLayoutGetAttribute(
+                      regular, HIPBLASLT_MATRIX_LAYOUT_BATCH_MODE, &mode, sizeof(mode), &written),
+                  HIPBLAS_STATUS_SUCCESS);
+        EXPECT_EQ(mode, HIPBLASLT_BATCH_MODE_STRIDED);
+        // Pointer-array and strided modes are still accepted on a regular layout.
+        int32_t ptrArray = HIPBLASLT_BATCH_MODE_POINTER_ARRAY;
+        EXPECT_EQ(hipblasLtMatrixLayoutSetAttribute(
+                      regular, HIPBLASLT_MATRIX_LAYOUT_BATCH_MODE, &ptrArray, sizeof(ptrArray)),
+                  HIPBLAS_STATUS_SUCCESS);
+        EXPECT_EQ(hipblasLtMatrixLayoutSetAttribute(
+                      regular, HIPBLASLT_MATRIX_LAYOUT_BATCH_MODE, &strided, sizeof(strided)),
+                  HIPBLAS_STATUS_SUCCESS);
         hipblasLtMatrixLayoutDestroy(regular);
 
         // Alpha/beta batch strides accept only 0 or 1; a valid stride reads back.
