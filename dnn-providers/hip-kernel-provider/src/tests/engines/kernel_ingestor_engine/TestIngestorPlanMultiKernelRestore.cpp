@@ -304,14 +304,16 @@ TEST_F(TestIngestorPlanMultiKernelRestore, RefusesALaunchSetTheHandlerDoesNotLau
     auto missing = twoLaunchPayload(alias);
     missing.stages.push_back(stageOf("later", later.alias, {stageKernel("")}, 0x6A));
     missing.stages.front().kernels.pop_back();
-    expectRefusal(missing, HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE, "");
+    expectRefusal(
+        missing, HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE, "does not launch this set of launches");
     EXPECT_EQ(stub.handler.received().size(), 1U);
     EXPECT_TRUE(laterStub.handler.received().empty());
 
     auto extra = twoLaunchPayload(alias);
     extra.stages.push_back(stageOf("later", later.alias, {stageKernel("")}, 0x6A));
     extra.stages.front().kernels.push_back(stageKernel("extra"));
-    expectRefusal(extra, HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE, "");
+    expectRefusal(
+        extra, HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE, "does not launch this set of launches");
     EXPECT_EQ(stub.handler.received().size(), 2U);
     EXPECT_TRUE(laterStub.handler.received().empty());
 }
@@ -327,7 +329,7 @@ TEST_F(TestIngestorPlanMultiKernelRestore, RefusesAStageWhoseHandlerRefusesItsLa
 
     auto payload = twoLaunchPayload(config.alias);
     payload.stages.push_back(stageOf("later", later.alias, {stageKernel("")}, 0x6A));
-    expectRefusal(payload, HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE, "");
+    expectRefusal(payload, HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE, "refuses its launch values");
     EXPECT_EQ(stub.handler.received().size(), 1U);
     EXPECT_TRUE(laterStub.handler.received().empty());
 }

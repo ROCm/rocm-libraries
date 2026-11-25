@@ -136,7 +136,8 @@ std::string deviceArch()
 // Fixtures
 // ---------------------------------------------------------------------------
 
-/// The split engine: the gfx11-generic content serves it on gfx1152, the gfx950 content on gfx950.
+/// The split engine: the gfx11-generic content serves it on gfx11 devices, and the gfx950, gfx942
+/// and gfx90a content on those devices.
 class TestGpuFlydslSdpaBwdSaveLoad : public FlydslSdpaBwdDevice
 {
 protected:
@@ -519,8 +520,9 @@ TEST_F(TestGpuFlydslSdpaBwdSaveLoad, RoundTripsASlottedPlanOfAPaddedGraphWithNot
 
 TEST_F(TestGpuFlydslSdpaBwdSaveLoad, RoundTripsASlottedPlanUsingTheSourcesReduceForm)
 {
+    const auto bwdCase = broadcastBiasCase();
     std::vector<uint8_t> bytes;
-    ASSERT_NO_FATAL_FAILURE(expectRoundTrip(SPLIT_ENGINE, broadcastBiasCase(), bytes));
+    ASSERT_NO_FATAL_FAILURE(expectRoundTrip(SPLIT_ENGINE, bwdCase, bytes));
 
     IngestorMultiKernelPayload payload;
     ASSERT_NO_FATAL_FAILURE(hooks::decodeMultiKernel(bytes, payload));
@@ -530,11 +532,16 @@ TEST_F(TestGpuFlydslSdpaBwdSaveLoad, RoundTripsASlottedPlanUsingTheSourcesReduce
     EXPECT_EQ(launchNamesOfStage(*dq), (std::vector<std::string>{"dq", "dbias_reduce"}));
     ASSERT_EQ(dq->kernels.size(), 2U);
     EXPECT_NE(dq->kernels[0].symbol, dq->kernels[1].symbol);
-    // gfx950's `dbias_reduce` entry names a second kernel of the dq row's own object, which the
-    // payload stores once; gfx11's names an object of its own.
-    const bool sharesTheObject = deviceArch().rfind("gfx950", 0) == 0;
+    // The kernel variant decides whether the `dbias_reduce` entry names a second kernel of the dq
+    // row's own object, which the payload stores once, or an object of its own. gfx950 always
+    // shares; gfx942 and gfx90a share for a FLOAT query only, and their 16-bit rows use a
+    // standalone object; gfx11 never shares.
+    const auto arch = deviceArch();
+    const bool sharesTheObject = arch.rfind("gfx950", 0) == 0
+                                 || ((arch.rfind("gfx942", 0) == 0 || arch.rfind("gfx90a", 0) == 0)
+                                     && bwdCase.dtype == DataType::FLOAT);
     EXPECT_EQ(dq->kernels[0].codeObjectIndex == dq->kernels[1].codeObjectIndex, sharesTheObject)
-        << deviceArch();
+        << arch;
 }
 
 // An f32 bias beside a half-precision Q: the dq stage's reduce kernel and the dBias it writes are
@@ -1012,7 +1019,8 @@ void expectLoadedSetReportsTheNote(std::string_view engineName,
 
 TEST(TestFlydslSdpaBwdSaveLoad, SplitEngineReportsThePlanSerializationNoteOnItsLoadedSet)
 {
-    expectLoadedSetReportsTheNote(SPLIT_ENGINE, "gfx11-generic and gfx950", "sdpa_bwd_dq");
+    expectLoadedSetReportsTheNote(
+        SPLIT_ENGINE, "gfx11-generic, gfx950, gfx942 and gfx90a", "sdpa_bwd_dq");
 }
 
 TEST(TestFlydslSdpaBwdSaveLoad, MergedEngineReportsThePlanSerializationNoteOnItsLoadedSet)

@@ -43,8 +43,8 @@
  * handler saves the launch inputs of one of its prepared dispatches and restores a second one
  * from them and from the code objects of every launch it names, and both launch over identical
  * inputs. Their outputs and workspace bytes must be equal, byte for byte. The split engine's
- * prep, dkdv, dq, dq_reduce, dkdv_u2 and dq_u2 handlers run on the gfx11-generic and gfx950
- * content; the merged and merged_reduce handlers run on gfx950.
+ * prep, dkdv, dq, dq_reduce, dkdv_u2 and dq_u2 handlers run on the gfx11-generic, gfx950, gfx942
+ * and gfx90a content; the merged and merged_reduce handlers run on gfx950.
  */
 namespace hip_kernel_provider::kernel_ingestor_engine
 {
@@ -865,14 +865,14 @@ TEST(TestFlydslSdpaBwdHandlerRestore, RefusesAMergedProblemWhoseTailzeroGridIsPa
 }
 
 // The merged launch is one block for every (batch, key tile, key head) and (batch, query tile,
-// query head), limited to int32: the sample's 4 key heads of 4 tiles of 32 keys and 8 query heads
-// of 2 tiles of 64 rows make 32 blocks a batch.
+// query head), limited to 2^32 - 1 work-items: the sample's 4 key heads of 4 tiles of 32 keys and
+// 8 query heads of 2 tiles of 64 rows make 32 blocks of 256 threads a batch.
 TEST(TestFlydslSdpaBwdHandlerRestore, RefusesAMergedProblemWhoseGridIsPastTheLimit)
 {
     constexpr StageLaunches NO_TAILS{false, false};
 
-    expectGridRefusal(Stage::MERGED, NO_TAILS, withBatch(67108864), "grid exceeds");
-    expectPastTheGridRule(Stage::MERGED, NO_TAILS, withBatch(67108863));
+    expectGridRefusal(Stage::MERGED, NO_TAILS, withBatch(524288), "grid exceeds");
+    expectPastTheGridRule(Stage::MERGED, NO_TAILS, withBatch(524287));
 }
 
 // ---------------------------------------------------------------------------
