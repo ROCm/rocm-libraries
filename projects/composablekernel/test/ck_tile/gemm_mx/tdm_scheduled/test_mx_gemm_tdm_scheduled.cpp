@@ -190,6 +190,36 @@ TEST(MxGemmTdmScheduled, KTailAfterLoop)
     {
         const index_t K = tiles * 256 + 96;
         check<Kernel<fp8_t, bf8_t, fp8_t, 128, 128, 256, 2, 2, 16, Tu<1, 1>, S>>(1000, 1000, K);
+        if(tiles % 2 != 0)
+        {
+            check_kernel<Kernel<fp8_t, bf8_t, fp8_t, 128, 128, 256, 2, 2, 16, Tu<1, 1>, S>>(
+                1000, 1000, K, kSparseScaleShift);
+            check_kernel<Kernel<fp8_t,
+                                bf8_t,
+                                fp8_t,
+                                128,
+                                128,
+                                256,
+                                2,
+                                2,
+                                16,
+                                Tu<1, 1>,
+                                Shape<true, true, 0>>>(1000, 1000, tiles * 256, kSparseScaleShift);
+            check_kernel<
+                Kernel<fp8_t, bf8_t, fp8_t, 128, 128, 256, 2, 2, 16, Tu<1, 1, 4, false, false>, S>>(
+                1000, 1000, K, kSparseScaleShift);
+            check_kernel<Kernel<fp8_t,
+                                bf8_t,
+                                fp8_t,
+                                128,
+                                128,
+                                256,
+                                2,
+                                2,
+                                16,
+                                Tu<1, 1, 4, false, false>,
+                                Shape<true, true, 0>>>(1000, 1000, tiles * 256, kSparseScaleShift);
+        }
         check<Kernel<fp8_t, bf8_t, fp8_t, 128, 128, 256, 2, 2, 16, Tu<1, 1, 4, true, false>, S>>(
             1000, 1000, K);
         check<Kernel<fp8_t, bf8_t, fp8_t, 128, 128, 256, 2, 2, 16, Tu<1, 1, 4, false, false>, S>>(
