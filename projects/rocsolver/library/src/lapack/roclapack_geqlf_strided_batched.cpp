@@ -76,7 +76,7 @@ try
     I const bid_inc = (nsweep == 0) ? 0 : ceildiv(batch_count_arg, nsweep);
 
     {
-        auto const batch_count = batch_count_arg;
+        auto const batch_count = bid_inc;
         rocsolver_geqlf_getMemorySize<false, T>(m, n, batch_count, &size_scalars,
                                                 &size_work_workArr, &size_Abyx_norms_trfact,
                                                 &size_diag_tmptr, &size_workArr);
