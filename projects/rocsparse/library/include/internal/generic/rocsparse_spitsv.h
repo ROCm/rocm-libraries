@@ -99,15 +99,14 @@ extern "C" {
 *  This routine does not support batched computation.
 *
 *  \note
-*  For a matrix with at least one row, no non-zero entries and a unit diagonal, \f$y = \alpha x\f$ is exact
-*  after one iteration. Nothing is done if \p host_nmaxiter[0] is not positive. Otherwise, without
-*  \p host_tol, \f$y\f$ is set to \f$\alpha x\f$ and \p host_nmaxiter[0] is left unchanged, as for a
-*  non-empty matrix: \p host_history[0] is the initial residual and the next \p host_nmaxiter[0] - 1
-*  entries are zero. With \p host_tol, the iteration is done only if
-*  \f$\Vert \alpha x - y_0 \Vert_{\infty}\f$ exceeds \p host_tol[0], \p host_nmaxiter[0] is set to 1
-*  if it is done and to 0 otherwise. \p host_history[0] is the initial residual and, if the
-*  iteration is done and \p host_nmaxiter[0] was at least 2, \p host_history[1] is zero, as for a
-*  non-empty matrix.
+*  For a matrix with at least one row, no non-zero entries and a unit diagonal, \f$op(A)\f$ is the identity, so
+*  the first iteration gives the exact solution \f$y = \alpha x\f$ and later iterations do not change it.
+*  Without \p host_tol, \p y is set to \f$\alpha x\f$ and \p host_nmaxiter[0] is unchanged. With
+*  \p host_tol, \p y is set to \f$\alpha x\f$ and \p host_nmaxiter[0] to 1, unless the input \p y
+*  already satisfies \f$\Vert \alpha x - y_0 \Vert_{\infty} \le\f$ \p host_tol[0], in which case \p y
+*  is unchanged and \p host_nmaxiter[0] is set to 0. \p host_history[0] is
+*  \f$\Vert \alpha x - y_0 \Vert_{\infty}\f$ and the residuals recorded after it are zero. As for a
+*  non-empty matrix, nothing is done if \p host_nmaxiter[0] is not positive.
 *
 *  @param[in]
 *  handle        handle to the rocSPARSE library context queue.
