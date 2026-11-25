@@ -2142,8 +2142,9 @@ namespace TensileLite
             auto         sizes   = tensor.sizes();
             auto const&  strides = tensor.strides();
             size_t const batches = strides[dim] == 0 ? 1 : sizes[dim];
-            size_t const stride  = strides[dim] * DataTypeInfo::Get(dataType).elementSize;
-            sizes[dim]           = 1;
+            size_t const stride
+                = multiplyElementSize(strides[dim], DataTypeInfo::Get(dataType).elementSize);
+            sizes[dim] = 1;
             TensorDescriptor const slice(tensor.getName().c_str(),
                                          tensor.dataType(),
                                          sizes.begin(),

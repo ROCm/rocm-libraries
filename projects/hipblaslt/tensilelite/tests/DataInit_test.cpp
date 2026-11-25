@@ -776,6 +776,51 @@ TEST(DataInitializationMafPointerArray, Maf2_0SeedsEachBatchLikeHipblaslt)
     }
 }
 
+// The per-batch byte offset must be exact past 2^24 elements. A batch stride of 2^24 + 3 FP8
+// elements rounds to 2^24 + 4 in float, which would leave batch 1's first byte unwritten and
+// write one byte past the allocation; the CPU copy carries a sentinel tail to see that.
+TEST(DataInitializationMafPointerArray, Maf2_0BatchOffsetIsExactPast2To24Elements)
+{
+    using namespace TensileLite::Client;
+    size_t const batchStride = (size_t(1) << 24) + 3;
+    auto         args        = makeMinimalClientArgs(/*mxScaleFormat=*/0); // non-MX FP8 A and B
+    setOption(args, "problem-size", std::vector<std::vector<size_t>>{{4, 3, 2, 5}});
+    setOption(args, "batch-mode", 1);
+    setOption(args, "a-strides", std::vector<std::vector<size_t>>{{1, 4, batchStride}});
+    setOption(args, "init-a", InitMode::Maf2_0);
+    ClientProblemFactory factory(args);
+    CPUInputProbe        dataInit(args, factory);
+    auto const&          gemm = dynamic_cast<ContractionProblemGemm const&>(*factory.problems()[0]);
+    ASSERT_EQ(gemm.batchMode(), ContractionProblemGemm::BATCHMODE::POINTER_ARRAY);
+    auto const&  a   = gemm.a();
+    size_t const dim = gemm.batchIndices().at(0).a;
+    ASSERT_EQ(a.dataType(), rocisa::DataType::Float8);
+    ASSERT_EQ(a.sizes()[dim], 2u);
+    ASSERT_EQ(a.strides()[dim], batchStride);
+    size_t const  slack    = 64;
+    uint8_t const sentinel = 0xA5;
+    size_t const  allocated
+        = dataInit.guardCPUTail(ContractionProblemGemm::TENSOR::A, a.dataType(), slack, sentinel);
+    ASSERT_EQ(allocated, a.totalAllocatedElements());
+    dataInit.initializeCPUInputs(gemm);
+
+    size_t const batchElements = allocated - batchStride;
+    auto const   bytes
+        = dataInit.cpuBytes(ContractionProblemGemm::TENSOR::A, a.dataType(), allocated + slack);
+    for(size_t i = allocated; i < bytes.size(); i++)
+        ASSERT_EQ(bytes[i], sentinel)
+            << "written " << i - allocated << " bytes past the allocation";
+    for(size_t b = 0; b < 2; b++)
+    {
+        std::vector<TensileLite::Float8> expected(batchElements);
+        DataInitialization::initArrayMaf2_0(
+            expected.data(), batchElements, ContractionProblemGemm::TENSOR::A + 3 * b);
+        std::vector<uint8_t> const got(bytes.begin() + b * batchStride,
+                                       bytes.begin() + b * batchStride + batchElements);
+        EXPECT_EQ(got, asBytes(expected)) << "batch " << b;
+    }
+}
+
 // Maf2_0UnitScale selected through the client options, with two batches of A and a broadcast B
 // (batch stride 0). Each batch of each operand must hold generateMXInput's maf2_0_unit_scale draw
 // for its own seed index, as hipBLASLt seeds it (A: 3 * batch; B: 1, batch 0 for every batch),
