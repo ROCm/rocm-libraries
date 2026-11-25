@@ -652,6 +652,7 @@ if(ROCKE_INSTALL_TESTS)
     # source tree), the arch-table parity test (reads cpp/core/arch/data.cpp),
     # the MMA catalog cross-check unit tests (load tools/ from the source tree),
     # the tree-wide check of rocke.tests.torch_uses and its allowlist (they list
+    # the source checkout), the compliance-pattern test (reads rocke/tools/ and lists
     # the source checkout), and the arch-domain artifact/probe unit tests. The host-only support-policy
     # units are installed with the rest of tests/tools; the full regeneration
     # sweep has its own CTest timeout and resource policy.
@@ -685,7 +686,8 @@ if(ROCKE_INSTALL_TESTS)
               PATTERN "test_limbo_audit.py" EXCLUDE
               PATTERN "test_gpu_work_placement.py" EXCLUDE
               PATTERN "test_no_torch.py" EXCLUDE
-              PATTERN "no_torch_allowlist.txt" EXCLUDE)
+              PATTERN "no_torch_allowlist.txt" EXCLUDE
+              PATTERN "test_compliance_patterns.py" EXCLUDE)
 
     endblock()
 

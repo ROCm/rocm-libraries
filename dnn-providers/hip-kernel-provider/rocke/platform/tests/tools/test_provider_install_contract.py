@@ -83,6 +83,13 @@ def _installs_under(install: str, directory: str) -> bool:
     )
 
 
+def _excludes_file(install: str, file_name: str) -> bool:
+    """True when an install(DIRECTORY) rule excludes every file named
+    ``file_name``; CMake writes a PATTERN as an escaped REGEX."""
+    escaped = "".join(c if c.isalnum() else "\\\\" + c for c in file_name)
+    return f'REGEX "/{escaped}$" EXCLUDE' in install
+
+
 def test_provider_follows_tests_switch(provider_cmake: str) -> None:
     block = provider_cmake.split('message(STATUS "rocKE features enabled")', 1)[1]
     block = block.split("endblock()", 1)[0]
@@ -140,3 +147,17 @@ def test_provider_tests_off_installs_no_rocke_content(
     assert not _installs_under(install, "bin")
     assert not _installs_under(install, "lib")
     assert not _installs_under(install, "include")
+
+
+def test_source_checkout_scans_are_not_installed(rocke: Path, tmp_path: Path) -> None:
+    # These tests scan every tracked file of the source checkout, so an
+    # installed copy could only skip; they run in the build tree instead.
+    install = _configure(
+        rocke,
+        tmp_path / "build",
+        "-DROCKE_INSTALL_TESTS=ON",
+        "-DROCKE_INSTALL_PYTHON_TESTS=ON",
+    )
+
+    assert _excludes_file(install, "test_compliance_patterns.py")
+    assert _excludes_file(install, "test_no_torch.py")

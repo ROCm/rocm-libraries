@@ -1,5 +1,5 @@
 {
-  "description": "Compliance patterns that must never appear in tracked files of the public tree or in text posted to pull requests. The one pattern file: the compliance hook and the compliance lint both read it through compliance_patterns.py. The policy itself lives in platform/AGENTS.md, section Compliance. Changing this file is a privileged change. A pattern that would match its own text writes one letter as a character class (r[a]deon), so this file passes its own scan.",
+  "description": "Compliance patterns that must never appear in tracked files of the public tree or in text posted to pull requests. The one pattern file: the scanner in compliance_patterns.py reads it, and the compliance test (platform/tests/tools/test_compliance_patterns.py) runs that scanner over every tracked file. The policy itself lives in platform/AGENTS.md, section Compliance. Changing this file is a privileged change. A pattern that would match its own text writes one letter as a character class (r[a]deon), so this file passes its own scan.",
   "rules": [
     {
       "id": "issue-tracker-link",
