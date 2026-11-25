@@ -44,7 +44,9 @@ RANGE_BOUNDARY_KEY = "range boundary"
 
 
 def _invoke(command: list[str]) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(command, capture_output=True, text=True, timeout=30)
+    return subprocess.run(
+        command, capture_output=True, text=True, timeout=30, check=False
+    )
 
 
 def config_key(index: int) -> str:

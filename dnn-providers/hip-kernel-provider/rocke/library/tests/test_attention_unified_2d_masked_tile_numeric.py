@@ -36,7 +36,6 @@ import math
 
 import numpy as np
 import pytest
-
 from kernels.common.attention_unified import (
     UnifiedAttentionProblem,
     _gfx942_4warp_route,

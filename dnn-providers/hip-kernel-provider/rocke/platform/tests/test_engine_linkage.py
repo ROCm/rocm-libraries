@@ -275,6 +275,7 @@ def configure_error_after_library_lists_edit(tmp_path, before, after):
         ],
         capture_output=True,
         text=True,
+        check=False,
     )
 
     assert configured.returncode != 0, configured.stdout

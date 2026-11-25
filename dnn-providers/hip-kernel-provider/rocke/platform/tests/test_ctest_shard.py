@@ -25,7 +25,6 @@ from pathlib import Path
 from xml.etree import ElementTree
 
 import pytest
-
 from rocke.tests import ci_shard, ctest_shard
 
 PACKAGE_ROOT = Path(ctest_shard.__file__).resolve().parents[2]
