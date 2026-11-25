@@ -5,6 +5,7 @@
 
 #include "ck/utility/common_header.hpp"
 #include "ck/utility/multi_index.hpp"
+#include "ck/utility/amd_wave_ballot.hpp"
 
 #if __clang_major__ >= 23
 #pragma clang diagnostic push
@@ -1571,6 +1572,32 @@ struct UnMerge
     }
 };
 
+// The custom convolution transforms report the GEMM padding (rows / columns beyond the real M and
+// K) as invalid by adding kConvPaddingPoison to the first spatial lower coordinate, so that the
+// unsigned range check of that coordinate fails. Unlike a separate compare, this needs the 32-bit
+// unsigned range to be big enough: a poisoned coordinate must not wrap back into [0, length).
+// The poison is added once for a padding row or a padding column (+2^30) and twice for a padding
+// row and column (+2^31), modulo 2^32:
+//  - lower side: with the smallest lower coordinate of a legitimate row being min_lower_index
+//    (negative when the input is padded), length - min_lower_index <= kConvPaddingPoison is needed
+//    so that min_lower_index + 2^30 is not inside [0, length);
+//  - upper side: the largest lower coordinate (including the padding rows and columns, whose
+//    filter index can exceed the filter) must be at most 2^31 - 1, otherwise max + 2^31 wraps past
+//    2^32 back into [0, length). The generic chain tolerates a bigger coordinate, because it uses
+//    separate compares for the GEMM padding.
+// Both are limits on index values, not on bytes, so they do not depend on the data type (unlike
+// the 2GB limit, which is in bytes and is therefore not enough for 8-bit types).
+inline constexpr uint32_t kConvPaddingPoison = 1u << 30;
+
+__host__ constexpr bool IsConvPaddingPoisonRangeSupported(long_index_t first_spatial_length,
+                                                          long_index_t min_lower_index,
+                                                          long_index_t max_lower_index)
+{
+    return first_spatial_length - min_lower_index <=
+               static_cast<long_index_t>(kConvPaddingPoison) &&
+           max_lower_index <= (long_index_t{1} << 31) - 1;
+}
+
 /**
  * @brief Transformation struct for convolution backward data output indices to GEMM indices.
  *
@@ -1588,8 +1615,11 @@ struct UnMerge
  * [0, Ho) x [0, Wo) and the GEMM rows / columns beyond the real M and K. The latter are made
  * invalid by adding a large value to the Ho coordinate (the M part to the term that only depends
  * on m, the K part to the term that only depends on k), so that the unsigned range check fails.
- * A poisoned coordinate must never wrap back into [0, Ho), which holds when Ho is at most 2^29
- * and the Ho coordinate of every valid row stays above -2^29.
+ * A poisoned coordinate must never wrap back into [0, Ho). This holds when
+ * Ho - (smallest Ho coordinate of a legitimate row) <= kConvPaddingPoison (2^30), for example Ho
+ * at most 2^29 and no coordinate below -2^29. It is a limit on index values, not on bytes, so it
+ * does not depend on the data type. See IsConvPaddingPoisonRangeSupported and
+ * IsMergedOutPaddingRangeSupported, which the device op checks on the host.
  *
  * Indices must be non-negative and below 2^31 (magic division limitation).
  */
@@ -1614,7 +1644,7 @@ struct ConvBwdDataImplicitGemmOutTransform
     index_t MPad_, KPad_;
     Tuple<index_t, index_t, index_t> up_lengths_; // K0_, MPadded, K1_;
 
-    static constexpr uint32_t kPoison = 1u << 30;
+    static constexpr uint32_t kPoison = kConvPaddingPoison;
 
     Tuple<index_t, index_t, index_t, index_t>
         low_lengths_magic_divisor_multiplier_; // XDotSlice_K_, K_, TildeSlice_, WTildeSlice_
@@ -1822,25 +1852,18 @@ struct ConvBwdDataImplicitGemmOutTransform
     // the Ho / Wo bounds are part of this transform.
     static constexpr bool HasValidLaneMask = MergePadding;
 
-    // Lane mask version of the validity check (wave32, gfx125): one ballot per dimension so that
+    // Lane mask version of the validity check (wave32 or wave64): one ballot per dimension so that
     // each ballot argument is a single compare, which is lowered to a v_cmp writing an SGPR lane
     // mask. Must be called by all the lanes of the wave.
     template <typename UpIdx>
-    __device__ uint32_t IsValidLaneMask(const UpIdx& idx_up) const
+    __device__ lane_mask_t IsValidLaneMask(const UpIdx& idx_up) const
     {
         static_assert(MergePadding, "the lane mask needs the Ho / Wo bounds in the transform");
-#if defined(__gfx125__)
         LowerIndex idx_low;
         CalculateLowerIndex(idx_low, idx_up);
 
-        return __builtin_amdgcn_ballot_w32(static_cast<uint32_t>(idx_low[I1]) <
-                                           static_cast<uint32_t>(Ho_)) &
-               __builtin_amdgcn_ballot_w32(static_cast<uint32_t>(idx_low[I2]) <
-                                           static_cast<uint32_t>(Wo_));
-#else
-        ignore = idx_up;
-        return 0;
-#endif
+        return amd_wave_ballot(static_cast<uint32_t>(idx_low[I1]) < static_cast<uint32_t>(Ho_)) &
+               amd_wave_ballot(static_cast<uint32_t>(idx_low[I2]) < static_cast<uint32_t>(Wo_));
     }
 
     __host__ __device__ static constexpr bool IsKnownAtCompileTime() { return false; }
@@ -1863,14 +1886,28 @@ struct ConvBwdDataImplicitGemmOutTransform
  * coordinates (N, I_0..I_{D-1}, C). D is NDimSpatial. Indices must be non-negative and below 2^31
  * (magic division limitation).
  *
+ * Use in backward weight: the transform only maps two flattened indices, the first one over
+ * (N, O_0..O_{D-1}) and the second over (F_0..F_{D-1}, C), to the coordinates of the input tensor
+ * (N, I_0..I_{D-1}, C) with I_d = O_d * stride_d + F_d * dilation_d - left_pad_d. It does not
+ * depend on which GEMM dimension is the reduction one. In forward convolution these are M (output
+ * pixels) and K (filter taps and channels) of the A matrix. In backward weight, the input tensor
+ * is the B matrix with GemmK = (N, O_0..O_{D-1}) and GemmN = (F_0..F_{D-1}, C): the same two index
+ * spaces in the opposite roles. The same transform therefore builds the backward weight B
+ * descriptor, with the padded GemmK as the first upper length and the padded GemmN as the second,
+ * and no separate backward weight transform is needed. Only the cost of the two parts changes: the
+ * part over (N, O) now moves along the reduction dimension, see the poison description below.
+ *
  * The rows and columns beyond the real M and K (GEMM padding) are reported as invalid by this
  * transform itself, so a separate right-pad transform (and its compares) is not needed. This is
  * done by pushing the first spatial lower coordinate out of range: the M part of the poison is
  * added to the term that only depends on m and the K part to the term that only depends on k, so
  * each of them can be hoisted or shared independently of the other. The lower index of a padding
  * row / column is therefore meaningless. A poisoned coordinate must never wrap back into
- * [0, length), which holds when the first spatial input length is at most 2^29 and the first
- * spatial lower coordinate of every row stays above -2^29.
+ * [0, length). This holds when length - (smallest first spatial lower coordinate of a legitimate
+ * row) <= kConvPaddingPoison (2^30), for example a length of at most 2^29 and no coordinate below
+ * -2^29. It is a limit on index values, not on bytes, so it does not depend on the data type. See
+ * IsConvPaddingPoisonRangeSupported and IsPaddingRangeSupported, which the device op checks on the
+ * host.
  */
 template <index_t NDimSpatial>
 struct ConvFwdDataImplicitGemmInTransform
@@ -1901,7 +1938,7 @@ struct ConvFwdDataImplicitGemmInTransform
     index_t m_valid_;
     index_t k_valid_;
 
-    static constexpr uint32_t kPoison = 1u << 30;
+    static constexpr uint32_t kPoison = kConvPaddingPoison;
 
     __host__ __device__ constexpr ConvFwdDataImplicitGemmInTransform() = default;
 
@@ -2067,25 +2104,41 @@ struct ConvFwdDataImplicitGemmInTransform
     }
 
     // PROTOTYPE: one ballot per spatial dimension keeps each term a single compare so it is
-    // lowered to a v_cmp writing an SGPR lane mask (wave32 / gfx125 only).
+    // lowered to a v_cmp writing an SGPR lane mask .
     static constexpr bool HasValidLaneMask = true;
 
     template <typename UpIdx>
-    __device__ uint32_t IsValidLaneMask(const UpIdx& idx_up) const
+    __device__ lane_mask_t IsValidLaneMask(const UpIdx& idx_up) const
     {
-#if defined(__gfx125__)
         LowerIndex idx_low;
         CalculateLowerIndex(idx_low, idx_up);
-        uint32_t mask = 0xffffffffu;
+        lane_mask_t mask = ~lane_mask_t{0};
         static_for<0, NDimSpatial, 1>{}([&](auto d) {
-            mask &= __builtin_amdgcn_ballot_w32(static_cast<uint32_t>(idx_low[Number<d + 1>{}]) <
-                                                static_cast<uint32_t>(in_lengths_[d]));
+            mask &= amd_wave_ballot(static_cast<uint32_t>(idx_low[Number<d + 1>{}]) <
+                                    static_cast<uint32_t>(in_lengths_[d]));
         });
         return mask;
-#else
-        ignore = idx_up;
-        return 0;
-#endif
+    }
+
+    // The poison of the padding rows / columns is only reliable if the first spatial lower
+    // coordinates stay in the range described at IsConvPaddingPoisonRangeSupported.
+    __host__ bool IsPaddingRangeSupported() const
+    {
+        long_index_t filter_rest = -static_cast<long_index_t>(nC_); // C
+        if constexpr(NDimSpatial > 1)
+        {
+            static_for<1, NDimSpatial, 1>{}(
+                [&](auto d) { filter_rest *= -static_cast<long_index_t>(neg_filter_lengths_[d]); });
+        }
+        // the filter index of the first spatial dimension is the last quotient of k
+        const long_index_t max_filter_idx = (up_lengths_[Number<1>{}] - 1) / filter_rest;
+        const long_index_t out0     = -static_cast<long_index_t>(neg_out_lengths_[Number<0>{}]);
+        const long_index_t left_pad = left_pads_[Number<0>{}];
+        const long_index_t max_lower_index = (out0 - 1) * conv_strides_[Number<0>{}] +
+                                             max_filter_idx * conv_dilations_[Number<0>{}] -
+                                             left_pad;
+        return IsConvPaddingPoisonRangeSupported(
+            in_lengths_[Number<0>{}], -left_pad, max_lower_index);
     }
 
     __host__ __device__ static constexpr bool IsKnownAtCompileTime() { return false; }

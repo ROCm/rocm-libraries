@@ -16,6 +16,7 @@
 #include "generic_memory_space_atomic.hpp"
 #include "data_cache_prefetch.hpp"
 #include "amd_tdm.hpp"
+#include "ck/utility/amd_wave_ballot.hpp"
 
 #if __clang_major__ >= 23
 #pragma clang diagnostic push
@@ -268,14 +269,17 @@ struct DynamicBuffer
                                                             element_space_size_ / PackedSize);
     }
 
+    // is_valid_element is either a per-lane bool or a wave lane mask (lane_mask_t, one bit per
+    // lane, the same for all the lanes of the wave). The lane mask needs UseFullAssembly.
     template <typename DstBuffer,
               index_t NumElemsPerThread,
               index_t static_dst_offset,
-              bool UseFullAssembly = false>
+              bool UseFullAssembly = false,
+              typename ValidType   = bool>
     __host__ __device__ void AsyncCopyToLds(DstBuffer& dst_buf,
                                             IndexType src_offset,
                                             IndexType dst_offset,
-                                            bool is_valid_element) const
+                                            ValidType is_valid_element) const
     {
         // Copy data from global to LDS memory using direct loads.
         static_assert(GetAddressSpace() == AddressSpaceEnum::Global,
@@ -284,9 +288,21 @@ struct DynamicBuffer
                       "Destination data must be stored in an LDS memory buffer.");
         static_assert(is_same_v<remove_cvref_t<typename DstBuffer::type>, remove_cvref_t<T>>,
                       "Source and destination buffer must have the same data type.");
+        static_assert(is_same_v<ValidType, bool> || is_same_v<ValidType, lane_mask_t>,
+                      "The validity must be a bool or a lane mask.");
 
         auto p_uniform_ptr = amd_wave_read_first_lane(p_data_);
-        if constexpr(!UseFullAssembly)
+        if constexpr(is_same_v<ValidType, lane_mask_t>)
+        {
+            static_assert(UseFullAssembly, "A lane mask needs the full assembly implementation.");
+            amd_async_load_global_to_lds_assembly_mask<remove_cvref_t<typename DstBuffer::type>,
+                                                       NumElemsPerThread,
+                                                       static_dst_offset,
+                                                       true,
+                                                       coherence>(
+                p_uniform_ptr, src_offset, dst_buf.p_data_, dst_offset, is_valid_element);
+        }
+        else if constexpr(!UseFullAssembly)
         {
             amd_async_load_global_to_lds<remove_cvref_t<typename DstBuffer::type>,
                                          NumElemsPerThread,

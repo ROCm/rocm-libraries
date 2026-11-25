@@ -1629,6 +1629,24 @@ struct DeviceGroupedConvFwdMultipleABD_WaveletModel_Xdl_CShuffle_V3
             return false;
         }
 
+        // The custom transform reports the GEMM padding through a poison of the first spatial
+        // coordinate. The 2GB check below is in bytes and does not bound the number of elements of
+        // 8-bit types, so the range of the poison is checked explicitly.
+        if constexpr(ConvToGemmFwdTransformer::UseCustomTransformA)
+        {
+            if(!arg.conv_to_gemm_transformer_.IsCustomTransformPaddingRangeSupported(KPerBlock))
+            {
+                if(ck::EnvIsEnabled(CK_ENV(CK_LOGGING)))
+                {
+                    std::cout << "The first spatial lower coordinates are out of the range of the "
+                                 "custom transform!"
+                              << " In " << __FILE__ << ":" << __LINE__
+                              << ", in function: " << __func__ << std::endl;
+                }
+                return false;
+            }
+        }
+
         // Gridwise gemm v3 doesn't verify descriptors size
         if(!arg.conv_to_gemm_transformer_.AreDescriptorsSmallerThan2GB())
         {

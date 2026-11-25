@@ -3,6 +3,7 @@
 
 #include <gtest/gtest.h>
 #include <array>
+#include <limits>
 #include <cstdint>
 #include <random>
 #include <sstream>
@@ -15,6 +16,9 @@
 #include "ck/tensor_operation/operator_transform/transform_conv_bwd_weight_to_gemm_v2.hpp"
 
 using namespace ck;
+
+constexpr index_t kIndexMax = std::numeric_limits<index_t>::max();
+constexpr index_t kIndexMin = std::numeric_limits<index_t>::lowest();
 
 // =============================================================================
 // Tests for convert_visible_to_hidden_id functor
@@ -380,7 +384,40 @@ struct ForwardConvCase
 {
     index_t N, C;
     std::array<index_t, NDim> In, Filter, Stride, Dilation, PadLeft, PadRight;
+    // Number of groups of the NHWGC input tensor. The descriptor describes one group, so the
+    // group only changes the strides: the channels of the other groups are interleaved.
+    index_t G = 1;
 };
+
+// Input descriptor (N, spatial..., C) of one group of an N spatial G C tensor
+template <index_t NDim>
+auto MakeInputDescriptor(const ForwardConvCase<NDim>& cfg)
+{
+    std::array<index_t, NDim + 2> lengths{};
+    std::array<index_t, NDim + 2> strides{};
+    lengths[0]        = cfg.N;
+    lengths[NDim + 1] = cfg.C;
+    strides[NDim + 1] = 1;
+    index_t stride    = cfg.G * cfg.C;
+    for(index_t d = NDim - 1; d >= 0; --d)
+    {
+        lengths[1 + d] = cfg.In[d];
+        strides[1 + d] = stride;
+        stride *= cfg.In[d];
+    }
+    strides[0] = stride;
+    if constexpr(NDim == 1)
+        return make_naive_tensor_descriptor(make_tuple(lengths[0], lengths[1], lengths[2]),
+                                            make_tuple(strides[0], strides[1], strides[2]));
+    else if constexpr(NDim == 2)
+        return make_naive_tensor_descriptor(
+            make_tuple(lengths[0], lengths[1], lengths[2], lengths[3]),
+            make_tuple(strides[0], strides[1], strides[2], strides[3]));
+    else
+        return make_naive_tensor_descriptor(
+            make_tuple(lengths[0], lengths[1], lengths[2], lengths[3], lengths[4]),
+            make_tuple(strides[0], strides[1], strides[2], strides[3], strides[4]));
+}
 
 template <index_t NDim>
 auto ToMultiIndex(const std::array<index_t, NDim>& a)
@@ -409,7 +446,7 @@ std::string Describe(const ForwardConvCase<NDim>& cfg)
 {
     const auto out = OutputLengths(cfg);
     std::ostringstream os;
-    os << NDim << "D N=" << cfg.N << " C=" << cfg.C;
+    os << NDim << "D N=" << cfg.N << " C=" << cfg.C << " G=" << cfg.G;
     for(index_t d = 0; d < NDim; ++d)
     {
         os << " | in=" << cfg.In[d] << " filter=" << cfg.Filter[d] << " stride=" << cfg.Stride[d]
@@ -427,7 +464,7 @@ auto MakeGenericDescriptor(const ForwardConvCase<NDim>& cfg, const std::array<in
     const index_t C = cfg.C;
     if constexpr(NDim == 1)
     {
-        const auto input_desc = make_naive_tensor_descriptor_packed(make_tuple(N, cfg.In[0], C));
+        const auto input_desc = MakeInputDescriptor(cfg);
         const auto padded     = transform_tensor_descriptor(
             input_desc,
             make_tuple(make_pass_through_transform(N),
@@ -452,9 +489,8 @@ auto MakeGenericDescriptor(const ForwardConvCase<NDim>& cfg, const std::array<in
     }
     else if constexpr(NDim == 2)
     {
-        const auto input_desc =
-            make_naive_tensor_descriptor_packed(make_tuple(N, cfg.In[0], cfg.In[1], C));
-        const auto padded = transform_tensor_descriptor(
+        const auto input_desc = MakeInputDescriptor(cfg);
+        const auto padded     = transform_tensor_descriptor(
             input_desc,
             make_tuple(make_pass_through_transform(N),
                        make_pad_transform(cfg.In[0], cfg.PadLeft[0], cfg.PadRight[0]),
@@ -482,9 +518,8 @@ auto MakeGenericDescriptor(const ForwardConvCase<NDim>& cfg, const std::array<in
     else
     {
         static_assert(NDim == 3);
-        const auto input_desc =
-            make_naive_tensor_descriptor_packed(make_tuple(N, cfg.In[0], cfg.In[1], cfg.In[2], C));
-        const auto padded = transform_tensor_descriptor(
+        const auto input_desc = MakeInputDescriptor(cfg);
+        const auto padded     = transform_tensor_descriptor(
             input_desc,
             make_tuple(make_pass_through_transform(N),
                        make_pad_transform(cfg.In[0], cfg.PadLeft[0], cfg.PadRight[0]),
@@ -554,16 +589,7 @@ void CheckForwardConvInputTransformMatchesGeneric(const ForwardConvCase<NDim>& c
     }
 
     const auto generic_desc = MakeGenericDescriptor<NDim>(cfg, out);
-    const auto input_desc   = [&] {
-        if constexpr(NDim == 1)
-            return make_naive_tensor_descriptor_packed(make_tuple(cfg.N, cfg.In[0], cfg.C));
-        else if constexpr(NDim == 2)
-            return make_naive_tensor_descriptor_packed(
-                make_tuple(cfg.N, cfg.In[0], cfg.In[1], cfg.C));
-        else
-            return make_naive_tensor_descriptor_packed(
-                make_tuple(cfg.N, cfg.In[0], cfg.In[1], cfg.In[2], cfg.C));
-    }();
+    const auto input_desc   = MakeInputDescriptor(cfg);
     // The transform is built with the padded GEMM lengths (as the GEMM padder would produce them)
     // and must report the padding rows / columns (m >= M or k >= K) as invalid itself, with the
     // same offsets and validity as the generic pad / embed / merge chain inside the real M x K.
@@ -621,6 +647,7 @@ void CheckForwardConvInputTransformMatchesGeneric(const ForwardConvCase<NDim>& c
 
     // Moving a coordinate (UpdateLowerIndex path used by the kernels) must agree with building
     // the coordinate from scratch. Steps go forward and backward, change one or both dimensions.
+    // NOTE: this check is NOT exhaustive: it follows a fixed-seed random walk of 5000 steps.
     const index_t out_last  = out[NDim - 1];
     const index_t filt_last = cfg.Filter[NDim - 1];
     const index_t dms[]     = {
@@ -632,6 +659,11 @@ void CheckForwardConvInputTransformMatchesGeneric(const ForwardConvCase<NDim>& c
     index_t cur_k           = 0;
     auto coordinate         = make_tensor_coordinate(custom_desc, make_tuple(cur_m, cur_k));
     int64_t move_mismatches = 0;
+    int first_bad_step      = -1;
+    index_t first_bad_m     = -1;
+    index_t first_bad_k     = -1;
+    index_t first_bad_dm    = 0;
+    index_t first_bad_dk    = 0;
     for(int step = 0; step < 5000; ++step)
     {
         const index_t dm = dms[rng() % (sizeof(dms) / sizeof(dms[0]))];
@@ -646,16 +678,34 @@ void CheckForwardConvInputTransformMatchesGeneric(const ForwardConvCase<NDim>& c
         move_tensor_coordinate(custom_desc, coordinate, coordinate_step);
 
         const auto fresh = make_tensor_coordinate(custom_desc, make_tuple(cur_m, cur_k));
-        move_mismatches +=
+        const bool mismatch =
             coordinate.GetOffset() != fresh.GetOffset() ||
             coordinate_has_valid_offset_assuming_visible_index_is_valid(custom_desc, coordinate) !=
                 coordinate_has_valid_offset_assuming_visible_index_is_valid(custom_desc, fresh);
+        if(mismatch && move_mismatches++ == 0)
+        {
+            first_bad_step = step;
+            first_bad_m    = cur_m;
+            first_bad_k    = cur_k;
+            first_bad_dm   = dm;
+            first_bad_dk   = dk;
+        }
     }
-    EXPECT_EQ(move_mismatches, 0);
+    EXPECT_EQ(move_mismatches, 0) << "first mismatch at step " << first_bad_step
+                                  << " (moved by dm=" << first_bad_dm << " dk=" << first_bad_dk
+                                  << " to m=" << first_bad_m << " k=" << first_bad_k << ")";
 }
 
 // Checks the transform alone (lower index and validity) against an int64 reference derived from
 // the convolution definition. Used for index ranges where a tensor offset would overflow.
+// The generic pad / embed / merge descriptor is not used as the reference here: it computes tensor
+// offsets with 32-bit indices, which wrap for these extreme lengths, and its merge transforms rely
+// on the same magic division (dividends below 2^31) whose limits this check exercises, so it would
+// not be an independent reference. The generic descriptor is the reference for realistic sizes in
+// CheckForwardConvInputTransformMatchesGeneric.
+// NOTE: this check is NOT exhaustive. The (m, k) space is up to 2^31 x 2^31, so only boundary
+// values (around every divisor, the real M and K, and the largest supported index) and a fixed-seed
+// random sample are tested.
 template <index_t NDim>
 void CheckForwardConvInputTransformLowerIndices(const ForwardConvCase<NDim>& cfg)
 {
@@ -680,7 +730,7 @@ void CheckForwardConvInputTransformLowerIndices(const ForwardConvCase<NDim>& cfg
 
     // Upper-index boundaries around every divisor, plus values up to the largest dividend
     // (2^31 - 1) magic division supports; random samples cover the rest.
-    std::vector<int64_t> ms{0, 1, M - 1, M, INT32_MAX - 1, INT32_MAX};
+    std::vector<int64_t> ms{0, 1, M - 1, M, kIndexMax - 1, kIndexMax};
     std::vector<int64_t> ks{0, 1, cfg.C - 1, cfg.C, cfg.C + 1, K - 1, K, K + cfg.C};
     int64_t prod = 1;
     for(index_t d = NDim - 1; d >= 0; --d)
@@ -699,7 +749,7 @@ void CheckForwardConvInputTransformLowerIndices(const ForwardConvCase<NDim>& cfg
     std::mt19937_64 rng(7);
     for(int i = 0; i < 2000; ++i)
     {
-        ms.push_back(rng() % (int64_t(INT32_MAX) + 1));
+        ms.push_back(rng() % (int64_t(kIndexMax) + 1));
         ks.push_back(rng() % (K + cfg.C));
     }
 
@@ -708,7 +758,7 @@ void CheckForwardConvInputTransformLowerIndices(const ForwardConvCase<NDim>& cfg
     {
         for(const int64_t k : ks)
         {
-            if(m < 0 || m > INT32_MAX || k < 0 || k > INT32_MAX)
+            if(m < 0 || m > kIndexMax || k < 0 || k > kIndexMax)
             {
                 continue;
             }
@@ -737,12 +787,11 @@ void CheckForwardConvInputTransformLowerIndices(const ForwardConvCase<NDim>& cfg
             {
                 in_idx[d] = o[d] * cfg.Stride[d] + f[d] * cfg.Dilation[d] - cfg.PadLeft[d];
                 valid &= in_idx[d] >= 0 && in_idx[d] < cfg.In[d];
-                in_range &= in_idx[d] >= INT32_MIN && in_idx[d] <= INT32_MAX;
+                in_range &= in_idx[d] >= kIndexMin && in_idx[d] <= kIndexMax;
             }
 
             // The transform computes lower indices in 32-bit arithmetic; a lower index outside
-            // the int32 range (only reachable with absurd dilation/pad past the filter) is not
-            // representable and therefore outside the supported range.
+            // the int32 range is not representable and therefore outside the supported range.
             if(!in_range)
             {
                 continue;
@@ -818,17 +867,32 @@ TEST(TensorDescriptorFunctorsIntegration, ForwardConvInputTransformMatchesGeneri
         {2, 3, {9, 9, 9}, {3, 3, 3}, {3, 3, 3}, {2, 1, 2}, {1, 3, 1}, {2, 3, 0}},
         {1, 16, {5, 4, 6}, {3, 3, 3}, {1, 1, 1}, {1, 1, 1}, {1, 1, 1}, {1, 1, 1}},
     };
-    for(const auto& cfg : cases1d)
+    for(auto cfg : cases1d)
     {
-        CheckForwardConvInputTransformMatchesGeneric<1>(cfg);
+        // packed tensor (G = 1) and a tensor with interleaved groups (NHWGC strides, G = 3)
+        for(const index_t groups : {1, 3})
+        {
+            cfg.G = groups;
+            CheckForwardConvInputTransformMatchesGeneric<1>(cfg);
+        }
     }
-    for(const auto& cfg : cases2d)
+    for(auto cfg : cases2d)
     {
-        CheckForwardConvInputTransformMatchesGeneric<2>(cfg);
+        // packed tensor (G = 1) and a tensor with interleaved groups (NHWGC strides, G = 3)
+        for(const index_t groups : {1, 3})
+        {
+            cfg.G = groups;
+            CheckForwardConvInputTransformMatchesGeneric<2>(cfg);
+        }
     }
-    for(const auto& cfg : cases3d)
+    for(auto cfg : cases3d)
     {
-        CheckForwardConvInputTransformMatchesGeneric<3>(cfg);
+        // packed tensor (G = 1) and a tensor with interleaved groups (NHWGC strides, G = 3)
+        for(const index_t groups : {1, 3})
+        {
+            cfg.G = groups;
+            CheckForwardConvInputTransformMatchesGeneric<3>(cfg);
+        }
     }
 
     // Extreme configurations, checked against an int64 reference (offsets would overflow here).
@@ -863,19 +927,19 @@ TEST(TensorDescriptorFunctorsIntegration, ForwardConvInputTransformMatchesGeneri
         {1, 1, {4, 4}, {1, 1}, {1 << 28, 1 << 28}, {1, 1}, {0, 0}, {1 << 30, 1 << 30}},
         {1, 1, {4, 4}, {1, 1}, {1 << 28, 1 << 28}, {1, 1}, {0, 0}, {7 << 28, 7 << 28}},
         // second dimension down to -(2^31 - 1)
-        {1, 1, {4, 4}, {1, 1}, {1 << 28, 1 << 28}, {1, 1}, {1 << 29, INT32_MAX}, {0, 0}},
-        // large extents: Hi = 2^29, Wi = INT32_MAX, filter taps reaching Hi - 1 and Hi
+        {1, 1, {4, 4}, {1, 1}, {1 << 28, 1 << 28}, {1, 1}, {1 << 29, kIndexMax}, {0, 0}},
+        // large extents: Hi = 2^29, Wi = kIndexMax, filter taps reaching Hi - 1 and Hi
         {1,
          1,
-         {1 << 29, INT32_MAX},
+         {1 << 29, kIndexMax},
          {2, 2},
-         {(1 << 29) - 1, INT32_MAX - 1},
+         {(1 << 29) - 1, kIndexMax - 1},
          {1, 1},
          {0, 0},
          {0, 0}},
-        {1, 1, {1 << 29, INT32_MAX}, {2, 2}, {1 << 29, INT32_MAX}, {1, 1}, {0, 0}, {1, 1}},
-        // Wo = INT32_MAX (largest magic-division divisor) with M = INT32_MAX
-        {1, 1, {1, INT32_MAX}, {1, 1}, {1, 1}, {1, 1}, {0, 0}, {0, 0}},
+        {1, 1, {1 << 29, kIndexMax}, {2, 2}, {1 << 29, kIndexMax}, {1, 1}, {0, 0}, {1, 1}},
+        // Wo = kIndexMax (largest magic-division divisor) with M = kIndexMax
+        {1, 1, {1, kIndexMax}, {1, 1}, {1, 1}, {1, 1}, {0, 0}, {0, 0}},
         // K = Y * X * C just below 2^31, with X = 1 (divisor 1) and a huge C divisor
         {1, 715827882, {3, 1}, {3, 1}, {1, 1}, {1, 1}, {0, 0}, {0, 0}},
     };
@@ -906,8 +970,8 @@ TEST(TensorDescriptorFunctorsIntegration, ForwardConvInputTransformMatchesGeneri
          {1, 1, 1},
          {0, 0, 0},
          {1 << 30, 1 << 30, 1 << 30}},
-        // Wo = INT32_MAX with the other output dimensions 1
-        {1, 1, {1, 1, INT32_MAX}, {1, 1, 1}, {1, 1, 1}, {1, 1, 1}, {0, 0, 0}, {0, 0, 0}},
+        // Wo = kIndexMax with the other output dimensions 1
+        {1, 1, {1, 1, kIndexMax}, {1, 1, 1}, {1, 1, 1}, {1, 1, 1}, {0, 0, 0}, {0, 0, 0}},
         // K just below 2^31 with filter 3 x 1 x 1 and a huge C divisor
         {1, 715827882, {3, 1, 1}, {3, 1, 1}, {1, 1, 1}, {1, 1, 1}, {0, 0, 0}, {0, 0, 0}},
     };
@@ -939,6 +1003,8 @@ struct BwdDataCase
     index_t Y, X;
     index_t StrideH, StrideW, DilationH, DilationW;
     index_t LeftPadH, LeftPadW, RightPadH, RightPadW;
+    // Number of groups of the NHWGK / NHWGC tensors (only the strides depend on it)
+    index_t G = 1;
 };
 
 template <typename IndexType, bool MergeOutPadding = false>
@@ -970,15 +1036,15 @@ auto MakeBwdDataADescriptor(const BwdDataCase& c, index_t ytilde, index_t xtilde
         (c.Hi + c.LeftPadH + c.RightPadH - c.DilationH * (c.Y - 1) - 1) / c.StrideH + 1;
     const IndexType Wo =
         (c.Wi + c.LeftPadW + c.RightPadW - c.DilationW * (c.X - 1) - 1) / c.StrideW + 1;
-    const IndexType G = 1, N = c.N, K = c.K, C = c.C;
+    const IndexType G = c.G, N = c.N, K = c.K, C = c.C;
 
     // NHWGK output, GKYXC weight, NHWGC input
     const std::array<IndexType, 5> a_lengths{G, N, K, Ho, Wo};
-    const std::array<IndexType, 5> a_strides{K, Ho * Wo * K, 1, Wo * K, K};
+    const std::array<IndexType, 5> a_strides{K, Ho * Wo * G * K, 1, Wo * G * K, G * K};
     const std::array<IndexType, 5> b_lengths{G, K, C, c.Y, c.X};
     const std::array<IndexType, 5> b_strides{K * c.Y * c.X * C, c.Y * c.X * C, 1, c.X * C, C};
     const std::array<IndexType, 5> c_lengths{G, N, C, c.Hi, c.Wi};
-    const std::array<IndexType, 5> c_strides{C, c.Hi * c.Wi * C, 1, c.Wi * C, C};
+    const std::array<IndexType, 5> c_strides{C, c.Hi * c.Wi * G * C, 1, c.Wi * G * C, G * C};
     const std::array<IndexType, 2> conv_strides{c.StrideH, c.StrideW};
     const std::array<IndexType, 2> conv_dilations{c.DilationH, c.DilationW};
     const std::array<IndexType, 2> left_pads{c.LeftPadH, c.LeftPadW};
@@ -1003,8 +1069,8 @@ template <bool MergePadding>
 void CheckBwdDataOutTransformMatchesGeneric(const BwdDataCase& c)
 {
     std::ostringstream os;
-    os << "N=" << c.N << " C=" << c.C << " K=" << c.K << " In=" << c.Hi << "x" << c.Wi
-       << " Filter=" << c.Y << "x" << c.X << " Stride=" << c.StrideH << "x" << c.StrideW
+    os << "N=" << c.N << " G=" << c.G << " C=" << c.C << " K=" << c.K << " In=" << c.Hi << "x"
+       << c.Wi << " Filter=" << c.Y << "x" << c.X << " Stride=" << c.StrideH << "x" << c.StrideW
        << " Dilation=" << c.DilationH << "x" << c.DilationW << " Pad=" << c.LeftPadH << ","
        << c.LeftPadW << "," << c.RightPadH << "," << c.RightPadW;
     SCOPED_TRACE(os.str() + (MergePadding ? " merged padding" : " separate padding"));
@@ -1085,10 +1151,15 @@ TEST(TensorDescriptorFunctorsIntegration, BackwardDataOutputTransformMatchesGene
         {3, 8, 8, 7, 5, 3, 3, 1, 1, 1, 1, 1, 1, 1, 1},
         {1, 8, 72, 5, 9, 3, 3, 1, 1, 1, 1, 0, 0, 0, 0},
     };
-    for(const auto& c : cases)
+    for(auto c : cases)
     {
-        CheckBwdDataOutTransformMatchesGeneric<false>(c);
-        CheckBwdDataOutTransformMatchesGeneric<true>(c);
+        // packed tensors (G = 1) and tensors with interleaved groups (NHWGK / NHWGC, G = 3)
+        for(const index_t groups : {1, 3})
+        {
+            c.G = groups;
+            CheckBwdDataOutTransformMatchesGeneric<false>(c);
+            CheckBwdDataOutTransformMatchesGeneric<true>(c);
+        }
     }
 }
 
@@ -1105,6 +1176,8 @@ struct BwdWeightCase
     index_t N, C, K;
     std::array<index_t, NDim> In, Filter, Stride, Dilation, PadLeft, PadRight;
     index_t BatchK;
+    // Number of groups of the N spatial G C input tensor (only the strides depend on it)
+    index_t G = 1;
 };
 
 template <index_t NDim, bool Custom>
@@ -1130,18 +1203,19 @@ auto MakeBwdWeightBDescriptor(const BwdWeightCase<NDim>& c)
                  1;
     }
 
-    // packed (G = 1) N spatial C input, N spatial K output, K filter C weight
+    // N spatial G C input, N spatial G K output (the groups are interleaved: G = 1 is packed),
+    // G K filter C weight
     std::array<index_t, NDim + 3> in_strides{}, wei_strides{}, out_strides{};
     in_strides[0]  = c.C;
-    in_strides[1]  = c.C;
+    in_strides[1]  = c.G * c.C;
     in_strides[2]  = 1;
     out_strides[0] = c.K;
-    out_strides[1] = c.K;
+    out_strides[1] = c.G * c.K;
     out_strides[2] = 1;
     wei_strides[0] = c.K * c.C;
     wei_strides[1] = c.C;
     wei_strides[2] = 1;
-    index_t in_s = c.C, out_s = c.K, wei_s = c.C;
+    index_t in_s = c.G * c.C, out_s = c.G * c.K, wei_s = c.C;
     for(index_t d = NDim - 1; d >= 0; --d)
     {
         in_strides[3 + d]  = in_s;
@@ -1177,9 +1251,9 @@ auto MakeBwdWeightBDescriptor(const BwdWeightCase<NDim>& c)
 template <index_t NDim>
 void CheckBwdWeightBTransformMatchesGeneric(const BwdWeightCase<NDim>& c)
 {
-    SCOPED_TRACE("N=" + std::to_string(c.N) + " C=" + std::to_string(c.C) +
-                 " In0=" + std::to_string(c.In[0]) + " Filter0=" + std::to_string(c.Filter[0]) +
-                 " BatchK=" + std::to_string(c.BatchK));
+    SCOPED_TRACE("N=" + std::to_string(c.N) + " G=" + std::to_string(c.G) +
+                 " C=" + std::to_string(c.C) + " In0=" + std::to_string(c.In[0]) +
+                 " Filter0=" + std::to_string(c.Filter[0]) + " BatchK=" + std::to_string(c.BatchK));
 
     const auto custom  = MakeBwdWeightBDescriptor<NDim, true>(c);
     const auto generic = MakeBwdWeightBDescriptor<NDim, false>(c);
@@ -1244,16 +1318,137 @@ TEST(TensorDescriptorFunctorsIntegration, BackwardWeightInputTransformMatchesGen
         {2, 3, 8, {6, 5, 7}, {2, 3, 3}, {2, 1, 2}, {1, 2, 1}, {1, 2, 0}, {0, 1, 1}, 2},
         {2, 8, 8, {4, 4, 4}, {1, 1, 1}, {1, 1, 1}, {1, 1, 1}, {0, 0, 0}, {0, 0, 0}, 3},
     };
-    for(const auto& c : cases1d)
+    for(auto c : cases1d)
     {
-        CheckBwdWeightBTransformMatchesGeneric<1>(c);
+        // packed tensors (G = 1) and tensors with interleaved groups (G = 3)
+        for(const index_t groups : {1, 3})
+        {
+            c.G = groups;
+            CheckBwdWeightBTransformMatchesGeneric<1>(c);
+        }
     }
-    for(const auto& c : cases2d)
+    for(auto c : cases2d)
     {
-        CheckBwdWeightBTransformMatchesGeneric<2>(c);
+        // packed tensors (G = 1) and tensors with interleaved groups (G = 3)
+        for(const index_t groups : {1, 3})
+        {
+            c.G = groups;
+            CheckBwdWeightBTransformMatchesGeneric<2>(c);
+        }
     }
-    for(const auto& c : cases3d)
+    for(auto c : cases3d)
     {
-        CheckBwdWeightBTransformMatchesGeneric<3>(c);
+        // packed tensors (G = 1) and tensors with interleaved groups (G = 3)
+        for(const index_t groups : {1, 3})
+        {
+            c.G = groups;
+            CheckBwdWeightBTransformMatchesGeneric<3>(c);
+        }
+    }
+}
+
+// =============================================================================
+// Range of the poison used by the custom transforms for the GEMM padding
+// =============================================================================
+
+TEST(TensorDescriptorFunctorsIntegration, ConvPaddingPoisonRangeLimit)
+{
+    constexpr long_index_t limit     = long_index_t{1} << 30;
+    constexpr long_index_t max_index = (long_index_t{1} << 31) - 1;
+
+    // lower side: length - min_lower_index <= 2^30
+    EXPECT_TRUE(IsConvPaddingPoisonRangeSupported(limit, 0, 0));
+    EXPECT_FALSE(IsConvPaddingPoisonRangeSupported(limit + 1, 0, 0));
+    EXPECT_TRUE(IsConvPaddingPoisonRangeSupported(limit - 5, -5, 0));
+    EXPECT_FALSE(IsConvPaddingPoisonRangeSupported(limit - 5, -6, 0));
+    // a negative left pad (positive lower index) does not reduce the range
+    EXPECT_TRUE(IsConvPaddingPoisonRangeSupported(limit, 7, 0));
+    // upper side: the largest lower coordinate must fit in 31 bits
+    EXPECT_TRUE(IsConvPaddingPoisonRangeSupported(8, 0, max_index));
+    EXPECT_FALSE(IsConvPaddingPoisonRangeSupported(8, 0, max_index + 1));
+
+    // wrw: first spatial length and left pad
+    using WrwTransform = ck::tensor_operation::TransformConvBwdWeightToGemmV2<
+        2,
+        32,
+        32,
+        8,
+        2,
+        1,
+        ck::tensor_operation::device::ConvolutionBackwardWeightSpecialization::Default,
+        index_t,
+        false,
+        true>;
+    // {input, filter, output, stride, dilation, left pad}, n_per_block = 64
+    const auto wrw_supported = [](std::array<index_t, 2> in,
+                                  std::array<index_t, 2> filter,
+                                  std::array<index_t, 2> out,
+                                  std::array<index_t, 2> dilation,
+                                  std::array<index_t, 2> pad) {
+        return WrwTransform::IsCustomTransformPaddingRangeSupported(
+            in, filter, out, {1, 1}, dilation, pad, 64);
+    };
+    EXPECT_TRUE(wrw_supported({1 << 30, 8}, {1, 1}, {1 << 30, 8}, {1, 1}, {0, 0}));
+    EXPECT_FALSE(wrw_supported({1 << 30, 8}, {1, 1}, {1 << 30, 8}, {1, 1}, {1, 0}));
+    // only the first spatial dimension is poisoned
+    EXPECT_TRUE(wrw_supported({8, 1 << 30}, {1, 1}, {8, 1 << 30}, {1, 1}, {1, 1}));
+    // upper side: the filter index of the padded columns times the dilation
+    EXPECT_TRUE(wrw_supported({8, 8}, {1, 1}, {8, 8}, {1 << 20, 1}, {0, 0}));
+    EXPECT_FALSE(wrw_supported({8, 8}, {1, 1}, {8, 8}, {1 << 26, 1}, {0, 0}));
+
+    // fwd: the padding row m = M of an input with the first spatial length at the limit. With a
+    // left pad of 1 its lower coordinate is -1 and the poison wraps it back inside the input, so
+    // the padding row is wrongly reported as valid. This is why the range is checked on the host.
+    for(const index_t pad : {0, 1})
+    {
+        const ForwardConvCase<1> cfg{1, 1, {1 << 30}, {1}, {1}, {1}, {pad}, {0}};
+        const auto out64 = OutputLengths(cfg);
+        const std::array<index_t, 1> out{static_cast<index_t>(out64[0])};
+        const index_t M      = out[0];
+        const auto transform = MakeCustomTransform<1>(cfg, out, M + 1, 2);
+
+        EXPECT_EQ(transform.IsPaddingRangeSupported(), pad == 0);
+        const bool padding_row_valid =
+            transform.IsValidUpperIndexMappedToValidLowerIndex(make_tuple(M, 0));
+        EXPECT_EQ(padding_row_valid, pad != 0);
+    }
+
+    // Upper side: a 1x1 filter with a huge dilation. The padded K columns (k >= K) get f0 > 0 and
+    // therefore a lower coordinate f0 * dilation. With both the M and the K poison (+2^31) a
+    // coordinate of 2^31 + o wraps modulo 2^32 back to o, inside the input. The generic chain
+    // would report this padding as invalid.
+    for(const index_t dilation : {1 << 20, 1 << 24})
+    {
+        const ForwardConvCase<1> cfg{1, 1, {8}, {1}, {1}, {dilation}, {0}, {0}};
+        const auto out64 = OutputLengths(cfg);
+        const std::array<index_t, 1> out{static_cast<index_t>(out64[0])};
+        const index_t M      = out[0];
+        const auto transform = MakeCustomTransform<1>(cfg, out, M + 1, 192);
+        const bool supported = dilation == (1 << 20);
+
+        EXPECT_EQ(transform.IsPaddingRangeSupported(), supported);
+        // m = M and k = 128: f0 = 128, and 128 * 2^24 = 2^31
+        EXPECT_EQ(transform.IsValidUpperIndexMappedToValidLowerIndex(make_tuple(M, 128)),
+                  !supported);
+    }
+
+    // a small input with a huge left pad: the lower coordinate of the first rows is about -pad
+    // (the check is on length + left pad, a right pad does not matter)
+    constexpr index_t in_len = 8;
+    for(const index_t pad : {(1 << 30) - in_len, (1 << 30) - in_len + 1})
+    {
+        for(const index_t right_pad : {0, 5})
+        {
+            const ForwardConvCase<1> cfg{1, 1, {in_len}, {1}, {1}, {1}, {pad}, {right_pad}};
+            const auto out64 = OutputLengths(cfg);
+            const std::array<index_t, 1> out{static_cast<index_t>(out64[0])};
+            const index_t M      = out[0];
+            const auto transform = MakeCustomTransform<1>(cfg, out, M + 1, 2);
+            const bool supported = pad == (1 << 30) - in_len;
+
+            EXPECT_EQ(transform.IsPaddingRangeSupported(), supported);
+            EXPECT_EQ(transform.IsValidUpperIndexMappedToValidLowerIndex(make_tuple(M, 0)),
+                      !supported);
+        }
     }
 }

@@ -10,15 +10,14 @@
 #include "ck/tensor_operation/gpu/element/element_wise_operation.hpp"
 
 #include "ck/tensor_operation/gpu/thread/threadwise_tensor_slice_transfer_util.hpp"
+#include "ck/utility/amd_arch.hpp"
 
 namespace ck {
 
-namespace direct_load_mask_detail {
+namespace direct_load_detail {
 
-// PROTOTYPE (gfx125 / wave32 only): validity as an SGPR lane mask for the full-assembly async load.
-#if defined(__gfx125__)
 // A two-sided Pad checks two compares combined with &&; ballot of that is lowered through a VGPR
-// flag, so descriptors containing it keep the original bool path.
+// flag, so descriptors containing it keep the bool validity.
 template <typename Tran>
 struct is_pad_transform : false_type
 {
@@ -39,12 +38,48 @@ struct any_pad_transform<Tuple<Ts...>>
 template <typename Desc>
 inline constexpr bool desc_has_pad_transform_v =
     any_pad_transform<remove_cvref_t<decltype(declval<const Desc&>().GetTransforms())>>::value;
-#else
-template <typename Desc>
-inline constexpr bool desc_has_pad_transform_v = false;
-#endif
 
-} // namespace direct_load_mask_detail
+// Validity of a source access, per architecture.
+// Generic (buffer loads to LDS, e.g. gfx9): a per-lane bool.
+template <typename DeviceArch, typename SrcDesc, bool UseFullAssembly>
+struct SrcValidity
+{
+    using type = bool;
+
+    template <typename Coord>
+    static __device__ type Compute(const SrcDesc& src_desc, const Coord& src_coord)
+    {
+        return coordinate_has_valid_offset_assuming_visible_index_is_valid(src_desc, src_coord);
+    }
+};
+
+// gfx125 (async global loads): with the full assembly implementation the validity is a wave lane
+// mask (the ballot of the validity of the transforms, see
+// coordinate_has_valid_lane_mask_assuming_visible_index_is_valid), unless the source descriptor has
+// a Pad.
+template <typename SrcDesc, bool UseFullAssembly>
+struct SrcValidity<gfx125_t, SrcDesc, UseFullAssembly>
+{
+    static constexpr bool use_lane_mask = UseFullAssembly && !desc_has_pad_transform_v<SrcDesc>;
+
+    using type = std::conditional_t<use_lane_mask, lane_mask_t, bool>;
+
+    template <typename Coord>
+    static __device__ type Compute(const SrcDesc& src_desc, const Coord& src_coord)
+    {
+        if constexpr(use_lane_mask)
+        {
+            return coordinate_has_valid_lane_mask_assuming_visible_index_is_valid(src_desc,
+                                                                                  src_coord);
+        }
+        else
+        {
+            return coordinate_has_valid_offset_assuming_visible_index_is_valid(src_desc, src_coord);
+        }
+    }
+};
+
+} // namespace direct_load_detail
 
 /**
  * Transfer that uses direct load instructions to copy data from global to LDS memory.
@@ -198,9 +233,108 @@ struct ThreadGroupTensorSliceTransfer_DirectLoad
             thread_cluster_desc_.CalculateBottomIndex(make_multi_index(ThreadGroup::GetThreadId()));
         const auto thread_data_idx_begin = thread_cluster_idx * thread_single_load_size;
         SetSrcSliceOrigin(src_desc, src_block_slice_origin + thread_data_idx_begin);
-#if defined(__gfx125__)
+        InitDstSliceOrigin(
+            dst_desc, dst_block_slice_origin, thread_data_idx_begin, get_device_arch());
+    }
+
+    __device__ void SetSrcSliceOrigin(const SrcDesc& src_desc, const Index& src_slice_origin_idx)
+    {
+        src_coord_        = make_tensor_coordinate(src_desc, src_slice_origin_idx);
+        src_slice_origin_ = src_slice_origin_idx;
+    }
+
+    __device__ void SetDstSliceOrigin(const DstDesc& dst_desc, const Index& dst_slice_origin_idx)
+    {
+        dst_coord_        = make_tensor_coordinate(dst_desc, dst_slice_origin_idx);
+        dst_slice_origin_ = dst_slice_origin_idx;
+    }
+
+    __device__ void ResetDstSliceWindow(const DstDesc& dst_desc)
+    {
+        dst_coord_ = make_tensor_coordinate(dst_desc, dst_slice_origin_);
+    }
+
+    __device__ void PrecomputeIdx(const SrcDesc& src_desc)
+    {
+        PrecomputeIdxImpl(src_desc, get_device_arch());
+    }
+
+    template <typename SrcBuffer, typename DstBuffer>
+    __device__ void Load(const SrcBuffer& src_buf, const DstDesc& dst_desc, DstBuffer& dst_buf)
+    {
+        static_assert(SrcBuffer::GetAddressSpace() == AddressSpaceEnum::Global,
+                      "Source data must come from a global memory buffer.");
+        static_assert(DstBuffer::GetAddressSpace() == AddressSpaceEnum::Lds,
+                      "Destination data must be stored in an LDS memory buffer.");
+
+        static_assert(
+            ck::is_same_v<remove_cvref_t<typename SrcBuffer::type>, remove_cvref_t<SrcData>>,
+            "SrcBuffer and SrcData data types must be consistent.");
+        static_assert(
+            ck::is_same_v<remove_cvref_t<typename DstBuffer::type>, remove_cvref_t<DstData>>,
+            "DstBuffer and DstData data types must be consistent.");
+        LoadImpl(src_buf, dst_desc, dst_buf, get_device_arch());
+    }
+
+    template <typename SrcBuffer, typename DstBuffer>
+    __device__ void Run(const SrcDesc& src_desc,
+                        const SrcBuffer& src_buf,
+                        const DstDesc& dst_desc,
+                        DstBuffer& dst_buf)
+    {
+        static_assert(SrcBuffer::GetAddressSpace() == AddressSpaceEnum::Global,
+                      "Source data must come from a global memory buffer.");
+        static_assert(DstBuffer::GetAddressSpace() == AddressSpaceEnum::Lds,
+                      "Destination data must be stored in an LDS memory buffer.");
+
+        static_assert(
+            ck::is_same_v<remove_cvref_t<typename SrcBuffer::type>, remove_cvref_t<SrcData>>,
+            "SrcBuffer and SrcData data types must be consistent.");
+        static_assert(
+            ck::is_same_v<remove_cvref_t<typename DstBuffer::type>, remove_cvref_t<DstData>>,
+            "DstBuffer and DstData data types must be consistent.");
+        RunImpl(src_desc, src_buf, dst_desc, dst_buf, get_device_arch());
+    }
+
+    __device__ void MoveSrcSliceWindow(const SrcDesc& src_desc, const Index& step)
+    {
+        src_slice_origin_ = src_slice_origin_ + step;
+        src_coord_        = make_tensor_coordinate(src_desc, src_slice_origin_);
+    }
+
+    template <typename DescType>
+    __device__ auto generate_steps(const DescType& desc, int sign)
+    {
+        return generate_tuple(
+            [&](auto i) {
+                Index step_idx;
+
+                static_for<0, nDim, 1>{}([&](auto j) {
+                    step_idx(j) = (i.value == j.value) ? sign * thread_steps[i] : 0;
+                });
+
+                return make_tensor_coordinate_step(desc, step_idx);
+            },
+            Number<nDim>{});
+    }
+
+    private:
+    // gfx125: each thread has its own LDS offset (async loads)
+    __device__ void InitDstSliceOrigin(const DstDesc& dst_desc,
+                                       const Index& dst_block_slice_origin,
+                                       const Index& thread_data_idx_begin,
+                                       gfx125_t)
+    {
         SetDstSliceOrigin(dst_desc, dst_block_slice_origin + thread_data_idx_begin);
-#else
+    }
+
+    template <typename DeviceArch>
+    __device__ void InitDstSliceOrigin(const DstDesc& dst_desc,
+                                       const Index& dst_block_slice_origin,
+                                       const Index& thread_data_idx_begin,
+                                       DeviceArch)
+    {
+        ignore                              = thread_data_idx_begin;
         constexpr auto wave_cluster_lengths = generate_sequence_v2(
             [&](auto i) {
                 // FIXME: wave parallelism is not always in that dimension.
@@ -227,47 +361,16 @@ struct ThreadGroupTensorSliceTransfer_DirectLoad
         // We don't need threadwise offset for lds since it was calculate by HW
         // We still need input the wavewise offset.
         SetDstSliceOrigin(dst_desc, dst_block_slice_origin + wave_data_idx_begin);
-#endif
     }
 
-    __device__ void SetSrcSliceOrigin(const SrcDesc& src_desc, const Index& src_slice_origin_idx)
+    // gfx125: offsets and validity of all the accesses along the space-filling curve
+    __device__ void PrecomputeIdxImpl(const SrcDesc& src_desc, gfx125_t)
     {
-        src_coord_        = make_tensor_coordinate(src_desc, src_slice_origin_idx);
-        src_slice_origin_ = src_slice_origin_idx;
-    }
-
-    __device__ void SetDstSliceOrigin(const DstDesc& dst_desc, const Index& dst_slice_origin_idx)
-    {
-        dst_coord_        = make_tensor_coordinate(dst_desc, dst_slice_origin_idx);
-        dst_slice_origin_ = dst_slice_origin_idx;
-    }
-
-    __device__ void ResetDstSliceWindow(const DstDesc& dst_desc)
-    {
-        dst_coord_ = make_tensor_coordinate(dst_desc, dst_slice_origin_);
-    }
-
-    __device__ void PrecomputeIdx(const SrcDesc& src_desc)
-    {
-#if defined(__gfx125__)
         // loop over space-filling curve
         static_assert(num_access > 0);
         static_for<0, num_access, 1>{}([&](auto idx_1d) {
-            src_coord_idx_(idx_1d) = src_coord_.GetOffset();
-            if constexpr(UseLaneMask)
-            {
-#if defined(__gfx125__)
-                src_coord_valid_mask_(idx_1d) =
-                    coordinate_has_valid_lane_mask_assuming_visible_index_is_valid(src_desc,
-                                                                                   src_coord_);
-#endif
-            }
-            else
-            {
-                src_coord_valid_(idx_1d) =
-                    coordinate_has_valid_offset_assuming_visible_index_is_valid(src_desc,
-                                                                                src_coord_);
-            }
+            src_coord_idx_(idx_1d)   = src_coord_.GetOffset();
+            src_coord_valid_(idx_1d) = Validity::Compute(src_desc, src_coord_);
 
             // move coordinate
             if constexpr(idx_1d.value != num_access - 1)
@@ -278,7 +381,11 @@ struct ThreadGroupTensorSliceTransfer_DirectLoad
                     src_desc, src_coord_, make_tensor_coordinate_step(src_desc, forward_step));
             }
         });
-#else
+    }
+
+    template <typename DeviceArch>
+    __device__ void PrecomputeIdxImpl(const SrcDesc& src_desc, DeviceArch)
+    {
         constexpr auto dst_access_lengths = thread_slice_lengths;
 
         // Check matching size of loop iterations and array size
@@ -328,24 +435,12 @@ struct ThreadGroupTensorSliceTransfer_DirectLoad
                 }
             });
         });
-#endif
     }
 
     template <typename SrcBuffer, typename DstBuffer>
-    __device__ void Load(const SrcBuffer& src_buf, const DstDesc& dst_desc, DstBuffer& dst_buf)
+    __device__ void
+    LoadImpl(const SrcBuffer& src_buf, const DstDesc& dst_desc, DstBuffer& dst_buf, gfx125_t)
     {
-        static_assert(SrcBuffer::GetAddressSpace() == AddressSpaceEnum::Global,
-                      "Source data must come from a global memory buffer.");
-        static_assert(DstBuffer::GetAddressSpace() == AddressSpaceEnum::Lds,
-                      "Destination data must be stored in an LDS memory buffer.");
-
-        static_assert(
-            ck::is_same_v<remove_cvref_t<typename SrcBuffer::type>, remove_cvref_t<SrcData>>,
-            "SrcBuffer and SrcData data types must be consistent.");
-        static_assert(
-            ck::is_same_v<remove_cvref_t<typename DstBuffer::type>, remove_cvref_t<DstData>>,
-            "DstBuffer and DstData data types must be consistent.");
-#if defined(__gfx125__)
         ignore = dst_desc;
 
         // loop over space-filling curve
@@ -358,29 +453,18 @@ struct ThreadGroupTensorSliceTransfer_DirectLoad
                 return make_tensor_coordinate(DstDesc{}, coord_offset).GetOffset();
             }();
 
-            if constexpr(UseLaneMask)
-            {
-#if defined(__gfx125__)
-                amd_async_load_global_to_lds_assembly_mask<remove_cvref_t<typename DstBuffer::type>,
-                                                           ScalarPerVector,
-                                                           lds_access_offset>(
-                    amd_wave_read_first_lane(src_buf.p_data_),
-                    src_offset,
-                    dst_buf.p_data_,
-                    dst_coord_.GetOffset(),
-                    src_coord_valid_mask_(idx_1d));
-#endif
-            }
-            else
-            {
-                src_buf.template AsyncCopyToLds<remove_cvref_t<decltype(dst_buf)>,
-                                                ScalarPerVector,
-                                                lds_access_offset,
-                                                UseFullAssembly>(
-                    dst_buf, src_offset, dst_coord_.GetOffset(), src_coord_valid_(idx_1d));
-            }
+            src_buf.template AsyncCopyToLds<remove_cvref_t<decltype(dst_buf)>,
+                                            ScalarPerVector,
+                                            lds_access_offset,
+                                            UseFullAssembly>(
+                dst_buf, src_offset, dst_coord_.GetOffset(), src_coord_valid_(idx_1d));
         });
-#else
+    }
+
+    template <typename SrcBuffer, typename DstBuffer, typename DeviceArch>
+    __device__ void
+    LoadImpl(const SrcBuffer& src_buf, const DstDesc& dst_desc, DstBuffer& dst_buf, DeviceArch)
+    {
         constexpr auto dst_access_lengths = thread_slice_lengths;
 
         // Check matching size of loop iterations and array size
@@ -436,27 +520,15 @@ struct ThreadGroupTensorSliceTransfer_DirectLoad
 
         // Reset the destination slice since the entire buffer has been already filled.
         ResetDstSliceWindow(dst_desc);
-#endif
     }
 
     template <typename SrcBuffer, typename DstBuffer>
-    __device__ void Run(const SrcDesc& src_desc,
-                        const SrcBuffer& src_buf,
-                        const DstDesc& dst_desc,
-                        DstBuffer& dst_buf)
+    __device__ void RunImpl(const SrcDesc& src_desc,
+                            const SrcBuffer& src_buf,
+                            const DstDesc& dst_desc,
+                            DstBuffer& dst_buf,
+                            gfx125_t)
     {
-        static_assert(SrcBuffer::GetAddressSpace() == AddressSpaceEnum::Global,
-                      "Source data must come from a global memory buffer.");
-        static_assert(DstBuffer::GetAddressSpace() == AddressSpaceEnum::Lds,
-                      "Destination data must be stored in an LDS memory buffer.");
-
-        static_assert(
-            ck::is_same_v<remove_cvref_t<typename SrcBuffer::type>, remove_cvref_t<SrcData>>,
-            "SrcBuffer and SrcData data types must be consistent.");
-        static_assert(
-            ck::is_same_v<remove_cvref_t<typename DstBuffer::type>, remove_cvref_t<DstData>>,
-            "DstBuffer and DstData data types must be consistent.");
-#if defined(__gfx125__)
         ignore = dst_desc;
 
         // loop over space-filling curve
@@ -486,7 +558,15 @@ struct ThreadGroupTensorSliceTransfer_DirectLoad
                     src_desc, src_coord_, make_tensor_coordinate_step(src_desc, forward_step));
             }
         });
-#else
+    }
+
+    template <typename SrcBuffer, typename DstBuffer, typename DeviceArch>
+    __device__ void RunImpl(const SrcDesc& src_desc,
+                            const SrcBuffer& src_buf,
+                            const DstDesc& dst_desc,
+                            DstBuffer& dst_buf,
+                            DeviceArch)
+    {
         constexpr auto dst_access_lengths = thread_slice_lengths;
 
         const auto dst_forward_steps  = generate_steps(dst_desc, 1);
@@ -531,32 +611,8 @@ struct ThreadGroupTensorSliceTransfer_DirectLoad
 
         // Reset the destination slice since the entire buffer has been already filled.
         ResetDstSliceWindow(dst_desc);
-#endif
     }
 
-    __device__ void MoveSrcSliceWindow(const SrcDesc& src_desc, const Index& step)
-    {
-        src_slice_origin_ = src_slice_origin_ + step;
-        src_coord_        = make_tensor_coordinate(src_desc, src_slice_origin_);
-    }
-
-    template <typename DescType>
-    __device__ auto generate_steps(const DescType& desc, int sign)
-    {
-        return generate_tuple(
-            [&](auto i) {
-                Index step_idx;
-
-                static_for<0, nDim, 1>{}([&](auto j) {
-                    step_idx(j) = (i.value == j.value) ? sign * thread_steps[i] : 0;
-                });
-
-                return make_tensor_coordinate_step(desc, step_idx);
-            },
-            Number<nDim>{});
-    }
-
-    private:
     using Helper = ThreadwiseTransferHelper_Serpentine;
 
     static constexpr auto thread_cluster_desc_ =
@@ -571,11 +627,10 @@ struct ThreadGroupTensorSliceTransfer_DirectLoad
 
     static constexpr index_t num_access = SpaceFillingCurve::GetNumOfAccess();
     StaticallyIndexedArray<index_t, num_access> src_coord_idx_;
-    StaticallyIndexedArray<bool, num_access> src_coord_valid_;
-    StaticallyIndexedArray<uint32_t, num_access> src_coord_valid_mask_;
 
-    static constexpr bool UseLaneMask =
-        UseFullAssembly && !direct_load_mask_detail::desc_has_pad_transform_v<SrcDesc>;
+    using Validity =
+        direct_load_detail::SrcValidity<decltype(get_device_arch()), SrcDesc, UseFullAssembly>;
+    StaticallyIndexedArray<typename Validity::type, num_access> src_coord_valid_;
 
     SrcCoord src_coord_;
     DstCoord dst_coord_;

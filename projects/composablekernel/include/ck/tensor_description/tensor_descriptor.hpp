@@ -607,32 +607,31 @@ coordinate_has_valid_offset_assuming_visible_index_is_valid(const TensorDesc& te
     return valid;
 }
 
-#if defined(__gfx125__)
 namespace detail {
 template <typename Tran, typename = void>
-struct has_valid_lane_mask : false_type
+struct has_valid_lane_mask_method : false_type
 {
 };
 // Transforms that provide IsValidLaneMask() (a wave lane mask) mark themselves with
 // HasValidLaneMask = true
 template <typename Tran>
-struct has_valid_lane_mask<Tran, void_t<decltype(Tran::HasValidLaneMask)>>
+struct has_valid_lane_mask_method<Tran, void_t<decltype(Tran::HasValidLaneMask)>>
     : integral_constant<bool, Tran::HasValidLaneMask>
 {
 };
 } // namespace detail
 
 // Same as coordinate_has_valid_offset_assuming_visible_index_is_valid, but returns the validity of
-// every lane of the wave as a lane mask (wave32 only). The mask is built from one ballot per
-// transform (or per term inside a transform that provides IsValidLaneMask) so that each ballot
-// argument is a single compare and is lowered to an SGPR lane mask. A ballot of an AND of several
-// compares is lowered through a VGPR 0/1 flag instead. It must be called by all the lanes of the
-// wave.
+// every lane of the wave as a lane mask (lane_mask_t: 64 bits on wave64, 32 bits on wave32). The
+// mask is built from one ballot per transform (or per term inside a transform that provides
+// IsValidLaneMask) so that each ballot argument is a single compare and is lowered to an SGPR lane
+// mask. A ballot of an AND of several compares is lowered through a VGPR 0/1 flag instead.
+// It must be called by all the lanes of the wave.
 template <typename TensorDesc, typename TensorCoord>
-__device__ uint32_t coordinate_has_valid_lane_mask_assuming_visible_index_is_valid(
+__device__ lane_mask_t coordinate_has_valid_lane_mask_assuming_visible_index_is_valid(
     const TensorDesc& tensor_desc, const TensorCoord& coord)
 {
-    uint32_t mask = 0xffffffffu;
+    lane_mask_t mask = ~lane_mask_t{0};
 
     constexpr index_t ntransform = TensorDesc::GetNumOfTransform();
 
@@ -647,21 +646,19 @@ __device__ uint32_t coordinate_has_valid_lane_mask_assuming_visible_index_is_val
             const auto idx_up =
                 get_container_subset(idx_hidden, TensorDesc::GetUpperDimensionIdss().At(itran));
 
-            if constexpr(detail::has_valid_lane_mask<decltype(tran)>::value)
+            if constexpr(detail::has_valid_lane_mask_method<decltype(tran)>::value)
             {
                 mask &= tran.IsValidLaneMask(idx_up);
             }
             else
             {
-                mask &= __builtin_amdgcn_ballot_w32(
-                    tran.IsValidUpperIndexMappedToValidLowerIndex(idx_up));
+                mask &= amd_wave_ballot(tran.IsValidUpperIndexMappedToValidLowerIndex(idx_up));
             }
         }
     });
 
     return mask;
 }
-#endif
 
 template <typename TensorDesc, typename TensorCoord>
 __host__ __device__ constexpr bool coordinate_has_valid_offset(const TensorDesc& tensor_desc,

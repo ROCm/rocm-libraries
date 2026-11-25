@@ -36,9 +36,15 @@ template <
 struct TransformConvBwdDataToGemm_v1
 {
     private:
-    static constexpr bool UsePaddingOnKDim = std::is_same_v<IndexType, long_index_t>;
-    // The 2D output (A) descriptor is built by ConvBwdDataImplicitGemmOutTransform
+    /**
+     * @brief Enable custom tensor transform for convolution backward data output.
+     *
+     * When set to 1, this variable enables a custom transformation of the output tensor
+     * in convolution backward data operations.
+     */
+    static constexpr bool UsePaddingOnKDim             = std::is_same_v<IndexType, long_index_t>;
     static constexpr bool CustomTensorTransformBwdData = std::is_same_v<IndexType, index_t>;
+
     // Opt-in: the Ho / Wo bounds and the GEMM M / K padding are handled by the custom transform
     // itself (see ConvBwdDataImplicitGemmOutTransform) instead of by outer Pad transforms.
     static constexpr bool MergePaddingInCustomTransform =
@@ -141,6 +147,27 @@ struct TransformConvBwdDataToGemm_v1
 
     public:
     __host__ __device__ constexpr TransformConvBwdDataToGemm_v1() {}
+
+    // With the padding merged in the custom transform (MergePaddingInCustomTransform) the GEMM
+    // padding is reported through a poison added to the Ho coordinate, see
+    // IsConvPaddingPoisonRangeSupported. The smallest Ho coordinate of a row is bounded by the
+    // largest ydot (ydot < YDot_, plus the rows the padding of GemmK adds: at most GemmKPerBlock)
+    // times the ydot step.
+    __host__ bool IsMergedOutPaddingRangeSupported() const
+    {
+        if constexpr(!MergePaddingInCustomTransform)
+        {
+            return true;
+        }
+        else
+        {
+            const long_index_t ydot_step = ConvDilationH_ / GcdStrideDilationH_;
+            const long_index_t max_ydot  = static_cast<long_index_t>(YDot_) + GemmKPerBlock;
+            const long_index_t min_ho    = -max_ydot * ydot_step;
+            // the largest Ho coordinate is below HTilde (the ydot term is not positive)
+            return IsConvPaddingPoisonRangeSupported(Ho_, min_ho, HTilde_);
+        }
+    }
 
     template <typename TransformConvBwdDataToGemm_v1Base>
     __host__ __device__ TransformConvBwdDataToGemm_v1(

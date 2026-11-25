@@ -587,6 +587,7 @@ struct DeviceGroupedConvBwdWeight_Xdl_WaveletModel_CShuffleV3
               filter_spatial_lengths_{},
               output_spatial_lengths_{},
               conv_filter_strides_{conv_filter_strides},
+              conv_filter_dilations_{conv_filter_dilations},
               input_left_pads_{input_left_pads},
               input_right_pads_{input_right_pads}
         {
@@ -738,6 +739,7 @@ struct DeviceGroupedConvBwdWeight_Xdl_WaveletModel_CShuffleV3
         std::array<index_t, NDimSpatial> filter_spatial_lengths_;
         std::array<index_t, NDimSpatial> output_spatial_lengths_;
         std::array<index_t, NDimSpatial> conv_filter_strides_;
+        std::array<index_t, NDimSpatial> conv_filter_dilations_;
         std::array<index_t, NDimSpatial> input_left_pads_;
         std::array<index_t, NDimSpatial> input_right_pads_;
         long_index_t c_space_size_bytes;
@@ -1129,6 +1131,24 @@ struct DeviceGroupedConvBwdWeight_Xdl_WaveletModel_CShuffleV3
         if(!(arg.Conv_C_ % CBlockTransferScalarPerVector_NWaveNPerXdl == 0))
         {
             return false;
+        }
+
+        // The custom B descriptor reports the GEMM padding through a poison of the first spatial
+        // coordinate. The 2GB checks below are in bytes and do not bound the number of elements
+        // of 8-bit types, so the range of the poison is checked explicitly.
+        if constexpr(decltype(conv_to_gemm_transformer)::UseCustomTransformB)
+        {
+            if(!decltype(conv_to_gemm_transformer)::IsCustomTransformPaddingRangeSupported(
+                   arg.input_spatial_lengths_,
+                   arg.filter_spatial_lengths_,
+                   arg.output_spatial_lengths_,
+                   arg.conv_filter_strides_,
+                   arg.conv_filter_dilations_,
+                   arg.input_left_pads_,
+                   NPerBlock))
+            {
+                return false;
+            }
         }
 
         constexpr long_index_t TwoGB = (long_index_t{1} << 31);

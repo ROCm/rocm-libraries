@@ -112,6 +112,30 @@ struct TransformConvFwdToGemm
 
     __host__ __device__ constexpr TransformConvFwdToGemm() {}
 
+    // The custom transform (UseCustomTransformA) needs the first spatial lower coordinates to stay
+    // in the range of the poison used for the GEMM padding, see IsConvPaddingPoisonRangeSupported.
+    // The filter index of the padded GEMM columns exceeds the filter by at most k_per_block.
+    __host__ bool IsCustomTransformPaddingRangeSupported(index_t k_per_block) const
+    {
+        const auto check = [&](long_index_t length,
+                               long_index_t out,
+                               long_index_t stride,
+                               long_index_t dilation,
+                               long_index_t filter,
+                               long_index_t left_pad) {
+            return IsConvPaddingPoisonRangeSupported(
+                length,
+                -left_pad,
+                (out - 1) * stride + (filter + k_per_block) * dilation - left_pad);
+        };
+        if constexpr(NDimSpatial == 1)
+            return check(Wi_, Wo_, ConvStrideW_, ConvDilationW_, X_, InLeftPadW_);
+        else if constexpr(NDimSpatial == 2)
+            return check(Hi_, Ho_, ConvStrideH_, ConvDilationH_, Y_, InLeftPadH_);
+        else
+            return check(Di_, Do_, ConvStrideD_, ConvDilationD_, Z_, InLeftPadD_);
+    }
+
     template <typename TransformConvFwdToGemmBase>
     __host__ __device__
     TransformConvFwdToGemm(const TransformConvFwdToGemmBase& transform_conv_fwd_to_gemm_base)

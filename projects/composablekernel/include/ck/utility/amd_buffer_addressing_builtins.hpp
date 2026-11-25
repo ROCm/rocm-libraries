@@ -1319,6 +1319,51 @@ __device__ void amd_async_load_global_to_lds(const T* global_base_ptr,
 #endif
 }
 
+// Inline assembly of the async loads with oob checks. SUF is the access size suffix (b8, b32, ...).
+// They use the local variables of the functions below (save_exec, lds_ptr, global_ptr,
+// global_offset, static_dst_offset_, dst_vector_t) and the validity of each lane (is_src_valid or
+// valid_mask).
+#define CK_ASYNC_LOAD_ASM(SUF)                                                                   \
+    asm volatile("s_mov_b32 %0, exec_lo\n\t"                                                     \
+                 "v_cmpx_le_u32  1, %5\n\t"                                                      \
+                 "global_load_async_to_lds_" SUF " %1, %2, %3, offset:%4\n\t"                    \
+                 "s_not_b32 exec_lo, exec_lo\n\t"                                                \
+                 "ds_store_" SUF " %1 %6, offset:%4\n\t"                                         \
+                 "s_mov_b32 exec_lo %0"                                                          \
+                 : "=&s"(save_exec)                                                              \
+                 : "v"(static_cast<uint32_t>(reinterpret_cast<uint64_t>(lds_ptr))),              \
+                   "v"(static_cast<uint32_t>((global_offset - static_dst_offset_) * sizeof(T))), \
+                   "s"(reinterpret_cast<uint64_t>(global_ptr)),                                  \
+                   "n"(static_cast<uint32_t>(static_dst_offset_ * sizeof(T))),                   \
+                   "v"(static_cast<uint32_t>(is_src_valid ? 1 : 0)),                             \
+                   "v"(dst_vector_t(0))                                                          \
+                 : "memory")
+
+// Selects the assembly by the number of bytes per thread (bytes_per_thread)
+#define CK_ASYNC_LOAD_BY_SIZE(ASM)                                                               \
+    if constexpr(bytes_per_thread == 1)                                                          \
+    {                                                                                            \
+        ASM("b8");                                                                               \
+    }                                                                                            \
+    else if constexpr(bytes_per_thread == 4)                                                     \
+    {                                                                                            \
+        ASM("b32");                                                                              \
+    }                                                                                            \
+    else if constexpr(bytes_per_thread == 8)                                                     \
+    {                                                                                            \
+        ASM("b64");                                                                              \
+    }                                                                                            \
+    else if constexpr(bytes_per_thread == 16)                                                    \
+    {                                                                                            \
+        ASM("b128");                                                                             \
+    }                                                                                            \
+    else                                                                                         \
+    {                                                                                            \
+        static_assert(bytes_per_thread == 1 || bytes_per_thread == 4 || bytes_per_thread == 8 || \
+                          bytes_per_thread == 16,                                                \
+                      "bytes_per_thread must be 1, 4, 8, or 16");                                \
+    }
+
 template <typename T,
           index_t NumElemsPerThread,
           index_t static_dst_offset,
@@ -1360,80 +1405,7 @@ __device__ void amd_async_load_global_to_lds_assembly(const T* global_base_ptr,
 
     uint32_t save_exec;
 
-    if constexpr(bytes_per_thread == 1)
-    {
-        asm volatile("s_mov_b32 %0, exec_lo\n\t"
-                     "v_cmpx_le_u32  1, %5\n\t"
-                     "global_load_async_to_lds_b8 %1, %2, %3, offset:%4\n\t"
-                     "s_not_b32 exec_lo, exec_lo\n\t"
-                     "ds_store_b8 %1 %6, offset:%4\n\t"
-                     "s_mov_b32 exec_lo %0"
-                     : "=&s"(save_exec)
-                     : "v"(static_cast<uint32_t>(reinterpret_cast<uint64_t>(lds_ptr))),
-                       "v"(static_cast<uint32_t>((global_offset - static_dst_offset_) * sizeof(T))),
-                       "s"(reinterpret_cast<uint64_t>(global_ptr)),
-                       "n"(static_cast<uint32_t>(static_dst_offset_ * sizeof(T))),
-                       "v"(static_cast<uint32_t>(is_src_valid ? 1 : 0)),
-                       "v"(dst_vector_t(0))
-                     : "memory");
-    }
-    else if constexpr(bytes_per_thread == 4)
-    {
-        asm volatile("s_mov_b32 %0, exec_lo\n\t"
-                     "v_cmpx_le_u32  1, %5\n\t"
-                     "global_load_async_to_lds_b32 %1, %2, %3, offset:%4\n\t"
-                     "s_not_b32 exec_lo, exec_lo\n\t"
-                     "ds_store_b32 %1 %6, offset:%4\n\t"
-                     "s_mov_b32 exec_lo %0"
-                     : "=&s"(save_exec)
-                     : "v"(static_cast<uint32_t>(reinterpret_cast<uint64_t>(lds_ptr))),
-                       "v"(static_cast<uint32_t>((global_offset - static_dst_offset_) * sizeof(T))),
-                       "s"(reinterpret_cast<uint64_t>(global_ptr)),
-                       "n"(static_cast<uint32_t>(static_dst_offset_ * sizeof(T))),
-                       "v"(static_cast<uint32_t>(is_src_valid ? 1 : 0)),
-                       "v"(dst_vector_t(0))
-                     : "memory");
-    }
-    else if constexpr(bytes_per_thread == 8)
-    {
-        asm volatile("s_mov_b32 %0, exec_lo\n\t"
-                     "v_cmpx_le_u32  1, %5\n\t"
-                     "global_load_async_to_lds_b64 %1, %2, %3, offset:%4\n\t"
-                     "s_not_b32 exec_lo, exec_lo\n\t"
-                     "ds_store_b64 %1 %6, offset:%4\n\t"
-                     "s_mov_b32 exec_lo %0"
-                     : "=&s"(save_exec)
-                     : "v"(static_cast<uint32_t>(reinterpret_cast<uint64_t>(lds_ptr))),
-                       "v"(static_cast<uint32_t>((global_offset - static_dst_offset_) * sizeof(T))),
-                       "s"(reinterpret_cast<uint64_t>(global_ptr)),
-                       "n"(static_cast<uint32_t>(static_dst_offset_ * sizeof(T))),
-                       "v"(static_cast<uint32_t>(is_src_valid ? 1 : 0)),
-                       "v"(dst_vector_t(0))
-                     : "memory");
-    }
-    else if constexpr(bytes_per_thread == 16)
-    {
-        asm volatile("s_mov_b32 %0, exec_lo\n\t"
-                     "v_cmpx_le_u32  1, %5\n\t"
-                     "global_load_async_to_lds_b128 %1, %2, %3, offset:%4\n\t"
-                     "s_not_b32 exec_lo, exec_lo\n\t"
-                     "ds_store_b128 %1 %6, offset:%4\n\t"
-                     "s_mov_b32 exec_lo %0"
-                     : "=&s"(save_exec)
-                     : "v"(static_cast<uint32_t>(reinterpret_cast<uint64_t>(lds_ptr))),
-                       "v"(static_cast<uint32_t>((global_offset - static_dst_offset_) * sizeof(T))),
-                       "s"(reinterpret_cast<uint64_t>(global_ptr)),
-                       "n"(static_cast<uint32_t>(static_dst_offset_ * sizeof(T))),
-                       "v"(static_cast<uint32_t>(is_src_valid ? 1 : 0)),
-                       "v"(dst_vector_t(0))
-                     : "memory");
-    }
-    else
-    {
-        static_assert(bytes_per_thread == 1 || bytes_per_thread == 4 || bytes_per_thread == 8 ||
-                          bytes_per_thread == 16,
-                      "bytes_per_thread must be 1, 4, 8, or 16");
-    }
+    CK_ASYNC_LOAD_BY_SIZE(CK_ASYNC_LOAD_ASM)
 }
 
 #define CK_ASYNC_LOAD_MASKED_ASM(SUF)                                                            \
@@ -1480,30 +1452,11 @@ __device__ void amd_async_load_global_to_lds_assembly_mask(const T* global_base_
             lds_base_ptr + lds_offset + (static_dst_offset - static_dst_offset_)));
 
     uint32_t save_exec;
-    if constexpr(bytes_per_thread == 1)
-    {
-        CK_ASYNC_LOAD_MASKED_ASM("b8");
-    }
-    else if constexpr(bytes_per_thread == 4)
-    {
-        CK_ASYNC_LOAD_MASKED_ASM("b32");
-    }
-    else if constexpr(bytes_per_thread == 8)
-    {
-        CK_ASYNC_LOAD_MASKED_ASM("b64");
-    }
-    else if constexpr(bytes_per_thread == 16)
-    {
-        CK_ASYNC_LOAD_MASKED_ASM("b128");
-    }
-    else
-    {
-        static_assert(bytes_per_thread == 1 || bytes_per_thread == 4 || bytes_per_thread == 8 ||
-                          bytes_per_thread == 16,
-                      "bytes_per_thread must be 1, 4, 8, or 16");
-    }
+    CK_ASYNC_LOAD_BY_SIZE(CK_ASYNC_LOAD_MASKED_ASM)
 }
 #undef CK_ASYNC_LOAD_MASKED_ASM
+#undef CK_ASYNC_LOAD_ASM
+#undef CK_ASYNC_LOAD_BY_SIZE
 
 template <AmdBufferCoherenceEnum coherence = AmdBufferCoherenceEnum::DefaultCoherence,
           typename TdmDesc>

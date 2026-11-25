@@ -58,6 +58,28 @@ struct TransformConvBwdWeightToGemmV2
             device::ConvolutionBackwardWeightSpecialization::Default &&
         std::is_same_v<IndexType, index_t> && NumGroupsToMerge == 1;
 
+    // The custom B descriptor needs the first spatial lower coordinates to stay in the range of the
+    // poison used for the GEMM padding, see IsConvPaddingPoisonRangeSupported. The filter index of
+    // the padded GemmN columns exceeds the filter by at most n_per_block.
+    static bool IsCustomTransformPaddingRangeSupported(
+        const std::array<IndexType, NDimSpatial>& input_spatial_lengths,
+        const std::array<IndexType, NDimSpatial>& filter_spatial_lengths,
+        const std::array<IndexType, NDimSpatial>& output_spatial_lengths,
+        const std::array<IndexType, NDimSpatial>& conv_filter_strides,
+        const std::array<IndexType, NDimSpatial>& conv_filter_dilations,
+        const std::array<IndexType, NDimSpatial>& input_left_pads,
+        const index_t n_per_block)
+    {
+        const long_index_t left_pad = input_left_pads[0];
+        return IsConvPaddingPoisonRangeSupported(
+            input_spatial_lengths[0],
+            -left_pad,
+            (static_cast<long_index_t>(output_spatial_lengths[0]) - 1) * conv_filter_strides[0] +
+                (static_cast<long_index_t>(filter_spatial_lengths[0]) + n_per_block) *
+                    conv_filter_dilations[0] -
+                left_pad);
+    }
+
     // B descriptor [K0, GemmN, K1] (UseCustomTransformB). The GEMM padding (GemmKPad >= N *
     // prod(O), GemmNPadded >= C * prod(F)) is reported as invalid by the transform itself.
     static auto MakeBDescriptorWithCustomTransform(
