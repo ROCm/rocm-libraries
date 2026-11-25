@@ -119,10 +119,12 @@ using _THRUST_STD::tuple_size;
  *  \see tuple_element
  *  \see tuple_size
  *  \see tie
+ *
+ *  \note \p thrust::tuple is an alias for \p hip::std::tuple.
  */
 #ifdef THRUST_DOXYGEN_INVOKED // Provide a fake alias for doxygen
 template <class... Ts>
-using tuple = _THRUST_STD::tuple<T...>;
+using tuple = _THRUST_STD::tuple<Ts...>;
 #else // ^^^ THRUST_DOXYGEN_INVOKED ^^^ / vvv !THRUST_DOXYGEN_INVOKED vvv
 using _THRUST_STD::tuple;
 #endif // THRUST_DOXYGEN_INVOKED

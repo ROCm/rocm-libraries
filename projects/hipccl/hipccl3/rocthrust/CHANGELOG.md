@@ -7,7 +7,7 @@ Documentation for rocThrust available at
 
 ### Added
 
-* rocThrust is now largely in feature parity with CCCL/thrust v3.2.1.  libhipcxx 3.4 is now required, and the `thrust::tuple`, `thrust::pair` and `thrust::zip_iterator` fallbacks have been removed.
+* rocThrust is now largely in feature parity with CCCL/thrust v3.2.1.  libhipcxx 3.4 is now required.
 * Add `THRUST_DISABLE_BROKEN_GCC_VECTORIZER`
 * Add `thrust::reduce_into`.
 * Add `thrust::shuffle_iterator`.
@@ -20,6 +20,7 @@ Documentation for rocThrust available at
 * Replaced ``_LIBCUDACXX_HIDE_FROM_ABI`` with ``_CCCL_API``.
 * Defined `THRUST_COMP_DEPR_IMPL` with `_CCCL_WARNING`.
 * Replaced `thrust::constant_iterator`, `thrust::make_discard_iterator`, `thrust::permutation_iterator`, `thrust::strided_iterator`, `thrust::tabulate_output_iterator` and `thrust::transform_output_iterator` with `hip::constant_iterator`, `hip::make_discard_iterator`, `hip::permutation_iterator`, `hip::strided_iterator`, `hip::tabulate_output_iterator` and `hip::transform_output_iterator` instead.
+* `thrust::tuple` and `thrust::pair` are now aliases for `hip::std::tuple` and `hip::std::pair`. `thrust::zip_iterator` now takes a `hip::std::tuple` as its iterator tuple. The old rocThrust 4.4.0 fallbacks have been removed, because libhipcxx 3.4 is now required.
 * Renamed the CMake option `CODE_COVERAGE` to `ROCTHRUST_ENABLE_COVERAGE`.
 
 ### Removed

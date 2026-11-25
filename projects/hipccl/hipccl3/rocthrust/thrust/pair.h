@@ -83,6 +83,8 @@ using _THRUST_STD::tuple_size;
  *  \tparam T2 The type of \p pair's second object type.  There are no
  *          requirements on the type of \p T2. <tt>T2</tt>'s type is
  *          provided by <tt>pair::second_type</tt>.
+ *
+ *  \note \p thrust::pair is an alias for \p hip::std::pair.
  */
 #ifdef THRUST_DOXYGEN_INVOKED // Provide a fake alias for doxygen
 template <class T, class U>
