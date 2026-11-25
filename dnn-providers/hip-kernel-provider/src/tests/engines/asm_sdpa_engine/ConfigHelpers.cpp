@@ -33,7 +33,9 @@ static DataType toDataType(const std::string& configDataType)
 }
 
 flatbuffers::FlatBufferBuilder configToCompatibleGraph(const fmha_v3_fwdConfig& config,
-                                                       bool withStats)
+                                                       bool withStats,
+                                                       int64_t seqQ,
+                                                       int64_t seqKv)
 {
     flatbuffers::FlatBufferBuilder builder;
     std::vector<flatbuffers::Offset<TensorAttributes>> tensorAttributes;
@@ -45,11 +47,9 @@ flatbuffers::FlatBufferBuilder configToCompatibleGraph(const fmha_v3_fwdConfig& 
     const DataType inDataType = isFp8 ? DataType::FP8_E4M3_FNUZ : toDataType(config.dtype);
     const DataType outDataType = isFp8 ? DataType::BFLOAT16 : inDataType;
 
-    // Use arbitrary values for batch, num_heads, and sequence lengths
+    // Use arbitrary values for batch and num_heads
     const int64_t batch = 2;
     const int64_t numHeads = 4;
-    const int64_t seqQ = 256;
-    const int64_t seqKv = 256;
 
     // Define tensor dimensions
     // Use physical memory layout: B, Seq, H, D for compatibility with group mode
