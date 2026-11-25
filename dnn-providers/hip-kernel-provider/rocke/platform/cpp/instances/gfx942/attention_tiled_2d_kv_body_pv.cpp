@@ -32,6 +32,7 @@
 #include <string.h>
 
 #include "rocke/helper_helper_rocke.helpers.attention.h" /* rocke_mfma_16x16x16_for_dtype */
+#include "rocke/helper_rocke.helpers.attention.h" /* rocke_pv32_v_load_paired */
 #include "rocke/helper_rocke.helpers.schedule.h" /* ROCKE_SCHED_DS_READ / ROCKE_SCHED_MFMA, T8 */
 #include "rocke/instance_gfx942_attention_tiled_2d_internal.h"
 #include "rocke/ir.h"
@@ -139,55 +140,6 @@ static rocke_value_t* mfma_32x32x16(rocke_gfx942_attn2d_build_ctx_t* ctx,
         return rocke_b_mfma_f32_32x32x16_bf16(B, a, bv, c);
     }
     return NULL;
-}
-
-/* pv32_v_load_paired (helpers/attention.py:760) is a gfx950-only
- * ds_read_tr16_b64 transpose-read promotion reached only on the
- * TRANSPOSED_HALF_LOCAL_PV branch (unreachable on gfx942, where the 32x32 path
- * is the K=8 register-P^T form). Faithful port of the Python helper so the
- * structurally-kept branch links and is byte-faithful where it is reached;
- * defined static here as it has a single call site (the dead K=16 branch). */
-static rocke_value_t* rocke_pv32_v_load_paired(rocke_ir_builder_t* b,
-                                               rocke_value_t* V_lds,
-                                               rocke_value_t* v_buf,
-                                               int n,
-                                               int k,
-                                               rocke_value_t* lane_half32,
-                                               rocke_value_t* lane_col32,
-                                               const rocke_type_t* dtype)
-{
-    /* All sub-expressions are bound in Python source (left-to-right) order so
-     * C's unspecified arg-eval order does not shuffle the SSA value numbering. */
-    /* col_group16 = (lane_col32 / 16) * 16. Python emits the div (with its const
-     * 16) BEFORE the mul's const 16; bind the div first so C's arg-eval order
-     * does not allocate the mul's const ahead of the div and shift its %value. */
-    rocke_value_t* col_div16 = rocke_b_div(b, lane_col32, rocke_b_const_i32(b, 16));
-    rocke_value_t* col_group16 = rocke_b_mul(b, col_div16, rocke_b_const_i32(b, 16));
-    /* tr_col32 = col_group16 + (lane_col32 % 4) * 4. Bind the mod before the
-     * mul's const so C arg-eval keeps Python's value order. */
-    rocke_value_t* tr_col_mod = rocke_b_mod(b, lane_col32, rocke_b_const_i32(b, 4));
-    rocke_value_t* tr_col_rhs = rocke_b_mul(b, tr_col_mod, rocke_b_const_i32(b, 4));
-    rocke_value_t* tr_col32 = rocke_b_add(b, col_group16, tr_col_rhs);
-    /* tr_row_base32 = (k*16 + lane_half32*4) + ((lane_col32 / 4) % 4). Python
-     * evaluates the inner add (const(k*16), mul(lane_half32,4)) BEFORE the mod. */
-    rocke_value_t* tr_row_k = rocke_b_const_i32(b, k * 16);
-    rocke_value_t* tr_row_inner
-        = rocke_b_add(b, tr_row_k, rocke_b_mul(b, lane_half32, rocke_b_const_i32(b, 4)));
-    rocke_value_t* tr_row_div4 = rocke_b_div(b, lane_col32, rocke_b_const_i32(b, 4));
-    rocke_value_t* tr_row_mod = rocke_b_mod(b, tr_row_div4, rocke_b_const_i32(b, 4));
-    rocke_value_t* tr_row_base32 = rocke_b_add(b, tr_row_inner, tr_row_mod);
-
-    /* Python computes the col = add(const(n*32), tr_col32) INLINE inside EACH
-     * ds_read call (helpers/attention.py 811-813, 818-820), so it is emitted
-     * TWICE -- once per read. Mirror that (do NOT hoist) for value numbering. */
-    rocke_value_t* col0 = rocke_b_add(b, rocke_b_const_i32(b, n * 32), tr_col32);
-    rocke_value_t* idx0[3] = {v_buf, tr_row_base32, col0};
-    rocke_value_t* A_r0 = rocke_b_ds_read_tr16_b64(b, V_lds, idx0, 3, dtype);
-    rocke_value_t* row1 = rocke_b_add(b, tr_row_base32, rocke_b_const_i32(b, 8));
-    rocke_value_t* col1 = rocke_b_add(b, rocke_b_const_i32(b, n * 32), tr_col32);
-    rocke_value_t* idx1[3] = {v_buf, row1, col1};
-    rocke_value_t* A_r1 = rocke_b_ds_read_tr16_b64(b, V_lds, idx1, 3, dtype);
-    return rocke_b_vec_concat(b, A_r0, A_r1);
 }
 
 /* ============================================================ *
