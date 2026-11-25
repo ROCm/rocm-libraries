@@ -25587,7 +25587,21 @@ ROCBLAS_EXPORT rocblas_status rocblas_device_malloc_get(struct rocblas_device_ma
                                                         size_t                             index,
                                                         void**                             res);
 ROCBLAS_EXPORT rocblas_status rocblas_device_malloc_free(struct rocblas_device_malloc_base* ptr);
-ROCBLAS_EXPORT void           rocblas_device_malloc_set_default_memory_size(size_t size);
+/*! \brief
+    \details
+    Internal use. Sets the initial device memory size for the next handle created by the calling thread.
+
+    The value is thread-local and applies once: ``rocblas_create_handle`` on the same thread uses it
+    for that handle's initial rocBLAS-managed allocation, then resets it to 0. Handles created later
+    on the thread, and other threads, are not affected.
+
+    The value is ignored when ``ROCBLAS_DEVICE_MEMORY_SIZE`` is set, and a value of 0 selects the
+    architecture default. It is not used by ``rocblas_set_device_memory_size`` or
+    ``rocblas_set_workspace``, including when they restore the default allocation.
+    @param[in]
+    size            initial device memory size in bytes for the next handle created on this thread
+ ******************************************************************************/
+ROCBLAS_EXPORT void rocblas_device_malloc_set_default_memory_size(size_t size);
 
 /*! \brief
     \details
@@ -25607,7 +25621,8 @@ ROCBLAS_EXPORT rocblas_status rocblas_get_device_memory_size(rocblas_handle hand
     Any previously allocated device memory managed by the handle is freed.
 
     If size > 0 sets the device memory size to the specified size (in bytes).
-    If size == 0, frees the memory allocated so far, and lets rocBLAS manage device memory in the future, expanding it when necessary.
+    If size == 0, frees the memory allocated so far, lets rocBLAS manage device memory in the future, expanding it when necessary, and allocates the architecture default size.
+    ``ROCBLAS_DEVICE_MEMORY_SIZE`` only sets the size of a newly created handle and is not applied here.
     Returns rocblas_status_invalid_handle if handle is nullptr; rocblas_status_invalid_pointer if size is nullptr; rocblas_status_success otherwise
     @param[in]
     handle          rocblas handle
@@ -25623,6 +25638,9 @@ ROCBLAS_EXPORT rocblas_status rocblas_set_device_memory_size(rocblas_handle hand
     Sets the device workspace for the handle to use.
 
     Any previously allocated device memory managed by the handle is freed.
+
+    If ``addr`` is a nullptr or ``size`` is 0, rocBLAS manages device memory in the future, expanding it when necessary, and allocates the architecture default size.
+    ``ROCBLAS_DEVICE_MEMORY_SIZE`` only sets the size of a newly created handle and is not applied here.
 
     Returns ``rocblas_status_invalid_handle`` if ``handle`` is nullptr and ``rocblas_status_success`` otherwise.
     @param[in]
