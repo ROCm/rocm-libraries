@@ -90,7 +90,7 @@ public:
     {
         HIPDNN_CHECK_ERROR(attributes.fill_from_context(graph_attributes));
 
-        auto y = attributes.get_y();
+        const auto y = attributes.get_y();
         if(!y)
         {
             return {ErrorCode::ATTRIBUTE_NOT_SET,

@@ -413,7 +413,7 @@ TEST_F(IntegrationConvolutionBwdDescriptorLifting, JsonRoundTripWithHandle)
 // validate() rejects it before the group arithmetic divides by the channel count.
 TEST_F(IntegrationConvolutionBwdDescriptorLifting, DeserializedZeroDxChannelRejectedByValidate)
 {
-    auto originalGraph = buildGraph();
+    const auto originalGraph = buildGraph();
 
     auto result = originalGraph->validate();
     ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
@@ -435,7 +435,7 @@ TEST_F(IntegrationConvolutionBwdDescriptorLifting, DeserializedZeroDxChannelReje
     ASSERT_TRUE(dxFound) << "dx tensor missing from serialized graph: " << jsonData;
     const std::string corruptedJson = parsed.dump();
 
-    auto liftedGraph = std::make_shared<TestableGraphLifting>();
+    const auto liftedGraph = std::make_shared<TestableGraphLifting>();
     result = liftedGraph->deserialize(corruptedJson);
     ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
 

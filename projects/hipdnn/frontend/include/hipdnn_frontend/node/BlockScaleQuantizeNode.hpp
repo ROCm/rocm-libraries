@@ -102,7 +102,7 @@ public:
             }
 
             // Scale holds one entry per block of x, so it has the same rank as x
-            auto scale = attributes.get_scale();
+            const auto scale = attributes.get_scale();
             if(detail::areTensorDimensionsSet(scale))
             {
                 HIPDNN_RETURN_IF_NE(scale->get_dim().size(),

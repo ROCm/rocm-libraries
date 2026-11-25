@@ -117,13 +117,13 @@ TEST(TestReductionNode, InferPropertiesInfersNhwcOrderStridesWhenOnlyOutputDimsS
     ReductionAttributes attrs;
     attrs.set_mode(ReductionMode::ADD);
 
-    auto x = std::make_shared<TensorAttributes>();
+    const auto x = std::make_shared<TensorAttributes>();
     x->set_uid(1)
         .set_data_type(DataType::FLOAT)
         .set_dim({2, 8, 16, 64})
         .set_stride({8192, 1024, 64, 1});
 
-    auto y = std::make_shared<TensorAttributes>();
+    const auto y = std::make_shared<TensorAttributes>();
     y->set_uid(2).set_data_type(DataType::FLOAT).set_dim({2, 8, 1, 1});
 
     attrs.set_x(x);
@@ -150,10 +150,10 @@ TEST(TestReductionNode, InferPropertiesInfersNhwcOrderStridesForRank3Output)
     ReductionAttributes attrs;
     attrs.set_mode(ReductionMode::ADD);
 
-    auto x = std::make_shared<TensorAttributes>();
+    const auto x = std::make_shared<TensorAttributes>();
     x->set_uid(1).set_data_type(DataType::FLOAT).set_dim({3, 4, 6}).set_stride({24, 6, 1});
 
-    auto y = std::make_shared<TensorAttributes>();
+    const auto y = std::make_shared<TensorAttributes>();
     y->set_uid(2).set_data_type(DataType::FLOAT).set_dim({1, 4, 6});
 
     attrs.set_x(x);
@@ -162,7 +162,7 @@ TEST(TestReductionNode, InferPropertiesInfersNhwcOrderStridesForRank3Output)
     const GraphAttributes graphAttributes;
     ReductionNode node(std::move(attrs), graphAttributes);
 
-    auto error = node.infer_properties_node();
+    const auto error = node.infer_properties_node();
     ASSERT_EQ(error.code, ErrorCode::OK) << error.get_message();
     // NWC order: C innermost, then W, then N
     EXPECT_EQ(y->get_stride(), (std::vector<int64_t>{24, 1, 4}));
@@ -173,13 +173,13 @@ TEST(TestReductionNode, InferPropertiesInfersNhwcOrderStridesForRank5Output)
     ReductionAttributes attrs;
     attrs.set_mode(ReductionMode::ADD);
 
-    auto x = std::make_shared<TensorAttributes>();
+    const auto x = std::make_shared<TensorAttributes>();
     x->set_uid(1)
         .set_data_type(DataType::FLOAT)
         .set_dim({2, 3, 4, 5, 6})
         .set_stride({360, 120, 30, 6, 1});
 
-    auto y = std::make_shared<TensorAttributes>();
+    const auto y = std::make_shared<TensorAttributes>();
     y->set_uid(2).set_data_type(DataType::FLOAT).set_dim({2, 3, 1, 5, 6});
 
     attrs.set_x(x);
@@ -188,7 +188,7 @@ TEST(TestReductionNode, InferPropertiesInfersNhwcOrderStridesForRank5Output)
     const GraphAttributes graphAttributes;
     ReductionNode node(std::move(attrs), graphAttributes);
 
-    auto error = node.infer_properties_node();
+    const auto error = node.infer_properties_node();
     ASSERT_EQ(error.code, ErrorCode::OK) << error.get_message();
     // NDHWC order: C innermost, then W, H, D, and N outermost
     EXPECT_EQ(y->get_stride(), (std::vector<int64_t>{90, 1, 90, 18, 3}));
@@ -199,10 +199,10 @@ TEST(TestReductionNode, InferPropertiesRejectsOutputWithoutDims)
     ReductionAttributes attrs;
     attrs.set_mode(ReductionMode::MAX);
 
-    auto x = std::make_shared<TensorAttributes>();
+    const auto x = std::make_shared<TensorAttributes>();
     x->set_uid(1).set_data_type(DataType::FLOAT).set_dim({4, 8}).set_stride({8, 1});
 
-    auto y = std::make_shared<TensorAttributes>();
+    const auto y = std::make_shared<TensorAttributes>();
     y->set_uid(2).set_data_type(DataType::FLOAT);
 
     attrs.set_x(x);
@@ -211,7 +211,7 @@ TEST(TestReductionNode, InferPropertiesRejectsOutputWithoutDims)
     const GraphAttributes graphAttributes;
     ReductionNode node(std::move(attrs), graphAttributes);
 
-    auto error = node.infer_properties_node();
+    const auto error = node.infer_properties_node();
     EXPECT_EQ(error.code, ErrorCode::INVALID_VALUE);
     EXPECT_TRUE(y->get_dim().empty());
 }
@@ -221,10 +221,10 @@ TEST(TestReductionNode, InferPropertiesRejectsOutputWithStridesButNoDims)
     ReductionAttributes attrs;
     attrs.set_mode(ReductionMode::MAX);
 
-    auto x = std::make_shared<TensorAttributes>();
+    const auto x = std::make_shared<TensorAttributes>();
     x->set_uid(1).set_data_type(DataType::FLOAT).set_dim({4, 8}).set_stride({8, 1});
 
-    auto y = std::make_shared<TensorAttributes>();
+    const auto y = std::make_shared<TensorAttributes>();
     y->set_uid(2).set_data_type(DataType::FLOAT).set_stride({8, 1});
 
     attrs.set_x(x);
@@ -233,7 +233,7 @@ TEST(TestReductionNode, InferPropertiesRejectsOutputWithStridesButNoDims)
     const GraphAttributes graphAttributes;
     ReductionNode node(std::move(attrs), graphAttributes);
 
-    auto error = node.infer_properties_node();
+    const auto error = node.infer_properties_node();
     EXPECT_EQ(error.code, ErrorCode::INVALID_VALUE);
     EXPECT_TRUE(y->get_dim().empty());
 }

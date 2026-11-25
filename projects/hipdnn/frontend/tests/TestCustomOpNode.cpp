@@ -68,14 +68,14 @@ TEST(TestCustomOpNode, GatherTensorsIncludesRaggedOffsetAux)
     graphAttrs.set_compute_data_type(DataType::FLOAT);
 
     // The aux tensors carry no UID; gathering them is what lets the graph assign one.
-    auto inputAux = std::make_shared<TensorAttributes>();
+    const auto inputAux = std::make_shared<TensorAttributes>();
     inputAux->set_dim({5}).set_stride({1}).set_data_type(DataType::INT32);
-    auto outputAux = std::make_shared<TensorAttributes>();
+    const auto outputAux = std::make_shared<TensorAttributes>();
     outputAux->set_dim({5}).set_stride({1}).set_data_type(DataType::INT32);
 
-    auto input = makeTensor("input", 1, {2, 3}, DataType::FLOAT);
+    const auto input = makeTensor("input", 1, {2, 3}, DataType::FLOAT);
     input->set_ragged_offset(inputAux);
-    auto output = makeTensor("output", 2, {2, 3}, DataType::FLOAT);
+    const auto output = makeTensor("output", 2, {2, 3}, DataType::FLOAT);
     output->set_ragged_offset(outputAux);
 
     CustomOpAttributes attr;

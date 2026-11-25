@@ -445,7 +445,7 @@ Error preValidateWithAttnMask(const std::vector<int64_t>& maskDims)
 {
     auto attrs = makeMinimalAttrs(
         makeTensor4D(2, 8, 16, 64), makeTensor4D(2, 8, 32, 64), makeTensor4D(2, 8, 32, 64));
-    auto mask = std::make_shared<TensorAttributes>();
+    const auto mask = std::make_shared<TensorAttributes>();
     mask->set_dim(maskDims);
     attrs.set_bias(mask);
 
@@ -457,7 +457,7 @@ Error preValidateWithAttnMask(const std::vector<int64_t>& maskDims)
 
 TEST(TestSdpaFwdNode, PreValidateFailsAttnMaskBatchDimMismatch)
 {
-    auto err = preValidateWithAttnMask({3, 8, 16, 32});
+    const auto err = preValidateWithAttnMask({3, 8, 16, 32});
     EXPECT_EQ(err.code, error_code_t::INVALID_VALUE) << err.err_msg;
     EXPECT_NE(err.err_msg.find("batch"), std::string::npos) << err.err_msg;
 }
@@ -467,7 +467,7 @@ TEST(TestSdpaFwdNode, PreValidateFailsAttnMaskHeadsDimMismatch)
     for(const auto& maskDims :
         {std::vector<int64_t>{2, 4, 16, 32}, std::vector<int64_t>{4, 16, 32}})
     {
-        auto err = preValidateWithAttnMask(maskDims);
+        const auto err = preValidateWithAttnMask(maskDims);
         EXPECT_EQ(err.code, error_code_t::INVALID_VALUE) << err.err_msg;
         EXPECT_NE(err.err_msg.find("num_heads"), std::string::npos) << err.err_msg;
     }
@@ -482,7 +482,7 @@ TEST(TestSdpaFwdNode, PreValidateSucceedsAttnMaskBroadcastLeadingDims)
                                 std::vector<int64_t>{1, 16, 32},
                                 std::vector<int64_t>{16, 32}})
     {
-        auto err = preValidateWithAttnMask(maskDims);
+        const auto err = preValidateWithAttnMask(maskDims);
         EXPECT_EQ(err.code, error_code_t::OK) << err.err_msg;
     }
 }
@@ -511,7 +511,7 @@ TEST(TestSdpaFwdNode, PreValidateFailsDropoutWithoutSeedAndOffset)
     auto attrs = makeDropoutAttrs();
     attrs.set_dropout_probability(0.1f);
 
-    auto err = preValidateDropout(std::move(attrs));
+    const auto err = preValidateDropout(std::move(attrs));
     EXPECT_EQ(err.code, error_code_t::ATTRIBUTE_NOT_SET) << err.err_msg;
     EXPECT_NE(err.err_msg.find("seed and offset"), std::string::npos) << err.err_msg;
 }
@@ -522,7 +522,7 @@ TEST(TestSdpaFwdNode, PreValidateFailsDropoutWithoutOffset)
     attrs.set_dropout_probability(0.1f);
     attrs.set_seed(makeTensor4D(1, 1, 1, 1));
 
-    auto err = preValidateDropout(std::move(attrs));
+    const auto err = preValidateDropout(std::move(attrs));
     EXPECT_EQ(err.code, error_code_t::ATTRIBUTE_NOT_SET) << err.err_msg;
 }
 
@@ -533,7 +533,7 @@ TEST(TestSdpaFwdNode, PreValidateFailsDropoutWithoutSeed)
     attrs.set_dropout_probability(0.1f);
     attrs.set_offset(makeTensor4D(1, 1, 1, 1));
 
-    auto err = preValidateDropout(std::move(attrs));
+    const auto err = preValidateDropout(std::move(attrs));
     EXPECT_EQ(err.code, error_code_t::ATTRIBUTE_NOT_SET) << err.err_msg;
     EXPECT_NE(err.err_msg.find("seed and offset"), std::string::npos) << err.err_msg;
 }
@@ -543,7 +543,7 @@ TEST(TestSdpaFwdNode, PreValidateSucceedsDropoutWithSeedAndOffset)
     auto attrs = makeDropoutAttrs();
     attrs.set_dropout(0.1f, makeTensor4D(1, 1, 1, 1), makeTensor4D(1, 1, 1, 1));
 
-    auto err = preValidateDropout(std::move(attrs));
+    const auto err = preValidateDropout(std::move(attrs));
     EXPECT_EQ(err.code, error_code_t::OK) << err.err_msg;
 }
 
@@ -552,7 +552,7 @@ TEST(TestSdpaFwdNode, PreValidateSucceedsZeroDropoutWithoutSeed)
     auto attrs = makeDropoutAttrs();
     attrs.set_dropout_probability(0.0f);
 
-    auto err = preValidateDropout(std::move(attrs));
+    const auto err = preValidateDropout(std::move(attrs));
     EXPECT_EQ(err.code, error_code_t::OK) << err.err_msg;
 }
 
@@ -561,7 +561,7 @@ TEST(TestSdpaFwdNode, PreValidateSucceedsCustomDropoutMaskWithoutSeed)
     auto attrs = makeDropoutAttrs();
     attrs.set_dropout(makeTensor4D(2, 8, 16, 32), makeTensor4D(1, 1, 1, 1));
 
-    auto err = preValidateDropout(std::move(attrs));
+    const auto err = preValidateDropout(std::move(attrs));
     EXPECT_EQ(err.code, error_code_t::OK) << err.err_msg;
 }
 
@@ -571,7 +571,7 @@ TEST(TestSdpaFwdNode, PreValidateFailsDropoutProbabilityWithCustomMask)
     attrs.set_dropout_probability(0.1f);
     attrs.set_dropout(makeTensor4D(2, 8, 16, 32), makeTensor4D(1, 1, 1, 1));
 
-    auto err = preValidateDropout(std::move(attrs));
+    const auto err = preValidateDropout(std::move(attrs));
     EXPECT_EQ(err.code, error_code_t::ATTRIBUTE_NOT_SET) << err.err_msg;
     EXPECT_NE(err.err_msg.find("custom dropout mask and dropout_probability"), std::string::npos)
         << err.err_msg;
@@ -1380,7 +1380,7 @@ SdpaAttributes makePaddingMaskAttrs()
 
 TEST(TestSdpaFwdNode, PreValidateFailsPaddingMaskWithoutSeqLens)
 {
-    auto err = preValidate(makePaddingMaskAttrs());
+    const auto err = preValidate(makePaddingMaskAttrs());
     EXPECT_EQ(err.code, error_code_t::ATTRIBUTE_NOT_SET) << err.err_msg;
     EXPECT_NE(err.err_msg.find("padding_mask requires"), std::string::npos) << err.err_msg;
 }
@@ -1389,7 +1389,7 @@ TEST(TestSdpaFwdNode, PreValidateFailsPaddingMaskWithOnlySeqLenQ)
 {
     auto attrs = makePaddingMaskAttrs();
     attrs.set_seq_len_q(makeSeqLen(2));
-    auto err = preValidate(std::move(attrs));
+    const auto err = preValidate(std::move(attrs));
     EXPECT_EQ(err.code, error_code_t::ATTRIBUTE_NOT_SET) << err.err_msg;
     EXPECT_NE(err.err_msg.find("padding_mask requires"), std::string::npos) << err.err_msg;
 }
@@ -1401,7 +1401,7 @@ TEST(TestSdpaFwdNode, PreValidateFailsPaddingMaskWithOnlySeqLenKv)
 {
     auto attrs = makePaddingMaskAttrs();
     attrs.set_seq_len_kv(makeSeqLen(2));
-    auto err = preValidate(std::move(attrs));
+    const auto err = preValidate(std::move(attrs));
     EXPECT_EQ(err.code, error_code_t::ATTRIBUTE_NOT_SET) << err.err_msg;
     EXPECT_NE(err.err_msg.find("padding_mask requires"), std::string::npos) << err.err_msg;
 }
@@ -1411,7 +1411,7 @@ TEST(TestSdpaFwdNode, PreValidateSucceedsPaddingMaskWithSeqLens)
     auto attrs = makePaddingMaskAttrs();
     attrs.set_seq_len_q(makeSeqLen(2));
     attrs.set_seq_len_kv(makeSeqLen(2));
-    auto err = preValidate(std::move(attrs));
+    const auto err = preValidate(std::move(attrs));
     EXPECT_EQ(err.code, error_code_t::OK) << err.err_msg;
 }
 
@@ -1421,6 +1421,6 @@ TEST(TestSdpaFwdNode, PreValidateSucceedsPaddingMaskRaggedQWithSeqLenKv)
     auto attrs = makePaddingMaskAttrs();
     attrs.get_q()->set_ragged_offset(makeCuSeqLen({3, 1, 1, 1}));
     attrs.set_seq_len_kv(makeSeqLen(2));
-    auto err = preValidate(std::move(attrs));
+    const auto err = preValidate(std::move(attrs));
     EXPECT_EQ(err.code, error_code_t::OK) << err.err_msg;
 }

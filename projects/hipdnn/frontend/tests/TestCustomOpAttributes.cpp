@@ -193,7 +193,7 @@ TEST(TestCustomOpAttributes, EqualityTreatsNullEntriesPositionally)
     EXPECT_TRUE(lhs.logicallyEquals(rhs));
     EXPECT_TRUE(lhs == rhs);
 
-    auto nonNull = makeEqualityAttributes();
+    const auto nonNull = makeEqualityAttributes();
     EXPECT_FALSE(lhs.logicallyEquals(nonNull));
     EXPECT_FALSE(nonNull.logicallyEquals(lhs));
     EXPECT_FALSE(lhs == nonNull);

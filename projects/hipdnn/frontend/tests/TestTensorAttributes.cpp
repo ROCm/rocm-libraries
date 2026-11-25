@@ -622,7 +622,7 @@ std::shared_ptr<TensorAttributes>
 
 TEST(TestTensorAttributes, LogicalEqualityDistinguishesAlignment)
 {
-    auto tensorA = makeEqualityTensor(1, "t");
+    const auto tensorA = makeEqualityTensor(1, "t");
     auto tensorB = makeEqualityTensor(1, "t");
     ASSERT_TRUE(tensorA == tensorB);
 

@@ -2160,7 +2160,7 @@ static std::shared_ptr<TensorAttributes>
         .set_intermediate_data_type(DataType::FLOAT)
         .set_io_data_type(DataType::FLOAT);
 
-    auto x = std::make_shared<TensorAttributes>();
+    const auto x = std::make_shared<TensorAttributes>();
     x->set_uid(1).set_name("X").set_dim({4, 4}).set_stride({4, 1});
     x->set_ragged_offset(raggedOffset);
 
@@ -2171,14 +2171,14 @@ static std::shared_ptr<TensorAttributes>
     attributes.set_name("Add");
     attributes.set_mode(PointwiseMode::ADD);
 
-    auto y = graph.pointwise(x, b, attributes);
+    const auto y = graph.pointwise(x, b, attributes);
     y->set_uid(3).set_name("Y").set_output(true);
     return b;
 }
 
 TEST_F(TestGraph, ValidateRejectsRaggedAuxWithDuplicateUid)
 {
-    auto raggedOffset = std::make_shared<TensorAttributes>();
+    const auto raggedOffset = std::make_shared<TensorAttributes>();
     raggedOffset->set_uid(7)
         .set_name("RaggedOffset")
         .set_data_type(DataType::INT32)
@@ -2186,7 +2186,7 @@ TEST_F(TestGraph, ValidateRejectsRaggedAuxWithDuplicateUid)
         .set_stride({1});
 
     Graph graph;
-    auto b = createRaggedPointwiseGraph(graph, raggedOffset);
+    const auto b = createRaggedPointwiseGraph(graph, raggedOffset);
     b->set_uid(7);
 
     const auto result = graph.validate();
@@ -2203,7 +2203,7 @@ TEST_F(TestGraph, ValidateRejectsRaggedAuxWithDuplicateUid)
 // (floating-point) I/O type, so an unset data type is an error.
 TEST_F(TestGraph, ValidateRejectsRaggedAuxWithoutDataType)
 {
-    auto raggedOffset = std::make_shared<TensorAttributes>();
+    const auto raggedOffset = std::make_shared<TensorAttributes>();
     raggedOffset->set_uid(7).set_name("RaggedOffset").set_dim({5}).set_stride({1});
 
     Graph graph;
@@ -2221,7 +2221,7 @@ TEST_F(TestGraph, ValidateRejectsRaggedAuxWithoutDataType)
 
 TEST_F(TestGraph, ValidateRejectsInvalidRaggedAuxDims)
 {
-    auto raggedOffset = std::make_shared<TensorAttributes>();
+    const auto raggedOffset = std::make_shared<TensorAttributes>();
     raggedOffset->set_uid(7).set_name("RaggedOffset").set_data_type(DataType::INT32);
 
     Graph graph;
@@ -2234,7 +2234,7 @@ TEST_F(TestGraph, ValidateRejectsInvalidRaggedAuxDims)
 
 TEST_F(TestGraph, ValidateAcceptsInt64RaggedAux)
 {
-    auto raggedOffset = std::make_shared<TensorAttributes>();
+    const auto raggedOffset = std::make_shared<TensorAttributes>();
     raggedOffset->set_uid(7)
         .set_name("RaggedOffset")
         .set_data_type(DataType::INT64)
@@ -2251,7 +2251,7 @@ TEST_F(TestGraph, ValidateAcceptsInt64RaggedAux)
 // Every gathered tensor's ragged-offset tensor is validated, not only those of graph inputs.
 TEST_F(TestGraph, ValidateRejectsInvalidRaggedAuxOnNodeOutput)
 {
-    auto raggedOffset = std::make_shared<TensorAttributes>();
+    const auto raggedOffset = std::make_shared<TensorAttributes>();
     raggedOffset->set_uid(7).set_name("RaggedOffset").set_dim({5}).set_stride({1});
 
     Graph graph;
@@ -2279,26 +2279,26 @@ TEST_F(TestGraph, ValidateCoversPeerStatRaggedAux)
         .set_compute_data_type(DataType::FLOAT)
         .set_intermediate_data_type(DataType::FLOAT);
 
-    auto x = std::make_shared<TensorAttributes>();
+    const auto x = std::make_shared<TensorAttributes>();
     x->set_uid(1)
         .set_name("InputX")
         .set_dim({1, 64, 32, 32})
         .set_stride({65536, 1024, 32, 1})
         .set_data_type(DataType::FLOAT);
 
-    auto scale = std::make_shared<TensorAttributes>();
+    const auto scale = std::make_shared<TensorAttributes>();
     scale->set_uid(2).set_name("ScaleTensor").set_dim({64}).set_stride({1});
 
-    auto bias = std::make_shared<TensorAttributes>();
+    const auto bias = std::make_shared<TensorAttributes>();
     bias->set_uid(3).set_name("BiasTensor").set_dim({64}).set_stride({1});
 
-    auto epsilon = std::make_shared<TensorAttributes>(1e-5f);
+    const auto epsilon = std::make_shared<TensorAttributes>(1e-5f);
     epsilon->set_uid(4).set_name("Epsilon");
 
-    auto peerStatOffset = std::make_shared<TensorAttributes>();
+    const auto peerStatOffset = std::make_shared<TensorAttributes>();
     peerStatOffset->set_name("PeerStatOffset").set_dim({5}).set_stride({1});
 
-    auto peerStat = std::make_shared<TensorAttributes>();
+    const auto peerStat = std::make_shared<TensorAttributes>();
     peerStat->set_uid(20)
         .set_name("PeerStat")
         .set_dim({1, 64, 1, 1})
@@ -5054,7 +5054,7 @@ TEST_F(TestGraph, AssignedTensorUidsFollowNodeOrder)
     Graph graph;
     createUnsetUidPointwiseChain(graph, 8);
 
-    auto buildResult = graph.build_operation_graph(_handle);
+    const auto buildResult = graph.build_operation_graph(_handle);
     ASSERT_TRUE(buildResult.is_good()) << buildResult.get_message();
 
     // Nodes in the order they were added; per node its inputs, then its outputs.
@@ -5100,7 +5100,7 @@ static std::vector<std::map<std::string, int64_t>>
         graphs.push_back(std::make_unique<Graph>());
         createGraph(*graphs.back());
 
-        auto buildResult = graphs.back()->build_operation_graph(handle);
+        const auto buildResult = graphs.back()->build_operation_graph(handle);
         EXPECT_TRUE(buildResult.is_good()) << buildResult.get_message();
         uidsPerBuild.push_back(tensorUidsByName(*graphs.back()));
     }
@@ -5133,25 +5133,25 @@ static void createUnsetUidMultiOperandGraph(Graph& graph)
     const std::vector<int64_t> derivedDims = hipdnn_data_sdk::utilities::getDerivedShape(dims);
     const auto derivedStrides = hipdnn_data_sdk::utilities::generateStrides(derivedDims);
 
-    auto x = std::make_shared<TensorAttributes>();
+    const auto x = std::make_shared<TensorAttributes>();
     x->set_name("X").set_dim(dims).set_stride(strides).set_data_type(DataType::FLOAT);
 
-    auto b = std::make_shared<TensorAttributes>();
+    const auto b = std::make_shared<TensorAttributes>();
     b->set_name("B").set_dim(dims).set_stride(strides).set_data_type(DataType::FLOAT);
 
     PointwiseAttributes addAttributes;
     addAttributes.set_name("Add");
     addAttributes.set_mode(PointwiseMode::ADD);
-    auto t = graph.pointwise(x, b, addAttributes);
+    const auto t = graph.pointwise(x, b, addAttributes);
     t->set_name("T");
 
-    auto scale = std::make_shared<TensorAttributes>();
+    const auto scale = std::make_shared<TensorAttributes>();
     scale->set_name("Scale").set_dim(derivedDims).set_stride(derivedStrides);
 
-    auto bias = std::make_shared<TensorAttributes>();
+    const auto bias = std::make_shared<TensorAttributes>();
     bias->set_name("Bias").set_dim(derivedDims).set_stride(derivedStrides);
 
-    auto epsilon = std::make_shared<TensorAttributes>(1e-5f);
+    const auto epsilon = std::make_shared<TensorAttributes>(1e-5f);
     epsilon->set_name("Epsilon");
 
     BatchnormAttributes bnAttributes;
@@ -7863,7 +7863,7 @@ TEST_P(TestGraphNullTensorArg, BuilderAcceptsNullAndValidateReportsAttributeNotS
         .set_intermediate_data_type(DataType::FLOAT);
     param.build(graph, param.nullArg);
 
-    auto result = graph.validate();
+    const auto result = graph.validate();
     EXPECT_EQ(result.code, ErrorCode::ATTRIBUTE_NOT_SET) << result.get_message();
 
     // The same node with every tensor argument set validates, so the error above comes from
@@ -7874,7 +7874,7 @@ TEST_P(TestGraphNullTensorArg, BuilderAcceptsNullAndValidateReportsAttributeNotS
         .set_intermediate_data_type(DataType::FLOAT);
     param.build(control, ALL_TENSOR_ARGS);
 
-    auto controlResult = control.validate();
+    const auto controlResult = control.validate();
     EXPECT_TRUE(controlResult.is_good()) << controlResult.get_message();
 }
 
@@ -7885,7 +7885,7 @@ static std::vector<NullTensorArgParam> getNullTensorArgParams()
     std::vector<NullTensorArgParam> params;
 
     addNullTensorArgRows(params, "Layernorm", {"X", "Scale", "Bias"}, [](Graph& g, int nullArg) {
-        auto epsilon = std::make_shared<TensorAttributes>();
+        const auto epsilon = std::make_shared<TensorAttributes>();
         epsilon->set_value(1e-5f);
         LayernormAttributes attributes;
         attributes.set_forward_phase(NormFwdPhase::INFERENCE);
@@ -7935,7 +7935,7 @@ static std::vector<NullTensorArgParam> getNullTensorArgParams()
     addNullTensorArgRows(params, "Reduction", {"X"}, [](Graph& g, int nullArg) {
         ReductionAttributes attributes;
         attributes.set_mode(ReductionMode::ADD);
-        auto y = g.reduction(tensorOrNull(0, nullArg, {2, 8, 16, 64}), attributes);
+        const auto y = g.reduction(tensorOrNull(0, nullArg, {2, 8, 16, 64}), attributes);
         y->set_dim({2, 8, 1, 1}).set_stride({8, 1, 1, 1});
     });
 
@@ -8026,9 +8026,9 @@ static std::vector<NullTensorArgParam> getNullTensorArgParams()
         attributes.set_post_padding({1, 1});
         attributes.set_stride({1, 1});
         attributes.set_dilation({1, 1});
-        auto dx = g.conv_dgrad(tensorOrNull(0, nullArg, {1, 64, 32, 32}),
-                               tensorOrNull(1, nullArg, {64, 3, 3, 3}),
-                               attributes);
+        const auto dx = g.conv_dgrad(tensorOrNull(0, nullArg, {1, 64, 32, 32}),
+                                     tensorOrNull(1, nullArg, {64, 3, 3, 3}),
+                                     attributes);
         dx->set_dim({1, 3, 32, 32});
     });
 
@@ -8038,9 +8038,9 @@ static std::vector<NullTensorArgParam> getNullTensorArgParams()
         attributes.set_post_padding({1, 1});
         attributes.set_stride({1, 1});
         attributes.set_dilation({1, 1});
-        auto dw = g.conv_wgrad(tensorOrNull(0, nullArg, {1, 64, 32, 32}),
-                               tensorOrNull(1, nullArg, {1, 3, 32, 32}),
-                               attributes);
+        const auto dw = g.conv_wgrad(tensorOrNull(0, nullArg, {1, 64, 32, 32}),
+                                     tensorOrNull(1, nullArg, {1, 3, 32, 32}),
+                                     attributes);
         dw->set_dim({64, 3, 3, 3});
     });
 

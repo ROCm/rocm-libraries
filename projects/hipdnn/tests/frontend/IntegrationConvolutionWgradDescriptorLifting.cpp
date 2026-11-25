@@ -418,7 +418,7 @@ TEST_F(IntegrationConvolutionWgradDescriptorLifting, JsonRoundTripWithHandle)
 // and validate() rejects it before the group arithmetic divides by the channel count.
 TEST_F(IntegrationConvolutionWgradDescriptorLifting, DeserializedZeroDwChannelRejectedByValidate)
 {
-    auto originalGraph = buildGraph();
+    const auto originalGraph = buildGraph();
 
     auto result = originalGraph->validate();
     ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
@@ -440,7 +440,7 @@ TEST_F(IntegrationConvolutionWgradDescriptorLifting, DeserializedZeroDwChannelRe
     ASSERT_TRUE(dwFound) << "dw tensor missing from serialized graph: " << jsonData;
     const std::string corruptedJson = parsed.dump();
 
-    auto liftedGraph = std::make_shared<TestableGraphLifting>();
+    const auto liftedGraph = std::make_shared<TestableGraphLifting>();
     result = liftedGraph->deserialize(corruptedJson);
     ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
 

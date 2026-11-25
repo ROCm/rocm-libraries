@@ -2010,16 +2010,16 @@ ConvolutionFpropNode makeShapeOverflowFpropNode(const std::vector<int64_t>& wDim
 {
     ConvFpropAttributes convAttributes;
 
-    auto xTensor = std::make_shared<TensorAttributes>();
+    const auto xTensor = std::make_shared<TensorAttributes>();
     xTensor->set_dim({1, 3, 8, 8});
     xTensor->set_stride({192, 64, 8, 1});
     convAttributes.set_x(xTensor);
 
-    auto wTensor = std::make_shared<TensorAttributes>();
+    const auto wTensor = std::make_shared<TensorAttributes>();
     wTensor->set_dim(wDims);
     convAttributes.set_w(wTensor);
 
-    auto yTensor = std::make_shared<TensorAttributes>();
+    const auto yTensor = std::make_shared<TensorAttributes>();
     yTensor->set_dim(yDims);
     convAttributes.set_y(yTensor);
 
@@ -2037,7 +2037,7 @@ TEST(TestConvolutionNode, InferPropertiesNodeRejectsPaddingOverflow)
     // 8 + max + max - 3 wraps to 3, which would infer an output extent of 4
     auto node = makeShapeOverflowFpropNode({64, 3, 3, 3}, {}, {K_INT64_MAX, 0}, {1, 1});
 
-    auto error = node.infer_properties_node();
+    const auto error = node.infer_properties_node();
     EXPECT_EQ(error.code, error_code_t::INVALID_VALUE);
     EXPECT_NE(error.err_msg.find("overflows int64"), std::string::npos) << error.err_msg;
     EXPECT_TRUE(node.attributes.get_y()->get_dim().empty());
@@ -2047,7 +2047,7 @@ TEST(TestConvolutionNode, InferPropertiesNodeRejectsDilationOverflow)
 {
     auto node = makeShapeOverflowFpropNode({64, 3, 5, 5}, {}, {0, 0}, {K_WRAPPING_DILATION, 1});
 
-    auto error = node.infer_properties_node();
+    const auto error = node.infer_properties_node();
     EXPECT_EQ(error.code, error_code_t::INVALID_VALUE);
     EXPECT_NE(error.err_msg.find("overflows int64"), std::string::npos) << error.err_msg;
     EXPECT_TRUE(node.attributes.get_y()->get_dim().empty());
@@ -2058,7 +2058,7 @@ TEST(TestConvolutionNode, InferPropertiesNodeLargeDilationKeepsNegativeOutputSiz
     // The dilated kernel size fits int64, so the negative-output-size check reports it
     auto node = makeShapeOverflowFpropNode({64, 3, 5, 5}, {}, {0, 0}, {int64_t{1} << 40, 1});
 
-    auto error = node.infer_properties_node();
+    const auto error = node.infer_properties_node();
     EXPECT_EQ(error.code, error_code_t::INVALID_VALUE);
     EXPECT_NE(error.err_msg.find("negative output size"), std::string::npos) << error.err_msg;
     EXPECT_EQ(error.err_msg.find("overflows"), std::string::npos) << error.err_msg;
@@ -2070,7 +2070,7 @@ TEST(TestConvolutionNode, PreValidateNodeRejectsPaddingOverflowWithYSet)
     const auto node
         = makeShapeOverflowFpropNode({64, 3, 3, 3}, {1, 64, 4, 6}, {K_INT64_MAX, 0}, {1, 1});
 
-    auto error = node.pre_validate_node();
+    const auto error = node.pre_validate_node();
     EXPECT_EQ(error.code, error_code_t::INVALID_VALUE);
     EXPECT_NE(error.err_msg.find("overflows int64"), std::string::npos) << error.err_msg;
 }
@@ -2080,7 +2080,7 @@ TEST(TestConvolutionNode, PreValidateNodeRejectsDilationOverflowWithYSet)
     const auto node = makeShapeOverflowFpropNode(
         {64, 3, 5, 5}, {1, 64, 4, 4}, {0, 0}, {K_WRAPPING_DILATION, 1});
 
-    auto error = node.pre_validate_node();
+    const auto error = node.pre_validate_node();
     EXPECT_EQ(error.code, error_code_t::INVALID_VALUE);
     EXPECT_NE(error.err_msg.find("overflows int64"), std::string::npos) << error.err_msg;
 }
@@ -2092,7 +2092,7 @@ TEST(TestConvolutionNode, PreValidateNodeAcceptsLargeNonOverflowingPadding)
     const auto node = makeShapeOverflowFpropNode(
         {64, 3, 3, 3}, {1, 64, (int64_t{1} << 62) + 6, 6}, {padding, 0}, {1, 1});
 
-    auto error = node.pre_validate_node();
+    const auto error = node.pre_validate_node();
     EXPECT_EQ(error.code, error_code_t::OK) << error.err_msg;
 }
 
@@ -2101,7 +2101,7 @@ TEST(TestConvolutionNode, PreValidateNodeLargeDilationKeepsInputTooSmallError)
     const auto node
         = makeShapeOverflowFpropNode({64, 3, 5, 5}, {1, 64, 4, 4}, {0, 0}, {int64_t{1} << 40, 1});
 
-    auto error = node.pre_validate_node();
+    const auto error = node.pre_validate_node();
     EXPECT_EQ(error.code, error_code_t::INVALID_VALUE);
     EXPECT_NE(error.err_msg.find("is too small"), std::string::npos) << error.err_msg;
     EXPECT_EQ(error.err_msg.find("overflows"), std::string::npos) << error.err_msg;

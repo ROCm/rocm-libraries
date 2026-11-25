@@ -135,7 +135,7 @@ TEST(TestCheckedShapeMath, MulAcceptsTheMaximumAndRejectsOnePastItForLikeSigns)
 TEST(TestCheckedShapeMath, DilatedKernelSizeComputesTheTerm)
 {
     int64_t out = 0;
-    auto error = checkedDilatedKernelSize("Node", 0, 2, 3, out);
+    const auto error = checkedDilatedKernelSize("Node", 0, 2, 3, out);
     EXPECT_EQ(error.code, ErrorCode::OK) << error.err_msg;
     EXPECT_EQ(out, 5);
 }
@@ -164,7 +164,7 @@ TEST(TestCheckedShapeMath, DilatedKernelSizeRejectsOverflowOfTheFinalIncrement)
 {
     int64_t out = K_UNTOUCHED;
     // kernel - 1 = 1 and max * 1 = max fit; max + 1 does not
-    auto error = checkedDilatedKernelSize("Node", 1, K_MAX, 2, out);
+    const auto error = checkedDilatedKernelSize("Node", 1, K_MAX, 2, out);
     EXPECT_EQ(error.code, ErrorCode::INVALID_VALUE);
     EXPECT_NE(error.err_msg.find("Node: dilated kernel size overflows int64 at spatial index 1"),
               std::string::npos)
@@ -207,7 +207,7 @@ TEST(TestCheckedShapeMath, PaddedNumeratorRejectsOverflowOfThePostPadding)
 {
     int64_t out = K_UNTOUCHED;
     // 1 + (max - 1) = max fits; max + max does not (it wraps to -2, and -2 - 3 would fit)
-    auto error = checkedPaddedNumerator("Node", 1, 1, K_MAX - 1, K_MAX, 3, out);
+    const auto error = checkedPaddedNumerator("Node", 1, 1, K_MAX - 1, K_MAX, 3, out);
     EXPECT_EQ(error.code, ErrorCode::INVALID_VALUE);
     EXPECT_NE(error.err_msg.find("padded extent minus span overflows int64 at spatial index 1"),
               std::string::npos)
@@ -246,7 +246,7 @@ TEST(TestCheckedShapeMath, TransposedExtentComputesTheTerm)
 {
     int64_t out = 0;
     // (4 - 1) * 2 - 1 - 1 + 3
-    auto error = checkedTransposedExtent("Node", 0, 4, 2, 1, 1, 3, out);
+    const auto error = checkedTransposedExtent("Node", 0, 4, 2, 1, 1, 3, out);
     EXPECT_EQ(error.code, ErrorCode::OK) << error.err_msg;
     EXPECT_EQ(out, 7);
 }

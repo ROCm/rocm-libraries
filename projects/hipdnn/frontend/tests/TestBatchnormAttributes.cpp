@@ -542,7 +542,7 @@ TEST(TestBatchnormAttributes, LogicalAndStrictEquality)
 
 TEST(TestBatchnormAttributes, LogicalEqualityTreatsNullOutputAsAbsent)
 {
-    auto makeTensor = [](int64_t uid, const std::string& name) {
+    const auto makeTensor = [](int64_t uid, const std::string& name) {
         auto tensor = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
         tensor->set_uid(uid)
             .set_name(name)

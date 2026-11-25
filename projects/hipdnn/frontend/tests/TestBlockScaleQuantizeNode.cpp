@@ -352,11 +352,11 @@ TEST(TestBlockScaleQuantizeNode, PreValidateNodeScaleRankMustMatchX)
     const auto makeNodeWithScaleDims = [](const std::vector<int64_t>& scaleDims) {
         BlockScaleQuantizeAttributes attrs;
 
-        auto xTensor = std::make_shared<TensorAttributes>();
+        const auto xTensor = std::make_shared<TensorAttributes>();
         xTensor->set_dim({4, 64}).set_stride({64, 1});
         attrs.set_x(xTensor);
 
-        auto scaleTensor = std::make_shared<TensorAttributes>();
+        const auto scaleTensor = std::make_shared<TensorAttributes>();
         scaleTensor->set_dim(scaleDims);
         attrs.set_scale(scaleTensor);
 

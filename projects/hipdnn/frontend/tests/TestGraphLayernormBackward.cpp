@@ -116,7 +116,7 @@ TEST(TestGraphLayernormBackward, ValidateRejectsStatsBatchMismatchOnFirstValidat
     addLayernormBackward(
         graph, {4, 6, 8, 8}, {384, 64, 8, 1}, {1, 6, 8, 8}, {384, 64, 8, 1}, {3, 1, 1, 1});
 
-    auto validationResult = graph.validate();
+    const auto validationResult = graph.validate();
     EXPECT_EQ(validationResult.code, error_code_t::INVALID_VALUE) << validationResult.get_message();
 }
 
@@ -146,9 +146,9 @@ TEST(TestGraphLayernormBackward, ValidateAcceptsForwardStatsWithRankReducedScale
         .set_io_data_type(DataType::FLOAT)
         .set_intermediate_data_type(DataType::FLOAT);
 
-    auto x = makeFloatTensor({2, 4, 8}, {32, 8, 1});
-    auto scale = makeFloatTensor({8}, {1});
-    auto epsilon = std::make_shared<TensorAttributes>();
+    const auto x = makeFloatTensor({2, 4, 8}, {32, 8, 1});
+    const auto scale = makeFloatTensor({8}, {1});
+    const auto epsilon = std::make_shared<TensorAttributes>();
     epsilon->set_value(1e-5f);
 
     LayernormAttributes forwardAttributes;
@@ -169,7 +169,7 @@ TEST(TestGraphLayernormBackward, ValidateAcceptsForwardStatsWithRankReducedScale
     dscale->set_output(true);
     dbias->set_output(true);
 
-    auto validationResult = graph.validate();
+    const auto validationResult = graph.validate();
     ASSERT_TRUE(validationResult.is_good()) << validationResult.get_message();
     EXPECT_EQ(mean->get_dim(), (std::vector<int64_t>{2, 4, 1}));
 }

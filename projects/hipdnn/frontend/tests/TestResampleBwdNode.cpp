@@ -57,7 +57,7 @@ ResampleBwdAttributes createInferableAttributes()
 {
     ResampleBwdAttributes attrs;
 
-    auto dyTensor = std::make_shared<TensorAttributes>();
+    const auto dyTensor = std::make_shared<TensorAttributes>();
     dyTensor->set_dim({1, 3, 4, 4});
     dyTensor->set_stride({48, 16, 4, 1});
     attrs.set_dy(dyTensor);
@@ -269,7 +269,7 @@ TEST(TestResampleBwdNode, PreValidateNodeRejectsWindowShorterThanSpatialRank)
     const GraphAttributes graphAttributes;
     const ResampleBwdNode node(std::move(attrs), graphAttributes);
 
-    auto error = node.pre_validate_node();
+    const auto error = node.pre_validate_node();
     EXPECT_EQ(error.code, error_code_t::INVALID_VALUE);
 }
 
@@ -284,7 +284,7 @@ TEST(TestResampleBwdNode, PreValidateNodeRejectsWindowLongerThanSpatialRank)
     const GraphAttributes graphAttributes;
     const ResampleBwdNode node(std::move(attrs), graphAttributes);
 
-    auto error = node.pre_validate_node();
+    const auto error = node.pre_validate_node();
     EXPECT_EQ(error.code, error_code_t::INVALID_VALUE);
     // Pins validateResampleParam's size-mismatch check (ResampleParamsValidation.hpp): an
     // over-long window must be rejected, not just a too-short one.
@@ -302,7 +302,7 @@ TEST(TestResampleBwdNode, PreValidateNodeRejectsZeroStride)
     const GraphAttributes graphAttributes;
     const ResampleBwdNode node(std::move(attrs), graphAttributes);
 
-    auto error = node.pre_validate_node();
+    const auto error = node.pre_validate_node();
     EXPECT_EQ(error.code, error_code_t::INVALID_VALUE);
 }
 
@@ -314,13 +314,13 @@ TEST(TestResampleBwdNode, PreValidateNodeRejectsZeroWindowValue)
     const GraphAttributes graphAttributes;
     const ResampleBwdNode node(std::move(attrs), graphAttributes);
 
-    auto error = node.pre_validate_node();
+    const auto error = node.pre_validate_node();
     EXPECT_EQ(error.code, error_code_t::INVALID_VALUE);
 }
 
 TEST(TestResampleBwdNode, PreValidateNodeRejectsNegativePadding)
 {
-    auto preValidateWithPadding
+    const auto preValidateWithPadding
         = [](const std::vector<int64_t>& prePadding, const std::vector<int64_t>& postPadding) {
               auto attrs = createValidAttributes();
               attrs.set_pre_padding(prePadding);
@@ -352,7 +352,7 @@ TEST(TestResampleBwdNode, PreValidateNodeAcceptsWindowWiderThanPaddedDx)
     const GraphAttributes graphAttributes;
     const ResampleBwdNode node(std::move(attrs), graphAttributes);
 
-    auto error = node.pre_validate_node();
+    const auto error = node.pre_validate_node();
     EXPECT_EQ(error.code, error_code_t::OK) << error.err_msg;
 }
 
@@ -368,7 +368,7 @@ TEST(TestResampleBwdNode, PreValidateNodeAcceptsExactlyTheResampleModesLoweringM
         const GraphAttributes graphAttributes;
         const ResampleBwdNode node(std::move(attrs), graphAttributes);
 
-        auto error = node.pre_validate_node();
+        const auto error = node.pre_validate_node();
         const auto expected = toBackendResampleMode(mode).has_value() ? error_code_t::OK
                                                                       : error_code_t::INVALID_VALUE;
         EXPECT_EQ(error.code, expected) << "resample mode " << raw << ": " << error.err_msg;
@@ -388,7 +388,7 @@ TEST(TestResampleBwdNode, PreValidateNodeAcceptsExactlyThePaddingModesLoweringMa
         const GraphAttributes graphAttributes;
         const ResampleBwdNode node(std::move(attrs), graphAttributes);
 
-        auto error = node.pre_validate_node();
+        const auto error = node.pre_validate_node();
         const auto expected = toBackendPaddingMode(mode).has_value() ? error_code_t::OK
                                                                      : error_code_t::INVALID_VALUE;
         EXPECT_EQ(error.code, expected) << "padding mode " << raw << ": " << error.err_msg;
@@ -432,12 +432,12 @@ TEST(TestResampleBwdNode, InferPropertiesNodeRejectsWindowShorterThanSpatialRank
 {
     auto attrs = createInferableAttributes();
     attrs.set_window({2});
-    auto dxTensor = attrs.get_dx();
+    const auto dxTensor = attrs.get_dx();
 
     const GraphAttributes graphAttributes;
     ResampleBwdNode node(std::move(attrs), graphAttributes);
 
-    auto error = node.infer_properties_node();
+    const auto error = node.infer_properties_node();
     EXPECT_EQ(error.code, error_code_t::INVALID_VALUE);
     EXPECT_TRUE(dxTensor->get_dim().empty());
 }
@@ -446,12 +446,12 @@ TEST(TestResampleBwdNode, InferPropertiesNodeRejectsEmptyStride)
 {
     auto attrs = createInferableAttributes();
     attrs.set_stride(std::vector<int64_t>{});
-    auto dxTensor = attrs.get_dx();
+    const auto dxTensor = attrs.get_dx();
 
     const GraphAttributes graphAttributes;
     ResampleBwdNode node(std::move(attrs), graphAttributes);
 
-    auto error = node.infer_properties_node();
+    const auto error = node.infer_properties_node();
     EXPECT_EQ(error.code, error_code_t::ATTRIBUTE_NOT_SET);
     EXPECT_TRUE(dxTensor->get_dim().empty());
 }
@@ -464,13 +464,13 @@ TEST(TestResampleBwdNode, InferPropertiesNodeRejectsNonPositiveDxExtent)
     attrs.set_pre_padding({5, 5});
     attrs.set_post_padding({5, 5});
     attrs.set_window({1, 1});
-    auto dxTensor = attrs.get_dx();
+    const auto dxTensor = attrs.get_dx();
 
     const GraphAttributes graphAttributes;
     ResampleBwdNode node(std::move(attrs), graphAttributes);
 
     // (1 - 1) * 1 - 5 - 5 + 1 = -9
-    auto error = node.infer_properties_node();
+    const auto error = node.infer_properties_node();
     EXPECT_EQ(error.code, error_code_t::INVALID_VALUE);
     EXPECT_TRUE(dxTensor->get_dim().empty());
 }
@@ -484,12 +484,12 @@ TEST(TestResampleBwdNode, InferPropertiesNodeRejectsStrideOverflow)
     attrs.get_dy()->set_stride({75, 25, 5, 1});
     attrs.set_stride({K_STRIDE_PAST_QUARTER, 1});
     attrs.set_window({1, 1});
-    auto dxTensor = attrs.get_dx();
+    const auto dxTensor = attrs.get_dx();
 
     const GraphAttributes graphAttributes;
     ResampleBwdNode node(std::move(attrs), graphAttributes);
 
-    auto error = node.infer_properties_node();
+    const auto error = node.infer_properties_node();
     EXPECT_EQ(error.code, error_code_t::INVALID_VALUE);
     EXPECT_NE(error.err_msg.find("overflows int64"), std::string::npos) << error.err_msg;
     EXPECT_TRUE(dxTensor->get_dim().empty());
@@ -505,12 +505,12 @@ TEST(TestResampleBwdNode, InferPropertiesNodeRejectsPaddingUnderflow)
     attrs.set_pre_padding({K_MAX, 0});
     attrs.set_post_padding({K_MAX, 0});
     attrs.set_window({1, 1});
-    auto dxTensor = attrs.get_dx();
+    const auto dxTensor = attrs.get_dx();
 
     const GraphAttributes graphAttributes;
     ResampleBwdNode node(std::move(attrs), graphAttributes);
 
-    auto error = node.infer_properties_node();
+    const auto error = node.infer_properties_node();
     EXPECT_EQ(error.code, error_code_t::INVALID_VALUE);
     EXPECT_NE(error.err_msg.find("overflows int64"), std::string::npos) << error.err_msg;
     EXPECT_TRUE(dxTensor->get_dim().empty());

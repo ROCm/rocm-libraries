@@ -145,21 +145,21 @@ Error preValidateWithScaleBiasDims(const std::vector<int64_t>& xDims,
 {
     BatchnormAttributes batchnormAttributes;
 
-    auto xTensor = std::make_shared<TensorAttributes>();
+    const auto xTensor = std::make_shared<TensorAttributes>();
     xTensor->set_dim(xDims);
     batchnormAttributes.set_x(xTensor);
 
     batchnormAttributes.set_y(std::make_shared<TensorAttributes>());
 
-    auto scaleTensor = std::make_shared<TensorAttributes>();
+    const auto scaleTensor = std::make_shared<TensorAttributes>();
     scaleTensor->set_dim(scaleBiasDims);
     batchnormAttributes.set_scale(scaleTensor);
 
-    auto biasTensor = std::make_shared<TensorAttributes>();
+    const auto biasTensor = std::make_shared<TensorAttributes>();
     biasTensor->set_dim(scaleBiasDims);
     batchnormAttributes.set_bias(biasTensor);
 
-    auto epsilonTensor = std::make_shared<TensorAttributes>();
+    const auto epsilonTensor = std::make_shared<TensorAttributes>();
     epsilonTensor->set_dim({1}).set_value(1e-5);
     batchnormAttributes.set_epsilon(epsilonTensor);
 
@@ -172,32 +172,32 @@ Error preValidateWithScaleBiasDims(const std::vector<int64_t>& xDims,
 
 TEST(TestBatchnormNode, PreValidateRejectsScaleBiasChannelMismatch)
 {
-    auto error = preValidateWithScaleBiasDims({2, 8, 4, 4}, {1, 6, 1, 1});
+    const auto error = preValidateWithScaleBiasDims({2, 8, 4, 4}, {1, 6, 1, 1});
     EXPECT_EQ(error.code, ErrorCode::INVALID_VALUE);
     EXPECT_NE(error.get_message().find("Scale"), std::string::npos) << error.get_message();
 }
 
 TEST(TestBatchnormNode, PreValidateRejectsRank1ScaleBiasChannelMismatch)
 {
-    auto error = preValidateWithScaleBiasDims({2, 64, 32, 32}, {32});
+    const auto error = preValidateWithScaleBiasDims({2, 64, 32, 32}, {32});
     EXPECT_EQ(error.code, ErrorCode::INVALID_VALUE);
 }
 
 TEST(TestBatchnormNode, PreValidateRejectsRank2ScaleBiasChannelMismatch)
 {
-    auto error = preValidateWithScaleBiasDims({2, 64, 32, 32}, {1, 32});
+    const auto error = preValidateWithScaleBiasDims({2, 64, 32, 32}, {1, 32});
     EXPECT_EQ(error.code, ErrorCode::INVALID_VALUE);
 }
 
 TEST(TestBatchnormNode, PreValidateAcceptsReducedRankScaleBias)
 {
-    auto error = preValidateWithScaleBiasDims({2, 64, 32, 32}, {64, 1, 1});
+    const auto error = preValidateWithScaleBiasDims({2, 64, 32, 32}, {64, 1, 1});
     EXPECT_EQ(error.code, ErrorCode::OK) << error.get_message();
 }
 
 TEST(TestBatchnormNode, PreValidateRejectsReducedRankScaleBiasChannelMismatch)
 {
-    auto error = preValidateWithScaleBiasDims({2, 64, 32, 32}, {32, 1, 1});
+    const auto error = preValidateWithScaleBiasDims({2, 64, 32, 32}, {32, 1, 1});
     EXPECT_EQ(error.code, ErrorCode::INVALID_VALUE);
     EXPECT_NE(error.get_message().find("(index 0) must be 64, got 32"), std::string::npos)
         << error.get_message();
@@ -205,7 +205,7 @@ TEST(TestBatchnormNode, PreValidateRejectsReducedRankScaleBiasChannelMismatch)
 
 TEST(TestBatchnormNode, PreValidateAcceptsChannelFirstRank2ScaleBias)
 {
-    auto error = preValidateWithScaleBiasDims({2, 64, 32, 32}, {64, 1});
+    const auto error = preValidateWithScaleBiasDims({2, 64, 32, 32}, {64, 1});
     EXPECT_EQ(error.code, ErrorCode::OK) << error.get_message();
 }
 
@@ -448,10 +448,10 @@ TEST(TestBatchnormNode, GatherHipdnnTensors)
 TEST(TestBatchnormNode, GatherHipdnnTensorsIncludesPeerStatRaggedOffset)
 {
     // The aux tensor carries no UID; gathering it is what lets the graph assign one.
-    auto peerStatOffset = std::make_shared<TensorAttributes>();
+    const auto peerStatOffset = std::make_shared<TensorAttributes>();
     peerStatOffset->set_name("PeerStatOffset").set_dim({5}).set_stride({1});
 
-    auto peerStat = std::make_shared<TensorAttributes>();
+    const auto peerStat = std::make_shared<TensorAttributes>();
     peerStat->set_uid(9).set_name("PeerStat");
     peerStat->set_ragged_offset(peerStatOffset);
 
@@ -727,25 +727,25 @@ TEST(TestBatchnormNode, PreValidateAcceptsMomentumWithoutPreviousRunningStats)
 {
     BatchnormAttributes batchnormAttributes;
 
-    auto xTensor = std::make_shared<TensorAttributes>();
+    const auto xTensor = std::make_shared<TensorAttributes>();
     xTensor->set_dim({2, 64, 32, 32}).set_stride({65536, 1024, 32, 1});
     batchnormAttributes.set_x(xTensor);
 
     batchnormAttributes.set_y(std::make_shared<TensorAttributes>());
 
-    auto scaleTensor = std::make_shared<TensorAttributes>();
+    const auto scaleTensor = std::make_shared<TensorAttributes>();
     scaleTensor->set_dim({1, 64, 1, 1});
     batchnormAttributes.set_scale(scaleTensor);
 
-    auto biasTensor = std::make_shared<TensorAttributes>();
+    const auto biasTensor = std::make_shared<TensorAttributes>();
     biasTensor->set_dim({1, 64, 1, 1});
     batchnormAttributes.set_bias(biasTensor);
 
-    auto epsilonTensor = std::make_shared<TensorAttributes>();
+    const auto epsilonTensor = std::make_shared<TensorAttributes>();
     epsilonTensor->set_dim({1}).set_value(1e-5);
     batchnormAttributes.set_epsilon(epsilonTensor);
 
-    auto momentumTensor = std::make_shared<TensorAttributes>();
+    const auto momentumTensor = std::make_shared<TensorAttributes>();
     momentumTensor->set_value(0.1);
     batchnormAttributes.set_momentum(momentumTensor);
 
@@ -759,7 +759,7 @@ TEST(TestBatchnormNode, PreValidateAcceptsMomentumWithoutPreviousRunningStats)
     EXPECT_EQ(error.code, ErrorCode::OK) << error.get_message();
 
     // Momentum with the complete running statistics.
-    auto runningStat = [] {
+    const auto runningStat = [] {
         auto tensor = std::make_shared<TensorAttributes>();
         tensor->set_dim({1, 64, 1, 1});
         return tensor;
@@ -986,7 +986,7 @@ protected:
         attributes.set_y(makeTensor(2, {2, 64, 32, 32}, {65536, 1024, 32, 1}));
         attributes.set_scale(makeTensor(3, {1, 64, 1, 1}, {64, 1, 1, 1}));
         attributes.set_bias(makeTensor(4, {1, 64, 1, 1}, {64, 1, 1, 1}));
-        auto epsilon = makeTensor(5, {1}, {1});
+        const auto epsilon = makeTensor(5, {1}, {1});
         epsilon->set_is_pass_by_value(true);
         attributes.set_epsilon(epsilon);
         return attributes;

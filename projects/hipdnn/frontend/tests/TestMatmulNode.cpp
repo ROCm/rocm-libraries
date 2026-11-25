@@ -179,7 +179,7 @@ TEST(TestMatmulNode, PreValidateNodeAcceptsUserSetOutputDims)
 
 TEST(TestMatmulNode, PreValidateNodeRejectsOutputRowsNotMatchingA)
 {
-    auto err = preValidateWithOutputDims({16, 32}, {32, 24}, {17, 24});
+    const auto err = preValidateWithOutputDims({16, 32}, {32, 24}, {17, 24});
     EXPECT_EQ(err.code, error_code_t::INVALID_VALUE);
 }
 
@@ -196,11 +196,11 @@ TEST(TestMatmulNode, PreValidateNodeRejectsOutputColsNotMatchingB)
 // on 2-D inputs matches the rows and columns.
 TEST(TestMatmulNode, PreValidateNodeRejectsOutputRankMismatch)
 {
-    auto lowerRank = preValidateWithOutputDims({2, 4, 8}, {2, 8, 5}, {2, 4});
+    const auto lowerRank = preValidateWithOutputDims({2, 4, 8}, {2, 8, 5}, {2, 4});
     EXPECT_EQ(lowerRank.code, error_code_t::INVALID_VALUE);
     EXPECT_NE(lowerRank.err_msg.find("same rank"), std::string::npos) << lowerRank.err_msg;
 
-    auto higherRank = preValidateWithOutputDims({4, 8}, {8, 5}, {4, 5, 1});
+    const auto higherRank = preValidateWithOutputDims({4, 8}, {8, 5}, {4, 5, 1});
     EXPECT_EQ(higherRank.code, error_code_t::INVALID_VALUE);
     EXPECT_NE(higherRank.err_msg.find("same rank"), std::string::npos) << higherRank.err_msg;
 }

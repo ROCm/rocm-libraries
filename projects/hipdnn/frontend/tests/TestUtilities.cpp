@@ -58,7 +58,7 @@ TEST(TestUtilities, FindCommonShapeAlignsLowerRankOnTrailingDims)
     const std::vector<std::vector<int64_t>> inputShapes = {{2, 3, 4}, {4}};
     std::vector<int64_t> commonShape;
 
-    auto error = findCommonShape(inputShapes, commonShape);
+    const auto error = findCommonShape(inputShapes, commonShape);
     EXPECT_EQ(error.code, ErrorCode::OK) << error.get_message();
     EXPECT_EQ(commonShape, (std::vector<int64_t>{2, 3, 4}));
 }
@@ -68,7 +68,7 @@ TEST(TestUtilities, FindCommonShapeBroadcastsUnitDimAgainstLowerRank)
     const std::vector<std::vector<int64_t>> inputShapes = {{4, 1}, {4}};
     std::vector<int64_t> commonShape;
 
-    auto error = findCommonShape(inputShapes, commonShape);
+    const auto error = findCommonShape(inputShapes, commonShape);
     EXPECT_EQ(error.code, ErrorCode::OK) << error.get_message();
     EXPECT_EQ(commonShape, (std::vector<int64_t>{4, 4}));
 }
@@ -78,7 +78,7 @@ TEST(TestUtilities, FindCommonShapeCombinesUnitDimsAcrossRanks)
     const std::vector<std::vector<int64_t>> inputShapes = {{3, 1, 4}, {1, 2, 4}, {2, 4}};
     std::vector<int64_t> commonShape;
 
-    auto error = findCommonShape(inputShapes, commonShape);
+    const auto error = findCommonShape(inputShapes, commonShape);
     EXPECT_EQ(error.code, ErrorCode::OK) << error.get_message();
     EXPECT_EQ(commonShape, (std::vector<int64_t>{3, 2, 4}));
 }
@@ -89,7 +89,7 @@ TEST(TestUtilities, FindCommonShapeRejectsLeadingDimMatchOnly)
     const std::vector<std::vector<int64_t>> inputShapes = {{1, 2}, {1, 2, 5}};
     std::vector<int64_t> commonShape;
 
-    auto error = findCommonShape(inputShapes, commonShape);
+    const auto error = findCommonShape(inputShapes, commonShape);
     EXPECT_EQ(error.code, ErrorCode::INVALID_VALUE);
 }
 

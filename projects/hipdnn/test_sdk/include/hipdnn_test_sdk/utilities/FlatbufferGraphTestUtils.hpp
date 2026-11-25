@@ -43,7 +43,7 @@ template <typename Mutate>
 flatbuffers::FlatBufferBuilder mutateGraph(const flatbuffers::FlatBufferBuilder& source,
                                            Mutate&& mutate)
 {
-    auto graph = hipdnn_flatbuffers_sdk::data_objects::UnPackGraph(source.GetBufferPointer());
+    const auto graph = hipdnn_flatbuffers_sdk::data_objects::UnPackGraph(source.GetBufferPointer());
     mutate(*graph);
     flatbuffers::FlatBufferBuilder builder;
     builder.Finish(hipdnn_flatbuffers_sdk::data_objects::CreateGraph(builder, graph.get()));
@@ -56,10 +56,10 @@ flatbuffers::FlatBufferBuilder mutateGraph(const flatbuffers::FlatBufferBuilder&
 /// has no non-virtual tensor to mark.
 inline flatbuffers::FlatBufferBuilder makeGraphWithRaggedTensor(const void* serializedGraph)
 {
-    auto graph = hipdnn_flatbuffers_sdk::data_objects::UnPackGraph(serializedGraph);
+    const auto graph = hipdnn_flatbuffers_sdk::data_objects::UnPackGraph(serializedGraph);
 
     hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT* target = nullptr;
-    for(auto& tensor : graph->tensors)
+    for(const auto& tensor : graph->tensors)
     {
         if(!tensor->virtual_)
         {
@@ -92,7 +92,7 @@ inline flatbuffers::FlatBufferBuilder
 inline flatbuffers::FlatBufferBuilder makeGraphWithTensorAlignment(const void* serializedGraph,
                                                                    int64_t alignment)
 {
-    auto graph = hipdnn_flatbuffers_sdk::data_objects::UnPackGraph(serializedGraph);
+    const auto graph = hipdnn_flatbuffers_sdk::data_objects::UnPackGraph(serializedGraph);
 
     const auto target = std::find_if(
         graph->tensors.begin(), graph->tensors.end(), [](const auto& tensor) {

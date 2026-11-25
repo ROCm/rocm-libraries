@@ -181,10 +181,10 @@ TEST(TestBatchnormBackwardNode, GatherHipdnnTensors)
 TEST(TestBatchnormBackwardNode, GatherHipdnnTensorsIncludesPeerStatRaggedOffset)
 {
     // The aux tensor carries no UID; gathering it is what lets the graph assign one.
-    auto peerStatOffset = std::make_shared<TensorAttributes>();
+    const auto peerStatOffset = std::make_shared<TensorAttributes>();
     peerStatOffset->set_name("PeerStatOffset").set_dim({5}).set_stride({1});
 
-    auto peerStat = std::make_shared<TensorAttributes>();
+    const auto peerStat = std::make_shared<TensorAttributes>();
     peerStat->set_uid(9).set_name("PeerStat");
     peerStat->set_ragged_offset(peerStatOffset);
 

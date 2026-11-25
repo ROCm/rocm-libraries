@@ -1067,17 +1067,17 @@ TEST(TestConvolutionDgradNode, PreValidateZeroDxChannelIsRejected)
 {
     ConvDgradAttributes convAttributes;
 
-    auto dyTensor = std::make_shared<TensorAttributes>();
+    const auto dyTensor = std::make_shared<TensorAttributes>();
     dyTensor->set_dim({1, 64, 32, 32});
     dyTensor->set_stride({65536, 1024, 32, 1});
     convAttributes.set_dy(dyTensor);
 
-    auto wTensor = std::make_shared<TensorAttributes>();
+    const auto wTensor = std::make_shared<TensorAttributes>();
     wTensor->set_dim({64, 32, 3, 3});
     wTensor->set_stride({288, 9, 3, 1});
     convAttributes.set_w(wTensor);
 
-    auto dxTensor = std::make_shared<TensorAttributes>();
+    const auto dxTensor = std::make_shared<TensorAttributes>();
     // 0 % 32 passes the divisibility check, so the group count would be 0
     dxTensor->set_dim({1, 0, 32, 32});
     dxTensor->set_stride({1024, 1024, 32, 1});
@@ -1091,7 +1091,7 @@ TEST(TestConvolutionDgradNode, PreValidateZeroDxChannelIsRejected)
     const GraphAttributes graphAttributes;
     const ConvolutionDgradNode node(std::move(convAttributes), graphAttributes);
 
-    auto error = node.pre_validate_node();
+    const auto error = node.pre_validate_node();
     EXPECT_EQ(error.code, error_code_t::INVALID_VALUE);
 }
 
@@ -1099,17 +1099,17 @@ TEST(TestConvolutionDgradNode, PreValidateZeroWeightInputChannelIsRejected)
 {
     ConvDgradAttributes convAttributes;
 
-    auto dyTensor = std::make_shared<TensorAttributes>();
+    const auto dyTensor = std::make_shared<TensorAttributes>();
     dyTensor->set_dim({1, 64, 32, 32});
     dyTensor->set_stride({65536, 1024, 32, 1});
     convAttributes.set_dy(dyTensor);
 
-    auto wTensor = std::make_shared<TensorAttributes>();
+    const auto wTensor = std::make_shared<TensorAttributes>();
     wTensor->set_dim({64, 0, 3, 3});
     wTensor->set_stride({9, 9, 3, 1});
     convAttributes.set_w(wTensor);
 
-    auto dxTensor = std::make_shared<TensorAttributes>();
+    const auto dxTensor = std::make_shared<TensorAttributes>();
     dxTensor->set_dim({1, 64, 32, 32});
     dxTensor->set_stride({65536, 1024, 32, 1});
     convAttributes.set_dx(dxTensor);
@@ -1122,7 +1122,7 @@ TEST(TestConvolutionDgradNode, PreValidateZeroWeightInputChannelIsRejected)
     const GraphAttributes graphAttributes;
     const ConvolutionDgradNode node(std::move(convAttributes), graphAttributes);
 
-    auto error = node.pre_validate_node();
+    const auto error = node.pre_validate_node();
     EXPECT_EQ(error.code, error_code_t::INVALID_VALUE);
 }
 
@@ -1130,18 +1130,18 @@ TEST(TestConvolutionDgradNode, PreValidateZeroDyChannelIsRejected)
 {
     ConvDgradAttributes convAttributes;
 
-    auto dyTensor = std::make_shared<TensorAttributes>();
+    const auto dyTensor = std::make_shared<TensorAttributes>();
     dyTensor->set_dim({1, 0, 32, 32});
     dyTensor->set_stride({1024, 1024, 32, 1});
     convAttributes.set_dy(dyTensor);
 
     // Weight output channels match dy; 0 % groups passes the group divisibility check
-    auto wTensor = std::make_shared<TensorAttributes>();
+    const auto wTensor = std::make_shared<TensorAttributes>();
     wTensor->set_dim({0, 32, 3, 3});
     wTensor->set_stride({288, 9, 3, 1});
     convAttributes.set_w(wTensor);
 
-    auto dxTensor = std::make_shared<TensorAttributes>();
+    const auto dxTensor = std::make_shared<TensorAttributes>();
     dxTensor->set_dim({1, 64, 32, 32});
     dxTensor->set_stride({65536, 1024, 32, 1});
     convAttributes.set_dx(dxTensor);
@@ -1154,7 +1154,7 @@ TEST(TestConvolutionDgradNode, PreValidateZeroDyChannelIsRejected)
     const GraphAttributes graphAttributes;
     const ConvolutionDgradNode node(std::move(convAttributes), graphAttributes);
 
-    auto error = node.pre_validate_node();
+    const auto error = node.pre_validate_node();
     EXPECT_EQ(error.code, error_code_t::INVALID_VALUE);
 }
 
@@ -1162,17 +1162,17 @@ TEST(TestConvolutionDgradNode, PreValidateNegativeDxChannelIsRejected)
 {
     ConvDgradAttributes convAttributes;
 
-    auto dyTensor = std::make_shared<TensorAttributes>();
+    const auto dyTensor = std::make_shared<TensorAttributes>();
     dyTensor->set_dim({1, 64, 32, 32});
     dyTensor->set_stride({65536, 1024, 32, 1});
     convAttributes.set_dy(dyTensor);
 
-    auto wTensor = std::make_shared<TensorAttributes>();
+    const auto wTensor = std::make_shared<TensorAttributes>();
     wTensor->set_dim({64, 3, 3, 3});
     wTensor->set_stride({27, 9, 3, 1});
     convAttributes.set_w(wTensor);
 
-    auto dxTensor = std::make_shared<TensorAttributes>();
+    const auto dxTensor = std::make_shared<TensorAttributes>();
     dxTensor->set_dim({1, -3, 32, 32});
     dxTensor->set_stride({1024, 1024, 32, 1});
     convAttributes.set_dx(dxTensor);
@@ -1185,7 +1185,7 @@ TEST(TestConvolutionDgradNode, PreValidateNegativeDxChannelIsRejected)
     const GraphAttributes graphAttributes;
     const ConvolutionDgradNode node(std::move(convAttributes), graphAttributes);
 
-    auto error = node.pre_validate_node();
+    const auto error = node.pre_validate_node();
     EXPECT_EQ(error.code, error_code_t::INVALID_VALUE);
     // Pins the dx channel positivity check (ConvolutionDgradNode.hpp): a negative channel
     // count, not just zero, must be rejected before the group arithmetic below it.
@@ -1535,15 +1535,15 @@ ConvolutionDgradNode makeShapeOverflowDgradNode(const std::vector<int64_t>& wDim
 {
     ConvDgradAttributes convAttributes;
 
-    auto dyTensor = std::make_shared<TensorAttributes>();
+    const auto dyTensor = std::make_shared<TensorAttributes>();
     dyTensor->set_dim(dyDims);
     convAttributes.set_dy(dyTensor);
 
-    auto wTensor = std::make_shared<TensorAttributes>();
+    const auto wTensor = std::make_shared<TensorAttributes>();
     wTensor->set_dim(wDims);
     convAttributes.set_w(wTensor);
 
-    auto dxTensor = std::make_shared<TensorAttributes>();
+    const auto dxTensor = std::make_shared<TensorAttributes>();
     dxTensor->set_dim({1, 3, 8, 8});
     dxTensor->set_stride({192, 64, 8, 1});
     convAttributes.set_dx(dxTensor);
@@ -1563,7 +1563,7 @@ TEST(TestConvolutionDgradNode, PreValidateNodeRejectsPaddingOverflow)
     const auto node
         = makeShapeOverflowDgradNode({64, 3, 3, 3}, {1, 64, 4, 6}, {K_INT64_MAX, 0}, {1, 1});
 
-    auto error = node.pre_validate_node();
+    const auto error = node.pre_validate_node();
     EXPECT_EQ(error.code, error_code_t::INVALID_VALUE);
     EXPECT_NE(error.err_msg.find("overflows int64"), std::string::npos) << error.err_msg;
 }
@@ -1573,7 +1573,7 @@ TEST(TestConvolutionDgradNode, PreValidateNodeRejectsDilationOverflow)
     const auto node = makeShapeOverflowDgradNode(
         {64, 3, 5, 5}, {1, 64, 4, 4}, {0, 0}, {K_WRAPPING_DILATION, 1});
 
-    auto error = node.pre_validate_node();
+    const auto error = node.pre_validate_node();
     EXPECT_EQ(error.code, error_code_t::INVALID_VALUE);
     EXPECT_NE(error.err_msg.find("overflows int64"), std::string::npos) << error.err_msg;
 }
@@ -1584,7 +1584,7 @@ TEST(TestConvolutionDgradNode, PreValidateNodeLargeDilationKeepsInputTooSmallErr
     const auto node
         = makeShapeOverflowDgradNode({64, 3, 5, 5}, {1, 64, 4, 4}, {0, 0}, {int64_t{1} << 40, 1});
 
-    auto error = node.pre_validate_node();
+    const auto error = node.pre_validate_node();
     EXPECT_EQ(error.code, error_code_t::INVALID_VALUE);
     EXPECT_NE(error.err_msg.find("is too small"), std::string::npos) << error.err_msg;
     EXPECT_EQ(error.err_msg.find("overflows"), std::string::npos) << error.err_msg;

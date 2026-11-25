@@ -612,7 +612,7 @@ inline Error validateLayernormAffineIfSet(const std::shared_ptr<graph::TensorAtt
             dimsText += dimsText.empty() ? "[" : ",";
             dimsText += std::to_string(dim);
         }
-        dimsText += "]";
+        dimsText += ']';
         return {ErrorCode::INVALID_VALUE,
                 "normalized_dim_count " + std::to_string(count) + " does not match "
                     + getTensorNameForError(tensor, fallbackName) + " dims " + dimsText
