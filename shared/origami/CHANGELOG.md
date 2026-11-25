@@ -8,5 +8,4 @@
 
 ### Changed
 
-* `rank_configs()`, `select_config()` and `select_topk_configs()` are now built on `argsort_configs()`. Ranking results are unchanged, but only the returned configs are copied rather than every candidate.
-* `datatype_to_bits()` is now an `inline constexpr noexcept` function defined in `origami/types.hpp`, and `data_type_to_bytes()` is now `inline constexpr noexcept`. `datatype_to_bits()` is no longer exported from the Origami library (it no longer has `ORIGAMI_EXPORT`), so it is not an exported symbol of `liborigami`. Code that includes `origami/types.hpp` is unaffected. The Python binding is unchanged.
+* `datatype_to_bits()` is now an `inline constexpr noexcept` function defined in `origami/types.hpp`, and `data_type_to_bytes()` is now `inline constexpr noexcept`. `datatype_to_bits()` is still exported from `liborigami`.

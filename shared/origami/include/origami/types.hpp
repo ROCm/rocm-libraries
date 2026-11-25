@@ -88,7 +88,7 @@ inline data_type_t int_to_data_type(int dt) { return static_cast<data_type_t>(dt
  * @param type Data type
  * @return int Number of bits
  */
-inline constexpr int datatype_to_bits(data_type_t type) noexcept {
+ORIGAMI_EXPORT inline constexpr int datatype_to_bits(data_type_t type) noexcept {
   switch (type) {
     case data_type_t::Float: return 32;
     case data_type_t::Double: return 64;
@@ -772,7 +772,9 @@ struct prediction_result_t {
  * Combines a configuration index with its estimated latency.
  */
 struct argsort_result_t {
+  /// Predicted latency.
   double latency;
+  /// Position in the `configs` vector passed to argsort_configs(), NOT config_t::index.
   std::size_t index;
 };
 

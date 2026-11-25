@@ -54,6 +54,14 @@ void runtime_options::update_from_env() {
   gemm_pick           = read_gemm_pick_from_env();
 }
 
+#if !defined(_WIN32)
+// Keep exporting datatype_to_bits() (ABI of 1.0). An inline function is emitted only
+// where it is used out of line; this forces one exported copy. On Windows,
+// dllexport on an inline function already exports it.
+[[gnu::used]] static constexpr int (*const keep_datatype_to_bits)(data_type_t) noexcept =
+    &datatype_to_bits;
+#endif
+
 std::string datatype_to_string(data_type_t type) {
   switch (type) {
     case data_type_t::Float: return "Float";
