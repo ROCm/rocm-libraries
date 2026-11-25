@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -377,7 +377,10 @@ void testing_dot_batched_ex(const Arguments& arg)
         for(int iter = 0; iter < total_calls; iter++)
         {
             if(iter == number_cold_calls)
+            {
+                getFrequencyMonitor().start();
                 gpu_time_used = get_time_us_sync(stream);
+            }
 
             DAPI_DISPATCH(rocblas_dot_batched_ex_fn,
                           (handle,
@@ -395,6 +398,7 @@ void testing_dot_batched_ex(const Arguments& arg)
         }
 
         gpu_time_used = get_time_us_sync(stream) - gpu_time_used;
+        getFrequencyMonitor().stop();
 
         ArgumentModel<e_N, e_incx, e_incy, e_batch_count, e_algo>{}.log_args<Tx>(
             rocblas_cout,
