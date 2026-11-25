@@ -198,14 +198,12 @@ struct heuristic_defaults_t {
   static constexpr double GFX1250_KLOOP_DRAM_OVERLAP = 1.73;
   /// Fixed cost of one K-iteration (two barriers, tensor waits, TDM issue), cycles: intercept of a K-loop DepthU
   /// sweep for 4 waves, which nearly all gfx1250 library kernels use (8 waves measured 314 clk).
-  /// The microbenchmark intercept alone is 207 clk; the value used is refit on the 145-size N-sweep (see
-  /// GFX1250_FIT_* below).
-  static constexpr double GFX1250_KITER_FIXED_CLK = 263.43924868273393;
+  /// The microbenchmark intercept alone is 207 clk; the value used is refit twice: 263.4 clk on the 145-size
+  /// N-sweep (see GFX1250_FIT_* below), then x3 in the second refit (see GFX1250_FIT2_* below).
+  static constexpr double GFX1250_KITER_FIXED_CLK = 3.0 * 263.43924868273393;  // 790.3 clk
   /// v_wmma_f32_16x16x32_bf16 issue interval per SIMD with 1, 2 and 4 waves on the SIMD, cycles at the engine
   /// clock (WMMA-rate microbenchmark, independent accumulators).
   static constexpr double GFX1250_WMMA_BF16_CLK = 10.1;  // 1 wave per SIMD; 2 / 4 waves measured 7.5 / 6.05
-  /// Most workgroups per WGP the co-residency law was measured for (1..4 workgroups per WGP).
-  static constexpr double GFX1250_MAX_MEASURED_RESIDENT_WGS = 4.0;
   /// K-loop slowdown of a multicast cluster over its exact 1x1 twin beyond the microbenchmarked multicast model:
   /// 1 + lambda x k / (k + K0) for k K-iterations, lambda by workgroups along the cluster's larger axis (2, 4, 8)
   /// (fitted to real BBS TN kernels on synthetic shapes).
@@ -229,9 +227,10 @@ struct heuristic_defaults_t {
   /// per WGP; the mechanism is not isolated).  Model-relative (measured minus this model with every fixed term at
   /// zero): refitted against the issue/wait-recurrence stall, which moves the model's one-wave intercepts (per
   /// kernel rms 2.4 us, n 405); the per-round fit (K = 1 and K = DU slopes, rms 2.6 us, n 162) is unchanged by it.
-  static constexpr double GFX1250_KERNEL_FIXED_CLK              = 569.0 * 2.4;  // 1365.6 clk (569 ns)
-  static constexpr double GFX1250_KERNEL_FIXED_CLK_PER_KIB_D    = 28.1 * 2.4;   // 67.44 clk/KiB (28.1 ns/KiB)
-  static constexpr double GFX1250_KERNEL_FIXED_CLK_PER_KIB_OP   = 6.7 * 2.4;    // 16.08 clk/KiB (6.7 ns/KiB)
+  /// The constant and the two per-KiB parts carry the x3 of the second refit (GFX1250_FIT2_* below).
+  static constexpr double GFX1250_KERNEL_FIXED_CLK              = 3.0 * 569.0 * 2.4;  // 4096.8 clk (3 x 569 ns)
+  static constexpr double GFX1250_KERNEL_FIXED_CLK_PER_KIB_D    = 3.0 * 28.1 * 2.4;   // 202.32 clk/KiB (3 x 28.1 ns/KiB)
+  static constexpr double GFX1250_KERNEL_FIXED_CLK_PER_KIB_OP   = 3.0 * 6.7 * 2.4;    // 48.24 clk/KiB (3 x 6.7 ns/KiB)
   static constexpr double GFX1250_KERNEL_FIXED_CLK_PER_LOG2_OCC = 680.0 * 2.4;  // 1632 clk (680 ns)
   static constexpr double GFX1250_TILE_FIXED_CLK_PER_KIB_D    = 15.2 * 2.4;  // 36.48 clk/KiB (15.2 ns/KiB)
   static constexpr double GFX1250_TILE_FIXED_CLK_PER_KIB_OP   = 16.8 * 2.4;  // 40.32 clk/KiB (16.8 ns/KiB)
@@ -245,8 +244,9 @@ struct heuristic_defaults_t {
   static constexpr double GFX1250_FIT_MEM_SCALE = 1.1005829744282523;
   /// Scale of the per-K-iteration compute time L_compute (WMMA issue, LDS-read exposure).
   static constexpr double GFX1250_FIT_COMPUTE_SCALE = 0.7766234901999738;
-  /// Scale of the load-to-use latencies of the K-loop (L2 and DRAM, flat and tensor-DMA loaded).
-  static constexpr double GFX1250_FIT_LATENCY_SCALE = 0.821273602515649;
+  /// Scale of the load-to-use latencies of the K-loop (L2 and DRAM, flat and tensor-DMA loaded): 0.8213 from
+  /// this refit times 0.5 from the second one (GFX1250_FIT2_* below).
+  static constexpr double GFX1250_FIT_LATENCY_SCALE = 0.5 * 0.821273602515649;
   /// Epilogue 1/occupancy exposure max(1, S / resident WGs per CU): fitted S, and the S (= EPILOGUE_OCC_SATURATION)
   /// of the base model it was fitted against.  The gfx1250 model has no such factor (it is 1), so the fit is
   /// applied as its ratio, max(1, S_fit / occ) / max(1, S_dev / occ).
@@ -256,19 +256,12 @@ struct heuristic_defaults_t {
   /// Second gfx1250 refit, on the measured top-30 candidates of 2,538 bf16 TN shapes (objective:
   /// rank correlation with the measured times within a shape, and the pick's regret), checked on
   /// 602 held-out shapes and on the top-50 candidates of the 200 OOB shapes.  All are applied on
-  /// top of the constants and GFX1250_FIT_* above (1.0 = unchanged for the scales). Scale of the
-  /// fixed cost of a K-iteration (GFX1250_KITER_FIXED_CLK).
-  static constexpr double GFX1250_FIT2_KITER_FIXED_SCALE = 3.0;
-  /// Scale of the per-kernel fixed cost (GFX1250_KERNEL_FIXED_CLK and its per-KiB parts; not the
-  /// occupancy part).
-  static constexpr double GFX1250_FIT2_KERNEL_FIXED_SCALE = 3.0;
-  /// Scale of the K-loop load-to-use latencies, on top of GFX1250_FIT_LATENCY_SCALE.
-  static constexpr double GFX1250_FIT2_LATENCY_SCALE = 0.5;
-  /// Scale of the prologue (first load's memory time and latency): 0 drops the term.
-  static constexpr double GFX1250_FIT2_PROLOGUE_SCALE = 0.0;
+  /// top of the constants and GFX1250_FIT_* above (1.0 = unchanged for the scales).
+  /// Changed in place, above: the K-iteration fixed cost and the per-kernel fixed cost (its constant
+  /// and per-KiB parts) are x3, the K-loop load-to-use latency scale is x0.5.  The prologue (first
+  /// load's memory time and latency) is no longer charged on gfx1250.
   /// Co-residency: scale of the busy time each further resident workgroup adds, and the most
-  /// resident workgroups per WGP the law is applied to (replaces GFX1250_MAX_MEASURED_RESIDENT_WGS
-  /// there).
+  /// resident workgroups per WGP the law is applied to (it was measured for up to 4).
   static constexpr double GFX1250_FIT2_RESIDENT_BUSY_SCALE = 2.0;
   static constexpr double GFX1250_FIT2_MAX_RESIDENT_WGS    = 2.0;
   /// Exponent of the edge-waste penalties (1 / utilization)^e of the tile and compute terms (1 =
