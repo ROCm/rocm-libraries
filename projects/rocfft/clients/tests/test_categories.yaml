@@ -22,9 +22,32 @@ test_categories:
       - "--test_prob"
       - "0.02"
     labels:
-    # standard/comprehensive/full run the same single-GPU test set
       - "standard"
+
+  comprehensive:
+    description: "Nightly - rocfft-test --test_prob 0.1"
+    test_patterns:
+      - "*"
+    exclude:
+      - "*multi_gpu*"
+    extra_args:
+      - "--test_prob"
+      - "0.1"
+    labels:
       - "comprehensive"
+
+  # Same arguments as the math-ci precheckin job: every test (the default
+  # --test_prob is 1) plus 10 random ones.
+  full:
+    description: "Full - rocfft-test --nrand 10"
+    test_patterns:
+      - "*"
+    exclude:
+      - "*multi_gpu*"
+    extra_args:
+      - "--nrand"
+      - "10"
+    labels:
       - "full"
 
   # Multi-GPU only subset. These tests are excluded from the single-GPU
@@ -59,6 +82,8 @@ execution_settings:
   timeout_multiplier: 1
   category_timeouts:
     quick: 600           # 10 min
-    standard: 10800      # 3 hours (covers standard/comprehensive/full labels), keep it conservative until oversubscription concerns in CI are addressed
+    standard: 10800      # 3 hours, keep it conservative until oversubscription concerns in CI are addressed
+    comprehensive: 21600 # 6 hours
+    full: 43200          # 12 hours
     ffm-quick: 7200      # 2 hours
     multigpu_tests: 3600 # 1 hour
