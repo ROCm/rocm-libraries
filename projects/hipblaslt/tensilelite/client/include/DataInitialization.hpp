@@ -35,7 +35,9 @@
 #include "DeviceContext.hpp"
 #include "Rotating.hpp"
 
+#if HIPBLASLT_ENABLE_MXDATAGENERATOR
 #include <mxDataGen.hpp>
+#endif
 
 #include <algorithm>
 #include <cstddef>
@@ -1362,10 +1364,16 @@ namespace TensileLite
                 ContractionProblemGemm const& problem,
                 ContractionSolution const*    solution) const
             {
+#if HIPBLASLT_ENABLE_MXDATAGENERATOR
                 return isMXProblem(problem) && m_mxScaleFormat > 0
                        && m_mxScaleLayout == MXScaleLayout::GFX950
                        && solution != nullptr
                        && solution->problemType.mxScaleFormat == 1;
+#else
+                (void)problem;
+                (void)solution;
+                return false;
+#endif
             }
 
             void copyInputs(std::vector<void*>&               ptrs,
@@ -1473,13 +1481,26 @@ namespace TensileLite
             int                           m_mxPreswizzleMiK          = -1;
             bool                          m_cpuInputsReadyForProblem = false;
 
+            // True when this device swizzles MX scales (gfx950 or gfx1250 layout).
+            bool mxScalesSwizzledByArch() const
+            {
+#if HIPBLASLT_ENABLE_MXDATAGENERATOR
+                return m_mxScaleLayout == MXScaleLayout::GFX1250
+                       || m_mxScaleLayout == MXScaleLayout::GFX950;
+#else
+                return false;
+#endif
+            }
+
             int m_mxScaleFormat = 0;
             /// A/B data source. -1: mxDataGenerator for MX inputs only. 1: mxDataGenerator
             /// for A/B, MX or not (non-MX A/B must be FP8/BF8). 0: initArray for A/B, MX or not, with
             /// MX scales from init-mx-a/b (MX FP8/BF8/FP4 data). 1 and 0 give F8 and MXF8
             /// runs identical A/B bytes.
             int m_mxDataGenerator = -1;
+#if HIPBLASLT_ENABLE_MXDATAGENERATOR
             MXScaleLayout m_mxScaleLayout = MXScaleLayout::None;
+#endif
             // Set by initializeMXData when a preswizzled scale was uploaded
             // straight into gpuInput.valid (i.e. copySwizzledToGPUBuffer can
             // hand back gpuInput.valid as-is rather than re-swizzling).

@@ -39,7 +39,6 @@
 #include <Tensile/Utils.hpp>
 
 #include <hip/hip_runtime.h>
-#include <mxDataGenerator/PreSwizzle.hpp>
 
 #include <algorithm>
 #include <atomic>
@@ -968,10 +967,12 @@ namespace TensileLite
 
         {
             {
-                hipDeviceProp_t prop;
                 HIP_CHECK_EXC(hipGetDevice(&m_deviceId));
+#if HIPBLASLT_ENABLE_MXDATAGENERATOR
+                hipDeviceProp_t prop;
                 HIP_CHECK_EXC(hipGetDeviceProperties(&prop, m_deviceId));
                 m_mxScaleLayout = mxScaleLayoutForArchName(prop.gcnArchName);
+#endif
             }
 
             m_rotatingBuffer
@@ -2782,7 +2783,7 @@ namespace TensileLite
             }
         }
 #else  // HIPBLASLT_ENABLE_MXDATAGENERATOR
-        void DataInitialization::initializeMXDataForFP4(ContractionProblemGemm const& /*problem*/)
+        void DataInitialization::initializeMXData(ContractionProblemGemm const& /*problem*/)
         {
             // The MX data generator is disabled at build time. Reaching this
             // path means a problem requiring MX initialization was issued
@@ -3308,8 +3309,8 @@ namespace TensileLite
                         ptr = p.gpuInput.valid.get();
                     }
                     else if(auto mxIt = m_mxSwizzledDescriptor.find(i);
-                            (m_mxScaleLayout == MXScaleLayout::GFX1250 || m_mxScaleLayout == MXScaleLayout::GFX950)
-                            && mxIt != m_mxSwizzledDescriptor.end() && mxIt->second == desc)
+                            mxScalesSwizzledByArch() && mxIt != m_mxSwizzledDescriptor.end()
+                            && mxIt->second == desc)
                     {
                         // Already swizzled, and initOneMXSide kept the source bytes
                         // unchanged, so skip the host-side permute.
