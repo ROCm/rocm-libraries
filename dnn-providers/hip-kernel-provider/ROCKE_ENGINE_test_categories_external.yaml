@@ -169,7 +169,6 @@ test_categories:
       - "rocke_differential_golden_ll"
       - "rocke_differential_golden_canonical"
       - "rocke_oracle_free_pytest"
-      - "rocke_library_dsa_pytest"
       - "rocke_contracts_pytest"
       - "rocke_entry_time_check"
       - "rocke_reference_common_pytest"
@@ -323,6 +322,7 @@ test_categories:
       - "rocke_library_attention_cache_key_pytest"
       - "rocke_library_attention_pytest"
       - "rocke_library_mla_pytest"
+      - "rocke_library_dsa_pytest"
       - "rocke_library_sdpa_pytest"
       # Not registered on Windows (see rocke/library/tests/ctest_lists.cmake); the
       # parser ignores a listed name that has no registered test.
