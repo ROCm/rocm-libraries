@@ -8,6 +8,7 @@ Documentation for rocRAND is available at
 ### Optimized
 
 * Improved MTGP32 performance by using one block-wide barrier per generation step instead of two. This affects both the host and device APIs, and the generated values are unchanged.
+* Improved MTGP32 host API performance by loading block-uniform generator parameters into registers once per kernel instead of reloading them from shared memory every step. The generated values are unchanged.
 
 ## rocRAND 5.3.0 for ROCm 10.3.0
 

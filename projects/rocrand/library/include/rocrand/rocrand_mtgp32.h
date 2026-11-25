@@ -268,16 +268,28 @@ private:
     __forceinline__ __device__ __host__ unsigned int
         para_rec(unsigned int X1, unsigned int X2, unsigned int Y) const
     {
-        unsigned int X = (X1 & mask) ^ X2;
+        return para_rec(X1, X2, Y, mask, sh1_tbl, sh2_tbl);
+    }
+
+    __forceinline__ __device__ __host__
+    unsigned int para_rec(unsigned int X1,
+                          unsigned int X2,
+                          unsigned int Y,
+                          unsigned int mask_,
+                          unsigned int sh1,
+                          unsigned int sh2) const
+    {
+        unsigned int X = (X1 & mask_) ^ X2;
         unsigned int MAT;
 
-        X ^= X << sh1_tbl;
-        Y = X ^ (Y >> sh2_tbl);
+        X ^= X << sh1;
+        Y   = X ^ (Y >> sh2);
         MAT = param_tbl[Y & 0x0f];
         return Y ^ MAT;
     }
 
-    __forceinline__ __device__ __host__ unsigned int temper(unsigned int V, unsigned int T) const
+    __forceinline__ __device__ __host__
+    unsigned int temper(unsigned int V, unsigned int T) const
     {
         unsigned int MAT;
 
@@ -303,15 +315,30 @@ private:
 protected:
     /// \brief Generate the next value for thread `thread_idx` and modify state in the process,
     ///   do not update offset.
+    ///   The block-uniform parameters are passed explicitly, so that callers can keep them in
+    ///   registers for the duration of a kernel.
+    __forceinline__ __device__ __host__
+    unsigned int next_thread(unsigned int thread_idx,
+                             unsigned int offset,
+                             unsigned int pos,
+                             unsigned int mask_,
+                             unsigned int sh1,
+                             unsigned int sh2)
+    {
+        const unsigned int r = para_rec(m_state.status[(thread_idx + offset) & MTGP_MASK],
+                                        m_state.status[(thread_idx + offset + 1) & MTGP_MASK],
+                                        m_state.status[(thread_idx + offset + pos) & MTGP_MASK],
+                                        mask_,
+                                        sh1,
+                                        sh2);
+        m_state.status[(thread_idx + offset + MTGP_N) & MTGP_MASK] = r;
+        return temper(r, m_state.status[(thread_idx + offset + pos - 1) & MTGP_MASK]);
+    }
+
     __forceinline__ __device__ __host__
     unsigned int next_thread(unsigned int thread_idx, unsigned int offset)
     {
-        const unsigned int r
-            = para_rec(m_state.status[(thread_idx + offset) & MTGP_MASK],
-                       m_state.status[(thread_idx + offset + 1) & MTGP_MASK],
-                       m_state.status[(thread_idx + offset + pos_tbl) & MTGP_MASK]);
-        m_state.status[(thread_idx + offset + MTGP_N) & MTGP_MASK] = r;
-        return temper(r, m_state.status[(thread_idx + offset + pos_tbl - 1) & MTGP_MASK]);
+        return next_thread(thread_idx, offset, pos_tbl, mask, sh1_tbl, sh2_tbl);
     }
 
     __forceinline__ __device__ __host__
