@@ -72,6 +72,36 @@ const char* modeName(VerificationMode mode)
     }
 }
 
+// In place, because a captured graph has its buffer addresses baked in. The device
+// upload is a plain copy, so it must not run inside a capture.
+void resetOutputsToSentinel(OutputTensors& outputs, bool useDevice)
+{
+    for(auto& [uid, tensor] : outputs)
+    {
+        tensor->fillWithSentinelValue();
+        tensor->markHostModified();
+        if(useDevice)
+        {
+            static_cast<void>(tensor->rawDeviceData());
+        }
+    }
+}
+
+const char* captureModeName(hipStreamCaptureMode mode)
+{
+    switch(mode)
+    {
+    case hipStreamCaptureModeGlobal:
+        return "Global";
+    case hipStreamCaptureModeThreadLocal:
+        return "ThreadLocal";
+    case hipStreamCaptureModeRelaxed:
+        return "Relaxed";
+    default:
+        return "unknown mode";
+    }
+}
+
 } // namespace
 
 // ---- the one graph, the one query ------------------------------------------
@@ -699,6 +729,11 @@ VerificationOutcome IntegrationBundleVerificationHarness::runGoldenMode(GraphSes
             "data; run `dvc pull` for it, or use --verification-mode=auto");
     }
 
+    if(_deps.policy.graphCapture.has_value() && _deps.policy.graphCapture->firstExecute)
+    {
+        return runGoldenModeViaFirstExecuteCapture(session);
+    }
+
     auto engine = runEngine(session);
     if(engine.status != EngineStatus::RAN)
     {
@@ -708,12 +743,16 @@ VerificationOutcome IntegrationBundleVerificationHarness::runGoldenMode(GraphSes
     _replayVerifier = [this](OutputTensors& outputs) { return compareAgainstGolden(outputs); };
     benchmarkIfVerified(session, engine.outputs, outcome);
     captureIfVerified(session, engine.outputs, outcome);
-    captureFirstExecuteIfApplicable(outcome);
     return outcome;
 }
 
 VerificationOutcome IntegrationBundleVerificationHarness::runReferenceMode(GraphSession& session)
 {
+    if(_deps.policy.graphCapture.has_value() && _deps.policy.graphCapture->firstExecute)
+    {
+        return runReferenceModeViaFirstExecuteCapture(session);
+    }
+
     // The engine runs before any oracle is looked at. A decline (a SKIP) or a break
     // (the engine's FAIL) needs no oracle to report, so only an engine that ran
     // creates or probes a reference.
@@ -748,7 +787,6 @@ VerificationOutcome IntegrationBundleVerificationHarness::runReferenceMode(Graph
     }
     benchmarkIfVerified(session, engine.outputs, *outcome);
     captureIfVerified(session, engine.outputs, *outcome);
-    captureFirstExecuteIfApplicable(*outcome);
     return *outcome;
 }
 
@@ -1291,6 +1329,140 @@ IntegrationBundleVerificationHarness::EngineRunResult
     return run;
 }
 
+IntegrationBundleVerificationHarness::EngineRunResult
+    IntegrationBundleVerificationHarness::runEngineViaFirstExecuteCapture(
+        GraphSession& session, hipStreamCaptureMode mode, CaptureResult& captureResult)
+{
+    EngineRunResult run;
+
+    // Same decline answer as runEngine(): applicability is one fact, decided once in
+    // openGraph().
+    if(!session.engines.accepted)
+    {
+        const auto summary
+            = std::to_string(_bundle->outputTensorUids.size()) + " output tensor(s), "
+              + std::to_string(session.engines.rankedIds.size()) + " ranked engine(s)";
+        run.status = EngineStatus::DECLINED;
+        run.message = _engineUnderTest.has_value()
+                          ? "Engine " + _engineUnderTest->name + " does not support this graph ("
+                                + summary + ")"
+                          : "No engine supports this graph (" + summary + ")";
+        return run;
+    }
+
+    // build_plans() only: this session's plan must still be unexecuted when the
+    // capture below runs, or the capture is not the plan's first execute.
+    const EngineOpResult built = _deps.engineRunner->buildPlans(session, _engineUnderTest);
+    run.plansBuilt = built.plansBuilt;
+    if(built.declined)
+    {
+        run.status = EngineStatus::DECLINED;
+        run.message = built.message;
+        return run;
+    }
+    if(!built.ok)
+    {
+        run.status = EngineStatus::ERRORED;
+        run.message = built.message;
+        return run;
+    }
+
+    const bool useDevice = _deps.policy.useDevice();
+    run.outputs = allocateSentinelOutputs(useDevice);
+    auto variantPack = buildVariantPack(run.outputs, useDevice);
+
+    CaptureSettings settings = *_deps.policy.graphCapture;
+    settings.mode = mode;
+    // One replay is enough to populate run.outputs for the comparison below; the
+    // remaining modes replay the configured number of times once an oracle exists.
+    settings.replays = 1;
+    ReplayHooks hooks;
+    hooks.resetOutputs = [&] { resetOutputsToSentinel(run.outputs, useDevice); };
+    hooks.checkOutputs = [&] {
+        // No oracle exists yet: the caller compares run.outputs once this returns.
+        markOutputsModified(run.outputs);
+        return true;
+    };
+
+    captureResult = _deps.engineRunner->captureReplay(session, variantPack, settings, hooks);
+
+    if(captureResult.status == CaptureResult::Status::DECLINED)
+    {
+        run.status = EngineStatus::DECLINED;
+        run.message = captureResult.message;
+        return run;
+    }
+    if(captureResult.status != CaptureResult::Status::REPLAYED)
+    {
+        run.status = EngineStatus::ERRORED;
+        run.message
+            = captureResult.message.empty() ? "graph capture failed" : captureResult.message;
+        return run;
+    }
+
+    run.status = EngineStatus::RAN;
+    return run;
+}
+
+VerificationOutcome
+    IntegrationBundleVerificationHarness::runGoldenModeViaFirstExecuteCapture(GraphSession& session)
+{
+    CaptureResult globalCapture;
+    auto engine
+        = runEngineViaFirstExecuteCapture(session, hipStreamCaptureModeGlobal, globalCapture);
+    if(engine.status != EngineStatus::RAN)
+    {
+        return engineDidNotRun(engine);
+    }
+    auto outcome = compareAgainstGolden(engine.outputs);
+    _replayVerifier = [this](OutputTensors& outputs) { return compareAgainstGolden(outputs); };
+    recordFirstExecuteCapture(hipStreamCaptureModeGlobal, std::move(globalCapture));
+    if(outcome.status == OutcomeStatus::PASSED && outcome.depth == VerificationDepth::VERIFIED)
+    {
+        captureRemainingFirstExecuteModes();
+    }
+    return outcome;
+}
+
+VerificationOutcome IntegrationBundleVerificationHarness::runReferenceModeViaFirstExecuteCapture(
+    GraphSession& session)
+{
+    CaptureResult globalCapture;
+    auto engine
+        = runEngineViaFirstExecuteCapture(session, hipStreamCaptureModeGlobal, globalCapture);
+    if(engine.status != EngineStatus::RAN)
+    {
+        return engineDidNotRun(engine);
+    }
+
+    auto oracles = resolveOracles(_deps.policy.mode);
+    std::optional<VerificationOutcome> outcome;
+    if(oracles.mode == VerificationMode::AUTO)
+    {
+        if(_bundle->hasGoldenOutputs)
+        {
+            outcome = compareAgainstGolden(engine.outputs);
+            _replayVerifier
+                = [this](OutputTensors& outputs) { return compareAgainstGolden(outputs); };
+        }
+        else
+        {
+            oracles.declined("golden (absent)");
+        }
+    }
+    if(!outcome.has_value())
+    {
+        dropDisabledReferences(oracles);
+        outcome = runOracleChain(engine.outputs, oracles);
+    }
+    recordFirstExecuteCapture(hipStreamCaptureModeGlobal, std::move(globalCapture));
+    if(outcome->status == OutcomeStatus::PASSED && outcome->depth == VerificationDepth::VERIFIED)
+    {
+        captureRemainingFirstExecuteModes();
+    }
+    return *outcome;
+}
+
 IntegrationBundleVerificationHarness::RefRunResult
     IntegrationBundleVerificationHarness::runReferenceCapturingOutputs(
         const ResolvedReference& ref, const OutputTensors& engineOutputs, OutputTensors& refOutputs)
@@ -1402,41 +1574,6 @@ void IntegrationBundleVerificationHarness::benchmarkIfVerified(GraphSession& ses
     }
 }
 
-namespace
-{
-
-// In place, because a captured graph has its buffer addresses baked in. The device
-// upload is a plain copy, so it must not run inside a capture.
-void resetOutputsToSentinel(OutputTensors& outputs, bool useDevice)
-{
-    for(auto& [uid, tensor] : outputs)
-    {
-        tensor->fillWithSentinelValue();
-        tensor->markHostModified();
-        if(useDevice)
-        {
-            static_cast<void>(tensor->rawDeviceData());
-        }
-    }
-}
-
-const char* captureModeName(hipStreamCaptureMode mode)
-{
-    switch(mode)
-    {
-    case hipStreamCaptureModeGlobal:
-        return "Global";
-    case hipStreamCaptureModeThreadLocal:
-        return "ThreadLocal";
-    case hipStreamCaptureModeRelaxed:
-        return "Relaxed";
-    default:
-        return "unknown mode";
-    }
-}
-
-} // namespace
-
 void IntegrationBundleVerificationHarness::captureIfVerified(GraphSession& session,
                                                              OutputTensors& engineOutputs,
                                                              const VerificationOutcome& outcome)
@@ -1469,21 +1606,23 @@ void IntegrationBundleVerificationHarness::captureIfVerified(GraphSession& sessi
     }
 }
 
-void IntegrationBundleVerificationHarness::captureFirstExecuteIfApplicable(
-    const VerificationOutcome& outcome)
+void IntegrationBundleVerificationHarness::recordFirstExecuteCapture(hipStreamCaptureMode mode,
+                                                                     CaptureResult result)
 {
-    if(!_deps.policy.graphCapture.has_value() || !_deps.policy.graphCapture->firstExecute
-       || outcome.status != OutcomeStatus::PASSED || outcome.depth != VerificationDepth::VERIFIED)
-    {
-        return;
-    }
+    const std::string label = std::string("first execute, ") + captureModeName(mode);
+    result.message = result.message.empty() ? label : label + ": " + result.message;
+    _firstExecuteCaptures.push_back(std::move(result));
+}
 
+void IntegrationBundleVerificationHarness::captureRemainingFirstExecuteModes()
+{
     const bool useDevice = _deps.policy.useDevice();
-    for(const auto mode :
-        {hipStreamCaptureModeGlobal, hipStreamCaptureModeThreadLocal, hipStreamCaptureModeRelaxed})
+    for(const auto mode : {hipStreamCaptureModeThreadLocal, hipStreamCaptureModeRelaxed})
     {
         CaptureResult result;
-        // A throw here must not reach TestBody()'s catch, for the same reason as in
+        // A throw here must not reach TestBody()'s catch: the Global-mode capture
+        // already decided the verdict runGoldenModeViaFirstExecuteCapture() /
+        // runReferenceModeViaFirstExecuteCapture() return, same reason as
         // benchmarkIfVerified().
         try
         {
@@ -1518,11 +1657,11 @@ void IntegrationBundleVerificationHarness::captureFirstExecuteIfApplicable(
             result = CaptureResult::failed(e.what());
         }
 
-        const std::string label = std::string("first execute, ") + captureModeName(mode);
-        result.message = result.message.empty() ? label : label + ": " + result.message;
         const bool declined = result.status == CaptureResult::Status::DECLINED;
-        _firstExecuteCaptures.push_back(std::move(result));
-        // An engine without the note declines every mode alike.
+        recordFirstExecuteCapture(mode, std::move(result));
+        // An engine without the note declines every mode alike; it would already
+        // have declined the Global-mode capture, so this should not be reached, but
+        // stop here too rather than pile on redundant declines.
         if(declined)
         {
             break;
