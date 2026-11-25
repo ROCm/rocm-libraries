@@ -62,16 +62,33 @@ Classify every hit by the stage that reaches it. A call counts only when it is r
      pool, a module load, or a per-call module lookup that loads (`kernelFor`, `kernelForStream`).
    - No `hipStreamIsCapturing` or `hipStreamGetCaptureInfo` branch that changes behavior.
    - Host values frozen at capture: `resolveScalarOperand`, `readHostScalar`, RNG seed and offset, counters, `getenv`.
-5. Check copy sources. `hipMemcpyAsync` host-to-device from a `std::vector`, the stack or a plan member is pageable: the host
-   stages it, and a capture records a host pointer the plan owns.
-6. Check workspace initialization. Atomics, split-K and two-stage reductions need an on-stream `hipMemsetAsync`; compare the
+5. Check copy sources. `hipMemcpyAsync` host-to-device from a `std::vector`, the stack, `new` or a plan member is pageable. It
+   is `sync`, settled from source: HIP documents that a copy with a non-pinned side runs synchronously (`hipMemcpyAsync` in
+   `hip_runtime_api.h`), so the host waits for earlier work on the stream, on any stream, and again at every `hipGraphLaunch`
+   of a captured copy, which also re-reads the host memory on replay.
+6. Check plan-constant data routes. These are contract-clean; do not report them as `sync` or `alloc`:
+   - kernel arguments;
+   - a few on-stream `hipMemsetD32Async` words into the workspace (a fill kernel with the pattern in its arguments; no host
+     wait);
+   - a kernel that writes the data into the workspace from its kernel arguments.
+
+   A table written with one memset per word or run costs about 1.7 µs of GPU time per call: at most `SUGGESTION`. A
+   kernel-argument size below 256 KiB is not a finding: no compiler or HIP API check applies, and the runtime's argument pool
+   chunk is 256 KiB. CUDA's 4 KiB parameter limit does not apply.
+7. Check where a removed violation went. When the change removes a build- or destroy-stage allocation or sync, find the data's
+   new route. Each of these moves the violation to another stage and is a finding in its own class:
+   - a per-execute pageable copy (`sync`, step 5);
+   - plan-owned pinned memory (`hipHostMalloc` or `hipHostRegister` at build: `alloc`);
+   - a handle- or plan-level staging buffer outside the workspace that a later execute overwrites while the device or a
+     captured graph still reads it (`alloc`).
+8. Check workspace initialization. Atomics, split-K and two-stage reductions need an on-stream `hipMemsetAsync`; compare the
    `workspaceBytes()` regions with the zero fills.
-7. Advertised capture. For every engine whose `getDetails()` or `.ued.json` `behavior_notes` gains or keeps
+9. Advertised capture. For every engine whose `getDetails()` or `.ued.json` `behavior_notes` gains or keeps
    `supports_graph_capture` (including `GRAPH_CAPTURE_OPS` in `flydsl/gen_descriptors.py`), walk its execute path through steps 4
-   to 6. Check that the integration-test capture category covers it (`GRAPH_CAPTURE_test_categories_integration.yaml`). For a
+   to 8. Check that the integration-test capture category covers it (`GRAPH_CAPTURE_test_categories_integration.yaml`). For a
    new or changed engine that lacks the note, find whether the provider's documentation section states a delegated-library
    exception for it.
-8. Delegated libraries: see *Delegated libraries*.
+10. Delegated libraries: see *Delegated libraries*.
 
 An engine's descriptor is its own `.ued.json`; ranker and kernel-pack JSON do not count. A *changed engine* is a new engine, or a
 change to that engine's own pack, plan, registration or descriptor; shared ingestor or SDK infrastructure does not count.
@@ -115,6 +132,7 @@ when a claim cannot be proved from source at all.
 | Docs that misstate a library's behavior or claim capture support: `capture-support` | `IMPORTANT` | Docs must match the library |
 | A new engine, arch or registration that reaches an existing violation (template reuse, shared pack) | Full tier of the violation | Introduced by this change; put the new reach in `Actual` and cite the existing violation |
 | The same violation's reach from engines that existed at `$BASE`; unreachable paths; code the change does not touch | `FUTURE WORK` | Not introduced by this change |
+| Plan-constant table written with one memset per word or run (step 6) | `SUGGESTION` at most | Contract-clean; GPU cost only |
 
 Build-flag-gated and default-OFF engines take the same tiers as default engines; the finding names the flag that ships the code,
 found in Orient's **Options and guards** (or by grepping CMake). A finding at `IMPORTANT` or above carries in **Proof** the
@@ -125,6 +143,7 @@ stage, the call path from the public entry point, the traced gate and `path:line
 - Benchmarking paths (contract 4) and persistent handle-create state.
 - A code-object load at plan build or deserialization.
 - A by-value scalar frozen into a capture; replay-after-destroy arguments.
+- The approved plan-constant data routes (step 6), and kernel-argument size below 256 KiB.
 - The per-device module load in `kernelFor` and `kernelForStream`: it runs only for a device other than the build device, which
   the backend rejects (`validateExecutionDevice`). At most `FUTURE WORK`, and only when the change touches it.
 - A documented delegated-library behavior (below).
@@ -142,10 +161,11 @@ applicability, build or destroy, is reported. Check the provider docs for accura
 
 ## Device checks
 
-Capture semantics the source cannot settle are `[INFERENCE]` in **Proof**: pageable memcpy nodes, a module load inside a capture,
-implicit syncs in the runtime. Put a reproducer under **Approval requests**: the integration-test `--graph-capture` run of the
-affected suites in `hipStreamCaptureModeGlobal` on the engine's architecture, or a short capture of `execute()` that shows
-`hipErrorStreamCaptureInvalidated`. A reproducer strengthens a finding; it never holds closure.
+Capture semantics the source cannot settle are `[INFERENCE]` in **Proof**: a module load inside a capture, implicit syncs in the
+runtime. A pageable copy is settled from source (step 5), not an inference. Put a reproducer under **Approval requests**: the
+integration-test `--graph-capture` run of the affected suites in `hipStreamCaptureModeGlobal` on the engine's architecture, or a
+short capture of `execute()` that shows `hipErrorStreamCaptureInvalidated`. A reproducer strengthens a finding; it never holds
+closure.
 
 ## Contract knowledge
 
@@ -159,4 +179,6 @@ knowledge: none supplied` under **Coverage** (a non-file line, free of `|`).
 - Missing capture tests: `TESTB`.
 - Missing decline of a capture-unsafe configuration: `APPL`.
 - Mutation proofs (remove the on-stream zero fill, move a load into `execute()`): `VER`.
+- A test that poisons memory with `hipMemset` (null stream) and then runs the engine on a non-blocking stream: racy, because
+  `hipMemset` on a device pointer is asynchronous and not ordered against non-blocking streams. `TESTQ`.
 - Provider-contract faults that are not execution-contract: `CORR`.
