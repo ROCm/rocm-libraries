@@ -1,0 +1,101 @@
+{
+  "version": "1.0",
+  "id": "ee6430bf-c2e3-5c2d-9d49-14687ed98a01",
+  "name": "hipkernel:conv_winograd_nd_fwd",
+  "arch": [],
+  "matchers": [
+    "35409203-659c-5b1a-9650-8384578c67d5"
+  ],
+  "engine": "db35ce0a-aa08-4787-b6f2-ab6528168a68",
+  "dispatch": "5611027a-301f-5d5f-8fcc-fd4280314529",
+  "kernelDescriptors": [
+    {
+      "version": "1.0",
+      "id": "1539fee3-9fe6-50fe-9032-d8d3731ef6e3",
+      "name": "conv_winograd_nd.fwd.float.residue2d.fp32.atom5.m64.chunk256",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvWinogradNd.cpp",
+        "entry_point": "ConvWinogradNdGemm"
+      },
+      "metadata": {
+        "direction": "FWD",
+        "dtype": "FLOAT",
+        "arch": "gfx1250",
+        "atom": 5,
+        "precision": 0,
+        "gemm_bm": 64,
+        "gemm_bn": 64,
+        "gemm_bk": 16,
+        "chunk_tiles": 256
+      },
+      "priority": 1000
+    },
+    {
+      "version": "1.0",
+      "id": "b8aab5c7-ef12-53f9-b40d-e79891d1cb21",
+      "name": "conv_winograd_nd.fwd.float.residue2d.fp32.atom5.m64.chunk4096",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvWinogradNd.cpp",
+        "entry_point": "ConvWinogradNdGemm"
+      },
+      "metadata": {
+        "direction": "FWD",
+        "dtype": "FLOAT",
+        "arch": "gfx1250",
+        "atom": 5,
+        "precision": 0,
+        "gemm_bm": 64,
+        "gemm_bn": 64,
+        "gemm_bk": 16,
+        "chunk_tiles": 4096
+      },
+      "priority": 999
+    },
+    {
+      "version": "1.0",
+      "id": "7a4e0277-f6fb-5a68-8a0a-9a7c520d709c",
+      "name": "conv_winograd_nd.fwd.float.residue2d.fp32.atom5.m128.chunk256",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvWinogradNd.cpp",
+        "entry_point": "ConvWinogradNdGemm"
+      },
+      "metadata": {
+        "direction": "FWD",
+        "dtype": "FLOAT",
+        "arch": "gfx1250",
+        "atom": 5,
+        "precision": 0,
+        "gemm_bm": 128,
+        "gemm_bn": 64,
+        "gemm_bk": 16,
+        "chunk_tiles": 256
+      },
+      "priority": 998
+    },
+    {
+      "version": "1.0",
+      "id": "3344cbbf-f1f3-5064-8caa-dbe483cc035b",
+      "name": "conv_winograd_nd.fwd.float.residue2d.fp32.atom5.m128.chunk4096",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvWinogradNd.cpp",
+        "entry_point": "ConvWinogradNdGemm"
+      },
+      "metadata": {
+        "direction": "FWD",
+        "dtype": "FLOAT",
+        "arch": "gfx1250",
+        "atom": 5,
+        "precision": 0,
+        "gemm_bm": 128,
+        "gemm_bn": 64,
+        "gemm_bk": 16,
+        "chunk_tiles": 4096
+      },
+      "priority": 997
+    }
+  ]
+}

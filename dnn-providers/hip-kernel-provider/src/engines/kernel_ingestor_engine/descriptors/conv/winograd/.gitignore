@@ -1,7 +1,0 @@
-/conv_winograd_bwd.kdp.json
-/conv_winograd_fwd.kdp.json
-/conv_winograd_wrw.kdp.json
-/conv_winograd_bwd_bf16.kdp.json
-/conv_winograd_bwd_f43.kdp.json
-/conv_winograd_fwd_bf16.kdp.json
-/conv_winograd_fwd_f43.kdp.json

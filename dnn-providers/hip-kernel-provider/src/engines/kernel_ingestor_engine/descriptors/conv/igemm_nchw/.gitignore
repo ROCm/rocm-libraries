@@ -1,6 +1,0 @@
-/conv_igemm_nchw_bwd.kdp.json
-/conv_igemm_nchw_bwd_f32x3.kdp.json
-/conv_igemm_nchw_bwd_gfx1250_bf16.kdp.json
-/conv_igemm_nchw_bwd_gfx1250_f16.kdp.json
-/conv_igemm_nchw_bwd_gfx1250_f32.kdp.json
-/conv_igemm_nchw_bwd_gfx1250_f32x3.kdp.json

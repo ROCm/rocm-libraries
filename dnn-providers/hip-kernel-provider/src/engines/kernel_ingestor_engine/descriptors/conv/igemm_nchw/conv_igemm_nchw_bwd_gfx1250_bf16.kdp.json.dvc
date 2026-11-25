@@ -1,6 +1,0 @@
-outs:
-- md5: 0a9c7c95fbd31873de021149c0945247
-  size: 196567
-  hash: md5
-  path: conv_igemm_nchw_bwd_gfx1250_bf16.kdp.json
-  remote: ingestor
