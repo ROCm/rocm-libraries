@@ -548,103 +548,31 @@ DGRAD_WMMA_SB_KNOBS = (
 )
 # Ping-pong configurations of direct_dgrad_wmma (two wave ranks a barrier
 # apart, as FWD_WMMA_PP_KNOBS): (waves_c, waves_p, tiles_c, tiles_p, tile_w,
-# tile_n, ck, stages, pp_group, sched), all with pingpong=True. The ping-pong
-# twins of the dense stride-1 3x3 winners of DGRAD_WMMA_KNOBS /
-# DGRAD_WMMA_SB_KNOBS (16 waves where the winner folds 4 images, since every
-# TDM issuer must sit in rank 0), then tiles that fit the 47x82 / 82x47,
-# 100x100 / 50x50 and 92x162 maps without padded columns (tile_w 28, 48, 50,
-# 54) and the n-folded 4 x 8x8 pixel tile.
+# tile_n, ck, stages, pp_group, sched), all with pingpong=True, for the dense
+# stride-1 3x3 grid: the 128 x 128 block of 16- and 32-wide tiles (two images
+# on the latter) and tile_w 28 / 48 tiles for maps that are not a multiple of
+# 16 columns wide. Rows trimmed to measured winners.
 DGRAD_WMMA_PP_KNOBS = (
     (2, 4, 4, 8, 16, 1, 32, 2, 1, "iterative-ilp"),
     (2, 4, 4, 8, 16, 1, 32, 2, 1, None),
-    (2, 4, 4, 8, 16, 1, 32, 2, 2, "iterative-ilp"),
-    (2, 4, 4, 8, 32, 1, 32, 2, 1, "iterative-ilp"),
-    (2, 4, 4, 8, 32, 1, 32, 2, 2, "iterative-ilp"),
-    (2, 4, 4, 8, 64, 1, 32, 2, 1, "iterative-ilp"),
-    (2, 4, 4, 8, 16, 2, 32, 2, 1, "iterative-ilp"),
-    (2, 4, 4, 8, 16, 2, 32, 2, 2, "iterative-ilp"),
     (2, 4, 4, 8, 32, 2, 32, 2, 1, "iterative-ilp"),
-    (1, 4, 4, 6, 16, 1, 32, 2, 1, "iterative-ilp"),
-    (1, 4, 4, 6, 16, 1, 32, 2, 3, "iterative-ilp"),
-    (1, 4, 4, 6, 32, 1, 32, 2, 1, "iterative-ilp"),
-    (1, 4, 4, 6, 32, 1, 32, 2, 3, "iterative-ilp"),
-    (1, 4, 8, 4, 16, 1, 32, 2, 1, "iterative-ilp"),
-    (1, 4, 8, 4, 16, 1, 32, 2, 2, "iterative-ilp"),
-    (1, 8, 4, 6, 32, 1, 32, 2, 2, "iterative-ilp"),
-    (1, 8, 4, 8, 16, 1, 32, 2, 2, "iterative-ilp"),
-    (1, 8, 4, 8, 32, 1, 32, 2, 1, "iterative-ilp"),
-    (2, 8, 4, 4, 16, 4, 32, 2, 1, "iterative-ilp"),
-    (2, 8, 4, 4, 32, 4, 32, 2, 1, "iterative-ilp"),
-    (2, 8, 4, 2, 8, 4, 32, 2, 1, "iterative-ilp"),
-    (2, 4, 4, 7, 28, 1, 32, 2, 1, "iterative-ilp"),
     (2, 4, 4, 7, 28, 1, 32, 2, 2, "iterative-ilp"),
     (2, 4, 4, 6, 48, 1, 32, 2, 1, "iterative-ilp"),
-    (2, 5, 4, 5, 50, 1, 32, 2, 1, "iterative-ilp"),
-    (2, 5, 4, 5, 50, 1, 32, 2, 2, "iterative-ilp"),
-    (2, 3, 4, 9, 54, 1, 32, 2, 1, "iterative-ilp"),
 )
 # Ping-pong with a weight ring (direct_dgrad_wmma row_ring / tap_ring) on the
 # dense stride-1 3x3 grid: (waves_c, waves_p, tiles_c, tiles_p, tile_w, ck,
 # stages, ring, pp_group), ring 1 = row_ring, 2 = tap_ring, all with the
-# iterative-ilp scheduler. 256 x 256 / 256 x 128 / 128 x 512 / 128 x 384 /
-# 192 x 384 blocks of 8 or 16 waves, which only fit in LDS with one tap or
-# filter row per weight slot (all nine taps need 365-750 KB); 128-channel
-# chunks on blocks of up to 256 pixels, pp_group 2 where it fits the VGPR
-# budget. Then tap_ring copies of the DGRAD_WMMA_PP_KNOBS tiles for the
-# 47x82, 50x50 / 100x100 and 92x162 maps (tile_w 48, 50, 54).
-DGRAD_WMMA_PP_RING_KNOBS = tuple(
-    (wc, wp, tc, tp, tw, ck, st, ring, pg)
-    for wc, wp, tc, tp, pgs in (
-        (2, 4, 8, 2, (1, 2)),
-        (4, 4, 4, 4, (1, 2)),
-        (2, 8, 8, 2, (1, 2)),
-        (4, 2, 4, 4, (1, 2)),
-        (2, 4, 4, 8, (1, 2)),
-        (2, 8, 4, 4, (1, 2)),
-        (2, 4, 4, 6, (1, 2)),
-        (2, 8, 4, 3, (1, 2)),
-        (2, 4, 6, 6, (1,)),
-    )
-    for ring, ck, st in (
-        (2, 32, 2),
-        (2, 32, 3),
-        (2, 64, 2),
-        (2, 64, 3),
-        (2, 128, 2),
-        (1, 32, 2),
-    )
-    for pg in pgs
-    for tw in (16, 32)
-    if ck < 128 or wp * tp * 16 <= 256
-) + tuple(
-    (wc, wp, tc, tp, tw, ck, 2, 2, 1)
-    for wc, wp, tc, tp, tw in ((2, 4, 4, 6, 48), (2, 5, 4, 5, 50), (2, 3, 4, 9, 54))
-    for ck in (32, 64)
+# iterative-ilp scheduler: 128 x 128 blocks with 64-channel chunks in a
+# 3-deep one-tap ring. Rows trimmed to measured winners.
+DGRAD_WMMA_PP_RING_KNOBS = (
+    (2, 4, 4, 8, 16, 64, 3, 2, 2),
+    (2, 4, 4, 8, 32, 64, 3, 2, 2),
 )
-# 3x1 / 1x3 "same" dgrad of direct_dgrad_wmma (the Inception-v3 8x8 blocks,
-# c384 -> 384, n16-n128): whole 8x8 images per block (block_p = 64 * tile_n)
-# and 32-128 channel C blocks, as FWD_WMMA_RECT3_KNOBS for the forward.
-# The DGRAD_WMMA_KNOBS layout; the last rows with split_barrier.
+# 3x1 / 1x3 "same" dgrad of direct_dgrad_wmma (8x8 maps, 384 channels):
+# whole 8x8 images per block, the DGRAD_WMMA_KNOBS layout. Rows trimmed to
+# measured winners.
 DGRAD_WMMA_RECT_LAYERS = ((3, 1, 1, 0), (1, 3, 0, 1))
-DGRAD_WMMA_RECT_KNOBS = (
-    (2, 1, 2, 4, 8, 1, 32, 3, True),
-    (2, 1, 4, 4, 8, 1, 32, 3, True),
-    (4, 1, 2, 4, 8, 1, 32, 2, True),
-    (2, 1, 2, 4, 8, 1, 64, 2, True),
-    (2, 2, 2, 4, 8, 2, 32, 3, True),
-    (2, 2, 4, 4, 8, 2, 32, 3, True),
-    (4, 2, 2, 4, 8, 2, 32, 2, True),
-    (2, 2, 4, 4, 8, 2, 64, 2, True),
-    (2, 4, 2, 4, 8, 4, 32, 2, True),
-    (2, 4, 4, 4, 8, 4, 32, 2, True),
-    (1, 8, 1, 2, 8, 4, 32, 2, True),
-    (1, 8, 2, 2, 8, 4, 32, 2, True),
-)
-DGRAD_WMMA_RECT_SB_KNOBS = (
-    (2, 1, 2, 4, 8, 1, 32, 3, True),
-    (2, 2, 4, 4, 8, 2, 32, 3, True),
-    (4, 2, 2, 4, 8, 2, 32, 2, True),
-)
+DGRAD_WMMA_RECT_KNOBS = ((2, 1, 4, 4, 8, 1, 32, 3, True),)
 
 # Grouped layers with fewer than 8 channels per group (or 16): direct_dgrad_wmma
 # packs 32 // cpg groups into one block-diagonal super-group, one dY chunk.
@@ -2461,8 +2389,6 @@ def _knob_grid(
             yield from _dgrad_wmma_knobs(DGRAD_WMMA_DILATED_KNOBS)
         elif caps is not None and caps.KW != caps.KH:
             yield from _dgrad_wmma_knobs(DGRAD_WMMA_RECT_KNOBS)
-            for knobs in _dgrad_wmma_knobs(DGRAD_WMMA_RECT_SB_KNOBS):
-                yield dict(knobs, split_barrier=True)
         else:
             yield from _dgrad_wmma_knobs(DGRAD_WMMA_KNOBS)
             for wc, wp, tc, tp, tw, tn, ck, st, pf, we in DGRAD_WMMA_SB_KNOBS:
