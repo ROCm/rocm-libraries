@@ -54,7 +54,7 @@ This table lists all operations supported in hipDNN:
    * - Batchnorm Training
      - ``FP16``, ``BFP16``, ``FP32``
      - NCL, NLC, NCHW, NHWC, NCDHW, NDHWC
-     - Spatial mode only¹, no running stats⁴
+     - Spatial mode only¹, optional running stats⁴
    * - Batchnorm Training + Activation
      - ``FP16``, ``BFP16``, ``FP32``
      - NCL, NLC, NCHW, NHWC, NCDHW, NDHWC
@@ -137,7 +137,7 @@ Activation node
 - Supports
     - Standard ReLU: no clips set, or ``relu_lower_clip`` = 0
     - Clipped ReLU: ``relu_upper_clip`` set
-    - CLAMP: ``relu_lower_clip`` and ``relu_upper_clip`` set
+    - CLAMP: ``relu_lower_clip`` set, with or without ``relu_upper_clip``
 - ``relu_lower_clip_slope`` must be unset or 0 (leaky ReLU is not supported when fused)
 
 .. _operations:
@@ -153,12 +153,12 @@ Operation notes
   - **Batchnorm Training + Activation**: Combines batchnorm training with forward activation.
   - **Convolution Forward + (Bias) + Activation**: Combines convolution forward, optional bias addition, and forward activation.
 
-- ⁴ **Batchnorm Training Running Statistics**: Batchnorm training only supports computing batch statistics (mean and inverse variance) without updating running statistics.
+- ⁴ **Batchnorm Training Running Statistics**: Batchnorm training can update running statistics. Supply the previous running mean and variance (read-only inputs), the momentum and the next running mean and variance (write-only outputs). All five must be present together; hipDNN rejects a partial set of running statistics, or running statistics without the momentum, when the graph is built. A momentum given without the running statistics is ignored, as in cuDNN. Training that updates running statistics also requires the saved mean and inverse variance as non-virtual outputs, and so does Batchnorm Training + Activation. Training without running statistics or a fused activation can leave both saved statistics virtual, and then they are not computed, or make both non-virtual outputs; the plugin declines a graph that outputs only one of them.
 - ⁶ **Convolution Backward Output Dimensions**: Convolution Dgrad requires explicit ``dx`` dimensions matching the original forward input tensor. Convolution Wgrad requires explicit ``dw`` dimensions matching the original forward weights tensor. These dimensions aren't inferred from ``dy`` and the other convolution tensors because floor division in the forward spatial formula can make multiple input or kernel shapes map to the same output-gradient shape. Output strides may still be inferred once explicit dimensions are present.
 
-- **Activation Functions (fused)**: Supports ReLU, Clipped ReLU (with configurable upper clip), and CLAMP (with configurable lower/upper clips). Leaky ReLU (non-zero ``relu_lower_clip_slope``), Sigmoid and Tanh are not supported when fused onto a producer op; use a standalone activation node for those.
-- **Standalone Activation**: A single-node pointwise graph supports ReLU, Clipped ReLU (configurable upper clip), CLAMP (configurable lower/upper clips), Leaky ReLU (configurable negative slope), Sigmoid and Tanh.
-- **ReLU Parameters**: An unset ``relu_lower_clip`` is treated as 0, an unset ``relu_upper_clip`` as no upper bound, and an unset ``relu_lower_clip_slope`` or a slope of exactly 0 as no leaky slope, so equivalent encodings select the same MIOpen activation. A non-zero ``relu_lower_clip`` without an upper clip is not supported.
+- **Activation Functions (fused)**: Supports ReLU, Clipped ReLU (with configurable upper clip), and CLAMP (with a configurable lower clip and an optional upper clip). Leaky ReLU (non-zero ``relu_lower_clip_slope``), Sigmoid and Tanh are not supported when fused onto a producer op; use a standalone activation node for those.
+- **Standalone Activation**: A single-node pointwise graph supports ReLU, Clipped ReLU (configurable upper clip), CLAMP (configurable lower clip and optional upper clip), Leaky ReLU (configurable negative slope), Sigmoid and Tanh.
+- **ReLU Parameters**: An unset ``relu_lower_clip`` is treated as 0, an unset ``relu_upper_clip`` as no upper bound, and an unset ``relu_lower_clip_slope`` or a slope of exactly 0 as no leaky slope, so equivalent encodings select the same MIOpen activation. A non-zero ``relu_lower_clip`` without an upper clip runs as CLAMP with the float maximum as its upper bound, as the hipDNN reference does. Leaky ReLU with a non-zero ``relu_lower_clip`` is not supported.
 - ⁷ **Standalone Binary Elementwise**: A single-node pointwise graph supports ADD, SUB, MUL, MAX and MIN across ranks 3-5, with packed channels-first strides and ``FP16``/``FP32`` datatypes only. ``in_0`` must be the full-shape operand; only ``in_1`` may broadcast per-axis at matching rank, and all three tensors must share one datatype. In-place execution (``out_0`` aliasing an input) isn't supported.
 - ⁸ **Standalone Reduction**: A single-node reduction graph supports ADD, MUL, MIN, MAX, AMAX, AVG, NORM1 and NORM2 with an ``FP32`` compute type. Input and output share one datatype and one rank (1-5), and each output dimension is either 1 (reduced) or equal to the input dimension, with at least one dimension reduced. MUL_NO_ZEROS, ``BFP16``, deterministic reduction (``is_deterministic``) and in-place execution aren't supported; reduction is only available through the default (non-deterministic) engine.
 - ⁹ **Convolution Applicability**: The plugin declines the convolution graphs below. A declined graph falls to another engine, or no engine is found for it. These are limits of the plugin's MIOpen-backed convolution engines, not errors in the graph: for graphs of these kinds MIOpen can return wrong output or fault. The rules are conservative and also decline some graphs MIOpen computes correctly. The data type, layout, packing and size rules apply to the plain Convolution Forward, Dgrad and Wgrad rows; the fused row is subject to the last rule only.
