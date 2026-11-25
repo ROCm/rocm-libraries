@@ -418,6 +418,8 @@ struct DeviceOperationInstanceFactory<ck::tensor_operation::device::DeviceGroupe
                         op_ptrs);
                     add_device_grouped_conv2d_bwd_weight_xdl_nhwgc_gkyxc_nhwgk_f16_wavelet_4w2_pad0_instances(
                         op_ptrs);
+                    add_device_grouped_conv2d_bwd_weight_wavelet_xdl_nhwgc_gkyxc_nhwgk_f16_instances_part1(
+                        op_ptrs);
 
                     add_device_grouped_conv2d_bwd_weight_two_stage_xdl_nhwgc_gkyxc_nhwgk_f16_pipev1_instances(
                         op_ptrs);
@@ -498,6 +500,8 @@ struct DeviceOperationInstanceFactory<ck::tensor_operation::device::DeviceGroupe
                     add_device_grouped_conv2d_bwd_weight_xdl_nhwgc_gkyxc_nhwgk_bf16_wavelet_4w2_default_instances(
                         op_ptrs);
                     add_device_grouped_conv2d_bwd_weight_xdl_nhwgc_gkyxc_nhwgk_bf16_wavelet_4w2_pad0_instances(
+                        op_ptrs);
+                    add_device_grouped_conv2d_bwd_weight_wavelet_xdl_nhwgc_gkyxc_nhwgk_bf16_instances_part1(
                         op_ptrs);
 
                     add_device_grouped_conv2d_bwd_weight_two_stage_xdl_nhwgc_gkyxc_nhwgk_bf16_pipev1_instances(
@@ -941,6 +945,10 @@ struct DeviceOperationInstanceFactory<ck::tensor_operation::device::DeviceGroupe
                         op_ptrs);
                     add_device_grouped_conv2d_bwd_weight_two_stage_wmma_nhwgc_gkyxc_nhwgk_f16_pipev1_instances(
                         op_ptrs);
+                    add_device_grouped_conv2d_bwd_weight_wmma_nhwgc_gkyxc_nhwgk_f16_instances_part1(
+                        op_ptrs);
+                    add_device_grouped_conv2d_bwd_weight_two_stage_wmma_nhwgc_gkyxc_nhwgk_f16_instances_part1(
+                        op_ptrs);
                     // Explicit GEMM
                     add_device_grouped_convnd_bwd_weight_wmma_f16_f16_f16_exp_comp_default_instances(
                         op_ptrs);
@@ -960,6 +968,10 @@ struct DeviceOperationInstanceFactory<ck::tensor_operation::device::DeviceGroupe
                     add_device_grouped_conv2d_bwd_weight_wmma_nhwgc_gkyxc_nhwgk_bf16_instances(
                         op_ptrs);
                     add_device_grouped_conv2d_bwd_weight_two_stage_wmma_nhwgc_gkyxc_nhwgk_bf16_pipev1_instances(
+                        op_ptrs);
+                    add_device_grouped_conv2d_bwd_weight_wmma_nhwgc_gkyxc_nhwgk_bf16_instances_part1(
+                        op_ptrs);
+                    add_device_grouped_conv2d_bwd_weight_two_stage_wmma_nhwgc_gkyxc_nhwgk_bf16_instances_part1(
                         op_ptrs);
                     // Explicit GEMM
                     add_device_grouped_convnd_bwd_weight_wmma_bf16_bf16_bf16_exp_comp_default_instances(
