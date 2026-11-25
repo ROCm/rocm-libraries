@@ -347,17 +347,19 @@ TEST_P(GPU_ConvDilatedGemmWorkspaceBudget_FP32, NonDilatedWorkspaceIgnoresBudget
 #endif
 }
 
-INSTANTIATE_TEST_SUITE_P(Smoke,
+INSTANTIATE_TEST_SUITE_P(Quick,
                          GPU_ConvDilatedGemmWorkspaceBudget_FP32,
                          testing::Values(Direction::Forward,
                                          Direction::BackwardData,
                                          Direction::BackwardWeights),
                          [](const auto& info) { return DirectionName(info.param); });
 
+using GPU_ConvDilatedGemmWorkspace_FP32 = ::testing::TestWithParam<int>;
+
 // Dilated GEMM is the alternative to the naive solvers only: where another solver applies, no GEMM
 // workspace is reported, so Find does not benchmark GEMM as well. The query then matches the one
 // with the GEMM family disabled.
-TEST(GPU_ConvDilatedGemmWorkspace_FP32, NoGemmWorkspaceWhereAnotherSolverApplies)
+TEST_P(GPU_ConvDilatedGemmWorkspace_FP32, NoGemmWorkspaceWhereAnotherSolverApplies)
 {
 #if !MIOPEN_USE_GEMM
     GTEST_SKIP() << "Built without GEMM support";
@@ -381,7 +383,7 @@ TEST(GPU_ConvDilatedGemmWorkspace_FP32, NoGemmWorkspaceWhereAnotherSolverApplies
 
 // rocm-libraries#14965: Find given the queried workspace must select GemmFwdRest instead of
 // failing.
-TEST(GPU_ConvDilatedGemmWorkspace_FP32, FindWithQueriedWorkspaceRunsGemmFwdRest)
+TEST_P(GPU_ConvDilatedGemmWorkspace_FP32, FindWithQueriedWorkspaceRunsGemmFwdRest)
 {
 #if !MIOPEN_USE_GEMM
     GTEST_SKIP() << "Built without GEMM support";
@@ -405,7 +407,7 @@ TEST(GPU_ConvDilatedGemmWorkspace_FP32, FindWithQueriedWorkspaceRunsGemmFwdRest)
 
 // A find-db record of GemmFwdRest must not make the query report a workspace that does not fit in
 // free memory: the record is honoured while it fits and skipped once it does not.
-TEST(GPU_ConvDilatedGemmWorkspace_FP32, FindDbRecordDoesNotBypassFreeMemoryBudget)
+TEST_P(GPU_ConvDilatedGemmWorkspace_FP32, FindDbRecordDoesNotBypassFreeMemoryBudget)
 {
 #if !MIOPEN_USE_GEMM
     GTEST_SKIP() << "Built without GEMM support";
@@ -436,7 +438,7 @@ TEST(GPU_ConvDilatedGemmWorkspace_FP32, FindDbRecordDoesNotBypassFreeMemoryBudge
 // In Fast mode the query takes the immediate-mode fallback's pick; a GEMM pick must not bypass
 // the budget either. The fallback ignores MIOPEN_DEBUG_FIND_ONLY_SOLVER, so the other algorithm
 // families are disabled to make GemmFwdRest its pick on every arch.
-TEST(GPU_ConvDilatedGemmWorkspace_FP32, FastModeFallbackDoesNotBypassFreeMemoryBudget)
+TEST_P(GPU_ConvDilatedGemmWorkspace_FP32, FastModeFallbackDoesNotBypassFreeMemoryBudget)
 {
 #if !MIOPEN_USE_GEMM
     GTEST_SKIP() << "Built without GEMM support";
@@ -460,7 +462,7 @@ TEST(GPU_ConvDilatedGemmWorkspace_FP32, FastModeFallbackDoesNotBypassFreeMemoryB
 
 // miopenFindSolutions without a preallocated workspace allocates what the query reports, so it
 // finds GemmFwdRest while its workspace fits the budget, and not once it does not.
-TEST(GPU_ConvDilatedGemmWorkspace_FP32, FindSolutionsAllocatesBudgetedWorkspace)
+TEST_P(GPU_ConvDilatedGemmWorkspace_FP32, FindSolutionsAllocatesBudgetedWorkspace)
 {
 #if !MIOPEN_USE_GEMM
     GTEST_SKIP() << "Built without GEMM support";
@@ -483,3 +485,5 @@ TEST(GPU_ConvDilatedGemmWorkspace_FP32, FindSolutionsAllocatesBudgetedWorkspace)
     EXPECT_TRUE(problem.FindSolutions(&tight).empty());
 #endif
 }
+
+INSTANTIATE_TEST_SUITE_P(Standard, GPU_ConvDilatedGemmWorkspace_FP32, ::testing::Values(0));

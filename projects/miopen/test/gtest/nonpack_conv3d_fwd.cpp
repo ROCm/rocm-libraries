@@ -101,7 +101,7 @@ TEST_P(GPU_ConvNonpackFwdSolverTest3D_FP16, CKNonPackConvFwd3D)
 // TODO: write test that varifies if values of alpha beta selects default, scalar or bilinear
 // solver.
 
-INSTANTIATE_TEST_SUITE_P(FullConvFwdDefault,
+INSTANTIATE_TEST_SUITE_P(StandardConvFwdDefault,
                          GPU_ConvNonpackFwdSolverTest3D_FP16,
                          testing::Combine(testing::Values(miopenConvolutionFwdAlgoImplicitGEMM),
                                           testing::ValuesIn(ConvTestConfigs<NonPackTestCase>()),
@@ -109,7 +109,7 @@ INSTANTIATE_TEST_SUITE_P(FullConvFwdDefault,
                                           testing::ValuesIn({0.0}), // beta
                                           testing::Values(miopenTensorNDHWC)));
 
-INSTANTIATE_TEST_SUITE_P(FullConvFwdScalar,
+INSTANTIATE_TEST_SUITE_P(StandardConvFwdScalar,
                          GPU_ConvNonpackFwdSolverTest3D_FP16,
                          testing::Combine(testing::Values(miopenConvolutionFwdAlgoImplicitGEMM),
                                           testing::ValuesIn(ConvTestConfigs<NonPackTestCase>()),
@@ -117,7 +117,7 @@ INSTANTIATE_TEST_SUITE_P(FullConvFwdScalar,
                                           testing::ValuesIn({0.0}), // beta
                                           testing::Values(miopenTensorNDHWC)));
 
-INSTANTIATE_TEST_SUITE_P(FullConvFwdBilinear,
+INSTANTIATE_TEST_SUITE_P(StandardConvFwdBilinear,
                          GPU_ConvNonpackFwdSolverTest3D_FP16,
                          testing::Combine(testing::Values(miopenConvolutionFwdAlgoImplicitGEMM),
                                           testing::ValuesIn(ConvTestConfigs<NonPackTestCase>()),

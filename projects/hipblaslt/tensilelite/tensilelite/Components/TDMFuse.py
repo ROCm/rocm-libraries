@@ -288,18 +288,20 @@ def tdmPapRejectReason(ks):
                " + ".join("{%s}" % ",".join(g) for g in shared)))
 
 
-def tdmKDimField(ks, tc):
+def tdmKDimField(ks, tc, allowIterate=False):
     """(group1 dword whose high half holds `tc`'s K dim, dim units per k-tile), or None.
 
     Unroll-major data tensors keep K in dim0; MX scales keep it in dim1, counted
     in MatrixInstK groups. None where one per-k-tile step does not describe every
-    wave: K along a data tensor's dim1, the sparse side, or iterate mode.
+    wave: K along a data tensor's dim1, the sparse side, or iterate mode unless
+    allowIterate. Iterate mode walks whole dim1 rows within one load and leaves
+    K in dim0, so tail folding allows it; RAP does not.
     """
     pt = ks["ProblemType"]
     du = ks["DepthU"]
     if tc in TDM_SCALE_TENSORS:
         return 2, du // ks["MatrixInstK"]
-    if pt["TLU%s" % tc] or pt.get("Sparse") or ks.get("_TDMIterateMode%s" % tc, False):
+    if pt["TLU%s" % tc] or pt.get("Sparse") or (not allowIterate and ks.get("_TDMIterateMode%s" % tc, False)):
         return None
     dtype = pt["DataType%s" % tc]
     if dtype.isFloat4():
@@ -309,19 +311,28 @@ def tdmKDimField(ks, tc):
     return 1, du
 
 
+def tdmKDimStepsInElements(ks, allowIterate=False):
+    """True when A's and B's TDM K dims both step DepthU per k-tile, i.e. count elements.
+
+    Packed sub-byte types (F4, F6) count K in packed units, so they do not.
+    """
+    du = ks["DepthU"]
+    return all((tdmKDimField(ks, tc, allowIterate) or (None, None))[1] == du for tc in ("A", "B"))
+
+
 def tdmKDimStepIsAddrInc(ks, tc):
     """True when `tc`'s K dim counts bytes, so its step is its own per-k-tile address increment."""
     return tc not in TDM_SCALE_TENSORS and ks["ProblemType"]["DataType%s" % tc].numBytes() <= 1
 
 
-def tdmKDimTrackable(ks):
+def tdmKDimTrackable(ks, allowIterate=False):
     """True when one subtract per descriptor set can shrink every member's K dim.
 
     Members must keep K in the same field. Their steps must match, or each must
     equal its own address increment, which the set already selects per wave.
     """
     for group in liveGroups(ks):
-        fields = [tdmKDimField(ks, tc) for tc in group]
+        fields = [tdmKDimField(ks, tc, allowIterate) for tc in group]
         if None in fields or len({dword for dword, _ in fields}) != 1:
             return False
         if len({step for _, step in fields}) != 1 \

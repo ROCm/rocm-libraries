@@ -26,6 +26,7 @@
 #include <cmath>
 #include <iostream>  // TODO: don't use iostream.
 #include <map>
+#include <memory>
 #include <queue>
 #include <utility>
 #include <vector>
@@ -216,6 +217,21 @@ class ReadyQueue {
 
     virtual bool empty() const = 0;
 
+    // Fixed-order issue timing, used by EstimateAsmCyclesPass to replay the final instruction
+    // order. A queue that models timing overrides modelsIssueTiming() and replayIssue(). The
+    // base has no model, so replayIssue does nothing and elapsedCycles stays 0.
+    virtual void replayIssue(const StinkyInstruction& inst) {
+        (void)inst;
+    }
+
+    virtual bool modelsIssueTiming() const {
+        return false;
+    }
+
+    virtual int elapsedCycles() const {
+        return 0;
+    }
+
     // Hook for derived classes to do something when the first group of instructions are ready to
     // issue.
     virtual void onInit(IRList::iterator regionStart, IRList::iterator regionEnd) {}
@@ -349,6 +365,10 @@ inline DAGNode* ReadyQueueByDAGid::pickOne() {
     queue.pop();
     return node;
 }
+
+// Arch switch shared by the scheduler and EstimateAsmCyclesPass. Defined in
+// StinkyDAGSchedulerPass.cpp, the only TU that includes each CDNA*.hpp.
+std::unique_ptr<ReadyQueue> chooseReadyQueue(const PassContext& passCtx);
 
 struct MFMAIssueConfig {
     int latency = 0;                // original mfma latency
