@@ -42,6 +42,9 @@ from kernels.conv.direct_variants import (
     DIRECT_HALO_VARIANTS as _HALO_VARIANTS,
     DIRECT_MFMA_DGRAD as _MFMA_DGRAD,
     DIRECT_SPLIT_REDUCE as _SPLIT_REDUCE,
+    DIRECT_FWD_RR_MFMA as _FWD_RR_MFMA,
+    DIRECT_FWD_RR_WFMT as _RR_WFMT,
+    DIRECT_FWD_TAP1D_MFMA as _FWD_TAP1D_MFMA,
     direct_spec_takes_target_wave,
     DIRECT_WGRAD_FOLD as _WGRAD_FOLD,
     DIRECT_WGRAD_FOLDED as _WGRAD_FOLDED,
@@ -1163,6 +1166,111 @@ FWD_FLEX_LAYERS = (
     (7, 1, 3, 0, 1, 1, 1),
 )
 FWD_FLEX_KNOBS = tuple((bk, sc) for bk in (256, 128) for sc in (1, 2, 4))
+# 1-D tap-reuse forward (direct_fwd_tap1d_mfma, gfx950): 1 x S filters, stride
+# 1, any width dilation and padding; (KW, pad_w, dil_w) rows.  The kernel bakes
+# filter width, padding, dilation, bk, nwv, seg, ck and the single-chunk flag;
+# N, H, W, C and K are kernargs.  "Same"-padded rows (pad_w = dil_w * (S-1)/2)
+# and "valid" rows (pad_w = 0) for the HiFi-GAN resblock and generator layers.
+FWD_TAP1D_LAYERS = (
+    # 1 x 3: "same"-padded at dilation 1, 3, 5; "valid" at dilation 1.
+    (3, 1, 1),
+    (3, 3, 3),
+    (3, 5, 5),
+    (3, 0, 1),
+    # 1 x 7: "same"-padded at dilation 1, 3, 5; "valid" at dilation 1.
+    (7, 3, 1),
+    (7, 9, 3),
+    (7, 15, 5),
+    (7, 0, 1),
+    # 1 x 11: "same"-padded at dilation 1, 3, 5.
+    (11, 5, 1),
+    (11, 15, 3),
+    (11, 25, 5),
+)
+# (bk, nwv, ck, one) knobs of every tap1d row; seg is fixed at 9 (the spec
+# default). ck and one depend on C (ck 32 for C % 64 != 0; one when C == ck),
+# so they are knobs.
+FWD_TAP1D_KNOBS = (
+    (128, 8, 64, False),
+    (128, 4, 64, False),
+    (128, 4, 32, False),
+    (64, 4, 64, False),
+    (64, 4, 32, False),
+    (64, 4, 64, True),
+    (32, 4, 64, True),
+    (32, 4, 32, True),
+)
+# Rows-in-registers forward (direct_fwd_rr_mfma, gfx950): knobs offered per
+# (filter width, padding) cell of its capabilities, plain walk; both dtypes.
+# kw16: K block (4 -> 128, 3 -> 96, 2 -> 64 output channels), k4w: 4 waves
+# along K (K256), odd_c: odd number of 64-channel chunks, c_tail: C not a
+# multiple of 64, c64 / one_c: one step per filter column / one 64-channel
+# chunk per tile, grp: grouped rows, unfold: 32 images per tile (width 1).
+FWD_RR_KNOBS = {
+    (3, 1): (
+        {},
+        dict(grp=True),
+        dict(k4w=True),
+        dict(kw16=3),
+        dict(one_c=True),
+        dict(c64=True, kw16=2),
+        dict(c_tail=True, k4w=True),
+        dict(grp=True, kw16=2),
+        dict(k4w=True, one_c=True),
+        dict(kw16=2, odd_c=True),
+        dict(kw16=2, one_c=True),
+        dict(c64=True, kw16=2, odd_c=True),
+        dict(c64=True, kw16=2, one_c=True),
+        dict(grp=True, kw16=2, one_c=True),
+    ),
+    (3, 0): (
+        {},
+        dict(k4w=True),
+        dict(kw16=3),
+        dict(one_c=True),
+        dict(c64=True, kw16=2),
+        dict(c_tail=True, k4w=True),
+        dict(k4w=True, one_c=True),
+        dict(kw16=2, odd_c=True),
+        dict(kw16=2, one_c=True),
+        dict(c64=True, kw16=2, odd_c=True),
+        dict(c64=True, kw16=2, one_c=True),
+    ),
+    (3, 2): (
+        {},
+        dict(k4w=True),
+        dict(kw16=3),
+        dict(c64=True, kw16=2),
+        dict(c_tail=True, k4w=True),
+        dict(kw16=2, odd_c=True),
+        dict(c64=True, kw16=2, odd_c=True),
+    ),
+    (1, 0): (
+        {},
+        dict(k4w=True),
+        dict(kw16=3),
+        dict(unfold=True),
+        dict(k4w=True, unfold=True),
+        dict(kw16=2, odd_c=True),
+    ),
+    (1, 1): (
+        {},
+        dict(k4w=True),
+        dict(kw16=3),
+        dict(unfold=True),
+        dict(k4w=True, unfold=True),
+        dict(kw16=2, odd_c=True),
+        dict(kw16=2, one_c=True, unfold=True),
+    ),
+    (1, 2): (
+        {},
+        dict(k4w=True),
+        dict(kw16=3),
+        dict(unfold=True),
+        dict(k4w=True, unfold=True),
+        dict(kw16=2, odd_c=True),
+    ),
+}
 # Tap-outer WMMA forward (direct_fwd_tapouter_wmma): the "same"-padded dilated
 # 3x3 rows of atrous / ASPP layers it serves, (PAD, dil); stride 1.
 FWD_TAPOUTER_DILATIONS = (
@@ -1950,6 +2058,40 @@ DIRECT_CAPABILITIES: Dict[str, Tuple[str, Tuple[DirectCaps, ...]]] = {
             for kh, kw, pad, pw, st, dh, dw in FWD_FLEX_LAYERS
         ),
     ),
+    # Rows-in-registers forward on wave64 MFMA (gfx950): dense 3x3 (pad 1, 0
+    # and 2; pad 2 is the forward over dY of a pad-0 3x3 dgrad) and 3x1
+    # (column padding 0, incl. the unfolded width-1 tiles that run folded 1x3
+    # layers), stride 1; C and K runtime. Pulls in its weight-format helper
+    # (_rr_wfmt_job).
+    _FWD_RR_MFMA: (
+        "fwd",
+        tuple(DirectCaps(KH=3, PAD=pd, stride=1, cpg=0, kpg=0) for pd in (1, 0, 2))
+        + tuple(
+            DirectCaps(
+                KH=3, kw=1, PAD=pd, pad_w=-1 if pd == 0 else 0, stride=1, cpg=0, kpg=0
+            )
+            for pd in (0, 1, 2)
+        ),
+    ),
+    # 1-D tap-reuse forward on wave64 MFMA (gfx950): KH=1, stride 1, C and K
+    # runtime; workspace is always 0 (no split-C helper needed).
+    _FWD_TAP1D_MFMA: (
+        "fwd",
+        tuple(
+            DirectCaps(
+                KH=1,
+                kw=kw,
+                PAD=0,
+                pad_w=pw,
+                stride=1,
+                cpg=0,
+                kpg=0,
+                dil_h=1,
+                dil_w=dw,
+            )
+            for kw, pw, dw in FWD_TAP1D_LAYERS
+        ),
+    ),
     _FWD_SMALLK: (
         "fwd",
         tuple(
@@ -2609,6 +2751,26 @@ def _knob_grid(
             return  # 16-byte LDS DMA and the 160 KiB LDS: gfx950 only
         for bk, sc in FWD_FLEX_KNOBS:
             yield dict(bk=bk, split_c=sc)
+    elif variant == _FWD_TAP1D_MFMA:
+        if arch != "gfx950":
+            return  # 16-byte LDS DMA and the 160 KiB LDS: gfx950 only
+        for bk, nwv, ck, one in FWD_TAP1D_KNOBS:
+            yield dict(bk=bk, nwv=nwv, ck=ck, one=one)
+    elif variant == _FWD_RR_MFMA:
+        if arch != "gfx950":
+            return  # 16-byte LDS DMA and the 160 KiB LDS: gfx950 only
+        if caps is None:
+            for knobs in FWD_RR_KNOBS.values():
+                yield from knobs
+            return
+        yield from FWD_RR_KNOBS.get((caps.KW, caps.PAD), ())
+        # XCD-local tile walk (xcd=True): only the cells offered with it
+        # (_RR_XCD_CELLS)
+        for xdt, kw, pad, xkn in _RR_XCD_CELLS:
+            if dtype == xdt and caps.KW == kw and caps.PAD == pad:
+                yield dict(xkn, xcd=True)
+        if dtype == "fp16" and (caps.KW, caps.PAD) == (3, 1):
+            yield dict(chunk=True, k4w=True)  # chunked columns, K256
     elif variant == _FWD_SMALLK_MFMA:
         from rocke.core.arch import ArchTarget
 
@@ -3062,6 +3224,76 @@ def _split_reduce_job(
     )
 
 
+# (dtype, filter width, pad, knobs) of the rows-in-registers forward cells that
+# also get the XCD-local tile walk (xcd=True), per dtype
+_RR_XCD_CELLS = (
+    ("bf16", 3, 1, {"kw16": 3}),
+    ("bf16", 3, 1, {}),
+    ("bf16", 3, 2, {"c64": True, "kw16": 2}),
+    ("fp16", 3, 1, {"kw16": 3}),
+    ("fp16", 3, 1, {}),
+    ("fp16", 3, 1, {"k4w": True}),
+    ("fp16", 3, 1, {"c64": True, "kw16": 2}),
+    ("fp16", 3, 1, {"grp": True, "kw16": 2}),
+    ("fp16", 3, 1, {"k4w": True, "one_c": True}),
+    ("fp16", 3, 2, {"c64": True, "kw16": 2}),
+    ("fp16", 1, 1, {"unfold": True}),
+    ("fp16", 1, 1, {"k4w": True, "unfold": True}),
+    ("fp16", 1, 1, {"kw16": 2, "one_c": True, "unfold": True}),
+    ("fp16", 1, 2, {"k4w": True, "unfold": True}),
+)
+
+
+def _rr_wfmt_knobs(kw16: int, fw: int = 3, nwk: int = 2, dg: bool = False) -> dict:
+    kn = {} if kw16 == 4 else {"kw16": kw16}
+    if fw != 3:
+        kn["fw"] = fw
+    if nwk != 2:
+        kn["nwk"] = nwk
+    if dg:
+        kn["dg"] = True
+    return kn
+
+
+def rr_wfmt_identity(
+    arch: str,
+    wave_size: int,
+    dtype: str = DIRECT_DTYPE,
+    kw16: int = 4,
+    fw: int = 3,
+    nwk: int = 2,
+    dg: bool = False,
+) -> KernelIdentity:
+    """The cached weight-format pass of ``direct_fwd_rr_mfma`` (one per dtype,
+    K block, filter width and K wave count; ``dg``: the form that reads a
+    dgrad's own filter)."""
+    return _identity(
+        arch,
+        wave_size,
+        _RR_WFMT,
+        _FWD_HELPER,
+        _NO_CAPS,
+        _rr_wfmt_knobs(kw16, fw, nwk, dg),
+        dtype,
+    )
+
+
+def _rr_wfmt_job(
+    arch: str,
+    wave_size: int,
+    dtype: str = DIRECT_DTYPE,
+    kw16: int = 4,
+    fw: int = 3,
+    nwk: int = 2,
+    dg: bool = False,
+) -> BuildJob:
+    return _job(
+        rr_wfmt_identity(arch, wave_size, dtype, kw16, fw, nwk, dg),
+        _NO_CAPS,
+        _rr_wfmt_knobs(kw16, fw, nwk, dg),
+    )
+
+
 def _caps_of(identity: KernelIdentity) -> DirectCaps:
     return DirectCaps(
         KH=identity.filter_h,
@@ -3259,6 +3491,50 @@ def probe_problem(
             stride=caps.stride,
             dtype=dtype,
         )
+    if caps.cpg == 0 and variant == _FWD_RR_MFMA:
+        # 384 output channels are a whole number of every K block (128, 96,
+        # 64); 448 input channels are the odd_c rows' odd chunk count.
+        channels = 448 if (knobs or {}).get("odd_c") else 384
+        if (knobs or {}).get("one_c"):
+            channels = 64
+        if (knobs or {}).get("c_tail"):  # 7 / 8 chunks, the last one partial
+            channels -= 56
+        unf = (knobs or {}).get("unfold", False)
+        return DirectConvProblem(
+            N=64 if unf else 1,
+            H=64,
+            W=1 if unf else 64,
+            groups=2 if (knobs or {}).get("grp") else 1,
+            cpg=channels,
+            kpg=768 if (knobs or {}).get("k4w") else 384,
+            KH=caps.KH,
+            KW=caps.KW,
+            PAD=caps.PAD,
+            stride=caps.stride,
+            dtype=dtype,
+            pad_w=caps.pad_w,
+        )
+    if caps.cpg == 0 and variant == _FWD_TAP1D_MFMA:
+        # 1-D tap-reuse: C follows the knobs' chunking (C == ck for the
+        # single-chunk build, two chunks otherwise) and K one bk tile.
+        kn = knobs or {}
+        ck = kn.get("ck", 64)
+        return DirectConvProblem(
+            N=1,
+            H=1,
+            W=64,
+            groups=1,
+            cpg=ck if kn.get("one", False) else 2 * ck,
+            kpg=kn.get("bk", 128),
+            KH=1,
+            KW=caps.KW,
+            PAD=0,
+            stride=1,
+            dtype=dtype,
+            dil_h=1,
+            dil_w=caps.dil_w,
+            pad_w=caps.pad_w,
+        )
     if caps.cpg == 0:
         # The non-grouped kernel's split-C rows need a whole chunk per split:
         # 1024 channels cover the deepest split (16 x ck 64).
@@ -3418,10 +3694,13 @@ def _caps_jobs(
     rtc_dgrad = variant == "direct_dgrad_mfma_rtc"
     # The runtime-channel dgrad probe follows each knob's tile counts, the
     # small-C depthwise wgrad's its baked channel count, the depthwise MFMA
-    # wgrad's its packed images (a narrow enough image).
+    # wgrad's its packed images (a narrow enough image), the rows-in-registers
+    # forward's its chunk parity and the tap-reuse forward's its chunking.
     knob_probe = rtc_dgrad or variant in (
         "direct_wgrad_dw_cols",
         "direct_wgrad_dw_mfma",
+        _FWD_RR_MFMA,
+        _FWD_TAP1D_MFMA,
     )
     probe = None if knob_probe else probe_problem(caps, dtype, variant)
     for knobs in _knob_grid(variant, arch, dtype, caps):
@@ -3486,6 +3765,17 @@ def _caps_jobs(
                     ),
                     replace(caps, PAD=0, stride=0, cpg=0, kpg=0),
                     fold_knobs,
+                )
+            )
+        if variant == _FWD_RR_MFMA:
+            cell.append(
+                _rr_wfmt_job(
+                    arch,
+                    wave_size,
+                    dtype,
+                    knobs.get("kw16", 4),
+                    caps.KW,
+                    4 if knobs.get("k4w") else 2,
                 )
             )
         if (
@@ -3570,7 +3860,7 @@ def direct_kernel_for_job(job: BuildJob, arch: str, dtype: str):
         raise ValueError(f"direct conv builds {DIRECT_DTYPES}, not {dtype!r}")
     caps = DirectCaps(**job.caps)
     variant = job.identity.algorithm
-    if variant == _SPLIT_REDUCE:
+    if variant in (_SPLIT_REDUCE, _RR_WFMT):
         spec = make_spec(variant, _DtypeOnly(dtype), job.spec_kwargs)
         return _build_kernel(variant, spec, arch), {}
     probe = probe_problem(caps, dtype, variant, job.spec_kwargs)
@@ -3605,6 +3895,18 @@ def direct_job_for_identity(identity: KernelIdentity) -> BuildJob:
         )
     caps = _caps_of(identity)
     knobs = json.loads(identity.knobs) if identity.knobs else {}
+    if identity.direction == _FWD_HELPER and identity.algorithm == _RR_WFMT:
+        kw16 = knobs.get("kw16", 4)
+        fw, nwk = knobs.get("fw", 3), knobs.get("nwk", 2)
+        dg = bool(knobs.get("dg", False))
+        rebuilt = rr_wfmt_identity(
+            identity.arch, identity.wave_size, identity.dtype_a, kw16, fw, nwk, dg
+        )
+        if replace(rebuilt, llvm_flavor=identity.llvm_flavor) != identity:
+            raise LookupError(
+                f"the direct grid cannot build this identity: {identity.label()}"
+            )
+        return _job(identity, _NO_CAPS, _rr_wfmt_knobs(kw16, fw, nwk, dg))
     if identity.direction == _FWD_HELPER:
         split_c = knobs.get("split_c")
         rebuilt = (

@@ -84,9 +84,13 @@ def _problem(**kw) -> DirectConvProblem:
 # 1x7 with column padding).
 # The flattened-pixel MFMA forward (gfx950) indexes its im2col by output pixel
 # and takes any padding, stride and dilation.
+# The rows-in-registers forward (gfx950) takes padding 0..2 on its 3x3 and 3x1
+# rows, the tap-reuse forward its 1 x S rows' own column padding and dilation.
 _PADDING_GENERIC_FWD = {
     "direct_depthwise_col",
     "direct_fwd_flex_mfma",
+    "direct_fwd_rr_mfma",
+    "direct_fwd_tap1d_mfma",
     "direct_fwd_smallc_mfma",
     "direct_fwd_smallk_mfma",
 }
@@ -119,7 +123,11 @@ def test_only_the_nongrouped_kernel_is_dilated(jobs):
         j.identity for j in jobs if j.identity.dilation_h * j.identity.dilation_w > 1
     ]
     assert dilated
-    assert {i.algorithm for i in dilated} == {"direct_nongrouped", DIRECT_FWD_FLEX_MFMA}
+    assert {i.algorithm for i in dilated} == {
+        "direct_nongrouped",
+        DIRECT_FWD_FLEX_MFMA,
+        "direct_fwd_tap1d_mfma",
+    }
 
 
 @pytest.mark.parametrize(
@@ -326,7 +334,13 @@ def test_group_count_is_runtime(cache, groups):
         "block_groups" in why
         for ident, why in rejected
         if ident.algorithm
-        not in (*dks._HALO_VARIANTS, DIRECT_FWD_PP_MFMA, DIRECT_FWD_FLEX_MFMA)
+        not in (
+            *dks._HALO_VARIANTS,
+            DIRECT_FWD_PP_MFMA,
+            DIRECT_FWD_FLEX_MFMA,
+            "direct_fwd_rr_mfma",
+            "direct_fwd_tap1d_mfma",
+        )
     )
 
 
@@ -1454,7 +1468,7 @@ def test_dgrad_rtc_grid_skips_wide_q_heavy_preloads(jobs):
 def test_plans_pack_against_their_signatures(cache, direction, problem):
     plans, _ = dks.direct_plans(cache, problem, direction, _ARCH)
     assert plans
-    names = ("x", "w", "y", "dy", "dx", "dw", "ws_t", "ws_coa", "ws_split")
+    names = ("x", "w", "y", "dy", "dx", "dw", "ws_t", "ws_coa", "ws_split", "ws_wf")
     ptrs = {n: 0x1000 * (i + 1) for i, n in enumerate(names)}
     sizes = {n: 1 << 20 for n in names}
     for plan in plans:
@@ -1845,7 +1859,14 @@ def test_run_from_cache_batch_chunks_are_balanced():
             assert s_i[name] == n * per_image < _TENSOR_LIMIT
         assert (p_i["w"], s_i["w"]) == (ptrs["w"], sizes["w"])
         n0 += n
-    assert _chunk_buffers(ptrs, sizes, inputs, "y", [31], 0) == (ptrs, sizes)
+    # One launch over the whole batch (a plan that rebases its activations
+    # per image): the i32 size kernargs take a clamped value.
+    assert _chunk_buffers(ptrs, sizes, inputs, "y", [31], 0) == (
+        ptrs,
+        {k: min(v, _TENSOR_LIMIT - 1) for k, v in sizes.items()},
+    )
+    small = {k: min(v, 4096) for k, v in sizes.items()}
+    assert _chunk_buffers(ptrs, small, inputs, "y", [31], 0) == (ptrs, small)
 
 
 def test_run_from_cache_wgrad_chunks_accumulate_into_one_dw():

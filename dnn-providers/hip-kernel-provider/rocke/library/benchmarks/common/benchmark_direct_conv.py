@@ -2344,6 +2344,10 @@ def _measure_plans(
     n_plans = len(plans)
     width = len(str(n_plans))
 
+    def plan_chunks(plan):
+        # a one-launch plan (see _one_launch) covers the whole batch
+        return [sum(chunks)] if len(per_chunk[plan.label]) == 1 else chunks
+
     def bind(plan):
         """The plan's launch, or ``None`` if a step cannot be loaded."""
         try:
@@ -2355,7 +2359,10 @@ def _measure_plans(
                         signature=st.signature,
                     ),
                     launch_values(
-                        st, *_chunk_buffers(ptrs, sizes, inputs, out_name, chunks, i)
+                        st,
+                        *_chunk_buffers(
+                            ptrs, sizes, inputs, out_name, plan_chunks(plan), i
+                        ),
                     ),
                     LaunchConfig(grid=st.grid, block=st.block, stream=0),
                 )
@@ -2594,6 +2601,7 @@ def _cache_dispatch(args, arch: str, cases: list) -> int:
 
 
 _TENSOR_LIMIT = 1 << 31
+_I32_MAX = _TENSOR_LIMIT - 1
 
 
 def _batch_chunks(p, direction: str) -> List[int]:
@@ -2620,7 +2628,12 @@ def _chunk_buffers(ptrs, sizes, inputs, out_name, chunks, i):
     """``(ptrs, sizes)`` with the activations narrowed to batch chunk ``i``
     of ``chunks`` (images per chunk, in batch order)."""
     if len(chunks) == 1:
-        return ptrs, sizes
+        if all(v <= _I32_MAX for v in sizes.values()):
+            return ptrs, sizes
+        # a one-launch plan (see _one_launch) rebases its activations per
+        # image and never reads their byte sizes: the i32 kernargs
+        # take a clamped value
+        return ptrs, {k: min(v, _I32_MAX) for k, v in sizes.items()}
     ptrs, sizes = dict(ptrs), dict(sizes)
     n_total, n0 = sum(chunks), sum(chunks[:i])
     # wgrad's dW has no batch: every chunk adds into the whole of it.
@@ -2645,6 +2658,11 @@ def _chunk_plans(plan_fn, p, chunks):
     by_size = {}
     for n in dict.fromkeys(chunks):
         by_size[n] = plan_fn(p if n == p.N else dataclasses.replace(p, N=n))
+    # the kernels that rebase their activations per image run the whole batch
+    # as one launch
+    whole = []
+    if len(chunks) > 1 and ONE_LAUNCH:
+        whole = [pl for pl in plan_fn(p)[0] if _one_launch(pl)]
     plans, rejected = by_size[chunks[0]]
     rejected = list(rejected)
     labels = {n: {pl.label: pl for pl in sized[0]} for n, sized in by_size.items()}
@@ -2657,7 +2675,24 @@ def _chunk_plans(plan_fn, p, chunks):
         ]
         plans = [pl for pl in plans if pl.label in labels[n]]
     per_chunk = {pl.label: [labels[n][pl.label] for n in chunks] for pl in plans}
+    if whole:
+        one = {pl.label for pl in whole}
+        plans = [pl for pl in plans if pl.label not in one] + whole
+        for pl in whole:
+            per_chunk[pl.label] = [pl]
     return plans, rejected, per_chunk
+
+
+#: Off by default: ROCKE_ONE_LAUNCH=1 runs the plans of :func:`_one_launch` as
+#: one launch over the whole batch.
+ONE_LAUNCH = os.environ.get("ROCKE_ONE_LAUNCH", "0") == "1"
+
+
+def _one_launch(plan) -> bool:
+    """A plan whose kernels address the activations through a per-image 64-bit
+    rebased base (rr): one launch serves a batch past the 2^31-byte buffer
+    range."""
+    return plan.identity.algorithm == "direct_fwd_rr_mfma"
 
 
 def _accumulates_dw(plan) -> bool:
