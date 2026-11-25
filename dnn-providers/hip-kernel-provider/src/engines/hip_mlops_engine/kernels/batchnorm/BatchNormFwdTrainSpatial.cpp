@@ -100,17 +100,32 @@ struct BatchNormFwdTrainSpatialImpl<0>
 
         if(lid < segment)
         {
-            // The original OpenCL kernel unrolled the loop with a hint of 2 when using FP16.
-            // Using this unrollHint and the static_unroll_count struct replicates this.
-            constexpr int unrollHint
-                = hip_plugin_config::input_type_strategy == type_strategy::fpmix ? 2 : 1;
-            static_unroll_count<unsigned int, 0, batchLoopm, 1, unrollHint>{
-                [&](unsigned int batch) {
-                    batchId = batch * segiSpatial + lidiSpatial;
-                    index = batchId * hip_plugin_bn_config::batch_size + channelSpatialId;
-                    batchvalues[batch] = *(in + index);
-                    stats.add(batchvalues[batch]);
-                }};
+            unsigned int batch = 0;
+            for(; batch + 3 < batchLoopm; batch += 4)
+            {
+                const unsigned int b0 = batch * segiSpatial + lidiSpatial;
+                const unsigned int b1 = (batch + 1) * segiSpatial + lidiSpatial;
+                const unsigned int b2 = (batch + 2) * segiSpatial + lidiSpatial;
+                const unsigned int b3 = (batch + 3) * segiSpatial + lidiSpatial;
+                batchvalues[batch] = in[b0 * hip_plugin_bn_config::batch_size + channelSpatialId];
+                batchvalues[batch + 1]
+                    = in[b1 * hip_plugin_bn_config::batch_size + channelSpatialId];
+                batchvalues[batch + 2]
+                    = in[b2 * hip_plugin_bn_config::batch_size + channelSpatialId];
+                batchvalues[batch + 3]
+                    = in[b3 * hip_plugin_bn_config::batch_size + channelSpatialId];
+                stats.add4(batchvalues[batch],
+                           batchvalues[batch + 1],
+                           batchvalues[batch + 2],
+                           batchvalues[batch + 3]);
+            }
+            for(; batch < batchLoopm; ++batch)
+            {
+                batchId = batch * segiSpatial + lidiSpatial;
+                index = batchId * hip_plugin_bn_config::batch_size + channelSpatialId;
+                batchvalues[batch] = *(in + index);
+                stats.add(batchvalues[batch]);
+            }
             batchId = snSpatial + lidiSpatial;
             index = batchId * hip_plugin_bn_config::batch_size + channelSpatialId;
             if(index < hip_plugin_bn_config::tensor_size)
@@ -282,25 +297,33 @@ struct BatchNormFwdTrainSpatialImpl<1>
         }
         else
         {
-            static_unroll_count<unsigned int, 0, less, hip_plugin_bn_config::launch_dim.grp0, 4>{
-                [&](unsigned int k) {
-                    if(k + lid < less)
-                    {
-                        batchIdx = (k + lid) / hip_plugin_bn_config::spatial_size;
-                        lidx = (k + lid) - (batchIdx * hip_plugin_bn_config::spatial_size);
-                        if constexpr(hip_plugin_config::layout_channel_last)
-                        {
-                            index = batchIdx * hip_plugin_bn_config::batch_size
-                                    + lidx * hip_plugin_bn_config::channels + grpid;
-                        }
-                        else
-                        {
-                            index = batchIdx * hip_plugin_bn_config::batch_size + channelSpatialId
-                                    + lidx;
-                        }
-                        stats.add(in[index]);
-                    }
-                }};
+            constexpr unsigned int step = hip_plugin_bn_config::launch_dim.grp0;
+            constexpr unsigned int less4s = (less / (4 * step)) * (4 * step);
+            auto loadAt = [&](unsigned int pos) {
+                const unsigned int b = pos / hip_plugin_bn_config::spatial_size;
+                const unsigned int s = pos - b * hip_plugin_bn_config::spatial_size;
+                if constexpr(hip_plugin_config::layout_channel_last)
+                {
+                    return in[b * hip_plugin_bn_config::batch_size
+                              + s * hip_plugin_bn_config::channels + grpid];
+                }
+                else
+                {
+                    return in[b * hip_plugin_bn_config::batch_size + channelSpatialId + s];
+                }
+            };
+            for(unsigned int k = 0; k < less4s; k += 4 * step)
+            {
+                const unsigned int base = k + lid;
+                stats.add4(loadAt(base),
+                           loadAt(base + step),
+                           loadAt(base + 2 * step),
+                           loadAt(base + 3 * step));
+            }
+            for(unsigned int k = less4s; k < less; k += step)
+            {
+                stats.add(loadAt(k + lid));
+            }
 
             if constexpr(rem > 0u)
             {
@@ -488,16 +511,34 @@ struct BatchNormFwdTrainSpatialImpl<3>
 
         if(lid < hip_plugin_bn_config::spatial_size)
         {
-            static_unroll_count<unsigned int, 0, hip_plugin_bn_config::batches, 1, 2>{
-                [&](unsigned int batch) {
-                    index = batch * hip_plugin_bn_config::batch_size + channelIdx + lid;
-                    const auto value = in[index];
-                    stats.add(value);
-                    if constexpr(hip_plugin_bn_config::batches < hip_plugin_bn_config::max_batches)
-                    {
-                        minibatch[batch] = value;
-                    }
-                }};
+            unsigned int batch = 0;
+            for(; batch + 3 < hip_plugin_bn_config::batches; batch += 4)
+            {
+                const unsigned int base
+                    = batch * hip_plugin_bn_config::batch_size + channelIdx + lid;
+                const auto v0 = in[base];
+                const auto v1 = in[base + hip_plugin_bn_config::batch_size];
+                const auto v2 = in[base + 2 * hip_plugin_bn_config::batch_size];
+                const auto v3 = in[base + 3 * hip_plugin_bn_config::batch_size];
+                stats.add4(v0, v1, v2, v3);
+                if constexpr(hip_plugin_bn_config::batches < hip_plugin_bn_config::max_batches)
+                {
+                    minibatch[batch] = v0;
+                    minibatch[batch + 1] = v1;
+                    minibatch[batch + 2] = v2;
+                    minibatch[batch + 3] = v3;
+                }
+            }
+            for(; batch < hip_plugin_bn_config::batches; ++batch)
+            {
+                index = batch * hip_plugin_bn_config::batch_size + channelIdx + lid;
+                const auto value = in[index];
+                stats.add(value);
+                if constexpr(hip_plugin_bn_config::batches < hip_plugin_bn_config::max_batches)
+                {
+                    minibatch[batch] = value;
+                }
+            }
         }
         reduction::reduce_welford(stats, lid);
         mean = stats.mean;

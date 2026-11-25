@@ -210,7 +210,27 @@ struct BatchNormBwdSpatialImpl<0>
     // == RECALC MEAN AND VARIANCE ===========
         if(lid < segment)
         {
-            for(unsigned int batch = 0; batch < batchLoopm; ++batch)
+            unsigned int batch = 0;
+            for(; batch + 3 < batchLoopm; batch += 4)
+            {
+                const unsigned int b0 = batch * segiSpatial + lidiSpatial;
+                const unsigned int b1 = (batch + 1) * segiSpatial + lidiSpatial;
+                const unsigned int b2 = (batch + 2) * segiSpatial + lidiSpatial;
+                const unsigned int b3 = (batch + 3) * segiSpatial + lidiSpatial;
+                batchValues[batch] = hip_kernel_provider::cast<ComputeType>(
+                    x_in[b0 * hip_plugin_bn_config::batch_size + channelSpatialId]);
+                batchValues[batch + 1] = hip_kernel_provider::cast<ComputeType>(
+                    x_in[b1 * hip_plugin_bn_config::batch_size + channelSpatialId]);
+                batchValues[batch + 2] = hip_kernel_provider::cast<ComputeType>(
+                    x_in[b2 * hip_plugin_bn_config::batch_size + channelSpatialId]);
+                batchValues[batch + 3] = hip_kernel_provider::cast<ComputeType>(
+                    x_in[b3 * hip_plugin_bn_config::batch_size + channelSpatialId]);
+                stats.add4(batchValues[batch],
+                           batchValues[batch + 1],
+                           batchValues[batch + 2],
+                           batchValues[batch + 3]);
+            }
+            for(; batch < batchLoopm; ++batch)
             {
                 batchId = batch * segiSpatial + lidiSpatial;
                 index = batchId * hip_plugin_bn_config::batch_size + channelSpatialId;
@@ -430,7 +450,16 @@ struct BatchNormBwdSpatialImpl<1>
         }
         else
         {
-            for(unsigned int k = lid; k < less; k += hip_plugin_bn_config::launch_dim.grp0)
+            constexpr unsigned int step = hip_plugin_bn_config::launch_dim.grp0;
+            constexpr unsigned int less4s = (less / (4 * step)) * (4 * step);
+            for(unsigned int k = lid; k < less4s; k += 4 * step)
+            {
+                stats.add4(x_in[getTensorIndex(k)],
+                           x_in[getTensorIndex(k + step)],
+                           x_in[getTensorIndex(k + 2 * step)],
+                           x_in[getTensorIndex(k + 3 * step)]);
+            }
+            for(unsigned int k = less4s + lid; k < less; k += step)
             {
                 stats.add(x_in[getTensorIndex(k)]);
             }
@@ -627,7 +656,28 @@ struct BatchNormBwdSpatialImpl<3>
 
         if(lid < hip_plugin_bn_config::spatial_size)
         {
-            for(unsigned int batch = 0; batch < hip_plugin_bn_config::batches; ++batch)
+            unsigned int batch = 0;
+            for(; batch + 3 < hip_plugin_bn_config::batches; batch += 4)
+            {
+                const unsigned int base
+                    = batch * hip_plugin_bn_config::batch_size + channelIdx + lid;
+                const auto v0 = hip_kernel_provider::cast<ComputeType>(x_in[base]);
+                const auto v1 = hip_kernel_provider::cast<ComputeType>(
+                    x_in[base + hip_plugin_bn_config::batch_size]);
+                const auto v2 = hip_kernel_provider::cast<ComputeType>(
+                    x_in[base + 2 * hip_plugin_bn_config::batch_size]);
+                const auto v3 = hip_kernel_provider::cast<ComputeType>(
+                    x_in[base + 3 * hip_plugin_bn_config::batch_size]);
+                stats.add4(v0, v1, v2, v3);
+                if constexpr(hip_plugin_bn_config::batches < hip_plugin_bn_config::max_batches)
+                {
+                    batchValues[batch] = v0;
+                    batchValues[batch + 1] = v1;
+                    batchValues[batch + 2] = v2;
+                    batchValues[batch + 3] = v3;
+                }
+            }
+            for(; batch < hip_plugin_bn_config::batches; ++batch)
             {
                 index = batch * hip_plugin_bn_config::batch_size + channelIdx + lid;
                 const auto value = hip_kernel_provider::cast<ComputeType>(x_in[index]);

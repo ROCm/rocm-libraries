@@ -220,12 +220,28 @@ struct Welford
         count = totalCount;
     }
 
+    // Branchless merge for a non-empty power-of-two chunk (otherCount in {1, 2, 4}).
+    // When count == 0 (mean == 0, m2 == 0), otherCount * rcpf(otherCount) == 1.0f exactly.
+    __forceinline__ __device__ void mergeNonEmpty(T otherMean, T otherM2, float otherCount)
+    {
+        const T delta = otherMean - mean;
+        const float totalCount = count + otherCount;
+        const float weight = otherCount * __builtin_amdgcn_rcpf(totalCount);
+        mean = fma(delta, cast<T>(weight), mean);
+        m2 = fma(delta, delta * cast<T>(count * weight), m2 + otherM2);
+        count = totalCount;
+    }
+
     template <typename Sample>
     __forceinline__ __device__ void add(Sample sample)
     {
         if constexpr(mapped_vector_info<T>::size == mapped_vector_info<Sample>::size)
         {
-            merge(cast<T>(sample), cast<T>(0.0f), 1.0f);
+            const T x = cast<T>(sample);
+            count += 1.0f;
+            const T delta = x - mean;
+            mean = fma(delta, cast<T>(__builtin_amdgcn_rcpf(count)), mean);
+            m2 = fma(delta, x - mean, m2);
         }
         else
         {
@@ -233,22 +249,45 @@ struct Welford
                           && (mapped_vector_info<Sample>::size == 2
                               || mapped_vector_info<Sample>::size == 4));
             // Merge spatial samples from one vector load before updating the running statistics.
-            const T dx = sample.y - sample.x;
-            const T meanXY = fma(dx, cast<T>(0.5f), sample.x);
-            const T m2XY = dx * (dx * cast<T>(0.5f));
             if constexpr(mapped_vector_info<Sample>::size == 4)
             {
-                const T dz = sample.w - sample.z;
-                const T meanZW = fma(dz, cast<T>(0.5f), sample.z);
-                const T delta = meanZW - meanXY;
-                const T vectorMean = fma(delta, cast<T>(0.5f), meanXY);
-                const T vectorM2 = fma(delta, delta, fma(dz, dz * cast<T>(0.5f), m2XY));
-                merge(vectorMean, vectorM2, 4.0f);
+                add4(sample.x, sample.y, sample.z, sample.w);
             }
             else
             {
-                merge(meanXY, m2XY, 2.0f);
+                const T dx = sample.y - sample.x;
+                const T meanXY = fma(dx, cast<T>(0.5f), sample.x);
+                const T m2XY = dx * (dx * cast<T>(0.5f));
+                mergeNonEmpty(meanXY, m2XY, 2.0f);
             }
+        }
+    }
+
+    template <typename Sample>
+    __forceinline__ __device__ void add4(Sample s0, Sample s1, Sample s2, Sample s3)
+    {
+        if constexpr(mapped_vector_info<T>::size == mapped_vector_info<Sample>::size)
+        {
+            const T x0 = cast<T>(s0);
+            const T x1 = cast<T>(s1);
+            const T x2 = cast<T>(s2);
+            const T x3 = cast<T>(s3);
+            const T d01 = x1 - x0;
+            const T m01 = fma(d01, cast<T>(0.5f), x0);
+            const T m2_01 = d01 * (d01 * cast<T>(0.5f));
+            const T d23 = x3 - x2;
+            const T m23 = fma(d23, cast<T>(0.5f), x2);
+            const T delta = m23 - m01;
+            const T chunkMean = fma(delta, cast<T>(0.5f), m01);
+            const T chunkM2 = fma(delta, delta, fma(d23, d23 * cast<T>(0.5f), m2_01));
+            mergeNonEmpty(chunkMean, chunkM2, 4.0f);
+        }
+        else
+        {
+            add(s0);
+            add(s1);
+            add(s2);
+            add(s3);
         }
     }
 };

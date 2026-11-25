@@ -339,15 +339,27 @@ __forceinline__ __device__ void stash_partial_stats(const config::input_type* __
     {
         const unsigned int base
             = x * detail::statsXStride + y * detail::statsYStride + z * config::batch_size;
-        for(unsigned int batch = 0; batch < config::batch_elements; ++batch)
+        constexpr bool exactMultiple = (config::batches % config::batch_elements == 0);
+        const unsigned int remaining = config::batches - z;
+        const unsigned int batchCount
+            = exactMultiple
+                  ? config::batch_elements
+                  : (remaining < config::batch_elements ? remaining : config::batch_elements);
+        unsigned int batch = 0;
+        for(; batch + 3 < batchCount; batch += 4)
         {
-            if constexpr(config::batches % config::batch_elements != 0)
-            {
-                if(z + batch >= config::batches)
-                {
-                    break;
-                }
-            }
+            const unsigned int index = base + batch * config::batch_size;
+            const auto s0 = cast<ComputeVec>(*reinterpret_cast<const InputVec*>(in + index));
+            const auto s1 = cast<ComputeVec>(
+                *reinterpret_cast<const InputVec*>(in + index + config::batch_size));
+            const auto s2 = cast<ComputeVec>(
+                *reinterpret_cast<const InputVec*>(in + index + 2 * config::batch_size));
+            const auto s3 = cast<ComputeVec>(
+                *reinterpret_cast<const InputVec*>(in + index + 3 * config::batch_size));
+            stats.add4(s0, s1, s2, s3);
+        }
+        for(; batch < batchCount; ++batch)
+        {
             const unsigned int index = base + batch * config::batch_size;
             const auto sample = *reinterpret_cast<const InputVec*>(in + index);
             stats.add(cast<ComputeVec>(sample));
