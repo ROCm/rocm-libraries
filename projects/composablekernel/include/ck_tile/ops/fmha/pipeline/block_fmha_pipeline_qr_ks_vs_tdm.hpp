@@ -567,8 +567,66 @@ struct BlockFmhaPipelineQRKSVSTdm
         return scales;
     }
 
-    // The K / V scale tiles of a block. Windows and strides are built once; a tile moves the
-    // window and switches the LDS parity, then issues through the uniform TDM path, as K / V.
+    // One TDM load stream: K, V or an MX scale tile. The groups of its first load are built once
+    // and read-first-laned; each load patches their LDS and global addresses and the extent of
+    // TDM dimension kDim, the one the window moves along (TDM dimension 0 is the contiguous one,
+    // so the window axis is 1 - kDim). Window origins only grow: the extent only shrinks, to 0
+    // past the end.
+    template <index_t kDim>
+    struct TdmLoad
+    {
+        static constexpr index_t kAxis = 1 - kDim;
+
+        template <typename LdsWindow>
+        CK_TILE_DEVICE static uint32_t LdsAddr(const LdsWindow& lds)
+        {
+            return static_cast<uint32_t>(reinterpret_cast<uintptr_t>(
+                lds.get_bottom_tensor_view().get_buffer_view().p_data_));
+        }
+
+        CK_TILE_DEVICE static index_t Extent(const TDM_GROUP1& g1)
+        {
+            if constexpr(kDim == 0)
+                return static_cast<index_t>(g1.tensor_dim0_lo |
+                                            static_cast<uint32_t>(g1.tensor_dim0_hi) << 16);
+            else
+                return static_cast<index_t>(g1.tensor_dim1_lo |
+                                            static_cast<uint32_t>(g1.tensor_dim1_hi) << 16);
+        }
+
+        template <typename DramWindow, typename LdsWindow>
+        CK_TILE_DEVICE
+        TdmLoad(const TDMConfig& config, const DramWindow& dram, const LdsWindow& lds)
+            : groups(amd_wave_read_first_lane(dram.make_tdm_groups(config, lds))),
+              lds_delta(groups.g0.lds_addr - LdsAddr(lds)),
+              origin(dram.get_window_origin().at(number<kAxis>{})),
+              extent(Extent(groups.g1)),
+              axis_bytes(static_cast<int64_t>(sizeof(typename DramWindow::DataType)) *
+                         dram.get_bottom_tensor_view().get_tensor_descriptor().calculate_offset(
+                             make_multi_index(kAxis == 0 ? 1 : 0, kAxis == 1 ? 1 : 0)))
+        {
+            static_assert(DramWindow::Traits::PackedSize == 1, "axis_bytes counts whole elements");
+        }
+
+        template <typename DramWindow, typename LdsWindow>
+        CK_TILE_DEVICE void operator()(const DramWindow& dram, const LdsWindow& lds) const
+        {
+            const index_t step = dram.get_window_origin().at(number<kAxis>{}) - origin;
+            amd_tdm_load<kDim>(groups,
+                               LdsAddr(lds) + lds_delta,
+                               groups.g0.getGlobalAddr() + static_cast<uint64_t>(step * axis_bytes),
+                               static_cast<uint32_t>(max(index_t{0}, extent - step)));
+        }
+
+        TDMGroups groups;
+        uint32_t lds_delta; // the box's LDS offset from the window's data pointer
+        index_t origin;     // window origin along kAxis when the groups were built
+        index_t extent;     // extent of dimension kDim then
+        int64_t axis_bytes; // global bytes per step along kAxis
+    };
+
+    // The K / V scale tiles of a block. Windows and TDM loads are built once; a tile moves the
+    // window and switches the LDS parity, then issues the load, as K / V.
     template <typename KDram, typename VDram, typename KLds, typename VLds>
     struct MxScaleTiles
     {
@@ -577,17 +635,15 @@ struct BlockFmhaPipelineQRKSVSTdm
         KLds k_lds;
         VLds v_lds;
         char* smem; // the arena
-        decltype(make_tdm_uniform_strides(std::declval<const KDram&>())) k_strides =
-            make_tdm_uniform_strides(k_dram);
-        decltype(make_tdm_uniform_strides(std::declval<const VDram&>())) v_strides =
-            make_tdm_uniform_strides(v_dram);
+        TdmLoad<1> k_load = TdmLoad<1>(TDMConfig{}, k_dram, k_lds);
+        TdmLoad<0> v_load = TdmLoad<0>(TDMConfig{}, v_dram, v_lds);
 
         CK_TILE_DEVICE void load_k(index_t tile, index_t kv0)
         {
             move_tile_window(k_dram, {kv0 - k_dram.get_window_origin().at(number<0>{}), 0});
             k_lds.set_bottom_tensor_view_data_ptr(
                 reinterpret_cast<int8_t*>(mx_k_scale_region(smem, tile)));
-            load_tile_tdm_uniform(TDMConfig{}, k_lds, k_dram, k_strides);
+            k_load(k_dram, k_lds);
         }
         CK_TILE_DEVICE void load_v(index_t tile, index_t kv0)
         {
@@ -595,7 +651,7 @@ struct BlockFmhaPipelineQRKSVSTdm
                 v_dram, {0, kv0 / kMxGranularity - v_dram.get_window_origin().at(number<1>{})});
             v_lds.set_bottom_tensor_view_data_ptr(
                 reinterpret_cast<int8_t*>(mx_v_scale_region(smem, tile)));
-            load_tile_tdm_uniform(TDMConfig{}, v_lds, v_dram, v_strides);
+            v_load(v_dram, v_lds);
         }
 
         CK_TILE_DEVICE int32_t k(index_t tile, index_t row, index_t step) const
@@ -3401,10 +3457,9 @@ struct BlockFmhaPipelineQRKSVSTdm
 
         static_assert(1 <= k0_loops);
         static_assert(1 <= k1_loops);
-        // K/V loads pack their TDM descriptor in SGPRs (load_tile_tdm_uniform): the strides
-        // are taken once here instead of riding a VGPR through the loop.
-        const auto k_tdm_strides = make_tdm_uniform_strides(k_dram_window);
-        const auto v_tdm_strides = make_tdm_uniform_strides(v_dram_window);
+        // K/V loads keep their TDM groups in SGPRs and patch addresses and extent per load.
+        const TdmLoad<1> k_tdm(tdm_config_k, k_dram_window, k_lds_write_window);
+        const TdmLoad<1> v_tdm(tdm_config_v, v_dram_window, v_lds_write_window);
 
         // First key of tile i_loop: sink tiles from kv_load_start, then the normal range.
         // k_origin, the blockscale descale index and the MX scales all use it.
@@ -3417,10 +3472,10 @@ struct BlockFmhaPipelineQRKSVSTdm
                           (k0_loops == 1 && k1_loops == 1 && kK1 == kScaleBytes * kMxGranularity),
                       "MX scales cover one gemm0 slice and one gemm1 K128 step per tile");
         block_sync_lds<0>();
-        load_tile_tdm_uniform(tdm_config_k, k_lds_write_window, k_dram_window, k_tdm_strides);
+        k_tdm(k_dram_window, k_lds_write_window);
         if constexpr(kMx)
             mx_tiles.load_k(0, kv_tile_start_of(0));
-        load_tile_tdm_uniform(tdm_config_v, v_lds_write_window, v_dram_window, v_tdm_strides);
+        v_tdm(v_dram_window, v_lds_write_window);
         if constexpr(kMx)
             mx_tiles.load_v(0, kv_tile_start_of(0));
 
@@ -3436,7 +3491,7 @@ struct BlockFmhaPipelineQRKSVSTdm
         }
         k_lds_write_window.set_bottom_tensor_view_data_ptr(
             static_cast<KDataType* __restrict__>(smem_ptrk1));
-        load_tile_tdm_uniform(tdm_config_k, k_lds_write_window, k_dram_window, k_tdm_strides);
+        k_tdm(k_dram_window, k_lds_write_window);
         if constexpr(kMx) // past the last tile the scales repeat it, as the K / V prefetches do
             mx_tiles.load_k(1, kv_tile_start_of(min(1, num_total_loop - 1)));
 
@@ -3502,7 +3557,7 @@ struct BlockFmhaPipelineQRKSVSTdm
             // Past the end re-read the last tile: same TDM count, no out-of-range address.
             move_tile_window(v_dram_window, {i_total_loops + 1 < num_total_loop ? kN0 : 0, 0});
             v_lds_write_window.set_bottom_tensor_view_data_ptr(v_lds_write_ptr);
-            load_tile_tdm_uniform(tdm_config_v, v_lds_write_window, v_dram_window, v_tdm_strides);
+            v_tdm(v_dram_window, v_lds_write_window);
             if constexpr(kMx)
                 mx_tiles.load_v(i_total_loops + 1,
                                 kv_tile_start_of(min(i_total_loops + 1, num_total_loop - 1)));
@@ -3580,7 +3635,7 @@ struct BlockFmhaPipelineQRKSVSTdm
             }
             move_tile_window(k_dram_window, {i_total_loops + 2 < num_total_loop ? kN0 : 0, 0});
             k_lds_write_window.set_bottom_tensor_view_data_ptr(k_lds_write_ptr);
-            load_tile_tdm_uniform(tdm_config_k, k_lds_write_window, k_dram_window, k_tdm_strides);
+            k_tdm(k_dram_window, k_lds_write_window);
             if constexpr(kMx)
                 mx_tiles.load_k(i_total_loops + 2,
                                 kv_tile_start_of(min(i_total_loops + 2, num_total_loop - 1)));

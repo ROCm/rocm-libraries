@@ -620,27 +620,6 @@ class TDMDescriptor
         }
     }
 
-    // getResourceDescriptorGroup() without its readfirstlane. Every input must already be
-    // wave-uniform: a read-first-laned word that is already in an SGPR would otherwise be
-    // copied into a VGPR to feed v_readfirstlane, and a loop-invariant copy stays live.
-    CK_TILE_DEVICE auto getUniformResourceDescriptorGroup() const
-        -> tuple<int32x4_t, int32x8_t, int32x4_t, int32x4_t, int32x8_t>
-    {
-        static_assert(TensorRank <= 2 && !IsGatherMode,
-                      "the uniform descriptor covers rank <= 2 loads without gather");
-        TDM_GROUP0 group0{reinterpret_cast<uintptr_t>(m_localAddress),
-                          reinterpret_cast<uintptr_t>(m_globalAddress),
-                          static_cast<uint32_t>(m_rowIdxSize),
-                          0u};
-
-        TDM_GROUP1 group1;
-        configureGroup1(group1);
-
-        int32x4_t v4i_zeros = {};
-        int32x8_t v8i_zeros = {};
-        return make_tuple(group0.bitfield, group1.bitfield, v4i_zeros, v4i_zeros, v8i_zeros);
-    }
-
     /// Groups 0 to 2 of a load of rank 2 or less, unlike getResourceDescriptorGroup with group 2
     /// set (iterate mode) and not read-first-lane'd: for amd_tdm_load(g0, g1, g2) by a caller
     /// that keeps them in registers and updates only the fields that change.
