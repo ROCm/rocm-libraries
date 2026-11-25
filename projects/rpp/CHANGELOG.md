@@ -18,6 +18,7 @@ Full documentation for RPP is available at [https://rocm.docs.amd.com/projects/r
 ### Removed
 
 - The standalone handle and backend-macro tests under `test/` have been merged into the GoogleTest suite in `utilities/test/`, and the `test/` directory has been removed. The HIP allocation-failure fault-injection cases were not carried over.
+- `rppGetKernelTime()` and `rppEnableProfiling()` have been removed from `rpp.h`. They were declared for HIP builds but never defined, so any caller that used them failed at link time. Use `rocprofv3` for kernel timing instead.
 
 ## RPP 3.2.0 for ROCm 10.2.0
 

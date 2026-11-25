@@ -93,8 +93,6 @@ struct HandleImpl {
     StreamPtr stream = nullptr;
     int device = -1;
     Allocator allocator{};
-    bool enable_profiling = false;
-    float profiling_result = 0.0;
     size_t nBatchSize = 1;
     Rpp32u numThreads = 0;
     RppBackend backend = RppBackend::RPP_HIP_BACKEND;
@@ -141,18 +139,6 @@ struct HandleImpl {
 
     static StreamPtr reference_stream(hipStream_t s) {
         return StreamPtr{s, null_deleter{}};
-    }
-
-    void elapsed_time(hipEvent_t start, hipEvent_t stop) {
-        if (enable_profiling) {
-            auto status = hipEventElapsedTime(&this->profiling_result, start, stop);
-            if (status != hipSuccess) RPP_THROW_HIP_STATUS(status, "hipEventElapsedTime failed");
-        }
-    }
-
-    std::function<void(hipEvent_t, hipEvent_t)> elapsed_time_handler() {
-        return std::bind(&HandleImpl::elapsed_time, this, std::placeholders::_1,
-                         std::placeholders::_2);
     }
 
     void set_ctx() {

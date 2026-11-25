@@ -229,41 +229,6 @@ extern "C" SHARED_PUBLIC rppStatus_t rppSetAllocator(rppHandle_t handle,
                                                      rppDeallocatorFunction deallocator,
                                                      void* allocatorContext);
 
-/*! \brief Get time taken by previous kernel.
- * \details Function to get time for last kernel launched. This function is used only when profiling
- * mode has been enabled. \param [in] handle RPP handle of type <tt> \ref rppHandle_t</tt>. \param
- * [in] time Pointer to a float type to contain kernel time in milliseconds. \ingroup group_rpp
- * \return A <tt> \ref rppStatus_t</tt> enumeration.
- * \retval rppStatusSuccess
- * \retval rppStatusNotInitialized
- * \retval rppStatusInvalidValue
- * \retval rppStatusBadParm
- * \retval rppStatusAllocFailed
- * \retval rppStatusInternalError
- * \retval rppStatusNotImplemented
- * \retval rppStatusUnknownError
- * \retval rppStatusUnsupportedOp
- */
-extern "C" SHARED_PUBLIC rppStatus_t rppGetKernelTime(rppHandle_t handle, float* time);
-
-/*! \brief Enable Profiling.
- * \details Function to enable profiling to retrieve kernel time.
- * \param [in] handle RPP handle of type <tt> \ref rppHandle_t</tt>.
- * \param [in] enable Boolean to toggle profiling.
- * \ingroup group_rpp
- * \return A <tt> \ref rppStatus_t</tt> enumeration.
- * \retval rppStatusSuccess
- * \retval rppStatusNotInitialized
- * \retval rppStatusInvalidValue
- * \retval rppStatusBadParm
- * \retval rppStatusAllocFailed
- * \retval rppStatusInternalError
- * \retval rppStatusNotImplemented
- * \retval rppStatusUnknownError
- * \retval rppStatusUnsupportedOp
- */
-extern "C" SHARED_PUBLIC rppStatus_t rppEnableProfiling(rppHandle_t handle, bool enable);
-
 #endif  // GPU_SUPPORT
 
 #ifdef __cplusplus
