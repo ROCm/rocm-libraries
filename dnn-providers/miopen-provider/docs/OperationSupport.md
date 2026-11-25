@@ -18,10 +18,10 @@ The following table lists all operations currently supported in hipDNN:
 | Batchnorm Training  | FP16, BFP16, FP32 | NCL, NLC, NCHW, NHWC, NCDHW, NDHWC | Spatial mode only<sup>1,6</sup> |
 | Batchnorm Training + Activation | FP16, BFP16, FP32 | NCL, NLC, NCHW, NHWC, NCDHW, NDHWC | Fused graph<sup>3,6</sup> |
 | Batchnorm Backward  | FP16, BFP16, FP32 | NCL, NLC, NCHW, NHWC, NCDHW, NDHWC | Spatial mode only<sup>1,6</sup> |
-| Convolution Dgrad   | FP16, BFP16, FP32 | NCL, NLC, NCHW, NHWC, NCDHW, NDHWC | Cross-correlation only<sup>2,6</sup>, Deterministic<sup>5</sup> |
-| Convolution Forward | FP16, BFP16, FP32 | NCL, NLC, NCHW, NHWC, NCDHW, NDHWC | Cross-correlation only<sup>2,6</sup>, Deterministic<sup>5</sup> |
-| Convolution Forward + (Bias) + Activation<sup>4</sup> | FP16, BFP16, FP32 | NCL, NLC, NCHW, NHWC, NCDHW, NDHWC | Fused graph<sup>2,3,6</sup>, Deterministic<sup>5</sup> |
-| Convolution Wgrad   | FP16, BFP16, FP32 | NCL, NLC, NCHW, NHWC, NCDHW, NDHWC | Cross-correlation only<sup>2,6</sup>, Deterministic<sup>5</sup> |
+| Convolution Dgrad   | FP16, BFP16, FP32 | NCL, NLC, NCHW, NHWC, NCDHW, NDHWC | Cross-correlation only<sup>2,6</sup>, Deterministic<sup>5</sup>, Applicability limits<sup>10</sup> |
+| Convolution Forward | FP16, BFP16, FP32 | NCL, NLC, NCHW, NHWC, NCDHW, NDHWC | Cross-correlation only<sup>2,6</sup>, Deterministic<sup>5</sup>, Applicability limits<sup>10</sup> |
+| Convolution Forward + (Bias) + Activation<sup>4</sup> | FP16, BFP16, FP32 | NCL, NLC, NCHW, NHWC, NCDHW, NDHWC | Fused graph<sup>2,3,6</sup>, Deterministic<sup>5</sup>, Applicability limits<sup>10</sup> |
+| Convolution Wgrad   | FP16, BFP16, FP32 | NCL, NLC, NCHW, NHWC, NCDHW, NDHWC | Cross-correlation only<sup>2,6</sup>, Deterministic<sup>5</sup>, Applicability limits<sup>10</sup> |
 | Pointwise Activation (standalone) | FP16, FP32 | Rank 1-4, any dimension order | Single-node graph<sup>7</sup> |
 | Pointwise Binary Elementwise (standalone) | FP16, FP32 | NCHW, NCDHW | Single-node graph<sup>8</sup> |
 | Reduction (standalone) | FP16, FP32 | Any, rank 1-5 | Single-node graph<sup>9</sup> |
@@ -35,6 +35,7 @@ The following table lists all operations currently supported in hipDNN:
 ⁷ See Standalone Activation note below
 ⁸ See Standalone Binary Elementwise note below
 ⁹ See Standalone Reduction note below
+¹⁰ See Convolution Applicability note below
 
 ## Detailed Requirements
 
@@ -49,13 +50,16 @@ The following table lists all operations currently supported in hipDNN:
 - Output tensor
     - Virtual
     - Data type: FP32 or the input data type
+- Bias operand (the ADD operand that is not the convolution output)
+    - Dims, rank and channel stride: see Bias, output and tensor requirements below
+    - Data type: the input data type
 #### Activation node
 - Compute data type: FP32
 - Activation mode: RELU_FORWARD
 - Supports
     - standard ReLU: no clips set, or relu_lower_clip = 0
     - clipped ReLU: relu_upper_clip set
-    - CLAMP: relu_lower_clip and relu_upper_clip set
+    - CLAMP: relu_lower_clip set, with or without relu_upper_clip
 - relu_lower_clip_slope must be unset or 0 (leaky ReLU is not supported when fused)
 #### Bias, output and tensor requirements
 - Bias dims, after left-padding with 1 to the convolution output rank, are `[1, K, 1, ...]` where K is the output channel count
@@ -76,6 +80,15 @@ The following table lists all operations currently supported in hipDNN:
 > **Convolution Operations:** Currently, only cross-correlation convolutions are supported. True mathematical convolution (with kernel flipping) is not yet implemented. In practice, cross-correlation is the standard operation used in modern deep learning frameworks. Pass-by-value tensors are not supported.
 
 > [!NOTE]
+> **Convolution Applicability:** The plugin declines the convolution graphs below. A declined graph falls to another engine, or no engine is found for it. These are limits of the plugin's MIOpen-backed convolution engines, not errors in the graph: for graphs of these kinds MIOpen can return wrong output or fault. The rules are conservative and also decline some graphs MIOpen computes correctly. The data type, layout, packing and size rules apply to the plain Convolution Forward, Dgrad and Wgrad rows; the fused row is subject to the last rule only.
+> - **Data type (plain Convolution Forward, Dgrad and Wgrad):** the three tensors (`x`, `w`, `y`; `dy`, `w`, `dx`; `x`, `dy`, `dw`) must share one data type, FP32, FP16 or BFP16.
+> - **Layout (plain Convolution Forward, Dgrad and Wgrad):** the three tensors must share one layout: all channels-first (NCL, NCHW, NCDHW) or all channels-last (NLC, NHWC, NDHWC). A packed tensor is judged by its exact canonical strides, including those of extent-1 dimensions; a non-packed tensor is judged by its stride order. Forward also accepts three packed tensors whose strides, read in one layout's order, never increase, extent-1 dimensions included: for example a 1x1 convolution on an `[N, C, 1, 1]` channels-first input with a channels-last output, or a batch-1 input sliced from a wider channel dimension.
+> - **Packing, plain Convolution Forward:** a non-packed tensor (the strides do not address exactly the element count) is declined in a grouped convolution and in a 3D channels-last convolution. Any tensor, packed or not, is declined when its strides may let two elements share an address (a zero, negative or overlapping stride; the check is conservative). Other non-packed tensors, such as padded rows or a channel slice, are accepted.
+> - **Packing, plain Convolution Dgrad and Wgrad:** a channels-first non-packed tensor is accepted; a channels-last non-packed tensor is declined.
+> - **Size, plain Convolution Dgrad:** `dy` and `dx` must each have at most 2^31 - 1 elements.
+> - **Fused Convolution Forward + (Bias) + Activation:** none of the rules above is applied to its `x`, `w` and `y`. The graph is declined when the bias operand does not meet the requirements under Detailed Requirements (dims, channel stride and data type), or when the final activation output does not have the data type of `x` and the dims of the convolution output, packed in the same layout as `x`. An ADD with any other operand, for example a residual of the output's shape, is not treated as a bias and the graph is declined.
+
+> [!NOTE]
 > **Fused Operations:**
 > - Fused batchnorm operations require F32 data type for the virtual/intermediate tensors. This can be set either explicitly on the tensor or by setting the default intermediate data type for the graph (recommended).
 > - The fused graph patterns combine multiple operations:
@@ -86,16 +99,17 @@ The following table lists all operations currently supported in hipDNN:
 >   - **Convolution Forward + (Bias) + Activation:** Combines convolution forward, optional bias addition, and forward activation
 
 > [!NOTE]
-> **Activation Functions (fused):** Supports ReLU, Clipped ReLU (with configurable upper clip), and CLAMP (with configurable lower/upper clips). Leaky ReLU (non-zero `relu_lower_clip_slope`), Sigmoid and Tanh are **not** supported when fused onto a producer op; use a standalone activation node for those.
+> **Activation Functions (fused):** Supports ReLU, Clipped ReLU (with configurable upper clip), and CLAMP (with a configurable lower clip and an optional upper clip). Leaky ReLU (non-zero `relu_lower_clip_slope`), Sigmoid and Tanh are **not** supported when fused onto a producer op; use a standalone activation node for those.
 
 > [!NOTE]
-> **Standalone Activation:** A single-node pointwise graph supports ReLU, Clipped ReLU (configurable upper clip), CLAMP (configurable lower/upper clips), Leaky ReLU (configurable negative slope), Sigmoid and Tanh. Tensors have rank 1-4. `x` and `y` have identical dims and are both packed with the same layout, in any dimension order; strides of unit dimensions are ignored. A padded, sliced, broadcast or otherwise non-packed tensor is declined because of [MIOpen issue 16024](https://github.com/ROCm/rocm-libraries/issues/16024).
+> **Standalone Activation:** A single-node pointwise graph supports ReLU, Clipped ReLU (configurable upper clip), CLAMP (configurable lower clip and optional upper clip), Leaky ReLU (configurable negative slope), Sigmoid and Tanh. Tensors have rank 1-4. `x` and `y` have identical dims and are both packed with the same layout, in any dimension order; strides of unit dimensions are ignored. A padded, sliced, broadcast or otherwise non-packed tensor is declined because of [MIOpen issue 16024](https://github.com/ROCm/rocm-libraries/issues/16024).
 
 > [!NOTE]
 > **ReLU parameters:** An unset `relu_lower_clip` is treated as 0, an unset `relu_upper_clip` as no
 > upper bound, and an unset `relu_lower_clip_slope` or a slope of exactly 0 as no leaky slope, so
 > equivalent encodings select the same MIOpen activation. A non-zero `relu_lower_clip` without an
-> upper clip is not supported.
+> upper clip runs as CLAMP with the float maximum as its upper bound, as the hipDNN reference does.
+> Leaky ReLU with a non-zero `relu_lower_clip` is not supported.
 
 > [!NOTE]
 > **Standalone Binary Elementwise:** A single-node pointwise graph supports ADD, SUB, MUL, MAX and MIN

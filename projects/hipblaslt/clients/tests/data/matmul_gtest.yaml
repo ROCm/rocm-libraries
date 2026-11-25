@@ -1352,6 +1352,64 @@ Tests:
   unit_check: 0
   norm_check: 1
 
+- name: matmul_bias_swish_aux
+  category: pre_checkin
+  function:
+    matmul: *real_precisions
+  M: [128, 129]
+  N: [128, 129]
+  K: [128, 129]
+  transA_transB: *transA_transB_range
+  alpha: 1
+  beta: [ 0.0, 2.0 ]
+  activation_type: swish
+  bias_vector: [0, 1]
+  unit_check: 0
+  norm_check: 1
+  gpu_arch: '9(42|50)|1250'
+  use_e: true
+
+- name: matmul_bias_swish_aux_fp16
+  category: pre_checkin
+  function:
+    matmul: *hpa_half_precision
+  M: [128, 129]
+  N: [128, 129]
+  K: [128, 129]
+  transA_transB: *transA_transB_range
+  alpha: 1
+  beta: [ 0.0, 2.0 ]
+  use_e: 1
+  activation_type: swish
+  bias_vector: [0, 1]
+  unit_check: 0
+  norm_check: 1
+
+- name: matmul_bias_swish_aux_layout
+  category: pre_checkin
+  function:
+    matmul: *real_precisions
+  M: 129
+  N: 128
+  K: 128
+  transA: T
+  transB: N
+  lde: 144
+  stride_e: 18560
+  batch_count: 2
+  alpha: 1
+  beta: 2
+  activation_type: swish
+  bias_vector: [0, 1]
+  use_e: true
+  arguments:
+    - { use_ext: 0, use_ext_setproblem: 0 }
+    - { use_ext: 1, use_ext_setproblem: 0 }
+    - { use_ext: 1, use_ext_setproblem: 1 }
+  unit_check: 0
+  norm_check: 1
+  gpu_arch: '9(42|50)|1250'
+
 - name: matmul_bias_clamp
   category: pre_checkin
   function:
@@ -4248,8 +4306,9 @@ Tests:
   require_solution_chip_ids: [0x75a0, 0x75a3]
   gpu_arch: '950'
 
-# gfx1151 W4A16: TN, complete quantization groups, K divisible by 64.
-# Every scale mode (G32/64/128, symmetric and _ZP) under both encodings.
+# gfx1150 and gfx1151 W4A16: TN, complete quantization groups, K divisible by 64.
+# Every scale mode (G32/64/128, symmetric and _ZP) under both encodings, on a prefill size
+# (256 tokens) and on 1 to 5 tokens (the decode kernels, one set per token count).
 - name: matmul_w4a16
   category: pre_checkin
   function:
@@ -4257,6 +4316,11 @@ Tests:
     - { a_type: i4_r, b_type: bf16_r, c_type: bf16_r, d_type: bf16_r, compute_type: c_f32_r, scale_type: f32_r, scaleA: [1006, 1007, 1008, 1009, 1010, 1011], int4_encoding: [0, 1] }
     - { a_type: i4_r, b_type: f16_r, c_type: f16_r, d_type: f16_r, compute_type: c_f32_r, scale_type: f32_r, scaleA: [1012, 1013, 1014, 1015, 1016, 1017], int4_encoding: [0, 1] }
   matrix_size:
+    - { M: 512, N:   1, K: 1024, lda: 1024, ldb: 1024, ldc: 512, ldd: 512 }
+    - { M: 512, N:   2, K: 1024, lda: 1024, ldb: 1024, ldc: 512, ldd: 512 }
+    - { M: 512, N:   3, K: 1024, lda: 1024, ldb: 1024, ldc: 512, ldd: 512 }
+    - { M: 512, N:   4, K: 1024, lda: 1024, ldb: 1024, ldc: 512, ldd: 512 }
+    - { M: 512, N:   5, K: 1024, lda: 1024, ldb: 1024, ldc: 512, ldd: 512 }
     - { M: 512, N: 256, K: 1024, lda: 1024, ldb: 1024, ldc: 512, ldd: 512 }
   transA: T
   transB: N
@@ -4265,9 +4329,9 @@ Tests:
   initialization: hpl
   unit_check: 0
   norm_check: 1
-  gpu_arch: '1151'
+  gpu_arch: '115[01]'
 
-# Asymmetric, odd M: partial last 8-row zero-point word.
+# Asymmetric, odd M: partial last 8-row zero-point word, and a last decode wave with one row.
 - name: matmul_w4a16
   category: pre_checkin
   function:
@@ -4277,7 +4341,12 @@ Tests:
     - { a_type: i4_r, b_type: f16_r, c_type: f16_r, d_type: f16_r, compute_type: c_f32_r, scale_type: f32_r, scaleA: 1016, int4_encoding: 0 }
     - { a_type: i4_r, b_type: f16_r, c_type: f16_r, d_type: f16_r, compute_type: c_f32_r, scale_type: f32_r, scaleA: 1017, int4_encoding: 1 }
   matrix_size:
-    - { M: 65, N: 64, K: 512, lda: 512, ldb: 512, ldc: 65, ldd: 65 }
+    - { M: 65, N:   1, K: 512, lda: 512, ldb: 512, ldc: 65, ldd: 65 }
+    - { M: 65, N:   2, K: 512, lda: 512, ldb: 512, ldc: 65, ldd: 65 }
+    - { M: 65, N:   3, K: 512, lda: 512, ldb: 512, ldc: 65, ldd: 65 }
+    - { M: 65, N:   4, K: 512, lda: 512, ldb: 512, ldc: 65, ldd: 65 }
+    - { M: 65, N:   5, K: 512, lda: 512, ldb: 512, ldc: 65, ldd: 65 }
+    - { M: 65, N:  64, K: 512, lda: 512, ldb: 512, ldc: 65, ldd: 65 }
   transA: T
   transB: N
   alpha: 1.0
@@ -4285,7 +4354,7 @@ Tests:
   initialization: hpl
   unit_check: 0
   norm_check: 1
-  gpu_arch: '1151'
+  gpu_arch: '115[01]'
 
 # Padded lda (a multiple of 8, not of 32) for the decode and tile kernels.
 - name: matmul_w4a16
@@ -4297,8 +4366,12 @@ Tests:
     - { a_type: i4_r, b_type: f16_r, c_type: f16_r, d_type: f16_r, compute_type: c_f32_r, scale_type: f32_r, scaleA: 1015, int4_encoding: 0 }
     - { a_type: i4_r, b_type: f16_r, c_type: f16_r, d_type: f16_r, compute_type: c_f32_r, scale_type: f32_r, scaleA: 1012, int4_encoding: 1 }
   matrix_size:
-    - { M: 128, N:  1, K: 512, lda: 520, ldb: 512, ldc: 128, ldd: 128 }
-    - { M: 128, N: 64, K: 512, lda: 520, ldb: 512, ldc: 128, ldd: 128 }
+    - { M: 128, N:   1, K: 512, lda: 520, ldb: 512, ldc: 128, ldd: 128 }
+    - { M: 128, N:   2, K: 512, lda: 520, ldb: 512, ldc: 128, ldd: 128 }
+    - { M: 128, N:   3, K: 512, lda: 520, ldb: 512, ldc: 128, ldd: 128 }
+    - { M: 128, N:   4, K: 512, lda: 520, ldb: 512, ldc: 128, ldd: 128 }
+    - { M: 128, N:   5, K: 512, lda: 520, ldb: 512, ldc: 128, ldd: 128 }
+    - { M: 128, N:  64, K: 512, lda: 520, ldb: 512, ldc: 128, ldd: 128 }
   transA: T
   transB: N
   alpha: 1.0
@@ -4306,7 +4379,59 @@ Tests:
   initialization: hpl
   unit_check: 0
   norm_check: 1
-  gpu_arch: '1151'
+  gpu_arch: '115[01]'
+
+# K a multiple of 64 but not of 128 (17 x 64): the tiles with DepthU 128 are not eligible and
+# the ones with DepthU 64 run. K is a whole number of scale groups, so 32 is its smallest step;
+# no prefill tile takes an odd multiple of 32.
+- name: matmul_w4a16
+  category: pre_checkin
+  function:
+    matmul:
+    - { a_type: i4_r, b_type: bf16_r, c_type: bf16_r, d_type: bf16_r, compute_type: c_f32_r, scale_type: f32_r, scaleA: 1006, int4_encoding: 0 }
+    - { a_type: i4_r, b_type: bf16_r, c_type: bf16_r, d_type: bf16_r, compute_type: c_f32_r, scale_type: f32_r, scaleA: 1010, int4_encoding: 1 }
+    - { a_type: i4_r, b_type: f16_r, c_type: f16_r, d_type: f16_r, compute_type: c_f32_r, scale_type: f32_r, scaleA: 1013, int4_encoding: 0 }
+    - { a_type: i4_r, b_type: f16_r, c_type: f16_r, d_type: f16_r, compute_type: c_f32_r, scale_type: f32_r, scaleA: 1015, int4_encoding: 1 }
+  matrix_size:
+    - { M: 512, N: 256, K: 1088, lda: 1088, ldb: 1088, ldc: 512, ldd: 512 }
+  transA: T
+  transB: N
+  alpha: 1.0
+  beta: 0.0
+  initialization: hpl
+  unit_check: 0
+  norm_check: 1
+  gpu_arch: '115[01]'
+
+# Decode kernels (1, 2, 3, 4 and 5 tokens) with a K remainder: K an odd multiple of 32 (33 x 32 and
+# 65 x 32) does not fill the last DepthU iteration, which runs masked.
+- name: matmul_w4a16
+  category: pre_checkin
+  function:
+    matmul:
+    - { a_type: i4_r, b_type: bf16_r, c_type: bf16_r, d_type: bf16_r, compute_type: c_f32_r, scale_type: f32_r, scaleA: 1006, int4_encoding: 0 }
+    - { a_type: i4_r, b_type: bf16_r, c_type: bf16_r, d_type: bf16_r, compute_type: c_f32_r, scale_type: f32_r, scaleA: 1009, int4_encoding: 1 }
+    - { a_type: i4_r, b_type: f16_r, c_type: f16_r, d_type: f16_r, compute_type: c_f32_r, scale_type: f32_r, scaleA: 1012, int4_encoding: 0 }
+    - { a_type: i4_r, b_type: f16_r, c_type: f16_r, d_type: f16_r, compute_type: c_f32_r, scale_type: f32_r, scaleA: 1015, int4_encoding: 1 }
+  matrix_size:
+    - { M: 128, N:   1, K: 1056, lda: 1056, ldb: 1056, ldc: 128, ldd: 128 }
+    - { M: 128, N:   2, K: 1056, lda: 1056, ldb: 1056, ldc: 128, ldd: 128 }
+    - { M: 128, N:   3, K: 1056, lda: 1056, ldb: 1056, ldc: 128, ldd: 128 }
+    - { M: 128, N:   4, K: 1056, lda: 1056, ldb: 1056, ldc: 128, ldd: 128 }
+    - { M: 128, N:   5, K: 1056, lda: 1056, ldb: 1056, ldc: 128, ldd: 128 }
+    - { M: 128, N:   1, K: 2080, lda: 2080, ldb: 2080, ldc: 128, ldd: 128 }
+    - { M: 128, N:   2, K: 2080, lda: 2080, ldb: 2080, ldc: 128, ldd: 128 }
+    - { M: 128, N:   3, K: 2080, lda: 2080, ldb: 2080, ldc: 128, ldd: 128 }
+    - { M: 128, N:   4, K: 2080, lda: 2080, ldb: 2080, ldc: 128, ldd: 128 }
+    - { M: 128, N:   5, K: 2080, lda: 2080, ldb: 2080, ldc: 128, ldd: 128 }
+  transA: T
+  transB: N
+  alpha: 1.0
+  beta: 0.0
+  initialization: hpl
+  unit_check: 0
+  norm_check: 1
+  gpu_arch: '115[01]'
 
 # Same via the ext API; only use_ext_setproblem 1 (api_method cpp) reads
 # setInt4EncodingA and the w4a16 modes from GemmProblemType/GemmEpilogue.
@@ -4329,7 +4454,7 @@ Tests:
   initialization: hpl
   unit_check: 0
   norm_check: 1
-  gpu_arch: '1151'
+  gpu_arch: '115[01]'
 
 - name: matmul_mx_all_kernels
   category: nightly
@@ -5075,8 +5200,9 @@ Tests:
 
 # The side operands, with the epilogue that reads them.
 # Runtime on gfx942: 4 cases, about 4 s.
+# Keep in the quick tier for the HOST_ASAN regression reported in ROCM-34728.
 - name: matmul_fast_check_placement_epilogue
-  category: pre_checkin
+  category: smoke
   function:
     matmul:
       - *single_precision

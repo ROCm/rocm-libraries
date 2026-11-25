@@ -503,7 +503,7 @@ void rocfft_rccl_comm_t::alltoall(const std::vector<const void*>& sendbufs,
                                         + std::to_string(r) + " has a null send or recv buffer");
 
         rocfft_scoped_device dev(loc.device);
-        ncclResult_t         result = ncclAllToAll(sendbufs[r],
+        ncclResult_t         result = ncclAlltoAll(sendbufs[r],
                                            recvbufs[r],
                                            nccl_count,
                                            dtype,
@@ -512,7 +512,7 @@ void rocfft_rccl_comm_t::alltoall(const std::vector<const void*>& sendbufs,
         if(result != ncclSuccess)
         {
             throw rocfft_rccl_exception_t(
-                "ncclAllToAll failed on device " + std::to_string(loc.device), result);
+                "ncclAlltoAll failed on device " + std::to_string(loc.device), result);
         }
     }
     group.end();
