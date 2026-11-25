@@ -642,7 +642,8 @@ struct MxMoeLayerCase
     int fused_slices = 0;
     // Run the layer as one persistent task-queue launch (MoeMxPersistentKernel): gate_up and
     // down tiles as tasks with per-row-tile dependencies. With per_slot, the combine kernel
-    // follows as a second launch. Takes precedence over fused_slices.
+    // follows as a second launch. Takes precedence over fused_slices, which then caps the K
+    // slices of the down tasks (atomic combine only; default one per 256 columns).
     bool persistent = false;
     int init        = 0;
     unsigned seed   = 11939;
@@ -837,12 +838,19 @@ inline MxMoeLayerResult run_mx_moe_layer(const MxMoeLayerCase& c)
     using DownSlotKernel = typename MxMoeKernelTypes<K::kFFN_gemm2_per_slot, F4, F4, float>::Kernel;
     using PersistentAtomic  = ck_tile::MoeMxPersistentKernel<GateUpKernel, DownKernel>;
     using PersistentPerSlot = ck_tile::MoeMxPersistentKernel<GateUpKernel, DownSlotKernel>;
-    ck_tile::DeviceMem ws_dev(PersistentAtomic::WorkspaceWords(M / MTile) * sizeof(int32_t));
+    // Most K slices of the persistent down tasks (the kernel picks how many it uses): fused_slices
+    // if given, else one per 256 columns with the atomic combine; per-slot output takes one.
+    const int persistent_slices =
+        per_slot_out ? 1
+                     : (c.fused_slices > 0 ? c.fused_slices : PersistentAtomic::MaxUsefulSlices(I));
+    ck_tile::DeviceMem ws_dev(PersistentAtomic::WorkspaceWords(M / MTile, persistent_slices) *
+                              sizeof(int32_t));
     ws_dev.SetZero();
     auto run_persistent = [&](const ck_tile::stream_config& s, bool clear) {
         auto launch = [&](auto kernel_type) {
-            using P       = decltype(kernel_type);
-            const auto pk = P::MakeKargs(gate_up, down, ws_dev.GetDeviceBuffer());
+            using P = decltype(kernel_type);
+            const auto pk =
+                P::MakeKargs(gate_up, down, ws_dev.GetDeviceBuffer(), persistent_slices);
             if(!P::IsSupportedArgument(pk))
                 throw std::runtime_error("Arguments not supported by the persistent MX MoE kernel");
             return ck_tile::make_kernel<1>(P{}, P::GridSize(pk), P::BlockSize(), 0, pk);

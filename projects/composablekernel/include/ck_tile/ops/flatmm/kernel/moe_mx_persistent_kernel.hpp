@@ -10,12 +10,28 @@ namespace ck_tile {
 
 // A whole MX MoE layer in one persistent launch, gfx1250, scheduled as tasks:
 //
-//   gate_up task (row tile m, gate_up column tile n): GateUpKernel
+//   gate_up task (row tile m, gate_up column tile g): GateUpKernel
 //       (MoeFlatmmKind::kFFN_gemm1_gate_up_mx_quant) writes its 32 x (N_Tile / 2) part of the
-//       MXFP4 intermediate, then publishes it by incrementing ready[m].
-//   down task (row tile m, output column tile n): waits until ready[m] counts every gate_up
-//       tile of m, then runs DownKernel (kFFN_gemm2: weighted fp32 atomics into Y, or
-//       kFFN_gemm2_per_slot: plain store per (token, slot), combined afterwards) over all of K.
+//       MXFP4 intermediate, then publishes it by incrementing ready[m][s] of each K slice s of
+//       the down projection whose reach (below) contains it.
+//   down task (row tile m, K slice s, output column tile n): waits until ready[m][s] counts every
+//       gate_up tile of the reach of slice s, then runs DownKernel over that slice of K:
+//       kFFN_gemm2 adds the
+//       routing-weighted partial sum into Y with fp32 atomics; kFFN_gemm2_per_slot (plain store
+//       per (token, slot), combined afterwards) needs a single slice.
+//
+// Splitting K lets a down task start once the gate_up tiles of its slice are done, rather than
+// all of the row tile's, shortens the longest dependent chain (one gate_up tile, then one slice of
+// the down projection) and gives decode-size batches more tasks. Each slice adds a pass of fp32
+// atomics into Y, though, which costs more than it gains once the down tasks fill the grid. So
+// the kernel picks the slice count on the device, where the number of row tiles is known: the
+// most slices (up to max_slices, each a multiple of 256 columns) that keep row tiles x output
+// column tiles x slices within half the grid (measured best on gfx1250: the other half runs the
+// gate_up tasks that overlap them).
+//
+// The reach of a slice is its columns rounded out to kReachCols: caches fill 256 bytes (512 fp4
+// values) at a time on gfx1250, so reading a slice can bring a neighbouring slice's bytes of the
+// same slot row into a cache; waiting for those too means no cache ever holds a stale copy.
 //
 // The task list holds every gate_up task, row tile by row tile, then every down task in the same
 // order. Workgroup w runs tasks w, w + grid, w + 2 grid, ...: it finishes all its gate_up tasks
@@ -31,10 +47,10 @@ namespace ck_tile {
 // device-scope release (cache writeback) or acquire (cache invalidate) per task, or counters
 // sharing a cache line each cost more than the tasks' work at decode sizes.
 //
-// Workspace (int32, zero when first allocated; the kernel leaves it zero): ready[max row tiles],
-// then waiters[max row tiles], kCounterStride words apart. The last down task of a row tile to
-// pass its wait resets that tile's counters, so consecutive launches on a stream need no
-// clearing.
+// Workspace (int32, zero when first allocated; the kernel leaves it zero): ready[max row tiles]
+// [slices], then waiters[max row tiles][slices], kCounterStride words apart. The last down task
+// of a (row tile, slice) to pass its wait resets its counters, so consecutive launches on a
+// stream need no clearing.
 template <typename GateUpKernel_, typename DownKernel_>
 struct MoeMxPersistentKernel
 {
@@ -53,10 +69,15 @@ struct MoeMxPersistentKernel
     static constexpr index_t kBlockSize      = GateUpKernel::kBlockSize;
     static constexpr index_t MPerBlock       = TilePartitioner::MPerBlock;
     static constexpr index_t GateUpNPerBlock = TilePartitioner::NPerBlock;
-    static constexpr index_t DownNPerBlock   = DownKernel::TilePartitioner::NPerBlock;
-    // int32 words between counters: each in its own 256 bytes, so polls of different row tiles
-    // go to different L2 channels instead of queueing on one line.
+    // Intermediate columns one gate_up tile produces (gate and up interleaved in its N tile).
+    static constexpr index_t InterPerGateUpTile = GateUpNPerBlock / 2;
+    static constexpr index_t DownNPerBlock      = DownKernel::TilePartitioner::NPerBlock;
+    static constexpr index_t DownKPerBlock      = DownKernel::TilePartitioner::KPerBlock;
+    // int32 words between counters: each in its own 256 bytes, so polls of different counters go
+    // to different L2 channels instead of queueing on one line.
     static constexpr index_t kCounterStride = 64;
+    // Intermediate columns per 256-byte block of a slot row (see the reach above).
+    static constexpr index_t kReachCols = 512;
 
     template <typename GateUpKargs, typename DownKargs>
     struct Kargs
@@ -65,22 +86,32 @@ struct MoeMxPersistentKernel
         DownKargs down;
         int32_t* workspace;
         index_t max_row_tiles; // row tiles the workspace has counters for
+        index_t max_slices;    // most K slices of the down projection (1: no split)
     };
 
-    // int32 words of workspace for up to max_row_tiles row tiles.
-    CK_TILE_HOST static constexpr std::size_t WorkspaceWords(index_t max_row_tiles)
+    // int32 words of workspace for up to max_row_tiles row tiles of up to max_slices K slices.
+    CK_TILE_HOST static constexpr std::size_t WorkspaceWords(index_t max_row_tiles,
+                                                             index_t max_slices = 1)
     {
-        return 2 * std::size_t(max_row_tiles) * kCounterStride;
+        return 2 * std::size_t(max_row_tiles) * max_slices * kCounterStride;
     }
 
+    // Most K slices worth allowing for a down projection of k columns: one per 256 columns.
+    CK_TILE_HOST_DEVICE static constexpr index_t MaxUsefulSlices(index_t k) { return k / 256; }
+
     template <typename GateUpHostArgs, typename DownHostArgs>
-    CK_TILE_HOST static auto
-    MakeKargs(const GateUpHostArgs& gate_up, const DownHostArgs& down, void* workspace)
+    CK_TILE_HOST static auto MakeKargs(const GateUpHostArgs& gate_up,
+                                       const DownHostArgs& down,
+                                       void* workspace,
+                                       index_t max_slices = 1)
     {
         auto g = GateUpKernel::MakeKernelArgs(gate_up);
         auto d = DownKernel::MakeKernelArgs(down);
-        return Kargs<decltype(g), decltype(d)>{
-            g, d, static_cast<int32_t*>(workspace), integer_divide_ceil(gate_up.M, MPerBlock)};
+        return Kargs<decltype(g), decltype(d)>{g,
+                                               d,
+                                               static_cast<int32_t*>(workspace),
+                                               integer_divide_ceil(gate_up.M, MPerBlock),
+                                               max_slices};
     }
 
     template <typename K>
@@ -91,7 +122,9 @@ struct MoeMxPersistentKernel
         // on gfx1250, so every slot row (stride / 2 bytes) and every row tile's scale block
         // (K bytes) must be whole 256-byte blocks: neighbouring slot rows belong to other row
         // tiles, and with a row stride that is not a multiple of 256 bytes the down projection
-        // reads wrong values.
+        // reads wrong values. Within a slot row, slices that share a 256-byte block wait for each
+        // other (the reach); within a scale block a slice is slice bytes, whole blocks as K
+        // slices are multiples of 256.
         if(kargs.workspace == nullptr || kargs.gate_up.N != 2 * kargs.down.K ||
            kargs.down.K % 256 != 0 || kargs.gate_up.stride_C != kargs.down.stride_A ||
            kargs.down.stride_A % 512 != 0 || kargs.gate_up.M != kargs.down.M ||
@@ -101,6 +134,16 @@ struct MoeMxPersistentKernel
                          "projection's K (a multiple of 256), the intermediate's row stride "
                          "(stride_C of gate_up = stride_A of down) a multiple of 512, and the "
                          "same sorted rows for both"
+                      << std::endl;
+            return false;
+        }
+        static_assert(256 % DownKPerBlock == 0 && 256 % InterPerGateUpTile == 0,
+                      "a 256-column slice must be whole down K tiles and gate_up tiles");
+        if(kargs.max_slices <= 0 ||
+           (DownKernel::Kind == MoeFlatmmKind::kFFN_gemm2_per_slot && kargs.max_slices != 1))
+        {
+            std::cerr << "MoeMxPersistentKernel: max_slices must be positive, and 1 for "
+                         "gemm2_per_slot"
                       << std::endl;
             return false;
         }
@@ -127,8 +170,8 @@ struct MoeMxPersistentKernel
             0));
         // No more workgroups than tasks: idle ones would only take launch slots.
         const index_t row_tiles = integer_divide_ceil(kargs.gate_up.M, MPerBlock);
-        const index_t tasks =
-            row_tiles * (kargs.gate_up.N / GateUpNPerBlock + kargs.down.N / DownNPerBlock);
+        const index_t tasks     = row_tiles * (kargs.gate_up.N / GateUpNPerBlock +
+                                           kargs.max_slices * (kargs.down.N / DownNPerBlock));
         return dim3(min(prop.multiProcessorCount * max(per_cu, 1), max(tasks, 1)));
     }
 
@@ -140,14 +183,34 @@ struct MoeMxPersistentKernel
     template <typename K>
     CK_TILE_DEVICE void operator()(K kargs) const
     {
-        int32_t* ready   = kargs.workspace;
-        int32_t* waiters = ready + kargs.max_row_tiles * kCounterStride;
-
         const index_t row_tiles = integer_divide_ceil(kargs.gate_up.p_max_token_id[0], MPerBlock);
         const index_t gate_up_n = kargs.gate_up.N / GateUpNPerBlock;
         const index_t down_n    = kargs.down.N / DownNPerBlock;
+        const index_t inter     = kargs.down.K;
+
+        // Slice count (see above): inter / slices a multiple of 256 (1 always qualifies).
+        const index_t want =
+            min(kargs.max_slices,
+                max(index_t(gridDim.x) / 2 / max(row_tiles * down_n, index_t(1)), index_t(1)));
+        index_t slices = 1;
+        for(index_t sl = want; sl > 1; --sl)
+            if(inter % (sl * 256) == 0)
+            {
+                slices = sl;
+                break;
+            }
+        const index_t slice = inter / slices;
+
+        int32_t* ready   = kargs.workspace;
+        int32_t* waiters = ready + kargs.max_row_tiles * kargs.max_slices * kCounterStride;
+
+        // Columns [reach_begin(s), reach_end(s)) of slice s's reach.
+        auto reach_begin = [&](index_t sl) { return sl * slice / kReachCols * kReachCols; };
+        auto reach_end   = [&](index_t sl) {
+            return min(integer_least_multiple((sl + 1) * slice, kReachCols), inter);
+        };
         const index_t gate_up_tasks = row_tiles * gate_up_n;
-        const index_t tasks         = gate_up_tasks + row_tiles * down_n;
+        const index_t tasks         = gate_up_tasks + row_tiles * slices * down_n;
 
         for(index_t task = blockIdx.x; task < tasks; task += gridDim.x)
         {
@@ -155,30 +218,43 @@ struct MoeMxPersistentKernel
             if(task < gate_up_tasks)
             {
                 const index_t m = task / gate_up_n;
-                GateUpKernel{}(kargs.gate_up, m, task % gate_up_n);
+                const index_t g = task % gate_up_n;
+                GateUpKernel{}(kargs.gate_up, m, g);
                 // Publish this tile of the intermediate: all its device-scope stores complete,
-                // then one count for the row tile.
+                // then one count for its (row tile, slice).
                 asm volatile("s_wait_storecnt 0x0" ::: "memory");
                 __builtin_amdgcn_s_barrier();
                 if(threadIdx.x == 0)
-                    __scoped_atomic_fetch_add(
-                        &ready[m * kCounterStride], 1, __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE);
+                {
+                    // Every slice whose reach contains this tile's columns: those overlapping
+                    // the tile's 256-byte block.
+                    const index_t block = g * InterPerGateUpTile / kReachCols * kReachCols;
+                    const index_t s_end = min(slices, (block + kReachCols - 1) / slice + 1);
+                    for(index_t sl = block / slice; sl < s_end; ++sl)
+                        __scoped_atomic_fetch_add(&ready[(m * slices + sl) * kCounterStride],
+                                                  1,
+                                                  __ATOMIC_RELAXED,
+                                                  __MEMORY_SCOPE_DEVICE);
+                }
             }
             else
             {
-                const index_t t = task - gate_up_tasks;
-                const index_t m = t / down_n;
+                const index_t t  = task - gate_up_tasks;
+                const index_t ms = t / down_n; // m * slices + s
+                const index_t m  = ms / slices;
+                const index_t s  = ms % slices;
                 if(threadIdx.x == 0)
                 {
+                    const int32_t needed = (reach_end(s) - reach_begin(s)) / InterPerGateUpTile;
                     // Poll with a compare-exchange that never changes the count: a real atomic,
                     // done at the L2. (An idempotent fetch_add(0) is folded into a plain load,
                     // which on gfx1250 can keep returning a stale count.)
                     for(;;)
                     {
-                        int32_t seen = gate_up_n;
-                        if(__scoped_atomic_compare_exchange_n(&ready[m * kCounterStride],
+                        int32_t seen = needed;
+                        if(__scoped_atomic_compare_exchange_n(&ready[ms * kCounterStride],
                                                               &seen,
-                                                              gate_up_n,
+                                                              needed,
                                                               false,
                                                               __ATOMIC_RELAXED,
                                                               __ATOMIC_RELAXED,
@@ -186,30 +262,36 @@ struct MoeMxPersistentKernel
                             break;
                         __builtin_amdgcn_s_sleep(1);
                     }
-                    // The last waiter of this row tile resets its counters for the next launch.
-                    if(__scoped_atomic_fetch_add(&waiters[m * kCounterStride],
+                    // The last waiter of this (row tile, slice) resets its counters for the next
+                    // launch.
+                    if(__scoped_atomic_fetch_add(&waiters[ms * kCounterStride],
                                                  1,
                                                  __ATOMIC_RELAXED,
                                                  __MEMORY_SCOPE_DEVICE) == down_n - 1)
                     {
-                        __scoped_atomic_store_n(&waiters[m * kCounterStride],
+                        __scoped_atomic_store_n(&waiters[ms * kCounterStride],
                                                 0,
                                                 __ATOMIC_RELAXED,
                                                 __MEMORY_SCOPE_DEVICE);
-                        __scoped_atomic_store_n(
-                            &ready[m * kCounterStride], 0, __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE);
+                        __scoped_atomic_store_n(&ready[ms * kCounterStride],
+                                                0,
+                                                __ATOMIC_RELAXED,
+                                                __MEMORY_SCOPE_DEVICE);
                     }
                 }
                 __builtin_amdgcn_s_barrier();
                 // Workgroup acquire: keeps the compiler from moving the intermediate's loads above
                 // the wait. No device-scope acquire is needed (an agent-scope cache invalidate
                 // costs more than the down task at decode sizes): no workgroup reads any 256-byte
-                // block of row tile m's intermediate before ready[m] is complete (see the layout
-                // checks in IsSupportedArgument; padded sorted rows are masked without a memory
-                // access), so no cache holds a stale copy, and the launch drops lines left by
-                // earlier launches.
+                // block of row tile m's intermediate before that block is complete (see
+                // the layout checks in IsSupportedArgument; padded sorted rows are masked without
+                // a memory access), so no cache holds a stale copy, and the launch drops lines
+                // left by earlier launches.
                 __builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "workgroup");
-                DownKernel{}(kargs.down, m, t % down_n);
+                if(slices == 1)
+                    DownKernel{}(kargs.down, m, t % down_n);
+                else
+                    DownKernel{}(kargs.down, m, t % down_n, s * slice, slice);
             }
         }
     }
