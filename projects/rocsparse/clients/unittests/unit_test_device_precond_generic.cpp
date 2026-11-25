@@ -103,7 +103,7 @@ TEST_F(PrecondGeneric, spic0_csr_nonzero_inner_sums_hash)
     }
     // 64-bit indices with a row as long as a table.
     check_csr_matrix<Kind::ic, double, int64_t, int64_t>(
-        handle, make_fat_row_matrix<double>(64, false, 3), opt, "fat 64 i64");
+        handle, make_fat_row_matrix<double>(64, 3), opt, "fat 64 i64");
     // Band and fat-row matrices (non-zero inner sums) in the other index base.
     const auto one = rocsparse_index_base_one;
     check_csr_matrix<Kind::ic, double>(
@@ -728,7 +728,7 @@ TEST_F(PrecondGeneric, spildlt0_csr_hash_row_lengths)
     // Complex values and 64-bit indices with a row as long as a table.
     check_csr_matrix<Kind::ildlt, rocsparse_double_complex, int64_t, int64_t>(
         handle,
-        make_fat_row_matrix<rocsparse_double_complex>(32, true, 3),
+        make_fat_row_matrix<rocsparse_double_complex>(32, 3),
         opt,
         "fat 32 i64 complex");
 }
