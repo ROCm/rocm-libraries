@@ -2187,7 +2187,7 @@ TEST_F(TestSdpaFwdPlanBuilder, IsApplicableDeclinesFp8CausalPastOneQTile)
         for(const auto& testCase : cases)
         {
             SCOPED_TRACE(std::string(testCase.label) + (withStats ? ", stats" : ""));
-            auto builder
+            const auto builder
                 = configToCompatibleGraph(*testCase.row, withStats, testCase.seqQ, testCase.seqKv);
             const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graphWrapper(
                 builder.GetBufferPointer(), builder.GetSize());
@@ -2198,16 +2198,16 @@ TEST_F(TestSdpaFwdPlanBuilder, IsApplicableDeclinesFp8CausalPastOneQTile)
         // the decline is fp8-only.
         SCOPED_TRACE(std::string("bf16 top-left causal, S_q == S_kv == 512")
                      + (withStats ? ", stats" : ""));
-        auto bf16Builder = createSdpaFwdGraph({4, 8, 512, 128},
-                                              {4, 8, 512, 128},
-                                              DataType::BFLOAT16,
-                                              DataType::FLOAT,
-                                              false,
-                                              true,
-                                              withStats,
-                                              false,
-                                              false,
-                                              true);
+        const auto bf16Builder = createSdpaFwdGraph({4, 8, 512, 128},
+                                                    {4, 8, 512, 128},
+                                                    DataType::BFLOAT16,
+                                                    DataType::FLOAT,
+                                                    false,
+                                                    true,
+                                                    withStats,
+                                                    false,
+                                                    false,
+                                                    true);
         const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper bf16Graph(
             bf16Builder.GetBufferPointer(), bf16Builder.GetSize());
         EXPECT_EQ(_planBuilder.isApplicable(_handle, bf16Graph),

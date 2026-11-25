@@ -287,9 +287,9 @@ flatbuffers::FlatBufferBuilder buildSdpaGraph(const Spec& spec)
                                                        attributesFor().Union()));
     }
 
-    auto name = builder.CreateString("gfx950_attention_unified_test");
-    auto tensorsVector = builder.CreateVector(tensors);
-    auto nodesVector = builder.CreateVector(nodes);
+    const auto name = builder.CreateString("gfx950_attention_unified_test");
+    const auto tensorsVector = builder.CreateVector(tensors);
+    const auto nodesVector = builder.CreateVector(nodes);
 
     data_objects::GraphBuilder graphBuilder(builder);
     graphBuilder.add_name(name);

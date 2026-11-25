@@ -61,7 +61,7 @@ public:
 
         const std::lock_guard<std::mutex> lock(_mutex);
 
-        auto it = _properties.find(deviceId);
+        const auto it = _properties.find(deviceId);
         if(it != _properties.end())
         {
             return it->second;

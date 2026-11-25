@@ -1009,21 +1009,21 @@ LayoutCase makeNhwcCase()
 void expectFprop(const LayoutCase& layout, bool declined)
 {
     const std::vector<int64_t> epsilonDims = {1};
-    auto builder = createInvalidShapeLayernormFpropGraph(layout.xDims,
-                                                         layout.xStrides,
-                                                         layout.xDims,
-                                                         layout.xStrides,
-                                                         layout.affineDims,
-                                                         layout.scaleStrides,
-                                                         layout.affineDims,
-                                                         layout.biasStrides,
-                                                         epsilonDims,
-                                                         epsilonDims,
-                                                         layout.statDims,
-                                                         layout.meanStrides,
-                                                         layout.statDims,
-                                                         layout.invVarianceStrides,
-                                                         layout.passByValue);
+    const auto builder = createInvalidShapeLayernormFpropGraph(layout.xDims,
+                                                               layout.xStrides,
+                                                               layout.xDims,
+                                                               layout.xStrides,
+                                                               layout.affineDims,
+                                                               layout.scaleStrides,
+                                                               layout.affineDims,
+                                                               layout.biasStrides,
+                                                               epsilonDims,
+                                                               epsilonDims,
+                                                               layout.statDims,
+                                                               layout.meanStrides,
+                                                               layout.statDims,
+                                                               layout.invVarianceStrides,
+                                                               layout.passByValue);
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
     const auto& attr = *graph.getNode(0).attributes_as_LayernormAttributes();
@@ -1043,25 +1043,25 @@ void expectFprop(const LayoutCase& layout, bool declined)
 void expectBprop(const LayoutCase& layout, bool declined)
 {
     const std::vector<int64_t> epsilonDims = {1};
-    auto builder = createInvalidShapeLayernormBwdGraph(layout.xDims,
-                                                       layout.xStrides,
-                                                       layout.xDims,
-                                                       layout.xStrides,
-                                                       layout.xDims,
-                                                       layout.xStrides,
-                                                       layout.affineDims,
-                                                       layout.scaleStrides,
-                                                       layout.affineDims,
-                                                       layout.dscaleStrides,
-                                                       layout.affineDims,
-                                                       layout.dbiasStrides,
-                                                       epsilonDims,
-                                                       epsilonDims,
-                                                       layout.statDims,
-                                                       layout.meanStrides,
-                                                       layout.statDims,
-                                                       layout.invVarianceStrides,
-                                                       layout.passByValue);
+    const auto builder = createInvalidShapeLayernormBwdGraph(layout.xDims,
+                                                             layout.xStrides,
+                                                             layout.xDims,
+                                                             layout.xStrides,
+                                                             layout.xDims,
+                                                             layout.xStrides,
+                                                             layout.affineDims,
+                                                             layout.scaleStrides,
+                                                             layout.affineDims,
+                                                             layout.dscaleStrides,
+                                                             layout.affineDims,
+                                                             layout.dbiasStrides,
+                                                             epsilonDims,
+                                                             epsilonDims,
+                                                             layout.statDims,
+                                                             layout.meanStrides,
+                                                             layout.statDims,
+                                                             layout.invVarianceStrides,
+                                                             layout.passByValue);
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
     const auto& attr = *graph.getNode(0).attributes_as_LayernormBackwardAttributes();
@@ -1080,7 +1080,7 @@ void expectBprop(const LayoutCase& layout, bool declined)
 
 void expectBpropDxType(DT xType, DT dxType, bool declined)
 {
-    auto builder = createInvalidTypeLayernormBwdGraph(
+    const auto builder = createInvalidTypeLayernormBwdGraph(
         xType, xType, dxType, xType, xType, xType, DT::FLOAT, xType, xType);
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());

@@ -61,7 +61,7 @@ inline constexpr double MAX_SOFTMAX_SCALE = 1048576.0; // 2^20
 inline const data_objects::TensorAttributes* findTensor(const MatchContext& context, int64_t uid)
 {
     const auto& tensors = context.graph.getTensorMap();
-    auto it = tensors.find(uid);
+    const auto it = tensors.find(uid);
     return it == tensors.end() ? nullptr : it->second;
 }
 

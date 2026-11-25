@@ -1321,7 +1321,7 @@ std::optional<AotInstance> parseAotInstance(const Metadata& metadata, const Targ
         return std::nullopt;
     }
     DirectKnobs knobs{};
-    const auto readKnob = [&](std::string_view field, int64_t DirectKnobs::*member) {
+    const auto readKnob = [&](std::string_view field, int64_t DirectKnobs::* member) {
         const auto value = metadata.intField(field);
         if(!value)
         {
@@ -1544,7 +1544,7 @@ inline uint64_t planDigest(const Plan& plan)
     uint64_t hash = 0xCBF29CE484222325ULL;
     for(const auto value : serializePlan(plan))
     {
-        auto bits = static_cast<uint64_t>(value);
+        const auto bits = static_cast<uint64_t>(value);
         for(int byte = 0; byte < 8; ++byte)
         {
             hash ^= (bits >> (8 * byte)) & 0xFFU;

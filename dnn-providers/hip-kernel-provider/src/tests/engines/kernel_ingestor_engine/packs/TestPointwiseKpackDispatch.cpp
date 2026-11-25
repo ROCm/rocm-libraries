@@ -331,7 +331,7 @@ TEST(TestPointwiseKpackDispatch, SurvivesAKpackWhoseArchiveIsAbsent)
     // archive-open, before HIP is involved, so this whole path runs without a device.
     const ScopedDirectory emptyDirectory = claimScratchDirectory(SCRATCH_LABEL);
 
-    auto recorder
+    const auto recorder
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_WARN);
 
     const auto set = makeTwoPackSet(emptyDirectory.path());

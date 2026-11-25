@@ -1057,8 +1057,8 @@ TEST_F(TestApplicabilityManager, SkipsEnginesThatThrowInFinishThreadedOrNot)
 
         addHandWritten(manager, HAND_YES, true);
         addStaged(manager, pending(PENDING_C, true, 700));
-        auto specA = addStaged(manager, pending(PENDING_A, true, 0));
-        auto specB = addStaged(manager, pending(PENDING_B, true, 0));
+        const auto specA = addStaged(manager, pending(PENDING_A, true, 0));
+        const auto specB = addStaged(manager, pending(PENDING_B, true, 0));
 
         // The iteration order is the manager's to choose; read it back and assign the
         // failures by position.
@@ -1107,8 +1107,8 @@ TEST_F(TestApplicabilityManager, SkipsEnginesThatThrowInBeginOrFinishThreadedOrN
 
     addStaged(manager, pending(PENDING_C, true, 700));
     addStaged(manager, pending(PENDING_D, true, 700));
-    auto specA = addStaged(manager, pending(PENDING_A, true, 600));
-    auto specB = addStaged(manager, pending(PENDING_B, true, 600));
+    const auto specA = addStaged(manager, pending(PENDING_A, true, 600));
+    const auto specB = addStaged(manager, pending(PENDING_B, true, 600));
 
     const auto order = inIterationOrder(manager, {PENDING_A, PENDING_B});
     ASSERT_EQ(order.size(), 2u);
@@ -1708,7 +1708,7 @@ TEST_F(TestApplicabilityManager, TheGuardsLoopSkipsAnAdmittedEngineThatThrows)
     ApplicabilityManager manager{pool};
     using hipdnn_data_sdk::utilities::Version;
     addHandWritten(manager, BASELINE_HAND, true);
-    auto throwing = std::make_shared<StagedSpec>(decided(OPTED_IN_1_3, true));
+    const auto throwing = std::make_shared<StagedSpec>(decided(OPTED_IN_1_3, true));
     throwing->failure = Failure::IN_BEGIN;
     throwing->failureStatus = HIPDNN_PLUGIN_STATUS_BAD_PARAM;
     throwing->failureMessage = "graph stage failed";
@@ -1749,7 +1749,8 @@ TEST_F(TestApplicabilityManager, TheGuardKeepsTheThreadedPathForTheEnginesItAdmi
     // finished on another thread, so the threaded finish is what this call takes.
     for(const auto engineId : {PENDING_A, PENDING_B, PENDING_C})
     {
-        auto spec = std::make_shared<StagedSpec>(pending(engineId, engineId != PENDING_C, 100));
+        const auto spec
+            = std::make_shared<StagedSpec>(pending(engineId, engineId != PENDING_C, 100));
         spec->predictedVariants = engineId == PENDING_A ? 300 : 100;
         spec->awaitSibling = engineId == PENDING_A;
         manager.addEngine(std::make_unique<FakeStagedEngine>(spec, _journal),

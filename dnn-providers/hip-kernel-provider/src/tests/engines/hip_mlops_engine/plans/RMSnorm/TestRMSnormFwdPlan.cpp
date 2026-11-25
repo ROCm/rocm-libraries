@@ -714,7 +714,7 @@ TEST(TestRMSnormFwdPlan, CompileWithBlockCountReachingThreadLimitThrows)
     const MockKernelCompiler mockCompiler;
 
     // 2^24 workgroups of 256 threads is 2^32 threads
-    auto builder
+    const auto builder
         = hipdnn_test_sdk::utilities::createValidRMSNormGraph({2, 1, 1, 1}, {16777216, 2, 1, 1});
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
@@ -725,7 +725,7 @@ TEST(TestRMSnormFwdPlan, CompileWithBlockCountReachingThreadLimitThrows)
     RMSnormFwdParams params(attr, graph.getTensorMap());
     RMSnormFwdPlan plan(std::move(params));
 
-    auto deviceProps = createTestDeviceProps();
+    const auto deviceProps = createTestDeviceProps();
 
     EXPECT_THROW(plan.compile(mockCompiler, deviceProps), hipdnn_plugin_sdk::HipdnnPluginException);
 }

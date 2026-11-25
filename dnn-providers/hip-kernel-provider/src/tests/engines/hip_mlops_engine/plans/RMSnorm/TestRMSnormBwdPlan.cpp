@@ -685,7 +685,7 @@ TEST(TestRMSnormBwdPlan, CompileWithBlockCountReachingThreadLimitThrows)
     const MockKernelCompiler mockCompiler;
 
     // 2^24 workgroups of 256 threads is 2^32 threads
-    auto builder
+    const auto builder
         = hipdnn_test_sdk::utilities::createValidRMSNormBwdGraph({2, 1, 1, 1}, {16777216, 2, 1, 1});
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
@@ -696,7 +696,7 @@ TEST(TestRMSnormBwdPlan, CompileWithBlockCountReachingThreadLimitThrows)
     RMSnormBwdParams params(attr, graph.getTensorMap());
     RMSnormBwdPlan plan(std::move(params));
 
-    auto deviceProps = createTestDeviceProps();
+    const auto deviceProps = createTestDeviceProps();
 
     EXPECT_THROW(plan.compile(mockCompiler, deviceProps), hipdnn_plugin_sdk::HipdnnPluginException);
 }
@@ -707,8 +707,8 @@ TEST(TestRMSnormBwdPlan, CompileWithScaleBiasBlockCountReachingThreadLimitThrows
 
     // One row keeps the data kernel at one workgroup. The scale/bias kernel needs
     // 2^24 workgroups of 256 threads, which is 2^32 threads.
-    auto builder = hipdnn_test_sdk::utilities::createValidRMSNormBwdGraph({4294967296, 256, 1, 1},
-                                                                          {1, 16777216, 256, 1});
+    const auto builder = hipdnn_test_sdk::utilities::createValidRMSNormBwdGraph(
+        {4294967296, 256, 1, 1}, {1, 16777216, 256, 1});
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
 
@@ -718,7 +718,7 @@ TEST(TestRMSnormBwdPlan, CompileWithScaleBiasBlockCountReachingThreadLimitThrows
     RMSnormBwdParams params(attr, graph.getTensorMap());
     RMSnormBwdPlan plan(std::move(params));
 
-    auto deviceProps = createTestDeviceProps();
+    const auto deviceProps = createTestDeviceProps();
 
     EXPECT_THROW(plan.compile(mockCompiler, deviceProps), hipdnn_plugin_sdk::HipdnnPluginException);
 }

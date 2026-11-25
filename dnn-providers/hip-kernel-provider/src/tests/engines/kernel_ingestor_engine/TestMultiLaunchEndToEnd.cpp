@@ -377,7 +377,7 @@ TEST(TestMultiLaunchLaunchSet, KeepsAKernelWhoseLaunchesItsHandlerLaunches)
                      << ". Environmental -- the build packs per GPU_TARGETS entry.";
     }
 
-    auto recorder
+    const auto recorder
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
 
     const MultiLaunchHarness harness({PRODUCE_LAUNCH, CONSUME_LAUNCH});
@@ -407,7 +407,7 @@ TEST(TestMultiLaunchLaunchSet, DropsAKernelWhoseLaunchesItsHandlerDoesNotLaunch)
                      << ". Environmental -- the build packs per GPU_TARGETS entry.";
     }
 
-    auto recorder
+    const auto recorder
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
 
     // The handler launches one of the kernel's two launches.

@@ -58,17 +58,18 @@ flatbuffers::FlatBufferBuilder createResampleBwdGraph(int64_t height,
     tensorAttributes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
         builder, 2, "dx", hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT, &strides, &dims));
 
-    auto resampleAttr = hipdnn_flatbuffers_sdk::data_objects::CreateResampleBwdAttributesDirect(
-        builder,
-        1,
-        2,
-        ::flatbuffers::nullopt,
-        &prePadding,
-        &postPadding,
-        &stride,
-        &window,
-        hipdnn_flatbuffers_sdk::data_objects::ResampleMode::AVGPOOL_EXCLUDE_PADDING,
-        hipdnn_flatbuffers_sdk::data_objects::PaddingMode::ZERO_PAD);
+    const auto resampleAttr
+        = hipdnn_flatbuffers_sdk::data_objects::CreateResampleBwdAttributesDirect(
+            builder,
+            1,
+            2,
+            ::flatbuffers::nullopt,
+            &prePadding,
+            &postPadding,
+            &stride,
+            &window,
+            hipdnn_flatbuffers_sdk::data_objects::ResampleMode::AVGPOOL_EXCLUDE_PADDING,
+            hipdnn_flatbuffers_sdk::data_objects::PaddingMode::ZERO_PAD);
 
     std::vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::Node>> nodes;
     nodes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateNodeDirect(
@@ -155,7 +156,7 @@ TEST_F(TestResampleBwdPlanBuilder, IsApplicableReturnsTrueWithoutOptionalAttribu
 // 16777215 * 256 = 2^32 - 256 dx elements is 2^24 - 1 blocks of 256 threads.
 TEST_F(TestResampleBwdPlanBuilder, IsApplicableReturnsTrueForGradientAtThreadLimit)
 {
-    auto builder = createResampleBwdGraphWithGradientSize(16777215, 256);
+    const auto builder = createResampleBwdGraphWithGradientSize(16777215, 256);
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
 
@@ -165,7 +166,7 @@ TEST_F(TestResampleBwdPlanBuilder, IsApplicableReturnsTrueForGradientAtThreadLim
 // 401 * 10710641 = 2^32 - 255 dx elements needs 2^24 blocks, which is 2^32 threads.
 TEST_F(TestResampleBwdPlanBuilder, IsApplicableReturnsFalseForGradientOverThreadLimit)
 {
-    auto builder = createResampleBwdGraphWithGradientSize(401, 10710641);
+    const auto builder = createResampleBwdGraphWithGradientSize(401, 10710641);
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
 
@@ -209,7 +210,7 @@ TEST_F(TestResampleBwdPlanBuilder, SpatialParametersAtTheInt64Limit)
         })
     {
         SCOPED_TRACE(row.name);
-        auto builder = createResampleBwdGraph(
+        const auto builder = createResampleBwdGraph(
             1, 1, row.outHeight, 1, row.prePadding, row.postPadding, {MAX, MAX}, row.window);
         const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
             builder.GetBufferPointer(), builder.GetSize());

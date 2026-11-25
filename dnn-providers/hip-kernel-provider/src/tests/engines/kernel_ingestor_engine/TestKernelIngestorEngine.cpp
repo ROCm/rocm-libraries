@@ -172,7 +172,7 @@ TEST(TestKernelIngestorEngine, ACommittedScopeKeepsItsSymbols)
 TEST(TestKernelIngestorEngine, MakePointwiseAddEngineIsReachableWithTheDescriptorEngineId)
 {
     Container container;
-    auto& engineManager = container.getEngineManager();
+    const auto& engineManager = container.getEngineManager();
 
     const auto allEngineIds = engineManager.getAllEngineIds();
     EXPECT_NE(std::find(allEngineIds.begin(),
@@ -229,7 +229,7 @@ TEST(TestKernelIngestorEngine, GetMaxWorkspaceSizeReportsTheLargerBlocksRequirem
     SKIP_IF_NO_DEVICES();
 
     Container container;
-    auto& engineManager = container.getEngineManager();
+    const auto& engineManager = container.getEngineManager();
     const Handle handle;
 
     const auto graph = buildPointwiseGraph();
@@ -247,7 +247,7 @@ TEST(TestKernelIngestorEngine, InitializeExecutionContextBuildsAPlanForTheTopRan
     SKIP_IF_NO_DEVICES();
 
     Container container;
-    auto& engineManager = container.getEngineManager();
+    const auto& engineManager = container.getEngineManager();
     const Handle handle;
 
     const auto graph = buildPointwiseGraph();

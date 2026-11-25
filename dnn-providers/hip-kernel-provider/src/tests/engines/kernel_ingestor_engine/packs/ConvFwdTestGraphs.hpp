@@ -105,15 +105,15 @@ inline flatbuffers::FlatBufferBuilder
     tensors.push_back(data_objects::CreateTensorAttributesDirect(
         builder, CONV_Y_UID, nullptr, dataType, &yStrides, &resolvedYDims));
 
-    auto attributes = data_objects::CreateConvolutionFwdAttributesDirect(builder,
-                                                                         CONV_X_UID,
-                                                                         CONV_W_UID,
-                                                                         CONV_Y_UID,
-                                                                         &prePadding,
-                                                                         &postPadding,
-                                                                         &stride,
-                                                                         &dilation,
-                                                                         convMode);
+    const auto attributes = data_objects::CreateConvolutionFwdAttributesDirect(builder,
+                                                                               CONV_X_UID,
+                                                                               CONV_W_UID,
+                                                                               CONV_Y_UID,
+                                                                               &prePadding,
+                                                                               &postPadding,
+                                                                               &stride,
+                                                                               &dilation,
+                                                                               convMode);
 
     std::vector<flatbuffers::Offset<data_objects::Node>> nodes;
     nodes.push_back(
@@ -123,9 +123,9 @@ inline flatbuffers::FlatBufferBuilder
                                        data_objects::NodeAttributes::ConvolutionFwdAttributes,
                                        attributes.Union()));
 
-    auto name = builder.CreateString("conv_fwd_test");
-    auto tensorsVector = builder.CreateVector(tensors);
-    auto nodesVector = builder.CreateVector(nodes);
+    const auto name = builder.CreateString("conv_fwd_test");
+    const auto tensorsVector = builder.CreateVector(tensors);
+    const auto nodesVector = builder.CreateVector(nodes);
 
     data_objects::GraphBuilder graphBuilder(builder);
     graphBuilder.add_name(name);

@@ -161,6 +161,8 @@ TEST(TestStandalonePointwise, DeclinesMalformedUnsupportedAndOverlappingOperands
         [](data::GraphT& g) { g.nodes.emplace_back(std::make_unique<data::NodeT>(*g.nodes[0])); }};
     for(size_t index = 0; index < mutations.size(); ++index)
     {
+        // Mutated through a function pointer, which misc-const-correctness does not see.
+        // NOLINTNEXTLINE(misc-const-correctness)
         auto input = graph();
         mutations[index](input);
         EXPECT_FALSE(matches(input)) << index;

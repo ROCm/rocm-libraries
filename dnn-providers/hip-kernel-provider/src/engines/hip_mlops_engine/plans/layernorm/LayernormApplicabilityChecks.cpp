@@ -56,7 +56,7 @@ bool hasDenseNonOverlappingStrides(const std::vector<int64_t>& dims,
 
 std::optional<int64_t> toStdOptional(flatbuffers::Optional<int64_t> value)
 {
-    return value.has_value() ? std::make_optional(value.value()) : std::nullopt;
+    return value;
 }
 
 } // namespace

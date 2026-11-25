@@ -135,8 +135,8 @@ TEST_F(TestLayernormPlanBuilder, IsApplicableReturnsTrueForValidBpropGraph)
 // threads, so the largest accepted outer size is 2^22 - 1.
 TEST_F(TestLayernormPlanBuilder, IsApplicableFpropAcceptsOuterSizeBelowThreadLimit)
 {
-    auto builder = hipdnn_test_sdk::utilities::createValidLayernormFpropGraph({4, 1, 1, 1},
-                                                                              {4194303, 4, 1, 1});
+    const auto builder = hipdnn_test_sdk::utilities::createValidLayernormFpropGraph(
+        {4, 1, 1, 1}, {4194303, 4, 1, 1});
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
 
@@ -145,8 +145,8 @@ TEST_F(TestLayernormPlanBuilder, IsApplicableFpropAcceptsOuterSizeBelowThreadLim
 
 TEST_F(TestLayernormPlanBuilder, IsApplicableFpropDeclinesOuterSizeAtThreadLimit)
 {
-    auto builder = hipdnn_test_sdk::utilities::createValidLayernormFpropGraph({4, 1, 1, 1},
-                                                                              {4194304, 4, 1, 1});
+    const auto builder = hipdnn_test_sdk::utilities::createValidLayernormFpropGraph(
+        {4, 1, 1, 1}, {4194304, 4, 1, 1});
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
 
@@ -155,8 +155,8 @@ TEST_F(TestLayernormPlanBuilder, IsApplicableFpropDeclinesOuterSizeAtThreadLimit
 
 TEST_F(TestLayernormPlanBuilder, IsApplicableBpropAcceptsOuterSizeBelowThreadLimit)
 {
-    auto builder = hipdnn_test_sdk::utilities::createValidLayernormBwdGraph({4, 1, 1, 1},
-                                                                            {4194303, 4, 1, 1});
+    const auto builder = hipdnn_test_sdk::utilities::createValidLayernormBwdGraph(
+        {4, 1, 1, 1}, {4194303, 4, 1, 1});
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
 
@@ -165,8 +165,8 @@ TEST_F(TestLayernormPlanBuilder, IsApplicableBpropAcceptsOuterSizeBelowThreadLim
 
 TEST_F(TestLayernormPlanBuilder, IsApplicableBpropDeclinesOuterSizeAtThreadLimit)
 {
-    auto builder = hipdnn_test_sdk::utilities::createValidLayernormBwdGraph({4, 1, 1, 1},
-                                                                            {4194304, 4, 1, 1});
+    const auto builder = hipdnn_test_sdk::utilities::createValidLayernormBwdGraph(
+        {4, 1, 1, 1}, {4194304, 4, 1, 1});
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
 

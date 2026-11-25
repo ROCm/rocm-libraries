@@ -135,7 +135,7 @@ inline void makePackedPlan(const PackedPlanCase& packedCase,
         *bound);
 
     tensors = hipdnn_test_sdk::utilities::GraphTensorBundle(fixture.context().graph.getTensorMap());
-    for(auto& entry : tensors.tensors)
+    for(const auto& entry : tensors.tensors)
     {
         entry.second->fillTensorWithValue(0.0F);
     }

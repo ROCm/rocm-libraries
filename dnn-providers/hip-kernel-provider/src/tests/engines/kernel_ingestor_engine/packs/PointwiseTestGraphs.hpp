@@ -131,7 +131,7 @@ inline flatbuffers::FlatBufferBuilder buildPointwiseGraph(
         attributesBuilder.add_in_2_tensor_uid(INPUT_C_UID);
     }
     attributesBuilder.add_out_0_tensor_uid(OUTPUT_UID);
-    auto attributes = attributesBuilder.Finish();
+    const auto attributes = attributesBuilder.Finish();
 
     std::vector<flatbuffers::Offset<data_objects::Node>> nodes;
     nodes.push_back(
@@ -141,9 +141,9 @@ inline flatbuffers::FlatBufferBuilder buildPointwiseGraph(
                                        data_objects::NodeAttributes::PointwiseAttributes,
                                        attributes.Union()));
 
-    auto name = builder.CreateString("pointwise_add_test");
-    auto tensorsVector = builder.CreateVector(tensors);
-    auto nodesVector = builder.CreateVector(nodes);
+    const auto name = builder.CreateString("pointwise_add_test");
+    const auto tensorsVector = builder.CreateVector(tensors);
+    const auto nodesVector = builder.CreateVector(nodes);
 
     data_objects::GraphBuilder graphBuilder(builder);
     graphBuilder.add_name(name);
@@ -193,7 +193,7 @@ inline flatbuffers::FlatBufferBuilder buildTwoNodePointwiseGraph()
         attributesBuilder.add_in_0_tensor_uid(in0);
         attributesBuilder.add_in_1_tensor_uid(in1);
         attributesBuilder.add_out_0_tensor_uid(out);
-        auto attributes = attributesBuilder.Finish();
+        const auto attributes = attributesBuilder.Finish();
 
         nodes.push_back(
             data_objects::CreateNodeDirect(builder,

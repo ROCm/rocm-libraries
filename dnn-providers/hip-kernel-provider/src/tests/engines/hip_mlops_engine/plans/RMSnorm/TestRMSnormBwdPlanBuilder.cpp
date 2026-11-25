@@ -296,7 +296,7 @@ TEST_F(TestRMSnormBwdPlanBuilder, IsApplicableReturnsTrueForValidDoubleNodeActiv
 // The data kernel launches one block of 256 threads per row: 16777215 rows is 2^32 - 256 threads.
 TEST_F(TestRMSnormBwdPlanBuilder, IsApplicableReturnsTrueForRowCountAtThreadLimit)
 {
-    auto builder
+    const auto builder
         = hipdnn_test_sdk::utilities::createValidRMSNormBwdGraph({2, 1, 1, 1}, {16777215, 2, 1, 1});
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
@@ -306,7 +306,7 @@ TEST_F(TestRMSnormBwdPlanBuilder, IsApplicableReturnsTrueForRowCountAtThreadLimi
 
 TEST_F(TestRMSnormBwdPlanBuilder, IsApplicableReturnsFalseForRowCountOverThreadLimit)
 {
-    auto builder
+    const auto builder
         = hipdnn_test_sdk::utilities::createValidRMSNormBwdGraph({2, 1, 1, 1}, {16777216, 2, 1, 1});
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
@@ -316,7 +316,7 @@ TEST_F(TestRMSnormBwdPlanBuilder, IsApplicableReturnsFalseForRowCountOverThreadL
 
 TEST_F(TestRMSnormBwdPlanBuilder, IsApplicableReturnsTrueForRowCountAtThreadLimitActivation)
 {
-    auto builder = hipdnn_test_sdk::utilities::createValidRMSNormBwdActivationGraph(
+    const auto builder = hipdnn_test_sdk::utilities::createValidRMSNormBwdActivationGraph(
         {2, 1, 1, 1}, {16777215, 2, 1, 1});
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
@@ -326,7 +326,7 @@ TEST_F(TestRMSnormBwdPlanBuilder, IsApplicableReturnsTrueForRowCountAtThreadLimi
 
 TEST_F(TestRMSnormBwdPlanBuilder, IsApplicableReturnsFalseForRowCountOverThreadLimitActivation)
 {
-    auto builder = hipdnn_test_sdk::utilities::createValidRMSNormBwdActivationGraph(
+    const auto builder = hipdnn_test_sdk::utilities::createValidRMSNormBwdActivationGraph(
         {2, 1, 1, 1}, {16777216, 2, 1, 1});
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
@@ -338,8 +338,8 @@ TEST_F(TestRMSnormBwdPlanBuilder, IsApplicableReturnsFalseForRowCountOverThreadL
 // ceil(inner / 256) blocks of 256 threads: inner 2^32 - 256 is 2^32 - 256 threads.
 TEST_F(TestRMSnormBwdPlanBuilder, IsApplicableReturnsTrueForInnerSizeAtThreadLimit)
 {
-    auto builder = hipdnn_test_sdk::utilities::createValidRMSNormBwdGraph({4294967040, 256, 1, 1},
-                                                                          {1, 16777215, 256, 1});
+    const auto builder = hipdnn_test_sdk::utilities::createValidRMSNormBwdGraph(
+        {4294967040, 256, 1, 1}, {1, 16777215, 256, 1});
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
 
@@ -348,8 +348,8 @@ TEST_F(TestRMSnormBwdPlanBuilder, IsApplicableReturnsTrueForInnerSizeAtThreadLim
 
 TEST_F(TestRMSnormBwdPlanBuilder, IsApplicableReturnsFalseForInnerSizeOverThreadLimit)
 {
-    auto builder = hipdnn_test_sdk::utilities::createValidRMSNormBwdGraph({4294967296, 256, 1, 1},
-                                                                          {1, 16777216, 256, 1});
+    const auto builder = hipdnn_test_sdk::utilities::createValidRMSNormBwdGraph(
+        {4294967296, 256, 1, 1}, {1, 16777216, 256, 1});
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
 

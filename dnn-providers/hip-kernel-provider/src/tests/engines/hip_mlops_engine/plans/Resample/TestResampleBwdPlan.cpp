@@ -396,7 +396,7 @@ TEST(TestResampleBwdPlan, CompileRejectsBlockCountReachingThreadLimit)
                                                                  {0, 0},
                                                                  {1, 1},
                                                                  {1, 1}));
-    auto deviceProps = createTestDeviceProps();
+    const auto deviceProps = createTestDeviceProps();
 
     const MockKernelCompiler mockCompiler;
     EXPECT_THROW(plan.compile(mockCompiler, deviceProps), hipdnn_plugin_sdk::HipdnnPluginException);

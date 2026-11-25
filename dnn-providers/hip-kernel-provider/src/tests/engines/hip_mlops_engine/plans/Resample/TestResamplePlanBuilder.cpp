@@ -57,18 +57,19 @@ flatbuffers::FlatBufferBuilder createResampleFwdGraph(int64_t height,
         &outStrides,
         &outDims));
 
-    auto resampleAttr = hipdnn_flatbuffers_sdk::data_objects::CreateResampleFwdAttributesDirect(
-        builder,
-        1,
-        2,
-        ::flatbuffers::nullopt,
-        &prePadding,
-        &postPadding,
-        &stride,
-        &window,
-        hipdnn_flatbuffers_sdk::data_objects::ResampleMode::MAXPOOL,
-        hipdnn_flatbuffers_sdk::data_objects::PaddingMode::ZERO_PAD,
-        ::flatbuffers::nullopt);
+    const auto resampleAttr
+        = hipdnn_flatbuffers_sdk::data_objects::CreateResampleFwdAttributesDirect(
+            builder,
+            1,
+            2,
+            ::flatbuffers::nullopt,
+            &prePadding,
+            &postPadding,
+            &stride,
+            &window,
+            hipdnn_flatbuffers_sdk::data_objects::ResampleMode::MAXPOOL,
+            hipdnn_flatbuffers_sdk::data_objects::PaddingMode::ZERO_PAD,
+            ::flatbuffers::nullopt);
 
     std::vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::Node>> nodes;
     nodes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateNodeDirect(
@@ -141,7 +142,7 @@ TEST_F(TestResamplePlanBuilder, IsApplicableReturnsTrueForValidGraph)
 // 16777215 * 256 = 2^32 - 256 output elements is 2^24 - 1 blocks of 256 threads.
 TEST_F(TestResamplePlanBuilder, IsApplicableReturnsTrueForOutputAtThreadLimit)
 {
-    auto builder = createResampleFwdGraphWithOutputSize(16777215, 256);
+    const auto builder = createResampleFwdGraphWithOutputSize(16777215, 256);
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
 
@@ -151,7 +152,7 @@ TEST_F(TestResamplePlanBuilder, IsApplicableReturnsTrueForOutputAtThreadLimit)
 // 401 * 10710641 = 2^32 - 255 output elements needs 2^24 blocks, which is 2^32 threads.
 TEST_F(TestResamplePlanBuilder, IsApplicableReturnsFalseForOutputOverThreadLimit)
 {
-    auto builder = createResampleFwdGraphWithOutputSize(401, 10710641);
+    const auto builder = createResampleFwdGraphWithOutputSize(401, 10710641);
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
 
@@ -239,7 +240,7 @@ TEST_F(TestResamplePlanBuilder, SpatialParametersAtTheInt64Limit)
         })
     {
         SCOPED_TRACE(row.name);
-        auto builder = createResampleFwdGraph(
+        const auto builder = createResampleFwdGraph(
             1, 1, row.outHeight, 1, row.prePadding, row.postPadding, {MAX, MAX}, row.window);
         const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
             builder.GetBufferPointer(), builder.GetSize());
