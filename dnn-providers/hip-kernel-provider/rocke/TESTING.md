@@ -255,12 +255,14 @@ Performance is **non-functional** — it answers *"is it fast enough?"*, not *"i
 correct?"* — so it is not a correctness oracle, though its baseline check is a
 regression-style comparison.
 
-- **Exists:** a threshold-based perf-baseline gate (per-workload baseline, metric,
-  direction, and tolerances such as `max_slowdown` / `min_fraction`), plus the
-  `benchmark/` suites. **⚠** This is *not* a sha "golden" — a within-tolerance
-  slowdown passes and a correctness-preserving speedup passes.
-- **⚠ WIP:** the `benchmark/` suites are orphaned (no gated tier) and there is no
-  perf lane in CI. Performance is in scope but only partially wired (gap **G8**).
+- **Exists:** `rocke.benchmark.perf` composes a kernel's counters, occupancy and
+  timing into one record and compares a run with its baseline by their spread,
+  and `library/benchmarks/` holds the sweep drivers. **⚠** This is *not* a sha
+  "golden" — a slowdown within the spread passes and a correctness-preserving
+  speedup passes.
+- Benchmarks run in the benchmarking tier on its own system, never in a CI tier
+  ([§5.0.3](#503-choosing-a-tier-and-an-entry-for-a-test)). That tier is only
+  partially wired (gap **G8**).
 
 ---
 
@@ -1034,6 +1036,18 @@ which CI jobs run these tiers today; say in the pull request where an installed
 entry placed there runs.
 Do not move a test there to make room.
 
+**Benchmarks are not a CI tier.** The CI tiers (quick, standard, comprehensive,
+full) run correctness and validation only. A benchmark, whose verdict is a time,
+a throughput or a comparison with a performance baseline, is never a CTest
+entry: benchmarking is its own tier and runs on a dedicated benchmarking system
+outside this CI. A host test of the benchmark tooling checks correctness and
+takes a CI tier like any other test.
+
+| Test | Placement |
+|---|---|
+| A host test of the benchmark tooling, such as `platform/tests/benchmark/test_occupancy_targets.py` (the occupancy model of `rocke.benchmark.perf`); it times nothing | A CI tier, as any host test. |
+| Anti-example: a CTest entry that runs a kernel sweep and fails when a kernel is slower than its baseline | Its verdict is a time: it belongs in the benchmarking tier, not in CI. |
+
 **Where a new file lands.** The one list of quick entries is the `quick`
 category of `ROCKE_ENGINE_test_categories_external.yaml`, whose header states
 the quick-tier rule. The platform pytest parts (`rocke_pytest_<part>`), the
@@ -1605,7 +1619,7 @@ Read coverage from the emitter configs ([`platform/tests/README.md`](platform/te
 | G3 | **No C-engine on-GPU correctness lane** | C++ engine numerics validated only transitively (byte-identity to the Python engine) | Add a C-emitted `.ll` → HSACO → launch → compare lane |
 | G4 | **Two overlapping correctness lanes** | Duplication between the platform and legacy numeric lanes | Consolidate to one canonical lane (needs GPU validation) |
 | G5 | **Loose correctness verdict** — single worst-case tolerance (fp16 `atol=rtol=1e-2`) | Structural bugs can hide inside dtype-truncation noise; no structural-vs-quantization separation; NaN/Inf/denormal caught only incidentally | Split structural from dtype tolerance; add numeric edge-case tests |
-| G8 | **Performance largely ungated** ([§3.2](#32-are-the-kernels-fast)) | Perf regression caught only by a manual smoke gate; benchmark suites orphaned | Wire a perf tier into CI |
+| G8 | **Performance largely ungated** ([§3.2](#32-are-the-kernels-fast)) | Perf regression caught only by a manual smoke gate | Run the benchmark suites in the benchmarking tier, on its own system; performance does not run in CI |
 
 > **Reference CI policy:** pinned-reference verification runs with NumPy and
 > ROCm, without installing Torch. Independent oracles, including optional Torch,
