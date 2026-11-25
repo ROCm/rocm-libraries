@@ -52,7 +52,7 @@ if(TENSILELITE_STANDALONE)
     endif()
 
     find_package(hip REQUIRED)
-    find_package(origami CONFIG REQUIRED)
+    find_package(origami 1.1 CONFIG REQUIRED)
     if(TENSILELITE_ENABLE_MXDATAGENERATOR)
         find_package(mxDataGenerator CONFIG REQUIRED)
     endif()

@@ -181,7 +181,7 @@ namespace TensileLite
                             lib.origami_config_list.emplace_back(origami_config);
                         }
                     }
-                    // Once per library load. rank_configs reads the flags.
+                    // Once per library load. rank_configs / argsort_configs read the flags.
                     origami::memoize_non_temporal_availability(lib.origami_config_list);
                 }
             }
@@ -189,4 +189,3 @@ namespace TensileLite
         };
     } // namespace Serialization
 } // namespace TensileLite
-

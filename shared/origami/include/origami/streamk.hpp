@@ -75,6 +75,23 @@ ORIGAMI_EXPORT size_t select_grid_size(const problem_t& problem,
                         grid_selection_t algorithm);
 
 /**
+ * @brief Like the public select_grid_size(), but the reduction strategy is supplied by the caller.
+ *
+ * Library-internal: intentionally not exported from liborigami, so it is not part of the
+ * public ABI.
+ *
+ * For grid_selection_t::k_split_aware the grid is sized for @p reduction and
+ * config.reduction_strategy is ignored. This lets a caller that already chose a strategy
+ * (e.g. with select_reduction()) get a grid that is consistent with it. Other algorithms
+ * ignore @p reduction.
+ */
+size_t select_grid_size(const problem_t& problem,
+                        const hardware_t& hardware,
+                        const config_t& config,
+                        grid_selection_t algorithm,
+                        reduction_t reduction);
+
+/**
  * @brief Pick the SK3-vs-SK4 sub-path for a StreamK=5 hybrid kernel.
  *
  * Decision rule fit to measured SK5 on(SK4)/off(SK3) sweeps on MI350X

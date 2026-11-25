@@ -457,3 +457,86 @@ TEST_CASE("Origami streamk: ipt <= 1 switches to DP above two waves of workgroup
                 p, make_hardware(950), c, origami::grid_selection_t::k_split_aware) == 768);
   }
 }
+
+TEST_CASE("Origami streamk: select_grid_size reduction strategy", "[streamk]") {
+  // 50 tiles on 256 CUs with deep K: parallel reduction splits K by floor(256/50)=5 (grid 250),
+  // while the tree path picks the largest fraction that fits (4 -> grid 200).
+  constexpr size_t MT_M = 16, MT_N = 16, MT_K = 32, TILES = 50, ITERS = 128;
+  auto hardware = make_hardware(950);
+  auto problem  = make_problem(MT_M, MT_N * TILES, MT_K * ITERS);
+  problem.num_cus = 0;
+  auto config     = make_config(MT_M, MT_N, MT_K);
+  config.workspace_size            = std::numeric_limits<size_t>::max();
+  config.workspace_size_per_elem_c = 0;
+
+  const auto algo = origami::grid_selection_t::k_split_aware;
+
+  SECTION("config.reduction_strategy selects the strategy when set") {
+    config.reduction_strategy = origami::reduction_t::parallel;
+    REQUIRE(origami::streamk::select_grid_size(problem, hardware, config, algo) == 250);
+    config.reduction_strategy = origami::reduction_t::tree;
+    REQUIRE(origami::streamk::select_grid_size(problem, hardware, config, algo) == 200);
+  }
+
+  SECTION("an unset strategy behaves like tree in the public select_grid_size()") {
+    // select_reduction() would pick parallel for this problem, but the public entry point
+    // only honors config.reduction_strategy; none means "not parallel".
+    REQUIRE(origami::streamk::select_reduction(problem, hardware, config, algo) ==
+            origami::reduction_t::parallel);
+    config.reduction_strategy = origami::reduction_t::none;
+    REQUIRE(origami::streamk::select_grid_size(problem, hardware, config, algo) == 200);
+  }
+
+  SECTION("other algorithms ignore the reduction strategy") {
+    for (auto a : {origami::grid_selection_t::number_of_cus, origami::grid_selection_t::min_resources,
+                   origami::grid_selection_t::energy_aware,
+                   origami::grid_selection_t::reduction_cost_aware,
+                   origami::grid_selection_t::data_parallel}) {
+      config.reduction_strategy = origami::reduction_t::parallel;
+      const auto with_parallel  = origami::streamk::select_grid_size(problem, hardware, config, a);
+      config.reduction_strategy = origami::reduction_t::tree;
+      REQUIRE(origami::streamk::select_grid_size(problem, hardware, config, a) == with_parallel);
+    }
+  }
+}
+
+TEST_CASE("Origami streamk: compute_launch_parameters ignores a preset reduction_strategy",
+          "[streamk]") {
+  // compute_launch_parameters sizes the grid for the strategy select_reduction() picks and
+  // reports that same strategy, whatever config.reduction_strategy was preset to.
+  auto base                      = make_config(128, 128, 64);
+  base.stream_k                  = 5;
+  base.grid_selection            = origami::grid_selection_t::k_split_aware;
+  base.workspace_size            = 1ull << 28;
+  base.workspace_size_per_elem_c = 4;
+
+  const auto launch = [](const origami::problem_t& p,
+                         const origami::hardware_t& h,
+                         origami::config_t c,
+                         origami::reduction_t preset) {
+    c.reduction_strategy = preset;
+    return origami::gemm::compute_launch_parameters(p, h, c, c.grid_selection);
+  };
+
+  SECTION("preset parallel with a small K does not divide by zero") {
+    const auto problem  = make_problem(1024, 1024, 64);
+    const auto hardware = make_hardware(950);
+    const auto expected = launch(problem, hardware, base, origami::reduction_t::none);
+    REQUIRE(std::get<0>(expected) == origami::reduction_t::tree);
+    REQUIRE(std::get<1>(expected) == 64);
+
+    const auto result = launch(problem, hardware, base, origami::reduction_t::parallel);
+    REQUIRE(result == expected);
+  }
+
+  SECTION("preset tree with a large K keeps the grid and reported strategy consistent") {
+    const auto problem  = make_problem(1, 1, 65536);
+    const auto hardware = make_hardware(942);
+    const auto expected = launch(problem, hardware, base, origami::reduction_t::none);
+    REQUIRE(std::get<0>(expected) == origami::reduction_t::parallel);
+    REQUIRE(std::get<1>(expected) == 128);
+
+    const auto result = launch(problem, hardware, base, origami::reduction_t::tree);
+    REQUIRE(result == expected);
+  }
+}
