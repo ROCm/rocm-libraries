@@ -448,6 +448,31 @@ TEST_CASE("GEMM: on gfx1150 a workgroup alone on its WGP is not twice as fast", 
   REQUIRE(gfx1151 < 2.1);
 }
 
+TEST_CASE("GEMM: a W4A16 tile with fewer tokens than its width costs what a whole one does", "[gemm][w4a16]") {
+  // 2560 rows, K = 256, 32x64x64 at one workgroup per tile: measured 22.2 us with 4 tokens and
+  // 24.8 with 64 on gfx1150.  The store of the tile is what the tile's width makes it.
+  for (const auto& hardware : {make_w4a16_gfx1150_hardware(), make_w4a16_gfx1151_hardware()}) {
+    auto latency = [&](size_t tokens) {
+      auto problem    = make_problem(2560, tokens, 256);
+      problem.a_dtype = origami::data_type_t::Int4;
+      problem.a_stride_bytes = ((problem.size.k / 2) + 255) / 256 * 256 + 128;
+      auto config     = make_config(32, 64, 64, 16, 16, 16, false, 1, 8, 0, 0, 3);
+      config.workspace_size            = std::numeric_limits<size_t>::max() / 2;
+      config.workspace_size_per_elem_c = 4;
+      config.launch_grid               = 80;
+      config.reduction_strategy        = origami::reduction_t::tree;
+      origami::tensile_params_t t;
+      t.wave_group_n = 2;
+      t.local_split_u = 2;
+      t.prefetch_global_read = 2;
+      config.backend = t;
+      return origami::gemm::compute_total_latency(problem, hardware, config);
+    };
+    REQUIRE(latency(4) == Approx(latency(64)).epsilon(0.1));
+    REQUIRE(latency(16) == Approx(latency(64)).epsilon(0.1));
+  }
+}
+
 TEST_CASE("GEMM: compute_timestep_latency", "[gemm]") {
   for (int gpu_arch : test_architectures) {
     DYNAMIC_SECTION("gfx" << gpu_arch << " - timestep latency equals tile latency") {

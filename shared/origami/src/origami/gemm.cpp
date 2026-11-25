@@ -2500,10 +2500,15 @@ double compute_epilogue_latency(const problem_t& problem,
   tile_epilogue_plan_t epilogue_m_edge;
   tile_epilogue_plan_t epilogue_corner;
   if (has_interior) epilogue_interior = compute_tile_epilogue(MT_M, MT_N, false);
-  if (has_n_edge) epilogue_n_edge = compute_tile_epilogue(MT_M, n_remainder, false);
+  // Where the tile terms are measured, a tile with fewer columns of N than its width costs what
+  // a whole one does: 2560 rows x 4, 16, 64, 128 and 256 tokens, 19 kernels at one workgroup per
+  // tile, take the same within 10% up to the tile's width on gfx1150 (64x256x64 at K = 256: 49,
+  // 51, 50, 56, 55 us), and on gfx1151 a tile with 4 tokens takes what a full one does.
+  const size_t n_edge_cols = measured_terms ? MT_N : n_remainder;
+  if (has_n_edge) epilogue_n_edge = compute_tile_epilogue(MT_M, n_edge_cols, false);
   if (has_m_edge) epilogue_m_edge = compute_tile_epilogue(m_remainder, MT_N, true);
   if (has_m_edge && has_n_edge)
-    epilogue_corner = compute_tile_epilogue(m_remainder, n_remainder, true);
+    epilogue_corner = compute_tile_epilogue(m_remainder, n_edge_cols, true);
 
   // Aggregate per-tile-type costs into a representative per-tile epilogue.  At
   // most one M-row and one N-column are partial (edge/scalar) tiles; their weight
