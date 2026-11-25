@@ -1,23 +1,23 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
-"""No test file in limbo: each runs in a CI lane or has a recorded reason.
+"""No test file in limbo: each is assigned to a CI entry or has a recorded reason.
 
 Pull-request and push CI select rocKE's CTest entries by the quick and standard
-tier labels the provider categories give them. A test file is in CI when one of
-those entries selects it: a build-tree entry names source paths; an installed
+tier labels the provider categories give them. A test file is assigned to a CI
+entry when one of those entries selects it: a build-tree entry names source paths; an installed
 entry names paths of the install layout, which the configured install rules map
-back to the source (so a file the install leaves out is not in CI even when its
-directory is). A file a selected test runs as a child process counts too. A
-module whose ``pytestmark`` the entry's ``-m`` expression rejects is not in CI
-through that entry. The check works per file: marks on single tests, ``-k``
+back to the source (so a file the install leaves out is assigned to no CI entry
+even when its directory is). A file a selected test runs as a child process counts too. A
+module whose ``pytestmark`` the entry's ``-m`` expression rejects is not
+assigned to that entry. The check works per file: marks on single tests, ``-k``
 filters and a file whose every case skips in CI are not seen here, so
 ``rocke.tests.pending_lanes`` records those files under the lane their cases
 declare where they skip (``rocke.tests.lanes``), and ``tools/limbo_audit.py``
 checks each case against the record from the run records of CI lanes.
 
 Every other test file must be listed in ``rocke.tests.pending_lanes``, and every
-listed entry must be current: its file present, and in no CI-run entry for a
-whole-file entry, in one otherwise. A file is listed once per lane, and a
+listed entry must be current: its file present, and assigned to no CI entry for
+a whole-file entry, to one otherwise. A file is listed once per lane, and a
 whole-file entry is its file's only entry. Each record's team owns its path in
 CODEOWNERS. A file whose cases need a GPU no pull-request runner has (an arch
 helper called with such arches) has a record for them, and no test writes a
@@ -1699,15 +1699,16 @@ def test_every_quarantined_test_is_current():
 @pytest.mark.skipif(
     sys.platform == "win32", reason="the provider's install paths are POSIX paths"
 )
-def test_every_test_file_runs_in_ci_or_has_a_recorded_reason(tmp_path):
+def test_every_test_file_is_assigned_to_a_ci_entry_or_has_a_recorded_reason(tmp_path):
     in_limbo, stale = audit(
         tree_test_files(ROCKE), ci_selected_files(tmp_path), PENDING
     )
     assert not in_limbo, (
-        f"{len(in_limbo)} test files run in no CI-run entry and are not in "
+        f"{len(in_limbo)} test files are assigned to no CI entry and are not in "
         f"rocke.tests.pending_lanes: {in_limbo}"
     )
     assert not stale, (
-        "listed under a lane whose kind no longer fits (a file waiting for a new "
-        f"lane is now in CI, or one waiting for something CI lacks left CI): {stale}"
+        "records whose scope no longer fits (a whole-file record's file is now "
+        "assigned to a CI entry, or a case record's file is assigned to none): "
+        f"{stale}"
     )

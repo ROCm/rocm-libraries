@@ -11,7 +11,7 @@ or test, that pull-request or push CI (the quick and standard tiers) does not
 run, with the lane it waits for (``rocke.tests.lanes``), why, the GitHub team
 that owns it, the issue that tracks it, and the date by which it is re-decided.
 ``platform/tests/tools/test_pending_lanes.py`` holds the tree to it: every test
-file is selected by a CI-run CTest entry or listed here, and no entry here is
+file is assigned to a CI entry or listed here, and no entry here is
 stale.
 
 Every record names a team of ``TEAMS`` (a CODEOWNERS team of its path) and an
@@ -27,7 +27,7 @@ reported as warnings, so one record reaching its date does not turn an
 unrelated pull request red, and a scheduled run passes ``--strict-expiry`` to
 fail on every expired entry. An expired quarantine always fails.
 
-An entry for a file in no CI-run entry (``whole_file=True``) covers every case
+An entry for a file assigned to no CI entry (``whole_file=True``) covers every case
 of the file, and is the file's only entry. Any other entry covers only the
 cases that declare its lane where they skip (``rocke.tests.lanes.skip_until``):
 a case that skips for any other reason is not covered, whatever its reason
@@ -222,10 +222,10 @@ class PendingTest:
     """One test file, or one test of it, waiting for a lane, with its recorded
     reason.
 
-    ``whole_file`` says the file is in no CI-run entry: the entry covers each
-    of its cases, and is the file's only entry. Otherwise the file runs in CI
-    and the entry covers its cases that declare its lane where they skip
-    (:meth:`covers`). ``node`` names tests below the file (one case
+    ``whole_file`` says the file is assigned to no CI entry: the entry covers
+    each of its cases, and is the file's only entry. Otherwise the file is
+    assigned to a CI entry, and the entry covers its cases that declare its
+    lane where they skip (:meth:`covers`). ``node`` names tests below the file (one case
     ``test_x[case]``, each case of ``test_x``, each test of a class ``TestX``;
     any of them below a class), as a quarantine does: the entry covers those
     cases where no CI entry selects them (not collected, or deselected), or

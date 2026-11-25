@@ -1560,46 +1560,64 @@ the suspect's PR.
 ### 5.4 Tests that do not run normally: one registry
 
 Every test that the CI entries do not run normally is recorded in one data module,
-[`platform/python/rocke/tests/pending_lanes.py`](platform/python/rocke/tests/pending_lanes.py),
-with its reason, owner and expiry. It holds three kinds of record:
+[`platform/python/rocke/tests/pending_lanes.py`](platform/python/rocke/tests/pending_lanes.py).
+Each record names its reason, the GitHub team that owns the test (`team`, one of
+`TEAMS`, a CODEOWNERS team of its path) and the issue that tracks it (`issue`, a
+Jira id or `ROCm/<repo>#<n>`). A record without a filed issue is refused: file
+one first. It holds three kinds of record:
 
-| Kind | Records | Expired entry |
+| Kind | Records | Longest expiry | Expired record |
+|---|---|---|---|
+| `PendingTest` | a test file (or one test of it, `node`) waiting for a lane; the file is not known to be broken. With `whole_file=True` the file is assigned to no CI entry, and the record covers every case of it and is its file's only record. Otherwise the file is assigned to a CI entry, and the record covers only the cases that declare its lane where they skip (below). One record per lane a file's cases wait for | 90 days from when it is written | fails a change that touches it (its lines in the registry, or its test file); otherwise a warning. A scheduled run with `--strict-expiry` fails every one |
+| `MeasuredBudget` | the scratch bytes one test allows one kernel on the compilers it was measured on (`Compilers`: an LLVM major, llvm-project commits, or both; two builds of one major can differ), while its retune is decided; any other compiler gets the strict rule | 90 days | as `PendingTest` |
+| `QuarantinedTest` | one test known to fail (a flake, or a defect that turns develop red), by item id `<file>::<node name>`; a name without parameters covers all of them, or, with `params`, those whose parameter ids include each of them (one record for one defect across several cases). May name the GPU arches and the compilers (`Compilers`) it fails with, to be held out there only; at most `QUARANTINE_CAP` (10) at once | 30 days | always fails |
+
+A record whose expiry is further away than its longest window is refused when
+the registry loads. Reaching the date means re-deciding the record: fix the
+test, move it, or write a new date with the reason; dates are spread so the
+records of one area come due together, not the whole registry at once.
+
+**Four lanes.** A lane is what pull-request CI lacks that a test needs
+([`rocke.tests.lanes`](platform/python/rocke/tests/lanes.py)). The finer
+distinction (which arch, which tool, which ticket) is in the reason and the
+record's issue, not in the lane:
+
+| Lane | Waits for | Examples |
 |---|---|---|
-| `PendingTest` | a test file (or one test of it, `node`) waiting for a lane; the file is not known to be broken. Under a lane no CI entry runs yet (a scheduled run, an unlanded PR) it covers every case of the file; under a lane CI lacks (torch, a runner for a GPU arch CI does not have, the C++ engine's Python modules; `rocke.tests.lanes` lists them all) it covers only the cases that declare that lane where they skip (below). One entry per lane a file's cases wait for; a file under a lane that waits for torch imports torch | warns, and fails only a change that touches the registry or that file (every scheduled run under `--strict-expiry`) |
-| `MeasuredBudget` | the scratch bytes one test allows one kernel on the compilers it was measured on (`Compilers`: an LLVM major, llvm-project commits, or both; two builds of one major can differ), while its retune is decided; any other compiler gets the strict rule | as `PendingTest` |
-| `QuarantinedTest` | one test known to fail (a flake, or a defect that turns develop red), by item id `<file>::<node name>`; a name without parameters covers all of them, or, with `params`, those whose parameter ids include each of them (one record for one defect across several cases). Needs an issue (`AICK-1234`, `ROCm/<repo>#<n>`, or `none filed yet`); may name the GPU arches and the compilers (`Compilers`) it fails with, to be held out there only; at most `QUARANTINE_CAP` (10) at once | always fails |
+| `RUNNER_HARDWARE` (`runner-hardware`) | hardware no pull-request runner has: a GPU other than gfx942 and gfx110X, or a second GPU | gfx950, gfx90a, gfx1151, gfx1200, gfx1201 and gfx1250 cases; the two-GPU cases |
+| `BUILD_VARIANT` (`build-variant`) | a build or test environment CI does not provide | the C++ engine's Python modules (pybind11), the shared librocke on the Windows build, hipcc and the LLVM tools, optional packages |
+| `TICKET` (`ticket`) | work the record's issue tracks | CTest entries not added yet, a tier decision, a scheduled run (comprehensive tier, exhaustive cohort: `-m 'not exhaustive'` deselects to this lane), a torch-free rewrite |
+| `SOURCE_TREE` (`source-tree`) | a source checkout (`run_all.py`) | cases that read platform tools, C++ sources, docs or git history; `-m 'not integration'` deselects to this lane |
 
-**A skipped case names its lane where it skips.** The lanes are
-[`rocke.tests.lanes`](platform/python/rocke/tests/lanes.py). A case that skips
-because CI lacks what a lane gives says so with the lane, never with words a
-script has to interpret; a case that needs a GPU states the arches it needs,
-and the lanes module books the runner lane they wait for (none when a CI
-runner has one of them):
+**A skipped case names its lane where it skips.** A case that skips because CI
+lacks what a lane gives says so with the lane, never with words a script has to
+interpret; a case that needs a GPU states the arches it needs, and the lanes
+module books `RUNNER_HARDWARE` when no pull-request runner has any of them:
 
 ```python
 from rocke.tests.lanes import (
-    BINDING_LANE, TORCH_IN_CI,
+    BUILD_VARIANT, TICKET,
     arch_skip_reason, import_or_skip_until, skip_needing_arch, skip_until_reason,
 )
 
 skip_needing_arch(("gfx950",), reason="needs a gfx950 GPU, found gfx942")
 @pytest.mark.skipif(arch != "gfx950", reason=arch_skip_reason(("gfx950",), "..."))
-torch = import_or_skip_until("torch", TORCH_IN_CI)
-@pytest.mark.skipif(no_engine, reason=skip_until_reason(BINDING_LANE, reason="..."))
+torch = import_or_skip_until("torch", TICKET)  # its record names the torch follow-up
+@pytest.mark.skipif(no_engine, reason=skip_until_reason(BUILD_VARIANT, reason="..."))
 ```
 
 The shared helpers declare for you: `rocke.tests.gpu.current_device_arch_in`
-the runner lane of the arches a case needs; the engine helpers `BINDING_LANE`
-(a module that is installed but fails to import is a defect, not a wait); the
-missing-tool helpers (`rocke.tests.compiler_tools`, `rocke.tests.llc`)
-`CI_TEST_TOOLS`; the source-tree helpers `SOURCE_TREE_CASES`; a case a CI entry
-deselects by `-m 'not exhaustive'` or `'not integration'` waits for the lane of
-that marker. A skip for any other reason (a defect, a configuration refused on
-its own arch, a missing installed artifact) names no lane, and no entry can
-cover it: it shows up in limbo until it is fixed or quarantined. A case that
-can never run (a refused request, a state the code cannot build) is not kept
-as a skip: after the owner's review it is left out of the parametrization, or
-the test is deleted.
+and `run_on_device` the runner hardware of the arches a case needs; the engine
+helpers and the missing-tool helpers (`rocke.tests.compiler_tools`,
+`rocke.tests.llc`) `BUILD_VARIANT` (a module that is installed but fails to
+import is a defect, not a wait); the source-tree helpers `SOURCE_TREE`. A skip
+for any other reason (a defect, a configuration refused on its own arch, a
+missing installed artifact, a platform or tool a developer machine lacks) names
+no lane and says what it needs in plain words; no record can cover it, so in CI
+it shows up in limbo until it is fixed or quarantined. A case that can never run
+(a refused request, a state the code cannot build) is not kept as a skip: after
+the owner's review it is left out of the parametrization, or the test is
+deleted.
 
 The pytest roots of `platform/tests`, `library/tests` and the tiling tests
 (`platform/python/rocke/tests/helpers/tiling`, which its CI entries collect on
@@ -1612,15 +1630,28 @@ that fails once its lane runs moves to quarantine; it does not stay pending.
 Two checks hold the tree to the registry. The PR gate
 [`platform/tests/tools/test_pending_lanes.py`](platform/tests/tools/test_pending_lanes.py)
 (the `rocke-pending-lanes` pre-commit hook in pull-request CI, [§5.0.2](#502-ci-shards-and-rocke-item-sharding))
-works per file: every test file is assigned to a CI entry or is pending, no entry
-is stale (its test gone, or its lane's kind no longer true), and no test names
-a runner lane or writes a declaration by hand.
+works per file. It fails when:
+
+- a test file is assigned to no CI entry and has no record, or a record is
+  stale (its test gone, a whole-file record's file assigned to a CI entry, or a
+  case record's file assigned to none);
+- a record's team is not a CODEOWNERS team of its test;
+- a test file calls an arch helper with arches no pull-request runner has (a
+  literal, or a module-level name bound to one) and has no `RUNNER_HARDWARE`
+  or whole-file record;
+- a test names the runner lane, or writes a lane reason by hand: a skip reason
+  that says "waits for", or names CI or a runner, without the lane helpers;
+- an expired record this change touches (the hook's diff base is
+  `ROCKE_CHANGE_BASE`, else pre-commit's `--from-ref`, else the merge base with
+  origin/develop).
+
 [`tools/limbo_audit.py`](tools/limbo_audit.py) works per case, from the run
 records (`rocke.tests.run_records`) of the CI lanes: it fails on each case no
-lane ran that no record covers. The docstrings of `rocke.tests.run_records`
-and `tools/limbo_audit.py` give the commands
-that write the records and run the audit. A test that starts pytest over a
-fixture tree of its own passes `fixture_session_environment()` from
+lane ran that no record covers, which the file-level check cannot see (arches
+computed at run time, a skip with no lane). The docstrings of
+`rocke.tests.run_records` and `tools/limbo_audit.py` give the commands that
+write the records and run the audit. A test that starts pytest over a fixture
+tree of its own passes `fixture_session_environment()` from
 `rocke.tests.run_records` to that process, so its sessions write no records.
 
 **A sweep that checked nothing fails.** The same pytest roots fail a test whose
@@ -1654,7 +1685,8 @@ Cross-cutting properties every change must preserve:
   `rocke.tests.torch_uses` and fails on a use that
   `platform/tests/tools/no_torch_allowlist.txt` does not list, and on a listed
   line that no longer matches the tree. Until a test's use is removed, it
-  declares torch with `import_or_skip_until("torch", TORCH_IN_CI)`; code that
+  declares torch with `import_or_skip_until("torch", TICKET)`, under a record
+  that names the torch follow-up ticket; code that
   still needs torch imports it lazily behind a guard. When you
   remove a use, remove its line (or its kind); never add one. Names that only
   carry torch (`run_unified_attention_torch`) are not uses:

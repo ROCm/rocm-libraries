@@ -85,7 +85,7 @@ class Lane:
 
     ``arches`` names the GPU arches no pull-request runner has, whose cases
     the GPU helpers declare (:func:`runner_lanes_for`); ``marker`` names the
-    pytest marker by which the CI-run entries deselect the lane's cases.
+    pytest marker by which the CI entries deselect the lane's cases.
     """
 
     name: str
@@ -127,7 +127,7 @@ TICKET = Lane(
     "ticket",
     "work its record's issue tracks: a CTest entry or tier the tests need, a "
     "scheduled run (the comprehensive tier, the exhaustive cohort), or a "
-    "torch-free rewrite; the CI-run entries deselect exhaustive cases with "
+    "torch-free rewrite; the CI entries deselect exhaustive cases with "
     "-m 'not exhaustive'",
     marker="exhaustive",
 )

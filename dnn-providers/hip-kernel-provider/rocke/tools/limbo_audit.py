@@ -4,7 +4,7 @@
 """Which tests did no CI lane run, with no recorded reason? A per-test audit.
 
 ``platform/tests/tools/test_pending_lanes.py`` checks, file by file, that every
-test file is in a CI-run CTest entry or recorded in ``rocke.tests.pending_lanes``.
+test file is assigned to a CI entry or recorded in ``rocke.tests.pending_lanes``.
 It cannot see a single test that skips or is deselected in every CI lane while
 the rest of its file runs, nor a file recorded under one lane whose other
 tests skip for another reason. This audit sees both, from what CI lanes did:
