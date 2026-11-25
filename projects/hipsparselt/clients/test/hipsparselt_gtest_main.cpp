@@ -28,6 +28,8 @@
 #include "hipsparselt_parse_data.hpp"
 #include "hipsparselt_test.hpp"
 #include "test_cleanup.hpp"
+
+// CI probe for gfx950 hipSPARSELt Multi-Arch tests (ROCm/rocm-libraries#16646). Do not merge.
 #include "utility.hpp"
 #include <string>
 
