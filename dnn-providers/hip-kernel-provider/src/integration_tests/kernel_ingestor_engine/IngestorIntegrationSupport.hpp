@@ -700,37 +700,37 @@ inline SdpaGraph buildSdpaGraph(const std::string& name, const IngestorSdpaGraph
     constexpr int64_t O_UID = 4;
     constexpr int64_t STATS_UID = 5;
 
-    auto graph = std::make_shared<hipdnn_frontend::graph::Graph>();
+    const auto graph = std::make_shared<hipdnn_frontend::graph::Graph>();
     graph->set_name(name)
         .set_io_data_type(shape.dataType)
         .set_intermediate_data_type(hipdnn_frontend::DataType::FLOAT)
         .set_compute_data_type(hipdnn_frontend::DataType::FLOAT);
 
-    auto q = makeSdpaTensor(Q_UID,
-                            "Q",
-                            shape.dataType,
-                            shape.batch,
-                            shape.queryHeads,
-                            shape.seqQ,
-                            shape.headSize,
-                            SdpaLayout::BSHD);
-    auto k = makeSdpaTensor(K_UID,
-                            "K",
-                            shape.dataType,
-                            shape.batch,
-                            shape.kvHeads,
-                            shape.seqKv,
-                            shape.headSize,
-                            shape.kLayout);
-    auto v = shape.sharedKv ? k
-                            : makeSdpaTensor(V_UID,
-                                             "V",
-                                             shape.dataType,
-                                             shape.batch,
-                                             shape.kvHeads,
-                                             shape.seqKv,
-                                             shape.headSize,
-                                             shape.vLayout);
+    const auto q = makeSdpaTensor(Q_UID,
+                                  "Q",
+                                  shape.dataType,
+                                  shape.batch,
+                                  shape.queryHeads,
+                                  shape.seqQ,
+                                  shape.headSize,
+                                  SdpaLayout::BSHD);
+    const auto k = makeSdpaTensor(K_UID,
+                                  "K",
+                                  shape.dataType,
+                                  shape.batch,
+                                  shape.kvHeads,
+                                  shape.seqKv,
+                                  shape.headSize,
+                                  shape.kLayout);
+    const auto v = shape.sharedKv ? k
+                                  : makeSdpaTensor(V_UID,
+                                                   "V",
+                                                   shape.dataType,
+                                                   shape.batch,
+                                                   shape.kvHeads,
+                                                   shape.seqKv,
+                                                   shape.headSize,
+                                                   shape.vLayout);
 
     hipdnn_frontend::graph::SdpaAttributes attributes;
     attributes.set_name(name);
@@ -780,7 +780,7 @@ inline SdpaGraph buildSdpaGraph(const std::string& name, const IngestorSdpaGraph
     }
 
     auto outputs = graph->sdpa(q, k, v, attributes);
-    auto o = outputs[0];
+    const auto& o = outputs[0];
     o->set_uid(O_UID)
         .set_name("O")
         .set_output(true)
@@ -788,7 +788,7 @@ inline SdpaGraph buildSdpaGraph(const std::string& name, const IngestorSdpaGraph
         .set_dim({shape.batch, shape.queryHeads, shape.seqQ, shape.headSize})
         .set_stride(sdpaStrides(SdpaLayout::BSHD, shape.queryHeads, shape.seqQ, shape.headSize));
 
-    auto stats = outputs[1];
+    const auto& stats = outputs[1];
     if(stats != nullptr)
     {
         stats->set_uid(STATS_UID)

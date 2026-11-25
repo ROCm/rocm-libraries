@@ -409,17 +409,18 @@ public:
                 sumDyScale += dyVal * scaleVal;
             }
 
-            auto a = rstdVal * rstdVal * rstdVal * sumDyScaleXc
-                     / static_cast<ComputeDataType>(normalizedDimsSize);
-            auto b = rstdVal * sumDyScale / static_cast<ComputeDataType>(normalizedDimsSize);
+            const auto a = rstdVal * rstdVal * rstdVal * sumDyScaleXc
+                           / static_cast<ComputeDataType>(normalizedDimsSize);
+            const auto b = rstdVal * sumDyScale / static_cast<ComputeDataType>(normalizedDimsSize);
             for(size_t element = 0; element < normElementCount; ++element)
             {
-                auto dyVal
+                const auto dyVal
                     = static_cast<ComputeDataType>(dyBase[dyBatchOffset + dyNormOffsets[element]]);
-                auto scaleVal = static_cast<ComputeDataType>(scaleBase[scaleNormOffsets[element]]);
-                auto xVal
+                const auto scaleVal
+                    = static_cast<ComputeDataType>(scaleBase[scaleNormOffsets[element]]);
+                const auto xVal
                     = static_cast<ComputeDataType>(xBase[xBatchOffset + xNormOffsets[element]]);
-                auto dxVal = rstdVal * dyVal * scaleVal - a * (xVal - meanVal) - b;
+                const auto dxVal = rstdVal * dyVal * scaleVal - a * (xVal - meanVal) - b;
                 dxBase[dxBatchOffset + dxNormOffsets[element]] = static_cast<DxDataType>(dxVal);
             }
         };
