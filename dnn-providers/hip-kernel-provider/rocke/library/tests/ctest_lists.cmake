@@ -283,6 +283,7 @@ set(_ROCKE_LIBRARY_ATTENTION_CPU_TEST_RELPATHS
     "tests/library/tests/test_attention_combo_sweep_fp8.py"
     "tests/library/tests/test_dense_prefill_emit_shapes.py"
     "tests/library/tests/dispatch/attention/test_review_followups.py"
+    "tests/library/tests/test_ci_subset.py"
     # One node id, not the file: the rest of test_attention_builds.py
     # disassembles HSACO, so it needs the compiler tools this lane does not
     # inject, and its budget sentinel turns a missing-tool skip into a
@@ -597,7 +598,7 @@ string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
        "set_tests_properties(rocke_library_attention_unified_gpu_pytest PROPERTIES\n"
        "  LABELS \"ckc\\;python\\;attention\\;gpu\"\n"
        "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\"\n"
-       "  TIMEOUT 3600)\n")
+       "  TIMEOUT 1800)\n")
 
 # gfx942 and gfx950 dense numeric lanes. Each has its own standard-tier entry so its
 # compile time does not eat into a quick or omnibus entry.
@@ -607,7 +608,7 @@ string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
        "set_tests_properties(rocke_library_attention_dense_gfx942_gpu_pytest PROPERTIES\n"
        "  LABELS \"ckc\\;python\\;attention\\;gpu\"\n"
        "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\"\n"
-       "  TIMEOUT 3600)\n")
+       "  TIMEOUT 1800)\n")
 
 string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
        "add_test(rocke_library_attention_dense_gfx950_gpu_pytest ${_ROCKE_INSTALLED_PYTEST} \"${ROCKE_TEST_CTEST_REL}tests/library/tests/test_attention_dense_gfx950_numeric.py\" -v -rs)\n")
@@ -615,17 +616,17 @@ string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
        "set_tests_properties(rocke_library_attention_dense_gfx950_gpu_pytest PROPERTIES\n"
        "  LABELS \"ckc\\;python\\;attention\\;gpu\"\n"
        "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\"\n"
-       "  TIMEOUT 3600)\n")
+       "  TIMEOUT 1800)\n")
 
 # Unified-attention LSE numeric lane (split-KV and tiled 2D, both gfx942 and gfx950).
-# Compile-bound on a cold cache, so it gets its own entry and a long timeout.
+# Compile-bound, so it gets its own entry.
 string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
        "add_test(rocke_library_attention_lse_gpu_pytest ${_ROCKE_INSTALLED_PYTEST} \"${ROCKE_TEST_CTEST_REL}tests/library/tests/test_attention_unified_lse_numeric.py\" -v -rs)\n")
 string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
        "set_tests_properties(rocke_library_attention_lse_gpu_pytest PROPERTIES\n"
        "  LABELS \"ckc\\;python\\;attention\\;gpu\"\n"
        "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\"\n"
-       "  TIMEOUT 7200)\n")
+       "  TIMEOUT 1800)\n")
 
 # Typed refusals of the SDPA entry points (scale range, unsupported LSE, ALiBi,
 # head size, mask), each checked on a launch that must not write the output.

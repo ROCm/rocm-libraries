@@ -29,6 +29,7 @@ from rocke.runtime.hip_module import get_device_arch
 
 from . import _attention_numpy as an
 from . import _unified_paged_numpy as U
+from ._ci_subset import ci_subset
 
 _ARCH = get_device_arch()
 
@@ -64,6 +65,25 @@ def _scenario(name):
     return next(s for s in _scenarios() if s.name == name)
 
 
+# ``auto`` hands each request to the 2D or the 3D kernel, which every scenario
+# already runs directly, so CI checks the routing on a few decode and prefill
+# shapes of each mask family; ROCKE_TEST_FULL_MATRIX=1 runs it on all of them.
+_AUTO_CI_SCENARIOS = frozenset(
+    {
+        "tl_mixed",
+        "tl_decode_q1",
+        "nm_q_gt_kv",
+        "nm_d256_decode_q1",
+        "bd_tl_two_sided_w64_r32",
+        "bd_br_decode_q1_r8",
+    }
+)
+
+
+def _in_ci_subset(scenario, path, **_):
+    return path != "auto" or scenario.name in _AUTO_CI_SCENARIOS
+
+
 class _Edit:
     """Overwrite whole cache blocks of one cache in place and put them back on exit,
     so a multi-GiB cache is not copied for a small perturbation."""
@@ -93,6 +113,7 @@ def _bump(cache, blk, dtype, delta, rows=slice(None)):
 class TestMaskNumeric:
     @requires_gfx950_gpu
     @pytest.mark.gpu
+    @ci_subset(keep=_in_ci_subset)
     @pytest.mark.parametrize("path", ["2d", "3d", "auto"])
     @pytest.mark.parametrize("scenario", _scenarios(), ids=lambda s: s.name)
     def test_matches_reference(self, rt, scenario, path):
@@ -512,6 +533,7 @@ _MASKS = {
 class TestMask2DLevers:
     @requires_gfx950_gpu
     @pytest.mark.gpu
+    @ci_subset(cover=("variant", "mask"), rotate=("scn",))
     @pytest.mark.parametrize("mask", list(_MASKS))
     @pytest.mark.parametrize("variant", list(_LEVER_VARIANTS))
     @pytest.mark.parametrize("scn", list(_LEVER_SCENARIOS))

@@ -36,6 +36,7 @@ from rocke.numeric import fp8
 from rocke.runtime.hip_module import get_device_arch
 
 from . import _attention_numpy as an
+from ._ci_subset import ci_subset
 from ._dense_paged_gpu import paged_cache, run_dispatched_paged
 
 _ARCH = get_device_arch()
@@ -604,6 +605,7 @@ class TestDenseNumeric:
             f"{'persist' if persistent else 'default'}",
         )
 
+    @ci_subset(cover=("d,hq,hkv", "causal,sliding_window"), rotate=("dtype",))
     @pytest.mark.parametrize("dtype", ["bf16", "fp16"])
     @pytest.mark.parametrize("d,hq,hkv", [(64, 16, 4), (128, 16, 4)])
     # (causal, sliding_window): flash-causal, SWA-128, non-causal (full), and the
@@ -1486,6 +1488,7 @@ class TestWideDmaFeatures:
 class TestDenseLseNumeric:
     """Direct-runner LSE coverage; no dispatcher or hipDNN feature is implied."""
 
+    @ci_subset(cover=("heads", "persistent", "geometry"), rotate=("dtype", "head_size"))
     @pytest.mark.parametrize("dtype", ["fp16", "bf16"])
     @pytest.mark.parametrize("head_size", [64, 128])
     @pytest.mark.parametrize(
@@ -2373,6 +2376,7 @@ class TestDenseLseNumeric:
 class TestDensePagedNumeric:
     """Paged K/V (block_tables indirection) on the non-persistent dense body."""
 
+    @ci_subset(cover=("block_size", "sq,window"), rotate=("dtype", "d"))
     @pytest.mark.parametrize("dtype", ["fp16", "bf16"])
     @pytest.mark.parametrize("block_size", [16, 32, 64])
     @pytest.mark.parametrize("sq,window", [(1024, 256), (2048, 1024), (1024, 0)])
@@ -2793,6 +2797,7 @@ class TestDenseRowIndependence:
     the wave move its max and round differently.
     """
 
+    @ci_subset(cover=("persistent", "window"), rotate=("d", "dtype"))
     @pytest.mark.parametrize("window", [0, 128], ids=["causal", "causal_w128"])
     @pytest.mark.parametrize("persistent", [False, True], ids=["grid", "persist"])
     @pytest.mark.parametrize("d", [64, 128])

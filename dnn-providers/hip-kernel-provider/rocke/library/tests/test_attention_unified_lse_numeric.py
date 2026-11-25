@@ -31,6 +31,7 @@ from rocke.runtime.hip_module import get_device_arch
 from . import _attention_numpy as an
 from . import _unified_paged_numpy as U
 from ._attention_device_array import DeviceArray
+from ._ci_subset import ci_subset
 
 _ARCH = get_device_arch()
 
@@ -263,6 +264,7 @@ _SHAPES = [
 
 @requires_cdna3_or_4
 @pytest.mark.gpu
+@ci_subset(cover=("q_lens,kv_lens",), rotate=("d", "dtype"))
 @pytest.mark.parametrize("dtype", ["fp16", "bf16"])
 @pytest.mark.parametrize("d", [64, 128, 256])
 @pytest.mark.parametrize("q_lens,kv_lens", _SHAPES)
@@ -662,6 +664,7 @@ def _forbid_tiled_2d(*_args, **_kwargs):
 
 @requires_cdna3_or_4
 @pytest.mark.gpu
+@ci_subset(cover=("q_lens,kv_lens",), rotate=("dtype",))
 @pytest.mark.parametrize(
     "q_lens,kv_lens",
     [([2048], [2048]), ([37, 300, 1], [37, 812, 900])],
@@ -954,6 +957,7 @@ def test_malformed_lse_buffer_is_refused_before_launch(rt, case_name, backend):
 
 @requires_cdna3_or_4
 @pytest.mark.gpu
+@ci_subset(cover=("backend", "q_lens,kv_lens"), rotate=("d", "dtype"))
 @pytest.mark.parametrize("q_lens,kv_lens", _PREFILL_SHAPES)
 @pytest.mark.parametrize("d", [64, 128, 256])
 @pytest.mark.parametrize("dtype", ["fp16", "bf16"])
@@ -973,6 +977,7 @@ def test_tiled_2d_output_and_lse(rt, backend, dtype, d, q_lens, kv_lens):
 
 @requires_cdna3_or_4
 @pytest.mark.gpu
+@ci_subset(cover=("q_lens,kv_lens",), rotate=("dtype",))
 @pytest.mark.parametrize("q_lens,kv_lens", _PREFILL_SHAPES)
 @pytest.mark.parametrize("dtype", ["fp16", "bf16"])
 def test_tiled_2d_lse_one_query_head_per_kv_head(rt, dtype, q_lens, kv_lens):
@@ -988,6 +993,7 @@ def test_tiled_2d_lse_one_query_head_per_kv_head(rt, dtype, q_lens, kv_lens):
 
 @requires_cdna3_or_4
 @pytest.mark.gpu
+@ci_subset(cover=("backend", "window"), rotate=("dtype",))
 @pytest.mark.parametrize("dtype", ["fp16", "bf16"])
 @pytest.mark.parametrize("window", [64, 4096])
 @pytest.mark.parametrize("backend", ["auto", "tiled"])
@@ -1022,6 +1028,7 @@ def test_tiled_2d_lse_with_softcap(rt, backend):
 
 @requires_cdna3_or_4
 @pytest.mark.gpu
+@ci_subset(cover=("branch", "q_lens,kv_lens"), rotate=("d", "dtype"))
 @pytest.mark.parametrize("q_lens,kv_lens", [([37, 300, 1], [37, 812, 900]), ([5], [3])])
 @pytest.mark.parametrize("dtype", ["fp16", "bf16"])
 @pytest.mark.parametrize("d", [64, 128])
@@ -1047,6 +1054,7 @@ def _token_major_view(head_major, q_lens, heads):
 
 @pytest.mark.skipif(_ARCH != "gfx950", reason="head-major LSE is gfx950-only")
 @pytest.mark.gpu
+@ci_subset(cover=("branch", "q_lens,kv_lens"), rotate=("dtype",))
 @pytest.mark.parametrize(
     "q_lens,kv_lens",
     [([256, 256], [256, 256]), ([37, 300, 1], [37, 812, 900]), ([5], [3])],
@@ -1151,6 +1159,7 @@ def test_dispatcher_2d_lse_end_to_end(rt, branch):
 
 @requires_cdna3_or_4
 @pytest.mark.gpu
+@ci_subset(cover=("branch",), rotate=("dtype,score",))
 @pytest.mark.parametrize("dtype,score", [("fp16", -20.0), ("bf16", -200.0)])
 @pytest.mark.parametrize("branch", _BRANCHES)
 def test_2d_lse_masked_leading_tile_very_negative_scores(rt, branch, dtype, score):
@@ -1177,6 +1186,7 @@ _NAN_ROW, _NAN_HEAD = 100, 5
 
 @requires_cdna3_or_4
 @pytest.mark.gpu
+@ci_subset(cover=("branch",), rotate=("dtype",))
 @pytest.mark.parametrize("dtype", ["fp16", "bf16"])
 @pytest.mark.parametrize("branch", _BRANCHES)
 def test_2d_lse_nan_query_row_stays_nan(rt, branch, dtype):

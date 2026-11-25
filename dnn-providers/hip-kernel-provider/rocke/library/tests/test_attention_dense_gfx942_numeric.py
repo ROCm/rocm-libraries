@@ -39,6 +39,7 @@ from rocke.runtime.hip_module import get_device_arch
 
 from . import _attention_numpy as an
 from ._attention_device_array import DeviceArray
+from ._ci_subset import ci_subset
 from ._dense_paged_gpu import paged_cache, run_dispatched_paged
 
 # Gate on the base ISA target, not the marketing name: the whole MI300 family is
@@ -1702,6 +1703,7 @@ class TestDenseLseNumericGfx942:
     that comparison on a keyless shape).
     """
 
+    @ci_subset(cover=("heads", "persistent", "causal"), rotate=("dtype", "d"))
     @pytest.mark.parametrize("dtype", ["fp16", "bf16"])
     @pytest.mark.parametrize("d", [64, 128])
     @pytest.mark.parametrize("heads", [(8, 8), (8, 2)], ids=["mha", "gqa"])
@@ -2073,6 +2075,7 @@ class TestDenseLseNumericGfx942:
 class TestDensePagedNumeric:
     """Paged K/V (block_tables indirection) on the default grid."""
 
+    @ci_subset(cover=("block_size", "sq,window"), rotate=("dtype", "d"))
     @pytest.mark.parametrize("dtype", ["fp16", "bf16"])
     @pytest.mark.parametrize("block_size", [16, 32, 64])
     @pytest.mark.parametrize("sq,window", [(1024, 256), (2048, 1024), (1024, 0)])

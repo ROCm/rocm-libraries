@@ -41,6 +41,7 @@ from rocke.runtime.hip_module import get_device_arch
 from . import _attention_numpy as an
 from . import _unified_paged_numpy as U
 from ._attention_device_array import DeviceArray
+from ._ci_subset import ci_subset
 
 
 class _LazyTorch:
@@ -355,6 +356,7 @@ def _check_case(
 
 @requires_gfx950_gpu
 @pytest.mark.gpu
+@ci_subset(cover=("case", "bias_mode"), rotate=("dtype", "heads"))
 @pytest.mark.parametrize("heads", sorted(_HEADS))
 @pytest.mark.parametrize("bias_mode", list(_BIAS_MODES))
 @pytest.mark.parametrize("dtype", ["fp16", "bf16"])
@@ -366,6 +368,7 @@ def test_additive_bias_matches_reference(rt, case, dtype, bias_mode, heads):
 
 @requires_gfx950_gpu
 @pytest.mark.gpu
+@ci_subset(cover=("case", "bias_mode"), rotate=("dtype", "heads"))
 @pytest.mark.parametrize("heads", sorted(_HEADS))
 @pytest.mark.parametrize("bias_mode", _EXTRA_BIAS_MODES)
 @pytest.mark.parametrize("dtype", ["fp16", "bf16"])
