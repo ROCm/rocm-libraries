@@ -87,7 +87,7 @@ def plsinStorePermlane16Active(kernel, weaveGroups) -> bool:
     paired-store emitter.
     """
     # gfx950 + MI16 is not specific enough on its own: MX-fp8 subtile kernels
-    # match it too and would be taken off develop's ds_bpermute path.
+    # match it too and must stay on the ds_bpermute store path.
     if not isMxf4SubtilePath(kernel):
         return False
     if tuple(kernel.get("ISA", ())) != (9, 5, 0):
@@ -105,7 +105,7 @@ def _isSerialFenceTile(kernel) -> bool:
 
 def serialStoreFenceWaitStates(kernel, weaveGroups) -> int:
     """Wait states between a paired ``buffer_store_dwordx4`` and the next pair's
-    convert into the same pack quad. One everywhere develop already uses permlane16;
+    convert into the same pack quad. One wherever the store already uses permlane16;
     two where only the store cacheline align put the serial store on it. Gated on
     ``plsinStorePermlane16Active`` (ISA (9,5,0)) so the widened fence stays on the
     gfx950 cacheline align path -- off gfx950 the serial store keeps ds_bpermute and never needs it."""
@@ -4085,7 +4085,7 @@ class GlobalWriteBatchWriter:
     (_popSubtileAccVgprReads) derive their dest from here, so exactly ONE place maps
     (element -> staging register).
 
-    Today this is the hard-coded elementSumIdx expression (the register checked out
+    This is the hard-coded elementSumIdx expression (the register checked out
     by AsmStoreState.setupStoreElementsForBatch via vgprPool.checkOutAligned). That
     direct, pool-order-dependent reference is what makes a dead-ValuC pack lease
     unsafe across the two-pass re-emit: reserving a ValuC slot in pass 2 perturbs the
@@ -5196,7 +5196,7 @@ class GlobalWriteBatchWriter:
 
   def _cachelineAlignPartners(self, pendA, pendB) -> bool:
     """True when the held pair A and the just-prepared pair B are the two halves of the
-    same 128B lines in this wave, so the staggered store can DPP cacheline-align them (STAGGER_CACHELINE_ALIGN).
+    same 128B lines in this wave, so the staggered store can DPP cacheline-align them.
     Anything else keeps the plain deferred store."""
     if not storeCachelineAlignEnabled(self.kernel) or pendA is None or pendB is None:
       return False

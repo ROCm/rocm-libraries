@@ -5878,7 +5878,7 @@ class LogicalScheduler:
         woven.setItems(others + [gap, phase2])
         return True
 
-    # Most terminal MFMAs the banded reorder puts in one store gap (develop's ALAP order
+    # Most terminal MFMAs the banded reorder puts in one store gap (the baseline ALAP order
     # gives 2; more than 3 piles the weave up at the front of the store).
     WOVEN_CACHELINE_ALIGN_BAND_CAP = 3
 
@@ -5942,11 +5942,11 @@ class LogicalScheduler:
         # Woven store cacheline align: per capture, a {pairIdx: quadBase} lease letting
         # the plain-woven store draw its pack scratch quad from retired operand VGPRs
         # (the free-list) instead of the dedicated pack ring. Consumed by the caller's
-        # second emit pass + _pairPackQuad. Empty unless the env flag is set.
+        # second emit pass + _pairPackQuad. Empty unless the store cacheline align is on.
         self._wovenPackPlans = []
         # Lease two-pass: the pack leases are computed from pass 1's placement
         # (applyMoves=False). Pass 2 re-emits the store with the leases applied (and, under
-        # STAGGER_CACHELINE_ALIGN, the cacheline align blends), which changes instruction counts; a free re-plan
+        # the store cacheline align, the blends), which changes instruction counts; a free re-plan
         # could put a reader in a LATER gap than the lease plan assumed and have it read an
         # operand already leased as a pack quad. So pass 2 is pinned: a producer may only go
         # to its pass-1 gap or an earlier one (earlier = operand retires sooner = lease still
