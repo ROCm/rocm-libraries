@@ -911,19 +911,41 @@ inputs); re-check them when that pin moves.
 
 | CI job | Runs on | Tier | CI shards | Builds rocKE |
 |---|---|---|---|---|
-| `therock-multi-arch-ci.yml` | a pull request or push whose changed paths all belong to projects in the repo config or to a directory the configure script also classifies (here `dnn-providers/cmake`), when one of them is hip-kernel-provider or a project TheRock's consumer graph links to it (such as hipDNN), or that changes a TheRock CI workflow (every configured project is tested) | standard | 4 | yes |
-| `therock-multi-arch-ci.yml` | a manual dispatch, or a pull request or push that touches shared CI files or an unclassified path: the configure step then tests every project | quick | 1 | yes |
+| `therock-multi-arch-ci.yml` | a pull request or push whose changed paths all belong to projects in the repo config or to a directory the configure script also classifies (here `dnn-providers/cmake`), when one of them is hip-kernel-provider or a project TheRock's consumer graph links to it (such as hipDNN), or that changes a TheRock CI workflow (every configured project is tested) | standard | 4 | no |
+| `therock-multi-arch-ci.yml` | a manual dispatch, or a pull request or push that touches shared CI files or an unclassified path: the configure step then tests every project | quick | 1 | no |
 | `therock-multi-arch-ci-nightly.yml` | the nightly schedule | comprehensive | 4 | no |
-| `hipdnn-superbuild-ci.yml` | a pull request that changes hipDNN or provider files other than docs, and its own nightly schedule | `full`, then entries without a tier label | n/a (one job per OS) | yes; tests the build tree only |
+| `hipdnn-superbuild-ci.yml` | a pull request that changes hipDNN or provider files other than docs, and its own nightly schedule | `full`, then entries without a tier label | n/a (one job per OS) | no |
 
-TheRock jobs run the installed entries. The scheduled TheRock job does not
-build rocKE: TheRock's flag `THEROCK_FLAG_HIPKERNELPROVIDER_ENABLE_ROCKE` is off
-by default, and only `therock-multi-arch-ci.yml` turns it on, through
-`extra_cmake_options`. Thus an installed entry that starts at comprehensive or
-full runs in no CI job (⚠ [G11](#72-platform-quality-gaps-question-b)). The hipDNN
-superbuild runs every build-tree entry (the test binaries and Python checks
-that `platform/tests/cmake/` and `library/cpp/tests/` register) and no
-installed entry.
+No rocm-libraries CI job builds rocKE, so no rocKE CTest entry, installed or
+build-tree, runs in CI (⚠ [G11](#72-platform-quality-gaps-question-b)). TheRock's
+flag `THEROCK_FLAG_HIPKERNELPROVIDER_ENABLE_ROCKE` is off by default, and no
+workflow under `.github/workflows/` passes it in its `external_repo` input. The
+hipDNN superbuild configures with `--preset hipdnn-dev-all`, which leaves the provider's
+`HIPKERNELPROVIDER_ENABLE_ROCKE` at its default, off
+(`dnn-providers/hip-kernel-provider/CMakeLists.txt`). The tier column says what
+each job selects once it builds rocKE: TheRock jobs run the installed entries,
+and the superbuild runs the build-tree entries (the test binaries and Python
+checks that `platform/tests/cmake/` and `library/cpp/tests/` register). The
+source-tree checks of a pull request run instead as pre-commit hooks of the
+repository root `.pre-commit-config.yaml`, which the `pre-commit.yml` workflow
+runs on each pull request to develop that changes rocKE: `rocke-pending-lanes`,
+`rocke-compliance` and `rocke-no-torch`.
+
+**Which GPUs run tests.** The pull-request job, `therock-multi-arch-ci.yml`,
+selects these GPU families; TheRock's family matrix
+(`amdgpu_family_matrix.py` at the pinned commit) decides where each one's tests
+run. A family's tests include rocKE's entries only in a job that builds rocKE.
+
+| Family (targets) | Platform | Selected by the pull-request job | Tests run on |
+|---|---|---|---|
+| gfx94X (gfx942) | Linux | yes | pull requests, pushes, TheRock's submodule-bump runs, nightly |
+| gfx950 | Linux | yes | TheRock's submodule-bump runs only |
+| gfx125X (gfx1250) | Linux | yes, build only | nightly runs only |
+| gfx110X (gfx1100-gfx1103) | Windows | yes | every trigger |
+| gfx90a | Linux | no | none in rocm-libraries CI |
+
+So pull-request CI tests only gfx942 (Linux) and gfx110X (Windows). rocKE's
+gfx950 runs outside this CI are tracked in AICK-3411.
 
 **Dependency on TheRock.** Item sharding needs two TheRock behaviours.
 TheRock exports `GTEST_SHARD_INDEX` and `GTEST_TOTAL_SHARDS` to every CTest
@@ -1550,6 +1572,7 @@ quarantine; it does not stay pending.
 
 Two checks hold the tree to the registry. The PR gate
 [`platform/tests/tools/test_pending_lanes.py`](platform/tests/tools/test_pending_lanes.py)
+(the `rocke-pending-lanes` pre-commit hook in pull-request CI, [§5.0.2](#502-ci-shards-and-rocke-item-sharding))
 works per file: every test file runs in a CI-run entry or is pending, no entry
 is stale (its test gone, or its lane's kind no longer true), and no test names
 a runner lane or writes a declaration by hand.
@@ -1586,7 +1609,8 @@ Cross-cutting properties every change must preserve:
 - **No torch** — rocKE does not use torch: references are numpy
   (`rocke.numeric`), device data is `DeviceArray`. Existing uses are being
   removed; the allowlist only shrinks. `rocke_no_torch_check`
-  (`platform/tests/tools/test_no_torch.py`, build tree, standard tier) reads every
+  (`platform/tests/tools/test_no_torch.py`, build tree, standard tier; in
+  pull-request CI the `rocke-no-torch` pre-commit hook) reads every
   Python, requirements, `pyproject.toml` and CMake file under `rocke/` with
   `rocke.tests.torch_uses` and fails on a use that
   `platform/tests/tools/no_torch_allowlist.txt` does not list, and on a listed
@@ -1633,8 +1657,8 @@ Read coverage from the emitter configs ([`platform/tests/README.md`](platform/te
 | G6 | **Partially enrolled `library/` behavioral pytest** | Installed CTest registers explicit attention, convolution, DSA, MLA, GDN/KDA, library-host (`rocke_library_host_pytest`: shared dispatch helpers, benchmark early stop, occupancy calibration), reference-contract, and GPU cohorts, plus the comprehensive-tier `rocke_library_conv_exhaustive_pytest` for the `exhaustive` items of the conv files, but source tests outside the explicit CMake selections remain ungated; the C++/Python engine parity files (`test_selector_cpp_parity.py`, `test_attention_ir_cpp_parity.py`, `test_gdn_decode_ir_cpp_parity.py`) run in `rocke_library_engine_parity_pytest` and the selector's full grid in the comprehensive-tier `rocke_library_engine_parity_exhaustive_pytest`, neither registered on Windows, where provider builds make no engine modules; on Linux every case of theirs skips where the build's Python had no pybind11, which is TheRock's CI build environment until it gains pybind11, and the standard-tier `rocke_engine_modules_check` reports that reason (it reads the configure's marker `tests/rocke_engine_modules.json`, and fails instead when a module the build made does not import or the `cpp` backend falls back to the Python engine); registration or adding a file under `library/tests/` does not establish CI coverage; the GDN/KDA host entry `rocke_library_gdn_pytest` is not registered on Windows (a slow case in `test_gdn_decode_fused.py`), so Windows runs no GDN/KDA decode host pytest (the KDA chunkwise IR hashes stay covered by `rocke_golden_static`); the TF32 conv build-and-lower matrices and comgr ISA checks (`rocke_library_conv_tf32_lowering_pytest`) are not registered on Windows either, to fit the Windows shard time, so Windows runs only the representative TF32 builds in `rocke_library_conv_tf32_pytest`; on Windows, `rocke_library_attention_cpu_pytest` leaves out the gfx942 dense prefill host tests and their IR golden; the GDN/KDA GPU numeric files skip on the Windows GPU lanes, which lack gfx950/gfx942 devices | Audit registered-but-unselected entries and unregistered files; enroll each in an owned CTest tier or document why it remains manual |
 | G7 | **Orphaned `platform/python` pytest** (heuristics, benchmark) | `platform/python/rocke/tests/in_tree_suites.py` lists the in-package directories `platform/tests/in_tree` runs; every test file that runs in no CI lane is in `platform/python/rocke/tests/pending_lanes.py` with its reason and the lane it waits for | Enrol each listed file as its lane lands |
 | G9 | **Legacy discovered pytest contains resource-bound work** | The affordable runner now excludes the largest marked matrices from execution and isolates selected files, but collection still imports and parameterizes every discovered module; additional unmarked structural/compiler cohorts remain in the default lane | Move each remaining resource-bound cohort behind a named structural/compiler CTest, then remove its transitional `exhaustive` marker |
-| G10 | **No CI job runs the byte-identity gate** ([§4.3](#43-do-the-two-implementations-agree-the-migration-gate)) | Only `tests/run_all.py` runs `tools/check_byte_identity.py`; no CTest entry or workflow does. Where the build made no engine modules (CI today, see G6), the C++-engine cases of the installed IR tests skip. A pull request whose author skipped the developer gate can merge with the two engines emitting different IR | Run the gate in pull-request CI (tracked in AICK-2301) and on each merge to develop (tracked in AICK-2929) |
-| G11 | **No CI job runs the installed comprehensive and full entries** ([§5.0.2](#502-ci-shards-and-rocke-item-sharding)) | The scheduled TheRock job selects comprehensive but does not build rocKE; the hipDNN superbuild selects full but tests the build tree only. The installed entries that start at comprehensive (such as the library gates and contracts that [`platform/tests/README.md`](platform/tests/README.md) lists as comprehensive and full) run nowhere in CI | Build rocKE in the scheduled TheRock job (tracked in AICK-2925) |
+| G10 | **No CI job runs the byte-identity gate** ([§4.3](#43-do-the-two-implementations-agree-the-migration-gate)) | Only `tests/run_all.py` runs `tools/check_byte_identity.py`; no CTest entry or workflow does. Where the build made no engine modules (see G6), the C++-engine cases of the installed IR tests skip. A pull request whose author skipped the developer gate can merge with the two engines emitting different IR | Run the gate in pull-request CI (tracked in AICK-2301) and on each merge to develop (tracked in AICK-2929) |
+| G11 | **No CI job builds rocKE** ([§5.0.2](#502-ci-shards-and-rocke-item-sharding)) | No TheRock workflow and not the hipDNN superbuild turns rocKE on, so no rocKE CTest entry of any tier, installed or build-tree, runs in CI; only the source-tree checks run, as the `rocke-pending-lanes`, `rocke-compliance` and `rocke-no-torch` pre-commit hooks | Build rocKE in the pull-request and scheduled TheRock jobs (the scheduled job tracked in AICK-2925) |
 
 ### 7.3 What "green" does and does not mean today
 
@@ -1657,7 +1681,8 @@ does not make that claim. The remaining numerical holes are G1–G5.
 
 A green **CI run** does not prove that the two engines emit the same IR: no CI
 job runs the byte-identity gate (G10). No CI run, pull-request or scheduled,
-covers the installed comprehensive and full entries (G11).
+runs any rocKE CTest entry (G11); a green CI run covers rocKE only through its
+pre-commit hooks.
 
 ---
 
