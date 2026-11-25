@@ -1,0 +1,6 @@
+{
+  "version": "1.0",
+  "id": "ff262106-ed8a-466a-a992-25ac733a2171",
+  "name": "hip_conv_fwd_bias_act_dw3d_rdna dispatch",
+  "dispatch_symbol": "hipkernel.hip_conv_fwd_bias_act_dw3d_rdna.dispatch"
+}

@@ -19,12 +19,72 @@
 //   DW_HAS_BIAS         1 = add bias[k] (one value per output channel, the dtype of the data)
 //                       to every output before it is stored; the kernel then takes the bias
 //                       pointer after `out`
+//   DW_HAS_ACT          1 = apply an activation to every output, after the bias, before it is
+//                       stored; the kernel then takes the activation (ACT_* below), its three
+//                       parameters and has_bias after the last int. Built with DW_HAS_BIAS; a
+//                       graph without a bias passes has_bias 0, and the bias pointer is not read
 
 #ifndef DW_GENERIC
 #define DW_GENERIC 0
 #endif
 #ifndef DW_HAS_BIAS
 #define DW_HAS_BIAS 0
+#endif
+#ifndef DW_HAS_ACT
+#define DW_HAS_ACT 0
+#endif
+
+#if DW_HAS_ACT
+// The activations, numbered as conv_rdna::ActivationMode.
+#define ACT_RELU 0
+#define ACT_SIGMOID 1
+#define ACT_TANH 2
+#define ACT_ELU 3
+#define ACT_GELU 4
+#define ACT_GELU_APPROX_TANH 5
+#define ACT_SWISH 6
+#define ACT_SOFTPLUS 7
+#define ACT_IDENTITY 8
+
+// The forward activations of hipDNN's pointwise reference, in fp32. `act` is a kernel argument,
+// so every thread takes the same branch.
+//   ACT_RELU      p0 lower clip, p1 upper clip, p2 slope below the lower clip
+//   ACT_ELU       p0 alpha
+//   ACT_SWISH     p0 beta
+//   ACT_SOFTPLUS  p0 beta
+// A call, not inlined: the store loops are unrolled so that the output tile is indexed by
+// constants and stays in registers, and inlined there the switch would be copied once per
+// output of the tile. In a loop that is not unrolled the tile moves to scratch; inlined into
+// the unrolled loops the code grows several times, which on gfx1151 was slower than the call.
+__device__ static __attribute__((noinline)) float
+    activate(float v, int act, float p0, float p1, float p2)
+{
+    switch(act)
+    {
+    case ACT_RELU:
+        return v <= p0 ? p2 * (v - p0) + p0 : (v >= p1 ? p1 : v);
+    case ACT_SIGMOID:
+        return 1.f / (1.f + expf(-v));
+    case ACT_TANH:
+        return tanhf(v);
+    case ACT_ELU:
+        return v > 0.f ? v : p0 * expm1f(v);
+    case ACT_GELU:
+        return 0.5f * v * (1.f + erff(v * 0.70710678118654752f));
+    case ACT_GELU_APPROX_TANH:
+        return 0.5f * v * (1.f + tanhf(0.79788456080286536f * (v + 0.044715f * v * v * v)));
+    case ACT_SWISH:
+        return v / (1.f + expf(-p0 * v));
+    case ACT_SOFTPLUS:
+    {
+        // Linear above 20, where log1p(exp(s)) / beta equals v in fp32 and exp would overflow.
+        const float s = p0 * v;
+        return s > 20.f ? v : log1pf(expf(s)) / p0;
+    }
+    default:
+        return v;
+    }
+}
 #endif
 
 #if !DW_GENERIC
@@ -153,7 +213,16 @@ extern "C" __global__ void __launch_bounds__(DW_BLOCK_SIZE)
                        int pd,
                        int ph,
                        int pw,
-                       int dd)
+                       int dd
+#if DW_HAS_ACT
+                       ,
+                       int act,
+                       float act_p0,
+                       float act_p1,
+                       float act_p2,
+                       int has_bias
+#endif
+    )
 {
     const int mult = K / C;
     const int wtiles = (Wo + DW_TW - 1) / DW_TW;
@@ -313,19 +382,24 @@ extern "C" __global__ void __launch_bounds__(DW_BLOCK_SIZE)
         }
     }
 
-#if DW_HAS_BIAS
+#if DW_HAS_ACT
+    const float bv = has_bias != 0 ? to_float(bias[k]) : 0.f;
+#elif DW_HAS_BIAS
     const float bv = to_float(bias[k]);
 #endif
+#pragma unroll
     for(int o = 0; o < DW_TD; ++o)
     {
         const int d_o = do0 + o;
         if(d_o >= Do)
             break;
+#pragma unroll
         for(int a = 0; a < DW_TH; ++a)
         {
             const int ho = ho0 + a;
             if(ho >= Ho)
                 break;
+#pragma unroll
             for(int t = 0; t < DW_TW; ++t)
             {
                 const int wo = wo0 + t;
@@ -334,6 +408,9 @@ extern "C" __global__ void __launch_bounds__(DW_BLOCK_SIZE)
                 float v = acc[o][a][t];
 #if DW_HAS_BIAS
                 v += bv;
+#endif
+#if DW_HAS_ACT
+                v = activate(v, act, act_p0, act_p1, act_p2);
 #endif
 #if DW_NDHWC
                 out[(((static_cast<long long>(n) * Do + d_o) * Ho + ho) * Wo + wo) * K + k]
@@ -426,7 +503,16 @@ extern "C" __global__ void __launch_bounds__(DWG_BLOCK_SIZE)
                        int pw,
                        int dd,
                        int dh,
-                       int dw)
+                       int dw
+#if DW_HAS_ACT
+                       ,
+                       int act,
+                       float act_p0,
+                       float act_p1,
+                       float act_p2,
+                       int has_bias
+#endif
+    )
 {
     const int mult = K / C;
     const int wtiles = (Wo + DWG_TW - 1) / DWG_TW;
@@ -499,9 +585,12 @@ extern "C" __global__ void __launch_bounds__(DWG_BLOCK_SIZE)
         }
     }
 
-#if DW_HAS_BIAS
+#if DW_HAS_ACT
+    const float bv = has_bias != 0 ? to_float(bias[k]) : 0.f;
+#elif DW_HAS_BIAS
     const float bv = to_float(bias[k]);
 #endif
+#pragma unroll
     for(int t = 0; t < DWG_TW; ++t)
     {
         const int wo = wo0 + t;
@@ -510,6 +599,9 @@ extern "C" __global__ void __launch_bounds__(DWG_BLOCK_SIZE)
         float v = acc[t];
 #if DW_HAS_BIAS
         v += bv;
+#endif
+#if DW_HAS_ACT
+        v = activate(v, act, act_p0, act_p1, act_p2);
 #endif
 #if DW_NDHWC
         out[(((static_cast<long long>(n) * Do + d_o) * Ho + ho) * Wo + wo) * K + k] = from_float(v);

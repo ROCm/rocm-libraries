@@ -850,6 +850,7 @@ There is no packaging `--profile`, CMake `PROFILES` or external root manifest.
 | `configs/hip_conv_fwd_fma_igemm_rdna.yaml` | The shipped `hipkernel:hip_conv_fwd_fma_igemm_rdna` catalog: HIP-source kernels (`kind: hip`, one per dtype x layout x tile, built with `defines`) under `hip/conv_rdna` |
 | `configs/hip_conv_fwd_dw3d_rdna.yaml` | The shipped `hipkernel:hip_conv_fwd_dw3d_rdna` catalog: a HIP-source depthwise 3-D kernel (`kind: hip`), 72 variants specialized at compile time on filter, H / W stride and tile, plus a generic variant per dtype and layout, under `hip/conv_dw3d_rdna` |
 | `configs/hip_conv_fwd_bias_dw3d_rdna.yaml` | The shipped `hipkernel:hip_conv_fwd_bias_dw3d_rdna` catalog: the same HIP-source depthwise 3-D kernel with its bias epilogue (`DW_HAS_BIAS`), named from `hip/conv_bias_dw3d_rdna` as `../conv_dw3d_rdna/kernels/ConvFwdDepthwise3d.cpp` |
+| `configs/hip_conv_fwd_bias_act_dw3d_rdna.yaml` | The shipped `hipkernel:hip_conv_fwd_bias_act_dw3d_rdna` catalog: the same HIP-source depthwise 3-D kernel with its bias and activation epilogues (`DW_HAS_BIAS`, `DW_HAS_ACT`), named from `hip/conv_bias_act_dw3d_rdna` as `../conv_dw3d_rdna/kernels/ConvFwdDepthwise3d.cpp` |
 
 ## Generated variant sets: `variants`
 
