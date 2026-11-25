@@ -76,6 +76,8 @@ if(BUILD_TESTING)
         TIMEOUT ${ROCKE_TEST_TIMEOUT_CPU}
         ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/../python")
 
+    # The next three entries are kept in step with the rocke-* hooks in the
+    # root .pre-commit-config.yaml.
     # Every test file runs in a CI-run entry or is listed, with its reason, in
     # rocke.tests.pending_lanes. The check configures this source tree and reads
     # the provider categories, which the installed test tree does not carry.

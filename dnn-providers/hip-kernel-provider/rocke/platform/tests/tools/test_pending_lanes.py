@@ -1243,6 +1243,11 @@ def test_every_quarantined_test_is_current():
     shutil.which("cmake") is None or shutil.which("ctest") is None,
     reason="CMake and CTest required",
 )
+# The provider's install paths this audit maps back to the source are POSIX
+# paths only; the registration it audits is the same on every platform.
+@pytest.mark.skipif(
+    sys.platform == "win32", reason="the provider's install paths are POSIX paths"
+)
 def test_every_test_file_runs_in_ci_or_has_a_recorded_reason(tmp_path):
     in_limbo, stale = audit(
         tree_test_files(ROCKE), ci_selected_files(tmp_path), PENDING

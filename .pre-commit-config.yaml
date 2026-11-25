@@ -413,8 +413,47 @@ repos:
         name: rocKE platform -> library imports only shrink
         entry: python -m pytest -p no:cacheprovider --noconftest -q dnn-providers/hip-kernel-provider/rocke/platform/tests/test_library_reach.py
         language: python
-        additional_dependencies: ["pytest==8.4.2"]
+        # One pytest pin for every rocKE hook; the hooks below reuse it.
+        additional_dependencies: [&rocke_pytest "pytest==9.2.0"]
         files: ^dnn-providers/hip-kernel-provider/rocke/platform/(python|tests|tools|dsl_docs|cpp)/.*\.py$
+        pass_filenames: false
+
+      # rocKE source-tree gates. Each reads the source checkout (git, the
+      # provider's CTest categories, a configure of the platform), which the
+      # installed test tree does not carry, so their CTest entries exist in the
+      # build tree only; these hooks run them on every change to rocKE. They
+      # import rocke through the platform tests' conftest, hence numpy, and need
+      # pytest 9. numpy is pinned to a release that still supports Python 3.10,
+      # rocKE's oldest. -B and no:cacheprovider keep bytecode and .pytest_cache
+      # out of the tree.
+      # Every test file runs in a CI-run CTest entry or is listed, with its
+      # reason, in rocke.tests.pending_lanes (rocke_pending_lanes_check). Needs
+      # cmake, ctest and a C++ compiler on PATH. It also reads
+      # shared/ctest/parse_ctest_categories.py, but a change to that file alone
+      # cannot trigger it: CI checks out only the directories a change touches,
+      # so the hook's own files under rocke/ would be missing.
+      - id: rocke-pending-lanes
+        name: rocKE every test file runs in CI or has a recorded reason
+        entry: python -B -m pytest -p no:cacheprovider -q dnn-providers/hip-kernel-provider/rocke/platform/tests/tools/test_pending_lanes.py dnn-providers/hip-kernel-provider/rocke/platform/tests/tools/test_limbo_audit.py
+        language: python
+        additional_dependencies: [*rocke_pytest, "numpy==2.2.6", "PyYAML==6.0.4"]
+        files: ^dnn-providers/hip-kernel-provider/(rocke/|ROCKE_ENGINE_test_categories_external\.yaml$)
+        pass_filenames: false
+      # No git-tracked file of rocKE holds a compliance hit (rocke_compliance_pytest).
+      - id: rocke-compliance
+        name: rocKE files pass the compliance patterns
+        entry: python -B -m pytest -p no:cacheprovider -q dnn-providers/hip-kernel-provider/rocke/platform/tests/tools/test_compliance_patterns.py
+        language: python
+        additional_dependencies: [*rocke_pytest, "numpy==2.2.6"]
+        files: ^dnn-providers/hip-kernel-provider/rocke/
+        pass_filenames: false
+      # No new torch use under rocKE (rocke_no_torch_check).
+      - id: rocke-no-torch
+        name: rocKE adds no torch use
+        entry: python -B -m pytest -p no:cacheprovider -q dnn-providers/hip-kernel-provider/rocke/platform/tests/tools/test_no_torch.py
+        language: python
+        additional_dependencies: [*rocke_pytest, "numpy==2.2.6"]
+        files: ^dnn-providers/hip-kernel-provider/rocke/
         pass_filenames: false
 
   - repo: https://github.com/cheshirekow/cmake-format-precommit
