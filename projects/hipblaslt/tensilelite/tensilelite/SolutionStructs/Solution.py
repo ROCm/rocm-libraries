@@ -5117,6 +5117,23 @@ class Solution(collections.abc.Mapping):
                                                           state.get("enableTDMMetadata", False))
         if state["DirectToLdsMetadata"]:
           LdsBlockSizePerPad = 0
+        # Wave-separated TDM restarts the LDS pad interval at each wave's piece of the
+        # metadata tile, so a piece must not straddle a pad-block boundary (a piece that
+        # starts mid-block but ends within it is fine, e.g. a whole tile under one block).
+        # Auto (-1) shrinks the block to gcd(block, piece); a manual value is rejected.
+        if LdsBlockSizePerPad and state["UnrollMajorLDSMetadata"] and state["TDMInst"] \
+            and tdmWaveSeparated(state):
+          numComp = tdmWavePartition(state, "Metadata")[0]
+          if numComp > 1:
+            pieceBytes = (state["MacroTileMetadata"] // numComp) * int(state["_DepthUMetadata"])
+            if any(start % LdsBlockSizePerPad and start % LdsBlockSizePerPad + pieceBytes > LdsBlockSizePerPad
+                   for start in range(pieceBytes, pieceBytes * numComp, pieceBytes)):
+              if state["LdsBlockSizePerPadMetadata"] == -1:
+                LdsBlockSizePerPad = math.gcd(LdsBlockSizePerPad, pieceBytes)
+              else:
+                reject(state, printRejectionReason,
+                       f"LdsBlockSizePerPadMetadata={LdsBlockSizePerPad} splits "
+                       f"TDM metadata piece {pieceBytes}B")
         return int(LdsBlockSizePerPad)
 
       def calcLdsBlockSizePerPad(tc: str, lrvw: int) -> int:

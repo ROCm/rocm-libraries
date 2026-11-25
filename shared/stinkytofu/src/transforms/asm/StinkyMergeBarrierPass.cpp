@@ -30,6 +30,7 @@
 #include "stinkytofu/analysis/asm/Layer2BarrierOverlapAnalysis.hpp"
 #include "stinkytofu/core/BasicBlock.hpp"
 #include "stinkytofu/core/PassManager.hpp"
+#include "stinkytofu/hardware/ArchHelper.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
 #include "stinkytofu/support/LoopDetection.hpp"
 
@@ -200,8 +201,8 @@ class StinkyMergeBarrierPass : public StinkyInstPass {
     }
 
     PreservedAnalyses run(Function& func, PassContext& passCtx, AnalysisManager& AM) override {
-        // CDNA5 (Gfx1250) barrier-token scheduling only. Match chooseReadyQueue().
-        if (passCtx.getGemmTileConfig().arch[0] != 12 || passCtx.getGemmTileConfig().arch[1] != 5)
+        // CDNA5 (Gfx1250) barrier-token scheduling only. Same gfx12.5 test as chooseReadyQueue().
+        if (!isGfx125(passCtx.getGemmTileConfig().arch[0], passCtx.getGemmTileConfig().arch[1]))
             return preserveCFGAnalyses();
 
         // Copy because chained merges redirect relations away from removed barriers.
