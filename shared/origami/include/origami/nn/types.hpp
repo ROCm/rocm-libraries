@@ -69,8 +69,19 @@ struct library_models_t {
   model_handle_t tilewright           = invalid_handle;
   model_handle_t embedding_similarity = invalid_handle;
 
-  bool has(backend_id_t backend) const;
-  model_handle_t get(backend_id_t backend) const;
+  /// Handle for `backend`, or invalid_handle. Inline so callers need neither the NN sources
+  /// nor an exported symbol.
+  model_handle_t get(backend_id_t backend) const {
+    switch (backend) {
+      case backend_id_t::tilewright_v1:
+        return tilewright;
+      case backend_id_t::embedding_similarity_v1:
+        return embedding_similarity;
+    }
+    return invalid_handle;
+  }
+
+  bool has(backend_id_t backend) const { return get(backend) >= 0; }
 };
 
 }  // namespace origami::nn

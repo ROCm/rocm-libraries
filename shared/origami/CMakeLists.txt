@@ -156,7 +156,6 @@ if(ORIGAMI_ENABLE_NN)
         origami
         PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src/nn/filter.cpp"
                 "${CMAKE_CURRENT_SOURCE_DIR}/src/nn/features/gemm_tilewright.cpp"
-                "${CMAKE_CURRENT_SOURCE_DIR}/src/nn/types.cpp"
                 "${CMAKE_CURRENT_SOURCE_DIR}/src/nn/model_registry.cpp"
                 "${CMAKE_CURRENT_SOURCE_DIR}/src/nn/dispatch.cpp"
                 "${CMAKE_CURRENT_SOURCE_DIR}/src/nn/twrec/b64_decode.cpp"

@@ -112,22 +112,25 @@ std::optional<std::vector<prediction_result_t>> try_rank_with_model(
 }
 
 model_handle_t resolve_model_handle(const rank_options_t& options) {
+  const auto from_library = [&](backend_id_t backend) {
+    return options.library_models ? options.library_models->get(backend) : invalid_handle;
+  };
   switch (options.nn_backend) {
     case nn_backend_t::tilewright:
       return first_valid(options.nn_model,
-                         options.library_models ? options.library_models->tilewright
-                                                : invalid_handle,
+                         from_library(backend_id_t::tilewright_v1),
                          nn::default_model(backend_id_t::tilewright_v1));
     case nn_backend_t::embedding_similarity:
       return first_valid(options.nn_model,
-                         options.library_models ? options.library_models->embedding_similarity
-                                                : invalid_handle,
+                         from_library(backend_id_t::embedding_similarity_v1),
                          nn::default_model(backend_id_t::embedding_similarity_v1));
     case nn_backend_t::auto_select:
       if (options.nn_model >= 0) return options.nn_model;
       if (options.library_models) {
-        if (options.library_models->tilewright >= 0) return options.library_models->tilewright;
-        return options.library_models->embedding_similarity;
+        if (options.library_models->has(backend_id_t::tilewright_v1)) {
+          return options.library_models->get(backend_id_t::tilewright_v1);
+        }
+        return options.library_models->get(backend_id_t::embedding_similarity_v1);
       }
       return nn::default_model(backend_id_t::tilewright_v1);
   }

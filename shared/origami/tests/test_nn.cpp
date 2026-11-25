@@ -238,6 +238,26 @@ TEST_CASE("NN: rank_options_t defaults", "[nn]") {
   REQUIRE(options.library_models == nullptr);
 }
 
+TEST_CASE("NN: library_models_t::get and has map each backend to its handle", "[nn]") {
+  using origami::nn::backend_id_t;
+  using origami::nn::invalid_handle;
+
+  origami::nn::library_models_t models;
+  REQUIRE(models.get(backend_id_t::tilewright_v1) == invalid_handle);
+  REQUIRE(models.get(backend_id_t::embedding_similarity_v1) == invalid_handle);
+  REQUIRE_FALSE(models.has(backend_id_t::tilewright_v1));
+  REQUIRE_FALSE(models.has(backend_id_t::embedding_similarity_v1));
+
+  models.tilewright = 3;
+  REQUIRE(models.get(backend_id_t::tilewright_v1) == 3);
+  REQUIRE(models.has(backend_id_t::tilewright_v1));
+  REQUIRE_FALSE(models.has(backend_id_t::embedding_similarity_v1));
+
+  models.embedding_similarity = 0;  // handle 0 is valid
+  REQUIRE(models.get(backend_id_t::embedding_similarity_v1) == 0);
+  REQUIRE(models.has(backend_id_t::embedding_similarity_v1));
+}
+
 TEST_CASE("NN: ORIGAMI_INFERENCE_MODE applies only to a call that did not choose a mode",
           "[nn][tilewright]") {
   using origami::inference_mode_t;
