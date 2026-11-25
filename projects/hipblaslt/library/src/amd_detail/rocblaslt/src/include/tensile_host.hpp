@@ -255,21 +255,42 @@ std::vector<std::shared_ptr<TensileLite::ContractionSolution>>
                         int                                requestedAlgoCount,
                         size_t                             maxWorkSpaceBytes);
 
+namespace TensileLite
+{
+    class ProblemOverride;
+    struct TunedEntry;
+}
+
+/**
+ * How the caller uses the answer. Online tuning serves and explores only
+ * PerDispatch lookups (hipblasLtMatmul with algo == nullptr); a Heuristic
+ * lookup's caller keeps the algo, so it never reaches the tuner.
+ */
+enum class SolutionLookup
+{
+    PerDispatch,
+    Heuristic,
+};
+
 /*******************************************************************************
  * getBestSolutions() calls finTopSolutions from Tensile and converts to       *
- * rocblaslt_matmul_heuristic_result                                           *
+ * rocblaslt_matmul_heuristic_result. With online tuning on, a PerDispatch     *
+ * lookup with tuningKey, prob's tuning-cache key, may be served a measured    *
+ * winner or explore; tuningKey is null if the caller has not built it.        *
  *******************************************************************************/
 // In both getBestSolutions overloads, layoutRuledOut, if given, is set when no
 // solution is returned and the MX scale layout rule refused a candidate, or the
 // scale modes accept no layout.
-rocblaslt_status getBestSolutions(RocblasltContractionProblem const& prob,
-                                  rocblaslt_handle                   handle,
-                                  std::shared_ptr<void>              gemmData,
-                                  int                                requestedAlgoCount,
-                                  rocblaslt_matmul_heuristic_result  heuristicResultsArray[],
-                                  int*                               returnAlgoCount,
-                                  size_t                             maxWorkSpaceBytes,
-                                  bool*                              layoutRuledOut = nullptr);
+rocblaslt_status getBestSolutions(RocblasltContractionProblem const&  prob,
+                                  rocblaslt_handle                    handle,
+                                  std::shared_ptr<void>               gemmData,
+                                  int                                 requestedAlgoCount,
+                                  rocblaslt_matmul_heuristic_result   heuristicResultsArray[],
+                                  int*                                returnAlgoCount,
+                                  size_t                              maxWorkSpaceBytes,
+                                  SolutionLookup                      lookup,
+                                  const TensileLite::ProblemOverride* tuningKey,
+                                  bool*                               layoutRuledOut = nullptr);
 
 rocblaslt_status getBestSolutions(rocblaslt_handle       handle,
                                   rocblaslt::RocGemmType gemmType,
@@ -292,12 +313,6 @@ bool topUpWithSizeIndependentSolutions(rocblaslt_handle                  handle,
                                        int*                              returnAlgoCount,
                                        int                               requestedAlgoCount,
                                        size_t                            maxWorkSpaceBytes);
-
-namespace TensileLite
-{
-    class ProblemOverride;
-    struct TunedEntry;
-}
 
 TensileLite::ProblemOverride
     RocblasltContractionProblem2ProblemOverride(const RocblasltContractionProblem&);
@@ -357,7 +372,8 @@ int tuningLastLaunchedIndexForTest();
  * Make later tuning attempts go wrong at one stage: 1 fails setup, 2 fails
  * enumeration, 3 throws after the first measured candidate, 4 stops the search
  * after the first measured candidate the way an expiring budget does, 5 makes
- * a configured budget read as already spent; 0 restores normal behaviour.
+ * a configured budget read as already spent, 6 makes the device refuse the
+ * scratch allocation; 0 restores normal behaviour.
  */
 void tuningInjectFailureForTest(int stage);
 

@@ -832,8 +832,7 @@ TYPED_TEST(ComplexTests, TestComplexExplicitConstruction)
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
   const thrust::complex<T> input(42.0, 1337.0);
-  const user_complex<T> result = thrust::exp(input);
-  (void) result;
+  [[maybe_unused]] const user_complex<T> result = thrust::exp(input);
 }
 
 TESTS_PAIRS_DEFINE(ComplexPairsTests, PairsTestsParams)

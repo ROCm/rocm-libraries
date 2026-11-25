@@ -876,6 +876,8 @@ def writeClientConfigIni(forBenchmark, problemSizes, biasTypeArgs, factorDimArgs
         param("log-level",                ClientLogLevel(globalParameters["ClientLogLevel"]).name)
         param("max-workspace-size",       globalParameters["MaxWorkspaceSize"])
         param("PrintWinnersOnly",         globalParameters["PrintWinnersOnly"])
+        if globalParameters["PrintRejectedPredicates"]:
+          param("print-rejected-predicates", True)
         param("granularity-threshold",    globalParameters["GranularityThreshold"])
         param("prediction-threshold",     globalParameters["PredictionThreshold"])
         param("pristine-on-gpu",          globalParameters["PristineOnGPU"])
@@ -886,12 +888,23 @@ def writeClientConfigIni(forBenchmark, problemSizes, biasTypeArgs, factorDimArgs
         param("use-user-args",            globalParameters["UseUserArgs"])
         if globalParameters["SplitDevices"] > 1:
             param("split-devices",        globalParameters["SplitDevices"])
-            param("split-dim",            globalParameters["SplitDim"])
+            splitDim = globalParameters["SplitDim"]
+            if splitDim not in ("M", "N"):
+                printExit("SplitDim must be M or N, got %r" % (splitDim,))
+            param("split-dim",            splitDim)
+            if globalParameters["SplitFreeRun"]:
+                param("split-free-run",   True)
+            # Only the operand the split does not cut (B for M, A for N) and D can be shared; the
+            # client applies the same rule (client/include/SplitPlacement.hpp).
+            uncut = "B" if splitDim == "M" else "A"
             placement = ""
             for tensor in "ABCD":
                 value = globalParameters["SplitPlacement" + tensor]
                 if value not in ("Replicated", "Shared"):
                     printExit("SplitPlacement%s must be Replicated or Shared, got %r" % (tensor, value))
+                if value == "Shared" and tensor not in (uncut, "D"):
+                    printExit("SplitPlacement%s cannot be Shared with SplitDim %s: only %s and D can be"
+                              " shared" % (tensor, splitDim, uncut))
                 placement += value[0]
             param("split-placement",      placement)
         param("rotating-buffer-size",     globalParameters["RotatingBufferSize"])

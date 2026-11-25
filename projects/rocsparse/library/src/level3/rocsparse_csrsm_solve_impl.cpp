@@ -503,8 +503,8 @@ namespace rocsparse
     }
 
     template <uint32_t BLOCKSIZE, typename T>
-    __launch_bounds__(BLOCKSIZE) __global__
-        static void csrsm_solve_copy_y_to_B(const int64_t m, T* B, const int64_t ldb, const T* y)
+    ROCSPARSE_KERNEL(BLOCKSIZE)
+    void csrsm_solve_copy_y_to_B(const int64_t m, T* B, const int64_t ldb, const T* y)
     {
         // hipBlockIdx_x * BLOCKSIZE is a 32 bit product before it widens into the
         // size_t it is assigned to, so cast first. The grid-stride loop then covers
