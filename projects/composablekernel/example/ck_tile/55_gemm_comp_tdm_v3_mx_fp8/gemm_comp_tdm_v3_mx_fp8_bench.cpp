@@ -1131,8 +1131,19 @@ int dispatch_tile(const ck_tile::ArgParser& arg, const std::string& name)
         return run<Instance<16, 64, 256, 1, 4, TdmEpi, CDataType>>(arg, name);
     if(tile == "32x64x256")
         return run<Instance<32, 64, 256, 2, 2, TdmEpi, CDataType>>(arg, name);
+    // 16-column tiles (narrow N, e.g. 49152 x 16): the four waves along M (warps 4x1x1), each
+    // M / 4 rows of one 16-wide warp tile in N
+    if(tile == "512x16x256")
+        return run<Instance<512, 16, 256, 4, 1, TdmEpi, CDataType>>(arg, name);
+    if(tile == "256x16x256")
+        return run<Instance<256, 16, 256, 4, 1, TdmEpi, CDataType>>(arg, name);
+    if(tile == "128x16x256")
+        return run<Instance<128, 16, 256, 4, 1, TdmEpi, CDataType>>(arg, name);
+    if(tile == "64x16x256")
+        return run<Instance<64, 16, 256, 4, 1, TdmEpi, CDataType>>(arg, name);
     std::printf("unknown -tile=%s (32x256x256, 32x128x256, 32x64x256, 64x256x256, 256x256x256, "
-                "16x512x256, 16x256x256, 16x128x256, 16x64x256)\n",
+                "16x512x256, 16x256x256, 16x128x256, 16x64x256, 512x16x256, 256x16x256, "
+                "128x16x256, 64x16x256)\n",
                 tile.c_str());
     return 2;
 #endif
@@ -1191,7 +1202,8 @@ int main(int argc, char* argv[])
         .insert("tile",
                 "32x256x256",
                 "32x256x256 | 32x128x256 | 32x64x256 | 64x256x256 | 256x256x256 | 16x512x256 | "
-                "16x256x256 | 16x128x256 | 16x64x256")
+                "16x256x256 | 16x128x256 | 16x64x256 | 512x16x256 | 256x16x256 | 128x16x256 | "
+                "64x16x256")
         .insert(
             "cluster", "1x1", "1x1 | 2x2 (256x256x256 only): workgroup cluster with TDM multicast")
         .insert("warps", "default", "default | 2x2 (EXPERIMENT: 256x256x256 with 4 waves)")

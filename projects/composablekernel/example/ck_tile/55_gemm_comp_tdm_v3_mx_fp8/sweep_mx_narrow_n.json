@@ -1,0 +1,110 @@
+{
+  "_comment": "MX 49152x16x32768: CK's current MX loop with the new 16-column tiles (four waves along M) on the native shape, against the 16-row tiles on its transpose 16x49152x32768 (same operand bytes and FLOPs, C transposed). The summary prints effective TB/s over the minimum traffic.",
+  "default_defines": [
+    "-DCK_EX55_BF16_TDM_ONLY",
+    "-DCK_TILE_GFX125_FP8_K1PERLANE=16",
+    "-DCK_EX55_MX_SCALE_WIDE=1",
+    "-DCK_EX55_A_ROW_PREFETCH=1"
+  ],
+  "variants": [
+    {
+      "name": "base",
+      "defines": []
+    }
+  ],
+  "arms": [
+    {
+      "tile": "512x16x256",
+      "warps": "default",
+      "shapes": [
+        [
+          49152,
+          16,
+          32768
+        ]
+      ]
+    },
+    {
+      "tile": "256x16x256",
+      "warps": "default",
+      "shapes": [
+        [
+          49152,
+          16,
+          32768
+        ]
+      ]
+    },
+    {
+      "tile": "128x16x256",
+      "warps": "default",
+      "shapes": [
+        [
+          49152,
+          16,
+          32768
+        ]
+      ]
+    },
+    {
+      "tile": "64x16x256",
+      "warps": "default",
+      "shapes": [
+        [
+          49152,
+          16,
+          32768
+        ]
+      ]
+    },
+    {
+      "tile": "16x256x256",
+      "warps": "default",
+      "shapes": [
+        [
+          16,
+          49152,
+          32768
+        ]
+      ]
+    },
+    {
+      "tile": "16x128x256",
+      "warps": "default",
+      "shapes": [
+        [
+          16,
+          49152,
+          32768
+        ]
+      ]
+    },
+    {
+      "tile": "16x64x256",
+      "warps": "default",
+      "shapes": [
+        [
+          16,
+          49152,
+          32768
+        ]
+      ]
+    }
+  ],
+  "shapes": [
+    [
+      49152,
+      16,
+      32768
+    ],
+    [
+      16,
+      49152,
+      32768
+    ]
+  ],
+  "c_dtype": "bf16",
+  "rounds": 5,
+  "warmup": 50,
+  "repeat": 100
+}
