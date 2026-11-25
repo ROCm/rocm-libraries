@@ -609,35 +609,28 @@ rocblas_status getf2_run_small(rocblas_handle handle,
 
     // n is passed at run time; DIM only sizes the per-thread row array. The sizes step by 8,
     // so the array is never much larger than n and the register use stays close to what n
-    // needs. A row of 64 double-complex values does not fit in registers, so double complex
-    // also gets a size of 60, the largest that does; for other types that slot is 64.
+    // needs. GETRF only uses widths up to 40 here, so wider matrices use the panel kernel
+    // (see select_spkernel and GETF2_SSKER_MAX_N); that also keeps the largest kernels, the
+    // slowest to compile, out of the library.
     ROCSOLVER_ASSUME_X(n >= 1 && n <= GETF2_SSKER_MAX_N, "getf2_run_small needs small n");
-    constexpr bool is_z = std::is_same_v<T, rocblas_double_complex>;
-    constexpr int DIM60 = is_z ? 60 : 64;
-    const int sz = (n <= 56) ? (n - 1) / 8 : (is_z && n > 60) ? 8 : 7;
+    static_assert(GETF2_SSKER_MAX_N <= 40, "getf2_run_small has kernels for n <= 40");
+    const int sz = (n - 1) / 8;
     if(pivot)
     {
         auto kernel = std::array{
-            getf2_small_kernel<8, T, I, INFO, U>,  getf2_small_kernel<16, T, I, INFO, U>,
+            getf2_small_kernel<8, T, I, INFO, U>, getf2_small_kernel<16, T, I, INFO, U>,
             getf2_small_kernel<24, T, I, INFO, U>, getf2_small_kernel<32, T, I, INFO, U>,
-            getf2_small_kernel<40, T, I, INFO, U>, getf2_small_kernel<48, T, I, INFO, U>,
-            getf2_small_kernel<56, T, I, INFO, U>, getf2_small_kernel<DIM60, T, I, INFO, U>,
-            getf2_small_kernel<64, T, I, INFO, U>};
+            getf2_small_kernel<40, T, I, INFO, U>};
         ROCSOLVER_LAUNCH_KERNEL(kernel[sz], grid, block, lmemsize, stream, m, n, A, shiftA, lda,
                                 strideA, ipiv, shiftP, strideP, info, batch_count, offset,
                                 permut_idx, stride);
     }
     else
     {
-        auto kernel = std::array{getf2_npvt_small_kernel<8, T, I, INFO, U>,
-                                 getf2_npvt_small_kernel<16, T, I, INFO, U>,
-                                 getf2_npvt_small_kernel<24, T, I, INFO, U>,
-                                 getf2_npvt_small_kernel<32, T, I, INFO, U>,
-                                 getf2_npvt_small_kernel<40, T, I, INFO, U>,
-                                 getf2_npvt_small_kernel<48, T, I, INFO, U>,
-                                 getf2_npvt_small_kernel<56, T, I, INFO, U>,
-                                 getf2_npvt_small_kernel<DIM60, T, I, INFO, U>,
-                                 getf2_npvt_small_kernel<64, T, I, INFO, U>};
+        auto kernel = std::array{
+            getf2_npvt_small_kernel<8, T, I, INFO, U>, getf2_npvt_small_kernel<16, T, I, INFO, U>,
+            getf2_npvt_small_kernel<24, T, I, INFO, U>, getf2_npvt_small_kernel<32, T, I, INFO, U>,
+            getf2_npvt_small_kernel<40, T, I, INFO, U>};
         ROCSOLVER_LAUNCH_KERNEL(kernel[sz], grid, block, lmemsize, stream, m, n, A, shiftA, lda,
                                 strideA, info, batch_count, offset);
     }

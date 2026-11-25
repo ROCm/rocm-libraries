@@ -78,10 +78,10 @@ const vector<int> large_n_size_range = {
 };
 
 // for checkin_lapack tests of the GETF2 small-matrix kernels, which size their row
-// array from n in steps of 8 (plus 60 for double complex). Each n is one past a size,
-// so most of the array is unused, and m < n with singular matrices checks that the
-// pivots stop at m. n = 57 uses the 60 size for double complex and 64 otherwise.
-const vector<getrf_tuple> small_kernel_range = {{{6, 6, 1}, 9}, {{54, 54, 1}, 57}};
+// array from n in steps of 8 up to 40. n = 9 is one past a size, so most of the array
+// is unused, and m < n with singular matrices checks that the pivots stop at m.
+// n = 41 is one past the largest size, so it uses the panel kernel instead.
+const vector<getrf_tuple> small_kernel_range = {{{6, 6, 1}, 9}, {{38, 38, 1}, 41}};
 
 // for weekly_lapack tests
 const vector<vector<int>> large_batch_size_range = {{3, 3, 0}, {129, 129, 0}};

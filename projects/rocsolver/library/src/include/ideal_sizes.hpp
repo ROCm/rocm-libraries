@@ -450,7 +450,7 @@
 #define GETF2_SSKER_MAX_M ROCSOLVER_ASAN_VALUE(256, 512) // always <= 512 and <= GETF2_SPKER_MAX_M
 #endif
 #ifndef GETF2_SSKER_MAX_N
-#define GETF2_SSKER_MAX_N 64 // always <= wavefront and <= GETF2_SPKER_MAX_N
+#define GETF2_SSKER_MAX_N 40 // always <= 40 (largest small kernel) and <= GETF2_SPKER_MAX_N
 #endif
 #ifndef GETF2_OPTIM_NGRP
 #define GETF2_OPTIM_NGRP \
