@@ -102,9 +102,6 @@ def _reference(x: np.ndarray, problem: PoolingProblem, op: str) -> np.ndarray:
     return out
 
 
-# is_valid_spec admits bf16, but build_pooling2d cannot emit a bf16 output store
-# (store_tile: "buffer ... store not yet wired for dtype bf16"). Strict, so the
-# cases fail loudly once the store is wired and must then be un-marked.
 @pytest.mark.gpu
 @pytest.mark.parametrize("case", sorted(_CASES))
 def test_pooling_matches_the_window_reduction_on_gpu(case):
