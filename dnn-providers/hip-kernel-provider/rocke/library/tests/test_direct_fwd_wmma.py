@@ -167,7 +167,10 @@ class TestFwdWmmaSpec(unittest.TestCase):
             (dict(pingpong=True, prefetch=True), "pingpong replaces"),
             (dict(pingpong=True, split_barrier=True), "pingpong replaces"),
             (dict(pingpong=True, row_ring=True, prefetch=True), "pingpong replaces"),
-            (dict(pingpong=True, tap_ring=True, split_barrier=True), "pingpong replaces"),
+            (
+                dict(pingpong=True, tap_ring=True, split_barrier=True),
+                "pingpong replaces",
+            ),
             (dict(pingpong=True, wave_epilogue=True), "block epilogue"),
             (dict(pingpong=True, waves_k=1, waves_p=3), "even wave count"),
             (dict(pingpong=True, tile_w=8, tile_n=4), "rank 0"),

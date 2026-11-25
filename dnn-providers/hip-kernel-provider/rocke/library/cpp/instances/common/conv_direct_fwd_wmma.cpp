@@ -538,10 +538,10 @@ bool rocke_direct_fwd_wmma_is_valid_spec(const rocke_direct_fwd_wmma_spec_t* spe
     if(spec->pingpong)
     {
         int issuers = spec->phase_split ? 2 * spec->tile_n + 1 : spec->tile_n + 1;
-        if(spec->row_ring || spec->tap_ring || spec->split_barrier || spec->prefetch)
+        if(spec->split_barrier || spec->prefetch)
             ROCKE_SPEC_FAIL(reason,
                             reason_cap,
-                            "pingpong replaces the ring variants, split_barrier and prefetch");
+                            "pingpong replaces split_barrier and prefetch");
         if(nw % 2 || issuers > nw / 2)
             ROCKE_SPEC_FAIL(reason,
                             reason_cap,
@@ -1240,6 +1240,108 @@ void chunk_rr(fww_ctx& c, V kc, std::vector<V>& accs)
                 row_steps.push_back(fww_step{ks, t / c.KW, t % c.KW});
         V wb = mulk(c, wslot, c.WEI);
         multiply(c, row_steps, halo_base, wb, accs, NULL);
+    }
+}
+
+/* _pp_ring_wait(u, chunk_end): pingpong with a ring. The weight issuer waits
+ * for ring step u; at a chunk boundary the halo issuers wait for the next
+ * halo (their only transfer in flight). */
+void pp_ring_wait(fww_ctx& c, V u, bool chunk_end)
+{
+    rocke_ir_builder_t* b = c.b;
+    V cond_nb = rocke_b_cmp_eq(b, c.wave_id, ci(c, c.NB));
+    if_then(c, cond_nb, [&]() { rocke_fwd_tdm_ring_wait(b, u, c.NS, c.n_steps); });
+    if(chunk_end)
+    {
+        V cond_ne = rocke_b_cmp_ne(b, c.wave_id, ci(c, c.NB));
+        if_then(c, cond_ne, [&]() { rocke_b_s_wait_tensorcnt(b, 0); });
+    }
+}
+
+/* _chunk_pp_rr(kc, accs): pingpong with row_ring / tap_ring. Chunk kc is
+ * processed as NG ring steps, each a run of ping-pong phases on its own
+ * weight slot. A slot is refilled at the start of a step, after the barrier
+ * by which both ranks drained the step that held it; the next chunk's halo
+ * goes out at the chunk's first step. */
+void chunk_pp_rr(fww_ctx& c, V kc, std::vector<V>& accs)
+{
+    rocke_ir_builder_t* b = c.b;
+    V hslot = modv(c, kc, c.c2);
+    V halo_base = mulk(c, hslot, c.HALO_STAGE);
+    for(int r = 0; r < c.NG; ++r)
+    {
+        V u;
+        {
+            V x = mulk(c, kc, c.NG);
+            u = addk(c, x, r);
+        }
+        {
+            V nxt = addk(c, u, c.NS - 1);
+            V cond = rocke_b_cmp_lt(b, nxt, c.n_steps);
+            if_then(c, cond, [&]() {
+                V nc = divk(c, nxt, c.NG);
+                V slot = modk(c, nxt, c.NS);
+                V grp = modk(c, nxt, c.NG);
+                issue_wei(c, nc, slot, grp);
+            });
+        }
+        if(r == 0)
+        {
+            V nc = add(c, kc, c.c1);
+            V cond = rocke_b_cmp_lt(b, nc, c.n_chunks);
+            if_then(c, cond, [&]() {
+                V slot = modv(c, nc, c.c2);
+                issue_halo(c, nc, slot);
+            });
+        }
+        V wslot = modk(c, u, c.NS);
+        V wei_base = mulk(c, wslot, c.WEI);
+        std::vector<fww_step> row_steps;
+        for(int ks = 0; ks < c.CK / ROCKE_FWD_WMMA_K; ++ks)
+            for(int t = r * c.WTAPS; t < (r + 1) * c.WTAPS; ++t)
+                row_steps.push_back(fww_step{ks, t / c.KW, t % c.KW});
+        int PG = c.spec->pp_group;
+        int n_steps = (int)row_steps.size();
+        int n_groups = (int)rocke_ceil_div(n_steps, PG);
+        for(int j = 0; j < n_groups; ++j)
+        {
+            std::vector<std::vector<V>> fa, fb;
+            for(int i = j * PG; i < std::min(n_steps, (j + 1) * PG); ++i)
+            {
+                const fww_step& st = row_steps[i];
+                int64_t tap_off = ((int64_t)st.r * c.DH * c.HALO_W + (int64_t)st.s * c.DW) * c.XP
+                                  + (int64_t)st.ks * ROCKE_FWD_WMMA_K;
+                std::vector<V> bf(c.TN), af(c.TM);
+                for(int tn = 0; tn < c.TN; ++tn)
+                    bf[tn] = read16(c, halo_base, c.px_off[tn], tap_off);
+                int tap = (st.r * c.KW + st.s) % c.WTAPS;
+                int64_t w_off = (int64_t)tap * c.BK * c.XP + (int64_t)st.ks * ROCKE_FWD_WMMA_K;
+                for(int m = 0; m < c.TM; ++m)
+                    af[m] = read16(c, wei_base, c.wei_off[m], w_off);
+                fa.push_back(af);
+                fb.push_back(bf);
+            }
+            bool last = j == n_groups - 1;
+            if(last)
+                rocke_b_s_waitcnt(b, -1, 0, -1);
+            pp_bar(c);
+            rocke_b_s_setprio(b, 1);
+            for(size_t f = 0; f < fa.size(); ++f)
+                for(int m = 0; m < c.TM; ++m)
+                    for(int tn = 0; tn < c.TN; ++tn)
+                    {
+                        int i = m * c.TN + tn;
+                        accs[i]
+                            = rocke_b_mma(b, c.wmma_op_id, fa[f][m], fb[f][tn], accs[i], NULL, 0);
+                    }
+            rocke_b_s_setprio(b, 0);
+            if(last)
+            {
+                V u_next = add(c, u, c.c1);
+                pp_ring_wait(c, u_next, r == c.NG - 1);
+            }
+            pp_bar(c);
+        }
     }
 }
 
@@ -1973,7 +2075,10 @@ rocke_kernel_def_t* rocke_build_direct_fwd_wmma(rocke_ir_builder_t* b,
     }
     if(c.PP)
     {
-        wait_landed(c, c.c0);
+        if(c.RR)
+            pp_ring_wait(c, c.c0, true);
+        else
+            wait_landed(c, c.c0);
         rocke_b_sync_lds_only(b);
         V cond = rocke_b_cmp_eq(b, c.rank, c.c1);
         if_then(c, cond, [&]() { pp_bar(c); });
@@ -1995,7 +2100,9 @@ rocke_kernel_def_t* rocke_build_direct_fwd_wmma(rocke_ir_builder_t* b,
     rocke_b_region_enter(b, loop.body);
     {
         std::vector<V> accs(loop.iter_vars, loop.iter_vars + n_acc);
-        if(c.RR)
+        if(c.RR && c.PP)
+            chunk_pp_rr(c, loop.iv, accs);
+        else if(c.RR)
             chunk_rr(c, loop.iv, accs);
         else if(c.PP)
             chunk_pp(c, loop.iv, accs);
