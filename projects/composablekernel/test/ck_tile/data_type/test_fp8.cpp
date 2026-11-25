@@ -686,8 +686,8 @@ TYPED_TEST(ExplicitFP8Formats, FiniteValuesRetainTheirEncodingOnDevice)
 
 __global__ void convert_f16_nan_to_f8(const uint16_t* input, uint8_t* out)
 {
-    const auto i = threadIdx.x;
-    const auto x = ck_tile::bit_cast<ck_tile::fp16_t>(input[i]);
+    const auto i   = threadIdx.x;
+    const auto x   = ck_tile::bit_cast<ck_tile::fp16_t>(input[i]);
     out[4 * i + 0] = ck_tile::fp16_to_fp8_rtn_raw<ck_tile::fp8_t>(x);
     out[4 * i + 1] = ck_tile::fp16_to_fp8_sr_raw<ck_tile::fp8_t>(x);
     out[4 * i + 2] = ck_tile::fp16_to_fp8_rtn_raw<ck_tile::bf8_t>(x);
@@ -749,9 +749,9 @@ TEST(ConvertFp16NanOnGfx125, InfAndOverflowSaturateToMaxNormal)
     }
 
     // +inf, -inf, +max fp16 (65504), -max fp16
-    const std::array<uint16_t, 4> input    = {0x7C00, 0xFC00, 0x7BFF, 0xFBFF};
-    const std::array<uint8_t, 4> fp8_ref   = {0x7E, 0xFE, 0x7E, 0xFE};
-    const std::array<uint8_t, 4> bf8_ref   = {0x7B, 0xFB, 0x7B, 0xFB};
+    const std::array<uint16_t, 4> input  = {0x7C00, 0xFC00, 0x7BFF, 0xFBFF};
+    const std::array<uint8_t, 4> fp8_ref = {0x7E, 0xFE, 0x7E, 0xFE};
+    const std::array<uint8_t, 4> bf8_ref = {0x7B, 0xFB, 0x7B, 0xFB};
     std::array<uint8_t, 16> out{};
 
     ck_tile::DeviceMem input_device(sizeof(input));
