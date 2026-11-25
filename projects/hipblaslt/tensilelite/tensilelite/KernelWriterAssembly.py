@@ -11576,6 +11576,7 @@ class KernelWriterAssembly(KernelWriter):
     module.add(skip)
     return module
 
+  @_logical_region_method("endSummation")
   def endSummation(self, kernel, tPA, tPB, noSkipLoad = True, label = None, isOptNLL = False):
     module = Module("endSummation")
 
@@ -17676,6 +17677,7 @@ class KernelWriterAssembly(KernelWriter):
 
     return module
 
+  @_logical_region_method("globalWriteWorkGroupInit")
   def globalWriteWorkGroupInit(self, kernel, skipUndefine=False, channels=None, labelSuffix="", noMultipleBuffer=False):
     # PLSIN emits this store-init twice: an early copy hoisted into the fused
     # NLL and the usual post-loop one. The runtime SRD compute is idempotent, so
@@ -18913,6 +18915,7 @@ class KernelWriterAssembly(KernelWriter):
   ##############################################################################
   # Not LocalSplitU: Global Write Indices
   ##############################################################################
+  @_logical_region_method("notLocalSplitUGlobalWriteIndices")
   def notLocalSplitUGlobalWriteIndices(self, kernel):
     #print "GlobalWriteIndices"
     if not self.do["PostLoop"]: return ""
@@ -26189,6 +26192,7 @@ class KernelWriterAssembly(KernelWriter):
     mod.add(emitFor(tP))
     return mod
 
+  @_logical_region_method("initTDMDescriptorWaveSeparated")
   def initTDMDescriptorWaveSeparated(self, kernel, tPA, tPB, waveIdxSgpr: int | str = "WaveIdx") -> Module:
     #TODO: TDM implement
     mod = Module("TDM Init Wave Separated")
@@ -26235,6 +26239,7 @@ class KernelWriterAssembly(KernelWriter):
     address = f"tdm{tc}Group0+2" if useDescriptor else f"Address{tc}"
     return comp.calculateStartAddr(self, kernel, tP, address)
 
+  @_logical_region_method("tdmGlobalOffsetWaveSeparated")
   def tdmGlobalOffsetWaveSeparated(self, kernel: Mapping, tPA: Mapping, tPB: Mapping, waveIdxSgpr: int | str = "WaveIdx") -> Module:
     mod = Module("TDM Global Offset Wave Separated")
     comp: TensorDataMoverLoad = TensorDataMoverLoad.find(self)

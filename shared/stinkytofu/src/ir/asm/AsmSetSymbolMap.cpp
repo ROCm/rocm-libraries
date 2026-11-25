@@ -27,6 +27,7 @@
 #include <cstdint>
 #include <cstdlib>
 #include <iomanip>
+#include <iostream>
 #include <optional>
 #include <ostream>
 #include <unordered_set>
@@ -243,8 +244,30 @@ size_t resolveSymbolicOperands(Function& func, std::vector<SymbolicOperandFix>& 
                 const std::string symbol = reg.getSymbolicName();
                 const uint32_t oldIdx = reg.reg.idx;
                 const std::optional<int64_t> named = resolveNamedIndex(symbol, live, reg.reg.num);
-                // An unresolvable name says nothing about the index; leave it be.
-                if (!named.has_value() || *named < 0) return;
+                if (!named.has_value() || *named < 0) {
+                    // Fail closed in migration mode. The operand is known to be the -1
+                    // sentinel an eager logical leaf left behind (idx == kUnresolvedSentinelIdx,
+                    // checked above), so it MUST resolve to a real index. Leaving it be would
+                    // emit a garbage (all-ones) register and silently diverge the asm -- the
+                    // exact failure mode the rocisa "+-N" negative-offset name once caused.
+                    // Fail loud so any still-uncovered symbolic-name serialization is
+                    // caught at build/validation time instead of slipping into codegen.
+                    // This core library is built with -fno-exceptions, so abort() rather
+                    // than throw; the check only runs in migration mode
+                    // (resolveUnresolvedSentinel, set during the logical-IR A/B trial),
+                    // so it never fires on the native path. Native mode keeps the old
+                    // contract: a name that says nothing about an already-valid index is
+                    // harmless, so leave it be.
+                    if (resolveUnresolvedSentinel) {
+                        std::cerr << "logical-IR migration: could not resolve symbolic register "
+                                     "operand '"
+                                  << symbol
+                                  << "' left by an eager logical leaf (-1 placeholder); the "
+                                     ".set-derived name did not map to a valid index\n";
+                        std::abort();
+                    }
+                    return;
+                }
                 if (*named == static_cast<int64_t>(oldIdx)) return;
 
                 StinkyRegister updated = reg;

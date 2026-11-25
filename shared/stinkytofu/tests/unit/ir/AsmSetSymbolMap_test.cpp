@@ -256,4 +256,34 @@ TEST_F(AsmSetSymbolMapTest, LeavesSymbolOffsetWithUnknownBaseAlone) {
     EXPECT_TRUE(fixes.empty());
 }
 
+// Migration mode (resolveUnresolvedSentinel = true) only touches the all-ones
+// placeholder an eager logical leaf leaves behind. Such an operand has no valid
+// index of its own to fall back on, so it MUST resolve; an unresolvable name
+// here is a real defect -- e.g. a symbolic-name serialization the parser does not
+// cover, as the rocisa "base+-N" negative offset once was -- and the resolver
+// fails closed instead of emitting the garbage all-ones register.
+TEST_F(AsmSetSymbolMapTest, MigrationModeFailsClosedOnUnresolvableSentinel) {
+    BasicBlock* bb = block("entry");
+    // No `.set vgprValuC` in scope, so the name cannot resolve.
+    addVAdd(bb, namedReg("v", 0xFFFFFFFFu, 1, "vgprValuC+-34"), vgpr(1), vgpr(2));
+
+    // The core library is built with -fno-exceptions, so the resolver aborts (not
+    // throws) when it fails closed; assert the process dies with the diagnostic.
+    EXPECT_DEATH(resolveSymbolicOperands(*func, fixes, /*resolveUnresolvedSentinel=*/true),
+                 "could not resolve symbolic register operand");
+}
+
+// The positive counterpart: a sentinel whose name does resolve is rewritten as
+// before -- including the rocisa "+-N" negative offset -- so failing closed never
+// trips on a name the resolver can handle.
+TEST_F(AsmSetSymbolMapTest, MigrationModeResolvesSentinelFromSetMap) {
+    BasicBlock* bb = block("entry");
+    appendSetDirective(bb, "vgprValuC", "45");
+    StinkyInstruction* add =
+        addVAdd(bb, namedReg("v", 0xFFFFFFFFu, 1, "vgprValuC+-34"), vgpr(1), vgpr(2));
+
+    EXPECT_EQ(resolveSymbolicOperands(*func, fixes, /*resolveUnresolvedSentinel=*/true), 1u);
+    EXPECT_EQ(add->getDestRegs()[0].reg.idx, 11u);  // 45 + (-34)
+}
+
 }  // namespace
