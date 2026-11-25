@@ -20,6 +20,7 @@ Full documentation for hipBLASLt is available at [rocm.docs.amd.com/projects/hip
 * `A2AGemm` mode for the `FusedA2A` TensileLite problem-type parameter (bf16 B): gathers B's K shards from the peers inside the GEMM kernel, and the `A2ASubRounds` solution parameter (`1`, `2` or `4`) splits each shard into sub-rounds. Validated on gfx950 only.
 * Fused all-to-all prologue, in builds with `HIPBLASLT_ENABLE_GEMM_A2A_FUSION`: `hipblasLtFusionAddPrologue` with `HIPBLASLT_FUSEABLE_PROLOGUE_A2A_PREFIX`, attached through `HIPBLASLT_MATMUL_DESC_FUSED_PROLOGUE`, gathers B across the registered ranks before the GEMM (`FusedA2A: A2AGemm`), with the peer-B and gather-buffer attributes `HIPBLASLT_FUSION_A2A_PEER_B_PTRS` and `HIPBLASLT_FUSION_A2A_GATHER_BUFFER`; tuned for gfx950 bf16. Prologue stage values start at 64, disjoint from the epilogue stages. `hipblaslt-bench-a2a` gains `--a2a_mode a2a-gemm`.
 * `HIPBLASLT_TUNING_MODE=tune` for the runtime tuning cache. With `HIPBLASLT_TUNING_CACHE_PATH=<file>`, the library benchmarks candidate kernels for an unseen problem at its first `hipblasLtMatmul`, records the winner in the file, and replays it afterwards. `tune` measures candidates the way `hipblaslt-bench` does (warm-up and timed launches over rotating buffers, with an instruction-cache flush), serialises tuning within a process, and bounds each shape's search to five minutes by default (`HIPBLASLT_TUNING_BUDGET_MS_PER_SHAPE`). A search the budget stops records its best candidate as incomplete, which is never slower than the untuned kernel because that kernel is measured first, and tune mode revisits it when a later run can finish or widen the search. Tune mode reports each tuned shape's start and result without needing a log level, and a process in a secure execution context ignores every tuning variable.
+* w4a16 GEMM support on gfx1150: the w4a16 scale modes (`HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_16BF_EXT` through `HIPBLASLT_MATMUL_MATRIX_SCALE_VEC128_16F_ZP_EXT`) now have kernels for bf16 and fp16 activations, both int4 encodings, and group sizes 32, 64, and 128.
 
 ### Changed
 
@@ -32,6 +33,10 @@ Full documentation for hipBLASLt is available at [rocm.docs.amd.com/projects/hip
 * Public functions whose C++ exceptions reach the shared exception handler now log
   the function name and exception message at `HIPBLASLT_LOG_LEVEL=1` (error).
   The returned status is unchanged.
+
+### Optimized
+
+* Improved w4a16 GEMM performance on gfx1151 with Stream-K kernels for prefill and dedicated kernels for 1 to 5 tokens, selected by Origami. For best performance on gfx1150 and gfx1151, pad every row of A, B, C, and D to an odd multiple of 128 bytes and pass a workspace of at least 8 MiB.
 
 ### Resolved issues
 
