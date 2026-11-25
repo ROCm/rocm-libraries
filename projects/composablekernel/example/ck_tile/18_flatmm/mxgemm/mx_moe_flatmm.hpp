@@ -33,6 +33,7 @@
 #include <string>
 #include <thread>
 #include <tuple>
+#include <utility>
 #include <vector>
 
 #include "ck_tile/core.hpp"
@@ -652,6 +653,48 @@ struct MxMoeLayerCase
     int repeat      = 0;
     bool verbose    = true;
 };
+
+// How to run a layer: combine (per-slot + MoeTopkCombineKernel, or fp32 atomics into Y) and
+// launch (MoeMxPersistentKernel, or gate_up and down kernels).
+struct MxMoeLayerPlan
+{
+    bool per_slot;
+    bool persistent;
+};
+
+// Picks the faster plan for a layer from crossovers measured on gfx1250 (7 shapes: 8 to 256
+// experts, top-k 2 to 8, hidden 2048 to 7168, intermediate 768 to 7168; 1 to 1024 tokens; worst
+// pick 6% slower than the best plan, 0.4% on average):
+// - Atomic combine for up to 128 (token, slot) pairs; past that its atomics cost more than the
+//   per-slot store and the combine launch.
+// - Persistent with the atomic combine when its tasks fit in half the resident grid (its
+//   synchronization then costs next to nothing, a launch is saved, and idle workgroups take K
+//   slices of the down projection), or with at most 8 experts, whose long tasks gain the most
+//   from overlapping the two projections.
+// - Persistent with the per-slot combine from 1024 pairs, with at most 16 experts or an
+//   intermediate of 4096 or more.
+// Row tiles are estimated as one per active expert plus one per 32 pairs.
+inline MxMoeLayerPlan
+choose_mx_moe_layer_plan(int experts, int num_tokens, int topk, int hidden, int inter)
+{
+    using K      = ck_tile::MoeFlatmmKind;
+    using F4     = ck_tile::pk_fp4_t;
+    using GateUp = typename MxMoeKernelTypes<K::kFFN_gemm1_gate_up_mx_quant, F4, F4, float>::Kernel;
+    using Down   = typename MxMoeKernelTypes<K::kFFN_gemm2, F4, F4, float>::Kernel;
+    using P      = ck_tile::MoeMxPersistentKernel<GateUp, Down>;
+    using SP     = ck_tile::FlatmmScalePointer<1, kScaleBlockK, ck_tile::e8m0_t>;
+    using Args   = ck_tile::MoeFlatmmHostArgs<SP, SP, ck_tile::FlatmmScalePointer<-1>>;
+    using PKargs = decltype(P::MakeKargs(std::declval<Args>(), std::declval<Args>(), nullptr));
+    const int pairs = num_tokens * topk;
+    if(pairs <= 128)
+    {
+        const int row_tiles = std::min(experts, pairs) + pairs / MXMoeFlatmmConfig::M_Tile;
+        const int tasks     = row_tiles * (2 * inter / MXMoeFlatmmConfig::N_Tile +
+                                       hidden / MXMoeFlatmmConfig::N_Tile);
+        return {false, experts <= 8 || 2 * tasks <= P::template MaxResidentWorkgroups<PKargs>()};
+    }
+    return {true, pairs >= 1024 && (experts <= 16 || inter >= 4096)};
+}
 
 struct MxMoeLayerResult
 {

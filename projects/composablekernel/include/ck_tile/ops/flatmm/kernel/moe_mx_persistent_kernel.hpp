@@ -153,10 +153,9 @@ struct MoeMxPersistentKernel
 
     CK_TILE_HOST static auto BlockSize() { return GateUpKernel::BlockSize(); }
 
-    // Workgroups that fit on the device at once (more would only queue behind them), and no
-    // more than there are tasks (row tiles bounded by the sorted rows).
+    // Workgroups of this kernel (with kernel arguments K) that fit on the device at once.
     template <typename K>
-    CK_TILE_HOST static auto GridSize(const K& kargs)
+    CK_TILE_HOST static index_t MaxResidentWorkgroups()
     {
         hipDeviceProp_t prop;
         int device = 0;
@@ -168,11 +167,19 @@ struct MoeMxPersistentKernel
             reinterpret_cast<const void*>(kentry<1, MoeMxPersistentKernel, K>),
             BlockSize().x,
             0));
+        return prop.multiProcessorCount * max(per_cu, 1);
+    }
+
+    // Workgroups that fit on the device at once (more would only queue behind them), and no
+    // more than there are tasks (row tiles bounded by the sorted rows).
+    template <typename K>
+    CK_TILE_HOST static auto GridSize(const K& kargs)
+    {
         // No more workgroups than tasks: idle ones would only take launch slots.
         const index_t row_tiles = integer_divide_ceil(kargs.gate_up.M, MPerBlock);
         const index_t tasks     = row_tiles * (kargs.gate_up.N / GateUpNPerBlock +
                                            kargs.max_slices * (kargs.down.N / DownNPerBlock));
-        return dim3(min(prop.multiProcessorCount * max(per_cu, 1), max(tasks, 1)));
+        return dim3(min(MaxResidentWorkgroups<K>(), max(tasks, 1)));
     }
 
     [[nodiscard]] CK_TILE_HOST static std::string GetName()

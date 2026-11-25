@@ -152,6 +152,13 @@ TEST_P(MxMoeLayer, FusedMaxSlices) { run_layer(GetParam(), false, GetParam().int
 // per-row-tile counters), launched twice so that the second runs on the counters the first reset.
 TEST_P(MxMoeLayer, PersistentPerSlot) { run_layer(GetParam(), true, 0, true); }
 TEST_P(MxMoeLayer, PersistentAtomic) { run_layer(GetParam(), false, 0, true); }
+// Whatever plan choose_mx_moe_layer_plan picks for the case.
+TEST_P(MxMoeLayer, AutoPlan)
+{
+    const auto& t   = GetParam();
+    const auto plan = choose_mx_moe_layer_plan(t.experts, t.num_tokens, t.topk, t.hidden, t.inter);
+    run_layer(t, plan.per_slot, 0, plan.persistent);
+}
 
 INSTANTIATE_TEST_SUITE_P(A4W4,
                          MxMoeLayer,

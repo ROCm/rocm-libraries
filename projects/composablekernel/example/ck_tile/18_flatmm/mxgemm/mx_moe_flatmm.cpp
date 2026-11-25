@@ -20,7 +20,10 @@ auto create_args(int argc, char* argv[])
             "gemm_kind",
             "gemm1_gate_up",
             "gemm1_gate_up | gemm2 | gemm2_per_slot | layer (gate_up with MXFP4 output, then down)")
-        .insert("combine", "per_slot", "layer only: per_slot | atomic")
+        .insert("combine",
+                "per_slot",
+                "layer only: per_slot | atomic | auto (combine and persistent picked by "
+                "choose_mx_moe_layer_plan)")
         .insert("fused",
                 "0",
                 "layer only: > 0 runs the layer in one launch with this many intermediate slices")
@@ -65,12 +68,21 @@ int main(int argc, char* argv[])
             l.per_slot     = arg_parser.get_str("combine") != "atomic";
             l.fused_slices = arg_parser.get_int("fused");
             l.persistent   = arg_parser.get_int("persistent") != 0;
-            l.init         = arg_parser.get_int("init");
-            l.seed         = arg_parser.get_uint32("seed");
-            l.validate     = arg_parser.get_int("validate") != 0;
-            l.warmup       = arg_parser.get_int("warmup");
-            l.repeat       = arg_parser.get_int("repeat");
-            const auto r   = run_mx_moe_layer(l);
+            if(arg_parser.get_str("combine") == "auto")
+            {
+                const auto plan =
+                    choose_mx_moe_layer_plan(l.experts, l.num_tokens, l.topk, l.hidden, l.inter);
+                l.per_slot   = plan.per_slot;
+                l.persistent = plan.persistent;
+                std::cout << "plan: " << (plan.per_slot ? "per-slot" : "atomic") << ", "
+                          << (plan.persistent ? "persistent" : "two kernels") << std::endl;
+            }
+            l.init       = arg_parser.get_int("init");
+            l.seed       = arg_parser.get_uint32("seed");
+            l.validate   = arg_parser.get_int("validate") != 0;
+            l.warmup     = arg_parser.get_int("warmup");
+            l.repeat     = arg_parser.get_int("repeat");
+            const auto r = run_mx_moe_layer(l);
             if(l.repeat > 0)
                 std::cout << "time gate_up(+quant) " << r.ms_gate_up << " ms, down " << r.ms_down
                           << " ms" << std::endl;
