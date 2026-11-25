@@ -500,6 +500,10 @@ void HipblasltMatmulPlanBuilder::buildPlan(
                         std::get<2>(nodeAttrs),
                         opGraph.getTensorMap());
     auto plan = std::make_unique<MatmulPlan>(handle, std::move(params));
+    // This is the plan buildPlan() returns, unlike the throwaway ones isApplicable()
+    // and getWorkspaceSize() construct and discard: load the GEMM's code object now,
+    // not on whichever execute() happens to run it first (#16572).
+    plan->warmUpCodeLoad(handle);
     executionContext.setPlan(std::move(plan));
 }
 

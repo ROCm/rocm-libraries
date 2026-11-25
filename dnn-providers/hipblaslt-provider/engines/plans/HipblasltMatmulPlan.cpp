@@ -6,7 +6,10 @@
 #include <cstddef>
 #include <limits>
 #include <numeric>
+#include <optional>
 #include <string>
+
+#include <hip/hip_runtime.h>
 
 #include <hipblaslt/hipblaslt.h>
 #include <hipdnn_data_sdk/utilities/ScopedResource.hpp>
@@ -388,6 +391,169 @@ MatmulPlan::MatmulPlan(const HipdnnEnginePluginHandle& handle, MatmulParams&& pa
     _workspaceSize = _heuristicResult.workspaceSize;
 }
 
+namespace
+{
+
+// Only the types dnn-providers/hipblaslt-provider/docs/OperationSupport.md lists for
+// Matmul: FP32/FP16/BF16 operands, FP32 or the output type for bias. Throws rather
+// than guess on anything else -- an unhandled type must not silently undersize a
+// scratch buffer.
+size_t hipDataTypeByteSize(hipDataType type)
+{
+    switch(type)
+    {
+    case HIP_R_32F:
+        return 4;
+    case HIP_R_16F:
+    case HIP_R_16BF:
+        return 2;
+    default:
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
+            "warmUpCodeLoad: unhandled hipDataType " + std::to_string(static_cast<int>(type)));
+    }
+}
+
+template <typename T>
+T matrixLayoutAttribute(hipblasLtMatrixLayout_t layout, hipblasLtMatrixLayoutAttribute_t attr)
+{
+    T value{};
+    size_t written = 0;
+    THROW_ON_HIPBLASLT_FAILURE(
+        hipblasLtMatrixLayoutGetAttribute(layout, attr, &value, sizeof(value), &written));
+    return value;
+}
+
+// Every element hipblasLtMatmul can address in this (strided-batch) layout: each of
+// batchCount instances gets max(ld*cols, the batch stride) elements reserved, so a
+// stride that is larger than one matrix's own footprint -- or a batch count of 1,
+// where the stride is unset -- never leaves a gap unaccounted for.
+size_t matrixElementSpan(hipblasLtMatrixLayout_t layout)
+{
+    const auto cols = matrixLayoutAttribute<uint64_t>(layout, HIPBLASLT_MATRIX_LAYOUT_COLS);
+    const auto ld = matrixLayoutAttribute<int64_t>(layout, HIPBLASLT_MATRIX_LAYOUT_LD);
+    const auto batchCount
+        = matrixLayoutAttribute<int32_t>(layout, HIPBLASLT_MATRIX_LAYOUT_BATCH_COUNT);
+    const auto batchStride
+        = matrixLayoutAttribute<int64_t>(layout, HIPBLASLT_MATRIX_LAYOUT_STRIDED_BATCH_OFFSET);
+
+    const auto oneMatrix = static_cast<size_t>(ld) * static_cast<size_t>(cols);
+    const auto perBatch = std::max<size_t>(oneMatrix, static_cast<size_t>(batchStride));
+    return perBatch * static_cast<size_t>(std::max<int32_t>(batchCount, 1));
+}
+
+size_t matrixByteSize(hipblasLtMatrixLayout_t layout)
+{
+    const auto type = matrixLayoutAttribute<uint32_t>(layout, HIPBLASLT_MATRIX_LAYOUT_TYPE);
+    return matrixElementSpan(layout) * hipDataTypeByteSize(static_cast<hipDataType>(type));
+}
+
+// hipMalloc()s a scratch device buffer of `bytes` (or stays empty for 0) and
+// hipFree()s it on destruction or on a throw while constructing a sibling buffer, so
+// warmUpCodeLoad() never leaks device memory on an early exit.
+class ScratchDeviceBuffer
+{
+public:
+    explicit ScratchDeviceBuffer(size_t bytes)
+    {
+        if(bytes == 0)
+        {
+            return;
+        }
+        if(const auto status = hipMalloc(&_ptr, bytes); status != hipSuccess)
+        {
+            throw hipdnn_plugin_sdk::HipdnnPluginException(
+                HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
+                "warmUpCodeLoad: hipMalloc(" + std::to_string(bytes)
+                    + ") failed: " + std::string(hipGetErrorString(status)));
+        }
+    }
+    ~ScratchDeviceBuffer()
+    {
+        if(_ptr != nullptr)
+        {
+            static_cast<void>(hipFree(_ptr));
+        }
+    }
+    ScratchDeviceBuffer(const ScratchDeviceBuffer&) = delete;
+    ScratchDeviceBuffer& operator=(const ScratchDeviceBuffer&) = delete;
+    ScratchDeviceBuffer(ScratchDeviceBuffer&&) = delete;
+    ScratchDeviceBuffer& operator=(ScratchDeviceBuffer&&) = delete;
+
+    void* ptr() const
+    {
+        return _ptr;
+    }
+
+private:
+    void* _ptr = nullptr;
+};
+
+} // namespace
+
+void MatmulPlan::warmUpCodeLoad(const HipdnnEnginePluginHandle& handle) const
+{
+    const ScratchDeviceBuffer aBuf(matrixByteSize(_params.a().matrixLayout()));
+    const ScratchDeviceBuffer bBuf(matrixByteSize(_params.b().matrixLayout()));
+    // BETA is 0, so C's prior content is never read for anything this result keeps:
+    // scratch, uninitialized memory in is as good as zero for a run whose output is
+    // discarded.
+    const ScratchDeviceBuffer cBuf(matrixByteSize(_params.c().matrixLayout()));
+    const ScratchDeviceBuffer workspaceBuf(_workspaceSize);
+
+    // The bias pointer the heuristic search set is a dummy (0x1): a real matmul call
+    // dereferences it, so it needs a real buffer here, sized to the output's row
+    // count (already the validated bias length) and the bias data type the epilogue
+    // already recorded on the descriptor.
+    std::optional<ScratchDeviceBuffer> biasBuf;
+    if(_params.biasUid().has_value())
+    {
+        uint32_t biasTypeRaw = 0;
+        size_t written = 0;
+        THROW_ON_HIPBLASLT_FAILURE(
+            hipblasLtMatmulDescGetAttribute(_params.desc().matmulDesc(),
+                                            HIPBLASLT_MATMUL_DESC_BIAS_DATA_TYPE,
+                                            &biasTypeRaw,
+                                            sizeof(biasTypeRaw),
+                                            &written));
+        const auto rows = matrixLayoutAttribute<uint64_t>(_params.c().matrixLayout(),
+                                                          HIPBLASLT_MATRIX_LAYOUT_ROWS);
+        biasBuf.emplace(static_cast<size_t>(rows)
+                        * hipDataTypeByteSize(static_cast<hipDataType>(biasTypeRaw)));
+        void* biasPtr = biasBuf->ptr();
+        THROW_ON_HIPBLASLT_FAILURE(
+            hipblasLtMatmulDescSetAttribute(_params.desc().matmulDesc(),
+                                            HIPBLASLT_MATMUL_DESC_BIAS_POINTER,
+                                            static_cast<const void*>(&biasPtr),
+                                            sizeof(biasPtr)));
+    }
+
+    THROW_ON_HIPBLASLT_FAILURE(hipblasLtMatmul(handle.hipblasltHandle,
+                                               _params.desc().matmulDesc(),
+                                               &ALPHA,
+                                               bBuf.ptr(),
+                                               _params.b().matrixLayout(),
+                                               aBuf.ptr(),
+                                               _params.a().matrixLayout(),
+                                               &BETA,
+                                               cBuf.ptr(),
+                                               _params.c().matrixLayout(),
+                                               cBuf.ptr(),
+                                               _params.c().matrixLayout(),
+                                               &_heuristicResult.algo,
+                                               workspaceBuf.ptr(),
+                                               _workspaceSize,
+                                               handle.getStream()));
+    // The scratch buffers are about to free; the matmul above must have finished
+    // using them first. build() may synchronize; execute() alone may not.
+    if(const auto status = hipStreamSynchronize(handle.getStream()); status != hipSuccess)
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
+            "warmUpCodeLoad: hipStreamSynchronize failed: "
+                + std::string(hipGetErrorString(status)));
+    }
+}
 size_t MatmulPlan::getWorkspaceSize([[maybe_unused]] const HipdnnEnginePluginHandle& handle) const
 {
     return _workspaceSize;
