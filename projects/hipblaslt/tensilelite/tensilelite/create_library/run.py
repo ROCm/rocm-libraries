@@ -31,6 +31,7 @@ import gc
 import glob
 import itertools
 import os
+import random
 import shutil
 import subprocess
 import sys
@@ -52,6 +53,8 @@ from ..Common import (
     IsaVersion,
     ParallelMap2,
     poolSizeBudget,
+    releaseFreedMemory,
+    shutdownWorkerPool,
     print1,
     print2,
     printWarning,
@@ -67,9 +70,12 @@ from ..Common.GlobalParameters import assignGlobalParameters, globalParameters
 from ..Common.TimingInstrumentation import timing_context
 from ..SolutionStructs.Naming import RegisterAllocationMerges, getKernelCompileKey, \
     getKernelFileBase, getKeyNoInternalArgs, getKernelNameMin
+from ..SolutionStructs import CompactSolution as _compact
+from ..SolutionStructs.CompactSolution import CompactSolution, compactLibrarySolutions, hydrateSolution
 
 from ..CustomYamlLoader import load_logic_gfx_arch, archMatch
 from ..KernelHelperNaming import kernelObjectNameCallables, initHelperKernelObjects
+from ..MatchingTable import numpyAvailable
 from ..KernelWriterAssembly import KernelWriterAssembly
 from ..KernelWriterBase import (
     KERNEL_HELPER_FILENAME_CPP,
@@ -104,6 +110,10 @@ def _parseLogicFileForLibrary(*args) -> LibraryIO.LibraryLogic:
     list and raw exact logic are about 40% of that volume.
     """
     logic = LibraryIO.LibraryLogic._make(LibraryIO.parseLibraryLogicFile(*args))
+    if isinstance(logic.library, MasterSolutionLibrary):
+        # Compact before returning to the parent so it retains only the summary
+        # and compressed generator state. splitGSU is the third positional argument.
+        compactLibrarySolutions(logic.library, args[2], kernelObjectNameCallables())
     return logic._replace(solutions=None, exactLogic=None)
 
 
@@ -136,6 +146,9 @@ def _baseArchs(archs: Collection[str]) -> List[str]:
 # run they must not disturb, so only they have to leave siblings alone; every
 # other run owns build_tmp outright and clears it as it always did.
 _GROUP_BUILD_ENV = "TENSILE_GROUP_BUILD"
+# Fixed seed for the kernel-order shuffle in writeSolutionsAndKernelsTCL: the
+# order is arbitrary but must be the same on every run of the same inputs.
+_KERNEL_ORDER_SEED = 0x7E45
 
 
 def buildTmpRoot(outputPath: Union[str, Path]) -> Path:
@@ -274,9 +287,9 @@ def groupKernelRecords(kernels, splitGSU: bool):
     artifactOwners = {}
     merges = RegisterAllocationMerges()
     for kernel in kernels:
-        key = getKernelCompileKey(kernel, splitGSU)
-        symbol = getKernelNameMin(kernel, splitGSU)
-        base = getKernelFileBase(splitGSU, kernel)
+        key = _compileKey(kernel, splitGSU)
+        symbol = _symbolName(kernel, splitGSU)
+        base = _fileBase(splitGSU, kernel)
         owner = artifactOwners.setdefault(base, key)
         if owner != key:
             raise RuntimeError(
@@ -455,7 +468,7 @@ def _emitKernel(kernelWriterAssembly, splitGSU, kernel, compress=False) -> Kerne
 def processKernelSource(kernelWriterAssembly, data, outOptions, splitGSU, kernel, compress = False) -> KernelCodeGenResult:
     """Generate source for a single kernel."""
     kernelWriterAssembly.setRocIsa(data, outOptions)
-    return _emitKernel(kernelWriterAssembly, splitGSU, kernel, compress)
+    return _emitKernel(kernelWriterAssembly, splitGSU, hydrateSolution(kernel), compress)
 
 
 def _mapKernels(fn, kernels):
@@ -550,34 +563,78 @@ def _applyCustomKernelDefToSol(sol, result):
     Contractions-level customKernel attribute."""
     ckDef = getattr(result, 'customKernelDef', None)
     if ckDef is not None:
-        sol.originalSolution._state["CustomKernel"] = ckDef
+        _setSolutionState(sol.originalSolution, "CustomKernel", ckDef)
         from ..Contractions import CustomKernel as CK
         sol.customKernel = CK.FromOriginalState(ckDef)
+
+def _setSolutionState(solution, key, value):
+    """Write one state key of a Solution or CompactSolution.
+
+    A real Solution is written through _state, as before, so its cached name
+    is not invalidated; a CompactSolution records the write in its overlay.
+    """
+    if isinstance(solution, CompactSolution):
+        solution[key] = value
+    else:
+        solution._state[key] = value
+
+
+def _compileKey(kernel, splitGSU: bool) -> str:
+    """getKernelCompileKey, served from the summary for a CompactSolution."""
+    if isinstance(kernel, CompactSolution):
+        kernel.checkSplitGSU(splitGSU)
+        return kernel.kernelNameMin
+    return getKernelCompileKey(kernel, splitGSU)
+
+
+def _symbolName(kernel, splitGSU: bool) -> str:
+    """getKernelNameMin, served from the summary for a CompactSolution."""
+    if isinstance(kernel, CompactSolution):
+        kernel.checkSplitGSU(splitGSU)
+        return kernel.kernelNameMin
+    return getKernelNameMin(kernel, splitGSU)
+
+
+def _fileBase(splitGSU: bool, kernel) -> str:
+    """getKernelFileBase, served from the summary for a CompactSolution."""
+    if isinstance(kernel, CompactSolution):
+        kernel.checkSplitGSU(splitGSU)
+        return kernel.baseName
+    return getKernelFileBase(splitGSU, kernel)
+
+
+def _dedupeKey(kernel, splitGSU: bool) -> str:
+    """getKeyNoInternalArgs, served from the summary for a CompactSolution."""
+    if isinstance(kernel, CompactSolution):
+        kernel.checkSplitGSU(splitGSU)
+        return kernel.dedupeKey()
+    return getKeyNoInternalArgs(kernel, splitGSU)
+
 
 def passPostKernelInfoToLibrary(results, kernels, masterLibraries, splitGSU: bool):
     resultDict = {}
     for kernIdx, r in enumerate(results):
-        kName = getKernelCompileKey(kernels[kernIdx], splitGSU)
+        kName = _compileKey(kernels[kernIdx], splitGSU)
         resultDict["%s"%kName] = r
     for archName, masterLibrary in masterLibraries.items():
         for solIdx, sol in masterLibrary.solutions.items():
             solutionKernels = sol.originalSolution.getKernels()
             for kernel in solutionKernels:
-                kName = getKernelCompileKey(kernel, splitGSU)
+                kName = _compileKey(kernel, splitGSU)
                 try:
                     result = resultDict["%s"%kName]
                     sol.sizeMapping.CUOccupancy = result.cuoccupancy
                     sol.sizeMapping.MathClocksUnrolledLoop = result.mathclk
-                    sol.sizeMapping.PrefetchGlobalRead = sol.originalSolution._state['PrefetchGlobalRead']
-                    sol.sizeMapping.NonTemporalA = sol.originalSolution._state['NonTemporalA']
-                    sol.sizeMapping.NonTemporalB = sol.originalSolution._state['NonTemporalB']
-                    sol.sizeMapping.adaptiveGemmNTAB = sol.originalSolution._state.get('AdaptiveGemmNTAB', 0)
-                    sol.sizeMapping.NonTemporalD = sol.originalSolution._state['NonTemporalD']
-                    sol.sizeMapping.WaveSeparateGlobalReadA = sol.originalSolution._state['WaveSeparateGlobalReadA']
-                    sol.sizeMapping.WaveSeparateGlobalReadB = sol.originalSolution._state['WaveSeparateGlobalReadB']
-                    sol.sizeMapping.UnrollLoopSwapGlobalReadOrder = sol.originalSolution._state['UnrollLoopSwapGlobalReadOrder']
-                    sol.sizeMapping.DirectToVgprA = bool(sol.originalSolution._state['DirectToVgprA'])
-                    sol.sizeMapping.DirectToVgprB = bool(sol.originalSolution._state['DirectToVgprB'])
+                    sol.sizeMapping.PrefetchGlobalRead = kernel['PrefetchGlobalRead']
+                    sol.sizeMapping.NonTemporalA = kernel['NonTemporalA']
+                    sol.sizeMapping.NonTemporalB = kernel['NonTemporalB']
+                    sol.sizeMapping.adaptiveGemmNTAB = kernel.get('AdaptiveGemmNTAB', 0)
+                    sol.sizeMapping.NonTemporalD = kernel['NonTemporalD']
+                    sol.sizeMapping.WaveSeparateGlobalReadA = kernel['WaveSeparateGlobalReadA']
+                    sol.sizeMapping.WaveSeparateGlobalReadB = kernel['WaveSeparateGlobalReadB']
+                    sol.sizeMapping.UnrollLoopSwapGlobalReadOrder = kernel['UnrollLoopSwapGlobalReadOrder']
+                    sol.sizeMapping.DirectToVgprA = bool(kernel['DirectToVgprA'])
+                    sol.sizeMapping.DirectToVgprB = bool(kernel['DirectToVgprB'])
                     _applyCustomKernelDefToSol(sol, result)
                 except KeyError:
                     print(f"\n{'='*80}")
@@ -594,21 +651,21 @@ def passPostKernelInfoToLibrary(results, kernels, masterLibraries, splitGSU: boo
             for solIdx, sol in lib.solutions.items():
                 solutionKernels = sol.originalSolution.getKernels()
                 for kernel in solutionKernels:
-                    kName = getKernelCompileKey(kernel, splitGSU)
+                    kName = _compileKey(kernel, splitGSU)
                     try:
                         result = resultDict["%s"%kName]
                         sol.sizeMapping.CUOccupancy = result.cuoccupancy
                         sol.sizeMapping.MathClocksUnrolledLoop = result.mathclk
-                        sol.sizeMapping.PrefetchGlobalRead = sol.originalSolution._state['PrefetchGlobalRead']
-                        sol.sizeMapping.NonTemporalA = sol.originalSolution._state['NonTemporalA']
-                        sol.sizeMapping.NonTemporalB = sol.originalSolution._state['NonTemporalB']
-                        sol.sizeMapping.adaptiveGemmNTAB = sol.originalSolution._state.get('AdaptiveGemmNTAB', 0)
-                        sol.sizeMapping.NonTemporalD = sol.originalSolution._state['NonTemporalD']
-                        sol.sizeMapping.WaveSeparateGlobalReadA = sol.originalSolution._state['WaveSeparateGlobalReadA']
-                        sol.sizeMapping.WaveSeparateGlobalReadB = sol.originalSolution._state['WaveSeparateGlobalReadB']
-                        sol.sizeMapping.UnrollLoopSwapGlobalReadOrder = sol.originalSolution._state['UnrollLoopSwapGlobalReadOrder']
-                        sol.sizeMapping.DirectToVgprA = bool(sol.originalSolution._state['DirectToVgprA'])
-                        sol.sizeMapping.DirectToVgprB = bool(sol.originalSolution._state['DirectToVgprB'])
+                        sol.sizeMapping.PrefetchGlobalRead = kernel['PrefetchGlobalRead']
+                        sol.sizeMapping.NonTemporalA = kernel['NonTemporalA']
+                        sol.sizeMapping.NonTemporalB = kernel['NonTemporalB']
+                        sol.sizeMapping.adaptiveGemmNTAB = kernel.get('AdaptiveGemmNTAB', 0)
+                        sol.sizeMapping.NonTemporalD = kernel['NonTemporalD']
+                        sol.sizeMapping.WaveSeparateGlobalReadA = kernel['WaveSeparateGlobalReadA']
+                        sol.sizeMapping.WaveSeparateGlobalReadB = kernel['WaveSeparateGlobalReadB']
+                        sol.sizeMapping.UnrollLoopSwapGlobalReadOrder = kernel['UnrollLoopSwapGlobalReadOrder']
+                        sol.sizeMapping.DirectToVgprA = bool(kernel['DirectToVgprA'])
+                        sol.sizeMapping.DirectToVgprB = bool(kernel['DirectToVgprB'])
                         _applyCustomKernelDefToSol(sol, result)
                     except KeyError:
                         print(f"\n{'='*80}")
@@ -913,7 +970,13 @@ def writeSolutionsAndKernelsTCL(
             assembled_kernel = assemble(written_kernel)
             # The source is on disk (and assembled) by now; don't ship it back
             # to the parent, which only needs the post-codegen kernel info.
-            return processed_kernel._replace(src=None, header=None)
+            slim = processed_kernel._replace(src=None, header=None)
+            # Release free allocator pages after dropping the source and write results.
+            # With CpuThreads 1 this runs in the parent beside the source
+            # compile thread; glibc's malloc_trim takes the arena locks.
+            del processed_kernel, written_kernel, assembled_kernel
+            releaseFreedMemory()
+            return slim
         return composed_function
 
     # The basename has to stay "Kernels": the emitted code object is named from
@@ -936,10 +999,22 @@ def writeSolutionsAndKernelsTCL(
             cmdlineArchs,
         )
 
+        # Kernels arrive grouped by logic file, so the largest kernels (those
+        # of the GridBased libraries) land on all workers at once and set the
+        # build's memory peak. A fixed-seed shuffle spreads them over the run.
+        # This lowers the expected number of large kernels in flight together;
+        # it is not a bound on the peak, and a different logic set can still
+        # draw an unlucky order. Results stay aligned with this list, and
+        # nothing downstream depends on the order (code objects link sorted,
+        # kernel info is keyed by kernel name).
+        random.Random(_KERNEL_ORDER_SEED).shuffle(uniqueAsmKernels)
         results = _mapKernels(
             compose(unaryAssemble, unaryWriteAssembly, unaryProcessKernelSource),
             uniqueAsmKernels,
         )
+        # The link and bundle steps below need no workers; the pool would
+        # otherwise sit idle holding the heap it grew during codegen.
+        shutdownWorkerPool()
 
         buildAssemblyCodeObjectFiles(
             asmToolchain.linker,
@@ -968,7 +1043,7 @@ def generateKernelObjectsFromSolutions(solutions):
     for solution in solutions:
         solutionKernels = solution.getKernels()
         for kernel in solutionKernels:
-            kName = getKeyNoInternalArgs(kernel, False)
+            kName = _dedupeKey(kernel, False)
             if kName not in kernelNames:
                 kernels.append(kernel)
                 kernelNames.add(kName)
@@ -995,10 +1070,17 @@ def generateKernelHelperObjects(solutions: List[Solution], cxxCompiler: str, isa
     """
     khos = []
     visited = set()
+    nameCallables = kernelObjectNameCallables()
     for solution in solutions:
-        for kernelHelperType, callable in kernelObjectNameCallables():
+        # A CompactSolution carries the names its parse worker computed, so
+        # only the few solutions that introduce a new helper are hydrated.
+        precomputed = getattr(solution, "helperNames", None)
+        if precomputed is not None:
+            perType = precomputed
+        else:
+            perType = [(t, c(solution)) for t, c in nameCallables]
+        for kernelHelperType, names in perType:
             buildMask = []
-            names = callable(solution)
             if names:
                 sortByEnum = lambda x: ("Enum" in x, names.index(x))
                 names = sorted(names, key=sortByEnum, reverse=True)
@@ -1009,7 +1091,7 @@ def generateKernelHelperObjects(solutions: List[Solution], cxxCompiler: str, isa
                     else:
                         buildMask.append(False)
                 if any(buildMask):
-                    kho = initHelperKernelObjects(solution, kernelHelperType, cxxCompiler, isaInfoMap)
+                    kho = initHelperKernelObjects(hydrateSolution(solution), kernelHelperType, cxxCompiler, isaInfoMap)
                     kho = list(itertools.compress(kho, buildMask))
                     if kho:
                         khos.extend(kho)
@@ -1181,6 +1263,13 @@ def generateLogicDataAndSolutions(logicFiles, args, assembler: Assembler, isaInf
     # raiseIfTypeMismatches() can format the existing fatal aggregate error.
     typeMismatchAggregate: dict = {}
     skippedGemmA2AFusion = 0
+    # The parse workers share this interpreter's environment, so one warning
+    # here covers every table they will keep as row dicts.
+    if not numpyAvailable():
+        printWarning(
+            "NumPy is not installed: matching tables are kept as row dicts, which "
+            "costs the parent several times the memory of the column form"
+        )
     # Every library pulled out of the generator below is retained for the rest
     # of the run, which makes the cyclic collector the dominant cost of this
     # phase (5x) if left running. See deferCyclicGC.
@@ -1260,18 +1349,19 @@ def generateLogicDataAndSolutions(logicFiles, args, assembler: Assembler, isaInf
             solIndex.append(sol.index)
         for name, lib in masterLibrary.lazyLibraries.items():
             for _, sol in lib.solutions.items():
-                sol.originalSolution._state["codeObjectFile"] = name
+                _setSolutionState(sol.originalSolution, "codeObjectFile", name)
                 solutions.append(sol.originalSolution)
                 solIndex.append(sol.index)
 
     # Get the solution index and it's codeObjectFile name
     codeObjectFilesIndex = {}
     for solution, index in zip(solutions, solIndex):
-        if "codeObjectFile" in solution._state and solution._state["codeObjectFile"] is not None:
-            if solution._state["codeObjectFile"] in codeObjectFilesIndex:
-                codeObjectFilesIndex[solution._state["codeObjectFile"]] = min(index, codeObjectFilesIndex[solution._state["codeObjectFile"]])
+        coFile = solution.get("codeObjectFile")
+        if coFile is not None:
+            if coFile in codeObjectFilesIndex:
+                codeObjectFilesIndex[coFile] = min(index, codeObjectFilesIndex[coFile])
             else:
-                codeObjectFilesIndex[solution._state["codeObjectFile"]] = index
+                codeObjectFilesIndex[coFile] = index
 
     # Reorder to int: name format
     codeObjectFilesIndex = {v: k for k, v in codeObjectFilesIndex.items()}
@@ -1568,6 +1658,9 @@ def main(argv=None):
     )
     stop_glds = timer()
     print(f"Time to load yaml files (s): {(stop_glds-start_glds):3.2f}")
+    # Codegen gets fresh workers rather than ones still holding the heap they
+    # grew parsing YAML.
+    shutdownWorkerPool()
 
 
     kernels = generateKernelObjectsFromSolutions(solutions)
@@ -1615,14 +1708,6 @@ def main(argv=None):
     passPostKernelInfoToLibrary(kernelInfo, uniqueKernels, masterLibraries, splitGSU)
     stop_pki = timer()
     print(f"Time to pass kernel info to library (s): {(stop_pki-start_pki):3.2f}")
-
-    solDict = {}
-    for solution in solutions:
-        solutionKernels = solution.getKernels()
-        for kernel in solutionKernels:
-            kName = getKeyNoInternalArgs(kernel, False)
-            if kName not in solDict:
-                solDict["%s"%kName] = kernel
 
     # The per-arch subdirectories these loops write into were created by
     # writeSolutionsAndKernelsTCL above, from the same requested names; LibraryIO.write
@@ -1697,6 +1782,7 @@ def main(argv=None):
 
     print(f"Total time (s): {(stop-start):3.2f}")
     print(f"Total kernels processed: {numKernels}")
+    print1(f"CompactSolution fallback reads in parent: {_compact.fallbackReads}")
     print(f"Kernels processed per second: {(numKernels/(stop-start)):3.2f}")
     print(f"KernelHelperObjs: {len(kernelHelperObjs)}")
     return 0

@@ -172,7 +172,6 @@ hiptensorStatus_t hiptensorReduce(const hiptensorHandle_t handle,
 
     using hiptensor::PlancacheAutotuneMgr;
     auto& autotuneMgr = PlancacheAutotuneMgr::instance();
-    autotuneMgr->startAutotune(hiptensor::AutotuneOps::Autotune_Redution);
 
     hiptensorOperationDescriptor_t    opDes       = plan->mOpDesc;
     const hiptensorTensorDescriptor_t descA       = opDes->mDescA;
@@ -237,8 +236,9 @@ hiptensorStatus_t hiptensorReduce(const hiptensorHandle_t handle,
     {
         // Composable Kernels (CK) does not handle reductions where the input and
         // output tensors maintain the same rank. For those scenarios, employ
-        // elementwise binary operations.
-        plan->mOpDesc->mOpAC = HIPTENSOR_OP_ADD;
+        // elementwise binary operations. hiptensorCreatePlan already set the
+        // plan's operation to HIPTENSOR_OP_ADD, so that executions sharing the
+        // plan only read it.
         return hiptensorElementwiseBinaryExecute(handle, plan, alpha, A, beta, C, D, stream);
     }
 
@@ -266,12 +266,13 @@ hiptensorStatus_t hiptensorReduce(const hiptensorHandle_t handle,
         internalTypeCompute = HIPTENSOR_COMPUTE_DESC_32F;
     }
 
-    autotuneMgr->setAutotune<hiptensor::ReductionSolution>(
+    auto trial = autotuneMgr->setAutotune<hiptensor::ReductionSolution>(
         hiptensor::AutotuneOps::Autotune_Redution, handle, plan);
 
     std::vector<hiptensor::ReductionSolution*> solutions;
-    if(plan->mPref->mSolution != nullptr)
-        solutions.push_back((hiptensor::ReductionSolution*)plan->mPref->mSolution);
+    // Use the trial's solution: another thread sharing this plan may update the plan's.
+    if(auto* planSolution = trial.solution())
+        solutions.push_back(planSolution);
     else
     {
         // Query reduction solutions for the correct reduction operation and type
@@ -310,6 +311,47 @@ hiptensorStatus_t hiptensorReduce(const hiptensorHandle_t handle,
         betaValue = hiptensor::readVal<double>(beta, typeCompute);
     }
 
+    // CK requires all the modes of the reduced tensors (C/D) to be sorted according to the
+    // non-reduced tensor mode (modeA).
+    //
+    // By permuting the reduced tensor modes and their lengths, if the strides are permuted
+    // following the same order, then it's possible to satisfy CK's requirement without
+    // physically permuting the data.
+    //
+    // For example:
+    //  - A lengths are [3, 5, 8], C/D modes are [2, 1].
+    //  - CK requires sorted modes as [1, 2] for C/D, and the respective lengths [5, 8].
+    //  - Strides of output are generated in this way:
+    //    - output dims are [2, 1]
+    //      => corresponding lengths are [8(2), 5(1)]
+    //      => strides are [5(2), 1(1)]
+    //      => permuted strides are [1(1), 5(2)]
+    //
+    // The code below implements this logic.
+    hiptensorTensorDescriptor sortedDescC    = *descC;
+    std::vector<int>          sortingIndices = {};
+
+    auto sortStatus = hiptensor::getSortingIndices(
+        modeA, descA->mLengths.size(), modeC, sortedDescC.mLengths.size(), sortingIndices);
+    if(sortStatus == HIPTENSOR_STATUS_SUCCESS)
+    {
+        sortStatus = hiptensor::applySortingIndices(sortingIndices, sortedDescC.mLengths);
+    }
+    if(sortStatus == HIPTENSOR_STATUS_SUCCESS)
+    {
+        sortStatus = hiptensor::applySortingIndices(sortingIndices, sortedDescC.mStrides);
+    }
+    if(sortStatus != HIPTENSOR_STATUS_SUCCESS)
+    {
+        snprintf(msg,
+                 sizeof(msg),
+                 "Invalid Argument Error : Failed to sort the modes of C and D by the modes of "
+                 "A (%s)",
+                 hiptensorGetErrorString(sortStatus));
+        logger->logError("hiptensorReduce", msg);
+        return sortStatus;
+    }
+
     if(C && C != D)
     {
         // CK API can only process $D = alpha * reduce(A) + beta * D$
@@ -333,31 +375,6 @@ hiptensorStatus_t hiptensorReduce(const hiptensorHandle_t handle,
         }
     }
 
-    // CK requires all the modes of the reduced tensors (C/D) to be sorted according to the
-    // non-reduced tensor mode (modeA).
-    //
-    // By permuting the reduced tensor modes and their lengths, if the strides are permuted
-    // following the same order, then it's possible to satisfy CK's requirement without
-    // physically permuting the data.
-    //
-    // For example:
-    //  - A lengths are [3, 5, 8], C/D modes are [2, 1].
-    //  - CK requires sorted modes as [1, 2] for C/D, and the respective lengths [5, 8].
-    //  - Strides of output are generated in this way:
-    //    - output dims are [2, 1]
-    //      => corresponding lengths are [8(2), 5(1)]
-    //      => strides are [5(2), 1(1)]
-    //      => permuted strides are [1(1), 5(2)]
-    //
-    // The code below implements this logic.
-    hiptensorTensorDescriptor sortedDescC    = *descC;
-    std::vector<int>          sortingIndices = {};
-
-    CHECK_HIPTENSOR_ERROR(hiptensor::getSortingIndices(
-        modeA, descA->mLengths.size(), modeC, sortedDescC.mLengths.size(), sortingIndices));
-    CHECK_HIPTENSOR_ERROR(hiptensor::applySortingIndices(sortingIndices, sortedDescC.mLengths));
-    CHECK_HIPTENSOR_ERROR(hiptensor::applySortingIndices(sortingIndices, sortedDescC.mStrides));
-
     for(auto pSolution : solutions)
     {
         using hiptensor::HiptensorOptions;
@@ -374,6 +391,7 @@ hiptensorStatus_t hiptensorReduce(const hiptensorHandle_t handle,
                 options->hotRuns(), // nrepeat
             }:
         StreamConfig{stream, false};
+        hiptensor::ReductionMetrics problemMetrics;
         auto [isSupported, time] = (*pSolution)(descA->mLengths,
                                                 descA->mStrides,
                                                 {modeA, modeA + descA->mLengths.size()},
@@ -387,7 +405,8 @@ hiptensorStatus_t hiptensorReduce(const hiptensorHandle_t handle,
                                                 A,
                                                 D,
                                                 opReduce,
-                                                streamConfig);
+                                                streamConfig,
+                                                &problemMetrics);
         if(isSupported)
         {
             if(time < 0)
@@ -396,10 +415,8 @@ hiptensorStatus_t hiptensorReduce(const hiptensorHandle_t handle,
             }
             if(logger->getLogMask() & HIPTENSOR_LOG_LEVEL_PERF_TRACE)
             {
-
-                int  n     = pSolution->problemDim();
-                auto flops = std::size_t(2) * n;
-                auto bytes = pSolution->problemBytes();
+                auto flops = std::size_t(2) * problemMetrics.mElements;
+                auto bytes = problemMetrics.mBytes;
 
                 hiptensor::PerfMetrics metrics = {
                     pSolution->uid(), // id
@@ -421,9 +438,8 @@ hiptensorStatus_t hiptensorReduce(const hiptensorHandle_t handle,
                 logger->logPerformanceTrace("hiptensorReduce", msg);
             }
 
-            plan->mPref->mSolution = pSolution;
-            autotuneMgr->saveAutotune<hiptensor::ReductionSolution>(
-                hiptensor::AutotuneOps::Autotune_Redution, time, handle, plan);
+            plan->mPref->mSolution.store(pSolution);
+            trial.save(pSolution, time);
 
             return HIPTENSOR_STATUS_SUCCESS;
         }

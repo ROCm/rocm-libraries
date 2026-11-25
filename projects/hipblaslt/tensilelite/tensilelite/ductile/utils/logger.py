@@ -84,9 +84,9 @@ class Logger:
         row = " "
         for i, (k, v) in enumerate(kwargs.items(), 1):
             if isinstance(v, numbers.Number):
-                width = int(math.log10(v)) + 3 if v > 0 else 3
+                width = int(math.log10(v)) + 3 if v > 0 and math.isfinite(v) else 3
                 if isinstance(v, (float, np.floating)):
-                    v = round(float(v), 3)
+                    v = round(float(v), 3) if math.isfinite(v) else v
                     width += 2
                 width = max(width, len(k))
             else:
