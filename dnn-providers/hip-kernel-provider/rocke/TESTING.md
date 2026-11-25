@@ -13,6 +13,24 @@ SPDX-License-Identifier: MIT
 > When the code and this document disagree, that disagreement is a bug in one of
 > them; fix it, don't route around it.
 
+## What CI checks today
+
+> - **No CI job builds rocKE**, on a pull request or on a schedule
+>   ([G11](#72-platform-quality-gaps-question-b)), so no rocKE test runs in CI.
+>   A pull request runs only the pre-commit hooks of the repository root
+>   `.pre-commit-config.yaml`: the `rocke-*` hooks, which are rocKE's own checks,
+>   and the generic ones (formatting, YAML, large files, bandit).
+> - **When CI builds rocKE again, the pull-request job tests GPUs on gfx942
+>   (Linux) and gfx110X (Windows) only**, at the pinned TheRock revision
+>   ([§5.0.2, Which GPUs run tests](#502-ci-shards-and-rocke-item-sharding)).
+>   No pull request tests gfx950 (AICK-3411).
+> - **Byte identity runs locally, not in CI**
+>   ([G10](#72-platform-quality-gaps-question-b)). Run it yourself.
+> - The `rocke-pending-lanes` hook checks that every test file is assigned to a
+>   CI entry (one that the quick or standard tier selects) or has a recorded
+>   reason ([§5.4](#54-tests-that-do-not-run-normally-one-registry)). That is
+>   bookkeeping: an assigned file runs only once a CI job builds rocKE.
+
 ## 0. Purpose, scope, and the other two docs
 
 **This doc defines the strategy**, validation requirements, and CI replay
@@ -1521,7 +1539,7 @@ the suspect's PR.
 
 ### 5.4 Tests that do not run normally: one registry
 
-Every test that CI does not run normally is recorded in one data module,
+Every test that the CI entries do not run normally is recorded in one data module,
 [`platform/python/rocke/tests/pending_lanes.py`](platform/python/rocke/tests/pending_lanes.py),
 with its reason, owner and expiry. It holds three kinds of record:
 
@@ -1573,7 +1591,7 @@ quarantine; it does not stay pending.
 Two checks hold the tree to the registry. The PR gate
 [`platform/tests/tools/test_pending_lanes.py`](platform/tests/tools/test_pending_lanes.py)
 (the `rocke-pending-lanes` pre-commit hook in pull-request CI, [§5.0.2](#502-ci-shards-and-rocke-item-sharding))
-works per file: every test file runs in a CI-run entry or is pending, no entry
+works per file: every test file is assigned to a CI entry or is pending, no entry
 is stale (its test gone, or its lane's kind no longer true), and no test names
 a runner lane or writes a declaration by hand.
 [`tools/limbo_audit.py`](tools/limbo_audit.py) works per case, from the run
@@ -1655,10 +1673,10 @@ Read coverage from the emitter configs ([`platform/tests/README.md`](platform/te
 | # | Gap | Impact | Target |
 |---|---|---|---|
 | G6 | **Partially enrolled `library/` behavioral pytest** | Installed CTest registers explicit attention, convolution, DSA, MLA, GDN/KDA, library-host (`rocke_library_host_pytest`: shared dispatch helpers, benchmark early stop, occupancy calibration), reference-contract, and GPU cohorts, plus the comprehensive-tier `rocke_library_conv_exhaustive_pytest` for the `exhaustive` items of the conv files, but source tests outside the explicit CMake selections remain ungated; the C++/Python engine parity files (`test_selector_cpp_parity.py`, `test_attention_ir_cpp_parity.py`, `test_gdn_decode_ir_cpp_parity.py`) run in `rocke_library_engine_parity_pytest` and the selector's full grid in the comprehensive-tier `rocke_library_engine_parity_exhaustive_pytest`, neither registered on Windows, where provider builds make no engine modules; on Linux every case of theirs skips where the build's Python had no pybind11, which is TheRock's CI build environment until it gains pybind11, and the standard-tier `rocke_engine_modules_check` reports that reason (it reads the configure's marker `tests/rocke_engine_modules.json`, and fails instead when a module the build made does not import or the `cpp` backend falls back to the Python engine); registration or adding a file under `library/tests/` does not establish CI coverage; the GDN/KDA host entry `rocke_library_gdn_pytest` is not registered on Windows (a slow case in `test_gdn_decode_fused.py`), so Windows runs no GDN/KDA decode host pytest (the KDA chunkwise IR hashes stay covered by `rocke_golden_static`); the TF32 conv build-and-lower matrices and comgr ISA checks (`rocke_library_conv_tf32_lowering_pytest`) are not registered on Windows either, to fit the Windows shard time, so Windows runs only the representative TF32 builds in `rocke_library_conv_tf32_pytest`; on Windows, `rocke_library_attention_cpu_pytest` leaves out the gfx942 dense prefill host tests and their IR golden; the GDN/KDA GPU numeric files skip on the Windows GPU lanes, which lack gfx950/gfx942 devices | Audit registered-but-unselected entries and unregistered files; enroll each in an owned CTest tier or document why it remains manual |
-| G7 | **Orphaned `platform/python` pytest** (heuristics, benchmark) | `platform/python/rocke/tests/in_tree_suites.py` lists the in-package directories `platform/tests/in_tree` runs; every test file that runs in no CI lane is in `platform/python/rocke/tests/pending_lanes.py` with its reason and the lane it waits for | Enrol each listed file as its lane lands |
+| G7 | **Orphaned `platform/python` pytest** (heuristics, benchmark) | `platform/python/rocke/tests/in_tree_suites.py` lists the in-package directories `platform/tests/in_tree` runs; every test file that is assigned to no CI entry is in `platform/python/rocke/tests/pending_lanes.py` with its reason and the lane it waits for | Enrol each listed file as its lane lands |
 | G9 | **Legacy discovered pytest contains resource-bound work** | The affordable runner now excludes the largest marked matrices from execution and isolates selected files, but collection still imports and parameterizes every discovered module; additional unmarked structural/compiler cohorts remain in the default lane | Move each remaining resource-bound cohort behind a named structural/compiler CTest, then remove its transitional `exhaustive` marker |
 | G10 | **No CI job runs the byte-identity gate** ([§4.3](#43-do-the-two-implementations-agree-the-migration-gate)) | Only `tests/run_all.py` runs `tools/check_byte_identity.py`; no CTest entry or workflow does. Where the build made no engine modules (see G6), the C++-engine cases of the installed IR tests skip. A pull request whose author skipped the developer gate can merge with the two engines emitting different IR | Run the gate in pull-request CI (tracked in AICK-2301) and on each merge to develop (tracked in AICK-2929) |
-| G11 | **No CI job builds rocKE** ([§5.0.2](#502-ci-shards-and-rocke-item-sharding)) | No TheRock workflow and not the hipDNN superbuild turns rocKE on, so no rocKE CTest entry of any tier, installed or build-tree, runs in CI; only the source-tree checks run, as the `rocke-pending-lanes`, `rocke-compliance` and `rocke-no-torch` pre-commit hooks | Build rocKE in the pull-request and scheduled TheRock jobs (the scheduled job tracked in AICK-2925) |
+| G11 | **No CI job builds rocKE** ([§5.0.2](#502-ci-shards-and-rocke-item-sharding)) | No TheRock workflow and not the hipDNN superbuild turns rocKE on, so no rocKE CTest entry of any tier, installed or build-tree, runs in CI; only the source-tree checks run, as the `rocke-*` pre-commit hooks, beside the repository's generic hooks ([What CI checks today](#what-ci-checks-today)) | Build rocKE in the pull-request and scheduled TheRock jobs (the scheduled job tracked in AICK-2925) |
 
 ### 7.3 What "green" does and does not mean today
 
@@ -1679,10 +1697,8 @@ reference under that lane's numerical contract. A green installed host lane or a
 GPU lane that selected no matching test, skipped, or performed zero comparisons
 does not make that claim. The remaining numerical holes are G1–G5.
 
-A green **CI run** does not prove that the two engines emit the same IR: no CI
-job runs the byte-identity gate (G10). No CI run, pull-request or scheduled,
-runs any rocKE CTest entry (G11); a green CI run covers rocKE only through its
-pre-commit hooks.
+A green **CI run** proves only that the pre-commit hooks that
+[What CI checks today](#what-ci-checks-today) lists passed.
 
 ---
 

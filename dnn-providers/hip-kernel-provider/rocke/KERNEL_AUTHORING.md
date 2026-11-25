@@ -113,9 +113,11 @@ a matching remote GPU before marking kernel work done.
       **new** family/case adds an entry, an intended emission change **re-blesses**
       it, an inert change touches no golden. [`run_checks.py`](#run-the-checks)
       picks all of this up automatically.
-- [ ] **Placed in CI.** Each new or moved test runs in a CTest entry at the tier
-      that [`TESTING.md` §5.0.3](TESTING.md#503-choosing-a-tier-and-an-entry-for-a-test)
-      gives (standard by default, quick only for smoke). The pull request states
+- [ ] **Assigned to a CI entry.** Each new or moved test is in a CTest entry at
+      the tier that [`TESTING.md` §5.0.3](TESTING.md#503-choosing-a-tier-and-an-entry-for-a-test)
+      gives (standard by default, quick only for smoke). CI does not run it yet
+      ([What CI checks today](TESTING.md#what-ci-checks-today)); the local checks
+      below are the evidence. The pull request states
       the tier and a short reason for it; it need not report measurements
       against the [budgets](TESTING.md#budgets), though the author measures the
       affected entries as [§5.0.3](TESTING.md#503-choosing-a-tier-and-an-entry-for-a-test)
