@@ -1,0 +1,28 @@
+# MIOpen changelog fragments
+
+For user-facing changes, add one uniquely named fragment per entry to this directory instead of editing `../CHANGELOG.md`. For example, `12345-reduce.resolved.md`:
+
+```markdown
+* [Reduce] Fixed incorrect results for noncontiguous output tensors.
+```
+
+Use a PR or issue number plus a short slug, or a unique lowercase slug if no number exists yet. Write one `* ` bullet as it should appear in the changelog; indent continuation lines by at least two spaces. Internal-only changes do not need an entry. The existing pre-commit CI lane validates fragment format; reviewers decide whether a note is needed.
+
+| Filename suffix | Changelog heading |
+|---|---|
+| `.added.md` | Added |
+| `.changed.md` | Changed |
+| `.removed.md` | Removed |
+| `.resolved.md` | Resolved Issues |
+| `.optimized.md` | Optimized |
+| `.known.md` | Known Issues |
+
+## Release checklist
+
+Before cutting or tagging a release, check the exact source ref in a clean checkout:
+
+```sh
+python3 projects/miopen/script/changelog_fragments.py --check-empty
+```
+
+If `develop` has pending fragments, dispatch the workflow and merge its PR. For a separate release branch with pending backport fragments, use `--fold` on a branch based on that release ref and open a regular PR there; the bot only targets `develop`. Recheck the final source ref before shipping. When finalizing a release, remove ` (Unreleased)` from its heading and add a newly marked heading on the branch where development continues. The assembler refuses to write to a changelog whose newest heading is not marked ` (Unreleased)`.

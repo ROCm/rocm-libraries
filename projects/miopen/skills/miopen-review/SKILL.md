@@ -159,7 +159,7 @@ model is enough for lanes 2 and 4 (enumeration and cross-checking).
 - In-code: new public APIs, changed semantics with stale comments, new env vars, CMake options and flags
   missing from `docs/reference/env_variables.rst` or other docs, new failure modes, non-obvious hardware or
   performance choices with no *why*.
-- Missing `CHANGELOG.md` entry for a user-visible change; removed or renamed solver env vars.
+- Missing `changelog.d/` fragment for a user-visible change; removed or renamed solver env vars.
 - PR text (PR mode) or commit messages (local mode): states the motivation (the why, not a restatement of
   the diff); every factual claim matches the diff; scope claims ("only affects X") hold; risk claims ("no
   allocation on the hot path") are not contradicted by the code; the test plan matches the tests actually

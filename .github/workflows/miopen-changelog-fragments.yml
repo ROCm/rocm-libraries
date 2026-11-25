@@ -1,0 +1,61 @@
+name: MIOpen changelog fragments
+
+on:
+  schedule:
+    - cron: '23 14 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: miopen-changelog-fragments
+  cancel-in-progress: false
+
+jobs:
+  fold:
+    # The write token is only available to the workflow on trusted develop.
+    if: github.repository == 'ROCm/rocm-libraries' && github.ref == 'refs/heads/develop'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: develop
+          filter: blob:none
+          sparse-checkout: |
+            projects/miopen/changelog.d
+            projects/miopen/script
+          persist-credentials: false
+
+      - name: Fold merged fragments
+        run: python3 projects/miopen/script/changelog_fragments.py --fold
+
+      - name: Create Libraries App token
+        id: app-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: ${{ secrets.APP_ID }}
+          private-key: ${{ secrets.APP_PRIVATE_KEY }}
+          permission-contents: write
+          permission-pull-requests: write
+          # Updating the rolling branch may bring in workflow changes from develop.
+          permission-workflows: write
+
+      - name: Reconcile the changelog PR
+        uses: peter-evans/create-pull-request@5f6978faf089d4d20b00c7766989d076bb2fc7f1 # v8.1.1
+        with:
+          token: ${{ steps.app-token.outputs.token }}
+          branch: bot/miopen-changelog-fragments
+          base: develop
+          add-paths: |
+            projects/miopen/CHANGELOG.md
+            projects/miopen/changelog.d
+          delete-branch: true
+          commit-message: 'docs(miopen): fold changelog fragments'
+          title: 'docs(miopen): fold changelog fragments'
+          body: |
+            Moves merged MIOpen fragments into the unreleased changelog and removes the consumed files.
+
+            Before merging, check that consumed fragments still exist unchanged on `develop`.
+            Do not push to this branch; use **MIOpen changelog fragments → Run workflow** to refresh it.
