@@ -78,7 +78,8 @@ using GPU_UnitTestConvSolverConvDirectDepthwiseFwd2DDilated_FP32  = GPU_UnitTest
 
 using CPU_UnitTestConvSolverConvDirectDepthwiseFwd2DDilatedDevApplicabilityFwd_NONE =
     CPU_UnitTestConvSolverDevApplicabilityFwd_NONE;
-using CPU_UnitTestConvSolverConvDirectDepthwiseFwd2DDilatedBounds_NONE = testing::TestWithParam<int>;
+using CPU_UnitTestConvSolverConvDirectDepthwiseFwd2DDilatedBounds_NONE =
+    testing::TestWithParam<int>;
 
 TEST_P(GPU_UnitTestConvSolverConvDirectDepthwiseFwd2DDilated_FP16, ConvDirectDepthwiseFwd2DDilated)
 {
@@ -104,7 +105,7 @@ TEST_P(CPU_UnitTestConvSolverConvDirectDepthwiseFwd2DDilatedDevApplicabilityFwd_
 // Both sides of each bound, on a mocked gfx1151 so the result does not depend on
 // the host GPU.
 TEST_P(CPU_UnitTestConvSolverConvDirectDepthwiseFwd2DDilatedBounds_NONE,
-     ConvDirectDepthwiseFwd2DDilated)
+       ConvDirectDepthwiseFwd2DDilated)
 {
     auto gfx1151   = MockHandle{DevDescription{"gfx1151", 20, 32}, true};
     auto ctx       = miopen::ExecutionContext{&gfx1151};
