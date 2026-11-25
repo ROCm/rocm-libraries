@@ -658,6 +658,23 @@ def test_the_registry_accounts_for_a_case_by_its_lane_quarantine_or_runner():
     assert waiting_entry(child, "TestAny::test_any", None) is runner
 
 
+def test_the_record_of_a_test_comes_before_its_files():
+    """A case both a record of its file and one of its test cover is booked
+    to the test's: the more specific record carries its reason and issue."""
+    node_entry = next(
+        entry
+        for entry in PENDING
+        if entry.node
+        and any(
+            other.path == entry.path and other.lane is entry.lane and not other.node
+            for other in PENDING
+        )
+    )
+    declared = skip_until_reason(node_entry.lane, reason="why")
+    assert waiting_entry(node_entry.path, node_entry.node, declared) is node_entry
+    assert waiting_entry(node_entry.path, "test_another", declared) is not node_entry
+
+
 def test_a_pending_test_needs_its_recorded_reason_team_and_issue():
     path = "library/tests/test_x.py"
     with pytest.raises(ValueError, match="reason is empty"):

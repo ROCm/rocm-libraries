@@ -2563,8 +2563,9 @@ class TestWgradWmmaCShuffle(unittest.TestCase):
 
     def _sweep(self, **knobs) -> None:
         if GPU_ARCH != "gfx1250":
-            self.skipTest(
-                f"the WMMA cshuffle epilogue is gfx1250-tested; on {GPU_ARCH}"
+            skip_needing_arch(
+                ("gfx1250",),
+                reason=f"the WMMA cshuffle epilogue is gfx1250-tested; on {GPU_ARCH}",
             )
         from kernels.common._conv_implicit_gemm_common import ConvProblem
         from kernels.common.conv_implicit_gemm import ConvDataSpec

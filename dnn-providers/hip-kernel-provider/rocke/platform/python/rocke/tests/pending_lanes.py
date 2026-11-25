@@ -577,6 +577,23 @@ def _waiting(
     )
 
 
+def _waiting_tests(
+    lane: Lane,
+    reason: str,
+    team: str,
+    issue: str,
+    expires: str,
+    path: str,
+    *nodes: str,
+) -> tuple[PendingTest, ...]:
+    """One entry per test of the file ``path``, all waiting for ``lane`` for
+    the same reason."""
+    return tuple(
+        PendingTest(path, lane, reason, team, issue, expires, node=node)
+        for node in nodes
+    )
+
+
 PENDING: tuple[PendingTest, ...] = (
     *_waiting(
         TICKET,
@@ -1437,6 +1454,77 @@ PENDING: tuple[PendingTest, ...] = (
         "2027-02-16",
         "platform/tests/instances/test_rocke_numeric.py",
     ),
+    *_waiting(
+        SOURCE_TREE,
+        "its cases that read rocke/tools, rocke/agents, the C++ headers or the "
+        "examples, which the installed test tree omits, skip in CI; run_all.py runs "
+        "them",
+        _PLATFORM,
+        _TRIAGE_FOLLOW_UP,
+        "2027-01-22",
+        "platform/tests/core/test_debug_info.py",
+        "platform/tests/instances/test_gfx950_grouped_gemm.py",
+        "platform/tests/tools/test_compliance_patterns.py",
+    ),
+    *_waiting(
+        BUILD_VARIANT,
+        "its cases need tools or a compiler build the CI test step lacks (Ninja and "
+        "a C++ compiler; a COMGR whose committed column rejects gfx1154)",
+        _PLATFORM,
+        _TRIAGE_FOLLOW_UP,
+        "2027-01-29",
+        "platform/tests/core/test_compile_target_with_this_hosts_compiler.py",
+        "platform/tests/tools/test_run_all.py",
+    ),
+    *_waiting_tests(
+        TICKET,
+        "it checks a column alias or an all-negative aliased declare, which no "
+        "committed column has yet; triage decides whether it keeps a committed case "
+        "or a fixture",
+        _PLATFORM,
+        _TRIAGE_FOLLOW_UP,
+        "2027-01-15",
+        "platform/tests/core/test_arch_domain_lane.py",
+        "test_a_borrowing_lane_refuses_at_its_source",
+        "test_a_waived_alias_does_not_turn_its_sibling_into_a_refusal",
+        "test_an_aliased_declare_no_alias_accounts_for_is_a_refusal",
+        "test_the_post_pass_reports_every_key_an_aliased_declare_could_be",
+    ),
+    *_waiting_tests(
+        TICKET,
+        "its native-engine cases of a concrete MMA op cannot run (native LLVM lowers "
+        "the neutral tile.mma only); triage leaves them out of the parametrization "
+        "after the owner's review",
+        _PLATFORM,
+        _TRIAGE_FOLLOW_UP,
+        "2027-01-15",
+        "platform/tests/core/test_gfx1250_scaled_wmma.py",
+        "test_scaled_lowering_rejects_accumulator_types",
+        "test_scaled_lowering_rejects_arity",
+        "test_scaled_lowering_rejects_sources",
+    ),
+    *_waiting_tests(
+        TICKET,
+        "its decode cases at head widths no decode bucket serves cannot run; triage "
+        "leaves them out of the parametrization after the owner's review",
+        _LIBRARY,
+        _TRIAGE_FOLLOW_UP,
+        "2027-01-15",
+        "library/tests/dispatch/attention/test_gfx1151_attention_dispatch_numeric.py",
+        "test_dispatch_unequal_head_dims",
+        "test_runtime_head_dims_serve_every_width_in_a_bucket",
+        "test_runtime_head_dims_unequal_widths",
+    ),
+    PendingTest(
+        "library/tests/test_attention_builds.py",
+        TICKET,
+        "it checks the budgets the file's other tests exercised, so it skips in a "
+        "CI shard that builds none of them; triage gives it a shard with them",
+        _LIBRARY,
+        _TRIAGE_FOLLOW_UP,
+        "2027-01-15",
+        node="test_every_declared_budget_was_exercised",
+    ),
 )
 
 
@@ -1724,7 +1812,7 @@ def waiting_entry(
     lane collected it. The case is recorded by its quarantine, or that of the
     test that runs its file (one that names arches or compilers, only where it
     was skipped as quarantined), or by an entry that covers it
-    (:meth:`PendingTest.covers`).
+    (:meth:`PendingTest.covers`), the one that names its test first.
     """
     quarantine = quarantined_test(path, node_name) or next(
         (entry for entry in QUARANTINED if path in entry.runs_files), None
@@ -1734,13 +1822,14 @@ def waiting_entry(
         or (reason is not None and reason.startswith(QUARANTINE_SKIP_PREFIX))
     ):
         return quarantine
-    return next(
-        (
-            entry
-            for entry in PENDING
-            if entry.covers(path, node_name, reason, deselected=deselected)
-        ),
-        None,
+    covering = [
+        entry
+        for entry in PENDING
+        if entry.covers(path, node_name, reason, deselected=deselected)
+    ]
+    # The record of the test it names comes before its file's.
+    return next((entry for entry in covering if entry.node), None) or next(
+        iter(covering), None
     )
 
 

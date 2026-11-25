@@ -13,14 +13,15 @@ from pathlib import Path
 from types import ModuleType
 
 import pytest
+from rocke.tests.lanes import SOURCE_TREE, skip_until
 
 
 def _load_patterns_module() -> ModuleType:
     path = Path(__file__).resolve().parents[3] / "tools" / "compliance_patterns.py"
     if not path.is_file():
-        pytest.skip(
-            "rocke/tools/compliance_patterns.py is absent from this tree",
-            allow_module_level=True,
+        skip_until(
+            SOURCE_TREE,
+            reason="rocke/tools/compliance_patterns.py is absent from this tree",
         )
     spec = importlib.util.spec_from_file_location(
         "compliance_patterns_under_test", path
@@ -198,7 +199,7 @@ def test_the_committed_agent_files_hold_no_compliance_hit() -> None:
     rocke = Path(patterns.__file__).resolve().parents[1]
     agents = rocke / "agents"
     if not agents.is_dir():
-        pytest.skip("rocke/agents is absent from this tree")
+        skip_until(SOURCE_TREE, reason="rocke/agents is absent from this tree")
     found = patterns.scan_paths([agents, rocke / "tools"], patterns.load_rules())
     assert found == [], [hit.describe(str(path)) for path, hit in found]
 

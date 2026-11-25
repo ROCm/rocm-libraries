@@ -20,7 +20,7 @@ from rocke.tests import ctest_listing
 from rocke.tests.ctest_listing import list_ctest_entries
 
 from rocke.tests.engines import IR_LOWER_CLI_ENV
-from rocke.tests.lanes import SOURCE_TREE, skip_until
+from rocke.tests.lanes import BUILD_VARIANT, SOURCE_TREE, skip_until
 
 
 @pytest.fixture
@@ -770,7 +770,10 @@ def test_fresh_build_prepares_entire_ctest_suite(
     runner, monkeypatch, tmp_path, override
 ):
     if not all(shutil.which(tool) for tool in ("cmake", "ctest", "ninja")):
-        pytest.skip("CMake, CTest, and Ninja required for fresh-build regression")
+        skip_until(
+            BUILD_VARIANT,
+            reason="CMake, CTest, and Ninja required for fresh-build regression",
+        )
     source = tmp_path / "source"
     source.mkdir()
     # One parity name proves real CTest discovery, using the existing CMake
@@ -821,7 +824,9 @@ def test_multi_config_build_supplies_its_archive(runner, monkeypatch, tmp_path):
     if runner.sys.platform != "linux" or not all(
         shutil.which(tool) for tool in ("cmake", "ninja", "c++")
     ):
-        pytest.skip("Linux, CMake, Ninja, and C++ compiler required")
+        skip_until(
+            BUILD_VARIANT, reason="Linux, CMake, Ninja, and C++ compiler required"
+        )
     source = tmp_path / "source"
     source.mkdir()
     (source / "core.cpp").write_text("int fixture() { return 0; }\n")

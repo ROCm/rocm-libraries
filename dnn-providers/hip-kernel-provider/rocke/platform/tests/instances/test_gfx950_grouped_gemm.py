@@ -21,6 +21,7 @@ import unittest
 
 from rocke.tests.arch_marks import arch_specific
 from rocke.tests.engines import native_engine_or_skip
+from rocke.tests.lanes import SOURCE_TREE, skip_until
 
 
 def _lower(kernel) -> str:
@@ -166,7 +167,7 @@ class TestRaggedGemmHarnessGfx950(unittest.TestCase):
             / "python/rocke/examples/gfx950/grouped_gemm/ragged_gemm_hip.py"
         )
         if not harness.is_file():
-            raise unittest.SkipTest(f"harness not found: {harness}")
+            skip_until(SOURCE_TREE, reason=f"harness not found: {harness}")
         spec = importlib.util.spec_from_file_location("_rgemm_harness", harness)
         mod = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(mod)

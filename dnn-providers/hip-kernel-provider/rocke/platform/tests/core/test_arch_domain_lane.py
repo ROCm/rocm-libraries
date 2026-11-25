@@ -47,7 +47,9 @@ from rocke.tests.engines import native_engine_or_skip
 from rocke.tests.lanes import (
     BUILD_VARIANT,
     SOURCE_TREE,
+    TICKET,
     import_or_skip_until,
+    skip_until,
     skip_until_reason,
 )
 
@@ -590,7 +592,7 @@ def _aliased_negative_declare() -> tuple[str, str, tuple[str, ...], str]:
                     c is not None and arch_domain.is_negative(c.status) for c in cells
                 ):
                     return decl, arch, tuple(sorted(keys)), flavor
-    pytest.skip("no committed column has an all-negative aliased declare")
+    skip_until(TICKET, reason="no committed column has an all-negative aliased declare")
 
 
 def test_the_post_pass_reports_every_key_an_aliased_declare_could_be(
@@ -977,7 +979,7 @@ def test_a_borrowing_lane_refuses_at_its_source(
 ) -> None:
     """A borrowed column keeps Python and C++ diagnostics on its source lane."""
     if not arch_domain.COLUMN_ALIASES:
-        pytest.skip("every qualified lane has its own committed column")
+        skip_until(TICKET, reason="every qualified lane has its own committed column")
     monkeypatch.setenv(arch_domain.MODE_ENV, "error")
     tested: list[str] = []
     for lane, source in arch_domain.COLUMN_ALIASES.items():

@@ -41,7 +41,7 @@ from rocke.core.ir import F32, IRBuilder, PtrType
 from rocke.core.ir_serialize import parse, serialize
 from rocke.core.lower_llvm import _escape_md_string, lower_kernel_to_llvm
 from rocke.tests.engines import native_engine_or_skip
-from rocke.tests.lanes import BUILD_VARIANT, skip_until
+from rocke.tests.lanes import BUILD_VARIANT, SOURCE_TREE, skip_until
 
 THIS_FILE = os.path.abspath(__file__)
 
@@ -693,7 +693,7 @@ class TestPythonPathSplitMirror(unittest.TestCase):
         )
         header = os.path.join(cls.include, "rocke", "py_path_split.h")
         if not os.path.isfile(header):
-            raise unittest.SkipTest(f"missing {header}")
+            skip_until(SOURCE_TREE, reason=f"missing {header}")
 
     def splits(self, paths):
         """``(ntpath, posixpath)`` splits of each path, as the C++ mirror cuts them."""
