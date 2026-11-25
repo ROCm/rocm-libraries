@@ -633,6 +633,9 @@ def test_resource_gate_per_split_value(point, pair, var):
     RESOURCE_REFUSED, is not legal for it)."""
     arch, cfg, d, body = point
     pytest.importorskip("rocke.runtime.comgr")
+    from ._attention_bwd_resources import skip_unless_gate_toolchain
+
+    skip_unless_gate_toolchain(arch)  # before any kernel is built
     from kernels.common.attention_bwd import attn_bwd_arch_facts
 
     from ._attention_bwd_resources import (

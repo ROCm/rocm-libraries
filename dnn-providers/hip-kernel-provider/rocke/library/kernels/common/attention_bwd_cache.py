@@ -18,7 +18,9 @@ one layer is read by every other one: the key is the same everywhere.
   compile in this process would load.
 * :func:`backward_source_hash` is a content hash of every Python source the
   backward kernels can depend on under the Python lowering backend: the whole
-  ``rocke`` package and every module under ``library/kernels``. Line endings
+  ``rocke`` package and every module under ``library/kernels``, found where
+  they are imported from (the source tree or an installed test tree) and
+  named by their source-tree paths, so both layouts hash alike. Line endings
   are normalised, so a synced copy and the working tree hash alike. Any change
   invalidates every entry.
 * :class:`CompileCache` stores one code object per (kernel stage, resolved
@@ -77,6 +79,7 @@ __all__ = [
     "patched_emission",
     "process_source_hash",
     "seed_comgr_digests",
+    "source_entries",
     "source_files",
     "spec_identity",
     "toolchain_identity",
@@ -91,6 +94,21 @@ HSACO_CACHE_ENV = "ROCKE_BWD_HSACO_CACHE"
 EMIT_ENV = ("ROCKE_DEBUG_LOC",)
 
 _ROOT = Path(__file__).resolve().parents[3]  # .../rocke
+# The hashed source roots, named by their paths in the source tree.
+_SOURCE_LABELS = ("platform/python/rocke", "library/kernels")
+
+
+def _source_roots(root: Path | None = None) -> tuple[tuple[str, Path], ...]:
+    """``(label, directory)`` of each hashed source root: under ``root`` when
+    given, else the imported ``rocke`` and ``kernels`` packages."""
+    if root is not None:
+        return tuple((s, Path(root) / s) for s in _SOURCE_LABELS)
+    import rocke
+
+    return (
+        (_SOURCE_LABELS[0], Path(rocke.__file__).resolve().parent),
+        (_SOURCE_LABELS[1], Path(__file__).resolve().parents[1]),
+    )
 
 
 # --------------------------------------------------------------------------- identity
@@ -199,38 +217,48 @@ def toolchain_identity() -> Toolchain:
     return Toolchain(flavor, path, rocm, sha, emission_env())
 
 
-def source_files(root: Path | None = None) -> list[Path]:
-    """Every source the backward kernels can depend on (see module doc)."""
-    base = Path(root) if root is not None else _ROOT
+def source_entries(root: Path | None = None) -> list[tuple[str, Path]]:
+    """``(name, path)`` of every source the backward kernels can depend on
+    (see module doc), sorted by name; the name is the path in the source tree
+    (``platform/python/rocke/...``, ``library/kernels/...``)."""
     out = []
-    for sub in ("platform/python/rocke", "library/kernels"):
-        d = base / sub
+    for label, d in _source_roots(root):
         if d.is_dir():
-            out.extend(p for p in d.rglob("*.py") if "__pycache__" not in p.parts)
-    return sorted(out, key=lambda p: p.relative_to(base).as_posix())
+            out.extend(
+                (f"{label}/{p.relative_to(d).as_posix()}", p)
+                for p in d.rglob("*.py")
+                if "__pycache__" not in p.parts
+            )
+    return sorted(out)
+
+
+def source_files(root: Path | None = None) -> list[Path]:
+    """The paths of :func:`source_entries`."""
+    return [p for _, p in source_entries(root)]
 
 
 def backward_source_hash(root: Path | None = None) -> str:
-    """Content hash of :func:`source_files` (paths and LF-normalised bytes)."""
-    base = Path(root) if root is not None else _ROOT
+    """Content hash of :func:`source_entries` (names and LF-normalised bytes)."""
     h = hashlib.sha256()
-    for p in source_files(base):
-        h.update(p.relative_to(base).as_posix().encode())
+    for name, p in source_entries(root):
+        h.update(name.encode())
         h.update(b"\0")
         h.update(p.read_bytes().replace(b"\r\n", b"\n"))
         h.update(b"\0")
     return h.hexdigest()[:16]
 
 
-_SOURCE_HASH: dict[Path, str] = {}
+_SOURCE_HASH: dict[tuple, str] = {}
 
 
 def process_source_hash() -> str:
-    """:func:`backward_source_hash` of this tree, computed once per process
-    (a process does not see source edits made after it imported the kernels)."""
-    if _ROOT not in _SOURCE_HASH:
-        _SOURCE_HASH[_ROOT] = backward_source_hash(_ROOT)
-    return _SOURCE_HASH[_ROOT]
+    """:func:`backward_source_hash` of the imported sources, computed once per
+    process (a process does not see source edits made after it imported the
+    kernels)."""
+    k = _source_roots()
+    if k not in _SOURCE_HASH:
+        _SOURCE_HASH[k] = backward_source_hash()
+    return _SOURCE_HASH[k]
 
 
 # --------------------------------------------------------------------------- live code
@@ -258,9 +286,7 @@ def _norm_dir(p) -> str:
 def _code_dirs() -> tuple[tuple[str, ...], str, tuple[str, ...]]:
     """``(hashed source roots, the rocke tree, the Python installation's
     library directories)``, normalised with a trailing separator."""
-    home = tuple(
-        _norm_dir(_ROOT / s) for s in ("platform/python/rocke", "library/kernels")
-    )
+    home = tuple(_norm_dir(d) for _, d in _source_roots())
     py = set()
     paths = sysconfig.get_paths()
     for key in ("stdlib", "platstdlib", "purelib", "platlib"):

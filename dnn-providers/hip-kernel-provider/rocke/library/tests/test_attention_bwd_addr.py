@@ -9,7 +9,7 @@ and THD sequence decode (int32 / int64 offsets, multiplier, lengths), strided
 user tensors (BSHD, BHSD, padded strides, packed QKV views, ``stage_vec`` 8 and
 1, clamped rows), 64-bit rebases past ``2**31`` elements, the fp32 workspace
 (head- and token-major) and paged caches.  Then IR lowering of a probe kernel
-at three flavors and the probe on the local device.
+at every LLVM flavor and the probe on the local device.
 """
 
 from __future__ import annotations
@@ -23,12 +23,13 @@ import numpy as np
 import pytest
 from kernels.common import _attention_bwd_addr as A
 from rocke.core.ir import BF16, F16, F32, I32, IRBuilder, PtrType
+from rocke.core.lower_llvm import LLVM_FLAVORS
 
 from ._attention_bwd_test_utils import device_arch
 from ._attention_bwd_int_eval import IntEvalBuilder, VirtualTensor
 
 ARCHS = ("gfx942", "gfx950", "gfx1151", "gfx1201")
-FLAVORS = ("llvm20", "llvm22", "llvm23")
+FLAVORS = LLVM_FLAVORS
 
 
 def _f16_buffer(shape, seed=0):

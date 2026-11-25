@@ -20,12 +20,13 @@ from pathlib import Path
 
 import pytest
 from rocke.core.ir import F16, F32, I32, IRBuilder, PtrType
+from rocke.core.lower_llvm import LLVM_FLAVORS
 from rocke.core.lower_llvm import _lower_kernel_to_llvm_python as lower
 
 from kernels.common import _attention_bwd_caps as C
 
 ARCHS = C.BWD_ARCHES
-FLAVORS = ("llvm20", "llvm22", "llvm23")
+FLAVORS = LLVM_FLAVORS
 
 
 # --- capability record --------------------------------------------------------

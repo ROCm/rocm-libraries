@@ -70,6 +70,7 @@ test_categories:
     test_patterns:
       - "rocke_f64_mma"
       - "rocke_optimization_barrier"
+      - "rocke_barrier_fence"
       - "rocke_optimization_barrier_hip_pair"
       - "rocke_arch_target_identity"
       - "rocke_ir_serialize_roundtrip"
@@ -181,6 +182,7 @@ test_categories:
     test_patterns:
       - "rocke_f64_mma"
       - "rocke_optimization_barrier"
+      - "rocke_barrier_fence"
       - "rocke_optimization_barrier_hip_pair"
       - "rocke_arch_target_identity"
       - "rocke_ir_serialize_roundtrip"
@@ -309,6 +311,9 @@ test_categories:
       - "rocke_library_gdn_pytest"
       # Its host tests are too slow for the single-shard quick tier.
       - "rocke_library_conv_fwd_aot_packaging_pytest"
+      # Attention backward: a few minutes of CPU and GPU items, sharded.
+      - "rocke_library_attention_bwd_pytest"
+      - "rocke_library_attention_bwd_gpu_pytest"
     labels:
       - "standard"
       - "comprehensive"

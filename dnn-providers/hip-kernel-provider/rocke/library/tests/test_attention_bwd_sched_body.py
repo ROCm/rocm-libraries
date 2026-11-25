@@ -553,6 +553,9 @@ def test_resource_gate_per_value(point, pair, var):
     head size and gate variant of every arch."""
     arch, cfg, d = point
     pytest.importorskip("rocke.runtime.comgr")
+    from ._attention_bwd_resources import skip_unless_gate_toolchain
+
+    skip_unless_gate_toolchain(arch)  # before any kernel is built
     from ._attention_bwd_resources import (
         GATE_FLAVOR,
         comgr_is_production,

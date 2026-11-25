@@ -23,6 +23,7 @@ from kernels.common.attention_bwd_plan import attn_bwd_plan
 
 from . import _attention_bwd_perf_gate as pg
 from ._attention_bwd_harness import ARCH, DEVICE_ARCHS
+from ._attention_bwd_stage_sample import sampled_geometry_stage
 from .sdpa.bwd_kernel_cases import (
     PRUNE_HEAD_GROUPS,
     PRUNE_TAILS,
@@ -100,7 +101,9 @@ def _plan(case, arch, cfg):
 
 def test_sweep_runtime_configs_keep_the_kernel():
     sl = sw.primary_slice("gfx942", "general", 128)
-    c = sw.geometry_stage(sl, sw.Release(frozenset({1}))).candidates[0]
+    c = sampled_geometry_stage(sl, sw.Release(frozenset({1})), n_default=1).candidates[
+        0
+    ]
     x = c.with_runtime(g_split=2)
     plan_spec = sw.legality(x).resolved
     fake = type("P", (), {"specs": {"main": plan_spec}})()
@@ -193,7 +196,9 @@ def test_head_split_pruning_cases_run_the_timed_main_kernel(arch, g_split):
     non-empty for every legal split, and every case plans the timed main
     kernel (the class: atomic dK / dV of the split)."""
     sl = sw.primary_slice(arch, "general", 128)
-    c = sw.geometry_stage(sl, sw.Release(frozenset({1}))).candidates[0]
+    c = sampled_geometry_stage(sl, sw.Release(frozenset({1})), n_default=1).candidates[
+        0
+    ]
     x = c.with_runtime(g_split=g_split)
     plan_spec = sw.legality(x).resolved
     fake = type("P", (), {"specs": {"main": plan_spec}})()

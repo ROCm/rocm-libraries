@@ -38,13 +38,14 @@ from functools import cache
 from pathlib import Path
 
 import pytest
+from rocke.core.lower_llvm import LLVM_FLAVORS
 
 _TESTS = Path(__file__).resolve().parent
 _PARITY = _TESTS / "parity"
 _LIB = _TESTS.parent
 _PLATFORM_PY = _LIB.parent / "platform" / "python"
 _EMITTER = _PARITY / "barrier_fence_emit.py"
-FLAVORS = ("llvm20", "llvm22", "llvm23")
+FLAVORS = LLVM_FLAVORS
 
 REL = '  fence syncscope("workgroup") release'
 BAR = " call void @llvm.amdgcn.s.barrier()"

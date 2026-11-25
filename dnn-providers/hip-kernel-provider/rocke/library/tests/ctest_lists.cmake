@@ -322,6 +322,122 @@ string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
        "  ENVIRONMENT \"\${_rocke_library_attention_cpu_pytest_environment}\"\n"
        "  TIMEOUT 180)\n")
 
+# Attention backward CPU tests: the backward default lane of run_all.py
+# (``-m "not gpu and not exhaustive"``). The exhaustive files run here only
+# through test_attention_bwd_exhaustive_sample.py, a covering sample of their
+# test functions; the files themselves stay in run_all.py's exhaustive lane.
+# test_attention_bwd_gemm.py, test_attention_bwd_body.py and
+# test_bwd_memo_bound.py run in rocke_library_attention_cpu_pytest, and the
+# backward case tables in rocke_library_sdpa_pytest. The counted-sync and
+# resource-gate files are left out (their gates are the comprehensive
+# rocke_library_counted_*_gate entries). The ISA checks read code objects
+# with llvm-objdump, so the entry takes the compiler tool environment and the
+# staged disassembler support (as the counted gates do).
+set(_ROCKE_LIBRARY_ATTENTION_BWD_TEST_RELPATHS
+    "tests/library/tests/dispatch/attention_bwd"
+    "tests/library/tests/test_attention_bwd.py"
+    "tests/library/tests/test_attention_bwd_access.py"
+    "tests/library/tests/test_attention_bwd_addr.py"
+    "tests/library/tests/test_attention_bwd_aux.py"
+    "tests/library/tests/test_attention_bwd_band.py"
+    "tests/library/tests/test_attention_bwd_barrier_merge.py"
+    "tests/library/tests/test_attention_bwd_bench.py"
+    "tests/library/tests/test_attention_bwd_caps.py"
+    "tests/library/tests/test_attention_bwd_comgr.py"
+    "tests/library/tests/test_attention_bwd_compile.py"
+    "tests/library/tests/test_attention_bwd_dispatch.py"
+    "tests/library/tests/test_attention_bwd_dq_levers.py"
+    "tests/library/tests/test_attention_bwd_exhaustive_sample.py"
+    "tests/library/tests/test_attention_bwd_frag.py"
+    "tests/library/tests/test_attention_bwd_fwd_chain.py"
+    "tests/library/tests/test_attention_bwd_host_checks.py"
+    "tests/library/tests/test_attention_bwd_hsaco_cache.py"
+    "tests/library/tests/test_attention_bwd_kernel_cases.py"
+    "tests/library/tests/test_attention_bwd_lds.py"
+    "tests/library/tests/test_attention_bwd_lds_alignment.py"
+    "tests/library/tests/test_attention_bwd_mirror.py"
+    "tests/library/tests/test_attention_bwd_noatomic.py"
+    "tests/library/tests/test_attention_bwd_paged_guard.py"
+    "tests/library/tests/test_attention_bwd_perf_gate.py"
+    "tests/library/tests/test_attention_bwd_plan.py"
+    "tests/library/tests/test_attention_bwd_refusals.py"
+    "tests/library/tests/test_attention_bwd_rocke_arm.py"
+    "tests/library/tests/test_attention_bwd_run.py"
+    "tests/library/tests/test_attention_bwd_sched.py"
+    "tests/library/tests/test_attention_bwd_shared_helpers.py"
+    "tests/library/tests/test_attention_bwd_sinks.py"
+    "tests/library/tests/test_attention_bwd_stage_sample.py"
+    "tests/library/tests/test_attention_bwd_sweep.py"
+    "tests/library/tests/test_attention_bwd_tiles.py"
+    "tests/library/tests/test_attention_bwd_unified_plan.py"
+    "tests/library/tests/test_attention_bwd_unit_ops.py"
+    "tests/library/tests/test_attention_bwd_worklist.py"
+    "tests/library/tests/test_attention_bwd_xt.py"
+    "tests/library/tests/test_attention_dense_bwd.py"
+    "tests/library/tests/test_attention_dense_bwd_ir.py"
+    "tests/library/tests/test_attention_dense_bwd_split.py"
+    "tests/library/tests/test_lse_store_ir.py")
+set(_ROCKE_LIBRARY_ATTENTION_BWD_TESTS "")
+foreach(_t ${_ROCKE_LIBRARY_ATTENTION_BWD_TEST_RELPATHS})
+  string(APPEND _ROCKE_LIBRARY_ATTENTION_BWD_TESTS
+         " \"${ROCKE_TEST_CTEST_REL}${_t}\"")
+endforeach()
+string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
+       "set(_rocke_library_attention_bwd_pytest_environment\n"
+       "    \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\"\n"
+       "    \"ROCKE_ISA_INSPECT_PROBE=${ROCKE_TEST_CTEST_REL}tests/support/probe_isa_inspect.py\")\n"
+       "list(APPEND _rocke_library_attention_bwd_pytest_environment\n"
+       "     \${_rocke_compiler_tool_environment})\n"
+       "add_test(rocke_library_attention_bwd_pytest ${_ROCKE_INSTALLED_PYTEST}${_ROCKE_LIBRARY_ATTENTION_BWD_TESTS} -m \"not gpu and not exhaustive\" -v -rs --timeout=60)\n")
+string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
+       "set_tests_properties(rocke_library_attention_bwd_pytest PROPERTIES\n"
+       "  LABELS \"ckc\\;python\\;attention\\;host\\;standard\"\n"
+       "  ENVIRONMENT \"\${_rocke_library_attention_bwd_pytest_environment}\"\n"
+       "  TIMEOUT 1800)\n")
+
+# Attention backward GPU tests: dQ / dK / dV against the float64 oracle, the
+# mutation canaries, the forward to backward chain, the dispatch entry point,
+# the LSE store, and the device tests of the backward CPU files. The shipped
+# (default) configuration only, at the smoke tier; the debug configuration,
+# the per-lever twin files (*_numeric.py beyond these) and the hardware probes
+# run in run_all.py. Skipped on devices that are not backward targets.
+set(_ROCKE_LIBRARY_ATTENTION_BWD_GPU_TEST_RELPATHS
+    "tests/library/tests/test_attention_bwd_access.py"
+    "tests/library/tests/test_attention_bwd_addr.py"
+    "tests/library/tests/test_attention_bwd_band.py"
+    "tests/library/tests/test_attention_bwd_dispatch_numeric.py"
+    "tests/library/tests/test_attention_bwd_fwd_chain.py"
+    "tests/library/tests/test_attention_bwd_mutations.py"
+    "tests/library/tests/test_attention_bwd_noatomic.py"
+    "tests/library/tests/test_attention_bwd_numeric.py"
+    "tests/library/tests/test_attention_bwd_paged_guard.py"
+    "tests/library/tests/test_attention_bwd_perf_gate.py"
+    "tests/library/tests/test_attention_bwd_run.py"
+    "tests/library/tests/test_attention_bwd_sinks.py"
+    "tests/library/tests/test_attention_bwd_unified_mutations.py"
+    "tests/library/tests/test_attention_bwd_unified_numeric.py"
+    "tests/library/tests/test_attention_dense_bwd_numeric.py"
+    "tests/library/tests/test_lse_store_numeric.py")
+set(_ROCKE_LIBRARY_ATTENTION_BWD_GPU_TESTS "")
+foreach(_t ${_ROCKE_LIBRARY_ATTENTION_BWD_GPU_TEST_RELPATHS})
+  string(APPEND _ROCKE_LIBRARY_ATTENTION_BWD_GPU_TESTS
+         " \"${ROCKE_TEST_CTEST_REL}${_t}\"")
+endforeach()
+string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
+       "set(_rocke_library_attention_bwd_gpu_pytest_environment\n"
+       "    \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\"\n"
+       "    \"ROCKE_BWD_TIER=smoke\"\n"
+       "    \"ROCKE_BWD_CONFIG=default\"\n"
+       "    \"ROCKE_ISA_INSPECT_PROBE=${ROCKE_TEST_CTEST_REL}tests/support/probe_isa_inspect.py\")\n"
+       "list(APPEND _rocke_library_attention_bwd_gpu_pytest_environment\n"
+       "     \${_rocke_compiler_tool_environment})\n"
+       "add_test(rocke_library_attention_bwd_gpu_pytest ${_ROCKE_INSTALLED_PYTEST}${_ROCKE_LIBRARY_ATTENTION_BWD_GPU_TESTS} -m gpu -v -rs --timeout=60)\n")
+string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
+       "set_tests_properties(rocke_library_attention_bwd_gpu_pytest PROPERTIES\n"
+       "  LABELS \"ckc\\;python\\;attention\\;gpu\\;standard\"\n"
+       "  ENVIRONMENT \"\${_rocke_library_attention_bwd_gpu_pytest_environment}\"\n"
+       "  TIMEOUT 900)\n")
+
 # The pure runner policy and the real subprocess/process-tree contracts run as
 # two entries, each with its own whole-entry budget.
 string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES

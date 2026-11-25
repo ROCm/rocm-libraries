@@ -3,8 +3,9 @@
 """The production comgr of the backward tests, gates, sweep and bench, without
 importing torch.
 
-The production ``libamd_comgr`` is the one the ROCm PyTorch wheel bundles in
-``<torch>/lib``: every timed process imports torch, and rocKE prefers that
+The production ``libamd_comgr`` is the one the ROCm PyTorch wheel bundles
+(in ``<torch>/lib``, or for a TheRock wheel in the ``rocm-sdk-core`` wheel's
+``_rocm_sdk_core``): every timed process imports torch, and rocKE prefers that
 library once torch is in the process. The compile-only processes (the resource
 gates, the pre-build, the sweep's candidate compile, the IR checks) do not
 need torch for anything else, and importing it costs seconds per process. They
@@ -14,8 +15,8 @@ take the same library here instead:
   ``importlib.util.find_spec``, which reads the import system's metadata and
   does not run the package.
 * :func:`torch_bundled_comgr` names ``<torch>/lib/libamd_comgr.so`` (the
-  ``amd_comgr*.dll`` of a Windows wheel), as the platform's own lookup does
-  for an imported torch.
+  ``amd_comgr*.dll`` of a Windows wheel), else the ``_rocm_sdk_core`` comgr
+  of a TheRock wheel, as the platform's own lookup does for an imported torch.
 * :func:`pin_production_comgr` exports that path as ``ROCKE_COMGR_LIB``, the
   explicit override the platform resolver honours before anything else. An
   explicit ``ROCKE_COMGR_LIB`` is kept; ``ROCKE_BWD_NO_COMGR_PIN=1`` opts out.
@@ -26,8 +27,8 @@ take the same library here instead:
   autodetect and the flavor / comgr guard query the compiler that library
   loads. Both hold in this process and in the fresh compile processes it
   starts (which inherit ``ROCKE_COMGR_LIB``).
-* :func:`pin_production_hip` exports the HIP runtime of the same torch
-  package as ``ROCKE_HIP_LIB`` when the comgr in effect is torch's bundled
+* :func:`pin_production_hip` exports the HIP runtime beside that comgr
+  as ``ROCKE_HIP_LIB`` when the comgr in effect is torch's bundled
   one (Linux; an explicit ``ROCKE_HIP_LIB`` is kept). A torch-free process
   otherwise loads a ROCm install's HIP runtime, which maps that install's
   comgr, and the platform refuses a pinned comgr that differs from the one
@@ -108,8 +109,15 @@ def torch_package_dir() -> Path | None:
 
 
 def torch_bundled_comgr() -> str | None:
-    """``<torch>/lib`` comgr library, as the platform's lookup names it for an
-    imported torch (``runtime_coexistence._torch_bundled_lib``), or None."""
+    """Torch's comgr library, as the platform's lookup names it for an
+    imported torch (``runtime_coexistence._torch_bundled_lib``), or None.
+
+    ``<torch>/lib`` first. TheRock torch wheels ship no comgr there; theirs
+    is in the ``rocm-sdk-core`` wheel's ``_rocm_sdk_core`` (``lib`` on Linux,
+    ``bin`` on Windows), found by the same platform helpers, which neither
+    import a package nor load a library."""
+    from rocke.runtime.runtime_coexistence import _rocm_sdk_core_lib, _rocm_sdk_dll
+
     pkg = torch_package_dir()
     if pkg is None:
         return None
@@ -119,9 +127,9 @@ def torch_bundled_comgr() -> str | None:
         if os.path.exists(direct):
             return direct
         matches = sorted(glob.glob(os.path.join(libdir, "amd_comgr*.dll")))
-        return matches[0] if matches else None
+        return matches[0] if matches else _rocm_sdk_dll("amd_comgr")
     candidate = os.path.join(libdir, "libamd_comgr.so")
-    return candidate if os.path.exists(candidate) else None
+    return candidate if os.path.exists(candidate) else _rocm_sdk_core_lib("amd_comgr")
 
 
 def pin_production_comgr(environ: dict | None = None) -> str | None:
@@ -164,9 +172,12 @@ def pin_production_hip(environ: dict | None = None) -> str | None:
     bundled = torch_bundled_comgr()
     if not comgr or bundled is None or not _same_file(comgr, bundled):
         return None
-    hip = os.path.join(os.path.dirname(bundled), "libamdhip64.so")
-    if not os.path.exists(hip):
+    # The bare name, else the SONAME only (``libamdhip64.so.7`` in TheRock's
+    # ``_rocm_sdk_core/lib``): the shortest match, as the platform picks.
+    hips = glob.glob(os.path.join(os.path.dirname(bundled), "libamdhip64.so*"))
+    if not hips:
         return None
+    hip = min(hips, key=lambda p: (len(p), p))
     env[HIP_LIB_ENV] = hip
     return hip
 

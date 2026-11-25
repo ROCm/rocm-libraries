@@ -196,7 +196,8 @@ def test_mirror_kernel_runs_the_second_tile(row):
     )
     assert any(o.name == "tile.mma" for o in inner)
     # the same q loops and epilogue as the first tile
-    outer = [o for o, _ in _walk(top) if not any(o is x for x in inner)]
+    inner_ids = {id(o) for o in inner}
+    outer = [o for o, _ in _walk(top) if id(o) not in inner_ids]
     n_mma = sum(o.name == "tile.mma" for o in inner)
     assert n_mma == sum(o.name == "tile.mma" for o in outer)
     n_atom = sum(o.name.startswith("memref.global_atomic") for o in inner)
