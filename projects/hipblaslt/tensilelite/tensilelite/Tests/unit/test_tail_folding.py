@@ -652,3 +652,40 @@ def test_fold_step_not_derivable_keeps_tail_loop(tmp_path, monkeypatch, kind):
     for _, assembly, error in results:
         assert error == 0
         assert CEIL not in assembly and "TailFolding:" not in assembly and "label_TailLoopBeginL" in assembly
+
+
+def _single_loop_optnll_config():
+    # The OOB kernel MT256x128x32 (bf16 TN, PGR2, PLR1, SIA4) whose fold failed only in the hipblaslt build:
+    # K <= DU folds to one unroll iteration, which takes the PGR2 one-tile escape to toPGR1, and an edge
+    # tile then enters the ordinary NLL behind the OptNLL dispatch, which has no barrier of its own.
+    return _config([("DepthU", 32), ("LdsBlockSizePerPadA", 512), ("VectorWidthA", 8), ("VectorWidthB", 4),
+                    ("StoreVectorWidth", 8), ("ClusterDim", [1, 1]), ("ClusterLocalRead", 0), ("LDSTrInst", True),
+                    ("LocalReadVectorWidth", -1), ("StaggerU", 32), ("StaggerUStride", 256)],
+                   mi=(16, 16, 32, 1, 1, 8, 4, 2, 2), wg=(32, 4, 1))
+
+
+@pytest.mark.parametrize("no_comment", [False, True], ids=["comments", "disable_asm_comments"])
+def test_fold_single_loop_escape_keeps_its_sync(tmp_path, no_comment):
+    # The barrier planner keeps the one-tile escape barrier by its comment. The hipblaslt build passes
+    # --disable-asm-comments, under which str() of the barrier has no comment: the planner dropped the
+    # barrier and its tensorcnt drain, so the ordinary NLL of an edge tile read LDS before the TDM tile
+    # landed (K <= DU with the fold; K in [DU, 2*DU) without it).
+    from rocisa import rocIsa
+    ri = rocIsa.getInstance()
+    opts = ri.getOutputOptions()
+    previous = opts.outputNoComment
+    opts.outputNoComment = no_comment
+    ri.setOutputOptions(opts)
+    try:
+        asm = _emit_one(tmp_path, _single_loop_optnll_config(), "tf_single_loop_%u.yaml" % no_comment)
+    finally:
+        opts = ri.getOutputOptions()
+        opts.outputNoComment = previous
+        ri.setOutputOptions(opts)
+    assert CEIL in asm and "label_TailLoopBeginL" not in asm
+    assert "label_OptNLL_End:" in asm, "no ordinary NLL behind an OptNLL dispatch"
+    ins = _instructions(asm)
+    i = next(n for n, l in enumerate(ins) if l.startswith("s_cbranch_scc0 label_AfterSingleLoopPGRSync"))
+    j = next(n for n in range(i, len(ins)) if ins[n].startswith("s_branch label_toPGR1"))
+    escape = [l.split("//")[0].strip() for l in ins[i + 1:j]]
+    assert "s_wait_tensorcnt 0" in escape and escape[-2:] == ["s_barrier_signal -1", "s_barrier_wait -1"], escape
