@@ -1,0 +1,24 @@
+{
+  "claims": {
+    "hipkernel:StandalonePointwise": [
+      {
+        "cases": [
+          "1_3_2_2_fp32_nchw"
+        ],
+        "support": {
+          "gfx1151": [
+            "linux",
+            "windows"
+          ],
+          "gfx942": [
+            "linux"
+          ],
+          "gfx950": [
+            "linux"
+          ]
+        }
+      }
+    ]
+  },
+  "version": 1
+}

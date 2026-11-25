@@ -22,11 +22,13 @@
  *
  * ************************************************************************ */
 #include "testing_spic0.hpp"
+#include "rocsparse_check_cholesky.hpp"
 #include "rocsparse_clients_log.hpp"
 #include "rocsparse_clients_objects.hpp"
 #include "rocsparse_clients_spmat_descr.hpp"
 #include "rocsparse_enum.hpp"
 #include "testing.hpp"
+#include <algorithm>
 #include <memory>
 
 namespace rocsparse_clients
@@ -187,7 +189,7 @@ void host_csric0(J                    M,
                 if(nnz_entries[col_k] != 0)
                 {
                     I idx     = nnz_entries[col_k];
-                    local_sum = std::fma(csr_val[k], rocsparse_conj(csr_val[idx]), local_sum);
+                    local_sum = std::fma(csr_val[idx], rocsparse_conj(csr_val[k]), local_sum);
                 }
             }
 
@@ -397,17 +399,19 @@ void host_bsric0(rocsparse_direction  direction,
                         {
                             if(direction == rocsparse_direction_row)
                             {
-                                local_sum = std::fma(bsr_val[block_dim * block_dim * l
-                                                             + block_dim * local_row_j + m],
-                                                     rocsparse_conj(bsr_val[idx]),
-                                                     local_sum);
+                                local_sum = std::fma(
+                                    bsr_val[idx],
+                                    rocsparse_conj(bsr_val[block_dim * block_dim * l
+                                                           + block_dim * local_row_j + m]),
+                                    local_sum);
                             }
                             else
                             {
-                                local_sum = std::fma(bsr_val[block_dim * block_dim * l
-                                                             + block_dim * m + local_row_j],
-                                                     rocsparse_conj(bsr_val[idx]),
-                                                     local_sum);
+                                local_sum = std::fma(
+                                    bsr_val[idx],
+                                    rocsparse_conj(bsr_val[block_dim * block_dim * l + block_dim * m
+                                                           + local_row_j]),
+                                    local_sum);
                             }
                         }
                     }
@@ -1131,6 +1135,11 @@ void testing_spic0(const Arguments& arg)
             auto& cpu_numeric_near_pivot = spic0_descr.m_cpu_numeric_near_singularity_position;
             auto& cpu_symbolic_pivot     = spic0_descr.m_cpu_symbolic_singularity_position;
 
+            const bool     csr = (A.get_format() == rocsparse_format_csr);
+            host_vector<T> a_values;
+            if(csr)
+                a_values = A.get_host_values();
+
             rocsparse_clients_spic0_host(spic0_descr, A, &numeric_pivot_tolerance);
             cpu_symbolic_pivot.unit_check(host_symbolic_pivot);
             cpu_numeric_near_pivot.unit_check(host_numeric_pivot);
@@ -1140,6 +1149,37 @@ void testing_spic0(const Arguments& arg)
             // didn't encounter a zero pivot.
             //
             A.near_check_values(host_symbolic_pivot, host_numeric_pivot);
+
+            //
+            // CSR: check L * L^H against A on every instance without a pivot, independently of
+            // host_csric0. The instances share the row offsets and column indices.
+            //
+            if(csr)
+            {
+                const auto&    host   = A.template as<rocsparse_format_csr>().host();
+                const auto&    gold   = A.get_host_values();
+                const int64_t  stride = A.get_stride();
+                host_vector<T> l_values(A.get_device_values().size());
+                l_values.transfer_from(A.get_device_values());
+                for(int64_t b = 0; b < batch_count; ++b)
+                {
+                    if(host_symbolic_pivot[b] != -1 || host_numeric_pivot[b] != -1)
+                        continue;
+                    // The identity is meaningless if the factorization overflowed.
+                    const T* ref = gold.data() + b * stride;
+                    if(std::any_of(ref, ref + host.nnz, [](const T& v) {
+                           return rocsparse_isnan(v) || rocsparse_isinf(v);
+                       }))
+                        continue;
+                    check_csr_cholesky(host.m,
+                                       host.ptr.data(),
+                                       host.ind.data(),
+                                       a_values.data() + b * stride,
+                                       l_values.data() + b * stride,
+                                       host.base,
+                                       "spic0");
+                }
+            }
         }
     }
 

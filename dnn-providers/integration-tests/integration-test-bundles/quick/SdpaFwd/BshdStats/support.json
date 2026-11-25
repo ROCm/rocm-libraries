@@ -1,5 +1,31 @@
 {
   "claims": {
+    "ASM_SDPA_ENGINE": [
+      {
+        "cases": [
+          "b1_hq16_kv2_sq384_skv384_d128_bf16_bshd_top_left_stats",
+          "b2_hq32_kv8_sq128_skv512_d128_bf16_bshd_bottom_right_stats"
+        ],
+        "support": {
+          "gfx942": [
+            "linux"
+          ]
+        }
+      },
+      {
+        "cases": [
+          "b4_hq32_kv4_sq1_skv2048_d128_bf16_bshd_none_stats"
+        ],
+        "support": {
+          "gfx942": [
+            "linux"
+          ],
+          "gfx950": [
+            "linux"
+          ]
+        }
+      }
+    ],
     "hipkernel:Gfx950AttentionUnified2D": [
       {
         "cases": [
@@ -24,6 +50,99 @@
         "support": {
           "gfx950": [
             "linux"
+          ]
+        }
+      }
+    ],
+    "hipkernel:flydsl_sdpa_cdna": [
+      {
+        "cases": [
+          "b1_hq16_kv16_sq512_skv512_d128_fp16_bshd_top_left_stats",
+          "b1_hq16_kv2_sq384_skv384_d128_bf16_bshd_top_left_stats",
+          "b2_hq32_kv8_sq128_skv512_d128_bf16_bshd_bottom_right_stats",
+          "b2_hq8_kv1_sq1_skv1024_d64_fp16_bshd_top_left_stats",
+          "b2_hq8_kv8_sq256_skv256_d64_fp16_bshd_none_stats",
+          "b4_hq32_kv4_sq1_skv2048_d128_bf16_bshd_none_stats"
+        ],
+        "support": {
+          "gfx942": [
+            "linux"
+          ],
+          "gfx950": [
+            "linux"
+          ]
+        }
+      }
+    ],
+    "hipkernel:flydsl_sdpa_cdna_decode": [
+      {
+        "cases": [
+          "b1_hq16_kv16_sq512_skv512_d128_fp16_bshd_top_left_stats",
+          "b1_hq16_kv2_sq384_skv384_d128_bf16_bshd_top_left_stats",
+          "b2_hq32_kv8_sq128_skv512_d128_bf16_bshd_bottom_right_stats",
+          "b2_hq8_kv1_sq1_skv1024_d64_fp16_bshd_top_left_stats",
+          "b2_hq8_kv8_sq256_skv256_d64_fp16_bshd_none_stats",
+          "b4_hq32_kv4_sq1_skv2048_d128_bf16_bshd_none_stats"
+        ],
+        "support": {
+          "gfx942": [
+            "linux"
+          ],
+          "gfx950": [
+            "linux"
+          ]
+        }
+      }
+    ],
+    "hipkernel:flydsl_sdpa_cdna_dualwave": [
+      {
+        "cases": [
+          "b1_hq16_kv16_sq512_skv512_d128_fp16_bshd_top_left_stats",
+          "b1_hq16_kv2_sq384_skv384_d128_bf16_bshd_top_left_stats",
+          "b2_hq32_kv8_sq128_skv512_d128_bf16_bshd_bottom_right_stats",
+          "b2_hq8_kv1_sq1_skv1024_d64_fp16_bshd_top_left_stats",
+          "b2_hq8_kv8_sq256_skv256_d64_fp16_bshd_none_stats",
+          "b4_hq32_kv4_sq1_skv2048_d128_bf16_bshd_none_stats"
+        ],
+        "support": {
+          "gfx950": [
+            "linux"
+          ]
+        }
+      }
+    ],
+    "hipkernel:flydsl_sdpa_rdna": [
+      {
+        "cases": [
+          "b1_hq16_kv16_sq512_skv512_d128_fp16_bshd_top_left_stats",
+          "b1_hq16_kv2_sq384_skv384_d128_bf16_bshd_top_left_stats",
+          "b2_hq32_kv8_sq128_skv512_d128_bf16_bshd_bottom_right_stats",
+          "b2_hq8_kv1_sq1_skv1024_d64_fp16_bshd_top_left_stats",
+          "b2_hq8_kv8_sq256_skv256_d64_fp16_bshd_none_stats",
+          "b4_hq32_kv4_sq1_skv2048_d128_bf16_bshd_none_stats"
+        ],
+        "support": {
+          "gfx1151": [
+            "linux",
+            "windows"
+          ]
+        }
+      }
+    ],
+    "hipkernel:flydsl_sdpa_rdna_decode": [
+      {
+        "cases": [
+          "b1_hq16_kv16_sq512_skv512_d128_fp16_bshd_top_left_stats",
+          "b1_hq16_kv2_sq384_skv384_d128_bf16_bshd_top_left_stats",
+          "b2_hq32_kv8_sq128_skv512_d128_bf16_bshd_bottom_right_stats",
+          "b2_hq8_kv1_sq1_skv1024_d64_fp16_bshd_top_left_stats",
+          "b2_hq8_kv8_sq256_skv256_d64_fp16_bshd_none_stats",
+          "b4_hq32_kv4_sq1_skv2048_d128_bf16_bshd_none_stats"
+        ],
+        "support": {
+          "gfx1151": [
+            "linux",
+            "windows"
           ]
         }
       }

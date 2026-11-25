@@ -1,0 +1,97 @@
+{
+  "claims": {
+    "ASM_SDPA_ENGINE": [
+      {
+        "cases": [
+          "bf16_1be69af91947fd22",
+          "bf16_2704eaba614f7ac0",
+          "bf16_55ca180c8ea5c381",
+          "bf16_6f1cc06602e8eaa3",
+          "bf16_78cd58855cb8a56f",
+          "bf16_8b9c5f50932754e3",
+          "bf16_a373846ee1c7709f",
+          "bf16_b91999bde161666c",
+          "bf16_d0044c9f06788aed",
+          "bf16_f82c1387cc10e037"
+        ],
+        "support": {
+          "gfx942": [
+            "linux"
+          ],
+          "gfx950": [
+            "linux"
+          ]
+        }
+      }
+    ],
+    "hipkernel:flydsl_sdpa_cdna": [
+      {
+        "cases": [
+          "bf16_01d45d5db85d3796",
+          "bf16_09808b90103bcf21",
+          "bf16_1be69af91947fd22",
+          "bf16_55ca180c8ea5c381",
+          "bf16_6f1cc06602e8eaa3",
+          "bf16_714a62fbb4dd7e10",
+          "bf16_78cd58855cb8a56f",
+          "bf16_7a64508fe5901411",
+          "bf16_8b9c5f50932754e3",
+          "bf16_996e58ffcbde306e",
+          "bf16_a373846ee1c7709f",
+          "bf16_b91999bde161666c",
+          "bf16_bc68fb4db5afadf4",
+          "bf16_d0044c9f06788aed",
+          "bf16_e45527696824a51a",
+          "bf16_f7202810a93d073c",
+          "bf16_f82c1387cc10e037",
+          "fp32_397ca3602d2368b0",
+          "fp32_d66f44408b09a5e7"
+        ],
+        "support": {
+          "gfx942": [
+            "linux"
+          ],
+          "gfx950": [
+            "linux"
+          ]
+        }
+      }
+    ],
+    "hipkernel:flydsl_sdpa_rdna": [
+      {
+        "cases": [
+          "bf16_01d45d5db85d3796",
+          "bf16_09808b90103bcf21",
+          "bf16_1be69af91947fd22",
+          "bf16_42f175ce54f88e8a",
+          "bf16_55ca180c8ea5c381",
+          "bf16_67291be048312995",
+          "bf16_6f1cc06602e8eaa3",
+          "bf16_714a62fbb4dd7e10",
+          "bf16_78bffcd73c4959f2",
+          "bf16_78cd58855cb8a56f",
+          "bf16_7a64508fe5901411",
+          "bf16_8b9c5f50932754e3",
+          "bf16_996e58ffcbde306e",
+          "bf16_a373846ee1c7709f",
+          "bf16_b91999bde161666c",
+          "bf16_bc68fb4db5afadf4",
+          "bf16_d0044c9f06788aed",
+          "bf16_e45527696824a51a",
+          "bf16_e7cacf7c2aae10b5",
+          "bf16_f7202810a93d073c",
+          "bf16_f82c1387cc10e037",
+          "fp32_397ca3602d2368b0",
+          "fp32_d66f44408b09a5e7"
+        ],
+        "support": {
+          "gfx1151": [
+            "linux",
+            "windows"
+          ]
+        }
+      }
+    ]
+  },
+  "version": 1
+}
