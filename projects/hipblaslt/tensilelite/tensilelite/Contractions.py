@@ -39,6 +39,7 @@ from .Common.ValidParameters import (
     checkAssertMultipleMapIsValid,
     checkAssertSizeMapIsValid,
 )
+from .CustomKernels import isRocRollerMXCapture
 from .SolutionStructs import Solution as OriginalSolution
 from .SolutionStructs.Problem import getBiasDataTypeListDefault, getGateResidualDataTypeListDefault
 from .Toolchain.Component import Assembler
@@ -822,13 +823,31 @@ class ProblemPredicate(Properties.Predicate):
         # (getRocRollerSelectedSolutions) guards all three; that is stricter than
         # correctness requires.
         customKernel = state.get('CustomKernel') if hasattr(state, 'get') else None
+        # C++ selectors key this family on the RR_GEMM_ prefix, so the name and
+        # the custom.config must name the same kernels. A directory on the
+        # kernel is how a caller points at a config outside the bundled tree;
+        # library builds leave it unset and the bundled tree is read.
+        emitRocRollerMXPredicates = False
         emittedBatchEqual = False
-        if customKernel and str(customKernel.get('name', '')).startswith('RR_GEMM_'):
+        if customKernel and not customKernel.get('generated', False):
+            name = customKernel.get('name')
+            inFamily = isRocRollerMXCapture(name, customKernel.get('directory'))
+            namedFamily = isinstance(name, str) and name.startswith('RR_GEMM_')
+            if namedFamily and not inFamily:
+                raise ValueError(
+                    f"Custom kernel '{name}' starts with RR_GEMM_ but its custom.config "
+                    "is not a rocRoller MX capture")
+            if inFamily and not namedFamily:
+                raise ValueError(
+                    f"Custom kernel '{name}' is a rocRoller MX capture but its name "
+                    "does not start with RR_GEMM_")
+            emitRocRollerMXPredicates = namedFamily and inFamily
+        if emitRocRollerMXPredicates:
             # [MacroTile0, MacroTile1, DepthU], computed in CustomKernels.py from
-            # the kernel's own MatrixInstruction/WaveTile/WorkGroup. Scoped by the
-            # RR_GEMM_ prefix, which is how matchesRocRollerSelectedKernel in
-            # tensile_host.cpp identifies the same family. Other custom-kernel
-            # families are deliberately untouched: no equivalent measurement.
+            # the kernel's own MatrixInstruction/WaveTile/WorkGroup. Scoped to
+            # the rocRoller MX captures (Source.Origin rocroller with MX scales),
+            # the family measured above. Other custom kernels, including non-MX
+            # rocRoller captures, are deliberately untouched.
             macroTile = customKernel.get('macrotile') or []
             if len(macroTile) == 3:
                 tileM, _, depthU = macroTile
@@ -871,8 +890,8 @@ class ProblemPredicate(Properties.Predicate):
             if skGrid or skWorkspace or skArgs:
                 rv += [cls('BatchSizeEqual', index=0, value=1)]
 
-        # Exact-size custom kernels record the M/N/K window they won. Without
-        # it, a multi-solution lookup also accepts the neighboring tile.
+        # Exact-size custom kernels record the smallest M/N/K they won. Without
+        # it, a multi-solution lookup also accepts them at smaller sizes.
         size_bounds = state.get("CustomKernelSizePredicate") if hasattr(state, "get") else None
         if size_bounds:
             for bound in size_bounds:
