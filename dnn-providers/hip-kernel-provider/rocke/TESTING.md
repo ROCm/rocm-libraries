@@ -1214,20 +1214,8 @@ log.
 #### Budgets
 
 Times are wall time on a CI runner, as the CI log shows it; the Test step of a
-CI shard has a 30-minute limit. Q1 and S4 are checked: their values are
-`CI_TIERS` in [`tools/check_entry_times.py`](tools/check_entry_times.py), and the
-quick CTest entry `rocke_entry_time_check` runs its `check`. The check projects
-each tier's shard from the whole-entry times in `tools/entry_times.json`
-(recorded from CI logs, per operating system) and the live CTest registration,
-counting a split entry as an even share, so it checks the average shard; an
-uneven split or per-shard start-up puts CI's slowest shard above it. It fails
-when one entry's share of a shard is over its tier's budget, when a shard is
-over its limit (the budget, or the ceiling `entry_times.json` records for a tier
-already over budget; a ceiling only goes down), or when a committed entry time
-drops out of the projection. An entry with no recorded time is listed but not
-counted until `record` adds it.
-The tool's docstring gives the `check`, `record` and `lower-ceiling` commands.
-The other budgets are proposed, pending agreement with the owners of the
+CI shard has a 30-minute limit. Q1 and S4 are checked (below the table). The
+other budgets are proposed, pending agreement with the owners of the
 hip-kernel-provider test tiers, and no check holds them; change them here only.
 
 | Id | Budget | Value | Why |
@@ -1239,7 +1227,26 @@ hip-kernel-provider test tiers, and no check holds them; change them here only.
 | S1 | One shard key in a sharded entry | 30 s | A key runs whole on one shard; this is half of the 60 s per-item `--timeout` of the `rocke_pytest_<part>` and tiling entries. In an entry with a lower `--timeout` (several library entries use 30 s), S2 holds each item to half of it. |
 | S2 | Limit headroom | The slowest item under half its pytest `--timeout`; the entry's longest run, which is its unsplit run if the entry is in quick, under half its CTest `TIMEOUT` | The worst case stays under half of each limit. The CTest `TIMEOUT` is its resource class's limit, so an entry near half of it gets cheaper or splits; the limit does not move. |
 | S3 | A new non-pytest entry in quick or standard | 1 s | It runs whole on every CI shard unless it takes its share under `--rocke-shard-from-gtest-env`. The golden entries and `rocke_optimization_barrier_hip_pair` are existing exceptions: each splits across the CI shards that way, and runs whole in quick. |
-| S4 | rocKE's share of one standard shard | 420 s | Keeps rocKE and the rest of the provider under half of the 30-minute step. Checked. |
+| S4 | rocKE's share of each standard shard | 420 s | Keeps rocKE and the rest of the provider under half of the 30-minute step. Checked for the slowest shard, not the average. |
+
+[`tools/check_entry_times.py`](tools/check_entry_times.py) enforces Q1 and S4
+(its `CI_TIERS` holds the same values), and the quick CTest entry
+`rocke_entry_time_check` runs its `check`. It projects every shard from the
+times in `tools/entry_times.json` (recorded from CI logs, per operating system)
+and the live CTest registration. It places the tests of each split pytest entry
+as CI does: it collects the entry, places its shard keys by their
+`rocke_shard_cost` marks and the hash, and spreads each shard's keys over the
+entry's workers. So heavy keys that the hash puts on one shard show on that
+shard. It fails when one entry alone is over its tier's budget on a shard, when
+any shard is over its limit (the budget, or the ceiling `entry_times.json`
+records for a tier already over budget; a ceiling only goes down), when a
+committed entry time drops out of the projection, or when an entry that a tier
+runs has no recorded time; record its time from a CI log with
+`check_entry_times.py record`. The tool's docstring gives the `check`, `record`
+and `lower-ceiling` commands. The check needs a provider install on the
+operating system it judges, because the tier labels and the tests it collects
+exist only there. Run `ctest -R '^rocke_entry_time_check$'` in
+`<install>/bin/hip_kernel_provider`. No pre-commit hook runs it.
 
 To review where a test lives (level, tier, entry, shard keys, budgets), use the
 checklist in [`agents/team_members/test_architect.md`](agents/team_members/test_architect.md).
