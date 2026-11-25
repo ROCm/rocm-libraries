@@ -21,6 +21,7 @@ from pathlib import Path
 
 import pytest
 from rocke.assets import platform_root
+from rocke.tests.lanes import SOURCE_TREE, skip_until_reason
 from rocke.tests.source_modules import load_module_from_path
 
 pytest.importorskip("yaml", reason="reading a pre-commit config needs PyYAML")
@@ -32,7 +33,10 @@ MONOREPO = ROCKE.parents[2]
 pytestmark = [
     pytest.mark.skipif(
         not GATE.is_file(),
-        reason="rocke/tools/run_hook_on_deletion.py is absent from this tree",
+        reason=skip_until_reason(
+            SOURCE_TREE,
+            reason="rocke/tools/run_hook_on_deletion.py is absent from this tree",
+        ),
     ),
     pytest.mark.skipif(shutil.which("git") is None, reason="git required"),
 ]

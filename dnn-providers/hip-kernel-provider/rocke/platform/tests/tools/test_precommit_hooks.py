@@ -12,15 +12,15 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+from rocke.tests.lanes import SOURCE_TREE, skip_until
 from rocke.tests.source_modules import load_module_from_path
 
 pytest.importorskip("yaml", reason="reading a pre-commit config needs PyYAML")
 
 MODULE = Path(__file__).resolve().parents[3] / "tools" / "precommit_hooks.py"
 if not MODULE.is_file():
-    pytest.skip(
-        "rocke/tools/precommit_hooks.py is absent from this tree",
-        allow_module_level=True,
+    skip_until(
+        SOURCE_TREE, reason="rocke/tools/precommit_hooks.py is absent from this tree"
     )
 precommit_hooks = load_module_from_path("precommit_hooks_under_test", MODULE)
 

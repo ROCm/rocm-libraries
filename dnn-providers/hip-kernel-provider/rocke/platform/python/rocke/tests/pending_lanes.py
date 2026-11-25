@@ -942,6 +942,7 @@ PENDING: tuple[PendingTest, ...] = (
         "platform/tests/instances/test_gfx950_attention_tiled_2d_prologue.py",
         "platform/tests/numeric/test_f64_gemm_numeric.py",
         "platform/tests/portable_ir/test_recipe_roller.py",
+        "platform/tests/support/test_assets.py",
         "platform/tests/test_library_reach.py",
         "platform/tests/tools/test_cmake_test_registration.py",
         "platform/tests/tools/test_emitter_pair_hook_files.py",
@@ -1049,6 +1050,7 @@ PENDING: tuple[PendingTest, ...] = (
         "library/tests/test_direct_fwd_wmma.py",
         "library/tests/test_fwd_small_mfma.py",
         "library/tests/test_fwd_small_wmma.py",
+        "library/tests/test_img2col_spec.py",
     ),
     *_waiting(
         BUILD_VARIANT,
