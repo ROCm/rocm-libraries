@@ -6894,7 +6894,7 @@ namespace TensileLite
             return detail;
         };
 
-        if(handwrittenCustomKernel() && !customKernel.uniformSummationOrder)
+        if(handwrittenCustomKernel())
             return refuse("CustomKernel",
                           "custom kernel " + customKernel.name
                               + " is not supported under uniform summation order");
