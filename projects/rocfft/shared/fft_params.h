@@ -36,8 +36,11 @@
 #include <valarray>
 #include <vector>
 
-#ifdef ROCFFT_MPI_ENABLE
+#if defined(ROCFFT_MPI_ENABLE) || defined(HIPFFT_MPI_ENABLE)
+#define FFT_PARAMS_WITH_MPI 1
 #include <mpi.h>
+#else
+#define FFT_PARAMS_WITH_MPI 0
 #endif
 
 #include "../shared/arithmetic.h"
@@ -557,10 +560,11 @@ public:
         fft_mp_lib_mpi,
     };
     fft_mp_lib mp_lib = fft_mp_lib_none;
-    // Pointer to a library-specific communicator type.  Note that this
-    // is a pointer, so whatever this points to must live as long as
-    // this pointer does.
-    void* mp_comm = nullptr;
+#if FFT_PARAMS_WITH_MPI
+    // Typed since MPI is the only supported communication library for now.
+    // Non-owned; must outlive plans created from this object.
+    MPI_Comm* mp_comm = nullptr;
+#endif
 
     struct fft_brick
     {
@@ -2885,10 +2889,10 @@ public:
         int process_rank = -1; // invalid initialization
         if(mp_lib == fft_mp_lib_mpi)
         {
-#ifdef ROCFFT_MPI_ENABLE
+#if FFT_PARAMS_WITH_MPI
             if(!mp_comm)
                 throw std::runtime_error("Multi-process communicator is not defined");
-            auto ret = MPI_Comm_rank(*static_cast<MPI_Comm*>(mp_comm), &process_rank);
+            auto ret = MPI_Comm_rank(*mp_comm, &process_rank);
             if(ret != MPI_SUCCESS || process_rank < 0)
                 throw std::runtime_error("Rank of current process couldn't be set");
 #else

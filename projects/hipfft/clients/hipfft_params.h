@@ -1381,7 +1381,7 @@ private:
                 return ret;
 
             int mpi_rank = 0;
-            MPI_Comm_rank(*static_cast<MPI_Comm*>(mp_comm), &mpi_rank);
+            MPI_Comm_rank(*mp_comm, &mpi_rank);
 
             const auto& in_bricks  = ifields.front().bricks;
             const auto& out_bricks = ofields.front().bricks;
