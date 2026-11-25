@@ -2115,14 +2115,18 @@ class KernelComponentFactoryGfx125(CompatibilityRuleFactory):
         # WMMA has K = 64 or 128 only, so d32 (-> 64), d96 (-> 128) and d160 (-> 192) take
         # the padded (dpad/dvpad) path. Prefill only: one bm0=128 tile per head dim (d512's
         # LDS arena fits bm0=64 only); short seqlen_q is left to another pipeline. The last
-        # d64/d128 tile is qr-only (gemm0 needs >= 2 K loops) and catches head dims that are
-        # not a multiple of 8.
+        # d32/d64/d96/d128 tile is qr-only (gemm0 needs >= 2 K loops) and catches head dims
+        # that are not a multiple of 8. Dispatch buckets by (hdim, bn1) and stops at the first
+        # bucket that fits, so d32 and d96 take the d64 and d128 qr tile at their own bn1,
+        # padded pipelines only (check_qr_d32_d96_padded).
         return {
                 #                             bm0, bn0, bk0, bn1, bk1,
-                ( 32,  32) : [FmhaFwdTileSize(128, 128,  64,  32, 128,   64,  4, 1, 1,  4, 1, 1,  16, 16, 64,  16, 16, 128,  -1)],
+                ( 32,  32) : [FmhaFwdTileSize(128, 128,  64,  32, 128,   64,  4, 1, 1,  4, 1, 1,  16, 16, 64,  16, 16, 128,  -1),
+                              FmhaFwdTileSize(128,  64,  64,  32,  64,  128,  4, 1, 1,  4, 1, 1,  16, 16, 64,  16, 16, 64,  -1)],
                 ( 64,  64) : [FmhaFwdTileSize(128, 128,  64,  64, 128,   64,  4, 1, 1,  4, 1, 1,  16, 16, 64,  16, 16, 128,  -1),
                               FmhaFwdTileSize(128,  64,  64,  64,  64,  128,  4, 1, 1,  4, 1, 1,  16, 16, 64,  16, 16, 64,  -1)],
-                ( 96,  96) : [FmhaFwdTileSize(128, 128, 128,  96, 128,  128,  4, 1, 1,  4, 1, 1,  16, 16, 128,  16, 16, 128,  -1)],
+                ( 96,  96) : [FmhaFwdTileSize(128, 128, 128,  96, 128,  128,  4, 1, 1,  4, 1, 1,  16, 16, 128,  16, 16, 128,  -1),
+                              FmhaFwdTileSize(128,  64,  64,  96,  64,  128,  4, 1, 1,  4, 1, 1,  16, 16, 64,  16, 16, 64,  -1)],
                 (128, 128) : [FmhaFwdTileSize(128, 128, 128, 128, 128,  128,  4, 1, 1,  4, 1, 1,  16, 16, 128,  16, 16, 128,  -1),
                               FmhaFwdTileSize(128,  64,  64, 128,  64,  128,  4, 1, 1,  4, 1, 1,  16, 16, 64,  16, 16, 64,  -1)],
                 (160, 160) : [FmhaFwdTileSize(128, 128, 192, 160, 128,  192,  4, 1, 1,  4, 1, 1,  16, 16, 64,  16, 16, 128,  -1)],
@@ -2369,6 +2373,18 @@ class KernelComponentFactoryGfx125(CompatibilityRuleFactory):
                 return False
             return True
 
+        def check_qr_d32_d96_padded(
+            problem_ctx: ProblemContext, kernel_ctx: KernelContext
+        ) -> bool:
+            # The d32/d96 qr-only tiles run padded only: bn1 = 96 makes V's global load 12 fp8
+            # per thread, which has no buffer-load width, and the unpadded dcheck
+            # (hdim % 128 == 0) cannot hold in a bucket of hdim <= 32 / <= 96.
+            if problem_ctx.dtype not in cls._DT_FP8_FP8BF16:
+                return True
+            if kernel_ctx.pipeline.tag != "qr" or problem_ctx.hdim not in (32, 96):
+                return True
+            return kernel_ctx.pipeline.F_dpad == "t"
+
         def check_tile_owner(
             problem_ctx: ProblemContext, kernel_ctx: KernelContext
         ) -> bool:
@@ -2383,6 +2399,7 @@ class KernelComponentFactoryGfx125(CompatibilityRuleFactory):
             [
                 check_gemm0_k,
                 check_qr_tdm_unpadded_head_reachable,
+                check_qr_d32_d96_padded,
                 check_tile_owner,
                 check_qr_tdm_fp8_sched_codegen_compatibility,
                 check_qr_tdm_sched_codegen_compatibility,
