@@ -1876,7 +1876,9 @@ def test_reference_fixture_keeps_one_slot_open_at_a_time(
         return {"variant": variant}
 
     @contextmanager
-    def reuse_workers(module):
+    def reuse_workers(module, *, timeout):
+        # A pinned test's requests stop below the GPU entries' per-test limit.
+        assert timeout == pinned_tests.PINNED_REQUEST_TIMEOUT_SECONDS
         workers.append("open")
         try:
             yield
