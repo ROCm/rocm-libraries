@@ -26,6 +26,7 @@ external manifest.
 | `wave/`         | External: Wave (handwritten) kernels.             |
 | `triton/`       | External: Triton-compiled GEMM kernels.           |
 | `rocke/`        | External: rocKE GEMM kernels.                     |
+| `test/`         | Test-only kernels for runtime contracts.          |
 
 Loader behavior is the same in every subdirectory; the split is purely
 organizational.
@@ -140,6 +141,38 @@ needs a case in `clients/tests/src/row_uniformity_gtest.cpp` (see the
 the device, with the kernel asserted as the default pick on its architecture.
 `AddCustomConfig` copies the key from the kernel's `CustomKernel` entry in the
 test YAML.
+
+### Stream-K reductions and post kernels
+
+An external Stream-K kernel lists the reduction modes it supports in
+`CustomKernel.streamKReductions` (`[tree]` by default, or any of `tree`,
+`parallel`). `parallel` needs a `streamKReduce` entry in
+`CustomKernel.postKernels`, and the reverse. A post kernel has `kind`,
+`version: 1`, `name`, `args`, `threads`, `grid` and `bands` (default 1). It
+must be named `<main>_streamKReduce` and live in the same `.s`, after the main
+kernel. Post kernels require `TileProcessingStrategy: StreamK`,
+`WorkAssignment` `StaticGrid` or `Hybrid`, `PersistentLoopArgsVersion: 3`,
+`KernArgsVersion: 3`, the main grid `[StreamKNoBatch, One, One]` and
+`ClusterDim` `[1, 1]`. The main kernel args must include `SKSplitFactor` and
+`AddressWorkspace`, and so must the `streamKReduce` args.
+
+The host picks one mode per launch and passes it in `SKSplitFactor`:
+
+- `0`: tree reduction (the kernel declares `tree`).
+- `1`: data-parallel clamp. A kernel without `tree` gets one workgroup per
+  tile whenever the host does not pick parallel; it applies the epilogue to D.
+- `F >= 2`: parallel. The main grid is `F * NumTiles`, and each workgroup
+  writes one partial slot. The post kernel then reduces the `F` slots of each
+  tile and applies the epilogue.
+
+`NumTiles` counts the tiles of all batches, and `F = grid / NumTiles` is the
+same for every batch. A post kernel `grid` of `TilesBands` launches
+`tilesX * tilesY * batch * bands` workgroups. The host sizes the workspace as
+`F * NumTiles` partial slots of the custom macrotile times
+`workspaceSizePerElemC` bytes per element. The slot layout belongs to the
+kernel pair. The partials start at `WorkspaceOffsetPartials`, currently 0.
+`test/c_hip_sk_parallel_Cijk_Ailk_Bjlk_HHS_BH_MT64x64x32_gfx950.hip` is the
+reference pair, and its `.s` carries the matching `custom.config`.
 
 ## Adding a new external kernel
 

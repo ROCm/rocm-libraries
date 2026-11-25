@@ -190,7 +190,11 @@ namespace TensileLite
         X_MACRO(AddressScaleZeroA) \
         X_MACRO(ScaleBlockSizeA) \
         X_MACRO(ESMRuntimeSupported) \
-        X_MACRO(DeltaPeerD)
+        X_MACRO(DeltaPeerD) \
+        /* Stream-K args, taken by main and post kernels */ \
+        X_MACRO(SKSplitFactor) \
+        X_MACRO(NumTiles) \
+        X_MACRO(WorkspaceOffsetPartials)
 
     enum class CustomArgSemantic
     {
@@ -233,6 +237,8 @@ namespace TensileLite
         PersistentNoBatch,
         TilesYGSU,
         ComputeUnits,
+        // One workgroup per (tile, band) of a post kernel.
+        TilesBands,
         CustomGridSize_Count,
     };
 
@@ -255,6 +261,43 @@ namespace TensileLite
     TENSILELITEHOST_EXPORT std::ostream& operator<<(std::ostream& stream, const CustomWorkspaceType& t);
     TENSILELITEHOST_EXPORT std::istream& operator>>(std::istream& stream, CustomWorkspaceType& t);
 
+    enum class CustomReductionMode
+    {
+        Tree,
+        Parallel,
+        Count,
+    };
+
+    TENSILELITEHOST_EXPORT std::string toString(CustomReductionMode mode);
+    TENSILELITEHOST_EXPORT std::ostream& operator<<(std::ostream&              stream,
+                                                    const CustomReductionMode& t);
+
+    // Role of a post kernel: when it is launched and which arguments it may take.
+    enum class CustomPostKernelKind
+    {
+        StreamKReduce,
+        Count,
+    };
+
+    TENSILELITEHOST_EXPORT std::string toString(CustomPostKernelKind kind);
+    TENSILELITEHOST_EXPORT std::ostream& operator<<(std::ostream&               stream,
+                                                    const CustomPostKernelKind& t);
+
+    // A kernel in the main kernel's code object, named <main>_<kind>.
+    struct CustomPostKernel
+    {
+        CustomPostKernelKind             kind = CustomPostKernelKind::StreamKReduce;
+        // New post-kernel fields or semantics need a version bump: the msgpack
+        // reader ignores unknown keys.
+        int                              version = 1;
+        std::string                      name;
+        std::vector<CustomArgDefinition> args;
+        dim3                             threads{0, 0, 0};
+        vector3<CustomGridSize> grid{CustomGridSize::One, CustomGridSize::One, CustomGridSize::One};
+        // Workgroups per tile for the TilesBands grid.
+        size_t bands = 1;
+    };
+
     struct CustomKernel
     {
         // Every member needs a default: mapOptional leaves absent keys untouched, so an
@@ -276,6 +319,11 @@ namespace TensileLite
         // same order, so identical rows of A give bitwise-identical rows of D.
         // Uniform summation order refuses hand-written kernels without it.
         bool uniformSummationOrder = false;
+        // Stream-K reduction modes the kernel implements.
+        std::vector<CustomReductionMode> streamKReductions{CustomReductionMode::Tree};
+        // Kernels launched after this one, in order. Requires persistent loop
+        // argument layout 3.
+        std::vector<CustomPostKernel> postKernels;
     };
   
     // Elements in one slot of the GSU (MBSK) reduction buffer. Usage there is
@@ -899,6 +947,8 @@ namespace TensileLite
         // Validate the complete descriptor when loading a solution. Programmatic
         // callers must also validate after constructing or changing a descriptor.
         void validatePersistentLoopArgs() const;
+        // Reduction modes and post kernels of the custom kernel descriptor.
+        void validateCustomPostKernels() const;
 
         // Prebuilt kernels retain their declared scheduling ABI even when their
         // cluster geometry also supports the spatial schedule. Policy and shape
@@ -1056,11 +1106,56 @@ namespace TensileLite
                                                       KA&                         h_args,
                                                       uint32_t                    gsu) const;
 
+        // Launch values shared by a custom kernel and its post kernels.
+        struct CustomCallSchedule
+        {
+            int      computeUnits               = 1;
+            dim3     tiles                      = {0, 0, 0};
+            uint32_t autoGsuVal                 = 0;
+            uint32_t gsu                        = 0;
+            size_t   adaptiveGlobalAccumulation = 0;
+            uint32_t itersPerTile               = 0;
+            uint32_t skTotalIters               = 0;
+            uint32_t skMagicNumberItersPerTile  = 0;
+            uint32_t skMagicShiftItersPerTile   = 0;
+            uint32_t skItersPerWG               = 0;
+            uint32_t skTotalTiles               = 0;
+        };
+
+        CustomCallSchedule customCallSchedule(Problem const&                  problem,
+                                              Hardware const&                 hardware,
+                                              PersistentLaunchSettings const& launch) const;
+
+        // Sets the workgroup size and count of a custom or post kernel launch.
+        // bands is the post kernel's TilesBands factor; the main kernel passes 0,
+        // which rejects a TilesBands grid.
+        void customCallGrid(KernelInvocation&                       rv,
+                            dim3 const&                             threads,
+                            vector3<CustomGridSize> const&          grid,
+                            size_t                                  bands,
+                            std::vector<CustomArgDefinition> const& args,
+                            CustomCallSchedule const&               schedule,
+                            PersistentLaunchSettings const&         launch) const;
+
+        // Appends args to rv.args; reads rv.numWorkGroups, so call customCallGrid first.
         template <bool T_Debug>
-        KernelInvocation generateCustomCall(Problem const&           problem,
-                                            ContractionInputs const& inputs,
-                                            Hardware const&          hardware,
-                                            PersistentLaunchSettings const&   launch) const;
+        void packCustomArgs(KernelInvocation&                       rv,
+                            std::vector<CustomArgDefinition> const& args,
+                            Problem const&                          problem,
+                            ContractionInputs const&                inputs,
+                            Hardware const&                         hardware,
+                            PersistentLaunchSettings const&         launch,
+                            CustomCallSchedule const&               schedule) const;
+
+        // Under parallel reduction, postCalls (when given) receives one call per
+        // post kernel, packed from the main kernel's schedule and launch.
+        template <bool T_Debug>
+        KernelInvocation generateCustomCall(Problem const&                  problem,
+                                            ContractionInputs const&        inputs,
+                                            Hardware const&                 hardware,
+                                            PersistentLaunchSettings const& launch,
+                                            std::vector<KernelInvocation>*  postCalls
+                                            = nullptr) const;
 
         // Temporary: the proven per-feature argument-packing path, restored from
         // develop and used for all Tensile-generated kernels while the generic
@@ -1323,6 +1418,16 @@ namespace TensileLite
                                                  size_t         tiles) const;
 
         bool handwrittenCustomKernel() const;
+        bool customKernelReduces(CustomReductionMode mode) const;
+        // A handwritten kernel without tree support launches data parallel
+        // whenever the resolved reduction is not parallel.
+        bool customDataParallelClamp(origami::reduction_t reduction) const;
+        // A handwritten parallel launch is exactly F workgroups per tile, each
+        // with at least one K unit; otherwise it demotes to tree.
+        void snapCustomParallelGrid(origami::reduction_t& reduction,
+                                    size_t&               grid,
+                                    size_t                tiles,
+                                    size_t                itersPerTile) const;
 
         // Same StreamK grid / reduction solve() packs, including the
         // insufficient-workspace fall back to tree + grid==tiles.

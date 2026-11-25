@@ -2254,7 +2254,8 @@ class Solution(collections.abc.Mapping):
       RuntimeError: If a macrotile component is supplied by neither the
         CustomKernel block nor the consuming logic file, or if the solution
         can split K (GlobalSplitU other than 0 or 1) but its grid launches one
-        GSU slice per tile.
+        GSU slice per tile, or if its post kernels meet OutputAmaxD or a bias
+        gradient, or its parallel reduction has no Stream-K workspace.
     """
     ck = state["CustomKernel"]
 
@@ -2345,6 +2346,33 @@ class Solution(collections.abc.Mapping):
     state["_WorkspaceSizePerElemBias"] = 0
     if state["ProblemType"]["UseBias"] and state["ProblemType"]["Gradient"]:
       state["_WorkspaceSizePerElemBias"] = ck.get("workspaceSizePerElemBias", 0)
+
+    # Parallel partials start at the workspace base, where amax and
+    # bias-gradient scratch would also go.
+    if ck.get("postKernels") and (state["ProblemType"].get("OutputAmaxD", False)
+                                  or (state["ProblemType"]["UseBias"] and state["ProblemType"]["Gradient"])):
+      raise RuntimeError(
+        f"Custom kernel '{ck.get('name', '?')}' has post kernels, which do not support "
+        f"OutputAmaxD or a bias gradient.")
+    # LibraryIO replaces custom.config's ProblemType with the logic file's, and
+    # the logic file can supply the execution policy.
+    if ck.get("postKernels") and state["ProblemType"].get("GroupedGemm", False):
+      raise RuntimeError(
+        f"Custom kernel '{ck.get('name', '?')}' has post kernels, which do not support GroupedGemm.")
+    if ck.get("postKernels") and (not isStreamK(state) or hasDynamicAssignment(state)):
+      raise RuntimeError(
+        f"Custom kernel '{ck.get('name', '?')}' has post kernels, which require "
+        f"TileProcessingStrategy StreamK with WorkAssignment StaticGrid or Hybrid.")
+    # The host does not round a handwritten Stream-K grid to the cluster size.
+    if isStreamK(state) and list(state.get("ClusterDim", [1, 1]))[:2] != [1, 1]:
+      raise RuntimeError(
+        f"Custom kernel '{ck.get('name', '?')}' is Stream-K and requires ClusterDim [1, 1].")
+    if "parallel" in ck.get("streamKReductions", []) and (
+        ck.get("workspaceType") not in ("StreamK", "StreamKWithReduction")
+        or not ck.get("workspaceSizePerElemC")):
+      raise RuntimeError(
+        f"Custom kernel '{ck.get('name', '?')}' declares parallel reduction, which needs a "
+        f"Stream-K workspace with workspaceSizePerElemC.")
 
     mi = state.get("MatrixInstruction", [])
     state.setdefault("EnableMatrixInstruction", isinstance(mi, list) and len(mi) >= 4)
