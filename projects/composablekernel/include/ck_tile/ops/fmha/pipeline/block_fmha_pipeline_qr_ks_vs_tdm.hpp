@@ -333,10 +333,7 @@ struct BlockFmhaPipelineQRKSVSTdm
             const float v_descale =
                 cast_pointer_to_constant_address_space(v_descale_ptr)[kv / block_scale_size_kv];
             packed.pack_scale(e8m0_t(v_descale), i);
-            // e8m0 keeps only the exponent, so a v_descale that is not a power of two is
-            // changed here, silently. Validate it outside this loop: keeping the operands
-            // live for the check below measured 331 -> 367 VGPR, one wave, reporting aside.
-            // if(bit_cast<uint32_t>(packed.unpack_to_float(i)) != bit_cast<uint32_t>(v_descale))
+            // e8m0 keeps only the exponent: a non-power-of-two v_descale is changed silently.
         });
         return pin_to_vgpr(static_cast<int32_t>(packed.data()));
     }
@@ -454,10 +451,7 @@ struct BlockFmhaPipelineQRKSVSTdm
             constexpr index_t g   = (IK1 * kK1 + i * kGemm1KPerByte) / kKVScaleAlign;
             const float v_descale = descale.v[g];
             packed.pack_scale(e8m0_t(v_descale), i);
-            // e8m0 keeps only the exponent, so a v_descale that is not a power of two is
-            // changed here, silently. Validate it outside this loop: keeping the operands
-            // live for the check below measured 331 -> 367 VGPR, one wave, reporting aside.
-            // if(bit_cast<uint32_t>(packed.unpack_to_float(i)) != bit_cast<uint32_t>(v_descale))
+            // e8m0 keeps only the exponent: a non-power-of-two v_descale is changed silently.
         });
         return pin_to_vgpr(static_cast<int32_t>(packed.data()));
     }
