@@ -121,6 +121,38 @@ TEST_F(InsertVgprMsbPassTest, ASetterAlreadyInTheStreamIsLeftAsItIs) {
     EXPECT_FALSE(firstVgprMsbMismatch(*func).has_value());
 }
 
+// At the default too, the word a setter in the stream sets is in force: the
+// v_mov it serves gets no second setter.
+TEST_F(InsertVgprMsbPassTest, AtTheDefaultASetterInTheStreamServesWhatItsWordServes) {
+    StinkyInstruction* existing = createInst(entry, GFX::s_set_vgpr_msb, {}, {});
+    existing->addSrcReg(StinkyRegister(msbWord(1, 0, 0, 1)));
+    createInst(entry, GFX::v_mov_b32, {vgpr(257)}, {vgpr(258)});
+    runPass(*func, createInsertVgprMsbPass(), VgprMsbMode::Msb8, VgprMsbPolicy::ExactWord);
+
+    const std::vector<StinkyInstruction*> found = setters(*func);
+    ASSERT_EQ(found.size(), 1U);
+    EXPECT_EQ(found[0], existing);
+    EXPECT_FALSE(firstVgprMsbMismatch(*func).has_value());
+}
+
+// After v_mov the setter v_fma needs would wait in front of the next
+// instruction, which is the setter in the stream, and that setter would then
+// override it. It goes after it instead.
+TEST_F(InsertVgprMsbPassTest, AtTheDefaultNoSetterGoesInFrontOfOneInTheStream) {
+    createInst(entry, GFX::v_mov_b32, {vgpr(257)}, {vgpr(258)});
+    StinkyInstruction* existing = createInst(entry, GFX::s_set_vgpr_msb, {}, {});
+    existing->addSrcReg(StinkyRegister(msbWord(0, 0, 0, 0)));
+    createInst(entry, GFX::v_fma_f32, {vgpr(259)}, {vgpr(260), vgpr(261), vgpr(262)});
+    runPass(*func, createInsertVgprMsbPass(), VgprMsbMode::Msb8, VgprMsbPolicy::ExactWord);
+
+    const std::vector<StinkyInstruction*> found = setters(*func);
+    ASSERT_EQ(found.size(), 3U);
+    EXPECT_EQ(found[0]->getSrcRegs()[0].getLiteralInt(), msbWord(1, 0, 0, 1));
+    EXPECT_EQ(found[1], existing);
+    EXPECT_EQ(found[2]->getSrcRegs()[0].getLiteralInt(), msbWord(1, 1, 1, 1));
+    EXPECT_FALSE(firstVgprMsbMismatch(*func).has_value());
+}
+
 TEST_F(InsertVgprMsbPassTest, TheReplayCheckNamesAnInstructionInTheWrongBank) {
     createInst(entry, GFX::v_mov_b32, {vgpr(257)}, {vgpr(258)});
     const std::optional<std::string> unset = firstVgprMsbMismatch(*func);
