@@ -495,6 +495,10 @@ std::vector<SolutionIndexParameters> chooseSolutionIndexParameters(
             useStreamK = true;
         }
 
+        // rocRoller's StreamK implementation is not USO compliant.
+        if(useStreamK && prob.uniform_summation_order != 0)
+            continue;
+
         // Heuristics:
         // 64x256 performs poorly for StreamK
         if(useStreamK && wgt.m == 64 && wgt.n == 256)
