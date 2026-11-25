@@ -21,6 +21,9 @@ auto create_args(int argc, char* argv[])
             "gemm1_gate_up",
             "gemm1_gate_up | gemm2 | gemm2_per_slot | layer (gate_up with MXFP4 output, then down)")
         .insert("combine", "per_slot", "layer only: per_slot | atomic")
+        .insert("fused",
+                "0",
+                "layer only: > 0 runs the layer in one launch with this many intermediate slices")
         .insert("hidden", "1024", "layer only: hidden size")
         .insert("inter", "512", "layer only: intermediate size")
         .insert("mx_prec", "fp4xfp4", "A x B data types: fp4xfp4 (a4w4) or fp8xfp4 (a8w4)")
@@ -50,18 +53,19 @@ int main(int argc, char* argv[])
             if(prec != "fp4xfp4")
                 throw std::runtime_error("layer: only mx_prec=fp4xfp4");
             MxMoeLayerCase l;
-            l.experts    = arg_parser.get_int("experts");
-            l.num_tokens = arg_parser.get_int("NumTokens");
-            l.topk       = arg_parser.get_int("TopK");
-            l.hidden     = arg_parser.get_int("hidden");
-            l.inter      = arg_parser.get_int("inter");
-            l.per_slot   = arg_parser.get_str("combine") != "atomic";
-            l.init       = arg_parser.get_int("init");
-            l.seed       = arg_parser.get_uint32("seed");
-            l.validate   = arg_parser.get_int("validate") != 0;
-            l.warmup     = arg_parser.get_int("warmup");
-            l.repeat     = arg_parser.get_int("repeat");
-            const auto r = run_mx_moe_layer(l);
+            l.experts      = arg_parser.get_int("experts");
+            l.num_tokens   = arg_parser.get_int("NumTokens");
+            l.topk         = arg_parser.get_int("TopK");
+            l.hidden       = arg_parser.get_int("hidden");
+            l.inter        = arg_parser.get_int("inter");
+            l.per_slot     = arg_parser.get_str("combine") != "atomic";
+            l.fused_slices = arg_parser.get_int("fused");
+            l.init         = arg_parser.get_int("init");
+            l.seed         = arg_parser.get_uint32("seed");
+            l.validate     = arg_parser.get_int("validate") != 0;
+            l.warmup       = arg_parser.get_int("warmup");
+            l.repeat       = arg_parser.get_int("repeat");
+            const auto r   = run_mx_moe_layer(l);
             if(l.repeat > 0)
                 std::cout << "time gate_up(+quant) " << r.ms_gate_up << " ms, down " << r.ms_down
                           << " ms" << std::endl;
