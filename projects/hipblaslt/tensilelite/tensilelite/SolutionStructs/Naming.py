@@ -318,6 +318,14 @@ def _getName(state, requiredParameters: frozenset, splitGSU: bool, ignoreInterna
     else:
       requiredParametersTemp.discard("TDMFuse")
 
+    # StoreCachelineAlign only changes codegen on the gfx950 MXF4 subtile path. Name it only
+    # there and only when it is on, so every other kernel keeps its existing name.
+    if state.get("StoreCachelineAlign", False) \
+        and tuple(state.get("ISA", ())[:2]) == (9, 5) and isMxf4SubtilePath(state):
+      requiredParametersTemp.add("StoreCachelineAlign")
+    else:
+      requiredParametersTemp.discard("StoreCachelineAlign")
+
     # StinkyTofuRegisterAllocation=0 leaves Tensile's colouring, so naming it
     # would rename every kernel that does not opt in. Any other value changes
     # the colouring (and mode 3 changes which kernels are accepted), so it

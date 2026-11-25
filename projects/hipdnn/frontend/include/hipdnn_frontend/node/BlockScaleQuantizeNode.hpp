@@ -100,6 +100,19 @@ public:
                         + std::to_string(xDims[targetAxis]) + ") must be divisible by block_size ("
                         + std::to_string(blockSize.value()) + ")");
             }
+
+            // Scale holds one entry per block of x, so it has the same rank as x
+            auto scale = attributes.get_scale();
+            if(detail::areTensorDimensionsSet(scale))
+            {
+                HIPDNN_RETURN_IF_NE(scale->get_dim().size(),
+                                    xDims.size(),
+                                    ErrorCode::INVALID_VALUE,
+                                    "BlockScaleQuantizeNode scale tensor rank ("
+                                        + std::to_string(scale->get_dim().size())
+                                        + ") must equal input tensor rank ("
+                                        + std::to_string(xDims.size()) + ")");
+            }
         }
 
         // Quantize preserves shape -- output dims must match input if set

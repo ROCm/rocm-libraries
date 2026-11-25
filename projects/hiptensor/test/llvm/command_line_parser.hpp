@@ -29,5 +29,7 @@
 namespace hiptensor
 {
     void parseOptions(int argc, char** argv);
-}
 
+    // Prints the hipTensor test options, as --help does, without exiting.
+    void printHelp(char* programName);
+}
