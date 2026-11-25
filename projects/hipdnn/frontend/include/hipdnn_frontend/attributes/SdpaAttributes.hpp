@@ -791,12 +791,12 @@ public:
     /**
      * @brief Custom equality hooks for SDPA-specific attributes
      *
-     * Compares all scalar/flag/enum configuration — stats generation, masking
-     * modes, dropout probability, attention scale, diagonal band bounds,
+     * Logical equality compares all scalar/flag/enum configuration that defines
+     * the mathematical semantics of the attention operation — stats generation,
+     * masking modes, dropout probability, attention scale, diagonal band bounds,
      * paged-attention limits, diagonal alignment, compute-core mode, and
-     * implementation strategy — all of which define the mathematical
-     * semantics of the attention operation rather than tensor layout, so
-     * logical and strict equality coincide here.
+     * implementation strategy. The advisory unfuse_fma_hint is not lowered
+     * (Graph::sdpa warns and ignores it), so only strict equality compares it.
      */
     bool logicallyEqualsImpl(const SdpaAttributes& other) const
     {
@@ -810,11 +810,10 @@ public:
                && mma_core_mode == other.mma_core_mode && implementation == other.implementation;
     }
 
-    /// @brief Strict equality delegates to logical equality; no layout-only
-    ///        fields exist in this class to distinguish the two checks.
+    /// @brief Strict equality adds the advisory unfuse_fma_hint to logical equality.
     bool strictEqualsImpl(const SdpaAttributes& other) const
     {
-        return logicallyEqualsImpl(other);
+        return logicallyEqualsImpl(other) && unfuse_fma_hint == other.unfuse_fma_hint;
     }
     // -- cuDNN parity setters --
     // Each accepts the cuDNN frontend spelling/overload/semantics that is more

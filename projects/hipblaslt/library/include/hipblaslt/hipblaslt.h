@@ -109,6 +109,8 @@ typedef enum {
   HIPBLASLT_EPILOGUE_SIGMOID = 1024,              /**<Apply sigmoid activation function pointwise. */
   HIPBLASLT_EPILOGUE_SWISH_EXT = 65536,           /**<Apply Swish pointwise transform to the results (``x:=Swish(x, 1)``).*/
   HIPBLASLT_EPILOGUE_SWISH_BIAS_EXT = 65540,      /**<Apply Bias and then Swish transform.*/
+  HIPBLASLT_EPILOGUE_SWISH_AUX_EXT = 65664,       /**<Output GEMM results before applying Swish transform.*/
+  HIPBLASLT_EPILOGUE_SWISH_AUX_BIAS_EXT = 65668,  /**<Output GEMM results after applying bias but before applying Swish transform.*/
   HIPBLASLT_EPILOGUE_CLAMP_EXT = 131072,          /**<Apply pointwise clamp to the results (``x:=max(alpha, min(x, beta))``).*/
   HIPBLASLT_EPILOGUE_CLAMP_BIAS_EXT = 131076,     /**<Apply Bias and then clamp.*/
   HIPBLASLT_EPILOGUE_CLAMP_AUX_EXT = 131200,      /**<Output GEMM results before applying clamp transform.*/
@@ -263,13 +265,14 @@ typedef enum {
 
   /** Memory order of the data. See ``hipblasLtOrder_t``.
    *
-   * ``hipblasLtMatmul``, ``hipblasLtMatmulAlgoGetHeuristic``, and the ``hipblaslt_ext`` ``Gemm`` and
+   * ``hipblasLtMatmul`` and ``hipblasLtMatmulAlgoGetHeuristic`` accept ``HIPBLASLT_ORDER_ROW`` for A
+   * and B; see ``hipblasLtOrder_t`` for the limits. The ``hipblaslt_ext`` ``Gemm`` and
    * ``GroupedGemm`` APIs return ``HIPBLAS_STATUS_NOT_SUPPORTED`` when any of A, B, C, or D uses
-   * ``HIPBLASLT_ORDER_ROW``. Only ``hipblasLtMatrixTransform`` accepts ``HIPBLASLT_ORDER_ROW``.
-   * Swizzled orders apply to A and B only: the same APIs return ``HIPBLAS_STATUS_NOT_SUPPORTED``
-   * when C or D uses any order other than ``HIPBLASLT_ORDER_COL``.
-   * Grouped layouts (``HIPBLASLT_BATCH_MODE_GROUPED``) accept only ``HIPBLASLT_ORDER_COL`` and return
-   * ``HIPBLAS_STATUS_INVALID_VALUE`` for any other order.
+   * ``HIPBLASLT_ORDER_ROW``. Swizzled orders apply to A and B only: those APIs,
+   * ``hipblasLtMatmul``, and ``hipblasLtMatmulAlgoGetHeuristic`` return
+   * ``HIPBLAS_STATUS_NOT_SUPPORTED`` when C or D uses any order other than ``HIPBLASLT_ORDER_COL``.
+   * Grouped layouts (``HIPBLASLT_BATCH_MODE_GROUPED``) accept only
+   * ``HIPBLASLT_ORDER_COL`` and return ``HIPBLAS_STATUS_INVALID_VALUE`` for any other order.
    *
    * ``int32_t``, default: ``HIPBLASLT_ORDER_COL``.
    */
@@ -393,7 +396,7 @@ typedef enum {
     HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_UE4M3_EXT = 1003, /**<Not supported yet. Scaling factors are tensors that contain a dedicated scaling factor stored as an 8-bit ``HIP_R_8F_E4M3`` value for each 32-element block in the innermost dimension of the corresponding data tensor. */
     HIPBLASLT_MATMUL_MATRIX_SCALE_VEC16_UE5M3_EXT = 1004, /**<Not supported yet. Scaling factors are tensors that contain a dedicated scaling factor stored as an 8-bit ``HIP_R_8F_E5M3_EXT`` value for each 16-element block in the innermost dimension of the corresponding data tensor. */
     HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_UE5M3_EXT = 1005, /**<Not supported yet. Scaling factors are tensors that contain a dedicated scaling factor stored as an 8-bit ``HIP_R_8F_E5M3_EXT`` value for each 32-element block in the innermost dimension of the corresponding data tensor. */
-    HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_16BF_EXT = 1006, /**<Scaling factors are a dense ``[M][ceil(K/32)]`` tensor that contains a dedicated ``HIP_R_16BF`` scaling factor for each 32-element block in the K dimension of the corresponding data tensor, with the K/32 dimension innermost. Symmetric quantization only (no zero-point). Currently supported for matrix A only, with A of type ``HIP_R_4I``, and the scale type named here must equal the type of matrix B. */
+    HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_16BF_EXT = 1006, /**<Scaling factors are a dense ``[M][ceil(K/32)]`` tensor that contains a dedicated ``HIP_R_16BF`` scaling factor for each 32-element block in the K dimension of the corresponding data tensor, with the K/32 dimension innermost. Symmetric quantization only (no zero-point). Currently supported for matrix A only, with A of type ``HIP_R_4I``, and the scale type named here must equal the type of matrix B. On gfx1150 and gfx1151, pad every row of A, B, C, and D to an odd multiple of 128 bytes: row strides that are a multiple of 256 bytes hit the same DRAM channels (channel camping) and run slower. The scale tensor is dense and takes no padding. Also on gfx1150 and gfx1151, pass a workspace of at least 8 MiB: with less, the Stream-K kernels fall back to grids slower than the one the heuristic ranked. */
     HIPBLASLT_MATMUL_MATRIX_SCALE_VEC64_16BF_EXT = 1007, /**<Equivalent to ``HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_16BF_EXT`` with a block size of 64. */
     HIPBLASLT_MATMUL_MATRIX_SCALE_VEC128_16BF_EXT = 1008, /**<Equivalent to ``HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_16BF_EXT`` with a block size of 128. */
     HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_16BF_ZP_EXT = 1009, /**<Equivalent to ``HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_16BF_EXT`` plus int4 zero-points (asymmetric quantization). The scale pointer addresses one allocation: the ``[M][ceil(K/32)]`` scales as in ``HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_16BF_EXT``, then, at the next 256-byte boundary, ``ceil(M/8) * ceil(K/32)`` 32-bit words of packed int4 zero-points. Word ``(m/8)*ceil(K/32) + k/32`` holds the zero-point of row ``m`` and K element ``k`` in bits ``4*(m%8)`` to ``4*(m%8)+3``, in the domain selected by ``HIPBLASLT_MATMUL_DESC_A_INT4_ENCODING_EXT``. The dequantized weight is ``(q - z) * s``. Currently supported for matrix A only, with A of type ``HIP_R_4I``. */
@@ -508,13 +511,21 @@ typedef enum {
    *
    * Leading dimension is the stride (in elements) to the beginning of the next row in memory.
    *
-   * Supported by ``hipblasLtMatrixTransform`` only. Matmul does not support this order and returns
-   * ``HIPBLAS_STATUS_NOT_SUPPORTED``. To multiply row-major data, keep ``HIPBLASLT_ORDER_COL`` and
-   * use the identity ``(A * B)^T = B^T * A^T``: swap A and B, swap ``m`` and ``n``, and describe each
-   * matrix as its column-major transpose. The column-major result is ``(A * B)^T``, which is
-   * ``A * B`` in row-major order, so the output needs no transpose. Anything applied per row of D,
-   * such as a bias or an alpha vector, then applies per column of ``A * B``, and the scale for A
-   * becomes the scale for the second operand.
+   * Supported by ``hipblasLtMatrixTransform``, and by ``hipblasLtMatmul`` and
+   * ``hipblasLtMatmulAlgoGetHeuristic`` for A and B. For the supported combinations, the library
+   * rewrites internal copies of the layouts and transpose operations into an equivalent
+   * column-major problem. This rewrite does not copy or reorder matrix data and does not launch
+   * a separate transpose kernel. The heuristic and matmul use the same rewritten problem.
+   *
+   * Matmul returns ``HIPBLAS_STATUS_NOT_SUPPORTED`` for a row-major C or D, and for a row-major
+   * A or B combined with an operation other than ``HIPBLAS_OP_N`` or
+   * ``HIPBLAS_OP_T``, a block or vector scale mode, or an ``HIP_R_4I`` matrix. With a fused
+   * all-to-all epilogue, a row-major D returns ``HIPBLAS_STATUS_INVALID_VALUE`` instead, because
+   * the epilogue's own check runs first.
+   *
+   * Argument errors such as a null handle, descriptor, layout, or data pointer keep their usual
+   * status, and so does ``HIPBLASLT_OPERATION_INVALID``. The ``hipblaslt_ext`` APIs return
+   * ``HIPBLAS_STATUS_NOT_SUPPORTED`` for this order.
    */
   HIPBLASLT_ORDER_ROW = 1,
   
@@ -1543,7 +1554,9 @@ hipblasStatus_t
  *  algo                    Handle for matrix multiplication algorithm to be
  * used. See \ref hipblasLtMatmulAlgo_t. When NULL, an implicit heuristics query
  * with default search preferences will be performed to determine the actual
- * algorithm to use.
+ * algorithm to use. If no algorithm supports the problem, the call returns
+ * HIPBLAS_STATUS_NOT_SUPPORTED, except for a block-scaled problem that rocRoller
+ * generates kernels for, which returns HIPBLAS_STATUS_INTERNAL_ERROR.
  *  @param[in]
  *  workspace               Pointer to the workspace buffer allocated in the GPU
  * memory. Pointer must be 16B aligned (that is, the lowest 4 bits of the address must

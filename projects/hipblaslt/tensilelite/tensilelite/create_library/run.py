@@ -31,6 +31,7 @@ import gc
 import glob
 import itertools
 import os
+import random
 import shutil
 import subprocess
 import sys
@@ -145,6 +146,9 @@ def _baseArchs(archs: Collection[str]) -> List[str]:
 # run they must not disturb, so only they have to leave siblings alone; every
 # other run owns build_tmp outright and clears it as it always did.
 _GROUP_BUILD_ENV = "TENSILE_GROUP_BUILD"
+# Fixed seed for the kernel-order shuffle in writeSolutionsAndKernelsTCL: the
+# order is arbitrary but must be the same on every run of the same inputs.
+_KERNEL_ORDER_SEED = 0x7E45
 
 
 def buildTmpRoot(outputPath: Union[str, Path]) -> Path:
@@ -995,6 +999,15 @@ def writeSolutionsAndKernelsTCL(
             cmdlineArchs,
         )
 
+        # Kernels arrive grouped by logic file, so the largest kernels (those
+        # of the GridBased libraries) land on all workers at once and set the
+        # build's memory peak. A fixed-seed shuffle spreads them over the run.
+        # This lowers the expected number of large kernels in flight together;
+        # it is not a bound on the peak, and a different logic set can still
+        # draw an unlucky order. Results stay aligned with this list, and
+        # nothing downstream depends on the order (code objects link sorted,
+        # kernel info is keyed by kernel name).
+        random.Random(_KERNEL_ORDER_SEED).shuffle(uniqueAsmKernels)
         results = _mapKernels(
             compose(unaryAssemble, unaryWriteAssembly, unaryProcessKernelSource),
             uniqueAsmKernels,
