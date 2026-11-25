@@ -92,7 +92,9 @@ inline constexpr int64_t DENSE_STRIDE_MULTIPLE = 8;
 /// alignment default).
 inline constexpr int64_t DENSE_POINTER_ALIGN = 16;
 /// K/V loads may reach this many tiles past the padded length: an empty KV segment still
-/// loads tiles n_upper and n_upper + 1.
+/// loads tiles n_upper and n_upper + 1. This widens only the 2^31 check (denseKvSlabFits), not
+/// a memory bound: the kernel bounds each K/V slab's buffer resource at the last valid row, so
+/// those loads return 0 and read nothing past the view.
 inline constexpr int64_t DENSE_SLAB_SLACK_TILES = 2;
 /// The kernel's 32-bit index limit: strides, K/V byte offsets and Q/O element offsets stay
 /// below it.
@@ -285,10 +287,13 @@ inline std::optional<AttentionDenseStrides> packedLaunchStrides(const DenseStrid
  *        @p elemBytes: `rows > 0 ? elemBytes * ((rows - 1) * tokenStride + headSize) : 0`
  *        (rocKE's `dense_slab_bytes`), or nullopt when it passes int64_t.
  *
- * With elemBytes 1 it counts elements. One function for the host predicate and the kernel's
- * buffer-resource bound, so the gate and `num_records` cannot diverge. Not the unified 3-D
- * engine's gfx942KvHeadSpan: that kernel has its own element size and limits, and its formula
- * gives a slab of no rows no special answer.
+ * With elemBytes 1 it counts elements. One formula for the host predicate and the kernel's
+ * buffer-resource bound, so the gate and `num_records` cannot diverge, but the two pass
+ * different row counts: the kernel passes the valid rows (`seqlen_kv`), so `num_records` ends
+ * at the last valid element and never passes the view; the host passes denseKvReachRows (the
+ * padded length plus the slack) to bound the furthest offset a load can form. Not the unified
+ * 3-D engine's gfx942KvHeadSpan: that kernel has its own element size and limits, and its
+ * formula gives a slab of no rows no special answer.
  */
 inline std::optional<int64_t>
     denseSlabBytes(int64_t rows, int64_t tokenStride, int64_t headSize, int64_t elemBytes)

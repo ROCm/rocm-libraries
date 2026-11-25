@@ -37,7 +37,10 @@ packed-QKV or batch-sliced tensor needed a copy before the launch. Now:
 - **Per-slab addressing** in the bodies that read them: a 64-bit base pointer per (batch, head) slab
   of each tensor, formed per workgroup (per work item in the persistent bodies), and one K and one V
   buffer resource per slab whose size comes from one slab-bound function that the host admission
-  check also calls. A load past the slab returns zero and cannot reach another slab.
+  check also calls. The kernel passes the valid rows (`seqlen_kv`), so the bound ends at the last
+  valid element and, for a view that ends at its allocation, the last slab ends at the allocation's
+  end; the host passes the padded length plus the slack, only to keep the furthest offset a load can
+  form below 2^31 bytes. A load past the slab returns zero and cannot reach another slab.
 - **Lane / uniform split.** Everything that does not depend on the work item or the KV tile (the
   per-lane part of the K/V load offsets, slab bounds) is computed once per workgroup. The row term
   stays in the per-lane VGPR offset: a first form that put it into an SGPR multiply per load spilled

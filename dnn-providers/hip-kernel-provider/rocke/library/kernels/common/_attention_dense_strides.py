@@ -93,11 +93,16 @@ DENSE_ELEM_BYTES = 2
 # conservative rule for every body: the kernels tolerate less on some operands.
 DENSE_STRIDE_MULTIPLE = 8
 DENSE_POINTER_ALIGN = 16
-# K/V tiles a load may reach past the padded length. The gfx950 grid, KV-segment and
-# persistent bodies prime a K/V double buffer with tiles start_tile and
-# start_tile + 1 before their loop, and an empty KV segment starts at
-# start_tile = n_upper (the padded tile count), so the furthest tile they load is
-# n_upper + 1. The gfx950 sliding-window bodies stop one tile past the padded
+# K/V tiles a load may reach past the padded length. This widens only the host's
+# 2^31 check (:func:`dense_kv_reach_rows`): it is the furthest offset a load can
+# FORM, not a memory bound. The K/V buffer resource of a slab is bounded at the last
+# valid row (:func:`dense_slab_bytes` at ``seqlen_kv``), so a load into the padded
+# tail or the slack returns 0 and reads no memory past the view.
+#
+# The gfx950 grid, KV-segment and persistent bodies prime a K/V double buffer with
+# tiles start_tile and start_tile + 1 before their loop, and an empty KV segment
+# starts at start_tile = n_upper (the padded tile count), so the furthest tile they
+# load is n_upper + 1. The gfx950 sliding-window bodies stop one tile past the padded
 # length; the gfx942 bodies load tile j inside the loop and stop at n_upper - 1.
 # test_kv_loads_stay_inside_the_admitted_reach and
 # test_the_slack_is_what_the_deepest_prefetch_needs (in
@@ -370,7 +375,7 @@ def _view_is_packed(view: Any) -> bool:
 
 
 # --------------------------------------------------------------------------- #
-# The bytes a load may reach (one rule for the predicate and the kernels)
+# Slab extents: one formula, two row counts (the kernels' bound, the host's reach)
 # --------------------------------------------------------------------------- #
 
 
@@ -388,10 +393,20 @@ def dense_slab_bytes(
     With ``b`` None, ``rows`` and ``token_stride`` are Python ints and so is the
     result (``elem_bytes=1`` gives elements). With an IR builder ``b`` they are
     ``i32`` values and the result is the ``i32`` ``num_records`` of a K/V slab
-    buffer resource, with ``rows`` the valid rows (at most ``seqlen_kv``).
-    :func:`dense_strides_admit` holds every offset a load forms, up to the
-    furthest element of :func:`dense_kv_reach_rows` (``seqlen_kv`` plus the
-    slack), below 2^31 bytes, so that record count is below 2^31 too.
+    buffer resource.
+
+    The two callers pass different row counts, on purpose:
+
+    * a kernel passes the valid rows, ``seqlen_kv`` itself: the slab's record count
+      ends at the last element of the last valid row, never at the padding to
+      ``block_n`` and never at the slack. For a K/V view that ends at its
+      allocation (a packed ``[B, Skv, Hkv, D]`` tensor, say) the last
+      (batch, head) slab therefore ends exactly at the allocation's end, and a load
+      past it returns 0 with no fault;
+    * the host admission passes :func:`dense_kv_reach_rows` (``seqlen_kv`` padded
+      to ``block_n`` plus the slack) to bound the furthest offset a load can form
+      below 2^31 bytes. That number is never a record count. It is at least the
+      record count, so the record count is below 2^31 too.
     """
     if b is None:
         rows, token_stride = int(rows), int(token_stride)

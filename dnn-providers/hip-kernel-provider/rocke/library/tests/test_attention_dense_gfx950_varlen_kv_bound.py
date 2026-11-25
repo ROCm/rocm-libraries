@@ -23,7 +23,10 @@ which ``attention_dense_signature`` fixes.
 
 The bodies that read their strides bound each (batch, KV head) slab instead, on gfx950
 and gfx942 alike; an over-wide slab bound is just as invisible to the numeric tests,
-so :func:`test_strided_kv_bound_is_the_slab_extent` pins it here for both.
+so :func:`test_strided_kv_bound_is_the_slab_extent` pins it here for both, and
+:func:`test_strided_kv_bound_never_passes_the_view_end` ties it to the end of K/V views
+of several layouts, at key counts that are and are not a multiple of ``block_n``: the
+last slab ends on the allocation's end, never past it.
 
 The host admits a stride only if the furthest row a K/V load may address,
 ``dense_kv_reach_rows`` (the padded length plus ``DENSE_SLAB_SLACK_TILES`` tiles), stays
@@ -308,15 +311,16 @@ def _build(arch, spec):
     return _MODULES[arch].build_attention_dense(spec, arch=arch)
 
 
-@pytest.mark.parametrize(
-    ("arch", "body", "shape"),
-    [
-        pytest.param(arch, body, shape, id=f"{arch}-{body}-{shape}")
-        for arch, body in _SLAB_BODIES
-        for shape in _SHAPES
-        if body != "wide_dma" or _SHAPES[shape][1] == 128
-    ],
-)
+# Every (arch, body, shape) that reads its strides; the wide-DMA body is head size 128 only.
+_SLAB_CASES = [
+    pytest.param(arch, body, shape, id=f"{arch}-{body}-{shape}")
+    for arch, body in _SLAB_BODIES
+    for shape in _SHAPES
+    if body != "wide_dma" or _SHAPES[shape][1] == 128
+]
+
+
+@pytest.mark.parametrize(("arch", "body", "shape"), _SLAB_CASES)
 def test_strided_kv_bound_is_the_slab_extent(arch, body, shape):
     """A body that reads its strides bounds each (batch, KV head) slab of K and of V
     by its last valid row: ``seqlen_kv > 0 ? 2 * ((seqlen_kv - 1) * stride + D) : 0``
@@ -339,6 +343,74 @@ def test_strided_kv_bound_is_the_slab_extent(arch, body, shape):
                 f"{name} bound is {got} bytes at {params}; want seqlen_kv > 0 ? "
                 f"2 * ((seqlen_kv - 1) * {token} + {head_size}) : 0 = {want}"
             )
+
+
+# A K/V view of dims [B, Skv, Hkv, D] as (batch, head, token) element strides, by
+# layout: contiguous [B, Skv, Hkv, D]; contiguous [B, Hkv, Skv, D] read through the same
+# logical dims; and token rows padded by 8 elements (a multiple the host admits).
+_VIEW_LAYOUTS = {
+    "packed": lambda s, h, d: (s * h * d, d, h * d),
+    "head_major": lambda s, h, d: (h * s * d, s * d, d),
+    "padded_rows": lambda s, h, d: (s * (h * d + 8), d, h * d + 8),
+}
+
+
+@pytest.mark.parametrize(("arch", "body", "shape"), _SLAB_CASES)
+def test_strided_kv_bound_never_passes_the_view_end(arch, body, shape):
+    """No K or V slab bound reaches past the end of its view, and the last (batch, head)
+    slab ends exactly on it. The view is the whole allocation: its last byte is the
+    last element of the last row of the last slab. So the padded tail of the last tile
+    and the host's slack tiles, which a load still forms offsets into, read as 0 and
+    never touch memory past the allocation: the bound is the valid rows, not the reach
+    :func:`dense_kv_reach_rows` admits strides for.
+
+    The bound of each body's IR is evaluated at key counts that are a multiple of
+    ``block_n`` (one tile, three tiles), that are not (one past a tile, five short of
+    three tiles) and one key, over every pair of K and V layouts, so a V bound that
+    borrows K's token stride, a bound that rounds up to ``block_n`` and one that adds
+    slack tiles each end past the view for some slab."""
+    spec = _spec(shape, varlen=False, arch=arch, **_SLAB_BODIES[(arch, body)])
+    assert _MODULES[arch].body_serves_strides(spec), "not a body that reads strides"
+    _, head_size, hkv = _SHAPES[shape]
+    block_n, batch = spec.block_n, 3
+    bounds = _kv_bounds(_build(arch, spec))
+    keys = (block_n, 3 * block_n, block_n + 1, 3 * block_n - 5, 1)
+    for skv in keys:
+        for k_layout in _VIEW_LAYOUTS:
+            for v_layout in _VIEW_LAYOUTS:
+                views = {
+                    "%k_ptr": _VIEW_LAYOUTS[k_layout](skv, hkv, head_size),
+                    "%v_ptr": _VIEW_LAYOUTS[v_layout](skv, hkv, head_size),
+                }
+                params = {
+                    **_PARAMS,
+                    "%seqlen_kv": skv,
+                    "%stride_k_token": views["%k_ptr"][2],
+                    "%stride_v_token": views["%v_ptr"][2],
+                }
+                for name, bound in bounds:
+                    sb, sh, st = views[name]
+                    # One past the view's last element, in bytes.
+                    view_end = DENSE_ELEM_BYTES * (
+                        (batch - 1) * sb + (hkv - 1) * sh + (skv - 1) * st + head_size
+                    )
+                    nrec = _evaluate(bound, name, params)
+                    where = f"{name} at seqlen_kv={skv} (K {k_layout}, V {v_layout})"
+                    for b_idx in range(batch):
+                        for h_idx in range(hkv):
+                            end = DENSE_ELEM_BYTES * (b_idx * sb + h_idx * sh) + nrec
+                            assert end <= view_end, (
+                                f"{where}: the slab of batch {b_idx}, head {h_idx} "
+                                f"ends at byte {end}, {end - view_end} past the "
+                                f"view's end {view_end}; the bound is {nrec} bytes"
+                            )
+                    last_end = (
+                        DENSE_ELEM_BYTES * ((batch - 1) * sb + (hkv - 1) * sh) + nrec
+                    )
+                    assert last_end == view_end, (
+                        f"{where}: the last slab ends at byte {last_end}, the view "
+                        f"at {view_end}: the bound is not the extent of the valid rows"
+                    )
 
 
 # ---- The furthest K/V row a strided body loads, against the host's slack ----
@@ -594,12 +666,7 @@ def _reach_points(block_n):
     return (0, block_n, 3 * block_n)
 
 
-_REACH_CASES = [
-    pytest.param(arch, body, shape, id=f"{arch}-{body}-{shape}")
-    for arch, body in _SLAB_BODIES
-    for shape in _SHAPES
-    if body != "wide_dma" or _SHAPES[shape][1] == 128
-]
+_REACH_CASES = _SLAB_CASES
 
 
 @pytest.mark.parametrize(("arch", "body", "shape"), _REACH_CASES)
