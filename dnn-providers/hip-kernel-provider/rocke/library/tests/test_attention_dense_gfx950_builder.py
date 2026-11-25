@@ -61,12 +61,28 @@ def native_emitter():
                 "native parity required but ROCKE_GFX950_DENSE_EMITTER is missing"
             )
         return None
-    executable = Path(path).resolve(strict=True)
-    end = subprocess.run(
-        [executable, str(len(_CONFIGS)), "ir"], capture_output=True, timeout=30
-    )
-    assert end.returncode and b"unknown config index" in end.stderr and not end.stdout
-    return executable
+    return Path(path).resolve(strict=True)
+
+
+def test_gfx950_dense_emitter_end_of_configs(native_emitter, monkeypatch):
+    # run_diff must see the end of both tables, not a failed build at this index.
+    monkeypatch.syspath_prepend(str(platform_instances_dir() / "differential"))
+    from run_diff import Emission, is_end_emission, python_emitter_env
+
+    parity = Path(__file__).parent / "parity"
+    emitters = [[sys.executable, parity / f"{_FAMILY}_emit.py"]]
+    if native_emitter is not None:
+        emitters.append([native_emitter])
+    for command in emitters:
+        end = subprocess.run(
+            [*command, str(len(_CONFIGS)), "ir"],
+            env=python_emitter_env(parity),
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        result = Emission(end.returncode, bool(end.stdout), None, end.stderr)
+        assert is_end_emission(result), (command, result)
 
 
 def _native_matches(executable, index, mode, expected_bytes, flavor):

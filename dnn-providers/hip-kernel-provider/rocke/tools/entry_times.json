@@ -1,6 +1,6 @@
 {
   "linux": {
-    "source": "Linux gfx942 CI test job run in emulation, quick and standard tiers, one run, 2026-11-22; rocke_library_conv_fwd_aot_packaging_pytest less its bf16 whole-sweep items (now comprehensive), timed on a build host; rocke_engine_modules_check and rocke_library_engine_parity_pytest from a second emulation run, with the C++ engine modules built",
+    "source": "Linux gfx942 CI test job run in emulation, quick and standard tiers, one run, 2026-11-22; rocke_library_conv_fwd_aot_packaging_pytest less its bf16 whole-sweep items (now comprehensive), timed on a build host; rocke_engine_modules_check and rocke_library_engine_parity_pytest from a second emulation run, with the C++ engine modules built; rocke_gfx950_attention_dense_builder_host and rocke_library_gfx950_dense_builder_pytest timed unsharded on an installed Linux gfx950 provider, without pybind",
     "seconds": {
       "rocke_arch_domain_refusal": 0.0,
       "rocke_arch_domain_reproducibility": 9.92,
@@ -46,6 +46,7 @@
       "rocke_gfx12_wmma_ops": 0.05,
       "rocke_gfx942_attention_4warp_gqa_lower_to_llvm": 0.04,
       "rocke_gfx942_attention_tiled_2d_hbm_knobs": 0.03,
+      "rocke_gfx950_attention_dense_builder_host": 0.0,
       "rocke_gfx950_f8f6f4_mfma_ops": 0.3,
       "rocke_global_access_alignment": 0.0,
       "rocke_global_load_index_width": 0.0,
@@ -73,6 +74,7 @@
       "rocke_library_dsa_pytest": 2.4,
       "rocke_library_engine_parity_pytest": 19.64,
       "rocke_library_gdn_pytest": 106.08,
+      "rocke_library_gfx950_dense_builder_pytest": 6.27,
       "rocke_library_gpu_pytest": 53.84,
       "rocke_library_host_pytest": 1.98,
       "rocke_library_mla_pytest": 13.92,

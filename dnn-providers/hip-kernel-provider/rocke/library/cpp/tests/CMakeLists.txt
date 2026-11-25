@@ -5,11 +5,11 @@
 # installed exactly like the engine's own C++ tests (platform/tests), so the
 # installed CTest file lists them with the rest.
 
-# The standard builder parity pytest compares each dense config from the same
-# real C emitter the developer differential gate links. CI needs no pybind.
-set(_dense_emit_source "${CMAKE_CURRENT_SOURCE_DIR}/../../tests/parity/attention_dense_gfx950_emit.c")
-set_source_files_properties("${_dense_emit_source}" PROPERTIES LANGUAGE CXX)
-add_executable(rocke_gfx950_dense_parity_emit "${_dense_emit_source}")
+# Compile the installed emitter as a C client of the C++ library. Only the
+# test build needs a C compiler; the engine itself remains C++-only.
+enable_language(C)
+add_executable(rocke_gfx950_dense_parity_emit ../../tests/parity/attention_dense_gfx950_emit.c)
+target_compile_features(rocke_gfx950_dense_parity_emit PRIVATE c_std_11)
 target_link_libraries(rocke_gfx950_dense_parity_emit PRIVATE rocke_library_core)
 rocke_cxx_test_installed_name(_rocke_installed_name rocke_gfx950_dense_parity_emit)
 set_target_properties(rocke_gfx950_dense_parity_emit PROPERTIES OUTPUT_NAME "${_rocke_installed_name}")

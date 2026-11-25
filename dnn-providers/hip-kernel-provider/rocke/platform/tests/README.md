@@ -402,10 +402,13 @@ ROCKE_LLVM_FLAVOR=llvm22 python tools/check_byte_identity.py --only attention_de
 The installed standard entry `rocke_library_gfx950_dense_builder_pytest` shards
 the matrix **by config**, separately from the other attention CPU checks.
 It compares native and Python serialized IR and all four LLVM flavors against
-each other and checks the existing library differential hashes. CTest supplies
-`ROCKE_GFX950_DENSE_EMITTER`; a missing executable is not a Python fallback. The
-matrix does not also run in the quick Python-only golden entries when this
-native lane is built. Regenerate intended output changes with
+each other and checks the library differential hashes. The test build compiles
+the `.c` emitter with a C11-capable C compiler and links the C++ library. CTest
+supplies the installed executable via `ROCKE_GFX950_DENSE_EMITTER`; no compiler
+or pybind is needed at test time. A missing executable fails. One additional
+item checks that both emitters reject the first index outside the matrix.
+The quick Python-only golden entries do not duplicate this standard matrix
+when its native emitter is built. Regenerate intended output changes with
 `python tools/golden.py rerecord differential --only attention_dense_gfx950`
 from the rocKE root. `rocke_gfx950_attention_dense_builder_host` separately
 checks native refusal precedence and arena reuse/concurrent builds. These are
