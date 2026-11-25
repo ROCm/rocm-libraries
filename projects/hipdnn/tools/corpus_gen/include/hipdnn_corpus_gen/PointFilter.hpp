@@ -58,27 +58,43 @@ inline bool parseKeepClauses(const std::vector<std::string>& clauses,
     return true;
 }
 
-/// @brief Whether @p point satisfies every clause.
+/// @brief Whether @p clauses admit @p value for @p parameter: they do not name it, or one that
+/// does names this value.
 ///
 /// Clauses on different parameters are AND-ed; repeats of the same parameter are OR-ed, so
-/// `--keep q.head_dim=64 --keep q.head_dim=128` means either. A point lacking a filtered
-/// parameter fails.
+/// `--keep q.head_dim=64 --keep q.head_dim=128` means either. This is the one rule @ref keeps
+/// applies to a point and the exploration applies to a categorical axis, so a keep narrows the
+/// combinations to exactly the ones whose points it can admit.
+inline bool admitsValue(const std::vector<KeepClause>& clauses,
+                        const std::string& parameter,
+                        const ParameterValue& value)
+{
+    bool named = false;
+    const auto held = asText(value);
+    for(const auto& clause : clauses)
+    {
+        if(clause.parameter != parameter)
+        {
+            continue;
+        }
+        named = true;
+        if(clause.value == held)
+        {
+            return true;
+        }
+    }
+    return !named;
+}
+
+/// @brief Whether @p point satisfies every clause.
+///
+/// A point lacking a filtered parameter fails.
 inline bool keeps(const std::vector<KeepClause>& clauses, const ProblemPoint& point)
 {
     for(const auto& clause : clauses)
     {
         const auto found = point.find(clause.parameter);
-        if(found == point.end())
-        {
-            return false;
-        }
-
-        const auto held = asText(found->second);
-        const auto satisfied
-            = std::any_of(clauses.begin(), clauses.end(), [&](const KeepClause& alternative) {
-                  return alternative.parameter == clause.parameter && alternative.value == held;
-              });
-        if(!satisfied)
+        if(found == point.end() || !admitsValue(clauses, clause.parameter, found->second))
         {
             return false;
         }

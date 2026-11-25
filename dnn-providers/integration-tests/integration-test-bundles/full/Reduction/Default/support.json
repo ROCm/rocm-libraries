@@ -1,0 +1,53 @@
+{
+  "claims": {
+    "MIOPEN_ENGINE": [
+      {
+        "cases": [
+          "1_16_8_8_fp16_nchw_modeavg",
+          "1_16_8_8_fp16_nchw_modemin",
+          "1_16_8_8_fp16_nhwc_modeavg",
+          "1_16_8_8_fp16_nhwc_modemin",
+          "1_16_8_8_fp32_nchw_modeadd",
+          "1_16_8_8_fp32_nchw_modemax",
+          "1_16_8_8_fp32_nchw_modenorm1",
+          "1_16_8_8_fp32_nhwc_modeadd",
+          "1_16_8_8_fp32_nhwc_modemax",
+          "1_16_8_8_fp32_nhwc_modenorm1",
+          "1_1_32_32_fp16_nchw_modemax",
+          "1_1_32_32_fp16_nhwc_modeadd",
+          "1_1_32_32_fp32_nchw_modemax",
+          "1_1_32_32_fp32_nhwc_modeadd",
+          "2_3_16_8_fp16_nchw_modeadd",
+          "2_3_16_8_fp16_nhwc_modemax",
+          "2_3_16_8_fp32_nchw_modeadd",
+          "2_3_16_8_fp32_nhwc_modemax",
+          "2_3_4_4_fp16_nchw_modeadd",
+          "2_3_4_4_fp32_nchw_modeadd",
+          "2_3_4_4_fp32_nhwc_modemax",
+          "4_8_4_4_fp16_nchw_modemax_681fb4",
+          "4_8_4_4_fp16_nchw_modemax_dfe69c",
+          "4_8_4_4_fp16_nhwc_modeadd_9a86f9",
+          "4_8_4_4_fp32_nchw_modemax_9a8afe",
+          "4_8_4_4_fp32_nchw_modemax_cab446",
+          "4_8_4_4_fp32_nhwc_modeadd_56c2a9",
+          "4_8_4_4_fp32_nhwc_modeadd_fd73be"
+        ],
+        "support": {
+          "gfx1201": [
+            "linux"
+          ],
+          "gfx90a": [
+            "linux"
+          ],
+          "gfx942": [
+            "linux"
+          ],
+          "gfx950": [
+            "linux"
+          ]
+        }
+      }
+    ]
+  },
+  "version": 1
+}
