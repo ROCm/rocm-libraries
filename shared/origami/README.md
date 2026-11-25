@@ -390,6 +390,8 @@ grep ORIGAMI_ENABLE_NN build/origami-config.cmake
 # or inspect compile definitions on the origami target
 ```
 
+**Using an installed NN build.** A shared `liborigami` has yaml-cpp built in, so `find_package(origami)` needs nothing extra. A static `liborigami` does not: its consumers link `yaml-cpp::yaml-cpp`, so `find_package(origami)` runs `find_package(yaml-cpp 0.8)` and fails if no yaml-cpp 0.8 or newer is installed. That holds whether Origami found yaml-cpp or fetched it, because a fetched copy is not installed. This applies with or without `ORIGAMI_INSTALL_COMPONENT`.
+
 ### Model Weights
 
 Weights live under:

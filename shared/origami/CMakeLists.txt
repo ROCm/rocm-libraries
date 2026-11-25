@@ -208,6 +208,17 @@ if(ORIGAMI_ENABLE_NN)
     # Static origami (hipBLASLt sets ORIGAMI_BUILD_SHARED_LIBS=OFF) would otherwise
     # export that private link and install(EXPORT) fails at generate time.
     target_link_libraries(origami PRIVATE $<BUILD_INTERFACE:yaml-cpp::yaml-cpp>)
+    # A static liborigami does not carry its dependencies, so a consumer's final link
+    # needs yaml-cpp too. The exported target links the name origami_yaml_cpp, and
+    # cmake/origami-yaml-deps.cmake, installed with the package config on both install
+    # paths below, defines it and finds yaml-cpp. The name is used instead of
+    # yaml-cpp::yaml-cpp because install(EXPORT) rejects that one when it is the fetched
+    # target. A shared liborigami has yaml-cpp inside it (the fetched copy is static) or
+    # as its own dependency, so its consumers need nothing.
+    if(NOT BUILD_SHARED_LIBS)
+        target_link_libraries(origami INTERFACE $<INSTALL_INTERFACE:origami_yaml_cpp>)
+        set(_origami_yaml_deps "${CMAKE_CURRENT_SOURCE_DIR}/cmake/origami-yaml-deps.cmake")
+    endif()
 endif()
 
 target_link_libraries(origami PRIVATE hip::host)
@@ -238,6 +249,14 @@ if(ORIGAMI_INSTALL_COMPONENT)
         COMPONENT "${ORIGAMI_INSTALL_COMPONENT}"
     )
 
+    if(_origami_yaml_deps)
+        # origami-config.cmake includes it when present.
+        install(FILES "${_origami_yaml_deps}"
+            DESTINATION "${_origami_config_dir}"
+            COMPONENT "${ORIGAMI_INSTALL_COMPONENT}"
+        )
+    endif()
+
     include(CMakePackageConfigHelpers)
     configure_package_config_file(
         "${CMAKE_CURRENT_SOURCE_DIR}/cmake/origami-config.cmake.in"
@@ -266,6 +285,13 @@ else()
         COMPONENT devel
     )
 
+    # rocm_export_targets() writes its own config file, not origami-config.cmake.in. Its
+    # INCLUDE files are installed beside it and included before the targets file.
+    set(_origami_export_include)
+    if(_origami_yaml_deps)
+        set(_origami_export_include INCLUDE "${_origami_yaml_deps}")
+    endif()
+
     rocm_export_targets(
         TARGETS
         roc::origami
@@ -273,10 +299,13 @@ else()
         DEPENDS
         PACKAGE
         hip
+        ${_origami_export_include}
         NAMESPACE
         roc::
     )
+    unset(_origami_export_include)
 endif()
+unset(_origami_yaml_deps)
 
 if(ORIGAMI_BUILD_TESTING OR BUILD_TESTING)
     rocm_install(TARGETS origami-tests COMPONENT tests)
