@@ -616,6 +616,15 @@ class TileInfo:
       self.lrSubtileShape      = list(lr_cfg.subtileShape)
       self.lrLocalSubtileGrid  = [math.ceil(self.localMMATileGrid[0] / lr_cfg.subtileShape[0]),
                                    int(self.localMMATileGrid[1] / lr_cfg.subtileShape[1])]
+      # Per-tile scale read: an odd per-wave MMA-tile count means a wave (or a
+      # workgroup) can start in the second half of a 32-row scale swizzle group,
+      # so which two tiles share a scale dword depends on that start parity and
+      # cannot be fixed at compile time.  Each tile then reads its own dword,
+      # byte-rotated so its half sits in byte 0, through one of two address
+      # registers (even-numbered / odd-numbered tiles) that the setup code
+      # points at the right group and byte for the runtime parity.  Even counts
+      # keep the pair-per-register path unchanged.
+      self.perTileScale        = (kernel["MIWaveTile"][0 if isA else 1] % 2 == 1)
       self.loadRatioGR         = 0
       self.numGRPerSubtile     = 1
       self.numGRTotal          = 1  # one buffer_load covers the full scale tile grid
@@ -806,8 +815,11 @@ class TileInfo:
     # should be managed by scale-specific alloc in SubtileScaleEmit.py
     if isinstance(self.geometry, MXScaleTilePair):
       self._sharedVgprGROffset = [writer.vgprPool.checkOut(1, tag="allocOffsetRegisters_sharedVgprGROffset")]
-      self._sharedVgprLROffset = [writer.vgprPool.checkOut(1, tag="allocOffsetRegisters_sharedVgprLROffset")]
-      self._sharedVgprLROffsetSwap = [writer.vgprPool.checkOut(1, tag="allocOffsetRegisters_sharedVgprLROffsetSwap")]
+      # Per-tile scale read with more than one tile per wave needs a second
+      # address register for the odd-numbered tiles (see perTileScale).
+      numLR = 2 if (self.perTileScale and int(self.localMMATileGrid[0]) > 1) else 1
+      self._sharedVgprLROffset = [writer.vgprPool.checkOut(1, tag="allocOffsetRegisters_sharedVgprLROffset") for _ in range(numLR)]
+      self._sharedVgprLROffsetSwap = [writer.vgprPool.checkOut(1, tag="allocOffsetRegisters_sharedVgprLROffsetSwap") for _ in range(numLR)]
 
   def allocVgprTileRegisters_legacy(self, writer, kernel):
     """Allocate data tile registers for A/B/D MMA operands.
@@ -1439,8 +1451,11 @@ def mainLoop(writer, kernel):
     grBGran = ReadGranularity(mn=tiB.localMMATileGrid[0], k=tiB.localMMATileGrid[1])
   else:
     grBGran = ReadGranularity(mn=grMNB, k=grKB) if tiB.loadRatioGR <= 1.0 else ReadGranularity(mn=2*grMNB, k=grKB)
-  lrSAGran = ReadGranularity(mn=scaleTiA.lrSubtileShape[0], k=scaleTiA.lrSubtileShape[1]) if scaleTiA else None
-  lrSBGran = ReadGranularity(mn=scaleTiB.lrSubtileShape[0], k=scaleTiB.lrSubtileShape[1]) if scaleTiB else None
+  def _scaleLRGran(ti):
+    # One scale read per tile in per-tile mode, else one per M-adjacent pair.
+    return ReadGranularity(mn=1 if ti.perTileScale else ti.lrSubtileShape[0], k=ti.lrSubtileShape[1])
+  lrSAGran = _scaleLRGran(scaleTiA) if scaleTiA else None
+  lrSBGran = _scaleLRGran(scaleTiB) if scaleTiB else None
   grSAGran = ReadGranularity(mn=scaleTiA.localMMATileGrid[0], k=scaleTiA.localMMATileGrid[1]) if scaleTiA else None
   grSBGran = ReadGranularity(mn=scaleTiB.localMMATileGrid[0], k=scaleTiB.localMMATileGrid[1]) if scaleTiB else None
 

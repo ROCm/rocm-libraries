@@ -11132,13 +11132,16 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
           requiredUnalignedSgprVar.append("SwapMXSA")
         if kernel["ProblemType"]["MXBlockB"]:
           requiredUnalignedSgprVar.append("SwapMXSB")
-        # A 16-wide MX tile is half of a 32-row scale swizzle group: remember which
-        # half this workgroup owns (set per tile in computeLoadSrd, consumed by the
-        # scale local-read address setup).
-        if kernel["ProblemType"]["MXBlockA"] and kernel["MacroTileA"] < 32:
-          requiredUnalignedSgprVar.append("ScaleByteOffMXSA")
-        if kernel["ProblemType"]["MXBlockB"] and kernel["MacroTileB"] < 32:
-          requiredUnalignedSgprVar.append("ScaleByteOffMXSB")
+        # A macrotile that is an odd number of 16-row MMA tiles (one wave, odd
+        # MIWaveTile) starts in the second half of a 32-row scale swizzle group
+        # for every other workgroup: remember that parity (set per tile in
+        # computeLoadSrd, consumed by the scale local-read address setup).  With
+        # several waves in the dim the macrotile is whole groups and the parity
+        # is per wave instead, computed in the setup code.
+        for _d, _tc in ((0, "MXSA"), (1, "MXSB")):
+          if kernel["ProblemType"]["MXBlock%s" % _tc[-1]] and kernel["MIWaveTile"][_d] % 2 == 1 \
+              and kernel["MIWaveGroup"][_d] == 1:
+            requiredUnalignedSgprVar.append("ScaleByteOff%s" % _tc)
       if kernel["ProblemType"]["Sparse"] and kernel["LocalWriteUseSgprMetadata"]:
         requiredUnalignedSgprVar.append("SwapMetadata")
 

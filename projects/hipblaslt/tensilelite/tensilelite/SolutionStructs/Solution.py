@@ -1536,8 +1536,10 @@ class Solution(collections.abc.Mapping):
       # mxfp8 kernels that cannot partition fall off the dual-period path (and are
       # then served by the DepthU=256 non-dual-period solution) instead of hitting
       # the prefetchNextPartition assertion in the scheduler.
+      # An odd MIWaveTile reads its scales per tile (granularity 1, see
+      # TileInfo.perTileScale), so an odd count >= 3 also splits in two.
       def _dualPeriodDimCanPartition(t):
-        return t % 2 == 0 and t >= 4
+        return (t % 2 == 0 and t >= 4) or (t % 2 == 1 and t >= 3)
       dualPeriodMXFP8 = (
           isgfx950
           and state["PrefetchGlobalRead"] == 2
@@ -1639,11 +1641,11 @@ class Solution(collections.abc.Mapping):
       # scale swizzle tile in the dual-period path, else the loop DepthU.
       scalePeriodKForLoad = 256 if dualPeriodMXFP8 else state["DepthU"]
       if state["ProblemType"]["MXBlockA"]:
-        numBytesMXSA = (scalePeriodKForLoad // state["ProblemType"]["MXBlockA"]) * state["MacroTile0"]
+        numBytesMXSA = (scalePeriodKForLoad // state["ProblemType"]["MXBlockA"]) * roundUpToNearestMultiple(state["MacroTile0"], 32)
         if bytesLoaded < numBytesMXSA:
           reject(state, printRejectionReason, "Unable to load MXSA scales using one load per wave")
       if state["ProblemType"]["MXBlockB"]:
-        numBytesMXSB = (scalePeriodKForLoad // state["ProblemType"]["MXBlockB"]) * state["MacroTile1"]
+        numBytesMXSB = (scalePeriodKForLoad // state["ProblemType"]["MXBlockB"]) * roundUpToNearestMultiple(state["MacroTile1"], 32)
         if bytesLoaded < numBytesMXSB:
           reject(state, printRejectionReason, "Unable to load MXSB scales using one load per wave")
 
@@ -3129,33 +3131,25 @@ class Solution(collections.abc.Mapping):
           return
       if state["UseSubtileImpl"] and (state["ProblemType"]["MXBlockA"] or state["ProblemType"]["MXBlockB"]):
         # The MX scale local-read packs 2 MMA tiles in M x 2 in K per VGPR
-        # (MXScaleLRGeometry.subtileShape = (2, 2)), which historically forced
-        # even MIWaveTile.  mxfp8 (8-bit-float A and B) now sizes the scale grid
-        # with ceil (see TileInfo MXScale branch), so an odd MIWaveTile allocates
-        # a full trailing scale group whose unused half is inert.
+        # (MXScaleLRGeometry.subtileShape = (2, 2)): scales are host-pre-swizzled
+        # in 32-row groups, two 16-row MMA tiles per group.  An even MIWaveTile
+        # keeps every wave and workgroup on a group boundary, so the tile pair
+        # sharing a scale dword is fixed at compile time.
         #
-        # The supported odd case is a single MMA tile in a single wave --
-        # MIWaveTile == 1 and MIWaveGroup == 1, i.e. MacroTile == 16 in that dim:
-        # the 16xN / Mx16 skinny target.  A 16-wide tile is exactly half of the
-        # 32-row MX scale swizzle group, so two adjacent workgroups share one
-        # group: computeLoadSrd places the scale SRD base at the group
-        # (floor(WG*MT/swizzleSize0)) and records which half the workgroup owns;
-        # the scale local-read address is offset by that many bytes so the
-        # compile-time byte select picks the right half.
-        # A larger odd MIWaveTile (e.g. 3, MT48) is 1.5 swizzle groups and does
-        # not align, and odd MIWaveTile with >1 wave has inexact per-wave scale
-        # sizing; both, and fp4/fp6, stay even.
+        # mxfp8 (8-bit-float A and B) also accepts an odd MIWaveTile.  A wave or
+        # workgroup can then start in the second half of a group, so each tile
+        # reads its own scale dword, byte-rotated so its half lands in byte 0,
+        # through address registers set up for the runtime start parity
+        # (TileInfo.perTileScale, lraTileAssignmentScaleSwizzled).  fp4/fp6 stay
+        # even: the per-tile read is implemented for the dual-period path only.
         is8bitMX = (state["ProblemType"]["DataTypeA"].is8bitFloat()
                     and state["ProblemType"]["DataTypeB"].is8bitFloat())
         def _miWaveTileDimOk(d):
-          return (state["MIWaveTile"][d] % 2 == 0
-                  or (is8bitMX and state["MIWaveTile"][d] == 1
-                      and state["MIWaveGroup"][d] == 1))
+          return state["MIWaveTile"][d] % 2 == 0 or is8bitMX
         if not (_miWaveTileDimOk(0) and _miWaveTileDimOk(1)):
           reject(state, printRejectionReason,
                  "UseSubtileImpl=1 with MX datatype requires even MIWaveTile "
-                 "(mxfp8 also allows MIWaveTile==1 with MIWaveGroup==1 in that "
-                 "dim, the 16xN / Mx16 skinny case), got MIWaveTile=[%d, %d] "
+                 "(only mxfp8 supports odd MIWaveTile), got MIWaveTile=[%d, %d] "
                  "MIWaveGroup=[%d, %d]"
                  % (state["MIWaveTile"][0], state["MIWaveTile"][1],
                     state["MIWaveGroup"][0], state["MIWaveGroup"][1]))
@@ -4187,18 +4181,17 @@ class Solution(collections.abc.Mapping):
     if "ValidDepthU" in state:
       del state["ValidDepthU"]
 
-    # A 16-wide (MIWaveTile==1) mxfp8 tile is supported only on the dual-period
-    # path (DepthU=128, PGR2, a partitionable other dim).  That is the only path
-    # on which the half-swizzle-group scale read has been validated; the legacy
-    # (non-dual-period) scale emit is untested for it, so such configs are
-    # rejected rather than shipped unverified.
+    # An odd MIWaveTile mxfp8 tile (per-tile scale read) is supported only on the
+    # dual-period path (DepthU=128, PGR2).  That is the only path on which the
+    # per-tile read is implemented and validated; the legacy scale emit pairs
+    # tiles at compile time, so such configs are rejected rather than emitted.
     if (state["UseSubtileImpl"]
         and (state["ProblemType"]["MXBlockA"] or state["ProblemType"]["MXBlockB"])
-        and (state["MIWaveTile"][0] == 1 or state["MIWaveTile"][1] == 1)
+        and (state["MIWaveTile"][0] % 2 == 1 or state["MIWaveTile"][1] % 2 == 1)
         and not state.get("_DualPeriodMXFP8")):
       reject(state, printRejectionReason,
-             "UseSubtileImpl=1 mxfp8 with a 16-wide tile (MIWaveTile==1) requires the "
-             "dual-period path (not validated on the legacy scale path); got "
+             "UseSubtileImpl=1 mxfp8 with an odd MIWaveTile requires the "
+             "dual-period path (not implemented on the legacy scale path); got "
              "MIWaveTile=[%d, %d] DepthU=%d _DualPeriodMXFP8=%s"
              % (state["MIWaveTile"][0], state["MIWaveTile"][1],
                 state["DepthU"], state.get("_DualPeriodMXFP8")))

@@ -6015,20 +6015,16 @@ class KernelWriterAssembly(KernelWriter):
                   module.add(scalarMultiplyBpe("Srd%s+2"%tc, stmp+0, float(tP["bpeGR"]), comment="buffer_load limit for %s (tile-boundary, avoids 32-bit overflow)"%tc))
           module.addModuleAsFlatItems(self.s_mul_u64_u32(sgpr(tileStart), sgpr(tileStart+1), sgpr(tileStart+0), \
                     strideF, comment="tlu=0, scaled tile-offset by stride"))
-          if isMxSwizzledScaleLayout and swizzleSize0 > kernel[tP["mt"]] and ("ScaleByteOff%s"%tc) in self.sgprs:
-            # Sub-group MX-scale macrotile (a 16-wide tile in a 32-row swizzle
-            # group): swizzleSize0/MT workgroups share one group, and the 2x2
-            # scale pack puts tile m of the group at byte m of each scale dword.
-            # The global read stays at the GROUP base (floor above), so it is
-            # in bounds exactly like an even tile's.  Which tile of the group
-            # this workgroup owns is recorded here and applied on the LDS side:
-            # lraTileAssignmentScaleSwizzled adds it to the scale local-read
-            # address, so ds_read_b32 returns the dword rotated by that many
-            # bytes and the kernel's compile-time byte-0 select picks this
-            # workgroup's tile.  Nothing is read outside the scale tensor.
-            tilesPerGroup = swizzleSize0 // kernel[tP["mt"]]
-            module.add(SAndB32(dst=sgpr("ScaleByteOff%s"%tc), src0=sgpr(tP["wg"]), src1=(tilesPerGroup - 1),
-                               comment="%s: wg %% %u = tile index inside its swizzle group (LR byte offset)"%(tc, tilesPerGroup)))
+          if isMxSwizzledScaleLayout and ("ScaleByteOff%s"%tc) in self.sgprs:
+            # Macrotile of an odd number of 16-row MMA tiles (16, 48, 80, ...):
+            # workgroup WG starts at MMA tile WG*odd, i.e. in the second half
+            # of a 32-row swizzle group when WG is odd.  The global read stays
+            # at the GROUP base (floor above) and so is in bounds exactly like
+            # an even tile's; the parity is recorded here and applied on the
+            # LDS side (lraTileAssignmentScaleSwizzled), which points each
+            # tile's scale ds_read_b32 at the group and byte that hold it.
+            module.add(SAndB32(dst=sgpr("ScaleByteOff%s"%tc), src0=sgpr(tP["wg"]), src1=1,
+                               comment="%s: workgroup starts in the 2nd half of a swizzle group? (LR parity)"%tc))
           if isPreShuffledAB:
             module.addModuleAsFlatItems(self.s_mul_u64_u32(sgpr(tileStart), sgpr(tileStart+1), sgpr(tileStart+0), \
                       swizzleSize0, comment="pre-shuffled: scale by %u rows per block"%swizzleSize0))
