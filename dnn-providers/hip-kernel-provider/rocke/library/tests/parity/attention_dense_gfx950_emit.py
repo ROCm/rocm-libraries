@@ -10,8 +10,6 @@
 #
 # Keep indices stable: the native emitter will need the same input at each
 # index. A successful Python emission alone is not a byte-identity comparison.
-from _emit_common import run_emit
-
 from kernels.gfx950.attention_dense import (
     Gfx950AttentionDenseSpec,
     build_attention_dense,
@@ -129,6 +127,8 @@ _CONFIGS = (
     dict(kv_segments=2),  # 72: per-segment output, max, and exp-sum workspaces
     dict(kv_storage_dtype="fp8e4m3"),  # 73: FP8 K/V pointers and two dequant scales
     dict(_PAGED, head_size=64, sliding_window=0),  # 74: D64 paged, plain causal
+    dict(nonpersist_decode="hq_minor_swz"),  # 75: ordinary grid
+    dict(persist_decode="hq_minor_swz", **_PERSIST),  # 76: persistent grid
 )
 
 
@@ -139,6 +139,8 @@ def spec_for_index(idx: int) -> Gfx950AttentionDenseSpec:
 
 
 def main() -> int:
+    from _emit_common import run_emit
+
     return run_emit(spec_for_index, build_attention_dense)
 
 

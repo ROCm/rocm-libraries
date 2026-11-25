@@ -390,6 +390,20 @@ string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
        "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\"\n"
        "  TIMEOUT ${ROCKE_TEST_TIMEOUT_CPU})\n")
 
+# The native builder matrix launches its own emitter. Run it in a separate
+# sharded entry so its CPU load cannot time out the attention suite's long
+# golden items. No pybind/GPU needed; a missing staged emitter is an error.
+if(TARGET rocke_gfx950_dense_parity_emit)
+  rocke_cxx_test_installed_name(_dense_emit_name rocke_gfx950_dense_parity_emit)
+  set(_dense_emit_path "${ROCKE_CXX_TEST_CTEST_REL}${_dense_emit_name}${CMAKE_EXECUTABLE_SUFFIX}")
+  string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
+         "add_test(rocke_library_gfx950_dense_builder_pytest ${_ROCKE_INSTALLED_PYTEST} ${_ROCKE_INSTALLED_PYTEST_WORKERS} \"${ROCKE_TEST_CTEST_REL}tests/library/tests/test_attention_dense_gfx950_builder.py\" -v -rs --timeout=30)\n"
+         "set_tests_properties(rocke_library_gfx950_dense_builder_pytest PROPERTIES\n"
+         "  LABELS \"ckc;python;attention;host;standard\"\n"
+         "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library;ROCKE_GFX950_DENSE_EMITTER=${_dense_emit_path}\"\n"
+         "  TIMEOUT ${ROCKE_TEST_TIMEOUT_CPU})\n")
+endif()
+
 # The rest of test_attention_builds.py (no GPU): the attention builders' compile
 # smoke tests and the HSACO resource budgets of the built kernels (scratch,
 # LDS, waves per SIMD), read with llvm-readelf / llvm-objdump. The entry takes

@@ -663,6 +663,10 @@ dense default-vs-persistent grid.
   kernels are `kernels/gfx950/attention_tiled_2d.py`,
   `kernels/gfx950/attention_tiled_3d.py`, and `kernels/common/attention_unified.py`
   (the dispatcher and shared spec); the dense prefill kernel (§8) is
-  `kernels/gfx950/attention_dense.py`, gated by the `attention_dense` family of
-  the platform parity harness (IR-SHA, in CI via `rocke_golden_static`) plus
-  `tests/test_attention_ir_cpp_parity.py` (C++/Python byte-identity).
+  `kernels/gfx950/attention_dense.py`. Its native twin lives in
+  `library/cpp/instances/gfx950/attention_dense*.cpp`. The
+  `attention_dense_gfx950` paired emitters compare **construction** of whole
+  kernels: ordinary and persistent, including wide DMA, paging, split KV,
+  FP8 KV and shape-baked ragged cases. `test_attention_ir_cpp_parity.py`
+  separately checks **lowering** from Python-built IR; `rocke_golden_static`
+  pins representative Python output. Neither comparison measures GPU numerics.

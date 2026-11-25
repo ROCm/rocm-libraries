@@ -1607,6 +1607,11 @@ def _golden_step(args, kind, flavor, cur, scope, failures, fams, shard=None):
         file_scope = None if scope is None else [f for f in scope if f in names]
         file_cur = {f: v for f, v in cur.items() if f in names}
         store = GoldenStore.load(golden_file)
+        if args.check_golden and args.exclude and not args.only:
+            # Leave only the explicitly excluded families to the other lane.
+            # A vanished, previously blessed emitter is missing, not excluded.
+            excluded = set(args.exclude.split(","))
+            file_scope = sorted((store.families() | set(file_cur)) - excluded)
         if shard is not None:
             file_scope = _shard_scope(shard, store, file_cur, file_scope)
         if file_scope == []:

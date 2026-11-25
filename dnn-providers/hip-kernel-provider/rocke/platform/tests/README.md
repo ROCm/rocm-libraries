@@ -383,9 +383,33 @@ D64 paging without a sliding window. For FP8 K/V with attention sinks, the
 vectors also pin which rejection wins: an invalid KV segment count or an
 incompatible tile is reported before the unsupported sinks.
 
-This port is host metadata only. The gfx950 dense C++ GPU builders and their
-paired IR emitters are separate work; these tests do not establish builder
-byte identity or GPU numerical correctness.
+## gfx950 dense builder parity
+
+`rocke_gfx950_build_attention_dense_new` (in `ckc::rocke_library`, header
+`rocke/instance_gfx950_attention_dense_builder.h`) emits the ordinary or
+persistent kernel from the same spec, without Python. Its returned kernel is
+arena-owned: free the supplied builder after use, even on refusal. The
+optional `rocke_library_engine` exposes `gfx950_attention_dense_serialize_ir`,
+`gfx950_attention_dense_lower_llvm` and `gfx950_attention_dense_verify`.
+
+The library's `attention_dense_gfx950_emit.{py,c}` pair feeds the same indexed
+inputs to the two independent builders. Run from `platform/`:
+
+```bash
+ROCKE_LLVM_FLAVOR=llvm22 python tools/check_byte_identity.py --only attention_dense_gfx950
+```
+
+The installed standard entry `rocke_library_gfx950_dense_builder_pytest` shards
+the matrix **by config**, separately from the other attention CPU checks.
+It compares native and Python serialized IR and all four LLVM flavors against
+each other and checks the existing library differential hashes. CTest supplies
+`ROCKE_GFX950_DENSE_EMITTER`; a missing executable is not a Python fallback. The
+matrix does not also run in the quick Python-only golden entries when this
+native lane is built. Regenerate intended output changes with
+`python tools/golden.py rerecord differential --only attention_dense_gfx950`
+from the rocKE root. `rocke_gfx950_attention_dense_builder_host` separately
+checks native refusal precedence and arena reuse/concurrent builds. These are
+host tests of emitted code, not GPU numerical tests.
 
 ## Multi-arch coverage (don't be blindsided by gfx950)
 
