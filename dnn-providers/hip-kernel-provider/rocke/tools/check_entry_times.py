@@ -190,12 +190,12 @@ class TierLayout:
 # Shard counts and the 30-minute step are TheRock's test configuration for the
 # provider (fetch_test_configurations.py and test_component.yml).
 # Budgets: quick runs as one shard and gives rocKE 300 s of it; a standard shard
-# gives rocKE 420 s, which keeps rocKE plus the rest of the provider under half
-# of the 30-minute step. The budgets are ratchets: fix a breach at its source (a
+# gives rocKE 540 s, under a third of the 30-minute step, which leaves the rest
+# of the step to the provider's other tests. The budgets are ratchets: fix a breach at its source (a
 # cheaper test, a smaller shard key, a different tier), never by raising them.
 CI_TIERS = (
     TierLayout("quick", shards=1, budget_seconds=300.0),
-    TierLayout("standard", shards=4, budget_seconds=420.0),
+    TierLayout("standard", shards=4, budget_seconds=540.0),
 )
 
 

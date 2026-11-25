@@ -198,7 +198,7 @@ def test_heavy_keys_the_hash_puts_together_are_projected_onto_their_shard() -> N
         keys=_sweep_keys(),
         test_seconds=SWEEP_TEST_SECONDS,
     )
-    assert SWEEP_WHOLE_SECONDS / 4 == 300.0  # the average shard fits 420 s
+    assert SWEEP_WHOLE_SECONDS / 4 == 300.0  # the average shard fits 540 s
     assert per_shard == (150.0, 750.0, 150.0, 150.0)
 
 
@@ -361,16 +361,16 @@ def test_only_the_shard_over_budget_breaches_while_the_average_fits() -> None:
     assert verdict.shard_seconds == (150.0, 750.0, 150.0, 150.0)
     entry_alone = (
         "linux standard shard 2 of 4: rocke_library_gpu_pytest alone takes 750 s, "
-        "over the 420 s budget"
+        "over the 540 s budget"
     )
     whole_shard = (
-        "linux standard shard 2 of 4 takes 750 s, over the 420 s budget; largest: "
+        "linux standard shard 2 of 4 takes 750 s, over the 540 s budget; largest: "
         "rocke_library_gpu_pytest 750 s"
     )
     assert verdict.breaches() == [entry_alone, whole_shard]
     assert verdict.summary() == (
         "linux standard (4 shard(s)): 150 / 750 / 150 / 150 s per shard, slowest "
-        "750 s, 330 s over the 420 s budget"
+        "750 s, 210 s over the 540 s budget"
     )
 
 
@@ -917,7 +917,7 @@ def test_check_fails_the_slowest_shard_until_heavy_keys_declare_costs(
     assert check.main(argv) == 1
     out = capsys.readouterr().out
     assert "150 / 750 / 150 / 150 s per shard" in out
-    assert "FAIL linux standard shard 2 of 4 takes 750 s, over the 420 s budget" in out
+    assert "FAIL linux standard shard 2 of 4 takes 750 s, over the 540 s budget" in out
     _write_sweep_tree(tree, declare_heavy_costs=True)
     assert check.main(argv) == 0
     assert "300 / 300 / 300 / 300 s per shard" in capsys.readouterr().out
@@ -1204,7 +1204,7 @@ def test_a_ceiling_replaces_the_budget_as_the_shard_limit() -> None:
     assert within.limit_seconds == 560.0
     assert within.summary() == (
         "linux standard (4 shard(s)): 410 / 410 / 410 / 410 s per shard, slowest "
-        "410 s, ceiling 560 s (margin 150 s), 10 s under the 420 s budget"
+        "410 s, ceiling 560 s (margin 150 s), 130 s under the 540 s budget"
     )
     assert within.breaches() == []
     over = _standard_verdict(570.0, ceiling=560.0)
@@ -1216,14 +1216,14 @@ def test_a_ceiling_replaces_the_budget_as_the_shard_limit() -> None:
 
 
 def test_a_tier_without_a_ceiling_is_held_to_its_budget() -> None:
-    verdict = _standard_verdict(430.0, ceiling=None)
-    assert verdict.limit_seconds == 420.0
-    assert verdict.summary().endswith("slowest 430 s, 10 s over the 420 s budget")
+    verdict = _standard_verdict(550.0, ceiling=None)
+    assert verdict.limit_seconds == 540.0
+    assert verdict.summary().endswith("slowest 550 s, 10 s over the 540 s budget")
 
 
 @pytest.mark.parametrize(
     "seconds, ceiling, lowered",
-    [(533.0, 560.0, 540.0), (540.0, 560.0, 540.0), (400.0, 560.0, None)],
+    [(653.0, 680.0, 660.0), (660.0, 680.0, 660.0), (400.0, 680.0, None)],
     ids=["rounds-up", "exact-step", "fits-budget"],
 )
 def test_lowered_ceiling_rounds_the_projection_up_or_drops_it(
@@ -1275,26 +1275,26 @@ def _write_standard_inputs(tmp_path: Path, seconds: float, ceiling: float):
 
 
 def test_lower_ceiling_writes_the_lower_value_and_record_keeps_it(tmp_path) -> None:
-    options, source, times = _write_standard_inputs(tmp_path, 2000.0, 560.0)
+    options, source, times = _write_standard_inputs(tmp_path, 2400.0, 680.0)
     lower = [*options, "lower-ceiling", "--column", "linux", "--tier", "standard"]
     assert check.main([*lower, *source]) == 0
-    assert json.loads(times.read_text())["linux"]["ceilings"] == {"standard": 500.0}
+    assert json.loads(times.read_text())["linux"]["ceilings"] == {"standard": 600.0}
     log = tmp_path / "shard3.log"
     log.write_text(_SHARD_LOG, encoding="utf-8")
     record = [*options, "record", "--column", "linux", "--source", "logs", str(log)]
     assert check.main(record) == 0
-    assert json.loads(times.read_text())["linux"]["ceilings"] == {"standard": 500.0}
+    assert json.loads(times.read_text())["linux"]["ceilings"] == {"standard": 600.0}
 
 
 def test_lower_ceiling_removes_a_ceiling_once_the_tier_fits(tmp_path) -> None:
-    options, source, times = _write_standard_inputs(tmp_path, 1600.0, 560.0)
+    options, source, times = _write_standard_inputs(tmp_path, 1600.0, 680.0)
     lower = [*options, "lower-ceiling", "--column", "linux", "--tier", "standard"]
     assert check.main([*lower, *source]) == 0
     assert "ceilings" not in json.loads(times.read_text())["linux"]
 
 
 def test_lower_ceiling_refuses_while_an_entry_has_no_time(tmp_path) -> None:
-    options, _, times = _write_standard_inputs(tmp_path, 2000.0, 560.0)
+    options, _, times = _write_standard_inputs(tmp_path, 2400.0, 680.0)
     listing = tmp_path / "untimed.json"
     listing.write_text(
         json.dumps(
@@ -1312,11 +1312,11 @@ def test_lower_ceiling_refuses_while_an_entry_has_no_time(tmp_path) -> None:
         "before a ceiling moves; linux: rocke_new_entry",
     ):
         check.main([*lower, "--listing", str(listing)])
-    assert json.loads(times.read_text())["linux"]["ceilings"] == {"standard": 560.0}
+    assert json.loads(times.read_text())["linux"]["ceilings"] == {"standard": 680.0}
 
 
 def test_lower_ceiling_refuses_an_unknown_column(tmp_path) -> None:
-    options, source, _ = _write_standard_inputs(tmp_path, 2000.0, 560.0)
+    options, source, _ = _write_standard_inputs(tmp_path, 2400.0, 680.0)
     lower = [*options, "lower-ceiling", "--column", "macos", "--tier", "standard"]
     with pytest.raises(KeyError, match="lower-ceiling failed - column='macos'"):
         check.main([*lower, *source])

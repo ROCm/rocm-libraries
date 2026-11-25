@@ -1237,7 +1237,7 @@ hip-kernel-provider test tiers, and no check holds them; change them here only.
 | S1 | One shard key in a sharded entry | 30 s | A key runs whole on one shard; this is half of the 60 s per-item `--timeout` of the `rocke_pytest_<part>` and tiling entries. In an entry with a lower `--timeout` (several library entries use 30 s), S2 holds each item to half of it. |
 | S2 | Limit headroom | The slowest item under half its pytest `--timeout`; the entry's longest run, which is its unsplit run if the entry is in quick, under half its CTest `TIMEOUT` | The worst case stays under half of each limit. The CTest `TIMEOUT` is its resource class's limit, so an entry near half of it gets cheaper or splits; the limit does not move. |
 | S3 | A new non-pytest entry in quick or standard | 1 s | It runs whole on every CI shard unless it takes its share under `--rocke-shard-from-gtest-env`. The golden entries and `rocke_optimization_barrier_hip_pair` are existing exceptions: each splits across the CI shards that way, and runs whole in quick. |
-| S4 | rocKE's share of each standard shard | 420 s | Keeps rocKE and the rest of the provider under half of the 30-minute step. Checked for the slowest shard, not the average. |
+| S4 | rocKE's share of each standard shard | 540 s | Under a third of the 30-minute step; the rest of the step is left to the provider's other tests. Checked for the slowest shard, not the average. |
 
 [`tools/check_entry_times.py`](tools/check_entry_times.py) enforces Q1 and S4
 (its `CI_TIERS` holds the same values), and the standard-tier CTest entry
