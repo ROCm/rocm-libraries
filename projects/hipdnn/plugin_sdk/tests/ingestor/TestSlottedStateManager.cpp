@@ -1135,7 +1135,7 @@ TEST_F(TestSlottedStateManagerDefault, AKernelDroppedForItsLaunchSetClaimsNoMeta
 }
 
 /// `sources` is part of the selector identity of a slotted engine's kernels, so a launch's code
-/// object changing makes it a different selector.
+/// object changing makes it a different selector, unless the launch carries an identity.
 TEST(TestSlottedStateManager, ASlotKernelsSourcesChangeTheEngineIdentity)
 {
     auto base = makeSlottedSet();
@@ -1152,6 +1152,18 @@ TEST(TestSlottedStateManager, ASlotKernelsSourcesChangeTheEngineIdentity)
     rehashed.slots[1].packs.front().kernels.front().sources.at("decode").sha256
         = std::string(64, 'b');
     EXPECT_NE(engineSelectorRevision(rehashed), revision);
+    EXPECT_NE(engineCodegenRevision(rehashed), engineCodegenRevision(base));
+
+    // A launch the packager compiled is named by its identity, so rebuilding its code object
+    // moves only the codegen revision.
+    auto identified = base;
+    identified.slots[1].packs.front().kernels.front().sources.at("decode").identity
+        = std::string(64, 'c');
+    auto rebuilt = identified;
+    rebuilt.slots[1].packs.front().kernels.front().sources.at("decode").sha256
+        = std::string(64, 'b');
+    EXPECT_EQ(engineSelectorRevision(rebuilt), engineSelectorRevision(identified));
+    EXPECT_NE(engineCodegenRevision(rebuilt), engineCodegenRevision(identified));
 
     auto launchRenamed = base;
     auto& sources = launchRenamed.slots[1].packs.front().kernels.front().sources;
