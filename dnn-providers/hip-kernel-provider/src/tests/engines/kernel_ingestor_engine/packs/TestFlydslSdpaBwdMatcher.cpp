@@ -2513,12 +2513,13 @@ constexpr auto F16 = data_objects::DataType::HALF;
 constexpr auto BF16 = data_objects::DataType::BFLOAT16;
 constexpr auto F32 = data_objects::DataType::FLOAT;
 
-SdpaBwdSpec withSink(SdpaBwdSpec spec = baseline(), data_objects::DataType dtype = F16)
+SdpaBwdSpec withSink(const SdpaBwdSpec& spec = baseline(), data_objects::DataType dtype = F16)
 {
     return spec.withEdit([dtype](SdpaBwdGraph& g) { addSink(g, dtype); });
 }
 
-SdpaBwdSpec withSinkAndDsink(SdpaBwdSpec spec = baseline(), data_objects::DataType dtype = F16)
+SdpaBwdSpec withSinkAndDsink(const SdpaBwdSpec& spec = baseline(),
+                             data_objects::DataType dtype = F16)
 {
     return spec.withEdit([dtype](SdpaBwdGraph& g) {
         addSink(g, dtype);
@@ -2612,7 +2613,7 @@ TEST(TestFlydslSdpaBwdMatcher, SK1DsinkOnAnFp32GraphDeclinesAndASinkAloneAccepts
 
 TEST(TestFlydslSdpaBwdMatcher, SK2SinkMustBeADeviceTensorOfTheServedShapeStrideAndAlignment)
 {
-    const auto edit = [](std::function<void(SdpaBwdTensor&)> change) {
+    const auto edit = [](const std::function<void(SdpaBwdTensor&)>& change) {
         return baseline().withEdit([change](SdpaBwdGraph& g) { change(addSink(g, F16)); });
     };
     declined(edit([](SdpaBwdTensor& t) { t.dims = {1, 4, 1, 1}; }),

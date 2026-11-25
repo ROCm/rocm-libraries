@@ -159,7 +159,7 @@ Tensorf denseTensor(const std::vector<int64_t>& dims, const std::vector<double>&
 std::vector<double> valuesOf(Tensorf& tensor)
 {
     const auto* host = tensor.memory().hostData();
-    return std::vector<double>(host, host + tensor.elementCount());
+    return {host, host + tensor.elementCount()};
 }
 
 Tensori lengthsTensor(int64_t batch, const std::vector<int32_t>& lengths)

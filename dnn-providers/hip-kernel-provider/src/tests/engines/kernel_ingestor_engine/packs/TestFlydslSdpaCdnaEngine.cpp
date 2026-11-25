@@ -3363,6 +3363,37 @@ std::vector<float> cdnaSinkLogits(const SdpaGraphSpec& spec)
     return logits;
 }
 
+/// Uploads a CDNA case's sink logits (cdnaSinkLogits): FLOAT, or narrowed to the query's 16-bit
+/// dtype when the spec's sink is in that dtype (vendored-kernel modification 41). Leaves
+/// @p sinkDevice null without a sink.
+template <typename T>
+void uploadCdnaSink(const SdpaGraphSpec& spec,
+                    const std::vector<float>& sinkLogits,
+                    std::vector<void*>& allocations,
+                    void*& sinkDevice)
+{
+    sinkDevice = nullptr;
+    if(!spec.withSink)
+    {
+        return;
+    }
+    std::vector<T> narrowed;
+    if(cdnaSinkIsInTheQueryDtype(spec))
+    {
+        for(const auto logit : sinkLogits)
+        {
+            narrowed.push_back(T(logit));
+        }
+    }
+    const void* sinkHost = narrowed.empty() ? static_cast<const void*>(sinkLogits.data())
+                                            : static_cast<const void*>(narrowed.data());
+    const size_t sinkBytes
+        = static_cast<size_t>(spec.heads) * (narrowed.empty() ? sizeof(float) : sizeof(T));
+    ASSERT_EQ(hipSuccess, hipMalloc(&sinkDevice, sinkBytes));
+    allocations.push_back(sinkDevice);
+    ASSERT_EQ(hipSuccess, hipMemcpy(sinkDevice, sinkHost, sinkBytes, hipMemcpyHostToDevice));
+}
+
 /// A CDNA sink case's O and LSE against hipDNN's CPU reference (FLOAT [1, Hq, 1, 1], SEM-022;
 /// FlydslSdpaCpuReferenceTestSupport.hpp), with the bias, band and padding @p problem holds.
 template <typename T, typename BiasAt>
@@ -4118,23 +4149,9 @@ void expectCandidatesMatchReference(const MatchContext& context,
     // A spec whose sinkDataType is the query's binds a 16-bit sink instead (modification 41).
     const auto sinkLogits = cdnaSinkLogits<T>(spec);
     void* sinkDevice = nullptr;
+    ASSERT_NO_FATAL_FAILURE(uploadCdnaSink<T>(spec, sinkLogits, allocations, sinkDevice));
     if(spec.withSink)
     {
-        std::vector<T> narrowed;
-        if(cdnaSinkIsInTheQueryDtype(spec))
-        {
-            for(const auto logit : sinkLogits)
-            {
-                narrowed.push_back(T(logit));
-            }
-        }
-        const void* sinkHost = narrowed.empty() ? static_cast<const void*>(sinkLogits.data())
-                                                : static_cast<const void*>(narrowed.data());
-        const size_t sinkBytes
-            = static_cast<size_t>(h) * (narrowed.empty() ? sizeof(float) : sizeof(T));
-        ASSERT_EQ(hipSuccess, hipMalloc(&sinkDevice, sinkBytes));
-        allocations.push_back(sinkDevice);
-        ASSERT_EQ(hipSuccess, hipMemcpy(sinkDevice, sinkHost, sinkBytes, hipMemcpyHostToDevice));
         buffers.push_back({FLYDSL_SDPA_RDNA_SINK_UID, sinkDevice});
     }
     // A runtime scale arrives with the buffers, as a host scalar.

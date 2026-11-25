@@ -27,13 +27,8 @@
 
 #include "../IntegrationGraphVerificationHarness.hpp"
 
-#include <algorithm>
-#include <cmath>
 #include <iostream>
-#include <memory>
-#include <optional>
 #include <string>
-#include <vector>
 
 using namespace hipdnn_frontend;
 using namespace hipdnn_frontend::graph;

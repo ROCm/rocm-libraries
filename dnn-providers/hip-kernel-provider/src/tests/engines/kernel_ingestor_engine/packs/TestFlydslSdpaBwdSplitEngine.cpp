@@ -985,7 +985,7 @@ TEST(TestFlydslSdpaBwdSplitWorkspace, PublishesNoSeedOffsetForASeedReadInPlace)
 TEST(TestFlydslSdpaBwdSplitWorkspace, ADsinkGraphPlacesTheSinktermRegionAfterLse)
 {
     const auto spec = dimsSpec(3, 5, 77, 91, 64);
-    constexpr int64_t STATS = 3 * 5 * 77 * 4;
+    constexpr int64_t STATS = int64_t{3} * 5 * 77 * 4;
     const auto aligned = [](int64_t bytes) {
         return static_cast<int64_t>(alignSharedWorkspace(static_cast<size_t>(bytes)));
     };
