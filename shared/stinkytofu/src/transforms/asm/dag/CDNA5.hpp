@@ -3158,8 +3158,10 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
     // WMMA region still needs them, and a WMMA-free region defers a gated ds_load to its end.
     clock_ = 0;
     // Per-region: MSB state is not carried across a region boundary (side-effect
-    // cut). Under the pass's policy, so a candidate is preferred exactly when
-    // InsertVgprMsbPass would emit nothing before it.
+    // cut), under the pass's policy. Within a region a candidate is preferred
+    // when InsertVgprMsbPass would emit nothing before it. The pass keeps its
+    // word across a wait, store or barrier, so the first VGPR pick after such a
+    // cut is not steered; carrying the word here too would change schedules.
     msbTracker_ = VgprMsbTracker(vgprMsbPolicyOf(getPassContext().getAsmCapsConfig()));
     // Clear per-region node ptr; it dangles into the previous region's freed
     // DAGNodeList.
