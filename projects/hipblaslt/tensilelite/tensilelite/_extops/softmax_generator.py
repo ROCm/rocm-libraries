@@ -39,7 +39,8 @@ from contextlib import contextmanager
 import os.path
 
 from ..Common.Utilities import _global_ti
-from ..Common.Architectures import detectGlobalCurrentArch, gfxToIsa
+from ..Common.Architectures import codeObjectVersionFor, detectGlobalCurrentArch, gfxToIsa
+from ..Common.Constants import coVersionMap
 from ..Common.Capabilities import applyArchCapOverrides, makeIsaInfoMap
 from ..Common.DataType import DataType
 from ..Common.GlobalParameters import restoreDefaultGlobalParameters, assignGlobalParameters
@@ -706,9 +707,10 @@ class KernelMeta:
             '.args': [arg.to_dict() for arg in self.args]
         }
 
-def meta_str(kernels: Tuple[KernelMeta]):
+def meta_str(kernels: Tuple[KernelMeta], codeObjectVersion: str):
     beg = '.amdgpu_metadata\n---'
-    content_str = yaml.dump({'amdhsa.version': [1, 1], 'amdhsa.kernels': [kernel.to_dict() for kernel in kernels]})
+    version = [1, 1] if codeObjectVersion == "4" else [1, 2]
+    content_str = yaml.dump({'amdhsa.version': version, 'amdhsa.kernels': [kernel.to_dict() for kernel in kernels]})
     end = '.end_amdgpu_metadata'
     return '\n'.join([beg, content_str, end])
 
@@ -760,10 +762,14 @@ if __name__ == '__main__':
     func_name = softmax.func_name
     meta = KernelMeta(func_name, softmax.vgpr_pool.size(), softmax.sgpr_pool.size(), 0, softmax.lds_usage_byte, waveFrontSize, 256, 8, args)
     meta.update_args_offsets()
-    k_str = '\n'.join([kernel_header(func_name, arch, xnack),
+    # The directive overrides the assembler flag, so the version and the
+    # amdhsa.version metadata both come from here.
+    codeObjectVersion = codeObjectVersionFor(coVersionMap["default"], arch)
+    k_str = '\n'.join([f'.amdhsa_code_object_version {codeObjectVersion}',
+                       kernel_header(func_name, arch, xnack),
                        withSgprHazardWaits(str(kernel_body), _global_ti.getArchCaps()),
                        kernel_rodata(func_name, isa),
-                       meta_str((meta,))])
+                       meta_str((meta,), codeObjectVersion)])
 
     with open(output_path, 'w') as f:
         f.write(k_str)

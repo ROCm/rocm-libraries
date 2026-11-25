@@ -75,6 +75,31 @@ def test_code():
     vs = code.ValueSet("BufferLimit", 0xFFFFFFFF, format=1)
     print(vs)
 
+def _metadata_version(codeObjectVersion):
+    signature = code.SignatureBase(kernelName="k",
+                                   kernArgsVersion=1,
+                                   codeObjectVersion=codeObjectVersion,
+                                   groupSegmentSize=0,
+                                   sgprWorkGroup=(1, 1, 0),
+                                   vgprWorkItem=0,
+                                   flatWorkGroupSize=256)
+    text = str(signature)
+    start = text.index("amdhsa.version:\n")
+    return text[start:].split("\n")[1:3]
+
+def test_signature_metadata_version():
+    # The runtime reads the code object version from amdhsa.version: 1.1 is v4, 1.2 is v5 and v6.
+    assert _metadata_version("4") == ["  - 1", "  - 1"]
+    assert _metadata_version("default") == ["  - 1", "  - 1"]
+    assert _metadata_version("5") == ["  - 1", "  - 2"]
+    assert _metadata_version("6") == ["  - 1", "  - 2"]
+    try:
+        _metadata_version("7")
+    except RuntimeError as e:
+        assert "Unknown code object version: 7" in str(e)
+    else:
+        assert False, "an unknown code object version must not emit metadata"
+
 def timeit_decorator(func):
     def wrapper(*args, **kwargs):
         start_time = timeit.default_timer()

@@ -85,4 +85,4 @@ ${TENSILE_OUT}/1_BenchmarkProblems%.co: $$(OBJFILES)
      ARCH ?= $(subst .co,,$(subst TensileLibrary_,,$(lastword $(subst /, ,$(COFILE)))))
 %.o: %.s
 	@echo rebuilding $(lastword $(subst /, ,$@)) for $(ARCH)
-	$(AS) -x assembler -target amdgcn-amd-amdhsa -mcode-object-version=4 -mcpu=$(ARCH) ${WAVEFRONTSIZE} ${ASM_ARGS} ${TRUE16_FEATURE} -c -o $@ $^
+	$(AS) -x assembler -target amdgcn-amd-amdhsa -mcode-object-version=$(if $(filter gfx1250%,$(ARCH)),5,4) -mcpu=$(ARCH) ${WAVEFRONTSIZE} ${ASM_ARGS} ${TRUE16_FEATURE} -c -o $@ $^

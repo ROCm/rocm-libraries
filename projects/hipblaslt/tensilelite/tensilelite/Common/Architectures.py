@@ -29,6 +29,7 @@ from pathlib import Path
 from subprocess import run, PIPE, DEVNULL
 from typing import List, Optional, Set, Tuple, Union, NamedTuple, Dict
 
+from .Constants import coVersionMap
 from .Types import IsaVersion
 from .Utilities import print1
 from ..GpuArch import detect_gpu_archs, restore_steppings
@@ -633,6 +634,32 @@ def gfxToIsa(name: str) -> Optional[IsaVersion]:
     except ValueError:
         return None
     return IsaVersion(major, minor, step)
+
+
+# The lowest code object version the HIP runtime loads on an ISA. CLR may refuse
+# code object v4 on devices with extended dispatch packets (gfx1250 and its
+# steppings), and takes the version from the amdhsa.version metadata, so the
+# assembler flag and the metadata must both be raised.
+MIN_CODE_OBJECT_VERSION: Dict[IsaVersion, str] = {
+    IsaVersion(12, 5, 0): "5",
+}
+
+
+def codeObjectVersionFor(version: str, arch: Union[str, IsaVersion]) -> str:
+    """The code object version to build ``arch`` with when ``version`` is requested.
+
+    Args:
+        version: The requested version, in any spelling coVersionMap accepts.
+        arch: A gfx name (qualifiers and steppings allowed) or an ISA version.
+
+    Returns:
+        ``version`` unchanged, or the architecture's minimum when it is older.
+    """
+    isa = gfxToIsa(arch) if isinstance(arch, str) else tuple(arch)
+    minimum = MIN_CODE_OBJECT_VERSION.get(isa)
+    if minimum is not None and int(coVersionMap[str(version)]) < int(minimum):
+        return minimum
+    return version
 
 
 def gfxToSwCodename(gfxName: str) -> Optional[str]:
