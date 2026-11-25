@@ -134,7 +134,7 @@ larger change with real correctness risk.
 
 From the rocKE platform root
 (`.../dnn-providers/hip-kernel-provider/rocke/platform`), with a ROCm 7.x
-toolchain (`hipcc` on `PATH`) and a Python env that has `torch` (ROCm build):
+toolchain (`hipcc` on `PATH`) and a Python env with numpy:
 
 ```bash
 # NT / RCR layout (default) -> ~808 TF median, ~815 TF peak

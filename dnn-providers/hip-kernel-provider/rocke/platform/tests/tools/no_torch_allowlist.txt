@@ -98,8 +98,6 @@ platform/python/rocke/examples/gfx950/gemm_perf_skinny_decode/scripts/22_confirm
 platform/python/rocke/examples/gfx950/gemm_perf_skinny_decode/scripts/23_splitk_universal.py: import torch_api torch_object
 platform/python/rocke/examples/gfx950/gemm_perf_skinny_decode/scripts/24_splitk_dispatch.py: import torch_api torch_object
 platform/python/rocke/examples/gfx950/gemm_perf_square_warpspec/scripts/ladder.py: import torch_api torch_object
-platform/python/rocke/examples/gfx950/grouped_gemm/grouped_gemm_hip.py: import torch_api torch_object
-platform/python/rocke/examples/gfx950/grouped_gemm/ragged_gemm_hip.py: import torch_api torch_object
 platform/python/rocke/examples/gfx950/grouped_gemm/ragged_moe_hip.py: import torch_api torch_object
 platform/python/rocke/examples/gfx950/moe/active_tile_skip_check.py: import torch_api torch_object
 platform/python/rocke/examples/gfx950/moe/fused_moe_e2e_perf.py: import torch_api torch_object
@@ -128,7 +126,6 @@ platform/python/rocke/torch_backend.py: import torch_api
 platform/requirements.txt: config
 platform/tests/instances/differential/numeric.py: import torch_api torch_object
 platform/tests/instances/test_gfx1250_qwen_integration.py: import torch_api torch_object
-platform/tests/instances/test_gfx950_grouped_gemm.py: import
 platform/tests/instances/test_rocke_numeric.py: import
 platform/tests/runtime/test_device_array.py: importorskip torch_api torch_interop torch_object
 platform/tests/runtime/test_parameter_contract.py: torch_interop

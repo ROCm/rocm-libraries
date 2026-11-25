@@ -149,11 +149,10 @@ class TestRaggedGemmHarnessGfx950(unittest.TestCase):
     """Host-side scheduling helpers of the ragged_gemm workflow harness
     (``examples/gfx950/grouped_gemm/ragged_gemm_hip.py``).
 
-    The harness imports torch/numpy at module scope and the numeric path needs a
-    GPU, so this loads the module by file path and skips cleanly when torch (or
-    the rocke runtime) is unavailable. It exercises the pure CPU scheduling glue:
-    ``make_group_sizes`` (per-expert row counts) and ``build_sched`` (per-tile
-    expert/offset/valid-row schedule).
+    The harness is a script, not a package module, so this loads it by file
+    path. It exercises the pure CPU scheduling glue: ``make_group_sizes``
+    (per-expert row counts) and ``build_sched`` (per-tile expert/offset/
+    valid-row schedule).
     """
 
     @classmethod
@@ -168,14 +167,9 @@ class TestRaggedGemmHarnessGfx950(unittest.TestCase):
         )
         if not harness.is_file():
             raise unittest.SkipTest(f"harness not found: {harness}")
-        try:
-            import torch  # noqa: F401
-
-            spec = importlib.util.spec_from_file_location("_rgemm_harness", harness)
-            mod = importlib.util.module_from_spec(spec)
-            spec.loader.exec_module(mod)
-        except Exception as e:  # torch / rocke runtime / numpy missing
-            raise unittest.SkipTest(f"ragged_gemm_hip harness not importable: {e}")
+        spec = importlib.util.spec_from_file_location("_rgemm_harness", harness)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
         cls.h = mod
 
     def test_make_group_sizes_partitions_total(self):
@@ -185,14 +179,14 @@ class TestRaggedGemmHarnessGfx950(unittest.TestCase):
         for dist in ("equal", "ragged", "bimodal"):
             sizes = self.h.make_group_sizes(m_total=m_total, e=e, dist=dist, seed=0)
             self.assertEqual(tuple(sizes.shape), (e,))
-            self.assertEqual(int(sizes.sum().item()), m_total, dist)
-            self.assertGreaterEqual(int(sizes.min().item()), 0, dist)
+            self.assertEqual(int(sizes.sum()), m_total, dist)
+            self.assertGreaterEqual(int(sizes.min()), 0, dist)
 
     def test_build_sched_is_consistent(self):
         sizes = self.h.make_group_sizes(m_total=16384, e=8, dist="ragged", seed=1)
         block_m = 256
         expert_ids, m_offsets, m_valid, num_tiles, m_starts = self.h.build_sched(
-            sizes, block_m, device="cpu"
+            sizes, block_m
         )
         # One tile per (ceil(size/block_m)) per expert.
         expected_tiles = int(
@@ -202,11 +196,11 @@ class TestRaggedGemmHarnessGfx950(unittest.TestCase):
         self.assertEqual(int(expert_ids.shape[0]), num_tiles)
         self.assertEqual(int(m_offsets.shape[0]), num_tiles)
         # Valid rows across all tiles must cover exactly the total rows.
-        self.assertEqual(int(m_valid.sum().item()), int(sizes.sum().item()))
+        self.assertEqual(int(m_valid.sum()), int(sizes.sum()))
         # No tile claims more than a full block.
-        self.assertLessEqual(int(m_valid.max().item()), block_m)
+        self.assertLessEqual(int(m_valid.max()), block_m)
         # Per-expert start offsets are the exclusive prefix sum of sizes.
-        self.assertEqual(int(m_starts[0].item()), 0)
+        self.assertEqual(int(m_starts[0]), 0)
 
 
 @arch_specific(
