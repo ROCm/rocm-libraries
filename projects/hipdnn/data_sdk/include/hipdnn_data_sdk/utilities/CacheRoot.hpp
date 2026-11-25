@@ -42,14 +42,14 @@ namespace detail
 /// that the caller asked for a directory literally named "%userprofile%".
 inline bool startsWithUserProfileToken(const std::wstring& path)
 {
-    static const std::wstring kUserProfileToken = L"%userprofile%";
+    static const std::wstring s_kUserProfileToken = L"%userprofile%";
     std::wstring lowerPath = path;
     std::transform(lowerPath.begin(), lowerPath.end(), lowerPath.begin(), ::towlower);
-    return lowerPath.size() >= kUserProfileToken.size()
-           && lowerPath.compare(0, kUserProfileToken.size(), kUserProfileToken) == 0
-           && (lowerPath.size() == kUserProfileToken.size()
-               || path[kUserProfileToken.size()] == L'/'
-               || path[kUserProfileToken.size()] == L'\\');
+    return lowerPath.size() >= s_kUserProfileToken.size()
+           && lowerPath.compare(0, s_kUserProfileToken.size(), s_kUserProfileToken) == 0
+           && (lowerPath.size() == s_kUserProfileToken.size()
+               || path[s_kUserProfileToken.size()] == L'/'
+               || path[s_kUserProfileToken.size()] == L'\\');
 }
 } // namespace detail
 #endif

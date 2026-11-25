@@ -1180,7 +1180,7 @@ inline EngineDescriptor parseEngineDescriptor(const nlohmann::json& root, const 
 
     // An absent key leaves numericalNotes unset (no claim); an authored list, even an
     // empty one, is the engine's explicit claim.
-    if(root.find("numerical_notes") != root.end())
+    if(root.contains("numerical_notes"))
     {
         const auto numericalNotes = optionalStringArray(root, "numerical_notes", where);
         requireNoDuplicates(numericalNotes, "numerical note", where);
@@ -1432,7 +1432,7 @@ inline std::map<std::string, KernelSource> parseKernelSources(const nlohmann::js
         std::string entryWhere = where;
         entryWhere += " launch '";
         entryWhere += name;
-        entryWhere += "'";
+        entryWhere += '\'';
         auto source = parseKernelSource(item.value(), entryWhere);
         if(source.kind != KernelSourceKind::KPACK)
         {
@@ -1643,7 +1643,7 @@ inline void addPackKernelEntry(KernelDescriptorPack& pack,
         message += kernel->name;
         message += "' in ";
         message += where;
-        message += " ";
+        message += ' ';
         message += violation;
         fail(message);
     }
@@ -3382,10 +3382,11 @@ inline std::vector<DescriptorSet> resolveDescriptorSets(DescriptorCatalog catalo
         const auto provenanceError = [&](const HeuristicDescriptor& model,
                                          const std::string& arch,
                                          const SlotDescriptorSet* slot) {
-            auto reason = slotted ? detail::slottedProvenanceError(
-                                        model, arch, engine, set.slots, slot, set.matchers)
-                                  : detail::provenanceError(
-                                        model, arch, &engine, schema, set.packs, set.matchers);
+            const auto reason = slotted
+                                    ? detail::slottedProvenanceError(
+                                          model, arch, engine, set.slots, slot, set.matchers)
+                                    : detail::provenanceError(
+                                          model, arch, &engine, schema, set.packs, set.matchers);
             return reason.empty() ? uhd::featureSemanticsMismatch(model.featuresSignature,
                                                                   model.trainedAgainstJson)
                                   : reason;

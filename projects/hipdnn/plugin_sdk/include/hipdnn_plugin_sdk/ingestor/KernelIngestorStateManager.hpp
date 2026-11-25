@@ -722,7 +722,7 @@ private:
 
         for(const auto& field : schema.fields)
         {
-            auto it = kernel.metadata.find(field.name);
+            const auto it = kernel.metadata.find(field.name);
 
             if(it == kernel.metadata.end())
             {

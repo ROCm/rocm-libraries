@@ -651,7 +651,7 @@ struct LongPathModule
 {
     RemoveTreeOnExit cleanup{};
     ModuleHandle handle{nullptr, &hipdnn_data_sdk::utilities::closeLibrary};
-    std::filesystem::path expectedDirectory{};
+    std::filesystem::path expectedDirectory;
 };
 
 /// Copies a system DLL into a freshly created extended-length directory and loads it.

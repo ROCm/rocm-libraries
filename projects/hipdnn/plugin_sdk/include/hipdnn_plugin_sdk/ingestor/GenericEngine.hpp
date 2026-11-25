@@ -222,7 +222,7 @@ public:
             knobOffsets.push_back(hipdnn_flatbuffers_sdk::data_objects::Knob::Pack(builder, &knob));
         }
 
-        auto knobs = builder.CreateVector(knobOffsets);
+        const auto knobs = builder.CreateVector(knobOffsets);
         auto behaviorNotes = builder.CreateVector(_engine.behaviorNotes);
         auto name = builder.CreateString(_engine.name);
         // Only an authored claim is written; an absent field tells the backend the

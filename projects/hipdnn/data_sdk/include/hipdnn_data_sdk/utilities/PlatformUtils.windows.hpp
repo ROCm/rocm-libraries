@@ -236,7 +236,7 @@ inline std::wstring moduleFileName(HMODULE handle, const char* what, const char*
     // by filling the buffer rather than failing. Retry with a larger one instead of
     // discarding a path this module genuinely has.
     std::wstring modulePath(MAX_PATH, L'\0');
-    DWORD capacity = static_cast<DWORD>(modulePath.size());
+    auto capacity = static_cast<DWORD>(modulePath.size());
     DWORD length = GetModuleFileNameW(handle, modulePath.data(), capacity);
     if(length == 0)
     {
