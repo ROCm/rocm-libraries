@@ -261,6 +261,9 @@ Tests:
   bias_type: f16_r
   activation_type: [none, gelu]
   scaleAlpha_vector: [0, 1]
+  # rand_int data with a scale-alpha vector of up to 10 and A and B scales of up to 1
+  # overflow FP16 at K = 41984 and 41008, and the norm check fails on overflowed entries.
+  initialization: hpl
   unit_check: 0
   norm_check: 1
   gpu_arch: '950'
