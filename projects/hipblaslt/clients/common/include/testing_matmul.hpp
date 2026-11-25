@@ -7127,7 +7127,8 @@ void testing_matmul_with_bias(const Arguments& arg,
         return filled;
     };
     // uniform_check: checks on the device that the D of rotation block 0 is uniform in each
-    // checked direction, and reports a failure on stderr without stopping the run.
+    // checked direction, and reports a failure on stderr without stopping the run. With uniform
+    // summation order on, a failure counts toward --verify_strict.
     std::unique_ptr<HipDeviceBuffer> dUniformResult, dUniformFlags;
     if(ucInputs)
     {
@@ -7142,7 +7143,10 @@ void testing_matmul_with_bias(const Arguments& arg,
         CHECK_HIP_ERROR(dUniformFlags->memcheck());
     }
     // How many solutions the uniform check ran on; a case that checked none skips at the end.
-    size_t ucChecked = 0;
+    size_t  ucChecked = 0;
+    int32_t ucUso     = 0;
+    if(ucInputs)
+        CHECK_HIPBLASLT_ERROR(hipblasLtGetUniformSummationOrder(handle, &ucUso));
     // void, since CHECK_HIP_ERROR returns from it under gtest.
     auto checkUniform = [&](size_t sol, UniformCheckResult& row) {
         if(arg.uniform_check == hipblaslt_uniform_check::none)
@@ -7192,6 +7196,8 @@ void testing_matmul_with_bias(const Arguments& arg,
 #else
                 hipblaslt_cerr << msg.str() << std::endl;
 #endif
+                if(ucUso)
+                    hipblaslt_bench_options::verification_failures()++;
             }
         };
         UniformCheckDeviceResult h{};

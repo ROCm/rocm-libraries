@@ -518,9 +518,10 @@ try
          "bias and scale vectors along M, equal to row 0) and checks after timing that every row "
          "of D is bitwise equal to row 0. Adds the row_uniform (pass, FAIL or skip), "
          "row_uniform_bad_cols and row_uniform_first_row result columns. A failure is reported "
-         "on stderr, does not stop the run and does not change the exit status. Inputs that sum "
-         "exactly in any order (rand_int, integer_exact, integer types, ...) get a warning, "
-         "since a pass shows little. Also a YAML key.")
+         "on stderr and does not stop the run. With uniform summation order on, it counts as a "
+         "failed check for --verify_strict. Inputs that sum exactly in any order (rand_int, "
+         "integer_exact, integer types, ...) get a warning, since a pass shows little. Also a "
+         "YAML key.")
 
         ("iters,i",
          value<int32_t>(&arg.iters)->default_value(tuningEnv? 1000 : 10),
