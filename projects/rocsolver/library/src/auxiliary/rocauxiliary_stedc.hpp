@@ -720,9 +720,11 @@ ROCSOLVER_KERNEL void __launch_bounds__(STEDC_BDIM)
     I* nps = ptr_nps(n, splits);
     I* ndd = ptr_ndd(n, splits);
     I* cand = ptr_cand(n, splits);
+    I* map = ptr_map(n, splits);
 
     S* tmpz = tmpzA + bid * get_tmpz_size(n);
     S* md = ptr_md(n, tmpz);
+    S* zz = ptr_z(n, tmpz);
     S* tolsD = ptr_tolsD(n, tmpz);
 
     constexpr I F_BCAND = I(1) << L_F_BCAND_BIT;
@@ -742,15 +744,21 @@ ROCSOLVER_KERNEL void __launch_bounds__(STEDC_BDIM)
         I p1 = nps[i];
         I pn = nps[next];
         I pp = nps[prev];
+        I z = zz[map[i]];
+        I zn = zz[map[next]];
+        I zp = zz[map[prev]];
+
+        S exn = std::abs(z * zn) / (z * z + zn * zn);
+        S exp = std::abs(z * zp) / (z * z + zp * zp);
 
         I bcandidate = (i - p1 < dd - 1) // current and next are not yet deflated
             && p1 == pn // in the same merge block
-            && std::abs(d - dn) <= tol // within tolerance
+            && std::abs(d - dn) * exn <= tol // within tolerance
             && i != (n - 1) // isn't last
             ;
         I tcandidate = (i - p1 < dd) // current and prev are not yet deflated
             && p1 == pp // in the same merge block
-            && std::abs(d - dp) <= tol // within tolerance
+            && std::abs(d - dp) * exp <= tol // within tolerance
             && i > 0 // isn't first
             ;
         cand[i] = (bcandidate << L_F_BCAND_BIT) + (tcandidate << L_F_TCAND_BIT);
