@@ -20,6 +20,7 @@
 
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
+#include <hipdnn_test_sdk/utilities/LogRecorder.hpp>
 
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/EngineConfigWrapper.hpp>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/EngineDetailsWrapper.hpp>
@@ -45,6 +46,7 @@
 #include "core/Container.hpp"
 #include "core/Context.hpp"
 #include "core/Handle.hpp"
+#include "core/PlanDescription.hpp"
 #include "engines/kernel_ingestor_engine/IngestorPacks.hpp"
 #include "engines/kernel_ingestor_engine/KernelIngestorEngine.hpp"
 #include "tests/engines/kernel_ingestor_engine/packs/ConvFwdTestGraphs.hpp"
@@ -255,6 +257,8 @@ TEST(TestKernelIngestorEngine, InitializeExecutionContextBuildsAPlanForTheTopRan
     stubAsThisEnginesConfig(engineConfig);
 
     Context context;
+    const auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
     ASSERT_NO_THROW(
         engineManager.initializeExecutionContext(handle, wrap(graph), engineConfig, context));
     ASSERT_TRUE(context.hasValidPlan());
@@ -263,6 +267,17 @@ TEST(TestKernelIngestorEngine, InitializeExecutionContextBuildsAPlanForTheTopRan
     const auto& plan
         = dynamic_cast<const hipdnn_plugin_sdk::ingestor::GenericPlan<Handle>&>(context.plan());
     EXPECT_EQ(plan.kernel().getIntMetadata(std::string(BLOCK_SIZE_FIELD)), 256);
+
+    // The plan names the config it runs, and the build logs it with its one program.
+    const auto description = hip_kernel_provider::core::describePlan(context);
+    EXPECT_FALSE(description.autotunePending);
+    ASSERT_FALSE(plan.kernel().name.empty());
+    EXPECT_EQ(description.configName, plan.kernel().name);
+    EXPECT_TRUE(
+        recorder.hasLogContaining(HIPDNN_SEV_INFO,
+                                  "plan build: engine '" + std::string(POINTWISE_ADD.engineName)
+                                      + "', config '" + plan.kernel().name + "', 1 program(s): "))
+        << recorder.getRecordedLogsAsString();
 }
 
 // ---------------------------------------------------------------------------
@@ -677,6 +692,65 @@ TEST(TestKernelIngestorEngine, EveryHandlerReportsSupportsSavingExactlyWhenItSav
         "hipkernel.gfx942_attention_dense.dispatch",
         "hipkernel.gfx1151_wmma_attention.dispatch",
         "hipkernel.gfx1151_wmma_attention_decode.dispatch",
+#ifdef HIPDNN_ENGINE_CONV
+#ifdef HIPDNN_ENGINE_CONV_NAIVE
+        // The conv engine group's packs, compiled in with HIPKERNELPROVIDER_ENABLE_CONV and
+        // registered per family when its catalogs ship (conv/ConvContent.cmake).
+        "hipkernel.conv_naive.dispatch",
+#endif
+#ifdef HIPDNN_ENGINE_CONV_DEPTHWISE_VALU
+        "hipkernel.conv_depthwise_valu.dispatch",
+#endif
+#ifdef HIPDNN_ENGINE_CONV_DEPTHWISE_VALU_WRW
+        "hipkernel.conv_depthwise_valu_wrw.dispatch",
+#endif
+#ifdef HIPDNN_ENGINE_CONV_DEPTHWISE_ROWS
+        "hipkernel.conv_depthwise_rows.dispatch",
+#endif
+#ifdef HIPDNN_ENGINE_CONV_DEPTHWISE_MFMA
+        "hipkernel.conv_depthwise_mfma.dispatch",
+#endif
+#ifdef HIPDNN_ENGINE_CONV_IGEMM
+        "hipkernel.conv_igemm.dispatch",
+#endif
+#ifdef HIPDNN_ENGINE_CONV_IGEMM_NCHW
+        "hipkernel.conv_igemm_nchw.dispatch",
+#endif
+#ifdef HIPDNN_ENGINE_CONV_WRW
+        "hipkernel.conv_wrw.dispatch",
+#endif
+#ifdef HIPDNN_ENGINE_CONV_STEM_BWD
+        "hipkernel.conv_stem_bwd.dispatch",
+#endif
+#ifdef HIPDNN_ENGINE_CONV_WINOGRAD
+        "hipkernel.conv_winograd.dispatch",
+#endif
+#ifdef HIPDNN_ENGINE_CONV_WINOGRAD_ND
+        "hipkernel.conv_winograd_nd.dispatch",
+#endif
+#ifdef HIPDNN_ENGINE_CONV_DIRECT
+        "hipkernel.conv_direct.dispatch",
+#endif
+#ifdef HIPDNN_ENGINE_CONV_SMALLC
+        "hipkernel.conv_smallc.dispatch",
+#endif
+#ifdef HIPDNN_ENGINE_CONV_GROUP
+        "hipkernel.conv_group.dispatch",
+#endif
+#ifdef HIPDNN_ENGINE_CONV_FFT
+        "hipkernel.conv_fft.dispatch",
+#endif
+#ifdef HIPDNN_ENGINE_CONV_GROUP_VALU
+        "hipkernel.conv_group_valu.dispatch",
+#endif
+#ifdef HIPDNN_ENGINE_CONV_GROUP_VALU_WRW
+        "hipkernel.conv_group_valu_wrw.dispatch",
+#endif
+#ifdef HIPDNN_ENGINE_CONV_NARROW
+        "hipkernel.conv_narrow.dispatch",
+        "hipkernel.conv_narrow_wrw.dispatch",
+#endif
+#endif
     };
     EXPECT_EQ(packDispatchSymbols.size(), ingestorPacks().size())
         << "add the dispatch symbol of each new pack to this list";

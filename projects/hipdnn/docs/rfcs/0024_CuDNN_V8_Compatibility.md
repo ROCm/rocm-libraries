@@ -268,7 +268,7 @@ runs no heuristics and needs no GPU.
 - **Notes.** Behavior notes map by name. Numerical notes are read from hipDNN's per-engine
   numerical-note attribute ([RFC 0025](./0025_NumericalNotes.md)): an engine that declares none is reported
   `NONDETERMINISTIC`, so deterministic filtering keeps only engines that claim determinism
-  ([RFC 0025](./0025_NumericalNotes.md)). No in-tree engine reports another numerical note. v0.x filtering runs in the caller, so an empty result reaches it as an
+  ([RFC 0025](./0025_NumericalNotes.md)). The TF32 conv engines also report `TENSOR_CORE` and the reduced-precision-reduction conv engines `REDUCED_PRECISION_REDUCTION`. v0.x filtering runs in the caller, so an empty result reaches it as an
   empty list where the v9 API returns `GRAPH_NOT_SUPPORTED`.
 - **Knobs.** hipDNN knobs that map onto a cuDNN knob type are shown; others are hidden, and choosing a
   hidden knob is `NOT_SUPPORTED`. A choice of `-1` is upstream's "unset" and is ignored unless the knob

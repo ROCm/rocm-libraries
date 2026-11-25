@@ -575,7 +575,7 @@ hipDNN-relevant configure presets:
 | `hipdnn-providers` | hipDNN core + integration-tests + MIOpen + hipBLASLt providers |
 | `hipdnn-providers-all` | `hipdnn-providers` + HIP-kernel provider |
 | `hipdnn-samples` | `hipdnn-providers` (hipDNN core + integration-tests + MIOpen + hipBLASLt providers) + samples |
-| `hipdnn-dev-all` | everything (all providers + integration-tests + samples + Python bindings) |
+| `hipdnn-dev-all` | everything (all providers + integration-tests + samples + Python bindings), with the HIP-kernel provider's conv engine group built (`HIPKERNELPROVIDER_ENABLE_CONV=ON`; `miopen-hipdnn-dev-all` too) |
 | `hipdnn-python` | hipDNN core + Python frontend bindings |
 
 > [!TIP]

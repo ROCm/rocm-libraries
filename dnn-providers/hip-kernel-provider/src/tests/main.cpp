@@ -21,6 +21,7 @@ SPDX-License-Identifier: MIT
 #include <hipdnn_test_sdk/utilities/ScopedTestCacheDir.hpp>
 
 #include "TestDescriptorRoot.hpp"
+#include "engines/kernel_ingestor_engine/ConvEngineGroupGate.hpp"
 #include "engines/kernel_ingestor_engine/KernelIngestorEngine.hpp"
 
 // Every census diagnostic in this file is matched as text by the CTest entries in
@@ -245,6 +246,18 @@ int main(int argc, char** argv)
     // Keep the ingestor's winner cache out of the developer's ~/.cache/hipdnn: the
     // dispatch cases benchmark, and benchmarking writes a shard through to disk.
     const hipdnn_test_sdk::utilities::ScopedTestCacheDir cacheDir("hip-kernel-provider-unit");
+
+#if defined(HIPDNN_ENABLE_KERNEL_INGESTOR) && defined(HIPDNN_ENGINE_CONV)
+    // The conv engine group is opt-in at runtime, and these suites exercise it: enable it
+    // unless the caller chose a value, so the binary runs standalone.
+    if(hipdnn_data_sdk::utilities::getEnv(
+           hip_kernel_provider::kernel_ingestor_engine::CONV_ENABLE_ENV)
+           .empty())
+    {
+        hipdnn_data_sdk::utilities::setEnv(
+            hip_kernel_provider::kernel_ingestor_engine::CONV_ENABLE_ENV, "1");
+    }
+#endif
 
 #ifdef HIPKERNELPROVIDER_TEST_SET_UNIT_RELDIR
     // Point this binary at the descriptors staged beside it. The engine implementation is

@@ -107,6 +107,41 @@ TEST(TestConvFwdGraphMatcher, AcceptsAHalfPrecisionConv)
     EXPECT_TRUE(matches(fixture.context()));
 }
 
+TEST(TestConvFwdGraphMatcher, ServesCudnnsComputeTypesPerElementType)
+{
+    using data_objects::DataType;
+    // cuDNN's convolution compute types (cudnn-frontend docs/developer/graph-api.mdx): FLOAT
+    // for every element type, HALF also for HALF; UNSET reads as FLOAT.
+    for(const auto element : {DataType::FLOAT, DataType::HALF})
+    {
+        for(const auto compute : {DataType::UNSET,
+                                  DataType::FLOAT,
+                                  DataType::HALF,
+                                  DataType::BFLOAT16,
+                                  DataType::DOUBLE,
+                                  DataType::INT32})
+        {
+            const GraphFixture fixture(buildConvFwdGraph(element,
+                                                         data_objects::ConvMode::CROSS_CORRELATION,
+                                                         {1, 1},
+                                                         {1, 1},
+                                                         {0, 0},
+                                                         {0, 0},
+                                                         {1, 1, 3, 3},
+                                                         std::nullopt,
+                                                         std::nullopt,
+                                                         std::nullopt,
+                                                         std::nullopt,
+                                                         compute));
+            const bool served = compute == DataType::UNSET || compute == DataType::FLOAT
+                                || (compute == DataType::HALF && element == DataType::HALF);
+            EXPECT_EQ(matches(fixture.context()), served)
+                << data_objects::EnumNameDataType(element) << " elements, "
+                << data_objects::EnumNameDataType(compute) << " compute";
+        }
+    }
+}
+
 TEST(TestConvFwdBinding, BindsAllThreeOperandUids)
 {
     const GraphFixture fixture(buildConvFwdGraph());

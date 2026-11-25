@@ -1,0 +1,99 @@
+{
+  "version": "1.0",
+  "id": "b76b27e5-6b1a-503c-8d4d-49348c685a47",
+  "name": "conv_smallc config fields",
+  "fields": [
+    {
+      "name": "direction",
+      "type": "string"
+    },
+    {
+      "name": "dtype",
+      "type": "string"
+    },
+    {
+      "name": "atom",
+      "type": "string"
+    },
+    {
+      "name": "archs",
+      "type": "string"
+    },
+    {
+      "name": "atom_id",
+      "type": "int"
+    },
+    {
+      "name": "wave",
+      "type": "int"
+    },
+    {
+      "name": "ka",
+      "type": "int"
+    },
+    {
+      "name": "cmax",
+      "type": "int"
+    },
+    {
+      "name": "kd",
+      "type": "int"
+    },
+    {
+      "name": "r",
+      "type": "int"
+    },
+    {
+      "name": "s",
+      "type": "int"
+    },
+    {
+      "name": "sd",
+      "type": "int"
+    },
+    {
+      "name": "sh",
+      "type": "int"
+    },
+    {
+      "name": "sw",
+      "type": "int"
+    },
+    {
+      "name": "dd",
+      "type": "int"
+    },
+    {
+      "name": "dh",
+      "type": "int"
+    },
+    {
+      "name": "dw",
+      "type": "int"
+    },
+    {
+      "name": "fm",
+      "type": "int"
+    },
+    {
+      "name": "fn",
+      "type": "int"
+    },
+    {
+      "name": "wm",
+      "type": "int"
+    },
+    {
+      "name": "wq",
+      "type": "int"
+    },
+    {
+      "name": "wn",
+      "type": "int"
+    },
+    {
+      "name": "ep",
+      "type": "int"
+    }
+  ]
+}

@@ -35,6 +35,7 @@
 #include "engines/kernel_ingestor_engine/IngestorLaunchRestore.hpp"
 #include "engines/kernel_ingestor_engine/IngestorPacks.hpp"
 #include "engines/kernel_ingestor_engine/IngestorPreparedDispatch.hpp"
+#include "engines/kernel_ingestor_engine/packs/ConvComputeType.hpp"
 #include "engines/kernel_ingestor_engine/packs/ConvFwdGeometry.hpp"
 #include "engines/kernel_ingestor_engine/packs/ConvFwdLaunchValues.hpp"
 #include "engines/kernel_ingestor_engine/packs/PackFeatures.hpp"
@@ -248,6 +249,12 @@ std::optional<BoundTokens> convFwdGraphMatches(const MatchContext& context)
 
     // Uniform dtype across operands; mixed precision is a different kernel.
     if(x->data_type() != w->data_type() || x->data_type() != y->data_type())
+    {
+        return std::nullopt;
+    }
+
+    // cuDNN's compute types for the element type; the kernel accumulates in f32.
+    if(!convServesComputeType(context.graph.getNodeWrapper(0).computeDataType(), x->data_type()))
     {
         return std::nullopt;
     }

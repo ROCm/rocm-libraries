@@ -1,0 +1,26 @@
+{
+  "version": "1.0",
+  "id": "4e40715e-efa1-5bff-9ca5-5e03933f56dd",
+  "name": "hipkernel:CONV_NARROW_WRW",
+  "graph_match": {
+    "native": "hipkernel.conv_narrow_wrw.graph_match"
+  },
+  "metadata": "c14c8068-1951-52c8-b88e-f48d96a631ce",
+  "knobs": [
+    "atom_id",
+    "side_id",
+    "kmin",
+    "ko",
+    "fd",
+    "fr",
+    "fs",
+    "wr",
+    "rb",
+    "nw",
+    "mpw"
+  ],
+  "behavior_notes": [
+    "runtime_compilation"
+  ],
+  "numerical_notes": []
+}

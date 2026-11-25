@@ -1,0 +1,36 @@
+{
+  "version": "1.0",
+  "id": "1219eae9-a0f4-5529-a15e-cf3e8121086e",
+  "name": "hipkernel:CONV_WINOGRAD_FWD_F43",
+  "graph_match": {
+    "native": "hipkernel.conv_winograd_fwd.graph_match"
+  },
+  "metadata": "48457d5b-f0a1-552a-a8ef-f732af8052bd",
+  "knobs": [
+    "m",
+    "llc",
+    "gemm_bm",
+    "gemm_bn",
+    "gemm_bk",
+    "bk",
+    "bt",
+    "ccv",
+    "tm",
+    "tn",
+    "waves",
+    "bins",
+    "f16math",
+    "pf",
+    "sb",
+    "variant_id",
+    "layout_id",
+    "atom"
+  ],
+  "behavior_notes": [
+    "runtime_compilation"
+  ],
+  "numerical_notes": [
+    "winograd",
+    "winograd_tile_6x6"
+  ]
+}

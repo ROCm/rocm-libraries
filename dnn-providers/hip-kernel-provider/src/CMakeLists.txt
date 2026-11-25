@@ -11,10 +11,15 @@ add_library(
     core/ApplicabilityPool.cpp
     core/Handle.cpp
     core/Container.cpp
+    core/PlanDescription.cpp
     core/PluginPublic.cpp
     core/Utils.cpp
+    compilation/CompileCounters.cpp
+    compilation/HiprtcDiskCache.cpp
     compilation/Kernel.cpp
     compilation/Program.cpp
+    compilation/ProgramFetchRecording.cpp
+    utilities/Checksum.cpp
     utilities/Digest.cpp
     utilities/sha256.cpp
 )
@@ -41,6 +46,8 @@ target_include_directories(hip_kernel_provider_impl PUBLIC
 
 dnn_provider_generate_version_header(hip_kernel_provider hip_kernel_provider_impl ${CMAKE_CURRENT_LIST_DIR}/..)
 target_link_libraries(hip_kernel_provider_impl PUBLIC hip::host hipdnn_data_sdk hipdnn_flatbuffers_sdk hipdnn_plugin_sdk hiprtc::hiprtc Threads::Threads)
+# dladdr/dl_iterate_phdr/dlsym name the compiler libraries in the HIPRTC cache key.
+target_link_libraries(hip_kernel_provider_impl PUBLIC ${CMAKE_DL_LIBS})
 if(KPACK_NEEDED)
     target_link_libraries(hip_kernel_provider_impl PRIVATE rocm::rocm_kpack)
     if(NOT WIN32)
@@ -77,6 +84,17 @@ endif()
 
 if(ENABLE_HIP_MLOPS_ENGINE)
     target_compile_definitions(hip_kernel_provider_private PUBLIC HIPDNN_ENGINE_HIP_MLOPS=1)
+endif()
+
+# Explicit independent accuracy authority; separate from provider kernel selection.
+if(HIPKERNELPROVIDER_ENABLE_CONV AND HIPKERNELPROVIDER_ENABLE_TESTS AND TARGET hipdnn_bench_lib)
+    add_executable(hipkernel_validate_wrw ../conv/tools/ValidateWrw.cpp)
+    target_compile_features(hipkernel_validate_wrw PRIVATE cxx_std_17)
+    target_compile_options(hipkernel_validate_wrw PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})
+    target_link_libraries(hipkernel_validate_wrw PRIVATE
+        hipdnn_bench_lib hipdnn_frontend hipdnn_backend hipdnn_flatbuffers_sdk
+        hipdnn_data_sdk hip::host hiprtc::hiprtc)
+    clang_tidy_check(hipkernel_validate_wrw)
 endif()
 
 if(ENABLE_HIP_FLASH2_ENGINE)

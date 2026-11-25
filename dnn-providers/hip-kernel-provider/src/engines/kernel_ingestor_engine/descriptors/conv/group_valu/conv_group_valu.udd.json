@@ -1,0 +1,6 @@
+{
+  "version": "1.0",
+  "id": "8af0d897-5c01-5410-bcd7-9ea74f6476be",
+  "name": "conv_group_valu dispatch",
+  "dispatch_symbol": "hipkernel.conv_group_valu.dispatch"
+}

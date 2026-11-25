@@ -1,0 +1,6 @@
+outs:
+- md5: d1132a176f3430f67ceb674185c4bb0d
+  size: 1404856
+  hash: md5
+  path: conv_igemm_nchw_bwd.kdp.json
+  remote: ingestor

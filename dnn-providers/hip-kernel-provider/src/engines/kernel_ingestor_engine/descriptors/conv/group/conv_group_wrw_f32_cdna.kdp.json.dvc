@@ -1,0 +1,6 @@
+outs:
+- md5: 18ece4bf11a82efe4094b2f640ad8b34
+  size: 281878
+  hash: md5
+  path: conv_group_wrw_f32_cdna.kdp.json
+  remote: ingestor

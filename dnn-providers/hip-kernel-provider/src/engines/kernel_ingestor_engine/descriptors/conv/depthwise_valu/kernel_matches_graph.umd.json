@@ -1,0 +1,7 @@
+{
+  "version": "1.0",
+  "id": "3fad376f-dfdf-5f14-8e1c-3df8bd4e70ca",
+  "name": "kernel dtype, direction, layout, rank and variant constraints match the graph",
+  "scope": "kernel",
+  "match_symbol": "hipkernel.conv_depthwise_valu.kernel_match"
+}

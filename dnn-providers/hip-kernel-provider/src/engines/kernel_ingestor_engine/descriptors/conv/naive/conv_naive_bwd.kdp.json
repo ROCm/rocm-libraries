@@ -1,0 +1,58 @@
+{
+  "version": "1.0",
+  "id": "2e276228-f033-4a0d-b744-b8f3eb8adadc",
+  "name": "hipkernel:conv_naive_bwd",
+  "arch": [],
+  "matchers": [
+    "0dec0719-a2c5-498f-996c-bb81e993293f"
+  ],
+  "engine": "6e768386-3eb7-448e-b7de-fd49a5d81008",
+  "dispatch": "a382d637-854c-4e42-ade4-8e4aaf6a06b1",
+  "kernelDescriptors": [
+    {
+      "version": "1.0",
+      "id": "1b302921-b942-407e-a57c-62df55aa3491",
+      "name": "conv_naive_bwd.f32",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvNaive.cpp",
+        "entry_point": "ConvNaiveBwd"
+      },
+      "metadata": {
+        "dtype": "FLOAT",
+        "direction": "BWD"
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "0b20d152-80df-4d0e-9d7a-e69b8b14d5f1",
+      "name": "conv_naive_bwd.f16",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvNaive.cpp",
+        "entry_point": "ConvNaiveBwd"
+      },
+      "metadata": {
+        "dtype": "HALF",
+        "direction": "BWD"
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "15671435-b707-452e-98e9-d81b7ed7dfae",
+      "name": "conv_naive_bwd.bf16",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvNaive.cpp",
+        "entry_point": "ConvNaiveBwd"
+      },
+      "metadata": {
+        "dtype": "BFLOAT16",
+        "direction": "BWD"
+      },
+      "priority": 0
+    }
+  ]
+}

@@ -26,6 +26,7 @@
 #include <hipdnn_data_sdk/types.hpp>
 #include <hipdnn_data_sdk/types/Bfloat16.hpp>
 #include <hipdnn_data_sdk/types/Half.hpp>
+#include <hipdnn_flatbuffers_sdk/utilities/FlatbufferUtils.hpp>
 
 #if defined(USE_ROCRAND)
 #include <hip/hip_runtime.h>
@@ -755,6 +756,29 @@ FillResult fillInputs(const hipdnn_flatbuffers_sdk::data_objects::Graph& graph,
                 "no input fill registered for op "
                 + std::string(name != nullptr ? name->c_str() : "(unnamed)"));
         }
+    }
+
+    // A floating tensor that carries a value (a constant, or a runtime pass-by-value scalar
+    // with a default) is that value: engines bake it at plan build and ignore any buffer for
+    // it (RFC 0016). The references read its buffer, so the buffer holds the value, whatever
+    // recipe or default would otherwise fill it. (Integer values keep their recipes: a float
+    // fill would not hold every one exactly.)
+    const std::unordered_set<int64_t> owned(ownedUids.begin(), ownedUids.end());
+    for(const auto* tensor : *graph.tensors())
+    {
+        using hipdnn_flatbuffers_sdk::data_objects::DataType;
+        const auto type = tensor->data_type();
+        const bool floating = type == DataType::FLOAT || type == DataType::HALF
+                              || type == DataType::BFLOAT16 || type == DataType::DOUBLE;
+        if(!floating
+           || tensor->value_type() == hipdnn_flatbuffers_sdk::data_objects::TensorValue::NONE
+           || owned.count(tensor->uid()) == 0)
+        {
+            continue;
+        }
+        const auto value = hipdnn_flatbuffers_sdk::utilities::extractValueFromTensorValue<double>(
+            tensor, "constant input");
+        recipes.set(tensor->uid(), FillRecipe::fixed(static_cast<float>(value)));
     }
 
     // Sort so the rng sequence is deterministic regardless of discovery order.

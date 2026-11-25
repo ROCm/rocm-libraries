@@ -1,0 +1,7 @@
+{
+  "version": "1.0",
+  "id": "08b27766-3642-567d-a74e-d82be8d9b5ee",
+  "name": "kernel direction, dtype, atom (device) and channel vector match the graph",
+  "scope": "kernel",
+  "match_symbol": "hipkernel.conv_igemm.kernel_match"
+}

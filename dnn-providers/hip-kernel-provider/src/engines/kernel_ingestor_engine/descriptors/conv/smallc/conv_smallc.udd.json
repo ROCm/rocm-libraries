@@ -1,0 +1,6 @@
+{
+  "version": "1.0",
+  "id": "4c926107-7b83-50eb-bfe6-b851592d6630",
+  "name": "conv_smallc dispatch",
+  "dispatch_symbol": "hipkernel.conv_smallc.dispatch"
+}

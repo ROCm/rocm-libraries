@@ -1,0 +1,6 @@
+{
+  "version": "1.0",
+  "id": "15253d78-61b1-5534-b551-c9c37e3dd289",
+  "name": "conv_stem_bwd dispatch",
+  "dispatch_symbol": "hipkernel.conv_stem_bwd.dispatch"
+}

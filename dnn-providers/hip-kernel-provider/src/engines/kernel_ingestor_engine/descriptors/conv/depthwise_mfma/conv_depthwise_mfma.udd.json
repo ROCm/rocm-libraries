@@ -1,0 +1,6 @@
+{
+  "version": "1.0",
+  "id": "67277a25-f4b7-5a94-859d-5e49d9d30c6f",
+  "name": "conv_depthwise_mfma dispatch",
+  "dispatch_symbol": "hipkernel.conv_depthwise_mfma.dispatch"
+}

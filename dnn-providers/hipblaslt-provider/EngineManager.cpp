@@ -3,11 +3,13 @@
 
 #include <algorithm>
 
+#include <hipdnn_flatbuffers_sdk/data_objects/knob_value_generated.h>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
+#include <hipdnn_plugin_sdk/GlobalKnobDefines.hpp>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 
 #include "EngineManager.hpp"
-#include "engines/HipblasltEngine.hpp"
+#include "engines/PlanBuilderEngine.hpp"
 
 using namespace hipdnn_plugin_sdk;
 using namespace hipdnn_flatbuffers_sdk::flatbuffer_utilities;
@@ -54,6 +56,35 @@ size_t EngineManager::getWorkspaceSize(
     return engine.getWorkspaceSize(handle, opGraph);
 }
 
+namespace
+{
+
+/// The engine configuration's `global.benchmarking` knob: absent or an invalid configuration
+/// reads as off; a non-integer setting is an error, as for the kernel ingestor's engines.
+bool benchmarkingKnob(
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IEngineConfig& engineConfig)
+{
+    using hipdnn_flatbuffers_sdk::data_objects::IntValue;
+    using hipdnn_flatbuffers_sdk::data_objects::KnobValue;
+    if(!engineConfig.isValid()
+       || !engineConfig.hasKnobSetting(hipdnn_plugin_sdk::BENCHMARKING_KNOB_NAME))
+    {
+        return false;
+    }
+    const auto& setting
+        = engineConfig.getKnobSettingByName(hipdnn_plugin_sdk::BENCHMARKING_KNOB_NAME);
+    if(setting.valueType() != KnobValue::IntValue)
+    {
+        throw HipdnnPluginException(HIPDNN_PLUGIN_STATUS_INVALID_VALUE,
+                                    std::string("knob '")
+                                        + hipdnn_plugin_sdk::BENCHMARKING_KNOB_NAME
+                                        + "' must be set to an integer value");
+    }
+    return setting.valueAs<IntValue>().value() != 0;
+}
+
+} // namespace
+
 void EngineManager::initializeExecutionContext(
     const HipdnnEnginePluginHandle& handle,
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph,
@@ -61,6 +92,8 @@ void EngineManager::initializeExecutionContext(
     HipdnnEnginePluginExecutionContext& executionContext) const
 {
     auto& engine = getEngine(engineConfig.engineId());
+    executionContext.setBenchmarking(
+        hipdnn_plugin_sdk::benchmarkingOverrideFromEnv().value_or(benchmarkingKnob(engineConfig)));
     engine.initializeExecutionContext(handle, opGraph, executionContext);
 }
 

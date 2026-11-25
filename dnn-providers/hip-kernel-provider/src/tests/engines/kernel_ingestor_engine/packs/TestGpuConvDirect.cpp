@@ -1,0 +1,1303 @@
+// Copyright © Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier:  MIT
+
+#if defined(HIPDNN_ENABLE_KERNEL_INGESTOR) && defined(HIPDNN_ENGINE_CONV)
+
+#include <algorithm>
+#include <array>
+#include <cmath>
+#include <filesystem>
+#include <fstream>
+#include <functional>
+#include <optional>
+#include <stdexcept>
+#include <string>
+#include <utility>
+#include <vector>
+
+#include <gtest/gtest.h>
+#include <hip/hip_runtime.h>
+#include <hipdnn_data_sdk/types.hpp>
+#include <hipdnn_data_sdk/utilities/Tensor.hpp>
+#include <hipdnn_test_sdk/utilities/CpuFpReferenceConvolution.hpp>
+#include <hipdnn_test_sdk/utilities/ScopedEnvironmentVariableSetter.hpp>
+#include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
+#include <nlohmann/json.hpp>
+
+#include "core/Handle.hpp"
+#include "engines/kernel_ingestor_engine/KernelIngestorEngine.hpp"
+#include "engines/kernel_ingestor_engine/packs/ConvDeterminismTestSupport.hpp"
+#include "engines/kernel_ingestor_engine/packs/ConvDirectProblem.hpp"
+#include "engines/kernel_ingestor_engine/packs/ConvEpilogueDeviceTestSupport.hpp"
+#include "engines/kernel_ingestor_engine/packs/ConvEpilogueTiming.hpp"
+#include "engines/kernel_ingestor_engine/packs/ConvNaiveTestGraphs.hpp"
+#include "engines/kernel_ingestor_engine/packs/DeviceUnits.hpp"
+#include "engines/kernel_ingestor_engine/packs/IngestorPackTestSupport.hpp"
+
+/**
+ * @file TestGpuConvDirect.cpp
+ * @brief The stride-1 halo-tile direct convolution kernels (CONV_DIRECT_FWD, CONV_DIRECT_BWD) on
+ *        the device, through the engines' own graph match, kernel match, prepare and launch,
+ *        against hipDNN's CPU reference convolution.
+ *
+ * Every config of the installed catalogs (the exact engines' and the CONV_DIRECT_*_TF32 engines')
+ * that the kernel match admits on this device runs on every case, forward and backward data, in
+ * fp32, fp16 and bf16 (the three-bf16 fp32 configs in their own suite). The cases cover every instantiated filter (3x3, 5x5, 7x7, 1x7, 7x1,
+ * 3x3x3, 5x5x5), both layouts (channels-first runs through the staging transposes), padding 0 to 3,
+ * asymmetric padding, odd extents, channel counts that are not tile multiples (and 3, which only
+ * the scalar configs serve), maps wide and deep enough for several blocks, depth splitting, and
+ * true convolution (the filter reflected by the weight pre-pass). The CPU reference is
+ * cross-correlation only, so true convolution reflects the filter around it.
+ */
+namespace
+{
+
+using namespace hip_kernel_provider;
+using namespace hip_kernel_provider::kernel_ingestor_engine;
+using namespace hip_kernel_provider::kernel_ingestor_engine::testing;
+using namespace hip_kernel_provider::kernel_ingestor_engine::testing::conv_naive_test;
+using conv_naive::ConvDirection;
+using hipdnn_data_sdk::utilities::Tensor;
+using hipdnn_flatbuffers_sdk::data_objects::ConvMode;
+using hipdnn_flatbuffers_sdk::data_objects::DataType;
+using hipdnn_test_sdk::utilities::CpuFpReferenceConvolution;
+
+using Half = hipdnn_data_sdk::types::half;
+using BFloat16 = hipdnn_data_sdk::types::bfloat16;
+
+PackSymbols packFor(ConvDirection direction)
+{
+    return {"",
+            direction == ConvDirection::FORWARD ? "hipkernel.conv_direct_fwd.graph_match"
+                                                : "hipkernel.conv_direct_bwd.graph_match",
+            "",
+            "hipkernel.conv_direct.kernel_match",
+            "",
+            "hipkernel.conv_direct.dispatch",
+            "",
+            "",
+            ""};
+}
+
+/// The shipped catalog of one direction, as kernel definitions: read from the production
+/// descriptor tree beside the provider (the unit tests' own descriptor root holds only test
+/// sets), so these cases run exactly the configs that ship.
+std::vector<hipdnn_plugin_sdk::ingestor::KernelDefinition> catalog(ConvDirection direction)
+{
+    static const auto s_catalogs = [] {
+        // The provider's resolved tree, else the copy beside this binary's tree (the tests link
+        // the provider in, so its module-relative lookup can fall through to the install prefix).
+        std::vector<std::filesystem::path> roots;
+        {
+            const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter unset(
+                "HIPDNN_DESCRIPTOR_DIR", "");
+            roots.push_back(descriptorSearchDirectory());
+        }
+        std::error_code exeError;
+        for(auto dir = std::filesystem::read_symlink("/proc/self/exe", exeError).parent_path();
+            !exeError && !dir.empty() && dir != dir.root_path();
+            dir = dir.parent_path())
+        {
+            roots.push_back(dir / "lib" / "hipdnn_plugins" / "engines"
+                            / HIPKERNELPROVIDER_DESCRIPTOR_SUBDIR);
+        }
+        std::array<std::vector<hipdnn_plugin_sdk::ingestor::KernelDefinition>, 2> catalogs;
+        // Each direction's exact engine's catalog, then its TF32 engine's (CONV_DIRECT_*_TF32).
+        for(size_t index = 0; index < 2 * catalogs.size(); ++index)
+        {
+            const size_t i = index / 2;
+            const std::string file = std::string(i == 0 ? "conv_direct_fwd" : "conv_direct_bwd")
+                                     + (index % 2 == 0 ? "" : "_tf32") + ".kdp.json";
+            std::filesystem::path found;
+            for(const auto& root : roots)
+            {
+                std::error_code error;
+                for(auto it = std::filesystem::recursive_directory_iterator(root, error);
+                    !error && found.empty()
+                    && it != std::filesystem::recursive_directory_iterator();
+                    it.increment(error))
+                {
+                    if(it->path().filename() == file)
+                    {
+                        found = it->path();
+                    }
+                }
+                if(!found.empty())
+                {
+                    break;
+                }
+            }
+            if(found.empty())
+            {
+                throw std::runtime_error("no " + file + " beside the provider or this test binary");
+            }
+            std::ifstream stream(found);
+            const auto pack = nlohmann::json::parse(stream);
+            for(const auto& descriptor : pack.at("kernelDescriptors"))
+            {
+                hipdnn_plugin_sdk::ingestor::KernelDefinition kernel;
+                kernel.name = descriptor.at("name").get<std::string>();
+                kernel.source.kind = hipdnn_plugin_sdk::ingestor::KernelSourceKind::EMBEDDED_SOURCE;
+                kernel.source.sourceFile
+                    = descriptor.at("kernel_source").at("source_file").get<std::string>();
+                kernel.source.entryPoint
+                    = descriptor.at("kernel_source").at("entry_point").get<std::string>();
+                for(const auto& [key, value] : descriptor.at("metadata").items())
+                {
+                    if(value.is_string())
+                    {
+                        kernel.metadata[key] = value.get<std::string>();
+                    }
+                    else
+                    {
+                        kernel.metadata[key] = value.get<int64_t>();
+                    }
+                }
+                kernel.priority = descriptor.at("priority").get<int64_t>();
+                catalogs[i].push_back(std::move(kernel));
+            }
+        }
+        return catalogs;
+    }();
+    return s_catalogs[direction == ConvDirection::FORWARD ? 0 : 1];
+}
+
+void forEachIndex(const std::vector<int64_t>& dims,
+                  const std::function<void(const std::vector<int64_t>&)>& visit)
+{
+    std::vector<int64_t> index(dims.size(), 0);
+    while(true)
+    {
+        visit(index);
+        size_t axis = dims.size();
+        while(axis > 0)
+        {
+            --axis;
+            if(++index[axis] < dims[axis])
+            {
+                break;
+            }
+            index[axis] = 0;
+            if(axis == 0)
+            {
+                return;
+            }
+        }
+    }
+}
+
+int64_t offsetOf(const std::vector<int64_t>& index, const std::vector<int64_t>& strides)
+{
+    int64_t offset = 0;
+    for(size_t axis = 0; axis < index.size(); ++axis)
+    {
+        offset += index[axis] * strides[axis];
+    }
+    return offset;
+}
+
+template <typename T>
+void reflectFilter(Tensor<T>& filter, Tensor<T>& reflected)
+{
+    const auto& dims = filter.dims();
+    const auto* source = static_cast<const T*>(filter.rawHostData());
+    auto* target = static_cast<T*>(reflected.rawHostData());
+    forEachIndex(dims, [&](const std::vector<int64_t>& index) {
+        auto mirror = index;
+        for(size_t axis = 2; axis < dims.size(); ++axis)
+        {
+            mirror[axis] = dims[axis] - 1 - index[axis];
+        }
+        target[offsetOf(mirror, reflected.strides())] = source[offsetOf(index, filter.strides())];
+    });
+    reflected.markHostModified();
+}
+
+template <typename T>
+float storageEpsilon()
+{
+    if constexpr(std::is_same_v<T, float>)
+    {
+        return 1.2e-7f;
+    }
+    else if constexpr(std::is_same_v<T, Half>)
+    {
+        return 9.8e-4f;
+    }
+    else
+    {
+        return 7.9e-3f;
+    }
+}
+
+template <typename T>
+DataType dataTypeOf()
+{
+    if constexpr(std::is_same_v<T, float>)
+    {
+        return DataType::FLOAT;
+    }
+    else if constexpr(std::is_same_v<T, Half>)
+    {
+        return DataType::HALF;
+    }
+    else
+    {
+        return DataType::BFLOAT16;
+    }
+}
+
+struct DeviceCase
+{
+    std::string name;
+    ConvShape shape;
+};
+
+ConvShape dense(int64_t c,
+                int64_t k,
+                std::vector<int64_t> input,
+                std::vector<int64_t> filter,
+                const std::vector<int64_t>& pad,
+                bool channelsLast)
+{
+    ConvShape shape;
+    shape.n = 2;
+    shape.c = c;
+    shape.k = k;
+    shape.groups = 1;
+    shape.input = std::move(input);
+    shape.filter = std::move(filter);
+    shape.prePadding = pad;
+    shape.postPadding = pad;
+    shape.stride.assign(shape.input.size(), 1);
+    shape.dilation.assign(shape.input.size(), 1);
+    shape.channelsLast = channelsLast;
+    return shape;
+}
+
+ConvShape padded(ConvShape shape, std::vector<int64_t> pre, std::vector<int64_t> post)
+{
+    shape.prePadding = std::move(pre);
+    shape.postPadding = std::move(post);
+    return shape;
+}
+
+// Extents are not multiples of the tiles and channel counts are not multiples of the column
+// tiles or channel chunks, so every edge runs; 24, 40 and 136 channels admit the 8-wide vectors,
+// 3 only the scalar ones.
+std::vector<DeviceCase> deviceCases()
+{
+    std::vector<DeviceCase> cases;
+    cases.push_back({"Nhwc3x3", dense(24, 40, {13, 11}, {3, 3}, {1, 1}, true)});
+    cases.push_back({"Nchw3x3", dense(24, 40, {13, 11}, {3, 3}, {1, 1}, false)});
+    cases.push_back({"Nhwc3x3Pad0", dense(40, 24, {9, 11}, {3, 3}, {0, 0}, true)});
+    cases.push_back({"Nhwc3x3Pad2", dense(24, 72, {9, 11}, {3, 3}, {2, 2}, true)});
+    cases.push_back({"Nhwc3x3Pad3", dense(16, 24, {6, 9}, {3, 3}, {3, 3}, true)});
+    cases.push_back({"NhwcSmallChannels", dense(3, 16, {17, 15}, {3, 3}, {1, 1}, true)});
+    cases.push_back({"NhwcWide", dense(32, 48, {5, 70}, {3, 3}, {1, 1}, true)});
+    cases.push_back({"NhwcMultiBlock", dense(136, 152, {17, 23}, {3, 3}, {1, 1}, true)});
+    // Wider column tiles must handle a full block followed by a partial one, including an
+    // unaligned final output vector. In backward data the graph's C/K exchange roles, so the
+    // mirrored case reaches that scalar epilogue while keeping the reduction divisible by 8.
+    auto outputTail = dense(40, 133, {9, 15}, {3, 3}, {1, 1}, true);
+    outputTail.n = 3;
+    cases.push_back({"Nhwc3x3OutputVectorTail", outputTail});
+    auto inputTail = dense(133, 40, {11, 9}, {3, 3}, {0, 0}, false);
+    inputTail.n = 3;
+    cases.push_back({"Nchw3x3InputVectorTail", inputTail});
+    // One image, several spatial and channel blocks, a partial reduction chunk in either
+    // direction, and asymmetric halos after reflection/staging.
+    auto wideConvolution = padded(dense(72, 168, {9, 15}, {3, 3}, {1, 1}, false), {2, 0}, {0, 1});
+    wideConvolution.n = 1;
+    wideConvolution.mode = ConvMode::CONVOLUTION;
+    cases.push_back({"Nchw3x3WideAsymmetricConvolutionMode", wideConvolution});
+    cases.push_back({"Nhwc5x5", dense(32, 48, {19, 23}, {5, 5}, {2, 2}, true)});
+    cases.push_back({"Nchw5x5Asymmetric",
+                     padded(dense(24, 40, {11, 13}, {5, 5}, {1, 1}, false), {2, 1}, {1, 2})});
+    cases.push_back({"Nhwc7x7", dense(16, 32, {20, 21}, {7, 7}, {3, 3}, true)});
+    cases.push_back({"Nhwc1x7", dense(32, 32, {11, 30}, {1, 7}, {0, 3}, true)});
+    cases.push_back({"Nchw7x1", dense(32, 40, {30, 11}, {7, 1}, {3, 0}, false)});
+    cases.push_back({"Ndhwc3x3x3", dense(32, 40, {5, 7, 9}, {3, 3, 3}, {1, 1, 1}, true)});
+    cases.push_back({"Ncdhw3x3x3", dense(16, 24, {5, 6, 7}, {3, 3, 3}, {1, 1, 1}, false)});
+    cases.push_back({"Ndhwc3x3x3Pad0", dense(16, 16, {4, 6, 6}, {3, 3, 3}, {0, 0, 0}, true)});
+    cases.push_back(
+        {"Ndhwc3x3x3Pad2Asymmetric",
+         padded(dense(24, 56, {3, 5, 6}, {3, 3, 3}, {2, 1, 2}, true), {2, 1, 2}, {1, 2, 0})});
+    auto deep = dense(64, 64, {9, 8, 8}, {3, 3, 3}, {1, 1, 1}, true);
+    deep.n = 1;
+    cases.push_back({"Ndhwc3x3x3Deep", deep});
+    // Run tiles (run configs): planes smaller than a tile, so a tile spans rows and planes and a
+    // filter row's reach past a plane lands on the padding; and 130-wide rows cut into strips,
+    // whose halos reach into the neighbouring strips' columns.
+    cases.push_back({"Ndhwc3x3x3Pad0Spans", dense(40, 24, {7, 9, 10}, {3, 3, 3}, {0, 0, 0}, true)});
+    auto wideRows = dense(24, 40, {4, 5, 130}, {3, 3, 3}, {0, 0, 0}, true);
+    wideRows.n = 1;
+    cases.push_back({"Ndhwc3x3x3Pad0WideRows", wideRows});
+    cases.push_back({"Ndhwc5x5x5", dense(64, 16, {6, 9, 10}, {5, 5, 5}, {2, 2, 2}, true)});
+    cases.push_back({"Ncdhw5x5x5Pad0", dense(24, 40, {7, 8, 9}, {5, 5, 5}, {0, 0, 0}, false)});
+
+    auto convolution = dense(24, 40, {13, 11}, {3, 3}, {1, 1}, true);
+    convolution.mode = ConvMode::CONVOLUTION;
+    cases.push_back({"Nhwc3x3ConvolutionMode", convolution});
+    auto convolution3d = dense(16, 24, {4, 5, 6}, {3, 3, 3}, {1, 1, 1}, false);
+    convolution3d.mode = ConvMode::CONVOLUTION;
+    cases.push_back({"Ncdhw3x3x3ConvolutionMode", convolution3d});
+    auto convolution1x7 = padded(dense(16, 24, {9, 20}, {1, 7}, {0, 3}, true), {0, 1}, {0, 4});
+    convolution1x7.mode = ConvMode::CONVOLUTION;
+    cases.push_back({"Nhwc1x7AsymmetricConvolutionMode", convolution1x7});
+    // Output extent 1 (hipconv #15149 review): the engine runs stride 1 only, so a "valid" 3x3
+    // over 3 rows (one output row) and the 3-D whole-filter window.
+    cases.push_back({"Nhwc3x3OutputOneHigh", dense(24, 40, {3, 11}, {3, 3}, {0, 0}, true)});
+    cases.push_back({"Ndhwc3x3x3OutputOne", dense(16, 24, {3, 3, 3}, {3, 3, 3}, {0, 0, 0}, true)});
+    // More tiles than a 256-CU device runs at once: the rows kernel's blocks walk several tiles,
+    // prefetching the next tile's first chunk; 136 channels make an odd chunk count (the walk
+    // alternates its starting stage) and 8 a single chunk.
+    auto manyTiles = dense(136, 8, {160, 160}, {3, 3}, {1, 1}, true);
+    manyTiles.n = 6;
+    cases.push_back({"Nhwc3x3ManyTiles", manyTiles});
+    // Batch-unfold rows tiles (two images per MFMA column group): an odd batch leaves the last
+    // group one image short; 24 columns fill 8-column halves exactly, 21 do not.
+    auto oddBatch = dense(64, 136, {11, 24}, {3, 3}, {1, 1}, true);
+    oddBatch.n = 3;
+    cases.push_back({"Nhwc3x3OddBatch", oddBatch});
+    auto oddBatchRagged = dense(72, 40, {9, 21}, {3, 3}, {2, 2}, true);
+    oddBatchRagged.n = 5;
+    cases.push_back({"Nhwc3x3OddBatchRagged", oddBatchRagged});
+    // A grid of a few tiles over 4+ channel chunks: the rows split-C configs (fp32 partials and
+    // the in-order reduce) serve it; 200 channels leave the last split a short chunk.
+    cases.push_back({"Nhwc3x3SplitC", dense(200, 72, {9, 11}, {3, 3}, {1, 1}, true)});
+    // Channels-first rows of whole 16-byte runs (widths a multiple of 8): the in-place
+    // channels-first configs serve these; leading pads 2, 0 and 3 move the halo against its
+    // 8-aligned runs, 72 and 136 channels leave short chunks, and many tiles make blocks walk.
+    cases.push_back({"Nchw3x3Runs", dense(72, 136, {21, 40}, {3, 3}, {2, 2}, false)});
+    cases.push_back({"Nchw3x3RunsPad0", dense(40, 24, {9, 16}, {3, 3}, {0, 0}, false)});
+    cases.push_back({"Nchw3x3RunsAsymmetric",
+                     padded(dense(40, 24, {9, 16}, {3, 3}, {1, 1}, false), {0, 3}, {2, 1})});
+    auto manyRuns = dense(136, 40, {48, 64}, {3, 3}, {1, 1}, false);
+    manyRuns.n = 6;
+    cases.push_back({"Nchw3x3RunsManyTiles", manyRuns});
+    return cases;
+}
+
+/// Which configs a run takes: the native ones, or (fp32, the TF32 engines') the three-bf16 ones.
+enum class Math
+{
+    NATIVE,
+    THREE_BF16,
+};
+
+/// +inf and -inf planted into @p input (the tensor the reduction reads, besides the filter).
+template <typename T>
+void plantInfinities(Tensor<T>& input)
+{
+    int64_t count = 1;
+    for(const auto extent : input.dims())
+    {
+        count *= extent;
+    }
+    auto* data = static_cast<T*>(input.rawHostData());
+    data[0] = static_cast<T>(INFINITY);
+    data[count / 2] = static_cast<T>(-INFINITY);
+    input.markHostModified();
+}
+
+/// A result matches its reference: within @p tolerance where the reference is finite, the same
+/// infinity, or NaN where the reference is NaN.
+bool matches(float got, float want, float tolerance)
+{
+    if(std::isnan(want))
+    {
+        return std::isnan(got);
+    }
+    if(std::isinf(want))
+    {
+        return got == want;
+    }
+    return std::fabs(got - want) <= tolerance;
+}
+
+/// Bytes of NaN guard placed before and after the input in the guarded runs.
+constexpr size_t GUARD_BYTES = size_t{64} * 1024;
+
+/// The input the reduction reads, copied between two NaN guards (all-ones bytes: NaN in fp32,
+/// fp16 and bf16): a kernel that read outside the tensor and used the value would put NaN into
+/// outputs whose reference is finite.
+class GuardedInput
+{
+public:
+    GuardedInput(const void* device, size_t bytes)
+    {
+        EXPECT_EQ(hipMalloc(&_base, bytes + 2 * GUARD_BYTES), hipSuccess);
+        EXPECT_EQ(hipMemset(_base, 0xFF, bytes + 2 * GUARD_BYTES), hipSuccess);
+        EXPECT_EQ(
+            hipMemcpy(
+                static_cast<char*>(_base) + GUARD_BYTES, device, bytes, hipMemcpyDeviceToDevice),
+            hipSuccess);
+    }
+    GuardedInput(const GuardedInput&) = delete;
+    GuardedInput& operator=(const GuardedInput&) = delete;
+    ~GuardedInput()
+    {
+        if(_base != nullptr)
+        {
+            (void)hipFree(_base);
+        }
+    }
+    void* data() const
+    {
+        return static_cast<char*>(_base) + GUARD_BYTES;
+    }
+
+private:
+    void* _base = nullptr;
+};
+
+/// Bytes a strided tensor spans (its largest element offset plus one element).
+template <typename T>
+size_t spanBytes(const Tensor<T>& tensor)
+{
+    int64_t last = 0;
+    for(size_t i = 0; i < tensor.dims().size(); ++i)
+    {
+        last += (tensor.dims()[i] - 1) * tensor.strides()[i];
+    }
+    return static_cast<size_t>(last + 1) * sizeof(T);
+}
+
+/// Which catalog configs a case runs (all when empty).
+using ConfigFilter = std::function<bool(const hipdnn_plugin_sdk::ingestor::KernelDefinition&)>;
+
+template <typename T>
+void runCase(ConvShape shape,
+             ConvDirection direction,
+             Math math = Math::NATIVE,
+             bool infinities = false,
+             bool guarded = false,
+             const ConfigFilter& only = {})
+{
+    shape.dataType = dataTypeOf<T>();
+    const auto spec = specFor(shape, direction);
+    const GraphFixture fixture(buildGraph(spec), currentDeviceProperties());
+    const auto pack = packFor(direction);
+    const auto bound = matchesGraph(pack, fixture.context());
+    ASSERT_TRUE(bound.has_value()) << "the engine refused a case it should serve";
+
+    Tensor<T> x(spec.x.dims, spec.x.strides);
+    Tensor<T> w(spec.w.dims, spec.w.strides);
+    Tensor<T> y(spec.y.dims, spec.y.strides);
+    constexpr unsigned int SEED = 1234;
+    const bool forward = direction == ConvDirection::FORWARD;
+    (forward ? x : y).fillTensorWithRandomValues(-1.0f, 1.0f, SEED);
+    w.fillTensorWithRandomValues(-1.0f, 1.0f, SEED + 1);
+    if(infinities)
+    {
+        plantInfinities(forward ? x : y);
+    }
+    Tensor<T>& written = forward ? y : x;
+
+    const bool reflect = shape.mode == ConvMode::CONVOLUTION;
+    Tensor<T> reflectedW(spec.w.dims, spec.w.strides);
+    if(reflect)
+    {
+        reflectFilter(w, reflectedW);
+    }
+    const Tensor<T>& filterForReference = reflect ? reflectedW : w;
+    Tensor<T> reference(written.dims(), written.strides());
+    if(forward)
+    {
+        CpuFpReferenceConvolution::fprop(x,
+                                         filterForReference,
+                                         reference,
+                                         shape.stride,
+                                         shape.dilation,
+                                         shape.prePadding,
+                                         shape.postPadding);
+    }
+    else
+    {
+        CpuFpReferenceConvolution::dgrad(reference,
+                                         filterForReference,
+                                         y,
+                                         shape.stride,
+                                         shape.dilation,
+                                         shape.prePadding,
+                                         shape.postPadding);
+    }
+    // Each output sums (taps x reduction channels) products of values in [-1, 1].
+    int64_t reductionLength = (forward ? shape.c : shape.k) / shape.groups;
+    for(const auto extent : shape.filter)
+    {
+        reductionLength *= extent;
+    }
+    // Three-bf16 drops about 2^-16 of each product (the lo x lo term and the lo parts' rounding).
+    const float accumulationBound
+        = (math == Math::THREE_BF16 ? 3e-5f : 2e-6f) * static_cast<float>(reductionLength);
+
+    const auto& handler = dispatchHandler(pack);
+    int ran = 0;
+    for(const auto& kernel : catalog(direction))
+    {
+        if((kernel.getIntMetadata("math") == 1) != (math == Math::THREE_BF16)
+           || (only && !only(kernel)) || !matchesKernel(pack, fixture.context(), kernel, *bound))
+        {
+            continue;
+        }
+        SCOPED_TRACE(kernel.name);
+        ++ran;
+        const auto prepared = handler.prepare(fixture.context(), *bound, kernel);
+        ASSERT_NE(prepared, nullptr);
+        const size_t workspaceBytes = handler.workspaceBytes(fixture.context(), *bound, kernel);
+        void* workspace = nullptr;
+        if(workspaceBytes > 0)
+        {
+            ASSERT_EQ(hipMalloc(&workspace, workspaceBytes), hipSuccess);
+        }
+
+        written.fillWithSentinelValue();
+        Tensor<T>& read = forward ? x : y;
+        std::optional<GuardedInput> guard;
+        if(guarded)
+        {
+            guard.emplace(read.rawDeviceData(), spanBytes(read));
+        }
+        void* readData = guard.has_value() ? guard->data() : read.rawDeviceData();
+        const std::array<hipdnnPluginDeviceBuffer_t, 3> buffers{
+            hipdnnPluginDeviceBuffer_t{X_UID, forward ? readData : x.rawDeviceData()},
+            hipdnnPluginDeviceBuffer_t{W_UID, w.rawDeviceData()},
+            hipdnnPluginDeviceBuffer_t{Y_UID, forward ? y.rawDeviceData() : readData}};
+        const Handle handle;
+        handler.launch(
+            handle, *prepared, buffers.data(), static_cast<uint32_t>(buffers.size()), workspace);
+        ASSERT_EQ(hipStreamSynchronize(handle.getStream()), hipSuccess);
+        // Deterministic: a second launch gives the same bits (the UED's RFC 0025 claim).
+        EXPECT_TRUE(conv_determinism_test::relaunchReproducesOutput(
+            [&] {
+                handler.launch(handle,
+                               *prepared,
+                               buffers.data(),
+                               static_cast<uint32_t>(buffers.size()),
+                               workspace);
+            },
+            handle.getStream(),
+            written,
+            workspace,
+            workspaceBytes));
+        if(workspace != nullptr)
+        {
+            ASSERT_EQ(hipFree(workspace), hipSuccess);
+        }
+        written.markDeviceModified();
+
+        const auto* actual = static_cast<const T*>(written.rawHostData());
+        const auto* expected = static_cast<const T*>(reference.rawHostData());
+        int64_t mismatches = 0;
+        forEachIndex(written.dims(), [&](const std::vector<int64_t>& index) {
+            const auto got = static_cast<float>(actual[offsetOf(index, written.strides())]);
+            const auto want = static_cast<float>(expected[offsetOf(index, reference.strides())]);
+            const float tolerance
+                = accumulationBound + 2.0f * storageEpsilon<T>() * (std::fabs(want) + 1e-3f);
+            if(!matches(got, want, tolerance) && ++mismatches <= 5)
+            {
+                ADD_FAILURE() << "at linear index " << offsetOf(index, written.strides())
+                              << ": got " << got << ", want " << want << ", tolerance "
+                              << tolerance;
+            }
+        });
+        EXPECT_EQ(mismatches, 0);
+    }
+    EXPECT_GE(ran, 1) << "no catalog config serves this case";
+}
+
+class TestGpuConvDirect : public ::testing::TestWithParam<std::tuple<DeviceCase, ConvDirection>>
+{
+};
+
+TEST_P(TestGpuConvDirect, Float)
+{
+    SKIP_IF_NO_DEVICES();
+    runCase<float>(std::get<0>(GetParam()).shape, std::get<1>(GetParam()));
+}
+
+TEST_P(TestGpuConvDirect, Half)
+{
+    SKIP_IF_NO_DEVICES();
+    runCase<Half>(std::get<0>(GetParam()).shape, std::get<1>(GetParam()));
+}
+
+TEST_P(TestGpuConvDirect, BFloat16)
+{
+    SKIP_IF_NO_DEVICES();
+    runCase<BFloat16>(std::get<0>(GetParam()).shape, std::get<1>(GetParam()));
+}
+
+INSTANTIATE_TEST_SUITE_P(,
+                         TestGpuConvDirect,
+                         ::testing::Combine(::testing::ValuesIn(deviceCases()),
+                                            ::testing::Values(ConvDirection::FORWARD,
+                                                              ConvDirection::BACKWARD_DATA)),
+                         [](const auto& info) {
+                             return std::get<0>(info.param).name
+                                    + (std::get<1>(info.param) == ConvDirection::FORWARD ? "Fwd"
+                                                                                         : "Bwd");
+                         });
+
+/// The input between NaN guards, on graphs whose blocks reach the input's first and last rows
+/// and planes: the halo loads past the image (and a block's step after its last plane, which
+/// loads nothing) must take no value from outside the tensor. Depth is split over several blocks
+/// of a few planes each; infinities are planted at the input's first and middle elements.
+std::vector<DeviceCase> guardedCases()
+{
+    std::vector<DeviceCase> cases;
+    auto deep = dense(40, 24, {13, 6, 9}, {3, 3, 3}, {1, 1, 1}, true);
+    deep.n = 1;
+    cases.push_back({"Ndhwc3x3x3DepthBlocks", deep});
+    cases.push_back({"Ndhwc3x3x3Pad0", dense(16, 40, {7, 5, 6}, {3, 3, 3}, {0, 0, 0}, true)});
+    cases.push_back({"Ncdhw3x3x3", dense(16, 24, {6, 5, 7}, {3, 3, 3}, {1, 1, 1}, false)});
+    cases.push_back({"Nhwc3x3", dense(24, 40, {13, 11}, {3, 3}, {1, 1}, true)});
+    cases.push_back({"Nchw3x3Runs", dense(72, 40, {21, 40}, {3, 3}, {2, 2}, false)});
+    return cases;
+}
+
+class TestGpuConvDirectGuarded
+    : public ::testing::TestWithParam<std::tuple<DeviceCase, ConvDirection>>
+{
+};
+
+TEST_P(TestGpuConvDirectGuarded, Float)
+{
+    SKIP_IF_NO_DEVICES();
+    runCase<float>(
+        std::get<0>(GetParam()).shape, std::get<1>(GetParam()), Math::NATIVE, false, true);
+}
+
+TEST_P(TestGpuConvDirectGuarded, Half)
+{
+    SKIP_IF_NO_DEVICES();
+    runCase<Half>(
+        std::get<0>(GetParam()).shape, std::get<1>(GetParam()), Math::NATIVE, false, true);
+}
+
+TEST_P(TestGpuConvDirectGuarded, BFloat16)
+{
+    SKIP_IF_NO_DEVICES();
+    runCase<BFloat16>(
+        std::get<0>(GetParam()).shape, std::get<1>(GetParam()), Math::NATIVE, false, true);
+}
+
+TEST_P(TestGpuConvDirectGuarded, BFloat16Infinities)
+{
+    SKIP_IF_NO_DEVICES();
+    runCase<BFloat16>(
+        std::get<0>(GetParam()).shape, std::get<1>(GetParam()), Math::NATIVE, true, true);
+}
+
+INSTANTIATE_TEST_SUITE_P(,
+                         TestGpuConvDirectGuarded,
+                         ::testing::Combine(::testing::ValuesIn(guardedCases()),
+                                            ::testing::Values(ConvDirection::FORWARD,
+                                                              ConvDirection::BACKWARD_DATA)),
+                         [](const auto& info) {
+                             return std::get<0>(info.param).name
+                                    + (std::get<1>(info.param) == ConvDirection::FORWARD ? "Fwd"
+                                                                                         : "Bwd");
+                         });
+
+/// The three-bf16 fp32 configs (the CONV_DIRECT_*_TF32 engines'): matrix-core devices only.
+class TestGpuConvDirectThreeBf16
+    : public ::testing::TestWithParam<std::tuple<DeviceCase, ConvDirection>>
+{
+};
+
+TEST_P(TestGpuConvDirectThreeBf16, Float)
+{
+    SKIP_IF_NO_DEVICES();
+    const auto properties = currentDeviceProperties();
+    const auto arch = std::string(properties.gcnArchName);
+    if(arch.rfind("gfx9", 0) != 0 && arch.rfind("gfx11", 0) != 0 && arch.rfind("gfx12", 0) != 0)
+    {
+        GTEST_SKIP() << "no bf16 matrix cores";
+    }
+    if(arch.rfind("gfx906", 0) == 0)
+    {
+        GTEST_SKIP() << "no bf16 matrix cores";
+    }
+    runCase<float>(std::get<0>(GetParam()).shape, std::get<1>(GetParam()), Math::THREE_BF16);
+}
+
+/// +inf and -inf in the input: every output an infinity reaches is that infinity (NaN where both
+/// meet), as the exact fp32 configs give; the three-bf16 split must not turn them into NaN.
+TEST_P(TestGpuConvDirectThreeBf16, FloatInfinities)
+{
+    SKIP_IF_NO_DEVICES();
+    const auto properties = currentDeviceProperties();
+    const auto arch = std::string(properties.gcnArchName);
+    if((arch.rfind("gfx9", 0) != 0 && arch.rfind("gfx11", 0) != 0 && arch.rfind("gfx12", 0) != 0)
+       || arch.rfind("gfx906", 0) == 0)
+    {
+        GTEST_SKIP() << "no bf16 matrix cores";
+    }
+    runCase<float>(std::get<0>(GetParam()).shape, std::get<1>(GetParam()), Math::THREE_BF16, true);
+}
+
+TEST_P(TestGpuConvDirectThreeBf16, FloatInfinitiesNative)
+{
+    SKIP_IF_NO_DEVICES();
+    runCase<float>(std::get<0>(GetParam()).shape, std::get<1>(GetParam()), Math::NATIVE, true);
+}
+
+std::vector<DeviceCase> threeBf16Cases()
+{
+    std::vector<DeviceCase> cases;
+    cases.push_back({"Nhwc3x3", dense(24, 40, {13, 11}, {3, 3}, {1, 1}, true)});
+    cases.push_back({"Nchw3x3MultiBlock", dense(136, 72, {17, 23}, {3, 3}, {1, 1}, false)});
+    cases.push_back({"Ndhwc3x3x3", dense(32, 40, {5, 7, 9}, {3, 3, 3}, {1, 1, 1}, true)});
+    auto convolution = dense(24, 40, {13, 11}, {3, 3}, {2, 0}, true);
+    convolution.mode = ConvMode::CONVOLUTION;
+    cases.push_back({"Nhwc3x3ConvolutionMode", convolution});
+    return cases;
+}
+
+INSTANTIATE_TEST_SUITE_P(,
+                         TestGpuConvDirectThreeBf16,
+                         ::testing::Combine(::testing::ValuesIn(threeBf16Cases()),
+                                            ::testing::Values(ConvDirection::FORWARD,
+                                                              ConvDirection::BACKWARD_DATA)),
+                         [](const auto& info) {
+                             return std::get<0>(info.param).name
+                                    + (std::get<1>(info.param) == ConvDirection::FORWARD ? "Fwd"
+                                                                                         : "Bwd");
+                         });
+
+/// Dilated 3x3 graphs (the 2-D rows configs' `dil`), narrow-channel graphs (the 32- and 64-wide
+/// rows tiles) and one-row images under 1 x S filters (the line configs), on the MFMA parts that
+/// ship the rows kernels. Elsewhere the dilated and one-row graphs have no config and are skipped.
+class TestGpuConvDirectRowsShapes
+    : public ::testing::TestWithParam<std::tuple<DeviceCase, ConvDirection>>
+{
+};
+
+bool rowsArch()
+{
+    const auto arch = std::string(currentDeviceProperties().gcnArchName);
+    return arch.rfind("gfx90a", 0) == 0 || arch.rfind("gfx94", 0) == 0
+           || arch.rfind("gfx950", 0) == 0;
+}
+
+TEST_P(TestGpuConvDirectRowsShapes, Float)
+{
+    SKIP_IF_NO_DEVICES();
+    if(!rowsArch())
+    {
+        GTEST_SKIP() << "no rows configs on this architecture";
+    }
+    runCase<float>(std::get<0>(GetParam()).shape, std::get<1>(GetParam()));
+}
+
+TEST_P(TestGpuConvDirectRowsShapes, Half)
+{
+    SKIP_IF_NO_DEVICES();
+    if(!rowsArch())
+    {
+        GTEST_SKIP() << "no rows configs on this architecture";
+    }
+    runCase<Half>(std::get<0>(GetParam()).shape, std::get<1>(GetParam()));
+}
+
+TEST_P(TestGpuConvDirectRowsShapes, BFloat16)
+{
+    SKIP_IF_NO_DEVICES();
+    if(!rowsArch())
+    {
+        GTEST_SKIP() << "no rows configs on this architecture";
+    }
+    runCase<BFloat16>(std::get<0>(GetParam()).shape, std::get<1>(GetParam()));
+}
+
+/// +inf and -inf in the input through the dilated and narrow configs.
+TEST_P(TestGpuConvDirectRowsShapes, HalfInfinities)
+{
+    SKIP_IF_NO_DEVICES();
+    if(!rowsArch())
+    {
+        GTEST_SKIP() << "no rows configs on this architecture";
+    }
+    runCase<Half>(std::get<0>(GetParam()).shape, std::get<1>(GetParam()), Math::NATIVE, true);
+}
+
+ConvShape dilatedBy(ConvShape shape, int64_t dilation)
+{
+    shape.dilation.assign(shape.input.size(), dilation);
+    return shape;
+}
+
+std::vector<DeviceCase> rowsShapeCases()
+{
+    std::vector<DeviceCase> cases;
+    // Dilation 2 and 4, channels-last and channels-first (widths of whole 16-byte runs, so the
+    // in-place configs serve them), "same" and unpadded, asymmetric pads, convolution mode; extents
+    // and channel counts off the tiles and chunks.
+    cases.push_back({"Nhwc3x3Dil2", dilatedBy(dense(24, 40, {13, 21}, {3, 3}, {2, 2}, true), 2)});
+    cases.push_back(
+        {"Nchw3x3Dil2Runs", dilatedBy(dense(40, 72, {11, 24}, {3, 3}, {2, 2}, false), 2)});
+    cases.push_back(
+        {"Nhwc3x3Dil4Pad0", dilatedBy(dense(16, 24, {17, 19}, {3, 3}, {0, 0}, true), 4)});
+    cases.push_back(
+        {"Nchw3x3Dil4RunsAsymmetric",
+         dilatedBy(padded(dense(24, 40, {14, 32}, {3, 3}, {4, 4}, false), {4, 3}, {2, 5}), 4)});
+    auto convolution = dilatedBy(dense(24, 40, {13, 21}, {3, 3}, {2, 2}, true), 2);
+    convolution.mode = ConvMode::CONVOLUTION;
+    cases.push_back({"Nhwc3x3Dil2ConvolutionMode", convolution});
+    // More tiles than a device runs at once: blocks walk tiles and prefetch.
+    auto manyTiles = dilatedBy(dense(72, 24, {64, 64}, {3, 3}, {2, 2}, false), 2);
+    manyTiles.n = 4;
+    cases.push_back({"Nchw3x3Dil2ManyTiles", manyTiles});
+    // Narrow outputs and reductions: 24, 32 and 64 output channels, 32 and 64 input channels,
+    // both layouts; many tiles so the narrow tiles' blocks walk.
+    cases.push_back({"Nchw3x3NarrowK", dense(64, 24, {21, 40}, {3, 3}, {1, 1}, false)});
+    cases.push_back({"Nhwc3x3NarrowK", dense(64, 32, {21, 37}, {3, 3}, {1, 1}, true)});
+    auto narrowMany = dense(32, 64, {48, 64}, {3, 3}, {1, 1}, false);
+    narrowMany.n = 6;
+    cases.push_back({"Nchw3x3NarrowManyTiles", narrowMany});
+    // One-row images under 1 x S filters (the line configs): 2-D of one row and 1-D, dilated and
+    // not, widths of whole 16-byte runs (channels-first in place) and not, asymmetric pads,
+    // convolution mode, and more tiles than a device runs at once.
+    auto rowDilated = dense(32, 40, {1, 200}, {1, 11}, {0, 25}, false);
+    rowDilated.dilation = {1, 5};
+    cases.push_back({"Nchw1x11Dil5Row", rowDilated});
+    auto rowNhwc = dense(24, 48, {1, 131}, {1, 7}, {0, 9}, true);
+    rowNhwc.dilation = {1, 3};
+    cases.push_back({"Nhwc1x7Dil3Row", rowNhwc});
+    cases.push_back({"Nchw1x3RowAsymmetric",
+                     padded(dense(64, 64, {1, 96}, {1, 3}, {0, 1}, false), {0, 2}, {0, 0})});
+    cases.push_back({"Ncl11", dense(32, 32, {160}, {11}, {5}, false)});
+    auto nclDilated = dense(40, 24, {136}, {3}, {5}, true);
+    nclDilated.dilation = {5};
+    cases.push_back({"Nlc3Dil5", nclDilated});
+    auto rowConvolution = dense(16, 32, {1, 64}, {1, 7}, {0, 3}, false);
+    rowConvolution.mode = ConvMode::CONVOLUTION;
+    cases.push_back({"Nchw1x7RowConvolutionMode", rowConvolution});
+    auto rowMany = dense(40, 24, {1, 2048}, {1, 7}, {0, 3}, false);
+    rowMany.n = 4;
+    cases.push_back({"Nchw1x7RowManyTiles", rowMany});
+    return cases;
+}
+
+INSTANTIATE_TEST_SUITE_P(,
+                         TestGpuConvDirectRowsShapes,
+                         ::testing::Combine(::testing::ValuesIn(rowsShapeCases()),
+                                            ::testing::Values(ConvDirection::FORWARD,
+                                                              ConvDirection::BACKWARD_DATA)),
+                         [](const auto& info) {
+                             return std::get<0>(info.param).name
+                                    + (std::get<1>(info.param) == ConvDirection::FORWARD ? "Fwd"
+                                                                                         : "Bwd");
+                         });
+
+// ---- Host-only: the shipped catalog ----
+
+TEST(TestConvDirectCatalog, LineConfigsServeEveryGeometryAndDtypeOnTheRowsArchitectures)
+{
+    for(const auto direction : {ConvDirection::FORWARD, ConvDirection::BACKWARD_DATA})
+    {
+        for(const int width : {3, 7, 11})
+        {
+            for(const int dilation : {1, 3, 5})
+            {
+                for(const char* dtype : {"FLOAT", "HALF", "BFLOAT16"})
+                {
+                    for(const char* arch : {"gfx90a", "gfx942", "gfx950"})
+                    {
+                        const auto& kernels = catalog(direction);
+                        const bool served
+                            = std::any_of(kernels.begin(), kernels.end(), [&](const auto& k) {
+                                  const auto config = conv_direct::configOf(k);
+                                  return config.has_value() && config->line == 1
+                                         && config->s == width && config->dil == dilation
+                                         && k.getStringMetadata("dtype") == dtype
+                                         && conv_direct::configRunsOn(*config, arch);
+                              });
+                        EXPECT_TRUE(served) << "1 x " << width << " dilation " << dilation << " "
+                                            << dtype << " " << arch;
+                    }
+                }
+            }
+        }
+    }
+}
+
+TEST(TestConvDirectCatalog, DilatedConfigsServeEveryDtypeOnTheRowsArchitectures)
+{
+    for(const auto direction : {ConvDirection::FORWARD, ConvDirection::BACKWARD_DATA})
+    {
+        for(const int dilation : {2, 4})
+        {
+            for(const char* dtype : {"FLOAT", "HALF", "BFLOAT16"})
+            {
+                for(const char* arch : {"gfx90a", "gfx942", "gfx950"})
+                {
+                    const auto& kernels = catalog(direction);
+                    const bool served
+                        = std::any_of(kernels.begin(), kernels.end(), [&](const auto& k) {
+                              const auto config = conv_direct::configOf(k);
+                              return config.has_value() && config->dil == dilation
+                                     && k.getStringMetadata("dtype") == dtype && !config->math
+                                     && conv_direct::configRunsOn(*config, arch);
+                          });
+                    EXPECT_TRUE(served) << "dilation " << dilation << " " << dtype << " " << arch;
+                }
+            }
+        }
+    }
+}
+
+TEST(TestConvDirectCatalog, EveryConfigParsesAndRunsSomewhere)
+{
+    static constexpr std::array<const char*, 9> ARCHS{"gfx906",
+                                                      "gfx908",
+                                                      "gfx90a",
+                                                      "gfx942",
+                                                      "gfx950",
+                                                      "gfx1100",
+                                                      "gfx1151",
+                                                      "gfx1201",
+                                                      "gfx1250"};
+    for(const auto direction : {ConvDirection::FORWARD, ConvDirection::BACKWARD_DATA})
+    {
+        ASSERT_FALSE(catalog(direction).empty());
+        for(const auto& kernel : catalog(direction))
+        {
+            SCOPED_TRACE(kernel.name);
+            const auto config = conv_direct::configOf(kernel);
+            ASSERT_TRUE(config.has_value());
+            const bool somewhere = std::any_of(ARCHS.begin(), ARCHS.end(), [&](const char* arch) {
+                return conv_direct::configRunsOn(*config, arch);
+            });
+            EXPECT_TRUE(somewhere);
+        }
+    }
+}
+
+TEST(TestConvDirectCatalog, EveryFilterAndDtypeHasAConfigOnEveryArchitecture)
+{
+    static constexpr std::array<const char*, 9> ARCHS{"gfx906",
+                                                      "gfx908",
+                                                      "gfx90a",
+                                                      "gfx942",
+                                                      "gfx950",
+                                                      "gfx1030",
+                                                      "gfx1151",
+                                                      "gfx1201",
+                                                      "gfx1250"};
+    for(const auto& filter : conv_direct::FILTERS)
+    {
+        for(const char* dtype : {"FLOAT", "HALF", "BFLOAT16"})
+        {
+            for(const char* arch : ARCHS)
+            {
+                const auto& kernels = catalog(ConvDirection::FORWARD);
+                const bool served = std::any_of(kernels.begin(), kernels.end(), [&](const auto& k) {
+                    const auto config = conv_direct::configOf(k);
+                    return config.has_value() && k.getStringMetadata("dtype") == dtype
+                           && !config->math && config->kd == filter[0] && config->r == filter[1]
+                           && config->s == filter[2] && conv_direct::configRunsOn(*config, arch);
+                });
+                EXPECT_TRUE(served) << dtype << " " << filter[0] << "x" << filter[1] << "x"
+                                    << filter[2] << " on " << arch;
+            }
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Z-ring tiles (3x3x3, 16-bit, gfx942 and gfx950): the planner admits them only on grids of
+// ZRING_MIN_PLANES output planes per compute unit, so the case's depth is sized from this
+// device's units. Two images, two channel stages, 72 output channels (a partial column block),
+// 20 x 18 outputs (edge tiles: a partial tile row and two columns past the whole strip),
+// asymmetric padding (two leading planes, none trailing), and ranges that cross tile boundaries.
+// Forward, and backward data (the forward form of dy: rotated filter, swapped channel roles).
+// ---------------------------------------------------------------------------
+
+bool isZring(const hipdnn_plugin_sdk::ingestor::KernelDefinition& kernel)
+{
+    return kernel.getStringMetadata("kind") == "zring";
+}
+
+ConvShape zringCase(ConvDirection direction = ConvDirection::FORWARD)
+{
+    // Units a plane: one whole strip of 2 tile rows and one narrow tile, two images, two
+    // 64-channel column blocks.
+    constexpr int64_t UNITS_PER_PLANE = (int64_t{1} * 2 + 1) * 2 * 2;
+    const int64_t units = device_units::dispatchUnits(currentDeviceProperties());
+    const int64_t depth
+        = (conv_direct::ZRING_MIN_PLANES * units + UNITS_PER_PLANE - 1) / UNITS_PER_PLANE + 5;
+    // Backward data reduces over k and writes c: 64 dy channels (two stages), 72 dx channels.
+    const bool forward = direction == ConvDirection::FORWARD;
+    auto shape
+        = dense(forward ? 64 : 72, forward ? 72 : 64, {depth, 20, 18}, {3, 3, 3}, {2, 1, 0}, true);
+    shape.postPadding = {0, 1, 2};
+    return shape;
+}
+
+/// Whether a z-ring config runs on this device (its ship list names it).
+bool zringArch()
+{
+    const auto arch = std::string(currentDeviceProperties().gcnArchName);
+    const auto& kernels = catalog(ConvDirection::FORWARD);
+    return std::any_of(kernels.begin(), kernels.end(), [&](const auto& kernel) {
+        const auto config = conv_direct::configOf(kernel);
+        return isZring(kernel) && config.has_value() && conv_direct::configRunsOn(*config, arch);
+    });
+}
+
+TEST(TestGpuConvDirectZring, Half)
+{
+    SKIP_IF_NO_DEVICES();
+    if(!zringArch())
+    {
+        GTEST_SKIP() << "no z-ring config ships to this device";
+    }
+    runCase<Half>(zringCase(), ConvDirection::FORWARD, Math::NATIVE, false, false, isZring);
+}
+
+TEST(TestGpuConvDirectZring, BFloat16)
+{
+    SKIP_IF_NO_DEVICES();
+    if(!zringArch())
+    {
+        GTEST_SKIP() << "no z-ring config ships to this device";
+    }
+    runCase<BFloat16>(zringCase(), ConvDirection::FORWARD, Math::NATIVE, false, false, isZring);
+}
+
+/// Infinities in the input, which sits between NaN guards: the halo loads past the image and
+/// the planes past the input must take nothing from outside the tensor.
+TEST(TestGpuConvDirectZring, BFloat16InfinitiesGuarded)
+{
+    SKIP_IF_NO_DEVICES();
+    if(!zringArch())
+    {
+        GTEST_SKIP() << "no z-ring config ships to this device";
+    }
+    runCase<BFloat16>(zringCase(), ConvDirection::FORWARD, Math::NATIVE, true, true, isZring);
+}
+
+TEST(TestGpuConvDirectZring, HalfBackwardData)
+{
+    SKIP_IF_NO_DEVICES();
+    if(!zringArch())
+    {
+        GTEST_SKIP() << "no z-ring config ships to this device";
+    }
+    runCase<Half>(zringCase(ConvDirection::BACKWARD_DATA),
+                  ConvDirection::BACKWARD_DATA,
+                  Math::NATIVE,
+                  false,
+                  false,
+                  isZring);
+}
+
+TEST(TestGpuConvDirectZring, BFloat16BackwardData)
+{
+    SKIP_IF_NO_DEVICES();
+    if(!zringArch())
+    {
+        GTEST_SKIP() << "no z-ring config ships to this device";
+    }
+    runCase<BFloat16>(zringCase(ConvDirection::BACKWARD_DATA),
+                      ConvDirection::BACKWARD_DATA,
+                      Math::NATIVE,
+                      false,
+                      false,
+                      isZring);
+}
+
+/// Infinities in dy between NaN guards: they reach the dx elements whose products the reference
+/// sums, and nothing outside the tensor reaches dx.
+TEST(TestGpuConvDirectZring, BFloat16BackwardDataInfinitiesGuarded)
+{
+    SKIP_IF_NO_DEVICES();
+    if(!zringArch())
+    {
+        GTEST_SKIP() << "no z-ring config ships to this device";
+    }
+    runCase<BFloat16>(zringCase(ConvDirection::BACKWARD_DATA),
+                      ConvDirection::BACKWARD_DATA,
+                      Math::NATIVE,
+                      true,
+                      true,
+                      isZring);
+}
+
+// ---------------------------------------------------------------------------
+// Fused pointwise epilogues (forward): every code path that writes y -- the FMA store, the
+// halo-tile strip store and its split-C partials, the rows kernels' direct and LDS-staged
+// stores (2-D, batch unfold, 3-D, in-place channels-first), the split-C reduce and the
+// three-bf16 forms -- once per distinct path among the configs the kernel match admits.
+// ---------------------------------------------------------------------------
+
+using conv_epilogue_test::Specials;
+using conv_epilogue_test::Step;
+using FusedChain = std::pair<std::string, std::vector<Step>>;
+
+/// The config fields that select a different store path.
+const std::vector<std::string>& fusedPathFields()
+{
+    static const std::vector<std::string> s_fields{
+        "atom", "math", "rows", "cf", "split", "epi", "pp", "un", "bl", "ring"};
+    return s_fields;
+}
+
+struct FusedShape
+{
+    std::string name;
+    ConvShape shape;
+};
+
+std::vector<FusedShape> fusedShapes()
+{
+    std::vector<FusedShape> shapes;
+    shapes.push_back({"NhwcEdge", dense(24, 40, {13, 11}, {3, 3}, {1, 1}, true)});
+    shapes.push_back({"NchwEdge", dense(24, 40, {13, 11}, {3, 3}, {1, 1}, false)});
+    // Few tiles over many channel chunks: the split-C configs and their reduce write y.
+    shapes.push_back({"SplitC", dense(200, 72, {9, 11}, {3, 3}, {1, 1}, true)});
+    // Whole 16-byte channels-first runs: the in-place channels-first configs.
+    shapes.push_back({"NchwRuns", dense(72, 136, {21, 40}, {3, 3}, {2, 2}, false)});
+    // Two images per MFMA column group, the last group one image short.
+    auto oddBatch = dense(64, 136, {11, 24}, {3, 3}, {1, 1}, true);
+    oddBatch.n = 3;
+    shapes.push_back({"OddBatch", oddBatch});
+    shapes.push_back({"Ndhwc3x3x3", dense(32, 40, {5, 7, 9}, {3, 3, 3}, {1, 1, 1}, true)});
+    shapes.push_back({"Nhwc5x5", dense(32, 48, {19, 23}, {5, 5}, {2, 2}, true)});
+    return shapes;
+}
+
+template <typename T>
+void runFused(const ConvShape& shape, const std::vector<Step>& steps, Specials specials)
+{
+    const auto runner = conv_epilogue_test::catalogRunner(
+        packFor(ConvDirection::FORWARD), catalog(ConvDirection::FORWARD), fusedPathFields());
+    // The three-bf16 forms (fp32 graphs) drop the lo x lo term: about 2^-16 of each product.
+    const auto tolerance = [](int64_t reduction) {
+        return (std::is_same_v<T, float> ? 2e-5 : 1e-6) * static_cast<double>(reduction);
+    };
+    EXPECT_GE(conv_epilogue_test::checkFusedCase<T>(shape, steps, runner, specials, tolerance), 1)
+        << "no catalog config serves this fused case";
+}
+
+class TestGpuConvDirectFused : public ::testing::TestWithParam<std::tuple<FusedShape, FusedChain>>
+{
+};
+
+TEST_P(TestGpuConvDirectFused, Float)
+{
+    SKIP_IF_NO_DEVICES();
+    runFused<float>(std::get<0>(GetParam()).shape, std::get<1>(GetParam()).second, Specials::NONE);
+}
+
+TEST_P(TestGpuConvDirectFused, Half)
+{
+    SKIP_IF_NO_DEVICES();
+    runFused<Half>(std::get<0>(GetParam()).shape, std::get<1>(GetParam()).second, Specials::NONE);
+}
+
+TEST_P(TestGpuConvDirectFused, BFloat16)
+{
+    SKIP_IF_NO_DEVICES();
+    runFused<BFloat16>(
+        std::get<0>(GetParam()).shape, std::get<1>(GetParam()).second, Specials::NONE);
+}
+
+std::vector<FusedChain> fusedChainsAllShapes()
+{
+    const auto menu = conv_epilogue_test::menuChains();
+    return {menu[0], menu[6]}; // bias + relu, bias + swish
+}
+
+INSTANTIATE_TEST_SUITE_P(Shapes,
+                         TestGpuConvDirectFused,
+                         ::testing::Combine(::testing::ValuesIn(fusedShapes()),
+                                            ::testing::ValuesIn(fusedChainsAllShapes())),
+                         [](const auto& info) {
+                             return std::get<0>(info.param).name + "_"
+                                    + std::get<1>(info.param).first;
+                         });
+
+INSTANTIATE_TEST_SUITE_P(Menu,
+                         TestGpuConvDirectFused,
+                         ::testing::Combine(::testing::Values(fusedShapes()[0], fusedShapes()[1]),
+                                            ::testing::ValuesIn(conv_epilogue_test::menuChains())),
+                         [](const auto& info) {
+                             return std::get<0>(info.param).name + "_"
+                                    + std::get<1>(info.param).first;
+                         });
+
+class TestGpuConvDirectFusedSpecials : public ::testing::TestWithParam<FusedShape>
+{
+};
+
+TEST_P(TestGpuConvDirectFusedSpecials, NanAndInfinityOperands)
+{
+    SKIP_IF_NO_DEVICES();
+    runFused<float>(GetParam().shape,
+                    {conv_epilogue_test::bias(), conv_epilogue_test::relu()},
+                    Specials::NAN_INF);
+    runFused<Half>(
+        GetParam().shape,
+        {conv_epilogue_test::bias(DataType::HALF),
+         conv_epilogue_test::unary(hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::SWISH_FWD)},
+        Specials::NAN_INF);
+}
+
+TEST_P(TestGpuConvDirectFusedSpecials, ClipBoundaries)
+{
+    SKIP_IF_NO_DEVICES();
+    runFused<Half>(
+        GetParam().shape,
+        {conv_epilogue_test::bias(DataType::HALF), conv_epilogue_test::relu(-0.5F, 0.5F)},
+        Specials::CLIP_BOUNDARY);
+}
+
+INSTANTIATE_TEST_SUITE_P(,
+                         TestGpuConvDirectFusedSpecials,
+                         ::testing::ValuesIn(fusedShapes()),
+                         [](const auto& info) { return info.param.name; });
+
+/// The z-ring tile's store with a fused bias + relu (its own store path: one 4-channel vector a
+/// lane, straight from the accumulators).
+TEST(TestGpuConvDirectZring, FusedBiasRelu)
+{
+    SKIP_IF_NO_DEVICES();
+    if(!zringArch())
+    {
+        GTEST_SKIP() << "no z-ring config ships to this device";
+    }
+    std::vector<hipdnn_plugin_sdk::ingestor::KernelDefinition> zring;
+    for(const auto& kernel : catalog(ConvDirection::FORWARD))
+    {
+        if(isZring(kernel))
+        {
+            zring.push_back(kernel);
+        }
+    }
+    const auto runner
+        = conv_epilogue_test::catalogRunner(packFor(ConvDirection::FORWARD), zring, {"atom"});
+    EXPECT_GE(conv_epilogue_test::checkFusedCase<BFloat16>(
+                  zringCase(),
+                  {conv_epilogue_test::bias(), conv_epilogue_test::relu()},
+                  runner,
+                  Specials::NONE,
+                  [](int64_t reduction) { return 1e-6 * static_cast<double>(reduction); }),
+              1);
+}
+
+// Opt-in: each config's time with and without a fused bias + relu (shapes in $K2_EPI_TIMING).
+TEST(TestGpuConvDirectFusedTiming, BareAgainstFused)
+{
+    SKIP_IF_NO_DEVICES();
+    conv_epilogue_timing::timeFusedAgainstBare(
+        packFor(ConvDirection::FORWARD), catalog(ConvDirection::FORWARD), "K2_EPI_TIMING");
+}
+
+} // namespace
+
+#endif

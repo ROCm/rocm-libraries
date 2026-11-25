@@ -3,6 +3,7 @@
 
 target_sources(hip_kernel_provider_tests PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/TestCodeObjectTarget.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/TestConvEngineGroupGate.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/TestHandleDeviceResolver.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/TestIngestorKernelCode.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/TestIngestorPlanRestoreChecks.cpp
@@ -149,6 +150,120 @@ target_sources(hip_kernel_provider_census_tests PRIVATE
 # Split across the two binaries on the same rule as the packs above: the census over the
 # staged shard goes to the census binary, and the seam suites -- matchers, scoring,
 # dispatch, the real launches -- stay in the ordinary one.
+if(HIPKERNELPROVIDER_ENABLE_CONV)
+    # The host-side problem and gate suites. They resolve the family's native symbols, so
+    # each builds with its family's registration (one with none builds always).
+    target_sources(hip_kernel_provider_tests PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestConvDepthwiseValuProblem.cpp)
+    target_sources(hip_kernel_provider_tests PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGpuWrwReference.cpp)
+    target_include_directories(hip_kernel_provider_tests PRIVATE "${PROJECT_SOURCE_DIR}/conv/tools")
+    if("naive" IN_LIST HIPKERNELPROVIDER_CONV_FAMILIES)
+        target_sources(hip_kernel_provider_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestConvNaiveProblem.cpp
+                                                          ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestConvEpilogue.cpp
+                                                          ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGpuConvEpilogueActivations.cpp)
+    endif()
+    if("depthwise_rows" IN_LIST HIPKERNELPROVIDER_CONV_FAMILIES)
+        target_sources(hip_kernel_provider_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestConvDepthwiseRowsProblem.cpp)
+    endif()
+    if("depthwise_mfma" IN_LIST HIPKERNELPROVIDER_CONV_FAMILIES)
+        target_sources(hip_kernel_provider_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestConvDepthwiseMfmaProblem.cpp)
+    endif()
+    if("igemm_nchw" IN_LIST HIPKERNELPROVIDER_CONV_FAMILIES)
+        target_sources(hip_kernel_provider_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestConvIgemmNchwProblem.cpp)
+    endif()
+    if("wrw" IN_LIST HIPKERNELPROVIDER_CONV_FAMILIES)
+        target_sources(hip_kernel_provider_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestConvWrwProblem.cpp)
+    endif()
+    if("stem_bwd" IN_LIST HIPKERNELPROVIDER_CONV_FAMILIES)
+        target_sources(hip_kernel_provider_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestConvStemBwdProblem.cpp)
+    endif()
+    if("winograd" IN_LIST HIPKERNELPROVIDER_CONV_FAMILIES)
+        target_sources(hip_kernel_provider_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestConvWinogradProblem.cpp)
+    endif()
+    if("winograd_nd" IN_LIST HIPKERNELPROVIDER_CONV_FAMILIES)
+        target_sources(hip_kernel_provider_tests PRIVATE
+            ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestConvWinogradNdProblem.cpp
+            ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGpuConvWinogradNd.cpp)
+    endif()
+    if("direct" IN_LIST HIPKERNELPROVIDER_CONV_FAMILIES)
+        target_sources(hip_kernel_provider_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestConvDirectProblem.cpp)
+    endif()
+    if("smallc" IN_LIST HIPKERNELPROVIDER_CONV_FAMILIES)
+        target_sources(hip_kernel_provider_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestConvSmallcProblem.cpp)
+    endif()
+    if("fft" IN_LIST HIPKERNELPROVIDER_CONV_FAMILIES)
+        target_sources(hip_kernel_provider_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestConvFftProblem.cpp)
+    endif()
+    if("group_valu_wrw" IN_LIST HIPKERNELPROVIDER_CONV_FAMILIES)
+        target_sources(hip_kernel_provider_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestConvGroupValuWrwProblem.cpp)
+    endif()
+    if("group_valu" IN_LIST HIPKERNELPROVIDER_CONV_FAMILIES)
+        target_sources(hip_kernel_provider_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestConvGroupValuProblem.cpp)
+    endif()
+    if("narrow" IN_LIST HIPKERNELPROVIDER_CONV_FAMILIES)
+        target_sources(hip_kernel_provider_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestConvNarrowProblem.cpp)
+    endif()
+    # A family's engine suites load its catalogs and resolve its native symbols, so they
+    # build only when the family is served -- its DVC-stored catalogs were pulled
+    # (conv/ConvContent.cmake).
+    if("naive" IN_LIST HIPKERNELPROVIDER_CONV_FAMILIES)
+        target_sources(hip_kernel_provider_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGpuConvNaive.cpp)
+    endif()
+    # One suite for the depthwise VALU forward/backward-data and backward-weights engines.
+    if("depthwise_valu" IN_LIST HIPKERNELPROVIDER_CONV_FAMILIES
+       AND "depthwise_valu_wrw" IN_LIST HIPKERNELPROVIDER_CONV_FAMILIES)
+        target_sources(hip_kernel_provider_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGpuConvDepthwiseValu.cpp)
+    endif()
+    if("depthwise_rows" IN_LIST HIPKERNELPROVIDER_CONV_FAMILIES)
+        target_sources(hip_kernel_provider_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGpuConvDepthwiseRows.cpp)
+    endif()
+    if("depthwise_mfma" IN_LIST HIPKERNELPROVIDER_CONV_FAMILIES)
+        target_sources(hip_kernel_provider_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGpuConvDepthwiseMfma.cpp)
+    endif()
+    if("igemm" IN_LIST HIPKERNELPROVIDER_CONV_FAMILIES)
+        target_sources(hip_kernel_provider_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGpuConvIgemm.cpp)
+    endif()
+    if("igemm_nchw" IN_LIST HIPKERNELPROVIDER_CONV_FAMILIES)
+        target_sources(hip_kernel_provider_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGpuConvIgemmNchw.cpp)
+    endif()
+    if("wrw" IN_LIST HIPKERNELPROVIDER_CONV_FAMILIES)
+        target_sources(hip_kernel_provider_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGpuConvWrw.cpp)
+    endif()
+    if("stem_bwd" IN_LIST HIPKERNELPROVIDER_CONV_FAMILIES)
+        target_sources(hip_kernel_provider_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGpuConvStemBwd.cpp)
+    endif()
+    if("winograd" IN_LIST HIPKERNELPROVIDER_CONV_FAMILIES)
+        target_sources(hip_kernel_provider_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGpuConvWinograd.cpp)
+    endif()
+    if("direct" IN_LIST HIPKERNELPROVIDER_CONV_FAMILIES)
+        target_sources(hip_kernel_provider_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGpuConvDirect.cpp)
+    endif()
+    if("smallc" IN_LIST HIPKERNELPROVIDER_CONV_FAMILIES)
+        target_sources(hip_kernel_provider_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGpuConvSmallc.cpp)
+    endif()
+    if("group" IN_LIST HIPKERNELPROVIDER_CONV_FAMILIES)
+        target_sources(hip_kernel_provider_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGpuConvGroup.cpp)
+    endif()
+    if("fft" IN_LIST HIPKERNELPROVIDER_CONV_FAMILIES)
+        target_sources(hip_kernel_provider_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGpuConvFft.cpp)
+    endif()
+    if("group_valu_wrw" IN_LIST HIPKERNELPROVIDER_CONV_FAMILIES)
+        target_sources(hip_kernel_provider_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGpuConvGroupValuWrw.cpp)
+    endif()
+    if("group_valu" IN_LIST HIPKERNELPROVIDER_CONV_FAMILIES)
+        target_sources(hip_kernel_provider_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGpuConvGroupValu.cpp)
+    endif()
+    if("narrow" IN_LIST HIPKERNELPROVIDER_CONV_FAMILIES)
+        target_sources(hip_kernel_provider_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGpuConvNarrow.cpp)
+    endif()
+    if(HIPKERNELPROVIDER_CONV_FAMILIES)
+        target_sources(hip_kernel_provider_tests PRIVATE
+            ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestConvDescriptorShards.cpp
+            ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestConvCompileCensus.cpp)
+    endif()
+endif()
+
 if(HIPKERNELPROVIDER_FLYDSL_ACTIVE)
     target_sources(hip_kernel_provider_tests PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestFlydslRmsNormEngine.cpp

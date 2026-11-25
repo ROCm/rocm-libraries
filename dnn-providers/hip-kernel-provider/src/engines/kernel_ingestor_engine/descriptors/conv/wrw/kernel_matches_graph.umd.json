@@ -1,0 +1,7 @@
+{
+  "version": "1.0",
+  "id": "b916a16f-fe8b-5d80-860c-64b0a2ec1e64",
+  "name": "kernel dtype, atom (device), layout, loop, filter width and tile match the graph",
+  "scope": "kernel",
+  "match_symbol": "hipkernel.conv_wrw.kernel_match"
+}

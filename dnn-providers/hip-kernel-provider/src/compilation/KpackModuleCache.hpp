@@ -24,6 +24,8 @@
 #include <vector>
 
 #include <hip/hip_runtime_api.h>
+#include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
+#include <hipdnn_data_sdk/utilities/StringUtil.hpp>
 #include <hipdnn_plugin_sdk/ArchMatch.hpp>
 #include <hipdnn_plugin_sdk/GpuGenericTargets.hpp>
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
@@ -59,18 +61,40 @@ private:
     KpackLoadStage _stage;
 };
 
+/// The environment variable that refuses generic-target archive entries (`gfx11-generic`,
+/// `gfx12-generic`, ...): set to 1/true/on/yes, only an entry naming the device's own
+/// architecture is selected, and a device served only by a generic entry takes the caller's
+/// normal miss path.
+inline constexpr const char* DISABLE_GENERIC_CODE_OBJECTS_ENV
+    = "HIP_KERNEL_PROVIDER_DISABLE_GENERIC_CODE_OBJECTS";
+
+/// Whether DISABLE_GENERIC_CODE_OBJECTS_ENV is set to a true value. Read on every call, so
+/// a test or a process can change it between plan builds.
+inline bool genericCodeObjectsDisabled()
+{
+    const auto raw = hipdnn_data_sdk::utilities::toLower(hipdnn_data_sdk::utilities::trim(
+        hipdnn_data_sdk::utilities::getEnv(DISABLE_GENERIC_CODE_OBJECTS_ENV)));
+    return raw == "1" || raw == "true" || raw == "on" || raw == "yes";
+}
+
 /// The best-tier entry of @p arches serving @p deviceArch (an explicit entry beats a
 /// generic one containing the device; ties: archive order), or nullptr when none does.
-/// Points into @p arches. Run it before the entry lookup: a bare KERNEL_NOT_FOUND cannot
-/// tell a wrong GPU from a wrong toc_key, and those two send a reader to different places.
+/// With @p allowGeneric false a generic entry never serves. Points into @p arches. Run it
+/// before the entry lookup: a bare KERNEL_NOT_FOUND cannot tell a wrong GPU from a wrong
+/// toc_key, and those two send a reader to different places.
 inline const std::string* selectKpackArchiveArch(const std::vector<std::string>& arches,
-                                                 std::string_view deviceArch)
+                                                 std::string_view deviceArch,
+                                                 bool allowGeneric)
 {
     const std::string* best = nullptr;
     std::optional<hipdnn_plugin_sdk::ArchTier> bestTier;
     for(const auto& candidate : arches)
     {
-        const auto tier = hipdnn_plugin_sdk::entryTier(candidate, deviceArch);
+        auto tier = hipdnn_plugin_sdk::entryTier(candidate, deviceArch);
+        if(!allowGeneric && tier == hipdnn_plugin_sdk::ArchTier::GENERIC)
+        {
+            tier.reset();
+        }
         if(tier && (!bestTier || *tier < *bestTier))
         {
             best = &candidate;
@@ -84,6 +108,14 @@ inline const std::string* selectKpackArchiveArch(const std::vector<std::string>&
                                << "'");
     }
     return best;
+}
+
+/// selectKpackArchiveArch with generic entries allowed unless DISABLE_GENERIC_CODE_OBJECTS_ENV
+/// refuses them.
+inline const std::string* selectKpackArchiveArch(const std::vector<std::string>& arches,
+                                                 std::string_view deviceArch)
+{
+    return selectKpackArchiveArch(arches, deviceArch, !genericCodeObjectsDisabled());
 }
 
 using CachedKpackModule = std::shared_ptr<const KpackModule>;
@@ -295,10 +327,16 @@ inline KpackCodeObject readVerifiedKpackCodeObject(const std::string& archivePat
         {
             available += (available.empty() ? "" : ", ") + candidate;
         }
+        const bool refusedGeneric
+            = genericCodeObjectsDisabled()
+              && selectKpackArchiveArch(opened->arches, deviceArch, true) != nullptr;
         throw KpackModuleLoadFailure(
             KpackLoadStage::ARCH_LOOKUP,
             "kpack archive '" + archivePath + "' holds no binary for device arch '" + deviceArch
-                + "'; the archive provides: " + (available.empty() ? "(none)" : available));
+                + "'; the archive provides: " + (available.empty() ? "(none)" : available)
+                + (refusedGeneric ? std::string("; its generic entry is refused because ")
+                                        + DISABLE_GENERIC_CODE_OBJECTS_ENV + " is set"
+                                  : std::string()));
     }
 
     KpackError error;

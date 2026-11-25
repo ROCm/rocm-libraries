@@ -1,0 +1,6 @@
+{
+  "version": "1.0",
+  "id": "edea5839-105d-5f30-b908-49f16802ef7a",
+  "name": "conv_igemm_nchw dispatch",
+  "dispatch_symbol": "hipkernel.conv_igemm_nchw.dispatch"
+}

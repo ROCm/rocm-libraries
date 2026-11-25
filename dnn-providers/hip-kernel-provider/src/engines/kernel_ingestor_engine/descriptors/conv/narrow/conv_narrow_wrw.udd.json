@@ -1,0 +1,6 @@
+{
+  "version": "1.0",
+  "id": "30151ada-f180-5d21-81da-521cb5cc67a1",
+  "name": "conv_narrow_wrw dispatch",
+  "dispatch_symbol": "hipkernel.conv_narrow_wrw.dispatch"
+}

@@ -1,0 +1,6 @@
+outs:
+- md5: 73e3be22bd17bb02389122e6692b9ec0
+  size: 16254
+  hash: md5
+  path: conv_wrw_f32_smallk1250.kdp.json
+  remote: ingestor

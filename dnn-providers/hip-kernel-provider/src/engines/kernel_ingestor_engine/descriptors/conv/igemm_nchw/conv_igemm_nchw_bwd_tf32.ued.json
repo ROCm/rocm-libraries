@@ -1,0 +1,33 @@
+{
+  "version": "1.0",
+  "id": "7c03ab36-0cbe-596d-891a-a0c948e85830",
+  "name": "hipkernel:CONV_IGEMM_NCHW_BWD_TF32",
+  "graph_match": {
+    "native": "hipkernel.conv_igemm_nchw_bwd.graph_match"
+  },
+  "metadata": "00c14ad8-20af-5a91-b1b9-90dc2576cafa",
+  "knobs": [
+    "atom_id",
+    "bmq",
+    "bn",
+    "bk",
+    "wm",
+    "wn",
+    "wp",
+    "tq",
+    "tc",
+    "vec",
+    "stride",
+    "taps",
+    "stages",
+    "flat",
+    "halo",
+    "math"
+  ],
+  "behavior_notes": [
+    "runtime_compilation"
+  ],
+  "numerical_notes": [
+    "tensor_core"
+  ]
+}

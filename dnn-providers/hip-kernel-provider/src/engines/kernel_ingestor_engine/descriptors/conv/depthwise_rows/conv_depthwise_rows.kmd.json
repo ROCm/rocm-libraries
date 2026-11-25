@@ -1,0 +1,71 @@
+{
+  "version": "1.0",
+  "id": "bfffbadf-4366-555b-8e37-90df8fb60c4b",
+  "name": "conv_depthwise_rows config fields",
+  "fields": [
+    {
+      "name": "dtype",
+      "type": "string"
+    },
+    {
+      "name": "direction",
+      "type": "string"
+    },
+    {
+      "name": "layout",
+      "type": "string"
+    },
+    {
+      "name": "variant",
+      "type": "int"
+    },
+    {
+      "name": "kh",
+      "type": "int"
+    },
+    {
+      "name": "kw",
+      "type": "int"
+    },
+    {
+      "name": "tx",
+      "type": "int"
+    },
+    {
+      "name": "ty",
+      "type": "int"
+    },
+    {
+      "name": "rw",
+      "type": "int"
+    },
+    {
+      "name": "rh",
+      "type": "int"
+    },
+    {
+      "name": "bh",
+      "type": "int"
+    },
+    {
+      "name": "threads",
+      "type": "int"
+    },
+    {
+      "name": "stride",
+      "type": "int"
+    },
+    {
+      "name": "q",
+      "type": "int"
+    },
+    {
+      "name": "lds",
+      "type": "int"
+    },
+    {
+      "name": "mmax",
+      "type": "int"
+    }
+  ]
+}

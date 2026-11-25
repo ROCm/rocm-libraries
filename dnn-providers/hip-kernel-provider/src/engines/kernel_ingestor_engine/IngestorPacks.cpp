@@ -20,6 +20,84 @@ const std::vector<IngestorPack>& ingestorPacks()
          &registerStandalonePointwiseSymbols,
          &resetStandalonePointwiseModuleCache},
         {"hipkernel:ConvFwd", &registerConvFwdSymbols, &resetConvFwdModuleCache},
+#ifdef HIPDNN_ENGINE_CONV
+#ifdef HIPDNN_ENGINE_CONV_NAIVE
+        // Compiled only with HIPKERNELPROVIDER_ENABLE_CONV; see this directory's CMakeLists.txt.
+        // Each conv family registers only when its catalogs ship in this build
+        // (HIPDNN_ENGINE_CONV_<FAMILY>, conv/ConvContent.cmake).
+        {"hipkernel:CONV_NAIVE", &registerConvNaiveSymbols, &resetConvNaiveModuleCache},
+#endif
+#ifdef HIPDNN_ENGINE_CONV_DEPTHWISE_VALU
+        {"hipkernel:CONV_DEPTHWISE_VALU",
+         &registerConvDepthwiseValuSymbols,
+         &resetConvDepthwiseValuModuleCache},
+#endif
+#ifdef HIPDNN_ENGINE_CONV_DEPTHWISE_VALU_WRW
+        {"hipkernel:CONV_DEPTHWISE_VALU_WRW",
+         &registerConvDepthwiseValuWrwSymbols,
+         &resetConvDepthwiseValuWrwModuleCache},
+#endif
+#ifdef HIPDNN_ENGINE_CONV_DEPTHWISE_ROWS
+        {"hipkernel:CONV_DEPTHWISE_ROWS",
+         &registerConvDepthwiseRowsSymbols,
+         &resetConvDepthwiseRowsModuleCache},
+#endif
+#ifdef HIPDNN_ENGINE_CONV_DEPTHWISE_MFMA
+        {"hipkernel:CONV_DEPTHWISE_MFMA",
+         &registerConvDepthwiseMfmaSymbols,
+         &resetConvDepthwiseMfmaModuleCache},
+#endif
+#ifdef HIPDNN_ENGINE_CONV_IGEMM
+        {"hipkernel:CONV_IGEMM", &registerConvIgemmSymbols, &resetConvIgemmModuleCache},
+#endif
+#ifdef HIPDNN_ENGINE_CONV_IGEMM_NCHW
+        {"hipkernel:CONV_IGEMM_NCHW",
+         &registerConvIgemmNchwSymbols,
+         &resetConvIgemmNchwModuleCache},
+#endif
+#ifdef HIPDNN_ENGINE_CONV_WRW
+        {"hipkernel:CONV_WRW", &registerConvWrwSymbols, &resetConvWrwModuleCache},
+#endif
+#ifdef HIPDNN_ENGINE_CONV_STEM_BWD
+        {"hipkernel:CONV_STEM_BWD", &registerConvStemBwdSymbols, &resetConvStemBwdModuleCache},
+#endif
+#ifdef HIPDNN_ENGINE_CONV_WINOGRAD
+        {"hipkernel:CONV_WINOGRAD", &registerConvWinogradSymbols, &resetConvWinogradModuleCache},
+#endif
+#ifdef HIPDNN_ENGINE_CONV_WINOGRAD_ND
+        {"hipkernel:CONV_WINOGRAD_ND",
+         &registerConvWinogradNdSymbols,
+         &resetConvWinogradNdModuleCache},
+#endif
+#ifdef HIPDNN_ENGINE_CONV_DIRECT
+        {"hipkernel:CONV_DIRECT", &registerConvDirectSymbols, &resetConvDirectModuleCache},
+#endif
+#ifdef HIPDNN_ENGINE_CONV_SMALLC
+        {"hipkernel:CONV_SMALLC", &registerConvSmallcSymbols, &resetConvSmallcModuleCache},
+#endif
+#ifdef HIPDNN_ENGINE_CONV_GROUP
+        {"hipkernel:CONV_GROUP", &registerConvGroupSymbols, &resetConvGroupModuleCache},
+#endif
+#ifdef HIPDNN_ENGINE_CONV_FFT
+        {"hipkernel:CONV_FFT", &registerConvFftSymbols, &resetConvFftModuleCache},
+#endif
+#ifdef HIPDNN_ENGINE_CONV_GROUP_VALU
+        {"hipkernel:CONV_GROUP_VALU",
+         &registerConvGroupValuSymbols,
+         &resetConvGroupValuModuleCache},
+#endif
+#ifdef HIPDNN_ENGINE_CONV_NARROW
+        {"hipkernel:CONV_NARROW", &registerConvNarrowSymbols, &resetConvNarrowModuleCache},
+        {"hipkernel:CONV_NARROW_WRW",
+         &registerConvNarrowWrwSymbols,
+         &resetConvNarrowWrwModuleCache},
+#endif
+#ifdef HIPDNN_ENGINE_CONV_GROUP_VALU_WRW
+        {"hipkernel:CONV_GROUP_VALU_WRW",
+         &registerConvGroupValuWrwSymbols,
+         &resetConvGroupValuWrwModuleCache},
+#endif
+#endif
 #ifdef HIPDNN_ENGINE_FLYDSL
         // Compiled only when FlyDSL staged a shard; see the gate in this directory's
         // CMakeLists.txt.

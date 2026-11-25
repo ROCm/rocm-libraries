@@ -1,0 +1,7 @@
+{
+  "version": "1.0",
+  "id": "824c50d1-d420-5d78-8d63-32e3b6ba9047",
+  "name": "kernel dtype, atom (device), stride, taps and tile match the graph",
+  "scope": "kernel",
+  "match_symbol": "hipkernel.conv_igemm_nchw.kernel_match"
+}

@@ -84,6 +84,91 @@ against these before accepting it. They derive from hipBLASLt's `VEC32_UE8M0` sc
 - Epilogue: none — no fused bias or activation permitted
 - Output type: limited to the supported output types above (`FP32`/`FP16`/`BF16`); FP8 and other quantized outputs are not produced by this fused path
 
+### rocBLAS Matmul (`ROCBLAS_MATMUL_ENGINE`)
+
+> **Build-time feature flag.** Built with `-DHIPBLASLTPROVIDER_ENABLE_ROCBLAS=ON` (default **OFF**). hipBLASLt itself is
+> optional (`HIPBLASLTPROVIDER_ENABLE_HIPBLASLT`, default **ON**), so a rocBLAS-only plugin serves the targets hipBLASLt is not
+> built for, such as gfx906 and gfx103X.
+
+A stand-alone Matmul through `rocblas_gemm_strided_batched_ex`, with no fused operations:
+- Input and output data types: FP32, FP16, BF16; an FP32 output from FP16 or BF16 inputs
+- Compute data type: FP32
+- Any row- or column-major operand layout, batches collapsed to one batch stride, and broadcasting of a single-batch operand
+- Every size and leading dimension must fit 32 bits
+
+### Convolution as explicit GEMM (`HIPBLASLT_CONV_ENGINE`, `ROCBLAS_CONV_ENGINE`)
+
+> **Build-time feature flag.** Built with `-DHIPBLASLTPROVIDER_ENABLE_CONV=ON` (default **OFF**), five engines per enabled
+> backend: the exact engine, its TF32 and reduced-precision-reduction siblings, and deterministic siblings of the exact and
+> TF32 engines (table below).
+
+Single-node convolution graphs, forward, backward data and backward weights, and forward convolutions followed by a pointwise
+epilogue (below):
+- Data types: FP32, FP16, BF16, the same for all three tensors; compute type unset or FP32,
+  or FP16 for FP16 tensors (cuDNN's set), accumulated in FP32
+- 1-D, 2-D and 3-D (rank 3 to 5), any x and y strides, groups (including depthwise), padding (including asymmetric), stride,
+  dilation, cross-correlation and true convolution
+
+How a convolution runs, in order of preference:
+1. **Directly on the tensors**, no workspace: a 1x1 filter with unit stride and no padding (a GEMM over pixels or channels), or a
+   filter that covers the whole unpadded input (a GEMM over images).
+2. **im2col**: every other convolution. A repack kernel writes the column matrix to the workspace and one GEMM reads it; backward data
+   runs the GEMM into an FP32 column matrix that col2im sums into dx. The repack workspace is held to 1 GiB: a larger column
+   matrix is built a slice of images at a time, and an image whose column matrix alone exceeds the cap in bands of rows along its
+   outermost spatial axis (backward data bands dx rows, each computing the output rows that reach them). Backward weights sums
+   the slices or bands, and any reduction long enough that rocBLAS would split it, in FP32 before rounding once. The repack
+   kernels are compiled at runtime by HIPRTC on first use.
+
+Fused forward graphs (every engine but the RPR siblings): the convolution, then a chain of pointwise nodes: scale and bias
+(per-channel or scalar), relu (clipped, clamp, leaky), GELU (exact and tanh), swish/silu, sigmoid, tanh, elu, abs and softplus.
+The chain runs in FP32 and y is rounded once:
+- **Native:** a leading per-channel bias in the GEMM that writes y (hipBLASLt's bias epilogue where y's channels are the
+  GEMM's rows; a broadcast bias matrix added as the GEMM's C, in y's type, where they are its columns, on both backends),
+  then hipBLASLt's sigmoid (16-bit y), or a relu / clamp whose bounds y's type holds exactly as an in-place pass over y
+- **Fused into the pass:** a channels-first y staged channels-last; the copy back into y applies the chain
+- **Extra pass:** otherwise (groups, other activations, a bias of another type): the GEMMs write y in FP32 to the workspace
+  and one cast applies the chain
+
+`HIPBLASLT_CONV_LIBRARY_ACTIVATION_ENGINE` (opt-in: `HIPBLASLT_PROVIDER_CONV_LIBRARY_ACTIVATIONS=1`; deterministic,
+hipBLASLt offered no workspace) runs relu, clamp, swish (beta 1), tanh GELU and fp32 sigmoid in hipBLASLt's epilogue. It serves only fused
+graphs with one of those. Its special values differ from every other engine's: relu maps NaN to 0, clamp maps NaN to its upper
+bound, swish and tanh GELU map -inf to NaN.
+
+Engines and their numerical notes ([RFC 0025](../../../projects/hipdnn/docs/rfcs/0025_NumericalNotes.md)). Every engine
+below but the opt-in library-activation one is registered by default; a caller excludes one by its notes through the hipDNN API's cuDNN-compatible
+`deselect_numeric_notes`.
+
+| Engine | Numerical notes |
+|---|---|
+| `ROCBLAS_CONV_ENGINE`, `HIPBLASLT_CONV_ENGINE` | `NONDETERMINISTIC` |
+| `ROCBLAS_CONV_ENGINE_DETERMINISTIC`, `HIPBLASLT_CONV_ENGINE_DETERMINISTIC` | none |
+| `ROCBLAS_CONV_TF32_ENGINE`, `HIPBLASLT_CONV_TF32_ENGINE` | `TENSOR_CORE`, `NONDETERMINISTIC` |
+| `ROCBLAS_CONV_TF32_ENGINE_DETERMINISTIC`, `HIPBLASLT_CONV_TF32_ENGINE_DETERMINISTIC` | `TENSOR_CORE` |
+| `ROCBLAS_CONV_RPR_ENGINE`, `HIPBLASLT_CONV_RPR_ENGINE` | `REDUCED_PRECISION_REDUCTION`, `NONDETERMINISTIC` |
+| `HIPBLASLT_CONV_LIBRARY_ACTIVATION_ENGINE` (opt-in: `HIPBLASLT_PROVIDER_CONV_LIBRARY_ACTIVATIONS=1`) | none |
+
+- **TF32** (`*_CONV_TF32_ENGINE`): they serve only convolutions with an FP32 GEMM and permit TF32 for them: hipBLASLt is
+  asked for `HIPBLAS_COMPUTE_32F_FAST_TF32` and falls back to FP32 when it has no algorithm; rocBLAS runs under
+  `rocblas_xf32_xdl_math_op`, which it applies only on gfx942. They report `TENSOR_CORE`, the note cuDNN reports for its TF32
+  convolution engines and the one PyTorch's cuDNN path excludes for FP32 when TF32 is not allowed.
+- **Reduced-precision reduction** (`*_CONV_RPR_ENGINE`): one form, a 1x1, unit-stride, unpadded FP16 backward weights of
+  several channels-first images, as one GEMM per image adding into the FP16 dw (beta 1, MIOpen's `GemmWrw1x1_stride1`), so
+  dw is rounded to FP16 once per image instead of once (cuDNN's `REDUCED_PRECISION_REDUCTION`). No workspace. BF16 has no
+  reduced form. Compute type unset, FP32 or FP16.
+- **Determinism** (`*_DETERMINISTIC`): the exact and TF32 engines run the libraries' defaults (rocBLAS atomics allowed,
+  hipBLASLt offered its workspace), which may split a reduction across workgroups, and report `NONDETERMINISTIC`. Their
+  deterministic siblings run rocBLAS with atomics not allowed (the handle's mode restored after the plan) or offer hipBLASLt
+  no workspace, as MIOpen's deterministic GEMMs do, and repack by gathers (each output element summed by one thread in a
+  fixed order), so a plan gives the same bits on every run; the device tests run each plan six times and compare the bits.
+  The reduced-precision-reduction engines have one form, `NONDETERMINISTIC`.
+
+Declined:
+- A filter whose (channel, spatial) axes nest in neither KCRS nor KRSC order
+- A convolution whose column matrix for one row of the outermost spatial axis exceeds 1 GiB
+- A GEMM leading dimension beyond 32 bits, or a GEMM reduction beyond 2^30 into an FP16 or BF16 output. Other long GEMMs are
+  split to fit the libraries' 32-bit arguments: a batch stride beyond 32 bits runs one call per image, and an n (or, into FP32,
+  a k) beyond 2^30 runs in chunks
+
 ## Legend
 
 ### Datatypes

@@ -30,6 +30,7 @@
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
 #include <hipdnn_plugin_sdk/ingestor/BenchmarkDetail.hpp>
 #include <hipdnn_plugin_sdk/ingestor/Descriptors.hpp>
+#include <hipdnn_plugin_sdk/ingestor/GenericPlan.hpp>
 #include <hipdnn_plugin_sdk/ingestor/WinnerCache.hpp>
 #include <hipdnn_plugin_sdk/interfaces/IPlan.hpp>
 
@@ -241,10 +242,16 @@ private:
         else
         {
             best = ranked.front().second;
+            // The config name follows the id, so a log reader can record which config
+            // autotune chose without the catalog at hand.
+            const auto* chosen = _candidates[best].plan->saveablePlan();
             HIPDNN_PLUGIN_LOG_INFO("ingestor: benchmarking selected kernel "
                                    << toString(_candidates[best].kernelId) << " in "
                                    << ranked.front().first << " ms among " << _candidates.size()
-                                   << " candidate(s)");
+                                   << " candidate(s)"
+                                   << (chosen != nullptr && !chosen->kernel().name.empty()
+                                           ? ", config '" + chosen->kernel().name + "'"
+                                           : std::string()));
 
             if(_recordRanking)
             {

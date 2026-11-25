@@ -19,6 +19,9 @@
 #include "HipblasltPlugin.hpp"
 #include "HipdnnEnginePluginExecutionContext.hpp"
 #include "HipdnnEnginePluginHandle.hpp"
+#ifdef HIPBLASLTPROVIDER_ENABLE_CONV
+#include "engines/conv/ConvLibraryActivations.hpp"
+#endif
 #include "version.h"
 
 static const char* pluginName = "hipblaslt_plugin";
@@ -119,7 +122,37 @@ hipdnnPluginStatus_t hipdnnEnginePluginGetAllEngineIdsImpl(int64_t* engineIds,
         }
         throwIfNull(numEngines);
 
-        auto allEngineIds = std::vector<int64_t>({hipdnn_data_sdk::utilities::HIPBLASLT_ENGINE_ID});
+        // One engine per backend this build has; HipblasltContainer adds the same set.
+        std::vector<int64_t> allEngineIds;
+#ifdef HIPBLASLTPROVIDER_ENABLE_HIPBLASLT
+        allEngineIds.push_back(hipdnn_data_sdk::utilities::HIPBLASLT_ENGINE_ID);
+#endif
+#ifdef HIPBLASLTPROVIDER_ENABLE_ROCBLAS
+        allEngineIds.push_back(hipdnn_data_sdk::utilities::ROCBLAS_MATMUL_ENGINE_ID);
+#endif
+#ifdef HIPBLASLTPROVIDER_ENABLE_CONV
+#ifdef HIPBLASLTPROVIDER_ENABLE_HIPBLASLT
+        allEngineIds.push_back(hipdnn_data_sdk::utilities::HIPBLASLT_CONV_ENGINE_ID);
+        allEngineIds.push_back(hipdnn_data_sdk::utilities::HIPBLASLT_CONV_ENGINE_DETERMINISTIC_ID);
+        allEngineIds.push_back(hipdnn_data_sdk::utilities::HIPBLASLT_CONV_TF32_ENGINE_ID);
+        allEngineIds.push_back(
+            hipdnn_data_sdk::utilities::HIPBLASLT_CONV_TF32_ENGINE_DETERMINISTIC_ID);
+        allEngineIds.push_back(hipdnn_data_sdk::utilities::HIPBLASLT_CONV_RPR_ENGINE_ID);
+        if(convLibraryActivationsEnabled())
+        {
+            allEngineIds.push_back(
+                hipdnn_data_sdk::utilities::HIPBLASLT_CONV_LIBRARY_ACTIVATION_ENGINE_ID);
+        }
+#endif
+#ifdef HIPBLASLTPROVIDER_ENABLE_ROCBLAS
+        allEngineIds.push_back(hipdnn_data_sdk::utilities::ROCBLAS_CONV_ENGINE_ID);
+        allEngineIds.push_back(hipdnn_data_sdk::utilities::ROCBLAS_CONV_ENGINE_DETERMINISTIC_ID);
+        allEngineIds.push_back(hipdnn_data_sdk::utilities::ROCBLAS_CONV_TF32_ENGINE_ID);
+        allEngineIds.push_back(
+            hipdnn_data_sdk::utilities::ROCBLAS_CONV_TF32_ENGINE_DETERMINISTIC_ID);
+        allEngineIds.push_back(hipdnn_data_sdk::utilities::ROCBLAS_CONV_RPR_ENGINE_ID);
+#endif
+#endif
         if(allEngineIds.size() > std::numeric_limits<uint32_t>::max())
         {
             throw HipdnnPluginException(HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,

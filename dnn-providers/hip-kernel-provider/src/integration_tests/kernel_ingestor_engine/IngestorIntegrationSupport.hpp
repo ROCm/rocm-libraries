@@ -172,6 +172,31 @@ inline std::string resetProviderModuleCaches()
     return {};
 }
 
+// Clears the loaded provider's in-memory HIPRTC modules, so its next plan build loads each
+// program from the disk cache or compiles it. Returns a description of the failure, or an
+// empty string.
+inline std::string resetProviderHiprtcModules()
+{
+    const auto pluginPath = loadedProviderPluginPath();
+    auto* library = hipdnn_data_sdk::utilities::openLoadedLibrary(pluginPath);
+    if(library == nullptr)
+    {
+        return "the provider at " + pluginPath.string() + " is not loaded";
+    }
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast)
+    auto* reset = reinterpret_cast<void (*)()>(hipdnn_data_sdk::utilities::getSymbol(
+        library, "hipdnnEnginePluginResetHiprtcModuleCacheForTesting"));
+    if(reset == nullptr)
+    {
+        hipdnn_data_sdk::utilities::closeLibrary(library);
+        return "the provider at " + pluginPath.string()
+               + " exports no hipdnnEnginePluginResetHiprtcModuleCacheForTesting";
+    }
+    reset();
+    hipdnn_data_sdk::utilities::closeLibrary(library);
+    return {};
+}
+
 // Sets the loaded provider's own per-image byte limit for the dgrad AOT engines' shared
 // batch chunker (ConvDgradAotGeometry.hpp::batchChunkByteLimitForTesting()), so a
 // small batch exercises the chunked-launch device path without a multi-GiB image. The

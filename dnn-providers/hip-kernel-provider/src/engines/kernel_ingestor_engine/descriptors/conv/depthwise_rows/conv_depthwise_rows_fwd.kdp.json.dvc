@@ -1,0 +1,6 @@
+outs:
+- md5: 3f96d866317c1d57bdee1c4323f23c1e
+  size: 53170
+  hash: md5
+  path: conv_depthwise_rows_fwd.kdp.json
+  remote: ingestor

@@ -1,0 +1,71 @@
+{
+  "version": "1.0",
+  "id": "60108cd8-db86-5c35-bc1d-827c7a5d3153",
+  "name": "conv_stem_bwd config fields",
+  "fields": [
+    {
+      "name": "direction",
+      "type": "string"
+    },
+    {
+      "name": "dtype",
+      "type": "string"
+    },
+    {
+      "name": "atom",
+      "type": "string"
+    },
+    {
+      "name": "atom_id",
+      "type": "int"
+    },
+    {
+      "name": "layout",
+      "type": "int"
+    },
+    {
+      "name": "vec",
+      "type": "int"
+    },
+    {
+      "name": "u",
+      "type": "int"
+    },
+    {
+      "name": "v",
+      "type": "int"
+    },
+    {
+      "name": "nb",
+      "type": "int"
+    },
+    {
+      "name": "kc",
+      "type": "int"
+    },
+    {
+      "name": "th",
+      "type": "int"
+    },
+    {
+      "name": "fm",
+      "type": "int"
+    },
+    {
+      "name": "sh",
+      "type": "int"
+    },
+    {
+      "name": "sw",
+      "type": "int"
+    },
+    {
+      "name": "ft",
+      "type": "int"
+    },
+    {
+      "name": "sd",
+      "type": "int"
+    }
+  ]
+}

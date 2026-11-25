@@ -58,6 +58,48 @@ void resetStandalonePointwiseModuleCache();
 void registerConvFwdSymbols(hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope);
 void resetConvFwdModuleCache();
 
+/// @see packs/ConvNaiveNative.cpp. The conv engine group's naive convolution: one pack
+/// serving three engines, CONV_NAIVE_FWD, CONV_NAIVE_BWD and CONV_NAIVE_WRW.
+void registerConvNaiveSymbols(hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope);
+void resetConvNaiveModuleCache();
+void registerConvDepthwiseValuSymbols(hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope);
+void resetConvDepthwiseValuModuleCache();
+void registerConvDepthwiseValuWrwSymbols(hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope);
+void resetConvDepthwiseValuWrwModuleCache();
+void registerConvDepthwiseRowsSymbols(hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope);
+void resetConvDepthwiseRowsModuleCache();
+void registerConvDepthwiseMfmaSymbols(hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope);
+void resetConvDepthwiseMfmaModuleCache();
+void registerConvSmallcSymbols(hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope);
+void resetConvSmallcModuleCache();
+void registerConvFftSymbols(hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope);
+void resetConvFftModuleCache();
+void registerConvGroupValuSymbols(hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope);
+void resetConvGroupValuModuleCache();
+void registerConvNarrowSymbols(hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope);
+void resetConvNarrowModuleCache();
+void registerConvNarrowWrwSymbols(hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope);
+void resetConvNarrowWrwModuleCache();
+void registerConvGroupValuWrwSymbols(hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope);
+void resetConvGroupValuWrwModuleCache();
+void registerConvIgemmSymbols(hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope);
+void resetConvIgemmModuleCache();
+void registerConvIgemmNchwSymbols(hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope);
+void resetConvIgemmNchwModuleCache();
+void registerConvWrwSymbols(hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope);
+void resetConvWrwModuleCache();
+/// @see packs/ConvStemBwdNative.cpp
+void registerConvStemBwdSymbols(hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope);
+void resetConvStemBwdModuleCache();
+void registerConvWinogradSymbols(hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope);
+void resetConvWinogradModuleCache();
+void registerConvWinogradNdSymbols(hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope);
+void resetConvWinogradNdModuleCache();
+void registerConvDirectSymbols(hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope);
+void resetConvDirectModuleCache();
+void registerConvGroupSymbols(hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope);
+void resetConvGroupModuleCache();
+
 /// The engine name gfx950_attention_dense.ued.json declares. The pack table, the pack's
 /// own log lines and the descriptor census (which looks the loaded set up by this name)
 /// all read it here, so a rename that misses the descriptor fails the census.

@@ -165,9 +165,9 @@ def _parse_args(argv):
         metavar="NAME",
         help="A folder of the source root that this build does not pack: a "
         "top-level child (a descriptor family whose build flag is off) or a "
-        "'/'-separated path under the root (a bundle whose DVC files were not "
-        "pulled), matched case-insensitively. A name that matches no folder is "
-        "ignored. Repeatable.",
+        "'/'-separated path under the root (a bundle or conv family whose DVC "
+        "files were not pulled), matched case-insensitively. A name that matches "
+        "no folder is ignored. Repeatable.",
     )
     p.add_argument(
         "--disable-kind",

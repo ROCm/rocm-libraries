@@ -2543,6 +2543,29 @@ def test_an_excluded_folder_is_never_read(tmp_path, main_fixture):
 
 
 @pytest.mark.quick
+def test_an_excluded_path_is_never_read_and_spares_its_siblings(tmp_path, main_fixture):
+    """A `/`-separated entry excludes that folder only (a conv family whose
+    catalogs were not pulled), matched case-insensitively; its siblings, a
+    same-named folder elsewhere and the parent's own files are still read."""
+    root = tmp_path / "root"
+    _nest(root, "conv/pointwise", main_fixture)
+    for family in (root / "conv" / "igemm", root / "hip" / "igemm"):
+        family.mkdir(parents=True)
+        (family / "broken.kdp.json").write_text("{", encoding="utf-8")
+
+    with pytest.raises(HkpPackError, match="malformed"):
+        load_flat_input(
+            root, GENERIC_TARGETS, log=_silent, exclude_folders=("conv/igemm",)
+        )
+    (root / "hip" / "igemm" / "broken.kdp.json").unlink()
+    flat = load_flat_input(
+        root, GENERIC_TARGETS, log=_silent, exclude_folders=("CONV/IGEMM",)
+    )
+    assert not any("igemm" in k.path.parts for k in flat.kdps())
+    assert any("pointwise" in k.path.parts for k in flat.kdps())
+
+
+@pytest.mark.quick
 def test_an_excluded_bundle_path_is_never_read(tmp_path, main_fixture):
     """A `/`-separated entry excludes one bundle (a bundle whose DVC outputs were
     not pulled, so what git holds of it may name a missing descriptor), matched

@@ -1,0 +1,7 @@
+{
+  "version": "1.0",
+  "id": "35409203-659c-5b1a-9650-8384578c67d5",
+  "name": "winograd_nd applicability",
+  "scope": "kernel",
+  "match_symbol": "hipkernel.conv_winograd_nd.kernel_match"
+}

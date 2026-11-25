@@ -23,10 +23,14 @@ add_executable(
     core/TestContext.cpp
     core/TestUtils.cpp
     core/TestPluginPublic.cpp
+    compilation/TestHiprtcDiskCache.cpp
+    compilation/TestHiprtcCacheStress.cpp
+    compilation/TestProgramFetchRecording.cpp
     compilation/TestProgramAndKernel.cpp
     compilation/TestKernelCompileOptions.cpp
     compilation/TestModuleCache.cpp
     device/TestScopedDevice.cpp
+    utilities/TestChecksum.cpp
     utilities/TestDigest.cpp
 )
 
@@ -49,6 +53,15 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
              kernels/PointwiseMul.cpp
              kernels/PointwiseSub.cpp
     )
+    if(HIPKERNELPROVIDER_ENABLE_CONV)
+        # The conv engine group's production kernels, under the keys its shipped
+        # descriptors name, so the conv tests compile them as the plugin does.
+        add_kernels_for_embedding(
+            TARGET hip_kernel_provider_tests
+            FILES ${HKP_CONV_KERNEL_SOURCES}
+            KEYS ${HKP_CONV_KERNEL_KEYS}
+        )
+    endif()
 endif()
 embed_kernel_sources(
     TARGET hip_kernel_provider_tests
@@ -155,9 +168,10 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
         HIPKERNELPROVIDER_MULTI_LAUNCH_RELDIR="${HIPKERNELPROVIDER_TEST_DESCRIPTOR_RELDIR}/${HIPKERNELPROVIDER_TEST_SET_MULTI_LAUNCH}")
 
     # The production descriptor tree, as the same binary-relative offset the integration
-    # binary uses. Only TestGfx950ConvDgradMatchers reads it, to run the shipped dgrad
-    # catalog's metadata through the real state manager; it skips when this configuration
-    # packs no production tree, so no dependency on hkp_packaging_product is added here.
+    # binary uses. TestGfx950ConvDgradMatchers reads it, to run the shipped dgrad catalog's
+    # metadata through the real state manager, and TestConvEngineGroupGate, to withdraw the
+    # conv group from the shipped catalog; both skip when this configuration packs no
+    # production tree, so no dependency on hkp_packaging_product is added here.
     target_compile_definitions(hip_kernel_provider_tests PRIVATE
         HIPKERNELPROVIDER_PRODUCT_DESCRIPTOR_RELDIR="${HIPKERNELPROVIDER_PLUGIN_ENGINE_RELDIR}/${HIPKERNELPROVIDER_DESCRIPTOR_SUBDIR}")
 
@@ -951,7 +965,14 @@ clang_tidy_check(hip_kernel_provider_tests)
 # runs standalone and nothing machine-specific reaches the generated CTest files. The
 # install-time file is written from this same list, where a build-tree path would name a
 # directory that does not exist on the machine running the installed suite.
-add_unit_test_target(hip_kernel_provider_tests ${CMAKE_CURRENT_BINARY_DIR})
+# The conv engine group is opt-in at runtime (HIP_KERNEL_PROVIDER_ENABLE_CONV); its suites run
+# with it enabled (main() also defaults it on, so the binary runs standalone).
+set(_hkp_unit_environment "")
+if(HIPDNN_ENABLE_KERNEL_INGESTOR AND HIPKERNELPROVIDER_ENABLE_CONV)
+    list(APPEND _hkp_unit_environment "HIP_KERNEL_PROVIDER_ENABLE_CONV=1")
+endif()
+add_unit_test_target(hip_kernel_provider_tests ${CMAKE_CURRENT_BINARY_DIR}
+                     ENVIRONMENT ${_hkp_unit_environment})
 
 # The FlyDSL backward suites that build graphs and match rows in-process, with no device
 # (the device cases are the TestGpuFlydslSdpaBwd* suites, which the host label excludes).
@@ -987,4 +1008,58 @@ endif()
 if(DEFINED hip_kernel_provider_tests_TEST_ENVIRONMENT)
     set(hip_kernel_provider_tests_TEST_ENVIRONMENT
         "${hip_kernel_provider_tests_TEST_ENVIRONMENT}" PARENT_SCOPE)
+endif()
+
+# The conv RDNA generic-target compile check (conv/tools/rdna_generic/check_generic.py): a
+# sample of logged conv configs, each compiled for its RDNA chip and for the chip's LLVM
+# generic target with the ROCm clang. It fails when a config does not compile or when its
+# generic build loses the chip build's matrix-core instructions (a WMMA config fallen back to
+# its trap). Host-only and minutes long, so opt-in and labeled out of the tiered suites.
+if(HIPKERNELPROVIDER_CONV_GENERIC_COMPILE_TEST AND HIPDNN_ENABLE_KERNEL_INGESTOR
+   AND HIPKERNELPROVIDER_ENABLE_CONV)
+    find_package(Python3 COMPONENTS Interpreter REQUIRED)
+    if(DEFINED ROCM_PATH)
+        set(_hkp_generic_rocm "${ROCM_PATH}")
+    else()
+        set(_hkp_generic_rocm "/opt/rocm")
+    endif()
+    set(_hkp_generic_tools "${CMAKE_CURRENT_SOURCE_DIR}/../../conv/tools/rdna_generic")
+    enable_testing()
+    add_test(
+        NAME hkp_conv_rdna_generic_compile
+        COMMAND
+            ${Python3_EXECUTABLE} ${_hkp_generic_tools}/check_generic.py
+            --configs ${_hkp_generic_tools}/rdna_generic_sample.jsonl
+            --kernels-root ${CMAKE_CURRENT_SOURCE_DIR}/../engines/kernel_ingestor_engine/descriptors/conv
+            --rocm ${_hkp_generic_rocm} -j 2)
+    set_tests_properties(hkp_conv_rdna_generic_compile PROPERTIES
+        LABELS "conv_generic_compile" TIMEOUT 3600)
+endif()
+
+# The conv code-size gate (conv/tools/code_gate): the compile census (TestConvCompileCensus under
+# the dry HIPRTC hook) records the compile of every catalog config the census graphs admit, on
+# every catalog architecture, and each distinct one is compiled with the ROCm clang. It fails
+# when a device function the inliner leaves out of its entry point reaches the 128 KiB
+# short-branch range or builds a long branch in s[30:31], its return address: such a kernel
+# returns into its own body and never ends. Host-only and long, so opt-in and labeled out of the
+# tiered suites.
+if(HIPKERNELPROVIDER_CONV_CODE_GATE_TEST AND HIPDNN_ENABLE_KERNEL_INGESTOR
+   AND HIPKERNELPROVIDER_ENABLE_CONV)
+    find_package(Python3 COMPONENTS Interpreter REQUIRED)
+    if(DEFINED ROCM_PATH)
+        set(_hkp_gate_rocm "${ROCM_PATH}")
+    else()
+        set(_hkp_gate_rocm "/opt/rocm")
+    endif()
+    cmake_host_system_information(RESULT _hkp_gate_jobs QUERY NUMBER_OF_LOGICAL_CORES)
+    enable_testing()
+    add_test(
+        NAME hkp_conv_code_size_gate
+        COMMAND
+            ${Python3_EXECUTABLE}
+            ${CMAKE_CURRENT_SOURCE_DIR}/../../conv/tools/code_gate/run_gate.py
+            --tests $<TARGET_FILE:hip_kernel_provider_tests>
+            --rocm ${_hkp_gate_rocm} -j ${_hkp_gate_jobs})
+    set_tests_properties(hkp_conv_code_size_gate PROPERTIES
+        LABELS "conv_code_gate" TIMEOUT 14400)
 endif()

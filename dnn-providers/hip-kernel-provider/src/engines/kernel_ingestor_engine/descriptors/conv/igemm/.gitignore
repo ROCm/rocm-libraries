@@ -1,0 +1,8 @@
+/conv_igemm_bwd.kdp.json
+/conv_igemm_fwd.kdp.json
+/conv_igemm_bwd_tf32.kdp.json
+/conv_igemm_fwd_tf32.kdp.json
+/conv_igemm_bwd_gfx1250.kdp.json
+/conv_igemm_fwd_gfx1250.kdp.json
+/conv_igemm_bwd_tf32_gfx1250.kdp.json
+/conv_igemm_fwd_tf32_gfx1250.kdp.json

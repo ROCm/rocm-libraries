@@ -1,0 +1,7 @@
+{
+  "version": "1.0",
+  "id": "feda6e7e-60e3-520f-8e32-cb03183b6d87",
+  "name": "kernel dtype, atom (device), layout, strides, window and columns match the graph",
+  "scope": "kernel",
+  "match_symbol": "hipkernel.conv_stem_bwd.kernel_match"
+}

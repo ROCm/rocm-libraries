@@ -1,0 +1,6 @@
+{
+  "version": "1.0",
+  "id": "66c38c94-c000-50df-809f-1d092c884577",
+  "name": "conv_depthwise_valu dispatch",
+  "dispatch_symbol": "hipkernel.conv_depthwise_valu.dispatch"
+}

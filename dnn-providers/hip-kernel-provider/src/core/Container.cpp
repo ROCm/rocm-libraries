@@ -2,6 +2,7 @@
 // SPDX-License-Identifier:  MIT
 
 #include "Container.hpp"
+#include "compilation/CompileCounters.hpp"
 #include "device/CurrentDevicePropertyProvider.hpp"
 
 #ifdef HIPDNN_ENGINE_HIP_MLOPS
@@ -269,6 +270,8 @@ Container::Container()
 Container::~Container()
 {
     HIPDNN_PLUGIN_LOG_INFO("Destroying Container");
+    // The last handle on the provider is going: report how this process got its code objects.
+    compilation::logCompileCounters();
 }
 
 ApplicabilityManager& Container::getEngineManager()

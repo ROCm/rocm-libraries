@@ -2,6 +2,8 @@
 // SPDX-License-Identifier:  MIT
 
 #include "ApplicabilityManager.hpp"
+#include "PlanDescription.hpp"
+#include "compilation/ProgramFetchRecording.hpp"
 
 #include <algorithm>
 #include <charconv>
@@ -81,6 +83,7 @@ void ApplicabilityManager::addEngine(std::unique_ptr<Engine> engine,
     const auto engineId = engine->id();
     // The first registration stands, as the base class keeps the first engine of an id.
     _maxGraphSchema.emplace(engineId, maxGraphSchema);
+    _engineNames.emplace(engineId, std::string(name));
     Base::addEngine(std::move(engine), name);
 
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
@@ -94,6 +97,27 @@ void ApplicabilityManager::addEngine(std::unique_ptr<Engine> engine,
         _stagedCount += staged != nullptr ? 1 : 0;
     }
 #endif
+}
+
+void ApplicabilityManager::initializeExecutionContext(const Handle& handle,
+                                                      const IGraph& opGraph,
+                                                      const IEngineConfig& engineConfig,
+                                                      Context& executionContext) const
+{
+    const compilation::ProgramFetchRecording recording;
+    Base::initializeExecutionContext(handle, opGraph, engineConfig, executionContext);
+    if(HIPDNN_PLUGIN_LOG_IS_INFO_ENABLED())
+    {
+        const auto engineId = engineConfig.engineId();
+        const auto name = _engineNames.find(engineId);
+        const auto plan = describePlan(executionContext);
+        HIPDNN_PLUGIN_LOG_INFO(compilation::formatPlanBuildSummary(
+            name != _engineNames.end() && !name->second.empty() ? name->second
+                                                                : std::to_string(engineId),
+            plan.configName,
+            plan.autotunePending,
+            recording.fetches()));
+    }
 }
 
 std::size_t ApplicabilityManager::stagedEngineCount() const noexcept

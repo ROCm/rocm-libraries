@@ -1380,10 +1380,10 @@ def load_flat_input(
     `exclude_folders` names folders of the root that are not content in this
     build: nothing under one is read, validated or shipped. An entry is a
     top-level child (a disabled family, `rocKE`) or a `/`-separated path under
-    the root (a bundle whose large files were not fetched,
-    `rocKE/<bundle>`). It matches case-insensitively, as the reserved `kpack/`
-    folder does, and one naming no folder is ignored (a root need not carry
-    every family).
+    the root (a bundle whose large files were not fetched, `rocKE/<bundle>`, or
+    a conv family whose DVC-stored catalogs were not pulled, `conv/<family>`).
+    It matches case-insensitively, as the reserved `kpack/` folder does, and
+    one naming no folder is ignored (a root need not carry every family).
     `disabled_kinds` names `kernel_source` kinds this build has no producer
     for: those UKDs are still read and validated, then pruned like an
     arch-pruned UKD once validation passes. An unknown kind raises HkpPackError.

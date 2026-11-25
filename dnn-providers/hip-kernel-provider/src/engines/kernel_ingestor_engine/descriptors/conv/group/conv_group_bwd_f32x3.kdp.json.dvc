@@ -1,0 +1,6 @@
+outs:
+- md5: 97571f58bce2eaa139a18bc3fa6cbe0b
+  size: 91048
+  hash: md5
+  path: conv_group_bwd_f32x3.kdp.json
+  remote: ingestor

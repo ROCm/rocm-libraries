@@ -31,7 +31,8 @@ set(HKP_PACK_STAMP_NAME ".hkp-packed.stamp" CACHE INTERNAL
 # every root is packed with that folder excluded. A new family is one entry here.
 set(HKP_DESCRIPTOR_FAMILIES
     "rocKE=HIPKERNELPROVIDER_ENABLE_ROCKE"
-    "FlyDSL=HIPKERNELPROVIDER_ENABLE_FLYDSL")
+    "FlyDSL=HIPKERNELPROVIDER_ENABLE_FLYDSL"
+    "conv=HIPKERNELPROVIDER_ENABLE_CONV")
 
 include(KpackPython)
 

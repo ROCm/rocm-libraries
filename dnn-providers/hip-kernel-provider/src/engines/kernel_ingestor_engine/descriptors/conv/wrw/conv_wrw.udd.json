@@ -1,0 +1,6 @@
+{
+  "version": "1.0",
+  "id": "82be9975-fb37-5d90-b1e4-2643b0409408",
+  "name": "conv_wrw dispatch",
+  "dispatch_symbol": "hipkernel.conv_wrw.dispatch"
+}

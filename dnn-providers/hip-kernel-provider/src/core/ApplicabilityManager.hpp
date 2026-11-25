@@ -85,6 +85,14 @@ public:
 
     std::size_t stagedEngineCount() const noexcept;
 
+    /// Hides the base: builds the plan as the base class does, then logs one INFO line with
+    /// the engine, the config it chose, where each program's code object came from and the
+    /// compile time (compilation::formatPlanBuildSummary).
+    void initializeExecutionContext(const Handle& handle,
+                                    const IGraph& opGraph,
+                                    const IEngineConfig& engineConfig,
+                                    Context& executionContext) const;
+
     /// The newest graph schema the engine @p engineId was registered as understanding.
     hipdnn_data_sdk::utilities::Version maxGraphSchema(int64_t engineId) const;
 
@@ -96,6 +104,7 @@ private:
     bool admits(int64_t engineId, const hipdnn_data_sdk::utilities::Version& floor) const;
 
     std::unordered_map<int64_t, hipdnn_data_sdk::utilities::Version> _maxGraphSchema;
+    std::unordered_map<int64_t, std::string> _engineNames;
 
     /// The applicable ids of one call, in the order the call's path produces them, before the
     /// provider's engine order rules (applyEngineOrderRules) are applied.

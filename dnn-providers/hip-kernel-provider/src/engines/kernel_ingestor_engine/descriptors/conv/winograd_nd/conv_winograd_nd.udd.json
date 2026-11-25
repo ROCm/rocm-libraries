@@ -1,0 +1,6 @@
+{
+  "version": "1.0",
+  "id": "5611027a-301f-5d5f-8fcc-fd4280314529",
+  "name": "winograd_nd dispatch",
+  "dispatch_symbol": "hipkernel.conv_winograd_nd.dispatch"
+}

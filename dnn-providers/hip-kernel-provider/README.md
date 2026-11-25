@@ -120,11 +120,54 @@ After building, run the test suites:
 ./bin/hip_kernel_plugin_integration_tests
 ```
 
+## Normalization Reductions
+
+On gfx1250, layernorm backward reuses batchnorm's existing `warpSize`-aware
+two-sum reduction: wave partials are combined through LDS rather than a full-block
+tree at every level. Other targets retain their existing reduction association.
+The change does not depend on enabling convolution. Forward Welford statistics,
+saved/recomputed-statistics handling and affine-gradient paths are unchanged;
+batchnorm and RMSNorm algorithms are unchanged.
+
 ## Kernel Embedding System
 
 Kernel source files (`.cpp`, `.hpp`, `.h`) under `engines/` are embedded as C++ string literals at CMake configure time. *Use the CMake function `add_kernels_for_embedding` in any engine you define that implements HIP kernels.* This allows runtime compilation via HIPRTC while keeping kernel sources as regular C++ files (with syntax highlighting, IDE support, etc.).
 
 The embedding is handled by the `embed_kernel_sources()` CMake function in `src/cmake/KernelEmbedding.cmake`.
+
+## Environment Variables
+
+| Variable | Effect |
+|---|---|
+| `HIP_KERNEL_PROVIDER_ENABLE_CONV` | Set to `1`, `true`, `on` or `yes`: a build with the conv engine group (`-DHIPKERNELPROVIDER_ENABLE_CONV=ON`, off by default) serves its `hipkernel:CONV_*` engines. Unset or any other value: the provider serves exactly what a build without the group serves. An opt-in preview; heuristics and default-on come later. Read once, when the provider loads its descriptors. See [the conv engine group](conv/README.md#opt-in-preview). |
+| `HIP_KERNEL_PROVIDER_DISABLE_GENERIC_CODE_OBJECTS` | Set to `1`, `true`, `on` or `yes`: a kpack archive entry for an LLVM generic target (`gfx11-generic`, `gfx12-generic`) is never selected. Only an entry for the device's own architecture loads. A device that an archive serves only through a generic entry gets a miss (`ARCH_LOOKUP`, naming this variable), and the caller takes its normal miss path. Unset, an exact entry still wins over a generic one. Read at every archive lookup. |
+| `HIP_KERNEL_PROVIDER_DISABLE_HIPRTC` | Set to `1`, `true`, `on` or `yes`: the provider never compiles with HIPRTC. A program already in the process or in the [HIPRTC code-object cache](#hiprtc-code-object-cache) still loads; a plan that needs any other program fails to build, so its engine declines at plan build and hipDNN tries the next engine. Execution never compiles. Read at every compile. |
+| `HIP_KERNEL_PROVIDER_TEST_FAIL_COMPILE` | For tests. A program whose name contains this value (for example `kernels/ConvNaive.cpp`) fails to compile with a HIPRTC error and bypasses the disk cache, as a real compile error would. Read at every compile. |
+
+### HIPRTC code-object cache
+
+Kernels the provider compiles at run time with HIPRTC (every `hipkernel:CONV_*` engine, and the HIP_MLOPS engine) are kept on disk, so a later process loads them instead of compiling again.
+
+- **Location.** `<cache root>/hip-kernel-provider/hiprtc/<key>.co`. The cache root is `HIPDNN_CACHE_DIR` when set, otherwise `~/.cache/hipdnn/` on Linux and `%USERPROFILE%\.hipdnn\cache\` on Windows. `HIPDNN_DISABLE_CACHE=1` turns the disk cache off; a root that cannot be created does the same. Without a disk cache each process compiles what it uses once and keeps it in memory.
+- **Key.** A SHA-256 over the cache format version, the compiler identity, the program name and source, every embedded header (name and text) and every compile option (`--offload-arch=<gcnArchName>` among them; the `-D` defines in name order, so the key depends on the set of defines, not on the order a pack adds them). The compiler identity is the HIPRTC version, the HIP runtime version, the comgr version, and a build identity of the HIPRTC and comgr libraries: the ELF build id where the library has one, otherwise its versioned file name and size. Editing a kernel or a header, changing an option, or running under another toolchain build gives a new key, so a stale code object is never loaded. The key does not depend on where the toolchain is installed.
+- **Integrity.** Each entry starts with a header recording the code object's length and its XXH64 checksum (a fast check for accidental damage; the SHA-256 key identifies the content). A truncated or damaged entry is reported once at WARN, recompiled and replaced.
+- **Concurrency.** An entry is written to a temporary file and renamed into place, so processes sharing a cache directory never read a partial entry. Two processes that miss on the same key at the same time both compile it; the result is the same. Within one process each program and option set is compiled once and shared.
+- **Size.** Nothing is evicted: entries for earlier toolchains, kernel edits or an earlier key or file format are never read again, and stay until removed.
+- **Clearing.** Delete the directory at any time; a missing entry is compiled again on next use. On Linux: `rm -rf "${HIPDNN_CACHE_DIR:-$HOME/.cache/hipdnn}/hip-kernel-provider/hiprtc"`. On Windows (PowerShell, default root): `Remove-Item -Recurse "$env:USERPROFILE\.hipdnn\cache\hip-kernel-provider\hiprtc"`. When developing kernels, a per-worktree `HIPDNN_CACHE_DIR` keeps each tree's entries (and its autotune winners, under `ingestor-winners/`) apart.
+
+### Seeing what ran
+
+With `HIPDNN_LOG_LEVEL=info`:
+
+- **Each plan build** logs one line: the engine, the config it chose (the kernel descriptor's name), and each program it needed with where its code object came from (`in-process`, `disk-cache`, `compiled`, or `store` for a precompiled store) and how long that took, then the total compile time:
+
+  ```
+  plan build: engine 'hipkernel:CONV_IGEMM_FWD', config 'conv_igemm_fwd.<config>', 2 program(s): kernels/ConvIgemm.cpp compiled 812.4 ms, kernels/ConvIgemm.cpp in-process 0.0 ms; compile 812.4 ms
+  ```
+
+  An engine without named configs logs `config -`.
+- **With autotune** (`global.benchmarking`) the plan build logs `config chosen by autotune at first execution`; the first execution benchmarks the candidates and logs `ingestor: benchmarking selected kernel <id> in <ms> ms among <n> candidate(s), config '<name>'`.
+- **When the last hipDNN handle using the provider is destroyed**, the provider logs its process totals: `hipRTC: <n> compiled (<s> s), <n> failed, <n> disk-cache hits, <n> corrupt entries replaced, <n> in-process hits, <n> store hits`.
 
 ## Saving and Loading Execution Plans
 

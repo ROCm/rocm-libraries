@@ -8,6 +8,9 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <filesystem>
+#include <fstream>
+#include <map>
 #include <memory>
 #include <optional>
 #include <set>
@@ -16,12 +19,14 @@
 #include <string_view>
 #include <utility>
 #include <variant>
+#include <vector>
 
 #include <hip/hip_runtime_api.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_flatbuffers_sdk/utilities/Uuid.hpp>
 #include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
+#include <hipdnn_plugin_sdk/ingestor/DescriptorLoader.hpp>
 #include <hipdnn_plugin_sdk/ingestor/IKernelDispatchHandler.hpp>
 #include <hipdnn_plugin_sdk/ingestor/KernelDefinition.hpp>
 #include <hipdnn_plugin_sdk/ingestor/MatchContext.hpp>
@@ -91,6 +96,89 @@ inline std::size_t distinctPackIdCount(const hipdnn_plugin_sdk::ingestor::Descri
         ids.insert(pack.id);
     }
     return ids.size();
+}
+
+/// Read the authored embedded-source kernels once each, even when several architecture
+/// shards carry the same UKD id. Only the shard's arch qualification may differ: a changed
+/// source, metadata tuple, priority or name under the same id is a conflicting catalog.
+/// Parse every record before deduplicating so a malformed copy cannot hide behind a valid one.
+inline std::vector<hipdnn_plugin_sdk::ingestor::KernelDefinition>
+    readDistinctEmbeddedKernelCatalog(const std::vector<std::filesystem::path>& paths)
+{
+    using namespace hipdnn_plugin_sdk::ingestor;
+    std::vector<KernelDefinition> kernels;
+    std::map<DescriptorId, std::size_t> indices;
+    for(const auto& path : paths)
+    {
+        std::ifstream stream(path);
+        const auto pack = nlohmann::json::parse(stream);
+        for(const auto& descriptor :
+            pack.at("kernelDescriptors").get_ref<const nlohmann::json::array_t&>())
+        {
+            auto parsed = hipdnn_plugin_sdk::ingestor::detail::parseInlineKernelDescriptor(
+                descriptor, path.string());
+            if(!parsed.has_value())
+            {
+                throw std::runtime_error("unsupported kernel descriptor version in "
+                                         + path.string());
+            }
+            // These catalogs require both fields and use only integer/string metadata.
+            // Do not let JSON's numeric conversions turn malformed knobs into valid ones.
+            (void)descriptor.at("metadata");
+            (void)descriptor.at("priority");
+            for(const auto& [key, value] : parsed->metadata)
+            {
+                if(!std::holds_alternative<int64_t>(value)
+                   && !std::holds_alternative<std::string>(value))
+                {
+                    throw std::runtime_error("metadata '" + key + "' in " + path.string()
+                                             + " must be an integer or string");
+                }
+            }
+            if(!parsed->sources.empty() || parsed->source.kind != KernelSourceKind::EMBEDDED_SOURCE)
+            {
+                throw std::runtime_error("expected an embedded-source kernel in " + path.string());
+            }
+            const auto [position, inserted] = indices.emplace(parsed->id, kernels.size());
+            if(!inserted)
+            {
+                auto& existing = kernels[position->second];
+                if(existing.name != parsed->name || existing.source != parsed->source
+                   || existing.metadata != parsed->metadata
+                   || existing.priority != parsed->priority)
+                {
+                    throw std::runtime_error("conflicting kernel id '" + toString(parsed->id)
+                                             + "' in " + path.string());
+                }
+                // An unqualified record remains unrestricted. Otherwise retain every arch.
+                if(existing.arch.empty() || parsed->arch.empty())
+                {
+                    existing.arch.clear();
+                }
+                else
+                {
+                    for(const auto& arch : parsed->arch)
+                    {
+                        if(std::find(existing.arch.begin(), existing.arch.end(), arch)
+                           == existing.arch.end())
+                        {
+                            existing.arch.push_back(arch);
+                        }
+                    }
+                }
+                continue;
+            }
+            KernelDefinition kernel{};
+            kernel.kernelId = parsed->id;
+            kernel.name = std::move(parsed->name);
+            kernel.source = std::move(parsed->source);
+            kernel.metadata = std::move(parsed->metadata);
+            kernel.priority = parsed->priority;
+            kernel.arch = std::move(parsed->arch);
+            kernels.push_back(std::move(kernel));
+        }
+    }
+    return kernels;
 }
 
 /// KMD fields both reference packs vary along. Shared because the *schema* shape is

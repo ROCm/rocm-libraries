@@ -1,0 +1,83 @@
+{
+  "version": "1.0",
+  "id": "00c14ad8-20af-5a91-b1b9-90dc2576cafa",
+  "name": "conv_igemm_nchw config fields",
+  "fields": [
+    {
+      "name": "direction",
+      "type": "string"
+    },
+    {
+      "name": "dtype",
+      "type": "string"
+    },
+    {
+      "name": "atom",
+      "type": "string"
+    },
+    {
+      "name": "atom_id",
+      "type": "int"
+    },
+    {
+      "name": "bmq",
+      "type": "int"
+    },
+    {
+      "name": "bn",
+      "type": "int"
+    },
+    {
+      "name": "bk",
+      "type": "int"
+    },
+    {
+      "name": "wm",
+      "type": "int"
+    },
+    {
+      "name": "wn",
+      "type": "int"
+    },
+    {
+      "name": "wp",
+      "type": "int"
+    },
+    {
+      "name": "tq",
+      "type": "int"
+    },
+    {
+      "name": "tc",
+      "type": "int"
+    },
+    {
+      "name": "vec",
+      "type": "int"
+    },
+    {
+      "name": "stride",
+      "type": "int"
+    },
+    {
+      "name": "taps",
+      "type": "int"
+    },
+    {
+      "name": "stages",
+      "type": "int"
+    },
+    {
+      "name": "flat",
+      "type": "int"
+    },
+    {
+      "name": "halo",
+      "type": "int"
+    },
+    {
+      "name": "math",
+      "type": "int"
+    }
+  ]
+}
