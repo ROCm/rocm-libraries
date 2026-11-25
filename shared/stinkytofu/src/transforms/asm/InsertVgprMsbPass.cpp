@@ -298,22 +298,24 @@ std::optional<std::string> firstVgprMsbMismatch(const Function& function) {
                 continue;
             }
 
-            const std::string where = "@" + function.getName() + " ^" + bb.getLabel() + " #" +
-                                      std::to_string(position) + " '" + mnemonicOf(*inst) + "'";
+            const auto where = [&] {
+                return "@" + function.getName() + " ^" + bb.getLabel() + " #" +
+                       std::to_string(position) + " '" + mnemonicOf(*inst) + "'";
+            };
             // A slot keeps whatever bank it last selected, so a class that is
             // given no word and read a VGPR through one would see a bank chosen
             // for someone else.
             if (!carriesVgprMsb(*inst)) {
                 if (hasSlottedVgprOperand(*inst))
-                    return where +
+                    return where() +
                            " names a VGPR through a bank slot, but its class is given no word";
                 continue;
             }
             const VgprMsbRequirement required = requiredVgprMsb(*inst);
             if (!required.needed()) continue;
-            if (word < 0) return where + " needs a bank word, but none is set";
+            if (word < 0) return where() + " needs a bank word, but none is set";
             if (vgprMsbChangedFields(word, required) != 0)
-                return where + " needs " + vgprMsbComment(required.word) + " (mask " +
+                return where() + " needs " + vgprMsbComment(required.word) + " (mask " +
                        std::to_string(required.mask) + "), but runs with " + vgprMsbComment(word);
         }
     }
