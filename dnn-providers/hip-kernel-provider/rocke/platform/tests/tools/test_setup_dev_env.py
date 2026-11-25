@@ -20,10 +20,9 @@ import pytest
 def _script_path() -> Path:
     """Find the script in source and relocated test layouts."""
     test_file = Path(__file__).resolve()
-    candidates = (
-        test_file.parents[3] / "tools" / "setup_dev_env.py",
-        test_file.with_name("setup_dev_env.py"),
-    )
+    candidates = [test_file.with_name("setup_dev_env.py")]
+    if len(test_file.parents) > 3:  # source tree: rocke/platform/tests/tools/
+        candidates.insert(0, test_file.parents[3] / "tools" / "setup_dev_env.py")
     for candidate in candidates:
         if candidate.is_file():
             return candidate
@@ -115,6 +114,24 @@ def test_write_hook_is_idempotent(sde, tmp_path, signed):
         assert first.startswith("deactivate () { :; }\nexport PATH\n")
 
 
+@pytest.mark.parametrize("original", ["\n", "\r\n"])
+def test_write_hook_line_endings(sde, tmp_path, original):
+    body = f"deactivate () {{ :; }}{original}export PATH{original}".encode()
+    # Without an explicit newline the script keeps its own endings ...
+    kept = tmp_path / "Activate.ps1"
+    kept.write_bytes(body)
+    sde._write_hook(kept, ["echo one", "echo two"])
+    sde._write_hook(kept, ["echo one", "echo two"])
+    raw = kept.read_bytes()
+    assert raw.count(original.encode()) == raw.count(b"\n") == 6
+    # ... and the bash activate is forced to LF, repairing a CRLF one: Git
+    # Bash cannot parse an activate script with CRLF line endings.
+    bash = tmp_path / "activate"
+    bash.write_bytes(body)
+    sde._write_hook(bash, ["echo one"], newline="\n")
+    assert b"\r" not in bash.read_bytes()
+
+
 @pytest.mark.skipif(
     sys.platform == "win32" or shutil.which("bash") is None, reason="needs POSIX bash"
 )
@@ -202,35 +219,81 @@ def test_resolve_nightly_refuses_a_different_compiler(sde, monkeypatch):
         sde.resolve_nightly(PIN, LLVM, "gfx942", cache)
 
 
-def _serve(sde, monkeypatch, blob: bytes, honor_range: bool = True):
-    from email.message import Message
+class _Response:
+    """Just enough of an ``http.client.HTTPResponse`` for ``_fetch``."""
 
-    def fetch(url, headers=None, method="GET"):
-        meta = Message()
-        meta["Content-Length"] = str(len(blob))
-        if method == "HEAD":
-            return 200, meta, b""
-        first, last = map(int, headers["Range"].split("=")[1].split("-"))
-        if not honor_range:
-            return 200, meta, blob
-        return 206, meta, blob[first : last + 1]
+    def __init__(self, status: int, body: bytes, size: int):
+        from email.message import Message
 
-    monkeypatch.setattr(sde, "_fetch", fetch)
+        self.status, self._body, self.reads = status, body, 0
+        self.headers = Message()
+        self.headers["Content-Length"] = str(size)
+
+    def read(self) -> bytes:
+        self.reads += 1
+        return self._body
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
 
 
-def test_read_wheel_member_extracts_one_file_by_byte_ranges(sde, monkeypatch):
-    manifest = {"submodules": [{"submodule_name": "llvm-project", "pin_sha": LLVM}]}
+def _serve(sde, monkeypatch, blob: bytes, honor_range: bool = True, status=None):
+    """Serve ``blob`` to the script's real fetch path at the urlopen level."""
+    responses: list[_Response] = []
+
+    def urlopen(request, timeout=None):
+        if status is not None:
+            raise sde.urllib.error.HTTPError(
+                request.full_url, status, "error", None, None
+            )
+        if request.get_method() == "HEAD":
+            response = _Response(200, b"", len(blob))
+        elif not honor_range:
+            response = _Response(200, blob, len(blob))
+        else:
+            spec = request.get_header("Range").split("=")[1]
+            first, last = map(int, spec.split("-"))
+            response = _Response(206, blob[first : last + 1], len(blob))
+        responses.append(response)
+        return response
+
+    monkeypatch.setattr(sde.urllib.request, "urlopen", urlopen)
+    return responses
+
+
+def _wheel(sde, manifest: dict) -> bytes:
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
         zf.writestr("_rocm_sdk_core/lib/big.so", b"\0" * 100_000)
         zf.writestr(sde.MANIFEST, json.dumps(manifest))
-    _serve(sde, monkeypatch, buf.getvalue())
+    return buf.getvalue()
+
+
+def test_read_wheel_member_extracts_one_file_by_byte_ranges(sde, monkeypatch):
+    manifest = {"submodules": [{"submodule_name": "llvm-project", "pin_sha": LLVM}]}
+    _serve(sde, monkeypatch, _wheel(sde, manifest))
     cache: dict = {}
     assert sde.nightly_llvm("10.3.0a20261118", "linux_x86_64", cache) == LLVM
     assert sde.longest_member("https://example/x.whl") == len(sde.MANIFEST)
 
 
-def test_a_server_ignoring_ranges_is_a_setup_error(sde, monkeypatch):
-    _serve(sde, monkeypatch, b"PK" * 100, honor_range=False)
+def test_a_server_ignoring_ranges_fails_before_reading_the_body(sde, monkeypatch):
+    responses = _serve(sde, monkeypatch, b"PK" * 100, honor_range=False)
     with pytest.raises(sde.SetupError, match="byte-range"):
         sde.read_wheel_member("https://example/x.whl", sde.MANIFEST)
+    assert responses[-1].reads == 0
+
+
+def test_an_http_error_on_a_wheel_is_a_setup_error(sde, monkeypatch):
+    _serve(sde, monkeypatch, b"", status=404)
+    with pytest.raises(sde.SetupError, match="404"):
+        sde.read_wheel_member("https://example/x.whl", sde.MANIFEST)
+
+
+def test_a_manifest_without_llvm_is_a_setup_error(sde, monkeypatch):
+    _serve(sde, monkeypatch, _wheel(sde, {"submodules": []}))
+    with pytest.raises(sde.SetupError, match="llvm-project"):
+        sde.nightly_llvm("10.3.0a20261118", "linux_x86_64", {})

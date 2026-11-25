@@ -152,16 +152,27 @@ def parse_therock_ref(action_yml: str) -> str:
 
 
 def _fetch(
-    url: str, headers: dict[str, str] | None = None, method: str = "GET"
+    url: str,
+    headers: dict[str, str] | None = None,
+    method: str = "GET",
+    expect_status: int | None = None,
 ) -> tuple[int, Message, bytes]:
     """(status, headers, body), retrying transient network failures.
 
-    HTTP error statuses are not transient and propagate as ``HTTPError``.
+    HTTP error statuses are not transient and propagate as ``HTTPError``. With
+    ``expect_status``, any other status is a ``SetupError`` raised before the
+    body is read, so a server that ignores a byte range never streams a whole
+    wheel into memory.
     """
     request = urllib.request.Request(url, headers=headers or {}, method=method)
     for attempt in range(3):
         try:
             with urllib.request.urlopen(request, timeout=120) as response:
+                if expect_status is not None and response.status != expect_status:
+                    raise SetupError(
+                        f"{url}: HTTP {response.status} where {expect_status} was "
+                        "required (the server ignored the byte-range request)"
+                    )
                 return response.status, response.headers, response.read()
         except urllib.error.HTTPError:
             raise
@@ -272,11 +283,9 @@ def pick_torch(
 
 def _range(url: str, first: int, last: int) -> bytes:
     try:
-        status, _, body = _fetch(url, {"Range": f"bytes={first}-{last}"})
+        _, _, body = _fetch(url, {"Range": f"bytes={first}-{last}"}, expect_status=206)
     except urllib.error.HTTPError as exc:
         raise SetupError(f"{url}: HTTP {exc.code}") from exc
-    if status != 206:
-        raise SetupError(f"{url}: server ignored a byte-range request")
     return body
 
 
@@ -683,7 +692,11 @@ def pin_runtime(venv: Path, checkout: Path, therock_ref: str) -> dict[str, str]:
     sets = "; ".join(f"os.environ.setdefault({k!r}, {v!r})" for k, v in env.items())
     (Path(libs["site"]) / PTH).write_text(f"import os; {sets}\n", encoding="utf-8")
     scripts = venv / ("Scripts" if IS_WINDOWS else "bin")
-    _write_hook(scripts / "activate", _bash_hook(env, checkout, therock_ref))
+    # bash needs LF (a CRLF activate stops parsing at the hook in Git Bash);
+    # writing it as LF also repairs one an earlier run converted.
+    _write_hook(
+        scripts / "activate", _bash_hook(env, checkout, therock_ref), newline="\n"
+    )
     if (scripts / "Activate.ps1").is_file():
         _write_hook(scripts / "Activate.ps1", _ps_hook(env, checkout, therock_ref))
     return env
@@ -756,12 +769,17 @@ def _ps_hook(env: dict[str, str], checkout: Path, therock_ref: str) -> list[str]
     ]
 
 
-def _write_hook(script: Path, lines: list[str]) -> None:
+def _write_hook(script: Path, lines: list[str], *, newline: str | None = None) -> None:
     """(Re)place the setup block in an activate script, before any signature block.
 
-    Re-running leaves the script byte-identical to the first run.
+    Re-running leaves the script byte-identical to the first run. Lines end in
+    ``newline`` when given, else in whatever the script already uses; text-mode
+    defaults would turn a bash ``activate`` into CRLF on Windows.
     """
-    text = script.read_text(encoding="utf-8")
+    raw = script.read_bytes()
+    if newline is None:
+        newline = "\r\n" if b"\r\n" in raw else "\n"
+    text = raw.decode("utf-8").replace("\r\n", "\n")
     text = re.sub(
         rf"{re.escape(HOOK_BEGIN)}.*?{re.escape(HOOK_END)}\n",
         "",
@@ -774,7 +792,7 @@ def _write_hook(script: Path, lines: list[str]) -> None:
         text = text[:signature] + block + text[signature:]
     else:
         text = text.rstrip("\n") + "\n" + block
-    script.write_text(text, encoding="utf-8")
+    script.write_text(text, encoding="utf-8", newline=newline)
 
 
 def verify(venv: Path, env: dict[str, str], arch: str) -> dict:
