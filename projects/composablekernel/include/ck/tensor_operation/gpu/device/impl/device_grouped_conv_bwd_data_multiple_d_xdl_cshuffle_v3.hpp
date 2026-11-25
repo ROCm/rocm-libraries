@@ -1060,8 +1060,6 @@ struct DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffleV3
                                                                            k_batch_};
 
                         conv_N_per_block_ = conv_to_gemm_transform_.N_;
-                        padding_range_supported_ &=
-                            conv_to_gemm_transform_.IsMergedOutPaddingRangeSupported();
 
                         const auto a_grid_desc_ak0_m_ak1 = [&]() {
                             return conv_to_gemm_transform_.MakeADescriptor_AK0_M_AK1();
@@ -1085,6 +1083,8 @@ struct DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffleV3
                         }();
 
                         const IndexType GemmM = a_grid_desc_m_k.GetLength(I0);
+                        padding_range_supported_ &=
+                            conv_to_gemm_transform_.IsMergedOutPaddingRangeSupported(GemmM);
                         const IndexType GemmN = b_grid_desc_n_k.GetLength(I0);
 
                         const auto e_grid_desc_mblock_mperblock_nblock_nperblock =

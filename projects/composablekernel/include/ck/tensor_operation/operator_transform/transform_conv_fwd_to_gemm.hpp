@@ -112,28 +112,57 @@ struct TransformConvFwdToGemm
 
     __host__ __device__ constexpr TransformConvFwdToGemm() {}
 
-    // The custom transform (UseCustomTransformA) needs the first spatial lower coordinates to stay
-    // in the range of the poison used for the GEMM padding, see IsConvPaddingPoisonRangeSupported.
-    // The filter index of the padded GEMM columns exceeds the filter by at most k_per_block.
-    __host__ bool IsCustomTransformPaddingRangeSupported(index_t k_per_block) const
+    // The custom transform (UseCustomTransformA) needs the first spatial lower coordinates and the
+    // offsets of the poisoned coordinates to stay in range, see IsConvInputTransformRangeSupported.
+    // m_padded and k_padded are the padded GEMM lengths of the A descriptor.
+    __host__ bool IsCustomTransformPaddingRangeSupported(index_t m_padded, index_t k_padded) const
     {
-        const auto check = [&](long_index_t length,
-                               long_index_t out,
-                               long_index_t stride,
-                               long_index_t dilation,
-                               long_index_t filter,
-                               long_index_t left_pad) {
-            return IsConvPaddingPoisonRangeSupported(
-                length,
-                -left_pad,
-                (out - 1) * stride + (filter + k_per_block) * dilation - left_pad);
+        const auto arr = [](auto... v) {
+            return std::array<long_index_t, sizeof...(v)>{static_cast<long_index_t>(v)...};
         };
         if constexpr(NDimSpatial == 1)
-            return check(Wi_, Wo_, ConvStrideW_, ConvDilationW_, X_, InLeftPadW_);
+            return IsConvInputTransformRangeSupported<1>(N_,
+                                                         C_,
+                                                         arr(Wi_),
+                                                         arr(X_),
+                                                         arr(Wo_),
+                                                         arr(ConvStrideW_),
+                                                         arr(ConvDilationW_),
+                                                         arr(InLeftPadW_),
+                                                         m_padded,
+                                                         k_padded,
+                                                         NStrideTensorA_,
+                                                         arr(WiStride_),
+                                                         CStrideTensorA_);
         else if constexpr(NDimSpatial == 2)
-            return check(Hi_, Ho_, ConvStrideH_, ConvDilationH_, Y_, InLeftPadH_);
+            return IsConvInputTransformRangeSupported<2>(N_,
+                                                         C_,
+                                                         arr(Hi_, Wi_),
+                                                         arr(Y_, X_),
+                                                         arr(Ho_, Wo_),
+                                                         arr(ConvStrideH_, ConvStrideW_),
+                                                         arr(ConvDilationH_, ConvDilationW_),
+                                                         arr(InLeftPadH_, InLeftPadW_),
+                                                         m_padded,
+                                                         k_padded,
+                                                         NStrideTensorA_,
+                                                         arr(HiStride_, WiStride_),
+                                                         CStrideTensorA_);
         else
-            return check(Di_, Do_, ConvStrideD_, ConvDilationD_, Z_, InLeftPadD_);
+            return IsConvInputTransformRangeSupported<3>(
+                N_,
+                C_,
+                arr(Di_, Hi_, Wi_),
+                arr(Z_, Y_, X_),
+                arr(Do_, Ho_, Wo_),
+                arr(ConvStrideD_, ConvStrideH_, ConvStrideW_),
+                arr(ConvDilationD_, ConvDilationH_, ConvDilationW_),
+                arr(InLeftPadD_, InLeftPadH_, InLeftPadW_),
+                m_padded,
+                k_padded,
+                NStrideTensorA_,
+                arr(DiStride_, HiStride_, WiStride_),
+                CStrideTensorA_);
     }
 
     template <typename TransformConvFwdToGemmBase>

@@ -1353,21 +1353,37 @@ TEST(TensorDescriptorFunctorsIntegration, BackwardWeightInputTransformMatchesGen
 
 TEST(TensorDescriptorFunctorsIntegration, ConvPaddingPoisonRangeLimit)
 {
-    constexpr long_index_t limit     = long_index_t{1} << 30;
-    constexpr long_index_t max_index = (long_index_t{1} << 31) - 1;
+    constexpr long_index_t max_wrap = (long_index_t{1} << 31) - 1;
 
-    // lower side: length - min_lower_index <= 2^30
-    EXPECT_TRUE(IsConvPaddingPoisonRangeSupported(limit, 0, 0));
-    EXPECT_FALSE(IsConvPaddingPoisonRangeSupported(limit + 1, 0, 0));
-    EXPECT_TRUE(IsConvPaddingPoisonRangeSupported(limit - 5, -5, 0));
-    EXPECT_FALSE(IsConvPaddingPoisonRangeSupported(limit - 5, -6, 0));
-    // a negative left pad (positive lower index) does not reduce the range
-    EXPECT_TRUE(IsConvPaddingPoisonRangeSupported(limit, 7, 0));
-    // upper side: the largest lower coordinate must fit in 31 bits
-    EXPECT_TRUE(IsConvPaddingPoisonRangeSupported(8, 0, max_index));
-    EXPECT_FALSE(IsConvPaddingPoisonRangeSupported(8, 0, max_index + 1));
+    // the poison is length + max(0, left_pad), and max_lower_index + 2 * poison must be below 2^31
+    EXPECT_EQ(GetConvPaddingPoison(8, 0), 8u);
+    EXPECT_EQ(GetConvPaddingPoison(8, 5), 13u);
+    EXPECT_EQ(GetConvPaddingPoison(8, -5), 8u);
 
-    // wrw: first spatial length and left pad
+    EXPECT_TRUE(IsConvPaddingPoisonRangeSupported(8, 0, max_wrap - 16));
+    EXPECT_FALSE(IsConvPaddingPoisonRangeSupported(8, 0, max_wrap - 15));
+    // a left pad increases the poison
+    EXPECT_TRUE(IsConvPaddingPoisonRangeSupported(8, -5, max_wrap - 26));
+    EXPECT_FALSE(IsConvPaddingPoisonRangeSupported(8, -5, max_wrap - 25));
+    // a negative left pad (positive lower index) does not
+    EXPECT_TRUE(IsConvPaddingPoisonRangeSupported(8, 5, max_wrap - 16));
+    // a big input and a big pad
+    EXPECT_TRUE(IsConvPaddingPoisonRangeSupported(1 << 28, -(1 << 27), 0));
+    EXPECT_FALSE(IsConvPaddingPoisonRangeSupported(1 << 30, -(1 << 29), 0));
+
+    // IsConvInputTransformRangeSupported<1>: N, C, input, filter, output, stride, dilation, left
+    // pad, m_padded, k_padded, N stride, spatial stride, C stride
+    const auto offset_supported = [](index_t length, index_t spatial_stride) {
+        return IsConvInputTransformRangeSupported<1>(
+            1, 1, {length}, {1}, {length}, {1}, {1}, {0}, length + 1, 2, 1, {spatial_stride}, 1);
+    };
+    EXPECT_TRUE(offset_supported(1 << 26, 8));
+    EXPECT_FALSE(offset_supported(1 << 27, 8));
+    EXPECT_TRUE(offset_supported(1 << 28, 1));
+    EXPECT_FALSE(offset_supported(1 << 30, 1));
+
+    // wrw: input, filter, output, dilation, left pad, stride of the spatial dimensions of the input
+    // (N = C = 1, stride 1, GemmK padded by 1 and GemmN by 64 columns)
     using WrwTransform = ck::tensor_operation::TransformConvBwdWeightToGemmV2<
         2,
         32,
@@ -1379,76 +1395,357 @@ TEST(TensorDescriptorFunctorsIntegration, ConvPaddingPoisonRangeLimit)
         index_t,
         false,
         true>;
-    // {input, filter, output, stride, dilation, left pad}, n_per_block = 64
     const auto wrw_supported = [](std::array<index_t, 2> in,
                                   std::array<index_t, 2> filter,
                                   std::array<index_t, 2> out,
                                   std::array<index_t, 2> dilation,
-                                  std::array<index_t, 2> pad) {
-        return WrwTransform::IsCustomTransformPaddingRangeSupported(
-            in, filter, out, {1, 1}, dilation, pad, 64);
+                                  std::array<index_t, 2> pad,
+                                  std::array<index_t, 2> spatial_stride) {
+        const std::array<index_t, 5> input_strides{1, 1, 1, spatial_stride[0], spatial_stride[1]};
+        return WrwTransform::IsCustomTransformPaddingRangeSupported(1,
+                                                                    1,
+                                                                    in,
+                                                                    filter,
+                                                                    out,
+                                                                    input_strides,
+                                                                    {1, 1},
+                                                                    dilation,
+                                                                    pad,
+                                                                    out[0] * out[1] + 1,
+                                                                    filter[0] * filter[1] + 64);
     };
-    EXPECT_TRUE(wrw_supported({1 << 30, 8}, {1, 1}, {1 << 30, 8}, {1, 1}, {0, 0}));
-    EXPECT_FALSE(wrw_supported({1 << 30, 8}, {1, 1}, {1 << 30, 8}, {1, 1}, {1, 0}));
-    // only the first spatial dimension is poisoned
-    EXPECT_TRUE(wrw_supported({8, 1 << 30}, {1, 1}, {8, 1 << 30}, {1, 1}, {1, 1}));
+    // big inputs and pads are fine (unit strides)
+    EXPECT_TRUE(wrw_supported({1 << 29, 1}, {1, 1}, {1 << 29, 1}, {1, 1}, {0, 0}, {1, 1}));
+    EXPECT_TRUE(wrw_supported({1 << 29, 1}, {1, 1}, {(1 << 29) + 1, 1}, {1, 1}, {1, 0}, {1, 1}));
     // upper side: the filter index of the padded columns times the dilation
-    EXPECT_TRUE(wrw_supported({8, 8}, {1, 1}, {8, 8}, {1 << 20, 1}, {0, 0}));
-    EXPECT_FALSE(wrw_supported({8, 8}, {1, 1}, {8, 8}, {1 << 26, 1}, {0, 0}));
+    EXPECT_TRUE(wrw_supported({8, 8}, {1, 1}, {8, 8}, {1 << 20, 1}, {0, 0}, {8, 1}));
+    EXPECT_FALSE(wrw_supported({8, 8}, {1, 1}, {8, 8}, {1 << 26, 1}, {0, 0}, {8, 1}));
+    // offset of the poisoned coordinate: about 3 * length * stride must stay below 2^31
+    EXPECT_TRUE(wrw_supported({1 << 26, 1}, {1, 1}, {1 << 26, 1}, {1, 1}, {0, 0}, {8, 1}));
+    EXPECT_FALSE(wrw_supported({1 << 27, 1}, {1, 1}, {1 << 27, 1}, {1, 1}, {0, 0}, {8, 1}));
+    // ... also with a left pad, which increases the poison
+    EXPECT_TRUE(wrw_supported(
+        {1 << 26, 1}, {1, 1}, {(1 << 26) + (1 << 26), 1}, {1, 1}, {1 << 26, 0}, {8, 1}));
+    EXPECT_FALSE(wrw_supported(
+        {1 << 26, 1}, {1, 1}, {(1 << 26) + (1 << 26), 1}, {1, 1}, {1 << 26, 0}, {16, 1}));
 
-    // fwd: the padding row m = M of an input with the first spatial length at the limit. With a
-    // left pad of 1 its lower coordinate is -1 and the poison wraps it back inside the input, so
-    // the padding row is wrongly reported as valid. This is why the range is checked on the host.
-    for(const index_t pad : {0, 1})
-    {
-        const ForwardConvCase<1> cfg{1, 1, {1 << 30}, {1}, {1}, {1}, {pad}, {0}};
-        const auto out64 = OutputLengths(cfg);
-        const std::array<index_t, 1> out{static_cast<index_t>(out64[0])};
-        const index_t M      = out[0];
-        const auto transform = MakeCustomTransform<1>(cfg, out, M + 1, 2);
-
-        EXPECT_EQ(transform.IsPaddingRangeSupported(), pad == 0);
-        const bool padding_row_valid =
-            transform.IsValidUpperIndexMappedToValidLowerIndex(make_tuple(M, 0));
-        EXPECT_EQ(padding_row_valid, pad != 0);
-    }
-
-    // Upper side: a 1x1 filter with a huge dilation. The padded K columns (k >= K) get f0 > 0 and
-    // therefore a lower coordinate f0 * dilation. With both the M and the K poison (+2^31) a
-    // coordinate of 2^31 + o wraps modulo 2^32 back to o, inside the input. The generic chain
-    // would report this padding as invalid.
-    for(const index_t dilation : {1 << 20, 1 << 24})
-    {
-        const ForwardConvCase<1> cfg{1, 1, {8}, {1}, {1}, {dilation}, {0}, {0}};
-        const auto out64 = OutputLengths(cfg);
-        const std::array<index_t, 1> out{static_cast<index_t>(out64[0])};
-        const index_t M      = out[0];
-        const auto transform = MakeCustomTransform<1>(cfg, out, M + 1, 192);
-        const bool supported = dilation == (1 << 20);
-
-        EXPECT_EQ(transform.IsPaddingRangeSupported(), supported);
-        // m = M and k = 128: f0 = 128, and 128 * 2^24 = 2^31
-        EXPECT_EQ(transform.IsValidUpperIndexMappedToValidLowerIndex(make_tuple(M, 128)),
-                  !supported);
-    }
-
-    // a small input with a huge left pad: the lower coordinate of the first rows is about -pad
-    // (the check is on length + left pad, a right pad does not matter)
-    constexpr index_t in_len = 8;
-    for(const index_t pad : {(1 << 30) - in_len, (1 << 30) - in_len + 1})
-    {
-        for(const index_t right_pad : {0, 5})
-        {
-            const ForwardConvCase<1> cfg{1, 1, {in_len}, {1}, {1}, {1}, {pad}, {right_pad}};
+    // fwd: padding position (m = M, k = k_pad) of an input with a 1x1 filter. m >= M and
+    // k >= K, so both poisons are added: 2 * poison, with poison = length + left_pad.
+    const auto fwd_padding_valid =
+        [](const ForwardConvCase<1>& cfg, index_t k_pad, bool& supported) {
             const auto out64 = OutputLengths(cfg);
             const std::array<index_t, 1> out{static_cast<index_t>(out64[0])};
             const index_t M      = out[0];
-            const auto transform = MakeCustomTransform<1>(cfg, out, M + 1, 2);
-            const bool supported = pad == (1 << 30) - in_len;
+            const auto transform = MakeCustomTransform<1>(cfg, out, M + 1, 192);
+            supported            = transform.IsPaddingRangeSupported();
+            return transform.IsValidUpperIndexMappedToValidLowerIndex(make_tuple(M, k_pad));
+        };
 
-            EXPECT_EQ(transform.IsPaddingRangeSupported(), supported);
-            EXPECT_EQ(transform.IsValidUpperIndexMappedToValidLowerIndex(make_tuple(M, 0)),
-                      !supported);
+    // a big first spatial length, with and without a left pad, and huge left pads on a small
+    // input: all of them keep the padding invalid
+    for(const index_t pad : {0, 1})
+    {
+        bool supported = false;
+        EXPECT_FALSE(fwd_padding_valid({1, 1, {1 << 29}, {1}, {1}, {1}, {pad}, {0}}, 1, supported));
+        EXPECT_TRUE(supported);
+    }
+    for(const index_t pad : {(1 << 29) - 8, (1 << 29) + 5})
+    {
+        for(const index_t right_pad : {0, 5})
+        {
+            bool supported = false;
+            EXPECT_FALSE(
+                fwd_padding_valid({1, 1, {8}, {1}, {1}, {1}, {pad}, {right_pad}}, 1, supported));
+            EXPECT_TRUE(supported);
         }
     }
+
+    // upper side: a 1x1 filter with a huge dilation. The padded K columns (k >= K) get f0 > 0 and
+    // therefore a lower coordinate f0 * dilation. With the dilation 2^28 - 1 and f0 = 16 the
+    // coordinate is 2^32 - 16, and the two poisons (2 * 8) wrap it to 0, inside the input. The
+    // generic chain would report this padding as invalid.
+    {
+        bool supported = false;
+        EXPECT_FALSE(fwd_padding_valid({1, 1, {8}, {1}, {1}, {1 << 20}, {0}, {0}}, 16, supported));
+        EXPECT_TRUE(supported);
+
+        supported = true;
+        const bool valid =
+            fwd_padding_valid({1, 1, {8}, {1}, {1}, {(1 << 28) - 1}, {0}, {0}}, 16, supported);
+        EXPECT_FALSE(supported);
+        EXPECT_TRUE(valid) << "the padding of this problem is reported as valid";
+    }
+    {
+        bool supported = false;
+        EXPECT_FALSE(fwd_padding_valid({1, 1, {8}, {1}, {1}, {1 << 20}, {0}, {0}}, 128, supported));
+        EXPECT_TRUE(supported);
+    }
+}
+
+// =============================================================================
+// Range limits of the custom input transform with filters larger than 1
+// =============================================================================
+
+namespace {
+
+// Runs the host check IsConvInputTransformRangeSupported on a packed channel-first tensor (the
+// first spatial dimension is the innermost one if first_dim_innermost, the last one otherwise: the
+// coordinates of the dimension with stride 1 are the ones that can reach the farthest) and, if the
+// problem is accepted, checks every position of the padded GEMM (all m < m_padded and
+// k < k_padded) against an int64 reference: the padding must be invalid, the real positions must
+// map to the right lower index, and no offset term or sum may leave the range of int32. Returns
+// the result of the host check.
+template <index_t NDim>
+bool CheckConvInputRangeLimit(const ForwardConvCase<NDim>& cfg, bool first_dim_innermost)
+{
+    SCOPED_TRACE(Describe(cfg));
+
+    constexpr int64_t limit = std::numeric_limits<index_t>::max();
+
+    const auto out64 = OutputLengths(cfg);
+    std::array<index_t, NDim> out{};
+    int64_t prod_out    = 1;
+    int64_t filter_size = 1;
+    for(index_t d = 0; d < NDim; ++d)
+    {
+        EXPECT_GE(out64[d], 1);
+        out[d] = static_cast<index_t>(out64[d]);
+        prod_out *= out64[d];
+        filter_size *= cfg.Filter[d];
+    }
+    const int64_t M        = cfg.N * prod_out;
+    const int64_t K        = filter_size * cfg.C;
+    const int64_t m_padded = (M + 63) / 64 * 64;
+    const int64_t k_padded = (K + 63) / 64 * 64;
+
+    std::array<long_index_t, NDim> spatial_stride{};
+    long_index_t acc = 1;
+    for(index_t i = 0; i < NDim; ++i)
+    {
+        const index_t d   = first_dim_innermost ? i : NDim - 1 - i;
+        spatial_stride[d] = acc;
+        acc *= cfg.In[d];
+    }
+    const long_index_t c_stride = acc;
+    const long_index_t n_stride = acc * cfg.C;
+
+    const auto to_long = [](const std::array<index_t, NDim>& a) {
+        std::array<long_index_t, NDim> r{};
+        for(index_t d = 0; d < NDim; ++d)
+        {
+            r[d] = a[d];
+        }
+        return r;
+    };
+    const bool supported = IsConvInputTransformRangeSupported<NDim>(cfg.N,
+                                                                    cfg.C,
+                                                                    to_long(cfg.In),
+                                                                    to_long(cfg.Filter),
+                                                                    to_long(out),
+                                                                    to_long(cfg.Stride),
+                                                                    to_long(cfg.Dilation),
+                                                                    to_long(cfg.PadLeft),
+                                                                    m_padded,
+                                                                    k_padded,
+                                                                    n_stride,
+                                                                    spatial_stride,
+                                                                    c_stride);
+    if(!supported)
+    {
+        return false;
+    }
+
+    const auto transform = MakeCustomTransform<NDim>(
+        cfg, out, static_cast<index_t>(m_padded), static_cast<index_t>(k_padded));
+    EXPECT_TRUE(transform.IsPaddingRangeSupported());
+
+    int64_t mismatches = 0;
+    int64_t overflows  = 0;
+    for(int64_t m = 0; m < m_padded; ++m)
+    {
+        std::array<int64_t, NDim> o{};
+        int64_t q = m;
+        for(index_t d = NDim - 1; d >= 0; --d)
+        {
+            o[d] = q % out64[d];
+            q /= out64[d];
+        }
+        const int64_t n = q;
+        for(int64_t k = 0; k < k_padded; ++k)
+        {
+            std::array<int64_t, NDim> f{};
+            q               = k;
+            const int64_t c = q % cfg.C;
+            q /= cfg.C;
+            for(index_t d = NDim - 1; d >= 1; --d)
+            {
+                f[d] = q % cfg.Filter[d];
+                q /= cfg.Filter[d];
+            }
+            f[0] = q;
+
+            bool valid = m < M && k < K;
+            std::array<int64_t, NDim> in_idx{};
+            for(index_t d = 0; d < NDim; ++d)
+            {
+                in_idx[d] = o[d] * cfg.Stride[d] + f[d] * cfg.Dilation[d] - cfg.PadLeft[d];
+                valid &= in_idx[d] >= 0 && in_idx[d] < cfg.In[d];
+            }
+
+            const auto up = make_tuple(static_cast<index_t>(m), static_cast<index_t>(k));
+            if(transform.IsValidUpperIndexMappedToValidLowerIndex(up) != valid)
+            {
+                ++mismatches;
+            }
+            MultiIndex<NDim + 2> low;
+            transform.CalculateLowerIndex(low, up);
+            if(valid)
+            {
+                bool equal = low[Number<0>{}] == n && low[Number<NDim + 1>{}] == c;
+                static_for<0, NDim, 1>{}(
+                    [&](auto d) { equal &= low[Number<d + 1>{}] == in_idx[d]; });
+                mismatches += !equal;
+            }
+
+            // offset in 32 bit arithmetic (emulated with 64 bit)
+            int64_t sum    = 0;
+            const auto add = [&](int64_t idx, int64_t stride) {
+                const int64_t term = idx * stride;
+                overflows += std::llabs(term) > limit;
+                sum += term;
+                overflows += std::llabs(sum) > limit;
+            };
+            add(low[Number<0>{}], n_stride);
+            static_for<0, NDim, 1>{}([&](auto d) { add(low[Number<d + 1>{}], spatial_stride[d]); });
+            add(low[Number<NDim + 1>{}], c_stride);
+        }
+    }
+    EXPECT_EQ(mismatches, 0) << "an accepted problem has a wrong padding or lower index";
+    EXPECT_EQ(overflows, 0) << "an accepted problem overflows the offset computation";
+    return true;
+}
+
+// 1D / 2D / 3D problem with a first spatial dimension of length 8 whose filter (F taps, dilation
+// D) reaches far out of the input: the right pad is chosen so that Wo = Wi + left_pad.
+template <index_t NDim>
+ForwardConvCase<NDim>
+MakeLargeReachCase(index_t channels, index_t filter0, int64_t dilation0, index_t left_pad0)
+{
+    ForwardConvCase<NDim> cfg{};
+    cfg.N = 1;
+    cfg.C = channels;
+    for(index_t d = 0; d < NDim; ++d)
+    {
+        cfg.In[d]       = d == 0 ? 8 : 3;
+        cfg.Filter[d]   = d == 0 ? filter0 : 2;
+        cfg.Stride[d]   = 1;
+        cfg.Dilation[d] = 1;
+        cfg.PadLeft[d]  = d == 0 ? left_pad0 : 1;
+        cfg.PadRight[d] = d == 0 ? 0 : 1;
+    }
+    cfg.Dilation[0] = static_cast<index_t>(dilation0);
+    // Wo = Wi + left_pad: right_pad = D * (F - 1), clamped to the index range
+    cfg.PadRight[0] = static_cast<index_t>(std::min<int64_t>(dilation0 * (filter0 - 1), kIndexMax));
+    return cfg;
+}
+
+} // namespace
+
+TEST(TensorDescriptorFunctorsIntegration, ConvInputTransformRangeLimitWithFilters)
+{
+    constexpr int64_t limit = std::numeric_limits<index_t>::max();
+
+    // First spatial dimension: the largest lower coordinate is (Wo - 1) + f0_max * D - left_pad,
+    // with f0_max the filter index of the last (padded) GEMM column, and the poison is
+    // Wi + left_pad. The documented limit is max_lower + 2 * poison <= 2^31 - 1.
+    const auto first_dimension = [&](auto ndim) {
+        constexpr index_t NDim = decltype(ndim)::value;
+        for(const index_t filter0 : {3, 7})
+        {
+            for(const index_t channels : {8, 40})
+            {
+                for(const index_t left_pad : {0, 5})
+                {
+                    int64_t filter_rest = channels;
+                    for(index_t d = 1; d < NDim; ++d)
+                    {
+                        filter_rest *= 2; // filter of the other dimensions
+                    }
+                    int64_t filter_size    = filter_rest * filter0;
+                    const int64_t k_padded = (filter_size + 63) / 64 * 64;
+                    const int64_t f0_max   = (k_padded - 1) / filter_rest;
+                    EXPECT_GE(f0_max, filter0 - 1);
+
+                    const int64_t wi     = 8;
+                    const int64_t wo     = wi + left_pad;
+                    const int64_t poison = wi + left_pad;
+                    // largest f0_max * D for which the poison range holds
+                    const int64_t max_reach = limit - (wo - 1) + left_pad - 2 * poison;
+                    const int64_t d_max     = max_reach / f0_max;
+
+                    // far from the limit, and a margin below it for the terms of the offset that
+                    // are not part of the poison range (batch, channel, other dimensions)
+                    for(const int64_t dilation :
+                        {int64_t{1}, int64_t{1} << 20, (max_reach - 65536) / f0_max})
+                    {
+                        EXPECT_TRUE(CheckConvInputRangeLimit<NDim>(
+                            MakeLargeReachCase<NDim>(channels, filter0, dilation, left_pad), true))
+                            << "F=" << filter0 << " C=" << channels << " D=" << dilation
+                            << " left_pad=" << left_pad;
+                    }
+                    // just above the limit of the poison range: always rejected
+                    for(const int64_t dilation : {d_max + 1, d_max + 1000})
+                    {
+                        EXPECT_FALSE(CheckConvInputRangeLimit<NDim>(
+                            MakeLargeReachCase<NDim>(channels, filter0, dilation, left_pad), true))
+                            << "F=" << filter0 << " C=" << channels << " D=" << dilation
+                            << " left_pad=" << left_pad;
+                    }
+                }
+            }
+        }
+    };
+    first_dimension(std::integral_constant<index_t, 1>{});
+    first_dimension(std::integral_constant<index_t, 2>{});
+    first_dimension(std::integral_constant<index_t, 3>{});
+
+    // Last spatial dimension: its coordinates are not poisoned, but they are multiplied by their
+    // stride in 32 bit, so (F - 1) * D must stay below 2^31 whatever the other terms are.
+    const auto last_dimension = [&](auto ndim) {
+        constexpr index_t NDim = decltype(ndim)::value;
+        for(const index_t filter_last : {3, 7})
+        {
+            const auto make = [&](int64_t dilation) {
+                ForwardConvCase<NDim> cfg{};
+                cfg.N = 1;
+                cfg.C = 64; // K is a multiple of the GEMM block: no padded columns
+                for(index_t d = 0; d < NDim; ++d)
+                {
+                    cfg.In[d]       = 8;
+                    cfg.Filter[d]   = d == NDim - 1 ? filter_last : 1;
+                    cfg.Stride[d]   = 1;
+                    cfg.Dilation[d] = d == NDim - 1 ? static_cast<index_t>(dilation) : 1;
+                    cfg.PadLeft[d]  = 0;
+                    cfg.PadRight[d] = d == NDim - 1 ? static_cast<index_t>(std::min<int64_t>(
+                                                          dilation * (filter_last - 1), kIndexMax))
+                                                    : 0;
+                }
+                return cfg;
+            };
+            for(const int64_t dilation :
+                {int64_t{1}, int64_t{1} << 20, (int64_t{1} << 30) / (filter_last - 1)})
+            {
+                EXPECT_TRUE(CheckConvInputRangeLimit<NDim>(make(dilation), false))
+                    << "F=" << filter_last << " D=" << dilation;
+            }
+            for(const int64_t dilation : {limit / (filter_last - 1) + 1})
+            {
+                EXPECT_FALSE(CheckConvInputRangeLimit<NDim>(make(dilation), false))
+                    << "F=" << filter_last << " D=" << dilation;
+            }
+        }
+    };
+    last_dimension(std::integral_constant<index_t, 1>{});
+    last_dimension(std::integral_constant<index_t, 2>{});
+    last_dimension(std::integral_constant<index_t, 3>{});
 }

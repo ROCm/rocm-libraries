@@ -152,8 +152,11 @@ struct TransformConvBwdDataToGemm_v1
     // padding is reported through a poison added to the Ho coordinate, see
     // IsConvPaddingPoisonRangeSupported. The smallest Ho coordinate of a row is bounded by the
     // largest ydot (ydot < YDot_, plus the rows the padding of GemmK adds: at most GemmKPerBlock)
-    // times the ydot step.
-    __host__ bool IsMergedOutPaddingRangeSupported() const
+    // times the ydot step. The offsets of the poisoned coordinates (coordinate * stride, in 32-bit
+    // arithmetic) must not overflow either: the bound is conservative, with the first dimension
+    // with its poison, the other dimensions with their largest coordinate and the n of the
+    // padding rows. m_padded is the padded GemmM of the A descriptor.
+    __host__ bool IsMergedOutPaddingRangeSupported(long_index_t m_padded) const
     {
         if constexpr(!MergePaddingInCustomTransform)
         {
@@ -161,11 +164,30 @@ struct TransformConvBwdDataToGemm_v1
         }
         else
         {
-            const long_index_t ydot_step = ConvDilationH_ / GcdStrideDilationH_;
-            const long_index_t max_ydot  = static_cast<long_index_t>(YDot_) + GemmKPerBlock;
-            const long_index_t min_ho    = -max_ydot * ydot_step;
+            const auto abs_value = [](long_index_t x) { return x < 0 ? -x : x; };
+
+            const long_index_t ratio_h  = ConvDilationH_ / GcdStrideDilationH_;
+            const long_index_t ratio_w  = ConvDilationW_ / GcdStrideDilationW_;
+            const long_index_t max_ydot = static_cast<long_index_t>(YDot_) + GemmKPerBlock;
+            const long_index_t max_xdot = static_cast<long_index_t>(XDot_) + GemmKPerBlock;
+            const long_index_t min_ho   = -max_ydot * ratio_h;
             // the largest Ho coordinate is below HTilde (the ydot term is not positive)
-            return IsConvPaddingPoisonRangeSupported(Ho_, min_ho, HTilde_);
+            if(!IsConvPaddingPoisonRangeSupported(Ho_, min_ho, HTilde_))
+            {
+                return false;
+            }
+            const long_index_t poison = Ho_ - min_ho;
+
+            // M = N * TildeSlice is at most GemmMPerBlock - 1 below m_padded
+            const long_index_t tilde_slice_min =
+                std::max<long_index_t>(1, (m_padded - GemmMPerBlock + N_) / N_);
+            const long_index_t n_max = (m_padded - 1) / tilde_slice_min;
+
+            long_index_t bound = n_max * abs_value(NStrideTensorA_);
+            bound += (static_cast<long_index_t>(K_) - 1) * abs_value(KStrideTensorA_);
+            bound += std::max<long_index_t>(HTilde_ + 2 * poison, -min_ho) * abs_value(HoStride_);
+            bound += std::max<long_index_t>(WTilde_, max_xdot * ratio_w) * abs_value(WoStride_);
+            return bound <= (long_index_t{1} << 31) - 1;
         }
     }
 

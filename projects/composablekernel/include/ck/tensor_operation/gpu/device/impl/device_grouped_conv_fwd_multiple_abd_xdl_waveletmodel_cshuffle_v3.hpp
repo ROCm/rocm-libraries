@@ -1634,12 +1634,15 @@ struct DeviceGroupedConvFwdMultipleABD_WaveletModel_Xdl_CShuffle_V3
         // 8-bit types, so the range of the poison is checked explicitly.
         if constexpr(ConvToGemmFwdTransformer::UseCustomTransformA)
         {
-            if(!arg.conv_to_gemm_transformer_.IsCustomTransformPaddingRangeSupported(KPerBlock))
+            if(!arg.conv_to_gemm_transformer_.IsCustomTransformPaddingRangeSupported(
+                   arg.a_grid_desc_ak0_m_ak1_.GetLength(I1),
+                   arg.a_grid_desc_ak0_m_ak1_.GetLength(I0) *
+                       arg.a_grid_desc_ak0_m_ak1_.GetLength(I2)))
             {
                 if(ck::EnvIsEnabled(CK_ENV(CK_LOGGING)))
                 {
-                    std::cout << "The first spatial lower coordinates are out of the range of the "
-                                 "custom transform!"
+                    std::cout << "The lower coordinates or their offsets are out of the range of "
+                                 "the custom transform!"
                               << " In " << __FILE__ << ":" << __LINE__
                               << ", in function: " << __func__ << std::endl;
                 }

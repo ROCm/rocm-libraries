@@ -58,26 +58,44 @@ struct TransformConvBwdWeightToGemmV2
             device::ConvolutionBackwardWeightSpecialization::Default &&
         std::is_same_v<IndexType, index_t> && NumGroupsToMerge == 1;
 
-    // The custom B descriptor needs the first spatial lower coordinates to stay in the range of the
-    // poison used for the GEMM padding, see IsConvPaddingPoisonRangeSupported. The filter index of
-    // the padded GemmN columns exceeds the filter by at most n_per_block.
+    // The custom B descriptor needs the first spatial lower coordinates and the offsets of the
+    // poisoned coordinates to stay in range, see IsConvInputTransformRangeSupported. gemm_k_pad and
+    // gemm_n_padded are the padded GemmK and GemmN lengths of the B descriptor.
     static bool IsCustomTransformPaddingRangeSupported(
+        const IndexType N,
+        const IndexType C,
         const std::array<IndexType, NDimSpatial>& input_spatial_lengths,
         const std::array<IndexType, NDimSpatial>& filter_spatial_lengths,
         const std::array<IndexType, NDimSpatial>& output_spatial_lengths,
+        const std::array<IndexType, NDimSpatial + 3>& input_strides,
         const std::array<IndexType, NDimSpatial>& conv_filter_strides,
         const std::array<IndexType, NDimSpatial>& conv_filter_dilations,
         const std::array<IndexType, NDimSpatial>& input_left_pads,
-        const index_t n_per_block)
+        const IndexType gemm_k_pad,
+        const IndexType gemm_n_padded)
     {
-        const long_index_t left_pad = input_left_pads[0];
-        return IsConvPaddingPoisonRangeSupported(
-            input_spatial_lengths[0],
-            -left_pad,
-            (static_cast<long_index_t>(output_spatial_lengths[0]) - 1) * conv_filter_strides[0] +
-                (static_cast<long_index_t>(filter_spatial_lengths[0]) + n_per_block) *
-                    conv_filter_dilations[0] -
-                left_pad);
+        const auto to_long = [](const std::array<IndexType, NDimSpatial>& a) {
+            std::array<long_index_t, NDimSpatial> r{};
+            for(index_t d = 0; d < NDimSpatial; ++d)
+                r[d] = a[d];
+            return r;
+        };
+        std::array<long_index_t, NDimSpatial> spatial_stride{};
+        for(index_t d = 0; d < NDimSpatial; ++d)
+            spatial_stride[d] = input_strides[3 + d];
+        return IsConvInputTransformRangeSupported<NDimSpatial>(N,
+                                                               C,
+                                                               to_long(input_spatial_lengths),
+                                                               to_long(filter_spatial_lengths),
+                                                               to_long(output_spatial_lengths),
+                                                               to_long(conv_filter_strides),
+                                                               to_long(conv_filter_dilations),
+                                                               to_long(input_left_pads),
+                                                               gemm_k_pad,
+                                                               gemm_n_padded,
+                                                               input_strides[1],
+                                                               spatial_stride,
+                                                               input_strides[2]);
     }
 
     // B descriptor [K0, GemmN, K1] (UseCustomTransformB). The GEMM padding (GemmKPad >= N *

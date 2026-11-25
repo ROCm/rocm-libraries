@@ -1573,29 +1573,119 @@ struct UnMerge
 };
 
 // The custom convolution transforms report the GEMM padding (rows / columns beyond the real M and
-// K) as invalid by adding kConvPaddingPoison to the first spatial lower coordinate, so that the
-// unsigned range check of that coordinate fails. Unlike a separate compare, this needs the 32-bit
-// unsigned range to be big enough: a poisoned coordinate must not wrap back into [0, length).
-// The poison is added once for a padding row or a padding column (+2^30) and twice for a padding
-// row and column (+2^31), modulo 2^32:
-//  - lower side: with the smallest lower coordinate of a legitimate row being min_lower_index
-//    (negative when the input is padded), length - min_lower_index <= kConvPaddingPoison is needed
-//    so that min_lower_index + 2^30 is not inside [0, length);
-//  - upper side: the largest lower coordinate (including the padding rows and columns, whose
-//    filter index can exceed the filter) must be at most 2^31 - 1, otherwise max + 2^31 wraps past
-//    2^32 back into [0, length). The generic chain tolerates a bigger coordinate, because it uses
-//    separate compares for the GEMM padding.
-// Both are limits on index values, not on bytes, so they do not depend on the data type (unlike
+// K) as invalid by adding a poison to the first spatial lower coordinate, so that the unsigned
+// range check of that coordinate fails. Unlike a separate compare, this needs the 32-bit unsigned
+// range to be big enough: a poisoned coordinate must not wrap back into [0, length).
+//
+// The poison is the smallest value that moves the smallest lower coordinate of a legitimate row
+// (-left_pad, negative when the input is padded) to length: poison = length + max(0, left_pad). It
+// is a runtime value, and not a big constant, so that a poisoned coordinate stays close to the
+// range of the tensor and its offset (coordinate * stride) does not overflow the 32-bit offset
+// arithmetic of the descriptor.
+//
+// It is added once for a padding row or a padding column and twice for a padding row and column.
+// The lower side is guaranteed by the value of the poison. On the upper side the largest lower
+// coordinate (including the padding rows and columns, whose filter index can exceed the filter)
+// plus twice the poison must stay below 2^31. That is required for the wrap-around (a coordinate
+// of 2^32 or more would come back into [0, length)) and it also keeps every coordinate in the
+// signed 32-bit range, so that the signed arithmetic of the transform (products with the strides
+// and dilations, differences of coordinates when a coordinate is moved) cannot overflow. The
+// generic chain tolerates a bigger coordinate, because it uses separate compares for the GEMM
+// padding.
+// This is a limit on index values, not on bytes, so it does not depend on the data type (unlike
 // the 2GB limit, which is in bytes and is therefore not enough for 8-bit types).
-inline constexpr uint32_t kConvPaddingPoison = 1u << 30;
+__host__ __device__ constexpr uint32_t GetConvPaddingPoison(index_t first_spatial_length,
+                                                            index_t left_pad)
+{
+    return static_cast<uint32_t>(first_spatial_length) +
+           (left_pad > 0 ? static_cast<uint32_t>(left_pad) : 0u);
+}
 
+// Host check of the upper side, see above. min_lower_index is the smallest lower coordinate of a
+// legitimate row, max_lower_index the largest one.
 __host__ constexpr bool IsConvPaddingPoisonRangeSupported(long_index_t first_spatial_length,
                                                           long_index_t min_lower_index,
                                                           long_index_t max_lower_index)
 {
-    return first_spatial_length - min_lower_index <=
-               static_cast<long_index_t>(kConvPaddingPoison) &&
-           max_lower_index <= (long_index_t{1} << 31) - 1;
+    const long_index_t poison = first_spatial_length + (min_lower_index < 0 ? -min_lower_index : 0);
+    return max_lower_index + 2 * poison <= (long_index_t{1} << 31) - 1;
+}
+
+// Host check of the whole custom input transform of a convolution (forward A matrix, backward
+// weight B matrix): the poison range (see IsConvPaddingPoisonRangeSupported) and the offset of the
+// poisoned coordinates. The offset is the sum over the dimensions of coordinate * stride in 32-bit
+// arithmetic, so a poisoned coordinate (up to the largest coordinate plus twice the poison) times
+// the stride of the first spatial dimension, plus the other terms, must stay below 2^31, otherwise
+// the offset computation of a padding row overflows. The padded GEMM lengths are the ones of the
+// descriptor: m_padded over (n, o_0..), k_padded over (f_0.., c). The strides are the ones of the
+// input tensor, in elements.
+template <index_t NDim>
+__host__ bool
+IsConvInputTransformRangeSupported(long_index_t N,
+                                   long_index_t C,
+                                   const std::array<long_index_t, NDim>& in_length,
+                                   const std::array<long_index_t, NDim>& filter,
+                                   const std::array<long_index_t, NDim>& out_length,
+                                   const std::array<long_index_t, NDim>& stride,
+                                   const std::array<long_index_t, NDim>& dilation,
+                                   const std::array<long_index_t, NDim>& left_pad,
+                                   long_index_t m_padded,
+                                   long_index_t k_padded,
+                                   long_index_t n_stride,
+                                   const std::array<long_index_t, NDim>& spatial_stride,
+                                   long_index_t c_stride)
+{
+    const auto abs_value = [](long_index_t x) { return x < 0 ? -x : x; };
+
+    long_index_t prod_out    = 1;
+    long_index_t filter_rest = C;
+    for(index_t d = 0; d < NDim; ++d)
+    {
+        prod_out *= out_length[d];
+        filter_rest *= d > 0 ? filter[d] : 1;
+    }
+    const long_index_t out_rest = prod_out / out_length[0];
+
+    // the last quotient of k is the filter index of the first dimension
+    const long_index_t f0_max = (k_padded - 1) / filter_rest;
+
+    const long_index_t max0 = (out_length[0] - 1) * stride[0] + f0_max * dilation[0] - left_pad[0];
+    if(!IsConvPaddingPoisonRangeSupported(in_length[0], -left_pad[0], max0))
+    {
+        return false;
+    }
+    const long_index_t poison = in_length[0] + (left_pad[0] > 0 ? left_pad[0] : 0);
+
+    // terms of the offset that do not depend on the case below: channel and the other dimensions
+    long_index_t others = (C - 1) * abs_value(c_stride);
+    for(index_t d = 1; d < NDim; ++d)
+    {
+        const long_index_t max_d =
+            (out_length[d] - 1) * stride[d] + (filter[d] - 1) * dilation[d] - left_pad[d];
+        others += std::max(abs_value(max_d), abs_value(left_pad[d])) * abs_value(spatial_stride[d]);
+    }
+
+    // Rows inside M (n < N) with a padding column (k >= K): the first dimension has any output
+    // index and one poison.
+    const long_index_t case_columns =
+        (N - 1) * abs_value(n_stride) +
+        std::max(max0 + poison, abs_value(left_pad[0])) * abs_value(spatial_stride[0]) + others;
+
+    // Padding rows (m >= M): n is the quotient past N and the first output index is small (it is
+    // limited by the number of padding rows, m_padded - N * prod_out), with up to two poisons.
+    const long_index_t padding_rows = m_padded - N * prod_out;
+    long_index_t case_rows          = 0;
+    if(padding_rows > 0)
+    {
+        const long_index_t n_max  = (m_padded - 1) / prod_out;
+        const long_index_t o0_max = std::min(out_length[0] - 1, (padding_rows - 1) / out_rest);
+        const long_index_t coord0 =
+            o0_max * stride[0] + f0_max * dilation[0] - left_pad[0] + 2 * poison;
+        case_rows = n_max * abs_value(n_stride) +
+                    std::max(coord0, abs_value(left_pad[0])) * abs_value(spatial_stride[0]) +
+                    others;
+    }
+    return std::max(case_columns, case_rows) <= (long_index_t{1} << 31) - 1;
 }
 
 /**
@@ -1615,10 +1705,10 @@ __host__ constexpr bool IsConvPaddingPoisonRangeSupported(long_index_t first_spa
  * [0, Ho) x [0, Wo) and the GEMM rows / columns beyond the real M and K. The latter are made
  * invalid by adding a large value to the Ho coordinate (the M part to the term that only depends
  * on m, the K part to the term that only depends on k), so that the unsigned range check fails.
- * A poisoned coordinate must never wrap back into [0, Ho). This holds when
- * Ho - (smallest Ho coordinate of a legitimate row) <= kConvPaddingPoison (2^30), for example Ho
- * at most 2^29 and no coordinate below -2^29. It is a limit on index values, not on bytes, so it
- * does not depend on the data type. See IsConvPaddingPoisonRangeSupported and
+ * A poisoned coordinate must never wrap back into [0, Ho). The poison is the smallest value that
+ * moves the smallest Ho coordinate of a legitimate row to Ho, see GetConvPaddingPoison, and the
+ * largest coordinate plus twice the poison must stay below 2^31. It is a limit on index values,
+ * not on bytes, so it does not depend on the data type. See IsConvPaddingPoisonRangeSupported and
  * IsMergedOutPaddingRangeSupported, which the device op checks on the host.
  *
  * Indices must be non-negative and below 2^31 (magic division limitation).
@@ -1644,7 +1734,20 @@ struct ConvBwdDataImplicitGemmOutTransform
     index_t MPad_, KPad_;
     Tuple<index_t, index_t, index_t> up_lengths_; // K0_, MPadded, K1_;
 
-    static constexpr uint32_t kPoison = kConvPaddingPoison;
+    // Poison of the padding rows / columns, see GetConvPaddingPoison. The smallest Ho coordinate of
+    // a legitimate row is IHTildeSliceBegin_ - ydot * |HRatio_|, with ydot the largest ydot index
+    // (it includes the rows added by the padding of GemmK). Computed from the stored lengths with
+    // the magic division of the K merge, so that no member is added.
+    __host__ __device__ constexpr uint32_t Poison() const
+    {
+        const uint32_t ydot_max =
+            MagicDivision::DoMagicDivision(up_lengths_[I0] * up_lengths_[I2] - 1,
+                                           low_lengths_magic_divisor_multiplier_[I0],
+                                           low_lengths_magic_divisor_shift_[I0]);
+        const uint32_t below = ydot_max * static_cast<uint32_t>(-HRatio_);
+        const uint32_t begin = static_cast<uint32_t>(IHTildeSliceBegin_);
+        return static_cast<uint32_t>(Ho_) + (below > begin ? below - begin : 0u);
+    }
 
     Tuple<index_t, index_t, index_t, index_t>
         low_lengths_magic_divisor_multiplier_; // XDotSlice_K_, K_, TildeSlice_, WTildeSlice_
@@ -1768,15 +1871,16 @@ struct ConvBwdDataImplicitGemmOutTransform
         const auto n_part = CalculateLowerIndexN(idx_up);
         const auto k_part = CalculateLowerIndexK(idx_up);
 
-        const index_t K_idx = idx_up[I0] * up_lengths_[I2] + idx_up[I2];
+        const index_t K_idx   = idx_up[I0] * up_lengths_[I2] + idx_up[I2];
+        const uint32_t poison = Poison();
         const uint32_t m_poison =
             static_cast<uint32_t>(idx_up[I1]) >= static_cast<uint32_t>(up_lengths_[I1] - MPad_)
-                ? kPoison
+                ? poison
                 : 0u;
         const uint32_t k_poison =
             static_cast<uint32_t>(K_idx) >=
                     static_cast<uint32_t>(up_lengths_[I0] * up_lengths_[I2] - KPad_)
-                ? kPoison
+                ? poison
                 : 0u;
 
         idx_low(I0) = n_part[I0];
@@ -1903,11 +2007,11 @@ struct ConvBwdDataImplicitGemmOutTransform
  * added to the term that only depends on m and the K part to the term that only depends on k, so
  * each of them can be hoisted or shared independently of the other. The lower index of a padding
  * row / column is therefore meaningless. A poisoned coordinate must never wrap back into
- * [0, length). This holds when length - (smallest first spatial lower coordinate of a legitimate
- * row) <= kConvPaddingPoison (2^30), for example a length of at most 2^29 and no coordinate below
- * -2^29. It is a limit on index values, not on bytes, so it does not depend on the data type. See
- * IsConvPaddingPoisonRangeSupported and IsPaddingRangeSupported, which the device op checks on the
- * host.
+ * [0, length). The poison is the smallest value that moves the smallest first spatial lower
+ * coordinate of a legitimate row to length, see GetConvPaddingPoison, and the largest coordinate
+ * plus twice the poison must stay below 2^31. It is a limit on index values, not on bytes, so it
+ * does not depend on the data type. See IsConvPaddingPoisonRangeSupported and
+ * IsPaddingRangeSupported, which the device op checks on the host.
  */
 template <index_t NDimSpatial>
 struct ConvFwdDataImplicitGemmInTransform
@@ -1938,7 +2042,11 @@ struct ConvFwdDataImplicitGemmInTransform
     index_t m_valid_;
     index_t k_valid_;
 
-    static constexpr uint32_t kPoison = kConvPaddingPoison;
+    // Poison of the padding rows / columns, see GetConvPaddingPoison
+    __host__ __device__ constexpr uint32_t Poison() const
+    {
+        return GetConvPaddingPoison(in_lengths_[Number<0>{}], left_pads_[Number<0>{}]);
+    }
 
     __host__ __device__ constexpr ConvFwdDataImplicitGemmInTransform() = default;
 
@@ -2044,11 +2152,12 @@ struct ConvFwdDataImplicitGemmInTransform
         // Padding rows / columns (m >= M, k >= K) are made invalid by adding a large value to
         // the first spatial coordinate, so that the unsigned range check fails. The M and K
         // contributions are kept in separate terms (unsigned arithmetic, no signed overflow).
+        const uint32_t poison = Poison();
         const uint32_t m_poison =
-            static_cast<uint32_t>(idx_up[Number<0>{}]) >= static_cast<uint32_t>(m_valid_) ? kPoison
+            static_cast<uint32_t>(idx_up[Number<0>{}]) >= static_cast<uint32_t>(m_valid_) ? poison
                                                                                           : 0u;
         const uint32_t k_poison =
-            static_cast<uint32_t>(idx_up[Number<1>{}]) >= static_cast<uint32_t>(k_valid_) ? kPoison
+            static_cast<uint32_t>(idx_up[Number<1>{}]) >= static_cast<uint32_t>(k_valid_) ? poison
                                                                                           : 0u;
         static_for<0, NDimSpatial, 1>{}([&](auto d) {
             uint32_t m_part = static_cast<uint32_t>(out_idx[d] * conv_strides_[d] - left_pads_[d]);

@@ -588,6 +588,7 @@ struct DeviceGroupedConvBwdWeight_Xdl_WaveletModel_CShuffleV3
               output_spatial_lengths_{},
               conv_filter_strides_{conv_filter_strides},
               conv_filter_dilations_{conv_filter_dilations},
+              b_g_n_c_wis_strides_{b_g_n_c_wis_strides},
               input_left_pads_{input_left_pads},
               input_right_pads_{input_right_pads}
         {
@@ -740,6 +741,7 @@ struct DeviceGroupedConvBwdWeight_Xdl_WaveletModel_CShuffleV3
         std::array<index_t, NDimSpatial> output_spatial_lengths_;
         std::array<index_t, NDimSpatial> conv_filter_strides_;
         std::array<index_t, NDimSpatial> conv_filter_dilations_;
+        std::array<index_t, NDimSpatial + 3> b_g_n_c_wis_strides_;
         std::array<index_t, NDimSpatial> input_left_pads_;
         std::array<index_t, NDimSpatial> input_right_pads_;
         long_index_t c_space_size_bytes;
@@ -1139,14 +1141,25 @@ struct DeviceGroupedConvBwdWeight_Xdl_WaveletModel_CShuffleV3
         if constexpr(decltype(conv_to_gemm_transformer)::UseCustomTransformB)
         {
             if(!decltype(conv_to_gemm_transformer)::IsCustomTransformPaddingRangeSupported(
+                   arg.Conv_N_,
+                   arg.Conv_C_,
                    arg.input_spatial_lengths_,
                    arg.filter_spatial_lengths_,
                    arg.output_spatial_lengths_,
+                   arg.b_g_n_c_wis_strides_,
                    arg.conv_filter_strides_,
                    arg.conv_filter_dilations_,
                    arg.input_left_pads_,
-                   NPerBlock))
+                   arg.b_grid_desc_k0_n_k1_.GetLength(I0) * arg.b_grid_desc_k0_n_k1_.GetLength(I2),
+                   arg.b_grid_desc_k0_n_k1_.GetLength(I1)))
             {
+                if(ck::EnvIsEnabled(CK_ENV(CK_LOGGING)))
+                {
+                    std::cout << "The lower coordinates or their offsets are out of the range of "
+                                 "the custom transform!"
+                              << " In " << __FILE__ << ":" << __LINE__
+                              << ", in function: " << __func__ << std::endl;
+                }
                 return false;
             }
         }
