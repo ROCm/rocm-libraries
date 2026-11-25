@@ -533,7 +533,7 @@ The gate is the emission definition-of-done. Run it from the **platform** tree
 
 ```bash
 cd rocm-libraries/dnn-providers/hip-kernel-provider/rocke/platform
-export ROCKE=$(pwd) PYTHONPATH=$ROCKE/Python
+export ROCKE=$(pwd) PYTHONPATH=$ROCKE/python
 
 ROCKE_LLVM_FLAVOR=llvm20 python tools/check_byte_identity.py   # llvm20, build engine + gate
 ROCKE_LLVM_FLAVOR=llvm22 python tools/check_byte_identity.py   # llvm22 flavor
