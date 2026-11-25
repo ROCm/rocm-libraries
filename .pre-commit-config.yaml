@@ -435,8 +435,9 @@ repos:
       # CTest entries exist in the build tree only; these hooks run them on a
       # pull request. -B and no:cacheprovider keep bytecode and .pytest_cache
       # out of the tree.
-      # Every test file runs in a CI-run CTest entry or is listed, with its
-      # reason, in rocke.tests.pending_lanes (rocke_pending_lanes_check). Needs
+      # Every test file is assigned to a CI CTest entry or is listed, with its
+      # reason, in rocke.tests.pending_lanes (rocke_pending_lanes_check). An
+      # assigned file runs only in a CI job that builds rocKE. Needs
       # cmake, ctest and a C++ compiler on PATH. It also reads
       # shared/ctest/parse_ctest_categories.py, but a change to that file alone
       # cannot trigger it: CI checks out only the directories a change touches,
@@ -446,7 +447,7 @@ repos:
       # or glob reads rocKE's documentation, so a change to it alone skips the
       # hook.
       - id: rocke-pending-lanes
-        name: rocKE every test file runs in CI or has a recorded reason
+        name: rocKE every test file is assigned to a CI entry or has a recorded reason
         entry: python -B -m pytest -p no:cacheprovider -q dnn-providers/hip-kernel-provider/rocke/platform/tests/tools/test_pending_lanes.py dnn-providers/hip-kernel-provider/rocke/platform/tests/tools/test_limbo_audit.py
         language: python
         additional_dependencies: *rocke_dependencies
