@@ -531,8 +531,8 @@ std::unique_ptr<IEngine<THandle, TSettings, TContext>>
     auto describedBy = describeDescriptor("engine", set.engine.name, set.engine.id);
     auto identity = engineIdentity(set);
     auto knobs = set.engine.knobs;
-    auto predictions = std::move(set.enginePredictionsByMetric);
-    auto unavailablePredictionArches = std::move(set.unavailableEnginePredictionArches);
+    const auto predictions = std::move(set.enginePredictionsByMetric);
+    const auto unavailablePredictionArches = std::move(set.unavailableEnginePredictionArches);
     auto provenance = engineBindingProvenance(set);
     auto selectorRevision = engineSelectorRevision(set);
     auto engine = set.engine;

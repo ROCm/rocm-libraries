@@ -169,7 +169,7 @@ TEST(TestComputeTensorDiff, DoubleCountsMismatchesAboveFloatRange)
 
     const float atol = 0.0f;
     const float rtol = 1e-6f;
-    auto summary = computeTensorDiff<double>(ref, impl, atol, rtol);
+    const auto summary = computeTensorDiff<double>(ref, impl, atol, rtol);
 
     EXPECT_EQ(summary.totalElements, 5u);
     EXPECT_EQ(summary.mismatchCount, 4u);
@@ -189,7 +189,7 @@ TEST(TestComputeTensorDiff, DoubleCountsTheSameMismatchesAsTheValidator)
 
     const float atol = 1e-12f;
     const float rtol = 0.0f;
-    auto summary = computeTensorDiff<double>(ref, impl, atol, rtol);
+    const auto summary = computeTensorDiff<double>(ref, impl, atol, rtol);
 
     EXPECT_EQ(summary.mismatchCount, 1u);
     EXPECT_EQ(summary.maxDiffIndices, (std::vector<int64_t>{1}));
@@ -395,7 +395,7 @@ TEST(TestRaggedTensorDiffDouble, InBlockReferenceAboveFloatRangeIsCompared)
     ref.setHostValue(1e300, 1, 1, 2, 1);
     impl.setHostValue(1e301, 1, 1, 2, 1);
 
-    auto summary = computeTensorDiff<double>(ref, impl, 0.0f, 1e-6f);
+    const auto summary = computeTensorDiff<double>(ref, impl, 0.0f, 1e-6f);
 
     EXPECT_EQ(summary.totalElements, 20u);
     EXPECT_EQ(summary.mismatchCount, 1u);

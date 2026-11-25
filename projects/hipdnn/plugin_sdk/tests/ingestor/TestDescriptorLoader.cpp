@@ -2991,7 +2991,7 @@ TEST(TestDescriptorLoader, ReadsACodegenRevisionOnlyFromAUhd12)
     const auto expectSkipped
         = [](const std::string& version, hipdnnSeverity_t severity, const std::string& expected) {
               SCOPED_TRACE(version);
-              auto recorder
+              const auto recorder
                   = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(severity);
               const hipdnn_test_sdk::utilities::ScopedDirectory dir(
                   uniqueDirectory("declared_l1_codegen_version"));
@@ -6080,7 +6080,7 @@ void expectDigestRejected(const std::string& key,
 /// message names the key and quotes no value.
 void expectEmptyDigestRejected(const std::string& key, const std::string& scratchLabel)
 {
-    auto recorder
+    const auto recorder
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
     const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory(scratchLabel));
     writePackagedKernelWithDigest(dir.path(), key, "");
@@ -6179,7 +6179,7 @@ TEST(TestDescriptorLoader, RefusesAnIdentityUnderAVersionBeforeItsMinor)
     for(const bool multiLaunch : {false, true})
     {
         SCOPED_TRACE(multiLaunch ? "launch" : "single source");
-        auto recorder
+        const auto recorder
             = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
         const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("identity_1_1"));
         auto documents = makeSetDocuments('1', "test:identity_1_1");

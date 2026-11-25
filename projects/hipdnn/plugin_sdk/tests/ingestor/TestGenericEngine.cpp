@@ -1366,7 +1366,7 @@ TEST(TestIngestorGenericEngine, MakeEngineComparesAModelToTheSetsCodegenRevision
     hipdnn_plugin_sdk::uhd::NativeScorerRegistry::registerSymbol(L1_SYMBOL, firstL1Feature);
     const ScopedTestSymbols symbols;
     ensureNoopDispatchRegistered<StubHandle>("hipdnn.kernel_ingestor.test.dispatch");
-    auto recorder
+    const auto recorder
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_WARN);
     const StubDeviceResolver resolver;
     auto set = makeUnslottedGoldenSet(/*withRanker=*/false);
