@@ -9,6 +9,7 @@
 #include <hipdnn_frontend/attributes/GraphAttributes.hpp>
 #include <hipdnn_frontend/detail/ConvolutionWgradPacker.hpp>
 #include <hipdnn_frontend/detail/ConvolutionWgradUnpacker.hpp>
+#include <hipdnn_frontend/node/detail/CheckedShapeMath.hpp>
 
 namespace hipdnn_frontend::graph
 {
@@ -116,6 +117,25 @@ public:
             ErrorCode::INVALID_VALUE,
             "ConvolutionWgradNode: dy tensor channels must match dw tensor output channels");
 
+        // Channel counts feed the group arithmetic below
+        HIPDNN_RETURN_IF_LT(xDims[1],
+                            1,
+                            ErrorCode::INVALID_VALUE,
+                            "ConvolutionWgradNode: x tensor channels (" + std::to_string(xDims[1])
+                                + ") must be positive");
+
+        HIPDNN_RETURN_IF_LT(dyDims[1],
+                            1,
+                            ErrorCode::INVALID_VALUE,
+                            "ConvolutionWgradNode: dy tensor channels (" + std::to_string(dyDims[1])
+                                + ") must be positive");
+
+        HIPDNN_RETURN_IF_LT(dwDims[1],
+                            1,
+                            ErrorCode::INVALID_VALUE,
+                            "ConvolutionWgradNode: dw tensor input channels ("
+                                + std::to_string(dwDims[1]) + ") must be positive");
+
         HIPDNN_RETURN_IF_NE(xDims[1] % dwDims[1],
                             0,
                             ErrorCode::INVALID_VALUE,
@@ -187,8 +207,13 @@ public:
             const int64_t dyDim = dyDims[spatialIdx];
             const int64_t kernelDim = dwDims[spatialIdx];
 
-            const int64_t kernelSize = (dilationVal * (kernelDim - 1)) + 1;
-            auto numerator = xDim + prePad + postPad - kernelSize;
+            int64_t kernelSize = 0;
+            HIPDNN_CHECK_ERROR(detail::checkedDilatedKernelSize(
+                "ConvolutionWgradNode", i, dilationVal, kernelDim, kernelSize));
+
+            int64_t numerator = 0;
+            HIPDNN_CHECK_ERROR(detail::checkedPaddedNumerator(
+                "ConvolutionWgradNode", i, xDim, prePad, postPad, kernelSize, numerator));
 
             HIPDNN_RETURN_IF_LT(numerator,
                                 0,
@@ -199,7 +224,9 @@ public:
                                     + std::to_string(kernelDim) + ") and dilation ("
                                     + std::to_string(dilationVal) + ")");
 
-            const int64_t expectedDyDim = (numerator / strideVal) + 1;
+            int64_t expectedDyDim = 0;
+            HIPDNN_CHECK_ERROR(detail::checkedStridedExtent(
+                "ConvolutionWgradNode", i, numerator, strideVal, expectedDyDim));
 
             // Verifying dy implicitly verifies dw and x
             HIPDNN_RETURN_IF_NE(

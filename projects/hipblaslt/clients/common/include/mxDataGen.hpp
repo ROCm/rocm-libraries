@@ -63,14 +63,11 @@ inline uint32_t mxSeedIndex(bool isMatrixA, int64_t batch, int64_t batchStride)
 // seedIndex (mxSeedIndex) salts the maf2_0 seed and, for maf1_0,
 // picks sin (A) or cos (B) and the batch's index offset batch * row * col; every other
 // initMethod uses one fixed seed for all matrices and batches.
-// data holds the stored matrix with its columns stride elements apart: exactly
-// stride * (col - 1) + row elements are written, with zeros between the columns. The values and
-// scales do not depend on stride, and scale holds one scale per (column, K block) as for a
-// dense matrix. The returned reference has stride * col values laid out like data, zero in the
-// padding. A stride below row (with more than one column) or a non-positive row or column
-// throws std::invalid_argument before writing.
 // integer_exact supports fp8 and fp6 data. With swizzled scales it currently requires K along
 // stored rows (transposed A or non-transposed B); other orientations throw before writing.
+// Data and scales are generated from the logical dense dimensions, then data and reference values
+// are placed at the requested leading dimension with zero padding. The leading dimension must be
+// at least the stored row count, and non-positive dimensions throw before writing.
 // With K along the stored columns (non-transposed A or transposed B), K must be a multiple of
 // the scale block. A partial block makes getAlignedFloat read past the packed buffer, so
 // integer_exact throws before writing.

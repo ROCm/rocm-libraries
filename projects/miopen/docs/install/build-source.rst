@@ -193,12 +193,15 @@ With this option, MIOpen is built as two libraries instead of one:
 
 Always install both libraries from the same build. Mixing versions is not supported.
 
-Programs that link to MIOpen through CMake (``find_package(miopen)``) need no changes. A program
-that links with a hand-written ``-lMIOpen`` and uses functions that aren't declared in
-``miopen/miopen.h`` must also link with ``-lMIOpen_private``. These are
+Programs that link to MIOpen through CMake (``find_package(miopen)``) need no changes. Programs
+that link with a hand-written ``-lMIOpen`` need no changes either: ``libMIOpen.so`` exports the
+whole public API. It also exports the functions that ``miopen/miopen.h`` doesn't declare but that
+earlier single-library builds exported:
 ``miopenConvolutionABBackwardWeightsGetWorkSpaceSize``,
 ``miopenConvolution{Forward,BackwardData,BackwardWeights}GetWorkSpaceSizeRange``,
-``miopenHiddenGetConvolutionFindMode`` and ``miopenHiddenSetConvolutionFindMode``.
+``miopenHiddenGetConvolutionFindMode`` and ``miopenHiddenSetConvolutionFindMode``. Only MIOpen's
+internal C++ symbols, which ``libMIOpen.so`` used to export, are now in ``libMIOpen_private.so``. A
+program that uses them must also link with ``-lMIOpen_private``.
 
 Building with this option doesn't turn forwarding on. To turn it on, see
 :doc:`Use hipDNN forwarding <../how-to/use-hipdnn-forwarding>`.
