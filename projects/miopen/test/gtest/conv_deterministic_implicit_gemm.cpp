@@ -431,29 +431,29 @@ TEST_P(GPU_ConvDeterministicRejection_WrwV4R4Xdlops_BFP16, RejectionTest) { this
 // ============================================================================
 
 // Forward solvers
-INSTANTIATE_TEST_SUITE_P(Smoke,
+INSTANTIATE_TEST_SUITE_P(Quick,
                          GPU_ConvDeterministic_FwdV4R1_BFP16,
                          testing::Values(DeterministicTestConfig{
                              64, 64, 64, 14, 14, 1, 1, 0, 0, 1, 1, 1, 1}));
 
-INSTANTIATE_TEST_SUITE_P(Smoke,
+INSTANTIATE_TEST_SUITE_P(Quick,
                          GPU_ConvDeterministic_FwdV4R4Xdlops_BFP16,
                          testing::Values(DeterministicTestConfig{
                              128, 48, 192, 13, 13, 1, 1, 0, 0, 1, 1, 1, 1}));
 
-INSTANTIATE_TEST_SUITE_P(Smoke,
+INSTANTIATE_TEST_SUITE_P(Quick,
                          GPU_ConvDeterministic_FwdV4R5Xdlops_BFP16,
                          testing::Values(DeterministicTestConfig{
                              64, 64, 64, 14, 14, 1, 1, 0, 0, 1, 1, 1, 1}));
 
 // Backward Data solvers
-INSTANTIATE_TEST_SUITE_P(Smoke,
+INSTANTIATE_TEST_SUITE_P(Quick,
                          GPU_ConvDeterministic_BwdV1R1_BFP16,
                          testing::Values(DeterministicTestConfig{
                              64, 64, 64, 14, 14, 1, 1, 0, 0, 1, 1, 1, 1}));
 
 // Weight-update solvers
-INSTANTIATE_TEST_SUITE_P(Smoke,
+INSTANTIATE_TEST_SUITE_P(Quick,
                          GPU_ConvDeterministic_WrwV4R4_BFP16,
                          testing::Values(DeterministicTestConfig{
                              1, 64, 64, 14, 14, 1, 1, 0, 0, 1, 1, 1, 1}));
@@ -462,14 +462,14 @@ INSTANTIATE_TEST_SUITE_P(Smoke,
 // N=2 allows split into 2 blocks, smaller H/W forces split-K
 // This tests the boundary condition: gemm_k_block=2 should be ACCEPTED in deterministic mode
 // (deterministic allows k_block <= 2, rejects k_block > 2)
-INSTANTIATE_TEST_SUITE_P(Smoke,
+INSTANTIATE_TEST_SUITE_P(Quick,
                          GPU_ConvDeterministic_WrwV4R4Xdlops_BFP16,
                          testing::Values(DeterministicTestConfig{
                              2, 192, 16, 16, 16, 1, 1, 0, 0, 1, 1, 1, 1}));
 
 // Rejection test configs
 // BwdV1R1: stride=1 < threshold=dilation*(y-1)+1=3 → AtomicAdd path → must be rejected
-INSTANTIATE_TEST_SUITE_P(Smoke,
+INSTANTIATE_TEST_SUITE_P(Quick,
                          GPU_ConvDeterministicRejection_BwdV1R1_BFP16,
                          testing::Values(DeterministicTestConfig{
                              //  N   C   K   H   W  y  x  ph pw sh sw dh dw
@@ -489,7 +489,7 @@ INSTANTIATE_TEST_SUITE_P(Smoke,
 
 // WrwV4R4Xdlops: N=8, H=W=8 → gemm_k_block=4 > 2 → AtomicAdd → must be rejected
 // (N=4,H=28,W=28 produced gemm_k_block=1 due to divisibility, so changed to this config)
-INSTANTIATE_TEST_SUITE_P(Smoke,
+INSTANTIATE_TEST_SUITE_P(Quick,
                          GPU_ConvDeterministicRejection_WrwV4R4Xdlops_BFP16,
                          testing::Values(DeterministicTestConfig{
                              //  N   C   K   H   W  y  x  ph pw sh sw dh dw

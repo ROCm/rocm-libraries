@@ -581,6 +581,10 @@ def wmmaV3InputVgprLayout(wmma: Sequence[int], dtypeBitWidth: Optional[int] = No
     else:
         assert False, f"Unhandled WMMA: {wmma}"
 
+# The host swizzles 16 free-dim rows per nO tile (the rows of a 16x16 WMMA) on every architecture. A taller
+# WMMA (32x16x128 = two stacked 16x16x128) reads several consecutive nO tiles per operand tile.
+SWIZZLE_BLOCK_ROWS = 16
+
 # Bytes moved by one buffer_load_dwordx4, the widest global load we issue.
 SWIZZLE_LOAD_BYTES = 16
 
