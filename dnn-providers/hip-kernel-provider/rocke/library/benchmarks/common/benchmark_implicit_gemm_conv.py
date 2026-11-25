@@ -2976,10 +2976,10 @@ def _worker_pool(max_workers: int):
 #: Work items each automatically sized pool worker gets at least. A worker
 #: imports the kernel modules before its first item, and the pool starts and
 #: joins its workers one at a time, so one worker per CPU on a many-core host
-#: spends longer starting and stopping than it saves. Measured on a 384-thread
-#: host with a cold COMGR cache, a sweep of a few hundred dgrad combos ran about
-#: three times faster at 16 to 28 combos per worker than at one worker per CPU,
-#: and slower again at 7 or 55 combos per worker.
+#: spends longer starting and stopping than it saves. On a many-core host with
+#: a cold COMGR cache, a sweep of a few hundred dgrad combos ran fastest at 16
+#: to 28 combos per worker: much faster than at one worker per CPU, and slower
+#: again with far fewer or far more combos per worker.
 _ITEMS_PER_AUTO_WORKER = 16
 
 
