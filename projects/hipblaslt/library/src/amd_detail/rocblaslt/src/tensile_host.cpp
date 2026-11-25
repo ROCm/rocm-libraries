@@ -6297,8 +6297,9 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
 
         if(algo == nullptr)
         {
-            int returnAlgoCount = 0;
-            status              = getBestSolutions(prob,
+            int  returnAlgoCount = 0;
+            bool layoutRuledOut  = false;
+            status               = getBestSolutions(prob,
                                       handle,
                                       gemmData,
                                       1,
@@ -6306,9 +6307,21 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
                                       &returnAlgoCount,
                                       prob.workspaceSize,
                                       SolutionLookup::PerDispatch,
-                                      tuningKey ? &*tuningKey : nullptr);
+                                      tuningKey ? &*tuningKey : nullptr,
+                                      &layoutRuledOut);
             if(status != rocblaslt_status_success)
                 return rocblaslt_status_not_implemented;
+            // As hipblasLtMatmulAlgoGetHeuristic does, so a problem the heuristic finds an
+            // algorithm for also runs with a null algo. A lookup that returns an error adds
+            // nothing, and the call then reports no algorithm. A library shard that fails to
+            // load throws instead, and the handler at the end of this function reports an
+            // internal error.
+            if(returnAlgoCount == 0 && !layoutRuledOut)
+            {
+                RocblasltContractionProblem probe = prob;
+                static_cast<void>(topUpWithSizeIndependentSolutions(
+                    handle, probe, gemmData, &heuristicResult, &returnAlgoCount, 1, prob.workspaceSize));
+            }
             if(returnAlgoCount == 0)
             {
                 log_error(__func__,
