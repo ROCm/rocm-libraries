@@ -48,14 +48,6 @@ namespace
 
     constexpr rocsparse_datatype f64 = rocsparse_datatype_f64_r;
 
-    csr_matrix<double> with_zero_diagonal(csr_matrix<double> a, int32_t row)
-    {
-        for(int32_t p = a.ptr[row]; p < a.ptr[row + 1]; ++p)
-            if(a.ind[p] == row)
-                a.val[p] = 0.0;
-        return a;
-    }
-
     // The matrix with the entry (row, from) moved to (row, to), keeping the row sorted:
     // the same size and number of entries on another pattern.
     csr_matrix<double> with_entry_moved(csr_matrix<double> a, int32_t row, int32_t from, int32_t to)
@@ -369,39 +361,20 @@ namespace
         EXPECT_EQ(s.singularity(), rocsparse_singularity_none);
     }
 
-    // Solves with the transpose of the lower triangle of `a` (non unit diagonal) for the
-    // `nrhs` columns of the column major `b`.
-    std::vector<double> host_lower_transposed_solve(const csr_matrix<double>& a,
-                                                    std::vector<double>       b,
-                                                    int32_t                   nrhs)
-    {
-        for(int32_t j = 0; j < nrhs; ++j)
-        {
-            double* x = b.data() + static_cast<size_t>(j) * a.n;
-            for(int32_t i = a.n - 1; i >= 0; --i)
-            {
-                for(int32_t p = a.ptr[i]; p < a.ptr[i + 1]; ++p)
-                    if(a.ind[p] == i)
-                        x[i] /= a.val[p];
-                for(int32_t p = a.ptr[i]; p < a.ptr[i + 1]; ++p)
-                    if(a.ind[p] < i)
-                        x[a.ind[p]] -= a.val[p] * x[i];
-            }
-        }
-        return b;
-    }
-
     // spsv (or spsm with `nrhs` columns) of op(L), L the lower triangle of A: the stages
-    // given, then the result. Returns the status of the compute stage.
+    // given, then the result, whose entries start at `initial`. Returns the status of the
+    // compute stage.
+    template <typename D>
     rocsparse_status run_spsv(rocsparse_handle     handle,
-                              device_csr&          d,
+                              D&                   d,
                               bool                 preprocess,
                               rocsparse_operation  op,
                               std::vector<double>  b,
-                              std::vector<double>& y)
+                              std::vector<double>& y,
+                              double               initial = 0.0)
     {
         const double alpha = 1.0;
-        dense_vector x(b), out(std::vector<double>(b.size(), 0.0));
+        dense_vector x(b), out(std::vector<double>(b.size(), initial));
         size_t       size = 0;
         const auto   call = [&](rocsparse_spsv_stage stage, void* buffer) {
             return rocsparse_spsv(handle,
@@ -425,8 +398,9 @@ namespace
         return status;
     }
 
+    template <typename D>
     rocsparse_status run_spsm(rocsparse_handle     handle,
-                              device_csr&          d,
+                              D&                   d,
                               bool                 preprocess,
                               rocsparse_operation  op,
                               int64_t              nrhs,
@@ -467,17 +441,23 @@ namespace
         return with_entry_moved(a, 5, 6, 0);
     }
 
-    // Points the matrix descriptor at the arrays of `m`, uploaded into `arrays`.
-    void set_pointers(device_csr& d, const csr_matrix<double>& m, device_csr& arrays)
+    // Points the matrix descriptor of `d` at the arrays of `m` in `base`, uploaded into
+    // `arrays`.
+    template <typename D>
+    void set_pointers(D& d, const csr_matrix<double>& m, rocsparse_index_base base, D& arrays)
     {
-        arrays.base = m;
-        upload(arrays.row, m.ptr);
-        upload(arrays.col, m.ind);
-        upload(arrays.val, m.val);
-        ASSERT_TRUE(arrays.row.ptr && arrays.col.ptr && arrays.val.ptr);
+        arrays.init(m, 1, true, base);
+        ASSERT_NE(arrays.A, nullptr);
         ASSERT_EQ(rocsparse_csr_set_pointers(d.A, arrays.row.ptr, arrays.col.ptr, arrays.val.ptr),
                   rocsparse_status_success);
         d.base = m;
+    }
+
+    template <typename I, typename J>
+    std::string index_types()
+    {
+        const auto width = [](size_t size) { return (size == 8) ? std::string("i64") : "i32"; };
+        return width(sizeof(I)) + " row pointers, " + width(sizeof(J)) + " column indices";
     }
 }
 
@@ -489,45 +469,65 @@ class PrecondTriangularScenariosGeneric : public HandleTest
 // Outputs and forced analyses
 // ---------------------------------------------------------------------------
 
+namespace
+{
+    // The index types decide the sizes of the shared analysis arrays, and the position is
+    // reported in the index base of the matrix.
+    template <typename I, typename J>
+    void check_sptrsv_outputs_belong_to_the_descriptor(rocsparse_handle     handle,
+                                                       rocsparse_index_base base)
+    {
+        SCOPED_TRACE((index_types<I, J>()));
+        const int32_t k    = 4;
+        const auto    want = static_cast<int32_t>(position_in_base(k, base));
+        const auto    a    = make_grid_matrix<double>(4, true);
+        const auto    b    = right_hand_side(a.n);
+        for(const auto policy : policies)
+        {
+            SCOPED_TRACE(name(policy));
+            dev_csr<double, I, J> d;
+            d.init(with_zero_diagonal(a, k), 1, true, base);
+            ASSERT_NE(d.A, nullptr);
+
+            sptrsv_solver first(handle, policy);
+            dense_vector  x(b), y(std::vector<double>(a.n, 0.0));
+            ASSERT_EQ(first.analysis(d.A, x, y), rocsparse_status_success);
+            ASSERT_EQ(first.solve(d.A, x, y), rocsparse_status_success);
+            ASSERT_EQ(first.singularity_position(), want);
+
+            ASSERT_EQ(
+                hipMemcpy(
+                    d.val.ptr, a.val.data(), sizeof(double) * a.val.size(), hipMemcpyHostToDevice),
+                hipSuccess);
+            sptrsv_solver second(handle, policy);
+            ASSERT_EQ(second.analysis(d.A, x, y), rocsparse_status_success);
+            ASSERT_EQ(second.solve(d.A, x, y), rocsparse_status_success);
+            EXPECT_EQ(second.singularity_position(), -1);
+
+            const auto position = static_cast<int32_t>(first.singularity_position());
+            if(policy == rocsparse_analysis_policy_reuse)
+                check(position,
+                      known_defect(no_pivot,
+                                   want,
+                                   "with reuse both descriptors read the singularity of the "
+                                   "csrsv data of the matrix, which the second solve resets"),
+                      "singularity_position of the first descriptor");
+            else
+                check(position, is(want), "singularity_position of the first descriptor");
+        }
+    }
+}
+
 // The outputs of an sptrsv descriptor are those of its own solve: a later solve by
 // another descriptor on the same matrix does not change them.
 TEST_F(PrecondTriangularScenariosGeneric, sptrsv_outputs_belong_to_the_descriptor)
 {
-    const int32_t k = 4;
-    const auto    a = make_grid_matrix<double>(4, true);
-    const auto    b = right_hand_side(a.n);
-    for(const auto policy : policies)
+    for(const auto base : bases)
     {
-        SCOPED_TRACE(name(policy));
-        device_csr d;
-        d.init(with_zero_diagonal(a, k), 1, true);
-        ASSERT_NE(d.A, nullptr);
-
-        sptrsv_solver first(handle, policy);
-        dense_vector  x(b), y(std::vector<double>(a.n, 0.0));
-        ASSERT_EQ(first.analysis(d.A, x, y), rocsparse_status_success);
-        ASSERT_EQ(first.solve(d.A, x, y), rocsparse_status_success);
-        ASSERT_EQ(first.singularity_position(), k);
-
-        ASSERT_EQ(
-            hipMemcpy(
-                d.val.ptr, a.val.data(), sizeof(double) * a.val.size(), hipMemcpyHostToDevice),
-            hipSuccess);
-        sptrsv_solver second(handle, policy);
-        ASSERT_EQ(second.analysis(d.A, x, y), rocsparse_status_success);
-        ASSERT_EQ(second.solve(d.A, x, y), rocsparse_status_success);
-        EXPECT_EQ(second.singularity_position(), -1);
-
-        const auto position = static_cast<int32_t>(first.singularity_position());
-        if(policy == rocsparse_analysis_policy_reuse)
-            check(position,
-                  known_defect(no_pivot,
-                               k,
-                               "with reuse both descriptors read the singularity of the csrsv "
-                               "data of the matrix, which the second solve resets"),
-                  "singularity_position of the first descriptor");
-        else
-            check(position, is(k), "singularity_position of the first descriptor");
+        SCOPED_TRACE(name(base));
+        check_sptrsv_outputs_belong_to_the_descriptor<int32_t, int32_t>(handle, base);
+        check_sptrsv_outputs_belong_to_the_descriptor<int64_t, int32_t>(handle, base);
+        check_sptrsv_outputs_belong_to_the_descriptor<int64_t, int64_t>(handle, base);
     }
 }
 
@@ -601,10 +601,59 @@ TEST_F(PrecondTriangularScenariosGeneric, spsv_compute_needs_the_preprocess)
     device_csr d;
     d.init(a, 1, true);
     std::vector<double> y;
-    check(run_spsv(handle, d, false, rocsparse_operation_none, right_hand_side(a.n), y),
+    check(run_spsv(handle, d, false, rocsparse_operation_none, right_hand_side(a.n), y, 7.0),
           is(rocsparse_status_invalid_pointer),
           "spsv compute without the preprocess");
-    EXPECT_EQ(y, std::vector<double>(a.n, 0.0));
+    EXPECT_EQ(y, std::vector<double>(a.n, 7.0));
+}
+
+namespace
+{
+    template <typename I, typename J>
+    void check_preprocess_of_a_new_pattern(rocsparse_handle handle, rocsparse_index_base base)
+    {
+        SCOPED_TRACE((index_types<I, J>()));
+        const auto a     = make_grid_matrix<double>(4, true);
+        const auto a_new = another_pattern(a);
+        const auto tol   = tolerance<double>(max_row_length(a));
+        const auto op    = rocsparse_operation_transpose;
+        for(const int32_t nrhs : {0, 2})
+        {
+            const bool spsv = (nrhs == 0);
+            SCOPED_TRACE(spsv ? "spsv" : "spsm");
+            const int32_t         cols = spsv ? 1 : nrhs;
+            const auto            b    = right_hand_side(a.n, cols);
+            dev_csr<double, I, J> d, arrays;
+            std::vector<double>   y;
+            d.init(a, 1, true, base);
+            ASSERT_NE(d.A, nullptr);
+            const auto run = [&] {
+                return spsv ? run_spsv(handle, d, true, op, b, y)
+                            : run_spsm(handle, d, true, op, nrhs, b, y);
+            };
+            ASSERT_EQ(run(), rocsparse_status_success);
+            expect_close(y, host_lower_transposed_solve(a, b, cols), tol);
+
+            ASSERT_NO_FATAL_FAILURE(set_pointers(d, a_new, base, arrays));
+            ASSERT_EQ(run(), rocsparse_status_success);
+            const bool documented = all_close(y, host_lower_transposed_solve(a_new, b, cols), tol);
+            check(documented,
+                  known_defect(false,
+                               true,
+                               "the preprocess skips the analysis when the matrix already has "
+                               "one, so the compute uses the analysis of the old pattern"),
+                  "solve with the new pattern matches the host");
+            // The stale analysis gathers the new values through the permutation of the
+            // old pattern: the solve is that of the old pattern holding the new values
+            // position by position.
+            if(!documented)
+            {
+                SCOPED_TRACE("solve with the analysis of the old pattern");
+                expect_close(
+                    y, host_lower_transposed_solve(with_values(a, a_new.val), b, cols), tol);
+            }
+        }
+    }
 }
 
 // The preprocess analyses the matrix it is given: after rocsparse_csr_set_pointers to
@@ -613,34 +662,12 @@ TEST_F(PrecondTriangularScenariosGeneric, spsv_compute_needs_the_preprocess)
 // solve with op none reads the structure from the matrix).
 TEST_F(PrecondTriangularScenariosGeneric, spsv_and_spsm_preprocess_a_new_pattern)
 {
-    const auto a     = make_grid_matrix<double>(4, true);
-    const auto a_new = another_pattern(a);
-    const auto tol   = tolerance<double>(max_row_length(a));
-    const auto op    = rocsparse_operation_transpose;
-    for(const int32_t nrhs : {0, 2})
+    for(const auto base : bases)
     {
-        const bool spsv = (nrhs == 0);
-        SCOPED_TRACE(spsv ? "spsv" : "spsm");
-        const int32_t       cols = spsv ? 1 : nrhs;
-        const auto          b    = right_hand_side(a.n, cols);
-        device_csr          d, arrays;
-        std::vector<double> y;
-        d.init(a, 1, true);
-        const auto run = [&] {
-            return spsv ? run_spsv(handle, d, true, op, b, y)
-                        : run_spsm(handle, d, true, op, nrhs, b, y);
-        };
-        ASSERT_EQ(run(), rocsparse_status_success);
-        expect_close(y, host_lower_transposed_solve(a, b, cols), tol);
-
-        ASSERT_NO_FATAL_FAILURE(set_pointers(d, a_new, arrays));
-        ASSERT_EQ(run(), rocsparse_status_success);
-        check(all_close(y, host_lower_transposed_solve(a_new, b, cols), tol),
-              known_defect(false,
-                           true,
-                           "the preprocess skips the analysis when the matrix already has one, "
-                           "so the compute uses the analysis of the old pattern"),
-              "solve with the new pattern matches the host");
+        SCOPED_TRACE(name(base));
+        check_preprocess_of_a_new_pattern<int32_t, int32_t>(handle, base);
+        check_preprocess_of_a_new_pattern<int64_t, int32_t>(handle, base);
+        check_preprocess_of_a_new_pattern<int64_t, int64_t>(handle, base);
     }
 }
 
@@ -990,15 +1017,16 @@ TEST_F(PrecondTriangularScenariosGeneric, spilu0_buffer_arguments)
           "spilu0 with a buffer of size 0");
 }
 
-// The documentation supports only none and transpose, not_implemented otherwise;
-// sptrsv, sptrsm, spsv and spsm accept conjugate_transpose and solve with it.
+// The pages contradict themselves and the routines: they support only none and
+// transpose, not_implemented otherwise, while the sptrsv page defines op(A) = A^H for
+// conjugate_transpose. sptrsv, sptrsm, spsv and spsm implement conjugate_transpose and
+// solve with it (with double values, the solve with the transpose). The pages need
+// reconciling with the routines; the expectations pin what they do today.
 TEST_F(PrecondTriangularScenariosGeneric, conjugate_transpose)
 {
-    const auto a        = make_grid_matrix<double>(3, false);
-    const auto b        = right_hand_side(a.n);
-    const auto expected = known_defect(rocsparse_status_success,
-                                       rocsparse_status_not_implemented,
-                                       "conjugate_transpose is accepted and solved with it");
+    const auto a   = make_grid_matrix<double>(3, false);
+    const auto b   = right_hand_side(a.n);
+    const auto tol = tolerance<double>(max_row_length(a));
     {
         SCOPED_TRACE("sptrsv");
         device_csr d;
@@ -1007,7 +1035,9 @@ TEST_F(PrecondTriangularScenariosGeneric, conjugate_transpose)
         ASSERT_EQ(s.set(rocsparse_sptrsv_input_operation, &conj_transpose, sizeof(conj_transpose)),
                   rocsparse_status_success);
         dense_vector x(b), y(std::vector<double>(a.n, 0.0));
-        check(s.analysis(d.A, x, y), expected, "sptrsv analysis");
+        check(s.analysis(d.A, x, y), is(rocsparse_status_success), "sptrsv analysis");
+        check(s.solve(d.A, x, y), is(rocsparse_status_success), "sptrsv compute");
+        expect_close(y.values(), host_lower_transposed_solve(a, b, 1), tol);
     }
     {
         SCOPED_TRACE("spsv");
@@ -1015,8 +1045,9 @@ TEST_F(PrecondTriangularScenariosGeneric, conjugate_transpose)
         d.init(a, 1, true);
         dense_vector x(b), y(std::vector<double>(a.n, 0.0));
         check(spsv_until(handle, conj_transpose, d.A, x.d, y.d, rocsparse_spsv_stage_compute),
-              expected,
+              is(rocsparse_status_success),
               "spsv");
+        expect_close(y.values(), host_lower_transposed_solve(a, b, 1), tol);
     }
     const int64_t nrhs = 2;
     const auto    bm   = right_hand_side(a.n, nrhs);
@@ -1025,6 +1056,10 @@ TEST_F(PrecondTriangularScenariosGeneric, conjugate_transpose)
         SCOPED_TRACE(on_A ? "operation of A" : "operation of the right-hand sides");
         const auto rows = on_A ? a.n : nrhs;
         const auto cols = on_A ? nrhs : a.n;
+        // The right-hand sides are `rows` x `cols`, so op(B) is their transpose when the
+        // operation applies to them.
+        const auto want = on_A ? host_lower_transposed_solve(a, bm, nrhs)
+                               : host_lower_solve(a, transposed(bm, nrhs, a.n), nrhs);
         {
             device_csr d;
             d.init(a, 1, true);
@@ -1035,7 +1070,13 @@ TEST_F(PrecondTriangularScenariosGeneric, conjugate_transpose)
                             sizeof(conj_transpose)),
                       rocsparse_status_success);
             dense_matrix X(bm, rows, cols), Y(std::vector<double>(bm.size(), 0.0), a.n, nrhs);
-            check(m.run(d.A, X, Y, rocsparse_sptrsm_stage_analysis), expected, "sptrsm analysis");
+            check(m.run(d.A, X, Y, rocsparse_sptrsm_stage_analysis),
+                  is(rocsparse_status_success),
+                  "sptrsm analysis");
+            check(m.run(d.A, X, Y, rocsparse_sptrsm_stage_compute),
+                  is(rocsparse_status_success),
+                  "sptrsm compute");
+            expect_close(Y.values(), want, tol);
         }
         {
             device_csr d;
@@ -1048,29 +1089,45 @@ TEST_F(PrecondTriangularScenariosGeneric, conjugate_transpose)
                              B.d,
                              C.d,
                              rocsparse_spsm_stage_compute),
-                  expected,
+                  is(rocsparse_status_success),
                   "spsm");
+            expect_close(C.values(), want, tol);
         }
     }
 }
 
-// An unsupported trans, alg or stage is documented as not_implemented.
-TEST_F(PrecondTriangularScenariosGeneric, spsv_and_spsm_unsupported_values)
+// A trans, alg or stage outside its enumeration is rejected as invalid_value, the status
+// ROCSPARSE_CHECKARG_ENUM gives throughout the library; the spsv and spsm pages list no
+// invalid_value and need it added. A valid compute type that the routines do not
+// support is the documented not_implemented.
+TEST_F(PrecondTriangularScenariosGeneric, spsv_and_spsm_invalid_and_unsupported_values)
 {
     const auto a = make_grid_matrix<double>(3, false);
     device_csr d;
     d.init(a, 1, true);
-    const auto          expected = known_defect(rocsparse_status_invalid_value,
-                                       rocsparse_status_not_implemented,
-                                       "an unsupported value is reported as an invalid value");
+    const auto          expected = is(rocsparse_status_invalid_value);
     const auto          bad_op   = static_cast<rocsparse_operation>(77);
     const auto          none     = rocsparse_operation_none;
+    const auto          f32      = rocsparse_datatype_f32_r;
     const double        alpha    = 1.0;
     size_t              size     = 64;
     device_vector<char> buffer(size);
     {
         SCOPED_TRACE("spsv");
         dense_vector x(right_hand_side(a.n)), y(std::vector<double>(a.n, 0.0));
+        check(rocsparse_spsv(handle,
+                             none,
+                             &alpha,
+                             d.A,
+                             x.d,
+                             y.d,
+                             f32,
+                             rocsparse_spsv_alg_default,
+                             rocsparse_spsv_stage_buffer_size,
+                             &size,
+                             nullptr),
+              is(rocsparse_status_not_implemented),
+              "compute type f32 for double data");
         check(spsv_until(handle, bad_op, d.A, x.d, y.d, rocsparse_spsv_stage_buffer_size),
               expected,
               "trans 77");
@@ -1101,6 +1158,20 @@ TEST_F(PrecondTriangularScenariosGeneric, spsv_and_spsm_unsupported_values)
         SCOPED_TRACE("spsm");
         const auto   bm = right_hand_side(a.n, 2);
         dense_matrix B(bm, a.n, 2), C(std::vector<double>(bm.size(), 0.0), a.n, 2);
+        check(rocsparse_spsm(handle,
+                             none,
+                             none,
+                             &alpha,
+                             d.A,
+                             B.d,
+                             C.d,
+                             f32,
+                             rocsparse_spsm_alg_default,
+                             rocsparse_spsm_stage_buffer_size,
+                             &size,
+                             nullptr),
+              is(rocsparse_status_not_implemented),
+              "compute type f32 for double data");
         check(spsm_until(handle, bad_op, none, d.A, B.d, C.d, rocsparse_spsm_stage_buffer_size),
               expected,
               "trans_A 77");
@@ -1131,38 +1202,46 @@ TEST_F(PrecondTriangularScenariosGeneric, spsv_and_spsm_unsupported_values)
     }
 }
 
-// The buffer holds nothing between the preprocess and the compute: the compute with
-// another buffer, after the first one is freed, solves correctly.
+// The buffer holds nothing between the preprocess and the compute, for every operation:
+// the compute with another buffer, after the first one is freed, solves correctly.
 TEST_F(PrecondTriangularScenariosGeneric, spsv_buffer_is_not_persistent)
 {
-    const auto a = make_grid_matrix<double>(4, false);
-    const auto b = right_hand_side(a.n);
-    device_csr d;
-    d.init(a, 1, true);
-    dense_vector x(b), y(std::vector<double>(a.n, 0.0));
-    const double alpha = 1.0;
-    size_t       size  = 0;
-    const auto   call  = [&](rocsparse_spsv_stage stage, void* buffer) {
-        return rocsparse_spsv(handle,
-                              rocsparse_operation_none,
-                              &alpha,
-                              d.A,
-                              x.d,
-                              y.d,
-                              f64,
-                              rocsparse_spsv_alg_default,
-                              stage,
-                              &size,
-                              buffer);
-    };
-    ASSERT_EQ(call(rocsparse_spsv_stage_buffer_size, nullptr), rocsparse_status_success);
-    const size_t                         n = size ? size : size_t{1};
-    std::unique_ptr<device_vector<char>> first(new device_vector<char>(n));
-    ASSERT_EQ(call(rocsparse_spsv_stage_preprocess, first->ptr), rocsparse_status_success);
-    device_vector<char> second(std::vector<char>(n, static_cast<char>(0xff)));
-    first.reset();
-    ASSERT_EQ(call(rocsparse_spsv_stage_compute, second.ptr), rocsparse_status_success);
-    expect_close(y.values(), host_lower_solve(a, b, 1), tolerance<double>(max_row_length(a)));
+    const auto a   = make_grid_matrix<double>(4, false);
+    const auto b   = right_hand_side(a.n);
+    const auto tol = tolerance<double>(max_row_length(a));
+    for(const auto op : {rocsparse_operation_none, rocsparse_operation_transpose})
+    {
+        SCOPED_TRACE(op == rocsparse_operation_none ? "op none" : "op transpose");
+        device_csr d;
+        d.init(a, 1, true);
+        dense_vector x(b), y(std::vector<double>(a.n, 0.0));
+        const double alpha = 1.0;
+        size_t       size  = 0;
+        const auto   call  = [&](rocsparse_spsv_stage stage, void* buffer) {
+            return rocsparse_spsv(handle,
+                                  op,
+                                  &alpha,
+                                  d.A,
+                                  x.d,
+                                  y.d,
+                                  f64,
+                                  rocsparse_spsv_alg_default,
+                                  stage,
+                                  &size,
+                                  buffer);
+        };
+        ASSERT_EQ(call(rocsparse_spsv_stage_buffer_size, nullptr), rocsparse_status_success);
+        const size_t                         n = size ? size : size_t{1};
+        std::unique_ptr<device_vector<char>> first(new device_vector<char>(n));
+        ASSERT_EQ(call(rocsparse_spsv_stage_preprocess, first->ptr), rocsparse_status_success);
+        device_vector<char> second(std::vector<char>(n, static_cast<char>(0xff)));
+        first.reset();
+        ASSERT_EQ(call(rocsparse_spsv_stage_compute, second.ptr), rocsparse_status_success);
+        expect_close(y.values(),
+                     (op == rocsparse_operation_none) ? host_lower_solve(a, b, 1)
+                                                      : host_lower_transposed_solve(a, b, 1),
+                     tol);
+    }
 }
 
 // spsv and spsm do not support batches: a strided batch is not_implemented.

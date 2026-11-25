@@ -167,6 +167,24 @@ namespace triangular_scenarios
         return b;
     }
 
+    // The `cols` x `rows` column major transpose of the `rows` x `cols` column major `v`.
+    inline std::vector<double> transposed(const std::vector<double>& v, int32_t rows, int32_t cols)
+    {
+        std::vector<double> t(v.size());
+        for(int32_t j = 0; j < cols; ++j)
+            for(int32_t i = 0; i < rows; ++i)
+                t[static_cast<size_t>(i) * cols + j] = v[static_cast<size_t>(j) * rows + i];
+        return t;
+    }
+
+    inline csr_matrix<double> with_zero_diagonal(csr_matrix<double> a, int32_t row)
+    {
+        for(int32_t p = a.ptr[row]; p < a.ptr[row + 1]; ++p)
+            if(a.ind[p] == row)
+                a.val[p] = 0.0;
+        return a;
+    }
+
     // Solves with the unit lower triangle of `lu` (on the pattern of `a`), then with its
     // upper triangle.
     inline std::vector<double> host_lu_solve(const csr_matrix<double>&  a,
@@ -239,6 +257,28 @@ namespace triangular_scenarios
                         diagonal = a.val[p];
                 }
                 x[i] /= diagonal;
+            }
+        }
+        return b;
+    }
+
+    // Solves with the transpose of the lower triangle of `a` (non unit diagonal) for the
+    // `nrhs` columns of the column major `b`.
+    inline std::vector<double> host_lower_transposed_solve(const csr_matrix<double>& a,
+                                                           std::vector<double>       b,
+                                                           int32_t                   nrhs)
+    {
+        for(int32_t j = 0; j < nrhs; ++j)
+        {
+            double* x = b.data() + static_cast<size_t>(j) * a.n;
+            for(int32_t i = a.n - 1; i >= 0; --i)
+            {
+                for(int32_t p = a.ptr[i]; p < a.ptr[i + 1]; ++p)
+                    if(a.ind[p] == i)
+                        x[i] /= a.val[p];
+                for(int32_t p = a.ptr[i]; p < a.ptr[i + 1]; ++p)
+                    if(a.ind[p] < i)
+                        x[a.ind[p]] -= a.val[p] * x[i];
             }
         }
         return b;

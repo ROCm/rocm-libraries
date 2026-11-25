@@ -25,14 +25,15 @@
 // Scenarios of the triangular analysis data that bsrilu0, bsric0, bsrsv and bsrsm share
 // on one mat_info: the block ILU(0) and IC(0) workflows, each routine reusing the
 // analysis of another, forced analyses of shared data, calls without an analysis, clear,
-// and a new pattern on an analysed mat_info. Only the public API is used; the results
-// are compared with the scalar host references on the expanded matrix, since the
-// blocks are dense. The conventions are those of
+// a copy that outlives the original, and a new pattern on an analysed mat_info. Only the
+// public API is used; the results are compared with the scalar host references on the
+// expanded matrix, since the blocks are dense. The conventions are those of
 // unit_test_device_precond_triangular_scenarios.cpp: expectations pin what the library
-// returns today, known_defect marks where it contradicts the documentation, and
-// sequences that crash or use freed memory are DISABLED_ tests asserting the documented
-// behaviour (run one at a time under a timeout, those using freed memory under
-// AddressSanitizer).
+// returns today, known_defect marks where the library is wrong and its page right, a
+// comment names the page where the page is what needs fixing, every byte of the buffer
+// is set to 0xff before every call, and sequences that crash or use freed memory are
+// DISABLED_ tests asserting the documented behaviour (run one at a time under a timeout,
+// those using freed memory under AddressSanitizer).
 
 #include "unit_test_device_precond_triangular_common.hpp"
 
@@ -105,11 +106,17 @@ namespace
         rocsparse_mat_descr          L    = nullptr;
         rocsparse_mat_descr          U    = nullptr;
         rocsparse_mat_info           info = nullptr;
+        bool                         device_query;
 
-        block_problem(rocsparse_handle h, const bsr_matrix<double>& b, rocsparse_index_base ib)
+        // The zero pivots are queried in device memory when `device` is set.
+        block_problem(rocsparse_handle          h,
+                      const bsr_matrix<double>& b,
+                      rocsparse_index_base      ib,
+                      bool                      device = false)
             : handle(h)
             , m(b)
             , base(ib)
+            , device_query(device)
         {
         }
 
@@ -203,12 +210,21 @@ namespace
             }
         }
 
-        // The buffer is filled with ones so that a call relying on zeroed memory shows.
         void reserve(size_t size)
         {
             if(size > buffer.n)
                 upload(buffer, std::vector<char>(size, static_cast<char>(0xff)));
             ASSERT_NE(buffer.ptr, nullptr);
+        }
+
+        // Sets every byte of the buffer to 0xff before every call, so that a call relying
+        // on zeroed memory, or on what an earlier call left in the buffer, shows.
+        void poison()
+        {
+            hipStream_t stream = nullptr;
+            EXPECT_EQ(rocsparse_get_stream(handle, &stream), rocsparse_status_success);
+            if(buffer.n != 0)
+                EXPECT_EQ(hipMemsetAsync(buffer.ptr, 0xff, buffer.n, stream), hipSuccess);
         }
 
         // Replaces the values on the device (bsrilu0 and bsric0 factor them in place);
@@ -237,6 +253,7 @@ namespace
 
         rocsparse_status ilu0_analysis(rocsparse_analysis_policy policy)
         {
+            poison();
             return rocsparse_dbsrilu0_analysis(handle,
                                                m.dir,
                                                m.mb,
@@ -254,6 +271,7 @@ namespace
 
         rocsparse_status ilu0()
         {
+            poison();
             return rocsparse_dbsrilu0(handle,
                                       m.dir,
                                       m.mb,
@@ -270,6 +288,7 @@ namespace
 
         rocsparse_status ic0_analysis(rocsparse_analysis_policy policy)
         {
+            poison();
             return rocsparse_dbsric0_analysis(handle,
                                               m.dir,
                                               m.mb,
@@ -287,6 +306,7 @@ namespace
 
         rocsparse_status ic0()
         {
+            poison();
             return rocsparse_dbsric0(handle,
                                      m.dir,
                                      m.mb,
@@ -305,6 +325,7 @@ namespace
                                      rocsparse_analysis_policy policy,
                                      rocsparse_operation       op = rocsparse_operation_none)
         {
+            poison();
             return rocsparse_dbsrsv_analysis(handle,
                                              m.dir,
                                              op,
@@ -326,6 +347,7 @@ namespace
                                   double*             y,
                                   rocsparse_operation op = rocsparse_operation_none)
         {
+            poison();
             const double one = 1.0;
             return rocsparse_dbsrsv_solve(handle,
                                           m.dir,
@@ -347,6 +369,7 @@ namespace
 
         rocsparse_status sm_analysis(rocsparse_mat_descr descr, rocsparse_analysis_policy policy)
         {
+            poison();
             return rocsparse_dbsrsm_analysis(handle,
                                              m.dir,
                                              rocsparse_operation_none,
@@ -367,6 +390,7 @@ namespace
 
         rocsparse_status sm_solve(rocsparse_mat_descr descr, const double* B, double* X)
         {
+            poison();
             const double one = 1.0;
             return rocsparse_dbsrsm_solve(handle,
                                           m.dir,
@@ -460,7 +484,7 @@ namespace
         template <typename F>
         int32_t zero_pivot(F&& call)
         {
-            return zero_pivot_row(handle, base, m.mb, false, call);
+            return zero_pivot_row(handle, base, m.mb, device_query, call);
         }
     };
 
@@ -628,6 +652,12 @@ namespace
         return (r == routine::bsrilu0) ? p.ilu0() : p.ic0();
     }
 
+    rocsparse_status clear_factorization(block_problem& p, routine r)
+    {
+        return (r == routine::bsrilu0) ? rocsparse_bsrilu0_clear(p.handle, p.info)
+                                       : rocsparse_bsric0_clear(p.handle, p.info);
+    }
+
     int32_t factorization_pivot(block_problem& p, routine r)
     {
         return (r == routine::bsrilu0) ? p.bsrilu0_pivot() : p.bsric0_pivot();
@@ -737,43 +767,52 @@ TEST_F(PrecondTriangularScenariosBsr, reuse_of_another_analysis)
 }
 
 // A reused analysis leaves the routine without a zero pivot of its own: the structural
-// zero that the analysis found is reported by the routine that made it only.
+// zero that the analysis found is reported by the routine that made it only, in host and
+// in device memory.
 TEST_F(PrecondTriangularScenariosBsr, reused_analysis_loses_the_structural_pivot)
 {
     const int32_t r = 2;
     const auto    m = without_block(test_matrix(), r, r);
     const auto    b = right_hand_side(m.mb * m.block_dim, block_problem::nrhs);
+    for(const bool device_query : {false, true})
     {
-        SCOPED_TRACE("bsrsv reusing bsrsm");
-        block_problem p(handle, m, rocsparse_index_base_zero);
-        ASSERT_NO_FATAL_FAILURE(p.init());
-        ASSERT_EQ(p.sm_analysis(p.A, rocsparse_analysis_policy_force), rocsparse_status_success);
-        ASSERT_EQ(p.sv_analysis(p.A, rocsparse_analysis_policy_reuse), rocsparse_status_success);
-        device_vector<double> x(b), y(p.n());
-        ASSERT_EQ(p.sv_solve(p.A, x, y), rocsparse_status_success);
-        check(p.bsrsm_pivot(), is(r), "bsrsm_zero_pivot after its analysis");
-        check(p.bsrsv_pivot(),
-              known_defect(no_pivot,
-                           r,
-                           "the reused analysis does not give bsrsv a zero pivot, so the "
-                           "structural zero stays with bsrsm"),
-              "bsrsv_zero_pivot after the solve");
-    }
-    {
-        SCOPED_TRACE("bsrsm reusing bsrsv");
-        block_problem p(handle, m, rocsparse_index_base_zero);
-        ASSERT_NO_FATAL_FAILURE(p.init());
-        ASSERT_EQ(p.sv_analysis(p.A, rocsparse_analysis_policy_force), rocsparse_status_success);
-        ASSERT_EQ(p.sm_analysis(p.A, rocsparse_analysis_policy_reuse), rocsparse_status_success);
-        device_vector<double> B(b), X(b.size());
-        ASSERT_EQ(p.sm_solve(p.A, B, X), rocsparse_status_success);
-        check(p.bsrsv_pivot(), is(r), "bsrsv_zero_pivot after its analysis");
-        check(p.bsrsm_pivot(),
-              known_defect(no_pivot,
-                           r,
-                           "the reused analysis does not give bsrsm a zero pivot, so the "
-                           "structural zero stays with bsrsv"),
-              "bsrsm_zero_pivot after the solve");
+        SCOPED_TRACE(::testing::Message() << "device query " << device_query);
+        {
+            SCOPED_TRACE("bsrsv reusing bsrsm");
+            block_problem p(handle, m, rocsparse_index_base_zero, device_query);
+            ASSERT_NO_FATAL_FAILURE(p.init());
+            ASSERT_EQ(p.sm_analysis(p.A, rocsparse_analysis_policy_force),
+                      rocsparse_status_success);
+            ASSERT_EQ(p.sv_analysis(p.A, rocsparse_analysis_policy_reuse),
+                      rocsparse_status_success);
+            device_vector<double> x(b), y(p.n());
+            ASSERT_EQ(p.sv_solve(p.A, x, y), rocsparse_status_success);
+            check(p.bsrsm_pivot(), is(r), "bsrsm_zero_pivot after its analysis");
+            check(p.bsrsv_pivot(),
+                  known_defect(no_pivot,
+                               r,
+                               "the reused analysis does not give bsrsv a zero pivot, so the "
+                               "structural zero stays with bsrsm"),
+                  "bsrsv_zero_pivot after the solve");
+        }
+        {
+            SCOPED_TRACE("bsrsm reusing bsrsv");
+            block_problem p(handle, m, rocsparse_index_base_zero, device_query);
+            ASSERT_NO_FATAL_FAILURE(p.init());
+            ASSERT_EQ(p.sv_analysis(p.A, rocsparse_analysis_policy_force),
+                      rocsparse_status_success);
+            ASSERT_EQ(p.sm_analysis(p.A, rocsparse_analysis_policy_reuse),
+                      rocsparse_status_success);
+            device_vector<double> B(b), X(b.size());
+            ASSERT_EQ(p.sm_solve(p.A, B, X), rocsparse_status_success);
+            check(p.bsrsv_pivot(), is(r), "bsrsv_zero_pivot after its analysis");
+            check(p.bsrsm_pivot(),
+                  known_defect(no_pivot,
+                               r,
+                               "the reused analysis does not give bsrsm a zero pivot, so the "
+                               "structural zero stays with bsrsv"),
+                  "bsrsm_zero_pivot after the solve");
+        }
     }
 }
 
@@ -842,17 +881,15 @@ TEST_F(PrecondTriangularScenariosBsr, calls_need_their_analysis)
         ASSERT_EQ(p.sv_analysis(p.A, policy), rocsparse_status_success);
         ASSERT_NO_FATAL_FAILURE(check_compute(p, routine::bsrsv));
 
-        for(const auto r : {routine::bsrilu0, routine::bsric0})
+        for(const auto r : factorizations)
         {
             SCOPED_TRACE(name(r));
             ASSERT_NO_FATAL_FAILURE(p.set_values());
             ASSERT_EQ(analyse(p, r, rocsparse_analysis_policy_force), rocsparse_status_success);
             ASSERT_NO_FATAL_FAILURE(check_compute(p, r));
             ASSERT_NO_FATAL_FAILURE(p.set_values());
-            ASSERT_EQ(r == routine::bsrilu0 ? rocsparse_bsrilu0_clear(handle, p.info)
-                                            : rocsparse_bsric0_clear(handle, p.info),
-                      rocsparse_status_success);
-            check(r == routine::bsrilu0 ? p.ilu0() : p.ic0(),
+            ASSERT_EQ(clear_factorization(p, r), rocsparse_status_success);
+            check(factorize(p, r),
                   is(rocsparse_status_invalid_pointer),
                   std::string(name(r)) + " after its clear");
             EXPECT_EQ(p.values(), m.val);
@@ -923,6 +960,39 @@ TEST_F(PrecondTriangularScenariosBsr, clear_keeps_the_other_routines)
         expect_close(p.llt_solve(b),
                      host_llt_solve(p.scalar, l, b),
                      tolerance<double>(max_row_length(p.scalar)));
+    }
+}
+
+// A copy of the mat_info carries the analysis data that bsrilu0, bsrsv and bsrsm share,
+// and stays usable for solves once the original is destroyed.
+TEST_F(PrecondTriangularScenariosBsr, copy_outlives_the_original)
+{
+    const auto m  = test_matrix(rocsparse_direction_row, true);
+    const auto b  = right_hand_side(m.mb * m.block_dim);
+    const auto bm = right_hand_side(m.mb * m.block_dim, block_problem::nrhs);
+    for(const auto policy : policies)
+    {
+        SCOPED_TRACE(name(policy));
+        block_problem p(handle, m, rocsparse_index_base_zero);
+        ASSERT_NO_FATAL_FAILURE(p.init());
+        ASSERT_NO_FATAL_FAILURE(p.ilu0_workflow(order::lower_first, policy));
+        ASSERT_EQ(p.sm_analysis(p.A, policy), rocsparse_status_success);
+        auto f = p.scalar;
+        f.val  = p.scalar_values();
+
+        rocsparse_mat_info copy = nullptr;
+        ASSERT_EQ(rocsparse_create_mat_info(&copy), rocsparse_status_success);
+        ASSERT_EQ(rocsparse_copy_mat_info(copy, p.info), rocsparse_status_success);
+        ASSERT_EQ(rocsparse_destroy_mat_info(p.info), rocsparse_status_success);
+        p.info = copy;
+
+        const auto tol = tolerance<double>(max_row_length(f));
+        check(p.bsrilu0_pivot(), is(no_pivot), "bsrilu0_zero_pivot of the copy");
+        expect_close(p.lu_solve(b), host_lu_solve(p.scalar, f.val, b), tol);
+        check(p.bsrsv_pivot(), is(no_pivot), "bsrsv_zero_pivot after the solves");
+        device_vector<double> B(bm), X(std::vector<double>(bm.size(), 7.0));
+        ASSERT_EQ(p.sm_solve(p.A, B, X), rocsparse_status_success);
+        expect_close(to_host(X), host_lower_solve(f, bm, block_problem::nrhs), tol);
     }
 }
 
@@ -1035,7 +1105,9 @@ TEST_F(PrecondTriangularScenariosBsr, first_of_several_zero_pivots)
 }
 
 // The numerical zero pivot belongs to the values solved with: once the zero on the
-// diagonal is replaced, the next solve reports none, with or without a new analysis.
+// diagonal is replaced, the next solve reports none. A reused analysis finds the existing
+// one and returns without resetting it; a forced analysis of the new values resets it,
+// which is how a caller recovers today.
 TEST_F(PrecondTriangularScenariosBsr, numerical_pivot_of_older_values)
 {
     const auto regular = test_matrix();
@@ -1064,9 +1136,13 @@ TEST_F(PrecondTriangularScenariosBsr, numerical_pivot_of_older_values)
         check(solve_pivot(p, r),
               known_defect(1,
                            no_pivot,
-                           "the solve only lowers the zero pivot, so the one of the earlier "
-                           "values stays"),
-              "zero pivot after a new analysis and solve");
+                           "the reused analysis keeps the zero pivot, which the solve only "
+                           "lowers"),
+              "zero pivot after a reused analysis and solve");
+        ASSERT_EQ(analyse_triangle(p, r, p.A, rocsparse_analysis_policy_force),
+                  rocsparse_status_success);
+        ASSERT_EQ(solve(p, r, p.A), rocsparse_status_success);
+        check(solve_pivot(p, r), is(no_pivot), "zero pivot after a forced analysis and solve");
     }
 }
 
@@ -1160,9 +1236,12 @@ TEST_F(PrecondTriangularScenariosBsr, unit_solve_keeps_the_non_unit_pivot)
     }
 }
 
-// The documentation describes a unit diagonal as identity blocks on the diagonal; the
-// solve takes the diagonal of each diagonal block as 1 and uses the rest of its lower
-// triangle.
+// With a unit diagonal the solve takes the diagonal of each diagonal block as 1 and uses
+// the rest of its lower triangle: it solves with the scalar lower triangle of the
+// expanded matrix, as check_compute assumes throughout. The bsrsv and bsrsm pages
+// describe identity blocks on the diagonal instead, under which the solve of
+// [[5, 0], [3, 5]] with b = (1, 1) is (1, 1); the pages need to describe the scalar
+// solve.
 TEST_F(PrecondTriangularScenariosBsr, unit_diagonal_of_a_block)
 {
     const auto m = one_block(2, {5, 0, 3, 5});
@@ -1185,7 +1264,10 @@ TEST_F(PrecondTriangularScenariosBsr, unit_diagonal_of_a_block)
 
 // The solve uses the lower triangle of the diagonal block: a zero on its diagonal is a
 // zero pivot even when the block is invertible, and a singular block with a nonzero
-// diagonal is not.
+// diagonal is not. The bsrsv and bsrsm pages ("inverting the diagonal blocks") make a
+// block that is not invertible the numerical zero instead, under which [[0, 1], [1, 0]]
+// has none and [[1, 1], [1, 1]] has one at 0; the pages need to describe the scalar
+// solve.
 TEST_F(PrecondTriangularScenariosBsr, numerical_zero_of_a_diagonal_block)
 {
     const std::pair<std::vector<double>, int32_t> cases[]
@@ -1228,8 +1310,13 @@ TEST_F(PrecondTriangularScenariosBsr, clear_resets_the_pivot)
 // Pivots and boost of the factorizations
 // ---------------------------------------------------------------------------
 
-// A missing diagonal block is a zero pivot from the analysis on. A numerical zero is a
-// diagonal block that is not invertible (bsrilu0) or not positive definite (bsric0).
+// A missing diagonal block is a zero pivot from the analysis on. The pages make a
+// numerical zero a diagonal block that is not invertible (bsrilu0) or not positive
+// definite (bsric0). bsrilu0 factorizes the block in place, without pivoting (the BSR
+// arrays have nowhere to keep a permutation), so its zero pivot is that of the scalar
+// factorization, as for the solves: the bsrilu0 page needs to say so. bsric0 is the one
+// that is wrong: the negative pivot of a block that is not positive definite is not
+// reported.
 TEST_F(PrecondTriangularScenariosBsr, factorization_zero_pivots)
 {
     const int32_t row = 2;
@@ -1247,12 +1334,7 @@ TEST_F(PrecondTriangularScenariosBsr, factorization_zero_pivots)
         ASSERT_NO_FATAL_FAILURE(p.init());
         ASSERT_EQ(p.ilu0_analysis(rocsparse_analysis_policy_force), rocsparse_status_success);
         ASSERT_EQ(p.ilu0(), rocsparse_status_success);
-        check(p.bsrilu0_pivot(),
-              known_defect(0,
-                           no_pivot,
-                           "bsrilu0 factorizes the diagonal block without pivoting, so it "
-                           "reports an invertible block with a zero leading entry"),
-              "bsrilu0_zero_pivot");
+        check(p.bsrilu0_pivot(), is(0), "bsrilu0_zero_pivot");
     }
     {
         SCOPED_TRACE("bsric0 of a block that is not positive definite");
@@ -1305,8 +1387,10 @@ TEST_F(PrecondTriangularScenariosBsr, factorization_pivot_of_older_values)
     }
 }
 
-// A pivot with |pivot| <= boost_tol becomes boost_val, and disabling the boost on the
-// same mat_info leaves the next factorization alone.
+// A pivot with |pivot| <= boost_tol becomes |boost_val| with the sign of the pivot, and
+// disabling the boost on the same mat_info leaves the next factorization alone. The sign
+// is kept on purpose, to keep the inertia of A; the bsrilu0_numeric_boost page, which
+// gives the boosted pivot as boost_val, needs to say so.
 TEST_F(PrecondTriangularScenariosBsr, bsrilu0_numeric_boost)
 {
     const auto    m         = one_block(2, {-1e-3, 1, 1, 4});
@@ -1318,9 +1402,7 @@ TEST_F(PrecondTriangularScenariosBsr, bsrilu0_numeric_boost)
     ASSERT_EQ(rocsparse_dbsrilu0_numeric_boost(handle, p.info, 1, &boost_tol, &boost_val),
               rocsparse_status_success);
     ASSERT_EQ(p.ilu0(), rocsparse_status_success);
-    check(p.values()[0],
-          known_defect(-2.0, 2.0, "the boost keeps the sign of the pivot"),
-          "the boosted pivot");
+    check(p.values()[0], is(-2.0), "the boosted pivot");
 
     ASSERT_NO_FATAL_FAILURE(p.set_values());
     ASSERT_EQ(rocsparse_dbsrilu0_numeric_boost(handle, p.info, 0, &boost_tol, &boost_val),
@@ -1385,13 +1467,16 @@ namespace
     }
 }
 
-// One buffer serves bsrsv, bsrilu0 and bsric0 on one pattern: the sizes are equal. The
-// documentation names no operation; bsrsv with op transpose needs more.
+// The bsrsv, bsrilu0 and bsric0 buffer size pages say that the sizes are identical on
+// one pattern, so that one buffer can be shared, and name no operation. That holds for
+// bsrsv with op none; with op transpose bsrsv needs more, so a buffer sized by
+// bsrilu0_buffer_size or bsric0_buffer_size is too small for it. The pages need to
+// restrict the statement to op none.
 TEST_F(PrecondTriangularScenariosBsr, buffer_size_of_the_solve_and_the_factorizations)
 {
     for(const auto dir : directions)
     {
-        SCOPED_TRACE(dir == rocsparse_direction_row ? "row blocks" : "column blocks");
+        SCOPED_TRACE(name(dir));
         block_problem p(handle, test_matrix(dir), rocsparse_index_base_zero);
         ASSERT_NO_FATAL_FAILURE(p.init());
         size_t ilu0 = 0, ic0 = 0;
@@ -1578,8 +1663,11 @@ TEST_F(PrecondTriangularScenariosBsr, DISABLED_bsrsv_unit_solve_after_a_reused_a
     ASSERT_EQ(p.ilu0_analysis(rocsparse_analysis_policy_force), rocsparse_status_success);
     ASSERT_EQ(p.sv_analysis(p.L, rocsparse_analysis_policy_reuse), rocsparse_status_success);
     const auto            b = right_hand_side(p.n());
-    device_vector<double> x(b), y(p.n());
+    device_vector<double> x(b), y(std::vector<double>(p.n(), 7.0));
     ASSERT_EQ(p.sv_solve(p.L, x, y), rocsparse_status_success);
+    expect_close(to_host(y),
+                 host_lower_solve(p.scalar, b, 1, rocsparse_diag_type_unit),
+                 tolerance<double>(max_row_length(p.scalar)));
     check(p.bsrsv_pivot(), is(no_pivot), "bsrsv_zero_pivot after the solve with L");
 }
 

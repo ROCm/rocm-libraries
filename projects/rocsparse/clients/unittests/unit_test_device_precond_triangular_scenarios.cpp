@@ -27,16 +27,20 @@
 // and both analysis policies, each routine reusing the analysis of another, forced
 // analyses of shared data, calls without an analysis, new values or a new pattern on an
 // analysed mat_info, clear and copy of a mat_info whose data is shared, and the zero
-// pivots reported along the way. Only the public API is used, so the tests keep holding
-// when the way the analysis data is stored or shared changes. The value type is double
-// throughout: the sharing does not depend on it.
+// pivots reported along the way. Every byte of the buffer is set to 0xff before every
+// call. Only the public API is used, so the tests keep holding when the way the analysis
+// data is stored or shared changes. The value type is double throughout: the sharing
+// does not depend on it.
 //
 // The expectations pin what the library returns today, including values the
 // documentation leaves open (such as the zero pivot right after an analysis). Where the
-// library contradicts the documentation the expectation is a known_defect: it holds
+// library is wrong and its page is right the expectation is a known_defect: it holds
 // both values and fails with its own message once the documented value is returned, so
-// the fix updates the expectation on purpose. Sequences that crash or use freed memory
-// are DISABLED_ tests asserting the documented behaviour; run them with
+// the fix updates the expectation on purpose. Where the library does something on
+// purpose that its page omits, contradicts or states inconsistently, the page is what
+// needs fixing: the expectation is today's value, with a comment naming the page.
+// Sequences that crash or use freed memory are DISABLED_ tests asserting the documented
+// behaviour or, where the page is silent, that of the sibling routines; run them with
 // --gtest_also_run_disabled_tests, those using freed memory under AddressSanitizer
 // (without it the freed memory is usually handed out again and they may pass). A kernel
 // dereferencing a pivot that was never allocated faults on the device, after which the
@@ -54,14 +58,6 @@ using namespace triangular_scenarios;
 namespace
 {
     using triangular_scenarios::name;
-
-    csr_matrix<double> with_zero_diagonal(csr_matrix<double> a, int32_t row)
-    {
-        for(int32_t p = a.ptr[row]; p < a.ptr[row + 1]; ++p)
-            if(a.ind[p] == row)
-                a.val[p] = 0.0;
-        return a;
-    }
 
     // The matrix without its entry (row, col).
     csr_matrix<double> without_entry(csr_matrix<double> a, int32_t row, int32_t col)
@@ -209,12 +205,21 @@ namespace
             }
         }
 
-        // The buffer is filled with ones so that a call relying on zeroed memory shows.
         void reserve(size_t size)
         {
             if(size > buffer.n)
                 upload(buffer, std::vector<char>(size, static_cast<char>(0xff)));
             ASSERT_NE(buffer.ptr, nullptr);
+        }
+
+        // Sets every byte of the buffer to 0xff before every call, so that a call relying
+        // on zeroed memory, or on what an earlier call left in the buffer, shows.
+        void poison()
+        {
+            hipStream_t stream = nullptr;
+            EXPECT_EQ(rocsparse_get_stream(handle, &stream), rocsparse_status_success);
+            if(buffer.n != 0)
+                EXPECT_EQ(hipMemsetAsync(buffer.ptr, 0xff, buffer.n, stream), hipSuccess);
         }
 
         // Replaces the values of the matrix on the device (csrilu0 factors them in
@@ -235,6 +240,7 @@ namespace
 
         rocsparse_status ilu0_analysis(rocsparse_analysis_policy policy)
         {
+            poison();
             return rocsparse_dcsrilu0_analysis(handle,
                                                a.n,
                                                a.nnz(),
@@ -250,12 +256,14 @@ namespace
 
         rocsparse_status ilu0()
         {
+            poison();
             return rocsparse_dcsrilu0(
                 handle, a.n, a.nnz(), A, val, row, col, info, rocsparse_solve_policy_auto, buffer);
         }
 
         rocsparse_status ic0_analysis(rocsparse_analysis_policy policy)
         {
+            poison();
             return rocsparse_dcsric0_analysis(handle,
                                               a.n,
                                               a.nnz(),
@@ -271,6 +279,7 @@ namespace
 
         rocsparse_status ic0()
         {
+            poison();
             return rocsparse_dcsric0(
                 handle, a.n, a.nnz(), A, val, row, col, info, rocsparse_solve_policy_auto, buffer);
         }
@@ -279,6 +288,7 @@ namespace
                                      rocsparse_analysis_policy policy,
                                      rocsparse_operation       op = rocsparse_operation_none)
         {
+            poison();
             return rocsparse_dcsrsv_analysis(handle,
                                              op,
                                              a.n,
@@ -298,6 +308,7 @@ namespace
                                   double*             y,
                                   rocsparse_operation op = rocsparse_operation_none)
         {
+            poison();
             const double one = 1.0;
             return rocsparse_dcsrsv_solve(handle,
                                           op,
@@ -445,42 +456,47 @@ namespace
         std::vector<double> x;
     };
 
-    // The buffer of csrsm with `nrhs` right-hand sides on the lower triangle of A.
-    void reserve_csrsm(triangular_problem& p, int32_t nrhs, const double* B)
+    // csrsm with alpha 1 on the lower triangle of A, for `nrhs` right-hand sides in B.
+    rocsparse_status csrsm_buffer_size(triangular_problem& p,
+                                       rocsparse_operation trans_A,
+                                       rocsparse_operation trans_B,
+                                       int32_t             nrhs,
+                                       const double*       B,
+                                       int32_t             ldb,
+                                       size_t*             size)
     {
         const double alpha = 1.0;
-        size_t       size  = 0;
-        ASSERT_EQ(rocsparse_dcsrsm_buffer_size(p.handle,
-                                               rocsparse_operation_none,
-                                               rocsparse_operation_none,
-                                               p.a.n,
-                                               nrhs,
-                                               p.a.nnz(),
-                                               &alpha,
-                                               p.A,
-                                               p.val,
-                                               p.row,
-                                               p.col,
-                                               B,
-                                               p.a.n,
-                                               p.info,
-                                               rocsparse_solve_policy_auto,
-                                               &size),
-                  rocsparse_status_success);
-        ASSERT_NO_FATAL_FAILURE(p.reserve(size));
+        return rocsparse_dcsrsm_buffer_size(p.handle,
+                                            trans_A,
+                                            trans_B,
+                                            p.a.n,
+                                            nrhs,
+                                            p.a.nnz(),
+                                            &alpha,
+                                            p.A,
+                                            p.val,
+                                            p.row,
+                                            p.col,
+                                            B,
+                                            ldb,
+                                            p.info,
+                                            rocsparse_solve_policy_auto,
+                                            size);
     }
 
-    rocsparse_status
-        csrsm_analysis(triangular_problem& p, int32_t nrhs, rocsparse_analysis_policy policy)
+    rocsparse_status csrsm_analysis(triangular_problem&       p,
+                                    rocsparse_operation       trans_A,
+                                    rocsparse_operation       trans_B,
+                                    int32_t                   nrhs,
+                                    const double*             B,
+                                    int32_t                   ldb,
+                                    rocsparse_analysis_policy policy)
     {
-        const double          alpha = 1.0;
-        device_vector<double> dB(right_hand_side(p.a.n, nrhs));
-        reserve_csrsm(p, nrhs, dB);
-        if(::testing::Test::HasFatalFailure())
-            return rocsparse_status_internal_error;
+        p.poison();
+        const double alpha = 1.0;
         return rocsparse_dcsrsm_analysis(p.handle,
-                                         rocsparse_operation_none,
-                                         rocsparse_operation_none,
+                                         trans_A,
+                                         trans_B,
                                          p.a.n,
                                          nrhs,
                                          p.a.nnz(),
@@ -489,21 +505,26 @@ namespace
                                          p.val,
                                          p.row,
                                          p.col,
-                                         dB,
-                                         p.a.n,
+                                         B,
+                                         ldb,
                                          p.info,
                                          policy,
                                          rocsparse_solve_policy_auto,
                                          p.buffer);
     }
 
-    // Solves in place with the lower triangle of A for the `nrhs` columns of B.
-    rocsparse_status csrsm_solve(triangular_problem& p, int32_t nrhs, double* B)
+    rocsparse_status csrsm_solve(triangular_problem& p,
+                                 rocsparse_operation trans_A,
+                                 rocsparse_operation trans_B,
+                                 int32_t             nrhs,
+                                 double*             B,
+                                 int32_t             ldb)
     {
+        p.poison();
         const double alpha = 1.0;
         return rocsparse_dcsrsm_solve(p.handle,
-                                      rocsparse_operation_none,
-                                      rocsparse_operation_none,
+                                      trans_A,
+                                      trans_B,
                                       p.a.n,
                                       nrhs,
                                       p.a.nnz(),
@@ -513,10 +534,38 @@ namespace
                                       p.row,
                                       p.col,
                                       B,
-                                      p.a.n,
+                                      ldb,
                                       p.info,
                                       rocsparse_solve_policy_auto,
                                       p.buffer);
+    }
+
+    // The buffer of csrsm with `nrhs` right-hand sides on the lower triangle of A.
+    void reserve_csrsm(triangular_problem& p, int32_t nrhs, const double* B)
+    {
+        const auto none = rocsparse_operation_none;
+        size_t     size = 0;
+        ASSERT_EQ(csrsm_buffer_size(p, none, none, nrhs, B, p.a.n, &size),
+                  rocsparse_status_success);
+        ASSERT_NO_FATAL_FAILURE(p.reserve(size));
+    }
+
+    rocsparse_status
+        csrsm_analysis(triangular_problem& p, int32_t nrhs, rocsparse_analysis_policy policy)
+    {
+        const auto            none = rocsparse_operation_none;
+        device_vector<double> dB(right_hand_side(p.a.n, nrhs));
+        reserve_csrsm(p, nrhs, dB);
+        if(::testing::Test::HasFatalFailure())
+            return rocsparse_status_internal_error;
+        return csrsm_analysis(p, none, none, nrhs, dB, p.a.n, policy);
+    }
+
+    // Solves in place with the lower triangle of A for the `nrhs` columns of B.
+    rocsparse_status csrsm_solve(triangular_problem& p, int32_t nrhs, double* B)
+    {
+        const auto none = rocsparse_operation_none;
+        return csrsm_solve(p, none, none, nrhs, B, p.a.n);
     }
 
     // csrsm with `nrhs` right-hand sides on the lower triangle of A (non unit), alpha 1.
@@ -1152,24 +1201,8 @@ TEST_F(PrecondTriangularScenarios, csrsm_clear_needs_a_new_analysis)
         ASSERT_EQ(out.solve, rocsparse_status_success);
         ASSERT_EQ(rocsparse_csrsm_clear(handle, p.info), rocsparse_status_success);
 
-        const double          alpha = 1.0;
         device_vector<double> dB(right_hand_side(a.n));
-        check(rocsparse_dcsrsm_solve(handle,
-                                     rocsparse_operation_none,
-                                     rocsparse_operation_none,
-                                     a.n,
-                                     1,
-                                     a.nnz(),
-                                     &alpha,
-                                     p.A,
-                                     p.val,
-                                     p.row,
-                                     p.col,
-                                     dB,
-                                     a.n,
-                                     p.info,
-                                     rocsparse_solve_policy_auto,
-                                     p.buffer),
+        check(csrsm_solve(p, 1, dB),
               is(rocsparse_status_invalid_pointer),
               "csrsm_solve after csrsm_clear");
         check(p.csrsm_pivot(), is(no_pivot), "csrsm_zero_pivot after csrsm_clear");
@@ -1279,7 +1312,9 @@ TEST_F(PrecondTriangularScenarios, copy_has_its_own_tolerance)
 
 // copy_mat_info into itself, and into a mat_info analysed for another matrix. The
 // documentation lists invalid_pointer only for an invalid src or dest, and no status for
-// a copy between two analyses of different sizes (which fails part way through).
+// a copy between two analyses of different sizes (which fails part way through). The
+// copy into itself is rejected on purpose (copy_mat_info checks src == dest) as an
+// invalid pointer; the page needs to say so.
 TEST_F(PrecondTriangularScenarios, copy_mat_info_status)
 {
     triangular_problem small(handle, make_grid_matrix<double>(3, true), rocsparse_index_base_zero);
@@ -1292,21 +1327,19 @@ TEST_F(PrecondTriangularScenarios, copy_mat_info_status)
               rocsparse_status_success);
 
     check(rocsparse_copy_mat_info(small.info, small.info),
-          known_defect(rocsparse_status_invalid_pointer,
-                       rocsparse_status_success,
-                       "a copy into itself is rejected as an invalid pointer"),
+          is(rocsparse_status_invalid_pointer),
           "copy_mat_info into itself");
     check(rocsparse_copy_mat_info(small.info, large.info),
           is(rocsparse_status_internal_error),
           "copy_mat_info into a mat_info analysed for another matrix");
 }
 
+// destroy_mat_info of a null pointer returns early with success, a no-op as free is; the
+// page lists invalid_pointer for an invalid info and needs to exempt the null pointer.
 TEST_F(PrecondTriangularScenarios, destroy_mat_info_of_a_null_pointer)
 {
     check(rocsparse_destroy_mat_info(nullptr),
-          known_defect(rocsparse_status_success,
-                       rocsparse_status_invalid_pointer,
-                       "a null info is accepted as a no-op"),
+          is(rocsparse_status_success),
           "destroy_mat_info(nullptr)");
 }
 
@@ -1643,8 +1676,14 @@ TEST_F(PrecondTriangularScenarios, numerical_pivot_of_older_values)
     }
 }
 
-// With a unit diagonal a missing diagonal entry is taken as 1 (the factor has no entry
-// for it): no zero pivot, and the factor of the matrix with that 1 added.
+// The csrilu0 and csric0 pages say a unit diagonal makes the routine "interpret the
+// matrix A as having ones on its diagonal (even if no non-zero exists in the sparsity
+// pattern)". Read as covering the missing entries only, a missing diagonal entry is
+// taken as 1 (the factor has no entry for it): no zero pivot, and the factor of the
+// matrix with that 1 added, `missing_only`. Read as covering every row, the matrices
+// below become [[1, 1, 0], [1, 1, 1], [0, 1, 1]] and [[1, .], [1, 1]], whose
+// factorizations have a numerical zero pivot at row 1. Today's factor matches neither
+// reading; the zero pivot expectations are today's values.
 TEST_F(PrecondTriangularScenarios, unit_diagonal_fills_a_missing_diagonal_of_the_factorization)
 {
     for(const auto r : factorizations)
@@ -1652,7 +1691,7 @@ TEST_F(PrecondTriangularScenarios, unit_diagonal_fills_a_missing_diagonal_of_the
         // Row 1 has no diagonal entry.
         const auto a = (r == routine::csrilu0) ? from_dense({{4, 1, 0}, {1, 0, 1}, {0, 1, 4}})
                                                : from_dense({{4, 0}, {1, 0}});
-        const std::vector<double> documented
+        const std::vector<double> missing_only
             = (r == routine::csrilu0) ? std::vector<double>{4, 1, 0.25, 1, 4.0 / 3, 8.0 / 3}
                                       : std::vector<double>{2, 0.5};
         for(const auto base : bases)
@@ -1666,7 +1705,7 @@ TEST_F(PrecondTriangularScenarios, unit_diagonal_fills_a_missing_diagonal_of_the
             check(factorization_pivot(p, r), is(no_pivot), "zero pivot after the analysis");
             ASSERT_EQ(factorize(p, r), rocsparse_status_success);
             check(factorization_pivot(p, r), is(no_pivot), "zero pivot after the factorization");
-            check(all_close(p.values(), documented, 1e-12),
+            check(all_close(p.values(), missing_only, 1e-12),
                   known_defect(false,
                                true,
                                "the factorization ignores the diagonal type: the row without a "
@@ -1677,8 +1716,10 @@ TEST_F(PrecondTriangularScenarios, unit_diagonal_fills_a_missing_diagonal_of_the
     }
 }
 
-// The factorization pages document the unit diagonal for missing entries only: the
-// stored diagonal values are factorized as with a non unit diagonal.
+// With a unit diagonal the stored diagonal values are factorized as with a non unit
+// diagonal. The csrilu0 and csric0 pages read as replacing them by ones too ("having
+// ones on its diagonal"), which would factorize [[4, 2], [2, 4]] as [[1, 2], [2, 1]]
+// (u11 = -3 for csrilu0); the pages need to say the stored diagonal is kept.
 TEST_F(PrecondTriangularScenarios, unit_diagonal_keeps_the_stored_diagonal_of_the_factorization)
 {
     const auto a = from_dense({{4, 2}, {2, 4}});
@@ -1728,8 +1769,10 @@ TEST_F(PrecondTriangularScenarios, tolerance_until_the_clear)
     }
 }
 
-// A pivot with |pivot| <= boost_tol becomes boost_val, and disabling the boost on the
-// same mat_info leaves the next factorization alone.
+// A pivot with |pivot| <= boost_tol becomes |boost_val| with the sign of the pivot, and
+// disabling the boost on the same mat_info leaves the next factorization alone. The sign
+// is kept on purpose, to keep the inertia of A; the csrilu0_numeric_boost page, which
+// gives the boosted pivot as boost_val, needs to say so.
 TEST_F(PrecondTriangularScenarios, csrilu0_numeric_boost)
 {
     const auto   a         = from_dense({{-1e-3, 1}, {1, 4}});
@@ -1744,9 +1787,7 @@ TEST_F(PrecondTriangularScenarios, csrilu0_numeric_boost)
         ASSERT_EQ(rocsparse_dcsrilu0_numeric_boost(handle, p.info, 1, &boost_tol, &boost_val),
                   rocsparse_status_success);
         ASSERT_EQ(p.ilu0(), rocsparse_status_success);
-        check(p.values()[0],
-              known_defect(-2.0, 2.0, "the boost keeps the sign of the pivot"),
-              "the boosted pivot");
+        check(p.values()[0], is(-2.0), "the boosted pivot");
 
         ASSERT_NO_FATAL_FAILURE(p.set_values());
         ASSERT_EQ(rocsparse_dcsrilu0_numeric_boost(handle, p.info, 0, &boost_tol, &boost_val),
@@ -1764,86 +1805,6 @@ namespace
 {
     constexpr rocsparse_operation conj_transpose = rocsparse_operation_conjugate_transpose;
 
-    rocsparse_status csrsm_buffer_size(triangular_problem& p,
-                                       rocsparse_operation trans_A,
-                                       rocsparse_operation trans_B,
-                                       int32_t             nrhs,
-                                       const double*       B,
-                                       int32_t             ldb,
-                                       size_t*             size)
-    {
-        const double alpha = 1.0;
-        return rocsparse_dcsrsm_buffer_size(p.handle,
-                                            trans_A,
-                                            trans_B,
-                                            p.a.n,
-                                            nrhs,
-                                            p.a.nnz(),
-                                            &alpha,
-                                            p.A,
-                                            p.val,
-                                            p.row,
-                                            p.col,
-                                            B,
-                                            ldb,
-                                            p.info,
-                                            rocsparse_solve_policy_auto,
-                                            size);
-    }
-
-    rocsparse_status csrsm_analysis(triangular_problem& p,
-                                    rocsparse_operation trans_A,
-                                    rocsparse_operation trans_B,
-                                    int32_t             nrhs,
-                                    const double*       B,
-                                    int32_t             ldb)
-    {
-        const double alpha = 1.0;
-        return rocsparse_dcsrsm_analysis(p.handle,
-                                         trans_A,
-                                         trans_B,
-                                         p.a.n,
-                                         nrhs,
-                                         p.a.nnz(),
-                                         &alpha,
-                                         p.A,
-                                         p.val,
-                                         p.row,
-                                         p.col,
-                                         B,
-                                         ldb,
-                                         p.info,
-                                         rocsparse_analysis_policy_force,
-                                         rocsparse_solve_policy_auto,
-                                         p.buffer);
-    }
-
-    rocsparse_status csrsm_solve(triangular_problem& p,
-                                 rocsparse_operation trans_A,
-                                 rocsparse_operation trans_B,
-                                 int32_t             nrhs,
-                                 double*             B,
-                                 int32_t             ldb)
-    {
-        const double alpha = 1.0;
-        return rocsparse_dcsrsm_solve(p.handle,
-                                      trans_A,
-                                      trans_B,
-                                      p.a.n,
-                                      nrhs,
-                                      p.a.nnz(),
-                                      &alpha,
-                                      p.A,
-                                      p.val,
-                                      p.row,
-                                      p.col,
-                                      B,
-                                      ldb,
-                                      p.info,
-                                      rocsparse_solve_policy_auto,
-                                      p.buffer);
-    }
-
     size_t csrsv_buffer_size(triangular_problem& p, rocsparse_operation op)
     {
         size_t size = 0;
@@ -1855,7 +1816,8 @@ namespace
 }
 
 // csrsv_zero_pivot does not read the matrix descriptor, and the documentation lists no
-// status for a null one.
+// status for a null one. hipsparseXcsrsv2_zeroPivot calls it with a null descriptor, so
+// rejecting one breaks hipSPARSE: the page needs to say that the descriptor is not read.
 TEST_F(PrecondTriangularScenarios, csrsv_zero_pivot_without_a_matrix_descriptor)
 {
     triangular_problem p(handle, make_grid_matrix<double>(3, true), rocsparse_index_base_zero);
@@ -1867,9 +1829,12 @@ TEST_F(PrecondTriangularScenarios, csrsv_zero_pivot_without_a_matrix_descriptor)
     EXPECT_EQ(position, -1);
 }
 
-// One buffer serves csrsv, csrilu0 and csric0 on one pattern: the sizes are equal. The
-// documentation names no operation; csrsv with op transpose needs more, for the
-// transposed matrix. The matrix is large enough for the sizes to differ: with 16 rows
+// The csrsv, csrilu0 and csric0 buffer size pages say that the sizes are identical on
+// one pattern, so that one buffer can be shared, and name no operation. That holds for
+// csrsv with op none; with op transpose csrsv needs more, for the transposed matrix, so
+// a buffer sized by csrilu0_buffer_size or csric0_buffer_size is too small for it (as
+// in the IC(0) workflow, which solves with A^T). The pages need to restrict the
+// statement to op none. The matrix is large enough for the sizes to differ: with 16 rows
 // every size is the same minimum.
 TEST_F(PrecondTriangularScenarios, buffer_size_of_the_solve_and_the_factorizations)
 {
@@ -1966,15 +1931,14 @@ TEST_F(PrecondTriangularScenarios, csrsv_empty_matrix_without_a_handle)
           "csrsv_solve with a null handle");
 }
 
-// The documentation rejects conjugate_transpose with not_implemented; csrsv accepts it
-// and solves with A^H.
+// The csrsv page contradicts itself: it defines op(A) = A^H for conjugate_transpose and
+// lists not_implemented for it. csrsv implements it and solves with A^H (with double
+// values, the solve with the transpose); the page needs reconciling with the routine.
 TEST_F(PrecondTriangularScenarios, csrsv_conjugate_transpose)
 {
     triangular_problem p(handle, make_grid_matrix<double>(3, true), rocsparse_index_base_zero);
     ASSERT_NO_FATAL_FAILURE(p.init());
-    const auto expected = known_defect(rocsparse_status_success,
-                                       rocsparse_status_not_implemented,
-                                       "conjugate_transpose is accepted and solved with A^H");
+    const auto expected = is(rocsparse_status_success);
     size_t     size     = 0;
     check(rocsparse_dcsrsv_buffer_size(
               handle, conj_transpose, p.a.n, p.a.nnz(), p.A, p.val, p.row, p.col, p.info, &size),
@@ -1984,17 +1948,19 @@ TEST_F(PrecondTriangularScenarios, csrsv_conjugate_transpose)
     check(p.sv_analysis(p.A, rocsparse_analysis_policy_force, conj_transpose),
           expected,
           "csrsv_analysis");
-    device_vector<double> x(right_hand_side(p.a.n)), y(p.a.n);
+    const auto            b = right_hand_side(p.a.n);
+    device_vector<double> x(b), y(p.a.n);
     check(p.sv_solve(p.A, x, y, conj_transpose), expected, "csrsv_solve");
+    expect_close(
+        to_host(y), host_lower_transposed_solve(p.a, b, 1), tolerance<double>(max_row_length(p.a)));
 }
 
-// The same for trans_A and for trans_B of csrsm.
+// The same for trans_A and for trans_B of csrsm: its page defines A^H, B^H and X^H and
+// lists not_implemented for them, and csrsm solves with them.
 TEST_F(PrecondTriangularScenarios, csrsm_conjugate_transpose)
 {
     const int32_t nrhs     = 2;
-    const auto    expected = known_defect(rocsparse_status_success,
-                                       rocsparse_status_not_implemented,
-                                       "conjugate_transpose is accepted and solved with it");
+    const auto    expected = is(rocsparse_status_success);
     for(const bool on_A : {true, false})
     {
         SCOPED_TRACE(on_A ? "trans_A" : "trans_B");
@@ -2003,19 +1969,29 @@ TEST_F(PrecondTriangularScenarios, csrsm_conjugate_transpose)
         triangular_problem p(handle, make_grid_matrix<double>(3, true), rocsparse_index_base_zero);
         ASSERT_NO_FATAL_FAILURE(p.init());
         const int32_t         ldb = on_A ? p.a.n : nrhs;
-        device_vector<double> B(right_hand_side(p.a.n, nrhs));
+        const auto            b   = right_hand_side(p.a.n, nrhs);
+        device_vector<double> B(b);
         size_t                size = 0;
         check(csrsm_buffer_size(p, trans_A, trans_B, nrhs, B, ldb, &size),
               expected,
               "csrsm_buffer_size");
         ASSERT_NO_FATAL_FAILURE(p.reserve(size));
-        check(csrsm_analysis(p, trans_A, trans_B, nrhs, B, ldb), expected, "csrsm_analysis");
+        check(csrsm_analysis(p, trans_A, trans_B, nrhs, B, ldb, rocsparse_analysis_policy_force),
+              expected,
+              "csrsm_analysis");
         check(csrsm_solve(p, trans_A, trans_B, nrhs, B, ldb), expected, "csrsm_solve");
+        // With trans_B, B and X are nrhs x m: op(X) = A^-1 op(B) is their transpose.
+        const auto want = on_A ? host_lower_transposed_solve(p.a, b, nrhs)
+                               : transposed(host_lower_solve(p.a, transposed(b, nrhs, p.a.n), nrhs),
+                                            p.a.n,
+                                            nrhs);
+        expect_close(to_host(B), want, tolerance<double>(max_row_length(p.a)));
     }
 }
 
-// The documentation rejects a matrix type other than general with not_implemented;
-// csrsv accepts the triangular type (and rejects symmetric and hermitian).
+// The csrsv page rejects a matrix type other than general with not_implemented; csrsv
+// accepts the triangular type on purpose (its checks name it next to general) and
+// rejects symmetric and hermitian. The page needs to list the triangular type.
 TEST_F(PrecondTriangularScenarios, csrsv_triangular_matrix_type)
 {
     triangular_problem p(handle, make_grid_matrix<double>(3, true), rocsparse_index_base_zero);
@@ -2024,9 +2000,7 @@ TEST_F(PrecondTriangularScenarios, csrsv_triangular_matrix_type)
         rocsparse_index_base_zero, rocsparse_fill_mode_lower, rocsparse_diag_type_non_unit);
     ASSERT_EQ(rocsparse_set_mat_type(T, rocsparse_matrix_type_triangular),
               rocsparse_status_success);
-    const auto expected = known_defect(rocsparse_status_success,
-                                       rocsparse_status_not_implemented,
-                                       "the triangular matrix type is accepted");
+    const auto expected = is(rocsparse_status_success);
     size_t     size     = 0;
     check(rocsparse_dcsrsv_buffer_size(handle,
                                        rocsparse_operation_none,
@@ -2042,8 +2016,10 @@ TEST_F(PrecondTriangularScenarios, csrsv_triangular_matrix_type)
           "csrsv_buffer_size");
     ASSERT_NO_FATAL_FAILURE(p.reserve(size));
     check(p.sv_analysis(T, rocsparse_analysis_policy_force), expected, "csrsv_analysis");
-    device_vector<double> x(right_hand_side(p.a.n)), y(p.a.n);
+    const auto            b = right_hand_side(p.a.n);
+    device_vector<double> x(b), y(p.a.n);
     check(p.sv_solve(T, x, y), expected, "csrsv_solve");
+    expect_close(to_host(y), host_lower_solve(p.a, b, 1), tolerance<double>(max_row_length(p.a)));
     (void)rocsparse_destroy_mat_descr(T);
 }
 
@@ -2065,10 +2041,11 @@ TEST_F(PrecondTriangularScenarios, csrsm_leading_dimension_too_small)
               "csrsm_buffer_size");
         ASSERT_EQ(csrsm_buffer_size(p, N, trans_B, nrhs, B, ldb, &size), rocsparse_status_success);
         ASSERT_NO_FATAL_FAILURE(p.reserve(size));
-        check(csrsm_analysis(p, N, trans_B, nrhs, B, ldb - 1),
+        const auto force = rocsparse_analysis_policy_force;
+        check(csrsm_analysis(p, N, trans_B, nrhs, B, ldb - 1, force),
               is(rocsparse_status_invalid_size),
               "csrsm_analysis");
-        ASSERT_EQ(csrsm_analysis(p, N, trans_B, nrhs, B, ldb), rocsparse_status_success);
+        ASSERT_EQ(csrsm_analysis(p, N, trans_B, nrhs, B, ldb, force), rocsparse_status_success);
         check(csrsm_solve(p, N, trans_B, nrhs, B, ldb - 1),
               is(rocsparse_status_invalid_size),
               "csrsm_solve");
@@ -2111,8 +2088,13 @@ TEST_F(PrecondTriangularScenarios, DISABLED_csrsv_solve_after_a_reused_analysis)
         ASSERT_EQ(p.ilu0_analysis(rocsparse_analysis_policy_force), rocsparse_status_success);
         ASSERT_EQ(p.ilu0(), rocsparse_status_success);
         ASSERT_EQ(p.sv_analysis(p.L, rocsparse_analysis_policy_reuse), rocsparse_status_success);
-        device_vector<double> x(b), y(a.n);
+        device_vector<double> x(b), y(std::vector<double>(a.n, 7.0));
         ASSERT_EQ(p.sv_solve(p.L, x, y), rocsparse_status_success);
+        auto f = a;
+        f.val  = p.values();
+        expect_close(to_host(y),
+                     host_lower_solve(f, b, 1, rocsparse_diag_type_unit),
+                     tolerance<double>(max_row_length(a)));
         check(p.csrsv_pivot(p.L), is(no_pivot), "csrsv_zero_pivot after the solve with L");
     }
 }
@@ -2204,8 +2186,10 @@ TEST_F(PrecondTriangularScenarios, DISABLED_csrilu0_reusing_a_transposed_analysi
     ASSERT_NO_FATAL_FAILURE(check_compute(p, routine::csrilu0));
 }
 
-// The documented call sequence starts with the analysis; these calls without one crash
-// on the host instead of returning rocsparse_status_invalid_pointer.
+// The documented call sequence starts with the analysis, and the pages list no status
+// for a call without one; these calls crash on the host. The expectation is
+// rocsparse_status_invalid_pointer, what csric0 (csric0_needs_its_analysis) and the BSR
+// routines return without an analysis.
 TEST_F(PrecondTriangularScenarios, DISABLED_csrilu0_without_an_analysis)
 {
     triangular_problem p(handle, make_grid_matrix<double>(4, true), rocsparse_index_base_zero);
