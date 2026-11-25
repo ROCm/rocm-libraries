@@ -126,10 +126,10 @@ generator never writes an illegal graph.
 | F8 | Stride phases | s = 1; `f % s = 0` (f = s, f = 2s); `f % s ≠ 0` (3/2, 7/2, 5/2, 16/8); `f < s` (1/2, 3/4); gcd(s, d) > 1 (s 2, d 2); coprime s, d (s 2, d 3); per-dimension stride | GPU, CPU ref | Q |
 | F9 | Dilation | 1, 2, 3, 5, 12; per dimension | GPU, CPU ref | Q |
 | F10 | Transposed padding | full (pad 0 on a filter > 1); positive (the usual "same" padding); negative (padding larger than the dilated filter) | GPU, CPU ref | Q |
-| F11 | Asymmetric padding | pre 0 / post 1 and pre 1 / post 0 with a stride-2 even filter | GPU, CPU ref take pre and post separately; no reference test covers asymmetric dgrad (I6) | Q (probe) |
-| F12 | Output extent | dy spatial 1 (filter equal to dx); dy larger than dx (even filter, pad 1); dx width at most 8 and 4; dx 16×48 with a 5×5 filter; odd wide dx (32×109); 1×1 dx; extreme aspect 1×256. **Inferred dx dims are illegal** (frontend rejects them): a frontend unit test, not a sweep case. | GPU, CPU ref | Q |
-| F13 | `conv_mode` | `CROSS_CORRELATION`, `CONVOLUTION` | **none**: both references reject `CONVOLUTION` for dgrad (I6) | Q (probe) |
-| F37 | dx elements no tap reaches | stride phases with no taps (`f < s`, gcd(s, d) > 1); a floor remainder: dx's last rows lie past the last window. The engine must write 0 there; the harness prefills outputs with a NaN sentinel, so an unwritten element fails. | GPU, CPU ref | Q |
+| F11 | Asymmetric padding | pre 0 / post 1 and pre 1 / post 0 with a stride-2 even filter | GPU, CPU ref take pre and post separately; no reference test covers asymmetric dgrad (I6) | PR (probe) |
+| F12 | Output extent | dy spatial 1 (filter equal to dx); dy larger than dx (even filter, pad 1); dx width at most 8 and 4; dx 16×48 with a 5×5 filter; odd wide dx (32×109); 1×1 dx; extreme aspect 1×256. **Inferred dx dims are illegal** (frontend rejects them): a frontend unit test, not a sweep case. | GPU, CPU ref | PR |
+| F13 | `conv_mode` | `CROSS_CORRELATION`, `CONVOLUTION` | **none**: both references reject `CONVOLUTION` for dgrad (I6) | PR (probe) |
+| F37 | dx elements no tap reaches | stride phases with no taps (`f < s`, gcd(s, d) > 1); a floor remainder: dx's last rows lie past the last window. The engine must write 0 there; the harness prefills outputs with a NaN sentinel, so an unwritten element fails. | GPU, CPU ref | PR |
 
 ### 2.2 Memory layout and tensor kind
 
@@ -149,7 +149,7 @@ scalar is not a valid graph.
 
 | Id | Feature | Values to cover | Oracle | Earliest level |
 |---|---|---|---|---|
-| F19 | IO data type | fp32, fp16, bf16; fp8 (E4M3, E5M2 and the FNUZ forms) with fp32 dx; int8 with int32 dx; double | **none** beyond the core three (I6) | Q (core; fp8 E4M3 and double as probes) |
+| F19 | IO data type | fp32, fp16, bf16; fp8 (E4M3, E5M2 and the FNUZ forms) with fp32 dx; int8 with int32 dx; double | **none** beyond the core three (I6) | Q (core), PR (fp8 E4M3 and double as probes) |
 | F20 | Mixed precision | fp16 or bf16 dy and w with fp32 dx; dy fp16 with w fp32; dy fp32 with w fp16; fp16 compute | **none** (only uniform core triples are registered) | PR |
 
 ### 2.4 Values and numerics
@@ -459,11 +459,11 @@ hazards its reduction.
 
 | Rule | Meaning |
 |---|---|
-| Core cover | Every level holds every rank × layout × data type cell (18) for plain dgrad and for each fused topology. In quick, at least one engine executes each cell of plain dgrad. |
+| Core cover | PR and every level above hold every rank × layout × data type cell (18) for plain dgrad and for each fused topology. Quick is a smoke set of 8 cases (4 plain, 4 fused) that catches gross breakage in a minute; it does not cover the cells. |
 | One feature at a time | Each S and L class changes one dgrad property from the defaults, so a failure points at it. |
 | Size grows with level | PR proves a class works small; nightly at medium size; full adds production sizes and stress. |
 | All-pairs | By the end of nightly every S class meets every layout × data type pair of its rank, and every feature probe meets every core value. |
-| Probes | Every unsupported feature, awkward combination and hazard has a probe in every level (directly or through the cascade). |
+| Probes | Every unsupported feature, awkward combination and hazard has a probe in PR and in every level above (directly or through the cascade). Quick holds none of them. |
 | Concrete graphs | Each level runs checked-in graphs only; the generator is deterministic. |
 | Unsupported stays in | A feature no engine supports stays in the sweep, unclaimed; it reports `unclaimed_support` once an engine adds it. |
 
@@ -472,17 +472,17 @@ hazards its reduction.
 | Feature group | quick | PR | nightly | full |
 |---|---|---|---|---|
 | Shape size | ≤ 20 MFLOP | ≤ 200 MFLOP (+3 M) | ≤ 8 GFLOP | unbounded |
-| Plain core | S1, S3, S6, S8, S17, S19, S23, S44, S53, pair rotated per rank | every S class × rank once, pair rotated | every S class × every pair of its rank; L × 2 pairs | L × every pair |
-| Rejection probes | `CONVOLUTION`, asymmetric pad (S10), fp8, double, sigmoid fusion | `CONVOLUTION` per rank; 6 extra types; 5 mixed pairs | × core | asymmetric padding, mixed layouts, strides, mixed types and values × every S class of S1–S31; `CONVOLUTION`, extra types and override shape stay at nightly's × core (T11) |
+| Plain core | S3 on 2D (fp32 channels-first, fp16 channels-last), S17 on 2D (bf16), S3 on 3D (fp32 channels-last) | the earlier quick set (S1, S3, S6, S8, S17, S19, S23, S44, S53, pair rotated per rank) and every S class × rank once, pair rotated | every S class × every pair of its rank; L × 2 pairs | L × every pair |
+| Rejection probes | — | `CONVOLUTION` per rank; asymmetric pad (S10); fp8 and double; 6 extra types; 5 mixed pairs | × core | asymmetric padding, mixed layouts, strides, mixed types and values × every S class of S1–S31; `CONVOLUTION`, extra types and override shape stay at nightly's × core (T11) |
 | F15, F16 | — | 1 case each | rank × dtype, 2 mixes and 3 stride kinds | paired with every S class of S1–S31 |
-| F19, F20 | fp8 E4M3, double | each extra type and mixed pair once | × rank × layout | F20 paired with every S class of S1–S31; F19 — (T11) |
+| F19, F20 | — | each extra type and mixed pair once | × rank × layout | F20 paired with every S class of S1–S31; F19 — (T11) |
 | F21 values | uniform | + zero, const, large | + tiny, × rank × dtype; A1, A2 | × core |
 | F35 | — | 1 case | × rank × dtype | — (T11) |
 | H hazards | — | each H once (2D) | each H × every pair (2D); 1D, 3D × 2 pairs | — |
 | Model (M) | — | M1, M8, M11 | M1–M12 × every pair of its rank | — |
 | Corpus (R) | — | 45 graphs | 86 graphs | 76 graphs |
 | Stress | — | — | — | X1, X2, X4 × every pair; X3 fp16 and bf16 |
-| Fusion core (4 topologies × 18) | 1 per cell; ReLU family rotated on `dact`, `pre_dact` | `dact`, `pre_dact`: 2× core, all 10 activations over the cells; `add`, `add_drelu`: 1× core | from quick and PR (T9) | from quick and PR (T9) |
+| Fusion core (4 topologies × 18) | S3 on 2D, ReLU: `dact` (fp16 channels-last), `pre_dact` (fp32), `add` (bf16), `add_drelu` (fp32 channels-last) | the earlier quick cells (1 per cell, ReLU family rotated on `dact`, `pre_dact`, plus a sigmoid `dact`) and: `dact`, `pre_dact`: 2× core, all 10 activations over the cells; `add`, `add_drelu`: 1× core | from PR (T9) | from PR (T9) |
 | Fusion features F30, F31 | — | each once per prologue / epilogue | × rank | — |
 
 The level rules generate more fused cases than the table shows (nightly: `dact`
@@ -495,14 +495,14 @@ Cases generated (own level / cumulative):
 
 | Level | Plain dgrad | Fused | Own | Cumulative | Claim | Probe |
 |---|---|---|---|---|---|---|
-| quick | 29 | 73 | **102** | 102 | 43 | 59 |
-| PR | 231 | 131 | **362** | 464 | 206 | 156 |
-| nightly | 1,506 | 12 | **1,518** | 1,982 | 1,151 | 367 |
-| full | 1,150 | 0 | **1,150** | 3,132 | 662 | 488 |
+| quick | 4 | 4 | **8** | 8 | 5 | 3 |
+| PR | 260 | 203 | **463** | 471 | 249 | 214 |
+| nightly | 1,503 | 12 | **1,515** | 1,986 | 1,148 | 367 |
+| full | 1,150 | 0 | **1,150** | 3,136 | 662 | 488 |
 
-By size class: quick S 102. PR S 297, H 17, M 3, R 45. Nightly S 903, L 298,
+By size class: quick S 8. PR S 398, H 17, M 3, R 45. Nightly S 900, L 298,
 M 66, H 153, A 12, R 86. Full S 462, L 592, R 76, X 20. 656 distinct dgrad
-geometries. The trims of §4.3 remove 3,411 of the 6,543 generated cases.
+geometries. The trims of §4.3 remove 3,410 of the 6,546 generated cases.
 `generate_conv_bwd_bundles.py --report` prints the counts again.
 
 ### 4.2 Probes and regressions
@@ -546,13 +546,13 @@ covers the same risk instead, and what brings them back.
 **Measured trims (applied after case ids are assigned, `conv_bwd_plan.TRIMS`).**
 The cases that remain keep their ids, seeds and claims, and undoing a trim
 restores exactly what it removed. No trim removes the last probe of a feature
-from any level, and every core cell of every topology stays in quick and PR.
+from any level, and every core cell of every topology stays in PR.
 F11, F15, F16, F20 and the F30, F31 fused variants are never trimmed: F11 exists
 only in full, and the others hold the evidence for the defects of §4.5.
 
 | Id | Product not run | Cases | Why it adds little | Covered instead by | Add it back when |
 |---|---|---|---|---|---|
-| T9 | Plain repeats of the four fused topologies in nightly and full | 3,171 (nightly 1,218, full 1,953) | No engine executed a fused dgrad graph on gfx90a or gfx942 (§4.5); each case repeats the same decline. | Each topology's 18 core cells in quick and PR, all 10 activations over the PR cells, and the F30, F31 variants in nightly. | An engine executes a dgrad fusion: remove its topology from `UNEXECUTED_TOPOLOGIES`. |
+| T9 | Plain repeats of the four fused topologies in nightly and full | 3,170 (nightly 1,218, full 1,952) | No engine executed a fused dgrad graph on gfx90a or gfx942 (§4.5); each case repeats the same decline. | Each topology's 18 core cells in PR, all 10 activations over the PR cells, and the F30, F31 variants in nightly. | An engine executes a dgrad fusion: remove its topology from `UNEXECUTED_TOPOLOGIES`. |
 | T11 | F13, F19 and F35 paired with every S class in full | 240 | No engine executed them, and no reference can judge F13 or F19 (§6). | Each × core in nightly (F13 18, F19 108, F35 9). | An engine executes the feature: remove it from `UNEXECUTED_FEATURES`; for F13 and F19 the reference fixes of §6 must land too. |
 
 ### 4.4 Cost
@@ -560,23 +560,23 @@ only in full, and the others hold the evidence for the defects of §4.5.
 | Estimate | Value |
 |---|---|
 | FLOP per case | quick ≤ 14 M, PR ≤ 1.9 G (the three M cases), nightly ≤ 7.3 G, full 116 G (X2) |
-| Oracle | GPU reference, with the CPU reference as the fallback (§2). All 2,429 executed cases of the measurement run below were judged by the GPU reference. All 6,543 cases ran serially in 18 min (gfx942) and 21 min (gfx90a). |
+| Oracle | GPU reference, with the CPU reference as the fallback (§2). All 2,430 executed cases of the measurement run below were judged by the GPU reference. All 6,546 cases ran serially in 18 min (gfx942) and 21 min (gfx90a). |
 | Compile and solver search | paid once per unique shape on a cold cache |
 | Device memory | X1 ≈ 0.4 GB, X3 ≈ 13 GB (fp16), so `minimum_vram_mb` is set on those cases |
 
 ### 4.5 Measured run
 
 **Which cases execute.** T9 and T11 come from serial runs (one test at a time,
-chunks of 100 tests per process) of all 6,543 generated cases with the MIOpen
+chunks of 100 tests per process) of all 6,546 generated cases with the MIOpen
 plugin, the only engine that runs dgrad today, with the engine TOML's dgrad
 tolerance classes (§6):
 
 | Architecture | OK | Skipped | Failed | Crashed | Wall time |
 |---|---|---|---|---|---|
-| gfx90a (MI250) | 2,429 | 4,114 | 0 | 0 | 21 min |
-| gfx942 (MI325X) | 2,429 | 4,114 | 0 | 0 | 18 min |
+| gfx90a (MI250) | 2,430 | 4,116 | 0 | 0 | 21 min |
+| gfx942 (MI325X) | 2,430 | 4,116 | 0 | 0 | 18 min |
 
-- No fused graph executed on either architecture (3,387 cases, all four
+- No fused graph executed on either architecture (3,389 cases, all four
   topologies), and F11, F13, F15, F19, F20, F30, F31 and F35 never executed. The
   plugin declines them, or the graph is outside what it computes correctly.
 - Every plain-dgrad class of §3 executed on both, except the asymmetric-padding
@@ -584,28 +584,30 @@ tolerance classes (§6):
   the plugin declines. F16 (non-packed strides) executes for 53 of 109 cases (the
   channels-first ones); the plugin declines the rest.
 - Every executed case was judged by the GPU reference (`[ VERIFIER ] gpu_ref`).
-- Without the TOML classes, 593 (gfx90a) and 295 (gfx942) of the 3,132 cases of the
-  current set fail at the default tolerance, every one by the numerical floor of its
-  reduction length (§6). With them, the measurement run above and the current set
-  below pass.
+- Without the TOML classes, 593 (gfx90a) and 295 (gfx942) of the 3,132 cases the plan
+  held before quick was reduced fail at the default tolerance, every one by the
+  numerical floor of its reduction length (§6). With them, the measurement run above
+  and the current set below pass.
 
-**The current set.** All 3,132 cases, serial, with the MIOpen plugin and the
+**The current set.** All 3,136 cases, serial, with the MIOpen plugin and the
 engine TOML:
 
 | Architecture | OK | Skipped | Failed | Crashed | Wall time |
 |---|---|---|---|---|---|
-| gfx90a (MI250) | 2,429 | 703 | 0 | 0 | 21 min |
-| gfx942 (MI325X) | 2,429 | 703 | 0 | 0 | 18 min |
+| gfx90a (MI250) | 2,430 | 706 | 0 | 0 | 21 min |
+| gfx942 (MI325X) | 2,430 | 706 | 0 | 0 | 17 min |
+
+Quick alone (8 cases) runs in under 30 s on either architecture: its four plain
+cases execute and pass, and its four fused cases are declined.
 
 Every skip is a graph the MIOpen plugin declines ("does not support this graph"):
 the mixed-type (F20), mixed-layout (F15), non-packed channels-last (part of F16),
 above-2³¹-element (X3) and the other graphs listed above. Before the plugin's
 decline rules (ALMIOPEN-3008) these probes were accepted and then failed or
 computed wrongly; they now show as skips, so a regression of a decline shows as an
-`unclaimed_support` or a failure. Claims are harvested from these runs: 2,028
+`unclaimed_support` or a failure. Claims are harvested from these runs: 2,029
 claim cases on each of gfx90a and gfx942 (linux), every claim case that executed;
-the other 34 claim cases are `dact` with the ReLU family, which no engine
-executes.
+the other 35 claim cases are fused (`dact`), which no engine executes.
 
 ---
 

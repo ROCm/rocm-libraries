@@ -493,6 +493,35 @@ class Builder:
         return [s for s in candidates if P.shape_L(s, r) is not None]
 
 
+def core_cases(b):
+    """The wide set that quick used to hold: one class from each group on every
+    rank, the probes, and every topology's core cells. ``b`` is the quick-level
+    builder, so the shapes are the quick-level shapes. PR holds it now."""
+    cases = []
+    add = cases.append
+    P1 = P.PAIRS[0]  # (cf, fp32)
+    for r in P.RANKS:
+        for i, s in enumerate(b.sids(r, P.S_QUICK)):
+            add(b.S(s, r, P.PAIRS[(i + r - 1) % 6]))
+    add(v_convmode(b.S("S3", 2, P1)))
+    add(b.S("S10", 2, P1))  # asymmetric padding
+    add(v_type(b.S("S3", 2, P1), "fp8_e4m3"))
+    add(v_type(b.S("S3", 2, P1), "double"))
+    for ti, topo in enumerate(P.FUSED):
+        for r in P.RANKS:
+            sids = b.sids(r, P.S_QUICK)
+            for j, pair in enumerate(P.PAIRS):
+                k = j + ti + r
+                act = (
+                    P.RELU_FAMILY[k % len(P.RELU_FAMILY)]
+                    if topo in P.HAS_ACT_PLACEHOLDERS
+                    else "relu"
+                )
+                add(fuse(b.S(sids[k % len(sids)], r, pair), topo, act=act))
+    add(fuse(b.S("S3", 2, P1), "dact", act="sigmoid"))
+    return cases
+
+
 def rules(lv):
     b = Builder(lv)
     cases = []
@@ -500,28 +529,21 @@ def rules(lv):
     P1 = P.PAIRS[0]  # (cf, fp32)
     acts = list(P.ACTS)
 
-    if lv == 0:  # quick: what must we test to catch gross breakage fast?
-        for r in P.RANKS:
-            for i, s in enumerate(b.sids(r, P.S_QUICK)):
-                add(b.S(s, r, P.PAIRS[(i + r - 1) % 6]))
-        add(v_convmode(b.S("S3", 2, P1)))
-        add(b.S("S10", 2, P1))  # asymmetric padding
-        add(v_type(b.S("S3", 2, P1), "fp8_e4m3"))
-        add(v_type(b.S("S3", 2, P1), "double"))
-        for ti, topo in enumerate(P.FUSED):
-            for r in P.RANKS:
-                sids = b.sids(r, P.S_QUICK)
-                for j, pair in enumerate(P.PAIRS):
-                    k = j + ti + r
-                    act = (
-                        P.RELU_FAMILY[k % len(P.RELU_FAMILY)]
-                        if topo in P.HAS_ACT_PLACEHOLDERS
-                        else "relu"
-                    )
-                    add(fuse(b.S(sids[k % len(sids)], r, pair), topo, act=act))
-        add(fuse(b.S("S3", 2, P1), "dact", act="sigmoid"))
+    if lv == 0:  # quick: the smallest set that catches gross breakage
+        # Plain: the 3x3 filter on 2D (fp32 channels-first, fp16 channels-last),
+        # a stride-2 filter (bf16), and a 3D filter (fp32 channels-last).
+        add(b.S("S3", 2, P.PAIRS[0]))
+        add(b.S("S3", 2, P.PAIRS[3]))
+        add(b.S("S17", 2, P.PAIRS[4]))
+        add(b.S("S3", 3, P.PAIRS[1]))
+        # Fused: one cell of each topology on the 3x3 filter (dact is golden G7).
+        for topo, pair in zip(
+            P.FUSED, (P.PAIRS[3], P.PAIRS[0], P.PAIRS[4], P.PAIRS[1])
+        ):
+            add(fuse(b.S("S3", 2, pair), topo, act="relu"))
 
     elif lv == 1:  # PR: what must we test on every PR?
+        cases.extend(core_cases(Builder(0)))
         for r in (1, 2, 3, 4):
             for i, s in enumerate(b.sids(r)):
                 add(b.S(s, r, P.PAIRS[(i + r + 3) % 6]))
