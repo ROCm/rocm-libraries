@@ -3576,9 +3576,12 @@ def run_attention_dense_torch(
       ``device`` for ``kv_segments > 1``;
     * with ``spec.paged`` the ``k``/``v`` page caches also need ``device``,
       ``dtype``, ``is_cuda`` and ``is_contiguous()``;
-    * with ``emit_lse`` each of q/k/v/out also needs ``device``, ``numel()`` and
-      ``element_size()``, and ``lse`` needs ``shape``, ``dtype``, ``numel()``,
-      ``element_size()``, ``is_contiguous()``, ``data_ptr()`` and ``device``.
+    * with ``emit_lse`` each of q/k/v/out also needs ``device``, ``is_cuda`` (True),
+      ``numel()`` and ``element_size()``, and ``lse`` needs ``shape``, ``dtype``,
+      ``numel()``, ``element_size()``, ``is_contiguous()``, ``data_ptr()``,
+      ``device`` and ``is_cuda`` (True). A view without ``is_cuda``, or with it
+      False, raises ``ValueError``; so does an optional tensor that is passed
+      (``_lse_store._check_lse_buffer``).
 
     With ``kv_segments > 1`` the runner allocates the segment workspace with torch
     unless ``workspace_allocator`` is given: ``workspace_allocator(shape)`` returns

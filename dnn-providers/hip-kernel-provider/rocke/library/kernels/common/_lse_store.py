@@ -248,17 +248,22 @@ def _check_lse_buffer(lse, q, expected, inputs):
 
     * ``lse``: ``shape``, ``dtype`` (FP32 is any dtype whose ``str()`` ends in
       ``float32``: torch's or numpy's), ``is_contiguous()``, ``data_ptr()``,
-      ``numel()``, ``element_size()`` and ``device``. One of the first six missing
-      raises ``ValueError``.
-    * ``q``: ``device``.
+      ``numel()``, ``element_size()``, ``device`` and ``is_cuda`` (True). One of the
+      first six missing raises ``ValueError``; a missing ``device`` raises
+      ``AttributeError``.
+    * ``q``: ``device`` and ``is_cuda`` (True); a missing ``device`` raises
+      ``AttributeError``.
     * each tensor of ``inputs`` that is not None (q, k, v, out and the optional
-      tensors): ``device`` and ``numel()``, and, when it has elements,
-      ``shape``, ``stride()``, ``data_ptr()`` and ``element_size()``. These are
-      read without a check first, so a missing one raises ``AttributeError``: a
-      caller without torch that asks for LSE passes views that have all of them.
+      tensors): ``device``, ``is_cuda`` (True) and ``numel()``, and, when it has
+      elements, ``shape``, ``stride()``, ``data_ptr()`` and ``element_size()``.
+      Apart from ``is_cuda``, these are read without a check first, so a missing
+      one raises ``AttributeError``: a caller without torch that asks for LSE
+      passes views that have all of them.
 
-    ``is_cuda`` is optional everywhere and taken as True when absent; ``device``
-    is still compared with q's."""
+    A caller that does not use torch passes views that declare ``is_cuda``; a
+    tensor without it, or with it False, is refused with ``ValueError`` (a CPU
+    view whose ``device`` equals q's would otherwise reach a GPU kernel by its
+    host address). ``device`` is still compared with q's."""
     if not all(
         hasattr(lse, a)
         for a in (
@@ -278,8 +283,8 @@ def _check_lse_buffer(lse, q, expected, inputs):
     if not lse.is_contiguous():
         raise ValueError("lse must be contiguous")
     if (
-        not getattr(q, "is_cuda", True)
-        or not getattr(lse, "is_cuda", True)
+        not getattr(q, "is_cuda", False)
+        or not getattr(lse, "is_cuda", False)
         or lse.device != q.device
     ):
         raise ValueError("lse and q must be GPU tensors on the same device")
@@ -289,7 +294,7 @@ def _check_lse_buffer(lse, q, expected, inputs):
     for name, tensor in inputs.items():
         if tensor is None:
             continue
-        if not getattr(tensor, "is_cuda", True) or tensor.device != q.device:
+        if not getattr(tensor, "is_cuda", False) or tensor.device != q.device:
             raise ValueError(f"{name} must be on q's GPU device")
         if not tensor.numel():
             continue

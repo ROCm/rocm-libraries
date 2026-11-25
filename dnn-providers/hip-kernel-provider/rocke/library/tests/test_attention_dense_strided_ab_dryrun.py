@@ -37,6 +37,8 @@ from pathlib import Path
 
 import pytest
 
+from rocke.helpers.split_k import ARCH_NUM_CUS
+
 _LIBROOT = Path(__file__).resolve().parents[1]
 _ROCKE = _LIBROOT.parent
 _AB_FILE = _LIBROOT / "benchmarks" / "common" / "attention_dense_strided_ab.py"
@@ -628,16 +630,61 @@ def test_export_records_the_runners_strides_and_pointer_slots(exported):
 
 def test_bare_export_records_the_cu_count_it_was_built_for(exported):
     """The driver compares this field with its own CU count and refuses a mismatch."""
-    assert exported["meta"]["num_cus"] == ab.ARCH_CUS["gfx942"]
+    assert exported["meta"]["num_cus"] == ARCH_NUM_CUS["gfx942"]
+
+
+def test_every_supported_arch_has_its_cu_count_in_the_shared_table():
+    """The harness keeps no CU table of its own: ``--arch`` offers ``ARCHES``, and
+    each one's count is its entry of ``rocke.helpers.split_k.ARCH_NUM_CUS``."""
+    assert ab.ARCHES and set(ab.ARCHES) <= set(ARCH_NUM_CUS)
+    assert not hasattr(ab, "ARCH_CUS")
+    parser = ab.build_parser()
+    for arch in ab.ARCHES:
+        assert parser.parse_args(["--arch", arch]).arch == arch
+    with pytest.raises(SystemExit):
+        parser.parse_args(["--arch", "gfx1100"])  # in the table, not supported here
+
+
+@pytest.mark.parametrize("flag", ["dry_run", "list"])
+@pytest.mark.parametrize("arch", ab.ARCHES)
+def test_cu_count_without_a_device_is_read_from_the_shared_table(
+    arch, flag, monkeypatch
+):
+    """The count is looked up in the shared table where it is used: a copy kept in the
+    harness would not follow this one (the values are stand-ins, not the real counts,
+    so the test does not pin any CU count)."""
+    import rocke.helpers.split_k as split_k
+
+    stand_in = {a: 1000 + i for i, a in enumerate(ab.ARCHES)}
+    monkeypatch.setattr(split_k, "ARCH_NUM_CUS", stand_in)
+    run = types.SimpleNamespace(arch=arch, num_cus=0, dry_run=False, list=False)
+    setattr(run, flag, True)
+    assert ab.resolve_num_cus(run) == stand_in[arch]
+
+
+def test_a_rocke_without_the_cu_table_is_a_refusal_and_num_cus_still_works(
+    monkeypatch,
+):
+    """An arm tree or a venv whose rocke predates the public table cannot give a CU
+    count: that is a refusal that names ``--num-cus``, and a count that is passed never
+    reads the table."""
+    import rocke.helpers.split_k as split_k
+
+    monkeypatch.delattr(split_k, "ARCH_NUM_CUS")
+    run = types.SimpleNamespace(arch="gfx942", num_cus=0, dry_run=True, list=False)
+    with pytest.raises(SystemExit, match="pass --num-cus"):
+        ab.resolve_num_cus(run)
+    run.num_cus = 77
+    assert ab.resolve_num_cus(run) == 77
 
 
 def test_cu_count_defaults_to_the_device_and_a_mismatched_export_is_refused(
     tmp_path, monkeypatch
 ):
     """A measured run builds its factory requests for the device's own CU count
-    (ARCH_CUS only without a device), and an arm exported for another count is refused
-    before anything is timed. In-process (no driver subprocess, no source tree), so it
-    runs in the installed CPU lane."""
+    (``ARCH_NUM_CUS`` only without a device), and an arm exported for another count is
+    refused before anything is timed. In-process (no driver subprocess, no source
+    tree), so it runs in the installed CPU lane."""
     import json
 
     def args(**kw):
@@ -653,8 +700,8 @@ def test_cu_count_defaults_to_the_device_and_a_mismatched_export_is_refused(
     monkeypatch.setitem(sys.modules, "torch", fake_torch)
     assert ab.resolve_num_cus(args()) == 228  # a 228-CU gfx942, not the table's 304
     assert ab.resolve_num_cus(args(num_cus=80)) == 80
-    assert ab.resolve_num_cus(args(dry_run=True)) == ab.ARCH_CUS["gfx942"]
-    assert ab.resolve_num_cus(args(list=True)) == ab.ARCH_CUS["gfx942"]
+    assert ab.resolve_num_cus(args(dry_run=True)) == ARCH_NUM_CUS["gfx942"]
+    assert ab.resolve_num_cus(args(list=True)) == ARCH_NUM_CUS["gfx942"]
 
     export = tmp_path / "a.export.yaml"
     export.write_text(json.dumps({"meta": {"num_cus": 304}, "cases": []}))

@@ -375,6 +375,14 @@ class PersistDecode:
         """Why ``spec`` cannot use this decode, or None."""
         return None
 
+    def required_num_persistent(self, spec) -> int | None:
+        """The one workgroup count (``num_persistent``) this order needs for the
+        spec's baked shape, or None when it does not tie the count to the shape
+        (the grid-stride orders run any count; ``hq_minor_swz`` needs a multiple of
+        ``chiplet_num_xcds``, which its ``check`` states). A formula of the shape
+        only: it does not say the order is legal for it (``check`` does)."""
+        return None
+
     def fastdiv_dividend_bound(self, spec) -> int:
         """An upper bound on every runtime fastdiv dividend: the work count."""
         return _spec_nqb(spec) * spec.num_query_heads * spec.batch
@@ -564,9 +572,12 @@ class PersistGqaPair(PersistDecode):
     name = "gqa_pair"
     tag = "gqapair"
 
+    def required_num_persistent(self, spec):
+        return _spec_nqb(spec) * spec.num_kv_heads * spec.batch
+
     def check(self, spec):
         nqb = _spec_nqb(spec)
-        expected_np = nqb * spec.num_kv_heads * spec.batch
+        expected_np = self.required_num_persistent(spec)
         why = _aligned_causal_error(spec, self.name)
         if why:
             return why
@@ -610,10 +621,14 @@ class PersistGqaPair2Phase(PersistDecode):
     name = "gqa_pair_2phase"
     tag = "gqapair2"
 
+    def required_num_persistent(self, spec):
+        nqb = _spec_nqb(spec)
+        return nqb * spec.num_kv_heads * spec.batch * spec.num_queries_per_kv // 2
+
     def check(self, spec):
         gqa = spec.num_queries_per_kv
         nqb = _spec_nqb(spec)
-        expected_np = nqb * spec.num_kv_heads * spec.batch * gqa // 2
+        expected_np = self.required_num_persistent(spec)
         why = _aligned_causal_error(spec, self.name)
         if why:
             return why

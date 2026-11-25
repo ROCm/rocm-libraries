@@ -22,7 +22,10 @@ Rows, one per line, ``{arch, kernel, variant, {overrides}, served}``:
   and on gfx942 the K double buffer, the V prefetch and the KV-segment split), with rocKE's
   answer for the flipped spec. The census applies the same overrides to the shipped kernel's
   KMD metadata and asks the engine. This is how a class the catalog does not carry today (a
-  gfx950 persistent kernel) is still held to rocKE. Flips rocKE's spec rejects are left out.
+  gfx950 persistent kernel) is still held to rocKE. A persistent order whose workgroup count
+  is a formula of the shape (gqa_pair, gqa_pair_2phase) gets the count the decode requires
+  for the kernel's own shape (``required_num_persistent``). Flips rocKE's spec rejects are
+  left out.
 
 Not covered, on purpose: varlen, paged and (gfx950) fp8 K/V-cache specs. The KMD cannot express
 them and their kernels take more arguments than the 22 the engine launches, so the argument census
@@ -41,24 +44,17 @@ provider root:
 import importlib
 import inspect
 import json
-import re
 import sys
 import typing
+
+from kernels.common.attention_dense_decode import PERSIST_DECODES
 
 # label -> ({spec field: value}, ((KMD field, value), ...) the engine sees). A string KMD value is
 # spelled as a C++ string, an integer (a flag too) as an integer.
 _PERSISTENT = ({"persistent": True}, (("persistent", 1),))
 _RAGGED = ({"ragged": True}, (("ragged", 1),))
 _BIAS = ({"use_additive_bias": True}, (("use_additive_bias", 1),))
-_GFX950_DECODES = (
-    "auto",
-    "qb_major",
-    "hkv_major",
-    "bt_hkv_minor",
-    "hq_minor_swz",
-    "gqa_pair",
-    "gqa_pair_2phase",
-)
+_GFX950_DECODES = ("auto", *PERSIST_DECODES)
 _FLIPS = {
     "gfx950": {
         "persistent": _PERSISTENT,
@@ -91,19 +87,6 @@ def _spec_class(module):
     builder = module.build_attention_dense
     first = next(iter(inspect.signature(builder).parameters))
     return typing.get_type_hints(builder)[first]
-
-
-def _build_spec(cls, fields):
-    """``cls(**fields)``; a persistent gqa_pair order states the workgroup count its baked shape needs
-    ("requires num_persistent == ... (N), got ..."), so that is taken once from the message.
-    """
-    try:
-        return cls(**fields)
-    except ValueError as error:
-        needed = re.search(r"requires num_persistent == .*? \((\d+)\), got", str(error))
-        if needed is None:
-            raise
-        return cls(**{**fields, "num_persistent": int(needed.group(1))})
 
 
 def _override(field, value):
@@ -141,10 +124,20 @@ def main() -> None:
                 seen.add(key)
                 bases.append((name, spec))
         for name, spec in bases:
+            # The kernel's own (valid) spec: the workgroup count a persistent order needs
+            # depends on batch, KV heads, GQA ratio and query blocks, which no flip changes.
+            base_spec = cls(**spec)
             for label, (spec_flips, overrides) in _FLIPS[arch].items():
                 flipped = {**spec, **spec_flips}
+                # The order the flipped spec ends up with (a flip that does not set one
+                # keeps the kernel's own); "auto" is not an order: any count.
+                decode = flipped.get("persist_decode")
+                if flipped.get("persistent") and decode in PERSIST_DECODES:
+                    needed = PERSIST_DECODES[decode].required_num_persistent(base_spec)
+                    if needed is not None:
+                        flipped["num_persistent"] = needed
                 try:
-                    served = bool(module.body_serves_strides(_build_spec(cls, flipped)))
+                    served = bool(module.body_serves_strides(cls(**flipped)))
                 except (TypeError, ValueError):
                     continue
                 print(_row(arch, name, label, overrides, served))

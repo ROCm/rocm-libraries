@@ -4,6 +4,7 @@
 """Host-only contract for the optional unified (split-KV and tiled 2D) LSE output."""
 
 import importlib
+import math
 import sys
 from contextlib import nullcontext
 from dataclasses import fields as dataclass_fields, replace
@@ -12,6 +13,7 @@ from types import SimpleNamespace
 import pytest
 
 from kernels.common import attention_unified as au
+from kernels.common._lse_store import _check_lse_buffer
 from rocke.core.lower_llvm import lower_kernel_to_llvm
 
 _ARCHES = ("gfx942", "gfx950")
@@ -386,6 +388,99 @@ def test_head_major_validator_refuses_a_non_contiguous_buffer_without_gpu():
         au.validate_unified_lse(
             problem, lse.t(), lse_layout="head_major", **_NO_TENSORS
         )
+
+
+def _gpu_view(address, shape, *, dtype="float32", item_bytes=4):
+    """A device-buffer view as a caller without torch hands it over: everything
+    ``_check_lse_buffer`` reads, ``is_cuda`` included."""
+    count = math.prod(shape)
+    strides = tuple(math.prod(shape[i + 1 :]) for i in range(len(shape)))
+    return SimpleNamespace(
+        shape=shape,
+        dtype=dtype,
+        is_contiguous=lambda: True,
+        data_ptr=lambda: address,
+        numel=lambda: count,
+        element_size=lambda: item_bytes,
+        device="gpu:0",
+        stride=lambda: strides,
+        is_cuda=True,
+    )
+
+
+def _lse_buffer_call():
+    """Arguments of a valid ``_check_lse_buffer`` call: an FP32 [4, 2, 1] LSE, three
+    inputs and one optional tensor (the additive bias), plus one optional input that
+    is None, each in an address range of its own."""
+    lse = _gpu_view(0x1000, (4, 2, 1))
+    q = _gpu_view(0x2000, (4, 2, 8), dtype="float16", item_bytes=2)
+    k = _gpu_view(0x3000, (4, 1, 8), dtype="float16", item_bytes=2)
+    out = _gpu_view(0x4000, (4, 2, 8), dtype="float16", item_bytes=2)
+    bias = _gpu_view(0x5000, (4, 2, 1), dtype="float16", item_bytes=2)
+    inputs = {"q": q, "k": k, "out": out, "additive_bias": bias, "sinks": None}
+    return lse, q, (4, 2, 1), inputs
+
+
+def test_lse_buffer_check_accepts_views_that_declare_a_gpu_device():
+    _check_lse_buffer(*_lse_buffer_call())
+
+
+_LSE_OR_Q = "lse and q must be GPU tensors on the same device"
+
+
+@pytest.mark.parametrize("declared", ["missing", "false"])
+@pytest.mark.parametrize(
+    "who, message",
+    [
+        pytest.param("q", _LSE_OR_Q, id="q"),
+        pytest.param("lse", _LSE_OR_Q, id="lse"),
+        pytest.param("k", "k must be on q's GPU device", id="k"),
+        pytest.param("out", "out must be on q's GPU device", id="out"),
+        pytest.param(
+            "additive_bias", "additive_bias must be on q's GPU device", id="bias"
+        ),
+    ],
+)
+def test_lse_buffer_check_refuses_a_tensor_that_is_not_declared_a_gpu_tensor(
+    who, message, declared
+):
+    """``is_cuda`` is required and true on q, lse and every input that is not None:
+    a view without it, or with it False, never passes on a matching ``device``."""
+    lse, q, expected, inputs = _lse_buffer_call()
+    _check_lse_buffer(lse, q, expected, inputs)  # the same call passes when declared
+    target = {"lse": lse, **inputs}[who]
+    if declared == "missing":
+        del target.is_cuda
+    else:
+        target.is_cuda = False
+    with pytest.raises(ValueError, match=message):
+        _check_lse_buffer(lse, q, expected, inputs)
+
+
+@pytest.mark.parametrize(
+    "who, message",
+    [
+        pytest.param("lse", _LSE_OR_Q, id="lse"),
+        pytest.param("k", "k must be on q's GPU device", id="k"),
+        pytest.param("out", "out must be on q's GPU device", id="out"),
+    ],
+)
+def test_lse_buffer_check_refuses_a_gpu_tensor_on_another_device(who, message):
+    """``is_cuda`` alone is not enough: ``device`` is still compared with q's."""
+    lse, q, expected, inputs = _lse_buffer_call()
+    _check_lse_buffer(lse, q, expected, inputs)  # the same call passes on one device
+    target = {"lse": lse, **inputs}[who]
+    target.device = "gpu:1"
+    with pytest.raises(ValueError, match=message):
+        _check_lse_buffer(lse, q, expected, inputs)
+
+
+def test_lse_buffer_check_still_refuses_an_input_that_overlaps_the_lse():
+    lse, q, expected, inputs = _lse_buffer_call()
+    _check_lse_buffer(lse, q, expected, inputs)  # disjoint ranges pass
+    inputs["k"].data_ptr = lambda: lse.data_ptr() + 8  # starts inside the LSE bytes
+    with pytest.raises(ValueError, match="lse overlaps k"):
+        _check_lse_buffer(lse, q, expected, inputs)
 
 
 # ---------------------------------------------------------------------------

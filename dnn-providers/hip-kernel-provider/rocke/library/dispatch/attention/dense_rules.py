@@ -224,8 +224,12 @@ def resolve_dense_num_persistent(
     ``block_m`` (the spec's by default).
 
     ``half`` / ``0.75x`` / ... / ``2x`` scale the base count; ``gqa_pair`` /
-    ``gqa_pair_2phase`` are the exact counts those decodes require; ``work`` is
-    one CTA per (query block, head, batch) work item.
+    ``gqa_pair_2phase`` are the exact counts those decodes require. They repeat
+    ``PersistDecode.required_num_persistent`` because this takes the tile as an
+    argument: the sweep asks at tiles the base spec is not built for, where a
+    ``dataclasses.replace`` would fail the decode's ``check``. Held to ``check`` by
+    ``test_num_persistent_policies_reach_every_persistent_decode``. ``work`` is one
+    CTA per (query block, head, batch) work item.
     """
     nqb = -(-int(spec.seqlen_q) // int(block_m or spec.block_m))
     pairs = nqb * int(spec.num_kv_heads) * int(spec.batch)

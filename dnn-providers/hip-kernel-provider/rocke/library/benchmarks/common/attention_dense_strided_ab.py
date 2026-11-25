@@ -19,7 +19,8 @@ a run has two steps:
    shape it was built for, and the size of the largest segment-workspace buffer the
    runner asked for. The export file is JSON-flow YAML. An export never asks a device
    (it is torch-free and may run on a host without one): its specs are built for
-   ``--num-cus`` (default: the arch's ``ARCH_CUS`` entry), and it records that count.
+   ``--num-cus`` (default: the arch's entry of ``rocke.helpers.split_k.ARCH_NUM_CUS``),
+   and it records that count.
    ``run`` passes its own count (the device's) to the exports it starts and refuses an
    export file built for another count, another arch, another shape of a case, or
    another compiler than the baseline's, so export by hand with the CU count of the
@@ -103,7 +104,7 @@ from collections.abc import Callable, Iterator, Mapping, Sequence
 from typing import Any
 
 __all__ = [
-    "ARCH_CUS",
+    "ARCHES",
     "LABEL_RE",
     "LAYOUTS",
     "MASK_TYPES",
@@ -155,9 +156,10 @@ __all__ = [
 ]
 
 SCRIPT_VERSION = "dense-strided-ab-2"
-# CU count the factory request is built for when no device is queried (--dry-run,
-# --list, a bare export); a measured run uses the device's own count (resolve_num_cus).
-ARCH_CUS = {"gfx942": 304, "gfx950": 256}
+# The architectures this harness supports. The CU count of each is its entry of
+# rocke.helpers.split_k.ARCH_NUM_CUS, read by _arch_num_cus only where no --num-cus
+# gives it (the arms' trees bring their own rocke).
+ARCHES = ("gfx942", "gfx950")
 MASK_TYPES = {"none": 0, "causal_tl": 1, "causal_br": 2}
 LAYOUTS = ("bshd", "bhsd", "packed_qkv", "batch_slice")
 TOL = {"fp16": 2e-2, "bf16": 4e-2}  # max-abs tolerances of the dense numeric tests
@@ -865,13 +867,27 @@ def capturing(bases: dict[str, int], dry_run: bool) -> Iterator[_Capture]:
         rcompile.compile_kernel = real_compile
 
 
+def _arch_num_cus(arch: str) -> int:
+    """``arch``'s CU count: its entry of ``rocke.helpers.split_k.ARCH_NUM_CUS`` in the
+    rocke this process imports (the driver's, or the exported tree's). Read only
+    where no ``--num-cus`` gave the count; a rocke without the table is a refusal."""
+    try:
+        from rocke.helpers.split_k import ARCH_NUM_CUS
+    except ImportError as exc:
+        raise SystemExit(
+            f"no CU count for {arch}: this rocke has no "
+            f"rocke.helpers.split_k.ARCH_NUM_CUS ({exc}); pass --num-cus"
+        ) from exc
+    return ARCH_NUM_CUS[arch]
+
+
 def export_case(
     case: dict[str, Any], args: argparse.Namespace, kmod: types.ModuleType
 ) -> dict[str, Any]:
     """One case through this tree: its factory spec, then its own runner on views at
     sentinel addresses. Returns the export record (status ok with the recorded
     launches, or refused with the runner's reason)."""
-    report, spec = build_spec(case, args.arch, args.num_cus or ARCH_CUS[args.arch])
+    report, spec = build_spec(case, args.arch, args.num_cus or _arch_num_cus(args.arch))
     out: dict[str, Any] = {
         "case": case["case"],
         "signature": case_signature(case),
@@ -988,7 +1004,7 @@ def export_arm(args: argparse.Namespace) -> int:
             "tree": root,
             "head": tree_head(root),
             "arch": args.arch,
-            "num_cus": args.num_cus or ARCH_CUS[args.arch],
+            "num_cus": args.num_cus or _arch_num_cus(args.arch),
             "python": sys.version.split()[0],
             "compiler": compiler,
             "torch_imported": "torch" in sys.modules,
@@ -1081,7 +1097,7 @@ def check_export(
             f"arm {label}: its export was built for {built_for} CUs, this run "
             f"for {num_cus}; export it again with --num-cus {num_cus} "
             "(an export never asks the device: without --num-cus it takes the "
-            "arch's ARCH_CUS entry)"
+            "arch's ARCH_NUM_CUS entry)"
         )
     if meta.get("arch") != arch:
         raise SystemExit(
@@ -1649,11 +1665,11 @@ def resolve_num_cus(args: argparse.Namespace) -> int:
     """The CU count every arm's factory requests are built for: ``--num-cus`` when
     given; otherwise the device's own count, so a run times the specs production
     would pick on that part; on ``--dry-run`` or ``--list`` (no device) the arch's
-    usual count from ``ARCH_CUS``."""
+    usual count from ``rocke.helpers.split_k.ARCH_NUM_CUS``."""
     if args.num_cus:
         return int(args.num_cus)
     if args.dry_run or args.list:
-        return ARCH_CUS[args.arch]
+        return _arch_num_cus(args.arch)
     import torch
 
     if not torch.cuda.is_available():
@@ -1804,7 +1820,7 @@ def build_parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
-    ap.add_argument("--arch", choices=sorted(ARCH_CUS), default="gfx950")
+    ap.add_argument("--arch", choices=ARCHES, default="gfx950")
     ap.add_argument(
         "--shapes",
         default="",
@@ -1853,9 +1869,8 @@ def build_parser() -> argparse.ArgumentParser:
         type=int,
         default=0,
         help="CU count of the factory request (default: the device's own count; with "
-        "--dry-run, --list or a bare export, the arch's entry of ARCH_CUS: "
-        + ", ".join(f"{a} {n}" for a, n in ARCH_CUS.items())
-        + ")",
+        "--dry-run, --list or a bare export, the arch's entry of "
+        "rocke.helpers.split_k.ARCH_NUM_CUS)",
     )
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--n-boot", type=int, default=10000)
