@@ -25,6 +25,7 @@ from rocke.tests.item_time_limit import (
     MEASURED_SECONDS_MARKER,
     PLUGIN_NAME,
 )
+from rocke.tests.run_records import fixture_session_environment
 from rocke.tests.subprocess_launcher import rocke_subprocess_env
 
 pytest.importorskip("pytest_timeout", reason="the per-test limit needs pytest-timeout")
@@ -38,7 +39,9 @@ needs_signal_method = pytest.mark.skipif(
 
 
 def _run(tmp_path: Path, source: str, *arguments: str) -> subprocess.CompletedProcess:
-    """pytest with the plugin over a module holding ``source``."""
+    """pytest with the plugin over a module holding ``source``, run without
+    ``ROCKE_RUN_RECORDS_DIR`` (``fixture_session_environment``): the child
+    session's outcomes belong to this test, not to the run's records."""
     (tmp_path / "test_mod.py").write_text(
         "import time\nimport pytest\n" + textwrap.dedent(source)
     )
@@ -55,7 +58,7 @@ def _run(tmp_path: Path, source: str, *arguments: str) -> subprocess.CompletedPr
             *arguments,
         ],
         cwd=tmp_path,
-        env=rocke_subprocess_env(),
+        env=rocke_subprocess_env(fixture_session_environment()),
         capture_output=True,
         text=True,
         check=False,
