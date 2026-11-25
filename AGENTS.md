@@ -98,7 +98,6 @@ All under [`projects/hipdnn/tools/ai/skills/`](projects/hipdnn/tools/ai/skills/)
 | --- | --- | --- |
 | `stinkytofu-guide` | [`shared/stinkytofu/.claude/skills/stinkytofu-guide/`](shared/stinkytofu/.claude/skills/stinkytofu-guide/SKILL.md) | Finding where a feature lives in StinkyTofu, or where a new one should go. |
 | `add-logical-ir-instruction` | [`shared/stinkytofu/.cursor/skills/add-logical-ir-instruction/`](shared/stinkytofu/.cursor/skills/add-logical-ir-instruction/SKILL.md) | Adding an instruction to the logical IR path. |
-| `worktree-venv` | [`shared/stinkytofu/.claude/skills/worktree-venv/`](shared/stinkytofu/.claude/skills/worktree-venv/SKILL.md) | Same skill as the repo-wide one below, kept for StinkyTofu's Claude setup. |
 
 ### rocKE
 
@@ -108,12 +107,6 @@ All under [`projects/hipdnn/tools/ai/skills/`](projects/hipdnn/tools/ai/skills/)
 | `layout-viz` | [`.../tiling/.claude/skills/layout-viz/`](dnn-providers/hip-kernel-provider/rocke/platform/python/rocke/helpers/tiling/.claude/skills/layout-viz/SKILL.md) | Rendering and explaining MMA layout visualizations. |
 | `bank-conflict` | [`.../tiling/.claude/skills/bank-conflict/`](dnn-providers/hip-kernel-provider/rocke/platform/python/rocke/helpers/tiling/.claude/skills/bank-conflict/SKILL.md) | Analyzing LDS bank conflicts for a kernel or layout. |
 | `lds-bank-conflict-expert` | [`.../utilities/skills/lds-bank-conflict-expert/`](dnn-providers/hip-kernel-provider/rocke/platform/dsl_docs/optimization/utilities/skills/lds-bank-conflict-expert/SKILL.md) | Predicting LDS access conflicts from a rocKE architecture profile. |
-
-### Repo-wide
-
-| Skill | Path | Use it when |
-| --- | --- | --- |
-| `worktree-venv` | [`skills/worktree-venv/`](skills/worktree-venv/SKILL.md) | Giving each git worktree its own Python venv for a rocm-libraries package. |
 
 ## Component entry points
 
