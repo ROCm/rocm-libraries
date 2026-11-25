@@ -186,6 +186,26 @@ jobs:
             .github/scripts
           sparse-checkout-cone-mode: true
 
+      - name: Test the job's scripts
+        # No GPU needed: gate logic, report parsing and log scrubbing.
+        run: python3 .github/scripts/tests/test_gfx1250_blas_tests.py
+
+      - name: Read the CI environment (TheRock ref)
+        id: ci_env
+        uses: ./.github/actions/ci-env
+
+      # Only to read which compiler per-PR CI builds with: TheRock pins it as the
+      # compiler/amd-llvm submodule, so no submodules are fetched.
+      - name: Checkout TheRock at per-PR CI's ref
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: ROCm/TheRock
+          ref: ${{ steps.ci_env.outputs.therock-ref }}
+          path: TheRock
+          fetch-depth: 1
+          sparse-checkout: README.md
+          persist-credentials: false
+
       - name: Install the ROCm SDK (gfx1250-strict capable)
         id: sdk
         env:
@@ -252,9 +272,7 @@ jobs:
         id: compiler
         # Warn only: the pin stays fixed. Flags in the step summary when the pinned SDK was
         # built with a different compiler than the one at ci-env's therock-ref.
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: python3 .github/scripts/gfx1250_blas_tests.py check-compiler
+        run: python3 .github/scripts/gfx1250_blas_tests.py check-compiler --therock-dir TheRock
 
       - name: Check the runtime reports gfx1250-strict
         id: strict
@@ -269,9 +287,9 @@ jobs:
           # Ninja like TheRock's build; cmake would otherwise default to Unix Makefiles.
           export CMAKE_GENERATOR=Ninja
           pip install PyYAML joblib packaging msgpack "cmake==3.31.10" invoke
-          # Redact ROCm/compiler versions and hardware info from the console.
+          # Redact host names and PCI addresses from the console.
           (cd projects/hipblaslt && ./install.sh -c -j 32 -a gfx1250-strict --skip_rocroller 2>&1) \
-            | python3 .github/scripts/scrub_test_log.py --versions
+            | python3 .github/scripts/scrub_test_log.py
 
       - name: Run hipBLASLt tests
         id: hipblaslt

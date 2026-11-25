@@ -8,14 +8,18 @@ hipBLASLt and runs these subcommands; on a gfx1250 machine the same commands rep
 the job. From the repo root, with the SDK's environment (ROCM_PATH, PATH) set and
 hipBLASLt built by ``install.sh -c -a gfx1250-strict --skip_rocroller``:
 
-  python3 .github/scripts/gfx1250_blas_tests.py check-compiler
+  python3 .github/scripts/gfx1250_blas_tests.py check-compiler --therock-dir PATH
   python3 .github/scripts/gfx1250_blas_tests.py check-runtime
   python3 .github/scripts/gfx1250_blas_tests.py hipblaslt [--gtest-filter=FILTER]
   python3 .github/scripts/gfx1250_blas_tests.py tensilelite [--pytest-k=EXPR]
 
-Every subcommand runs in gfx1250-strict mode (HSA_DISABLE_GFX12_STRICT=0). Test output
-goes through scrub_test_log.py before it reaches the console or a log file, because the
-job log is public. A failed hipBLASLt test is listed with the command that reruns it.
+Every subcommand runs in gfx1250-strict mode (HSA_DISABLE_GFX12_STRICT=0).
+
+Results come from the XML reports gtest and pytest write, not from the console. The
+console and the uploaded logs go through scrub_test_log.py because the job log is public
+(see that file for why). The uploaded XML copies have timings and host names removed for
+the same reason. A failed hipBLASLt test is listed with the command that reruns it.
+Unit tests: .github/scripts/tests/test_gfx1250_blas_tests.py.
 """
 
 import argparse
@@ -31,7 +35,6 @@ import subprocess
 import sys
 import tempfile
 import threading
-import urllib.request
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
@@ -72,14 +75,25 @@ SK_ENV = {"TENSILE_PERSISTENT_FIXED_GRID": "360"}
 # The large tests are why the job runs on this host: one that skips for lack of memory
 # fails rather than passing quietly.
 LARGE_ENV = {"HIPBLASLT_TEST_FAIL_ON_MEMORY_SKIP": "1"}
+# How often a running hipBLASLt process reports its progress to the console.
+PROGRESS_SECONDS = 120
+# gtest's line for one finished test, e.g. "[  FAILED  ] Suite.Test/3, where GetParam() = 7"
+# (no "(N ms)": the job sets GTEST_PRINT_TIME=0).
+TEST_RESULT = re.compile(r"^\[ +(OK|FAILED|SKIPPED) +\] [A-Za-z_][^ ,]*[.][^ ,]+")
+# XML attributes that describe the machine or its speed; removed from the uploaded copies.
+PRIVATE_XML_ATTRIBUTES = ("time", "timestamp", "hostname")
 
 
-def error(msg):
-    print(f"::error::{msg}", flush=True)
+class CheckFailed(Exception):
+    """A check or a test run failed; main() reports the message and exits 1."""
 
 
-def warning(msg):
-    print(f"::warning::{msg}", flush=True)
+def error(message):
+    print(f"::error::{message}", flush=True)
+
+
+def warning(message):
+    print(f"::warning::{message}", flush=True)
 
 
 def summary(text):
@@ -95,55 +109,113 @@ def gpus_per_host():
     return max(1, int(os.environ.get("GPUS_PER_HOST", "1")))
 
 
-def job_cpus():
+def job_cpus(allowed=None, total=None):
     """CPUs this job may use. A runner that pins its container (--cpuset-cpus) already gives
     the job its GPU's share; otherwise the affinity mask is the whole host, split by GPU.
     """
-    allowed = len(os.sched_getaffinity(0))
-    if allowed * gpus_per_host() <= (os.cpu_count() or allowed):
+    allowed = allowed if allowed is not None else len(os.sched_getaffinity(0))
+    total = total if total is not None else (os.cpu_count() or allowed)
+    if allowed * gpus_per_host() <= total:
         return allowed
     return max(1, allowed // gpus_per_host())
 
 
 def in_filter(name, gtest_filter):
     """True if gtest would run test ``name`` under ``gtest_filter`` (POSITIVE[-NEGATIVE])."""
-    pos, _, neg = gtest_filter.partition("-")
+    positive, _, negative = gtest_filter.partition("-")
 
     def matches(patterns):
         return any(fnmatch.fnmatchcase(name, p) for p in patterns.split(":") if p)
 
-    return matches(pos or "*") and not matches(neg)
+    return matches(positive or "*") and not matches(negative)
+
+
+def scrub_text(scrubber, text):
+    """Scrub multi-line text as the logs are; a dropped line becomes "<redacted>"."""
+    lines = [scrubber.scrub(line) for line in text.split("\n")]
+    return "\n".join("<redacted>" if line is None else line for line in lines)
+
+
+def write_public_xml(source, destination):
+    """Copy an XML report for the public artifact: no timings or host names, and its
+    messages (failure, skip, captured output) scrubbed like the logs."""
+    tree = ET.parse(source)
+    scrubber = Scrubber(timing="pytest")
+    for element in tree.iter():
+        for attribute in PRIVATE_XML_ATTRIBUTES:
+            element.attrib.pop(attribute, None)
+        for key, value in element.attrib.items():
+            element.set(key, scrub_text(scrubber, value))
+        if element.text and element.text.strip():
+            element.text = scrub_text(scrubber, element.text)
+    tree.write(destination, encoding="utf-8", xml_declaration=True)
 
 
 # ---------------------------------------------------------------------------- checks
 
 
-def check_compiler(_args):
+def compiler_of_sdk(rocm_path):
+    """(llvm-project commit, TheRock commit) the installed ROCm SDK was built from.
+
+    The SDK's therock_manifest.json pins every submodule; it sits under the SDK root or,
+    for the pip SDK, in a sibling _rocm_sdk_* package.
+    """
+    candidates = [f"{rocm_path}/share/therock/therock_manifest.json"] + glob.glob(
+        f"{os.path.dirname(rocm_path)}/_rocm_sdk_*/share/therock/therock_manifest.json"
+    )
+    path = next((p for p in candidates if os.path.isfile(p)), None)
+    if path is None:
+        raise FileNotFoundError(f"no therock_manifest.json under {rocm_path}")
+    print(f"SDK manifest: {path}")
+    with open(path) as f:
+        manifest = json.load(f)
+    llvm = next(
+        submodule.get("pin_sha", "")
+        for submodule in manifest.get("submodules", [])
+        if submodule.get("submodule_name") == "llvm-project"
+    )
+    return llvm, manifest.get("the_rock_commit", "")
+
+
+def compiler_of_therock(therock_dir):
+    """(amd-llvm commit, TheRock commit) of a TheRock checkout, from its submodule pin."""
+
+    def git(*args):
+        return subprocess.run(
+            ["git", "-C", str(therock_dir), *args],
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout.strip()
+
+    # "160000 commit <sha>\tcompiler/amd-llvm": the gitlink is the pinned compiler.
+    entry = git("ls-tree", "HEAD", "compiler/amd-llvm").split()
+    if len(entry) < 3 or entry[1] != "commit":
+        raise ValueError(f"compiler/amd-llvm is not a submodule in {therock_dir}")
+    return entry[2], git("rev-parse", "HEAD")
+
+
+def check_compiler(args):
     """Warn when the pinned SDK was built with a different compiler than per-PR CI uses
-    (the amd-llvm at ci-env's therock-ref). Never fails: the pin stays fixed."""
+    (the amd-llvm at ci-env's therock-ref, checked out by the workflow). Never fails: the
+    pin stays fixed."""
     sdk = os.environ.get("ROCM_SDK_VERSION", "")
+    therock_dir = args.therock_dir or os.environ.get("THEROCK_DIR", "")
     try:
-        action = (REPO / ".github/actions/ci-env/action.yml").read_text()
-        ref = re.search(r'therock-ref:.*?value: *"([0-9a-f]{40})"', action, re.S)[1]
-        token = os.environ.get("GH_TOKEN")
-        req = urllib.request.Request(
-            f"https://api.github.com/repos/ROCm/TheRock/contents/compiler/amd-llvm?ref={ref}",
-            headers={"Authorization": f"Bearer {token}"} if token else {},
-        )
-        want = json.load(urllib.request.urlopen(req, timeout=60))["sha"]
-        root = os.environ["ROCM_PATH"]
-        manifests = [f"{root}/share/therock/therock_manifest.json"] + glob.glob(
-            f"{os.path.dirname(root)}/_rocm_sdk_*/share/therock/therock_manifest.json"
-        )
-        with open(next(p for p in manifests if os.path.isfile(p))) as f:
-            manifest = json.load(f)
-        have = next(
-            s.get("pin_sha", "")
-            for s in manifest.get("submodules", [])
-            if s.get("submodule_name") == "llvm-project"
-        )
-        built = manifest.get("the_rock_commit", "")
-    except Exception as e:
+        if not therock_dir:
+            raise ValueError(
+                "no TheRock checkout: pass --therock-dir or set THEROCK_DIR"
+            )
+        print(f"TheRock checkout: {therock_dir}")
+        want, ref = compiler_of_therock(therock_dir)
+        have, built = compiler_of_sdk(os.environ["ROCM_PATH"])
+    except (
+        OSError,
+        ValueError,
+        KeyError,
+        StopIteration,
+        subprocess.CalledProcessError,
+    ) as e:
         warning(
             "Could not compare the ROCm SDK's compiler with per-PR CI's "
             f"({type(e).__name__}: {e})."
@@ -179,10 +251,9 @@ def check_runtime(_args):
             with open(os.environ["GITHUB_ENV"], "a") as f:
                 f.write(f"ROCR_VISIBLE_DEVICES={gpu}\n")
     if not gpu.isdigit():
-        error(
+        raise CheckFailed(
             f"ROCR_VISIBLE_DEVICES='{gpu}' must be a single GPU index: set it in the runner's .env"
         )
-        return 1
     # The host pins each runner's container to its GPU's CPUs; a job that sees them all
     # means that setup is missing on this runner (the job still runs, on a split share).
     allowed, total = len(os.sched_getaffinity(0)), os.cpu_count() or 0
@@ -200,62 +271,94 @@ def check_runtime(_args):
     detected = gpu_arch.detect_gpu_arch()
     arch = gpu_arch.cmake_gpu_target(detected) if detected else ""
     if arch != ARCH:
-        error(f"runtime reports '{arch or 'no GPU'}', not {ARCH}")
-        return 1
+        raise CheckFailed(f"runtime reports '{arch or 'no GPU'}', not {ARCH}")
     print(f"GPU {gpu}: {arch}")
     return 0
 
 
-def check_build(binary, install):
-    """hipblaslt-test must link the libhipblaslt built here, not the SDK's copy, and the
-    library next to it must hold code objects labelled gfx1250-strict: with a stale
-    bundler the label is empty and no GEMM kernel loads."""
+def find_linked_libhipblaslt(binary, install):
+    """The libhipblaslt hipblaslt-test loads (from ldd); it must be the one built here,
+    not the SDK's copy."""
     ldd = subprocess.run(["ldd", str(binary)], capture_output=True, text=True).stdout
-    lib = next(
+    library = next(
         (
-            l.split()[2]
-            for l in ldd.splitlines()
-            if "libhipblaslt.so" in l and len(l.split()) > 2
+            line.split()[2]
+            for line in ldd.splitlines()
+            if "libhipblaslt.so" in line and len(line.split()) > 2
         ),
         "",
     )
-    if not lib or not any(
-        Path(lib).resolve().is_relative_to(d) for d in (install, HIPBLASLT / "build")
+    built_here = (install, HIPBLASLT / "build")
+    if not library or not any(
+        Path(library).resolve().is_relative_to(d) for d in built_here
     ):
-        error(
-            f"hipblaslt-test links '{lib or 'nothing'}', not the libhipblaslt built here"
+        raise CheckFailed(
+            f"hipblaslt-test loads libhipblaslt from '{library or 'nowhere'}', "
+            "not the one built here"
         )
-        return False
-    cos = sorted(
-        Path(lib).parent.glob(f"hipblaslt/library/{ARCH}/**/TensileLibrary*.co")
+    print(f"hipblaslt-test loads {library}")
+    return Path(library)
+
+
+def check_code_objects_target(library):
+    """The hipBLASLt library next to ``library`` must hold code objects labelled
+    gfx1250-strict: with a stale bundler the label is empty and no GEMM kernel loads."""
+    code_objects = sorted(
+        library.parent.glob(f"hipblaslt/library/{ARCH}/**/TensileLibrary*.co")
     )
-    if not cos:
-        error(f"the build produced no {ARCH} hipBLASLt library")
-        return False
+    if not code_objects:
+        raise CheckFailed(f"the build produced no {ARCH} hipBLASLt library")
     bundler = Path(os.environ["ROCM_PATH"]) / "lib/llvm/bin/clang-offload-bundler"
-    ids = subprocess.run(
-        [str(bundler), "--list", "--type=o", f"--input={cos[0]}"],
+    listed = subprocess.run(
+        [str(bundler), "--list", "--type=o", f"--input={code_objects[0]}"],
         capture_output=True,
         text=True,
     )
-    if ids.returncode:
-        error(
+    if listed.returncode:
+        raise CheckFailed(
             "cannot list a hipBLASLt code object with the SDK's clang-offload-bundler"
         )
-        return False
-    if not any(i.endswith(f"-{ARCH}") for i in ids.stdout.split()):
-        error(f"hipBLASLt code objects are not labelled {ARCH}")
-        return False
-    return True
+    targets = listed.stdout.split()
+    print(
+        f"{len(code_objects)} {ARCH} code objects; {code_objects[0].name} "
+        f"targets: {', '.join(targets)}"
+    )
+    if not any(target.endswith(f"-{ARCH}") for target in targets):
+        raise CheckFailed(f"hipBLASLt code objects are not labelled {ARCH}")
 
 
 # ------------------------------------------------------------------------- hipBLASLt
 
 
+def parse_gtest_xml(path):
+    """{"run": count, "failed": [names], "skipped": {name: message}} from a gtest report."""
+    root = ET.parse(path).getroot()
+    results = {"run": 0, "failed": [], "skipped": {}}
+    for case in root.iter("testcase"):
+        if case.get("status") != "run":
+            continue
+        results["run"] += 1
+        name = f"{case.get('classname')}.{case.get('name')}"
+        if case.find("failure") is not None:
+            results["failed"].append(name)
+        elif case.get("result") == "skipped":
+            skip = case.find("skipped")
+            results["skipped"][name] = "" if skip is None else skip.get("message", "")
+    return results
+
+
 class GtestRun:
-    """One hipblaslt-test process. Its output is scrubbed line by line, written to
-    ``<out>/<name>.log`` and echoed as ``[name] line``; results come from gtest's XML
-    report, which stays in a private directory (it holds timings)."""
+    """One hipblaslt-test process.
+
+    Its results come from the gtest XML report it writes. Its console output is scrubbed
+    and written to ``<out>/<name>.log`` for people reading a failure. While it runs, the
+    console shows only its failures and a progress line every PROGRESS_SECONDS (shards run
+    at once, so their full output would interleave). The progress line names the test in
+    progress, so a hang or a job killed mid-run still shows where each shard was.
+    report_hipblaslt() then prints each log in its own collapsible group. Two lines hipblaslt-test prints at the end, peak
+    memory and the tests it stopped for lack of memory, are not in the XML, so they are
+    read from the output.
+    """
 
     _print_lock = threading.Lock()
 
@@ -263,18 +366,38 @@ class GtestRun:
         self.name = name
         self.log = out / f"{name}.log"
         self.xml = Path(xml_dir) / f"{name}.xml"
+        self.public_xml = out / f"{name}.xml"
         self.peak_rss, self.memory_stops = "", []
+        self.tests_done = self.tests_failed = 0
+        self.running = ""  # the test in progress: where a hang or a killed job stopped
         self.proc = subprocess.Popen(
             [str(binary), *args, f"--gtest_output=xml:{self.xml}"],
             env={**os.environ, **env},
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
         )
+        self._done = threading.Event()
         self._reader = threading.Thread(target=self._stream, daemon=True)
         self._reader.start()
+        # A timer, not the output, drives progress: a hung test prints nothing.
+        threading.Thread(target=self._report_progress, daemon=True).start()
+
+    def _say(self, text):
+        with self._print_lock:
+            print(f"[{self.name}] {text}", flush=True)
+
+    def _report_progress(self):
+        while not self._done.wait(PROGRESS_SECONDS):
+            self._say(
+                f"{self.tests_done} tests done, {self.tests_failed} failed; "
+                f"running {self.running or '-'}"
+            )
 
     def _stream(self):
         scrubber = Scrubber()
+        # gtest repeats the failed and skipped tests in a list after "[==========] ... ran.";
+        # only the per-test result lines before it count.
+        in_results = True
         with open(self.log, "w", encoding="utf-8", errors="surrogateescape") as log:
             for raw in text_stream(self.proc.stdout.fileno()):
                 line = scrubber.scrub(raw.rstrip("\n"))
@@ -282,55 +405,59 @@ class GtestRun:
                     continue
                 log.write(line + "\n")
                 log.flush()
-                # hipblaslt-test's own end-of-run lines: peak memory, and one line per
-                # test it stopped for lack of memory (after a count line).
-                if line.startswith("[ PEAK RSS ] "):
+                if line.startswith("[==========]") and line.rstrip().endswith("ran."):
+                    in_results = False
+                result = TEST_RESULT.match(line) if in_results else None
+                if line.startswith("[ RUN      ] "):
+                    self.running = line[len("[ RUN      ] ") :]
+                elif result:
+                    self.tests_done += 1
+                    if result[1] == "FAILED":
+                        self.tests_failed += 1
+                        self._say(line)
+                elif line.startswith("[ PEAK RSS ] "):
                     self.peak_rss = line.split()[4]
                 elif re.match(r"\[ MEMORY   \] [^0-9]", line):
                     self.memory_stops.append(line[len("[ MEMORY   ] ") :])
-                with self._print_lock:
-                    sys.stdout.write(f"[{self.name}] {line}\n")
-                    sys.stdout.flush()
 
     def wait(self):
         """Wait for the process; return (exit code, results or None if it wrote none)."""
-        rc = self.proc.wait()
+        exit_code = self.proc.wait()
         self._reader.join()
+        self._done.set()
         try:
-            root = ET.parse(self.xml).getroot()
+            results = parse_gtest_xml(self.xml)
+            write_public_xml(self.xml, self.public_xml)
         except (OSError, ET.ParseError):
-            return rc, None
-        results = {"run": 0, "failed": [], "skipped": {}}
-        for case in root.iter("testcase"):
-            if case.get("status") != "run":
-                continue
-            results["run"] += 1
-            name = f"{case.get('classname')}.{case.get('name')}"
-            if case.find("failure") is not None:
-                results["failed"].append(name)
-            elif case.get("result") == "skipped":
-                skip = case.find("skipped")
-                results["skipped"][name] = (
-                    "" if skip is None else skip.get("message", "")
-                )
-        return rc, results
+            return exit_code, None
+        self._say(
+            f"finished: exit {exit_code}, {results['run']} run, "
+            f"{len(results['failed'])} failed, {len(results['skipped'])} skipped"
+        )
+        return exit_code, results
 
 
-def list_tests(binary, gtest_filter):
-    """Full names of the tests gtest selects for gtest_filter."""
-    out = subprocess.run(
-        [str(binary), "--gtest_list_tests", f"--gtest_filter={gtest_filter}"],
-        capture_output=True,
-        text=True,
-        errors="replace",
-    ).stdout
+def parse_test_list(text):
+    """Full test names from ``--gtest_list_tests`` output."""
     names, suite = [], ""
-    for line in out.splitlines():
+    for line in text.splitlines():
         if not line.startswith(" ") and line.endswith("."):
             suite = line.split()[0]
         elif line.startswith("  ") and suite:
             names.append(suite + line.split()[0])
     return names
+
+
+def list_tests(binary, gtest_filter):
+    """Full names of the tests gtest selects for gtest_filter."""
+    output = subprocess.run(
+        [str(binary), "--gtest_list_tests", f"--gtest_filter={gtest_filter}"],
+        capture_output=True,
+        text=True,
+        errors="replace",
+        check=True,  # an empty listing would silently skip the large-memory groups
+    ).stdout
+    return parse_test_list(output)
 
 
 def run_hipblaslt(args):
@@ -358,16 +485,18 @@ def run_hipblaslt(args):
     )
     # The runtime loads library/gfx1250-strict/ next to libhipblaslt.
     os.environ.pop("HIPBLASLT_TENSILE_LIBPATH", None)
-    if not check_build(binary, install):
-        return 1
+    library = find_linked_libhipblaslt(binary, install)
+    check_code_objects_target(library)
     out = Path(args.out).resolve()
     out.mkdir(parents=True, exist_ok=True)
+    print(f"{args.shards} shards, {threads} CPU threads each; logs and XML in {out}")
 
+    # gtest's own XML keeps timings: it stays out of the uploaded directory.
     xml_dir = tempfile.mkdtemp(
         prefix="hipblaslt-gtest-", dir=os.environ.get("RUNNER_TEMP")
     )
     started, finished = [], []  # GtestRun; (GtestRun, exit code, results)
-    ok = True
+    problems = []  # filters that select no test: a renamed test would drop out silently
 
     def start(name, gtest_filter, env):
         started.append(
@@ -378,15 +507,15 @@ def run_hipblaslt(args):
         return started[-1]
 
     def run(name, gtest_filter, env):
-        r = start(name, gtest_filter, env)
-        finished.append((r, *r.wait()))
+        process = start(name, gtest_filter, env)
+        finished.append((process, *process.wait()))
         return finished[-1][2]
 
     try:
         # Shards in parallel: one shard's CPU reference checks overlap another's GPU work.
-        pos, _, neg = user_filter.partition("-")
-        negatives = ":".join(([neg] if neg else []) + LARGE + [SK_DEADLOCK])
-        shard_filter = f"{pos or '*'}-{negatives}"
+        positive, _, negative = user_filter.partition("-")
+        negatives = ":".join(([negative] if negative else []) + LARGE + [SK_DEADLOCK])
+        shard_filter = f"{positive or '*'}-{negatives}"
         shards = [
             start(
                 f"hipblaslt_test_shard{i}",
@@ -400,8 +529,7 @@ def run_hipblaslt(args):
         if not user_filter or in_filter(SK_DEADLOCK, user_filter):
             results = run("hipblaslt_test_shard_streamk", SK_DEADLOCK, SK_ENV)
             if results and not results["run"]:
-                error(f"{SK_DEADLOCK} matches no test; update SK_DEADLOCK")
-                ok = False
+                problems.append(f"{SK_DEADLOCK} matches no test; update SK_DEADLOCK")
             elif results and SK_DEADLOCK in results["skipped"]:
                 warning(
                     f"{SK_DEADLOCK} skipped at TENSILE_PERSISTENT_FIXED_GRID="
@@ -422,55 +550,63 @@ def run_hipblaslt(args):
             ]
         else:
             groups = LARGE_GROUPS
-        for k, group in enumerate(groups):
+        for index, group in enumerate(groups):
             if not group:
                 continue
-            results = run(f"hipblaslt_test_shard_large{k}", group, LARGE_ENV)
-            # A filter that matches nothing runs nothing and passes, so a renamed test
-            # would silently drop out of the run.
+            results = run(f"hipblaslt_test_shard_large{index}", group, LARGE_ENV)
             if results and not results["run"]:
-                error(
+                problems.append(
                     f"large-memory group '{group}' matches no test; update LARGE_GROUPS"
                 )
-                ok = False
     finally:
-        for r in started:
-            if r.proc.poll() is None:
-                r.proc.terminate()
+        for process in started:
+            if process.proc.poll() is None:
+                process.proc.terminate()
         shutil.rmtree(xml_dir, ignore_errors=True)
 
-    return 0 if report_hipblaslt(finished) and ok else 1
+    report_hipblaslt(finished, problems)
+    return 0
 
 
-def report_hipblaslt(finished):
-    """Print the per-process table and every failure with its rerun command; True if all
-    processes passed."""
+def report_hipblaslt(finished, problems):
+    """Print each process's log in a collapsible group, the per-process table and every
+    failure with its rerun command; raise CheckFailed if anything failed."""
+    for process, exit_code, results in finished:
+        failed = len(results["failed"]) if results else "?"
+        print(f"::group::{process.name}: exit {exit_code}, {failed} failed", flush=True)
+        print(process.log.read_text(errors="replace"), end="", flush=True)
+        print("::endgroup::", flush=True)
+
     rows = [
         "### hipBLASLt test processes",
-        "| Process | Ran | Failed | Skipped | Peak resident memory (GiB) | Tests stopped for memory |",
-        "| --- | --- | --- | --- | --- | --- |",
+        "| Process | Exit | Ran | Failed | Skipped | Peak resident memory (GiB) | Tests stopped for memory |",
+        "| --- | --- | --- | --- | --- | --- | --- |",
     ]
-    failed, memory_stops, ok = [], [], True
-    for r, rc, results in finished:
+    failed, memory_stops = [], []
+    for process, exit_code, results in finished:
         if results is None:
-            error(f"{r.name} exited with {rc} and wrote no results: see {r.log.name}")
-            rows.append(f"| {r.name} | exit {rc}, no results | | | {r.peak_rss} | |")
-            ok = False
+            problems.append(
+                f"{process.name} exited with {exit_code} and wrote no results: "
+                f"see {process.log.name}"
+            )
+            rows.append(
+                f"| {process.name} | {exit_code} | no results | | | {process.peak_rss} | |"
+            )
             continue
-        if rc and not results["failed"]:
-            error(f"{r.name} exited with {rc}: see {r.log.name}")
-        ok = ok and rc == 0
+        if exit_code and not results["failed"]:
+            problems.append(
+                f"{process.name} exited with {exit_code}: see {process.log.name}"
+            )
         failed += results["failed"]
-        memory_stops += r.memory_stops
+        memory_stops += process.memory_stops
         rows.append(
-            f"| {r.name} | {results['run']} | {len(results['failed'])} | "
-            f"{len(results['skipped'])} | {r.peak_rss} | {len(r.memory_stops)} |"
+            f"| {process.name} | {exit_code} | {results['run']} | {len(results['failed'])} | "
+            f"{len(results['skipped'])} | {process.peak_rss} | {len(process.memory_stops)} |"
         )
     summary("\n".join(rows))
     if memory_stops:
         summary("```\n" + "\n".join(memory_stops) + "\n```")
     if failed:
-        error(f"{len(failed)} hipBLASLt tests failed")
         script = shlex.quote(os.path.relpath(__file__, REPO))
         rerun = [
             f"python3 {script} hipblaslt --gtest-filter={shlex.quote(t)}"
@@ -482,21 +618,37 @@ def report_hipblaslt(finished):
             + "\n".join(sorted(set(rerun)))
             + "\n```"
         )
-    return ok
+        problems.append(f"{len(failed)} hipBLASLt tests failed")
+    if problems:
+        raise CheckFailed("; ".join(problems))
 
 
 # ------------------------------------------------------------------------ TensileLite
 
 
+def parse_junit_xml(path):
+    """{"tests", "failures", "errors", "skipped"} totals from a pytest JUnit report."""
+    root = ET.parse(path).getroot()
+    suites = [root] if root.tag == "testsuite" else list(root.iter("testsuite"))
+    totals = {"tests": 0, "failures": 0, "errors": 0, "skipped": 0}
+    for suite in suites:
+        for key in totals:
+            totals[key] += int(suite.get(key, 0))
+    return totals
+
+
 def run_tensilelite(args):
     if re.search(r"\s", args.pytest_k):
-        error(
+        raise CheckFailed(
             "--pytest-k must not contain spaces (tox splits them into separate arguments)"
         )
-        return 1
     out = Path(args.out).resolve()
     out.mkdir(parents=True, exist_ok=True)
     log = out / "common_test.log"
+    tensilelite = HIPBLASLT / "tensilelite"
+    # tox.ini's py3 command writes pytest's JUnit report here.
+    junit = tensilelite / "python_tests.xml"
+    junit.unlink(missing_ok=True)
     root = os.environ["ROCM_PATH"]
     env = {
         **os.environ,
@@ -509,65 +661,111 @@ def run_tensilelite(args):
     # compile overlaps another's GPU run. skip-gfx1250-strict configs are skipped on this
     # target (config_helpers.py). Each argument after -- stays a single word: tox inserts
     # them into tox.ini's sh -c command unquoted.
-    cmd = ["tox", "-v", "-e", "py3", "--", "tensilelite/Tests", "-m", "common"]
-    cmd += ["-k", args.pytest_k] if args.pytest_k else []
-    cmd += [f"--timeout={args.timeout}", "-n", str(args.workers), "-rfxX"]
+    command = ["tox", "-v", "-e", "py3", "--", "tensilelite/Tests", "-m", "common"]
+    command += ["-k", args.pytest_k] if args.pytest_k else []
+    command += [f"--timeout={args.timeout}", "-n", str(args.workers), "-rfxX"]
+    print(f"Running: {shlex.join(command)} (in {tensilelite}); log: {log}", flush=True)
     proc = subprocess.Popen(
-        cmd,
-        cwd=HIPBLASLT / "tensilelite",
+        command,
+        cwd=tensilelite,
         env=env,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
     )
+    # One process: its output goes to the console as it runs, scrubbed.
     scrubber = Scrubber(timing="pytest")
-    no_tests = False
     with open(log, "w", encoding="utf-8", errors="surrogateescape") as f:
         for raw in text_stream(proc.stdout.fileno()):
             line = scrubber.scrub(raw.rstrip("\n"))
             if line is None:
                 continue
-            no_tests = no_tests or bool(
-                re.search(r"workers \[0 items\]|no tests ran", line)
-            )
             f.write(line + "\n")
             f.flush()
             sys.stdout.write(line + "\n")
             sys.stdout.flush()
-    rc = proc.wait()
+    exit_code = proc.wait()
+
+    if not junit.is_file():
+        raise CheckFailed(
+            f"tox exited with {exit_code} and wrote no {junit.name}: see {log.name}"
+        )
+    totals = parse_junit_xml(junit)
+    write_public_xml(junit, out / "common_tests.xml")
+    summary(
+        f"### TensileLite common tests\n{totals['tests']} tests: {totals['failures']} failed, "
+        f"{totals['errors']} errors, {totals['skipped']} skipped (tox exit {exit_code})"
+    )
     # tox.ini maps pytest's "no tests collected" (exit 5) to success.
-    if no_tests:
-        error("TensileLite ran no tests")
-        return 1
-    return rc
+    if totals["tests"] == 0:
+        raise CheckFailed("TensileLite ran no tests")
+    if exit_code or totals["failures"] or totals["errors"]:
+        raise CheckFailed(
+            f"TensileLite: {totals['failures']} failed, {totals['errors']} errors "
+            f"(tox exit {exit_code}); see {log.name}"
+        )
+    return 0
 
 
 # ------------------------------------------------------------------------------- main
 
 
-def main(argv=None):
+def parse_args(argv):
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    sub = parser.add_subparsers(dest="command", required=True)
-    sub.add_parser("check-compiler", help=check_compiler.__doc__.splitlines()[0])
-    sub.add_parser("check-runtime", help=check_runtime.__doc__.splitlines()[0])
-    hip = sub.add_parser("hipblaslt", help="run the hipBLASLt gtest suite")
-    hip.add_argument(
+    subcommands = parser.add_subparsers(dest="command", required=True)
+
+    compiler_parser = subcommands.add_parser(
+        "check-compiler", help=check_compiler.__doc__.splitlines()[0]
+    )
+    compiler_parser.add_argument(
+        "--therock-dir",
+        default="",
+        help="TheRock checkout at ci-env's therock-ref (default: $THEROCK_DIR)",
+    )
+    subcommands.add_parser("check-runtime", help=check_runtime.__doc__.splitlines()[0])
+
+    hipblaslt_parser = subcommands.add_parser(
+        "hipblaslt", help="run the hipBLASLt gtest suite"
+    )
+    hipblaslt_parser.add_argument(
         "--gtest-filter", default="", help="gtest filter; empty runs everything"
     )
-    hip.add_argument(
-        "--binary", default=str(HIPBLASLT / "build/release/clients/hipblaslt-test")
+    hipblaslt_parser.add_argument(
+        "--binary",
+        default=str(HIPBLASLT / "build/release/clients/hipblaslt-test"),
+        help="hipblaslt-test to run",
     )
-    hip.add_argument("--out", default=str(REPO / "test_results"))
-    hip.add_argument(
+    hipblaslt_parser.add_argument(
+        "--out",
+        default=str(REPO / "test_results"),
+        help="directory for the scrubbed logs and XML reports",
+    )
+    hipblaslt_parser.add_argument(
         "--shards", type=int, default=4, help="gtest shards run at once on the GPU"
     )
-    tl = sub.add_parser("tensilelite", help="run the TensileLite common tests via tox")
-    tl.add_argument("--pytest-k", default="", help="pytest -k expression, no spaces")
-    tl.add_argument("--out", default=str(REPO / "tensilelite_test_results"))
-    tl.add_argument("--workers", type=int, default=4, help="pytest-xdist workers")
-    # decouple_pgr_tdm_fuse_gfx1250.yaml's sweep runs past 600 s.
-    tl.add_argument("--timeout", type=int, default=1200, help="per-test timeout (s)")
-    args = parser.parse_args(argv)
 
+    tensilelite_parser = subcommands.add_parser(
+        "tensilelite", help="run the TensileLite common tests via tox"
+    )
+    tensilelite_parser.add_argument(
+        "--pytest-k", default="", help="pytest -k expression, no spaces"
+    )
+    tensilelite_parser.add_argument(
+        "--out",
+        default=str(REPO / "tensilelite_test_results"),
+        help="directory for the scrubbed log and XML report",
+    )
+    tensilelite_parser.add_argument(
+        "--workers", type=int, default=4, help="pytest-xdist workers"
+    )
+    # decouple_pgr_tdm_fuse_gfx1250.yaml's sweep runs past 600 s.
+    tensilelite_parser.add_argument(
+        "--timeout", type=int, default=1200, help="per-test timeout in seconds"
+    )
+    return parser.parse_args(argv)
+
+
+def main(argv=None):
+    args = parse_args(argv)
     os.environ["HSA_DISABLE_GFX12_STRICT"] = "0"
     os.environ["PYTHONUNBUFFERED"] = "1"
     sys.stdout.reconfigure(encoding="utf-8", errors="surrogateescape")
@@ -577,7 +775,11 @@ def main(argv=None):
         "hipblaslt": run_hipblaslt,
         "tensilelite": run_tensilelite,
     }[args.command]
-    return command(args)
+    try:
+        return command(args)
+    except CheckFailed as failure:
+        error(str(failure))
+        return 1
 
 
 if __name__ == "__main__":
