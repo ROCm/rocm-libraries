@@ -1,5 +1,5 @@
 {
-  "_comment": "B0 4096x4096x65536: comp_tdm_v3 MX baseline against the read-ahead K loop with cluster barriers (early signal) and L2 prefetch 6 ahead, with split TDM loads (sp) and the block B order (g1; g1sa: A split too); warp tile 16, clusters 1x1 / 4x4.",
+  "_comment": "B0 4096x4096x65536: comp_tdm_v3 MX baseline against the read-ahead K loop (LDS-staged scales, cluster barriers with the early signal, B and A in halves) with packed scale registers (pk, each lane loading its packed word), late reads 0 / 8 / 16 WMMAs into the half (lN) and L2 prefetch 4 / 6 / 8 ahead (pfD); pk_g1: block B order, A whole; warp tile 16, clusters 4x4 / 1x1.",
   "default_defines": [
     "-DCK_EX55_FOCUS",
     "-DCK_EX55_BF16_TDM_ONLY",
@@ -14,69 +14,81 @@
       "defines": []
     },
     {
-      "name": "sa_l8_cb2_pf6",
+      "name": "l8pf6",
       "defines": [
         "-DCK_EX55_RA=1",
         "-DCK_EX55_MX_SCALE_LDS=1",
         "-DCK_EX55_RA_CB=2",
-        "-DCK_EX55_RA_GL2=6",
-        "-DCK_EX55_RA_BLOCKB=0",
-        "-DCK_EX55_RA_SPLITA=1",
-        "-DCK_EX55_RA_LATEAT=8"
-      ]
-    },
-    {
-      "name": "sa_l8_cb2_pf6_sp",
-      "defines": [
-        "-DCK_EX55_RA=1",
-        "-DCK_EX55_MX_SCALE_LDS=1",
-        "-DCK_EX55_RA_CB=2",
-        "-DCK_EX55_RA_GL2=6",
         "-DCK_EX55_RA_BLOCKB=0",
         "-DCK_EX55_RA_SPLITA=1",
         "-DCK_EX55_RA_LATEAT=8",
-        "-DCK_EX55_RA_SPLIT=1"
+        "-DCK_EX55_RA_GL2=6"
       ]
     },
     {
-      "name": "sa_cb2_pf6_sp",
+      "name": "pk_l0pf4",
       "defines": [
         "-DCK_EX55_RA=1",
         "-DCK_EX55_MX_SCALE_LDS=1",
         "-DCK_EX55_RA_CB=2",
-        "-DCK_EX55_RA_GL2=6",
         "-DCK_EX55_RA_BLOCKB=0",
         "-DCK_EX55_RA_SPLITA=1",
-        "-DCK_EX55_RA_SPLIT=1"
+        "-DCK_EX55_RA_PACK=1",
+        "-DCK_EX55_RA_LATEAT=0",
+        "-DCK_EX55_RA_GL2=4"
       ]
     },
     {
-      "name": "g1_cb2_pf6_sp",
+      "name": "pk_l0pf6",
       "defines": [
         "-DCK_EX55_RA=1",
         "-DCK_EX55_MX_SCALE_LDS=1",
         "-DCK_EX55_RA_CB=2",
-        "-DCK_EX55_RA_GL2=6",
-        "-DCK_EX55_RA_SPLIT=1"
-      ]
-    },
-    {
-      "name": "g1sa_cb2_pf6_sp",
-      "defines": [
-        "-DCK_EX55_RA=1",
-        "-DCK_EX55_MX_SCALE_LDS=1",
-        "-DCK_EX55_RA_CB=2",
-        "-DCK_EX55_RA_GL2=6",
+        "-DCK_EX55_RA_BLOCKB=0",
         "-DCK_EX55_RA_SPLITA=1",
-        "-DCK_EX55_RA_SPLIT=1"
+        "-DCK_EX55_RA_PACK=1",
+        "-DCK_EX55_RA_LATEAT=0",
+        "-DCK_EX55_RA_GL2=6"
+      ]
+    },
+    {
+      "name": "pk_l8pf6",
+      "defines": [
+        "-DCK_EX55_RA=1",
+        "-DCK_EX55_MX_SCALE_LDS=1",
+        "-DCK_EX55_RA_CB=2",
+        "-DCK_EX55_RA_BLOCKB=0",
+        "-DCK_EX55_RA_SPLITA=1",
+        "-DCK_EX55_RA_PACK=1",
+        "-DCK_EX55_RA_LATEAT=8",
+        "-DCK_EX55_RA_GL2=6"
+      ]
+    },
+    {
+      "name": "pk_l16pf6",
+      "defines": [
+        "-DCK_EX55_RA=1",
+        "-DCK_EX55_MX_SCALE_LDS=1",
+        "-DCK_EX55_RA_CB=2",
+        "-DCK_EX55_RA_BLOCKB=0",
+        "-DCK_EX55_RA_SPLITA=1",
+        "-DCK_EX55_RA_PACK=1",
+        "-DCK_EX55_RA_LATEAT=16",
+        "-DCK_EX55_RA_GL2=6"
+      ]
+    },
+    {
+      "name": "pk_g1_pf6",
+      "defines": [
+        "-DCK_EX55_RA=1",
+        "-DCK_EX55_MX_SCALE_LDS=1",
+        "-DCK_EX55_RA_CB=2",
+        "-DCK_EX55_RA_PACK=1",
+        "-DCK_EX55_RA_GL2=6"
       ]
     }
   ],
   "arms": [
-    {
-      "wt": 16,
-      "cluster": "1x1"
-    },
     {
       "wt": 16,
       "cluster": "4x4"

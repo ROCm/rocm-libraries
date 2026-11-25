@@ -115,7 +115,10 @@ struct GemmPipelineAgBgCrCompTDMV3Policy : public GemmPipelineAgBgCrCompTDMDefau
     static constexpr bool kReadAheadCluster = false;
     /// kReadAhead: every wave fills half of one operand's rows per K tile (odd waves A, even B)
     /// with one TDM load, and with MX the same half of its scale words; 4 waves only.
-    static constexpr bool kReadAheadSplitLoad    = false;
+    static constexpr bool kReadAheadSplitLoad = false;
+    /// kReadAhead, MX: two M (N) iterations' scale words per register (lane halves), the
+    /// WMMA selecting its half; half the scale registers.
+    static constexpr bool kReadAheadPackScales   = false;
     static constexpr bool kReadAheadClusterEarly = false;
 
     /// Workgroups per CU the register budget assumes (the launch's kBlockPerCu).

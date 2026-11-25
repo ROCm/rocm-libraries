@@ -125,6 +125,10 @@ struct Ex55Policy : ck_tile::GemmPipelineAgBgCrCompTDMV3Policy
 #if defined(CK_EX55_RA_SPLITA)
     [[maybe_unused]] static constexpr bool kReadAheadSplitA = CK_EX55_RA_SPLITA != 0;
 #endif
+#if defined(CK_EX55_RA_PACK)
+    // -DCK_EX55_RA_PACK=1: packed scale registers
+    [[maybe_unused]] static constexpr bool kReadAheadPackScales = CK_EX55_RA_PACK != 0;
+#endif
 #if defined(CK_EX55_RA_SPLIT)
     // -DCK_EX55_RA_SPLIT=1: split TDM loads (every wave half of one operand)
     [[maybe_unused]] static constexpr bool kReadAheadSplitLoad = CK_EX55_RA_SPLIT != 0;

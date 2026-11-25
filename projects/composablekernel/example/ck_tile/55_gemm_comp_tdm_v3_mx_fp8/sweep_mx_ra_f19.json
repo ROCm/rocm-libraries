@@ -1,0 +1,91 @@
+{
+  "_comment": "f19-17 (96-CU partition), MAF 3072x4096x65536: the comp_tdm_v3 MX baseline (kMxScaleWide, A-row prefetch; focus arms at warp tile 16 and 32) against the read-ahead K loop with cluster barriers (early signal), packed LDS-staged scales, B and A in halves, late reads 8 WMMAs into the half and L2 prefetch 2 / 4 / 6 ahead (pk_l8pfD). The read-ahead variants build (CK_EX55_FOCUS_MIN) and run only warp tile 16 at clusters 1x1 and 4x4.",
+  "default_defines": [
+    "-DCK_EX55_FOCUS",
+    "-DCK_EX55_BF16_TDM_ONLY",
+    "-DCK_TILE_GFX125_FP8_K1PERLANE=16",
+    "-DCK_EX55_MX_SCALE_WIDE=1",
+    "-DCK_EX55_A_ROW_PREFETCH=1"
+  ],
+  "variants": [
+    {
+      "name": "base",
+      "defines": []
+    },
+    {
+      "name": "pk_l8pf2",
+      "defines": [
+        "-DCK_EX55_FOCUS_MIN",
+        "-DCK_EX55_RA=1",
+        "-DCK_EX55_MX_SCALE_LDS=1",
+        "-DCK_EX55_RA_CB=2",
+        "-DCK_EX55_RA_BLOCKB=0",
+        "-DCK_EX55_RA_SPLITA=1",
+        "-DCK_EX55_RA_PACK=1",
+        "-DCK_EX55_RA_LATEAT=8",
+        "-DCK_EX55_RA_GL2=2"
+      ]
+    },
+    {
+      "name": "pk_l8pf4",
+      "defines": [
+        "-DCK_EX55_FOCUS_MIN",
+        "-DCK_EX55_RA=1",
+        "-DCK_EX55_MX_SCALE_LDS=1",
+        "-DCK_EX55_RA_CB=2",
+        "-DCK_EX55_RA_BLOCKB=0",
+        "-DCK_EX55_RA_SPLITA=1",
+        "-DCK_EX55_RA_PACK=1",
+        "-DCK_EX55_RA_LATEAT=8",
+        "-DCK_EX55_RA_GL2=4"
+      ]
+    },
+    {
+      "name": "pk_l8pf6",
+      "defines": [
+        "-DCK_EX55_FOCUS_MIN",
+        "-DCK_EX55_RA=1",
+        "-DCK_EX55_MX_SCALE_LDS=1",
+        "-DCK_EX55_RA_CB=2",
+        "-DCK_EX55_RA_BLOCKB=0",
+        "-DCK_EX55_RA_SPLITA=1",
+        "-DCK_EX55_RA_PACK=1",
+        "-DCK_EX55_RA_LATEAT=8",
+        "-DCK_EX55_RA_GL2=6"
+      ]
+    }
+  ],
+  "arms": [
+    {
+      "wt": 16,
+      "cluster": "4x4"
+    },
+    {
+      "wt": 16,
+      "cluster": "1x1"
+    },
+    {
+      "wt": 16,
+      "cluster": "2x2"
+    },
+    {
+      "wt": 32,
+      "cluster": "2x2"
+    },
+    {
+      "wt": 32,
+      "cluster": "4x4"
+    }
+  ],
+  "shapes": [
+    [
+      3072,
+      4096,
+      65536
+    ]
+  ],
+  "c_dtype": "bf16",
+  "rounds": 5,
+  "warmup": 50,
+  "repeat": 100
+}

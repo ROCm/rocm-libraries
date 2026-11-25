@@ -1180,11 +1180,50 @@ struct GemmPipelineAgBgCrCompTDMV3 : public GemmPipelineAgBgCrCompTDMV1<Problem,
                 }
                 // The scale words of one K atom: kMI of A and kNI of B (one int32, four E8M0
                 // scales, per M or N iteration), read from scale ring stage s.
+                // Policy::kReadAheadPackScales: one register per pair of M (N) iterations q and
+                // q + kMI / 2: lanes 0-15 hold q's words, lanes 16-31 q + kMI / 2's (moved there
+                // from lanes 0-15 by permlanex16); each WMMA selects its half with the scale-select
+                // bit (MATRIX_SCALE_ROW1), so half the scale registers are live.
+                constexpr bool kPackSc = kMx && Policy::kReadAheadPackScales;
+                constexpr index_t kSA  = kPackSc ? kMI / 2 : kMI;
+                constexpr index_t kSB  = kPackSc ? kNI / 2 : kNI;
+                static_assert(!kPackSc || (kMI % 2 == 0 && get_warp_size() == 32),
+                              "kReadAheadPackScales: wave32, an even iteration count");
                 struct AtomScales
                 {
-                    int32_t a[kMI];
-                    int32_t b[kNI];
+                    int32_t a[kSA];
+                    int32_t b[kSB];
                 };
+                // kPackSc: lanes 16-31 read, at the word base of lane l - 16 (permlanex16, once),
+                // the words of iteration q + kSA, so a lane loads its packed word directly
+                const index_t pk_a_word0 = [&]() -> index_t {
+                    if constexpr(kPackSc)
+                    {
+                        using St              = remove_cvref_t<decltype(scales)>;
+                        constexpr index_t kSK = St::kThreadA / kMI;
+                        const index_t partner = __builtin_amdgcn_permlanex16(
+                            scales.a_word0, scales.a_word0, 0x76543210, 0xfedcba98, false, false);
+                        return get_lane_id() >= 16 ? partner + kSA * kSK : scales.a_word0;
+                    }
+                    else
+                    {
+                        return 0;
+                    }
+                }();
+                const index_t pk_b_word0 = [&]() -> index_t {
+                    if constexpr(kPackSc)
+                    {
+                        using St              = remove_cvref_t<decltype(scales)>;
+                        constexpr index_t kSK = St::kThreadB / kNI;
+                        const index_t partner = __builtin_amdgcn_permlanex16(
+                            scales.b_word0, scales.b_word0, 0x76543210, 0xfedcba98, false, false);
+                        return get_lane_id() >= 16 ? partner + kSB * kSK : scales.b_word0;
+                    }
+                    else
+                    {
+                        return 0;
+                    }
+                }();
                 auto rd_sc = [&](auto s, auto k) {
                     AtomScales r{};
                     if constexpr(kMx)
@@ -1197,11 +1236,23 @@ struct GemmPipelineAgBgCrCompTDMV3 : public GemmPipelineAgBgCrCompTDMV1<Problem,
                         constexpr index_t si               = decltype(s)::value;
                         constexpr index_t ki               = decltype(k)::value;
                         const CK_TILE_LDS_ADDR int32_t* st = scales.ring + si * St::kStageWords;
-                        static_for<0, kMI, 1>{}(
-                            [&](auto m) { r.a[m] = st[scales.a_word0 + m.value * kSK + ki]; });
-                        static_for<0, kNI, 1>{}([&](auto n) {
-                            r.b[n] = st[St::kWordsA + scales.b_word0 + n.value * kSK + ki];
-                        });
+                        if constexpr(kPackSc)
+                        {
+                            // one load per packed word, at the per-lane base set up once
+                            static_for<0, kSA, 1>{}(
+                                [&](auto q) { r.a[q] = st[pk_a_word0 + q.value * kSK + ki]; });
+                            static_for<0, kSB, 1>{}([&](auto q) {
+                                r.b[q] = st[St::kWordsA + pk_b_word0 + q.value * kSK + ki];
+                            });
+                        }
+                        else
+                        {
+                            static_for<0, kMI, 1>{}(
+                                [&](auto m) { r.a[m] = st[scales.a_word0 + m.value * kSK + ki]; });
+                            static_for<0, kNI, 1>{}([&](auto n) {
+                                r.b[n] = st[St::kWordsA + scales.b_word0 + n.value * kSK + ki];
+                            });
+                        }
                     }
                     return r;
                 };
@@ -1386,25 +1437,55 @@ struct GemmPipelineAgBgCrCompTDMV3 : public GemmPipelineAgBgCrCompTDMV1<Problem,
                     constexpr index_t ni = decltype(n)::value;
                     if constexpr(kMx)
                     {
-                        const int32_t scale_a = sc.a[mi];
-                        const int32_t scale_b = sc.b[ni];
+                        const int32_t scale_a = sc.a[mi % kSA];
+                        const int32_t scale_b = sc.b[ni % kSB];
+                        constexpr int kSelA   = kPackSc ? mi / kSA : 0;
+                        constexpr int kSelB   = kPackSc ? ni / kSB : 0;
 #if defined(__gfx125__)
                         // fp8 (e4m3) A and B, E8M0 scales, as WmmaTraits' scaled intrinsic;
                         // with the warp GEMM's transposed C, B and its scales go first (as
                         // WarpGemmAttributeWmma's kTransC path)
                         if constexpr(Problem::TransposeC)
                         {
-                            acc[mi][ni] = __builtin_amdgcn_wmma_scale_f32_16x16x128_f8f6f4(
-                                0, b, 0, a, 0, acc[mi][ni], 0, 0, scale_b, 0, 0, scale_a, 0, 0);
+                            acc[mi][ni] =
+                                __builtin_amdgcn_wmma_scale_f32_16x16x128_f8f6f4(0,
+                                                                                 b,
+                                                                                 0,
+                                                                                 a,
+                                                                                 0,
+                                                                                 acc[mi][ni],
+                                                                                 kSelB,
+                                                                                 0,
+                                                                                 scale_b,
+                                                                                 kSelA,
+                                                                                 0,
+                                                                                 scale_a,
+                                                                                 0,
+                                                                                 0);
                         }
                         else
                         {
-                            acc[mi][ni] = __builtin_amdgcn_wmma_scale_f32_16x16x128_f8f6f4(
-                                0, a, 0, b, 0, acc[mi][ni], 0, 0, scale_a, 0, 0, scale_b, 0, 0);
+                            acc[mi][ni] =
+                                __builtin_amdgcn_wmma_scale_f32_16x16x128_f8f6f4(0,
+                                                                                 a,
+                                                                                 0,
+                                                                                 b,
+                                                                                 0,
+                                                                                 acc[mi][ni],
+                                                                                 kSelA,
+                                                                                 0,
+                                                                                 scale_a,
+                                                                                 kSelB,
+                                                                                 0,
+                                                                                 scale_b,
+                                                                                 0,
+                                                                                 0);
                         }
 #else
                         ignore = scale_a;
                         ignore = scale_b;
+                        ignore = kSelA;
+                        ignore = kSelB;
 #endif
                     }
                     else
