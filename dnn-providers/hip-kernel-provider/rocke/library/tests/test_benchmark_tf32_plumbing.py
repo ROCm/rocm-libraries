@@ -419,15 +419,15 @@ def test_json_file_cases_carry_a_direction(tmp_path, monkeypatch):
 
 
 def test_verify_tol_table():
-    assert big._verify_tol("fp16", "gfx950") == 5e-2
-    assert big._verify_tol("bf16", "gfx942") == 5e-2
-    assert big._verify_tol("fp32", "gfx950") == 1e-3
+    assert big.verify_tol("fp16", "gfx950") == 5e-2
+    assert big.verify_tol("bf16", "gfx942") == 5e-2
+    assert big.verify_tol("fp32", "gfx950") == 1e-3
     # gfx950 emulates TF32 (bf16x3), gfx942 encodes XF32 natively.
-    assert big._verify_tol("tf32", "gfx950") == 1e-4
-    assert big._verify_tol("tf32", "gfx942") == 2**-8
+    assert big.verify_tol("tf32", "gfx950") == 1e-4
+    assert big.verify_tol("tf32", "gfx942") == 2**-8
     # The atom decides when it is known.
-    assert big._verify_tol("tf32", "gfx942", "mfma_f32_32x32x16_xf32") == 1e-4
-    assert big._verify_tol("tf32", "gfx950", "mfma_f32_16x16x8_xf32") == 2**-8
+    assert big.verify_tol("tf32", "gfx942", "mfma_f32_32x32x16_xf32") == 1e-4
+    assert big.verify_tol("tf32", "gfx950", "mfma_f32_16x16x8_xf32") == 2**-8
     # One pair of TF32 bounds for both sweeps.
     from benchmarks.common.direct_kernel_sweep import DIRECT_VERIFY_TOL
     from benchmarks.common.tf32_verify import TF32_VERIFY_TOL

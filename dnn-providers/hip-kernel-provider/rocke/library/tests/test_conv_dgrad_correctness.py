@@ -2,9 +2,12 @@
 # SPDX-License-Identifier: MIT
 """Numeric correctness tests for the conv backward-data (dgrad) implicit-GEMM kernel.
 
-Builds one dgrad kernel per test case on the running GPU and compares the output
-against a float64 data-gradient reference of the stored inputs
-(``builders.common.conv_reference.conv_dgrad_reference``).  Covers:
+Builds dgrad kernels on the running GPU and compares each output against a
+float64 data-gradient reference of the stored inputs
+(``builders.common.conv_reference.conv_dgrad_reference``).
+``TestConvDgradCorrectness`` checks, per problem, every candidate of a pinned
+sample of the dgrad sweep (``_conv_dgrad_sweep_sample``) against the sweep's
+``--verify`` bound; the other classes build the kernels they name.  Covers:
 
   - stride=1 (direct-store epilogue, no atomics)
   - stride=2 (tilde-decomposition, atomic epilogue)
@@ -16,41 +19,45 @@ against a float64 data-gradient reference of the stored inputs
 
 Requires a ROCm GPU (skip otherwise).
 
-Run:
-  PYTHONPATH=rocke/platform/python:rocke/library python \
-    rocke/library/tests/test_conv_dgrad_correctness.py
+Run, from rocke/library:
+  PYTHONPATH=../platform/python:. python -m pytest \
+    tests/test_conv_dgrad_correctness.py
 """
 
 from __future__ import annotations
 
-import os
+import multiprocessing
 import re
-import subprocess
-import sys
 import unittest
+from concurrent.futures import BrokenExecutor, ProcessPoolExecutor
 
 import numpy as np
-from rocke.assets import library_root, platform_root
+from rocke import compile_kernel
 from rocke.numeric import storage
 from rocke.runtime.hip_module import get_device_arch
+from rocke.tests.host_cpus import available_cpus
 from rocke.tests.lanes import arch_skip_reason
 
+from benchmarks.common import conv_fill
+from benchmarks.common.benchmark_implicit_gemm_conv import (
+    compile_dgrad_sweep_candidate,
+    dgrad_sweep_grid,
+    sample_combos,
+    verify_verdict,
+)
 from builders.common.conv_reference import (
     conv_dgrad_reference,
     tf32_reference_inputs,
     tf32_reference_tol,
 )
+from kernels.common.conv_implicit_gemm import ConvProblem
+from kernels.common.conv_implicit_gemm_dgrad import build_implicit_gemm_conv_dgrad
 
-_PYDIR = str(platform_root() / "python")
-_LIB_DIR = str(library_root())
-
-# The assets roots describe the source checkout. In an installed test artifact
-# the packages sit under tests/ and tests/library instead, so lead with this
-# process's own sys.path -- whatever let pytest import rocke and kernels here
-# is by definition enough for the child -- and keep the derived roots as the
-# source-tree fallback.
-_CHILD_PYTHONPATH = os.pathsep.join(
-    dict.fromkeys([p for p in sys.path if p] + [_PYDIR, _LIB_DIR])
+from ._conv_dgrad_sweep_sample import (
+    SWEEP_SAMPLE_FRACTION,
+    SWEEP_SAMPLE_SEED,
+    SWEEP_SAMPLE_TILINGS,
+    sweep_sample,
 )
 
 ARCH = get_device_arch(0)
@@ -65,130 +72,121 @@ _SKIP_REASON = (
     f"detected arch={ARCH!r}"
 )
 
-
-def _run_benchmark(*extra_args, timeout=600):
-    """Run benchmark_implicit_gemm_conv in a subprocess and return (rc, output)."""
-    import io
-
-    env = {
-        **os.environ,
-        "PYTHONDONTWRITEBYTECODE": "1",
-        "PYTHONPATH": _CHILD_PYTHONPATH,
-    }
-    cmd = [
-        sys.executable,
-        "-m",
-        "benchmarks.common.benchmark_implicit_gemm_conv",
-        "--arch",
-        ARCH,
-        "--direction",
-        "dgrad",
-        "--verify",
-        "--sample",
-        "0.05",
-        "--warmup",
-        "1",
-        "--iters",
-        "1",
-        "--jobs",
-        "0",
-        *extra_args,
-    ]
-    # Stream output to the terminal in real time and also collect it for
-    # assertions.  Using Popen + readline avoids the buffering that hides
-    # progress when capture_output=True is used with subprocess.run.
-    buf = io.StringIO()
-    with subprocess.Popen(
-        cmd,
-        env=env,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        text=True,
-        bufsize=1,
-    ) as proc:
-        for line in proc.stdout:
-            sys.stdout.write(line)
-            sys.stdout.flush()
-            buf.write(line)
-        proc.wait(timeout=timeout)
-    return proc.returncode, buf.getvalue()
+#: Most worker processes the sample compiles in: each worker holds its own
+#: imports and COMGR in memory.
+_MAX_SAMPLE_COMPILE_WORKERS = 32
 
 
 @unittest.skipUnless(ARCH in _SUPPORTED_ARCHES, _SKIP_REASON)
 class TestConvDgradCorrectness(unittest.TestCase):
-    """Build and verify dgrad kernels numerically on the running GPU."""
+    """Every candidate of the sampled dgrad sweep computes the right dX.
 
-    def _verify(self, *extra_args, label="", timeout=600):
-        rc, out = _run_benchmark(*extra_args, timeout=timeout)
-        self.assertEqual(
-            rc,
-            0,
-            f"dgrad benchmark failed{' (' + label + ')' if label else ''} "
-            f"on {ARCH}:\n{out[-3000:]}",
+    For each problem, every tile configuration of ``SWEEP_SAMPLE_TILINGS``
+    that is a sweep candidate with the test's split-K mode is built and
+    compiled in worker processes (:func:`compile_dgrad_sweep_candidate`),
+    launched here, and must pass the sweep's ``--verify``
+    (:func:`verify_verdict`). A kernel that stores its output is launched on
+    poisoned output, an atomic (split-K) one on zeroed output. A build or
+    compile that raises fails the test, and so does a problem with no
+    candidate.
+    """
+
+    @classmethod
+    def _start_compile_pool(cls):
+        # One pool for the class: its workers import the kernel modules once.
+        cls._compile_pool = ProcessPoolExecutor(
+            max_workers=min(available_cpus(), _MAX_SAMPLE_COMPILE_WORKERS),
+            mp_context=multiprocessing.get_context("spawn"),
         )
-        self.assertNotIn(
-            "FAIL",
-            out,
-            f"dgrad numeric FAIL{' (' + label + ')' if label else ''} "
-            f"on {ARCH}:\n{out[-3000:]}",
-        )
+
+    @classmethod
+    def setUpClass(cls):
+        cls._start_compile_pool()
+
+    @classmethod
+    def tearDownClass(cls):
+        cls._compile_pool.shutdown(cancel_futures=True)
+
+    def _verify(self, dtype: str, problem: ConvProblem, *, split_k: int) -> None:
+        """Check the sample's candidates for ``problem`` in ``dtype``;
+        ``split_k`` is 1, or -1 for the split-K resolver's pick."""
+        combos = sweep_sample(split_k)
+        futures = [
+            self._compile_pool.submit(
+                compile_dgrad_sweep_candidate,
+                combo,
+                problem=problem,
+                dtype=dtype,
+                arch=ARCH,
+            )
+            for combo in combos
+        ]
+        grad_output, weights = _dgrad_inputs(problem, dtype)
+        ref = _dgrad_reference(problem, dtype)
+        checked, failures = 0, []
+        try:
+            for combo, future in zip(combos, futures):
+                try:
+                    compiled = future.result()
+                except BrokenExecutor as error:
+                    # A worker died (a crash, out of memory): every pending
+                    # candidate would report it, so stop here, and give the
+                    # next test a working pool.
+                    self._compile_pool.shutdown(wait=False, cancel_futures=True)
+                    type(self)._start_compile_pool()
+                    self.fail(f"the compile pool died at {combo}: {error!r}")
+                except Exception as error:  # noqa: BLE001 - reported per candidate
+                    failures.append(f"{combo}: build/compile raised {error!r}")
+                    continue
+                if compiled is None:
+                    continue
+                spec, artifact = compiled
+                got = _dgrad_launch(
+                    spec,
+                    dtype,
+                    grad_output,
+                    weights,
+                    hsaco=artifact.hsaco,
+                    kernel_name=artifact.kernel_name,
+                    poison=True,
+                )
+                checked += 1
+                passed, error = verify_verdict(
+                    got,
+                    ref,
+                    compute_dtype=dtype,
+                    arch=ARCH,
+                    ref_floor=conv_fill.ref_floor("dgrad"),
+                )
+                if not passed:
+                    failures.append(f"{artifact.kernel_name}: rel_err={error:.2e}")
+        finally:
+            for future in futures:
+                future.cancel()
+        case = f"{dtype} {problem.short()} split_k={split_k} on {ARCH}"
+        if failures:
+            self.fail(
+                f"{len(failures)} sampled dgrad candidates failed for {case}:\n"
+                + "\n".join(failures)
+            )
+        self.assertGreater(checked, 0, f"no sampled dgrad candidate for {case}")
 
     # ---- stride=1 (direct store, no atomics) ---------------------------------
 
     def test_fp16_stride1(self):
         """fp16 dgrad, stride=1 — single sub-GEMM, direct-store epilogue."""
         self._verify(
-            "--dtype",
             "fp16",
-            "--N",
-            "4",
-            "--Hi",
-            "16",
-            "--Wi",
-            "16",
-            "--C",
-            "32",
-            "--K",
-            "32",
-            "--Y",
-            "3",
-            "--X",
-            "3",
-            "--pH",
-            "1",
-            "--pW",
-            "1",
-            "--split-k",
-            "1",
-            label="fp16 stride=1",
+            ConvProblem(N=4, Hi=16, Wi=16, C=32, K=32, Y=3, X=3, pH=1, pW=1),
+            split_k=1,
         )
 
     def test_bf16_stride1(self):
         """bf16 dgrad, stride=1."""
         self._verify(
-            "--dtype",
             "bf16",
-            "--N",
-            "4",
-            "--Hi",
-            "16",
-            "--Wi",
-            "16",
-            "--C",
-            "32",
-            "--K",
-            "32",
-            "--Y",
-            "3",
-            "--X",
-            "3",
-            "--pH",
-            "1",
-            "--pW",
-            "1",
-            "--split-k",
-            "1",
-            label="bf16 stride=1",
+            ConvProblem(N=4, Hi=16, Wi=16, C=32, K=32, Y=3, X=3, pH=1, pW=1),
+            split_k=1,
         )
 
     def test_fp32_stride1(self):
@@ -196,29 +194,9 @@ class TestConvDgradCorrectness(unittest.TestCase):
         if ARCH not in _MFMA_ARCHES:
             self.skipTest(f"fp32 dgrad candidates require MFMA; running on {ARCH}")
         self._verify(
-            "--dtype",
             "fp32",
-            "--N",
-            "2",
-            "--Hi",
-            "16",
-            "--Wi",
-            "16",
-            "--C",
-            "32",
-            "--K",
-            "32",
-            "--Y",
-            "3",
-            "--X",
-            "3",
-            "--pH",
-            "1",
-            "--pW",
-            "1",
-            "--split-k",
-            "1",
-            label="fp32 stride=1",
+            ConvProblem(N=2, Hi=16, Wi=16, C=32, K=32, Y=3, X=3, pH=1, pW=1),
+            split_k=1,
         )
 
     # ---- pointwise 1x1 (flat-offset fast path) -------------------------------
@@ -245,29 +223,9 @@ class TestConvDgradCorrectness(unittest.TestCase):
         not a property of these particular numbers.
         """
         self._verify(
-            "--dtype",
             "fp16",
-            "--N",
-            "2",
-            "--Hi",
-            "7",
-            "--Wi",
-            "7",
-            "--C",
-            "64",
-            "--K",
-            "48",
-            "--Y",
-            "1",
-            "--X",
-            "1",
-            "--pH",
-            "0",
-            "--pW",
-            "0",
-            "--split-k",
-            "1",
-            label="fp16 pointwise 1x1",
+            ConvProblem(N=2, Hi=7, Wi=7, C=64, K=48, Y=1, X=1, pH=0, pW=0),
+            split_k=1,
         )
 
     # ---- stride=2 (tilde decomposition, atomic epilogue) ---------------------
@@ -279,33 +237,11 @@ class TestConvDgradCorrectness(unittest.TestCase):
                 f"stride>1 dgrad requires atomic-add or wavelet pipeline; running on {ARCH}"
             )
         self._verify(
-            "--dtype",
             "fp16",
-            "--N",
-            "2",
-            "--Hi",
-            "16",
-            "--Wi",
-            "16",
-            "--C",
-            "32",
-            "--K",
-            "32",
-            "--Y",
-            "3",
-            "--X",
-            "3",
-            "--pH",
-            "1",
-            "--pW",
-            "1",
-            "--sH",
-            "2",
-            "--sW",
-            "2",
-            "--split-k",
-            "1",
-            label="fp16 stride=2",
+            ConvProblem(
+                N=2, Hi=16, Wi=16, C=32, K=32, Y=3, X=3, pH=1, pW=1, sH=2, sW=2
+            ),
+            split_k=1,
         )
 
     def test_bf16_stride2(self):
@@ -315,33 +251,11 @@ class TestConvDgradCorrectness(unittest.TestCase):
                 f"stride>1 dgrad requires atomic-add or wavelet pipeline; running on {ARCH}"
             )
         self._verify(
-            "--dtype",
             "bf16",
-            "--N",
-            "2",
-            "--Hi",
-            "16",
-            "--Wi",
-            "16",
-            "--C",
-            "32",
-            "--K",
-            "32",
-            "--Y",
-            "3",
-            "--X",
-            "3",
-            "--pH",
-            "1",
-            "--pW",
-            "1",
-            "--sH",
-            "2",
-            "--sW",
-            "2",
-            "--split-k",
-            "1",
-            label="bf16 stride=2",
+            ConvProblem(
+                N=2, Hi=16, Wi=16, C=32, K=32, Y=3, X=3, pH=1, pW=1, sH=2, sW=2
+            ),
+            split_k=1,
         )
 
     def test_bf16_patch_embedding_stride16(self):
@@ -356,33 +270,11 @@ class TestConvDgradCorrectness(unittest.TestCase):
                 f"stride>1 dgrad requires atomic-add or wavelet pipeline; running on {ARCH}"
             )
         self._verify(
-            "--dtype",
             "bf16",
-            "--N",
-            "2",
-            "--Hi",
-            "32",
-            "--Wi",
-            "32",
-            "--C",
-            "3",
-            "--K",
-            "32",
-            "--Y",
-            "16",
-            "--X",
-            "16",
-            "--pH",
-            "0",
-            "--pW",
-            "0",
-            "--sH",
-            "16",
-            "--sW",
-            "16",
-            "--split-k",
-            "1",
-            label="bf16 patch 16x16 stride=16",
+            ConvProblem(
+                N=2, Hi=32, Wi=32, C=3, K=32, Y=16, X=16, pH=0, pW=0, sH=16, sW=16
+            ),
+            split_k=1,
         )
 
     # ---- split_k > 1 (atomic epilogue) ---------------------------------------
@@ -394,29 +286,9 @@ class TestConvDgradCorrectness(unittest.TestCase):
                 f"split_k dgrad requires atomic-add or wavelet pipeline; running on {ARCH}"
             )
         self._verify(
-            "--dtype",
             "fp16",
-            "--N",
-            "4",
-            "--Hi",
-            "28",
-            "--Wi",
-            "28",
-            "--C",
-            "64",
-            "--K",
-            "128",
-            "--Y",
-            "3",
-            "--X",
-            "3",
-            "--pH",
-            "1",
-            "--pW",
-            "1",
-            "--split-k",
-            "-1",
-            label="fp16 split_k=auto",
+            ConvProblem(N=4, Hi=28, Wi=28, C=64, K=128, Y=3, X=3, pH=1, pW=1),
+            split_k=-1,
         )
 
     # ---- larger realistic shape ----------------------------------------------
@@ -424,29 +296,9 @@ class TestConvDgradCorrectness(unittest.TestCase):
     def test_fp16_resnet_shape(self):
         """fp16 dgrad, ResNet-style shape N8 H56 W56 C64 K64 R3 S3."""
         self._verify(
-            "--dtype",
             "fp16",
-            "--N",
-            "8",
-            "--Hi",
-            "56",
-            "--Wi",
-            "56",
-            "--C",
-            "64",
-            "--K",
-            "64",
-            "--Y",
-            "3",
-            "--X",
-            "3",
-            "--pH",
-            "1",
-            "--pW",
-            "1",
-            "--split-k",
-            "-1",
-            label="fp16 resnet N8H56W56C64K64",
+            ConvProblem(N=8, Hi=56, Wi=56, C=64, K=64, Y=3, X=3, pH=1, pW=1),
+            split_k=-1,
         )
 
     # ---- grouped (grid-per-group on blockIdx.y) ------------------------------
@@ -454,61 +306,17 @@ class TestConvDgradCorrectness(unittest.TestCase):
     def test_fp16_grouped_stride1(self):
         """fp16 grouped dgrad, groups=4 (cpg=kpg=16), stride=1 direct store."""
         self._verify(
-            "--dtype",
             "fp16",
-            "--N",
-            "2",
-            "--Hi",
-            "16",
-            "--Wi",
-            "16",
-            "--C",
-            "64",
-            "--K",
-            "64",
-            "--Y",
-            "3",
-            "--X",
-            "3",
-            "--pH",
-            "1",
-            "--pW",
-            "1",
-            "--groups",
-            "4",
-            "--split-k",
-            "1",
-            label="fp16 grouped g4 stride=1",
+            ConvProblem(N=2, Hi=16, Wi=16, C=64, K=64, Y=3, X=3, pH=1, pW=1, groups=4),
+            split_k=1,
         )
 
     def test_bf16_grouped_stride1(self):
         """bf16 grouped dgrad, groups=4, stride=1."""
         self._verify(
-            "--dtype",
             "bf16",
-            "--N",
-            "2",
-            "--Hi",
-            "16",
-            "--Wi",
-            "16",
-            "--C",
-            "64",
-            "--K",
-            "64",
-            "--Y",
-            "3",
-            "--X",
-            "3",
-            "--pH",
-            "1",
-            "--pW",
-            "1",
-            "--groups",
-            "4",
-            "--split-k",
-            "1",
-            label="bf16 grouped g4 stride=1",
+            ConvProblem(N=2, Hi=16, Wi=16, C=64, K=64, Y=3, X=3, pH=1, pW=1, groups=4),
+            split_k=1,
         )
 
     def test_fp16_grouped_stride2(self):
@@ -516,66 +324,31 @@ class TestConvDgradCorrectness(unittest.TestCase):
         if ARCH not in _MFMA_ARCHES:
             self.skipTest(f"stride>1 dgrad requires CDNA atomic-add; running on {ARCH}")
         self._verify(
-            "--dtype",
             "fp16",
-            "--N",
-            "2",
-            "--Hi",
-            "16",
-            "--Wi",
-            "16",
-            "--C",
-            "64",
-            "--K",
-            "64",
-            "--Y",
-            "3",
-            "--X",
-            "3",
-            "--pH",
-            "1",
-            "--pW",
-            "1",
-            "--sH",
-            "2",
-            "--sW",
-            "2",
-            "--groups",
-            "4",
-            "--split-k",
-            "1",
-            label="fp16 grouped g4 stride=2",
+            ConvProblem(
+                N=2,
+                Hi=16,
+                Wi=16,
+                C=64,
+                K=64,
+                Y=3,
+                X=3,
+                pH=1,
+                pW=1,
+                sH=2,
+                sW=2,
+                groups=4,
+            ),
+            split_k=1,
         )
 
     def test_fp16_grouped_odd_kpg(self):
         """Non-power-of-two kpg (C=K=48, groups=8 -> cpg=kpg=6): guards against
         the k_sub decode-divisor trap (must divide by kpg, not total K)."""
         self._verify(
-            "--dtype",
             "fp16",
-            "--N",
-            "2",
-            "--Hi",
-            "16",
-            "--Wi",
-            "16",
-            "--C",
-            "48",
-            "--K",
-            "48",
-            "--Y",
-            "3",
-            "--X",
-            "3",
-            "--pH",
-            "1",
-            "--pW",
-            "1",
-            "--groups",
-            "8",
-            "--split-k",
-            "1",
-            label="fp16 grouped g8 cpg=kpg=6",
+            ConvProblem(N=2, Hi=16, Wi=16, C=48, K=48, Y=3, X=3, pH=1, pW=1, groups=8),
+            split_k=1,
         )
 
     def test_fp16_grouped_split_k(self):
@@ -584,31 +357,9 @@ class TestConvDgradCorrectness(unittest.TestCase):
         if ARCH not in _MFMA_ARCHES:
             self.skipTest(f"split_k dgrad requires CDNA atomic-add; running on {ARCH}")
         self._verify(
-            "--dtype",
             "fp16",
-            "--N",
-            "4",
-            "--Hi",
-            "28",
-            "--Wi",
-            "28",
-            "--C",
-            "64",
-            "--K",
-            "128",
-            "--Y",
-            "3",
-            "--X",
-            "3",
-            "--pH",
-            "1",
-            "--pW",
-            "1",
-            "--groups",
-            "4",
-            "--split-k",
-            "-1",
-            label="fp16 grouped g4 split_k=auto",
+            ConvProblem(N=4, Hi=28, Wi=28, C=64, K=128, Y=3, X=3, pH=1, pW=1, groups=4),
+            split_k=-1,
         )
 
     def test_bf16_depthwise_large_filter(self):
@@ -616,31 +367,11 @@ class TestConvDgradCorrectness(unittest.TestCase):
         operand scalar. A tall, asymmetric filter with per-axis "same"
         padding pins the separate Y/X and pH/pW decode."""
         self._verify(
-            "--dtype",
             "bf16",
-            "--N",
-            "2",
-            "--Hi",
-            "14",
-            "--Wi",
-            "14",
-            "--C",
-            "32",
-            "--K",
-            "32",
-            "--Y",
-            "11",
-            "--X",
-            "3",
-            "--pH",
-            "5",
-            "--pW",
-            "1",
-            "--groups",
-            "32",
-            "--split-k",
-            "1",
-            label="bf16 depthwise g32 11x3",
+            ConvProblem(
+                N=2, Hi=14, Wi=14, C=32, K=32, Y=11, X=3, pH=5, pW=1, groups=32
+            ),
+            split_k=1,
         )
 
     def test_fp16_depthwise_stride2(self):
@@ -648,35 +379,22 @@ class TestConvDgradCorrectness(unittest.TestCase):
         if ARCH not in _MFMA_ARCHES:
             self.skipTest(f"stride>1 dgrad requires CDNA atomic-add; running on {ARCH}")
         self._verify(
-            "--dtype",
             "fp16",
-            "--N",
-            "2",
-            "--Hi",
-            "15",
-            "--Wi",
-            "13",
-            "--C",
-            "64",
-            "--K",
-            "64",
-            "--Y",
-            "5",
-            "--X",
-            "3",
-            "--pH",
-            "2",
-            "--pW",
-            "0",
-            "--sH",
-            "2",
-            "--sW",
-            "2",
-            "--groups",
-            "64",
-            "--split-k",
-            "1",
-            label="fp16 depthwise g64 stride=2",
+            ConvProblem(
+                N=2,
+                Hi=15,
+                Wi=13,
+                C=64,
+                K=64,
+                Y=5,
+                X=3,
+                pH=2,
+                pW=0,
+                sH=2,
+                sW=2,
+                groups=64,
+            ),
+            split_k=1,
         )
 
 
@@ -887,13 +605,8 @@ class TestConvDgradGfx1250Emit(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-# K-outer LDS (transpose-read) A/B
+# In-process build and launch
 # ---------------------------------------------------------------------------
-#
-# Every other test in this file shells out to the benchmark driver and greps
-# stdout, which cannot A/B one spec flag. These helpers build and launch a
-# dgrad kernel in-process so the K-outer B tile can be compared against the
-# M-outer default for the identical problem and tiling.
 
 
 def _dgrad_inputs(problem, dtype, seed=0):
@@ -907,41 +620,61 @@ def _dgrad_inputs(problem, dtype, seed=0):
 
 
 def _dgrad_run_inprocess(spec, dtype, seed=0, poison=False, problem=None):
-    """Launch one dgrad kernel and return dX (NHWC): the float32 values of the
-    stored ``dtype`` output, on the inputs :func:`_dgrad_inputs` draws.
-
-    The kernel is built from ``spec`` (its problem is the build probe) and
-    launched on ``problem`` (default: the spec's own), as an AOT binary is:
-    the shape travels as kernargs and the sub-GEMM records are packed for the
-    launched problem. ``poison=True`` pre-fills dX with 0xFF bytes (NaN in
-    fp16/bf16) when the kernel stores rather than accumulates, so an output
-    the kernel never writes shows up as NaN instead of passing as zero.
-    """
-    import ctypes
-    from dataclasses import replace as dc_replace
-
-    from rocke import compile_kernel
-    from kernels.common.conv_args import ConvArgs
-    from kernels.common.conv_abi import conv_args_signature
-    from kernels.common.conv_implicit_gemm_dgrad import (
-        build_implicit_gemm_conv_dgrad,
-        pack_sub_gemm_buffer,
-    )
-    from rocke.runtime.hip_module import Runtime
-    from rocke.runtime.host_buffers import as_u8_buffer
-    from rocke.runtime.launcher import KernelLauncher, LaunchConfig
-
+    """Build, compile and launch one dgrad kernel (:func:`_dgrad_launch`) on
+    the inputs :func:`_dgrad_inputs` draws from ``seed`` for the launched
+    problem, and return dX (NHWC) as float32."""
     artifact = compile_kernel(
         build_implicit_gemm_conv_dgrad(spec, arch=ARCH), arch=ARCH
     )
     p = spec.problem if problem is None else problem
-    dY, W = _dgrad_inputs(p, dtype, seed)
-    dX = np.zeros((p.N, p.Hi, p.Wi, p.C), dtype=dY.dtype)
+    dy, w = _dgrad_inputs(p, dtype, seed)
+    return _dgrad_launch(
+        spec,
+        dtype,
+        dy,
+        w,
+        hsaco=artifact.hsaco,
+        kernel_name=artifact.kernel_name,
+        poison=poison,
+        problem=problem,
+    )
+
+
+def _dgrad_launch(
+    spec, dtype, grad_output, weights, *, hsaco, kernel_name, poison=False, problem=None
+):
+    """Launch the compiled dgrad kernel of ``spec`` on the stored ``dtype``
+    inputs ``grad_output`` (dY) and ``weights`` (W) and return dX (NHWC): the float32 values of the
+    stored output.
+
+    The kernel was built from ``spec`` (its problem is the build probe) and is
+    launched on ``problem`` (default: the spec's own), as an AOT binary is:
+    the shape travels as kernargs and the sub-GEMM records are packed for the
+    launched problem. ``poison=True`` pre-fills dX with 0xFF bytes (NaN in
+    every stored dtype) when the kernel stores rather than accumulates, so an
+    output the kernel never writes shows up as NaN instead of passing as zero.
+    """
+    import ctypes
+    from dataclasses import replace as dc_replace
+
+    from kernels.common.conv_args import ConvArgs
+    from kernels.common.conv_abi import conv_args_signature
+    from kernels.common.conv_implicit_gemm_dgrad import pack_sub_gemm_buffer
+    from rocke.runtime.hip_module import Runtime
+    from rocke.runtime.host_buffers import as_u8_buffer
+    from rocke.runtime.launcher import KernelLauncher, LaunchConfig
+
+    p = spec.problem if problem is None else problem
+    dX = np.zeros((p.N, p.Hi, p.Wi, p.C), dtype=grad_output.dtype)
 
     rt = Runtime()
-    dY_d, W_d, dX_d = rt.alloc(dY.nbytes), rt.alloc(W.nbytes), rt.alloc(dX.nbytes)
-    rt.memcpy_h2d(dY_d, as_u8_buffer(dY), dY.nbytes)
-    rt.memcpy_h2d(W_d, as_u8_buffer(W), W.nbytes)
+    dY_d, W_d, dX_d = (
+        rt.alloc(grad_output.nbytes),
+        rt.alloc(weights.nbytes),
+        rt.alloc(dX.nbytes),
+    )
+    rt.memcpy_h2d(dY_d, as_u8_buffer(grad_output), grad_output.nbytes)
+    rt.memcpy_h2d(W_d, as_u8_buffer(weights), weights.nbytes)
     # split-K atomic-add needs a zeroed dX.
     rt.memset(dX_d, 0xFF if (poison and not spec.needs_atomic) else 0, dX.nbytes)
 
@@ -953,9 +686,7 @@ def _dgrad_run_inprocess(spec, dtype, seed=0, poison=False, problem=None):
 
     # The tilde record buffer is part of the dgrad ABI, not an extension.
     sig = conv_args_signature(dtype, direction="dgrad")
-    launcher = KernelLauncher(
-        hsaco=artifact.hsaco, kernel_name=artifact.kernel_name, signature=sig
-    )
+    launcher = KernelLauncher(hsaco=hsaco, kernel_name=kernel_name, signature=sig)
     launcher(
         ConvArgs.from_problem(
             p, direction="dgrad", tile_m=spec.tile_m, tile_n=spec.tile_n
@@ -963,8 +694,8 @@ def _dgrad_run_inprocess(spec, dtype, seed=0, poison=False, problem=None):
             int(dY_d),
             int(W_d),
             int(dX_d),
-            dY.nbytes,
-            W.nbytes,
+            grad_output.nbytes,
+            weights.nbytes,
             dX.nbytes,
             sub_gemm_buf=int(sg_d),
             num_sub_gemms=len(sub_gemms),
@@ -992,6 +723,10 @@ def _dgrad_reference(problem, dtype, seed=0, *, tf32=False):
     return conv_dgrad_reference(dy, w, problem)
 
 
+# ---------------------------------------------------------------------------
+# K-outer LDS (transpose-read) A/B
+# ---------------------------------------------------------------------------
+
 # The K-outer B tile runs in two lane-mapping regimes, and the A/B has to cover
 # both: gfx950 is wave64 MFMA reading through ``ds_read_b64_tr_b16`` (4 elements
 # per lane), gfx1250 is wave32 WMMA reading through ``ds_load_tr16_b128`` (8 per
@@ -1016,7 +751,6 @@ class TestConvDgradLdsKOuter(unittest.TestCase):
     def _pair(
         self, dtype, *, warp_tile_mn, tile_k, epilogue, split_k, stride=1, Hi=14, K=64
     ):
-        sys.path.insert(0, os.path.abspath(_PYDIR))
         from kernels.common.conv_implicit_gemm import ConvDataSpec
         from kernels.common.conv_implicit_gemm_dgrad import (
             DgradConvSpec,
@@ -1156,7 +890,6 @@ class TestConvDgradUniformKDecode(unittest.TestCase):
     @staticmethod
     def _problem(dtype, *, groups=1, K=64, C=64, Hi=14, Y=3, stride=1, dil=1, pad=1):
         """The problem :meth:`_run` launches: N=2, H=Hi, W=Hi+3, YxY filter."""
-        sys.path.insert(0, os.path.abspath(_PYDIR))
         from benchmarks.common.benchmark_implicit_gemm_conv import parse_miopen_cmd
 
         kw = "convbfp16" if dtype == "bf16" else "convfp16"
@@ -1338,7 +1071,6 @@ class TestConvDgradPatch(unittest.TestCase):
         tile_k=64,
         dtype="bf16",
     ):
-        sys.path.insert(0, os.path.abspath(_PYDIR))
         from kernels.common.conv_implicit_gemm import ConvDataSpec
         from kernels.common.conv_implicit_gemm_dgrad import (
             DgradConvSpec,
@@ -2110,7 +1842,6 @@ class TestConvDgradSplitKCshuffle(unittest.TestCase):
         tile_n=128,
         pipeline="mem",
     ):
-        sys.path.insert(0, os.path.abspath(_PYDIR))
         from benchmarks.common.benchmark_implicit_gemm_conv import parse_miopen_cmd
         from kernels.common.conv_implicit_gemm import ConvDataSpec
         from kernels.common.conv_implicit_gemm_dgrad import (
@@ -2177,5 +1908,12 @@ class TestConvDgradSplitKCshuffle(unittest.TestCase):
         self._check("fp16", split_k=16, vec_c=8, C=72, tile_m=64, tile_n=64)
 
 
-if __name__ == "__main__":
-    unittest.main(verbosity=2)
+def test_the_pinned_sample_is_the_sweeps_draw():
+    """``SWEEP_SAMPLE_TILINGS`` is what the dgrad sweep's ``--sample`` draws
+    from its grid today, in order, so a change to the sweep's axes or its
+    sampling rule fails here instead of silently changing what
+    ``TestConvDgradCorrectness`` covers."""
+    drawn = sample_combos(
+        dgrad_sweep_grid((1,)), SWEEP_SAMPLE_FRACTION, SWEEP_SAMPLE_SEED
+    )
+    assert [tuple(combo)[:-1] for combo in drawn] == list(SWEEP_SAMPLE_TILINGS)
