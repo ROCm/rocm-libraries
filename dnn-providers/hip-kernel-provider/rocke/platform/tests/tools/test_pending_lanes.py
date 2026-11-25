@@ -37,7 +37,7 @@ from __future__ import annotations
 
 import ast
 import datetime
-import inspect
+import functools
 import os
 import posixpath
 import re
@@ -53,18 +53,16 @@ from typing import Protocol
 import pytest
 from _pytest.mark.expression import Expression
 from rocke.assets import platform_root
-from rocke.tests import gpu as rocke_gpu
 from rocke.tests import in_tree_suites
-from rocke.tests import lanes as rocke_lanes
 from rocke.tests.comgr import CompilerBuild
 from rocke.tests.ctest_listing import configure_installed_ctest, list_ctest_entries
+from rocke.tests.lane_mentions import LaneMention, LaneMentionKind, lane_mentions
 from rocke.tests.lanes import (
     BUILD_VARIANT,
     RUNNER_HARDWARE,
     SOURCE_TREE,
     TICKET,
     Lane,
-    runner_lanes_for,
     skip_until_reason,
 )
 from rocke.tests.pending_lanes import (
@@ -1455,9 +1453,10 @@ _LANE_TESTS = (
 _BUILD_DIR = re.compile(r"build([-_].*)?")
 
 
-def _python_sources() -> Iterable[tuple[str, ast.Module]]:
+def _python_source_paths() -> list[str]:
     """Each Python file of the test file roots, outside the lane homes and
-    their tests, relative to the rocke directory, with its syntax tree."""
+    their tests, relative to the rocke directory."""
+    paths = []
     for root in ("platform", "library"):
         for file in (ROCKE / root).rglob("*.py"):
             parts = file.relative_to(ROCKE).parts
@@ -1466,80 +1465,15 @@ def _python_sources() -> Iterable[tuple[str, ast.Module]]:
             path = file.relative_to(ROCKE).as_posix()
             if path in _LANE_HOMES or path.startswith(_LANE_TESTS):
                 continue
-            yield path, ast.parse(file.read_text(encoding="utf-8"))
+            paths.append(path)
+    return paths
 
 
-def _declares_a_lane(text: str) -> bool:
-    """Whether ``text`` reads as a lane declaration, a known lane or not."""
-    try:
-        return bool(rocke_lanes.lanes_waited_for(text))
-    except ValueError:
-        return True
-
-
-# What a skip reason says when it claims CI lacks something: that the case
-# waits for something, or a CI runner or CI itself.
-_LANE_WORDS = re.compile(r"(?i:\bwait(?:s|ing)?\s+(?:for|on)\b|\brunners?\b)|\bCI\b")
-# The pytest and unittest calls that skip, with the index of their first
-# reason argument (``skipif(condition, reason)``); a keyword ``reason`` or
-# ``msg`` is a reason too.
-_SKIP_CALLS = {
-    "skip": 0,
-    "skipTest": 0,
-    "skipif": 1,
-    "skipIf": 1,
-    "skipUnless": 1,
-    "importorskip": 2,
-}
-
-
-def _written_text(node: ast.AST) -> str:
-    """The text written in ``node`` itself: its string constants, f-string
-    parts included, but none a call returns (a lane helper's reason)."""
-    if isinstance(node, ast.Call):
-        return ""
-    if isinstance(node, ast.Constant):
-        return node.value if isinstance(node.value, str) else ""
-    return " ".join(_written_text(child) for child in ast.iter_child_nodes(node))
-
-
-def hand_written_lane_reasons(tree: ast.Module) -> list[int]:
-    """The lines of the skips in ``tree`` whose written reason says what CI
-    lacks (:data:`_LANE_WORDS`) instead of naming a lane through
-    ``rocke.tests.lanes``, or reads as a lane declaration. A reason held in a
-    variable or a constant is not read."""
-    lines = []
-    for node in ast.walk(tree):
-        if not isinstance(node, ast.Call):
-            continue
-        name = getattr(node.func, "attr", getattr(node.func, "id", None))
-        if name not in _SKIP_CALLS:
-            continue
-        reasons = node.args[_SKIP_CALLS[name] :] + [
-            keyword.value
-            for keyword in node.keywords
-            if keyword.arg in ("reason", "msg")
-        ]
-        text = " ".join(_written_text(reason) for reason in reasons)
-        if _LANE_WORDS.search(text) or _declares_a_lane(text):
-            lines.append(node.lineno)
-    return lines
-
-
-def test_a_hand_written_lane_reason_is_found():
-    tree = ast.parse(
-        "import pytest, unittest\n"
-        "pytest.skip('waits for a gfx950 runner in CI')\n"
-        "pytest.mark.skipif(True, reason='no gfx950 runner')\n"
-        "unittest.skipUnless(False, f'waiting on {x} in CI')\n"
-        "pytest.skip('waits for ticket: torch')\n"
-        "pytest.skip(msg='CI has no gfx1250')\n"
-        "pytest.skip(skip_until_reason(TICKET, reason='waits for torch'))\n"
-        "pytest.skip('needs ctest on PATH')\n"
-        "pytest.mark.skipif(True, reason='the lane map is gfx942-only')\n"
-        "pytest.importorskip('yaml', reason='needs PyYAML')\n"
-    )
-    assert hand_written_lane_reasons(tree) == [2, 3, 4, 5, 6]
+@functools.cache
+def _source_lane_mentions() -> tuple[LaneMention, ...]:
+    """The lane mentions of :func:`_python_source_paths`, parsed once for the
+    checks that read them."""
+    return tuple(lane_mentions(ROCKE, _python_source_paths()))
 
 
 def test_tests_state_the_arches_they_need_not_the_runner_lane():
@@ -1551,23 +1485,15 @@ def test_tests_state_the_arches_they_need_not_the_runner_lane():
     reason, or one about CI or a runner, is refused everywhere else. Only a
     reason written at the skip is read; one passed through a variable is not
     seen here (the limbo audit sees its case)."""
-    runner_lanes = {
-        name
-        for name, value in vars(rocke_lanes).items()
-        if isinstance(value, Lane) and value.arches
-    }
     named, hand_written = [], []
-    for path, tree in _python_sources():
-        for node in ast.walk(tree):
-            if isinstance(node, ast.Name) and node.id in runner_lanes:
-                named.append(f"{path}:{node.lineno} {node.id}")
-            elif (
-                isinstance(node, ast.Constant)
-                and isinstance(node.value, str)
-                and _declares_a_lane(node.value)
-            ):
-                hand_written.append(f"{path}:{node.lineno}")
-        hand_written += [f"{path}:{line}" for line in hand_written_lane_reasons(tree)]
+    for mention in _source_lane_mentions():
+        if mention.kind is LaneMentionKind.RUNNER_LANE_NAME:
+            named.append(f"{mention.path}:{mention.line} {mention.text}")
+        elif mention.kind in (
+            LaneMentionKind.HAND_WRITTEN_DECLARATION,
+            LaneMentionKind.HAND_WRITTEN_SKIP_REASON,
+        ):
+            hand_written.append(f"{mention.path}:{mention.line}")
     assert not named, (
         "name the arches the case needs (skip_needing_arch / arch_skip_reason) "
         f"instead of the runner lane: {named}"
@@ -1577,86 +1503,6 @@ def test_tests_state_the_arches_they_need_not_the_runner_lane():
         "skip_needing_arch, arch_skip_reason, import_or_skip_until), not a "
         f"hand-written lane reason: {sorted(set(hand_written))}"
     )
-
-
-# The helpers a test passes the arches its case needs, which declare the runner
-# hardware when no pull-request runner has any of them.
-_ARCH_NEED_HELPERS = {
-    helper.__name__: list(inspect.signature(helper).parameters).index("arches")
-    for helper in (
-        rocke_lanes.skip_needing_arch,
-        rocke_lanes.arch_skip_reason,
-        rocke_gpu.current_device_arch_in,
-        rocke_gpu.supported_device_arch,
-        rocke_gpu.run_on_device,
-    )
-}
-
-
-def _literal_strings(node: ast.AST | None) -> tuple[str, ...] | None:
-    if isinstance(node, (ast.Tuple, ast.List, ast.Set)) and all(
-        isinstance(element, ast.Constant) and isinstance(element.value, str)
-        for element in node.elts
-    ):
-        return tuple(element.value for element in node.elts)
-    return None
-
-
-def runner_hardware_needs(tree: ast.Module) -> list[tuple[int, tuple[str, ...]]]:
-    """(line, arches) of each arch helper call in ``tree`` whose arches, a
-    literal or a module-level name bound to one, no pull-request runner has.
-    Arches computed at run time are not seen; the limbo audit sees their
-    cases."""
-    module_arches = {
-        target.id: arches
-        for statement in tree.body
-        if isinstance(statement, (ast.Assign, ast.AnnAssign))
-        and (arches := _literal_strings(statement.value)) is not None
-        for target in (
-            statement.targets
-            if isinstance(statement, ast.Assign)
-            else [statement.target]
-        )
-        if isinstance(target, ast.Name)
-    }
-    needs = []
-    for node in ast.walk(tree):
-        if not isinstance(node, ast.Call):
-            continue
-        name = getattr(node.func, "attr", getattr(node.func, "id", None))
-        if name not in _ARCH_NEED_HELPERS:
-            continue
-        index = _ARCH_NEED_HELPERS[name]
-        argument = (
-            node.args[index]
-            if len(node.args) > index
-            else next((kw.value for kw in node.keywords if kw.arg == "arches"), None)
-        )
-        arches = _literal_strings(argument)
-        if arches is None and isinstance(argument, ast.Name):
-            arches = module_arches.get(argument.id)
-        if arches and runner_lanes_for(arches):
-            needs.append((node.lineno, arches))
-    return needs
-
-
-def test_runner_hardware_needs_are_found_from_literal_arches():
-    tree = ast.parse(
-        "ARCHES = ('gfx950',)\n"
-        "BOTH = ('gfx942', 'gfx950')\n"
-        "run_on_device(kernel, buffers, 64, ('gfx950',))\n"
-        "run_on_device(kernel, buffers, 64, BOTH)\n"
-        "gpu.current_device_arch_in(ARCHES, subject='x')\n"
-        "skip_needing_arch(('gfx1250',), reason='x')\n"
-        "supported_device_arch(kernel, arches=['gfx1151', 'gfx1201'])\n"
-        "arch_skip_reason(computed_arches(), 'x')\n"
-    )
-    assert runner_hardware_needs(tree) == [
-        (3, ("gfx950",)),
-        (5, ("gfx950",)),
-        (6, ("gfx1250",)),
-        (7, ("gfx1151", "gfx1201")),
-    ]
 
 
 def test_a_case_that_needs_runner_hardware_has_a_record():
@@ -1670,10 +1516,11 @@ def test_a_case_that_needs_runner_hardware_has_a_record():
         if entry.whole_file or entry.lane is RUNNER_HARDWARE
     }
     unrecorded = [
-        f"{path}:{line} needs one of {list(arches)}"
-        for path, tree in _python_sources()
-        if posixpath.basename(path).startswith("test_") and path not in recorded
-        for line, arches in runner_hardware_needs(tree)
+        f"{mention.path}:{mention.line} needs one of {list(mention.arches)}"
+        for mention in _source_lane_mentions()
+        if mention.kind is LaneMentionKind.RUNNER_HARDWARE_NEED
+        and posixpath.basename(mention.path).startswith("test_")
+        and mention.path not in recorded
     ]
     assert not unrecorded, (
         "cases that need a GPU no pull-request runner has, with no record: add a "
