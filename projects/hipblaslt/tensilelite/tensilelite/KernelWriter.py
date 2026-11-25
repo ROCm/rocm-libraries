@@ -6975,6 +6975,13 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
       module.addComment1("PAP: G2L vgpr [%u...%u) held for prefetched data" % \
           (self.states.lastValuAB, self.states.lastVgprForReads))
 
+    # The L2 prefetch increments are set again for every tile and nothing after the
+    # main loop reads them, so the tail loop and the store setup can have the registers.
+    if kernel["PrefetchGL2"]:
+      for tc in ("A", "B", "MXSA", "MXSB", "Metadata"):
+        if "GL2PrefetchInc%s" % tc in self.sgprs:
+          module.add(self.undefineSgpr("GL2PrefetchInc%s" % tc))
+
     self.removeSgprVarFromPool("SrdWS")
 
     if not kernel["NoTailLoop"]:
@@ -10325,13 +10332,20 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
         self.states.b.tmpVgprCvtSub = vgprIdx
         vgprIdx += 1
   
+      # The prefetch addresses start on an even register. From an odd index, Serial takes
+      # the slot that alignment would leave empty.
+      serialFirst = bool(kernel["PrefetchGL2"]) and vgprIdx % 2 == 1
+      if serialFirst:
+        self.states.startVgprSerial = vgprIdx
+        vgprIdx += 1
       if kernel["PrefetchGL2"]:
         vgprIdx = self.allocGL2PrefetchAddrVgprs(kernel, tensorParametersA, tensorParametersB, vgprIdx)
 
       # TODO: Serial is always the first/last register in the pool so the store
       # code doesn't have to deal with fragmentation
-      self.states.startVgprSerial = vgprIdx
-      vgprIdx += 1 # for vgpr serial id
+      if not serialFirst:
+        self.states.startVgprSerial = vgprIdx
+        vgprIdx += 1 # for vgpr serial id
 
       self.states.totalVgprs = max(vgprIdx, self.states.c.numVgprValu)
       if self.states.totalVgprs < 0 or self.states.totalVgprs > self.states.regCaps["MaxVgpr"]:

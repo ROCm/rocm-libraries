@@ -17133,10 +17133,12 @@ class KernelWriterAssembly(KernelWriter):
 
     # Keep tmp SGPR usage lean for the common path.
     requiredNumSgpr = 4 if self.states.archCaps["EnableXnackReplay"] else 3
-    with self.allocTmpSgpr(requiredNumSgpr, tag="computeStoreSrdStart_tmpSgprInfo") as tmpSgprInfo:
-      tmpS0 = tmpSgprInfo.idx
+    # [tmpS0, tmpS1] and [wgMT1, wgMT1+1] are used as two separate groups, so they need not be
+    # adjacent: a block of 4 can miss the SGPR limit while free slots remain lower in the pool.
+    with self.allocTmpSgprList(nums=[2, requiredNumSgpr - 2], tag="computeStoreSrdStart_tmpSgprInfo") as tmpSgprInfoList:
+      tmpS0 = tmpSgprInfoList[0].idx
       tmpS1 = tmpS0+1
-      wgMT1 = tmpS0+2
+      wgMT1 = tmpSgprInfoList[1].idx
 
       assert kernel["BufferStore"]
       module.addSpaceLine()

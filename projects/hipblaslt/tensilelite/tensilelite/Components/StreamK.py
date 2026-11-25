@@ -1205,19 +1205,13 @@ class StreamK(TileProcessingStrategy):
         writer.releasePersistentConstSgpr(sSkt)
         module.add(SCBranchSCC1(labelName=skSplitSrd.getLabelName(), comment="branch if split == 1"))
         # Parallel reduction: adjust output buffer address to per split buffer
-        with writer.allocTmpSgpr(4, alignment=1, tag="computeStoreSrdStartCommon_tmpSgprInfo") as tmpSgprInfo:
-            if tmpSgprInfo.idx % 2 == 0:
-                tmpSgprX2  = tmpSgprInfo.idx+0
-                tmpSgpr0   = tmpSgprInfo.idx+0
-                tmpSgpr1   = tmpSgprInfo.idx+1
-                tmpSgpr2   = tmpSgprInfo.idx+2
-                tmpSgpr3   = tmpSgprInfo.idx+3
-            else:
-                tmpSgprX2  = tmpSgprInfo.idx+1
-                tmpSgpr0   = tmpSgprInfo.idx+1
-                tmpSgpr1   = tmpSgprInfo.idx+2
-                tmpSgpr2   = tmpSgprInfo.idx+0
-                tmpSgpr3   = tmpSgprInfo.idx+3
+        # One aligned pair and two single registers; they need not be adjacent.
+        with writer.allocTmpSgprList(nums=[2, 1, 1], tag="computeStoreSrdStartCommon_tmpSgprInfo") as tmpSgprInfoList:
+            tmpSgprX2  = tmpSgprInfoList[0].idx
+            tmpSgpr0   = tmpSgprInfoList[0].idx
+            tmpSgpr1   = tmpSgprInfoList[0].idx+1
+            tmpSgpr2   = tmpSgprInfoList[1].idx
+            tmpSgpr3   = tmpSgprInfoList[2].idx
             module.addComment("Split Output Buffer offset: Free0 + (Free1-1)*StrideC1J + (Free2-1)*StrideCK * SplitIdx * bpe%s")
             # PartialIdx was saved in sgprBeta for re-use
             module.addModuleAsFlatItems(writer.s_mul_u64_u32(sgpr(tmpSgpr0), sgpr(tmpSgpr1), sgpr("SizesFree+0"), sgpr("SkPartialIdx"), comment="Free0"))
