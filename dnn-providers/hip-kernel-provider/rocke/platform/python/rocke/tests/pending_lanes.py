@@ -944,6 +944,7 @@ PENDING: tuple[PendingTest, ...] = (
         "platform/tests/portable_ir/test_recipe_roller.py",
         "platform/tests/test_library_reach.py",
         "platform/tests/tools/test_cmake_test_registration.py",
+        "platform/tests/tools/test_emitter_pair_hook_files.py",
         "platform/tests/tools/test_gen_arch_domain_cpp.py",
         "platform/tests/tools/test_gen_cxx_keywords_cpp.py",
         "platform/tests/tools/test_golden_tool.py",

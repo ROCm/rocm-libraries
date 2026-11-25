@@ -544,24 +544,62 @@ repos:
       # same messages (rocke_coalesced_loader_async_refusals). Both entries run
       # a C program linked with the engine, so the runner builds those two
       # programs (C++ only: no ROCm, HIP or LLVM) and runs the two entries
-      # through CTest. Needs cmake, ctest and a C++ compiler on PATH. Each
-      # entry's outcome depends on the whole engine in both languages and on
-      # its build, hence the broad file pattern. The runner configures the
-      # platform without the sibling library, so the configure reads no CMake
-      # file outside the platform, and both entries' programs and scripts live
-      # in it.
+      # through CTest. Needs cmake, ctest and a C++ compiler on PATH. The
+      # runner configures the platform without the sibling library.
+      # The pattern takes what can change the entries' outcome: the CMake files
+      # the configure reads and the platform's cmake/ helpers, the engine's C++
+      # sources, the build steps' generators and their inputs, the emitter
+      # programs, the arch data the engine reads at run time, and the Python
+      # files the entries' scripts and the runner can import (every top-level
+      # module of each engine package they import from; test support and
+      # scripts by name). A change to any other file, such as another test,
+      # skips the hook.
       - id: rocke-emitter-pair-parity
         name: rocKE C and Python emitters agree on HIP text and refusals
         entry: python -B dnn-providers/hip-kernel-provider/rocke/platform/tools/run_build_tree_ctest.py --target rocke_optimization_barrier_emit --target rocke_coalesced_loader_async_emit --test rocke_optimization_barrier_hip_pair --test rocke_coalesced_loader_async_refusals
         language: python
         additional_dependencies: *rocke_dependencies
-        files: ^dnn-providers/hip-kernel-provider/rocke/platform/(CMakeLists\.txt$|(cmake|cpp|python|tests|tools)/)
+        files: &rocke_emitter_pair_files |
+          (?x)^dnn-providers/hip-kernel-provider/rocke/platform/(
+            CMakeLists\.txt|cmake/[^/]+|tests/CMakeLists\.txt|tests/cmake/[^/]+|
+            tests/golden/attention_dense_spec_vectors\.json|
+            cpp/(?!bindings/).+(?<!\.md)|
+            tools/(gen_arch_domain_cpp|gen_cxx_keywords_cpp|run_build_tree_ctest)\.py|
+            python/rocke/(
+              (analysis/|benchmark/(perf/)?|core/(arch/|isa/)?|helpers/|
+               instances/(common/(manifest_runner/)?)?|numeric/|runtime/)?[^/]+\.py|
+              core/arch/data/[^/]+|
+              tests/(__init__|ci_shard|ctest_listing|hip_identity_cases|
+                hip_outcomes|host_cpus|platform_build|staged_payload|
+                subprocess_launcher)\.py
+            )|
+            tests/core/test_optimization_barrier_cli\.py|
+            tests/instances/differential/(compare_refusals|golden_store|
+              python_batch_worker|run_diff)\.py|
+            tests/instances/parity/(_emit_common\.py|
+              (coalesced_loader_async|optimization_barrier)_emit\.(c|py))
+          )$
+        pass_filenames: false
+      # The pattern above takes every file the configure reads, every file the
+      # emitter programs compile, and every Python file the entries' scripts
+      # and the runner can import, and no test module none of them can import.
+      # A new import or CMake include edits a file the pattern takes, so this
+      # check runs on it; rocke-hook-checks runs it when the config changes.
+      # It cannot see the files a build step's command reads: the generator
+      # scripts and cmake/ helpers in the pattern.
+      - id: rocke-emitter-pair-files
+        name: rocKE emitter pair hook takes every file its entries read
+        entry: python -B -m pytest -p no:cacheprovider -q dnn-providers/hip-kernel-provider/rocke/platform/tests/tools/test_emitter_pair_hook_files.py
+        language: python
+        additional_dependencies: *rocke_dependencies
+        files: *rocke_emitter_pair_files
         pass_filenames: false
 
       # The checks of the rocKE hooks themselves: the tools that read this
-      # config (rocke/tools/precommit_hooks.py and run_hook_on_deletion.py)
-      # and this config, whose hooks they read. In CI an edit to this config
-      # alone checks out no rocKE, so this hook runs nothing for it there.
+      # config (rocke/tools/precommit_hooks.py and run_hook_on_deletion.py),
+      # the emitter pair pattern check and the modules it alone imports, and
+      # this config, whose hooks they read. In CI an edit to this config alone
+      # checks out no rocKE, so this hook runs nothing for it there.
       - id: rocke-hook-checks
         name: rocKE hook tools and hook config checks pass
         entry: *rocke_when_checked_out
@@ -572,6 +610,9 @@ repos:
           - -p
           - no:cacheprovider
           - -q
+          - dnn-providers/hip-kernel-provider/rocke/platform/tests/support/test_cmake_file_api.py
+          - dnn-providers/hip-kernel-provider/rocke/platform/tests/support/test_import_closure.py
+          - dnn-providers/hip-kernel-provider/rocke/platform/tests/tools/test_emitter_pair_hook_files.py
           - dnn-providers/hip-kernel-provider/rocke/platform/tests/tools/test_precommit_hooks.py
           - dnn-providers/hip-kernel-provider/rocke/platform/tests/tools/test_run_hook_on_deletion.py
         language: python
@@ -581,8 +622,11 @@ repos:
             \.pre-commit-config\.yaml|
             dnn-providers/hip-kernel-provider/rocke/(
               tools/(precommit_hooks|run_hook_on_deletion)\.py|
-              platform/python/rocke/tests/source_modules\.py|
-              platform/tests/tools/test_(precommit_hooks|run_hook_on_deletion)\.py
+              platform/python/rocke/tests/(cmake_file_api|import_closure|lanes|
+                source_modules)\.py|
+              platform/tests/support/test_(cmake_file_api|import_closure)\.py|
+              platform/tests/tools/test_(emitter_pair_hook_files|precommit_hooks|
+                run_hook_on_deletion)\.py
             )
           )$
         pass_filenames: false
