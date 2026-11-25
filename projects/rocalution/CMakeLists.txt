@@ -246,7 +246,7 @@ endif()
 
 
 # Setup version
-rocm_setup_version(VERSION "4.3.0")
+rocm_setup_version(VERSION "4.2.0")
 
 # Configure Windows version resource file
 if(WIN32)
