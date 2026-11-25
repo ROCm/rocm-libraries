@@ -6975,14 +6975,14 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
       module.addComment1("PAP: G2L vgpr [%u...%u) held for prefetched data" % \
           (self.states.lastValuAB, self.states.lastVgprForReads))
 
-    # The L2 prefetch increments are set again for every tile and nothing after the
-    # main loop reads them, so the tail loop and the store setup can have the registers.
-    if kernel["PrefetchGL2"]:
+    self.removeSgprVarFromPool("SrdWS")
+
+    # The L2 prefetch increments are set again for every tile and nothing after the main loop
+    # reads them. Give them back when the 4 temporaries of the tail loop no longer fit.
+    if kernel["PrefetchGL2"] and not self.tmpSgprFits(4):
       for tc in ("A", "B", "MXSA", "MXSB", "Metadata"):
         if "GL2PrefetchInc%s" % tc in self.sgprs:
           module.add(self.undefineSgpr("GL2PrefetchInc%s" % tc))
-
-    self.removeSgprVarFromPool("SrdWS")
 
     if not kernel["NoTailLoop"]:
       ########################################
