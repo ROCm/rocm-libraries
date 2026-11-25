@@ -63,9 +63,9 @@ class PullRequestGateTest(unittest.TestCase):
     def test_pr_without_an_org_label_is_skipped(self):
         self.assertFalse(decide(pr_env(LABELS="[]"), self.CHANGE, RULES).run)
 
-    def test_streamhpc_label_counts_as_an_org_label(self):
+    def test_streamhpc_label_alone_is_skipped(self):
         env = pr_env(LABELS='["organization: streamhpc"]')
-        self.assertTrue(decide(env, self.CHANGE, RULES).run)
+        self.assertFalse(decide(env, self.CHANGE, RULES).run)
 
     def test_unrelated_label_event_is_skipped(self):
         self.assertFalse(

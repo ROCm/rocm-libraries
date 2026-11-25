@@ -45,10 +45,11 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from ci_utils import set_github_output  # noqa: E402
 
 PATHS = Path(__file__).resolve().parents[1] / "gfx1250-hw-ci-paths.toml"
-# pr-org-label.yml labels a ROCm org member's PR with exactly one of these: members of
-# the org's streamhpc team get "organization: streamhpc" instead of "organization: ROCm".
-# Outside contributors get neither, so their PR code never reaches the self-hosted runner.
-ORG_LABELS = {"organization: ROCm", "organization: streamhpc"}
+# pr-org-label.yml labels a ROCm org member's PR "organization: ROCm". Outside
+# contributors don't get it, so their PR code never reaches the self-hosted runner.
+# "organization: streamhpc" (the streamhpc team's label) is left out: that team doesn't
+# work on hipBLASLt or TensileLite, and a manual dispatch still covers a one-off PR.
+ORG_LABELS = {"organization: ROCm"}
 
 log = logging.getLogger("configure_gfx1250_hw_ci")
 
