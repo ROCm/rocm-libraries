@@ -23,7 +23,8 @@
  * @brief The depthwise 3D kernels (descriptors/hip/conv_dw3d_rdna/kernels/ConvFwdDepthwise3d.cpp)
  *        as the RDNA engines use them: which problems they serve, which variant a problem takes
  *        and how it tiles the output, how a variant is compiled and launched, and the problem
- *        half of a saved launch. `hip_conv_fwd_dw3d_rdna` runs them as they are.
+ *        half of a saved launch. `hip_conv_fwd_dw3d_rdna` runs them as they are,
+ *        `hip_conv_fwd_bias_dw3d_rdna` with their bias epilogue (DW_HAS_BIAS).
  */
 namespace hip_kernel_provider::kernel_ingestor_engine::conv_rdna::dw3d
 {
@@ -63,19 +64,24 @@ bool isVariantOf(const hipdnn_plugin_sdk::ingestor::KernelDefinition& kernel,
 /// The defines a variant is built with, for a kernel compiled at run time.
 void addCompileOptions(compilation::KernelCompileOptions& options,
                        const ConvProblem& problem,
-                       const Geometry& geometry);
+                       const Geometry& geometry,
+                       bool hasBias = false);
 
-/// The argument list of the specialized or the generic kernel.
-const std::vector<hipdnn_plugin_sdk::ingestor::KernelArgument>& kernelSignature(bool generic);
+/// The argument list of the specialized or the generic kernel: in, wei, out, [bias,] then the
+/// ints.
+const std::vector<hipdnn_plugin_sdk::ingestor::KernelArgument>&
+    kernelSignature(bool generic, bool hasBias = false);
 
 /// Launches the kernel over the grid of @p problem and @p geometry (set by the caller).
+/// @p bias is given exactly when the kernel was built with DW_HAS_BIAS.
 void launch(const compilation::IRunnableKernel& kernel,
             hipStream_t stream,
             const void* x,
             const void* w,
             void* y,
             const ConvProblem& problem,
-            const Geometry& geometry);
+            const Geometry& geometry,
+            const void* bias = nullptr);
 
 /// The problem and geometry values of a saved launch: `n`, `c`, `k`, per spatial axis (`_d`,
 /// `_h`, `_w`) `in_`, `filter_`, `out_`, `pad_`, `stride_`, `dilation_`, and the geometry

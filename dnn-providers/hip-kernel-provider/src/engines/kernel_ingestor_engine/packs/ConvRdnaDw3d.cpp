@@ -231,10 +231,15 @@ bool isVariantOf(const KernelDefinition& kernel, const ConvProblem& problem)
 
 void addCompileOptions(compilation::KernelCompileOptions& options,
                        const ConvProblem& problem,
-                       const Geometry& geometry)
+                       const Geometry& geometry,
+                       bool hasBias)
 {
     options.add("DW_DTYPE", dtypeCode(problem.dtype));
     options.add("DW_NDHWC", problem.layout == Layout::CHANNELS_LAST ? 1 : 0);
+    if(hasBias)
+    {
+        options.add("DW_HAS_BIAS", 1);
+    }
     if(geometry.generic)
     {
         options.add("DW_GENERIC", 1);
@@ -251,20 +256,27 @@ void addCompileOptions(compilation::KernelCompileOptions& options,
 }
 
 /// Mirrors the argument lists of the two kernels and launch() below one for one.
-const std::vector<KernelArgument>& kernelSignature(bool generic)
+const std::vector<KernelArgument>& kernelSignature(bool generic, bool hasBias)
 {
     static const KernelArgument s_buffer{
         "global_buffer", static_cast<uint32_t>(sizeof(void*)), 0, ""};
     static const KernelArgument s_scalar{"by_value", static_cast<uint32_t>(sizeof(int)), 0, ""};
-    const auto make = [](size_t scalars) {
-        std::vector<KernelArgument> signature{s_buffer, s_buffer, s_buffer};
+    const auto make = [](size_t buffers, size_t scalars) {
+        std::vector<KernelArgument> signature(buffers, s_buffer);
         signature.insert(signature.end(), scalars, s_scalar);
         return signature;
     };
     // Specialized: N, C, Di, Hi, Wi, K, Do, Ho, Wo, sd, pd, ph, pw, dd. Generic: N, C, Di, Hi,
-    // Wi, K, Do, Ho, Wo, Z, Y, X, sd, sh, sw, pd, ph, pw, dd, dh, dw.
-    static const std::vector<KernelArgument> s_specialized = make(14);
-    static const std::vector<KernelArgument> s_generic = make(21);
+    // Wi, K, Do, Ho, Wo, Z, Y, X, sd, sh, sw, pd, ph, pw, dd, dh, dw. The bias pointer follows
+    // `out`.
+    static const std::vector<KernelArgument> s_specialized = make(3, 14);
+    static const std::vector<KernelArgument> s_generic = make(3, 21);
+    static const std::vector<KernelArgument> s_specializedBias = make(4, 14);
+    static const std::vector<KernelArgument> s_genericBias = make(4, 21);
+    if(hasBias)
+    {
+        return generic ? s_genericBias : s_specializedBias;
+    }
     return generic ? s_generic : s_specialized;
 }
 
@@ -274,14 +286,40 @@ void launch(const compilation::IRunnableKernel& kernel,
             const void* w,
             void* y,
             const ConvProblem& p,
-            const Geometry& geometry)
+            const Geometry& geometry,
+            const void* bias)
 {
-    if(geometry.generic)
-    {
+    const auto run = [&](auto&&... buffers) {
+        if(geometry.generic)
+        {
+            kernel.launch(stream,
+                          buffers...,
+                          p.n,
+                          p.c,
+                          p.in[0],
+                          p.in[1],
+                          p.in[2],
+                          p.k,
+                          p.out[0],
+                          p.out[1],
+                          p.out[2],
+                          p.filter[0],
+                          p.filter[1],
+                          p.filter[2],
+                          p.stride[0],
+                          p.stride[1],
+                          p.stride[2],
+                          p.pad[0],
+                          p.pad[1],
+                          p.pad[2],
+                          p.dilation[0],
+                          p.dilation[1],
+                          p.dilation[2]);
+            return;
+        }
+        // The filter, H / W stride and dilation are compiled into the specialized variant.
         kernel.launch(stream,
-                      x,
-                      w,
-                      y,
+                      buffers...,
                       p.n,
                       p.c,
                       p.in[0],
@@ -291,39 +329,20 @@ void launch(const compilation::IRunnableKernel& kernel,
                       p.out[0],
                       p.out[1],
                       p.out[2],
-                      p.filter[0],
-                      p.filter[1],
-                      p.filter[2],
                       p.stride[0],
-                      p.stride[1],
-                      p.stride[2],
                       p.pad[0],
                       p.pad[1],
                       p.pad[2],
-                      p.dilation[0],
-                      p.dilation[1],
-                      p.dilation[2]);
-        return;
+                      p.dilation[0]);
+    };
+    if(bias != nullptr)
+    {
+        run(x, w, y, bias);
     }
-    // The filter, H / W stride and dilation are compiled into the specialized variant.
-    kernel.launch(stream,
-                  x,
-                  w,
-                  y,
-                  p.n,
-                  p.c,
-                  p.in[0],
-                  p.in[1],
-                  p.in[2],
-                  p.k,
-                  p.out[0],
-                  p.out[1],
-                  p.out[2],
-                  p.stride[0],
-                  p.pad[0],
-                  p.pad[1],
-                  p.pad[2],
-                  p.dilation[0]);
+    else
+    {
+        run(x, w, y);
+    }
 }
 
 void addProblemLaunchValues(MetadataValues& values,
