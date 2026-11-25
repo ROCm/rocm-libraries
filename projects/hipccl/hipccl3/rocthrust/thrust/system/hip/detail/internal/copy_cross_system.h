@@ -91,7 +91,7 @@ OutputIt THRUST_HOST cross_system_copy_n(
   InputIt begin,
   Size n,
   OutputIt result,
-  thrust::detail::true_type) // trivial copy
+  _THRUST_STD::true_type) // trivial copy
 
 {
   using InputTy = thrust::detail::it_value_t<InputIt>;
@@ -116,14 +116,14 @@ OutputIt THRUST_HOST cross_system_copy_n(
   InputIt first,
   Size num_items,
   OutputIt result,
-  thrust::detail::false_type) // non-trivial copy
+  _THRUST_STD::false_type) // non-trivial copy
 {
   // get type of the input data
   using InputTy = thrust::detail::it_value_t<InputIt>;
 
   // copy input data into host temp storage
   InputIt last = first;
-  thrust::advance(last, num_items);
+  _THRUST_STD::advance(last, num_items);
   thrust::detail::temporary_array<InputTy, H> temp(host_s, num_items);
 
   for (Size idx = 0; idx != num_items; idx++)
@@ -157,7 +157,7 @@ OutputIt THRUST_HOST cross_system_copy_n(
   InputIt first,
   Size num_items,
   OutputIt result,
-  thrust::detail::false_type) // non-trivial copy
+  _THRUST_STD::false_type) // non-trivial copy
 
 {
   // get type of the input data
@@ -201,7 +201,7 @@ template <class System1, class System2, class InputIterator, class OutputIterato
 OutputIterator THRUST_HOST
 cross_system_copy(cross_system<System1, System2> systems, InputIterator begin, InputIterator end, OutputIterator result)
 {
-  return cross_system_copy_n(systems, begin, thrust::distance(begin, end), result);
+  return cross_system_copy_n(systems, begin, _THRUST_STD::distance(begin, end), result);
 }
 
 } // namespace __copy

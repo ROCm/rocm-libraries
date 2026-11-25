@@ -555,7 +555,7 @@ public:
         // Reject wider Q tiling when the selected block width would be at least twice par.q.
         if(cfg_.wave_q32 > 1 && cfg_.block_q() >= 2 * virtual_q(par))
             return false;
-        if(get_launch_params(dev, par).grid.z > max_grid_z)
+        if(!grid_fits(get_launch_params(dev, par)))
             return false;
         return true;
     }
@@ -566,7 +566,7 @@ public:
         auto blocks_c = divup(par.groups, cfg_.waves_per_wg);
 
         LaunchParams launch;
-        launch.grid       = dim3(blocks_c, blocks_q, par.n * par.e * par.kd);
+        launch.grid       = dim3(blocks_c, blocks_q, grid_extent(int64_t(par.n) * par.e * par.kd));
         launch.block_size = dim3(cfg_.block_size(), 1, 1);
         return launch;
     }

@@ -28,6 +28,7 @@
 #include <hipdnn_plugin_sdk/ingestor/KernelDefinition.hpp>
 #include <hipdnn_plugin_sdk/ingestor/MatchContext.hpp>
 
+#include "compilation/LaunchLimits.hpp"
 #include "engines/kernel_ingestor_engine/packs/SdpaGraphMatch.hpp"
 
 /**
@@ -54,6 +55,7 @@ inline constexpr uint32_t HEAD_AXIS = 1;
 inline constexpr uint32_t SEQ_AXIS = 2;
 inline constexpr uint32_t HEAD_DIM_AXIS = 3;
 
+using compilation::launchAxisFits;
 using sdpa_graph::INT32_LIMIT;
 inline constexpr int64_t BYTES_PER_ELEMENT = 2; // bf16 and f16 only
 

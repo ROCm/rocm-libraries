@@ -45,6 +45,7 @@
 #include <miopen/filesystem.hpp>
 
 #include <algorithm>
+#include <cctype>
 #include <cstdlib>
 #include <regex>
 #include <iterator>
@@ -558,8 +559,8 @@ void SetupPaths(fs::path& fdb_file_path,
     const std::string ext = ".fdb.txt";
     const auto root_path  = miopen::GetSystemDbPath();
     // The base name has to be the test name for each GPU arch we have
-    const std::string base_name = handle.GetDbBasename(); // "gfx90a68";
-    const std::string suffix    = "HIP";                  // miopen::GetSystemFindDbSuffix();
+    const std::string base_name = handle.GetSystemDbBasename(); // "gfx90a68";
+    const std::string suffix    = "HIP";                        // miopen::GetSystemFindDbSuffix();
     fdb_file_path               = root_path / (base_name + "." + suffix + ext);
 #if MIOPEN_ENABLE_SQLITE && MIOPEN_USE_SQLITE_PERFDB
     pdb_file_path = root_path / (base_name + ".db");
@@ -573,7 +574,9 @@ void SetupPaths(fs::path& fdb_file_path,
         << "Db file does not exist" << kdb_file_path;
 }
 
-TEST(CPU_DBSync_NONE, KDBTargetID)
+using CPU_DBSyncTarget_NONE = testing::TestWithParam<int>;
+
+TEST_P(CPU_DBSyncTarget_NONE, KDBTargetID)
 {
 #if SKIP_KDB_TESTING
     GTEST_SKIP();
@@ -710,7 +713,7 @@ void CheckDynamicFDBEntry(size_t thread_index,
     }
 }
 
-TEST(CPU_DBSync_NONE, DISABLED_DynamicFDBSync)
+TEST_P(CPU_DBSyncTarget_NONE, DISABLED_DynamicFDBSync)
 {
     fs::path fdb_file_path, pdb_file_path, kdb_file_path;
     auto& handle = get_handle();
@@ -751,6 +754,8 @@ TEST(CPU_DBSync_NONE, DISABLED_DynamicFDBSync)
     ASSERT_TRUE(counter == fdb_data.size())
         << "Multi-threading error, work done is not equal to total work";
 }
+
+INSTANTIATE_TEST_SUITE_P(Quick, CPU_DBSyncTarget_NONE, testing::Values(0));
 
 /// Workspace corrections found by MIOPEN_DBSYNC_CLEAN, applied after the worker threads finish.
 /// Each RamDb update rewrites the whole file under an exclusive lock, so updating from every
@@ -1147,7 +1152,9 @@ void StaticFDBSync(const std::string& arch, const size_t num_cu)
 {
     fs::path fdb_file_path, pdb_file_path, kdb_file_path;
     auto& handle = get_test_handle(num_cu);
-    if(handle.GetDeviceName() != arch)
+    // A target variant (gfx1250 reports "gfx1250-strict") loads its base arch's system db.
+    const auto& device = handle.GetDeviceName();
+    if(device.substr(0, device.find('-')) != arch)
         GTEST_SKIP();
     // Skip params whose CU count is not the one this device would actually select its system DB
     // for. The param's num_cu only picks the DB *basename* (via TestHandle::GetMaxComputeUnits);
@@ -1264,7 +1271,19 @@ TEST_P(CPU_DBSync_NONE, StaticFDBSync)
 #endif
 }
 
-INSTANTIATE_TEST_SUITE_P(Smoke,
+// Names each param <arch>_<num_cu> (for example gfx1151_0) instead of its position in the list, so
+// a filter that names one param, such as an arch exclusion in test_categories.yaml, keeps naming
+// the same arch when a param is added. Characters gtest rejects in a name become '_'.
+static std::string
+StaticFDBSyncParamName(const testing::TestParamInfo<CPU_DBSync_NONE::ParamType>& info)
+{
+    auto name = info.param.first + "_" + std::to_string(info.param.second);
+    std::replace_if(
+        name.begin(), name.end(), [](unsigned char c) { return std::isalnum(c) == 0; }, '_');
+    return name;
+}
+
+INSTANTIATE_TEST_SUITE_P(Quick,
                          CPU_DBSync_NONE,
                          testing::Values(std::make_pair("gfx908", 120),
                                          std::make_pair("gfx90a", 104),
@@ -1285,4 +1304,7 @@ INSTANTIATE_TEST_SUITE_P(Smoke,
                                          // (gfx120140). 32 makes StaticFDBSync skip other CU
                                          // counts, such as the 56-CU part (28 WGP), instead of
                                          // failing on a missing file.
-                                         std::make_pair("gfx1201", 32)));
+                                         std::make_pair("gfx1201", 32),
+                                         // gfx1250 reports CUs, not WGPs: 256 selects gfx1250100.
+                                         std::make_pair("gfx1250", 256)),
+                         StaticFDBSyncParamName);

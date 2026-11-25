@@ -11,8 +11,8 @@ TEST(TestTypes, HeuristicModeConversion)
 
     EXPECT_EQ(toBackendType(HeuristicMode::FALLBACK),
               hipdnnBackendHeurMode_t::HIPDNN_HEUR_MODE_FALLBACK);
-    EXPECT_EQ(toBackendType(HeuristicMode::A), hipdnnBackendHeurMode_t::HIPDNN_HEUR_MODE_FALLBACK);
-    EXPECT_EQ(toBackendType(HeuristicMode::B), hipdnnBackendHeurMode_t::HIPDNN_HEUR_MODE_FALLBACK);
+    EXPECT_EQ(toBackendType(HeuristicMode::A), hipdnnBackendHeurMode_t::HIPDNN_HEUR_MODE_A);
+    EXPECT_EQ(toBackendType(HeuristicMode::B), hipdnnBackendHeurMode_t::HIPDNN_HEUR_MODE_B);
     EXPECT_EQ(toBackendType(HeuristicMode::OPENSOURCE),
               hipdnnBackendHeurMode_t::HIPDNN_HEUR_MODE_FALLBACK);
 }

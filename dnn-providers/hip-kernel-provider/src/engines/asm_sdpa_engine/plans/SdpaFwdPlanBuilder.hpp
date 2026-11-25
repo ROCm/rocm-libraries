@@ -4,12 +4,14 @@
 #pragma once
 
 #include "SdpaModuleCache.hpp"
+#include "SdpaPlanUtils.hpp"
 #include "core/Context.hpp"
 #include "core/Handle.hpp"
 #include "core/Settings.hpp"
 
 #include <cstdint>
 
+#include <hip_kernel_provider_common/SdpaConfigEnumerations.hpp>
 #include <hipdnn_flatbuffers_sdk/data_objects/tensor_attributes_generated.h>
 #include <hipdnn_plugin_sdk/interfaces/IPlanBuilder.hpp>
 
@@ -42,6 +44,17 @@ bool fwdKvRowExtentsFitU32(const hipdnn_flatbuffers_sdk::data_objects::TensorAtt
 // fwdBlockDimX for the row's arch, dtype, head dims and mode. A graph resolves
 // only to a row whose fields equal its own, so this is the block its plan uses.
 unsigned int fwdConfigBlockDimX(const fmha_v3_fwdConfig& config);
+
+// Key of the forward kernel table row (cfg_fmha_fwd) a graph with these fields runs on,
+// or an empty string when the table has none. gfx942 also matches bf16Cvt; gfx950
+// ignores it. maskType is the registry ordinal, after fwdKernelMaskType's mapping.
+std::string fwdKernelNameKey(const std::string& archId,
+                             const std::string& dataType,
+                             int hdimQ,
+                             int hdimV,
+                             plan_utils::MaskType maskType,
+                             hip_kernel_provider_common::RoundingMode bf16Cvt,
+                             hip_kernel_provider_common::BatchMode mode);
 
 class SdpaFwdPlanBuilder : public hipdnn_plugin_sdk::IPlanBuilder<Handle, Settings, Context>
 {
@@ -84,14 +97,22 @@ protected:
     // vendored kernel accepts the block it is launched with.
     virtual unsigned int maxThreadsPerBlock(const fmha_v3_fwdConfig& config) const;
 
+    // Architecture name ("gfx942", "gfx950", ...) of the device behind the handle's
+    // stream, or std::nullopt when the query fails; isApplicable's only device query.
+    // Virtual so tests can check the applicability rules of each served architecture
+    // on a host without that GPU.
+    virtual std::optional<std::string> deviceArch(const Handle& handle) const;
+
 private:
     // Describes why the resolved kernel cannot be launched with the block the
     // plan uses, or std::nullopt when it can.
     std::optional<std::string> launchLimitViolation(const fmha_v3_fwdConfig& config) const;
 
-    // launchLimitViolation as an isApplicable verdict: logs the reason and
-    // returns false when the kernel cannot be launched with the plan's block.
-    bool acceptsLaunchBlock(const fmha_v3_fwdConfig& config) const;
+    // Why isApplicable declines the graph, or std::nullopt when it accepts it.
+    // isApplicable logs the reason once.
+    std::optional<std::string> checkFwdApplicability(
+        const Handle& handle,
+        const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph) const;
 };
 
 } // namespace asm_sdpa_engine
