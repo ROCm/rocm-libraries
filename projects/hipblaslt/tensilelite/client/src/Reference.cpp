@@ -1007,8 +1007,13 @@ namespace TensileLite
             }
             else
             {
-                std::string msg = "Unsupported reduction dimension "
-                                  + std::to_string(tensor.dimensions()) + ".";
+                std::string msg
+                    = "Bias-gradient reduction requires a 2-D tensor or a single batch; got "
+                      + std::to_string(tensor.dimensions()) + " dimensions"
+                      + (tensor.dimensions() == 3
+                             ? " and " + std::to_string(tensor.sizes()[2]) + " batches"
+                             : "")
+                      + ".";
                 return msg;
             }
             return "";
@@ -1406,8 +1411,7 @@ namespace TensileLite
             }
 
             // The bias gradient is reduced by ReductionCPU on both paths. For a source
-            // shape it does not support, the slow path does not report the error
-            // (and frees its D workspace twice); such problems stay on it.
+            // shape it does not support, the slow path reports the reduction error.
             if(problem.useGradient() && problem.useBias())
             {
                 auto src = problem.biasSrc();
@@ -1679,7 +1683,7 @@ namespace TensileLite
             }
         }
 
-        // The bias gradient (useGradient with useBias) on the fast path: the slow path's
+        // Shared bias gradient (useGradient with useBias) on both paths:
         // ReductionCPU, in the epilogue type AccumT, of D (the workspace ws: the
         // epilogue values before gate residual, at D's offsets) or of A or B as stored.
         // Non-HPA H_H_H and B_B_S bias gradients stay on the slow path to preserve
@@ -1749,8 +1753,6 @@ namespace TensileLite
                 throw std::runtime_error("Unsupported bias reduction source "
                                          + std::to_string(problem.biasSrc()) + ".");
             }
-            // Not reached: isFastPathEligible rejects the shapes ReductionCPU does not
-            // support.
             if(!msg.empty())
                 throw std::runtime_error(msg);
         }
@@ -2368,14 +2370,13 @@ namespace TensileLite
                     throw std::runtime_error("Int8 CPU reference does not support MX scales");
             }
 
-            EpilogueT* ws                   = nullptr;
-            size_t       validationStrideGemm = 1;
+            std::vector<EpilogueT> ws;
+            size_t                   validationStrideGemm = 1;
             if(problem.useGradient() && problem.useBias()
                && (problem.biasSrc() == ContractionProblemGemm::D))
             {
                 validationStrideGemm = 1;
-                ws                   = (EpilogueT*)malloc(problem.d().totalAllocatedElements()
-                                          * sizeof(EpilogueT));
+                ws.resize(problem.d().totalAllocatedElements());
             }
             else
             {
@@ -2832,44 +2833,11 @@ namespace TensileLite
 
             if(problem.useGradient() && problem.useBias())
             {
-                auto& biasTensor = problem.tensor(ContractionProblemGemm::TENSOR::BIAS);
-                if(problem.biasSrc() == ContractionProblemGemm::D)
-                {
-                    auto msg = ReductionCPU<EpilogueT, EpilogueT>(
-                        biasTensor, d, ws, inputs, elementsToValidate, 1);
-                    if(!msg.empty())
-                    {
-                        free(ws);
-                        std::runtime_error(msg.c_str());
-                    }
-                }
-                else if(problem.biasSrc() == ContractionProblemGemm::A)
-                {
-                    auto reducIdx = problem.transA() ? 0 : 1;
-                    auto msg      = ReductionCPU<typename Inputs::AType, EpilogueT>(
-                        biasTensor, a, inputs.a, inputs, elementsToValidate, reducIdx);
-                    if(!msg.empty())
-                    {
-                        std::runtime_error(msg.c_str());
-                    }
-                }
-                else if(problem.biasSrc() == ContractionProblemGemm::B)
-                {
-                    auto reducIdx = problem.transB() ? 1 : 0;
-                    auto msg      = ReductionCPU<typename Inputs::BType, EpilogueT>(
-                        biasTensor, b, inputs.b, inputs, elementsToValidate, reducIdx);
-                    if(!msg.empty())
-                    {
-                        std::runtime_error(msg.c_str());
-                    }
-                }
+                if constexpr(TypeInfo<EpilogueT>::IsComplex)
+                    throw std::runtime_error(
+                        "Bias-gradient reduction does not support complex inputs.");
                 else
-                {
-                    std::string msg = "Unsupported bias reduction source "
-                                      + std::to_string(problem.biasSrc()) + ".";
-                    throw std::runtime_error(msg.c_str());
-                }
-                free(ws);
+                    reduceBiasGradient<EpilogueT>(problem, inputs, ws.data(), elementsToValidate);
             }
         }
 
