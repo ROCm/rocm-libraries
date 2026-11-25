@@ -2130,8 +2130,9 @@ __global__ void create_gaussian_kernel_9x9(float* filterTensor, float* stdDevTen
 }
 
 static RppStatus hip_exec_create_gaussian_kernel(Rpp32f* filterTensor, Rpp32s kernelSize,
-                                                 Rpp32f* stdDevTensor, rpp::Handle& handle) {
-    int globalThreads_x = handle.GetBatchSize();
+                                                 Rpp32f* stdDevTensor, Rpp32u batchSize,
+                                                 rpp::Handle& handle) {
+    int globalThreads_x = batchSize;
     int globalThreads_y = 1;
     int globalThreads_z = 1;
 
@@ -2158,7 +2159,7 @@ static RppStatus hip_exec_create_gaussian_kernel(Rpp32f* filterTensor, Rpp32s ke
                             ceil((float)globalThreads_y / LOCAL_THREADS_Y_1DIM),
                             ceil((float)globalThreads_z / LOCAL_THREADS_Z_1DIM)),
                        dim3(LOCAL_THREADS_X_1DIM, LOCAL_THREADS_Y_1DIM, LOCAL_THREADS_Z_1DIM), 0,
-                       handle.GetStream(), filterTensor, stdDevTensor, handle.GetBatchSize());
+                       handle.GetStream(), filterTensor, stdDevTensor, batchSize);
     HIP_CHECK_LAUNCH_RETURN();
 
     return RPP_SUCCESS;
@@ -2176,7 +2177,7 @@ RppStatus hip_exec_gaussian_filter_tensor(T* srcPtr, RpptDescPtr srcDescPtr, T* 
 
     int globalThreads_x = (dstDescPtr->strides.hStride + 7) >> 3;
     int globalThreads_y = dstDescPtr->h;
-    int globalThreads_z = handle.GetBatchSize();
+    int globalThreads_z = batchSize;
 
     uint padLength = kernelSize / 2;
     uint padLengthTwice = padLength * 2;
@@ -2186,8 +2187,8 @@ RppStatus hip_exec_gaussian_filter_tensor(T* srcPtr, RpptDescPtr srcDescPtr, T* 
 
     // Create a filter of size (kernel size x kernel size)
     float* filterTensor = handle.GetInitHandle()->mem.mgpu.scratchBufferHip.floatmem;
-    RPP_RETURN_IF_ERROR(
-        hip_exec_create_gaussian_kernel(filterTensor, kernelSize, stdDevTensor, handle));
+    RPP_RETURN_IF_ERROR(hip_exec_create_gaussian_kernel(filterTensor, kernelSize, stdDevTensor,
+                                                        dstDescPtr->n, handle));
 
     if ((srcDescPtr->layout == RpptLayout::NHWC) && (dstDescPtr->layout == RpptLayout::NHWC)) {
         globalThreads_x = (dstDescPtr->strides.hStride / 3 + 7) >> 3;
@@ -2348,8 +2349,8 @@ RppStatus hip_exec_gaussian_filter_single_image(T* srcPtr, RpptDescPtr srcDescPt
 
     // Create a filter of size (kernel size x kernel size)
     float* filterTensor = handle.GetInitHandle()->mem.mgpu.scratchBufferHip.floatmem;
-    RPP_RETURN_IF_ERROR(
-        hip_exec_create_gaussian_kernel(filterTensor, kernelSize, stdDevTensor, handle));
+    RPP_RETURN_IF_ERROR(hip_exec_create_gaussian_kernel(filterTensor, kernelSize, stdDevTensor,
+                                                        dstDescPtr->n, handle));
 
     if ((srcDescPtr->layout == RpptLayout::NHWC) && (dstDescPtr->layout == RpptLayout::NHWC)) {
         globalThreads_x = (dstDescPtr->strides.hStride / 3 + 7) >> 3;

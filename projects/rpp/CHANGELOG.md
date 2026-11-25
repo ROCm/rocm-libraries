@@ -19,6 +19,10 @@ Full documentation for RPP is available at [https://rocm.docs.amd.com/projects/r
 
 - The standalone handle and backend-macro tests under `test/` have been merged into the GoogleTest suite in `utilities/test/`, and the `test/` directory has been removed. The HIP allocation-failure fault-injection cases were not carried over.
 
+### Resolved issues
+
+- Fixed the remaining HIP kernels that sized a grid from the handle batch instead of the descriptor batch: the Emboss and Gaussian filter coefficient builders, plus Gamma Correction and the LTRB ROI conversion. A handle reused with a different batch size could size a grid too small, leaving images unprocessed or filter coefficients unbuilt, while still returning `RPP_SUCCESS`.
+
 ## RPP 3.2.0 for ROCm 10.2.0
 
 ### Added
