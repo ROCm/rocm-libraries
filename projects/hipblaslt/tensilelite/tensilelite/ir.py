@@ -472,19 +472,22 @@ def maybe_logical_leaf(inst):
 # scheduler-introspection seam extended from "counting/classification" (count.cpp)
 # to "SCC/sgpr dataflow".
 #
-# NOT included (yet): s_add_u64 (the 64-bit "TDM addr += inc"). Its rocisa class
-# SAddU64 is a CompositeInstruction, unlike every opcode migrated so far (simple
-# CommonInstructions). Composite-ness was *ruled out* as the wrapIter-drop cause
-# (removing it did not fix the 71/71 drop; the real cause was the SCC/sgpr seam
-# above, and SAddU64 counts/lowers identically as a leaf via CompositeInstruction-
-# LoweringPass). It is held back only to validate the SCC/sgpr bridge in isolation;
-# re-add it to flip the whole wrapIter once the bridge lands byte-identical.
+# s_add_u64 (the 64-bit "TDM addr += inc", the tail of the staggerU wrapIter chain):
+# its rocisa class SAddU64 is a CompositeInstruction, unlike the simple
+# CommonInstructions above, but it counts and lowers identically as a leaf
+# (CompositeInstructionLoweringPass keeps the s_add_u64 as-is on gfx1250, and
+# createLogicalFromRocisa returns a single logical node for it). Composite-ness was
+# *ruled out* as the earlier wrapIter-drop cause; the real cause was LogicalLeaf's
+# clone sharing the wrapped logical node across unrolled bodies (§10.10 / §10.10.1).
+# It was held back one step only to validate the SCC/sgpr bridge + that deep-copy fix
+# in isolation; now re-added to flip the whole wrapIter increment chain to leaves.
 _MIGRATED = {
     "SMovB32", "SMovB64", "SLShiftRightB32", "SLShiftLeftB32",
     "SMulI32", "SAddU32", "SAddCU32", "SSubI32", "SSubU32",
     "SAndB32", "SOrB32", "SCSelectB32", "VReadfirstlaneB32",
     "MFMAInstruction", "SMFMAInstruction", "MXMFMAInstruction",
     "SCmpEQU32", "SSubBU32", "SCMovB32", "SCmpLeI32", "SBitcmp1B32",
+    "SAddU64",
 }
 _MIGRATE_ALL = False
 
