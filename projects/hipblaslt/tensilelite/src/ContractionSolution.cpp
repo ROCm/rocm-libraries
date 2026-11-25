@@ -1886,6 +1886,16 @@ namespace TensileLite
         return std::make_tuple(defaultStaggerUMapping, defaultStaggerU, defaultStaggerUStrideShift);
     }
 
+    std::tuple<size_t, size_t, size_t> ContractionSolution::calculateGroupedAutoStaggerU(
+        std::vector<Problem> const& problems, Hardware const* hardware, int32_t autoWGM) const
+    {
+        const auto uso = std::find_if(problems.begin(), problems.end(), [](Problem const& p) {
+            return p.getParams().uniformSummationOrder() != 0;
+        });
+        return calculateAutoStaggerU(
+            uso != problems.end() ? *uso : problems[0], hardware, 0, autoWGM);
+    }
+
     uint32_t ContractionSolution::calculateAutoGSU(Problem const&  problem,
                                                    Hardware const* hardware) const
     {
@@ -3817,7 +3827,7 @@ namespace TensileLite
             auto [autoWGM, autoWGMXCC, autoWGMXCCCHUNK, autoWGMXCCSPLITK]
                 = calculateAutoWGM(problems[0], &hardware, 0);
             auto [autoStaggerUMapping, autoStaggerU, autoStaggerUStrideShift]
-                = calculateAutoStaggerU(problems[0], &hardware, 0, autoWGM);
+                = calculateGroupedAutoStaggerU(problems, &hardware, autoWGM);
             AdaptiveGemmNTAB ntab = calculateAdaptiveGemmNTAB(problems[0], &hardware);
 
             if(internalArgsSupport.useUniversalArgs)

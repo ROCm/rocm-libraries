@@ -253,6 +253,33 @@ TEST(StreamKLaunchSummaryTest, UniformSummationTurnsStaggerOff)
     }
 }
 
+// A grouped launch packs one StaggerU for the whole group, so a group with any
+// problem under uniform summation order packs it off, in either order.
+TEST(StreamKLaunchSummaryTest, GroupedUniformSummationTurnsStaggerOff)
+{
+    AnalyticalEnv       env;
+    ContractionSolution solution;
+    initStreamKSolution(solution, 3);
+    solution.sizeMapping.workGroupMapping   = 1;
+    solution.sizeMapping.workGroupMappingXCC = 0;
+    solution.sizeMapping.staggerU           = 16;
+    solution.sizeMapping.staggerUMapping    = 1;
+    solution.sizeMapping.staggerStrideShift = 2;
+    solution.internalArgsSupport.staggerU   = true;
+
+    auto off = makeGemmProblem(1024, 1024, 1024);
+    auto on  = makeGemmProblem(1024, 1024, 1024);
+    off.setParams().setUniformSummationOrder(0);
+    on.setParams().setUniformSummationOrder(1);
+
+    const auto stagger = [&](std::vector<ContractionProblemGemm> const& group) {
+        return std::get<1>(solution.calculateGroupedAutoStaggerU(group, &env.device, 1));
+    };
+    EXPECT_EQ(stagger({off, on}), 0u);
+    EXPECT_EQ(stagger({on, off}), 0u);
+    EXPECT_EQ(stagger({off, off}), 16u);
+}
+
 // ---------------------------------------------------------------------------
 // No-drift contract: the snapshot fields equal what the individual production
 // helpers report, so the summary reflects the REAL decisions (not a re-derivation
