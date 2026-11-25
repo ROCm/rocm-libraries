@@ -202,6 +202,11 @@ target_compile_definitions(
             TEST_MISMATCHED_NAME_PLUGIN_NAME="${TEST_MISMATCHED_NAME_PLUGIN_NAME}"
             TEST_MALFORMED_VERSION_PLUGIN_NAME="${HIPDNN_TEST_MALFORMED_VERSION_PLUGIN_TARGET}"
 )
+# Tells tests that measure heap growth across plugin loads that the instrumented test plugins
+# carry the coverage runtime, which retains memory on every load.
+if(HIPDNN_ENABLE_COVERAGE)
+    target_compile_definitions(hipdnn_backend_tests PRIVATE HIPDNN_COVERAGE_BUILD)
+endif()
 target_compile_options(hipdnn_backend_tests PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS} ${HIPDNN_NO_RTTI_OPTIONS})
 clang_tidy_check(hipdnn_backend_tests)
 

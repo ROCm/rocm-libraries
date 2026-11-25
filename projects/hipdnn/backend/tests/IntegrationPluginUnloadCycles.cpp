@@ -74,6 +74,12 @@ constexpr bool K_SANITIZED_ALLOCATOR = false;
 constexpr bool K_SANITIZED_ALLOCATOR = false;
 #endif
 
+#if defined(HIPDNN_COVERAGE_BUILD)
+constexpr bool K_COVERAGE_BUILD = true;
+#else
+constexpr bool K_COVERAGE_BUILD = false;
+#endif
+
 // Bytes the allocator currently hands out, summed over every arena.
 size_t heapBytesInUse()
 {
@@ -263,6 +269,11 @@ TEST_F(IntegrationPluginUnloadCycles, ReloadCyclesDoNotGrowExitHandlerMemory)
     if constexpr(K_SANITIZED_ALLOCATOR)
     {
         GTEST_SKIP() << "A sanitizer replaces the allocator, so mallinfo does not measure it";
+    }
+    if constexpr(K_COVERAGE_BUILD)
+    {
+        GTEST_SKIP() << "The coverage runtime in the instrumented test plugin retains memory on "
+                        "every load, which this heap measurement would count";
     }
 
     // The first cycles fill lazily created state (function-local statics, loader
