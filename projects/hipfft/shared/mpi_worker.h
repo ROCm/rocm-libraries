@@ -143,25 +143,30 @@ static bool synchronize_local_devices(const std::map<int, gpubuf>& local_bricks)
     return success;
 }
 
-// Gather a whole field to a host buffer on rank 0, using MPI_Gatherv.
-// This is only possible if each rank's bricks are on a single device.
-// local_bricks is the contiguous buffer allocated by
-// alloc_local_bricks with all of the current rank's bricks.
-static void gather_field_v(MPI_Comm                                  mpi_comm,
-                           const std::vector<fft_params::fft_brick>& bricks,
-                           const std::vector<size_t>&                field_stride,
-                           size_t                                    field_dist,
-                           const fft_precision                       precision,
-                           const fft_array_type                      array_type,
-                           std::map<int, gpubuf>&                    local_bricks,
-                           hostbuf&                                  output)
+// gather_field using MPI_Gatherv: each rank's bricks must share one buffer, with no gap
+// between consecutive bricks.
+static hostbuf gather_field_v(const fft_params&      src_params,
+                              fft_io                 io,
+                              std::map<int, gpubuf>& local_bricks,
+                              const fft_params&      dest_params)
 {
-    int mpi_rank = 0;
-    MPI_Comm_rank(mpi_comm, &mpi_rank);
-    int mpi_size = 0;
+    const MPI_Comm mpi_comm = *src_params.mp_comm;
+    const int      mpi_rank = src_params.get_process_rank();
+    int            mpi_size = 0;
     MPI_Comm_size(mpi_comm, &mpi_size);
 
+    const bool  is_input     = io == fft_io::fft_io_in;
+    const auto& bricks       = (is_input ? src_params.ifields : src_params.ofields).front().bricks;
+    const auto  precision    = src_params.precision;
+    const auto  array_type   = is_input ? src_params.itype : src_params.otype;
+    const auto& field_stride = is_input ? dest_params.istride : dest_params.ostride;
+    const auto  field_dist   = is_input ? dest_params.idist : dest_params.odist;
+
     auto elem_size = var_size<size_t>(precision, array_type);
+
+    hostbuf output;
+    if(mpi_rank == 0)
+        output.alloc((is_input ? dest_params.isize : dest_params.osize).front() * elem_size);
 
     hostbuf recvbuf;
 
@@ -275,26 +280,32 @@ static void gather_field_v(MPI_Comm                                  mpi_comm,
             }
         }
     }
+    return output;
 }
 
-// Gather a whole field to a host buffer on rank 0, using MPI
-// point-to-point operations.  local_bricks is the contiguous buffer
-// allocated by alloc_local_bricks with all of the current rank's
-// bricks.
-static void gather_field_p2p(MPI_Comm                                  mpi_comm,
-                             const std::vector<fft_params::fft_brick>& bricks,
-                             const std::vector<size_t>&                field_stride,
-                             size_t                                    field_dist,
-                             const fft_precision                       precision,
-                             const fft_array_type                      array_type,
-                             std::map<int, gpubuf>&                    local_bricks,
-                             hostbuf&                                  output)
+// gather_field using MPI point-to-point operations.  local_bricks holds the per-device
+// buffers allocated by alloc_local_bricks for the current rank's bricks.
+static hostbuf gather_field_p2p(const fft_params&      src_params,
+                                fft_io                 io,
+                                std::map<int, gpubuf>& local_bricks,
+                                const fft_params&      dest_params)
 {
-    int mpi_rank = 0;
-    MPI_Comm_rank(mpi_comm, &mpi_rank);
+    const MPI_Comm mpi_comm = *src_params.mp_comm;
+    const int      mpi_rank = src_params.get_process_rank();
+
+    const bool  is_input     = io == fft_io::fft_io_in;
+    const auto& bricks       = (is_input ? src_params.ifields : src_params.ofields).front().bricks;
+    const auto  precision    = src_params.precision;
+    const auto  array_type   = is_input ? src_params.itype : src_params.otype;
+    const auto& field_stride = is_input ? dest_params.istride : dest_params.ostride;
+    const auto  field_dist   = is_input ? dest_params.idist : dest_params.odist;
 
     auto elem_size = var_size<size_t>(precision, array_type);
     auto mpi_type  = get_mpi_type(elem_size);
+
+    hostbuf output;
+    if(mpi_rank == 0)
+        output.alloc((is_input ? dest_params.isize : dest_params.osize).front() * elem_size);
 
     // make sure init/execution kernels are done before sending data
     bool sync_failed = !synchronize_local_devices(local_bricks);
@@ -403,70 +414,50 @@ static void gather_field_p2p(MPI_Comm                                  mpi_comm,
                          {0});
         }
     }
+    return output;
 }
 
-// Gather a whole field to a host buffer on rank 0.
-static void gather_field(MPI_Comm                                  mpi_comm,
-                         const std::vector<fft_params::fft_brick>& bricks,
-                         const std::vector<size_t>&                field_stride,
-                         size_t                                    field_dist,
-                         const fft_precision                       precision,
-                         const fft_array_type                      array_type,
-                         std::map<int, gpubuf>&                    local_bricks,
-                         hostbuf&                                  output)
+// Gather src_params's io field (its bricks) to a host buffer on rank 0, laid out per
+// dest_params's global strides, distance and size (dest_params's fields are ignored).
+static hostbuf gather_field(const fft_params&      src_params,
+                            fft_io                 io,
+                            std::map<int, gpubuf>& local_bricks,
+                            const fft_params&      dest_params)
 {
-    if(multiple_devices_on_rank(bricks))
-    {
-        // Can't do MPI_Gather, as MPI assumes we only have one pointer per rank
-        gather_field_p2p(mpi_comm,
-                         bricks,
-                         field_stride,
-                         field_dist,
-                         precision,
-                         array_type,
-                         local_bricks,
-                         output);
-    }
-    else
-    {
-        // Do gather, which is more efficient
-        gather_field_v(mpi_comm,
-                       bricks,
-                       field_stride,
-                       field_dist,
-                       precision,
-                       array_type,
-                       local_bricks,
-                       output);
-    }
+    const bool  is_input = io == fft_io::fft_io_in;
+    const auto& bricks   = (is_input ? src_params.ifields : src_params.ofields).front().bricks;
+
+    // MPI_Gatherv needs one buffer per rank
+    const bool use_p2p = multiple_devices_on_rank(bricks);
+
+    // MPI_Gatherv is more efficient
+    return use_p2p ? gather_field_p2p(src_params, io, local_bricks, dest_params)
+                   : gather_field_v(src_params, io, local_bricks, dest_params);
 }
 
-// Allocate device buffer(s) to hold all of the bricks for this rank.
-// A rank can have N bricks on it but this will allocate one
-// contiguous buffer per device and return pointers to each of the N bricks.
-static void
-    alloc_local_bricks(int                                       mpi_rank,
-                       const std::vector<fft_params::fft_brick>& bricks,
-                       size_t                                    elem_size,
-                       std::map<int, gpubuf>&                    buffers,
-                       std::vector<void*>&                       buffer_ptrs,
-                       const std::vector<fft_params::fft_brick>* corresponding_in_place_bricks
-                       = nullptr,
-                       size_t corresponding_in_place_elem_size = 0)
+// Allocate device buffer(s) to hold all of the current rank's bricks
+// of the io side of params.  A rank can have N bricks on it but this
+// will allocate one contiguous buffer per device and return pointers
+// to each of the N bricks.
+static void alloc_local_bricks(const fft_params&      params,
+                               fft_io                 io,
+                               std::map<int, gpubuf>& buffers,
+                               std::vector<void*>&    buffer_ptrs)
 {
+    const int   mpi_rank = params.get_process_rank();
+    const bool  is_input = io == fft_io::fft_io_in;
+    const auto& bricks   = (is_input ? params.ifields : params.ofields).front().bricks;
+
     // Get bricks that are local to this rank
     auto local_range = std::equal_range(bricks.begin(), bricks.end(), mpi_rank, match_rank());
-    if(corresponding_in_place_bricks)
+    if(params.placement == fft_placement_inplace)
     {
-        if(corresponding_in_place_elem_size == 0)
-            throw std::invalid_argument("Invalid element size for corresponding in-place I/O data");
-
+        const auto& other_bricks = (is_input ? params.ofields : params.ifields).front().bricks;
         for(auto brick = local_range.first; brick != local_range.second; ++brick)
         {
             const size_t brick_idx = std::distance(bricks.begin(), brick);
-            if(brick_idx >= corresponding_in_place_bricks->size()
-               || corresponding_in_place_bricks->at(brick_idx).rank != mpi_rank
-               || corresponding_in_place_bricks->at(brick_idx).device != brick->device)
+            if(brick_idx >= other_bricks.size() || other_bricks[brick_idx].rank != mpi_rank
+               || other_bricks[brick_idx].device != brick->device)
                 throw std::invalid_argument("Invalid configuration for in-place operations");
         }
     }
@@ -478,12 +469,7 @@ static void
     {
         const size_t brick_idx = std::distance(bricks.begin(), brick);
         buffer_byte_sizes.insert({brick->device, static_cast<size_t>(0)}).first->second
-            += std::max(compute_ptrdiff(brick->length(), brick->stride) * elem_size,
-                        corresponding_in_place_bricks
-                            ? compute_ptrdiff(corresponding_in_place_bricks->at(brick_idx).length(),
-                                              corresponding_in_place_bricks->at(brick_idx).stride)
-                                  * corresponding_in_place_elem_size
-                            : 0);
+            += params.buffer_bytes_for_brick(io, brick_idx);
     }
 
     // Alloc buffers for each device
@@ -507,13 +493,7 @@ static void
         // Use buffer_byte_sizes to count down bricks for each device
         auto& remaining_byte_size = buffer_byte_sizes[brick->device];
         auto  offset_bytes        = buf.size() - remaining_byte_size;
-        remaining_byte_size
-            -= std::max(compute_ptrdiff(brick->length(), brick->stride) * elem_size,
-                        corresponding_in_place_bricks
-                            ? compute_ptrdiff(corresponding_in_place_bricks->at(brick_idx).length(),
-                                              corresponding_in_place_bricks->at(brick_idx).stride)
-                                  * corresponding_in_place_elem_size
-                            : 0);
+        remaining_byte_size -= params.buffer_bytes_for_brick(io, brick_idx);
         buffer_ptrs.push_back(buf.data_offset(offset_bytes));
     }
 }
@@ -617,19 +597,11 @@ void exec_testcases(MPI_Comm                          mpi_comm,
 
     // use first params to know things like precision, type that
     // won't change between libraries
-    auto&      params        = all_params.front();
-    const auto in_elem_size  = var_size<size_t>(params.precision, params.itype);
-    const auto out_elem_size = var_size<size_t>(params.precision, params.otype);
+    auto&      params       = all_params.front();
+    const auto in_elem_size = var_size<size_t>(params.precision, params.itype);
 
     // allocate and initialize input buffers
-    alloc_local_bricks(mpi_rank,
-                       params.ifields.back().bricks,
-                       in_elem_size,
-                       local_inputs,
-                       local_input_ptrs,
-                       params.placement == fft_placement_inplace ? &params.ofields.back().bricks
-                                                                 : nullptr,
-                       out_elem_size);
+    alloc_local_bricks(params, fft_io::fft_io_in, local_inputs, local_input_ptrs);
 
     init_local_input<decltype(params), gpubuf>(
         mpi_rank, params, params.ifields.back().bricks, in_elem_size, local_input_ptrs);
@@ -638,18 +610,8 @@ void exec_testcases(MPI_Comm                          mpi_comm,
     std::optional<reference_fft_data_t> reference_fft;
     if(fftw_compare)
     {
-        hostbuf    ref_input;
         const auto ref_params = params.make_params_for_reference_cpu();
-        ref_input.alloc(ref_params.isize.front() * in_elem_size);
-
-        gather_field(mpi_comm,
-                     params.ifields.front().bricks,
-                     ref_params.istride,
-                     ref_params.idist,
-                     params.precision,
-                     params.itype,
-                     local_inputs,
-                     ref_input);
+        hostbuf    ref_input  = gather_field(params, fft_io::fft_io_in, local_inputs, ref_params);
 
         if(mpi_rank == 0)
         {
@@ -665,11 +627,7 @@ void exec_testcases(MPI_Comm                          mpi_comm,
     }
     else
     {
-        alloc_local_bricks(mpi_rank,
-                           params.ofields.back().bricks,
-                           out_elem_size,
-                           local_outputs,
-                           local_output_ptrs);
+        alloc_local_bricks(params, fft_io::fft_io_out, local_outputs, local_output_ptrs);
     }
 
     // execute FFTs
@@ -758,19 +716,13 @@ void exec_testcases(MPI_Comm                          mpi_comm,
         VectorNorms          cpu_output_norm;
 
         if(mpi_rank == 0)
-        {
             cpu_output_norm = reference_fft->get_norm<fft_io::fft_io_out>(params.nbatch).get();
-            gpu_output.front().alloc(params.osize.front() * out_elem_size);
-        }
 
-        gather_field(mpi_comm,
-                     params.ofields.front().bricks,
-                     params.ostride,
-                     params.odist,
-                     params.precision,
-                     params.otype,
-                     params.placement == fft_placement_inplace ? local_inputs : local_outputs,
-                     gpu_output.front());
+        gpu_output.front()
+            = gather_field(params,
+                           fft_io::fft_io_out,
+                           params.placement == fft_placement_inplace ? local_inputs : local_outputs,
+                           params);
 
         if(mpi_rank == 0)
         {

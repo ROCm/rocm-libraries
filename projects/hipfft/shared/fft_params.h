@@ -2354,6 +2354,39 @@ public:
         return fft_status_success;
     }
 
+    // Bytes of the execution-time buffer holding brick brick_idx of the io side's field field_idx.
+    // In-place transforms share that buffer between both sides' bricks brick_idx, so io is then
+    // irrelevant: the buffer fits the larger of them, and brick_idx only needs to be valid for
+    // whichever of the two fields field_idx has more bricks.
+    // Throws std::out_of_range if field_idx is invalid for a side considered, or brick_idx for all.
+    size_t buffer_bytes_for_brick(fft_io io, size_t brick_idx, size_t field_idx = 0) const
+    {
+        size_t bytes       = 0;
+        bool   brick_found = false;
+        for(const auto side : {fft_io::fft_io_in, fft_io::fft_io_out})
+        {
+            if(side != io && placement != fft_placement_inplace)
+                continue;
+            const auto& fields = side == fft_io::fft_io_in ? ifields : ofields;
+            if(field_idx >= fields.size())
+                throw std::out_of_range("buffer_bytes_for_brick: invalid field index "
+                                        + std::to_string(field_idx));
+            const auto& bricks = fields[field_idx].bricks;
+            if(brick_idx >= bricks.size())
+                continue;
+            const auto& brick = bricks[brick_idx];
+            const auto  type  = side == fft_io::fft_io_in ? itype : otype;
+            bytes             = std::max(bytes,
+                             compute_ptrdiff(brick.length(), brick.stride)
+                                 * var_size<size_t>(precision, type));
+            brick_found       = true;
+        }
+        if(!brick_found)
+            throw std::out_of_range("buffer_bytes_for_brick: invalid brick index "
+                                    + std::to_string(brick_idx));
+        return bytes;
+    }
+
     std::vector<size_t> footprint_on_devices_for(fft_io io) const
     {
         std::vector<size_t> sizes(rocfft_scoped_device::device_count());
