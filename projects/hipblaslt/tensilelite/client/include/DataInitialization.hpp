@@ -382,8 +382,31 @@ namespace TensileLite
                     kind = hipMemcpyHostToDevice;
                 }
 
+                // All three swizzle/data-init paths produce the same bytes on
+                // every eval for a fixed problem, so the cached GPU buffers are
+                // reusable after the first eval:
+                //  - non-MX: data is problem-independent (!m_problemDependentData)
+                //  - needSwizzle: tensor swizzle is a problem-level transform
+                //    (swizzleTensorA/B), constant across solutions
+                //  - gfx1250 MX: scale layout is geometry-based, so the descriptor
+                //    caches added in #11963 make every per-solution regeneration a
+                //    no-op. (gfx950 is excluded because its preswizzle depends on
+                //    the solution's matrix-instruction shape.)
+                // This reuse is only valid within the SAME problem: m_gpuInit is a
+                // client-lifetime flag (never reset per problem), so it alone can't
+                // tell a later, different problem apart from a later solution of the
+                // same problem. m_gpuSwizzledReadyForProblem (reset in preProblem())
+                // closes that gap by requiring at least one real pass for this
+                // problem before trusting the cached buffers.
+                bool mxInputsReusable = !needMXSwizzle
+                    || m_mxScaleLayout == MXScaleLayout::GFX1250;
+                bool inputsUnchanged
+                    = mxInputsReusable
+                      && (!m_problemDependentData
+                          || ((needSwizzle || needMXSwizzle) && m_gpuSwizzledReadyForProblem));
+
                 if(m_gpuInit && m_curBoundsCheck == BoundsCheckMode::Disable
-                   && !m_problemDependentData && !needSwizzle && !needMXSwizzle)
+                   && inputsUnchanged)
                 {
                     if(m_elementsToValidate)
                     {
@@ -460,7 +483,8 @@ namespace TensileLite
                                 }
                             }
                     }
-                    m_gpuInit = true;
+                    m_gpuInit                    = true;
+                    m_gpuSwizzledReadyForProblem = true;
                 }
                 {
                     ScopedTimer timer(gpuInputCategory("gpu_input_reset_batched_inputs",
@@ -971,6 +995,7 @@ namespace TensileLite
                 m_currentSolution          = nullptr;
                 m_mxPreswizzleMiK          = -1;
                 m_cpuInputsReadyForProblem = false;
+                m_gpuSwizzledReadyForProblem = false;
             }
             virtual void postProblem() override {}
             virtual void preSolution(ContractionSolution* const solution) override
@@ -1281,6 +1306,11 @@ namespace TensileLite
             ContractionProblemGemm const* m_currentGemmProblem = nullptr;
             int                           m_mxPreswizzleMiK          = -1;
             bool                          m_cpuInputsReadyForProblem = false;
+            // Per-problem (not client-lifetime) latch for the needSwizzle/needMXSwizzle
+            // fast-path reuse below: m_gpuInit never resets across problems, so without
+            // this a later, different problem would wrongly reuse an earlier problem's
+            // stale swizzled GPU buffers on its very first prepareGPUInputs() call.
+            bool                          m_gpuSwizzledReadyForProblem = false;
 
             int m_mxScaleFormat = 0;
             /// A/B data source. -1: mxDataGenerator for MX inputs only. 1: mxDataGenerator
