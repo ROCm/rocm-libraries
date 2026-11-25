@@ -55,4 +55,14 @@
 #define HIPCUB_CCCL_VERSION_MINOR @HIPCUB_CCCL_VERSION_MINOR@
 #define HIPCUB_CCCL_VERSION_PATCH @HIPCUB_CCCL_VERSION_PATCH@
 
+/// \def HIPCUB_USE_LEGACY_API
+/// \brief Whether the legacy hipCUB APIs from before CCCL 3.0 parity are available.
+///
+/// These APIs are deprecated and only provided for backward compatibility. They are
+/// enabled by default and can be disabled by configuring hipCUB with
+/// ``-DHIPCCL_USE_LEGACY_API=OFF``.
+#ifndef HIPCUB_USE_LEGACY_API
+#cmakedefine01 HIPCUB_USE_LEGACY_API
+#endif
+
 #endif // HIPCUB_VERSION_HPP_

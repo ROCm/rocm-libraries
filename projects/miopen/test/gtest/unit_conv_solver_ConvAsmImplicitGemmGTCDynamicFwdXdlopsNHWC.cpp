@@ -127,40 +127,40 @@ TEST_P(CPU_UnitTestConvSolverAsmImplicitGemmGTCDynamicFwdXdlopsNHWCDevApplicabil
     this->RunTest(miopen::solver::conv::ConvAsmImplicitGemmGTCDynamicFwdXdlopsNHWC{});
 };
 
-// Smoke tests
-INSTANTIATE_TEST_SUITE_P(Smoke,
+// Quick tests
+INSTANTIATE_TEST_SUITE_P(Quick,
                          GPU_UnitTestConvSolverAsmImplicitGemmGTCDynamicFwdXdlopsNHWCFwd_FP16,
                          testing::Combine(testing::Values(GetSmokeTestParams(miopenHalf)),
                                           testing::Values(miopenConvolutionAlgoImplicitGEMM),
                                           testing::ValuesIn(GetConvSmokeTestCases(miopenHalf))));
 
 INSTANTIATE_TEST_SUITE_P(
-    Smoke,
+    Quick,
     GPU_UnitTestConvSolverAsmImplicitGemmGTCDynamicFwdXdlopsNHWCFwd_BFP16,
     testing::Combine(testing::Values(GetSmokeTestParams(miopenBFloat16)),
                      testing::Values(miopenConvolutionAlgoImplicitGEMM),
                      testing::ValuesIn(GetConvSmokeTestCases(miopenBFloat16))));
 
-INSTANTIATE_TEST_SUITE_P(Smoke,
+INSTANTIATE_TEST_SUITE_P(Quick,
                          GPU_UnitTestConvSolverAsmImplicitGemmGTCDynamicFwdXdlopsNHWCFwd_FP32,
                          testing::Combine(testing::Values(GetSmokeTestParams(miopenFloat)),
                                           testing::Values(miopenConvolutionAlgoImplicitGEMM),
                                           testing::ValuesIn(GetConvSmokeTestCases(miopenFloat))));
 
-// Full tests
-INSTANTIATE_TEST_SUITE_P(Full,
+// Standard tests
+INSTANTIATE_TEST_SUITE_P(Standard,
                          GPU_UnitTestConvSolverAsmImplicitGemmGTCDynamicFwdXdlopsNHWCFwd_FP16,
                          testing::Combine(testing::Values(GetFullTestParams(miopenHalf)),
                                           testing::Values(miopenConvolutionAlgoImplicitGEMM),
                                           testing::ValuesIn(GetConvFullTestCases(miopenHalf))));
 
-INSTANTIATE_TEST_SUITE_P(Full,
+INSTANTIATE_TEST_SUITE_P(Standard,
                          GPU_UnitTestConvSolverAsmImplicitGemmGTCDynamicFwdXdlopsNHWCFwd_BFP16,
                          testing::Combine(testing::Values(GetFullTestParams(miopenBFloat16)),
                                           testing::Values(miopenConvolutionAlgoImplicitGEMM),
                                           testing::ValuesIn(GetConvFullTestCases(miopenBFloat16))));
 
-INSTANTIATE_TEST_SUITE_P(Full,
+INSTANTIATE_TEST_SUITE_P(Standard,
                          GPU_UnitTestConvSolverAsmImplicitGemmGTCDynamicFwdXdlopsNHWCFwd_FP32,
                          testing::Combine(testing::Values(GetFullTestParams(miopenFloat)),
                                           testing::Values(miopenConvolutionAlgoImplicitGEMM),
@@ -168,7 +168,7 @@ INSTANTIATE_TEST_SUITE_P(Full,
 
 // Device applicability test
 INSTANTIATE_TEST_SUITE_P(
-    Smoke,
+    Quick,
     CPU_UnitTestConvSolverAsmImplicitGemmGTCDynamicFwdXdlopsNHWCDevApplicabilityFwd_NONE,
     testing::Combine(testing::Values(GetSmokeTestParams(miopenFloat)),
                      testing::Values(GetConvSmokeTestCases(miopenFloat)[0])));

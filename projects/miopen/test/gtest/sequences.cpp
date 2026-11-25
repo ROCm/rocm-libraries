@@ -28,7 +28,9 @@
 
 namespace Seq = miopen::seq;
 
-TEST(CPU_sequence_NONE, SimpleListTest)
+using CPU_sequence_NONE = testing::TestWithParam<int>;
+
+TEST_P(CPU_sequence_NONE, SimpleListTest)
 {
     using TestSequence = Seq::Sequence<int, 1, 2, 4, 5>;
     TestSequence test_seq;
@@ -40,7 +42,7 @@ TEST(CPU_sequence_NONE, SimpleListTest)
     EXPECT_EQ(++it, test_seq.end());
 }
 
-TEST(CPU_sequence_NONE, LinearListTest)
+TEST_P(CPU_sequence_NONE, LinearListTest)
 {
     using TestSequence = Seq::Span<int, 1, 3>;
     TestSequence test_seq;
@@ -52,7 +54,7 @@ TEST(CPU_sequence_NONE, LinearListTest)
     EXPECT_EQ(++it, test_seq.end());
 }
 
-TEST(CPU_sequence_NONE, TwoPowersListTest)
+TEST_P(CPU_sequence_NONE, TwoPowersListTest)
 {
     using TestSequence = Seq::TwoPowersSpan<int, 4, 16>;
     TestSequence test_seq;
@@ -63,7 +65,7 @@ TEST(CPU_sequence_NONE, TwoPowersListTest)
     EXPECT_EQ(++it, test_seq.end());
 }
 
-TEST(CPU_sequence_NONE, JoinTest)
+TEST_P(CPU_sequence_NONE, JoinTest)
 {
     using TestSequence = Seq::Join<Seq::Sequence<int, 1>, Seq::TwoPowersSpan<int, 4, 8>>;
     TestSequence test_seq;
@@ -74,7 +76,7 @@ TEST(CPU_sequence_NONE, JoinTest)
     EXPECT_EQ(++it, test_seq.end());
 }
 
-TEST(CPU_sequence_NONE, DividedTest)
+TEST_P(CPU_sequence_NONE, DividedTest)
 {
     using TestSequence = Seq::Multiplied<Seq::Sequence<int, 1, 2, 4, 5>, 3>;
     TestSequence test_seq;
@@ -86,8 +88,10 @@ TEST(CPU_sequence_NONE, DividedTest)
     EXPECT_EQ(++it, test_seq.end());
 }
 
+INSTANTIATE_TEST_SUITE_P(Quick, CPU_sequence_NONE, testing::Values(0));
+
 namespace {
-class CPU_sequenceRule_NONE : public ::testing::Test
+class CPU_sequenceRule_NONE : public testing::TestWithParam<int>
 {
 protected:
     struct TestData
@@ -105,14 +109,14 @@ protected:
 };
 }; // namespace
 
-TEST_F(CPU_sequenceRule_NONE, IsInTest)
+TEST_P(CPU_sequenceRule_NONE, IsInTest)
 {
     EXPECT_TRUE(TestRule().IsIn({1, 2}));
     EXPECT_TRUE(TestRule().IsIn({2, 3}));
     EXPECT_FALSE(TestRule().IsIn({3, 1}));
 }
 
-TEST_F(CPU_sequenceRule_NONE, NextTest)
+TEST_P(CPU_sequenceRule_NONE, NextTest)
 {
     TestData data{-1, 2};
     TestRule().FillBegin(data);
@@ -128,7 +132,7 @@ TEST_F(CPU_sequenceRule_NONE, NextTest)
     EXPECT_EQ(data.y, 2);
 }
 
-TEST_F(CPU_sequenceRule_NONE, CompareTest)
+TEST_P(CPU_sequenceRule_NONE, CompareTest)
 {
     TestData data1{-1, 2};
     TestData data2{-1, 1};
@@ -138,8 +142,10 @@ TEST_F(CPU_sequenceRule_NONE, CompareTest)
     EXPECT_FALSE(TestRule().Compare(data1, data3));
 }
 
+INSTANTIATE_TEST_SUITE_P(Quick, CPU_sequenceRule_NONE, testing::Values(0));
+
 namespace {
-class CPU_sequenceRuleSet_NONE : public ::testing::Test
+class CPU_sequenceRuleSet_NONE : public testing::TestWithParam<int>
 {
 protected:
     struct TestData
@@ -159,7 +165,7 @@ protected:
 };
 }; // namespace
 
-TEST_F(CPU_sequenceRuleSet_NONE, IsInTest)
+TEST_P(CPU_sequenceRuleSet_NONE, IsInTest)
 {
     EXPECT_TRUE(TestRule().IsIn(TestData{1, 2, 5}));
     EXPECT_TRUE(TestRule().IsIn(TestData{2, 3, 5}));
@@ -167,7 +173,7 @@ TEST_F(CPU_sequenceRuleSet_NONE, IsInTest)
     EXPECT_FALSE(TestRule().IsIn(TestData{2, 1, 2}));
 }
 
-TEST_F(CPU_sequenceRuleSet_NONE, NextTest)
+TEST_P(CPU_sequenceRuleSet_NONE, NextTest)
 {
     TestData data{-1, -1, 5};
     TestRule().FillBegin(data);
@@ -194,7 +200,7 @@ TEST_F(CPU_sequenceRuleSet_NONE, NextTest)
     EXPECT_EQ(data.z, 5);
 }
 
-TEST_F(CPU_sequenceRuleSet_NONE, CompareTest)
+TEST_P(CPU_sequenceRuleSet_NONE, CompareTest)
 {
     const TestData data1{-1, 2, 3};
     const TestData data2{-1, 2, 2};
@@ -205,3 +211,5 @@ TEST_F(CPU_sequenceRuleSet_NONE, CompareTest)
     EXPECT_FALSE(TestRule().Compare(data1, data3));
     EXPECT_FALSE(TestRule().Compare(data1, data4));
 }
+
+INSTANTIATE_TEST_SUITE_P(Quick, CPU_sequenceRuleSet_NONE, testing::Values(0));
