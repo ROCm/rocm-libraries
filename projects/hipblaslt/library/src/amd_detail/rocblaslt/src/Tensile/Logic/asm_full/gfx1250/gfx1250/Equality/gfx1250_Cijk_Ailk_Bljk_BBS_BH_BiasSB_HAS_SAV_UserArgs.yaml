@@ -1,4 +1,3 @@
----
 MinimumRequiredVersion: 5.0.0
 ScheduleName: gfx1250
 ArchitectureName: gfx1250
@@ -3761,4 +3760,3 @@ RangeLogic: null
 TileSelectionIndices: null
 PerfMetric: DeviceEfficiency
 LibraryType: Equality
-...
