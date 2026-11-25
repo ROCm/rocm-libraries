@@ -16,8 +16,8 @@
 namespace stinkytofu {
 namespace {
 
-// The greedy engine's loop weighting, so a switch and a use weigh alike.
-constexpr double kLoopWeight = 10.0;
+// BankCostModel's unit is the greedy engine's loop weighting, so a switch and a
+// use weigh alike; like the greedy engine's, it stops growing at this depth.
 constexpr uint32_t kMaxLoopDepth = 4;
 
 uint8_t bankIn(std::span<const uint8_t> bankOfValue, SSAValueID value) {
@@ -36,7 +36,7 @@ VgprMsbStreamModel::VgprMsbStreamModel(const Function& function, const std::vect
         }
         double weight = 1.0;
         for (uint32_t level = 0; level < std::min(nesting, kMaxLoopDepth); ++level)
-            weight *= kLoopWeight;
+            weight *= kBankCostLoopWeight;
 
         // Walked as InsertVgprMsbPass walks it, so the segments are where its
         // tracker forgets the word.

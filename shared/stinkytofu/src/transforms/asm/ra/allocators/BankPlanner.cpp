@@ -16,10 +16,11 @@
 namespace stinkytofu {
 namespace {
 
-/// The weight the cost model gives a use inside a loop.
-constexpr double kInLoop = 10.0;
+/// The least weight a cost model gives a use inside a loop (BankCostModel.hpp).
+constexpr double kInLoop = kBankCostLoopWeight;
 
-/// Weights are whole powers of ten, so a real improvement is at least 1.
+/// Costs are whole numbers (BankCostModel.hpp), so a real improvement is at
+/// least 1.
 constexpr double kImprovement = -0.5;
 
 /// The search stops after this many passes over the planned blocks or this

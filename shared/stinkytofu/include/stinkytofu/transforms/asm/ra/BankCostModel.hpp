@@ -25,6 +25,14 @@ namespace stinkytofu {
 /// value: pricing a neighbour as undecided favours no bank over another.
 inline constexpr uint8_t kUnknownBank = 4;
 
+/// The unit every weight in a BankCostModel is in: one use, or one switch,
+/// outside every loop weighs 1, and each loop around it multiplies that by
+/// kBankCostLoopWeight, up to a depth the model chooses. A cost is a sum of such
+/// weights, so a cost and a change in one are whole numbers. A policy may read a
+/// use weight of at least kBankCostLoopWeight as a use inside a loop, and a
+/// change smaller than 1 as none.
+inline constexpr double kBankCostLoopWeight = 10.0;
+
 class BankCostModel {
    public:
     virtual ~BankCostModel() = default;
