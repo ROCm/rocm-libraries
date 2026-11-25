@@ -339,10 +339,10 @@ struct w4a16_params_t {
   // part of the tile lies inside the problem: the bytes at 69 GB/s, on top of the flag poll.
   // The poll is a load that goes to memory, charged as a load round trip: with the CUs shared
   // a partial of 2 KB costs 0.4 to 0.65 us (80 and 40 workgroups of 32x16x128 as 2 to 40
-  // splits per tile, the same K each), 0.3 with the device idle.  Kernels whose
-  // epilogue has registers for 2 accumulators at a time (128x128x64 and 160x128x64, 32 and 40
-  // load batches a partial where the others have 1 or 2) take 0.08 us more per batch; the
-  // batches are not known to the model and are not charged.
+  // splits per tile, the same K each), 0.3 with the device idle.  (128x128x64 and 160x128x64
+  // loaded a partial 2 accumulators at a time, 32 and 40 serialized batches, and cost 3.7 and
+  // 4.45 us per partial; their fixup now loads it in 2 to 4 batches and they are on the line:
+  // 1.1 to 1.5 us.)
   // That is the owner's rate with the device idle.  With every CU busy the fixup is bound by
   // the device's memory instead, through which all the partials are stored and loaded (40
   // workgroups of 96x256x64, same K each: 20 tiles split in 2 take 15.6 us more than 40 whole
