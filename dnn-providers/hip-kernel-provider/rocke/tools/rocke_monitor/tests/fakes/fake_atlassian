@@ -1,0 +1,356 @@
+#!/usr/bin/env python3
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+"""A stand-in for the atlassian CLI (JIRA from the command line), for the tests: never any network.
+
+Every call is recorded as a JSON line (its arguments) in FAKE_ATLASSIAN_LOG when that is set, and its environment's
+ATLASSIAN_ variables as a JSON line ({name: value}) in FAKE_ATLASSIAN_ENV_LOG when that is set. It answers:
+  version                                  atlassian version 1.5.2
+  auth status                              logged in (FAKE_ATLASSIAN_LOGGED_OUT=1: not, exit 1, until `auth login`)
+  auth login [--read-only]                 a device code and a page, then logged in: it writes `login` in
+                                           ATLASSIAN_CONFIG_DIR (FAKE_ATLASSIAN_LOGIN_FAIL=1: exit 1, no login)
+  site list [--json]                       the sites FAKE_ATLASSIAN_SITES names (comma-separated; default
+                                           example-site), in that order, the active one marked `* ` in the plain
+                                           listing; --json: [{"id", "name", "url"}]; FAKE_ATLASSIAN_SITES_FAIL=1 (or
+                                           logged out): an error, exit 1
+  site active [--json]                     with --site: that site; else FAKE_ATLASSIAN_ACTIVE (default: the first
+                                           site; "-": none, exit 1)
+  jira project versions KEY                exit 0 ([]) on a site FAKE_ATLASSIAN_PROJECT_SITES names (comma-separated),
+                                           else an HTTP 404, exit 1
+  jira issue create --project P ...        {"key": "P-<n>", ...}, n counting up in FAKE_ATLASSIAN_STATE (a file);
+                                           FAKE_ATLASSIAN_FAIL=create: an error, exit 1; create-lost: the issue is
+                                           made, then a timeout's error, exit 1 (the answer lost). Each issue made is
+                                           a line of <state>.issues ({"key", "summary"})
+  jira issue search|list --jql JQL         {"issues": [{"key", "fields": {"summary"}}]}: every issue made, newest
+                                           first; FAKE_ATLASSIAN_FAIL=search (or create-lost-search): an error, exit 1
+  jira issue get KEY                       {"key", "fields": {"summary", "status"}} for an issue made, else an HTTP
+                                           404, exit 1
+  jira user get EMAIL                     {"accountId": ...} for an address at example.com, else not found (exit 1)
+  jira issue update KEY [--assignee ID] [--field-json description=ADF]   {"key": KEY}; FAKE_ATLASSIAN_FAIL=update:
+                                           an error, exit 1
+  jira issue link-epic KEY --epic EPIC     {"key": KEY, "epic": EPIC}; FAKE_ATLASSIAN_FAIL=link-epic: an error, exit 1
+  jira issue comment add KEY --body TEXT   {"id", "key"}; each comment a line of <state>.comments ({"key", "body"})
+  jira issue remote-link KEY --url URL     {"id", "key", "url"}
+  confluence search --cql CQL              {"results": [one page]}; FAKE_ATLASSIAN_FAIL=confluence: an error, exit 1
+  rest --product jira --method GET --path /rest/api/3/issue/createmeta/P/issuetypes[/ID]   the project's issue types
+                                           ({"issueTypes"}), or one type's fields ({"fields"}); any other path: 404.
+                                           FAKE_ATLASSIAN_CREATEMETA: a JSON file whose "types" and "fields" are the
+                                           answers instead
+The global flags (--site, --json, --profile, --proxy, --verbose) may come anywhere and are left out of the answer. An
+option's value may come as the next word or after `=` (`--site=NAME`), as the CLI takes both.
+"""
+
+import hashlib
+import json
+import os
+import sys
+
+GLOBAL_WITH_VALUE = ("--site", "--profile", "--proxy")
+GLOBAL_FLAGS = ("--json", "--verbose")
+
+
+def sites() -> list[str]:
+    return [
+        s.strip()
+        for s in (os.environ.get("FAKE_ATLASSIAN_SITES") or "example-site").split(",")
+        if s.strip()
+    ]
+
+
+def made_issues(state: str) -> list[dict]:
+    """The issues made so far: the lines of <state>.issues."""
+    if not state or not os.path.isfile(state + ".issues"):
+        return []
+    with open(state + ".issues", encoding="utf-8") as f:
+        return [json.loads(x) for x in f if x.strip()]
+
+
+def value(args: list[str], name: str) -> str:
+    """The value given to option NAME, "" when it is not given."""
+    return args[args.index(name) + 1] if name in args[:-1] else ""
+
+
+def logged_in() -> bool:
+    if os.environ.get("FAKE_ATLASSIAN_LOGGED_OUT") != "1":
+        return True
+    d = os.environ.get("ATLASSIAN_CONFIG_DIR") or ""
+    return bool(d) and os.path.isfile(os.path.join(d, "login"))
+
+
+def main(argv):
+    log = os.environ.get("FAKE_ATLASSIAN_LOG")
+    if log:
+        with open(log, "a", encoding="utf-8") as f:
+            f.write(json.dumps(argv) + "\n")
+    env_log = os.environ.get("FAKE_ATLASSIAN_ENV_LOG")
+    if env_log:
+        with open(env_log, "a", encoding="utf-8") as f:
+            given = {k: v for k, v in os.environ.items() if k.startswith("ATLASSIAN_")}
+            f.write(json.dumps(given) + "\n")
+    argv = [
+        part
+        for w in argv
+        for part in (
+            w.split("=", 1) if w.startswith("--") and "=" in w.split()[0] else [w]
+        )
+    ]
+    args, flags, i = [], {}, 0
+    while i < len(argv):
+        if argv[i] in GLOBAL_WITH_VALUE:
+            flags[argv[i]] = argv[i + 1] if i + 1 < len(argv) else ""
+            i += 2
+            continue
+        if argv[i] in GLOBAL_FLAGS:
+            flags[argv[i]] = True
+        else:
+            args.append(argv[i])
+        i += 1
+    as_json = bool(flags.get("--json"))
+    if args[:1] == ["version"]:
+        print("atlassian version 1.5.2")
+        return 0
+    if args[:2] == ["auth", "status"]:
+        if not logged_in():
+            print("Not logged in")
+            return 1
+        print("Logged in as op (fake)")
+        return 0
+    if args[:2] == ["auth", "login"]:
+        print("First copy your one-time code: 0000-0000")
+        print("Then open https://login.example.invalid/device and pick the site there.")
+        if os.environ.get("FAKE_ATLASSIAN_LOGIN_FAIL") == "1":
+            sys.stderr.write("Error: the device code expired\n")
+            return 1
+        d = os.environ.get("ATLASSIAN_CONFIG_DIR") or ""
+        if d:
+            os.makedirs(d, exist_ok=True)
+            with open(os.path.join(d, "login"), "w", encoding="utf-8") as f:
+                f.write("read-only\n" if "--read-only" in args else "read-write\n")
+        print("Logged in.")
+        return 0
+    if args[:2] == ["site", "list"]:
+        if os.environ.get("FAKE_ATLASSIAN_SITES_FAIL") == "1" or not logged_in():
+            sys.stderr.write("Error: Unable to query Atlassian accessible resources.\n")
+            return 1
+        names = sites()
+        if as_json:
+            print(
+                json.dumps(
+                    [
+                        {
+                            "id": hashlib.sha1(n.encode()).hexdigest()[:8]
+                            + "-0000-4000-8000-000000000000",
+                            "name": n,
+                            "url": f"https://{n}.example.invalid",
+                        }
+                        for n in names
+                    ],
+                    separators=(",", ":"),
+                )
+            )
+            print(
+                "A new version (9.9.9) is available. Run: atlassian update",
+                file=sys.stderr,
+            )
+            return 0
+        if not names:
+            print("No accessible sites found.")
+            return 0
+        active = os.environ.get("FAKE_ATLASSIAN_ACTIVE") or names[0]
+        for n in names:
+            print(("* " if n == active else "  ") + n)
+        print("\n* = active site")
+        return 0
+    if args[:2] == ["site", "active"]:
+        site = (
+            flags.get("--site")
+            or os.environ.get("FAKE_ATLASSIAN_ACTIVE")
+            or (sites() or ["-"])[0]
+        )
+        if site == "-":
+            sys.stderr.write("Error: No active site configured.\n")
+            return 1
+        if as_json:
+            print(
+                json.dumps(
+                    {
+                        "profile": "DEFAULT",
+                        "site": {
+                            "name": site,
+                            "url": f"https://{site}.example.invalid",
+                            "cloud_id": "0000",
+                            "override": "--site" in flags,
+                        },
+                    }
+                )
+            )
+        else:
+            print(f"Active site: {site}")
+        return 0
+    if args[:3] == ["jira", "project", "versions"]:
+        holders = [
+            s.strip()
+            for s in (os.environ.get("FAKE_ATLASSIAN_PROJECT_SITES") or "").split(",")
+            if s.strip()
+        ]
+        if flags.get("--site") in holders:
+            print("[]")
+            return 0
+        sys.stderr.write("Error: Atlassian API error: HTTP 404\n")
+        return 1
+    fail = os.environ.get("FAKE_ATLASSIAN_FAIL") or ""
+    state = os.environ.get("FAKE_ATLASSIAN_STATE") or (
+        os.path.join(os.path.dirname(log), "atlassian_n") if log else ""
+    )
+    if args[:3] in (["jira", "issue", "search"], ["jira", "issue", "list"]):
+        if fail in ("search", "create-lost-search"):
+            sys.stderr.write("Error: Atlassian API error: HTTP 503\n")
+            return 1
+        print(
+            json.dumps(
+                {
+                    "issues": [
+                        {"key": m["key"], "fields": {"summary": m["summary"]}}
+                        for m in reversed(made_issues(state))
+                    ]
+                }
+            )
+        )
+        return 0
+    if args[:3] == ["jira", "issue", "get"]:
+        key = args[3] if len(args) > 3 else ""
+        found = [m for m in made_issues(state) if m["key"] == key]
+        if not found:
+            sys.stderr.write("Error: Atlassian API error: HTTP 404\n")
+            return 1
+        print(
+            json.dumps(
+                {
+                    "key": key,
+                    "fields": {
+                        "summary": found[0]["summary"],
+                        "status": {"name": "To Do"},
+                    },
+                }
+            )
+        )
+        return 0
+    if args[:4] == ["jira", "issue", "comment", "add"]:
+        key, body = (args[4] if len(args) > 4 else ""), value(args, "--body")
+        if not body:
+            sys.stderr.write('Error: required flag(s) "body" not set\n')
+            return 1
+        n = 1
+        if state:
+            with open(state + ".comments", "a+", encoding="utf-8") as f:
+                f.seek(0)
+                n = sum(1 for x in f if x.strip()) + 1
+                f.write(json.dumps({"key": key, "body": body}) + "\n")
+        print(json.dumps({"id": str(20000 + n), "key": key}))
+        return 0
+    if args[:3] == ["jira", "issue", "remote-link"]:
+        key = args[3] if len(args) > 3 else ""
+        print(json.dumps({"id": 1, "key": key, "url": value(args, "--url")}))
+        return 0
+    if args[:2] == ["confluence", "search"]:
+        if fail == "confluence":
+            sys.stderr.write("Error: Atlassian API error: HTTP 403\n")
+            return 1
+        print(json.dumps({"results": [{"id": "1", "title": "A page"}]}))
+        return 0
+    if args[:1] == ["rest"]:
+        parts = value(args, "--path").partition("?")[0].strip("/").split("/")
+        if parts[:5] == ["rest", "api", "3", "issue", "createmeta"] and len(parts) in (
+            7,
+            8,
+        ):
+            meta = os.environ.get("FAKE_ATLASSIAN_CREATEMETA")
+            if meta:  # {"types": the types' answer, "fields": the fields' answer}
+                with open(meta, encoding="utf-8") as f:
+                    print(
+                        json.dumps(
+                            json.load(f)["types" if len(parts) == 7 else "fields"]
+                        )
+                    )
+                return 0
+            print(
+                json.dumps(
+                    {"issueTypes": [{"id": "10001", "name": "Bug"}]}
+                    if len(parts) == 7
+                    else {"fields": [{"fieldId": "summary", "required": True}]}
+                )
+            )
+            return 0
+        sys.stderr.write("Error: Atlassian API error: HTTP 404\n")
+        return 1
+    if args[:3] == ["jira", "issue", "create"]:
+        if fail == "create":
+            sys.stderr.write("Error: 400 Bad Request: Field 'priority' is not valid\n")
+            return 1
+        project = args[args.index("--project") + 1]
+        n = 1
+        if state:
+            try:
+                with open(state, encoding="utf-8") as f:
+                    n = int(f.read().strip() or 0) + 1
+            except OSError:
+                n = 1
+            with open(state, "w", encoding="utf-8") as f:
+                f.write(str(n))
+            summary = args[args.index("--summary") + 1] if "--summary" in args else ""
+            with open(state + ".issues", "a", encoding="utf-8") as f:
+                f.write(
+                    json.dumps({"key": f"{project}-{n}", "summary": summary}) + "\n"
+                )
+        if fail.startswith("create-lost"):
+            sys.stderr.write("Error: Command timed out after 90 seconds\n")
+            return 1
+        print("A new version (9.9.9) is available.", file=sys.stderr)
+        print(
+            json.dumps(
+                {
+                    "id": str(10000 + n),
+                    "key": f"{project}-{n}",
+                    "self": "https://jira.example.com/rest/api/2/issue",
+                }
+            )
+        )
+        return 0
+    if args[:3] == ["jira", "user", "get"]:
+        who = args[3] if len(args) > 3 else ""
+        if who.endswith("@example.com"):
+            print(
+                json.dumps(
+                    {
+                        "accountId": hashlib.sha1(who.encode()).hexdigest()[:24],
+                        "emailAddress": who,
+                    }
+                )
+            )
+            return 0
+        sys.stderr.write(f"Error: user {who} not found\n")
+        return 1
+    if args[:3] == ["jira", "issue", "update"]:
+        if fail == "update":
+            sys.stderr.write("Error: Atlassian API error: HTTP 500\n")
+            return 1
+        print(json.dumps({"key": args[3] if len(args) > 3 else ""}))
+        return 0
+    if args[:3] == ["jira", "issue", "link-epic"]:
+        if fail == "link-epic":
+            sys.stderr.write(
+                "Error: Atlassian API error: HTTP 400: the epic does not exist\n"
+            )
+            return 1
+        epic = args[args.index("--epic") + 1] if "--epic" in args else ""
+        if not epic:
+            sys.stderr.write('Error: required flag(s) "epic" not set\n')
+            return 1
+        print(json.dumps({"key": args[3] if len(args) > 3 else "", "epic": epic}))
+        return 0
+    sys.stderr.write(f"unknown command: {' '.join(args)}\n")
+    return 2
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

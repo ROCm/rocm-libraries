@@ -1,0 +1,26 @@
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+# The checks venv's exact versions, as the live checks venv runs them (Python 3.14.4, `pip freeze`): the image
+# installs these (pip install -r requirements/checks.lock.txt); checks.txt sets the lower bounds. PyYAML
+# is the one addition (rocKE's tests that read YAML take it from this venv), at the release the generator venv runs.
+cmake==4.4.4
+contourpy==1.4.0
+cycler==0.12.1
+fonttools==4.67.0
+iniconfig==2.3.1
+kiwisolver==1.5.1
+matplotlib==3.11.2
+ml_dtypes==0.6.0
+ninja==1.13.2
+numpy==2.5.4
+packaging==26.3
+pillow==13.0.0
+pluggy==1.7.0
+pybind11==3.1.0
+Pygments==2.21.0
+pyparsing==3.3.3
+pytest==9.1.1
+pytest-timeout==2.4.0
+python-dateutil==2.9.0.post0
+PyYAML==6.0.3
+six==1.17.0

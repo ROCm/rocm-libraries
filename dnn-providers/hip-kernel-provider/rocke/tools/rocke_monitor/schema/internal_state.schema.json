@@ -1,0 +1,300 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "rocKE monitor: internal state",
+  "description": "What the monitor finds out or records as it runs. Only the monitor writes it.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "kind",
+    "schema_version"
+  ],
+  "properties": {
+    "kind": {
+      "description": "The type of file. Don't change it.",
+      "type": "string",
+      "const": "internal_state",
+      "x-class": "public",
+      "x-used-by": []
+    },
+    "schema_version": {
+      "description": "The layout version of this file. Don't change it.",
+      "type": "integer",
+      "const": 1,
+      "x-class": "public",
+      "x-used-by": []
+    },
+    "repository": {
+      "title": "Repository",
+      "description": "what the monitor finds out about the repository it watches.",
+      "type": "object",
+      "x-class": "public",
+      "additionalProperties": false,
+      "properties": {
+        "codeowner_teams": {
+          "description": "The GitHub teams that approve each code-owner area of the repository, by area, as its CODEOWNERS file names them. Default: none.",
+          "type": "object",
+          "additionalProperties": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "default": {},
+          "x-class": "private",
+          "x-used-by": [],
+          "x-internal": "codeowner_teams"
+        },
+        "clone_since": {
+          "description": "The oldest commit date (YYYY-MM-DD) that the monitor's clone of the repository and its pull request fetches keep. Default: \"\".",
+          "type": "string",
+          "pattern": "^$|^[0-9]{4}-[0-9]{2}-[0-9]{2}$",
+          "default": "",
+          "x-class": "public",
+          "x-used-by": [],
+          "x-internal": "clone_since"
+        },
+        "base_branch": {
+          "description": "The branch the monitor watches for changes. Default: \"\", which means the repository's default branch.",
+          "type": "string",
+          "default": "",
+          "x-default-means": "the repository's default branch",
+          "x-class": "public",
+          "x-used-by": [],
+          "x-internal": "base_branch"
+        }
+      }
+    },
+    "model_bindings": {
+      "description": "what the monitor finds out about each model binding's server by probing it, by the binding's name. Default: none.",
+      "title": "Model bindings",
+      "type": "object",
+      "propertyNames": {
+        "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]*$"
+      },
+      "additionalProperties": {
+        "$ref": "#/$defs/binding_found"
+      },
+      "default": {},
+      "x-class": "public",
+      "x-used-by": []
+    },
+    "team_dashboard": {
+      "title": "Team dashboard",
+      "description": "what the monitor records for the team dashboard's web host.",
+      "type": "object",
+      "x-class": "public",
+      "additionalProperties": false,
+      "properties": {
+        "web_host_keys": {
+          "description": "The web host's own SSH keys, as known_hosts lines, recorded once you accept them. Default: none.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "x-class": "private",
+          "x-used-by": [],
+          "x-internal": "publish.html.host_keys"
+        }
+      }
+    },
+    "remote_gpu_tests": {
+      "title": "Remote GPU tests",
+      "description": "what the monitor records for the GPU cluster.",
+      "type": "object",
+      "x-class": "public",
+      "additionalProperties": false,
+      "properties": {
+        "login_host_keys": {
+          "description": "The GPU cluster login node's own SSH keys, as known_hosts lines, recorded once you accept them. Default: none.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "x-class": "private",
+          "x-used-by": []
+        }
+      }
+    },
+    "jira": {
+      "title": "JIRA",
+      "description": "the JIRA accounts the monitor assigns tickets to.",
+      "type": "object",
+      "x-class": "public",
+      "additionalProperties": false,
+      "properties": {
+        "accounts": {
+          "description": "Each author's JIRA account, by GitHub username, as rkmon rk jira-account add LOGIN ACCOUNT records it. Default: none.",
+          "type": "object",
+          "propertyNames": {
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9-]{0,38}$"
+          },
+          "additionalProperties": {
+            "type": "string",
+            "pattern": "^\\S+$"
+          },
+          "default": {},
+          "x-class": "private",
+          "x-used-by": [],
+          "x-internal": "jira.accounts"
+        }
+      }
+    },
+    "site": {
+      "title": "Site",
+      "description": "what the monitor learns on this site.",
+      "type": "object",
+      "x-class": "public",
+      "additionalProperties": false,
+      "properties": {
+        "ci_infra_signatures": {
+          "description": "The CI failures this site's own infrastructure causes, each in the form of the repository's CI infrastructure signatures, learned on this site. Default: none.",
+          "type": "array",
+          "default": [],
+          "x-class": "private",
+          "x-used-by": [],
+          "x-internal": "ci_infra_site_signatures"
+        }
+      }
+    },
+    "reviews": {
+      "title": "Reviews",
+      "description": "what the monitor records about the reviews it posts.",
+      "type": "object",
+      "x-class": "public",
+      "additionalProperties": false,
+      "properties": {
+        "automated_reviewer_names_used": {
+          "description": "Every automated reviewer name this monitor's reviews have carried, so that its earlier reviews stay its own after the name changes. Default: none.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "x-class": "private",
+          "x-used-by": []
+        },
+        "unnamed_are_ours_until": {
+          "description": "The time before which the reviews an older monitor posted, whose line 1 has no automated reviewer name, are this deployment's own, as an ISO 8601 time in UTC. A mirror of a live monitor (mirror.enabled) takes each of them for its own, whatever this time. The one-time move sets it to the move's time, and rkmon standby off sets it again, to its own time. Default: \"\", which means none of them is this deployment's own, unless it is a mirror.",
+          "type": "string",
+          "default": "",
+          "x-default-means": "none of them is this deployment's own, unless it is a mirror",
+          "x-class": "public",
+          "x-used-by": []
+        }
+      }
+    },
+    "standby": {
+      "title": "Standby",
+      "description": "the whole monitor sending nothing, each feature in prototype or live mode alike.",
+      "type": "object",
+      "x-class": "public",
+      "additionalProperties": false,
+      "properties": {
+        "on": {
+          "description": "true: the monitor works but posts and sends nothing, keeping each item as an unsent item, until you run rkmon standby off. Default: false.",
+          "type": "boolean",
+          "default": false,
+          "x-class": "public",
+          "x-used-by": []
+        },
+        "reason": {
+          "description": "Why the monitor is in standby. Default: \"\".",
+          "type": "string",
+          "default": "",
+          "x-class": "public",
+          "x-used-by": []
+        },
+        "since": {
+          "description": "When standby began, as an ISO 8601 time in UTC. Default: \"\".",
+          "type": "string",
+          "default": "",
+          "x-class": "public",
+          "x-used-by": []
+        }
+      }
+    },
+    "provisioned": {
+      "title": "Provisioned",
+      "description": "the work volume set up from your confirmed settings by rk provision, which each start runs: the first sets it up, and a later one puts back what has gone missing.",
+      "type": "object",
+      "x-class": "public",
+      "additionalProperties": false,
+      "properties": {
+        "at": {
+          "description": "When the last run of rk provision finished, as an ISO 8601 time in UTC; a work volume an older package set up gets it when it is first read, and one rkmon adopt filled when the next start sets it up. Default: \"\", which means not set up yet.",
+          "type": "string",
+          "default": "",
+          "x-default-means": "not set up yet",
+          "x-class": "public",
+          "x-used-by": []
+        },
+        "package_version": {
+          "description": "The package of the last run of rk provision, or the one that first read a work volume an older package set up. Default: \"\".",
+          "type": "string",
+          "default": "",
+          "x-class": "public",
+          "x-used-by": []
+        },
+        "older_install": {
+          "description": "true: the work volume was an older install's when this package first read it (its config.json was there before any record), so the one-time move splits that config.json, once; rkmon adopt sets it again when it copies an earlier monitor's config.json. A config.json written later on a volume this package set up is never moved. Default: false.",
+          "type": "boolean",
+          "default": false,
+          "x-class": "public",
+          "x-used-by": []
+        },
+        "adopted_at": {
+          "description": "When rkmon adopt last filled the work volume with an earlier monitor's state, as an ISO 8601 time in UTC: until the next start has set the volume up, the config.json adopt copied is the one-time move's, not an older install's setup. Default: \"\", which means none was adopted.",
+          "type": "string",
+          "default": "",
+          "x-default-means": "none was adopted",
+          "x-class": "public",
+          "x-used-by": []
+        }
+      }
+    }
+  },
+  "$defs": {
+    "binding_found": {
+      "description": "what the monitor found out about one binding's server.",
+      "type": "object",
+      "x-class": "public",
+      "additionalProperties": false,
+      "properties": {
+        "display_name": {
+          "description": "The model's name as the server's model list gives it, when it differs from the model's id. Default: \"\".",
+          "type": "string",
+          "default": "",
+          "x-class": "private",
+          "x-used-by": [],
+          "x-internal": "worker.model_name"
+        },
+        "chat_path": {
+          "description": "The server's chat route, after the binding's address, that answered the probe. Default: \"\".",
+          "type": "string",
+          "default": "",
+          "x-class": "private",
+          "x-used-by": [],
+          "x-internal": "worker.chat_path"
+        },
+        "models_url": {
+          "description": "The address where the server lists its models. Default: \"\".",
+          "type": "string",
+          "default": "",
+          "x-class": "private",
+          "x-used-by": [],
+          "x-internal": "worker.models_url"
+        },
+        "probe": {
+          "description": "What the last probe of the server found: when (at); the address, model and kind of server probed (url, model, backend); how it sent the key (key_sent: a digest of the headers that carry it, which never shows the key, or none with no key); its test chat (chat: ok, or why not, as the server answered it, which reads \"not checked: \" and why when it got no HTTP answer or a rate limit stopped it); the tool-call probe (tools: ok, why not, or blank when not reached); the context length the model list or the server reports (context); how long the test chat took (latency_s); and where its model list and its chat route answered (models_url, chat_path). Each start probes the local review loop's server again while this is of another address or model, or of another key or another way of sending it, or its test chat or its tool-call probe is not ok. Default: none.",
+          "type": "object",
+          "default": {},
+          "x-class": "private",
+          "x-used-by": [],
+          "x-internal": "worker.probe"
+        }
+      }
+    }
+  }
+}

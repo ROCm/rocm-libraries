@@ -1,0 +1,44 @@
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+#
+# The files of the package the suite runs every lint of tools/doc_lints.py over (tests/test_doc_lints.py): every
+# Markdown file of the package and other files that pass; one path in the package to a line, each once, in sorted
+# order. A line that starts with # is a comment.
+.claude/skills/rkmon-setup/SKILL.md
+QUICK_BUILD_GUIDE.md
+QUICK_DEPLOY_GUIDE.md
+QUICK_USER_GUIDE.md
+README.md
+agentic/README.md
+agentic/agents/rocke-code-quality-reviewer.md
+agentic/agents/rocke-review-verifier.md
+agentic/review_book.md
+agentic/skills/rocke-monitor/SKILL.md
+agentic/skills/rocke-monitor/commands.md
+agentic/skills/rocke-monitor/incident_procedure.md
+agentic/skills/rocke-monitor/lane_commands.md
+agentic/skills/rocke-monitor/lessons.md
+agentic/skills/rocke-monitor/merge_procedure.md
+agentic/skills/rocke-monitor/offload.md
+agentic/skills/rocke-monitor/review_procedure.md
+agentic/skills/rocke-monitor/rules.md
+agentic/skills/rocke-monitor/weekly.md
+agentic/skills/shared/prerequisites.md
+agentic/skills/shared/temporary_file_policy.md
+agentic/team_members/dispatch_rows.md
+agentic/team_members/rocke_code_quality_reviewer.md
+agentic/team_members/rocke_review_verifier.md
+docker/compose.local.example.yaml
+docker/compose.yaml
+docs/FAQ.md
+docs/design.md
+docs/internal_settings.md
+docs/maintaining.md
+docs/operations_guide.md
+docs/restart.md
+docs/review_pipeline.md
+repository/ROCm__rocm-libraries/drafter_rules.md
+requirements/README.md
+schema/build_settings.schema.json
+schema/deploy_settings.schema.json
+worker/README.md

@@ -1,0 +1,61 @@
+#!/bin/sh
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+#
+# rk: the monitor's command (rkmon.py), from anywhere. It runs the package it lives in, so `./rk selftest` in a
+# worktree tests that worktree's code; `rk --home DIR ...` (or RKMON_HOME) names the monitor's home, else the pointer
+# file (~/.config/rkmon/home) does. python3 runs rkmon.py (the image's is 3.10 or newer). `rk --which-code` prints
+# the folder of the code it runs.
+here=$(dirname "$(readlink -f "$0")")
+# In the container rk never runs as root (a `docker exec` without --user starts as root): it runs as the monitor's user,
+# so everything it writes stays the monitor's.
+if [ "${RKMON_CONTAINER:-}" = 1 ] && [ "$(id -u)" = 0 ] && command -v setpriv >/dev/null 2>&1 \
+        && id rkmon >/dev/null 2>&1; then
+    exec setpriv --reuid=rkmon --regid="$(id -g rkmon)" --init-groups -- "$0" "$@"
+fi
+# In the container a process tree runs one code from its start to its end (rkmon_lib/code_volume.py). The rk that starts
+# the tree picks it: the release root installed over this very image (`rkmon apply`: current/ in the code volume,
+# RKMON_CODE_DIR, /code by default) while it is whole, else the image's own code (RKMON_IMAGE_CODE names its folder, for
+# tests). It exports the folder it picked as RKMON_CODE: every rk the tree starts, whichever rk it is, runs that
+# folder's code, so code changes only when a tree starts. RKMON_CODE=image picks the image's code (`rkmon --image-code`
+# on the host). A damaged release, or a picked code that is gone or damaged, never runs: the image's code runs, with a
+# line on stderr. Whole is code_volume.WHOLE: each of these files there, and not empty. The writer's broker picks by the
+# same rule, and never by RKMON_CODE (docker/rk_write.py).
+if [ "${RKMON_CONTAINER:-}" = 1 ]; then
+    whole() {
+        [ -s "$1/rk" ] && [ -s "$1/rkmon.py" ] && [ -s "$1/rkmon_lib/store.py" ]
+    }
+    image=$(readlink -f "${RKMON_IMAGE_CODE:-/opt/rocke_monitor}")
+    case ${RKMON_CODE:-} in
+        "")
+            code=$image
+            image_id=${RKMON_IMAGE_ID_FILE:-/etc/rkmon/image_code_id}  # the image's code digest (the Dockerfile's)
+            cur="${RKMON_CODE_DIR:-/code}/current"
+            if [ -s "$image_id" ] && grep -qF "\"base_image\": \"$(cat "$image_id")\"" "$cur/.rkmon_release.json" \
+                    2>/dev/null; then
+                rel=$(readlink -f "$cur")
+                if whole "$rel"; then
+                    code=$rel
+                else
+                    echo "rk: the code release in $rel is damaged (a file is missing or empty), so the image's code" \
+                         "runs; to go back to the code before it: ${RKMON_WRAPPER:-rkmon} rollback" >&2
+                fi
+            fi ;;
+        image) code=$image ;;
+        *)
+            code=$(readlink -f "$RKMON_CODE")
+            if ! whole "$code"; then
+                echo "rk: the code this command was started with ($RKMON_CODE) is gone or damaged, so the image's" \
+                     "code runs" >&2
+                code=$image
+            fi ;;
+    esac
+    RKMON_CODE=$code
+    export RKMON_CODE
+    here=$code
+fi
+[ "${1:-}" = --which-code ] && { echo "$here"; exit 0; }  # the code this rk runs (the entry point asks)
+# rkmon.py runs from the package's folder; the folder it was called from is RKMON_CALLER_DIR (rk pr-run runs there).
+RKMON_CALLER_DIR=$PWD
+export RKMON_CALLER_DIR
+cd "$here" && exec python3 -B rkmon.py "$@"

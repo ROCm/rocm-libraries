@@ -1,0 +1,8 @@
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+# Optional: the generator venv (<WORKING_DIR>/venv-gen). A verifier runs the IngestorGenerator suite, which lives
+# outside the rocKE tree, in it (lessons L-327). The image carries it (in /opt/rkmon/venv-gen), made from
+# gen.lock.txt (the exact versions); these are the lower bounds.
+pytest>=8.0
+Jinja2>=3.1
+PyYAML>=6.0

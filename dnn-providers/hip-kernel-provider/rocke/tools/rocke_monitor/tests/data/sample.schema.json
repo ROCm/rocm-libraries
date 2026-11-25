@@ -1,0 +1,464 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.com/sample/2/sample_settings.schema.json",
+  "title": "Sample tool: sample settings",
+  "description": "The settings of the sample tool: a small schema for the tests of rkmon_lib/settings_file.py.",
+  "x-header": [
+    "These settings decide what one sample service does. GUIDE.md walks you through them, and README.md explains each one.",
+    "This file is yours: keep it out of git. Never put a password, token or key in it: sample login installs those.",
+    "Put text in double quotes. Replace every <...>, then run: sample check FILE"
+  ],
+  "x-profiles": {
+    "full": {
+      "what": "reviews and the queue"
+    },
+    "lean": {
+      "what": "the queue only",
+      "header": [
+        "This service runs the queue by fixed rules. It writes no reviews, so it needs no tracker."
+      ],
+      "values": {
+        "features.reviews.enabled": false
+      }
+    }
+  },
+  "x-turn-on": "To turn it on, see GUIDE.md, \"Turn on a feature\".",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "kind",
+    "schema_version",
+    "service",
+    "repository",
+    "features"
+  ],
+  "properties": {
+    "kind": {
+      "type": "string",
+      "const": "sample_settings",
+      "x-class": "public",
+      "description": "The type of settings file. Don't change it."
+    },
+    "schema_version": {
+      "type": "integer",
+      "const": 2,
+      "x-changed-by": "sample migrate updates it when a new tool changes the layout",
+      "x-class": "public",
+      "description": "The layout version of this file. Don't change it: sample migrate updates it when a new tool changes the layout."
+    },
+    "service": {
+      "type": "object",
+      "title": "Service",
+      "description": "the service this file sets up.",
+      "x-class": "public",
+      "additionalProperties": false,
+      "required": [
+        "tag"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "pattern": "^[a-z0-9_-]+$",
+          "default": "sample",
+          "x-class": "public",
+          "description": "The service's name. Lowercase letters, digits, - and _. Default: \"sample\"."
+        },
+        "tag": {
+          "type": "string",
+          "x-template": "1.0.0",
+          "x-class": "public",
+          "description": "The release to run, such as \"1.0.0\". Required."
+        },
+        "registry": {
+          "type": "string",
+          "default": "",
+          "x-blank": "if you load the release from a file",
+          "x-class": "private",
+          "description": "The registry to pull the release from, such as \"registry.example.com/my-team\". Leave blank if you load the release from a file."
+        }
+      }
+    },
+    "host": {
+      "type": "object",
+      "title": "Host",
+      "description": "how much of this host the service may use.",
+      "x-class": "public",
+      "additionalProperties": false,
+      "properties": {
+        "cpus": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 8,
+          "default": 4,
+          "x-class": "public",
+          "description": "The number of CPUs the service may use, from {minimum} to {maximum}. Default: 4."
+        },
+        "user_id": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 1000,
+          "default": null,
+          "x-default-means": "your own user id on this host",
+          "x-class": "public",
+          "description": "The user id to run as, 1000 or more. Default: null, which means your own user id on this host."
+        },
+        "share": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "default": 0.5,
+          "x-class": "public",
+          "description": "The share of this host's memory the service may use, from {minimum} to {maximum}. Default: 0.5."
+        }
+      }
+    },
+    "tool": {
+      "type": "object",
+      "title": "Tool",
+      "description": "a tool the service installs.",
+      "x-class": "public",
+      "additionalProperties": false,
+      "properties": {
+        "version": {
+          "type": "string",
+          "default": "",
+          "x-blank": "for the newest release",
+          "x-class": "public",
+          "description": "The tool's version, in quotes, such as \"7.10\". Leave blank for the newest release."
+        },
+        "package_sha256": {
+          "type": "string",
+          "pattern": "^([0-9a-f]{64})?$",
+          "default": "",
+          "x-blank": "to skip the check",
+          "x-class": "public",
+          "description": "The package's SHA-256 checksum: 64 hex digits, in quotes. Leave blank to skip the check."
+        }
+      }
+    },
+    "repository": {
+      "type": "object",
+      "title": "Repository",
+      "description": "the repository the service watches.",
+      "x-class": "private",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "labels"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "pattern": "^[^/\\s]+/[^/\\s]+$",
+          "x-template": "<org>/<repo>",
+          "x-source": "the repository's name, as <org>/<repo>",
+          "x-class": "private",
+          "description": "The repository, as <org>/<repo>. Example: \"my-org/my-repo\". Required."
+        },
+        "labels": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "x-template": [
+            "<label>"
+          ],
+          "x-class": "private",
+          "description": "The labels that put a pull request in scope. Example: [\"my-project\"]. Required."
+        },
+        "folders": {
+          "type": "object",
+          "propertyNames": {
+            "pattern": "^[A-Za-z0-9._-]+$"
+          },
+          "additionalProperties": {
+            "type": "string"
+          },
+          "default": {},
+          "x-class": "private",
+          "description": "Labels that several teams share, each with a folder. Write each one as \"label\": \"folder\". Default: none."
+        }
+      }
+    },
+    "features": {
+      "type": "object",
+      "title": "Features",
+      "description": "what the service does. Each feature that posts has a mode:\n  \"prototype\": it shows you its work, but posts nothing.\n  \"live\": it posts.",
+      "x-class": "public",
+      "additionalProperties": false,
+      "required": [
+        "reviews",
+        "queue"
+      ],
+      "properties": {
+        "reviews": {
+          "type": "object",
+          "title": "Reviews",
+          "description": "the service reviews each new pull request.",
+          "x-class": "public",
+          "additionalProperties": false,
+          "required": [
+            "enabled"
+          ],
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "x-template": true,
+              "x-class": "public",
+              "description": "true: review pull requests. false: no reviews. Required."
+            },
+            "mode": {
+              "type": "string",
+              "enum": [
+                "prototype",
+                "live"
+              ],
+              "x-template": "prototype",
+              "x-required-when": "reviews are on",
+              "x-class": "public",
+              "description": "\"prototype\": reviews are shown to you, not posted. \"live\": reviews are posted. Required when reviews are on."
+            },
+            "reviewer_name": {
+              "type": "string",
+              "default": "",
+              "x-blank": "to use the service's name",
+              "x-class": "private",
+              "description": "The name at the top of each review. Leave blank to use the service's name."
+            },
+            "effort": {
+              "type": "string",
+              "enum": [
+                "low",
+                "medium",
+                "high"
+              ],
+              "default": "high",
+              "x-class": "public",
+              "description": "How hard the reviewer thinks: \"low\", \"medium\" or \"high\". Default: \"high\"."
+            }
+          }
+        },
+        "queue": {
+          "type": "object",
+          "title": "Queue",
+          "description": "the merge queue.",
+          "x-class": "public",
+          "additionalProperties": false,
+          "required": [
+            "enabled"
+          ],
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "x-template": true,
+              "x-class": "public",
+              "description": "true: run the merge queue. false: no merge queue. Required."
+            },
+            "mode": {
+              "type": "string",
+              "enum": [
+                "prototype",
+                "live"
+              ],
+              "x-template": "prototype",
+              "x-required-when": "the queue is on",
+              "x-class": "public",
+              "description": "\"prototype\": the queue is shown to you. \"live\": the queue merges. Required when the queue is on."
+            },
+            "notices": {
+              "type": "object",
+              "title": "Notices",
+              "description": "a comment on each pull request near the front of the queue.",
+              "x-class": "public",
+              "additionalProperties": false,
+              "properties": {
+                "enabled": {
+                  "type": "boolean",
+                  "x-template": false,
+                  "x-required-when": "the queue is on",
+                  "x-class": "public",
+                  "description": "true: post them. false: none. Required when the queue is on."
+                },
+                "every_minutes": {
+                  "type": "integer",
+                  "minimum": 5,
+                  "default": 30,
+                  "x-class": "public",
+                  "description": "Minutes between two updates of a notice, {minimum} or more. Default: 30."
+                },
+                "page_url": {
+                  "type": "string",
+                  "default": "",
+                  "x-required-when": "the queue is live",
+                  "x-blank": "to link no page",
+                  "x-class": "private",
+                  "description": "The page the notices link to. Example: \"https://dashboards.example.com/my-team/\". Required when the queue is live. Otherwise, leave blank to link no page."
+                },
+                "post_as": {
+                  "type": "string",
+                  "enum": [
+                    "comment",
+                    "status"
+                  ],
+                  "default": "comment",
+                  "x-chooses": true,
+                  "x-class": "public",
+                  "description": "How a notice is posted: \"comment\" (a comment on the pull request) or \"status\" (a commit status). Default: \"comment\"."
+                },
+                "comment": {
+                  "type": "object",
+                  "title": "Comment",
+                  "description": "the comment's own words.",
+                  "x-class": "public",
+                  "additionalProperties": false,
+                  "properties": {
+                    "header": {
+                      "type": "string",
+                      "default": "",
+                      "x-blank": "for no header",
+                      "x-class": "public",
+                      "description": "A line at the top of each comment. Leave blank for no header."
+                    }
+                  }
+                },
+                "status": {
+                  "type": "object",
+                  "title": "Status",
+                  "description": "use this block instead of comment when post_as is \"status\".",
+                  "x-class": "public",
+                  "additionalProperties": false,
+                  "properties": {
+                    "context": {
+                      "type": "string",
+                      "default": "sample/queue",
+                      "x-class": "public",
+                      "description": "The status's name on the pull request. Default: \"sample/queue\"."
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "integrations": {
+      "type": "object",
+      "title": "Integrations",
+      "description": "the systems the service talks to.",
+      "x-class": "public",
+      "additionalProperties": false,
+      "properties": {
+        "tracker": {
+          "type": "object",
+          "title": "Tracker",
+          "description": "the issue tracker the reviews link to.",
+          "x-used-by": [
+            "features.reviews"
+          ],
+          "x-off-reason": "reviews are off",
+          "x-class": "public",
+          "additionalProperties": false,
+          "properties": {
+            "project": {
+              "type": "string",
+              "x-template": "<PROJECT>",
+              "x-required-when": "reviews are on",
+              "x-source": "your tracker's project key, such as \"SAMPLE\"",
+              "x-class": "private",
+              "description": "The tracker's project key. Required when reviews are on."
+            },
+            "address": {
+              "type": "string",
+              "default": "",
+              "x-blank": "for no links",
+              "x-class": "private",
+              "description": "The tracker's address. Example: \"https://tracker.example.com\". Leave blank for no links."
+            }
+          }
+        }
+      }
+    },
+    "bindings": {
+      "type": "object",
+      "title": "Bindings",
+      "propertyNames": {
+        "pattern": "^[a-z][a-z0-9_]*$",
+        "x-template": "<name>"
+      },
+      "additionalProperties": {
+        "$ref": "#/$defs/binding"
+      },
+      "default": {},
+      "x-used-by": [
+        "features.reviews"
+      ],
+      "x-off-reason": "reviews are off",
+      "x-class": "private",
+      "description": "other models the reviews can use, each under a name you choose. Default: none."
+    }
+  },
+  "$defs": {
+    "binding": {
+      "oneOf": [
+        {
+          "type": "object",
+          "description": "A model behind a gateway.",
+          "additionalProperties": false,
+          "required": [
+            "provider",
+            "address"
+          ],
+          "properties": {
+            "provider": {
+              "const": "gateway",
+              "x-class": "public",
+              "description": "\"gateway\": a model behind a gateway. Required."
+            },
+            "address": {
+              "type": "string",
+              "x-template": "<url>",
+              "x-class": "private",
+              "description": "The gateway's address. Required."
+            },
+            "api_key_secret_name": {
+              "type": "string",
+              "default": "",
+              "x-blank": "for a gateway that takes no key",
+              "x-secret-ref": true,
+              "x-class": "public",
+              "description": "The name of the secret that holds the gateway's key. Leave blank for a gateway that takes no key."
+            }
+          }
+        },
+        {
+          "type": "object",
+          "description": "A model on this host.",
+          "additionalProperties": false,
+          "required": [
+            "provider",
+            "port"
+          ],
+          "properties": {
+            "provider": {
+              "const": "local",
+              "x-class": "public",
+              "description": "\"local\": a model on this host. Required."
+            },
+            "port": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 65535,
+              "x-template": 8080,
+              "x-class": "public",
+              "description": "The port the model listens on. Required."
+            }
+          }
+        }
+      ]
+    }
+  }
+}

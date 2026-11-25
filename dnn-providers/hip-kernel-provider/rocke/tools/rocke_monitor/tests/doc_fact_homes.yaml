@@ -1,0 +1,92 @@
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+#
+# The procedures and facts written once, each with its home and its signatures, which
+# tools/doc_lints.py's homes lint reads. home: the fact's doc, by its path in the package; section: the heading in it
+# the fact is under (none: the whole doc); help: when the home is a command's help (home: rkmon_lib/commands.py), the
+# command's words after the program's name, which a copy's problem line names as `rkmon <help> --help`;
+# signatures: regular expressions, each matching words of the
+# fact that may appear nowhere but in its home. The lint reads every place a copy could hide: the docs, the help, the
+# printed messages, the schema descriptions and the skill files. A copy names the home to link instead; another home
+# may name the commands a procedure shares, but not repeat the procedure. A generated section is no copy: it is made
+# from its source (tools/generated.py). A home the lint reads has its section and a match of each signature.
+
+change_a_setting:
+  home: QUICK_USER_GUIDE.md
+  section: Change a setting
+  signatures:
+    - 'never `?docker/\.env'
+    - '\| You change \| It applies \|'
+
+turn_on_a_feature:
+  home: QUICK_USER_GUIDE.md
+  section: Turn on a feature
+  signatures:
+    - 'paste it over the section in your file'
+
+go_live:
+  home: QUICK_USER_GUIDE.md
+  section: Go live
+  signatures:
+    - 'one feature live at a time'
+
+first_day:
+  home: QUICK_USER_GUIDE.md
+  section: Your first day
+  signatures:
+    - 'first ticks queue'
+
+standby:
+  home: QUICK_USER_GUIDE.md
+  section: Standby
+  signatures:
+    - 'the monitor you moved from has stopped'
+
+stop_levels:
+  home: docs/restart.md
+  section: The four stop levels
+  signatures:
+    - '\| Level \| Command \|'
+
+machine_sizing:
+  home: QUICK_DEPLOY_GUIDE.md
+  section: Machine sizing
+  signatures:
+    - 'memory_gib.*ramdisk_gib.*(plus|\+) \d+'
+
+what_goes_out:
+  home: README.md
+  section: Prototype, live and standby
+  signatures:
+    - '\| What \| Prototype \| Live \| Standby \|'
+
+admin_dashboard_tunnel:
+  home: README.md
+  section: The admin dashboard
+  signatures:
+    - 'ssh -L'
+
+several_deployments:
+  home: QUICK_DEPLOY_GUIDE.md
+  section: Several deployments
+  signatures:
+    - 'do not know of each other'
+
+moving:
+  home: QUICK_DEPLOY_GUIDE.md
+  section: Moving from an existing monitor
+  signatures:
+    - 'settings export >'
+
+doc_map:
+  home: README.md
+  signatures:
+    - '\| Doc \| Reader \| Its one job \|'
+
+# The network each stage of the image test runs on: `rkmon image test --help`.
+image_test_network:
+  home: rkmon_lib/commands.py
+  help: image test
+  signatures:
+    - 'containers with no network, except'
+    - 'reaches only stand-ins'

@@ -1,0 +1,15 @@
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+#
+# The places where tools/doc_lints.py's keys lint reads no key: files that name, on purpose, keys
+# that no settings file has. allowed: each place a mapping as tests/doc_words.yaml says (files, kind, section, keep and
+# why), files and why required; there, the lint reads only the text keep does not match, and nothing when there is no
+# keep.
+
+allowed:
+  - files: 'rkmon_lib/from_layout1\.py'
+    why: layout 1's step to layout 2 (rkmon migrate), whose notes name layout 1's keys on purpose
+  - files: 'tools/translate_production\.py'
+    why: the translation of layout 1's configuration (production's config.json), whose report names its keys on purpose
+  - files: 'schema/layout1/deploy_settings\.schema\.json'
+    why: layout 1's deploy settings schema, whose descriptions name layout 1's keys

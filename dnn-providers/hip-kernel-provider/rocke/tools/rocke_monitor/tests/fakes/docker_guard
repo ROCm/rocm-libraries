@@ -1,0 +1,578 @@
+#!/usr/bin/env python3
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+"""docker as a fresh machine shows it, for the image test's deploy-path stage (tests/container/stage_deploy_path.py).
+The stage puts this guard first on the PATH of each rkmon command it runs, so every docker command of the deploy path
+passes through it. It passes a command on to the real engine only when the command acts on the stage's own objects
+(those whose names begin with its scope) and on the images it names. It narrows every listing to them. It refuses any
+other command with exit 125 and a line on stderr, and never passes it on.
+
+    docker_guard CONFIG ARG...
+
+CONFIG is a JSON file: {"engine": the real engine's path, "scope": the names' beginning, "images": [the images it may
+use], "network": the stage's network, "log": the file each call is logged to}. Each call is a JSON line there: its
+arguments as given, and as passed on when the guard changed them, the folder it ran in, the command the guard read
+(`compose stop`, `volume ls`, and ps for `container ls` too), the guard's verdict (pass, narrowed, placed or refused)
+and why, and what it names: each container, volume, network, compose project, image or other object, and each name a
+listing filters on, by its kind.
+
+Passed on:
+- the engine's own questions: version, info, `buildx version`, `compose version`;
+- a listing (ps, `container ls`, images, `image ls`, `volume ls`, `network ls`, `compose ls`), narrowed to the scope
+  by a filter of its own, which docker joins to the listing's own: on a name, one anchored at the scope (docker reads
+  a name filter as a pattern that may match any part of a name); on an image, its reference. A listing that already
+  filters on that key passes as it is when each of its own values is the stage's (a name filter anchored on a name in
+  the scope, `^NAME` or `^NAME$`; an image the config names), and is refused otherwise;
+- a command on containers, volumes, networks or images (exec, inspect, cp, logs, stop, rm, the `volume`, `network`
+  and `image` ones, ...) whose every object is the stage's: a container by a name in the scope or by the ID of one of
+  them, a volume or network in the scope, an image the config names;
+- `run` and `create` of an image the config names, on a network in the scope or none, with only the scope's volumes,
+  and a --pull, if any, of never; one that names no network is placed on the stage's network, which reaches nothing
+  outside this host, in place of the engine's default one, which does;
+- a compose command whose project is in the scope, the project as compose resolves it: -p, then
+  COMPOSE_PROJECT_NAME, then the project folder's .env, then the compose file's name, then the folder's name; but
+  not `compose pull`, `push` or `build`, nor one whose words hold --build, or a --pull other than never.
+Everything else is refused: pull, push, login, build, tag, prune, events, system and builder commands, and any
+argument the guard cannot read. An image never comes from outside this host, whatever the network of the container
+that runs it, and never leaves it.
+"""
+
+import json
+import os
+import re
+import subprocess
+import sys
+import time
+
+REFUSED = 125
+
+# Options that take a value, and flags, of the commands the guard reads (a short one as "-x"); an option outside these
+# is one the guard cannot read, so its command is refused.
+RUN_VALUES = frozenset(
+    "--name --network --net -v --volume --mount -e --env --env-file --entrypoint -u --user -w --workdir --cap-add "
+    "--cap-drop --pids-limit -m --memory --memory-swap --cpus --security-opt --tmpfs -l --label --ulimit --group-add "
+    "-h --hostname --network-alias --stop-timeout --stop-signal --log-driver --log-opt --restart --shm-size "
+    "--platform --pull -p --publish --expose --sysctl --health-cmd --health-interval --health-timeout "
+    "--health-retries --health-start-period --cidfile".split()
+)
+RUN_FLAGS = frozenset(
+    "--rm -i --interactive -t --tty -d --detach --init --read-only -q --quiet --no-healthcheck".split()
+)
+EXEC_VALUES = frozenset("-u --user -e --env --env-file -w --workdir".split())
+EXEC_FLAGS = frozenset("-i --interactive -t --tty -d --detach".split())
+LOGS_VALUES = frozenset("--tail -n --since --until".split())
+LOGS_FLAGS = frozenset("-f --follow -t --timestamps --details".split())
+INSPECT_VALUES = frozenset("-f --format --type".split())
+INSPECT_FLAGS = frozenset("-s --size".split())
+LIST_VALUES = frozenset("-f --filter --format -n --last".split())
+LIST_FLAGS = frozenset(
+    "-a --all -q --quiet --no-trunc -s --size -l --latest --digests".split()
+)
+CP_FLAGS = frozenset("-a --archive -L --follow-link -q --quiet".split())
+# Commands on containers named by their positional words, with their options.
+ON_CONTAINERS = {
+    "stop": (frozenset("-t --time -s --signal".split()), frozenset()),
+    "start": (frozenset(), frozenset("-a --attach -i --interactive".split())),
+    "restart": (frozenset("-t --time -s --signal".split()), frozenset()),
+    "kill": (frozenset("-s --signal".split()), frozenset()),
+    "rm": (frozenset(), frozenset("-f --force -v --volumes".split())),
+    "wait": (frozenset(), frozenset()),
+    "port": (frozenset(), frozenset()),
+    "pause": (frozenset(), frozenset()),
+    "unpause": (frozenset(), frozenset()),
+    "diff": (frozenset(), frozenset()),
+    "stats": (
+        frozenset(["--format"]),
+        frozenset("-a --all --no-stream --no-trunc".split()),
+    ),
+}
+COMPOSE_VALUES = frozenset(
+    "-p --project-name -f --file --project-directory --env-file --profile --ansi --progress --parallel".split()
+)
+COMPOSE_FLAGS = frozenset("--compatibility --dry-run --all-resources".split())
+COMPOSE_FILES = (
+    "compose.yaml",
+    "compose.yml",
+    "docker-compose.yaml",
+    "docker-compose.yml",
+)
+# The compose commands that pull, push or build an image.
+COMPOSE_IMAGES = frozenset(["pull", "push", "build"])
+# The characters a name filter's pattern reads as more than themselves (Go's regexp.QuoteMeta).
+PATTERN_CHARS = frozenset("\\.+*?()|[]{}^$")
+
+
+class Refused(Exception):
+    """A command the guard does not pass on, and why."""
+
+
+def anchored(name: str) -> str:
+    """A name filter's value that matches each name that begins with NAME, and no other."""
+    return "^" + "".join("\\" + c if c in PATTERN_CHARS else c for c in name)
+
+
+def anchored_name(value: str) -> str:
+    """The name each match of the name filter VALUE begins with, when VALUE is anchored at a name's start: ^NAME, or
+    ^NAME$ for that name alone, a container's name with its leading slash or without, each pattern character escaped;
+    "" for any other filter, which may match a part of a name anywhere in it."""
+    m = re.fullmatch(r"\^/?((?:[A-Za-z0-9_-]|\\[^A-Za-z0-9_])+)\$?", value)
+    return re.sub(r"\\(.)", r"\1", m.group(1)) if m else ""
+
+
+def refuse_pull(what: str, value: str) -> None:
+    """Refused: WHAT with --pull VALUE, unless VALUE is never: the engine pulls from outside this host, whatever the
+    network of the container it runs."""
+    if value != "never":
+        raise Refused(
+            f"{what} --pull {value}: only never, as images come from this host alone"
+        )
+
+
+def refuse_pulls(what: str, words: list) -> None:
+    """Refused: WHAT, a compose command, when any of its words WORDS builds (--build), which may fetch from outside
+    this host, or pulls (--pull other than never)."""
+    for i, word in enumerate(words):
+        name, eq, value = word.partition("=")
+        if name == "--build":
+            raise Refused(f"{what} --build: a build may fetch from outside this host")
+        if name == "--pull":
+            refuse_pull(what, value if eq else (words[i + 1 : i + 2] or [""])[0])
+
+
+def options(args: list, values: frozenset, flags: frozenset, stop: bool) -> tuple:
+    """(the options, as (name, value) pairs, a flag's value None; the positional words) of ARGS, a command's words
+    after its name. STOP: options end at the first positional word (run, create and exec: the rest is the container's
+    command). An option outside VALUES and FLAGS cannot be read: Refused."""
+    opts, words, i = [], [], 0
+    while i < len(args):
+        a = args[i]
+        if a == "--":
+            words += args[i + 1 :]
+            break
+        if not a.startswith("-") or a == "-":
+            words.append(a)
+            if stop:
+                words += args[i + 1 :]
+                break
+            i += 1
+            continue
+        name, eq, value = a.partition("=")
+        if a.startswith("--") and eq:
+            if name not in values:
+                raise Refused(f"an option the guard cannot read: {name}")
+            opts.append((name, value))
+        elif a in values:
+            if i + 1 >= len(args):
+                raise Refused(f"{a} without its value")
+            opts.append((a, args[i + 1]))
+            i += 1
+        elif a in flags:
+            opts.append((a, None))
+        elif not a.startswith("--") and len(a) > 2:
+            # short flags together (-it), or a short option with its value attached (-uroot)
+            if f"-{a[1]}" in values:
+                opts.append((f"-{a[1]}", a[2:]))
+            elif all(f"-{c}" in flags for c in a[1:]):
+                opts += [(f"-{c}", None) for c in a[1:]]
+            else:
+                raise Refused(f"an option the guard cannot read: {a}")
+        else:
+            raise Refused(f"an option the guard cannot read: {a}")
+        i += 1
+    return opts, words
+
+
+class Guard:
+    def __init__(self, config: dict):
+        self.engine = config["engine"]
+        self.scope = config["scope"]
+        self.images = list(config.get("images") or [])
+        self.network = config["network"]
+        self.log_path = config.get("log") or ""
+        self._ids = None
+        self._image_ids = None
+        # [kind, word] of each object the command names, as the log shows them
+        self.names = []
+        # the command the guard read, as the log shows it
+        self.command = ""
+
+    # --- whose an object is ---------------------------------------------------------------------------------------
+    def in_scope(self, name: str) -> bool:
+        return name.lstrip("/").startswith(self.scope)
+
+    def note(self, kind: str, word: str) -> None:
+        if [kind, word] not in self.names:
+            self.names.append([kind, word])
+
+    def note_filters(self, opts: list) -> None:
+        """What a listing's own filters name: a name (docker matches it in any name), a compose project (by its
+        label), any other label, a volume, a network or an image (reference)."""
+        for n, v in opts:
+            if n not in ("-f", "--filter"):
+                continue
+            key, _eq, value = str(v).partition("=")
+            if key == "label" and value.startswith("com.docker.compose.project="):
+                self.note("project", value.partition("=")[2])
+            elif key in ("name", "volume", "network", "label"):
+                self.note(key, value)
+            elif key == "reference":
+                self.note("image", value)
+
+    def container_ids(self) -> list:
+        """The full IDs of the scope's containers, asked once (a listing narrowed to the scope)."""
+        if self._ids is None:
+            p = subprocess.run(
+                [
+                    self.engine,
+                    "ps",
+                    "-a",
+                    "-q",
+                    "--no-trunc",
+                    "--filter",
+                    f"name={anchored(self.scope)}",
+                ],
+                capture_output=True,
+                text=True,
+            )
+            self._ids = p.stdout.split() if p.returncode == 0 else []
+        return self._ids
+
+    def image_ids(self) -> list:
+        if self._image_ids is None:
+            self._image_ids = []
+            for ref in self.images:
+                p = subprocess.run(
+                    [self.engine, "image", "inspect", "--format", "{{.Id}}", ref],
+                    capture_output=True,
+                    text=True,
+                )
+                if p.returncode == 0:
+                    self._image_ids.append(p.stdout.strip())
+        return self._image_ids
+
+    def container(self, word: str, note: bool = True) -> None:
+        name = word.lstrip("/")
+        if note:
+            self.note("container", name)
+        if self.in_scope(name):
+            return
+        if re.fullmatch(r"[0-9a-f]{12,64}", name) and any(
+            i.startswith(name) for i in self.container_ids()
+        ):
+            return
+        raise Refused(f"a container outside {self.scope}*: {word}")
+
+    def image(self, word: str, note: bool = True) -> None:
+        if note:
+            self.note("image", word)
+        if word in self.images:
+            return
+        bare = word[len("sha256:") :] if word.startswith("sha256:") else word
+        if re.fullmatch(r"[0-9a-f]{12,64}", bare) and any(
+            i.removeprefix("sha256:").startswith(bare) for i in self.image_ids()
+        ):
+            return
+        raise Refused(f"an image the stage does not name: {word}")
+
+    def named(self, what: str, word: str, note: bool = True) -> None:
+        """WORD, a WHAT (a volume, a network, a container's name), is in the scope."""
+        if note:
+            self.note({"container name": "container"}.get(what, what), word)
+        if not self.in_scope(word):
+            raise Refused(f"a {what} outside {self.scope}*: {word}")
+
+    def any_object(self, word: str) -> None:
+        """A word `docker inspect` takes: a container, an image, a volume or a network of the stage's."""
+        self.note("object", word)
+        for check in (self.container, self.image):
+            try:
+                check(word, note=False)
+                return
+            except Refused:
+                pass
+        self.named("container, image, volume or network", word, note=False)
+
+    # --- the commands ------------------------------------------------------------------------------------------------
+    def narrowed(self, args: list, opts: list, key: str) -> list:
+        """ARGS with the guard's own filter on KEY: on a name, one anchored at the scope (`anchored`); on a reference,
+        one for each image the config names. A listing that filters on KEY itself is passed as it is when each of its
+        values is the stage's (the module's docstring), and refused otherwise: docker would join its filter and the
+        guard's with or."""
+        self.note_filters(opts)
+        own = [
+            v
+            for n, (k, _eq, v) in ((n, str(v).partition("=")) for n, v in opts)
+            if n in ("-f", "--filter") and k == key
+        ]
+        for v in own:
+            ok = self.in_scope(anchored_name(v)) if key == "name" else v in self.images
+            if not ok:
+                raise Refused(f"a listing that filters on {key} outside the scope: {v}")
+        if own:
+            return args
+        extra = []
+        for v in [anchored(self.scope)] if key == "name" else self.images:
+            extra += ["--filter", f"{key}={v}"]
+        return args + extra
+
+    def run_or_create(self, args: list) -> tuple:
+        """(ARGS, pass) for a run or create of the stage's; (ARGS on the stage's network, placed) for one that names
+        no network."""
+        opts, words = options(args[1:], RUN_VALUES, RUN_FLAGS, stop=True)
+        if not words:
+            raise Refused(f"{args[0]} without an image")
+        self.image(words[0])
+        network = None
+        for name, value in opts:
+            if name == "--name":
+                self.named("container name", value)
+            elif name == "--pull":
+                refuse_pull(args[0], value)
+            elif name in ("--network", "--net"):
+                network = value
+                if value != "none":
+                    self.named("network", value)
+            elif name in ("-v", "--volume"):
+                source = value.split(":", 1)[0] if ":" in value else ""
+                if source and not source.startswith(("/", ".", "~")):
+                    self.named("volume", source)
+            elif name == "--mount":
+                fields = dict(
+                    f.split("=", 1) if "=" in f else (f, "") for f in value.split(",")
+                )
+                kind = fields.get("type", "volume")
+                source = fields.get("source") or fields.get("src") or ""
+                if kind == "volume" and source:
+                    self.named("volume", source)
+        if network is None:
+            return [args[0], "--network", self.network, *args[1:]], "placed"
+        return args, "pass"
+
+    def compose_project(self, opts: list, environ: dict) -> str:
+        """The compose project, as compose resolves it from these options, the environment, .env and the file."""
+        given = dict(opts)
+        files = [v for n, v in opts if n in ("-f", "--file")]
+        name = given.get("-p") or given.get("--project-name")
+        if name:
+            return name
+        if environ.get("COMPOSE_PROJECT_NAME"):
+            return environ["COMPOSE_PROJECT_NAME"]
+        folder = given.get("--project-directory") or (
+            os.path.dirname(os.path.abspath(files[0])) if files else os.getcwd()
+        )
+        env_file = given.get("--env-file") or os.path.join(folder, ".env")
+        try:
+            with open(env_file, encoding="utf-8") as f:
+                for line in f:
+                    k, eq, v = line.strip().partition("=")
+                    if eq and k.strip() == "COMPOSE_PROJECT_NAME":
+                        return v.strip().strip("'\"")
+        except OSError:
+            pass
+        if not files:
+            found = [
+                n for n in COMPOSE_FILES if os.path.isfile(os.path.join(folder, n))
+            ]
+            stem = found[0].rsplit(".", 1) if found else []
+            override = f"{stem[0]}.override.{stem[1]}" if stem else ""
+            files = [os.path.join(folder, n) for n in found[:1] + [override] if n]
+        top = ""
+        for path in files:  # compose merges them in order: the last top-level name wins
+            try:
+                with open(path, encoding="utf-8") as f:
+                    for line in f:
+                        m = re.match(r"name:\s*['\"]?([^'\"\s#]+)", line)
+                        if m:
+                            top = m.group(1)
+            except OSError:
+                continue
+        return top or os.path.basename(folder).lower()
+
+    def check(self, args: list, environ: dict) -> tuple:
+        """(the arguments to pass on, the verdict: pass, narrowed or placed); Refused for any other command."""
+        if not args:
+            raise Refused("no command")
+        if args[0].startswith("-"):
+            raise Refused(f"an option before the command: {args[0]}")
+        cmd, rest = args[0], args[1:]
+        self.command = cmd
+        if cmd in ("container", "image", "volume", "network") and rest:
+            sub = rest[0]
+            self.command = f"{cmd} {sub}"
+            if cmd == "container":
+                sub = {"ls": "ps", "list": "ps"}.get(sub, sub)
+                return self.check([sub, *rest[1:]], environ)
+            if sub in ("ls", "list"):
+                opts, _ = options(rest[1:], LIST_VALUES, LIST_FLAGS, stop=False)
+                key = "reference" if cmd == "image" else "name"
+                return self.narrowed(args, opts, key), "narrowed"
+            if "prune" in rest:
+                raise Refused(f"{cmd} prune")
+            if cmd == "image":
+                if sub in ("inspect", "rm", "history"):
+                    _, words = options(
+                        rest[1:],
+                        INSPECT_VALUES,
+                        INSPECT_FLAGS | {"-f", "--force"},
+                        stop=False,
+                    )
+                    for w in words:
+                        self.image(w)
+                    return args, "pass"
+                raise Refused(f"image {sub}")
+            if sub in ("inspect", "rm", "create"):
+                _, words = options(
+                    rest[1:],
+                    INSPECT_VALUES
+                    | {"--label", "--driver", "-d", "-o", "--opt", "--internal"},
+                    INSPECT_FLAGS | {"-f", "--force", "--internal"},
+                    stop=False,
+                )
+                for w in words:
+                    self.named(cmd, w)
+                return args, "pass"
+            if cmd == "network" and sub in ("connect", "disconnect"):
+                _, words = options(
+                    rest[1:],
+                    frozenset("--alias --ip --ip6 --link --driver-opt".split()),
+                    frozenset(["-f", "--force"]),
+                    stop=False,
+                )
+                if len(words) != 2:
+                    raise Refused(f"network {sub} without a network and a container")
+                self.named("network", words[0])
+                self.container(words[1])
+                return args, "pass"
+            raise Refused(f"{cmd} {sub}")
+        if cmd in ("version", "info"):
+            return args, "pass"
+        if cmd == "buildx" and rest[:1] == ["version"]:
+            return args, "pass"
+        if cmd == "ps":
+            opts, _ = options(rest, LIST_VALUES, LIST_FLAGS, stop=False)
+            return self.narrowed(args, opts, "name"), "narrowed"
+        if cmd == "images":
+            opts, words = options(rest, LIST_VALUES, LIST_FLAGS, stop=False)
+            return self.narrowed(args, opts, "reference"), "narrowed"
+        if cmd in ("run", "create"):
+            return self.run_or_create(args)
+        if cmd == "exec":
+            _, words = options(rest, EXEC_VALUES, EXEC_FLAGS, stop=True)
+            if not words:
+                raise Refused("exec without a container")
+            self.container(words[0])
+            return args, "pass"
+        if cmd == "logs":
+            _, words = options(rest, LOGS_VALUES, LOGS_FLAGS, stop=False)
+            for w in words:
+                self.container(w)
+            return args, "pass"
+        if cmd == "inspect":
+            opts, words = options(rest, INSPECT_VALUES, INSPECT_FLAGS, stop=False)
+            kind = dict(opts).get("--type", "")
+            for w in words:
+                {
+                    "container": self.container,
+                    "image": self.image,
+                    "volume": lambda x: self.named("volume", x),
+                    "network": lambda x: self.named("network", x),
+                }.get(kind, self.any_object)(w)
+            return args, "pass"
+        if cmd == "cp":
+            _, words = options(rest, frozenset(), CP_FLAGS, stop=False)
+            ends = [w for w in words if ":" in w and not w.startswith(("/", ".", "~"))]
+            if len(words) != 2 or len(ends) != 1:
+                raise Refused("cp between a container of the stage's and this host")
+            self.container(ends[0].split(":", 1)[0])
+            return args, "pass"
+        if cmd == "top":
+            words = [w for w in rest if not w.startswith("-")]
+            if not words:
+                raise Refused("top without a container")
+            self.container(words[0])
+            return args, "pass"
+        if cmd in ON_CONTAINERS:
+            values, flags = ON_CONTAINERS[cmd]
+            _, words = options(rest, values, flags, stop=False)
+            if not words:
+                raise Refused(f"{cmd} without a container")
+            for w in words:
+                self.container(w)
+            return args, "pass"
+        if cmd == "rmi":
+            _, words = options(
+                rest, frozenset(), frozenset(["-f", "--force"]), stop=False
+            )
+            for w in words:
+                self.image(w)
+            return args, "pass"
+        if cmd == "compose":
+            opts, words = options(rest, COMPOSE_VALUES, COMPOSE_FLAGS, stop=True)
+            sub = words[0] if words else ""
+            self.command = f"compose {sub}".strip()
+            if sub == "version":
+                return args, "pass"
+            if sub == "ls":
+                lopts, _ = options(
+                    words[1:],
+                    frozenset("--filter --format".split()),
+                    frozenset("-a --all -q --quiet".split()),
+                    stop=False,
+                )
+                return self.narrowed(args, lopts, "name"), "narrowed"
+            if sub in COMPOSE_IMAGES:
+                raise Refused(
+                    f"compose {sub}: images neither come from outside this host nor leave it"
+                )
+            refuse_pulls(f"compose {sub}", words[1:])
+            project = self.compose_project(opts, environ)
+            self.note("project", project)
+            if not self.in_scope(project):
+                raise Refused(
+                    f"a compose command of the project {project!r}, outside {self.scope}*"
+                )
+            return args, "pass"
+        raise Refused(f"the command {cmd}")
+
+    def log(self, args: list, passed, verdict: str, why: str = "") -> None:
+        """The call's line in the log: ARGS as given, PASSED as passed on when the guard changed them."""
+        if not self.log_path:
+            return
+        line = {
+            "t": round(time.time(), 3),
+            "argv": args,
+            "cwd": os.getcwd(),
+            "command": self.command,
+            "verdict": verdict,
+        }
+        if passed is not None and passed != args:
+            line["passed"] = passed
+        if why:
+            line["why"] = why
+        if self.names:
+            line["names"] = self.names
+        with open(self.log_path, "a", encoding="utf-8") as f:
+            f.write(json.dumps(line) + "\n")
+
+
+def main(argv: list) -> int:
+    if not argv:
+        print("usage: docker_guard CONFIG ARG...", file=sys.stderr)
+        return 2
+    with open(argv[0], encoding="utf-8") as f:
+        guard = Guard(json.load(f))
+    args = argv[1:]
+    try:
+        passed, verdict = guard.check(args, dict(os.environ))
+    except Refused as exc:
+        guard.log(args, None, "refused", str(exc))
+        print(f"docker guard: refused: {exc}", file=sys.stderr)
+        return REFUSED
+    guard.log(args, passed, verdict)
+    sys.stdout.flush()
+    os.execv(guard.engine, [guard.engine, *passed])
+    return REFUSED  # not reached
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

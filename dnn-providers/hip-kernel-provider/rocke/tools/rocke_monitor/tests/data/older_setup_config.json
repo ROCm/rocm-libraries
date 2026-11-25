@@ -1,0 +1,443 @@
+{
+  "admin_dashboard": {
+    "access_token_file": "",
+    "bind": "127.0.0.1",
+    "port": 18613,
+    "public_port": 18614,
+    "url": ""
+  },
+  "analysis_max_wait_min": 90,
+  "atlassian": {
+    "proxy_url": "",
+    "site": ""
+  },
+  "automerge_guard_own": false,
+  "autopilot_max_lines": 30000,
+  "base_branch": "",
+  "checks": {
+    "limit": 1,
+    "min_free_memory_gb": 16
+  },
+  "ci_absent_modules": [],
+  "ci_infra_signatures": [
+    {
+      "note": "the runner lost its connection to the server",
+      "pattern": "The runner has received a shutdown signal"
+    }
+  ],
+  "ci_infra_site_signatures": [],
+  "ci_test_tiers": [],
+  "ci_times": {
+    "budget_s": 90,
+    "days": 8,
+    "every_min": 60,
+    "job_min_s": 600,
+    "jobs_runs": 2,
+    "max_calls": 30,
+    "weekly_calls": 150
+  },
+  "clashes": {},
+  "claude": {
+    "auto_compact_window": 300000,
+    "effort": "high",
+    "gateway": "",
+    "prompt_cache_ttl": "1h",
+    "subagent_prompt_cache_ttl": "5m",
+    "tick_min": 10
+  },
+  "claude_workspace": "",
+  "clone_since": "",
+  "clone_url": "",
+  "codeowner_org": "",
+  "codeowner_teams": {
+    "library": [],
+    "platform": [],
+    "root": [],
+    "style": []
+  },
+  "conflicts": {
+    "budget_s": 60,
+    "max_checks": 25,
+    "max_fetches": 5,
+    "refresh_h": 6,
+    "scan_days": 8,
+    "timeout_s": 120
+  },
+  "confluence": {
+    "space": ""
+  },
+  "deployment": {
+    "image": "",
+    "project": "rocke-pr-monitor",
+    "pull_registry": ""
+  },
+  "develop_rocke_job_pattern": "widgets",
+  "develop_watched_workflows": [
+    "Widgets CI",
+    "pre-commit"
+  ],
+  "draft_parallel_max": 6,
+  "draft_stage": "auto",
+  "drafter": {},
+  "drift_batch": 6,
+  "drift_extract": [],
+  "effort": {
+    "audit": "",
+    "ci_triage": "",
+    "deep": "medium",
+    "first_pass": "",
+    "notice_draft": "",
+    "orchestrator": "high",
+    "quality": "medium",
+    "quality_draft": "",
+    "tick": "",
+    "verify": "high"
+  },
+  "features": {
+    "alerts": {
+      "enabled": false
+    },
+    "dashboards": {
+      "admin": {
+        "enabled": true
+      },
+      "team": {
+        "enabled": false
+      }
+    },
+    "merge_queue": {
+      "auto_hold": true,
+      "auto_merge": "hints_only",
+      "develop_guard": true,
+      "enabled": true,
+      "mode": "prototype",
+      "queue_notices": true
+    },
+    "review_automation": {
+      "enabled": true,
+      "mode": "prototype"
+    },
+    "ticket_creation": {
+      "enabled": false,
+      "triggers": {
+        "out_of_scope_issue": false,
+        "review_follow_up": false
+      }
+    }
+  },
+  "followup_gap_exempt": [
+    "develop_fix",
+    "priority"
+  ],
+  "followup_min_gap_min": 60,
+  "followup_scan": {
+    "defer_patterns": [],
+    "dir": "",
+    "request_patterns": [],
+    "ticket_pattern": ""
+  },
+  "gh": {
+    "probe_issue": 1,
+    "read_config_dir": "",
+    "write_config_dir": ""
+  },
+  "gpu": {
+    "accounts": [],
+    "clone_url": "",
+    "constraint": "",
+    "default_arch": "",
+    "enabled": false,
+    "env": {
+      "ROCKE_BACKEND": "python"
+    },
+    "exclude": [],
+    "gres": {},
+    "known_hosts": "",
+    "login_host": "",
+    "max_cases": 300,
+    "max_jobs_per_pr": 2,
+    "partition": "",
+    "pending_report_min": 240,
+    "remote_dir": "rkmon-gpu",
+    "remote_python": "",
+    "resubmits": 1,
+    "setup": "",
+    "skip_pattern": "(?i)\\b(gpus?|devices?)\\b",
+    "ssh_key": "",
+    "ssh_port": 22,
+    "ssh_user": "",
+    "time_limit": "01:00:00"
+  },
+  "hold_label_patterns": [
+    "do[ _-]*not[ _-]*merge",
+    "don'?t[ _-]*merge",
+    "\\bdnm\\b",
+    "on[ _-]*hold",
+    "\\bwip\\b",
+    "not[ _-]*ready"
+  ],
+  "hold_stale_h": 24,
+  "huge_pr_lines": 8000,
+  "idle_full_tick_min": 60,
+  "incident_issue": {
+    "labels": [],
+    "repo": "",
+    "stability_label": "",
+    "time_limit_labels": [
+      "test-timeout"
+    ]
+  },
+  "jira": {
+    "accounts": {},
+    "component": "",
+    "default_epic": "",
+    "extra_fields": {},
+    "issue_type": "",
+    "labels": [],
+    "mcp_enabled": false,
+    "mcp_server": "",
+    "mcp_url": "",
+    "priority_map": {},
+    "project": "",
+    "url": ""
+  },
+  "libparity_check": true,
+  "loop_heartbeat_min": 60,
+  "loop_log_max_mb": 20,
+  "max_host_usage_pct": 75,
+  "max_posts_per_hour": 6,
+  "merge_plan": {
+    "budget_s": 10,
+    "max_merges": 80,
+    "timeout_s": 120
+  },
+  "mirror": {
+    "arm_a": 0,
+    "checks": "",
+    "checks_wait_min": 240,
+    "enabled": false,
+    "feed": "",
+    "max_age_min": 360,
+    "out": "",
+    "pairs": 15
+  },
+  "model_bindings": {},
+  "models": {
+    "analyst": "",
+    "analytics": "",
+    "audit": "opus",
+    "ci_triage": "default",
+    "deep": "opus",
+    "draft": "worker",
+    "notice_draft": "default",
+    "planner": "",
+    "post": "claude",
+    "quality": "claude",
+    "quality_draft": "default",
+    "tick": "",
+    "verify": "claude"
+  },
+  "offload": {
+    "budget_shares": {
+      "draft": 0.5,
+      "quality": 0.25,
+      "regrade": 0.25
+    },
+    "check_rerun_max_s": 120,
+    "check_total_s": 900,
+    "deep_files": 40,
+    "deep_hot_spots": [
+      "ABI",
+      "CMK",
+      "CAT"
+    ],
+    "deep_lines": 2000,
+    "deep_paths": [
+      "(^|/)CMakeLists\\.txt$",
+      "\\.cmake$"
+    ],
+    "max_steps": 40,
+    "mode": "off",
+    "probe_timeout_s": 600,
+    "spot_check": 0.25,
+    "spot_check_min": 2,
+    "trial_prs": 10
+  },
+  "operator": {
+    "github_login": "<user_login>"
+  },
+  "orchestrator": {
+    "model": "opus"
+  },
+  "overlaps": {
+    "budget_s": 30,
+    "max_fetches": 3,
+    "max_heads": 12
+  },
+  "paths": {
+    "agentic": "",
+    "build": "",
+    "cache": "",
+    "claude_projects": "",
+    "cmake": "",
+    "daily_dir": "",
+    "dashboard": "",
+    "gh": "",
+    "html": "",
+    "insights_dir": "",
+    "lessons": "",
+    "outputs_dir": "",
+    "posted_dir": "",
+    "posts": "",
+    "probes": "",
+    "pyyaml": "",
+    "repo": "",
+    "review_book": "",
+    "rocm_llvm_bin": "",
+    "rocm_reference_clang": "",
+    "run": "",
+    "scratch": "",
+    "secrets_dir": "",
+    "spend_dir": "",
+    "tmp": "",
+    "toolkit": "",
+    "torch_python": "",
+    "venv": "",
+    "verifier_team_file": "",
+    "worker_tools": "",
+    "workers": "",
+    "working_dir": "/work"
+  },
+  "prices": {},
+  "profile_dir": "",
+  "publish": {
+    "html": {
+      "dest": "",
+      "host": "",
+      "host_keys": [],
+      "key": "",
+      "known_hosts": "",
+      "requests": "",
+      "site": "",
+      "url": "",
+      "user": ""
+    }
+  },
+  "ramdisk": {
+    "enabled": false,
+    "path": "/ramdisk",
+    "size_gb": 0
+  },
+  "rebase_noise_paths": [],
+  "repo": "acme/widgets",
+  "resources": {
+    "cpus": 4,
+    "memory_gb": 8
+  },
+  "retention": {
+    "job_days": 7,
+    "kept_reviews_h": 24,
+    "log_max_mb": 20
+  },
+  "revert_offer_after_min": 120,
+  "review": {
+    "pipes": 3
+  },
+  "review_checklist": "",
+  "review_first_line": "",
+  "review_first_line_no_draft": "",
+  "reviewer": "default",
+  "rocke_path": "a/b/rocke",
+  "roles": {},
+  "scope": {
+    "labels": [
+      "team: widgets"
+    ],
+    "path_labels": []
+  },
+  "scoreboard": {
+    "ahead_h": 12,
+    "conflict_window_h": 3,
+    "git_budget_s": 0.4,
+    "lookback_days": 8
+  },
+  "services": {
+    "claude_timer": false,
+    "enabled": false
+  },
+  "settle_min": 30,
+  "split_part_lines": 8000,
+  "team_dashboard": {
+    "bind": "127.0.0.1",
+    "mode": "publish",
+    "port": 18615,
+    "public_port": 18615,
+    "publish_host": "127.0.0.1",
+    "url": ""
+  },
+  "teams": {
+    "channel": "",
+    "message_cooldown_min": 30,
+    "webhook_file": ""
+  },
+  "test_sparse": [],
+  "tick_interval_min": 10,
+  "tick_timeout_min": 20,
+  "tracker_allow": [],
+  "tracker_keys": [],
+  "update": {
+    "branch": "",
+    "drain_timeout_min": 60,
+    "path": "",
+    "poll_s": 20,
+    "repo": "",
+    "test_timeout_min": 45
+  },
+  "verifier_name": "",
+  "weekly_report": {
+    "dir": "",
+    "enabled": false,
+    "friction_window_h": 6,
+    "hour_utc": 14,
+    "weekday": 0
+  },
+  "worker": {
+    "api_key_env": "",
+    "api_key_file": "",
+    "auth_header": "Authorization",
+    "auth_mode": "",
+    "auth_scheme": "Bearer",
+    "backend": "ollama",
+    "chat_path": "",
+    "context": 262144,
+    "hang_s": 120,
+    "header_env": {},
+    "headers_file": "",
+    "keep_alive": "120s",
+    "max_hangs": 6,
+    "max_output_tokens": 16000,
+    "max_parallel": 0,
+    "max_resends": 3,
+    "max_steps": 20,
+    "model": "",
+    "model_name": "",
+    "models_url": "",
+    "num_batch": 256,
+    "omp_provider": "",
+    "probe": {},
+    "rpm": 0,
+    "source": "",
+    "stall_s": 900,
+    "tag": "",
+    "temperature": 0.3,
+    "think": "max",
+    "tpm": 0,
+    "url": ""
+  },
+  "wsl_distro": "",
+  "hot_spots": {
+    "ABI": "<ROCKE_PATH>/include/widgets/abi.h",
+    "CAT": "<ROCKE_PATH>/core/data.cpp",
+    "CMK": "<ROCKE_PATH>/CMakeLists.txt"
+  }
+}

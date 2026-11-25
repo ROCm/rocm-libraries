@@ -1,0 +1,951 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "rocKE monitor deploy settings",
+  "description": "One deployment of the rocKE monitor in a container: the container, the repository, the host's share, the monitor, its features, the tools it works through and the models it may use (QUICK_DEPLOY_GUIDE.md). No secret, token or key goes in this file: rkmon login and rkmon secret set them.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "kind",
+    "schema_version"
+  ],
+  "properties": {
+    "kind": {
+      "description": "What this file is: deploy_settings.",
+      "type": "string",
+      "enum": [
+        "deploy_settings"
+      ],
+      "default": "deploy_settings"
+    },
+    "schema_version": {
+      "description": "The version of this file's layout. A file in an older layout is moved to it when it is read.",
+      "type": "integer",
+      "enum": [
+        1
+      ],
+      "default": 1
+    },
+    "container": {
+      "title": "Container",
+      "description": "What this deployment's container is called and the image it runs.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "description": "The container's name: its volumes and its first image tag are named after it too. Each deployment on one host needs a name of its own (lowercase letters, digits, - and _).",
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9_-]*$",
+          "default": "rkmon"
+        },
+        "image": {
+          "title": "Image",
+          "description": "The image the container runs, as rkmon image load or rkmon image pull leaves it on this host.",
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "name": {
+              "description": "The image's name, as the build settings' image.name named it: the container runs <name>:<tag>, and rkmon image load, pull, check, start and swap look for that image. Lowercase letters and digits, joined by . _ or -, parts separated by /; a registry goes in container.image.pull_registry. Blank: rocke-pr-monitor.",
+              "type": "string",
+              "pattern": "^$|^(?!localhost/)(?![^/]*\\.[^/]*/)[a-z0-9]+(?:(?:[._]|__|-+)[a-z0-9]+)*(?:/[a-z0-9]+(?:(?:[._]|__|-+)[a-z0-9]+)*)*$",
+              "default": "rocke-pr-monitor"
+            },
+            "tag": {
+              "description": "The image's tag, as the image builder built it (the package's version, say). A new tag is how a new image is rolled out: load or pull it, then rkmon swap --tag TAG. Blank: container.name.",
+              "type": "string",
+              "pattern": "^$|^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$",
+              "default": "",
+              "x-template": "<version>"
+            },
+            "pull_registry": {
+              "description": "The registry rkmon image pull pulls <registry>/<name>:<tag> from. Blank: no registry; the image comes from a file (rkmon image load IMAGE_FILE).",
+              "type": "string",
+              "default": ""
+            }
+          }
+        }
+      }
+    },
+    "repository": {
+      "title": "Repository",
+      "description": "The repository that holds rocKE, and the pull requests the monitor watches.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "description": "The GitHub repository that holds rocKE, as owner/name. Required.",
+          "type": "string",
+          "pattern": "^$|^[\\w.-]+/[\\w.-]+$",
+          "default": "",
+          "x-template": "ROCm/rocm-libraries"
+        },
+        "path": {
+          "description": "rocKE's folder inside the repository. Required.",
+          "type": "string",
+          "default": "",
+          "x-template": "dnn-providers/hip-kernel-provider/rocke"
+        },
+        "scope_labels": {
+          "description": "The pull-request labels that put a PR in scope; at least one is required.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "x-template": [
+            "<label>"
+          ]
+        },
+        "path_labels": {
+          "description": "Broad labels that put a PR in scope only when its diff touches repository.path. Empty: none.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": []
+        }
+      }
+    },
+    "host": {
+      "title": "Host",
+      "description": "The container's share of this host, its users' ids and your own mounts.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "resources": {
+          "title": "Resources",
+          "description": "The container's CPUs, memory and RAM disk.",
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "cpus": {
+              "description": "The CPUs the container may use; the scaler keeps the parallel reviews and the parallel builds within them.",
+              "type": "number",
+              "minimum": 1,
+              "default": 4
+            },
+            "memory_gb": {
+              "description": "The container's memory limit in GB: at least ramdisk_gb plus 8.",
+              "type": "number",
+              "minimum": 1,
+              "default": 8
+            },
+            "ramdisk_gb": {
+              "description": "A RAM disk (tmpfs) for the reviews' worktrees and builds, in GB; it counts against memory_gb. 0: no RAM disk.",
+              "type": "number",
+              "minimum": 0,
+              "default": 0
+            }
+          }
+        },
+        "users": {
+          "title": "Users",
+          "description": "The ids of the container's users: the monitor's and the GitHub writer's, each 1000 or more, not 65534, and neither the other's nor a PR runner's (the PR runners, one per slot, keep the package's ids).",
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "monitor_uid": {
+              "description": "The user id the monitor runs as. Blank: yours (whoever runs rkmon).",
+              "type": [
+                "integer",
+                "string"
+              ],
+              "pattern": "^$|^[0-9]+$",
+              "default": ""
+            },
+            "monitor_gid": {
+              "description": "The monitor's group id. Blank: yours.",
+              "type": [
+                "integer",
+                "string"
+              ],
+              "pattern": "^$|^[0-9]+$",
+              "default": ""
+            },
+            "github_writer_uid": {
+              "description": "The id of the GitHub writer, the only user that reads the GitHub write login.",
+              "type": "integer",
+              "minimum": 1000,
+              "default": 1999
+            },
+            "pr_runner_uid": {
+              "description": "Sets no user's id (the PR runners keep the package's ids); checked as the others are: 1000 or more, not 65534, and neither the monitor's nor the writer's.",
+              "type": "integer",
+              "minimum": 1000,
+              "default": 1998
+            }
+          }
+        },
+        "mounts": {
+          "description": "More read-only mounts into the container, each HOST:CONTAINER:ro (an SSH key for remote GPU tests, say). Empty: none.",
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[^:]+:[^:]+:ro$"
+          },
+          "default": []
+        }
+      }
+    },
+    "monitor": {
+      "title": "Monitor",
+      "description": "The tick cycle and the orchestrator, shared by every feature.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "tick_min": {
+          "description": "Minutes between two ticks; each reads GitHub, updates the queue and the plans, and hands the orchestrator what needs it.",
+          "type": "integer",
+          "minimum": 1,
+          "default": 10
+        },
+        "full_tick_min": {
+          "description": "A full tick at least every this many minutes, even when nothing changed (an idle tick is one line). 0: every tick is full.",
+          "type": "integer",
+          "minimum": 0,
+          "default": 60
+        },
+        "orchestrator": {
+          "title": "Orchestrator",
+          "description": "The Claude session that runs the ticks, verifies, decides and posts.",
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "model": {
+              "description": "Its model: a claude model (opus, sonnet, haiku, or a model_bindings entry whose provider is claude).",
+              "type": "string",
+              "default": "opus",
+              "x-model": "claude"
+            },
+            "effort": {
+              "description": "How hard it thinks: low, medium, high, xhigh or max.",
+              "type": "string",
+              "enum": [
+                "low",
+                "medium",
+                "high",
+                "xhigh",
+                "max"
+              ],
+              "default": "high"
+            }
+          }
+        }
+      }
+    },
+    "features": {
+      "title": "Features",
+      "description": "What the monitor does. review_automation and merge_queue each run in prototype (everything computed and kept here, nothing sent) or live (they act on GitHub).",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "review_automation": {
+          "title": "Review automation",
+          "description": "A review of each new or changed pull request in scope: a first pass, then the verifier's check of every claim.",
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "description": "true: reviews run; false: no reviews, no review checks and no Claude session (ticks are acted on by rules).",
+              "type": "boolean",
+              "default": true
+            },
+            "mode": {
+              "description": "prototype: reviews are prepared and kept on this machine, nothing is posted; live: each verified review, and each overlap notice, is posted on its PR as integrations.github_cli.account.",
+              "type": "string",
+              "enum": [
+                "prototype",
+                "live"
+              ],
+              "default": "prototype"
+            },
+            "schedule": {
+              "title": "Schedule",
+              "description": "When a pull request's review starts.",
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "push_cooldown_min": {
+                  "description": "Minutes after a PR's newest push before it is reviewed, so a burst of pushes gets one review. 0: no wait.",
+                  "type": "integer",
+                  "minimum": 0,
+                  "default": 30
+                },
+                "follow_up_cooldown_min": {
+                  "description": "Minutes between two follow-up reviews on one PR; a follow-up due sooner waits. 0: no wait.",
+                  "type": "integer",
+                  "minimum": 0,
+                  "default": 60
+                }
+              }
+            },
+            "capacity": {
+              "title": "Capacity",
+              "description": "How much runs at once: starting points, which the scaler then moves by the machine's load.",
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "parallel_reviews": {
+                  "description": "Reviews prepared at once at the start, 1 to 5; the scaler then moves it within 1 to 5.",
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 5,
+                  "default": 3
+                },
+                "parallel_heavy_checks": {
+                  "description": "Local builds and GPU tests at once at the start, 1 to 8; the scaler then moves it within 1 to 8.",
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 8,
+                  "default": 1
+                }
+              }
+            },
+            "large_prs": {
+              "title": "Large PRs",
+              "description": "What happens with very large pull requests.",
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "manual_review_over_lines": {
+                  "description": "A PR with more changed lines than this is never reviewed on its own: it waits for you to start it (rk review-start N).",
+                  "type": "integer",
+                  "minimum": 1,
+                  "default": 30000
+                },
+                "split_part_lines": {
+                  "description": "The most changed lines in one part when a large review is split into parts (rk review-split N).",
+                  "type": "integer",
+                  "minimum": 100,
+                  "default": 8000
+                }
+              }
+            },
+            "passes": {
+              "title": "Passes",
+              "description": "Each review pass's model and effort. A model is opus, sonnet, haiku or a model_bindings entry; default (the optional passes) means the pass's owner does it, with the owner's model and effort.",
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "verify": {
+                  "title": "Verify",
+                  "description": "The verifier: the Claude agent that reviews blind, then reproduces or cuts each claim of the first pass and writes the post.",
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "model": {
+                      "description": "The verifier's model: a claude model (opus, sonnet, haiku, or a model_bindings entry whose provider is claude).",
+                      "type": "string",
+                      "default": "opus",
+                      "x-model": "claude"
+                    },
+                    "effort": {
+                      "description": "The verifier's effort: low, medium, high, xhigh or max.",
+                      "type": "string",
+                      "enum": [
+                        "low",
+                        "medium",
+                        "high",
+                        "xhigh",
+                        "max"
+                      ],
+                      "default": "high"
+                    }
+                  }
+                },
+                "quality": {
+                  "title": "Quality",
+                  "description": "The code quality lane: the Claude agent that reviews each PR's design (single responsibility, one home per fact, layers, names, tests).",
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "model": {
+                      "description": "The quality lane's model: a claude model (opus, sonnet, haiku, or a model_bindings entry whose provider is claude).",
+                      "type": "string",
+                      "default": "opus",
+                      "x-model": "claude"
+                    },
+                    "effort": {
+                      "description": "The quality lane's effort: low, medium, high, xhigh or max.",
+                      "type": "string",
+                      "enum": [
+                        "low",
+                        "medium",
+                        "high",
+                        "xhigh",
+                        "max"
+                      ],
+                      "default": "medium"
+                    }
+                  }
+                },
+                "first_pass": {
+                  "title": "First pass",
+                  "description": "The draft of each review, before the verifier reads it.",
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "model": {
+                      "description": "Who drafts it. default: no separate pass; the verifier does it, with passes.verify's model and effort. A model: that model drafts, and the verifier checks each claim.",
+                      "type": "string",
+                      "default": "default",
+                      "x-model": "any"
+                    },
+                    "effort": {
+                      "description": "The drafting model's effort: low, medium, high, xhigh or max for a claude model. default: passes.verify's effort. A model that is not Claude takes none: leave it default.",
+                      "type": "string",
+                      "enum": [
+                        "default",
+                        "low",
+                        "medium",
+                        "high",
+                        "xhigh",
+                        "max"
+                      ],
+                      "default": "default"
+                    }
+                  }
+                },
+                "ci_triage": {
+                  "title": "CI triage",
+                  "description": "The first read of a PR's failing CI jobs, for the verifier.",
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "model": {
+                      "description": "Who reads them first. default: no separate pass; the verifier does it, with passes.verify's model and effort. A model: that model hands the verifier leads, which it checks.",
+                      "type": "string",
+                      "default": "default",
+                      "x-model": "any"
+                    },
+                    "effort": {
+                      "description": "That model's effort: low, medium, high, xhigh or max for a claude model. default: passes.verify's effort. A model that is not Claude takes none: leave it default.",
+                      "type": "string",
+                      "enum": [
+                        "default",
+                        "low",
+                        "medium",
+                        "high",
+                        "xhigh",
+                        "max"
+                      ],
+                      "default": "default"
+                    }
+                  }
+                },
+                "quality_draft": {
+                  "title": "Quality draft",
+                  "description": "The first read of a PR's diff by the code quality rules, for the quality lane.",
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "model": {
+                      "description": "Who reads it first. default: no separate pass; the quality lane does it, with passes.quality's model and effort. A model: that model hands the quality lane leads, which it checks.",
+                      "type": "string",
+                      "default": "default",
+                      "x-model": "any"
+                    },
+                    "effort": {
+                      "description": "That model's effort: low, medium, high, xhigh or max for a claude model. default: passes.quality's effort. A model that is not Claude takes none: leave it default.",
+                      "type": "string",
+                      "enum": [
+                        "default",
+                        "low",
+                        "medium",
+                        "high",
+                        "xhigh",
+                        "max"
+                      ],
+                      "default": "default"
+                    }
+                  }
+                },
+                "notice_draft": {
+                  "title": "Notice draft",
+                  "description": "The first draft of an overlap or a drift notice, for the orchestrator.",
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "model": {
+                      "description": "Who drafts it. default: no separate pass; the orchestrator does it, with monitor.orchestrator's model and effort. A model: that model hands the orchestrator a draft and its leads, which it checks.",
+                      "type": "string",
+                      "default": "default",
+                      "x-model": "any"
+                    },
+                    "effort": {
+                      "description": "That model's effort: low, medium, high, xhigh or max for a claude model. default: monitor.orchestrator's effort. A model that is not Claude takes none: leave it default.",
+                      "type": "string",
+                      "enum": [
+                        "default",
+                        "low",
+                        "medium",
+                        "high",
+                        "xhigh",
+                        "max"
+                      ],
+                      "default": "default"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "merge_queue": {
+          "title": "Merge queue",
+          "description": "The landing order of the PRs in scope, with its gates and its merge plan, computed every tick.",
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "description": "true: the queue, its gates, the merge plan and priority requests run; false: none of them.",
+              "type": "boolean",
+              "default": true
+            },
+            "mode": {
+              "description": "prototype: the plan, the gates and the order are computed and shown, and nothing is armed, held, commented or filed; live: the monitor acts on them (auto_merge, auto_hold, develop_guard, queue and drift notices).",
+              "type": "string",
+              "enum": [
+                "prototype",
+                "live"
+              ],
+              "default": "prototype"
+            },
+            "auto_merge": {
+              "description": "enabled: a PR you cleared (rk clear N) gets GitHub's own auto-merge once it is validated (live only; GitHub's gates still decide); hints_only: the order is shown and proposed to you, and nothing is armed.",
+              "type": "string",
+              "enum": [
+                "enabled",
+                "hints_only"
+              ],
+              "default": "hints_only"
+            },
+            "auto_hold": {
+              "description": "true: a PR whose gate failure is confirmed as its own is held with a change request until it is fixed and you re-approve it (live only); false: the failure is reported to you only.",
+              "type": "boolean",
+              "default": true
+            },
+            "develop_guard": {
+              "description": "true: develop is checked after every merge, and a break is traced to its PR; live: the break is filed as a GitHub issue (an incident when CI is red) and its fixes are linked; prototype: it is reported to you only. false: develop is not checked.",
+              "type": "boolean",
+              "default": true
+            }
+          }
+        },
+        "dashboards": {
+          "title": "Dashboards",
+          "description": "Your admin dashboard, and the team dashboard for other teams.",
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "admin": {
+              "title": "Admin dashboard",
+              "description": "Your page: everything the monitor shows, with Approve and Decline for priority requests and ticket drafts.",
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "enabled": {
+                  "description": "true: the admin dashboard is served; false: no web server, no dashboard.",
+                  "type": "boolean",
+                  "default": true
+                },
+                "port": {
+                  "description": "The host port it is published on.",
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 65535,
+                  "default": 18614
+                },
+                "bind": {
+                  "description": "The host address it is published on (where it listens and who can reach it: README.md, \"The admin dashboard\").",
+                  "type": "string",
+                  "pattern": "^([0-9]{1,3}\\.){3}[0-9]{1,3}$",
+                  "default": "127.0.0.1"
+                }
+              }
+            },
+            "team": {
+              "title": "Team dashboard",
+              "description": "The page for other teams: the admin dashboard without its admin controls, with a request box whose requests wait for your OK.",
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "enabled": {
+                  "description": "true: the team dashboard is delivered; false: none.",
+                  "type": "boolean",
+                  "default": false
+                },
+                "delivery": {
+                  "description": "publish: pushed after every tick to a team web host (advanced publish.html; its key: rkmon secret webhost_ed25519); serve: served by this monitor at bind and port.",
+                  "type": "string",
+                  "enum": [
+                    "publish",
+                    "serve"
+                  ],
+                  "default": "publish"
+                },
+                "port": {
+                  "description": "The host port it is served on (delivery serve).",
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 65535,
+                  "default": 18615
+                },
+                "bind": {
+                  "description": "The host address it is served on (delivery serve): 127.0.0.1, this machine only; another address of this host, or 0.0.0.0 for all of them.",
+                  "type": "string",
+                  "pattern": "^([0-9]{1,3}\\.){3}[0-9]{1,3}$",
+                  "default": "127.0.0.1"
+                }
+              }
+            }
+          }
+        },
+        "alerts": {
+          "title": "Alerts",
+          "description": "Messages to the team chat channel: a develop break with CI red and no fix planned, and the decisions on the Needs-you list.",
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "description": "true: the messages go to teams_channel; false: they wait on the dashboards and in the log.",
+              "type": "boolean",
+              "default": false
+            },
+            "teams_channel": {
+              "description": "The Teams channel's name, as the messages name it; required with alerts on. Its webhook is a secret: rkmon secret teams_webhook.",
+              "type": "string",
+              "default": ""
+            },
+            "message_cooldown_min": {
+              "description": "The fewest minutes between two messages of the same kind (a develop break, the Needs-you list), each kind on its own clock; what comes up in between goes in the next one. 0: no wait.",
+              "type": "integer",
+              "minimum": 0,
+              "default": 30
+            }
+          }
+        },
+        "ticket_creation": {
+          "title": "Ticket creation",
+          "description": "JIRA tickets, filed through the atlassian CLI, which it requires (integrations.atlassian_cli.jira_site).",
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "description": "true: tickets are filed for the triggers below; false: what would be ticketed is reported to you.",
+              "type": "boolean",
+              "default": false
+            },
+            "jira_project": {
+              "description": "The JIRA project key new tickets go to; required with ticket creation on.",
+              "type": "string",
+              "default": ""
+            },
+            "default_epic": {
+              "description": "The key of the epic new tickets are linked to. Blank: no epic.",
+              "type": "string",
+              "default": ""
+            },
+            "triggers": {
+              "title": "Triggers",
+              "description": "What gets a ticket.",
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "review_follow_up": {
+                  "description": "true: a significant review item still open when its PR merged gets a follow-up ticket for the PR's author; false: it is listed for you.",
+                  "type": "boolean",
+                  "default": true
+                },
+                "out_of_scope_issue": {
+                  "description": "true: an issue found outside any PR's review gets a ticket draft, filed when you approve it on the admin dashboard; false: it is reported to you only.",
+                  "type": "boolean",
+                  "default": true
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "integrations": {
+      "title": "Integrations",
+      "description": "The tools the monitor works through; a feature that needs one requires its settings. Their tokens and keys are never here: rkmon login sets them.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "github_cli": {
+          "title": "GitHub CLI",
+          "description": "GitHub, through gh: a read login for every tick and a write login for what the monitor posts.",
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "account": {
+              "description": "The GitHub login the monitor acts as and takes instructions from (the operator); required. Its logins: rkmon login gh-read and rkmon login gh.",
+              "type": "string",
+              "default": "",
+              "x-template": "<user_login>"
+            }
+          }
+        },
+        "atlassian_cli": {
+          "title": "Atlassian CLI",
+          "description": "JIRA and Confluence, through the atlassian CLI (its login: rkmon login atlassian); ticket creation requires it.",
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "jira_site": {
+              "description": "The Atlassian site that holds the JIRA project, as the atlassian CLI names it (a site's name or its address); required with ticket creation on. Blank: the monitor uses no Atlassian site.",
+              "type": "string",
+              "default": ""
+            },
+            "confluence_site": {
+              "description": "The Atlassian site the monitor's Confluence space is on. Blank: jira_site.",
+              "type": "string",
+              "default": ""
+            }
+          }
+        },
+        "claude_code": {
+          "title": "Claude Code",
+          "description": "Claude Code, which runs the orchestrator and its agents and reaches every claude model (its login: rkmon login claude).",
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "gateway": {
+              "description": "The address of the gateway Claude is reached through (ANTHROPIC_BASE_URL). Blank: the one in the Claude login, else Anthropic's own API.",
+              "type": "string",
+              "pattern": "^$|^https?://",
+              "default": ""
+            }
+          }
+        }
+      }
+    },
+    "model_bindings": {
+      "title": "Model bindings",
+      "description": "The models the passes may name, each by a name of your choice. Built in, with no entry: opus, sonnet and haiku, the latest Claude Opus, Sonnet and Haiku (claude-opus-5-5, claude-sonnet-5-5, claude-haiku-5-5). A key is never here: api_key_secret names a secret installed with rkmon secret.",
+      "type": [
+        "object",
+        "null"
+      ],
+      "default": {},
+      "propertyNames": {
+        "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]*$"
+      },
+      "x-reserved": [
+        "default",
+        "opus",
+        "sonnet",
+        "haiku"
+      ],
+      "x-template-lines": [
+        "# Example: GLM through an OpenAI-compatible gateway. Uncomment, fill in your gateway, install its key.",
+        "# glm-flash:",
+        "#   provider: openai-compatible",
+        "#   endpoint: <your gateway URL>              # your organization's LLM gateway, ending in its API base path",
+        "#   model_id: GLM-5.3-Flash                   # the exact model name your gateway serves",
+        "#   api_key_secret: glm_api_key               # install with: rkmon secret glm_api_key <file holding the key>",
+        "#   limits: { requests_per_min: 30, tokens_per_min: 200000, max_parallel: 4, timeout_min: 10 }",
+        "",
+        "# Example: qwen on a local Ollama server. Uncomment and set the model you pulled.",
+        "# qwen-local:",
+        "#   provider: ollama",
+        "#   endpoint: http://localhost:11434          # Ollama's default address on the same host",
+        "#   model_id: qwen3.6:<tag>                   # as `ollama list` shows it",
+        "#   limits: { max_parallel: 1, timeout_min: 20 }"
+      ],
+      "additionalProperties": {
+        "description": "One model: its provider, its id, and for a model outside Claude Code its endpoint, key and limits.",
+        "oneOf": [
+          {
+            "title": "claude",
+            "description": "A Claude model, reached through Claude Code and integrations.claude_code.gateway.",
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "provider",
+              "model_id"
+            ],
+            "properties": {
+              "provider": {
+                "description": "claude: a Claude model.",
+                "type": "string",
+                "enum": [
+                  "claude"
+                ]
+              },
+              "model_id": {
+                "description": "The model's id, as Claude Code names it (claude-opus-5-5, say).",
+                "type": "string",
+                "pattern": "^\\S+$"
+              }
+            }
+          },
+          {
+            "title": "ollama",
+            "description": "A model on an Ollama server.",
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "provider",
+              "model_id",
+              "endpoint"
+            ],
+            "properties": {
+              "provider": {
+                "description": "ollama: a model an Ollama server runs.",
+                "type": "string",
+                "enum": [
+                  "ollama"
+                ]
+              },
+              "model_id": {
+                "description": "The model's name, as ollama list shows it.",
+                "type": "string",
+                "pattern": "^\\S+$"
+              },
+              "endpoint": {
+                "description": "The Ollama server's address (http://localhost:11434 on the same host).",
+                "type": "string",
+                "pattern": "^https?://\\S+$"
+              },
+              "limits": {
+                "description": "What the server allows.",
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "max_parallel": {
+                    "description": "Requests at once (one model in memory serves one well). 0: no cap.",
+                    "type": "integer",
+                    "minimum": 0,
+                    "default": 1
+                  },
+                  "timeout_min": {
+                    "description": "Minutes a request may wait for an answer before it is sent again.",
+                    "type": "integer",
+                    "minimum": 1,
+                    "default": 15
+                  }
+                }
+              }
+            }
+          },
+          {
+            "title": "openai-compatible",
+            "description": "A model behind an OpenAI-compatible chat completions route (an LLM gateway, vLLM, LiteLLM).",
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "provider",
+              "model_id",
+              "endpoint"
+            ],
+            "properties": {
+              "provider": {
+                "description": "openai-compatible: an OpenAI-compatible endpoint.",
+                "type": "string",
+                "enum": [
+                  "openai-compatible"
+                ]
+              },
+              "model_id": {
+                "description": "The model's name, exactly as the endpoint serves it.",
+                "type": "string",
+                "pattern": "^\\S+$"
+              },
+              "endpoint": {
+                "description": "The endpoint's address, ending in its API base path (the chat route /chat/completions goes after it).",
+                "type": "string",
+                "pattern": "^https?://\\S+$"
+              },
+              "api_key_secret": {
+                "description": "The secret that holds the endpoint's key, installed with rkmon secret NAME FILE. Blank: no key.",
+                "type": "string",
+                "pattern": "^$|^[a-z0-9][a-z0-9_]*$",
+                "default": ""
+              },
+              "limits": {
+                "description": "What the endpoint allows, shared by every pass that uses it.",
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "requests_per_min": {
+                    "description": "Requests a minute. 0: none known (an HTTP 429 still slows the callers).",
+                    "type": "integer",
+                    "minimum": 0,
+                    "default": 0
+                  },
+                  "tokens_per_min": {
+                    "description": "Tokens a minute. 0: none known.",
+                    "type": "integer",
+                    "minimum": 0,
+                    "default": 0
+                  },
+                  "max_parallel": {
+                    "description": "Requests at once. 0: no cap.",
+                    "type": "integer",
+                    "minimum": 0,
+                    "default": 0
+                  },
+                  "timeout_min": {
+                    "description": "Minutes a request may wait for an answer before it is sent again.",
+                    "type": "integer",
+                    "minimum": 1,
+                    "default": 15
+                  }
+                }
+              }
+            }
+          }
+        ]
+      },
+      "x-builtin": {
+        "opus": "claude-opus-5-5",
+        "sonnet": "claude-sonnet-5-5",
+        "haiku": "claude-haiku-5-5"
+      }
+    },
+    "advanced": {
+      "title": "Advanced",
+      "description": "Any other configuration key, at its name in docs/internal_settings.md (worker, gpu, publish, drafter, ...). A key the sections above hold is refused here.",
+      "type": "object",
+      "default": {}
+    },
+    "secrets": {
+      "description": "A secret's name to a file of yours that holds it (mode 600, outside the package): rkmon secret NAME reads it. Never the secret itself.",
+      "type": "object",
+      "additionalProperties": {
+        "type": "string"
+      },
+      "default": {}
+    },
+    "secret_values": {
+      "description": "A secret's name to its value, for tests; a real deployment names files under secrets instead.",
+      "type": "object",
+      "additionalProperties": {
+        "type": "string"
+      },
+      "default": {}
+    },
+    "setup": {
+      "description": "The setup's step choices (rk settings export writes them): the clone, the venvs, the private gh, the model check, the agentic files, the services.",
+      "type": "object",
+      "additionalProperties": {
+        "type": "boolean"
+      },
+      "default": {}
+    },
+    "exported_at": {
+      "description": "When rk settings export wrote this file.",
+      "type": "string"
+    },
+    "package_version": {
+      "description": "The package version that wrote this file.",
+      "type": "string"
+    },
+    "source": {
+      "description": "Where this file came from.",
+      "type": "string"
+    }
+  }
+}

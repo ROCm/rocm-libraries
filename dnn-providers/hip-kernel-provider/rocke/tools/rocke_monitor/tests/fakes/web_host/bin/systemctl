@@ -1,0 +1,68 @@
+#!/usr/bin/env python3
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+"""systemctl --user on a stand-in web host, where no systemd runs (tests/test_web_host_install.py, and the image test's
+web-host stage, tests/container/stage_web_host.py), for each user unit in ~/.config/systemd/user, such as the one
+`rkmon web-host install` puts there: restart, and start while the unit does not run, runs its ExecStart as its
+service, in a session of its own, once the one before has stopped, its pid in HOME/UNIT.pid and its output in
+HOME/UNIT.log; with $FAKE_BIND set, on that address in place of every address (0.0.0.0). is-active, show (the main
+pid), stop and status answer as systemd answers them; daemon-reload, enable and disable do nothing.
+"""
+
+import os
+import shlex
+import signal
+import subprocess
+import sys
+import time
+
+home = os.environ["HOME"]
+words = [a for a in sys.argv[1:] if a not in ("--user", "--no-pager")]
+cmd, unit = words[0], words[-1]
+pid_file = os.path.join(home, unit + ".pid")
+
+
+def running():
+    """The service's pid while it runs (an ended one, not yet reaped, does not), else 0."""
+    try:
+        with open(pid_file) as f:
+            pid = int(f.read())
+        with open("/proc/%d/stat" % pid) as f:
+            state = f.read().rsplit(")", 1)[1].split()[0]
+    except (OSError, ValueError, IndexError):
+        return 0
+    return 0 if state == "Z" else pid
+
+
+if cmd in ("stop", "restart") and running():
+    os.kill(running(), signal.SIGTERM)
+    for _ in range(100):
+        if not running():
+            break
+        time.sleep(0.05)
+if cmd == "restart" or (cmd == "start" and not running()):
+    with open(os.path.join(home, ".config", "systemd", "user", unit)) as f:
+        line = [x for x in f.read().splitlines() if x.startswith("ExecStart=")][0]
+    argv = shlex.split(line.partition("=")[2].replace("%h", home))
+    bind = os.environ.get("FAKE_BIND")
+    if bind:
+        argv = [bind if a == "0.0.0.0" else a for a in argv]
+    with open(os.path.join(home, unit + ".log"), "ab") as log:
+        p = subprocess.Popen(
+            argv,
+            cwd=home,
+            stdin=subprocess.DEVNULL,
+            stdout=log,
+            stderr=log,
+            start_new_session=True,
+        )
+    with open(pid_file, "w") as f:
+        f.write(str(p.pid))
+elif cmd == "is-active":
+    print("active" if running() else "inactive")
+    sys.exit(0 if running() else 3)
+elif cmd == "show":
+    print(running())
+elif cmd == "status":
+    print("* %s - the request service" % unit)
+    print("     Active: %s" % ("active (running)" if running() else "inactive (dead)"))

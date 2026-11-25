@@ -1,0 +1,7 @@
+{
+  "folders": ["projects/mine"],
+  "values": {
+    "ci_absent_modules": ["torch"],
+    "develop_rocke_job_pattern": "mine"
+  }
+}

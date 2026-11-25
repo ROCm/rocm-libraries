@@ -1,0 +1,176 @@
+#!/usr/bin/env python3
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+"""A stand-in for docker, for the tests of docker/rkmon: it never runs a container. Each call is recorded in
+FAKE_DOCKER_LOG (one line: the folder it ran in, a tab, its arguments). `compose ps --status running --quiet rkmon`
+answers a container ID when FAKE_DOCKER_RUNNING=1, else nothing; nothing too once the file FAKE_DOCKER_STOPPED names,
+when that is set, exists: a `compose stop` or `compose down` that exits 0 makes it, and a `compose up` that exits 0
+removes it. A `compose down` that exits 0 copies the file FAKE_DOCKER_DOWN names, when that is set, over the one
+FAKE_DOCKER_ANSWERS names: docker's answers once the removal is done. Whose a container name is (identity's question,
+`ps --all --filter label=com.docker.compose.project=NAME --format {{json .}}`) is always answered, exit 0: the
+container of the compose project FAKE_DOCKER_PROJECT (default rkmon), made from the folder FAKE_DOCKER_WORKDIR, when
+that is set and NAME is that project; none otherwise. Every other call exits FAKE_DOCKER_EXIT (default 0).
+FAKE_DOCKER_ANSWERS comes before all of these (main says its rows). A build's named contexts
+(`--build-context NAME=FOLDER`) are copied to FAKE_DOCKER_CONTEXTS/NAME, when that is set, as the build would read
+them: the last build's. A `run --cidfile FILE` writes FAKE_DOCKER_CID, when that is set, to FILE first, as docker
+writes the id of the container it makes there before the container runs.
+"""
+
+import json
+import os
+import signal
+import sys
+
+
+def pwd() -> str:
+    """The folder as `pwd` names it: $PWD when it is this folder, else the physical path."""
+    p = os.environ.get("PWD", "")
+    try:
+        if p.startswith("/") and os.path.samefile(p, "."):
+            return p
+    except OSError:
+        pass
+    return os.getcwd()
+
+
+def main(args: list) -> int:
+    log = os.environ.get("FAKE_DOCKER_LOG")
+    earlier = ""  # the calls before this one, as the log has them
+    if log:
+        if os.path.exists(log):
+            with open(log, encoding="utf-8") as f:
+                earlier = f.read()
+        with open(log, "a", encoding="utf-8") as f:
+            f.write(f"{pwd()}\t{' '.join(args)}\n")
+    contexts = os.environ.get("FAKE_DOCKER_CONTEXTS")
+    if contexts and args[:1] == ["build"]:
+        import shutil
+
+        for i, a in enumerate(args[:-1]):
+            if a == "--build-context":
+                name, _, folder = args[i + 1].partition("=")
+                copy = os.path.join(contexts, name)
+                shutil.rmtree(copy, ignore_errors=True)
+                shutil.copytree(folder, copy)
+    cid = os.environ.get("FAKE_DOCKER_CID")
+    if cid and args[:1] == ["run"] and "--cidfile" in args[:-1]:
+        with open(args[args.index("--cidfile") + 1], "w", encoding="utf-8") as f:
+            f.write(cid)
+    # NAME=value of each variable FAKE_DOCKER_ENV names, in FAKE_DOCKER_ENV_LOG
+    env_log = os.environ.get("FAKE_DOCKER_ENV_LOG")
+    if env_log:
+        with open(env_log, "a", encoding="utf-8") as f:
+            for name in filter(None, os.environ.get("FAKE_DOCKER_ENV", "").split(",")):
+                if name in os.environ:
+                    f.write(f"{name}={os.environ[name]}\n")
+    # FAKE_DOCKER_ANSWERS: a JSON file of [pattern, output, exit code] rows, each with an optional fourth element, a
+    # map of variables the call's environment must hold, and an optional fifth, a map: "after", a pattern the calls
+    # before it must show (re.search in FAKE_DOCKER_LOG's lines before this call's); "unless", a file whose existence
+    # keeps the row from answering; "makes", a file the call makes once the row answers it (so a later call is
+    # answered as after what this one did); "ends", a file the call makes as it ends, when no Ctrl-C stopped it;
+    # "sleeps", the seconds the call takes before it answers (one that docker/rkmon stops at its time limit). The
+    # first row whose pattern is found (re.search) in the call's arguments, joined by spaces, and whose other elements
+    # match, answers it. Its stdin, when it gets one, goes to FAKE_DOCKER_STDIN, byte for byte. The exit code "SIGINT"
+    # is Ctrl-C's: the process that called docker gets SIGINT, as a terminal's Ctrl-C sends it to the processes of its
+    # foreground process group, and the call, when it is one of them, exits 130; a call in a process group of its own
+    # (docker/rkmon's run_whole, or relayed's terminal of its own) runs on to its end, half a second later, whatever
+    # becomes of its terminal (it ignores SIGHUP: only a kill stops it short), and exits 0.
+    answers = os.environ.get("FAKE_DOCKER_ANSWERS")
+    if answers:
+        import re
+
+        with open(answers, encoding="utf-8") as f:
+            rows = json.load(f)
+        line = " ".join(args)
+        for row in rows:
+            pattern, output, code = row[:3]
+            want = row[3] if len(row) > 3 else {}
+            more = row[4] if len(row) > 4 else {}
+            if "unless" in more and os.path.exists(more["unless"]):
+                continue
+            after = more.get("after", "")
+            if (
+                re.search(pattern, line)
+                and all(os.environ.get(k, "") == v for k, v in want.items())
+                and (not after or re.search(after, earlier))
+            ):
+                if "makes" in more:
+                    open(more["makes"], "a", encoding="utf-8").close()
+                if os.environ.get("FAKE_DOCKER_STDIN") and not sys.stdin.isatty():
+                    data = sys.stdin.buffer.read()
+                    if data:
+                        with open(os.environ["FAKE_DOCKER_STDIN"], "ab") as f:
+                            f.write(data)
+                if "sleeps" in more:
+                    import time
+
+                    time.sleep(float(more["sleeps"]))
+                if output:
+                    sys.stdout.write(output if output.endswith("\n") else output + "\n")
+                if code == "SIGINT":
+                    sys.stdout.flush()
+                    caller = os.getppid()
+                    own = os.getpgid(0) != os.getpgid(caller)
+                    if own:
+                        signal.signal(signal.SIGHUP, signal.SIG_IGN)
+                    os.kill(caller, signal.SIGINT)
+                    if not own:
+                        return 130
+                    import time
+
+                    time.sleep(0.5)
+                    code = 0
+                if "ends" in more:
+                    open(more["ends"], "a", encoding="utf-8").close()
+                return int(code)
+    stopped = os.environ.get("FAKE_DOCKER_STOPPED", "")
+    if args[:3] == ["compose", "ps", "--status"]:
+        if os.environ.get("FAKE_DOCKER_RUNNING", "0") == "1" and not (
+            stopped and os.path.exists(stopped)
+        ):
+            print("0123456789ab")
+        return 0
+    if args[:2] == ["ps", "--all"] and "--filter" in args:
+        # identity's question: the project's container, made from FAKE_DOCKER_WORKDIR (none when it is not set)
+        project = os.environ.get("FAKE_DOCKER_PROJECT") or "rkmon"
+        workdir = os.environ.get("FAKE_DOCKER_WORKDIR")
+        asked = args[args.index("--filter") + 1 :][:1]
+        if workdir and asked == [f"label=com.docker.compose.project={project}"]:
+            print(
+                json.dumps(
+                    {
+                        "Names": f"{project}-rkmon-1",
+                        "Labels": f"com.docker.compose.project={project},"
+                        f"com.docker.compose.project.working_dir={workdir},"
+                        "com.docker.compose.service=rkmon",
+                    }
+                )
+            )
+        return 0
+    try:
+        code = int(os.environ.get("FAKE_DOCKER_EXIT") or "0")
+    except ValueError:
+        print(
+            f"fake_docker: exit: Illegal number: {os.environ['FAKE_DOCKER_EXIT']}",
+            file=sys.stderr,
+        )
+        return 2
+    if stopped and code == 0 and args[:2] in (["compose", "stop"], ["compose", "down"]):
+        open(stopped, "a", encoding="utf-8").close()
+    after = os.environ.get("FAKE_DOCKER_DOWN")
+    if after and answers and code == 0 and args[:2] == ["compose", "down"]:
+        import shutil
+
+        shutil.copyfile(after, answers)
+    if (
+        stopped
+        and code == 0
+        and args[:2] == ["compose", "up"]
+        and os.path.exists(stopped)
+    ):
+        os.unlink(stopped)
+    return code
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

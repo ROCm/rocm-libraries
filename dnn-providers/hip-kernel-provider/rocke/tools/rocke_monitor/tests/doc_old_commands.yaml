@@ -1,0 +1,79 @@
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+#
+# The old command names that rkmon_lib/commands.py's GONE does not hold: GONE is the one
+# home of each command and option of rkmon's that another command replaced, and tools/doc_lints.py builds an old
+# command of each of its rows. The old-commands lint looks for both in the docs, the messages and the skill files, text
+# in backticks included; the tests of the commands that replaced them read this list too. instead: what to run in its
+# place; pattern: a regular expression that finds the old name; every_file: true, to read every file of the package
+# for it, its code included; allowed: the places that keep it, each a mapping as tests/doc_words.yaml says.
+
+PREFLIGHT:
+  instead: rkmon check --settings FILE
+  pattern: '\bPREFLIGHT\b'
+
+rkmon swap:
+  instead: set image.tag, then rkmon confirm and rkmon apply
+  pattern: '\brkmon swap\b|\bswap --tag\b'
+
+rkmon refresh:
+  instead: rkmon package update --from NEW
+  pattern: '\brkmon refresh\b|\brefresh --from\b'
+
+setup --section:
+  instead: your deploy settings file, rkmon login, rkmon secret, or /rkmon-setup
+  pattern: '\bsetup --section\b'
+
+rk settings export:
+  instead: rk config show
+  pattern: '\brk settings export\b'
+  allowed:
+    - files: 'QUICK_DEPLOY_GUIDE\.md'
+      section: Moving from an existing monitor
+      why: step 1 of the move runs the existing package's own command, the one place a doc may name it
+
+rk off:
+  instead: rk pause
+  pattern: '\brk off\b(?! (?:the|a|an|its)\b)'
+  every_file: true
+
+rk on:
+  instead: rk resume
+  pattern: '\brk on\b(?! (?:the|a|an|its)\b)'
+  every_file: true
+
+rk stop --wait:
+  instead: rk stop --drain --timeout-minutes N
+  pattern: '\bstop(?: \[?--drain\]?)? \[?--wait\b|--wait MIN\b|`--wait` minutes'
+  every_file: true
+  allowed:
+    - files: 'rkmon\.py'
+      keep: '^stop --wait$'
+      why: rk's usage error names the command to run instead (INSTEAD)
+
+rkmon update:
+  instead: rkmon package update (with --rollback, rkmon rollback)
+  pattern: '\brkmon update\b'
+
+rk update:
+  instead: on the host, rkmon package update, then rkmon confirm and rkmon apply (with --rollback, rkmon rollback)
+  pattern: '\brk update\b'
+
+rk setup:
+  instead: on the host, your deploy settings file, rkmon login, rkmon secret, or /rkmon-setup
+  pattern: '\brk setup\b'
+  every_file: true
+
+"--timeout MIN":
+  instead: --timeout-minutes N
+  pattern: '--timeout(?![-\w])'
+  allowed:
+    - files: 'rkmon_lib/commands\.py'
+      keep: '^first-tick --timeout$'
+      why: GONE's row of the old option, the one home of its old command (tools/doc_lints.py, gone_commands)
+    - files: 'docker/Dockerfile'
+      keep: '(?<= )--timeout(?==\d+s )'
+      why: Docker's HEALTHCHECK option, how long one health check may take
+    - files: 'tools/installed_tests\.py'
+      keep: '^--timeout$'
+      why: pytest's option, one of those the tool passes on with the value after it

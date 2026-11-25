@@ -1,0 +1,3 @@
+{
+  "_comment": "Blank on purpose: a deployment's configuration lives outside the package, in its deploy settings file, which step 1 of QUICK_DEPLOY_GUIDE.md makes. README.md's Settings reference describes each of its keys, and docs/internal_settings.md every other key."
+}

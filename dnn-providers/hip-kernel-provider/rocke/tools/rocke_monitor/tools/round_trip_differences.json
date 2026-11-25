@@ -1,0 +1,304 @@
+{
+  "about": "The intended differences of the round trip: where production's configuration and the deploy settings file translated from it may differ, each row with why. tools/round_trip.py reads it, and its docstring gives a row's form; the property test of the running configuration reads it too (tests/test_runtime_config.py). The rows the owner agreed for the package keys production sets to another value are in a file of the same form outside the package, which the command names.",
+  "differences": [
+    {
+      "keys": ["worker"],
+      "kind": "value",
+      "after": "(no drafting model)",
+      "why": "production binds no drafting model: the verification pass reviews alone, so the local worker's settings are not carried, and the report names each one"
+    },
+    {
+      "keys": ["worker.think"],
+      "kind": "value",
+      "why": "merged into the first review pass's effort: a thinking level is not sent to a model that is not Claude, so the effort is \"default\", which sends none; each effort as sent is compared as an effort"
+    },
+    {
+      "keys": ["ANTHROPIC_MODEL", "ANTHROPIC_DEFAULT_*_MODEL"],
+      "kind": "value",
+      "production": "set",
+      "blank": ["after"],
+      "why": "each call names its model by its built-in id, which the gateway takes: no model variable is set, and the report names each one the older Claude secret sets"
+    },
+    {
+      "keys": ["CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC"],
+      "kind": "value",
+      "after": "1",
+      "why": "the container turns Claude Code's nonessential traffic off for every session, whatever the older Claude secret sets: the claude login is the key alone"
+    },
+    {
+      "keys": ["team_dashboard.public_port"],
+      "kind": "value",
+      "production": 0,
+      "default": ["after"],
+      "why": "0 stands for the port the team dashboard is served on, which the file writes"
+    },
+    {
+      "keys": ["team_dashboard.public_port"],
+      "kind": "value",
+      "blank": ["production"],
+      "default": ["after"],
+      "why": "a blank stands for the port the team dashboard is served on, which the file writes"
+    },
+    {
+      "keys": ["admin_dashboard.public_port"],
+      "kind": "value",
+      "blank": ["production"],
+      "default": ["after"],
+      "why": "a blank stands for the admin dashboard's default port, which the file writes"
+    },
+    {
+      "keys": ["admin_dashboard.public_port"],
+      "kind": "value",
+      "production": 0,
+      "default": ["after"],
+      "why": "0 stands for the admin dashboard's default port, which the file writes"
+    },
+    {
+      "keys": ["container.uid", "container.gid"],
+      "kind": "value",
+      "blank": ["production", "after"],
+      "why": "a blank user or group id is null in the file: the same meaning, in the schema's form"
+    },
+    {
+      "keys": ["publish.html.url", "team_dashboard.url", "jira.url", "atlassian.site"],
+      "kind": "value",
+      "extends": "production",
+      "by": "/",
+      "why": "an address the file writes without its closing slash"
+    },
+    {
+      "keys": ["team_dashboard.url", "jira.url", "atlassian.site"],
+      "kind": "value",
+      "blank": ["production"],
+      "why": "merged: one key for the address, which the other key gives (for the JIRA site, the translation stops when the two differ)"
+    },
+    {
+      "keys": ["tick_interval_min"],
+      "kind": "value",
+      "why": "merged into the monitor's one tick interval: production's own is not carried, and the report names it"
+    },
+    {
+      "keys": ["effort"],
+      "kind": "value",
+      "why": "each pass's effort, resolved through today's chain and written: each effort as sent is compared as an effort"
+    },
+    {
+      "keys": ["gpu.env.ROCKE_BACKEND"],
+      "kind": "value",
+      "production": "python",
+      "blank": ["after"],
+      "why": "each GPU job sets the repository defaults' variables first (gpu.base_env): the file leaves out each one that equals them"
+    },
+    {
+      "keys": ["gpu.qos", "gpu.gpus_per_job"],
+      "kind": "value",
+      "blank": ["production"],
+      "default": ["after"],
+      "why": "a job option of the remote GPU tests at its default: no quality of service, and one GPU per job, as a job asked for without it"
+    },
+    {
+      "keys": [
+        "features.merge_queue.drift_notices",
+        "features.merge_queue.queue_notices",
+        "claude.api_key_sent_as",
+        "claude.api_key_header",
+        "claude.api_key_scheme",
+        "gh.max_requests_per_hour",
+        "features.review_automation.automated_reviewer_name",
+        "split_part_lines",
+        "effort.first_pass",
+        "jira.default_epic"
+      ],
+      "kind": "value",
+      "blank": ["production"],
+      "default": ["after"],
+      "why": "a deploy key no configuration file of an earlier setup has, at its default, which is what its reader takes without it"
+    },
+    {
+      "keys": ["features.alerts.mode", "features.dashboards.team.mode", "features.ticket_creation.mode"],
+      "kind": "value",
+      "blank": ["production"],
+      "default": ["after"],
+      "why": "no configuration file of an earlier setup says whether a feature that sends is in prototype mode or live mode: the running configuration has prototype, the default, which is what its reader takes without it"
+    },
+    {
+      "keys": ["needs-you-alerts", "chat-alerts"],
+      "kind": "feature",
+      "production": true,
+      "after": false,
+      "why": "one switch sends both types of alert today, while either of production's two switches is on; the file keeps the two, so the alerts whose switch is off are not sent, and the report says so"
+    },
+    {
+      "keys": ["audit", "deep"],
+      "kind": "effort",
+      "why": "the offload's efforts (effort.audit and effort.deep, else claude.effort): the offload goes with its efforts, so no request carries them"
+    },
+    {
+      "keys": ["review_first_line"],
+      "kind": "line 1",
+      "blank": ["after"],
+      "why": "the drafter's line 1, compared apart from the automated reviewer name it gives (features.review_automation.automated_reviewer_name, else container.name, each compared as a value): with no drafting model, the drafter's line is not used, and line 1 is the verifier's (review_first_line_no_draft)"
+    },
+    {
+      "keys": ["claude.effort"],
+      "kind": "internal value",
+      "why": "merged into each Claude pass's effort, which the file writes resolved through today's chain: each effort as sent is compared as an effort"
+    },
+    {
+      "keys": ["offload.check_total_s"],
+      "kind": "internal value",
+      "production": 900,
+      "why": "the offload's evidence-check budget goes with the offload; the first review pass's stays 600 seconds (drafter.check_total_s)"
+    },
+    {
+      "keys": [
+        "worker.api_key_env",
+        "worker.header_env",
+        "worker.headers_file",
+        "worker.source",
+        "worker.omp_provider",
+        "worker.context",
+        "worker.temperature",
+        "worker.max_output_tokens",
+        "worker.num_batch",
+        "worker.keep_alive",
+        "worker.max_steps",
+        "worker.hang_s",
+        "worker.max_hangs",
+        "worker.max_resends",
+        "mirror",
+        "offload",
+        "models.verify",
+        "models.quality",
+        "models.post",
+        "models.tick",
+        "models.analytics",
+        "models.planner",
+        "models.analyst",
+        "roles",
+        "effort.audit",
+        "effort.deep",
+        "effort.tick",
+        "admin_dashboard.token_file",
+        "admin_dashboard.url",
+        "atlassian.proxy_url",
+        "confluence.space",
+        "confluence.site",
+        "wsl_distro",
+        "update.path",
+        "update.test_timeout_min",
+        "container.mounts",
+        "services"
+      ],
+      "kind": "internal value",
+      "why": "a removed key no feature reads: the translation's report names it, or counts it when blank or off"
+    },
+    {
+      "keys": ["admin_dashboard.publish_host"],
+      "kind": "internal value",
+      "after": "127.0.0.1",
+      "why": "the admin dashboard is reached on 127.0.0.1 alone, the address its readers take without the key"
+    },
+    {
+      "keys": ["container.write_uid", "container.pr_uid"],
+      "kind": "internal value",
+      "why": "the package's user ids: no file outside the container's volumes is this user's, so no deployment changes them"
+    },
+    {
+      "keys": ["paths.rocm_reference_clang"],
+      "kind": "internal value",
+      "why": "a package build default: the doctor compares this machine's clang with the commit the package's build plan names"
+    },
+    {
+      "keys": ["loop_log_max_mb"],
+      "kind": "internal value",
+      "why": "merged into retention.log_max_mb, the one log size limit: production's own is not carried, and the report names it"
+    },
+    {
+      "keys": ["paths", "claude_workspace", "ramdisk.path"],
+      "kind": "internal value",
+      "owner": "derived",
+      "why": "derived from the container's layout: the container's own folders and files"
+    },
+    {
+      "keys": ["admin_dashboard.port", "admin_dashboard.bind", "team_dashboard.port", "team_dashboard.bind"],
+      "kind": "internal value",
+      "owner": "derived",
+      "why": "derived from the container's layout: inside the container each dashboard listens on every address of the container's own network, at its own port, and the deployment says which address and port of the host reach it"
+    },
+    {
+      "keys": ["codeowner_org", "clone_url"],
+      "kind": "internal value",
+      "owner": "derived",
+      "why": "derived from the repository's name: its organization and GitHub's address of it, which a blank took too"
+    },
+    {
+      "keys": ["profile_dir"],
+      "kind": "internal value",
+      "owner": "derived",
+      "why": "derived from the repository's name and folder: the folder of the repository defaults that apply"
+    },
+    {
+      "keys": ["followup_scan.dir", "weekly_report.dir"],
+      "kind": "internal value",
+      "owner": "derived",
+      "why": "derived from the container's layout: the folder in the monitor's state folder, where a blank put them"
+    },
+    {
+      "keys": ["draft_stage", "models.draft", "worker.tag"],
+      "kind": "internal value",
+      "owner": "derived",
+      "why": "derived from the first review pass's model: the stage that runs (no draft while that model is \"default\", the choice \"auto\" and a blank meant), the model that drafts, and its tag (bindings.worker_tag, which a blank meant)"
+    },
+    {
+      "keys": ["verifier_name"],
+      "kind": "internal value",
+      "owner": "derived",
+      "why": "derived from the verification pass's model: the footer names the model that verifies (bindings.verifier_name, which a blank meant); the verifier's line 1, which names it too, is compared as line 1"
+    },
+    {
+      "keys": ["gpu.known_hosts", "publish.html.known_hosts"],
+      "kind": "internal value",
+      "owner": "derived",
+      "why": "derived: the file in the working folder that ssh's callers write the host's own keys to, which the state records (the remote GPU tests the login host's, the team dashboard's pushes the web host's); ssh's own known_hosts and the file setup wrote, which a blank meant, are never read"
+    },
+    {
+      "keys": ["*"],
+      "kind": "internal value",
+      "owner": "derived",
+      "why": "a derived key, computed at each load from the file, its secrets and the container's layout: the translation's report names each one production sets"
+    },
+    {
+      "keys": ["*"],
+      "kind": "internal value",
+      "owner": "state",
+      "blank": ["production"],
+      "default": ["after"],
+      "why": "a state key at the internal state's default: no configuration file of an earlier setup has it"
+    },
+    {
+      "keys": [
+        "gpu.base_env",
+        "incident_issue.title_pattern",
+        "incident_issue.test_name_pattern",
+        "incident_issue.umbrella_test_names"
+      ],
+      "kind": "internal value",
+      "blank": ["production"],
+      "why": "a package key the repository defaults set, which no configuration file of an earlier setup has: the running configuration has the repository defaults' value, or the package's own where none apply"
+    },
+    {
+      "keys": [
+        "settle_burst_min",
+        "settle_develop_fix_min",
+        "resources.work_memory_gib",
+        "ramdisk.review_estimate_gib",
+        "ramdisk.build_estimate_gib"
+      ],
+      "kind": "internal value",
+      "blank": ["production"],
+      "default": ["after"],
+      "why": "a package key of the sizing or the settle at its default, which is what its readers take without it"
+    }
+  ]
+}

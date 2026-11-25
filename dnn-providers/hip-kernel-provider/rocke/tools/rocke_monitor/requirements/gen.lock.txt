@@ -1,0 +1,12 @@
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+# The generator venv's exact versions, as the live generator venv runs them (Python 3.14, `pip freeze`): the image
+# installs these (pip install -r requirements/gen.lock.txt); gen.txt sets the lower bounds.
+iniconfig==2.3.1
+Jinja2==3.1.6
+MarkupSafe==3.0.4
+packaging==26.3
+pluggy==1.7.0
+Pygments==2.21.0
+pytest==9.1.1
+PyYAML==6.0.3
