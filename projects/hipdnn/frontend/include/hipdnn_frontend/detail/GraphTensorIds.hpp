@@ -5,6 +5,8 @@
 #include <hipdnn_frontend/Error.hpp>
 #include <hipdnn_frontend/attributes/TensorAttributes.hpp>
 
+#include <algorithm>
+#include <cstddef>
 #include <cstdint>
 #include <memory>
 #include <string>
@@ -14,8 +16,58 @@
 namespace hipdnn_frontend::detail
 {
 
-inline std::unordered_set<int64_t>
-    getUsedIds(const std::unordered_set<std::shared_ptr<graph::TensorAttributes>>& allTensors)
+// Collects graph tensors without duplicates and iterates them in insertion order.
+// Everything derived from that order, such as the UIDs populateHipdnnTensorIds()
+// assigns, follows the order in which the nodes insert their tensors. Within a node,
+// inputs and outputs follow the iteration order of the attributes' std::unordered_map,
+// which depends on the standard library and on the order in which the attribute setters
+// were called. Identical graphs get the same UIDs only when they are built with the same
+// setter order and the same standard library.
+class OrderedTensorSet
+{
+public:
+    using value_type = std::shared_ptr<graph::TensorAttributes>;
+    using const_iterator = std::vector<value_type>::const_iterator;
+
+    void insert(const value_type& tensor)
+    {
+        if(_members.insert(tensor.get()).second)
+        {
+            _tensors.push_back(tensor);
+        }
+    }
+
+    size_t count(const value_type& tensor) const
+    {
+        return _members.count(tensor.get());
+    }
+
+    const_iterator find(const value_type& tensor) const
+    {
+        return count(tensor) == 0 ? end() : std::find(begin(), end(), tensor);
+    }
+
+    size_t size() const
+    {
+        return _tensors.size();
+    }
+
+    const_iterator begin() const
+    {
+        return _tensors.begin();
+    }
+
+    const_iterator end() const
+    {
+        return _tensors.end();
+    }
+
+private:
+    std::vector<value_type> _tensors;
+    std::unordered_set<const graph::TensorAttributes*> _members;
+};
+
+inline std::unordered_set<int64_t> getUsedIds(const OrderedTensorSet& allTensors)
 {
     std::unordered_set<int64_t> usedIds;
     for(const auto& tensor : allTensors)
@@ -38,9 +90,8 @@ inline int64_t getUnusedTensorUid(int64_t& currentTensorId, std::unordered_set<i
     return currentTensorId++;
 }
 
-inline void populateHipdnnTensorIds(
-    const std::unordered_set<std::shared_ptr<graph::TensorAttributes>>& allTensors,
-    std::unordered_set<int64_t>& usedIds)
+inline void populateHipdnnTensorIds(const OrderedTensorSet& allTensors,
+                                    std::unordered_set<int64_t>& usedIds)
 {
     int64_t currentTensorId = 0;
 
@@ -58,8 +109,7 @@ inline void populateHipdnnTensorIds(
     }
 }
 
-inline Error checkTensorUidsSetImpl(
-    const std::unordered_set<std::shared_ptr<graph::TensorAttributes>>& allTensors)
+inline Error checkTensorUidsSetImpl(const OrderedTensorSet& allTensors)
 {
     std::vector<std::string> missingUidTensors;
 
@@ -87,8 +137,7 @@ inline Error checkTensorUidsSetImpl(
     return {ErrorCode::OK, ""};
 }
 
-inline Error checkNoDuplicateTensorIdsImpl(
-    const std::unordered_set<std::shared_ptr<graph::TensorAttributes>>& allTensors)
+inline Error checkNoDuplicateTensorIdsImpl(const OrderedTensorSet& allTensors)
 {
     std::unordered_set<int64_t> seenUids;
     std::unordered_set<int64_t> duplicateUids;

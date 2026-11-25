@@ -11,7 +11,9 @@
 #include "fake_backend/MockHipdnnBackend.hpp"
 
 #include <algorithm>
+#include <cstdint>
 #include <cstring>
+#include <limits>
 #include <string>
 #include <vector>
 
@@ -681,7 +683,7 @@ TEST(TestConvolutionNode, GatherHipdnnTensor)
     const GraphAttributes graphAttributes;
     const ConvolutionFpropNode node(std::move(convAttributes), graphAttributes);
 
-    std::unordered_set<std::shared_ptr<TensorAttributes>> allTensors;
+    hipdnn_frontend::detail::OrderedTensorSet allTensors;
 
     node.gather_hipdnn_tensors(allTensors);
 
@@ -1991,6 +1993,118 @@ TEST(TestConvolutionNode, PreValidateNodeInputTooSmall)
 
     const auto error = node.pre_validate_node();
     EXPECT_EQ(error.code, error_code_t::INVALID_VALUE);
+}
+
+namespace
+{
+constexpr int64_t K_INT64_MAX = std::numeric_limits<int64_t>::max();
+// dilation * 4 wraps to 4 in two's complement
+constexpr int64_t K_WRAPPING_DILATION = (int64_t{1} << 62) + 1;
+
+// Fprop node over x {1, 3, 8, 8} with stride 1 and the same padding before and after each
+// spatial dimension. An empty yDims leaves y to inference.
+ConvolutionFpropNode makeShapeOverflowFpropNode(const std::vector<int64_t>& wDims,
+                                                const std::vector<int64_t>& yDims,
+                                                const std::vector<int64_t>& padding,
+                                                const std::vector<int64_t>& dilation)
+{
+    ConvFpropAttributes convAttributes;
+
+    auto xTensor = std::make_shared<TensorAttributes>();
+    xTensor->set_dim({1, 3, 8, 8});
+    xTensor->set_stride({192, 64, 8, 1});
+    convAttributes.set_x(xTensor);
+
+    auto wTensor = std::make_shared<TensorAttributes>();
+    wTensor->set_dim(wDims);
+    convAttributes.set_w(wTensor);
+
+    auto yTensor = std::make_shared<TensorAttributes>();
+    yTensor->set_dim(yDims);
+    convAttributes.set_y(yTensor);
+
+    convAttributes.set_pre_padding(padding);
+    convAttributes.set_post_padding(padding);
+    convAttributes.set_stride({1, 1});
+    convAttributes.set_dilation(dilation);
+
+    return {std::move(convAttributes), GraphAttributes{}};
+}
+} // namespace
+
+TEST(TestConvolutionNode, InferPropertiesNodeRejectsPaddingOverflow)
+{
+    // 8 + max + max - 3 wraps to 3, which would infer an output extent of 4
+    auto node = makeShapeOverflowFpropNode({64, 3, 3, 3}, {}, {K_INT64_MAX, 0}, {1, 1});
+
+    auto error = node.infer_properties_node();
+    EXPECT_EQ(error.code, error_code_t::INVALID_VALUE);
+    EXPECT_NE(error.err_msg.find("overflows int64"), std::string::npos) << error.err_msg;
+    EXPECT_TRUE(node.attributes.get_y()->get_dim().empty());
+}
+
+TEST(TestConvolutionNode, InferPropertiesNodeRejectsDilationOverflow)
+{
+    auto node = makeShapeOverflowFpropNode({64, 3, 5, 5}, {}, {0, 0}, {K_WRAPPING_DILATION, 1});
+
+    auto error = node.infer_properties_node();
+    EXPECT_EQ(error.code, error_code_t::INVALID_VALUE);
+    EXPECT_NE(error.err_msg.find("overflows int64"), std::string::npos) << error.err_msg;
+    EXPECT_TRUE(node.attributes.get_y()->get_dim().empty());
+}
+
+TEST(TestConvolutionNode, InferPropertiesNodeLargeDilationKeepsNegativeOutputSizeError)
+{
+    // The dilated kernel size fits int64, so the negative-output-size check reports it
+    auto node = makeShapeOverflowFpropNode({64, 3, 5, 5}, {}, {0, 0}, {int64_t{1} << 40, 1});
+
+    auto error = node.infer_properties_node();
+    EXPECT_EQ(error.code, error_code_t::INVALID_VALUE);
+    EXPECT_NE(error.err_msg.find("negative output size"), std::string::npos) << error.err_msg;
+    EXPECT_EQ(error.err_msg.find("overflows"), std::string::npos) << error.err_msg;
+}
+
+TEST(TestConvolutionNode, PreValidateNodeRejectsPaddingOverflowWithYSet)
+{
+    // y matches the extent the wrapped numerator would produce
+    const auto node
+        = makeShapeOverflowFpropNode({64, 3, 3, 3}, {1, 64, 4, 6}, {K_INT64_MAX, 0}, {1, 1});
+
+    auto error = node.pre_validate_node();
+    EXPECT_EQ(error.code, error_code_t::INVALID_VALUE);
+    EXPECT_NE(error.err_msg.find("overflows int64"), std::string::npos) << error.err_msg;
+}
+
+TEST(TestConvolutionNode, PreValidateNodeRejectsDilationOverflowWithYSet)
+{
+    const auto node = makeShapeOverflowFpropNode(
+        {64, 3, 5, 5}, {1, 64, 4, 4}, {0, 0}, {K_WRAPPING_DILATION, 1});
+
+    auto error = node.pre_validate_node();
+    EXPECT_EQ(error.code, error_code_t::INVALID_VALUE);
+    EXPECT_NE(error.err_msg.find("overflows int64"), std::string::npos) << error.err_msg;
+}
+
+TEST(TestConvolutionNode, PreValidateNodeAcceptsLargeNonOverflowingPadding)
+{
+    // 8 + 2^61 + 2^61 - 3 = 2^62 + 5 fits int64, giving an output extent of 2^62 + 6
+    const int64_t padding = int64_t{1} << 61;
+    const auto node = makeShapeOverflowFpropNode(
+        {64, 3, 3, 3}, {1, 64, (int64_t{1} << 62) + 6, 6}, {padding, 0}, {1, 1});
+
+    auto error = node.pre_validate_node();
+    EXPECT_EQ(error.code, error_code_t::OK) << error.err_msg;
+}
+
+TEST(TestConvolutionNode, PreValidateNodeLargeDilationKeepsInputTooSmallError)
+{
+    const auto node
+        = makeShapeOverflowFpropNode({64, 3, 5, 5}, {1, 64, 4, 4}, {0, 0}, {int64_t{1} << 40, 1});
+
+    auto error = node.pre_validate_node();
+    EXPECT_EQ(error.code, error_code_t::INVALID_VALUE);
+    EXPECT_NE(error.err_msg.find("is too small"), std::string::npos) << error.err_msg;
+    EXPECT_EQ(error.err_msg.find("overflows"), std::string::npos) << error.err_msg;
 }
 
 // =============================================================================

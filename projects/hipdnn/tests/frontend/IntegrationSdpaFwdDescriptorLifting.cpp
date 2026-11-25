@@ -296,10 +296,11 @@ TEST_F(IntegrationSdpaFwdDescriptorLifting, SdpaFwdLiftWithoutFinalization)
 
 // Builds an SDPA fprop graph with all compatible optional boolean flags, scalar parameters,
 // and optional tensors set, lowers via the C-API, lifts back, and verifies
-// every attribute survives.
+// every attribute survives. Dropout takes its Philox form (probability, seed, offset); the
+// custom-mask form, which excludes a probability, is SdpaFwdCustomDropoutRoundTrip.
 TEST_F(IntegrationSdpaFwdDescriptorLifting, SdpaFwdWithCompatibleOptionalAttributesViaCApi)
 {
-    const auto originalGraph = buildGraph();
+    auto originalGraph = buildGraph();
 
     auto& subNodes = originalGraph->getSubNodes();
     ASSERT_EQ(subNodes.size(), 1u);
@@ -309,58 +310,48 @@ TEST_F(IntegrationSdpaFwdDescriptorLifting, SdpaFwdWithCompatibleOptionalAttribu
     // Compatible optional input tensors; attention scale is set as a scalar below. The page
     // tables make K and V paged containers, which max_seq_len_kv requires.
 
-    const auto attnMask = std::make_shared<TensorAttributes>();
+    auto attnMask = std::make_shared<TensorAttributes>();
     attnMask->set_uid(K_SDPA_TENSOR_ATTN_MASK_UID)
         .set_name("ATTN_MASK")
         .set_data_type(DataType::FLOAT);
     attnMask->set_dim(toVec(K_SDPA_TENSOR_ATTN_MASK_DIMS))
         .set_stride(toVec(K_SDPA_TENSOR_ATTN_MASK_STRIDES));
 
-    const auto seqLenQ = std::make_shared<TensorAttributes>();
+    auto seqLenQ = std::make_shared<TensorAttributes>();
     seqLenQ->set_uid(K_SDPA_TENSOR_SEQ_LEN_Q_UID)
         .set_name("SEQ_LEN_Q")
         .set_data_type(DataType::INT32);
     seqLenQ->set_dim(toVec(K_SDPA_TENSOR_SEQ_LEN_DIMS))
         .set_stride(toVec(K_SDPA_TENSOR_SEQ_LEN_STRIDES));
 
-    const auto seqLenKv = std::make_shared<TensorAttributes>();
+    auto seqLenKv = std::make_shared<TensorAttributes>();
     seqLenKv->set_uid(K_SDPA_TENSOR_SEQ_LEN_KV_UID)
         .set_name("SEQ_LEN_KV")
         .set_data_type(DataType::INT32);
     seqLenKv->set_dim(toVec(K_SDPA_TENSOR_SEQ_LEN_DIMS))
         .set_stride(toVec(K_SDPA_TENSOR_SEQ_LEN_STRIDES));
 
-    const auto pageTableK = std::make_shared<TensorAttributes>();
+    auto pageTableK = std::make_shared<TensorAttributes>();
     pageTableK->set_uid(K_SDPA_TENSOR_PAGE_TABLE_K_UID)
         .set_name("PAGE_TABLE_K")
         .set_data_type(DataType::INT32);
     pageTableK->set_dim(toVec(K_SDPA_TENSOR_PAGE_TABLE_DIMS))
         .set_stride(toVec(K_SDPA_TENSOR_PAGE_TABLE_STRIDES));
 
-    const auto pageTableV = std::make_shared<TensorAttributes>();
+    auto pageTableV = std::make_shared<TensorAttributes>();
     pageTableV->set_uid(K_SDPA_TENSOR_PAGE_TABLE_V_UID)
         .set_name("PAGE_TABLE_V")
         .set_data_type(DataType::INT32);
     pageTableV->set_dim(toVec(K_SDPA_TENSOR_PAGE_TABLE_DIMS))
         .set_stride(toVec(K_SDPA_TENSOR_PAGE_TABLE_STRIDES));
 
-    const auto seed = std::make_shared<TensorAttributes>();
+    auto seed = std::make_shared<TensorAttributes>();
     seed->set_uid(K_SDPA_TENSOR_SEED_UID).set_name("SEED");
     seed->set_value(int32_t{42});
 
-    const auto offset = std::make_shared<TensorAttributes>();
+    auto offset = std::make_shared<TensorAttributes>();
     offset->set_uid(K_SDPA_TENSOR_OFFSET_UID).set_name("OFFSET");
     offset->set_value(int32_t{0});
-
-    const auto dropoutMask = std::make_shared<TensorAttributes>();
-    dropoutMask->set_uid(K_SDPA_TENSOR_DROPOUT_MASK_UID)
-        .set_name("DROPOUT_MASK")
-        .set_data_type(DataType::UINT8);
-    dropoutMask->set_dim(toVec(K_SDPA_TENSOR_Q_DIMS)).set_stride(toVec(K_SDPA_TENSOR_Q_STRIDES));
-
-    const auto dropoutScale = std::make_shared<TensorAttributes>();
-    dropoutScale->set_uid(K_SDPA_TENSOR_DROPOUT_SCALE_UID).set_name("DROPOUT_SCALE");
-    dropoutScale->set_value(1.0f / (1.0f - 0.1f));
 
     sdpaNode->attributes.set_bias(attnMask)
         .set_seq_len_q(seqLenQ)
@@ -368,8 +359,6 @@ TEST_F(IntegrationSdpaFwdDescriptorLifting, SdpaFwdWithCompatibleOptionalAttribu
         .set_paged_attention_k_table(pageTableK)
         .set_paged_attention_v_table(pageTableV)
         .set_dropout(0.1f, seed, offset)
-        .set_dropout_mask(dropoutMask)
-        .set_dropout_scale(dropoutScale)
         .set_alibi_mask(true)
         .set_padding_mask(true)
         .set_generate_stats(true)
@@ -456,20 +445,6 @@ TEST_F(IntegrationSdpaFwdDescriptorLifting, SdpaFwdWithCompatibleOptionalAttribu
     EXPECT_EQ(attrs.get_offset()->get_dim(), (std::vector<int64_t>{1}));
     EXPECT_EQ(attrs.get_offset()->get_stride(), (std::vector<int64_t>{1}));
 
-    ASSERT_NE(attrs.get_dropout_mask(), nullptr);
-    EXPECT_EQ(attrs.get_dropout_mask()->get_uid(), K_SDPA_TENSOR_DROPOUT_MASK_UID);
-    EXPECT_EQ(attrs.get_dropout_mask()->get_name(), "DROPOUT_MASK");
-    EXPECT_EQ(attrs.get_dropout_mask()->get_data_type(), DataType::UINT8);
-    EXPECT_EQ(attrs.get_dropout_mask()->get_dim(), toVec(K_SDPA_TENSOR_Q_DIMS));
-    EXPECT_EQ(attrs.get_dropout_mask()->get_stride(), toVec(K_SDPA_TENSOR_Q_STRIDES));
-
-    ASSERT_NE(attrs.get_dropout_scale(), nullptr);
-    EXPECT_EQ(attrs.get_dropout_scale()->get_uid(), K_SDPA_TENSOR_DROPOUT_SCALE_UID);
-    EXPECT_EQ(attrs.get_dropout_scale()->get_name(), "DROPOUT_SCALE");
-    EXPECT_EQ(attrs.get_dropout_scale()->get_data_type(), DataType::FLOAT);
-    EXPECT_EQ(attrs.get_dropout_scale()->get_dim(), (std::vector<int64_t>{1}));
-    EXPECT_EQ(attrs.get_dropout_scale()->get_stride(), (std::vector<int64_t>{1}));
-
     // Boolean flags (direct member access -- not optional)
     EXPECT_TRUE(attrs.alibi_mask);
     EXPECT_TRUE(attrs.padding_mask);
@@ -497,6 +472,68 @@ TEST_F(IntegrationSdpaFwdDescriptorLifting, SdpaFwdWithCompatibleOptionalAttribu
 
     // MMA core mode
     EXPECT_EQ(attrs.mma_core_mode, DataType::HALF);
+}
+
+// Builds an SDPA fprop graph with the custom dropout form (mask and scale, no probability),
+// lowers via the C-API, lifts back, and verifies the mask and scale survive.
+TEST_F(IntegrationSdpaFwdDescriptorLifting, SdpaFwdCustomDropoutRoundTrip)
+{
+    auto originalGraph = buildGraph();
+
+    auto& subNodes = originalGraph->getSubNodes();
+    ASSERT_EQ(subNodes.size(), 1u);
+    auto* sdpaNode = dynamic_cast<SdpaFwdNode*>(subNodes[0].get());
+    ASSERT_NE(sdpaNode, nullptr);
+
+    auto dropoutMask = std::make_shared<TensorAttributes>();
+    dropoutMask->set_uid(K_SDPA_TENSOR_DROPOUT_MASK_UID)
+        .set_name("DROPOUT_MASK")
+        .set_data_type(DataType::UINT8);
+    dropoutMask->set_dim(toVec(K_SDPA_TENSOR_Q_DIMS)).set_stride(toVec(K_SDPA_TENSOR_Q_STRIDES));
+
+    auto dropoutScale = std::make_shared<TensorAttributes>();
+    dropoutScale->set_uid(K_SDPA_TENSOR_DROPOUT_SCALE_UID).set_name("DROPOUT_SCALE");
+    dropoutScale->set_value(1.0f / (1.0f - 0.1f));
+
+    sdpaNode->attributes.set_dropout(dropoutMask, dropoutScale);
+
+    auto result = originalGraph->validate();
+    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+
+    result = originalGraph->build_operation_graph(_handle);
+    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+
+    auto rawDesc = originalGraph->get_raw_graph_descriptor();
+    ASSERT_NE(rawDesc, nullptr);
+
+    auto liftedGraph = std::make_shared<TestableGraph>();
+    result = liftedGraph->fromBackendDescriptor(rawDesc);
+    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+
+    auto& liftedNodes = liftedGraph->getSubNodes();
+    ASSERT_EQ(liftedNodes.size(), 1u);
+    auto* liftedNode = dynamic_cast<SdpaFwdNode*>(liftedNodes[0].get());
+    ASSERT_NE(liftedNode, nullptr);
+
+    const auto& attrs = liftedNode->attributes;
+
+    ASSERT_NE(attrs.get_dropout_mask(), nullptr);
+    EXPECT_EQ(attrs.get_dropout_mask()->get_uid(), K_SDPA_TENSOR_DROPOUT_MASK_UID);
+    EXPECT_EQ(attrs.get_dropout_mask()->get_name(), "DROPOUT_MASK");
+    EXPECT_EQ(attrs.get_dropout_mask()->get_data_type(), DataType::UINT8);
+    EXPECT_EQ(attrs.get_dropout_mask()->get_dim(), toVec(K_SDPA_TENSOR_Q_DIMS));
+    EXPECT_EQ(attrs.get_dropout_mask()->get_stride(), toVec(K_SDPA_TENSOR_Q_STRIDES));
+
+    ASSERT_NE(attrs.get_dropout_scale(), nullptr);
+    EXPECT_EQ(attrs.get_dropout_scale()->get_uid(), K_SDPA_TENSOR_DROPOUT_SCALE_UID);
+    EXPECT_EQ(attrs.get_dropout_scale()->get_name(), "DROPOUT_SCALE");
+    EXPECT_EQ(attrs.get_dropout_scale()->get_data_type(), DataType::FLOAT);
+    EXPECT_EQ(attrs.get_dropout_scale()->get_dim(), (std::vector<int64_t>{1}));
+    EXPECT_EQ(attrs.get_dropout_scale()->get_stride(), (std::vector<int64_t>{1}));
+
+    EXPECT_FALSE(attrs.dropout_probability.has_value());
+    EXPECT_EQ(attrs.get_seed(), nullptr);
+    EXPECT_EQ(attrs.get_offset(), nullptr);
 }
 
 // Builds an SDPA fprop graph without explicit tensor UIDs, then verifies

@@ -10,6 +10,7 @@
 #include <hipdnn_frontend/attributes/GraphAttributes.hpp>
 #include <hipdnn_frontend/detail/ConvolutionDgradPacker.hpp>
 #include <hipdnn_frontend/detail/ConvolutionDgradUnpacker.hpp>
+#include <hipdnn_frontend/node/detail/CheckedShapeMath.hpp>
 
 namespace hipdnn_frontend::graph
 {
@@ -114,6 +115,25 @@ public:
                             "ConvolutionDgradNode: dx tensor batch size must match dy "
                             "tensor batch size");
 
+        // Channel counts feed the group arithmetic below
+        HIPDNN_RETURN_IF_LT(dyDims[1],
+                            1,
+                            ErrorCode::INVALID_VALUE,
+                            "ConvolutionDgradNode: dy tensor channels (" + std::to_string(dyDims[1])
+                                + ") must be positive");
+
+        HIPDNN_RETURN_IF_LT(wDims[1],
+                            1,
+                            ErrorCode::INVALID_VALUE,
+                            "ConvolutionDgradNode: Weight tensor input channels ("
+                                + std::to_string(wDims[1]) + ") must be positive");
+
+        HIPDNN_RETURN_IF_LT(dxDims[1],
+                            1,
+                            ErrorCode::INVALID_VALUE,
+                            "ConvolutionDgradNode: dx tensor channels (" + std::to_string(dxDims[1])
+                                + ") must be positive");
+
         HIPDNN_RETURN_IF_NE(dxDims[1] % wDims[1],
                             0,
                             ErrorCode::INVALID_VALUE,
@@ -192,8 +212,18 @@ public:
             const auto kernelSize = wDims[i + 2];
             const auto inputSize = dxDims[i + 2];
 
-            const auto dilatedKernelSize = (dilationVal * (kernelSize - 1)) + 1;
-            const auto numerator = inputSize + prePad + postPad - dilatedKernelSize;
+            int64_t dilatedKernelSize = 0;
+            HIPDNN_CHECK_ERROR(detail::checkedDilatedKernelSize(
+                "ConvolutionDgradNode", i, dilationVal, kernelSize, dilatedKernelSize));
+
+            int64_t numerator = 0;
+            HIPDNN_CHECK_ERROR(detail::checkedPaddedNumerator("ConvolutionDgradNode",
+                                                              i,
+                                                              inputSize,
+                                                              prePad,
+                                                              postPad,
+                                                              dilatedKernelSize,
+                                                              numerator));
 
             HIPDNN_RETURN_IF_LT(numerator,
                                 0,
@@ -204,7 +234,9 @@ public:
                                     + std::to_string(kernelSize) + ") and dilation ("
                                     + std::to_string(dilationVal) + ")");
 
-            const int64_t expectedOutputSize = (numerator / strideVal) + 1;
+            int64_t expectedOutputSize = 0;
+            HIPDNN_CHECK_ERROR(detail::checkedStridedExtent(
+                "ConvolutionDgradNode", i, numerator, strideVal, expectedOutputSize));
 
             HIPDNN_RETURN_IF_NE(
                 outputSize,

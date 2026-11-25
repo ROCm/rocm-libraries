@@ -347,6 +347,42 @@ TEST(TestBlockScaleQuantizeNode, PreValidateNodeDefaultAxisNotDivisible)
     EXPECT_EQ(error.code, ErrorCode::INVALID_VALUE);
 }
 
+TEST(TestBlockScaleQuantizeNode, PreValidateNodeScaleRankMustMatchX)
+{
+    const auto makeNodeWithScaleDims = [](const std::vector<int64_t>& scaleDims) {
+        BlockScaleQuantizeAttributes attrs;
+
+        auto xTensor = std::make_shared<TensorAttributes>();
+        xTensor->set_dim({4, 64}).set_stride({64, 1});
+        attrs.set_x(xTensor);
+
+        auto scaleTensor = std::make_shared<TensorAttributes>();
+        scaleTensor->set_dim(scaleDims);
+        attrs.set_scale(scaleTensor);
+
+        attrs.set_y(std::make_shared<TensorAttributes>());
+        attrs.set_block_size(32);
+
+        const GraphAttributes graphAttributes;
+        return BlockScaleQuantizeNode(std::move(attrs), graphAttributes);
+    };
+
+    EXPECT_EQ(makeNodeWithScaleDims({4, 2}).pre_validate_node().code, ErrorCode::OK);
+
+    const std::vector<std::vector<int64_t>> mismatchedScaleDims
+        = {{4, 2, 1}, {4, 1, 2}, {4, 2, 1, 1}, {4}};
+    for(const auto& scaleDims : mismatchedScaleDims)
+    {
+        const auto error = makeNodeWithScaleDims(scaleDims).pre_validate_node();
+        EXPECT_EQ(error.code, ErrorCode::INVALID_VALUE)
+            << "scale rank " << scaleDims.size() << " vs x rank 2";
+        EXPECT_NE(error.get_message().find("scale tensor rank (" + std::to_string(scaleDims.size())
+                                           + ") must equal input tensor rank (2)"),
+                  std::string::npos)
+            << error.get_message();
+    }
+}
+
 TEST(TestBlockScaleQuantizeNode, InferPropertiesNode)
 {
     BlockScaleQuantizeAttributes attrs;
@@ -697,7 +733,7 @@ TEST(TestBlockScaleQuantizeNode, GatherHipdnnTensors)
     const GraphAttributes graphAttributes;
     const BlockScaleQuantizeNode node(std::move(attrs), graphAttributes);
 
-    std::unordered_set<std::shared_ptr<TensorAttributes>> allTensors;
+    hipdnn_frontend::detail::OrderedTensorSet allTensors;
     node.gather_hipdnn_tensors(allTensors);
 
     EXPECT_TRUE(allTensors.find(xTensor) != allTensors.end());

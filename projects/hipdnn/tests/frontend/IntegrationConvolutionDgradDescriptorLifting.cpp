@@ -8,6 +8,8 @@
 #include <string>
 #include <vector>
 
+#include <nlohmann/json.hpp>
+
 #include <hipdnn_frontend.hpp>
 #include <hipdnn_frontend/node/ConvolutionDgradNode.hpp>
 #include <hipdnn_test_sdk/constants/ConvDgradConstants.hpp>
@@ -405,6 +407,40 @@ TEST_F(IntegrationConvolutionBwdDescriptorLifting, JsonRoundTripWithHandle)
     EXPECT_EQ(opNode->attributes.get_stride(), toVec(K_DGRAD_CONV_STRIDE));
     EXPECT_EQ(opNode->attributes.get_dilation(), toVec(K_DGRAD_CONV_DILATION));
     EXPECT_EQ(opNode->attributes.get_name(), "test_op");
+}
+
+// A serialized graph whose dx tensor carries a zero channel dimension deserializes, and
+// validate() rejects it before the group arithmetic divides by the channel count.
+TEST_F(IntegrationConvolutionBwdDescriptorLifting, DeserializedZeroDxChannelRejectedByValidate)
+{
+    auto originalGraph = buildGraph();
+
+    auto result = originalGraph->validate();
+    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+
+    std::string jsonData;
+    result = originalGraph->serialize(jsonData);
+    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+
+    auto parsed = nlohmann::json::parse(jsonData);
+    bool dxFound = false;
+    for(auto& tensor : parsed.at("tensors"))
+    {
+        if(tensor.at("uid").get<int64_t>() == K_DGRAD_TENSOR_DX_UID)
+        {
+            tensor.at("dims").at(1) = 0;
+            dxFound = true;
+        }
+    }
+    ASSERT_TRUE(dxFound) << "dx tensor missing from serialized graph: " << jsonData;
+    const std::string corruptedJson = parsed.dump();
+
+    auto liftedGraph = std::make_shared<TestableGraphLifting>();
+    result = liftedGraph->deserialize(corruptedJson);
+    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+
+    result = liftedGraph->validate();
+    EXPECT_EQ(result.code, ErrorCode::INVALID_VALUE) << result.err_msg;
 }
 
 } // namespace

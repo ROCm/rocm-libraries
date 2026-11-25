@@ -275,7 +275,15 @@ TEST(TestTensorAttributes, ValidateDataType)
            {DataType::FP6_E2M3, ErrorCode::OK},
            {DataType::FP6_E3M2, ErrorCode::OK},
            {DataType::INT64, ErrorCode::OK},
-           {DataType::BOOLEAN, ErrorCode::OK}};
+           {DataType::BOOLEAN, ErrorCode::OK},
+           {DataType::FP8_E4M3_FNUZ, ErrorCode::OK},
+           {DataType::FP8_E5M2_FNUZ, ErrorCode::OK},
+           {DataType::INT8x4, ErrorCode::INVALID_VALUE},
+           {DataType::UINT8x4, ErrorCode::INVALID_VALUE},
+           {DataType::INT8x32, ErrorCode::INVALID_VALUE},
+           {DataType::FAST_FLOAT_FOR_FP8, ErrorCode::INVALID_VALUE},
+           {DataType::COMPLEX_FP32, ErrorCode::INVALID_VALUE},
+           {DataType::COMPLEX_FP64, ErrorCode::INVALID_VALUE}};
 
     for(auto [dataType, errorCode] : expectedResults)
     {
@@ -283,6 +291,60 @@ TEST(TestTensorAttributes, ValidateDataType)
         const auto result = tensor.validate();
         EXPECT_EQ(result.code, errorCode) << "For " + std::string(to_string(dataType));
     }
+}
+
+// validate() and the lowering share one table (toHipdnnDataType): a data type
+// validate() accepts is one the lowering can express, and vice versa. The probed values run
+// past the last enumerator, so an enumerator added later is covered too.
+TEST(TestTensorAttributes, ValidateDataTypeAgreesWithLoweringForEveryValue)
+{
+    constexpr int K_DATA_TYPE_PROBE_END = 64;
+
+    TensorAttributes tensor;
+    tensor.set_dim({4, 5, 6});
+    tensor.set_stride({30, 6, 1});
+
+    for(int i = 0; i < K_DATA_TYPE_PROBE_END; ++i)
+    {
+        const auto dataType = static_cast<DataType>(i);
+        tensor.set_data_type(dataType);
+        const auto result = tensor.validate();
+
+        ErrorCode expected = ErrorCode::INVALID_VALUE;
+        if(dataType == DataType::NOT_SET)
+        {
+            expected = ErrorCode::ATTRIBUTE_NOT_SET;
+        }
+        else if(toHipdnnDataType(dataType).has_value())
+        {
+            expected = ErrorCode::OK;
+        }
+        EXPECT_EQ(result.code, expected) << "For DataType value " << i;
+    }
+
+    // The last probed value is past every enumerator: it has no name and validate() rejects it.
+    // Raise K_DATA_TYPE_PROBE_END when this fails.
+    const auto pastTheEnd = static_cast<DataType>(K_DATA_TYPE_PROBE_END - 1);
+    EXPECT_STREQ(to_string(pastTheEnd), "unknown");
+    tensor.set_data_type(pastTheEnd);
+    const auto result = tensor.validate();
+    EXPECT_EQ(result.code, ErrorCode::INVALID_VALUE);
+    EXPECT_NE(result.err_msg.find("data type unknown is not supported by hipDNN lowering"),
+              std::string::npos)
+        << result.err_msg;
+}
+
+TEST(TestTensorAttributes, ValidateRejectsUnmappedDataTypeWithMessage)
+{
+    TensorAttributes tensor;
+    tensor.set_name("x");
+    tensor.set_dim({4});
+    tensor.set_stride({1});
+    tensor.set_data_type(DataType::INT8x4);
+
+    EXPECT_EQ(tensor.validate(),
+              Error(ErrorCode::INVALID_VALUE,
+                    "Tensor x data type int8x4 is not supported by hipDNN lowering"));
 }
 
 TEST(TestTensorAttributes, SetAndGetRaggedOffset)
@@ -528,4 +590,89 @@ TEST(TestTensorAttributes, TensorLogicalAndStrictEquality)
     EXPECT_FALSE(compileTimeConstant.get_is_runtime_pass_by_value());
     EXPECT_FALSE(runtimeWithDefault.logicallyEquals(compileTimeConstant));
     EXPECT_FALSE(compileTimeConstant.logicallyEquals(runtimeWithDefault));
+}
+
+namespace
+{
+
+TensorAttributes makeEqualityTensor(int64_t uid, const std::string& name)
+{
+    TensorAttributes tensor;
+    tensor.set_dim({4, 16, 8, 64});
+    tensor.set_stride({8192, 512, 64, 1});
+    tensor.set_data_type(DataType::HALF);
+    tensor.set_uid(uid);
+    tensor.set_name(name);
+    return tensor;
+}
+
+std::shared_ptr<TensorAttributes>
+    makeRaggedOffset(int64_t batch, int64_t uid, const std::string& name)
+{
+    auto offset = std::make_shared<TensorAttributes>();
+    offset->set_dim({batch, 1, 1, 1});
+    offset->set_stride({1, 1, 1, 1});
+    offset->set_data_type(DataType::INT32);
+    offset->set_uid(uid);
+    offset->set_name(name);
+    return offset;
+}
+
+} // namespace
+
+TEST(TestTensorAttributes, LogicalEqualityDistinguishesAlignment)
+{
+    auto tensorA = makeEqualityTensor(1, "t");
+    auto tensorB = makeEqualityTensor(1, "t");
+    ASSERT_TRUE(tensorA == tensorB);
+
+    tensorB.set_alignment(4);
+    EXPECT_FALSE(tensorA.logicallyEquals(tensorB));
+    EXPECT_FALSE(tensorB.logicallyEquals(tensorA));
+    EXPECT_FALSE(tensorA == tensorB);
+}
+
+TEST(TestTensorAttributes, LogicalEqualityDistinguishesRaggedOffset)
+{
+    auto ragged = makeEqualityTensor(1, "t");
+    ragged.set_ragged_offset(makeRaggedOffset(4, 10, "offs"));
+    const auto plain = makeEqualityTensor(1, "t");
+
+    // Ragged vs non-ragged, both directions.
+    EXPECT_FALSE(ragged.logicallyEquals(plain));
+    EXPECT_FALSE(plain.logicallyEquals(ragged));
+    EXPECT_FALSE(ragged == plain);
+    EXPECT_FALSE(plain == ragged);
+
+    // Offset tensors with different layouts.
+    auto otherLayout = makeEqualityTensor(1, "t");
+    otherLayout.set_ragged_offset(makeRaggedOffset(3, 10, "offs"));
+    EXPECT_FALSE(ragged.logicallyEquals(otherLayout));
+    EXPECT_FALSE(ragged == otherLayout);
+
+    // Logically equal offset tensors that differ only in name and UID.
+    auto renamedOffset = makeEqualityTensor(1, "t");
+    renamedOffset.set_ragged_offset(makeRaggedOffset(4, 11, "offs_other"));
+    EXPECT_TRUE(ragged.logicallyEquals(renamedOffset));
+    EXPECT_FALSE(ragged == renamedOffset);
+
+    // Strictly equal offset tensors held by distinct objects.
+    auto sameOffset = makeEqualityTensor(1, "t");
+    sameOffset.set_ragged_offset(makeRaggedOffset(4, 10, "offs"));
+    EXPECT_TRUE(ragged.logicallyEquals(sameOffset));
+    EXPECT_TRUE(ragged == sameOffset);
+}
+
+TEST(TestTensorAttributes, LogicalEqualityDistinguishesRaggedOffsetMultiplier)
+{
+    const auto offset = makeRaggedOffset(4, 10, "offs");
+    auto tensorA = makeEqualityTensor(1, "t");
+    tensorA.set_ragged_offset(offset);
+    auto tensorB = makeEqualityTensor(1, "t");
+    tensorB.set_ragged_offset(offset);
+    ASSERT_TRUE(tensorA == tensorB);
+
+    tensorB.set_ragged_offset_multiplier(2);
+    EXPECT_FALSE(tensorA.logicallyEquals(tensorB));
+    EXPECT_FALSE(tensorA == tensorB);
 }

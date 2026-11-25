@@ -9,6 +9,29 @@
 using namespace hipdnn_frontend;
 using namespace hipdnn_frontend::graph;
 
+namespace
+{
+std::shared_ptr<TensorAttributes>
+    makeTensor(const std::string& name, int64_t uid, const std::vector<int64_t>& dims)
+{
+    auto tensor = std::make_shared<TensorAttributes>();
+    tensor->set_name(name).set_uid(uid).set_dim(dims).set_data_type(DataType::FLOAT);
+    return tensor;
+}
+
+CustomOpAttributes makeEqualityAttributes()
+{
+    CustomOpAttributes attr;
+    attr.set_name("op")
+        .set_custom_op_id("example.my_add")
+        .set_compute_data_type(DataType::FLOAT)
+        .set_inputs({makeTensor("a", 1, {2, 3}), makeTensor("b", 2, {4, 5})})
+        .set_outputs({makeTensor("out", 3, {2, 3})})
+        .set_data({0x01, 0x02});
+    return attr;
+}
+} // namespace
+
 TEST(TestCustomOpAttributes, DefaultValues)
 {
     const CustomOpAttributes attr;
@@ -99,4 +122,79 @@ TEST(TestCustomOpAttributes, FillFromContextPreservesExplicitComputeType)
     const auto err = attr.fill_from_context(graphAttrs);
     EXPECT_EQ(err.code, ErrorCode::OK);
     EXPECT_EQ(attr.get_compute_data_type(), DataType::HALF);
+}
+
+TEST(TestCustomOpAttributes, EqualAttributesCompareEqual)
+{
+    const auto lhs = makeEqualityAttributes();
+    const auto rhs = makeEqualityAttributes();
+
+    EXPECT_TRUE(lhs.logicallyEquals(rhs));
+    EXPECT_TRUE(lhs == rhs);
+    EXPECT_FALSE(lhs != rhs);
+}
+
+TEST(TestCustomOpAttributes, LogicalEqualityIgnoresNamesAndUids)
+{
+    const auto lhs = makeEqualityAttributes();
+
+    auto rhs = makeEqualityAttributes();
+    rhs.set_name("other_op")
+        .set_inputs({makeTensor("x", 11, {2, 3}), makeTensor("y", 12, {4, 5})})
+        .set_outputs({makeTensor("z", 13, {2, 3})});
+
+    EXPECT_TRUE(lhs.logicallyEquals(rhs));
+    EXPECT_FALSE(lhs == rhs);
+}
+
+TEST(TestCustomOpAttributes, EqualityComparesCustomOpIdAndData)
+{
+    const auto lhs = makeEqualityAttributes();
+
+    auto otherId = makeEqualityAttributes();
+    otherId.set_custom_op_id("example.my_mul");
+    EXPECT_FALSE(lhs.logicallyEquals(otherId));
+    EXPECT_FALSE(lhs == otherId);
+
+    auto otherData = makeEqualityAttributes();
+    otherData.set_data({0x01, 0x03});
+    EXPECT_FALSE(lhs.logicallyEquals(otherData));
+    EXPECT_FALSE(lhs == otherData);
+
+    auto otherComputeType = makeEqualityAttributes();
+    otherComputeType.set_compute_data_type(DataType::HALF);
+    EXPECT_FALSE(lhs.logicallyEquals(otherComputeType));
+    EXPECT_FALSE(lhs == otherComputeType);
+}
+
+TEST(TestCustomOpAttributes, EqualityRespectsTensorOrder)
+{
+    const auto lhs = makeEqualityAttributes();
+
+    auto swapped = makeEqualityAttributes();
+    swapped.set_inputs({makeTensor("b", 2, {4, 5}), makeTensor("a", 1, {2, 3})});
+
+    EXPECT_FALSE(lhs.logicallyEquals(swapped));
+    EXPECT_FALSE(lhs == swapped);
+
+    auto extraOutput = makeEqualityAttributes();
+    extraOutput.set_outputs({makeTensor("out", 3, {2, 3}), makeTensor("out2", 4, {2, 3})});
+    EXPECT_FALSE(lhs.logicallyEquals(extraOutput));
+    EXPECT_FALSE(lhs == extraOutput);
+}
+
+TEST(TestCustomOpAttributes, EqualityTreatsNullEntriesPositionally)
+{
+    auto lhs = makeEqualityAttributes();
+    lhs.set_inputs({nullptr, makeTensor("b", 2, {4, 5})});
+
+    auto rhs = makeEqualityAttributes();
+    rhs.set_inputs({nullptr, makeTensor("b", 2, {4, 5})});
+    EXPECT_TRUE(lhs.logicallyEquals(rhs));
+    EXPECT_TRUE(lhs == rhs);
+
+    auto nonNull = makeEqualityAttributes();
+    EXPECT_FALSE(lhs.logicallyEquals(nonNull));
+    EXPECT_FALSE(nonNull.logicallyEquals(lhs));
+    EXPECT_FALSE(lhs == nonNull);
 }

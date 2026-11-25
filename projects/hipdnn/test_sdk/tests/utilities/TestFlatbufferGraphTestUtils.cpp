@@ -3,6 +3,7 @@
 
 #include <cstdint>
 #include <optional>
+#include <string>
 #include <vector>
 
 #include <gtest/gtest.h>
@@ -14,6 +15,7 @@ using hipdnn_flatbuffers_sdk::data_objects::DataType;
 using hipdnn_flatbuffers_sdk::data_objects::GetGraph;
 using hipdnn_flatbuffers_sdk::data_objects::ReductionMode;
 using hipdnn_test_sdk::utilities::createReductionGraph;
+using hipdnn_test_sdk::utilities::createValidMxMatmulGraph;
 using hipdnn_test_sdk::utilities::ReductionGraphSpec;
 
 namespace
@@ -22,6 +24,48 @@ namespace
 std::vector<int64_t> toVector(const flatbuffers::Vector<int64_t>& values)
 {
     return {values.begin(), values.end()};
+}
+
+std::vector<int64_t> tensorStrides(const flatbuffers::FlatBufferBuilder& builder,
+                                   const std::string& name)
+{
+    const auto* graph = GetGraph(builder.GetBufferPointer());
+    for(const auto* tensor : *graph->tensors())
+    {
+        if(tensor->name()->str() == name)
+        {
+            return {tensor->strides()->begin(), tensor->strides()->end()};
+        }
+    }
+    ADD_FAILURE() << "no tensor named " << name;
+    return {};
+}
+
+// Builds the default MX matmul graph (scale A {32, 4}, scale B {4, 32}) with the given
+// scale strides; an empty vector keeps the helper's default.
+flatbuffers::FlatBufferBuilder
+    createMxMatmulGraphWithScaleStrides(const std::vector<int64_t>& scaleAStrides,
+                                        const std::vector<int64_t>& scaleBStrides)
+{
+    return createValidMxMatmulGraph({32, 128},
+                                    {1, 32},
+                                    {128, 32},
+                                    {32, 1},
+                                    {32, 32},
+                                    {32, 1},
+                                    {32, 4},
+                                    {4, 32},
+                                    DataType::FP8_E4M3,
+                                    DataType::HALF,
+                                    DataType::FP8_E8M0,
+                                    DataType::FP8_E8M0,
+                                    DataType::FLOAT,
+                                    32,
+                                    false,
+                                    false,
+                                    DataType::UNSET,
+                                    scaleAStrides,
+                                    scaleBStrides);
 }
 
 } // namespace
@@ -90,4 +134,37 @@ TEST(TestCreateReductionGraph, EmitsInPlaceTensorOnce)
     ASSERT_NE(attributes, nullptr);
     EXPECT_EQ(attributes->in_tensor_uid(), ReductionGraphSpec::X_UID);
     EXPECT_EQ(attributes->out_tensor_uid(), ReductionGraphSpec::X_UID);
+}
+
+// ============================================================================
+// createValidMxMatmulGraph scale strides
+// ============================================================================
+
+TEST(TestCreateValidMxMatmulGraph, DefaultsToRowMajorScaleStrides)
+{
+    const auto builder = createValidMxMatmulGraph();
+
+    EXPECT_EQ(tensorStrides(builder, "scale_a"), (std::vector<int64_t>{4, 1}));
+    EXPECT_EQ(tensorStrides(builder, "scale_b"), (std::vector<int64_t>{32, 1}));
+}
+
+TEST(TestCreateValidMxMatmulGraph, UsesGivenScaleStrides)
+{
+    const auto builder = createMxMatmulGraphWithScaleStrides({1, 32}, {1, 4});
+
+    EXPECT_EQ(tensorStrides(builder, "scale_a"), (std::vector<int64_t>{1, 32}));
+    EXPECT_EQ(tensorStrides(builder, "scale_b"), (std::vector<int64_t>{1, 4}));
+    EXPECT_EQ(tensorStrides(builder, "x_a"), (std::vector<int64_t>{1, 32}));
+    EXPECT_EQ(tensorStrides(builder, "x_b"), (std::vector<int64_t>{32, 1}));
+}
+
+TEST(TestCreateValidMxMatmulGraph, OverridesEachScaleSeparately)
+{
+    const auto onlyA = createMxMatmulGraphWithScaleStrides({1, 32}, {});
+    EXPECT_EQ(tensorStrides(onlyA, "scale_a"), (std::vector<int64_t>{1, 32}));
+    EXPECT_EQ(tensorStrides(onlyA, "scale_b"), (std::vector<int64_t>{32, 1}));
+
+    const auto onlyB = createMxMatmulGraphWithScaleStrides({}, {1, 4});
+    EXPECT_EQ(tensorStrides(onlyB, "scale_a"), (std::vector<int64_t>{4, 1}));
+    EXPECT_EQ(tensorStrides(onlyB, "scale_b"), (std::vector<int64_t>{1, 4}));
 }

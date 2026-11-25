@@ -374,6 +374,7 @@ private:
      * * Iterates over keys and evaluates whether their underlying values are functionally
      * equivalent by routing the evaluation down to their custom `logicallyEquals` implementation.
      * This bypasses rigid layout parameters (like memory strides) in favor of graph state matching.
+     * A key mapped to a null pointer is equivalent to an absent key.
      * * @tparam MapT The map collection type (e.g., std::unordered_map or std::map).
      * @param m1 The primary map instance to compare.
      * @param m2 The secondary map instance to compare against.
@@ -384,72 +385,58 @@ private:
     template <typename MapT>
     static bool compareMapsLogical(const MapT& m1, const MapT& m2)
     {
-        if(m1.size() != m2.size())
-        {
-            return false;
-        }
-        // NOLINTNEXTLINE(readability-identifier-naming)
-        for(const auto& [key, t1] : m1)
-        {
-            const auto it = m2.find(key);
-            if(it == m2.end())
-            {
-                return false;
-            }
-            // Both are unassigned or null; equivalent semantic state
-            if(!t1 && !it->second)
-            {
-                continue;
-            }
-            // Mismatched pointer presence, or structural logical validation fails
-            if(!t1 || !it->second || !t1->logicallyEquals(*it->second))
-            {
-                return false;
-            }
-        }
-
-        return true;
+        return compareNonNullEntries(
+            m1, m2, [](const auto& t1, const auto& t2) { return t1.logicallyEquals(t2); });
     }
 
     /**
      * @brief Performs a strict equality check between two maps of descriptor pointers.
-     * * Compares sizes, keys, and dereferenced values. Two maps are strictly equal if they
-     * contain the identical set of keys and their corresponding non-null pointers point
-     * to objects that satisfy the binary `operator==` check.
+     * * Two maps are strictly equal if they hold the identical set of keys with non-null
+     * pointers and those pointers point to objects that satisfy the binary `operator==`
+     * check. A key mapped to a null pointer is equivalent to an absent key.
      * * @tparam MapT The map collection type (e.g., std::unordered_map or std::map).
      * @param m1 The primary map instance to compare.
      * @param m2 The secondary map instance to compare against.
      * @return true If both maps have identical structures and strict value matching.
-     * @return false If sizes, keys, nullability states, or raw evaluations mismatch.
+     * @return false If keys or raw evaluations mismatch.
      */
     template <typename MapT>
     static bool compareMapsStrict(const MapT& m1, const MapT& m2)
     {
-        if(m1.size() != m2.size())
-        {
-            return false;
-        }
+        return compareNonNullEntries(
+            m1, m2, [](const auto& t1, const auto& t2) { return t1 == t2; });
+    }
 
+    // True if m1 and m2 hold the same keys with non-null values and `equal` holds for the
+    // values of each such key. Null values count as absent keys.
+    template <typename MapT, typename EqualT>
+    static bool compareNonNullEntries(const MapT& m1, const MapT& m2, EqualT equal)
+    {
+        size_t nonNullCount1 = 0;
         for(const auto& [key, t1] : m1)
         {
-            const auto it = m2.find(key);
-            if(it == m2.end())
-            {
-                return false;
-            }
-            // Both are null pointers; they match logically and strictly
-            if(!t1 && !it->second)
+            if(!t1)
             {
                 continue;
             }
-            // One is null while the other isn't, or underlying values differ strictly
-            if(!t1 || !it->second || !(*t1 == *it->second))
+            ++nonNullCount1;
+            const auto it = m2.find(key);
+            if(it == m2.end() || !it->second || !equal(*t1, *it->second))
             {
                 return false;
             }
         }
 
-        return true;
+        size_t nonNullCount2 = 0;
+        for(const auto& entry : m2)
+        {
+            if(entry.second)
+            {
+                ++nonNullCount2;
+            }
+        }
+
+        return nonNullCount1 == nonNullCount2;
     }
 };
 

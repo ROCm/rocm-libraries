@@ -5,10 +5,15 @@
 #include "Node.hpp"
 #include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
 #include <hipdnn_frontend/Error.hpp>
+#include <hipdnn_frontend/Types.hpp>
 #include <hipdnn_frontend/attributes/GraphAttributes.hpp>
 #include <hipdnn_frontend/attributes/ResampleFwdAttributes.hpp>
 #include <hipdnn_frontend/detail/ResampleFwdPacker.hpp>
 #include <hipdnn_frontend/detail/ResampleFwdUnpacker.hpp>
+#include <hipdnn_frontend/node/detail/CheckedShapeMath.hpp>
+#include <hipdnn_frontend/node/detail/ResampleParamsValidation.hpp>
+
+#include <string>
 
 namespace hipdnn_frontend::graph
 {
@@ -37,9 +42,26 @@ public:
                     "ResampleFwdNode missing output Y for pre-validation"};
         }
 
-        const bool generateIndex = attributes.get_generate_index().value_or(false);
-        if(generateIndex && attributes.get_resample_mode() == ResampleMode::MAXPOOL
-           && !attributes.get_index())
+        // The modes must be ones the lowering can express; padding_mode has no default
+        HIPDNN_RETURN_IF_TRUE(attributes.get_padding_mode() == PaddingMode::NOT_SET,
+                              ErrorCode::ATTRIBUTE_NOT_SET,
+                              "ResampleFwdNode missing padding_mode for pre-validation");
+        HIPDNN_RETURN_IF_FALSE(
+            toBackendResampleMode(attributes.get_resample_mode()).has_value(),
+            ErrorCode::INVALID_VALUE,
+            "ResampleFwdNode resample mode "
+                + std::to_string(static_cast<int>(attributes.get_resample_mode()))
+                + " is not supported by hipDNN lowering");
+        HIPDNN_RETURN_IF_FALSE(toBackendPaddingMode(attributes.get_padding_mode()).has_value(),
+                               ErrorCode::INVALID_VALUE,
+                               "ResampleFwdNode padding mode "
+                                   + std::to_string(static_cast<int>(attributes.get_padding_mode()))
+                                   + " is not supported by hipDNN lowering");
+
+        // generate_index is ignored for modes other than MAXPOOL, as in cuDNN
+        const bool generateIndex = attributes.get_generate_index().value_or(false)
+                                   && attributes.get_resample_mode() == ResampleMode::MAXPOOL;
+        if(generateIndex && !attributes.get_index())
         {
             return {ErrorCode::ATTRIBUTE_NOT_SET,
                     "ResampleFwdNode missing output Index when index generation requested"};
@@ -57,6 +79,17 @@ public:
         {
             return {ErrorCode::INVALID_VALUE,
                     "ResampleFwdNode output Y must have at least rank 3 (N, C, spatial...)"};
+        }
+
+        auto& xDims = x->get_dim();
+        if(!xDims.empty())
+        {
+            HIPDNN_CHECK_ERROR(detail::validateResampleParams("ResampleFwdNode",
+                                                              xDims.size() - 2,
+                                                              attributes.get_window(),
+                                                              attributes.get_stride(),
+                                                              attributes.get_pre_padding(),
+                                                              attributes.get_post_padding()));
         }
 
         if(const auto index = attributes.get_index())
@@ -93,17 +126,34 @@ public:
         if(yDims.empty())
         {
             auto& xDims = x->get_dim();
-            yDims.resize(xDims.size());
+            HIPDNN_RETURN_IF_TRUE(xDims.empty(),
+                                  ErrorCode::ATTRIBUTE_NOT_SET,
+                                  "ResampleFwdNode missing input X dimensions for inferring "
+                                  "output Y dimensions");
+            HIPDNN_RETURN_IF_LT(
+                xDims.size(),
+                3,
+                ErrorCode::INVALID_VALUE,
+                "ResampleFwdNode input X must have at least rank 3 (N, C, spatial...)");
 
             auto& prePadding = attributes.get_pre_padding();
             auto& postPadding = attributes.get_post_padding();
             auto& strideVec = attributes.get_stride();
             auto& windowVec = attributes.get_window();
 
+            HIPDNN_CHECK_ERROR(detail::requireResampleParams("ResampleFwdNode",
+                                                             xDims.size() - 2,
+                                                             windowVec,
+                                                             strideVec,
+                                                             prePadding,
+                                                             postPadding));
+
+            yDims.resize(xDims.size());
             yDims[0] = xDims[0]; // N (batch)
             yDims[1] = xDims[1]; // C (channels preserved)
 
-            // Calculate spatial dimensions
+            // Calculate spatial dimensions with truncating division, as cuDNN does: a window
+            // wider than the padded input by less than the stride still yields one element
             for(size_t i = 2; i < xDims.size(); ++i)
             {
                 const auto spatialIdx = i - 2;
@@ -112,8 +162,27 @@ public:
                 const auto postPad = postPadding[spatialIdx];
                 const auto strideVal = strideVec[spatialIdx];
                 const auto windowVal = windowVec[spatialIdx];
+                int64_t numerator = 0;
+                HIPDNN_CHECK_ERROR(detail::checkedPaddedNumerator("ResampleFwdNode",
+                                                                  spatialIdx,
+                                                                  inputSize,
+                                                                  prePad,
+                                                                  postPad,
+                                                                  windowVal,
+                                                                  numerator));
+                HIPDNN_CHECK_ERROR(detail::checkedStridedExtent(
+                    "ResampleFwdNode", spatialIdx, numerator, strideVal, yDims[i]));
 
-                yDims[i] = (inputSize + prePad + postPad - windowVal) / strideVal + 1;
+                HIPDNN_RETURN_IF_LT(
+                    yDims[i],
+                    1,
+                    ErrorCode::INVALID_VALUE,
+                    "ResampleFwdNode: inferred y extent (" + std::to_string(yDims[i])
+                        + ") at spatial index " + std::to_string(spatialIdx)
+                        + " is below 1 for x extent " + std::to_string(inputSize) + ", pre_padding "
+                        + std::to_string(prePad) + ", post_padding " + std::to_string(postPad)
+                        + ", window " + std::to_string(windowVal) + " and stride "
+                        + std::to_string(strideVal));
             }
 
             y->set_dim(yDims);
@@ -155,7 +224,17 @@ public:
         std::unordered_map<int64_t, detail::ScopedHipdnnBackendDescriptor>& tensorDescs,
         std::vector<detail::ScopedHipdnnBackendDescriptor>& operations) const override
     {
-        return detail::createResampleFwdOperation(attributes, tensorDescs, operations);
+        if(attributes.get_resample_mode() == ResampleMode::MAXPOOL
+           || !attributes.get_generate_index().value_or(false))
+        {
+            return detail::createResampleFwdOperation(attributes, tensorDescs, operations);
+        }
+
+        // generate_index is ignored for modes other than MAXPOOL, so engines never see the
+        // flag without an index tensor.
+        auto loweredAttributes = attributes;
+        loweredAttributes.set_generate_index(false);
+        return detail::createResampleFwdOperation(loweredAttributes, tensorDescs, operations);
     }
 
     Error unpack_from_descriptor(

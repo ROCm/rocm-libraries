@@ -28,11 +28,29 @@ namespace hipdnn_frontend::graph
  * layer normalization normalizes across the last k feature dimensions.
  *
  * The number of normalized dimensions (k) is determined by:
- * 1. **From scale shape**: k is inferred from the scale tensor. Dimensions
- *    where scale != 1 are normalized. If scale has fewer dims than X, all
- *    scale dims are normalized dims.
- * 2. **Default**: If scale dims are also unset, they are inferred as
+ * 1. **Explicit**: `normalized_dim_count` k, when set (> 0), wins outright.
+ * 2. **From scale shape**: a full-rank scale (same rank as X) gives
+ *    `rank(X) - i` for the first dimension i (0-indexed, up to but
+ *    excluding X's last dimension) whose value is not 1; if every such
+ *    dimension is 1, k = 1. A scale with a 1 after its first non-1
+ *    dimension where X's dimension there is not 1, such as `(1, C, 1, 1)`
+ *    on X `(N, C, H, W)`, derives a k that would span non-trailing
+ *    feature dimensions; no hipDNN provider normalizes non-trailing axes,
+ *    so validation rejects such a graph (see "Graph validation" in
+ *    docs/KNOWN_DIVERGENCES.md). A lower-rank scale that equals X's own
+ *    trailing dims normalizes all of them: k equals the scale's rank. For
+ *    example, X `(2, 1, 14, 14)` with scale `(1, 14, 14)` gives k = 3. Any
+ *    other lower-rank scale is right-aligned to X's rank by prepending 1s
+ *    and then follows the full-rank rule above. For example, X
+ *    `(2, 3, 4, 5)` with scale `(1, 5)` right-aligns to `(1, 1, 1, 5)`, so
+ *    k = 1.
+ * 3. **Default**: If scale dims are also unset, they are inferred as
  *    `[1, D1, ..., Dk]` (batch dim = 1), normalizing all non-batch dims.
+ *
+ * Unset Scale and Bias dims are inferred during validation as
+ * `[1, D1, ..., Dk]`, as cuDNN does, or, when `normalized_dim_count` k is set
+ * explicitly, as 1s followed by the last k dims of X. When only one of Scale and
+ * Bias has dims set, they must equal the dims inferred for the other.
  *
  * **Tensor Shapes:**
  * - **X** (input): `(N, D1, D2, ..., Dk)` — batch first, then feature dims
