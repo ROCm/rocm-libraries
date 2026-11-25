@@ -2297,6 +2297,10 @@ double compute_epilogue_latency(const problem_t& problem,
   double store_bw           = ((measured_terms && hardware.has_MALL()) ? hardware.mem2_perf_ratio
                                                                         : hardware.mem3_perf_ratio) *
                               context.mem_bw_limited;
+  // A device without a MALL stores the output's bytes at its measured rate.
+  const double store_gb_per_s = heuristic_defaults_t::output_store_gb_per_s(hardware.arch);
+  const bool   measured_store = measured_terms && !hardware.has_MALL() && store_gb_per_s > 0.0;
+  if (measured_store) store_bw = store_gb_per_s / hardware.compute_clock_ghz * context.mem_bw_limited;
   const double reduce_bw    = hardware.mem3_perf_ratio * context.write_mem_bw_limited;
   double reduce_write_bw    = reduce_bw;
 
@@ -2455,11 +2459,11 @@ double compute_epilogue_latency(const problem_t& problem,
     const double store_issue_parallel = critical_path(tile.max_wave_issue, tile.store.issue_insts);
     tile.store_issue                  = store_issue_parallel;
     // The traffic of the stores is all their sectors: the SIMDs issuing in parallel shorten
-    // the issue, not the bytes (charged as such where the tile terms are measured; gfx1150
-    // stores a tile at half its DRAM rate, its stores filling half of each sector).
-    const double store_memory_bytes = measured_terms
-                                          ? tile.store.sector_bytes
-                                          : critical_path(max_wave_sector_bytes, tile.store.sector_bytes);
+    // the issue, not the bytes (charged as such where the tile terms are measured).  Where the
+    // store rate is measured it is the rate of the output's own bytes.
+    const double store_memory_bytes = measured_store   ? tile.store.useful_bytes
+                                      : measured_terms ? tile.store.sector_bytes
+                                                       : critical_path(max_wave_sector_bytes, tile.store.sector_bytes);
     tile.store_memory = (per_cu_store_bw > 0.0)
         ? store_memory_bytes / per_cu_store_bw
         : 0.0;

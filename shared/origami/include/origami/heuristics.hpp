@@ -281,6 +281,20 @@ struct heuristic_defaults_t {
     return arch == hardware_t::architecture_t::gfx1150 ? GFX1150_KLOOP_OVERLAP : 0.0;
   }
 
+  /// Rate at which the kernels of a device without a MALL store their output, in GB/s of the
+  /// output's bytes; 0 where it is not measured (the store then goes at the DRAM rate of the
+  /// sectors it touches).
+  /// gfx1150 [MEASURED]: 2560 rows x 256 to 4096 tokens (an output of 1.3 to 21 MB) at K 64 and
+  /// 256, seven tile kernels of 128 and 256 columns at one workgroup per tile: the kernel time
+  /// is linear in the tokens and the same for every kernel, 0.075 to 0.082 us per token at
+  /// K 64 and 0.136 to 0.150 at K 256, which leaves 0.055 us per token (5120 B) that does not
+  /// depend on K: 93 GB/s.  The model had 0.146 (the sectors of the stores, twice the bytes,
+  /// at the 70 GB/s of its DRAM).
+  static constexpr double GFX1150_OUTPUT_STORE_GB_PER_S = 93.0;
+  static constexpr double output_store_gb_per_s(hardware_t::architecture_t arch) noexcept {
+    return arch == hardware_t::architecture_t::gfx1150 ? GFX1150_OUTPUT_STORE_GB_PER_S : 0.0;
+  }
+
   /// Time a workgroup spends on a tile outside its K loop (argument and address set-up,
   /// reduction and store), in compute cycles; 0 where it has not been measured.  Fitted to the
   /// same dot2 kernel timings as the round trip above: the time left at zero K iterations.

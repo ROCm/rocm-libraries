@@ -473,6 +473,32 @@ TEST_CASE("GEMM: a W4A16 tile with fewer tokens than its width costs what a whol
   }
 }
 
+TEST_CASE("GEMM: gfx1150 stores the output at its measured rate", "[gemm][w4a16]") {
+  // 2560 rows, one K iteration, 64x256x64 at one workgroup per tile: the kernel grows by 0.080 us
+  // per token measured (0.055 of it the 5120 B of output a token adds, at 93 GB/s).  With the
+  // stores' sectors at the DRAM rate the model had 0.207.
+  const auto hardware = make_w4a16_gfx1150_hardware();
+  auto latency = [&](size_t tokens) {
+    auto problem    = make_problem(2560, tokens, 64);
+    problem.a_dtype = origami::data_type_t::Int4;
+    problem.a_stride_bytes = 128 + 256;
+    auto config     = make_config(64, 256, 64, 16, 16, 16, false, 1, 2, 0, 0, 3);
+    config.workspace_size            = std::numeric_limits<size_t>::max() / 2;
+    config.workspace_size_per_elem_c = 4;
+    config.launch_grid               = 40 * tokens / 256;
+    config.reduction_strategy        = origami::reduction_t::tree;
+    origami::tensile_params_t t;
+    t.wave_group_n = 8;
+    t.prefetch_global_read = 2;
+    config.backend = t;
+    return origami::gemm::compute_total_latency(problem, hardware, config);
+  };
+  const double us_per_token = (latency(4096) - latency(256)) / (4096.0 - 256.0) / (hardware.compute_clock_ghz * 1e3);
+  CAPTURE(us_per_token);
+  REQUIRE(us_per_token > 0.055);
+  REQUIRE(us_per_token < 0.14);
+}
+
 TEST_CASE("GEMM: compute_timestep_latency", "[gemm]") {
   for (int gpu_arch : test_architectures) {
     DYNAMIC_SECTION("gfx" << gpu_arch << " - timestep latency equals tile latency") {
