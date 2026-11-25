@@ -32,7 +32,7 @@ struct Arguments;
 // verification_failures counts the -v checks of D that failed: one per gemm, per solution,
 // for each of the norm and allclose checks, plus one per solution whose post_bench_verify_iters
 // relaunches differed from the first launch (however many gemms or relaunches differed), plus
-// one per solution whose row uniform_check failed with uniform summation order on. With
+// one per solution whose uniform_check failed with uniform summation order on. With
 // verify_strict set, verification_exit_code turns a run that would exit 0 into exit code 2 when
 // any check of D failed. apply_to enables these checks for every case when verify_strict
 // is set, even if a case disables them; strict verification is a run-wide requirement.

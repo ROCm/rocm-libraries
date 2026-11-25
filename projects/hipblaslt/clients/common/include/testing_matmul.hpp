@@ -7241,7 +7241,7 @@ void testing_matmul_with_bias(const Arguments& arg,
     };
     // uniform_check: checks on the device that the D of rotation block 0 is uniform in the running
     // direction, and reports a failure on stderr without stopping the run. With uniform summation
-    // order on, a row failure counts toward --verify_strict; it does not promise uniform columns.
+    // order on, a failure counts toward --verify_strict.
     std::unique_ptr<HipDeviceBuffer> dUniformResult, dUniformFlags;
     if(ucRows || ucCols)
     {
@@ -7336,7 +7336,7 @@ void testing_matmul_with_bias(const Arguments& arg,
 #else
             hipblaslt_cerr << msg.str() << std::endl;
 #endif
-            if(ucUso && !ucCols)
+            if(ucUso)
                 hipblaslt_bench_options::verification_failures()++;
         }
     };
