@@ -28,21 +28,21 @@ protected:
 TEST_F(TestUserDefinedLiterals, Bfloat16LiteralPositive)
 {
     const auto a = 1.0_bf;
-    EXPECT_TRUE((std::is_same_v<decltype(a), bfloat16>));
+    EXPECT_TRUE((std::is_same_v<decltype(a), const bfloat16>));
     EXPECT_EQ(static_cast<float>(a), 1.0f);
 }
 
 TEST_F(TestUserDefinedLiterals, Bfloat16LiteralNegative)
 {
     const auto a = -3.14_bf;
-    EXPECT_TRUE((std::is_same_v<decltype(a), bfloat16>));
+    EXPECT_TRUE((std::is_same_v<decltype(a), const bfloat16>));
     EXPECT_TRUE(nearEqual(static_cast<float>(a), -3.14f, 0.02f));
 }
 
 TEST_F(TestUserDefinedLiterals, Bfloat16LiteralZero)
 {
     const auto a = 0.0_bf;
-    EXPECT_TRUE((std::is_same_v<decltype(a), bfloat16>));
+    EXPECT_TRUE((std::is_same_v<decltype(a), const bfloat16>));
     EXPECT_EQ(static_cast<float>(a), 0.0f);
 }
 
@@ -68,21 +68,21 @@ TEST_F(TestUserDefinedLiterals, Bfloat16LiteralLargeValue)
 TEST_F(TestUserDefinedLiterals, HalfLiteralPositive)
 {
     const auto a = 1.0_h;
-    EXPECT_TRUE((std::is_same_v<decltype(a), half>));
+    EXPECT_TRUE((std::is_same_v<decltype(a), const half>));
     EXPECT_EQ(static_cast<float>(a), 1.0f);
 }
 
 TEST_F(TestUserDefinedLiterals, HalfLiteralNegative)
 {
     const auto a = -3.14_h;
-    EXPECT_TRUE((std::is_same_v<decltype(a), half>));
+    EXPECT_TRUE((std::is_same_v<decltype(a), const half>));
     EXPECT_TRUE(nearEqual(static_cast<float>(a), -3.14f, 0.01f));
 }
 
 TEST_F(TestUserDefinedLiterals, HalfLiteralZero)
 {
     const auto a = 0.0_h;
-    EXPECT_TRUE((std::is_same_v<decltype(a), half>));
+    EXPECT_TRUE((std::is_same_v<decltype(a), const half>));
     EXPECT_EQ(static_cast<float>(a), 0.0f);
 }
 
@@ -108,21 +108,21 @@ TEST_F(TestUserDefinedLiterals, HalfLiteralLargeValue)
 TEST_F(TestUserDefinedLiterals, Fp4E2M1LiteralPositive)
 {
     const auto a = 1.0_e2m1;
-    EXPECT_TRUE((std::is_same_v<decltype(a), fp4_e2m1>));
+    EXPECT_TRUE((std::is_same_v<decltype(a), const fp4_e2m1>));
     EXPECT_EQ(static_cast<float>(a), 1.0f);
 }
 
 TEST_F(TestUserDefinedLiterals, Fp4E2M1LiteralNegative)
 {
     const auto a = -2.0_e2m1;
-    EXPECT_TRUE((std::is_same_v<decltype(a), fp4_e2m1>));
+    EXPECT_TRUE((std::is_same_v<decltype(a), const fp4_e2m1>));
     EXPECT_EQ(static_cast<float>(a), -2.0f);
 }
 
 TEST_F(TestUserDefinedLiterals, Fp4E2M1LiteralZero)
 {
     const auto a = 0.0_e2m1;
-    EXPECT_TRUE((std::is_same_v<decltype(a), fp4_e2m1>));
+    EXPECT_TRUE((std::is_same_v<decltype(a), const fp4_e2m1>));
     EXPECT_EQ(static_cast<float>(a), 0.0f);
 }
 
@@ -142,21 +142,21 @@ TEST_F(TestUserDefinedLiterals, Fp4E2M1LiteralFractional)
 TEST_F(TestUserDefinedLiterals, Fp6E2M3LiteralPositive)
 {
     const auto a = 1.0_e2m3;
-    EXPECT_TRUE((std::is_same_v<decltype(a), fp6_e2m3>));
+    EXPECT_TRUE((std::is_same_v<decltype(a), const fp6_e2m3>));
     EXPECT_EQ(static_cast<float>(a), 1.0f);
 }
 
 TEST_F(TestUserDefinedLiterals, Fp6E2M3LiteralNegative)
 {
     const auto a = -2.0_e2m3;
-    EXPECT_TRUE((std::is_same_v<decltype(a), fp6_e2m3>));
+    EXPECT_TRUE((std::is_same_v<decltype(a), const fp6_e2m3>));
     EXPECT_EQ(static_cast<float>(a), -2.0f);
 }
 
 TEST_F(TestUserDefinedLiterals, Fp6E2M3LiteralZero)
 {
     const auto a = 0.0_e2m3;
-    EXPECT_TRUE((std::is_same_v<decltype(a), fp6_e2m3>));
+    EXPECT_TRUE((std::is_same_v<decltype(a), const fp6_e2m3>));
     EXPECT_EQ(static_cast<float>(a), 0.0f);
 }
 
@@ -179,21 +179,21 @@ TEST_F(TestUserDefinedLiterals, Fp6E2M3LiteralFractional)
 TEST_F(TestUserDefinedLiterals, Fp6E3M2LiteralPositive)
 {
     const auto a = 1.0_e3m2;
-    EXPECT_TRUE((std::is_same_v<decltype(a), fp6_e3m2>));
+    EXPECT_TRUE((std::is_same_v<decltype(a), const fp6_e3m2>));
     EXPECT_EQ(static_cast<float>(a), 1.0f);
 }
 
 TEST_F(TestUserDefinedLiterals, Fp6E3M2LiteralNegative)
 {
     const auto a = -2.0_e3m2;
-    EXPECT_TRUE((std::is_same_v<decltype(a), fp6_e3m2>));
+    EXPECT_TRUE((std::is_same_v<decltype(a), const fp6_e3m2>));
     EXPECT_EQ(static_cast<float>(a), -2.0f);
 }
 
 TEST_F(TestUserDefinedLiterals, Fp6E3M2LiteralZero)
 {
     const auto a = 0.0_e3m2;
-    EXPECT_TRUE((std::is_same_v<decltype(a), fp6_e3m2>));
+    EXPECT_TRUE((std::is_same_v<decltype(a), const fp6_e3m2>));
     EXPECT_EQ(static_cast<float>(a), 0.0f);
 }
 
@@ -213,21 +213,21 @@ TEST_F(TestUserDefinedLiterals, Fp6E3M2LiteralFractional)
 TEST_F(TestUserDefinedLiterals, Fp8E4M3LiteralPositive)
 {
     const auto a = 1.0_e4m3;
-    EXPECT_TRUE((std::is_same_v<decltype(a), fp8_e4m3>));
+    EXPECT_TRUE((std::is_same_v<decltype(a), const fp8_e4m3>));
     EXPECT_EQ(static_cast<float>(a), 1.0f);
 }
 
 TEST_F(TestUserDefinedLiterals, Fp8E4M3LiteralNegative)
 {
     const auto a = -2.0_e4m3;
-    EXPECT_TRUE((std::is_same_v<decltype(a), fp8_e4m3>));
+    EXPECT_TRUE((std::is_same_v<decltype(a), const fp8_e4m3>));
     EXPECT_EQ(static_cast<float>(a), -2.0f);
 }
 
 TEST_F(TestUserDefinedLiterals, Fp8E4M3LiteralZero)
 {
     const auto a = 0.0_e4m3;
-    EXPECT_TRUE((std::is_same_v<decltype(a), fp8_e4m3>));
+    EXPECT_TRUE((std::is_same_v<decltype(a), const fp8_e4m3>));
     EXPECT_EQ(static_cast<float>(a), 0.0f);
 }
 
@@ -259,21 +259,21 @@ TEST_F(TestUserDefinedLiterals, Fp8E4M3LiteralPowerOfTwo)
 TEST_F(TestUserDefinedLiterals, Fp8E4M3FnuzLiteralPositive)
 {
     const auto a = 1.0_e4m3_fnuz;
-    EXPECT_TRUE((std::is_same_v<decltype(a), fp8_e4m3_fnuz>));
+    EXPECT_TRUE((std::is_same_v<decltype(a), const fp8_e4m3_fnuz>));
     EXPECT_EQ(static_cast<float>(a), 1.0f);
 }
 
 TEST_F(TestUserDefinedLiterals, Fp8E4M3FnuzLiteralNegative)
 {
     const auto a = -2.0_e4m3_fnuz;
-    EXPECT_TRUE((std::is_same_v<decltype(a), fp8_e4m3_fnuz>));
+    EXPECT_TRUE((std::is_same_v<decltype(a), const fp8_e4m3_fnuz>));
     EXPECT_EQ(static_cast<float>(a), -2.0f);
 }
 
 TEST_F(TestUserDefinedLiterals, Fp8E4M3FnuzLiteralZero)
 {
     const auto a = 0.0_e4m3_fnuz;
-    EXPECT_TRUE((std::is_same_v<decltype(a), fp8_e4m3_fnuz>));
+    EXPECT_TRUE((std::is_same_v<decltype(a), const fp8_e4m3_fnuz>));
     EXPECT_EQ(static_cast<float>(a), 0.0f);
 }
 
@@ -305,21 +305,21 @@ TEST_F(TestUserDefinedLiterals, Fp8E4M3FnuzLiteralPowerOfTwo)
 TEST_F(TestUserDefinedLiterals, Fp8E5M2LiteralPositive)
 {
     const auto a = 1.0_e5m2;
-    EXPECT_TRUE((std::is_same_v<decltype(a), fp8_e5m2>));
+    EXPECT_TRUE((std::is_same_v<decltype(a), const fp8_e5m2>));
     EXPECT_EQ(static_cast<float>(a), 1.0f);
 }
 
 TEST_F(TestUserDefinedLiterals, Fp8E5M2LiteralNegative)
 {
     const auto a = -2.0_e5m2;
-    EXPECT_TRUE((std::is_same_v<decltype(a), fp8_e5m2>));
+    EXPECT_TRUE((std::is_same_v<decltype(a), const fp8_e5m2>));
     EXPECT_EQ(static_cast<float>(a), -2.0f);
 }
 
 TEST_F(TestUserDefinedLiterals, Fp8E5M2LiteralZero)
 {
     const auto a = 0.0_e5m2;
-    EXPECT_TRUE((std::is_same_v<decltype(a), fp8_e5m2>));
+    EXPECT_TRUE((std::is_same_v<decltype(a), const fp8_e5m2>));
     EXPECT_EQ(static_cast<float>(a), 0.0f);
 }
 
@@ -351,21 +351,21 @@ TEST_F(TestUserDefinedLiterals, Fp8E5M2LiteralPowerOfTwo)
 TEST_F(TestUserDefinedLiterals, Fp8E5M2FnuzLiteralPositive)
 {
     const auto a = 1.0_e5m2_fnuz;
-    EXPECT_TRUE((std::is_same_v<decltype(a), fp8_e5m2_fnuz>));
+    EXPECT_TRUE((std::is_same_v<decltype(a), const fp8_e5m2_fnuz>));
     EXPECT_EQ(static_cast<float>(a), 1.0f);
 }
 
 TEST_F(TestUserDefinedLiterals, Fp8E5M2FnuzLiteralNegative)
 {
     const auto a = -2.0_e5m2_fnuz;
-    EXPECT_TRUE((std::is_same_v<decltype(a), fp8_e5m2_fnuz>));
+    EXPECT_TRUE((std::is_same_v<decltype(a), const fp8_e5m2_fnuz>));
     EXPECT_EQ(static_cast<float>(a), -2.0f);
 }
 
 TEST_F(TestUserDefinedLiterals, Fp8E5M2FnuzLiteralZero)
 {
     const auto a = 0.0_e5m2_fnuz;
-    EXPECT_TRUE((std::is_same_v<decltype(a), fp8_e5m2_fnuz>));
+    EXPECT_TRUE((std::is_same_v<decltype(a), const fp8_e5m2_fnuz>));
     EXPECT_EQ(static_cast<float>(a), 0.0f);
 }
 
@@ -398,7 +398,7 @@ TEST_F(TestUserDefinedLiterals, Fp8E5M2FnuzLiteralPowerOfTwo)
 TEST_F(TestUserDefinedLiterals, Fp8E8M0LiteralPositive)
 {
     const auto a = 1.0_e8m0;
-    EXPECT_TRUE((std::is_same_v<decltype(a), fp8_e8m0>));
+    EXPECT_TRUE((std::is_same_v<decltype(a), const fp8_e8m0>));
     EXPECT_EQ(static_cast<float>(a), 1.0f);
 }
 
