@@ -55,7 +55,7 @@ extern "C" {
 *  @param[out]
 *  buffer_size_in_bytes  number of bytes of the buffer.
 *  @param[out]
-*  error        error descriptor created if the returned status is not \ref rocsparse_status_success. A null pointer can be passed if an error descriptor is not required.
+*  error        error descriptor, reserved for future use. A null pointer can be passed.
 *
 *  \retval rocsparse_status_success the operation completed successfully.
 *  \retval rocsparse_status_invalid_handle the library context was not initialized.
@@ -217,7 +217,7 @@ rocsparse_status rocsparse_v2_spmv_buffer_size(rocsparse_handle            handl
 *  @param[in]
 *  buffer       temporary buffer allocated by the user.
 *  @param[out]
-*  error        error descriptor created if the returned status is not \ref rocsparse_status_success. A null pointer can be passed if an error descriptor is not required.
+*  error        error descriptor, reserved for future use. A null pointer can be passed.
 *
 *  \retval      rocsparse_status_success the operation completed successfully.
 *  \retval      rocsparse_status_invalid_handle the library context \p handle was not initialized.
@@ -277,7 +277,7 @@ rocsparse_status rocsparse_v2_spmv(rocsparse_handle            handle,
  *  z_vecs          array of dense vector descriptors for z vectors. All vectors must have a
  *                  data type matching the compute data type and have the same size.
  *  @param[out]
- *  p_error         error descriptor created if the returned status is not \ref rocsparse_status_success. A null pointer can be passed if an error descriptor is not required.
+ *  p_error         error descriptor, reserved for future use. A null pointer can be passed.
  *
  *  \retval rocsparse_status_success the operation completed successfully.
  *  \retval rocsparse_status_invalid_handle the library context was not initialized.
@@ -310,7 +310,7 @@ rocsparse_status rocsparse_spmv_set_extra(rocsparse_handle             handle,
  *  @param[inout]
  *  descr           SpMV descriptor.
  *  @param[out]
- *  p_error         error descriptor created if the returned status is not \ref rocsparse_status_success. A null pointer can be passed if an error descriptor is not required.
+ *  p_error         error descriptor, reserved for future use. A null pointer can be passed.
  *
  *  \retval rocsparse_status_success the operation completed successfully.
  *  \retval rocsparse_status_invalid_handle the library context was not initialized.

@@ -16,6 +16,7 @@ Documentation for rocSPARSE is available at
 * GoogleTest 1.11.0 or later must be installed before building the client tests (`BUILD_CLIENTS_TESTS`). Alternatively, set `FETCHCONTENT_SOURCE_DIR_GOOGLETEST` to a googletest source tree, or configure with `-DALLOW_FETCH_DEPS=ON` to download GoogleTest 1.15.2. Both build GoogleTest statically and don't install it.
 * `install.sh -d` no longer builds and installs GoogleTest from source.
 * The 24 SuiteSparse test matrices are now stored with DVC in `clients/matrices`. Run `dvc pull -R projects/rocsparse/clients/matrices` before building the tests. In a sparse checkout, add the repository-root `.dvc` directory first with `git sparse-checkout add .dvc`. By default, CMake configuration fails when matrices are missing instead of downloading them from SuiteSparse. Configure with `-DALLOW_FETCH_DEPS=ON` to download them instead, which also applies to `ROCSPARSE_TEST_MIRROR`. The `--matrices-dir` and `--matrices-dir-install` options of `install.sh` and the `--matrices-dir` option of `rmake.py` still download missing matrices.
+* The `rocsparse_error* p_error` arguments are now documented as reserved for future use. No routine writes an error descriptor yet, although the documentation said that one was created when the returned status was not `rocsparse_status_success`.
 
 ### Optimized
 * Reduced the size of the rocSPARSE shared library. The host code of each kernel launch and HIP error check is now emitted once instead of at every call site. The exported API is unchanged.
