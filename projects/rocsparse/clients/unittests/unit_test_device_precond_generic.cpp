@@ -727,10 +727,7 @@ TEST_F(PrecondGeneric, spildlt0_csr_hash_row_lengths)
     }
     // Complex values and 64-bit indices with a row as long as a table.
     check_csr_matrix<Kind::ildlt, rocsparse_double_complex, int64_t, int64_t>(
-        handle,
-        make_fat_row_matrix<rocsparse_double_complex>(32, 3),
-        opt,
-        "fat 32 i64 complex");
+        handle, make_fat_row_matrix<rocsparse_double_complex>(32, 3), opt, "fat 32 i64 complex");
 }
 
 // ---------------------------------------------------------------------------
