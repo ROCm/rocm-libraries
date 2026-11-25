@@ -1281,21 +1281,20 @@ int main(int argc, const char* argv[])
     std::vector<std::vector<std::shared_ptr<void>>> fullBatchD; // [device][rotating slot]
     // One counter per device, in host memory every device can reach. Joined run (the default):
     // after its slice of a launch a device's stream writes the launch number into its counter,
-    // then waits until the other devices' counters have reached it (see launchAll). That write
-    // also publishes the device's stores into another device's D. With --split-free-run there is
-    // no join and the write is only the publish. Created here and not at the first launch, so that
-    // a launch only enqueues.
+    // then waits until the other devices' counters have reached it (see launchAll).
+    // --split-free-run has no join and no counters. Created here and not at the first launch, so
+    // that a launch only enqueues.
     std::vector<std::shared_ptr<void>> joinCounters; // [device]
     uint64_t                           joinLaunch = 0;
     const bool joinSplit = problemFactory.numSlices() > 1 && !args["split-free-run"].as<bool>();
-    if(problemFactory.numSlices() > 1)
+    if(joinSplit)
         for(auto const& ctx : devices)
         {
             ScopedDevice device(ctx->deviceId);
             int          canWait = 0;
             HIP_CHECK_EXC(hipDeviceGetAttribute(
                 &canWait, hipDeviceAttributeCanUseStreamWaitValue, ctx->deviceId));
-            if(joinSplit && !canWait)
+            if(!canWait)
                 throw std::runtime_error(
                     "--split-devices joins the devices with hipStreamWaitValue64, which device "
                     + std::to_string(ctx->deviceId) + " does not support; use --split-free-run");
@@ -1750,24 +1749,6 @@ int main(int argc, const char* argv[])
                                     rotationLaunchIdx++;
                                 };
 
-                                // Whoever writes memory of another device publishes it, as
-                                // hipBLASLt's PartitionedGemm::run() does: every device but the
-                                // owner of a shared D, and every device of an OutputPeerD kernel.
-                                // A stream write after the kernels makes those writes visible to
-                                // the other devices.
-                                auto const* splitGemm
-                                    = dynamic_cast<ContractionProblemGemm const*>(problem);
-                                const bool split = problemFactory.numSlices() > 1;
-                                const bool sharedD
-                                    = split && args["split-placement"].as<std::string>()[3] == 'S';
-                                const bool peerD   = split && splitGemm && splitGemm->outputPeerD();
-                                auto       publish = [&](size_t d) {
-                                    if(!peerD && !(sharedD && d > 0))
-                                        return;
-                                    HIP_CHECK_EXC(hipStreamWriteValue64(
-                                        active[d]->stream, joinCounters[d].get(), 1, 0));
-                                };
-
                                 // One counter across warmups, the profiler run and every sync.
                                 size_t launchIdx = 0;
                                 auto   launchAll = [&](TimingEvents const* startEvents,
@@ -1787,8 +1768,6 @@ int main(int argc, const char* argv[])
                                         else
                                             HIP_CHECK_EXC(ctx.adapter->launchKernels(
                                                 launch[d], ctx.stream, nullptr, nullptr));
-                                        if(!joinSplit)
-                                            publish(d);
                                     }
                                     // Join the devices: the next launch starts on every device
                                     // only when this one has finished on all of them, as
