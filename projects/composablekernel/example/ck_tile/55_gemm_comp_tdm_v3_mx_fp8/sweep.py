@@ -389,9 +389,16 @@ def main():
             + (f" on HIP {gpu}" if gpu is not None else "")
             + ("  [SINGLE partition: quick check only]" if single else ""))
         top = rows[0][0] if rows else 1.0
+        # effective bandwidth over the minimum DRAM traffic: fp8 A and B once, their E8M0
+        # scales (one byte per 32 K), C once (bf16 / fp16: 2 bytes)
+        m_, n_, k_ = shape
+        nbytes = (m_ + n_) * k_ + (m_ + n_) * (k_ // 32) + m_ * n_ * 2
+        flops = 2.0 * m_ * n_ * k_
         for med, lo, hi, p in rows:
             n_ok = len([x for x in res.get((p["tag"], tuple(shape)), []) if x is not None])
-            log(f"  {med:8.1f}  ({lo:.0f}-{hi:.0f})  {med / top:.3f}x  {p['tag']}  [{n_ok}/{rounds} clean]")
+            tbs = nbytes / (flops / (med * 1e12)) / 1e12
+            log(f"  {med:8.1f}  ({lo:.0f}-{hi:.0f})  {med / top:.3f}x  {tbs:6.2f} TB/s  {p['tag']}"
+                f"  [{n_ok}/{rounds} clean]")
         best += [(shape, p) for _, _, _, p in rows[: o.verify_top]]
 
     # --- verify the winners last
