@@ -514,27 +514,30 @@ def conv_args_signature(
     )
 
 
-def conv_direct_output_dtype(dtype: str, direction: str = "fwd") -> str:
+def conv_direct_output_dtype(
+    dtype: str, direction: str = "fwd", *, dw16: bool = False
+) -> str:
     """Element type of a direct kernel's output ``D`` for activation / filter
     element type ``dtype``: the wgrad kernel accumulates dW through fp32
-    atomics, so its ``D`` is always ``fp32``; every other direction writes
-    ``dtype``."""
-    return "fp32" if direction == "wgrad" else dtype
+    atomics, so its ``D`` is always ``fp32`` unless ``dw16`` (a kernel that
+    stores the 16-bit dW whole); every other direction writes ``dtype``."""
+    return "fp32" if direction == "wgrad" and not dw16 else dtype
 
 
 def conv_direct_args_signature(
-    dtype: str = "fp16", *, direction: str = "fwd"
+    dtype: str = "fp16", *, direction: str = "fwd", dw16: bool = False
 ) -> List[Dict[str, Any]]:
     """Direct grouped-conv AOT launch signature.
 
     ``dtype`` is the activation/filter element type (``fp16`` or ``bf16``);
-    ``D`` carries :func:`conv_direct_output_dtype`.
+    ``D`` carries :func:`conv_direct_output_dtype`. ``dw16`` selects a wgrad
+    kernel that stores the 16-bit dW whole instead of accumulating in fp32.
     """
     return _conv_signature(
         conv_direct_arg_names(direction=direction),
         dtype,
         dtype,
-        conv_direct_output_dtype(dtype, direction),
+        conv_direct_output_dtype(dtype, direction, dw16=dw16),
     )
 
 

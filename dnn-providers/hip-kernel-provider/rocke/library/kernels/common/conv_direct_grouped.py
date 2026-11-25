@@ -108,7 +108,12 @@ from rocke.helpers.transforms import (
 
 
 def emit_direct_params(
-    b: IRBuilder, *, direction: str = "fwd", io_type=F16
+    b: IRBuilder,
+    *,
+    direction: str = "fwd",
+    io_type=F16,
+    d16: bool = False,
+    d16_atomic: bool = False,
 ) -> Dict[str, Value]:
     """Declare the direct-conv kernarg block in :mod:`conv_abi` order.
 
@@ -123,11 +128,19 @@ def emit_direct_params(
     ``direction="wgrad"`` binds dY to A and X to B, and D is the fp32 dW the
     kernel ``global_atomic_add``s into: an atomic reads its target, so it is
     not ``writeonly``, and a scalar f32 atomic only needs dword alignment.
+    ``d16`` makes a wgrad D the ``io_type`` dW a kernel stores whole,
+    ``d16_atomic`` the one it adds packed pairs into.
     """
     out: Dict[str, Value] = {}
     for name, kind in conv_direct_arg_names(direction=direction):
         if kind == "i32":
             out[name] = b.param(name, I32)
+        elif kind == "d" and direction == "wgrad" and d16_atomic:
+            out[name] = b.param(name, PtrType(io_type, "global"), noalias=True, align=4)
+        elif kind == "d" and direction == "wgrad" and d16:
+            out[name] = b.param(
+                name, PtrType(io_type, "global"), noalias=True, writeonly=True, align=2
+            )
         elif kind == "d" and direction == "wgrad":
             out[name] = b.param(name, PtrType(F32, "global"), noalias=True, align=4)
         elif kind == "d":
