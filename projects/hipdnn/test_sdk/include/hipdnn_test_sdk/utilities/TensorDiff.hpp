@@ -71,6 +71,7 @@ TensorDiffSummary computeTensorDiff(hipdnn_data_sdk::utilities::ITensor& referen
     std::atomic<size_t> comparedCount(0);
 
     auto diffFunc = [&](const std::vector<int64_t>& indices) {
+        using hipdnn_data_sdk::types::isnan;
         if(isRagged && raggedLayout->isOutOfBlock(indices))
         {
             return;
@@ -82,7 +83,7 @@ TensorDiffSummary computeTensorDiff(hipdnn_data_sdk::utilities::ITensor& referen
         // A ragged reference marks the positions it leaves undefined with NaN (RFC 0014).
         if(isRagged)
         {
-            if(std::isnan(static_cast<float>(refValue)))
+            if(isnan(refValue))
             {
                 return;
             }

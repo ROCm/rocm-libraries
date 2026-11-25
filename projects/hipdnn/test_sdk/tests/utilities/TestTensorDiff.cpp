@@ -388,6 +388,21 @@ TYPED_TEST(RaggedTensorDiff, ReportsInBlockDifference)
     EXPECT_EQ(summary.maxDiffIndices, (std::vector<int64_t>{1, 1, 2, 1}));
 }
 
+TEST(TestRaggedTensorDiffDouble, InBlockReferenceAboveFloatRangeIsCompared)
+{
+    auto ref = createRaggedSdpaTensor<double>(0.5f);
+    auto impl = createRaggedSdpaTensor<double>(0.5f);
+    ref.setHostValue(1e300, 1, 1, 2, 1);
+    impl.setHostValue(1e301, 1, 1, 2, 1);
+
+    auto summary = computeTensorDiff<double>(ref, impl, 0.0f, 1e-6f);
+
+    EXPECT_EQ(summary.totalElements, 20u);
+    EXPECT_EQ(summary.mismatchCount, 1u);
+    EXPECT_DOUBLE_EQ(summary.maxAbsDiff, 9e300);
+    EXPECT_EQ(summary.maxDiffIndices, (std::vector<int64_t>{1, 1, 2, 1}));
+}
+
 TYPED_TEST(RaggedTensorDiff, MismatchedLayoutsReturnEmptySummary)
 {
     auto ref = createRaggedSdpaTensor<TypeParam>(0.5f);
