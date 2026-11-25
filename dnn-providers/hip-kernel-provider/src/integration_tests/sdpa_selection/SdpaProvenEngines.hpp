@@ -225,7 +225,7 @@ inline std::vector<SelectionRow> selectionRows()
             {
                 if(built(engine.archs, arch))
                 {
-                    unclaimedRanked.push_back(engine.name);
+                    unclaimedRanked.emplace_back(engine.name);
                 }
             }
             rows.push_back({std::string(selectionCase.token) + "_" + arch,
