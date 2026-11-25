@@ -248,6 +248,8 @@ struct Arguments
     int32_t uniform_summation_order;
     // Directions in which the inputs are made uniform and D is checked to be bitwise uniform.
     hipblaslt_uniform_check uniform_check;
+    // Self-test of uniform_check: flips one bit of one element of D for the check, which must fail
+    int8_t uniform_check_inject;
     // tuning
     int32_t gsu_vector[MAX_SUPPORTED_NUM_PROBLEMS]; // This is for client
     int32_t wgm_vector[MAX_SUPPORTED_NUM_PROBLEMS]; // This is for client
@@ -390,6 +392,7 @@ struct Arguments
     OPER(skip_slow_solution_ratio) SEP\
     OPER(uniform_summation_order) SEP\
     OPER(uniform_check) SEP          \
+    OPER(uniform_check_inject) SEP   \
     OPER(gsu_vector) SEP             \
     OPER(wgm_vector) SEP             \
     OPER(print_solution_found) SEP   \

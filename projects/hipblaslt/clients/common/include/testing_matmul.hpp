@@ -3122,6 +3122,16 @@ void testing_matmul_with_bias(const Arguments& arg,
         }
     }
 
+    if(arg.uniform_check_inject && arg.uniform_check == hipblaslt_uniform_check::none)
+    {
+#ifdef GOOGLE_TEST
+        FAIL() << "uniform_check_inject requires uniform_check";
+#else
+        hipblaslt_cerr << "uniform_check_inject requires uniform_check" << std::endl;
+        return;
+#endif
+    }
+
     // The self-test counts the allclose failures that check() reports per solution: unit_check
     // and norm_check would fail the case outright on the NaN in the skipped solution's D. The
     // skipped solution follows one that wrote D.
@@ -7274,6 +7284,25 @@ void testing_matmul_with_bias(const Arguments& arg,
         auto*        dResult = dUniformResult->as<UniformCheckDeviceResult>();
         void*        flags   = dUniformFlags->buf();
         const size_t elem    = realDataTypeSize(To);
+        // uniform_check_inject flips one bit of the last element of line 0 of the first D, in
+        // batch 0, for the compare only.
+        auto flipInjected = [&]() -> hipError_t {
+            const int64_t  row = ucCols ? 0 : M[0] - 1, col = ucCols ? N[0] - 1 : 0;
+            unsigned char* p
+                = static_cast<unsigned char*>((*dDp)[0].buf()) + (col * ldd[0] + row) * elem;
+            unsigned char byte = 0;
+            hipError_t    err  = hipMemcpyAsync(&byte, p, 1, hipMemcpyDeviceToHost, stream);
+            if(err == hipSuccess)
+                err = hipStreamSynchronize(stream);
+            byte ^= 1;
+            if(err == hipSuccess)
+                err = hipMemcpyAsync(p, &byte, 1, hipMemcpyHostToDevice, stream);
+            if(err == hipSuccess)
+                err = hipStreamSynchronize(stream);
+            return err;
+        };
+        if(arg.uniform_check_inject)
+            CHECK_HIP_ERROR(flipInjected());
         // One GEMM of a group at a time, so the first difference names its GEMM.
         const int groups     = batchMode == HIPBLASLT_BATCH_MODE_POINTER_ARRAY ? 1 : gemm_count;
         int       failedGemm = -1;
@@ -7316,6 +7345,8 @@ void testing_matmul_with_bias(const Arguments& arg,
             }
             h.bad += g.bad;
         }
+        if(arg.uniform_check_inject)
+            CHECK_HIP_ERROR(flipInjected());
         result = {h.bad ? UniformCheckResult::Status::fail : UniformCheckResult::Status::pass,
                   int64_t(h.bad),
                   h.first_pos()};

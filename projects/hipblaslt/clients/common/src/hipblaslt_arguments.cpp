@@ -190,6 +190,7 @@ void Arguments::init()
     skip_slow_solution_ratio = 0.0;
     uniform_summation_order  = -1;
     uniform_check            = hipblaslt_uniform_check::none;
+    uniform_check_inject     = 0;
 
     // tuning
     gsu_vector[0] = 0;
