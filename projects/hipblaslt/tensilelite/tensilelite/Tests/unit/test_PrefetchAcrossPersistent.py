@@ -20,6 +20,7 @@ from rocisa.register import RegisterPool
 import tensilelite.KernelWriter as kw_module
 from tensilelite.KernelWriter import KernelWriter
 import tensilelite.KernelWriterAssembly as kwa_module
+import tensilelite.Components.StreamK as streamk_module
 from tensilelite.Components.StreamK import StreamKDynamic, StreamKHybrid, StreamKTwoTileDPFirst
 from tensilelite.Components.TDMFuse import TDM_GROUPS, tdmGrouping, tdmPapRejectReason, tdmScaleSharesDataSet
 from tensilelite.Components.TileProcessingStrategy import DataParallel
@@ -1268,6 +1269,11 @@ def test_sk4_pap_setup_next_tile_uses_stashed_work_item(monkeypatch):
             "computeNextTileIdentity", "unit: tile identity"
         ),
     )
+    monkeypatch.setattr(
+        streamk_module,
+        "papNextTileWorkGroupMapping",
+        lambda writer, kernel: _module_with_comment("wgm", "unit: WorkGroupMapping"),
+    )
     module = StreamKDynamic().prefetchAcrossPersistentSetupNextTile(
         _PapFetchWriter(),
         {"TileProcessingStrategy": "StreamK", "WorkAssignment": "DynamicWorkQueue"},
@@ -1276,7 +1282,8 @@ def test_sk4_pap_setup_next_tile_uses_stashed_work_item(monkeypatch):
     )
     rendered = str(module)
     assert "s[sgprNextWorkItem]" in rendered
-    assert "unit: tile identity" in rendered
+    # graWorkGroup remaps the tile after its identity; the prefetch must too.
+    assert rendered.index("unit: tile identity") < rendered.index("unit: WorkGroupMapping")
 
 
 # ---------------------------------------------------------------------------

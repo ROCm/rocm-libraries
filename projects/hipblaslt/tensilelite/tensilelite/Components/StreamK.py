@@ -198,6 +198,21 @@ def skPaddedItersPerTileTmp(writer, kernel, module, sIpt,
 _SK_USO_BIT = 29
 
 
+def papNextTileWorkGroupMapping(writer, kernel):
+    """WorkGroupMapping remap for a PAP next-tile identity.
+
+    ``graWorkGroup`` applies this remap after every tile-identity
+    derivation, so the next-tile prefetch must apply the same one to its
+    WorkGroup0/1. Otherwise the prefetched first K group belongs to the
+    un-remapped tile while the next iteration computes the remapped tile.
+    """
+    from .WorkGroupMappingAlgos import DefaultWGM, SpaceFillingCurveWalk
+    if len(kernel["SpaceFillingAlgo"]):
+        writer.states.WGMTransformLevels = len(kernel["SpaceFillingAlgo"])
+        return SpaceFillingCurveWalk(writer, kernel, "WGM")
+    return DefaultWGM(writer, kernel, "WGM")
+
+
 class StreamKMemoryOrdering(Component):
     """
     Memory-ordering fences and flag accessors for the StreamK partial-tile
@@ -4094,12 +4109,18 @@ class StreamKDynamic(StreamK):
         here. ``skipLroReset`` is accepted for signature parity with the base
         implementation; SK4 tile identity is index-derived and does not touch
         local-read offsets.
+
+        ``graWorkGroup`` applies the WorkGroupMapping remap after the tile
+        identity, so the prefetch must apply it too. Without it, WGM != 1
+        prefetches the first K group of a different tile than the one the
+        next iteration computes.
         """
         module = Module("StreamK Dynamic prefetchAcrossPersistentSetupNextTile")
         sWorkItemIdx = writer.sgprPool.checkOut(1, "papNextWorkItemIdx")
         module.add(SMovB32(dst=sgpr(sWorkItemIdx), src=sgpr("NextWorkItem"), comment="PAP: next tile work item (already popped)"))
         module.add(self._computeNextTileIdentity(writer, kernel, sWorkItemIdx, tPA, tPB))
         writer.sgprPool.checkIn(sWorkItemIdx)
+        module.add(papNextTileWorkGroupMapping(writer, kernel))
         return module
 
     def computeLoadSrd(self, writer, kernel, tc, sTmp):
@@ -4588,10 +4609,10 @@ class StreamKHybrid(StreamK):
         reuses the SK4 index-derived identity: the work item was already popped
         and validated by ``papHasNextPersistentIteration`` (stashed in
         NextWorkItem), so we only derive its tile identity + WorkGroup* here
-        (no second queue interaction, no LDS broadcast).
+        (no second queue interaction, no LDS broadcast). Both sub-paths then
+        apply the WorkGroupMapping remap that ``graWorkGroup`` applies, so the
+        prefetched tile is the one the next iteration computes.
         """
-        from .WorkGroupMappingAlgos import DefaultWGM, SpaceFillingCurveWalk
-
         module = Module("StreamK Hybrid prefetchAcrossPersistentSetupNextTile")
 
         def emitDynamic(mod):
@@ -4605,13 +4626,9 @@ class StreamKHybrid(StreamK):
                 sTmp = sTmpRes.idx
                 mod.add(self.skTileIndex(writer, kernel, sTmp, tPA, tPB, skipLroReset=skipLroReset))
                 mod.add(self.tileIndexToWorkGroup(writer, kernel, sTmp))
-            if len(kernel["SpaceFillingAlgo"]):
-                writer.states.WGMTransformLevels = len(kernel["SpaceFillingAlgo"])
-                mod.add(SpaceFillingCurveWalk(writer, kernel, "WGM"))
-            else:
-                mod.add(DefaultWGM(writer, kernel, "WGM"))
 
         Component.WorkAssignment.find(writer).dispatch(writer, module, "PapSetup", emitDynamic, emitStatic)
+        module.add(papNextTileWorkGroupMapping(writer, kernel))
         return module
 
     # ------------------------------------------------------------------
