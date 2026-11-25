@@ -9,8 +9,8 @@ When your packet lists owned files (docs-only change), you are the correctness o
 - Every statement matches the code at `$HEAD`: names, defaults, paths, commands, supported types and archs. Run or read what
   you can to confirm.
 - Docs the change makes stale are updated or removed (`projects/miopen/CONTRIBUTING.md`, reviewer checklist item 4): the
-  `projects/miopen/docs/` pages for find, the databases, the cache and environment variables, `projects/miopen/CHANGELOG.md`,
-  and `projects/miopen/test/gtest/README.md` for test conventions.
+  `projects/miopen/docs/` pages for find, the databases, the cache and environment variables, `projects/miopen/changelog.d/`
+  for user-facing release notes, and `projects/miopen/test/gtest/README.md` for test conventions.
 - Existing public headers the change edits (`projects/miopen/include/miopen/miopen.h`) keep accurate Doxygen documentation.
 
 ## PR text (PR targets only)

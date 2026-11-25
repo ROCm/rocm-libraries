@@ -82,6 +82,7 @@ common = [
     ".github/workflows/issue-import.yml",
     ".github/workflows/labeler.yml",
     ".github/workflows/libraries-pr-bot.yml",
+    ".github/workflows/miopen-changelog-fragments.yml",
     ".github/workflows/miopen-wrapper-flag-on.yml",
     ".github/workflows/multiple_pr_import.yml",
     ".github/workflows/pr-ci-freshness.yml",

@@ -13,12 +13,18 @@ PROJECT = Path(__file__).resolve().parents[1]
 SECTIONS = {
     "added": "Added",
     "changed": "Changed",
+    "deprecated": "Deprecated",
     "removed": "Removed",
     "resolved": "Resolved Issues",
     "optimized": "Optimized",
     "known": "Known Issues",
 }
 NAME = re.compile(r"[a-z0-9]+(?:-[a-z0-9]+)*\.([a-z]+)\.md")
+
+
+def fragment_order(path):
+    number = re.match(r"[0-9]+(?=[.-])", path.name)
+    return (number is None, int(number[0]) if number else 0, path.name)
 
 
 def read_fragment(directory, path):
@@ -49,9 +55,9 @@ def read_fragment(directory, path):
 def assemble(changelog, entries):
     lines = changelog.splitlines(keepends=True)
     releases = [index for index, line in enumerate(lines) if line.startswith("## ")]
-    if not releases or not lines[releases[0]].rstrip().endswith(" (Unreleased)"):
+    if not releases or not lines[releases[0]].startswith("## (Unreleased) "):
         raise ValueError(
-            "CHANGELOG.md: newest release heading must end in ' (Unreleased)'"
+            "CHANGELOG.md: newest release heading must start with '## (Unreleased) '"
         )
     missing = []
     start = releases[0]
@@ -59,10 +65,12 @@ def assemble(changelog, entries):
     headings = [
         index for index in range(start + 1, end) if lines[index].startswith("### ")
     ]
-    insertions = []
+    insertions = {}
     for section, bullets in entries.items():
         matches = [
-            index for index in headings if lines[index].strip() == f"### {section}"
+            index
+            for index in headings
+            if lines[index].strip().casefold() == f"### {section}".casefold()
         ]
         if len(matches) > 1:
             raise ValueError(f"CHANGELOG.md: duplicate active section '{section}'")
@@ -71,25 +79,25 @@ def assemble(changelog, entries):
             boundary = next((index for index in headings if index > matches[0]), end)
             while boundary > matches[0] + 1 and not lines[boundary - 1].strip():
                 boundary -= 1
-            insertions.append(
-                (
-                    boundary,
-                    text
-                    + (
-                        "\n"
-                        if boundary < len(lines) and lines[boundary].strip()
-                        else ""
-                    ),
-                )
+            separator = (
+                "\n" if boundary < len(lines) and lines[boundary].strip() else ""
             )
+            insertions[boundary] = text + separator
         else:
-            missing.append(f"\n### {section}\n{text}\n")
+            missing.append(f"### {section}\n{text}")
     if missing:
-        insertions.append((end, "".join(missing)))
-    # Insert later positions first; reverse equal positions to keep section order.
-    for index, text in sorted(
-        reversed(insertions), key=lambda item: item[0], reverse=True
-    ):
+        boundary = end
+        while boundary > start + 1 and not lines[boundary - 1].strip():
+            boundary -= 1
+        previous = insertions.get(boundary, "")
+        separator = "\n" if boundary < len(lines) and lines[boundary].strip() else ""
+        insertions[boundary] = (
+            (previous.rstrip("\n") + "\n" if previous else "")
+            + "\n"
+            + "\n".join(missing)
+            + separator
+        )
+    for index, text in sorted(insertions.items(), reverse=True):
         if index and not lines[index - 1].endswith("\n"):
             lines[index - 1] += "\n"
         lines.insert(index, text)
@@ -132,7 +140,7 @@ def main():
         paths = (
             [path.absolute() for path in args.validate]
             if args.validate
-            else sorted(directory.iterdir())
+            else sorted(directory.iterdir(), key=fragment_order)
         )
         entries = {section: [] for section in SECTIONS.values()}
         consumed = []

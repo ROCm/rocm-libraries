@@ -21,7 +21,7 @@ class ChangelogFragmentsTest(unittest.TestCase):
         self.readme.write_text("Instructions\n", encoding="utf-8")
         self.changelog = self.root / "CHANGELOG.md"
         self.history = "## MIOpen 3.0\n\n### Resolved Issues\n* Shipped fix.\n"
-        self.active = "# Changelog\n\n## MIOpen 4.0 (Unreleased)\n\n### Resolved Issues\n* Existing fix.\n\n"
+        self.active = "# Changelog\n\n## (Unreleased) MIOpen 4.0\n\n### Resolved issues\n* Existing fix.\n\n"
         self.changelog.write_text(self.active + self.history, encoding="utf-8")
 
     def run_cli(self, *args):
@@ -43,20 +43,23 @@ class ChangelogFragmentsTest(unittest.TestCase):
         return path
 
     def test_fold_orders_entries_and_preserves_released_history(self):
-        second = self.entry("22.resolved.md", "* Second fix.\n  More detail.\n")
-        first = self.entry("11.resolved.md", "* First fix.\n")
+        second = self.entry("10-b.resolved.md", "* Second fix.\n  More detail.\n")
+        first = self.entry("9-a.resolved.md", "* First fix.\n")
+        unnumbered = self.entry("alpha.resolved.md", "* Unnumbered fix.\n")
         added = self.entry("33.added.md", "* New feature.\n")
+        deprecated = self.entry("44.deprecated.md", "* Deprecated an option.\n")
         self.assertNotEqual(self.run_cli("--check-empty").returncode, 0)
         result = self.run_cli("--fold")
         self.assertEqual(result.returncode, 0, result.stderr)
         expected = (
             self.active.rstrip()
-            + "\n* First fix.\n* Second fix.\n  More detail.\n\n\n### Added\n* New feature.\n\n"
+            + "\n* First fix.\n* Second fix.\n  More detail.\n* Unnumbered fix.\n\n"
+            + "### Added\n* New feature.\n\n### Deprecated\n* Deprecated an option.\n\n"
             + self.history
         )
         self.assertEqual(self.changelog.read_text(encoding="utf-8"), expected)
         self.assertEqual(set(self.pending.iterdir()), {self.readme})
-        for path in (first, second, added):
+        for path in (first, second, unnumbered, added, deprecated):
             self.assertFalse(path.exists())
         self.assertEqual(self.run_cli("--check-empty").returncode, 0)
         self.assertEqual(self.run_cli("--fold").returncode, 0)
@@ -82,6 +85,20 @@ class ChangelogFragmentsTest(unittest.TestCase):
         self.assertIn("(Unreleased)", result.stderr)
         self.assertTrue(note.exists())
         self.assertEqual(self.changelog.read_text(encoding="utf-8"), self.history)
+
+    def test_rejects_duplicate_section_headings_that_differ_only_in_case(self):
+        changelog = (
+            self.active + "### Resolved Issues\n* Another fix.\n\n" + self.history
+        )
+        with self.assertRaisesRegex(ValueError, "duplicate active section"):
+            fragments.assemble(changelog, {"Resolved Issues": ["* New fix."]})
+
+    def test_rejects_suffix_marker(self):
+        changelog = self.active.replace(
+            "(Unreleased) MIOpen 4.0", "MIOpen 4.0 (Unreleased)"
+        )
+        with self.assertRaisesRegex(ValueError, "must start with"):
+            fragments.assemble(changelog, {"Resolved Issues": ["* New fix."]})
 
     def test_validation_rejects_symlink_and_bad_category(self):
         bad = self.entry("11.fixed.md", "* A fix.\n")

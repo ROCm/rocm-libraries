@@ -4,9 +4,18 @@ on:
   schedule:
     - cron: '23 14 * * 1'
   workflow_dispatch:
+  push:
+    branches: [develop]
+    paths:
+      - '.github/workflows/miopen-changelog-fragments.yml'
+      - 'projects/miopen/changelog.d/**'
+
+env:
+  BOT_BRANCH: bot/miopen-changelog-fragments
 
 permissions:
   contents: read
+  pull-requests: read
 
 concurrency:
   group: miopen-changelog-fragments
@@ -19,7 +28,21 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
+      # A push can invalidate an open fold, but only the weekly or manual run
+      # should open a new PR. Use the read-only token to check before checkout.
+      - name: Check for an open fold PR
+        id: refresh
+        if: github.event_name == 'push'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          count=$(gh api --method GET "repos/$GITHUB_REPOSITORY/pulls" \
+            -f state=open -f base=develop -f head="$GITHUB_REPOSITORY_OWNER:$BOT_BRANCH" \
+            --jq 'length')
+          echo "count=$count" >> "$GITHUB_OUTPUT"
+
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        if: github.event_name != 'push' || steps.refresh.outputs.count != '0'
         with:
           ref: develop
           filter: blob:none
@@ -29,24 +52,23 @@ jobs:
           persist-credentials: false
 
       - name: Fold merged fragments
+        if: github.event_name != 'push' || steps.refresh.outputs.count != '0'
         run: python3 projects/miopen/script/changelog_fragments.py --fold
 
       - name: Create Libraries App token
         id: app-token
+        if: github.event_name != 'push' || steps.refresh.outputs.count != '0'
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
         with:
           client-id: ${{ secrets.APP_ID }}
           private-key: ${{ secrets.APP_PRIVATE_KEY }}
-          permission-contents: write
-          permission-pull-requests: write
-          # Updating the rolling branch may bring in workflow changes from develop.
-          permission-workflows: write
 
       - name: Reconcile the changelog PR
+        if: github.event_name != 'push' || steps.refresh.outputs.count != '0'
         uses: peter-evans/create-pull-request@5f6978faf089d4d20b00c7766989d076bb2fc7f1 # v8.1.1
         with:
           token: ${{ steps.app-token.outputs.token }}
-          branch: bot/miopen-changelog-fragments
+          branch: ${{ env.BOT_BRANCH }}
           base: develop
           add-paths: |
             projects/miopen/CHANGELOG.md

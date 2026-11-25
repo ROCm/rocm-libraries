@@ -3,7 +3,7 @@
 
 Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/projects/MIOpen/en/latest/)
 
-## MIOpen 3.6.3 for ROCm 10.3.0 (Unreleased)
+## (Unreleased) MIOpen 3.6.3 for ROCm 10.3.0
 
 ### Resolved Issues
 * [Conv] Fixed an out-of-bounds shared-memory read in the CK depthwise forward and backward-data
