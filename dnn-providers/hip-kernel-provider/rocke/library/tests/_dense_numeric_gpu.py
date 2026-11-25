@@ -5,13 +5,14 @@
 
 * Operands: seeded random arrays stored in the kernel's element type and uploaded as
   :class:`~rocke.runtime.device_array.DeviceArray` (:func:`operand`, :func:`upload`,
-  :func:`filled`, and :func:`guarded` with a trailing guard region), read back as
+  :func:`filled`, and :func:`guarded` between two guard regions), read back as
   float64 values (:func:`values`).
 * Reference: :func:`dense_reference`, the float64 ``rocke.numeric.sdpa_reference``
   oracle in the runners' ``[B, S, H, D]`` layout, on exactly the stored values. It
   runs one head per worker thread and remembers each result by its inputs, so
   parametrized rows on the same seeded inputs compute it once.
-* Comparisons: :func:`assert_close` and :func:`same_values` (equal elements). The
+* Comparisons: :func:`assert_close`, :func:`attention_tolerance` (the max-abs bound
+  per element type) and :func:`same_values` (equal elements). The
   error metric is ``rocke.numeric.compare.max_abs_error`` on :func:`values`; equal
   bit patterns are ``rocke.tests.ieee_compare.same_bits`` on
   ``rocke.runtime.device_array.host_values``.
@@ -47,6 +48,9 @@ from ._reference_threads import run_reference_pieces
 #: The largest finite OCP e4m3 magnitude.
 _FP8E4M3_MAX = float(np.nanmax(fp8e4m3_decode_table()))
 
+#: Max-abs error bound of an attention output per stored element type.
+_ATTENTION_TOLERANCE = {"fp16": 2e-2, "bf16": 4e-2}
+
 
 def upload(host, dtype: str) -> DeviceArray:
     """Host values stored as ``dtype`` (:func:`rocke.numeric.storage.encode`) on the
@@ -65,21 +69,66 @@ def filled(shape, dtype: str, value: float = float("nan")) -> DeviceArray:
     return upload(np.full(tuple(shape), value), dtype)
 
 
-def guarded(shape, dtype: str, fill: float, *, guard_elements: int = 16) -> DeviceArray:
-    """A ``dtype`` array of ``shape`` filled with ``fill``, at the start of a buffer
-    whose trailing whole rows (at least ``guard_elements`` elements) hold ``fill``
-    too, so :func:`guard_intact` sees a write past the array's end."""
+def guarded(
+    shape,
+    dtype: str,
+    fill: float,
+    *,
+    guard_fill: float | None = None,
+    guard_elements: int = 16,
+) -> DeviceArray:
+    """A ``dtype`` array of ``shape`` filled with ``fill``, in the middle of a buffer
+    whose whole rows before and after it (at least ``guard_elements`` elements on
+    each side) hold ``guard_fill`` (default ``fill``), so :func:`guard_intact` sees
+    a write outside the array. A NaN ``fill`` under a finite ``guard_fill`` also
+    shows an element the kernel never wrote."""
     shape = tuple(shape)
     row = int(np.prod(shape[1:], dtype=np.int64))
     guard_rows = -(-guard_elements // row)
-    buffer = storage.encode(np.full((shape[0] + guard_rows, *shape[1:]), fill), dtype)
-    return DeviceArray(buffer, dtype, shape=shape)
+    buffer = np.full(
+        (guard_rows + shape[0] + guard_rows, *shape[1:]),
+        fill if guard_fill is None else guard_fill,
+    )
+    buffer[guard_rows : guard_rows + shape[0]] = fill
+    stored = DeviceArray(storage.encode(buffer, dtype), dtype)
+    return stored.view(shape, offset=guard_rows * row)
 
 
-def guard_intact(array: DeviceArray, fill: float) -> bool:
-    """Whether the guard rows past a :func:`guarded` array still hold ``fill``."""
-    tail = storage.decode(array.read()[array.shape[0] :], array.dtype)
-    return bool(np.all(tail == storage.round_to(fill, array.dtype)))
+def guard_intact(array: DeviceArray, guard_fill: float) -> bool:
+    """Whether the guard rows on both sides of a :func:`guarded` array still hold
+    ``guard_fill``, bit for bit (so a NaN guard compares too). An array without
+    whole guard rows on both sides raises ``ValueError``."""
+    buffer = array.read()
+    row = int(np.prod(array.shape[1:], dtype=np.int64))
+    # The elements of the buffer before the array: its view offset.
+    lead_rows, partial = divmod(buffer.size - array.info().backed_elements, row)
+    trail_rows = buffer.shape[0] - lead_rows - array.shape[0]
+    if (
+        buffer.shape[1:] != array.shape[1:]
+        or partial
+        or lead_rows < 1
+        or trail_rows != lead_rows
+    ):
+        raise ValueError(
+            f"guard_intact failed - {array!r} has {lead_rows} guard rows before it "
+            f"and {trail_rows} after in a {buffer.shape} buffer, expected the same "
+            "positive number of whole rows on both sides, as guarded() makes"
+        )
+    guards = np.concatenate([buffer[:lead_rows], buffer[lead_rows + array.shape[0] :]])
+    expected = storage.encode(np.full(guards.shape, guard_fill), array.dtype)
+    return guards.tobytes() == expected.tobytes()
+
+
+def attention_tolerance(dtype: str) -> float:
+    """The max-abs error bound of a dense attention output stored as ``dtype``
+    (fp16 or bf16), against the float64 oracle. fp16 keeps 10 mantissa bits to
+    bf16's 7, so its bound is tighter."""
+    if dtype not in _ATTENTION_TOLERANCE:
+        raise ValueError(
+            f"attention_tolerance failed - dtype={dtype!r}, expected one of "
+            f"{tuple(_ATTENTION_TOLERANCE)}"
+        )
+    return _ATTENTION_TOLERANCE[dtype]
 
 
 def values(array) -> np.ndarray:

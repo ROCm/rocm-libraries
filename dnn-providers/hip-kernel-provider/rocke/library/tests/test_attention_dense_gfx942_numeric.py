@@ -45,6 +45,7 @@ from kernels.gfx942.attention_dense import (
 from ._dense_numeric_gpu import (
     Alias,
     assert_close,
+    attention_tolerance,
     dense_reference,
     filled,
     first_tile_max,
@@ -275,7 +276,7 @@ def test_dense_non_default_scale(d, dtype, persistent, scale):
     Not covered: scales other than 0.5 and 1.0.
     """
     hq, hkv = 16, 4
-    tol = 2e-2 if dtype == "fp16" else 4e-2
+    tol = attention_tolerance(dtype)
     B, S = 1, 512
     rng = np.random.default_rng(0)
 
@@ -352,7 +353,7 @@ _BOTTOM_RIGHT_COHORT = [
 def test_dense_bottom_right_numeric_vs_fp32_sdpa(
     dtype, d, hq, hkv, persistent, diag_split, sq, sk
 ):
-    tol = 2e-2 if dtype == "fp16" else 4e-2
+    tol = attention_tolerance(dtype)
     B = 1
     scale = 1.0 / math.sqrt(d)
     rng = np.random.default_rng(0)
@@ -397,7 +398,7 @@ _KV_SEGMENT_COHORT = [
 def test_dense_kv_segments_numeric_vs_fp32_sdpa(
     dtype, d, hq, hkv, mask, diag_split, segments, sq, sk
 ):
-    tol = 2e-2 if dtype == "fp16" else 4e-2
+    tol = attention_tolerance(dtype)
     scale = 1.0 / math.sqrt(d)
     rng = np.random.default_rng(0)
     q = operand(rng, (1, sq, hq, d), dtype)
@@ -637,7 +638,7 @@ def test_dense_swa_numeric_vs_fp32_sdpa(
     ``cmp_gt(ktok, q - SW)``): keep key k for query q iff ``q - W < k <= q``, the
     reference's ``window=W``. The diagonal k==q is always kept (W>0), so no row is
     fully masked."""
-    tol = 2e-2 if dtype == "fp16" else 4e-2
+    tol = attention_tolerance(dtype)
     B, S = 1, 512
     scale = 1.0 / math.sqrt(d) if scale is None else scale
     rng = np.random.default_rng(0)
@@ -695,7 +696,7 @@ def _check_sinks(
     halves of the seed are exercised, which IR goldens cannot do. Eight above
     (``dominates_qk``): the sink takes nearly all of every row's softmax, so the
     non-vacuity check holds even with no causal mask."""
-    tol = 2e-2 if dtype == "fp16" else 4e-2
+    tol = attention_tolerance(dtype)
     B, Sq, Skv = 1, sq, sq if sk is None else sk
     scale = 1.0 / math.sqrt(d) if scale is None else scale
     rng = np.random.default_rng(0)
@@ -882,7 +883,7 @@ def test_dense_swa_keyless_rows_output_zero_without_lse(
     is requested. Without the guard, such a row is the mean of V (every score equals
     the mask sentinel) or NaN (zero-trip KV loop: 0 * rcp(0)). Rows that do see keys
     keep parity, and the LSE-off output is bit-identical to LSE-on."""
-    tol = _tolerance(dtype)
+    tol = attention_tolerance(dtype)
     scale = 1.0 / math.sqrt(d)
     rng = np.random.default_rng(0)
     q = operand(rng, (1, sq, hq, d), dtype)
@@ -947,7 +948,7 @@ def test_one_sliding_window_binary_serves_keyless_and_keyed_shapes(persistent):
     from kernels.common.attention_dense_spec import attention_dense_cache_key
 
     dtype, d, hq, hkv, window = "bf16", 128, 16, 4, 128
-    tol = _tolerance(dtype)
+    tol = attention_tolerance(dtype)
     scale = 1.0 / math.sqrt(d)
     base = _as_gfx942_spec(
         _spec(dtype, d, hq, hkv, persistent, sq=1024, sliding_window=window)
@@ -1184,7 +1185,7 @@ def test_one_persistent_binary_serves_every_shape_and_head_config(
     from kernels.gfx942.attention_dense import _DENSE_LAUNCHER_CACHE
 
     d = 128
-    tol = 2e-2 if dtype == "fp16" else 4e-2
+    tol = attention_tolerance(dtype)
     scale = 1.0 / math.sqrt(d)
 
     specs = [
@@ -1354,10 +1355,6 @@ _KNOB_AB_COHORT = [
     ("fp16", 128, False, dict(pv_priority=2, pv_sched_fence_mask=0)),
     ("fp16", 128, False, dict(iglp=True, iglp_mode=1)),
 ]
-
-
-def _tolerance(dtype):
-    return 2e-2 if dtype == "fp16" else 4e-2
 
 
 def _lse_spec(dtype, d, hq, hkv, persistent, **kwargs):
@@ -1624,8 +1621,8 @@ class TestDenseLseNumericGfx942:
         v = operand(rng, k.shape, k.dtype)
         out, lse, off_out = _run_lse_and_off(spec, q, k, v, scale)
         ref, lse_ref = dense_reference(q, k, v, scale, causal=causal)
-        assert max_abs_error(values(out), values(ref)) < _tolerance(dtype)
-        assert max_abs_error(values(lse), values(lse_ref)) < _tolerance(dtype)
+        assert max_abs_error(values(out), values(ref)) < attention_tolerance(dtype)
+        assert max_abs_error(values(lse), values(lse_ref)) < attention_tolerance(dtype)
         assert same_values(out, off_out)
 
     @pytest.mark.parametrize(
@@ -1674,7 +1671,7 @@ class TestDenseLseNumericGfx942:
         v = operand(rng, k.shape, k.dtype)
         out, lse, off_out = _run_lse_and_off(spec, q, k, v, scale)
         ref, lse_ref = dense_reference(q, k, v, scale, causal=True)
-        assert max_abs_error(values(out), values(ref)) < _tolerance("bf16")
+        assert max_abs_error(values(out), values(ref)) < attention_tolerance("bf16")
         assert max_abs_error(values(lse), values(lse_ref)) < 1e-3
         assert same_values(out, off_out)
 
@@ -1692,8 +1689,8 @@ class TestDenseLseNumericGfx942:
         v = operand(rng, k.shape, k.dtype)
         out, lse, off_out = _run_lse_and_off(spec, q, k, v, scale)
         ref, lse_ref = dense_reference(q, k, v, scale, causal=True, window=128)
-        assert max_abs_error(values(out), values(ref)) < _tolerance(dtype)
-        assert max_abs_error(values(lse), values(lse_ref)) < _tolerance(dtype)
+        assert max_abs_error(values(out), values(ref)) < attention_tolerance(dtype)
+        assert max_abs_error(values(lse), values(lse_ref)) < attention_tolerance(dtype)
         assert same_values(out, off_out)
 
     @pytest.mark.parametrize("width", [1, 2])
@@ -1744,11 +1741,13 @@ class TestDenseLseNumericGfx942:
         ref, lse_ref = dense_reference(q, k, v, scale, causal=True, window=64)
         # Rows 0..126 see at least one key; rows 127.. see none.
         o = values(out)
-        assert max_abs_error(o[:, :127], ref[:, :127]) < _tolerance("bf16")
+        assert max_abs_error(o[:, :127], ref[:, :127]) < attention_tolerance("bf16")
         assert same_values(o[:, 127:], np.zeros_like(o[:, 127:]))
         lse_got = values(lse)
         finite = np.isfinite(lse_ref)
-        assert max_abs_error(lse_got[finite], lse_ref[finite]) < _tolerance("bf16")
+        assert max_abs_error(lse_got[finite], lse_ref[finite]) < attention_tolerance(
+            "bf16"
+        )
         assert np.array_equal(np.isneginf(lse_got), np.isneginf(lse_ref))
 
         # LSE off on the same keyless shape: the width-1/2 store must write O exactly
@@ -1809,7 +1808,7 @@ class TestDenseLseNumericGfx942:
         assert max_abs_error(lse_got[finite], analytic_lse[finite]) < 1e-5
         assert max_abs_error(lse_ref[finite], analytic_lse[finite]) < 1e-5
         assert np.array_equal(np.isneginf(lse_got), np.isneginf(analytic_lse))
-        assert max_abs_error(values(out), values(ref)) < _tolerance(dtype)
+        assert max_abs_error(values(out), values(ref)) < attention_tolerance(dtype)
         o = values(out)
         assert same_values(o[:, 127:], np.zeros_like(o[:, 127:]))
         if with_sink:
@@ -1912,8 +1911,8 @@ class TestDenseLseNumericGfx942:
             result.bind_torch(tensors, scale=scale).launch()
         result.bind_torch({**tensors, "lse": lse}, scale=scale).launch()
         ref, lse_ref = dense_reference(q, k, v, scale, causal=True)
-        assert max_abs_error(values(out), values(ref)) < _tolerance("bf16")
-        assert max_abs_error(values(lse), values(lse_ref)) < _tolerance("bf16")
+        assert max_abs_error(values(out), values(ref)) < attention_tolerance("bf16")
+        assert max_abs_error(values(lse), values(lse_ref)) < attention_tolerance("bf16")
 
     @pytest.mark.parametrize(
         "persistent,decode",
@@ -1968,8 +1967,12 @@ class TestDenseLseNumericGfx942:
                 v = operand(rng, k.shape, k.dtype)
                 out, lse, off_out = _run_lse_and_off(spec, q, k, v, scale)
                 ref, lse_ref = dense_reference(q, k, v, scale, causal=True)
-                assert max_abs_error(values(out), values(ref)) < _tolerance("bf16")
-                assert max_abs_error(values(lse), values(lse_ref)) < _tolerance("bf16")
+                assert max_abs_error(values(out), values(ref)) < attention_tolerance(
+                    "bf16"
+                )
+                assert max_abs_error(
+                    values(lse), values(lse_ref)
+                ) < attention_tolerance("bf16")
                 assert same_values(out, off_out)
                 launchers.append(_launcher_for(spec))
             assert launchers[0] is not None
@@ -2028,7 +2031,7 @@ class TestDensePagedNumeric:
         assert np.isfinite(values(out)).all()
         scale = 1.0 / math.sqrt(q.shape[-1])
         ref, _ = dense_reference(q, k, v, scale, window=window)
-        assert max_abs_error(values(out), values(ref)) < _tolerance("fp16")
+        assert max_abs_error(values(out), values(ref)) < attention_tolerance("fp16")
 
     @staticmethod
     def _check_paged(dtype, block_size, sq, sk, window, d):
@@ -2086,7 +2089,7 @@ class TestDensePagedNumeric:
         # zero.
         live = np.isfinite(lse_ref[0, 0, :, 0])
         max_abs = max_abs_error(paged[:, live], ref[:, live])
-        assert max_abs < _tolerance(dtype), f"{name}: max_abs={max_abs:.3e}"
+        assert max_abs < attention_tolerance(dtype), f"{name}: max_abs={max_abs:.3e}"
         if not live.all():
             worst = np.abs(paged[:, ~live]).max()
             assert worst == 0.0, f"{name}: {int((~live).sum())} keyless rows: {worst}"
