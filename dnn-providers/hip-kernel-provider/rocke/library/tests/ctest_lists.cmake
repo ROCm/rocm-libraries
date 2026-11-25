@@ -233,7 +233,8 @@ endif()
 # packed-offset host checks (test_attention_dense_varlen_keys.py), the gfx950
 # dense varlen K/V buffer bound on the emitted IR, the tiled-2D spec validators'
 # refusals (their engine-comparison cases skip here, where rocke_engine is not
-# built), and the backward-test memo bound in tests/conftest.py.
+# built), the gfx942 sliced-K ring's slice width and refusals
+# (test_attn_k_slice_hd.py), and the backward-test memo bound in tests/conftest.py.
 # File-list style (same pattern as conv_pytest) so PYTHONPATH resolves rocke/
 # correctly from the installed tree.
 set(_ROCKE_LIBRARY_ATTENTION_CPU_TEST_RELPATHS
@@ -258,6 +259,7 @@ set(_ROCKE_LIBRARY_ATTENTION_CPU_TEST_RELPATHS
     "tests/library/tests/test_attention_tiled_2d_mask_type.py"
     "tests/library/tests/test_attention_tiled_2d_head_counts_gfx942.py"
     "tests/library/tests/test_attn_tiled_2d_gfx950_k_lds_read.py"
+    "tests/library/tests/test_attn_k_slice_hd.py"
     "tests/library/tests/test_attention_tiled_3d_decode_split.py"
     "tests/library/tests/test_attention_3d_workspace_i32_guard.py"
     "tests/library/tests/test_attention_tiled_3d_kv_cache_policy.py"
