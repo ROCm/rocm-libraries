@@ -113,6 +113,37 @@ static int make_spec(int idx, rocke_img2col_spec_t* spec)
         spec->block_tile_k = 128;
         spec->vec_k = 4;
         break;
+    case 6: /* grouped: both engines refuse it (the descriptor has no group axis) */
+        p.N = 2;
+        p.Hi = 16;
+        p.Wi = 16;
+        p.C = 32;
+        p.K = 32;
+        p.Y = 3;
+        p.X = 3;
+        p.groups = 2;
+        spec->block_tile_m = 8;
+        spec->block_tile_k = 128;
+        spec->vec_k = 4;
+        break;
+    case 7: /* 3-D: the depth axis goes through the shared conv descriptor */
+        p.N = 1;
+        p.Hi = 8;
+        p.Wi = 8;
+        p.C = 16;
+        p.K = 16;
+        p.Y = 3;
+        p.X = 3;
+        p.is_3d = true;
+        p.Di = 4;
+        p.Z = 3;
+        p.sD = 1;
+        p.pD = 0;
+        p.dD = 1;
+        spec->block_tile_m = 4;
+        spec->block_tile_k = 64;
+        spec->vec_k = 1;
+        break;
     default:
         return -1;
     }
