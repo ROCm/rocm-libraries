@@ -9,7 +9,9 @@ test or infers artifacts from a source checkout. CMake supplies relocatable path
 With ``--rocke-shard-from-gtest-env`` it compares only its CI shard's share
 (``rocke.tests.ci_shard``, imported from the package on ``PYTHONPATH``): each configuration and the range-boundary check fall
 in exactly one shard, so the shards of a run compare everything once, and a run
-without the shard variables compares everything.
+without the shard variables compares everything. With ``--rocke-list-shard-keys``
+as well, it writes those keys to a path instead of comparing, for the
+entry-time check (``tools/check_entry_times.py``).
 """
 
 from __future__ import annotations
@@ -28,8 +30,10 @@ from unittest import mock
 
 from rocke.tests.ci_shard import (
     Shard,
+    ShardKeyListing,
     add_shard_argument,
     header_line,
+    list_keys_path,
     shard_from_arguments,
 )
 
@@ -187,9 +191,21 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--launcher", type=Path, required=True)
     parser.add_argument("--emitter", type=Path, required=True)
     parser.add_argument("--count", type=int, required=True)
-    add_shard_argument(parser, help="compare only this CI shard's configurations")
+    add_shard_argument(
+        parser,
+        help="compare only this CI shard's configurations",
+        list_help="write the configurations and the range-boundary check the CI "
+        "shards split, each its own shard key, to this path instead of comparing "
+        "them",
+    )
     args = parser.parse_args(argv)
     shard = shard_from_arguments(parser, args)
+    listing = list_keys_path(args)
+    if listing is not None:
+        ShardKeyListing({key: key for key in comparison_keys(args.count)}).write(
+            listing
+        )
+        return 0
     if args.shard_from_gtest_env:
         print(header_line(shard))
     owns = None

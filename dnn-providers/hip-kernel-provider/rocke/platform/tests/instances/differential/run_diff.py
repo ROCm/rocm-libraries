@@ -122,8 +122,10 @@ from rocke.core.golden_file import rerecord_hint
 from rocke.tests.ci_shard import (
     ACTIVATION_FLAG,
     Shard,
+    ShardKeyListing,
     add_shard_argument,
     header_line,
+    list_keys_path,
     shard_from_arguments,
 )
 from rocke.tests.host_cpus import available_cpus
@@ -1365,6 +1367,8 @@ def main():
         help="with --python-only --check-golden: check only the families of this "
         "CI shard, from ROCKE_TEST_SHARD or else GTEST_SHARD_INDEX and "
         "GTEST_TOTAL_SHARDS (rocke.tests.ci_shard); without either, every family",
+        list_help="write the cases the CI shards split, keyed by family, to this path "
+        "instead of checking them",
     )
     args = ap.parse_args()
     if args.record_golden and args.check_golden:
@@ -1374,6 +1378,7 @@ def main():
     if args.shard_from_gtest_env and not (args.python_only and args.check_golden):
         ap.error(f"{ACTIVATION_FLAG} needs --python-only --check-golden")
     shard = shard_from_arguments(ap, args)
+    listing = list_keys_path(args)
 
     global PY_REF_ROOT, SHIM_DIR
     if args.pyroot:
@@ -1400,6 +1405,9 @@ def main():
         kept = [(n, d) for n, d in fams if n not in excluded]
         if fams and not kept:
             # The caller compares these families in another lane.
+            if listing is not None:
+                ShardKeyListing({}).write(listing)
+                return 0
             print(
                 f"[diff] every selected family is excluded ({args.exclude}); nothing to do"
             )
@@ -1414,6 +1422,9 @@ def main():
             # empty the section. A typo in --only must not do either.
             print(f"\nNO_FAMILIES: {GATE_FAIL['NO_FAMILIES']}")
             return 1
+        if listing is not None:
+            _shard_key_listing(args, kind, flavors, fams).write(listing)
+            return 0
         run_fams = fams
         if args.shard_from_gtest_env:
             print(header_line(shard))
@@ -1618,6 +1629,22 @@ def _golden_step(args, kind, flavor, cur, scope, failures, fams, shard=None):
             args, kind, flavor, golden_file, store, file_cur, file_scope, failures
         )
     return status
+
+
+def _shard_key_listing(args, kind, flavors, fams) -> ShardKeyListing:
+    """The cases a sharded golden check splits, keyed by family as the shards
+    split them: each blessed config of each selected family at each flavor the
+    run checks. A family with no blessed config is one case."""
+    key_of_case = {}
+    files = _golden_files(args, fams)
+    for flavor in dict.fromkeys(selected_llvm_flavor(f) for f in flavors):
+        for golden_file, names in files.items():
+            section = GoldenStore.load(golden_file).section(kind, flavor)
+            for family in sorted(names):
+                configs = section.get(family) or {"": ""}
+                for config in configs:
+                    key_of_case[f"{family}/{flavor}/{config}"] = family
+    return ShardKeyListing(key_of_case)
 
 
 def _shard_scope(

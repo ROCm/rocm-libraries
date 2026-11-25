@@ -141,8 +141,10 @@ _bootstrap_sys_path()
 from rocke.core.arch import domain as _domain
 from rocke.tests.ci_shard import (
     ACTIVATION_FLAG,
+    ShardKeyListing,
     add_shard_argument,
     header_line,
+    list_keys_path,
     shard_from_arguments,
 )
 from rocke.tests.host_cpus import available_cpus
@@ -1910,6 +1912,8 @@ def main() -> int:
         help="with --check: check only the declaration keys of this CI shard, "
         "from ROCKE_TEST_SHARD or else GTEST_SHARD_INDEX and GTEST_TOTAL_SHARDS "
         "(rocke.tests.ci_shard); without either, every key",
+        list_help="write the probes the CI shards split, keyed by declaration key, to "
+        "this path instead of checking them",
     )
     args = ap.parse_args()
     if args.unvalidated_exit_code is not None:
@@ -1920,6 +1924,7 @@ def main() -> int:
     if args.shard_from_gtest_env and not args.check:
         ap.error(f"{ACTIVATION_FLAG} requires --check")
     shard = shard_from_arguments(ap, args)
+    listing = list_keys_path(args)
 
     sys.path.insert(0, str(HERE))
     from check_ir_validity import llvm_tool  # same resolution order, one owner
@@ -2096,6 +2101,10 @@ def main() -> int:
     arches = sorted(args.arch) if args.arch else sorted(wired_arches())
     decls = _decl_table(flavor)
     keys = sorted(k for k in decls if not args.only or args.only in k)
+    if listing is not None:
+        probes = {f"{key}/{arch}": key for key in keys for arch in arches}
+        ShardKeyListing(probes).write(listing)
+        return 0
     if args.shard_from_gtest_env:
         print(header_line(shard))
     if shard is not None:

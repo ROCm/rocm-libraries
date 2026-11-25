@@ -37,7 +37,7 @@ def _load_check_module():
 check = _load_check_module()
 # The check puts the rocke package on the path, so these follow it.
 import rocke
-from rocke.tests.ci_shard import ACTIVATION_FLAG, shard_of
+from rocke.tests.ci_shard import ACTIVATION_FLAG, ShardKeyListing, shard_of
 from rocke.tests.ctest_workers import WORKERS_OPTION, worker_keys
 
 QUICK, STANDARD = check.CI_TIERS
@@ -175,9 +175,9 @@ SWEEP_WHOLE_SECONDS = sum(SWEEP_TEST_SECONDS.values())
 
 
 def _sweep_keys(declared_costs: dict[str, float] | None = None):
-    return check.EntryKeys(
-        key_of_test={_test_of(key): key for key in HEAVY + LIGHT},
-        declared_costs=declared_costs or {},
+    return ShardKeyListing(
+        key_of_case={_test_of(key): key for key in HEAVY + LIGHT},
+        costs=declared_costs or {},
     )
 
 
@@ -204,18 +204,18 @@ def test_declared_costs_place_heavy_keys_as_ci_does() -> None:
 
 
 def test_a_declared_cost_weighs_a_key_without_recorded_seconds() -> None:
-    keys = check.EntryKeys(
-        key_of_test={"t.py::test[a]": "t.py[a]", "t.py::test[b]": "t.py[b]"},
-        declared_costs={"t.py[a]": 30.0, "t.py[b]": 10.0},
+    keys = ShardKeyListing(
+        key_of_case={"t.py::test[a]": "t.py[a]", "t.py::test[b]": "t.py[b]"},
+        costs={"t.py[a]": 30.0, "t.py[b]": 10.0},
     )
     per_shard = check.split_entry_shard_seconds(80.0, 2, keys=keys)
     assert sorted(per_shard) == [20.0, 60.0]
 
 
 def test_declared_costs_scale_by_the_keys_that_also_have_recorded_seconds() -> None:
-    keys = check.EntryKeys(
-        key_of_test={"t.py::test[a]": "t.py[a]", "t.py::test[b]": "t.py[b]"},
-        declared_costs={"t.py[a]": 30.0, "t.py[b]": 10.0},
+    keys = ShardKeyListing(
+        key_of_case={"t.py::test[a]": "t.py[a]", "t.py::test[b]": "t.py[b]"},
+        costs={"t.py[a]": 30.0, "t.py[b]": 10.0},
     )
     # b takes 30 s against its declared 10: a, declared 30, is taken as 90 s.
     per_shard = check.split_entry_shard_seconds(
@@ -229,14 +229,23 @@ def test_keys_without_a_weight_share_what_the_weighed_keys_leave() -> None:
     # the first, share the remaining 40 s of a 100 s entry.
     measured_key = _keys_on_shard("measured", 1, 1, shards=2)[0]
     other_keys = _keys_on_shard("other", 0, 4, shards=2)
-    keys = check.EntryKeys(
-        key_of_test={_test_of(key): key for key in [measured_key, *other_keys]},
-        declared_costs={},
+    keys = ShardKeyListing(
+        key_of_case={_test_of(key): key for key in [measured_key, *other_keys]},
+        costs={},
     )
     per_shard = check.split_entry_shard_seconds(
         100.0, 2, keys=keys, test_seconds={_test_of(measured_key): 60.0}
     )
     assert per_shard == (40.0, 60.0)
+
+
+def test_keys_without_a_weight_share_the_rest_by_their_number_of_cases() -> None:
+    # Two untimed keys: three cases on the first shard, one on the second.
+    [three] = _keys_on_shard("three", 0, 1, shards=2)
+    [one] = _keys_on_shard("one", 1, 1, shards=2)
+    cases = {f"{three}/{n}": three for n in range(3)} | {f"{one}/0": one}
+    keys = ShardKeyListing(cases)
+    assert check.split_entry_shard_seconds(80.0, 2, keys=keys) == (60.0, 20.0)
 
 
 def _keys_per_worker(shard: int, shards: int, workers: int, per_worker: int):
@@ -257,9 +266,9 @@ def test_a_shard_with_workers_takes_as_long_as_its_busiest_worker() -> None:
     spread = _keys_per_worker(1, 2, workers=4, per_worker=2)
     test_seconds = {_test_of(heavy[0]): 100.0}
     test_seconds |= {_test_of(key): 25.0 for key in spread}
-    keys = check.EntryKeys(
-        key_of_test={_test_of(key): key for key in heavy + spread},
-        declared_costs={},
+    keys = ShardKeyListing(
+        key_of_case={_test_of(key): key for key in heavy + spread},
+        costs={},
     )
     # The entry's whole time is the sum of its shards, 100 s + 50 s.
     with_workers = check.split_entry_shard_seconds(
@@ -277,10 +286,10 @@ def test_tests_that_run_alone_add_to_their_shard_after_the_workers() -> None:
     # Shard 0: a 40 s run-alone key and a 20 s key; shard 1: one 60 s key.
     [alone, worked] = _keys_on_shard("first", 0, 2, shards=2)
     [other] = _keys_on_shard("second", 1, 1, shards=2)
-    keys = check.EntryKeys(
-        key_of_test={_test_of(key): key for key in (alone, worked, other)},
-        declared_costs={},
-        run_alone_tests=frozenset({_test_of(alone)}),
+    keys = ShardKeyListing(
+        key_of_case={_test_of(key): key for key in (alone, worked, other)},
+        costs={},
+        run_alone_cases=frozenset({_test_of(alone)}),
     )
     test_seconds = {_test_of(alone): 40.0, _test_of(worked): 20.0}
     test_seconds[_test_of(other)] = 60.0
@@ -301,27 +310,6 @@ def test_split_entry_shard_seconds_refuses_no_shard_or_no_worker(
         "least 1",
     ):
         check.split_entry_shard_seconds(10.0, shards, workers=workers)
-
-
-@pytest.mark.parametrize(
-    "field, value, message",
-    [
-        ("declared_costs", {"t.py[x]": 1.0}, r"declared_costs names \['t.py\[x\]'\]"),
-        ("worker_costs", {"t.py[x]": 1.0}, r"worker_costs names \['t.py\[x\]'\]"),
-        ("run_alone_tests", frozenset({"t.py::x"}), r"run_alone_tests names"),
-    ],
-)
-def test_entry_keys_refuses_a_cost_or_test_it_does_not_list(
-    field: str, value, message: str
-) -> None:
-    with pytest.raises(ValueError, match="EntryKeys failed - " + message):
-        check.EntryKeys(
-            **{
-                "key_of_test": {"t.py::test[a]": "t.py[a]"},
-                "declared_costs": {},
-                field: value,
-            }
-        )
 
 
 def test_a_tier_over_budget_names_the_shard_and_the_entry_alone() -> None:
@@ -668,8 +656,8 @@ def test_collect_entry_keys_lists_keys_and_declared_costs(tmp_path) -> None:
     _write_sweep_tree(tmp_path / "tree", declare_heavy_costs=True)
     [entry] = check.registered_entries([_sweep_entry(tmp_path / "tree")])
     keys = check.collect_entry_keys(entry)
-    assert keys.key_of_test == {_test_of(key): key for key in HEAVY + LIGHT}
-    assert keys.declared_costs == dict.fromkeys(HEAVY, HEAVY_SECONDS)
+    assert keys.key_of_case == {_test_of(key): key for key in HEAVY + LIGHT}
+    assert keys.costs == dict.fromkeys(HEAVY, HEAVY_SECONDS)
 
 
 def test_collect_entry_keys_is_none_when_the_entry_skips_on_this_host(
@@ -694,8 +682,8 @@ def test_collect_entry_keys_refuses_a_collection_that_fails(tmp_path) -> None:
     [entry] = check.registered_entries([_sweep_entry(tree)])
     with pytest.raises(
         RuntimeError,
-        match="collect_entry_keys failed - rocke_library_gpu_pytest returncode=2, "
-        "expected 0 with a key listing",
+        match="collect_entry_keys failed - rocke_library_gpu_pytest returncode=2 "
+        "with the key listing written, expected 0 with the listing written",
     ):
         check.collect_entry_keys(entry)
 
@@ -717,8 +705,8 @@ def test_collect_entry_keys_lists_the_tests_that_run_alone(tmp_path) -> None:
     [entry] = check.registered_entries([_sweep_entry(tree)])
     keys = check.collect_entry_keys(entry)
     large, small = "test_sweep.py::test_large", "test_sweep.py::test_small"
-    assert keys.run_alone_tests == frozenset({large})
-    assert keys.declared_costs == {large: 8, small: 3}
+    assert keys.run_alone_cases == frozenset({large})
+    assert keys.costs == {large: 8, small: 3}
     assert keys.worker_costs == {small: 3}
 
 
@@ -735,7 +723,7 @@ def test_collect_entry_keys_collects_every_test_whatever_shard_it_runs_in(
     entry_listing = _sweep_entry(tmp_path / "tree", environment=shard_variables)
     [entry] = check.registered_entries([entry_listing])
     keys = check.collect_entry_keys(entry)
-    assert sorted(keys.key_of_test.values()) == sorted(HEAVY + LIGHT)
+    assert sorted(keys.key_of_case.values()) == sorted(HEAVY + LIGHT)
 
 
 def test_collect_entry_keys_imports_from_the_working_directory_first(
@@ -757,21 +745,21 @@ def test_collect_entry_keys_imports_from_the_working_directory_first(
     entry_listing = _sweep_entry(tree, arguments=("tests/test_sweep.py",))
     [entry] = check.registered_entries([entry_listing])
     keys = check.collect_entry_keys(entry)
-    assert sorted(keys.key_of_test.values()) == [
+    assert sorted(keys.key_of_case.values()) == [
         "tests/test_sweep.py[one]",
         "tests/test_sweep.py[two]",
     ]
 
 
-def test_collect_entry_keys_refuses_an_entry_that_is_not_a_pytest_run() -> None:
+def test_collect_entry_keys_refuses_an_entry_that_does_not_split() -> None:
     [entry] = check.registered_entries(
-        [_test("rocke_golden_split", ["standard"], SPLIT_RUNNER_COMMAND)]
+        [_test("rocke_golden_whole", ["standard"], WHOLE_COMMAND)]
     )
     with pytest.raises(
         ValueError,
-        match="collect_entry_keys failed - rocke_golden_split command="
-        "'python tests/run_golden.py --rocke-shard-from-gtest-env', expected "
-        "`<python> -m pytest ...`",
+        match="collect_entry_keys failed - rocke_golden_whole command="
+        "'python tests/run_golden.py', expected a split entry "
+        "\\(--rocke-shard-from-gtest-env\\)",
     ):
         check.collect_entry_keys(entry)
 
@@ -782,8 +770,8 @@ def test_collect_entry_keys_refuses_a_run_that_lists_no_selection(tmp_path) -> N
     [entry] = check.registered_entries([_sweep_entry(tree, arguments=("--help",))])
     with pytest.raises(
         RuntimeError,
-        match="collect_entry_keys failed - rocke_library_gpu_pytest returncode=0, "
-        "expected 0 with a key listing",
+        match="collect_entry_keys failed - rocke_library_gpu_pytest returncode=0 "
+        "with the key listing not written, expected 0 with the listing written",
     ):
         check.collect_entry_keys(entry)
 
@@ -798,7 +786,7 @@ def test_collect_entry_keys_refuses_a_collection_past_its_timeout(tmp_path) -> N
     with pytest.raises(
         RuntimeError,
         match="collect_entry_keys failed - rocke_library_gpu_pytest "
-        "timeout_seconds=0.5, expected its collection to finish within it",
+        "timeout_seconds=0.5, expected its listing to finish within it",
     ):
         check.collect_entry_keys(entry, timeout_seconds=0.5)
 
@@ -832,6 +820,59 @@ def test_registered_entries_refuses_a_worker_count_that_is_not_one_or_more(
         ValueError, match=f"RegisteredEntry failed - rocke_x {expected}"
     ):
         check.registered_entries([listed])
+
+
+def _golden_runner_entry(tree: Path, case_ids: list[str]) -> dict:
+    """A split entry that is not a pytest run: a runner whose cases are each
+    their own shard key, as the golden runners' are, and that writes them under
+    ``LIST_KEYS_FLAG``."""
+    tree.mkdir(parents=True, exist_ok=True)
+    (tree / "run_golden.py").write_text(
+        "import sys\n"
+        "from pathlib import Path\n\n"
+        "from rocke.tests.ci_shard import LIST_KEYS_FLAG, ShardKeyListing\n\n"
+        f"CASES = {case_ids!r}\n"
+        "path = Path(sys.argv[sys.argv.index(LIST_KEYS_FLAG) + 1])\n"
+        "ShardKeyListing({case: case for case in CASES}).write(path)\n",
+        encoding="utf-8",
+    )
+    command = [sys.executable, "run_golden.py", ACTIVATION_FLAG]
+    return _test(
+        "rocke_golden_split",
+        ["standard"],
+        command,
+        ENVIRONMENT=[_ROCKE_PATH],
+        WORKING_DIRECTORY=str(tree),
+    )
+
+
+def test_a_golden_runner_lists_its_cases_through_the_shared_flag(tmp_path) -> None:
+    cases = _keys_on_shard("case", 0, 3) + _keys_on_shard("case", 2, 1)
+    [entry] = check.registered_entries([_golden_runner_entry(tmp_path, cases)])
+    keys = check.collect_entry_keys(entry)
+    assert keys == ShardKeyListing({case: case for case in cases})
+    # Cases without a time count alike: three on the first shard, one on the
+    # third.
+    assert check.split_entry_shard_seconds(40.0, 4, keys=keys) == (
+        30.0,
+        0.0,
+        10.0,
+        0.0,
+    )
+
+
+def test_a_split_runner_that_does_not_list_its_cases_fails_the_check(
+    tmp_path,
+) -> None:
+    runner = _golden_runner_entry(tmp_path, ["case"])
+    (tmp_path / "run_golden.py").write_text("print('checked')\n", encoding="utf-8")
+    [entry] = check.registered_entries([runner])
+    with pytest.raises(
+        RuntimeError,
+        match="collect_entry_keys failed - rocke_golden_split returncode=0 with "
+        "the key listing not written, expected 0 with the listing written",
+    ):
+        check.collect_entry_keys(entry)
 
 
 def test_check_fails_the_slowest_shard_until_heavy_keys_declare_costs(
@@ -1091,12 +1132,9 @@ def test_lowered_ceiling_refuses_anything_but_a_decrease(
 
 def _write_standard_inputs(tmp_path: Path, seconds: float, ceiling: float):
     listing = tmp_path / "listing.json"
-    listing.write_text(
-        json.dumps(
-            _listing(_test("rocke_golden_split", ["standard"], SPLIT_RUNNER_COMMAND))
-        ),
-        encoding="utf-8",
-    )
+    one_case_per_shard = [_keys_on_shard("case", shard, 1)[0] for shard in range(4)]
+    runner = _golden_runner_entry(tmp_path / "runner", one_case_per_shard)
+    listing.write_text(json.dumps(_listing(runner)), encoding="utf-8")
     times = tmp_path / "entry_times.json"
     column = _column({"standard": ceiling}, rocke_golden_split=seconds)
     times.write_text(json.dumps(column), encoding="utf-8")

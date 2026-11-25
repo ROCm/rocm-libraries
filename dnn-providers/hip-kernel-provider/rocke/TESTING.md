@@ -1233,15 +1233,18 @@ hip-kernel-provider test tiers, and no check holds them; change them here only.
 (its `CI_TIERS` holds the same values), and the quick CTest entry
 `rocke_entry_time_check` runs its `check`. It projects every shard from the
 times in `tools/entry_times.json` (recorded from CI logs, per operating system)
-and the live CTest registration. It places the tests of each split pytest entry
-as CI does: it collects the entry, places its shard keys by their
-`rocke_shard_cost` marks and the hash, and spreads each shard's keys over the
-entry's workers. So heavy keys that the hash puts on one shard show on that
-shard. It fails when one entry alone is over its tier's budget on a shard, when
-any shard is over its limit (the budget, or the ceiling `entry_times.json`
-records for a tier already over budget; a ceiling only goes down), when a
-committed entry time drops out of the projection, or when an entry that a tier
-runs has no recorded time; record its time from a CI log with
+and the live CTest registration. It places the cases of each split entry as CI
+does: it collects a pytest entry's tests, and every other split runner (the
+golden runners, `rocke_optimization_barrier_hip_pair`) lists its cases under
+`--rocke-list-shard-keys` (`rocke.tests.ci_shard.LIST_KEYS_FLAG`, which
+`add_shard_argument` gives a runner with its shard flag). It places their shard
+keys by their `rocke_shard_cost` marks and the hash, and spreads each shard's
+keys over the entry's workers. So heavy keys that the hash puts on one shard
+show on that shard. It fails when one entry alone is over its tier's budget on
+a shard, when any shard is over its limit (the budget, or the ceiling
+`entry_times.json` records for a tier already over budget; a ceiling only goes
+down), when a committed entry time drops out of the projection, or when an
+entry that a tier runs has no recorded time; record its time from a CI log with
 `check_entry_times.py record`. The tool's docstring gives the `check`, `record`
 and `lower-ceiling` commands. The check needs a provider install on the
 operating system it judges, because the tier labels and the tests it collects

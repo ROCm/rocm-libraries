@@ -13,6 +13,7 @@ of one case run side by side to keep the cost of this file low.
 from __future__ import annotations
 
 import dataclasses
+import importlib.util
 import os
 import re
 import shutil
@@ -129,7 +130,11 @@ def _runner_parser():
     import argparse
 
     parser = argparse.ArgumentParser(prog="runner")
-    ci_shard.add_shard_argument(parser, help="check only this shard's share")
+    ci_shard.add_shard_argument(
+        parser,
+        help="check only this shard's share",
+        list_help="write this run's cases instead of checking them",
+    )
     return parser
 
 
@@ -257,6 +262,99 @@ def test_every_shard_of_a_run_keeps_its_share_of_costed_keys_once():
 def test_a_cost_that_is_not_a_positive_number_is_an_error(cost):
     with pytest.raises(ValueError, match="is not a positive finite number"):
         ci_shard.place_keys(["key"], 4, {"key": cost})
+
+
+def test_a_shard_key_listing_reads_back_what_it_wrote(tmp_path):
+    listing = ci_shard.ShardKeyListing(
+        key_of_case={"t.py::test[a]": "t.py[a]", "t.py::test[b]": "t.py[b]"},
+        costs={"t.py[a]": 30.0},
+        worker_costs={"t.py[a]": 20.0},
+        run_alone_cases=frozenset({"t.py::test[b]"}),
+    )
+    listing.write(tmp_path / "keys.json")
+    assert ci_shard.ShardKeyListing.read(tmp_path / "keys.json") == listing
+
+
+@pytest.mark.parametrize(
+    "field, value, message",
+    [
+        ("costs", {"t.py[x]": 1.0}, r"costs keys=\['t.py\[x\]'\]"),
+        ("worker_costs", {"t.py[x]": 1.0}, r"worker_costs keys=\['t.py\[x\]'\]"),
+        ("run_alone_cases", frozenset({"t.py::x"}), r"run_alone_cases=\['t.py::x'\]"),
+    ],
+)
+def test_a_shard_key_listing_refuses_a_cost_or_case_it_does_not_list(
+    field, value, message
+):
+    with pytest.raises(ValueError, match="ShardKeyListing failed - " + message):
+        ci_shard.ShardKeyListing(
+            **{"key_of_case": {"t.py::test[a]": "t.py[a]"}, field: value}
+        )
+
+
+def test_a_shard_key_listing_refuses_a_cost_that_is_not_positive():
+    with pytest.raises(ValueError, match="is not a positive finite number"):
+        ci_shard.ShardKeyListing({"t.py::test[a]": "t.py[a]"}, costs={"t.py[a]": 0})
+
+
+def _golden_runner():
+    """The installed golden runner, imported by path: beside this file in a
+    checkout, one level up in an installed tree."""
+    here = Path(__file__).resolve().parent
+    for candidate in (here, here.parent):
+        script = candidate / "rocke_installed_golden_test.py"
+        if script.is_file():
+            spec = importlib.util.spec_from_file_location("golden_runner", script)
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)
+            return module
+    pytest.skip("rocke_installed_golden_test.py is not in this tree")
+
+
+def test_the_golden_runner_lists_the_cases_its_shards_split(
+    tmp_path, monkeypatch, capsys
+):
+    """Under LIST_KEYS_FLAG the runner writes the cases a sharded check splits,
+    each its own key: the case ids of the harness and the golden, and placed by
+    place_keys they split as the check's own split line says."""
+    runner = _golden_runner()
+    monkeypatch.setattr(sys, "path", list(sys.path))
+    listing_path = tmp_path / "keys.json"
+    flags = [ci_shard.ACTIVATION_FLAG, ci_shard.LIST_KEYS_FLAG, str(listing_path)]
+    assert runner.main(flags) == 0
+    listing = ci_shard.ShardKeyListing.read(listing_path)
+    assert listing.key_of_case
+    assert all(case == key for case, key in listing.key_of_case.items())
+    import rocke_ir_parity_harness  # on the path main() set up
+    from rocke.core.ir_golden import golden_case_ids, load_golden
+
+    case_ids = {case["case_id"] for case in rocke_ir_parity_harness.cases()}
+    case_ids |= golden_case_ids(load_golden(runner._find_golden()))
+    assert set(listing.key_of_case) == case_ids
+    placement = ci_shard.place_keys(listing.key_of_case.values(), 4)
+    counts = [list(placement.values()).count(shard) for shard in range(4)]
+
+    # Only the split line is wanted here, not the golden comparison itself.
+    monkeypatch.setattr(rocke_ir_parity_harness, "check_golden", lambda *_, **__: [])
+    for name, value in _gtest(0).items():
+        monkeypatch.setenv(name, value)
+    capsys.readouterr()
+    assert runner.main([ci_shard.ACTIVATION_FLAG]) == 0
+    split = "/".join(map(str, counts))
+    assert f"split {split} of {sum(counts)}" in capsys.readouterr().out
+
+
+def test_the_golden_runner_refuses_to_list_without_the_shard_flag(
+    tmp_path, monkeypatch, capsys
+):
+    runner = _golden_runner()
+    monkeypatch.setattr(sys, "path", list(sys.path))
+    with pytest.raises(SystemExit) as refused:
+        runner.main([ci_shard.LIST_KEYS_FLAG, str(tmp_path / "keys.json")])
+    assert refused.value.code == 2
+    assert f"{ci_shard.LIST_KEYS_FLAG} needs {ci_shard.ACTIVATION_FLAG}" in (
+        capsys.readouterr().err
+    )
 
 
 def test_a_shard_names_its_source_in_the_header_line():

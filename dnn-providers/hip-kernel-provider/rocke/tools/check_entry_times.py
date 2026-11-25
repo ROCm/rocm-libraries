@@ -19,30 +19,32 @@ The check combines three inputs:
   from logs of runs with pytest's ``--durations`` report.
 - The live CTest registration: which tiers an entry is in, and whether it
   splits across shards. Relabelling an entry is judged without re-measuring it.
-- Each split pytest entry of a sharded tier, collected with its own command,
-  working directory and environment but no shard: which shard key each test
-  has, its ``rocke_shard_cost`` mark and whether it runs alone. The keys are
+- Each split entry of a sharded tier, listed with its own command, working
+  directory and environment but no shard: which shard key each case has (a
+  pytest entry's tests, through this file's ``list-keys``; any other split
+  runner's cases, through its ``rocke.tests.ci_shard.LIST_KEYS_FLAG``), each
+  key's ``rocke_shard_cost`` mark, and which tests run alone. The keys are
   placed by CI's own rule, ``rocke.tests.ci_shard.place_keys``.
 
-Each shard is projected on its own. A split pytest entry's whole time ``W``
-(the sum of its shards) is divided over the shards in proportion to how long
-each shard's share takes:
+Each shard is projected on its own. A split entry's whole time ``W`` (the sum
+of its shards) is divided over the shards in proportion to how long each
+shard's share takes:
 
-1. A shard key weighs its tests' recorded seconds. A key without them weighs
+1. A shard key weighs its cases' recorded seconds. A key without them weighs
    its declared cost, scaled by the median ratio of recorded seconds to
    declared cost over the entry's keys that have both (as seconds when none
-   has both). The keys with neither share equally what is left of ``W`` times
-   the entry's ``--rocke-workers`` count, the time its processes spend together.
-2. On each shard, the keys of the tests that do not run alone are spread over
+   has both). The keys with neither share what is left of ``W`` times the
+   entry's ``--rocke-workers`` count (the time its processes spend together)
+   in proportion to their number of cases.
+2. On each shard, the keys of the cases that do not run alone are spread over
    the workers by ``rocke.tests.ctest_workers.worker_keys``. The shard takes as
-   long as its busiest worker, plus its tests that run alone, one after another.
+   long as its busiest worker, plus its cases that run alone, one after another.
 
-A split entry that is not a pytest run (a golden runner) has no keys to list,
-and neither has an entry whose collection exits with its ``SKIP_RETURN_CODE``
-on this host (a GPU suite of another target): each divides ``W`` evenly, and
-``check`` names them. The projection is an estimate: test times vary between
-runs, a declared cost is a rough figure, and the shared remainder assumes every
-worker is busy for the whole run.
+An entry whose listing exits with its ``SKIP_RETURN_CODE`` on this host (a GPU
+suite of another target) has no cases to place: it divides ``W`` evenly, and
+``check`` names it. The projection is an estimate: case times vary between
+runs, a declared cost is a rough figure, cases without a time count alike, and
+the shared remainder assumes every worker is busy for the whole run.
 
 A tier fails when an entry alone is over the tier's budget on a shard, or when
 a shard's sum is over the tier's limit: its budget, or the ceiling
@@ -112,8 +114,10 @@ from rocke.tests.ci_shard import (
     ACTIVATION_FLAG,
     GTEST_INDEX_ENV,
     GTEST_TOTAL_ENV,
+    LIST_KEYS_FLAG,
     SHARD_ENV,
     WORKER_ENV,
+    ShardKeyListing,
     place_keys,
 )
 from rocke.tests.ctest_listing import list_ctest_entries
@@ -127,7 +131,6 @@ __all__ = [
     "ENTRY_TIMES_PATH",
     "STEP_LIMIT_SECONDS",
     "TEST_SECONDS_FLOOR",
-    "EntryKeys",
     "RegisteredEntry",
     "TierLayout",
     "TierVerdict",
@@ -254,40 +257,6 @@ class RegisteredEntry:
             if self.command[index : index + 2] == _PYTEST_MODULE:
                 return index
         return None
-
-
-@dataclasses.dataclass(frozen=True)
-class EntryKeys:
-    """A split pytest entry's selection, as collecting it without a shard
-    lists it.
-
-    ``key_of_test`` maps each test's node id to its shard key, in collection
-    order. ``declared_costs`` is each key's ``rocke_shard_cost`` over all its
-    tests, which places it on a CI shard; ``worker_costs`` the same over its
-    tests that do not run alone, which places it on a worker.
-    ``run_alone_tests`` are the tests marked ``rocke_run_alone``.
-    """
-
-    key_of_test: Mapping[str, str]
-    declared_costs: Mapping[str, float]
-    worker_costs: Mapping[str, float] = dataclasses.field(default_factory=dict)
-    run_alone_tests: frozenset[str] = frozenset()
-
-    def __post_init__(self) -> None:
-        keys = set(self.key_of_test.values())
-        for field in ("declared_costs", "worker_costs"):
-            unknown = sorted(set(getattr(self, field)) - keys)
-            if unknown:
-                raise ValueError(
-                    f"EntryKeys failed - {field} names {unknown}, expected only "
-                    "keys of key_of_test"
-                )
-        unknown_tests = sorted(self.run_alone_tests - set(self.key_of_test))
-        if unknown_tests:
-            raise ValueError(
-                f"EntryKeys failed - run_alone_tests names {unknown_tests}, "
-                "expected only tests of key_of_test"
-            )
 
 
 @dataclasses.dataclass(frozen=True)
@@ -421,7 +390,7 @@ def split_entry_shard_seconds(
     whole_seconds: float,
     shards: int,
     workers: int = 1,
-    keys: EntryKeys | None = None,
+    keys: ShardKeyListing | None = None,
     test_seconds: Mapping[str, float] | None = None,
 ) -> tuple[float, ...]:
     """A split entry's seconds on each of ``shards``, by the rule in the module
@@ -435,12 +404,12 @@ def split_entry_shard_seconds(
                 f"split_entry_shard_seconds failed - {name}={value}, expected at "
                 "least 1"
             )
-    if keys is None or not keys.key_of_test:
+    if keys is None or not keys.key_of_case:
         return (whole_seconds / shards,) * shards
     recorded = {} if test_seconds is None else test_seconds
-    ordered_keys = list(dict.fromkeys(keys.key_of_test.values()))
+    ordered_keys = list(dict.fromkeys(keys.key_of_case.values()))
     tests_of: dict[str, list[str]] = {key: [] for key in ordered_keys}
-    for test, key in keys.key_of_test.items():
+    for test, key in keys.key_of_case.items():
         tests_of[key].append(test)
     # Each key's seconds on a worker and alone, after the workers.
     on_worker: dict[str, float] = {}
@@ -450,32 +419,34 @@ def split_entry_shard_seconds(
         timed = [test for test in tests if test in recorded]
         if timed:
             on_worker[key] = sum(
-                recorded[test] for test in timed if test not in keys.run_alone_tests
+                recorded[test] for test in timed if test not in keys.run_alone_cases
             )
             alone[key] = sum(
-                recorded[test] for test in timed if test in keys.run_alone_tests
+                recorded[test] for test in timed if test in keys.run_alone_cases
             )
             measured[key] = on_worker[key] + alone[key]
-    scale = _cost_scale(measured, keys.declared_costs)
-    for key, cost in keys.declared_costs.items():
+    scale = _cost_scale(measured, keys.costs)
+    for key, cost in keys.costs.items():
         if key not in measured:
             on_worker[key] = keys.worker_costs.get(key, 0.0) * scale
             alone[key] = cost * scale - on_worker[key]
     unweighed = [key for key in ordered_keys if key not in on_worker]
     if unweighed:
         spent = sum(on_worker.values()) + sum(alone.values())
-        share = max(whole_seconds * workers - spent, 0.0) / len(unweighed)
+        unweighed_cases = sum(len(tests_of[key]) for key in unweighed)
+        per_case = max(whole_seconds * workers - spent, 0.0) / unweighed_cases
         for key in unweighed:
-            runs_alone = all(test in keys.run_alone_tests for test in tests_of[key])
+            share = per_case * len(tests_of[key])
+            runs_alone = all(test in keys.run_alone_cases for test in tests_of[key])
             on_worker[key], alone[key] = (0.0, share) if runs_alone else (share, 0.0)
-    placement = place_keys(ordered_keys, shards, keys.declared_costs)
+    placement = place_keys(ordered_keys, shards, keys.costs)
     busy = []
     for shard in range(shards):
         on_shard = [key for key in ordered_keys if placement[key] == shard]
         worked = [
             key
             for key in on_shard
-            if any(test not in keys.run_alone_tests for test in tests_of[key])
+            if any(test not in keys.run_alone_cases for test in tests_of[key])
         ]
         worker_of = worker_keys(worked, dict(keys.worker_costs), workers)
         load = [0.0] * workers
@@ -491,7 +462,7 @@ def split_entry_shard_seconds(
 def evaluate_tiers(
     entries: Iterable[RegisteredEntry],
     entry_times: Mapping[str, Mapping],
-    entry_keys: Mapping[str, EntryKeys | None] | None = None,
+    entry_keys: Mapping[str, ShardKeyListing | None] | None = None,
     tiers: Sequence[TierLayout] = CI_TIERS,
 ) -> list[TierVerdict]:
     """Project every shard of every tier on every operating system column of
@@ -630,36 +601,45 @@ _RUN_THIS_FILE = (
 )
 
 
-def collect_entry_keys(
-    entry: RegisteredEntry, timeout_seconds: float = _COLLECTION_TIMEOUT_SECONDS
-) -> EntryKeys | None:
-    """Collect ``entry``, a split pytest entry, as CI's shards would before
-    taking their share: its own command, working directory and environment,
-    with no shard. ``None`` when the collection exits with the entry's
-    ``SKIP_RETURN_CODE``: the entry skips on this host (a GPU suite of another
-    target), so there is no selection to place."""
+def _listing_command(entry: RegisteredEntry, listing: Path) -> list[str]:
+    """The command that makes ``entry`` write its :class:`ShardKeyListing` to
+    ``listing``: a pytest entry through this file's ``list-keys``, any other
+    split entry (a golden runner, the emitter-pair check) with
+    ``LIST_KEYS_FLAG``."""
     pytest_arguments = entry.pytest_arguments
     if pytest_arguments is None:
+        return [*entry.command, LIST_KEYS_FLAG, str(listing)]
+    return [
+        *entry.interpreter,
+        "-c",
+        _RUN_THIS_FILE,
+        str(Path(__file__).resolve()),
+        "list-keys",
+        "--output",
+        str(listing),
+        "--",
+        *pytest_arguments,
+    ]
+
+
+def collect_entry_keys(
+    entry: RegisteredEntry, timeout_seconds: float = _COLLECTION_TIMEOUT_SECONDS
+) -> ShardKeyListing | None:
+    """List the cases of ``entry``, a split entry, as CI's shards would before
+    taking their share: its own command, working directory and environment,
+    with no shard. ``None`` when the listing exits with the entry's
+    ``SKIP_RETURN_CODE``: the entry skips on this host (a GPU suite of another
+    target), so there is no selection to place."""
+    if not entry.splits_across_shards:
         raise ValueError(
             f"collect_entry_keys failed - {entry.name} command="
-            f"{' '.join(entry.command)!r}, expected `<python> -m pytest ...`"
+            f"{' '.join(entry.command)!r}, expected a split entry ({ACTIVATION_FLAG})"
         )
     with tempfile.TemporaryDirectory() as scratch:
         listing = Path(scratch) / "keys.json"
-        command = [
-            *entry.interpreter,
-            "-c",
-            _RUN_THIS_FILE,
-            str(Path(__file__).resolve()),
-            "list-keys",
-            "--output",
-            str(listing),
-            "--",
-            *pytest_arguments,
-        ]
         try:
             result = subprocess.run(
-                command,
+                _listing_command(entry, listing),
                 check=False,
                 cwd=entry.working_directory,
                 env=_collection_environment(entry),
@@ -670,7 +650,7 @@ def collect_entry_keys(
         except subprocess.TimeoutExpired as expired:
             raise RuntimeError(
                 f"collect_entry_keys failed - {entry.name} timeout_seconds="
-                f"{timeout_seconds:g}, expected its collection to finish within it"
+                f"{timeout_seconds:g}, expected its listing to finish within it"
             ) from expired
         if (
             entry.skip_return_code is not None
@@ -679,34 +659,30 @@ def collect_entry_keys(
             return None
         if result.returncode != 0 or not listing.is_file():
             output = (result.stdout + result.stderr).strip().splitlines()[-20:]
+            written = "written" if listing.is_file() else "not written"
             raise RuntimeError(
                 f"collect_entry_keys failed - {entry.name} returncode="
-                f"{result.returncode}, expected 0 with a key listing; its last "
-                "lines:\n" + "\n".join(output)
+                f"{result.returncode} with the key listing {written}, expected 0 "
+                "with the listing written; its last lines:\n" + "\n".join(output)
             )
-        collected = json.loads(listing.read_text(encoding="utf-8"))
-    return EntryKeys(
-        key_of_test=collected["key_of_test"],
-        declared_costs=collected["costs"],
-        worker_costs=collected["worker_costs"],
-        run_alone_tests=frozenset(collected["run_alone_tests"]),
-    )
+        return ShardKeyListing.read(listing)
 
 
 def _entries_to_collect(
     entries: Iterable[RegisteredEntry], tiers: Sequence[TierLayout] = CI_TIERS
 ) -> list[RegisteredEntry]:
-    """The split pytest entries of the tiers that run as more than one shard."""
+    """The split entries of the tiers that run as more than one shard."""
     return [
         entry
         for entry in entries
         if entry.splits_across_shards
-        and entry.pytest_arguments is not None
         and any(tier.shards > 1 and entry.runs_in(tier) for tier in tiers)
     ]
 
 
-def _collect_all(entries: Sequence[RegisteredEntry]) -> dict[str, EntryKeys | None]:
+def _collect_all(
+    entries: Sequence[RegisteredEntry],
+) -> dict[str, ShardKeyListing | None]:
     """:func:`collect_entry_keys` of every entry :func:`_entries_to_collect`
     names, in parallel."""
     to_collect = _entries_to_collect(entries)
@@ -867,7 +843,7 @@ def _check(arguments: argparse.Namespace) -> int:
     not_placed = sorted(name for name, keys in entry_keys.items() if keys is None)
     if not_placed:
         print(
-            "not projected per shard, as their collection skips on this host "
+            "not projected per shard, as their listing skips on this host "
             "(divided evenly): " + ", ".join(not_placed)
         )
     breaches = untimed_entries(entries, column)
@@ -933,8 +909,8 @@ def _lower_ceiling(arguments: argparse.Namespace) -> int:
 
 
 class _KeyListing:
-    """A pytest plugin that writes the selection's shard keys, declared costs
-    and run-alone tests to ``output`` once every filter has run."""
+    """A pytest plugin that writes the selection's :class:`ShardKeyListing` to
+    ``output`` once every filter has run."""
 
     def __init__(self, output: Path) -> None:
         self.output = output
@@ -944,15 +920,14 @@ class _KeyListing:
         alone = {
             item.nodeid for item in items if item.get_closest_marker(RUN_ALONE_MARKER)
         }
-        listing = {
-            "key_of_test": {item.nodeid: shard_key(item) for item in items},
-            "costs": shard_costs(items),
-            "worker_costs": shard_costs(
+        ShardKeyListing(
+            key_of_case={item.nodeid: shard_key(item) for item in items},
+            costs=shard_costs(items),
+            worker_costs=shard_costs(
                 [item for item in items if item.nodeid not in alone]
             ),
-            "run_alone_tests": sorted(alone),
-        }
-        self.output.write_text(json.dumps(listing), encoding="utf-8")
+            run_alone_cases=frozenset(alone),
+        ).write(self.output)
 
 
 def _list_keys(arguments: argparse.Namespace) -> int:
