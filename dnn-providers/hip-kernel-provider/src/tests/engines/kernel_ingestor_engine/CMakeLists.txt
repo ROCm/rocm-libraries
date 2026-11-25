@@ -140,6 +140,7 @@ target_sources(hip_kernel_provider_census_tests PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGfx950ConvDgradAotPacks.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGfx1250ConvDgradAotPacks.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGfx1250ConvDgradAotModelBinding.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestShippedEnginePredictors.cpp
 )
 
 # FlyDSL's suites ride FlyDSL's gate, not the ingestor's: they read a shard only FlyDSL

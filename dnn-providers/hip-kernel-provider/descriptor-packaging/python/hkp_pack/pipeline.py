@@ -841,6 +841,24 @@ def shipped_engines(flat, arches):
     }
 
 
+def predicting_engines(flat, shipped):
+    """The engines of `shipped` (`shipped_engines`' answer) whose UED binds an
+    engine-prediction (L1, `predict_engine`) model for the arch: `{arch: [name, ...]}`.
+
+    An arch's engine serves the model bound under the arch's own key or `default`, so
+    either counts. What configure asks before registering a census of those models:
+    an arch mapping to an empty list has none to check.
+    """
+    bound = {
+        d.doc.get("name", d.id): set(d.doc.get("predict_engine") or ())
+        for d in flat.by_type("ued")
+    }
+    return {
+        arch: [name for name in names if bound.get(name, set()) & {arch, "default"}]
+        for arch, names in shipped.items()
+    }
+
+
 def offered_engines(flat):
     """The engine names `flat` carries for at least one arch, sorted.
 

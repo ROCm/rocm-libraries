@@ -1223,6 +1223,33 @@ def test_one_metric_per_architecture_is_per_architecture(tmp_path, main_fixture)
     load_flat_input(root, GENERIC_TARGETS, log=lambda *_: None)
 
 
+@pytest.mark.parametrize(
+    ("roles", "expected"),
+    [
+        ({"predict_engine": {"gfx942": _TFLOPS_ID}}, ["gfx942"]),
+        ({"predict_engine": {"gfx950": _TFLOPS_ID}}, ["gfx950"]),
+        ({"predict_engine": {"default": _TFLOPS_ID}}, ["gfx942", "gfx950"]),
+        ({}, []),
+    ],
+    ids=["own-arch", "other-arch", "default", "none"],
+)
+def test_an_arch_predicts_only_when_its_engine_binds_an_l1_it_serves(
+    tmp_path, main_fixture, roles, expected
+):
+    """Configure registers the engine-prediction census for an arch only when an
+    engine its shard ships binds an L1 under that arch's key or `default`, the keys
+    the arch's engine serves; one bound for another arch does not count."""
+    from hkp_pack.pipeline import predicting_engines, shipped_engines
+
+    root = _root_with_roles(tmp_path, main_fixture, **roles)
+    flat = load_flat_input(root, GENERIC_TARGETS, log=lambda *_: None)
+    shipped = shipped_engines(flat, ["gfx942", "gfx950"])
+    assert all(shipped.values()), "the premise: the engine ships for both arches"
+
+    predicting = predicting_engines(flat, shipped)
+    assert [arch for arch, names in predicting.items() if names] == expected
+
+
 def test_references_resolve_in_any_letter_case(tmp_path, main_fixture):
     """The loader parses a reference to its UUID bytes, so letter case is not
     part of the match, and pruning must keep what the reference names."""

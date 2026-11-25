@@ -682,6 +682,7 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
         "${CMAKE_CURRENT_SOURCE_DIR}/engines/kernel_ingestor_engine/packs/TestGfx942AttentionDenseModelBinding.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/engines/kernel_ingestor_engine/packs/TestGfx1250ConvDgradAotModelBinding.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/engines/kernel_ingestor_engine/packs/TestFlydslModelBinding.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/engines/kernel_ingestor_engine/packs/TestShippedEnginePredictors.cpp"
         PROPERTIES COMPILE_DEFINITIONS
             "HKP_REQUIRE_DVC_DESCRIPTORS=$<BOOL:${HIPKERNELPROVIDER_REQUIRE_DVC_DESCRIPTORS}>")
     set(_hkp_catalog_tiles_cases_gfx950_dense EveryShippedKernelsTileIsOneTheEngineLaunches)
@@ -941,6 +942,30 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
         message(STATUS
             "hkp: this configuration does not ship hipkernel:Gfx1250ConvDgradAot for "
             "gfx1250, so its census is not registered.")
+    endif()
+
+    # Every engine-prediction (L1) model the product shard ships, whatever its engine, must
+    # load, pass the runtime's acceptance and record the selector revision this build
+    # computes: GenericEngine otherwise refuses it at runtime with one log line and ranks the
+    # engine without an estimate. One entry per architecture whose product shard ships an
+    # engine binding an L1 for it, since each shard binds its own models; a shard that ships
+    # none (or ships nothing, as the packer's skipped architectures do) gets no entry.
+    hkp_product_engine_prediction_arches(_hkp_engine_prediction_arches)
+    if(_hkp_engine_prediction_arches)
+        hkp_register_census_tests(
+            TARGET hip_kernel_provider_census_tests
+            PACK_NAME product
+            ARCHES ${_hkp_engine_prediction_arches}
+            SUITES TestShippedEnginePredictors
+            EXPECTED_CASES
+                EveryServedEnginePredictorLoadsAndMatchesThisBuild
+                EveryServedEnginePredictorPassesTheRuntimeAcceptance
+                EveryServedSdpaForwardPredictorEstimatesItsRepresentativeGraphs
+        )
+    else()
+        message(STATUS
+            "hkp: no architecture's product shard ships an engine-prediction (L1) model, "
+            "so TestShippedEnginePredictors is not registered.")
     endif()
 
 endif()

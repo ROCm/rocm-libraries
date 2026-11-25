@@ -352,7 +352,8 @@ def test_the_root_probe_answers_under_a_base_interpreter_without_pip(
     shutil.copytree(rocke_fixture, consumer.source / "authored" / "rocKE" / "attention")
     kinds = "rocke" if enable_rocke == "OFF" else ""
     consumer._write(
-        f"""_hkp_root_probe(_shipped _offered _ok "${{CMAKE_CURRENT_SOURCE_DIR}}/authored"
+        f"""_hkp_root_probe(_shipped _predicting _offered _ok
+    "${{CMAKE_CURRENT_SOURCE_DIR}}/authored"
     "gfx950;gfx942" "{folders}" "{kinds}")
 {_report("ok", "${_ok}")}
 {_report("shipped", "${_shipped}")}
@@ -531,6 +532,83 @@ endif()
     assert evaluate({"gfx950": ["x:Other"]}, "TRUE") == "FALSE"
     assert evaluate({"gfx950": ["hipkernel:Gfx950AttentionDense"]}, "TRUE") == "TRUE"
     assert evaluate({}, "FALSE") == ("TRUE" if enable_rocke == "ON" else "FALSE")
+
+
+@pytest.mark.parametrize("enable_rocke", ["ON", "OFF"])
+def test_the_engine_prediction_arches_are_the_wired_arches_whose_shard_ships_an_l1(
+    consumer, enable_rocke
+):
+    """The engine-prediction census registers for the wired arches whose shard ships
+    an engine binding an L1, in wiring order, and for none when no shard does or the
+    product pack is not wired. A probe that could not answer reads as
+    HIPKERNELPROVIDER_ENABLE_ROCKE for every wired arch."""
+
+    def evaluate(predicting, probe_ok, labels="product"):
+        consumer._write(
+            f"""set(HIPKERNELPROVIDER_ENABLE_ROCKE {enable_rocke})
+set_property(GLOBAL PROPERTY HKP_PACK_LABELS {labels})
+set_property(GLOBAL PROPERTY HKP_PACK_ARCHES_product "gfx908;gfx950;gfx942")
+set_property(GLOBAL PROPERTY HKP_PACK_PROBE_OK_product {probe_ok})
+set_property(GLOBAL PROPERTY HKP_PACK_PREDICTING_ENGINES_product
+    "{_cmake_string(json.dumps(predicting))}")
+hkp_product_engine_prediction_arches(_arches)
+{_report("arches", "${_arches}")}
+"""
+        )
+        return _reported(consumer.configure(), "arches")
+
+    some = {"gfx908": [], "gfx950": ["x:A"], "gfx942": ["x:A", "x:B"]}
+    assert evaluate(some, "TRUE") == "gfx950;gfx942"
+    assert evaluate({"gfx908": [], "gfx950": [], "gfx942": []}, "TRUE") == ""
+    assert evaluate(some, "TRUE", labels="other") == ""
+    assert evaluate({}, "FALSE") == (
+        "gfx908;gfx950;gfx942" if enable_rocke == "ON" else ""
+    )
+
+
+@pytest.mark.parametrize(
+    ("l1_key", "expected"),
+    [("gfx950", "gfx950"), ("default", "gfx942;gfx950"), ("gfx90a", ""), (None, "")],
+    ids=["own-arch", "default", "unwired-arch", "none"],
+)
+def test_the_engine_prediction_arches_come_from_the_wired_roots_probe(
+    consumer, empty_arch_fixture, l1_key, expected
+):
+    """The census registration reads what the packer said when the product root was
+    wired, not a value a test set: a root whose engine ships for every wired arch
+    names the arches its UED binds an L1 under, `default` naming them all, and none
+    for an L1 bound only under an arch the build does not pack. Wired with rocKE
+    off, so a probe answer lost on the way reads as no arch at all."""
+    authored = consumer.source / "authored" / "pointwise"
+    _wildcard_pointwise(empty_arch_fixture, authored)
+    if l1_key is not None:
+        l1_id = "9c245a40-2483-5c46-a92e-97cd450b0a51"
+        (authored / "solo_tflops.uhd.json").write_text(
+            json.dumps(
+                {
+                    "version": "1.0",
+                    "id": l1_id,
+                    "name": "Solo TFLOPS estimate",
+                    "adapter": "native",
+                    "objective": "max",
+                    "native": {"symbol": "hipkernel.solo.score"},
+                    "score": {"metric": "tflops", "calibrated": True},
+                }
+            ),
+            encoding="utf-8",
+        )
+        ued_path = authored / "solo.ued.json"
+        ued = json.loads(ued_path.read_text(encoding="utf-8"))
+        ued["predict_engine"] = {l1_key: l1_id}
+        ued_path.write_text(json.dumps(ued), encoding="utf-8")
+
+    consumer._write(
+        _wire_root("product", arches="gfx942;gfx950")
+        + f"""hkp_product_engine_prediction_arches(_arches)
+{_report("arches", "${_arches}")}
+"""
+    )
+    assert _reported(consumer.configure(), "arches") == expected
 
 
 def test_a_probe_failure_prints_the_packers_reason_and_wires_the_root(consumer):
