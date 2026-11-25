@@ -32,6 +32,13 @@ class Verdict:
     # (the early exit and the overflow measure would then misjudge kernels).
     over_cap: List[str] = field(default_factory=list)
 
+    @property
+    def unmeasured(self) -> bool:
+        """No kernel of this MI was measured: TensileLite refused every setting before code generation, so no
+        resource count shows that it cannot build. Lists keep such an MI: a refusal can come from a setting
+        geko pairs with it differently (e.g. a per-MI value in the MI group), not from the MI itself."""
+        return not self.buildable and math.isinf(self.overflow)
+
 
 _Failure = Tuple[float, str, Dict[str, Any]]  # overflow, resource, setting
 

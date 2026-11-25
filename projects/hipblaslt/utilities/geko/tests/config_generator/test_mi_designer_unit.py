@@ -133,6 +133,24 @@ def test_generated_lists_read_back_even_when_no_mi_builds(tmp_path: Path) -> Non
         assert bl.generated == datetime.date(2026, 11, 2)
 
 
+def test_mi_refused_without_a_measured_kernel_stays_listed_at_every_depthu(tmp_path: Path) -> None:
+    from geko.config_generator import buildability as B
+
+    built, refused, over = (16, 16, 4, 1, 1, 1, 1, 4, 1), (16, 16, 4, 1, 1, 1, 2, 4, 1), (16, 16, 4, 1, 1, 1, 3, 4, 1)
+    verdicts = [
+        B.Verdict(refused, False, "", 0, reason="TDMFuse=1 needs more than one wave: use TDMFuse=0"),  # nothing measured
+        B.Verdict(built, True, "preset", 1, depthu=[64]),
+        B.Verdict(over, False, "", 9, overflow=0.1, reason="too many vgprs"),
+    ]
+    path = tmp_path / "SSS_NN.yaml"
+    B.write_buildable_list(path, verdicts, arch="gfx950", gemm_name="SSS_NN",
+                           source="rocm-libraries 0123456789, 2026-11-02", depthu=[32, 64, 128])
+    bl = mi_candidates.load_buildable_list(path)
+    assert bl.mis == [refused, built]  # enumeration order; the MI measured over a limit is excluded
+    assert bl.allowed_depthu(refused, [32, 64, 128]) == [32, 64, 128]
+    assert bl.allowed_depthu(built, [32, 64, 128]) == [64]
+
+
 def test_sort_and_remove_gsu_duplicates_and_log_path(tmp_path: Path) -> None:
     d = mid.MIDesign(tmp_path, _config())
     entries = [

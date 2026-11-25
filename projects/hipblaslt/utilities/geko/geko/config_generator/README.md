@@ -168,8 +168,10 @@ python3 scripts/generate_buildable_mis.py --hipblaslt /path/to/hipblaslt --arch 
 
 The bundled lists record the `rocm-libraries` `develop` base used for TensileLite code generation. Each list records
 the DepthUs searched and gives each MI found buildable as `{MatrixInstruction: [...], DepthU: [...]}` (macro tile
-as a comment). The trailer lists MIs for which no setting built and why the closest setting failed. It says
-`no resource counts` when TensileLite refused every setting before code generation.
+as a comment). An MI for which TensileLite refused every setting before code generation was never measured, so the
+list keeps it, with no DepthUs recorded (every DepthU stays allowed) and `not measured` in its comment: such a
+refusal can come from a setting geko pairs with the MI differently, not from the MI. The trailer lists the MIs
+measured not to build and why the closest setting failed.
 MI Designer warns, with the command that regenerates it, when a list it uses was generated (the UTC date in its
 `Source` line) more than 7 days from today in UTC, or records no date (`BUILDABLE_LIST_MAX_AGE_DAYS` in
 `mi_candidates.py`).

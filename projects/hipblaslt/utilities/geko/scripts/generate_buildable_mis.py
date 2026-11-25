@@ -17,7 +17,6 @@ Usage:
 
 import argparse
 import logging
-import math
 import os
 import subprocess
 import sys
@@ -128,11 +127,11 @@ def main() -> None:
                 f"{sum(v.validations for v in verdicts):,} validations, {time.time() - t0:.0f}s)",
                 flush=True,
             )
-            # Decided by validity rules alone: check these first.
-            refused = sum(not v.buildable and math.isinf(v.overflow) for v in verdicts)
-            if refused:
+            # TensileLite refused every setting of these before code generation: the list keeps them.
+            unmeasured = sum(v.unmeasured for v in verdicts)
+            if unmeasured:
                 print(
-                    f"  note: {refused} MIs rejected without a measured kernel (refused before code generation)",
+                    f"  note: {unmeasured} MIs kept without a measured kernel (every setting refused before code generation)",
                     flush=True,
                 )
             # Many under one code suggest a resource limit buildability does not model.

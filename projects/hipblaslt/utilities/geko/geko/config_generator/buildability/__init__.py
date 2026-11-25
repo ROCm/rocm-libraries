@@ -16,6 +16,8 @@ Search per MI, stopping at the first kernel that builds:
   R. Repair: the nearest settings TensileLite accepts to each refused one (validation only), code-generated.
   3. One parameter at a time, starting from the kernels closest to fitting.
 Each buildable MI is then searched at every DepthU of the space (buildable_depthus).
+An MI is excluded only when a measured kernel shows it over a limit. One for which TensileLite refused every
+setting before code generation was never measured and stays in the list at every DepthU (Verdict.unmeasured).
 
 Modules:
   constants    probe size, presets, base values, search limits
