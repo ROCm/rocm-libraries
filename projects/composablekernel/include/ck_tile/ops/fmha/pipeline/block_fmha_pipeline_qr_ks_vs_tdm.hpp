@@ -3472,8 +3472,8 @@ struct BlockFmhaPipelineQRKSVSTdm
 
         auto mainloop = [&](KDataType* __restrict__ k_lds_write_ptr,
                             KDataType* __restrict__ k_lds_read_ptr,
-                            KDataType* __restrict__ v_lds_write_ptr,
-                            KDataType* __restrict__ v_lds_read_ptr) {
+                            VDataType* __restrict__ v_lds_write_ptr,
+                            VDataType* __restrict__ v_lds_read_ptr) {
             const index_t kv_tile_start = kv_tile_start_of(i_total_loops);
             [[maybe_unused]] constexpr index_t kKAccesses =
                 remove_cvref_t<decltype(k_lds_read_window)>::Traits::NumAccess;
