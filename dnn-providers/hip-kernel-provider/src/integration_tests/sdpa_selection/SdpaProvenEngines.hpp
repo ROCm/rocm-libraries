@@ -24,16 +24,30 @@
  * survivor.
  */
 // CMakeLists.txt defines them for the integration binary: the comma-separated architectures an
-// engine of the build serves the forward and the backward graph on, and (for the backward graph)
-// the subset of those architectures that ships a claimed engine.
+// engine of the build serves the forward and the backward graph on; the subset of each that
+// ships a claimed engine (HKP_SDPA_SELECTION_FWD_CLAIMED_ARCHS, _BWD_CLAIMED_ARCHS); and, for the
+// three FlyDSL forward engines that are never claimed (the head-pad copy they wrap is unproven),
+// the architectures each ships forward content for.
 #ifndef HKP_SDPA_SELECTION_FWD_ARCHS
 #define HKP_SDPA_SELECTION_FWD_ARCHS ""
+#endif
+#ifndef HKP_SDPA_SELECTION_FWD_CLAIMED_ARCHS
+#define HKP_SDPA_SELECTION_FWD_CLAIMED_ARCHS ""
 #endif
 #ifndef HKP_SDPA_SELECTION_BWD_ARCHS
 #define HKP_SDPA_SELECTION_BWD_ARCHS ""
 #endif
 #ifndef HKP_SDPA_SELECTION_BWD_CLAIMED_ARCHS
 #define HKP_SDPA_SELECTION_BWD_CLAIMED_ARCHS ""
+#endif
+#ifndef HKP_SDPA_SELECTION_FLYDSL_CDNA_ARCHS
+#define HKP_SDPA_SELECTION_FLYDSL_CDNA_ARCHS ""
+#endif
+#ifndef HKP_SDPA_SELECTION_FLYDSL_RDNA_ARCHS
+#define HKP_SDPA_SELECTION_FLYDSL_RDNA_ARCHS ""
+#endif
+#ifndef HKP_SDPA_SELECTION_FLYDSL_AIW_ARCHS
+#define HKP_SDPA_SELECTION_FLYDSL_AIW_ARCHS ""
 #endif
 
 namespace hip_kernel_provider::sdpa_selection
@@ -63,9 +77,11 @@ struct SelectionRow
     std::vector<std::string> unclaimedRanked;
     /// Whether a claimed engine ranks the row's graph on this architecture, so the filter is
     /// expected to leave a survivor. False on an architecture where every engine that ranks the
-    /// graph is unclaimed: BwdAsmOnly's one architecture (ASM_SDPA_ENGINE ranks alone and
-    /// backward never claims), and BwdBf16Hd128's architectures that ASM serves but no claimed
-    /// backward engine is built for.
+    /// graph is unclaimed: the forward graph's architectures served only by
+    /// hipkernel:flydsl_sdpa_cdna, _rdna or _aiw (the head-pad copy they wrap is unproven);
+    /// BwdAsmOnly's one architecture (ASM_SDPA_ENGINE ranks alone and backward never claims);
+    /// and BwdBf16Hd128's architectures that ASM serves but no claimed backward engine is built
+    /// for.
     /// A fact about the graph's ranking, not a list of claimed engines.
     bool expectsSurvivor = true;
 };
@@ -85,18 +101,25 @@ inline std::string engineNamesText(const std::vector<int64_t>& ids)
 /// Every row of both suites, one per (case, architecture) the build can rank the graph on.
 inline std::vector<SelectionRow> selectionRows()
 {
+    /// One engine that is never claimed on this row's graph, and the architectures it ranks the
+    /// graph on.
+    struct UnclaimedEngine
+    {
+        const char* name;
+        std::vector<std::string> archs;
+    };
+
     struct Case
     {
         const char* token;
         GraphKind kind;
         std::vector<std::string> archs;
         std::vector<std::string> served;
-        /// The architectures on which `unclaimed` rank the graph.
-        std::vector<std::string> unclaimedArchs;
-        /// The engines that rank the graph on those architectures and report NONDETERMINISTIC.
-        std::vector<std::string> unclaimed;
-        /// The architectures on which every ranked engine is unclaimed, so no survivor is
-        /// expected.
+        /// The unclaimed engines that may rank the graph; a row's unclaimedRanked lists the
+        /// subset whose archs include that row's architecture.
+        std::vector<UnclaimedEngine> unclaimed;
+        /// The architectures on which every engine that ranks the graph is unclaimed, so no
+        /// survivor is expected.
         std::vector<std::string> noSurvivorArchs;
     };
     // A row exists only for an architecture an engine of this build serves its graph on
@@ -125,31 +148,44 @@ inline std::vector<SelectionRow> selectionRows()
         return std::find(served.begin(), served.end(), arch) != served.end();
     };
     const auto fwdServed = archsOf(HKP_SDPA_SELECTION_FWD_ARCHS);
+    const auto fwdClaimedArchs = archsOf(HKP_SDPA_SELECTION_FWD_CLAIMED_ARCHS);
     const auto bwdServed = archsOf(HKP_SDPA_SELECTION_BWD_ARCHS);
     const auto bwdClaimedArchs = archsOf(HKP_SDPA_SELECTION_BWD_CLAIMED_ARCHS);
+    const auto cdnaArchs = archsOf(HKP_SDPA_SELECTION_FLYDSL_CDNA_ARCHS);
+    const auto rdnaArchs = archsOf(HKP_SDPA_SELECTION_FLYDSL_RDNA_ARCHS);
+    const auto aiwArchs = archsOf(HKP_SDPA_SELECTION_FLYDSL_AIW_ARCHS);
 
     std::vector<Case> cases;
     // Forward: ASM forward declines the graph -- its kernel table has no bf16 head-size-64 row
     // (key.empty(), SdpaFwdPlanBuilder.cpp:1041-1045) -- and Flash2 serves fp16 only
-    // (HipFlash2FwdPlanBuilder.cpp:178), so every engine ranking it is a claimable one: no
-    // unclaimed engine is expected to rank it.
+    // (HipFlash2FwdPlanBuilder.cpp:178), so every claimed engine ranking it is a rocKE or WMMA
+    // one. hipkernel:flydsl_sdpa_cdna, _rdna and _aiw also rank this dense bf16/hd64/causal
+    // shape through their generic unsplit prefill kernel (each engine's own determinism table,
+    // first class) but are never claimed, so an architecture only one of them serves (no
+    // rocKE/WMMA engine of this build targets it, e.g. gfx90a) gets no survivor.
+    std::vector<std::string> fwdNoSurvivorArchs;
+    for(const auto& arch : fwdServed)
+    {
+        if(!built(fwdClaimedArchs, arch))
+        {
+            fwdNoSurvivorArchs.push_back(arch);
+        }
+    }
     cases.push_back({"FwdBf16Hd64Causal",
                      GraphKind::FORWARD,
                      {"gfx90a", "gfx942", "gfx950", "gfx1100", "gfx1201"},
                      fwdServed,
-                     {},
-                     {},
-                     {}});
+                     {{"hipkernel:flydsl_sdpa_cdna", cdnaArchs},
+                      {"hipkernel:flydsl_sdpa_rdna", rdnaArchs},
+                      {"hipkernel:flydsl_sdpa_aiw", aiwArchs}},
+                     fwdNoSurvivorArchs});
     // Backward: ASM_SDPA_ENGINE accepts the packed bf16 hd128 graph (equal heads at
     // SdpaBwdPlanBuilder.cpp:1185-1186, packed stats at :1196-1219) beside the FlyDSL split engine,
     // on gfx942 and gfx950 (isSupportedArch :636-638, isBatchShapeSupported :699-721), and is never
     // claimed, when this build has it.
-    std::vector<std::string> bwdUnclaimedArchs;
-    std::vector<std::string> bwdUnclaimed;
+    std::vector<UnclaimedEngine> bwdUnclaimed;
 #ifdef HKP_SDPA_SELECTION_ASM_ONLY
-    bwdUnclaimedArchs.emplace_back("gfx942");
-    bwdUnclaimedArchs.emplace_back("gfx950");
-    bwdUnclaimed.emplace_back("ASM_SDPA_ENGINE");
+    bwdUnclaimed.push_back({"ASM_SDPA_ENGINE", {"gfx942", "gfx950"}});
 #endif
     // Architectures ASM serves without a claimed backward engine built: the filter leaves no
     // survivor there, whatever FlyDSL's content for this build happens to cover.
@@ -165,7 +201,6 @@ inline std::vector<SelectionRow> selectionRows()
                      GraphKind::BACKWARD,
                      {"gfx90a", "gfx942", "gfx950", "gfx1100"},
                      bwdServed,
-                     bwdUnclaimedArchs,
                      bwdUnclaimed,
                      bwdNoSurvivorArchs});
 #ifdef HKP_SDPA_SELECTION_ASM_ONLY
@@ -173,8 +208,7 @@ inline std::vector<SelectionRow> selectionRows()
                      GraphKind::BACKWARD_ASM_ONLY,
                      {"gfx942"},
                      {"gfx942"},
-                     {"gfx942"},
-                     {"ASM_SDPA_ENGINE"},
+                     {{"ASM_SDPA_ENGINE", {"gfx942"}}},
                      {"gfx942"}});
 #endif
     std::vector<SelectionRow> rows;
@@ -186,11 +220,18 @@ inline std::vector<SelectionRow> selectionRows()
             {
                 continue;
             }
+            std::vector<std::string> unclaimedRanked;
+            for(const auto& engine : selectionCase.unclaimed)
+            {
+                if(built(engine.archs, arch))
+                {
+                    unclaimedRanked.push_back(engine.name);
+                }
+            }
             rows.push_back({std::string(selectionCase.token) + "_" + arch,
                             selectionCase.kind,
                             arch,
-                            built(selectionCase.unclaimedArchs, arch) ? selectionCase.unclaimed
-                                                                      : std::vector<std::string>{},
+                            std::move(unclaimedRanked),
                             !built(selectionCase.noSurvivorArchs, arch)});
         }
     }

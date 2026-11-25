@@ -266,12 +266,9 @@ ROCKE_UEDS = sorted(ROCKE_DESCRIPTORS.glob("*/*.ued.json"))
 # Engines whose UED authors `numerical_notes: []` (bit-for-bit repeatable results). An
 # absent key is not a claim and reads as NONDETERMINISTIC.
 DETERMINISTIC_ENGINES: set[str] = {
-    "sdpa_cdna",
     "sdpa_cdna_dualwave",
     "sdpa_cdna_decode",
-    "sdpa_rdna",
     "sdpa_rdna_decode",
-    "sdpa_aiw",
     "sdpa_bwd_merged",
     "sdpa_bwd_split",
     "gfx950_attention_dense",

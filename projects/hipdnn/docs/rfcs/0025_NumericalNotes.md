@@ -90,8 +90,9 @@ Compatibility-layer divergences from cuDNN are in [KNOWN_DIVERGENCES.md](../KNOW
 |---|---|
 | `MIOPEN_ENGINE_DETERMINISTIC` | Explicit `[]` |
 | `MIOPEN_ENGINE` | Explicit `[NONDETERMINISTIC]` |
-| hip-kernel-provider SDPA forward: `hipkernel:Gfx942AttentionDense`, `Gfx942AttentionUnified2D`, `Gfx942AttentionUnified3d`, `Gfx950AttentionDense`, `Gfx950AttentionUnified2D`, `Gfx950AttentionUnified3D`, `Gfx1151WmmaAttention`, `Gfx1151WmmaAttentionDecode`, `flydsl_sdpa_cdna`, `flydsl_sdpa_cdna_decode`, `flydsl_sdpa_cdna_dualwave`, `flydsl_sdpa_rdna`, `flydsl_sdpa_rdna_decode`, `flydsl_sdpa_aiw` | Explicit `[]`, authored in the engine's UED |
+| hip-kernel-provider SDPA forward: `hipkernel:Gfx942AttentionDense`, `Gfx942AttentionUnified2D`, `Gfx942AttentionUnified3d`, `Gfx950AttentionDense`, `Gfx950AttentionUnified2D`, `Gfx950AttentionUnified3D`, `Gfx1151WmmaAttention`, `Gfx1151WmmaAttentionDecode`, `flydsl_sdpa_cdna_decode`, `flydsl_sdpa_cdna_dualwave`, `flydsl_sdpa_rdna_decode` | Explicit `[]`, authored in the engine's UED |
 | hip-kernel-provider SDPA backward: `hipkernel:flydsl_sdpa_bwd_merged`, `flydsl_sdpa_bwd_split` | Explicit `[]`, authored in the engine's UED |
+| hip-kernel-provider SDPA forward (head-pad): `hipkernel:flydsl_sdpa_cdna`, `flydsl_sdpa_rdna`, `flydsl_sdpa_aiw` | No claim: field absent, reported `{NONDETERMINISTIC}`; the head-pad copy can write past a packed operand's region when per-batch origins run past `B*S` tokens |
 | `ASM_SDPA_ENGINE` (forward and backward), `HIP_FLASH2_ENGINE` | No claim: field absent, reported `{NONDETERMINISTIC}` |
 | Every other engine | No tested claim: field absent, reported `{NONDETERMINISTIC}` |
 

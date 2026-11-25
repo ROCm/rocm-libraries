@@ -15,7 +15,7 @@
 
 /**
  * @file IntegrationSdpaDeterminismClaimCoverage.cpp
- * @brief Host-only check tying the 16 claimed SDPA engines to the determinism rows that are
+ * @brief Host-only check tying the 13 claimed SDPA engines to the determinism rows that are
  *        their evidence: without it, deleting an engine's row group, or shipping a claimed
  *        FlyDSL op on an architecture no row names, would leave every other test green.
  *        Needs no device: it reads registeredDeterminismRows(), which every determinism
@@ -58,7 +58,7 @@ const std::set<std::string>& provenButUnclaimedEngines()
     return s_engines;
 }
 
-/// The 16 claimed engines and the architectures their descriptors ship, read from the catalog
+/// The 13 claimed engines and the architectures their descriptors ship, read from the catalog
 /// and generator sources.
 std::vector<ClaimedEngine> claimedEngines()
 {
@@ -98,10 +98,6 @@ std::vector<ClaimedEngine> claimedEngines()
     // .../configs/gfx1151_wmma_attention_decode.yaml:86, same families and the same rule.
     engines.push_back({"hipkernel:Gfx1151WmmaAttentionDecode", {"gfx1100", "gfx1201"}});
 #endif
-#ifdef HKP_DETERMINISM_FLYDSL_SDPA_CDNA
-    // flydsl/generators/_instances.py:1364 ("for arch in (gfx950, gfx942, gfx90a)").
-    engines.push_back({"hipkernel:flydsl_sdpa_cdna", {"gfx90a", "gfx942", "gfx950"}});
-#endif
 #ifdef HKP_DETERMINISM_FLYDSL_SDPA_CDNA_DECODE
     // Same CDNA family targets as sdpa_cdna (_instances.py:1364); IntegrationGpuSdpaDeterminism
     // FlydslFwd.cpp's cdna_decode table pins the same three archs.
@@ -112,17 +108,9 @@ std::vector<ClaimedEngine> claimedEngines()
     // comment: "gfx950's dual-wave kernel").
     engines.push_back({"hipkernel:flydsl_sdpa_cdna_dualwave", {"gfx950"}});
 #endif
-#ifdef HKP_DETERMINISM_FLYDSL_SDPA_RDNA
-    // _instances.py:799 ("on gfx11-generic and gfx12-generic"); run tokens gfx1100/gfx1201.
-    engines.push_back({"hipkernel:flydsl_sdpa_rdna", {"gfx1100", "gfx1201"}});
-#endif
 #ifdef HKP_DETERMINISM_FLYDSL_SDPA_RDNA_DECODE
     // Same RDNA family targets as sdpa_rdna.
     engines.push_back({"hipkernel:flydsl_sdpa_rdna_decode", {"gfx1100", "gfx1201"}});
-#endif
-#ifdef HKP_DETERMINISM_FLYDSL_SDPA_AIW
-    // _instances.py:2399 (SDPA_AIW_TARGETS = ("gfx12-generic",)); run token gfx1201.
-    engines.push_back({"hipkernel:flydsl_sdpa_aiw", {"gfx1201"}});
 #endif
 #ifdef HKP_DETERMINISM_FLYDSL_BWD_MERGED
     // _instances.py:2635 (SDPA_BWD_TARGET = "gfx950").

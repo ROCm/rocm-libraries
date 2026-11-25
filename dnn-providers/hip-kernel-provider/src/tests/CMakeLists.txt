@@ -405,7 +405,6 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
                 ShipsTheWideAndPairBuckets
                 StagesTheHeadDim256KeysInChunksOn64KiBParts
                 EveryKernelDeclaresItsFamilysSignature
-                DeclaresItsNumericalNotes
         )
     endif()
     if(HIPKERNELPROVIDER_FLYDSL_ACTIVE AND HIPKERNELPROVIDER_FLYDSL_ARCHS_sdpa_cdna_dualwave)
@@ -447,7 +446,6 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
                 ShipsEverySpecializedAndGenericVariantOnce
                 RanksTheNarrowestServingObjectFirst
                 EveryKernelDeclaresTheFortySevenSlotSignature
-                DeclaresItsNumericalNotes
         )
     endif()
     if(HIPKERNELPROVIDER_FLYDSL_ACTIVE AND HIPKERNELPROVIDER_FLYDSL_ARCHS_sdpa_aiw)
@@ -460,7 +458,6 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
                 IsOnePackWithAGraphMatchAndOneKernelScopedMatcher
                 ShipsEveryVariantOnce
                 EveryKernelDeclaresTheFiftySlotSignature
-                DeclaresItsNumericalNotes
         )
     endif()
     if(HIPKERNELPROVIDER_FLYDSL_ACTIVE AND HIPKERNELPROVIDER_FLYDSL_ARCHS_sdpa_bwd_merged)

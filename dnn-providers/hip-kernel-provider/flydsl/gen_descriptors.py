@@ -166,12 +166,9 @@ GRAPH_CAPTURE_OPS: tuple[str, ...] = (
 # set authors no `numerical_notes` key at all: an absent key is not a claim and reads as
 # NONDETERMINISTIC.
 DETERMINISTIC_OPS: tuple[str, ...] = (
-    "sdpa_cdna",
     "sdpa_cdna_dualwave",
     "sdpa_cdna_decode",
-    "sdpa_rdna",
     "sdpa_rdna_decode",
-    "sdpa_aiw",
     "sdpa_bwd_merged",
     "sdpa_bwd_split",
 )

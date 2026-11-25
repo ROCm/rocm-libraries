@@ -64,14 +64,12 @@
  *   copies Q, K and V into the workspace (the columns past their width zeroed, so Q·K over the
  *   padding adds exactly 0 and nothing read past a row reaches a score), runs the engine's
  *   launch with Q/K/V/O's buffers pointing at the copies, and copies O's first Dv columns back.
- *   A packed operand's copies go through its token table, each sequence at its table's
- *   difference, `offset[b + 1] - offset[b]`: the binding the attention kernels read,
- *   servablePackedVarlenWithLengths(), so copies and kernels take the same lengths; no token
- *   outside the operand's B*S tokens is read or written (headPadLengths()). A packed graph whose
- *   binding instead gives a per-batch length (`seq_len_q` for Q and O, `seq_len_kv` for K and V:
- *   cuDNN's per-batch origins, in any order and with gaps) is declined at match time: the copy
- *   sizes its buffer from the tensor's own B*S tokens and cannot bound a length and origin that
- *   table difference does not agree with.
+ *   A packed operand's copies go through its token table: each sequence at its table entry, for
+ *   its per-batch length when the graph gives one (`seq_len_q` for Q and O, `seq_len_kv` for K
+ *   and V: cuDNN's per-batch origins, in any order and with gaps), else for the table's
+ *   difference: the binding the attention kernels read, servablePackedVarlenWithLengths(), so
+ *   copies and kernels take the same lengths; no token outside a sequence is read or written
+ *   (headPadLengths()).
  *   The copies are the `sdpa_head_pad` op's object (`flydsl/kernels_src/kernels/head_pad/`),
  *   found beside the attention kernel's directory as the RNG dump's writer is; all four launch on
  *   the attention launch's stream.
@@ -314,9 +312,7 @@ struct HeadPadGraph
  * @brief The padded graph for @p context (the file comment), or nullptr when an operand cannot
  *        be copied: Q, K, V and O each headPadCopyable, and O's elements distinct, since the copy
  *        back writes each once. Also nullptr unless K has Q's head dim and O has V's, for a
- *        packed graph the kernels' binding declines (headPadLengths()), for a packed graph whose
- *        binding gives a per-batch length rather than the table's own difference (the copy's
- *        buffer has no bound for an origin the table disagrees with), and when one packed
+ *        packed graph the kernels' binding declines (headPadLengths()), and when one packed
  *        tensor is both a query-side and a key-side operand whose lengths differ
  *        (headPadOperandLengths()).
  */
@@ -396,14 +392,6 @@ inline std::shared_ptr<const HeadPadGraph> buildHeadPadGraph(const MatchContext&
     // The lengths the kernels read on the padded graph are the ones the copies read.
     const auto lengths = headPadLengths(padded->contextFor(context));
     if(!lengths.has_value())
-    {
-        return nullptr;
-    }
-    // A per-batch length lets a sequence's origin and length disagree with the offset table's own
-    // difference (cuDNN's per-batch origins, in any order and with gaps, RFC 0014): the copy sizes
-    // a packed operand's buffer from the tensor's own B*S tokens (headPadLayout()) and has no
-    // per-batch bound to check an origin against before it writes.
-    if(lengths->query != NO_SEQ_LEN || lengths->key != NO_SEQ_LEN)
     {
         return nullptr;
     }

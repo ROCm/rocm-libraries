@@ -604,11 +604,6 @@ TEST(TestFlydslSdpaCdnaPacks, EveryKernelDeclaresItsFamilysSignature)
     expectEveryKernelDeclaresItsFamilysSignature(GENERIC);
 }
 
-TEST(TestFlydslSdpaCdnaPacks, DeclaresItsNumericalNotes)
-{
-    expectAnExplicitEmptyNumericalNoteList(GENERIC);
-}
-
 TEST(TestFlydslSdpaCdnaDualwavePacks, IsOnePackWithAGraphMatchAndOneKernelScopedMatcher)
 {
     expectOnePackWithAGraphMatchAndOneKernelScopedMatcher(DUALWAVE);

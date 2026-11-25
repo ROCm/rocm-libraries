@@ -84,10 +84,7 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR AND HIPDNN_ENABLE_SDPA)
     # content for every op the engine serves, so a build whose product root ships no content
     # for an op compiles no row of it.
     set(_hkp_determinism_flydsl_fwd
-        sdpa_rdna RDNA
         sdpa_rdna_decode RDNA_DECODE
-        sdpa_aiw AIW
-        sdpa_cdna CDNA
         sdpa_cdna_decode CDNA_DECODE
         sdpa_cdna_dualwave CDNA_DUALWAVE
     )

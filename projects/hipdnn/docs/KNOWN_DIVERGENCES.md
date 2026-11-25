@@ -80,17 +80,17 @@ A claim is made for the engine ID and the finalized graph, never per plan, confi
 
 The hip-kernel-provider SDPA engines report these claims. A claim rests on a source trace (no atomics, every split or cross-workgroup combine in a fixed order, every output byte written by one writer or by writers that store the same value), on the engine declining every output and stats tensor whose strides map two logical elements to one address, and on a device test that runs every launch structure of the engine on one device per code-object target it ships. The claim also covers the target's other devices, which run the same code objects and have no device run of their own: gfx11-generic is proven on gfx1100 (gfx1101 to gfx1103 and gfx1150 to gfx1153 not run), gfx12-generic on gfx1201 (gfx1200 not run), gfx942 on MI300X and MI325X (MI308X and MI300A not run), gfx90a on MI210 (MI250 and MI250X not run).
 
-`flydsl_sdpa_cdna`, `flydsl_sdpa_rdna` and `flydsl_sdpa_aiw` decline a packed graph that needs head-dim padding (head dim not a multiple of 8) and carries an explicit per-batch length (`seq_len_q` or `seq_len_kv`) beside a ragged offset table: the head-pad copy sizes its buffers from the tensor shape and cannot bound a per-batch origin the offset table's own difference disagrees with, so that graph class is outside what these three engines serve.
+`flydsl_sdpa_cdna`, `flydsl_sdpa_rdna` and `flydsl_sdpa_aiw` are not claimed: their head-pad copy, which pads a head dim that is not a multiple of 8, sizes its buffers from the tensor shape and can still write past a packed operand's region when per-batch origins run past `B*S` tokens. The three engines keep the default `NONDETERMINISTIC` note until that copy is fixed.
 
 | Engine | Operation | Claim | Basis | Targets proven (device) |
 |---|---|---|---|---|
 | `hipkernel:Gfx942AttentionDense`, `hipkernel:Gfx942AttentionUnified2D`, `hipkernel:Gfx942AttentionUnified3d` | forward | `[]` | source trace, repeat test | gfx942 (MI300X; repeated on MI325X) |
 | `hipkernel:Gfx950AttentionDense`, `hipkernel:Gfx950AttentionUnified2D`, `hipkernel:Gfx950AttentionUnified3D` | forward | `[]` | source trace, repeat test | gfx950 (MI355X) |
 | `hipkernel:Gfx1151WmmaAttention`, `hipkernel:Gfx1151WmmaAttentionDecode` | forward | `[]` | source trace, repeat test | gfx11-generic (gfx1100), gfx12-generic (gfx1201) |
-| `hipkernel:flydsl_sdpa_cdna`, `hipkernel:flydsl_sdpa_cdna_decode` | forward | `[]` | source trace, repeat test | gfx90a (MI210), gfx942 (MI300X; repeated on MI325X), gfx950 (MI355X) |
+| `hipkernel:flydsl_sdpa_cdna_decode` | forward | `[]` | source trace, repeat test | gfx90a (MI210), gfx942 (MI300X; repeated on MI325X), gfx950 (MI355X) |
 | `hipkernel:flydsl_sdpa_cdna_dualwave` | forward | `[]` | source trace, repeat test | gfx950 (MI355X) |
-| `hipkernel:flydsl_sdpa_rdna`, `hipkernel:flydsl_sdpa_rdna_decode` | forward | `[]` | source trace, repeat test | gfx11-generic (gfx1100), gfx12-generic (gfx1201) |
-| `hipkernel:flydsl_sdpa_aiw` | forward | `[]` | source trace, repeat test | gfx12-generic (gfx1201) |
+| `hipkernel:flydsl_sdpa_rdna_decode` | forward | `[]` | source trace, repeat test | gfx11-generic (gfx1100), gfx12-generic (gfx1201) |
+| `hipkernel:flydsl_sdpa_cdna`, `hipkernel:flydsl_sdpa_rdna`, `hipkernel:flydsl_sdpa_aiw` | forward | absent (`{NONDETERMINISTIC}`) | not claimed: the head-pad copy that pads a head dim not a multiple of 8 sizes its buffers from the tensor shape and can write past a packed operand's region when a per-batch origin runs past `B*S` tokens | none |
 | `hipkernel:flydsl_sdpa_bwd_merged` | backward | `[]` | source trace, repeat test | gfx950 (MI355X) |
 | `hipkernel:flydsl_sdpa_bwd_split` | backward | `[]` | source trace, repeat test | gfx90a (MI210), gfx942 (MI300X; repeated on MI325X), gfx950 (MI355X), gfx11-generic (gfx1100) |
 | `ASM_SDPA_ENGINE` | backward | absent (`{NONDETERMINISTIC}`) | dQ is accumulated with atomics (fp32 under the default a32 accumulator, 16-bit under a16), so repeated launches of one plan can give different dQ bytes; measured nondeterministic dQ on gfx942 with A32 (dK and dV identical in the measured rows); gfx950 and A16 unmeasured. The engine serves backward on gfx942 and gfx950; neither is claimed | none |
@@ -108,7 +108,7 @@ A claim is run-to-run: repeated launches of one plan on the same inputs, on one 
 - race-detection tooling;
 - ragged offset tables whose sequences overlap (the offsets are device data that no host check reads);
 - aliasing between the buffers of different tensors (no engine checks it).
-- sliding-window and keyless-row graphs for `flydsl_sdpa_cdna`, `flydsl_sdpa_cdna_decode`, `flydsl_sdpa_rdna`, `flydsl_sdpa_rdna_decode`, `flydsl_sdpa_aiw` and `hipkernel:Gfx1151WmmaAttention` (keyless covered by the paged rows): source-traced, not device-tested. `hipkernel:Gfx1151WmmaAttentionDecode`'s window is device-tested (`Bf16Hd128CausalWindow2048LseHq8Kv2B1S1x8192`, gfx1100 and gfx1201).
+- sliding-window and keyless-row graphs for `flydsl_sdpa_cdna_decode`, `flydsl_sdpa_rdna_decode` and `hipkernel:Gfx1151WmmaAttention` (keyless covered by the paged rows): source-traced, not device-tested. `hipkernel:Gfx1151WmmaAttentionDecode`'s window is device-tested (`Bf16Hd128CausalWindow2048LseHq8Kv2B1S1x8192`, gfx1100 and gfx1201).
 
 ## Engine filtering
 

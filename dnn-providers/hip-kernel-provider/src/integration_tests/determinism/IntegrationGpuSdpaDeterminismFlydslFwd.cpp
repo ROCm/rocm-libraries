@@ -1,11 +1,9 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
-#if defined(HIPDNN_ENABLE_KERNEL_INGESTOR) && defined(HIPDNN_ENABLE_SDPA)                        \
-    && (defined(HKP_DETERMINISM_FLYDSL_SDPA_RDNA)                                                \
-        || defined(HKP_DETERMINISM_FLYDSL_SDPA_RDNA_DECODE)                                      \
-        || defined(HKP_DETERMINISM_FLYDSL_SDPA_AIW) || defined(HKP_DETERMINISM_FLYDSL_SDPA_CDNA) \
-        || defined(HKP_DETERMINISM_FLYDSL_SDPA_CDNA_DECODE)                                      \
+#if defined(HIPDNN_ENABLE_KERNEL_INGESTOR) && defined(HIPDNN_ENABLE_SDPA) \
+    && (defined(HKP_DETERMINISM_FLYDSL_SDPA_RDNA_DECODE)                  \
+        || defined(HKP_DETERMINISM_FLYDSL_SDPA_CDNA_DECODE)               \
         || defined(HKP_DETERMINISM_FLYDSL_SDPA_CDNA_DUALWAVE))
 
 #include <optional>
@@ -17,36 +15,32 @@
 
 /**
  * @file IntegrationGpuSdpaDeterminismFlydslFwd.cpp
- * @brief The determinism rows of the FlyDSL forward engines hipkernel:flydsl_sdpa_rdna,
- *        _rdna_decode, _aiw, _cdna, _cdna_decode and _cdna_dualwave. CMake defines
+ * @brief The determinism rows of the FlyDSL forward decode and dual-wave engines
+ *        hipkernel:flydsl_sdpa_cdna_decode, _cdna_dualwave and _rdna_decode. CMake defines
  *        HKP_DETERMINISM_FLYDSL_SDPA_<OP> for each op the product root ships FlyDSL content
  *        for, and each table below exists only under its definition.
  *
- * One row per launch-structure class and dtype. The classes come from a
- * source read of every kernel family: the unsplit prefill kernel, the
- * column-split (dv_split) and head-pair (hd_pair) schedules, the split-KV decode kernels with
- * their ascending-order merge, the dual-wave kernel, the aiw kernel's QK shards, and the helper
- * launches (head_pad copies, the dropout keep-mask writer, the padded-row fill).
+ * One row per launch-structure class and dtype. The classes come from a source read of the
+ * split-KV decode kernels with their ascending-order merge kernel and the dual-wave kernel.
  *
  * Which shapes an engine admits is read from its matchers (FlydslSdpaCdnaCommon.hpp,
- * FlydslSdpaRdnaCommon.hpp, FlydslSdpaRdnaDecodeNative.cpp, FlydslSdpaAiwNative.cpp) and from the
- * objects each target ships (flydsl/generators/_instances.py, the SOURCE.md beside each target's
- * descriptors). A row the pinned engine does not rank FAILS at run time by design.
+ * FlydslSdpaRdnaDecodeNative.cpp) and from the objects each target ships
+ * (flydsl/generators/_instances.py, the SOURCE.md beside each target's descriptors). A row the
+ * pinned engine does not rank FAILS at run time by design.
  *
  * Split counts (candidateSplits, decodeSplits) depend on the device's compute-unit count, so a
  * claim is run-to-run on one device. Rows whose split count is the cap or the work bound give
  * the same count on every device; the "device bound" rows do not.
  *
- * Dropout rows run the engine's Philox objects and read the RNG dump back; a 16-bit dropout
- * graph is served by flydsl_sdpa_rdna on gfx11 only (SDPA_RDNA_DROPOUT_TARGETS) and by
- * flydsl_sdpa_aiw on gfx12, so the rdna dropout rows list gfx1100 only.
+ * hipkernel:flydsl_sdpa_cdna, _rdna and _aiw are not rowed here: the head-pad copy they wrap can
+ * write past a packed operand's region when a batch's origins run past B*S tokens, so they keep
+ * the absent numerical_notes field.
  */
 
 namespace
 {
 
 using namespace hip_kernel_provider::sdpa_determinism;
-using hip_kernel_provider::kernel_ingestor_engine::integration::FrontendDropout;
 using hip_kernel_provider::kernel_ingestor_engine::integration::FrontendSdpaSpec;
 using hipdnn_frontend::DataType;
 
@@ -83,22 +77,6 @@ struct Shape
 {
     spec.seqLensQ = std::move(lensQ);
     spec.seqLensKv = std::move(lensKv);
-    return spec;
-}
-
-/// Packed THD slots (compact tables), one length per batch for Q/O and for K/V.
-[[maybe_unused]] FrontendSdpaSpec
-    packedSlots(FrontendSdpaSpec spec, std::vector<int32_t> slotsQ, std::vector<int32_t> slotsKv)
-{
-    spec.packedLensQ = std::move(slotsQ);
-    spec.packedLensKv = std::move(slotsKv);
-    return spec;
-}
-
-/// Philox dropout (p 0.2, fixed seed and offset on the device) with the RNG dump.
-[[maybe_unused]] FrontendSdpaSpec dropping(FrontendSdpaSpec spec)
-{
-    spec.dropout = FrontendDropout{};
     return spec;
 }
 
@@ -152,236 +130,13 @@ RowMeta metaFor(const char* engine,
         forwardRow(metaFor(engine, caseName, archs, std::move(knobs), knobClass), std::move(spec)));
 }
 
-/// An f32 row: Q, K, V and O FLOAT through A0's builder.
-[[maybe_unused]] void addF32(std::vector<DeterminismRow>& rows,
-                             const char* engine,
-                             const char* caseName,
-                             const std::vector<std::string>& archs,
-                             FrontendSdpaSpec spec,
-                             KnobList knobs = {},
-                             KnobClass knobClass = KnobClass::TILE_SCHEDULE)
-{
-    spec.name = caseName;
-    DeterminismFwdSpec determinism;
-    determinism.shape = std::move(spec);
-    determinism.dtypes.qkvType = DataType::FLOAT;
-    determinism.dtypes.oType = DataType::FLOAT;
-    rows.push_back(forwardRow(metaFor(engine, caseName, archs, std::move(knobs), knobClass),
-                              std::move(determinism)));
-}
-
 [[maybe_unused]] constexpr auto BF16 = DataType::BFLOAT16;
 [[maybe_unused]] constexpr auto F16 = DataType::HALF;
 [[maybe_unused]] constexpr auto F32 = DataType::FLOAT;
 
-// Shapes shared by several engines.
-[[maybe_unused]] constexpr Shape GQA_256{2, 8, 2, 256, 256, 64};
-[[maybe_unused]] constexpr Shape GQA_128{2, 8, 2, 128, 128, 64};
-// AOTriton's prime head dims at their own width (the frontend lane's odd-head-dim base).
-[[maybe_unused]] constexpr Shape ODD_BASE{2, 8, 2, 67, 143, 64};
-
-[[maybe_unused]] Shape withHead(Shape shape, int64_t headSize)
-{
-    shape.headSize = headSize;
-    return shape;
-}
-
 std::vector<DeterminismRow> flydslForwardRows()
 {
     std::vector<DeterminismRow> rows;
-
-#ifdef HKP_DETERMINISM_FLYDSL_SDPA_CDNA
-    {
-        // The generic prefill kernel: one launch, one writer per O element, no workspace.
-        // Evidence per class:
-        //  - tiles hd64/128/256: FlydslSdpaCdnaCommon.hpp:1746-1754 (exact head) with the tier
-        //    tables _instances.py:1181-1256 (gfx90a/gfx942/gfx950 each ship every class below);
-        //    hd256 on gfx942/gfx90a stages K in 128-column chunks (k_chunk), :1235-1254.
-        //  - hd512 prefill with O's columns split four ways (dv_split 4, k_chunk 256 on gfx942 and
-        //    gfx90a): _instances.py:1407-1419, SOURCE.md d512 rows (gfx90a:112, gfx942:108,
-        //    gfx950:94).
-        //  - f32: the generic prefill objects only, FlydslSdpaCdnaCommon.hpp:1636-1639 and
-        //    _instances.py:1801-1833; dualwave and split decline it.
-        //  - bias (vectorized bf16/f16 and the strided f32 one), sink (hd64/128), dropout
-        //    (hd64/128/256 plus buckets), padded and packed: matcher :983-1049, :1103-1117,
-        //    :937-946 (dropout and sink never together), :1613-1632; objects
-        //    _instances.py:1286-1319, 1548-1660, 1662-1736; frontend lane cases that every FlyDSL
-        //    family serves: IntegrationGpuFlydslSdpaFrontend.cpp:62-108 and :232-277,
-        //    IntegrationGpuFlydslSdpaFrontendFeatures.cpp:232-316.
-        //  - odd head dims run through the head_pad copies (FlydslSdpaHeadPad.hpp, wrapped
-        //    around this engine at FlydslSdpaCdnaNative.cpp:124-148).
-        constexpr const char* CDNA = "hipkernel:flydsl_sdpa_cdna";
-        const std::vector<std::string> archs = {"gfx90a", "gfx942", "gfx950"};
-
-        {
-            // The prefill path with no split: bf16, head size 64, GQA, causal.
-            FrontendSdpaSpec spec;
-            spec.name = "flydsl_cdna_bf16_hd64";
-            spec.dataType = BF16;
-            spec.batch = 2;
-            spec.queryHeads = 8;
-            spec.kvHeads = 2;
-            spec.seqQ = 128;
-            spec.seqKv = 128;
-            spec.headSize = 64;
-            spec.rightBound = 0;
-            spec.withStats = true;
-            rows.push_back(forwardRow({CDNA, "Bf16Hd64", archs}, spec));
-        }
-        // kv_align 64 objects (Skv a multiple of 64, non-causal) and the masked tail objects.
-        add(rows, CDNA, "F16Hd64NonCausal", archs, shaped(F16, {2, 8, 2, 256, 512, 64}, false));
-        add(rows,
-            CDNA,
-            "Bf16Hd128NonCausalKvTail",
-            archs,
-            shaped(BF16, {2, 4, 4, 384, 500, 128}, false));
-        add(rows, CDNA, "F16Hd128Causal", archs, shaped(F16, {1, 8, 2, 512, 512, 128}, true));
-        add(rows, CDNA, "Bf16Hd256NonCausal", archs, shaped(BF16, {1, 4, 2, 512, 512, 256}, false));
-        add(rows, CDNA, "F16Hd256Causal", archs, shaped(F16, {1, 4, 2, 512, 512, 256}, true));
-        add(rows,
-            CDNA,
-            "Bf16Hd512DvSplit",
-            archs,
-            shaped(BF16, {1, 4, 4, 256, 256, 512}, false),
-            {{"dv_split", 4}},
-            KnobClass::STRUCTURE);
-        add(rows,
-            CDNA,
-            "F16Hd512DvSplitCausal",
-            archs,
-            shaped(F16, {1, 4, 4, 256, 256, 512}, true),
-            {{"dv_split", 4}},
-            KnobClass::STRUCTURE);
-
-        // f32 (dv_split 2 with k_chunk 64 at 256 on gfx942 and gfx90a, unsplit on gfx950).
-        addF32(rows, CDNA, "F32Hd64", archs, shaped(F32, GQA_128, false));
-        addF32(rows, CDNA, "F32Hd128Causal", archs, shaped(F32, {1, 8, 2, 256, 256, 128}, true));
-        addF32(rows,
-               CDNA,
-               "F32Hd256",
-               archs,
-               shaped(F32, {1, 4, 2, 256, 256, 256}, false),
-               {},
-               KnobClass::STRUCTURE);
-        // Wide bucket (qk_mask objects of the 512 bucket, V following Q/K, dv_split 4 with only
-        // the slices that hold the graph's width launched: 264 takes three, 504 four).
-        // _instances.py:1440-1456, FlydslSdpaCdnaCommon.hpp:1383-1387 (slices), SOURCE.md
-        // sdpa_cdna d512 ..qkm1_dv4 rows (gfx90a:114, gfx942:110-111, gfx950:96).
-        add(rows,
-            CDNA,
-            "Bf16Hd264WideBucket",
-            archs,
-            shaped(BF16, {1, 4, 4, 256, 256, 264}, false),
-            {},
-            KnobClass::STRUCTURE);
-        add(rows,
-            CDNA,
-            "F16Hd504WideBucketCausal",
-            archs,
-            shaped(F16, {1, 4, 4, 256, 256, 504}, true),
-            {},
-            KnobClass::STRUCTURE);
-        // f32 with dropout (keep-mask dump launch) and with the strided f32 bias: the f32 buckets'
-        // qkm1 dropout1 and kstrbias1 objects (SOURCE.md sdpa_cdna gfx90a:302-321, gfx942:294-,
-        // gfx950:266-277; _instances.py:1835-1880); f32 declines only sink, dualwave and split
-        // (FlydslSdpaCdnaCommon.hpp:1051-1054, 1636-1639).
-        addF32(rows, CDNA, "F32Hd64Dropout", archs, dropping(shaped(F32, GQA_128, false)));
-        addF32(rows,
-               CDNA,
-               "F32Hd128DropoutCausal",
-               archs,
-               dropping(shaped(F32, {2, 8, 2, 128, 128, 128}, true)));
-        addF32(rows, CDNA, "F32Hd64F32Bias", archs, biased(shaped(F32, GQA_128, false), F32));
-
-        // Bias, sink.
-        add(rows, CDNA, "Bf16Hd64Bias", archs, biased(shaped(BF16, GQA_128, false), BF16));
-        add(rows,
-            CDNA,
-            "F16Hd128Bias",
-            archs,
-            biased(shaped(F16, {1, 8, 2, 256, 256, 128}, true), F16));
-        add(rows, CDNA, "Bf16Hd64F32Bias", archs, biased(shaped(BF16, GQA_128, false), F32));
-        add(rows, CDNA, "Bf16Hd64Sink", archs, sunk(shaped(BF16, GQA_128, false)));
-        add(rows,
-            CDNA,
-            "F16Hd128SinkCausal",
-            archs,
-            sunk(shaped(F16, {2, 8, 2, 128, 128, 128}, true)));
-
-        // Dropout: the Philox objects, the keep-mask writer, padded and packed.
-        add(rows, CDNA, "Bf16Hd64Dropout", archs, dropping(shaped(BF16, GQA_128, false)));
-        add(rows,
-            CDNA,
-            "F16Hd128DropoutCausal",
-            archs,
-            dropping(shaped(F16, {2, 8, 2, 128, 128, 128}, true)));
-        add(rows,
-            CDNA,
-            "Bf16Hd256Dropout",
-            archs,
-            dropping(shaped(BF16, {1, 4, 2, 128, 128, 256}, false)));
-        add(rows,
-            CDNA,
-            "Bf16Hd64DropoutPadded",
-            archs,
-            padded(dropping(shaped(BF16, GQA_128, false)), {128, 77}, {128, 90}));
-        add(rows,
-            CDNA,
-            "F16Hd64DropoutPacked",
-            archs,
-            packedSlots(dropping(shaped(F16, GQA_128, true)), {128, 77}, {128, 90}));
-
-        // Padded batches and packed THD.
-        add(rows,
-            CDNA,
-            "Bf16Hd64Padded",
-            archs,
-            padded(shaped(BF16, GQA_256, true), {256, 200}, {256, 230}));
-        add(rows,
-            CDNA,
-            "F16Hd128Padded",
-            archs,
-            padded(shaped(F16, {2, 8, 2, 256, 256, 128}, false), {256, 200}, {256, 230}));
-        add(rows,
-            CDNA,
-            "Bf16Hd64Packed",
-            archs,
-            packedSlots(shaped(BF16, GQA_128, true), {128, 77}, {128, 90}));
-        add(rows,
-            CDNA,
-            "F16Hd128Packed",
-            archs,
-            packedSlots(shaped(F16, {2, 8, 2, 128, 128, 128}, false), {128, 77}, {128, 90}));
-
-        // Head dims off 8 (head_pad copies before and after the attention launch).
-        add(rows,
-            CDNA,
-            "Bf16Hd53HeadPadBias",
-            archs,
-            biased(shaped(BF16, withHead(ODD_BASE, 53), false), BF16));
-        add(rows,
-            CDNA,
-            "F16Hd113HeadPadDropout",
-            archs,
-            dropping(shaped(F16, withHead(ODD_BASE, 113), false)));
-        add(rows,
-            CDNA,
-            "F16Hd241HeadPadPadded",
-            archs,
-            padded(shaped(F16, withHead(ODD_BASE, 241), true), {67, 19}, {143, 40}));
-        add(rows,
-            CDNA,
-            "Bf16Hd23HeadPadPacked",
-            archs,
-            packedSlots(shaped(BF16, withHead(ODD_BASE, 23), true), {67, 19}, {143, 40}));
-        add(rows,
-            CDNA,
-            "Bf16Hd7HeadPadPackedOneToken",
-            archs,
-            packedSlots(shaped(BF16, {2, 8, 2, 1, 1, 7}, true), {1, 1}, {1, 1}));
-        addF32(rows, CDNA, "F32Hd37HeadPad", archs, shaped(F32, withHead(ODD_BASE, 37), true));
-    }
-#endif
 
 #ifdef HKP_DETERMINISM_FLYDSL_SDPA_CDNA_DECODE
     {
@@ -590,176 +345,6 @@ std::vector<DeterminismRow> flydslForwardRows()
     }
 #endif
 
-#ifdef HKP_DETERMINISM_FLYDSL_SDPA_RDNA
-    {
-        // The RDNA prefill kernel: one launch, no workspace, one O writer per (row, column
-        // slice). Classes:
-        //  - hd_pair 0 (hd64, hd96, hd128), hd_pair 1 (hd256 exact, a head-dim pair split across
-        //    two waves summed through LDS) and dv_split 2 with hd_pair (the generic 256 tier,
-        //    head dims 232-248): sdpa_prefill_schedule and SDPA_GENERIC_HEAD_DIM_MAX,
-        //    _instances.py:332-358; SOURCE.md sdpa_rdna gfx11-generic and gfx12-generic list
-        //    d256 pair1 and dgeneric dv2_dmax256_pair1 objects in both bf16 and f16.
-        //  - Graph and kernel matchers: FlydslSdpaRdnaCommon.hpp:470-791, 912-1047;
-        //    FlydslSdpaRdnaNative.cpp:133-150.
-        //  - f32: exact f32 tiers 64/128/256 on both targets, with an f32 bias and dropout
-        //    (_instances.py:803-805, :962-990; gfx12 SOURCE.md:208-231); f32 never takes a sink.
-        //  - 16-bit dropout: gfx11-generic only (_instances.py:767); on gfx12 aiw serves it.
-        //  - head_pad: wrapped around this engine (FlydslSdpaRdnaNative.cpp).
-        constexpr const char* RDNA = "hipkernel:flydsl_sdpa_rdna";
-        const std::vector<std::string> archs = {"gfx1100", "gfx1201"};
-        const std::vector<std::string> gfx11 = {"gfx1100"};
-        const auto pair = KnobClass::STRUCTURE;
-
-        add(rows, RDNA, "Bf16Hd64Causal", archs, shaped(BF16, GQA_256, true));
-        add(rows, RDNA, "F16Hd64NonCausal", archs, shaped(F16, GQA_256, false));
-        add(rows, RDNA, "Bf16Hd96NonCausal", archs, shaped(BF16, withHead(GQA_256, 96), false));
-        add(rows, RDNA, "Bf16Hd128NonCausal", archs, shaped(BF16, withHead(GQA_256, 128), false));
-        add(rows, RDNA, "F16Hd128Causal", archs, shaped(F16, withHead(GQA_256, 128), true));
-        add(rows,
-            RDNA,
-            "Bf16Hd256HdPair",
-            archs,
-            shaped(BF16, {1, 4, 2, 256, 256, 256}, false),
-            {{"hd_pair", 1}},
-            pair);
-        add(rows,
-            RDNA,
-            "F16Hd256HdPairCausal",
-            archs,
-            shaped(F16, {1, 4, 2, 256, 256, 256}, true),
-            {{"hd_pair", 1}},
-            pair);
-        add(rows,
-            RDNA,
-            "Bf16Hd240DvSplit",
-            archs,
-            shaped(BF16, {1, 4, 2, 256, 256, 240}, false),
-            {{"dv_split", 2}},
-            pair);
-        add(rows,
-            RDNA,
-            "F16Hd240DvSplitCausal",
-            archs,
-            shaped(F16, {1, 4, 2, 256, 256, 240}, true),
-            {{"dv_split", 2}},
-            pair);
-        add(rows,
-            RDNA,
-            "Bf16Hd192V128Mla",
-            archs,
-            valueWidth(shaped(BF16, {1, 4, 2, 256, 256, 192}, false), 128),
-            {},
-            pair);
-
-        add(rows, RDNA, "Bf16Hd64Bias", archs, biased(shaped(BF16, GQA_128, false), BF16));
-        add(rows,
-            RDNA,
-            "F16Hd128F32Bias",
-            archs,
-            biased(shaped(F16, withHead(GQA_128, 128), false), F32));
-        add(rows, RDNA, "Bf16Hd64SinkCausal", archs, sunk(shaped(BF16, GQA_128, true)));
-        add(rows, RDNA, "F16Hd128Sink", archs, sunk(shaped(F16, withHead(GQA_128, 128), false)));
-        add(rows,
-            RDNA,
-            "Bf16Hd64Padded",
-            archs,
-            padded(shaped(BF16, GQA_256, true), {256, 200}, {256, 230}));
-        add(rows,
-            RDNA,
-            "F16Hd128PaddedCausal",
-            archs,
-            padded(shaped(F16, withHead(GQA_256, 128), true), {256, 200}, {256, 230}));
-        add(rows,
-            RDNA,
-            "Bf16Hd64Packed",
-            archs,
-            packedSlots(shaped(BF16, GQA_128, true), {128, 77}, {128, 90}));
-        add(rows,
-            RDNA,
-            "F16Hd128Packed",
-            archs,
-            packedSlots(shaped(F16, withHead(GQA_128, 128), false), {128, 77}, {128, 90}));
-
-        addF32(rows, RDNA, "F32Hd64", archs, shaped(F32, GQA_128, false));
-        addF32(rows, RDNA, "F32Hd128Causal", archs, shaped(F32, withHead(GQA_128, 128), true));
-        addF32(rows,
-               RDNA,
-               "F32Hd256DvSplit",
-               archs,
-               shaped(F32, {1, 4, 2, 128, 128, 256}, false),
-               {},
-               pair);
-        addF32(rows, RDNA, "F32Hd64Dropout", archs, dropping(shaped(F32, GQA_128, false)));
-        addF32(rows,
-               RDNA,
-               "F32Hd128F32Bias",
-               archs,
-               biased(shaped(F32, withHead(GQA_128, 128), false), F32));
-
-        add(rows,
-            RDNA,
-            "Bf16Hd53HeadPadBias",
-            archs,
-            biased(shaped(BF16, withHead(ODD_BASE, 53), false), BF16));
-        add(rows,
-            RDNA,
-            "F16Hd241HeadPadPadded",
-            archs,
-            padded(shaped(F16, withHead(ODD_BASE, 241), true), {67, 19}, {143, 40}));
-        add(rows,
-            RDNA,
-            "Bf16Hd23HeadPadPacked",
-            archs,
-            packedSlots(shaped(BF16, withHead(ODD_BASE, 23), true), {67, 19}, {143, 40}));
-        add(rows,
-            RDNA,
-            "Bf16Hd7HeadPadPackedOneToken",
-            archs,
-            packedSlots(shaped(BF16, {2, 8, 2, 1, 1, 7}, true), {1, 1}, {1, 1}));
-        addF32(rows, RDNA, "F32Hd37HeadPad", archs, shaped(F32, withHead(ODD_BASE, 37), true));
-
-        // 16-bit dropout, gfx11 only.
-        add(rows, RDNA, "Bf16Hd64Dropout", gfx11, dropping(shaped(BF16, GQA_128, false)));
-        add(rows,
-            RDNA,
-            "F16Hd128DropoutCausal",
-            gfx11,
-            dropping(shaped(F16, withHead(GQA_128, 128), true)));
-        add(rows,
-            RDNA,
-            "Bf16Hd256Dropout",
-            gfx11,
-            dropping(shaped(BF16, {1, 4, 2, 128, 128, 256}, false)),
-            {},
-            pair);
-        add(rows,
-            RDNA,
-            "Bf16Hd64DropoutPadded",
-            gfx11,
-            padded(dropping(shaped(BF16, GQA_128, false)), {128, 77}, {128, 90}));
-        add(rows,
-            RDNA,
-            "F16Hd64DropoutPacked",
-            gfx11,
-            packedSlots(dropping(shaped(F16, GQA_128, true)), {128, 77}, {128, 90}));
-        // Generic dropout tiers (gfx11 SOURCE.md sdpa_rdna dmax256_pair1_dropout1 and
-        // dmax160_pair1_dropout1; _instances.py:779-782, :962-990): hd240 on the 256 tier with the
-        // column split, and hd113 padded to 120 by head_pad onto the 160 tier.
-        add(rows,
-            RDNA,
-            "F16Hd240DropoutDvSplit",
-            gfx11,
-            dropping(shaped(F16, {1, 4, 2, 128, 128, 240}, false)),
-            {{"dv_split", 2}},
-            pair);
-        add(rows,
-            RDNA,
-            "F16Hd113HeadPadDropout",
-            gfx11,
-            dropping(shaped(F16, withHead(ODD_BASE, 113), false)));
-    }
-#endif
-
 #ifdef HKP_DETERMINISM_FLYDSL_SDPA_RDNA_DECODE
     {
         // The RDNA decode kernel: split-KV main launch with an in-workgroup wave combine
@@ -904,151 +489,6 @@ std::vector<DeterminismRow> flydslForwardRows()
             shaped(F16, {1, 8, 1, 4, 8192, 128}, true),
             {},
             split);
-    }
-#endif
-
-#ifdef HKP_DETERMINISM_FLYDSL_SDPA_AIW
-    {
-        // AOTriton's gfx1201 kernel, gfx12-generic only (SDPA_AIW_TARGETS, _instances.py:2399):
-        // one launch (plus the padded-row fill launch for a padded graph), explicit per-wave LDS
-        // partials for the cross-shard reduction at head dims above 256 (QK_SHARDS 2 at 384, 4
-        // at 512). The head dims, dropout,
-        // sink, bias and MLA objects are the sdpa_aiw/gfx12-generic SOURCE.md rows (a bf16 and
-        // f16 object per class; no f32). Kernel matcher FlydslSdpaAiwNative.cpp:262-420: padded
-        // or packed graphs need a bottom-right (or no) mask (:336), padded with packed lengths
-        // declines (:344), a padded graph needs the fill symbol (:414). head_pad is wrapped
-        // around the engine (:886-910).
-        constexpr const char* AIW = "hipkernel:flydsl_sdpa_aiw";
-        const std::vector<std::string> archs = {"gfx1201"};
-        const auto shards = KnobClass::STRUCTURE;
-
-        add(rows, AIW, "Bf16Hd64Causal", archs, shaped(BF16, GQA_256, true));
-        add(rows, AIW, "F16Hd64NonCausal", archs, shaped(F16, GQA_256, false));
-        add(rows, AIW, "Bf16Hd128NonCausal", archs, shaped(BF16, withHead(GQA_256, 128), false));
-        add(rows, AIW, "F16Hd128Causal", archs, shaped(F16, withHead(GQA_256, 128), true));
-        add(rows, AIW, "Bf16Hd256NonCausal", archs, shaped(BF16, {1, 4, 2, 256, 256, 256}, false));
-        add(rows, AIW, "F16Hd256Causal", archs, shaped(F16, {1, 4, 2, 256, 256, 256}, true));
-        add(rows,
-            AIW,
-            "Bf16Hd384Shards2",
-            archs,
-            shaped(BF16, {1, 4, 4, 256, 256, 384}, false),
-            {},
-            shards);
-        add(rows,
-            AIW,
-            "F16Hd384Shards2Causal",
-            archs,
-            shaped(F16, {1, 4, 4, 256, 256, 384}, true),
-            {},
-            shards);
-        add(rows,
-            AIW,
-            "Bf16Hd512Shards4",
-            archs,
-            shaped(BF16, {1, 4, 4, 256, 256, 512}, false),
-            {},
-            shards);
-        add(rows,
-            AIW,
-            "F16Hd512Shards4Causal",
-            archs,
-            shaped(F16, {1, 4, 4, 256, 256, 512}, true),
-            {},
-            shards);
-
-        add(rows, AIW, "Bf16Hd64Dropout", archs, dropping(shaped(BF16, GQA_128, false)));
-        add(rows,
-            AIW,
-            "F16Hd128DropoutCausal",
-            archs,
-            dropping(shaped(F16, withHead(GQA_128, 128), true)));
-        add(rows,
-            AIW,
-            "Bf16Hd256Dropout",
-            archs,
-            dropping(shaped(BF16, {1, 4, 2, 128, 128, 256}, false)));
-        add(rows,
-            AIW,
-            "F16Hd64DropoutPadded",
-            archs,
-            padded(dropping(shaped(F16, GQA_128, false)), {128, 77}, {128, 90}));
-        add(rows,
-            AIW,
-            "Bf16Hd64DropoutPacked",
-            archs,
-            packedSlots(dropping(shaped(BF16, GQA_128, true)), {128, 77}, {128, 90}));
-
-        add(rows, AIW, "Bf16Hd64Sink", archs, sunk(shaped(BF16, GQA_128, false)));
-        add(rows,
-            AIW,
-            "F16Hd128SinkCausal",
-            archs,
-            sunk(shaped(F16, withHead(GQA_128, 128), true)));
-        add(rows, AIW, "Bf16Hd64Bias", archs, biased(shaped(BF16, GQA_128, false), BF16));
-        // An f32 bias without dropout is not a row: the non-strided f32 bias objects need the bias
-        // to declare 32-byte alignment (FlydslSdpaAiwNative.cpp:392-399), the frontend builder
-        // declares the default 16 (TensorConstants.hpp:13) and sets no other, and the kstrided
-        // f32 objects, which need no alignment, ship only with dropout (SOURCE.md sdpa_aiw
-        // *_f32bias1_kstrbias1_dropout1). So the f32 bias class is covered through those.
-        add(rows,
-            AIW,
-            "F16Hd128F32BiasKStridedDropoutCausal",
-            archs,
-            dropping(biased(shaped(F16, withHead(GQA_128, 128), true), F32)));
-        add(rows,
-            AIW,
-            "Bf16Hd64Padded",
-            archs,
-            padded(shaped(BF16, GQA_256, true), {256, 200}, {256, 230}));
-        add(rows,
-            AIW,
-            "F16Hd128PaddedCausal",
-            archs,
-            padded(shaped(F16, withHead(GQA_256, 128), true), {256, 200}, {256, 230}));
-        add(rows,
-            AIW,
-            "Bf16Hd64Packed",
-            archs,
-            packedSlots(shaped(BF16, GQA_128, true), {128, 77}, {128, 90}));
-        add(rows,
-            AIW,
-            "F16Hd128Packed",
-            archs,
-            packedSlots(shaped(F16, withHead(GQA_128, 128), false), {128, 77}, {128, 90}));
-        add(rows,
-            AIW,
-            "Bf16Hd192V128Mla",
-            archs,
-            valueWidth(shaped(BF16, {1, 4, 2, 256, 256, 192}, false), 128));
-
-        add(rows,
-            AIW,
-            "Bf16Hd53HeadPadBias",
-            archs,
-            // Skv 144: the non-strided bias objects need every bias row stride a multiple of 8
-            // (FlydslSdpaAiwNative.cpp:403-409); Skv 143 gives a query stride of 143.
-            biased(shaped(BF16, {2, 8, 2, 67, 144, 53}, false), BF16));
-        add(rows,
-            AIW,
-            "F16Hd113HeadPadDropout",
-            archs,
-            dropping(shaped(F16, withHead(ODD_BASE, 113), false)));
-        add(rows,
-            AIW,
-            "F16Hd241HeadPadPadded",
-            archs,
-            padded(shaped(F16, withHead(ODD_BASE, 241), true), {67, 19}, {143, 40}));
-        add(rows,
-            AIW,
-            "Bf16Hd23HeadPadPacked",
-            archs,
-            packedSlots(shaped(BF16, withHead(ODD_BASE, 23), true), {67, 19}, {143, 40}));
-        add(rows,
-            AIW,
-            "Bf16Hd7HeadPadPackedOneToken",
-            archs,
-            packedSlots(shaped(BF16, {2, 8, 2, 1, 1, 7}, true), {1, 1}, {1, 1}));
     }
 #endif
 

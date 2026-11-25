@@ -326,21 +326,31 @@ TEST(TestFlydslSdpaHeadPad, DeclinesATensorInTwoRolesWithDifferentLengths)
     EXPECT_EQ(flydsl_sdpa::buildHeadPadGraph(fixture.context()), nullptr);
 }
 
-// A packed graph whose binding gives a per-batch length (an origin the offset table's own
-// difference may disagree with) is declined rather than copied: the copy has no
-// per-batch bound to check it against. The compact table alone (no length tensor) still copies
-// through the binding the attention kernels read, servablePackedVarlenWithLengths().
-TEST(TestFlydslSdpaHeadPad, DeclinesAPerBatchLengthBindingAndServesTheCompactTable)
+// The copies read the lengths the attention kernels read: the binding their matchers take,
+// servablePackedVarlenWithLengths(), on the padded graph. Q and O its query lengths, unless they
+// are Q's own table (seq_len_kv alone), K and V its key lengths.
+TEST(TestFlydslSdpaHeadPad, CopiesReadTheLengthBindingTheKernelsRead)
 {
     struct Case
     {
         const char* name;
         bool lengths;
         bool omitSeqLenQ;
+        int64_t query;
+        int64_t key;
     };
-    for(const auto& form : {Case{"both lengths", true, false},
-                            Case{"seq_len_kv alone", true, true},
-                            Case{"no lengths", false, false}})
+    for(const auto& form :
+        {Case{"both lengths",
+              true,
+              false,
+              FLYDSL_SDPA_RDNA_SEQ_LEN_Q_UID,
+              FLYDSL_SDPA_RDNA_SEQ_LEN_KV_UID},
+         Case{"seq_len_kv alone",
+              true,
+              true,
+              flydsl_sdpa::NO_SEQ_LEN,
+              FLYDSL_SDPA_RDNA_SEQ_LEN_KV_UID},
+         Case{"no lengths", false, false, flydsl_sdpa::NO_SEQ_LEN, flydsl_sdpa::NO_SEQ_LEN}})
     {
         SCOPED_TRACE(form.name);
         auto spec = compactSpec(53);
@@ -352,56 +362,15 @@ TEST(TestFlydslSdpaHeadPad, DeclinesAPerBatchLengthBindingAndServesTheCompactTab
         }
         const GraphFixture fixture(buildFlydslSdpaRdnaGraph(spec));
         const auto padded = flydsl_sdpa::buildHeadPadGraph(fixture.context());
-        if(form.lengths)
-        {
-            EXPECT_EQ(padded, nullptr);
-            continue;
-        }
         ASSERT_NE(padded, nullptr);
         const auto plan = flydsl_sdpa::headPadPlan(fixture.context(), *padded, 0);
         ASSERT_EQ(plan.inputs.size(), 3U);
         EXPECT_EQ(plan.inputs[0].uid, FLYDSL_SDPA_RDNA_Q_UID);
-        for(const auto& input : plan.inputs)
-        {
-            EXPECT_EQ(input.lengths, flydsl_sdpa::NO_SEQ_LEN);
-        }
-        EXPECT_EQ(plan.output.lengths, flydsl_sdpa::NO_SEQ_LEN);
+        EXPECT_EQ(plan.inputs[0].lengths, form.query);
+        EXPECT_EQ(plan.inputs[1].lengths, form.key);
+        EXPECT_EQ(plan.inputs[2].lengths, form.key);
+        EXPECT_EQ(plan.output.lengths, form.query);
     }
-}
-
-// The decline is every head-pad wrapper's, not only buildHeadPadGraph's own caller: a packed
-// graph with a per-batch length is declined on cdna, rdna and aiw alike once its head dim needs
-// padding; the compact table alone still matches; a head dim that needs no padding reaches the
-// engine's own match unwrapped, where the binding is the engine's to accept.
-TEST(TestFlydslSdpaHeadPad, DeclinesPackedOriginsOnEveryHeadPadMatcher)
-{
-    for(const int64_t headDim : {7, 100})
-    {
-        SCOPED_TRACE("head_dim " + std::to_string(headDim));
-        auto withLengths = compactSpec(headDim);
-        setPacked(withLengths, {37, 11}, {61, 29});
-        setPadding(withLengths, {30, 11}, {50, 5});
-        const GraphFixture origins(buildFlydslSdpaRdnaGraph(withLengths));
-        EXPECT_FALSE(matchesGraph(FLYDSL_SDPA_RDNA, origins.context()).has_value());
-        EXPECT_FALSE(matchesGraph(FLYDSL_SDPA_AIW, origins.context()).has_value());
-        EXPECT_FALSE(matchesGraph(FLYDSL_SDPA_CDNA, origins.context()).has_value());
-
-        auto compactOnly = compactSpec(headDim);
-        setPacked(compactOnly, {37, 11}, {61, 29});
-        const GraphFixture control(buildFlydslSdpaRdnaGraph(compactOnly));
-        EXPECT_TRUE(matchesGraph(FLYDSL_SDPA_RDNA, control.context()).has_value());
-        EXPECT_TRUE(matchesGraph(FLYDSL_SDPA_AIW, control.context()).has_value());
-        EXPECT_TRUE(matchesGraph(FLYDSL_SDPA_CDNA, control.context()).has_value());
-    }
-
-    auto noPadNeeded = compactSpec(64);
-    setPacked(noPadNeeded, {37, 11}, {61, 29});
-    setPadding(noPadNeeded, {30, 11}, {50, 5});
-    const GraphFixture unaffected(buildFlydslSdpaRdnaGraph(noPadNeeded));
-    EXPECT_FALSE(flydsl_sdpa::needsHeadPad(unaffected.context()));
-    EXPECT_TRUE(matchesGraph(FLYDSL_SDPA_RDNA, unaffected.context()).has_value());
-    EXPECT_TRUE(matchesGraph(FLYDSL_SDPA_AIW, unaffected.context()).has_value());
-    EXPECT_TRUE(matchesGraph(FLYDSL_SDPA_CDNA, unaffected.context()).has_value());
 }
 
 /// @p spec's graph with one tensor's head dim set to @p headDim, its strides contiguous BSHD at
