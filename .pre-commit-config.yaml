@@ -413,8 +413,12 @@ repos:
         name: rocKE platform -> library imports only shrink
         entry: python -m pytest -p no:cacheprovider --noconftest -q dnn-providers/hip-kernel-provider/rocke/platform/tests/test_library_reach.py
         language: python
-        # One pytest pin for every rocKE hook; the hooks below reuse it.
-        additional_dependencies: [&rocke_pytest "pytest==9.2.0"]
+        # One environment for every rocKE hook: the hooks below reuse this
+        # list, so pre-commit builds and caches it once. pytest 9 runs the
+        # checks; the conftest that imports rocke needs numpy, pinned to a
+        # release that still supports Python 3.10, rocKE's oldest; the
+        # provider's CTest categories are YAML.
+        additional_dependencies: &rocke_dependencies ["pytest==9.2.0", "numpy==2.2.6", "PyYAML==6.0.4"]
         files: ^dnn-providers/hip-kernel-provider/rocke/platform/(python|tests|tools|dsl_docs|cpp)/.*\.py$
         pass_filenames: false
 
@@ -422,10 +426,8 @@ repos:
       # provider's CTest categories, a configure of the platform, or a C++
       # source as text), which the installed test tree does not carry, so their
       # CTest entries exist in the build tree only; these hooks run them on a
-      # pull request. They import rocke through the platform tests' conftest,
-      # hence numpy, and need pytest 9. numpy is pinned to a release that still
-      # supports Python 3.10, rocKE's oldest. -B and no:cacheprovider keep
-      # bytecode and .pytest_cache out of the tree.
+      # pull request. -B and no:cacheprovider keep bytecode and .pytest_cache
+      # out of the tree.
       # Every test file runs in a CI-run CTest entry or is listed, with its
       # reason, in rocke.tests.pending_lanes (rocke_pending_lanes_check). Needs
       # cmake, ctest and a C++ compiler on PATH. It also reads
@@ -436,7 +438,7 @@ repos:
         name: rocKE every test file runs in CI or has a recorded reason
         entry: python -B -m pytest -p no:cacheprovider -q dnn-providers/hip-kernel-provider/rocke/platform/tests/tools/test_pending_lanes.py dnn-providers/hip-kernel-provider/rocke/platform/tests/tools/test_limbo_audit.py
         language: python
-        additional_dependencies: [*rocke_pytest, "numpy==2.2.6", "PyYAML==6.0.4"]
+        additional_dependencies: *rocke_dependencies
         files: ^dnn-providers/hip-kernel-provider/(rocke/|ROCKE_ENGINE_test_categories_external\.yaml$)
         pass_filenames: false
       # No git-tracked file of rocKE holds a compliance hit. A hit depends only
@@ -448,7 +450,7 @@ repos:
         name: rocKE changed files pass the compliance patterns
         entry: python -B dnn-providers/hip-kernel-provider/rocke/tools/compliance_patterns.py
         language: python
-        additional_dependencies: [*rocke_pytest, "numpy==2.2.6"]
+        additional_dependencies: *rocke_dependencies
         files: ^dnn-providers/hip-kernel-provider/rocke/
         # The tree scan reads a tracked symlink's target; so does this one.
         types_or: [file, symlink]
@@ -456,7 +458,7 @@ repos:
         name: rocKE compliance patterns hold, and the whole tree passes them
         entry: python -B -m pytest -p no:cacheprovider -q dnn-providers/hip-kernel-provider/rocke/platform/tests/tools/test_compliance_patterns.py
         language: python
-        additional_dependencies: [*rocke_pytest, "numpy==2.2.6"]
+        additional_dependencies: *rocke_dependencies
         files: ^dnn-providers/hip-kernel-provider/rocke/(tools/compliance_patterns\.(py|json)|platform/tests/tools/test_compliance_patterns\.py)$
         pass_filenames: false
       # No new torch use under rocKE (rocke_no_torch_check).
@@ -464,7 +466,7 @@ repos:
         name: rocKE adds no torch use
         entry: python -B -m pytest -p no:cacheprovider -q dnn-providers/hip-kernel-provider/rocke/platform/tests/tools/test_no_torch.py
         language: python
-        additional_dependencies: [*rocke_pytest, "numpy==2.2.6"]
+        additional_dependencies: *rocke_dependencies
         files: ^dnn-providers/hip-kernel-provider/rocke/
         pass_filenames: false
 
@@ -479,7 +481,7 @@ repos:
         name: rocKE engines' arch tables agree
         entry: python -B -m pytest -p no:cacheprovider -q dnn-providers/hip-kernel-provider/rocke/platform/tests/core/test_arch_table_engine_parity.py
         language: python
-        additional_dependencies: [*rocke_pytest, "numpy==2.2.6"]
+        additional_dependencies: *rocke_dependencies
         files: ^dnn-providers/hip-kernel-provider/rocke/platform/(tests/core/test_arch_table_engine_parity\.py|cpp/core/arch/data\.cpp|python/rocke/(assets\.py|core/arch/data/arch_specs\.json))$
         pass_filenames: false
       # Each GEMM spec dict carries every field of its spec, and the binding
@@ -491,7 +493,7 @@ repos:
         name: rocKE GEMM spec dicts match the engine binding
         entry: python -B -m pytest -p no:cacheprovider -q dnn-providers/hip-kernel-provider/rocke/platform/tests/core/test_gemm_spec_dict_binding_parity.py
         language: python
-        additional_dependencies: [*rocke_pytest, "numpy==2.2.6"]
+        additional_dependencies: *rocke_dependencies
         files: ^dnn-providers/hip-kernel-provider/rocke/platform/(tests/core/test_gemm_spec_dict_binding_parity\.py|cpp/bindings/rocke_engine\.cpp|python/rocke/(assets\.py|core/backend\.py|instances/(__init__|common/[^/]+)\.py))$
         pass_filenames: false
 
@@ -510,6 +512,7 @@ repos:
         name: rocKE C and Python emitters agree on HIP text and refusals
         entry: python -B dnn-providers/hip-kernel-provider/rocke/platform/tools/run_build_tree_ctest.py --target rocke_optimization_barrier_emit --target rocke_coalesced_loader_async_emit --test rocke_optimization_barrier_hip_pair --test rocke_coalesced_loader_async_refusals
         language: python
+        additional_dependencies: *rocke_dependencies
         files: ^dnn-providers/hip-kernel-provider/rocke/platform/(CMakeLists\.txt$|(cmake|cpp|python|tests|tools)/)
         pass_filenames: false
 
