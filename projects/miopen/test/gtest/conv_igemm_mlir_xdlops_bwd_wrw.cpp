@@ -100,6 +100,6 @@ TEST_P(GPU_Conv2dMLIRTestIGemmXDlopsBwdWrw_FP32, FloatTest_conv_igemm_mlir_xdlop
 };
 
 // Half for FWD, BWD, WRW
-INSTANTIATE_TEST_SUITE_P(Full,
+INSTANTIATE_TEST_SUITE_P(Standard,
                          GPU_Conv2dMLIRTestIGemmXDlopsBwdWrw_FP32,
                          testing::Values(GetTestCases()));

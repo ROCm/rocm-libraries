@@ -13,6 +13,8 @@
 #include <hipdnn_test_sdk/utilities/ScopedEnvironmentVariableSetter.hpp>
 #include <string>
 
+#include <limits>
+
 using namespace miopen_plugin;
 using namespace miopen_utils;
 
@@ -320,8 +322,31 @@ TEST(TestMiopenUtils, MapPointwiseModeReluNonZeroLowerClipOnly)
         = flatbuffers::GetRoot<hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes>(
             builder.GetBufferPointer());
 
-    ASSERT_THROW(mapPointwiseModeToMiopenActivation(*attr),
-                 hipdnn_plugin_sdk::HipdnnPluginException);
+    // CLAMP with the float maximum as the upper bound, which is what the reference uses for an
+    // unset upper clip.
+    ActivationParams result;
+    ASSERT_NO_THROW(result = mapPointwiseModeToMiopenActivation(*attr));
+    EXPECT_EQ(result.mode, miopenActivationCLAMP);
+    EXPECT_DOUBLE_EQ(result.alpha, static_cast<double>(lowerClip));
+    EXPECT_DOUBLE_EQ(result.beta, static_cast<double>(std::numeric_limits<float>::max()));
+}
+
+TEST(TestMiopenUtils, MapPointwiseModeReluBwdNegativeLowerClipOnly)
+{
+    const float lowerClip = -0.5f;
+    flatbuffers::FlatBufferBuilder builder;
+    auto attrOffset = hipdnn_flatbuffers_sdk::data_objects::CreatePointwiseAttributes(
+        builder, hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::RELU_BWD, lowerClip);
+    builder.Finish(attrOffset);
+    const auto* attr
+        = flatbuffers::GetRoot<hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes>(
+            builder.GetBufferPointer());
+
+    ActivationParams result;
+    ASSERT_NO_THROW(result = mapPointwiseModeToMiopenActivation(*attr));
+    EXPECT_EQ(result.mode, miopenActivationCLAMP);
+    EXPECT_DOUBLE_EQ(result.alpha, static_cast<double>(lowerClip));
+    EXPECT_DOUBLE_EQ(result.beta, static_cast<double>(std::numeric_limits<float>::max()));
 }
 
 TEST(TestMiopenUtils, MapPointwiseModeReluZeroLowerClipOnly)
@@ -467,12 +492,15 @@ TEST(TestMiopenUtils, MapPointwiseModeClampZeroSlope)
     EXPECT_DOUBLE_EQ(result.beta, 6.0);
 }
 
-TEST(TestMiopenUtils, MapPointwiseModeReluNonZeroLowerClipAndZeroSlopeThrows)
+TEST(TestMiopenUtils, MapPointwiseModeReluNonZeroLowerClipAndZeroSlopeIsClamp)
 {
     // A zero slope must not route a shifted knee into LEAKYRELU, which would drop the clip.
     const ReluAttrsHolder h(0.5f, flatbuffers::nullopt, 0.f);
-    EXPECT_THROW(mapPointwiseModeToMiopenActivation(*h.attrs),
-                 hipdnn_plugin_sdk::HipdnnPluginException);
+    ActivationParams result;
+    ASSERT_NO_THROW(result = mapPointwiseModeToMiopenActivation(*h.attrs));
+    EXPECT_EQ(result.mode, miopenActivationCLAMP);
+    EXPECT_DOUBLE_EQ(result.alpha, 0.5);
+    EXPECT_DOUBLE_EQ(result.beta, static_cast<double>(std::numeric_limits<float>::max()));
 }
 
 TEST(TestMiopenUtils, MapPointwiseModeSigmoid)

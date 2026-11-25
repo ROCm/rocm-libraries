@@ -62,26 +62,26 @@ TEST_P(GPU_ReduceCalculationTest_BFP16, ReduceCalculationTestFw)
 };
 
 INSTANTIATE_TEST_SUITE_P(
-    FullSUM,
+    StandardSUM,
     GPU_ReduceCalculationTest_FP32,
     testing::ValuesIn(ReduceCalculationTestConfigs(MIOPEN_REDUCE_CALCULATION_SUM)));
 INSTANTIATE_TEST_SUITE_P(
-    FullPROD,
+    StandardPROD,
     GPU_ReduceCalculationTest_FP32,
     testing::ValuesIn(ReduceCalculationTestConfigs(MIOPEN_REDUCE_CALCULATION_PROD)));
 INSTANTIATE_TEST_SUITE_P(
-    FullSUM,
+    StandardSUM,
     GPU_ReduceCalculationTest_FP16,
     testing::ValuesIn(ReduceCalculationTestConfigs(MIOPEN_REDUCE_CALCULATION_SUM)));
 INSTANTIATE_TEST_SUITE_P(
-    FullPROD,
+    StandardPROD,
     GPU_ReduceCalculationTest_FP16,
     testing::ValuesIn(ReduceCalculationTestConfigs(MIOPEN_REDUCE_CALCULATION_PROD)));
 INSTANTIATE_TEST_SUITE_P(
-    FullSUM,
+    StandardSUM,
     GPU_ReduceCalculationTest_BFP16,
     testing::ValuesIn(ReduceCalculationTestConfigs(MIOPEN_REDUCE_CALCULATION_SUM)));
 INSTANTIATE_TEST_SUITE_P(
-    FullPROD,
+    StandardPROD,
     GPU_ReduceCalculationTest_BFP16,
     testing::ValuesIn(ReduceCalculationTestConfigs(MIOPEN_REDUCE_CALCULATION_PROD)));
