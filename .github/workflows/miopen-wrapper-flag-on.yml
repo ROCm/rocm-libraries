@@ -42,7 +42,7 @@ concurrency:
 jobs:
   flag-on:
     name: MIOpen wrapper flag-on checks
-    runs-on: azure-linux-scale-rocm
+    runs-on: az-linux-scale-rocm-default-prod
     # A full release build plus miopen_gtest; well past this means a hang, not a slow build.
     timeout-minutes: 180
     container:
@@ -158,7 +158,7 @@ jobs:
   # plugins are built: they pull in MIOpen_private and the wrapper but not the MIOpen tests.
   flag-on-provider:
     name: MIOpen wrapper with the hipDNN provider
-    runs-on: azure-linux-scale-rocm
+    runs-on: az-linux-scale-rocm-default-prod
     timeout-minutes: 180
     container:
       image: rocm/miopen-dev:multiarch_dev_20261117
