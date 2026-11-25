@@ -3517,15 +3517,10 @@ class GlobalWriteBatchWriter:
     self._emitFusedA2ASdmaIssue(module, dstRankSgpr, myRankSgpr, nShardSgpr,
                                 flagBaseSgpr, tmpSgpr2)
 
-    # (6) second-level, per-peer counter: converge the DRAIN spinners from tokenTiles
-    # per peer down to exactly one, since the DRAIN poll address below depends only
-    # on dst_rank.  counter2 is a MAX_RANKS-entry u32 array at a fixed byte offset in
-    # the counter block (FUSED_A2A_COUNTER2_OFFSET).
-    # It is incremented AFTER _emitFusedA2ASdmaIssue returns, so the WG that reads
-    # back tokenTiles-1 is the one that submitted this card's LAST packet to dst_rank.
-    #
-    # counter3 (below) owns the DRAIN election; this one elects the work-group that
-    # puts the peer-flag and outbound ATOMICs on this card's queue to dst_rank.
+    # (6) per-peer counter: elects the work-group that puts the queue-tail ATOMICs on this
+    # card's queue to dst_rank, the one whose increment reads back tokenTiles-1. counter2 is a
+    # MAX_RANKS-entry u32 array at FUSED_A2A_COUNTER2_OFFSET in the counter block. Incremented
+    # only after _emitFusedA2ASdmaIssue returns, so the tail ATOMICs land behind every COPY.
     counter2PtrSgpr = kw.sgprPool.checkOutAligned(2, 2, tag="fusedA2A_hsCounter2Ptr", preventOverflow=False)
     c2Limit         = kw.sgprPool.checkOut(1, tag="fusedA2A_hsCounter2Limit", preventOverflow=False)
     module.add(SLShiftLeftB32(dst=sgpr(tmpSgpr2), src=sgpr(dstRankSgpr), shiftHex=2,
