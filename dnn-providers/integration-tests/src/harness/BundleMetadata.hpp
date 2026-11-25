@@ -6,10 +6,12 @@
 #ifndef HIPDNN_FLATBUFFERS_SDK_SKIP_JSON_LIB
 
 #include <array>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
+#include <limits>
 #include <optional>
 #include <stdexcept>
 #include <string>
@@ -22,6 +24,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include "harness/bundle/EngineVariant.hpp"
 #include "harness/input-init/InputFillRecipes.hpp"
 #include "harness/input-init/TensorAliases.hpp"
 
@@ -71,6 +74,74 @@ enum class EnforcementLevel
     FULL ///< engine must additionally execute and numeric-verify (default)
 };
 
+/// Why a case exists (RFC 0022 §9). A tag only: it changes no verdict, and a report
+/// reads it to say whether a decline was an expected answer.
+enum class CasePurpose
+{
+    CLAIM, ///< the engine claims this graph; a decline is a broken claim
+    PROBE, ///< legal graph whose expected outcome is decline-or-correct
+    REGRESSION ///< a frozen finding
+};
+
+inline const char* toString(CasePurpose purpose)
+{
+    switch(purpose)
+    {
+    case CasePurpose::CLAIM:
+        return "claim";
+    case CasePurpose::PROBE:
+        return "probe";
+    case CasePurpose::REGRESSION:
+        return "regression";
+    default:
+        return "unknown";
+    }
+}
+
+/// How a case's float outputs are graded beyond the per-tensor tolerance (RFC 0023 §8).
+enum class CaseValidator
+{
+    DEFAULT, ///< the tolerance resolved for each tensor, unchanged
+    MATCH_NONFINITE ///< non-finite positions must match by position; finite ones use the tolerance
+};
+
+inline const char* toString(CaseValidator validator)
+{
+    switch(validator)
+    {
+    case CaseValidator::DEFAULT:
+        return "default";
+    case CaseValidator::MATCH_NONFINITE:
+        return "match_nonfinite";
+    default:
+        return "unknown";
+    }
+}
+
+/// Where the engine run's device pointers sit relative to the declared tensor alignment N
+/// (RFC 0023 §8). Only the engine run is placed; a reference run never is.
+enum class CasePlacement
+{
+    DEFAULT, ///< wherever the allocator put them
+    EXACT, ///< every device pointer aligned to N but not 2N
+    UNDER ///< the pointer of `placement_uid` aligned below N, so the backend must reject it
+};
+
+inline const char* toString(CasePlacement placement)
+{
+    switch(placement)
+    {
+    case CasePlacement::DEFAULT:
+        return "default";
+    case CasePlacement::EXACT:
+        return "exact";
+    case CasePlacement::UNDER:
+        return "under";
+    default:
+        return "unknown";
+    }
+}
+
 /// Metadata read from a {Name}.meta.json companion file alongside a golden
 /// reference bundle ({Name}.json + {Name}.tensor{uid}.bin).
 ///
@@ -93,8 +164,17 @@ struct BundleMetadata
     std::optional<std::string> generationCommand;
     std::optional<std::string> notes;
     std::optional<int64_t> seed;
+    std::optional<CasePurpose> purpose;
     std::optional<int64_t> minimumVramMb;
     std::optional<std::unordered_map<int64_t, nlohmann::json>> inputs;
+    CaseValidator validator = CaseValidator::DEFAULT;
+    CasePlacement placement = CasePlacement::DEFAULT;
+    /// The tensor `placement: "under"` misaligns. Required for UNDER; ignored by every other
+    /// placement, so a space can always render it.
+    std::optional<int64_t> placementUid;
+    /// The one catalog candidate the engine must build for this case (a catalog sweep). Absent:
+    /// the engine's heuristic pick, as every other case.
+    std::optional<bundle::EngineVariantSpec> engineVariant;
     /// Inputs that read the memory of another input and have no allocation of their own.
     std::vector<TensorAlias> aliases;
     /// Tensors whose data starts past an aligned address in the engine's variant pack.
@@ -126,8 +206,9 @@ inline bool excludedFromSupportClaims(const BundleMetadata& metadata)
 }
 
 /// Thrown when a metadata object exists but is malformed: not a JSON object,
-/// missing/invalid/unsupported `format_version`, an invalid `enforcement_level`,
-/// a non-boolean `no_cpu_reference` / `no_gpu_reference` / `expected_rejection`,
+/// missing/invalid/unsupported `format_version`, an invalid `enforcement_level`, `purpose`,
+/// `validator` or `placement`, a `placement` of "under" without `placement_uid`, a malformed
+/// `engine_variant`, a non-boolean `no_cpu_reference` / `no_gpu_reference` / `expected_rejection`,
 /// a non-numeric `inputs` key, an `inputs` entry that is not a valid fill spec, an
 /// `aliases` value that parseTensorAliases() rejects, a view whose `inputs` entry sets a
 /// fill kind, a malformed `start_offsets` or `live_rows` value, a feature that needs a
@@ -140,6 +221,95 @@ class BundleMetadataError : public std::runtime_error
 public:
     using std::runtime_error::runtime_error;
 };
+
+/// One knob value of an `engine_variant`: an integer, a finite real or a string, the three
+/// types a knob holds. A JSON integer is a knob integer and a JSON real a knob real, so a
+/// listing's `knobs` (which prints each value in its own type) selects the same candidate when
+/// it is read back. A boolean or null has no knob type, and an integer beyond int64 has no
+/// exact one.
+inline hipdnn_frontend::KnobValueVariant
+    parseKnobValue(const nlohmann::json& value, const std::string& knob, const std::string& where)
+{
+    if(value.is_number_unsigned())
+    {
+        const auto unsignedValue = value.get<uint64_t>();
+        if(unsignedValue > static_cast<uint64_t>(std::numeric_limits<int64_t>::max()))
+        {
+            throw BundleMetadataError(where + " has engine_variant knob \"" + knob
+                                      + "\" beyond the int64 range");
+        }
+        return static_cast<int64_t>(unsignedValue);
+    }
+    if(value.is_number_integer())
+    {
+        return value.get<int64_t>();
+    }
+    if(value.is_number_float())
+    {
+        const auto real = value.get<double>();
+        if(!std::isfinite(real))
+        {
+            throw BundleMetadataError(where + " has engine_variant knob \"" + knob
+                                      + "\" that is not finite");
+        }
+        return real;
+    }
+    if(value.is_string())
+    {
+        return value.get<std::string>();
+    }
+    throw BundleMetadataError(where + " has engine_variant knob \"" + knob
+                              + "\" that is not an integer, a number or a string");
+}
+
+/// Parses `metadata.engine_variant`: `{"id": "<candidate id>", "knobs": {"<knob>": <value>}}`.
+///
+/// `id` is required and non-empty. `knobs` is optional (an empty tuple), an object of knob name
+/// to value, and must be empty for the default id, which is the engine's own pick and takes no
+/// knobs. Any other key throws, for the same reason a typo in any other metadata field does.
+inline bundle::EngineVariantSpec parseEngineVariant(const nlohmann::json& json,
+                                                    const std::string& where)
+{
+    if(!json.is_object())
+    {
+        throw BundleMetadataError(where + " has invalid engine_variant (not an object)");
+    }
+    for(const auto& [key, value] : json.items())
+    {
+        if(key != "id" && key != "knobs")
+        {
+            std::string message = where;
+            message.append(" has engine_variant with unknown key \"").append(key).append("\"");
+            throw BundleMetadataError(message);
+        }
+    }
+    if(!json.contains("id") || !json["id"].is_string() || json["id"].get<std::string>().empty())
+    {
+        throw BundleMetadataError(where + " has engine_variant without an id (a non-empty string)");
+    }
+
+    bundle::EngineVariantSpec variant;
+    variant.id = json["id"].get<std::string>();
+
+    if(json.contains("knobs"))
+    {
+        if(!json["knobs"].is_object())
+        {
+            throw BundleMetadataError(where + " has engine_variant knobs that is not an object");
+        }
+        for(const auto& [name, value] : json["knobs"].items())
+        {
+            variant.knobs.emplace_back(name, parseKnobValue(value, name, where));
+        }
+    }
+
+    if(variant.isDefault() && !variant.knobs.empty())
+    {
+        throw BundleMetadataError(where + " has engine_variant \"" + variant.id
+                                  + "\" with knobs: the default is the engine's own pick");
+    }
+    return variant;
+}
 
 namespace bundle_metadata_detail
 {
@@ -303,7 +473,8 @@ inline std::vector<OutputLiveRows> parseLiveRows(const nlohmann::json& json)
 ///
 /// Throws BundleMetadataError when the object is not a JSON object, is missing
 /// `format_version`, carries a format version other than 1 or 2, has an invalid
-/// `enforcement_level`, has a reference/rejection flag that is not a boolean, has an
+/// `enforcement_level`, `purpose`, `validator` or `placement`, an "under" placement without
+/// placement_uid, has a reference/rejection flag that is not a boolean, has an
 /// `inputs` key that is not a tensor UID or an `inputs` entry that is not a valid fill
 /// spec, has an `aliases` value that parseTensorAliases() rejects or a view whose
 /// `inputs` entry sets a fill kind, has a malformed `start_offsets` or `live_rows` value,
@@ -416,6 +587,98 @@ inline BundleMetadata parseBundleMetadataJson(const nlohmann::json& json,
         }
     }
 
+    // purpose: absent leaves it unset. Present but not claim, probe or regression
+    // throws, for the same reason enforcement_level does: a typo must not silently
+    // retag a case.
+    if(json.contains("purpose"))
+    {
+        if(!json["purpose"].is_string())
+        {
+            throw BundleMetadataError(where + " has invalid purpose (not a string)");
+        }
+
+        const auto purpose = json["purpose"].get<std::string>();
+        if(purpose == "claim")
+        {
+            meta.purpose = CasePurpose::CLAIM;
+        }
+        else if(purpose == "probe")
+        {
+            meta.purpose = CasePurpose::PROBE;
+        }
+        else if(purpose == "regression")
+        {
+            meta.purpose = CasePurpose::REGRESSION;
+        }
+        else
+        {
+            throw BundleMetadataError(where + " has invalid purpose \"" + purpose + "\"");
+        }
+    }
+
+    // validator and placement: absent leaves the default. Present but unknown throws, so a
+    // typo cannot silently run a case without the grading or the placement it was written for.
+    if(json.contains("validator"))
+    {
+        if(!json["validator"].is_string())
+        {
+            throw BundleMetadataError(where + " has invalid validator (not a string)");
+        }
+
+        const auto validator = json["validator"].get<std::string>();
+        if(validator == "match_nonfinite")
+        {
+            meta.validator = CaseValidator::MATCH_NONFINITE;
+        }
+        else if(validator != "default")
+        {
+            throw BundleMetadataError(where + " has invalid validator \"" + validator + "\"");
+        }
+    }
+
+    if(json.contains("placement"))
+    {
+        if(!json["placement"].is_string())
+        {
+            throw BundleMetadataError(where + " has invalid placement (not a string)");
+        }
+
+        const auto placement = json["placement"].get<std::string>();
+        if(placement == "exact")
+        {
+            meta.placement = CasePlacement::EXACT;
+        }
+        else if(placement == "under")
+        {
+            meta.placement = CasePlacement::UNDER;
+        }
+        else if(placement != "default")
+        {
+            throw BundleMetadataError(where + " has invalid placement \"" + placement + "\"");
+        }
+    }
+
+    if(json.contains("placement_uid"))
+    {
+        if(!json["placement_uid"].is_number_integer())
+        {
+            throw BundleMetadataError(where + " has invalid placement_uid (not an integer)");
+        }
+        meta.placementUid = json["placement_uid"].get<int64_t>();
+    }
+
+    if(meta.placement == CasePlacement::UNDER && !meta.placementUid.has_value())
+    {
+        throw BundleMetadataError(where + " has placement \"under\" but no placement_uid");
+    }
+
+    // engine_variant: absent leaves the heuristic pick. Present but malformed throws, so a typo
+    // cannot silently build the engine's own pick while the record claims another candidate.
+    if(json.contains("engine_variant"))
+    {
+        meta.engineVariant = parseEngineVariant(json["engine_variant"], where);
+    }
+
     if(json.contains("inputs") && json["inputs"].is_object())
     {
         std::unordered_map<int64_t, nlohmann::json> inputMap;
@@ -441,20 +704,19 @@ inline BundleMetadata parseBundleMetadataJson(const nlohmann::json& json,
                 message += '"';
                 throw BundleMetadataError(message);
             }
-            try
-            {
-                parseInputFillSpec(val);
-            }
-            catch(const std::invalid_argument& e)
-            {
-                std::string message = where;
-                message += " input ";
-                message += key;
-                message += ": ";
-                message += e.what();
-                throw BundleMetadataError(message);
-            }
             inputMap[uid] = val;
+        }
+        // The strict parse the harness applies (parseInputFillSpec per entry, so kind values and
+        // the rest too), run here so a recipe that cannot load is a BundleMetadataError (a failed
+        // load of this one case) and not a throw inside the test factory. FillRecipeError is an
+        // std::invalid_argument.
+        try
+        {
+            InputFillRecipes{}.loadFromJson(inputMap, where);
+        }
+        catch(const std::invalid_argument& e)
+        {
+            throw BundleMetadataError(e.what());
         }
         meta.inputs = std::move(inputMap);
     }

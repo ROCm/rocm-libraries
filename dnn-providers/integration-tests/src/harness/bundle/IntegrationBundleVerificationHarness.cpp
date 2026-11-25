@@ -5,8 +5,14 @@
 #include "harness/bundle/RngDumpHandoff.hpp"
 
 #include <algorithm>
+#include <cctype>
+#include <chrono>
+#include <cstdlib>
+#include <filesystem>
+#include <fstream>
 #include <initializer_list>
 #include <map>
+#include <memory>
 #include <optional>
 #include <ostream>
 #include <set>
@@ -16,6 +22,7 @@
 #include <utility>
 
 #include "harness/BundleMetadata.hpp"
+#include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
 #include <hipdnn_test_sdk/utilities/ComparisonReport.hpp>
@@ -72,6 +79,151 @@ const char* modeName(VerificationMode mode)
     }
 }
 
+// Diagnostic, off unless HIPDNN_TEST_DUMP_DIR is set: writes every input, the engine's output and the
+// reference's output of the comparison to <dir>/<test name>/ as raw element-space bytes plus a
+// manifest.json (role, uid, dims, strides, element size, file). Lets an offline tool grade the same
+// tensors with another tolerance rule (see the sdpa_conformance comparison in the gauntlet notes).
+template <class Wrapper, class Inputs, class Engine, class Expected, class Uids>
+void dumpComparisonTensors(const std::string& testName,
+                           const Wrapper& wrapper,
+                           Inputs& inputs,
+                           Engine& engineOutputs,
+                           const Expected& expectedFor,
+                           const Uids& outputUids,
+                           hipdnn_data_sdk::utilities::ITensor* philoxMask)
+{
+    const std::string root = hipdnn_data_sdk::utilities::getEnv("HIPDNN_TEST_DUMP_DIR");
+    if(root.empty())
+    {
+        return;
+    }
+    std::string safe = testName;
+    for(auto& c : safe)
+    {
+        if(!std::isalnum(static_cast<unsigned char>(c)) && c != '_' && c != '.' && c != '-')
+        {
+            c = '_';
+        }
+    }
+    const auto dir = std::filesystem::path(root) / safe;
+    std::filesystem::create_directories(dir);
+    std::ostringstream manifest;
+    manifest << R"({"test":")" << safe << R"(","tensors":[)";
+    bool first = true;
+    const auto write = [&](const char* role, int64_t uid, hipdnn_data_sdk::utilities::ITensor& t) {
+        const std::string file = std::string(role) + "_" + std::to_string(uid) + ".bin";
+        std::ofstream out(dir / file, std::ios::binary);
+        out.write(static_cast<const char*>(t.rawHostData()),
+                  static_cast<std::streamsize>(t.elementSpace() * t.elementSize()));
+        std::string name;
+        const auto& tensorMap = wrapper.getTensorMap();
+        const auto found = tensorMap.find(uid);
+        if(std::string(role) != "philox_mask" && found != tensorMap.end()
+           && found->second->name() != nullptr)
+        {
+            name = found->second->name()->str();
+        }
+        std::string dtype;
+        std::string raggedOff = "null";
+        if(found != tensorMap.end() && std::string(role) != "philox_mask")
+        {
+            dtype = hipdnn_flatbuffers_sdk::data_objects::EnumNameDataType(
+                found->second->data_type());
+            if(const auto ragged = found->second->ragged_offset_tensor_uid(); ragged.has_value())
+            {
+                raggedOff = std::to_string(ragged.value());
+            }
+        }
+        manifest << (first ? "" : ",") << R"({"role":")" << role << R"(","uid":)" << uid
+                 << R"(,"name":")" << name << R"(","dtype":")" << dtype << R"(","ragged_off":)"
+                 << raggedOff << R"(,"elem":)" << t.elementSize() << R"(,"space":)"
+                 << t.elementSpace() << R"(,"file":")" << file << R"(","dims":[)";
+        first = false;
+        for(size_t i = 0; i < t.dims().size(); ++i)
+        {
+            manifest << (i != 0 ? "," : "") << t.dims()[i];
+        }
+        manifest << "],\"strides\":[";
+        for(size_t i = 0; i < t.strides().size(); ++i)
+        {
+            manifest << (i != 0 ? "," : "") << t.strides()[i];
+        }
+        manifest << "]}";
+    };
+    for(auto& [uid, tensor] : inputs)
+    {
+        write("input", uid, *tensor);
+    }
+    if(philoxMask != nullptr)
+    {
+        // The keep mask the harness drew for a Philox dropout graph (1 kept, 0 dropped), the oracle's input.
+        write("philox_mask", 0, *philoxMask);
+    }
+    for(const auto uid : outputUids)
+    {
+        write("engine", uid, *engineOutputs.at(uid));
+        write("ref", uid, expectedFor(uid));
+    }
+    manifest << "]";
+    // The SDPA backward node: tensor uids and parameters, so the offline tool needs no other copy of the graph.
+    for(uint32_t i = 0; i < wrapper.nodeCount(); ++i)
+    {
+        const auto* bwd = wrapper.getNode(i).attributes_as_SdpaBackwardAttributes();
+        if(bwd == nullptr)
+        {
+            continue;
+        }
+        const std::unique_ptr<hipdnn_flatbuffers_sdk::data_objects::SdpaBackwardAttributesT> n(
+            bwd->UnPack());
+        const auto opt = [](const ::flatbuffers::Optional<int64_t>& v) {
+            return v.has_value() ? std::to_string(v.value()) : std::string("null");
+        };
+        // 9 significant digits round-trip a float, which std::to_string (6 decimals) does not.
+        const auto optf = [](const ::flatbuffers::Optional<float>& v) {
+            std::ostringstream out;
+            out.precision(9);
+            if(v.has_value())
+            {
+                out << v.value();
+            }
+            else
+            {
+                out << "null";
+            }
+            return out.str();
+        };
+        manifest << R"(,"node":{"q":)" << n->q_tensor_uid << ",\"k\":" << n->k_tensor_uid
+                 << ",\"v\":" << n->v_tensor_uid << ",\"o\":" << n->o_tensor_uid
+                 << ",\"do\":" << n->do_tensor_uid << ",\"stats\":" << n->stats_tensor_uid
+                 << ",\"dq\":" << n->dq_tensor_uid << ",\"dk\":" << n->dk_tensor_uid
+                 << ",\"dv\":" << n->dv_tensor_uid
+                 << ",\"scale_tensor\":" << opt(n->scale_tensor_uid)
+                 << ",\"attn_mask\":" << opt(n->attn_mask_tensor_uid)
+                 << ",\"seq_len_q\":" << opt(n->seq_len_q_tensor_uid)
+                 << ",\"seq_len_kv\":" << opt(n->seq_len_kv_tensor_uid)
+                 << ",\"seed\":" << opt(n->seed_tensor_uid)
+                 << ",\"offset\":" << opt(n->offset_tensor_uid)
+                 << ",\"dropout_mask\":" << opt(n->dropout_mask_tensor_uid)
+                 << ",\"dbias\":" << opt(n->dbias_tensor_uid)
+                 << ",\"alibi\":" << (n->alibi_mask ? "true" : "false")
+                 << ",\"padding\":" << (n->padding_mask ? "true" : "false")
+                 << ",\"causal\":" << (n->causal_mask ? "true" : "false")
+                 << ",\"causal_bottom_right\":" << (n->causal_mask_bottom_right ? "true" : "false")
+                 << ",\"dropout_p\":" << optf(n->dropout_probability)
+                 << ",\"scale\":" << optf(n->attn_scale_value)
+                 << ",\"left_bound\":" << opt(n->left_bound)
+                 << ",\"right_bound\":" << opt(n->right_bound) << ",\"top_left\":"
+                 << (n->diagonal_alignment
+                             == hipdnn_flatbuffers_sdk::data_objects::DiagonalAlignment::TOP_LEFT
+                         ? "true"
+                         : "false")
+                 << "}";
+        break;
+    }
+    manifest << "}";
+    std::ofstream(dir / "manifest.json") << manifest.str();
+}
+
 } // namespace
 
 // ---- the one graph, the one query ------------------------------------------
@@ -85,18 +237,34 @@ GraphSession IntegrationBundleVerificationHarness::openGraph()
     return _deps.engineRunner->openGraph(*_bundle, _engineUnderTest);
 }
 
-void IntegrationBundleVerificationHarness::applyMetadataGuards() const
+void IntegrationBundleVerificationHarness::applyMetadataGuards()
 {
     if(auto reason = checkVramRequirement(_bundle->metadata, _deps.policy.deviceVramMb))
     {
-        noteSkipBeforeObservation();
+        noteSetupSkip(*reason);
         GTEST_SKIP() << *reason;
     }
 
     if(auto reason = checkArchCompatibility(_bundle->metadata, _deps.policy.arch))
     {
-        noteSkipBeforeObservation();
+        noteSetupSkip(*reason);
         GTEST_SKIP() << *reason;
+    }
+}
+
+std::string IntegrationBundleVerificationHarness::describeCurrentException()
+{
+    try
+    {
+        throw;
+    }
+    catch(const std::exception& e)
+    {
+        return e.what();
+    }
+    catch(...)
+    {
+        return "an exception that is not a std::exception";
     }
 }
 
@@ -144,9 +312,10 @@ ClaimPhase IntegrationBundleVerificationHarness::observeClaims(const GraphSessio
     return phase;
 }
 
-void IntegrationBundleVerificationHarness::raiseComplaints(
+bool IntegrationBundleVerificationHarness::raiseComplaints(
     std::initializer_list<std::optional<HarnessComplaint>> complaints)
 {
+    bool raised = false;
     for(const auto& complaint : complaints)
     {
         if(!complaint.has_value())
@@ -157,7 +326,9 @@ void IntegrationBundleVerificationHarness::raiseComplaints(
         // ADD_FAILURE() rather than FAIL(): FAIL() returns, and the caller still has
         // an outcome to report and possibly a second complaint to raise.
         ADD_FAILURE() << complaint->message;
+        raised = true;
     }
+    return raised;
 }
 
 // The decision is finalizeClaims(); this only publishes what it returns. results is
@@ -214,9 +385,11 @@ VerificationOutcome IntegrationBundleVerificationHarness::enforceAtLevel(Enforce
     if(level == EnforcementLevel::FULL)
     {
         return VerificationOutcome::failed(
-            VerificationDepth::NOT_REACHED,
-            FailureOrigin::HARNESS,
-            "enforceAtLevel() handles APPLICABILITY/BUILDABLE only; FULL uses the normal path");
+                   VerificationDepth::NOT_REACHED,
+                   FailureOrigin::HARNESS,
+                   "enforceAtLevel() handles APPLICABILITY/BUILDABLE only; FULL uses the normal "
+                   "path")
+            .atStage(OutcomeStage::SETUP);
     }
 
     // The rung itself needs a named engine to check applicability against; claim
@@ -238,8 +411,13 @@ VerificationOutcome IntegrationBundleVerificationHarness::enforceAtLevel(Enforce
     // Same applicability answer the claim verdict and the executor read.
     if(!session.engines.accepted)
     {
-        return unverifiable("Engine " + _engineUnderTest->name + " does not support this graph ("
-                            + asked + ")");
+        // A decline only when the query resolved: an unresolved one leaves "does the
+        // engine take it" unknown, and unknown is not declined.
+        auto outcome = unverifiable("Engine " + _engineUnderTest->name
+                                    + " does not support this graph (" + asked + ")")
+                           .atStage(OutcomeStage::QUERY);
+        outcome.declined = isResolved(session.engines.status.get_code());
+        return outcome;
     }
 
     if(level == EnforcementLevel::APPLICABILITY)
@@ -258,13 +436,16 @@ VerificationOutcome IntegrationBundleVerificationHarness::enforceAtLevel(Enforce
     {
         return unverifiable("Engine " + _engineUnderTest->name
                             + " declined this graph while compiling plans (enforcement_level="
-                            + rung + "): " + built.message);
+                            + rung + "): " + built.message)
+            .atStage(OutcomeStage::BUILD)
+            .asDecline();
     }
     if(!built.ok)
     {
         return VerificationOutcome::failed(VerificationDepth::APPLICABLE,
                                            FailureOrigin::ENGINE,
-                                           "[rung=buildable] " + built.message);
+                                           "[rung=buildable] " + built.message)
+            .atStage(OutcomeStage::BUILD);
     }
     return VerificationOutcome::passed(VerificationDepth::BUILDABLE);
 }
@@ -311,7 +492,8 @@ VerificationOutcome
     if(auto claimError = expectedRejectionClaimError())
     {
         return VerificationOutcome::failed(
-            VerificationDepth::NOT_REACHED, FailureOrigin::HARNESS, std::move(*claimError));
+                   VerificationDepth::NOT_REACHED, FailureOrigin::HARNESS, std::move(*claimError))
+            .atStage(OutcomeStage::SETUP);
     }
 
     // "Every engine rejects it" is only checkable one lane at a time, so a run that
@@ -332,16 +514,18 @@ VerificationOutcome
                                            "expected-rejection bundle never reached an engine: "
                                            "from_binary failed: "
                                                + session.buildError + " (" + _bundlePath.string()
-                                               + ")");
+                                               + ")")
+            .atStage(OutcomeStage::GRAPH);
     }
     if(!isResolved(session.engines.status.get_code()))
     {
         return VerificationOutcome::failed(
-            VerificationDepth::NOT_REACHED,
-            FailureOrigin::HARNESS,
-            "the ranked-engine query for an expected-rejection bundle did not resolve ("
-                + session.engines.status.get_message() + "), so it is unknown whether " + engine
-                + " rejects it (" + _bundlePath.string() + ")");
+                   VerificationDepth::NOT_REACHED,
+                   FailureOrigin::HARNESS,
+                   "the ranked-engine query for an expected-rejection bundle did not resolve ("
+                       + session.engines.status.get_message() + "), so it is unknown whether "
+                       + engine + " rejects it (" + _bundlePath.string() + ")")
+            .atStage(OutcomeStage::QUERY);
     }
 
     // The query resolved, so absence from the list is the engine's refusal.
@@ -432,7 +616,8 @@ VerificationOutcome IntegrationBundleVerificationHarness::runComparison(GraphSes
     {
         return VerificationOutcome::failed(VerificationDepth::NOT_REACHED,
                                            FailureOrigin::ENGINE,
-                                           "from_binary failed: " + session.buildError);
+                                           "from_binary failed: " + session.buildError)
+            .atStage(OutcomeStage::GRAPH);
     }
 
     // --skip-graph-validation caps every bundle at the applicability rung, the same one
@@ -449,6 +634,20 @@ VerificationOutcome IntegrationBundleVerificationHarness::runComparison(GraphSes
     if(_bundle->outputTensorUids.empty())
     {
         return unverifiable("bundle has no output tensors to compare");
+    }
+
+    // A case that asked for the host-only match_nonfinite validator cannot be graded under an
+    // explicit --validator gpu. Said before the engine runs, not after it has spent its time.
+    if(_bundle->metadata.validator == CaseValidator::MATCH_NONFINITE
+       && _deps.policy.validator == ValidatorDevice::GPU)
+    {
+        return VerificationOutcome::failed(
+                   VerificationDepth::NOT_REACHED,
+                   FailureOrigin::HARNESS,
+                   "this case selects the host-only validator match_nonfinite, which cannot run "
+                   "under --validator gpu; run it with --validator auto or --validator cpu ("
+                       + _bundlePath.string() + ")")
+            .atStage(OutcomeStage::SETUP);
     }
 
     // Decided from the bundle's own metadata, so before any input is read or filled and
@@ -481,8 +680,10 @@ VerificationOutcome IntegrationBundleVerificationHarness::runComparison(GraphSes
     case VerificationMode::AUTO:
         return runReferenceMode(session);
     default:
-        return VerificationOutcome::failed(
-            VerificationDepth::NOT_REACHED, FailureOrigin::HARNESS, "Unknown verification mode");
+        return VerificationOutcome::failed(VerificationDepth::NOT_REACHED,
+                                           FailureOrigin::HARNESS,
+                                           "Unknown verification mode")
+            .atStage(OutcomeStage::SETUP);
     }
 }
 
@@ -599,8 +800,8 @@ std::optional<IntegrationBundleVerificationHarness::ResolvedReference>
         bool applicable = false;
         measureReference(&ReferenceBenchmarkResult::prepareMs, [&] {
             executor = &_deps.referenceExecutors->get(type);
-            applicable
-                = executor->isApplicable(_bundle->graphBuffer.data(), _bundle->graphBuffer.size());
+            const auto [graphData, graphSize] = referenceGraph();
+            applicable = executor->isApplicable(graphData, graphSize);
         });
         if(applicable)
         {
@@ -658,6 +859,31 @@ VerificationOutcome
     const VerificationDepth reached
         = run.plansBuilt ? VerificationDepth::BUILDABLE : VerificationDepth::NOT_REACHED;
 
+    if(run.status == EngineStatus::REJECTED_AS_EXPECTED)
+    {
+        // The case was written to be refused, and it was: the rejection is what was
+        // verified, so this is a pass at the depth a full bundle asks for. Nothing was
+        // compared, hence no verifier.
+        return VerificationOutcome::passed(VerificationDepth::VERIFIED).expecting("BAD_PARAM");
+    }
+
+    if(run.status == EngineStatus::NOT_REJECTED)
+    {
+        // Written to be refused and was not: a failure whatever else happened, because a
+        // case that expected BAD_PARAM verified nothing by being accepted, declined or
+        // broken some other way.
+        return VerificationOutcome::failed(reached, FailureOrigin::ENGINE, run.message)
+            .atStage(run.stage);
+    }
+
+    if(run.status == EngineStatus::SETUP_FAILED)
+    {
+        // Placing the buffers failed: the harness or the device, never the engine.
+        return VerificationOutcome::failed(
+                   VerificationDepth::NOT_REACHED, FailureOrigin::HARNESS, run.message)
+            .atStage(OutcomeStage::SETUP);
+    }
+
     if(run.status == EngineStatus::DECLINED)
     {
         std::ostringstream msg;
@@ -666,7 +892,9 @@ VerificationOutcome
         {
             msg << ": " << run.message;
         }
-        return VerificationOutcome::skipped(reached, msg.str());
+        auto skipped = VerificationOutcome::skipped(reached, msg.str()).atStage(run.stage);
+        skipped.declined = run.decline;
+        return skipped;
     }
 
     // ERRORED: the engine broke while compiling or executing, and the runner handed
@@ -681,7 +909,8 @@ VerificationOutcome
     {
         msg << ": " << run.message;
     }
-    return VerificationOutcome::failed(reached, FailureOrigin::ENGINE, msg.str());
+    return VerificationOutcome::failed(reached, FailureOrigin::ENGINE, msg.str())
+        .atStage(run.stage);
 }
 
 VerificationOutcome IntegrationBundleVerificationHarness::runGoldenMode(GraphSession& session)
@@ -693,10 +922,11 @@ VerificationOutcome IntegrationBundleVerificationHarness::runGoldenMode(GraphSes
     if(!_bundle->hasGoldenOutputs)
     {
         return VerificationOutcome::failed(
-            VerificationDepth::NOT_REACHED,
-            FailureOrigin::HARNESS,
-            "verification-mode=golden was requested but this bundle has no golden "
-            "data; run `dvc pull` for it, or use --verification-mode=auto");
+                   VerificationDepth::NOT_REACHED,
+                   FailureOrigin::HARNESS,
+                   "verification-mode=golden was requested but this bundle has no golden "
+                   "data; run `dvc pull` for it, or use --verification-mode=auto")
+            .atStage(OutcomeStage::SETUP);
     }
 
     auto engine = runEngine(session);
@@ -767,7 +997,9 @@ VerificationOutcome
         const bool lastResort = i + 1 == chain.candidates.size();
 
         OutputTensors refOutputs;
+        const auto started = std::chrono::steady_clock::now();
         const RefRunResult result = runReferenceCapturingOutputs(*ref, engineOutputs, refOutputs);
+        const auto elapsed = std::chrono::steady_clock::now() - started;
         const std::string label = refLabel(ref->type);
         switch(result.status)
         {
@@ -775,6 +1007,11 @@ VerificationOutcome
         {
             const auto verifier = verifierFor(ref->type);
             auto outcome = compareOutputs(engineOutputs, refOutputs, result.site, verifier);
+            // Only the run that graded is recorded: a lane that errored or declined
+            // before this one produced no outputs and has no entry here.
+            outcome.reference = ReferenceRun{
+                std::chrono::duration<double, std::milli>(elapsed).count(),
+                ref->type == ReferenceExecutorType::GPU ? ReferenceLane::GPU : ReferenceLane::CPU};
             if(_deps.policy.graphCapture.has_value())
             {
                 // The replay is judged against this same oracle output, so it has to
@@ -830,10 +1067,12 @@ VerificationOutcome
             // goes in the reference-error report.
             return VerificationOutcome::failed(VerificationDepth::EXECUTED,
                                                FailureOrigin::HARNESS,
-                                               label + " was not run: " + result.message);
+                                               label + " was not run: " + result.message)
+                .atStage(OutcomeStage::ORACLE);
         default:
             return VerificationOutcome::failed(
-                VerificationDepth::EXECUTED, FailureOrigin::HARNESS, "Unknown RefStatus");
+                       VerificationDepth::EXECUTED, FailureOrigin::HARNESS, "Unknown RefStatus")
+                .atStage(OutcomeStage::ORACLE);
         }
     }
 
@@ -856,7 +1095,8 @@ VerificationOutcome
     message.append("; ").append(describeTried(chain));
     message.append(" (").append(_bundlePath.string()).append(")");
     return VerificationOutcome::failed(
-        VerificationDepth::EXECUTED, FailureOrigin::ORACLE, std::move(message));
+               VerificationDepth::EXECUTED, FailureOrigin::ORACLE, std::move(message))
+        .atStage(OutcomeStage::ORACLE);
 }
 
 VerificationOutcome IntegrationBundleVerificationHarness::noOracle(const OracleChain& chain)
@@ -875,7 +1115,8 @@ VerificationOutcome IntegrationBundleVerificationHarness::noOracle(const OracleC
 
     return VerificationOutcome::failed(VerificationDepth::EXECUTED,
                                        refErrored ? FailureOrigin::ORACLE : FailureOrigin::HARNESS,
-                                       recordUnverifiable(reason));
+                                       recordUnverifiable(reason))
+        .atStage(OutcomeStage::ORACLE);
 }
 
 std::string IntegrationBundleVerificationHarness::describeTried(const OracleChain& chain) const
@@ -910,7 +1151,8 @@ std::optional<VerificationOutcome> IntegrationBundleVerificationHarness::prepare
                                            FailureOrigin::HARNESS,
                                            "aliases cannot be used with tensor data read from "
                                            "blobs, which store each tensor apart ("
-                                               + _bundlePath.string() + ")");
+                                               + _bundlePath.string() + ")")
+            .atStage(OutcomeStage::SETUP);
     }
 
     // Tensors read from blobs are unpacked, but the engine reads sub-byte operands
@@ -943,7 +1185,8 @@ std::optional<VerificationOutcome> IntegrationBundleVerificationHarness::prepare
         return VerificationOutcome::failed(VerificationDepth::NOT_REACHED,
                                            FailureOrigin::HARNESS,
                                            std::string("tensor data failed to load: ") + e.what()
-                                               + " (" + _bundlePath.string() + ")");
+                                               + " (" + _bundlePath.string() + ")")
+            .atStage(OutcomeStage::SETUP);
     }
     return std::nullopt;
 }
@@ -976,7 +1219,8 @@ std::optional<VerificationOutcome> IntegrationBundleVerificationHarness::fillBun
         return VerificationOutcome::failed(VerificationDepth::NOT_REACHED,
                                            FailureOrigin::HARNESS,
                                            std::string("ragged graph cannot be filled: ") + e.what()
-                                               + " (" + _bundlePath.string() + ")");
+                                               + " (" + _bundlePath.string() + ")")
+            .atStage(OutcomeStage::SETUP);
     }
     std::string missingValues;
     for(const int64_t uid : detail::raggedIndexUids(wrapper.getGraph(), tensorAttrMap))
@@ -1038,7 +1282,8 @@ std::optional<VerificationOutcome> IntegrationBundleVerificationHarness::fillBun
             return VerificationOutcome::failed(VerificationDepth::NOT_REACHED,
                                                FailureOrigin::HARNESS,
                                                "input fill failed: " + result.reason + " ("
-                                                   + _bundlePath.string() + ")");
+                                                   + _bundlePath.string() + ")")
+                .atStage(OutcomeStage::SETUP);
         }
         return unverifiable(result.reason);
     };
@@ -1060,17 +1305,19 @@ std::optional<VerificationOutcome> IntegrationBundleVerificationHarness::fillBun
             // The device failed, not the graph, so this is a failure and not an
             // "unverifiable" skip that would let the run go green.
             return VerificationOutcome::failed(
-                VerificationDepth::NOT_REACHED,
-                FailureOrigin::HARNESS,
-                std::string(e.what()) + " (" + _bundlePath.string()
-                    + "); set HIPDNN_TEST_HOST_INPUT_FILL=1 to fill on the host");
+                       VerificationDepth::NOT_REACHED,
+                       FailureOrigin::HARNESS,
+                       std::string(e.what()) + " (" + _bundlePath.string()
+                           + "); set HIPDNN_TEST_HOST_INPUT_FILL=1 to fill on the host")
+                .atStage(OutcomeStage::SETUP);
         }
         catch(const std::exception& e)
         {
             return VerificationOutcome::failed(VerificationDepth::NOT_REACHED,
                                                FailureOrigin::HARNESS,
                                                std::string("input fill failed: ") + e.what() + " ("
-                                                   + _bundlePath.string() + ")");
+                                                   + _bundlePath.string() + ")")
+                .atStage(OutcomeStage::SETUP);
         }
         if(!result.filled)
         {
@@ -1108,7 +1355,55 @@ std::optional<VerificationOutcome> IntegrationBundleVerificationHarness::fillBun
 
     _inputs = std::move(inputs);
     _inputsFromRecipes = true;
+    if(const auto why = prepareReferencePhiloxMask())
+    {
+        return unverifiable(*why);
+    }
     return checkRaggedLayouts(lengthUids);
+}
+
+IntegrationBundleVerificationHarness::PhiloxReference*
+    IntegrationBundleVerificationHarness::philoxReference() const
+{
+    if(!_philoxResolved)
+    {
+        _philoxResolved = true;
+        std::string unsupported;
+        const auto& graph = _bundle->graphWrapper().getGraph();
+        if(const auto dropout = findPhiloxBackwardDropout(graph, unsupported); dropout.has_value())
+        {
+            _philoxReference = PhiloxReference{
+                *dropout, rewritePhiloxBackwardWithExplicitMask(graph, *dropout), nullptr};
+        }
+    }
+    return _philoxReference.has_value() ? &*_philoxReference : nullptr;
+}
+
+std::pair<uint8_t*, std::size_t> IntegrationBundleVerificationHarness::referenceGraph() const
+{
+    if(auto* philox = philoxReference())
+    {
+        return {philox->graph.data(), philox->graph.size()};
+    }
+    return {_bundle->graphBuffer.data(), _bundle->graphBuffer.size()};
+}
+
+std::optional<std::string> IntegrationBundleVerificationHarness::prepareReferencePhiloxMask()
+{
+    auto* philox = philoxReference();
+    if(philox == nullptr)
+    {
+        return std::nullopt;
+    }
+    uint64_t seed = 0;
+    uint64_t offset = 0;
+    if(auto why = resolvePhiloxSeedAndOffset(
+           _bundle->graphWrapper().getGraph(), philox->dropout, _inputs, seed, offset))
+    {
+        return "Philox dropout: " + *why;
+    }
+    philox->mask = makePhiloxKeepMask(philox->dropout, seed, offset);
+    return std::nullopt;
 }
 
 std::optional<VerificationOutcome> IntegrationBundleVerificationHarness::checkRaggedLayouts(
@@ -1144,7 +1439,8 @@ std::optional<VerificationOutcome> IntegrationBundleVerificationHarness::checkRa
             return VerificationOutcome::failed(VerificationDepth::NOT_REACHED,
                                                FailureOrigin::HARNESS,
                                                "ragged tensor " + std::to_string(uid) + " "
-                                                   + problem + " (" + _bundlePath.string() + ")");
+                                                   + problem + " (" + _bundlePath.string() + ")")
+                .atStage(OutcomeStage::SETUP);
         }
     }
     return std::nullopt;
@@ -1152,8 +1448,8 @@ std::optional<VerificationOutcome> IntegrationBundleVerificationHarness::checkRa
 
 // ---- engine + reference runs -----------------------------------------------
 
-void IntegrationBundleVerificationHarness::measureReference(double ReferenceBenchmarkResult::*phase,
-                                                            const std::function<void()>& work)
+void IntegrationBundleVerificationHarness::measureReference(
+    double ReferenceBenchmarkResult::* phase, const std::function<void()>& work)
 {
     if(_deps.policy.benchmarkReference)
     {
@@ -1165,14 +1461,17 @@ void IntegrationBundleVerificationHarness::measureReference(double ReferenceBenc
     }
 }
 
-OutputTensors IntegrationBundleVerificationHarness::allocateSentinelOutputs(bool onDevice) const
+OutputTensors
+    IntegrationBundleVerificationHarness::allocateSentinelOutputs(bool onDevice,
+                                                                  bool payloadNanSentinel) const
 {
     const auto wrapper = _bundle->graphWrapper();
     return detail::allocateSentinelOutputs(wrapper.getTensorMap(),
                                            _bundle->outputTensorUids,
                                            _inputs,
                                            cachedRaggedLengthUids(),
-                                           onDevice);
+                                           onDevice,
+                                           payloadNanSentinel);
 }
 
 TensorMap& IntegrationBundleVerificationHarness::variantPackInputs(bool useDevice)
@@ -1221,6 +1520,24 @@ detail::StartOffsetStaging IntegrationBundleVerificationHarness::stageStartOffse
     }
 }
 
+detail::PlacedVariantPack IntegrationBundleVerificationHarness::placeEngineRun(
+    CasePlacement placement, VariantPack& variantPack, OutputTensors& outputs)
+{
+    const auto wrapper = _bundle->graphWrapper();
+    // The set buildVariantPack() built this pack from.
+    const bool packed = !_packedInputs.empty();
+    TensorMap& inputs = packed ? _packedInputs : _inputs;
+
+    const auto plan
+        = detail::planPlacement(variantPack, inputs, outputs, wrapper.getTensorMap(), packed);
+    for(const auto& note : plan.leftInPlace)
+    {
+        HIPDNN_PLUGIN_LOG_INFO("placement \"" << toString(placement) << "\" leaves " << note
+                                              << " where it is (" << _bundlePath << ")");
+    }
+    return {variantPack, plan.candidates, placement, _bundle->metadata.placementUid};
+}
+
 IntegrationBundleVerificationHarness::EngineRunResult
     IntegrationBundleVerificationHarness::runEngine(GraphSession& session)
 {
@@ -1239,13 +1556,53 @@ IntegrationBundleVerificationHarness::EngineRunResult
                           ? "Engine " + _engineUnderTest->name + " does not support this graph ("
                                 + summary + ")"
                           : "No engine supports this graph (" + summary + ")";
+        run.stage = OutcomeStage::QUERY;
+        // Nobody can say an engine declined when the query did not resolve, or when no
+        // engine was named to be absent from the list.
+        run.decline = _engineUnderTest.has_value() && isResolved(session.engines.status.get_code());
         return run;
     }
 
-    run.outputs = allocateSentinelOutputs(_deps.policy.useDevice());
-    auto variantPack = buildVariantPack(run.outputs, _deps.policy.useDevice());
+    const bool useDevice = _deps.policy.useDevice();
+    // With the non-finite mask on, NaN matches NaN, so the engine's outputs start as a NaN
+    // with a distinctive payload that the validator fails: an unwritten element cannot pass.
+    run.outputs = allocateSentinelOutputs(
+        useDevice, _bundle->metadata.validator == CaseValidator::MATCH_NONFINITE);
+    auto variantPack = buildVariantPack(run.outputs, useDevice);
     // The references run on the tensors themselves; only the engine sees the moved copies.
-    auto staging = stageStartOffsets(variantPack, run.outputs, _deps.policy.useDevice());
+    auto staging = stageStartOffsets(variantPack, run.outputs, useDevice);
+
+    // Placement moves the buffers of this run only, and only when they are device buffers:
+    // a HOST policy has no device pointer to move. The reference run never gets here.
+    const CasePlacement placement = _bundle->metadata.placement;
+    std::optional<detail::PlacedVariantPack> placed;
+    if(placement != CasePlacement::DEFAULT && useDevice)
+    {
+        // Both rewrite the engine's pointer for a tensor and copy its bytes back over the
+        // tensor's own buffer afterwards, so the second copy-back would overwrite the first
+        // with the sentinel the engine never touched. Refused rather than run wrongly.
+        if(!_bundle->metadata.startOffsets.empty())
+        {
+            run.status = EngineStatus::SETUP_FAILED;
+            run.message = std::string("placement \"") + toString(placement)
+                          + "\" cannot be combined with start_offsets (" + _bundlePath.string()
+                          + ")";
+            run.stage = OutcomeStage::SETUP;
+            return run;
+        }
+        try
+        {
+            placed.emplace(placeEngineRun(placement, variantPack, run.outputs));
+        }
+        catch(const std::exception& e)
+        {
+            run.status = EngineStatus::SETUP_FAILED;
+            run.message = std::string("placement \"") + toString(placement)
+                          + "\" could not be set up: " + e.what();
+            run.stage = OutcomeStage::SETUP;
+            return run;
+        }
+    }
 
     // The runner reports rather than asserts, so "the engine broke" is a value here
     // instead of a disposition read back off GTest, which cannot tell an engine
@@ -1255,17 +1612,78 @@ IntegrationBundleVerificationHarness::EngineRunResult
 
     run.plansBuilt = result.plansBuilt;
 
+    // Plans compile before anything executes, so where the engine stopped follows from
+    // how far it got.
+    const OutcomeStage stoppedAt = result.plansBuilt ? OutcomeStage::EXECUTE : OutcomeStage::BUILD;
+
+    if(placement == CasePlacement::UNDER)
+    {
+        // The case expects the backend to refuse the misaligned pointer of one tensor. Only
+        // that answer, for that tensor, is a pass; every other result is a failure.
+        const int64_t uid = _bundle->metadata.placementUid.value_or(0);
+        run.stage = stoppedAt;
+        if(!result.ok && !result.declined && result.executeStatus.alignmentRejectedUid == uid)
+        {
+            run.status = EngineStatus::REJECTED_AS_EXPECTED;
+            run.message = result.message;
+            return run;
+        }
+
+        run.status = EngineStatus::NOT_REJECTED;
+        std::string what;
+        if(result.ok)
+        {
+            what = "the backend executed the graph with the pointer of uid " + std::to_string(uid)
+                   + " below its declared alignment";
+            run.stage = OutcomeStage::EXECUTE;
+        }
+        else if(result.declined)
+        {
+            what = "the engine declined the graph: " + result.message;
+        }
+        else
+        {
+            what = "execute failed with another error: " + result.message;
+        }
+        run.message = "expected BAD_PARAM for uid " + std::to_string(uid) + " (" + what + ") on "
+                      + _bundlePath.string();
+        return run;
+    }
+
     if(result.declined)
     {
+        // A decline after the engine was handed the graph is still the engine saying
+        // "not mine"; it is the late NOT_SUPPORTED, which is not this.
         run.status = EngineStatus::DECLINED;
         run.message = result.message;
+        run.stage = stoppedAt;
+        run.decline = true;
         return run;
     }
     if(!result.ok)
     {
         run.status = EngineStatus::ERRORED;
         run.message = result.message;
+        run.stage = stoppedAt;
         return run;
+    }
+
+    if(placed.has_value())
+    {
+        // What the comparison reads is the original buffers, so the engine's writes in the
+        // shadows go back into them first, unwritten elements and their sentinel included.
+        try
+        {
+            placed->copyBackOutputs();
+        }
+        catch(const std::exception& e)
+        {
+            run.status = EngineStatus::SETUP_FAILED;
+            run.message = std::string("placement \"") + toString(placement)
+                          + "\" could not copy the outputs back: " + e.what();
+            run.stage = OutcomeStage::SETUP;
+            return run;
+        }
     }
 
     // The engine may run asynchronously, so a fault in its work on a moved copy can
@@ -1274,6 +1692,7 @@ IntegrationBundleVerificationHarness::EngineRunResult
     {
         run.status = EngineStatus::ERRORED;
         run.message = describeDeviceWaitFailure(status);
+        run.stage = OutcomeStage::EXECUTE;
         return run;
     }
     try
@@ -1316,6 +1735,13 @@ IntegrationBundleVerificationHarness::RefRunResult
             try
             {
                 variantPack = buildVariantPack(refOutputs, useDevice);
+                if(const auto* philox = philoxReference(); philox != nullptr && philox->mask)
+                {
+                    variantPack.emplace(
+                        philox->dropout.maskUid,
+                        hipdnn_test_sdk::utilities::selectVariantPackPointer(
+                            *philox->mask, useDevice, /*isRuntimePassByValue=*/false));
+                }
             }
             catch(const std::invalid_argument& e)
             {
@@ -1328,7 +1754,8 @@ IntegrationBundleVerificationHarness::RefRunResult
             return {RefStatus::HARNESS_ERROR, *harnessError};
         }
         measureReference(&ReferenceBenchmarkResult::executeMs, [&] {
-            executor.execute(_bundle->graphBuffer.data(), _bundle->graphBuffer.size(), variantPack);
+            const auto [graphData, graphSize] = referenceGraph();
+            executor.execute(graphData, graphSize, variantPack);
         });
     }
     catch(const ReferenceCapabilityError& e)
@@ -1485,7 +1912,8 @@ VerificationOutcome
             return VerificationOutcome::failed(VerificationDepth::NOT_REACHED,
                                                FailureOrigin::HARNESS,
                                                "tensor data failed to load: " + *loadError + " ("
-                                                   + _bundlePath.string() + ")");
+                                                   + _bundlePath.string() + ")")
+                .atStage(OutcomeStage::SETUP);
         }
     }
     return compareAgainst(
@@ -1512,7 +1940,10 @@ VerificationOutcome
                                                          Verifier verifier)
 {
     auto wrapper = _bundle->graphWrapper();
-    const auto validationSite = resolveValidationSite(_deps.policy.validator, site);
+    // A case that asked for the host-only match_nonfinite validator compares on the host
+    // whatever site the expected values are at.
+    const bool matchNonFinite = _bundle->metadata.validator == CaseValidator::MATCH_NONFINITE;
+    const auto validationSite = resolveValidationSite(_deps.policy.validator, site, matchNonFinite);
     if(_deps.policy.benchmarkReference)
     {
         _referenceBenchmarks.back().validator
@@ -1615,17 +2046,23 @@ VerificationOutcome
                     = tolerance::convFwdOutputTolerance(*convScale->second, dataType, coefficients);
             }
         }
+        float atol = 0.0f;
+        float rtol = 0.0f;
         if(dynamic.has_value())
         {
-            return gradingForTensor(currentTestName(),
-                                    label,
-                                    _deps.policy.testSettings,
-                                    static_cast<float>(dynamic->atol),
-                                    static_cast<float>(dynamic->rtol));
+            atol = static_cast<float>(dynamic->atol);
+            rtol = static_cast<float>(dynamic->rtol);
         }
-        const auto value = tolerance::defaultTolerance(wrapper, dataType);
-        return gradingForTensor(
-            currentTestName(), label, _deps.policy.testSettings, value.atol, value.rtol);
+        else
+        {
+            const auto value = tolerance::defaultTolerance(wrapper, dataType);
+            atol = value.atol;
+            rtol = value.rtol;
+        }
+        const auto resolved
+            = gradingForTensor(currentTestName(), label, _deps.policy.testSettings, atol, rtol);
+        // Layered on whatever kind the TOML resolved for this tensor, float outputs only.
+        return matchNonFinite ? withNonFiniteMask(resolved, dataType) : resolved;
     };
 
     // A Philox rng_dump is the oracle's input, not a result: sanity-check it, do not compare it.
@@ -1669,9 +2106,19 @@ VerificationOutcome
         return VerificationOutcome::failed(VerificationDepth::EXECUTED,
                                            FailureOrigin::HARNESS,
                                            std::string("metadata live_rows cannot be applied: ")
-                                               + e.what() + " (" + _bundlePath.string() + ")");
+                                               + e.what() + " (" + _bundlePath.string() + ")")
+            .atStage(OutcomeStage::COMPARE);
     }
-
+    {
+        const auto* philox = philoxReference();
+        dumpComparisonTensors(currentTestName(),
+                              wrapper,
+                              _inputs,
+                              engineOutputs,
+                              expectedFor,
+                              _bundle->outputTensorUids,
+                              philox != nullptr ? philox->mask.get() : nullptr);
+    }
     const auto mismatches = bundle::compareOutputs(
         wrapper,
         bundle::comparedOutputUids(_bundle->outputTensorUids, dump),
@@ -1681,7 +2128,7 @@ VerificationOutcome
         validationSite,
         "Bundle: " + _bundlePath.string() + inputFillNote(),
         liveRows,
-        resolveValidationSite(_deps.policy.validator, ValidationSite::HOST));
+        resolveValidationSite(_deps.policy.validator, ValidationSite::HOST, matchNonFinite));
 
     // Reported one per tensor so each diff lands next to the tensor it describes;
     // the outcome carries no message because of it.
@@ -1712,7 +2159,8 @@ std::string IntegrationBundleVerificationHarness::recordUnverifiable(const std::
 VerificationOutcome IntegrationBundleVerificationHarness::unverifiable(const std::string& reason,
                                                                        VerificationDepth reached)
 {
-    return VerificationOutcome::skipped(reached, recordUnverifiable(reason));
+    return VerificationOutcome::skipped(reached, recordUnverifiable(reason))
+        .atStage(OutcomeStage::SETUP);
 }
 
 void IntegrationBundleVerificationHarness::recordRefError(const std::string& reason)

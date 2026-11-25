@@ -860,6 +860,67 @@ TEST(TestGpuLayernormBwdRefChannelLast, MatchesCpuRefWithMeanAndRstd)
     assertAllClose(dbiasCpu, dbiasGpu, getTolerance<float>());
 }
 
+// --- Scale and bias wider than one group's worth of threads ---
+
+// bug caught: the weights kernel was launched with outerSize * stride blocks of LOCAL_SIZE
+// threads, so dscale and dbias elements past outerSize * stride * LOCAL_SIZE were never written.
+// One group (outer = 1) with 6000 normalized elements needs 6 blocks of 1024 threads, not 1.
+TEST(TestGpuLayernormBwdRefWideInner, MatchesCpuRefWhenInnerExceedsGroupsTimesLocalSize)
+{
+    SKIP_IF_NO_DEVICES();
+
+    const std::vector<int64_t> dims = {1, 2, 3, 1000};
+    Tensor<float> dyTensor(dims);
+    Tensor<float> xTensor(dims);
+    Tensor<float> scaleTensor(dims);
+    Tensor<float> dxCpu(dims);
+    Tensor<float> dxGpu(dims);
+    Tensor<float> dscaleCpu(dims);
+    Tensor<float> dscaleGpu(dims);
+    Tensor<float> dbiasCpu(dims);
+    Tensor<float> dbiasGpu(dims);
+
+    const unsigned int seed = getGlobalTestSeed();
+    fillWithRandomValues(dyTensor, -1.0f, 1.0f, seed);
+    fillWithRandomValues(xTensor, -1.0f, 1.0f, seed + 1);
+    fillWithRandomValues(scaleTensor, -1.0f, 1.0f, seed + 2);
+
+    // Outputs the kernels leave unwritten stay NaN and fail the comparison
+    dscaleGpu.fillWithSentinelValue();
+    dbiasGpu.fillWithSentinelValue();
+
+    // Single non-const access to trigger migration as, despite a comment claiming otherwise, MigratableMemory cannot migrate via a const access
+    dyTensor.memory().hostData();
+    xTensor.memory().hostData();
+    scaleTensor.memory().hostData();
+
+    CpuFpReferenceLayernorm::bprop<float, float, float, double, double>(dyTensor,
+                                                                        xTensor,
+                                                                        scaleTensor,
+                                                                        dxCpu,
+                                                                        dscaleCpu,
+                                                                        dbiasCpu,
+                                                                        LAYERNORM_DEFAULT_EPSILON,
+                                                                        nullptr,
+                                                                        nullptr,
+                                                                        3);
+
+    GpuFpReferenceLayernorm::bprop<float, float, float, double, double>(dyTensor,
+                                                                        xTensor,
+                                                                        scaleTensor,
+                                                                        dxGpu,
+                                                                        dscaleGpu,
+                                                                        dbiasGpu,
+                                                                        LAYERNORM_DEFAULT_EPSILON,
+                                                                        nullptr,
+                                                                        nullptr,
+                                                                        3);
+
+    assertAllClose(dxCpu, dxGpu, getTolerance<float>());
+    assertAllClose(dscaleCpu, dscaleGpu, getTolerance<float>());
+    assertAllClose(dbiasCpu, dbiasGpu, getTolerance<float>());
+}
+
 // --- Test suite instantiations ---
 
 using TestGpuLayernormBwdRef4DFp32 = LayernormBwdTestSuite<float, float, float, double>;

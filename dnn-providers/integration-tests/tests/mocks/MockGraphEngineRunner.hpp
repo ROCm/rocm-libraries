@@ -52,6 +52,15 @@ public:
                  const CaptureSettings& settings,
                  const ReplayHooks& hooks),
                 (override));
+
+    MOCK_METHOD(hipdnn_frontend::Error,
+                candidatePage,
+                (GraphSession & session,
+                 const LoadedEngine& engine,
+                 int64_t offset,
+                 int64_t limit,
+                 hipdnn_frontend::EngineCandidatePage& page),
+                (override));
 };
 
 } // namespace hipdnn_integration_tests::bundle

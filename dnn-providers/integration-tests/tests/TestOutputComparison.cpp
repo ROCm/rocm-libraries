@@ -23,6 +23,7 @@
 #include <hipdnn_data_sdk/utilities/TensorView.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceMiopenRmsValidation.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
+#include <hipdnn_test_sdk/utilities/NonFiniteMask.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
 #include "BundleFixtureFiles.hpp"
@@ -1216,6 +1217,350 @@ TEST(TestOutputComparison, AllcloseMatchingInfinitiesFailureStillReportsAtolRtol
         << "no threshold decided this failure; reporting one would name a check that did not run";
 }
 
+// ---------------------------------------------------------------------------
+// The non-finite mask (`metadata.validator: "match_nonfinite"`), layered on the resolved
+// tolerance by withNonFiniteMask(). Host only.
+// ---------------------------------------------------------------------------
+
+namespace
+{
+
+ComparisonTolerance maskedExact()
+{
+    return hipdnn_integration_tests::bundle::withNonFiniteMask(
+        exact(), hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT);
+}
+
+// A [1, 3, 1, 1] float tensor holding the unwritten-output sentinel bits at `position` and
+// `value` elsewhere. Stored bitwise: a float NaN converted through arithmetic could lose the
+// payload that identifies it.
+std::shared_ptr<hipdnn_data_sdk::utilities::ITensor> tensorWithSentinelAt(
+    const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& attrs, int position, float value)
+{
+    auto tensor = floatTensor(attrs, value);
+    const auto sentinel = hipdnn_test_sdk::utilities::payloadNanSentinelValue<float>();
+    std::memcpy(static_cast<float*>(tensor->rawHostData()) + position, &sentinel, sizeof(float));
+    tensor->markHostModified();
+    return tensor;
+}
+
+} // namespace
+
+// Bug caught: the mask never being consulted (a NaN that is right on both sides still fails),
+// or being on for everyone (the same pair passing without it).
+TEST(TestOutputComparison, NonFiniteMaskMatchesNaNAndSameSignedInfinitiesByPosition)
+{
+    const auto buffer = makeGraphBuffer();
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper wrapper{buffer.data(),
+                                                                             buffer.size()};
+    const auto& attrs = *wrapper.getTensorMap().at(K_UID_B);
+
+    // One finite element each: a reference with none is not a verified output (see below).
+    auto expected = floatTensor3(attrs, K_NAN, K_INF, 1.0f);
+    auto actual = floatTensor3(attrs, K_NAN, K_INF, 1.0f);
+    auto negExpected = floatTensor3(attrs, -K_INF, 1.0f, K_NAN);
+    auto negActual = floatTensor3(attrs, -K_INF, 1.0f, K_NAN);
+
+    for(const auto& pair : {std::make_pair(expected.get(), actual.get()),
+                            std::make_pair(negExpected.get(), negActual.get())})
+    {
+        EXPECT_FALSE(
+            compareTensor(
+                K_UID_B, attrs, *pair.first, *pair.second, maskedExact(), ValidationSite::HOST, "b")
+                .has_value())
+            << "NaN, +inf and -inf are right on both sides";
+        EXPECT_TRUE(
+            compareTensor(
+                K_UID_B, attrs, *pair.first, *pair.second, exact(), ValidationSite::HOST, "b")
+                .has_value())
+            << "without the mask the same pair fails: the default grading is unchanged";
+    }
+}
+
+// Bug caught: the mask forgiving a disagreement about where the non-finite values are.
+TEST(TestOutputComparison, NonFiniteMaskStillRejectsEveryNonFiniteDisagreement)
+{
+    const auto buffer = makeGraphBuffer();
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper wrapper{buffer.data(),
+                                                                             buffer.size()};
+    const auto& attrs = *wrapper.getTensorMap().at(K_UID_B);
+
+    struct Case
+    {
+        float expected;
+        float actual;
+        const char* what;
+    };
+    const std::vector<Case> cases = {{K_NAN, 1.0f, "NaN reference, finite output"},
+                                     {1.0f, K_NAN, "finite reference, NaN output"},
+                                     {K_INF, 1.0f, "Inf reference, finite output"},
+                                     {1.0f, K_INF, "finite reference, Inf output"},
+                                     {K_INF, -K_INF, "+Inf against -Inf"},
+                                     {K_NAN, K_INF, "NaN against Inf"},
+                                     {K_INF, K_NAN, "Inf against NaN"}};
+    for(const auto& c : cases)
+    {
+        // Two more finite elements, so the finite part is never empty and only this position
+        // can decide the verdict.
+        auto expected = floatTensor3(attrs, c.expected, 1.0f, 2.0f);
+        auto actual = floatTensor3(attrs, c.actual, 1.0f, 2.0f);
+        EXPECT_TRUE(
+            compareTensor(
+                K_UID_B, attrs, *expected, *actual, maskedExact(), ValidationSite::HOST, "b")
+                .has_value())
+            << c.what;
+    }
+}
+
+// Bug caught: matched non-finite positions carrying a finite neighbour's drift through, or
+// finite elements escaping the tolerance because the tensor also holds a NaN.
+TEST(TestOutputComparison, NonFiniteMaskStillGradesFiniteElementsByTheResolvedTolerance)
+{
+    const auto buffer = makeGraphBuffer();
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper wrapper{buffer.data(),
+                                                                             buffer.size()};
+    const auto& attrs = *wrapper.getTensorMap().at(K_UID_B);
+
+    auto expected = floatTensor3(attrs, K_NAN, 1.0f, 2.0f);
+    auto actual = floatTensor3(attrs, K_NAN, 1.1f, 2.0f);
+
+    EXPECT_TRUE(
+        compareTensor(K_UID_B, attrs, *expected, *actual, maskedExact(), ValidationSite::HOST, "b")
+            .has_value());
+    const auto loose = hipdnn_integration_tests::bundle::withNonFiniteMask(
+        ComparisonTolerance::allClose(0.2f, 0.0f),
+        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT);
+    EXPECT_FALSE(compareTensor(K_UID_B, attrs, *expected, *actual, loose, ValidationSite::HOST, "b")
+                     .has_value())
+        << "atol of the resolved tolerance still decides the finite elements";
+}
+
+// Bug caught: an engine that never wrote an element passing because NaN matches NaN. The element
+// still holds the payload sentinel the harness filled the output with, and fails; a NaN the
+// engine really computed (the default quiet NaN) passes.
+TEST(TestOutputComparison, NonFiniteMaskFailsAnElementThatStillHoldsTheSentinel)
+{
+    const auto buffer = makeGraphBuffer();
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper wrapper{buffer.data(),
+                                                                             buffer.size()};
+    const auto& attrs = *wrapper.getTensorMap().at(K_UID_B);
+
+    auto expected = floatTensor3(attrs, K_NAN, 1.0f, 1.0f);
+    auto unwritten = tensorWithSentinelAt(attrs, 0, 1.0f);
+    auto computed = floatTensor3(attrs, K_NAN, 1.0f, 1.0f);
+
+    const auto tolerance = maskedExact();
+    ASSERT_TRUE(tolerance.unwrittenSentinelBits.has_value());
+    EXPECT_TRUE(
+        compareTensor(K_UID_B, attrs, *expected, *unwritten, tolerance, ValidationSite::HOST, "b")
+            .has_value())
+        << "an element holding the sentinel was never written";
+    EXPECT_FALSE(
+        compareTensor(K_UID_B, attrs, *expected, *computed, tolerance, ValidationSite::HOST, "b")
+            .has_value())
+        << "an ordinary NaN the engine computed is not the sentinel";
+}
+
+// Bug caught: a reference that is nothing but non-finite values passing (NaN matches NaN
+// everywhere), which hides a run that produced garbage on both sides.
+TEST(TestOutputComparison, NonFiniteMaskFailsAReferenceWithNoFiniteElement)
+{
+    const auto buffer = makeGraphBuffer();
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper wrapper{buffer.data(),
+                                                                             buffer.size()};
+    const auto& attrs = *wrapper.getTensorMap().at(K_UID_B);
+
+    // The control: the same two non-finite positions pass beside one finite element.
+    auto expected = floatTensor3(attrs, K_NAN, K_INF, 1.0f);
+    auto actual = floatTensor3(attrs, K_NAN, K_INF, 1.0f);
+    EXPECT_FALSE(
+        compareTensor(K_UID_B, attrs, *expected, *actual, maskedExact(), ValidationSite::HOST, "b")
+            .has_value());
+
+    auto nothingFinite = floatTensor3(attrs, K_NAN, K_INF, -K_INF);
+    auto nothingFiniteToo = floatTensor3(attrs, K_NAN, K_INF, -K_INF);
+    EXPECT_TRUE(compareTensor(K_UID_B,
+                              attrs,
+                              *nothingFinite,
+                              *nothingFiniteToo,
+                              maskedExact(),
+                              ValidationSite::HOST,
+                              "b")
+                    .has_value())
+        << "NaN, +inf and -inf on both sides, and nothing finite to grade";
+
+    auto allNaNExpected = floatTensor(attrs, K_NAN);
+    auto allNaNActual = floatTensor(attrs, K_NAN);
+    EXPECT_TRUE(compareTensor(K_UID_B,
+                              attrs,
+                              *allNaNExpected,
+                              *allNaNActual,
+                              maskedExact(),
+                              ValidationSite::HOST,
+                              "b")
+                    .has_value())
+        << "an all-NaN reference is not a verified output";
+}
+
+// Bug caught: the mask replacing a per-tensor RMS override with allclose, or the RMS grade
+// being skipped, or its normalizer inflated by the non-finite positions so a real error hides.
+TEST(TestOutputComparison, NonFiniteMaskKeepsRmsGradingAndItsNormalizer)
+{
+    const auto buffer = makeGraphBuffer();
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper wrapper{buffer.data(),
+                                                                             buffer.size()};
+    const auto& attrs = *wrapper.getTensorMap().at(K_UID_B);
+
+    const auto rmsMasked = hipdnn_integration_tests::bundle::withNonFiniteMask(
+        ComparisonTolerance::rms(K_RMS_THRESHOLD),
+        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT);
+    EXPECT_EQ(rmsMasked.kind, ValidatorKind::RMS) << "the resolved kind stays in force";
+    EXPECT_TRUE(rmsMasked.matchNonFinite);
+
+    // Finite elements 1 and 2 plus a matched NaN: identical outputs pass, a 10% error on the
+    // large element fails however many non-finite positions sit beside it.
+    auto expected = floatTensor3(attrs, K_NAN, 1.0f, 2.0f);
+    auto same = floatTensor3(attrs, K_NAN, 1.0f, 2.0f);
+    auto drifted = floatTensor3(attrs, K_NAN, 1.0f, 2.2f);
+    EXPECT_FALSE(
+        compareTensor(K_UID_B, attrs, *expected, *same, rmsMasked, ValidationSite::HOST, "b")
+            .has_value());
+    EXPECT_TRUE(
+        compareTensor(K_UID_B, attrs, *expected, *drifted, rmsMasked, ValidationSite::HOST, "b")
+            .has_value())
+        << "RMS over the finite elements is still enforced";
+
+    auto infExpected = floatTensor3(attrs, K_INF, 1.0f, 2.0f);
+    auto infDrifted = floatTensor3(attrs, K_INF, 1.0f, 2.2f);
+    EXPECT_TRUE(compareTensor(
+                    K_UID_B, attrs, *infExpected, *infDrifted, rmsMasked, ValidationSite::HOST, "b")
+                    .has_value())
+        << "an Inf position does not inflate the normalizer either";
+}
+
+// Bug caught: the mask switched on for an output it cannot grade, or the sentinel set for a
+// type with no payload NaN.
+TEST(TestOutputComparison, NonFiniteMaskIsOnlyLayeredOnFloatingPointOutputs)
+{
+    using hipdnn_flatbuffers_sdk::data_objects::DataType;
+    using hipdnn_integration_tests::bundle::canMatchNonFinite;
+    using hipdnn_integration_tests::bundle::withNonFiniteMask;
+
+    for(const auto type : {DataType::FLOAT, DataType::HALF, DataType::BFLOAT16, DataType::DOUBLE})
+    {
+        const auto masked = withNonFiniteMask(exact(), type);
+        EXPECT_TRUE(canMatchNonFinite(type)) << EnumNameDataType(type);
+        EXPECT_TRUE(masked.matchNonFinite) << EnumNameDataType(type);
+        EXPECT_TRUE(masked.unwrittenSentinelBits.has_value()) << EnumNameDataType(type);
+    }
+    for(const auto type : {DataType::INT32,
+                           DataType::INT8,
+                           DataType::UINT8,
+                           DataType::FP8_E4M3,
+                           DataType::FP8_E5M2,
+                           DataType::BOOLEAN})
+    {
+        const auto masked = withNonFiniteMask(exact(), type);
+        EXPECT_FALSE(canMatchNonFinite(type)) << EnumNameDataType(type);
+        EXPECT_FALSE(masked.matchNonFinite) << EnumNameDataType(type);
+        EXPECT_FALSE(masked.unwrittenSentinelBits.has_value()) << EnumNameDataType(type);
+    }
+}
+
+// Bug caught: the harness's own "can this output carry the mask" list drifting from the SDK's
+// payload-sentinel list. A type matchable here without a payload sentinel would let an unwritten
+// output pass as NaN matching NaN; one with a sentinel but not matchable would never be graded.
+// Walks every DataType enumerator, so a type added later is covered without editing the test.
+TEST(TestOutputComparison, NonFiniteMaskMatchableTypesAreExactlyThoseWithAPayloadSentinel)
+{
+    using hipdnn_flatbuffers_sdk::data_objects::DataType;
+    using hipdnn_integration_tests::bundle::canMatchNonFinite;
+    using hipdnn_integration_tests::bundle::withNonFiniteMask;
+
+    std::vector<DataType> matchable;
+    for(const auto type : hipdnn_flatbuffers_sdk::data_objects::EnumValuesDataType())
+    {
+        const bool hasSentinel
+            = hipdnn_test_sdk::utilities::payloadNanSentinelBits(type).has_value();
+        EXPECT_EQ(canMatchNonFinite(type), hasSentinel) << EnumNameDataType(type);
+        EXPECT_EQ(withNonFiniteMask(exact(), type).matchNonFinite, hasSentinel)
+            << EnumNameDataType(type);
+        if(canMatchNonFinite(type))
+        {
+            matchable.push_back(type);
+        }
+    }
+
+    EXPECT_EQ(matchable,
+              (std::vector<DataType>{
+                  DataType::FLOAT, DataType::HALF, DataType::BFLOAT16, DataType::DOUBLE}));
+}
+
+// Bug caught: a device-site request served by the host validator (reading device memory
+// through host pointers) instead of refused, as every other host-only validator is.
+TEST(TestOutputComparison, NonFiniteMaskOnTheDeviceIsRefusedNotHostGraded)
+{
+    const auto buffer = makeGraphBuffer();
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper wrapper{buffer.data(),
+                                                                             buffer.size()};
+    const auto& attrs = *wrapper.getTensorMap().at(K_UID_B);
+
+    auto expected = floatTensor3(attrs, K_NAN, 1.0f, 2.0f);
+    auto actual = floatTensor3(attrs, K_NAN, 1.0f, 2.0f);
+
+    std::optional<hipdnn_integration_tests::bundle::TensorMismatch> mismatch;
+    ASSERT_NO_THROW(mismatch = compareTensor(K_UID_B,
+                                             attrs,
+                                             *expected,
+                                             *actual,
+                                             maskedExact(),
+                                             ValidationSite::DEVICE,
+                                             "Bundle: b"));
+    ASSERT_TRUE(mismatch.has_value());
+    EXPECT_NE(mismatch->report.find("match_nonfinite"), std::string::npos)
+        << "the operator has to be told which validator could not be honoured";
+}
+
+// Bug caught: a mask forced onto an integer output (which has no NaN) throwing out of the
+// comparison instead of naming the tensor.
+TEST(TestOutputComparison, NonFiniteMaskOnAnIntegerOutputIsReportedNotThrown)
+{
+    const auto buffer = makeGraphBuffer();
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper wrapper{buffer.data(),
+                                                                             buffer.size()};
+    const auto& attrs = *wrapper.getTensorMap().at(K_UID_INT);
+
+    auto expected = intTensor(attrs, 7);
+    auto actual = intTensor(attrs, 7);
+    auto tolerance = exact();
+    tolerance.matchNonFinite = true;
+
+    std::optional<hipdnn_integration_tests::bundle::TensorMismatch> mismatch;
+    ASSERT_NO_THROW(
+        mismatch = compareTensor(
+            K_UID_INT, attrs, *expected, *actual, tolerance, ValidationSite::HOST, "Bundle: b"));
+    ASSERT_TRUE(mismatch.has_value());
+    EXPECT_NE(mismatch->report.find("counts"), std::string::npos);
+    EXPECT_NE(mismatch->report.find("match_nonfinite"), std::string::npos);
+}
+
+// Bug caught: a failure report that lists the matched NaN positions as drift without saying
+// which rule decided, sending a reader after elements that were fine.
+TEST(TestOutputComparison, NonFiniteMaskFailureSaysWhichRuleGradedIt)
+{
+    const auto buffer = makeGraphBuffer();
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper wrapper{buffer.data(),
+                                                                             buffer.size()};
+    const auto& attrs = *wrapper.getTensorMap().at(K_UID_B);
+
+    auto expected = floatTensor3(attrs, K_NAN, 1.0f, 2.0f);
+    auto actual = floatTensor3(attrs, K_NAN, 1.5f, 2.0f);
+    const auto mismatch = compareTensor(
+        K_UID_B, attrs, *expected, *actual, maskedExact(), ValidationSite::HOST, "b");
+    ASSERT_TRUE(mismatch.has_value());
+    EXPECT_NE(mismatch->report.find("match_nonfinite"), std::string::npos);
+}
+
 // Ragged Stats compare within one storage layout: [H,T] (L7a) and [T,H] (L7b) each match the
 // same logical data and report a single differing in-block element. A pair whose layouts
 // differ (origins, lengths or strides) is reported as a ragged layout mismatch.
@@ -1886,3 +2231,106 @@ TEST(TestOutputComparison, LiveRowHostAllcloseMatchesOnlySameSignedInfinities)
 }
 
 // NOLINTEND(readability-identifier-naming)
+
+// ---------------------------------------------------------------------------
+// Padded leading stride. A tensor whose rows are padded has gap elements between the end of a
+// row and the start of the next; they belong to no element, so whatever an engine or a reference
+// left there must never decide a verdict, at either site.
+// ---------------------------------------------------------------------------
+
+namespace
+{
+
+// The batchnorm graph of K_GRAPH with y_out (uid 5) given a padded leading stride: [2, 3, 4, 5]
+// elements whose rows are 8 apart instead of 5: 120 elements in an allocation of 189, with 3 gap
+// elements after every row but the last.
+const std::string K_PADDED_GRAPH
+    = R"({"nodes": [{"inputs": {"x_tensor_uid": 0, "mean_tensor_uid": 1, )"
+      R"("inv_variance_tensor_uid": 2, "scale_tensor_uid": 3, "bias_tensor_uid": 4}, )"
+      R"("outputs": {"y_tensor_uid": 5}, "type": "BatchnormInferenceAttributes", )"
+      R"("compute_data_type": "float", "name": ""}], "tensors": [)"
+      R"({"name": "", "uid": 0, "strides": [60, 20, 5, 1], "dims": [2, 3, 4, 5], )"
+      R"("data_type": "float", "virtual": false}, )"
+      R"({"name": "", "uid": 1, "strides": [3, 1, 1, 1], "dims": [1, 3, 1, 1], )"
+      R"("data_type": "float", "virtual": false}, )"
+      R"({"name": "", "uid": 2, "strides": [3, 1, 1, 1], "dims": [1, 3, 1, 1], )"
+      R"("data_type": "float", "virtual": false}, )"
+      R"({"name": "", "uid": 3, "strides": [3, 1, 1, 1], "dims": [1, 3, 1, 1], )"
+      R"("data_type": "float", "virtual": false}, )"
+      R"({"name": "", "uid": 4, "strides": [3, 1, 1, 1], "dims": [1, 3, 1, 1], )"
+      R"("data_type": "float", "virtual": false}, )"
+      R"({"name": "y_out", "uid": 5, "strides": [96, 32, 8, 1], "dims": [2, 3, 4, 5], )"
+      R"("data_type": "float", "virtual": false}], "io_data_type": "float", )"
+      R"("compute_data_type": "float", "intermediate_data_type": "float", "name": ""})";
+
+flatbuffers::DetachedBuffer makePaddedGraphBuffer()
+{
+    flatbuffers::DetachedBuffer buffer;
+    EXPECT_TRUE(hipdnn_integration_tests::bundle::detail::buildGraphBuffer(
+        nlohmann::json::parse(K_PADDED_GRAPH), buffer));
+    return buffer;
+}
+
+// A y_out whose every element is `value` and whose every gap byte is `gapByte`, the gaps set
+// before the elements are written and left as they are.
+std::shared_ptr<hipdnn_data_sdk::utilities::ITensor>
+    paddedFloatTensor(const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& attrs,
+                      float value,
+                      unsigned char gapByte)
+{
+    auto tensor = hipdnn_test_sdk::detail::createTensorFromAttribute(attrs);
+    std::memset(tensor->rawHostData(), gapByte, tensor->elementSpace() * tensor->elementSize());
+    tensor->fillTensorWithValue(value);
+    return tensor;
+}
+
+} // namespace
+
+// Bug caught: a comparison that walks the allocation (a linear fast path taken for a tensor
+// that is not packed, or a validator that reads elementSpace) instead of the logical elements:
+// two tensors that hold the same elements but different bytes in the gaps (NaN against zero) would
+// disagree. The layout is [96, 32, 8, 1] over [2, 3, 4, 5], so it is padded in every row.
+TEST_P(TestOutputComparisonSite, GapBytesOfAPaddedOutputAreNeverCompared)
+{
+    const auto buffer = makePaddedGraphBuffer();
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper wrapper{buffer.data(),
+                                                                             buffer.size()};
+    const auto& attrs = *wrapper.getTensorMap().at(K_UID_A);
+
+    auto expected = paddedFloatTensor(attrs, 3.5f, 0xFF); // NaN bytes in the gaps
+    auto actual = paddedFloatTensor(attrs, 3.5f, 0x00); // zero bytes in the gaps
+    ASSERT_FALSE(expected->isPacked());
+    ASSERT_GT(expected->elementSpace(), expected->elementCount());
+
+    EXPECT_FALSE(
+        compareTensor(K_UID_A, attrs, *expected, *actual, exact(), GetParam(), "b").has_value());
+    EXPECT_FALSE(
+        compareTensor(K_UID_A, attrs, *actual, *expected, exact(), GetParam(), "b").has_value());
+}
+
+// Bug caught: the comparison stopping short of the allocation's end: the element at the largest
+// offset (the last element of the last row) is the one a short walk drops, and a first-row
+// element is the one a walk that pairs elements by position in the allocation misreads.
+TEST_P(TestOutputComparisonSite, ADifferenceInTheLastAndTheFirstElementOfAPaddedOutputIsFound)
+{
+    const auto buffer = makePaddedGraphBuffer();
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper wrapper{buffer.data(),
+                                                                             buffer.size()};
+    const auto& attrs = *wrapper.getTensorMap().at(K_UID_A);
+
+    const std::vector<std::vector<int64_t>> positions = {{1, 2, 3, 4}, {0, 0, 0, 0}, {0, 1, 3, 4}};
+    for(const auto& position : positions)
+    {
+        auto expected = paddedFloatTensor(attrs, 3.5f, 0xFF);
+        auto actual = paddedFloatTensor(attrs, 3.5f, 0x00);
+        hipdnn_data_sdk::utilities::TensorView<float> view(*actual);
+        view.getHostValue(position) = 9.25f;
+        actual->markHostModified();
+
+        const auto mismatch
+            = compareTensor(K_UID_A, attrs, *expected, *actual, exact(), GetParam(), "b");
+        ASSERT_TRUE(mismatch.has_value())
+            << "element at offset " << actual->getIndex(position) << " differs";
+        EXPECT_NE(mismatch->report.find("9.25"), std::string::npos);
+    }
+}

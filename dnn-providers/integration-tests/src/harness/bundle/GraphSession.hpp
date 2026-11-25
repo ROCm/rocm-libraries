@@ -11,6 +11,7 @@
 
 #include <hipdnn_frontend/Error.hpp>
 
+#include "harness/bundle/EngineVariant.hpp"
 #include "harness/bundle/LoadedEngine.hpp"
 
 // Held by pointer so this header stays free of the frontend's Graph.hpp, which the
@@ -82,6 +83,9 @@ struct GraphSession
     bool buildFailed = false;
     std::string buildError;
     RankedEngines engines;
+    /// The catalog candidate the case asked for (`metadata.engine_variant`), copied from the
+    /// bundle by openGraph() so buildPlans() builds it and nothing else. Empty: the heuristic pick.
+    std::optional<EngineVariantSpec> forcedVariant;
 };
 
 } // namespace hipdnn_integration_tests::bundle

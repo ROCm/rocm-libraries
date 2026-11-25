@@ -108,6 +108,49 @@ inline const char* toString(FailureOrigin origin)
     }
 }
 
+/// Where a test stopped. VerificationDepth says how far the engine got; this says
+/// which step answered, so a failure or skip can be classed (CaseOutcome.hpp) without
+/// parsing its message.
+enum class OutcomeStage : uint8_t
+{
+    NONE, ///< not set: a pass, or a skip nothing classifies
+    GRAPH, ///< from_binary rejected the graph
+    CLAIM, ///< the support-claim check blocked the test
+    QUERY, ///< the ranked-engine query: the engine is not in the list, or nobody could tell
+    BUILD, ///< plan creation and compilation
+    EXECUTE, ///< running the plan
+    COMPARE, ///< outputs against an oracle
+    ORACLE, ///< the oracle chain itself
+    SETUP, ///< inputs, device, metadata guards, anything before the engine is involved
+};
+
+inline const char* toString(OutcomeStage stage)
+{
+    switch(stage)
+    {
+    case OutcomeStage::NONE:
+        return "none";
+    case OutcomeStage::GRAPH:
+        return "graph";
+    case OutcomeStage::CLAIM:
+        return "claim";
+    case OutcomeStage::QUERY:
+        return "query";
+    case OutcomeStage::BUILD:
+        return "build";
+    case OutcomeStage::EXECUTE:
+        return "execute";
+    case OutcomeStage::COMPARE:
+        return "compare";
+    case OutcomeStage::ORACLE:
+        return "oracle";
+    case OutcomeStage::SETUP:
+        return "setup";
+    default:
+        return "unknown";
+    }
+}
+
 /// The oracle the engine's outputs were compared against. NONE when nothing was
 /// compared: a skip, a failure before the comparison, or a bundle whose
 /// enforcement_level stops short of comparing. EXPECTED_REJECTION is not an oracle:
@@ -140,6 +183,27 @@ inline const char* toString(Verifier verifier)
         return "unknown";
     }
 }
+
+/// The reference lane that produced the outputs an engine was graded against.
+enum class ReferenceLane : uint8_t
+{
+    CPU,
+    GPU,
+};
+
+inline const char* toString(ReferenceLane lane)
+{
+    return lane == ReferenceLane::GPU ? "gpu" : "cpu";
+}
+
+/// One reference execution that produced the outputs a case was graded against: its
+/// wall time and the lane it ran on. After a GPU-to-CPU fallback this is the CPU run
+/// that graded, not the GPU attempt that errored before it.
+struct ReferenceRun
+{
+    double ms = 0.0; ///< wall time of runReferenceCapturingOutputs(), in milliseconds
+    ReferenceLane lane = ReferenceLane::CPU;
+};
 
 /// What one test body did, as a value.
 ///
@@ -174,9 +238,27 @@ struct VerificationOutcome
     /// Empty for every other verifier.
     std::string verifierDetail;
 
+    /// Where the test stopped. Set by whoever ends the test early; a pass leaves it NONE.
+    OutcomeStage stage = OutcomeStage::NONE;
+
+    /// The engine's support query resolved and the engine was absent from the ranked
+    /// list (or it declined later, while building or running). Never set when the query
+    /// did not resolve, and never for a run with no engine under test: nobody can say
+    /// an engine declined then.
+    bool declined = false;
+
+    /// The non-success status the case was written to get, when it got it: "BAD_PARAM" for
+    /// an under-aligned placement the backend rejected. Empty for every other outcome. A
+    /// pass that carries one verified the rejection, not a comparison.
+    std::string expectedStatus;
+
+    /// The reference that graded the outputs. Set only when a reference executor ran;
+    /// golden grading, skips and failures before the oracle leave it empty.
+    std::optional<ReferenceRun> reference;
+
     static VerificationOutcome passed(VerificationDepth depth)
     {
-        return {OutcomeStatus::PASSED, depth, FailureOrigin::NONE, {}, false, Verifier::NONE, {}};
+        return make(OutcomeStatus::PASSED, depth, FailureOrigin::NONE, {}, false);
     }
 
     /// The engine refused an expected-rejection bundle at `stage`. It never took the
@@ -191,27 +273,56 @@ struct VerificationOutcome
 
     static VerificationOutcome skipped(VerificationDepth depth, std::string message)
     {
-        return {OutcomeStatus::SKIPPED,
-                depth,
-                FailureOrigin::NONE,
-                std::move(message),
-                false,
-                Verifier::NONE,
-                {}};
+        return make(OutcomeStatus::SKIPPED, depth, FailureOrigin::NONE, std::move(message), false);
     }
 
     static VerificationOutcome
         failed(VerificationDepth depth, FailureOrigin origin, std::string message)
     {
-        return {
-            OutcomeStatus::FAILED, depth, origin, std::move(message), false, Verifier::NONE, {}};
+        return make(OutcomeStatus::FAILED, depth, origin, std::move(message), false);
     }
 
     /// A failure whose detail is already on the record. The caller MUST have issued
     /// at least one gtest failure before building this.
     static VerificationOutcome alreadyReportedFailure(VerificationDepth depth, FailureOrigin origin)
     {
-        return {OutcomeStatus::FAILED, depth, origin, {}, true, Verifier::NONE, {}};
+        return make(OutcomeStatus::FAILED, depth, origin, {}, true);
+    }
+
+    /// Builder-style setters for the two fields above, so a factory call can name them
+    /// without a second statement.
+    VerificationOutcome atStage(OutcomeStage where) &&
+    {
+        stage = where;
+        return std::move(*this);
+    }
+
+    VerificationOutcome asDecline() &&
+    {
+        declined = true;
+        return std::move(*this);
+    }
+
+    VerificationOutcome expecting(std::string expected) &&
+    {
+        expectedStatus = std::move(expected);
+        return std::move(*this);
+    }
+
+private:
+    static VerificationOutcome make(OutcomeStatus status,
+                                    VerificationDepth depth,
+                                    FailureOrigin origin,
+                                    std::string message,
+                                    bool alreadyReported)
+    {
+        VerificationOutcome outcome;
+        outcome.status = status;
+        outcome.depth = depth;
+        outcome.origin = origin;
+        outcome.message = std::move(message);
+        outcome.alreadyReported = alreadyReported;
+        return outcome;
     }
 };
 

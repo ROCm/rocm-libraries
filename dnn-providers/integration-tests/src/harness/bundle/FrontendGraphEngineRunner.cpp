@@ -8,6 +8,7 @@
 #include <vector>
 
 #include <hipdnn_frontend/Graph.hpp>
+#include <hipdnn_frontend/detail/EngineQueries.hpp>
 
 #include "harness/EngineNotApplicableError.hpp"
 #include "harness/GraphBenchmark.hpp"
@@ -24,6 +25,8 @@ GraphSession
                                          const std::optional<LoadedEngine>& engineUnderTest)
 {
     GraphSession session;
+    // Before from_binary: a case whose graph fails to load still names its candidate.
+    session.forcedVariant = bundle.metadata.engineVariant;
 
     auto handle = getSharedHandle();
     session.graph = std::make_unique<hipdnn_frontend::graph::Graph>();
@@ -82,7 +85,8 @@ EngineOpResult
 
     try
     {
-        if(auto failed = firstFailure(graph.create_execution_plans()))
+        const auto created = createCasePlans(graph, engineUnderTest, session.forcedVariant);
+        if(auto failed = firstFailure(created))
         {
             return *failed;
         }
@@ -134,7 +138,12 @@ EngineOpResult
             if(auto status = graph.execute(handle, variantPack, workspace->get());
                !status.is_good())
             {
-                return EngineOpResult::failed(status.get_message());
+                // The frontend keeps only the text of the backend's status, so the one
+                // status the harness acts on is read back out of it, here, where it is seen.
+                auto failure = EngineOpResult::failed(status.get_message());
+                failure.executeStatus.alignmentRejectedUid
+                    = parseAlignmentRejectedUid(failure.message);
+                return failure;
             }
         }
         catch(const EngineNotApplicableError& e)
@@ -171,6 +180,38 @@ CaptureResult FrontendGraphEngineRunner::captureReplay(GraphSession& session,
         return CaptureResult::failed("openGraph() produced no graph to capture");
     }
     return captureGraph(*session.graph, getSharedHandle(), variantPack, settings, hooks);
+}
+
+namespace
+{
+
+/// Reads the finalized backend graph descriptor, which Graph keeps protected for exactly this
+/// kind of engine inspection (the bench tool derives from Graph for the same read).
+class GraphDescriptorAccess : public hipdnn_frontend::graph::Graph
+{
+public:
+    static hipdnnBackendDescriptor_t of(const hipdnn_frontend::graph::Graph& graph)
+    {
+        return (graph.*(&GraphDescriptorAccess::get_raw_graph_descriptor))();
+    }
+};
+
+} // namespace
+
+hipdnn_frontend::Error
+    FrontendGraphEngineRunner::candidatePage(GraphSession& session,
+                                             const LoadedEngine& engine,
+                                             int64_t offset,
+                                             int64_t limit,
+                                             hipdnn_frontend::EngineCandidatePage& page)
+{
+    if(session.graph == nullptr)
+    {
+        return {hipdnn_frontend::ErrorCode::INVALID_VALUE,
+                "openGraph() produced no graph to enumerate candidates of"};
+    }
+    return hipdnn_frontend::detail::getEngineCandidates(
+        GraphDescriptorAccess::of(*session.graph), engine.id, page, offset, limit);
 }
 
 } // namespace hipdnn_integration_tests::bundle

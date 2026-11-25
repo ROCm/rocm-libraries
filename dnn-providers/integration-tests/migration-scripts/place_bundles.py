@@ -303,9 +303,11 @@ def manual_cases_to_keep(sweep_path: Path, template: dict, captured_ids: set):
         values = c.get("values", {})
         case_uids = {t.get("uid") for t in values.get("tensors", [])}
         patch_uids = {p.get("uid") for p in c.get("tensor_patches", [])}
+        # A uid that add_tensors adds can be patched, as the harness applies add_tensors first.
+        added_uids = {t.get("uid") for t in c.get("add_tensors") or []}
         if (
             case_uids != template_uids
-            or not patch_uids <= template_uids
+            or not patch_uids <= template_uids | added_uids
             or "${UNRESOLVED:" in canon(expand(template, values))
         ):
             return [], f"manual case {cid!r} does not fit the regenerated template"

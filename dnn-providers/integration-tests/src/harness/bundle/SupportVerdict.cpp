@@ -253,6 +253,9 @@ SupportObservation observeSupport(const RankedEngines& engines,
 std::optional<VerificationOutcome> claimBlocked(const SupportObservation& observation)
 {
     std::string aggregate;
+    // A broken claim is the one failing verdict that says the query resolved and the
+    // engine is absent. QUERY_ERRORED says nobody could tell, which is not a decline.
+    bool engineAbsent = false;
     for(const auto& result : observation.results)
     {
         if(isFailure(result.verdict))
@@ -260,6 +263,7 @@ std::optional<VerificationOutcome> claimBlocked(const SupportObservation& observ
             // Gathered up rather than failed on sight, so one FAIL() names every
             // failing verdict instead of the first one hiding the rest.
             aggregate += formatVerdictMessage(result);
+            engineAbsent = engineAbsent || result.verdict == SupportVerdict::CLAIM_BROKEN;
         }
     }
 
@@ -272,8 +276,11 @@ std::optional<VerificationOutcome> claimBlocked(const SupportObservation& observ
     // the first because it is not in the ranked list, the second because the list
     // cannot be trusted at all. Either way the engine is what stands between this
     // bundle and a verdict, so the outcome names it as the cause.
-    return VerificationOutcome::failed(
-        VerificationDepth::NOT_REACHED, FailureOrigin::ENGINE, std::move(aggregate));
+    auto blocked = VerificationOutcome::failed(
+                       VerificationDepth::NOT_REACHED, FailureOrigin::ENGINE, std::move(aggregate))
+                       .atStage(OutcomeStage::CLAIM);
+    blocked.declined = engineAbsent;
+    return blocked;
 }
 
 std::vector<SupportResult> finalizeClaims(std::vector<SupportResult> results,

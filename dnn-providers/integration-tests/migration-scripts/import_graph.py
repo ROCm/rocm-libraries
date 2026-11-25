@@ -115,6 +115,14 @@ from bundle_utils import (
     uid_map_onto,
 )
 
+# The sweep-case patch rules (add_tensors, node_patches, tensor_patches) live with the
+# other Python mirrors of the C++ loader.
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
+from support_matrix_units import (  # noqa: E402
+    NODE_PATCH_SECTIONS,
+    apply_case_patches,
+)
+
 
 # --------------------------------------------------------------------------
 # Scan existing bundles
@@ -167,7 +175,7 @@ class ImportCache:
         return template, sweep
 
     def case_canons(self, sweep_path: Path, template: dict, sweep: dict):
-        """Yield canon(expand_case(template, case)) per case.
+        """Yield :func:`_graph_canon` of the graph of each case (:func:`_case_graph`).
 
         Yield None for a case that does not expand.
         """
@@ -178,10 +186,7 @@ class ImportCache:
                 yield known[i][1]
                 continue
             del known[i:]
-            try:
-                text = canon(expand_case(template, case))
-            except ValueError:
-                text = None
+            text = _case_canon(template, case)
             known.append((case, text))
             yield text
 
@@ -476,14 +481,25 @@ def _remove_patches(graph: dict, template: dict) -> list:
     return patches
 
 
-def _sweep_case(case_id, values, patches, meta, absent=None) -> dict:
-    """A sweep case: id, absent tensors (if any), values, tensor patches (if any), metadata."""
+ADD_TENSORS_KEY = "add_tensors"
+NODE_PATCHES_KEY = "node_patches"
+
+
+def _sweep_case(
+    case_id, values, patches, meta, absent=None, added=None, node_patches=None
+) -> dict:
+    """A sweep case: id, absent tensors (if any), values, tensor patches (if any), added
+    tensors (if any), node patches (if any), metadata."""
     case = {"id": case_id}
     if absent:
         case[ABSENT_TENSORS_KEY] = absent
     case["values"] = values
     if patches:
         case[TENSOR_PATCHES_KEY] = patches
+    if added:
+        case[ADD_TENSORS_KEY] = added
+    if node_patches:
+        case[NODE_PATCHES_KEY] = node_patches
     case["metadata"] = meta
     return case
 
@@ -531,6 +547,224 @@ def _extract_values(graph: dict, template: dict) -> dict:
                 _deep_set(values, case_path, src_val)
 
     return values
+
+
+def _expanded_case(template: dict, case: dict) -> dict:
+    """The graph a sweep case runs, built in the harness's order: the absent tensors
+    leave a copy of the template first, then the placeholders expand, then the case's
+    ``add_tensors``, ``node_patches`` and ``tensor_patches`` apply.
+
+    Raises ``ValueError`` for a case the harness would refuse to load."""
+    absent = case.get(ABSENT_TENSORS_KEY)
+    base = prune_absent_tensors(template, absent) if absent else template
+    graph = expand(base, case.get("values", {}))
+    apply_case_patches(graph, case)
+    return graph
+
+
+def _case_graph(template: dict, case: dict):
+    """:func:`_expanded_case`, or None for a case that does not expand (hand-written
+    cases carry other shapes)."""
+    try:
+        return _expanded_case(template, case)
+    except ValueError:
+        return None
+
+
+def _case_canon(template: dict, case: dict):
+    """:func:`_graph_canon` of the graph of ``case``; None if it does not expand."""
+    graph = _case_graph(template, case)
+    return None if graph is None else _graph_canon(graph)
+
+
+def _graph_canon(graph: dict) -> str:
+    """:func:`canon` of ``graph`` with its tensors in uid order, the order
+    :func:`remap_graph` gives a frozen graph. An added tensor lands after the template's,
+    whatever its uid, and the harness does not read the order."""
+    tensors = graph.get("tensors")
+    if isinstance(tensors, list) and all(isinstance(t, dict) for t in tensors):
+        graph = {**graph, "tensors": sorted(tensors, key=lambda t: t.get("uid", 0))}
+    return canon(graph)
+
+
+def _node_patches(graph: dict, expanded: dict) -> list:
+    """``node_patches`` that turn the nodes of ``expanded`` into those of ``graph``: per
+    section (``attributes``, ``parameters``, ``inputs``, ``outputs``), a ``set`` for each
+    key whose value differs and a ``remove`` for each key ``graph`` lacks. A key only
+    ``graph`` has cannot be expressed (``set`` never inserts), nor can a difference outside
+    those sections or in the node list: the round-trip check then names it."""
+    want, have = graph.get("nodes"), expanded.get("nodes")
+    if (
+        not isinstance(want, list)
+        or not isinstance(have, list)
+        or len(want) != len(have)
+    ):
+        return []
+    names = [n.get("name") for n in have if isinstance(n, dict)]
+    patches = []
+    for index, (target, node) in enumerate(zip(want, have)):
+        if not isinstance(target, dict) or not isinstance(node, dict):
+            continue
+        name = node.get("name")
+        selector = (
+            name if isinstance(name, str) and name and names.count(name) == 1 else index
+        )
+        for section in NODE_PATCH_SECTIONS:
+            wanted, present = target.get(section), node.get(section)
+            if not isinstance(wanted, dict) or not isinstance(present, dict):
+                continue
+            changed = {
+                key: copy.deepcopy(value)
+                for key, value in sorted(wanted.items())
+                if key in present and canon(present[key]) != canon(value)
+            }
+            removed = sorted(key for key in present if key not in wanted)
+            if not changed and not removed:
+                continue
+            patch = {"node": selector, "section": section}
+            if changed:
+                patch["set"] = changed
+            if removed:
+                patch["remove"] = removed
+            patches.append(patch)
+    return patches
+
+
+def _case_patches(graph: dict, expanded: dict) -> dict:
+    """The sweep-case patch fields that turn ``expanded`` (a template expansion) into
+    ``graph``, keyed by field name; a field with nothing to say is absent.
+
+    * ``add_tensors``: the tensors only ``graph`` has, verbatim.
+    * ``node_patches``: changed node values, see :func:`_node_patches`.
+    * ``tensor_patches``: where only a tensor's ``alignment`` differs. A template
+      hard-codes one alignment, and a sweep case declares another through a patch (a fuzz
+      finding at alignment 1, say).
+    """
+    have = tensors_by_uid(expanded)
+    wanted = tensors_by_uid(graph)
+    fields = {
+        "add_tensors": [
+            copy.deepcopy(tensor)
+            for uid, tensor in sorted(wanted.items())
+            if uid not in have
+        ],
+        "node_patches": _node_patches(graph, expanded),
+        "tensor_patches": [
+            {"uid": uid, "set": {"alignment": tensor["alignment"]}}
+            for uid, tensor in sorted(wanted.items())
+            if "alignment" in tensor
+            and uid in have
+            and have[uid].get("alignment") != tensor["alignment"]
+        ],
+    }
+    return {key: value for key, value in fields.items() if value}
+
+
+def _case_patch_fields(graph: dict, template: dict, values: dict) -> dict:
+    """The patch fields of a case of ``template`` with ``values`` that runs ``graph``:
+    :func:`_case_patches`, plus the ``tensor_patches`` that remove the fields the graph's
+    tensors lack (:func:`_remove_patches`). A field with nothing to say is absent."""
+    fields = _case_patches(graph, expand(template, values))
+    removals = _remove_patches(graph, template)
+    if removals:
+        fields[TENSOR_PATCHES_KEY] = removals + fields.get(TENSOR_PATCHES_KEY, [])
+    return fields
+
+
+def _fits_template(template: dict, graph: dict) -> bool:
+    """Whether a case of ``template`` (its values, then :func:`_case_patch_fields`)
+    expands to ``graph``: the check that makes a freeze lossless."""
+    values = _extract_values(graph, template)
+    case = {"values": values, **_case_patch_fields(graph, template, values)}
+    rebuilt = _case_graph(template, case)
+    return rebuilt is not None and _graph_canon(rebuilt) == _graph_canon(graph)
+
+
+def _align_to_template(graph: dict, rep: dict):
+    """``(graph, uid_map)`` with ``graph``'s uids renumbered into the uid space of ``rep``
+    (a template expansion) by tensor name, or None when it cannot be done.
+
+    A graph that adds tensors to a topology has the same nodes and every tensor of
+    ``rep``, plus others. Its uids come from :func:`canonical_uid_map_by_name`, so an added
+    tensor can shift the ones after it; the template's uids are what the case values
+    address. A tensor ``rep`` lacks keeps its own uid when that is free and gets the next
+    free one otherwise. Tensors need unique, non-empty names to be matched.
+    """
+    want, have = graph.get("nodes"), rep.get("nodes")
+    if (
+        not isinstance(want, list)
+        or not isinstance(have, list)
+        or len(want) != len(have)
+        or any(
+            not isinstance(a, dict)
+            or not isinstance(b, dict)
+            or (a.get("type"), a.get("name")) != (b.get("type"), b.get("name"))
+            for a, b in zip(want, have)
+        )
+    ):
+        return None
+    graph_tensors = [t for t in graph.get("tensors", []) if "uid" in t]
+    rep_tensors = [t for t in rep.get("tensors", []) if "uid" in t]
+    graph_names = [t.get("name") for t in graph_tensors]
+    rep_names = [t.get("name") for t in rep_tensors]
+    if (
+        not all(isinstance(n, str) and n for n in graph_names + rep_names)
+        or len(set(graph_names)) != len(graph_names)
+        or len(set(rep_names)) != len(rep_names)
+        or not set(rep_names) <= set(graph_names)
+    ):
+        return None
+    by_name = {t["name"]: t["uid"] for t in rep_tensors}
+    used = set(by_name.values())
+    uid_map = {}
+    extras = []
+    for tensor in graph_tensors:
+        if tensor["name"] in by_name:
+            uid_map[tensor["uid"]] = by_name[tensor["name"]]
+        else:
+            extras.append(tensor["uid"])
+    fresh = max(used, default=-1) + 1
+    for uid in sorted(extras):
+        if uid in used:
+            while fresh in used:
+                fresh += 1
+            uid_map[uid] = fresh
+        else:
+            uid_map[uid] = uid
+        used.add(uid_map[uid])
+    return remap_graph(graph, uid_map), uid_map
+
+
+def _added_tensor_matches(graph: dict, sweeps: list) -> list:
+    """The sweeps whose template can express ``graph`` with ``add_tensors``: same nodes,
+    every tensor of the template's expansion, and the case patches that close the rest.
+    Each is ``(template, sweep, sweep_path, aligned_graph, uid_map)``. A sweep whose
+    cases all drop template tensors, or add tensors of their own, has no plain
+    expansion of the template to match against and is left out."""
+    found = []
+    for template, sweep, sweep_path in sweeps:
+        rep = next(
+            (
+                case
+                for case in sweep.get("cases", [])
+                if not (
+                    case.get(ABSENT_TENSORS_KEY)
+                    or case.get(ADD_TENSORS_KEY)
+                    or case.get(NODE_PATCHES_KEY)
+                )
+            ),
+            None,
+        )
+        if rep is None:
+            continue
+        try:
+            expanded_rep = expand(template, rep.get("values", {}))
+        except ValueError:
+            continue
+        aligned = _align_to_template(graph, expanded_rep)
+        if aligned is not None and _fits_template(template, aligned[0]):
+            found.append((template, sweep, sweep_path, *aligned))
+    return found
 
 
 # --------------------------------------------------------------------------
@@ -657,15 +891,12 @@ def _is_grouped(args) -> bool:
 
 
 def _expanded_canons(template, sweep, sweep_path, cache):
-    """Yield canon(expand_case(template, case)) per case; None if it does not expand."""
+    """Yield the :func:`_graph_canon` of each case's graph; None if it does not expand."""
     if cache is not None:
         yield from cache.case_canons(sweep_path, template, sweep)
         return
     for case in sweep.get("cases", []):
-        try:
-            yield canon(expand_case(template, case))
-        except ValueError:
-            yield None
+        yield _case_canon(template, case)
 
 
 def _report_duplicate(args, candidates, graph_json: str, meta: dict, cache=None):
@@ -723,8 +954,12 @@ def _append_case(
         if new_case["id"] in taken:
             new_case["id"] = f"{new_case['id']}_{_case_hash(new_case)}"
 
-    expanded = expand_case(template, new_case)
-    if canon(expanded) != canon(graph):
+    try:
+        expanded = _expanded_case(template, new_case)
+    except ValueError as error:
+        print(f"  ERROR: the new case does not expand: {error}", file=sys.stderr)
+        return 1
+    if _graph_canon(expanded) != _graph_canon(graph):
         _report_roundtrip_failure(
             "after extraction", expanded, graph, selected=selected
         )
@@ -818,7 +1053,7 @@ def _append_superset_case(args, join, n_joins, graph, meta, cache=None) -> int:
     ):
         meta_t["format_version"] = ABSENT_TENSORS_FORMAT_VERSION
 
-    dup = _report_duplicate(args, [join], canon(graph_t), meta_t, cache)
+    dup = _report_duplicate(args, [join], _graph_canon(graph_t), meta_t, cache)
     if dup is not None:
         return dup
 
@@ -840,6 +1075,53 @@ def _append_superset_case(args, join, n_joins, graph, meta, cache=None) -> int:
         new_case,
         graph_t,
         f"{sweep_path} (of {n_joins} superset template(s))",
+        cache,
+    )
+
+
+def _append_added_tensors_case(args, join, n_joins, graph, meta, cache=None) -> int:
+    """Append ``graph`` to the sweep of ``join`` as a case that adds tensors.
+
+    The graph is the template plus tensors (a stats output switched on, say). The
+    graph and the metadata take the template's uids, matched by tensor name, so the
+    case values address them; the tensors the template lacks come from the case's
+    ``add_tensors``, and other differences from its ``node_patches``.
+    """
+    template, sweep, sweep_path, graph_t, uid_map = join
+    meta_t = remap_meta_inputs(meta, uid_map)
+    named = metadata_uid_names(meta, graph)
+    if metadata_uid_names(meta_t, graph_t) != named:
+        print(
+            "  ERROR: the uid remap onto the template moves a metadata uid to"
+            f" another tensor: {named} became {metadata_uid_names(meta_t, graph_t)}",
+            file=sys.stderr,
+        )
+        return 1
+
+    dup = _report_duplicate(
+        args, [(template, sweep, sweep_path)], _graph_canon(graph_t), meta_t, cache
+    )
+    if dup is not None:
+        return dup
+
+    values = _extract_values(graph_t, template)
+    fields = _case_patch_fields(graph_t, template, values)
+    new_case = _sweep_case(
+        None,
+        values,
+        fields.get(TENSOR_PATCHES_KEY),
+        meta_t,
+        added=fields.get(ADD_TENSORS_KEY),
+        node_patches=fields.get(NODE_PATCHES_KEY),
+    )
+    return _append_case(
+        args,
+        template,
+        sweep,
+        sweep_path,
+        new_case,
+        graph_t,
+        f"{sweep_path} (of {n_joins} template(s) that the graph adds tensors to)",
         cache,
     )
 
@@ -1098,7 +1380,7 @@ def main(argv=None, cache: ImportCache = None) -> int:
 
     h = skeleton_hash(graph, value_form=args.skeleton_value_form)
     op = args.op_dir if args.op_dir is not None else derive_operation(graph)
-    graph_json = canon(graph)
+    graph_json = _graph_canon(graph)
 
     print(f"  skeleton hash: {h}", file=sys.stderr)
     print(f"  operation:     {op}", file=sys.stderr)
@@ -1148,7 +1430,15 @@ def main(argv=None, cache: ImportCache = None) -> int:
         tier_matches = [m for m in matches if str(m[2]).startswith(tier_prefix)]
         template, sweep, sweep_path = (tier_matches or matches)[0]
         values = _extract_values(graph, template)
-        new_case = _sweep_case(None, values, _remove_patches(graph, template), meta)
+        fields = _case_patch_fields(graph, template, values)
+        new_case = _sweep_case(
+            None,
+            values,
+            fields.get(TENSOR_PATCHES_KEY),
+            meta,
+            added=fields.get(ADD_TENSORS_KEY),
+            node_patches=fields.get(NODE_PATCHES_KEY),
+        )
         return _append_case(
             args,
             template,
@@ -1191,6 +1481,24 @@ def main(argv=None, cache: ImportCache = None) -> int:
                 )
             )
             return _append_superset_case(args, joins[0], len(joins), graph, meta, cache)
+
+    # --- Added-tensor match: append, the case adds tensors to the template ---
+    # Default mode only: a grouped import takes a graph with more tensors than a
+    # template as a new template (--superset-templates notes the missed merge).
+    if not matched_elsewhere and not grouped_mode:
+        candidates = [
+            s
+            for s in sweeps
+            if sweep_import_mode(s[1]) is None
+            and (topology_dir is None or s[2].parent == topology_dir)
+        ]
+        added = _added_tensor_matches(graph, candidates)
+        if added:
+            tier_prefix = str(args.bundle_dir / args.tier) + os.sep
+            added.sort(key=lambda j: (not str(j[2]).startswith(tier_prefix), str(j[2])))
+            return _append_added_tensors_case(
+                args, added[0], len(added), graph, meta, cache
+            )
 
     if matched_elsewhere:
         print(

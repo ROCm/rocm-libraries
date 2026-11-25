@@ -635,7 +635,8 @@ TEST_F(TestSupportClaimEnforcement, EngineFailureAfterPlansBuiltKeepsTheDepthItR
         .WillByDefault(Return(EngineOpResult{/*ok=*/false,
                                              /*declined=*/false,
                                              /*plansBuilt=*/true,
-                                             "stub: died executing compiled plans"}));
+                                             "stub: died executing compiled plans",
+                                             /*executeStatus=*/{}}));
 
     IntegrationBundleVerificationHarness harness(_mocks.dependencies(testing_support::hostPolicy(
                                                      VerificationMode::GOLDEN, ClaimMode::ENFORCE)),

@@ -1,0 +1,1156 @@
+{
+  "description": "Shared by the Python and C++ sweep-case loaders: a SDPA-forward-shaped template and sweep cases with add_tensors / node_patches / tensor_patches. Each 'expands' entry names the graph a loader must build; each 'rejects' entry the exact exception message.",
+  "template": {
+    "compute_data_type": "float",
+    "intermediate_data_type": "float",
+    "io_data_type": "${case.io_data_type}",
+    "name": "",
+    "nodes": [
+      {
+        "attributes": {
+          "alibi_mask": false,
+          "attn_scale_value": 0.125,
+          "causal_mask": false,
+          "causal_mask_bottom_right": false,
+          "diagonal_alignment": "BOTTOM_RIGHT",
+          "dropout_probability": null,
+          "generate_stats": null,
+          "implementation": "AUTO",
+          "left_bound": null,
+          "max_seq_len_kv": null,
+          "mma_core_mode": "unset",
+          "padding_mask": false,
+          "right_bound": 0
+        },
+        "compute_data_type": "float",
+        "inputs": {
+          "attn_mask_tensor_uid": null,
+          "block_mask_tensor_uid": null,
+          "descale_k_tensor_uid": null,
+          "descale_q_tensor_uid": null,
+          "descale_s_tensor_uid": null,
+          "descale_v_tensor_uid": null,
+          "dropout_mask_tensor_uid": null,
+          "dropout_scale_tensor_uid": null,
+          "k_tensor_uid": 0,
+          "offset_tensor_uid": null,
+          "page_table_k_tensor_uid": null,
+          "page_table_v_tensor_uid": null,
+          "q_tensor_uid": 1,
+          "scale_o_tensor_uid": null,
+          "scale_s_tensor_uid": null,
+          "scale_tensor_uid": null,
+          "seed_tensor_uid": null,
+          "seq_len_kv_tensor_uid": null,
+          "seq_len_q_tensor_uid": null,
+          "sink_token_tensor_uid": null,
+          "v_tensor_uid": 3
+        },
+        "name": "SdpaFwd_0",
+        "outputs": {
+          "amax_o_tensor_uid": null,
+          "amax_s_tensor_uid": null,
+          "max_tensor_uid": null,
+          "o_tensor_uid": 2,
+          "rng_dump_tensor_uid": null,
+          "stats_tensor_uid": null,
+          "sum_exp_tensor_uid": null
+        },
+        "type": "SdpaAttributes"
+      }
+    ],
+    "tensors": [
+      {
+        "alignment": 16,
+        "data_type": "${case.data_type}",
+        "dims": "${case.dims}",
+        "is_runtime_pass_by_value": false,
+        "name": "K",
+        "strides": "${case.strides}",
+        "uid": 0,
+        "virtual": false
+      },
+      {
+        "alignment": 16,
+        "data_type": "${case.data_type}",
+        "dims": "${case.dims}",
+        "is_runtime_pass_by_value": false,
+        "name": "Q",
+        "strides": "${case.strides}",
+        "uid": 1,
+        "virtual": false
+      },
+      {
+        "alignment": 16,
+        "data_type": "${case.data_type}",
+        "dims": "${case.dims}",
+        "is_runtime_pass_by_value": false,
+        "name": "SdpaFwd_0::O",
+        "strides": "${case.strides}",
+        "uid": 2,
+        "virtual": false
+      },
+      {
+        "alignment": 16,
+        "data_type": "${case.data_type}",
+        "dims": "${case.dims}",
+        "is_runtime_pass_by_value": false,
+        "name": "V",
+        "strides": "${case.strides}",
+        "uid": 3,
+        "virtual": false
+      }
+    ]
+  },
+  "expands": [
+    {
+      "why": "stats on: add_tensors, node_patches that wire it, a tensor_patch on the added uid",
+      "case": {
+        "id": "stats_on",
+        "values": {
+          "io_data_type": "half",
+          "tensors": [
+            {"uid": 0, "data_type": "half", "dims": [1, 2, 16, 8], "strides": [256, 128, 8, 1]},
+            {"uid": 1, "data_type": "half", "dims": [1, 2, 16, 8], "strides": [256, 128, 8, 1]},
+            {"uid": 2, "data_type": "half", "dims": [1, 2, 16, 8], "strides": [256, 128, 8, 1]},
+            {"uid": 3, "data_type": "half", "dims": [1, 2, 16, 8], "strides": [256, 128, 8, 1]}
+          ]
+        },
+        "metadata": {"format_version": 1, "operation": "SdpaFwd", "seed": 42},
+        "add_tensors": [
+          {
+            "alignment": 16,
+            "data_type": "float",
+            "dims": [1, 2, 16, 1],
+            "is_runtime_pass_by_value": false,
+            "name": "SdpaFwd_0::Stats",
+            "ragged_offset_multiplier": 1,
+            "strides": [32, 16, 1, 1],
+            "uid": 4,
+            "virtual": false
+          }
+        ],
+        "node_patches": [
+          {"node": "SdpaFwd_0", "section": "outputs", "set": {"stats_tensor_uid": 4}},
+          {"node": "SdpaFwd_0", "section": "attributes", "set": {"generate_stats": true}}
+        ],
+        "tensor_patches": [{"uid": 4, "set": {"alignment": 4}}]
+      },
+      "graph": {
+        "compute_data_type": "float",
+        "intermediate_data_type": "float",
+        "io_data_type": "half",
+        "name": "",
+        "nodes": [
+          {
+            "attributes": {
+              "alibi_mask": false,
+              "attn_scale_value": 0.125,
+              "causal_mask": false,
+              "causal_mask_bottom_right": false,
+              "diagonal_alignment": "BOTTOM_RIGHT",
+              "dropout_probability": null,
+              "generate_stats": true,
+              "implementation": "AUTO",
+              "left_bound": null,
+              "max_seq_len_kv": null,
+              "mma_core_mode": "unset",
+              "padding_mask": false,
+              "right_bound": 0
+            },
+            "compute_data_type": "float",
+            "inputs": {
+              "attn_mask_tensor_uid": null,
+              "block_mask_tensor_uid": null,
+              "descale_k_tensor_uid": null,
+              "descale_q_tensor_uid": null,
+              "descale_s_tensor_uid": null,
+              "descale_v_tensor_uid": null,
+              "dropout_mask_tensor_uid": null,
+              "dropout_scale_tensor_uid": null,
+              "k_tensor_uid": 0,
+              "offset_tensor_uid": null,
+              "page_table_k_tensor_uid": null,
+              "page_table_v_tensor_uid": null,
+              "q_tensor_uid": 1,
+              "scale_o_tensor_uid": null,
+              "scale_s_tensor_uid": null,
+              "scale_tensor_uid": null,
+              "seed_tensor_uid": null,
+              "seq_len_kv_tensor_uid": null,
+              "seq_len_q_tensor_uid": null,
+              "sink_token_tensor_uid": null,
+              "v_tensor_uid": 3
+            },
+            "name": "SdpaFwd_0",
+            "outputs": {
+              "amax_o_tensor_uid": null,
+              "amax_s_tensor_uid": null,
+              "max_tensor_uid": null,
+              "o_tensor_uid": 2,
+              "rng_dump_tensor_uid": null,
+              "stats_tensor_uid": 4,
+              "sum_exp_tensor_uid": null
+            },
+            "type": "SdpaAttributes"
+          }
+        ],
+        "tensors": [
+          {
+            "alignment": 16,
+            "data_type": "half",
+            "dims": [1, 2, 16, 8],
+            "is_runtime_pass_by_value": false,
+            "name": "K",
+            "strides": [256, 128, 8, 1],
+            "uid": 0,
+            "virtual": false
+          },
+          {
+            "alignment": 16,
+            "data_type": "half",
+            "dims": [1, 2, 16, 8],
+            "is_runtime_pass_by_value": false,
+            "name": "Q",
+            "strides": [256, 128, 8, 1],
+            "uid": 1,
+            "virtual": false
+          },
+          {
+            "alignment": 16,
+            "data_type": "half",
+            "dims": [1, 2, 16, 8],
+            "is_runtime_pass_by_value": false,
+            "name": "SdpaFwd_0::O",
+            "strides": [256, 128, 8, 1],
+            "uid": 2,
+            "virtual": false
+          },
+          {
+            "alignment": 16,
+            "data_type": "half",
+            "dims": [1, 2, 16, 8],
+            "is_runtime_pass_by_value": false,
+            "name": "V",
+            "strides": [256, 128, 8, 1],
+            "uid": 3,
+            "virtual": false
+          },
+          {
+            "alignment": 4,
+            "data_type": "float",
+            "dims": [1, 2, 16, 1],
+            "is_runtime_pass_by_value": false,
+            "name": "SdpaFwd_0::Stats",
+            "ragged_offset_multiplier": 1,
+            "strides": [32, 16, 1, 1],
+            "uid": 4,
+            "virtual": false
+          }
+        ]
+      }
+    },
+    {
+      "why": "node addressed by index; set and remove in one entry; set value types kept",
+      "case": {
+        "id": "window",
+        "values": {
+          "io_data_type": "half",
+          "tensors": [
+            {"uid": 0, "data_type": "half", "dims": [1, 2, 16, 8], "strides": [256, 128, 8, 1]},
+            {"uid": 1, "data_type": "half", "dims": [1, 2, 16, 8], "strides": [256, 128, 8, 1]},
+            {"uid": 2, "data_type": "half", "dims": [1, 2, 16, 8], "strides": [256, 128, 8, 1]},
+            {"uid": 3, "data_type": "half", "dims": [1, 2, 16, 8], "strides": [256, 128, 8, 1]}
+          ]
+        },
+        "metadata": {"format_version": 1, "operation": "SdpaFwd", "seed": 42},
+        "node_patches": [
+          {
+            "node": 0,
+            "section": "attributes",
+            "set": {"left_bound": 3, "attn_scale_value": 0.0625, "diagonal_alignment": "TOP_LEFT"},
+            "remove": ["alibi_mask"]
+          }
+        ]
+      },
+      "graph": {
+        "compute_data_type": "float",
+        "intermediate_data_type": "float",
+        "io_data_type": "half",
+        "name": "",
+        "nodes": [
+          {
+            "attributes": {
+              "attn_scale_value": 0.0625,
+              "causal_mask": false,
+              "causal_mask_bottom_right": false,
+              "diagonal_alignment": "TOP_LEFT",
+              "dropout_probability": null,
+              "generate_stats": null,
+              "implementation": "AUTO",
+              "left_bound": 3,
+              "max_seq_len_kv": null,
+              "mma_core_mode": "unset",
+              "padding_mask": false,
+              "right_bound": 0
+            },
+            "compute_data_type": "float",
+            "inputs": {
+              "attn_mask_tensor_uid": null,
+              "block_mask_tensor_uid": null,
+              "descale_k_tensor_uid": null,
+              "descale_q_tensor_uid": null,
+              "descale_s_tensor_uid": null,
+              "descale_v_tensor_uid": null,
+              "dropout_mask_tensor_uid": null,
+              "dropout_scale_tensor_uid": null,
+              "k_tensor_uid": 0,
+              "offset_tensor_uid": null,
+              "page_table_k_tensor_uid": null,
+              "page_table_v_tensor_uid": null,
+              "q_tensor_uid": 1,
+              "scale_o_tensor_uid": null,
+              "scale_s_tensor_uid": null,
+              "scale_tensor_uid": null,
+              "seed_tensor_uid": null,
+              "seq_len_kv_tensor_uid": null,
+              "seq_len_q_tensor_uid": null,
+              "sink_token_tensor_uid": null,
+              "v_tensor_uid": 3
+            },
+            "name": "SdpaFwd_0",
+            "outputs": {
+              "amax_o_tensor_uid": null,
+              "amax_s_tensor_uid": null,
+              "max_tensor_uid": null,
+              "o_tensor_uid": 2,
+              "rng_dump_tensor_uid": null,
+              "stats_tensor_uid": null,
+              "sum_exp_tensor_uid": null
+            },
+            "type": "SdpaAttributes"
+          }
+        ],
+        "tensors": [
+          {
+            "alignment": 16,
+            "data_type": "half",
+            "dims": [1, 2, 16, 8],
+            "is_runtime_pass_by_value": false,
+            "name": "K",
+            "strides": [256, 128, 8, 1],
+            "uid": 0,
+            "virtual": false
+          },
+          {
+            "alignment": 16,
+            "data_type": "half",
+            "dims": [1, 2, 16, 8],
+            "is_runtime_pass_by_value": false,
+            "name": "Q",
+            "strides": [256, 128, 8, 1],
+            "uid": 1,
+            "virtual": false
+          },
+          {
+            "alignment": 16,
+            "data_type": "half",
+            "dims": [1, 2, 16, 8],
+            "is_runtime_pass_by_value": false,
+            "name": "SdpaFwd_0::O",
+            "strides": [256, 128, 8, 1],
+            "uid": 2,
+            "virtual": false
+          },
+          {
+            "alignment": 16,
+            "data_type": "half",
+            "dims": [1, 2, 16, 8],
+            "is_runtime_pass_by_value": false,
+            "name": "V",
+            "strides": [256, 128, 8, 1],
+            "uid": 3,
+            "virtual": false
+          }
+        ]
+      }
+    },
+    {
+      "why": "tensor_patches only, as before",
+      "case": {
+        "id": "aligned",
+        "values": {
+          "io_data_type": "half",
+          "tensors": [
+            {"uid": 0, "data_type": "half", "dims": [1, 2, 16, 8], "strides": [256, 128, 8, 1]},
+            {"uid": 1, "data_type": "half", "dims": [1, 2, 16, 8], "strides": [256, 128, 8, 1]},
+            {"uid": 2, "data_type": "half", "dims": [1, 2, 16, 8], "strides": [256, 128, 8, 1]},
+            {"uid": 3, "data_type": "half", "dims": [1, 2, 16, 8], "strides": [256, 128, 8, 1]}
+          ]
+        },
+        "metadata": {"format_version": 1, "operation": "SdpaFwd", "seed": 42},
+        "tensor_patches": [{"uid": 1, "set": {"alignment": 2}}]
+      },
+      "graph": {
+        "compute_data_type": "float",
+        "intermediate_data_type": "float",
+        "io_data_type": "half",
+        "name": "",
+        "nodes": [
+          {
+            "attributes": {
+              "alibi_mask": false,
+              "attn_scale_value": 0.125,
+              "causal_mask": false,
+              "causal_mask_bottom_right": false,
+              "diagonal_alignment": "BOTTOM_RIGHT",
+              "dropout_probability": null,
+              "generate_stats": null,
+              "implementation": "AUTO",
+              "left_bound": null,
+              "max_seq_len_kv": null,
+              "mma_core_mode": "unset",
+              "padding_mask": false,
+              "right_bound": 0
+            },
+            "compute_data_type": "float",
+            "inputs": {
+              "attn_mask_tensor_uid": null,
+              "block_mask_tensor_uid": null,
+              "descale_k_tensor_uid": null,
+              "descale_q_tensor_uid": null,
+              "descale_s_tensor_uid": null,
+              "descale_v_tensor_uid": null,
+              "dropout_mask_tensor_uid": null,
+              "dropout_scale_tensor_uid": null,
+              "k_tensor_uid": 0,
+              "offset_tensor_uid": null,
+              "page_table_k_tensor_uid": null,
+              "page_table_v_tensor_uid": null,
+              "q_tensor_uid": 1,
+              "scale_o_tensor_uid": null,
+              "scale_s_tensor_uid": null,
+              "scale_tensor_uid": null,
+              "seed_tensor_uid": null,
+              "seq_len_kv_tensor_uid": null,
+              "seq_len_q_tensor_uid": null,
+              "sink_token_tensor_uid": null,
+              "v_tensor_uid": 3
+            },
+            "name": "SdpaFwd_0",
+            "outputs": {
+              "amax_o_tensor_uid": null,
+              "amax_s_tensor_uid": null,
+              "max_tensor_uid": null,
+              "o_tensor_uid": 2,
+              "rng_dump_tensor_uid": null,
+              "stats_tensor_uid": null,
+              "sum_exp_tensor_uid": null
+            },
+            "type": "SdpaAttributes"
+          }
+        ],
+        "tensors": [
+          {
+            "alignment": 16,
+            "data_type": "half",
+            "dims": [1, 2, 16, 8],
+            "is_runtime_pass_by_value": false,
+            "name": "K",
+            "strides": [256, 128, 8, 1],
+            "uid": 0,
+            "virtual": false
+          },
+          {
+            "alignment": 2,
+            "data_type": "half",
+            "dims": [1, 2, 16, 8],
+            "is_runtime_pass_by_value": false,
+            "name": "Q",
+            "strides": [256, 128, 8, 1],
+            "uid": 1,
+            "virtual": false
+          },
+          {
+            "alignment": 16,
+            "data_type": "half",
+            "dims": [1, 2, 16, 8],
+            "is_runtime_pass_by_value": false,
+            "name": "SdpaFwd_0::O",
+            "strides": [256, 128, 8, 1],
+            "uid": 2,
+            "virtual": false
+          },
+          {
+            "alignment": 16,
+            "data_type": "half",
+            "dims": [1, 2, 16, 8],
+            "is_runtime_pass_by_value": false,
+            "name": "V",
+            "strides": [256, 128, 8, 1],
+            "uid": 3,
+            "virtual": false
+          }
+        ]
+      }
+    },
+    {
+      "why": "no patch fields: the expansion alone",
+      "case": {
+        "id": "plain",
+        "values": {
+          "io_data_type": "half",
+          "tensors": [
+            {"uid": 0, "data_type": "half", "dims": [1, 2, 16, 8], "strides": [256, 128, 8, 1]},
+            {"uid": 1, "data_type": "half", "dims": [1, 2, 16, 8], "strides": [256, 128, 8, 1]},
+            {"uid": 2, "data_type": "half", "dims": [1, 2, 16, 8], "strides": [256, 128, 8, 1]},
+            {"uid": 3, "data_type": "half", "dims": [1, 2, 16, 8], "strides": [256, 128, 8, 1]}
+          ]
+        },
+        "metadata": {"format_version": 1, "operation": "SdpaFwd", "seed": 42}
+      },
+      "graph": {
+        "compute_data_type": "float",
+        "intermediate_data_type": "float",
+        "io_data_type": "half",
+        "name": "",
+        "nodes": [
+          {
+            "attributes": {
+              "alibi_mask": false,
+              "attn_scale_value": 0.125,
+              "causal_mask": false,
+              "causal_mask_bottom_right": false,
+              "diagonal_alignment": "BOTTOM_RIGHT",
+              "dropout_probability": null,
+              "generate_stats": null,
+              "implementation": "AUTO",
+              "left_bound": null,
+              "max_seq_len_kv": null,
+              "mma_core_mode": "unset",
+              "padding_mask": false,
+              "right_bound": 0
+            },
+            "compute_data_type": "float",
+            "inputs": {
+              "attn_mask_tensor_uid": null,
+              "block_mask_tensor_uid": null,
+              "descale_k_tensor_uid": null,
+              "descale_q_tensor_uid": null,
+              "descale_s_tensor_uid": null,
+              "descale_v_tensor_uid": null,
+              "dropout_mask_tensor_uid": null,
+              "dropout_scale_tensor_uid": null,
+              "k_tensor_uid": 0,
+              "offset_tensor_uid": null,
+              "page_table_k_tensor_uid": null,
+              "page_table_v_tensor_uid": null,
+              "q_tensor_uid": 1,
+              "scale_o_tensor_uid": null,
+              "scale_s_tensor_uid": null,
+              "scale_tensor_uid": null,
+              "seed_tensor_uid": null,
+              "seq_len_kv_tensor_uid": null,
+              "seq_len_q_tensor_uid": null,
+              "sink_token_tensor_uid": null,
+              "v_tensor_uid": 3
+            },
+            "name": "SdpaFwd_0",
+            "outputs": {
+              "amax_o_tensor_uid": null,
+              "amax_s_tensor_uid": null,
+              "max_tensor_uid": null,
+              "o_tensor_uid": 2,
+              "rng_dump_tensor_uid": null,
+              "stats_tensor_uid": null,
+              "sum_exp_tensor_uid": null
+            },
+            "type": "SdpaAttributes"
+          }
+        ],
+        "tensors": [
+          {
+            "alignment": 16,
+            "data_type": "half",
+            "dims": [1, 2, 16, 8],
+            "is_runtime_pass_by_value": false,
+            "name": "K",
+            "strides": [256, 128, 8, 1],
+            "uid": 0,
+            "virtual": false
+          },
+          {
+            "alignment": 16,
+            "data_type": "half",
+            "dims": [1, 2, 16, 8],
+            "is_runtime_pass_by_value": false,
+            "name": "Q",
+            "strides": [256, 128, 8, 1],
+            "uid": 1,
+            "virtual": false
+          },
+          {
+            "alignment": 16,
+            "data_type": "half",
+            "dims": [1, 2, 16, 8],
+            "is_runtime_pass_by_value": false,
+            "name": "SdpaFwd_0::O",
+            "strides": [256, 128, 8, 1],
+            "uid": 2,
+            "virtual": false
+          },
+          {
+            "alignment": 16,
+            "data_type": "half",
+            "dims": [1, 2, 16, 8],
+            "is_runtime_pass_by_value": false,
+            "name": "V",
+            "strides": [256, 128, 8, 1],
+            "uid": 3,
+            "virtual": false
+          }
+        ]
+      }
+    },
+    {
+      "why": "empty arrays change nothing",
+      "case": {
+        "id": "empty",
+        "values": {
+          "io_data_type": "half",
+          "tensors": [
+            {"uid": 0, "data_type": "half", "dims": [1, 2, 16, 8], "strides": [256, 128, 8, 1]},
+            {"uid": 1, "data_type": "half", "dims": [1, 2, 16, 8], "strides": [256, 128, 8, 1]},
+            {"uid": 2, "data_type": "half", "dims": [1, 2, 16, 8], "strides": [256, 128, 8, 1]},
+            {"uid": 3, "data_type": "half", "dims": [1, 2, 16, 8], "strides": [256, 128, 8, 1]}
+          ]
+        },
+        "metadata": {"format_version": 1, "operation": "SdpaFwd", "seed": 42},
+        "add_tensors": [],
+        "node_patches": []
+      },
+      "graph": {
+        "compute_data_type": "float",
+        "intermediate_data_type": "float",
+        "io_data_type": "half",
+        "name": "",
+        "nodes": [
+          {
+            "attributes": {
+              "alibi_mask": false,
+              "attn_scale_value": 0.125,
+              "causal_mask": false,
+              "causal_mask_bottom_right": false,
+              "diagonal_alignment": "BOTTOM_RIGHT",
+              "dropout_probability": null,
+              "generate_stats": null,
+              "implementation": "AUTO",
+              "left_bound": null,
+              "max_seq_len_kv": null,
+              "mma_core_mode": "unset",
+              "padding_mask": false,
+              "right_bound": 0
+            },
+            "compute_data_type": "float",
+            "inputs": {
+              "attn_mask_tensor_uid": null,
+              "block_mask_tensor_uid": null,
+              "descale_k_tensor_uid": null,
+              "descale_q_tensor_uid": null,
+              "descale_s_tensor_uid": null,
+              "descale_v_tensor_uid": null,
+              "dropout_mask_tensor_uid": null,
+              "dropout_scale_tensor_uid": null,
+              "k_tensor_uid": 0,
+              "offset_tensor_uid": null,
+              "page_table_k_tensor_uid": null,
+              "page_table_v_tensor_uid": null,
+              "q_tensor_uid": 1,
+              "scale_o_tensor_uid": null,
+              "scale_s_tensor_uid": null,
+              "scale_tensor_uid": null,
+              "seed_tensor_uid": null,
+              "seq_len_kv_tensor_uid": null,
+              "seq_len_q_tensor_uid": null,
+              "sink_token_tensor_uid": null,
+              "v_tensor_uid": 3
+            },
+            "name": "SdpaFwd_0",
+            "outputs": {
+              "amax_o_tensor_uid": null,
+              "amax_s_tensor_uid": null,
+              "max_tensor_uid": null,
+              "o_tensor_uid": 2,
+              "rng_dump_tensor_uid": null,
+              "stats_tensor_uid": null,
+              "sum_exp_tensor_uid": null
+            },
+            "type": "SdpaAttributes"
+          }
+        ],
+        "tensors": [
+          {
+            "alignment": 16,
+            "data_type": "half",
+            "dims": [1, 2, 16, 8],
+            "is_runtime_pass_by_value": false,
+            "name": "K",
+            "strides": [256, 128, 8, 1],
+            "uid": 0,
+            "virtual": false
+          },
+          {
+            "alignment": 16,
+            "data_type": "half",
+            "dims": [1, 2, 16, 8],
+            "is_runtime_pass_by_value": false,
+            "name": "Q",
+            "strides": [256, 128, 8, 1],
+            "uid": 1,
+            "virtual": false
+          },
+          {
+            "alignment": 16,
+            "data_type": "half",
+            "dims": [1, 2, 16, 8],
+            "is_runtime_pass_by_value": false,
+            "name": "SdpaFwd_0::O",
+            "strides": [256, 128, 8, 1],
+            "uid": 2,
+            "virtual": false
+          },
+          {
+            "alignment": 16,
+            "data_type": "half",
+            "dims": [1, 2, 16, 8],
+            "is_runtime_pass_by_value": false,
+            "name": "V",
+            "strides": [256, 128, 8, 1],
+            "uid": 3,
+            "virtual": false
+          }
+        ]
+      }
+    }
+  ],
+  "rejects": [
+    {
+      "why": "unknown node name",
+      "case": {
+        "id": "e_node",
+        "values": {
+          "io_data_type": "half",
+          "tensors": [
+            {"uid": 0, "data_type": "half", "dims": [1, 2, 16, 8], "strides": [256, 128, 8, 1]},
+            {"uid": 1, "data_type": "half", "dims": [1, 2, 16, 8], "strides": [256, 128, 8, 1]},
+            {"uid": 2, "data_type": "half", "dims": [1, 2, 16, 8], "strides": [256, 128, 8, 1]},
+            {"uid": 3, "data_type": "half", "dims": [1, 2, 16, 8], "strides": [256, 128, 8, 1]}
+          ]
+        },
+        "metadata": {"format_version": 1, "operation": "SdpaFwd", "seed": 42},
+        "node_patches": [{"node": "Sdpa", "section": "attributes", "set": {"left_bound": 3}}]
+      },
+      "error": "sweep case 'e_node': node_patches[0]: node 'Sdpa' not found in expanded graph"
+    },
+    {
+      "why": "node index out of range",
+      "case": {
+        "id": "e_index",
+        "values": {
+          "io_data_type": "half",
+          "tensors": [
+            {"uid": 0, "data_type": "half", "dims": [1, 2, 16, 8], "strides": [256, 128, 8, 1]},
+            {"uid": 1, "data_type": "half", "dims": [1, 2, 16, 8], "strides": [256, 128, 8, 1]},
+            {"uid": 2, "data_type": "half", "dims": [1, 2, 16, 8], "strides": [256, 128, 8, 1]},
+            {"uid": 3, "data_type": "half", "dims": [1, 2, 16, 8], "strides": [256, 128, 8, 1]}
+          ]
+        },
+        "metadata": {"format_version": 1, "operation": "SdpaFwd", "seed": 42},
+        "node_patches": [{"node": 1, "section": "attributes", "set": {"left_bound": 3}}]
+      },
+      "error": "sweep case 'e_index': node_patches[0]: node index 1 is out of range (nodes[] has 1 entries)"
+    },
+    {
+      "why": "negative node index",
+      "case": {
+        "id": "e_negative",
+        "values": {
+          "io_data_type": "half",
+          "tensors": [
+            {"uid": 0, "data_type": "half", "dims": [1, 2, 16, 8], "strides": [256, 128, 8, 1]},
+            {"uid": 1, "data_type": "half", "dims": [1, 2, 16, 8], "strides": [256, 128, 8, 1]},
+            {"uid": 2, "data_type": "half", "dims": [1, 2, 16, 8], "strides": [256, 128, 8, 1]},
+            {"uid": 3, "data_type": "half", "dims": [1, 2, 16, 8], "strides": [256, 128, 8, 1]}
+          ]
+        },
+        "metadata": {"format_version": 1, "operation": "SdpaFwd", "seed": 42},
+        "node_patches": [{"node": -1, "section": "attributes", "set": {"left_bound": 3}}]
+      },
+      "error": "sweep case 'e_negative': node_patches[0]: node index -1 is out of range (nodes[] has 1 entries)"
+    },
+    {
+      "why": "a node that is neither a name nor an index",
+      "case": {
+        "id": "e_node_type",
+        "values": {
+          "io_data_type": "half",
+          "tensors": [
+            {"uid": 0, "data_type": "half", "dims": [1, 2, 16, 8], "strides": [256, 128, 8, 1]},
+            {"uid": 1, "data_type": "half", "dims": [1, 2, 16, 8], "strides": [256, 128, 8, 1]},
+            {"uid": 2, "data_type": "half", "dims": [1, 2, 16, 8], "strides": [256, 128, 8, 1]},
+            {"uid": 3, "data_type": "half", "dims": [1, 2, 16, 8], "strides": [256, 128, 8, 1]}
+          ]
+        },
+        "metadata": {"format_version": 1, "operation": "SdpaFwd", "seed": 42},
+        "node_patches": [{"node": true, "section": "attributes", "set": {"left_bound": 3}}]
+      },
+      "error": "sweep case 'e_node_type': node_patches[0]: node must be a node name or an index"
+    },
+    {
+      "why": "unknown section",
+      "case": {
+        "id": "e_section",
+        "values": {
+          "io_data_type": "half",
+          "tensors": [
+            {"uid": 0, "data_type": "half", "dims": [1, 2, 16, 8], "strides": [256, 128, 8, 1]},
+            {"uid": 1, "data_type": "half", "dims": [1, 2, 16, 8], "strides": [256, 128, 8, 1]},
+            {"uid": 2, "data_type": "half", "dims": [1, 2, 16, 8], "strides": [256, 128, 8, 1]},
+            {"uid": 3, "data_type": "half", "dims": [1, 2, 16, 8], "strides": [256, 128, 8, 1]}
+          ]
+        },
+        "metadata": {"format_version": 1, "operation": "SdpaFwd", "seed": 42},
+        "node_patches": [{"node": "SdpaFwd_0", "section": "attribute", "set": {"left_bound": 3}}]
+      },
+      "error": "sweep case 'e_section': node_patches[0]: unknown section \"attribute\" (expected attributes, parameters, inputs or outputs)"
+    },
+    {
+      "why": "a section the node does not have",
+      "case": {
+        "id": "e_missing_section",
+        "values": {
+          "io_data_type": "half",
+          "tensors": [
+            {"uid": 0, "data_type": "half", "dims": [1, 2, 16, 8], "strides": [256, 128, 8, 1]},
+            {"uid": 1, "data_type": "half", "dims": [1, 2, 16, 8], "strides": [256, 128, 8, 1]},
+            {"uid": 2, "data_type": "half", "dims": [1, 2, 16, 8], "strides": [256, 128, 8, 1]},
+            {"uid": 3, "data_type": "half", "dims": [1, 2, 16, 8], "strides": [256, 128, 8, 1]}
+          ]
+        },
+        "metadata": {"format_version": 1, "operation": "SdpaFwd", "seed": 42},
+        "node_patches": [{"node": "SdpaFwd_0", "section": "parameters", "set": {"left_bound": 3}}]
+      },
+      "error": "sweep case 'e_missing_section': node_patches[0]: node 'SdpaFwd_0' has no 'parameters' section"
+    },
+    {
+      "why": "unknown key in set (the first in key order is named)",
+      "case": {
+        "id": "e_key",
+        "values": {
+          "io_data_type": "half",
+          "tensors": [
+            {"uid": 0, "data_type": "half", "dims": [1, 2, 16, 8], "strides": [256, 128, 8, 1]},
+            {"uid": 1, "data_type": "half", "dims": [1, 2, 16, 8], "strides": [256, 128, 8, 1]},
+            {"uid": 2, "data_type": "half", "dims": [1, 2, 16, 8], "strides": [256, 128, 8, 1]},
+            {"uid": 3, "data_type": "half", "dims": [1, 2, 16, 8], "strides": [256, 128, 8, 1]}
+          ]
+        },
+        "metadata": {"format_version": 1, "operation": "SdpaFwd", "seed": 42},
+        "node_patches": [
+          {"node": "SdpaFwd_0", "section": "attributes", "set": {"zeta": 1, "generate_stat": true}}
+        ]
+      },
+      "error": "sweep case 'e_key': node_patches[0]: set key 'generate_stat' is not in the 'attributes' section of node 'SdpaFwd_0' (set only overwrites existing keys)"
+    },
+    {
+      "why": "unknown key in remove",
+      "case": {
+        "id": "e_remove",
+        "values": {
+          "io_data_type": "half",
+          "tensors": [
+            {"uid": 0, "data_type": "half", "dims": [1, 2, 16, 8], "strides": [256, 128, 8, 1]},
+            {"uid": 1, "data_type": "half", "dims": [1, 2, 16, 8], "strides": [256, 128, 8, 1]},
+            {"uid": 2, "data_type": "half", "dims": [1, 2, 16, 8], "strides": [256, 128, 8, 1]},
+            {"uid": 3, "data_type": "half", "dims": [1, 2, 16, 8], "strides": [256, 128, 8, 1]}
+          ]
+        },
+        "metadata": {"format_version": 1, "operation": "SdpaFwd", "seed": 42},
+        "node_patches": [
+          {"node": "SdpaFwd_0", "section": "attributes", "remove": ["generate_stat"]}
+        ]
+      },
+      "error": "sweep case 'e_remove': node_patches[0]: remove key \"generate_stat\" is not in the 'attributes' section of node 'SdpaFwd_0'"
+    },
+    {
+      "why": "remove entry that is not a string",
+      "case": {
+        "id": "e_remove_type",
+        "values": {
+          "io_data_type": "half",
+          "tensors": [
+            {"uid": 0, "data_type": "half", "dims": [1, 2, 16, 8], "strides": [256, 128, 8, 1]},
+            {"uid": 1, "data_type": "half", "dims": [1, 2, 16, 8], "strides": [256, 128, 8, 1]},
+            {"uid": 2, "data_type": "half", "dims": [1, 2, 16, 8], "strides": [256, 128, 8, 1]},
+            {"uid": 3, "data_type": "half", "dims": [1, 2, 16, 8], "strides": [256, 128, 8, 1]}
+          ]
+        },
+        "metadata": {"format_version": 1, "operation": "SdpaFwd", "seed": 42},
+        "node_patches": [{"node": "SdpaFwd_0", "section": "attributes", "remove": [1]}]
+      },
+      "error": "sweep case 'e_remove_type': node_patches[0]: remove key 1 is not in the 'attributes' section of node 'SdpaFwd_0'"
+    },
+    {
+      "why": "entry with neither set nor remove",
+      "case": {
+        "id": "e_neither",
+        "values": {
+          "io_data_type": "half",
+          "tensors": [
+            {"uid": 0, "data_type": "half", "dims": [1, 2, 16, 8], "strides": [256, 128, 8, 1]},
+            {"uid": 1, "data_type": "half", "dims": [1, 2, 16, 8], "strides": [256, 128, 8, 1]},
+            {"uid": 2, "data_type": "half", "dims": [1, 2, 16, 8], "strides": [256, 128, 8, 1]},
+            {"uid": 3, "data_type": "half", "dims": [1, 2, 16, 8], "strides": [256, 128, 8, 1]}
+          ]
+        },
+        "metadata": {"format_version": 1, "operation": "SdpaFwd", "seed": 42},
+        "node_patches": [{"node": "SdpaFwd_0", "section": "attributes"}]
+      },
+      "error": "sweep case 'e_neither': node_patches[0] has neither set nor remove"
+    },
+    {
+      "why": "entry with an unknown field",
+      "case": {
+        "id": "e_field",
+        "values": {
+          "io_data_type": "half",
+          "tensors": [
+            {"uid": 0, "data_type": "half", "dims": [1, 2, 16, 8], "strides": [256, 128, 8, 1]},
+            {"uid": 1, "data_type": "half", "dims": [1, 2, 16, 8], "strides": [256, 128, 8, 1]},
+            {"uid": 2, "data_type": "half", "dims": [1, 2, 16, 8], "strides": [256, 128, 8, 1]},
+            {"uid": 3, "data_type": "half", "dims": [1, 2, 16, 8], "strides": [256, 128, 8, 1]}
+          ]
+        },
+        "metadata": {"format_version": 1, "operation": "SdpaFwd", "seed": 42},
+        "node_patches": [
+          {"node": "SdpaFwd_0", "section": "attributes", "set": {"left_bound": 3}, "when": true}
+        ]
+      },
+      "error": "sweep case 'e_field': node_patches[0]: unknown key 'when'"
+    },
+    {
+      "why": "entry without a section",
+      "case": {
+        "id": "e_no_section",
+        "values": {
+          "io_data_type": "half",
+          "tensors": [
+            {"uid": 0, "data_type": "half", "dims": [1, 2, 16, 8], "strides": [256, 128, 8, 1]},
+            {"uid": 1, "data_type": "half", "dims": [1, 2, 16, 8], "strides": [256, 128, 8, 1]},
+            {"uid": 2, "data_type": "half", "dims": [1, 2, 16, 8], "strides": [256, 128, 8, 1]},
+            {"uid": 3, "data_type": "half", "dims": [1, 2, 16, 8], "strides": [256, 128, 8, 1]}
+          ]
+        },
+        "metadata": {"format_version": 1, "operation": "SdpaFwd", "seed": 42},
+        "node_patches": [{"node": "SdpaFwd_0", "set": {"left_bound": 3}}]
+      },
+      "error": "sweep case 'e_no_section': node_patches[0] must be an object with node and section"
+    },
+    {
+      "why": "node_patches that is not an array",
+      "case": {
+        "id": "e_not_array",
+        "values": {
+          "io_data_type": "half",
+          "tensors": [
+            {"uid": 0, "data_type": "half", "dims": [1, 2, 16, 8], "strides": [256, 128, 8, 1]},
+            {"uid": 1, "data_type": "half", "dims": [1, 2, 16, 8], "strides": [256, 128, 8, 1]},
+            {"uid": 2, "data_type": "half", "dims": [1, 2, 16, 8], "strides": [256, 128, 8, 1]},
+            {"uid": 3, "data_type": "half", "dims": [1, 2, 16, 8], "strides": [256, 128, 8, 1]}
+          ]
+        },
+        "metadata": {"format_version": 1, "operation": "SdpaFwd", "seed": 42},
+        "node_patches": {"node": "SdpaFwd_0"}
+      },
+      "error": "sweep case 'e_not_array': node_patches must be an array"
+    },
+    {
+      "why": "duplicate uid against the template",
+      "case": {
+        "id": "e_dup",
+        "values": {
+          "io_data_type": "half",
+          "tensors": [
+            {"uid": 0, "data_type": "half", "dims": [1, 2, 16, 8], "strides": [256, 128, 8, 1]},
+            {"uid": 1, "data_type": "half", "dims": [1, 2, 16, 8], "strides": [256, 128, 8, 1]},
+            {"uid": 2, "data_type": "half", "dims": [1, 2, 16, 8], "strides": [256, 128, 8, 1]},
+            {"uid": 3, "data_type": "half", "dims": [1, 2, 16, 8], "strides": [256, 128, 8, 1]}
+          ]
+        },
+        "metadata": {"format_version": 1, "operation": "SdpaFwd", "seed": 42},
+        "add_tensors": [
+          {
+            "alignment": 16,
+            "data_type": "float",
+            "dims": [1, 2, 16, 1],
+            "is_runtime_pass_by_value": false,
+            "name": "SdpaFwd_0::Stats",
+            "ragged_offset_multiplier": 1,
+            "strides": [32, 16, 1, 1],
+            "uid": 0,
+            "virtual": false
+          }
+        ]
+      },
+      "error": "sweep case 'e_dup': add_tensors[0]: uid 0 already exists in the graph"
+    },
+    {
+      "why": "duplicate uid between two added tensors",
+      "case": {
+        "id": "e_dup_added",
+        "values": {
+          "io_data_type": "half",
+          "tensors": [
+            {"uid": 0, "data_type": "half", "dims": [1, 2, 16, 8], "strides": [256, 128, 8, 1]},
+            {"uid": 1, "data_type": "half", "dims": [1, 2, 16, 8], "strides": [256, 128, 8, 1]},
+            {"uid": 2, "data_type": "half", "dims": [1, 2, 16, 8], "strides": [256, 128, 8, 1]},
+            {"uid": 3, "data_type": "half", "dims": [1, 2, 16, 8], "strides": [256, 128, 8, 1]}
+          ]
+        },
+        "metadata": {"format_version": 1, "operation": "SdpaFwd", "seed": 42},
+        "add_tensors": [
+          {
+            "alignment": 16,
+            "data_type": "float",
+            "dims": [1, 2, 16, 1],
+            "is_runtime_pass_by_value": false,
+            "name": "SdpaFwd_0::Stats",
+            "ragged_offset_multiplier": 1,
+            "strides": [32, 16, 1, 1],
+            "uid": 4,
+            "virtual": false
+          },
+          {
+            "alignment": 16,
+            "data_type": "float",
+            "dims": [1, 2, 16, 1],
+            "is_runtime_pass_by_value": false,
+            "name": "SdpaFwd_0::Stats",
+            "ragged_offset_multiplier": 1,
+            "strides": [32, 16, 1, 1],
+            "uid": 4,
+            "virtual": false
+          }
+        ]
+      },
+      "error": "sweep case 'e_dup_added': add_tensors[1]: uid 4 already exists in the graph"
+    },
+    {
+      "why": "added tensor without an integer uid",
+      "case": {
+        "id": "e_no_uid",
+        "values": {
+          "io_data_type": "half",
+          "tensors": [
+            {"uid": 0, "data_type": "half", "dims": [1, 2, 16, 8], "strides": [256, 128, 8, 1]},
+            {"uid": 1, "data_type": "half", "dims": [1, 2, 16, 8], "strides": [256, 128, 8, 1]},
+            {"uid": 2, "data_type": "half", "dims": [1, 2, 16, 8], "strides": [256, 128, 8, 1]},
+            {"uid": 3, "data_type": "half", "dims": [1, 2, 16, 8], "strides": [256, 128, 8, 1]}
+          ]
+        },
+        "metadata": {"format_version": 1, "operation": "SdpaFwd", "seed": 42},
+        "add_tensors": [{"name": "x"}]
+      },
+      "error": "sweep case 'e_no_uid': add_tensors[0] must be an object with an integer uid"
+    },
+    {
+      "why": "added tensor that is not an object",
+      "case": {
+        "id": "e_not_object",
+        "values": {
+          "io_data_type": "half",
+          "tensors": [
+            {"uid": 0, "data_type": "half", "dims": [1, 2, 16, 8], "strides": [256, 128, 8, 1]},
+            {"uid": 1, "data_type": "half", "dims": [1, 2, 16, 8], "strides": [256, 128, 8, 1]},
+            {"uid": 2, "data_type": "half", "dims": [1, 2, 16, 8], "strides": [256, 128, 8, 1]},
+            {"uid": 3, "data_type": "half", "dims": [1, 2, 16, 8], "strides": [256, 128, 8, 1]}
+          ]
+        },
+        "metadata": {"format_version": 1, "operation": "SdpaFwd", "seed": 42},
+        "add_tensors": [7]
+      },
+      "error": "sweep case 'e_not_object': add_tensors[0] must be an object with an integer uid"
+    },
+    {
+      "why": "add_tensors that is not an array",
+      "case": {
+        "id": "e_add_not_array",
+        "values": {
+          "io_data_type": "half",
+          "tensors": [
+            {"uid": 0, "data_type": "half", "dims": [1, 2, 16, 8], "strides": [256, 128, 8, 1]},
+            {"uid": 1, "data_type": "half", "dims": [1, 2, 16, 8], "strides": [256, 128, 8, 1]},
+            {"uid": 2, "data_type": "half", "dims": [1, 2, 16, 8], "strides": [256, 128, 8, 1]},
+            {"uid": 3, "data_type": "half", "dims": [1, 2, 16, 8], "strides": [256, 128, 8, 1]}
+          ]
+        },
+        "metadata": {"format_version": 1, "operation": "SdpaFwd", "seed": 42},
+        "add_tensors": {"uid": 4}
+      },
+      "error": "sweep case 'e_add_not_array': add_tensors must be an array"
+    },
+    {
+      "why": "a tensor_patch on a uid that nothing added",
+      "case": {
+        "id": "e_unadded",
+        "values": {
+          "io_data_type": "half",
+          "tensors": [
+            {"uid": 0, "data_type": "half", "dims": [1, 2, 16, 8], "strides": [256, 128, 8, 1]},
+            {"uid": 1, "data_type": "half", "dims": [1, 2, 16, 8], "strides": [256, 128, 8, 1]},
+            {"uid": 2, "data_type": "half", "dims": [1, 2, 16, 8], "strides": [256, 128, 8, 1]},
+            {"uid": 3, "data_type": "half", "dims": [1, 2, 16, 8], "strides": [256, 128, 8, 1]}
+          ]
+        },
+        "metadata": {"format_version": 1, "operation": "SdpaFwd", "seed": 42},
+        "tensor_patches": [{"uid": 4, "set": {"alignment": 4}}]
+      },
+      "error": "sweep case 'e_unadded': tensor_patch uid 4 not found in expanded graph"
+    },
+    {
+      "why": "tensor_patch without a uid",
+      "case": {
+        "id": "e_tp_uid",
+        "values": {
+          "io_data_type": "half",
+          "tensors": [
+            {"uid": 0, "data_type": "half", "dims": [1, 2, 16, 8], "strides": [256, 128, 8, 1]},
+            {"uid": 1, "data_type": "half", "dims": [1, 2, 16, 8], "strides": [256, 128, 8, 1]},
+            {"uid": 2, "data_type": "half", "dims": [1, 2, 16, 8], "strides": [256, 128, 8, 1]},
+            {"uid": 3, "data_type": "half", "dims": [1, 2, 16, 8], "strides": [256, 128, 8, 1]}
+          ]
+        },
+        "metadata": {"format_version": 1, "operation": "SdpaFwd", "seed": 42},
+        "tensor_patches": [{"set": {"alignment": 4}}]
+      },
+      "error": "sweep case 'e_tp_uid': tensor_patch entry is missing an integer uid"
+    },
+    {
+      "why": "the case has no id",
+      "case": {
+        "values": {
+          "io_data_type": "half",
+          "tensors": [
+            {"uid": 0, "data_type": "half", "dims": [1, 2, 16, 8], "strides": [256, 128, 8, 1]},
+            {"uid": 1, "data_type": "half", "dims": [1, 2, 16, 8], "strides": [256, 128, 8, 1]},
+            {"uid": 2, "data_type": "half", "dims": [1, 2, 16, 8], "strides": [256, 128, 8, 1]},
+            {"uid": 3, "data_type": "half", "dims": [1, 2, 16, 8], "strides": [256, 128, 8, 1]}
+          ]
+        },
+        "metadata": {"format_version": 1, "operation": "SdpaFwd", "seed": 42},
+        "node_patches": [{"node": "nope", "section": "attributes", "set": {"left_bound": 3}}]
+      },
+      "error": "sweep case '<no id>': node_patches[0]: node 'nope' not found in expanded graph"
+    }
+  ]
+}

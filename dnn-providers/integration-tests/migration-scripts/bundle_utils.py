@@ -241,18 +241,23 @@ def canonical_uid_map_by_name(graph: dict) -> dict:
 def remap_meta_inputs(meta: dict, m: dict) -> dict:
     """Deep copy of metadata with every tensor UID remapped via ``m``.
 
-    ``inputs`` is keyed by stringified tensor UID, and each ``aliases`` entry
+    ``inputs`` is keyed by stringified tensor UID, ``placement_uid`` names the
+    tensor a misaligned placement targets, and each ``aliases`` entry
     (``uid``, ``of``), ``start_offsets`` entry (``uid``) and ``live_rows`` entry
     (``uid``, ``lengths``, ``like``) names tensors by UID, so they must be
     remapped in lockstep with the graph whenever UIDs are canonicalized —
-    otherwise a tensor's fill spec, alias, start offset or live rows would end up
-    attached to the wrong tensor after remapping. Entries that are not
-    integer UIDs are left as they are; the harness rejects them at load.
+    otherwise a tensor's fill spec, misaligned pointer, alias, start offset or
+    live rows would end up attached to the wrong tensor after remapping. Entries
+    that are not integer UIDs are left as they are; the harness rejects them at
+    load.
     """
     out = copy.deepcopy(meta)
     inputs = out.get("inputs")
     if isinstance(inputs, dict):
         out["inputs"] = {str(m.get(int(k), int(k))): v for k, v in inputs.items()}
+    uid = out.get("placement_uid")
+    if isinstance(uid, int) and not isinstance(uid, bool):
+        out["placement_uid"] = m.get(uid, uid)
     for section, keys in (
         ("aliases", ("uid", "of")),
         ("start_offsets", ("uid",)),
@@ -901,7 +906,7 @@ def apply_tensor_patches(graph: dict, case: dict, *, error_cls=ValueError):
         if target is None:
             raise error_cls(f"tensor_patch uid {uid} not found in expanded graph")
         if isinstance(patch.get("set"), dict):
-            target.update(patch["set"])
+            target.update(copy.deepcopy(patch["set"]))
         if isinstance(patch.get("remove"), list):
             for key in patch["remove"]:
                 if isinstance(key, str):
@@ -1297,11 +1302,34 @@ def _case_identity(entry: dict) -> dict:
     otherwise such cases would silently collide.
     """
     meta = entry.get("metadata", {})
-    return {
+    identity = {
         "values": entry.get("values", {}),
         "inputs": meta.get("inputs", {}),
         "seed": meta.get("seed"),
     }
+    # A declared alignment (an alignment entry of tensor_patches) and a placement make cases
+    # with one graph distinct tests. They ride the hash only when present. The other
+    # tensor_patches shipped sweeps carry (is_runtime_pass_by_value, remove value) stay out
+    # of it, so no existing case id changes (test_every_shipped_case_id_is_unchanged).
+    aligned = [
+        {"uid": p.get("uid"), "alignment": p["set"]["alignment"]}
+        for p in entry.get("tensor_patches") or []
+        if isinstance(p, dict)
+        and isinstance(p.get("set"), dict)
+        and "alignment" in p["set"]
+    ]
+    if aligned:
+        identity["alignment"] = aligned
+    # add_tensors and node_patches are new fields no shipped case has. A case that
+    # carries them is a different graph from the case without, so they ride the hash, again
+    # only when present.
+    for key in ("add_tensors", "node_patches"):
+        if entry.get(key):
+            identity[key] = entry[key]
+    for key in ("placement", "placement_uid"):
+        if key in meta:
+            identity[key] = meta[key]
+    return identity
 
 
 def _case_hash(entry: dict) -> str:

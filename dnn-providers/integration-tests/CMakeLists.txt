@@ -204,11 +204,20 @@ if(Python3_FOUND)
     )
     set(HIPDNN_IT_SUPPORT_FEATURES_TEST hipdnn_support_features_python_tests)
 
+    # The gauntlet fuzz driver's own tests: space evaluator, sampler, and the driver
+    # against a stub binary. No GPU and no built binary are involved.
+    add_test(
+        NAME hipdnn_gauntlet_python_tests
+        COMMAND ${Python3_EXECUTABLE} -m pytest -q -p no:cacheprovider
+                ${CMAKE_CURRENT_SOURCE_DIR}/gauntlet/test_gauntlet.py
+    )
+    set(HIPDNN_IT_GAUNTLET_TEST hipdnn_gauntlet_python_tests)
+
     # None of these suites uses a third-party plugin; don't let a broken one
     # installed in the developer's environment fail them.
     set_tests_properties(
         hipdnn_bundle_discovery_python_tests hipdnn_support_matrix_renderer_python_tests
-        hipdnn_support_features_python_tests
+        hipdnn_support_features_python_tests hipdnn_gauntlet_python_tests
         PROPERTIES ENVIRONMENT "PYTEST_DISABLE_PLUGIN_AUTOLOAD=1"
     )
 
@@ -269,10 +278,15 @@ add_executable(${INTEGRATION_TESTS_EXE}
     src/harness/CpuReferenceGraphExecutorAdapter.cpp
     src/harness/ReferenceExecutorPool.cpp
     src/harness/ReferenceGraphExecutorFactory.cpp
+    src/harness/bundle/CandidateListing.cpp
+    src/harness/bundle/CaseOutcome.cpp
     src/harness/bundle/FrontendGraphEngineRunner.cpp
+    src/harness/bundle/FrontendKernelLogControl.cpp
     src/harness/bundle/GraphSession.cpp
     src/harness/bundle/HarnessDependencies.cpp
     src/harness/bundle/IntegrationBundleVerificationHarness.cpp
+    src/harness/bundle/KernelLogTap.cpp
+    src/harness/bundle/OutcomeReportLog.cpp
     src/harness/bundle/OutputComparison.cpp
     src/harness/bundle/ProductionPolicy.cpp
     src/harness/bundle/SupportClaimReport.cpp
@@ -285,6 +299,7 @@ add_executable(${INTEGRATION_TESTS_EXE}
     src/harness/input-init/FillInputs.cpp
     src/harness/input-init/ResampleBackwardInputs.cpp
     src/harness/input-init/SdpaBackwardInputs.cpp
+    src/harness/input-init/PhiloxBackward.cpp
 )
 
 # Golden-data validation: validates our checked-in .bin data against our own
@@ -304,7 +319,9 @@ add_executable(${GOLDEN_DATA_TESTS_EXE}
     src/golden_data_main.cpp
     src/harness/CpuReferenceGraphExecutorAdapter.cpp
     src/harness/ReferenceExecutorPool.cpp
+    src/harness/bundle/CaseOutcome.cpp
     src/harness/bundle/GraphSession.cpp
+    src/harness/bundle/OutcomeReportLog.cpp
     src/harness/bundle/OutputComparison.cpp
     src/harness/bundle/SupportClaimReport.cpp
     src/harness/bundle/SupportClaims.cpp
@@ -315,6 +332,7 @@ add_executable(${GOLDEN_DATA_TESTS_EXE}
     src/harness/input-init/FillInputs.cpp
     src/harness/input-init/ResampleBackwardInputs.cpp
     src/harness/input-init/SdpaBackwardInputs.cpp
+    src/harness/input-init/PhiloxBackward.cpp
     src/harness/reference-validation/BundleReferenceValidationHarness.cpp
     src/harness/reference-validation/GoldenDataPlan.cpp
     src/harness/reference-validation/GoldenDataRegistration.cpp
@@ -424,6 +442,9 @@ if(EXISTS "${HIPDNN_IT_GTEST_CATEGORIES_YAML}"
     endif()
     if(HIPDNN_IT_SDPA_BWD_GENERATOR_TEST)
         _apply_provider_ctest_category_labels(${HIPDNN_IT_SDPA_BWD_GENERATOR_TEST})
+    endif()
+    if(HIPDNN_IT_GAUNTLET_TEST)
+        _apply_provider_ctest_category_labels(${HIPDNN_IT_GAUNTLET_TEST})
     endif()
     _apply_provider_ctest_category_labels(${HIPDNN_IT_BENCHMARK_REFERENCE_REFUSAL_TEST})
 else()

@@ -11,6 +11,7 @@
 #   - the generated <project>_test_name_validation meta-test (see
 #     dnn-providers/cmake/Tests.cmake _create_test_name_validation_target_internal)
 #   - hipdnn_bundle_verifier_python_tests (a Python golden-bundle verifier)
+#   - hipdnn_gauntlet_python_tests (the gauntlet fuzz driver's own pytest suite)
 #   - hipdnn_integration_tests_benchmark_reference_refusal (a plugin-free check
 #     that --benchmark-reference is refused with a mode that runs no reference)
 # Without an entry here a pre-registered test carries no labels and is never
@@ -34,6 +35,7 @@ test_categories:
       - "hipdnn_bundle_discovery_python_tests"
       - "hipdnn_support_matrix_renderer_python_tests"
       - "hipdnn_support_features_python_tests"
+      - "hipdnn_gauntlet_python_tests"
       - "hipdnn_golden_sdpa_fwd_generator_python_tests"
       - "hipdnn_golden_sdpa_bwd_generator_python_tests"
       - "hipdnn_golden_sdpa_fwd_paged_generator_python_tests"
@@ -55,6 +57,7 @@ test_categories:
       - "hipdnn_bundle_discovery_python_tests"
       - "hipdnn_support_matrix_renderer_python_tests"
       - "hipdnn_support_features_python_tests"
+      - "hipdnn_gauntlet_python_tests"
       - "hipdnn_golden_sdpa_fwd_generator_python_tests"
       - "hipdnn_golden_sdpa_bwd_generator_python_tests"
       - "hipdnn_golden_sdpa_fwd_paged_generator_python_tests"

@@ -21,6 +21,7 @@
 #include <hipdnn_test_sdk/utilities/VariantPackUtils.hpp>
 
 #include "harness/ReferenceCapabilityError.hpp"
+#include "harness/input-init/PhiloxBackward.hpp"
 
 namespace hipdnn_integration_tests
 {
@@ -66,7 +67,8 @@ struct ForwardGraph
 
 ForwardGraph buildForwardGraph(const fb::Graph& graph,
                                const fb::SdpaBackwardAttributes& b,
-                               const std::vector<int64_t>& tensorUids)
+                               const std::vector<int64_t>& tensorUids,
+                               const PhiloxBackwardDropout* philox)
 {
     fb::GraphT fwd;
     fwd.name = "sdpa_backward_forward_derivation";
@@ -115,8 +117,35 @@ ForwardGraph buildForwardGraph(const fb::Graph& graph,
     a.left_bound = b.left_bound();
     a.right_bound = b.right_bound();
     a.diagonal_alignment = b.diagonal_alignment();
-    // dropout_probability stays unset: an explicit mask carries the dropout, and the
-    // caller refuses a nonzero probability without one (Philox).
+    // dropout_probability stays unset: an explicit mask carries the dropout. A Philox
+    // dropout (probability, seed and offset) is carried by the keep mask the harness draws
+    // from the seed and offset (SEM-015, PhiloxDropout.hpp): the mask and the scale
+    // 1 / (1 - p) are tensors of the forward graph, and the mask is supplied by the caller.
+    if(philox != nullptr)
+    {
+        const auto& e = philox->extent;
+        auto mask = std::make_unique<fb::TensorAttributesT>();
+        mask->uid = philox->maskUid;
+        mask->name = "philox_keep_mask";
+        mask->data_type = fb::DataType::FLOAT;
+        mask->dims = {e.batch, e.heads, e.seqQ, e.seqKv};
+        mask->strides = {e.heads * e.seqQ * e.seqKv, e.seqQ * e.seqKv, e.seqKv, 1};
+        mask->virtual_ = false;
+        fwd.tensors.push_back(std::move(mask));
+        auto scale = std::make_unique<fb::TensorAttributesT>();
+        scale->uid = philox->scaleUid;
+        scale->name = "philox_dropout_scale";
+        scale->data_type = fb::DataType::FLOAT;
+        scale->dims = {1, 1, 1, 1};
+        scale->strides = {1, 1, 1, 1};
+        scale->virtual_ = false;
+        scale->is_runtime_pass_by_value = false;
+        scale->value.Set(fb::Float32Value(philox::dropoutScale(philox->probability)));
+        fwd.tensors.push_back(std::move(scale));
+        a.dropout_mask_tensor_uid = philox->maskUid;
+        a.dropout_scale_tensor_uid = philox->scaleUid;
+        out.uids.push_back(philox->maskUid);
+    }
 
     auto node = std::make_unique<fb::NodeT>();
     node->name = "sdpa_forward";
@@ -130,14 +159,25 @@ ForwardGraph buildForwardGraph(const fb::Graph& graph,
     return out;
 }
 
-std::unordered_map<int64_t, void*> variantPack(const fb::Graph& graph,
-                                               const std::vector<int64_t>& uids,
-                                               InputTensorMap& inputs,
-                                               bool useDevice)
+// `extras` are tensors of the forward graph that are not tensors of the backward graph (the
+// Philox keep mask); they are not pass-by-value.
+std::unordered_map<int64_t, void*>
+    variantPack(const fb::Graph& graph,
+                const std::vector<int64_t>& uids,
+                InputTensorMap& inputs,
+                bool useDevice,
+                const std::unordered_map<int64_t, hipdnn_data_sdk::utilities::ITensor*>& extras)
 {
     std::unordered_map<int64_t, void*> pack;
     for(const int64_t uid : uids)
     {
+        if(const auto extra = extras.find(uid); extra != extras.end())
+        {
+            pack.emplace(uid,
+                         hipdnn_test_sdk::utilities::selectVariantPackPointer(
+                             *extra->second, useDevice, /*isRuntimePassByValue=*/false));
+            continue;
+        }
         pack.emplace(
             uid,
             hipdnn_test_sdk::utilities::selectVariantPackPointer(
@@ -173,19 +213,44 @@ std::optional<std::string>
     }
 
     // Philox dropout draws its mask from an engine's random stream, which no reference
-    // reproduces, and a backward graph has no RNG dump. A zero probability is no
-    // dropout, as the plans read it: a seed or offset it names is not read. An explicit
-    // mask carries its own dropout.
+    // reproduces, and a backward graph has no RNG dump; but the mask bits are pinned
+    // (SEM-015), so the harness draws the mask from the seed and offset itself and derives O
+    // and stats from the forward over it. A zero probability is no dropout, as the plans
+    // read it: a seed or offset it names is not read. An explicit mask carries its own
+    // dropout.
+    std::string philoxUnsupported;
+    const auto philox = findPhiloxBackwardDropout(graph, philoxUnsupported);
+    if(!philoxUnsupported.empty())
+    {
+        return philoxUnsupported;
+    }
     const bool zeroProbability = attributes.dropout_probability().has_value()
                                  && attributes.dropout_probability().value() == 0.f;
-    const bool philox = (!attributes.dropout_mask_tensor_uid().has_value()
-                         && attributes.dropout_probability().has_value() && !zeroProbability)
-                        || (!zeroProbability
-                            && (attributes.seed_tensor_uid().has_value()
-                                || attributes.offset_tensor_uid().has_value()));
-    if(philox)
+    if(!philox.has_value()
+       && ((attributes.dropout_probability().has_value() && !zeroProbability
+            && !attributes.dropout_mask_tensor_uid().has_value())
+           || (!zeroProbability
+               && (attributes.seed_tensor_uid().has_value()
+                   || attributes.offset_tensor_uid().has_value()))))
     {
-        return "Philox dropout: no reference reproduces an engine's random stream";
+        return "Philox dropout without a probability above 0, a seed and an offset is not "
+               "modelled";
+    }
+    std::shared_ptr<hipdnn_data_sdk::utilities::ITensor> philoxMask;
+    if(philox.has_value())
+    {
+        uint64_t seed = 0;
+        uint64_t offset = 0;
+        if(auto why = resolvePhiloxSeedAndOffset(graph, *philox, inputs, seed, offset))
+        {
+            return "Philox dropout: " + *why;
+        }
+        philoxMask = makePhiloxKeepMask(*philox, seed, offset);
+    }
+    std::unordered_map<int64_t, hipdnn_data_sdk::utilities::ITensor*> extras;
+    if(philoxMask != nullptr)
+    {
+        extras.emplace(philox->maskUid, philoxMask.get());
     }
 
     // Every tensor the forward reads must be a graph input: its values are only known
@@ -259,7 +324,7 @@ std::optional<std::string>
         tensorUids.push_back(scaleUid);
     }
 
-    auto fwd = buildForwardGraph(graph, attributes, tensorUids);
+    auto fwd = buildForwardGraph(graph, attributes, tensorUids, philox ? &*philox : nullptr);
     auto& o = *inputs.at(attributes.o_tensor_uid());
     auto& stats = *inputs.at(attributes.stats_tensor_uid());
 
@@ -276,7 +341,7 @@ std::optional<std::string>
             {
                 gpu.execute(fwd.buffer.data(),
                             fwd.buffer.size(),
-                            variantPack(graph, fwd.uids, inputs, /*useDevice=*/true));
+                            variantPack(graph, fwd.uids, inputs, /*useDevice=*/true, extras));
                 // Download O and stats as well, so they leave the fill current on the
                 // host as after the CPU forward: a const host read of a tensor whose
                 // device copy is newer throws. Both copies stay valid.
@@ -314,7 +379,7 @@ std::optional<std::string>
     {
         cpu.execute(fwd.buffer.data(),
                     fwd.buffer.size(),
-                    variantPack(graph, fwd.uids, inputs, /*useDevice=*/false));
+                    variantPack(graph, fwd.uids, inputs, /*useDevice=*/false, extras));
     }
     catch(const std::exception& e)
     {

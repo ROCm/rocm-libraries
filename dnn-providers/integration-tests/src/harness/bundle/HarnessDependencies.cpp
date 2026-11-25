@@ -5,6 +5,7 @@
 
 #include "harness/ReferenceExecutorPool.hpp"
 #include "harness/bundle/FrontendGraphEngineRunner.hpp"
+#include "harness/bundle/FrontendKernelLogControl.hpp"
 #include "harness/bundle/ProductionPolicy.hpp"
 
 namespace hipdnn_integration_tests::bundle
@@ -20,6 +21,7 @@ HarnessDependencies productionDependencies(TensorPlacement placement,
     deps.reporter = std::make_shared<GlobalVerificationReporter>();
     deps.policy = productionPolicy(placement);
     deps.deviceFiller = std::move(deviceFiller);
+    deps.kernelLog = std::make_shared<FrontendKernelLogControl>();
     return deps;
 }
 

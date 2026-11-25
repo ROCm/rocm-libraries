@@ -14,10 +14,14 @@
 # GoldenDataPlan.cpp and GoldenOutputProbe.cpp, which are linked and tested here.
 add_executable(hipdnn_integration_tests_unit_tests
     main.cpp
+    ../src/harness/bundle/CandidateListing.cpp
+    ../src/harness/bundle/CaseOutcome.cpp
     ../src/harness/CpuReferenceGraphExecutorAdapter.cpp
     ../src/harness/ReferenceGraphExecutorFactory.cpp
     ../src/harness/bundle/GraphSession.cpp
     ../src/harness/bundle/IntegrationBundleVerificationHarness.cpp
+    ../src/harness/bundle/KernelLogTap.cpp
+    ../src/harness/bundle/OutcomeReportLog.cpp
     ../src/harness/bundle/OutputComparison.cpp
     ../src/harness/bundle/ProductionPolicy.cpp
     ../src/harness/bundle/SupportClaimReport.cpp
@@ -30,6 +34,7 @@ add_executable(hipdnn_integration_tests_unit_tests
     ../src/harness/input-init/FillInputs.cpp
     ../src/harness/input-init/ResampleBackwardInputs.cpp
     ../src/harness/input-init/SdpaBackwardInputs.cpp
+    ../src/harness/input-init/PhiloxBackward.cpp
     ../src/harness/reference-validation/BundleReferenceValidationHarness.cpp
     ../src/harness/reference-validation/GoldenDataPlan.cpp
     ../src/harness/reference-validation/GoldenOutputProbe.cpp
@@ -95,6 +100,7 @@ add_executable(hipdnn_integration_tests_unit_tests
     TestCapture.cpp
     TestInputFillRecipes.cpp
     TestFillInputs.cpp
+    TestDeviceInputFill.cpp
     TestToleranceResolver.cpp
     TestConvFwdDynamicTolerance.cpp
     TestConvFwdToleranceGrading.cpp
@@ -118,7 +124,13 @@ add_executable(hipdnn_integration_tests_unit_tests
     TestGoldenOutputProbe.cpp
     TestProductionPolicy.cpp
     TestGraphSession.cpp
+    TestCaseOutcome.cpp
+    TestCandidateListing.cpp
+    TestEngineVariant.cpp
+    TestOutcomeReport.cpp
+    TestKernelLogTap.cpp
     TestOutputComparison.cpp
+    TestPhiloxDropout.cpp
     TestRngDumpHandoff.cpp
 )
 

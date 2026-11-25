@@ -157,6 +157,29 @@ TEST(TestResolveValidationSite, AutoFollowsTheReferenceAndAnExplicitDeviceOverri
     }
 }
 
+// Bug caught: a host-only validator selected by the case being sent to the device because the
+// reference left its output there (a GPU reference), or an explicit --validator gpu silently
+// overridden instead of reported.
+TEST(TestResolveValidationSite, ACaseThatNeedsTheHostForcesItAndRefusesAnExplicitDeviceValidator)
+{
+    using hipdnn_integration_tests::resolveValidationSite;
+    using hipdnn_integration_tests::ValidationSite;
+    using hipdnn_integration_tests::ValidatorDevice;
+
+    for(const auto referenceSite : {ValidationSite::HOST, ValidationSite::DEVICE})
+    {
+        EXPECT_EQ(resolveValidationSite(ValidatorDevice::AUTO, referenceSite, true),
+                  ValidationSite::HOST);
+        EXPECT_EQ(resolveValidationSite(ValidatorDevice::CPU, referenceSite, true),
+                  ValidationSite::HOST);
+        EXPECT_THROW(resolveValidationSite(ValidatorDevice::GPU, referenceSite, true),
+                     std::invalid_argument);
+        // The default is the old behaviour.
+        EXPECT_EQ(resolveValidationSite(ValidatorDevice::AUTO, referenceSite, false),
+                  referenceSite);
+    }
+}
+
 TEST(TestResolveGoldenDataDir, CliValueWinsOverEnv)
 {
     using hipdnn_integration_tests::resolveGoldenDataDir;
@@ -174,6 +197,39 @@ TEST(TestResolveGoldenDataDir, NulloptCliWithoutEnvReturnsNullopt)
     const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter guard(
         "HIPDNN_TEST_GOLDEN_DATA_DIR");
     const auto result = resolveGoldenDataDir(std::nullopt);
+    EXPECT_FALSE(result.has_value());
+}
+
+TEST(TestResolveOutcomeReportPath, CliValueWinsOverEnv)
+{
+    using hipdnn_integration_tests::resolveOutcomeReportPath;
+
+    const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter guard(
+        "HIPDNN_TEST_OUTCOME_REPORT", "/from/env.jsonl");
+    const std::filesystem::path cliPath = "/from/cli.jsonl";
+    const auto result = resolveOutcomeReportPath(cliPath);
+    ASSERT_TRUE(result.has_value());
+    EXPECT_EQ(*result, cliPath);
+}
+
+TEST(TestResolveOutcomeReportPath, EnvIsUsedWhenThereIsNoCliValue)
+{
+    using hipdnn_integration_tests::resolveOutcomeReportPath;
+
+    const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter guard(
+        "HIPDNN_TEST_OUTCOME_REPORT", "/from/env.jsonl");
+    const auto result = resolveOutcomeReportPath(std::nullopt);
+    ASSERT_TRUE(result.has_value());
+    EXPECT_EQ(*result, std::filesystem::path("/from/env.jsonl"));
+}
+
+TEST(TestResolveOutcomeReportPath, NulloptCliWithoutEnvReturnsNullopt)
+{
+    using hipdnn_integration_tests::resolveOutcomeReportPath;
+
+    const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter guard(
+        "HIPDNN_TEST_OUTCOME_REPORT");
+    const auto result = resolveOutcomeReportPath(std::nullopt);
     EXPECT_FALSE(result.has_value());
 }
 
@@ -258,6 +314,16 @@ TEST_F(TestConfigInitialized, HasGoldenDataDirReturnsFalseWhenNotProvided)
 TEST_F(TestConfigInitialized, GetGoldenDataDirThrowsWhenNotProvided)
 {
     EXPECT_THROW(TestConfig::get().getGoldenDataDir(), std::runtime_error);
+}
+
+TEST_F(TestConfigInitialized, HasOutcomeReportReturnsFalseWhenNotProvided)
+{
+    EXPECT_FALSE(TestConfig::get().hasOutcomeReport());
+}
+
+TEST_F(TestConfigInitialized, GetOutcomeReportThrowsWhenNotProvided)
+{
+    EXPECT_THROW(TestConfig::get().getOutcomeReport(), std::runtime_error);
 }
 
 TEST_F(TestConfigInitialized, DoubleInitializeThrows)

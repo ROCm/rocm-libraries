@@ -10,6 +10,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
+#include <fstream>
 #include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
 #include <hipdnn_frontend.hpp>
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
@@ -30,8 +31,10 @@
 #include "harness/SupportMatrixCollector.hpp"
 #include "harness/TestConfig.hpp"
 #include "harness/bundle/BundleRegistration.hpp"
+#include "harness/bundle/FrontendGraphEngineRunner.hpp"
 #include "harness/bundle/HarnessPolicy.hpp"
 #include "harness/bundle/LoadedEngineTable.hpp"
+#include "harness/bundle/OutcomeReportLog.hpp"
 #include "harness/bundle/ProductionPolicy.hpp"
 #include "harness/bundle/SupportClaimReport.hpp"
 #include "harness/bundle/SupportClaimWriter.hpp"
@@ -144,6 +147,12 @@ int main(int argc, char** argv) noexcept
             .help("Path to the integration test bundle data directory. "
                   "Defaults to <exe>/../lib/integration-test-bundles/. "
                   "Can also be set via HIPDNN_TEST_GOLDEN_DATA_DIR env var.");
+        parser.add_argument("--outcome-report")
+            .help("Append one JSON object per line to this file: a `started` record before "
+                  "each bundle test and a `finished` record (PASS, DECLINED, WRONG, CRASH, "
+                  "UNCLAIMED_PASS or UNEXERCISED, with its reason) when it ends. Flushed per "
+                  "record, so a crash keeps every earlier line. Can also be set via "
+                  "HIPDNN_TEST_OUTCOME_REPORT env var.");
         // --verification-mode governs BUNDLE tests (how the engine's output is
         // verified). It is independent of --reference-executor, which governs the
         // parameterized tests (which ref executor is exercised as the SUT).
@@ -214,6 +223,16 @@ int main(int argc, char** argv) noexcept
         parser.add_argument("--benchmark-warmup")
             .scan<'i', int>()
             .help("Untimed executions before timing (default 30). Requires --benchmark.");
+        parser.add_argument("--list-candidates")
+            .help("Write the candidate catalog of the engine named by --test-engine to this file "
+                  "and exit, without building or executing anything: one JSON object per line "
+                  "for each bundle case this run would execute (--gtest_filter applies): "
+                  "{\"test\", \"bundle\", \"engine\", \"status\", \"total\", \"candidates\": "
+                  "[{\"id\", \"knobs\"}], \"reason\"}. Every page of the catalog is read. "
+                  "status is ok, not_enumerable (the engine cannot enumerate, or does not take "
+                  "the graph: the catalog is its one heuristic pick) or error; a per-case error "
+                  "does not change the exit status. A candidate is built by a case whose "
+                  "metadata carries engine_variant {\"id\", \"knobs\"}.");
         parser.add_argument("--graph-capture")
             .default_value(false)
             .implicit_value(true)
@@ -344,6 +363,12 @@ int main(int argc, char** argv) noexcept
             captureDir = parser.get<std::string>("--capture-bundles");
         }
 
+        std::optional<std::filesystem::path> outcomeReport;
+        if(parser.is_used("--outcome-report"))
+        {
+            outcomeReport = parser.get<std::string>("--outcome-report");
+        }
+
         // Parse --test-article argument and load explicit plugin if provided
         std::optional<std::filesystem::path> articlePath;
         if(parser.is_used("--test-article"))
@@ -403,6 +428,14 @@ int main(int argc, char** argv) noexcept
         {
             std::cerr << "--write-support-claims requires --test-article (mode B or C).\n"
                       << "Mode A (auto-select) cannot generate support claims.\n";
+            return 1;
+        }
+
+        const auto listCandidatesPath = parser.present<std::string>("--list-candidates");
+        if(listCandidatesPath.has_value() && (!engineName.has_value() || writeSupportClaims))
+        {
+            std::cerr << "--list-candidates lists the candidates of the engine named by "
+                         "--test-engine, and cannot be combined with --write-support-claims.\n";
             return 1;
         }
 
@@ -470,6 +503,7 @@ int main(int argc, char** argv) noexcept
         opts.verificationMode = verificationMode;
         opts.validatorDevice = validator;
         opts.captureDir = std::move(captureDir);
+        opts.outcomeReport = std::move(outcomeReport);
         opts.writeSupportClaims = writeSupportClaims;
         opts.benchmark = benchmark.settings;
         opts.graphCapture = graphCapture.settings;
@@ -478,6 +512,17 @@ int main(int argc, char** argv) noexcept
             = claimMode.mode == hipdnn_integration_tests::bundle::ClaimMode::ENFORCE;
 
         hipdnn_integration_tests::TestConfig::initialize(std::move(opts));
+
+        if(hipdnn_integration_tests::TestConfig::get().hasOutcomeReport())
+        {
+            const auto& reportPath = hipdnn_integration_tests::TestConfig::get().getOutcomeReport();
+            if(!hipdnn_integration_tests::bundle::OutcomeReportLog::get().open(reportPath))
+            {
+                std::cerr << "Error: cannot open the outcome report for writing: " << reportPath
+                          << "\n";
+                return 1;
+            }
+        }
 
         // Checked against the initialized config: HIPDNN_TEST_ALLOW_BUNDLES can override
         // --no-bundles either way, and only initialize() settles which one wins.
@@ -573,6 +618,37 @@ int main(int argc, char** argv) noexcept
             return 1;
         }
 
+        // Listing mode: the catalog of every case this run would execute, and nothing else.
+        // After the engine table is built and the engine is known to be loaded, before any test
+        // is registered: it builds no plan, executes nothing and runs no test.
+        if(listCandidatesPath.has_value())
+        {
+            const auto engine = hipdnn_integration_tests::bundle::resolveEngineUnderTest();
+            std::ofstream listing(*listCandidatesPath, std::ios::trunc);
+            if(!engine.has_value() || !listing)
+            {
+                std::cerr << "Error: cannot open the candidate listing for writing: "
+                          << *listCandidatesPath << "\n";
+                return 1;
+            }
+
+            const auto cases = hipdnn_integration_tests::bundle::collectListingCases();
+            hipdnn_integration_tests::bundle::FrontendGraphEngineRunner runner;
+            const auto errors = hipdnn_integration_tests::bundle::writeCandidateListing(
+                listing, runner, cases, *engine);
+            listing.close();
+            if(!listing)
+            {
+                std::cerr << "Error: cannot write the candidate listing: " << *listCandidatesPath
+                          << "\n";
+                return 1;
+            }
+            std::cerr << "Listed the candidates of " << cases.size() << " case(s) of engine "
+                      << engine->name << " (" << errors << " with status error) into "
+                      << *listCandidatesPath << "\n";
+            return 0;
+        }
+
         // Enumerated before any test records support data (see setEngineNames); the
         // vector keeps enumeration order for the table columns below.
         std::vector<std::string> loadedEngineNames;
@@ -601,12 +677,10 @@ int main(int argc, char** argv) noexcept
         // Device-filled inputs differ from the host fill's, so a failure seen with them
         // is reproduced bit-for-bit only on the same path. HIPDNN_TEST_HOST_INPUT_FILL=1
         // withholds the filler, which makes every input a host fill.
-        const auto hostInputFill
-            = hipdnn_data_sdk::utilities::getEnv("HIPDNN_TEST_HOST_INPUT_FILL");
-        const bool forceHostInputFill = !hostInputFill.empty() && hostInputFill != "0";
         const auto deviceFiller
-            = forceHostInputFill ? std::shared_ptr<hipdnn_integration_tests::DeviceInputFiller>()
-                                 : std::make_shared<hipdnn_integration_tests::DeviceInputFiller>();
+            = hipdnn_integration_tests::hostInputFillForced()
+                  ? std::shared_ptr<hipdnn_integration_tests::DeviceInputFiller>()
+                  : std::make_shared<hipdnn_integration_tests::DeviceInputFiller>();
         const auto registrationStats
             = hipdnn_integration_tests::bundle::registerBundleTests(deviceFiller);
 

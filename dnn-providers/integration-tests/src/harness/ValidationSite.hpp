@@ -61,8 +61,26 @@ inline ValidatorDevice parseValidatorDevice(std::string value)
 
 /// The site one comparison runs at: the requested validator, or — under AUTO — where
 /// the expected values already live. The single place the two are combined.
-inline ValidationSite resolveValidationSite(ValidatorDevice requested, ValidationSite referenceSite)
+///
+/// `caseNeedsHost` is a case that asked for a validator that exists only on the host
+/// (`metadata.validator: "match_nonfinite"`). It forces HOST, so a GPU reference's output is
+/// compared on the host exactly as `--validator cpu` does. An explicit `--validator gpu`
+/// contradicts it, and is a configuration error rather than a silent override either way.
+inline ValidationSite resolveValidationSite(ValidatorDevice requested,
+                                            ValidationSite referenceSite,
+                                            bool caseNeedsHost = false)
 {
+    if(caseNeedsHost)
+    {
+        if(requested == ValidatorDevice::GPU)
+        {
+            throw std::invalid_argument(
+                "this case selects the host-only validator match_nonfinite, which cannot run "
+                "under --validator gpu; run it with --validator auto or --validator cpu");
+        }
+        return ValidationSite::HOST;
+    }
+
     switch(requested)
     {
     case ValidatorDevice::CPU:
