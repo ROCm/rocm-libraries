@@ -3272,6 +3272,7 @@ namespace
 
         // Clustered Stream-K schedules spatial blocks and may switch parallel
         // reduction to tree or fall back to whole blocks, so read the launch
+        // settings from resolvePersistentSettings().
         if(solution.usesStreamKSpatialCluster())
         {
             const auto  launch  = solution.resolvePersistentSettings(tensile, hardware);
@@ -3304,15 +3305,15 @@ namespace
         out.staticPacking           = solution.sizeMapping.workAssignment == TensileLite::WorkAssignment::StaticGrid
                                       || (solution.sizeMapping.workAssignment == TensileLite::WorkAssignment::Hybrid && !effectiveDynamic);
 
-        const origami::reduction_t rawReduction
+        const origami::reduction_t reduction
             = effectiveDynamic ? origami::reduction_t::tree
                                : solution.getSKReduction(tensile, hardware);
+        out.tree = reduction == origami::reduction_t::tree;
 
         out.tiles = tensile.getNumTiles(solution.sizeMapping, 1);
-        out.itersPerTile = std::max(size_t{1}, tensile.getItersPerTile(solution.sizeMapping));
-
-        out.grid = solution.getSKGrid(tensile, hardware, out.tiles, rawReduction);
-        out.tree = rawReduction == origami::reduction_t::tree;
+        out.itersPerTile
+            = std::max(size_t{1}, tensile.getItersPerTile(solution.sizeMapping));
+        out.grid = solution.getSKGrid(tensile, hardware, out.tiles, reduction);
 
         if(!out.staticPacking || !out.tree || out.grid == 0)
             return out;
