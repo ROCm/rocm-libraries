@@ -19,9 +19,9 @@ Every other test file must be listed in ``rocke.tests.pending_lanes``, and every
 listed entry must be current: its file present, and in no CI-run entry for a
 whole-file entry, in one otherwise. A file is listed once per lane, and a
 whole-file entry is its file's only entry. Each record's team owns its path in
-CODEOWNERS. An expired entry fails only a change that touches the registry or
-its file, and every run under ``--strict-expiry``; otherwise it is reported as
-a warning. The registry's measured budgets are held
+CODEOWNERS. An expired entry fails a change that touches it (its lines in the
+registry, or its test file), and every run under ``--strict-expiry``; otherwise
+it is reported as a warning. The registry's measured budgets are held
 to the same rules: each names a present test file, is listed once, and is
 reported or failed when expired the same way. A quarantined test is held to
 stricter rules: it names a test that exists, is listed once, fails the check as
@@ -726,6 +726,28 @@ def test_install_rules_map_installed_paths_back_to_the_source(tmp_path):
     }
 
 
+@dataclass(frozen=True)
+class Change:
+    """What a change touches against its base: the files (relative to the
+    rocke directory, working tree included) and, in the registry module, the
+    lines it adds or rewrites and the lines after which it deletes some."""
+
+    files: frozenset[str]
+    registry_lines: frozenset[int]
+    registry_gaps: frozenset[int]
+
+
+def change_base() -> str | None:
+    """The commit this change is checked against: ``ROCKE_CHANGE_BASE``, else
+    the ``--from-ref`` of the pre-commit run (``PRE_COMMIT_FROM_REF``, which CI
+    sets to the pull request's base), else the merge base with origin/develop;
+    None when none resolves."""
+    explicit = os.environ.get("ROCKE_CHANGE_BASE") or os.environ.get(
+        "PRE_COMMIT_FROM_REF"
+    )
+    return explicit or _git("merge-base", "HEAD", "origin/develop")
+
+
 def _git(*arguments: str) -> str | None:
     git = shutil.which("git")
     if git is None:
@@ -736,56 +758,214 @@ def _git(*arguments: str) -> str | None:
     return result.stdout.strip() if result.returncode == 0 else None
 
 
-def changed_files() -> set[str] | None:
-    """The files, relative to the rocke directory, that this change touches
-    against its base (``ROCKE_CHANGE_BASE``, else the merge base with
-    origin/develop), working tree included; None when git cannot tell."""
-    base = os.environ.get("ROCKE_CHANGE_BASE") or _git(
-        "merge-base", "HEAD", "origin/develop"
-    )
+# A hunk header of a zero-context diff: its start and length in the new file.
+_HUNK = re.compile(r"^@@ -\S+ \+(\d+)(?:,(\d+))? @@", re.MULTILINE)
+
+
+def registry_line_changes(diff: str) -> tuple[frozenset[int], frozenset[int]]:
+    """(lines added or rewritten, lines after which lines were deleted) in the
+    new file, from the zero-context diff of the registry module."""
+    lines, gaps = set(), set()
+    for match in _HUNK.finditer(diff):
+        start, length = int(match.group(1)), int(match.group(2) or 1)
+        if length:
+            lines.update(range(start, start + length))
+        else:
+            gaps.add(start)
+    return frozenset(lines), frozenset(gaps)
+
+
+def current_change() -> Change | None:
+    """This change against :func:`change_base`; None when git cannot tell."""
+    base = change_base()
     if not base:
         return None
     names = _git("diff", "--name-only", "--relative", base)
-    return None if names is None else set(names.splitlines())
+    diff = _git("diff", "-U0", "--relative", base, "--", PENDING_LANES_MODULE)
+    if names is None or diff is None:
+        return None
+    lines, gaps = registry_line_changes(diff)
+    return Change(frozenset(names.splitlines()), lines, gaps)
+
+
+# The registry helpers that build one record per trailing argument, by the
+# number of leading arguments every record shares.
+_GROUP_HELPERS = {"_waiting": 5, "_measured": 3, "_quarantined": 4}
+
+
+def _lines_of(node: ast.AST) -> set[int]:
+    return set(range(node.lineno, node.end_lineno + 1))
+
+
+def record_lines(source: str, registry_name: str) -> list[frozenset[int]]:
+    """The source lines of each record of the registry tuple ``registry_name``
+    in ``source``, in order: a record written alone, all its lines; one of a
+    group helper's records, the helper's shared arguments and its own."""
+    statement = next(
+        node
+        for node in ast.parse(source).body
+        if isinstance(node, ast.AnnAssign)
+        and getattr(node.target, "id", None) == registry_name
+    )
+    spans = []
+    for element in statement.value.elts:
+        if not isinstance(element, ast.Starred):
+            spans.append(frozenset(_lines_of(element)))
+            continue
+        call = element.value
+        shared_count = _GROUP_HELPERS[call.func.id]
+        shared = {call.lineno}.union(
+            *(_lines_of(argument) for argument in call.args[:shared_count]),
+            *(_lines_of(keyword.value) for keyword in call.keywords),
+        )
+        spans += [
+            frozenset(shared | _lines_of(own)) for own in call.args[shared_count:]
+        ]
+    return spans
+
+
+def touches(change: Change, path: str, lines: frozenset[int]) -> bool:
+    """Whether ``change`` touches the record of ``path`` written on ``lines``
+    of the registry: it changes the test file, or adds, rewrites or deletes
+    one of the record's lines."""
+    return (
+        path in change.files
+        or bool(lines & change.registry_lines)
+        or any(gap in lines and gap + 1 in lines for gap in change.registry_gaps)
+    )
+
+
+@dataclass(frozen=True)
+class ExpiredRecord:
+    label: str
+    path: str  # the test file
+    lines: frozenset[int]  # its lines in the registry module
 
 
 def expiry_failures(
-    expired: list[str], changed: set[str] | None, *, strict: bool
+    expired: Iterable[ExpiredRecord], change: Change | None, *, strict: bool
 ) -> list[str]:
-    """The expired entries that fail the run: all of them under
-    ``--strict-expiry``, else only when the change touches the registry or one
-    of their files (so an entry expiring does not turn an unrelated change
-    red). The rest are reported as warnings."""
-    if strict:
-        return expired
-    if not changed:
-        return []
-    if PENDING_LANES_MODULE in changed:
-        return expired
-    return [path for path in expired if path in changed]
+    """The labels of the expired records that fail the run: all of them under
+    ``--strict-expiry`` (a scheduled run), else those ``change`` touches, so
+    a record reaching its date fails only the change that re-decides it. The
+    rest are reported as warnings."""
+    return [
+        record.label
+        for record in expired
+        if strict or (change is not None and touches(change, record.path, record.lines))
+    ]
 
 
-def test_expired_entries_fail_only_a_change_that_touches_them():
-    expired = ["a/test_x.py", "a/test_y.py"]
+_GROUP_SOURCE = """\
+PENDING: tuple = (
+    *_waiting(
+        LANE,
+        "reason",
+        TEAM,
+        "AICK-1",
+        "2026-01-01",
+        "a/test_x.py",
+        "a/test_y.py",
+    ),
+    PendingTest(
+        "a/test_z.py",
+        LANE,
+        "reason",
+        TEAM,
+        "AICK-1",
+        "2026-01-01",
+    ),
+)
+"""
+
+
+def test_each_record_owns_its_lines_and_its_group_lines():
+    x, y, z = record_lines(_GROUP_SOURCE, "PENDING")
+    shared = {2, 3, 4, 5, 6, 7}
+    assert x == shared | {8} and y == shared | {9}
+    assert z == set(range(11, 19))
+
+
+def test_an_expired_record_fails_only_a_change_that_touches_it():
+    x, y, z = (
+        ExpiredRecord(f"a/test_{name}.py", f"a/test_{name}.py", lines)
+        for name, lines in zip("xyz", record_lines(_GROUP_SOURCE, "PENDING"))
+    )
+    expired = [x, y, z]
+
+    def change(files=(), lines=(), gaps=()):
+        return Change(frozenset(files), frozenset(lines), frozenset(gaps))
+
+    labels = [record.label for record in expired]
     assert expiry_failures(expired, None, strict=False) == []
-    assert expiry_failures(expired, {"other.py"}, strict=False) == []
-    assert expiry_failures(expired, {"a/test_y.py"}, strict=False) == ["a/test_y.py"]
-    assert expiry_failures(expired, {PENDING_LANES_MODULE}, strict=False) == expired
-    assert expiry_failures(expired, None, strict=True) == expired
+    assert expiry_failures(expired, None, strict=True) == labels
+    # Another record's line, or a record added next to them: none fails.
+    assert expiry_failures(expired, change(lines={30}), strict=False) == []
+    assert expiry_failures(expired, change(files={"other.py"}), strict=False) == []
+    # Its own line, its test file, or its group's shared expiry line.
+    assert expiry_failures(expired, change(lines={9}), strict=False) == [y.label]
+    assert expiry_failures(expired, change(files={z.path}), strict=False) == [z.label]
+    assert expiry_failures(expired, change(lines={7}), strict=False) == [
+        x.label,
+        y.label,
+    ]
+    # A line deleted between two of a record's lines touches it (here a line
+    # of the group's reason); one deleted between two records, or a path
+    # deleted from the group, touches neither.
+    assert expiry_failures(expired, change(gaps={4}), strict=False) == [
+        x.label,
+        y.label,
+    ]
+    assert expiry_failures(expired, change(gaps={8}), strict=False) == []
+    assert expiry_failures(expired, change(gaps={10}), strict=False) == []
 
 
-def _fail_or_report_expired(request, registry: str, expired: dict[str, str]) -> None:
-    """Fail on the ``expired`` entries (label -> its test file) that
-    :func:`expiry_failures` says fail this run; report the rest as a warning."""
+def test_a_zero_context_diff_names_the_lines_it_changes():
+    diff = (
+        "diff --git a/x b/x\n"
+        "@@ -10,2 +10,3 @@ PENDING\n-a\n-b\n+a\n+b\n+c\n"
+        "@@ -40 +41 @@\n-x\n+y\n"
+        "@@ -60,2 +60,0 @@\n-gone\n-gone\n"
+    )
+    assert registry_line_changes(diff) == (frozenset({10, 11, 12, 41}), {60})
+
+
+def test_the_change_base_follows_the_pre_commit_from_ref(monkeypatch):
+    monkeypatch.delenv("ROCKE_CHANGE_BASE", raising=False)
+    monkeypatch.setenv("PRE_COMMIT_FROM_REF", "origin/develop~3")
+    assert change_base() == "origin/develop~3"
+    monkeypatch.setenv("ROCKE_CHANGE_BASE", "abc123")
+    assert change_base() == "abc123"
+
+
+def _fail_or_report_expired(
+    request, registry_name: str, records: Iterable, label
+) -> None:
+    """Fail on the expired records of the registry tuple ``registry_name``
+    that :func:`expiry_failures` says fail this run; report the rest as a
+    warning. ``label`` names a record in the message."""
+    today = _utc_today()
+    source = (ROCKE / PENDING_LANES_MODULE).read_text(encoding="utf-8")
+    spans = record_lines(source, registry_name)
+    records = list(records)
+    assert len(spans) == len(records), (registry_name, len(spans), len(records))
+    expired = [
+        ExpiredRecord(label(record), record.path, lines)
+        for record, lines in zip(records, spans)
+        if record.expiry_date < today
+    ]
     if not expired:
         return
     strict = request.config.getoption("--strict-expiry")
-    failing_paths = set(
-        expiry_failures(sorted(set(expired.values())), changed_files(), strict=strict)
+    failing = expiry_failures(expired, current_change(), strict=strict)
+    assert not failing, (
+        f"expired {registry_name} entries this change touches; re-decide them "
+        f"(a new expiry at most {PENDING_MAX_DAYS} days away, or clear them): "
+        f"{failing}"
     )
-    failing = sorted(label for label, path in expired.items() if path in failing_paths)
-    assert not failing, f"expired {registry} entries; re-decide them: {failing}"
-    message = f"{registry} entries past their expiry: {sorted(expired)}"
+    message = (
+        f"{registry_name} entries past their expiry: {sorted(r.label for r in expired)}"
+    )
     print(message)
     warnings.warn(message, stacklevel=2)
 
@@ -807,11 +987,8 @@ def test_every_pending_entry_is_current(request):
         if pending.node and not _defines_test(ROCKE / pending.path, pending.node)
     )
     assert not gone, f"tests listed but gone: {gone}"
-    today = _utc_today()
     _fail_or_report_expired(
-        request,
-        "pending_lanes",
-        {f"{p.path} ({p.lane.name})": p.path for p in PENDING if p.expiry_date < today},
+        request, "PENDING", PENDING, lambda p: f"{p.path} ({p.lane.name})"
     )
 
 
@@ -823,15 +1000,11 @@ def test_every_measured_budget_is_current(request):
         {b.path for b in MEASURED_BUDGETS if not (ROCKE / b.path).is_file()}
     )
     assert not missing, f"measured budgets for test files that are gone: {missing}"
-    today = _utc_today()
     _fail_or_report_expired(
         request,
-        "measured budget",
-        {
-            f"{b.path}::{b.kernel_name}": b.path
-            for b in MEASURED_BUDGETS
-            if b.expiry_date < today
-        },
+        "MEASURED_BUDGETS",
+        MEASURED_BUDGETS,
+        lambda b: f"{b.path}::{b.kernel_name}",
     )
 
 

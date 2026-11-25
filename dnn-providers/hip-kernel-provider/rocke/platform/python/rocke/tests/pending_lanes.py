@@ -22,9 +22,10 @@ quarantine) when it is written, so no record is set and forgotten.
 Stale and expired are treated differently. A stale entry (its file is gone, or
 a whole-file entry's file is in CI, or a case entry's file has left CI) always
 fails the check. An expired pending entry or measured budget fails a change
-that touches this module or its test file; otherwise the check reports it as a
-warning, and a scheduled run passes ``--strict-expiry`` to fail on every
-expired entry. An expired quarantine always fails.
+that touches it (its lines here, or its test file); other expired entries are
+reported as warnings, so one record reaching its date does not turn an
+unrelated pull request red, and a scheduled run passes ``--strict-expiry`` to
+fail on every expired entry. An expired quarantine always fails.
 
 An entry for a file in no CI-run entry (``whole_file=True``) covers every case
 of the file, and is the file's only entry. Any other entry covers only the
