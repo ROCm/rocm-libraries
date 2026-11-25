@@ -4032,6 +4032,7 @@ namespace TensileLite
         }
         //Pass along code object dependency
         rv.codeObjectFile = codeObjectFilename.load();
+        rv.isHelperKernel = true;
 
         return rv;
     }
@@ -4054,6 +4055,7 @@ namespace TensileLite
         rv.workGroupSize.z = 1;
 
         rv.codeObjectFile = codeObjectFilename.load();
+        rv.isHelperKernel = true;
 
         return rv;
     }
@@ -4414,6 +4416,7 @@ namespace TensileLite
 
         //@TODO determine if this is needed, may not end up in the same code object file
         rv.codeObjectFile = codeObjectFilename.load();
+        rv.isHelperKernel = true;
 
         if(problemType.stochasticRounding)
         {
@@ -4590,6 +4593,7 @@ namespace TensileLite
             rv.args.append<uint8_t*>("argsPtr", d_args + problems.size() * sizeof(uint32_t));
             rv.args.append<uint32_t>("gemm_count", problems.size());
             rv.codeObjectFile = codeObjectFilename.load();
+            rv.isHelperKernel = true;
         }
 
         return rv;
@@ -4632,6 +4636,7 @@ namespace TensileLite
         rv.args.append<uint8_t*>("argsPtr", d_args + problems.size() * sizeof(uint32_t));
         rv.args.append<uint32_t>("gemm_count", problems.size());
         rv.codeObjectFile = codeObjectFilename.load();
+        rv.isHelperKernel = true;
 
         return rv;
     }
@@ -4857,6 +4862,7 @@ namespace TensileLite
 
         //@TODO determine if this is needed, may not end up in the same code object file
         rv.codeObjectFile = codeObjectFilename.load();
+        rv.isHelperKernel = true;
 
         return rv;
     }

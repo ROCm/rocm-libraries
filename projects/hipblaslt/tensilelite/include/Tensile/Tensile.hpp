@@ -141,6 +141,10 @@ namespace TensileLite
 
         // Carries a non-null occupancy-probe address.
         bool occupancyProbe = false;
+
+        // Helper kernels (beta-only, output conversion, reduction) are in the
+        // helper code object, not the solution's that codeObjectFile names.
+        bool isHelperKernel = false;
     };
 
     /**
