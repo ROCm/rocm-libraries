@@ -155,22 +155,28 @@ TEST(PredictionLibraryTest, DeviceScalarAlphaFiltersUnadvertisedSolutions)
         256, 163840, 262144, 8, 1.0, 1.0, 1.0, 4000000, 1.2, 1,
         std::make_tuple(0.0, 0.008, 0.0));
 
-    auto legacy = makeMappedSolution(0);
-    auto scalar = makeMappedSolution(1);
+    auto legacy                          = makeMappedSolution(0);
+    auto scalar                          = makeMappedSolution(1);
+    legacy->sizeMapping.macroTile        = TensileLite::dim3(64, 64, 1);
+    legacy->sizeMapping.depthU           = 64;
+    scalar->sizeMapping.macroTile        = TensileLite::dim3(512, 512, 1);
+    scalar->sizeMapping.depthU           = 256;
     legacy->problemType.useScaleAlphaVec = 1;
     scalar->problemType.useScaleAlphaVec = 5;
-    SolutionMap<ContractionSolution> solutions{{0, legacy}, {1, scalar}};
+    SolutionMap<ContractionSolution>    solutions{{0, legacy}, {1, scalar}};
     ContractionProblemPredictionLibrary lib;
     loadPredictionLibrary({0, 1}, solutions, lib);
-    auto problem = ContractionProblemGemm::GEMM(false, false, 256, 256, 64,
-                                               256, 64, 256, 1.0, false, 1);
+    auto problem
+        = ContractionProblemGemm::GEMM(false, false, 256, 256, 64, 256, 64, 256, 1.0, false, 1);
     problem.setUseScaleAlphaVec(1);
     problem.setComputeInputTypeA(rocisa::DataType::Float);
     problem.setComputeInputTypeB(rocisa::DataType::Float);
-    ASSERT_EQ(lib.findTopSolutions(problem, hardware, 2).size(), 2u);
+    auto selected = lib.findTopSolutions(problem, hardware, 1);
+    ASSERT_EQ(selected.size(), 1u);
+    EXPECT_EQ(selected.front(), legacy);
 
     problem.setParams().setDeviceScalarAlpha(true);
-    auto selected = lib.findTopSolutions(problem, hardware, 2);
+    selected = lib.findTopSolutions(problem, hardware, 1);
     ASSERT_EQ(selected.size(), 1u);
     EXPECT_EQ(selected.front(), scalar);
     scalar->problemType.useScaleAlphaVec = 0;

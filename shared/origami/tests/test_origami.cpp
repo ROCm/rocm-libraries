@@ -617,37 +617,51 @@ TEST_CASE("Origami: rank_configs unit test", "[origami]") {
       if (gpu_arch == 950) {
         auto small_k_problem = make_problem(1024, 1024, 256);
         std::vector<origami::config_t> mixed_configs;
-        mixed_configs.push_back(make_config(64, 64, 64, 32, 32, 8, false, 1, 6, 0, 0));
 
-        auto lds_invalid = make_config(512, 512, 256, 32, 32, 8, false, 1, 6, 0, 0);
+        // Put the lower-AI rejected config first to verify the rejected tail is ranked by AI.
+        auto heuristic_rejected  = make_heuristic_rejected();
+        heuristic_rejected.index = 3;
+        mixed_configs.push_back(heuristic_rejected);
+
+        auto valid_config  = make_config(64, 64, 64, 32, 32, 8, false, 1, 6, 0, 0);
+        valid_config.index = 2;
+        mixed_configs.push_back(valid_config);
+
+        auto lds_invalid  = make_config(512, 512, 256, 32, 32, 8, false, 1, 6, 0, 0);
+        lds_invalid.index = 1;
         mixed_configs.push_back(lds_invalid);
-        mixed_configs.push_back(make_heuristic_rejected());
 
         auto mixed_results = origami::rank_configs(small_k_problem, hardware, mixed_configs);
-        // Both the LDS-invalid 512x512x256 and the heuristic-rejected 480x480x32
-        // drop out; only the valid 64x64 tile survives with a finite latency.
-        REQUIRE(mixed_results.size() == 1);
+        REQUIRE(mixed_results.size() == mixed_configs.size());
         REQUIRE(mixed_results.front().latency < std::numeric_limits<double>::max());
-        REQUIRE(mixed_results.front().config.mt.m == 64);
+        REQUIRE(mixed_results.front().config.index == 2);
+        REQUIRE(mixed_results[1].latency == std::numeric_limits<double>::max());
+        REQUIRE(mixed_results[1].config.index == 1);
+        REQUIRE(mixed_results[2].latency == std::numeric_limits<double>::max());
+        REQUIRE(mixed_results[2].config.index == 3);
       }
 
-      // Test 2c: Catastrophic fallback when every path rejects (LDS + heuristic)
+      // Test 2c: Every rejected candidate remains available (LDS + heuristic)
       if (gpu_arch == 950) {
         auto small_k_problem = make_problem(1024, 1024, 256);
         std::vector<origami::config_t> all_rejected_configs;
-        all_rejected_configs.push_back(
-            make_config(512, 512, 256, 32, 32, 8, false, 1, 6, 0, 0));
-        all_rejected_configs.push_back(make_heuristic_rejected());
+
+        auto heuristic_rejected  = make_heuristic_rejected();
+        heuristic_rejected.index = 3;
+        all_rejected_configs.push_back(heuristic_rejected);
+
+        auto lds_invalid  = make_config(512, 512, 256, 32, 32, 8, false, 1, 6, 0, 0);
+        lds_invalid.index = 1;
+        all_rejected_configs.push_back(lds_invalid);
 
         auto fallback_results =
             origami::rank_configs(small_k_problem, hardware, all_rejected_configs);
-        // Every path rejects (LDS-invalid + heuristic-rejected tile), so the
-        // catastrophic fallback keeps all candidates pegged at max latency rather
-        // than returning an empty set.
         REQUIRE(fallback_results.size() == all_rejected_configs.size());
         for (const auto& result : fallback_results) {
           REQUIRE(result.latency == std::numeric_limits<double>::max());
         }
+        REQUIRE(fallback_results[0].config.index == 1);
+        REQUIRE(fallback_results[1].config.index == 3);
       }
 
       // Test 3: Test tie-breaking with arithmetic intensity (TODO: Find the pair which has same
@@ -752,9 +766,11 @@ TEST_CASE("Origami: rank_configs non-temporal availability", "[origami][cache-hi
 
       auto results = origami::rank_configs(problem, hardware, configs);
       if (cdna_hints) {
-        REQUIRE(results.size() == 1);
+        REQUIRE(results.size() == configs.size());
         REQUIRE(results.front().latency < rejected);
         REQUIRE(results.front().config.cache_hints_b == 4);
+        REQUIRE(results.back().latency == rejected);
+        REQUIRE(results.back().config.cache_hints_b == 0);
       } else {
         // TemporalHint archs have no admission rule: both variants are scored.
         REQUIRE(results.size() == configs.size());
@@ -787,9 +803,11 @@ TEST_CASE("Origami: rank_configs non-temporal availability", "[origami][cache-hi
 
       auto results = origami::rank_configs(problem, hardware, configs);
       if (cdna_hints) {
-        REQUIRE(results.size() == 1);
+        REQUIRE(results.size() == configs.size());
         REQUIRE(results.front().latency < rejected);
         REQUIRE(results.front().config.cache_hints_a == 4);
+        REQUIRE(results.back().latency == rejected);
+        REQUIRE(results.back().config.cache_hints_a == 0);
       } else {
         REQUIRE(results.size() == configs.size());
         for (const auto& result : results) REQUIRE(result.latency < rejected);

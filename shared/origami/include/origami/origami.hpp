@@ -87,9 +87,10 @@ ORIGAMI_EXPORT staggerU_t select_staggerU(const problem_t& problem,
  * @param hardware Hardware characteristics (@see origami::hardware_t)
  * @param configs List of candidate configurations to rank
  * @param model Model type to use for ranking (gemm or attention)
- * @return std::vector<prediction_result_t> Configurations with latencies ranked by performance
- * (best first). If every candidate is rejected, returns a ranking of the rejected configs
- * (max latency) instead of throwing.
+ * @return std::vector<prediction_result_t> One result per candidate configuration. Non-rejected
+ * configurations are ranked by predicted performance (best first), followed by rejected
+ * configurations with maximum latency. If every candidate is rejected, secondary tie-breakers
+ * rank the rejected configurations.
  *
  * Non-temporal availability is read from each config
  * (config_t::non_temporal_a_available / non_temporal_b_available). Call

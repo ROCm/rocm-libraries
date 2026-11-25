@@ -735,8 +735,8 @@ std::vector<prediction_result_t> rank_configs(const problem_t& problem,
     }
   }
 
-  // Fallback: when the analytical model rejected every candidate, rank the
-  // invalid configs so the caller still gets a usable kernel rather than failing.
+  // Preserve the existing all-rejected fallback: the secondary tie-breakers
+  // still rank every candidate when every configuration is rejected.
   if (valid_configs.empty()) { valid_configs = std::move(invalid_configs); }
 
   std::stable_sort(valid_configs.begin(), valid_configs.end(), [](const auto& a, const auto& b) {
@@ -744,11 +744,15 @@ std::vector<prediction_result_t> rank_configs(const problem_t& problem,
   });
 
   std::vector<prediction_result_t> results;
-  results.reserve(valid_configs.size());
-  std::transform(valid_configs.begin(),
-                 valid_configs.end(),
-                 std::back_inserter(results),
-                 [&](const auto& r) -> prediction_result_t { return {r.latency, r.config.get()}; });
+  results.reserve(configs.size());
+  auto append_results = [&results](const auto& ranked_configs) {
+    std::transform(
+        ranked_configs.begin(),
+        ranked_configs.end(),
+        std::back_inserter(results),
+        [](const auto& r) -> prediction_result_t { return {r.latency, r.config.get()}; });
+  };
+  append_results(valid_configs);
 
   // Compute arithmetic intensity for tie-breaking
   // Flops = 2 * MT_M * MT_N * MT_K, Memory traffic = MT_M*MT_K + MT_K*MT_N + MT_M*MT_N
@@ -897,6 +901,16 @@ std::vector<prediction_result_t> rank_configs(const problem_t& problem,
                        });
     }
   }
+
+  // Rejected configs are fallback candidates. Rank them by arithmetic intensity
+  // without allowing them to participate in the valid-config tie-breaks.
+  std::stable_sort(invalid_configs.begin(),
+                   invalid_configs.end(),
+                   [&compute_arithmetic_intensity](const auto& a, const auto& b) {
+                     return compute_arithmetic_intensity(a.config.get()) >
+                            compute_arithmetic_intensity(b.config.get());
+                   });
+  append_results(invalid_configs);
 
   OLOG_DEBUG("rank_configs selected MT=(" << results[0].config.mt.m << "," << results[0].config.mt.n
                                           << "," << results[0].config.mt.k << ")"

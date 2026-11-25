@@ -356,7 +356,7 @@ struct ORIGAMI_EXPORT heuristic_params_t {
 
   // === Kernel Rejection ===
   /// When true, the kernel is rejected: its predicted latency is forced to the
-  /// maximum so that rank_configs() drops it from selection entirely.
+  /// maximum so that rank_configs() places it after non-rejected kernels.
   bool reject = false;
 
   /**
