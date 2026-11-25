@@ -1,21 +1,25 @@
 // Copyright Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
-// hipblasLtCreate reports a failed HIP call as a status instead of ending the
-// process (ROCM-32008).
+// hipblasLtCreate and hipblasLtDestroy report a failed HIP call as a status
+// instead of ending the process.
 
 #include "testing_multi_gpu.hpp"
 
 #include <gtest/gtest.h>
+#include <hip/hip_runtime.h>
 #include <hipblaslt/hipblaslt.h>
 
 #include <cstdio>
+#include <cstdlib>
 #include <vector>
 
 namespace
 {
     constexpr int kChildReturnedStatus = 0;
+    constexpr int kChildFailed         = 2;
     constexpr int kChildDeviceVisible  = 3;
+    constexpr int kChildCaptureAllowed = 4;
     constexpr int kChildTimeoutSec     = 120;
 } // namespace
 
@@ -23,7 +27,7 @@ namespace hipblaslt_handle_create_errors
 {
     // Runs in a copy of hipblaslt-test started with no visible device, before
     // main() looks for one. The library's old exit(EXIT_FAILURE) ends this
-    // process with 1, which matches neither code below.
+    // process with 1, which matches none of the codes above.
     int run_no_device_child()
     {
         hipblasLtHandle_t handle = nullptr;
@@ -40,6 +44,49 @@ namespace hipblaslt_handle_create_errors
 
 namespace
 {
+    // HIP refuses hipMalloc and hipFree while a stream captures in global mode,
+    // so both calls fail inside the library. A destroy that failed leaves the
+    // handle valid, and destroying it again after the capture must succeed.
+    // Direct hipMalloc and hipFree calls after the library's decide whether this
+    // runtime refuses them, so a library that hides the failure cannot skip.
+    void createAndDestroyWhileCapturingAndExit()
+    {
+        hipblasLtHandle_t handle = nullptr;
+        void*             probe  = nullptr;
+        if(hipblasLtCreate(&handle) != HIPBLAS_STATUS_SUCCESS
+           || hipMalloc(&probe, 256) != hipSuccess)
+            std::_Exit(kChildFailed);
+        hipStream_t stream = nullptr;
+        if(hipStreamCreateWithFlags(&stream, hipStreamNonBlocking) != hipSuccess
+           || hipStreamBeginCapture(stream, hipStreamCaptureModeGlobal) != hipSuccess)
+            std::_Exit(kChildFailed);
+
+        hipblasLtHandle_t other     = nullptr;
+        const auto        created   = hipblasLtCreate(&other);
+        const auto        destroyed = hipblasLtDestroy(handle);
+        void*             probe2    = nullptr;
+        const bool allowed = hipMalloc(&probe2, 256) == hipSuccess || hipFree(probe) == hipSuccess;
+
+        hipGraph_t graph = nullptr;
+        static_cast<void>(hipStreamEndCapture(stream, &graph));
+        if(graph != nullptr)
+            static_cast<void>(hipGraphDestroy(graph));
+        static_cast<void>(hipGetLastError());
+        std::fprintf(stderr,
+                     "during capture: hipblasLtCreate returned %d, hipblasLtDestroy returned %d\n",
+                     int(created),
+                     int(destroyed));
+        if(allowed)
+            std::_Exit(kChildCaptureAllowed);
+
+        if(created == HIPBLAS_STATUS_SUCCESS || other != nullptr
+           || destroyed == HIPBLAS_STATUS_SUCCESS)
+            std::_Exit(kChildFailed);
+        const auto retried = hipblasLtDestroy(handle);
+        std::fprintf(stderr, "after capture: hipblasLtDestroy returned %d\n", int(retried));
+        std::_Exit(retried == HIPBLAS_STATUS_SUCCESS ? kChildReturnedStatus : kChildFailed);
+    }
+
     TEST(HandleCreateErrors, smoke_CreateWithNoVisibleDeviceReturnsStatus)
     {
         std::vector<pid_t> pids(1, -1);
@@ -57,5 +104,20 @@ namespace
             GTEST_SKIP() << "HIP_VISIBLE_DEVICES=-1 did not hide the device";
         EXPECT_EQ(codes[0], kChildReturnedStatus)
             << "exit code 1 means hipblasLtCreate ended the process instead of returning";
+    }
+
+    TEST(HandleCreateErrors, smoke_CreateAndDestroyDuringCaptureReturnStatus)
+    {
+        // The library's old exit() would end the whole test run, so the case runs
+        // in a newly started copy of this binary.
+        GTEST_FLAG_SET(death_test_style, "threadsafe");
+        bool captureAllowed = false;
+        auto passOrSkip     = [&captureAllowed](int status) {
+            captureAllowed = ::testing::ExitedWithCode(kChildCaptureAllowed)(status);
+            return captureAllowed || ::testing::ExitedWithCode(kChildReturnedStatus)(status);
+        };
+        EXPECT_EXIT(createAndDestroyWhileCapturingAndExit(), passOrSkip, "");
+        if(captureAllowed)
+            GTEST_SKIP() << "this HIP runtime allows hipMalloc or hipFree during global capture";
     }
 } // namespace

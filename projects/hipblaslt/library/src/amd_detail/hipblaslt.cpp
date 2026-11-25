@@ -759,12 +759,12 @@ try
         rocblaslt::Debug::Instance().markerStop();
         return HIPBLAS_STATUS_INVALID_VALUE;
     }
+    *handle = nullptr;
 
     // Two flag regions with different shapes: GSU reduction keeps the large
     // per-problem buffer it has always had, Stream-K gets a small one that can
     // afford a private region per stream. Both are allocated here so that no
     // matmul path allocates device memory, which would break hipGraph capture.
-    // Each buffer is freed on every return or exception until the new handle owns it.
     auto freeDevice = [](void* p) { static_cast<void>(hipFree(p)); };
     std::unique_ptr<void, decltype(freeDevice)> d_Synchronizer(nullptr, freeDevice);
     std::unique_ptr<void, decltype(freeDevice)> d_StreamKFlags(nullptr, freeDevice);
@@ -803,6 +803,7 @@ try
 }
 catch(...)
 {
+    rocblaslt::Debug::Instance().markerStop();
     return exception_to_hipblas_status();
 }
 
@@ -835,6 +836,7 @@ try
 }
 catch(...)
 {
+    rocblaslt::Debug::Instance().markerStop();
     return exception_to_hipblas_status();
 }
 

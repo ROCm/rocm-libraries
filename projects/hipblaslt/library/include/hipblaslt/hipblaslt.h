@@ -768,8 +768,9 @@ hipblasStatus_t hipblasLtGetArchName(char** archName);
  * because no device is visible. With \p HIPBLASLT_LOG_LEVEL=1 the error log
  * names the call and the HIP error.
  *
- *  On any status other than \p HIPBLAS_STATUS_SUCCESS, nothing stays allocated
- * and \p handle must not be passed to hipblasLtDestroy().
+ *  On any status other than \p HIPBLAS_STATUS_SUCCESS, \p *handle is NULL and
+ * must not be passed to hipblasLtDestroy(). The call passes any device memory
+ * it allocated to hipFree() before it returns.
  */
 HIPBLASLT_EXPORT
 hipblasStatus_t hipblasLtCreate(hipblasLtHandle_t* handle);
