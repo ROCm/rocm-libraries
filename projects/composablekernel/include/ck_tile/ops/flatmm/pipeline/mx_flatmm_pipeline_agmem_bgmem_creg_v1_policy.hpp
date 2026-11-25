@@ -209,14 +209,16 @@ struct MXFlatmmPipelineAgBgCrPolicy : UniversalFlatmmPipelineAgBgCrPolicy
                                                               window_tmp.get_window_origin()));
 
         // The plain path sizes the byte buffer with the element count of the source view, which
-        // overstates it for packed types. Use the exact byte size so that rows past the end
-        // (padding entries of the sorted token list) read as zero instead of past the buffer.
-        const auto [rows, cols] =
-            window_tmp.get_bottom_tensor_view().get_tensor_descriptor().get_lengths();
+        // overstates it for packed types. Use the exact byte size, row stride included, so that
+        // rows past the end (padding entries of the sorted token list) read as zero instead of
+        // past the buffer. The rows themselves come from the byte offsets below, so the plain
+        // path's packed row layout does not matter.
+        const index_t space =
+            window_tmp.get_bottom_tensor_view().get_tensor_descriptor().get_element_space_size();
         const auto& plain_view = plain.get_bottom_tensor_view();
         const auto& plain_desc = plain_view.get_tensor_descriptor();
         const auto exact_desc  = remove_cvref_t<decltype(plain_desc)>(
-            plain_desc.get_transforms(), rows * (cols * sizeof(ADataType) / APackedSize));
+            plain_desc.get_transforms(), space * index_t(sizeof(ADataType)) / APackedSize);
         const auto byte_view = make_tensor_view<address_space_enum::global>(
             plain_view.get_buffer_view().p_data_, exact_desc);
 

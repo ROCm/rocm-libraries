@@ -640,12 +640,16 @@ struct MxMoeLayerCase
     // > 0: the whole layer in one MoeMxFusedKernel launch, the intermediate split into this
     // many slices per row tile (atomic combine; per_slot is ignored). 0: two kernels.
     int fused_slices = 0;
-    int init         = 0;
-    unsigned seed    = 11939;
-    bool validate    = true;
-    int warmup       = 0;
-    int repeat       = 0;
-    bool verbose     = true;
+    // Run the layer as one persistent task-queue launch (MoeMxPersistentKernel): gate_up and
+    // down tiles as tasks with per-row-tile dependencies. With per_slot, the combine kernel
+    // follows as a second launch. Takes precedence over fused_slices.
+    bool persistent = false;
+    int init        = 0;
+    unsigned seed   = 11939;
+    bool validate   = true;
+    int warmup      = 0;
+    int repeat      = 0;
+    bool verbose    = true;
 };
 
 struct MxMoeLayerResult
@@ -726,9 +730,12 @@ inline MxMoeLayerResult run_mx_moe_layer(const MxMoeLayerCase& c)
     }
 
     using OutDataType = float; // the atomic gemm2 output; per-slot writes bf16
+    // Row stride of the MXFP4 intermediate, in fp4 values: the persistent kernel needs whole
+    // 256-byte rows (see MoeMxPersistentKernel::IsSupportedArgument).
+    const int I_stride = c.persistent ? ck_tile::integer_least_multiple(I, 512) : I;
     ck_tile::DeviceMem x_dev(x.get_element_space_size_in_bytes()), w1_dev(w1_shuf.size()),
         w2_dev(w2_shuf.size()), xs_dev(x_scale_sorted.size()), w1s_dev(w1_scale.size()),
-        w2s_dev(w2_scale.size()), mid_dev(std::size_t(T) * topk * I / 2),
+        w2s_dev(w2_scale.size()), mid_dev(std::size_t(T) * topk * I_stride / 2),
         mids_dev(std::size_t(M) * IB), p_dev(std::size_t(T) * topk * H * sizeof(float)),
         out_dev(std::size_t(T) * H * sizeof(OutDataType)),
         out16_dev(std::size_t(T) * H * sizeof(ck_tile::bf16_t)), // per-slot combine output
@@ -773,12 +780,12 @@ inline MxMoeLayerResult run_mx_moe_layer(const MxMoeLayerCase& c)
                  H,
                  H,
                  H,
-                 I, // stride_C: the intermediate's logical width (the MX store addresses bytes)
+                 I_stride, // stride_C: the intermediate's row stride, in fp4 values
                  SP{static_cast<const ScaleType*>(xs_dev.GetDeviceBuffer()), M},
                  SP{static_cast<const ScaleType*>(w1s_dev.GetDeviceBuffer()), 2 * I},
                  {}};
     gate_up.e_scale_ptr     = mids_dev.GetDeviceBuffer();
-    const bool fused        = c.fused_slices > 0;
+    const bool fused        = c.fused_slices > 0 && !c.persistent;
     const bool per_slot_out = c.per_slot && !fused;
     void* down_out          = per_slot_out ? p_dev.GetDeviceBuffer() : out_dev.GetDeviceBuffer();
     Args down{ids,
@@ -795,7 +802,7 @@ inline MxMoeLayerResult run_mx_moe_layer(const MxMoeLayerCase& c)
               M,
               H,
               I,
-              I,
+              I_stride,
               I,
               H,
               SP{static_cast<const ScaleType*>(mids_dev.GetDeviceBuffer()), M},
@@ -826,12 +833,51 @@ inline MxMoeLayerResult run_mx_moe_layer(const MxMoeLayerCase& c)
             clear_out,
             ck_tile::make_kernel<1>(Fused{}, Fused::GridSize(fk), Fused::BlockSize(), 0, fk));
     };
+    // Persistent task-queue launch; its counters live in a workspace zeroed once here.
+    using DownSlotKernel = typename MxMoeKernelTypes<K::kFFN_gemm2_per_slot, F4, F4, float>::Kernel;
+    using PersistentAtomic  = ck_tile::MoeMxPersistentKernel<GateUpKernel, DownKernel>;
+    using PersistentPerSlot = ck_tile::MoeMxPersistentKernel<GateUpKernel, DownSlotKernel>;
+    ck_tile::DeviceMem ws_dev(PersistentAtomic::WorkspaceWords(M / MTile) * sizeof(int32_t));
+    ws_dev.SetZero();
+    auto run_persistent = [&](const ck_tile::stream_config& s, bool clear) {
+        auto launch = [&](auto kernel_type) {
+            using P       = decltype(kernel_type);
+            const auto pk = P::MakeKargs(gate_up, down, ws_dev.GetDeviceBuffer());
+            if(!P::IsSupportedArgument(pk))
+                throw std::runtime_error("Arguments not supported by the persistent MX MoE kernel");
+            return ck_tile::make_kernel<1>(P{}, P::GridSize(pk), P::BlockSize(), 0, pk);
+        };
+        auto clear_out = [&]() {
+            if(clear && !per_slot_out)
+                HIP_CHECK_ERROR(hipMemsetAsync(
+                    out_dev.GetDeviceBuffer(), 0, out_dev.GetBufferSize(), s.stream_id_));
+        };
+        if(per_slot_out)
+        {
+            using Combine     = ck_tile::MoeTopkCombineKernel<float, ck_tile::bf16_t>;
+            const auto ckargs = Combine::MakeKargs(
+                p_dev.GetDeviceBuffer(), tw, out16_dev.GetDeviceBuffer(), T, topk, H, H, H);
+            return ck_tile::launch_kernel_time_mask(
+                s,
+                clear_out,
+                launch(PersistentPerSlot{}),
+                ck_tile::make_kernel<1>(
+                    Combine{}, Combine::GridSize(ckargs), Combine::BlockSize(), 0, ckargs));
+        }
+        return ck_tile::launch_kernel_time_mask(s, clear_out, launch(PersistentAtomic{}));
+    };
     auto run2 = [&](const ck_tile::stream_config& s, bool clear) {
         return per_slot_out ? launch_mx_moe_gemm<K::kFFN_gemm2_per_slot, F4, F4, float>(
                                   down, s, false, tw, out16_dev.GetDeviceBuffer())
                             : launch_mx_moe_gemm<K::kFFN_gemm2, F4, F4, float>(down, s, clear);
     };
-    if(fused)
+    if(c.persistent)
+    {
+        // Twice: the checked launch runs on the counters the first one reset.
+        run_persistent(ck_tile::stream_config{nullptr, false}, true);
+        run_persistent(ck_tile::stream_config{nullptr, false}, true);
+    }
+    else if(fused)
         run_fused(ck_tile::stream_config{nullptr, false}, true);
     else
     {
@@ -839,7 +885,7 @@ inline MxMoeLayerResult run_mx_moe_layer(const MxMoeLayerCase& c)
         run2(ck_tile::stream_config{nullptr, false}, true);
     }
 
-    std::vector<uint8_t> mid(std::size_t(T) * topk * I / 2), mid_scale(std::size_t(M) * IB);
+    std::vector<uint8_t> mid(std::size_t(T) * topk * I_stride / 2), mid_scale(std::size_t(M) * IB);
     mid_dev.FromDevice(mid.data());
     mids_dev.FromDevice(mid_scale.data());
     std::vector<float> out(std::size_t(T) * H);
@@ -857,7 +903,9 @@ inline MxMoeLayerResult run_mx_moe_layer(const MxMoeLayerCase& c)
     if(c.repeat > 0)
     {
         const ck_tile::stream_config s{nullptr, true, 0, c.warmup, c.repeat, true};
-        if(fused)
+        if(c.persistent)
+            res.ms_gate_up = run_persistent(s, false); // the whole layer; ms_down stays 0
+        else if(fused)
             res.ms_gate_up = run_fused(s, false); // the whole layer; ms_down stays 0
         else
         {
@@ -923,7 +971,7 @@ inline MxMoeLayerResult run_mx_moe_layer(const MxMoeLayerCase& c)
                 for(int j = 0; j < kScaleBlockK; ++j)
                 {
                     const int n        = kb * kScaleBlockK + j;
-                    const uint8_t byte = mid[rc * (I / 2) + n / 2];
+                    const uint8_t byte = mid[rc * (I_stride / 2) + n / 2];
                     const uint8_t nib  = n % 2 == 0 ? (byte & 0xf) : (byte >> 4);
                     const float gpu =
                         ck_tile::type_convert<float>(ck_tile::pk_fp4_t(ck_tile::pk_fp4_raw_t(nib))
@@ -976,7 +1024,9 @@ inline MxMoeLayerResult run_mx_moe_layer(const MxMoeLayerCase& c)
     res.pass = mid_ok && out_ok;
     if(c.verbose)
         std::cout << "mx_moe layer ("
-                  << (fused          ? "fused, " + std::to_string(c.fused_slices) + " slices"
+                  << (c.persistent
+                          ? std::string("persistent, ") + (per_slot_out ? "per-slot" : "atomic")
+                      : fused        ? "fused, " + std::to_string(c.fused_slices) + " slices"
                       : per_slot_out ? std::string("per-slot")
                                      : std::string("atomic"))
                   << "): experts " << E << ", tokens " << T << ", topk " << topk << ", hidden " << H

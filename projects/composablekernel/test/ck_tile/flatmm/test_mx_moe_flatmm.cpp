@@ -113,13 +113,16 @@ const LayerCase kLayerCases[] = {
     {"PaddingRows", 8, 37, 2, 512, 512, 0},
     {"ManyExperts", 64, 64, 8, 512, 768, 0},
     {"OneToken", 8, 1, 2, 512, 512, 0},
+    // Intermediate rows that are not whole 256-byte blocks: the persistent kernel pads the row
+    // stride, which the down projection's gathered A must honour.
+    {"PaddedIntermediateStride", 64, 256, 8, 512, 1280, 0},
 };
 
 class MxMoeLayer : public ::testing::TestWithParam<LayerCase>
 {
 };
 
-void run_layer(const LayerCase& t, bool per_slot, int fused_slices = 0)
+void run_layer(const LayerCase& t, bool per_slot, int fused_slices = 0, bool persistent = false)
 {
     if(!ck_tile::is_gfx125_supported())
         GTEST_SKIP() << "the MX MoE path is implemented for gfx1250 only";
@@ -132,6 +135,7 @@ void run_layer(const LayerCase& t, bool per_slot, int fused_slices = 0)
     c.init         = t.init;
     c.per_slot     = per_slot;
     c.fused_slices = fused_slices;
+    c.persistent   = persistent;
     c.verbose      = false;
     const auto r   = run_mx_moe_layer(c);
     EXPECT_EQ(r.intermediate_mismatch, 0.0) << "the MXFP4 intermediate differs from the CPU";
@@ -144,6 +148,10 @@ TEST_P(MxMoeLayer, Atomic) { run_layer(GetParam(), false); }
 // and the most slices (one 256-column K tile each).
 TEST_P(MxMoeLayer, FusedOneSlice) { run_layer(GetParam(), false, 1); }
 TEST_P(MxMoeLayer, FusedMaxSlices) { run_layer(GetParam(), false, GetParam().inter / 256); }
+// The whole layer in one MoeMxPersistentKernel launch (gate_up and down tasks synchronized by
+// per-row-tile counters), launched twice so that the second runs on the counters the first reset.
+TEST_P(MxMoeLayer, PersistentPerSlot) { run_layer(GetParam(), true, 0, true); }
+TEST_P(MxMoeLayer, PersistentAtomic) { run_layer(GetParam(), false, 0, true); }
 
 INSTANTIATE_TEST_SUITE_P(A4W4,
                          MxMoeLayer,

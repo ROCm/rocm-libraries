@@ -145,7 +145,8 @@ enum class MoeFlatmmKind
     // there are enough tokens to hide the second launch.
     kFFN_gemm2_per_slot,
     // gemm1_gate_up whose output, SiLU(gate) * up, is quantized to MXFP4 in the epilogue: the
-    // packed fp4 values go to C[token * TopK + slot] (I / 2 bytes per row, I = N / 2) and one
+    // packed fp4 values go to C[token * TopK + slot] (I / 2 bytes of each stride_C / 2-byte row,
+    // I = N / 2) and one
     // e8m0 scale per 32 columns to e_scale_ptr, in sorted-row order and the gfx1250 MX scale
     // layout [sorted rows / 32][I / 128][32][4]. That is the A operand and A scale layout of
     // gemm2 / gemm2_per_slot on the gfx1250 MX path, so no separate quantization kernel is needed.
@@ -506,10 +507,11 @@ struct MoeFlatmmKernel
         }
         if constexpr(IsMxQuantOut)
         {
-            if(kargs.e_scale_ptr == nullptr || (kargs.N / 2) % 128 != 0 || kargs.M % 32 != 0)
+            if(kargs.e_scale_ptr == nullptr || (kargs.N / 2) % 128 != 0 || kargs.M % 32 != 0 ||
+               kargs.stride_C < kargs.N / 2 || kargs.stride_C % 8 != 0)
             {
-                std::cerr << "gate_up_mx_quant needs e_scale_ptr, N / 2 % 128 == 0 and "
-                             "M % 32 == 0!"
+                std::cerr << "gate_up_mx_quant needs e_scale_ptr, N / 2 % 128 == 0, M % 32 == 0 "
+                             "and a row stride (stride_C) >= N / 2, a multiple of 8!"
                           << std::endl;
                 return false;
             }
@@ -1097,8 +1099,8 @@ struct MoeFlatmmKernel
 
         constexpr index_t token_id_offset = 24;
         constexpr index_t token_id_mask   = (1 << token_id_offset) - 1;
-        const index_t inter               = kargs.N / 2; // intermediate size
-        const index_t row_bytes           = inter / 2;   // packed fp4
+        const index_t inter               = kargs.N / 2;        // intermediate size
+        const index_t row_bytes           = kargs.stride_C / 2; // packed fp4, >= inter / 2
         const index_t k_packs             = inter / (BlockK * 4);
         const index_t col                 = col0 + idx[number<1>{}];
         const index_t lane                = get_lane_id();
@@ -1128,13 +1130,22 @@ struct MoeFlatmmKernel
             {
                 const long_index_t slot_row =
                     long_index_t(token) * kargs.TopK + (fused >> token_id_offset);
-                __builtin_memcpy(data + slot_row * row_bytes + col / 2, &packed, sizeof(packed));
+                // Device-scope stores: once they complete they are visible device-wide, so
+                // MoeMxPersistentKernel publishes the intermediate without a cache writeback.
+                __scoped_atomic_store_n(
+                    reinterpret_cast<uint32_t*>(data + slot_row * row_bytes + col / 2),
+                    packed,
+                    __ATOMIC_RELAXED,
+                    __MEMORY_SCOPE_DEVICE);
             }
             if(lane % LanesPerBlock == 0)
             {
                 const index_t kb = col / BlockK;
-                scales[long_index_t(row / 32) * k_packs * 128 + (kb / 4) * 128 + (row % 32) * 4 +
-                       kb % 4]   = static_cast<uint8_t>(shared + 127);
+                __scoped_atomic_store_n(scales + long_index_t(row / 32) * k_packs * 128 +
+                                            (kb / 4) * 128 + (row % 32) * 4 + kb % 4,
+                                        static_cast<uint8_t>(shared + 127),
+                                        __ATOMIC_RELAXED,
+                                        __MEMORY_SCOPE_DEVICE);
             }
         });
 #else
