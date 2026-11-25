@@ -714,8 +714,8 @@ tracked as a gap.
 **Trusted gate.** A failure here is a real problem with the change.
 
 - Build on both platforms, which includes the `TensileLogic --check-all` library logic validation
-- Client GTest `standard` tier on gfx94X-dcgpu (Linux) and gfx110X (Windows), and `quick` tier on
-  gfx950-dcgpu (Linux), through Multi-Arch CI
+- Client GTest `standard` tier on gfx94X-dcgpu and gfx950-dcgpu (Linux) and gfx110X (Windows),
+  through Multi-Arch CI; gfx950 only for pull requests that touch `projects/hipblaslt/`
 - The Math CI client suite on gfx90a, gfx942, gfx950 and gfx12, plus the multi-GPU cases on two
   gfx950 GPUs
 - The Math CI sensitive-word scan, the job named `static-analysis`

@@ -188,8 +188,9 @@ only. On any other architecture ``setProblem`` returns ``HIPBLAS_STATUS_NOT_SUPP
 ``hipblaslt_experimental::PartitionedGemm`` (C++ only) runs one GEMM as slices on the devices of a
 partitioned GPU, for example the two partitions of a DPX card, where each partition is a separate
 HIP device. The partitions can also be separate GPUs that can reach each other's memory; the
-slices that are not local then travel over the link between them. The caller passes one hipBLASLt handle per partition (created with that partition's
-device current), and one stream, workspace, and event per partition when it initializes and runs.
+slices that are not local then travel over the link between them. The caller passes one hipBLASLt
+handle per partition (created with that partition's device current), and one stream, workspace,
+and event per partition when it initializes and runs.
 ``SplitDim`` picks the dimension to split (M, N, or the batch). The first ``N - 1`` partitions take
 ``size / N`` rounded up to a 256-byte boundary of every matrix they cut when that changes the
 balance by at most 1%, and the last takes the rest; otherwise they take ``size / N`` and a hint is
