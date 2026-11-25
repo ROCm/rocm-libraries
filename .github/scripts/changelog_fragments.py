@@ -1,15 +1,17 @@
 # Copyright Advanced Micro Devices, Inc.
 # SPDX-License-Identifier: MIT
 
-"""Validate MIOpen changelog fragments or fold them into the active release."""
+"""Validate changelog fragments or fold them into a project's active release."""
 
 import argparse
+import json
 from pathlib import Path
 import re
 import sys
 
 
-PROJECT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
+REGISTRY = Path(__file__).with_name("changelog-projects.json")
 SECTIONS = {
     "added": "Added",
     "changed": "Changed",
@@ -20,6 +22,43 @@ SECTIONS = {
     "known": "Known Issues",
 }
 NAME = re.compile(r"[a-z0-9]+(?:-[a-z0-9]+)*\.([a-z]+)\.md")
+
+
+def registered_projects():
+    projects = json.loads(REGISTRY.read_text(encoding="utf-8"))
+    if (
+        not isinstance(projects, list)
+        or any(
+            not isinstance(name, str) or not re.fullmatch(r"[a-z0-9][a-z0-9_-]*", name)
+            for name in projects
+        )
+        or len(set(projects)) != len(projects)
+    ):
+        raise ValueError(
+            f"{REGISTRY}: expected a list of unique project directory names"
+        )
+    return projects
+
+
+def validate_files(paths, project):
+    directories = (
+        [project.absolute() / "changelog.d"]
+        if project is not None
+        else [
+            ROOT / "projects" / name / "changelog.d" for name in registered_projects()
+        ]
+    )
+    for path in paths:
+        path = path.absolute()
+        for directory in directories:
+            if path.is_relative_to(directory):
+                if directory.is_symlink():
+                    raise ValueError(f"{directory}: expected a real directory")
+                read_fragment(directory, path)
+                break
+        else:
+            if project is not None:
+                raise ValueError(f"{path}: expected a fragment under {directories[0]}")
 
 
 def fragment_order(path):
@@ -109,10 +148,14 @@ def main():
     parser.add_argument(
         "--project",
         type=Path,
-        default=PROJECT,
-        help="MIOpen directory (default: checked-out project)",
+        help="project directory (required for --fold and --check-empty)",
     )
     mode = parser.add_mutually_exclusive_group(required=True)
+    mode.add_argument(
+        "--list-projects",
+        action="store_true",
+        help="print the project registry as JSON",
+    )
     mode.add_argument(
         "--validate",
         nargs="+",
@@ -131,17 +174,25 @@ def main():
         help="fail if release notes are still pending",
     )
     args = parser.parse_args()
+    if not (args.list_projects or args.validate) and args.project is None:
+        parser.error("--project is required for --fold and --check-empty")
+    try:
+        if args.list_projects:
+            print(json.dumps(registered_projects()))
+            return 0
+        if args.validate:
+            validate_files(args.validate, args.project)
+            return 0
+    except (OSError, ValueError) as error:
+        print(error, file=sys.stderr)
+        return 1
     project = args.project.absolute()
     directory = project / "changelog.d"
     changelog = project / "CHANGELOG.md"
     try:
         if directory.is_symlink():
             raise ValueError(f"{directory}: expected a real directory")
-        paths = (
-            [path.absolute() for path in args.validate]
-            if args.validate
-            else sorted(directory.iterdir(), key=fragment_order)
-        )
+        paths = sorted(directory.iterdir(), key=fragment_order)
         entries = {section: [] for section in SECTIONS.values()}
         consumed = []
         for path in paths:
@@ -167,9 +218,9 @@ def main():
                 path.unlink()
         if args.fold or args.check_empty:
             print(
-                f"Folded {len(consumed)} MIOpen changelog fragment(s)."
+                f"Folded {len(consumed)} changelog fragment(s)."
                 if consumed
-                else "No pending MIOpen changelog fragments."
+                else "No pending changelog fragments."
             )
     except (OSError, ValueError) as error:
         print(error, file=sys.stderr)

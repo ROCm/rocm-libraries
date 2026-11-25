@@ -1,4 +1,4 @@
-name: MIOpen changelog fragments
+name: Changelog fragments
 
 on:
   schedule:
@@ -7,24 +7,49 @@ on:
   push:
     branches: [develop]
     paths:
-      - '.github/workflows/miopen-changelog-fragments.yml'
-      - 'projects/miopen/changelog.d/**'
-
-env:
-  BOT_BRANCH: bot/miopen-changelog-fragments
+      - '.github/workflows/changelog-fragments.yml'
+      - '.github/scripts/changelog-projects.json'
+      - '.github/scripts/changelog_fragments.py'
+      - 'projects/*/changelog.d/**'
 
 permissions:
   contents: read
   pull-requests: read
 
 concurrency:
-  group: miopen-changelog-fragments
+  group: changelog-fragments
   cancel-in-progress: false
 
 jobs:
-  fold:
+  projects:
     # The write token is only available to the workflow on trusted develop.
     if: github.repository == 'ROCm/rocm-libraries' && github.ref == 'refs/heads/develop'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      names: ${{ steps.registry.outputs.names }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: develop
+          sparse-checkout: .github/scripts
+          persist-credentials: false
+      - name: Read registered projects
+        id: registry
+        run: |
+          names=$(python3 .github/scripts/changelog_fragments.py --list-projects)
+          echo "names=$names" >> "$GITHUB_OUTPUT"
+
+  fold:
+    needs: projects
+    if: needs.projects.outputs.names != '[]'
+    strategy:
+      fail-fast: false
+      matrix:
+        project: ${{ fromJSON(needs.projects.outputs.names) }}
+    env:
+      PROJECT: ${{ matrix.project }}
+      BOT_BRANCH: bot/${{ matrix.project }}-changelog-fragments
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
@@ -47,13 +72,13 @@ jobs:
           ref: develop
           filter: blob:none
           sparse-checkout: |
-            projects/miopen/changelog.d
-            projects/miopen/script
+            .github/scripts
+            projects/${{ matrix.project }}/changelog.d
           persist-credentials: false
 
       - name: Fold merged fragments
         if: github.event_name != 'push' || steps.refresh.outputs.count != '0'
-        run: python3 projects/miopen/script/changelog_fragments.py --fold
+        run: python3 .github/scripts/changelog_fragments.py --project "projects/$PROJECT" --fold
 
       - name: Create Libraries App token
         id: app-token
@@ -71,13 +96,13 @@ jobs:
           branch: ${{ env.BOT_BRANCH }}
           base: develop
           add-paths: |
-            projects/miopen/CHANGELOG.md
-            projects/miopen/changelog.d
+            projects/${{ matrix.project }}/CHANGELOG.md
+            projects/${{ matrix.project }}/changelog.d
           delete-branch: true
-          commit-message: 'docs(miopen): fold changelog fragments'
-          title: 'docs(miopen): fold changelog fragments'
+          commit-message: 'docs(${{ matrix.project }}): fold changelog fragments'
+          title: 'docs(${{ matrix.project }}): fold changelog fragments'
           body: |
-            Moves merged MIOpen fragments into the unreleased changelog and removes the consumed files.
+            Moves merged `${{ matrix.project }}` fragments into the unreleased changelog and removes the consumed files.
 
             Before merging, check that consumed fragments still exist unchanged on `develop`.
-            Do not push to this branch; use **MIOpen changelog fragments → Run workflow** to refresh it.
+            Do not push to this branch; use **Changelog fragments → Run workflow** to refresh it.

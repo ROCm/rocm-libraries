@@ -140,6 +140,10 @@ Further changes to the structure may be made to improve development efficiency a
 You can continue working inside your project's folder as you did before the monorepo migration.
 This process is intended to remain as familiar as possible, though some adjustments may be made to improve efficiency based on feedback.
 
+Projects can opt into the shared [changelog fragment workflow](.github/workflows/changelog-fragments.yml)
+by registering in [`.github/scripts/changelog-projects.json`](.github/scripts/changelog-projects.json).
+See the [opt-in checklist](projects/miopen/changelog.d/README.md#opt-in-another-project).
+
 #### Example: hipblaslt Developer
 
 ```bash
