@@ -24,6 +24,8 @@ auto create_args(int argc, char* argv[])
         .insert("fused",
                 "0",
                 "layer only: > 0 runs the layer in one launch with this many intermediate slices")
+        .insert(
+            "persistent", "0", "layer only: 1 runs the layer as one persistent task-queue launch")
         .insert("hidden", "1024", "layer only: hidden size")
         .insert("inter", "512", "layer only: intermediate size")
         .insert("mx_prec", "fp4xfp4", "A x B data types: fp4xfp4 (a4w4) or fp8xfp4 (a8w4)")
@@ -60,6 +62,7 @@ int main(int argc, char* argv[])
             l.inter        = arg_parser.get_int("inter");
             l.per_slot     = arg_parser.get_str("combine") != "atomic";
             l.fused_slices = arg_parser.get_int("fused");
+            l.persistent   = arg_parser.get_int("persistent") != 0;
             l.init         = arg_parser.get_int("init");
             l.seed         = arg_parser.get_uint32("seed");
             l.validate     = arg_parser.get_int("validate") != 0;

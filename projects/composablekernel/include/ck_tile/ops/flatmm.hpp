@@ -14,6 +14,7 @@
 #include "ck_tile/ops/flatmm/kernel/mixed_prec_flatmm_kernel.hpp"
 #include "ck_tile/ops/flatmm/kernel/moe_flatmm_kernel.hpp"
 #include "ck_tile/ops/flatmm/kernel/moe_mx_fused_kernel.hpp"
+#include "ck_tile/ops/flatmm/kernel/moe_mx_persistent_kernel.hpp"
 #include "ck_tile/ops/flatmm/kernel/moe_topk_combine_kernel.hpp"
 #include "ck_tile/ops/flatmm/kernel/mx_flatmm_kernel.hpp"
 #include "ck_tile/ops/flatmm/pipeline/flatmm_pipeline_agmem_bgmem_creg_v1.hpp"
