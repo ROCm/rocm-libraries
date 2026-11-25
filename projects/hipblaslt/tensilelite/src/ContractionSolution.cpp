@@ -6651,7 +6651,8 @@ namespace TensileLite
                 return;
             std::cerr << "hipBLASLt warning: HIPBLASLT_FORCE_USO_ON bypassed the uniform "
                          "summation order "
-                      << where << " refusal " << tag << " for kernel " << kernel << std::endl;
+                      << where << " refusal " << tag << " for kernel " << kernel
+                      << " (the first refusal found; later checks were not evaluated)" << std::endl;
         }
 
         // Statically-knowable reasons a StreamK launch cannot be shown
