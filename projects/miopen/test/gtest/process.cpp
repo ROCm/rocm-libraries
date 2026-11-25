@@ -22,7 +22,7 @@
 
 namespace {
 
-struct CPU_Process_NONE : ::testing::Test
+struct CPU_Process_NONE : testing::TestWithParam<int>
 {
     miopen::TmpDir dir{"process_test"};
     miopen::fs::path marker = dir / "pwned";
@@ -38,7 +38,7 @@ struct CPU_Process_NONE : ::testing::Test
 // TEST_F stays outside the anonymous namespace: cppcheck otherwise reports a false syntaxError
 // (https://trac.cppcheck.net/ticket/9160).
 
-TEST_F(CPU_Process_NONE, ArgumentMetacharactersAreLiteral)
+TEST_P(CPU_Process_NONE, ArgumentMetacharactersAreLiteral)
 {
     const auto m = marker.string();
     for(const auto& args : std::vector<std::string>{"a;touch " + m,
@@ -57,14 +57,14 @@ TEST_F(CPU_Process_NONE, ArgumentMetacharactersAreLiteral)
     }
 }
 
-TEST_F(CPU_Process_NONE, QuotesAreNotInterpreted)
+TEST_P(CPU_Process_NONE, QuotesAreNotInterpreted)
 {
     std::stringstream out;
     EXPECT_EQ(miopen::Process{"echo"}("\"a b\" 'c'", "", &out), 0);
     EXPECT_EQ(out.str(), "\"a b\" 'c'\n");
 }
 
-TEST_F(CPU_Process_NONE, EnvironmentValuesAreLiteral)
+TEST_P(CPU_Process_NONE, EnvironmentValuesAreLiteral)
 {
     const auto value = "v;touch " + marker.string() + ";$(touch " + marker.string() + ")";
     std::stringstream out;
@@ -81,7 +81,7 @@ TEST_F(CPU_Process_NONE, EnvironmentValuesAreLiteral)
     ExpectNoMarker();
 }
 
-TEST_F(CPU_Process_NONE, WorkingDirectoryIsLiteral)
+TEST_P(CPU_Process_NONE, WorkingDirectoryIsLiteral)
 {
     const auto cwd = dir / "a b;touch pwned&&$(touch pwned)";
     miopen::fs::create_directories(cwd);
@@ -92,7 +92,7 @@ TEST_F(CPU_Process_NONE, WorkingDirectoryIsLiteral)
     EXPECT_FALSE(miopen::fs::exists(cwd / "pwned"));
 }
 
-TEST_F(CPU_Process_NONE, CommandPathWithSpaces)
+TEST_P(CPU_Process_NONE, CommandPathWithSpaces)
 {
     // env, unlike echo, is never a shell builtin, so command -v yields its path.
     std::stringstream which;
@@ -107,7 +107,7 @@ TEST_F(CPU_Process_NONE, CommandPathWithSpaces)
     EXPECT_NE(out.str().find("MIOPEN_PROCESS_TEST_VAR=hi\n"), std::string::npos);
 }
 
-TEST_F(CPU_Process_NONE, ExitCodes)
+TEST_P(CPU_Process_NONE, ExitCodes)
 {
     EXPECT_EQ(miopen::Process{"true"}(), 0);
     EXPECT_EQ(miopen::Process{"sh"}("-c exit${IFS}3"), 3);
@@ -118,14 +118,14 @@ TEST_F(CPU_Process_NONE, ExitCodes)
     EXPECT_EQ(miopen::Process{dir / "does-not-exist"}("", dir.path), 127);
 }
 
-TEST_F(CPU_Process_NONE, CapturesStdoutAndStderr)
+TEST_P(CPU_Process_NONE, CapturesStdoutAndStderr)
 {
     std::stringstream out;
     EXPECT_EQ(miopen::Process{"sh"}("-c echo${IFS}out;echo${IFS}err>&2", "", &out), 0);
     EXPECT_EQ(out.str(), "out\nerr\n");
 }
 
-TEST_F(CPU_Process_NONE, FeedsStdin)
+TEST_P(CPU_Process_NONE, FeedsStdin)
 {
     const auto file = dir / "stdin.txt";
     std::string input;
@@ -140,21 +140,21 @@ TEST_F(CPU_Process_NONE, FeedsStdin)
     EXPECT_EQ(contents, input);
 }
 
-TEST_F(CPU_Process_NONE, StdinIsEmptyWhenNotFed)
+TEST_P(CPU_Process_NONE, StdinIsEmptyWhenNotFed)
 {
     std::stringstream out;
     EXPECT_EQ(miopen::Process{"cat"}("", "", &out), 0);
     EXPECT_EQ(out.str(), "");
 }
 
-TEST_F(CPU_Process_NONE, StdinWithStdoutThrows)
+TEST_P(CPU_Process_NONE, StdinWithStdoutThrows)
 {
     std::istringstream in{"x"};
     std::stringstream out;
     EXPECT_ANY_THROW(miopen::Process{"cat"}("", "", &out, {}, &in));
 }
 
-TEST_F(CPU_Process_NONE, ConcurrentAsyncProcesses)
+TEST_P(CPU_Process_NONE, ConcurrentAsyncProcesses)
 {
     constexpr int count = 8;
     std::vector<std::stringstream> outs(count);
@@ -168,5 +168,7 @@ TEST_F(CPU_Process_NONE, ConcurrentAsyncProcesses)
         EXPECT_EQ(outs[i].str(), std::to_string(i) + "\n");
     }
 }
+
+INSTANTIATE_TEST_SUITE_P(Quick, CPU_Process_NONE, testing::Values(0));
 
 #endif // !_WIN32

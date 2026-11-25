@@ -127,6 +127,10 @@ NIGHTLY_WORKFLOW = "therock-multi-arch-ci-nightly.yml"
 DEFAULT_JOBS = r"Test \w+provider\b"  # every provider's engines, on every GPU
 FETCHED_CONCLUSIONS = ("success", "failure")
 NIGHTLY_PAGE = 50
+# A run's jobs are listed this many per page. GitHub answers HTTP 502 after
+# about 10 s when a page of 100 jobs of a multi-arch run (hundreds of jobs)
+# takes longer to build; a page of 30, its default, does not.
+JOBS_PAGE = 30
 INTEGRATION_TESTS = Path(__file__).resolve().parent.parent
 
 # GitHub starts each chunk of a job log with a UTF-8 BOM.
@@ -732,7 +736,7 @@ def fetch_run(
         raise FetchError(f"run {run_id} is {status}, not completed")
     listing = gh(
         [
-            f"repos/{REPO}/actions/runs/{run_id}/jobs?per_page=100",
+            f"repos/{REPO}/actions/runs/{run_id}/jobs?per_page={JOBS_PAGE}",
             "--paginate",
             "--jq",
             ".jobs[] | {id, name, conclusion}",

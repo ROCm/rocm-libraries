@@ -5,8 +5,6 @@ Documentation for rocSPARSE is available at
 
 ## (Unreleased) rocSPARSE 5.3.0
 
-## (Unreleased) rocSPARSE 5.2.0
-
 ### Added
 * Added support for the generic `amdgcnspirv` (SPIR-V) offload target, and added it to the default `GPU_TARGETS` (used when `GPU_TARGETS` is not set or is `all`) when building with ROCm 10.2 or later. The runtime compiles the SPIR-V code object for devices that have no architecture-specific code object in the build. SPIR-V needs ROCm 10.2 or later: the SPIR-V translator of older versions, including ROCm 10.1, crashes the process while it compiles the SPIR-V code object of the triangular-solve and incomplete-factorization kernels. SPIR-V cannot be combined with `BUILD_ADDRESS_SANITIZER`.
 
