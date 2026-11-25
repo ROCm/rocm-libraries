@@ -1,0 +1,335 @@
+{
+  "claims": {
+    "ASM_SDPA_ENGINE": [
+      {
+        "cases": [
+          "bf16_144478c5c50de51b",
+          "bf16_4ff0f373a6eca17c",
+          "bf16_8ad5652480cee0b2",
+          "bf16_c544b81344d13c95",
+          "bf16_d1a9c7a3df1232ac",
+          "bf16_de3b0ea4b6f6f546"
+        ],
+        "support": {
+          "gfx942": [
+            "linux"
+          ],
+          "gfx950": [
+            "linux"
+          ]
+        }
+      },
+      {
+        "cases": [
+          "bf16_cac9c50290cc2590"
+        ],
+        "support": {
+          "gfx942": [
+            "linux"
+          ]
+        }
+      }
+    ],
+    "hipkernel:flydsl_sdpa_cdna": [
+      {
+        "cases": [
+          "bf16_059f796c1f88a696",
+          "bf16_0789d104673f5793",
+          "bf16_0dfb28c37fb7b1b8",
+          "bf16_138e7fbe56672f2d",
+          "bf16_1412638ce0aa4ac7",
+          "bf16_144478c5c50de51b",
+          "bf16_1fef2dc61346e86e",
+          "bf16_237e3fc4a0c1107a",
+          "bf16_269feb4582dcab7c",
+          "bf16_2a0b083efa3798fc",
+          "bf16_36468140c1f92b5f",
+          "bf16_4572efe913a114bf",
+          "bf16_4ff0f373a6eca17c",
+          "bf16_5b24ca56f710f62a",
+          "bf16_6ceead95dd4da045",
+          "bf16_801a8c25fe6ed260",
+          "bf16_87b06b472b0f0ad4",
+          "bf16_8ad5652480cee0b2",
+          "bf16_8dc00aef2a379b6a",
+          "bf16_9be214804a355a36",
+          "bf16_a78b591810c6f9b8",
+          "bf16_ad4b05b081530833",
+          "bf16_ae30a9f33a8ca438",
+          "bf16_ba9a5215c7b6654e",
+          "bf16_c544b81344d13c95",
+          "bf16_c6645cf411e2d2c5",
+          "bf16_c770caf1a1fc7e6f",
+          "bf16_cac9c50290cc2590",
+          "bf16_d1a9c7a3df1232ac",
+          "bf16_d5562559673121cd",
+          "bf16_d8eb3e55af934525",
+          "bf16_de3b0ea4b6f6f546",
+          "bf16_e5666d9aed4d8601",
+          "bf16_e8b55625ae13f4e1",
+          "bf16_ede4ceb92f2c4b32",
+          "bf16_fe177d4fe55a498d",
+          "fp16_05725f056a3b75cd",
+          "fp16_0fc68821a16cc39e",
+          "fp16_1114944282dda459",
+          "fp16_1466342a04a30dc5",
+          "fp16_16945d12b44b759e",
+          "fp16_16bd353044e7ead6",
+          "fp16_185653a7e3afd6f8",
+          "fp16_387ae73746979284",
+          "fp16_3940db256cbc63f9",
+          "fp16_4279c184e03f7592",
+          "fp16_5c900de63965b0c9",
+          "fp16_6da02d25103696ac",
+          "fp16_70ebdc6e724374fc",
+          "fp16_73ec5ce1c12e32bb",
+          "fp16_78eabf03e8b45b16",
+          "fp16_79ca34056508fb47",
+          "fp16_7a4af5a620f75c8f",
+          "fp16_832c1f2a49e6130b",
+          "fp16_8aa306e573b59809",
+          "fp16_9628849f611b2d67",
+          "fp16_a17d714e3f817d0a",
+          "fp16_a9c1cbf08bb3a3b2",
+          "fp16_b0bc5cd5ade709db",
+          "fp16_b9d34f01567b89f5",
+          "fp16_c61cff565f03f33a",
+          "fp16_d2539857b9b21676",
+          "fp16_e12b20f2f6da5585",
+          "fp16_f3b41c6e07c26820",
+          "fp16_f695f32ceb581f4a",
+          "fp16_f7a57650faae5ca7",
+          "fp16_f9194e77c03f394a",
+          "fp16_fe7a90e94a151709"
+        ],
+        "support": {
+          "gfx942": [
+            "linux"
+          ],
+          "gfx950": [
+            "linux"
+          ]
+        }
+      }
+    ],
+    "hipkernel:flydsl_sdpa_cdna_decode": [
+      {
+        "cases": [
+          "bf16_059f796c1f88a696",
+          "bf16_0789d104673f5793",
+          "bf16_144478c5c50de51b",
+          "bf16_1fef2dc61346e86e",
+          "bf16_269feb4582dcab7c",
+          "bf16_4ff0f373a6eca17c",
+          "bf16_5b24ca56f710f62a",
+          "bf16_6ceead95dd4da045",
+          "bf16_8ad5652480cee0b2",
+          "bf16_9be214804a355a36",
+          "bf16_ae30a9f33a8ca438",
+          "bf16_c544b81344d13c95",
+          "bf16_c770caf1a1fc7e6f",
+          "bf16_cac9c50290cc2590",
+          "bf16_de3b0ea4b6f6f546",
+          "bf16_e8b55625ae13f4e1",
+          "bf16_fe177d4fe55a498d",
+          "fp16_05725f056a3b75cd",
+          "fp16_0fc68821a16cc39e",
+          "fp16_1114944282dda459",
+          "fp16_16945d12b44b759e",
+          "fp16_16bd353044e7ead6",
+          "fp16_185653a7e3afd6f8",
+          "fp16_387ae73746979284",
+          "fp16_3940db256cbc63f9",
+          "fp16_70ebdc6e724374fc",
+          "fp16_73ec5ce1c12e32bb",
+          "fp16_8aa306e573b59809",
+          "fp16_a17d714e3f817d0a",
+          "fp16_a9c1cbf08bb3a3b2",
+          "fp16_b0bc5cd5ade709db",
+          "fp16_f3b41c6e07c26820",
+          "fp16_f7a57650faae5ca7",
+          "fp16_f9194e77c03f394a",
+          "fp16_fe7a90e94a151709"
+        ],
+        "support": {
+          "gfx942": [
+            "linux"
+          ],
+          "gfx950": [
+            "linux"
+          ]
+        }
+      }
+    ],
+    "hipkernel:flydsl_sdpa_cdna_dualwave": [
+      {
+        "cases": [
+          "bf16_4ff0f373a6eca17c",
+          "bf16_8ad5652480cee0b2",
+          "bf16_9be214804a355a36",
+          "bf16_ae30a9f33a8ca438",
+          "bf16_cac9c50290cc2590",
+          "fp16_1114944282dda459",
+          "fp16_16945d12b44b759e",
+          "fp16_16bd353044e7ead6",
+          "fp16_387ae73746979284",
+          "fp16_70ebdc6e724374fc",
+          "fp16_73ec5ce1c12e32bb",
+          "fp16_8aa306e573b59809",
+          "fp16_a9c1cbf08bb3a3b2",
+          "fp16_b0bc5cd5ade709db",
+          "fp16_f3b41c6e07c26820",
+          "fp16_f9194e77c03f394a",
+          "fp16_fe7a90e94a151709"
+        ],
+        "support": {
+          "gfx950": [
+            "linux"
+          ]
+        }
+      }
+    ],
+    "hipkernel:flydsl_sdpa_rdna": [
+      {
+        "cases": [
+          "bf16_059f796c1f88a696",
+          "bf16_0789d104673f5793",
+          "bf16_0dfb28c37fb7b1b8",
+          "bf16_138e7fbe56672f2d",
+          "bf16_1412638ce0aa4ac7",
+          "bf16_144478c5c50de51b",
+          "bf16_1fef2dc61346e86e",
+          "bf16_237e3fc4a0c1107a",
+          "bf16_269feb4582dcab7c",
+          "bf16_2a0b083efa3798fc",
+          "bf16_36468140c1f92b5f",
+          "bf16_4572efe913a114bf",
+          "bf16_4ff0f373a6eca17c",
+          "bf16_5b24ca56f710f62a",
+          "bf16_6ceead95dd4da045",
+          "bf16_801a8c25fe6ed260",
+          "bf16_87b06b472b0f0ad4",
+          "bf16_8ad5652480cee0b2",
+          "bf16_8dc00aef2a379b6a",
+          "bf16_9be214804a355a36",
+          "bf16_a78b591810c6f9b8",
+          "bf16_ad4b05b081530833",
+          "bf16_ae30a9f33a8ca438",
+          "bf16_ba9a5215c7b6654e",
+          "bf16_c544b81344d13c95",
+          "bf16_c6645cf411e2d2c5",
+          "bf16_c770caf1a1fc7e6f",
+          "bf16_cac9c50290cc2590",
+          "bf16_d1a9c7a3df1232ac",
+          "bf16_d5562559673121cd",
+          "bf16_d8eb3e55af934525",
+          "bf16_de3b0ea4b6f6f546",
+          "bf16_e5666d9aed4d8601",
+          "bf16_e8b55625ae13f4e1",
+          "bf16_ede4ceb92f2c4b32",
+          "bf16_fe177d4fe55a498d",
+          "fp16_05725f056a3b75cd",
+          "fp16_0fc68821a16cc39e",
+          "fp16_1114944282dda459",
+          "fp16_1466342a04a30dc5",
+          "fp16_16945d12b44b759e",
+          "fp16_16bd353044e7ead6",
+          "fp16_185653a7e3afd6f8",
+          "fp16_387ae73746979284",
+          "fp16_3940db256cbc63f9",
+          "fp16_4279c184e03f7592",
+          "fp16_5c900de63965b0c9",
+          "fp16_6da02d25103696ac",
+          "fp16_70ebdc6e724374fc",
+          "fp16_73ec5ce1c12e32bb",
+          "fp16_78eabf03e8b45b16",
+          "fp16_79ca34056508fb47",
+          "fp16_7a4af5a620f75c8f",
+          "fp16_832c1f2a49e6130b",
+          "fp16_8aa306e573b59809",
+          "fp16_9628849f611b2d67",
+          "fp16_a17d714e3f817d0a",
+          "fp16_a9c1cbf08bb3a3b2",
+          "fp16_b0bc5cd5ade709db",
+          "fp16_b9d34f01567b89f5",
+          "fp16_c61cff565f03f33a",
+          "fp16_d2539857b9b21676",
+          "fp16_e12b20f2f6da5585",
+          "fp16_f3b41c6e07c26820",
+          "fp16_f695f32ceb581f4a",
+          "fp16_f7a57650faae5ca7",
+          "fp16_f9194e77c03f394a",
+          "fp16_fe7a90e94a151709"
+        ],
+        "support": {
+          "gfx1151": [
+            "linux",
+            "windows"
+          ]
+        }
+      }
+    ],
+    "hipkernel:flydsl_sdpa_rdna_decode": [
+      {
+        "cases": [
+          "bf16_059f796c1f88a696",
+          "bf16_0789d104673f5793",
+          "bf16_144478c5c50de51b",
+          "bf16_1fef2dc61346e86e",
+          "bf16_237e3fc4a0c1107a",
+          "bf16_269feb4582dcab7c",
+          "bf16_36468140c1f92b5f",
+          "bf16_4572efe913a114bf",
+          "bf16_4ff0f373a6eca17c",
+          "bf16_5b24ca56f710f62a",
+          "bf16_6ceead95dd4da045",
+          "bf16_8ad5652480cee0b2",
+          "bf16_9be214804a355a36",
+          "bf16_a78b591810c6f9b8",
+          "bf16_ad4b05b081530833",
+          "bf16_ae30a9f33a8ca438",
+          "bf16_c544b81344d13c95",
+          "bf16_c770caf1a1fc7e6f",
+          "bf16_cac9c50290cc2590",
+          "bf16_d1a9c7a3df1232ac",
+          "bf16_d8eb3e55af934525",
+          "bf16_de3b0ea4b6f6f546",
+          "bf16_e8b55625ae13f4e1",
+          "bf16_fe177d4fe55a498d",
+          "fp16_05725f056a3b75cd",
+          "fp16_0fc68821a16cc39e",
+          "fp16_1114944282dda459",
+          "fp16_16945d12b44b759e",
+          "fp16_16bd353044e7ead6",
+          "fp16_185653a7e3afd6f8",
+          "fp16_387ae73746979284",
+          "fp16_3940db256cbc63f9",
+          "fp16_4279c184e03f7592",
+          "fp16_5c900de63965b0c9",
+          "fp16_6da02d25103696ac",
+          "fp16_70ebdc6e724374fc",
+          "fp16_73ec5ce1c12e32bb",
+          "fp16_78eabf03e8b45b16",
+          "fp16_7a4af5a620f75c8f",
+          "fp16_8aa306e573b59809",
+          "fp16_9628849f611b2d67",
+          "fp16_a17d714e3f817d0a",
+          "fp16_a9c1cbf08bb3a3b2",
+          "fp16_b0bc5cd5ade709db",
+          "fp16_d2539857b9b21676",
+          "fp16_f3b41c6e07c26820",
+          "fp16_f7a57650faae5ca7",
+          "fp16_f9194e77c03f394a",
+          "fp16_fe7a90e94a151709"
+        ],
+        "support": {
+          "gfx1151": [
+            "linux",
+            "windows"
+          ]
+        }
+      }
+    ]
+  },
+  "version": 1
+}

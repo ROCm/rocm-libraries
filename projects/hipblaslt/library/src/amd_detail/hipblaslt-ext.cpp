@@ -26,6 +26,7 @@
 
 #include "hipblaslt/hipblaslt-ext.hpp"
 #include "exceptions.hpp"
+#include "hipblaslt-ext-inputs.hpp"
 #include "hipblaslt_internal.hpp"
 #include "utility.hpp"
 #include <Debug.hpp>
@@ -609,29 +610,6 @@ namespace hipblaslt_ext
     {
         return pimpl->wgm;
     }
-
-    class GemmInputs::GemmInputsImpl
-    {
-    public:
-        const void* a     = nullptr;
-        const void* b     = nullptr;
-        const void* c     = nullptr;
-        const void* d     = nullptr;
-        const void* alpha = nullptr;
-        const void* beta  = nullptr;
-        // Epilogue inputs
-        const void* bias          = nullptr;
-        const void* scaleA        = nullptr;
-        const void* scaleB        = nullptr;
-        const void* scaleC        = nullptr;
-        const void* scaleD        = nullptr;
-        const void* scaleAux      = nullptr;
-        const void* scaleAlphaVec = nullptr;
-        const void* aux           = nullptr;
-        const void* amaxD         = nullptr;
-        // Keep this layout in sync with rocblaslt::RocGemmInputsV2.
-        bool deviceScalarAlpha = false;
-    };
 
     GemmInputs::GemmInputs()
         : pimpl(std::make_unique<GemmInputsImpl>())
@@ -1804,7 +1782,7 @@ namespace hipblaslt_ext
                                                       (rocblaslt_matrix_layout)matD);
                status != HIPBLAS_STATUS_SUCCESS)
                 return status;
-        if(heuristicResultsArray[0].algo.data[0] != 0)
+        if(getIndexFromAlgo(heuristicResultsArray[0].algo) != 0)
         {
             rocblaslt_status status = rocblaslt_matmul_is_algo_supported((rocblaslt_handle)handle,
                                                                          (rocblaslt_matmul_desc)matmulDesc,

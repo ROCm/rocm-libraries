@@ -44,7 +44,7 @@ BenchmarkProblems:
         - KernelLanguage: ["Assembly"]
         - LDSTrInst: [True]
         - ExpandPointerSwap: [False]
-        - 1LDSBuffer: [1]
+        - 1LDSBuffer: [0]
       ForkParameters:
         - MatrixInstruction:
           - [16, 16, 64, 1, 1, 2, 2, 2, 2]
@@ -116,7 +116,7 @@ BenchmarkProblems:
         - KernelLanguage: ["Assembly"]
         - LDSTrInst: [True]
         - ExpandPointerSwap: [False]
-        - 1LDSBuffer: [1]
+        - 1LDSBuffer: [0]
       ForkParameters:
         - MatrixInstruction:
           - [16, 16, 64, 1, 1, 2, 2, 2, 2]
@@ -152,7 +152,7 @@ BenchmarkProblems:
         - KernelLanguage: ["Assembly"]
         - LDSTrInst: [True]
         - ExpandPointerSwap: [False]
-        - 1LDSBuffer: [1]
+        - 1LDSBuffer: [0]
       ForkParameters:
         - MatrixInstruction:
           - [16, 16, 64, 1, 1, 2, 2, 2, 2]
@@ -220,7 +220,7 @@ BenchmarkProblems:
         - KernelLanguage: ["Assembly"]
         - LDSTrInst: [True]
         - ExpandPointerSwap: [False]
-        - 1LDSBuffer: [1]
+        - 1LDSBuffer: [0]
       ForkParameters:
         - MatrixInstruction:
           - [16, 16, 64, 1, 1, 2, 2, 2, 2]
@@ -255,7 +255,7 @@ BenchmarkProblems:
         - KernelLanguage: ["Assembly"]
         - LDSTrInst: [True]
         - ExpandPointerSwap: [False]
-        - 1LDSBuffer: [1]
+        - 1LDSBuffer: [0]
       ForkParameters:
         - MatrixInstruction:
           - [16, 16, 64, 1, 1, 2, 2, 2, 2]
@@ -289,7 +289,7 @@ BenchmarkProblems:
         - KernelLanguage: ["Assembly"]
         - LDSTrInst: [True]
         - ExpandPointerSwap: [False]
-        - 1LDSBuffer: [1]
+        - 1LDSBuffer: [0]
       ForkParameters:
         - MatrixInstruction:
           - [16, 16, 64, 1, 1, 2, 2, 2, 2]
@@ -322,7 +322,7 @@ BenchmarkProblems:
         - KernelLanguage: ["Assembly"]
         - LDSTrInst: [True]
         - ExpandPointerSwap: [False]
-        - 1LDSBuffer: [1]
+        - 1LDSBuffer: [0]
       ForkParameters:
         - MatrixInstruction:
           - [16, 16, 64, 1, 1, 2, 2, 2, 2]

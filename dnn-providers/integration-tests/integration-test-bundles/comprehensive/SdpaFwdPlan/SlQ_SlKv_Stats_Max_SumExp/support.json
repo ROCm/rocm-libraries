@@ -1,0 +1,97 @@
+{
+  "claims": {
+    "hipkernel:flydsl_sdpa_cdna": [
+      {
+        "cases": [
+          "bf16_17a0876a8be4a71d",
+          "bf16_466373b00e90e35b",
+          "bf16_4b61cc9e99fb3627",
+          "bf16_67b224ce2bd66568",
+          "bf16_6ea496b6d40018ac",
+          "bf16_b3cb730db757e212",
+          "bf16_dbe85570ebaf2f62",
+          "bf16_ea82c5e9765d8641",
+          "bf16_fe2c2fcb47a9946d",
+          "fp16_876c35aaac26542b",
+          "fp16_8ecb4b72d2bdcfd6",
+          "fp16_e0924a4a948c42b4"
+        ],
+        "support": {
+          "gfx942": [
+            "linux"
+          ],
+          "gfx950": [
+            "linux"
+          ]
+        }
+      }
+    ],
+    "hipkernel:flydsl_sdpa_cdna_decode": [
+      {
+        "cases": [
+          "bf16_466373b00e90e35b",
+          "bf16_67b224ce2bd66568",
+          "bf16_fe2c2fcb47a9946d",
+          "fp16_876c35aaac26542b",
+          "fp16_8ecb4b72d2bdcfd6",
+          "fp16_e0924a4a948c42b4"
+        ],
+        "support": {
+          "gfx942": [
+            "linux"
+          ],
+          "gfx950": [
+            "linux"
+          ]
+        }
+      }
+    ],
+    "hipkernel:flydsl_sdpa_rdna": [
+      {
+        "cases": [
+          "bf16_17a0876a8be4a71d",
+          "bf16_466373b00e90e35b",
+          "bf16_4b61cc9e99fb3627",
+          "bf16_67b224ce2bd66568",
+          "bf16_6ea496b6d40018ac",
+          "bf16_b3cb730db757e212",
+          "bf16_d84b1e12d95a1fb5",
+          "bf16_dbe85570ebaf2f62",
+          "bf16_ea82c5e9765d8641",
+          "bf16_fe2c2fcb47a9946d",
+          "fp16_876c35aaac26542b",
+          "fp16_8ecb4b72d2bdcfd6",
+          "fp16_e0924a4a948c42b4"
+        ],
+        "support": {
+          "gfx1151": [
+            "windows"
+          ]
+        }
+      }
+    ],
+    "hipkernel:flydsl_sdpa_rdna_decode": [
+      {
+        "cases": [
+          "bf16_17a0876a8be4a71d",
+          "bf16_466373b00e90e35b",
+          "bf16_67b224ce2bd66568",
+          "bf16_6ea496b6d40018ac",
+          "bf16_b3cb730db757e212",
+          "bf16_d84b1e12d95a1fb5",
+          "bf16_dbe85570ebaf2f62",
+          "bf16_fe2c2fcb47a9946d",
+          "fp16_876c35aaac26542b",
+          "fp16_8ecb4b72d2bdcfd6",
+          "fp16_e0924a4a948c42b4"
+        ],
+        "support": {
+          "gfx1151": [
+            "windows"
+          ]
+        }
+      }
+    ]
+  },
+  "version": 1
+}

@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2024-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2024-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -53,8 +53,8 @@ rocsparse_status
                                                                     rocprim_values,
                                                                     length,
                                                                     segments,
-                                                                    (I*)nullptr,
-                                                                    (I*)nullptr,
+                                                                    (const I*)nullptr,
+                                                                    (const I*)nullptr,
                                                                     startbit,
                                                                     endbit,
                                                                     handle->stream));
@@ -67,8 +67,8 @@ rocsparse_status rocsparse::primitives::segmented_radix_sort_pairs(rocsparse_han
                                                                    double_buffer<V>& values,
                                                                    size_t            length,
                                                                    size_t            segments,
-                                                                   I*                begin_offsets,
-                                                                   I*                end_offsets,
+                                                                   const I*          begin_offsets,
+                                                                   const I*          end_offsets,
                                                                    uint32_t          startbit,
                                                                    uint32_t          endbit,
                                                                    size_t            buffer_size,
@@ -123,19 +123,15 @@ rocsparse_status rocsparse::primitives::segmented_radix_sort_pairs(rocsparse_han
         double_buffer<VTYPE>& values,                                                       \
         size_t                length,                                                       \
         size_t                segments,                                                     \
-        ITYPE*                begin_offsets,                                                \
-        ITYPE*                end_offsets,                                                  \
+        const ITYPE*          begin_offsets,                                                \
+        const ITYPE*          end_offsets,                                                  \
         uint32_t              startbit,                                                     \
         uint32_t              endbit,                                                       \
         size_t                buffer_size,                                                  \
         void*                 buffer);
 
-INSTANTIATE(int32_t, int32_t, const int32_t);
-INSTANTIATE(int64_t, int64_t, const int64_t);
 INSTANTIATE(int32_t, int32_t, int32_t);
 INSTANTIATE(int64_t, int64_t, int64_t);
-INSTANTIATE(int32_t, int64_t, const int64_t);
 INSTANTIATE(int32_t, int64_t, int64_t);
-INSTANTIATE(int64_t, int32_t, const int32_t);
 INSTANTIATE(int64_t, int32_t, int32_t);
 #undef INSTANTIATE

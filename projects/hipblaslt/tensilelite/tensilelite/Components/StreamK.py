@@ -59,7 +59,7 @@ from copy import deepcopy
 # distributes the leftover in units of skKGranularity instead of single
 # iterations, which keeps every workgroup start on an epoch boundary. The host
 # packs SKItersPerWG already rounded down to a multiple of the same quantum
-# (streamKStaticSplit in ContractionSolution.cpp), so the leftover is a whole
+# (StreamK::Static::computeSplit in StreamK.cpp), so the leftover is a whole
 # number of epochs and the closed-form inverses in the fixup path stay valid.
 #
 # This is a no-op (granularity 1) for every non-dual-period kernel.
@@ -120,7 +120,7 @@ def skPaddedItersPerTile(module, kernel, dst, src,
     starts on an epoch boundary: the last boundary before the padded end is
     paddedIters-g, which is below the real count.
 
-    Mirrors ContractionSolution::skPaddedItersPerTile() on the host. Returns
+    Mirrors StreamK::paddedItersPerTile() on the host. Returns
     the register holding the count: `src` itself when one epoch is one
     iteration, so a kernel without scale reuse emits what it emitted before.
     """
@@ -166,7 +166,7 @@ def skPaddedItersPerTileTmp(writer, kernel, module, sIpt,
 #              a tile boundary (required for row-uniform summation order).
 #
 # The selector rides in bit 29 of the MagicShiftItersPerTile kernel argument.
-# That bit is free: magicNumberAlg2 (ContractionSolution.cpp) packs
+# That bit is free: magicNumberAlg2 (MagicDivision.hpp) packs
 # abit(31) | shift, and the shift field never exceeds 6 bits (bits 0..5).
 # Bit 30 is already taken by the SK5 hybrid mode bit (see _extract_hybrid_mode).
 #
@@ -613,9 +613,11 @@ class StreamK(TileProcessingStrategy):
         whose StreamK range starts mid-tile has to start from the same scale or
         it reads a K position 16x too close to the tile.
 
-        Only the subtile global read walks blocks this way.  The classic swizzle
-        path steps one row per K window, so scaling its start would move the
-        workgroup off its own range.
+        Only the subtile global read walks blocks this way.  The classic (DTV)
+        swizzle path steps one row per K window, so scaling its start would move
+        the workgroup off its own range.  Swizzled-TDM needs no scaling here
+        either: its StreamKLocalStart * GlobalReadIncs K offset is applied to the
+        TDM descriptor address, and GlobalReadIncs already carries the MI factor.
         """
         if tc not in ("A", "B"):
             return 1

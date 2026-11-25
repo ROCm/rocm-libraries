@@ -144,6 +144,10 @@ namespace TensileLite
             // The problem device `card` runs: its slice under --split-devices, else m_problem.
             ContractionProblem* deviceProblem(size_t card) const;
 
+            // --split-devices: point every non-owner device's reference A or B (the shared
+            // operand) at the owner's host data, the data the kernels read.
+            void redirectSharedInputs();
+
             bool shouldSkipNullTensor(const std::string& tensorName,
                                       bool hasNullPointer,
                                       bool hasZeroElements) const;
@@ -158,6 +162,10 @@ namespace TensileLite
             ContractionProblem* m_problem = nullptr;
 
             ClientProblemFactory const* m_split = nullptr;
+
+            // The unsplit operand is shared: every device validates against the owner's data.
+            bool m_sharedA = false;
+            bool m_sharedB = false;
 
             bool m_enabled;
             FusedA2A m_fusedA2A              = FusedA2A::Disabled;
