@@ -1321,7 +1321,7 @@ std::optional<AotInstance> parseAotInstance(const Metadata& metadata, const Targ
         return std::nullopt;
     }
     DirectKnobs knobs{};
-    const auto readKnob = [&](std::string_view field, int64_t DirectKnobs::* member) {
+    const auto readKnob = [&](std::string_view field, int64_t DirectKnobs::*member) {
         const auto value = metadata.intField(field);
         if(!value)
         {
