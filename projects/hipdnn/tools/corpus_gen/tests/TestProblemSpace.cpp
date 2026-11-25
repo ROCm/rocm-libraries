@@ -1260,9 +1260,9 @@ TEST(TestProblemSpace, EveryShippedSdpaCombinationIsExploredAndNoDeclaredValueIs
         const auto all = detail::categoricalCombinations(metadata.parameters, 0, 0, total);
         EXPECT_EQ(all.size(), total) << operation;
         // is_causal 2 x alignment 2 x dtype (the forward's 7, the backward's 3) x value_head_dim
-        // 2 x layout 5 x scale 3 x window 4, then the forward's 8 forms and generate_stats 2,
-        // the backward's 7 forms.
-        EXPECT_EQ(total, operation == "sdpa_fwd" ? size_t{53760} : size_t{10080}) << operation;
+        // 2 x layout 5 x scale 3 x window 4, then the forward's 10 forms and generate_stats 2,
+        // the backward's 11 forms.
+        EXPECT_EQ(total, operation == "sdpa_fwd" ? size_t{67200} : size_t{15840}) << operation;
 
         size_t sampledTotal = 0;
         const auto sampled = detail::categoricalCombinations(
@@ -1332,8 +1332,8 @@ TEST(TestProblemSpace, EveryShippedSdpaCombinationIsExploredAndNoDeclaredValueIs
 TEST(TestProblemSpace, TheScatteredOrderIsABijectionOfTheProductUnderEverySeed)
 {
     // Cycle-walked, the Feistel network visits each index of the product exactly once whatever
-    // its size (an odd product, one past a power of two, the forward's 53760) and seed.
-    for(const size_t total : {size_t{1}, size_t{2}, size_t{3}, size_t{1025}, size_t{53760}})
+    // its size (an odd product, one past a power of two, the forward's 67200) and seed.
+    for(const size_t total : {size_t{1}, size_t{2}, size_t{3}, size_t{1025}, size_t{67200}})
     {
         for(const uint64_t seed : {uint64_t{0}, uint64_t{1}, uint64_t{0xfeedULL}})
         {
@@ -1442,7 +1442,7 @@ TEST(TestProblemSpace, AKeepOnACategoricalAxisNarrowsTheCombinationsBeforeTheBou
     // A clause on a numeric parameter leaves the categorical product alone; the oracle applies it.
     combinations = detail::categoricalCombinations(
         metadata.parameters, 0, 0, total, {}, {{"head_dim", "64"}});
-    EXPECT_EQ(total, 53760U);
+    EXPECT_EQ(total, 67200U);
 
     // A value the declaration does not hold admits nothing, and says so with a total of 0 rather
     // than sampling combinations that every point would then fail.
@@ -1458,7 +1458,7 @@ TEST(TestProblemSpace, AKeepOnACategoricalAxisNarrowsTheCombinationsBeforeTheBou
 
 TEST(TestProblemSpace, EveryCombinationAShippedSdpaKeepAdmitsProducesProblemsPastTheBound)
 {
-    // The product is 53760, past the bound of 1024, and a sample of it drawn before the keep held
+    // The product is 67200, past the bound of 1024, and a sample of it drawn before the keep held
     // 16 problems from one combination of the 6 that can hold one.
     const auto metadata = test::shippedOperation("sdpa_fwd");
     ExplorationRequest request;
@@ -1589,7 +1589,7 @@ TEST(TestProblemSpace, TheCombinationsTheBoundLeavesOutAreCountedAgainstTheKeptP
     const auto corpus
         = exploreProblemSpace(metadata, request, test::admitsOnlyWhatKeepKeeps(request.keep));
 
-    EXPECT_EQ(corpus.categoricalTotal, 8U) << "the keep's product, not the declared 53760";
+    EXPECT_EQ(corpus.categoricalTotal, 8U) << "the keep's product, not the declared 67200";
     EXPECT_EQ(corpus.categoricalConstraintEmpty, 2U);
     EXPECT_EQ(corpus.categoricalNotExplored, 2U)
         << "the combinations the constraints empty were never candidates";
@@ -1731,20 +1731,16 @@ TEST_P(TestShippedSdpaConstraints, KeepOnlyProblemsThatAreDistinctAndHaveKeys)
     // A fused QKV projection is self-attention.
     EXPECT_TRUE(admits({2048, 2048, 8, 8, true, "none", "qkv_packed"}));
     EXPECT_FALSE(admits({128, 4096, 8, 8, true, "none", "qkv_packed"}));
-    // An MLA value head is 64 narrower than Q and K, at the widths DeepSeek's MLA has: 192/128
-    // in both directions, and the absorbed 576/512 in the forward, which no training runs. The
-    // other widths the offset gives are no model's, and a V as wide as Q stays at 512.
-    const bool forward = GetParam() == "sdpa_fwd";
+    // An MLA value head is 64 narrower than Q and K, at the widths DeepSeek's MLA has: 192/128,
+    // and the absorbed 576/512 (a decode, and in the backward a converted decode's gradient).
+    // The other widths the offset gives are no model's, and a V as wide as Q stays at 512.
     EXPECT_TRUE(admits({2048, 2048, 8, 8, true, "none", "bshd", "top_left", 1, 192, "mla"}));
-    EXPECT_EQ(admits({1, 4096, 128, 1, true, "none", "bshd", "top_left", 1, 576, "mla"}), forward);
+    EXPECT_TRUE(admits({1, 4096, 128, 1, true, "none", "bshd", "top_left", 1, 576, "mla"}));
     EXPECT_FALSE(admits({2048, 2048, 8, 8, true, "none", "bshd", "top_left", 1, 128, "mla"}));
     EXPECT_FALSE(admits({2048, 2048, 8, 8, true, "none", "bshd", "top_left", 1, 129, "mla"}));
     EXPECT_FALSE(admits({2048, 2048, 8, 8, true, "none", "bshd", "top_left", 1, 256, "mla"}));
     EXPECT_TRUE(admits({2048, 2048, 8, 8, true, "none", "bshd", "top_left", 1, 512}));
-    if(forward)
-    {
-        EXPECT_FALSE(admits({1, 4096, 128, 1, true, "none", "bshd", "top_left", 1, 576}));
-    }
+    EXPECT_FALSE(admits({1, 4096, 128, 1, true, "none", "bshd", "top_left", 1, 576}));
 
     EXPECT_TRUE(admits({2048, 2048, 8, 8, true, "local_1024"}));
     // The frontend accepts a left bound under any mask.
@@ -1789,12 +1785,14 @@ TEST(TestProblemSpace, TheShippedSdpaFacetInteractionsRefuseWhatIsDegenerateAndA
         return detail::satisfiesConstraints(metadata,
                                             test::withDefaultCategoricals(metadata, point));
     };
-    // The forms both directions build; the forward also builds sink.
+    // The forms both directions build; the forward also builds paged (held to bshd below), the
+    // backward dbias and dsink. alibi is held to a causal top-left mask, so it is checked apart.
     const auto formsOf = [](const std::string& operation) {
-        std::vector<std::string> forms{"plain", "dropout", "padded", "ragged", "bias"};
-        if(operation == "sdpa_fwd")
+        std::vector<std::string> forms{"plain", "dropout", "padded", "ragged", "bias", "sink"};
+        if(operation == "sdpa_bwd")
         {
-            forms.emplace_back("sink");
+            forms.emplace_back("dbias");
+            forms.emplace_back("dsink");
         }
         return forms;
     };
@@ -1813,7 +1811,7 @@ TEST(TestProblemSpace, TheShippedSdpaFacetInteractionsRefuseWhatIsDegenerateAndA
                 << operation << " " << form;
         }
         // The forms that state the scale keep the whole facet, over every layout.
-        for(const std::string form : {"plain", "dropout", "padded", "bias"})
+        for(const std::string form : {"plain", "dropout", "padded", "bias", "sink"})
         {
             for(const std::string scale : {"inv_sqrt_d", "unit", "jitter"})
             {
@@ -1873,9 +1871,32 @@ TEST(TestProblemSpace, TheShippedSdpaFacetInteractionsRefuseWhatIsDegenerateAndA
                     << operation << " " << form << " causal " << causal;
             }
         }
+
+        // ALiBi is defined causal and anchored top-left (SEM-021): the frontend accepts the
+        // others, which no reference or engine computes. Under a window and over the layouts it
+        // crosses freely.
+        EXPECT_FALSE(admitsFor(operation, Candidate{"alibi"})) << operation;
+        for(const std::string layout : {"bshd", "bhsd", "kv_bhsd", "sbhd", "qkv_packed"})
+        {
+            EXPECT_TRUE(admitsFor(
+                operation, Candidate{"alibi", layout, "unit", "local_128", 2048, 2048, true}))
+                << operation << " " << layout;
+        }
+        EXPECT_TRUE(
+            admitsFor(operation, Candidate{"alibi", "bshd", "inv_sqrt_d", "none", 128, 4096, true}))
+            << operation;
     }
     EXPECT_TRUE(admitsFor("sdpa_fwd",
                           Candidate{"sink", "bshd", "inv_sqrt_d", "local_128", 2048, 2048, true}));
+    // A page is a run of tokens of vLLM's token-major cache, so paged is BSHD only, with any
+    // window, scale and mask, decode or prefill.
+    EXPECT_TRUE(admitsFor("sdpa_fwd", Candidate{"paged", "bshd", "jitter", "local_128", 1, 4097}));
+    EXPECT_TRUE(
+        admitsFor("sdpa_fwd", Candidate{"paged", "bshd", "unit", "none", 2048, 2048, true}));
+    for(const std::string layout : {"bhsd", "kv_bhsd", "sbhd", "qkv_packed"})
+    {
+        EXPECT_FALSE(admitsFor("sdpa_fwd", Candidate{"paged", layout})) << layout;
+    }
 }
 
 namespace
@@ -2042,8 +2063,9 @@ TEST(TestProblemSpace, SizesAreRakedOverTheCombinationsThatCanHoldAProblem)
     // (alignment bottom_right, non-causal, window none) is empty by the declaration's own
     // constraints, while its windowed twins are not, so sizes taken as a product of weights over
     // every combination leave window none under its declared 50%. The forms empty more: a scale
-    // the form does not state (scale_unset, scale_tensor) other than inv_sqrt_d, and a ragged
-    // form over a layout that is not token-major (bshd, qkv_packed); and a fused QKV projection
+    // the form does not state (scale_unset, scale_tensor) other than inv_sqrt_d, a ragged
+    // form over a layout that is not token-major (bshd, qkv_packed), ALiBi under anything but a
+    // causal top-left mask, and a paged cache that is not BSHD; and a fused QKV projection
     // is square, so its diagonal is anchored top-left. The raking has to hold all
     // five weighted facets (dtype, value_head_dim, layout, scale, window) at once over what is
     // left. The form is not weighted.
@@ -2051,7 +2073,7 @@ TEST(TestProblemSpace, SizesAreRakedOverTheCombinationsThatCanHoldAProblem)
 
     size_t total = 0;
     const auto combinations = detail::categoricalCombinations(metadata.parameters, 0, 0, total);
-    ASSERT_EQ(combinations.size(), 53760U);
+    ASSERT_EQ(combinations.size(), 67200U);
     const auto sizes = detail::combinationSizes(metadata, combinations);
 
     double all = 0.0;
@@ -2067,12 +2089,14 @@ TEST(TestProblemSpace, SizesAreRakedOverTheCombinationsThatCanHoldAProblem)
         const auto& c = combinations[i];
         const auto text = [&c](const char* name) { return std::get<std::string>(c.at(name)); };
         const bool scaleIgnored = text("form") == "scale_unset" || text("form") == "scale_tensor";
+        const bool causal = std::get<bool>(c.at("is_causal"));
         const bool emptyByDeclaration
-            = (text("alignment") == "bottom_right" && !std::get<bool>(c.at("is_causal"))
-               && text("window") == "none")
+            = (text("alignment") == "bottom_right" && !causal && text("window") == "none")
               || (scaleIgnored && text("scale") != "inv_sqrt_d")
               || (text("form") == "ragged" && text("layout") != "bshd"
                   && text("layout") != "qkv_packed")
+              || (text("form") == "alibi" && (!causal || text("alignment") != "top_left"))
+              || (text("form") == "paged" && text("layout") != "bshd")
               || (text("layout") == "qkv_packed" && text("alignment") == "bottom_right");
         if(emptyByDeclaration)
         {
@@ -2094,10 +2118,12 @@ TEST(TestProblemSpace, SizesAreRakedOverTheCombinationsThatCanHoldAProblem)
     // Per form, 6720 combinations: 420 are the bottom_right, non-causal, no-window sixteenth of
     // the product, and qkv_packed at bottom_right, a tenth, adds the 588 of its 672 not already
     // among them. Five forms leave it at that; scale_unset and scale_tensor also lose the 4480
-    // whose scale is not inv_sqrt_d (672 of them already counted), and ragged the 4032 whose
-    // layout is not token-major (252 already in the 420):
-    // 5 * 1008 + 2 * (4480 + 1008 - 672) + (4032 + 1008 - 252) = 19460.
-    EXPECT_EQ(empty, 19460U);
+    // whose scale is not inv_sqrt_d (672 of them already counted), ragged the 4032 whose
+    // layout is not token-major (252 already in the 420), alibi every combination but the
+    // causal top-left quarter (5040, the 1008 among them), and paged the 5376 that are not BSHD
+    // (the 84 BSHD ones of the 420 stay empty):
+    // 5 * 1008 + 2 * (4480 + 1008 - 672) + (4032 + 1008 - 252) + 5040 + (5376 + 84) = 29960.
+    EXPECT_EQ(empty, 29960U);
     EXPECT_NEAR(window["none"] / all, 0.5, 1e-6);
     EXPECT_NEAR(window["local_128"] / all, 1.0 / 6.0, 1e-6);
     EXPECT_NEAR(layout["bshd"] / all, 2.0 / 6.0, 1e-6);
@@ -2116,9 +2142,9 @@ TEST(TestProblemSpace, SizesAreRakedOverTheCombinationsThatCanHoldAProblem)
     EXPECT_NEAR(dtype["fp8_e5m2"] / all, 1.0 / 29.0, 1e-6);
     EXPECT_NEAR(dtype["fp8_e5m2_fnuz"] / all, 1.0 / 29.0, 1e-6);
     // The form carries no weight: a form's share is its share of the combinations that can hold
-    // a problem, less for the three that the declaration's constraints leave fewer of than the
+    // a problem, less for the five that the declaration's constraints leave fewer of than the
     // other five (those hold 5712 of their 6720 combinations each; scale_unset and scale_tensor
-    // 1904, ragged 1932), and no form is left out.
+    // 1904, ragged 1932, alibi 1680 and paged 1260), and no form is left out.
     EXPECT_TRUE(metadata.find("form")->weights.empty());
     for(const auto& [name, held] : form)
     {

@@ -475,8 +475,8 @@ TEST_P(TestShippedSdpaRealism, ArchetypesAnchorCrossAttentionAndTheHeadWidthsOfR
     // head widths the model-pinned archetypes (D of 64 and 128) lack, and every MLA pair the
     // declaration admits: with none anchored, the MLA rows took whatever width the search drew.
     const auto metadata = test::shippedOperation(GetParam());
-    const std::set<int64_t> mlaWidths
-        = GetParam() == "sdpa_fwd" ? std::set<int64_t>{192, 576} : std::set<int64_t>{192};
+    // Both directions anchor DeepSeek's 192/128 and the absorbed 576/512.
+    const std::set<int64_t> mlaWidths{192, 576};
 
     std::mt19937_64 rng(11);
     std::set<int64_t> headDims;
@@ -534,6 +534,11 @@ TEST_P(TestShippedSdpaRealism, ArchetypesAnchorCrossAttentionAndTheHeadWidthsOfR
     {
         EXPECT_EQ(headDims.count(width), 1U) << "no archetype anchors head_dim " << width;
     }
+    // A width off the multiples of 8, which only padded copies serve: neither the neighbourhood
+    // nor exploration's few draws would otherwise make it a share an engine can be judged on.
+    EXPECT_TRUE(std::any_of(headDims.begin(), headDims.end(), [](int64_t width) {
+        return width % 8 != 0;
+    })) << "no archetype anchors a head_dim that is not a multiple of 8";
     EXPECT_EQ(mlaAnchored, mlaWidths) << "an MLA pair no archetype anchors";
 }
 

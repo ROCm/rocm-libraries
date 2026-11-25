@@ -49,26 +49,33 @@ parameter repeated widens it. Examples:
   drop the rest. `sdpa_bwd` has no fp8: its schema has no descale operand. The declaration's
   `// types` note under `graph_builder` is the dtype matrix and where each rule comes from.
 - SDPA also varies `form` (which optional attributes and tensors the graph binds: `plain`,
-  `scale_unset`, `scale_tensor`, `dropout`, `padded`, `ragged`, `bias`, and on `sdpa_fwd`
-  `sink`), `layout` (the strides: `bshd`, `bhsd`, `kv_bhsd`, `sbhd`, and `qkv_packed`, Q, K and
+  `scale_unset`, `scale_tensor`, `dropout`, `padded`, `ragged`, `bias`, `sink`, `alibi`, on
+  `sdpa_fwd` `paged` (K and V in a paged cache of 16-token blocks read through block tables),
+  and on `sdpa_bwd` `dbias` (a learned per-head bias and its gradient) and `dsink` (the sink
+  and its gradient; `sink` there is a frozen sink, bound without one)), `layout` (the strides:
+  `bshd`, `bhsd`, `kv_bhsd`, `sbhd`, and `qkv_packed`, Q, K and
   V as views of one fused projection), `scale` (`inv_sqrt_d`, `unit`, `jitter`), `window`
   (`none`, `local_128`, `local_1024`, `local_4096`) and `value_head_dim` (`same`, or `mla`: V
-  and O 64 narrower than Q and K, at DeepSeek's 192/128 and, in `sdpa_fwd`, the absorbed
-  decode's 576/512, both anchored by `deepseek_v3` archetypes). An engine that serves only plain
+  and O 64 narrower than Q and K, at DeepSeek's 192/128 and the absorbed decode's 576/512, in
+  both directions, anchored by the `deepseek_v3` and `mla_absorbed_decode` archetypes). An
+  engine that serves only plain
   BSHD keeps `--keep q.form=plain --keep q.layout=bshd --keep q.value_head_dim=same`; otherwise
   leave them free, since a set with one form, layout or scale teaches a model nothing about the
   others. Not every pairing is declared, so a `--keep` on one facet can pin another:
   `scale_unset` and `scale_tensor` take `scale=inv_sqrt_d` only (they state no scale value, or
   pass it as a tensor, so the facet would list one graph under three scales), `ragged` takes the
-  token-major `bshd` and `qkv_packed` only (it packs tokens through offset tensors), `qkv_packed`
+  token-major `bshd` and `qkv_packed` only (it packs tokens through offset tensors), `paged`
+  takes `bshd` only (a block is a run of tokens of vLLM's token-major cache), `alibi` takes a
+  causal mask anchored top-left only (the only ALiBi the references define, SEM-021), `qkv_packed`
   needs `seqlen_q == seqlen_k` (one projection is self-attention) and so `alignment=top_left`
   (on a square mask the two anchors are one graph, and the bottom-right one is declared only
   with more keys than queries), `sbhd` needs a batch and a sequence above 1 (otherwise it
-  aliases `bshd`), and `mla` takes `head_dim` 192 (or 576 in `sdpa_fwd`) only, while `same`
+  aliases `bshd`), and `mla` takes `head_dim` 192 or 576 only, while `same`
   stays at 512 or less. A window needs seqlen_q <= seqlen_k
   whatever the form. More queries than keys (cross attention) is declared causal or not, its
   diagonal anchored top-left, and the `cross_attention` archetype anchors both masks. Every
-  other pairing, dropout, sink, bias and padded included with any window and layout, is
+  other pairing, dropout, sink, bias, dbias, dsink, paged and padded included with any window
+  and every layout they admit, is
   declared: whether an engine serves it is the engine oracle's decision, not the declaration's.
 - `pointwise` for an fp16 ADD kernel: `--keep q.dtype=fp16 --keep q.mode=ADD`
   (`mode` uses the FlatBuffers enumerator names ADD, MUL, SUB, DIV, MAX_OP, MIN_OP).
@@ -106,41 +113,40 @@ The SDPA files do not weight `form`, so each form is a stratum of its own and co
 first pass's budget. That budget is `--per-combination` (default 50) for each
 live combination of the unweighted parameters (`is_causal`, `alignment`, `form`, and `dtype` on
 `sdpa_bwd`, `generate_stats` on `sdpa_fwd`), not of the weighted ones: without `--count`,
-`sdpa_bwd` is about 4,200 problems. `sdpa_fwd` was about 8,600 while `dtype` was unweighted
-and three strata of it; weighted, `dtype` splits the budget instead of multiplying it, so the
-forward's default is about 3,200, and `--per-combination 150` restores the old size (about
-9,500). That is the default corpus cost: an engine-backed default `sdpa_fwd` run issued about
+`sdpa_bwd` is about 6,100 problems and `sdpa_fwd` about 3,700 (seed 0, measured with the
+`alibi`, `paged`, `dbias`, `sink` and `dsink` forms declared). `sdpa_fwd` was about 8,600
+while `dtype` was unweighted and three strata of it; weighted, `dtype` splits the budget
+instead of multiplying it, and `--per-combination 150` restores the larger first pass.
+That is the default corpus cost: an engine-backed default `sdpa_fwd` run issued about
 four times the engine queries of the declaration without the SDPA facets (1.03 million against
 0.26 million, 1,600 s against 470 s, for one RDNA engine at `--count 300`, measured before the
 `sbhd`, `qkv_packed` and `mla` facets and before `dtype` was weighted), and a lower
 `--per-combination` shortens it in proportion. The pipeline passes `--count 2000` per
 operation, and `--per-combination 150` for `sdpa_fwd` ([generate.md](generate.md), step 3).
 
-Without `--count` the forms come out in proportion to the combinations that can hold them:
-`sdpa_bwd` about 760-810 each of its four unconstrained forms, 400 of `ragged`, 310 of
-`scale_unset` and 340 of `scale_tensor`; `sdpa_fwd` about 420-560 each of `plain`, `dropout`,
-`padded`, `bias` and `sink`, 290 of `ragged`, 220 of `scale_unset` and 190 of `scale_tensor`
-(default `--per-combination`, seed 0). The forms with fewer are declared with one scale
-(`inv_sqrt_d`) or two layouts (`ragged`), so fewer combinations can hold a problem. With
-`--count` the cut takes each form
-evenly, as far as the first pass holds it: `sdpa_fwd` at `--count 2000 --per-combination 150`
-comes out at an eighth each (241-255 rows, seeds 1 and 2), while at the default 50 its smaller
-first pass holds only 181-198 of `scale_unset`, 212-215 of `scale_tensor` and 191-233 of
-`ragged` against 260-294 of the other five; `sdpa_bwd` at `--count 2000` holds 250-266 of
-`scale_tensor`, 269-277 of `scale_unset` and 264-290 of `ragged` against about 290-310 each of
-the other four. `--form-floor` tops each form up to its count
+Without `--count` the forms come out in proportion to the combinations that can hold them
+(seed 0): `sdpa_bwd` 620-760 each of `plain`, `dropout`, `padded`, `bias`, `dbias`, `sink`
+and `dsink`, 400 of `ragged`, 354 of `scale_unset`, 295 of `scale_tensor` and 224 of `alibi`;
+`sdpa_fwd` 437-645 each of `plain`, `dropout`, `padded`, `bias` and `sink`, 324 of
+`scale_unset`, 214 of `scale_tensor`, 193 of `alibi`, 174 of `ragged` and 121 of `paged`. The
+forms with fewer are declared with one scale (`inv_sqrt_d`), with fewer layouts (`ragged`:
+two, `paged`: `bshd` only) or with one mask (`alibi`: causal, top-left), so fewer combinations
+can hold a problem. With `--count` the cut takes each form evenly, as far as the first pass
+holds it: `sdpa_fwd` at `--count 2000 --per-combination 150` comes out at about a tenth each
+(176-207 rows, `paged` fewest, seed 1), and `sdpa_bwd` at `--count 2000` at 175-195 each but
+`alibi` (130, seed 1). `--form-floor` tops each form up to its count
 regardless.
 
-Both SDPA declarations are past the 1024 bound (`sdpa_fwd` 53760 combinations, 34300 of them able
-to hold a problem; `sdpa_bwd` 10080, of them 6126), so each explores a sample of the
+Both SDPA declarations are past the 1024 bound (`sdpa_fwd` 67200 combinations, 37240 of them able
+to hold a problem; `sdpa_bwd` 15840, of them 10158), so each explores a sample of the
 combinations that can hold a problem, every declared value present. The sample walks the product
 in a pseudo-random order keyed by `--seed` (a Feistel permutation), not a stride: a stride ties
 digits of the product together and starved whole forms (`scale_unset` held 1 of the 56
 combinations it was due). A seed reproduces its sample and another seed samples other
-combinations (`sdpa_fwd` at `--count 2000`, seeds 1 and 2 share 16 of their 600-680
+combinations (`sdpa_fwd` at `--count 2000`, seeds 1 and 2 shared 16 of their 600-680
 combinations), so a set regenerated under a new seed widens what the sets together cover. A
 `--keep` on an enum or bool facet narrows the combinations before that bound applies, so the
-sample is of the combinations the keep admits (a keep that leaves 8 of the 53760 explores all
+sample is of the combinations the keep admits (a keep that leaves 8 of the 67200 explores all
 8). `manifest.json` reports the combinations under
 `reports.categorical_combinations.<operation>`: `total` is the product the keeps admit,
 `constraint_empty` how many of them the declaration's constraints leave unable to hold a problem
@@ -194,11 +200,14 @@ pack-coverage engine adds its entry there on its branch.
   many points as the engine was asked about in an `sdpa_fwd --count 2000 --seed 1` run).
 - `--form-floor n` asks n in every optional **form** the operation declares (`form_label`):
   for `sdpa_fwd` plain, `scale_unset`, `scale_tensor`, `dropout`, `padded`, `ragged`, `bias`,
-  `sink`; for `sdpa_bwd` all but `sink`. Each form varies one optional attribute
-  or tensor from the plain graph, so a model trains and is validated on graphs that leave it
-  unbound (RFC 0019 §6.7, absent is not zero, and §6.8 rule 9). Forms are a manifest column of
-  their own, not part of the regime label, and are reported as `form:<label>` in
-  `reports.regime_quota`; the live engine decides which it serves.
+  `sink`, `alibi`, `paged`; for `sdpa_bwd` plain, `scale_unset`, `scale_tensor`, `dropout`,
+  `padded`, `ragged`, `bias`, `dbias`, `sink`, `dsink`, `alibi`. Each form varies one optional
+  attribute or tensor from the plain graph, so a model trains and is validated on graphs that
+  leave it unbound (RFC 0019 §6.7, absent is not zero, and §6.8 rule 9). Forms are a manifest
+  column of their own, not part of the regime label, and are reported as `form:<label>` in
+  `reports.regime_quota`; the live engine decides which it serves. A form the engine serves
+  none of is short there (`delivered` 0 of `asked`) without failing the run, so
+  `--form-floor 1` against an engine is also a per-form coverage check.
 - A graph's name is the operation, its regime and every parameter in alphabetical order
   (`..._seqlen_k512_seqlen_q1_value_head_dimsame_windownone`), with one limit: a name longer
   than 200 characters (`MAX_GRAPH_NAME`, `GraphIdentity.hpp`) keeps its leading parameters and

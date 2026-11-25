@@ -83,43 +83,43 @@ if(HIPDNN_BUILD_FRONTEND AND HIPDNN_BUILD_BACKEND)
                 "default_operations|--without-engine,--operation,matmul,--count,4|0|4"
                 "empty|--without-engine,--operations,${_operations_dir},--operation,matmul,--count,4,--keep,q.M=-7|2|0"
                 # With quotas and no --count, the corpus is the quotas alone. The first pass still
-                # runs before the quota is filled, and the forward's default one is about 3000
-                # problems (50 for each of about 60 live combinations of the unweighted
+                # runs before the quota is filled, and the forward's default one is about 3700
+                # problems (50 for each of about 74 live combinations of the unweighted
                 # parameters, the form among them), seconds to tens of seconds depending on the
-                # host: --per-combination 10 shortens it to about 600 problems.
+                # host: --per-combination 10 shortens it to about 750 problems.
                 "regime_quota|--without-engine,--operations,${_operations_dir},--operation,sdpa_fwd,--per-combination,10,--regime-quota,decode_short_mha=3|0|3"
-                # One form axis of eight labels: one graph under each, and nothing else. Each
+                # One form axis of ten labels: one graph under each, and nothing else. Each
                 # label is a value of the manifest's own `form` column and a reported quota. The
                 # small --per-combination is as for regime_quota.
-                "form_floor|--without-engine,--operations,${_operations_dir},--operation,sdpa_fwd,--per-combination,10,--form-floor,1|0|8|plain,scale_unset,scale_tensor,dropout,padded,ragged,bias,sink"
-                # The backward declares seven of them: no sink token.
-                "form_floor_sdpa_bwd|--without-engine,--operations,${_operations_dir},--operation,sdpa_bwd,--form-floor,1|0|7|plain,scale_unset,scale_tensor,dropout,padded,ragged,bias"
-                # Both floors at once, narrowed to one form so that the seven other forms are
+                "form_floor|--without-engine,--operations,${_operations_dir},--operation,sdpa_fwd,--per-combination,10,--form-floor,1|0|10|plain,scale_unset,scale_tensor,dropout,padded,ragged,bias,sink,alibi,paged"
+                # The backward declares eleven: no paging, and the gradients of a learned bias
+                # and sink.
+                "form_floor_sdpa_bwd|--without-engine,--operations,${_operations_dir},--operation,sdpa_bwd,--form-floor,1|0|11|plain,scale_unset,scale_tensor,dropout,padded,ragged,bias,dbias,sink,dsink,alibi"
+                # Both floors at once, narrowed to one form so that the nine other forms are
                 # short: one graph fills a regime's floor and the form's, so `requested` is the
-                # graphs plus the larger of the two shortfalls (CorpusGenRun.cmake), 24 + 7, not
-                # the floors' sum, 24 + 8. All 24 regimes are served, cross attention (more
+                # graphs plus the larger of the two shortfalls (CorpusGenRun.cmake), 24 + 9, not
+                # the floors' sum, 24 + 10. All 24 regimes are served, cross attention (more
                 # queries than keys) among them.
                 "regime_and_form_floor|--without-engine,--operations,${_operations_dir},--operation,sdpa_fwd,--regime-floor,1,--form-floor,1,--keep,q.form=padded|0|24|padded"
                 # A sweep with no share still delivers the regimes the quotas name.
                 "regime_quota_without_sweep|--without-engine,--operations,${_operations_dir},--operation,sdpa_fwd,--regime-quota,decode_short_mha=3,--sweep-share,0|0|3"
                 # A keep on enum facets narrows the categorical combinations before the search's
-                # bound: of sdpa_fwd's 53760, the 8 of is_causal x alignment x generate_stats, 2 of
+                # bound: of sdpa_fwd's 67200, the 8 of is_causal x alignment x generate_stats, 2 of
                 # them empty by the declaration and none left unexplored, as manifest.json reports
                 # them (total:constraint_empty:not_explored), and the declared weights of the
                 # weighted facets.
                 "keep_narrows_combinations|--without-engine,--operations,${_operations_dir},--operation,sdpa_fwd,--count,20,--keep,q.form=plain,--keep,q.layout=bshd,--keep,q.scale=inv_sqrt_d,--keep,q.window=none,--keep,q.dtype=fp16,--keep,q.value_head_dim=same|0|20||8:2:0|reports.categorical_weights.sdpa_fwd.layout.bshd=2.0,reports.categorical_weights.sdpa_fwd.scale.inv_sqrt_d=2.0,reports.categorical_weights.sdpa_fwd.window.none=3.0"
                 # Past the bound of 1024 the sample holds combinations that can hold a problem
-                # only: of the 53760, 19460 are empty by the declaration, and 33276 of the 34300
+                # only: of the 67200, 29960 are empty by the declaration, and 36216 of the 37240
                 # that are not are left out.
-                "combinations_past_the_bound|--without-engine,--operations,${_operations_dir},--operation,sdpa_fwd,--per-combination,2,--count,20|0|20||53760:19460:33276"
-                # The cut to --count holds every form at about an even share (an eighth), though
+                "combinations_past_the_bound|--without-engine,--operations,${_operations_dir},--operation,sdpa_fwd,--per-combination,2,--count,20|0|20||67200:29960:36216"
+                # The cut to --count holds every form at about an even share (a tenth), though
                 # fewer combinations can hold some forms than others. The weighted dtype splits
                 # the first pass's budget rather than multiplying it, so --per-combination 30
-                # gives the cut the first pass of about 1800 problems it had at 10 with three
-                # unweighted dtypes. At 10 the default seed's cut still held every form at 40 of
-                # 400 or more but scale_unset (42), 6 above the 9% floor (36); 30 keeps the floor
-                # from resting on one seed's margin.
-                "count_cut_keeps_forms_even|--without-engine,--operations,${_operations_dir},--operation,sdpa_fwd,--per-combination,30,--count,400|0|400|||||9:plain:scale_unset:scale_tensor:dropout:padded:ragged:bias:sink"
+                # gives the cut a first pass of a few thousand problems. At the default seed the
+                # cut held 32 to 45 of 400 per form (sink fewest); the 7% floor (28) keeps it
+                # from resting on that seed's margin.
+                "count_cut_keeps_forms_even|--without-engine,--operations,${_operations_dir},--operation,sdpa_fwd,--per-combination,30,--count,400|0|400|||||7:plain:scale_unset:scale_tensor:dropout:padded:ragged:bias:sink:alibi:paged"
                 # With --anchor-scaling the declared mixture (80% archetypes and neighbourhood)
                 # holds at a count far above the first pass; without it the first pass's fixed
                 # quotas are diluted by exploration. anchored_share reports the delivered corpus.

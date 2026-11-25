@@ -348,7 +348,7 @@ TEST(TestRegimeFocus, ARegimeInACorpusWhoseEveryCombinationIsEmptyIsSaturated)
 
 TEST(TestRegimeFocus, PastTheBoundTheFocusSearchesTheMainPassSampleForItsSeed)
 {
-    // The forward's 53760 combinations are past the bound, so the lanes are a sample; under
+    // The forward's 67200 combinations are past the bound, so the lanes are a sample; under
     // the request's seed it is the main pass's sample, and another seed samples others.
     const auto metadata = shippedSdpa();
     std::string error;
@@ -599,7 +599,7 @@ INSTANTIATE_TEST_SUITE_P(SdpaDeclarations,
 
 TEST(TestRegimeFocus, AFocusedSearchUnderAKeepSpendsItsLanesOnTheCombinationsTheKeepAdmits)
 {
-    // The forward's 53760 combinations are past the bound of 1024, and a sample drawn before the
+    // The forward's 67200 combinations are past the bound of 1024, and a sample drawn before the
     // keep leaves a few of the 6 combinations the keep admits that can hold a problem, or none.
     const auto metadata = test::shippedOperation("sdpa_fwd");
     std::string error;
@@ -848,8 +848,9 @@ TEST_P(TestShippedForms, ALabelTheAxisDoesNotDeclareIsRefused)
 {
     const auto metadata = TestShippedForms::metadata();
     std::string error;
-    EXPECT_FALSE(compileFormFocus(metadata, "form", "paged", error).has_value());
-    EXPECT_NE(error.find("paged"), std::string::npos) << error;
+    // A schema feature no form declares.
+    EXPECT_FALSE(compileFormFocus(metadata, "form", "block_mask", error).has_value());
+    EXPECT_NE(error.find("block_mask"), std::string::npos) << error;
     error.clear();
     EXPECT_FALSE(compileFormFocus(metadata, "layout", "padded", error).has_value());
     EXPECT_NE(error.find("layout"), std::string::npos) << error;

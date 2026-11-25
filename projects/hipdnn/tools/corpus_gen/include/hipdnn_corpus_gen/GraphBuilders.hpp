@@ -745,6 +745,26 @@ struct SdpaForwardOperands : SdpaOperands
     std::optional<TensorSpec> descaleQ;
     std::optional<TensorSpec> descaleK;
     std::optional<TensorSpec> descaleV;
+
+    /// A paged KV cache (cuDNN's paged attention, SEM-009): the INT32 [B, 1, M, 1] block tables
+    /// of K and V, which are then containers [num_blocks, H_kv, block_size, D], and the logical
+    /// key length they span. The backward schema has no paging. Set together or not at all,
+    /// with the per-batch lengths the frontend requires of a paged graph.
+    std::optional<TensorSpec> pageTableK;
+    std::optional<TensorSpec> pageTableV;
+    std::optional<int32_t> maxSeqLenKv;
+};
+
+/// The backward's operands: those both directions take, and the ones only it has.
+struct SdpaBackwardOperands : SdpaOperands
+{
+    /// The gradient of the additive bias, written in the bias's dims and type.
+    std::optional<TensorSpec> dbias;
+
+    /// The attention-sink logits the forward read, and their gradient (cuDNN's set_sink_token
+    /// and set_dsink_token). dSink needs the sink; the sink is bound without it for a frozen one.
+    std::optional<TensorSpec> sink;
+    std::optional<TensorSpec> dsink;
 };
 
 namespace detail
@@ -803,8 +823,8 @@ void bindSdpaOperands(AttributesBuilder& attributes, const SdpaOperands& operand
 
 /// @brief Scaled dot-product attention, forward.
 ///
-/// The schema's other optional tensor uids (paged KV, the softmax and output scaling of
-/// cuDNN's sdpa_fp8, block mask) stay null; @p operands binds the rest. Stats are generated
+/// The schema's other optional tensor uids (the softmax and output scaling of cuDNN's sdpa_fp8,
+/// block mask) stay null; @p operands binds the rest. Stats are generated
 /// only when `generateStats` is set and @p stats is given.
 inline GraphBytes sdpaForward(const TensorSpec& q,
                               const TensorSpec& k,
@@ -830,11 +850,15 @@ inline GraphBytes sdpaForward(const TensorSpec& q,
     {
         tensors.push_back(detail::addTensor(builder, *operands.sink));
     }
-    for(const auto* descale : {&operands.descaleQ, &operands.descaleK, &operands.descaleV})
+    for(const auto* optional : {&operands.descaleQ,
+                                &operands.descaleK,
+                                &operands.descaleV,
+                                &operands.pageTableK,
+                                &operands.pageTableV})
     {
-        if(descale->has_value())
+        if(optional->has_value())
         {
-            tensors.push_back(detail::addTensor(builder, **descale));
+            tensors.push_back(detail::addTensor(builder, **optional));
         }
     }
     for(const auto& offsets : operands.raggedOffsets)
@@ -863,6 +887,18 @@ inline GraphBytes sdpaForward(const TensorSpec& q,
     if(operands.descaleV.has_value())
     {
         attributes.add_descale_v_tensor_uid(operands.descaleV->uid);
+    }
+    if(operands.pageTableK.has_value())
+    {
+        attributes.add_page_table_k_tensor_uid(operands.pageTableK->uid);
+    }
+    if(operands.pageTableV.has_value())
+    {
+        attributes.add_page_table_v_tensor_uid(operands.pageTableV->uid);
+    }
+    if(operands.maxSeqLenKv.has_value())
+    {
+        attributes.add_max_seq_len_kv(*operands.maxSeqLenKv);
     }
     // Causality is written as bounds (right 0, left unbounded) plus diagonal_alignment. The
     // deprecated causal_mask flag stays false: providers read it as top-left regardless of the
@@ -907,7 +943,8 @@ inline GraphBytes sdpaForward(const TensorSpec& q,
 /// @brief Scaled dot-product attention, backward. Stats from the forward pass are required,
 ///        not optional: the backward pass reads them rather than recomputing the softmax.
 ///
-/// The backward schema has no sink token, so @p operands is the shared set.
+/// @p operands binds the shared optional tensors and the backward's own: dBias, the sink and
+/// dSink.
 inline GraphBytes sdpaBackward(const TensorSpec& q,
                                const TensorSpec& k,
                                const TensorSpec& v,
@@ -919,7 +956,7 @@ inline GraphBytes sdpaBackward(const TensorSpec& q,
                                const TensorSpec& dv,
                                const SdpaOptions& options,
                                const GraphTypes& types,
-                               const SdpaOperands& operands = {})
+                               const SdpaBackwardOperands& operands = {})
 {
     flatbuffers::FlatBufferBuilder builder;
     std::vector<flatbuffers::Offset<fb::TensorAttributes>> tensors{
@@ -933,6 +970,13 @@ inline GraphBytes sdpaBackward(const TensorSpec& q,
         detail::addTensor(builder, dk),
         detail::addTensor(builder, dv)};
     detail::addSdpaOperandTensors<fb::SdpaBackwardAttributesBuilder>(builder, tensors, operands);
+    for(const auto* optional : {&operands.dbias, &operands.sink, &operands.dsink})
+    {
+        if(optional->has_value())
+        {
+            tensors.push_back(detail::addTensor(builder, **optional));
+        }
+    }
     for(const auto& offsets : operands.raggedOffsets)
     {
         tensors.push_back(detail::addTensor(builder, offsets));
@@ -949,6 +993,18 @@ inline GraphBytes sdpaBackward(const TensorSpec& q,
     attributes.add_dk_tensor_uid(dk.uid);
     attributes.add_dv_tensor_uid(dv.uid);
     detail::bindSdpaOperands(attributes, operands);
+    if(operands.dbias.has_value())
+    {
+        attributes.add_dbias_tensor_uid(operands.dbias->uid);
+    }
+    if(operands.sink.has_value())
+    {
+        attributes.add_sink_token_tensor_uid(operands.sink->uid);
+    }
+    if(operands.dsink.has_value())
+    {
+        attributes.add_dsink_token_tensor_uid(operands.dsink->uid);
+    }
     // Same encoding as sdpaForward: causality as bounds plus diagonal_alignment.
     const bool causal = options.causalMask && options.rightBound < 0;
     attributes.add_causal_mask(false);

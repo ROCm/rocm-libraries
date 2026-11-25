@@ -360,9 +360,10 @@ TEST(TestShippedGraphsValidate, EverySdpaFormBuildsAGraphTheFrontendValidates)
                 }
             }
         }
-        // Three admitted mask and anchor pairs, every declared element type, two statistics
-        // settings.
-        EXPECT_EQ(built, form->values.size() * dtypes->values.size() * 6U) << operation;
+        // Three admitted mask and anchor pairs per form but alibi, which takes one (causal,
+        // top-left: SEM-021), every declared element type, two statistics settings.
+        const size_t maskPairs = (form->values.size() * 3U) - 2U;
+        EXPECT_EQ(built, maskPairs * dtypes->values.size() * 2U) << operation;
     }
 }
 

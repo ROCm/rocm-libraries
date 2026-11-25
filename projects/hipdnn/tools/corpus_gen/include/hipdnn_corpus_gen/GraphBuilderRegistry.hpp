@@ -474,7 +474,11 @@ enum SdpaOperandUid : int64_t
     SDPA_KV_OFFSETS_UID,
     SDPA_DESCALE_Q_UID,
     SDPA_DESCALE_K_UID,
-    SDPA_DESCALE_V_UID
+    SDPA_DESCALE_V_UID,
+    SDPA_DBIAS_UID,
+    SDPA_DSINK_UID,
+    SDPA_PAGE_TABLE_K_UID,
+    SDPA_PAGE_TABLE_V_UID
 };
 
 /// What the `dropout` form drops. Any non-zero rate selects the dropout kernel; this one is the
@@ -567,9 +571,10 @@ inline std::string applySdpaLengths(const ArgumentResolution& resolved,
 /// it.
 ///
 /// Absent or `plain` binds none, so a declaration without a form builds the graph it always did.
-/// Returns the reason a form cannot be built, empty on success. `sink` (forward only) and
-/// `ragged` (built differently per direction) are the adapters' own; here they are unknown,
-/// which is what an adapter that does not build them reports.
+/// Returns the reason a form cannot be built, empty on success. The forms only one direction has
+/// (`sink` and `paged` forward, `sink`, `dsink` and `dbias` backward) and `ragged` (built
+/// differently per direction) are the adapters' own; here they are unknown, which is what an
+/// adapter that does not build them reports.
 inline std::string applySdpaCommonForm(const ArgumentResolution& resolved,
                                        const std::string& builder,
                                        const std::string& form,
@@ -579,6 +584,12 @@ inline std::string applySdpaCommonForm(const ArgumentResolution& resolved,
     std::string error;
     if(form.empty() || form == "plain")
     {
+        return {};
+    }
+    if(form == "alibi")
+    {
+        // No tensor: the slopes are cuDNN's, fixed by the query head count (SEM-021).
+        options.alibiMask = true;
         return {};
     }
     if(form == "scale_unset")
@@ -685,6 +696,106 @@ inline std::string applySdpaRaggedOffsets(const ArgumentResolution& resolved,
     }
     operands.raggedOffsets = {*qOffsets, *kvOffsets};
     return {};
+}
+
+/// @brief Pages a forward's K and V (cuDNN's paged attention, SEM-009): each becomes a container
+/// [B x M, H_kv, kvBlockSize, D] of M blocks per sequence, sequence b's keys in blocks b x M up to
+/// b x M + M - 1, read through INT32 [B, 1, M, 1] tables (`pageTableDims`, `pageTableStrides`,
+/// `pageTableDataType`), with the per-batch lengths the frontend requires of a paged graph and
+/// max_seq_len_kv the declared key extent. A block keeps the declared token-major layout: its
+/// stride is kvBlockSize tokens, its head and token strides are the dense tensor's. Returns the
+/// reason it cannot, empty on success.
+inline std::string applySdpaPagedKv(const ArgumentResolution& resolved,
+                                    const std::string& builder,
+                                    const std::string& form,
+                                    builders::TensorSpec& k,
+                                    builders::TensorSpec& v,
+                                    builders::SdpaOptions& options,
+                                    builders::SdpaForwardOperands& operands)
+{
+    std::string error = applySdpaLengths(resolved, builder, form, options, operands);
+    if(!error.empty())
+    {
+        return error;
+    }
+    auto tableK = sdpaOperand(
+        resolved, builder, form, SDPA_PAGE_TABLE_K_UID, "page_table_k", "pageTable", error);
+    auto tableV = sdpaOperand(
+        resolved, builder, form, SDPA_PAGE_TABLE_V_UID, "page_table_v", "pageTable", error);
+    if(!tableK.has_value() || !tableV.has_value())
+    {
+        return error;
+    }
+    // An expression yields a number, integral or not; a block size must be a whole count.
+    const double declaredBlockSize = scalar(resolved, "kvBlockSize", 0.0);
+    const auto blockSize = static_cast<int64_t>(declaredBlockSize);
+    if(blockSize < 1 || static_cast<double>(blockSize) != declaredBlockSize)
+    {
+        return builder + ": form '" + form + "' needs a positive whole kvBlockSize";
+    }
+
+    constexpr size_t RANK = 4;
+    constexpr size_t HEAD_AXIS = 1;
+    constexpr size_t TOKEN_AXIS = 2;
+    const auto& table = tableK->dims;
+    if(table.size() != RANK || k.dims.size() != RANK || v.dims.size() != RANK
+       || table[0] != k.dims[0] || table[2] < 1)
+    {
+        return builder + ": form '" + form + "' needs rank-4 K and V and a [B, 1, M, 1] page table";
+    }
+    const int64_t keys = k.dims[TOKEN_AXIS];
+    if(keys > table[2] * blockSize || keys > std::numeric_limits<int32_t>::max())
+    {
+        return builder + ": form '" + form + "' pages " + std::to_string(keys)
+               + " keys into fewer than that many slots";
+    }
+    for(auto* tensor : {&k, &v})
+    {
+        if(tensor->strides.size() != RANK
+           || tensor->strides[TOKEN_AXIS] < tensor->strides[HEAD_AXIS])
+        {
+            return builder + ": form '" + form + "' needs a token-major " + tensor->name;
+        }
+        const int64_t tokenStride = tensor->strides[TOKEN_AXIS];
+        tensor->dims = {table[0] * table[2], tensor->dims[HEAD_AXIS], blockSize, tensor->dims[3]};
+        tensor->strides = {
+            blockSize * tokenStride, tensor->strides[HEAD_AXIS], tokenStride, tensor->strides[3]};
+    }
+    operands.pageTableK = std::move(tableK);
+    operands.pageTableV = std::move(tableV);
+    operands.maxSeqLenKv = static_cast<int32_t>(keys);
+    return {};
+}
+
+/// @brief Applies a backward form the forward does not have: `dbias` binds the bias and writes
+/// its gradient in the bias's dims and type; `sink` binds the sink logits a frozen sink leaves
+/// without a gradient; `dsink` binds them and writes their gradient, in the sink's dims and type.
+/// Any other form goes to applySdpaCommonForm. Returns the reason it cannot, empty on success.
+inline std::string applySdpaBackwardForm(const ArgumentResolution& resolved,
+                                         const std::string& builder,
+                                         const std::string& form,
+                                         builders::SdpaOptions& options,
+                                         builders::SdpaBackwardOperands& operands)
+{
+    std::string error;
+    if(form == "dbias")
+    {
+        operands.bias = sdpaOperand(resolved, builder, form, SDPA_BIAS_UID, "bias", "bias", error);
+        operands.dbias
+            = sdpaOperand(resolved, builder, form, SDPA_DBIAS_UID, "dbias", "bias", error);
+        return error;
+    }
+    if(form == "sink" || form == "dsink")
+    {
+        operands.sink = sdpaOperand(resolved, builder, form, SDPA_SINK_UID, "sink", "sink", error);
+        if(form == "dsink")
+        {
+            operands.dsink
+                = sdpaOperand(resolved, builder, form, SDPA_DSINK_UID, "dsink", "sink", error);
+        }
+        return error;
+    }
+    return applySdpaCommonForm(resolved, builder, form, options, operands);
 }
 
 } // namespace detail
@@ -850,6 +961,11 @@ inline const std::map<std::string, BuilderAdapter>& builderRegistry()
                  }
                  error = detail::applySdpaRaggedOffsets(
                      resolved, "sdpaForward", form, querySide, {&kTensor, &vTensor}, operands);
+             }
+             else if(form == "paged")
+             {
+                 error = detail::applySdpaPagedKv(
+                     resolved, "sdpaForward", form, kTensor, vTensor, options, operands);
              }
              else
              {
@@ -1043,7 +1159,7 @@ inline const std::map<std::string, BuilderAdapter>& builderRegistry()
 
              // t holds q, k, v, o, dO, stats, dq, dk, dv in that order.
              const auto form = detail::enumName(resolved, "form");
-             builders::SdpaOperands operands;
+             builders::SdpaBackwardOperands operands;
              std::string error;
              if(form == "ragged")
              {
@@ -1065,7 +1181,7 @@ inline const std::map<std::string, BuilderAdapter>& builderRegistry()
              }
              else
              {
-                 error = detail::applySdpaCommonForm(
+                 error = detail::applySdpaBackwardForm(
                      resolved, "sdpaBackward", form, options, operands);
              }
              if(!error.empty())

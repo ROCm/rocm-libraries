@@ -497,7 +497,20 @@ std::vector<FormExpectation> formExpectations()
         // The offsets go on the tensors, not the node; the backward also binds the lengths.
         {"ragged", {}, {}, {}, 7, 13, {"seq_len_q", "seq_len_kv"}, {"padding_mask"}},
         {"bias", {"attn_mask"}, {}, {}, 6, 10, {}, {}},
-        {"sink", {"sink_token"}, {}, {}, 6, 0, {}, {}},
+        // A learned per-head bias and its gradient: the backward's own.
+        {"dbias", {"attn_mask", "dbias"}, {}, {}, 0, 11, {}, {}},
+        {"sink", {"sink_token"}, {}, {}, 6, 10, {}, {}},
+        {"dsink", {"sink_token", "dsink_token"}, {}, {}, 0, 11, {}, {}},
+        {"alibi", {}, {"alibi_mask"}, {}, 5, 9, {}, {}},
+        // K and V paged through two tables, with the lengths a paged graph requires.
+        {"paged",
+         {"seq_len_q", "seq_len_kv", "page_table_k", "page_table_v"},
+         {"padding_mask", "max_seq_len_kv"},
+         {},
+         9,
+         0,
+         {},
+         {}},
     };
 }
 
@@ -610,7 +623,7 @@ TEST(TestSdpaForms, EveryForwardFormBindsExactlyItsOptionalFields)
 
 TEST(TestSdpaForms, EveryBackwardFormBindsExactlyItsOptionalFields)
 {
-    // The backward schema has no sink token.
+    // The backward has its own forms (dbias, sink, dsink) and none of the forward's paging.
     expectEveryFormBindsExactlyItsOptionalFields(
         "sdpa_bwd", {"q", "k", "v", "o", "do", "stats", "dq", "dk", "dv"});
 }
@@ -752,6 +765,98 @@ TEST(TestSdpaForms, TheSinkIsOneFloatLogitPerQueryHead)
     EXPECT_EQ(sink->data_type(), fb::DataType::FLOAT);
 }
 
+TEST(TestSdpaForms, TheBackwardSinkIsOneFloatLogitPerQueryHeadAndDsinkIsShapedLikeIt)
+{
+    const auto metadata = test::shippedOperation("sdpa_bwd");
+    for(const auto* form : {"sink", "dsink"})
+    {
+        const auto built = buildForm(metadata, form);
+        ASSERT_TRUE(built.ok()) << form << ": " << built.error;
+        const auto* graph = asGraph(built.bytes);
+        const auto* attributes = graph->nodes()->Get(0)->attributes_as_SdpaBackwardAttributes();
+        ASSERT_NE(attributes, nullptr) << form;
+        const auto* sink = tensorWithUid(*graph, attributes->sink_token_tensor_uid());
+        ASSERT_NE(sink, nullptr) << form;
+        EXPECT_EQ(dimsOf(sink), (Ints{1, HEADS, 1, 1})) << form;
+        EXPECT_EQ(sink->data_type(), fb::DataType::FLOAT) << form;
+
+        // A frozen sink binds no gradient; a learned one writes dSink in the sink's dims and type.
+        const auto* dsink = tensorWithUid(*graph, attributes->dsink_token_tensor_uid());
+        if(std::string(form) == "sink")
+        {
+            EXPECT_EQ(dsink, nullptr);
+            continue;
+        }
+        ASSERT_NE(dsink, nullptr);
+        EXPECT_NE(dsink->uid(), sink->uid());
+        EXPECT_EQ(dimsOf(dsink), dimsOf(sink));
+        EXPECT_EQ(dsink->data_type(), sink->data_type());
+    }
+}
+
+TEST(TestSdpaForms, TheLearnedBiasIsPerHeadAndItsGradientTakesItsDimsStridesAndType)
+{
+    const auto built = buildForm(test::shippedOperation("sdpa_bwd"), "dbias");
+    ASSERT_TRUE(built.ok()) << built.error;
+    const auto* graph = asGraph(built.bytes);
+    const auto* attributes = graph->nodes()->Get(0)->attributes_as_SdpaBackwardAttributes();
+    ASSERT_NE(attributes, nullptr);
+    const auto* bias = tensorWithUid(*graph, attributes->attn_mask_tensor_uid());
+    const auto* dbias = tensorWithUid(*graph, attributes->dbias_tensor_uid());
+    ASSERT_NE(bias, nullptr);
+    ASSERT_NE(dbias, nullptr);
+    EXPECT_NE(bias->uid(), dbias->uid());
+    EXPECT_EQ(dimsOf(bias), (Ints{1, HEADS, SEQLEN_Q, SEQLEN_K}));
+    EXPECT_EQ(dimsOf(dbias), dimsOf(bias));
+    EXPECT_EQ(Ints(dbias->strides()->begin(), dbias->strides()->end()),
+              Ints(bias->strides()->begin(), bias->strides()->end()));
+    EXPECT_EQ(bias->data_type(), fb::DataType::HALF);
+    EXPECT_EQ(dbias->data_type(), bias->data_type());
+}
+
+TEST(TestSdpaForms, PagedKvIsAContainerOfBlocksReadThroughOneTablePerSide)
+{
+    // vLLM's 16-token blocks: ceil(seqlen_k / 16) blocks per sequence, a whole number of them
+    // even when the keys do not fill the last.
+    constexpr int64_t BLOCK = 16;
+    const auto metadata = test::shippedOperation("sdpa_fwd");
+    for(const int64_t keys : {SEQLEN_K, SEQLEN_K + 1})
+    {
+        auto point = formPoint(metadata, "paged");
+        point["seqlen_k"] = keys;
+        const auto built = buildGraphFor(metadata, point);
+        ASSERT_TRUE(built.ok()) << keys << ": " << built.error;
+        const auto* graph = asGraph(built.bytes);
+        const auto* attributes = graph->nodes()->Get(0)->attributes_as_SdpaAttributes();
+        ASSERT_NE(attributes, nullptr);
+        const int64_t blocks = (keys + BLOCK - 1) / BLOCK;
+
+        EXPECT_TRUE(attributes->padding_mask()) << keys;
+        ASSERT_TRUE(attributes->max_seq_len_kv().has_value()) << keys;
+        EXPECT_EQ(attributes->max_seq_len_kv().value(), keys);
+        const auto* tableK = tensorWithUid(*graph, attributes->page_table_k_tensor_uid());
+        const auto* tableV = tensorWithUid(*graph, attributes->page_table_v_tensor_uid());
+        ASSERT_NE(tableK, nullptr) << keys;
+        ASSERT_NE(tableV, nullptr) << keys;
+        EXPECT_NE(tableK->uid(), tableV->uid());
+        for(const auto* table : {tableK, tableV})
+        {
+            EXPECT_EQ(dimsOf(table), (Ints{BATCH, 1, blocks, 1})) << keys;
+            EXPECT_EQ(table->data_type(), fb::DataType::INT32) << keys;
+        }
+        // Token-major blocks: a block is BLOCK tokens of the dense cache's token stride.
+        for(const auto uid : {attributes->k_tensor_uid(), attributes->v_tensor_uid()})
+        {
+            const auto* cache = tensorWithUid(*graph, uid);
+            ASSERT_NE(cache, nullptr) << keys;
+            EXPECT_EQ(dimsOf(cache), (Ints{BATCH * blocks, HEADS_KV, BLOCK, HEAD_DIM})) << keys;
+            EXPECT_EQ(Ints(cache->strides()->begin(), cache->strides()->end()),
+                      (Ints{BLOCK * HEADS_KV * HEAD_DIM, HEAD_DIM, HEADS_KV * HEAD_DIM, 1}))
+                << keys;
+        }
+    }
+}
+
 TEST(TestSdpaForms, RaggedPacksQOAndStatsThroughOneOffsetAndKVThroughAnother)
 {
     for(const bool stats : {true, false})
@@ -879,15 +984,15 @@ TEST(TestSdpaForms, BackwardRaggedPacksTheQuerySideThroughOneOffsetAndTheKeySide
 
 TEST(TestSdpaForms, AFormTheDirectionDoesNotBuildIsRefusedByName)
 {
-    for(const auto* form : {"sink", "paged"})
+    const auto unpaged = buildForm(test::shippedOperation("sdpa_bwd"), "paged");
+    EXPECT_FALSE(unpaged.ok());
+    EXPECT_NE(unpaged.error.find("paged"), std::string::npos) << unpaged.error;
+    for(const auto* form : {"dbias", "dsink"})
     {
-        const auto built = buildForm(test::shippedOperation("sdpa_bwd"), form);
+        const auto built = buildForm(test::shippedOperation("sdpa_fwd"), form);
         EXPECT_FALSE(built.ok()) << form;
         EXPECT_NE(built.error.find(form), std::string::npos) << built.error;
     }
-    const auto built = buildForm(test::shippedOperation("sdpa_fwd"), "paged");
-    EXPECT_FALSE(built.ok());
-    EXPECT_NE(built.error.find("paged"), std::string::npos) << built.error;
 }
 
 namespace
@@ -951,12 +1056,16 @@ TEST(TestSdpaForms, AFormWhoseOperandIsNotDeclaredIsRefusedByFormAndArgument)
         {"sdpa_fwd", "bias", "biasDataType"},
         {"sdpa_fwd", "sink", "sinkStrides"},
         {"sdpa_fwd", "ragged", "offsetsStrides"},
+        {"sdpa_fwd", "paged", "pageTableDataType"},
         {"sdpa_bwd", "scale_tensor", "scaleDataType"},
         {"sdpa_bwd", "dropout", "seedStrides"},
         {"sdpa_bwd", "padded", "seqLenDataType"},
         {"sdpa_bwd", "bias", "biasStrides"},
         {"sdpa_bwd", "ragged", "offsetsStrides"},
         {"sdpa_bwd", "ragged", "seqLenDataType"},
+        {"sdpa_bwd", "dbias", "biasDataType"},
+        {"sdpa_bwd", "sink", "sinkStrides"},
+        {"sdpa_bwd", "dsink", "sinkDataType"},
     };
     for(const auto& missing : cases)
     {

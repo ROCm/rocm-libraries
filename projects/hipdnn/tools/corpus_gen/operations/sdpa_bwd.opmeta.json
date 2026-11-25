@@ -2,7 +2,7 @@
   "schema_version": "1.0",
   "operation": "sdpa_bwd",
   "display_name": "Scaled Dot-Product Attention, Backward",
-  "description": "Gradients of scaled dot-product attention: dq, dk and dv from dO, given q, k, v, the forward output o and its softmax statistics. Its problem space is sdpa_fwd's without the sink form and generate_stats; its ragged form carries the per-batch lengths the forward's compact one leaves out.",
+  "description": "Gradients of scaled dot-product attention: dq, dk and dv from dO, given q, k, v, the forward output o and its softmax statistics. Its problem space is sdpa_fwd's without the paged form and generate_stats, plus the gradients a forward does not write: dbias and dsink; its ragged form carries the per-batch lengths the forward's compact one leaves out.",
   "parameters": {
     "batch": {
       "type": "int64"
@@ -30,12 +30,13 @@
       "type": "int64",
       "range": [
         8,
-        512
+        576
       ],
       "common_values": [
-        192
+        192,
+        576
       ],
-      "description": "Per-head width. 8 and up: narrower is not an attention head, and without a range the search spends half its draws below 16. The common value is the MLA width, beside the regime buckets 64, 128 and 256, so the search is seeded where an MLA combination can hold a problem: the constraints admit no other width there, which a walk does not find by stepping."
+      "description": "Per-head width. 8 and up: narrower is not an attention head, and without a range the search spends half its draws below 16. Up to 576 for absorbed MLA's Q and K (value_head_dim mla); a V as wide as Q stays at 512 or less. The common values are the two MLA widths, beside the regime buckets 64, 128 and 256, so the search is seeded where an MLA combination can hold a problem: the constraints admit no other width there, which a walk does not find by stepping."
     },
     "value_head_dim": {
       "type": "enum",
@@ -47,7 +48,7 @@
         "same": 3,
         "mla": 1
       },
-      "description": "Width of V, and so of O (and dO, dV), against Q and K's head_dim. same (default): equal, as nearly every model has. mla: 64 narrower, DeepSeek's multi-head latent attention, whose Q and K carry a 64-wide rotary part that V does not -- 192/128 in prefill and training, 576/512 with the latent absorbed in decode. hipDNN requires only Q and K's last dims to agree (SdpaFwdNode Rule 2, SdpaBwdNode Rule 3; O, dO and dV take V's), and ASM SDPA and FlyDSL ship kernels for such pairs. The backward declares the training pair only (head_dim 192): the absorbed 576/512 form is an inference rewrite no training step runs. The mla pair is pinned on purpose to DeepSeek's 192/128, and other unequal Q/K and V widths (128/64, 129/65, or any V an engine's pair buckets take) are deliberately left out of the corpus, so UHD has no data for them. The deepseek_v3_mla_prefill archetype anchors it."
+      "description": "Width of V, and so of O (and dO, dV), against Q and K's head_dim. same (default): equal, as nearly every model has. mla: 64 narrower, DeepSeek's multi-head latent attention, whose Q and K carry a 64-wide rotary part that V does not -- 192/128 in prefill and training, 576/512 with the latent absorbed in decode. hipDNN requires only Q and K's last dims to agree (SdpaFwdNode Rule 2, SdpaBwdNode Rule 3; O, dO and dV take V's), and ASM SDPA and FlyDSL ship kernels for such pairs. The backward declares both pairs, as the forward does: 192/128 is the training pair, and 576/512 is the backward of the absorbed decode. No training step runs the absorbed form, but converted inference graphs reach the backward in it (dnn-benchmarking's SDPA OOTB corpus, 2026-11-24, kimi_k3 generation at 576/512, which no engine served), so a model needs data there too. The mla pairs are pinned on purpose to DeepSeek's 192/128 and 576/512, and other unequal Q/K and V widths (128/64, 129/65, or any V an engine's pair buckets take) are deliberately left out of the corpus, so UHD has no data for them. The deepseek_v3_mla_prefill and mla_absorbed_decode archetypes anchor them."
     },
     "is_causal": {
       "type": "bool",
@@ -127,9 +128,13 @@
         "dropout",
         "padded",
         "ragged",
-        "bias"
+        "bias",
+        "dbias",
+        "sink",
+        "dsink",
+        "alibi"
       ],
-      "description": "Which optional attributes and tensors the graph binds (RFC 0019 \u00a76.7, absent is not zero, and \u00a76.8 rule 9: a model must tolerate any optional feature a valid graph leaves unbound). One aspect varies per graph from the plain baseline, so every optional input appears both present and absent without crossing them all. Only the forms built for the backward: its schema has no sink token. plain states the scale and binds nothing optional; scale_unset leaves the scale unstated; scale_tensor gives it as a pass-by-value tensor; dropout adds Philox dropout with an INT64 seed and offset; padded adds per-batch seq_len_q and seq_len_kv; ragged packs Q, O, dO, dQ and the statistics through one offset tensor and K, V, dK and dV through another, with the per-batch lengths and padding mask beside them (cuDNN's THD backward; the forward's ragged is compact THD, without lengths); bias adds an additive [1, 1, seqlen_q, seqlen_k] bias (attn_mask only: no dbias is written). A --model-shapes file with no `q.form` column reads every row as plain; a column left empty in a row is refused. Every form is an even stratum, and the forms are not weighted (unlike layout, scale and window), so the cut to --count takes each form evenly, as far as the first pass holds it. Without --count the forms declared in fewer combinations get fewer graphs: scale_unset and scale_tensor take inv_sqrt_d only and ragged takes the token-major layouts (bshd, qkv_packed) only. --form-floor tops each form up to its count. Interactions: the form decides whether the `scale` facet applies (scale_unset and scale_tensor ignore it, so they are held at inv_sqrt_d) and which `layout` is meaningful (ragged is token-major: bshd and qkv_packed only). Every other pairing with layout, window and scale is a valid graph; an engine that serves only some of them is filtered by the oracle."
+      "description": "Which optional attributes and tensors the graph binds (RFC 0019 \u00a76.7, absent is not zero, and \u00a76.8 rule 9: a model must tolerate any optional feature a valid graph leaves unbound). One aspect varies per graph from the plain baseline, so every optional input appears both present and absent without crossing them all. plain states the scale and binds nothing optional; scale_unset leaves the scale unstated; scale_tensor gives it as a pass-by-value tensor; dropout adds Philox dropout with an INT64 seed and offset; padded adds per-batch seq_len_q and seq_len_kv; ragged packs Q, O, dO, dQ and the statistics through one offset tensor and K, V, dK and dV through another, with the per-batch lengths and padding mask beside them (cuDNN's THD backward; the forward's ragged is compact THD, without lengths); bias adds an additive [1, 1, seqlen_q, seqlen_k] bias (attn_mask only: no dbias is written, a fixed mask); dbias adds a learned per-head [1, heads, seqlen_q, seqlen_k] bias and writes its gradient in the same dims (T5, Swin and AlphaFold relative biases); sink binds one FLOAT sink logit per query head, a frozen sink, without its gradient; dsink binds it and writes dSink, [1, heads, 1, 1] FLOAT, as a model that learns its sinks trains (gpt-oss); alibi sets alibi_mask, cuDNN's ALiBi with no tensor (the slopes follow the query head count, SEM-021), declared causal and top-left only, as the references define it. A --model-shapes file with no `q.form` column reads every row as plain; a column left empty in a row is refused. Every form is an even stratum, and the forms are not weighted (unlike layout, scale and window), so the cut to --count takes each form evenly, as far as the first pass holds it. Without --count the forms declared in fewer combinations get fewer graphs: scale_unset and scale_tensor take inv_sqrt_d only and ragged takes the token-major layouts (bshd, qkv_packed) only. --form-floor tops each form up to its count. Interactions: the form decides whether the `scale` facet applies (scale_unset and scale_tensor ignore it, so they are held at inv_sqrt_d) and which `layout` is meaningful (ragged is token-major: bshd and qkv_packed only). Every other pairing with layout, window and scale is a valid graph; an engine that serves only some of them is filtered by the oracle."
     }
   },
   "stratification_axis": "arithmetic_intensity",
@@ -334,6 +339,42 @@
               "bias"
             ]
           }
+        },
+        {
+          "label": "dbias",
+          "when": {
+            "==": [
+              "$q.form",
+              "dbias"
+            ]
+          }
+        },
+        {
+          "label": "sink",
+          "when": {
+            "==": [
+              "$q.form",
+              "sink"
+            ]
+          }
+        },
+        {
+          "label": "dsink",
+          "when": {
+            "==": [
+              "$q.form",
+              "dsink"
+            ]
+          }
+        },
+        {
+          "label": "alibi",
+          "when": {
+            "==": [
+              "$q.form",
+              "alibi"
+            ]
+          }
         }
       ],
       "otherwise": "plain"
@@ -477,6 +518,28 @@
             "$q.head_dim",
             192
           ]
+        },
+        {
+          "==": [
+            "$q.head_dim",
+            576
+          ]
+        }
+      ]
+    },
+    {
+      "or": [
+        {
+          "==": [
+            "$q.value_head_dim",
+            "mla"
+          ]
+        },
+        {
+          "<=": [
+            "$q.head_dim",
+            512
+          ]
         }
       ]
     },
@@ -582,6 +645,32 @@
           "==": [
             "$q.alignment",
             "top_left"
+          ]
+        }
+      ]
+    },
+    {
+      "or": [
+        {
+          "!=": [
+            "$q.form",
+            "alibi"
+          ]
+        },
+        {
+          "and": [
+            {
+              "==": [
+                "$q.is_causal",
+                true
+              ]
+            },
+            {
+              "==": [
+                "$q.alignment",
+                "top_left"
+              ]
+            }
           ]
         }
       ]
@@ -1739,7 +1828,18 @@
         "kind": "expr",
         "value": [
           1,
-          1,
+          {
+            "if": [
+              {
+                "==": [
+                  "$q.form",
+                  "dbias"
+                ]
+              },
+              "$q.heads",
+              1
+            ]
+          },
           "$q.seqlen_q",
           "$q.seqlen_k"
         ]
@@ -1753,6 +1853,26 @@
         "name": "biasDataType",
         "kind": "dtype_of",
         "source": "$q.dtype"
+      },
+      {
+        "name": "sinkDims",
+        "kind": "expr",
+        "value": [
+          1,
+          "$q.heads",
+          1,
+          1
+        ]
+      },
+      {
+        "name": "sinkStrides",
+        "kind": "strides_of",
+        "of": "sinkDims"
+      },
+      {
+        "name": "sinkDataType",
+        "kind": "constant",
+        "constant": "float"
       }
     ],
     "// types": [
@@ -1762,7 +1882,7 @@
     ],
     "// layout": "BSHD (the default): dims stay (B, H, S, D) and the layout lives in the strides, token-major, as the shipped bundles lay them out. Not row-major: strides_of would give BHSD, and rocKE's dense kernels take no stride kernargs -- stride_q_tok is baked as Hq*D -- so their matcher (hasBshdStrides) declines every BHSD graph. AITER serves BSHD too, so the default keeps both engines in the contest. The `layout` parameter adds bhsd (head-major, [H*S*D, S*D, D, 1]) and kv_bhsd (Q/O token-major, K/V head-major, the decode KV cache), whose batch stride is BSHD's, so only the head and sequence strides differ; sbhd (Megatron's sequence-major order, batch stride H*D) and qkv_packed (Q, K and V as views of one fused QKV projection row, O token-major). value_head_dim mla narrows V, O (and dO, dV) by 64, so their strides use the value width wherever Q's use head_dim. An engine that serves only some of them is filtered by the oracle, per combination, not by a measurement.",
     "// scale": "attnScale is the plain form's stated scale, not left to the schema's optional: rocKE's dense matcher declines a graph with no attn_scale_value (the scale is a required f32 kernarg and guessing 1/sqrt(D) is what it refuses to do), so a corpus that was all scale_unset would empty a rocKE corpus. 1/sqrt(head_dim) is the standard scale and what the shipped bundles carry. The other forms leave it out (scale_unset, scale_tensor) or keep it (the rest), and the live-engine oracle drops the forms an engine refuses, which is how rocKE's corpus stays free of them. The `scale` parameter chooses the stated value for the forms that state one; scale_unset states none and scale_tensor passes the value as a runtime tensor, so a constraint holds the facet at inv_sqrt_d there instead of listing the same graph (or tensors differing only in their default) under three scales.",
-    "// form": "One optional aspect per graph, everything else as the plain graph has it. The conventions are hipDNN's own: SdpaBwdNode requires seq_len_q and seq_len_kv, INT32 [B, 1, 1, 1], when padding_mask is set (detail::validateIndexTensor, Rule 9); the scale tensor is a single-element pass-by-value tensor (validateScalarParameter, Rule 10b), given as a runtime parameter whose default is the plain form's scale; the bias takes Q's dtype and dims [1, 1, seqlen_q, seqlen_k], row-major (Rule 7: last two dims equal seq_q and seq_kv, or 1), and dbias stays unset. The dropout seed and offset are INT64 [1, 1, 1, 1] device tensors as the test SDK builds the forward's (RaggedSdpaDensifyTestGraphs.hpp withPhiloxDropout); the frontend states no rule for them and no explicit dropout mask is needed, so that one is the test SDK's convention, not a validated one. There is no kernel_catalog here to hold a plain constant, and no sink form: the backward schema has no sink token. ragged is cuDNN's THD backward: Q, O, dO, dQ and the statistics share one INT32 [B+1, 1, 1, 1] offset tensor and K, V, dK and dV another, each multiplier the tensor's token stride (the statistics packed token-major, [seqlen_q*heads, 1, heads, 1], as the forward writes them), with seq_len_q, seq_len_kv and the padding mask beside them (SdpaBwdNode Rule 9). The lengths are not optional here: FlyDSL's backward, the engine that serves ragged, declines offsets without them (checkVarlen), while the forward's compact THD form (the test SDK's makeVllmGraph) has none. Facet interactions are constraints, not builder guards: `scale` is held at inv_sqrt_d under scale_unset and scale_tensor, and `ragged` to the token-major layouts (bshd, qkv_packed). Everything else crosses freely (padded, dropout and bias with every layout and window), since the frontend validators, the CPU and GPU references and the engine matchers state those as valid or as an engine-level decline, which the oracle filters.",
+    "// form": "One optional aspect per graph, everything else as the plain graph has it. The conventions are hipDNN's own: SdpaBwdNode requires seq_len_q and seq_len_kv, INT32 [B, 1, 1, 1], when padding_mask is set (detail::validateIndexTensor, Rule 9); the scale tensor is a single-element pass-by-value tensor (validateScalarParameter, Rule 10b), given as a runtime parameter whose default is the plain form's scale; the bias takes Q's dtype and dims [1, 1, seqlen_q, seqlen_k], row-major (Rule 7: last two dims equal seq_q and seq_kv, or 1), and dbias stays unset; the dbias form's bias is per head, [1, heads, seqlen_q, seqlen_k], and dBias takes its dims, strides and dtype (Rule 12), so a seqlen_k that is not a multiple of 8 gives both a row pitch off 16 bytes, as Swin's 49-token windows do; the sink and dSink are one FLOAT logit per query head, [1, heads, 1, 1] (Rule 15: dSink needs the sink and takes its dtype); alibi binds no tensor. The dropout seed and offset are INT64 [1, 1, 1, 1] device tensors as the test SDK builds the forward's (RaggedSdpaDensifyTestGraphs.hpp withPhiloxDropout); the frontend states no rule for them and no explicit dropout mask is needed, so that one is the test SDK's convention, not a validated one. There is no kernel_catalog here to hold a plain constant. ragged is cuDNN's THD backward: Q, O, dO, dQ and the statistics share one INT32 [B+1, 1, 1, 1] offset tensor and K, V, dK and dV another, each multiplier the tensor's token stride (the statistics packed token-major, [seqlen_q*heads, 1, heads, 1], as the forward writes them), with seq_len_q, seq_len_kv and the padding mask beside them (SdpaBwdNode Rule 9). The lengths are not optional here: FlyDSL's backward, the engine that serves ragged, declines offsets without them (checkVarlen), while the forward's compact THD form (the test SDK's makeVllmGraph) has none. Facet interactions are constraints, not builder guards: `scale` is held at inv_sqrt_d under scale_unset and scale_tensor, `ragged` to the token-major layouts (bshd, qkv_packed), and `alibi` to a causal mask anchored top-left, the only ALiBi the references define (SEM-021: the frontend accepts the others, which no reference or engine computes). Everything else crosses freely (padded, dropout and bias with every layout and window), since the frontend validators, the CPU and GPU references and the engine matchers state those as valid or as an engine-level decline, which the oracle filters.",
     "// let": "head_dim_v is V's width, and so O's (and dO's and dV's in the backward): head_dim, or 64 narrower under value_head_dim mla. Named once here; every dims and strides argument reads it as $let.head_dim_v."
   },
   "archetypes": [
@@ -2169,6 +2289,232 @@
         ],
         "is_causal": [
           true
+        ]
+      }
+    },
+    {
+      "name": "alibi_causal_lm",
+      "source": "BLOOM-176B (112 heads, head_dim 128) and MPT-7B (32 heads, head_dim 128), causal language models with ALiBi positions; the bloom-176b and mpt-7b model_spec backward graphs of dnn-benchmarking's SDPA OOTB run (2026-11-24, rocm-libraries aa791ab77), which no engine served",
+      "note": "causal self-attention with ALiBi (form alibi) at its trained sizes. No backward engine takes ALiBi today (FlyDSL declines it, MW-12, as do ASM SDPA and rocKE), so an engine-backed run reports this archetype never admitted, declined by the engine: that warning is the coverage gap. 3 of its 12 points fit the default --max-bytes of 256 MiB in fp16, all 12 fit 4 GiB.",
+      "values": {
+        "batch": [
+          1,
+          4,
+          8
+        ],
+        "heads": [
+          32,
+          112
+        ],
+        "heads_kv": [
+          "$q.heads"
+        ],
+        "seqlen_q": [
+          1024,
+          2048
+        ],
+        "seqlen_k": [
+          "$q.seqlen_q"
+        ],
+        "head_dim": [
+          128
+        ],
+        "is_causal": [
+          true
+        ],
+        "form": [
+          "alibi"
+        ]
+      }
+    },
+    {
+      "name": "swin_window_relative_bias",
+      "source": "Swin-B (4, 8, 16 and 32 heads by stage, head_dim 32, 7x7 windows) relative position bias, learned per head; the swin-base model_spec backward graph of dnn-benchmarking's SDPA OOTB run (2026-11-24, rocm-libraries aa791ab77), which no engine served",
+      "note": "windowed attention over 49 tokens with a learned per-head bias and its gradient (form dbias), the batch counting every window of every image. A 49-key row is 98 bytes in 16 bits, off the 16-byte pitch FlyDSL's dBias needs (BI-9), so today it is a declined graph. 10 of its 16 points fit the default --max-bytes of 256 MiB in fp16.",
+      "values": {
+        "batch": [
+          64,
+          256,
+          1024,
+          4096
+        ],
+        "heads": [
+          4,
+          8,
+          16,
+          32
+        ],
+        "heads_kv": [
+          "$q.heads"
+        ],
+        "seqlen_q": [
+          49
+        ],
+        "seqlen_k": [
+          49
+        ],
+        "head_dim": [
+          32
+        ],
+        "is_causal": [
+          false
+        ],
+        "form": [
+          "dbias"
+        ]
+      }
+    },
+    {
+      "name": "padded_head_dim",
+      "source": "AOTriton's backward test head dims and the sweep tier of dnn-benchmarking's SDPA OOTB run (2026-11-24, rocm-libraries aa791ab77): 71 backward graphs at head dims 59, 111 and 203, dense and padded, none served",
+      "note": "head dims that are not a multiple of 8 at their own compact pitch, so no row is 16-byte aligned. The forward serves them on padded copies (FlyDSL's FlydslSdpaHeadPad.hpp); the backward engines decline them (FlyDSL LY-3 and DT-8, ASM's hdim % 8 rule). Exploration draws such widths but neither the archetypes nor the neighbourhood did, so the declined share went unreported. 117 of its 120 points fit the default --max-bytes of 256 MiB in fp16.",
+      "values": {
+        "batch": [
+          1,
+          4
+        ],
+        "heads": [
+          8,
+          16
+        ],
+        "heads_kv": [
+          1,
+          "$q.heads"
+        ],
+        "seqlen_q": [
+          128,
+          1024,
+          2048
+        ],
+        "seqlen_k": [
+          "$q.seqlen_q"
+        ],
+        "head_dim": [
+          23,
+          59,
+          111,
+          203,
+          241
+        ],
+        "is_causal": [
+          true,
+          false
+        ]
+      }
+    },
+    {
+      "name": "mla_absorbed_decode",
+      "source": "DeepSeek-V3 and Kimi-K2/K3 absorbed MLA decode (one 576-wide latent KV head, V 512); the kimi_k3 generation backward graph of dnn-benchmarking's SDPA OOTB run (2026-11-24, rocm-libraries aa791ab77) (B128 Hq96, 131072 keys), which no engine served",
+      "note": "the backward of a one-token decode against a long latent cache. No training step runs it, but a converted inference graph reaches the backward in this form; FlyDSL declines a head dim above 512 (DT-4). 28 of its 80 points fit the default --max-bytes of 256 MiB in fp16, 56 fit 4 GiB.",
+      "values": {
+        "batch": [
+          1,
+          8,
+          32,
+          128
+        ],
+        "heads": [
+          16,
+          64,
+          96,
+          128
+        ],
+        "heads_kv": [
+          1
+        ],
+        "seqlen_q": [
+          1
+        ],
+        "seqlen_k": [
+          1024,
+          4096,
+          16384,
+          32768,
+          131072
+        ],
+        "head_dim": [
+          576
+        ],
+        "value_head_dim": [
+          "mla"
+        ],
+        "is_causal": [
+          true
+        ]
+      }
+    },
+    {
+      "name": "shared_kv_head_dim_512",
+      "source": "the DeepSeek-V4 training captures (captured-bwd) of dnn-benchmarking's SDPA OOTB run (2026-11-24, rocm-libraries aa791ab77): 64 or 128 query heads over one 512-wide KV head, causal with a 128-key window",
+      "note": "the training counterpart of sdpa_fwd's shared_kv_head_dim_512. At 128 heads and 16384 tokens one head's query slab passes 2 GiB, past the 32-bit offsets FlyDSL's backward addresses (DT-9), and no engine served it; that point needs a --max-bytes above 8 GiB. None of its 16 points fit the default 256 MiB in bf16, 8 fit 4 GiB.",
+      "values": {
+        "batch": [
+          1,
+          2
+        ],
+        "heads": [
+          64,
+          128
+        ],
+        "heads_kv": [
+          1
+        ],
+        "seqlen_q": [
+          2048,
+          4096,
+          8192,
+          16384
+        ],
+        "seqlen_k": [
+          "$q.seqlen_q"
+        ],
+        "head_dim": [
+          512
+        ],
+        "is_causal": [
+          true
+        ],
+        "window": [
+          "local_128"
+        ]
+      }
+    },
+    {
+      "name": "gpt_oss_sink_training",
+      "source": "gpt-oss-120b and -20b (64 heads, 8 KV heads, head_dim 64, learned attention sinks, a 128-token window on alternate layers); the 45 sink graphs dnn-benchmarking's SDPA OOTB run (2026-11-24, rocm-libraries aa791ab77) could not convert to a backward before SdpaBackwardAttributes took a sink",
+      "note": "causal prefill with learned sinks and their gradient (form dsink), on both the full and the windowed layers. 6 of its 18 points fit the default --max-bytes of 256 MiB in bf16.",
+      "values": {
+        "batch": [
+          1,
+          2,
+          4
+        ],
+        "heads": [
+          64
+        ],
+        "heads_kv": [
+          8
+        ],
+        "seqlen_q": [
+          2048,
+          4096,
+          8192
+        ],
+        "seqlen_k": [
+          "$q.seqlen_q"
+        ],
+        "head_dim": [
+          64
+        ],
+        "is_causal": [
+          true
+        ],
+        "window": [
+          "none",
+          "local_128"
+        ],
+        "form": [
+          "dsink"
         ]
       }
     }
