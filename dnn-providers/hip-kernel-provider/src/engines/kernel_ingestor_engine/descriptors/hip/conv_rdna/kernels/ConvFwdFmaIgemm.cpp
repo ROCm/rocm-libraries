@@ -101,7 +101,7 @@ __device__ static inline data_t from_float(float v)
 #endif
 
 #if CONV_HAS_ACT
-// The activations, numbered as conv_rdna::fma_igemm::ActivationMode.
+// The activations, numbered as conv_rdna::ActivationMode.
 #define ACT_RELU 0
 #define ACT_SIGMOID 1
 #define ACT_TANH 2

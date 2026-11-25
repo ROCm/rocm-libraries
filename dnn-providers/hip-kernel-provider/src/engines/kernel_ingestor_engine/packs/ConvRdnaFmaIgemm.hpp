@@ -17,6 +17,7 @@
 #include "compilation/IRunnableKernel.hpp"
 #include "compilation/KernelCompileOptions.hpp"
 #include "engines/kernel_ingestor_engine/packs/ConvRdnaCommon.hpp"
+#include "engines/kernel_ingestor_engine/packs/ConvRdnaFusedEpilogue.hpp"
 
 /**
  * @file ConvRdnaFmaIgemm.hpp
@@ -36,31 +37,6 @@ inline constexpr std::string_view FAMILY = "fma_igemm";
 
 /// Threads per workgroup; must match kernels/ConvFwdFmaIgemm.cpp.
 inline constexpr unsigned int BLOCK_SIZE = 256;
-
-/// The activations of the CONV_HAS_ACT epilogue, numbered as the kernel's ACT_* values.
-enum class ActivationMode : int32_t
-{
-    RELU = 0,
-    SIGMOID = 1,
-    TANH = 2,
-    ELU = 3,
-    GELU = 4,
-    GELU_APPROX_TANH = 5,
-    SWISH = 6,
-    SOFTPLUS = 7,
-    IDENTITY = 8,
-};
-
-/// An activation and its parameters as the kernel takes them: RELU reads p0 as the lower clip,
-/// p1 as the upper clip and p2 as the slope below the lower clip; ELU reads p0 as alpha;
-/// SWISH and SOFTPLUS read p0 as beta. The others read none.
-struct Activation
-{
-    ActivationMode mode = ActivationMode::IDENTITY;
-    float p0 = 0.0F;
-    float p1 = 0.0F;
-    float p2 = 0.0F;
-};
 
 /// The output channels per workgroup the variant for @p problem has: the narrowest tile that
 /// holds one group's channels.

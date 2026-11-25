@@ -35,8 +35,8 @@ namespace
 
 using namespace hip_kernel_provider::kernel_ingestor_engine;
 using namespace hip_kernel_provider::kernel_ingestor_engine::testing;
-using hip_kernel_provider::kernel_ingestor_engine::conv_rdna::fma_igemm::Activation;
-using hip_kernel_provider::kernel_ingestor_engine::conv_rdna::fma_igemm::ActivationMode;
+using hip_kernel_provider::kernel_ingestor_engine::conv_rdna::Activation;
+using hip_kernel_provider::kernel_ingestor_engine::conv_rdna::ActivationMode;
 using hipdnn_plugin_sdk::ingestor::KernelDefinition;
 using hipdnn_plugin_sdk::ingestor::SavedLaunchInputs;
 using hipdnn_plugin_sdk::ingestor::tryGetBoundInt;

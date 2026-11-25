@@ -13,7 +13,7 @@
 #include <hipdnn_plugin_sdk/ingestor/SavedDispatch.hpp>
 
 #include "engines/kernel_ingestor_engine/packs/ConvRdnaCommon.hpp"
-#include "engines/kernel_ingestor_engine/packs/ConvRdnaFmaIgemm.hpp"
+#include "engines/kernel_ingestor_engine/packs/ConvRdnaFusedEpilogue.hpp"
 
 /**
  * @file HipConvFwdBiasActFmaIgemmRdnaLaunchValues.hpp
@@ -43,7 +43,7 @@ struct HipConvFwdBiasActFmaIgemmRdnaLaunchInputs
 {
     HipConvFwdBiasActFmaIgemmRdnaBinding binding;
     conv_rdna::ConvProblem problem;
-    conv_rdna::fma_igemm::Activation activation;
+    conv_rdna::Activation activation;
 };
 
 inline constexpr std::string_view HIP_CONV_FWD_BIAS_ACT_FMA_IGEMM_RDNA_DISPATCH_SYMBOL_V1
@@ -52,11 +52,11 @@ inline constexpr std::string_view HIP_CONV_FWD_BIAS_ACT_FMA_IGEMM_RDNA_DISPATCH_
 /// The values of the `hipkernel.hip_conv_fwd_bias_act_fma_igemm_rdna.dispatch.v1` contract:
 /// `x.uid`, `w.uid`, `b.uid` (only when the graph has a bias), `y.uid`, the problem values of
 /// conv_rdna::fma_igemm::addProblemLaunchValues, `activation` (the hipDNN pointwise mode name,
-/// e.g. `RELU_FWD`) and `activation.p0` to `activation.p2` (conv_rdna::fma_igemm::Activation).
+/// e.g. `RELU_FWD`) and `activation.p0` to `activation.p2` (conv_rdna::Activation).
 hipdnn_plugin_sdk::ingestor::MetadataValues
     hipConvFwdBiasActFmaIgemmRdnaLaunchValues(const HipConvFwdBiasActFmaIgemmRdnaBinding& binding,
                                               const conv_rdna::ConvProblem& problem,
-                                              const conv_rdna::fma_igemm::Activation& activation);
+                                              const conv_rdna::Activation& activation);
 
 /// Reads the values of the `hipkernel.hip_conv_fwd_bias_act_fma_igemm_rdna.dispatch.v1`
 /// contract, with the checks of conv_rdna::fma_igemm::readProblemLaunchValues.
