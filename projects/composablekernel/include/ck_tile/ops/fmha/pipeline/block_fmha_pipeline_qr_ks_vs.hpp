@@ -95,9 +95,9 @@ struct BlockFmhaPipelineQRKSVS
         !(kQKHeaddim == 128 && kN1 == 128 && kHasDropout &&
           BiasEnum == BlockAttentionBiasEnum::ELEMENTWISE_BIAS) &&
 #elif defined(__gfx120__)
-        // D64 masked dropout+sink shares LDS for bias and unpadded ALiBi.
-        !(kQKHeaddim == 64 && FmhaMask::IsMasking && kHasDropout && kHasSink &&
-          (BiasEnum == BlockAttentionBiasEnum::ELEMENTWISE_BIAS ||
+        // D64 masked dropout shares LDS for bias+sink and unpadded ALiBi.
+        !(kQKHeaddim == 64 && FmhaMask::IsMasking && kHasDropout &&
+          ((BiasEnum == BlockAttentionBiasEnum::ELEMENTWISE_BIAS && kHasSink) ||
            (BiasEnum == BlockAttentionBiasEnum::ALIBI && !kUseHdimTailArgs))) &&
         // Small no-bias tiles share LDS, except D32 dropout.
         (kM0 > 64 || BiasEnum != BlockAttentionBiasEnum::NO_BIAS ||
@@ -738,9 +738,18 @@ struct BlockFmhaPipelineQRKSVS
 #elif defined(__gfx120__)
                 if constexpr(kUseSeparateKVLds)
                 {
-                    // D64/D128 dropout trades V's live range against overlap with softmax.
+                    // Padded D256 dropout keeps V out of the softmax live range.
+                    if constexpr(kQKHeaddim == 256 && kUseHdimTailArgs && kHasDropout)
+                        return VPrefetchPoint::AfterSoftmax;
+                    // Full D128 bias tiles defer V to reduce QK register pressure.
                     if constexpr(!kHasDropout || (kQKHeaddim != 64 && kQKHeaddim != 128))
-                        return VPrefetchPoint::BeforeGemm0Tail;
+                        return kQKHeaddim == 128 && kM0 == 256 && !kUseHdimTailArgs &&
+                                       (BiasEnum == BlockAttentionBiasEnum::ELEMENTWISE_BIAS ||
+                                        (BiasEnum == BlockAttentionBiasEnum::ALIBI &&
+                                         FmhaMask::IsMasking && kHasSink))
+                                   ? VPrefetchPoint::AfterGemm0Tail
+                                   : VPrefetchPoint::BeforeGemm0Tail;
+                    // D64/D128 dropout trades V's live range against overlap with softmax.
                     constexpr auto kAfterQKBias = kQKHeaddim == 64
                                                       ? BlockAttentionBiasEnum::ALIBI
                                                       : BlockAttentionBiasEnum::ELEMENTWISE_BIAS;
@@ -824,8 +833,16 @@ struct BlockFmhaPipelineQRKSVS
                         s_acc(i_j_idx) *= scale_s;
                         position_encoding.update(s_acc(i_j_idx), row, col);
 #if defined(__gfx117__)
-                        // Limit live ALiBi offsets by consuming each updated score.
-                        impl::insert_dummy_dep(s_acc(i_j_idx));
+                        // Limit live ALiBi offsets, except where that adds spills.
+                        constexpr bool kSkipAlibiScoreDep =
+                            !FmhaMask::IsMasking && kHasDropout &&
+                            (kQKHeaddim == 128 || (kQKHeaddim == 64 && kUseHdimTailArgs));
+                        if constexpr(!kSkipAlibiScoreDep)
+                            impl::insert_dummy_dep(s_acc(i_j_idx));
+#elif defined(__gfx120__)
+                        // Limit ALiBi live ranges in D256 and the M64/PV64 D128 tile.
+                        if constexpr(kN1 == 256 || (kM0 == 64 && kN1 == 128 && kK1 == 64))
+                            impl::insert_dummy_dep(s_acc(i_j_idx));
 #endif
                     });
                 });
@@ -1220,9 +1237,21 @@ struct BlockFmhaPipelineQRKSVS
                 return static_cast<index_t>(0);
             }();
 
-            auto schedule_gemm_1 = [&] {
+            auto schedule_gemm_1 = [&](auto& o_acc_tensor,
+                                       const auto& p_slice,
+                                       const auto&... gemm_1_args) {
 #if defined(__gfx117__)
-                if constexpr(kUseSeparateKVLds)
+                constexpr bool kScheduleGemm1 = kUseSeparateKVLds;
+#elif defined(__gfx120__)
+                constexpr bool kScheduleGemm1 = kUseSeparateKVLds && kM0 == 256 && kN1 == 256;
+#else
+                constexpr bool kScheduleGemm1 = false;
+#endif
+                // Keep preceding operations out of the PV scheduling groups.
+                if constexpr(kScheduleGemm1)
+                    __builtin_amdgcn_sched_barrier(0);
+                gemm_1(o_acc_tensor, p_slice, gemm_1_args...);
+                if constexpr(kScheduleGemm1)
                 {
                     constexpr index_t kMRepeats =
                         kM0 / (gemm_1_config.template at<1>() * Gemm1WarpGemm::kM);
@@ -1234,7 +1263,6 @@ struct BlockFmhaPipelineQRKSVS
                         __builtin_amdgcn_sched_group_barrier(MFMA, kReads * kMRepeats, 0);
                     });
                 }
-#endif
             };
 
             auto run_gemm_1_impl =
@@ -1245,13 +1273,7 @@ struct BlockFmhaPipelineQRKSVS
                     }
                     else
                     {
-#if defined(__gfx117__)
-                        // Keep preceding operations out of the PV scheduling groups.
-                        if constexpr(kUseSeparateKVLds)
-                            __builtin_amdgcn_sched_barrier(0);
-#endif
-                        gemm_1(o_acc_tensor, p_slice, gemm_1_args...);
-                        schedule_gemm_1();
+                        schedule_gemm_1(o_acc_tensor, p_slice, gemm_1_args...);
                     }
                 };
 
