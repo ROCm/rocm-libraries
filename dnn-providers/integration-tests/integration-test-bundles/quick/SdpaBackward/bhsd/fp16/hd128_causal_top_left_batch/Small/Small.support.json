@@ -1,5 +1,13 @@
 {
   "claims": {
+    "ASM_SDPA_ENGINE": {
+      "gfx942": [
+        "linux"
+      ],
+      "gfx950": [
+        "linux"
+      ]
+    },
     "hipkernel:flydsl_sdpa_bwd_merged": {
       "gfx950": [
         "linux"
@@ -8,6 +16,10 @@
     "hipkernel:flydsl_sdpa_bwd_split": {
       "gfx1100": [
         "linux"
+      ],
+      "gfx1151": [
+        "linux",
+        "windows"
       ],
       "gfx90a": [
         "linux"
