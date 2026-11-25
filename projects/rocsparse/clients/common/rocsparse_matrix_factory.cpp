@@ -368,6 +368,22 @@ void rocsparse_matrix_factory<T, I, J>::init_csr(host_csr_matrix<T, I, J>& that,
 }
 
 //
+// The CSC arrays are the CSR arrays of the transpose, so the CSR builder is
+// given the opposite fill mode. The CSC matrix then stores the requested
+// triangle. General generators ignore uplo, so a general matrix is unchanged.
+//
+// GEBSC has the same relation at block level only: its blocks are not
+// transposed. Only the rocalution GEBSR path honours matrix_type and uplo.
+// The other GEBSR generators ignore both, so their GEBSC matrices are general
+// whatever uplo says.
+//
+static rocsparse_fill_mode transposed_fill_mode(rocsparse_fill_mode uplo)
+{
+    return (uplo == rocsparse_fill_mode_lower) ? rocsparse_fill_mode_upper
+                                               : rocsparse_fill_mode_lower;
+}
+
+//
 // CSC
 //
 template <typename T, typename I, typename J>
@@ -389,7 +405,7 @@ void rocsparse_matrix_factory<T, I, J>::init_csc(std::vector<I>&      csc_col_pt
                                nnz,
                                base,
                                this->m_arg.matrix_type,
-                               this->m_arg.uplo,
+                               transposed_fill_mode(this->m_arg.uplo),
                                this->m_arg.storage);
 }
 
@@ -410,7 +426,7 @@ void rocsparse_matrix_factory<T, I, J>::init_csc(host_csc_matrix<T, I, J>& that,
                                that.nnz,
                                that.base,
                                this->m_arg.matrix_type,
-                               this->m_arg.uplo,
+                               transposed_fill_mode(this->m_arg.uplo),
                                this->m_arg.storage);
     that.m = m;
     that.n = n;
@@ -645,7 +661,7 @@ void rocsparse_matrix_factory<T, I, J>::init_gebsc(std::vector<I>&      bsc_col_
                                  col_block_dim,
                                  base,
                                  this->m_arg.matrix_type,
-                                 this->m_arg.uplo,
+                                 transposed_fill_mode(this->m_arg.uplo),
                                  this->m_arg.storage);
 }
 

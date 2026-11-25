@@ -15,9 +15,14 @@
 
 #include <nlohmann/json.hpp>
 
+#include "OperationsDir.hpp"
+#include <algorithm>
+#include <fstream>
 #include <map>
+#include <numeric>
 #include <set>
 #include <string>
+#include <vector>
 
 namespace hipdnn_corpus_gen
 {
@@ -170,7 +175,9 @@ TEST(TestProblemSpace, SaysSoWhenItDidNotExploreEveryCombination)
 
     const auto corpus = exploreProblemSpace(metadata, request, ACCEPT_EVERYTHING);
 
-    EXPECT_LE(corpus.combinations.size(), 5U);
+    // The bound, plus one combination for each declared value the scattered sample missed.
+    EXPECT_GE(corpus.combinations.size(), 5U);
+    EXPECT_LE(corpus.combinations.size(), 5U + 4U + 4U);
     ASSERT_FALSE(corpus.skippedCombinations.empty());
     EXPECT_NE(corpus.skippedCombinations.front().find("16"), std::string::npos);
 }
@@ -603,5 +610,1117 @@ TEST(TestProblemSpace, NothingServedHasNoEdges)
         EXPECT_TRUE(combination.highest.empty());
     }
 }
+
+namespace
+{
+
+/// Two combinations, each with an archetype list and neighbourhoods wide enough that the
+/// anchored draws are not limited by the number of distinct points they can reach.
+OperationMetadata anchoredToy()
+{
+    return metadataFor(R"({
+      "schema_version": "1.0",
+      "operation": "toy",
+      "parameters": {
+        "M":     { "type": "int64" },
+        "N":     { "type": "int64" },
+        "dtype": { "type": "enum", "values": ["fp32", "fp16"] }
+      },
+      "stratification_axis": "working_set",
+      "regimes": {},
+      "graph_builder": { "function": "createValidMatmulGraph", "source": "x.hpp",
+                         "arguments": [] },
+      "archetypes": [
+        { "name": "layers",
+          "values": { "M": [64, 96, 128, 192, 256, 384, 512, 768, 1024, 1536],
+                      "N": [64, 96, 128, 192, 256, 384, 512, 768, 1024, 1536] } }
+      ],
+      "neighbourhood": {
+        "M": { "kind": "scale", "factors": [0.5, 0.75, 1, 1.5, 2] },
+        "N": { "kind": "scale", "factors": [0.5, 1, 2] }
+      },
+      "mixture": { "archetypes": 0.2, "neighbourhood": 0.6, "exploration": 0.2 }
+    })");
+}
+
+std::vector<std::string> described(const ProblemCorpus& corpus)
+{
+    std::vector<std::string> out;
+    for(const auto& point : corpus.problems())
+    {
+        out.push_back(detail::describe(point));
+    }
+    return out;
+}
+
+} // namespace
+
+TEST(TestProblemSpace, TheAnchoredShareCollapsesAtALargeCountUnlessAnchorScalingHoldsIt)
+{
+    // The declared mixture is 80% anchored. The fixed quotas give each combination a few
+    // anchored draws however large the corpus, so at a large count the corpus is exploration;
+    // anchor scaling sizes the quotas to the target.
+    ExplorationRequest request;
+    request.pointsPerCombination = 10;
+    request.corpusTarget = 300;
+    request.seed = 6;
+
+    const auto fixed = exploreProblemSpace(anchoredToy(), request, ACCEPT_EVERYTHING);
+    request.anchorScaling = true;
+    const auto scaled = exploreProblemSpace(anchoredToy(), request, ACCEPT_EVERYTHING);
+
+    ASSERT_GE(fixed.problems().size(), 300U);
+    ASSERT_GE(scaled.problems().size(), 300U);
+    EXPECT_LT(fixed.anchoredShare(), 0.2);
+    // Growth past the target is made of exploration, so the realised share sits below the
+    // declared 0.8; the point is that it is not the few percent the fixed quotas leave.
+    EXPECT_GT(scaled.anchoredShare(), 0.4);
+}
+
+TEST(TestProblemSpace, AnchorScalingNeverShrinksTheFixedQuotasAndNeedsATarget)
+{
+    // max(pointsPerCombination, target / combinations): a target the first pass already covers,
+    // or none, leaves the corpus exactly as it was.
+    ExplorationRequest request;
+    request.pointsPerCombination = 10;
+    request.seed = 7;
+
+    for(const int64_t target : {int64_t{0}, int64_t{12}})
+    {
+        request.corpusTarget = target;
+        request.anchorScaling = false;
+        const auto fixed = exploreProblemSpace(anchoredToy(), request, ACCEPT_EVERYTHING);
+        request.anchorScaling = true;
+        const auto scaled = exploreProblemSpace(anchoredToy(), request, ACCEPT_EVERYTHING);
+        EXPECT_EQ(described(scaled), described(fixed)) << "target " << target;
+    }
+}
+
+namespace
+{
+
+/// Each combination's result of an anchor-scaled run toward 120 problems over a declaration
+/// whose `layout` c is empty, with the values of `layout` weighted or not.
+std::vector<CombinationResult> anchorScaledOverAnEmptyLayout(bool weighted)
+{
+    const auto metadata = metadataFor(std::string(R"({
+      "schema_version": "1.0",
+      "operation": "toy",
+      "parameters": {
+        "M":      { "type": "int64" },
+        "N":      { "type": "int64" },
+        "layout": { "type": "enum", "values": ["a", "b", "c"])")
+                                      + (weighted ? R"(,
+                    "weights": {"a": 1, "b": 1, "c": 1})"
+                                                  : "")
+                                      + R"( }
+      },
+      "stratification_axis": "working_set",
+      "regimes": {},
+      "graph_builder": { "function": "createValidMatmulGraph", "source": "x.hpp",
+                         "arguments": [] },
+      "constraints": [ { "!=": ["$q.layout", "c"] } ],
+      "archetypes": [
+        { "name": "layers",
+          "values": { "M": [64, 96, 128, 192, 256, 384, 512, 768, 1024, 1536],
+                      "N": [64, 96, 128, 192, 256, 384, 512, 768, 1024, 1536] } }
+      ],
+      "neighbourhood": {
+        "M": { "kind": "scale", "factors": [0.5, 0.75, 1, 1.5, 2] },
+        "N": { "kind": "scale", "factors": [0.5, 1, 2] }
+      },
+      "mixture": { "archetypes": 0.25, "neighbourhood": 0.5, "exploration": 0.25 }
+    })");
+    ExplorationRequest request;
+    request.pointsPerCombination = 2;
+    request.corpusTarget = 120;
+    request.anchorScaling = true;
+    request.seed = 8;
+
+    return exploreProblemSpace(metadata, request, ACCEPT_EVERYTHING).combinations;
+}
+
+void expectTheTargetSharedOverTheLiveCombinations(const std::vector<CombinationResult>& result)
+{
+    int64_t fromArchetypes = 0;
+    for(const auto& combination : result)
+    {
+        if(!combination.problems.empty())
+        {
+            // The quarter of 120 / 2.
+            EXPECT_EQ(combination.fromArchetypes, 15) << detail::describe(combination.categorical);
+        }
+        fromArchetypes += combination.fromArchetypes;
+    }
+    EXPECT_EQ(fromArchetypes, 30);
+}
+
+} // namespace
+
+TEST(TestProblemSpace, AnchorScalingSharesTheTargetOverTheCombinationsThatCanHoldAProblem)
+{
+    // Layout c is empty by the declaration, so the corpus is split over layouts a and b: each
+    // gets half of the target, not a third, and the quotas sum to the target.
+    expectTheTargetSharedOverTheLiveCombinations(anchorScaledOverAnEmptyLayout(true));
+}
+
+TEST(TestProblemSpace, AnchorScalingSharesTheTargetOverTheLiveCombinationsOfAnUnweightedDeclaration)
+{
+    // The same split when no value is weighted: a combination the declaration empties is not
+    // counted among those the target is divided over.
+    expectTheTargetSharedOverTheLiveCombinations(anchorScaledOverAnEmptyLayout(false));
+}
+
+TEST(TestProblemSpace, EveryShippedSdpaCombinationIsExploredAndNoDeclaredValueIsDropped)
+{
+    // Past maxCombinations the product is sampled, which the manifest reports as skipped
+    // combinations. The backward fits under it; the forward, with the optional forms crossed
+    // with every facet, does not, so what it must keep is every declared value of every
+    // categorical parameter, and every value pair of the weighted facets and the form: a model
+    // trained on the corpus has seen each one (RFC 0019 section 5.2), and `--form-floor` finds
+    // a form among them. The sample is drawn from the combinations that can hold a problem.
+    for(const std::string operation : {"sdpa_fwd", "sdpa_bwd"})
+    {
+        const auto metadata = test::shippedOperation(operation);
+
+        size_t total = 0;
+        const auto all = detail::categoricalCombinations(metadata.parameters, 0, total);
+        EXPECT_EQ(all.size(), total) << operation;
+        // is_causal 2 x alignment 2 x dtype 3 x layout 3 x scale 3 x form 8, and for the
+        // forward generate_stats 2 x window 4 (the backward has 6 forms and no window).
+        EXPECT_EQ(total, operation == "sdpa_fwd" ? size_t{6912} : size_t{648}) << operation;
+
+        size_t sampledTotal = 0;
+        const auto sampled = detail::categoricalCombinations(
+            metadata.parameters,
+            ExplorationRequest{}.maxCombinations,
+            sampledTotal,
+            [&metadata](const ProblemPoint& combination) {
+                return !detail::excludedByCategoricals(metadata, combination);
+            });
+        EXPECT_EQ(sampledTotal, total) << operation;
+        if(operation == "sdpa_bwd")
+        {
+            EXPECT_EQ(sampled.size(), total) << operation;
+        }
+        else
+        {
+            EXPECT_EQ(sampled.size(), ExplorationRequest{}.maxCombinations) << operation;
+            for(const auto& combination : sampled)
+            {
+                EXPECT_FALSE(detail::excludedByCategoricals(metadata, combination))
+                    << detail::describe(combination);
+            }
+            // No triple of the weighted facets is left out: a stride that aliases with the
+            // combination index leaves some (kv_bhsd, jitter, local_4096) with none.
+            std::set<std::string> triples;
+            for(const auto& combination : sampled)
+            {
+                triples.insert(std::get<std::string>(combination.at("layout")) + "/"
+                               + std::get<std::string>(combination.at("scale")) + "/"
+                               + std::get<std::string>(combination.at("window")));
+            }
+            EXPECT_EQ(triples.size(), 36U) << operation;
+        }
+        for(const auto& parameter : metadata.parameters)
+        {
+            for(const auto& value : parameter.enumerable())
+            {
+                EXPECT_TRUE(std::any_of(
+                    sampled.begin(),
+                    sampled.end(),
+                    [&](const ProblemPoint& point) { return point.at(parameter.name) == value; }))
+                    << operation << " dropped " << parameter.name;
+            }
+        }
+    }
+}
+
+TEST(TestProblemSpace, AKeepOnACategoricalAxisNarrowsTheCombinationsBeforeTheBoundApplies)
+{
+    const auto metadata = test::shippedOperation("sdpa_fwd");
+    const auto narrow = test::narrowSdpaFwdKeeps();
+
+    size_t total = 0;
+    auto combinations = detail::categoricalCombinations(
+        metadata.parameters, ExplorationRequest{}.maxCombinations, total, {}, narrow);
+    EXPECT_EQ(total, 8U);
+    ASSERT_EQ(combinations.size(), 8U) << "the bound is 1024, so every admitted one is explored";
+    for(const auto& combination : combinations)
+    {
+        EXPECT_TRUE(keeps(narrow, combination)) << detail::describe(combination);
+    }
+
+    // The same parameter repeated widens its axis, as it widens the filter on points.
+    auto widened = narrow;
+    widened.push_back({"form", "padded"});
+    combinations = detail::categoricalCombinations(
+        metadata.parameters, ExplorationRequest{}.maxCombinations, total, {}, widened);
+    EXPECT_EQ(total, 16U);
+    EXPECT_EQ(combinations.size(), 16U);
+
+    // A clause on a numeric parameter leaves the categorical product alone; the oracle applies it.
+    combinations
+        = detail::categoricalCombinations(metadata.parameters, 0, total, {}, {{"head_dim", "64"}});
+    EXPECT_EQ(total, 6912U);
+
+    // A value the declaration does not hold admits nothing, and says so with a total of 0 rather
+    // than sampling combinations that every point would then fail.
+    combinations = detail::categoricalCombinations(
+        metadata.parameters, ExplorationRequest{}.maxCombinations, total, {}, {{"form", "nope"}});
+    EXPECT_EQ(total, 0U);
+    EXPECT_TRUE(combinations.empty());
+}
+
+TEST(TestProblemSpace, EveryCombinationAShippedSdpaKeepAdmitsProducesProblemsPastTheBound)
+{
+    // The product is 6912, past the bound of 1024, and a sample of it drawn before the keep held
+    // 16 problems from one combination of the 6 that can hold one.
+    const auto metadata = test::shippedOperation("sdpa_fwd");
+    ExplorationRequest request;
+    request.keep = test::narrowSdpaFwdKeeps();
+    request.pointsPerCombination = 8;
+    request.budgetPerCombination = 2000;
+
+    const auto corpus
+        = exploreProblemSpace(metadata, request, test::admitsOnlyWhatKeepKeeps(request.keep));
+
+    EXPECT_EQ(corpus.categoricalTotal, 8U);
+    EXPECT_EQ(corpus.categoricalNotExplored, 0U);
+    EXPECT_EQ(corpus.categoricalConstraintEmpty, 2U) << "counted though the product fits the bound";
+    size_t live = 0;
+    std::set<bool> causal;
+    for(const auto& combination : corpus.combinations)
+    {
+        if(detail::excludedByCategoricals(metadata, combination.categorical))
+        {
+            EXPECT_TRUE(combination.problems.empty()) << detail::describe(combination.categorical);
+            continue;
+        }
+        ++live;
+        EXPECT_FALSE(combination.problems.empty()) << detail::describe(combination.categorical);
+        causal.insert(std::get<bool>(combination.categorical.at("is_causal")));
+    }
+    EXPECT_EQ(live, 6U);
+    EXPECT_EQ(causal, (std::set<bool>{false, true})) << "both masks are explored";
+
+    // Narrowing by one more clause keeps exploring what is left rather than going empty.
+    request.keep.push_back({"is_causal", "true"});
+    const auto causalOnly
+        = exploreProblemSpace(metadata, request, test::admitsOnlyWhatKeepKeeps(request.keep));
+    EXPECT_EQ(causalOnly.categoricalTotal, 4U);
+    EXPECT_GE(causalOnly.problems().size(), 4U * 4U);
+    size_t withProblems = 0;
+    for(const auto& combination : causalOnly.combinations)
+    {
+        withProblems += combination.problems.empty() ? 0 : 1;
+    }
+    EXPECT_EQ(withProblems, 4U);
+    for(const auto& point : causalOnly.problems())
+    {
+        EXPECT_TRUE(std::get<bool>(point.at("is_causal")));
+    }
+}
+
+TEST(TestProblemSpace, AKeepEveryDeclaredConstraintEmptiesExploresNothingRatherThanFailing)
+{
+    // The ragged form is declared only with bshd, so no combination of these two keeps can hold a
+    // problem; the bound is low enough that the sample walks the product and finds none.
+    const auto metadata = test::shippedOperation("sdpa_fwd");
+    ExplorationRequest request;
+    request.keep = {{"form", "ragged"}, {"layout", "bhsd"}};
+    request.maxCombinations = 4;
+
+    const auto corpus
+        = exploreProblemSpace(metadata, request, test::admitsOnlyWhatKeepKeeps(request.keep));
+
+    EXPECT_TRUE(corpus.problems().empty());
+    EXPECT_EQ(corpus.categoricalTotal, 288U);
+    EXPECT_EQ(corpus.categoricalConstraintEmpty, 288U);
+    EXPECT_EQ(corpus.categoricalNotExplored, 0U) << "none was left out: none could hold a problem";
+    ASSERT_FALSE(corpus.skippedCombinations.empty());
+    EXPECT_NE(corpus.skippedCombinations.front().find("empty under the declared constraints"),
+              std::string::npos)
+        << corpus.skippedCombinations.front();
+}
+
+TEST(TestProblemSpace, TheCombinationsTheBoundLeavesOutAreCountedAgainstTheKeptProduct)
+{
+    // The product is 8 and 2 of them are empty by the declaration, so the 4 the bound allows are
+    // taken from the 6 that can hold a problem and 2 of those are left out.
+    const auto metadata = test::shippedOperation("sdpa_fwd");
+    ExplorationRequest request;
+    request.keep = test::narrowSdpaFwdKeeps();
+    request.maxCombinations = 4;
+    request.pointsPerCombination = 2;
+    request.budgetPerCombination = 500;
+
+    const auto corpus
+        = exploreProblemSpace(metadata, request, test::admitsOnlyWhatKeepKeeps(request.keep));
+
+    EXPECT_EQ(corpus.categoricalTotal, 8U) << "the keep's product, not the declared 6912";
+    EXPECT_EQ(corpus.categoricalConstraintEmpty, 2U);
+    EXPECT_EQ(corpus.categoricalNotExplored, 2U)
+        << "the combinations the constraints empty were never candidates";
+    ASSERT_FALSE(corpus.skippedCombinations.empty());
+    EXPECT_NE(corpus.skippedCombinations.front().find("2 of 6"), std::string::npos)
+        << corpus.skippedCombinations.front();
+}
+
+TEST(TestProblemSpace, TheConstraintEmptyCombinationsAreCountedOverTheWholeProductPastTheBound)
+{
+    // The sample stops once it holds 1024 combinations that can hold a problem; the count of
+    // those that cannot covers the product the walk did not reach too.
+    const auto metadata = test::shippedOperation("sdpa_fwd");
+    const auto live = [&metadata](const ProblemPoint& combination) {
+        return !detail::excludedByCategoricals(metadata, combination);
+    };
+    size_t total = 0;
+    const auto everything = detail::categoricalCombinations(metadata.parameters, 0, total);
+    const auto empty = static_cast<size_t>(
+        std::count_if(everything.begin(), everything.end(), [&](const ProblemPoint& combination) {
+            return !live(combination);
+        }));
+    ASSERT_GT(empty, 0U);
+
+    size_t sampledTotal = 0;
+    size_t counted = 0;
+    const auto sampled = detail::categoricalCombinations(metadata.parameters,
+                                                         ExplorationRequest{}.maxCombinations,
+                                                         sampledTotal,
+                                                         live,
+                                                         {},
+                                                         &counted);
+    EXPECT_EQ(sampled.size(), ExplorationRequest{}.maxCombinations);
+    EXPECT_EQ(counted, empty);
+
+    size_t underTheBound = 0;
+    detail::categoricalCombinations(
+        metadata.parameters, 0, sampledTotal, live, test::narrowSdpaFwdKeeps(), &underTheBound);
+    EXPECT_EQ(underTheBound, 2U);
+
+    ExplorationRequest request;
+    request.pointsPerCombination = 1;
+    request.budgetPerCombination = 50;
+    request.probeBudget = 25;
+    const auto corpus
+        = exploreProblemSpace(metadata, request, [](const ProblemPoint&) { return false; });
+    EXPECT_EQ(corpus.categoricalTotal, total);
+    EXPECT_EQ(corpus.categoricalConstraintEmpty, empty);
+    EXPECT_EQ(corpus.categoricalNotExplored, total - empty - corpus.combinations.size())
+        << "the combinations that can hold a problem and the bound left out";
+}
+
+TEST(TestProblemSpace, ACombinationTheConstraintsEmptyHasNoSizeWhetherOrNotAnythingIsWeighted)
+{
+    const auto metadata = metadataFor(R"({
+      "schema_version": "1.0",
+      "operation": "toy",
+      "parameters": {
+        "M":      { "type": "int64" },
+        "layout": { "type": "enum", "values": ["a", "b", "c"] }
+      },
+      "stratification_axis": "working_set",
+      "regimes": {},
+      "graph_builder": { "function": "createValidMatmulGraph", "source": "x.hpp",
+                         "arguments": [] },
+      "constraints": [ { "!=": ["$q.layout", "c"] } ]
+    })");
+    size_t total = 0;
+    const auto combinations = detail::categoricalCombinations(metadata.parameters, 0, total);
+    ASSERT_EQ(combinations.size(), 3U);
+
+    EXPECT_EQ(detail::combinationSizes(metadata, combinations),
+              (std::vector<double>{1.0, 1.0, 0.0}));
+}
+
+/// The shipped attention declarations, whose constraints the forward and the backward share.
+class TestShippedSdpaConstraints : public ::testing::TestWithParam<std::string>
+{
+};
+
+TEST_P(TestShippedSdpaConstraints, KeepOnlyProblemsThatAreDistinctAndHaveKeys)
+{
+    // The window is the forward's alone: the backward declares neither it nor generate_stats, so
+    // the expectations about a window run only for the forward.
+    const bool forward = GetParam() == "sdpa_fwd";
+    const auto metadata = test::shippedOperation(GetParam());
+
+    struct Candidate
+    {
+        int64_t seqlenQ = 2048;
+        int64_t seqlenK = 2048;
+        int64_t heads = 8;
+        int64_t headsKv = 8;
+        bool causal = true;
+        std::string window = "none";
+        std::string layout = "bshd";
+        std::string alignment = "top_left";
+    };
+    const auto admits = [&](const Candidate& c) {
+        ProblemPoint point{{"batch", int64_t{1}},
+                           {"heads", c.heads},
+                           {"heads_kv", c.headsKv},
+                           {"seqlen_q", c.seqlenQ},
+                           {"seqlen_k", c.seqlenK},
+                           {"head_dim", int64_t{64}},
+                           {"is_causal", c.causal},
+                           {"alignment", c.alignment},
+                           {"dtype", std::string("fp16")},
+                           {"layout", c.layout}};
+        if(forward)
+        {
+            point["window"] = c.window;
+        }
+        return detail::satisfiesConstraints(metadata,
+                                            test::withDefaultCategoricals(metadata, point));
+    };
+
+    // Cross attention is bidirectional; a causal mask needs seqlen_q <= seqlen_k.
+    EXPECT_TRUE(admits({4096, 77, 8, 8, false}));
+    EXPECT_FALSE(admits({4096, 77, 8, 8, true}));
+    // The anchor is a distinct problem where the mask is causal (OR, for the forward, windowed)
+    // and seqlen_q < seqlen_k, and pinned to top_left everywhere else.
+    EXPECT_TRUE(admits({128, 4096, 8, 8, true, "none", "bshd", "bottom_right"}));
+    EXPECT_FALSE(admits({128, 4096, 8, 8, false, "none", "bshd", "bottom_right"}));
+    // Extents of 1 make kv_bhsd the same graph as bhsd (seqlen_q 1, one head) or as bshd
+    // (seqlen_k 1, one kv head), so it is not listed there.
+    EXPECT_FALSE(admits({1, 4096, 1, 1, true, "none", "kv_bhsd"}));
+    EXPECT_TRUE(admits({1, 4096, 8, 1, true, "none", "kv_bhsd"}));
+    EXPECT_TRUE(admits({2, 4096, 1, 1, true, "none", "kv_bhsd"}));
+    EXPECT_FALSE(admits({1, 1, 8, 1, false, "none", "kv_bhsd"}));
+    EXPECT_TRUE(admits({1, 1, 8, 1, false, "none", "bhsd"}));
+
+    if(forward)
+    {
+        EXPECT_TRUE(admits({2048, 2048, 8, 8, true, "local_1024"}));
+        // The frontend accepts a left bound under any mask.
+        EXPECT_TRUE(admits({2048, 2048, 8, 8, false, "local_1024"}));
+        // A window over more queries than keys: top-left, every row from seqlen_k + N - 1 on
+        // keeps no key (90% of the rows at 2048 x 77, local_128), so the softmax is over nothing.
+        EXPECT_FALSE(admits({2048, 77, 8, 8, false, "local_128"}));
+        EXPECT_FALSE(admits({4096, 77, 8, 8, false, "local_4096"}));
+        EXPECT_TRUE(admits({128, 4096, 8, 8, false, "local_128", "bshd", "bottom_right"}));
+    }
+}
+
+INSTANTIATE_TEST_SUITE_P(SdpaDeclarations,
+                         TestShippedSdpaConstraints,
+                         ::testing::Values("sdpa_fwd", "sdpa_bwd"));
+
+TEST(TestProblemSpace, TheShippedSdpaFacetInteractionsRefuseWhatIsDegenerateAndAdmitTheRest)
+{
+    struct Candidate
+    {
+        std::string form = "plain";
+        std::string layout = "bshd";
+        std::string scale = "inv_sqrt_d";
+        std::string window = "none";
+        int64_t seqlenQ = 2048;
+        int64_t seqlenK = 2048;
+        bool causal = false;
+    };
+    const auto admitsFor = [](const std::string& operation, const Candidate& c) {
+        const auto metadata = test::shippedOperation(operation);
+        ProblemPoint point{{"batch", int64_t{2}},
+                           {"heads", int64_t{8}},
+                           {"heads_kv", int64_t{2}},
+                           {"seqlen_q", c.seqlenQ},
+                           {"seqlen_k", c.seqlenK},
+                           {"head_dim", int64_t{64}},
+                           {"is_causal", c.causal},
+                           {"dtype", std::string("fp16")},
+                           {"form", c.form},
+                           {"layout", c.layout},
+                           {"scale", c.scale}};
+        if(operation == "sdpa_fwd")
+        {
+            point["window"] = c.window;
+        }
+        return detail::satisfiesConstraints(metadata,
+                                            test::withDefaultCategoricals(metadata, point));
+    };
+
+    for(const std::string operation : {"sdpa_fwd", "sdpa_bwd"})
+    {
+        // A form that states no scale value (scale_unset), or passes it as a tensor
+        // (scale_tensor), ignores the scale facet: three values would list one graph three times
+        // (or three tensors that differ only in their default), so only inv_sqrt_d is declared.
+        for(const std::string form : {"scale_unset", "scale_tensor"})
+        {
+            EXPECT_TRUE(admitsFor(operation, Candidate{form})) << operation << " " << form;
+            EXPECT_FALSE(admitsFor(operation, Candidate{form, "bshd", "unit"}))
+                << operation << " " << form;
+            EXPECT_FALSE(admitsFor(operation, Candidate{form, "bshd", "jitter"}))
+                << operation << " " << form;
+        }
+        // The forms that state the scale keep the whole facet, over every layout.
+        for(const std::string form : {"plain", "dropout", "padded", "bias"})
+        {
+            for(const std::string scale : {"inv_sqrt_d", "unit", "jitter"})
+            {
+                for(const std::string layout : {"bshd", "bhsd", "kv_bhsd"})
+                {
+                    EXPECT_TRUE(admitsFor(operation, Candidate{form, layout, scale}))
+                        << operation << " " << form << " " << layout << " " << scale;
+                }
+            }
+        }
+    }
+
+    // Ragged packs tokens through offset tensors whose multiplier is the token stride, so it
+    // needs token-major strides: head-major Q, K or V would be addressed as if tokens were
+    // contiguous across heads.
+    EXPECT_TRUE(admitsFor("sdpa_fwd", Candidate{"ragged", "bshd"}));
+    EXPECT_FALSE(admitsFor("sdpa_fwd", Candidate{"ragged", "bhsd"}));
+    EXPECT_FALSE(admitsFor("sdpa_fwd", Candidate{"ragged", "kv_bhsd"}));
+    EXPECT_TRUE(admitsFor("sdpa_fwd", Candidate{"ragged", "bshd", "unit"}));
+    EXPECT_TRUE(admitsFor("sdpa_fwd", Candidate{"ragged", "bshd", "jitter", "local_128"}));
+
+    // Everything else crosses with a window and with the layouts, the frontend validators and
+    // references stating nothing against it and an engine's matcher declining what it does not
+    // serve (which the oracle filters): dropout, sink, bias and padded with every window.
+    for(const std::string form : {"plain", "dropout", "padded", "bias", "sink"})
+    {
+        for(const std::string window : {"local_128", "local_1024", "local_4096"})
+        {
+            for(const bool causal : {true, false})
+            {
+                EXPECT_TRUE(admitsFor("sdpa_fwd", Candidate{form, "bshd", "inv_sqrt_d", window}))
+                    << form << " " << window;
+                EXPECT_TRUE(admitsFor("sdpa_fwd",
+                                      Candidate{form, "bhsd", "unit", window, 2048, 2048, causal}))
+                    << form << " " << window << " causal " << causal;
+            }
+        }
+    }
+    EXPECT_TRUE(admitsFor("sdpa_fwd",
+                          Candidate{"sink", "bshd", "inv_sqrt_d", "local_128", 2048, 2048, true}));
+
+    // Cross attention (more queries than keys) is non-causal only, and never windowed, whatever
+    // the form: the forms that carry per-batch lengths (padded, ragged) keep the same bounds.
+    for(const std::string operation : {"sdpa_fwd", "sdpa_bwd"})
+    {
+        for(const std::string form :
+            {"plain", "scale_unset", "scale_tensor", "dropout", "padded", "bias"})
+        {
+            EXPECT_TRUE(
+                admitsFor(operation, Candidate{form, "bshd", "inv_sqrt_d", "none", 4096, 77}))
+                << operation << " " << form;
+            EXPECT_FALSE(
+                admitsFor(operation, Candidate{form, "bshd", "inv_sqrt_d", "none", 4096, 77, true}))
+                << operation << " " << form;
+        }
+    }
+    for(const std::string form : {"padded", "ragged", "bias", "sink", "dropout"})
+    {
+        EXPECT_FALSE(
+            admitsFor("sdpa_fwd", Candidate{form, "bshd", "inv_sqrt_d", "local_128", 4096, 77}))
+            << form;
+        EXPECT_TRUE(admitsFor("sdpa_fwd", Candidate{form, "bshd", "inv_sqrt_d", "none", 4096, 77}))
+            << form;
+    }
+}
+
+namespace
+{
+
+/// Two enums, one weighted 2:1:1, one not, over two numeric extents.
+OperationMetadata weightedToy(const std::string& weights)
+{
+    return metadataFor(R"({
+      "schema_version": "1.0",
+      "operation": "toy",
+      "parameters": {
+        "M":      { "type": "int64" },
+        "N":      { "type": "int64" },
+        "layout": { "type": "enum", "values": ["a", "b", "c"])"
+                       + weights + R"( },
+        "dtype":  { "type": "enum", "values": ["fp32", "fp16"] }
+      },
+      "stratification_axis": "working_set",
+      "regimes": {},
+      "graph_builder": { "function": "createValidMatmulGraph", "source": "x.hpp",
+                         "arguments": [] }
+    })");
+}
+
+double shareOf(const ProblemCorpus& corpus, const std::string& parameter, const std::string& value)
+{
+    size_t held = 0;
+    const auto problems = corpus.problems();
+    for(const auto& point : problems)
+    {
+        held += std::get<std::string>(point.at(parameter)) == value ? 1 : 0;
+    }
+    return static_cast<double>(held) / static_cast<double>(problems.size());
+}
+
+} // namespace
+
+TEST(TestProblemSpace, AWeightedValueRealisesItsShareOfTheFirstPassAndOfTheGrownCorpus)
+{
+    const auto metadata = weightedToy(R"(, "weights": {"a": 2})");
+    for(const int64_t target : {int64_t{0}, int64_t{600}})
+    {
+        ExplorationRequest request;
+        request.pointsPerCombination = 40;
+        request.corpusTarget = target;
+        request.seed = 12;
+
+        const auto corpus = exploreProblemSpace(metadata, request, ACCEPT_EVERYTHING);
+
+        // 2:1:1 is 0.5, 0.25, 0.25; the other enum stays even.
+        EXPECT_NEAR(shareOf(corpus, "layout", "a"), 0.5, 0.03) << "target " << target;
+        EXPECT_NEAR(shareOf(corpus, "layout", "b"), 0.25, 0.03) << "target " << target;
+        EXPECT_NEAR(shareOf(corpus, "layout", "c"), 0.25, 0.03) << "target " << target;
+        EXPECT_NEAR(shareOf(corpus, "dtype", "fp32"), 0.5, 0.03) << "target " << target;
+        if(target > 0)
+        {
+            EXPECT_GE(corpus.problems().size(), static_cast<size_t>(target));
+        }
+    }
+}
+
+TEST(TestProblemSpace, EqualWeightsAreNoWeightsInTheSharesAndTheFirstPassIsTheUnweightedMean)
+{
+    // Weights are relative: declaring every value equal must not move any value's share. It does
+    // move the size of the first pass: the weighted axis splits pointsPerCombination for each
+    // dtype combination (2 x 25) among its three values, where the unweighted search gives each
+    // of the six combinations 25.
+    for(const int64_t target : {int64_t{0}, int64_t{250}})
+    {
+        ExplorationRequest request;
+        request.pointsPerCombination = 25;
+        request.corpusTarget = target;
+        request.seed = 13;
+
+        const auto absent = exploreProblemSpace(weightedToy(""), request, ACCEPT_EVERYTHING);
+        const auto equal = exploreProblemSpace(
+            weightedToy(R"(, "weights": {"a": 3, "b": 3, "c": 3})"), request, ACCEPT_EVERYTHING);
+
+        EXPECT_NEAR(shareOf(equal, "layout", "a"), shareOf(absent, "layout", "a"), 0.03);
+        EXPECT_NEAR(shareOf(equal, "layout", "b"), shareOf(absent, "layout", "b"), 0.03);
+        EXPECT_NEAR(shareOf(equal, "dtype", "fp32"), shareOf(absent, "dtype", "fp32"), 0.03);
+        if(target == 0)
+        {
+            EXPECT_EQ(absent.problems().size(), size_t{150});
+            EXPECT_EQ(equal.problems().size(), size_t{50});
+        }
+        else
+        {
+            // Growing splits the need exactly (as apportion splits it) where the unweighted
+            // search rounds each share up, so the points differ.
+            EXPECT_GE(equal.problems().size(), static_cast<size_t>(target));
+        }
+    }
+}
+
+TEST(TestProblemSpace, ApportionSplitsBySystematicSamplingAndSumsExactly)
+{
+    // 5 exactly for the heavy part; the two equal ones split the other 5 as 3 and 2, and which
+    // gets the odd one is the tie-break's, not a fixed position.
+    const auto split = detail::apportion(10, {2.0, 1.0, 1.0});
+    EXPECT_EQ(split[0], 5);
+    EXPECT_EQ(split[1] + split[2], 5);
+    // A ceiling per part would give four here (1 each) and a rounding per part two or none.
+    for(const int64_t total : {int64_t{1}, int64_t{3}, int64_t{7}, int64_t{50}, int64_t{1001}})
+    {
+        const auto parts = detail::apportion(total, {0.25, 0.75, 1.5, 0.25, 1.25});
+        int64_t sum = 0;
+        for(const auto part : parts)
+        {
+            sum += part;
+        }
+        EXPECT_EQ(sum, total);
+    }
+    EXPECT_EQ(detail::apportion(0, {1.0, 1.0}), (std::vector<int64_t>{0, 0}));
+
+    // Every ideal below one: 300 over 864 parts of two sizes. A largest-remainder split gives
+    // nearly all 300 units to the heavy parts; the light ones must keep their share of them.
+    std::vector<double> sizes(864, 1.0);
+    std::vector<uint64_t> keys(864);
+    for(size_t i = 0; i < sizes.size(); ++i)
+    {
+        sizes[i] = i % 3 == 0 ? 2.0 : 0.5;
+        keys[i] = detail::tieKey(3, i);
+    }
+    const auto spread = detail::apportion(300, sizes, keys);
+    int64_t heavy = 0;
+    int64_t all = 0;
+    for(size_t i = 0; i < spread.size(); ++i)
+    {
+        all += spread[i];
+        heavy += i % 3 == 0 ? spread[i] : 0;
+    }
+    EXPECT_EQ(all, 300);
+    // The 288 heavy parts weigh 576 of 576 + 288 = 864: two thirds.
+    EXPECT_NEAR(static_cast<double>(heavy) / 300.0, 2.0 / 3.0, 0.07);
+}
+
+TEST(TestProblemSpace, AWeightedValueKeepsItsShareAtASmallPointsPerCombination)
+{
+    // 0.75 of two points rounds to two, and 1.5 of two to three: a per-combination rounding
+    // (and a per-combination ceiling when growing) puts every small value above its weight.
+    // The split of the whole first pass (2 points for each of the two dtypes) by apportion
+    // lands exactly on 2:1:1, and no combination is owed a point to spoil it.
+    ExplorationRequest request;
+    request.pointsPerCombination = 2;
+    request.seed = 14;
+    const auto corpus
+        = exploreProblemSpace(weightedToy(R"(, "weights": {"a": 2})"), request, ACCEPT_EVERYTHING);
+    // Exact for the heavy value; the two equal light ones split what is left, so one of them
+    // may hold a point more than the other.
+    EXPECT_NEAR(shareOf(corpus, "layout", "a"), 0.5, 0.01);
+    EXPECT_NEAR(shareOf(corpus, "layout", "b") + shareOf(corpus, "layout", "c"), 0.5, 0.01);
+
+    request.corpusTarget = 400;
+    const auto grown
+        = exploreProblemSpace(weightedToy(R"(, "weights": {"a": 2})"), request, ACCEPT_EVERYTHING);
+    EXPECT_NEAR(shareOf(grown, "layout", "a"), 0.5, 0.03);
+    EXPECT_NEAR(shareOf(grown, "layout", "b") + shareOf(grown, "layout", "c"), 0.5, 0.03);
+}
+
+TEST(TestProblemSpace, SizesAreRakedOverTheCombinationsThatCanHoldAProblem)
+{
+    // (alignment bottom_right, non-causal, window none) is empty by the declaration's own
+    // constraints, while its windowed twins are not, so sizes taken as a product of weights over
+    // every combination leave window none under its declared 50%. The forms empty more: a scale
+    // the form does not state (scale_unset, scale_tensor) other than inv_sqrt_d, and a ragged
+    // form over a layout that is not token-major. The raking has to hold all three weighted
+    // facets (layout, scale, window) at once over what is left. The form is not weighted.
+    const auto metadata = test::shippedOperation("sdpa_fwd");
+
+    size_t total = 0;
+    const auto combinations = detail::categoricalCombinations(metadata.parameters, 0, total);
+    ASSERT_EQ(combinations.size(), 6912U);
+    const auto sizes = detail::combinationSizes(metadata, combinations);
+
+    double all = 0.0;
+    std::map<std::string, double> window;
+    std::map<std::string, double> layout;
+    std::map<std::string, double> scale;
+    std::map<std::string, double> form;
+    size_t empty = 0;
+    for(size_t i = 0; i < combinations.size(); ++i)
+    {
+        const auto& c = combinations[i];
+        const auto text = [&c](const char* name) { return std::get<std::string>(c.at(name)); };
+        const bool scaleIgnored = text("form") == "scale_unset" || text("form") == "scale_tensor";
+        const bool emptyByDeclaration
+            = (text("alignment") == "bottom_right" && !std::get<bool>(c.at("is_causal"))
+               && text("window") == "none")
+              || (scaleIgnored && text("scale") != "inv_sqrt_d")
+              || (text("form") == "ragged" && text("layout") != "bshd");
+        if(emptyByDeclaration)
+        {
+            EXPECT_EQ(sizes[i], 0.0) << detail::describe(c);
+            ++empty;
+        }
+        else
+        {
+            EXPECT_GT(sizes[i], 0.0) << detail::describe(c);
+        }
+        all += sizes[i];
+        window[text("window")] += sizes[i];
+        layout[text("layout")] += sizes[i];
+        scale[text("scale")] += sizes[i];
+        form[text("form")] += sizes[i];
+    }
+    // Per form, 864 combinations: 54 are the bottom_right, non-causal, no-window quarter of the
+    // product. Five forms leave it at that; scale_unset and scale_tensor also lose the 576 whose
+    // scale is not inv_sqrt_d, and ragged the 576 whose layout is not bshd, each less the 36 of
+    // those already in the 54: 5 * 54 + 3 * (576 + 54 - 36) = 2052.
+    EXPECT_EQ(empty, 2052U);
+    EXPECT_NEAR(window["none"] / all, 0.5, 1e-6);
+    EXPECT_NEAR(window["local_128"] / all, 1.0 / 6.0, 1e-6);
+    EXPECT_NEAR(layout["bshd"] / all, 0.5, 1e-6);
+    EXPECT_NEAR(layout["kv_bhsd"] / all, 0.25, 1e-6);
+    EXPECT_NEAR(scale["inv_sqrt_d"] / all, 0.5, 1e-6);
+    // The form carries no weight: a form's share is its share of the combinations that can hold
+    // a problem, less for the three that the declaration's constraints leave fewer of than the
+    // other five (those hold 810 of their 864 combinations each; scale_unset, scale_tensor and
+    // ragged 270), and no form is left out.
+    EXPECT_TRUE(metadata.find("form")->weights.empty());
+    for(const auto& [name, held] : form)
+    {
+        EXPECT_GT(held / all, 0.04) << name;
+    }
+    EXPECT_GT(form["sink"], form["scale_unset"]);
+    EXPECT_GT(form["sink"], form["ragged"]);
+    // The mean over combinations that can hold a problem is 1, as it is for unweighted ones.
+    EXPECT_NEAR(all, static_cast<double>(combinations.size() - empty), 1e-6);
+}
+
+namespace
+{
+
+/// Three equally weighted layouts over two extents and nothing else, so the first pass is
+/// pointsPerCombination points split over three combinations.
+OperationMetadata threeEqualLayouts()
+{
+    return metadataFor(R"({
+      "schema_version": "1.0",
+      "operation": "toy",
+      "parameters": {
+        "M":      { "type": "int64" },
+        "N":      { "type": "int64" },
+        "layout": { "type": "enum", "values": ["a", "b", "c"],
+                    "weights": {"a": 1, "b": 1, "c": 1} }
+      },
+      "stratification_axis": "working_set",
+      "regimes": {},
+      "graph_builder": { "function": "createValidMatmulGraph", "source": "x.hpp",
+                         "arguments": [] }
+    })");
+}
+
+/// Layout c admits every extent up to @p wideLimit; a and b admit only M = N = 1, so each is
+/// exhausted by its first point.
+ProblemOracle oneWideLayout(int64_t wideLimit)
+{
+    return [wideLimit](const ProblemPoint& point) {
+        const auto m = std::get<int64_t>(point.at("M"));
+        const auto n = std::get<int64_t>(point.at("N"));
+        return std::get<std::string>(point.at("layout")) == "c" ? m <= wideLimit && n <= wideLimit
+                                                                : m <= 1 && n <= 1;
+    };
+}
+
+} // namespace
+
+TEST(TestProblemSpace, TheFirstPassDrawsEveryDeclaredValueAndKeepsItsBudgetWhereItCan)
+{
+    ExplorationRequest request;
+    request.seed = 15;
+    size_t total = 0;
+    const auto covered = [](const OperationMetadata& metadata,
+                            const std::vector<ProblemPoint>& combinations,
+                            const std::vector<int64_t>& targets,
+                            const std::string& parameter) {
+        std::set<std::string> values;
+        for(size_t i = 0; i < combinations.size(); ++i)
+        {
+            if(targets[i] > 0)
+            {
+                values.insert(std::get<std::string>(combinations[i].at(parameter)));
+            }
+        }
+        EXPECT_NE(metadata.find(parameter), nullptr);
+        return values;
+    };
+    const auto sum = [](const std::vector<int64_t>& targets) {
+        return std::accumulate(targets.begin(), targets.end(), int64_t{0});
+    };
+
+    // Layout a is a thousand times as common as b and c: their combinations' shares round to
+    // nothing, yet each is drawn, with the points taken from layout a, not added to the budget
+    // (10 points for each of the two dtypes).
+    request.pointsPerCombination = 10;
+    const auto skewed = weightedToy(R"(, "weights": {"a": 1000, "b": 1, "c": 1})");
+    const auto skewedCombinations = detail::categoricalCombinations(skewed.parameters, 0, total);
+    const auto skewedTargets = detail::firstPassTargets(
+        skewed, request, skewedCombinations, detail::combinationSizes(skewed, skewedCombinations));
+    EXPECT_EQ(sum(skewedTargets), 20);
+    EXPECT_EQ(covered(skewed, skewedCombinations, skewedTargets, "layout"),
+              (std::set<std::string>{"a", "b", "c"}));
+    EXPECT_EQ(covered(skewed, skewedCombinations, skewedTargets, "dtype"),
+              (std::set<std::string>{"fp32", "fp16"}));
+
+    // Three values and one point: none may give theirs up, so the first pass is the three owed.
+    request.pointsPerCombination = 1;
+    const auto three = threeEqualLayouts();
+    const auto threeCombinations = detail::categoricalCombinations(three.parameters, 0, total);
+    const auto threeTargets = detail::firstPassTargets(
+        three, request, threeCombinations, detail::combinationSizes(three, threeCombinations));
+    EXPECT_EQ(threeTargets, std::vector<int64_t>(3, 1));
+
+    // Nothing weighted: pointsPerCombination for each combination, as ever.
+    const auto plain = weightedToy("");
+    const auto plainCombinations = detail::categoricalCombinations(plain.parameters, 0, total);
+    request.pointsPerCombination = 9;
+    EXPECT_EQ(
+        detail::firstPassTargets(
+            plain, request, plainCombinations, detail::combinationSizes(plain, plainCombinations)),
+        std::vector<int64_t>(6, 9));
+}
+
+TEST(TestProblemSpace, ACombinationLeftWithoutAFirstPassPointStillGrowsToTheTarget)
+{
+    // Six combinations share 4 first-pass points (2 for each dtype), layout a taking nearly
+    // all of them; b and c are drawn once each, so two combinations are left with none. They are
+    // untried, not declined: growing toward a target well past the first pass reaches them, in
+    // proportion to their weight.
+    const auto metadata = weightedToy(R"(, "weights": {"a": 100, "b": 1, "c": 1})");
+    for(uint64_t seed = 0; seed < 5; ++seed)
+    {
+        ExplorationRequest request;
+        request.pointsPerCombination = 2;
+        request.seed = seed;
+        size_t total = 0;
+        const auto combinations = detail::categoricalCombinations(metadata.parameters, 0, total);
+        const auto targets = detail::firstPassTargets(
+            metadata, request, combinations, detail::combinationSizes(metadata, combinations));
+        ASSERT_NE(std::count(targets.begin(), targets.end(), 0), 0) << "seed " << seed;
+
+        request.corpusTarget = 2000;
+        const auto corpus = exploreProblemSpace(metadata, request, ACCEPT_EVERYTHING);
+
+        EXPECT_GE(corpus.problems().size(), 2000U) << "seed " << seed;
+        EXPECT_TRUE(corpus.shortfall.empty()) << "seed " << seed;
+        for(const auto& combination : corpus.combinations)
+        {
+            EXPECT_FALSE(combination.problems.empty())
+                << "seed " << seed << ": " << detail::describe(combination.categorical);
+        }
+    }
+}
+
+TEST(TestProblemSpace, WeightedGrowthKeepsGoingWhenTheRoundsShareFallsOnExhaustedCombinations)
+{
+    // A round's need split by weight gives a unit to only some combinations: a need of one goes
+    // to one of the three. When that one is exhausted it adds nothing and is spent, but the
+    // others were never searched, so growth has to go on and reach layout c's points rather
+    // than stop short of the target.
+    for(uint64_t seed = 0; seed < 20; ++seed)
+    {
+        ExplorationRequest request;
+        request.pointsPerCombination = 8;
+        request.numericCeiling = 256;
+        request.seed = seed;
+        const auto firstPass = exploreProblemSpace(threeEqualLayouts(), request, oneWideLayout(256))
+                                   .problems()
+                                   .size();
+
+        request.corpusTarget = static_cast<int64_t>(firstPass) + 1;
+        const auto grown = exploreProblemSpace(threeEqualLayouts(), request, oneWideLayout(256));
+
+        EXPECT_GE(grown.problems().size(), static_cast<size_t>(request.corpusTarget))
+            << "seed " << seed;
+        EXPECT_TRUE(grown.shortfall.empty()) << "seed " << seed;
+    }
+}
+
+TEST(TestProblemSpace, WeightedGrowthStopsWhenEveryCombinationIsExhausted)
+{
+    // Each layout holds one point, so no target above three can be met. Growth must end with the
+    // shortfall reported, having searched every combination rather than re-splitting a need
+    // nobody can take.
+    ExplorationRequest request;
+    request.pointsPerCombination = 8;
+    request.numericCeiling = 256;
+    request.corpusTarget = 1000;
+    request.seed = 3;
+
+    const auto corpus = exploreProblemSpace(threeEqualLayouts(), request, oneWideLayout(1));
+
+    EXPECT_EQ(corpus.problems().size(), 3U);
+    ASSERT_EQ(corpus.shortfall.size(), 4U);
+    for(size_t i = 1; i < corpus.shortfall.size(); ++i)
+    {
+        EXPECT_NE(corpus.shortfall[i].find("saturated"), std::string::npos) << corpus.shortfall[i];
+    }
+}
+
+/// The shipped attention declarations, whose weighted facets and forms cross to thousands of
+/// combinations.
+class TestShippedFirstPass : public ::testing::TestWithParam<std::string>
+{
+};
+
+TEST_P(TestShippedFirstPass, TheShippedSdpaDeclarationsKeepTheDefaultFirstPassNearItsUnweightedSize)
+{
+    // Weighted axes split a budget; they do not multiply it. The budget is pointsPerCombination
+    // for each distinct live combination of the unweighted parameters (is_causal, alignment,
+    // dtype, form, and for the forward generate_stats), not for each of the thousands of
+    // weighted combinations: crossing three weighted axes (layout, scale, window) in would multiply
+    // it by their 36 value combinations in the forward.
+    const auto metadata = test::shippedOperation(GetParam());
+    const ExplorationRequest request;
+    size_t total = 0;
+    const auto combinations = detail::categoricalCombinations(
+        metadata.parameters,
+        request.maxCombinations,
+        total,
+        [&metadata](const ProblemPoint& combination) {
+            return !detail::excludedByCategoricals(metadata, combination);
+        });
+    const auto sizes = detail::combinationSizes(metadata, combinations);
+    const auto targets = detail::firstPassTargets(metadata, request, combinations, sizes);
+    ASSERT_EQ(targets.size(), combinations.size());
+
+    // U, counted here from the declaration: live combinations, projected onto the enumerable
+    // parameters that have no weights.
+    std::set<std::string> unweighted;
+    int64_t live = 0;
+    for(size_t i = 0; i < combinations.size(); ++i)
+    {
+        if(sizes[i] <= 0.0)
+        {
+            EXPECT_EQ(targets[i], 0) << detail::describe(combinations[i]);
+            continue;
+        }
+        ++live;
+        ProblemPoint projected;
+        for(const auto& parameter : metadata.parameters)
+        {
+            if(parameter.weights.empty() && !parameter.enumerable().empty())
+            {
+                projected[parameter.name] = combinations[i].at(parameter.name);
+            }
+        }
+        unweighted.insert(detail::describe(projected));
+    }
+    const auto distinct = static_cast<int64_t>(unweighted.size());
+    ASSERT_GT(live, 0);
+    ASSERT_GT(distinct, 0);
+
+    int64_t sum = 0;
+    for(const auto target : targets)
+    {
+        sum += target;
+    }
+    EXPECT_EQ(sum, request.pointsPerCombination * distinct);
+    EXPECT_LT(sum * 4, request.pointsPerCombination * live)
+        << "the weighted axes split the budget; one budget for each combination would be "
+        << request.pointsPerCombination * live;
+
+    // Every declared value that some live combination holds is drawn, weighted or not, and each
+    // weighted value holds its declared share of the first pass.
+    for(const auto& parameter : metadata.parameters)
+    {
+        const auto values = parameter.enumerable();
+        for(size_t v = 0; v < values.size(); ++v)
+        {
+            int64_t held = 0;
+            bool someLiveCombinationHoldsIt = false;
+            for(size_t i = 0; i < combinations.size(); ++i)
+            {
+                if(combinations[i].at(parameter.name) == values[v])
+                {
+                    held += targets[i];
+                    someLiveCombinationHoldsIt = someLiveCombinationHoldsIt || sizes[i] > 0.0;
+                }
+            }
+            if(someLiveCombinationHoldsIt)
+            {
+                EXPECT_GE(held, 1) << GetParam() << " " << parameter.name << " value " << v;
+            }
+            if(!parameter.weights.empty())
+            {
+                const auto& value = parameter.values[v];
+                EXPECT_NEAR(static_cast<double>(held) / static_cast<double>(sum),
+                            parameter.relativeWeight(value)
+                                / static_cast<double>(parameter.values.size()),
+                            0.03)
+                    << GetParam() << " " << parameter.name << "=" << value;
+            }
+        }
+    }
+}
+
+INSTANTIATE_TEST_SUITE_P(SdpaDeclarations,
+                         TestShippedFirstPass,
+                         ::testing::Values("sdpa_fwd", "sdpa_bwd"));
 
 } // namespace hipdnn_corpus_gen

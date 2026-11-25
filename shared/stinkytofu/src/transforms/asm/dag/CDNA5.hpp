@@ -492,6 +492,9 @@ class CDNA5ReadyQueue : public ReadyQueue {
         return dsIssueCyclesForWaves(
             hw_, inst.issueCycles, static_cast<int>(getPassContext().getGemmTileConfig().NumWaves));
     }
+    // A feature value of 0, including an explicit user 0, falls back to
+    // CDNA5Config::tensorLoadWmmaSpace. That config value is 0, so the
+    // thresholds stay unshifted. Only a value > 0 is applied as-is.
     int tensorLoadWmmaSpace() const {
         const int cfg = getPassContext().getPassFeatureConfig().dagFeatures.tensorLoadWmmaSpace;
         return cfg > 0 ? cfg : config_.tensorLoadWmmaSpace;
@@ -859,10 +862,12 @@ class CDNA5ReadyQueue : public ReadyQueue {
     //  ValuIssue - the same for a VALU, which can only issue in the window's co-issue slots.
     enum class TimeKind { Elapsed, Issue, ValuIssue };
     void advanceTime(int cycles, TimeKind kind);
-    void updateWMMAStatus(DAGNode* node);
+    void modelInstIssue(const StinkyInstruction& inst);
+    void modelMatrixIssue(const StinkyInstruction& inst);
     void stampDataReady(const StinkyInstruction& inst, int extraDelay = 0);
     void touchOperands(const StinkyInstruction& inst);
     int getMaxSrcDataWait(DAGNode* node) const;
+    int getMaxSrcDataWait(const StinkyInstruction& inst) const;
     bool destOverlapsActiveWmmaSrc(DAGNode* node) const;
     bool pipeOpGateBlocks(DAGNode* node) const;
     bool warGateRelieved(DAGNode* ds) const;
@@ -1067,6 +1072,19 @@ class CDNA5ReadyQueue : public ReadyQueue {
     }
     bool empty() const override;
 
+    bool modelsIssueTiming() const override {
+        return true;
+    }
+
+    int elapsedCycles() const override {
+        return clock_;
+    }
+
+    // Replay one already-ordered instruction: stall until its sources are ready, then charge
+    // the same issue cost the scheduler uses. Scheduling itself calls modelInstIssue /
+    // modelMatrixIssue after it has applied its own stall.
+    void replayIssue(const StinkyInstruction& inst) override;
+
     // Build the coexec filler v_nops counted during the last pickOne() as
     // detached insts.
     std::vector<StinkyInstruction*> takePendingFillerInsts() override {
@@ -1204,21 +1222,44 @@ void CDNA5ReadyQueue::advanceTime(int cycles, TimeKind kind) {
     }
 }
 
-// After a picked instruction: advance the co-issue timeline. Barriers use
-// result latency (latencyCycles); VALU/transcendentals use co-issue-aware issue
-// progress; others use issueCycles.
-void CDNA5ReadyQueue::updateWMMAStatus(DAGNode* node) {
-    int cycles = node->inst->issueCycles;
+// Issue cost of one non-matrix instruction. Barriers use result latency
+// (latencyCycles); VALU/transcendentals use co-issue-aware issue progress;
+// ds_load uses the per-wave issue cost; everything else uses issueCycles.
+void CDNA5ReadyQueue::modelInstIssue(const StinkyInstruction& inst) {
+    int cycles = inst.issueCycles;
     TimeKind kind = TimeKind::Issue;
-    if (isBarrier(*node->inst)) {
-        cycles = node->inst->latencyCycles;
+    if (isBarrier(inst)) {
+        cycles = inst.latencyCycles;
         kind = TimeKind::Elapsed;
-    } else if (isVectorALU(*node->inst) || isTranscendental(*node->inst)) {
+    } else if (isVectorALU(inst) || isTranscendental(inst)) {
         kind = TimeKind::ValuIssue;
-    } else if (isDSRead(*node->inst)) {
-        cycles = dsIssueCost(*node->inst);
+    } else if (isDSRead(inst)) {
+        cycles = dsIssueCost(inst);
     }
     advanceTime(cycles, kind);
+}
+
+// WMMA window update: wait until the hardware queue has room, append its
+// co-issue window, then advance by its issue cycles and stamp dest data-ready.
+void CDNA5ReadyQueue::modelMatrixIssue(const StinkyInstruction& inst) {
+    while (outstandingWmmas() >= effectiveWmmaQueueDepth())
+        advanceTime(soonestQueueEnd(), TimeKind::Elapsed);
+    if (coIssueCyclePos_ >= activeWmmaLatency_) resetActiveWindow();
+    const int queueDelay = queuedCoverCycles();
+    appendWindowSegment(inst);
+    advanceTime(inst.issueCycles, TimeKind::Issue);
+    stampDataReady(inst, queueDelay);
+}
+
+void CDNA5ReadyQueue::replayIssue(const StinkyInstruction& inst) {
+    const int wait = getMaxSrcDataWait(inst);
+    if (wait > 0) advanceTime(wait, TimeKind::Elapsed);
+    if (isMatrixInstruction(inst)) {
+        modelMatrixIssue(inst);
+    } else {
+        modelInstIssue(inst);
+        stampDataReady(inst);
+    }
 }
 
 // True if VALU can be picked in the current co-issue timeline position.
@@ -1273,7 +1314,7 @@ DAGNode* CDNA5ReadyQueue::popNonWmma(DAGNode* node, int pickKind) {
     // (A) RAW: stamp this producer's dest data-ready latency (e.g. ds_load).
     // (B) elapse: record the timeline touch for all operands (dst + src).
     touchOperands(*node->inst);
-    updateWMMAStatus(node);
+    modelInstIssue(*node->inst);
     stampDataReady(*node->inst);
     // Advance the tracked MSB bank; ops with no opinion (-1) leave it unchanged.
     if (node->requiredMsb != -1) currentMsb_ = node->requiredMsb;
@@ -1282,7 +1323,7 @@ DAGNode* CDNA5ReadyQueue::popNonWmma(DAGNode* node, int pickKind) {
 }
 
 // (A) RAW stamp: record each dest reg's data-ready latency. Skip when
-// latencyCycles <= issueCycles: after a pick, updateWMMAStatus ->
+// latencyCycles <= issueCycles: after a pick, modelInstIssue ->
 // advanceTime(issueCycles) runs before the next pickOne and would immediately
 // decay such a stamp to 0, so it can never gate a consumer. Skipping it makes
 // the dominant gfx1250 case (VALU/SALU latency == issue == 1) a no-op with no
@@ -1316,9 +1357,9 @@ void CDNA5ReadyQueue::touchOperands(const StinkyInstruction& inst) {
 // (A) RAW data-ready gate: max outstanding data-ready latency over a node's src
 // VGPRs. Returns 0 if all src data is ready (safe to consume), >0 if hardware
 // would stall.
-int CDNA5ReadyQueue::getMaxSrcDataWait(DAGNode* node) const {
+int CDNA5ReadyQueue::getMaxSrcDataWait(const StinkyInstruction& inst) const {
     int maxLat = 0;
-    for (const StinkyRegister& srcReg : node->inst->getSrcRegs()) {
+    for (const StinkyRegister& srcReg : inst.getSrcRegs()) {
         if (!srcReg.isRegister()) continue;
         for (unsigned off = 0; off < srcReg.reg.num; ++off) {
             auto it = regDataReadyCounters.find(regDepKey(srcReg.reg.type, srcReg.reg.idx + off));
@@ -1326,6 +1367,10 @@ int CDNA5ReadyQueue::getMaxSrcDataWait(DAGNode* node) const {
         }
     }
     return maxLat;
+}
+
+int CDNA5ReadyQueue::getMaxSrcDataWait(DAGNode* node) const {
+    return getMaxSrcDataWait(*node->inst);
 }
 
 // True if issuing \p node now would risk a co-execution hazard: while the WMMA
@@ -1564,15 +1609,9 @@ DAGNode* CDNA5ReadyQueue::pickOneFromWMMA(DAGNode* pick) {
     }
     if (shortfall > 0) pendingFillerVNops_ = shortfall;
 
-    // Wait until the queue has room (depth 1: until the previous WMMA finished). The
-    // queue never waits for a window end while it has room.
-    while (outstandingWmmas() >= effectiveWmmaQueueDepth())
-        advanceTime(soonestQueueEnd(), TimeKind::Elapsed);
-    if (coIssueCyclePos_ >= activeWmmaLatency_) resetActiveWindow();
-    // A WMMA queued behind others starts when the previous one ends: its D is ready later.
-    const int queueDelay = queuedCoverCycles();
-    // Appended before the advanceTime() below so its blocked cycles are never picked into.
-    appendWindowSegment(*node->inst);
+    // Same queue wait, window append, issue advance, and dest stamp as a fixed-order
+    // replay. Resets the pipe window when the previous WMMA has finished.
+    modelMatrixIssue(*node->inst);
     activeWmmaNode_ = node;
     queuedWmmas_.push_back(node);
     {
@@ -1582,19 +1621,14 @@ DAGNode* CDNA5ReadyQueue::pickOneFromWMMA(DAGNode* pick) {
     }
     nonWmmaFillsSinceActiveWmma_ = 0;  // new window: restart WMMA->WMMA fill count
     fillsThisWindow_ = 0;
-    // Advance by WMMA issue cycles after opening a new timeline window.
-    // This keeps coIssueCyclePos_ aligned with elapsed cycles right after WMMA
-    // issue.
-    advanceTime(node->inst->issueCycles, TimeKind::Issue);
     wmmaIssueConfig.issuedCount--;
 
     if (deferHeadBalanceThisRegion_) deferFirstHeadWmmaActive_ = false;
     wmmaIssuedCountThisRegion_++;
     if (wmmaRefilling_ && wmmaRefillLeft_ > 0) --wmmaRefillLeft_;
     globalReadCounter = 0;
-    // (A) RAW: stamp the WMMA's dest (accumulator) data-ready latency.
-    // (B) elapse: record the timeline touch for all its operands.
-    stampDataReady(*node->inst, queueDelay);
+    // Dest data-ready was stamped by modelMatrixIssue. Record the timeline touch
+    // for all operands.
     touchOperands(*node->inst);
     if (node->requiredMsb != -1) currentMsb_ = node->requiredMsb;
     stampPipeOpGates(*node->inst);
@@ -2826,7 +2860,7 @@ DAGNode* CDNA5ReadyQueue::pickOne() {
             if (barrier) barrierQueue.erase(barrier);
         }
         if (barrier) {
-            updateWMMAStatus(barrier);
+            modelInstIssue(*barrier->inst);
             const bool queueReset = isBarrierWait(*barrier->inst);
             // The stall in front of a barrier wait (s_wait_dscnt / s_wait_tensorcnt, not simulated)
             // lets the queued WMMAs finish: take the WMMA queue as empty.

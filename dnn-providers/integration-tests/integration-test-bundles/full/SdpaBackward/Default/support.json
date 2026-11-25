@@ -411,7 +411,6 @@
           "tpd50_b2h3k3v3_72x40_d192_fp16_brcausal_bshd_v0to1_tolp",
           "tpd51_b2h3k3v3_72x40_d192_fp16_tlw16_bshd_v0to1_tolp",
           "tpd52_b2h3k3v3_72x40_d192_fp16_brw16_bshd_v0to1_tolp",
-          "x06_b1h1k1v1_64x65536_d128_fp16_none_dom128to128_told",
           "x07_b1h1k1v1_65536x1_d128_bfp16_none_tolk1",
           "x07_b1h1k1v1_65536x1_d128_fp16_none_tolk1",
           "x11_b1h1k1v1_4096x4096_d128_bfp16_tlcausal_tolp",
@@ -419,6 +418,12 @@
         ],
         "support": {
           "gfx1100": [
+            "linux"
+          ],
+          "gfx90a": [
+            "linux"
+          ],
+          "gfx942": [
             "linux"
           ],
           "gfx950": [
@@ -431,6 +436,28 @@
           "s24_b2h3k3v3_72x120_d512_bfp16_none_told"
         ],
         "support": {
+          "gfx90a": [
+            "linux"
+          ],
+          "gfx942": [
+            "linux"
+          ],
+          "gfx950": [
+            "linux"
+          ]
+        }
+      },
+      {
+        "cases": [
+          "x06_b1h1k1v1_64x65536_d128_fp16_none_dom128to128_told"
+        ],
+        "support": {
+          "gfx1100": [
+            "linux"
+          ],
+          "gfx942": [
+            "linux"
+          ],
           "gfx950": [
             "linux"
           ]

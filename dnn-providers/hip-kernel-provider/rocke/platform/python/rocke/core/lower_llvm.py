@@ -71,6 +71,7 @@ from .ir import (
     _gpu_check_failed_op_error,
     _if_else_yields,
     _is_unsigned,
+    _ldexp_op_error,
     _refuse_malformed_control_flow,
     _refuse_non_u8_source,
     _refuse_unsigned_operands,
@@ -326,6 +327,7 @@ _INTRINSIC_DECLS: Dict[str, str] = {
         "<4 x i32>, <8 x i32>, <4 x i32>, <4 x i32>, <8 x i32>, i32 immarg)"
     ),
     "exp2.f32": "declare float @llvm.exp2.f32(float)",
+    "ldexp.f32.i32": "declare float @llvm.ldexp.f32.i32(float, i32)",
     "amdgcn.exp2.f32": "declare float @llvm.amdgcn.exp2.f32(float)",
     "log2.f32": "declare float @llvm.log2.f32(float)",
     "sqrt.f32": "declare float @llvm.sqrt.f32(float)",
@@ -983,6 +985,19 @@ _GLOBAL_LOAD_PTR_TYPES: dict[int, str] = {
     1: "ptr addrspace(1)",
     4: "ptr addrspace(4)",
 }
+
+
+def _scalar_global_align(op: Op, *, unannotated: int) -> int:
+    """The ``align`` that scalar global load or store ``op`` prints: its
+    :func:`align_attr`, refused as the vector accesses refuse it, or
+    ``unannotated`` when the op carries none.
+
+    ``unannotated`` is the op's own claim for IR without ``align`` (2 for the
+    ``f16`` ops, 1 for the typed ops), kept so such IR lowers as before. The
+    C++ engine's twin is ``ll_scalar_global_align`` in ``lower_llvm/mem.cpp``.
+    """
+    align = align_attr(op)
+    return unannotated if align is None else align
 
 
 # Declaration overrides, one table per declaration ABI generation
@@ -3355,6 +3370,17 @@ class _Lowerer:
             f"  {op.result.name} = call float @llvm.exp2.f32(float {self._operand(v)})"
         )
 
+    def _op_math_ldexp(self, op: Op) -> None:
+        error = _ldexp_op_error(op)
+        if error:
+            raise ValueError(error)
+        value, exponent = op.operands
+        self._need("ldexp.f32.i32")
+        self._current().emit(
+            f"  {op.result.name} = call float @llvm.ldexp.f32.i32("
+            f"float {self._operand(value)}, i32 {self._operand(exponent)})"
+        )
+
     def _op_math_exp2_fast(self, op: Op) -> None:
         (v,) = op.operands
         if v.type.name != "f32":
@@ -3557,7 +3583,7 @@ class _Lowerer:
         ptr, idx = op.operands
         _, ptr_ty = self._anyptr_space("global_load_f16", ptr, _GLOBAL_LOAD_PTR_TYPES)
         gep = self._fresh("gep")
-        align = int(op.attrs.get("align", 2))
+        align = _scalar_global_align(op, unannotated=2)
         self._current().emit(
             f"  {gep} = getelementptr inbounds half, {ptr_ty} "
             f"{self._operand(ptr)}, i32 {self._operand(idx)}"
@@ -3574,7 +3600,7 @@ class _Lowerer:
         # an i64 element offset (paged caches past 2 GiB) stays valid IR.
         idx_ty = _llvm_type(idx.type)
         gep = self._fresh("gep")
-        align = int(op.attrs.get("align", 1))
+        align = _scalar_global_align(op, unannotated=1)
         self._current().emit(
             f"  {gep} = getelementptr inbounds {elem_ty}, {ptr_ty} "
             f"{self._operand(ptr)}, {idx_ty} {self._operand(idx)}"
@@ -3587,7 +3613,7 @@ class _Lowerer:
         ptr, idx, val = op.operands
         self._require_global_header_ptr("store_f16", ptr)
         gep = self._fresh("gep")
-        align = int(op.attrs.get("align", 2))
+        align = _scalar_global_align(op, unannotated=2)
         self._current().emit(
             f"  {gep} = getelementptr inbounds half, ptr addrspace(1) "
             f"{self._operand(ptr)}, i32 {self._operand(idx)}"
@@ -3601,7 +3627,7 @@ class _Lowerer:
         self._require_global_header_ptr("global_store", ptr)
         elem_ty = _llvm_type(val.type)
         gep = self._fresh("gep")
-        align = int(op.attrs.get("align", 1))
+        align = _scalar_global_align(op, unannotated=1)
         self._current().emit(
             f"  {gep} = getelementptr inbounds {elem_ty}, ptr addrspace(1) "
             f"{self._operand(ptr)}, i32 {self._operand(idx)}"

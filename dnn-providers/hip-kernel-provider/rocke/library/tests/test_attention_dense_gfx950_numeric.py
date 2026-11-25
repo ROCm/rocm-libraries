@@ -32,6 +32,8 @@ from kernels.gfx950.attention_dense import (
 
 torch = pytest.importorskip("torch", reason="ROCm torch required")
 
+from ._dense_paged_gpu import paged_cache, run_dispatched_paged  # noqa: E402
+
 
 def _gpu_ready():
     """True only on a gfx950 box with ROCm torch. Gate on ``gcnArchName`` (the ISA
@@ -99,6 +101,7 @@ def _spec(
     use_sinks=False,
     sliding_window=0,
     causal=True,
+    kv_block_size=0,
     causal_bottom_right=False,
     num_cus=None,
     use_fp8=False,
@@ -143,6 +146,11 @@ def _spec(
             dtype=dtype,
             use_sinks=use_sinks,
             sliding_window=sliding_window,
+            **(
+                {"layout": "paged", "kv_block_size": kv_block_size}
+                if kv_block_size
+                else {}
+            ),
             use_fp8=use_fp8,
             **({} if num_cus is None else {"num_cus": num_cus}),
         ),
@@ -2463,10 +2471,11 @@ class TestDensePagedNumeric:
     @pytest.mark.gpu
     @pytest.mark.parametrize("dtype", ["fp16", "bf16"])
     @pytest.mark.parametrize("block_size", [16, 32, 64])
-    @pytest.mark.parametrize("sq,window", [(1024, 256), (2048, 1024)])
-    def test_paged_matches_dense_bit_exact(self, dtype, block_size, sq, window):
+    @pytest.mark.parametrize("sq,window", [(1024, 256), (2048, 1024), (1024, 0)])
+    @pytest.mark.parametrize("d", [128, 64])
+    def test_paged_matches_dense_bit_exact(self, dtype, block_size, sq, window, d):
         """A paged cache must give the same bits as the dense K/V it was scattered
-        from, and match the fp32 sliding-window reference.
+        from, and match the fp32 causal (sliding-window) reference.
 
         The pages land at randomly permuted physical ids in a cache twice the
         needed size, and every unused page is NaN. A wrong page index (the
@@ -2475,32 +2484,69 @@ class TestDensePagedNumeric:
         the wrong keys, rather than a near miss the tolerance could absorb.
         block_size 16/32/64 covers 4, 2 and 1 pages per 64-key tile.
         """
+        self._check_paged(dtype, block_size, sq, sq, window, d)
+
+    @requires_gfx950_gpu
+    @pytest.mark.gpu
+    @pytest.mark.parametrize(
+        "sq,sk,window",
+        [
+            pytest.param(512, 2048, 0, id="top-left-512x2048"),
+            pytest.param(2048, 512, 0, id="top-left-2048x512"),
+            pytest.param(1088, 1088, 0, id="ragged-q-1088"),
+            pytest.param(1024, 512, 128, id="swa-empty-rows-1024x512"),
+        ],
+    )
+    def test_paged_cross_length_matches_dense(self, sq, sk, window):
+        """Top-left causal with ``seqlen_q != seqlen_kv``, a ragged query tail and
+        rows whose window holds no key."""
+        self._check_paged("fp16", 16, sq, sk, window, 128)
+
+    @requires_gfx950_gpu
+    @pytest.mark.gpu
+    @pytest.mark.parametrize("spec_id", ["gfx950_dense_grid", "gfx950_dense_qbminor"])
+    def test_dispatched_paged(self, spec_id):
+        """Request -> dispatch -> bind -> launch, with the block count taken from the
+        cache at bind."""
+        window = 1024
+        q, k, v, out = run_dispatched_paged("gfx950", spec_id, window=window)
+        assert torch.isfinite(out).all()
+        scale = 1.0 / math.sqrt(q.shape[-1])
+        ref = _standard_reference(q, k, v, scale, sliding_window=window)
+        assert (out.float() - ref).abs().max().item() < _tolerance("fp16")
+
+    @staticmethod
+    def _check_paged(dtype, block_size, sq, sk, window, d):
         import torch
 
-        hq, hkv, d, B = 16, 4, 128, 1
+        hq, hkv, B = 16, 4, 1
         tdt = getattr(torch, _TORCH_DT[dtype])
         scale = 1.0 / math.sqrt(d)
         torch.manual_seed(0)
 
         q = torch.randn(B, sq, hq, d, device="cuda", dtype=tdt)
-        k = torch.randn(B, sq, hkv, d, device="cuda", dtype=tdt)
-        v = torch.randn(B, sq, hkv, d, device="cuda", dtype=tdt)
+        k = torch.randn(B, sk, hkv, d, device="cuda", dtype=tdt)
+        v = torch.randn(B, sk, hkv, d, device="cuda", dtype=tdt)
 
-        npages = sq // block_size
-        num_kv_blocks = 2 * npages
-        phys = torch.randperm(num_kv_blocks, device="cuda")[:npages]
-        k_cache = torch.full(
-            (num_kv_blocks, block_size, hkv, d), float("nan"), device="cuda", dtype=tdt
+        k_cache, v_cache, block_tables, kv_lens = paged_cache(k, v, block_size)
+        num_kv_blocks = k_cache.shape[0]
+
+        # The shipped paged spec (its tile can differ from the contiguous one's),
+        # and its contiguous twin on the same tile.
+        shipped = _spec(
+            dtype,
+            d,
+            hq,
+            hkv,
+            False,
+            sq=sq,
+            sk=sk,
+            sliding_window=window,
+            kv_block_size=block_size,
         )
-        v_cache = torch.full_like(k_cache, float("nan"))
-        k_cache[phys] = k[0].view(npages, block_size, hkv, d)
-        v_cache[phys] = v[0].view(npages, block_size, hkv, d)
-        block_tables = phys.to(torch.int32).view(1, npages).contiguous()
-        kv_lens = torch.tensor([sq], device="cuda", dtype=torch.int32)
-
-        dense_spec = _spec(dtype, d, hq, hkv, False, sq=sq, sliding_window=window)
-        paged_spec = dataclasses.replace(
-            dense_spec, paged=True, block_size=block_size, num_kv_blocks=num_kv_blocks
+        paged_spec = dataclasses.replace(shipped, num_kv_blocks=num_kv_blocks)
+        dense_spec = dataclasses.replace(
+            shipped, paged=False, block_size=0, num_kv_blocks=0
         )
 
         dense_out = torch.empty_like(q)
@@ -2520,12 +2566,23 @@ class TestDensePagedNumeric:
         )
         torch.cuda.synchronize()
 
-        name = f"{dtype} pgd{block_size} sq{sq} swa{window}"
+        name = f"{dtype} D{d} pgd{block_size} sq{sq} sk{sk} swa{window}"
         assert torch.isfinite(paged_out).all(), f"{name}: read a NaN (unused) page"
         assert torch.equal(paged_out, dense_out), f"{name}: paged != dense bits"
         ref = _standard_reference(q, k, v, scale, sliding_window=window)
-        max_abs = (ref - paged_out.float()).abs().max().item()
+        # A row whose window holds no key has no SDPA reference (NaN); its output
+        # must be zero.
+        qi = torch.arange(sq, device="cuda").view(-1, 1)
+        ki = torch.arange(sk, device="cuda").view(1, -1)
+        keep = ki <= qi
+        if window:
+            keep &= ki > qi - window
+        live = keep.any(dim=1)
+        max_abs = (ref - paged_out.float())[:, live].abs().max().item()
         assert max_abs < _tolerance(dtype), f"{name}: max_abs={max_abs:.3e}"
+        if not live.all():
+            worst = paged_out.float()[:, ~live].abs().max().item()
+            assert worst == 0.0, f"{name}: {int((~live).sum())} keyless rows: {worst}"
 
 
 # Cross-length top-left (unshifted diagonal): sq < sk and sq > sk, ragged and
@@ -2866,6 +2923,54 @@ class TestDenseBandIndexTruthTable:
                 expected[p, :, visible] = 1.0 / len(visible)
         err = (out.float().cpu() - expected[None]).abs().max().item()
         assert err < 1e-2, f"max_abs={err:.3e}"
+
+
+class TestDenseRowIndependence:
+    """A row's output depends only on the keys that row sees.
+
+    Causal (top-left), Sq = Skv = S: key S-1 is visible to row S-1 only, which shares
+    a 32-row wave with rows S-32..S-2. K at that key is 1e4 * sign(Q of row S-1), so
+    row S-1's running max jumps far past the lazy-rescale threshold, and V there is
+    +-1e4. Every other row masks the key, so its output must not change by a single
+    bit. A wave-wide lazy-rescale decision breaks this: the jump makes every row of
+    the wave move its max and round differently.
+    """
+
+    @requires_gfx950_gpu
+    @pytest.mark.gpu
+    @pytest.mark.parametrize("window", [0, 128], ids=["causal", "causal_w128"])
+    @pytest.mark.parametrize("persistent", [False, True], ids=["grid", "persist"])
+    @pytest.mark.parametrize("d", [64, 128])
+    @pytest.mark.parametrize("dtype", ["bf16", "fp16"])
+    def test_rows_independent_of_wave_neighbours(self, dtype, d, persistent, window):
+        import torch
+
+        tdt = getattr(torch, _TORCH_DT[dtype])
+        B, S, H = 1, 512, 16
+        scale = 1.0 / math.sqrt(d)
+        torch.manual_seed(0)
+        q = torch.randn(B, S, H, d, device="cuda", dtype=tdt)
+        k = torch.randn(B, S, H, d, device="cuda", dtype=tdt)
+        v = torch.randn(B, S, H, d, device="cuda", dtype=tdt)
+        k_hot, v_hot = k.clone(), v.clone()
+        k_hot[:, S - 1] = 1e4 * torch.sign(q[:, S - 1])
+        v_hot[:, S - 1] = 1e4 * torch.sign(torch.randn_like(v[:, S - 1]))
+
+        spec = _spec(dtype, d, H, H, persistent, sq=S, sliding_window=window)
+        outs = []
+        for kk, vv in ((k, v), (k_hot, v_hot)):
+            out = torch.empty_like(q)
+            run_attention_dense_torch(spec=spec, q=q, k=kk, v=vv, out=out, scale=scale)
+            torch.cuda.synchronize()
+            outs.append(out)
+        base, hot = outs
+        assert torch.isfinite(hot).all(), "non-finite output"
+        assert not torch.equal(base[:, S - 1], hot[:, S - 1]), "key S-1 had no effect"
+        changed = (base[:, : S - 1] != hot[:, : S - 1]).any(dim=-1).nonzero()
+        assert changed.numel() == 0, (
+            f"{len(changed)} (row, head) pairs that mask key {S - 1} changed, rows "
+            f"{sorted(set(changed[:, 1].tolist()))}"
+        )
 
 
 if __name__ == "__main__":

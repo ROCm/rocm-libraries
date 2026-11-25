@@ -110,7 +110,11 @@ def _split_tree(tmp_path: Path) -> Path:
             ("sdpa_bwd_dq", {"role_order": "auto", "reduce_symbol": ""}),
         )
     ]
-    gen_descriptors._write(tmp_path, gen_descriptors.build_documents(rows, "gfx950"))
+    # Built against tmp_path, still empty: synthetic rows fingerprint their own engine id, and
+    # the shipped content files its trained models under the real one.
+    gen_descriptors._write(
+        tmp_path, gen_descriptors.build_documents(rows, "gfx950", tmp_path)
+    )
     return tmp_path
 
 
@@ -129,7 +133,7 @@ def test_a_slotted_engine_exposes_exactly_each_slots_tuning_fields(
     }
     # head_dim is an alternative of every slot (their tiles overlap).
     assert knobs == {
-        "prep": ["head_dim", "block_m"],
+        "prep": ["head_dim", "block_m", "vec_tail"],
         "dkdv": ["head_dim", "block_m", "waves_per_eu"],
         "dq": ["head_dim", "block_m", "role_order"],
     }
@@ -168,6 +172,38 @@ def test_an_unclassified_field_is_refused() -> None:
     with pytest.raises(gen_descriptors.HkpPackError, match="'new_flag'.*found in none"):
         gen_descriptors._fields_for_op(
             [_entry("sdpa_rdna", "sdpa_rdna_x", {"block_m": 64, "new_flag": 1})]
+        )
+
+
+def test_the_prep_schema_holds_vec_tail_whether_or_not_a_row_spells_it() -> None:
+    """The KMD of an op is one for every arch: a prep row of an arch that never sets ``vec_tail`` leaves it out and reads the default."""
+    row = {"head_dim": 64, "sink": 0, "grid": "g"}
+    plain = gen_descriptors._fields_for_op([_entry("sdpa_bwd_prep", "a", row)])
+    spelled = gen_descriptors._fields_for_op(
+        [
+            _entry("sdpa_bwd_prep", "a", row),
+            _entry("sdpa_bwd_prep", "b", {**row, "vec_tail": 1}),
+        ]
+    )
+    assert (
+        list(plain)
+        == list(spelled)
+        == ["dtype", "head_dim", "sink", "vec_tail", "grid"]
+    )
+    kmd = gen_descriptors.OpDescriptors(
+        "sdpa_bwd_prep", plain, ued="split-engine-id"
+    )._documents()
+    (fields,) = (d["fields"] for n, d in kmd.items() if n.endswith(".kmd.json"))
+    assert {f["name"]: f.get("default_value") for f in fields}["vec_tail"] == -1
+
+
+def test_a_row_may_leave_out_only_a_knob_that_has_a_default() -> None:
+    with pytest.raises(gen_descriptors.HkpPackError, match="one op is one schema"):
+        gen_descriptors._fields_for_op(
+            [
+                _entry("sdpa_bwd_prep", "a", {"head_dim": 64, "sink": 0}),
+                _entry("sdpa_bwd_prep", "b", {"head_dim": 64}),
+            ]
         )
 
 

@@ -171,22 +171,23 @@ protected:
 
     virtual void runGraphTest() = 0;
 
-    // Resolve tolerance for an output tensor via ToleranceResolver (max-across-nodes + TOML override).
-    float getTolerance(const hipdnn_frontend::graph::Graph& graph,
-                       const std::shared_ptr<hipdnn_frontend::graph::TensorAttributes>& output)
+    // Resolve tolerance for an output tensor via ToleranceResolver, with the TOML override.
+    tolerance::Tolerance
+        getTolerance(const hipdnn_frontend::graph::Graph& graph,
+                     const std::shared_ptr<hipdnn_frontend::graph::TensorAttributes>& output)
     {
         ToleranceMode mode = TestConfig::get().getToleranceMode();
         if(mode != ToleranceMode::DEFAULT)
         {
             ADD_FAILURE() << "getTolerance: unhandled tolerance mode";
-            return 0.0f;
+            return {0.0f, 0.0f};
         }
 
         auto [serialized, serErr] = graph.to_binary();
         if(serErr.code != hipdnn_frontend::ErrorCode::OK || serialized.empty())
         {
             ADD_FAILURE() << "getTolerance: graph serialization failed";
-            return 0.0f;
+            return {0.0f, 0.0f};
         }
 
         const auto wrapper
@@ -195,7 +196,7 @@ protected:
         if(!wrapper.isValid())
         {
             ADD_FAILURE() << "getTolerance: serialized graph failed verification";
-            return 0.0f;
+            return {0.0f, 0.0f};
         }
 
         const auto& tensorMap = wrapper.getTensorMap();
@@ -204,16 +205,13 @@ protected:
         {
             ADD_FAILURE() << "getTolerance: output tensor uid " << output->get_uid()
                           << " not found in serialized graph";
-            return 0.0f;
+            return {0.0f, 0.0f};
         }
 
-        float atol = 0.0f;
-        float rtol = 0.0f;
+        tolerance::Tolerance resolved{0.0f, 0.0f};
         tolerance::resolveTolerance(
-            wrapper, it->second->data_type(), currentTestName(), atol, rtol);
-        // getTolerance's single-float contract predates split atol/rtol; under the
-        // current resolver the two are equal (same default, same override).
-        return atol;
+            wrapper, it->second->data_type(), currentTestName(), resolved.atol, resolved.rtol);
+        return resolved;
     }
 
     // Delegates to the free hipdnn_integration_tests::checkEngineSupportOrSkip(),
@@ -280,6 +278,12 @@ protected:
         registerValidator(attr, tolerance, tolerance);
     }
 
+    void registerValidator(const std::shared_ptr<hipdnn_frontend::graph::TensorAttributes> attr,
+                           const tolerance::Tolerance& tolerance)
+    {
+        registerValidator(attr, tolerance.atol, tolerance.rtol);
+    }
+
     // Registers the comparison for one output tensor. allclose at the resolved
     // tolerance, unless the engine's TOML config names this tensor in a
     // [[validator_overrides]] entry — the only thing that can select a different
@@ -297,8 +301,11 @@ protected:
 
                 // One shared decision site for both harnesses: it picks the check and
                 // logs the one it picked.
-                const auto tolerance
-                    = gradingForTensor(testName, label, absoluteTolerance, relativeTolerance);
+                const auto tolerance = gradingForTensor(testName,
+                                                        label,
+                                                        TestConfig::get().testSettings(),
+                                                        absoluteTolerance,
+                                                        relativeTolerance);
 
                 auto selection = bundle::makeValidator(sdkDataType, label, tolerance, site);
                 auto [it, inserted] = _tensorValidationMap.insert(

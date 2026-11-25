@@ -7,6 +7,23 @@
 #include "HipKernelMath.hpp"
 #include "VectorTypes.hpp"
 
+// NOTE on bf16 rounding: narrowing casts to __bf16 in these kernels go through
+// hip_kernel_provider::cast<T> (VectorTypes.hpp), which does a plain static_cast with no custom
+// rounding logic - the actual rounding mode is whatever the compiler's native float->__bf16
+// conversion implements. MIOpen explicitly passes -DMIOPEN_USE_RNE_BFLOAT16 for its BatchNorm
+// kernel builds (PR #13998) so its device conversion round-to-nearest-even (RNE) matches its CPU
+// reference, since a plain truncating conversion would otherwise be a real mismatch.
+//
+// Empirically verified on this provider's actual mechanism (static_cast<__bf16>(float), no
+// compile-time fast-math/ffp-contract flags are set for these kernels) on gfx90a: the compiler's
+// native conversion already performs RNE, not truncation - confirmed against MIOpen's
+// float_to_bfloat16 RNE bit-manipulation oracle (bfloat16_dev.hpp) across round-half-to-even tie
+// cases (including a mean~1000 case matching this file's Welford fix), 0 mismatches. This matches
+// hipDNN's CPU reference (hipdnn_data_sdk::types::bfloat16, which defaults to RNE). So no RNE
+// compile-define/kernel change is needed here; if this provider's minimum compiler version or
+// -ffast-math-style flags ever change, re-verify this empirically rather than assuming it still
+// holds, since native-cast rounding behavior isn't guaranteed by the language standard. Verified
+// only on gfx90a - gfx942/gfx1201 are presumed to use the same codegen path but are unconfirmed.
 namespace hip_kernel_provider::batchnorm
 {
 
@@ -147,11 +164,11 @@ __forceinline__ __device__ unsigned int getStashIndex(unsigned int vindex,
         // 2 _FLOAT values are used to store 1 _FLOAT_PREC value.
         if constexpr(hip_kernel_provider::config::layout_channel_last)
         {
-            if constexpr(config::channels % 2 == 0)
+            if constexpr((config::channels / config::vec_size_x) % 2 == 0)
             {
                 // xgrp_size values are split in two parts: even threads use 2 values at even rows,
-                // odd threads - at odd rows. The only restriction for C and xgrp_size is that they
-                // must be even.
+                // odd threads - at odd rows. The only restriction for C / vec_size_x and xgrp_size
+                // is that they must be even. Must match the parity test in getStashMethod.
                 return zgroupoffset * (config::channels / config::vec_size_x * config::spatial_size)
                        + (vindex * 2 + xlid % 2) * batchStride + ygroupoffset * ystride
                        + (xgrp_size * xgrp_id + xlid / 2 * 2) * xstride;
@@ -181,11 +198,11 @@ __forceinline__ __device__ unsigned int getStashIndex(unsigned int vindex,
         // 2 _FLOAT values are used to store 1 _FLOAT_PREC value.
         if constexpr(hip_kernel_provider::config::layout_channel_last)
         {
-            if constexpr(config::channels % 2 == 0)
+            if constexpr((config::channels / config::vec_size_x) % 2 == 0)
             {
                 // xgrp_size values are split in two parts: even threads use 2 values at even rows,
-                // odd threads - at odd rows. The only restriction for C and xgrp_size is that they
-                // must be even.
+                // odd threads - at odd rows. The only restriction for C / vec_size_x and xgrp_size
+                // is that they must be even. Must match the parity test in getStashMethod.
                 return zgroupoffset * (config::channels / config::vec_size_x * config::spatial_size)
                        + (vindex * 2 + xlid % 2) * batchStride + ygroupoffset * ystride
                        + (xgrp_size * xgrp_id + xlid / 2 * 2) * xstride;

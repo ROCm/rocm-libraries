@@ -3,6 +3,8 @@
 
 #pragma once
 
+#include <algorithm>
+#include <cmath>
 #include <cstdint>
 #include <memory>
 #include <stdexcept>
@@ -61,6 +63,29 @@ struct FillRecipe
     static FillRecipe values(std::vector<double> numbers, bool repeat = true)
     {
         return valuesOf(ValueList(std::move(numbers)), repeat);
+    }
+
+    /// Largest magnitude a draw from this recipe can have.
+    float maxMagnitude() const
+    {
+        if(kind == Kind::FIXED)
+        {
+            return std::fabs(value);
+        }
+        if(kind == Kind::VALUES && list != nullptr)
+        {
+            return std::visit(
+                [](const auto& numbers) {
+                    float magnitude = 0.0f;
+                    for(const auto number : numbers)
+                    {
+                        magnitude = std::max(magnitude, std::fabs(static_cast<float>(number)));
+                    }
+                    return magnitude;
+                },
+                *list);
+        }
+        return std::max(std::fabs(lo), std::fabs(hi));
     }
 
     friend bool operator==(const FillRecipe& a, const FillRecipe& b)

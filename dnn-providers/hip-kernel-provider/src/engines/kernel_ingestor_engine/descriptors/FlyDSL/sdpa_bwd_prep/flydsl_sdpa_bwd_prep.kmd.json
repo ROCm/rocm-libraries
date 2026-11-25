@@ -48,6 +48,11 @@
       "type": "int"
     },
     {
+      "name": "vec_tail",
+      "type": "int",
+      "default_value": -1
+    },
+    {
       "name": "grid",
       "type": "string"
     }

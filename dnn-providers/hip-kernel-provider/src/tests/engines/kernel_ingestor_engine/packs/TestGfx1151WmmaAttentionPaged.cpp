@@ -775,6 +775,14 @@ TEST(TestGfx1151WmmaAttentionPaged, LogsTheCauseOfEachDecline)
         s.extraAttributes = [](Builder& attributes) { attributes.add_dropout_probability(0.1F); };
     });
     add("block_mask", "feature", "a block mask", setting(&Builder::add_block_mask_tensor_uid));
+    add("cu_seq_len_q",
+        "varlen",
+        "cu_seq_len_q and cu_seq_len_kv are not implemented",
+        setting(&Builder::add_cu_seq_len_q_tensor_uid));
+    add("cu_seq_len_kv",
+        "varlen",
+        "cu_seq_len_q and cu_seq_len_kv are not implemented",
+        setting(&Builder::add_cu_seq_len_kv_tensor_uid));
     add("max", "feature", "max / sum_exp outputs", setting(&Builder::add_max_tensor_uid));
     add("sum_exp", "feature", "max / sum_exp outputs", setting(&Builder::add_sum_exp_tensor_uid));
     for(const auto implementation : {data_objects::AttentionImplementation::COMPOSITE,

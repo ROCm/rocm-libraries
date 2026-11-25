@@ -27,6 +27,7 @@
 #include <hipdnn_data_sdk/utilities/EngineNames.hpp>
 #include <hipdnn_data_sdk/utilities/PathSanitizer.hpp>
 #include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
+#include <hipdnn_flatbuffers_sdk/utilities/Uuid.hpp>
 #include <hipdnn_frontend/Error.hpp>
 #include <hipdnn_frontend/Graph.hpp>
 #include <hipdnn_frontend/attributes/TensorAttributes.hpp>
@@ -48,6 +49,8 @@
 #include "../IntegrationGraphVerificationHarness.hpp"
 #include "ScopedPluginLogCapture.hpp"
 #include "engines/kernel_ingestor_engine/packs/SdpaLayoutTestSupport.hpp"
+#include "tests/engines/kernel_ingestor_engine/packs/RankingTraceSupport.hpp"
+#include "tests/engines/kernel_ingestor_engine/packs/UnpulledModelsRecord.hpp"
 
 namespace hip_kernel_provider::kernel_ingestor_engine::integration
 {
@@ -205,10 +208,10 @@ inline std::string setProviderDgradBatchChunkByteLimit(int64_t limit)
     return {};
 }
 
-// The loaded provider's count of hipkernel:Gfx950ConvDgradAot implicit-GEMM launches, one
-// per batch slice (exported as
-// hipdnnEnginePluginConvDgradAotImplicitLaunchCountForTesting). Writes a
-// description of the failure to error and returns -1 if the hook is not there.
+// The loaded provider's count of hipkernel:Gfx950ConvDgradAot and hipkernel:Gfx1250ConvDgradAot
+// implicit-GEMM launches, one per batch slice (exported as
+// hipdnnEnginePluginConvDgradAotImplicitLaunchCountForTesting). Writes a description of
+// the failure to error and returns -1 if the hook is not there.
 inline int64_t providerDgradImplicitLaunchCount(std::string& error)
 {
     const auto pluginPath = loadedProviderPluginPath();
@@ -411,6 +414,50 @@ inline std::optional<std::string>
     return std::nullopt;
 }
 
+// Who ordered that engine's catalog (RankingTraceSupport.hpp), read from @p recorder.
+inline std::optional<std::string>
+    rankingDecidedBy(const ServedEngine& engine,
+                     const hipdnn_test_sdk::utilities::IsolatedLogRecorder& recorder)
+{
+    return testing::rankingDecidedBy(engine.name, recorder.getRecordedLogs());
+}
+
+// Whether every trained ranker that engine's UED binds for its arch was left out of the
+// production pack because its model.bin was never pulled, as the pack's skip record says.
+inline bool boundRankerLeftOutAsUnpulled(const ServedEngine& engine)
+{
+    const std::filesystem::path root
+        = hipdnn_data_sdk::utilities::getEnv("HIPDNN_DESCRIPTOR_RUNTIME_DIR");
+    if(root.empty())
+    {
+        return false;
+    }
+    for(const auto& entry : runtimeCatalog().engines)
+    {
+        const auto& ued = entry.second.descriptor;
+        if(ued.name != engine.name)
+        {
+            continue;
+        }
+        const auto bound = ued.sortKernelCatalog.find(engine.arch);
+        if(bound == ued.sortKernelCatalog.end() || bound->second.empty())
+        {
+            return false;
+        }
+        for(const auto& id : bound->second)
+        {
+            const auto uhd = hipdnn_flatbuffers_sdk::utilities::formatUuid(id);
+            if(!testing::unpulledRecordNames(root / engine.arch, uhd)
+               && !testing::unpulledRecordNames(root, uhd))
+            {
+                return false;
+            }
+        }
+        return true;
+    }
+    return false;
+}
+
 // Prints `KNOB_SELECTED <case> <kernelId>` when the case ends, however it ends, so a run's
 // log carries the selected kernel of every case, including a failing one.
 class SelectedKernelReport
@@ -581,6 +628,9 @@ struct IngestorSdpaGraphSpec
     // The layouts of K and V. Q and O are BSHD.
     SdpaLayout kLayout = SdpaLayout::BSHD;
     SdpaLayout vLayout = SdpaLayout::BSHD;
+    // K and V are one tensor (one descriptor, one buffer), so the graph has three unique
+    // inputs instead of four. vLayout is ignored.
+    bool sharedKv = false;
 };
 
 struct SdpaGraph
@@ -672,14 +722,15 @@ inline SdpaGraph buildSdpaGraph(const std::string& name, const IngestorSdpaGraph
                             shape.seqKv,
                             shape.headSize,
                             shape.kLayout);
-    auto v = makeSdpaTensor(V_UID,
-                            "V",
-                            shape.dataType,
-                            shape.batch,
-                            shape.kvHeads,
-                            shape.seqKv,
-                            shape.headSize,
-                            shape.vLayout);
+    auto v = shape.sharedKv ? k
+                            : makeSdpaTensor(V_UID,
+                                             "V",
+                                             shape.dataType,
+                                             shape.batch,
+                                             shape.kvHeads,
+                                             shape.seqKv,
+                                             shape.headSize,
+                                             shape.vLayout);
 
     hipdnn_frontend::graph::SdpaAttributes attributes;
     attributes.set_name(name);

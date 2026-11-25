@@ -829,7 +829,7 @@ void testing_spmm(const Arguments& arg)
     {
         if(arg.initialization == hipsparselt_initialization::rand_int)
         {
-            hipsparselt_init<Ti>(hA, A_row_r, A_col_r, lda, stride_a, num_batches);
+            hipsparselt_init_idx<Ti>(hA, A_row_r, A_col_r, lda, stride_a, num_batches);
             hipsparselt_init_alternating_sign<Ti>(hB, B_row_r, B_col_r, ldb, stride_b, num_batches);
         }
         else if(arg.initialization == hipsparselt_initialization::trig_float)
@@ -856,7 +856,7 @@ void testing_spmm(const Arguments& arg)
     else
     {
         if(arg.initialization == hipsparselt_initialization::rand_int)
-            hipsparselt_init<To>(hC, C_row_r, C_col_r, ldc, stride_c, num_batches);
+            hipsparselt_init_idx<To>(hC, C_row_r, C_col_r, ldc, stride_c, num_batches);
         else if(arg.initialization == hipsparselt_initialization::trig_float)
             hipsparselt_init_sin<To>(hC, C_row_r, C_col_r, ldc, stride_c, num_batches);
         else if(arg.initialization == hipsparselt_initialization::hpl)
@@ -1491,7 +1491,7 @@ void testing_aux_plan_assign(const Arguments& arg)
     {
         if(arg.initialization == hipsparselt_initialization::rand_int)
         {
-            hipsparselt_init<Ti>(hA, A_row, A_col, lda, stride_a, num_batches);
+            hipsparselt_init_idx<Ti>(hA, A_row, A_col, lda, stride_a, num_batches);
             hipsparselt_init_alternating_sign<Ti>(hB, B_row, B_col, ldb, stride_b, num_batches);
         }
         else if(arg.initialization == hipsparselt_initialization::trig_float)
@@ -1518,7 +1518,7 @@ void testing_aux_plan_assign(const Arguments& arg)
     else
     {
         if(arg.initialization == hipsparselt_initialization::rand_int)
-            hipsparselt_init<To>(hC, M, N, ldc, stride_c, num_batches);
+            hipsparselt_init_idx<To>(hC, M, N, ldc, stride_c, num_batches);
         else if(arg.initialization == hipsparselt_initialization::trig_float)
             hipsparselt_init_sin<To>(hC, M, N, ldc, stride_c, num_batches);
         else if(arg.initialization == hipsparselt_initialization::hpl)

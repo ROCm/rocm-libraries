@@ -23,7 +23,7 @@ This module records the policy; which (tile, schedule, feature) combinations the
 
 from dataclasses import dataclass, fields, replace
 
-from kernels.attention_bwd_cdna.fmha_f32_common_gfx950 import Family
+from kernels.attention_bwd_cdna.fmha_f32_common_gfx950 import ARCHES, Family
 
 __all__ = [
     "BwdDkDvInputMetadata",
@@ -39,6 +39,9 @@ __all__ = [
 
 # The fp32 ladder: the 16-bit ladder without 384 (hd 257..512 rides t512).
 FP32_LADDER = (32, 64, 96, 128, 160, 192, 224, 256, 512)
+
+# gfx90a has no 64-bit-pointer `global_load_lds`, and the buffer-resource staging of a padded object is bounded by `slab_span`, which an exact object does not have.
+EXACT_REFUSED_GFX90A = "gfx90a stages fp32 tiles through buffer resources only: an exact-head (unpadded) fp32 object is refused, build the padded one"
 
 # Geometry of an unpinned Spec.
 DEFAULT_BLOCK_Q = 32
@@ -142,6 +145,9 @@ class BwdDkDvInputMetadata:
 class BwdDkDvKnobs:
     """How to compute it. `None` means "policy decides"; `resolve` fills every field. A pin must equal what the table gives for the (tile, geometry)."""
 
+    arch: str | None = (
+        None  # `fmha_f32_common_gfx950.ARCHES`: the DMA width, LDS cap and half-head tiles of the family; set by `bwd_dkdv_knobs`
+    )
     block_dmodel: int | None = None
     block_dmodel_v: int | None = None
     padded_head: bool | None = None
@@ -226,6 +232,8 @@ class BwdDkDvKnobs:
         padded_head = self.padded_head
         if padded_head is None:
             padded_head = meta.head_dim != block_dmodel or head_dim_v != block_dmodel_v
+        if self._arch() == "gfx90a" and not padded_head:
+            raise ValueError(EXACT_REFUSED_GFX90A)
         # the floor of a pinned tile is 0 unless the Spec names one; the one floor covers the QK and the VO side, and a build promises both head dims above it
         hdim_qk_floor = 0 if self.hdim_qk_floor is None else self.hdim_qk_floor
         if not 0 <= hdim_qk_floor < block_dmodel:
@@ -269,6 +277,13 @@ class BwdDkDvKnobs:
                 )
         return replace(self, **derived)
 
+    def _arch(self):
+        if self.arch is None:
+            raise ValueError(
+                "knobs carry no arch: build them with `bwd_dkdv_knobs(arch, ...)`"
+            )
+        return self.arch
+
     def family(self):
         """The layout parameters of the resolved variant (`fmha_f32_common_gfx950.Family`)."""
         if self.schedule is None:
@@ -276,12 +291,17 @@ class BwdDkDvKnobs:
                 "knobs must be resolved: call `bwd_dkdv_knobs(...).resolve(meta)` first"
             )
         return Family(
-            "dkdv", self.block_dmodel, self.block_q, self.schedule, self.num_waves
+            "dkdv",
+            self.block_dmodel,
+            self.block_q,
+            self.schedule,
+            self.num_waves,
+            self._arch(),
         )
 
 
 def bwd_dkdv_knobs(arch="gfx950", **overrides):
     """Knobs for `arch`, with `overrides` pinned. Mirrors `fmha_tuning_bwd_dkdv_gfx950.bwd_dkdv_knobs`."""
-    if arch != "gfx950":
-        raise ValueError(f"this tuning module is gfx950-only, got {arch!r}")
-    return BwdDkDvKnobs(**overrides)
+    if arch not in ARCHES:
+        raise ValueError(f"arch {arch!r} is not one of {ARCHES}")
+    return BwdDkDvKnobs(arch=arch, **overrides)

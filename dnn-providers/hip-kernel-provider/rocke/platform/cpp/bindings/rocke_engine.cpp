@@ -747,7 +747,6 @@ rocke_mx_gemm_spec_t mx_build_spec(const py::dict& d, std::deque<std::string>& s
     s.group_k = dict_int(d, "group_k", s.group_k);
     s.block_tile_m = dict_int(d, "block_tile_m", s.block_tile_m);
     s.block_tile_n = dict_int(d, "block_tile_n", s.block_tile_n);
-    s.per_input_row = dict_bool(d, "per_input_row", s.per_input_row);
     {
         std::string v;
         if(dict_str(d, "mantissa_dtype", v))

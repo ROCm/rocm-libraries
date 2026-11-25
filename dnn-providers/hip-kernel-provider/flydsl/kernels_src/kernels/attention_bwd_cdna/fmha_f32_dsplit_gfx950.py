@@ -53,6 +53,7 @@ from kernels.attention_bwd_cdna.fmha_f32_common_gfx950 import (  # noqa: E402
     mfma_dot_panel,
     scores_block,
     stage_panel,
+    stage_panel_rsrc,
     stage_row_off,
     stg_v4_masked,
     store_resident_panels,
@@ -106,6 +107,8 @@ class DSplitDkDv(_Exchange):
         self.W = fam.waves
         self.rb = fam.rb
         self.dsu = fam.dsu
+        self.dsu_h = fam.dsu_h
+        self.halves = fam.halves
         self.np_lds = fam.panels_lds
         self.tile_f = self.np_lds * self.rb * CHUNK_STRIDE
         self.part_base = 2 * self.tile_f
@@ -128,12 +131,12 @@ class DSplitDkDv(_Exchange):
         return bx * PANEL
 
     def p0(self, wave):
-        """First panel (head-dim panel index and LDS panel index) of `wave`'s slice."""
+        """First head-dim panel of `wave`'s slice (its LDS panel index is `slot0` / `wave * dsu_h + pl` under halves)."""
         return wave * self.dsu
 
     def slot0(self, wave):
         """LDS word offset of the wave's first panel in a staged tensor tile."""
-        return self.p0(wave) * self.rb * CHUNK_STRIDE
+        return wave * self.fam.dsu_h * self.rb * CHUNK_STRIDE
 
     def init_acc(self, ops):
         return [ops.zero(4) for _ in range(self.dsu)], [
@@ -180,9 +183,11 @@ class DSplitDkDv(_Exchange):
         mv=None,
         q_span=None,
         do_span=None,
+        h=0,
     ):
         """Stage this wave's slice of the q tile starting at row `q0` (rows clamped to `q_last`): global->LDS DMA, skipped for panels past the head
-        dim; with a padded-head-dim mask `mq` / `mv` a bounded buffer DMA over the slab (`q_span` / `do_span` = `slab_span`).
+        dim; with a padded-head-dim mask `mq` / `mv` a bounded buffer DMA over the slab (`q_span` / `do_span` = `slab_span`). `h`: the half of the
+        slice (panels `[h dsu_h, (h + 1) dsu_h)`) staged into the wave's `dsu_h`-panel buffer when `Family.halves` is 2.
         """
         p0 = self.p0(L.wave)
         qro = [
@@ -193,11 +198,13 @@ class DSplitDkDv(_Exchange):
             stage_row_off(ops, q0 + PANEL * r, q_last, stride_do, L.lane)
             for r in range(self.rb)
         ]
-        for pl in range(self.dsu):
-            p = p0 + pl
+        for pl in range(self.dsu_h):
+            p = p0 + (h * self.dsu_h + pl)
             owned = (p < self.fam.panels_total) if self.fam.uneven else None
             for r in range(self.rb):
-                idx = p * self.rb + r
+                idx = (
+                    p if self.halves == 1 else L.wave * self.dsu_h + pl
+                ) * self.rb + r
                 stage_panel(
                     ops,
                     "Q",
@@ -242,6 +249,49 @@ class DSplitDkDv(_Exchange):
             S.append(sa)
             Pd.append(da)
         return S, Pd
+
+    def scores_halves(self, ops, L, K, V, stage_h, mq=None, mv=None):
+        """`scores` with the slice staged in `halves` passes: stage pass h (`stage_h(h)`), wait, accumulate its panels onto the running (S, dP).
+        The panel order is the unhalved chain's, so the partials equal `scores`'."""
+        S = [ops.zero(4) for _ in range(self.rb)]
+        Pd = [ops.zero(4) for _ in range(self.rb)]
+        n = self.dsu_h
+        for h in range(self.halves):
+            if h:
+                ops.wait_lds()  # this wave's reads of the previous half precede the DMA that overwrites it (a wave's slice is private: no barrier)
+            stage_h(h)
+            ops.wait_dma()
+            for s in range(self.rb):
+                S[s], Pd[s] = scores_block(
+                    ops,
+                    L,
+                    self.slot0(L.wave),
+                    s,
+                    self.rb,
+                    n,
+                    self.tile_f,
+                    K[h * n : (h + 1) * n],
+                    V[h * n : (h + 1) * n],
+                    self.p0(L.wave) + h * n,
+                    mq,
+                    mv,
+                    (S[s], Pd[s]),
+                )
+        return S, Pd
+
+    def accumulate_halves(self, ops, L, Pm, dS, dK, dV, stage_h):
+        """`accumulate` over the halves: the last staged half first, then the others re-staged one by one (`stage_h(h)`)."""
+        n = self.dsu_h
+        for h in reversed(range(self.halves)):
+            if h != self.halves - 1:
+                ops.wait_lds()
+                stage_h(h)
+                ops.wait_dma()
+            dKh, dVh = dK[h * n : (h + 1) * n], dV[h * n : (h + 1) * n]
+            accumulate_cols(
+                ops, L, self.slot0(L.wave), self.rb, n, self.tile_f, Pm, dS, dKh, dVh
+            )
+            dK[h * n : (h + 1) * n], dV[h * n : (h + 1) * n] = dKh, dVh
 
     def exchange(self, ops, L, S, Pd):
         """Sum the W partials: returns (S[s], dP[s]) complete, in the per-wave schedule's accumulator layout."""
@@ -307,6 +357,8 @@ class DSplitDq(_Exchange):
         self.rb = fam.rb
         self.bq = fam.bq
         self.dsu = fam.dsu
+        self.dsu_h = fam.dsu_h
+        self.halves = fam.halves
         self.np_lds = fam.panels_lds
         self.tile_f = (
             self.np_lds * CHUNK_STRIDE
@@ -330,7 +382,7 @@ class DSplitDq(_Exchange):
         return wave * self.dsu
 
     def slot0(self, wave):
-        return self.p0(wave) * CHUNK_STRIDE
+        return wave * self.dsu_h * CHUNK_STRIDE
 
     def q_row(self, L):
         """Offset from the workgroup's first q row of the q row whose accumulator column / B-operand column the lane holds: m at `block_m` 16,
@@ -395,34 +447,37 @@ class DSplitDq(_Exchange):
         v_span=None,
         k_rsrc=None,
         v_rsrc=None,
+        h=0,
     ):
         """Stage this wave's K / V slice of the 16 KV rows starting at `k0` (rows clamped to `k_last`); with `mq` / `mv` a bounded buffer DMA
         over the slab: through a resource built per panel from `k_span` / `v_span` (`slab_span`), or through `k_rsrc` / `v_rsrc` (`ops.buf_rsrc`,
-        built once outside the loop; they win over the spans)."""
+        built once outside the loop; they win over the spans). `h`: the half of the slice staged into the `dsu_h`-panel buffer (`Family.halves` 2).
+        """
         p0 = self.p0(L.wave)
         kro = stage_row_off(ops, k0, k_last, stride_k, L.lane)
         vro = stage_row_off(ops, k0, k_last, stride_v, L.lane)
-        for pl in range(self.dsu):
-            p = p0 + pl
+        for pl in range(self.dsu_h):
+            p = p0 + (h * self.dsu_h + pl)
+            pa = p if self.halves == 1 else L.wave * self.dsu_h + pl
             owned = (p < self.fam.panels_total) if self.fam.uneven else None
             if k_rsrc is not None:
-                ops.dma_rsrc(
-                    k_rsrc,
-                    kro + ops.i64(p * PANEL + (L.lane % 4) * 4),
-                    chunk_off(p),
-                    owned,
+                stage_panel_rsrc(
+                    ops, k_rsrc, chunk_off(pa), kro, p * PANEL, L.lane, owned
                 )
-                ops.dma_rsrc(
+                stage_panel_rsrc(
+                    ops,
                     v_rsrc,
-                    vro + ops.i64(p * PANEL + (L.lane % 4) * 4),
-                    self.tile_f + chunk_off(p),
+                    self.tile_f + chunk_off(pa),
+                    vro,
+                    p * PANEL,
+                    L.lane,
                     owned,
                 )
                 continue
             stage_panel(
                 ops,
                 "K",
-                chunk_off(p),
+                chunk_off(pa),
                 k_base,
                 kro,
                 p * PANEL,
@@ -433,7 +488,7 @@ class DSplitDq(_Exchange):
             stage_panel(
                 ops,
                 "V",
-                self.tile_f + chunk_off(p),
+                self.tile_f + chunk_off(pa),
                 v_base,
                 vro,
                 p * PANEL,
@@ -457,6 +512,45 @@ class DSplitDq(_Exchange):
                 S[s] = mfma_dot_panel(ops, S[s], ka, Q[s][c])
                 Pd[s] = mfma_dot_panel(ops, Pd[s], va, DO[s][c])
         return S, Pd
+
+    def scores_halves(self, ops, L, Q, DO, stage_h, mq=None, mv=None):
+        """`scores` with the K / V slice staged in `halves` passes (`stage_h(h)`); the panel order, hence the partials, equal `scores`'."""
+        S = [ops.zero(4) for _ in range(self.rb)]
+        Pd = [ops.zero(4) for _ in range(self.rb)]
+        a = a_read(L.lane)
+        n = self.dsu_h
+        for h in range(self.halves):
+            if h:
+                ops.wait_lds()  # this wave's reads of the previous half precede the DMA that overwrites it (a wave's slice is private: no barrier)
+            stage_h(h)
+            ops.wait_dma()
+            p = self.p0(L.wave) + h * n
+            for c in range(n):
+                off = self.slot0(L.wave) + chunk_off(c) + a
+                ka = mask_a(ops, ops.lds_ld(off, 4), p, c, L.g, mq)
+                va = mask_a(ops, ops.lds_ld(off + self.tile_f, 4), p, c, L.g, mv)
+                for s in range(self.rb):
+                    S[s] = mfma_dot_panel(ops, S[s], ka, Q[s][h * n + c])
+                    Pd[s] = mfma_dot_panel(ops, Pd[s], va, DO[s][h * n + c])
+        return S, Pd
+
+    def accumulate16_halves(self, ops, L, acc, dS, stage_h):
+        """`accumulate16` over the halves: the last staged half first, then the others re-staged one by one (`stage_h(h)`)."""
+        n = self.dsu_h
+        for h in reversed(range(self.halves)):
+            if h != self.halves - 1:
+                ops.wait_lds()
+                stage_h(h)
+                ops.wait_dma()
+            for t in range(n):
+                for i in range(4):
+                    acc[h * n + t] = ops.mfma16(
+                        ops.lds_ld(
+                            self.slot0(L.wave) + chunk_off(t) + col_read(L.lane, i), 1
+                        ),
+                        dS[i],
+                        acc[h * n + t],
+                    )
 
     def ds_operands16(self, ops, L, S, Pd):
         """(`block_m` 16) Exchange, then (S sum, dP sum) V4 at the lane's own position: element i = KV row g + 4 i, q column m, which is
