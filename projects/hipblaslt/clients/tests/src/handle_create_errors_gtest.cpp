@@ -44,8 +44,8 @@ namespace
     // HIP refuses hipMalloc and hipFree while a stream captures in global mode,
     // so both calls fail inside the library. A destroy that failed leaves the
     // handle valid, and destroying it again after the capture must succeed.
-    // Direct hipMalloc and hipFree calls after the library's decide whether this
-    // runtime refuses them, so a library that hides the failure cannot skip.
+    // Direct hipMalloc and hipFree calls after the library calls decide whether
+    // this runtime refuses them, so a library that hides the failure cannot skip.
     void createAndDestroyWhileCapturingAndExit()
     {
         hipblasLtHandle_t handle = nullptr;
