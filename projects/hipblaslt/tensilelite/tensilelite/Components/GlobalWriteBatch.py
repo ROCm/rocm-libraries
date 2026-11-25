@@ -23,14 +23,14 @@
 from ..ExecutionPolicy import isPersistent
 from rocisa.code import Label, Module, RegSet, TextBlock
 from rocisa.container import SMEMModifiers, VOP3PModifiers, MUBUFModifiers, GLOBALModifiers, \
-  SDWAModifiers, replaceHolder, EXEC, VCC, vgpr, sgpr, ContinuousRegister, mgpr, MemTokenData
+  DPPModifiers, SDWAModifiers, replaceHolder, EXEC, VCC, vgpr, sgpr, ContinuousRegister, mgpr, MemTokenData
 from rocisa.enum import CvtType, HighBitSel, RoundType, SaturateCastType, SelectBit, CacheScope
 from rocisa.instruction import BufferAtomicAddF32, BufferAtomicCmpswapB32, \
   BufferAtomicPkAddBF16, GlobalLoadB32, GlobalStoreB32, SLoadB128, \
   BufferAtomicCmpswapB64, BufferStoreB16, BufferStoreB32, BufferStoreB64, BufferStoreB128, \
   DSBPermuteB32, FlatAtomicCmpswapB32, \
   SAddCU32, SAddU32, SAddU64, SAndB32, \
-  SAndB64, SAtomicDec, SAtomicInc, SBarrier, SBfmB32, SBfmB64, SBranch, SCBranchExecNZ, SCBranchExecZ, \
+  SAndB64, SAtomicDec, SAtomicInc, SBarrier, SBitcmp1B32, SBfmB32, SBfmB64, SBranch, SCBranchExecNZ, SCBranchExecZ, \
   SCBranchSCC0, SCBranchSCC1, SCBranchVCCNZ, SCmpGtU32, SCmpKGtU32, SCSelectB32, SCmpEQI32, SCmpEQU32, SCmpGtI32, SCmpLeI32, SCmpLeU32, SMinU32, SEndpgm, \
   SLShiftLeftB32, SLShiftLeftB64, SLShiftRightB32, SLShiftRightB64, SMovB32, SMovB64, SMulHIU32, SMulI32, \
   SNop, SOrB32, SOrB64, SOrSaveExecB32, SOrSaveExecB64, SSleep, SSubI32, SSubU32, \
@@ -66,6 +66,12 @@ from math import ceil, log2, gcd
 # v_permlane32_swap x2` with a two-`v_permlane16_swap` shuffle on eligible gfx950
 # paired dwordx4 stores. This changes the cross-lane assembly AND the per-lane store
 # row address. Orphan/scalar stores use a separate, already LDS-free path.
+def storeCachelineAlignEnabled(kernel) -> bool:
+    """The StoreCachelineAlign solution parameter: two paired 16-bit stores that are the two
+    halves of the same 128B lines are blended so each store writes full lines."""
+    return bool(kernel.get("StoreCachelineAlign", False))
+
+
 def plsinStorePermlane16Active(kernel, weaveGroups) -> bool:
     """Whether this store emission uses the ``v_permlane16_swap`` shuffle.
 
@@ -73,7 +79,10 @@ def plsinStorePermlane16Active(kernel, weaveGroups) -> bool:
     the exception: its serial store (plain NLL / post-loop / Lend fused) has
     only ``s_nop 0`` between ``buffer_store_dwordx4`` (reads ``vPack``) and the
     next pair's ``v_cvt_pk``, which is not a reliable WAR fence. Keep
-    ``ds_bpermute`` + ``s_waitcnt`` on those arms.
+    ``ds_bpermute`` + ``s_waitcnt`` on those arms -- unless the store cacheline align is on:
+    the cacheline align needs the permlane16 layout, so those arms take it too and the fence
+    is widened to the two wait states a dwordx4 store's data registers require
+    (``serialStoreFenceWaitStates``).
 
     Fused PLSIN Weave is eligible: last-K MFMAs sit in the pair gaps, so the
     next convert cannot overwrite ``vPack`` until the store has latched.
@@ -88,9 +97,25 @@ def plsinStorePermlane16Active(kernel, weaveGroups) -> bool:
         return False
     if kernel.get("MatrixInstM") != 16:
         return False
-    if kernel.get("MacroTile0") == 320 and kernel.get("MacroTile1") == 256:
-        return weaveGroups is not None
+    if _isSerialFenceTile(kernel):
+        return weaveGroups is not None or storeCachelineAlignEnabled(kernel)
     return True
+
+
+def _isSerialFenceTile(kernel) -> bool:
+    return kernel.get("MacroTile0") == 320 and kernel.get("MacroTile1") == 256
+
+
+def serialStoreFenceWaitStates(kernel, weaveGroups) -> int:
+    """Wait states between a paired ``buffer_store_dwordx4`` and the next pair's
+    convert into the same pack quad. One everywhere develop already uses permlane16;
+    two where only the store cacheline align put the serial store on it. Gated on
+    ``plsinStorePermlane16Active`` (ISA (9,5,0)) so the widened fence stays on the
+    gfx950 cacheline align path -- off gfx950 the serial store keeps ds_bpermute and never needs it."""
+    if (_isSerialFenceTile(kernel) and weaveGroups is None and storeCachelineAlignEnabled(kernel)
+            and plsinStorePermlane16Active(kernel, weaveGroups)):
+        return 2
+    return 1
 
 
 def _scmpGtU32(writer, src, imm, comment=""):
@@ -2660,6 +2685,9 @@ class GlobalWriteBatchWriter:
               else:
                 if _weavePairIdx is not None and self._weaveMfmaGroups() is not None:
                   tmpStoreCode = self._emit16bitSubtilePairedStoreWoven(partnerAddrCalc, sumIdx0, sumIdx1, prefixOffset, _weavePairIdx, tt0 - 1, blockIdxM=blockIdxM, blockIdxN=blockIdxN, forceSlc=fusedA2APushPass)
+                elif self._stagedCachelineAlignActive():
+                  tmpStoreCode = self._emitStagedCachelineAlignPair(partnerAddrCalc, sumIdx0, sumIdx1, prefixOffset, tt0 - 1,
+                                                          blockIdxM, blockIdxN, fusedA2APushPass)
                 else:
                   tmpStoreCode = self._emit16bitSubtilePairedStore(partnerAddrCalc, sumIdx0, sumIdx1, prefixOffset, tt0 - 1, blockIdxM=blockIdxM, blockIdxN=blockIdxN, forceSlc=fusedA2APushPass)
                 storeCodeModule.add(tmpStoreCode)
@@ -3873,6 +3901,10 @@ class GlobalWriteBatchWriter:
     Must be called once after all elements have been emitted to close out the last
     N group and anchor the N-cbranch target past all stores.
     """
+    # Staged store cacheline align: a held pair whose line partner never arrived is stored as is.
+    if (getattr(self.parentWriter.states, "subtileStagedHold", None) is not None
+        and self.batchIdx >= self.numBatches - 1):
+      targetModule.add(self._flushStagedHold())
     if self._subtileNGroupSkipLabel is not None:
       targetModule.add(self._subtileNGroupSkipLabel)
       self._subtileNGroupSkipLabel = None
@@ -4117,6 +4149,56 @@ class GlobalWriteBatchWriter:
       self._weaveEmitGroup(module, q)
 
   def _buildSubtileInteriorStores(self, forceSlc: bool = False) -> Module:
+    """The guard-free interior store body, see _buildSubtileInteriorStoreBody.
+
+    The store cacheline align pairs the two halves of the same 128B lines. When a wave is an odd
+    number of half-lines tall (MIWaveTile[0] % 4 == 2), waves alternate between starting
+    on a line and starting mid-line, so one fixed pairing is aligned in every other wave
+    only. Emit the body once per alignment and let each wave pick its own at run time."""
+    sel = self._cachelineAlignLineStartSelector() if self._plainCachelineAlignActive() else None
+    if sel is None:
+      return self._buildSubtileInteriorStoreBody(forceSlc, self._cachelineAlignLineStartParity())
+    slot = self.parentWriter.states.subtilePairPackSlot
+    body0 = self._buildSubtileInteriorStoreBody(forceSlc, 0)
+    self.parentWriter.states.subtilePairPackSlot = slot   # both bodies leave the same state
+    body1 = self._buildSubtileInteriorStoreBody(forceSlc, 1)
+    mod = Module("subtileInteriorStoresPerWave")
+    midLine = Label(self.parentWriter.labels.getNameInc("subtile_cacheline_align_midline"),
+                    "this wave starts mid-line: lines start at odd pairs")
+    done = Label(self.parentWriter.labels.getNameInc("subtile_cacheline_align_done"), "")
+    if sel == "wave":
+      sT = self._epilogScratchSgpr(1)
+      mod.add(VReadfirstlaneB32(dst=sgpr(sT), src=vgpr("Serial"), comment="lane 0 serial of this wave"))
+      mod.add(SBitcmp1B32(src0=sgpr(sT), src1=int(log2(self.kernel["WavefrontSize"])),
+                          comment="SCC = wave position in M, bit 0"))
+      self._epilogScratchFree(sT)
+    else:
+      mod.add(SBitcmp1B32(src0=sgpr("WorkGroup0"), src1=0, comment="SCC = tile position in M, bit 0"))
+    mod.add(SCBranchSCC1(labelName=midLine.getLabelName(), comment="odd -> starts mid-line"))
+    mod.add(body0)
+    mod.add(SBranch(labelName=done.getLabelName(), comment="interior stores done"))
+    mod.add(midLine)
+    mod.add(body1)
+    mod.add(done)
+    return mod
+
+  def _cachelineAlignLineStartSelector(self):
+    """How a wave tells whether its first paired store starts a 128B line, or None when
+    every wave does. A wave is MIWaveTile[0]/2 half-lines tall; if that is odd the wave's
+    first half-line index is (WorkGroup0 * MIWaveGroup[0] + waveId0) mod 2:
+      "wave": MIWaveGroup[0] even -> bit 0 of the wave's position in M (waveId0)
+      "tile": MIWaveGroup[0] == 1 -> bit 0 of WorkGroup0."""
+    miwt0 = self.kernel["MIWaveTile"][0]
+    if miwt0 % 4 != 2 or miwt0 < 6:
+      return None
+    miwg0 = self.kernel["MIWaveGroup"][0]
+    if miwg0 == 1:
+      return "tile"
+    if miwg0 % 2 == 0:
+      return "wave"
+    return None
+
+  def _buildSubtileInteriorStoreBody(self, forceSlc: bool, cachelineAlignParity: int) -> Module:
     """Lever 1 (SubtileBf16EpilogueOpt Stage2) — guard-free/mask-free interior store body.
 
     Re-emits the 16bit subtile stores for the current batch WITHOUT `_emitSubtileOobGuard`
@@ -4198,6 +4280,12 @@ class GlobalWriteBatchWriter:
           pendingInc = None
         prevN = blockIdxN
 
+    plainCachelineAlign = usePermlane16 and self._plainCachelineAlignActive()
+    alignedSecond = set()   # elementIdx of the sba=1 element of a pair already stored by a cacheline align
+    bpeCurr = self.parentWriter.states.bpeCexternal
+    bpeDest = self.parentWriter.states.bpeCexternalGSU1
+    nE = len(self.batchElements)
+
     for elementIdx, element in enumerate(self.batchElements):
       tt0 = element[1]
       blockIdxN = element[0]
@@ -4207,11 +4295,26 @@ class GlobalWriteBatchWriter:
         partnerElementIdx = elementIdx - 1
         partnerExists = (partnerElementIdx >= 0 and
                          self.batchElements[partnerElementIdx][1] == tt0 - 1)
+        if partnerExists and elementIdx in alignedSecond:
+          continue
         if partnerExists:
           flushAtTransition(blockIdxN)
           partnerAddrCalc = self.ss.elementAddr[partnerElementIdx]
           sumIdx0 = self.ss.elementSumIdx[partnerElementIdx]
           sumIdx1 = self.ss.elementSumIdx[elementIdx]
+          # Store cacheline align with the next pair of this N-group when the two are the halves of
+          # the same 128B lines (both in this batch, 64B apart).
+          b0, b1 = elementIdx + 1, elementIdx + 2
+          if (plainCachelineAlign and ((tt0 - 1) // 2) % 2 == cachelineAlignParity and b1 < nE
+              and self.batchElements[b0][0] == blockIdxN and self.batchElements[b0][1] == tt0 + 1
+              and self.batchElements[b1][0] == blockIdxN and self.batchElements[b1][1] == tt0 + 2
+              and self.ss.elementAddr[b0].addrDVgpr == partnerAddrCalc.addrDVgpr
+              and (self.ss.elementAddr[b0].globalOffset - partnerAddrCalc.globalOffset) * bpeDest // bpeCurr == 64):
+            mod.add(self._emitPlainCachelineAlignPair(partnerAddrCalc, sumIdx0, sumIdx1,
+                                            self.ss.elementAddr[b0], self.ss.elementSumIdx[b0],
+                                            self.ss.elementSumIdx[b1], prefixOffset, tt0 - 1, blockIdxN, forceSlc))
+            alignedSecond.add(b1)
+            continue
           issuePaired(partnerAddrCalc, sumIdx0, sumIdx1, tt0 - 1, blockIdxN)
         else:
           flushAtTransition(blockIdxN)
@@ -4356,12 +4459,12 @@ class GlobalWriteBatchWriter:
 
     def packF32pair(dst, src0, src1, comment):
       """Pack two f32 VGPRs into one dword of two 16bit values."""
-      module.add(VCvtPkF32to16(dst=vgpr(dst), src0=src0, src1=src1, comment=f"{comment} -> {typeStr}"))
+      module.add(VCvtPkF32to16(dst=dst, src0=src0, src1=src1, comment=f"{comment} -> {typeStr}"))
 
-    packF32pair(vPack+0, vc(sumIdx0, 0), vc(sumIdx0, 1), f"sba=0 tt0={tt0}[0:1]")
-    packF32pair(vPack+1, vc(sumIdx0, 2), vc(sumIdx0, 3), f"sba=0 tt0={tt0}[2:3]")
-    packF32pair(vPack+2, vc(sumIdx1, 0), vc(sumIdx1, 1), f"sba=1 tt0={tt0}[0:1]")
-    packF32pair(vPack+3, vc(sumIdx1, 2), vc(sumIdx1, 3), f"sba=1 tt0={tt0}[2:3]")
+    packF32pair(self._vPackReg(vPack, 0), vc(sumIdx0, 0), vc(sumIdx0, 1), f"sba=0 tt0={tt0}[0:1]")
+    packF32pair(self._vPackReg(vPack, 1), vc(sumIdx0, 2), vc(sumIdx0, 3), f"sba=0 tt0={tt0}[2:3]")
+    packF32pair(self._vPackReg(vPack, 2), vc(sumIdx1, 0), vc(sumIdx1, 1), f"sba=1 tt0={tt0}[0:1]")
+    packF32pair(self._vPackReg(vPack, 3), vc(sumIdx1, 2), vc(sumIdx1, 3), f"sba=1 tt0={tt0}[2:3]")
 
     # Compute the adjusted D address into vgprAddrScratch (overlapping the
     # ds_bpermute on the fallback path).  addrDVgpr holds the M-byte offset
@@ -4389,7 +4492,7 @@ class GlobalWriteBatchWriter:
     if not getattr(self, "_permlane16Active", False):
       module.addComment1("ds_bpermute in-place: gather packed dwords from partner lane-group")
       for k in range(4):
-        module.add(DSBPermuteB32(dst=vgpr(vPack+k), src0=vgpr(vPermAddr), src1=vgpr(vPack+k),
+        module.add(DSBPermuteB32(dst=self._vPackReg(vPack, k), src0=vgpr(vPermAddr), src1=self._vPackReg(vPack, k),
                                  comment=f"perm dword {k}"))
 
     # The ds_bpermute has ~88 cycles of LDS latency.  Overlap SALU/VALU work here:
@@ -4454,7 +4557,7 @@ class GlobalWriteBatchWriter:
     """NonTemporalD for the fused store's D writes."""
     return int(self.kernel["NonTemporalD"])
 
-  def _emit16bitSubtilePairedStorePhase2(self, addrCalc, tt0: int = 0, pending_lgkm=None, interior: bool = False, forceSlc: bool = False, vPackOverride=None) -> Module:
+  def _emit16bitSubtilePairedStorePhase2(self, addrCalc, tt0: int = 0, pending_lgkm=None, interior: bool = False, forceSlc: bool = False, vPackOverride=None, emitStore: bool = True) -> Module:
     """Phase 2 (consume) of the paired dwordx4 store — see _emit16bitSubtilePairedStore.
 
     Emits, with NO s_barrier:
@@ -4496,8 +4599,8 @@ class GlobalWriteBatchWriter:
     # to drain; two v_permlane16_swap assemble the eight rows directly.
     if getattr(self, "_permlane16Active", False):
       module.addComment1("v_permlane16_swap_b32: cross-lane assembly (no ds_bpermute)")
-      module.add(VPermlane16SwapB32(dst=vgpr(vPack+0), src=vgpr(vPack+2), comment="swap dwords 0↔2"))
-      module.add(VPermlane16SwapB32(dst=vgpr(vPack+1), src=vgpr(vPack+3), comment="swap dwords 1↔3"))
+      module.add(VPermlane16SwapB32(dst=self._vPackReg(vPack, 0), src=self._vPackReg(vPack, 2), comment="swap dwords 0↔2"))
+      module.add(VPermlane16SwapB32(dst=self._vPackReg(vPack, 1), src=self._vPackReg(vPack, 3), comment="swap dwords 1↔3"))
     else:
       if pending_lgkm is None:
         module.add(SWaitCnt(dscnt=0, comment="wait for ds_bpermute (lgkmcnt=0)"))
@@ -4506,8 +4609,13 @@ class GlobalWriteBatchWriter:
         module.add(SWaitCnt(dscnt=dscnt, comment=f"wait for this pair's 4 ds_bpermute (lgkmcnt={dscnt})"))
 
       module.addComment1("v_permlane32_swap_b32: swap across lane-32 boundary")
-      module.add(VPermlane32SwapB32(dst=vgpr(vPack+0), src=vgpr(vPack+2), comment="swap dwords 0↔2"))
-      module.add(VPermlane32SwapB32(dst=vgpr(vPack+1), src=vgpr(vPack+3), comment="swap dwords 1↔3"))
+      module.add(VPermlane32SwapB32(dst=self._vPackReg(vPack, 0), src=self._vPackReg(vPack, 2), comment="swap dwords 0↔2"))
+      module.add(VPermlane32SwapB32(dst=self._vPackReg(vPack, 1), src=self._vPackReg(vPack, 3), comment="swap dwords 1↔3"))
+
+    if not emitStore:
+      # Store cacheline align: the caller blends this quad with its line partner and issues the stores.
+      assert not useAlign8, "prepare-only Phase2 is for the mask-free paths"
+      return module
 
     if useAlign8:
       module.add(self.getEdgeMovInstType()(EXEC(), sgpr(self._pairedStoreMaskSgpr, self.laneSGPRC), "apply exec mask"))
@@ -4515,7 +4623,7 @@ class GlobalWriteBatchWriter:
     module.addComment1("buffer_store_dwordx4: write 8 16bit values (4 dwords, 2-aligned src)")
     _soff, _soffTmp = self._subtileStoreSoffset(module, addrCalc)
     module.add(BufferStoreB128(
-      src=vgpr(vPack, 4),
+      src=self._vPackReg(vPack, 0, 4),
       vaddr=vgpr(vAddrScratch),
       saddr=sgpr("SrdD", 4),
       soffset=_soff,
@@ -4536,7 +4644,8 @@ class GlobalWriteBatchWriter:
     # A rotating ring hands the next store a different quad, so there is nothing
     # left for this wait state to fence.
     if not self._pairPackRotating():
-      module.add(SNop(waitState=0, comment="1 wait state: WAR hazard between store src and next pack dst"))
+      ws = serialStoreFenceWaitStates(self.kernel, self._weaveMfmaGroups())
+      module.add(SNop(waitState=ws - 1, comment=f"{ws} wait state{'s' if ws > 1 else ''}: WAR hazard between store src and next pack dst"))
 
     assert not any(isinstance(i, SBarrier) for i in module.flatitems()), \
       "PostLoopStoreInNll Phase2 must be barrier-free (no s_barrier in the MFMA-interleaved store)"
@@ -4652,6 +4761,184 @@ class GlobalWriteBatchWriter:
       return
     self.parentWriter.states.subtileStoreStageHighWater = stage
     module.add(Module(f"PlsinStageBoundary{stage}"))
+
+  def _vPackReg(self, vPack, k, n=1):
+    """Pack-quad register k (width n). vPack is a physical base (the pack quad or ring), or
+    ('c', base) for ValuC+base: the store cacheline align packs the second pair of a line in place
+    into that pair's own accumulator staging registers, which are dead once it is packed."""
+    if isinstance(vPack, tuple):
+      return vgpr("ValuC+" + str(vPack[1] + k), n)
+    return vgpr(vPack + k, n)
+
+  def _cachelineAlignLineStartParity(self) -> int:
+    """Pair-in-column index parity (0/1) of the pair holding the FIRST half of a 128B line.
+    Fixed 0: correct for every wave when MIWaveTile[0] % 4 == 0. The plain interior body
+    selects it per wave instead where that does not hold (_cachelineAlignLineStartSelector)."""
+    return 0
+
+  def _cachelineAlignStoreNow(self, module, addrCalc, tt0, forceSlc, vPack, vAddr, tag):
+    ntd = self._epilogueNtd()
+    bpeCurr = self.parentWriter.states.bpeCexternal
+    bpeDest = self.parentWriter.states.bpeCexternalGSU1
+    _soff, _soffTmp = self._subtileStoreSoffset(module, addrCalc)
+    module.add(BufferStoreB128(
+      src=self._vPackReg(vPack, 0, 4), vaddr=vgpr(vAddr), saddr=sgpr("SrdD", 4), soffset=_soff,
+      mubuf=MUBUFModifiers(offen=True, offset12=addrCalc.globalOffset * bpeDest // bpeCurr,
+                           glc=bool(ntd & 0x1), slc=bool((ntd & 0x2) or forceSlc), nt=bool(ntd & 0x4)),
+      comment=f"16bit paired dwordx4 store ({tag}) tt0={tt0},{tt0+1}"))
+    if _soffTmp is not None:
+      self._epilogScratchFree(_soffTmp)
+
+  def _emitCachelineAlignBlendAndStores(self, module, addrCalcA, tt0A, forceSlc, H, X, W, rebuildMask):
+    """In-place DPP blend of two permlaned pack quads and the two full-line stores.
+    H = pair A's quad (m-rows 0-31 of the line), X = pair B's quad (m-rows 32-63), W = a
+    scratch vgpr name, T = vgprCachelineAlignTmp, address = vgprAddrScratch (only read).
+    A paired store fills half of each 128B line; afterwards X holds the odd n-columns
+    (stored first) and H the even n-columns, each a full line per lane pair:
+      even lanes take A, odd lanes take B; the odd-column store shifts A down one lane.
+    DPP is only legal on v_cndmask src0 with the select in VCC, and a cross-lane DPP read
+    of an exec-inactive lane is wrong on gfx950, so EXEC must be full at the call site.
+    rebuildMask: re-derive VCC before the second store (the staged store cuts a scheduler
+    unit there, so nothing but H may be carried across)."""
+    T = self.cvtVgprStruct.vgprCachelineAlignTmp
+    addr = self.cvtVgprStruct.vgprAddrScratch
+    module.add(VAndB32(dst=vgpr(T), src0=1, src1=vgpr("Serial"), comment="lane parity"))
+    module.add(VCmpEQU32(dst=VCC(), src0=vgpr(T), src1=0, comment="VCC = even lanes"))
+    for k in range(4):
+      rA = self._vPackReg(H, k)
+      rB = self._vPackReg(X, k)
+      module.add(VMovB32(dst=vgpr(T), src=rA, dpp=DPPModifiers(quad_perm=[1,1,3,3]),
+                         comment=f"align d{k}: save A odd n-cols into even lanes"))
+      module.add(VCndMaskB32(dst=rA, src0=rB, src1=rA, src2=VCC(), dpp=DPPModifiers(quad_perm=[0,0,2,2]),
+                             comment=f"align d{k}: store1 even<-A odd<-B[0,0,2,2]"))
+      module.add(VCndMaskB32(dst=rB, src0=rB, src1=vgpr(T), src2=VCC(),
+                             comment=f"align d{k}: store2 even<-A[1,1,3,3] odd<-B"))
+    module.add(VAddU32(dst=vgpr(W), src0=vgpr(addr), src1=hex(64), comment="addr + 64B"))
+    module.add(VMovB32(dst=vgpr(T), src=vgpr(addr), dpp=DPPModifiers(quad_perm=[1,1,3,3]),
+                       comment="align voff2: addr perm [1,1,3,3]"))
+    module.add(VCndMaskB32(dst=vgpr(T), src0=vgpr(W), src1=vgpr(T), src2=VCC(),
+                           comment="align voff2: even<-perm addr, odd<-addr+64"))
+    self._cachelineAlignStoreNow(module, addrCalcA, tt0A, forceSlc, X, T, "align store 2")
+    if rebuildMask:
+      module.add(VAndB32(dst=vgpr(T), src0=1, src1=vgpr("Serial"), comment="lane parity"))
+      module.add(VCmpEQU32(dst=VCC(), src0=vgpr(T), src1=0, comment="VCC = even lanes"))
+    module.add(VMovB32(dst=vgpr(T), src=vgpr(addr), dpp=DPPModifiers(quad_perm=[0,0,2,2]),
+                       comment="align voff1: addr perm [0,0,2,2]"))
+    module.add(VAddU32(dst=vgpr(T), src0=vgpr(T), src1=hex(64), comment="align voff1: perm addr + 64B"))
+    module.add(VCndMaskB32(dst=vgpr(T), src0=vgpr(T), src1=vgpr(addr), src2=VCC(),
+                           comment="align voff1: even<-addr, odd<-perm addr+64"))
+    self._cachelineAlignStoreNow(module, addrCalcA, tt0A, forceSlc, H, T, "align store 1")
+
+  def _plainCachelineAlignActive(self) -> bool:
+    """Store cacheline align on the plain (non-fused) paired store's guard-free interior body."""
+    return (storeCachelineAlignEnabled(self.kernel)
+            and getattr(self, "_permlane16Active", False)
+            and not self.parentWriter.states.subtileFusedFullTileStore
+            and getattr(self.cvtVgprStruct, "vgprCachelineAlignTmp", -1) >= 0)
+
+  def _emitPlainCachelineAlignPair(self, addrA, sA0, sA1, addrB, sB0, sB1, prefixOffset, tt0A, blockIdxN, forceSlc) -> Module:
+    """Interior body of the plain store: align pair A (tt0A, tt0A+1) with pair B (tt0A+2,
+    tt0A+3) of the same N-group. Both are in this batch with their epilogues (bias,
+    activation, alpha) already applied; the interior body is only entered when every row
+    and column of the batch is in bounds, so EXEC is full and there are no guards. Pair B
+    is packed in place into its own ValuC registers, so no register is added."""
+    module = Module("16bitSubtilePlainCachelineAlign")
+    H = self.cvtVgprStruct.vgprBf16Temp
+    X = ('c', sB0 - prefixOffset)
+    W = "ValuC+" + str(sB1 - prefixOffset)
+    for (ac, s0, s1, t, q) in ((addrA, sA0, sA1, tt0A, H), (addrB, sB0, sB1, tt0A + 2, X)):
+      module.add(self._emit16bitSubtilePairedStorePhase1(
+        ac, s0, s1, prefixOffset, tt0=t, blockIdxM=t, blockIdxN=blockIdxN, interior=True, vPackOverride=q))
+      module.add(self._emit16bitSubtilePairedStorePhase2(ac, tt0=t, interior=True, forceSlc=forceSlc,
+                                                         vPackOverride=q, emitStore=False))
+    self._emitCachelineAlignBlendAndStores(module, addrA, tt0A, forceSlc, H, X, W, rebuildMask=False)
+    # gfx940+: a VALU that overwrites the data of a store wider than 8 bytes needs 2 wait
+    # states. The next line's first convert writes H straight after the store that read it.
+    module.add(SNop(waitState=1, comment="2 wait states: WAR hazard between store src and next pack dst"))
+    return module
+
+  STAGED_UNIT_CUT = "[plsin-unit-cut]"
+
+  def _stagedCachelineAlignActive(self) -> bool:
+    """Store cacheline align on the STAGED fused store (block-scheduled tiles). Needs the 2-quad pack
+    ring (one hold quad per stage parity) and the cacheline align temp, and no register beyond those."""
+    c = self.cvtVgprStruct
+    return (storeCachelineAlignEnabled(self.kernel)
+            and bool(getattr(self.parentWriter.states, "subtileStoreStages", 0))
+            and self._fusedFullTileNoGuards()
+            and getattr(self, "_permlane16Active", False)
+            and getattr(c, "vgprCachelineAlignTmp", -1) >= 0
+            and getattr(c, "vgprPairPackRing", -1) >= 0)
+
+  def _flushStagedHold(self) -> Module:
+    """A held pair whose line partner never came: store it unblended."""
+    hold = self.parentWriter.states.subtileStagedHold
+    self.parentWriter.states.subtileStagedHold = None
+    module = Module("16bitSubtileStagedHoldFlush")
+    self._cachelineAlignStoreNow(module, hold["addrCalc"], hold["tt0"], hold["forceSlc"], hold["H"],
+                       self.cvtVgprStruct.vgprAddrScratch, "staged hold flushed")
+    return module
+
+  def _emitStagedCachelineAlignPair(self, addrCalc, sumIdx0, sumIdx1, prefixOffset, tt0, blockIdxM, blockIdxN, forceSlc) -> Module:
+    """Staged fused store with the store cacheline align. The scheduler cuts each stage into units
+    (one per buffer_store, plus the cut tag below) and scatters them between the loop
+    tail's MFMAs, where units of the NEIGHBOURING stage can land between them. So the only
+    register live across units is the hold quad H, private to the stage parity (the two
+    pack-ring quads). Everything else is used inside one unit: X (pair B packed in place
+    into its own, now dead, ValuC registers), W (another dead ValuC register of pair B),
+    the cacheline align temp and VCC.
+      unit A : prep A -> H                      (no store)
+      unit B : prep B -> X, blend (H<-store1, X<-store2), store 2
+      unit S1: rebuild the mask and store-1 voffset, store 1 from H"""
+    states = self.parentWriter.states
+    c = self.cvtVgprStruct
+    stage = states.subtileStoreStageHighWater
+    H = c.vgprPairPackRing if stage % 2 else c.vgprBf16Temp
+    X = ('c', sumIdx0 - prefixOffset)                 # cvt_pk in place: d_k reads only regs >= k
+    W = "ValuC+" + str(sumIdx1 - prefixOffset)        # dead once pair B is packed
+    addr = c.vgprAddrScratch
+    bpeCurr = states.bpeCexternal
+    bpeDest = states.bpeCexternalGSU1
+    module = Module("16bitSubtileStagedCachelineAlign")
+    hold = getattr(states, "subtileStagedHold", None)
+
+    def prep(vPack):
+      module.add(self._emit16bitSubtilePairedStorePhase1(
+        addrCalc, sumIdx0, sumIdx1, prefixOffset, tt0=tt0, blockIdxM=blockIdxM, blockIdxN=blockIdxN,
+        vPackOverride=vPack))
+      module.add(self._emit16bitSubtilePairedStorePhase2(addrCalc, tt0=tt0, forceSlc=forceSlc,
+                                                         vPackOverride=vPack, emitStore=False))
+
+    if hold is not None:
+      a = hold["addrCalc"]
+      partner = (hold["stage"] == stage and hold["blockIdxN"] == blockIdxN
+                 and tt0 == hold["tt0"] + 2 and a.addrDVgpr == addrCalc.addrDVgpr
+                 and a.coordOffset1 == addrCalc.coordOffset1
+                 and (addrCalc.globalOffset - a.globalOffset) * bpeDest // bpeCurr == 64)
+      if not partner:
+        module.add(self._flushStagedHold())
+        hold = None
+    if hold is not None:
+      prep(X)
+      self._emitCachelineAlignBlendAndStores(module, hold["addrCalc"], hold["tt0"], forceSlc, H, X, W,
+                                   rebuildMask=True)
+      states.subtileStagedHold = None
+      return module
+
+    tt0PerStage = getattr(states, "subtileStoreTt0PerStage", 0)
+    lineStart = ((tt0 // 2) % 2 == self._cachelineAlignLineStartParity()
+                 and tt0PerStage and (tt0 + 3) // tt0PerStage == tt0 // tt0PerStage)
+    if lineStart:
+      prep(H)
+      last = [i for i in module.flatitems() if isinstance(i, VPermlane16SwapB32)][-1]
+      last.comment = (last.comment or "") + " " + self.STAGED_UNIT_CUT
+      states.subtileStagedHold = {"addrCalc": addrCalc, "tt0": tt0, "blockIdxN": blockIdxN,
+                                  "stage": stage, "H": H, "forceSlc": forceSlc}
+      return module
+    # no line partner in this stage: self-contained store on the pair's own ValuC quad
+    prep(X)
+    self._cachelineAlignStoreNow(module, addrCalc, tt0, forceSlc, X, addr, "staged, unaligned")
+    return module
 
   def _pairPackQuad(self) -> int:
     """Base vgpr of the 4-dword pack quad this paired store uses.

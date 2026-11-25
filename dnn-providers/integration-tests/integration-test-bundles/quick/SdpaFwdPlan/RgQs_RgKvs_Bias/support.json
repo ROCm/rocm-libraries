@@ -1,4 +1,83 @@
 {
-  "claims": {},
+  "claims": {
+    "ASM_SDPA_ENGINE": [
+      {
+        "cases": [
+          "bf16_07ba936f2cd5034d",
+          "bf16_2ef1589138c8834f",
+          "bf16_3199d8f2e441f56b",
+          "bf16_3b0769413b978436",
+          "bf16_3c708ac21fa959b4",
+          "bf16_422c611dd195cf59",
+          "bf16_50d89fcc2e1d08fb",
+          "bf16_7b29bf2bda1f32a3",
+          "bf16_efce3b7a568c3e4d",
+          "bf16_f2a7ca18714ee111"
+        ],
+        "support": {
+          "gfx942": [
+            "linux"
+          ],
+          "gfx950": [
+            "linux"
+          ]
+        }
+      }
+    ],
+    "hipkernel:flydsl_sdpa_cdna": [
+      {
+        "cases": [
+          "bf16_07ba936f2cd5034d",
+          "bf16_2ebe5f5a35cb867f",
+          "bf16_2ef1589138c8834f",
+          "bf16_3199d8f2e441f56b",
+          "bf16_3b0769413b978436",
+          "bf16_3c708ac21fa959b4",
+          "bf16_422c611dd195cf59",
+          "bf16_50d89fcc2e1d08fb",
+          "bf16_7b29bf2bda1f32a3",
+          "bf16_8d3c1469ff01771b",
+          "bf16_a1485cfdfcb9d1ed",
+          "bf16_b3a069e2c9f95645",
+          "bf16_efce3b7a568c3e4d",
+          "bf16_f2a7ca18714ee111"
+        ],
+        "support": {
+          "gfx942": [
+            "linux"
+          ],
+          "gfx950": [
+            "linux"
+          ]
+        }
+      }
+    ],
+    "hipkernel:flydsl_sdpa_rdna": [
+      {
+        "cases": [
+          "bf16_07ba936f2cd5034d",
+          "bf16_2ebe5f5a35cb867f",
+          "bf16_2ef1589138c8834f",
+          "bf16_3199d8f2e441f56b",
+          "bf16_3b0769413b978436",
+          "bf16_3c708ac21fa959b4",
+          "bf16_422c611dd195cf59",
+          "bf16_50d89fcc2e1d08fb",
+          "bf16_7b29bf2bda1f32a3",
+          "bf16_8d3c1469ff01771b",
+          "bf16_a1485cfdfcb9d1ed",
+          "bf16_b3a069e2c9f95645",
+          "bf16_efce3b7a568c3e4d",
+          "bf16_f2a7ca18714ee111"
+        ],
+        "support": {
+          "gfx1151": [
+            "linux",
+            "windows"
+          ]
+        }
+      }
+    ]
+  },
   "version": 1
 }

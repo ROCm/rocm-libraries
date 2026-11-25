@@ -42,6 +42,8 @@ if(HIPBLASLTPROVIDER_ENABLE_HIPBLASLT)
         engines/plans/TestHipblasltMatmulPlanBuilder.cpp
         $<$<BOOL:${HIPBLASLTPROVIDER_ENABLE_MX_GEMM}>:engines/plans/TestHipblasltMxMatmulPlan.cpp>
         $<$<BOOL:${HIPBLASLTPROVIDER_ENABLE_MX_GEMM}>:engines/plans/TestHipblasltMxMatmulPlanBuilder.cpp>
+        $<$<BOOL:${HIPBLASLTPROVIDER_ENABLE_MX_GEMM}>:engines/plans/TestHipblasltMxScaleLayout.cpp>
+        $<$<BOOL:${HIPBLASLTPROVIDER_ENABLE_MX_GEMM}>:compilation/TestProgramAndKernel.cpp>
         TestHipblasltEnginePluginApi.cpp
         TestHipblasltMatmulDesc.cpp
         TestHipblasltMatrixLayout.cpp
