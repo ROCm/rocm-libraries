@@ -234,6 +234,15 @@ TEST(PackedBf6, ConvertBasic)
     EXPECT_EQ(pk_bf6_t(-1.0f).get_element(0), 0b101100);
 }
 
+TEST(PackedBf6, ConvertFp16)
+{
+    EXPECT_EQ(ck_tile::fp16_to_pk_bf6(1.0f, 1.f).get_element(0), 0b001100);
+
+    // 1.125 + 2^-10 is exact in fp16 and lies just above the midpoint of 1.0 and 1.25,
+    // so it rounds up to 1.25: 0 011 01 = 0b001101
+    EXPECT_EQ(ck_tile::fp16_to_pk_bf6(1.1259765625f, 1.f).get_element(0), 0b001101);
+}
+
 TEST(PackedBf6, ConvertHost)
 {
     constexpr bool is_device = false;
