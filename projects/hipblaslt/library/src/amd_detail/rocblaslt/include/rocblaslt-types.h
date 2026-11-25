@@ -625,6 +625,14 @@ struct RocblasltContractionProblem
     ScalingFormat scaleAType;
     ScalingFormat scaleBType;
 
+    // Gate epilogue: D = gate * x + gate (gate_mode 1) or D = gate * x (gate_mode 2), x being
+    // the result after the activation. Not constructor parameters; set after construction.
+    const void* gate              = nullptr;
+    hipDataType gate_type         = HIPBLASLT_DATATYPE_INVALID;
+    size_t      col_stride_gate   = 0;
+    size_t      batch_stride_gate = 0;
+    int         gate_mode         = 0;
+
     hipDataType        bias_type;
     hipDataType        aux_type;
     rocblaslt_epilogue epilogue;
@@ -841,6 +849,11 @@ namespace rocblaslt
             = RocblasltContractionProblem::ScalingFormat::None;
         float act0 = 0.f;
         float act1 = 0.f;
+        // Keep this layout in sync with hipblaslt_ext::GemmEpilogue::GemmEpilogueImpl.
+        int         gate_mode      = 0;
+        hipDataType gate_data_type = HIPBLASLT_DATATYPE_INVALID;
+        int         gate_ld        = 0;
+        int         gate_stride    = 0;
     };
 
     class RocTuningV2
@@ -869,6 +882,7 @@ namespace rocblaslt
         void* aux           = nullptr;
         void* amaxD         = nullptr;
         void* dPeer         = nullptr;
+        void* gate          = nullptr;
         // Keep this layout in sync with hipblaslt_ext::GemmInputs::GemmInputsImpl.
         bool deviceScalarAlpha = false;
     };

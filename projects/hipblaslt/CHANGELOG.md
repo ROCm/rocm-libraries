@@ -6,6 +6,14 @@ Full documentation for hipBLASLt is available at [rocm.docs.amd.com/projects/hip
 
 ### Added
 
+* Gate epilogue in the Extension API: `GemmEpilogue::setGateMode()` with `hipblaslt_ext::GateMode`
+  (`Residual`: `D = gate * x + gate`, `Multiply`: `D = gate * x`, where `x` is the result after the
+  activation), `setGateDataType()`, `setGateLeadingDimension()`, `setGateBatchStride()`, and
+  `GemmInputs::setGate()`. The gate has the shape of D. For `GroupedGemm` it needs the host-argument
+  path (`initialize(algo, workspace, false)` then `run(stream)`); the device user-arguments record
+  has no gate field. The `GateMulOnly` TensileLite problem-type parameter selects the multiply form,
+  one gfx1250 bf16 grouped kernel enables it, and `samples/32_hipblaslt_groupedgemm_gate_ext`
+  computes `D_g = silu(A_g * B_g) * G_g` for every group in one launch.
 * `hipblaslt-bench --partitions N --split_dim M|N|B`, which runs `testing_matmul` through the
   experimental `PartitionedGemm` (see Experimental) with the same data, reference and verification,
   and `samples/31_hipblaslt_gemm_partitioned_ext`.

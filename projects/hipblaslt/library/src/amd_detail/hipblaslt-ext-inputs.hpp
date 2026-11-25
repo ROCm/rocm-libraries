@@ -31,6 +31,7 @@ namespace hipblaslt_ext
         const void* aux           = nullptr;
         const void* amaxD         = nullptr;
         void*       dPeer         = nullptr;
+        const void* gate          = nullptr;
         // Keep this layout in sync with rocblaslt::RocGemmInputsV2.
         bool deviceScalarAlpha = false;
     };

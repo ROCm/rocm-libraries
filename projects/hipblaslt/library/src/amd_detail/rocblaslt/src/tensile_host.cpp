@@ -2348,6 +2348,14 @@ namespace
                                 isOutput);
         }
 
+        // set gate mode. Always set both flags: a reused problem may have had a gate before.
+        tensileProblem.setUseGateResidual(prob.gate_mode != 0);
+        tensileProblem.setGateMulOnly(prob.gate_mode == 2);
+        if(prob.gate_mode != 0)
+            tensileProblem.setGateResidual(hipDataType_to_tensile_type(prob.gate_type),
+                                           {prob.m, prob.n, prob.batch_count},
+                                           {1, prob.col_stride_gate, prob.batch_stride_gate});
+
         // set bias mode
         auto biasSrc  = getBiasSrc(prob.epilogue);
         auto biasSize = (biasSrc == TensileLite::ContractionProblemGemm::TENSOR::B) ? d.sizes()[1]
@@ -2875,6 +2883,14 @@ namespace
                                 isOutput);
         }
 
+        // set gate mode. Always set both flags: a reused problem may have had a gate before.
+        tensileProblem.setUseGateResidual(prob.gate_mode != 0);
+        tensileProblem.setGateMulOnly(prob.gate_mode == 2);
+        if(prob.gate_mode != 0)
+            tensileProblem.setGateResidual(hipDataType_to_tensile_type(prob.gate_type),
+                                           {prob.m, prob.n, prob.batch_count},
+                                           {1, prob.col_stride_gate, prob.batch_stride_gate});
+
         // set gradient
         tensileProblem.setUseGradient(is_grad_enabled(prob.epilogue));
 
@@ -2963,6 +2979,7 @@ namespace
         inputs.c = reinterpret_cast<const void*>(prob.C);
         inputs.d = reinterpret_cast<void*>(prob.D);
         inputs.e = reinterpret_cast<void*>(prob.E);
+        inputs.gateResidual = prob.gate_mode != 0 ? prob.gate : nullptr;
 
         inputs.batchA = reinterpret_cast<void const* const*>(prob.batch_A);
         inputs.batchB = reinterpret_cast<void const* const*>(prob.batch_B);
