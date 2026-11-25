@@ -43,6 +43,7 @@ import array
 import csv
 import os
 from copy import deepcopy
+from pathlib import Path
 from unittest.mock import patch, MagicMock
 
 import pytest
@@ -295,6 +296,62 @@ class TestAnalyzeProblemTypeTileAware:
         assert sel is not None
         assert len(sel) == 1
         assert sel[0] is external_sol
+
+    def test_tile_aware_remainder_gets_logic_index_and_unique_uid(
+        self, tmp_path: Path, analysis_params: dict
+    ) -> None:
+        """A remainder selection solution takes the next logic index and a new UID.
+
+        Its benchmark ``SolutionIndex`` (99) and its UID, which a winner already
+        uses, must both be replaced: the index by its position after the
+        winners, and the UID by one that the run has not used.
+
+        Args:
+            tmp_path: Pytest temporary-directory fixture.
+            analysis_params: Default LibraryLogic analysis parameters.
+
+        Returns:
+            None.
+
+        Raises:
+            AssertionError: If the remainder solution keeps its benchmark
+                index or a UID that a winner already has.
+        """
+        from tensilelite.LibraryLogic import analyzeProblemType
+        from tensilelite.SolutionIdGen import decode_solution_uid, encode_solution_uid
+
+        pt = _MockProblemType(tile_aware=True)
+        exact_sizes = [(128, 128, 1, 256)]
+        mock_ps = _MockProblemSizes(exact_sizes=exact_sizes)
+        winner_uid = encode_solution_uid(2001)
+        sol_a = _MockSolution(idx=0)
+        sol_a["SolutionUID"] = winner_uid
+        sol_b = _MockSolution(idx=1)
+
+        csv_path = str(tmp_path / "bench.csv")
+        _write_exact_csv(csv_path, exact_sizes, 2, [[15.0, 10.0]])
+        sel_file = str(tmp_path / "bench.gsp")
+        lib_path = str(tmp_path / "lib_remainder_uid")
+        os.makedirs(lib_path, exist_ok=True)
+
+        psg = [(mock_ps, csv_path, "d.yaml", sel_file, [sol_a, sol_b])]
+        external_sol = _MockSolution(idx=99, tile0=128, tile1=128)
+        external_sol["SolutionUID"] = winner_uid
+
+        with patch("tensilelite.LibraryLogic.getSolutionNameMin", _mock_name), \
+             patch("tensilelite.LibraryLogic.getKernelNameMin", _mock_name), \
+             patch("tensilelite.LibraryLogic.getSolutionNameFull", _mock_name_full), \
+             patch("tensilelite.LibraryLogic.SolutionSelectionLibrary.analyzeSolutionSelection",
+                   return_value=[(external_sol, {"tile": "128x128"})]):
+            result = analyzeProblemType(pt, psg, analysis_params, lib_path, splitGSU=False)
+
+        (_, winners, _, _, _, sel, ids, _, _) = result
+        assert sel == [external_sol]
+        assert external_sol["SolutionIndex"] == len(winners)
+        assert external_sol["SolutionIndex"] in ids
+        assert [s["SolutionUID"] for s in winners] == [winner_uid]
+        assert external_sol["SolutionUID"] != winner_uid
+        assert decode_solution_uid(external_sol["SolutionUID"]) != 0
 
 
 # ===========================================================================
@@ -855,6 +912,94 @@ class TestGenerateLogic:
             globalParameters["LogicFormat"] = orig_format
 
         assert mock_write_json.call_count >= 1
+
+    def test_generatelogic_claims_uids_unique_across_problem_types(self, tmp_path: Path) -> None:
+        """Winners keep a unique UID; a UID shared across problem types and ``0u0`` are redrawn.
+
+        Two problem types each have two winners. Problem type A, read first,
+        holds a UID it shares with B and a UID that only it has. Problem type B
+        holds the shared UID and ``0u0``. One ``seen`` set spans the run, so A
+        keeps both of its UIDs and B gets two new ones.
+
+        Args:
+            tmp_path: Pytest temporary-directory fixture.
+
+        Returns:
+            None.
+
+        Raises:
+            AssertionError: If a unique UID is not kept, or a shared or zero
+                UID reaches the logic tuples.
+        """
+        from tensilelite.Common.GlobalParameters import defaultAnalysisParameters
+        from tensilelite.LibraryLogic import generateLogic
+        from tensilelite.SolutionIdGen import decode_solution_uid, encode_solution_uid
+
+        benchmark_path = str(tmp_path / "2_BenchmarkData")
+        os.makedirs(benchmark_path)
+        library_path = str(tmp_path / "3_LibraryLogic")
+        os.makedirs(library_path)
+
+        shared_uid = encode_solution_uid(1001)
+        unique_uid = encode_solution_uid(1002)
+        exact_sizes = [(128, 128, 1, 256), (256, 256, 1, 256)]
+        parsed = {}
+        for name, uids in (("bench_a", [shared_uid, unique_uid]), ("bench_b", [shared_uid, "0u0"])):
+            pt = _MockProblemType()
+            sols = []
+            for idx, uid in enumerate(uids):
+                sol = _MockSolution(idx=idx)
+                sol["ProblemType"] = pt
+                sol["SolutionUID"] = uid
+                sols.append(sol)
+            # Each solution wins one size, so both stay in the logic file.
+            _write_exact_csv(
+                os.path.join(benchmark_path, name + ".csv"),
+                exact_sizes,
+                2,
+                [[15.0, 1.0], [1.0, 15.0]],
+            )
+            yaml_path = os.path.join(benchmark_path, name + ".yaml")
+            with open(yaml_path, "w") as f:
+                f.write("# dummy\n")
+            parsed[yaml_path] = (_MockProblemSizes(exact_sizes=exact_sizes), sols)
+
+        config = dict(defaultAnalysisParameters)
+        config["ScheduleName"] = "TestSchedule"
+        config["ArchitectureName"] = "gfx942"
+        config["DeviceNames"] = "fallback"
+        config["LibraryType"] = "GridBased"
+        config["SolutionImportanceMin"] = 0.01
+
+        with patch("tensilelite.LibraryLogic.getSolutionNameMin", _mock_name), \
+             patch("tensilelite.LibraryLogic.getKernelNameMin", _mock_name), \
+             patch("tensilelite.LibraryLogic.getSolutionNameFull", _mock_name_full), \
+             patch("tensilelite.LibraryIO.parseSolutionsFile",
+                   side_effect=lambda path, *a, **k: parsed[path]), \
+             patch("tensilelite.LibraryIO.createLibraryLogic",
+                   return_value={"mock": "data"}) as mock_create, \
+             patch("tensilelite.LibraryIO.writeYAML"):
+            generateLogic(
+                config,
+                benchmark_path,
+                library_path,
+                cxxCompiler="amdclang++",
+                splitGSU=False,
+                printSolutionRejectionReason=False,
+                printIndexAssignmentInfo=False,
+                isaInfoMap={},
+            )
+
+        # createLibraryLogic(schedule, arch, devices, libraryType, logicTuple)
+        winners = [call.args[4][1] for call in mock_create.call_args_list]
+        assert [len(w) for w in winners] == [2, 2]
+        uids_a = [s["SolutionUID"] for s in winners[0]]
+        uids_b = [s["SolutionUID"] for s in winners[1]]
+        assert sorted(uids_a) == sorted([shared_uid, unique_uid])
+        assert shared_uid not in uids_b
+        all_uids = uids_a + uids_b
+        assert len(set(all_uids)) == 4
+        assert all(decode_solution_uid(uid) != 0 for uid in all_uids)
 
 
 # ===========================================================================
