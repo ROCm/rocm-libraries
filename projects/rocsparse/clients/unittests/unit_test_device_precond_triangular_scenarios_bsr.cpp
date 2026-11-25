@@ -217,14 +217,9 @@ namespace
             ASSERT_NE(buffer.ptr, nullptr);
         }
 
-        // Sets every byte of the buffer to 0xff before every call, so that a call relying
-        // on zeroed memory, or on what an earlier call left in the buffer, shows.
         void poison()
         {
-            hipStream_t stream = nullptr;
-            EXPECT_EQ(rocsparse_get_stream(handle, &stream), rocsparse_status_success);
-            if(buffer.n != 0)
-                EXPECT_EQ(hipMemsetAsync(buffer.ptr, 0xff, buffer.n, stream), hipSuccess);
+            triangular_scenarios::poison(handle, buffer);
         }
 
         // Replaces the values on the device (bsrilu0 and bsric0 factor them in place);
@@ -428,7 +423,7 @@ namespace
         // Solves with L, then with U, and returns the result.
         std::vector<double> lu_solve(const std::vector<double>& b)
         {
-            device_vector<double> x(b), y(b.size()), z(b.size());
+            device_vector<double> x(b), y(sentinel(b.size())), z(sentinel(b.size()));
             EXPECT_EQ(sv_solve(L, x, y), rocsparse_status_success);
             EXPECT_EQ(sv_solve(U, y, z), rocsparse_status_success);
             return to_host(z);
@@ -451,10 +446,28 @@ namespace
         // Solves with the lower triangle of the values, then with its transpose.
         std::vector<double> llt_solve(const std::vector<double>& b)
         {
-            device_vector<double> x(b), y(b.size()), z(b.size());
+            device_vector<double> x(b), y(sentinel(b.size())), z(sentinel(b.size()));
             EXPECT_EQ(sv_solve(A, x, y), rocsparse_status_success);
             EXPECT_EQ(sv_solve(A, y, z, rocsparse_operation_transpose), rocsparse_status_success);
             return to_host(z);
+        }
+
+        // Replaces the mat_info by a copy of it and destroys the original.
+        rocsparse_status replace_info_by_copy()
+        {
+            rocsparse_mat_info copy   = nullptr;
+            rocsparse_status   status = rocsparse_create_mat_info(&copy);
+            if(status != rocsparse_status_success)
+                return status;
+            status = rocsparse_copy_mat_info(copy, info);
+            if(status != rocsparse_status_success)
+            {
+                (void)rocsparse_destroy_mat_info(copy);
+                return status;
+            }
+            status = rocsparse_destroy_mat_info(info);
+            info   = copy;
+            return status;
         }
 
         int32_t bsrsv_pivot()
@@ -539,7 +552,7 @@ namespace
         case routine::bsrsv:
         {
             const auto            b = right_hand_side(p.n());
-            device_vector<double> x(b), y(p.n());
+            device_vector<double> x(b), y(sentinel(p.n()));
             ASSERT_EQ(p.sv_solve(p.A, x, y), rocsparse_status_success);
             expect_close(to_host(y), host_lower_solve(p.scalar, b, 1), tol);
             check(p.bsrsv_pivot(), is(no_pivot), "bsrsv_zero_pivot after the solve");
@@ -548,7 +561,7 @@ namespace
         case routine::bsrsm:
         {
             const auto            b = right_hand_side(p.n(), block_problem::nrhs);
-            device_vector<double> B(b), X(b.size());
+            device_vector<double> B(b), X(sentinel(b.size()));
             ASSERT_EQ(p.sm_solve(p.A, B, X), rocsparse_status_success);
             expect_close(to_host(X), host_lower_solve(p.scalar, b, block_problem::nrhs), tol);
             check(p.bsrsm_pivot(), is(no_pivot), "bsrsm_zero_pivot after the solve");
@@ -625,7 +638,7 @@ namespace
                            const std::vector<double>* b = nullptr)
     {
         const auto             rhs = b ? *b : right_hand_side(p.n(), columns(r));
-        device_vector<double>  B(rhs), X(rhs.size());
+        device_vector<double>  B(rhs), X(sentinel(rhs.size()));
         const rocsparse_status status
             = (r == routine::bsrsv) ? p.sv_solve(descr, B, X) : p.sm_solve(descr, B, X);
         if(x)
@@ -963,36 +976,45 @@ TEST_F(PrecondTriangularScenariosBsr, clear_keeps_the_other_routines)
     }
 }
 
-// A copy of the mat_info carries the analysis data that bsrilu0, bsrsv and bsrsm share,
-// and stays usable for solves once the original is destroyed.
+// A copy of the mat_info carries the analysis data that bsrilu0, bsrsv and bsrsm share
+// and the zero pivots, and stays usable for solves once the original is destroyed.
 TEST_F(PrecondTriangularScenariosBsr, copy_outlives_the_original)
 {
-    const auto m  = test_matrix(rocsparse_direction_row, true);
-    const auto b  = right_hand_side(m.mb * m.block_dim);
-    const auto bm = right_hand_side(m.mb * m.block_dim, block_problem::nrhs);
-    for(const auto policy : policies)
+    const int32_t r     = 2;
+    const auto    clean = test_matrix(rocsparse_direction_row, true);
+    const int32_t n     = clean.mb * clean.block_dim;
+    const auto    b     = right_hand_side(n);
+    const auto    bm    = right_hand_side(n, block_problem::nrhs);
+    for(const bool missing_diagonal : {false, true})
     {
-        SCOPED_TRACE(name(policy));
-        block_problem p(handle, m, rocsparse_index_base_zero);
-        ASSERT_NO_FATAL_FAILURE(p.init());
-        ASSERT_NO_FATAL_FAILURE(p.ilu0_workflow(order::lower_first, policy));
-        ASSERT_EQ(p.sm_analysis(p.A, policy), rocsparse_status_success);
-        auto f = p.scalar;
-        f.val  = p.scalar_values();
+        const auto    m    = missing_diagonal ? without_block(clean, r, r) : clean;
+        const int32_t want = missing_diagonal ? r : no_pivot;
+        for(const auto base : bases)
+        {
+            for(const auto policy : policies)
+            {
+                SCOPED_TRACE(::testing::Message() << "missing diagonal " << missing_diagonal << ", "
+                                                  << name(base) << ", " << name(policy));
+                block_problem p(handle, m, base);
+                ASSERT_NO_FATAL_FAILURE(p.init());
+                ASSERT_NO_FATAL_FAILURE(p.ilu0_workflow(order::lower_first, policy));
+                ASSERT_EQ(p.sm_analysis(p.A, policy), rocsparse_status_success);
+                const auto f = with_values(p.scalar, p.scalar_values());
 
-        rocsparse_mat_info copy = nullptr;
-        ASSERT_EQ(rocsparse_create_mat_info(&copy), rocsparse_status_success);
-        ASSERT_EQ(rocsparse_copy_mat_info(copy, p.info), rocsparse_status_success);
-        ASSERT_EQ(rocsparse_destroy_mat_info(p.info), rocsparse_status_success);
-        p.info = copy;
-
-        const auto tol = tolerance<double>(max_row_length(f));
-        check(p.bsrilu0_pivot(), is(no_pivot), "bsrilu0_zero_pivot of the copy");
-        expect_close(p.lu_solve(b), host_lu_solve(p.scalar, f.val, b), tol);
-        check(p.bsrsv_pivot(), is(no_pivot), "bsrsv_zero_pivot after the solves");
-        device_vector<double> B(bm), X(std::vector<double>(bm.size(), 7.0));
-        ASSERT_EQ(p.sm_solve(p.A, B, X), rocsparse_status_success);
-        expect_close(to_host(X), host_lower_solve(f, bm, block_problem::nrhs), tol);
+                ASSERT_EQ(p.replace_info_by_copy(), rocsparse_status_success);
+                check(p.bsrilu0_pivot(), is(want), "bsrilu0_zero_pivot of the copy");
+                check(p.bsrsv_pivot(), is(want), "bsrsv_zero_pivot of the copy");
+                if(!missing_diagonal)
+                {
+                    const auto tol = tolerance<double>(max_row_length(f));
+                    expect_close(p.lu_solve(b), host_lu_solve(p.scalar, f.val, b), tol);
+                    check(p.bsrsv_pivot(), is(no_pivot), "bsrsv_zero_pivot after the solves");
+                    device_vector<double> B(bm), X(sentinel(bm.size()));
+                    ASSERT_EQ(p.sm_solve(p.A, B, X), rocsparse_status_success);
+                    expect_close(to_host(X), host_lower_solve(f, bm, block_problem::nrhs), tol);
+                }
+            }
+        }
     }
 }
 
@@ -1467,11 +1489,12 @@ namespace
     }
 }
 
-// The bsrsv, bsrilu0 and bsric0 buffer size pages say that the sizes are identical on
-// one pattern, so that one buffer can be shared, and name no operation. That holds for
-// bsrsv with op none; with op transpose bsrsv needs more, so a buffer sized by
-// bsrilu0_buffer_size or bsric0_buffer_size is too small for it. The pages need to
-// restrict the statement to op none.
+// The bsrilu0 and bsric0 buffer size pages say that their size is identical to that of
+// bsrsv on one pattern, so that one buffer can be shared, and name no operation (the
+// bsrsv page says nothing of it). That holds for bsrsv with op none; with op transpose
+// bsrsv needs more, so a buffer sized by bsrilu0_buffer_size or bsric0_buffer_size is
+// too small for it. The bsrilu0 and bsric0 pages need to restrict the statement to op
+// none.
 TEST_F(PrecondTriangularScenariosBsr, buffer_size_of_the_solve_and_the_factorizations)
 {
     for(const auto dir : directions)
@@ -1587,6 +1610,7 @@ TEST_F(PrecondTriangularScenariosBsr, conjugate_transpose)
         size_t size = 0;
         check(bsrsm_buffer_size(p, trans_A, trans_X, nrhs, &size), expected, "bsrsm_buffer_size");
         ASSERT_NO_FATAL_FAILURE(p.reserve(size));
+        p.poison();
         check(rocsparse_dbsrsm_analysis(handle,
                                         p.m.dir,
                                         trans_A,
@@ -1608,6 +1632,7 @@ TEST_F(PrecondTriangularScenariosBsr, conjugate_transpose)
         const double          one = 1.0;
         const int32_t         ld  = bsrsm_ld(p, trans_X, nrhs);
         device_vector<double> B(right_hand_side(p.n(), nrhs)), X(p.n() * nrhs);
+        p.poison();
         check(rocsparse_dbsrsm_solve(handle,
                                      p.m.dir,
                                      trans_A,
@@ -1663,7 +1688,7 @@ TEST_F(PrecondTriangularScenariosBsr, DISABLED_bsrsv_unit_solve_after_a_reused_a
     ASSERT_EQ(p.ilu0_analysis(rocsparse_analysis_policy_force), rocsparse_status_success);
     ASSERT_EQ(p.sv_analysis(p.L, rocsparse_analysis_policy_reuse), rocsparse_status_success);
     const auto            b = right_hand_side(p.n());
-    device_vector<double> x(b), y(std::vector<double>(p.n(), 7.0));
+    device_vector<double> x(b), y(sentinel(p.n()));
     ASSERT_EQ(p.sv_solve(p.L, x, y), rocsparse_status_success);
     expect_close(to_host(y),
                  host_lower_solve(p.scalar, b, 1, rocsparse_diag_type_unit),

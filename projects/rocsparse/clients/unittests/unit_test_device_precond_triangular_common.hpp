@@ -26,7 +26,8 @@
 
 // What the scenario tests of the CSR and BSR triangular analysis data share: the
 // expectations (today's value, the documented one and the known defect between them),
-// the host solves, and the zero pivot queries in host or device memory.
+// the host solves, the poisoned buffers and results, and the zero pivot queries in host
+// or device memory.
 
 #include "unit_test_device_precond_common.hpp"
 
@@ -167,6 +168,13 @@ namespace triangular_scenarios
         return b;
     }
 
+    // The initial entries of a result that is compared with a host reference, so that an
+    // entry the call leaves unwritten shows instead of passing with what the memory held.
+    inline std::vector<double> sentinel(size_t n)
+    {
+        return std::vector<double>(n, 7.0);
+    }
+
     // The `cols` x `rows` column major transpose of the `rows` x `cols` column major `v`.
     inline std::vector<double> transposed(const std::vector<double>& v, int32_t rows, int32_t cols)
     {
@@ -182,6 +190,13 @@ namespace triangular_scenarios
         for(int32_t p = a.ptr[row]; p < a.ptr[row + 1]; ++p)
             if(a.ind[p] == row)
                 a.val[p] = 0.0;
+        return a;
+    }
+
+    // The matrix with the values `val` on its pattern.
+    inline csr_matrix<double> with_values(csr_matrix<double> a, const std::vector<double>& val)
+    {
+        a.val = val;
         return a;
     }
 
@@ -293,6 +308,16 @@ namespace triangular_scenarios
         EXPECT_EQ(rocsparse_set_mat_fill_mode(descr, fill), rocsparse_status_success);
         EXPECT_EQ(rocsparse_set_mat_diag_type(descr, diag), rocsparse_status_success);
         return descr;
+    }
+
+    // Sets every byte of `buffer` to 0xff on the stream of `handle`, so that a call relying
+    // on zeroed memory, or on what an earlier call left in the buffer, shows.
+    inline void poison(rocsparse_handle handle, device_vector<char>& buffer)
+    {
+        hipStream_t stream = nullptr;
+        EXPECT_EQ(rocsparse_get_stream(handle, &stream), rocsparse_status_success);
+        if(buffer.n != 0)
+            EXPECT_EQ(hipMemsetAsync(buffer.ptr, 0xff, buffer.n, stream), hipSuccess);
     }
 
     // Runs `call` with the position in host memory, or in device memory when

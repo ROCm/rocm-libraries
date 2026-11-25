@@ -212,14 +212,9 @@ namespace
             ASSERT_NE(buffer.ptr, nullptr);
         }
 
-        // Sets every byte of the buffer to 0xff before every call, so that a call relying
-        // on zeroed memory, or on what an earlier call left in the buffer, shows.
         void poison()
         {
-            hipStream_t stream = nullptr;
-            EXPECT_EQ(rocsparse_get_stream(handle, &stream), rocsparse_status_success);
-            if(buffer.n != 0)
-                EXPECT_EQ(hipMemsetAsync(buffer.ptr, 0xff, buffer.n, stream), hipSuccess);
+            triangular_scenarios::poison(handle, buffer);
         }
 
         // Replaces the values of the matrix on the device (csrilu0 factors them in
@@ -340,7 +335,7 @@ namespace
         // Solves with L, then with U, and returns the result.
         std::vector<double> lu_solve(const std::vector<double>& b)
         {
-            device_vector<double> x(b), y(b.size()), z(b.size());
+            device_vector<double> x(b), y(sentinel(b.size())), z(sentinel(b.size()));
             EXPECT_EQ(sv_solve(L, x, y), rocsparse_status_success);
             EXPECT_EQ(sv_solve(U, y, z), rocsparse_status_success);
             return to_host(z);
@@ -363,7 +358,7 @@ namespace
         // Solves with the lower triangle of the values, then with its transpose.
         std::vector<double> llt_solve(const std::vector<double>& b)
         {
-            device_vector<double> x(b), y(b.size()), z(b.size());
+            device_vector<double> x(b), y(sentinel(b.size())), z(sentinel(b.size()));
             EXPECT_EQ(sv_solve(A, x, y), rocsparse_status_success);
             EXPECT_EQ(sv_solve(A, y, z, rocsparse_operation_transpose), rocsparse_status_success);
             return to_host(z);
@@ -634,7 +629,7 @@ namespace
         case routine::csrsv:
         {
             const auto            b = right_hand_side(p.a.n);
-            device_vector<double> x(b), y(p.a.n);
+            device_vector<double> x(b), y(sentinel(p.a.n));
             ASSERT_EQ(p.sv_solve(p.A, x, y), rocsparse_status_success);
             expect_close(to_host(y), host_lower_solve(p.a, b, 1), tol);
             check(p.csrsv_pivot(p.A), is(no_pivot), "csrsv_zero_pivot after the solve");
@@ -1310,11 +1305,13 @@ TEST_F(PrecondTriangularScenarios, copy_has_its_own_tolerance)
     }
 }
 
-// copy_mat_info into itself, and into a mat_info analysed for another matrix. The
-// documentation lists invalid_pointer only for an invalid src or dest, and no status for
-// a copy between two analyses of different sizes (which fails part way through). The
-// copy into itself is rejected on purpose (copy_mat_info checks src == dest) as an
-// invalid pointer; the page needs to say so.
+// copy_mat_info into itself, and into a mat_info analysed for another matrix. The copy
+// into itself is rejected on purpose (copy_mat_info checks src == dest) as an invalid
+// pointer; the page lists invalid_pointer only for an invalid src or dest and needs to
+// say so. The page asks only for an initialized src and dest, so the other copy is to
+// succeed and replace what the destination held, as in copy_replaces_the_destination.
+// It stops with an internal error at the first analysis of another size instead,
+// leaving what it copied before that in the destination.
 TEST_F(PrecondTriangularScenarios, copy_mat_info_status)
 {
     triangular_problem small(handle, make_grid_matrix<double>(3, true), rocsparse_index_base_zero);
@@ -1330,7 +1327,9 @@ TEST_F(PrecondTriangularScenarios, copy_mat_info_status)
           is(rocsparse_status_invalid_pointer),
           "copy_mat_info into itself");
     check(rocsparse_copy_mat_info(small.info, large.info),
-          is(rocsparse_status_internal_error),
+          known_defect(rocsparse_status_internal_error,
+                       rocsparse_status_success,
+                       "a copy into a mat_info analysed for another size fails part way through"),
           "copy_mat_info into a mat_info analysed for another matrix");
 }
 
@@ -1949,7 +1948,7 @@ TEST_F(PrecondTriangularScenarios, csrsv_conjugate_transpose)
           expected,
           "csrsv_analysis");
     const auto            b = right_hand_side(p.a.n);
-    device_vector<double> x(b), y(p.a.n);
+    device_vector<double> x(b), y(sentinel(p.a.n));
     check(p.sv_solve(p.A, x, y, conj_transpose), expected, "csrsv_solve");
     expect_close(
         to_host(y), host_lower_transposed_solve(p.a, b, 1), tolerance<double>(max_row_length(p.a)));
@@ -2017,7 +2016,7 @@ TEST_F(PrecondTriangularScenarios, csrsv_triangular_matrix_type)
     ASSERT_NO_FATAL_FAILURE(p.reserve(size));
     check(p.sv_analysis(T, rocsparse_analysis_policy_force), expected, "csrsv_analysis");
     const auto            b = right_hand_side(p.a.n);
-    device_vector<double> x(b), y(p.a.n);
+    device_vector<double> x(b), y(sentinel(p.a.n));
     check(p.sv_solve(T, x, y), expected, "csrsv_solve");
     expect_close(to_host(y), host_lower_solve(p.a, b, 1), tolerance<double>(max_row_length(p.a)));
     (void)rocsparse_destroy_mat_descr(T);
@@ -2088,12 +2087,10 @@ TEST_F(PrecondTriangularScenarios, DISABLED_csrsv_solve_after_a_reused_analysis)
         ASSERT_EQ(p.ilu0_analysis(rocsparse_analysis_policy_force), rocsparse_status_success);
         ASSERT_EQ(p.ilu0(), rocsparse_status_success);
         ASSERT_EQ(p.sv_analysis(p.L, rocsparse_analysis_policy_reuse), rocsparse_status_success);
-        device_vector<double> x(b), y(std::vector<double>(a.n, 7.0));
+        device_vector<double> x(b), y(sentinel(a.n));
         ASSERT_EQ(p.sv_solve(p.L, x, y), rocsparse_status_success);
-        auto f = a;
-        f.val  = p.values();
         expect_close(to_host(y),
-                     host_lower_solve(f, b, 1, rocsparse_diag_type_unit),
+                     host_lower_solve(with_values(a, p.values()), b, 1, rocsparse_diag_type_unit),
                      tolerance<double>(max_row_length(a)));
         check(p.csrsv_pivot(p.L), is(no_pivot), "csrsv_zero_pivot after the solve with L");
     }

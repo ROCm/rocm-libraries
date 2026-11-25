@@ -64,13 +64,6 @@ namespace
         return a;
     }
 
-    // The matrix with the values `val` on its pattern.
-    csr_matrix<double> with_values(csr_matrix<double> a, const std::vector<double>& val)
-    {
-        a.val = val;
-        return a;
-    }
-
     struct dense_vector
     {
         device_vector<double> data;
@@ -179,6 +172,7 @@ namespace
             if(status != rocsparse_status_success)
                 return status;
             device_vector<char> buffer(size ? size : size_t{1});
+            poison(handle, buffer);
             return rocsparse_sptrsv(
                 handle, descr, A, x.d, y.d, stage, size, size ? buffer.ptr : nullptr, nullptr);
         }
@@ -270,6 +264,7 @@ namespace
             if(status != rocsparse_status_success)
                 return status;
             device_vector<char> buffer(size ? size : size_t{1});
+            poison(handle, buffer);
             return rocsparse_sptrsm(
                 handle, descr, A, X.d, Y.d, stage, size, size ? buffer.ptr : nullptr, nullptr);
         }
@@ -305,6 +300,7 @@ namespace
             if(status != rocsparse_status_success)
                 return status;
             device_vector<char> buffer(size ? size : size_t{1});
+            poison(handle, buffer);
             return api<K>::run(
                 handle, guard.descr, A, A, api<K>::stage(s), size, size ? buffer.ptr : nullptr);
         }
@@ -392,7 +388,11 @@ namespace
         EXPECT_EQ(call(rocsparse_spsv_stage_buffer_size, nullptr), rocsparse_status_success);
         device_vector<char> buffer(size ? size : size_t{1});
         if(preprocess)
+        {
+            poison(handle, buffer);
             EXPECT_EQ(call(rocsparse_spsv_stage_preprocess, buffer.ptr), rocsparse_status_success);
+        }
+        poison(handle, buffer);
         const rocsparse_status status = call(rocsparse_spsv_stage_compute, buffer.ptr);
         y                             = out.values();
         return status;
@@ -405,11 +405,12 @@ namespace
                               rocsparse_operation  op,
                               int64_t              nrhs,
                               std::vector<double>  b,
-                              std::vector<double>& c)
+                              std::vector<double>& c,
+                              double               initial = 0.0)
     {
         const double  alpha = 1.0;
         const int64_t n     = d.base.n;
-        dense_matrix  B(b, n, nrhs), C(std::vector<double>(b.size(), 0.0), n, nrhs);
+        dense_matrix  B(b, n, nrhs), C(std::vector<double>(b.size(), initial), n, nrhs);
         size_t        size = 0;
         const auto    call = [&](rocsparse_spsm_stage stage, void* buffer) {
             return rocsparse_spsm(handle,
@@ -428,7 +429,11 @@ namespace
         EXPECT_EQ(call(rocsparse_spsm_stage_buffer_size, nullptr), rocsparse_status_success);
         device_vector<char> buffer(size ? size : size_t{1});
         if(preprocess)
+        {
+            poison(handle, buffer);
             EXPECT_EQ(call(rocsparse_spsm_stage_preprocess, buffer.ptr), rocsparse_status_success);
+        }
+        poison(handle, buffer);
         const rocsparse_status status = call(rocsparse_spsm_stage_compute, buffer.ptr);
         c                             = C.values();
         return status;
@@ -472,7 +477,10 @@ class PrecondTriangularScenariosGeneric : public HandleTest
 namespace
 {
     // The index types decide the sizes of the shared analysis arrays, and the position is
-    // reported in the index base of the matrix.
+    // reported in the index base of the matrix. The sptrsv and sptrsm output enumerators
+    // in rocsparse-types.h describe zero_pivot_position and singularity_position as an
+    // "int64_t based position", which names the type and not the base; they need to say
+    // that the position is in the index base of the matrix.
     template <typename I, typename J>
     void check_sptrsv_outputs_belong_to_the_descriptor(rocsparse_handle     handle,
                                                        rocsparse_index_base base)
@@ -810,9 +818,11 @@ namespace
         if(status != rocsparse_status_success || last == rocsparse_spsv_stage_buffer_size)
             return status;
         device_vector<char> buffer(size ? size : size_t{1});
+        poison(handle, buffer);
         status = call(rocsparse_spsv_stage_preprocess, buffer.ptr);
         if(status != rocsparse_status_success || last == rocsparse_spsv_stage_preprocess)
             return status;
+        poison(handle, buffer);
         return call(rocsparse_spsv_stage_compute, buffer.ptr);
     }
 
@@ -835,9 +845,11 @@ namespace
         if(status != rocsparse_status_success || last == rocsparse_spsm_stage_buffer_size)
             return status;
         device_vector<char> buffer(size ? size : size_t{1});
+        poison(handle, buffer);
         status = call(rocsparse_spsm_stage_preprocess, buffer.ptr);
         if(status != rocsparse_status_success || last == rocsparse_spsm_stage_preprocess)
             return status;
+        poison(handle, buffer);
         return call(rocsparse_spsm_stage_compute, buffer.ptr);
     }
 
@@ -1233,6 +1245,7 @@ TEST_F(PrecondTriangularScenariosGeneric, spsv_buffer_is_not_persistent)
         ASSERT_EQ(call(rocsparse_spsv_stage_buffer_size, nullptr), rocsparse_status_success);
         const size_t                         n = size ? size : size_t{1};
         std::unique_ptr<device_vector<char>> first(new device_vector<char>(n));
+        poison(handle, *first);
         ASSERT_EQ(call(rocsparse_spsv_stage_preprocess, first->ptr), rocsparse_status_success);
         device_vector<char> second(std::vector<char>(n, static_cast<char>(0xff)));
         first.reset();
@@ -1367,14 +1380,17 @@ TEST_F(PrecondTriangularScenariosGeneric, DISABLED_sptrsm_reusing_an_sptrsv_anal
 }
 
 // The compute stage of spsm without the preprocess dereferences the analysis it does
-// not have (spsv returns rocsparse_status_invalid_pointer in that case).
+// not have (spsv returns rocsparse_status_invalid_pointer in that case, and leaves y
+// alone).
 TEST_F(PrecondTriangularScenariosGeneric, DISABLED_spsm_compute_without_the_preprocess)
 {
     const auto a = make_grid_matrix<double>(4, true);
+    const auto b = right_hand_side(a.n, 2);
     device_csr d;
     d.init(a, 1, true);
     std::vector<double> c;
-    check(run_spsm(handle, d, false, rocsparse_operation_none, 2, right_hand_side(a.n, 2), c),
+    check(run_spsm(handle, d, false, rocsparse_operation_none, 2, b, c, 7.0),
           is(rocsparse_status_invalid_pointer),
           "spsm compute without the preprocess");
+    EXPECT_EQ(c, std::vector<double>(b.size(), 7.0));
 }
