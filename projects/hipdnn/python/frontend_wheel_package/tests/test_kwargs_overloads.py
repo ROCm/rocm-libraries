@@ -478,7 +478,9 @@ def _rmsnorm_backward(has_dbias):
 def _block_scale_dequantize(keywords, compute):
     graph, t = _graph(compute)
     x = t.input("x", [2, 64, 32, 32])
-    scale = t.input("scale", [2, 2, 32, 32])
+    # block_size [32] applies to the last dimension (block sizes align to the
+    # trailing dimensions), so the scale is [2, 64, 32, 1].
+    scale = t.input("scale", [2, 64, 32, 1])
     if keywords:
         y = graph.block_scale_dequantize(
             x,
