@@ -1235,7 +1235,7 @@ _PREBUILT: dict[tuple[str, str], bytes | Exception] = {}
 
 def _gpu_case_target(route: str) -> tuple[str, int] | str:
     """``(arch, wave size)`` of the GPU the cases run on with ``route``, or why
-    they are skipped here (declaring the runner lane of a processor they have
+    they are skipped here (declaring the runner hardware of a processor they have
     not run on, when it has one)."""
     arch, absence = probe_device_arch()
     if arch is None:

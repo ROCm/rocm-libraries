@@ -51,8 +51,8 @@ CONFIG = TorchUseKind.CONFIG
         ("import pytest\ntorch = pytest.importorskip('torch')\n", {IMPORTORSKIP}),
         (
             (
-                "from rocke.tests.lanes import TORCH_IN_CI, import_or_skip_until\n"
-                "import_or_skip_until('torch', TORCH_IN_CI)\n"
+                "from rocke.tests.lanes import TICKET, import_or_skip_until\n"
+                "import_or_skip_until('torch', TICKET)\n"
             ),
             {IMPORTORSKIP},
         ),

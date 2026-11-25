@@ -17,7 +17,7 @@ import numpy as np
 import pytest
 from rocke.runtime.device_array import DeviceArray, host_values
 from rocke.tests.gpu import probe_device_arch
-from rocke.tests.lanes import TORCH_IN_CI, arch_skip_reason, import_or_skip_until
+from rocke.tests.lanes import TICKET, arch_skip_reason, import_or_skip_until
 
 from dispatch.sdpa.bind_unified import (
     _LaunchPlan,
@@ -68,7 +68,7 @@ _TORCH_CASES = torch_caller_cases(_CASES)
 @pytest.mark.parametrize("case", _TORCH_CASES, ids=[c.id for c in _TORCH_CASES])
 def test_torch_callers_match_sdpa_reference(case):
     """The production callers pass torch tensors: a few cases with them."""
-    import_or_skip_until("torch", TORCH_IN_CI)
+    import_or_skip_until("torch", TICKET)
     req = request_from_case(case, ARCH)
     assert bind_and_check(sdpa_unified_bind, case, req, kind="torch") == []
 

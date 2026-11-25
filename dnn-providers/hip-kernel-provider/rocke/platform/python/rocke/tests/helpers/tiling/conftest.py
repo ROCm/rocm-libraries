@@ -19,7 +19,7 @@ from typing import TypeVar
 import pytest
 
 from rocke.tests.gpu import current_device_arch, current_device_arch_in
-from rocke.tests.lanes import CI_TEST_TOOLS, skip_until
+from rocke.tests.lanes import BUILD_VARIANT, skip_until
 from rocke.tests.pytest_roots import configure_pytest_root
 
 _Fixture = TypeVar("_Fixture", bound=Callable[..., object])
@@ -66,7 +66,7 @@ def requires_matplotlib() -> None:
         import matplotlib  # noqa: F401
     except ModuleNotFoundError:
         skip_until(
-            CI_TEST_TOOLS,
+            BUILD_VARIANT,
             reason="matplotlib is not installed; it is needed to draw figures",
         )
 

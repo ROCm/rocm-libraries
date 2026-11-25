@@ -17,7 +17,7 @@ import textwrap
 from pathlib import Path
 
 import pytest
-from rocke.tests.lanes import EXHAUSTIVE_CASES, SOURCE_TREE_CASES, skip_until_reason
+from rocke.tests.lanes import SOURCE_TREE, TICKET, skip_until_reason
 from rocke.tests.run_records import (
     OTHER_SHARD,
     RAN_OUTCOMES,
@@ -135,9 +135,7 @@ def test_each_test_event_is_recorded_with_its_node_and_reason(tmp_path):
         "test_cases.py",
         "test_deselected",
         "deselected",
-        skip_until_reason(
-            SOURCE_TREE_CASES, reason="deselected by -m 'not integration'"
-        ),
+        skip_until_reason(SOURCE_TREE, reason="deselected by -m 'not integration'"),
     ) in events
     collected = {node for file, node, event, _ in events if event == "collected"}
     assert {
@@ -213,9 +211,7 @@ def test_a_deselection_is_put_down_to_the_filter_that_made_it(tmp_path):
         (
             "test_marked",
             "deselected",
-            skip_until_reason(
-                SOURCE_TREE_CASES, reason="deselected by -m 'not integration'"
-            ),
+            skip_until_reason(SOURCE_TREE, reason="deselected by -m 'not integration'"),
         ),
     }
 
@@ -256,7 +252,7 @@ def test_a_marker_deselection_declares_the_lane_whose_marker_rejects_it(tmp_path
     assert {
         (node, why) for _, node, event, why in _events(records) if event == "deselected"
     } == {
-        ("test_sweep", skip_until_reason(EXHAUSTIVE_CASES, reason=reason)),
+        ("test_sweep", skip_until_reason(TICKET, reason=reason)),
         ("test_gpu_sweep", reason),
         ("test_on_gpu", reason),
     }

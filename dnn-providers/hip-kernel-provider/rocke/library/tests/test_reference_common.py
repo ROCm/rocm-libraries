@@ -39,7 +39,7 @@ from reference_common.numeric import (
     encode,
     max_abs_upper,
 )
-from rocke.tests.lanes import SOURCE_TREE_CASES, skip_until
+from rocke.tests.lanes import SOURCE_TREE, skip_until
 from rocke.tests.run_records import fixture_session_environment
 
 from ._child_pytest import pin_child_rootdir
@@ -3833,7 +3833,7 @@ def _published_bundle_data(spec, architecture, variant):
                 + display_command(["dvc", "pull", str(pointer)])
             )
         skip_until(
-            SOURCE_TREE_CASES,
+            SOURCE_TREE,
             reason=f"no {name} bundle is installed at {bundle}; installed trees have "
             "it only when built with ROCKE_INSTALL_TEST_GPU_REFERENCES=ON and "
             "assembled with its architecture's test artifact",
@@ -4392,7 +4392,7 @@ def _baseline_repository(tests, revision):
 
     if installed_test_root(tests) is not None:
         skip_until(
-            SOURCE_TREE_CASES,
+            SOURCE_TREE,
             reason="installed test trees have no git history to export locked "
             "baselines from; run this check from a rocKE source checkout",
         )

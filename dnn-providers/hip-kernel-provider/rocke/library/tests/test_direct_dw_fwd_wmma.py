@@ -19,7 +19,7 @@ from __future__ import annotations
 import unittest
 
 from rocke.runtime.hip_module import get_device_arch
-from rocke.tests.lanes import BINDING_LANE, arch_skip_reason, import_or_skip_until
+from rocke.tests.lanes import BUILD_VARIANT, arch_skip_reason, import_or_skip_until
 
 from kernels.common.conv_direct_dw_fwd_wmma import (
     DwFwdWmmaSpec,
@@ -96,7 +96,7 @@ class TestDwFwdWmmaSpec(unittest.TestCase):
         tensor-size rules (0 bytes) and gave a zero grid Y."""
         import dataclasses
 
-        eng = import_or_skip_until("rocke_library_engine", BINDING_LANE)
+        eng = import_or_skip_until("rocke_library_engine", BUILD_VARIANT)
         from kernels.common.conv_direct_grouped import PROBLEM_DIMS
         from kernels.conv.engine_bridge import conv_direct_dw_fwd_wmma_spec_to_dict
 
@@ -154,7 +154,7 @@ class TestDwFwdWmmaSpec(unittest.TestCase):
     def test_engines_agree_on_specs(self):
         """The C++ engine's validator, kernel name, grid and LDS size match
         Python's over the AOT grid and a set of rejected specs."""
-        eng = import_or_skip_until("rocke_library_engine", BINDING_LANE)
+        eng = import_or_skip_until("rocke_library_engine", BUILD_VARIANT)
         from kernels.conv.direct_aot_jobs import (
             DIRECT_CAPABILITIES,
             _knob_grid,

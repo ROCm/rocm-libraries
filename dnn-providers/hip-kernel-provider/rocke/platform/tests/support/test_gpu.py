@@ -15,7 +15,7 @@ import pytest
 from rocke.core.arch import known_arches
 from rocke.tests.gpu import current_device_arch, current_device_arch_in
 from rocke.tests.lanes import (
-    MULTI_GPU_RUNNER,
+    RUNNER_HARDWARE,
     lanes_waited_for,
     runner_lanes_for,
     skip_until,
@@ -44,7 +44,7 @@ def test_reports_the_only_devices_arch():
 
 def test_follows_a_change_of_current_device():
     if hip.get_device_count() < 2:
-        skip_until(MULTI_GPU_RUNNER, reason="needs two GPUs")
+        skip_until(RUNNER_HARDWARE, reason="needs two GPUs")
     previous = hip.current_device()
     try:
         _select_device(1)
@@ -56,7 +56,7 @@ def test_follows_a_change_of_current_device():
 
 
 def _another_arch_with(runner_lane: bool) -> str:
-    """A known arch that is not the current GPU's, with a runner lane CI lacks
+    """A known arch that is not the current GPU's, whose GPU no CI runner has
     (``rocke.tests.lanes.runner_lanes_for``) or without one."""
     arch = current_device_arch()
     return next(

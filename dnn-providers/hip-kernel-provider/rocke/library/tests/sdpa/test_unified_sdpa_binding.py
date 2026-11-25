@@ -18,9 +18,9 @@ from dataclasses import replace
 
 import numpy as np
 import pytest
-from rocke.tests.lanes import TORCH_IN_CI, import_or_skip_until
+from rocke.tests.lanes import TICKET, import_or_skip_until
 
-torch = import_or_skip_until("torch", TORCH_IN_CI)
+torch = import_or_skip_until("torch", TICKET)
 
 from rocke.numeric.sdpa_reference import hipdnn_left_to_window, sdpa_reference
 

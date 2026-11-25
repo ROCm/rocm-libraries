@@ -18,7 +18,7 @@ from unittest import mock
 from rocke import assets
 from rocke.core import engine_provenance, native_engine
 from rocke.portable_ir.src import online
-from rocke.tests.lanes import SOURCE_TREE_CASES, skip_until
+from rocke.tests.lanes import SOURCE_TREE, skip_until
 
 # The CMake scripts that generate the source build ID, under platform/cmake.
 _BUILD_ID_SCRIPTS = ("rocke_build_id.cmake", "generate_rocke_build_id.cmake")
@@ -34,7 +34,7 @@ def _build_id_generator(test: unittest.TestCase) -> tuple[Path, tuple[str, ...]]
         "(platform/cmake)"
     )
     if not all((source_cmake / name).is_file() for name in _BUILD_ID_SCRIPTS):
-        skip_until(SOURCE_TREE_CASES, reason=reason)
+        skip_until(SOURCE_TREE, reason=reason)
     if not shutil.which("cmake"):
         test.skipTest(reason)
     return source_cmake, _BUILD_ID_SCRIPTS

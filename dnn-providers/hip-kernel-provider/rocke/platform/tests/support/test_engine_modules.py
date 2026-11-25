@@ -33,7 +33,7 @@ from rocke.tests.engine_modules import (
     read_engine_modules_marker,
 )
 from rocke.tests.engines import hide_shared_engine
-from rocke.tests.lanes import BINDING_LANE, SHARED_LIBRARY_LANE, skip_until_reason
+from rocke.tests.lanes import BUILD_VARIANT, skip_until_reason
 
 _ENGINE = "rocke_engine"
 _NO_PYBIND11 = "the build's Python had no pybind11"
@@ -43,14 +43,14 @@ _NO_SHARED_ENGINE = {"shared_engine": "", "shared_engine_absent_reason": _NO_SHA
 needs_engine = pytest.mark.skipif(
     importlib.util.find_spec(_ENGINE) is None,
     reason=skip_until_reason(
-        BINDING_LANE, reason="the rocke_engine module is not built in this environment"
+        BUILD_VARIANT, reason="the rocke_engine module is not built in this environment"
     ),
 )
 _INSTALLED = native_engine.installed_shared_engine_path()
 needs_installed_shared_engine = pytest.mark.skipif(
     _INSTALLED is None,
     reason=skip_until_reason(
-        SHARED_LIBRARY_LANE,
+        BUILD_VARIANT,
         reason="no shared engine is installed beside the rocke package here",
     ),
 )

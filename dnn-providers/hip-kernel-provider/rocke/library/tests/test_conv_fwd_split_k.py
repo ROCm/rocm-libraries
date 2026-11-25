@@ -20,7 +20,7 @@ from unittest import mock
 
 import numpy as np
 from rocke.tests.lanes import (
-    BINDING_LANE,
+    BUILD_VARIANT,
     arch_skip_reason,
     skip_until,
 )
@@ -1026,7 +1026,7 @@ def _engine_or_skip(case):
         import rocke_library_engine  # type: ignore
     except ModuleNotFoundError:
         skip_until(
-            BINDING_LANE,
+            BUILD_VARIANT,
             reason="rocke_library_engine (the conv C++ extension) is not built",
         )
     return rocke_library_engine
@@ -1208,7 +1208,7 @@ class TestSplitKReduceEngine(unittest.TestCase):
             import rocke_library_engine  # type: ignore
         except ModuleNotFoundError:
             skip_until(
-                BINDING_LANE,
+                BUILD_VARIANT,
                 reason="rocke_library_engine (the conv C++ extension) is not built",
             )
         spec = dict(dtype_d="bf16", vec=4, name="x" * 300)

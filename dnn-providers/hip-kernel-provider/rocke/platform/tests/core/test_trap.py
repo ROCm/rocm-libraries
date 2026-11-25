@@ -41,7 +41,7 @@ from rocke.tests.engines import (
     lower_with_engine,
 )
 from rocke.tests.gpu import current_device_arch
-from rocke.tests.lanes import CI_TEST_TOOLS, skip_until
+from rocke.tests.lanes import BUILD_VARIANT, skip_until
 from rocke.tests.subprocess_launcher import (
     rocke_python_command,
     rocke_subprocess_env,
@@ -195,7 +195,7 @@ def test_code_object_holds_s_trap_2_and_halts_only_where_the_trap_is_simulated()
     objdump = _objdump()
     if objdump is None:
         skip_until(
-            CI_TEST_TOOLS,
+            BUILD_VARIANT,
             reason="llvm-objdump not found (LLVM_OBJDUMP / ROCM_PATH / PATH)",
         )
     try:

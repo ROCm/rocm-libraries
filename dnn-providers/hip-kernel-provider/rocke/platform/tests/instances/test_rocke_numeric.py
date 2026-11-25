@@ -35,7 +35,7 @@ import subprocess
 import unittest
 
 from rocke.runtime.hip_module import get_device_arch
-from rocke.tests.lanes import TORCH_IN_CI, skip_needing_arch, skip_until_reason
+from rocke.tests.lanes import TICKET, skip_needing_arch, skip_until_reason
 from rocke.tests.subprocess_launcher import (
     rocke_python_command,
     rocke_subprocess_env,
@@ -147,7 +147,7 @@ class TestNumericVerification(unittest.TestCase):
 
     @unittest.skipUnless(
         _HAVE_TORCH,
-        skip_until_reason(TORCH_IN_CI, reason="FusedMoeForward takes torch tensors"),
+        skip_until_reason(TICKET, reason="FusedMoeForward takes torch tensors"),
     )
     def test_moe_e2e_forward(self):
         """The fused-MoE forward (router, sort, gather, grouped GEMMs, SwiGLU,

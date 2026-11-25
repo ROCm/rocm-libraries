@@ -6,7 +6,7 @@ import re
 from pathlib import Path
 
 import pytest
-from rocke.tests.lanes import SOURCE_TREE_CASES, skip_until
+from rocke.tests.lanes import SOURCE_TREE, skip_until
 
 _INCLUDE_RE = re.compile(r"(?im)^[ \t]*include\s*\(\s*([^\s)]+)\s*\)")
 _REGISTRATION_RE = re.compile(r"\badd_(?:test|executable)\s*\(", re.IGNORECASE)
@@ -32,7 +32,7 @@ def test_cmake_test_registration_is_concern_owned():
     orchestrator = platform / "tests" / "CMakeLists.txt"
     if not orchestrator.is_file():
         skip_until(
-            SOURCE_TREE_CASES,
+            SOURCE_TREE,
             reason="source CMake project is absent from the installed test artifact",
         )
 
@@ -72,7 +72,7 @@ def test_every_registered_cpp_test_is_in_a_provider_tier():
     fragments = platform / "tests" / "cmake"
     if not (categories.is_file() and fragments.is_dir()):
         skip_until(
-            SOURCE_TREE_CASES,
+            SOURCE_TREE,
             reason="the provider tier lists or the CMake fragments are absent here",
         )
     yaml = pytest.importorskip("yaml", reason="reading the tier lists needs PyYAML")

@@ -48,7 +48,7 @@ import pytest
 from rocke.analysis.isa import _extract_mnemonic, _instruction_lines
 from rocke.assets import platform_tools_dir
 from rocke.core.ir import KernelDef
-from rocke.tests.lanes import SOURCE_TREE_CASES, skip_until
+from rocke.tests.lanes import SOURCE_TREE, skip_until
 
 Verdict = Literal["accepted", "rejected", "cannot_judge"]
 
@@ -195,9 +195,9 @@ def assert_target_accepts(ir_text: str, target: str) -> None:
 def skip_without_verdict(reason: str) -> NoReturn:
     """Skip the calling test, for ``reason``, as one :func:`arbiter_verdict`
     cannot judge here: as waiting for the source-tree run when this layout has
-    no platform tools (``rocke.tests.lanes.SOURCE_TREE_CASES``)."""
+    no platform tools (``rocke.tests.lanes.SOURCE_TREE``)."""
     if _validity_tool() is None:
-        skip_until(SOURCE_TREE_CASES, reason=reason)
+        skip_until(SOURCE_TREE, reason=reason)
     pytest.skip(reason)
 
 

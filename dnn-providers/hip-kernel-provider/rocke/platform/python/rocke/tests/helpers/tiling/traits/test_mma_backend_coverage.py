@@ -84,7 +84,7 @@ from rocke.tests.ir_validity import (
     require_arbiter_llvm_flavor,
 )
 from rocke.tests.lane_maps import lane_placements
-from rocke.tests.lanes import SOURCE_TREE_CASES, skip_until
+from rocke.tests.lanes import SOURCE_TREE, skip_until
 
 _CATALOG = load_mma_traits()
 _ROWS = sorted(_CATALOG.by_op_id.values(), key=lambda row: row.op_id)
@@ -101,7 +101,7 @@ def _catalog_tool() -> ModuleType:
     tools = platform_root() / "tools"
     if not (tools / "check_mma_catalog.py").is_file():
         skip_until(
-            SOURCE_TREE_CASES,
+            SOURCE_TREE,
             reason="platform/tools is not installed beside rocke (source tree only)",
         )
     if str(tools) not in sys.path:

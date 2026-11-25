@@ -25,7 +25,7 @@ import pytest
 from rocke.numeric import storage
 from rocke.numeric.compare import peak_relative_error
 from rocke.tests.gpu import current_device_arch_in
-from rocke.tests.lanes import BINDING_LANE, import_or_skip_until
+from rocke.tests.lanes import BUILD_VARIANT, import_or_skip_until
 
 from kernels.common.conv_direct_dgrad_pp_mfma import (
     DgradPpMfmaSpec,
@@ -375,7 +375,7 @@ def test_engines_agree_on_specs():
     """The C++ engine's validator, kernel name, grid and LDS size match
     Python's over the AOT grid and a set of rejected specs (the byte-identity
     gate only covers the IR of specs both engines build)."""
-    eng = import_or_skip_until("rocke_library_engine", BINDING_LANE)
+    eng = import_or_skip_until("rocke_library_engine", BUILD_VARIANT)
     from kernels.conv.engine_bridge import conv_direct_dgrad_pp_mfma_spec_to_dict
 
     specs = []
@@ -429,7 +429,7 @@ def test_engines_agree_on_specs():
 
 def test_binding_rejects_bad_input():
     """A missing, mistyped or partial problem raises in the binding."""
-    eng = import_or_skip_until("rocke_library_engine", BINDING_LANE)
+    eng = import_or_skip_until("rocke_library_engine", BUILD_VARIANT)
     from kernels.conv.engine_bridge import conv_direct_dgrad_pp_mfma_spec_to_dict
 
     good = conv_direct_dgrad_pp_mfma_spec_to_dict(
@@ -463,7 +463,7 @@ def test_binding_rejects_bad_input():
 def test_backend_lowers_through_both_engines():
     """``lower_conv_direct_dgrad_pp_mfma`` gives the same .ll on the Python
     and the C++ engine."""
-    import_or_skip_until("rocke_library_engine", BINDING_LANE)
+    import_or_skip_until("rocke_library_engine", BUILD_VARIANT)
     from kernels.conv.engine_bridge import lower_conv_direct_dgrad_pp_mfma
 
     spec = DgradPpMfmaSpec(problem=dgrad_pp_mfma_problem(_dgrad()), block_k=256)

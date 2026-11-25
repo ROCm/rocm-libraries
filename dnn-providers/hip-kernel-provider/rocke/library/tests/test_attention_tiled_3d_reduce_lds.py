@@ -17,7 +17,7 @@ import tempfile
 from pathlib import Path
 
 import pytest
-from rocke.tests.lanes import CI_TEST_TOOLS, skip_until
+from rocke.tests.lanes import BUILD_VARIANT, skip_until
 
 # An installed test tree carries a copy of the two headers under ``hkp_packs/``
 # (the rocKE umbrella CMake project installs it); a source checkout reads the provider's.
@@ -79,7 +79,7 @@ def _compiled_lds_bytes(kernel, arch: str) -> int:
             lds = analyze_hsaco(Path(fh.name)).resources.lds_bytes
         except FileNotFoundError as e:  # pragma: no cover - no llvm-objdump
             skip_until(
-                CI_TEST_TOOLS, reason=f"HSACO introspection tool unavailable: {e}"
+                BUILD_VARIANT, reason=f"HSACO introspection tool unavailable: {e}"
             )
         except RuntimeError as e:  # pragma: no cover
             pytest.skip(f"HSACO introspection tool unavailable: {e}")

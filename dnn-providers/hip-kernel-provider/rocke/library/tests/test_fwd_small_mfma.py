@@ -24,7 +24,7 @@ from __future__ import annotations
 import unittest
 
 from rocke.runtime.hip_module import get_device_arch
-from rocke.tests.lanes import BINDING_LANE, arch_skip_reason, import_or_skip_until
+from rocke.tests.lanes import BUILD_VARIANT, arch_skip_reason, import_or_skip_until
 
 from kernels.common.conv_direct_grouped import DirectConvProblem
 from kernels.common.conv_fwd_small_mfma import (
@@ -187,7 +187,7 @@ class TestSmallSpecs(unittest.TestCase):
         """The C++ engine's validator, kernel name, grid and LDS size match
         Python's over the AOT grid and a few rejected specs (the byte-identity
         gate only covers the IR of specs both engines build)."""
-        eng = import_or_skip_until("rocke_library_engine", BINDING_LANE)
+        eng = import_or_skip_until("rocke_library_engine", BUILD_VARIANT)
         from kernels.conv.direct_aot_jobs import (
             DIRECT_CAPABILITIES,
             _knob_grid,
@@ -293,7 +293,7 @@ class TestSmallSpecs(unittest.TestCase):
     def test_binding_rejects_bad_input(self):
         """A rejected spec returns the rejection (no grid is computed); a
         missing, mistyped or partial problem raises."""
-        eng = import_or_skip_until("rocke_library_engine", BINDING_LANE)
+        eng = import_or_skip_until("rocke_library_engine", BUILD_VARIANT)
         from kernels.conv.engine_bridge import (
             conv_direct_fwd_smallc_mfma_spec_to_dict,
             conv_direct_fwd_smallk_mfma_spec_to_dict,

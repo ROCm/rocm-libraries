@@ -38,7 +38,7 @@ from rocke.runtime.device_array import (
 from rocke.runtime.torch_interop import torch_array_info
 from rocke.tests.gpu import current_device_arch
 from rocke.tests.host_arrays import HostArray
-from rocke.tests.lanes import TORCH_IN_CI, import_or_skip_until
+from rocke.tests.lanes import TICKET, import_or_skip_until
 
 
 def _info(shape, strides, element_size=4, data_ptr=1024):
@@ -449,7 +449,7 @@ def test_gpu_copy_and_zero_follow_each_layout():
 
 
 def test_gpu_torch_tensors_get_torch_values_and_workspaces():
-    torch = import_or_skip_until("torch", TORCH_IN_CI)
+    torch = import_or_skip_until("torch", TICKET)
     if not torch.cuda.is_available():
         pytest.skip("torch has no GPU here")
     lengths = torch.arange(6, dtype=torch.int32, device="cuda").reshape(2, 3)

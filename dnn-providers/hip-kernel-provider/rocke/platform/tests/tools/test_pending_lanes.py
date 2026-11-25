@@ -16,18 +16,16 @@ declare where they skip (``rocke.tests.lanes``), and ``tools/limbo_audit.py``
 checks each case against the record from the run records of CI lanes.
 
 Every other test file must be listed in ``rocke.tests.pending_lanes``, and every
-listed entry must be current: its file present and its lane's kind still
-true of the file (a file waiting for a new lane is in no CI-run entry; a
-file waiting for something CI lacks is in one), and a file waiting for torch
-imports it. A file is listed once per lane, and under several lanes only when
-each waits for something CI lacks. An expired entry fails only a
-change that touches the registry or its file, and every run under
-``--strict-expiry``; otherwise it is reported as a warning. The registry's
-measured budgets are held to the same rules: each names a present test file, is
-listed once, and is reported or failed when expired the same way. A
-quarantined test is held to stricter rules: it names a test that exists, is
-listed once, fails the check as soon as it expires, and the registry holds at
-most ``QUARANTINE_CAP`` of them.
+listed entry must be current: its file present, and in no CI-run entry for a
+whole-file entry, in one otherwise. A file is listed once per lane, and a
+whole-file entry is its file's only entry. Each record's team owns its path in
+CODEOWNERS. An expired entry fails only a change that touches the registry or
+its file, and every run under ``--strict-expiry``; otherwise it is reported as
+a warning. The registry's measured budgets are held
+to the same rules: each names a present test file, is listed once, and is
+reported or failed when expired the same way. A quarantined test is held to
+stricter rules: it names a test that exists, is listed once, fails the check as
+soon as it expires, and the registry holds at most ``QUARANTINE_CAP`` of them.
 
 The check configures the platform (nothing is built) and reads the provider
 categories, so it runs in a source checkout of the monorepo only.
@@ -57,22 +55,22 @@ from rocke.tests.comgr import CompilerBuild
 from rocke.tests.ctest_listing import configure_installed_ctest, list_ctest_entries
 from rocke.tests.lane_mentions import LaneMentionKind, lane_mentions
 from rocke.tests.lanes import (
-    COMPREHENSIVE_CASES,
-    GFX950_RUNNER,
-    GFX1250_RUNNER,
-    LANES,
-    NIGHTLY_SOURCE,
-    TORCH_IN_CI,
+    BUILD_VARIANT,
+    RUNNER_HARDWARE,
+    SOURCE_TREE,
+    TICKET,
     Lane,
     skip_until_reason,
 )
 from rocke.tests.pending_lanes import (
     MEASURED_BUDGETS,
-    NO_ISSUE_FILED,
     PENDING,
+    PENDING_MAX_DAYS,
     QUARANTINE_CAP,
+    QUARANTINE_MAX_DAYS,
     QUARANTINE_TREES,
     QUARANTINED,
+    TEAMS,
     Compilers,
     MeasuredBudget,
     PendingTest,
@@ -84,7 +82,6 @@ from rocke.tests.pending_lanes import (
 )
 from rocke.tests.provider_categories import provider_category_labels
 from rocke.tests.quarantine import register_quarantine, skip_quarantined_items
-from rocke.tests.torch_uses import TorchUseKind, file_kinds, torch_uses_in_python
 
 ROCKE = platform_root().parent
 # The tiers pull-request and push CI select.
@@ -469,133 +466,91 @@ def audit(
     test_files: set[str], in_ci: set[str], pending: Iterable[PendingTest]
 ) -> tuple[list[str], list[str]]:
     """(files in limbo, stale pending entries): the test files neither in CI
-    nor listed, and the listed files a lane's kind does not fit."""
+    nor listed, and the listed files whose entry's scope does not fit: a
+    whole-file entry for a file in CI, or a case entry for a file in none."""
     pending = list(pending)
     in_limbo = sorted(test_files - in_ci - {entry.path for entry in pending})
     stale = sorted(
-        {
-            entry.path
-            for entry in pending
-            if (entry.path in in_ci) != entry.lane.enrolled
-        }
+        {entry.path for entry in pending if (entry.path in in_ci) == entry.whole_file}
     )
     return in_limbo, stale
 
 
 def listing_breaches(pending: Iterable[PendingTest]) -> list[str]:
-    """The files or tests listed twice under one lane, or files under several
-    lanes when one of them is a lane that does not exist yet (its files are in
-    no CI entry)."""
+    """The files or tests listed twice under one lane, and the whole-file
+    entries that are not their file's only entry."""
     pending = list(pending)
     keys = [(entry.path, entry.node, entry.lane.name) for entry in pending]
     breaches = [
         f"listed twice under one lane: {path}" + (f"::{node}" if node else "")
         for path, node, _ in sorted({key for key in keys if keys.count(key) > 1})
     ]
-    lanes_of: dict[str, dict[str, Lane]] = {}
+    entries_of: dict[str, list[PendingTest]] = {}
     for entry in pending:
-        lanes_of.setdefault(entry.path, {})[entry.lane.name] = entry.lane
-    for path, lanes in sorted(lanes_of.items()):
-        if len(lanes) > 1 and not all(lane.enrolled for lane in lanes.values()):
+        entries_of.setdefault(entry.path, []).append(entry)
+    for path, entries in sorted(entries_of.items()):
+        if len(entries) > 1 and any(entry.whole_file for entry in entries):
             breaches.append(
-                f"listed under several lanes, one of which no CI entry runs yet: "
-                f"{path} ({', '.join(lanes)})"
+                "a whole-file entry and other entries for one file: "
+                f"{path} ({', '.join(entry.lane.name for entry in entries)})"
             )
     return breaches
 
 
-def imports_torch(test_file: Path) -> bool:
-    """Whether a test module imports torch anywhere, a function body included:
-    an import, ``importorskip``/``import_or_skip_until``, or a call of
-    ``__import__``, ``import_module`` or ``find_spec`` with ``"torch"`` (a module
-    that checks for torch, for a child process that imports it)."""
-    source = test_file.read_text(encoding="utf-8")
-    return bool(
-        file_kinds(torch_uses_in_python(source, str(test_file)))
-        & {TorchUseKind.IMPORT, TorchUseKind.IMPORTORSKIP}
-    )
+def _days_from_today(days: int) -> str:
+    return (_utc_today() + datetime.timedelta(days=days)).isoformat()
+
+
+def _pending(path: str, lane: Lane, **overrides: object) -> PendingTest:
+    """A pending entry with a valid team, issue and expiry, overridden by
+    ``overrides``."""
+    fields = {
+        "reason": "why",
+        "team": TEAMS[0],
+        "issue": "AICK-1234",
+        "expires": _days_from_today(30),
+    }
+    return PendingTest(path, lane, **{**fields, **overrides})
 
 
 def test_audit_finds_files_in_limbo_and_stale_entries():
-    waiting = next(lane for lane in LANES if not lane.enrolled)
-    lacking = next(lane for lane in LANES if lane.enrolled)
-
-    def entry(path, lane):
-        return PendingTest(path, lane, "why", "owner", "2027-01-31")
-
     test_files = {
         "a/test_in_ci.py",
         "a/test_limbo.py",
-        "a/test_new_lane.py",
+        "a/test_whole_file.py",
         "a/test_skips.py",
     }
-    in_ci = {"a/test_in_ci.py", "a/test_new_lane.py"}
-    pending = [entry("a/test_new_lane.py", waiting), entry("a/test_skips.py", lacking)]
-    # test_new_lane waits for a lane but is in CI; test_skips waits for
-    # something CI lacks but is in no CI entry.
+    in_ci = {"a/test_in_ci.py", "a/test_whole_file.py"}
+    pending = [
+        _pending("a/test_whole_file.py", TICKET, whole_file=True),
+        _pending("a/test_skips.py", BUILD_VARIANT),
+    ]
+    # test_whole_file waits as a whole file but is in CI; test_skips has a
+    # case entry (its cases declare a lane) but is in no CI entry.
     assert audit(test_files, in_ci, pending) == (
         ["a/test_limbo.py"],
-        ["a/test_new_lane.py", "a/test_skips.py"],
+        ["a/test_skips.py", "a/test_whole_file.py"],
     )
 
 
-def test_a_file_may_wait_for_several_things_ci_lacks_but_one_new_lane():
-    def entry(lane):
-        return PendingTest("a/test_x.py", lane, "why", "owner", "2027-01-31")
-
-    gfx1250_runner = next(
-        lane for lane in LANES if lane.enrolled and lane is not GFX950_RUNNER
-    )
-    assert listing_breaches([entry(GFX950_RUNNER), entry(gfx1250_runner)]) == []
-    assert listing_breaches([entry(GFX950_RUNNER), entry(GFX950_RUNNER)]) == [
+def test_a_file_may_wait_for_several_lanes_but_a_whole_file_entry_is_alone():
+    hardware = _pending("a/test_x.py", RUNNER_HARDWARE)
+    build = _pending("a/test_x.py", BUILD_VARIANT)
+    assert listing_breaches([hardware, build]) == []
+    assert listing_breaches([hardware, hardware]) == [
         "listed twice under one lane: a/test_x.py"
     ]
-    assert listing_breaches([entry(GFX950_RUNNER), entry(NIGHTLY_SOURCE)]) == [
+    whole_file = _pending("a/test_x.py", SOURCE_TREE, whole_file=True)
+    assert listing_breaches([hardware, whole_file]) == [
         (
-            "listed under several lanes, one of which no CI entry runs yet: "
-            "a/test_x.py (gfx950-runner, nightly-source)"
+            "a whole-file entry and other entries for one file: "
+            "a/test_x.py (runner-hardware, source-tree)"
         )
     ]
-    # Each of a file's entries must fit it: in CI for both enrolled lanes.
-    entries = [entry(GFX950_RUNNER), entry(gfx1250_runner)]
+    # Each of a file's case entries must fit it: the file is in CI.
+    entries = [hardware, build]
     assert audit({"a/test_x.py"}, {"a/test_x.py"}, entries) == ([], [])
     assert audit({"a/test_x.py"}, set(), entries) == ([], ["a/test_x.py"])
-
-
-def test_a_torch_import_is_found_wherever_the_module_makes_it(tmp_path):
-    sources = {
-        "test_module_level.py": "import torch\n",
-        "test_submodule.py": "import numpy as np\nfrom torch.nn import functional\n",
-        "test_in_a_function.py": "def test_x():\n    import torch.cuda\n",
-        "test_importorskip.py": (
-            "import pytest\n"
-            "def test_x():\n"
-            "    torch = pytest.importorskip('torch', reason='graphs')\n"
-        ),
-        "test_import_module.py": (
-            "import importlib\ntorch = importlib.import_module('torch')\n"
-        ),
-        "test_find_spec.py": (
-            "import importlib.util\nHAS_TORCH = importlib.util.find_spec('torch')\n"
-        ),
-        "test_lane_import.py": (
-            "from rocke.tests.lanes import TORCH_IN_CI, import_or_skip_until\n"
-            "torch = import_or_skip_until('torch', TORCH_IN_CI)\n"
-        ),
-    }
-    for name, source in sources.items():
-        (tmp_path / name).write_text(source)
-        assert imports_torch(tmp_path / name), name
-    torch_free = {
-        "test_numpy.py": "import numpy as np\n",
-        "test_lookalike.py": "import torchvision\nfrom torchaudio import io\n",
-        "test_relative.py": "from .torch import helper\n",
-        "test_mention.py": "# torch is not needed: a numpy reference\nNAME = 'torch'\n",
-        "test_other_skip.py": "import pytest\nyaml = pytest.importorskip('yaml')\n",
-    }
-    for name, source in torch_free.items():
-        (tmp_path / name).write_text(source)
-        assert not imports_torch(tmp_path / name), name
 
 
 def test_paths_keep_their_root_when_normalized():
@@ -630,55 +585,43 @@ def test_a_marker_expression_deselects_a_module_by_its_pytestmark(tmp_path):
 
 
 def test_a_file_entry_covers_the_cases_that_declare_its_lane_only():
-    def entry(lane):
-        return PendingTest("a/test_x.py", lane, "why", "owner", "2027-01-31")
-
-    waiting = entry(GFX950_RUNNER)
-    declared = skip_until_reason(GFX950_RUNNER, reason="needs a gfx950 GPU")
+    waiting = _pending("a/test_x.py", RUNNER_HARDWARE)
+    declared = skip_until_reason(RUNNER_HARDWARE, reason="needs a gfx950 GPU")
     assert waiting.covers("a/test_x.py", "test_y", declared)
-    both = skip_until_reason(GFX950_RUNNER, GFX1250_RUNNER, reason="needs either")
+    both = skip_until_reason(RUNNER_HARDWARE, BUILD_VARIANT, reason="needs both")
     assert waiting.covers("a/test_x.py", "test_y", both)
     # A skip that only mentions the lane's arch is not a declaration: a defect
-    # whose reason names gfx950 is not booked as waiting for its runner.
+    # whose reason names gfx950 is not booked as waiting for the hardware.
     assert not waiting.covers("a/test_x.py", "test_y", "needs a gfx950 GPU")
     assert not waiting.covers("a/test_x.py", "test_y", "gfx950 kernel miscompares")
-    other = skip_until_reason(GFX1250_RUNNER, reason="needs a gfx1250 GPU")
+    other = skip_until_reason(BUILD_VARIANT, reason="no rocke_engine")
     assert not waiting.covers("a/test_x.py", "test_y", other)
     assert not waiting.covers("a/test_x.py", "test_y", None)
     assert not waiting.covers("a/test_z.py", "test_y", declared)
-    # A lane no CI entry runs yet: every case of its files waits for it.
-    new_lane = entry(NIGHTLY_SOURCE)
-    assert new_lane.covers("a/test_x.py", "test_y", "any reason")
-    assert new_lane.covers("a/test_x.py", "test_y", None)
+    # A whole-file entry: every case of its file waits for it.
+    whole_file = _pending("a/test_x.py", SOURCE_TREE, whole_file=True)
+    assert whole_file.covers("a/test_x.py", "test_y", "any reason")
+    assert whole_file.covers("a/test_x.py", "test_y", None)
 
 
 def test_an_entry_for_one_test_covers_its_unselected_or_declared_cases_only():
-    def entry(lane, node=""):
-        return PendingTest("a/test_x.py", lane, "why", "owner", "2027-01-31", node)
-
-    with pytest.raises(ValueError, match="expected a lane CI lacks for one test"):
-        entry(NIGHTLY_SOURCE, "test_y")
+    with pytest.raises(ValueError, match="expected one test or the whole file"):
+        _pending("a/test_x.py", TICKET, node="test_y", whole_file=True)
     with pytest.raises(ValueError, match="expected one of rocke.tests.lanes.LANES"):
-        PendingTest(
-            "a/test_x.py",
-            Lane("unlisted", "a lane", enrolled=True),
-            "why",
-            "owner",
-            "2027-01-31",
-        )
-    test = entry(COMPREHENSIVE_CASES, "test_y")
+        _pending("a/test_x.py", Lane("unlisted", "a lane"))
+    test = _pending("a/test_x.py", TICKET, node="test_y")
     left_out = "deselected by -k 'not test_y'"
     assert test.covers("a/test_x.py", "test_y[case]", left_out, deselected=True)
     assert test.covers("a/test_x.py", "test_y", None)
     assert not test.covers("a/test_x.py", "test_yz", None)
     assert not test.covers("a/test_z.py", "test_y", None)
-    group = entry(COMPREHENSIVE_CASES, "TestGroup")
+    group = _pending("a/test_x.py", TICKET, node="TestGroup")
     assert group.covers("a/test_x.py", "TestGroup::test_y[case]", None)
     assert not group.covers("a/test_x.py", "TestGroupTwo::test_y", None)
     # A test that ran to a skip is covered only when the skip declares the
-    # entry's lane: a defect skip of a test listed under a runner is not.
-    runner = entry(GFX950_RUNNER, "test_y")
-    declared = skip_until_reason(GFX950_RUNNER, reason="needs a gfx950 GPU")
+    # entry's lane: a defect skip of a test listed under the hardware is not.
+    runner = _pending("a/test_x.py", RUNNER_HARDWARE, node="test_y")
+    declared = skip_until_reason(RUNNER_HARDWARE, reason="needs a gfx950 GPU")
     assert runner.covers("a/test_x.py", "test_y", declared)
     assert not runner.covers("a/test_x.py", "test_y", "invalid spec on gfx942")
     assert not runner.covers("a/test_x.py", "test_y", left_out)
@@ -688,13 +631,13 @@ def test_the_registry_accounts_for_a_case_by_its_lane_quarantine_or_runner():
     file_entry = next(
         entry
         for entry in PENDING
-        if entry.lane is GFX950_RUNNER
+        if entry.lane is RUNNER_HARDWARE
         and not entry.node
         and sum(other.path == entry.path for other in PENDING) == 1
         and not any(q.path == entry.path for q in QUARANTINED)
     )
     path = file_entry.path
-    declared = skip_until_reason(GFX950_RUNNER, reason="needs a gfx950 GPU")
+    declared = skip_until_reason(RUNNER_HARDWARE, reason="needs a gfx950 GPU")
     assert waiting_entry(path, "test_any", declared) is file_entry
     assert waiting_entry(path, "test_any", "needs a gfx950 GPU") is None
     assert waiting_entry(path, "test_any", None) is None
@@ -709,16 +652,42 @@ def test_the_registry_accounts_for_a_case_by_its_lane_quarantine_or_runner():
     assert waiting_entry(child, "TestAny::test_any", None) is runner
 
 
-def test_a_pending_test_needs_its_recorded_reason():
-    lane = LANES[0]
+def test_a_pending_test_needs_its_recorded_reason_team_and_issue():
+    path = "library/tests/test_x.py"
     with pytest.raises(ValueError, match="reason is empty"):
-        PendingTest("library/tests/test_x.py", lane, " ", "owner", "2027-01-31")
+        _pending(path, TICKET, reason=" ")
     with pytest.raises(ValueError, match="expected plain text"):
-        PendingTest(
-            "library/tests/test_x.py", lane, "see https://x", "owner", "2027-01-31"
-        )
+        _pending(path, TICKET, reason="see https://x")
     with pytest.raises(ValueError, match="expected an ISO date"):
-        PendingTest("library/tests/test_x.py", lane, "why", "owner", "next month")
+        _pending(path, TICKET, expires="next month")
+    with pytest.raises(ValueError, match="team='rocKE library', expected one of"):
+        _pending(path, TICKET, team="rocKE library")
+    for unfiled in ("none filed yet", "issue: none filed yet", "", "AICK"):
+        with pytest.raises(ValueError, match="expected the issue that tracks it"):
+            _pending(path, TICKET, issue=unfiled)
+    assert _pending(path, TICKET, issue="ROCm/rocm-libraries#1").issue == (
+        "ROCm/rocm-libraries#1"
+    )
+
+
+def test_a_record_expires_within_its_maximum_window():
+    """A pending entry or measured budget expires at most PENDING_MAX_DAYS
+    days away, a quarantine at most QUARANTINE_MAX_DAYS: a record is re-decided
+    in that window, not set once and forgotten. A past date is a valid
+    record, which the expiry check then reports."""
+    path = "library/tests/test_x.py"
+    assert _pending(path, TICKET, expires=_days_from_today(PENDING_MAX_DAYS))
+    assert _pending(path, TICKET, expires="2026-01-01")
+    with pytest.raises(ValueError, match=f"expected at most {PENDING_MAX_DAYS} days"):
+        _pending(path, TICKET, expires=_days_from_today(PENDING_MAX_DAYS + 1))
+    test_id = f"{path}::test_y"
+    assert _quarantined(test_id, expires=_days_from_today(QUARANTINE_MAX_DAYS))
+    with pytest.raises(
+        ValueError, match=f"expected at most {QUARANTINE_MAX_DAYS} days"
+    ):
+        _quarantined(test_id, expires=_days_from_today(QUARANTINE_MAX_DAYS + 1))
+    with pytest.raises(ValueError, match=f"expected at most {PENDING_MAX_DAYS} days"):
+        _measured_budget(expires=_days_from_today(PENDING_MAX_DAYS + 1))
 
 
 def test_install_rules_map_installed_paths_back_to_the_source(tmp_path):
@@ -757,26 +726,26 @@ def test_install_rules_map_installed_paths_back_to_the_source(tmp_path):
     }
 
 
+def _git(*arguments: str) -> str | None:
+    git = shutil.which("git")
+    if git is None:
+        return None
+    result = subprocess.run(
+        [git, *arguments], cwd=ROCKE, capture_output=True, text=True, check=False
+    )
+    return result.stdout.strip() if result.returncode == 0 else None
+
+
 def changed_files() -> set[str] | None:
     """The files, relative to the rocke directory, that this change touches
     against its base (``ROCKE_CHANGE_BASE``, else the merge base with
     origin/develop), working tree included; None when git cannot tell."""
-    git = shutil.which("git")
-    if git is None:
-        return None
-
-    def run(*arguments: str) -> str | None:
-        result = subprocess.run(
-            [git, *arguments], cwd=ROCKE, capture_output=True, text=True, check=False
-        )
-        return result.stdout.strip() if result.returncode == 0 else None
-
-    base = os.environ.get("ROCKE_CHANGE_BASE") or run(
+    base = os.environ.get("ROCKE_CHANGE_BASE") or _git(
         "merge-base", "HEAD", "origin/develop"
     )
     if not base:
         return None
-    names = run("diff", "--name-only", "--relative", base)
+    names = _git("diff", "--name-only", "--relative", base)
     return None if names is None else set(names.splitlines())
 
 
@@ -866,17 +835,24 @@ def test_every_measured_budget_is_current(request):
     )
 
 
+def _measured_budget(**overrides: object) -> MeasuredBudget:
+    """A measured budget with valid fields, overridden by ``overrides``."""
+    fields = {
+        "path": "library/tests/test_x.py",
+        "kernel_name": "rocke_x",
+        "scratch_bytes": 8,
+        "compilers": Compilers(llvm_major=24),
+        "reason": "why",
+        "team": TEAMS[0],
+        "issue": "AICK-1234",
+        "expires": _days_from_today(30),
+    }
+    return MeasuredBudget(**{**fields, **overrides})
+
+
 def test_a_measured_budget_applies_only_on_its_compilers():
     def budget(compilers):
-        return MeasuredBudget(
-            "library/tests/test_x.py",
-            "rocke_x",
-            12,
-            compilers,
-            "why",
-            "o",
-            "2027-01-31",
-        )
+        return _measured_budget(compilers=compilers)
 
     ci_build = "424729dba65359a5e521ab2e729af131c8a5b0d4"
     other_build = "d6f6cb691863e9258034ab48c1dfce21689d5606"
@@ -916,18 +892,7 @@ def test_the_registry_allows_a_measured_budget_on_its_compilers_only():
 
 
 def test_a_measured_budget_needs_a_positive_size_and_its_recorded_reason():
-    def budget(**overrides):
-        fields = {
-            "path": "library/tests/test_x.py",
-            "kernel_name": "rocke_x",
-            "scratch_bytes": 8,
-            "compilers": Compilers(llvm_major=24),
-            "reason": "why",
-            "owner": "owner",
-            "expires": "2027-01-31",
-        }
-        return MeasuredBudget(**{**fields, **overrides})
-
+    budget = _measured_budget
     with pytest.raises(ValueError, match="expected a test file path"):
         budget(path="/abs/test_x.py")
     with pytest.raises(ValueError, match="kernel_name is empty"):
@@ -936,8 +901,10 @@ def test_a_measured_budget_needs_a_positive_size_and_its_recorded_reason():
         budget(scratch_bytes=0)
     with pytest.raises(TypeError, match="compilers=24, expected a Compilers"):
         budget(compilers=24)
-    with pytest.raises(ValueError, match="owner is empty"):
-        budget(owner="")
+    with pytest.raises(ValueError, match="team='', expected one of"):
+        budget(team="")
+    with pytest.raises(ValueError, match="expected the issue that tracks it"):
+        budget(issue="none filed yet")
     with pytest.raises(ValueError, match="expected plain text"):
         budget(reason="see https://x")
     with pytest.raises(ValueError, match="expected an ISO date"):
@@ -960,8 +927,8 @@ def _quarantined(test_id: str, **overrides: object) -> QuarantinedTest:
     fields = {
         "issue": "AICK-1234",
         "reason": "why",
-        "owner": "owner",
-        "expires": "2027-01-31",
+        "team": TEAMS[0],
+        "expires": _days_from_today(14),
     }
     return QuarantinedTest(test_id, **{**fields, **overrides})
 
@@ -971,9 +938,9 @@ def test_a_quarantined_test_needs_an_item_an_issue_and_its_recorded_reason():
         _quarantined("library/tests/test_x.py")
     with pytest.raises(ValueError, match="expected a test under one of"):
         _quarantined("platform/python/rocke/tests/test_x.py::test_y")
-    with pytest.raises(ValueError, match="expected a Jira id"):
+    with pytest.raises(ValueError, match="expected the issue that tracks it"):
         _quarantined("library/tests/test_x.py::test_y", issue="filed soon")
-    with pytest.raises(ValueError, match="expected a Jira id"):
+    with pytest.raises(ValueError, match="expected the issue that tracks it"):
         _quarantined(
             "library/tests/test_x.py::test_y",
             issue="https://x/issues/1",
@@ -992,8 +959,8 @@ def test_a_quarantined_test_needs_an_item_an_issue_and_its_recorded_reason():
         "library/tests/test_x.py::test_y", issue="ROCm/rocm-libraries#1"
     )
     assert github.issue == "ROCm/rocm-libraries#1"
-    unfiled = _quarantined("library/tests/test_x.py::test_y", issue=NO_ISSUE_FILED)
-    assert unfiled.issue == NO_ISSUE_FILED
+    with pytest.raises(ValueError, match="expected the issue that tracks it"):
+        _quarantined("library/tests/test_x.py::test_y", issue="none filed yet")
 
 
 def test_a_quarantine_that_names_arches_holds_its_test_out_on_those_only():
@@ -1210,10 +1177,10 @@ def quarantine_breaches(
 
 
 def test_a_quarantine_fails_when_expired_listed_twice_or_over_the_cap():
-    today = datetime.date(2027, 1, 1)
+    today = _utc_today()
     current = _quarantined("library/tests/test_x.py::test_y")
     assert quarantine_breaches([current], today) == []
-    expired = _quarantined("library/tests/test_x.py::test_z", expires="2026-12-31")
+    expired = _quarantined("library/tests/test_x.py::test_z", expires="2026-01-01")
     assert quarantine_breaches([current, expired], today) == [
         (
             "quarantine expired: library/tests/test_x.py::test_z; fix the test, "
@@ -1292,17 +1259,66 @@ def test_tests_state_the_arches_they_need_not_the_runner_lane():
     )
 
 
-def test_every_file_waiting_for_torch_imports_it():
-    assert TORCH_IN_CI.waits_for_torch
-    torchless = sorted(
-        f"{pending.path} ({pending.lane.name})"
-        for pending in PENDING
-        if pending.lane.waits_for_torch and not imports_torch(ROCKE / pending.path)
+def codeowners_teams(codeowners: str, path: str) -> set[str]:
+    """The teams the CODEOWNERS text ``codeowners`` gives the repository path
+    ``path``: those of its last rule for a directory above it (rocKE's rules
+    are directory rules)."""
+    teams: set[str] = set()
+    for line in codeowners.splitlines():
+        words = line.partition("#")[0].split()
+        if not words:
+            continue
+        pattern, *owners = words
+        if pattern.endswith("/") and f"/{path}".startswith(pattern):
+            teams = {owner.removeprefix("@") for owner in owners}
+    return teams
+
+
+def test_codeowners_rules_give_a_path_the_teams_of_its_last_directory_rule():
+    codeowners = (
+        "# a comment\n"
+        "\n"
+        "/group/project/ @ROCm/project-platform @ROCm/project-lib\n"
+        "/group/project/library/ @ROCm/project-lib  # the library\n"
+        "/group/project/library/README.md @ROCm/docs\n"
     )
-    assert not torchless, (
-        "listed under a lane that waits for torch, but they do not import it "
-        f"(move them to the lane they wait for, or drop them): {torchless}"
+    assert codeowners_teams(codeowners, "group/project/library/tests/test_x.py") == {
+        "ROCm/project-lib"
+    }
+    assert codeowners_teams(codeowners, "group/project/tools/x.py") == {
+        "ROCm/project-platform",
+        "ROCm/project-lib",
+    }
+    assert codeowners_teams(codeowners, "group/other/x.py") == set()
+
+
+def _codeowners() -> str | None:
+    """The repository's CODEOWNERS, from the checkout or, in a sparse one,
+    from git; None when neither has it."""
+    file = ROCKE.parents[2] / ".github" / "CODEOWNERS"
+    if file.is_file():
+        return file.read_text(encoding="utf-8")
+    return _git("show", "HEAD:.github/CODEOWNERS")
+
+
+def test_every_record_names_a_team_that_owns_its_test():
+    codeowners = _codeowners()
+    if codeowners is None:
+        pytest.skip("this checkout has no .github/CODEOWNERS, in the tree or in git")
+    prefix = ROCKE.relative_to(ROCKE.parents[2]).as_posix()
+    records = [
+        *((entry.path, entry.team) for entry in PENDING),
+        *((budget.path, budget.team) for budget in MEASURED_BUDGETS),
+        *((entry.path, entry.team) for entry in QUARANTINED),
+    ]
+    unowned = sorted(
+        f"{path} ({team})"
+        for path, team in records
+        if team not in codeowners_teams(codeowners, f"{prefix}/{path}")
     )
+    assert (
+        not unowned
+    ), f"records whose team is not a CODEOWNERS team of their test: {unowned}"
 
 
 def test_every_quarantined_test_is_current():

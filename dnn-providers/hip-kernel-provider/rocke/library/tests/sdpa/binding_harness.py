@@ -15,7 +15,7 @@ import numpy as np
 from rocke.numeric.storage import decode
 from rocke.runtime.device_array import array_info, device_values, host_values
 from rocke.runtime.hip_module import Runtime
-from rocke.tests.lanes import TORCH_IN_CI, skip_until
+from rocke.tests.lanes import TICKET, skip_until
 
 from tests.sdpa import helpers as H
 
@@ -107,7 +107,7 @@ def bind_and_check(bind, case, req, *, kind: str) -> list:
         import torch
 
         if not torch.cuda.is_available():
-            skip_until(TORCH_IN_CI, reason="the installed torch has no GPU")
+            skip_until(TICKET, reason="the installed torch has no GPU")
         arrays = H.to_torch(inputs, device="cuda")
     else:
         arrays = H.to_device_arrays(inputs)

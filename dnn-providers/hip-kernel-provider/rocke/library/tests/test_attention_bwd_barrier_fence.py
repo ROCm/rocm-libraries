@@ -23,7 +23,7 @@ from __future__ import annotations
 import pytest
 from rocke.core.lower_llvm import _lower_kernel_to_llvm_python as lower
 from rocke.tests.engines import native_engine_or_skip
-from rocke.tests.lanes import CI_TEST_TOOLS, skip_until
+from rocke.tests.lanes import BUILD_VARIANT, skip_until
 
 from kernels.common.attention_bwd import (
     BWD_BARRIER_FENCE,
@@ -210,7 +210,7 @@ def _compile_isa(kernel, arch):
     from ._attention_bwd_resources import compile_or_skip
 
     if R.find_objdump() is None:
-        skip_until(CI_TEST_TOOLS, reason="llvm-objdump not found")
+        skip_until(BUILD_VARIANT, reason="llvm-objdump not found")
     art = compile_or_skip(kernel, arch=arch, backend="python")
     return art.llvm_text, R.parse_disassembly(R.disassemble(art.hsaco, arch=arch))
 

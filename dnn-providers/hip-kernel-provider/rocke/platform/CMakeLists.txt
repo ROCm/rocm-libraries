@@ -1120,7 +1120,7 @@ if(ROCKE_INSTALL_TESTS)
       # (rocke/heuristics/tests) and need packages that are not rocKE
       # dependencies: rocke/heuristics/tests/requirements.txt, installed beside
       # the tests, lists them, and each test module reads it, skipping where one
-      # is missing (waiting for the ci-test-tools lane). A job that runs this
+      # is missing (waiting for the build-variant lane). A job that runs this
       # entry installs them with `pip install -r <that requirements.txt>`.
       # Scheduled CI only (the comprehensive tier).
       set(_ROCKE_HEURISTICS_TESTS "${_ROCKE_INSTALLED_PYTHONPATH}/rocke/heuristics/tests")

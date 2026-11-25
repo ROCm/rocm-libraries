@@ -19,7 +19,7 @@ from __future__ import annotations
 import unittest
 
 from rocke.runtime.hip_module import get_device_arch
-from rocke.tests.lanes import BINDING_LANE, arch_skip_reason, import_or_skip_until
+from rocke.tests.lanes import BUILD_VARIANT, arch_skip_reason, import_or_skip_until
 
 from kernels.common.conv_direct_fwd_wmma import (
     POLY_ZERO_LANE_CH,
@@ -291,7 +291,7 @@ class TestFwdWmmaSpec(unittest.TestCase):
 
     def test_engines_refuse_non_positive_extents(self):
         """The C++ engine refuses the same extents with the same text."""
-        eng = import_or_skip_until("rocke_library_engine", BINDING_LANE)
+        eng = import_or_skip_until("rocke_library_engine", BUILD_VARIANT)
         from kernels.conv import engine_bridge as be
 
         engines = {
@@ -328,7 +328,7 @@ class TestFwdWmmaSpec(unittest.TestCase):
         """The C++ engine's validator, kernel name, grid and LDS size match
         Python's over the AOT grid and a set of rejected specs (the
         byte-identity gate only covers the IR of specs both engines build)."""
-        eng = import_or_skip_until("rocke_library_engine", BINDING_LANE)
+        eng = import_or_skip_until("rocke_library_engine", BUILD_VARIANT)
         from kernels.conv.direct_aot_jobs import (
             DIRECT_CAPABILITIES,
             _knob_grid,
@@ -458,7 +458,7 @@ class TestFwdWmmaSpec(unittest.TestCase):
         """The shared validator tail refuses an unknown scheduler with
         normalize_scheduler_strategy's text, choices included, in both
         engines."""
-        eng = import_or_skip_until("rocke_library_engine", BINDING_LANE)
+        eng = import_or_skip_until("rocke_library_engine", BUILD_VARIANT)
         from kernels.conv.engine_bridge import conv_direct_fwd_wmma_spec_to_dict
         from rocke.core.codegen_policy import normalize_scheduler_strategy
 
@@ -478,7 +478,7 @@ class TestFwdWmmaSpec(unittest.TestCase):
     def test_binding_rejects_bad_input(self):
         """A rejected spec returns the rejection (no grid is computed from its
         zero tile extents); a missing, mistyped or partial problem raises."""
-        eng = import_or_skip_until("rocke_library_engine", BINDING_LANE)
+        eng = import_or_skip_until("rocke_library_engine", BUILD_VARIANT)
         from kernels.conv.engine_bridge import conv_direct_fwd_wmma_spec_to_dict
 
         for knobs in (dict(waves_k=0), dict(tiles_k=0), dict(waves_p=0)):

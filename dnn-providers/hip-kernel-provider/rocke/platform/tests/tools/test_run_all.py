@@ -20,7 +20,7 @@ from rocke.tests import ctest_listing
 from rocke.tests.ctest_listing import list_ctest_entries
 
 from rocke.tests.engines import IR_LOWER_CLI_ENV
-from rocke.tests.lanes import SOURCE_TREE_CASES, skip_until
+from rocke.tests.lanes import SOURCE_TREE, skip_until
 
 
 @pytest.fixture
@@ -575,7 +575,7 @@ def test_pytest_build_configuration_owns_shared_engine(runner, monkeypatch, tmp_
 def test_arch_domain_ctest_registration_contract(runner, tmp_path):
     if not (runner.ROCKE / "CMakeLists.txt").is_file():
         skip_until(
-            SOURCE_TREE_CASES,
+            SOURCE_TREE,
             reason="source CMake project is absent from the installed test artifact",
         )
     if not all(shutil.which(tool) for tool in ("cmake", "ctest")):
