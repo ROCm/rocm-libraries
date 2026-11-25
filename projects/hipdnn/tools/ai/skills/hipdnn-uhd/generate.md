@@ -97,10 +97,13 @@ binding decides everything below:
    <build>/bin/hipdnn_corpus_gen \
      --operation <op> --engine-name <engine> --plugin-dir <abs plugin dir> \
      --output <store>/corpora/<engine>/<device>/<set>/<op> --count <tier count> \
+     [--per-combination 150] \
      --seed <unused seed> --bench-path <build>/bin/hipdnn_bench \
      [--exclude-corpus <each active set>/<op>/manifest.json ...] [--keep q.<p>=<v> ...] \
      [--kdp-root <pack or dir>]
    ```
+   Pass `--per-combination 150` for `sdpa_fwd` only: its default first pass is too small to
+   hold every form evenly at `--count 2000` ([corpus-facets.md](corpus-facets.md), §2).
    Exclude every active set of this engine and device; take a seed none of them used. A
    descriptor engine's packs are a source (`--kdp-root` with the engine's installed
    directory); a closed shape set requires them and is not searched. Exit 0 is a set (a
@@ -110,7 +113,8 @@ binding decides everything below:
    `--count`; `K of T declared regime combinations not tried (maxSkeleton bound)` means the
    first pass tried `--max-skeleton` (default 512) of the operation's declared combinations,
    which is expected; so are `no declared archetype was admitted for ...; that combination is
-   exploration only` lines ([triage.md](triage.md), "Harmless noise"). Move a set that did
+   exploration only` lines and an `archetype <name> was never admitted` warning whose reason is
+   `--max-bytes` ([triage.md](triage.md), "Harmless noise"). Move a set that did
    not exit 0 to `archive/` ([data.md](data.md)). On exit 2, rerun one operation with
    `HIPDNN_LOG_LEVEL=info --count 1` into a scratch directory, its log to a file, and look for
    the engine's own lines: its plan builders log why they decline a graph (e.g. `isApplicable`

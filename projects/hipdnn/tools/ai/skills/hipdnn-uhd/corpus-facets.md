@@ -82,11 +82,11 @@ combination's share of the sweep scales with the product of its values' weights,
 combinations that can hold a problem (the excluded pairings above do not take a share), and the
 cut to `--count` keeps those shares: each combination's part of the cut is proportional to its
 raked size, with every unweighted enum and bool parameter's values at equal shares. Where the
-declared constraints tie an unweighted parameter's values to others' (in `sdpa_bwd` only a
-causal mask has a bottom-right anchor, so equal `alignment` and `is_causal` shares would leave
-no causal top-left graph), equal shares would leave some combination with almost no rows; that
-parameter is kept as the first pass left it, the run says so on stderr, and every combination
-keeps its place in the cut. A declaration that weights
+declared constraints tie an unweighted parameter's values to others' (a value that only some
+values of another parameter admit), equal shares would leave some combination with almost no
+rows; that parameter is kept as the first pass left it, the run says so on stderr (`the
+declared constraints tie the values of ...`), and every combination keeps its place in the
+cut. A declaration that weights
 nothing is cut in proportion to what its first pass holds. The SDPA files weight `layout`,
 `scale`, `window` and `value_head_dim`, and `sdpa_fwd` also `dtype`, keeping the common
 configuration (BSHD, `1/sqrt(head_dim)`, no window, V as wide as Q) at about half of each facet
@@ -114,7 +114,7 @@ four times the engine queries of the declaration without the SDPA facets (1.03 m
 0.26 million, 1,600 s against 470 s, for one RDNA engine at `--count 300`, measured before the
 `sbhd`, `qkv_packed` and `mla` facets and before `dtype` was weighted), and a lower
 `--per-combination` shortens it in proportion. The pipeline passes `--count 2000` per
-operation; for `sdpa_fwd` it should pass `--per-combination 150` as well (below).
+operation, and `--per-combination 150` for `sdpa_fwd` ([generate.md](generate.md), step 3).
 
 Without `--count` the forms come out in proportion to the combinations that can hold them:
 `sdpa_bwd` about 760-810 each of its four unconstrained forms, 400 of `ragged`, 310 of
@@ -157,8 +157,8 @@ pack-coverage engine adds its entry there on its branch.
 
 ## 4. Size, identity and exits
 
-- `--count` is the set size per operation; `--count` and `--seed` are the set's identity, so
-  changing either is a new set and a full re-collection.
+- `--count` is the set size per operation; `--count`, `--per-combination` and `--seed` are the
+  set's identity, so changing any of them is a new set and a full re-collection.
 - Each set's evaluation slice ([data.md](data.md)) is held out of training through
   `uhd_gen generate --eval-benchmarks`; a closed shape set uses `--recall` instead.
 - `--regime-quota` / `--regime-quotas` ask at least n problems in a named regime (a sizing's
@@ -177,14 +177,21 @@ pack-coverage engine adds its entry there on its branch.
   admitted archetype (counted against `--count`, as the served edges are). Which archetype a
   combination tries first is keyed by `--seed`, not the declaration order.
   `reports.anchored_share.<operation>.archetypes.<name>` counts each one's draws (`drawn`,
-  `refused_by_constraints`, `refused_by_oracle`, `admitted`) and the graphs it put in the set
-  (`delivered`). An archetype never admitted is a warning with the reason: no explored
-  combination it fits, a declared constraint, a graph past `--max-bytes` (GPT-3's matmul
-  projections at the default 256 MiB), or the engine declining it.
-- `reports.search.<operation>` says where the sweep's engine queries went: `oracle_queries` in
-  all, and over each combination's first search the seeds checked and accepted, the random
-  foothold draws checked and accepted, the walk steps, and the searches that accepted no seed
-  (`no_seed_accepted`) with how many a draw rescued (`recovered_by_draws`).
+  `refused_by_constraints`, `refused_by_oracle`, `admitted`, and `held`: draws the constraints
+  and the engine admitted whose point `--model-shapes` or `--kdp-root` already put in the set,
+  kept under that source) and the graphs it put in the set (`delivered`). An archetype neither
+  admitted nor held is a warning with the reason: no explored combination it fits, a declared
+  constraint, a graph past `--max-bytes` (GPT-3's matmul projections at the default 256 MiB),
+  the engine declining it, or, when nothing was refused, every draw repeating a point already
+  drawn. The warning is expected when the reason is `--max-bytes` ([triage.md](triage.md),
+  "Harmless noise").
+- `reports.search.<operation>` reports the sweep's search: `oracle_queries` is the number of
+  engine queries (a memoized answer is not one), and over each combination's first search it
+  counts the seeds checked and accepted, the random foothold draws checked and accepted, the
+  walk steps, and the searches that accepted no seed (`no_seed_accepted`) with how many a draw
+  rescued (`recovered_by_draws`). These checks include memoized revisits, so they are not a
+  breakdown of `oracle_queries` and can exceed it (the walk alone checked about five times as
+  many points as the engine was asked about in an `sdpa_fwd --count 2000 --seed 1` run).
 - `--form-floor n` asks n in every optional **form** the operation declares (`form_label`):
   for `sdpa_fwd` plain, `scale_unset`, `scale_tensor`, `dropout`, `padded`, `ragged`, `bias`,
   `sink`; for `sdpa_bwd` all but `sink`. Each form varies one optional attribute
@@ -193,20 +200,21 @@ pack-coverage engine adds its entry there on its branch.
   their own, not part of the regime label, and are reported as `form:<label>` in
   `reports.regime_quota`; the live engine decides which it serves.
 - A graph's name is the operation, its regime and every parameter in alphabetical order
-  (`..._is_causaltrue_layoutbshd_scaleinv_sqrt_d_seqlen_k512_seqlen_q1_windownone`), with one
-  limit: a name longer than 200 characters (`MAX_GRAPH_NAME`, `GraphIdentity.hpp`) keeps its
-  leading parameters and ends in `_` and a 16-hex hash of the full name. About two in five
-  default `sdpa_fwd` names are cut that way and do not show their last parameters (`seqlen_q`,
+  (`..._seqlen_k512_seqlen_q1_value_head_dimsame_windownone`), with one limit: a name longer
+  than 200 characters (`MAX_GRAPH_NAME`, `GraphIdentity.hpp`) keeps its leading parameters and
+  ends in `_` and a 16-hex hash of the full name. Every default `sdpa_fwd` name and about two
+  in five `sdpa_bwd` names are cut that way and do not show their last parameters (`seqlen_q`,
   `seqlen_k`, `window`, ...), so read a problem's parameters from its `q.<parameter>` manifest
   columns, never from the name. The `.fb` file, `results/<name>.csv` and `--problem-id` follow
   the name; the `benchmark` key (the content key, `graph_key` in `hipdnn_bench`) does not: a
   `plain`-form, BSHD, `inv_sqrt_d`, no-window problem has the key of the same graph built
   without those facets. Join sets by `benchmark`, never by name.
-- A `--model-shapes` CSV with no `form`, `layout`, `scale` or `window` column reads as `plain`,
-  `bshd`, `inv_sqrt_d` and `none`: the operation file's `model_shape_defaults`, one list for all
-  four. `manifest.json`'s `reports.model_shapes[].defaulted` maps each such parameter to the
-  number of rows that took its default. Any other missing column, `alignment` or
-  `generate_stats` included, and a listed column left empty in a row, still refuses the row.
+- A `--model-shapes` CSV with no `form`, `layout`, `scale`, `window` or `value_head_dim`
+  column reads as `plain`, `bshd`, `inv_sqrt_d`, `none` and `same`: the operation file's
+  `model_shape_defaults`, one list for all five. `manifest.json`'s
+  `reports.model_shapes[].defaulted` maps each such parameter to the number of rows that took
+  its default. Any other missing column, `alignment` or `generate_stats` included, and a listed
+  column left empty in a row, still refuses the row.
 - `--include-extremes` takes the served point at each end of every numeric parameter first;
   `--ceiling` is the largest extent searched. Every manifest records `served_extent` (how far
   the search reached; a maximum near the ceiling is marked `at_search_ceiling`).
