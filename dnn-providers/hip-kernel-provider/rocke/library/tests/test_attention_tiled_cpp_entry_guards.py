@@ -37,7 +37,13 @@ from kernels.gfx950.attention_tiled_2d_fastkv_regp import (
 )
 from rocke.tests.lanes import BUILD_VARIANT, import_or_skip_until
 
-rocke_engine = import_or_skip_until("rocke_engine", BUILD_VARIANT)
+
+@pytest.fixture(scope="module")
+def rocke_engine():
+    """The C++ entries' binding. Only the tests that call it take it, so the
+    Python-only spec checks run where the binding is not built."""
+    return import_or_skip_until("rocke_engine", BUILD_VARIANT)
+
 
 _PROBLEM = {
     "head_size": 128,
@@ -57,7 +63,9 @@ _PROBLEM = {
     "heads, reason",
     [((32, 0), "must be > 0"), ((32, 6), "must be divisible by num_kv_heads")],
 )
-def test_2d_entry_refuses_bad_head_counts_like_python(arch, spec_cls, heads, reason):
+def test_2d_entry_refuses_bad_head_counts_like_python(
+    rocke_engine, arch, spec_cls, heads, reason
+):
     hq, hkv = heads
     spec = spec_cls(num_query_heads=hq, num_kv_heads=hkv, **_PROBLEM)
     with pytest.raises(ValueError, match=reason) as py_err:
@@ -68,7 +76,7 @@ def test_2d_entry_refuses_bad_head_counts_like_python(arch, spec_cls, heads, rea
     assert str(py_err.value) in str(cpp_err.value)
 
 
-def test_fastkv_register_p_entry_refuses_gfx942_like_python():
+def test_fastkv_register_p_entry_refuses_gfx942_like_python(rocke_engine):
     spec = make_fastkv_register_p_spec(
         Gfx950Spec2D(
             num_query_heads=64,
@@ -435,13 +443,17 @@ _ENTRY_POINTS = ("lower_llvm", "serialize_ir", "verify")
         for arch in e.archs
     ],
 )
-def test_2d_entries_build_the_accepted_specs(spec_cls, accepted, binding, arch):
+def test_2d_entries_build_the_accepted_specs(
+    rocke_engine, spec_cls, accepted, binding, arch
+):
     """The C++ entries build each accepted spec, so a refusal below is the rule's."""
     fields = dataclasses.asdict(spec_cls(**accepted))
     assert getattr(rocke_engine, f"{binding}_serialize_ir")(fields, arch)
 
 
-def _assert_both_engines_refuse(spec_cls, accepted, entry_point, arch, refusal):
+def _assert_both_engines_refuse(
+    rocke_engine, spec_cls, accepted, entry_point, arch, refusal
+):
     # The C++ message is matched as a substring: the binding prefixes it with
     # the entry's "build failed:" context.
     accepted_spec = spec_cls(**accepted)
@@ -472,10 +484,12 @@ def _assert_both_engines_refuse(spec_cls, accepted, entry_point, arch, refusal):
     ],
 )
 def test_2d_entries_refuse_the_spec_rules_like_python(
-    spec_cls, accepted, entry_point, arch, refusal
+    rocke_engine, spec_cls, accepted, entry_point, arch, refusal
 ):
     """Python and the C++ entry refuse the changed spec with the same text."""
-    _assert_both_engines_refuse(spec_cls, accepted, entry_point, arch, refusal)
+    _assert_both_engines_refuse(
+        rocke_engine, spec_cls, accepted, entry_point, arch, refusal
+    )
 
 
 # The gfx942 spec refuses grouped-KV2 and the fp8 K/V cache in its first checks,
@@ -539,12 +553,14 @@ _GFX942_REFUSALS = [
     ],
 )
 def test_gfx942_2d_entry_refuses_grouped_kv2_and_fp8_kv_on_every_arch(
-    entry_point, arch, refusal
+    rocke_engine, entry_point, arch, refusal
 ):
     """The gfx942 entry runs the gfx942 spec checks for every target, so the
     grouped-KV2 and early-V specs the gfx942 spec refuses are refused on both
     arches its builder admits."""
-    _assert_both_engines_refuse(Gfx942Spec2D, _PROBLEM_64_8, entry_point, arch, refusal)
+    _assert_both_engines_refuse(
+        rocke_engine, Gfx942Spec2D, _PROBLEM_64_8, entry_point, arch, refusal
+    )
 
 
 @pytest.mark.parametrize(
