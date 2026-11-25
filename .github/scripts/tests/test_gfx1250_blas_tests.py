@@ -49,19 +49,19 @@ def write(directory, name, text):
 
 class FilterTest(unittest.TestCase):
     def test_positive_and_negative_patterns(self):
-        self.assertTrue(blas.in_filter("A.b", "A.*"))
-        self.assertFalse(blas.in_filter("A.b", "A.*-*b"))
-        self.assertTrue(blas.in_filter("A.b", "-B.*"))
+        self.assertTrue(blas.gtest_filter_selects("A.b", "A.*"))
+        self.assertFalse(blas.gtest_filter_selects("A.b", "A.*-*b"))
+        self.assertTrue(blas.gtest_filter_selects("A.b", "-B.*"))
 
     def test_empty_filter_selects_everything(self):
-        self.assertTrue(blas.in_filter("Any.test", ""))
+        self.assertTrue(blas.gtest_filter_selects("Any.test", ""))
 
     def test_every_large_group_is_one_of_the_large_patterns(self):
-        # A group outside LARGE would run in both the shards and its own process.
-        for group in blas.LARGE_GROUPS:
+        # A group outside LARGE_MEMORY_TESTS would run in both the shards and its own process.
+        for group in blas.LARGE_MEMORY_GROUPS:
             positive = group.partition("-")[0]
             self.assertTrue(
-                any(positive.startswith(p.rstrip("*")) for p in blas.LARGE), group
+                any(positive.startswith(p.rstrip("*")) for p in blas.LARGE_MEMORY_TESTS), group
             )
 
     def test_parse_test_list(self):
@@ -75,15 +75,15 @@ class FilterTest(unittest.TestCase):
 class CpuShareTest(unittest.TestCase):
     def test_pinned_container_keeps_its_cpus(self):
         with mock.patch.dict(os.environ, {"GPUS_PER_HOST": "4"}):
-            self.assertEqual(blas.job_cpus(allowed=64, total=256), 64)
+            self.assertEqual(blas.job_cpus(cpus_visible=64, cpus_on_host=256), 64)
 
     def test_unpinned_container_gets_its_gpus_share(self):
         with mock.patch.dict(os.environ, {"GPUS_PER_HOST": "4"}):
-            self.assertEqual(blas.job_cpus(allowed=256, total=256), 64)
+            self.assertEqual(blas.job_cpus(cpus_visible=256, cpus_on_host=256), 64)
 
     def test_single_gpu_host_keeps_everything(self):
         with mock.patch.dict(os.environ, {"GPUS_PER_HOST": "1"}):
-            self.assertEqual(blas.job_cpus(allowed=256, total=256), 256)
+            self.assertEqual(blas.job_cpus(cpus_visible=256, cpus_on_host=256), 256)
 
 
 class TestResultLineTest(unittest.TestCase):
@@ -150,7 +150,7 @@ class ReportOutcomeTest(unittest.TestCase):
     """report_hipblaslt raises for every way a run can go wrong."""
 
     def process(self, tmp, name="shard0"):
-        process = mock.Mock(peak_rss="1.0", memory_stops=[])
+        process = mock.Mock(peak_memory_gib="1.0", memory_stops=[])
         process.name = name
         process.log = write(tmp, f"{name}.log", "log text\n")
         return process
@@ -209,7 +209,7 @@ class CompilerCheckTest(unittest.TestCase):
             target.mkdir(parents=True)
             (target / "therock_manifest.json").write_text(json.dumps(manifest))
             with mock.patch("sys.stdout"):
-                self.assertEqual(blas.compiler_of_sdk(tmp), ("a" * 40, "b" * 40))
+                self.assertEqual(blas.sdk_compiler_and_therock_commits(tmp), ("a" * 40, "b" * 40))
 
     def test_therock_submodule_pin(self):
         # A TheRock-like repo whose compiler/amd-llvm is a gitlink to a known commit.
@@ -231,7 +231,7 @@ class CompilerCheckTest(unittest.TestCase):
             git(
                 "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "pin"
             )
-            llvm, head = blas.compiler_of_therock(tmp)
+            llvm, head = blas.therock_compiler_and_commit(tmp)
         self.assertEqual(llvm, pinned)
         self.assertEqual(len(head), 40)
 

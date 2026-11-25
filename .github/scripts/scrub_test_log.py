@@ -36,12 +36,12 @@ import sys
 # show, e.g. "  Serial Number:   1234". One label per alternative; \s+ allows any
 # whitespace inside it. Partial redaction could leave the value behind, so the whole
 # line goes.
-_DROP = re.compile(
+_DROPPED_LINE = re.compile(
     r"Marketing\s+Name|Product\s+Name|Serial\s+Number|Unique\s+ID|VBIOS|[Ff]irmware"
     r"|multiProcessorCount|l2CacheSize|Compute\s+Unit"
 )
 # Values redacted inside a line, replaced by "<redacted>":
-_REDACT = re.compile(
+_REDACTED_VALUE = re.compile(
     # 1. AMD host names (anything.amd.com). The lookbehind starts a match only where a
     #    run of host characters starts; without it a long run with no ".amd.com" is
     #    rescanned from every position (quadratic).
@@ -54,10 +54,12 @@ _REDACT = re.compile(
     # 4. Memory clock in hipblaslt-test's header: "max. MCLK 1000 MHz".
     r"|(?<=MCLK )[0-9]+"
 )
+# The TensileLite client's problem-progress CSV: a header naming the columns, then one row
+# per kernel run, starting "<run>,<problem i>/<problems>," e.g. "12,3/40,".
 _PROGRESS_HEADER = "run,problem-progress,"
 _PROGRESS_ROW = re.compile(r"^[0-9]+,[0-9]+/[0-9]+,")
 # problem-progress columns that measure this machine rather than the kernel's result.
-_HW_COLUMNS = frozenset(
+_HARDWARE_COLUMNS = frozenset(
     "num-cus tiles-per-cu total-gran cu-gran wave-gran temp-edge clock-sys clock-soc"
     " clock-mem fan-rpm hardware-samples gfx-frequency(maximum) time-us gflops"
     " gflops-per-cu fastest-gflops peak-gflops efficiency gbps-bandwidth enqueue-time"
@@ -80,31 +82,36 @@ class Scrubber:
     """Line-by-line scrubber; keeps the last problem-progress header's column map."""
 
     def __init__(self, timing="none"):
-        self._subs = _PYTEST_TIMING if timing == "pytest" else []
-        self._header_fields = 0
-        self._blank_from_end = set()
+        """timing="pytest" also removes pytest's and TensileLite's timings."""
+        self._timing_substitutions = _PYTEST_TIMING if timing == "pytest" else []
+        self._header_field_count = 0
+        self._hardware_column_offsets_from_end = set()
 
     def scrub(self, line):
         """Return the scrubbed line (no newline), or None to drop it."""
-        for pattern, repl in self._subs:
-            line = pattern.sub(repl, line)
-        if _DROP.search(line):
+        for pattern, replacement in self._timing_substitutions:
+            line = pattern.sub(replacement, line)
+        if _DROPPED_LINE.search(line):
             return None
-        line = _REDACT.sub("<redacted>", line)
+        line = _REDACTED_VALUE.sub("<redacted>", line)
         if line.startswith(_PROGRESS_HEADER):
-            # Problem sizes such as "(m,n,b,k)" add commas before these columns,
-            # so they are located by their distance from the end.
+            # A row's problem size "(m,n,b,k)" adds commas the header doesn't have, so the
+            # hardware columns are found by their distance from the end. E.g. header
+            # "run,problem-progress,size,gflops,valid" puts gflops 1 from the end; in the
+            # row "1,1/9,(64,64,1,64),900.1,PASSED" that is "900.1".
             fields = line.split(",")
-            self._header_fields = len(fields)
-            self._blank_from_end = {
-                len(fields) - 1 - i for i, f in enumerate(fields) if f in _HW_COLUMNS
+            self._header_field_count = len(fields)
+            self._hardware_column_offsets_from_end = {
+                len(fields) - 1 - position
+                for position, name in enumerate(fields)
+                if name in _HARDWARE_COLUMNS
             }
-        elif self._header_fields and _PROGRESS_ROW.match(line):
+        elif self._header_field_count and _PROGRESS_ROW.match(line):
             fields = line.split(",")
-            if len(fields) < self._header_fields:
+            if len(fields) < self._header_field_count:
                 return None  # truncated: drop rather than half-scrub
-            for k in self._blank_from_end:
-                fields[len(fields) - 1 - k] = ""
+            for offset in self._hardware_column_offsets_from_end:
+                fields[len(fields) - 1 - offset] = ""
             line = ",".join(fields)
         return line
 
