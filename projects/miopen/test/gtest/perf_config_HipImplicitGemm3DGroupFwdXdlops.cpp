@@ -14,6 +14,8 @@
 using Problem = miopen::conv::ProblemDescription;
 using Config  = miopen::solver::conv::PerformanceConfigHipImplicitGemm3DGroupFwdXdlops;
 
+MIOPEN_LIB_ENV_VAR(MIOPEN_DEBUG_3D_CONV_IMPLICIT_GEMM_HIP_FWD_XDLOPS_HARDCODE)
+
 struct PerfConfigTestCase
 {
     struct group_conv::GroupConvTestConfig<3u> conv;
@@ -91,7 +93,9 @@ using GPU_PerfConfig_HipImplicitGemm3DGroupFwdXdlops_FP16 =
 TEST_P(GPU_PerfConfig_HipImplicitGemm3DGroupFwdXdlops_BFP16, All) { TestConfigs(); }
 TEST_P(GPU_PerfConfig_HipImplicitGemm3DGroupFwdXdlops_FP16, All) { TestConfigs(); }
 
-TEST(GPU_PerfConfig_HipImplicitGemm3DGroupFwdXdlops_FP16, SearchStartsAtKernelZero)
+using GPU_PerfConfig_HipImplicitGemm3DGroupFwdXdlopsSearch_FP16 = ::testing::TestWithParam<int>;
+
+TEST_P(GPU_PerfConfig_HipImplicitGemm3DGroupFwdXdlopsSearch_FP16, SearchStartsAtKernelZero)
 {
     const auto device_name = miopen::solver::GetCurrentDeviceName();
     if(device_name.empty())
@@ -114,10 +118,80 @@ TEST(GPU_PerfConfig_HipImplicitGemm3DGroupFwdXdlops_FP16, SearchStartsAtKernelZe
     EXPECT_TRUE(cfg.IsValid(problem));
 }
 
-INSTANTIATE_TEST_SUITE_P(Full,
+// gfx950 has no hard-coded FP16/BF16 picks in HeuristicInit, so the default kernel must not depend
+// on MIOPEN_DEBUG_3D_CONV_IMPLICIT_GEMM_HIP_FWD_XDLOPS_HARDCODE. The shapes have in_depth >= 3 and
+// in_width >= 256, where a former gfx950 rule returned one fixed CK instance ahead of the AI
+// heuristic.
+static void
+CheckGfx950HasNoHardcodedPick(miopenDataType_t data_type,
+                              const std::vector<group_conv::GroupConvTestConfig<3u>>& convs)
+{
+    auto&& handle = get_handle();
+    miopen::ExecutionContext ctx(&handle);
+    if(ctx.GetStream().GetDeviceName() != "gfx950")
+        GTEST_SKIP() << "gfx950 only";
+
+    using Solver = miopen::solver::conv::ConvHipImplicitGemm3DGroupFwdXdlops;
+    for(const auto& conv : convs)
+    {
+        const auto problem = MakeSearchProblem(conv, data_type, miopenTensorNCDHW);
+        ASSERT_TRUE(group_conv::SolverApplicable<Solver>(problem)) << conv;
+
+        Config hardcode_on;
+        {
+            ScopedEnvironment<bool> env(MIOPEN_DEBUG_3D_CONV_IMPLICIT_GEMM_HIP_FWD_XDLOPS_HARDCODE,
+                                        true);
+            hardcode_on.HeuristicInit(ctx, problem);
+        }
+        Config hardcode_off;
+        {
+            ScopedEnvironment<bool> env(MIOPEN_DEBUG_3D_CONV_IMPLICIT_GEMM_HIP_FWD_XDLOPS_HARDCODE,
+                                        false);
+            hardcode_off.HeuristicInit(ctx, problem);
+        }
+        EXPECT_NE(hardcode_off.kernel_id, "None") << conv;
+        EXPECT_EQ(hardcode_on.kernel_id, hardcode_off.kernel_id) << conv;
+    }
+}
+
+using GPU_PerfConfig_HipImplicitGemm3DGroupFwdXdlopsGfx950_BFP16 = ::testing::TestWithParam<int>;
+using GPU_PerfConfig_HipImplicitGemm3DGroupFwdXdlopsGfx950_FP16  = ::testing::TestWithParam<int>;
+
+TEST_P(GPU_PerfConfig_HipImplicitGemm3DGroupFwdXdlopsGfx950_BFP16, Gfx950NoHardcodedPick)
+{
+    CheckGfx950HasNoHardcodedPick(
+        miopenBFloat16,
+        {// Wan VAE stage 2
+         {1, 1, 96, 96, {6, 642, 354}, {3, 3, 3}, {0, 0, 0}, {1, 1, 1}, {1, 1, 1}},
+         // stride 2 in D, H and W
+         {1, 1, 96, 96, {8, 256, 256}, {3, 3, 3}, {0, 0, 0}, {2, 2, 2}, {1, 1, 1}},
+         // dilation 2 in D, H and W
+         {1, 1, 64, 64, {8, 256, 256}, {3, 3, 3}, {0, 0, 0}, {1, 1, 1}, {2, 2, 2}}});
+}
+
+TEST_P(GPU_PerfConfig_HipImplicitGemm3DGroupFwdXdlopsGfx950_FP16, Gfx950NoHardcodedPick)
+{
+    // Wan VAE stage 2
+    CheckGfx950HasNoHardcodedPick(
+        miopenHalf, {{1, 1, 96, 96, {6, 642, 354}, {3, 3, 3}, {0, 0, 0}, {1, 1, 1}, {1, 1, 1}}});
+}
+
+INSTANTIATE_TEST_SUITE_P(Standard,
+                         GPU_PerfConfig_HipImplicitGemm3DGroupFwdXdlopsSearch_FP16,
+                         ::testing::Values(0));
+
+INSTANTIATE_TEST_SUITE_P(Standard,
+                         GPU_PerfConfig_HipImplicitGemm3DGroupFwdXdlopsGfx950_BFP16,
+                         ::testing::Values(0));
+
+INSTANTIATE_TEST_SUITE_P(Standard,
+                         GPU_PerfConfig_HipImplicitGemm3DGroupFwdXdlopsGfx950_FP16,
+                         ::testing::Values(0));
+
+INSTANTIATE_TEST_SUITE_P(Standard,
                          GPU_PerfConfig_HipImplicitGemm3DGroupFwdXdlops_BFP16,
                          testing::ValuesIn(GetPerfConfigTestCases(miopenBFloat16, "gfx942")));
 
-INSTANTIATE_TEST_SUITE_P(Full,
+INSTANTIATE_TEST_SUITE_P(Standard,
                          GPU_PerfConfig_HipImplicitGemm3DGroupFwdXdlops_FP16,
                          testing::ValuesIn(GetPerfConfigTestCases(miopenHalf, "gfx942")));

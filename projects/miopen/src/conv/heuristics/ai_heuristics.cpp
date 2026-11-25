@@ -313,8 +313,10 @@ EngineeredConvFeaturesByName(std::size_t N,
     std::map<std::string, float> by_name;
     for(std::size_t i = 0; i < kBaseDerivedFeatureNames.size(); ++i)
         by_name[kBaseDerivedFeatureNames[i]] = base[i];
-    if(spatial_dim == 3) // log_d_in is appended after the base block (3D only)
-        by_name["log_d_in"] = base[kBaseDerivedFeatureNames.size()];
+    // log_d_in = log1p(depth): real depth for 3D, log1p(1) for 2D models that carry a constant
+    // depth feature (in_d) in their derived_features. Computed from D_in so the named registry
+    // serves both spatial ranks; the 3D value is identical to the base block's appended entry.
+    by_name["log_d_in"] = static_cast<float>(std::log1p(static_cast<double>(D_in)));
 
     // GEMM dims for the divfeat features. Same direction switch as EngineeredConvFeatures; computed
     // exactly (not reconstructed from the log features) so tile-alignment is not perturbed by
@@ -846,13 +848,15 @@ static bool HasLegacyTunaNetSupport(const std::string& device)
 
 /**
  * @brief Check if device has ND TunaNet model support (2D and 3D)
- * @param device GPU device name (e.g., "gfx942", "gfx950")
+ * @param device GPU device name (e.g., "gfx942", "gfx950", "gfx1250")
  * @return true if ND TunaNet models exist for this device
  */
 static bool HasNDTunaNetSupport(const std::string& device)
 {
-    // ND TunaNet models (supporting both 2D and 3D) exist for these architectures
-    return (device == "gfx942" || device == "gfx950");
+    // ND TunaNet models (supporting both 2D and 3D) exist for these architectures.
+    // Normalize first so a runtime sub-target (e.g. "gfx1250-strict") still matches.
+    const std::string arch = common::NormalizeArch(device);
+    return (arch == "gfx942" || arch == "gfx950" || arch == "gfx1250");
 }
 
 bool HasBundledTunaNetModels(const std::string& device)
@@ -1138,7 +1142,7 @@ std::vector<uint64_t> PredictSolver(const conv::ProblemDescription& problem,
             MIOPEN_LOG_I2("TunaNet bypassed via MIOPEN_DEBUG_LGBM_ONLY for " << device
                                                                              << "; trying LGBM");
         }
-        // ND model (for gfx942/gfx950, supports both 2D and 3D).
+        // ND model (for gfx942/gfx950/gfx1250, supports both 2D and 3D).
         else if((is2d || is3d) && HasNDTunaNetSupport(device))
         {
             int dim                        = is3d ? 3 : 2;
@@ -1323,7 +1327,23 @@ ExtractTunaNetNDFeatures(const conv::ProblemDescription& problem,
     {
         if(common::IsTunaNetCategoricalFeature(feature_name))
             continue;
-        features.push_back(TunaNetRawFeatureValue(feature_name, problem, isFwd));
+        if(feature_name == "num_cu")
+        {
+            // Combined multi-arch models add num_cu as a raw numeric input (metadata gpu.num_cu).
+            features.push_back(static_cast<float>(num_cu));
+        }
+        else if(feature_name == "arch")
+        {
+            // Combined gfx950+gfx1250 models add a binary arch input (gfx950=0, gfx1250=1). Each
+            // per-arch model file serves a single device, so emit that device's arch bit. Use the
+            // normalized arch (covers gfx1250-strict) rather than substring-matching the prefix.
+            const bool is_gfx1250 = metadata.GetArch() == "gfx1250";
+            features.push_back(is_gfx1250 ? 1.0f : 0.0f);
+        }
+        else
+        {
+            features.push_back(TunaNetRawFeatureValue(feature_name, problem, isFwd));
+        }
     }
 
     const auto gemm_dir       = problem.GetDirection() == conv::Direction::Forward
@@ -1367,13 +1387,16 @@ ExtractTunaNetNDFeatures(const conv::ProblemDescription& problem,
 class TunaNetNDModel : public ModelND
 {
 private:
-    const std::string device_name; // Device name (e.g., "gfx942", "gfx950")
+    const std::string device_name; // Device name (e.g., "gfx942", "gfx950", "gfx1250")
 
 public:
     MetadataND metadata;
 
     explicit TunaNetNDModel(const std::string& device, const int& dim)
-        : device_name(device), metadata(MetadataND(device, dim))
+        // Normalize the arch so a runtime sub-target (e.g. "gfx1250-strict") loads the
+        // "gfx1250_*" model/metadata files and matches the per-arch gates below.
+        : device_name(common::NormalizeArch(device)),
+          metadata(MetadataND(common::NormalizeArch(device), dim))
     {
         MIOPEN_LOG_I2("TunaNetNDModel initialized for device: " << device_name << " dim: " << dim);
     }
@@ -1460,7 +1483,7 @@ protected:
 
         std::vector<float> features = {};
         if((problem.Is2d() || problem.Is3d()) &&
-           (device_name == "gfx950" || device_name == "gfx942"))
+           (device_name == "gfx950" || device_name == "gfx942" || device_name == "gfx1250"))
         {
             features = ExtractTunaNetNDFeatures(problem, isFwd, metadata);
         }

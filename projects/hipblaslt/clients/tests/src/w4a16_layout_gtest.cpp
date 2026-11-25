@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 /// W4A16: int4 encoding validation, the 8-row zero-point packing of the test
-/// data, and kernel selection by scale mode, B scale and lda.
+/// data, kernel selection by scale mode, B scale and lda, and the K the kernels serve.
 
 #include "w4a16_datagen.hpp"
 
@@ -13,8 +13,11 @@
 #include <string>
 #include <vector>
 
+#include <cmath>
 #include <cstdint>
 #include <cstring>
+#include <random>
+#include <utility>
 
 TEST(w4a16_encoding, cpp_api_accepts_only_supported_encodings)
 {
@@ -103,8 +106,9 @@ namespace
             hipDeviceProp_t properties;
             ASSERT_EQ(hipGetDevice(&device), hipSuccess);
             ASSERT_EQ(hipGetDeviceProperties(&properties, device), hipSuccess);
-            if(std::string(properties.gcnArchName).find("gfx1151") != 0)
-                GTEST_SKIP() << "W4A16 custom kernels require gfx1151";
+            const std::string arch(properties.gcnArchName);
+            if(arch.find("gfx1150") != 0 && arch.find("gfx1151") != 0)
+                GTEST_SKIP() << "W4A16 custom kernels require gfx1150 or gfx1151";
             ASSERT_EQ(hipMalloc(&storage, m * k * sizeof(float)), hipSuccess);
             ASSERT_EQ(hipblasLtCreate(&handle), HIPBLAS_STATUS_SUCCESS);
             ASSERT_EQ(hipblasLtMatmulPreferenceCreate(&pref), HIPBLAS_STATUS_SUCCESS);
@@ -224,7 +228,7 @@ TEST_F(w4a16_b_scale, every_mode_has_a_kernel_without_b_scale)
                              HIPBLASLT_INT4_ENCODING_UNSIGNED_BIAS8_EXT})
             for(bool zp : {false, true})
                 for(int group = 0; group < 3; ++group)
-                    for(int64_t cols : {int64_t(1), n})
+                    for(int64_t cols : {int64_t(1), int64_t(2), int64_t(3), int64_t(4), int64_t(5), n})
                     {
                         SCOPED_TRACE(::testing::Message() << "dtype=" << dtype << " encoding="
                                      << encoding << " zp=" << zp << " group=" << group
@@ -287,4 +291,273 @@ TEST_F(w4a16_b_scale, lda_must_cover_k_in_whole_dwords)
                 EXPECT_EQ(ext.count(), 1u);
         }
     }
+}
+
+namespace
+{
+    // One W4A16 problem through the C API, with its own data: how many kernels the heuristic
+    // returns, what hipblasLtMatmul returns and, when it ran, the error of D against a CPU
+    // reference (relative, 2-norm).
+    struct W4A16Run
+    {
+        int             kernels = -1;
+        hipblasStatus_t status  = HIPBLAS_STATUS_UNKNOWN;
+        double          error   = -1;
+    };
+
+    W4A16Run runW4A16(hipblasLtHandle_t handle, hipblasLtMatmulPreference_t pref,
+                      hipDataType dtype, int group, bool zp, int64_t rows, int64_t cols,
+                      int64_t depth, int batch = 1)
+    {
+        const int     groupSize = 32 << group;
+        const int64_t groups    = (depth + groupSize - 1) / groupSize;
+        const auto    encoding  = HIPBLASLT_INT4_ENCODING_SIGNED_EXT;
+        const auto    mode      = w4a16Mode(dtype, group, zp);
+        const float   alpha = 1, beta = 0;
+        const size_t  workspaceBytes = 32 * 1024 * 1024;
+
+        // The weights and the scales are those of one problem; a batch reuses them.
+        std::vector<uint8_t> hostA(static_cast<size_t>(depth) * rows / 2 * batch + 64, 0);
+        std::vector<uint8_t> hostScale(w4a16::scaleBytes(rows, groups, zp) + 64, 0);
+        const auto reference = generateW4A16Input(
+            hostA.data(), hostScale.data(), dtype, rows, depth, depth, groupSize, zp, encoding);
+        std::vector<uint8_t> hostB(static_cast<size_t>(2) * depth * cols * batch);
+        std::vector<uint8_t> hostD(static_cast<size_t>(2) * rows * cols * batch, 0);
+        std::vector<float>   b(static_cast<size_t>(depth) * cols);
+        std::mt19937                          rng(7);
+        std::uniform_real_distribution<float> dist(-1.0f, 1.0f);
+        for(size_t i = 0; i < b.size(); ++i)
+        {
+            w4a16::storeAs(hostB.data(), i, dist(rng), dtype);
+            b[i] = w4a16::loadAs(hostB.data(), i, dtype);
+        }
+
+        W4A16Run run;
+        void *devA = nullptr, *devB = nullptr, *devD = nullptr, *devScale = nullptr,
+             *workspace = nullptr;
+        hipblasLtMatmulDesc_t   desc = nullptr;
+        hipblasLtMatrixLayout_t a = nullptr, bLayout = nullptr, c = nullptr, d = nullptr;
+        const auto upload = [](void** device, const std::vector<uint8_t>& host) {
+            return hipMalloc(device, host.size()) == hipSuccess
+                   && hipMemcpy(*device, host.data(), host.size(), hipMemcpyHostToDevice)
+                          == hipSuccess;
+        };
+        bool ok = upload(&devA, hostA) && upload(&devB, hostB) && upload(&devD, hostD)
+                  && upload(&devScale, hostScale)
+                  && hipMalloc(&workspace, workspaceBytes) == hipSuccess;
+        ok = ok && hipblasLtMatmulDescCreate(&desc, HIPBLAS_COMPUTE_32F, HIP_R_32F)
+                       == HIPBLAS_STATUS_SUCCESS;
+        ok = ok && hipblasLtMatrixLayoutCreate(&a, HIP_R_4I, depth, rows, depth)
+                       == HIPBLAS_STATUS_SUCCESS;
+        ok = ok && hipblasLtMatrixLayoutCreate(&bLayout, dtype, depth, cols, depth)
+                       == HIPBLAS_STATUS_SUCCESS;
+        ok = ok && hipblasLtMatrixLayoutCreate(&c, dtype, rows, cols, rows) == HIPBLAS_STATUS_SUCCESS;
+        ok = ok && hipblasLtMatrixLayoutCreate(&d, dtype, rows, cols, rows) == HIPBLAS_STATUS_SUCCESS;
+        if(ok && batch > 1)
+        {
+            const int32_t count = batch;
+            const int64_t strideA = depth * rows, strideB = depth * cols, strideC = rows * cols;
+            for(auto [layout, stride] : {std::pair{a, strideA}, std::pair{bLayout, strideB},
+                                         std::pair{c, strideC}, std::pair{d, strideC}})
+            {
+                ok = ok && hipblasLtMatrixLayoutSetAttribute(
+                               layout, HIPBLASLT_MATRIX_LAYOUT_BATCH_COUNT, &count, sizeof(count))
+                               == HIPBLAS_STATUS_SUCCESS;
+                ok = ok && hipblasLtMatrixLayoutSetAttribute(
+                               layout, HIPBLASLT_MATRIX_LAYOUT_STRIDED_BATCH_OFFSET, &stride,
+                               sizeof(stride))
+                               == HIPBLAS_STATUS_SUCCESS;
+            }
+        }
+        if(ok)
+        {
+            const hipblasOperation_t trans = HIPBLAS_OP_T;
+            ok = hipblasLtMatmulDescSetAttribute(
+                     desc, HIPBLASLT_MATMUL_DESC_TRANSA, &trans, sizeof(trans))
+                     == HIPBLAS_STATUS_SUCCESS
+                 && hipblasLtMatmulDescSetAttribute(
+                        desc, HIPBLASLT_MATMUL_DESC_A_INT4_ENCODING_EXT, &encoding, sizeof(encoding))
+                        == HIPBLAS_STATUS_SUCCESS
+                 && hipblasLtMatmulDescSetAttribute(
+                        desc, HIPBLASLT_MATMUL_DESC_A_SCALE_MODE, &mode, sizeof(mode))
+                        == HIPBLAS_STATUS_SUCCESS
+                 && hipblasLtMatmulDescSetAttribute(
+                        desc, HIPBLASLT_MATMUL_DESC_A_SCALE_POINTER, &devScale, sizeof(devScale))
+                        == HIPBLAS_STATUS_SUCCESS;
+        }
+        if(ok)
+        {
+            hipblasLtMatmulHeuristicResult_t result;
+            hipblasLtMatmulAlgoGetHeuristic(
+                handle, desc, a, bLayout, c, d, pref, 1, &result, &run.kernels);
+            run.status = hipblasLtMatmul(handle, desc, &alpha, devA, a, devB, bLayout, &beta, devD,
+                                         c, devD, d, nullptr, workspace, workspaceBytes, nullptr);
+            if(run.status == HIPBLAS_STATUS_SUCCESS && batch == 1
+               && hipDeviceSynchronize() == hipSuccess
+               && hipMemcpy(hostD.data(), devD, hostD.size(), hipMemcpyDeviceToHost) == hipSuccess)
+            {
+                double difference = 0, norm = 0;
+                for(int64_t col = 0; col < cols; ++col)
+                    for(int64_t row = 0; row < rows; ++row)
+                    {
+                        double expected = 0;
+                        for(int64_t l = 0; l < depth; ++l)
+                            expected += static_cast<double>(reference[row * depth + l])
+                                        * b[col * depth + l];
+                        const double got = w4a16::loadAs(hostD.data(), col * rows + row, dtype);
+                        difference += (got - expected) * (got - expected);
+                        norm += expected * expected;
+                    }
+                run.error = std::sqrt(difference / norm);
+            }
+        }
+        if(desc)
+            hipblasLtMatmulDescDestroy(desc);
+        for(auto layout : {a, bLayout, c, d})
+            if(layout)
+                hipblasLtMatrixLayoutDestroy(layout);
+        for(void* buffer : {devA, devB, devD, devScale, workspace})
+            if(buffer)
+                (void)hipFree(buffer);
+        return run;
+    }
+
+    // Largest error of a correct result: fp16 and bf16 round the f32 sum to their own type.
+    double w4a16Tolerance(hipDataType dtype)
+    {
+        return dtype == HIP_R_16F ? 2e-3 : 2e-2;
+    }
+}
+
+// The prefill tiles (more than 5 tokens) have no K tail: K is a multiple of the tile's DepthU,
+// 64 at least. They do take an incomplete last scale group (K = 320 is 2.5 groups of 128).
+TEST_F(w4a16_b_scale, prefill_tiles_take_k_a_multiple_of_64)
+{
+    for(auto dtype : {HIP_R_16F, HIP_R_16BF})
+        for(bool zp : {false, true})
+            for(int group = 0; group < 3; ++group)
+                for(int64_t depth : {int64_t(320), int64_t(1088)})
+                {
+                    SCOPED_TRACE(::testing::Message() << "dtype=" << dtype << " zp=" << zp
+                                 << " group=" << (32 << group) << " k=" << depth);
+                    const auto run = runW4A16(handle, pref, dtype, group, zp, m, n, depth);
+                    EXPECT_EQ(run.kernels, 1);
+                    ASSERT_EQ(run.status, HIPBLAS_STATUS_SUCCESS);
+                    EXPECT_GT(run.error, -0.5);
+                    EXPECT_LT(run.error, w4a16Tolerance(dtype));
+                }
+}
+
+// What the prefill tiles do not serve: no kernel is returned and hipblasLtMatmul fails, it
+// does not compute a wrong result. These follow the kernels the library has; a tile with a K
+// tail would move them to the test above.
+TEST_F(w4a16_b_scale, k_without_a_kernel_is_not_served)
+{
+    struct Unserved
+    {
+        int64_t     cols, depth;
+        const char* why;
+    };
+    for(auto dtype : {HIP_R_16F, HIP_R_16BF})
+        for(bool zp : {false, true})
+            for(int group = 0; group < 3; ++group)
+                for(const auto& unserved : {
+                        Unserved{n, 240, "prefill, K not a multiple of 64"},
+                        Unserved{n, 288, "prefill, K a multiple of 32 only"},
+                        Unserved{n, 1056, "prefill, K a multiple of 32 only"},
+                        Unserved{n, 248, "prefill, K a multiple of 8 only"},
+                    })
+                {
+                    SCOPED_TRACE(::testing::Message() << unserved.why << ": dtype=" << dtype
+                                 << " zp=" << zp << " group=" << (32 << group)
+                                 << " k=" << unserved.depth << " n=" << unserved.cols);
+                    const auto run = runW4A16(
+                        handle, pref, dtype, group, zp, m, unserved.cols, unserved.depth);
+                    EXPECT_EQ(run.kernels, 0);
+                    EXPECT_NE(run.status, HIPBLAS_STATUS_SUCCESS);
+                }
+
+}
+
+// The scale tensor has no batch dimension: a batch is rejected, whatever its K.
+TEST_F(w4a16_b_scale, batch_count_above_one_is_rejected)
+{
+    for(auto dtype : {HIP_R_16F, HIP_R_16BF})
+        for(int64_t cols : {int64_t(1), int64_t(2), int64_t(3), int64_t(4), int64_t(5), n})
+        {
+            SCOPED_TRACE(::testing::Message() << "dtype=" << dtype << " n=" << cols);
+            EXPECT_EQ(runW4A16(handle, pref, dtype, 0, false, m, cols, k, 1).status,
+                      HIPBLAS_STATUS_SUCCESS);
+            EXPECT_NE(runW4A16(handle, pref, dtype, 0, false, m, cols, k, 2).status,
+                      HIPBLAS_STATUS_SUCCESS);
+        }
+}
+
+// K the W4A16 kernels support beyond whole DepthU iterations. The decode kernels (1 to 5
+// tokens) run a masked last iteration, so K only has to be a multiple of a lane's K block: 16
+// for the kernels with DepthU 512, which every type has from 2 tokens on. The last scale group
+// may be incomplete: the scale tensor has ceil(K / group) entries per row.
+TEST_F(w4a16_b_scale, decode_kernels_take_a_k_remainder_and_an_incomplete_last_group)
+{
+    for(auto dtype : {HIP_R_16F, HIP_R_16BF})
+        for(bool zp : {false, true})
+            for(int group = 0; group < 3; ++group)
+                for(int64_t depth : {int64_t(240), int64_t(272), int64_t(1056)})
+                    for(int64_t cols : {int64_t(2), int64_t(3), int64_t(4), int64_t(5)})
+                    {
+                        SCOPED_TRACE(::testing::Message() << "dtype=" << dtype << " zp=" << zp
+                                     << " group=" << (32 << group) << " k=" << depth
+                                     << " n=" << cols);
+                        const auto run = runW4A16(handle, pref, dtype, group, zp, m, cols, depth);
+                        EXPECT_EQ(run.kernels, 1);
+                        ASSERT_EQ(run.status, HIPBLAS_STATUS_SUCCESS);
+                        EXPECT_GT(run.error, -0.5);
+                        EXPECT_LT(run.error, w4a16Tolerance(dtype));
+                    }
+}
+
+// One token: every type has a kernel for K a multiple of 32, with whole groups or not.
+TEST_F(w4a16_b_scale, one_token_takes_k_a_multiple_of_32)
+{
+    for(auto dtype : {HIP_R_16F, HIP_R_16BF})
+        for(bool zp : {false, true})
+            for(int group = 0; group < 3; ++group)
+                for(int64_t depth : {int64_t(288), int64_t(1056)})
+                {
+                    SCOPED_TRACE(::testing::Message() << "dtype=" << dtype << " zp=" << zp
+                                 << " group=" << (32 << group) << " k=" << depth);
+                    const auto run = runW4A16(handle, pref, dtype, group, zp, m, 1, depth);
+                    EXPECT_EQ(run.kernels, 1);
+                    ASSERT_EQ(run.status, HIPBLAS_STATUS_SUCCESS);
+                    EXPECT_GT(run.error, -0.5);
+                    EXPECT_LT(run.error, w4a16Tolerance(dtype));
+                }
+}
+
+// What the decode kernels do not serve: K has to be a multiple of 16. As above, no kernel is
+// returned and hipblasLtMatmul fails.
+TEST_F(w4a16_b_scale, decode_k_without_a_kernel_is_not_served)
+{
+    for(auto dtype : {HIP_R_16F, HIP_R_16BF})
+        for(bool zp : {false, true})
+            for(int group = 0; group < 3; ++group)
+                for(int64_t cols : {int64_t(1), int64_t(2), int64_t(3), int64_t(4), int64_t(5)})
+                {
+                    SCOPED_TRACE(::testing::Message() << "dtype=" << dtype << " zp=" << zp
+                                 << " group=" << (32 << group) << " n=" << cols);
+                    const auto run = runW4A16(handle, pref, dtype, group, zp, m, cols, 248);
+                    EXPECT_EQ(run.kernels, 0);
+                    EXPECT_NE(run.status, HIPBLAS_STATUS_SUCCESS);
+                }
+
+    // fp16 symmetric has no one-token kernel with DepthU 512, so its K is a multiple of 32.
+    for(int group = 0; group < 3; ++group)
+        for(int64_t depth : {int64_t(240), int64_t(272)})
+        {
+            SCOPED_TRACE(::testing::Message() << "fp16 symmetric, one token: group="
+                         << (32 << group) << " k=" << depth);
+            const auto run = runW4A16(handle, pref, HIP_R_16F, group, false, m, 1, depth);
+            EXPECT_EQ(run.kernels, 0);
+            EXPECT_NE(run.status, HIPBLAS_STATUS_SUCCESS);
+        }
 }
