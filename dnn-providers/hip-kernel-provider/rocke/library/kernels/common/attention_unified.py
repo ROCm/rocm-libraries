@@ -5812,8 +5812,11 @@ def _select_2d_compile_backend(problem: UnifiedAttentionProblem, arch: str) -> s
     """
     if arch == "gfx1250":
         return "llvm"
-    if problem.compile_backend in ("llvm", "hip"):
-        return problem.compile_backend
+    backend = problem.compile_backend
+    if backend == "hipcc":
+        backend = "hip"  # legacy alias
+    if backend in ("llvm", "hip"):
+        return backend
     # Auto: HIP for large-batch bf16/fp16 prefill workloads where
     # the HIP backend's heavier scheduler measurably wins. FP8 stays on LLVM
     # until the HIP path is exercised on the dequant-loader kernels.
