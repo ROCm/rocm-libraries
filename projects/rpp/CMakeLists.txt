@@ -21,6 +21,14 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ]]
+
+# DO NOT MERGE: no-op marker so this PR's diff is exactly one RPP file.
+# RPP is the one rocm-libraries project that compiles into cv-libs, a stage
+# the caller lists in prebuilt_stages. This PR is the end-to-end check that
+# TheRock drops cv-libs from that list once it resolves
+# changed_projects="projects/rpp", instead of copying a baseline cv-libs that
+# does not contain this RPP.
+
 cmake_minimum_required(VERSION 3.15)
 include( utils.cmake )
 set( CORE_TARGET "rpp" )
