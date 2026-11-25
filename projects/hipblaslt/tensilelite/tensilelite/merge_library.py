@@ -76,6 +76,29 @@ def normalizeDictLibraryLayout(data: dict[str, Any]) -> bool:
     return bool(hadLibrary or data.get("LibraryType") != old_lt)
 
 
+def placeSolutionUidAfterIndex(solutions: list[dict[str, Any]]) -> None:
+    """Move each solution's ``SolutionUID`` to just after ``SolutionIndex``.
+
+    Every other key keeps its position, so a file whose UIDs were already in
+    place is written with the same key order.
+
+    Args:
+        solutions: Solution dicts, mutated in place.
+
+    Returns:
+        None.
+
+    Raises:
+        None.
+    """
+    for i, solution in enumerate(solutions):
+        if "SolutionUID" not in solution or "SolutionIndex" not in solution:
+            continue
+        keys = [k for k in solution if k != "SolutionUID"]
+        keys.insert(keys.index("SolutionIndex") + 1, "SolutionUID")
+        solutions[i] = {k: solution[k] for k in keys}
+
+
 def ensurePath(path):
     if not os.path.exists(path):
         os.makedirs(path)
@@ -119,14 +142,14 @@ def addKernel(solutionPool, solDict, solution, seen: set[str] | None = None):
 
     A reused name keeps the solution already in the pool, including its UID.
     A new solution is copied in. When ``seen`` is provided, that copy's UID is
-    made unique among the files in this merge.
+    made unique within the merged file that ``seen`` belongs to.
 
     Args:
         solutionPool: Solutions accumulated for the merged file.
         solDict: ``SolutionNameMin`` to the pooled solution.
         solution: Incoming solution.
-        seen: Canonical UIDs already reserved by this merge. Omitted by callers
-            that do not assign UIDs.
+        seen: Canonical UIDs already reserved in this merged file. Omitted by
+            callers that do not assign UIDs.
 
     Returns:
         Updated pool, name map, and the solution index to record.
@@ -494,6 +517,51 @@ def mergeLogic(oriData: dict[str, Any], incData: dict[str, Any], forceMerge, noE
     return [mergedData, numSizesAdded, numSolutionsAdded, numSolutionsRemoved]
 
 
+def copyClaimingSolutionUids(srcFile: str, outputFile: str, data: list | dict) -> int:
+    """Copy a logic file that has no base file, claiming its SolutionUIDs.
+
+    Each solution is claimed against the others in the same file. A unique
+    non-zero UID is kept; a missing, zero, malformed, or duplicate UID is
+    replaced. When nothing changes, the file is copied byte for byte.
+    Otherwise it is written the way merged files are written, so a legacy
+    list-format file comes out in dict format.
+
+    Args:
+        srcFile: Incremental logic YAML with no matching base file.
+        outputFile: Destination path.
+        data: Contents of ``srcFile`` as loaded; updated in place.
+
+    Returns:
+        Number of solutions whose UID was assigned or replaced.
+
+    Raises:
+        RuntimeError: If a unique SolutionUID cannot be drawn.
+        SystemExit: When ``parseLibraryLogicList`` rejects a list-format file.
+    """
+    if isinstance(data, list):
+        data = convertToDict(data, srcFile)
+    solutions = data.get("Solutions") if isinstance(data, dict) else None
+    if not solutions:
+        shutil.copyfile(srcFile, outputFile)
+        return 0
+
+    seen: set[str] = set()
+    numClaimed = 0
+    for solution in solutions:
+        before = solution.get("SolutionUID")
+        if claim_solution_uid(solution, seen) != before:
+            numClaimed += 1
+    if numClaimed == 0:
+        shutil.copyfile(srcFile, outputFile)
+        return 0
+
+    placeSolutionUidAfterIndex(solutions)
+    LibraryIO.writeYAML(
+        outputFile, data, explicit_start=False, explicit_end=False, sort_keys=False
+    )
+    return numClaimed
+
+
 def avoidRegressions(originalDir, incrementalDir, outputPath, forceMerge, noEff=False):
     originalFiles = allFiles(originalDir)
     incrementalFiles = allFiles(incrementalDir)
@@ -506,10 +574,12 @@ def avoidRegressions(originalDir, incrementalDir, outputPath, forceMerge, noEff=
             incrementalFilesTemp.append(file)
         else:
             outputFile = os.path.join(outputPath, os.path.split(file)[-1])
-            shutil.copyfile(file, outputFile)
-            msg("Copied", file, "to", outputFile)
             companionSrc = file + ".csv.xz"
             if os.path.isfile(companionSrc):
+                # The YAML is paired with its .csv.xz, so both are copied
+                # unchanged; the logic-corpus lane checks their UIDs.
+                shutil.copyfile(file, outputFile)
+                msg("Copied", file, "to", outputFile)
                 shutil.copyfile(companionSrc, outputFile + ".csv.xz")
                 msg("Copied", companionSrc, "to", outputFile + ".csv.xz")
             else:
@@ -519,6 +589,9 @@ def avoidRegressions(originalDir, incrementalDir, outputPath, forceMerge, noEff=
                         f"[Error] {file}: MeshBased logic requires a companion "
                         f".csv.xz but {companionSrc} was not found."
                     )
+                numClaimed = copyClaimingSolutionUids(file, outputFile, data)
+                msg("Copied", file, "to", outputFile,
+                    "(%d SolutionUID(s) assigned)" % numClaimed if numClaimed else "")
 
     incrementalFiles = incrementalFilesTemp
 
@@ -578,6 +651,7 @@ def avoidRegressions(originalDir, incrementalDir, outputPath, forceMerge, noEff=
         normalizeDictLibraryLayout(mergedData)
         if isinstance(mergedData.get("ProblemType"), dict):
             mergedData["ProblemType"] = dict(sorted(mergedData["ProblemType"].items()))
+        placeSolutionUidAfterIndex(mergedData["Solutions"])
 
         LibraryIO.writeYAML(
             os.path.join(outputPath, basename),

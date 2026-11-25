@@ -29,6 +29,7 @@ from tensilelite.merge_library import (
     mergeLogic,
     msg,
     normalizeDictLibraryLayout,
+    placeSolutionUidAfterIndex,
     removeDefaultInitParams,
     removeDuplicatedSolutions,
     removeUnusedSolutions,
@@ -555,6 +556,38 @@ class TestMergeLogic:
         }
         assert ori_data["Solutions"][3].get("SolutionUID") is None
 
+    def test_merge_claims_uid_for_new_name_winning_existing_size(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A new-name winner at an existing size cannot keep a base solution's UID.
+
+        Args:
+            monkeypatch: Pytest monkeypatch fixture.
+
+        Returns:
+            None.
+
+        Raises:
+            AssertionError: If the incoming solution keeps the colliding UID.
+        """
+        draws = iter(range(100, 200))
+        monkeypatch.setattr(
+            "tensilelite.SolutionIdGen.generate_solution_id", lambda: next(draws)
+        )
+        ori_data = {
+            "Solutions": [{"SolutionIndex": 0, "SolutionNameMin": "A", "SolutionUID": "0u5"}],
+            "ExactLogic": [[[1, 1, 1, 1], [0, 1.0]], [[2, 1, 1, 1], [0, 1.0]]],
+        }
+        inc_data = {
+            "Solutions": [{"SolutionIndex": 0, "SolutionNameMin": "F", "SolutionUID": "0u5"}],
+            "ExactLogic": [[[2, 1, 1, 1], [0, 2.0]]],
+        }
+
+        merged_data, _, _, _ = mergeLogic(ori_data, inc_data, forceMerge=False)
+
+        uids = {s["SolutionNameMin"]: s["SolutionUID"] for s in merged_data["Solutions"]}
+        assert uids == {"A": "0u5", "F": encode_solution_uid(100)}
+
     def test_merge_converted_list_fixture(self, dict_from_list_logic: dict[str, Any]) -> None:
         """Merge works on dict converted from legacy list fixture."""
         ori_data = deepcopy(dict_from_list_logic)
@@ -1002,6 +1035,50 @@ class TestReNameSolutions:
 class TestAvoidRegressions:
     """End-to-end tests for ``avoidRegressions`` file merge."""
 
+    def test_merged_file_places_claimed_uid_after_solution_index(
+        self, dict_logic: dict[str, Any], tmp_path: Path
+    ) -> None:
+        """A UID claimed for a base solution sits after ``SolutionIndex``.
+
+        The base and incremental files have no UIDs. Every other solution key
+        keeps the base file's order.
+
+        Args:
+            dict_logic: Dict-format logic fixture without UIDs.
+            tmp_path: Pytest temporary-directory fixture.
+
+        Returns:
+            None.
+
+        Raises:
+            AssertionError: If a UID is missing or keys move.
+        """
+        orig_dir, inc_dir, out_dir = (tmp_path / d for d in ("orig", "inc", "out"))
+        for d in (orig_dir, inc_dir):
+            d.mkdir()
+            LibraryIO.writeYAML(
+                str(d / "logic.yaml"),
+                deepcopy(dict_logic),
+                explicit_start=False,
+                explicit_end=False,
+                sort_keys=False,
+            )
+
+        with patch("tensilelite.merge_library.compareProblemType"), patch(
+            "tensilelite.merge_library.compareDestFolderToYaml"
+        ), patch("tensilelite.merge_library.reNameSolutions"):
+            avoidRegressions(str(orig_dir), str(inc_dir), str(out_dir), forceMerge=True)
+
+        merged = LibraryIO.readYAML(str(out_dir / "logic.yaml"))
+        base_by_name = {s["SolutionNameMin"]: s for s in dict_logic["Solutions"]}
+        assert merged["Solutions"]
+        for solution in merged["Solutions"]:
+            base = base_by_name[solution["SolutionNameMin"]]
+            assert list(solution)[:2] == ["SolutionIndex", "SolutionUID"]
+            assert [k for k in solution if k != "SolutionUID"] == [
+                k for k in base if k in solution
+            ]
+
     def test_merge_matching_basenames_and_copy_extra(
         self, dict_logic: dict[str, Any]
     ) -> None:
@@ -1082,6 +1159,168 @@ class TestAvoidRegressions:
 
             assert os.path.isfile(os.path.join(out_dir, inc_name))
             assert os.path.isfile(os.path.join(out_dir, inc_name + ".csv.xz"))
+            assert Path(out_dir, inc_name).read_bytes() == Path(inc_path).read_bytes()
+
+    def test_incremental_only_file_gets_claimed_uids(
+        self, dict_logic: dict[str, Any], monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """A copied file keeps a unique UID and stores new ones for the rest.
+
+        The first solution keeps its UID, the second shares it, and the third
+        has none. Only ``SolutionUID`` lines may differ from the input, the
+        new UID sits right after ``SolutionIndex``, and the input is unchanged.
+
+        Args:
+            dict_logic: Dict-format logic fixture.
+            monkeypatch: Pytest monkeypatch fixture.
+            tmp_path: Pytest temporary-directory fixture.
+
+        Returns:
+            None.
+
+        Raises:
+            AssertionError: If the copy has the wrong UIDs or other changes.
+        """
+        draws = iter(range(100, 200))
+        monkeypatch.setattr(
+            "tensilelite.SolutionIdGen.generate_solution_id", lambda: next(draws)
+        )
+        orig_dir, inc_dir, out_dir = (tmp_path / d for d in ("orig", "inc", "out"))
+        orig_dir.mkdir()
+        inc_dir.mkdir()
+
+        logic = deepcopy(dict_logic)
+        third = deepcopy(logic["Solutions"][1])
+        third["SolutionIndex"] = 2
+        logic["Solutions"].append(third)
+        for solution, uid in zip(logic["Solutions"], ("0u5", "0u5")):
+            solution["SolutionUID"] = uid
+        placeSolutionUidAfterIndex(logic["Solutions"])
+        inc_path = inc_dir / "new_logic.yaml"
+        LibraryIO.writeYAML(
+            str(inc_path), logic, explicit_start=False, explicit_end=False, sort_keys=False
+        )
+        inc_text = inc_path.read_text()
+
+        avoidRegressions(str(orig_dir), str(inc_dir), str(out_dir), forceMerge=False)
+
+        out_text = (out_dir / "new_logic.yaml").read_text()
+        copied = LibraryIO.readYAML(str(out_dir / "new_logic.yaml"))
+        assert [s["SolutionUID"] for s in copied["Solutions"]] == [
+            "0u5",
+            encode_solution_uid(100),
+            encode_solution_uid(101),
+        ]
+        assert all(list(s)[:2] == ["SolutionIndex", "SolutionUID"] for s in copied["Solutions"])
+
+        def _without_uid_lines(text: str) -> list[str]:
+            """Drop ``SolutionUID`` lines.
+
+            Args:
+                text: Logic YAML text.
+
+            Returns:
+                The remaining lines.
+
+            Raises:
+                None.
+            """
+            return [line for line in text.splitlines() if "SolutionUID:" not in line]
+
+        assert _without_uid_lines(out_text) == _without_uid_lines(inc_text)
+        assert inc_path.read_text() == inc_text
+
+    def test_incremental_only_file_with_unique_uids_is_copied_unchanged(
+        self, dict_logic: dict[str, Any], tmp_path: Path
+    ) -> None:
+        """When every UID is already unique, the copy is byte for byte.
+
+        Args:
+            dict_logic: Dict-format logic fixture.
+            tmp_path: Pytest temporary-directory fixture.
+
+        Returns:
+            None.
+
+        Raises:
+            AssertionError: If the copied file differs from the input.
+        """
+        orig_dir, inc_dir, out_dir = (tmp_path / d for d in ("orig", "inc", "out"))
+        orig_dir.mkdir()
+        inc_dir.mkdir()
+        logic = deepcopy(dict_logic)
+        for solution, uid in zip(logic["Solutions"], ("0u5", "0u6")):
+            solution["SolutionUID"] = uid
+        placeSolutionUidAfterIndex(logic["Solutions"])
+        inc_path = inc_dir / "new_logic.yaml"
+        LibraryIO.writeYAML(
+            str(inc_path), logic, explicit_start=False, explicit_end=False, sort_keys=False
+        )
+        with inc_path.open("a") as f:
+            f.write("# hand-written trailing comment\n")
+
+        avoidRegressions(str(orig_dir), str(inc_dir), str(out_dir), forceMerge=False)
+
+        assert (out_dir / "new_logic.yaml").read_bytes() == inc_path.read_bytes()
+
+    def test_incremental_only_list_file_is_written_as_dict_with_uids(
+        self, list_logic: list[Any], tmp_path: Path
+    ) -> None:
+        """A list-format copy with no UIDs comes out in dict format with UIDs.
+
+        Args:
+            list_logic: List-format logic fixture.
+            tmp_path: Pytest temporary-directory fixture.
+
+        Returns:
+            None.
+
+        Raises:
+            AssertionError: If the copy is not dict format with unique UIDs.
+        """
+        orig_dir, inc_dir, out_dir = (tmp_path / d for d in ("orig", "inc", "out"))
+        orig_dir.mkdir()
+        inc_dir.mkdir()
+        LibraryIO.writeYAML(
+            str(inc_dir / "list_logic.yaml"),
+            deepcopy(list_logic),
+            explicit_start=False,
+            explicit_end=False,
+            sort_keys=False,
+        )
+
+        avoidRegressions(str(orig_dir), str(inc_dir), str(out_dir), forceMerge=False)
+
+        copied = LibraryIO.readYAML(str(out_dir / "list_logic.yaml"))
+        assert isinstance(copied, dict)
+        uids = [s["SolutionUID"] for s in copied["Solutions"]]
+        assert len(uids) == len(set(uids)) > 0
+        assert "0u0" not in uids
+        assert all(list(s)[:2] == ["SolutionIndex", "SolutionUID"] for s in copied["Solutions"])
+
+    def test_incremental_only_file_without_solutions_is_copied_unchanged(
+        self, tmp_path: Path
+    ) -> None:
+        """A YAML file with no solutions is copied byte for byte.
+
+        Args:
+            tmp_path: Pytest temporary-directory fixture.
+
+        Returns:
+            None.
+
+        Raises:
+            AssertionError: If the copied file differs from the input.
+        """
+        orig_dir, inc_dir, out_dir = (tmp_path / d for d in ("orig", "inc", "out"))
+        orig_dir.mkdir()
+        inc_dir.mkdir()
+        inc_path = inc_dir / "empty.yaml"
+        inc_path.write_text("LibraryType: Equality\nSolutions: []\n# keep me\n")
+
+        avoidRegressions(str(orig_dir), str(inc_dir), str(out_dir), forceMerge=False)
+
+        assert (out_dir / "empty.yaml").read_bytes() == inc_path.read_bytes()
 
     def test_incremental_only_meshbased_without_companion_exits(self) -> None:
         """Incremental-only MeshBased YAML without companion .csv.xz exits."""
