@@ -1413,7 +1413,9 @@ public:
  * so this does not decrease the test coverage significantly.
  */
 
-TEST(GPU_BN_Spatial_FP32, MIOpen3900Regression)
+using GPU_BN_SpatialRegression_FP32 = ::testing::TestWithParam<int>;
+
+TEST_P(GPU_BN_SpatialRegression_FP32, MIOpen3900Regression)
 {
     /*
      * Overview of the test:
@@ -1633,6 +1635,8 @@ TEST(GPU_BN_Spatial_FP32, MIOpen3900Regression)
         }
     }
 }
+
+INSTANTIATE_TEST_SUITE_P(Standard, GPU_BN_SpatialRegression_FP32, ::testing::Values(0));
 
 /*
  * A test suite that demonstrates the need for Welford's online algorithm for calculating variance
@@ -1864,7 +1868,7 @@ INSTANTIATE_TEST_SUITE_P(Full, GPU_BN_Spatial_FP32, GetCases(), [](const auto& i
     return NameGenerator(info_);
 });
 
-INSTANTIATE_TEST_SUITE_P(Smoke, GPU_BN_Spatial_FP32, GetCases(false), [](const auto& info_) {
+INSTANTIATE_TEST_SUITE_P(Quick, GPU_BN_Spatial_FP32, GetCases(false), [](const auto& info_) {
     return NameGenerator(info_);
 });
 
