@@ -42,7 +42,10 @@ Supported MX input element types are **FP8 OCP** (`FP8_E4M3` / `FP8_E5M2`), **OC
 > **Build-time feature flag.** This path is gated behind the CMake option
 > `HIPBLASLTPROVIDER_ENABLE_MX_GEMM`, which defaults to **OFF**; when OFF the plugin
 > reports these graphs as unsupported. Build with
-> `-DHIPBLASLTPROVIDER_ENABLE_MX_GEMM=ON` to enable it.
+> `-DHIPBLASLTPROVIDER_ENABLE_MX_GEMM=ON` to enable it. With the flag ON the plugin
+> needs HIPRTC (`hiprtc`) to build and links it: it compiles its scale relayout kernel
+> at run time, for the device in use, when the first plan that needs swizzled scales is
+> built.
 
 **Graph topology:**
 ```
@@ -58,23 +61,29 @@ Matmul(a, b) → d
 - Compute type: `FP32`
 
 > **Known issue (#10811):** FP8 OCP on operand A paired with FP6 OCP on operand
-> B currently returns incorrect results and is rejected as unsupported
-> (originally observed on gfx950; not yet arch-gated pending further testing).
+> B returns incorrect results when A is column-major, so that layout is rejected as
+> unsupported on every architecture (observed on gfx950). With a row-major
+> (K-contiguous) A the pair is supported.
 
-**Hardware support:** Supported on **gfx950** only.
+**Hardware support:**
+- **gfx950:** every operand layout in the table below.
+- **gfx1250:** K-contiguous A and B only (#13715). The type pairs are those the installed hipBLASLt has gfx1250 MX kernels for; graphs it has no kernel for (FP6 inputs among them) are declined.
 
-> **Known issue (#13715):** on **gfx1250**, hipBLASLt has MX GEMM kernels only for
-> `transA = T, transB = N`. The layout below reaches hipBLASLt as
-> `transA = N, transB = T` (after the row-major operand swap), so hipBLASLt
-> finds no algorithm and the engine declines every MX graph on gfx1250.
+**Operand layouts:** each MX input is a packed matrix.
+
+| A `[M, K]` | B `[K, N]` | gfx950 | gfx1250 |
+|---|---|---|---|
+| row-major (K-contiguous) | column-major (K-contiguous) | yes | yes |
+| column-major (M-contiguous) | row-major (N-contiguous) | yes | no |
+| row-major | row-major | yes | no |
+| column-major | column-major | yes | no |
 
 **Graph requirements:** the plugin validates the hipDNN graph
 against these before accepting it. They derive from hipBLASLt's `VEC32_UE8M0` scale mode — see the
 [hipBLASLt API reference](https://rocm.docs.amd.com/projects/hipBLASLt/en/latest/reference/api-reference.html).
 - Tensor roles: the MX inputs, the UE8M0 scales, and the output `d` must be non-virtual; the dequantize outputs `a`/`b` must be virtual (fused intermediates)
-- Scale tensors: dtype `FP8_E8M0`, with one scale per 32-element block — element count `M*(K/32)` for `scale_a`, `(K/32)*N` for `scale_b`
-- Layout: `opA = T` (A is col-major, i.e., `stride[-2] == 1`), `opB = N` (B is row-major, i.e., `stride[-1] == 1`)
-- Scale layout: scale tensors must be dense row-major (the A scale `[M, K/32]` with strides `[K/32, 1]`, the B scale `[K/32, N]` with strides `[N, 1]`; strides of size-1 dimensions are ignored)
+- Scale tensors: dtype `FP8_E8M0`, natural (unswizzled) values, one scale per 32-element block: `[M, K/32]` for `scale_a`, `[K/32, N]` for `scale_b`
+- Layout: A and B are packed matrices in the orders of the table above; each scale is a packed row- or column-major matrix in either order, whatever its operand's order (a scale in the other order is reordered on the device, in the workspace); the output `d` is a packed row-major matrix; padded leading dimensions are rejected
 - Dequantize attributes: `is_negative_scale` is declined; the plan scales by 2^(scale) only
 - Alignment: `M % 16 == 0`, `N % 16 == 0`, `K % 128 == 0`
 - Block size: innermost `block_size == 32` for both scale tensors (VEC32)
