@@ -167,6 +167,27 @@ def test_a_runner_reports_a_malformed_shard_as_a_usage_error(monkeypatch, capsys
     assert "rocke-ctest-shard: shard '4/4' out of range" in capsys.readouterr().err
 
 
+def test_a_runner_refuses_the_listing_flag_without_the_shard_flag(capsys):
+    parser = _runner_parser()
+    arguments = parser.parse_args([ci_shard.LIST_KEYS_FLAG, "keys.json"])
+    with pytest.raises(SystemExit) as exit_info:
+        ci_shard.shard_from_arguments(parser, arguments)
+    assert exit_info.value.code == 2
+    assert (
+        f"{ci_shard.LIST_KEYS_FLAG} needs {ci_shard.ACTIVATION_FLAG}"
+        in capsys.readouterr().err
+    )
+
+
+def test_a_runner_reads_its_listing_path_only_when_it_is_given(monkeypatch):
+    for name in ctest_shard.CHILD_ENV_EXCLUDED:
+        monkeypatch.delenv(name, raising=False)
+    parser = _runner_parser()
+    listing = parser.parse_args([FLAG, ci_shard.LIST_KEYS_FLAG, "keys.json"])
+    assert ci_shard.list_keys_path(listing) == Path("keys.json")
+    assert ci_shard.list_keys_path(parser.parse_args([FLAG])) is None
+
+
 # ------------------------------------------------------------------------- shard rule
 # Shard of each key for n = 2, 3, 4 and 8. The values pin the hash, so that
 # developer runs and CI map a test to the same shard on every change.

@@ -23,6 +23,7 @@ import io
 import os
 import subprocess
 import sys
+import tempfile
 import unittest
 from collections.abc import Callable
 from pathlib import Path
@@ -183,6 +184,37 @@ class TestEmitterComparisonSharding(unittest.TestCase):
         ):
             main(argv)
         self.assertEqual(exit_info.exception.code, 2)
+
+    def test_the_listing_flag_writes_every_key_instead_of_comparing(self):
+        missing = Path(__file__).with_name("missing")
+        argv = ["--native", str(missing), "--launcher", str(missing)]
+        argv += ["--emitter", str(missing), "--count", "3"]
+        with tempfile.TemporaryDirectory() as scratch:
+            listing = Path(scratch) / "keys.json"
+            argv += ["--rocke-shard-from-gtest-env"]
+            argv += ["--rocke-list-shard-keys", str(listing)]
+            with contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(main(argv), 0)
+            written = ShardKeyListing.read(listing)
+        keys = comparison_keys(3)
+        self.assertEqual(dict(written.key_of_case), {key: key for key in keys})
+
+    def test_the_listing_flag_without_the_shard_flag_is_a_usage_error(self):
+        missing = Path(__file__).with_name("missing")
+        argv = ["--native", str(missing), "--launcher", str(missing)]
+        argv += ["--emitter", str(missing), "--count", "3"]
+        argv += ["--rocke-list-shard-keys", str(missing)]
+        error = io.StringIO()
+        with (
+            contextlib.redirect_stderr(error),
+            self.assertRaises(SystemExit) as exit_info,
+        ):
+            main(argv)
+        self.assertEqual(exit_info.exception.code, 2)
+        self.assertIn(
+            "--rocke-list-shard-keys needs --rocke-shard-from-gtest-env",
+            error.getvalue(),
+        )
 
 
 def main(argv: list[str] | None = None) -> int:

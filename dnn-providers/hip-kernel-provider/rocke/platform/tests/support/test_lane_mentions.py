@@ -116,6 +116,25 @@ def test_the_pool_finds_what_each_file_holds_in_the_order_given(tmp_path):
 
 
 @needs_two_cpus
+def test_the_pool_keeps_skip_reasons_and_runner_hardware_needs(tmp_path):
+    source = (
+        "pytest.skip('waits for a gfx950 runner in CI')\n"
+        "skip_needing_arch(('gfx1250',), reason='x')\n"
+    )
+    paths = []
+    for index in range(2):
+        (tmp_path / f"needs{index}.py").write_text(source, encoding="utf-8")
+        paths.append(f"needs{index}.py")
+    found = {
+        (mention.path, mention.kind, mention.arches)
+        for mention in lane_mentions(tmp_path, paths)
+    }
+    for path in paths:
+        assert (path, LaneMentionKind.HAND_WRITTEN_SKIP_REASON, ()) in found
+        assert (path, LaneMentionKind.RUNNER_HARDWARE_NEED, ("gfx1250",)) in found
+
+
+@needs_two_cpus
 def test_a_file_that_does_not_parse_raises_from_the_pool(tmp_path):
     paths = _write_sources(tmp_path)
     (tmp_path / "broken.py").write_text("def broken(:\n", encoding="utf-8")
