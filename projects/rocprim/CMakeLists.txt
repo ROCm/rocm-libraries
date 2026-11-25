@@ -20,6 +20,12 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
+# DO NOT MERGE: no-op marker so this PR's diff is exactly one rocPRIM file.
+# It exists to prove that determine_changed_projects(), now running inside
+# TheRock's configure_multi_arch_ci.py rather than in a rocm-libraries-side
+# configure job, narrows the run to changed_projects="projects/rocprim" and
+# derives test_type="standard" from that same diff.
+
 cmake_minimum_required(VERSION 3.18 FATAL_ERROR)
 cmake_policy(VERSION 3.18...3.25)
 
