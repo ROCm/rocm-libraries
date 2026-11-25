@@ -96,7 +96,7 @@ from .Utilities import TDM_PAD_INTERVAL_LIMIT, isSubtileIterateMode, reject, rou
 from .Validators.MXScaleFormat import validateHostPreSwizzle128x4, validateMXScaleFormatCombination
 from .Validators.Subtile import (subtileStackForTLU1, subtileTLU1StackReason,
                                  validateSubtileGRKPartition)
-from ..Common.Utilities import isMxf4SubtilePath, isSubtileSwizzledTensor, plsinDataTypes, swizzleTensorMaxDepthU
+from ..Common.Utilities import isMxf4SubtilePath, isSubtileSwizzledTensor, plsinFp8Operand, plsinStoreDataTypes, swizzleTensorMaxDepthU
 
 
 def _oneSidedMX(state):
@@ -2368,8 +2368,10 @@ class Solution(collections.abc.Mapping):
     isa = tuple(state["ISA"])
 
     if state["PostLoopStoreInNll"]:
-      isFloat4 = state["ProblemType"]["DataTypeA"].isFloat4() or \
-                 state["ProblemType"]["DataTypeB"].isFloat4()
+      # fp8 joins fp4 here: the fused store is built for both (see
+      # plsinStoreDataTypes). Block scheduling does not follow -- it hangs off
+      # isMxf4SubtilePath, which stays fp4-only.
+      isMxIn = plsinStoreDataTypes(state)
       isgfx950 = isa[:2] == (9, 5)
       # _emit16bitSubtilePairedStore needs HPA on wave64 and cannot run on the
       # StreamK workspace accumulation paths. The dest type goes through
@@ -2379,7 +2381,7 @@ class Solution(collections.abc.Mapping):
       # would allocate sgprPostLoopFusedStore -- renumbering every later SGPR --
       # for a store that is then never built.
       pairedStoreAvailable = (
-        plsinDataTypes(state) and
+        plsinStoreDataTypes(state) and
         state["ProblemType"]["HighPrecisionAccumulate"] and
         state["WavefrontSize"] != 32 and
         state["_GlobalAccumulation"] not in ("MultipleBufferSingleKernel", "MultipleBuffer")
@@ -2415,7 +2417,7 @@ class Solution(collections.abc.Mapping):
       mxBlockScaleSgprFits = not (mxBlockScaled and bool(miwt) and len(miwt) == 2 and
                                   min(miwt[0], miwt[1]) <= 2 and max(miwt[0], miwt[1]) >= 16)
       # Hard structural: the fused store literally cannot be emitted. ALWAYS enforced.
-      structuralFail = ((not isFloat4)
+      structuralFail = ((not isMxIn)
                         or (not state["UseSubtileImpl"])
                         or (not isgfx950)
                         or (not state["EnableMatrixInstruction"])
@@ -2424,11 +2426,55 @@ class Solution(collections.abc.Mapping):
                         or (not pairedStoreAvailable)
                         or (not streamKAtomicFree)
                         or (not barrierFreeStore))
-      # Register / spill budget: the fused store would overflow the arch-VGPR / 102-SGPR
-      # ceiling for this tile.
+      # fp8 operand fragments are twice fp4's for the same MI shape, so the
+      # headroom the fused store needs is not the same for the two. At DepthU
+      # 128 it fits everywhere measured. At DepthU 256 the deeper unroll fails
+      # in two independent ways, which is why this is held on the depth rather
+      # than fitted to the geometries that fail:
+      #
+      #   Registers. Four of the shipped geometries -- MT128x160 (MIWaveTile
+      #   [2,10]), MT192x192 ([6,6]), MT128x256 ([8,4]) and MT160x128 ([10,2])
+      #   -- need 264 VGPRs against the 256 cap, and judgeRegisterBudget
+      #   refuses a PLSIN kernel outright rather than emit it as a dropped
+      #   shell, so the library build fails. Reproduced by emitting the shipped
+      #   Origami MXFP8 logic entries with this hold removed; the synthetic
+      #   equivalents of those tiles fit, so the entry's own parameters are
+      #   part of the result.
+      #
+      #   Results. With the hold removed and the library built, 16 of the 91
+      #   fused DepthU-256 solutions offered for 1664x6912x256 fail
+      #   verification, returning NaN. On the same problem every fused
+      #   DepthU-128 solution and every unfused DepthU-256 solution is clean,
+      #   so it is the fused store at the deeper unroll that is wrong, not the
+      #   depth. Until that is understood, no DepthU-256 geometry is safe to
+      #   fuse on the strength of fitting.
+      #
+      # DepthU is read with a default because the gate also runs on solutions
+      # that do not carry one -- pre-tuned logic entries, and the sparse states
+      # the arm tests drive it with. An unknown depth is not a reason to hold:
+      # the hold applies where the deeper unroll is known to be in play.
+      fp8In = plsinFp8Operand(state)
+      fp8DepthFits = (not fp8In) or state.get("DepthU", 0) <= 128
+      # gfx950 holds one 131072-register unified VGPR file per CU, so an
+      # N-thread workgroup is allowed 131072/N registers per thread: 512 at four
+      # waves, which is above the 256 architectural cap and so never binds, and
+      # exactly 256 at eight. An MT256x256 MIWaveTile [8,4] kernel already
+      # spends 128 of those on accumulators, which leaves the fused store's arch
+      # registers (152 measured) over the budget -- judgeRegisterBudget then
+      # returns its occupancy verdict, the kernel is emitted as a shell, and a
+      # problem whose only solution is that kernel has none left.
+      #
+      # Held on the thread count rather than the register peak because the peak
+      # is not known until the store is emitted, and the budget is. Every MXFP8
+      # entry in the shipped logic is two or four waves, so no library kernel
+      # loses the store to this. fp4 is not asked, and an unknown thread count
+      # is not a reason to hold, as with DepthU above.
+      fp8WaveFits = (not fp8In) or state.get("NumThreads", 0) <= 256
       registerFail = ((not spillFree)
                       or (not storeFitsVgpr)
-                      or (not mxBlockScaleSgprFits))
+                      or (not mxBlockScaleSgprFits)
+                      or (not fp8DepthFits)
+                      or (not fp8WaveFits))
       # Schedule feasibility is not decided here: LogicalScheduler works from exact
       # producer/consumer ranges, and a schedule with no safe group falls back
       # without extracting terminal MFMAs.

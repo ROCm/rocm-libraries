@@ -107,7 +107,7 @@ from .CustomKernels import isCustomKernelConfig, getCustomKernelFilepath, getCus
 from .Common import roundUp, log2, ceilDivide, choose_multiplier, wmmaV3InputVgprLayout, clusterEnabled, isPow2, persistentSpatialCluster, plsinBlockSchedTile
 from .OccupancyMeasure import compute_occupancy_from_asm_source, _arch_caps_for_kernel
 from .ir import ECvtF16toF32, ECvtF32toF16, ECvtPkFP8toF32
-from .Common import print2, printExit, printWarning, INDEX_CHARS, DebugConfig, DataDirection, isSubtileMultiDU, plsinBlockSchedTile, isMxf4SubtilePath, isSubtileSwizzledTensor
+from .Common import print2, printExit, printWarning, INDEX_CHARS, DebugConfig, DataDirection, isSubtileMultiDU, plsinBlockSchedTile, isMxf4SubtilePath, isSubtileSwizzledTensor, plsinStoreScope
 from .Components.NonTemporal import decodeNonTemporal, forceCoherentNonTemporal, tdmCacheModifiers
 from .Common.DataType import DataType
 from .Common.ScaleAlphaVec import scaleAlphaSupportsDeviceScalar
@@ -19561,7 +19561,9 @@ class KernelWriterAssembly(KernelWriter):
     module = Module("SubtileStoreLaneMath")
     self.states.subtileHoistedLaneGroupDelta = False
     self.states.subtileHoistedPermAddr = False
-    if not isMxf4SubtilePath(kernel) or cvtVgprStruct is None:
+    # Feeds the permlane16 store, so it follows the same scope: fp4 always,
+    # fp8 only where PLSIN is built.
+    if not plsinStoreScope(kernel) or cvtVgprStruct is None:
       return module
     if getattr(cvtVgprStruct, "vgprLaneGroupDelta", -1) < 0:
       return module
