@@ -18,8 +18,10 @@
 <test sets="ctest_comprehensive">
   <run name="ctest comprehensive">{TEST_BASE_OPTIONS} --gtest_filter=*quick*:*pre_checkin*:*nightly*-*known_bug*</run>
 </test>
+<!-- full = comprehensive plus the math-ci weekly job: *stress* and *HMM* tests, and check numerics on the smoke set -->
 <test sets="ctest_full">
-  <run name="ctest full">{TEST_BASE_OPTIONS} --gtest_filter=*quick*:*pre_checkin*:*nightly*-*known_bug*</run>
+  <run name="ctest full">{TEST_BASE_OPTIONS} --gtest_filter=*quick*:*pre_checkin*:*nightly*:*stress*:*HMM*-*known_bug*</run>
+  <run name="ctest full check numerics">ROCBLAS_CHECK_NUMERICS=6 {TEST_BASE_OPTIONS} --yaml rocblas_smoke.yaml</run>
 </test>
 <!-- math-CI or devops old runs -->
 <test sets="psdb">
