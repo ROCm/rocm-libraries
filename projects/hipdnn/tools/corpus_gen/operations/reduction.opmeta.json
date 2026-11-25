@@ -54,6 +54,39 @@
       ]
     }
   },
+  "// regime_label": "The population a problem is reported, held out and grown under. rows: few (16 or fewer, one row a workgroup leaves the device idle) or many. cols: short (1024 or fewer, a row in one workgroup) or long (a row split across workgroups).",
+  "regime_label": [
+    {
+      "name": "rows",
+      "labels": [
+        {
+          "label": "few",
+          "when": {
+            "<=": [
+              "$q.rows",
+              16
+            ]
+          }
+        }
+      ],
+      "otherwise": "many"
+    },
+    {
+      "name": "cols",
+      "labels": [
+        {
+          "label": "short",
+          "when": {
+            "<=": [
+              "$q.cols",
+              1024
+            ]
+          }
+        }
+      ],
+      "otherwise": "long"
+    }
+  ],
   "graph_builder": {
     "function": "reduction",
     "source": "hipdnn_corpus_gen/GraphBuilders.hpp",

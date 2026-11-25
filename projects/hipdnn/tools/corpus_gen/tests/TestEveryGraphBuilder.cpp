@@ -395,8 +395,10 @@ constexpr int64_t SEQLEN_Q = 16;
 constexpr int64_t SEQLEN_K = 32;
 constexpr int64_t HEAD_DIM = 64;
 
-ProblemPoint
-    formPoint(const OperationMetadata& metadata, const std::string& form, bool stats = true)
+ProblemPoint formPoint(const OperationMetadata& metadata,
+                       const std::string& form,
+                       bool stats = true,
+                       const std::string& dtype = "fp16")
 {
     return test::withDefaultCategoricals(metadata,
                                          ProblemPoint{{"batch", BATCH},
@@ -407,7 +409,7 @@ ProblemPoint
                                                       {"head_dim", HEAD_DIM},
                                                       {"is_causal", true},
                                                       {"generate_stats", stats},
-                                                      {"dtype", std::string("fp16")},
+                                                      {"dtype", dtype},
                                                       {"form", form}});
 }
 
@@ -470,7 +472,8 @@ Operands operandsOf(const fb::Graph& graph)
 
 /// What a form changes about the plain graph's node, and how many tensors its graph holds
 /// (statistics included for the forward; the backward's nine roles always). A direction that
-/// does not build the form has 0 tensors.
+/// does not build the form has 0 tensors. The backward-only roles and scalars are added on top of
+/// the shared ones for the backward (its ragged form carries the lengths the forward's does not).
 struct FormExpectation
 {
     std::string form;
@@ -479,6 +482,8 @@ struct FormExpectation
     std::set<std::string> removedScalars;
     size_t forwardTensors;
     size_t backwardTensors;
+    std::set<std::string> backwardAddedRoles = {};
+    std::set<std::string> backwardAddedScalars = {};
 };
 
 std::vector<FormExpectation> formExpectations()
@@ -489,8 +494,8 @@ std::vector<FormExpectation> formExpectations()
         {"scale_tensor", {"scale"}, {}, {"attn_scale_value"}, 6, 10},
         {"dropout", {"seed", "offset"}, {"dropout_probability"}, {}, 7, 11},
         {"padded", {"seq_len_q", "seq_len_kv"}, {"padding_mask"}, {}, 7, 11},
-        // The offsets go on the tensors, not the node.
-        {"ragged", {}, {}, {}, 7, 0},
+        // The offsets go on the tensors, not the node; the backward also binds the lengths.
+        {"ragged", {}, {}, {}, 7, 13, {"seq_len_q", "seq_len_kv"}, {"padding_mask"}},
         {"bias", {"attn_mask"}, {}, {}, 6, 10},
         {"sink", {"sink_token"}, {}, {}, 6, 0},
     };
@@ -518,9 +523,12 @@ std::vector<int64_t> dimsOf(const fb::TensorAttributes* tensor)
                              : std::vector<int64_t>(tensor->dims()->begin(), tensor->dims()->end());
 }
 
-BuildResult buildForm(const OperationMetadata& metadata, const std::string& form, bool stats = true)
+BuildResult buildForm(const OperationMetadata& metadata,
+                      const std::string& form,
+                      bool stats = true,
+                      const std::string& dtype = "fp16")
 {
-    return buildGraphFor(metadata, formPoint(metadata, form, stats));
+    return buildGraphFor(metadata, formPoint(metadata, form, stats, dtype));
 }
 
 } // namespace
@@ -579,6 +587,12 @@ void expectEveryFormBindsExactlyItsOptionalFields(const std::string& operation,
             scalars.erase(name);
         }
         scalars.insert(expected.addedScalars.begin(), expected.addedScalars.end());
+        if(backward)
+        {
+            roles.insert(expected.backwardAddedRoles.begin(), expected.backwardAddedRoles.end());
+            scalars.insert(expected.backwardAddedScalars.begin(),
+                           expected.backwardAddedScalars.end());
+        }
 
         EXPECT_EQ(bound.roles(), roles) << operation << " " << expected.form;
         EXPECT_EQ(bound.scalars, scalars) << operation << " " << expected.form;
@@ -596,7 +610,7 @@ TEST(TestSdpaForms, EveryForwardFormBindsExactlyItsOptionalFields)
 
 TEST(TestSdpaForms, EveryBackwardFormBindsExactlyItsOptionalFields)
 {
-    // The backward schema has no sink token, and no ragged form is built for it.
+    // The backward schema has no sink token.
     expectEveryFormBindsExactlyItsOptionalFields(
         "sdpa_bwd", {"q", "k", "v", "o", "do", "stats", "dq", "dk", "dv"});
 }
@@ -604,7 +618,8 @@ TEST(TestSdpaForms, EveryBackwardFormBindsExactlyItsOptionalFields)
 TEST(TestSdpaForms, ThePlainFormIsTheGraphTheDeclarationAlwaysBuilt)
 {
     // No optional tensor, the stated scale: byte for byte what the builder writes given only
-    // the operands, as it did before forms existed.
+    // the operands, as it did before forms existed, and for each of the types declared before
+    // the fp8 ones (no descale, and O in the inputs' type).
     const auto metadata = test::shippedOperation("sdpa_fwd");
     const auto tensor
         = [](int64_t uid, const char* name, Ints dims, Ints strides, fb::DataType type) {
@@ -616,36 +631,43 @@ TEST(TestSdpaForms, ThePlainFormIsTheGraphTheDeclarationAlwaysBuilt)
               spec.dataType = type;
               return spec;
           };
-    const auto q = tensor(1,
-                          "q",
-                          {BATCH, HEADS, SEQLEN_Q, HEAD_DIM},
-                          {SEQLEN_Q * HEADS * HEAD_DIM, HEAD_DIM, HEADS * HEAD_DIM, 1},
-                          fb::DataType::HALF);
-    const auto k = tensor(2,
-                          "k",
-                          {BATCH, HEADS_KV, SEQLEN_K, HEAD_DIM},
-                          {SEQLEN_K * HEADS_KV * HEAD_DIM, HEAD_DIM, HEADS_KV * HEAD_DIM, 1},
-                          fb::DataType::HALF);
-    auto v = k;
-    v.uid = 3;
-    v.name = "v";
-    auto o = q;
-    o.uid = 4;
-    o.name = "o";
-    const auto stats = tensor(5,
-                              "stats",
-                              {BATCH, HEADS, SEQLEN_Q, 1},
-                              {HEADS * SEQLEN_Q, SEQLEN_Q, 1, 1},
-                              fb::DataType::FLOAT);
-    builders::SdpaOptions options;
-    options.causalMask = true;
-    options.generateStats = true;
-    options.attnScale = 0.125F; // rsqrt(64)
-    const builders::GraphTypes types{fb::DataType::HALF, fb::DataType::FLOAT, fb::DataType::FLOAT};
+    for(const auto& [declared, type] :
+        std::vector<std::pair<std::string, fb::DataType>>{{"fp16", fb::DataType::HALF},
+                                                          {"bf16", fb::DataType::BFLOAT16},
+                                                          {"fp32", fb::DataType::FLOAT}})
+    {
+        const auto q = tensor(1,
+                              "q",
+                              {BATCH, HEADS, SEQLEN_Q, HEAD_DIM},
+                              {SEQLEN_Q * HEADS * HEAD_DIM, HEAD_DIM, HEADS * HEAD_DIM, 1},
+                              type);
+        const auto k = tensor(2,
+                              "k",
+                              {BATCH, HEADS_KV, SEQLEN_K, HEAD_DIM},
+                              {SEQLEN_K * HEADS_KV * HEAD_DIM, HEAD_DIM, HEADS_KV * HEAD_DIM, 1},
+                              type);
+        auto v = k;
+        v.uid = 3;
+        v.name = "v";
+        auto o = q;
+        o.uid = 4;
+        o.name = "o";
+        const auto stats = tensor(5,
+                                  "stats",
+                                  {BATCH, HEADS, SEQLEN_Q, 1},
+                                  {HEADS * SEQLEN_Q, SEQLEN_Q, 1, 1},
+                                  fb::DataType::FLOAT);
+        builders::SdpaOptions options;
+        options.causalMask = true;
+        options.generateStats = true;
+        options.attnScale = 0.125F; // rsqrt(64)
+        const builders::GraphTypes types{type, fb::DataType::FLOAT, fb::DataType::FLOAT};
 
-    const auto built = buildForm(metadata, "plain");
-    ASSERT_TRUE(built.ok()) << built.error;
-    EXPECT_EQ(built.bytes, builders::sdpaForward(q, k, v, o, options, types, stats));
+        const auto built = buildForm(metadata, "plain", true, declared);
+        ASSERT_TRUE(built.ok()) << declared << ": " << built.error;
+        EXPECT_EQ(built.bytes, builders::sdpaForward(q, k, v, o, options, types, stats))
+            << declared;
+    }
 }
 
 TEST(TestSdpaForms, TheScaleTensorIsAScalarPassByValueWhoseDefaultIsTheStatedScale)
@@ -788,9 +810,76 @@ TEST(TestSdpaForms, RaggedPacksQOAndStatsThroughOneOffsetAndKVThroughAnother)
     }
 }
 
+TEST(TestSdpaForms, BackwardRaggedPacksTheQuerySideThroughOneOffsetAndTheKeySideThroughAnother)
+{
+    // cuDNN's THD backward: Q, O, dO, dQ and the statistics through one offset tensor, K, V, dK
+    // and dV through another, with the per-batch lengths and the padding mask beside them.
+    const auto built = buildForm(test::shippedOperation("sdpa_bwd"), "ragged");
+    ASSERT_TRUE(built.ok()) << built.error;
+    const auto* graph = asGraph(built.bytes);
+    const auto* attributes = graph->nodes()->Get(0)->attributes_as_SdpaBackwardAttributes();
+    ASSERT_NE(attributes, nullptr);
+
+    EXPECT_TRUE(attributes->padding_mask());
+    for(const auto uid : {attributes->seq_len_q_tensor_uid(), attributes->seq_len_kv_tensor_uid()})
+    {
+        const auto* lengths = tensorWithUid(*graph, uid);
+        ASSERT_NE(lengths, nullptr);
+        EXPECT_EQ(dimsOf(lengths), (Ints{BATCH, 1, 1, 1}));
+        EXPECT_EQ(lengths->data_type(), fb::DataType::INT32);
+    }
+
+    const std::map<std::string, const fb::TensorAttributes*> query{
+        {"q", tensorWithUid(*graph, attributes->q_tensor_uid())},
+        {"o", tensorWithUid(*graph, attributes->o_tensor_uid())},
+        {"dO", tensorWithUid(*graph, attributes->do_tensor_uid())},
+        {"dq", tensorWithUid(*graph, attributes->dq_tensor_uid())},
+        {"stats", tensorWithUid(*graph, attributes->stats_tensor_uid())}};
+    const std::map<std::string, const fb::TensorAttributes*> key{
+        {"k", tensorWithUid(*graph, attributes->k_tensor_uid())},
+        {"v", tensorWithUid(*graph, attributes->v_tensor_uid())},
+        {"dk", tensorWithUid(*graph, attributes->dk_tensor_uid())},
+        {"dv", tensorWithUid(*graph, attributes->dv_tensor_uid())}};
+    const auto offsetOf = [](const fb::TensorAttributes* tensor) {
+        return tensor == nullptr ? std::nullopt : tensor->ragged_offset_tensor_uid();
+    };
+    const auto queryOffsets = offsetOf(query.at("q"));
+    const auto keyOffsets = offsetOf(key.at("k"));
+    ASSERT_TRUE(queryOffsets.has_value());
+    ASSERT_TRUE(keyOffsets.has_value());
+    EXPECT_NE(*queryOffsets, *keyOffsets);
+    for(const auto& [name, tensor] : query)
+    {
+        EXPECT_EQ(offsetOf(tensor), queryOffsets) << name;
+    }
+    for(const auto& [name, tensor] : key)
+    {
+        EXPECT_EQ(offsetOf(tensor), keyOffsets) << name;
+    }
+    for(const auto uid : {*queryOffsets, *keyOffsets})
+    {
+        const auto* offsets = tensorWithUid(*graph, uid);
+        ASSERT_NE(offsets, nullptr);
+        EXPECT_EQ(dimsOf(offsets), (Ints{BATCH + 1, 1, 1, 1}));
+        EXPECT_EQ(offsets->data_type(), fb::DataType::INT32);
+    }
+
+    // Elements per token: each tensor's token stride, the statistics packed token-major.
+    for(const auto* name : {"q", "o", "dO", "dq"})
+    {
+        EXPECT_EQ(query.at(name)->ragged_offset_multiplier(), HEADS * HEAD_DIM) << name;
+    }
+    EXPECT_EQ(query.at("stats")->ragged_offset_multiplier(), HEADS);
+    for(const auto* name : {"k", "v", "dk", "dv"})
+    {
+        EXPECT_EQ(key.at(name)->ragged_offset_multiplier(), HEADS_KV * HEAD_DIM) << name;
+    }
+    EXPECT_EQ(graph->tensors()->size(), 13U);
+}
+
 TEST(TestSdpaForms, AFormTheDirectionDoesNotBuildIsRefusedByName)
 {
-    for(const auto* form : {"ragged", "sink", "paged"})
+    for(const auto* form : {"sink", "paged"})
     {
         const auto built = buildForm(test::shippedOperation("sdpa_bwd"), form);
         EXPECT_FALSE(built.ok()) << form;
@@ -866,6 +955,8 @@ TEST(TestSdpaForms, AFormWhoseOperandIsNotDeclaredIsRefusedByFormAndArgument)
         {"sdpa_bwd", "dropout", "seedStrides"},
         {"sdpa_bwd", "padded", "seqLenDataType"},
         {"sdpa_bwd", "bias", "biasStrides"},
+        {"sdpa_bwd", "ragged", "offsetsStrides"},
+        {"sdpa_bwd", "ragged", "seqLenDataType"},
     };
     for(const auto& missing : cases)
     {
@@ -898,12 +989,298 @@ TEST(TestSdpaForms, AScaleTensorWithNoStatedScaleToDefaultToIsRefused)
 TEST(TestSdpaForms, ARaggedFormOverTokensWithNoPositiveStrideIsRefused)
 {
     // The stride is the offsets' elements per token; zero would pack every token onto one.
-    const auto built = buildForm(
-        withConstantArgument(test::shippedOperation("sdpa_fwd"), "qStrides", Ints{0, 0, 0, 1}),
-        "ragged");
-    EXPECT_FALSE(built.ok());
-    EXPECT_NE(built.error.find("ragged"), std::string::npos) << built.error;
-    EXPECT_NE(built.error.find("qStrides"), std::string::npos) << built.error;
+    for(const std::string operation : {"sdpa_fwd", "sdpa_bwd"})
+    {
+        const auto built = buildForm(
+            withConstantArgument(test::shippedOperation(operation), "qStrides", Ints{0, 0, 0, 1}),
+            "ragged");
+        EXPECT_FALSE(built.ok()) << operation;
+        EXPECT_NE(built.error.find("ragged"), std::string::npos) << built.error;
+        EXPECT_NE(built.error.find("qStrides"), std::string::npos) << built.error;
+    }
+}
+
+namespace
+{
+
+const std::vector<std::string>& legacyDtypes()
+{
+    static const std::vector<std::string> dtypes{"fp16", "bf16", "fp32"};
+    return dtypes;
+}
+
+const std::vector<std::string>& fp8Dtypes()
+{
+    static const std::vector<std::string> dtypes{
+        "fp8_e4m3", "fp8_e5m2", "fp8_e4m3_fnuz", "fp8_e5m2_fnuz"};
+    return dtypes;
+}
+
+bool isFp8Dtype(const std::string& dtype)
+{
+    return std::find(fp8Dtypes().begin(), fp8Dtypes().end(), dtype) != fp8Dtypes().end();
+}
+
+} // namespace
+
+TEST(TestSdpaDtypes, TheForwardDeclaresEveryTypeItsGraphsCanCarryAndTheBackwardOnlyThree)
+{
+    // The forward takes the three element types and the four fp8 encodings, the latter with the
+    // descales an fp8 plan requires. The backward takes the three only: its schema has no descale
+    // operand to dequantize an fp8 input with (sdpa_backward_attributes.fbs), so an fp8 dtype
+    // declared there would be a graph with nothing to read its inputs by. A dtype added to either
+    // declaration needs its row in the "// types" note and an expectation here.
+    const auto forward = test::shippedOperation("sdpa_fwd");
+    const auto backward = test::shippedOperation("sdpa_bwd");
+    const auto* forwardDtype = forward.find("dtype");
+    const auto* backwardDtype = backward.find("dtype");
+    ASSERT_NE(forwardDtype, nullptr);
+    ASSERT_NE(backwardDtype, nullptr);
+
+    std::set<std::string> everyType(legacyDtypes().begin(), legacyDtypes().end());
+    everyType.insert(fp8Dtypes().begin(), fp8Dtypes().end());
+    EXPECT_EQ(std::set<std::string>(forwardDtype->values.begin(), forwardDtype->values.end()),
+              everyType);
+    EXPECT_EQ(forwardDtype->values.size(), everyType.size()) << "a dtype is declared twice";
+    EXPECT_EQ(backwardDtype->values, legacyDtypes());
+    // The first value is what a test, and a shape file's missing column, takes as the default.
+    EXPECT_EQ(forwardDtype->values.front(), "fp16");
+}
+
+TEST(TestSdpaDtypes, Fp8IsAMinorityOfTheForwardAndTheWiderTypesKeepTheirBalance)
+{
+    const auto metadata = test::shippedOperation("sdpa_fwd");
+    const auto* dtype = metadata.find("dtype");
+    ASSERT_NE(dtype, nullptr);
+    // Unweighted, the four fp8 types would be four sevenths of the sweep.
+    ASSERT_FALSE(dtype->weights.empty()) << "dtype is unweighted: fp8 would be 4/7 of the corpus";
+
+    double total = 0.0;
+    double fp8 = 0.0;
+    for(const auto& value : dtype->values)
+    {
+        total += dtype->weightOf(value);
+        fp8 += isFp8Dtype(value) ? dtype->weightOf(value) : 0.0;
+    }
+    EXPECT_LT(fp8 / total, 0.25);
+    EXPECT_GT(fp8 / total, 0.1) << "too little fp8 for a model to learn from";
+    // The types declared before fp8 stay in the proportion they had, one to one to one.
+    EXPECT_EQ(dtype->weightOf("fp16"), dtype->weightOf("bf16"));
+    EXPECT_EQ(dtype->weightOf("fp16"), dtype->weightOf("fp32"));
+    // Each wider type outweighs every single fp8 encoding.
+    for(const auto& value : fp8Dtypes())
+    {
+        EXPECT_LT(dtype->weightOf(value), dtype->weightOf("fp16")) << value;
+    }
+    // The backward weights nothing, as before.
+    EXPECT_TRUE(test::shippedOperation("sdpa_bwd").find("dtype")->weights.empty());
+}
+
+TEST(TestSdpaDtypes, EveryForwardDtypeTypesItsTensorsAndBindsItsDescalesAsTheMatrixSays)
+{
+    // Every declared value, not a list here, so a dtype added to the declaration is held to the
+    // rule without an edit: Q, K, V in the dtype; O (and the bias) in it for fp16, bf16 and fp32
+    // and in bf16 for fp8; statistics FLOAT; for fp8 only, the three descales, each FLOAT, one
+    // element, an ordinary device tensor; no mma_core_mode and none of the other fp8 scalings.
+    const auto metadata = test::shippedOperation("sdpa_fwd");
+    const auto* declared = metadata.find("dtype");
+    ASSERT_NE(declared, nullptr);
+
+    for(const auto& dtype : declared->values)
+    {
+        const bool fp8 = isFp8Dtype(dtype);
+        const auto input = detail::dataTypeFor(dtype);
+        ASSERT_TRUE(input.has_value()) << dtype;
+        const auto output = fp8 ? fb::DataType::BFLOAT16 : *input;
+
+        for(const auto& expected : formExpectations())
+        {
+            if(expected.forwardTensors == 0)
+            {
+                continue;
+            }
+            const auto where = dtype + " " + expected.form;
+            const auto built = buildForm(metadata, expected.form, true, dtype);
+            ASSERT_TRUE(built.ok()) << where << ": " << built.error;
+            const auto* graph = asGraph(built.bytes);
+            ASSERT_NE(graph, nullptr) << where;
+            const auto* attributes = graph->nodes()->Get(0)->attributes_as_SdpaAttributes();
+            ASSERT_NE(attributes, nullptr) << where;
+
+            EXPECT_EQ(graph->io_data_type(), *input) << where;
+            EXPECT_EQ(graph->compute_data_type(), fb::DataType::FLOAT) << where;
+            EXPECT_EQ(graph->intermediate_data_type(), fb::DataType::FLOAT) << where;
+            EXPECT_EQ(graph->nodes()->Get(0)->compute_data_type(), fb::DataType::FLOAT) << where;
+            EXPECT_EQ(graph->tensors()->size(), expected.forwardTensors + (fp8 ? 3U : 0U)) << where;
+
+            const auto typeOf = [&](std::optional<int64_t> uid) {
+                const auto* tensor = tensorWithUid(*graph, uid);
+                return tensor == nullptr ? fb::DataType::UNSET : tensor->data_type();
+            };
+            EXPECT_EQ(typeOf(attributes->q_tensor_uid()), *input) << where;
+            EXPECT_EQ(typeOf(attributes->k_tensor_uid()), *input) << where;
+            EXPECT_EQ(typeOf(attributes->v_tensor_uid()), *input) << where;
+            EXPECT_EQ(typeOf(attributes->o_tensor_uid()), output) << where;
+            EXPECT_EQ(typeOf(attributes->stats_tensor_uid()), fb::DataType::FLOAT) << where;
+            if(expected.form == "bias")
+            {
+                EXPECT_EQ(typeOf(attributes->attn_mask_tensor_uid()), output) << where;
+            }
+
+            // Nothing the matrix leaves out: the softmax and output scaling, and the core mode.
+            EXPECT_FALSE(attributes->descale_s_tensor_uid().has_value()) << where;
+            EXPECT_FALSE(attributes->scale_s_tensor_uid().has_value()) << where;
+            EXPECT_FALSE(attributes->scale_o_tensor_uid().has_value()) << where;
+            EXPECT_FALSE(attributes->amax_s_tensor_uid().has_value()) << where;
+            EXPECT_FALSE(attributes->amax_o_tensor_uid().has_value()) << where;
+            EXPECT_EQ(attributes->mma_core_mode(), fb::DataType::UNSET) << where;
+
+            const std::vector<std::optional<int64_t>> descales{attributes->descale_q_tensor_uid(),
+                                                               attributes->descale_k_tensor_uid(),
+                                                               attributes->descale_v_tensor_uid()};
+            std::set<int64_t> descaleUids;
+            for(const auto& uid : descales)
+            {
+                EXPECT_EQ(uid.has_value(), fp8) << where << ": descales belong to fp8 alone";
+                if(!uid.has_value())
+                {
+                    continue;
+                }
+                descaleUids.insert(*uid);
+                const auto* descale = tensorWithUid(*graph, uid);
+                ASSERT_NE(descale, nullptr) << where;
+                EXPECT_EQ(descale->data_type(), fb::DataType::FLOAT) << where;
+                EXPECT_EQ(dimsOf(descale), (Ints{1, 1, 1, 1})) << where;
+                // ASM reads a descale through a device pointer, so it is neither virtual nor
+                // passed by value, whatever the references would take.
+                EXPECT_FALSE(descale->virtual_()) << where;
+                EXPECT_FALSE(descale->is_runtime_pass_by_value()) << where;
+                EXPECT_EQ(descale->value_type(), fb::TensorValue::NONE) << where;
+            }
+            EXPECT_EQ(descaleUids.size(), fp8 ? 3U : 0U) << where << ": one tensor per descale";
+        }
+    }
+}
+
+TEST(TestSdpaDtypes, EveryBackwardDtypeTypesAllNineRolesAlike)
+{
+    // One element type across Q, K, V, O, dO and the three gradients, the statistics FLOAT, and
+    // no descale or core mode: the backward schema has no field for either.
+    const auto metadata = test::shippedOperation("sdpa_bwd");
+    const auto* declared = metadata.find("dtype");
+    ASSERT_NE(declared, nullptr);
+
+    for(const auto& dtype : declared->values)
+    {
+        const auto input = detail::dataTypeFor(dtype);
+        ASSERT_TRUE(input.has_value()) << dtype;
+        for(const auto& form : {"plain", "bias"})
+        {
+            const auto where = dtype + " " + form;
+            const auto built = buildForm(metadata, form, true, dtype);
+            ASSERT_TRUE(built.ok()) << where << ": " << built.error;
+            const auto* graph = asGraph(built.bytes);
+            ASSERT_NE(graph, nullptr) << where;
+            const auto* attributes = graph->nodes()->Get(0)->attributes_as_SdpaBackwardAttributes();
+            ASSERT_NE(attributes, nullptr) << where;
+
+            EXPECT_EQ(graph->io_data_type(), *input) << where;
+            EXPECT_EQ(graph->compute_data_type(), fb::DataType::FLOAT) << where;
+            for(const auto uid : {attributes->q_tensor_uid(),
+                                  attributes->k_tensor_uid(),
+                                  attributes->v_tensor_uid(),
+                                  attributes->o_tensor_uid(),
+                                  attributes->do_tensor_uid(),
+                                  attributes->dq_tensor_uid(),
+                                  attributes->dk_tensor_uid(),
+                                  attributes->dv_tensor_uid()})
+            {
+                const auto* tensor = tensorWithUid(*graph, uid);
+                ASSERT_NE(tensor, nullptr) << where;
+                EXPECT_EQ(tensor->data_type(), *input) << where << " " << tensor->name()->str();
+            }
+            const auto* stats = tensorWithUid(*graph, attributes->stats_tensor_uid());
+            ASSERT_NE(stats, nullptr) << where;
+            EXPECT_EQ(stats->data_type(), fb::DataType::FLOAT) << where;
+            EXPECT_EQ(std::string(form) == "bias" ? 10U : 9U, graph->tensors()->size()) << where;
+        }
+    }
+}
+
+TEST(TestSdpaDtypes, AnFp8ForwardWhoseDescaleIsNotDeclaredIsRefusedByArgumentAndOthersNeedNone)
+{
+    // The descales come with the dtype, so declaring fp8 without their dims, strides or type is
+    // refused by name; an fp16 forward never reads them, which the declaration it already had
+    // (no descale arguments) relies on.
+    const auto metadata = test::shippedOperation("sdpa_fwd");
+    const auto plain = buildForm(metadata, "plain", true, "fp16");
+    ASSERT_TRUE(plain.ok()) << plain.error;
+    for(const auto* argument : {"descaleDims", "descaleStrides", "descaleDataType"})
+    {
+        const auto without = withoutArgument(metadata, argument);
+        const auto refused = buildForm(without, "plain", true, "fp8_e4m3_fnuz");
+        EXPECT_FALSE(refused.ok()) << argument;
+        EXPECT_NE(refused.error.find(argument), std::string::npos) << refused.error;
+        EXPECT_NE(refused.error.find("fp8"), std::string::npos) << refused.error;
+
+        const auto unaffected = buildForm(without, "plain", true, "fp16");
+        ASSERT_TRUE(unaffected.ok()) << argument << ": " << unaffected.error;
+        EXPECT_EQ(unaffected.bytes, plain.bytes) << argument;
+    }
+
+    // Byte for byte, for every form: the fp16, bf16 and fp32 graphs are what the declaration built
+    // before it had the descale and output-type arguments, which an adapter that read them at any
+    // dtype but fp8, or a map that touched a wider type, would change.
+    auto before = metadata;
+    for(const auto* argument : {"descaleDims", "descaleStrides", "descaleDataType", "oDataType"})
+    {
+        before = withoutArgument(before, argument);
+    }
+    for(const auto& dtype : legacyDtypes())
+    {
+        for(const auto& expected : formExpectations())
+        {
+            if(expected.forwardTensors == 0)
+            {
+                continue;
+            }
+            const auto now = buildForm(metadata, expected.form, true, dtype);
+            const auto then = buildForm(before, expected.form, true, dtype);
+            ASSERT_TRUE(now.ok()) << dtype << " " << expected.form << ": " << now.error;
+            ASSERT_TRUE(then.ok()) << dtype << " " << expected.form << ": " << then.error;
+            EXPECT_EQ(now.bytes, then.bytes) << dtype << " " << expected.form;
+        }
+    }
+}
+
+TEST(TestSdpaDtypes, TheOutputAndBiasSpellingsFollowTheDtypeAndAMisspeltOneIsRefused)
+{
+    const auto metadata = test::shippedOperation("sdpa_fwd");
+    const auto spelled = [&metadata](const std::string& dtype, const char* argument) {
+        const auto resolved
+            = resolveArguments(metadata.graphBuilder, formPoint(metadata, "bias", true, dtype));
+        EXPECT_TRUE(resolved.ok()) << resolved.error;
+        const auto* found = resolved.find(argument);
+        const auto* name = found == nullptr ? nullptr : std::get_if<std::string>(&found->value);
+        return name == nullptr ? std::string("<unresolved>") : *name;
+    };
+    for(const auto& dtype : fp8Dtypes())
+    {
+        EXPECT_EQ(spelled(dtype, "dataType"), dtype);
+        EXPECT_EQ(spelled(dtype, "oDataType"), "bf16") << dtype;
+        EXPECT_EQ(spelled(dtype, "biasDataType"), "bf16") << dtype;
+        EXPECT_EQ(spelled(dtype, "statsDataType"), "float") << dtype;
+    }
+    for(const auto& dtype : legacyDtypes())
+    {
+        EXPECT_EQ(spelled(dtype, "oDataType"), dtype);
+        EXPECT_EQ(spelled(dtype, "biasDataType"), dtype);
+    }
+
+    const auto misspelt = buildForm(
+        withConstantArgument(metadata, "oDataType", "bfloat17"), "plain", true, "fp8_e4m3_fnuz");
+    EXPECT_FALSE(misspelt.ok());
+    EXPECT_NE(misspelt.error.find("oDataType"), std::string::npos) << misspelt.error;
 }
 
 } // namespace hipdnn_corpus_gen

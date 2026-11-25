@@ -112,14 +112,19 @@ TEST(TestWorkloadSampling, EveryShippedSdpaArchetypeDrawsWhateverOrderItsKeysPar
     {
         const auto metadata = test::shippedOperation(operation);
         ASSERT_FALSE(metadata.archetypes.empty()) << operation;
-        auto categorical
+        const auto defaults
             = test::withDefaultCategoricals(metadata, ProblemPoint{{"dtype", std::string{"bf16"}}});
-        // The archetypes say whether their mask is causal.
-        categorical.erase("is_causal");
 
         std::mt19937_64 rng(4);
         for(const auto& archetype : metadata.archetypes)
         {
+            // The archetypes say whether their mask is causal, and the MLA ones their value
+            // width.
+            auto categorical = defaults;
+            for(const auto& [name, values] : archetype.values)
+            {
+                categorical.erase(name);
+            }
             for(int i = 0; i < 20; ++i)
             {
                 const auto drawn = detail::drawFromArchetype(metadata, archetype, categorical, rng);
@@ -459,9 +464,14 @@ TEST(TestWorkloadSampling, AMalformedDeclarationIsRefusedRatherThanQuietlyWeaken
 TEST(TestWorkloadSampling, AShippedAnchorsHeadDimMovesAmongTheWidthsModelsUse)
 {
     // head_dim has no scale neighbourhood: an interpolated 100 or 144 is not a shipped model.
-    const std::set<int64_t> widths{32, 40, 48, 64, 80, 96, 112, 128, 160, 192, 256};
+    // The forward's widths include absorbed MLA's 576.
     for(const std::string operation : {"sdpa_fwd", "sdpa_bwd"})
     {
+        std::set<int64_t> widths{32, 40, 48, 64, 80, 96, 112, 128, 160, 192, 256};
+        if(operation == "sdpa_fwd")
+        {
+            widths.insert(576);
+        }
         const auto metadata = test::shippedOperation(operation);
         std::mt19937_64 rng(8);
         const ProblemPoint anchor{{"batch", int64_t{4}},

@@ -12,6 +12,8 @@
 #include "OperationsDir.hpp"
 
 #include <algorithm>
+#include <cmath>
+#include <filesystem>
 #include <set>
 #include <string>
 #include <vector>
@@ -327,13 +329,14 @@ TEST(TestRegimeFocus, ARegimeTheEngineDoesNotServeIsNotReachedRatherThanSaturate
 TEST(TestRegimeFocus, ARegimeInACorpusWhoseEveryCombinationIsEmptyIsSaturated)
 {
     // The ragged form is declared only with bshd, so every combination of these two keeps is
-    // empty: nothing is left to search, which is a proof.
+    // empty: nothing is left to search, which is a proof. The bound covers every combination
+    // the two keeps leave (seven dtypes since fp8), so the search can enumerate them all.
     const auto metadata = shippedSdpa();
     std::string error;
     const auto focus = compileRegimeFocus(metadata, "decode_long_mha", error);
     ASSERT_TRUE(focus.has_value()) << error;
     auto request = focusRequest();
-    request.maxCombinations = 1024;
+    request.maxCombinations = 4096;
     request.keep = {{"form", "ragged"}, {"layout", "bhsd"}};
 
     const auto found = exploreRegime(metadata, *focus, request, 10, SERVES_EVERYTHING, {}, {});
@@ -344,14 +347,16 @@ TEST(TestRegimeFocus, ARegimeInACorpusWhoseEveryCombinationIsEmptyIsSaturated)
 
 TEST(TestRegimeFocus, ARegimeTheDeclaredConstraintsExcludeIsSaturatedWithoutAskingTheEngine)
 {
-    // Cross attention (more queries than keys) is admitted only under a non-causal mask, so
-    // under a causal keep every proposal in the regime breaks a constraint.
+    // Cross attention (more queries than keys) under a causal mask is admitted only anchored
+    // top-left, where every query row keeps a key, so under a causal, bottom-right keep every
+    // proposal in the regime breaks a constraint. (A causal keep alone admits the top-left
+    // half, which a search that finds its footholds then serves.)
     const auto metadata = shippedSdpa();
     std::string error;
     const auto focus = compileRegimeFocus(metadata, "cross_long_gqa", error);
     ASSERT_TRUE(focus.has_value()) << error;
     auto request = focusRequest();
-    request.keep = {{"is_causal", "true"}};
+    request.keep = {{"is_causal", "true"}, {"alignment", "bottom_right"}};
     int64_t asked = 0;
     const ProblemOracle counting = [&asked](const ProblemPoint&) {
         ++asked;
@@ -387,8 +392,8 @@ TEST(TestRegimeFocus, AnUnservedRegimeCostsOnlyTheProbe)
     // The sample is capped at maxCombinations, plus one extra combination per declared value it
     // missed, so the cap is what the enumeration actually yields.
     size_t total = 0;
-    const auto combinations
-        = detail::categoricalCombinations(metadata.parameters, request.maxCombinations, total);
+    const auto combinations = detail::categoricalCombinations(
+        metadata.parameters, request.maxCombinations, request.seed, total);
     EXPECT_LE(found.proposed, static_cast<int64_t>(combinations.size()) * request.probeBudget);
 }
 
@@ -416,6 +421,94 @@ TEST(TestRegimeFocus, EveryLabelTheFacetsCanSpellIsListedAndCompiles)
     EXPECT_NE(std::find(labels.begin(), labels.end(), "append_long_gqa"), labels.end());
 }
 
+TEST(TestRegimeFocus, EveryShippedDeclarationLabelsItsRegimesAndEachLabelCompiles)
+{
+    // An unlabelled corpus is one regime: coverage reports it as such, sizing skips it, and a
+    // floor cannot spread over it, so a convolution corpus held no depthwise or 3-D graph that a
+    // regime floor could ask for. Every declaration labels its regimes, every label it spells
+    // compiles to a focus, and no two spell the same label.
+    size_t declarations = 0;
+    for(const auto& entry :
+        std::filesystem::directory_iterator(hipdnn_corpus_gen::test::operationsDir()))
+    {
+        if(entry.path().string().find(".opmeta.json") == std::string::npos)
+        {
+            continue;
+        }
+        const auto metadata = test::shippedOperation(entry.path().filename().string().substr(
+            0, entry.path().filename().string().find(".opmeta.json")));
+        ++declarations;
+        EXPECT_FALSE(metadata.regimeLabel.empty()) << metadata.operation << " labels no regime";
+        const auto labels = declaredRegimeLabels(metadata);
+        EXPECT_GE(labels.size(), 2U) << metadata.operation;
+        EXPECT_EQ(std::set<std::string>(labels.begin(), labels.end()).size(), labels.size())
+            << metadata.operation;
+        for(const auto& label : labels)
+        {
+            std::string error;
+            EXPECT_TRUE(compileRegimeFocus(metadata, label, error).has_value())
+                << metadata.operation << " " << label << ": " << error;
+        }
+    }
+    EXPECT_GT(declarations, 20U);
+}
+
+TEST(TestRegimeFocus, AConvolutionIsLabelledByItsFilterItsGroupingAndItsRank)
+{
+    const auto metadata = test::shippedOperation("conv_fwd");
+    const auto conv = [&metadata](int64_t c,
+                                  int64_t k,
+                                  int64_t groups,
+                                  int64_t r,
+                                  int64_t stride,
+                                  const std::string& spatial,
+                                  int64_t depth,
+                                  int64_t t) {
+        return regimeLabel(metadata,
+                           test::withDefaultCategoricals(metadata,
+                                                         ProblemPoint{{"N", int64_t{8}},
+                                                                      {"C", c},
+                                                                      {"K", k},
+                                                                      {"groups", groups},
+                                                                      {"H", int64_t{56}},
+                                                                      {"W", int64_t{56}},
+                                                                      {"R", r},
+                                                                      {"S", r},
+                                                                      {"pad_h", r / 2},
+                                                                      {"pad_w", r / 2},
+                                                                      {"stride_h", stride},
+                                                                      {"stride_w", stride},
+                                                                      {"dilation_h", int64_t{1}},
+                                                                      {"dilation_w", int64_t{1}},
+                                                                      {"D", depth},
+                                                                      {"T", t},
+                                                                      {"pad_d", t / 2},
+                                                                      {"stride_d", int64_t{1}},
+                                                                      {"dilation_d", int64_t{1}},
+                                                                      {"spatial", spatial}}));
+    };
+    EXPECT_EQ(conv(64, 256, 1, 1, 1, "2d", 1, 1), "pointwise_dense_2d");
+    EXPECT_EQ(conv(3, 768, 1, 16, 16, "2d", 1, 1), "patch_dense_2d");
+    EXPECT_EQ(conv(64, 64, 1, 2, 2, "2d", 1, 1), "patch_dense_2d");
+    EXPECT_EQ(conv(64, 64, 1, 3, 2, "2d", 1, 1), "small_dense_2d");
+    EXPECT_EQ(conv(3, 64, 1, 7, 2, "2d", 1, 1), "large_dense_2d");
+    EXPECT_EQ(conv(96, 96, 96, 7, 1, "2d", 1, 1), "large_depthwise_2d");
+    EXPECT_EQ(conv(256, 256, 32, 3, 1, "2d", 1, 1), "small_grouped_2d");
+    EXPECT_EQ(conv(256, 256, 1, 1, 1, "3d", 16, 1), "pointwise_dense_3d");
+    EXPECT_EQ(conv(320, 320, 1, 1, 1, "3d", 16, 3), "small_dense_3d");
+    EXPECT_EQ(conv(96, 96, 96, 3, 1, "3d", 16, 3), "small_depthwise_3d");
+
+    // The depthwise label ties groups to C, so its focus searches neither apart; the 3-D rank
+    // pins the spatial facet (2-D is `otherwise`, which pins nothing).
+    std::string error;
+    const auto focus = compileRegimeFocus(metadata, "small_depthwise_3d", error);
+    ASSERT_TRUE(focus.has_value()) << error;
+    ASSERT_EQ(focus->ties.count("groups"), 1U);
+    EXPECT_EQ(focus->ties.at("groups"), "C");
+    ASSERT_EQ(focus->categoricalPins.count("spatial"), 1U);
+    EXPECT_EQ(focus->categoricalPins.at("spatial"), ParameterValue(std::string("3d")));
+}
+
 TEST(TestRegimeFocus, AFloorIsAskedOfEveryRegimeNoQuotaNames)
 {
     const auto metadata = shippedSdpa();
@@ -437,11 +530,11 @@ class TestShippedValueWeights : public ::testing::TestWithParam<std::string>
 TEST_P(TestShippedValueWeights,
        AFocusedSearchRealisesTheDeclaredValueWeightsAndProbesOnlyTheLanesItNeeds)
 {
-    // layout 2:1:1 and scale 2:1:1 in both, window 3:1:1:1 in sdpa_fwd, which alone declares one;
-    // the form is unweighted. The regime quota and floor path splits its need over categorical
-    // lanes, so a lane-even split would make every value 1/3 (window none 1/4) however the main
-    // search is weighted.
-    const bool forward = GetParam() == "sdpa_fwd";
+    // layout 2:1:1:1:1, scale 2:1:1, window 3:1:1:1 and value_head_dim 3:1 in both (and, in the
+    // forward only, dtype 8:8:8:1:1:2:1, which the shares below do not test); the form is
+    // unweighted. The regime quota and floor path splits its need over categorical lanes, so a
+    // lane-even split would make every value even (bshd 1/4 here, window none 1/4) however the
+    // main search is weighted.
     const auto metadata = test::shippedOperation(GetParam());
     std::string error;
     const auto focus = compileRegimeFocus(metadata, "decode_long_mha", error);
@@ -457,7 +550,10 @@ TEST_P(TestShippedValueWeights,
     // over every point, so over every point the weighted and the unweighted share both fall
     // within the tolerance of 0.5 (about 0.5 and 0.47 in sdpa_bwd). Among the points whose form states
     // the scale the weight is what remains once the forced share, the rows of those two forms,
-    // is taken out, and the unweighted 1/3 is further from it than the tolerance.
+    // is taken out. The lanes are a seeded sample of the combinations, so the realised share
+    // moves with the seed: over seeds 1 to 8 it fell within 0.034 of the weighted share in both
+    // declarations, inside the tolerance below; the weighted share must also be nearer than the
+    // unweighted 1/3, which in sdpa_bwd can sit as close as 0.05.
     const auto* formParameter = metadata.find("form");
     ASSERT_NE(formParameter, nullptr);
     EXPECT_TRUE(formParameter->weights.empty()) << "the forms are even strata, not weighted";
@@ -484,32 +580,38 @@ TEST_P(TestShippedValueWeights,
               }
               return static_cast<double>(held) / static_cast<double>(counted);
           };
-    EXPECT_NEAR(shareOf("layout", "bshd", false), 0.5, 0.05);
-    EXPECT_NEAR(shareOf("layout", "bhsd", false), 0.25, 0.05);
+    // A decode regime holds no qkv_packed graph (a fused QKV projection is self-attention, and a
+    // decode step has one query against a long cache), so the layouts left share 2:1:1:1.
+    EXPECT_NEAR(shareOf("layout", "bshd", false), 0.4, 0.05);
+    EXPECT_NEAR(shareOf("layout", "bhsd", false), 0.2, 0.05);
     EXPECT_NEAR(shareOf("scale", "inv_sqrt_d", false), 0.5, 0.1);
-    EXPECT_NEAR(shareOf("scale", "inv_sqrt_d", true), statedInvSqrtD, 0.03);
-    // No form is starved: each holds at least 0.4 of an even share, though the three that fewer
-    // combinations can hold (scale_unset, scale_tensor, ragged) hold less than the others.
+    const auto stated = shareOf("scale", "inv_sqrt_d", true);
+    EXPECT_NEAR(stated, statedInvSqrtD, 0.045);
+    EXPECT_LT(std::abs(stated - statedInvSqrtD), std::abs(stated - (1.0 / 3.0)))
+        << "the stated scales are nearer an even split than the declared weight";
+    // No form is starved. The three that fewer combinations can hold sit below an even share by
+    // construction: scale_unset and scale_tensor take inv_sqrt_d only (half the scale weight),
+    // and ragged the token-major layouts only (bshd's 2 of 5 here, with no qkv_packed in a
+    // decode regime). Around that the sampled lanes vary by a fifth, so each form is held to a
+    // quarter of an even share; a stride that aliased a form away left it none.
     for(const auto& form : formParameter->values)
     {
         EXPECT_GE(shareOf("form", form, false),
-                  0.4 / static_cast<double>(formParameter->values.size()))
+                  0.25 / static_cast<double>(formParameter->values.size()))
             << form;
     }
-    if(forward)
-    {
-        EXPECT_NEAR(shareOf("window", "none", false), 0.5, 0.1);
-        EXPECT_NEAR(shareOf("window", "local_128", false), 1.0 / 6.0, 0.08);
-    }
+    EXPECT_NEAR(shareOf("window", "none", false), 0.5, 0.1);
+    EXPECT_NEAR(shareOf("window", "local_128", false), 1.0 / 6.0, 0.08);
+    EXPECT_NEAR(shareOf("value_head_dim", "same", false), 0.75, 0.08);
 
     // A floor of 60 needs at most 60 lanes of the declared lanes; running each of them once would
     // cost its whole budget.
     const auto few = exploreRegime(metadata, *focus, request, 60, SERVES_EVERYTHING, {}, {});
     ASSERT_GE(few.problems.size(), 60u);
     size_t total = 0;
-    const auto lanes
-        = detail::categoricalCombinations(metadata.parameters, request.maxCombinations, total)
-              .size();
+    const auto lanes = detail::categoricalCombinations(
+                           metadata.parameters, request.maxCombinations, request.seed, total)
+                           .size();
     EXPECT_LT(few.proposed, static_cast<int64_t>(lanes) * request.budgetPerCombination / 8)
         << "proposed " << few.proposed << " over " << lanes << " lanes";
 }
@@ -520,7 +622,7 @@ INSTANTIATE_TEST_SUITE_P(SdpaDeclarations,
 
 TEST(TestRegimeFocus, AFocusedSearchUnderAKeepSpendsItsLanesOnTheCombinationsTheKeepAdmits)
 {
-    // The forward's 6912 combinations are past the bound of 1024, and a sample drawn before the
+    // The forward's 53760 combinations are past the bound of 1024, and a sample drawn before the
     // keep leaves a few of the 6 combinations the keep admits that can hold a problem, or none.
     const auto metadata = test::shippedOperation("sdpa_fwd");
     std::string error;
