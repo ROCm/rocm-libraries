@@ -2,6 +2,7 @@
 // SPDX-License-Identifier:  MIT
 
 #include <algorithm>
+#include <array>
 #include <cstdint>
 #include <memory>
 #include <stdexcept>
@@ -35,12 +36,6 @@ using namespace asm_sdpa_engine;
 
 namespace
 {
-
-// Names the config helper assigns to the fp8 q/k/v descale tensors; the fill below
-// selects them by these names (see initializeBundle).
-constexpr const char* K_DESCALE_Q_NAME = "descale_q";
-constexpr const char* K_DESCALE_K_NAME = "descale_k";
-constexpr const char* K_DESCALE_V_NAME = "descale_v";
 
 // Fixed, positive, DISTINCT dequantization factors for the q/k/v descales. Distinct so a
 // q/k/v pointer swap changes the result and fails the test; fixed (not randomized) so the
@@ -152,12 +147,16 @@ protected:
     // positive, DISTINCT fill constants defined above (see K_DESCALE_*_FILL for the
     // distinct-and-fixed rationale). Offset tables get the token seqstarts of the case's
     // groupLengthSet lengths, or its physical starts in a cu_seq_len case, whose cumulative
-    // tables (and the reference graph's seq_len tensors) get the lengths.
-    // Every other tensor gets the plain random fill.
+    // tables (and the reference graph's seq_len tensors) get the lengths. A qkStress case
+    // fills q, k, v and the q and k descales as GraphTestCase::qkStress describes. Every
+    // other tensor gets the plain U[-1, 1] fill.
     void initializeBundle(const hipdnn_frontend::graph::Graph& graph,
                           GraphTensorBundle& bundle,
                           unsigned int seed) override
     {
+        const GraphTestCase& testCase = this->GetParam();
+        const auto& stress = testCase.qkStress;
+
         std::unordered_map<int64_t, std::string> uidToName;
         graph.visit([&](const hipdnn_frontend::graph::INode& node) {
             for(const auto& tensorAttr : node.getNodeInputTensorAttributes())
@@ -172,21 +171,28 @@ protected:
         });
 
         const GroupLengthSet& lengths = groupLengthSet(this->GetParam().groupLengths);
+        // Tensors the qkStress branches fill: q, k, v, descale_q and descale_k.
+        int stressFilled = 0;
         for(auto const& tensorPair : bundle.tensors)
         {
-            const auto nameIt = uidToName.find(tensorPair.first);
+            const auto uid = tensorPair.first;
+            const auto nameIt = uidToName.find(uid);
             const bool hasName = (nameIt != uidToName.end());
-            if(hasName && nameIt->second == K_DESCALE_Q_NAME)
+            if(hasName && nameIt->second == K_DESCALE_Q_TENSOR_NAME)
             {
-                bundle.randomizeTensor(tensorPair.first, K_DESCALE_Q_FILL, K_DESCALE_Q_FILL, seed);
+                const float fill = stress ? stress->descale : K_DESCALE_Q_FILL;
+                bundle.randomizeTensor(uid, fill, fill, seed);
+                stressFilled += stress ? 1 : 0;
             }
-            else if(hasName && nameIt->second == K_DESCALE_K_NAME)
+            else if(hasName && nameIt->second == K_DESCALE_K_TENSOR_NAME)
             {
-                bundle.randomizeTensor(tensorPair.first, K_DESCALE_K_FILL, K_DESCALE_K_FILL, seed);
+                const float fill = stress ? stress->descale : K_DESCALE_K_FILL;
+                bundle.randomizeTensor(uid, fill, fill, seed);
+                stressFilled += stress ? 1 : 0;
             }
-            else if(hasName && nameIt->second == K_DESCALE_V_NAME)
+            else if(hasName && nameIt->second == K_DESCALE_V_TENSOR_NAME)
             {
-                bundle.randomizeTensor(tensorPair.first, K_DESCALE_V_FILL, K_DESCALE_V_FILL, seed);
+                bundle.randomizeTensor(uid, K_DESCALE_V_FILL, K_DESCALE_V_FILL, seed);
             }
             else if(hasName && nameIt->second == K_QO_RAGGED_OFFSET_NAME)
             {
@@ -226,11 +232,49 @@ protected:
             {
                 fillTable(*tensorPair.second, lengths.seqLensKv);
             }
+            else if(stress && hasName && nameIt->second == K_Q_TENSOR_NAME)
+            {
+                bundle.randomizeTensor(uid, -stress->absMax, stress->absMax, seed);
+                ++stressFilled;
+            }
+            else if(stress && hasName && nameIt->second == K_K_TENSOR_NAME)
+            {
+                bundle.randomizeTensor(uid, -stress->absMax, stress->absMax, seed + 1);
+                ++stressFilled;
+            }
+            else if(stress && hasName && nameIt->second == K_V_TENSOR_NAME)
+            {
+                bundle.randomizeTensor(uid, -1.0f, 1.0f, seed + 2);
+                ++stressFilled;
+            }
             else
             {
-                bundle.randomizeTensor(tensorPair.first, _minVal, _maxVal, seed);
+                bundle.randomizeTensor(uid, -1.0f, 1.0f, seed);
             }
         }
+
+        if(stress && stressFilled != 5)
+        {
+            throw std::runtime_error(
+                "qkStress case did not find its q, k, v, descale_q and descale_k tensors by name");
+        }
+    }
+
+    // Whether ASM_SDPA_ENGINE is in graph's ranked engine list, i.e. its isApplicable
+    // accepted the graph. buildPlansForEngine rebuilds the operation graph afterwards
+    // (build_operation_graph re-lowers from the frontend nodes).
+    bool asmEngineOffersToServe(hipdnn_frontend::graph::Graph& graph)
+    {
+        auto result = graph.build_operation_graph(this->_handle);
+        EXPECT_EQ(result.code, hipdnn_frontend::ErrorCode::OK) << result.err_msg;
+
+        std::vector<int64_t> ranked;
+        result = graph.get_ranked_engine_ids(ranked);
+        EXPECT_TRUE(result.code == hipdnn_frontend::ErrorCode::OK
+                    || result.code == hipdnn_frontend::ErrorCode::GRAPH_NOT_SUPPORTED)
+            << result.err_msg;
+        return result.code == hipdnn_frontend::ErrorCode::OK
+               && std::find(ranked.begin(), ranked.end(), ASM_SDPA_ENGINE_ID) != ranked.end();
     }
 
     void runGraphTest(float tolerance)
@@ -331,14 +375,17 @@ protected:
             }
         });
 
+        if(testCase.mayDeclineForKernelDefect && !asmEngineOffersToServe(*graph))
+        {
+            GTEST_SKIP() << "ASM_SDPA_ENGINE declines this graph while the fp8 causal kernel is "
+                            "defective (ALMIOPEN-3392, AITER issue #7593)";
+        }
+
         // Pinned to the ASM engine: other hip-kernel-provider engines serve some of these
         // graphs, so a heuristic build could pass while this engine declines its own row.
         ASSERT_NO_FATAL_FAILURE(this->buildPlansForEngine(*graph, ASM_SDPA_ENGINE_ID, {}));
         this->verifyBuiltGraph(context, 0);
     }
-
-    float _minVal = -1.0;
-    float _maxVal = 1.0;
 };
 
 using IntegrationGpuSdpaFwdBf16 = IntegrationSdpaFwd<bfloat16>;
@@ -877,6 +924,84 @@ std::vector<GraphTestCase> getFp8MmaCoreModeTestCases()
     return cases;
 }
 
+// fp8 causal past one Q tile (ALMIOPEN-3392): the gfx942 fp8 causal kernel computes every
+// Q tile after the first wrongly. Q and K are drawn from U[-absMax, absMax] with
+// independent seeds; at scale 1/sqrt(128) the logit standard deviation is about
+// descale^2 * absMax^2 / 3: 1.3 at descale 0.5 (a diffuse softmax) and 5.3 at descale 1.0
+// (a peaked one). With the decline removed, on an MI300X every descale-0.5 case past one
+// Q tile fails (O or LSE), while the descale-1.0 cases pass; both stay, the latter as
+// peaked-softmax coverage. Cases past one Q tile of a causal row may decline while the
+// kernel is defective; the controls must be served and correct.
+std::vector<GraphTestCase> getFp8CausalQTileTestCases()
+{
+    struct Fill
+    {
+        float descale;
+        const char* label;
+        float absMax;
+    };
+    const std::array<Fill, 2> fills
+        = {{{0.5f, "QkDescale0p5", 4.0f}, {1.0f, "QkDescale1p0", 4.0f}}};
+
+    struct Shape
+    {
+        plan_utils::MaskType mask;
+        int64_t seqQ;
+        int64_t seqKv;
+        bool withStats;
+    };
+    const std::array<Shape, 8> shapes = {{
+        {plan_utils::MaskType::NO_MASK, 1024, 1024, true},
+        {plan_utils::MaskType::BOTTOM_RIGHT_CAUSAL, 256, 256, true},
+        {plan_utils::MaskType::BOTTOM_RIGHT_CAUSAL, 256, 1024, true},
+        {plan_utils::MaskType::BOTTOM_RIGHT_CAUSAL, 512, 512, true},
+        {plan_utils::MaskType::BOTTOM_RIGHT_CAUSAL, 1024, 1024, false},
+        {plan_utils::MaskType::BOTTOM_RIGHT_CAUSAL, 300, 299, true},
+        {plan_utils::MaskType::BOTTOM_RIGHT_CAUSAL, 512, 256, true},
+        {plan_utils::MaskType::TOP_LEFT_CAUSAL, 512, 512, true},
+    }};
+
+    std::vector<GraphTestCase> cases;
+    for(const auto& [key, config] : cfg_fmha_fwd)
+    {
+        if(config.dtype != hip_kernel_provider_common::config::FP8BF16
+           || config.mode != hip_kernel_provider_common::BatchMode::BATCH)
+        {
+            continue;
+        }
+        for(const auto& fill : fills)
+        {
+            for(const auto& shape : shapes)
+            {
+                // Top-left cases run on the bottom-right causal row (S_q == S_kv).
+                const auto rowMask = shape.mask == plan_utils::MaskType::TOP_LEFT_CAUSAL
+                                         ? plan_utils::MaskType::BOTTOM_RIGHT_CAUSAL
+                                         : shape.mask;
+                if(static_cast<plan_utils::MaskType>(config.mask) != rowMask)
+                {
+                    continue;
+                }
+                auto caseConfig = config;
+                caseConfig.mask = static_cast<int>(shape.mask);
+
+                auto tc = configToTestCase(caseConfig, shape.withStats);
+                tc.batch = 1;
+                tc.numHeads = 8;
+                tc.seqQ = shape.seqQ;
+                tc.seqKv = shape.seqKv;
+                tc.qkStress = GraphTestCase::QkStress{fill.absMax, fill.descale};
+                tc.mayDeclineForKernelDefect
+                    = shape.mask != plan_utils::MaskType::NO_MASK && shape.seqQ > caseConfig.ts_qo;
+                tc.name = getConfigDescription(caseConfig) + "Sq" + std::to_string(shape.seqQ)
+                          + "Skv" + std::to_string(shape.seqKv) + (shape.withStats ? "Stats" : "")
+                          + fill.label + "Abs" + std::to_string(static_cast<int>(fill.absMax));
+                cases.push_back(tc);
+            }
+        }
+    }
+    return cases;
+}
+
 } // namespace
 
 TEST_P(IntegrationGpuSdpaFwdBf16, Correctness)
@@ -937,6 +1062,11 @@ INSTANTIATE_TEST_SUITE_P(GroupEdgeLengths,
 INSTANTIATE_TEST_SUITE_P(StandardGroupCoverage,
                          IntegrationGpuSdpaFwdBf16,
                          testing::ValuesIn(getGroupCoverageTestCases()),
+                         GraphTestCase::getName);
+
+INSTANTIATE_TEST_SUITE_P(Fp8CausalQTiles,
+                         IntegrationGpuSdpaFwdBf16,
+                         testing::ValuesIn(getFp8CausalQTileTestCases()),
                          GraphTestCase::getName);
 
 TEST_P(IntegrationGpuSdpaFwdShapeSweepBf16, Correctness)
