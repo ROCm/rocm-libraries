@@ -11,24 +11,29 @@ tensor_load_to_lds, bounded the same way.
   TDMStoreInst   Paths stored through the TDM block
   =============  =================================================================
   False          off: every block keeps its buffer_store
-  True           on: EdgeM, EdgeN and NonEdge, so every tile, the OptNLL store included
+  True           on: every tile of a final-D store, the OptNLL store included
   =============  =================================================================
 
-TDMStoreInst on stores every tile through the TDM block, whatever the alignment of its columns, so
-the epilogue keeps one store path and splits only on beta / non-beta. The choice is whether to enable
+TDMStoreInst on stores every tile through the TDM block, whatever the alignment of its columns, and
+tensor_dim bounds the edge tiles, so the epilogue keeps one store path and splits only on beta / non-beta:
+each beta of a final-D store is one TDM block, generated like the NonEdge path at the store vector width,
+with no edge check and no EdgeN or EdgeM block (tdmStoreSinglePath). The choice is whether to enable
 TDMStoreInst for a kernel, not which paths it covers.
 
-A path is a store block of the store-width cascade generateBetaModules builds, one per vector width,
-and turning TDMStoreInst on only changes which store each block emits: it adds, drops and moves no
-block, label or branch of the cascade. The one addition is in a MultipleBufferSingleKernel kernel with
-MbskPrefetchMethod 0, whose reduced tile globalWriteElements then generates twice, through the TDM block
-and through buffer_store, behind a compare of the runtime GSU and a branch to the copy
-(tdmStoreRejectReason). With AdaptiveGemm=0 the narrowest masked block is the only one narrower than
-the store vector width, which every M-edge workgroup takes. With AdaptiveGemm=1, which TDMStoreInst
-admits only with per-element outputs beyond C and D (tdmStoreRejectReason), an M-edge workgroup takes
-the widest block whose vector width divides SizeI, so the masked block of the store vector width also
-stores the M-edge tiles of a SizeI it divides. At store vector width 1 the narrowest masked block is
-the one of the store vector width, so EdgeM and EdgeN are that same single block.
+Without TDMStoreInst a final-D store is the store-width cascade generateBetaModules builds, one block per
+vector width: the NonEdge block and the masked EdgeN block of the store vector width and the narrower
+masked EdgeM blocks, picked by edge checks. A kernel with per-element outputs beyond C and D
+(hasEpilogueSideEffects) keeps that cascade with TDMStoreInst on: every block stores through its own copy of
+the TDM block, and the edge blocks keep their masks, vector width and C loads. With AdaptiveGemm=0 the
+narrowest masked block is the only one narrower than the store vector width, which every M-edge workgroup
+takes. With AdaptiveGemm=1, which TDMStoreInst admits only in such kernels (tdmStoreRejectReason), an M-edge
+workgroup takes the widest block whose vector width divides SizeI, so the masked block of the store vector
+width also stores the M-edge tiles of a SizeI it divides. At store vector width 1 the narrowest masked block
+is the one of the store vector width, so EdgeM and EdgeN are that same single block. The stores that do not
+write final D, the partials and atomics of GSU > 1, keep their cascade and buffer_store. A
+MultipleBufferSingleKernel kernel with MbskPrefetchMethod 0 generates its reduced tile twice, through the TDM
+block and through buffer_store, whose copy keeps the cascade, behind a compare of the runtime GSU and a branch
+to the copy (tdmStoreRejectReason).
 
 The block runs in the phases of GlobalWriteBatchWriter. _prolog of the first batch calls
 emitTDMStoreSetup and, with beta != 0, emitTDMStoreLoadC, so the C tile is in LDS before any element
@@ -36,7 +41,8 @@ reads it, and every element reads its C with emitTDMStoreLoadCElement in place o
 except in the edge blocks of a kernel with per-element outputs beyond C and D, which keep their buffer
 loads of C. _emitNonatomicAdd stages the D of every batch with emitTDMStoreStaging; emitTDMStoreFlush
 runs after the last batch, or after the CompactLoopStore loop.
-generateBetaModules picks the blocks with tdmStoreBlocks; Solution checks a configuration
+globalWriteElements hands a final-D store to generateBetaModules as one block where tdmStoreSinglePath
+holds, and generateBetaModules picks the TDM blocks of a cascade with tdmStoreBlocks; Solution checks a configuration
 with tdmStoreRejectReason and its store vectors with tdmStoreVectorRejectReason, and reserves the staged tile with
 tdmStoreLdsBytes, at _TDMStoreLdsOffset after the epilogue vectors, over the main-loop buffers.
 """
@@ -108,10 +114,10 @@ def tdmStoreRejectReason(state):
   outputs beyond C and D (hasEpilogueSideEffects) the TDM blocks of the edge paths are generated as the edge
   block, with its masks, vector width and C loads, and only stage D in place of its store. GroupedGemm sets the sizes, strides and addresses
   the block reads for each group.
-  AdaptiveGemm=1 adds a block for every halving of the store vector width, and an M-edge workgroup takes the
-  widest one whose vector width divides SizeI. Without outputs beyond C and D every TDM block stages at the store
-  vector width without masks, so the blocks would only repeat the TDM block of AdaptiveGemm=0, and TDMStoreInst
-  requires AdaptiveGemm=0. With them each TDM block of an edge path keeps the width, masks and C loads of its own
+  AdaptiveGemm=1 adds a block for every halving of the store vector width to the cascade, and an M-edge workgroup
+  takes the widest one whose vector width divides SizeI. Without outputs beyond C and D a final-D store is one TDM
+  block (tdmStoreSinglePath), with no cascade for AdaptiveGemm=1 to extend, so TDMStoreInst requires
+  AdaptiveGemm=0. With them each TDM block of an edge path keeps the width, masks and C loads of its own
   block, so AdaptiveGemm=1 changes the edge code and is supported.
   A GlobalSplitU=-1 kernel, with any GlobalSplitUAlgorithm and AdaptiveGemmGSUA, uses the block when
   the runtime GSU is 1; the partials and atomics of its GSU>1 branch keep buffer_store. The reduced tile of a
@@ -148,8 +154,8 @@ def tdmStoreRejectReason(state):
      and state["GlobalSplitUAlgorithm"] != "MultipleBufferSingleKernel":
     return "TDMStoreInst requires GlobalSplitU=1 or -1, or MultipleBufferSingleKernel"
   if state["AdaptiveGemm"] and not hasEpilogueSideEffects(pt):
-    return "TDMStoreInst does not support AdaptiveGemm=1 without per-element outputs beyond C and D: every block of " \
-           "its store-width cascade would be the same TDM block, so AdaptiveGemm=1 would only add copies of it"
+    return "TDMStoreInst does not support AdaptiveGemm=1 without per-element outputs beyond C and D: such a kernel " \
+           "stores each beta through one TDM block, with no store-width cascade for AdaptiveGemm=1 to extend"
   if state["UseSubtileImpl"]:
     return "TDMStoreInst does not support UseSubtileImpl"
   if isFusedA2A(pt):
@@ -265,14 +271,31 @@ def tdmStoreBlocks(kernel, edge, atomic, vectorWidths):
   narrowest one; without edge the one block is unmasked, NonEdge, and generateBetaModules picks the
   NonEdge path of a store with edge the same way, with edge=False. TDMStoreInst on sends every path
   through the TDM block, so with edge that is every block of the cascade. In a picked block the TDM
-  block replaces the store; it is generated like the NonEdge path (widest vector width, no per-element
-  mask), except for the edge blocks of a kernel with per-element outputs beyond C and D
-  (hasEpilogueSideEffects), which keep their own. Only a block that storesFinalD uses it, not a GSU or
+  block replaces the store. A final-D store keeps its edge blocks with TDMStoreInst only in a kernel with
+  per-element outputs beyond C and D (hasEpilogueSideEffects), whose TDM blocks of the edge paths keep the
+  masks and vector width of their block; any other one reaches generateBetaModules without edge, as the one
+  block of the store vector width (tdmStoreSinglePath). Only a block that storesFinalD uses it, not a GSU or
   StreamK partial-tile store.
   """
   if not (kernel["TDMStoreInst"] and storesFinalD(kernel, atomic)):
     return set()
   return set(vectorWidths) if edge else {max(vectorWidths)}
+
+
+def tdmStoreSinglePath(kernel, edge, atomic):
+  """Whether a store with edge blocks goes to generateBetaModules as one TDM block in place of its store-width
+  cascade.
+
+  With TDMStoreInst on every block of a store that storesFinalD stores through the TDM block, and without
+  per-element outputs beyond C and D (hasEpilogueSideEffects) each would be generated like the NonEdge path, at
+  the widest vector width and without masks: the same block. tensor_dim bounds the edge tiles, so
+  globalWriteElements passes such a store without edge and with the widest vector width only, and each beta
+  gets that block alone: no edge check, no EdgeN or EdgeM block and none of their labels. A store without edge
+  blocks, such as the OptNLL store, is one block already. A kernel with such outputs keeps the cascade, whose
+  edge blocks need their masks.
+  """
+  return edge and kernel["TDMStoreInst"] and storesFinalD(kernel, atomic) \
+    and not hasEpilogueSideEffects(kernel["ProblemType"])
 
 
 def storeRemapVectorWidth(kernel, tdmStoreLdsBase):

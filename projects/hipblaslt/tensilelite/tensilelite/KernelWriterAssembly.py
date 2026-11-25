@@ -100,7 +100,7 @@ from .Components.TDMFuse import tdmFusePaired, tdmGroupPartner, \
                                 tdmMemberIsLive, tdmPairOnEveryWave, tdmRidesEveryWave, \
                                 tdmStashedMembers, tdmWaveComponents, tdmWaveGuard, \
                                 tdmWavePartition, tdmWaveRangeText, tdmWaveResident
-from .Components.TDMStoreInst import hasEpilogueSideEffects, storeRemapVectorWidth, tdmStoreBlocks
+from .Components.TDMStoreInst import storeRemapVectorWidth, tdmStoreBlocks, tdmStoreSinglePath
 from .SolutionStructs import isPackedIndex
 from .AsmStoreState import StoreState, VectorDataTypes
 from .Activation import ActivationType
@@ -19357,14 +19357,10 @@ class KernelWriterAssembly(KernelWriter):
           else:
             tdmStoreBlock = vectorWidth in tdmVectorWidths
             tdmStoreLdsBase = self.vgprPool.checkOut(1, "tdmStoreLdsBase") if tdmStoreBlock else None
-            # The TDM block stores the whole tile like the NonEdge path: the widest block, which comes first. With
-            # per-element outputs beyond C and D it keeps the masks and the vector width of the edge block.
-            tdmWide = tdmStoreBlock and not hasEpilogueSideEffects(kernel["ProblemType"])
             currentInstLength, activationTypeStr = \
             self.globalWriteElementBatch(kernel, tPA, tPB, activation,
-                                          applyAlpha, beta, edge and not tdmWide, atomic,
-                                          vectorWidths[0] if tdmWide else vectorWidth,
-                                          elements[0] if tdmWide else element, activationLabelList,
+                                          applyAlpha, beta, edge, atomic,
+                                          vectorWidth, element, activationLabelList,
                                           tmpVgpr, cvtVgprStruct, activationSetPCStruct, activationEnumStrList,
                                           actPCMaxTempSgpr, isInsertActFunctionCallAddrCalc, toActModuleList,
                                           edgeModule, writeLabels[beta][factorDim][vectorWidth][globalWriteMode]["Then"], endLabel,
@@ -21397,12 +21393,15 @@ class KernelWriterAssembly(KernelWriter):
                  or kernel["_GlobalAccumulation"] == "MultipleBufferSingleKernel"))
         emittedGateModes = (True, False) if gateAppliesToFinalD else (False,)
         gateTrees = {}
+        # The buffer_store copy of the reduced tile keeps its cascade.
+        singlePath = globalWriteMode != "MBSKBuffer" and tdmStoreSinglePath(kernel, edge, atomic)
+        modeVectorWidths, modeElements = (vectorWidths[:1], elements[:1]) if singlePath else (vectorWidths, elements)
 
         for emitGateResidual in emittedGateModes:
           gateLabels = writeLabels[emitGateResidual]
           betaModules, currentInstLength = self.generateBetaModules(
-              kernel, tPA, tPB, activation, applyAlpha, modeBetas, edge, atomic,
-              vectorWidths, elements, activationLabelList, tmpVgpr, cvtVgprStruct,
+              kernel, tPA, tPB, activation, applyAlpha, modeBetas, edge and not singlePath, atomic,
+              modeVectorWidths, modeElements, activationLabelList, tmpVgpr, cvtVgprStruct,
               activationSetPCStruct, activationEnumStrList, actPCMaxTempSgpr,
               isInsertActFunctionCallAddrCalc, toActModuleList, gateLabels,
               endLabel, vectorDataTypes, factorDims, globalWriteMode,
