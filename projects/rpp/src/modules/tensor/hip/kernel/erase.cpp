@@ -119,7 +119,7 @@ RppStatus hip_exec_erase_tensor(T* srcPtr, RpptDescPtr srcDescPtr, T* dstPtr,
 
     int globalThreads_x = dstDescPtr->w;
     int globalThreads_y = dstDescPtr->h;
-    int globalThreads_z = handle.GetBatchSize();
+    int globalThreads_z = dstDescPtr->n;
 
     if (dstDescPtr->layout == RpptLayout::NHWC) {
         // if src layout is NHWC, copy src to dst

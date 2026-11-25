@@ -665,7 +665,7 @@ RppStatus hip_exec_gridmask_tensor(T* srcPtr, RpptDescPtr srcDescPtr, T* dstPtr,
 
     int globalThreads_x = (dstDescPtr->w + 7) >> 3;
     int globalThreads_y = dstDescPtr->h;
-    int globalThreads_z = handle.GetBatchSize();
+    int globalThreads_z = dstDescPtr->n;
 
     Rpp32f tileWidthInv = 1.0f / (Rpp32f)tileWidth;
     float2 rotateRatios =

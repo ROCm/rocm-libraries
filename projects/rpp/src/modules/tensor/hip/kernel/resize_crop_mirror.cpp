@@ -270,7 +270,7 @@ RppStatus hip_exec_resize_crop_mirror_tensor(T* srcPtr, RpptDescPtr srcDescPtr, 
 
         int globalThreads_x = (dstDescPtr->strides.hStride + 7) >> 3;
         int globalThreads_y = dstDescPtr->h;
-        int globalThreads_z = handle.GetBatchSize();
+        int globalThreads_z = dstDescPtr->n;
 
         if ((srcDescPtr->layout == RpptLayout::NHWC) && (dstDescPtr->layout == RpptLayout::NHWC)) {
             hipLaunchKernelGGL(

@@ -242,7 +242,7 @@ RppStatus hip_exec_gamma_correction_tensor(T* srcPtr, RpptDescPtr srcDescPtr, T*
         RPP_RETURN_IF_ERROR(hip_exec_roi_conversion_ltrb_to_xywh(roiTensorPtrSrc, handle));
 
     int globalThreads_x = (256 + 7) >> 3;
-    int globalThreads_y = handle.GetBatchSize();
+    int globalThreads_y = dstDescPtr->n;
     int globalThreads_z = 1;
 
     Rpp32f* gammaLUT = handle.GetInitHandle()->mem.mgpu.scratchBufferHip.floatmem;
@@ -256,7 +256,7 @@ RppStatus hip_exec_gamma_correction_tensor(T* srcPtr, RpptDescPtr srcDescPtr, T*
 
     globalThreads_x = (dstDescPtr->strides.hStride + 7) >> 3;
     globalThreads_y = dstDescPtr->h;
-    globalThreads_z = handle.GetBatchSize();
+    globalThreads_z = dstDescPtr->n;
 
     if ((srcDescPtr->layout == RpptLayout::NHWC) && (dstDescPtr->layout == RpptLayout::NHWC)) {
         hipLaunchKernelGGL(

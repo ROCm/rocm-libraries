@@ -2104,7 +2104,7 @@ __global__ void create_emboss_kernel_9x9(float* filterTensor, float* strengthTen
 
 static RppStatus hip_exec_create_emboss_kernel(Rpp32f* filterTensor, Rpp32s kernelSize,
                                                Rpp32f* strength, rpp::Handle& handle) {
-    int globalThreads_x = handle.GetBatchSize();
+    int globalThreads_x = dstDescPtr->n;
     int globalThreads_y = 1;
     int globalThreads_z = 1;
 
@@ -2157,7 +2157,7 @@ RppStatus hip_exec_emboss_tensor(T* srcPtr, RpptDescPtr srcDescPtr, T* dstPtr,
 
     int globalThreads_x = (dstDescPtr->strides.hStride + 7) >> 3;
     int globalThreads_y = dstDescPtr->h;
-    int globalThreads_z = handle.GetBatchSize();
+    int globalThreads_z = dstDescPtr->n;
 
     uint padLength = kernelSize / 2;
     uint padLengthTwice = padLength * 2;
