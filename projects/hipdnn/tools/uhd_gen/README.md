@@ -1355,7 +1355,7 @@ holds for an unslotted engine, and for each slot of a slotted one unless stated 
 | Sweep kernel columns | `kernel.<field>` | `kernel.<slot>.<field>`, plus `kernel` (the composite id) and `slot_reference` |
 | Catalog ranker | one `sort_kernel_catalog` | one per slot, metric-less |
 | Engine estimate | `predict_engine` | `predict_engine`, engine-level; its `trained_against` names every slot's KMD in `kmds` |
-| Descriptor `version` | `1.0` | `1.1` for the UED, KDPs and slot-aware UHDs (`uhd.schema.json` accepts `1.0`, `1.1` and `1.2`) |
+| Descriptor `version` | `1.0` (a UHD that records `codegen_revision`: `1.2`) | `1.1` for the UED, KDPs and slot-aware UHDs, `1.2` for a UHD that also records `codegen_revision` (`uhd.schema.json` accepts `1.0`, `1.1` and `1.2`) |
 
 **Training data.** `hipdnn_bench --sweep` times every composite candidate: the product of the
 slot catalogs. `slot_reference` names the slots whose training rows a row is, joined by `|`:
@@ -1575,7 +1575,7 @@ what `train` needs, and refuses a run that cannot meet it before it measures or 
   `tflops`.
 
 A slotted engine's L1 estimate may be `mlp_data` (its `trained_against` carries `kmds`, a `1.1`
-UHD); its slot rankers may not.
+UHD, or `1.2` with a `codegen_revision`); its slot rankers may not.
 
 ## Output
 

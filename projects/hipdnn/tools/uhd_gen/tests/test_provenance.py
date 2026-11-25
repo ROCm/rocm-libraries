@@ -15,6 +15,7 @@ from uhd_gen.provenance import (
     require_feature_semantics,
     shared_provenance,
     snapshot_provenance,
+    uhd_version_refusal,
     validate_provenance,
 )
 
@@ -600,15 +601,24 @@ def _patched(base, patch):
     ids=lambda row: row["name"],
 )
 def test_slot_provenance_is_refused_like_the_loader_refuses_it(row):
-    """The corpus the runtime parser and the packer also run: `trained_against` rows."""
-    trained = _patched(_SLOT_CORPUS["bases"][row["base"]], row["patch"])[
-        "trained_against"
-    ]
+    """The corpus the runtime parser and the packer also run: `trained_against` rows,
+    including the UHD version each member needs (`uhd_version_refusal`, which promote
+    applies)."""
+    document = _patched(_SLOT_CORPUS["bases"][row["base"]], row["patch"])
+    trained = document["trained_against"]
+
+    def check():
+        validated = validate_provenance(trained)
+        refusal = uhd_version_refusal(document["version"], trained)
+        if refusal is not None:
+            raise ProvenanceError(refusal)
+        return validated
+
     if not row.get("reject"):
-        assert validate_provenance(trained) == trained
+        assert check() == trained
         return
     with pytest.raises(ProvenanceError, match=row.get("uhd_gen")):
-        validate_provenance(trained)
+        check()
 
 
 def test_a_slot_ranker_may_omit_the_optional_slot_member():

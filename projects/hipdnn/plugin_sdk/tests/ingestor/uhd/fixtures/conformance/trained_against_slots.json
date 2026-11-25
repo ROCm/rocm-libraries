@@ -9,8 +9,8 @@
 {"name":"slot_provenance","base":"slot","patch":[]},
 {"name":"kmds_provenance","base":"kmds","patch":[]},
 {"name":"slot_provenance_in_1_2","base":"slot","patch":[{"op":"replace","path":"/version","value":"1.2"}]},
-{"name":"slot_in_1_0","base":"v10","patch":[{"op":"add","path":"/trained_against/slot","value":"dkdv"}],"reject":true,"skip":["uhd_gen"]},
-{"name":"kmds_in_1_0","base":"kmds","patch":[{"op":"replace","path":"/version","value":"1.0"}],"reject":true,"skip":["uhd_gen"]},
+{"name":"slot_in_1_0","base":"v10","patch":[{"op":"add","path":"/trained_against/slot","value":"dkdv"}],"reject":true},
+{"name":"kmds_in_1_0","base":"kmds","patch":[{"op":"replace","path":"/version","value":"1.0"}],"reject":true},
 {"name":"kmds_names_a_slot_twice","base":"kmds","patch":[{"op":"add","path":"/trained_against/kmds/-","value":{"slot":"prep","id":"31112233-4455-6677-8899-aabbccddeeff","revision":"1.0"}}],"reject":true,"skip":["schema"],"uhd_gen":"kmds names slot 'prep' twice"},
 {"name":"kmd_beside_kmds","base":"kmds","patch":[{"op":"add","path":"/trained_against/kmd","value":{"id":"30112233-4455-6677-8899-aabbccddeeff","revision":"1.0"}}],"reject":true,"uhd_gen":"names both kmd and kmds"},
 {"name":"slot_with_kmds","base":"kmds","patch":[{"op":"add","path":"/trained_against/slot","value":"dkdv"}],"reject":true,"uhd_gen":"slot requires kmd, and excludes kmds"},
@@ -37,7 +37,8 @@
 {"name":"codegen_revision_alone","base":"v12","patch":[{"op":"replace","path":"/trained_against","value":{"codegen_revision":"c"}}],"reject":true},
 {"name":"codegen_revision_is_empty","base":"v12","patch":[{"op":"add","path":"/trained_against/codegen_revision","value":""}],"reject":true},
 {"name":"codegen_revision_is_not_a_string","base":"v12","patch":[{"op":"add","path":"/trained_against/codegen_revision","value":3}],"reject":true},
-{"name":"codegen_revision_in_1_0","base":"v12","patch":[{"op":"replace","path":"/version","value":"1.0"},{"op":"add","path":"/trained_against/codegen_revision","value":"c"}],"reject":true,"skip":["uhd_gen"]},
-{"name":"codegen_revision_in_1_1","base":"v12","patch":[{"op":"replace","path":"/version","value":"1.1"},{"op":"add","path":"/trained_against/codegen_revision","value":"c"}],"reject":true,"skip":["uhd_gen"]}
+{"name":"codegen_revision_in_1_0","base":"v12","patch":[{"op":"replace","path":"/version","value":"1.0"},{"op":"add","path":"/trained_against/codegen_revision","value":"c"}],"reject":true},
+{"name":"codegen_revision_in_1_1","base":"v12","patch":[{"op":"replace","path":"/version","value":"1.1"},{"op":"add","path":"/trained_against/codegen_revision","value":"c"}],"reject":true},
+{"name":"kmds_with_codegen_revision_in_1_1","base":"kmds","patch":[{"op":"add","path":"/trained_against/codegen_revision","value":"c"}],"reject":true}
 ]
 }

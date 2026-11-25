@@ -27,9 +27,14 @@ _MAX_INT64 = 2**63 - 1
 #: `trained_against` member: the digest of the engine's code objects. The runtime binds a
 #: model whose value differs and warns; it is recorded, never a compatibility key.
 CODEGEN_REVISION = "codegen_revision"
-#: The first UHD file-format version each `trained_against` member may appear in: the RFC
-#: 0021 slot forms from 1.1, `codegen_revision` from 1.2. A member not listed is 1.0.
-UHD_MEMBER_VERSIONS = {"slot": "1.1", "kmds": "1.1", CODEGEN_REVISION: "1.2"}
+#: Each `trained_against` member a UHD version gates, in the order UhdParser.hpp checks them:
+#: the first file-format version it may appear in (the RFC 0021 slot forms from 1.1,
+#: `codegen_revision` from 1.2) and how a refusal names it. A member not listed is 1.0.
+UHD_MEMBER_RULES = {
+    "slot": ("1.1", "uses slot provenance ('slot' or 'kmds')"),
+    "kmds": ("1.1", "uses slot provenance ('slot' or 'kmds')"),
+    CODEGEN_REVISION: ("1.2", f"records {CODEGEN_REVISION}"),
+}
 
 logger = logging.getLogger(__name__)
 
@@ -219,10 +224,7 @@ def minimum_uhd_version(trained_against: object) -> str:
     """The lowest UHD file-format version that admits every member of `trained_against`."""
     members = set(trained_against) if isinstance(trained_against, dict) else set()
     return max(
-        (
-            UHD_MEMBER_VERSIONS[member]
-            for member in members & UHD_MEMBER_VERSIONS.keys()
-        ),
+        (UHD_MEMBER_RULES[member][0] for member in members & UHD_MEMBER_RULES.keys()),
         key=UHD_FILE_VERSIONS.index,
         default="1.0",
     )
@@ -231,16 +233,16 @@ def minimum_uhd_version(trained_against: object) -> str:
 def uhd_version_refusal(version: str, trained_against: object) -> str | None:
     """Why a UHD at `version` cannot carry `trained_against`, or None when it can.
 
-    The wording matches `UhdParser.hpp` and hkp_pack's validator."""
-    required = minimum_uhd_version(trained_against)
-    if UHD_FILE_VERSIONS.index(version) >= UHD_FILE_VERSIONS.index(required):
+    Names the first member, in UhdParser.hpp's order, that `version` is too early for, in
+    the parser's wording."""
+    if not isinstance(trained_against, dict):
         return None
-    if required == UHD_MEMBER_VERSIONS[CODEGEN_REVISION]:
-        return f"trained_against records {CODEGEN_REVISION}, which requires UHD version {required}"
-    return (
-        "trained_against uses slot provenance ('slot' or 'kmds'), which requires UHD "
-        f"version {required}"
-    )
+    for member, (first, refusal) in UHD_MEMBER_RULES.items():
+        if member in trained_against and UHD_FILE_VERSIONS.index(
+            version
+        ) < UHD_FILE_VERSIONS.index(first):
+            return f"trained_against {refusal}, which requires UHD version {first}"
+    return None
 
 
 def hard_provenance(snapshot):

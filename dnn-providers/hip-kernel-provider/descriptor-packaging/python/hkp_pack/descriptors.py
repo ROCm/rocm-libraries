@@ -932,10 +932,15 @@ def _string(value, where):
         raise HkpPackError(f"{where} must be a nonempty string")
 
 
-#: UHD file-format versions, and the first one each `trained_against` member may appear in
-#: (UhdParser.hpp; uhd_gen's provenance.py keeps the same table).
+#: UHD file-format versions, and each `trained_against` member a version gates, in the order
+#: UhdParser.hpp checks them: the first version it may appear in and how a refusal names it
+#: (uhd_gen's provenance.py keeps the same table).
 _UHD_VERSIONS = ("1.0", "1.1", "1.2")
-_UHD_MEMBER_VERSIONS = {"slot": "1.1", "kmds": "1.1", "codegen_revision": "1.2"}
+_UHD_MEMBER_RULES = {
+    "slot": ("1.1", "uses slot provenance ('slot' or 'kmds')"),
+    "kmds": ("1.1", "uses slot provenance ('slot' or 'kmds')"),
+    "codegen_revision": ("1.2", "records codegen_revision"),
+}
 
 
 def _validate_trained_against(value, where, version):
@@ -946,24 +951,13 @@ def _validate_trained_against(value, where, version):
     # RFC 0021 §9 adds the slot forms, valid from UHD 1.1: `slot` beside `kmd`, or
     # `kmds` in place of `kmd`. @p version is the UHD's own. Loader is authoritative:
     # UhdParser.hpp.
-    required = max(
-        (
-            _UHD_MEMBER_VERSIONS[key]
-            for key in _UHD_MEMBER_VERSIONS
-            if isinstance(value, dict) and key in value
-        ),
-        key=_UHD_VERSIONS.index,
-        default="1.0",
-    )
-    if _UHD_VERSIONS.index(version) < _UHD_VERSIONS.index(required):
-        if required == _UHD_MEMBER_VERSIONS["codegen_revision"]:
-            raise HkpPackError(
-                f"{where} records codegen_revision, which requires UHD version {required}"
-            )
-        raise HkpPackError(
-            f"{where} uses slot provenance ('slot' or 'kmds'), which requires "
-            f"UHD version {required}"
-        )
+    for member, (first, refusal) in _UHD_MEMBER_RULES.items():
+        if (
+            isinstance(value, dict)
+            and member in value
+            and _UHD_VERSIONS.index(version) < _UHD_VERSIONS.index(first)
+        ):
+            raise HkpPackError(f"{where} {refusal}, which requires UHD version {first}")
     _known_keys(
         value,
         (
