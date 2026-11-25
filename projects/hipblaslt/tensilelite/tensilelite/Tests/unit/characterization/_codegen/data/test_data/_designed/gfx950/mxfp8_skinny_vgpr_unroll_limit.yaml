@@ -1,0 +1,105 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+# DESIGNED gfx950 MXFP8 skinny tiles (MT352x128 and MT128x352), DU256, PGR=1.
+#
+# These tiles reach a subtile partition candidate whose VGPR tile assignment
+# does not repeat within the unroll limit; codegen must skip that candidate
+# rather than abort the whole job.
+#
+# CPU-only. No GPU, no compile, no hardware access.
+
+GlobalParameters:
+  SyncsPerBenchmark: 0
+  SleepPercent: 0
+  NumElementsToValidate: 0
+  NumWarmups: 0
+  NumBenchmarks: 1
+  EnqueuesPerSync: 1
+  DataInitTypeAlpha: 1
+  DataInitTypeBeta: 0
+  Device: 0
+  MXScaleFormat: 1
+  PrintSolutionRejectionReason: True
+
+BenchmarkProblems:
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: F8
+      DestDataType: B
+      ComputeDataType: S
+      HighPrecisionAccumulate: True
+      MXBlockA: 32
+      MXBlockB: 32
+      UseScaleAlphaVec: 1
+      UseScaleAB: Scalar
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      UseBias: 1
+      Activation: True
+      ActivationHPA: True
+      ActivationType: hipblaslt_all
+      Batched: True
+
+    - InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 128, 1, 1, 22, 2, 1, 4]  # MT352x128, MIWT [22,2]
+        - UseSubtileImpl: [True]
+        - WorkGroupMapping: [0]
+        - WorkGroupMappingXCC: [-1]
+        - PrefetchGlobalRead: [1]
+        - TileProcessingStrategy: ["StreamK"]
+        - WorkAssignment: ["StaticGrid"]
+        - DepthU: [256]
+        - DirectToLds: [0]
+        - UseSgprForGRO: [0]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [28672, 128, 1, 4096]
+        - BiasTypeArgs: [S]
+
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: F8
+      DestDataType: B
+      ComputeDataType: S
+      HighPrecisionAccumulate: True
+      MXBlockA: 32
+      MXBlockB: 32
+      UseScaleAlphaVec: 1
+      UseScaleAB: Scalar
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      UseBias: 1
+      Activation: True
+      ActivationHPA: True
+      ActivationType: hipblaslt_all
+      Batched: True
+
+    - InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 128, 1, 1, 2, 22, 4, 1]  # MT128x352, MIWT [2,22]
+        - UseSubtileImpl: [True]
+        - WorkGroupMapping: [0]
+        - WorkGroupMappingXCC: [-1]
+        - PrefetchGlobalRead: [1]
+        - TileProcessingStrategy: ["StreamK"]
+        - WorkAssignment: ["StaticGrid"]
+        - DepthU: [256]
+        - DirectToLds: [0]
+        - UseSgprForGRO: [0]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [128, 8192, 1, 28672]
+        - BiasTypeArgs: [S]
