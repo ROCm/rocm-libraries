@@ -574,7 +574,9 @@ void SetupPaths(fs::path& fdb_file_path,
         << "Db file does not exist" << kdb_file_path;
 }
 
-TEST(CPU_DBSync_NONE, KDBTargetID)
+using CPU_DBSyncTarget_NONE = testing::TestWithParam<int>;
+
+TEST_P(CPU_DBSyncTarget_NONE, KDBTargetID)
 {
 #if SKIP_KDB_TESTING
     GTEST_SKIP();
@@ -711,7 +713,7 @@ void CheckDynamicFDBEntry(size_t thread_index,
     }
 }
 
-TEST(CPU_DBSync_NONE, DISABLED_DynamicFDBSync)
+TEST_P(CPU_DBSyncTarget_NONE, DISABLED_DynamicFDBSync)
 {
     fs::path fdb_file_path, pdb_file_path, kdb_file_path;
     auto& handle = get_handle();
@@ -752,6 +754,8 @@ TEST(CPU_DBSync_NONE, DISABLED_DynamicFDBSync)
     ASSERT_TRUE(counter == fdb_data.size())
         << "Multi-threading error, work done is not equal to total work";
 }
+
+INSTANTIATE_TEST_SUITE_P(Quick, CPU_DBSyncTarget_NONE, testing::Values(0));
 
 /// Workspace corrections found by MIOPEN_DBSYNC_CLEAN, applied after the worker threads finish.
 /// Each RamDb update rewrites the whole file under an exclusive lock, so updating from every
@@ -1279,7 +1283,7 @@ StaticFDBSyncParamName(const testing::TestParamInfo<CPU_DBSync_NONE::ParamType>&
     return name;
 }
 
-INSTANTIATE_TEST_SUITE_P(Smoke,
+INSTANTIATE_TEST_SUITE_P(Quick,
                          CPU_DBSync_NONE,
                          testing::Values(std::make_pair("gfx908", 120),
                                          std::make_pair("gfx90a", 104),
