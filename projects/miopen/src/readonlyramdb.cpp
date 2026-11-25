@@ -33,10 +33,12 @@
 #include <miopen_data.hpp>
 #endif
 
+#include <algorithm>
+#include <cstring>
 #include <fstream>
 #include <mutex>
-#include <sstream>
 #include <map>
+#include <system_error>
 
 namespace miopen {
 
@@ -83,28 +85,29 @@ static auto Measure(const std::string& funcName, TFunc&& func)
                                    << " ms");
 }
 
-void ReadonlyRamDb::ParseAndLoadDb(std::istream& input_stream, bool warn_if_unreadable)
+void ReadonlyRamDb::ParseAndLoadDb()
 {
-    if(!input_stream)
-    {
-        const auto log_level = (warn_if_unreadable && !MIOPEN_DISABLE_SYSDB) ? LoggingLevel::Warning
-                                                                             : LoggingLevel::Info;
-        MIOPEN_LOG(log_level, "File is unreadable: " << db_path);
-        return;
-    }
+    const char* p   = buffer.data();
+    const char* end = p + buffer.size();
+    cache.reserve(std::count(p, end, '\n') + 1);
 
-    auto line   = std::string{};
     auto n_line = 0;
-
-    while(std::getline(input_stream, line))
+    while(p < end)
     {
         ++n_line;
-
+        const auto* eol = static_cast<const char*>(std::memchr(p, '\n', end - p));
+        if(eol == nullptr)
+            eol = end;
+        auto line = std::string_view(p, eol - p);
+        p         = eol == end ? end : eol + 1;
+        // Text-mode streams dropped the '\r' of CRLF files on Windows. Drop it on every platform.
+        if(!line.empty() && line.back() == '\r')
+            line.remove_suffix(1);
         if(line.empty())
             continue;
 
         const auto key_size = line.find('=');
-        const bool is_key   = (key_size != std::string::npos && key_size != 0);
+        const bool is_key   = (key_size != std::string_view::npos && key_size != 0);
 
         if(!is_key)
         {
@@ -112,10 +115,7 @@ void ReadonlyRamDb::ParseAndLoadDb(std::istream& input_stream, bool warn_if_unre
             continue;
         }
 
-        const auto key      = line.substr(0, key_size);
-        const auto contents = line.substr(key_size + 1);
-
-        cache.emplace(key, CacheItem{n_line, contents});
+        cache.try_emplace(line.substr(0, key_size), CacheItem{n_line, line.substr(key_size + 1)});
     }
 }
 
@@ -139,15 +139,35 @@ void ReadonlyRamDb::Prefetch(bool warn_if_unreadable)
             const auto& p = it_p->second;
             ptrdiff_t sz  = p.second - p.first;
             MIOPEN_LOG_I2("Loading In Memory file: " << filepath);
-            auto input_stream = std::stringstream(std::string(p.first, sz));
-            ParseAndLoadDb(input_stream, warn_if_unreadable);
+            buffer.assign(p.first, sz);
 #endif
         }
         else
         {
-            auto input_stream = std::ifstream{db_path};
-            ParseAndLoadDb(input_stream, warn_if_unreadable);
+            // One read of the whole file. Records are then indexed in place, without a copy per
+            // line. A path that can't be sized or opened (a directory, for instance) is as
+            // unreadable as a missing file.
+            std::error_code ec;
+            const auto size   = fs::file_size(db_path, ec);
+            auto input_stream = std::ifstream{};
+            if(!ec)
+                input_stream.open(db_path, std::ios::binary);
+            if(!ec && input_stream)
+            {
+                buffer.resize(size);
+                input_stream.read(buffer.data(), static_cast<std::streamsize>(size));
+            }
+            if(ec || !input_stream)
+            {
+                buffer.clear();
+                const auto log_level = (warn_if_unreadable && !MIOPEN_DISABLE_SYSDB)
+                                           ? LoggingLevel::Warning
+                                           : LoggingLevel::Info;
+                MIOPEN_LOG(log_level, "File is unreadable: " << db_path);
+                return;
+            }
         }
+        ParseAndLoadDb();
     });
 }
 } // namespace miopen

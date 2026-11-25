@@ -33,6 +33,7 @@
 #include <optional>
 #include <string>
 #include <sstream>
+#include <string_view>
 #include <unordered_map>
 
 namespace miopen {
@@ -62,7 +63,8 @@ public:
         MIOPEN_LOG_I2("Key match: " << problem);
         MIOPEN_LOG_I2("Contents found: " << it->second.content);
 
-        if(!record.ParseContents(it->second.content))
+        auto contents = std::istringstream{std::string{it->second.content}};
+        if(!record.ParseContents(contents))
         {
             MIOPEN_LOG_E("Error parsing payload under the key: "
                          << problem << " form file " << db_path << "#" << it->second.line);
@@ -89,26 +91,29 @@ public:
         return record->GetValues(id, value);
     }
 
+    /// Key and content are views into the buffer the instance owns. They stay valid as long as the
+    /// instance, which GetCached keeps until the process exits.
     struct CacheItem
     {
         int line;
-        std::string content;
+        std::string_view content;
     };
 
-    const std::unordered_map<std::string, CacheItem>& GetCacheMap() const { return cache; }
+    const std::unordered_map<std::string_view, CacheItem>& GetCacheMap() const { return cache; }
+
+    ReadonlyRamDb(const ReadonlyRamDb&)            = delete;
+    ReadonlyRamDb(ReadonlyRamDb&&)                 = delete;
+    ReadonlyRamDb& operator=(const ReadonlyRamDb&) = delete;
+    ReadonlyRamDb& operator=(ReadonlyRamDb&&)      = delete;
 
 private:
     DbKinds db_kind;
     fs::path db_path;
-    std::unordered_map<std::string, CacheItem> cache;
-
-    ReadonlyRamDb(const ReadonlyRamDb&)            = default;
-    ReadonlyRamDb(ReadonlyRamDb&&)                 = default;
-    ReadonlyRamDb& operator=(const ReadonlyRamDb&) = default;
-    ReadonlyRamDb& operator=(ReadonlyRamDb&&)      = default;
+    std::string buffer;
+    std::unordered_map<std::string_view, CacheItem> cache;
 
     void Prefetch(bool warn_if_unreadable);
-    void ParseAndLoadDb(std::istream& input_stream, bool warn_if_unreadable);
+    void ParseAndLoadDb();
 };
 
 } // namespace miopen
