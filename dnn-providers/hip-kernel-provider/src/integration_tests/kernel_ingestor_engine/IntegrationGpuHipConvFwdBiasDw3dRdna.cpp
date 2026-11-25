@@ -215,7 +215,8 @@ std::shared_ptr<Graph> buildGraph(const BiasCase& biasCase,
 }
 
 /// FLOAT: each output is a filter-taps sum plus the bias, accumulated in float on both sides
-/// but in a different order, so the budget is twice that many float epsilons.
+/// but in a different order, so the budget is that many float epsilons, as in the unfused
+/// engine's suite with one more term.
 float floatToleranceEpsilons(const BiasCase& biasCase)
 {
     int64_t taps = 1;
@@ -223,7 +224,7 @@ float floatToleranceEpsilons(const BiasCase& biasCase)
     {
         taps *= extent;
     }
-    return 2.0F * static_cast<float>(taps + 1);
+    return static_cast<float>(taps + 1);
 }
 
 /// HALF / BFLOAT16: the 16-bit tolerances of the depthwise 3-D engine's suite, plus what the

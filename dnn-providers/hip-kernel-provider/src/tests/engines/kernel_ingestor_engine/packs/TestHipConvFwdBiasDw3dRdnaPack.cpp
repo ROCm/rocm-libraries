@@ -83,10 +83,15 @@ struct GraphSpec
     std::optional<data_objects::DataType> biasDtype;
     /// The bias shape; (1, K, 1...) unless set.
     std::optional<std::vector<int64_t>> biasDims;
+    /// The bias strides; packed unless set.
+    std::optional<std::vector<int64_t>> biasStrides;
+    bool biasVirtual = false;
     bool biasFirst = false;
     data_objects::PointwiseMode mode = data_objects::PointwiseMode::ADD;
     /// The ADD reads x instead of the convolution output.
     bool addReadsX = false;
+    /// The ADD reads the convolution output twice.
+    bool addReadsConvTwice = false;
     /// The conv node alone: the unfused engine's graph.
     bool convOnly = false;
     /// A relu after the ADD: the conv + bias + activation graph.
@@ -160,7 +165,7 @@ flatbuffers::FlatBufferBuilder buildGraph(const GraphSpec& spec)
     const auto xStrides = packedStrides(xDims, spec.channelsLast);
     const auto wStrides = packedStrides(wDims, spec.channelsLast);
     const auto yStrides = packedStrides(yDims, spec.channelsLast);
-    const auto bStrides = packedStrides(bDims, spec.channelsLast);
+    const auto bStrides = spec.biasStrides.value_or(packedStrides(bDims, spec.channelsLast));
 
     flatbuffers::FlatBufferBuilder builder;
     std::vector<flatbuffers::Offset<data_objects::TensorAttributes>> tensors;
@@ -176,8 +181,14 @@ flatbuffers::FlatBufferBuilder buildGraph(const GraphSpec& spec)
         &yStrides,
         &yDims,
         spec.convOutVirtual && !spec.convOnly));
-    tensors.push_back(data_objects::CreateTensorAttributesDirect(
-        builder, B_UID, nullptr, spec.biasDtype.value_or(spec.dtype), &bStrides, &bDims));
+    tensors.push_back(
+        data_objects::CreateTensorAttributesDirect(builder,
+                                                   B_UID,
+                                                   nullptr,
+                                                   spec.biasDtype.value_or(spec.dtype),
+                                                   &bStrides,
+                                                   &bDims,
+                                                   spec.biasVirtual));
     tensors.push_back(data_objects::CreateTensorAttributesDirect(
         builder, Y_UID, nullptr, spec.dtype, &yStrides, &yDims, spec.reluAfter));
     tensors.push_back(data_objects::CreateTensorAttributesDirect(
@@ -203,8 +214,9 @@ flatbuffers::FlatBufferBuilder buildGraph(const GraphSpec& spec)
     if(!spec.convOnly)
     {
         const int64_t convSide = spec.addReadsX ? X_UID : CONV_OUT_UID;
-        auto add = spec.biasFirst ? pointwise(builder, spec.mode, B_UID, convSide, Y_UID)
-                                  : pointwise(builder, spec.mode, convSide, B_UID, Y_UID);
+        const int64_t biasSide = spec.addReadsConvTwice ? CONV_OUT_UID : B_UID;
+        auto add = spec.biasFirst ? pointwise(builder, spec.mode, biasSide, convSide, Y_UID)
+                                  : pointwise(builder, spec.mode, convSide, biasSide, Y_UID);
         nodes.push_back(
             data_objects::CreateNodeDirect(builder,
                                            "bias",
@@ -375,6 +387,18 @@ TEST(TestHipConvFwdBiasDw3dRdnaGraphMatcher, RefusesWhatItCannotServe)
     GraphSpec addReadsX;
     addReadsX.addReadsX = true;
     EXPECT_FALSE(matches(addReadsX)) << "an ADD that does not read the convolution output";
+
+    GraphSpec addReadsConvTwice;
+    addReadsConvTwice.addReadsConvTwice = true;
+    EXPECT_FALSE(matches(addReadsConvTwice)) << "an ADD of the convolution output to itself";
+
+    GraphSpec virtualBias;
+    virtualBias.biasVirtual = true;
+    EXPECT_FALSE(matches(virtualBias)) << "a virtual bias";
+
+    GraphSpec stridedBias;
+    stridedBias.biasStrides = std::vector<int64_t>{32, 2, 1, 1, 1};
+    EXPECT_FALSE(matches(stridedBias)) << "a bias whose channels are not contiguous";
 
     GraphSpec convOnly;
     convOnly.convOnly = true;
