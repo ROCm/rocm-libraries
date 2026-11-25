@@ -19,7 +19,12 @@ from rocke.core import native_engine
 from rocke.portable_ir.src import online
 from rocke.tests import item_time_limit
 from rocke.tests.ci_shard import ACTIVATION_FLAG
-from rocke.tests.ctest_listing import configure_installed_ctest, list_ctest_entries
+from rocke.tests.ctest_listing import (
+    GPU_RESOURCE_LOCK,
+    PROVIDER_CTEST_SUBDIR,
+    configure_installed_ctest,
+    list_ctest_entries,
+)
 from rocke.tests.engine_modules import EngineModulesMarker, read_engine_modules_marker
 from rocke.tests.lanes import SOURCE_TREE, skip_until
 from rocke.tests.provider_categories import provider_category_labels
@@ -172,9 +177,9 @@ def reference_archives_missing():
     ("provider_subdir", "gpu_references"),
     [
         ("", False),
-        ("hip_kernel_provider", False),
+        (PROVIDER_CTEST_SUBDIR, False),
         pytest.param(
-            "hip_kernel_provider",
+            PROVIDER_CTEST_SUBDIR,
             True,
             marks=pytest.mark.skipif(
                 reference_archives_missing(),
@@ -329,7 +334,7 @@ def resource_class_timeouts():
 @requires_cmake
 @pytest.mark.parametrize(
     "provider_subdir",
-    ["", "hip_kernel_provider"],
+    ["", PROVIDER_CTEST_SUBDIR],
     ids=["standalone", "provider"],
 )
 def test_every_entry_sets_a_resource_class_timeout(tmp_path, provider_subdir):
@@ -403,9 +408,9 @@ def entry_property(test: dict, name: str):
     ("provider_subdir", "gpu_references"),
     [
         ("", False),
-        ("hip_kernel_provider", False),
+        (PROVIDER_CTEST_SUBDIR, False),
         pytest.param(
-            "hip_kernel_provider",
+            PROVIDER_CTEST_SUBDIR,
             True,
             marks=pytest.mark.skipif(
                 reference_archives_missing(),
@@ -456,11 +461,11 @@ def test_every_gpu_pytest_entry_limits_each_test(
         ]
         assert item_time_limit.PLUGIN_NAME in plugins, (name, plugins)
         assert limit <= float(entry_property(test, "TIMEOUT")) / 2, name
-        assert entry_property(test, "RESOURCE_LOCK") == ["rocke_gpu"], name
+        assert entry_property(test, "RESOURCE_LOCK") == [GPU_RESOURCE_LOCK], name
 
 
 _NO_SHARED_ENGINE = "the build had ROCKE_BUILD_SHARED_ENGINE off"
-_PROVIDER = "-DROCKE_INSTALL_PROVIDER_CTEST_SUBDIR=hip_kernel_provider"
+_PROVIDER = f"-DROCKE_INSTALL_PROVIDER_CTEST_SUBDIR={PROVIDER_CTEST_SUBDIR}"
 _SHARED_ENGINE = "-DROCKE_BUILD_SHARED_ENGINE=ON"
 
 
@@ -580,7 +585,7 @@ def test_configure_stops_on_an_installed_entry_without_a_timeout(tmp_path):
 @requires_cmake
 @pytest.mark.parametrize(
     "provider_subdir",
-    ["", "hip_kernel_provider"],
+    ["", PROVIDER_CTEST_SUBDIR],
     ids=["standalone", "provider"],
 )
 @pytest.mark.parametrize(
@@ -916,7 +921,7 @@ _IGNORED_FILES = {"core": "core/test_intexpr.py", "other": "test_rocke.py"}
 @requires_cmake
 @pytest.mark.parametrize(
     ("provider_subdir", "ignored_files"),
-    [("", {}), ("hip_kernel_provider", {}), ("hip_kernel_provider", _IGNORED_FILES)],
+    [("", {}), (PROVIDER_CTEST_SUBDIR, {}), (PROVIDER_CTEST_SUBDIR, _IGNORED_FILES)],
     ids=["standalone", "provider", "provider-ignored-files"],
 )
 def test_installed_platform_pytest_parts_partition_the_suite(
@@ -1143,7 +1148,7 @@ def test_every_installed_entry_runs_in_a_ci_tier(tmp_path):
     full tiers from a category, and every quick entry also the standard tier,
     so moving an entry out of quick keeps it in standard CI."""
     _, ctest_dir = configure_installed_ctest(
-        tmp_path, "-DROCKE_INSTALL_PROVIDER_CTEST_SUBDIR=hip_kernel_provider"
+        tmp_path, f"-DROCKE_INSTALL_PROVIDER_CTEST_SUBDIR={PROVIDER_CTEST_SUBDIR}"
     )
     names = [test["name"] for test in list_ctest_entries(ctest_dir)]
     labels = provider_category_labels(names, tmp_path)

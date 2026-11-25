@@ -683,6 +683,7 @@ if(ROCKE_INSTALL_TESTS)
               PATTERN "test_gpu_references.py" EXCLUDE
               PATTERN "test_pending_lanes.py" EXCLUDE
               PATTERN "test_limbo_audit.py" EXCLUDE
+              PATTERN "test_gpu_work_placement.py" EXCLUDE
               PATTERN "test_no_torch.py" EXCLUDE
               PATTERN "no_torch_allowlist.txt" EXCLUDE)
 

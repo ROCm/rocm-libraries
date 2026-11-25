@@ -87,13 +87,15 @@ if(BUILD_TESTING)
     # The registration it audits is the same on every platform, so it runs
     # where the provider's install paths are POSIX paths only. The entry also
     # runs the tests of tools/limbo_audit.py, the per-test audit of CI runs
-    # against the same registry, which lives in the source tree only.
+    # against the same registry, which lives in the source tree only, and the
+    # check that no host entry runs a GPU test, which configures this tree too.
     if(NOT WIN32)
       add_test(
         NAME rocke_pending_lanes_check
         COMMAND "${Python3_EXECUTABLE}" -m pytest
                 "${CMAKE_CURRENT_SOURCE_DIR}/tools/test_pending_lanes.py"
-                "${CMAKE_CURRENT_SOURCE_DIR}/tools/test_limbo_audit.py" -q)
+                "${CMAKE_CURRENT_SOURCE_DIR}/tools/test_limbo_audit.py"
+                "${CMAKE_CURRENT_SOURCE_DIR}/tools/test_gpu_work_placement.py" -q)
       set_tests_properties(
         rocke_pending_lanes_check
         PROPERTIES

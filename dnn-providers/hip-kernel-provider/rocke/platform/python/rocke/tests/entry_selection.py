@@ -19,6 +19,7 @@ single tests and ``-k`` filters are not read.
 from __future__ import annotations
 
 import ast
+import itertools
 import posixpath
 import re
 from dataclasses import dataclass
@@ -36,9 +37,13 @@ __all__ = [
     "arguments_after_interpreter",
     "deselects_module",
     "install_rules",
+    "keeps_marked_tests",
+    "mark_names",
     "module_marks",
     "normalized_path",
+    "pytest_mark_name",
     "pytest_selection",
+    "runs_pytest",
     "selected_test_files",
 ]
 
@@ -180,6 +185,18 @@ class InstallLayout:
     def __init__(self, rules: list[InstallRule]) -> None:
         self.rules = rules
 
+    @classmethod
+    def of_build_tree(cls, build: Path) -> InstallLayout:
+        """The layout every ``cmake_install.cmake`` of the configured
+        ``build`` tree installs."""
+        return cls(
+            [
+                rule
+                for script in sorted(build.rglob("cmake_install.cmake"))
+                for rule in install_rules(script.read_text())
+            ]
+        )
+
     def source_of(self, path: str) -> Path | None:
         for rule in self.rules:
             source = rule.source_of(path)
@@ -243,6 +260,20 @@ def pytest_selection(arguments: list[str]) -> PytestSelection:
     return PytestSelection(tuple(paths), tuple(ignored), marker_expression)
 
 
+def pytest_mark_name(node: ast.AST) -> str | None:
+    """``name`` when ``node`` is the expression ``pytest.mark.<name>``, else
+    None."""
+    if (
+        isinstance(node, ast.Attribute)
+        and isinstance(node.value, ast.Attribute)
+        and node.value.attr == "mark"
+        and isinstance(node.value.value, ast.Name)
+        and node.value.value.id == "pytest"
+    ):
+        return node.attr
+    return None
+
+
 def module_marks(test_file: Path) -> set[str]:
     """The marker names a test module's ``pytestmark`` sets: each
     ``pytest.mark.<name>`` (called or not) it assigns, alone or in a list."""
@@ -264,15 +295,43 @@ def module_marks(test_file: Path) -> set[str]:
         for mark in value.elts if isinstance(value, (ast.List, ast.Tuple)) else [value]:
             if isinstance(mark, ast.Call):
                 mark = mark.func
-            if (
-                isinstance(mark, ast.Attribute)
-                and isinstance(mark.value, ast.Attribute)
-                and mark.value.attr == "mark"
-                and isinstance(mark.value.value, ast.Name)
-                and mark.value.value.id == "pytest"
-            ):
-                marks.add(mark.attr)
+            if (name := pytest_mark_name(mark)) is not None:
+                marks.add(name)
     return marks
+
+
+def mark_names(source: str) -> set[str]:
+    """Every marker name a test module's source writes as
+    ``pytest.mark.<name>``, wherever it attaches the mark."""
+    return {
+        name
+        for node in ast.walk(ast.parse(source))
+        if (name := pytest_mark_name(node)) is not None
+    }
+
+
+def keeps_marked_tests(
+    marker_expression: str | None, test_file: Path, mark: str
+) -> bool:
+    """Whether ``-m marker_expression`` can keep a test of the module that
+    carries ``mark``. Its ``pytestmark`` marks are on every test; any other
+    mark the module writes may or may not be on that test, so the answer is
+    True when some choice of them, with ``mark``, satisfies the expression."""
+    if marker_expression is None:
+        return True
+    always = module_marks(test_file) | {mark}
+    maybe = sorted(mark_names(test_file.read_text(encoding="utf-8")) - always)
+    expression = Expression.compile(marker_expression)
+    return any(
+        _satisfies(expression, always.union(chosen))
+        for count in range(len(maybe) + 1)
+        for chosen in itertools.combinations(maybe, count)
+    )
+
+
+def _satisfies(expression: Expression, marks: set[str]) -> bool:
+    """Whether a test carrying exactly ``marks`` satisfies ``expression``."""
+    return expression.evaluate(lambda name, **_: name in marks)
 
 
 def deselects_module(marker_expression: str | None, test_file: Path) -> bool:
@@ -285,15 +344,27 @@ def deselects_module(marker_expression: str | None, test_file: Path) -> bool:
     return not expression.evaluate(lambda name, **_: name in marks)
 
 
-def arguments_after_interpreter(command: list[str]) -> list[str]:
-    """A command's arguments past the interpreter and its ``-m pytest`` (or
-    ``-u``); a script entry keeps its script path."""
+def _past_interpreter_flags(command: list[str]) -> list[str]:
+    """A command's arguments past the interpreter and its ``-u``, ``-I`` and
+    ``-S`` flags."""
     arguments = command[1:]
     while arguments and arguments[0] in ("-u", "-I", "-S"):
         arguments = arguments[1:]
+    return arguments
+
+
+def arguments_after_interpreter(command: list[str]) -> list[str]:
+    """A command's arguments past the interpreter and its ``-m pytest`` (or
+    ``-u``); a script entry keeps its script path."""
+    arguments = _past_interpreter_flags(command)
     if arguments[:2] == ["-m", "pytest"]:
         arguments = arguments[2:]
     return arguments
+
+
+def runs_pytest(command: list[str]) -> bool:
+    """Whether a CTest command runs ``python [-u|-I|-S]... -m pytest``."""
+    return _past_interpreter_flags(command)[:2] == ["-m", "pytest"]
 
 
 def selected_test_files(
