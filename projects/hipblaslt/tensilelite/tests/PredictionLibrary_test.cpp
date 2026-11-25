@@ -516,3 +516,9 @@ TEST(PredictionLibraryTest, MlpGemmTypeOnlySearchKeepsTheQueriedType)
     lib.solutionmap = {{0, f32}, {1, f16}};
     expectGemmTypeOnlyFilter(lib, f32, f16);
 }
+
+// W4A16 Prediction libraries rank problems whose A is Int4.
+TEST(PredictionLibraryTest, Int4MapsToOrigamiInt4)
+{
+    EXPECT_EQ(datatypeToAnalyticalDatatype(rocisa::DataType::Int4), origami::data_type_t::Int4);
+}

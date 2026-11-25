@@ -59,6 +59,8 @@ double test_prob;
 double emulation_prob;
 // Probability of running unit tests
 double unittest_prob;
+// Probability of verifying that a transform left its input buffer alone
+double input_preservation_prob;
 // Modifier for probability of running tests with complex interleaved data
 double complex_interleaved_prob_factor;
 // Modifier for probability of running tests with real data
@@ -380,6 +382,11 @@ int main(int argc, char* argv[])
                    "ratio of 1D test count to 2D or 3D test count as test_prob approaches 0.")
         ->default_val(0.0)
         ->check(CLI::Range(0.0, 1.0));
+    app.add_option("--input_preservation_prob",
+                   input_preservation_prob,
+                   "Probability of checking that an out-of-place transform left its input intact")
+        ->default_val(0.1)
+        ->check(CLI::Range(0.0, 1.0));
     app.add_option("--real_prob",
                    real_prob_factor,
                    "Probability multiplier for running individual real/complex transforms")
@@ -410,7 +417,12 @@ int main(int argc, char* argv[])
         ->check(CLI::IsMember(
             {emulation_quick, emulation_smoke, emulation_regression, emulation_extended}))
         ->expected(1)
-        ->excludes("--test_prob", "--emulation_prob", "--unittest_prob", "--callback_prob", "--R")
+        ->excludes("--test_prob",
+                   "--emulation_prob",
+                   "--unittest_prob",
+                   "--callback_prob",
+                   "--input_preservation_prob",
+                   "--R")
         ->each([&](const std::string& emulationtype) {
             // Emulation test suites focus on well-established software paths.
 
@@ -419,6 +431,9 @@ int main(int argc, char* argv[])
 
             // Callbacks are not an emulation test target.
             callback_prob_factor = 0;
+
+            // Input preservation is not an emulation test target.
+            input_preservation_prob = 0;
 
             // Very large transforms are not an emulation test target.
             quick_tests_only = true;

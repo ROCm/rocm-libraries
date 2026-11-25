@@ -495,8 +495,8 @@ inline auto GenCasesFull()
     // the environment (eg. vm.max_map_count=1048576).  However it was determined that while
     // ASan is enabled, losing a small amount of edge case test coverage was acceptable.
     //
-    // The Smoke and Standard tiers use small fixed subsets that stay within ASan's
-    // virtual-memory-area limit; this ASan reduction only applies to the Full tier.
+    // The Quick and Standard tiers use small fixed subsets that stay within ASan's
+    // virtual-memory-area limit; this ASan reduction only applies to the Comprehensive tier.
     return testing::Combine(
         MakeNamedParameterValues<int>("batch_size", 2, 4),
         MakeNamedParameterValues<int>("num_layer", 2, 4),
@@ -529,8 +529,8 @@ inline auto GetCasesFull()
     return cases;
 }
 
-// Smoke (pre-commit) and Standard (per-CI) subsets. The full cross product
-// stays in GenCasesFull (used by the Full instantiation), so no coverage is lost.
+// Quick (pre-commit) and Standard (per-PR) subsets. The full cross product
+// stays in GenCasesFull (used by the Comprehensive instantiation), so no coverage is lost.
 // These are intentionally small fixed sets (the cases are cheap CPU checks).
 inline auto GenCasesSmoke()
 {
@@ -764,8 +764,8 @@ using CPU_WSuperTensor_NONE = WSuperTensorTest;
 
 TEST_P(CPU_WSuperTensor_NONE, WSuperTensorTest) { this->Run(); }
 
-// Tiered: Smoke (pre-commit) and Standard (per-CI) run subsets; Full
-// (comprehensive/nightly) runs the complete cross product so no coverage is lost.
-INSTANTIATE_TEST_SUITE_P(Smoke, CPU_WSuperTensor_NONE, GetCasesSmoke(), TestNameGenerator{});
+// Tiered: Quick (pre-commit) and Standard (per-PR) run subsets; Comprehensive
+// (nightly) runs the complete cross product so no coverage is lost.
+INSTANTIATE_TEST_SUITE_P(Quick, CPU_WSuperTensor_NONE, GetCasesSmoke(), TestNameGenerator{});
 INSTANTIATE_TEST_SUITE_P(Standard, CPU_WSuperTensor_NONE, GetCasesStandard(), TestNameGenerator{});
-INSTANTIATE_TEST_SUITE_P(Full, CPU_WSuperTensor_NONE, GetCasesFull(), TestNameGenerator{});
+INSTANTIATE_TEST_SUITE_P(Comprehensive, CPU_WSuperTensor_NONE, GetCasesFull(), TestNameGenerator{});

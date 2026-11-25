@@ -205,16 +205,38 @@ void printHelp(const char* program)
         << "                         0 (default) takes what the first pass finds. The\n"
         << "                         per-combination count is --per-combination.\n"
         << "  --per-combination <n>  First-pass problems per categorical combination\n"
-        << "                         (default 50)\n"
+        << "                         (default 50). Where a declaration weights the values\n"
+        << "                         of a parameter (sdpa_fwd, sdpa_bwd) it is the mean\n"
+        << "                         over the combinations of the unweighted parameters,\n"
+        << "                         split among the combinations by weight. A combination\n"
+        << "                         may get none (--count, the regime and form floors and\n"
+        << "                         the quotas reach it), but every declared value some\n"
+        << "                         combination can hold is drawn at least once, so the\n"
+        << "                         first pass exceeds that budget only when there are\n"
+        << "                         more such values than points\n"
+        << "  --anchor-scaling       Scale each combination's archetype and neighbourhood\n"
+        << "                         quotas with --count, to the mixture share of the larger\n"
+        << "                         of its first-pass count and its share of --count (by\n"
+        << "                         weight where values are weighted), so the declared\n"
+        << "                         mixture holds at a large --count instead of diluting\n"
+        << "                         into exploration. Default off (fixed quotas).\n"
+        << "                         manifest.json's anchored_share reports, with or\n"
+        << "                         without it, the share of the sweep's graphs in the\n"
+        << "                         corpus (after the --count cut) drawn from archetypes\n"
+        << "                         or their neighbourhood\n"
         << "  --kdp-root <path>      A *.kdp.json pack, or a directory of them (repeatable)\n"
         << "  --model-shapes <csv>   Recorded shapes as q.<parameter> columns (repeatable). A\n"
-        << "                         file with no q.form column reads every row as plain\n"
+        << "                         file with no column for a parameter the operation lists\n"
+        << "                         in model_shape_defaults (form, layout, scale, window)\n"
+        << "                         reads every row as the listed value (plain, bshd, ...)\n"
         << "  --model-share <f>      Share of the corpus per source; a share of 0\n"
         << "  --kernel-share <f>     excludes that source rather than deferring it\n"
         << "  --sweep-share <f>\n"
         << "  --keep q.<p>=<v>       Keep only problems with this facet. Repeatable:\n"
         << "                         different parameters conjoin, the same parameter\n"
-        << "                         repeated widens it (q.head_dim=64 q.head_dim=128)\n"
+        << "                         repeated widens it (q.head_dim=64 q.head_dim=128).\n"
+        << "                         A clause on an enum or bool narrows the categorical\n"
+        << "                         combinations before the search's bound applies\n"
         << "  --exclude-corpus <m>   manifest.json whose graphs must not recur (repeatable)\n"
         << "  --regime-quota <r>=<n> At least n problems in regime r, as manifest.csv\n"
         << "                         labels it (decode_short_mha); every operation.\n"
@@ -223,7 +245,8 @@ void printHelp(const char* program)
         << "                         --count below the quotas' sum does not trim them;\n"
         << "                         above it, the rest is cut as usual. 0 (default)\n"
         << "                         with quotas means the quotas alone. Exit 3 when a\n"
-        << "                         quota is short and not shown saturated.\n"
+        << "                         quota is short and the search did not show the regime\n"
+        << "                         holds no more (reported `not reached`).\n"
         << "  --regime-quotas <f>    The same as JSON: {\"<operation>\": {\"<regime>\": n}}\n"
         << "  --regime-floor <n>     At least n problems in every regime the declaration\n"
         << "                         can spell (a named quota overrides it). Searched as\n"
@@ -331,6 +354,10 @@ ParseOutcome parseArguments(const std::vector<std::string>& args, Options& optio
         else if(arg == "--per-combination")
         {
             reader.integer(options.exploration.pointsPerCombination, 1);
+        }
+        else if(arg == "--anchor-scaling")
+        {
+            options.exploration.anchorScaling = true;
         }
         else if(arg == "--kdp-root" || arg == "--kdp")
         {
@@ -532,6 +559,110 @@ nlohmann::json
             {"extremes", taken}};
 }
 
+/// Per operation, the declared value weights of each weighted categorical parameter, added to
+/// `report` under the operation's name.
+void addDeclaredWeights(nlohmann::json& report,
+                        const hipdnn_corpus_gen::OperationMetadata& metadata)
+{
+    for(const auto& parameter : metadata.parameters)
+    {
+        if(!parameter.weights.empty())
+        {
+            report[metadata.operation][parameter.name] = parameter.weights;
+        }
+    }
+}
+
+/// Adds @p report to the manifest's @p reports under @p key, unless no operation contributed.
+void addReport(nlohmann::json& reports, const char* key, const nlohmann::json& report)
+{
+    if(!report.empty())
+    {
+        reports[key] = report;
+    }
+}
+
+/// The mixture of the corpus delivered, after the cut: of the sweep graphs in @p chosen, how
+/// many the sweep of @p corpus drew from archetypes or their neighbourhood.
+nlohmann::json deliveredAnchoredShare(const std::vector<hipdnn_corpus_gen::PoolEntry>& chosen,
+                                      const hipdnn_corpus_gen::ProblemCorpus& corpus,
+                                      bool anchorScaling)
+{
+    std::set<std::string> anchoredKeys;
+    for(const auto& point : corpus.anchoredPoints())
+    {
+        anchoredKeys.insert(hipdnn_corpus_gen::detail::describe(point));
+    }
+    int64_t delivered = 0;
+    int64_t anchored = 0;
+    for(const auto& entry : chosen)
+    {
+        if(entry.source == "sweep")
+        {
+            ++delivered;
+            anchored += static_cast<int64_t>(
+                anchoredKeys.count(hipdnn_corpus_gen::detail::describe(entry.point)));
+        }
+    }
+    return nlohmann::json{
+        {"anchored", anchored},
+        {"delivered", delivered},
+        {"share",
+         delivered == 0 ? 0.0 : static_cast<double>(anchored) / static_cast<double>(delivered)},
+        {"anchor_scaling", anchorScaling}};
+}
+
+/// Weighs the sweep's pool of @p pools for the cut (weighGroups) and says on stderr which
+/// unweighted parameters the declared constraints keep from equal shares.
+void weighSweep(hipdnn_corpus_gen::SourcePools& pools,
+                const hipdnn_corpus_gen::OperationMetadata& metadata,
+                const std::string& operation)
+{
+    const auto sweep = pools.find("sweep");
+    if(sweep == pools.end())
+    {
+        return;
+    }
+    const auto weighing = hipdnn_corpus_gen::weighGroups(sweep->second, metadata);
+    if(weighing.uneven.empty())
+    {
+        return;
+    }
+    std::string names;
+    for(const auto& name : weighing.uneven)
+    {
+        names += (names.empty() ? "" : ", ") + name;
+    }
+    std::cerr << operation << ": the declared constraints tie the values of " << names
+              << " to others', so the --count cut keeps them as the first pass left them, "
+                 "not at equal shares\n";
+}
+
+/// One line per operation searched against an engine: its queries, and their cost per query.
+void printQueryTiming(const std::string& operation,
+                      const hipdnn_corpus_gen::OracleTiming& timing,
+                      std::chrono::steady_clock::time_point searchStart)
+{
+    if(timing.queries == 0)
+    {
+        return;
+    }
+    const auto wall
+        = std::chrono::duration<double>(std::chrono::steady_clock::now() - searchStart).count();
+    const auto perQuery
+        = [&timing](double seconds) { return seconds * 1e6 / static_cast<double>(timing.queries); };
+    std::fprintf(stderr,
+                 "%s: %lld engine queries in %.1f s of %.1f s -- per query: build %.0f us, "
+                 "load %.0f us, ask %.0f us\n",
+                 operation.c_str(),
+                 static_cast<long long>(timing.queries),
+                 timing.buildSeconds + timing.loadSeconds + timing.askSeconds,
+                 wall,
+                 perQuery(timing.buildSeconds),
+                 perQuery(timing.loadSeconds),
+                 perQuery(timing.askSeconds));
+}
+
 int runGenerator(const std::vector<std::string>& args)
 {
     Options options;
@@ -651,9 +782,13 @@ int runGenerator(const std::vector<std::string>& args)
             declaredParameters.push_back(parameter.name);
         }
     }
-    std::vector<hipdnn_corpus_gen::KeepClause> keep;
+    // Parsed into the exploration request: the clauses on an enum or bool parameter narrow the
+    // categorical combinations ahead of the search's bound, and every clause still filters
+    // points in the search's oracle.
+    const auto& keep = options.exploration.keep;
     std::string keepError;
-    if(!hipdnn_corpus_gen::parseKeepClauses(options.keep, declaredParameters, keep, keepError))
+    if(!hipdnn_corpus_gen::parseKeepClauses(
+           options.keep, declaredParameters, options.exploration.keep, keepError))
     {
         std::cerr << keepError << "\n";
         return 1;
@@ -1113,6 +1248,12 @@ int runGenerator(const std::vector<std::string>& args)
     std::vector<std::string> quotaShort;
     /// Per operation: each numeric parameter's served extent, and the extremes taken.
     nlohmann::json servedExtent = nlohmann::json::object();
+    nlohmann::json anchoredShare = nlohmann::json::object();
+    /// Per operation, the categorical combinations --keep leaves and how many the search's bound
+    /// left unexplored.
+    nlohmann::json categoricalCombinations = nlohmann::json::object();
+    /// Per operation, the declared value weights of each weighted categorical parameter.
+    nlohmann::json categoricalWeights = nlohmann::json::object();
     bool searchFoundMore = false;
     std::ofstream commands;
     std::filesystem::path root;
@@ -1147,6 +1288,7 @@ int runGenerator(const std::vector<std::string>& args)
         hipdnn_corpus_gen::MetadataOperationCorpus result;
         result.metadataPath = operationEntry.first;
         result.operation = metadata.operation;
+        addDeclaredWeights(categoricalWeights, metadata);
 
         // Every source passes the same engine test; a problem is served only if every named
         // engine serves it. The byte ceiling applies only to the search: pack and model shapes
@@ -1262,7 +1404,8 @@ int runGenerator(const std::vector<std::string>& args)
                                {"rows", report.rows},
                                {"other_operation", report.otherOperation},
                                {"unusable", report.unusable},
-                               {"first_problem", report.firstProblem}});
+                               {"first_problem", report.firstProblem},
+                               {"defaulted", report.defaulted}});
         }
 
         auto request = options.exploration;
@@ -1284,6 +1427,11 @@ int runGenerator(const std::vector<std::string>& args)
         {
             result.corpus
                 = hipdnn_corpus_gen::exploreProblemSpace(metadata, request, admits, alreadyPooled);
+            categoricalCombinations[result.operation] = nlohmann::json{
+                {"total", static_cast<int64_t>(result.corpus.categoricalTotal)},
+                {"constraint_empty",
+                 static_cast<int64_t>(result.corpus.categoricalConstraintEmpty)},
+                {"not_explored", static_cast<int64_t>(result.corpus.categoricalNotExplored)}};
         }
         else
         {
@@ -1291,25 +1439,7 @@ int runGenerator(const std::vector<std::string>& args)
         }
 
         const auto problems = result.corpus.problems();
-        if(timing.queries > 0)
-        {
-            const auto wall
-                = std::chrono::duration<double>(std::chrono::steady_clock::now() - searchStart)
-                      .count();
-            const auto perQuery = [&timing](double seconds) {
-                return seconds * 1e6 / static_cast<double>(timing.queries);
-            };
-            std::fprintf(stderr,
-                         "%s: %lld engine queries in %.1f s of %.1f s -- per query: build %.0f us, "
-                         "load %.0f us, ask %.0f us\n",
-                         result.operation.c_str(),
-                         static_cast<long long>(timing.queries),
-                         timing.buildSeconds + timing.loadSeconds + timing.askSeconds,
-                         wall,
-                         perQuery(timing.buildSeconds),
-                         perQuery(timing.loadSeconds),
-                         perQuery(timing.askSeconds));
-        }
+        printQueryTiming(result.operation, timing, searchStart);
         std::cerr << result.operation << ": " << problems.size() << " problems";
         if(result.buildFailures > 0)
         {
@@ -1450,6 +1580,10 @@ int runGenerator(const std::vector<std::string>& args)
                 {
                     stop = ", budget limit";
                 }
+                else if(static_cast<int64_t>(found.problems.size()) < asked - have)
+                {
+                    stop = ", not reached";
+                }
                 std::cerr << "  focus " << regime << ": " << have << " pooled, " << asked - have
                           << " wanted, " << found.problems.size() << " found (" << found.inRegime
                           << " of " << found.proposed << " proposals in the regime)" << stop
@@ -1503,6 +1637,12 @@ int runGenerator(const std::vector<std::string>& args)
             }
         }
 
+        // A cut keeps the declared weights: the sweep's pool is cut by each categorical
+        // combination's weight, not by what the first pass and the growth happened to leave.
+        // A declaration with no weights, and recorded shapes (the model and kernel pools), are
+        // cut in proportion to what they hold.
+        weighSweep(pools, metadata, result.operation);
+
         std::map<std::string, int64_t> dropped;
         // One entry per graph: two points a builder renders identically (one differing only in
         // a parameter the graph does not carry) are one problem, whatever their names.
@@ -1536,6 +1676,11 @@ int runGenerator(const std::vector<std::string>& args)
                                                       owed,
                                                       quotaOutcome,
                                                       reserved);
+        if(searched)
+        {
+            anchoredShare[result.operation]
+                = deliveredAnchoredShare(chosen, result.corpus, request.anchorScaling);
+        }
         if(quotasAlone)
         {
             // One graph can fill a regime's quota and a form's, so the quotas' sum overstates
@@ -1579,7 +1724,7 @@ int runGenerator(const std::vector<std::string>& args)
                                      + (focusSearched && search->second.searchCapped
                                             ? " (focused search stopped at its budget limit while "
                                               "still finding points; raise --budget)"
-                                            : " (not shown saturated)"));
+                                            : " (not reached)"));
             }
         }
 
@@ -1708,14 +1853,11 @@ int runGenerator(const std::vector<std::string>& args)
             manifest.reports["also_engines"] = options.alsoEngineNames;
         }
         manifest.reports["excluded"] = static_cast<int64_t>(heldOutIds.size());
-        if(!quotaReports.empty())
-        {
-            manifest.reports["regime_quota"] = quotaReports;
-        }
-        if(!servedExtent.empty())
-        {
-            manifest.reports["served_extent"] = servedExtent;
-        }
+        addReport(manifest.reports, "regime_quota", quotaReports);
+        addReport(manifest.reports, "served_extent", servedExtent);
+        addReport(manifest.reports, "anchored_share", anchoredShare);
+        addReport(manifest.reports, "categorical_combinations", categoricalCombinations);
+        addReport(manifest.reports, "categorical_weights", categoricalWeights);
         if(options.count > 0 && total < requested && !shortfall.empty())
         {
             manifest.reports["shortfall"] = shortfall;

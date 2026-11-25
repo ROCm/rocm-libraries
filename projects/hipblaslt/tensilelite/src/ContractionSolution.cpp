@@ -7347,30 +7347,26 @@ namespace TensileLite
                                   << " (<=0) for kernel '" << self.kernelName
                                   << "'; clamping to 1 for origami grid selection.\n";
                     }
-                    origami::config_t origami_config = {
-                        .mt = {static_cast<size_t>(self.sizeMapping.macroTile.x),
-                               static_cast<size_t>(self.sizeMapping.macroTile.y),
-                               static_cast<size_t>(self.sizeMapping.depthU)},
-                        .mi = {static_cast<size_t>(self.sizeMapping.matrixInstruction[0]),
-                               static_cast<size_t>(self.sizeMapping.matrixInstruction[1]),
-                               static_cast<size_t>(self.sizeMapping.matrixInstruction[2])},
-                        .occupancy = std::max(self.sizeMapping.CUOccupancy, static_cast<int>(1)),
-                        .workgroup_mapping         = self.sizeMapping.workGroupMapping,
-                        // The spatial-cluster schedule re-cuts this grid and checks its own
-                        // (unpadded) workspace requirement, so the per-WG tile check must not
-                        // turn the exact size it reports into a whole-tile grid.
-                        .workspace_size            = self.usesStreamKSpatialCluster()
-                                                         ? std::numeric_limits<size_t>::max()
-                                                         : problem.workspaceSize(),
-                        .workspace_size_per_elem_c = self.sizeMapping.isPersistentDataParallel()
-                                                         ? static_cast<size_t>(DataTypeInfo::Get(self.problemType.computeType).elementSize)
-                                                         : self.sizeMapping.workspaceSizePerElemC,
-                        // The existing grid predictor was calibrated with this model
-                        // for whole-tile launches. This adapter preserves its grid policy;
-                        // the DataParallel launch itself has no reduction strategy.
-                        .reduction_strategy = self.sizeMapping.isPersistentDataParallel()
-                                                  ? origami::reduction_t::tree : reductionStrat,
-                    };
+                    // The config Origami ranked this kernel with, and the launch's own workspace
+                    // and reduction.
+                    origami::config_t origami_config = makeOrigamiConfig(self);
+                    // The spatial-cluster schedule re-cuts this grid and checks its own
+                    // (unpadded) workspace requirement, so the per-WG tile check must not
+                    // turn the exact size it reports into a whole-tile grid.
+                    origami_config.workspace_size = self.usesStreamKSpatialCluster()
+                                                        ? std::numeric_limits<size_t>::max()
+                                                        : problem.workspaceSize();
+                    origami_config.workspace_size_per_elem_c
+                        = self.sizeMapping.isPersistentDataParallel()
+                              ? static_cast<size_t>(
+                                    DataTypeInfo::Get(self.problemType.computeType).elementSize)
+                              : self.sizeMapping.workspaceSizePerElemC;
+                    // The existing grid predictor was calibrated with this model
+                    // for whole-tile launches. This adapter preserves its grid policy;
+                    // the DataParallel launch itself has no reduction strategy.
+                    origami_config.reduction_strategy = self.sizeMapping.isPersistentDataParallel()
+                                                            ? origami::reduction_t::tree
+                                                            : reductionStrat;
 
                     TENSILE_ASSERT_EXC(hipAMDGPU->analyticalHardware != nullptr);
 
