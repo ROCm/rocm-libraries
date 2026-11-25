@@ -11,7 +11,11 @@
  * reduce_source() via rocke_build_unified_attention_reduce_scalar_new, and
  * configs 8-10 as the scalar split-3D segment kernel (8 segments; config 10 with
  * a sliding window) of the problem named in segment_source() via
- * rocke_build_unified_attention_3d_scalar_new. It lowers the returned KernelDef
+ * rocke_build_unified_attention_3d_scalar_new. Configs 11-15 are further scalar
+ * 2D kernels, 16-20 split-3D segment kernels and 21-22 split-3D reduces, each of
+ * its own problem with the segment count from own_segments(). Configs 23 and 24
+ * are the scalar 2D and split-3D segment kernels given an additive-bias problem,
+ * which both engines refuse. It lowers the returned KernelDef
  * via rocke_lower_kernel_to_llvm_ex (arch gfx950, flavor AUTO) and prints the .ll
  * to stdout so the two outputs can be byte-compared.
  */
@@ -29,6 +33,10 @@
 static int make_problem(int idx, rocke_unified_attention_problem_t* p)
 {
     *p = rocke_unified_attention_problem_default();
+    /* num_seqs is a runtime kernel param (not a build-time constant) in the
+     * scalar builders, so its value does not affect the emitted IR. Mirror the
+     * Python emitter's choice for clarity; a config may override it. */
+    p->num_seqs = 1;
     switch(idx)
     {
     case 0:
@@ -104,13 +112,156 @@ static int make_problem(int idx, rocke_unified_attention_problem_t* p)
         p->use_sinks = true;
         p->softcap = 50.0;
         break;
+    case 11:
+        p->head_size = 128;
+        p->block_size = 32;
+        p->dtype = "bf16";
+        p->num_query_heads = 32;
+        p->num_kv_heads = 8;
+        p->total_q = 64;
+        p->max_seqlen_q = 64;
+        p->max_seqlen_k = 1024;
+        p->use_fp8 = true;
+        break;
+    case 12:
+        p->head_size = 64;
+        p->block_size = 16;
+        p->dtype = "fp16";
+        p->num_query_heads = 16;
+        p->num_kv_heads = 4;
+        p->total_q = 256;
+        p->max_seqlen_q = 256;
+        p->max_seqlen_k = 512;
+        p->sliding_window = 64;
+        p->causal_top_left = true;
+        break;
+    case 13:
+        p->head_size = 128;
+        p->block_size = 32;
+        p->dtype = "bf16";
+        p->num_query_heads = 64;
+        p->num_kv_heads = 8;
+        p->total_q = 128;
+        p->max_seqlen_q = 128;
+        p->max_seqlen_k = 1024;
+        p->use_sinks = true;
+        p->right_bound = 5;
+        break;
+    case 14:
+        p->head_size = 64;
+        p->block_size = 64;
+        p->dtype = "bf16";
+        p->num_query_heads = 8;
+        p->num_kv_heads = 8;
+        p->total_q = 512;
+        p->max_seqlen_q = 512;
+        p->max_seqlen_k = 512;
+        p->softcap = 30.0;
+        p->right_bound = -1;
+        break;
+    case 15:
+        p->head_size = 256;
+        p->block_size = 16;
+        p->dtype = "fp16";
+        p->num_query_heads = 16;
+        p->num_kv_heads = 2;
+        p->total_q = 32;
+        p->max_seqlen_q = 32;
+        p->max_seqlen_k = 2048;
+        p->use_fp8 = true;
+        p->causal_top_left = true;
+        p->right_bound = 3;
+        break;
+    case 16:
+        p->head_size = 128;
+        p->block_size = 16;
+        p->dtype = "bf16";
+        p->num_query_heads = 32;
+        p->num_kv_heads = 8;
+        p->total_q = 4;
+        p->max_seqlen_q = 1;
+        p->max_seqlen_k = 4096;
+        p->num_seqs = 4;
+        break;
+    case 17:
+        p->head_size = 64;
+        p->block_size = 32;
+        p->dtype = "fp16";
+        p->num_query_heads = 16;
+        p->num_kv_heads = 16;
+        p->total_q = 8;
+        p->max_seqlen_q = 2;
+        p->max_seqlen_k = 8192;
+        p->sliding_window = 256;
+        p->num_seqs = 4;
+        break;
+    case 18:
+        p->head_size = 64;
+        p->block_size = 16;
+        p->dtype = "bf16";
+        p->num_query_heads = 64;
+        p->num_kv_heads = 8;
+        p->total_q = 4;
+        p->max_seqlen_q = 1;
+        p->max_seqlen_k = 4096;
+        p->sliding_window = 128;
+        p->causal_top_left = true;
+        p->num_seqs = 4;
+        break;
+    case 19:
+        p->head_size = 128;
+        p->block_size = 32;
+        p->dtype = "fp16";
+        p->num_query_heads = 32;
+        p->num_kv_heads = 4;
+        p->total_q = 16;
+        p->max_seqlen_q = 4;
+        p->max_seqlen_k = 4096;
+        p->use_sinks = true;
+        p->right_bound = -1;
+        p->num_seqs = 4;
+        break;
+    case 20:
+        p->head_size = 256;
+        p->block_size = 64;
+        p->dtype = "bf16";
+        p->num_query_heads = 16;
+        p->num_kv_heads = 2;
+        p->total_q = 2;
+        p->max_seqlen_q = 1;
+        p->max_seqlen_k = 8192;
+        p->right_bound = 7;
+        p->num_seqs = 2;
+        break;
+    case 21:
+        p->head_size = 128;
+        p->block_size = 16;
+        p->dtype = "bf16";
+        p->num_query_heads = 32;
+        p->num_kv_heads = 8;
+        p->total_q = 4;
+        p->max_seqlen_q = 1;
+        p->max_seqlen_k = 4096;
+        p->num_seqs = 4;
+        break;
+    case 22:
+        p->head_size = 64;
+        p->block_size = 32;
+        p->dtype = "fp16";
+        p->num_query_heads = 16;
+        p->num_kv_heads = 16;
+        p->total_q = 8;
+        p->max_seqlen_q = 2;
+        p->max_seqlen_k = 8192;
+        p->num_seqs = 4;
+        break;
+    case 23: /* config 2 + additive bias: the scalar kernels refuse it. */
+        make_problem(2, p);
+        p->use_additive_bias = true;
+        break;
     default:
         return -1;
     }
-    /* num_seqs is a runtime kernel param (not a build-time constant) in the
-     * scalar 2D builder, so its value does not affect the emitted IR. Mirror
-     * the Python emitter's choice for clarity. */
-    p->num_seqs = 1;
     return 0;
 }
 
@@ -142,6 +293,34 @@ static int segment_source(int idx)
         return 1;
     case 10:
         return 3;
+    case 24:
+        return 23;
+    default:
+        return -1;
+    }
+}
+
+/* Configs 16-20 are scalar split-3D segment kernels and 21-22 scalar split-3D
+ * reduces of their own problem; their segment count (mirrors the Python
+ * _SEGMENTS), or -1 for any other config. */
+static int own_segments(int idx)
+{
+    switch(idx)
+    {
+    case 16:
+        return 8;
+    case 17:
+        return 4;
+    case 18:
+        return 8;
+    case 19:
+        return 16;
+    case 20:
+        return 8;
+    case 21:
+        return 8;
+    case 22:
+        return 16;
     default:
         return -1;
     }
@@ -175,7 +354,16 @@ int main(int argc, char** argv)
 
     rocke_ir_builder_t b;
     rocke_kernel_def_t* kernel = NULL;
-    if(red_src >= 0)
+    int own_seg = own_segments(idx);
+    if(own_seg > 0 && idx >= 21)
+    {
+        kernel = rocke_build_unified_attention_reduce_scalar_new(&b, &p, own_seg, NULL);
+    }
+    else if(own_seg > 0)
+    {
+        kernel = rocke_build_unified_attention_3d_scalar_new(&b, &p, NULL, own_seg);
+    }
+    else if(red_src >= 0)
     {
         /* The _new entry names the kernel and initializes the builder. */
         kernel = rocke_build_unified_attention_reduce_scalar_new(&b, &p, NUM_SEGMENTS, NULL);
@@ -200,7 +388,7 @@ int main(int argc, char** argv)
     }
     if(!kernel)
     {
-        fprintf(stderr, "build failed for config %d (sticky err)\n", idx);
+        fprintf(stderr, "build failed for config %d: %s\n", idx, rocke_ir_builder_error(&b));
         return 1;
     }
 

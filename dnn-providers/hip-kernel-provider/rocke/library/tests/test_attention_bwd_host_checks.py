@@ -184,6 +184,78 @@ def test_thd_offsets():
         check_attn_bwd_lengths(mult, offsets_q=[0, 65 * q, 66 * q])
 
 
+def test_thd_offsets_per_side_multipliers():
+    """Token offsets with the hipDNN multipliers of each side (Q: 8 heads *
+    64, K / V: 2 * 64): each table is scaled by its own side's multiplier."""
+    q, kv = 512, 128
+    mults = {n: q for n in ("q", "o", "do", "dq")}
+    mults.update({n: kv for n in ("k", "v", "dk", "dv")})
+    req = _req(layout="thd", ragged_offset_multipliers=mults)
+    check_attn_bwd_lengths(req, offsets_q=[0, 100, 228], offsets_kv=[0, 96, 96],
+                           tokens_q=228, tokens_kv=96)  # fmt: skip
+    with pytest.raises(ValueError, match="offsets_q: sequence 1 spans 129"):
+        check_attn_bwd_lengths(req, offsets_q=[0, 100, 229])
+    with pytest.raises(ValueError, match="offsets_kv: sequence 0 spans 97"):
+        check_attn_bwd_lengths(req, offsets_kv=[0, 97, 98])
+    # a K multiplier that is not a whole number of tokens per offset unit
+    half = _req(layout="thd", ragged_offset_multipliers={"q": q, "k": kv // 2})
+    with _code("RAGGED_RANGE"):
+        check_attn_bwd_lengths(half, offsets_kv=[0, 3, 4])
+    check_attn_bwd_lengths(half, offsets_kv=[0, 4, 6])
+
+
+def test_thd_offsets_end_within_every_tensor_of_the_side():
+    """The end token of each table must lie inside every tensor of its side,
+    each against its own token count, not only the caller's ``tokens_*``."""
+    req = _req(layout="thd")
+    q, kv = 512, 128
+    offs_q, offs_kv = [0, 100 * q, 228 * q], [0, 96 * kv, 96 * kv]
+    good = _general_tensors(req, tokens=(228, 96))
+    check_attn_bwd_lengths(req, offsets_q=offs_q, offsets_kv=offs_kv, tensors=good)
+
+    def short(role, tokens):
+        t = dict(good)
+        m = good[role]
+        shape = (tokens, *m.shape[1:])
+        t[role] = _meta(shape, m.strides, m.dtype)
+        return t
+
+    for role, tokens, name in (
+        ("o", 227, "offsets_q"),
+        ("dq", 100, "offsets_q"),
+        ("v", 95, "offsets_kv"),
+        ("dk", 1, "offsets_kv"),
+        ("dv", 0, "offsets_kv"),
+    ):
+        with pytest.raises(ValueError, match=f"^RAGGED_RANGE: {name}: .*past {role}'s"):
+            check_attn_bwd_lengths(
+                req, offsets_q=offs_q, offsets_kv=offs_kv, tensors=short(role, tokens)
+            )
+    # a ragged lse is a Q-side tensor: rank 2 [T, H_q] and the batched [B, H_q, T, 1]
+    lse = good["lse"]
+    t = dict(good, lse=_meta((227, req.h_q), lse.strides, "fp32"))
+    with pytest.raises(ValueError, match="past lse's 227 tokens"):
+        check_attn_bwd_lengths(req, offsets_q=offs_q, tensors=t)
+    batched = _meta((req.b, req.h_q, 227, 1), (0, 227, 1, 1), "fp32")
+    with pytest.raises(ValueError, match="past lse's 227 tokens"):
+        check_attn_bwd_lengths(req, offsets_q=offs_q, tensors=dict(good, lse=batched))
+    # a packed lse (lse_ragged=False under THD) is read per Q token as well
+    packed = _req(layout="thd", lse_ragged=False, lse_dims=(256, 8, 1))
+    full = _meta((228, req.h_q, 1), (req.h_q, 1, 1), "fp32")
+    check_attn_bwd_lengths(packed, offsets_q=offs_q, tensors=dict(good, lse=full))
+    short_packed = _meta((227, req.h_q, 1), (req.h_q, 1, 1), "fp32")
+    with pytest.raises(ValueError, match="past lse's 227 tokens"):
+        check_attn_bwd_lengths(
+            packed, offsets_q=offs_q, tensors=dict(good, lse=short_packed)
+        )
+    # a side whose table is not given is not checked
+    check_attn_bwd_lengths(req, offsets_q=offs_q, tensors=short("v", 1))
+    with _code("MISSING_TENSOR"):
+        check_attn_bwd_lengths(
+            req, offsets_q=offs_q, tensors={k: v for k, v in good.items() if k != "do"}
+        )
+
+
 def test_tensor_meta_of_a_torch_like_tensor():
     class Storage:
         def nbytes(self):

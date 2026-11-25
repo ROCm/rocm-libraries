@@ -213,7 +213,8 @@ endif()
 # and K/V cache policy, the scalar fallback's cache key and block-table stride
 # kernarg, the unified attention running-max carry and keyless guards on the
 # emitted IR, the tiled 2D LSE store on the emitted IR, the
-# gfx950 tiled-2D K reads from LDS on the emitted IR, the
+# gfx950 tiled-2D K reads from LDS on the emitted IR, the gfx950 additive-bias
+# route and cohort-knob pins, the
 # gfx942 cfvst V loader's i64 K/V addressing on the emitted IR, the
 # LDS alignment claims of the backward kernel with the slices dK / dV sink, the
 # backward/gfx1250 MMA accumulator-input versus result-role regressions, the
@@ -223,14 +224,17 @@ endif()
 # fmha_mfma free-stride ABI and layout contracts, the 2D/3D mask_type spec
 # fields, the gfx942 2D head counts and batch being IR-neutral at a fixed GQA
 # ratio, the 3D segment+reduce module's pairing, the reduce's LDS segment
-# bound against the compiled code object, the tiled C++ entries' head-count
+# bound against the compiled code object, run_all.py's forwarding of the
+# installed-asset --rocke-require-* flags, the tiled C++ entries' head-count
 # and arch refusals, the dense segment-combine launch ABI, the drift guard
 # that pins the shared dense spec's C++ mirror to the Python, the
 # oracle-free uniform-probability checker and subject contracts, the gfx942
 # dense golden IR hashes (pure text lowering, a few seconds), the dense
 # packed-offset host checks (test_attention_dense_varlen_keys.py), the gfx950
-# dense varlen K/V buffer bound on the emitted IR, and the backward-test memo
-# bound in tests/conftest.py.
+# dense varlen K/V buffer bound on the emitted IR, the tiled-2D spec validators'
+# refusals (their engine-comparison cases skip here, where rocke_engine is not
+# built), the gfx942 sliced-K ring's slice width and refusals
+# (test_attn_k_slice_hd.py), and the backward-test memo bound in tests/conftest.py.
 # File-list style (same pattern as conv_pytest) so PYTHONPATH resolves rocke/
 # correctly from the installed tree.
 set(_ROCKE_LIBRARY_ATTENTION_CPU_TEST_RELPATHS
@@ -255,18 +259,22 @@ set(_ROCKE_LIBRARY_ATTENTION_CPU_TEST_RELPATHS
     "tests/library/tests/test_attention_tiled_2d_mask_type.py"
     "tests/library/tests/test_attention_tiled_2d_head_counts_gfx942.py"
     "tests/library/tests/test_attn_tiled_2d_gfx950_k_lds_read.py"
+    "tests/library/tests/test_attn_k_slice_hd.py"
     "tests/library/tests/test_attention_tiled_3d_decode_split.py"
     "tests/library/tests/test_attention_3d_workspace_i32_guard.py"
     "tests/library/tests/test_attention_tiled_3d_kv_cache_policy.py"
     "tests/library/tests/test_attention_tiled_launch_signature.py"
     "tests/library/tests/test_attention_tiled_cpp_entry_guards.py"
+    "tests/library/tests/test_attention_binding_spec_fields.py"
     "tests/library/tests/test_attention_dense_kv_split_combine_abi.py"
     "tests/library/tests/test_attention_tiled_3d_mask_type.py"
     "tests/library/tests/test_attention_tiled_3d_module.py"
     "tests/library/tests/test_attention_tiled_3d_module_gfx942.py"
     "tests/library/tests/test_attention_tiled_3d_reduce_lds.py"
+    "tests/library/tests/test_run_all_asset_require_flags.py"
     "tests/library/tests/test_attention_unified_masked_tile_ir.py"
     "tests/library/tests/test_attention_unified_2d_lse_ir.py"
+    "tests/library/tests/test_attention_additive_bias_routes.py"
     "tests/library/tests/test_gfx942_cfvst_i64_kv_addr.py"
     "tests/library/tests/test_d256_gfx942_fast_routing.py"
     "tests/library/tests/test_gfx1250_tiled_3d_bounds.py"
@@ -275,6 +283,8 @@ set(_ROCKE_LIBRARY_ATTENTION_CPU_TEST_RELPATHS
     "tests/library/tests/test_fmha_mfma_free_stride.py"
     "tests/library/tests/test_sdpa_free_stride_layouts.py"
     "tests/library/tests/test_bwd_memo_bound.py"
+    "tests/library/tests/test_attention_bwd_dq_refusal_rows.py"
+    "tests/library/tests/test_attention_bwd_layout_spill_rows.py"
     "tests/library/tests/oracle_free/test_contracts.py"
     "tests/library/tests/oracle_free/test_permutation_contracts.py"
     "tests/library/tests/test_attention_dense_gfx942.py"
@@ -291,12 +301,25 @@ foreach(_t ${_ROCKE_LIBRARY_ATTENTION_CPU_TEST_RELPATHS})
   string(APPEND _ROCKE_LIBRARY_ATTENTION_CPU_TESTS
          " \"${ROCKE_TEST_CTEST_REL}${_t}\"")
 endforeach()
+# The rocKE umbrella sets the requirement when it stages the provider's pack
+# headers (tests/hkp_packs); standalone platform builds leave it disabled.
+if(ROCKE_REQUIRE_INSTALLED_HKP_PACK_HEADERS)
+  string(APPEND _ROCKE_LIBRARY_ATTENTION_CPU_TESTS " --rocke-require-hkp-pack-headers")
+endif()
+# test_attention_tiled_3d_reduce_lds.py compiles the reduce through comgr and
+# reads its LDS size with llvm-objdump, so the entry takes the compiler tool
+# discovery list; it also reads the requirement list (TESTING.md §5.1.4), so a
+# missing llvm-objdump fails the entry instead of silently skipping those cases.
 string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
+       "set(_rocke_library_attention_cpu_pytest_environment \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\")\n"
+       "list(APPEND _rocke_library_attention_cpu_pytest_environment\n"
+       "     \${_rocke_compiler_tool_environment}\n"
+       "     \${_rocke_compiler_requirement_environment})\n"
        "add_test(rocke_library_attention_cpu_pytest ${_ROCKE_INSTALLED_PYTEST}${_ROCKE_LIBRARY_ATTENTION_CPU_TESTS} -v -rs --timeout=30)\n")
 string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
        "set_tests_properties(rocke_library_attention_cpu_pytest PROPERTIES\n"
        "  LABELS \"ckc\\;python\\;attention\\;host\\;quick\"\n"
-       "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\"\n"
+       "  ENVIRONMENT \"\${_rocke_library_attention_cpu_pytest_environment}\"\n"
        "  TIMEOUT 180)\n")
 
 # The pure runner policy and the real subprocess/process-tree contracts run as
@@ -332,6 +355,27 @@ string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
        "  LABELS \"ckc\\;python\\;attention\\;host\\;standard\"\n"
        "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\"\n"
        "  TIMEOUT 900)\n")
+
+# Attention backward hipDNN lowering and plan tests (no GPU): the graph lowering and
+# verdicts hipkernel:AttentionGeneralBwd's C++ mirrors, its shipped catalog, the
+# backward plan and the host-side length checks.
+set(_ROCKE_LIBRARY_ATTENTION_BWD_HIPDNN_TEST_RELPATHS
+    "tests/library/tests/test_attention_bwd_hipdnn.py"
+    "tests/library/tests/test_attention_bwd_hipdnn_catalog.py"
+    "tests/library/tests/test_attention_bwd_plan.py"
+    "tests/library/tests/test_attention_bwd_host_checks.py")
+set(_ROCKE_LIBRARY_ATTENTION_BWD_HIPDNN_TESTS "")
+foreach(_t ${_ROCKE_LIBRARY_ATTENTION_BWD_HIPDNN_TEST_RELPATHS})
+  string(APPEND _ROCKE_LIBRARY_ATTENTION_BWD_HIPDNN_TESTS
+         " \"${ROCKE_TEST_CTEST_REL}${_t}\"")
+endforeach()
+string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
+       "add_test(rocke_library_attention_bwd_hipdnn_pytest ${_ROCKE_INSTALLED_PYTEST}${_ROCKE_LIBRARY_ATTENTION_BWD_HIPDNN_TESTS} -v -rs --timeout=60)\n")
+string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
+       "set_tests_properties(rocke_library_attention_bwd_hipdnn_pytest PROPERTIES\n"
+       "  LABELS \"ckc\\;python\\;attention\\;host\\;quick\"\n"
+       "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\"\n"
+       "  TIMEOUT 180)\n")
 
 # Exhaustive counted-sync gates are intentionally outside normal pytest
 # discovery. The structural gate is host-only; the compiler gate additionally
@@ -563,16 +607,19 @@ string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
 
 # Additive-bias numeric lane (the gfx950 unified and dense kernels, the gfx942 dense
 # kernel). Its own entry (selected by name, like the one above) so its runtime does
-# not eat into that entry's timeout. All files drive the torch runners and skip
-# without torch, each also off its own arch; the dense kernels' torch-free subsets
-# (test_attention_dense_bias_gfx950_gpu.py and test_attention_dense_bias_gfx942_gpu.py)
-# run in rocke_library_gpu_pytest below.
+# not eat into that entry's timeout. The torch files skip without torch, each also
+# off its own arch; the device_numeric file runs one unified case per path without
+# torch. The dense kernels' torch-free subsets (test_attention_dense_bias_gfx950_gpu.py
+# and test_attention_dense_bias_gfx942_gpu.py) run in rocke_library_gpu_pytest below.
+# Without a GPU of the files' archs every gpu-marked case skips; report the entry as
+# skipped (77, below) rather than Passed on the host-only checks alone.
 string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
-       "add_test(rocke_library_attention_bias_gpu_pytest ${_ROCKE_INSTALLED_PYTEST} \"${ROCKE_TEST_CTEST_REL}tests/library/tests/test_attention_additive_bias_gfx950_numeric.py\" \"${ROCKE_TEST_CTEST_REL}tests/library/tests/test_attention_dense_bias_gfx950_numeric.py\" \"${ROCKE_TEST_CTEST_REL}tests/library/tests/test_attention_dense_bias_gfx942_numeric.py\" -v -rs)\n")
+       "add_test(rocke_library_attention_bias_gpu_pytest ${_ROCKE_INSTALLED_PYTEST} \"${ROCKE_TEST_CTEST_REL}tests/library/tests/test_attention_additive_bias_gfx950_numeric.py\" \"${ROCKE_TEST_CTEST_REL}tests/library/tests/test_attention_additive_bias_gfx950_device_numeric.py\" \"${ROCKE_TEST_CTEST_REL}tests/library/tests/test_attention_dense_bias_gfx950_numeric.py\" \"${ROCKE_TEST_CTEST_REL}tests/library/tests/test_attention_dense_bias_gfx942_numeric.py\" -v -rs --rocke-exit-77-if-gpu-skipped)\n")
 string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
        "set_tests_properties(rocke_library_attention_bias_gpu_pytest PROPERTIES\n"
        "  LABELS \"ckc\\;python\\;attention\\;gpu\"\n"
        "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\"\n"
+       "  SKIP_RETURN_CODE 77\n"
        "  TIMEOUT 1200)\n")
 
 # Library GPU numeric suites: convolution, attention, KDA, and GDN. The gfx950
@@ -631,6 +678,7 @@ set(_ROCKE_LIBRARY_GPU_TEST_RELPATHS
     "tests/library/tests/test_gfx942_cfvst_i64_kv_addr_numeric.py"
     "tests/library/tests/test_gfx942_4wgqa_bounds_numeric.py"
     "tests/library/tests/test_attention_gfx942_kv_pages.py"
+    "tests/library/tests/test_attention_kv_tail_numeric.py"
     "tests/library/tests/test_attention_tiled_runtime_shape_numeric.py"
     "tests/library/tests/test_attention_tiled_3d_kv_lds_swizzle.py"
     "tests/library/tests/test_attention_tiled_3d_running_max.py"

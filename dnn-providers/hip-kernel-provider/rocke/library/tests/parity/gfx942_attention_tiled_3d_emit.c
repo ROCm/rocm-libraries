@@ -7,15 +7,14 @@
  * rocke_unified_attention_3d_tiled_spec_t identically to the Python emitter
  * gfx942_attention_tiled_3d_emit.py, and emits BOTH kernels, segment first:
  *   1. the segment kernel via
- *      rocke_build_unified_attention_3d_tiled_gfx942_lower_to_llvm (paged K/V)
- *      or rocke_build_unified_attention_3d_tiled_strided_gfx942 (configs
- *      23-32: strided K/V, the Python kv_layout="strided"), then
+ *      rocke_build_unified_attention_3d_tiled_gfx942_lower_to_llvm (configs
+ *      23-33 set kv_layout = "strided", the rest page K/V), then
  *   2. the reduce kernel via
  *      rocke_build_unified_attention_reduce_tiled_gfx942_lower_to_llvm, with a
  *      rocke_unified_attention_reduce_tiled_spec_t derived from the same config
  *      (head_size / num_query_heads / num_kv_heads / dtype / num_segments /
- *      waves_per_eu, as the Python reduce_spec_for; configs 20-21 also
- *      set emit_lse, as _REDUCE_LSE does)
+ *      waves_per_eu, as the Python reduce_spec_for; configs 20-21 and 35-36
+ *      also set emit_lse, as _REDUCE_LSE does)
  * (arch gfx942, flavor AUTO), printing the .ll to stdout for byte comparison.
  */
 #include <stdio.h>
@@ -55,14 +54,13 @@ static void strided_decode(rocke_unified_attention_3d_tiled_spec_t* s,
     s->tile_size_override = tile > 0 ? tile : 0;
     s->use_decode_grid = true;
     s->kv_cache_policy = "stream";
+    s->kv_layout = "strided";
 }
 
-/* Fill `s` for config index `idx` and set `*strided` when its K/V is strided
- * (non-paged). Returns 0 on success, -1 on unknown idx. */
-static int make_spec(int idx, rocke_unified_attention_3d_tiled_spec_t* s, bool* strided)
+/* Fill `s` for config index `idx`. Returns 0 on success, -1 on unknown idx. */
+static int make_spec(int idx, rocke_unified_attention_3d_tiled_spec_t* s)
 {
     *s = rocke_unified_attention_3d_tiled_spec_default();
-    *strided = false;
     switch(idx)
     {
     case 0:
@@ -440,18 +438,111 @@ static int make_spec(int idx, rocke_unified_attention_3d_tiled_spec_t* s, bool* 
         s->has_waves_per_eu = true;
         s->waves_per_eu = 2;
         break;
+
+    case 33:
+        /* Decode K/V streamed by the async copies from strided (non-paged) K/V. */
+        s->head_size = 128;
+        s->block_size = 16;
+        s->num_query_heads = 32;
+        s->num_kv_heads = 8;
+        s->dtype = "bf16";
+        s->num_segments = 16;
+        s->use_sinks = true;
+        s->sliding_window = 0;
+        s->has_softcap = false;
+        s->kv_storage_dtype = NULL;
+        s->num_seqs = 4;
+        s->use_decode_grid = true;
+        s->kv_cache_policy = "stream";
+        s->kv_layout = "strided";
+        break;
+
+    case 34:
+        /* Decode K/V with globally cached copies through the 1-DWORD async loader. */
+        s->head_size = 128;
+        s->block_size = 32;
+        s->num_query_heads = 32;
+        s->num_kv_heads = 8;
+        s->dtype = "fp16";
+        s->num_segments = 16;
+        s->use_sinks = true;
+        s->sliding_window = 0;
+        s->has_softcap = false;
+        s->kv_storage_dtype = NULL;
+        s->use_decode_grid = true;
+        s->kv_cache_policy = "global";
+        break;
+
+    case 35:
+        /* Reduce with the LSE output, decode grid. */
+        s->head_size = 128;
+        s->block_size = 16;
+        s->num_query_heads = 32;
+        s->num_kv_heads = 8;
+        s->dtype = "bf16";
+        s->num_segments = 16;
+        s->use_sinks = false;
+        s->sliding_window = 0;
+        s->has_softcap = false;
+        s->kv_storage_dtype = NULL;
+        s->use_decode_grid = true;
+        break;
+
+    case 36:
+        /* Reduce with the LSE output. */
+        s->head_size = 64;
+        s->block_size = 16;
+        s->num_query_heads = 8;
+        s->num_kv_heads = 8;
+        s->dtype = "fp16";
+        s->num_segments = 8;
+        s->use_sinks = false;
+        s->sliding_window = 0;
+        s->has_softcap = false;
+        s->kv_storage_dtype = NULL;
+        break;
+
+    case 37:
+        /* QQ bias alone (no config here enabled it before). Pins the gfx950
+         * twin's mask build order fix (bind cmp_ge/cmp_lt before land, since
+         * C's argument evaluation order is unspecified), mirrored into this
+         * file's 3D compute without a parity config until now. */
+        s->head_size = 64;
+        s->block_size = 16;
+        s->num_query_heads = 16;
+        s->num_kv_heads = 4;
+        s->dtype = "fp16";
+        s->num_segments = 8;
+        s->use_sinks = false;
+        s->sliding_window = 0;
+        s->has_softcap = false;
+        s->use_qq_bias = true;
+        s->kv_storage_dtype = NULL;
+        break;
+    case 38:
+        /* Additive bias on gfx942; both engines reject it (BOTH_REJECTED). */
+        s->head_size = 64;
+        s->block_size = 16;
+        s->num_query_heads = 16;
+        s->num_kv_heads = 4;
+        s->dtype = "fp16";
+        s->num_segments = 8;
+        s->use_sinks = false;
+        s->sliding_window = 0;
+        s->has_softcap = false;
+        s->use_additive_bias = true;
+        s->kv_storage_dtype = NULL;
+        break;
     default:
         return -1;
     }
-    if(idx >= 23)
-        *strided = true;
     return 0;
 }
 
 /* Derive the reduce spec from the segment spec, exactly as the Python
  * reduce_spec_for (head_size / num_query_heads / num_kv_heads / dtype /
- * num_segments / waves_per_eu); configs 20-21 also set emit_lse, as
- * _REDUCE_LSE does. */
+ * num_segments / waves_per_eu); configs 20-21 and 35-36 also set emit_lse,
+ * as _REDUCE_LSE does. */
 static void make_reduce_spec(int idx,
                              const rocke_unified_attention_3d_tiled_spec_t* s,
                              rocke_unified_attention_reduce_tiled_spec_t* r)
@@ -464,15 +555,14 @@ static void make_reduce_spec(int idx,
     r->num_segments = s->num_segments;
     r->has_waves_per_eu = s->has_waves_per_eu;
     r->waves_per_eu = s->waves_per_eu;
-    r->emit_lse = (idx == 20 || idx == 21);
+    r->emit_lse = (idx == 20 || idx == 21 || idx == 35 || idx == 36);
 }
 
-/* Build the segment kernel into `b` (initialised here, named by the spec):
- * the strided entry for strided K/V, the paged one otherwise. Returns the
- * kernel, or NULL after printing the builder error (b is then freed). */
+/* Build the segment kernel into `b` (initialised here, named by the spec).
+ * Returns the kernel, or NULL after printing the builder error (b is then
+ * freed). */
 static rocke_kernel_def_t* build_segment(rocke_ir_builder_t* b,
-                                         const rocke_unified_attention_3d_tiled_spec_t* s,
-                                         bool strided)
+                                         const rocke_unified_attention_3d_tiled_spec_t* s)
 {
     char kname[256];
     kname[0] = 0;
@@ -482,9 +572,7 @@ static rocke_kernel_def_t* build_segment(rocke_ir_builder_t* b,
         fprintf(stderr, "builder init failed\n");
         return NULL;
     }
-    rocke_kernel_def_t* k
-        = strided ? rocke_build_unified_attention_3d_tiled_strided_gfx942(b, s, "gfx942")
-                  : rocke_build_unified_attention_3d_tiled_gfx942(b, s, "gfx942");
+    rocke_kernel_def_t* k = rocke_build_unified_attention_3d_tiled_gfx942(b, s, "gfx942");
     if(!k || !rocke_ir_builder_ok(b))
     {
         fprintf(stderr, "segment build failed: err=%s\n", rocke_ir_builder_error(b));
@@ -571,8 +659,7 @@ int main(int argc, char** argv)
     const char* mode = (argc > 2) ? argv[2] : "ll";
 
     rocke_unified_attention_3d_tiled_spec_t s;
-    bool strided = false;
-    if(make_spec(idx, &s, &strided) != 0)
+    if(make_spec(idx, &s) != 0)
     {
         fprintf(stderr, "unknown config index %d\n", idx);
         return 1;
@@ -580,7 +667,7 @@ int main(int argc, char** argv)
     rocke_unified_attention_reduce_tiled_spec_t r;
     make_reduce_spec(idx, &s, &r);
 
-    if(strcmp(mode, "ll") == 0 && !strided)
+    if(strcmp(mode, "ll") == 0)
     {
         char* llvm_text = NULL;
         char err[ROCKE_ERR_MSG_CAP];
@@ -598,7 +685,7 @@ int main(int argc, char** argv)
     else if(strcmp(mode, "ll") == 0 || strcmp(mode, "ir") == 0)
     {
         rocke_ir_builder_t b;
-        rocke_kernel_def_t* seg_k = build_segment(&b, &s, strided);
+        rocke_kernel_def_t* seg_k = build_segment(&b, &s);
         if(!seg_k)
             return 1;
         char* t = NULL;
@@ -620,7 +707,7 @@ int main(int argc, char** argv)
     else if(strcmp(mode, "verify") == 0)
     {
         rocke_ir_builder_t b;
-        rocke_kernel_def_t* seg_k = build_segment(&b, &s, strided);
+        rocke_kernel_def_t* seg_k = build_segment(&b, &s);
         if(!seg_k)
             return 1;
         rocke_diag_t* d = NULL;

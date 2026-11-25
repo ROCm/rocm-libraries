@@ -23,18 +23,12 @@ import dataclasses
 
 import pytest
 
+from _gpu_gate import requires_gpu
+
 torch = pytest.importorskip("torch", reason="ROCm torch required")
 
 
-def _gpu_ready() -> bool:
-    if not torch.cuda.is_available():
-        return False
-    return "gfx950" in torch.cuda.get_device_properties(0).gcnArchName.lower()
-
-
-requires_gfx950_gpu = pytest.mark.skipif(
-    not _gpu_ready(), reason="needs a gfx950 GPU with ROCm torch"
-)
+requires_gfx950_gpu = requires_gpu("gfx950")
 
 requires_any_gpu = pytest.mark.skipif(
     not torch.cuda.is_available(), reason="needs a GPU with ROCm torch"

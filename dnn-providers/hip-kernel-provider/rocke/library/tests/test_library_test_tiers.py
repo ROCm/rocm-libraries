@@ -46,6 +46,18 @@ _EXPECTED_GATES = {
 }
 
 
+@pytest.fixture(autouse=True)
+def _no_installed_asset_copies(monkeypatch):
+    """Pin ``run_all.main()``'s asset detection to "absent" so this file's
+    exact-argument assertions hold in an installed tree too. Installed trees
+    make ``main()`` append ``--rocke-require-*`` flags; that path has its own
+    ``main()`` cases in ``test_run_all_asset_require_flags.py``."""
+    monkeypatch.setattr(run_all.hipdnn_assets, "installed_copy_present", lambda: False)
+    monkeypatch.setattr(
+        run_all.hkp_pack_headers, "installed_copy_present", lambda: False
+    )
+
+
 def _process_is_dead(pid: int) -> bool:
     try:
         return Path(f"/proc/{pid}/stat").read_text().split()[2] == "Z"
@@ -1573,3 +1585,25 @@ def test_source_runner_preserves_library_ir_gates(monkeypatch):
         ]
         for tool in ("check_ir_validity.py", "check_arch_domain.py")
     ]
+
+
+def test_gpu_gate_skips_on_cuda_torch(monkeypatch):
+    """A CUDA build of torch skips the on-GPU numeric tests instead of failing their collection."""
+    from . import _gpu_gate
+
+    def no_device_query(index):
+        raise AssertionError("the gate queried a CUDA device")
+
+    cuda = SimpleNamespace(
+        is_available=lambda: True, get_device_properties=no_device_query
+    )
+    monkeypatch.setitem(
+        sys.modules,
+        "torch",
+        SimpleNamespace(version=SimpleNamespace(hip=None), cuda=cuda),
+    )
+    _gpu_gate.gpu_arch.cache_clear()
+    try:
+        assert _gpu_gate.gpu_arch() is None
+    finally:
+        _gpu_gate.gpu_arch.cache_clear()

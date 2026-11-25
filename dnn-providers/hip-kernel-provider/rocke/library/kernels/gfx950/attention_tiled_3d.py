@@ -35,6 +35,10 @@ from kernels.common._attention_additive_bias import (
     add_additive_bias,
     declare_additive_bias_params,
 )
+from kernels.common._attention_kv_seq_tail import (
+    last_row_in_sequence,
+    VTileBound,
+)
 from kernels.common._attention_strided_kv import (
     declare_strided_kv_params,
     strided_kv_offset,
@@ -44,9 +48,8 @@ from kernels.common._lse_store import emit_lse_field, reduce_lse_store
 from kernels.common._spec_checks import require_bool
 from kernels.common.attention_mask_type import band_mask_type
 from kernels.common.attention_split_kv_reduce import (
-    split_kv_reduce_max_segments,
     split_kv_reduce_spec,
-    tiled_reduce_unsupported_reason,
+    supports_split_kv_reduce,
 )
 
 from rocke.core.ir import (
@@ -75,6 +78,7 @@ from rocke.helpers.attention import (
     wave64_reduce_max as _wave64_reduce_max,
     wave64_reduce_sum as _wave64_reduce_sum,
 )
+from rocke.helpers.attention_arch_caps import attn_arch_caps
 from rocke.helpers.distribution import make_static_tile_distribution
 from rocke.helpers.layouts import TransposeLdsReader
 from rocke.helpers.transforms import DynamicTensorDescriptor, indirect, unmerge
@@ -82,11 +86,20 @@ from rocke.helpers.transforms import DynamicTensorDescriptor, indirect, unmerge
 MFMA_M = 16
 MFMA_N = 16
 # Async K/V feed: the segment kernel is one wave64 CTA, and each lane's
-# buffer_load ... lds moves 4 DWORDs (8 halves), so one async call stages
-# 64 * 8 halves. Every call is one outstanding vmcnt event; the gfx950
-# s_waitcnt vmcnt field is 6 bits.
+# buffer_load ... lds moves the widest gfx950 LDS-DMA width (from the attention
+# capability table: 4 DWORDs, 8 halves), so one async call stages 64 * 8
+# halves. Every call is one outstanding vmcnt event; the gfx950 s_waitcnt
+# vmcnt field is 6 bits.
 SEGMENT_THREADS = 64
-KV_HALVES_PER_LANE = 8
+KV_DMA_DWORDS = attn_arch_caps("gfx950").max_lds_dma_dwords
+# The KV swizzle (one lane payload = one 16-byte chunk, tid * 8 halves) is
+# written for 4-dword lanes.
+if KV_DMA_DWORDS != 4:
+    raise RuntimeError(
+        "gfx950 tiled 3D attention lane addressing assumes a 4-dword LDS-DMA "
+        f"width; the capability table gives {KV_DMA_DWORDS}"
+    )
+KV_HALVES_PER_LANE = KV_DMA_DWORDS * 2
 KV_HALVES_PER_CALL = SEGMENT_THREADS * KV_HALVES_PER_LANE
 MAX_VMCNT = (1 << 6) - 1
 
@@ -981,10 +994,32 @@ def build_unified_attention_3d_tiled(
         return ids
 
     def _issue_paged_tile(
-        src: Value, src_rsrc: Value, lds_base: Value, buf_idx: Value, page_ids
+        src: Value,
+        src_rsrc: Value,
+        lds_base: Value,
+        buf_idx: Value,
+        page_ids,
+        v_tile: Value | None = None,
     ) -> None:
+        """``v_tile``: the tile's index when it is V, whose rows past the sequence load
+        zero (_attention_kv_seq_tail)."""
         buf_off_i64 = b.zext(b.mul(buf_idx, b.const_i32(bytes_per_buf)), I64)
         buf_base = b.smem_ptr_add(lds_base, buf_off_i64)
+        # The swizzle permutes columns within a row only.
+        v_bound = (
+            VTileBound(
+                b,
+                seq_len,
+                v_tile,
+                T,
+                HD,
+                KV_HALVES_PER_CALL,
+                lane_half_base,
+                lane_row=lane_tok if KV_HALVES_PER_CALL % HD == 0 else None,
+            )
+            if v_tile is not None
+            else None
+        )
         for call in range(kv_calls_per_tile):
             blk = call // calls_per_block
             tok0 = (call % calls_per_block) * tokens_per_call
@@ -993,14 +1028,19 @@ def build_unified_attention_3d_tiled(
                 # The call covers a partial row (head_size 192), so each lane
                 # takes its own (row, dim); the tile is one page (spec check).
                 lin = b.add(b.const_i32(call * KV_HALVES_PER_CALL), lane_half_base)
-                tok_b = b.mul(b.div(lin, b.const_i32(HD)), kv_stride_tok_b)
+                lin_row = b.div(lin, b.const_i32(HD))
+                tok_b = b.mul(lin_row, kv_stride_tok_b)
                 head_b = b.mul(kv_head_idx, b.const_i32(kv_stride_h_b))
                 dim_b = b.mul(b.mod(lin, b.const_i32(HD)), b.const_i32(KV_BYTES))
                 voff = b.add(b.add(tok_b, head_b), dim_b)
+                if v_bound is not None:
+                    voff = v_bound(voff, call, row=lin_row)
             else:
                 voff = lane_within_b[ph]
                 if tok0:
                     voff = b.add(voff, call_tok_b[tok0])
+                if v_bound is not None:
+                    voff = v_bound(voff, call)
             if I64_KV_ADDR:
                 base_i64 = b.mul(b.zext(page_ids[blk], I64), kv_stride_blk_i64)
                 call_rsrc = b.buffer_rsrc(
@@ -1012,7 +1052,7 @@ def build_unified_attention_3d_tiled(
                 soff = b.mul(page_ids[blk], kv_stride_blk_b)
             dst = b.smem_ptr_add(buf_base, b.const_i64(call * bytes_per_call))
             b.async_buffer_load_lds_addr(
-                call_rsrc, dst, voff, soff, 4, coherency=KV_CACHE_BITS
+                call_rsrc, dst, voff, soff, KV_DMA_DWORDS, coherency=KV_CACHE_BITS
             )
 
     def _issue_strided_tile(
@@ -1028,7 +1068,7 @@ def build_unified_attention_3d_tiled(
             )
             dst = b.smem_ptr_add(buf_base, b.const_i64(call * bytes_per_call))
             b.async_buffer_load_lds_addr(
-                src_rsrc, dst, voff, zero_soff, 4, coherency=KV_CACHE_BITS
+                src_rsrc, dst, voff, zero_soff, KV_DMA_DWORDS, coherency=KV_CACHE_BITS
             )
 
     # FP8 K/V cache: sync dequant loader. See attention_tiled_2d.py for the
@@ -1077,6 +1117,8 @@ def build_unified_attention_3d_tiled(
             f"{fp8_elems_per_chunk}); the packed-cvt path needs the chunk "
             f"to split cleanly into 2× <4 x fp8> sub-chunks."
         )
+        if lds_token == "V":  # V rows past the sequence read its last row instead
+            v_last_row = last_row_in_sequence(b, seq_len, kv_tile_idx, T)
         for call in range(fp8_chunks_per_thread):
             chunk_id = b.add(b.mul(b.const_i32(call), b.const_i32(THREADS)), tid)
             row = b.div(chunk_id, b.const_i32(HD // fp8_elems_per_chunk))
@@ -1084,7 +1126,9 @@ def build_unified_attention_3d_tiled(
                 b.mod(chunk_id, b.const_i32(HD // fp8_elems_per_chunk)),
                 b.const_i32(fp8_elems_per_chunk),
             )
-            linear_half_first = b.add(b.mul(row, b.const_i32(HD)), col)
+            # V: the global row it is read from; the LDS row stays ``row``.
+            src_row = b.smin(row, v_last_row) if lds_token == "V" else row
+            linear_half_first = b.add(b.mul(src_row, b.const_i32(HD)), col)
             if I64_KV_ADDR:
                 # Flat per-lane global load: full i64 byte/element offset so
                 # the per-thread physical_block * stride cannot overflow the
@@ -1127,7 +1171,9 @@ def build_unified_attention_3d_tiled(
         elif spec.kv_layout == "strided":
             _issue_strided_tile(value_rsrc, v_strides, V_lds_addr, tile_idx, buf_idx)
         else:
-            _issue_paged_tile(value, value_rsrc, V_lds_addr, buf_idx, page_ids)
+            _issue_paged_tile(
+                value, value_rsrc, V_lds_addr, buf_idx, page_ids, v_tile=tile_idx
+            )
 
     first_page_ids = None
     if WAVE_PAGE_ID_LOAD:
@@ -1739,36 +1785,16 @@ def supports_tiled_3d_spec(
     )
 
 
-def reduce_max_segments(arch: str) -> int:
-    """The most segments whose factor cache fits ``arch``'s LDS
-    (``ArchTarget.lds_capacity_bytes``). The C++ host mirrors gfx950's as
-    ``GFX950_UNIFIED_3D_MAX_SEGMENTS``."""
-    from rocke.core.arch.target import ArchTarget
-
-    return split_kv_reduce_max_segments(ArchTarget.from_gfx(arch).lds_capacity_bytes)
-
-
 def supports_tiled_reduce_spec(
     spec: UnifiedAttentionReduceTiledSpec, *, arch: str = "gfx950"
 ) -> Tuple[bool, str]:
     """Spec-first predicate for ``build_unified_attention_reduce_tiled``.
 
-    The reduce kernel has no dispatcher gate of its own: it is only ever built beside the
-    3D segment kernel, whose ``supports_tiled_3d`` decides routing. This predicate lets
-    ``hkp_pack`` validate it as a companion at pack time, and states what the builder
-    otherwise assumes: ``head_size`` splits evenly across the 64 lanes, the heads group
-    evenly, and the segment-factor cache fits in LDS. The kernel is one 64-thread CTA
-    whose ``wave64_reduce_max/sum`` butterfly assumes a single wave64, so ``arch`` is
-    gated like the segment kernel's: ``validate_tiled_attention_arch`` admits only the
-    wave64 gfx950 and gfx942 targets and refuses wave32 RDNA.
+    The name ``hkp_pack``'s predicate alias for the reduce builder expects; the rules are
+    :func:`kernels.common.attention_split_kv_reduce.supports_split_kv_reduce`, shared with
+    every arch's reduce.
     """
-    reason = tiled_reduce_unsupported_reason(spec, arch=arch)
-    if reason is not None:
-        return False, reason
-    ok, reason = check_head_counts(spec.num_query_heads, spec.num_kv_heads)
-    if not ok:
-        return False, f"tiled reduce kernel: {reason}"
-    return True, "supported"
+    return supports_split_kv_reduce(spec, arch=arch)
 
 
 def reduce_spec_for(

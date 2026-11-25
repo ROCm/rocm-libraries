@@ -1,0 +1,7 @@
+{
+  "version": "1.0",
+  "id": "3264bf6f-48fc-4dbe-8c84-360df8607488",
+  "name": "graph operation is main_splitdq_gfx950",
+  "scope": "graph",
+  "match_symbol": "hipkernel.attention_general_bwd.main_splitdq_gfx950_match"
+}

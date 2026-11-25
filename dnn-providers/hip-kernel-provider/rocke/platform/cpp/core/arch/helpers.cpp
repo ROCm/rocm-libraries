@@ -138,6 +138,13 @@ int rocke_archtarget_async_lds_max_dwords(const rocke_archtarget_t* t)
     return rocke_arch_async_lds_max_dwords(t);
 }
 
+int rocke_archtarget_async_lds_dwords(const rocke_archtarget_t* t,
+                                      int out[ROCKE_LDS_DMA_ENCODED_DWORDS_N])
+{
+    /* ArchTarget.async_lds_dwords property. */
+    return rocke_arch_async_lds_dwords(t, out);
+}
+
 int rocke_archtarget_max_threads_per_block(const rocke_archtarget_t* t)
 {
     /* ArchTarget.max_threads_per_block property. */

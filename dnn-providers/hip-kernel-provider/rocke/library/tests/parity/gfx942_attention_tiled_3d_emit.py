@@ -378,10 +378,53 @@ _CONFIGS = {
         use_decode_grid=True,
         waves_per_eu=2,
     ),
+    # idx37: QQ bias alone (no config here enabled it before). The gfx950
+    # twin's mask build order fix (bind cmp_ge/cmp_lt before land, since C's
+    # argument evaluation order is unspecified) was mirrored into this file's
+    # 3D compute without a parity config to pin it -- this is that config.
+    37: dict(
+        head_size=64,
+        block_size=16,
+        num_query_heads=16,
+        num_kv_heads=4,
+        dtype="fp16",
+        num_segments=8,
+        use_sinks=False,
+        sliding_window=0,
+        has_softcap=False,
+        use_qq_bias=True,
+        kv_storage_dtype=None,
+    ),
+    # idx38: additive bias on gfx942; both engines reject it (BOTH_REJECTED).
+    # The gfx942 Python spec has no use_additive_bias field (TypeError); the C
+    # twin rejects it in rocke_unified_attention_3d_tiled_spec_validate.
+    38: dict(
+        head_size=64,
+        block_size=16,
+        num_query_heads=16,
+        num_kv_heads=4,
+        dtype="fp16",
+        num_segments=8,
+        use_sinks=False,
+        sliding_window=0,
+        has_softcap=False,
+        use_additive_bias=True,
+        kv_storage_dtype=None,
+    ),
 }
 
 # Configs whose REDUCE kernel is built with emit_lse=True (segment unchanged).
-_REDUCE_LSE = frozenset({20, 21})
+_REDUCE_LSE = frozenset({20, 21, 35, 36})
+
+# Configs both engines must reject, with the reason each one pins: run_diff
+# requires the regex in both engines' stderr (BOTH_REJECTED alone accepts any
+# reason, a typo included).
+_EXPECTED_REJECTIONS = {
+    38: (
+        r"unexpected keyword argument 'use_additive_bias'"
+        r"|use_additive_bias is not implemented on gfx942"
+    ),
+}
 
 
 def _strided_decode(head_size, block_size, tile, dtype, num_segments, heads=(32, 8)):
@@ -422,6 +465,69 @@ _CONFIGS.update(
         31: _strided_decode(256, 64, 32, "fp16", 8),
         32: dict(_strided_decode(128, 32, 16, "fp16", 16), waves_per_eu=2),
     }
+)
+
+_CONFIGS[33] = dict(
+    # Decode K/V streamed by the async copies from strided (non-paged) K/V.
+    head_size=128,
+    block_size=16,
+    num_query_heads=32,
+    num_kv_heads=8,
+    dtype="bf16",
+    num_segments=16,
+    use_sinks=True,
+    sliding_window=0,
+    has_softcap=False,
+    kv_storage_dtype=None,
+    num_seqs=4,
+    use_decode_grid=True,
+    kv_cache_policy="stream",
+    kv_layout="strided",
+)
+
+_CONFIGS[34] = dict(
+    # Decode K/V with globally cached copies through the 1-DWORD async loader.
+    head_size=128,
+    block_size=32,
+    num_query_heads=32,
+    num_kv_heads=8,
+    dtype="fp16",
+    num_segments=16,
+    use_sinks=True,
+    sliding_window=0,
+    has_softcap=False,
+    kv_storage_dtype=None,
+    use_decode_grid=True,
+    kv_cache_policy="global",
+)
+
+_CONFIGS[35] = dict(
+    # Reduce with the LSE output, decode grid.
+    head_size=128,
+    block_size=16,
+    num_query_heads=32,
+    num_kv_heads=8,
+    dtype="bf16",
+    num_segments=16,
+    use_sinks=False,
+    sliding_window=0,
+    has_softcap=False,
+    kv_storage_dtype=None,
+    use_decode_grid=True,
+)
+
+_CONFIGS[36] = dict(
+    # Reduce with the LSE output.
+    head_size=64,
+    block_size=16,
+    num_query_heads=8,
+    num_kv_heads=8,
+    dtype="fp16",
+    num_segments=8,
+    use_sinks=False,
+    sliding_window=0,
+    has_softcap=False,
+    kv_storage_dtype=None,
 )
 
 
