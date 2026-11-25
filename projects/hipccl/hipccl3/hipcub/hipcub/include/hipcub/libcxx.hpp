@@ -52,6 +52,33 @@
 #define _HIPCUB_STRINGIFY_IMPL(x) #x
 #define _HIPCUB_STRINGIFY(x) _HIPCUB_STRINGIFY_IMPL(x)
 
+// Windows 'min'/'max' guard.
+// 'windows.h' defines 'min' and 'max' as macros. This breaks
+// hipcub/rocthrust/rocprim code that uses 'std::min' and 'std::max'.
+// So we define 'NOMINMAX' here if the user did not define it.
+// If 'windows.h' ran first, it is too late. We print an error instead.
+#if defined(_WIN32) || defined(_WIN64)
+    #if !defined(NOMINMAX)
+        #if defined(min) || defined(max) || defined(MIN) || defined(MAX)
+            // 'windows.h' was already included. It defined these macros.
+            // Defining 'NOMINMAX' now does not help. It only works before
+            // 'windows.h' is included.
+            #ifndef HIPCUB_ALLOW_WINDOWS_MINMAX
+                #error "windows.h defined the min/max macros before hipcub " \
+                       "was included. Define NOMINMAX before you include " \
+                       "windows.h, or include hipcub headers before windows.h. " \
+                       "You can also define HIPCUB_ALLOW_WINDOWS_MINMAX to " \
+                       "ignore this error."
+            #endif
+        #else
+            #define NOMINMAX 1
+            #ifndef HIPCUB_SUPPRESS_WINDOWS_MINMAX_WARNING
+                #pragma message("hipcub: defined NOMINMAX to avoid the windows.h min/max macro conflict. Define HIPCUB_SUPPRESS_WINDOWS_MINMAX_WARNING to hide this message.")
+            #endif
+        #endif
+    #endif
+#endif
+
 // Newer versions (e.g. 3.4) no longer define '_CUDA_VSTD' and
 // '_LIBCUDACXX_{BEGIN,END}_NAMESPACE_STD', replacing them with
 // '_CCCL_{BEGIN,END}_NAMESPACE_CUDA_STD'. Both spellings are supported.

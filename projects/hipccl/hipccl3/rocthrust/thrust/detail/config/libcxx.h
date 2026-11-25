@@ -24,6 +24,32 @@
 
 #include <thrust/detail/libcxx_wrapper/std/__cccl/preprocessor.h>
 
+// Windows 'min'/'max' guard.
+// 'windows.h' defines 'min' and 'max' as macros. This breaks
+// hipcub/rocthrust/rocprim code that uses 'std::min' and 'std::max'.
+// So we define 'NOMINMAX' here if the user did not define it.
+// If 'windows.h' ran first, it is too late. We print an error instead.
+#if defined(_WIN32) || defined(_WIN64)
+#  if !defined(NOMINMAX)
+#    if defined(min) || defined(max) || defined(MIN) || defined(MAX)
+       // 'windows.h' was already included. It defined these macros.
+       // Defining 'NOMINMAX' now does not help. It only works before
+       // 'windows.h' is included.
+#      if !defined(THRUST_ALLOW_WINDOWS_MINMAX)
+#        error "windows.h defined the min/max macros before thrust was " \
+               "included. Define NOMINMAX before you include windows.h, or " \
+               "include thrust headers before windows.h. You can also define " \
+               "THRUST_ALLOW_WINDOWS_MINMAX to ignore this error."
+#      endif
+#    else
+#      define NOMINMAX 1
+#      if !defined(THRUST_SUPPRESS_WINDOWS_MINMAX_WARNING)
+#        pragma message("thrust: defined NOMINMAX to avoid the windows.h min/max macro conflict. Define THRUST_SUPPRESS_WINDOWS_MINMAX_WARNING to hide this message.")
+#      endif
+#    endif
+#  endif
+#endif
+
 // This is a utility file that helps managing which
 // 'std' implementation we're using. The provided
 // macros are for internal use only and may change
