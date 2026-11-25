@@ -24,6 +24,11 @@
  * Epilogue: fp32 atomics into replica block_y % ws_replicas of the
  * [R][kpg][KH * KW * cpg] scratch that conv_wgrad_workspace_reduce folds.
  *
+ * small_k runs the same GEMM on the swapped problem (stride 1, square
+ * filter): X takes dY's place as the vector operand, dY is gathered as the
+ * im2col operand at padding KH - 1 - PAD, and the epilogue writes GEMM
+ * element [c][(r', s', k)] to dW[k][KH-1-r'][KW-1-s'][c].
+ *
  * Every helper emits in PYTHON EVALUATION ORDER, one builder call per Python
  * statement, so the SSA sequence -- and therefore the .ll bytes -- match.
  */
@@ -85,6 +90,14 @@ typedef struct rocke_wgrad_sc_ctx
     rocke_value_t* n_pix;
     rocke_value_t* a_rsrc;
     rocke_value_t* b_rsrc;
+    /* Strides of the 8-channel vector operand (dY, or X with small_k) and
+     * the im2col operand's image stride (X, or dY with small_k). */
+    rocke_value_t* v_N;
+    rocke_value_t* v_H;
+    rocke_value_t* v_W;
+    rocke_value_t* s_N;
+    rocke_value_t* s_H;
+    rocke_value_t* s_W;
     rocke_value_t* dy_lds;
     rocke_value_t* x_lds;
     rocke_value_t* zero_elem;
@@ -155,16 +168,15 @@ static void sc_issue_px(rocke_wgrad_sc_ctx_t* c,
                         int* n)
 {
     rocke_ir_builder_t* b = c->b;
-    const rocke_dconv_params_t* params = c->params;
     rocke_value_t* p_ok = rocke_b_cmp_lt(b, gp, c->n_pix);
     rocke_value_t* wo = rocke_b_mod(b, gp, c_Wo);
     rocke_value_t* t = rocke_b_div(b, gp, c_Wo);
     rocke_value_t* ho = rocke_b_mod(b, t, c_Ho);
     rocke_value_t* n_i = rocke_b_div(b, t, c_Ho);
-    rocke_value_t* dy_n = rocke_b_mul(b, n_i, params->p_A_stride_n);
-    rocke_value_t* dy_h = rocke_b_mul(b, ho, params->p_A_stride_hi);
+    rocke_value_t* dy_n = rocke_b_mul(b, n_i, c->v_N);
+    rocke_value_t* dy_h = rocke_b_mul(b, ho, c->v_H);
     rocke_value_t* dy_nh = rocke_b_add(b, dy_n, dy_h);
-    rocke_value_t* dy_w = rocke_b_mul(b, wo, params->p_A_stride_wi);
+    rocke_value_t* dy_w = rocke_b_mul(b, wo, c->v_W);
     rocke_value_t* dy_base = rocke_b_add(b, dy_nh, dy_w);
     rocke_value_t* ho_u;
     rocke_value_t* hb;
@@ -194,10 +206,10 @@ static void sc_issue_px(rocke_wgrad_sc_ctx_t* c,
     hb = rocke_b_sub(b, ho_u, c->c_PAD);
     wo_u = rocke_b_mul(b, wo, c->c_U);
     wb = rocke_b_sub(b, wo_u, c->c_PAD);
-    x_n = rocke_b_mul(b, n_i, params->p_B_stride_n);
-    x_h = rocke_b_mul(b, hb, params->p_B_stride_hi);
+    x_n = rocke_b_mul(b, n_i, c->s_N);
+    x_h = rocke_b_mul(b, hb, c->s_H);
     x_nh = rocke_b_add(b, x_n, x_h);
-    x_w = rocke_b_mul(b, wb, params->p_B_stride_wi);
+    x_w = rocke_b_mul(b, wb, c->s_W);
     x_base = rocke_b_add(b, x_nh, x_w);
     for(j = 0; j < c->X_PASSES; ++j)
     {
@@ -486,6 +498,7 @@ rocke_kernel_def_t* rocke_dconv_wgrad_build_small_c(rocke_ir_builder_t* b,
     rocke_dconv_params_t params;
     const rocke_direct_conv_problem_t* p = &spec->problem;
     int KH, KW, C, K, U, PAD, RSC, RUN, RUNP, NG;
+    bool SK;
     int WK, WN, TK, TN, NW, THREADS, BK, BN, PIX, M, PIX_STEP, PART, C_FRAG, VX;
     int N_N_TILES, DY_GROUPS, X_GROUPS;
     int j, q, e, t, tk, tn, slot;
@@ -528,10 +541,13 @@ rocke_kernel_def_t* rocke_dconv_wgrad_build_small_c(rocke_ir_builder_t* b,
     c->is_bf16 = p->dtype && strcmp(p->dtype, "bf16") == 0;
     KH = p->KH;
     KW = p->KW;
-    C = p->cpg;
-    K = p->kpg;
+    /* With small_k the GEMM runs on the swapped problem: C and K trade places
+     * and the im2col operand (dY) takes padding KH - 1 - PAD (see small_k). */
+    SK = spec->small_k != 0;
+    C = rocke_direct_conv_wgrad_sc_cpg(spec);
+    K = rocke_direct_conv_wgrad_sc_kpg(spec);
     U = p->stride;
-    PAD = p->PAD;
+    PAD = rocke_direct_conv_wgrad_sc_pad(spec);
     RSC = KH * KW * C;
     RUN = KW * C;
     RUNP = rocke_direct_conv_wgrad_small_c_run(spec);
@@ -614,13 +630,36 @@ rocke_kernel_def_t* rocke_dconv_wgrad_build_small_c(rocke_ir_builder_t* b,
     c_NG = rocke_b_const_i32(b, NG);
     c->c_PART = rocke_b_const_i32(b, PART);
     c->c_PIX_STEP = rocke_b_const_i32(b, PIX_STEP);
-    c_H = params.p_Hi;
-    c_W = params.p_Wi;
-    c_Ho = params.p_Ho;
-    c_Wo = params.p_Wo;
     c_N = params.p_N;
-    s_H = params.p_B_stride_hi;
-    s_W = params.p_B_stride_wi;
+    if(SK)
+    {
+        /* Swapped: the GEMM's im2col image is dY, its pixel range X's. */
+        c_H = params.p_Ho;
+        c_W = params.p_Wo;
+        c_Ho = params.p_Hi;
+        c_Wo = params.p_Wi;
+        s_H = params.p_A_stride_hi;
+        s_W = params.p_A_stride_wi;
+        c->s_N = params.p_A_stride_n;
+        c->v_N = params.p_B_stride_n;
+        c->v_H = params.p_B_stride_hi;
+        c->v_W = params.p_B_stride_wi;
+    }
+    else
+    {
+        c_H = params.p_Hi;
+        c_W = params.p_Wi;
+        c_Ho = params.p_Ho;
+        c_Wo = params.p_Wo;
+        s_H = params.p_B_stride_hi;
+        s_W = params.p_B_stride_wi;
+        c->s_N = params.p_B_stride_n;
+        c->v_N = params.p_A_stride_n;
+        c->v_H = params.p_A_stride_hi;
+        c->v_W = params.p_A_stride_wi;
+    }
+    c->s_H = s_H;
+    c->s_W = s_W;
 
     tid = rocke_b_thread_id_x(b);
     c_wave = rocke_b_const_i32(b, spec->wave_size);
@@ -655,6 +694,12 @@ rocke_kernel_def_t* rocke_dconv_wgrad_build_small_c(rocke_ir_builder_t* b,
     c->a_rsrc = rocke_b_buffer_rsrc(b, params.A, params.A_bytes);
     c->b_rsrc = rocke_b_buffer_rsrc(b, params.Bp, params.B_bytes);
     d_rsrc = rocke_b_buffer_rsrc(b, params.D, params.D_bytes);
+    if(SK)
+    {
+        rocke_value_t* t_rsrc = c->a_rsrc;
+        c->a_rsrc = c->b_rsrc;
+        c->b_rsrc = t_rsrc;
+    }
 
     /* ---- this block's steps: whole PIX_STEP runs of the flattened pixels. */
     {
@@ -935,6 +980,27 @@ rocke_kernel_def_t* rocke_dconv_wgrad_build_small_c(rocke_ir_builder_t* b,
                     rr_off = rocke_b_mul(b, rr, c_RUN);
                     n = rocke_b_add(b, rr_off, jj);
                 }
+                if(SK)
+                {
+                    /* GEMM column (r', s', k) -> dW[k][KH-1-r'][KW-1-s'][c]: the
+                     * k_off below then steps by one channel (c) instead of RSC. */
+                    rocke_value_t* rr = rocke_b_div(b, n, c_RUN);
+                    rocke_value_t* jj = rocke_b_mod(b, n, c_RUN);
+                    rocke_value_t* ss = rocke_b_div(b, jj, c_C);
+                    rocke_value_t* kk = rocke_b_mod(b, jj, c_C);
+                    rocke_value_t* c_tap_last = rocke_b_const_i32(b, KH * KW - 1);
+                    rocke_value_t* c_KW = rocke_b_const_i32(b, KW);
+                    rocke_value_t* rr_kw = rocke_b_mul(b, rr, c_KW);
+                    rocke_value_t* tap = rocke_b_add(b, rr_kw, ss);
+                    rocke_value_t* tap_off;
+                    rocke_value_t* c_rsk;
+                    rocke_value_t* kk_off;
+                    tap = rocke_b_sub(b, c_tap_last, tap);
+                    tap_off = rocke_b_mul(b, tap, c_K);
+                    c_rsk = rocke_b_const_i32(b, KH * KW * K);
+                    kk_off = rocke_b_mul(b, kk, c_rsk);
+                    n = rocke_b_add(b, kk_off, tap_off);
+                }
                 acc = accs[tk * TN + tn];
                 for(slot = 0; slot < C_FRAG; ++slot)
                 {
@@ -942,7 +1008,7 @@ rocke_kernel_def_t* rocke_dconv_wgrad_build_small_c(rocke_ir_builder_t* b,
                     rocke_value_t* k = rocke_b_add(b, k_base, c_slot);
                     rocke_value_t* k_ok = rocke_b_cmp_lt(b, k, c_K);
                     rocke_value_t* ok = rocke_b_land(b, n_ok, k_ok);
-                    rocke_value_t* k_off = rocke_b_mul(b, k, c_RSC);
+                    rocke_value_t* k_off = SK ? k : rocke_b_mul(b, k, c_RSC);
                     rocke_value_t* dw_off = rocke_b_add(b, k_off, n);
                     rocke_value_t* byte;
                     rocke_value_t* val;

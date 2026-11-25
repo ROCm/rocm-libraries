@@ -173,6 +173,9 @@ static int make_4c_bf16_cfg(int idx, rocke_direct_conv_4c_spec_t* s4, const char
 #define WGRAD_STEM_CFG_BASE 356
 #define WGRAD_AUTO_CFG_BASE 359
 #define WGRAD_PP_CFG_BASE 364
+/* gfx1250 small-K wgrad (small_c on the swapped problem) follows the 7
+ * tiled ping-pong ones. */
+#define WGRAD_SK_CFG_BASE 371
 
 /* Problem helper mirroring prob() in the Python _dw_wgrad_spec: N=2, H=9,
  * W=13, groups = C, cpg = kpg. */
@@ -3461,6 +3464,54 @@ static int make_f32_cfg(int idx, int* kind, const f32_specs_t* sp, const char** 
     return -1;
 }
 
+/* gfx1250 small-K wgrad, emitted as WGRAD_SK_CFG_BASE + idx (see
+ * _wgrad_sk_spec in the Python emitter): the 3- and 4-channel output layers,
+ * a 5x5 filter at padding 1, then small_k at stride 2 and small_k without
+ * small_c, which both engines must reject. Returns 0 on success, -1 if
+ * unknown. */
+static int make_wgrad_sk_cfg(int idx, rocke_direct_conv_wgrad_spec_t* swg, const char** arch)
+{
+    /* cpg, kpg, F, stride, PAD, bf16, waves_k, waves_c, wave_tiles_k,
+     * wave_tiles_c, vec_x, sub_steps, ws_replicas, row_blocks, uniform_wave */
+    static const int knobs[5][15] = {
+        {64, 3, 3, 1, 1, 0, 1, 1, 2, 2, 0, 2, 8, 512, 0},
+        {320, 4, 3, 1, 1, 1, 8, 1, 1, 3, 4, 2, 32, 512, 0},
+        {128, 3, 3, 1, 1, 1, 8, 1, 1, 3, 4, 4, 32, 512, 1},
+        {16, 3, 5, 1, 1, 0, 2, 2, 1, 2, 8, 1, 4, 3, 0},
+        {64, 3, 3, 2, 1, 0, 1, 1, 2, 2, 0, 2, 8, 512, 0},
+    };
+    const int* k;
+    *swg = rocke_direct_conv_wgrad_spec_default();
+    *arch = "gfx1250";
+    if(idx == 5)
+    {
+        /* must reject: small_k needs small_c (a dense problem, so the refusal
+         * is that one) */
+        swg->problem = mk_w32_sc_problem(64, 64, 3, 1, 1, "fp16");
+        swg->wave_size = 32;
+        swg->small_k = 1;
+        return 0;
+    }
+    if(idx < 0 || idx > 4)
+        return -1;
+    k = knobs[idx];
+    swg->problem = mk_w32_sc_problem(k[0], k[1], k[2], k[3], k[4], k[5] ? "bf16" : "fp16");
+    swg->name = "rocke_direct_conv_wgrad_sk";
+    swg->wave_size = 32;
+    swg->small_c = 1;
+    swg->small_k = 1;
+    swg->waves_k = k[6];
+    swg->waves_c = k[7];
+    swg->wave_tiles_k = k[8];
+    swg->wave_tiles_c = k[9];
+    swg->vec_x = k[10];
+    swg->sub_steps = k[11];
+    swg->ws_replicas = k[12];
+    swg->row_blocks = k[13];
+    swg->uniform_wave = k[14];
+    return 0;
+}
+
 int main(int argc, char** argv)
 {
     if(argc < 2)
@@ -3492,7 +3543,16 @@ int main(int argc, char** argv)
     rocke_direct_depthwise_dgrad_stream_spec_t sdgs;
     rocke_direct_depthwise_wgrad_spec_t sdww;
     const char* arch = "gfx950";
-    if(idx >= WGRAD_PP_CFG_BASE)
+    if(idx >= WGRAD_SK_CFG_BASE)
+    {
+        if(make_wgrad_sk_cfg(idx - WGRAD_SK_CFG_BASE, &swg, &arch) != 0)
+        {
+            fprintf(stderr, "unknown config index %d\n", idx);
+            return 2;
+        }
+        kind = KIND_WGRAD;
+    }
+    else if(idx >= WGRAD_PP_CFG_BASE)
     {
         if(make_wgrad_pp_cfg(idx - WGRAD_PP_CFG_BASE, &swd.tiled) != 0)
         {

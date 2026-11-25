@@ -35,10 +35,10 @@
  * rocke_direct_conv_wgrad_spec_t from its own header, so growing it must move
  * ROCKE_ABI_VERSION too. Editing the struct fails the build here; the fix is
  * to bump ROCKE_ABI_VERSION in platform/cpp/include/rocke/abi.h and BINARY_ABI
- * in platform/python/rocke/portable_ir/src/abi.py, then update this pin.
+ * in platform/python/rocke/core/native_engine.py, then update this pin.
  * 64-bit only. */
 #if INTPTR_MAX == INT64_MAX
-static_assert(sizeof(rocke_direct_conv_wgrad_spec_t) == 160 && ROCKE_ABI_VERSION >= 15,
+static_assert(sizeof(rocke_direct_conv_wgrad_spec_t) == 160 && ROCKE_ABI_VERSION >= 24,
               "rocke_direct_conv_wgrad_spec_t changed size: bump ROCKE_ABI_VERSION in "
               "rocke/abi.h, then update this pin");
 #endif
