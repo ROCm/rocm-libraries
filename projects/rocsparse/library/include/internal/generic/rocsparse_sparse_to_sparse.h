@@ -270,7 +270,9 @@ rocsparse_status rocsparse_sparse_to_sparse_buffer_size(rocsparse_handle        
 *  It returns \ref rocsparse_status_type_mismatch when the intermediate CSR matrix does not fit
 *  the 32-bit index types of the source. These statuses are returned by
 *  \ref rocsparse_sparse_to_sparse_buffer_size for the
-*  \ref rocsparse_sparse_to_sparse_stage_analysis stage.
+*  \ref rocsparse_sparse_to_sparse_stage_analysis stage, except a value type mismatch when the
+*  target value array is set after analysis, which the same call returns for the
+*  \ref rocsparse_sparse_to_sparse_stage_compute stage.
 *
 *  \note
 *  When the conversion goes through an intermediate CSR matrix, the source is read when
