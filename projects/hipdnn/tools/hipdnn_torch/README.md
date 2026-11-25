@@ -49,14 +49,24 @@ hipDNN.** Concretely:
 - **Translate *every* torch-op parameter into the graph** — conv `groups` (via the
   weight's own channel count), `'same'`/`'valid'` padding, SDPA `attn_mask` (→ additive
   bias), `dropout_p`, `is_causal`, mixed per-tensor dtypes — rather than declining it.
-- **Make no capability *or* correctness pre-judgement.** The injection does not decide
-  what an engine can do, and does not pre-validate shapes: a malformed or unsupported
-  request is still built and submitted, and it is hipDNN's job (`check_support` /
-  `execute`) to reject it. Every rejection becomes a clean, logged native fallback.
-- **The only two things that stop a submission** are the mechanical preconditions for
+- **Make no capability *or* correctness pre-judgement, with one exception.** The
+  injection does not decide what an engine can do, and does not pre-validate shapes: a
+  malformed or unsupported request is still built and submitted, and it is hipDNN's job
+  (`check_support` / `execute`) to reject it. Every rejection becomes a clean, logged
+  native fallback. The exception is a training call to
+  `F.scaled_dot_product_attention` (grad mode on and q/k/v requiring grad, or any
+  dropout): forward and backward must land on hipDNN together or not at all, so a
+  handful of host-only checks (operand layout, a float `attn_mask` requiring grad,
+  deterministic-algorithms mode, `torch.compile` tracing) run before the graph is even
+  built. See "Backward / training support" below.
+- **Two mechanical preconditions stop a submission outright** — the preconditions for
   reaching the FFI at all: a **non-CUDA tensor** (`execute()` needs a device pointer) and a
   **dtype with no `DataType` enum** (nothing to describe the tensor with). Neither is a
-  capability judgement.
+  capability judgement. Training adds one further stop for every op except SDPA: under
+  grad mode, an operand that requires grad routes the whole call native
+  (`autograd: grad enabled and operand requires grad (no backward)`), since this layer
+  builds no backward graph for them. SDPA's own training behavior — forward and
+  backward routed together — is in "Backward / training support" below.
 
 A corollary worth stating: when a new kernel is later added to hipDNN (say an fp8 GEMM), a
 call that falls back today starts being served with **zero injection changes** — the
@@ -68,9 +78,10 @@ engine or provider and is architecture-agnostic.
 > `projects/hipdnn/python/frontend_bindings` (merged in
 > [ROCm/rocm-libraries#10600](https://github.com/ROCm/rocm-libraries/pull/10600)), which
 > bind the graph surface it uses (`graph.sdpa`/`layernorm`/`rmsnorm`; SDPA
-> `set_attn_scale`/`set_causal_mask`/`set_bias`/`set_dropout_probability`; conv
-> `set_pre_padding`/`set_post_padding`; per-tensor `set_data_type`). This is a build-time
-> dependency, not a runtime gate.
+> `set_attn_scale`/`set_causal_mask`/`set_bias`/`set_dropout`/`set_generate_stats`, and
+> `SdpaBackwardAttributes` for the backward graph; conv `set_pre_padding`/
+> `set_post_padding`; per-tensor `set_data_type`). This is a build-time dependency, not a
+> runtime gate.
 
 ## Contents
 
@@ -257,7 +268,11 @@ there are real ways a model bypasses it:
 
 - **`torch.compile` / TorchInductor.** A compiled graph is lowered ahead of time and may
   never re-enter the Python `F.*` functions at run time. Install *before* compiling, and
-  be aware that fused/traced regions can route around the patch entirely.
+  be aware that fused/traced regions can route around the patch entirely. If a
+  grad-eligible SDPA call does reach the override while compiling (e.g. a graph break),
+  it declines to native with reason `compile: tracing` instead of building a graph under
+  trace — the census is not meaningful under compile, and `fullgraph=True` is not
+  supported for a grad-eligible call.
 - **Custom fused attention.** FlashAttention, xformers, Triton kernels, AITER, and
   similar call their **own** ops (`torch.ops.*` / custom CUDA/HIP), not
   `F.scaled_dot_product_attention` — they are invisible to this layer. (See the next
@@ -273,19 +288,118 @@ there are real ways a model bypasses it:
 
 **What each override submits to hipDNN.** Per the pure-passthrough contract above, the
 override does *not* pre-judge shape, rank, layout, or param support — it builds the faithful
-graph and submits; the "Falls back when" column lists only the two structural stops (which
-are identical for every op) plus intrinsic materializations, **not** engine capability.
-Whether any given shape is actually *served* is reported by the census at run time.
+graph and submits; the "Falls back when" column lists the two structural stops (identical
+for every op), the training-mode autograd stop for every op except SDPA, and intrinsic
+materializations — never engine capability. The one exception is a grad-eligible
+`F.scaled_dot_product_attention` call, whose host-only preflight checks are listed in
+"Backward / training support" below, not in this table. Whether any given shape is
+actually *served* is reported by the census at run time.
 
 | Op | Submits to hipDNN | Falls back when |
 |----|-------------------|-----------------|
-| `F.linear` | N-D matmul at the input's true rank (`A=[batch…,M,K]`, `B` described as `[1,…,1,K,N]`), with `bias` as a fused `ADD` node when present (matmul-only + native bias-add on decline). | non-CUDA / unmappable dtype. |
-| `F.rms_norm` | N-D RMSNorm at true rank; scale described as `[1,…,1,*normalized_shape]`. Weightless norms synthesize a cached ones-scale; `eps=None` → `torch.finfo(dtype).eps` to match native. | non-CUDA / unmappable dtype. |
-| `F.scaled_dot_product_attention` | Fused attention from Q/K/V's *actual* dims+strides (permuted views submitted with no copy); `is_causal`→`set_causal_mask`, `attn_mask`→additive `set_bias` (bool masks materialized to 0/−inf), `dropout_p`→`set_dropout_probability` (parity defined only at `p=0`), `scale`→`set_attn_scale`. | non-CUDA / unmappable dtype. |
-| `F.layer_norm` | N-D LayerNorm at true rank (multi-axis `normalized_shape` supported); scale/bias described as `[1,…,1,*normalized_shape]`. Weightless/biasless synthesize cached ones/zeros; `eps` defaults to `1e-5`. | non-CUDA / unmappable dtype. |
-| `F.silu` | Pointwise SiLU (Swish, β=1) at the input's actual dims/strides. | non-CUDA / unmappable dtype. |
-| `F.gelu` | Pointwise GELU — `approximate="tanh"`→`GELU_APPROX_TANH_FWD`, default exact-erf→`GELU_FWD` (both built and submitted; hipDNN decides). | non-CUDA / unmappable dtype. |
-| `F.conv2d` / `F.conv3d` | Conv fprop at the input's actual layout (no forced channels-last; output preserves input layout); `groups` inferred from the weight's own channel count; `'valid'`→0 and `'same'`→per-axis `set_pre_padding`/`set_post_padding`; `bias` added natively after the conv. | non-CUDA / unmappable dtype, or a padding string other than `'same'`/`'valid'`. |
+| `F.linear` | N-D matmul at the input's true rank (`A=[batch…,M,K]`, `B` described as `[1,…,1,K,N]`), with `bias` as a fused `ADD` node when present (matmul-only + native bias-add on decline). | non-CUDA / unmappable dtype; under grad mode, input/weight/bias requiring grad (`autograd: grad enabled and operand requires grad (no backward)`). |
+| `F.rms_norm` | N-D RMSNorm at true rank; scale described as `[1,…,1,*normalized_shape]`. Weightless norms synthesize a cached ones-scale; `eps=None` → `torch.finfo(dtype).eps` to match native. | non-CUDA / unmappable dtype; under grad mode, input/weight requiring grad (`autograd: grad enabled and operand requires grad (no backward)`). |
+| `F.scaled_dot_product_attention` | Fused attention from Q/K/V's *actual* dims+strides (permuted views submitted with no copy); `is_causal`→`set_causal_mask`, `attn_mask`→additive `set_bias` (bool masks materialized to 0/−inf), `dropout_p`→`set_dropout(p, seed, offset)`, `scale`→`set_attn_scale`. A training call (grad mode on and q/k/v requiring grad, or any dropout) also builds a stats-generating forward (`set_generate_stats`) and the backward graph (`SdpaBackwardAttributes`) — see "Backward / training support". | non-CUDA / unmappable dtype; a training call additionally declines whole (fwd+bwd) for the reasons listed below. |
+| `F.layer_norm` | N-D LayerNorm at true rank (multi-axis `normalized_shape` supported); scale/bias described as `[1,…,1,*normalized_shape]`. Weightless/biasless synthesize cached ones/zeros; `eps` defaults to `1e-5`. | non-CUDA / unmappable dtype; under grad mode, input/weight/bias requiring grad (`autograd: grad enabled and operand requires grad (no backward)`). |
+| `F.silu` | Pointwise SiLU (Swish, β=1) at the input's actual dims/strides. | non-CUDA / unmappable dtype; under grad mode, input requiring grad (`autograd: grad enabled and operand requires grad (no backward)`). |
+| `F.gelu` | Pointwise GELU — `approximate="tanh"`→`GELU_APPROX_TANH_FWD`, default exact-erf→`GELU_FWD` (both built and submitted; hipDNN decides). | non-CUDA / unmappable dtype; under grad mode, input requiring grad (`autograd: grad enabled and operand requires grad (no backward)`). |
+| `F.conv2d` / `F.conv3d` | Conv fprop at the input's actual layout (no forced channels-last; output preserves input layout); `groups` inferred from the weight's own channel count; `'valid'`→0 and `'same'`→per-axis `set_pre_padding`/`set_post_padding`; `bias` added natively after the conv. | non-CUDA / unmappable dtype, or a padding string other than `'same'`/`'valid'`; under grad mode, input/weight/bias requiring grad (`autograd: grad enabled and operand requires grad (no backward)`). |
+
+## Backward / training support (SDPA)
+
+`F.scaled_dot_product_attention` is the one op whose override supports training: a
+training call runs **either wholly on hipDNN (forward + backward) or wholly on native
+PyTorch**, decided once at forward time — never a half-native step counted as served.
+Every other intercepted op (`F.linear`, `F.rms_norm`, `F.layer_norm`, `F.silu`/`F.gelu`,
+`F.conv2d`/`F.conv3d`) still has no hipDNN backward: under grad mode, with an operand
+that requires grad, it declines to native with reason `autograd: grad enabled and
+operand requires grad (no backward)` so autograd stays correct rather than silently
+losing `grad_fn`. A training comparison across ops should therefore pin
+`install(ops=("sdpa",))` to keep every non-attention op identical whichever arm it runs
+in.
+
+**Grad-eligible.** A call is grad-eligible — and takes the training path — when
+`dropout_p > 0`, or grad mode is on and any of q/k/v requires grad. (A float
+`attn_mask` requiring grad always declines, whenever grad mode is on or whenever
+`dropout_p > 0` regardless of grad mode; see below.)
+
+**Decline reasons** (whole call goes native, logged and counted, nothing breaks):
+
+| Reason | When |
+|---|---|
+| `compile: tracing` | under `torch.compiler.is_compiling()` |
+| `operand: stride` | q/k/v last-dim stride != 1, or seq stride < head dim |
+| `operand: pointer not 16-byte aligned` | q, k, v, or bias not 16-byte aligned |
+| `grad: attn_mask requires grad` | a float `attn_mask` requires grad, whenever grad mode is on or whenever `dropout_p > 0` regardless of grad mode |
+| `grad: deterministic algorithms` | `torch.use_deterministic_algorithms(True)` (not warn-only) |
+| `grad: fwd+stats: <reason>` / `grad: bwd: <reason>` | the forward-with-stats or backward graph itself declines (shape/dtype/engine not applicable) |
+| `dropout: stream capturing` | `p>0` under CUDA-graph capture |
+| `dropout: native math backend` | native would pick the MATH SDPA backend (its dropout consumes RNG differently) |
+| `dropout: CK flash preferred` | native would pick the CK flash kernel (different RNG advance) |
+| `dropout: cannot mirror native RNG advance` | `torch._fused_sdp_choice` unavailable |
+| `set_stream: <msg>` | binding hipDNN's handle to torch's current stream failed |
+| `bwd execute failed, recomputed natively: <msg>` (WARNING) | the backward execute faulted at `dropout_p == 0`; recomputed on native and counted native (at `p>0` this raises instead, since a native recompute would use a different dropout mask) |
+
+**Dropout (`p > 0`).** Forward and backward share one mask. The seed/offset come from
+torch's default CUDA generator for q's device, and the generator advances by exactly the
+amount native SDPA would advance for the backend `torch._fused_sdp_choice` picks for the
+same call — so checkpoint recompute replays the same mask and every other RNG consumer
+sees the same stream in both a hipDNN run and a native run. If anything from the draw
+through the forward execute fails, the generator offset is rewound before falling back,
+so a failed attempt never draws twice.
+
+**Stats and engine selection.** The training forward requests `set_generate_stats`,
+which can steer it to a different engine than an inference call at the same shape would
+get (e.g. on gfx950 the dense attention engine declines any stats request, so the
+training forward runs on a different engine than the otherwise-identical inference
+call). The forward and backward rows may also name different engines — nothing
+constrains them to match (`grad` and `bwd` census rows each report their own engine).
+
+**Autocast.** Under `torch.is_autocast_enabled("cuda")`, q, k, v, and a float
+`attn_mask` are cast (via a differentiable `.to`) to the autocast dtype before routing,
+keying, and graph-building — the override sees the same dtype native autocast SDPA
+would see, and gradients come back in each tensor's original dtype. This applies
+whether or not the call is grad-eligible.
+
+**Force mode on the grad path.** `HIPDNN_TORCH_SELECT=force` can still serve a full
+training step, but only when the pinned engine has both a forward-with-stats and a
+backward builder for that call (today: `ASM_SDPA_ENGINE`, MHA with no `attn_mask`,
+`dropout_p=0`). Any other pin declines the grad-eligible call with a `grad: fwd+stats:`
+or `grad: bwd:` reason naming the engine.
+
+**Stream.** hipDNN work is bound to torch's current CUDA stream before every execute (a
+side-stream `backward()` runs on hipDNN too, not silently serialized onto the default
+stream).
+
+**Benchmarking (`HIPDNN_FORCE_BENCHMARKING=1`).** Correct on the grad path: the first
+execute of a graph already delegates to the benchmark's winning candidate, so sampling
+candidates does not return a wrong result even on the very first forward or backward.
+Only the ingestor engines (FlyDSL, the dense attention pack) honor the env var and
+write winner records — `ASM_SDPA_ENGINE` ignores it, and tuning only ever picks a
+kernel within an engine, never the engine itself. A tuned graph's first execute samples
+several candidates (the backward's sweep happens on the first backward), and a tuned
+process loads every candidate module, so don't measure memory in a benchmarking
+process. Benchmarking is invalid under HIP graph capture. Winner records are read
+regardless of whether benchmarking is on, so an untuned comparison needs an empty
+cache root or `HIPDNN_DISABLE_CACHE=1`.
+
+**Census.** Rows carry the prefix `grad ` for a grad-eligible forward and `bwd ` for its
+backward; `bwd_totals()` sums the `bwd ` rows and `format_report()` prints a `BWD
+TOTAL` line once any exist. Extra markers: `dropout=1` when `p>0`, `recompute=1` on a
+forward re-executed inside a checkpoint recompute, `bwd_recompute=1` on a `bwd` row
+that had to recompute natively (counted `native`, not `aot`, even though its matching
+`grad` row stayed `aot`). To confirm a run trained **purely on hipDNN**: every
+`grad`/`bwd` row has `native == 0`, no row carries `bwd_recompute`, the `bwd` row's
+`aot` equals the number of attention calls, every engine is named (not hex), and
+`fallback_reasons()` is empty — a run full of `bwd_recompute` rows looks served in
+`aot` but fails that check because those rows also count `native`.
+
+**Not in scope.** A learned float `attn_mask` / dBias stays native
+(`grad: attn_mask requires grad`) even though some engines could serve a bias.
+`torch.compile` support beyond the graph-break fallback above (`compile: tracing`) is
+not implemented. Multi-GPU is a known caveat independent of this change: the graph
+cache key has no device index and the process-global handle binds to whatever device
+was current at `install()`.
 
 ## Per-framework notes
 

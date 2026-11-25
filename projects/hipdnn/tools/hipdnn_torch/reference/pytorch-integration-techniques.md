@@ -147,7 +147,7 @@ details the other. They are complementary, not mutually exclusive.
 | **Mechanism** | Replace `torch.nn.functional.linear` / `.rms_norm` / `.scaled_dot_product_attention` | Register `torch.library.Library("aten", "IMPL")` overrides at the HIP dispatch key |
 | **Call sites caught** | Calls that resolve `F.<op>` at call time — `nn.Linear`, `nn.RMSNorm`, `F.sdpa`. Does not catch GEMMs written as `torch.matmul` / `@` / `torch.bmm`. | The ATen op regardless of how it was spelled — `@`, `torch.matmul`, `bmm`, and direct `torch.ops.aten.*` all route through it. |
 | **torch.compile** | Not caught — Dynamo resolves function references at trace time | Caught — the override runs below Dynamo at the dispatcher |
-| **Autograd / training** | Returns a plain tensor; inference-only unless you add an `autograd.Function` | Registered below autograd; cover training by also overriding the backward ATen ops |
+| **Autograd / training** | SDPA trains end-to-end via a built-in `torch.autograd.Function` (forward decides whether the whole step — forward and backward — runs on hipDNN or native); every other intercepted op still returns a plain tensor and declines to native whenever grad is enabled and an operand requires grad, so autograd stays correct without a hipDNN backward for those ops | Registered below autograd; cover training by also overriding the backward ATen ops |
 | **Reading op intent** | Direct — the high-level args (`is_causal`, `scale`, `normalized_shape`) are in hand | Indirect — you see decomposed ops; SDPA is post-backend-selection and returns a tuple |
 | **Fallback** | Call the saved original functional | `get_kernel()` + `call_boxed()` |
 | **Opt-in** | Via `install()`; importing the package has no side effects | Overrides register when the injection module is imported |
@@ -784,7 +784,14 @@ hipDNN provides backward variants for all operations: `conv_dgrad`, `conv_wgrad`
 
 **Strategy for Phase 1**: Register the forward override at the HIP dispatch key. PyTorch's autograd engine will decompose the backward through the same dispatch — if you also override the backward ATen ops, hipDNN handles both directions.
 
-For inference-only use cases (ComfyUI image generation), backward is not needed. For training, ensure backward ops are also overridden or implement `torch.autograd.Function` with custom forward/backward.
+For an inference use case with no gradients (ComfyUI image generation), backward is not
+needed. For training, ensure backward ops are also overridden or implement
+`torch.autograd.Function` with custom forward/backward — this package does exactly that
+for SDPA (§3.1, `hipdnn_torch/sdpa.py`): a grad-eligible call runs through an
+`autograd.Function` whose forward decides routing for the whole step, and a decline
+sends both the forward and backward to native so autograd is never left half-served.
+The other intercepted ops do not yet have a hipDNN backward and decline to native under
+grad instead.
 
 ### 6.3 Three Native Backend Paths
 

@@ -3,7 +3,7 @@
 
 """Subprocess bodies for the GPU SDPA-backward cases that need a fresh process:
 
-  * case (l): the autograd worker-thread teardown hazard (M10) is only
+  * case (l): the autograd worker-thread teardown hazard is only
     observable by actually letting the interpreter tear down -- a foreground
     ``pytest`` process never exercises that.
   * case (o): ``HIPDNN_TORCH_SELECT=force`` must be set before the first
@@ -134,7 +134,7 @@ def _run_force(engine, shape):
 
 
 # --------------------------------------------------------------------------- #
-# case (r): benchmarking guard (M17)                                          #
+# case (r): benchmarking guard                                               #
 # --------------------------------------------------------------------------- #
 def _run_benchmark_guard():
     import torch
@@ -190,10 +190,10 @@ def _run_benchmark_guard():
 
 
 # --------------------------------------------------------------------------- #
-# case (s): mixed engine pair (Q4)                                            #
+# case (s): mixed engine pair                                                 #
 # --------------------------------------------------------------------------- #
 def _run_mixed_pair():
-    """Force mode pins one engine for every graph of a call (M13), so it
+    """Force mode pins one engine for every graph of a call, so it
     cannot build a mixed pair. Instead, a ``HIPDNN_HEUR_CONFIG_PATH`` rule
     (``SelectionHeuristic::Config``, docs/Environment.md#HIPDNN_HEUR_CONFIG_PATH)
     that matches ``sdpa_fwd`` nodes moves ``ASM_SDPA_ENGINE`` to the front
@@ -283,8 +283,8 @@ def main(argv):
     elif mode == "force_flydsl_bwd":
         # A FlyDSL engine that serves only the backward: forcing it for a call
         # that also needs a fwd-with-stats graph makes THAT probe decline
-        # (M13: "any other pin declines grad-eligible calls"). Name from the
-        # DESIGN.md M8 census example (line 241).
+        # ("any other pin declines grad-eligible calls"). A real FlyDSL
+        # backward-only engine name (no corresponding forward builder).
         _run_force("hipkernel:flydsl_sdpa_bwd_split", "mha")
     elif mode == "force_asm_gqa":
         _run_force("ASM_SDPA_ENGINE", "gqa")

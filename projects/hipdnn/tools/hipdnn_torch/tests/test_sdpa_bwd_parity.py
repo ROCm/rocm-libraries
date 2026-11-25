@@ -3,25 +3,25 @@
 
 """GPU backward-routing parity tests for SDPA (ALMIOPEN-2978).
 
-Covers DESIGN.md's verification-plan cases (a)-(l), (n)-(p), (r)-(u) -- every
-GPU case except (m) (``test_training_gate.py``), (q) (``test_sdpa_bwd_hf.py``)
-and (g)/(g2) (``test_sdpa_autocast.py``, wave 2). Like ``test_parity.py``,
+Covers backward-routing test cases (a)-(l), (n)-(p), (r)-(u) -- every GPU
+case except (m) (``test_training_gate.py``), (q) (``test_sdpa_bwd_hf.py``)
+and (g)/(g2) (``test_sdpa_autocast.py``). Like ``test_parity.py``,
 every test here is marked ``gpu`` and auto-skipped by ``conftest.py`` unless a
 wired provider + HIP device is present.
 
-A call is *grad-eligible* (routed through the backward machinery, M2) when
+A call is *grad-eligible* (routed through the backward machinery) when
 ``dropout_p > 0`` or grad mode is on and q/k/v require grad; its forward row
 key carries the ``"grad "`` prefix and its backward row the ``"bwd "`` prefix
-(``base.GRAD_PREFIX`` / ``base.BWD_PREFIX``). Two build facts this design
-depends on cannot be assumed from the test process and are read from the job's
+(``base.GRAD_PREFIX`` / ``base.BWD_PREFIX``). Two build facts these tests
+depend on cannot be assumed from the test process and are read from the job's
 environment instead of the build:
 
   * ``HIPDNN_TORCH_TEST_FLYDSL`` -- ``"on"``/``"off"``: whether the kernel
-    ingestor (FlyDSL) is loaded. Only FlyDSL serves dropout (M6), so every
-    test here that needs a SERVED dropout call skips cleanly unless this is
-    ``"on"``; ASM-only builds also serve far fewer shapes (M18), so most
-    other cases pin an MHA D=128 shape ASM covers in every build state
-    instead of gating on this variable.
+    ingestor (FlyDSL) is loaded. Only FlyDSL serves dropout, so every test
+    here that needs a SERVED dropout call skips cleanly unless this is
+    ``"on"``; ASM-only builds also serve far fewer shapes, so most other
+    cases pin an MHA D=128 shape ASM covers in every build state instead of
+    gating on this variable.
   * ``HIPDNN_TORCH_TEST_16337`` -- ``"in"``/``"out"``: whether
     hip-kernel-provider#16337 (ASM backward at gfx950 D=64/192) is in the
     build; only case (u)'s D=64 row depends on it.
@@ -114,7 +114,7 @@ def _require_flydsl_on():
     if _flydsl_state() != "on":
         pytest.skip(
             "HIPDNN_TORCH_TEST_FLYDSL not 'on'; dropout is served only by "
-            "FlyDSL (M6) and this case needs a SERVED dropout call"
+            "FlyDSL and this case needs a SERVED dropout call"
         )
 
 
@@ -206,12 +206,12 @@ def _sanitize_for_path(raw):
 
 def _misaligned_like(t):
     """A tensor with ``t``'s exact shape/stride/dtype/device and VALUES,
-    whose ``data_ptr()`` sits one element off a 16-byte boundary (M5's
-    alignment trigger): slice a buffer one element larger by 1 element (torch
-    's allocator cannot have rounded back onto the boundary for every dtype),
-    then copy ``t``'s values in -- an uninitialized view would read back as
-    allocator garbage (occasionally NaN/Inf in bf16), making the parity
-    check flaky for reasons unrelated to M5."""
+    whose ``data_ptr()`` sits one element off a 16-byte boundary (the
+    alignment ``execute`` rejects): slice a buffer one element larger by 1
+    element (torch's allocator cannot have rounded back onto the boundary
+    for every dtype), then copy ``t``'s values in -- an uninitialized view
+    would read back as allocator garbage (occasionally NaN/Inf in bf16),
+    making the parity check flaky for reasons unrelated to alignment."""
     flat = t.new_empty(t.numel() + 1)
     m = flat[1:].as_strided(t.shape, t.stride())
     m.copy_(t)
@@ -256,7 +256,7 @@ def _fail_nth_execute(real_execute, n):
     implementation otherwise -- lets (b)/(i) target one specific graph's
     execute (fwd is always first, backward second) without reaching into
     cache-key internals. ``NotApplicable`` (not a bare exception) matters:
-    the backward's P4 handler catches only ``except NotApplicable``
+    the backward's native-recompute handler catches only ``except NotApplicable``
     (base.py's own fallback ladder does the same for the forward)."""
     calls = {"i": 0}
 
@@ -298,7 +298,7 @@ def torch():
 # --------------------------------------------------------------------------- #
 def test_dropout_mask_matches_philox_reference_and_native_oracle(torch):
     """(a) The override must draw -- and use -- the exact Philox stream
-    AOTriton's own kernels would (RngRouting, M6). Oracle: hipDNN's O AND
+    AOTriton's own kernels would. Oracle: hipDNN's O AND
     dQ/dK/dV against a float64 manual-attention reference built from
     ``_philox.philox_mask`` at the seed/offset the call actually drew; if
     that mask equals torch's own ``_fill_mem_eff_dropout_mask_`` probe at the
@@ -379,10 +379,10 @@ def test_dropout_generator_offset_delta_matches_native(
     torch, name, hq, hkv, d, dtype, causal, mask_kind
 ):
     """(b) The generator offset delta a call draws must equal native's delta
-    from the identical starting state (RngRouting D3/M6) -- checked as a
-    black box, by running native and the override from the same seed and
-    diffing ``Generator.get_offset()``, not by re-deriving the backend's
-    advance arithmetic (that is B1's CPU unit-test surface). Also asserts
+    from the identical starting state -- checked as a black box, by running
+    native and the override from the same seed and diffing
+    ``Generator.get_offset()``, not by re-deriving the backend's advance
+    arithmetic (that is a separate CPU unit-test surface). Also asserts
     routing was actually SERVED when FlyDSL is on: the delta-equality check
     alone cannot distinguish "routed and matched native's advance" from "
     declined and ran the same native call twice"."""
@@ -431,7 +431,7 @@ def test_dropout_generator_offset_delta_matches_native(
 
 def test_dropout_offset_delta_matches_native_under_autocast(torch):
     """(b) fp32 inputs under bf16 autocast: the generator delta must match
-    native's even when M7's cast runs before the dropout gate."""
+    native's even when the autocast cast runs before the dropout gate."""
     import torch.nn.functional as F
 
     device = torch.device("cuda")
@@ -453,8 +453,8 @@ def test_dropout_offset_delta_matches_native_under_autocast(torch):
 
 
 def test_dropout_ck_preferred_routes_native_with_reason(torch):
-    """(b) CK-preferred flash routes native with the CK reason (RngRouting
-    D3): hipDNN's dropout RNG cannot mirror CK's generator advance."""
+    """(b) CK-preferred flash routes native with the CK reason: hipDNN's
+    dropout RNG cannot mirror CK's generator advance."""
     try:
         ck = torch.backends.cuda.ROCmFABackend.Ck
         if torch.backends.cuda.preferred_rocm_fa_library() != ck:
@@ -476,7 +476,7 @@ def test_dropout_ck_preferred_routes_native_with_reason(torch):
 def test_dropout_consecutive_calls_draw_different_masks(torch):
     """(b) Two dropout calls on the same generator never reuse a Philox
     stream offset: each draws a fresh (seed, offset), so their keep masks
-    differ (RngRouting draw order, M6)."""
+    differ."""
     import torch.nn.functional as F
 
     philox_mask = _philox_mask_fn()
@@ -505,8 +505,8 @@ def test_dropout_consecutive_calls_draw_different_masks(torch):
 
 def test_dropout_execute_failure_rewinds_generator_offset(torch, monkeypatch):
     """(b) A forward execute failure after the RNG draw must rewind
-    (``gen.set_offset(offset_before)``) before falling back natively (P5, M6
-    draw-order/rewind): the final offset must equal what a direct native
+    (``gen.set_offset(offset_before)``) before falling back natively: the
+    final offset must equal what a direct native
     call draws from the same starting state, never double-advanced -- and
     the injection must actually have fired (one native fallback counted)."""
     from hipdnn_torch.base import OpOverride
@@ -565,11 +565,11 @@ def test_checkpoint_matches_no_checkpoint_run(
     torch, use_reentrant, with_dropout_module
 ):
     """(c) Reentrant and non-reentrant checkpoint recompute must reach the
-    same routing decision on the no_grad first pass and its grad recompute
-    (RngRouting D1), replay the same dropout mask, and leave the generator at
-    the same final offset as an uncheckpointed call; census shows 2 hipDNN
-    forwards (one ``recompute=1``) and 1 hipDNN backward per call. dropout_p
-    > 0 needs FlyDSL (M6: only FlyDSL serves dropout)."""
+    same routing decision on the no_grad first pass and its grad recompute,
+    replay the same dropout mask, and leave the generator at the same final
+    offset as an uncheckpointed call; census shows 2 hipDNN forwards (one
+    ``recompute=1``) and 1 hipDNN backward per call. dropout_p > 0 needs
+    FlyDSL (only FlyDSL serves dropout)."""
     _require_flydsl_on()
     import torch.nn.functional as F
 
@@ -617,13 +617,13 @@ def test_checkpoint_matches_no_checkpoint_run(
 
 
 def test_checkpoint_declined_shape_both_passes_native(torch):
-    """(c) A shape the probes decline (D=100: not a multiple of 8, HKP-H34
-    /M18) must send BOTH the no_grad first pass and its grad recompute
-    native under checkpoint -- M2's decline-the-whole-call policy applies
+    """(c) A shape the probes decline (D=100: not a multiple of 8,
+    HKP-H34) must send BOTH the no_grad first pass and its grad recompute
+    native under checkpoint -- the decline-the-whole-call policy applies
     independently to each pass, never a half-routed checkpoint step.
-    ``dropout_p=0.1`` makes EVERY call grad-eligible regardless of grad mode
-    (M6 D1), so both passes take the identical probe-decline path; at p==0
-    the no_grad first pass would instead take the PLAIN (non-grad) key and
+    ``dropout_p=0.1`` makes EVERY call grad-eligible regardless of grad
+    mode, so both passes take the identical probe-decline path; at p==0 the
+    no_grad first pass would instead take the PLAIN (non-grad) key and
     could serve a D=100 non-grad forward (no dQ buffer at all), defeating
     this test's premise."""
     import torch.nn.functional as F
@@ -647,9 +647,10 @@ def test_checkpoint_declined_shape_both_passes_native(torch):
 
 
 def test_checkpoint_no_grad_first_pass_bit_identical_to_grad_recompute(torch):
-    """(c) RngRouting D1: the no_grad first pass and its grad recompute probe
-    the identical graph key and draw the identical (seed, offset), so their O
-    must be bit-identical, not merely within tolerance. Needs FlyDSL (dropout)."""
+    """(c) The no_grad first pass and its grad recompute probe the
+    identical graph key and draw the identical (seed, offset), so their O
+    must be bit-identical, not merely within tolerance. Needs FlyDSL
+    (dropout)."""
     _require_flydsl_on()
     import torch.nn.functional as F
 
@@ -689,7 +690,7 @@ def test_checkpoint_no_grad_first_pass_bit_identical_to_grad_recompute(torch):
 def test_do_layout_variants_match_native(torch, kind):
     """(d) A dense BHSD-contiguous dO (HF's ``transpose(1,2).contiguous()``),
     an expanded (self-overlapping, stride-0) dO, and a 16-byte-misaligned dO
-    must all be copied into O's layout first (M5) with no execute error and
+    must all be copied into O's layout first with no execute error and
     grads matching native."""
     import torch.nn.functional as F
 
@@ -719,7 +720,7 @@ def test_do_layout_variants_match_native(torch, kind):
             bwd_aot, bwd_native = ov.bwd_totals()
             assert bwd_aot > 0 and bwd_native == 0, (
                 "this unmasked MHA D=64 shape must be served when FlyDSL is "
-                "on, or M5's copy path is never exercised"
+                "on, or the dO-copy path is never exercised"
             )
 
     want = F.scaled_dot_product_attention(q2, k2, v2)
@@ -729,7 +730,7 @@ def test_do_layout_variants_match_native(torch, kind):
 
 
 def test_do_size1_axis_stride_difference_is_ignored(torch):
-    """(d)/M5: a stride mismatch confined to a size-1 axis (B=1 here) must
+    """(d): a stride mismatch confined to a size-1 axis (B=1 here) must
     NOT trigger a copy or change the result -- only axes with extent > 1
     matter; the declared dO strides are O's own."""
     import torch.nn.functional as F
@@ -794,8 +795,8 @@ def test_gqa_grad_matches_native_and_keeps_hkv(torch):
 # --------------------------------------------------------------------------- #
 def test_bool_mask_and_nongrad_float_mask_route(torch):
     """(f) A bool mask materializes to an additive bias and a non-grad float
-    mask passes through as-is; both route the same as unmasked (M9 only
-    exempts a float mask that itself requires grad). FlyDSL OFF: both ASM
+    mask passes through as-is; both route the same as unmasked (only a
+    float mask that itself requires grad is exempt). FlyDSL OFF: both ASM
     builders reject any bias, so the whole call goes native."""
     import torch.nn.functional as F
 
@@ -833,9 +834,9 @@ def test_bool_mask_and_nongrad_float_mask_route(torch):
 
 
 def test_mask_requiring_grad_routes_native(torch):
-    """(f)/M9: a float ``attn_mask`` that itself requires grad under grad
+    """(f) A float ``attn_mask`` that itself requires grad under grad
     mode always goes native, whatever q/k/v need (learned dBias is out of
-    scope, Q2)."""
+    scope)."""
     import torch.nn.functional as F
 
     b, hq, sq, skv, d = 2, 4, 64, 64, 64
@@ -858,7 +859,7 @@ def test_mask_requiring_grad_routes_native(torch):
 # (h) declines                                                                 #
 # --------------------------------------------------------------------------- #
 def test_d100_declines_at_forward_stage_not_bwd(torch):
-    """(h)/M18 HKP-H34: D=100 is not a multiple of 8 -- the fresh dense dQ
+    """(h) D=100 is not a multiple of 8 (HKP-H34) -- the fresh dense dQ
     buffer's row-padding write cannot happen, so the FORWARD stage declines
     first (D%8==0 required on CDNA); the reason must start ``grad:`` but is
     not specifically the bwd-stage reason."""
@@ -875,11 +876,12 @@ def test_d100_declines_at_forward_stage_not_bwd(torch):
 
 
 def test_misaligned_operand_declines_before_rng_draw(torch):
-    """(h)/M14: a 16-byte-misaligned q/k/v view declines ``operand: pointer
+    """(h) A 16-byte-misaligned q/k/v view declines ``operand: pointer
     not 16-byte aligned`` -- and the override draws NOTHING of its own at
-    p>0 before falling back (M14 runs before the probes and before the
-    draw): the overall generator advance equals exactly a plain native
-    call's own advance, since the decline falls straight through to it."""
+    p>0 before falling back (the host-side checks run before the probes and
+    before the draw): the overall generator advance equals exactly a plain
+    native call's own advance, since the decline falls straight through to
+    it."""
     import torch.nn.functional as F
 
     device = torch.device("cuda")
@@ -903,7 +905,7 @@ def test_misaligned_operand_declines_before_rng_draw(torch):
             gen, 5, lambda: F.scaled_dot_product_attention(q, k, v, dropout_p=p)
         )
     assert routed_delta == native_delta, (
-        "M14's decline must fall straight through to native with no extra "
+        "the decline must fall straight through to native with no extra "
         "draw of its own"
     )
     aot, native = ov.totals()
@@ -912,7 +914,7 @@ def test_misaligned_operand_declines_before_rng_draw(torch):
 
 
 def test_seq_stride_less_than_d_declines_before_rng_draw(torch):
-    """(h)/M14 HKP-H30: q/k/v rows must not alias (seq stride >= D); a
+    """(h) q/k/v rows must not alias (seq stride >= D, HKP-H30); a
     narrower seq stride declines ``operand: stride``, with the same
     no-extra-draw property as the alignment decline above."""
     import torch.nn.functional as F
@@ -945,10 +947,10 @@ def test_seq_stride_less_than_d_declines_before_rng_draw(torch):
 
 
 # --------------------------------------------------------------------------- #
-# (i) P4 fault injection                                                       #
+# (i) backward execute fault injection                                        #
 # --------------------------------------------------------------------------- #
 def test_p4_fault_injection_p_zero_recomputes_natively(torch, monkeypatch, caplog):
-    """(i) P4: a backward execute failure at p==0 recomputes natively --
+    """(i) A backward execute failure at p==0 recomputes natively --
     WARNING logged, ``bwd_recompute=1``, ``bwd_totals()`` native += 1, the
     grad row's aot UNCHANGED by the failure, the bwd row's aot stays 0, and
     the recompute must call the saved native function (sdpa.py's ``_native``
@@ -992,10 +994,10 @@ def test_p4_fault_injection_p_zero_recomputes_natively(torch, monkeypatch, caplo
 
 
 def test_p4_fault_injection_p_nonzero_raises(torch, monkeypatch):
-    """(i) P4/Q5: at p>0 a backward execute failure RAISES -- a native
-    recompute would use a different (non-replayed) dropout mask, so no
-    fallback is attempted. Needs FlyDSL (p>0 only ever reaches a real
-    backward execute via FlyDSL, M6)."""
+    """(i) At p>0 a backward execute failure RAISES -- a native recompute
+    would use a different (non-replayed) dropout mask, so no fallback is
+    attempted. Needs FlyDSL (p>0 only ever reaches a real backward execute
+    via FlyDSL)."""
     _require_flydsl_on()
     from hipdnn_torch.base import OpOverride
 
@@ -1025,7 +1027,7 @@ def test_p4_fault_injection_p_nonzero_raises(torch, monkeypatch):
 @pytest.mark.parametrize("gqa", [False, True])
 def test_mha_gqa_p0_grad_matches_native(torch, gqa, dtype_name, causal):
     """(k) p==0 MHA and GQA, causal and non-causal, bf16/fp16: dQ/dK/dV
-    match native autograd (P3). With FlyDSL ON this asserts only that SOME
+    match native autograd. With FlyDSL ON this asserts only that SOME
     engine served and is named (ASM may win the unmasked MHA bwd at D=128,
     and with #16337 also at D=64), not a specific one. FlyDSL OFF: GQA's bwd
     is rejected by ASM; MHA D=128 is served by ASM alone."""
@@ -1072,8 +1074,8 @@ def test_mha_gqa_p0_grad_matches_native(torch, gqa, dtype_name, causal):
 # (l) subprocess: autograd worker-thread teardown                             #
 # --------------------------------------------------------------------------- #
 def test_subprocess_backward_exits_zero_and_bwd_row_served(torch):
-    """(l) The autograd worker-thread teardown hazard (M10) is checked by
-    exit code on GPU: the process must exit 0 AND the backward must have
+    """(l) The autograd worker-thread teardown hazard is checked by exit
+    code on GPU: the process must exit 0 AND the backward must have
     actually been served (MHA D=128 p=0, servable in every build state) --
     the teardown hazard needs a real hipDNN backward graph alive on the
     worker thread, not a native fallback."""
@@ -1100,7 +1102,7 @@ def test_subprocess_forward_only_graph_held_on_ctx_exits_zero(torch):
 # (n) streams                                                                  #
 # --------------------------------------------------------------------------- #
 def test_side_stream_forward_backward_matches_native_and_binds_stream(torch):
-    """(n) M12: a side-stream grad step must execute hipDNN work on that
+    """(n) A side-stream grad step must execute hipDNN work on that
     stream (``handle.get_stream()`` returns the side stream's raw handle)
     and match native. The side stream must wait for the default stream's
     writes to q/k/v before reading them."""
@@ -1131,7 +1133,7 @@ def test_side_stream_forward_backward_matches_native_and_binds_stream(torch):
 
 
 def test_default_stream_loop_never_calls_set_stream(torch, monkeypatch):
-    """(n) M12: a default-stream loop must bind the stream at most once (the
+    """(n) A default-stream loop must bind the stream at most once (the
     first call when ``bound_stream`` is still 0) and then never call
     ``set_stream`` again -- repeated calls on the same stream are a no-op.
     nanobind's ``Handle`` has no ``dynamic_attr()``, so an instance-level
@@ -1160,7 +1162,7 @@ def test_default_stream_loop_never_calls_set_stream(torch, monkeypatch):
 
 
 def test_two_threads_two_streams_outputs_match_and_counts_exact(torch):
-    """(n) M12 ``st.lock``: two threads calling into the same installed
+    """(n) ``st.lock``: two threads calling into the same installed
     override on two different streams must not corrupt the shared census
     counters (counted under the lock) nor each other's results. The native
     reference is the function captured BEFORE ``install()`` patches the
@@ -1214,8 +1216,8 @@ def test_two_threads_two_streams_outputs_match_and_counts_exact(torch):
 def test_subprocess_force_asm_serves_mha_no_mask(torch):
     """(o) Force mode + ASM_SDPA_ENGINE on bf16 D=128 p=0 MHA, no mask: both
     the fwd-with-stats graph and the bwd graph are built with ONE builder
-    (ASM has both), so the whole call is served and both rows name ASM
-    (M13)."""
+    (ASM has both), so the whole call is served and both rows name
+    ASM."""
     proc = _run_subproc("force_asm")
     payload = json.loads(proc.stdout)
     census = payload["census"]
@@ -1228,7 +1230,7 @@ def test_subprocess_force_asm_serves_mha_no_mask(torch):
 
 
 def test_subprocess_force_flydsl_bwd_engine_declines_fwd_stats(torch):
-    """(o) Force mode pins ONE engine for every graph of a call (M13); a
+    """(o) Force mode pins ONE engine for every graph of a call; a
     FlyDSL engine that serves only the backward makes the fwd-with-stats
     probe decline for that engine -> native with ``grad: fwd+stats:``."""
     proc = _run_subproc("force_flydsl_bwd")
@@ -1252,9 +1254,9 @@ def test_subprocess_force_asm_gqa_or_mask_declines(torch, variant):
 # (p) in-place on the output                                                   #
 # --------------------------------------------------------------------------- #
 def test_inplace_on_output_no_custom_function_creation_error(torch):
-    """(p) B1: M1's Function returns the dense allocation, not a view the
-    custom-function machinery would mark ``IN_CUSTOM_FUNCTION`` -- an
-    in-place op on O must not raise "created inside a custom Function"."""
+    """(p) The custom autograd Function returns the dense allocation, not a
+    view the custom-function machinery would mark ``IN_CUSTOM_FUNCTION`` --
+    an in-place op on O must not raise "created inside a custom Function"."""
     import torch.nn.functional as F
 
     q, k, v = _qkv_bshd(torch, 2, 64, 64, 8, 8, 64, torch.bfloat16)
@@ -1282,7 +1284,9 @@ def test_inplace_on_output_raises_at_backward_parity_with_native(torch):
         out = F.scaled_dot_product_attention(q, k, v)
         if _flydsl_state() == "on":
             aot, _ = ov.totals()
-            assert aot > 0, "this shape must be served when FlyDSL is on (exercises M1)"
+            assert (
+                aot > 0
+            ), "this shape must be served when FlyDSL is on (exercises the dense-allocation path)"
         out.add_(1.0)
         with pytest.raises(RuntimeError):
             out.sum().backward()
@@ -1296,7 +1300,7 @@ def test_inplace_on_output_raises_at_backward_parity_with_native(torch):
 
 def test_backward_after_nonin_place_use_works_output_is_permuted_view(torch):
     """(p) A non-in-place use must not raise, and O must be a permuted view
-    of the dense allocation ``Function.forward`` returns (M1), not that
+    of the dense allocation ``Function.forward`` returns, not that
     allocation itself."""
     import torch.nn.functional as F
 
@@ -1305,34 +1309,34 @@ def test_backward_after_nonin_place_use_works_output_is_permuted_view(torch):
         out = F.scaled_dot_product_attention(q, k, v)
         if _flydsl_state() == "on":
             aot, _ = ov.totals()
-            assert aot > 0, "this shape must be served when FlyDSL is on (exercises M1)"
+            assert (
+                aot > 0
+            ), "this shape must be served when FlyDSL is on (exercises the dense-allocation path)"
         (out * 2.0).sum().backward()
         assert q.grad is not None and k.grad is not None and v.grad is not None
 
-    assert (
-        out._base is not None
-    ), "O must be a view (M1), not the dense allocation itself"
+    assert out._base is not None, "O must be a view, not the dense allocation itself"
     assert out._base.is_contiguous()
 
 
 # --------------------------------------------------------------------------- #
-# (r) benchmarking guard (M17)                                                 #
+# (r) benchmarking guard                                                       #
 # --------------------------------------------------------------------------- #
 def test_benchmarking_guard_samples_both_graphs_and_writes_winners(torch, tmp_path):
-    """(r) M17: a fresh, empty cache root under ``HIPDNN_FORCE_BENCHMARKING=1``
+    """(r) A fresh, empty cache root under ``HIPDNN_FORCE_BENCHMARKING=1``
     must sample BOTH the stats-forward and backward graphs for an
     ingestor-served MHA bf16 D=128 p=0 shape with a non-grad, non-causal
     bias (both ASM builders reject any bias, so only ingestor engines can
-    serve it -- a shape ASM can never claim, M17), and leave a non-empty
-    winner shard for EACH engine; first-execute grads must still match
-    native (P3 survives tuning). Reads the backend's own C++ log from
+    serve it -- a shape ASM can never claim), and leave a non-empty winner
+    shard for EACH engine; first-execute grads must still match native.
+    Reads the backend's own C++ log from
     ``HIPDNN_LOG_FILE`` (the alola harness always exports one; a console
     sink is used only when that var is unset, Logging.cpp:66-67, :249), not
     the subprocess's stderr."""
     if _flydsl_state() != "on":
         pytest.skip(
             "HIPDNN_TORCH_TEST_FLYDSL not 'on'; case (r) needs an ingestor "
-            "engine to serve both graphs (ASM ignores benchmarking, M17)"
+            "engine to serve both graphs (ASM ignores benchmarking)"
         )
     cache_dir = tmp_path / "hipdnn_cache"
     log_file = tmp_path / "hipdnn.log"
@@ -1423,21 +1427,21 @@ def test_benchmarking_guard_samples_both_graphs_and_writes_winners(torch, tmp_pa
 
 
 # --------------------------------------------------------------------------- #
-# (s) mixed engine pair (Q4)                                                   #
+# (s) mixed engine pair                                                        #
 # --------------------------------------------------------------------------- #
 def test_subprocess_mixed_engine_pair_asm_fwd_flydsl_bwd(torch):
-    """(s) Q4: the census does not constrain engine pairs. Force mode cannot
-    build this (it pins one engine for every graph, M13); instead a
+    """(s) The census does not constrain engine pairs. Force mode cannot
+    build this (it pins one engine for every graph); instead a
     ``HIPDNN_HEUR_CONFIG_PATH`` rule prefers ASM_SDPA_ENGINE for the FORWARD
     node only, on a GQA D=128 bf16 p=0 shape where ASM's forward builder
     accepts GQA but its backward builder rejects it
     (SdpaBwdPlanBuilder.cpp:1137-1141) -- so the bwd graph must fall through
     to some other (FlyDSL) engine. Asserts the grad row names ASM and the
     bwd row names a DIFFERENT engine, unconditionally (not "if the default
-    ranking happened to pick ASM"), and that grads match native (P3
-    evidence for a cross-engine pair). FlyDSL OFF has no GQA backward at
-    all (ASM is the only bwd engine and it rejects GQA), so the bwd graph
-    would have nothing to fall through to."""
+    ranking happened to pick ASM"), and that grads match native (evidence
+    for a cross-engine pair). FlyDSL OFF has no GQA backward at all (ASM is
+    the only bwd engine and it rejects GQA), so the bwd graph would have
+    nothing to fall through to."""
     _require_flydsl_on()
     proc = _run_subproc("mixed_pair")
     payload = json.loads(proc.stdout)
@@ -1514,7 +1518,7 @@ def test_deterministic_mode_routes_native(torch):
 
 
 # --------------------------------------------------------------------------- #
-# (u) gfx950 FlyDSL OFF expected census table (M18)                           #
+# (u) gfx950 FlyDSL OFF expected census table                                 #
 # --------------------------------------------------------------------------- #
 @pytest.mark.parametrize(
     "name, hq, hkv, d, mask_kind, expect",
@@ -1531,7 +1535,7 @@ def test_flydsl_off_expected_census_per_shape(
     """(u) gfx950 FlyDSL OFF: ASM serves only MHA, no attn_mask, 64<D<=128
     (or 192/128), p=0 (SdpaBwdPlanBuilder.cpp:635-638, :700-716, :427-438);
     GQA -> ``grad: bwd:``, any mask -> ``grad: fwd+stats:``; D=64 depends on
-    whether hip-kernel-provider#16337 is in the build (M18)."""
+    whether hip-kernel-provider#16337 is in the build."""
     flydsl = _flydsl_state()
     if flydsl != "off":
         pytest.skip(

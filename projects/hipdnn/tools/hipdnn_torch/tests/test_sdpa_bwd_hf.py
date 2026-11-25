@@ -11,14 +11,14 @@ checkpoint is downloaded, only the layer's shape), OLMo-2 (D=128, MHA) and
 GPT-2 (D=64), each with ``use_cache=False``, ``use_cache=True`` and a padded
 ``attention_mask``, dropout 0, ``attn_implementation="sdpa"`` (a bare Config
 otherwise defaults to eager -- ``AttentionInterface.get_interface(None, ...)``
-never reaches SDPA). Per variant: ``bwd`` aot == calls and native == 0 when
-``HIPDNN_TORCH_TEST_FLYDSL=on`` (FlyDSL serves every shape here: no GQA/D=64
-/bias restriction), or the exact M18 decline reason when ``=off`` (GQA and
-D=64-without-#16337 -> ``grad: bwd:``; any mask -> ``grad: fwd+stats:``;
-unmasked OLMo-2, MHA D=128 -> served by ASM); grads match native autograd;
-the recorded q/k/v strides equal the layout class of that variant computed
-from the layer's config by DESIGN.md's M18 formulas (not the D=16/Hq=8/S=16
-table it was measured at); a served ``bwd`` row's engine is a name, not hex.
+``HIPDNN_TORCH_TEST_FLYDSL=on`` (the kernel-ingestor engine serves every
+shape here: no GQA/D=64/bias restriction), or the exact decline reason when
+``=off`` (GQA and D=64-without-#16337 -> ``grad: bwd:``; any mask ->
+``grad: fwd+stats:``; unmasked OLMo-2, MHA D=128 -> served by ASM); grads
+match native autograd; the recorded q/k/v strides equal the layout class of
+that variant computed from the layer's config by the per-variant stride
+formulas below (not the small fixed shape they were measured at); a served
+``bwd`` row's engine is a name, not hex.
 """
 
 import contextlib
@@ -226,17 +226,17 @@ def _run_layer(torch, arch, layer, hidden, attention_mask, cache):
 
 
 def _assert_served_or_declined(ov, sq, skv, d, *, arch, masked):
-    """(q)/M18: with FlyDSL ON every variant here is served; with FlyDSL OFF
-    only unmasked MHA D=128 (olmo2) is served by ASM -- GQA archs and D=64
-    without #16337 decline at the bwd stage, and a mask always declines at
-    the fwd+stats stage (both ASM builders reject any bias)."""
+    """(q): with the kernel ingestor on, every variant here is served; with
+    it off only unmasked MHA D=128 (olmo2) is served by ASM -- GQA archs and
+    D=64 without #16337 decline at the bwd stage, and a mask always
+    declines at the fwd+stats stage (both ASM builders reject any bias)."""
     aot, native = ov.totals()
     bwd_aot, bwd_native = ov.bwd_totals()
     flydsl = _flydsl_state()
     if flydsl is None:
         pytest.skip(
             "HIPDNN_TORCH_TEST_FLYDSL unset; case (q) states a build-specific "
-            "census expectation per variant (DESIGN.md M18)"
+            "census expectation per variant"
         )
 
     if flydsl == "on":
@@ -336,7 +336,7 @@ def test_use_cache_true_mixed_layout_matches_native(torch, transformers, arch):
     """(q) ``use_cache=True``: a prefill then a 1-token decode step appends
     to a ``DynamicCache``, producing a mixed per-tensor layout -- k/v become
     contiguous BHSD (`Hkv*S*D, S*D, D, 1`) while q stays a fresh BSHD view
-    at the decode step (M18/M4: mixed layouts are structurally accepted,
+    at the decode step (mixed layouts are structurally accepted;
     correctness is this test)."""
     from transformers.cache_utils import DynamicCache
 

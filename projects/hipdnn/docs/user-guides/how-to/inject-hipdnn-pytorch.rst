@@ -56,6 +56,18 @@ Importing the package does not import ``torch`` or touch the GPU; that happens l
 the first ``install()`` (or ``provider_ready()``), which is also where a misconfigured
 environment raises a clear error naming the variable to set.
 
+Training support
+================
+
+``F.scaled_dot_product_attention`` is the one intercepted op that also serves
+training: a training call (grad mode on with ``q``/``k``/``v`` requiring grad, or any
+dropout) runs either wholly on hipDNN — forward and backward both — or wholly on
+native PyTorch, decided once at forward time. Every other intercepted op still has no
+hipDNN backward and falls back to native under grad instead of silently dropping
+autograd. See the ``hipdnn_torch`` README's "Backward / training support" section for
+the full set of decline reasons, dropout/RNG behavior, autocast, force mode, and how to
+read the training census.
+
 Environment setup
 =================
 
