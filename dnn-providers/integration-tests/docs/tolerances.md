@@ -1178,9 +1178,9 @@ left-out tests number 455 on gfx942 and 525 on gfx90a.
 | gfx942 | backward data | float | 3,758 | 1,004 | 0 | 1.54 | 2,944 | 0 | 1.55 |
 | gfx942 | backward data | half | 4,265 | 244 | 0 | 1.54 | 2,213 | 0 | 1.61 |
 | gfx942 | backward data | bfloat16 | 3,566 | 278 | 0 | 1.56 | 3,033 | 0 | 1.78 |
-| gfx942 | backward weights | float | 4,356 | 638 | 0 | 1.55 | 3,970 | 0 | 1.64 |
-| gfx942 | backward weights | half | 5,155 | 279 | 0 | 1.55 | 1,263 | 0 | 1.55 |
-| gfx942 | backward weights | bfloat16 | 4,167 | 491 | 0 | 1.55 | 2,605 | 0 | 1.60 |
+| gfx942 | backward weights | float | 4,008 | 447 | 0 | 1.55 | 3,659 | 0 | 1.64 |
+| gfx942 | backward weights | half | 4,525 | 155 | 0 | 1.55 | 1,177 | 0 | 1.55 |
+| gfx942 | backward weights | bfloat16 | 3,831 | 425 | 0 | 1.55 | 2,409 | 0 | 1.60 |
 | gfx90a | backward data | float | 2,930 | 756 | 0 | 1.52 | 2,430 | 0 | 2.16 |
 | gfx90a | backward data | half | 3,239 | 1,343 | 0 | 1.50 | 1,344 | 16 | 0.54 |
 | gfx90a | backward data | bfloat16 | 2,776 | 202 | 0 | 3.22 | 2,686 | 0 | 2.28 |
@@ -1338,12 +1338,12 @@ accumulators, at the price of failing correct outputs (table above):
 | backward data, bfloat16 | one element off by 4 ULP / output truncated | 54 % / 0 % | 25 % / 0 % | 55 % / 0 % |
 | backward weights, float | one batch sample / one dy row missing | 100 % / 100 % | 100 % / 100 % | 100 % / 100 % |
 | backward weights, float | inputs rounded to tf32 / to bfloat16 | 100 % / 100 % | 100 % / 100 % | 100 % / 100 % |
-| backward weights, float | one element off by 4 ULP / output truncated | 14 % / 14 % | 0 % / 0 % | 0 % / 0 % |
-| backward weights, half | one batch sample / one dy row missing | 100 % / 100 % | 100 % / 100 % | 100 % / 100 % |
-| backward weights, half | accumulator in the io type | 2 % | 0 % | 0 % |
+| backward weights, float | one element off by 4 ULP / output truncated | 10 % / 10 % | 0 % / 0 % | 0 % / 0 % |
+| backward weights, half | one batch sample / one dy row missing | 100 % / 99 % | 100 % / 100 % | 100 % / 100 % |
+| backward weights, half | accumulator in the io type | 1 % | 0 % | 0 % |
 | backward weights, half | one element off by 4 ULP / output truncated | 0 % / 0 % | 0 % / 0 % | 0 % / 0 % |
 | backward weights, bfloat16 | one batch sample / one dy row missing | 100 % / 99 % | 100 % / 94 % | 100 % / 99 % |
-| backward weights, bfloat16 | accumulator in the io type | 50 % | 0 % | 1 % |
+| backward weights, bfloat16 | accumulator in the io type | 48 % | 0 % | 1 % |
 | backward weights, bfloat16 | one element off by 4 ULP / output truncated | 0 % / 0 % | 2 % / 0 % | 1 % / 0 % |
 
 An accumulator in the io type is what the allowance of half and of bfloat16
