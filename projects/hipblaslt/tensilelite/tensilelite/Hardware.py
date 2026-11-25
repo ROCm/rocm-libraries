@@ -122,7 +122,7 @@ class HardwarePredicate(Properties.Predicate):
         return cls("AMDGPU", value=cls("Processor", value=gfxArch))
 
     @classmethod
-    def FromHardware(cls, isa, cuCount=None, deviceNames=None, logicFile=None):
+    def FromHardware(cls, isa, cuCount=None, deviceNames=None, logicFile=None, rocRollerCapture=False):
         """Create a HardwarePredicate from hardware specifications.
 
         The Processor value comes from the ISA, so gfx1250 and gfx1250-strict get
@@ -139,6 +139,8 @@ class HardwarePredicate(Properties.Predicate):
             deviceNames: Optional list of device name strings like ["Device 75a0", "Device 75a2"],
                          or a single string, or None
             logicFile: Optional source logic file path used only for diagnostics
+            rocRollerCapture: The solution is a checked-in rocRoller kernel, which only
+                         a hipBLASLt build without rocRoller may select (RocRollerCaptures)
         """
         gfxArch = isaToGfx(tuple(isa))
         props = [cls("Processor", value=gfxArch)]
@@ -150,6 +152,9 @@ class HardwarePredicate(Properties.Predicate):
             pciChipIdPred = cls._createPciChipIdPredicate(deviceNames, gfxArch, logicFile)
             if pciChipIdPred is not None:
                 props.append(pciChipIdPred)
+
+        if rocRollerCapture:
+            props.append(cls("RocRollerCaptures"))
 
         if len(props) == 1:
             return cls("AMDGPU", value=props[0])

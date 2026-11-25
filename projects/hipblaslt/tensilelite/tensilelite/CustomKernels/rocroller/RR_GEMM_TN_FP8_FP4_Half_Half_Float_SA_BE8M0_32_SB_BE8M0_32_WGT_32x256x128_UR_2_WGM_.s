@@ -1,9 +1,7 @@
 // Copyright Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
-
-
-.amdgcn_target "amdgcn-amd-amdhsa--gfx950:sramecc+"
+.amdgcn_target "amdgcn-amd-amdhsa--gfx950"
 .set .amdgcn.next_free_vgpr, 0
 .set .amdgcn.next_free_sgpr, 0
 .text
@@ -4569,6 +4567,7 @@ custom.config:
     threads: [256, 1, 1]
     grid: [TilesXY, One, Batch]
     unroll: 2
+    uniformSummationOrder: true
   MatrixInstruction: [16, 16, 128, 1]
   StaggerU: 0
   EnableMatrixInstruction: True
