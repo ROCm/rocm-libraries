@@ -1261,7 +1261,7 @@ def test_ued_sdk_version_accepts_what_the_runtime_parses(
 
 def _empty_arch_pattern_root(tmp_path, empty_arch_fixture, embedded=False):
     """The empty-arch fixture, its UED matching by a `nodes` pattern. An `embedded`
-    root compiles nothing, so a full pack needs no hipcc."""
+    root compiles nothing, so a full pack never runs the HIP compiler."""
     root = tmp_path / "root"
     folder = _nest(root, "hip", empty_arch_fixture)
     if embedded:

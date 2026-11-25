@@ -1103,9 +1103,9 @@ TEST(TestMiopenConvApplicabilityChecks, BackwardAcceptsNonPackedChannelsFirst)
 
 // A tensor with a zero dim has no elements, and the io validators do not decline it for that: only
 // dims whose product would overflow are declined (below). The zero is the leading dim, where the
-// canonical strides of both layouts still describe a packed tensor, so the tensor takes its layout
-// class from them like any other. Each tensor in turn is empty, and the input and output of an
-// empty batch together.
+// canonical strides of both layouts have no broadcast axis, so the validators count the tensor as
+// packed (isTensorPacked does not) and it takes its layout class from them like any other. Each
+// tensor in turn is empty, and the input and output of an empty batch together.
 TEST(TestMiopenConvApplicabilityChecks, AcceptsEmptyTensorsWithSaneDims)
 {
     for(const auto& shapes : rankShapes())
@@ -1194,11 +1194,11 @@ TEST(TestMiopenConvApplicabilityChecks, DeclinesEmptyTensorsWhoseZeroExtentIsNot
 }
 
 // A zero dim whose outer dims in the layout's memory order all have extent 1 is accepted: the zero
-// strides it leaves sit on extent-1 dims, so there is no broadcast axis, and the tensor is packed
-// (element count 0 equals the span -1 plus 1) with the canonical strides of its layout. By hand,
-// {1, 0, 8, 8} channels-first has strides {0, 64, 8, 1} and {1, 4, 0, 8} channels-last has
-// {0, 1, 32, 4}. Every operation accepts such a tensor in each of the three roles. This pins the
-// current behaviour.
+// strides it leaves sit on extent-1 dims, so there is no broadcast axis, and the validators count
+// the tensor as packed because it has the canonical strides of its layout, although isTensorPacked
+// counts no tensor with a zero dim as packed. By hand, {1, 0, 8, 8} channels-first has strides
+// {0, 64, 8, 1} and {1, 4, 0, 8} channels-last has {0, 1, 32, 4}. Every operation accepts such a
+// tensor in each of the three roles. This pins the current behaviour.
 TEST(TestMiopenConvApplicabilityChecks, AcceptsEmptyTensorsWithoutAZeroStrideAxis)
 {
     struct UnitBatchCase
@@ -1214,7 +1214,7 @@ TEST(TestMiopenConvApplicabilityChecks, AcceptsEmptyTensorsWithoutAZeroStrideAxi
     {
         const TensorSpec empty = withStrides(unitBatch.dims, unitBatch.strides);
         ASSERT_EQ(empty.strides, packedStrides(empty.dims, unitBatch.channelsLastLayout));
-        ASSERT_TRUE(isTensorPacked(empty.dims, empty.strides));
+        ASSERT_FALSE(isTensorPacked(empty.dims, empty.strides));
 
         const ConvCase base = uniformCase(convShapes(), unitBatch.channelsLastLayout);
 
@@ -1656,18 +1656,18 @@ TEST(TestMiopenConvApplicabilityChecks, ForwardDeclinesNonPackedTensorsWhoseElem
     }
 }
 
-// A packed tensor can still have elements that share an address: isTensorPacked compares only the
-// span of the strides with the element count. These strides decrease strictly, so the strict
-// layout path accepts their layout, and forward must decline them for the shared address, in the
-// x role and in the y role. The canonical packed graph stays accepted.
-TEST(TestMiopenConvApplicabilityChecks, ForwardDeclinesPackedTensorsWhoseElementsShareAnAddress)
+// Overlapping strides whose span equals the element count, so MIOpen counts them as packed;
+// isTensorPacked does not. These strides decrease strictly, so their stride order is
+// channels-first and the layout rule accepts them, and forward must decline them for the shared
+// address, in the x role and in the y role. The canonical packed graph stays accepted.
+TEST(TestMiopenConvApplicabilityChecks, ForwardDeclinesTensorsWhoseSpanMatchesButElementsOverlap)
 {
     const ConvCase base = uniformCase(convShapes(), /*channelsLastLayout=*/false);
     expectAccepted(base, FORWARD_OPS);
 
     // W steps by 4 over 8 columns while H steps by 5: rows overlap. Span 512 = 2 * 4 * 8 * 8.
     const TensorSpec overlappingInput = withStrides(convXDims, {256, 64, 5, 4});
-    ASSERT_TRUE(isTensorPacked(overlappingInput.dims, overlappingInput.strides));
+    ASSERT_FALSE(isTensorPacked(overlappingInput.dims, overlappingInput.strides));
     expectDeclinedAtRole(withTensorAt(base, Role::DX, overlappingInput),
                          Role::DX,
                          packedRuleReason(SHARED_ADDRESS_REASON),
@@ -1675,7 +1675,7 @@ TEST(TestMiopenConvApplicabilityChecks, ForwardDeclinesPackedTensorsWhoseElement
 
     // W steps by 3 over 6 columns while H steps by 4. Span 288 = 2 * 4 * 6 * 6.
     const TensorSpec overlappingOutput = withStrides(convYDims, {144, 36, 4, 3});
-    ASSERT_TRUE(isTensorPacked(overlappingOutput.dims, overlappingOutput.strides));
+    ASSERT_FALSE(isTensorPacked(overlappingOutput.dims, overlappingOutput.strides));
     expectDeclinedAtRole(withTensorAt(base, Role::DY, overlappingOutput),
                          Role::DY,
                          packedRuleReason(SHARED_ADDRESS_REASON),
@@ -2007,17 +2007,17 @@ TEST(TestMiopenConvApplicabilityChecks, DeclinesStridesWhoseArithmeticOverflows)
     }
 }
 
-// The overflow check forms the partial sums of (dim - 1) * stride in dim order, as isTensorPacked
-// does, so which strides overflow depends on the order. With dims [2, 2, 2] every term is the
-// stride itself.
+// The overflow check forms the partial sums of (dim - 1) * stride in dim order, as MIOpen's element
+// space does, so which strides overflow depends on the order. With dims [2, 2, 2] every term is
+// the stride itself.
 // - [INT64_MAX, 1, -INT64_MAX]: the partial sums are INT64_MAX, then INT64_MAX + 1, which
 //   overflows, so every operation declines it for overflow although the full sum is 1 and a
-//   reverse-order replay would accept it. isTensorPacked is not asked for it, as it would overflow.
+//   reverse-order replay would accept it.
 // - [-INT64_MAX, 1, INT64_MAX]: the partial sums are -INT64_MAX, -INT64_MAX + 1, then 1, and the
 //   final sum plus 1 is 2, so nothing overflows and a reverse-order replay (INT64_MAX, then
-//   INT64_MAX + 1) would decline it for overflow. The element count 8 is not the span 2, so the
-//   tensor is not packed, and its stride order [2, 1, 0] is neither layout, so every operation
-//   declines it by the layout rule instead.
+//   INT64_MAX + 1) would decline it for overflow. A negative stride is never packed, and its
+//   stride order [2, 1, 0] is neither layout, so every operation declines it by the layout rule
+//   instead.
 TEST(TestMiopenConvApplicabilityChecks, StrideOverflowFollowsThePackingSumOrder)
 {
     constexpr int64_t MAX_VALUE = std::numeric_limits<int64_t>::max();
@@ -2080,9 +2080,9 @@ TEST(TestMiopenConvApplicabilityChecks, StridesThatDoNotOverflowAreJudgedByLayou
 // from a declined row of overflowingStrides. The other tensors are those of a grouped
 // convolution, where forward needs every tensor packed.
 // - [2, 1, 1] with [INT64_MAX - 1, 1, 1]: the factor (2 - 1) is exactly INT64_MAX / (INT64_MAX - 1)
-//   and the final sum (INT64_MAX - 1) + 1 is exactly INT64_MAX. The span is not the element count
-//   2, so the tensor is not packed; its stride order is channels-first, so forward declines it as
-//   not packed and backward accepts it.
+//   and the final sum (INT64_MAX - 1) + 1 is exactly INT64_MAX. The strides are not dense, so the
+//   tensor is not packed; its stride order is channels-first, so forward declines it as not packed
+//   and backward accepts it.
 // - [2, 1, 1] with [INT64_MIN, 1, 1]: the term (2 - 1) * INT64_MIN is exactly INT64_MIN, as is
 //   the sum 0 + INT64_MIN. The tensor is not packed and its stride order (the two unit strides
 //   before INT64_MIN) is neither layout, so every operation declines it by the layout rule, not
@@ -2109,18 +2109,17 @@ TEST(TestMiopenConvApplicabilityChecks, StridesOnTheRepresentableLimitAreJudgedB
     }
 }
 
-// The overflow check before isTensorPacked (the replay of its arithmetic) must not decline strides
-// whose arithmetic fits, and the packed verdict is isTensorPacked's own, which the validators read
+// The overflow check before isTensorPacked must not decline strides whose arithmetic fits, and for
+// a tensor without a zero dim the packed verdict is isTensorPacked's own, which the validators read
 // from it directly. This pins that for rows none of which is near a limit: in a grouped
 // convolution, where every tensor must be packed, forward declines a tensor as "not packed"
 // exactly when isTensorPacked is false for it, and never for overflow, whichever of x, w and y it
-// is, at ranks 3, 4 and 5 and on the 2D shape of the other tests. It does not pin the replay's
-// arithmetic against the SDK function (the overflow rows do, above). The other two tensors are
-// packed in the layout class of the row so that the layout rule does not pre-empt the packing
-// rule; the reordered rows are packed and are declined by the layout rule instead, so they must
-// not be declined as not packed. The padded rows pad every position of both layouts by 1, 2, 4
-// and 8 elements: a padded tensor keeps the stride order of its layout, so forward declines it
-// for packing alone.
+// is, at ranks 3, 4 and 5 and on the 2D shape of the other tests. The overflow rows above pin the
+// overflow check's boundary. The other two tensors are packed in the layout class of the row so
+// that the layout rule does not pre-empt the packing rule; the reordered rows are packed and are
+// declined by the layout rule instead, so they must not be declined as not packed. The padded rows
+// pad every position of both layouts by 1, 2, 4 and 8 elements: a padded tensor keeps the stride
+// order of its layout, so forward declines it for packing alone.
 TEST(TestMiopenConvApplicabilityChecks, PackingVerdictAgreesWithIsTensorPacked)
 {
     struct PackingRow

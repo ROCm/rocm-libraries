@@ -964,6 +964,11 @@ static_assert(!std::is_constructible_v<GraphMatch, const char*>);
 static_assert(!std::is_constructible_v<GraphMatch, std::string>);
 static_assert(std::is_constructible_v<GraphMatch, NativeGraphMatch>);
 
+// The resolved graph match is public API, named in the ingestor namespace.
+static_assert(std::is_same_v<
+              decltype(std::declval<const KernelIngestorSharedState<TestHandle>&>().graphMatch()),
+              const hipdnn_plugin_sdk::ingestor::ResolvedGraphMatch&>);
+
 using SharedState = KernelIngestorSharedState<TestHandle>;
 
 std::vector<MatchDescriptor> kernelScopedMatchers()
