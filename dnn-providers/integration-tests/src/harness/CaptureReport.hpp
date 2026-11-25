@@ -30,6 +30,7 @@ public:
         size_t mismatch = 0;
         size_t declined = 0;
         size_t failed = 0;
+        size_t allocated = 0;
     };
 
     static CaptureTally& get()
@@ -53,7 +54,11 @@ public:
             {
                 ++_counts.mismatch;
             }
-            else
+            if(result.allocatedDuringCapture)
+            {
+                ++_counts.allocated;
+            }
+            if(!result.outputsMismatched && !result.allocatedDuringCapture)
             {
                 ++_counts.replayed;
             }
@@ -103,13 +108,29 @@ inline void reportCapture(const CaptureResult& result)
 {
     CaptureTally::get().record(result);
 
+    const bool allocated
+        = result.status == CaptureResult::Status::REPLAYED && result.allocatedDuringCapture;
+
     const char* state = "replayed";
     switch(result.status)
     {
     case CaptureResult::Status::REPLAYED:
-        if(result.outputsMismatched)
+        if(result.outputsMismatched && allocated)
+        {
+            state = "mismatch,allocated";
+        }
+        else if(result.outputsMismatched)
         {
             state = "mismatch";
+        }
+        else if(allocated)
+        {
+            state = "allocated";
+        }
+        if(allocated)
+        {
+            ADD_FAILURE() << "graph capture detected an allocation or free during execute(): "
+                          << result.message;
         }
         break;
     case CaptureResult::Status::DECLINED:

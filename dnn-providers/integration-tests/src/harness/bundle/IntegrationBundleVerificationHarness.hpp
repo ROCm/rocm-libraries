@@ -268,6 +268,10 @@ public:
         {
             reportCapture(*_capture);
         }
+        for(const auto& result : _firstExecuteCaptures)
+        {
+            reportCapture(result);
+        }
         // An attempt still pending here ended in a throw that skipped the code that
         // settles it, and reporting it as pending would read as "still running".
         for(auto& result : _referenceBenchmarks)
@@ -286,6 +290,12 @@ public:
            && !HasFailure())
         {
             GTEST_SKIP() << "--graph-capture: " << _capture->message;
+        }
+        if(!_firstExecuteCaptures.empty() && !HasFailure()
+           && _firstExecuteCaptures.front().status == CaptureResult::Status::DECLINED)
+        {
+            GTEST_SKIP() << "--graph-capture-first-execute: "
+                         << _firstExecuteCaptures.front().message;
         }
     }
 
@@ -622,6 +632,12 @@ private:
                            OutputTensors& engineOutputs,
                            const VerificationOutcome& outcome);
 
+    // Under --graph-capture-first-execute, once per capture mode: builds a fresh plan
+    // on a session of its own, never executes it, and captures its first execute while
+    // verifying every replay with _replayVerifier. Keeps the results for TestBody()
+    // to report. Does nothing for any outcome but a verified pass.
+    void captureFirstExecuteIfApplicable(const VerificationOutcome& outcome);
+
     // Under --benchmark, times the engine on the outputs `outcome` just verified and
     // keeps the result for TestBody() to report. Does nothing for any other outcome.
     void benchmarkIfVerified(GraphSession& session,
@@ -688,6 +704,9 @@ private:
     std::optional<hipdnn_frontend::AutotuneResult> _benchmark;
     // Set by captureIfVerified(); reported at the end of TestBody().
     std::optional<CaptureResult> _capture;
+    // Set by captureFirstExecuteIfApplicable(), one per capture mode; reported at the
+    // end of TestBody().
+    std::vector<CaptureResult> _firstExecuteCaptures;
     // Re-runs the comparison that verified the eager outputs, on `outputs`. Set with
     // every verified comparison; _oracleOutputs backs it for a reference oracle.
     std::function<VerificationOutcome(OutputTensors&)> _replayVerifier;

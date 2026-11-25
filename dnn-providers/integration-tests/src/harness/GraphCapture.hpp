@@ -168,18 +168,27 @@ inline CaptureResult captureGraph(hipdnn_frontend::graph::Graph& graph,
     }
 
     detail::HipGraph captured;
-    if(const auto status = hipStreamBeginCapture(stream, hipStreamCaptureModeGlobal);
-       status != hipSuccess)
+    if(const auto status = hipStreamBeginCapture(stream, settings.mode); status != hipSuccess)
     {
         return CaptureResult::failed(detail::hipFailure("hipStreamBeginCapture", status));
     }
 
     std::string executeError;
+    size_t freeBefore = 0;
+    size_t freeAfter = 0;
+    size_t totalMemory = 0;
+    bool memoryBeforeKnown = false;
+    bool memoryAfterKnown = false;
     try
     {
+        memoryBeforeKnown = hipMemGetInfo(&freeBefore, &totalMemory) == hipSuccess;
         if(auto status = graph.execute(handle, variantPack, workspace->get()); !status.is_good())
         {
             executeError = status.get_message();
+        }
+        else
+        {
+            memoryAfterKnown = hipMemGetInfo(&freeAfter, &totalMemory) == hipSuccess;
         }
     }
     catch(const std::exception& e)
@@ -204,6 +213,22 @@ inline CaptureResult captureGraph(hipdnn_frontend::graph::Graph& graph,
     {
         return CaptureResult::failed(detail::hipFailure("hipGraphInstantiateWithFlags", status));
     }
+
+    // A change in free device memory across execute() means the engine allocated or
+    // freed during capture. Skipped when either hipMemGetInfo call failed.
+    const bool allocated = memoryBeforeKnown && memoryAfterKnown && freeBefore != freeAfter;
+    const auto annotate = [&](CaptureResult& result) {
+        if(allocated)
+        {
+            result.allocatedDuringCapture = true;
+            result.message
+                = "free device memory changed by "
+                  + std::to_string(freeBefore > freeAfter ? freeBefore - freeAfter
+                                                          : freeAfter - freeBefore)
+                  + " bytes during execute() under capture (before=" + std::to_string(freeBefore)
+                  + ", after=" + std::to_string(freeAfter) + ")";
+        }
+    };
 
     for(int replay = 0; replay < settings.replays; ++replay)
     {
@@ -233,10 +258,13 @@ inline CaptureResult captureGraph(hipdnn_frontend::graph::Graph& graph,
         {
             auto result = CaptureResult::replayed();
             result.outputsMismatched = true;
+            annotate(result);
             return result;
         }
     }
-    return CaptureResult::replayed();
+    auto result = CaptureResult::replayed();
+    annotate(result);
+    return result;
 }
 
 } // namespace hipdnn_integration_tests

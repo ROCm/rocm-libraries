@@ -708,6 +708,7 @@ VerificationOutcome IntegrationBundleVerificationHarness::runGoldenMode(GraphSes
     _replayVerifier = [this](OutputTensors& outputs) { return compareAgainstGolden(outputs); };
     benchmarkIfVerified(session, engine.outputs, outcome);
     captureIfVerified(session, engine.outputs, outcome);
+    captureFirstExecuteIfApplicable(outcome);
     return outcome;
 }
 
@@ -747,6 +748,7 @@ VerificationOutcome IntegrationBundleVerificationHarness::runReferenceMode(Graph
     }
     benchmarkIfVerified(session, engine.outputs, *outcome);
     captureIfVerified(session, engine.outputs, *outcome);
+    captureFirstExecuteIfApplicable(*outcome);
     return *outcome;
 }
 
@@ -1418,14 +1420,29 @@ void resetOutputsToSentinel(OutputTensors& outputs, bool useDevice)
     }
 }
 
+const char* captureModeName(hipStreamCaptureMode mode)
+{
+    switch(mode)
+    {
+    case hipStreamCaptureModeGlobal:
+        return "Global";
+    case hipStreamCaptureModeThreadLocal:
+        return "ThreadLocal";
+    case hipStreamCaptureModeRelaxed:
+        return "Relaxed";
+    default:
+        return "unknown mode";
+    }
+}
+
 } // namespace
 
 void IntegrationBundleVerificationHarness::captureIfVerified(GraphSession& session,
                                                              OutputTensors& engineOutputs,
                                                              const VerificationOutcome& outcome)
 {
-    if(!_deps.policy.graphCapture.has_value() || outcome.status != OutcomeStatus::PASSED
-       || outcome.depth != VerificationDepth::VERIFIED)
+    if(!_deps.policy.graphCapture.has_value() || _deps.policy.graphCapture->firstExecute
+       || outcome.status != OutcomeStatus::PASSED || outcome.depth != VerificationDepth::VERIFIED)
     {
         return;
     }
@@ -1449,6 +1466,67 @@ void IntegrationBundleVerificationHarness::captureIfVerified(GraphSession& sessi
     catch(const std::exception& e)
     {
         _capture = CaptureResult::failed(e.what());
+    }
+}
+
+void IntegrationBundleVerificationHarness::captureFirstExecuteIfApplicable(
+    const VerificationOutcome& outcome)
+{
+    if(!_deps.policy.graphCapture.has_value() || !_deps.policy.graphCapture->firstExecute
+       || outcome.status != OutcomeStatus::PASSED || outcome.depth != VerificationDepth::VERIFIED)
+    {
+        return;
+    }
+
+    const bool useDevice = _deps.policy.useDevice();
+    for(const auto mode :
+        {hipStreamCaptureModeGlobal, hipStreamCaptureModeThreadLocal, hipStreamCaptureModeRelaxed})
+    {
+        CaptureResult result;
+        // A throw here must not reach TestBody()'s catch, for the same reason as in
+        // benchmarkIfVerified().
+        try
+        {
+            // A session of its own, whose execute() never runs: the captured call is
+            // the first execute of a freshly built plan.
+            auto session = _deps.engineRunner->openGraph(*_bundle, _engineUnderTest);
+            const EngineOpResult built = _deps.engineRunner->buildPlans(session, _engineUnderTest);
+            if(!built.ok)
+            {
+                result = CaptureResult::failed("building a fresh plan failed: " + built.message);
+            }
+            else
+            {
+                auto outputs = allocateSentinelOutputs(useDevice);
+                auto variantPack = buildVariantPack(outputs, useDevice);
+
+                ReplayHooks hooks;
+                hooks.resetOutputs = [&] { resetOutputsToSentinel(outputs, useDevice); };
+                hooks.checkOutputs = [&] {
+                    SCOPED_TRACE("graph-capture first-execute replay");
+                    markOutputsModified(outputs);
+                    return _replayVerifier(outputs).status == OutcomeStatus::PASSED;
+                };
+
+                CaptureSettings settings = *_deps.policy.graphCapture;
+                settings.mode = mode;
+                result = _deps.engineRunner->captureReplay(session, variantPack, settings, hooks);
+            }
+        }
+        catch(const std::exception& e)
+        {
+            result = CaptureResult::failed(e.what());
+        }
+
+        const std::string label = std::string("first execute, ") + captureModeName(mode);
+        result.message = result.message.empty() ? label : label + ": " + result.message;
+        const bool declined = result.status == CaptureResult::Status::DECLINED;
+        _firstExecuteCaptures.push_back(std::move(result));
+        // An engine without the note declines every mode alike.
+        if(declined)
+        {
+            break;
+        }
     }
 }
 

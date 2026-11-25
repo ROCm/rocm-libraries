@@ -301,9 +301,11 @@ if(HIPKERNELPROVIDER_ENABLE_TESTS)
     # Graph-capture lanes. Every engine that reports SUPPORTS_GRAPH_CAPTURE and has an
     # external integration lane below gets a sibling lane, pinned to the same engine, that
     # runs a few quick bundle suites with --graph-capture: each case the engine verifies is
-    # also captured into a HIP graph, replayed, and verified again. The suites are
-    # GRAPH_CAPTURE_test_categories_integration.yaml under YAML categorization and this
-    # filter otherwise; keep the two in step.
+    # also captured into a HIP graph, replayed, and verified again. A further lane per
+    # engine passes --graph-capture-first-execute instead, for the first execute of a
+    # freshly built plan. The suites are GRAPH_CAPTURE_test_categories_integration.yaml
+    # (GRAPH_CAPTURE_FIRST_EXECUTE_test_categories_integration.yaml for the second lane)
+    # under YAML categorization and this filter otherwise; keep them in step.
     set(HKP_GRAPH_CAPTURE_GTEST_FILTER
         "quick_Batchnorm_Default.*"
         "quick_BatchnormBackward_Default.*"
@@ -320,29 +322,44 @@ if(HIPKERNELPROVIDER_ENABLE_TESTS)
         "*_SdpaFwd_bhsd_fp16_hd128_causal_mha_Small.*"
     )
 
-    # _hkp_add_graph_capture_lane(<stem> <install test file> <lane arguments>...)
-    #   Registers <stem>-graph-capture-external-integration-check. The lane arguments are
-    #   those of the engine's own lane (engine, TOML, reference executor, install routing);
-    #   <install test file> receives the categorized suites, as the engine's own lane's do.
-    function(_hkp_add_graph_capture_lane stem install_test_file)
+    # _hkp_add_graph_capture_lane_variant(<lane> <flag> <categories yaml> <stem>
+    #                                     <install test file> <lane arguments>...)
+    #   Registers <stem>-<lane>-external-integration-check, which passes <flag>.
+    function(_hkp_add_graph_capture_lane_variant lane flag categories_yaml stem install_test_file)
         set(_category_args "")
         if(HIPKERNELPROVIDER_YAML_CATEGORIZATION_ENABLED)
             list(APPEND _category_args
-                TEST_CATEGORIES_YAML "${HIPKERNELPROVIDER_GRAPH_CAPTURE_INTEGRATION_CATEGORIES_YAML}"
+                TEST_CATEGORIES_YAML "${categories_yaml}"
                 INSTALL_TEST_FILE "${install_test_file}"
-                TEST_NAME_PREFIX ${stem}-graph-capture-external-integration
+                TEST_NAME_PREFIX ${stem}-${lane}-external-integration
             )
         endif()
         add_external_integration_test_target(
-            TARGET_NAME    ${stem}-graph-capture-external-integration-check
+            TARGET_NAME    ${stem}-${lane}-external-integration-check
             PLUGIN_TARGET  hip_kernel_provider
-            EXTRA_ARGS     --graph-capture
+            EXTRA_ARGS     ${flag}
             GTEST_FILTER   ${HKP_GRAPH_CAPTURE_GTEST_FILTER}
             ENVIRONMENT    ${TEST_ENVIRONMENT}
             ENVIRONMENT_MODIFICATION ${TEST_ENVIRONMENT_MODIFICATION}
             ${ARGN}
             ${_category_args}
         )
+    endfunction()
+
+    # _hkp_add_graph_capture_lane(<stem> <install test file> <lane arguments>...)
+    #   Registers <stem>-graph-capture-external-integration-check and
+    #   <stem>-graph-capture-first-execute-external-integration-check. The second passes
+    #   --graph-capture-first-execute: it captures the first execute of a freshly built
+    #   plan in every stream capture mode, with the same suites. The lane arguments are
+    #   those of the engine's own lane (engine, TOML, reference executor, install routing);
+    #   <install test file> receives the categorized suites, as the engine's own lane's do.
+    function(_hkp_add_graph_capture_lane stem install_test_file)
+        _hkp_add_graph_capture_lane_variant(graph-capture --graph-capture
+            "${HIPKERNELPROVIDER_GRAPH_CAPTURE_INTEGRATION_CATEGORIES_YAML}"
+            ${stem} "${install_test_file}" ${ARGN})
+        _hkp_add_graph_capture_lane_variant(graph-capture-first-execute --graph-capture-first-execute
+            "${HIPKERNELPROVIDER_GRAPH_CAPTURE_FIRST_EXECUTE_INTEGRATION_CATEGORIES_YAML}"
+            ${stem} "${install_test_file}" ${ARGN})
     endfunction()
 
     if(TARGET hipdnn_integration_tests)
