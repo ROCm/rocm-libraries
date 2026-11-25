@@ -953,13 +953,21 @@ runs on each pull request to develop that changes rocKE:
 - `rocke-library-reach`: platform's imports of the library packages only shrink;
 - `rocke-pending-lanes`: every test file is assigned to a CI entry or has a
   recorded reason;
-- `rocke-compliance`: the compliance patterns;
+- `rocke-compliance`: the files a change adds or edits pass the compliance
+  patterns;
+- `rocke-compliance-rules`: when the patterns or their scanner change, the
+  scanner's tests and a scan of the whole tree;
 - `rocke-no-torch`: no new torch use;
 - `rocke-arch-table-engine-parity`: the two engines' arch tables agree;
 - `rocke-gemm-spec-dict-binding-parity`: the GEMM spec dicts match the engine
   binding;
 - `rocke-emitter-pair-parity`: the C and Python emitters agree on HIP text and
-  refusals (lands with the hook change that adds it to the config).
+  refusals.
+
+Each hook runs only when a change touches a file it reads. They run at every
+commit after `pre-commit install`; `pre-commit install --hook-type pre-push`
+runs them, with every other hook of the file, at push instead. CI runs every
+hook on each pull request either way.
 
 **Which GPUs run tests.** The pull-request job, `therock-multi-arch-ci.yml`,
 selects these GPU families; TheRock's family matrix
