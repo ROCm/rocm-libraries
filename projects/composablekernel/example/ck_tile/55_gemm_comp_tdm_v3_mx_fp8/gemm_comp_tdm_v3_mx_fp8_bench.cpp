@@ -90,7 +90,7 @@ constexpr int kScale = 32; // K elements per scale
 
 #if defined(CK_EX55_MX_SCALE_PREFETCH_DEPTH) || defined(CK_EX55_A_ROW_PREFETCH) ||                \
     defined(CK_EX55_MX_SCALE_LDS) || defined(CK_EX55_MX_SCALE_WIDE) || defined(CK_EX55_REFILL) || \
-    defined(CK_EX55_RA)
+    defined(CK_EX55_RA) || defined(CK_EX55_DCPF_A)
 // EXPERIMENT: -DCK_EX55_MX_SCALE_PREFETCH_DEPTH=N sets the pipeline's MX scale prefetch depth;
 // -DCK_EX55_A_ROW_PREFETCH=1 sets kStreamARowPrefetch; -DCK_EX55_MX_SCALE_LDS=1 sets kMxScaleLds
 // (and the host lays the scales out for it, see swizzle_scales_for_lds); -DCK_EX55_MX_SCALE_WIDE=1
@@ -117,6 +117,13 @@ struct Ex55Policy : ck_tile::GemmPipelineAgBgCrCompTDMV3Policy
 #endif
 #if defined(CK_EX55_A_ROW_PREFETCH)
     [[maybe_unused]] static constexpr bool kStreamARowPrefetch = CK_EX55_A_ROW_PREFETCH != 0;
+#endif
+#if defined(CK_EX55_DCPF_A)
+    // -DCK_EX55_DCPF_A=1 (L1) | 2 (L2): data cache prefetch of the next A tile with each TDM fill
+    // (the pipeline then uses its joint-barrier form)
+    [[maybe_unused]] static constexpr ck_tile::DataCachePrefetchKind DataCachePrefetchA =
+        CK_EX55_DCPF_A == 2 ? ck_tile::DataCachePrefetchKind::L2
+                            : ck_tile::DataCachePrefetchKind::L1;
 #endif
 #if defined(CK_EX55_RA)
     // -DCK_EX55_RA=1 sets kReadAhead (the read-ahead K loop)
@@ -1141,9 +1148,14 @@ int dispatch_tile(const ck_tile::ArgParser& arg, const std::string& name)
         return run<Instance<128, 16, 256, 4, 1, TdmEpi, CDataType>>(arg, name);
     if(tile == "64x16x256")
         return run<Instance<64, 16, 256, 4, 1, TdmEpi, CDataType>>(arg, name);
+    // the same with a 128-deep K tile: half the LDS per workgroup, twice the workgroups per CU
+    if(tile == "256x16x128")
+        return run<Instance<256, 16, 128, 4, 1, TdmEpi, CDataType>>(arg, name);
+    if(tile == "128x16x128")
+        return run<Instance<128, 16, 128, 4, 1, TdmEpi, CDataType>>(arg, name);
     std::printf("unknown -tile=%s (32x256x256, 32x128x256, 32x64x256, 64x256x256, 256x256x256, "
                 "16x512x256, 16x256x256, 16x128x256, 16x64x256, 512x16x256, 256x16x256, "
-                "128x16x256, 64x16x256)\n",
+                "128x16x256, 64x16x256, 256x16x128, 128x16x128)\n",
                 tile.c_str());
     return 2;
 #endif
@@ -1203,7 +1215,7 @@ int main(int argc, char* argv[])
                 "32x256x256",
                 "32x256x256 | 32x128x256 | 32x64x256 | 64x256x256 | 256x256x256 | 16x512x256 | "
                 "16x256x256 | 16x128x256 | 16x64x256 | 512x16x256 | 256x16x256 | 128x16x256 | "
-                "64x16x256")
+                "64x16x256 | 256x16x128 | 128x16x128")
         .insert(
             "cluster", "1x1", "1x1 | 2x2 (256x256x256 only): workgroup cluster with TDM multicast")
         .insert("warps", "default", "default | 2x2 (EXPERIMENT: 256x256x256 with 4 waves)")

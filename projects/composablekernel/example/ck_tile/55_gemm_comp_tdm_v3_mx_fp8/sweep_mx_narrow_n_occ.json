@@ -1,0 +1,95 @@
+{
+  "_comment": "MX 49152x16x32768 (native, 16-column tiles): occupancy and in-flight bytes. base: the current MX loop; dcpfA_l1 / dcpfA_l2: with CK's data cache prefetch of the next A tile (L1 / L2; joint-barrier form). Tiles 256x16 / 128x16 / 64x16 by 256 in K, and 256x16 / 128x16 by 128 in K (half the LDS per workgroup, twice the workgroups per CU). The summary prints effective TB/s.",
+  "default_defines": [
+    "-DCK_EX55_BF16_TDM_ONLY",
+    "-DCK_TILE_GFX125_FP8_K1PERLANE=16",
+    "-DCK_EX55_MX_SCALE_WIDE=1",
+    "-DCK_EX55_A_ROW_PREFETCH=1"
+  ],
+  "variants": [
+    {
+      "name": "base",
+      "defines": []
+    },
+    {
+      "name": "dcpfA_l1",
+      "defines": [
+        "-DCK_EX55_DCPF_A=1"
+      ]
+    },
+    {
+      "name": "dcpfA_l2",
+      "defines": [
+        "-DCK_EX55_DCPF_A=2"
+      ]
+    }
+  ],
+  "arms": [
+    {
+      "tile": "256x16x256",
+      "warps": "default",
+      "shapes": [
+        [
+          49152,
+          16,
+          32768
+        ]
+      ]
+    },
+    {
+      "tile": "128x16x256",
+      "warps": "default",
+      "shapes": [
+        [
+          49152,
+          16,
+          32768
+        ]
+      ]
+    },
+    {
+      "tile": "64x16x256",
+      "warps": "default",
+      "shapes": [
+        [
+          49152,
+          16,
+          32768
+        ]
+      ]
+    },
+    {
+      "tile": "256x16x128",
+      "warps": "default",
+      "shapes": [
+        [
+          49152,
+          16,
+          32768
+        ]
+      ]
+    },
+    {
+      "tile": "128x16x128",
+      "warps": "default",
+      "shapes": [
+        [
+          49152,
+          16,
+          32768
+        ]
+      ]
+    }
+  ],
+  "shapes": [
+    [
+      49152,
+      16,
+      32768
+    ]
+  ],
+  "c_dtype": "bf16",
+  "rounds": 5,
+  "warmup": 50,
+  "repeat": 100
+}
