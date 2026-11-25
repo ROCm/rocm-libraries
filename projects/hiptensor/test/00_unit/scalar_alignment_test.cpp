@@ -29,7 +29,6 @@
 
 #include <complex>
 #include <cstring>
-#include <string>
 #include <vector>
 
 #include <gtest/gtest.h>
@@ -38,28 +37,51 @@
 
 namespace
 {
-    bool deviceArchIsOneOf(std::vector<std::string> const& archs)
+    // Owns everything runComplexBilinear creates, so an early return from a failed ASSERT
+    // releases it as well.
+    struct ContractionResources
     {
-        int deviceId = 0;
-        if(hipGetDevice(&deviceId) != hipSuccess)
+        hiptensorHandle_t              handle = nullptr;
+        hiptensorTensorDescriptor_t    descA = nullptr, descB = nullptr, descD = nullptr;
+        hiptensorOperationDescriptor_t opDesc = nullptr;
+        hiptensorPlanPreference_t      pref   = nullptr;
+        hiptensorPlan_t                plan   = nullptr;
+        void *dA = nullptr, *dB = nullptr, *dC = nullptr, *dD = nullptr, *dWs = nullptr;
+
+        ~ContractionResources()
         {
-            return false;
-        }
-        hipDeviceProp_t props{};
-        if(hipGetDeviceProperties(&props, deviceId) != hipSuccess)
-        {
-            return false;
-        }
-        std::string const name(props.gcnArchName);
-        for(auto const& arch : archs)
-        {
-            if(name.find(arch) != std::string::npos)
+            for(void* buffer : {dA, dB, dC, dD, dWs})
             {
-                return true;
+                if(buffer != nullptr)
+                {
+                    (void)hipFree(buffer);
+                }
+            }
+            if(plan != nullptr)
+            {
+                hiptensorDestroyPlan(plan);
+            }
+            if(pref != nullptr)
+            {
+                hiptensorDestroyPlanPreference(pref);
+            }
+            if(opDesc != nullptr)
+            {
+                hiptensorDestroyOperationDescriptor(opDesc);
+            }
+            for(auto desc : {descA, descB, descD})
+            {
+                if(desc != nullptr)
+                {
+                    hiptensorDestroyTensorDescriptor(desc);
+                }
+            }
+            if(handle != nullptr)
+            {
+                hiptensorDestroy(handle);
             }
         }
-        return false;
-    }
+    };
 
     // D[m,n] = alpha * sum_k A[m,k] * B[n,k] + beta * C[m,n], column-major (first mode fastest),
     // with alpha and beta read from scalarBuf + scalarOffset and scalarBuf + 32 + scalarOffset.
@@ -99,8 +121,8 @@ namespace
         std::memcpy(alphaPtr, &alpha, sizeof(alpha));
         std::memcpy(betaPtr, &beta, sizeof(beta));
 
-        hiptensorHandle_t handle = nullptr;
-        ASSERT_EQ(hiptensorCreate(&handle), HIPTENSOR_STATUS_SUCCESS);
+        ContractionResources r;
+        ASSERT_EQ(hiptensorCreate(&r.handle), HIPTENSOR_STATUS_SUCCESS);
 
         int64_t lensA[2]    = {M, K};
         int64_t stridesA[2] = {1, M};
@@ -112,71 +134,80 @@ namespace
         int32_t modeB[2]    = {'n', 'k'};
         int32_t modeD[2]    = {'m', 'n'};
 
-        hiptensorTensorDescriptor_t descA = nullptr, descB = nullptr, descD = nullptr;
         ASSERT_EQ(
-            hiptensorCreateTensorDescriptor(handle, &descA, 2, lensA, stridesA, dataType, 128),
+            hiptensorCreateTensorDescriptor(r.handle, &r.descA, 2, lensA, stridesA, dataType, 128),
             HIPTENSOR_STATUS_SUCCESS);
         ASSERT_EQ(
-            hiptensorCreateTensorDescriptor(handle, &descB, 2, lensB, stridesB, dataType, 128),
+            hiptensorCreateTensorDescriptor(r.handle, &r.descB, 2, lensB, stridesB, dataType, 128),
             HIPTENSOR_STATUS_SUCCESS);
         ASSERT_EQ(
-            hiptensorCreateTensorDescriptor(handle, &descD, 2, lensD, stridesD, dataType, 128),
+            hiptensorCreateTensorDescriptor(r.handle, &r.descD, 2, lensD, stridesD, dataType, 128),
             HIPTENSOR_STATUS_SUCCESS);
 
-        hiptensorOperationDescriptor_t opDesc = nullptr;
-        ASSERT_EQ(hiptensorCreateContraction(handle,
-                                             &opDesc,
-                                             descA,
-                                             modeA,
-                                             HIPTENSOR_OP_IDENTITY,
-                                             descB,
-                                             modeB,
-                                             HIPTENSOR_OP_IDENTITY,
-                                             descD,
-                                             modeD,
-                                             HIPTENSOR_OP_IDENTITY,
-                                             descD,
-                                             modeD,
-                                             computeType),
-                  HIPTENSOR_STATUS_SUCCESS);
+        // The library decides whether this device supports the compute type.
+        auto const status = hiptensorCreateContraction(r.handle,
+                                                       &r.opDesc,
+                                                       r.descA,
+                                                       modeA,
+                                                       HIPTENSOR_OP_IDENTITY,
+                                                       r.descB,
+                                                       modeB,
+                                                       HIPTENSOR_OP_IDENTITY,
+                                                       r.descD,
+                                                       modeD,
+                                                       HIPTENSOR_OP_IDENTITY,
+                                                       r.descD,
+                                                       modeD,
+                                                       computeType);
+        if(status == HIPTENSOR_STATUS_ARCH_MISMATCH)
+        {
+            GTEST_SKIP() << "This compute type is not supported on this device";
+        }
+        ASSERT_EQ(status, HIPTENSOR_STATUS_SUCCESS);
 
-        hiptensorPlanPreference_t pref = nullptr;
         ASSERT_EQ(hiptensorCreatePlanPreference(
-                      handle, &pref, HIPTENSOR_ALGO_DEFAULT, HIPTENSOR_JIT_MODE_NONE),
+                      r.handle, &r.pref, HIPTENSOR_ALGO_DEFAULT, HIPTENSOR_JIT_MODE_NONE),
                   HIPTENSOR_STATUS_SUCCESS);
 
         uint64_t wsSize = 0;
         ASSERT_EQ(hiptensorEstimateWorkspaceSize(
-                      handle, opDesc, pref, HIPTENSOR_WORKSPACE_DEFAULT, &wsSize),
+                      r.handle, r.opDesc, r.pref, HIPTENSOR_WORKSPACE_DEFAULT, &wsSize),
                   HIPTENSOR_STATUS_SUCCESS);
 
-        hiptensorPlan_t plan = nullptr;
-        ASSERT_EQ(hiptensorCreatePlan(handle, &plan, opDesc, pref, wsSize),
+        ASSERT_EQ(hiptensorCreatePlan(r.handle, &r.plan, r.opDesc, r.pref, wsSize),
                   HIPTENSOR_STATUS_SUCCESS);
 
         size_t const bytesA = sizeof(Complex) * hA.size();
         size_t const bytesB = sizeof(Complex) * hB.size();
         size_t const bytesD = sizeof(Complex) * hD.size();
 
-        void *dA = nullptr, *dB = nullptr, *dC = nullptr, *dD = nullptr, *dWs = nullptr;
-        ASSERT_EQ(hipMalloc(&dA, bytesA), hipSuccess);
-        ASSERT_EQ(hipMalloc(&dB, bytesB), hipSuccess);
-        ASSERT_EQ(hipMalloc(&dC, bytesD), hipSuccess);
-        ASSERT_EQ(hipMalloc(&dD, bytesD), hipSuccess);
+        ASSERT_EQ(hipMalloc(&r.dA, bytesA), hipSuccess);
+        ASSERT_EQ(hipMalloc(&r.dB, bytesB), hipSuccess);
+        ASSERT_EQ(hipMalloc(&r.dC, bytesD), hipSuccess);
+        ASSERT_EQ(hipMalloc(&r.dD, bytesD), hipSuccess);
         if(wsSize > 0)
         {
-            ASSERT_EQ(hipMalloc(&dWs, wsSize), hipSuccess);
+            ASSERT_EQ(hipMalloc(&r.dWs, wsSize), hipSuccess);
         }
-        ASSERT_EQ(hipMemcpy(dA, hA.data(), bytesA, hipMemcpyHostToDevice), hipSuccess);
-        ASSERT_EQ(hipMemcpy(dB, hB.data(), bytesB, hipMemcpyHostToDevice), hipSuccess);
-        ASSERT_EQ(hipMemcpy(dC, hC.data(), bytesD, hipMemcpyHostToDevice), hipSuccess);
-        ASSERT_EQ(hipMemset(dD, 0, bytesD), hipSuccess);
+        ASSERT_EQ(hipMemcpy(r.dA, hA.data(), bytesA, hipMemcpyHostToDevice), hipSuccess);
+        ASSERT_EQ(hipMemcpy(r.dB, hB.data(), bytesB, hipMemcpyHostToDevice), hipSuccess);
+        ASSERT_EQ(hipMemcpy(r.dC, hC.data(), bytesD, hipMemcpyHostToDevice), hipSuccess);
+        ASSERT_EQ(hipMemset(r.dD, 0, bytesD), hipSuccess);
 
-        ASSERT_EQ(hiptensorContract(
-                      handle, plan, alphaPtr, dA, dB, betaPtr, dC, dD, dWs, wsSize, nullptr),
+        ASSERT_EQ(hiptensorContract(r.handle,
+                                    r.plan,
+                                    alphaPtr,
+                                    r.dA,
+                                    r.dB,
+                                    betaPtr,
+                                    r.dC,
+                                    r.dD,
+                                    r.dWs,
+                                    wsSize,
+                                    nullptr),
                   HIPTENSOR_STATUS_SUCCESS);
         ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
-        ASSERT_EQ(hipMemcpy(hD.data(), dD, bytesD, hipMemcpyDeviceToHost), hipSuccess);
+        ASSERT_EQ(hipMemcpy(hD.data(), r.dD, bytesD, hipMemcpyDeviceToHost), hipSuccess);
 
         using Ref = std::complex<double>;
         for(int64_t n = 0; n < N; n++)
@@ -194,41 +225,17 @@ namespace
                     << "D[" << m << "," << n << "] = " << actual << ", expected " << expected;
             }
         }
-
-        (void)hipFree(dA);
-        (void)hipFree(dB);
-        (void)hipFree(dC);
-        (void)hipFree(dD);
-        if(dWs != nullptr)
-        {
-            (void)hipFree(dWs);
-        }
-        hiptensorDestroyPlan(plan);
-        hiptensorDestroyPlanPreference(pref);
-        hiptensorDestroyOperationDescriptor(opDesc);
-        hiptensorDestroyTensorDescriptor(descA);
-        hiptensorDestroyTensorDescriptor(descB);
-        hiptensorDestroyTensorDescriptor(descD);
-        hiptensorDestroy(handle);
     }
 } // namespace
 
 // alpha and beta 8 bytes past a 16-byte boundary, as for a complex double passed as double[2].
 TEST(ScalarAlignmentTest, ComplexF64ContractionScalarsAt8Mod16)
 {
-    if(!deviceArchIsOneOf({"gfx90a", "gfx942", "gfx950"}))
-    {
-        GTEST_SKIP() << "Complex FP64 contractions are not supported on this device";
-    }
     runComplexBilinear<double>(HIPTENSOR_C_64F, HIPTENSOR_COMPUTE_DESC_C64F, 8, 1e-12);
 }
 
 // alpha and beta 4 bytes past an 8-byte boundary, as for a complex float passed as float[2].
 TEST(ScalarAlignmentTest, ComplexF32ContractionScalarsAt4Mod8)
 {
-    if(!deviceArchIsOneOf({"gfx908", "gfx90a", "gfx942", "gfx950", "gfx1250"}))
-    {
-        GTEST_SKIP() << "Complex FP32 contractions are not supported on this device";
-    }
     runComplexBilinear<float>(HIPTENSOR_C_32F, HIPTENSOR_COMPUTE_DESC_C32F, 4, 1e-4);
 }

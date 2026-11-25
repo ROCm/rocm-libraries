@@ -194,16 +194,9 @@ namespace hiptensor
         {
             return static_cast<T>(loadUnaligned<uint64_t>(value));
         }
-        else if constexpr(std::is_same_v<T, hipFloatComplex> && id == HIPTENSOR_C_32F)
-        {
-            return static_cast<T>(loadUnaligned<hipFloatComplex>(value));
-        }
-        else if constexpr(std::is_same_v<T, hipDoubleComplex> && id == HIPTENSOR_C_64F)
-        {
-            return static_cast<T>(loadUnaligned<hipDoubleComplex>(value));
-        }
         else
         {
+            // Complex scalars are read with readVal<ScalarData>(value, hiptensorComputeDescriptor_t).
 #if !NDEBUG
             std::cout << "Unhandled hip datatype: " << id << std::endl;
 #endif // !NDEBUG

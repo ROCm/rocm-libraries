@@ -251,7 +251,7 @@ namespace hiptensor
     template <typename T>
     T readVal(void const* value, hiptensorComputeDescriptor_t id);
 
-    void writeVal(void const* addr, hiptensorComputeDescriptor_t id, ScalarData value);
+    void writeVal(void* addr, hiptensorComputeDescriptor_t id, ScalarData value);
 
     std::string computeTypeToString(hiptensorComputeDescriptor_t computeType);
     std::string hipTypeToString(hiptensorDataType_t hipType);

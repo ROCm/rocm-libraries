@@ -167,40 +167,38 @@ namespace hiptensor
     }
     // @endcond
 
-    void writeVal(void const* addr, hiptensorComputeDescriptor_t id, ScalarData value)
+    void writeVal(void* addr, hiptensorComputeDescriptor_t id, ScalarData value)
     {
         switch(id)
         {
         case HIPTENSOR_COMPUTE_DESC_16F:
         {
-            storeUnaligned<_Float16>(const_cast<void*>(addr), static_cast<_Float16>(value.mReal));
+            storeUnaligned<_Float16>(addr, static_cast<_Float16>(value.mReal));
             return;
         }
         case HIPTENSOR_COMPUTE_DESC_16BF:
         {
-            storeUnaligned<hip_bfloat16>(const_cast<void*>(addr),
-                                         static_cast<hip_bfloat16>(value.mReal));
+            storeUnaligned<hip_bfloat16>(addr, static_cast<hip_bfloat16>(value.mReal));
             return;
         }
         case HIPTENSOR_COMPUTE_DESC_32F:
         {
-            storeUnaligned<float>(const_cast<void*>(addr), static_cast<float>(value.mReal));
+            storeUnaligned<float>(addr, static_cast<float>(value.mReal));
             return;
         }
         case HIPTENSOR_COMPUTE_DESC_64F:
         {
-            storeUnaligned<double>(const_cast<void*>(addr), value.mReal);
+            storeUnaligned<double>(addr, value.mReal);
             return;
         }
         case HIPTENSOR_COMPUTE_DESC_C32F:
         {
-            storeUnaligned<hipFloatComplex>(const_cast<void*>(addr),
-                                            hipComplexDoubleToFloat(value.mComplex));
+            storeUnaligned<hipFloatComplex>(addr, hipComplexDoubleToFloat(value.mComplex));
             return;
         }
         case HIPTENSOR_COMPUTE_DESC_C64F:
         {
-            storeUnaligned<hipDoubleComplex>(const_cast<void*>(addr), value.mComplex);
+            storeUnaligned<hipDoubleComplex>(addr, value.mComplex);
             return;
         }
         default:
