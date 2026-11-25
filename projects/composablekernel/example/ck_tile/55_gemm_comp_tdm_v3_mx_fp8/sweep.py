@@ -267,6 +267,8 @@ def main():
     ap.add_argument("--verify-top", type=int, default=3, help="verify the N best arms (0: none)")
     ap.add_argument("--no-build", action="store_true", help="reuse <out>/bin binaries")
     ap.add_argument("--dry-run", action="store_true", help="build and match arms; no GPU runs")
+    ap.add_argument("--allow-spills", type=int, default=0,
+                    help="run arms whose kernel spills at most this many VGPRs + SGPRs (default 0)")
     o = ap.parse_args()
 
     cfg = json.loads(o.config.read_text())
@@ -299,9 +301,12 @@ def main():
             if not hits:
                 log(f"SKIP {tag}: no such instance in the binary")
                 continue
-            if any(vs or ss for vs, ss, _ in hits):
+            spill = [(vs, ss) for vs, ss, _ in hits if vs or ss]
+            if spill and max(vs + ss for vs, ss in spill) > o.allow_spills:
                 log(f"SKIP {tag}: spills (vgpr/sgpr spills {[(vs, ss) for vs, ss, _ in hits]})")
                 continue
+            if spill:
+                log(f"NOTE {tag}: runs with spills {spill} (--allow-spills {o.allow_spills})")
             plan.append(dict(tag=tag, exe=exe, arm=arm, vgpr=max(vg for _, _, vg in hits)))
     log(f"{len(plan)} arm(s) x {len(cfg['shapes'])} shape(s) to time")
     for p in plan:

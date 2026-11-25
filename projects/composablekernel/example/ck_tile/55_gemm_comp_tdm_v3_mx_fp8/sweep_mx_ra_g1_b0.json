@@ -1,0 +1,94 @@
+{
+  "_comment": "B0 4096x4096x65536: the read-ahead K loop (cluster barriers, early signal, packed LDS-staged scales) in the block B order (g1: all of the next K atom's B before the second half; g1sa: A in halves too) with L2 prefetch 4 / 6 ahead or none, against the best halves form (pk_l8pf6); warp tile 16, cluster 4x4.",
+  "default_defines": [
+    "-DCK_EX55_FOCUS",
+    "-DCK_EX55_BF16_TDM_ONLY",
+    "-DCK_TILE_GFX125_FP8_K1PERLANE=16",
+    "-DCK_EX55_MX_SCALE_WIDE=1",
+    "-DCK_EX55_A_ROW_PREFETCH=1",
+    "-DCK_EX55_FOCUS_MIN"
+  ],
+  "variants": [
+    {
+      "name": "pk_l8pf6",
+      "defines": [
+        "-DCK_EX55_RA=1",
+        "-DCK_EX55_MX_SCALE_LDS=1",
+        "-DCK_EX55_RA_CB=2",
+        "-DCK_EX55_RA_PACK=1",
+        "-DCK_EX55_RA_BLOCKB=0",
+        "-DCK_EX55_RA_SPLITA=1",
+        "-DCK_EX55_RA_LATEAT=8",
+        "-DCK_EX55_RA_GL2=6"
+      ]
+    },
+    {
+      "name": "pk_g1_pf6",
+      "defines": [
+        "-DCK_EX55_RA=1",
+        "-DCK_EX55_MX_SCALE_LDS=1",
+        "-DCK_EX55_RA_CB=2",
+        "-DCK_EX55_RA_PACK=1",
+        "-DCK_EX55_RA_GL2=6"
+      ]
+    },
+    {
+      "name": "pk_g1_pf4",
+      "defines": [
+        "-DCK_EX55_RA=1",
+        "-DCK_EX55_MX_SCALE_LDS=1",
+        "-DCK_EX55_RA_CB=2",
+        "-DCK_EX55_RA_PACK=1",
+        "-DCK_EX55_RA_GL2=4"
+      ]
+    },
+    {
+      "name": "pk_g1_nopf",
+      "defines": [
+        "-DCK_EX55_RA=1",
+        "-DCK_EX55_MX_SCALE_LDS=1",
+        "-DCK_EX55_RA_CB=2",
+        "-DCK_EX55_RA_PACK=1"
+      ]
+    },
+    {
+      "name": "pk_g1sa_pf6",
+      "defines": [
+        "-DCK_EX55_RA=1",
+        "-DCK_EX55_MX_SCALE_LDS=1",
+        "-DCK_EX55_RA_CB=2",
+        "-DCK_EX55_RA_PACK=1",
+        "-DCK_EX55_RA_SPLITA=1",
+        "-DCK_EX55_RA_GL2=6"
+      ]
+    },
+    {
+      "name": "pk_g1sa_pf4",
+      "defines": [
+        "-DCK_EX55_RA=1",
+        "-DCK_EX55_MX_SCALE_LDS=1",
+        "-DCK_EX55_RA_CB=2",
+        "-DCK_EX55_RA_PACK=1",
+        "-DCK_EX55_RA_SPLITA=1",
+        "-DCK_EX55_RA_GL2=4"
+      ]
+    }
+  ],
+  "arms": [
+    {
+      "wt": 16,
+      "cluster": "4x4"
+    }
+  ],
+  "shapes": [
+    [
+      4096,
+      4096,
+      65536
+    ]
+  ],
+  "c_dtype": "bf16",
+  "rounds": 5,
+  "warmup": 50,
+  "repeat": 100
+}
