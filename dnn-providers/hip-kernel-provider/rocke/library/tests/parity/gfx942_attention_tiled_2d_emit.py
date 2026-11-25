@@ -347,6 +347,36 @@ _CONFIGS = {
         has_softcap=False,
         use_additive_bias=True,
     ),
+    # Fast paged-KV descriptor (bounded V tail per call).
+    52: dict(
+        head_size=64,
+        block_size=32,
+        num_query_heads=64,
+        num_kv_heads=8,
+        dtype="bf16",
+        use_sinks=False,
+        sliding_window=0,
+        has_softcap=False,
+        num_warps=4,
+        tile_size=64,
+        use_fast_paged_kv_desc=True,
+    ),
+    # Page copies whose copy spans pages (one 8-warp copy is two 16-token pages
+    # of head size 32): each copy's page comes from the wave, and each lane sits
+    # at the same row of its page in every copy.
+    53: dict(
+        head_size=32,
+        block_size=16,
+        num_query_heads=32,
+        num_kv_heads=8,
+        dtype="bf16",
+        use_sinks=False,
+        sliding_window=0,
+        has_softcap=False,
+        num_seqs=2,
+        num_warps=8,
+        tile_size=64,
+    ),
 }
 
 # Configs both engines must reject, with the reason each one pins: run_diff
@@ -359,6 +389,10 @@ _EXPECTED_REJECTIONS = {
         r"|use_additive_bias is not implemented on gfx942"
     ),
 }
+# cfg53 with i64 K/V (one resource per page), and cfg11 with i64 K/V: copies
+# that end mid-row on a per-page resource.
+_CONFIGS[54] = {**_CONFIGS[53], "use_i64_kv_addr": True}
+_CONFIGS[55] = {**_CONFIGS[11], "use_i64_kv_addr": True}
 
 # D64 fp16 flash prefill with the transposed VALU stack (scalar state,
 # invariant hoist, mask-once, mask-limit), non-ring.

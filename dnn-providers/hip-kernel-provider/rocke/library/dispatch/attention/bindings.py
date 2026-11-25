@@ -233,6 +233,15 @@ def validate_tuning_attention_tensors(
         )
     if table_shape[1] <= 0:
         raise ValueError("block_table must have at least one block column")
+    # The kernels bound a sequence's table reads by its own entry count, which stays inside
+    # its row when every row can hold max_seqlen_k tokens and seqused_k <= max_seqlen_k. The
+    # width is checked from shapes, so also with validate_contents=False; seqused_k is then
+    # the caller's contract.
+    if table_shape[1] * int(problem.block_size) < int(problem.max_seqlen_k):
+        raise ValueError(
+            f"block_table has {table_shape[1]} columns of {problem.block_size} tokens, "
+            f"fewer than max_seqlen_k={problem.max_seqlen_k}"
+        )
     stride = getattr(table, "stride", None)
     if not callable(stride):
         raise ValueError("block_table must expose strides")
@@ -270,11 +279,6 @@ def validate_tuning_attention_tensors(
                     f"seqused_k[{seq}]={kv_len} is outside [0, {problem.max_seqlen_k}]"
                 )
             pages = (kv_len + int(problem.block_size) - 1) // int(problem.block_size)
-            if pages > table_shape[1]:
-                raise ValueError(
-                    f"block_table row {seq} has {table_shape[1]} entries but "
-                    f"seqused_k requires {pages}"
-                )
             row = table_values[seq]
             if len(row) != table_shape[1]:
                 raise ValueError(
