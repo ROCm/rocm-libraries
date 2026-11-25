@@ -4181,21 +4181,11 @@ class Solution(collections.abc.Mapping):
     if "ValidDepthU" in state:
       del state["ValidDepthU"]
 
-    # An odd MIWaveTile mxfp8 tile (per-tile scale read) is supported only on the
-    # dual-period path (DepthU=128, PGR2).  That is the only path on which the
-    # per-tile read is implemented and validated; the legacy scale emit pairs
-    # tiles at compile time, so such configs are rejected rather than emitted.
-    if (state["UseSubtileImpl"]
-        and (state["ProblemType"]["MXBlockA"] or state["ProblemType"]["MXBlockB"])
-        and (state["MIWaveTile"][0] % 2 == 1 or state["MIWaveTile"][1] % 2 == 1)
-        and not state.get("_DualPeriodMXFP8")):
-      reject(state, printRejectionReason,
-             "UseSubtileImpl=1 mxfp8 with an odd MIWaveTile requires the "
-             "dual-period path (not implemented on the legacy scale path); got "
-             "MIWaveTile=[%d, %d] DepthU=%d _DualPeriodMXFP8=%s"
-             % (state["MIWaveTile"][0], state["MIWaveTile"][1],
-                state["DepthU"], state.get("_DualPeriodMXFP8")))
-      return
+    # An odd MIWaveTile mxfp8 tile uses the per-tile scale read (scale LR
+    # granularity mn=1), which is emitted the same way on both the dual-period
+    # path (DepthU=128, PGR2) and the single-period path (e.g. DepthU=256): the
+    # byte-select reads one tile's scale, independent of the DepthU the data
+    # loop runs at.  No DepthU gate is applied here.
 
     if state["A2ASubRounds"] > 1 \
         and state["DepthU"] * state["ProblemType"]["DataTypeB"].numBytes() % 128 != 0:
