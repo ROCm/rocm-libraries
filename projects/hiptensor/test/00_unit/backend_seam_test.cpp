@@ -714,3 +714,91 @@ TEST(BackendSeamTest, KernelCacheCalls)
               HIPTENSOR_STATUS_SUCCESS);
     std::remove(fileName.c_str());
 }
+
+// A contraction's workspace estimate needs a plan preference on every backend.
+TEST(BackendSeamTest, ContractionEstimatesNeedAPreference)
+{
+    ScopedEnvironmentVariable ab("HIPTENSOR_BACKEND_AB", nullptr);
+    for(char const* backend : {"ck", "rocke"})
+    {
+        ScopedEnvironmentVariable selected("HIPTENSOR_BACKEND", backend);
+        ApiObjects                api;
+        int32_t const             modeA[] = {'m', 'k'}, modeB[] = {'k', 'n'}, modeD[] = {'m', 'n'};
+        auto                      dA        = api.tensor({8, 5}, {}, HIPTENSOR_R_32F);
+        auto                      dB        = api.tensor({5, 6}, {}, HIPTENSOR_R_32F);
+        auto                      dD        = api.tensor({8, 6}, {}, HIPTENSOR_R_32F);
+        hiptensorOperationDescriptor_t desc = nullptr;
+        auto const                     id   = HIPTENSOR_OP_IDENTITY;
+        if(hiptensorCreateContraction(api.handle,
+                                      &desc,
+                                      dA,
+                                      modeA,
+                                      id,
+                                      dB,
+                                      modeB,
+                                      id,
+                                      dD,
+                                      modeD,
+                                      id,
+                                      dD,
+                                      modeD,
+                                      HIPTENSOR_COMPUTE_DESC_32F)
+           != HIPTENSOR_STATUS_SUCCESS)
+        {
+            GTEST_SKIP() << "the device refuses the f32 contraction";
+        }
+        api.keep(desc);
+        uint64_t estimate = 0;
+        EXPECT_EQ(hiptensorEstimateWorkspaceSize(
+                      api.handle, desc, nullptr, HIPTENSOR_WORKSPACE_DEFAULT, &estimate),
+                  HIPTENSOR_STATUS_NOT_INITIALIZED)
+            << backend;
+    }
+}
+
+// A plan executes only with a handle of the device it was created on, even when that handle's
+// device is the current one.
+TEST(BackendSeamTest, PlansRunOnlyOnTheirDevice)
+{
+    ScopedEnvironmentVariable backend("HIPTENSOR_BACKEND", nullptr);
+    ScopedEnvironmentVariable ab("HIPTENSOR_BACKEND_AB", nullptr);
+    int                       count = 0, first = 0;
+    ASSERT_EQ(hipGetDeviceCount(&count), hipSuccess);
+    if(count < 2)
+    {
+        GTEST_SKIP() << "needs two devices";
+    }
+    ASSERT_EQ(hipGetDevice(&first), hipSuccess);
+    int const second = first == 0 ? 1 : 0;
+
+    ApiObjects                     api;
+    int32_t const                  modeA[] = {'m', 'n'}, modeB[] = {'n', 'm'};
+    auto                           dA   = api.tensor({4, 3}, {}, HIPTENSOR_R_32F);
+    auto                           dB   = api.tensor({3, 4}, {}, HIPTENSOR_R_32F);
+    hiptensorOperationDescriptor_t desc = nullptr;
+    ASSERT_EQ(hiptensorCreatePermutation(api.handle,
+                                         &desc,
+                                         dA,
+                                         modeA,
+                                         HIPTENSOR_OP_IDENTITY,
+                                         dB,
+                                         modeB,
+                                         HIPTENSOR_COMPUTE_DESC_32F),
+              HIPTENSOR_STATUS_SUCCESS);
+    api.keep(desc);
+    hiptensorPlan_t plan = nullptr;
+    ASSERT_EQ(api.plan(desc, plan), HIPTENSOR_STATUS_SUCCESS);
+
+    ASSERT_EQ(hipSetDevice(second), hipSuccess);
+    {
+        LogCapture          log;
+        ApiObjects          other;
+        DeviceBuffer<float> a(std::vector<float>(12, 1.0f)), b(std::vector<float>(12, 0.0f));
+        float const         alpha = 1.0f;
+        hiptensorStatus_t   status
+            = hiptensorPermute(other.handle, plan, &alpha, a.ptr, b.ptr, nullptr);
+        EXPECT_EQ(status, HIPTENSOR_STATUS_ARCH_MISMATCH) << log.all();
+        EXPECT_TRUE(log.contains("plan device id")) << log.all();
+    }
+    ASSERT_EQ(hipSetDevice(first), hipSuccess);
+}

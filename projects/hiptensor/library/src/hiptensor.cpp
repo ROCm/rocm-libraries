@@ -976,6 +976,13 @@ hiptensorStatus_t hiptensorEstimateWorkspaceSize(const hiptensorHandle_t        
     CheckApiParams(checkResult, *logger, HIPTENSOR_STATUS_NOT_INITIALIZED, handle);
     CheckApiParams(checkResult, *logger, HIPTENSOR_STATUS_NOT_INITIALIZED, desc);
     CheckApiParams(checkResult, *logger, HIPTENSOR_STATUS_NOT_INITIALIZED, workspaceSizeEstimate);
+    if(checkResult == HIPTENSOR_STATUS_SUCCESS
+       && (desc->mOperationType == HIPTENSOR_CONTRACTION
+           || desc->mOperationType == HIPTENSOR_CONTRACTION_TRINARY))
+    {
+        // Contraction estimates depend on the preference on every backend.
+        CheckApiParams(checkResult, *logger, HIPTENSOR_STATUS_NOT_INITIALIZED, planPref);
+    }
     if(checkResult != HIPTENSOR_STATUS_SUCCESS)
     {
         return checkResult;

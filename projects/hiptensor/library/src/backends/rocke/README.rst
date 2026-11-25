@@ -154,15 +154,16 @@ kernel, the tiled kernel and the generic kernel), checking every capability on t
 The plan preference changes this:
 
 * ``HIPTENSOR_PLAN_PREFERENCE_KERNEL_RANK`` = *k* selects the *k*-th candidate of that order (0 is the
-  default). A rank past the candidates the plan admits returns ``HIPTENSOR_STATUS_NOT_SUPPORTED``.
+  default). A rank past the candidates the plan admits returns ``HIPTENSOR_STATUS_INVALID_VALUE``.
 * ``HIPTENSOR_ALGO_DEFAULT_PATIENT`` times the first candidates of the order on the device at plan creation
   (on buffers it allocates and initializes, which it frees before ``hiptensorCreatePlan`` returns) and keeps
   the fastest one.
 
-With ``HIPTENSOR_CACHE_MODE_PEDANTIC`` (the default) the kernel a plan takes (the winner of the timing, or the
-selected candidate) is stored in the handle's plan cache, and later plans of the same problem on that handle, or on
-a handle that read the plan cache file, take it from there without timing or selecting again, as long as their
-workspace limit admits it.
+With ``HIPTENSOR_CACHE_MODE_PEDANTIC`` (the default) the winner of the timing is stored in the handle's plan cache,
+and later plans of the same problem on that handle, or on a handle that read the plan cache file, take it from there
+without timing or selecting again, as long as their workspace limit admits it. A candidate chosen without timing is
+not stored. Plans created with ``HIPTENSOR_JIT_MODE_DEFAULT`` and plans created without the JIT have separate plan
+cache lines, since only the former have the contraction JIT's candidates.
 
 ``hiptensorEstimateWorkspaceSize`` reports, for ``HIPTENSOR_WORKSPACE_DEFAULT``, the workspace of the leading
 candidates of the selection, with either algorithm: the ones ``HIPTENSOR_ALGO_DEFAULT_PATIENT`` times

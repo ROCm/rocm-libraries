@@ -27,6 +27,7 @@
 #include <cassert>
 #include <fstream>
 
+#include "backends/common/backend.hpp"
 #include "data_types.hpp"
 #include "hash.hpp"
 #include "plan_cache.hpp"
@@ -42,7 +43,7 @@ namespace hiptensor
     }
 
     PlanCache::HashId PlanCache::getHashID(hiptensorOperationDescriptor_t desc,
-                                           std::string const&             backend)
+                                           std::string const&             backendName)
     {
         auto tag             = desc->mTag;
         auto ADataType       = desc->mDescA ? desc->mDescA->mType : hiptensor::NONE_TYPE;
@@ -82,10 +83,10 @@ namespace hiptensor
         arrLSM.insert(arrLSM.end(), desc->mModeC.begin(), desc->mModeC.end());
         arrLSM.insert(arrLSM.end(), desc->mModeD.begin(), desc->mModeD.end());
 
-        //generate hash ID by {Backend, Tag, DatatypeA, DatatypeB, DatatypeC, DatatypeD, DatatypeCompute, mOperationType, mContractionOpId, lengths, strides, modes}
-        std::size_t const backendHash = Hash{}(backend);
-        PlanCache::HashId hashID      = Hash{}(backendHash,
-                                          tag,
+        //generate hash ID by {Tag, DatatypeA, DatatypeB, DatatypeC, DatatypeD, DatatypeCompute, mOperationType, mContractionOpId, lengths, strides, modes},
+        //then for backends other than CK by {Backend, that hash}: CK keys stay those of earlier
+        //versions, so plan cache files written by them still apply
+        PlanCache::HashId hashID = Hash{}(tag,
                                           ADataType,
                                           BDataType,
                                           CDataType,
@@ -94,6 +95,10 @@ namespace hiptensor
                                           operationType,
                                           contractionOpId,
                                           arrLSM);
+        if(backendName != backend::kCkBackendName)
+        {
+            hashID = Hash{}(Hash{}(backendName), hashID);
+        }
 
         return hashID;
     }

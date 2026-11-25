@@ -95,6 +95,28 @@ namespace hiptensor
                 return true;
             }
 
+            // Whether the span of the tensor (TensorArg::spanElements) and its byte count fit in
+            // int64_t, so that the backends can size allocations and offsets from them.
+            bool spanFits(std::vector<int64_t> const& extents,
+                          std::vector<int64_t> const& strides,
+                          uint32_t                    elementBytes)
+            {
+                int64_t span = 1;
+                for(std::size_t i = 0; i < extents.size(); i++)
+                {
+                    int64_t const stride = i < strides.size() ? strides[i] : 0;
+                    int64_t       term   = 0;
+                    if(extents[i] > 0
+                       && (__builtin_mul_overflow(extents[i] - 1, stride, &term)
+                           || __builtin_add_overflow(span, term, &span)))
+                    {
+                        return false;
+                    }
+                }
+                int64_t bytes = 0;
+                return !__builtin_mul_overflow(span, static_cast<int64_t>(elementBytes), &bytes);
+            }
+
             hiptensorStatus_t makeTensor(hiptensorTensorDescriptor const* desc,
                                          std::vector<int32_t> const&      modes,
                                          hiptensorOperator_t              unaryOp,
@@ -109,6 +131,10 @@ namespace hiptensor
                 if(desc->mLengths.size() > static_cast<std::size_t>(kMaxModes)
                    || !toInt64(desc->mLengths, tensor.extents)
                    || !toInt64(desc->mStrides, tensor.strides))
+                {
+                    return HIPTENSOR_STATUS_NOT_SUPPORTED;
+                }
+                if(!spanFits(tensor.extents, tensor.strides, hiptensorDataTypeSize(desc->mType)))
                 {
                     return HIPTENSOR_STATUS_NOT_SUPPORTED;
                 }

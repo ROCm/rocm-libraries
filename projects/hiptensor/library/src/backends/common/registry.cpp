@@ -560,14 +560,16 @@ namespace hiptensor
                 return status;
             }
 
-            auto state = std::make_unique<PlanBackendState>();
+            auto state      = std::make_unique<PlanBackendState>();
+            state->deviceId = handle->getDevice().getDeviceId();
             if(auto status = makeProblem(*plan->mOpDesc, handle->getDevice(), state->problem);
                status != HIPTENSOR_STATUS_SUCCESS)
             {
                 snprintf(msg,
                          sizeof(msg),
                          "The operation cannot be described to a backend: a tensor has more than "
-                         "%d modes or an extent or stride that does not fit in 64 bits (%s)",
+                         "%d modes, or an extent, stride or byte span that does not fit in 64 "
+                         "bits (%s)",
                          static_cast<int>(kMaxModes),
                          hiptensorGetErrorString(status));
                 logger->logError("hiptensorCreatePlan", msg);
@@ -659,6 +661,18 @@ namespace hiptensor
             if(auto status = checkHandleDevice(handle, apiName); status != HIPTENSOR_STATUS_SUCCESS)
             {
                 return status;
+            }
+            if(state.deviceId != handle->getDevice().getDeviceId())
+            {
+                char msg[256];
+                snprintf(msg,
+                         sizeof(msg),
+                         "Device mismatch error: plan device id: %d, handle device id: %d (%s)",
+                         state.deviceId,
+                         static_cast<int>(handle->getDevice().getDeviceId()),
+                         hiptensorGetErrorString(HIPTENSOR_STATUS_ARCH_MISMATCH));
+                Logger::instance()->logError(apiName, msg);
+                return HIPTENSOR_STATUS_ARCH_MISMATCH;
             }
 
             auto context = PlanContext{handle, plan, 0};

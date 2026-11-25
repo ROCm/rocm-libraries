@@ -163,6 +163,13 @@ namespace hiptensor
 #endif
             }
 
+            // The plan cache name of rocKE plans: JIT plans have candidates that other plans
+            // don't (the contraction JIT's route), so their cache lines are kept apart.
+            char const* cacheName(bool jit)
+            {
+                return jit ? "rocke-jit" : backend::kRockeBackendName;
+            }
+
             // Whether a plan of `pref` specializes its elementwise launches with the JIT
             // (jitPlan, the JIT not turned off by HIPTENSOR_ROCKE_JIT=0|off): a selection feature
             // of every candidate (CandidateFacts::jitMode), whose launches then run faster.
@@ -418,7 +425,7 @@ namespace hiptensor
                     PlanCache::HashId hash  = 0;
                     if(cache != nullptr)
                     {
-                        hash = cache->getHashID(plan->mOpDesc, backend::kRockeBackendName);
+                        hash = cache->getHashID(plan->mOpDesc, cacheName(jit));
                     }
 
                     int         chosen = sel.order.front();
@@ -442,8 +449,7 @@ namespace hiptensor
                     }
                     if(!decided && cache != nullptr)
                     {
-                        auto const uid
-                            = cache->querySolutionUid(plan->mOpDesc, backend::kRockeBackendName);
+                        auto const uid = cache->querySolutionUid(plan->mOpDesc, cacheName(jit));
                         if(uid != 0)
                         {
                             for(size_t i = 0; i < candidates.size(); i++)
@@ -539,13 +545,6 @@ namespace hiptensor
                         note += std::string(note.empty() ? "" : "; ") + jitNotes;
                     }
 
-                    // the plan's kernel goes to the plan cache (PEDANTIC), as the measured winner
-                    // does: later plans of the problem on the handle, or on a handle that reads
-                    // the plan cache file, take it without selecting again
-                    if(!decided && source != "AUTOTUNE" && cache != nullptr)
-                    {
-                        cache->addCacheLine(hash, candidateUid(*pack, candidates[chosen]));
-                    }
                     if(source != "AUTOTUNE")
                     {
                         dumpTimings(problem, candidates, sel, nullptr, 0, chosen);
@@ -710,7 +709,7 @@ namespace hiptensor
                     {
                         auto const uid = cache->querySolutionUid(
                             const_cast<hiptensorOperationDescriptor_t>(context.desc),
-                            backend::kRockeBackendName);
+                            cacheName(jitPlan(pref)));
                         for(auto const& c : candidates)
                         {
                             if(uid != 0 && candidateUid(*pack, c) == uid)

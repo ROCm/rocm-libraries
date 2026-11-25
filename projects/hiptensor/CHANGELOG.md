@@ -15,7 +15,7 @@ Full documentation for hipTensor is available at [rocm.docs.amd.com/projects/hip
 * Added bf16 support to `hiptensorElementwiseTrinaryExecute` for ranks 2-6, with a bf16 or fp32 scalar type, and fp32 scalar support for fp16 tensors. Trinary now accepts the same data type combinations as `hiptensorElementwiseBinaryExecute`.
 
 ### Changed
-* Changed the plan cache to keep its entries per backend: the hash key of an entry includes the backend name, so plans of one backend never take a kernel cached for another. The plan cache file format is unchanged.
+* Changed the plan cache to keep its entries per backend, so plans of one backend never take a kernel cached for another. Composable Kernel entries keep their earlier keys, so plan cache files written by earlier versions still apply. The plan cache file format is unchanged.
 * Changed `hiptensorWriteKernelCacheToFile` and `hiptensorReadKernelCacheFromFile` to return `HIPTENSOR_STATUS_NOT_INITIALIZED` for a null `handle` and `HIPTENSOR_STATUS_INVALID_VALUE` for a null `fileName`. With no backend that keeps a kernel cache, both still succeed without touching the file.
 * Changed `hiptensorPermute` to return `HIPTENSOR_STATUS_NOT_SUPPORTED` when the output tensor's data type differs from the input tensor's. Previously the mismatch passed validation and the call failed with `HIPTENSOR_STATUS_INTERNAL_ERROR` because no kernel matched.
 * Changed `hiptensorElementwiseTrinaryExecute` to return `HIPTENSOR_STATUS_NOT_SUPPORTED` when the data type of D differs from that of C, matching `hiptensorElementwiseBinaryExecute`. Previously the mismatch failed later with `HIPTENSOR_STATUS_INTERNAL_ERROR`.

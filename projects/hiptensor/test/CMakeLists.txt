@@ -495,12 +495,6 @@ set(_HIPTENSOR_HOST_TESTS
   util_test
   yaml_test
 )
-if(HIPTENSOR_ENABLE_ROCKE_BACKEND)
-  list(APPEND _HIPTENSOR_HOST_TESTS rocke_backend_test)
-  if(HIPTENSOR_ENABLE_ROCKE_JIT)
-    list(APPEND _HIPTENSOR_HOST_TESTS rocke_jit_test rocke_gett_jit_test)
-  endif()
-endif()
 
 # Device tests encoded as "binary|config-or-NONE". The config path is
 # relative to a per-category config root (bin/hiptensor/configs/<category>/),
@@ -709,22 +703,38 @@ foreach(_hiptensor_family "quick|validation/quick" "standard|validation/standard
     endforeach()
 endforeach()
 
-# rocKE tests that need an environment of their own, emitted once under quick like the host tests.
-# The selection model test reads the models installed next to it (rocke_select).
+# rocKE tests, emitted once under quick like the host tests. They skip unsupported devices
+# themselves, so they carry no SKIP_REGULAR_EXPRESSION: the HIPTENSOR_STATUS_ARCH_MISMATCH that some
+# cases expect, printed with a failure, would otherwise report the failure as a skip. The selection
+# model test reads the models installed next to it (rocke_select). The cases on tensors of 2 GiB and
+# more (tens of GiB of device and host memory) run only in full, one test at a time.
 if(HIPTENSOR_ENABLE_ROCKE_BACKEND)
-    function(_hiptensor_emit_env_test test_name command environment)
-        _hiptensor_emit_test("${test_name} quick" "${command}")
-        file(APPEND "${INSTALL_TEST_FILE}"
-             "set_tests_properties(\"${test_name} quick\" PROPERTIES ENVIRONMENT \"${environment}\")\n")
+    function(_hiptensor_emit_rocke_test test_name command environment)
+        file(APPEND "${INSTALL_TEST_FILE}" "add_test(\"${test_name}\" ${command})\n")
+        if(NOT environment STREQUAL "")
+            file(APPEND "${INSTALL_TEST_FILE}"
+                 "set_tests_properties(\"${test_name}\" PROPERTIES ENVIRONMENT \"${environment}\")\n")
+        endif()
     endfunction()
-    _hiptensor_emit_env_test(rocke_select_model_test "\"../rocke_select_model_test\""
-                             "HIPTENSOR_ROCKE_TEST_SELECT_MODEL_DIR=rocke_select")
-    _hiptensor_emit_env_test(rocke_backend_test_f64_route
-                             "\"../rocke_backend_test\" --gtest_filter=*RockeContraction*"
-                             "HIPTENSOR_ROCKE_CONTRACTION_ROUTE=f64")
+    set(_hiptensor_rocke_large
+        "*RockeLargeIndex.*:*RockeLargeContraction.*:*RockeHugeContraction.*:*RockeHugeTensor.*")
+    _hiptensor_emit_rocke_test("rocke_backend_test quick"
+                               "\"../rocke_backend_test\" --gtest_filter=-${_hiptensor_rocke_large}" "")
+    _hiptensor_emit_rocke_test("rocke_backend_test_large full"
+                               "\"../rocke_backend_test\" --gtest_filter=${_hiptensor_rocke_large}" "")
+    file(APPEND "${INSTALL_TEST_FILE}"
+         "set_tests_properties(\"rocke_backend_test_large full\" PROPERTIES RUN_SERIAL TRUE)\n")
+    _hiptensor_emit_rocke_test("rocke_select_model_test quick" "\"../rocke_select_model_test\""
+                               "HIPTENSOR_ROCKE_TEST_SELECT_MODEL_DIR=rocke_select")
+    _hiptensor_emit_rocke_test("rocke_backend_test_f64_route quick"
+                               "\"../rocke_backend_test\" --gtest_filter=*RockeContraction*"
+                               "HIPTENSOR_ROCKE_CONTRACTION_ROUTE=f64")
     if(HIPTENSOR_ENABLE_ROCKE_JIT)
-        _hiptensor_emit_env_test(rocke_backend_test_jit "\"../rocke_backend_test\""
-                                 "HIPTENSOR_ROCKE_TEST_JIT=1;HIPTENSOR_ROCKE_JIT=all")
+        _hiptensor_emit_rocke_test("rocke_jit_test quick" "\"../rocke_jit_test\"" "")
+        _hiptensor_emit_rocke_test("rocke_gett_jit_test quick" "\"../rocke_gett_jit_test\"" "")
+        _hiptensor_emit_rocke_test("rocke_backend_test_jit quick"
+                                   "\"../rocke_backend_test\" --gtest_filter=-${_hiptensor_rocke_large}"
+                                   "HIPTENSOR_ROCKE_TEST_JIT=1;HIPTENSOR_ROCKE_JIT=all")
     endif()
     rocm_install(
         DIRECTORY "${HIPTENSOR_ROCKE_SELECT_MODEL_DIR}/"

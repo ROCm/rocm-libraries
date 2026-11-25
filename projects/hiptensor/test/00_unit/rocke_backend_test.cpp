@@ -712,8 +712,7 @@ namespace
                            LogCapture const&              log)
     {
         workspaceSize = 0;
-        EXPECT_EQ(hiptensorEstimateWorkspaceSize(
-                      api.handle, desc, nullptr, HIPTENSOR_WORKSPACE_DEFAULT, &workspaceSize),
+        EXPECT_EQ(api.estimate(desc, workspaceSize, HIPTENSOR_WORKSPACE_DEFAULT),
                   HIPTENSOR_STATUS_SUCCESS)
             << log.all();
         hiptensorPlan_t plan   = nullptr;
@@ -1081,20 +1080,25 @@ namespace
             ASSERT_EQ(hipMalloc(&ws, workspaceSize), hipSuccess);
             dev.buffers.push_back(ws);
         }
-        Stream stream;
-        ASSERT_EQ(hiptensorContract(api.handle,
-                                    plan,
-                                    alpha.as(scalarType),
-                                    pA,
-                                    pB,
-                                    beta.as(scalarType),
-                                    pC,
-                                    pD,
-                                    ws,
-                                    workspaceSize,
-                                    stream.s),
-                  HIPTENSOR_STATUS_SUCCESS)
-            << log.all();
+        Stream     stream;
+        auto const status = hiptensorContract(api.handle,
+                                              plan,
+                                              alpha.as(scalarType),
+                                              pA,
+                                              pB,
+                                              beta.as(scalarType),
+                                              pC,
+                                              pD,
+                                              ws,
+                                              workspaceSize,
+                                              stream.s);
+        if(choice.device >= 0)
+        {
+            // another device than the handle's: refused before any kernel runs
+            EXPECT_EQ(status, HIPTENSOR_STATUS_ARCH_MISMATCH) << log.all();
+            return;
+        }
+        ASSERT_EQ(status, HIPTENSOR_STATUS_SUCCESS) << log.all();
         ASSERT_EQ(hipStreamSynchronize(stream.s), hipSuccess);
         Tensor got = D;
         dev.download(pD, got);
@@ -4200,7 +4204,8 @@ namespace
         std::remove(file.c_str());
     }
 
-    // KERNEL_RANK past the candidates is NOT_SUPPORTED (no fallback in this test program).
+    // KERNEL_RANK past the candidates is INVALID_VALUE: an invalid request, which no fallback
+    // backend serves instead.
     TEST(RockeSelection, KernelRankPastTheCandidates)
     {
         ApiObjects                     api;
@@ -4235,7 +4240,7 @@ namespace
         {
             api.plans.push_back(plan);
         }
-        EXPECT_EQ(status, HIPTENSOR_STATUS_NOT_SUPPORTED) << log.all();
+        EXPECT_EQ(status, HIPTENSOR_STATUS_INVALID_VALUE) << log.all();
         EXPECT_TRUE(log.contains("KERNEL_RANK 1 is past the 1 rocKE candidates")) << log.all();
     }
 
@@ -5937,21 +5942,26 @@ namespace
             ASSERT_EQ(hipMemset(ws, 0xFF, workspaceSize), hipSuccess);
             dev.buffers.push_back(ws);
         }
-        Stream stream;
-        ASSERT_EQ(hiptensorContractTrinary(api.handle,
-                                           plan,
-                                           alpha.as(scalarType),
-                                           pA,
-                                           pB,
-                                           pC,
-                                           beta.as(scalarType),
-                                           pD,
-                                           pE,
-                                           ws,
-                                           workspaceSize,
-                                           stream.s),
-                  HIPTENSOR_STATUS_SUCCESS)
-            << log.all();
+        Stream     stream;
+        auto const status = hiptensorContractTrinary(api.handle,
+                                                     plan,
+                                                     alpha.as(scalarType),
+                                                     pA,
+                                                     pB,
+                                                     pC,
+                                                     beta.as(scalarType),
+                                                     pD,
+                                                     pE,
+                                                     ws,
+                                                     workspaceSize,
+                                                     stream.s);
+        if(choice.device >= 0)
+        {
+            // another device than the handle's: refused before any kernel runs
+            EXPECT_EQ(status, HIPTENSOR_STATUS_ARCH_MISMATCH) << log.all();
+            return;
+        }
+        ASSERT_EQ(status, HIPTENSOR_STATUS_SUCCESS) << log.all();
         ASSERT_EQ(hipStreamSynchronize(stream.s), hipSuccess);
         Tensor got = E;
         dev.download(pE, got);
@@ -6212,9 +6222,8 @@ namespace
     // that keep the tiled kernel's vectors aligned, on the emulated-f32 and 16-bit GEMM routes of
     // gfx950): every candidate is exact with aligned buffers, with every buffer one element past
     // an aligned address (each tiled launch then runs the generic launches it replaced, which
-    // address T in the workspace and the trinary's tensors exactly as the tiled launch does), and
-    // executed on another device of the same architecture than the plan was created on, when the
-    // machine has one.
+    // address T in the workspace and the trinary's tensors exactly as the tiled launch does); on
+    // another device of the same architecture, when the machine has one, executions are refused.
     TEST(RockeTrinary, TiledStepLaunches)
     {
         int const        other   = otherDevice();
@@ -8582,12 +8591,10 @@ namespace
             EXPECT_EQ(tiledGemm, gemmTarget());
         }
     }
-    // Plans executed on another device of the same architecture than the one they were created
-    // on: every candidate of a contraction with tiled packs and epilogues of many modes (the
-    // pack kernels load on the executing device; their generic fallbacks run only for unaligned
-    // buffers) and of a 16-bit contraction (every route of its data type), exact, aligned and
-    // not; with the JIT (HIPTENSOR_ROCKE_TEST_JIT=1) the specialized launches run the pack
-    // launches they replaced.
+    // Plans executed with their handle while another device of the same architecture is current:
+    // every candidate of a contraction with tiled packs and epilogues of many modes and of a
+    // 16-bit contraction (every route of its data type) is refused with
+    // HIPTENSOR_STATUS_ARCH_MISMATCH.
     TEST(RockeInPlaceGett, OtherDevice)
     {
         int const other = otherDevice();
@@ -9307,15 +9314,10 @@ namespace
             auto       desc = describeEstimateCase(api, c);
             ASSERT_NE(desc, nullptr);
             uint64_t mn = 0, df = 0, mx = 0;
-            ASSERT_EQ(hiptensorEstimateWorkspaceSize(
-                          api.handle, desc, nullptr, HIPTENSOR_WORKSPACE_MIN, &mn),
+            ASSERT_EQ(api.estimate(desc, mn, HIPTENSOR_WORKSPACE_MIN), HIPTENSOR_STATUS_SUCCESS);
+            ASSERT_EQ(api.estimate(desc, df, HIPTENSOR_WORKSPACE_DEFAULT),
                       HIPTENSOR_STATUS_SUCCESS);
-            ASSERT_EQ(hiptensorEstimateWorkspaceSize(
-                          api.handle, desc, nullptr, HIPTENSOR_WORKSPACE_DEFAULT, &df),
-                      HIPTENSOR_STATUS_SUCCESS);
-            ASSERT_EQ(hiptensorEstimateWorkspaceSize(
-                          api.handle, desc, nullptr, HIPTENSOR_WORKSPACE_MAX, &mx),
-                      HIPTENSOR_STATUS_SUCCESS);
+            ASSERT_EQ(api.estimate(desc, mx, HIPTENSOR_WORKSPACE_MAX), HIPTENSOR_STATUS_SUCCESS);
             EXPECT_LE(mn, df);
             EXPECT_LE(df, mx);
 
@@ -10953,8 +10955,7 @@ namespace
             ASSERT_EQ(created, HIPTENSOR_STATUS_SUCCESS) << rowName(row);
             api.keep(desc);
             uint64_t ws = 0;
-            EXPECT_EQ(hiptensorEstimateWorkspaceSize(
-                          api.handle, desc, nullptr, HIPTENSOR_WORKSPACE_DEFAULT, &ws),
+            EXPECT_EQ(api.estimate(desc, ws, HIPTENSOR_WORKSPACE_DEFAULT),
                       HIPTENSOR_STATUS_NOT_SUPPORTED)
                 << rowName(row);
             hiptensorPlan_t plan = nullptr;

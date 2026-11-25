@@ -230,15 +230,18 @@ namespace hiptensor_test
             return status;
         }
 
-        // hiptensorEstimateWorkspaceSize with the default preference.
-        hiptensorStatus_t estimate(hiptensorOperationDescriptor_t op, uint64_t& workspaceSize)
+        // hiptensorEstimateWorkspaceSize with the default plan preference.
+        hiptensorStatus_t estimate(hiptensorOperationDescriptor_t op,
+                                   uint64_t&                      workspaceSize,
+                                   hiptensorWorksizePreference_t  workspacePref
+                                   = HIPTENSOR_WORKSPACE_DEFAULT)
         {
             hiptensorPlanPreference_t pref = nullptr;
             CHECK_HIPTENSOR_ERROR(hiptensorCreatePlanPreference(
                 handle, &pref, HIPTENSOR_ALGO_DEFAULT, HIPTENSOR_JIT_MODE_NONE));
             workspaceSize = 0;
-            auto status   = hiptensorEstimateWorkspaceSize(
-                handle, op, pref, HIPTENSOR_WORKSPACE_DEFAULT, &workspaceSize);
+            auto status
+                = hiptensorEstimateWorkspaceSize(handle, op, pref, workspacePref, &workspaceSize);
             static_cast<void>(hiptensorDestroyPlanPreference(pref));
             return status;
         }

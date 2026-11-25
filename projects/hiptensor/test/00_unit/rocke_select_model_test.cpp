@@ -84,6 +84,13 @@ namespace
         return fs::path(env != nullptr && *env != 0 ? env : HIPTENSOR_ROCKE_SELECT_MODEL_DIR);
     }
 
+    // Whether HIPTENSOR_ROCKE_TEST_SELECT_MODEL_DIR names the model directory.
+    bool explicitModelDir()
+    {
+        char const* env = std::getenv("HIPTENSOR_ROCKE_TEST_SELECT_MODEL_DIR");
+        return env != nullptr && *env != 0;
+    }
+
     std::vector<fs::path> shippedModels()
     {
         std::vector<fs::path> out;
@@ -114,13 +121,23 @@ namespace
 // Every shipped model is one the library uses (format, schema, features, trees).
 TEST(RockeSelectModels, ShippedModelsLoad)
 {
+    // A model directory named explicitly must exist; one without models (rules-only selection)
+    // has nothing to check.
     if(!fs::is_directory(modelDir()))
     {
+        if(explicitModelDir())
+        {
+            FAIL() << "HIPTENSOR_ROCKE_TEST_SELECT_MODEL_DIR=" << modelDir()
+                   << " is not a directory";
+        }
         GTEST_SKIP() << "no model directory " << modelDir()
                      << " (set HIPTENSOR_ROCKE_TEST_SELECT_MODEL_DIR)";
     }
+    if(shippedModels().empty())
+    {
+        GTEST_SKIP() << "no model in " << modelDir() << " (rules-only selection)";
+    }
     auto const models = shippedModels();
-    ASSERT_FALSE(models.empty()) << "no model in " << modelDir();
     for(auto const& path : models)
     {
         sm::Model   model;
@@ -136,10 +153,21 @@ TEST(RockeSelectModels, ShippedModelsLoad)
 // the vectors cover every route the model scores.
 TEST(RockeSelectModels, ShippedModelsScoreLikeTheExporter)
 {
+    // A model directory named explicitly must exist; one without models (rules-only selection)
+    // has nothing to check.
     if(!fs::is_directory(modelDir()))
     {
+        if(explicitModelDir())
+        {
+            FAIL() << "HIPTENSOR_ROCKE_TEST_SELECT_MODEL_DIR=" << modelDir()
+                   << " is not a directory";
+        }
         GTEST_SKIP() << "no model directory " << modelDir()
                      << " (set HIPTENSOR_ROCKE_TEST_SELECT_MODEL_DIR)";
+    }
+    if(shippedModels().empty())
+    {
+        GTEST_SKIP() << "no model in " << modelDir() << " (rules-only selection)";
     }
     auto const& names  = sm::featureNames();
     int         models = 0, rows = 0;

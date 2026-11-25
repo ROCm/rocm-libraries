@@ -233,7 +233,9 @@ namespace hiptensor
         // compared with it.
         struct PlanBackendState
         {
-            Problem                    problem;
+            Problem problem;
+            // The device the plan was created on; its programs run on that device only.
+            int                        deviceId = -1;
             std::unique_ptr<IPrepared> primary;
             std::unique_ptr<IPrepared> shadow;
             DeviceAllocation           shadowOutput;

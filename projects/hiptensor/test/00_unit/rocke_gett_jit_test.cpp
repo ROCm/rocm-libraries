@@ -781,23 +781,22 @@ namespace
                                         o.workspace > 0 ? w : nullptr,
                                         o.workspace,
                                         stream.s);
+            if(opt.execDevice >= 0)
+            {
+                // another device than the handle's: refused before any kernel runs
+                EXPECT_EQ(st, HIPTENSOR_STATUS_ARCH_MISMATCH) << log.all();
+                continue;
+            }
             EXPECT_EQ(st, HIPTENSOR_STATUS_SUCCESS) << log.all();
             EXPECT_EQ(hipStreamSynchronize(stream.s), hipSuccess);
             // the JIT route runs the direct GETT for a zero scale and for buffers (here A and the
-            // workspace) not aligned to its 16-byte accesses, and only then (on the plan's device)
-            if(o.jit && opt.execDevice < 0)
+            // workspace) not aligned to its 16-byte accesses, and only then
+            if(o.jit)
             {
                 bool const want = v.alpha == 0.0 || (p.bilinear && v.beta == 0.0)
                                   || (v.aSkew * 2) % 16 != 0
                                   || (o.workspace > 0 && v.wsSkew % 16 != 0);
                 EXPECT_EQ(log.contains("runs its fallback"), want) << v.what << "\n" << log.all();
-            }
-            else if(o.jit)
-            {
-                // on another device: always the fallback (its kernels are not loaded there)
-                EXPECT_TRUE(log.contains("runs its fallback (another device than the plan's)"))
-                    << v.what << "\n"
-                    << log.all();
             }
             std::vector<uint16_t> got(size_t(D.span));
             EXPECT_EQ(hipMemcpy(got.data(), bufD.p, got.size() * 2, hipMemcpyDeviceToHost),
@@ -1640,10 +1639,9 @@ TEST(RockeGettJitChild, NoJitRoute)
         << log.all();
 }
 
-// A JIT plan executed on another device than the one it was created on (its kernels are loaded
-// there only) runs its fallback, the direct GETT, with the same results (needs two devices of the
-// architecture).
-TEST(RockeGettJit, OtherDeviceRunsTheFallback)
+// A JIT plan executed with its handle while another device is current is refused with
+// HIPTENSOR_STATUS_ARCH_MISMATCH (needs two devices of the architecture).
+TEST(RockeGettJit, OtherDeviceIsRefused)
 {
     if(!plannerTarget())
     {
@@ -1661,7 +1659,6 @@ TEST(RockeGettJit, OtherDeviceRunsTheFallback)
         opt.execDevice = other;
         auto o         = runProblem(fixedProblems()[size_t(i)], opt);
         EXPECT_TRUE(o.jit) << o.pick;
-        EXPECT_TRUE(o.exact);
     }
 }
 
