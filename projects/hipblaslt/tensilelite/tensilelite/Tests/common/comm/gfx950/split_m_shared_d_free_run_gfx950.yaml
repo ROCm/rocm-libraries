@@ -1,9 +1,10 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 # split_m_shared_d_gfx950.yaml with SplitFreeRun: the two gfx950 GPUs run their launches back to
-# back without a join, and no stream write follows the second device's stores into the first
-# device's D. D is validated after the warmup and after the timed launches, so both must see those
-# stores without one.
+# back without a join, and the second device writes its slice into the first device's D. D is
+# validated after the warmup and after the timed launches. If the client did not finish clearing
+# that D before the second device's first launch, the second slice could read as zeros; this config
+# caught that in about 1 of 60 runs.
 # Kernel parameters are those of a2a_gemm_loop.yaml without FusedA2A.
 TestParameters:
   marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201, skip-gfx1250, skip-gfx1250-strict] # gfx950 only
