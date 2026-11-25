@@ -952,7 +952,7 @@ runs on each pull request to develop that changes rocKE:
 
 - `rocke-library-reach`: platform's imports of the library packages only shrink;
 - `rocke-pending-lanes`: every test file is assigned to a CI entry or has a
-  recorded reason;
+  recorded reason, and no host CTest entry runs a GPU test;
 - `rocke-compliance`: the files a change adds or edits pass the compliance
   patterns;
 - `rocke-compliance-rules`: when the patterns or their scanner change, the
@@ -1254,6 +1254,18 @@ exist only there. So the `windows` column of `entry_times.json` is judged only
 when the check runs on Windows; the entries it has no time for stay untimed
 until a Windows run records them. Run `ctest -R '^rocke_entry_time_check$'` in
 `<install>/bin/hip_kernel_provider`. No pre-commit hook runs it.
+
+**GPU tests.** A test that launches GPU work (device memory, a code object or a
+kernel launch) carries the `gpu` mark. The host CTest entries deselect it, and
+only a GPU entry runs it: a GPU entry takes the CTest resource lock `rocke_gpu`,
+so a parallel `ctest -j` never runs two of them at once on the one GPU.
+`platform/tests/tools/test_gpu_work_placement.py` refuses a host entry that
+runs a GPU test. A GPU pytest entry limits each test to 120 s
+(`ROCKE_TEST_ITEM_TIMEOUT_GPU` in `platform/tests/cmake/TestTimeouts.cmake`),
+or to its own lower `--timeout`. A test slower than half of that declares its
+slowest measured CI time with `@pytest.mark.rocke_measured_seconds(seconds)`,
+which raises that test's limit alone to twice the time
+(`rocke.tests.item_time_limit`).
 
 To review where a test lives (level, tier, entry, shard keys, budgets), use the
 checklist in [`agents/team_members/test_architect.md`](agents/team_members/test_architect.md).
