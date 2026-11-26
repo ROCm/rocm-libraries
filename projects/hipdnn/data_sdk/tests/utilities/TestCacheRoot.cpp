@@ -105,7 +105,7 @@ TEST_F(TestCacheRoot, UnexpandableCacheDirWarnsOnceWithItsValue)
 #endif
     const ScopedEnvironmentVariableSetter cacheDir("HIPDNN_CACHE_DIR", "~/hipdnn_unexpanded_root");
     detail::unexpandedCacheRootWarned().store(false);
-    auto recorder
+    const auto recorder
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_WARN);
 
     EXPECT_TRUE(cacheRoot().empty());
@@ -131,7 +131,7 @@ TEST_F(TestCacheRoot, UnexpandableDefaultRootWarnsWithTheDefaultAndHomeVariable)
     const ScopedEnvironmentVariableSetter home(homeVariable, "");
     const ScopedEnvironmentVariableSetter cacheDir("HIPDNN_CACHE_DIR", "");
     detail::unexpandedCacheRootWarned().store(false);
-    auto recorder
+    const auto recorder
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_WARN);
 
     EXPECT_TRUE(cacheRoot().empty());
@@ -158,7 +158,7 @@ TEST_F(TestCacheRoot, TildeUserCacheDirWarnsThatTheFormIsNotExpanded)
     const ScopedEnvironmentVariableSetter cacheDir("HIPDNN_CACHE_DIR",
                                                    "~hipdnn_no_such_user/cache");
     detail::unexpandedCacheRootWarned().store(false);
-    auto recorder
+    const auto recorder
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_WARN);
 
     EXPECT_TRUE(cacheRoot().empty());

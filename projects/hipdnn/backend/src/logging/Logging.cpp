@@ -533,7 +533,7 @@ hipdnnStatus_t lockedRemoveUserCallback(BackendLogState& state,
         return HIPDNN_STATUS_BAD_PARAM; // Not registered
     }
 
-    const auto& info = it->second;
+    auto& info = it->second;
 
     // Atomically disable callback FIRST
     info.callbackHolder->store(nullptr, std::memory_order_release);
@@ -605,7 +605,7 @@ hipdnnStatus_t setUserLogCallback(hipdnnUserLogCallback_t callback,
         else
         {
             // Update an existing registration, or add a new one
-            auto it = state.userCallbacks.find(key);
+            const auto it = state.userCallbacks.find(key);
             status = it != state.userCallbacks.end()
                          ? lockedUpdateUserCallback(state, it->second, minLevel, mode)
                          : lockedAddUserCallback(state, key, callback, userHandle, minLevel, mode);

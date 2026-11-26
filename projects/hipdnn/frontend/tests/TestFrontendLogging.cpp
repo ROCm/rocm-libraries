@@ -191,7 +191,7 @@ TEST_F(TestFrontendLogging, RejectedLogLevelReportsReasonAndKeepsLevel)
 {
     ASSERT_EQ(setGlobalLogLevel(HIPDNN_SEV_WARN).code, ErrorCode::OK);
 
-    auto error = setGlobalLogLevel(static_cast<hipdnnSeverity_t>(999));
+    const auto error = setGlobalLogLevel(static_cast<hipdnnSeverity_t>(999));
     EXPECT_EQ(error.code, ErrorCode::HIPDNN_BACKEND_ERROR);
     EXPECT_FALSE(backendReason(error.get_message()).empty()) << error.get_message();
 
@@ -205,7 +205,7 @@ TEST_F(TestFrontendLogging, RejectedLogLevelReportsReasonAndKeepsLevel)
 TEST_F(TestFrontendLogging, RejectedUserLogCallbackReportsReason)
 {
     int token = 0;
-    auto error = setUserLogCallback(nullptr, HIPDNN_SEV_INFO, LogCallbackMode::SYNC, &token);
+    const auto error = setUserLogCallback(nullptr, HIPDNN_SEV_INFO, LogCallbackMode::SYNC, &token);
     EXPECT_EQ(error.code, ErrorCode::HIPDNN_BACKEND_ERROR);
     EXPECT_FALSE(backendReason(error.get_message()).empty()) << error.get_message();
 }

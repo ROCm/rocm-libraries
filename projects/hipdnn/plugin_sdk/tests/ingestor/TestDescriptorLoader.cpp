@@ -4186,7 +4186,7 @@ TEST(TestDescriptorLoader, DropsAnEngineWhoseSdkVersionIsMalformed)
 /// drops rather than claiming a negative major that compares below every floor.
 TEST(TestDescriptorLoader, DropsAnEngineWhoseSdkVersionIsSigned)
 {
-    auto recorder
+    const auto recorder
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
     const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("signed_sdk_version"));
     auto documents = makeSetDocuments('1', "test:signed_version");

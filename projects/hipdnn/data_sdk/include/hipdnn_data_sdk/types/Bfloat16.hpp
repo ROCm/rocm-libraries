@@ -116,7 +116,7 @@ inline uint16_t float_to_bfloat16_bits_truncate(float f) noexcept
     uint32_t bits;
     std::memcpy(&bits, &f, sizeof(float));
 
-    auto upper = static_cast<uint16_t>(bits >> 16);
+    const auto upper = static_cast<uint16_t>(bits >> 16);
 
     const uint32_t exp = (bits >> 23) & 0xFF;
     const uint32_t mant = bits & 0x007FFFFF;

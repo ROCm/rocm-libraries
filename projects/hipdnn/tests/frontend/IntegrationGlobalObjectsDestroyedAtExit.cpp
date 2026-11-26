@@ -55,13 +55,14 @@ std::shared_ptr<Graph> makeConvFpropGraph()
         .set_intermediate_data_type(DataType::FLOAT)
         .set_compute_data_type(DataType::FLOAT);
 
-    auto makeTensor = [](const std::vector<int64_t>& dims, const std::vector<int64_t>& strides) {
-        auto tensor = std::make_shared<TensorAttributes>();
-        tensor->set_dim(dims).set_stride(strides).set_data_type(DataType::FLOAT);
-        return tensor;
-    };
-    auto x = makeTensor({2, 3, 8, 8}, {192, 64, 8, 1});
-    auto w = makeTensor({4, 3, 3, 3}, {27, 9, 3, 1});
+    const auto makeTensor
+        = [](const std::vector<int64_t>& dims, const std::vector<int64_t>& strides) {
+              auto tensor = std::make_shared<TensorAttributes>();
+              tensor->set_dim(dims).set_stride(strides).set_data_type(DataType::FLOAT);
+              return tensor;
+          };
+    const auto x = makeTensor({2, 3, 8, 8}, {192, 64, 8, 1});
+    const auto w = makeTensor({4, 3, 3, 3}, {27, 9, 3, 1});
 
     ConvFpropAttributes conv;
     conv.set_padding({1, 1}).set_stride({1, 1}).set_dilation({1, 1});

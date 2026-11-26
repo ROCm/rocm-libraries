@@ -67,7 +67,7 @@ std::string stepResult(const char* step, hipdnnStatus_t status)
 // width stride above 3.
 flatbuffers::FlatBufferBuilder createHugeStrideDgradGraph(int64_t widthStride)
 {
-    auto base = hipdnn_test_sdk::utilities::createValidConvBwdGraph();
+    const auto base = hipdnn_test_sdk::utilities::createValidConvBwdGraph();
     auto graphT = fb::UnPackGraph(base.GetBufferPointer());
     graphT->nodes.at(0)->attributes.AsConvolutionBwdAttributes()->stride[1] = widthStride;
     flatbuffers::FlatBufferBuilder builder;
@@ -91,7 +91,7 @@ SequenceOutcome runDgradSequence(int64_t widthStride)
         return outcome;
     }
 
-    auto builder = createHugeStrideDgradGraph(widthStride);
+    const auto builder = createHugeStrideDgradGraph(widthStride);
 
     hipdnnBackendDescriptor_t rawGraph = nullptr;
     auto status = hipdnnBackendCreateAndDeserializeGraph_ext(

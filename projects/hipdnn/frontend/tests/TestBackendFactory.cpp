@@ -52,7 +52,7 @@ TEST(TestBackendFactory, TryToUseBackendInterfaceVersionMismatchReportsBothVersi
 {
     const std::string backendVersion
         = std::to_string(HIPDNN_FRONTEND_VERSION_MAJOR + 1) + ".0.0.TWEAK";
-    auto backend = tryToUseBackendInterface(backendVersion.c_str());
+    const auto backend = tryToUseBackendInterface(backendVersion.c_str());
     ASSERT_TRUE(std::dynamic_pointer_cast<IncompatibleBackendWrapper>(backend));
 
     std::array<char, 256> message{};
