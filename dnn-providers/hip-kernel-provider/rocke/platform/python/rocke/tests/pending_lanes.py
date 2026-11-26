@@ -21,11 +21,12 @@ quarantine) when it is written, so no record is set and forgotten.
 
 Stale and expired are treated differently. A stale entry (its file is gone, or
 a whole-file entry's file is in CI, or a case entry's file has left CI) always
-fails the check. An expired pending entry or measured budget fails a change
-that touches it (its lines here, or its test file); other expired entries are
-reported as warnings, so one record reaching its date does not turn an
-unrelated pull request red, and a scheduled run passes ``--strict-expiry`` to
-fail on every expired entry. An expired quarantine always fails.
+fails the check. An expired entry of any kind fails a change that touches it
+(its lines here, or its test file); other expired entries are reported as
+warnings, so one record reaching its date does not turn an unrelated pull
+request, or develop, red, and a scheduled run passes ``--strict-expiry`` to
+fail on every expired entry. An expired quarantine keeps its test held out
+until someone re-decides it.
 
 An entry for a file assigned to no CI entry (``whole_file=True``) covers every case
 of the file, and is the file's only entry. Any other entry covers only the
@@ -90,8 +91,9 @@ compiler build) names them, and is held out only while the loaded COMGR's
 compiler is one of them. The pytest roots of ``QUARANTINE_TREES`` skip it with
 the reason ``quarantined: <issue>`` (``rocke.tests.quarantine``), so it stays
 visible in every report; ``ROCKE_QUARANTINE=ignore`` runs it anyway. Rules
-stricter than a pending entry's hold it: an expired quarantine always fails the
-check, and at most ``QUARANTINE_CAP`` tests may be quarantined at once.
+stricter than a pending entry's hold it: its expiry is at most
+``QUARANTINE_MAX_DAYS`` away, and at most ``QUARANTINE_CAP`` tests may be
+quarantined at once.
 
     QuarantinedTest(
         test_id="platform/tests/test_example.py::test_case[gfx942]",

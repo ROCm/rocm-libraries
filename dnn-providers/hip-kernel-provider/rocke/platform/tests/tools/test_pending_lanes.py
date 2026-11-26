@@ -25,9 +25,9 @@ lane reason by hand. An expired entry fails a change that touches it (its lines
 in the registry, or its test file), and every run under ``--strict-expiry``;
 otherwise it is reported as a warning. The registry's measured budgets are held
 to the same rules: each names a present test file, is listed once, and is
-reported or failed when expired the same way. A quarantined test is held to
-stricter rules: it names a test that exists, is listed once, fails the check as
-soon as it expires, and the registry holds at most ``QUARANTINE_CAP`` of them.
+reported or failed when expired the same way. A quarantined test names a test
+that exists, is listed once, is reported or failed when expired the same way,
+and the registry holds at most ``QUARANTINE_CAP`` of them.
 
 The check configures the platform (nothing is built) and reads the provider
 categories, so it runs in a source checkout of the monorepo only.
@@ -46,7 +46,7 @@ import shutil
 import subprocess
 import sys
 import warnings
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -128,6 +128,8 @@ PORTABLE_IR_UNIT_TESTS = "platform/python/rocke/portable_ir/tests"
 # from the committed locks (rocke.tests.reference_artifacts).
 # The registry module, relative to the rocke directory.
 PENDING_LANES_MODULE = "platform/python/rocke/tests/pending_lanes.py"
+# A record of the registry: each kind names its test file and its expiry.
+Record = PendingTest | MeasuredBudget | QuarantinedTest
 
 
 def pinned_reference_entries(library: Path) -> dict[str, set[str]]:
@@ -737,14 +739,21 @@ def test_the_change_base_is_the_fork_point_of_the_first_base_given(monkeypatch):
     assert change_base() is None
 
 
-def _fail_or_report_expired(
-    request, registry_name: str, records: Iterable, label
+def fail_or_report_expired(
+    registry_name: str,
+    records: Iterable[Record],
+    label: Callable[[Record], str],
+    *,
+    source: str,
+    change: Change | None,
+    strict: bool,
+    max_days: int,
+    today: datetime.date,
 ) -> None:
-    """Fail on the expired records of the registry tuple ``registry_name``
-    that :func:`expiry_failures` says fail this run; report the rest as a
-    warning. ``label`` names a record in the message."""
-    today = utc_today()
-    source = (ROCKE / PENDING_LANES_MODULE).read_text(encoding="utf-8")
+    """Fail on the expired records of the registry tuple ``registry_name``,
+    written in the registry module's ``source``, that :func:`expiry_failures`
+    says fail this run; report the rest as a warning. ``label`` names a record
+    in the message, and ``max_days`` is its kind's longest expiry window."""
     spans = record_lines(source, registry_name)
     records = list(records)
     assert len(spans) == len(records), (
@@ -759,12 +768,11 @@ def _fail_or_report_expired(
     ]
     if not expired:
         return
-    strict = request.config.getoption("--strict-expiry")
-    failing = expiry_failures(expired, current_change(), strict=strict)
+    failing = expiry_failures(expired, change, strict=strict)
     assert not failing, (
         f"expired {registry_name} entries this change touches, or any under "
         "--strict-expiry; re-decide them "
-        f"(a new expiry at most {PENDING_MAX_DAYS} days away, or clear them): "
+        f"(a new expiry at most {max_days} days away, or clear them): "
         f"{failing}"
     )
     message = (
@@ -772,6 +780,27 @@ def _fail_or_report_expired(
     )
     print(message)
     warnings.warn(message, stacklevel=2)
+
+
+def _check_expiry(
+    request: pytest.FixtureRequest,
+    registry_name: str,
+    records: Iterable[Record],
+    label: Callable[[Record], str],
+    max_days: int,
+) -> None:
+    """:func:`fail_or_report_expired` on this tree's registry module, this
+    change, today, and this run's ``--strict-expiry``."""
+    fail_or_report_expired(
+        registry_name,
+        records,
+        label,
+        source=(ROCKE / PENDING_LANES_MODULE).read_text(encoding="utf-8"),
+        change=current_change(),
+        strict=request.config.getoption("--strict-expiry"),
+        max_days=max_days,
+        today=utc_today(),
+    )
 
 
 def test_every_pending_entry_is_current(request):
@@ -787,11 +816,12 @@ def test_every_pending_entry_is_current(request):
         if pending.node and not _defines_test(ROCKE / pending.path, pending.node)
     )
     assert not gone, f"tests listed but gone: {gone}"
-    _fail_or_report_expired(
+    _check_expiry(
         request,
         "PENDING",
         PENDING,
         lambda p: f"{p.path}{'::' + p.node if p.node else ''} ({p.lane.name})",
+        PENDING_MAX_DAYS,
     )
 
 
@@ -803,11 +833,12 @@ def test_every_measured_budget_is_current(request):
         {b.path for b in MEASURED_BUDGETS if not (ROCKE / b.path).is_file()}
     )
     assert not missing, f"measured budgets for test files that are gone: {missing}"
-    _fail_or_report_expired(
+    _check_expiry(
         request,
         "MEASURED_BUDGETS",
         MEASURED_BUDGETS,
         lambda b: f"{b.path}::{b.kernel_name}",
+        PENDING_MAX_DAYS,
     )
 
 
@@ -1134,12 +1165,11 @@ def _defines_test(test_file: Path, node_name: str) -> bool:
     )
 
 
-def quarantine_breaches(
-    entries: Iterable[QuarantinedTest], today: datetime.date
-) -> list[str]:
+def quarantine_breaches(entries: Iterable[QuarantinedTest]) -> list[str]:
     """What fails the quarantine record, whatever the change: two entries
-    that may hold out the same item, more items than ``QUARANTINE_CAP``, or an
-    expired entry."""
+    that may hold out the same item, or more items than ``QUARANTINE_CAP``. An
+    expired entry fails as any expired record does
+    (:func:`fail_or_report_expired`)."""
     entries = list(entries)
     breaches = [
         f"quarantined twice: {first.test_id} and {second.test_id} may hold out "
@@ -1152,27 +1182,17 @@ def quarantine_breaches(
             f"{len(entries)} quarantined tests, over the cap of {QUARANTINE_CAP}; "
             "fix one before quarantining another"
         )
-    breaches += [
-        f"quarantine expired: {entry.test_id}; fix the test, retire it, or extend "
-        "the expiry with the reason recorded in its issue"
-        for entry in entries
-        if entry.expiry_date < today
-    ]
     return breaches
 
 
-def test_a_quarantine_fails_when_expired_listed_twice_or_over_the_cap():
-    today = utc_today()
+def test_a_quarantine_fails_when_listed_twice_or_over_the_cap():
     current = _quarantined("library/tests/test_x.py::test_y")
-    assert quarantine_breaches([current], today) == []
+    assert quarantine_breaches([current]) == []
+    # Expiry is not a breach whatever the change; an expired quarantine fails
+    # as test_an_expired_quarantine_fails_a_change_that_touches_it says.
     expired = _quarantined("library/tests/test_x.py::test_z", expires="2026-01-01")
-    assert quarantine_breaches([current, expired], today) == [
-        (
-            "quarantine expired: library/tests/test_x.py::test_z; fix the test, "
-            "retire it, or extend the expiry with the reason recorded in its issue"
-        )
-    ]
-    assert quarantine_breaches([current, current], today) == [
+    assert quarantine_breaches([current, expired]) == []
+    assert quarantine_breaches([current, current]) == [
         (
             "quarantined twice: library/tests/test_x.py::test_y and "
             "library/tests/test_x.py::test_y may hold out the same tests; keep one "
@@ -1194,7 +1214,7 @@ def test_a_quarantine_fails_when_expired_listed_twice_or_over_the_cap():
             _quarantined(method, arches=("gfx950",)),
         ),
     ):
-        assert quarantine_breaches([first, second], today) == [
+        assert quarantine_breaches([first, second]) == [
             (
                 f"quarantined twice: {first.test_id} and {second.test_id} may hold "
                 "out the same tests; keep one entry per test"
@@ -1202,7 +1222,7 @@ def test_a_quarantine_fails_when_expired_listed_twice_or_over_the_cap():
         ]
     assert (
         quarantine_breaches(
-            [_quarantined(f"{method}[a]"), _quarantined(f"{method}[b]")], today
+            [_quarantined(f"{method}[a]"), _quarantined(f"{method}[b]")]
         )
         == []
     )
@@ -1210,12 +1230,114 @@ def test_a_quarantine_fails_when_expired_listed_twice_or_over_the_cap():
         _quarantined(f"library/tests/test_x.py::test_{index}")
         for index in range(QUARANTINE_CAP + 1)
     ]
-    assert quarantine_breaches(over_the_cap, today) == [
+    assert quarantine_breaches(over_the_cap) == [
         (
             f"{QUARANTINE_CAP + 1} quarantined tests, over the cap of "
             f"{QUARANTINE_CAP}; fix one before quarantining another"
         )
     ]
+
+
+# A quarantine registry as pending_lanes.py writes one: a group of two records
+# (lines 2-6, 9 and 10 shared; 7 and 8 their own) and one record alone (lines
+# 12-18).
+_QUARANTINE_SOURCE = """\
+QUARANTINED: tuple = (
+    *_quarantined(
+        "AICK-1",
+        "reason",
+        TEAM,
+        "2026-01-01",
+        "library/tests/test_x.py::test_a",
+        "library/tests/test_x.py::test_b",
+        arches=("gfx950",),
+        compilers=COMPILERS,
+    ),
+    QuarantinedTest(
+        "library/tests/test_y.py::test_c",
+        "AICK-2",
+        "reason",
+        TEAM,
+        "2026-01-01",
+    ),
+)
+
+
+def _quarantined(issue, reason, team, expires, *test_ids, arches=(), compilers=None):
+    pass
+"""
+
+
+def _expired_quarantines() -> list[QuarantinedTest]:
+    """The records ``_QUARANTINE_SOURCE`` spells, expired."""
+    return [
+        _quarantined(test_id, expires="2026-01-01")
+        for test_id in (
+            "library/tests/test_x.py::test_a",
+            "library/tests/test_x.py::test_b",
+            "library/tests/test_y.py::test_c",
+        )
+    ]
+
+
+def _check_quarantine_expiry(change: Change | None, *, strict: bool) -> None:
+    fail_or_report_expired(
+        "QUARANTINED",
+        _expired_quarantines(),
+        lambda entry: entry.test_id,
+        source=_QUARANTINE_SOURCE,
+        change=change,
+        strict=strict,
+        max_days=QUARANTINE_MAX_DAYS,
+        today=datetime.date(2026, 1, 2),
+    )
+
+
+def _change(files=(), lines=()) -> Change:
+    return Change(frozenset(files), frozenset(lines), frozenset())
+
+
+def test_an_expired_quarantine_fails_a_change_that_touches_it():
+    """Its own line in the registry, its group's shared lines, or its test
+    file: the change that touches an expired quarantine re-decides it."""
+    with pytest.raises(AssertionError, match=r"\['library/tests/test_y.py::test_c'\]"):
+        _check_quarantine_expiry(_change(lines={15}), strict=False)
+    with pytest.raises(AssertionError, match=r"\['library/tests/test_x.py::test_a'\]"):
+        _check_quarantine_expiry(_change(lines={7}), strict=False)
+    with pytest.raises(
+        AssertionError,
+        match=(
+            r"\['library/tests/test_x.py::test_a', "
+            r"'library/tests/test_x.py::test_b'\]"
+        ),
+    ):
+        _check_quarantine_expiry(_change(lines={6}), strict=False)
+    with pytest.raises(AssertionError, match=r"\['library/tests/test_y.py::test_c'\]"):
+        _check_quarantine_expiry(
+            _change(files={"library/tests/test_y.py"}), strict=False
+        )
+    with pytest.raises(
+        AssertionError, match=f"at most {QUARANTINE_MAX_DAYS} days away"
+    ):
+        _check_quarantine_expiry(_change(lines={15}), strict=False)
+
+
+def test_an_expired_quarantine_is_a_warning_for_a_change_that_does_not_touch_it():
+    """An expired quarantine does not turn an unrelated change red, nor a run
+    with no change to compare (develop's own CI): it is reported. The entry
+    still covers its test, whose skip does not read the date."""
+    for change in (_change(files={"library/tests/test_z.py"}, lines={30}), None):
+        with pytest.warns(UserWarning, match="QUARANTINED entries past their expiry"):
+            _check_quarantine_expiry(change, strict=False)
+    expired = _quarantined("library/tests/test_x.py::test_a", expires="2026-01-01")
+    assert expired.covers("library/tests/test_x.py", "test_a")
+
+
+def test_every_expired_quarantine_fails_under_strict_expiry():
+    """The scheduled run (--strict-expiry) fails on every expired quarantine,
+    whatever the change."""
+    with pytest.raises(AssertionError, match="test_a.*test_b.*test_c"):
+        _check_quarantine_expiry(None, strict=True)
 
 
 # The files that may name the runner lane or write a lane declaration by hand:
@@ -1374,8 +1496,8 @@ def test_every_record_names_a_team_that_owns_its_test():
     ), f"records whose team is not a CODEOWNERS team of their test: {unowned}"
 
 
-def test_every_quarantined_test_is_current():
-    breaches = quarantine_breaches(QUARANTINED, utc_today())
+def test_every_quarantined_test_is_current(request):
+    breaches = quarantine_breaches(QUARANTINED)
     assert not breaches, breaches
     gone = [
         entry.test_id
@@ -1385,6 +1507,13 @@ def test_every_quarantined_test_is_current():
         or not all((ROCKE / child).is_file() for child in entry.runs_files)
     ]
     assert not gone, f"quarantined but gone: {gone}"
+    _check_expiry(
+        request,
+        "QUARANTINED",
+        QUARANTINED,
+        lambda entry: entry.test_id,
+        QUARANTINE_MAX_DAYS,
+    )
 
 
 @pytest.mark.skipif(
