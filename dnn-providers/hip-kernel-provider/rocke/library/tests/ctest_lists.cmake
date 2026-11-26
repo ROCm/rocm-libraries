@@ -60,6 +60,7 @@ set(_ROCKE_LIBRARY_CONV_TEST_RELPATHS
     "tests/library/tests/test_direct_dgrad_pp_mfma.py"
     "tests/library/tests/test_direct_fwd_wmma.py"
     "tests/library/tests/test_direct_fwd_pp_mfma.py"
+    "tests/library/tests/test_direct_grouped_dw_gfx950.py"
     "tests/library/tests/test_direct_fwd_flex_mfma.py"
     "tests/library/tests/test_conv_fwd_split_k.py"
     "tests/library/tests/test_conv_winograd_fwd_cpu.py"
