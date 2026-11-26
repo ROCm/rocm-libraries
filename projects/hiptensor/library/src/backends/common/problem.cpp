@@ -24,6 +24,7 @@
  *
  *******************************************************************************/
 
+#include <algorithm>
 #include <limits>
 
 #include "data_types.hpp"
@@ -96,19 +97,23 @@ namespace hiptensor
             }
 
             // Whether the span of the tensor (TensorArg::spanElements) and its byte count fit in
-            // int64_t, so that the backends can size allocations and offsets from them.
+            // int64_t, so that the backends can size allocations and offsets from them. An empty
+            // tensor spans nothing, whatever its strides.
             bool spanFits(std::vector<int64_t> const& extents,
                           std::vector<int64_t> const& strides,
                           uint32_t                    elementBytes)
             {
+                if(std::find(extents.begin(), extents.end(), 0) != extents.end())
+                {
+                    return true;
+                }
                 int64_t span = 1;
                 for(std::size_t i = 0; i < extents.size(); i++)
                 {
                     int64_t const stride = i < strides.size() ? strides[i] : 0;
                     int64_t       term   = 0;
-                    if(extents[i] > 0
-                       && (__builtin_mul_overflow(extents[i] - 1, stride, &term)
-                           || __builtin_add_overflow(span, term, &span)))
+                    if(__builtin_mul_overflow(extents[i] - 1, stride, &term)
+                       || __builtin_add_overflow(span, term, &span))
                     {
                         return false;
                     }
@@ -174,7 +179,7 @@ namespace hiptensor
 
         int64_t TensorArg::spanElements() const
         {
-            if(!present)
+            if(!present || std::find(extents.begin(), extents.end(), 0) != extents.end())
             {
                 return 0;
             }

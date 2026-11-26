@@ -59,6 +59,8 @@ When paired with cache serialization APIs like `hiptensorHandleWritePlanCacheToF
 
 Plan cache entries are kept per backend, so entries of one backend are never applied to plans that another backend
 serves. Composable Kernel entries keep the keys of earlier versions, so plan cache files written by them still apply.
+The keys of the other backends' entries take every field of the problem, including the unary operators, the operators of
+elementwise operations and reductions, the alignments, and the output tensor of trinary contractions.
 
 ------------------------------------
 Plan cache example

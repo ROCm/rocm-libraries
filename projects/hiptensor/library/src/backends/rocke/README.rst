@@ -163,7 +163,9 @@ With ``HIPTENSOR_CACHE_MODE_PEDANTIC`` (the default) the winner of the timing is
 and later plans of the same problem on that handle, or on a handle that read the plan cache file, take it from there
 without timing or selecting again, as long as their workspace limit admits it. A candidate chosen without timing is
 not stored. Plans created with ``HIPTENSOR_JIT_MODE_DEFAULT`` and plans created without the JIT have separate plan
-cache lines, since only the former have the contraction JIT's candidates.
+cache lines, since only the former have the contraction JIT's candidates. A rocKE plan cache line's key takes every
+field of the problem: also the unary operators, the operators of elementwise operations and reductions, the
+alignments and the trinary contraction's output.
 
 ``hiptensorEstimateWorkspaceSize`` reports, for ``HIPTENSOR_WORKSPACE_DEFAULT``, the workspace of the leading
 candidates of the selection, with either algorithm: the ones ``HIPTENSOR_ALGO_DEFAULT_PATIENT`` times

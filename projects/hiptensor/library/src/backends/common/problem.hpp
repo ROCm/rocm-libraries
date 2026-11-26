@@ -76,7 +76,7 @@ namespace hiptensor
             }
 
             // Number of elements spanned in memory: 1 + sum((extent - 1) * stride), 0 when the
-            // tensor is absent.
+            // tensor is absent or empty (an extent is 0).
             int64_t spanElements() const;
         };
 

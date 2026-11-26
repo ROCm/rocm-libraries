@@ -218,6 +218,11 @@ namespace hiptensor
                     logger->logHeuristics("hiptensorExecute", "A/B: cannot synchronize the stream");
                     return;
                 }
+                if(output.spanElements() == 0)
+                {
+                    logger->logHeuristics("hiptensorExecute", "A/B: the output is empty");
+                    return;
+                }
 
                 std::vector<uint8_t> primary(bytes), shadow(bytes);
                 if(hipMemcpy(primary.data(), primaryOutput, bytes, hipMemcpyDeviceToHost)
@@ -253,9 +258,11 @@ namespace hiptensor
                     double const diff = std::hypot(pr - sr, pi - si);
                     if(!std::isfinite(diff))
                     {
-                        // Equal infinities and NaN in both outputs agree.
-                        bool const same
-                            = (std::isnan(pr) && std::isnan(sr)) || (pr == sr && pi == si);
+                        // Equal infinities and NaN in both outputs agree, component by component.
+                        auto const agree = [](double a, double b) {
+                            return (std::isnan(a) && std::isnan(b)) || a == b;
+                        };
+                        bool const same = agree(pr, sr) && agree(pi, si);
                         nonFinite += same ? 0 : 1;
                     }
                     else
@@ -684,7 +691,7 @@ namespace hiptensor
             {
                 shadowLock = std::unique_lock<std::mutex>(state.shadowMutex);
             }
-            bool shadowRan = false;
+            bool shadowQueued = false, shadowRan = false;
             if(state.shadow != nullptr && buffers.out != nullptr)
             {
                 auto shadowBuffers = buffers;
@@ -696,7 +703,8 @@ namespace hiptensor
                                   cfg.stream)
                    == hipSuccess)
                 {
-                    auto status = state.shadow->run(
+                    shadowQueued = true;
+                    auto status  = state.shadow->run(
                         context, scalars, shadowBuffers, workspace, workspaceSize, cfg);
                     shadowRan = status == HIPTENSOR_STATUS_SUCCESS;
                     if(!shadowRan)
@@ -712,11 +720,66 @@ namespace hiptensor
                 }
             }
 
+            // The Composable Kernel backend logs its executions itself; the others are logged here.
+            auto&       logger    = Logger::instance();
+            auto const& kernel    = state.primary->kernelId();
+            bool const  ownTraces = kernel.backend != kCkBackendName;
+            if(ownTraces && (logger->getLogMask() & HIPTENSOR_LOG_LEVEL_API_TRACE))
+            {
+                char msg[512];
+                snprintf(msg,
+                         sizeof(msg),
+                         "handle=%p, plan=%p, backend=%s, kernel=%s, workspace=%p, "
+                         "workspaceSize=%llu, stream=%p",
+                         static_cast<void*>(handle),
+                         static_cast<void*>(plan),
+                         kernel.backend.c_str(),
+                         kernel.specKey.c_str(),
+                         workspace,
+                         static_cast<unsigned long long>(workspaceSize),
+                         static_cast<void*>(cfg.stream));
+                logger->logAPITrace(apiName, msg);
+            }
+            hipEvent_t start = nullptr, stop = nullptr;
+            bool const timed = ownTraces && (logger->getLogMask() & HIPTENSOR_LOG_LEVEL_PERF_TRACE)
+                               && hipEventCreate(&start) == hipSuccess
+                               && hipEventCreate(&stop) == hipSuccess
+                               && hipEventRecord(start, cfg.stream) == hipSuccess;
+
             auto status
                 = state.primary->run(context, scalars, buffers, workspace, workspaceSize, cfg);
+
+            float ms = 0.0f;
+            if(timed && status == HIPTENSOR_STATUS_SUCCESS
+               && hipEventRecord(stop, cfg.stream) == hipSuccess
+               && hipEventSynchronize(stop) == hipSuccess
+               && hipEventElapsedTime(&ms, start, stop) == hipSuccess)
+            {
+                char msg[512];
+                snprintf(msg,
+                         sizeof(msg),
+                         "backend=%s, kernel=%s, time=%.6f ms",
+                         kernel.backend.c_str(),
+                         kernel.specKey.c_str(),
+                         static_cast<double>(ms));
+                logger->logPerformanceTrace(apiName, msg);
+            }
+            for(auto event : {start, stop})
+            {
+                if(event != nullptr)
+                {
+                    static_cast<void>(hipEventDestroy(event));
+                }
+            }
+
             if(status == HIPTENSOR_STATUS_SUCCESS && shadowRan)
             {
                 compareOutputs(state, buffers.out, cfg.stream);
+            }
+            else if(shadowQueued)
+            {
+                // The shadow output must be idle before the next execution takes the lock.
+                static_cast<void>(hipStreamSynchronize(cfg.stream));
             }
             return status;
         }

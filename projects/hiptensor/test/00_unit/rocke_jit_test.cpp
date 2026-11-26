@@ -73,6 +73,7 @@
 #endif
 
 #include "api_test_helpers.hpp"
+#include "rocke_test_device.hpp"
 
 namespace
 {
@@ -87,6 +88,10 @@ namespace
     {
         void SetUp() override
         {
+            if(hiptensor_test::skipNonRockeDevice())
+            {
+                GTEST_SKIP();
+            }
 #ifdef _WIN32
             _putenv_s("HIPTENSOR_BACKEND", "rocke");
             _putenv_s("HIPTENSOR_BACKEND_FALLBACK", "0");

@@ -46,6 +46,10 @@
      ${HIPTENSOR_COMMON_TEST_SOURCES}
      ${CMAKE_CURRENT_SOURCE_DIR}/plan_cache_lru_test.cpp
      )
+ add_hiptensor_unit_test(plan_cache_key_test
+     ${HIPTENSOR_COMMON_TEST_SOURCES}
+     ${CMAKE_CURRENT_SOURCE_DIR}/plan_cache_key_test.cpp
+     )
  add_hiptensor_unit_test(batched_contraction_test
      ${HIPTENSOR_COMMON_TEST_SOURCES}
      ${CMAKE_CURRENT_SOURCE_DIR}/batched_contraction_test.cpp
@@ -69,7 +73,7 @@ add_hiptensor_unit_test(concurrency_test
     ${HIPTENSOR_COMMON_TEST_SOURCES}
     ${CMAKE_CURRENT_SOURCE_DIR}/concurrency_test.cpp
     )
-add_hiptensor_unit_test(backend_seam_test
+add_hiptensor_unit_test(backend_seam_test DEVICE_SKIP_ONLY
     ${HIPTENSOR_COMMON_TEST_SOURCES}
     ${CMAKE_CURRENT_SOURCE_DIR}/backend_seam_test.cpp
     )
@@ -118,13 +122,25 @@ if(HIPTENSOR_ENABLE_ROCKE_BACKEND)
         message(STATUS "rocKE pack manifests: ${_ROCKE_MANIFESTS} not found; "
                        "rocke_pack_manifest_test not added")
     endif()
-    add_hiptensor_unit_test(rocke_backend_test
+    # The rocKE tests write their own install-tree entries (test/CMakeLists.txt), are skipped
+    # only on an unsupported host device (on a device that is not a rocKE target, they say so
+    # themselves), and leave the large suites (HIPTENSOR_ROCKE_TEST_LARGE_SUITES) to
+    # rocke_backend_test_large, which runs alone.
+    string(REPLACE ";" "," _ROCKE_TEST_TARGETS "${HIPTENSOR_ROCKE_SUPPORTED_TARGETS}")
+    add_hiptensor_unit_test(rocke_backend_test NO_INSTALL_ENTRIES DEVICE_SKIP_ONLY
         ${HIPTENSOR_COMMON_TEST_SOURCES}
         ${CMAKE_CURRENT_SOURCE_DIR}/rocke_backend_test.cpp
+        TEST_ARGS --gtest_filter=-${HIPTENSOR_ROCKE_TEST_LARGE_SUITES}
         )
+    add_test(NAME rocke_backend_test_large
+             COMMAND rocke_backend_test --gtest_filter=${HIPTENSOR_ROCKE_TEST_LARGE_SUITES})
+    set_tests_properties(rocke_backend_test_large PROPERTIES
+        RUN_SERIAL TRUE
+        SKIP_REGULAR_EXPRESSION "unsupported host device"
+        WORKING_DIRECTORY ${CMAKE_RUNTIME_OUTPUT_DIRECTORY})
     # The shipped selection models (HIPTENSOR_ROCKE_SELECT_MODEL_DIR) read and walked by the
     # library's model code against the exporter's check vectors (CPU only).
-    add_hiptensor_unit_test(rocke_select_model_test
+    add_hiptensor_unit_test(rocke_select_model_test NO_INSTALL_ENTRIES DEVICE_SKIP_ONLY
         ${CMAKE_CURRENT_SOURCE_DIR}/rocke_select_model_test.cpp
         ${PROJECT_SOURCE_DIR}/library/src/backends/rocke/rocke_select_model.cpp
         )
@@ -135,26 +151,35 @@ if(HIPTENSOR_ENABLE_ROCKE_BACKEND)
              COMMAND rocke_backend_test --gtest_filter=*RockeContraction*)
     set_tests_properties(rocke_backend_test_f64_route PROPERTIES
         ENVIRONMENT "HIPTENSOR_ROCKE_CONTRACTION_ROUTE=f64"
+        SKIP_REGULAR_EXPRESSION "unsupported host device"
         WORKING_DIRECTORY ${CMAKE_RUNTIME_OUTPUT_DIRECTORY})
+    set(_ROCKE_DEVICE_TESTS rocke_backend_test)
     if(HIPTENSOR_ENABLE_ROCKE_JIT)
         # The JIT and kernel cache, and every rocke_backend_test case with every elementwise
         # launch specialized (HIPTENSOR_ROCKE_JIT=all: also the launches without a vector form).
-        add_hiptensor_unit_test(rocke_jit_test
+        add_hiptensor_unit_test(rocke_jit_test NO_INSTALL_ENTRIES DEVICE_SKIP_ONLY
             ${HIPTENSOR_COMMON_TEST_SOURCES}
             ${CMAKE_CURRENT_SOURCE_DIR}/rocke_jit_test.cpp
             )
         # The contraction JIT (rocKE's tensor GETT planner at plan creation).
-        add_hiptensor_unit_test(rocke_gett_jit_test
+        add_hiptensor_unit_test(rocke_gett_jit_test NO_INSTALL_ENTRIES DEVICE_SKIP_ONLY
             ${HIPTENSOR_COMMON_TEST_SOURCES}
             ${CMAKE_CURRENT_SOURCE_DIR}/rocke_gett_jit_test.cpp
             )
         # rocKE's C++ engine: the route tables and their plans the JIT's routes are compared with
         target_link_libraries(rocke_gett_jit_test PRIVATE hiptensor_rocke_core)
-        add_test(NAME rocke_backend_test_jit COMMAND rocke_backend_test)
+        add_test(NAME rocke_backend_test_jit
+                 COMMAND rocke_backend_test --gtest_filter=-${HIPTENSOR_ROCKE_TEST_LARGE_SUITES})
         set_tests_properties(rocke_backend_test_jit PROPERTIES
             ENVIRONMENT "HIPTENSOR_ROCKE_TEST_JIT=1;HIPTENSOR_ROCKE_JIT=all"
+            SKIP_REGULAR_EXPRESSION "unsupported host device"
             WORKING_DIRECTORY ${CMAKE_RUNTIME_OUTPUT_DIRECTORY})
+        list(APPEND _ROCKE_DEVICE_TESTS rocke_jit_test rocke_gett_jit_test)
     endif()
+    foreach(_test IN LISTS _ROCKE_DEVICE_TESTS)
+        target_compile_definitions(${_test} PRIVATE
+            HIPTENSOR_ROCKE_TEST_TARGETS="${_ROCKE_TEST_TARGETS}")
+    endforeach()
 endif()
  # add_hiptensor_unit_test(interface_test
      # ${HIPTENSOR_COMMON_TEST_SOURCES}

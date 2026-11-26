@@ -215,7 +215,8 @@ namespace hiptensor
         ~PlanCache() = default;
 
         //Get hash ID from operation descriptor pointer, for the solutions of a backend
-        //Calculate hash key by: hash({Backend, Tag, DatatypeA, DatatypeB, DatatypeC, DatatypeD, DatatypeCompute, mOperationType, mContractionOpId, lengths, strides, modes})
+        //Composable Kernel plans keep the key of earlier versions (legacyPlanCacheKey), the other
+        //backends' keys take every field of the problem and the backend (fullPlanCacheKey)
         HashId getHashID(hiptensorOperationDescriptor_t desc, std::string const& backend);
 
         //Query solution Uid of a backend through operation descriptor pointer

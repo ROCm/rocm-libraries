@@ -488,13 +488,17 @@ namespace hiptensor
                             }
                         }
                         AutotuneResult result;
-                        if(auto status = timed.empty()
-                                             ? HIPTENSOR_STATUS_SUCCESS
-                                             : autotune(problem, candidates, timed, reps, result);
-                           status != HIPTENSOR_STATUS_SUCCESS)
+                        auto           status = HIPTENSOR_STATUS_SUCCESS;
+                        if(!timed.empty())
+                        {
+                            status = autotune(problem, candidates, timed, reps, result);
+                            // autotune handles its failed allocations and launches, also when it
+                            // succeeds; their HIP error must not reach a later launch
+                            static_cast<void>(hipGetLastError());
+                        }
+                        if(status != HIPTENSOR_STATUS_SUCCESS)
                         {
                             // as when its allocations fail: the selector's pick is used
-                            static_cast<void>(hipGetLastError());
                             result        = AutotuneResult{};
                             result.winner = -1;
                             result.note   = std::string("the measured selection failed (")

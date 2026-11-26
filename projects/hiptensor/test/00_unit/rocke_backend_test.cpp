@@ -66,6 +66,7 @@
 #include <vector>
 
 #include "api_test_helpers.hpp"
+#include "rocke_test_device.hpp"
 
 namespace
 {
@@ -77,6 +78,10 @@ namespace
     {
         void SetUp() override
         {
+            if(hiptensor_test::skipNonRockeDevice())
+            {
+                GTEST_SKIP();
+            }
 #ifdef _WIN32
             _putenv_s("HIPTENSOR_BACKEND", "rocke");
             _putenv_s("HIPTENSOR_BACKEND_FALLBACK", "0");
@@ -6817,6 +6822,42 @@ namespace
                                 3,
                                 (int64_t(1) << 28) + 1024,
                                 false}));
+
+    // A rocKE execution is logged by the API and performance traces, like the Composable Kernel
+    // backend's.
+    TEST(RockeTraces, ExecutionsAreTraced)
+    {
+        ApiObjects                     api;
+        LogCapture                     log;
+        int32_t const                  modeA[] = {'m', 'n'}, modeB[] = {'n', 'm'};
+        auto                           dA   = api.tensor({64, 32}, {}, HIPTENSOR_R_32F);
+        auto                           dB   = api.tensor({32, 64}, {}, HIPTENSOR_R_32F);
+        hiptensorOperationDescriptor_t desc = nullptr;
+        ASSERT_EQ(hiptensorCreatePermutation(api.handle,
+                                             &desc,
+                                             dA,
+                                             modeA,
+                                             HIPTENSOR_OP_IDENTITY,
+                                             dB,
+                                             modeB,
+                                             HIPTENSOR_COMPUTE_DESC_32F),
+                  HIPTENSOR_STATUS_SUCCESS);
+        api.keep(desc);
+        uint64_t ws   = 0;
+        auto     plan = planOf(api, desc, ws, log);
+        ASSERT_NE(plan, nullptr);
+        hiptensor_test::DeviceBuffer<float> a(std::vector<float>(64 * 32, 1.0f)),
+            b(std::vector<float>(64 * 32, 0.0f));
+        hiptensorLoggerSetMask(HIPTENSOR_LOG_LEVEL_API_TRACE | HIPTENSOR_LOG_LEVEL_PERF_TRACE
+                               | HIPTENSOR_LOG_LEVEL_ERROR);
+        float const alpha = 1.0f;
+        ASSERT_EQ(hiptensorPermute(api.handle, plan, &alpha, a.ptr, b.ptr, nullptr),
+                  HIPTENSOR_STATUS_SUCCESS)
+            << log.all();
+        EXPECT_TRUE(log.contains("hiptensorPermute: handle=")) << log.all();
+        EXPECT_TRUE(log.contains("backend=rocke, kernel=")) << log.all();
+        EXPECT_TRUE(log.contains(" ms")) << log.all();
+    }
 
     // A mode of more than 2^31 elements (B = -A, f16, 4.3 GB each): pieces of 2^30.
     TEST(RockeHugeTensor, PermutationOfALongMode)

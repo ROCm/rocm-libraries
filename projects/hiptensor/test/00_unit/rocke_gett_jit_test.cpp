@@ -80,6 +80,7 @@
 #endif
 
 #include "api_test_helpers.hpp"
+#include "rocke_test_device.hpp"
 
 // rocKE's C++ engine (the route tables and their plans; this test links hiptensor_rocke_core)
 #include "rocke/instance_tensor_gett.h"
@@ -97,6 +98,10 @@ namespace
     {
         void SetUp() override
         {
+            if(hiptensor_test::skipNonRockeDevice())
+            {
+                GTEST_SKIP();
+            }
 #ifdef _WIN32
             _putenv_s("HIPTENSOR_BACKEND", "rocke");
             _putenv_s("HIPTENSOR_BACKEND_FALLBACK", "0");
