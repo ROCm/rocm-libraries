@@ -4,15 +4,19 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
 import uuid
 from pathlib import Path
+from typing import Iterable
 
 ROLES = ("sort_kernel_catalog", "predict_engine", "predict_applicable_kernels")
 _REVISION = re.compile(r"^[0-9]+\.[0-9]+$")
 _SLOT_NAME = re.compile(r"^[a-z][a-z0-9_]*$")
 #: Descriptor file-format versions the tooling reads; 1.1 adds the RFC 0021 slot members.
 SUPPORTED_FILE_VERSIONS = ("1.0", "1.1")
+#: UHD file-format versions the tooling reads; 1.2 adds `trained_against.codegen_revision`.
+UHD_FILE_VERSIONS = ("1.0", "1.1", "1.2")
 #: UED and KDP members that exist only from file-format 1.1.
 _SLOT_MEMBERS = frozenset({"slots", "slot", "shared_workspace"})
 _UUID = re.compile(r"^[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}$")
@@ -20,6 +24,19 @@ _UUID = re.compile(r"^[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}$")
 FEATURE_SEMANTICS_REVISION = "feature_semantics_revision"
 #: The loader reads the revision as int64_t.
 _MAX_INT64 = 2**63 - 1
+#: `trained_against` member: the digest of the engine's code objects. The runtime binds a
+#: model whose value differs and warns; it is recorded, never a compatibility key.
+CODEGEN_REVISION = "codegen_revision"
+#: Each `trained_against` member a UHD version gates, in the order UhdParser.hpp checks them:
+#: the first file-format version it may appear in (the RFC 0021 slot forms from 1.1,
+#: `codegen_revision` from 1.2) and how a refusal names it. A member not listed is 1.0.
+UHD_MEMBER_RULES = {
+    "slot": ("1.1", "uses slot provenance ('slot' or 'kmds')"),
+    "kmds": ("1.1", "uses slot provenance ('slot' or 'kmds')"),
+    CODEGEN_REVISION: ("1.2", f"records {CODEGEN_REVISION}"),
+}
+
+logger = logging.getLogger(__name__)
 
 
 class ProvenanceError(ValueError):
@@ -90,7 +107,8 @@ def validate_provenance(snapshot: object) -> dict:
 
     Accepts what the loader accepts (RFC 0019 §4.1): a descriptor set (`ued`/`kmd`/`umd`,
     all or none) and/or a `selector_revision` for engines with no UED, plus an optional
-    `feature_semantics_revision` (absent means 1). RFC 0021 §9 adds two slot forms: `slot`
+    `feature_semantics_revision` (absent means 1) and an optional `codegen_revision`
+    (`hard_provenance` sets it aside). RFC 0021 §9 adds two slot forms: `slot`
     beside `kmd` (one slot's ranker), and `kmds: [{slot, id, revision}]` in place of `kmd`
     (a slotted engine's `predict_engine` model).
     """
@@ -104,10 +122,11 @@ def validate_provenance(snapshot: object) -> dict:
         "umd",
         "selector_revision",
         FEATURE_SEMANTICS_REVISION,
+        CODEGEN_REVISION,
     }
     if unknown:
         raise ProvenanceError(f"trained_against has unknown members: {sorted(unknown)}")
-    semantics = {}
+    optional = {}
     if FEATURE_SEMANTICS_REVISION in snapshot:
         recorded_semantics = snapshot[FEATURE_SEMANTICS_REVISION]
         # Strict int: True or 1.0 would compare equal to 1 here but the loader refuses them.
@@ -119,7 +138,15 @@ def validate_provenance(snapshot: object) -> dict:
             raise ProvenanceError(
                 f"trained_against.{FEATURE_SEMANTICS_REVISION} must be an integer >= 1"
             )
-        semantics[FEATURE_SEMANTICS_REVISION] = recorded_semantics
+        optional[FEATURE_SEMANTICS_REVISION] = recorded_semantics
+    if CODEGEN_REVISION in snapshot:
+        codegen = snapshot[CODEGEN_REVISION]
+        if not isinstance(codegen, str) or not codegen:
+            raise ProvenanceError(
+                f"trained_against.{CODEGEN_REVISION} must be a non-empty string"
+            )
+        # Like the feature-semantics revision, it completes neither form by itself.
+        optional[CODEGEN_REVISION] = codegen
     names_descriptor_set = bool({"ued", "kmd", "kmds", "umd"} & set(snapshot))
     if not names_descriptor_set and "selector_revision" not in snapshot:
         raise ProvenanceError(
@@ -136,7 +163,7 @@ def validate_provenance(snapshot: object) -> dict:
     if "kmd" in snapshot and "kmds" in snapshot:
         raise ProvenanceError("trained_against names both kmd and kmds")
     if not names_descriptor_set:
-        return {"selector_revision": snapshot["selector_revision"], **semantics}
+        return {"selector_revision": snapshot["selector_revision"], **optional}
     # All three or none: a partial descriptor set is unverifiable. `kmds` stands in for `kmd`.
     kmd_key = "kmds" if "kmds" in snapshot else "kmd"
     if not {"ued", kmd_key, "umd"} <= set(snapshot):
@@ -161,7 +188,7 @@ def validate_provenance(snapshot: object) -> dict:
         # A descriptor-backed engine may also record its selector revision; the loader
         # checks it independently of the descriptor revisions.
         recorded["selector_revision"] = snapshot["selector_revision"]
-    return {**recorded, **semantics}
+    return {**recorded, **optional}
 
 
 def require_feature_semantics(trained: object, current: int) -> None:
@@ -191,6 +218,75 @@ def record_feature_semantics(snapshot: object, current: int) -> dict:
     if FEATURE_SEMANTICS_REVISION in recorded:
         require_feature_semantics(recorded, current)
     return {**recorded, FEATURE_SEMANTICS_REVISION: current}
+
+
+def minimum_uhd_version(trained_against: object) -> str:
+    """The lowest UHD file-format version that admits every member of `trained_against`."""
+    members = set(trained_against) if isinstance(trained_against, dict) else set()
+    return max(
+        (UHD_MEMBER_RULES[member][0] for member in members & UHD_MEMBER_RULES.keys()),
+        key=UHD_FILE_VERSIONS.index,
+        default="1.0",
+    )
+
+
+def uhd_version_refusal(version: str, trained_against: object) -> str | None:
+    """Why a UHD at `version` cannot carry `trained_against`, or None when it can.
+
+    Names the first member, in UhdParser.hpp's order, that `version` is too early for, in
+    the parser's wording."""
+    if not isinstance(trained_against, dict):
+        return None
+    for member, (first, refusal) in UHD_MEMBER_RULES.items():
+        if member in trained_against and UHD_FILE_VERSIONS.index(
+            version
+        ) < UHD_FILE_VERSIONS.index(first):
+            return f"trained_against {refusal}, which requires UHD version {first}"
+    return None
+
+
+def hard_provenance(snapshot):
+    """`snapshot` without its `codegen_revision`: the members the runtime refuses a model on.
+
+    Measurements, contributions and bindings that agree on this were taken under one
+    contract, whichever compiler built the code objects. Anything but an object is returned
+    as is.
+    """
+    if not isinstance(snapshot, dict):
+        return snapshot
+    return {key: value for key, value in snapshot.items() if key != CODEGEN_REVISION}
+
+
+def shared_provenance(snapshots: Iterable[dict]) -> tuple[dict, str | None]:
+    """The provenance every snapshot records, and a warning when their codegen differs.
+
+    The hard provenance must agree (`hard_provenance`). `codegen_revision` is kept only when
+    every snapshot records the same one; when they differ, or some record none, the result
+    records none and the warning names what was seen.
+    """
+    snapshots = list(snapshots)
+    if not snapshots:
+        raise ProvenanceError("no trained_against to share")
+    shared = hard_provenance(snapshots[0])
+    if any(hard_provenance(snapshot) != shared for snapshot in snapshots[1:]):
+        raise ProvenanceError(
+            "measurements disagree on trained_against beyond its codegen_revision"
+        )
+    revisions = {
+        snapshot.get(CODEGEN_REVISION) if isinstance(snapshot, dict) else None
+        for snapshot in snapshots
+    }
+    if len(revisions) == 1:
+        (codegen,) = revisions
+        return (
+            shared if codegen is None else {**shared, CODEGEN_REVISION: codegen}
+        ), None
+    seen = ", ".join(sorted("unrecorded" if r is None else r for r in revisions))
+    return shared, (
+        f"measurements under one selector revision come from {len(revisions)} code "
+        f"generations ({seen}): their timings were taken with different compilers, and a "
+        f"model trained on them records no {CODEGEN_REVISION}"
+    )
 
 
 def _check_dependency(kind: str, dependency: dict, by_id: dict, foreign=frozenset()):
@@ -285,7 +381,8 @@ def compare_provenance(
     `actual` -- the arch's own -- must be recorded, since the runtime disables a model that
     never saw one of them. The same matcher rule holds for slotted engines (`actual` is then
     scoped to the ranker's slot, or to every slot for an engine-level model), as in
-    `umdProvenanceError`. Selector revisions are opaque and must match exactly. Slot forms
+    `umdProvenanceError`. Selector revisions are opaque and must match exactly; a differing
+    `codegen_revision` is logged as a warning, as the runtime does, never refused. Slot forms
     compare as `_compare_kmds` describes.
     """
     trained = validate_provenance(trained)
@@ -301,6 +398,21 @@ def compare_provenance(
         raise ProvenanceError(
             f"trained_against.selector_revision: model records {recorded_revision!r}, "
             f"the provider reports {actual.get('selector_revision')!r}"
+        )
+    recorded_codegen = trained.get(CODEGEN_REVISION)
+    if (
+        recorded_codegen is not None
+        and CODEGEN_REVISION in actual
+        and actual[CODEGEN_REVISION] != recorded_codegen
+    ):
+        # The runtime binds such a model and warns: the selector is the same, its code
+        # objects were built by another compiler. Retraining is a decision, not a refusal.
+        logger.warning(
+            "trained_against.%s: model records %r, the provider reports %r; the model "
+            "still binds, but its timings were measured with other code objects",
+            CODEGEN_REVISION,
+            recorded_codegen,
+            actual[CODEGEN_REVISION],
         )
     if "ued" not in trained:
         return

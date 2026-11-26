@@ -60,11 +60,10 @@ from test_PrefetchAcrossPersistent import (
     _tensor_parameters,
 )
 
-# Real-Solution gfx1250 toolchain fixtures. Imported so pytest resolves them as
-# fixtures in this module (they auto-skip when amdclang++ cannot target gfx1250).
+# Reuse the gfx1250 global setup and PrefetchGL2 capability gate. The assembler
+# fixture is inherited from unit/conftest.py.
 from test_prefetchgl2_streamk_guard import (  # noqa: F401  (fixtures used by name)
     _gp_gfx1250,
-    assembler,
     gfx1250_iim,
 )
 
@@ -598,7 +597,7 @@ def _emit_static_kernel_asm(gfx1250_iim, assembler, capsys, dp_only):
     from tensilelite.KernelWriterAssembly import KernelWriterAssembly
     from tensilelite.SolutionStructs.Naming import getKernelFileBase
     from tensilelite.SolutionStructs.Solution import Solution
-    from tensilelite.TensileCreateLibrary.Run import (
+    from tensilelite.create_library.run import (
         generateKernelObjectsFromSolutions,
         processKernelSource,
     )

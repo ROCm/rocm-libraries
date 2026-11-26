@@ -254,7 +254,7 @@ namespace Tensor
             std::unique_ptr<char[]> data;
         };
 
-        Indices permute(const Indices& indices, const Permutation& perm)
+        inline Indices permute(const Indices& indices, const Permutation& perm)
         {
             assert(indices.size() == perm.size());
             Indices newIndices = indices;
@@ -268,7 +268,7 @@ namespace Tensor
         using IterateCallback    = std::function<void(const Indices& indices)>;
         using IterateDimCallback = std::function<void(size_t dim)>;
 
-        void iterate(
+        inline void iterate(
             const Shape&       shape,
             size_t             dim,
             Indices&           indices,
@@ -336,10 +336,10 @@ namespace Tensor
             return dst;
         }
 
-        Tensor pad(const Tensor& tensor,
-                   const Shape&  newShape,
-                   const void*   padValPtr,
-                   size_t        padValSize)
+        inline Tensor pad(const Tensor& tensor,
+                          const Shape&  newShape,
+                          const void*   padValPtr,
+                          size_t        padValSize)
         {
             switch(padValSize)
             {
@@ -358,7 +358,7 @@ namespace Tensor
             return Tensor({0}, tensor.getElementSize());
         }
 
-        Tensor permute(const Tensor& tensor, const Permutation& perm)
+        inline Tensor permute(const Tensor& tensor, const Permutation& perm)
         {
             Shape  newShape = permute(tensor.getDesc().getShape(), perm);
             Tensor permuted(newShape, size_t(tensor.getElementSize()));

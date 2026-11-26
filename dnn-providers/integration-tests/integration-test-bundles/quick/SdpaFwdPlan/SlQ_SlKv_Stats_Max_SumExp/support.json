@@ -1,0 +1,90 @@
+{
+  "claims": {
+    "hipkernel:flydsl_sdpa_cdna": [
+      {
+        "cases": [
+          "bf16_05bd8d61e6c669a8",
+          "bf16_0977f4530bb4c0e9",
+          "bf16_16c7273af0443c16",
+          "bf16_6dda699e57655fe9",
+          "bf16_746b2202ddfc5339",
+          "bf16_9a8e264d5e53180f",
+          "fp16_ebc9e1d2a2632569",
+          "fp16_ecc730b2de9de08b",
+          "fp16_fd2695f15c774eb4"
+        ],
+        "support": {
+          "gfx942": [
+            "linux"
+          ],
+          "gfx950": [
+            "linux"
+          ]
+        }
+      }
+    ],
+    "hipkernel:flydsl_sdpa_cdna_decode": [
+      {
+        "cases": [
+          "bf16_0977f4530bb4c0e9",
+          "bf16_16c7273af0443c16",
+          "bf16_746b2202ddfc5339",
+          "fp16_ebc9e1d2a2632569",
+          "fp16_ecc730b2de9de08b",
+          "fp16_fd2695f15c774eb4"
+        ],
+        "support": {
+          "gfx942": [
+            "linux"
+          ],
+          "gfx950": [
+            "linux"
+          ]
+        }
+      }
+    ],
+    "hipkernel:flydsl_sdpa_rdna": [
+      {
+        "cases": [
+          "bf16_05bd8d61e6c669a8",
+          "bf16_0977f4530bb4c0e9",
+          "bf16_16c7273af0443c16",
+          "bf16_6dda699e57655fe9",
+          "bf16_746b2202ddfc5339",
+          "bf16_9a8e264d5e53180f",
+          "fp16_ebc9e1d2a2632569",
+          "fp16_ecc730b2de9de08b",
+          "fp16_fd2695f15c774eb4"
+        ],
+        "support": {
+          "gfx1151": [
+            "linux",
+            "windows"
+          ]
+        }
+      }
+    ],
+    "hipkernel:flydsl_sdpa_rdna_decode": [
+      {
+        "cases": [
+          "bf16_05bd8d61e6c669a8",
+          "bf16_0977f4530bb4c0e9",
+          "bf16_16c7273af0443c16",
+          "bf16_6dda699e57655fe9",
+          "bf16_746b2202ddfc5339",
+          "bf16_9a8e264d5e53180f",
+          "fp16_ebc9e1d2a2632569",
+          "fp16_ecc730b2de9de08b",
+          "fp16_fd2695f15c774eb4"
+        ],
+        "support": {
+          "gfx1151": [
+            "linux",
+            "windows"
+          ]
+        }
+      }
+    ]
+  },
+  "version": 1
+}

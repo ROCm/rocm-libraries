@@ -270,10 +270,19 @@ def halfPlrKernel(tmp_path_factory):
     return emit
 
 
+def _folds(kernel):
+    """Tail folding: the kernel runs the K tail in the unroll loop and emits no tail loop."""
+    return "TailFolding:" in kernel.source and "label_TailLoopBeginL" not in kernel.source
+
+
 @pytest.mark.parametrize("cell", _HALFPLR_TAIL_CELLS, ids=_HALFPLR_TAIL_IDS)
 def test_s01_halfplr_tail_reenables_every_disabled_set(halfPlrKernel, cell):
     """The K tail loads through every descriptor set, so each enable word the loop zeroed is set."""
     kernel = halfPlrKernel(*cell)
+    if _folds(kernel):
+        # tail folding (16-bit TDM, PGR 2): the K tail runs in the unroll loop, there is no tail loop
+        assert _TAIL_ENABLE not in kernel.source
+        return
     zeroed, enabled = kernel.enableWords()
     scales = {kernel.index("sgprtdm%sGroup0" % tc) for tc in ("MXSA", "MXSB")
               if _HALFPLR_PROBLEMS[cell[0]].get("MXBlock" + tc[-1])}
@@ -299,8 +308,10 @@ def test_s01_halfplr_copy_is_primed_before_the_main_loop_and_the_mask_is_unchang
 def test_s01_halfplr_remove_stagger_multiplies_by_an_increment_the_mask_left_intact(
         halfPlrKernel, cell):
     """removeStagger reads the copy for each masked tensor and GlobalReadIncs for the others."""
-    reads = sorted(set(halfPlrKernel(*cell).staggerReads))
-    if cell[5] != _ONE:
+    kernel = halfPlrKernel(*cell)
+    reads = sorted(set(kernel.staggerReads))
+    if cell[5] != _ONE or _folds(kernel):
+        # a cluster has no StaggerU code; a folding kernel has no tail loop, so nothing removes the stagger
         assert not reads, reads
         return
     masked = _HALFPLR_CELLS[cell]

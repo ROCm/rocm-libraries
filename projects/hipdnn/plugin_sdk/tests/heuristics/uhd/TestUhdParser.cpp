@@ -62,7 +62,9 @@ enum class Base
     NATIVE,
     TREE_DATA,
     CUSTOM_LIBRARY,
-    STATIC_ORDER
+    STATIC_ORDER,
+    LINEAR_DATA,
+    MLP_DATA
 };
 
 /// A valid document of each body kind. The native one carries every optional block a
@@ -98,6 +100,23 @@ nlohmann::json baseDocument(Base base)
         document["adapter"] = "tree_data";
         document.erase("native");
         document["tree_data"] = {{"artifact", "models/model.fb"}, {"hash", DIGEST}};
+    }
+    else if(base == Base::LINEAR_DATA)
+    {
+        // A within-catalog ranker: a log slowdown, lower is better, estimating no metric.
+        document["adapter"] = "linear_data";
+        document.erase("native");
+        document.erase("score");
+        document["objective"] = "min";
+        document["linear_data"] = {{"artifact", "models/linear.fb"}, {"hash", DIGEST}};
+    }
+    else if(base == Base::MLP_DATA)
+    {
+        // An engine estimate: the log of a registered metric, so the score names both.
+        document["adapter"] = "mlp_data";
+        document.erase("native");
+        document["score"]["transform"] = "log";
+        document["mlp_data"] = {{"artifact", "models/mlp.fb"}, {"hash", DIGEST}};
     }
     else if(base == Base::CUSTOM_LIBRARY)
     {
@@ -219,7 +238,7 @@ const std::vector<Refusal> REFUSALS = {
     {"RootIsNotAnObject", Base::NATIVE, [](nlohmann::json& doc) { doc = nlohmann::json::array(); }},
     {"UnknownRootKey", Base::NATIVE, [](nlohmann::json& doc) { doc["featuresHash"] = "x"; }},
     {"MissingVersion", Base::NATIVE, [](nlohmann::json& doc) { doc.erase("version"); }},
-    {"UnsupportedVersion", Base::NATIVE, [](nlohmann::json& doc) { doc["version"] = "1.2"; }},
+    {"UnsupportedVersion", Base::NATIVE, [](nlohmann::json& doc) { doc["version"] = "1.3"; }},
     {"IdIsNotAUuid", Base::NATIVE, [](nlohmann::json& doc) { doc["id"] = "model-1"; }},
     {"EmptyName", Base::NATIVE, [](nlohmann::json& doc) { doc["name"] = ""; }},
     {"NameIsNotAString", Base::NATIVE, [](nlohmann::json& doc) { doc["name"] = 3; }},
@@ -375,6 +394,39 @@ const std::vector<Refusal> REFUSALS = {
     {"CustomLibraryWithConfiguration",
      Base::CUSTOM_LIBRARY,
      [](nlohmann::json& doc) { doc["custom_library"]["config"] = {{"threads", 4}}; }},
+    {"LinearDataWithTheMaxObjective",
+     Base::LINEAR_DATA,
+     [](nlohmann::json& doc) { doc["objective"] = "max"; }},
+    {"LinearDataWithAMetric",
+     Base::LINEAR_DATA,
+     [](nlohmann::json& doc) { doc["score"] = {{"metric", "time"}}; }},
+    {"LinearDataWithATransform",
+     Base::LINEAR_DATA,
+     [](nlohmann::json& doc) { doc["score"] = {{"transform", "log1p"}}; }},
+    {"LinearDataWithoutASignature",
+     Base::LINEAR_DATA,
+     [](nlohmann::json& doc) { doc.erase("features_signature"); }},
+    {"LinearDataBodyHasAnUnknownKey",
+     Base::LINEAR_DATA,
+     [](nlohmann::json& doc) { doc["linear_data"]["library"] = "x"; }},
+    {"LinearDataNamesAnotherBody",
+     Base::LINEAR_DATA,
+     [](nlohmann::json& doc) { doc["adapter"] = "table"; }},
+    {"MlpDataWithoutAMetric",
+     Base::MLP_DATA,
+     [](nlohmann::json& doc) {
+         doc["score"].erase("metric");
+         doc["score"]["calibrated"] = false;
+     }},
+    {"MlpDataWithAnotherTransform",
+     Base::MLP_DATA,
+     [](nlohmann::json& doc) { doc["score"]["transform"] = "log1p"; }},
+    {"MlpDataWithoutATransform",
+     Base::MLP_DATA,
+     [](nlohmann::json& doc) { doc["score"].erase("transform"); }},
+    {"MlpDataWithoutASignature",
+     Base::MLP_DATA,
+     [](nlohmann::json& doc) { doc.erase("features_signature"); }},
 };
 
 INSTANTIATE_TEST_SUITE_P(Rule,
@@ -399,6 +451,30 @@ TEST(TestUhdParser, AcceptsEveryBaseDocument)
     const auto custom = parseUhdConfig(baseDocument(Base::CUSTOM_LIBRARY), descriptorPath());
     EXPECT_EQ(custom.customLibrarySymbol, "scorer");
     EXPECT_EQ(custom.modelHash, DIGEST);
+
+    const auto linear = parseUhdConfig(baseDocument(Base::LINEAR_DATA), descriptorPath());
+    EXPECT_EQ(linear.adapterType, "linear_data");
+    EXPECT_EQ(linear.objective, "min");
+    EXPECT_TRUE(linear.scoreMetric.empty());
+    EXPECT_FALSE(linear.scoreCalibrated);
+    EXPECT_EQ(linear.modelHash, DIGEST);
+    EXPECT_EQ(std::filesystem::path(linear.modelArtifactPath).filename().string(), "linear.fb");
+
+    // Either registered metric, each with its own direction.
+    const auto throughput = parseUhdConfig(baseDocument(Base::MLP_DATA), descriptorPath());
+    EXPECT_EQ(throughput.adapterType, "mlp_data");
+    EXPECT_EQ(throughput.scoreMetric, "tflops");
+    EXPECT_EQ(throughput.scoreTransform, "log");
+    EXPECT_EQ(std::filesystem::path(throughput.modelArtifactPath).filename().string(), "mlp.fb");
+    auto time = baseDocument(Base::MLP_DATA);
+    time["score"]["metric"] = "time";
+    time["objective"] = "min";
+    EXPECT_EQ(parseUhdConfig(time, descriptorPath()).scoreMetric, "time");
+
+    // An identity transform is what an absent one means.
+    auto identity = baseDocument(Base::LINEAR_DATA);
+    identity["score"] = {{"transform", "identity"}, {"calibrated", false}};
+    EXPECT_NO_THROW(parseUhdConfig(identity, descriptorPath()));
 
     // static_order scores nothing, so it is admitted without an objective.
     const auto ordered = parseUhdConfig(baseDocument(Base::STATIC_ORDER), descriptorPath());
@@ -426,6 +502,33 @@ TEST(TestUhdParser, AcceptsEachSlotProvenanceForm)
     one["trained_against"]["kmds"] = nlohmann::json::array({one["trained_against"]["kmds"][0]});
     one["trained_against"]["kmds"][0]["slot"] = "p_9";
     EXPECT_NO_THROW(parseUhdConfig(one, descriptorPath()));
+}
+
+/// `codegen_revision` arrived with UHD 1.2: an older document recording it is refused, naming
+/// the version it needs, and a 1.2 one is read.
+TEST(TestUhdParser, ReadsACodegenRevisionOnlyFromVersion12)
+{
+    auto document = baseDocument(Base::NATIVE);
+    document["trained_against"]["codegen_revision"] = "codegen-a";
+    for(const auto* version : {"1.0", "1.1"})
+    {
+        SCOPED_TRACE(version);
+        document["version"] = version;
+        try
+        {
+            (void)parseUhdConfig(document, descriptorPath());
+            ADD_FAILURE() << "a codegen_revision under " << version << " was accepted";
+        }
+        catch(const std::invalid_argument& error)
+        {
+            const std::string message = error.what();
+            EXPECT_NE(message.find("records codegen_revision"), std::string::npos) << message;
+            EXPECT_NE(message.find("requires UHD version 1.2"), std::string::npos) << message;
+        }
+    }
+    document["version"] = "1.2";
+    EXPECT_EQ(parseUhdConfig(document, descriptorPath()).trainedAgainst.at("codegen_revision"),
+              "codegen-a");
 }
 
 /// The `trained_against` header grammar of RFC 0021 §9: the rows the packer, its schema and

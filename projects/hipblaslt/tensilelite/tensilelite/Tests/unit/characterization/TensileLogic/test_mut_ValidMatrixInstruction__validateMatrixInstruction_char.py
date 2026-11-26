@@ -24,7 +24,7 @@
 ################################################################################
 
 """Mutation-targeted characterization tests for
-``TensileLogic.ValidMatrixInstruction._validateMatrixInstruction``.
+``tensilelite.logic.valid_matrix_instruction._validateMatrixInstruction``.
 
 Companion to ``test_validmatrixinstruction_char.py``. The base suite pins the
 *return value* of the accept/reject paths but does not pin the diagnostic that
@@ -40,7 +40,7 @@ the base suite and asserts the actual diagnostic text, killing the mutant.
 
 import pytest
 
-from tensilelite.TensileLogic.ValidMatrixInstruction import _validateMatrixInstruction
+from tensilelite.logic.valid_matrix_instruction import _validateMatrixInstruction
 
 pytestmark = pytest.mark.unit
 

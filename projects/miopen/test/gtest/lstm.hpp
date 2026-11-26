@@ -1479,6 +1479,9 @@ struct Verifier
     int time_iter{1};
     int warmup_iter{0};
     double tolerance{80.0};
+    // the number of mismatches, all-zero results and exceptions of the GPU run reported (printed)
+    // by verify(); a test that has to fail on them checks it is zero
+    unsigned verifyFailures{0};
 
     template <class CpuRange, class GpuRange, class Compare, class Report, class Fail>
     bool compare_and_report(
@@ -1517,13 +1520,14 @@ struct Verifier
 
     auto verify_reporter()
     {
-        return [=](bool pass,
-                   std::vector<double> error,
-                   const auto& out_cpu,
-                   const auto& out_gpu,
-                   auto fail) {
+        return [this](bool pass,
+                      std::vector<double> error,
+                      const auto& out_cpu,
+                      const auto& out_gpu,
+                      auto fail) {
             if(not pass)
             {
+                ++verifyFailures;
                 if(not error.empty())
                 {
                     std::cout << "FAILED: " << error.front() << std::endl;
@@ -1563,6 +1567,7 @@ struct Verifier
                     (miopen::range_distance(out_cpu) != 0))
             {
                 std::cout << "Warning: Both CPU and GPU data is all zero" << std::endl;
+                ++verifyFailures;
                 fail(-1);
             }
             return true;
@@ -1624,11 +1629,13 @@ struct Verifier
         catch(const std::exception& ex)
         {
             std::cout << "FAILED: " << ex.what() << std::endl;
+            ++verifyFailures;
             v.fail(-1, xs...);
         }
         catch(...)
         {
             std::cout << "FAILED with unknown exception" << std::endl;
+            ++verifyFailures;
             v.fail(-1, xs...);
         }
 

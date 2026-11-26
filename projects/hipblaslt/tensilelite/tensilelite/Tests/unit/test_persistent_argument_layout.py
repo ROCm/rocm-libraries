@@ -263,7 +263,7 @@ def _data_parallel_signature_agreement(tmp_path, use_beta, initial_strides):
     from test_persistent_config_generation import _config
     from tensilelite.Common.Types import DebugConfig
     from tensilelite.KernelWriterAssembly import KernelWriterAssembly
-    from tensilelite.TensileCreateLibrary.Run import generateKernelObjectsFromSolutions
+    from tensilelite.create_library.run import generateKernelObjectsFromSolutions
 
     config = _config({"TileProcessingStrategy": ["DataParallel"], "WorkAssignment": ["StaticGrid"]})
     config["BenchmarkProblems"][0][0].update(UseBeta=use_beta, UseInitialStridesAB=initial_strides,
@@ -318,8 +318,11 @@ def _data_parallel_signature_agreement(tmp_path, use_beta, initial_strides):
         packed_arguments = packed_metadata["amdhsa.kernels"][0][".args"]
         inferred = [_metadataArgToCustomArg(argument) for argument in packed_arguments]
         assert inferred == writer.kernelArgDefs
-        magic = [argument for argument in packed_arguments if argument[".name"].endswith("SizeJ")]
-        assert [argument[".name"] for argument in magic] == ["MagicNumberSizeJ", "MagicShiftSizeJ"]
+        alg = packed["MagicDivAlg"]
+        magic = [argument for argument in packed_arguments
+                 if argument[".name"].endswith("Alg%dJ" % alg)]
+        assert [argument[".name"] for argument in magic] == ["MagicNumberSizeAlg%dJ" % alg,
+                                                             "MagicShiftSizeAlg%dJ" % alg]
         assert magic[1][".offset"] == magic[0][".offset"] + 4
         assert packed_arguments[-4][".offset"] == arguments[-4][".offset"] + 8
     return arguments, generated
@@ -348,7 +351,7 @@ def test_streamk_generated_signature_descriptor_and_reader_agree(tmp_path, recor
     from config_harness import _emit_one, _isolated_globals_with_isa, _toolchain_for, _solutions_from_config_unguarded
     from tensilelite.Common.Types import DebugConfig
     from tensilelite.KernelWriterAssembly import KernelWriterAssembly
-    from tensilelite.TensileCreateLibrary.Run import generateKernelObjectsFromSolutions
+    from tensilelite.create_library.run import generateKernelObjectsFromSolutions
 
     fixture = Path(__file__).parents[1] / "common/streamk/gfx1250/static_streamk_cluster_multicast_boundaries.yaml"
     config = yaml.safe_load(fixture.read_text())
@@ -406,7 +409,7 @@ def _reject_invalid_data_parallel_descriptor(tmp_path):
     from test_persistent_config_generation import _config
     from tensilelite.Common.Types import DebugConfig
     from tensilelite.KernelWriterAssembly import KernelWriterAssembly
-    from tensilelite.TensileCreateLibrary.Run import generateKernelObjectsFromSolutions
+    from tensilelite.create_library.run import generateKernelObjectsFromSolutions
 
     config = _config({"TileProcessingStrategy": ["DataParallel"], "WorkAssignment": ["StaticGrid"]})
     path = tmp_path / "data_parallel.yaml"

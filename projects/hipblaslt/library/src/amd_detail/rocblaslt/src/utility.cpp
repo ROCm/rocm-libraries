@@ -304,6 +304,8 @@ const char* rocblaslt_matmul_desc_attributes_to_string(rocblaslt_matmul_desc_att
 #if HIPBLASLT_HAS_GEMM_A2A_FUSION
     case ROCBLASLT_MATMUL_DESC_FUSED_EPILOGUE:
         return "MATMUL_DESC_FUSED_EPILOGUE";
+    case ROCBLASLT_MATMUL_DESC_FUSED_PROLOGUE:
+        return "MATMUL_DESC_FUSED_PROLOGUE";
 #endif
     case ROCBLASLT_MATMUL_DESC_MAX:
         return "MATMUL_DESC_MAX";
@@ -381,6 +383,8 @@ const char* rocblaslt_scaling_format_to_string(RocblasltContractionProblem::Scal
         return "Block_64_F16_ZP";
     case RocblasltContractionProblem::ScalingFormat::Block_128_F16_ZP:
         return "Block_128_F16_ZP";
+    case RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_128_4_EXT:
+        return "Block_32_UE8M0_128_4_EXT";
     default:
         return "Invalid";
     }
@@ -453,6 +457,10 @@ const char* rocblaslt_epilogue_to_string(rocblaslt_epilogue epilogue)
         return "EPILOGUE_SWISH_EXT";
     case ROCBLASLT_EPILOGUE_SWISH_BIAS_EXT:
         return "EPILOGUE_SWISH_BIAS_EXT";
+    case ROCBLASLT_EPILOGUE_SWISH_AUX_EXT:
+        return "EPILOGUE_SWISH_AUX_EXT";
+    case ROCBLASLT_EPILOGUE_SWISH_AUX_BIAS_EXT:
+        return "EPILOGUE_SWISH_AUX_BIAS_EXT";
     case ROCBLASLT_EPILOGUE_CLAMP_EXT:
         return "EPILOGUE_CLAMP_EXT";
     case ROCBLASLT_EPILOGUE_CLAMP_BIAS_EXT:

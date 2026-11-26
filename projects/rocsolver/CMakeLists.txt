@@ -61,13 +61,14 @@ option(ROCSOLVER_EMBED_FMT "Hide libfmt symbols" ON)
 option(OPTIMAL "Build specialized kernels for small matrix sizes" ON)
 option(ROCSOLVER_FIND_PACKAGE_LAPACK_CONFIG "Skip module mode search for LAPACK" ON)
 option(ROCSOLVER_USE_INTERNAL_BLAS "Use internal implementation of GEMM and TRSM for debugging." OFF)
-option(ROCSOLVER_USE_REFERENCE_SECULAR_EQUATIONS_SOLVER "Use LAPACK like implementation of secular equations solver" ON)
+option(ROCSOLVER_USE_REFERENCE_SECULAR_EQUATIONS_SOLVER "Use LAPACK like implementation of secular equations solver" OFF)
 
 # Feature flags
 option(ROCSOLVER_ENABLE_CHOLQR "Enable CholQR method" ON)
 option(ROCSOLVER_ENABLE_EIGENSOLVERS_64 "Enable the 64-bit eigensolver API (syev/heev/syevd/heevd)" ON)
 option(ROCSOLVER_ENABLE_EIG_2STAGE "Enable 2-stage eigensolver reduction (he2hb + hb2st)" ON)
 option(ROCSOLVER_ENABLE_HESSENBERG "Enable Hessenberg reduction routines (gehrd/gehd2/lahr2)" ON)
+option(ROCSOLVER_ENABLE_LARFG_TAU2 "Enable larfg setting tau=2 when norm(x)=0" OFF)
 
 # Add our CMake helper files to the lookup path
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")

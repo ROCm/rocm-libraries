@@ -309,6 +309,14 @@ namespace hiptensor
                       : hiptensor::stridesFromLengths(
                             extentD, memoryLayout == HIPTENSOR_MEMORY_LAYOUT_COLUMN_MAJOR);
 
+            double alphaValue{};
+            double gammaValue{};
+            if(!writeElementwiseScalar(alphaValue, computeDataType, alpha)
+               || !writeElementwiseScalar(gammaValue, computeDataType, gamma))
+            {
+                FAIL() << "Unexpected compute data type: " << computeDataType;
+            }
+
             hiptensorHandle_t handle;
             CHECK_HIPTENSOR_ERROR(hiptensorCreate(&handle));
 
@@ -383,14 +391,6 @@ namespace hiptensor
             CHECK_HIPTENSOR_ERROR(
                 hiptensorCreatePlan(handle, &plan, desc, planPref, 0 /*workspaceSizeEstimate*/));
 
-            double alphaValue{};
-            double gammaValue{};
-            if(!writeElementwiseScalar(alphaValue, computeDataType, alpha)
-               || !writeElementwiseScalar(gammaValue, computeDataType, gamma))
-            {
-                FAIL() << "Unexpected compute data type: " << computeDataType;
-            }
-
             auto& opts     = HiptensorOptions::instance();
             int   coldRuns = opts->coldRuns();
             int   hotRuns  = std::max(1, opts->hotRuns()); // guard hot_runs <= 0
@@ -428,17 +428,17 @@ namespace hiptensor
 
             size_t sizeA = std::accumulate(extentA.begin(),
                                            extentA.end(),
-                                           hiptensorDataTypeSize(dataType),
+                                           size_t(hiptensorDataTypeSize(dataType)),
                                            std::multiplies<size_t>());
 
             size_t sizeC = std::accumulate(extentC.begin(),
                                            extentC.end(),
-                                           hiptensorDataTypeSize(dataType),
+                                           size_t(hiptensorDataTypeSize(dataType)),
                                            std::multiplies<size_t>());
 
             size_t sizeD = std::accumulate(extentD.begin(),
                                            extentD.end(),
-                                           hiptensorDataTypeSize(dataType),
+                                           size_t(hiptensorDataTypeSize(dataType)),
                                            std::multiplies<size_t>());
 
             mElapsedTimeMs        = float64_t(timeMs) / hotRuns;

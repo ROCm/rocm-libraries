@@ -10,6 +10,7 @@
 #include <cstdint>
 #include <map>
 #include <memory>
+#include <mutex>
 #include <set>
 #include <stdexcept>
 #include <string>
@@ -24,6 +25,7 @@
 #include <hipdnn_plugin_sdk/KnobFactory.hpp>
 #include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
+#include <hipdnn_plugin_sdk/PluginLogging.hpp>
 #include <hipdnn_plugin_sdk/heuristics/RankingMetric.hpp>
 #include <hipdnn_plugin_sdk/heuristics/uhd/EnginePredictor.hpp>
 #include <hipdnn_plugin_sdk/ingestor/GenericPlanBuilder.hpp>
@@ -56,6 +58,21 @@ inline const std::string* findUndeclaredKnob(const std::vector<std::string>& kno
     return nullptr;
 }
 
+namespace detail
+{
+
+/// Whether to log the warning @p key names: true only the first time this process sees it, so
+/// a condition every Container of an engine meets is logged once rather than once per handle.
+inline bool warnOnceInProcess(const std::string& key)
+{
+    static std::mutex s_mutex;
+    static std::set<std::string> s_seen;
+    const std::lock_guard<std::mutex> lock(s_mutex);
+    return s_seen.insert(key).second;
+}
+
+} // namespace detail
+
 /// The first knob @p engine exposes that @p fields does not declare, or nullptr.
 /// The descriptor form of the vector overload above, which it forwards to.
 inline const std::string* findUndeclaredKnob(const EngineDescriptor& engine,
@@ -74,6 +91,11 @@ public:
     using IGraph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph;
     using IEngineConfig = hipdnn_flatbuffers_sdk::flatbuffer_utilities::IEngineConfig;
 
+    /// @param provenance The engine's own `trained_against`: pass engineBindingProvenance(set).
+    ///        Its `codegen_revision` is compared with each L1 model's recorded one, logging a
+    ///        warning when they differ, and is published in the binding's `trained_against`, so
+    ///        a model trained from those bindings records it. Without the key, or with a null
+    ///        provenance, the engine never warns and publishes none.
     /// @throws std::invalid_argument if a knob names no field in the metadata schema, or, for a
     ///         slotted engine, in its slot's schema.
     GenericEngine(
@@ -127,7 +149,12 @@ public:
         // RFC 0019 §3.1: the UED role map is this engine's L1 binding, keyed by each UHD's metric.
         // §4.1 selector_revision is re-checked here because this engine's selector also covers
         // its rankers, packs, kernels and native symbols; an L1 model measured against another
-        // selector changes which engine is chosen.
+        // selector changes which engine is chosen. §8.1 codegen_revision is only warned about:
+        // it moves when a compiler rebuilds the same kernels.
+        // A null provenance (what `{}` constructs) is the same as an empty object.
+        const auto codegenRevision = _provenance.is_object()
+                                         ? _provenance.value("codegen_revision", std::string{})
+                                         : std::string{};
         for(const auto& [metric, byArch] : predictions)
         {
             for(const auto& [arch, descriptor] : byArch)
@@ -153,6 +180,27 @@ public:
                 }
                 else
                 {
+                    const auto& trainedCodegen = descriptor.trainedAgainstCodegenRevision;
+                    // Either side recording none leaves nothing to compare.
+                    if(!trainedCodegen.empty() && !codegenRevision.empty()
+                       && trainedCodegen != codegenRevision
+                       && detail::warnOnceInProcess(std::string(_engine.name)
+                                                        .append("|")
+                                                        .append(metric)
+                                                        .append("|")
+                                                        .append(arch)
+                                                        .append("|")
+                                                        .append(trainedCodegen)
+                                                        .append("|")
+                                                        .append(codegenRevision)))
+                    {
+                        HIPDNN_PLUGIN_LOG_WARN(
+                            "ingestor: engine '"
+                            << _engine.name << "' binds its " << metric << " model for " << arch
+                            << ", which was measured on other code objects (trained against "
+                            << trainedCodegen << ", engine reports " << codegenRevision
+                            << "); its estimates may be stale until it is retrained");
+                    }
                     _binding.bind(metric, arch, UhdKernelHeuristic::configFrom(descriptor));
                 }
             }
@@ -225,8 +273,15 @@ public:
         auto knobs = builder.CreateVector(knobOffsets);
         auto behaviorNotes = builder.CreateVector(_engine.behaviorNotes);
         auto name = builder.CreateString(_engine.name);
+        // Only an authored claim is written; an absent field tells the backend the
+        // engine's numerical behavior is unknown.
+        flatbuffers::Offset<flatbuffers::Vector<int32_t>> numericalNotes;
+        if(_engine.numericalNotes.has_value())
+        {
+            numericalNotes = builder.CreateVector(*_engine.numericalNotes);
+        }
         auto engineDetails = hipdnn_flatbuffers_sdk::data_objects::CreateEngineDetails(
-            builder, _id, knobs, behaviorNotes, name);
+            builder, _id, knobs, behaviorNotes, name, 0, numericalNotes);
         builder.Finish(engineDetails);
 
         // Detached buffer outlives this call; the handle takes ownership.

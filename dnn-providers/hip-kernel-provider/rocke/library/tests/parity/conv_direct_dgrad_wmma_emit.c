@@ -344,6 +344,58 @@ static int make_cfg(int idx, rocke_direct_dgrad_wmma_spec_t* s, const char** arc
         s->prefetch = true;
         s->sched = "iterative-ilp";
         return 0;
+    case 32: /* bf16, stride 2 pack_groups 2 (cpg = kpg = 16, 4 groups), 1x4 waves, 2x2 tiles */
+        s->problem = make_problem_ex(3, 1, "bf16", 2, 4, 16, 16, 1, 1);
+        s->waves_c = 1;
+        s->waves_p = 4;
+        s->tiles_c = 2;
+        s->tiles_p = 2;
+        s->pack_groups = 2;
+        return 0;
+    case 33: /* fp16, stride 2 pack_groups 4 (cpg = kpg = 8, 8 groups), 1x8 waves, 8-wide tiles */
+        s->problem = make_problem_ex(3, 1, "fp16", 2, 8, 8, 8, 1, 1);
+        s->waves_c = 1;
+        s->waves_p = 8;
+        s->tiles_c = 2;
+        s->tiles_p = 4;
+        s->tile_w = 8;
+        s->pack_groups = 4;
+        return 0;
+    case 34: /* bf16, stride 2 pack_groups 8 (cpg = kpg = 4, 16 groups), 2x4 waves, 2 images */
+        s->problem = make_problem_ex(3, 1, "bf16", 2, 16, 4, 4, 1, 1);
+        s->waves_c = 2;
+        s->waves_p = 4;
+        s->tiles_c = 1;
+        s->tiles_p = 4;
+        s->tile_n = 2;
+        s->pack_groups = 8;
+        return 0;
+    case 35: /* fp16, stride 2 pack_groups 2, 1x4 waves, 2x4 tiles, prefetch + iterative-ilp */
+        s->problem = make_problem_ex(3, 1, "fp16", 2, 4, 16, 16, 1, 1);
+        s->waves_c = 1;
+        s->waves_p = 4;
+        s->tiles_c = 2;
+        s->tiles_p = 4;
+        s->prefetch = true;
+        s->sched = "iterative-ilp";
+        s->pack_groups = 2;
+        return 0;
+    case 36: /* bf16, stride 2 pack_groups 4, 1x2 waves, 2x4 tiles */
+        s->problem = make_problem_ex(3, 1, "bf16", 2, 8, 8, 8, 1, 1);
+        s->waves_c = 1;
+        s->waves_p = 2;
+        s->tiles_c = 2;
+        s->tiles_p = 4;
+        s->pack_groups = 4;
+        return 0;
+    case 37: /* fp16, stride 2 pack_groups 8, 1x4 waves, 2x3 tiles */
+        s->problem = make_problem_ex(3, 1, "fp16", 2, 16, 4, 4, 1, 1);
+        s->waves_c = 1;
+        s->waves_p = 4;
+        s->tiles_c = 2;
+        s->tiles_p = 3;
+        s->pack_groups = 8;
+        return 0;
     default:
         return -1;
     }

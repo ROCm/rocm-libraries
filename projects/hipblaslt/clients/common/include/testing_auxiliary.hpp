@@ -45,9 +45,11 @@
 #include "tensile_host.hpp"
 #include "utility.hpp"
 #endif
+#include "hipBuffer.hpp"
 #include "unit.hpp"
 #include "utility.hpp"
 #include <limits>
+#include <regex>
 
 void testing_aux_handle_init_bad_arg(const Arguments& arg)
 {
@@ -378,6 +380,7 @@ void testing_aux_mat_set_get_attr(const Arguments& arg)
     // that only some APIs accept.
     for(int32_t order : {int32_t(HIPBLASLT_ORDER_ROW),
                          int32_t(HIPBLASLT_ORDER_COL16_4R8),
+                         int32_t(HIPBLASLT_ORDER_COL256_R128_EXT),
                          int32_t(HIPBLASLT_ORDER_COL)})
     {
         EXPECT_HIPBLAS_STATUS(hipblasLtMatrixLayoutSetAttribute(
@@ -881,6 +884,20 @@ void testing_aux_matmul_set_get_attr(const Arguments& arg)
         ASSERT_TRUE(modeGot == modeSet);
     }
 
+    for(auto attr : {HIPBLASLT_MATMUL_DESC_A_SCALE_MODE, HIPBLASLT_MATMUL_DESC_B_SCALE_MODE})
+    {
+        uint32_t modeSet = HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_128_4_EXT;
+        uint32_t modeGot = 0xFFFFFFFFu;
+        EXPECT_HIPBLAS_STATUS(
+            hipblasLtMatmulDescSetAttribute(matmul, attr, &modeSet, sizeof(uint32_t)),
+            HIPBLAS_STATUS_SUCCESS);
+        EXPECT_HIPBLAS_STATUS(
+            hipblasLtMatmulDescGetAttribute(
+                matmul, attr, &modeGot, sizeof(uint32_t), &sizeWritten),
+            HIPBLAS_STATUS_SUCCESS);
+        EXPECT_EQ(modeGot, modeSet);
+    }
+
     hipStream_t stream;
     CHECK_HIP_ERROR(hipStreamCreate(&stream));
 
@@ -997,6 +1014,16 @@ void testing_aux_matmul_set_get_attr(const Arguments& arg)
         HIPBLAS_STATUS_SUCCESS);
 
     ASSERT_TRUE(pMode_r == pMode); // validate
+
+    pMode = HIPBLASLT_POINTER_MODE_ALPHA_DEVICE_SCALAR_BETA_HOST_EXT;
+    EXPECT_HIPBLAS_STATUS(hipblasLtMatmulDescSetAttribute(
+                              matmul, HIPBLASLT_MATMUL_DESC_POINTER_MODE, &pMode, sizeof(pMode)),
+                          HIPBLAS_STATUS_SUCCESS);
+    EXPECT_HIPBLAS_STATUS(
+        hipblasLtMatmulDescGetAttribute(
+            matmul, HIPBLASLT_MATMUL_DESC_POINTER_MODE, &pMode_r, sizeof(pMode_r), &sizeWritten),
+        HIPBLAS_STATUS_SUCCESS);
+    ASSERT_TRUE(pMode_r == pMode);
 
     // For HIPBLASLT_MATMUL_DESC_BIAS_DATA_TYPE Set Desc Bias Data Type
     int32_t bias_data_type   = HIP_R_16F;
@@ -2406,6 +2433,75 @@ void testing_aux_mat_copy(const Arguments& arg)
     CHECK_HIPBLASLT_ERROR(hipblasLtMatmulDescDestroy(matmul_dest));
 }
 
+inline void testing_aux_matmul_swish(const Arguments& arg)
+{
+    hipblaslt_local_handle        handle{arg};
+    hipblaslt_local_matrix_layout mat(128, 128, 128, HIP_R_32F);
+    hipblaslt_local_matmul_descr  desc(HIPBLAS_OP_N, HIPBLAS_OP_N, HIPBLAS_COMPUTE_32F, HIP_R_32F);
+    HipDeviceBuffer               buffer(HIP_R_32F, 128 * 128);
+    CHECK_HIP_ERROR(buffer.memcheck());
+    void*       data  = buffer.buf();
+    const float alpha = 1.0f, beta = 0.0f;
+
+    for(auto mode : {HIPBLASLT_EPILOGUE_SWISH_AUX_EXT, HIPBLASLT_EPILOGUE_SWISH_AUX_BIAS_EXT})
+    {
+        CHECK_HIPBLASLT_ERROR(hipblasLtMatmulDescSetAttribute(
+            desc, HIPBLASLT_MATMUL_DESC_EPILOGUE, &mode, sizeof(mode)));
+        hipblasLtEpilogue_t retrieved = HIPBLASLT_EPILOGUE_DEFAULT;
+        size_t              written   = 0;
+        CHECK_HIPBLASLT_ERROR(hipblasLtMatmulDescGetAttribute(
+            desc, HIPBLASLT_MATMUL_DESC_EPILOGUE, &retrieved, sizeof(retrieved), &written));
+        EXPECT_EQ(retrieved, mode);
+        EXPECT_EQ(written, sizeof(mode));
+        CHECK_HIPBLASLT_ERROR(hipblasLtMatmulDescSetAttribute(
+            desc, HIPBLASLT_MATMUL_DESC_BIAS_POINTER, &data, sizeof(data)));
+
+        struct AuxLayout
+        {
+            void*   pointer;
+            int64_t ld;
+            int64_t stride;
+        };
+        const AuxLayout invalid[] = {
+            {nullptr, 128, 128 * 128}, // Missing AUX pointer.
+            {data, 127, 128 * 128}, // Leading dimension below M.
+            {data, 128, 128 * 128 - 1}, // Batch stride below M * N.
+        };
+        for(auto layout : invalid)
+        {
+            CHECK_HIPBLASLT_ERROR(
+                hipblasLtMatmulDescSetAttribute(desc,
+                                                HIPBLASLT_MATMUL_DESC_EPILOGUE_AUX_POINTER,
+                                                &layout.pointer,
+                                                sizeof(layout.pointer)));
+            CHECK_HIPBLASLT_ERROR(hipblasLtMatmulDescSetAttribute(
+                desc, HIPBLASLT_MATMUL_DESC_EPILOGUE_AUX_LD, &layout.ld, sizeof(layout.ld)));
+            CHECK_HIPBLASLT_ERROR(
+                hipblasLtMatmulDescSetAttribute(desc,
+                                                HIPBLASLT_MATMUL_DESC_EPILOGUE_AUX_BATCH_STRIDE,
+                                                &layout.stride,
+                                                sizeof(layout.stride)));
+            EXPECT_HIPBLAS_STATUS(hipblasLtMatmul(handle,
+                                                  desc,
+                                                  &alpha,
+                                                  data,
+                                                  mat,
+                                                  data,
+                                                  mat,
+                                                  &beta,
+                                                  data,
+                                                  mat,
+                                                  data,
+                                                  mat,
+                                                  nullptr,
+                                                  nullptr,
+                                                  0,
+                                                  nullptr),
+                                  HIPBLAS_STATUS_INVALID_VALUE);
+        }
+    }
+}
+
 #ifdef CODE_COVERAGE
 inline void testing_aux_auxiliary_func(const Arguments& arg)
 {
@@ -2553,6 +2649,10 @@ inline void testing_aux_auxiliary_func(const Arguments& arg)
                 == HIPBLASLT_EPILOGUE_SWISH_EXT);
     ASSERT_TRUE(string_to_epilogue_type("HIPBLASLT_EPILOGUE_SWISH_BIAS_EXT")
                 == HIPBLASLT_EPILOGUE_SWISH_BIAS_EXT);
+    ASSERT_TRUE(string_to_epilogue_type("HIPBLASLT_EPILOGUE_SWISH_AUX_EXT")
+                == HIPBLASLT_EPILOGUE_SWISH_AUX_EXT);
+    ASSERT_TRUE(string_to_epilogue_type("HIPBLASLT_EPILOGUE_SWISH_AUX_BIAS_EXT")
+                == HIPBLASLT_EPILOGUE_SWISH_AUX_BIAS_EXT);
     ASSERT_TRUE(string_to_epilogue_type("HIPBLASLT_EPILOGUE_CLAMP_EXT")
                 == HIPBLASLT_EPILOGUE_CLAMP_EXT);
     ASSERT_TRUE(string_to_epilogue_type("HIPBLASLT_EPILOGUE_CLAMP_BIAS_EXT")
@@ -3301,6 +3401,11 @@ inline void testing_aux_rocblaslt_utility_func(const Arguments& arg)
                 == "EPILOGUE_SWISH_EXT");
     ASSERT_TRUE(std::string_view{rocblaslt_epilogue_to_string(ROCBLASLT_EPILOGUE_SWISH_BIAS_EXT)}
                 == "EPILOGUE_SWISH_BIAS_EXT");
+    ASSERT_TRUE(std::string_view{rocblaslt_epilogue_to_string(ROCBLASLT_EPILOGUE_SWISH_AUX_EXT)}
+                == "EPILOGUE_SWISH_AUX_EXT");
+    ASSERT_TRUE(
+        std::string_view{rocblaslt_epilogue_to_string(ROCBLASLT_EPILOGUE_SWISH_AUX_BIAS_EXT)}
+        == "EPILOGUE_SWISH_AUX_BIAS_EXT");
     ASSERT_TRUE(std::string_view{rocblaslt_epilogue_to_string(static_cast<rocblaslt_epilogue>(999))}
                 == "Invalid epilogue");
 
@@ -3661,6 +3766,12 @@ inline void testing_aux_rocblaslt_utility_func(const Arguments& arg)
     ASSERT_TRUE(is_act_enabled(ROCBLASLT_EPILOGUE_DRELU_BGRAD) == true);
     ASSERT_TRUE(is_act_enabled(ROCBLASLT_EPILOGUE_SWISH_EXT) == true);
     ASSERT_TRUE(is_act_enabled(ROCBLASLT_EPILOGUE_SWISH_BIAS_EXT) == true);
+    ASSERT_TRUE(is_act_enabled(ROCBLASLT_EPILOGUE_SWISH_AUX_EXT));
+    ASSERT_TRUE(is_act_enabled(ROCBLASLT_EPILOGUE_SWISH_AUX_BIAS_EXT));
+    ASSERT_TRUE(is_e_enabled(ROCBLASLT_EPILOGUE_SWISH_AUX_EXT));
+    ASSERT_TRUE(is_e_enabled(ROCBLASLT_EPILOGUE_SWISH_AUX_BIAS_EXT));
+    ASSERT_FALSE(is_bias_enabled(ROCBLASLT_EPILOGUE_SWISH_AUX_EXT));
+    ASSERT_TRUE(is_bias_enabled(ROCBLASLT_EPILOGUE_SWISH_AUX_BIAS_EXT));
     ASSERT_TRUE(is_act_enabled(ROCBLASLT_EPILOGUE_CLAMP_EXT) == true);
     ASSERT_TRUE(is_act_enabled(ROCBLASLT_EPILOGUE_CLAMP_BIAS_EXT) == true);
     // Test all epilogue values that should return false (activation disabled)
@@ -3714,6 +3825,8 @@ inline void testing_aux_hipblaslt_func(const Arguments& arg)
                 == HIPBLAS_STATUS_INVALID_VALUE);
     ASSERT_TRUE(RocBlasLtStatusToHIPStatus(rocblaslt_status_arch_mismatch)
                 == HIPBLAS_STATUS_ARCH_MISMATCH);
+    ASSERT_TRUE(RocBlasLtStatusToHIPStatus(rocblaslt_status_not_supported)
+                == HIPBLAS_STATUS_NOT_SUPPORTED);
 
     // Test default case - should throw HIPBLAS_STATUS_INVALID_ENUM
     bool            exception_thrown = false;
@@ -3973,34 +4086,8 @@ inline void testing_aux_rocblaslt_rocroller_host_func(const Arguments& arg)
     CHECK_HIPBLASLT_ERROR(hipblasLtMatrixLayoutCreate(&matD, arg.a_type, m, n, m));
     hipDataType a_type, b_type, c_type, d_type;
 
-    const int                        request_solutions = 1;
-    hipblasLtMatmulHeuristicResult_t heuristicResult[request_solutions];
-    int                              returnedAlgoCount  = 0;
-    size_t                           max_workspace_size = 128 * 1024 * 1024;
-    hipblasLtMatmulPreference_t      pref;
-    CHECK_HIPBLASLT_ERROR(hipblasLtMatmulPreferenceCreate(&pref));
-    CHECK_HIPBLASLT_ERROR(
-        hipblasLtMatmulPreferenceSetAttribute(pref,
-                                              HIPBLASLT_MATMUL_PREF_MAX_WORKSPACE_BYTES,
-                                              &max_workspace_size,
-                                              sizeof(max_workspace_size)));
+    size_t max_workspace_size = 128 * 1024 * 1024;
 
-    void* d_workspace;
-    if(max_workspace_size > 0)
-        CHECK_HIP_ERROR(hipMalloc(&d_workspace, max_workspace_size));
-
-    CHECK_HIPBLASLT_ERROR(hipblasLtMatmulAlgoGetHeuristic(handle,
-                                                          matmul,
-                                                          matA,
-                                                          matB,
-                                                          matC,
-                                                          matD,
-                                                          pref,
-                                                          request_solutions,
-                                                          heuristicResult,
-                                                          &returnedAlgoCount));
-
-    CHECK_SOLUTION_FOUND(returnedAlgoCount);
     rocblaslt_matmul_desc matmul_descr = (rocblaslt_matmul_desc)matmul;
     int64_t               batch_count  = 1;
     void *                A, *B, *C, *D, *E, *d_alphaVec; // device
@@ -4138,18 +4225,83 @@ inline void testing_aux_rocblaslt_rocroller_host_func(const Arguments& arg)
                                         batchMode,
                                         0}; // bias_stride
 
-    const hipblasLtMatmulAlgo_t* hip_algo = &heuristicResult[0].algo;
-    const rocblaslt_matmul_algo* roc_algo = (const rocblaslt_matmul_algo*)hip_algo;
-
     ASSERT_TRUE(runRocRollerContractionProblem(roc_handle, nullptr, problem)
                 != rocblaslt_status_success);
-    ASSERT_TRUE(runRocRollerContractionProblem(roc_handle, roc_algo, problem)
-                != rocblaslt_status_success);
+    EXPECT_EQ(isRocRollerSolutionSupported(roc_handle, problem, nullptr, &max_workspace_size),
+              rocblaslt_status_invalid_pointer);
 
-    hipblasLtMatmulAlgo_t* hip_algo2 = &heuristicResult[0].algo;
-    rocblaslt_matmul_algo* roc_algo2 = (rocblaslt_matmul_algo*)hip_algo;
-    ASSERT_TRUE(isRocRollerSolutionSupported(roc_handle, problem, roc_algo2, &max_workspace_size)
-                != rocblaslt_status_success);
+    auto algo_with_index = [](int index) {
+        rocblaslt_matmul_algo algo{};
+        memcpy(algo.data, &index, sizeof(index));
+        return algo;
+    };
+
+    // Indices without the rocRoller marker bit: Tensile indices (80950 decodes to a
+    // 32x1920x1728 tile) and the -1 "no solution" sentinel. Neither entry point may build
+    // or launch a kernel for them.
+    for(int index : {0, 80950, -1})
+    {
+        SCOPED_TRACE(index);
+        auto algo = algo_with_index(index);
+        EXPECT_EQ(runRocRollerContractionProblem(roc_handle, &algo, problem),
+                  rocblaslt_status_invalid_value);
+        EXPECT_EQ(isRocRollerSolutionSupported(roc_handle, problem, &algo, &max_workspace_size),
+                  rocblaslt_status_invalid_value);
+    }
+
+    // Clearing only the marker bit of a real rocRoller index leaves a non-negative index that
+    // decodes to the same kernel, so only the marker check can reject it. No rocRoller tile
+    // divides a 1x1x1 problem, so this needs a larger one; nothing is launched.
+    RocblasltContractionProblem tiled = problem;
+    tiled.m = tiled.n = tiled.k = 256;
+    tiled.col_stride_a = tiled.col_stride_b = tiled.col_stride_c = tiled.col_stride_d
+        = tiled.col_stride_e                                     = 256;
+
+    rocblaslt_matmul_heuristic_result rocroller_result{};
+    int                               rocroller_count = 0;
+    ASSERT_EQ(getRocRollerBestSolutions(
+                  roc_handle, tiled, 1, &rocroller_result, max_workspace_size, &rocroller_count),
+              rocblaslt_status_success);
+    EXPECT_GT(rocroller_count, 0);
+    if(rocroller_count > 0)
+    {
+        int index;
+        memcpy(&index, rocroller_result.algo.data, sizeof(index));
+        EXPECT_LT(index, 0);
+
+        size_t workspace = 0;
+        EXPECT_EQ(
+            isRocRollerSolutionSupported(roc_handle, tiled, &rocroller_result.algo, &workspace),
+            rocblaslt_status_success);
+
+        auto unmarked = algo_with_index(index & 0x7fffffff);
+        EXPECT_EQ(isRocRollerSolutionSupported(roc_handle, tiled, &unmarked, &workspace),
+                  rocblaslt_status_invalid_value);
+    }
+
+    // A device without block scaling, or one rocRoller does not know, gets no block-scaled
+    // rocRoller kernels rather than an exception.
+    RocblasltContractionProblem blockScaled = tiled;
+    blockScaled.scaleAType                  = blockScaled.scaleBType
+        = RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0;
+    for(const char* arch : {"gfx942", "gfx1100"})
+    {
+        SCOPED_TRACE(arch);
+        hipblasLtHandle_t archHandle;
+        CHECK_HIPBLASLT_ERROR(hipblasLtCreate(&archHandle));
+        auto& archName = ((rocblaslt_handle)archHandle)->properties.gcnArchName;
+        strncpy(archName, arch, sizeof(archName));
+        int count = -1;
+        EXPECT_EQ(getRocRollerBestSolutions((rocblaslt_handle)archHandle,
+                                            blockScaled,
+                                            1,
+                                            &rocroller_result,
+                                            max_workspace_size,
+                                            &count),
+                  rocblaslt_status_success);
+        EXPECT_EQ(count, 0);
+        CHECK_HIPBLASLT_ERROR(hipblasLtDestroy(archHandle));
+    }
 
     // Free GPU memory allocations
     CHECK_HIP_ERROR(hipFree(A));
@@ -4157,12 +4309,6 @@ inline void testing_aux_rocblaslt_rocroller_host_func(const Arguments& arg)
     CHECK_HIP_ERROR(hipFree(C));
     CHECK_HIP_ERROR(hipFree(D));
     CHECK_HIP_ERROR(hipFree(E));
-
-    // Free workspace
-    CHECK_HIP_ERROR(hipFree(d_workspace));
-
-    // Destroy preference object
-    CHECK_HIPBLASLT_ERROR(hipblasLtMatmulPreferenceDestroy(pref));
 
     // Destroy handles
     CHECK_HIPBLASLT_ERROR(hipblasLtMatmulDescDestroy(matmul));

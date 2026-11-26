@@ -92,6 +92,7 @@ from ..runtime.comgr import (
     build_hsaco_from_llvm_ir,
     build_hsaco_from_llvm_modules,
     loaded_compiler_info,
+    require_options_accepted,
 )
 
 # Kernel attribute (bool) a builder sets on a kernel whose code generation
@@ -108,6 +109,8 @@ class KernelArtifact:
 
     ``isa`` records the COMGR ISA name for the compiler target used to build
     ``hsaco``, including any target features. It is not a device query result.
+    ``options`` records the COMGR options it was compiled with (empty from
+    ``compile_kernel_via_hipcc``, which does not compile through COMGR).
     """
 
     kernel: KernelDef
@@ -117,6 +120,7 @@ class KernelArtifact:
     timings: Dict[str, float] = field(default_factory=dict)
     pass_stats: PassStats = field(default_factory=PassStats)
     isa: str = "amdgcn-amd-amdhsa--gfx950"
+    options: Tuple[str, ...] = ()
 
     @property
     def kernel_name(self) -> str:
@@ -178,8 +182,14 @@ def compile_kernel(
     A kernel carrying ``COMGR_FRESH_PROCESS_ATTR`` is compiled in a fresh
     process (``build_hsaco_from_llvm_ir(..., fresh_process=True)``); every
     other kernel compiles in this process.
+
+    A kernel whose COMGR options include a ``-mllvm`` option the loaded
+    compiler does not accept raises
+    :class:`~rocke.runtime.compiler_options.CompilerOptionNotAccepted` (a
+    ``ValueError``) before anything is lowered or compiled.
     """
     _lower_arch, isa = _resolve_compile_target(arch, isa)
+    options = accepted_comgr_options(kernel)
 
     timings: Dict[str, float] = {}
 
@@ -195,7 +205,7 @@ def compile_kernel(
     hsaco, comgr_t = build_hsaco_from_llvm_ir(
         llvm_text,
         isa=isa,
-        options=_comgr_options_for_kernel(kernel),
+        options=options,
         fresh_process=bool(kernel.attrs.get(COMGR_FRESH_PROCESS_ATTR)),
     )
     t3 = time.perf_counter()
@@ -216,6 +226,7 @@ def compile_kernel(
         timings=timings,
         pass_stats=pass_stats,
         isa=isa,
+        options=tuple(options),
     )
 
 
@@ -284,7 +295,8 @@ class ModuleArtifact:
     """Output from :func:`compile_module`: one code object, several kernels.
 
     ``ir_texts`` and ``llvm_texts`` follow ``module.kernels`` order. ``isa``
-    is the COMGR ISA name, as in :class:`KernelArtifact`.
+    is the COMGR ISA name and ``options`` the COMGR options the module was
+    linked and compiled with, as in :class:`KernelArtifact`.
     """
 
     module: KernelModule
@@ -294,6 +306,7 @@ class ModuleArtifact:
     timings: Dict[str, float] = field(default_factory=dict)
     pass_stats: Tuple[PassStats, ...] = ()
     isa: str = "amdgcn-amd-amdhsa--gfx950"
+    options: Tuple[str, ...] = ()
 
     @property
     def kernel_name(self) -> str:
@@ -333,8 +346,9 @@ def compile_module(
     ``ValueError`` rather than compiling one kernel under another's flags.
     A kernel carrying ``COMGR_FRESH_PROCESS_ATTR`` raises ``ValueError`` too:
     a linked module compiles in this process, which that kernel must not.
-    Target resolution and per-kernel lowering can also raise ``ValueError``,
-    as in :func:`compile_kernel`, before any link.
+    Options the loaded compiler does not accept raise as in
+    :func:`compile_kernel`. Target resolution and per-kernel lowering can also
+    raise ``ValueError``, as in :func:`compile_kernel`, before any link.
     """
     lower_arch, isa = _resolve_compile_target(arch, isa)
     kernels = module.kernels
@@ -353,6 +367,9 @@ def compile_module(
             f"KernelModule kernels need one set of COMGR codegen options to share "
             f"a code object; they imply {detail}"
         )
+    require_options_accepted(
+        options[0], needed_by=f"KernelModule kernels {[k.name for k in kernels]}"
+    )
 
     timings: Dict[str, float] = {}
     t0 = time.perf_counter()
@@ -389,6 +406,7 @@ def compile_module(
         timings=timings,
         pass_stats=pass_stats,
         isa=isa,
+        options=tuple(options[0]),
     )
 
 
@@ -457,11 +475,13 @@ def lower_kernel_for_comgr(
     Resolves the target the same way and lowers through the same backend, so
     ``build_hsaco_from_llvm_ir(c.llvm_text, isa=c.isa, options=list(c.options),
     fresh_process=c.fresh_process)`` produces the binary
-    ``compile_kernel(kernel, arch=arch)`` would. The ISA name is chosen for the
+    ``compile_kernel(kernel, arch=arch)`` would, and it refuses the same
+    compiler options ``compile_kernel`` refuses. The ISA name is chosen for the
     compiler COMGR loads in this process; where COMGR cannot be loaded, the
     processor keeps its name.
     """
     lower_arch, isa = _resolve_compile_target(arch, isa)
+    options = accepted_comgr_options(kernel)
     llvm_text = _lower_llvm_via_backend(
         kernel, arch=lower_arch, backend=backend, spec=None
     )
@@ -469,7 +489,7 @@ def lower_kernel_for_comgr(
         kernel_name=kernel.name,
         llvm_text=llvm_text,
         isa=isa,
-        options=tuple(_comgr_options_for_kernel(kernel)),
+        options=tuple(options),
         fresh_process=bool(kernel.attrs.get(COMGR_FRESH_PROCESS_ATTR)),
     )
 
@@ -529,12 +549,37 @@ def _lower_llvm_via_backend(
 
 
 def _comgr_options_for_kernel(kernel: KernelDef) -> List[str]:
-    """Return AMDGPU codegen options implied by kernel attrs."""
+    """Return AMDGPU codegen options implied by kernel attrs.
+
+    ``-amdgpu-mfma-vgpr-form`` makes the backend select the VGPR form of every
+    MFMA. A kernel asks for it directly (``mfma_vgpr_form``) or by allowing
+    zero AGPRs, which the backend can only honour with every MFMA in VGPR
+    form: without the option a compiler may use AGPRs anyway or fail to
+    allocate registers. The option is therefore part of the kernel, not a hint.
+    """
 
     options = ["-O3"]
     agpr_alloc = kernel.attrs.get("agpr_alloc")
     if kernel.attrs.get("mfma_vgpr_form") or _is_zero_agpr_alloc(agpr_alloc):
         options.extend(["-mllvm", "-amdgpu-mfma-vgpr-form"])
+    return options
+
+
+def accepted_comgr_options(kernel: KernelDef) -> list[str]:
+    """The COMGR options ``kernel`` compiles with, checked against the loaded
+    compiler.
+
+    These are the options :func:`compile_kernel` and
+    :func:`lower_kernel_for_comgr` pass to COMGR. Raises
+    :class:`~rocke.runtime.compiler_options.CompilerOptionNotAccepted` (a
+    ``ValueError``) when the loaded compiler does not accept one of them,
+    ``ValueError`` when the table has no answer for one, and
+    :class:`~rocke.runtime.comgr.ComgrError` when a ``-mllvm`` option is needed
+    and no queryable COMGR loads (see
+    :func:`~rocke.runtime.comgr.require_options_accepted`).
+    """
+    options = _comgr_options_for_kernel(kernel)
+    require_options_accepted(options, needed_by=f"kernel '{kernel.name}'")
     return options
 
 

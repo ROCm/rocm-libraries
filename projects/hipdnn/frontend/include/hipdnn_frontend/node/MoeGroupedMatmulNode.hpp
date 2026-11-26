@@ -144,6 +144,13 @@ public:
                 attributes.get_token_ks()->get_dim()[1],
                 ErrorCode::INVALID_VALUE,
                 "MoE token-index and token-ks tensors must have the same routed-token count");
+            HIPDNN_RETURN_IF_NE(attributes.get_token_index()->get_dim()[1],
+                                token->get_dim()[1],
+                                ErrorCode::INVALID_VALUE,
+                                "MoE SCATTER routed-token count ("
+                                    + std::to_string(attributes.get_token_index()->get_dim()[1])
+                                    + ") must equal the token tensor row count ("
+                                    + std::to_string(token->get_dim()[1]) + ")");
             HIPDNN_RETURN_IF_TRUE(attributes.get_top_k() <= 0,
                                   ErrorCode::INVALID_VALUE,
                                   "MoE SCATTER mode requires top_k to be positive");

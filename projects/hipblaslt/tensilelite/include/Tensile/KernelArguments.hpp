@@ -29,7 +29,9 @@
 #include <cstring>
 #include <sstream>
 #include <string>
+#include <string_view>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 #include <Tensile/DataTypes.hpp>
@@ -139,26 +141,26 @@ namespace TensileLite
 
         void reserve(size_t bytes, size_t count);
 
-        void append(std::string const& name, ConstantVariant const& value, rocisa::DataType type);
+        void append(std::string_view name, ConstantVariant const& value, rocisa::DataType type);
 
-        void append(std::string const& name, float const value, rocisa::DataType type);
-
-        template <typename T>
-        void append(std::string const& name, T value);
+        void append(std::string_view name, float const value, rocisa::DataType type);
 
         template <typename T>
-        void appendAligned(std::string const& name, T value);
+        void append(std::string_view name, T value);
+
+        template <typename T>
+        void appendAligned(std::string_view name, T value);
 
         void appendPadding(size_t bytes);
 
         template <typename T>
-        void appendUnbound(std::string const& name);
+        void appendUnbound(std::string_view name);
 
         template <typename T>
-        void appendCustomType(std::string const& name, T value, CustomArgType type);
+        void appendCustomType(std::string_view name, T value, CustomArgType type);
 
         template <typename T>
-        void bind(std::string const& name, T value);
+        void bind(std::string_view name, T value);
 
         bool isFullyBound() const;
 
@@ -181,7 +183,7 @@ namespace TensileLite
             using reference         = const ArgPair&;
 
             const_iterator(KernelArguments const& args);
-            const_iterator(KernelArguments const& args, std::string const& name);
+            const_iterator(KernelArguments const& args, std::string_view name);
             const_iterator(const const_iterator& other) = default;
             const_iterator& operator++();
             const_iterator  operator++(int);
@@ -222,12 +224,12 @@ namespace TensileLite
         void alignTo(size_t alignment);
 
         template <typename T>
-        void append(std::string const& name, T value, bool bound);
+        void append(std::string_view name, T value, bool bound);
 
         template <typename T>
         std::string stringForValue(T value, bool bound);
 
-        void appendRecord(std::string const& name, Arg info);
+        void appendRecord(std::string_view name, Arg info);
 
         template <typename T>
         void writeValue(size_t offset, T value);
@@ -244,7 +246,7 @@ namespace TensileLite
     TENSILELITEHOST_EXPORT KernelArguments::const_iterator begin(KernelArguments const&);
     TENSILELITEHOST_EXPORT KernelArguments::const_iterator end(KernelArguments const&);
 
-    inline void KernelArguments::append(std::string const&     name,
+    inline void KernelArguments::append(std::string_view       name,
                                         ConstantVariant const& value,
                                         rocisa::DataType       type)
     {
@@ -434,7 +436,7 @@ namespace TensileLite
     }
 
     inline void
-        KernelArguments::append(std::string const& name, float const value, rocisa::DataType type)
+        KernelArguments::append(std::string_view name, float const value, rocisa::DataType type)
     {
         if(name == "alpha" || name == "beta")
         {
@@ -481,19 +483,19 @@ namespace TensileLite
     }
 
     template <typename T>
-    inline void KernelArguments::append(std::string const& name, T value)
+    inline void KernelArguments::append(std::string_view name, T value)
     {
         append(name, value, true);
     }
 
     template <typename T>
-    inline void KernelArguments::appendUnbound(std::string const& name)
+    inline void KernelArguments::appendUnbound(std::string_view name)
     {
         append(name, static_cast<T>(0), false);
     }
 
     template <typename T>
-    inline void KernelArguments::appendCustomType(std::string const& name, T value, CustomArgType type)
+    inline void KernelArguments::appendCustomType(std::string_view name, T value, CustomArgType type)
     {
         switch(type)
         {
@@ -544,28 +546,28 @@ namespace TensileLite
     }
 
     template <>
-    inline void KernelArguments::appendCustomType<std::complex<float>>(std::string const& name, std::complex<float> value, CustomArgType type)
+    inline void KernelArguments::appendCustomType<std::complex<float>>(std::string_view name, std::complex<float> value, CustomArgType type)
     {
         // Use real part if user requests cast from complex
         appendCustomType(name, value.real(), type);
     }
 
     template <>
-    inline void KernelArguments::appendCustomType<std::complex<double>>(std::string const& name, std::complex<double> value, CustomArgType type)
+    inline void KernelArguments::appendCustomType<std::complex<double>>(std::string_view name, std::complex<double> value, CustomArgType type)
     {
         // Use real part if user requests cast from complex
         appendCustomType(name, value.real(), type);
     }
 
     template <>
-    inline void KernelArguments::appendCustomType<Int8x4>(std::string const& name, Int8x4 value, CustomArgType type)
+    inline void KernelArguments::appendCustomType<Int8x4>(std::string_view name, Int8x4 value, CustomArgType type)
     {
         // Use first value for conversion for now
         appendCustomType(name, value.a, type);
     }
 
     template <>
-    inline void KernelArguments::appendCustomType<BFloat16>(std::string const& name, BFloat16 value, CustomArgType type)
+    inline void KernelArguments::appendCustomType<BFloat16>(std::string_view name, BFloat16 value, CustomArgType type)
     {
         // Convert to float first to facilitate other conversions
         appendCustomType(name, static_cast<float>(value), type);
@@ -573,19 +575,19 @@ namespace TensileLite
 
 #ifndef _WIN32
     template <>
-    inline void KernelArguments::appendCustomType<Float6x32>(std::string const& name, Float6x32 value, CustomArgType type)
+    inline void KernelArguments::appendCustomType<Float6x32>(std::string_view name, Float6x32 value, CustomArgType type)
     {
         // Use first packed element for scalar custom argument conversion.
         appendCustomType(name, value.getElement(0), type);
     }
     template <>
-    inline void KernelArguments::appendCustomType<BFloat6x32>(std::string const& name, BFloat6x32 value, CustomArgType type)
+    inline void KernelArguments::appendCustomType<BFloat6x32>(std::string_view name, BFloat6x32 value, CustomArgType type)
     {
         // Use first packed element for scalar custom argument conversion.
         appendCustomType(name, value.getElement(0), type);
     }
     template <>
-    inline void KernelArguments::appendCustomType<Float4x2>(std::string const& name, Float4x2 value, CustomArgType type)
+    inline void KernelArguments::appendCustomType<Float4x2>(std::string_view name, Float4x2 value, CustomArgType type)
     {
         // Use first packed element for scalar custom argument conversion.
         appendCustomType(name, value.getElement(0), type);
@@ -593,14 +595,14 @@ namespace TensileLite
 #endif // !_WIN32
 
     template <>
-    inline void KernelArguments::appendCustomType<E8>(std::string const& name, E8 value, CustomArgType type)
+    inline void KernelArguments::appendCustomType<E8>(std::string_view name, E8 value, CustomArgType type)
     {
         // E8 is a scale exponent; convert through float for downstream casts.
         appendCustomType(name, static_cast<float>(value), type);
     }
 
     template <>
-    inline void KernelArguments::appendCustomType<ConstantVariant>(std::string const& name, ConstantVariant value, CustomArgType type)
+    inline void KernelArguments::appendCustomType<ConstantVariant>(std::string_view name, ConstantVariant value, CustomArgType type)
     {
         // Read variant with type used to set it, and call template function to convert to target type
         auto visitor = [this, &name, &type](auto&& arg) {
@@ -612,36 +614,37 @@ namespace TensileLite
     
 
     template <typename T>
-    inline void KernelArguments::bind(std::string const& name, T value)
+    inline void KernelArguments::bind(std::string_view name, T value)
     {
         if(!m_log)
         {
             throw std::runtime_error("Binding is not supported without logging.");
         }
 
-        auto it = m_argRecords.find(name);
+        std::string const key(name);
+        auto              it = m_argRecords.find(key);
         if(it == m_argRecords.end())
         {
-            throw std::runtime_error("Attempt to bind unknown argument " + name);
+            throw std::runtime_error("Attempt to bind unknown argument " + key);
         }
 
         auto& record = it->second;
 
         if(std::get<ArgBound>(record))
         {
-            throw std::runtime_error("Attempt to bind already bound argument " + name);
+            throw std::runtime_error("Attempt to bind already bound argument " + key);
         }
 
         if(sizeof(T) != std::get<ArgSize>(record))
         {
-            throw std::runtime_error("Size mismatch in binding argument " + name);
+            throw std::runtime_error("Size mismatch in binding argument " + key);
         }
 
         size_t offset = std::get<ArgOffset>(record);
 
         if(offset % alignof(T) != 0)
         {
-            throw std::runtime_error("Alignment error in argument " + name + ": type mismatch?");
+            throw std::runtime_error("Alignment error in argument " + key + ": type mismatch?");
         }
 
         writeValue(offset, value);
@@ -667,7 +670,7 @@ namespace TensileLite
     }
 
     template <typename T>
-    void KernelArguments::appendAligned(std::string const& name, T value)
+    void KernelArguments::appendAligned(std::string_view name, T value)
     {
         alignTo(alignof(T));
         append(name, value, true);
@@ -679,7 +682,7 @@ namespace TensileLite
     }
 
     template <typename T>
-    inline void KernelArguments::append(std::string const& name, T value, bool bound)
+    inline void KernelArguments::append(std::string_view name, T value, bool bound)
     {
         size_t offset = m_data.size();
         size_t size   = sizeof(T);
@@ -687,7 +690,7 @@ namespace TensileLite
         if(m_log)
         {
             std::string valueString = stringForValue(value, bound);
-            appendRecord(name, Arg(offset, size, bound, valueString));
+            appendRecord(name, Arg(offset, size, bound, std::move(valueString)));
         }
 
         m_data.insert(m_data.end(), sizeof(value), 0);
@@ -713,20 +716,21 @@ namespace TensileLite
         m_data.insert(m_data.end(), padding, 0);
     }
 
-    inline void KernelArguments::appendRecord(std::string const& name, KernelArguments::Arg record)
+    inline void KernelArguments::appendRecord(std::string_view name, KernelArguments::Arg record)
     {
-        auto it = m_argRecords.find(name);
+        std::string key(name);
+        auto        it = m_argRecords.find(key);
         if(it != m_argRecords.end())
         {
-            std::string name2   = name + "_" + std::to_string(m_argNameCounter[name]);
-            m_argRecords[name2] = record;
-            m_names.push_back(name2);
-            m_argNameCounter[name]++;
+            std::string name2   = key + "_" + std::to_string(m_argNameCounter[key]);
+            m_argRecords[name2] = std::move(record);
+            m_names.push_back(std::move(name2));
+            m_argNameCounter[key]++;
             return;
         }
-        m_argNameCounter[name] = 1;
-        m_argRecords[name]     = record;
-        m_names.push_back(name);
+        m_argNameCounter[key] = 1;
+        m_argRecords[key]     = std::move(record);
+        m_names.push_back(std::move(key));
     }
 
     template <typename T>
@@ -749,7 +753,7 @@ namespace TensileLite
         void reserve(size_t bytes, size_t count) {}
 
         inline void
-            append(std::string const& name, ConstantVariant const& value, rocisa::DataType type)
+            append(std::string_view name, ConstantVariant const& value, rocisa::DataType type)
         {
             if(name == "alpha" || name == "beta")
             {
@@ -818,7 +822,7 @@ namespace TensileLite
             }
         }
 
-        inline void append(std::string const& name, float const value, rocisa::DataType type)
+        inline void append(std::string_view name, float const value, rocisa::DataType type)
         {
             if(name == "alpha" || name == "beta")
             {
@@ -861,7 +865,7 @@ namespace TensileLite
         }
 
         template <typename T>
-        inline void append(std::string const& name, T value)
+        inline void append(std::string_view name, T value)
         {
             counter += sizeof(value);
         }
@@ -874,14 +878,14 @@ namespace TensileLite
         }
 
         template <typename T>
-        inline void appendAligned(std::string const& name, T value)
+        inline void appendAligned(std::string_view name, T value)
         {
             alignTo(alignof(T));
             append(name, value);
         }
 
         template <typename T>
-        inline void appendUnbound(std::string const& name)
+        inline void appendUnbound(std::string_view name)
         {
             append(name, static_cast<T>(0));
         }

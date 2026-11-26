@@ -45,11 +45,11 @@ namespace hip_rocprim
 {
 
 template <int PAR>
-struct has_par : thrust::detail::true_type
+struct has_par : _THRUST_STD::true_type
 {};
 
 template <>
-struct has_par<0> : thrust::detail::false_type
+struct has_par<0> : _THRUST_STD::false_type
 {};
 
 template <class Policy>

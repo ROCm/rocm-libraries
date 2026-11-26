@@ -10,6 +10,7 @@
 
 #include "definitions.h"
 #include "handle.h"
+#include "mx_scale_format.hpp"
 #include "rocblaslt.h"
 #include "rocblaslt_mat_utils.hpp"
 #include "tensile_host.hpp"
@@ -144,20 +145,17 @@ namespace
         return mxBlockSize(desc->scaleAType);
     }
 
-    // Whether a kernel's in-device scale layout (Tensile MXScaleFormat) is the one the
-    // caller's scale mode provides: pre-swizzled for the _EXT mode, unswizzled otherwise.
+    // Whether a kernel's in-device scale layout (Tensile MXScaleFormat) is one the
+    // caller's scale modes provide.
     bool scaleFormatMatches(rocblaslt_handle             handle,
                             rocblaslt_matmul_desc        desc,
                             const rocblaslt_matmul_algo& algo)
     {
-        if(!isMX(desc))
+        const auto need = rocblaslt_mx_scale_need_for(desc->scaleAType, desc->scaleBType);
+        if(need == rocblaslt_mx_scale_need::Any)
             return true;
-        constexpr int kHostPreSwizzle = 1;
-        int           format          = getMXScaleFormatFromAlgoIndex(handle, algo);
-        if(format < 0)
-            return false;
-        return (desc->scaleAType == ScalingFormat::Block_32_UE8M0_32_8_EXT)
-               == (format == kHostPreSwizzle);
+        const int format = getMXScaleFormatFromAlgoIndex(handle, algo);
+        return format >= 0 && rocblaslt_mx_scale_layout_ok(need, format);
     }
 
     size_t recordBytes(int groupCount, bool mx)
@@ -255,6 +253,14 @@ namespace
             log_error(__func__, "grouped GEMM does not support epilogues or scaling other than MX");
             return rocblaslt_status_invalid_value;
         }
+#if HIPBLASLT_HAS_GEMM_A2A_FUSION
+        RocblasltFusedEpilogueInfo fusedInfo;
+        if(rocblaslt_resolve_fused_a2a(*desc, fusedInfo) || fusedInfo.misattached)
+        {
+            log_error(__func__, "grouped GEMM does not support a fused all-to-all");
+            return rocblaslt_status_invalid_value;
+        }
+#endif
         if(mx && kIsUniform(desc, matA) && uniformK(desc, matA) % mxBlock(desc) != 0)
         {
             log_error(__func__, "MX grouped GEMM needs K to be a multiple of the scale block size");
@@ -749,8 +755,7 @@ rocblaslt_status
         if(status != rocblaslt_status_success)
             return status;
 
-        // Ask for extra candidates: some may not fit the bound problems, and with MX some
-        // expect the other scale layout.
+        // Ask for extra candidates: some may not fit the bound problems.
         const int candidateCount = isMX(desc) ? std::max(4 * requestedAlgoCount, 32)
                                               : std::max(requestedAlgoCount, 8);
         std::vector<rocblaslt_matmul_heuristic_result> candidates;
@@ -781,8 +786,6 @@ rocblaslt_status
             if(*returnAlgoCount >= requestedAlgoCount)
                 break;
             size_t ws = 0;
-            if(!scaleFormatMatches(handle, desc, candidate.algo))
-                continue;
             if(rocblaslt_is_algo_supported_cpp(handle,
                                                rocblaslt::RocGemmType::ROCBLASLT_GROUPED_GEMM,
                                                boundData,
@@ -991,27 +994,28 @@ rocblaslt_status rocblaslt_grouped_matmul(rocblaslt_handle             handle,
             args.betaPtr   = beta;
         }
 
-        unsigned block = 256;
-        unsigned grid  = (static_cast<unsigned>(groups) + block - 1) / block;
-        if(mx)
-            hipLaunchKernelGGL(packGroupedRecords<GroupedRecordMX>,
-                               dim3(grid),
-                               dim3(block),
-                               0,
-                               stream,
-                               mxTemplate(launch->templ),
-                               args,
-                               static_cast<GroupedRecordMX*>(workspace));
-        else
-            hipLaunchKernelGGL(packGroupedRecords<GroupedRecord>,
-                               dim3(grid),
-                               dim3(block),
-                               0,
-                               stream,
-                               launch->templ,
-                               args,
-                               static_cast<GroupedRecord*>(workspace));
-        if(hipGetLastError() != hipSuccess)
+        // The launch's own status: hipGetLastError would also return an error the
+        // caller left pending, and fail a matmul that ran.
+        unsigned         block = 256;
+        unsigned         grid  = (static_cast<unsigned>(groups) + block - 1) / block;
+        const hipError_t packed
+            = mx ? rocblaslt_launch_kernel(&packGroupedRecords<GroupedRecordMX>,
+                                           dim3(grid),
+                                           dim3(block),
+                                           0,
+                                           stream,
+                                           mxTemplate(launch->templ),
+                                           args,
+                                           static_cast<GroupedRecordMX*>(workspace))
+                 : rocblaslt_launch_kernel(&packGroupedRecords<GroupedRecord>,
+                                           dim3(grid),
+                                           dim3(block),
+                                           0,
+                                           stream,
+                                           launch->templ,
+                                           args,
+                                           static_cast<GroupedRecord*>(workspace));
+        if(packed != hipSuccess)
         {
             log_error(__func__, "failed to launch the grouped record pack kernel");
             return rocblaslt_status_internal_error;

@@ -106,15 +106,29 @@ def _emitGRLDSBufferSwap(tag, tile, ti, writer, kernel):
   raise NotImplementedError(f"emitGRLDSBufferSwap not implemented for {type(tag).__name__}")
 
 @singledispatch
-def _emitGRPtrUpdate(tag, tile, ti, writer, kernel, holdOnLastIter=False):
+def _emitGRPtrUpdate(tag, tile, ti, writer, kernel, holdOnLastIter=False,
+                     tightenLimit=False):
   raise NotImplementedError(f"emitGRPtrUpdate not implemented for {type(tag).__name__}")
 
 # Stubs for tags not yet implemented.
 _stub = lambda *args, **kwargs: None
 
 
-def emitSrdAdvance(module, tc, inc, writer, kernel=None, holdOnLastIter=False):
+def emitSrdAdvance(module, tc, inc, writer, kernel=None, holdOnLastIter=False,
+                   tightenLimit=False):
   """Advance Srd{tc}'s base pointer by inc bytes.
+
+  tightenLimit shrinks Srd+2 by the same inc. Srd+2 is a byte count measured from
+  the base, so an advance that leaves it alone moves the end of the window forward
+  with the base. That is deliberate in the main loop, where Srd+2 is a generous
+  tile-boundary limit and every K-block inside it is valid. The tail loop is the
+  exception: computeTailLoopSrdLimit has just tightened Srd+2 so the window ends at
+  K_rem, and a multi-unroll tail advances the base between its uids. Without the
+  matching shrink the second uid's window ends inc bytes past the data, its
+  out-of-range lanes read live memory instead of clamping to zero, and an FP8 NaN
+  encoding there survives the scale mask (a masked scale is 0x00 = 2^-127, not
+  zero). The result is a NaN whose appearance depends on what the allocator left
+  behind.
 
   holdOnLastIter suppresses the advance when the K-block that the PGR=2 pre-loop's
   second prefetch cluster would read does not exist at all. It is set only for the
@@ -140,6 +154,7 @@ def emitSrdAdvance(module, tc, inc, writer, kernel=None, holdOnLastIter=False):
                        comment=f"{tc}: advance SRD by {inc} bytes"))
     module.add(SAddCU32(dst=sgpr(f"Srd{tc}+1"), src0=sgpr(f"Srd{tc}+1"), src1=0,
                         comment=f"{tc}: carry"))
+    _emitSrdLimitShrink(module, tc, inc, tightenLimit)
     return
 
   depthU = kernel["DepthU"]
@@ -159,7 +174,21 @@ def emitSrdAdvance(module, tc, inc, writer, kernel=None, holdOnLastIter=False):
                      comment=f"{tc}: advance SRD by {inc} bytes"))
   module.add(SAddCU32(dst=sgpr(f"Srd{tc}+1"), src0=sgpr(f"Srd{tc}+1"), src1=0,
                       comment=f"{tc}: carry"))
+  _emitSrdLimitShrink(module, tc, inc, tightenLimit)
   writer.sgprPool.checkIn(tmp)
+
+
+def _emitSrdLimitShrink(module, tc, inc, tightenLimit):
+  """Hold Srd+2's end fixed across a base advance of inc bytes."""
+  if not tightenLimit:
+    return
+  limit = sgpr(f"Srd{tc}+2")
+  module.add(SSubU32(dst=limit, src0=limit, src1=inc,
+                     comment=f"{tc}: keep the tail-tight limit's end fixed across the advance"))
+  module.add(SCSelectB32(dst=limit, src0=0, src1=limit,
+                         comment=f"{tc}: clamp to 0 when this unroll holds no valid K"))
+
+
 _emitGlobalReadOffset.register(GRTag_TLU1)(_stub)
 _emitGlobalRead.register(GRTag_TLU1)(_stub)
 for _tag in (GRTag_1x1, GRTag_1x2, GRTag_2x2, GRTag_TLU1):
@@ -371,7 +400,8 @@ def _emitGRLDSSwap_TLU0(tag, tile, ti, writer, kernel):
 @_emitGRPtrUpdate.register(GRTag_1x1)
 @_emitGRPtrUpdate.register(GRTag_1x2)
 @_emitGRPtrUpdate.register(GRTag_2x2)
-def _emitGRPtrUpdate_TLU0(tag, tile, ti, writer, kernel, holdOnLastIter=False):
+def _emitGRPtrUpdate_TLU0(tag, tile, ti, writer, kernel, holdOnLastIter=False,
+                          tightenLimit=False):
   """Advance SRD base pointer by one depthU iteration (depthU * bpe bytes)."""
   tc = ti.tc
   # TDM path: advance Address{tc} and sync the TDM descriptor instead of SRD.
@@ -390,12 +420,13 @@ def _emitGRPtrUpdate_TLU0(tag, tile, ti, writer, kernel, holdOnLastIter=False):
   # tile, so advancing one DepthU consumes 16 contiguous row fragments.
   rowMultiplier = ti.mmaTileShape[0] if ti.isPreShuffled else 1
   inc = int(ti.depthUBytes * rowMultiplier)
-  emitSrdAdvance(module, tc, inc, writer, kernel, holdOnLastIter)
+  emitSrdAdvance(module, tc, inc, writer, kernel, holdOnLastIter, tightenLimit)
   return module
 
 
 @_emitGRPtrUpdate.register(GRTag_TLU1)
-def _emitGRPtrUpdate_TLU1(tag, tile, ti, writer, kernel, holdOnLastIter=False):
+def _emitGRPtrUpdate_TLU1(tag, tile, ti, writer, kernel, holdOnLastIter=False,
+                          tightenLimit=False):
   """Advance the SRD base pointer by one DepthU K-window.
 
   holdOnLastIter is accepted so this shares the dispatcher's signature, but it is
@@ -409,22 +440,36 @@ def _emitGRPtrUpdate_TLU1(tag, tile, ti, writer, kernel, holdOnLastIter=False):
   DepthU * bpe * strideK bytes.  depthUBytes is already DepthU * bpe, so it only
   needs scaling by the runtime K stride.  When K is itself unit-stride the window
   is the plain TLU=0 advance, which that case and the TDM path both defer to.
+
+  The window lands in the persistent GlobalReadIncs{tc} rather than a pool temp.
+  PostLoopStoreInNll weaves the fused store's coordinate VALU into this block's
+  MFMA gaps (LogicalScheduler._emitNGLL), and that splice happens AFTER both
+  streams are generated -- so a temp whose allocTmpSgpr scope has already closed
+  gets handed out again to the coord stream and the two live ranges overlap. A
+  pinned register cannot be re-handed. The pin is guaranteed here: this branch
+  writes Srd{tc}, so BufferLoad is on (globalReadIncsUseVgpr False), and TLU=1
+  keeps useConstSgprGlobalReadIncs off, so numSgprGlobalReadIncs{tc} >= 1 and
+  removeGROffsetsVariableSgprsFromPool holds it out of the pool for the whole
+  loop. The value is also exactly what GlobalReadIncs{tc} is defined to hold.
   """
   tc = ti.tc
   strideK = writer.strideRef(tc, kernel["ProblemType"]["IndexUnroll"])
   if kernel.get("enableTDM%s" % tc, False) or writer.isConstUnitStride(strideK):
-    return _emitGRPtrUpdate_TLU0(tag, tile, ti, writer, kernel)
+    return _emitGRPtrUpdate_TLU0(tag, tile, ti, writer, kernel,
+                                 tightenLimit=tightenLimit)
 
   module = Module(f"GR Ptr Update ({tc})")
   inc = int(ti.depthUBytes)
-  with writer.allocTmpSgpr(1) as tmpSgprRes:
-    incSgpr = tmpSgprRes.idx
-    module.add(SMulI32(dst=sgpr(incSgpr), src0=inc, src1=strideK,
-               comment=f"{tc}: DepthU*bpe({inc}) * strideK (NT K-window bytes)"))
-    module.add(SAddU32(dst=sgpr(f"Srd{tc}"), src0=sgpr(f"Srd{tc}"), src1=sgpr(incSgpr),
-               comment=f"{tc}: advance SRD by DepthU K-window"))
-    module.add(SAddCU32(dst=sgpr(f"Srd{tc}+1"), src0=sgpr(f"Srd{tc}+1"), src1=0,
-               comment=f"{tc}: carry"))
+  incSgpr = writer.globalReadIncsOperand(tc, writer.states.unrollIdx)
+  assert not isinstance(incSgpr, str), \
+    f"GR Ptr Update ({tc}): TLU=1 must hold its K-window in a GlobalReadIncs SGPR"
+  module.add(SMulI32(dst=incSgpr, src0=inc, src1=strideK,
+             comment=f"{tc}: DepthU*bpe({inc}) * strideK (NT K-window bytes)"))
+  module.add(SAddU32(dst=sgpr(f"Srd{tc}"), src0=sgpr(f"Srd{tc}"), src1=incSgpr,
+             comment=f"{tc}: advance SRD by DepthU K-window"))
+  module.add(SAddCU32(dst=sgpr(f"Srd{tc}+1"), src0=sgpr(f"Srd{tc}+1"), src1=0,
+             comment=f"{tc}: carry"))
+  _emitSrdLimitShrink(module, tc, incSgpr, tightenLimit)
   return module
 
 
@@ -504,17 +549,22 @@ def _grComputeRowPartition(module, kernel, writer, tileInfo, waveId, rowOffset):
   partitionOffset = tileInfo.mmaTileShape[0]*tileInfo.localSubtileGrid[0]
   module.add(SMovB32(dst=sgpr(tmpSgpr), src=partitionOffset, comment="%s: row offset"%tc))
 
-  if tileInfo.loadRatioGR == 1.0:
-    module.add(VAndB32(dst=vgpr(localRow), src0=hex(1), src1=vgpr(waveId), comment="%s: waveId %% 2"%tc))
-    module.add(VLShiftRightB32(dst=vgpr(partitionRow), shiftHex=hex(1), src=vgpr(waveId), comment="%s: waveId / 2"%tc))
-  elif tileInfo.loadRatioGR == 0.5:
-    module.add(VMovB32(dst=vgpr(localRow), src=0, comment="%s"%tc))
-    module.add(VMovB32(dst=vgpr(partitionRow), src=vgpr(waveId), comment="%s"%tc))
-  elif tileInfo.loadRatioGR == 2.0:
-    module.add(VMovB32(dst=vgpr(localRow), src=vgpr(waveId), comment="%s"%tc))
-    module.add(VMovB32(dst=vgpr(partitionRow), src=0, comment="%s"%tc))
-  else:
+  wavesPerPartition = int(2 * tileInfo.loadRatioGR)
+  if tileInfo.loadRatioGR not in (0.5, 1.0, 2.0):
     raise NotImplementedError("Unsupported loadRatioGR for wave partition: %s"%str(tileInfo.loadRatioGR))
+  # loadRatioGR determines how many waves cooperate inside one free-dimension
+  # partition: 0.5 -> 1, 1.0 -> 2, 2.0 -> 4.  Express the old three special
+  # cases as a single quotient/remainder mapping so eight-wave asymmetric
+  # groups do not send the upper waves past the end of LDS.
+  if wavesPerPartition == 1:
+    module.add(VMovB32(dst=vgpr(localRow), src=0, comment="%s: one wave per partition"%tc))
+    module.add(VMovB32(dst=vgpr(partitionRow), src=vgpr(waveId), comment="%s: partition = waveId"%tc))
+  else:
+    shift = wavesPerPartition.bit_length() - 1
+    module.add(VAndB32(dst=vgpr(localRow), src0=hex(wavesPerPartition - 1), src1=vgpr(waveId),
+                      comment="%s: waveId %% %u"%(tc, wavesPerPartition)))
+    module.add(VLShiftRightB32(dst=vgpr(partitionRow), shiftHex=hex(shift), src=vgpr(waveId),
+                              comment="%s: waveId / %u"%(tc, wavesPerPartition)))
 
   module.add(VLShiftLeftB32(dst=vgpr(localRow), shiftHex=hex(numRowsPerWave.bit_length()-1), src=vgpr(localRow), comment="%s: local row offset"%tc))
   module.add(VMulLOU32(dst=vgpr(partitionRow), src0=sgpr(tmpSgpr), src1=vgpr(partitionRow), comment="%s: wave row offset"%tc))
@@ -648,17 +698,18 @@ def _grComputeRowPartition_legacy(module, kernel, writer, tileInfo, waveId, rowO
   partitionRow = tmpVgpr+1
   partitionOffset = tileInfo.mmaTileShape[0]*tileInfo.localSubtileGrid[0]
   module.add(SMovB32(dst=sgpr(tmpSgpr), src=partitionOffset, comment="%s: row offset"%tc))
-  if tileInfo.loadRatioGR == 1.0:
-    module.add(VAndB32(dst=vgpr(localRow), src0=hex(1), src1=vgpr(waveId), comment="%s: waveId %% 2"%tc))
-    module.add(VLShiftRightB32(dst=vgpr(partitionRow), shiftHex=hex(1), src=vgpr(waveId), comment="%s: waveId / 2"%tc))
-  elif tileInfo.loadRatioGR == 0.5:
-    module.add(VMovB32(dst=vgpr(localRow), src=0, comment="%s"%tc))
-    module.add(VMovB32(dst=vgpr(partitionRow), src=vgpr(waveId), comment="%s"%tc))
-  elif tileInfo.loadRatioGR == 2.0:
-    module.add(VMovB32(dst=vgpr(localRow), src=vgpr(waveId), comment="%s"%tc))
-    module.add(VMovB32(dst=vgpr(partitionRow), src=0, comment="%s"%tc))
-  else:
+  wavesPerPartition = int(2 * tileInfo.loadRatioGR)
+  if tileInfo.loadRatioGR not in (0.5, 1.0, 2.0):
     raise NotImplementedError("Unsupported loadRatioGR for wave partition: %s"%str(tileInfo.loadRatioGR))
+  if wavesPerPartition == 1:
+    module.add(VMovB32(dst=vgpr(localRow), src=0, comment="%s: one wave per partition"%tc))
+    module.add(VMovB32(dst=vgpr(partitionRow), src=vgpr(waveId), comment="%s: partition = waveId"%tc))
+  else:
+    shift = wavesPerPartition.bit_length() - 1
+    module.add(VAndB32(dst=vgpr(localRow), src0=hex(wavesPerPartition - 1), src1=vgpr(waveId),
+                      comment="%s: waveId %% %u"%(tc, wavesPerPartition)))
+    module.add(VLShiftRightB32(dst=vgpr(partitionRow), shiftHex=hex(shift), src=vgpr(waveId),
+                              comment="%s: waveId / %u"%(tc, wavesPerPartition)))
   module.add(VLShiftLeftB32(dst=vgpr(localRow), shiftHex=hex(numRowsPerWave.bit_length()-1), src=vgpr(localRow), comment="%s: local row offset"%tc))
   module.add(VMulLOU32(dst=vgpr(partitionRow), src0=sgpr(tmpSgpr), src1=vgpr(partitionRow), comment="%s: wave row offset"%tc))
   module.add(VAddU32(dst=vgpr(rowOffset), src0=vgpr(localRow), src1=vgpr(partitionRow), comment="%s: row offset"%tc))
@@ -2051,9 +2102,9 @@ def tdmApplyTileKOffsetSubtile(writer, kernel, tP):
 ##################################################
 # Subroutine to update ptrs
 #
-def globalReadPtrUpdates(tc, writer, kernel, holdOnLastIter=False):
+def globalReadPtrUpdates(tc, writer, kernel, holdOnLastIter=False, tightenLimit=False):
   ti_ = writer.states.a.tileInfo if tc == 'A' else writer.states.b.tileInfo
-  return ti_.emitGRPtrUpdate(writer, kernel, holdOnLastIter)
+  return ti_.emitGRPtrUpdate(writer, kernel, holdOnLastIter, tightenLimit)
 
 
 def _grDTLAddKSlice(writer, kernel, module, tc, ti, dstVgpr):

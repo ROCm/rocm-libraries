@@ -10,6 +10,7 @@
 #include "compilation/IKernelCompiler.hpp"
 #include "compilation/IRunnableKernel.hpp"
 #include "core/Handle.hpp"
+#include "engines/hip_mlops_engine/plans/PlanUtils.hpp"
 
 #include <hipdnn_flatbuffers_sdk/data_objects/resample_fwd_attributes_generated.h>
 
@@ -76,6 +77,9 @@ public:
     ResampleFwdPlan(ResampleFwdPlan&&) = default;
     ResampleFwdPlan& operator=(ResampleFwdPlan&&) = delete;
 
+    // Every kernel launch of the plan for the given number of output elements.
+    static std::vector<KernelLaunchShape> launchShapes(int64_t numElements);
+
     void compile(const IKernelCompiler& kernelCompiler, const hipDeviceProp_t& deviceProperties);
 
     size_t getWorkspaceSize(const Handle& handle) const override;
@@ -86,6 +90,8 @@ public:
                  void* workspace = nullptr) const override;
 
 private:
+    static constexpr int64_t BLOCK_SIZE = 256;
+
     uint64_t outputElementCount() const;
 
     ResampleFwdParams _params;

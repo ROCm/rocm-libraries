@@ -51,6 +51,7 @@
 #include "HipdnnBackendDescriptorType.h"
 #include "HipdnnBackendHeuristicType.h"
 #include "HipdnnBackendLimits.h"
+#include "HipdnnBackendNumericalNote.h"
 #include "HipdnnBackendPluginLoadingMode.h"
 #include "HipdnnBackendPluginUnloadingMode.h"
 #include "HipdnnConvolutionMode.h"
@@ -196,10 +197,10 @@ HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnBackendExecute(hipdnnHandle_t handle,
 * hipdnnBackendCreateDescriptor() or initialized using hipdnnBackendInitialize().
 *
 * @note An engine descriptor validates its graph and engine applicability here, but loads
-* plugin metadata lazily. The first engine-name, knob-info, or behavior-note attribute query
-* fetches and validates EngineDetails, including count-only queries. Successful finalization
-* does not guarantee that metadata retrieval will succeed; callers requiring eager metadata
-* validation should issue such a query after finalization.
+* plugin metadata lazily. The first engine-name, knob-info, behavior-note, or numerical-note
+* attribute query fetches and validates EngineDetails, including count-only queries. Successful
+* finalization does not guarantee that metadata retrieval will succeed; callers requiring eager
+* metadata validation should issue such a query after finalization.
 *
 * @param  [in]  descriptor  Instance of hipdnnBackendDescriptor_t to finalize
 *
@@ -221,9 +222,10 @@ HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnBackendFinalize(hipdnnBackendDescript
  * pointer to the output value. This function will return HIPDNN_STATUS_NOT_INTIALIZED if the
  * descriptor has not been successfully finalized using hipdnnBackendFinalize()
  *
- * @note Engine-name, knob-info, and behavior-note queries lazily fetch plugin EngineDetails.
- * Retrieval or validation errors are reported by this call, not engine finalization. A failed
- * metadata load publishes no partial result and can be retried by a later attribute query.
+ * @note Engine-name, knob-info, behavior-note, and numerical-note queries lazily fetch plugin
+ * EngineDetails. Retrieval or validation errors are reported by this call, not engine
+ * finalization. A failed metadata load publishes no partial result and can be retried by a later
+ * attribute query.
  *
  * @param  [in]   descriptor               Instance of hipdnnBackendDescriptor_t whose attribute to
  *                                         retrieve
@@ -608,7 +610,12 @@ HIPDNN_BACKEND_EXPORT void hipdnnLoggingCallback_ext(hipdnnSeverity_t severity, 
  * @brief Sets the search paths for hipDNN engine plugins.
  *
  * This function configures the search paths for engine plugins and must be called before
- * creating a hipDNN handle, as plugins are loaded during handle creation.
+ * creating a hipDNN handle, as plugins are loaded during handle creation. With an active
+ * handle, a call succeeds only when `pluginPaths` equals the full configured path set
+ * (compared as written, ignoring order and duplicates) and `loadingMode` equals the current
+ * loading mode; it then changes nothing. This holds in `HIPDNN_PLUGIN_LOADING_ADDITIVE` mode
+ * too: adding a path that is already configured fails unless the call lists every
+ * configured path.
  *
  * Paths can be either directories or specific plugin files. Relative paths are resolved
  * from the location of the libhipdnn_backend.so file. The backend can resolve
@@ -621,7 +628,10 @@ HIPDNN_BACKEND_EXPORT void hipdnnLoggingCallback_ext(hipdnnSeverity_t severity, 
  *
  * @retval HIPDNN_STATUS_SUCCESS           The operation was successful.
  * @retval HIPDNN_STATUS_BAD_PARAM_NULL_POINTER         `pluginPaths` is nullptr when `numPaths` is greater than 0.
- * @retval HIPDNN_STATUS_NOT_SUPPORTED         Called with active handle.
+ * @retval HIPDNN_STATUS_NOT_SUPPORTED         Called with an active handle when `pluginPaths`
+ *                                             differs from the full configured path set or
+ *                                             `loadingMode` differs from the current loading
+ *                                             mode.
  * @retval HIPDNN_STATUS_INTERNAL_ERROR    An internal error occurred.
  */
 HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnSetEnginePluginPaths_ext(
@@ -632,7 +642,11 @@ HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnSetEnginePluginPaths_ext(
  *
  * Mirrors @ref hipdnnSetEnginePluginPaths_ext for the heuristic plugin search domain.
  * Must be called before creating a hipDNN handle, as heuristic plugins are loaded
- * during handle creation.
+ * during handle creation. With an active handle, a call succeeds only when `pluginPaths`
+ * equals the full configured heuristic path set (compared as written, ignoring order and
+ * duplicates) and `loadingMode` equals the current loading mode; it then changes nothing.
+ * This holds in `HIPDNN_PLUGIN_LOADING_ADDITIVE` mode too: adding a path that is already
+ * configured fails unless the call lists every configured path.
  *
  * Paths can be either directories or specific plugin files. Relative paths are resolved
  * from the location of the libhipdnn_backend.so file.
@@ -643,7 +657,11 @@ HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnSetEnginePluginPaths_ext(
  *
  * @retval HIPDNN_STATUS_SUCCESS                  The operation was successful.
  * @retval HIPDNN_STATUS_BAD_PARAM_NULL_POINTER   `pluginPaths` is nullptr when `numPaths` is greater than 0.
- * @retval HIPDNN_STATUS_NOT_SUPPORTED            Called with active handle.
+ * @retval HIPDNN_STATUS_NOT_SUPPORTED            Called with an active handle when
+ *                                                `pluginPaths` differs from the full
+ *                                                configured heuristic path set or
+ *                                                `loadingMode` differs from the current
+ *                                                loading mode.
  * @retval HIPDNN_STATUS_INTERNAL_ERROR           An internal error occurred.
  */
 HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnSetHeuristicPluginPaths_ext(

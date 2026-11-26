@@ -60,7 +60,7 @@ try
     rocsolver_lauum_getMemorySize<U>(n, batch_count, &size_work);
 
     if(rocblas_is_device_memory_size_query(handle))
-        rocblas_set_optimal_device_memory_size(handle, size_work);
+        return rocblas_set_optimal_device_memory_size(handle, size_work);
 
     void* work;
     rocblas_device_malloc mem(handle, size_work);

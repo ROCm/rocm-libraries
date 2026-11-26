@@ -57,6 +57,11 @@ gfx950 only: the kernels size their LDS stage for its 160 KB per CU.
 Predicated in `custom.config`: `batch == 1`, `n == N`, `m > 8`, `K % 8 == 0`,
 and unit strides on all four tensors. K needs no bound.
 
+Each row of D is reduced by one wave with the same split of K over its lanes,
+the same loop and the same reduction, whichever wave and tile it falls in, and
+StaggerU is 0. The kernels therefore declare `uniformSummationOrder: true` in
+`custom.config`, so hipBLASLt can select them under uniform summation order.
+
 ## Kernarg preload
 
 The kernels take the arguments of the rocBLAS wvSpltK kernels, in the same
@@ -90,8 +95,9 @@ where hipBLASLt's own kernel wins have no row. Rows never overlap, since
 hipBLASLt takes the first row that contains the problem.
 
 The files carry the plain-GEMM problem type (no bias, activation or scale
-vector), because a custom kernel takes the logic file's problem type and these
-kernels support none of those.
+vector). The `custom.config` `Features` `SupportsBias`, `SupportsActivation` and
+`SupportsScaleAlpha` being false also restrict each such solution's own problem type, so these kernels
+would reject such problems even in a Bias/SAV logic file.
 
 Within one device's logic, hipBLASLt searches the plain-GEMM placeholder library
 before the Bias/SAV ones, and `Equality` before `Range` inside a placeholder.

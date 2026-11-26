@@ -3,7 +3,7 @@
 - Contributors: Brian Harrison, Daryl Hawkins, Jason Campbell, Brad Pepers
 - **Status**: In progress
 - **Status notes**: The generic kernel ingestor ships behind the default-OFF `HIPDNN_ENABLE_KERNEL_INGESTOR` CMake option (#10606), in `plugin_sdk/include/hipdnn_plugin_sdk/ingestor/`, with build-time kpack packaging in `dnn-providers/hip-kernel-provider/descriptor-packaging` (#10820, #11165) and runtime kpack loading (#11144). UMD, UDD, and `NATIVE` UHD logic resolve to C++ symbols through `NativeRegistry`, and the UED `graph_match.native` arm through `GraphMatchRegistry`. The declarative `nodes`/`criteria` forms, UDD formulas, `MODEL` UHDs, runtime drop-in, multi-launch, and composition are not built.
-- **Last verified**: 2026-10-15 against `develop` (2501d0b28cc)
+- **Last verified**: 2026-11-10 against `develop` (1c63e26254a)
 
 ## Table of Contents
 
@@ -478,7 +478,7 @@ each format are specified in that format's follow-up RFC.
     ]
   },
   "behavior_notes":  ["runtime_compilation"],   // hipDNN behavior notes for this engine
-  "numerical_notes": ["tensor_core", "reduced_precision_reduction"],  // hipDNN numerical notes
+  "numerical_notes": ["nondeterministic"],  // any of the ten cuDNN numerical-note names; omit = NONDETERMINISTIC, [] claims determinism
   "knobs": ["split_k", "tile_m"]    // KMD fields this engine lets the user control
 }
 ```
@@ -1354,7 +1354,10 @@ Authored `hip`, `hsaco`, and `rocke` sources are packed into kpack at build time
 loader (`DescriptorLoader.hpp`) accepts the kinds `embedded_source`, `kpack`, `hsaco_file`, and
 `rocke_builder`. Only `embedded_source` and `kpack` have adapters; the loader rejects the other
 two as not yet implemented. A runtime `kpack` source carries `toc_key`, `sha256`, and the
-packager-read `signature`, in addition to `library` and `symbol`.
+packager-read `signature`, in addition to `library` and `symbol`. A source the packager compiled
+from rocKE IR also carries `identity` (UKD 1.2): a sha256 of what it handed the compiler, which the
+generic engine's selector revision reads in place of `sha256` so that a compiler bump within one
+LLVM flavor does not move it ([RFC 0019 §8.1](0019_UniversalHeuristicDescriptor.md#81-descriptor-versions-and-uhd-coupling)).
 
 A kernel source points at code through a small tagged union, the one piece unique to a UKD,
 and fills a Launch slot in the pack's shared UDD to run. A single-kernel UKD supplies one
@@ -2702,7 +2705,7 @@ choices; none is a dependency.
   top-ranked kernel.
 - **Behavior / numerical notes:** hipDNN's existing per-engine annotations that a UED carries;
   behavior notes describe execution properties (for example runtime compilation), numerical notes
-  describe precision behavior (for example tensor-core use).
+  describe numerical behavior (for example nondeterminism; see [RFC 0025](./0025_NumericalNotes.md)).
 - **GQA:** grouped-query attention, where several query heads share one key/value head, so
   `num_heads` is a multiple of `num_kv_heads` rather than equal to it.
 - **LDS:** local data share, a GPU workgroup's on-chip scratch memory. A kernel either requests it

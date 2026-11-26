@@ -22,6 +22,9 @@
 
 # hipCUB header-only library
 
+# Expose the HIPCCL_USE_LEGACY_API option to the configured version header
+set(HIPCUB_USE_LEGACY_API ${HIPCCL_USE_LEGACY_API})
+
 # Configure a header file to pass the hipCUB version. Changing the out path as it conflict with header wrapper
 configure_file(
   "${CMAKE_CURRENT_SOURCE_DIR}/include/hipcub/hipcub_version.hpp.in"
@@ -42,8 +45,14 @@ target_include_directories(hipcub
 if(HIP_COMPILER STREQUAL "clang")
   target_link_libraries(hipcub
     INTERFACE
-      roc::rocprim_hip libhipcxx::libhipcxx
+      roc::rocprim_hip
   )
+  if (libhipcxx_FOUND)
+    target_link_libraries(hipcub
+      INTERFACE
+        libhipcxx::libhipcxx
+    )
+  endif()
 else()
   # On CUDA platform we don't want to export hipcub target with
   # INTERFACE_INCLUDE_DIRECTORIES property containing a path to
@@ -87,3 +96,4 @@ else()
     NAMESPACE hip::
   )
 endif()
+

@@ -80,14 +80,12 @@
 #undef hipFree
 #endif
 
-#define LIMITED_MEMORY_STRING "Error: Attempting to allocate more memory than available."
 #define TOO_MANY_DEVICES_STRING "Error: Too many devices requested."
 #define HMM_NOT_SUPPORTED "Error: HMM not supported."
 
 // TODO: This is dependent on internal gtest behaviour.
 // Compared with result.message() when a test ended. Note that "Succeeded\n" is
 // added to the beginning of the message automatically by gtest, so this must be compared.
-#define LIMITED_MEMORY_STRING_GTEST "Succeeded\n" LIMITED_MEMORY_STRING
 #define TOO_MANY_DEVICES_STRING_GTEST "Succeeded\n" TOO_MANY_DEVICES_STRING
 #define HMM_NOT_SUPPORTED_GTEST "Succeeded\n" HMM_NOT_SUPPORTED
 
@@ -104,6 +102,7 @@ inline bool is_bias_enabled(hipblasLtEpilogue_t value_)
     case HIPBLASLT_EPILOGUE_DRELU_BGRAD:
     case HIPBLASLT_EPILOGUE_BGRADA:
     case HIPBLASLT_EPILOGUE_BGRADB:
+    case HIPBLASLT_EPILOGUE_SWISH_AUX_BIAS_EXT:
     case HIPBLASLT_EPILOGUE_SWISH_BIAS_EXT:
     case HIPBLASLT_EPILOGUE_CLAMP_BIAS_EXT:
         return true;

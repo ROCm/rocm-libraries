@@ -255,8 +255,8 @@ protected:
             GTEST_SKIP() << "packaged artifact absent -- packaging did not run. Looked for "
                             "*.kpack under "
                          << packagedDescriptorRoot()
-                         << ". Configure with -DHIPDNN_ENABLE_KERNEL_INGESTOR=ON and a hipcc "
-                            "the packaging rule can find.";
+                         << ". Configure with -DHIPDNN_ENABLE_KERNEL_INGESTOR=ON and a HIP "
+                            "compiler the packaging rule can find.";
         }
 
         // "Something was packed" is not "something was packed for THIS device". The

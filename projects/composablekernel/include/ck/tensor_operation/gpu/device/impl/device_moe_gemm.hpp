@@ -109,6 +109,7 @@ struct DeviceMoeGemm : public DeviceGemmMultipleDSplitKBPreShuffle<ALayout,
     static constexpr auto NXdlPerWave64    = WarpTileConfig64.At(3);
     static constexpr auto NXdlPerWave32    = WarpTileConfig32.At(3);
     static constexpr index_t NumDTensor    = DsDataType::Size();
+    static constexpr bool IsGateUp         = (ActivationOP != Activation::relu2);
     template <typename WarpTileConfig>
     using GridwiseGemmBase =
         GridwiseMoeGemm<ALayout,
@@ -160,6 +161,7 @@ struct DeviceMoeGemm : public DeviceGemmMultipleDSplitKBPreShuffle<ALayout,
                         ActivationOP,
                         NSwizzle,
                         IsInputGemm,
+                        IsGateUp,
                         MulRoutedWeight,
                         PerTokenQuant,
                         IndexType,
@@ -455,9 +457,30 @@ struct DeviceMoeGemm : public DeviceGemmMultipleDSplitKBPreShuffle<ALayout,
         {
             return false;
         }
-        if(arg.N % NPerBlock != 0 || arg.K % KPerBlock != 0)
+        if((arg.N % NPerBlock != 0 && !GridwiseGemm64::PadN) ||
+           (arg.K % KPerBlock != 0 && !GridwiseGemm64::PadK))
         {
             return false;
+        }
+        if constexpr(GridwiseGemm64::PadN || GridwiseGemm64::PadK)
+        {
+            // Masked loads/stores in the padded region are offset by 2GB, which only lands
+            // outside buffers of at most 2GB.
+            constexpr long_index_t TwoGB   = (long_index_t{1} << 31);
+            const long_index_t routed_rows = static_cast<long_index_t>(arg.NumTokens) * arg.TopK;
+            const long_index_t a_rows      = IsInputGemm ? arg.NumTokens : routed_rows;
+            const long_index_t e_rows      = IsInputGemm ? routed_rows : arg.NumTokens;
+            if(GridwiseGemm64::PadK && arg.K % KPerBlock != 0 &&
+               a_rows * arg.StrideA * static_cast<long_index_t>(sizeof(ADataType)) / APackedSize >
+                   TwoGB)
+            {
+                return false;
+            }
+            if(GridwiseGemm64::PadN && arg.N % NPerBlock != 0 &&
+               e_rows * arg.StrideC * static_cast<long_index_t>(sizeof(CDataType)) > TwoGB)
+            {
+                return false;
+            }
         }
         if(get_warp_size() == 64)
         {

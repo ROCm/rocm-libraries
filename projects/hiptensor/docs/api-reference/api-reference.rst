@@ -41,11 +41,13 @@ List of supported RDNA architectures:
 * gfx1200
 * gfx1201
 * gfx1250
+* gfx1251
 * gfx1250-strict
 
 .. note::
     gfx11 = gfx1100, gfx1101, gfx1102, gfx1103, gfx1150, gfx1151, gfx1152, gfx1153, gfx1170, gfx1171
-    gfx12 = gfx1200, gfx1201, gfx1250, gfx1250-strict
+    gfx12 = gfx1200, gfx1201, gfx1250, gfx1250-strict, gfx1251
+    gfx125 = gfx1250, gfx1250-strict, gfx1251
 
 .. _hiptensor-supported-data-types:
 
@@ -90,15 +92,15 @@ Data Types **<Ti / To / Tc>** = <Input type / Output Type / Compute Type>, where
 |                     +------------------------------+                     |                     |
 |                     |     f32 / f32 / bf16         |                     | 4m4n4k (Rank8)      |
 |                     +------------------------------+---------------------+                     |
-|                     |     f16 / f16 / f32          |  gfx9 gfx1250       | 5m5n5k (Rank10)     |
-|                     +------------------------------+                     |                     |
+|                     |     f16 / f16 / f32          |  gfx9               | 5m5n5k (Rank10)     |
+|                     +------------------------------+  gfx125             |                     |
 |                     |     bf16 / bf16 / f32        |                     | 6m6n6k (Rank12)     |
 |                     +------------------------------+                     |                     |
 |                     |     f32 / f32 / f32          |                     |                     |
 |                     +------------------------------+                     |                     |
 |                     |     cf32 / cf32 / cf32       |                     |                     |
 |                     +------------------------------+---------------------+                     |
-|                     |     f64 / f64 / f64          |  gfx90a+            |                     |
+|                     |     f64 / f64 / f64          |  gfx90a+ gfx1251    |                     |
 |                     +------------------------------+                     |                     |
 |                     |     f64 / f64 / f32          |                     |                     |
 |                     +------------------------------+                     |                     |
@@ -114,7 +116,7 @@ Data Types **<Ti / To / Tc>** = <Input type / Output Type / Compute Type>, where
 |                     +------------------------------+                     |                     |
 |                     |     f32 / f32 / f32          |                     |                     |
 |                     +------------------------------+---------------------+                     |
-|                     |     f64 / f64 / f64          |  gfx90a+ gfx1250    |                     |
+|                     |     f64 / f64 / f64          |  gfx90a+ gfx125     |                     |
 +---------------------+------------------------------+---------------------+---------------------+
 |                     |     f16 / f16 / f16          |  gfx9 gfx11 gfx12   | Rank1 - Rank6       |
 | Reduction           +------------------------------+                     |                     |
@@ -126,8 +128,31 @@ Data Types **<Ti / To / Tc>** = <Input type / Output Type / Compute Type>, where
 |                     +------------------------------+                     |                     |
 |                     |     f32 / f32 / f32          |                     |                     |
 |                     +------------------------------+---------------------+                     |
-|                     |     f64 / f64 / f64          |  gfx90a+            |                     |
+|                     |     f64 / f64 / f64          |  gfx90a+ gfx125     |                     |
 +---------------------+------------------------------+---------------------+---------------------+
+
+Thread safety
+--------------
+
+hipTensor API functions can be called concurrently from multiple host threads:
+
+* A ``hiptensorHandle_t``, including its plan cache, can be shared by all threads.
+* Plans can be created concurrently, and a ``hiptensorPlan_t`` can be executed by several
+  threads at once, whether each thread uses its own plan or all threads share one.
+  This applies to ``hiptensorContract``, ``hiptensorContractTrinary``, ``hiptensorPermute``,
+  ``hiptensorElementwiseBinaryExecute``, ``hiptensorElementwiseTrinaryExecute``, and
+  ``hiptensorReduce``.
+* Each concurrent call must use its own output tensor and workspace. Calls that write
+  the same memory, or that share a workspace, race on the GPU.
+* With ``HIPTENSOR_AUTOTUNE_MODE_INCREMENTAL``, threads that execute the same plan
+  interleave the candidate kernels they try, so the kernel a given call uses is not
+  deterministic until autotuning completes. A candidate that cannot run the problem makes
+  that call fail; autotuning then moves on to the next candidate and never caches the
+  failed one.
+  Autotuning is tracked separately for each problem and handle, and each timing is
+  credited to the kernel that produced it, so concurrent calls on different problems do
+  not affect each other's result. Calls from all threads on the same problem count
+  toward the same ``HIPTENSOR_PLAN_PREFERENCE_INCREMENTAL_COUNT``.
 
 Limitations
 ------------

@@ -36,6 +36,12 @@ public:
             return {ErrorCode::ATTRIBUTE_NOT_SET,
                     "PointwiseNode missing operation for pre-validation"};
         }
+        if(!toBackendPointwiseMode(attributes.get_mode()).has_value())
+        {
+            return {ErrorCode::INVALID_VALUE,
+                    std::string("PointwiseNode mode ") + to_string(attributes.get_mode())
+                        + " is not supported by hipDNN lowering"};
+        }
         if(attributes.outputs.size() != 1)
         {
             return {ErrorCode::INVALID_VALUE, "PointwiseNode must have exactly one output"};
@@ -61,36 +67,44 @@ public:
 
         HIPDNN_CHECK_ERROR(attributes.fill_from_context(graph_attributes));
 
+        // Every set input, including any the mode does not use, takes part in shape inference.
+        const size_t usedInputCount = std::max<size_t>(modeInputCount(attributes.get_mode()), 1);
+        std::vector<std::shared_ptr<TensorAttributes>> inputs;
+        for(size_t slot = 0; slot < K_MAX_INPUT_COUNT; ++slot)
+        {
+            auto it = attributes.inputs.find(static_cast<PointwiseAttributes::InputNames>(slot));
+            if(it == attributes.inputs.end())
+            {
+                continue;
+            }
+            if(it->second)
+            {
+                inputs.push_back(it->second);
+            }
+            else if(slot < usedInputCount)
+            {
+                return nullInputError(slot);
+            }
+        }
+
         if(out->get_dim().empty())
         {
             std::vector<std::vector<int64_t>> inputShapes;
-
-            for(const auto& [_, tensor] : attributes.inputs)
+            inputShapes.reserve(inputs.size());
+            for(const auto& tensor : inputs)
             {
-                if(tensor)
-                {
-                    inputShapes.push_back(tensor->get_dim());
-                }
-                else
-                {
-                    return {ErrorCode::INVALID_VALUE, "PointwiseNode has null input tensor"};
-                }
+                inputShapes.push_back(tensor->get_dim());
             }
 
-            auto outputDims = out->get_dim();
+            std::vector<int64_t> outputDims;
             HIPDNN_CHECK_ERROR(detail::findCommonShape(inputShapes, outputDims));
             out->set_dim(outputDims);
         }
 
         if(out->get_stride().empty())
         {
-            for(const auto& [_, tensor] : attributes.inputs)
+            for(const auto& tensor : inputs)
             {
-                if(!tensor)
-                {
-                    return {ErrorCode::INVALID_VALUE, "PointwiseNode has null input tensor"};
-                }
-
                 if(tensor->get_dim() == out->get_dim())
                 {
                     HIPDNN_FE_LOG_INFO("PointwiseNode " << attributes.get_name()
@@ -100,6 +114,11 @@ public:
                     out->set_stride(tensor->get_stride());
                     break;
                 }
+            }
+
+            if(out->get_stride().empty() && out->get_is_virtual())
+            {
+                inferVirtualOutputStride(*out);
             }
 
             if(out->get_stride().empty())
@@ -115,7 +134,23 @@ public:
         std::unordered_map<int64_t, detail::ScopedHipdnnBackendDescriptor>& tensorDescs,
         std::vector<detail::ScopedHipdnnBackendDescriptor>& operations) const override
     {
-        return detail::createPointwiseOperation(attributes, tensorDescs, operations);
+        const size_t usedInputCount = modeInputCount(attributes.get_mode());
+        if(attributes.inputs.size() <= usedInputCount)
+        {
+            return detail::createPointwiseOperation(attributes, tensorDescs, operations);
+        }
+
+        // Inputs beyond the mode's operand count are not part of the operation.
+        auto usedAttributes = attributes;
+        if(usedInputCount < 2)
+        {
+            usedAttributes.inputs.erase(PointwiseAttributes::InputNames::IN_1);
+        }
+        if(usedInputCount < 3)
+        {
+            usedAttributes.inputs.erase(PointwiseAttributes::InputNames::IN_2);
+        }
+        return detail::createPointwiseOperation(usedAttributes, tensorDescs, operations);
     }
 
     Error unpack_from_descriptor(
@@ -128,40 +163,101 @@ public:
         return {};
     }
 
+    // Number of inputs the mode reads: IN_0 for unary, IN_0 and IN_1 for binary, all three for
+    // ternary. Returns 0 for a mode in none of these classes.
+    static size_t modeInputCount(PointwiseMode mode)
+    {
+        if(isTernaryPointwiseMode(mode))
+        {
+            return 3;
+        }
+        if(isBinaryPointwiseMode(mode))
+        {
+            return 2;
+        }
+        if(isUnaryPointwiseMode(mode))
+        {
+            return 1;
+        }
+        return 0;
+    }
+
 private:
+    static constexpr size_t K_MAX_INPUT_COUNT = 3;
+
+    Error nullInputError(size_t slot) const
+    {
+        return {ErrorCode::ATTRIBUTE_NOT_SET,
+                "PointwiseNode " + attributes.get_name() + " has null input tensor IN_"
+                    + std::to_string(slot)};
+    }
+
+    // Inputs beyond the mode's operand count are accepted and left out of the operation.
     Error checkInputsMatchOperationType() const
     {
-        switch(attributes.inputs.size())
+        if(attributes.inputs.empty())
         {
-        case 0:
             return {ErrorCode::INVALID_VALUE, "PointwiseNode must have at least one input"};
-        case 1:
-            if(!isUnaryPointwiseMode(attributes.get_mode()))
-            {
-                return {ErrorCode::INVALID_VALUE,
-                        "PointwiseNode with one input must have a unary operation"};
-            }
-            break;
-        case 2:
-            if(!isBinaryPointwiseMode(attributes.get_mode()))
-            {
-                return {ErrorCode::INVALID_VALUE,
-                        "PointwiseNode with two inputs must have a binary operation"};
-            }
-            break;
-        case 3:
-            if(!isTernaryPointwiseMode(attributes.get_mode()))
-            {
-                return {ErrorCode::INVALID_VALUE,
-                        "PointwiseNode with three inputs must have a ternary operation"};
-            }
-            break;
-        default:
+        }
+        if(attributes.inputs.size() > K_MAX_INPUT_COUNT)
+        {
             return {ErrorCode::INVALID_VALUE,
                     "PointwiseNode can only have one, two, or three inputs"};
         }
 
+        const size_t usedInputCount = modeInputCount(attributes.get_mode());
+        if(usedInputCount == 0)
+        {
+            return {ErrorCode::INVALID_VALUE,
+                    "PointwiseNode " + attributes.get_name() + " mode "
+                        + std::to_string(static_cast<int>(attributes.get_mode()))
+                        + " has no known operand count"};
+        }
+
+        for(size_t slot = 0; slot < usedInputCount; ++slot)
+        {
+            auto it = attributes.inputs.find(static_cast<PointwiseAttributes::InputNames>(slot));
+            if(it == attributes.inputs.end())
+            {
+                return {ErrorCode::INVALID_VALUE,
+                        "PointwiseNode " + attributes.get_name() + " mode requires "
+                            + std::to_string(usedInputCount) + " inputs but IN_"
+                            + std::to_string(slot) + " is not set"};
+            }
+            if(!it->second)
+            {
+                return nullInputError(slot);
+            }
+        }
+
         return {};
+    }
+
+    // Generates strides for a virtual output that no input matches, following IN_0's stride
+    // order. Axes the output has beyond IN_0's rank are leading and outermost.
+    void inferVirtualOutputStride(TensorAttributes& out) const
+    {
+        auto in0 = attributes.get_input_0();
+        const auto& outDims = out.get_dim();
+        if(!in0 || in0->get_stride().empty() || in0->get_stride().size() > outDims.size())
+        {
+            return;
+        }
+
+        const auto in0Order = hipdnn_data_sdk::utilities::extractStrideOrder(in0->get_stride());
+        const size_t leadingAxes = outDims.size() - in0Order.size();
+        std::vector<int64_t> strideOrder(outDims.size());
+        for(size_t i = 0; i < outDims.size(); ++i)
+        {
+            strideOrder[i] = i < leadingAxes ? static_cast<int64_t>(outDims.size() - 1 - i)
+                                             : in0Order[i - leadingAxes];
+        }
+
+        HIPDNN_FE_LOG_INFO("PointwiseNode " << attributes.get_name()
+                                            << " generating stride from the stride order of "
+                                            << in0->get_name() << " for virtual output "
+                                            << out.get_name());
+        out.set_stride(hipdnn_data_sdk::utilities::generateStrides(outDims, strideOrder));
     }
 
     Error checkInputsAndOutputsAreBroadcastCompatible() const
@@ -173,22 +269,19 @@ private:
 
             for(const auto& [_, inputTensor] : attributes.inputs)
             {
-                if(inputTensor)
+                if(!inputTensor)
                 {
-                    const auto& inputDims = inputTensor->get_dim();
-
-                    if(!hipdnn_data_sdk::utilities::areDimensionsBroadcastCompatible(inputDims,
-                                                                                     outputDims))
-                    {
-                        return {ErrorCode::INVALID_VALUE,
-                                "PointwiseNode input '" + inputTensor->get_name()
-                                    + "' has dimensions incompatible with output. "
-                                    + "All inputs must be broadcastable to output dimensions."};
-                    }
+                    continue;
                 }
-                else
+
+                const auto& inputDims = inputTensor->get_dim();
+                if(!hipdnn_data_sdk::utilities::areDimensionsBroadcastCompatible(inputDims,
+                                                                                 outputDims))
                 {
-                    return {ErrorCode::INVALID_VALUE, "PointwiseNode has null input tensor"};
+                    return {ErrorCode::INVALID_VALUE,
+                            "PointwiseNode input '" + inputTensor->get_name()
+                                + "' has dimensions incompatible with output. "
+                                + "All inputs must be broadcastable to output dimensions."};
                 }
             }
         }

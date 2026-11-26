@@ -63,7 +63,7 @@ else()
     endif()
 endif()
 
-get_target_property(composable_kernel_INCLUDES composable_kernel::device_other_operations INTERFACE_INCLUDE_DIRECTORIES)
+get_target_property(composable_kernel_INCLUDES ${HIPTENSOR_CK_INCLUDE_TARGET} INTERFACE_INCLUDE_DIRECTORIES)
 
 # ABI export-surface guard. Host-only (no GPU): runs scripts/check_exported_symbols.py over the
 # built libhiptensor.so and fails if any symbol outside the public allowlist is exported. The
@@ -189,6 +189,35 @@ set(HIPTENSOR_COMMON_TEST_SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/common.cpp
                                   ${CMAKE_CURRENT_SOURCE_DIR}/hip_resource.cpp
                                   ${CMAKE_CURRENT_SOURCE_DIR}/hiptensor_gtest_main.cpp)
 
+# Test sources that define GPU kernels (they instantiate the kernel templates in
+# device/common.hpp or define their own). Every other test source is compiled host-only: its
+# per-GPU-target device pass emits no kernels and only costs build time.
+# A source that launches a kernel but is missing from this list builds fine and fails at run
+# time with an invalid-device-function error, so add new kernel-launching sources here.
+set(HIPTENSOR_TEST_DEVICE_SOURCES
+    ${CMAKE_CURRENT_SOURCE_DIR}/00_unit/elementwise_op_test.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/01_contraction/contraction_test.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/01_contraction/trinary_contraction_test.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/02_elementwise/elementwise_binary_op_test.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/02_elementwise/elementwise_resource.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/02_elementwise/elementwise_test.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/02_elementwise/elementwise_trinary_op_test.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/03_reduction/reduction_resource.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/03_reduction/reduction_test.cpp)
+
+# Mark the given test sources host-only, except those in HIPTENSOR_TEST_DEVICE_SOURCES. Source
+# properties are directory-scoped, so this must run in the directory that creates the target
+# (the add_hiptensor_*test functions below do so).
+function(hiptensor_test_set_host_only_sources)
+    foreach(SOURCE ${ARGN})
+        get_filename_component(SOURCE "${SOURCE}" ABSOLUTE)
+        if(SOURCE MATCHES "\\.cpp$" AND NOT SOURCE IN_LIST HIPTENSOR_TEST_DEVICE_SOURCES)
+            set_source_files_properties(${SOURCE} PROPERTIES
+                COMPILE_OPTIONS "--offload-host-only;-Wno-unused-command-line-argument")
+        endif()
+    endforeach()
+endfunction()
+
 
 # Create test executables and deploy
 function(add_hiptensor_test BINARY_NAME YAML_CONFIG_FILE TEST_SOURCES)
@@ -221,6 +250,9 @@ function(add_hiptensor_test BINARY_NAME YAML_CONFIG_FILE TEST_SOURCES)
     add_executable(${BINARY_NAME} ${TEST_SOURCES})
     target_compile_options(${BINARY_NAME} PRIVATE ${CLANG_DRIVER_MODE})
     target_link_options(${BINARY_NAME} PRIVATE ${CLANG_DRIVER_MODE})
+    # hiptensor only propagates hip::host; tests compile as HIP for their own kernels.
+    target_link_libraries(${BINARY_NAME} PRIVATE hip::device)
+    hiptensor_test_set_host_only_sources(${TEST_SOURCES})
 
     # Test must propagate the build interface includes to make sure
     # hiptensor includes are captured at runtime.
@@ -307,6 +339,9 @@ function(add_hiptensor_unit_test)
 
     target_compile_options(${BINARY_NAME} PRIVATE ${CLANG_DRIVER_MODE})
     target_link_options(${BINARY_NAME} PRIVATE ${CLANG_DRIVER_MODE})
+    # hiptensor only propagates hip::host; tests compile as HIP for their own kernels.
+    target_link_libraries(${BINARY_NAME} PRIVATE hip::device)
+    hiptensor_test_set_host_only_sources(${ARGV})
 
     # Test must propagate the build interface includes to make sure
     # hiptensor includes are captured at runtime.
@@ -375,10 +410,42 @@ function(add_hiptensor_unit_test)
 
 endfunction()
 
+# Compile test sources shared by several test executables once, as an object library, instead of
+# once per executable. Configured like the test executables above, minus the per-executable
+# HIPTENSOR_TEST_YAML_INCLUDE define: only the leaf sources (through the *_test_helpers.hpp
+# headers) read the bundled YAML config, so shared sources must not include those headers.
+function(add_hiptensor_test_objects TARGET_NAME)
+    add_library(${TARGET_NAME} OBJECT ${ARGN})
+    target_compile_options(${TARGET_NAME} PRIVATE ${CLANG_DRIVER_MODE})
+    target_link_libraries(${TARGET_NAME} PRIVATE hip::device hiptensor::host_reference
+                          hiptensor::hiptensor hiptensor_llvm GTest::gtest)
+    hiptensor_test_set_host_only_sources(${ARGN})
+    target_include_directories(${TARGET_NAME} PRIVATE
+                               ${CMAKE_CURRENT_SOURCE_DIR}
+                               ${composable_kernel_INCLUDES}
+                               ${PROJECT_SOURCE_DIR}/library/include
+                               ${PROJECT_SOURCE_DIR}/library/src/include
+                               ${PROJECT_SOURCE_DIR}/library/src
+                               ${PROJECT_SOURCE_DIR}/test
+                               ${PROJECT_BINARY_DIR}/include/hiptensor
+                               ${PROJECT_BINARY_DIR}/include)
+    if(WIN32 AND CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+        target_compile_options(${TARGET_NAME} PRIVATE -Wno-ignored-attributes)
+    endif()
+endfunction()
+
+# Every test executable links these: pass the objects, not the sources, to the test functions.
+add_hiptensor_test_objects(hiptensor_test_common_objects ${HIPTENSOR_COMMON_TEST_SOURCES})
+set(HIPTENSOR_COMMON_TEST_SOURCES $<TARGET_OBJECTS:hiptensor_test_common_objects>)
+
 add_subdirectory(00_unit)
 add_subdirectory(01_contraction)
 add_subdirectory(02_elementwise)
 add_subdirectory(03_reduction)
+
+# --help of the shared test main() lists the Google Test flags after the hipTensor options.
+add_test(NAME test_help COMMAND util_test --help)
+set_tests_properties(test_help PROPERTIES PASS_REGULAR_EXPRESSION "--gtest_filter")
 
 # Build-tree ABI export-surface test (host-only). Asserts the just-built shared library exports
 # nothing beyond the public allowlist. $<TARGET_FILE:hiptensor> expands to the versioned .so.
@@ -392,8 +459,10 @@ endif()
 # Test entries for the install-tree category filters.
 #
 # Two building-block lists keep the three filters distinct in intent:
-#   _HIPTENSOR_HOST_TESTS   - host-only (non-device) tests. They take no config and
-#                             no run-count flags.
+#   _HIPTENSOR_HOST_TESTS   - tests that take no config and no run-count flags. Some
+#                             of them (e.g. concurrency_test) still run on the GPU;
+#                             listing them here only keeps them out of the
+#                             per-config and FFM families below.
 #   _HIPTENSOR_DEVICE_TESTS - device tests. Each runs with --hot_runs 1 --cold_runs 0
 #                             and, where applicable, a custom config via -y.
 #
@@ -414,6 +483,7 @@ endif()
 
 set(_HIPTENSOR_HOST_TESTS
   batched_contraction_test
+  concurrency_test
   contraction_mode_test
   elementwise_cpu_test
   elementwise_mode_test
@@ -421,6 +491,7 @@ set(_HIPTENSOR_HOST_TESTS
   hiptensor_options_test
   logger_test
   reduction_cpu_impl_test
+  reduction_mode_test
   util_test
   yaml_test
 )
@@ -455,12 +526,14 @@ set(_HIPTENSOR_DEVICE_TESTS
   "complex_scale_contraction_test_m5n5k5|01_contraction/complex_scale_test_params_rank5.yaml"
   "complex_scale_contraction_test_m6n6k6|01_contraction/complex_scale_test_params_rank6.yaml"
   "plan_cache_test|01_contraction/plan_cache_test_params.yaml"
+  "plan_cache_lru_test|NONE"
   "plan_lifetime_test|NONE"
   "trinary_bilinear_contraction_test|NONE"
   "trinary_scale_contraction_test|NONE"
   "bilinear_contraction_with_unary_ops_test|NONE"
   "scale_contraction_with_unary_ops_test|NONE"
   "elementwise_output_strides_test|NONE"
+  "elementwise_trinary_op_order_test|NONE"
   "rank2_elementwise_permute_test|02_elementwise/permutation/rank2_test_params.yaml"
   "rank3_elementwise_permute_test|02_elementwise/permutation/rank3_test_params.yaml"
   "rank4_elementwise_permute_test|02_elementwise/permutation/rank4_test_params.yaml"
@@ -593,6 +666,9 @@ foreach(_hiptensor_family "quick|validation/quick" "standard|validation/standard
         foreach(_hiptensor_host IN LISTS _HIPTENSOR_HOST_TESTS)
             _hiptensor_emit_test("${_hiptensor_host} ${_hiptensor_suffix}" "\"../${_hiptensor_host}\"")
         endforeach()
+        # --help of the shared test main() lists the Google Test flags after the hipTensor options.
+        file(APPEND "${INSTALL_TEST_FILE}" "add_test(\"test_help ${_hiptensor_suffix}\" \"../util_test\" --help)\n")
+        file(APPEND "${INSTALL_TEST_FILE}" "set_tests_properties(\"test_help ${_hiptensor_suffix}\" PROPERTIES PASS_REGULAR_EXPRESSION \"--gtest_filter\")\n")
         if(HIPTENSOR_ABI_CHECKER)
             # Resolve python3/nm from PATH at ctest time: the build-stage interpreter and the
             # build-tree llvm-nm do not exist when the packaged tests run on a separate machine.

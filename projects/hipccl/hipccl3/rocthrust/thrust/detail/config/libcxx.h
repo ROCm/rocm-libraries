@@ -37,11 +37,7 @@
 // since we're only interested in breaking (major) and
 // features (minor).
 #define _THRUST_REQUIRED_LIBCXX_VERSION_MAJOR 3
-#define _THRUST_REQUIRED_LIBCXX_VERSION_MINOR 0
-
-// TODO: remove this once we truly depend on libhipcxx 3.4.
-// When this is dropped, verify with 'LIBHIPCXX_NO_LEGACY_COMPAT=1'.
-#define LIBHIPCXX_IGNORE_DEPRECATED_LEGACY_COMPAT 1
+#define _THRUST_REQUIRED_LIBCXX_VERSION_MINOR 4
 
 // Set default values if not explictly set
 #ifndef USE_LIBCUDACXX
@@ -52,21 +48,18 @@
 #endif
 
 // If the '::cuda::std' namespace from 'libcudacxx' or 'libhipcxx' is available.
-#if THRUST_HAS_INCLUDE(<cuda/std/version>) \
-	&& (USE_LIBCUDACXX || USE_LIBHIPCXX)
+#if THRUST_HAS_INCLUDE(<cuda/std/version>) && (USE_LIBCUDACXX || USE_LIBHIPCXX)
 #  include <cuda/std/version>
 // If version matches and '_CUDA_VSTD' is available.
 #  if _LIBCUDACXX_CUDA_API_VERSION_MAJOR == _THRUST_REQUIRED_LIBCXX_VERSION_MAJOR \
     && _LIBCUDACXX_CUDA_API_VERSION_MINOR >= _THRUST_REQUIRED_LIBCXX_VERSION_MINOR
-#    define _THRUST_LIBCXX_INCLUDE(LIB)   <cuda/LIB>
-#    define _THRUST_STD_INCLUDE(LIB)      <cuda/std/LIB>
-#    define _THRUST_LIBCXX                ::cuda
-#    define _THRUST_STD_NOVERSION         ::cuda::std
-#    define _THRUST_STD                   ::cuda::std
-#    define _THRUST_HAS_DEVICE_SYSTEM_STD 1
-#    define _THRUST_STD_NAMESPACE_BEGIN   _LIBCUDACXX_BEGIN_NAMESPACE_STD
-#    define _THRUST_STD_NAMESPACE_END     _LIBCUDACXX_END_NAMESPACE_STD
-#    define _THRUST_USE_ROCPRIM           0
+#    define _THRUST_LIBCXX_INCLUDE(LIB)    <cuda/LIB>
+#    define _THRUST_STD_INCLUDE(LIB)       <cuda/std/LIB>
+#    define _THRUST_LIBCXX                 ::cuda
+#    define _THRUST_STD_NOVERSION          ::cuda::std
+#    define _THRUST_STD                    ::cuda::std
+#    define _THRUST_HAS_DEVICE_SYSTEM_STD  1
+#    define _THRUST_USE_ROCPRIM            0
 #  endif
 
 // Otherwise, if the '::hip::std' namespace from 'libhipcxx' is available.
@@ -74,7 +67,7 @@
 #  include <hip/std/version>
 // If version matches and '_CUDA_VSTD' is available.
 #  if _LIBCUDACXX_CUDA_API_VERSION_MAJOR == _THRUST_REQUIRED_LIBCXX_VERSION_MAJOR \
-    && _LIBCUDACXX_CUDA_API_VERSION_MINOR >= _THRUST_REQUIRED_LIBCXX_VERSION_MINOR
+    && _LIBCUDACXX_CUDA_API_VERSION_MINOR >= _THRUST_REQUIRED_LIBCXX_VERSION_MINOR && defined(_CUDA_VSTD)
 #    define _THRUST_LIBCXX_INCLUDE(LIB)   <hip/LIB>
 #    define _THRUST_STD_INCLUDE(LIB)      <hip/std/LIB>
 // In 'libhipcxx' the '::hip' namespace is synonymous with '::cuda'.
@@ -83,26 +76,19 @@
 #    define _THRUST_STD_NOVERSION         ::hip::std
 #    define _THRUST_STD                   ::hip::std
 #    define _THRUST_HAS_DEVICE_SYSTEM_STD 1
-#    define _THRUST_STD_NAMESPACE_BEGIN   _LIBCUDACXX_BEGIN_NAMESPACE_STD
-#    define _THRUST_STD_NAMESPACE_END     _LIBCUDACXX_END_NAMESPACE_STD
 #    define _THRUST_USE_ROCPRIM           0
 #  endif
 #endif
 
-// If 'libcudacxx' or 'libhipcxx' is not found, or the
-// feature flag ROCTHRUST_USE_LIBHIPCXX is not ON, use fallback.
-#ifndef _THRUST_HAS_DEVICE_SYSTEM_STD
-#  define _THRUST_LIBCXX_INCLUDE(LIB)
-#  define _THRUST_STD_INCLUDE(LIB) <LIB>
-#  define _THRUST_LIBCXX
-#  define _THRUST_STD_NOVERSION         ::std
-#  define _THRUST_STD                   ::std
-#  define _THRUST_HAS_DEVICE_SYSTEM_STD 0
-#  define _THRUST_STD_NAMESPACE_BEGIN \
-    namespace std                     \
-    {
-#  define _THRUST_STD_NAMESPACE_END }
-#  define _THRUST_USE_ROCPRIM (THRUST_DEVICE_SYSTEM != THRUST_DEVICE_SYSTEM_CPP)
+// Defined in '{cuda,hip}/std/__internal/namespaces.h'
+// Transitively included via '{cuda,hip}/std/version'
+#if defined(_THRUST_HAS_DEVICE_SYSTEM_STD)
+#  define _THRUST_STD_NAMESPACE_BEGIN         _CCCL_BEGIN_NAMESPACE_CUDA_STD
+#  define _THRUST_STD_NAMESPACE_END           _CCCL_END_NAMESPACE_CUDA_STD
+#  define _THRUST_LIBCXX_BEGIN_NAMESPACE_CUDA _CCCL_BEGIN_NAMESPACE_CUDA
+#  define _THRUST_LIBCXX_END_NAMESPACE_CUDA   _CCCL_END_NAMESPACE_CUDA
+#else
+#  error Could not find libhipcxx!
 #endif
 
 // In case libhipcxx is not available, load a basic version from our libcxx wrapper.

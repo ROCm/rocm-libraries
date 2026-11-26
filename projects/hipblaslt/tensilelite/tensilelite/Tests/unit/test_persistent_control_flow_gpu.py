@@ -51,7 +51,9 @@ def test_ordinary_loop_count_respects_tail_and_gsu(
         sgprs={"LoopCounter": 6, "SizesSum": 8, "GSU": 9},
     )
     module = KernelWriterAssembly._calculateOrdinaryLoopNumIter(
-        writer, {"DepthU": 16, "GlobalSplitU": gsu}, "LoopCounter", 0,
+        writer,
+        {"DepthU": 16, "GlobalSplitU": gsu, "ProblemType": {"FusedA2A": "Disabled"}},
+        "LoopCounter", 0,
         ContinuousRegister(32, 3),
     )
     observed = run_scalar_kernel(
@@ -85,6 +87,7 @@ def test_ordinary_srd_routes_general_batch_and_gsu(
 
     writer = SimpleNamespace(
         states=SimpleNamespace(kernel=kernel), allocTmpSgpr=alloc_tmp,
+        gsuMaskHex=lambda kernel: "0x3fff",
         shiftSrd=lambda ch: Module("gfx950 requires no SRD shift"),
         # Outside ReuseAcrossPersistent's reuse copy a literal label keeps its name.
         rapLabel=lambda name: name,

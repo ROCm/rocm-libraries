@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2018-2023 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -52,13 +52,13 @@ namespace rocalution
     struct MatrixCSR
     {
         // Row offsets (row ptr)
-        PointerType* row_offset;
+        PointerType* row_offset = nullptr;
 
         // Column index
-        IndexType* col;
+        IndexType* col = nullptr;
 
         // Values
-        ValueType* val;
+        ValueType* val = nullptr;
     };
 
     // Sparse Matrix - Modified Sparse Compressed Row Format MCSR
@@ -66,36 +66,36 @@ namespace rocalution
     struct MatrixMCSR
     {
         // Row offsets (row ptr)
-        IndexType* row_offset;
+        IndexType* row_offset = nullptr;
 
         // Column index
-        IndexType* col;
+        IndexType* col = nullptr;
 
         // Values
-        ValueType* val;
+        ValueType* val = nullptr;
     };
 
     template <typename ValueType, typename IndexType, typename Index = IndexType>
     struct MatrixBCSR
     {
         // Number of block rows
-        Index nrowb;
+        Index nrowb = 0;
         // Number of block columns
-        Index ncolb;
+        Index ncolb = 0;
         // Number of block nnz
-        int64_t nnzb;
+        int64_t nnzb = 0;
 
         // Block dimension
-        Index blockdim;
+        Index blockdim = 0;
 
         // Row offsets (row ptr)
-        IndexType* row_offset;
+        IndexType* row_offset = nullptr;
 
         // Column index
-        IndexType* col;
+        IndexType* col = nullptr;
 
         // Values
-        ValueType* val;
+        ValueType* val = nullptr;
     };
 
     // Sparse Matrix - Coordinate Format COO
@@ -103,13 +103,13 @@ namespace rocalution
     struct MatrixCOO
     {
         // Row index
-        IndexType* row;
+        IndexType* row = nullptr;
 
         // Column index
-        IndexType* col;
+        IndexType* col = nullptr;
 
         // Values
-        ValueType* val;
+        ValueType* val = nullptr;
     };
 
     // Sparse Matrix - Diagonal Format DIA (see DIA_IND for indexing)
@@ -117,13 +117,13 @@ namespace rocalution
     struct MatrixDIA
     {
         // Number of diagonal
-        Index num_diag;
+        Index num_diag = 0;
 
         // Offset with respect to the main diagonal
-        IndexType* offset;
+        IndexType* offset = nullptr;
 
         // Values
-        ValueType* val;
+        ValueType* val = nullptr;
     };
 
     // Sparse Matrix - ELL Format (see ELL_IND for indexing)
@@ -131,13 +131,13 @@ namespace rocalution
     struct MatrixELL
     {
         // Maximal elements per row
-        Index max_row;
+        Index max_row = 0;
 
         // Column index
-        IndexType* col;
+        IndexType* col = nullptr;
 
         // Values
-        ValueType* val;
+        ValueType* val = nullptr;
     };
 
     // Sparse Matrix - Hybrid Format HYB (Contains ELL and COO Matrices)
@@ -153,7 +153,7 @@ namespace rocalution
     struct MatrixDENSE
     {
         // Values
-        ValueType* val;
+        ValueType* val = nullptr;
     };
 
 } // namespace rocalution

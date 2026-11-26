@@ -67,14 +67,16 @@ def selection_path(manifest_path) -> Path:
 
 
 @pytest.fixture(scope="module")
-def shipped(manifest, manifest_path) -> tuple:
-    """(directory, KDP, KMD) the provider ships for this manifest's pack."""
-    pack = manifest["pack"]
+def shipped(manifest, selection) -> tuple:
+    """(directory, KDP, KMD) the provider ships for this manifest's pack. The files are
+    named by the engine's slug, which is not always the pack name
+    (``gfx942_attention_unified3d`` in ``gfx942_attention_unified_3d/``)."""
+    slug = selection.engine.slug
     directory = _DESCRIPTORS / manifest["authored_subpath"]
-    kdp = directory / "artifacts" / f"{pack}.kdp.json"
+    kdp = directory / "artifacts" / f"{slug}.kdp.json"
     if not kdp.is_file():
         pytest.skip(f"shipped KDP not in this checkout: {kdp}")
-    return directory, kdp, directory / f"{pack}.kmd.json"
+    return directory, kdp, directory / f"{slug}.kmd.json"
 
 
 @pytest.fixture(scope="module")
@@ -334,14 +336,210 @@ def test_g2_the_shipped_catalog_is_generated_from_the_selection(
 
     # The catalog diff covers the KDP's catalog; this covers every byte of every
     # file. The KDP's DVC object is LF; the git-tracked files are compared as text
-    # because an autocrlf checkout holds them as CRLF.
-    assert kdp.read_bytes() == shipped_kdp.read_bytes()
+    # because an autocrlf checkout holds them as CRLF. A mismatch fails with
+    # pytest.fail, not assert: pytest's diff of two MB-sized KDPs runs for longer
+    # than the ctest timeout.
+    if kdp.read_bytes() != shipped_kdp.read_bytes():
+        pytest.fail(f"{kdp.name}: bytes differ from the shipped {shipped_kdp}")
     others = sorted(p.name for p in descriptors.glob("*.json") if p != kdp)
     assert others == sorted(p.name for p in shipped_dir.glob("*.json"))
     for name in others:
-        assert (descriptors / name).read_text(encoding="utf-8") == (
+        if (descriptors / name).read_text(encoding="utf-8") != (
             shipped_dir / name
-        ).read_text(encoding="utf-8"), name
+        ).read_text(encoding="utf-8"):
+            pytest.fail(f"{name}: text differs from the shipped {shipped_dir / name}")
+
+
+@pytest.fixture(scope="module")
+def bundle(manifest) -> Path:
+    """The directory the provider ships for this manifest's pack. Unlike `shipped` it needs
+    no KDP: the checks that use it read only the UED and the UHDs."""
+    directory = _DESCRIPTORS / manifest["authored_subpath"]
+    assert (
+        directory.is_dir()
+    ), f"{manifest['authored_subpath']} is not under {_DESCRIPTORS}"
+    return directory
+
+
+#: `uhd_gen` imports its own dependency set (``tools/uhd_gen/requirements.txt``:
+#: flatbuffers, lightgbm, numpy, pandas, pyarrow, scikit-learn), which this generator's
+#: own ``requirements.txt`` deliberately does not carry. The gates below reach it only
+#: for a bundle that ships a model binary, so a venv built for this suite alone can lack
+#: it entirely.
+_NO_UHD_GEN = (
+    "uhd_gen is not importable ({error}). The gates that read a shipped model binary "
+    "need uhd_gen's dependencies (tools/uhd_gen/requirements.txt); install them to run "
+    "them. This suite's own requirements.txt does not carry them, the same way it does "
+    "not carry rocm_kpack."
+)
+
+
+def _uhd_gen():
+    """`uhd_gen`'s promotion checks, run on the shipped files rather than reimplemented:
+    promote refuses a model the runtime would refuse, and so must a model that ships.
+
+    Skips rather than fails when `uhd_gen` cannot be imported: its dependencies are not
+    this suite's, so an absent one is an unrun gate, not a broken bundle. A bundle that
+    ships no model never gets here, so the skip is only reachable where there is
+    something to check and no means to check it.
+    """
+    tools = str(_ROOT.parent)
+    if tools not in sys.path:
+        sys.path.append(tools)
+    try:
+        from uhd_gen import promote, provenance
+    except ImportError as error:  # pragma: no cover - depends on the venv
+        pytest.skip(_NO_UHD_GEN.format(error=error))
+
+    return promote, provenance
+
+
+@dataclasses.dataclass(frozen=True)
+class _ShippedUhd:
+    """One UHD under a bundle's ``heuristics/``, placed by its path the way promote
+    installs it: ``heuristics/<UED id>[/<slot>]/<role>/<arch>[/<metric>]/<file>``."""
+
+    path: Path
+    document: dict
+    role: str
+    slot: str | None
+    arch: str
+    metric_dir: str | None
+
+
+def _shipped_uhds(bundle: Path) -> list:
+    _, provenance = _uhd_gen()
+    root = bundle / "heuristics"
+    found = []
+    for path in sorted(root.rglob("*.uhd.json")):
+        parts = path.relative_to(root).parts[1:-1]  # minus the UED id and the file
+        roles = [i for i, part in enumerate(parts) if part in provenance.ROLES]
+        assert (
+            roles and roles[0] <= 1 and len(parts) > roles[0] + 1
+        ), f"{path} is not under heuristics/<UED id>[/<slot>]/<role>/<arch>[/<metric>]"
+        at = roles[0]
+        found.append(
+            _ShippedUhd(
+                path,
+                json.loads(path.read_text(encoding="utf-8")),
+                parts[at],
+                parts[0] if at else None,
+                parts[at + 1],
+                parts[at + 2] if len(parts) > at + 2 else None,
+            )
+        )
+    return found
+
+
+def test_g8_the_ued_binds_exactly_the_uhds_shipped_under_heuristics(bundle):
+    """A model on disk the UED does not bind is never loaded, and a binding with no model
+    loads nothing: either way the engine ranks without it and nothing else notices. Needs
+    no model binary, so it runs wherever the descriptors do."""
+    if not (bundle / "heuristics").is_dir():
+        return  # a bundle with no trained models has no binding to check
+    promote, provenance = _uhd_gen()
+    index = provenance.load_descriptor_tree(bundle)
+    ued_path, ued = provenance.select_engine(index, None)
+    installed, installed_ids = promote._installed_uhds(bundle)
+    references = list(promote._role_references(ued_path, ued))
+
+    missing = sorted(
+        f"{role_key}.{arch}: {identity}"
+        for _, role_key, arch, identity, _ in references
+        if identity not in installed_ids
+    )
+    assert not missing, f"the UED binds UHDs the bundle does not hold: {missing}"
+
+    shipped = set()
+    for uhd in _shipped_uhds(bundle):
+        identity = provenance.descriptor_id(uhd.document.get("id"), str(uhd.path))
+        assert (
+            uhd.path.relative_to(bundle / "heuristics").parts[0] == ued["id"]
+        ), f"{uhd.path} is under another engine's heuristics directory than the UED's {ued['id']}"
+        assert uhd.metric_dir == promote._score_metric(uhd.document), (
+            f"{uhd.path} sits under metric {uhd.metric_dir!r} but declares score.metric "
+            f"{promote._score_metric(uhd.document)!r}"
+        )
+        shipped.add((promote._role_key(uhd.role, uhd.slot), uhd.arch, identity))
+    heuristics = (bundle / "heuristics").resolve()
+    bound = {
+        (role_key, arch, identity)
+        for _, role_key, arch, identity, _ in references
+        if heuristics in installed_ids[identity].resolve().parents
+    }
+    assert shipped == bound, (
+        f"shipped under heuristics/ but unbound: {sorted(shipped - bound)}; "
+        f"bound but not shipped there: {sorted(bound - shipped)}"
+    )
+
+
+def test_g8_every_shipped_uhd_was_trained_against_the_shipped_descriptors(shipped):
+    """promote's `compare_provenance`, on the shipped files: the UED, KMD and matcher ids and
+    revisions a model records must still be the bundle's, or the loader drops the model
+    (`provenanceError`) and the engine ranks without it. The packs' matchers come from the
+    KDP, so this needs it, as g2 does."""
+    bundle_dir, _, _ = shipped
+    if not (bundle_dir / "heuristics").is_dir():
+        return
+    promote, provenance = _uhd_gen()
+    index = provenance.load_descriptor_tree(bundle_dir)
+    _, ued = provenance.select_engine(index, None)
+    slots = provenance.declared_slots(ued)
+    failures = []
+    for uhd in _shipped_uhds(bundle_dir):
+        trained = uhd.document.get("trained_against", {})
+        if "ued" not in trained:
+            continue  # bound by a provider-declared id, as promote does
+        slot = (
+            promote._promotion_slot(uhd.role, trained, slots, ued.get("name", ""))
+            if slots is not None
+            else None
+        )
+        try:
+            provenance.compare_provenance(
+                trained,
+                provenance.provenance_for_engine(index, ued, uhd.arch, slot),
+                foreign_matchers=provenance.foreign_matcher_ids(
+                    index, ued, uhd.arch, slot
+                ),
+            )
+        except provenance.ProvenanceError as error:
+            failures.append(f"{uhd.path.relative_to(bundle_dir)}: {error}")
+    assert not failures, "\n".join(failures)
+
+
+def test_g8_every_shipped_model_binary_is_one_the_engine_loads(bundle):
+    """promote's `_verify_artifact`, on the shipped bytes: the payload hash, the FlatBuffer
+    and its feature count, and the model's features_hash against its UHD's. `hkp_pack`
+    accepts any bytes as `model.bin`, and a refused model falls back silently."""
+    if not (bundle / "heuristics").is_dir():
+        return
+    promote, _ = _uhd_gen()
+    failures, unpulled = [], []
+    for uhd in _shipped_uhds(bundle):
+        adapter = uhd.document["adapter"]
+        if adapter not in ("static_order", "native"):
+            key = "library" if adapter == "custom_library" else "artifact"
+            if not (uhd.path.parent / uhd.document[adapter][key]).is_file():
+                unpulled.append(uhd.path.parent / uhd.document[adapter][key])
+                continue
+        try:
+            artifact, _ = promote._artifact_path(
+                uhd.document, uhd.path, uhd.path.parent
+            )
+            promote._verify_artifact(uhd.document, artifact, uhd.role)
+        except promote.PromoteError as error:
+            failures.append(f"{uhd.path.relative_to(bundle)}: {error}")
+        except ImportError as error:
+            # Reading the model parses its FlatBuffer, so this is the first point that
+            # needs uhd_gen's own dependencies rather than just its modules. Absent one,
+            # the gate is unrun rather than failed -- the same call the suite makes for
+            # rocm_kpack, and for a model dvc has not pulled below.
+            pytest.skip(_NO_UHD_GEN.format(error=error))
+    assert not failures, "\n".join(failures)
+    if unpulled:
+        # The way g2 and g3 skip an un-pulled KDP: CI pulls, and a strict run fails the skip.
+        pytest.skip(f"shipped model not in this checkout (dvc pull): {unpulled}")
 
 
 def _full_space(manifest: dict) -> bool:
@@ -559,10 +757,15 @@ def test_g6_every_shipped_spec_hydrates_and_passes_the_builders_predicate(
 #: Per builder, a real spec field and a value its spec class accepts and its support
 #: predicate declines, so g6's positive control reaches the predicate. A new builder
 #: needs an entry here.
+# Keyed by builder, or by pack where two packs share a builder name.
 _PREDICATE_DECLINES = {
+    # gfx942 dense declines varlen in its predicate.
+    "gfx942_attention_dense": {"varlen": True},
     # gfx950 dense ships block_m 128 and 256 only.
     "build_attention_dense": {"block_m": 64},
-    # The tiled 2D/3D kernels are built for head_size 64, 128 and 256.
+    # The tiled 2D/3D kernels and the gfx950 and gfx942 split-KV modules (segment +
+    # reduce; both builders are named build_unified_attention_3d_tiled_module) are
+    # built for head_size 64, 128 and 256.
     "build_unified_attention_2d_tiled": {"head_size": 96},
     "build_unified_attention_3d_tiled": {"head_size": 96},
     "build_unified_attention_3d_tiled_module": {"head_size": 96},
@@ -600,15 +803,17 @@ def test_g6_catches_a_renamed_field_and_a_declined_spec(manifest, registry_confi
         for pack in registry_config["packs"]
         for k in pack["kernels"]
     )
-    assert manifest["builder"] in _PREDICATE_DECLINES, (
+    key = (
+        manifest["pack"]
+        if manifest["pack"] in _PREDICATE_DECLINES
+        else manifest["builder"]
+    )
+    assert key in _PREDICATE_DECLINES, (
         f"add a predicate-declined spec for {manifest['builder']} to "
         f"_PREDICATE_DECLINES"
     )
     renamed = {**source, "spec": {**source["spec"], "no_such_field": 1}}
-    declined = {
-        **source,
-        "spec": {**source["spec"], **_PREDICATE_DECLINES[manifest["builder"]]},
-    }
+    declined = {**source, "spec": {**source["spec"], **_PREDICATE_DECLINES[key]}}
     failures = _hydration_failures(
         manifest, [("renamed", renamed), ("declined", declined)]
     )
@@ -701,3 +906,165 @@ def test_g7_catches_a_missing_accessor_and_a_disagreeing_value(
     }
     failures = _observation_failures(broken, [(name, source, metadata)])
     assert any("no_such_accessor" in f for f in failures), failures
+
+
+_UNIFIED_2D = "hipkernel:Gfx942AttentionUnified2D"
+
+
+@pytest.mark.parametrize(
+    "manifest_path",
+    [_ROOT / "configs" / "gfx942_attention_unified_2d.engine.yaml"],
+    indirect=True,
+    ids=lambda p: p.name,
+)
+def test_g9_each_production_kernel_is_rockes_own_prefill_spec(
+    manifest, registry_config
+):
+    """The unified 2D catalog's production kernels (the mask limit on) are the spec rocKE's
+    `_tiled_spec_from_problem` builds for a long prefill of their (dtype, head size, GQA
+    ratio), field for field, so a rocKE default or builder change that moves the production
+    spec fails here instead of leaving the catalog on a stale stack. Every (dtype, head size,
+    ratio) cell has one. Not a comparison of cold selection: the sweep ranks them. Only the
+    gfx942 unified 2D manifest enumerates production stacks, so it is the one case."""
+    assert manifest["engine"]["name"] == _UNIFIED_2D
+    enumerator.bind_provider(manifest.get("provider_root"))
+    from kernels.common.attention_unified import (
+        UnifiedAttentionProblem,
+        _tiled_spec_from_problem,
+    )
+
+    kernels = [k for pack in registry_config["packs"] for k in pack["kernels"]]
+    production = [k for k in kernels if k["metadata"]["use_transposed_mask_limit"]]
+    cells = collections.Counter(
+        (
+            k["metadata"]["dtype"],
+            k["metadata"]["head_size"],
+            k["metadata"]["num_queries_per_kv"],
+        )
+        for k in production
+    )
+    assert cells == {
+        (dtype, head, ratio): 1
+        for dtype in ("BF16", "FP16")
+        for head in (64, 128)
+        for ratio in (1, 2, 4, 8, 16)
+    }, cells
+    for kernel in production:
+        spec = kernel["kernel_source"]["spec"]
+        problem = UnifiedAttentionProblem(
+            total_q=2048,
+            num_seqs=1,
+            num_query_heads=spec["num_query_heads"],
+            num_kv_heads=spec["num_kv_heads"],
+            head_size=spec["head_size"],
+            block_size=spec["block_size"],
+            max_seqlen_q=2048,
+            max_seqlen_k=4096,
+            dtype=spec["dtype"],
+            num_cus=304,
+            num_kv_blocks=256,
+        )
+        rocke = dataclasses.asdict(_tiled_spec_from_problem(problem, manifest["arch"]))
+        # num_seqs is neutral: the kernel reads the batch at run time.
+        moved = {
+            f: (v, rocke[f])
+            for f, v in spec.items()
+            if f != "num_seqs" and rocke[f] != v
+        }
+        assert (
+            not moved
+        ), f"{kernel['name']} differs from rocKE's production spec: {moved}"
+
+
+def _knob_clashes(features, knobs, kernels) -> list:
+    """Names of the kernels sharing one engine-knob tuple inside one cell, per clash.
+    `kernels` is `(metadata, name)` pairs."""
+    cells = collections.defaultdict(list)
+    for metadata, name in kernels:
+        cell = tuple(metadata.get(f) for f in features)
+        cells[cell].append((tuple(metadata.get(k) for k in knobs), name))
+    return [
+        names
+        for entries in cells.values()
+        for names in _group_names(entries).values()
+        if len(names) > 1
+    ]
+
+
+# Bundles whose whole enumeration is a catalog a sweep installs: every kernel a reduction
+# may keep must already page and load without a collision, before any is chosen.
+_SWEPT_WHOLE = frozenset({"gfx942_attention_dense", "gfx942_attention_unified_2d"})
+
+
+@pytest.mark.parametrize("name", sorted(_SWEPT_WHOLE))
+def test_g8_every_cell_is_addressable_by_the_engine_knobs(name):
+    """hipDNN pages a graph's candidates by their engine-knob tuple and refuses a page in
+    which two candidates share one ("Ambiguous enrolled knob tuple"). A graph's candidates
+    all sit in one cell (the reduction's feature fields), so inside every cell each
+    kernel's tuple of engine knobs must be unique."""
+    selection = load_config(_ROOT / "configs" / f"{name}.yaml")
+    features = list(selection.reduction["fields"]["feature"])
+    knobs = list(selection.engine.knobs)
+    clashes = _knob_clashes(
+        features,
+        knobs,
+        [(k.metadata, k.name) for k in _selection_kernels(selection)],
+    )
+    assert not clashes, (
+        f"engine knobs {knobs} do not tell these kernels apart within a cell; "
+        f"add the KMD field that differs to engine.knobs: {clashes[:3]}"
+    )
+
+
+@pytest.mark.parametrize("name", sorted(_SWEPT_WHOLE))
+def test_g8_the_whole_enumeration_pages_and_loads_without_a_collision(name):
+    """g8 over the manifest's full enumeration, not only the shipped selection: the swept
+    catalog is the enumeration, so every field that varies inside a cell must be an engine
+    knob (else enumerateCandidates refuses the page), and every kernel's metadata completed
+    with the KMD defaults -- the loader's catalog key -- must be unique (else the loader
+    keeps one and drops the other)."""
+    if not _ROCKE_LIBRARY.is_dir():
+        pytest.skip(f"rocKE library not in this checkout: {_ROCKE_LIBRARY}")
+    manifest = enumerator.load_manifest(str(_ROOT / "configs" / f"{name}.engine.yaml"))
+    enumerator.bind_provider(manifest.get("provider_root"))
+    registry_config = enumerator.build_config(
+        manifest, enumerator.Registry(manifest), warn=lambda _: None, strict=True
+    )
+    kernels = [k for pack in registry_config["packs"] for k in pack["kernels"]]
+    features = list(manifest["reduction"]["fields"]["feature"])
+    knobs = list(registry_config["engine"]["knobs"])
+    clashes = _knob_clashes(
+        features, knobs, [(k["metadata"], k["name"]) for k in kernels]
+    )
+    assert not clashes, (
+        f"engine knobs {knobs} do not tell these enumerated kernels apart within a cell: "
+        f"{clashes[:3]}"
+    )
+    varying = {
+        f
+        for f in {name for k in kernels for name in k["metadata"]}
+        if len({tuple(k["metadata"].get(x) for x in features + [f]) for k in kernels})
+        > len({tuple(k["metadata"].get(x) for x in features) for k in kernels})
+    }
+    assert varying <= set(knobs), (
+        f"KMD fields {sorted(varying - set(knobs))} vary inside a cell but are not "
+        f"engine knobs"
+    )
+    fields = registry_config["kmd_fields"]
+    keys = collections.Counter(
+        tuple(
+            json.dumps(k["metadata"].get(f["name"], f.get("default_value")))
+            for f in fields
+        )
+        for k in kernels
+    )
+    repeated = [key for key, count in keys.items() if count > 1]
+    assert not repeated, f"{len(repeated)} catalog keys repeat, e.g. {repeated[:2]}"
+    assert len(keys) == len(kernels)
+
+
+def _group_names(entries):
+    grouped = collections.defaultdict(list)
+    for knob_values, name in entries:
+        grouped[knob_values].append(name)
+    return grouped

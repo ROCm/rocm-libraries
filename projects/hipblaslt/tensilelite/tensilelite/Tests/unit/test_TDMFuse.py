@@ -129,30 +129,6 @@ def test_paired_only_swaps_scale_parity_against_default():
 # Solution wiring. Needs amdclang++ gfx1250; skipped otherwise.
 # ---------------------------------------------------------------------------
 @pytest.fixture(scope="module")
-def gfx1250_iim():
-    from tensilelite.Common.Architectures import gfxToIsa
-    from tensilelite.Common.Capabilities import makeIsaInfoMap
-    from tensilelite.Toolchain.Validators import validateToolchain
-
-    cxx = validateToolchain("amdclang++")
-    isa = gfxToIsa("gfx1250")
-    iim = makeIsaInfoMap([isa], cxx)
-    if not iim[isa].asmCaps["SupportedISA"]:
-        pytest.skip("amdclang++ in this environment does not support gfx1250")
-    return iim
-
-
-@pytest.fixture(scope="module")
-def assembler():
-    from tensilelite.Toolchain.Assembly import makeAssemblyToolchain
-    from tensilelite.Toolchain.Validators import validateToolchain, ToolchainDefaults
-
-    cxx = validateToolchain("amdclang++")
-    bundler = validateToolchain(ToolchainDefaults.OFFLOAD_BUNDLER)
-    return makeAssemblyToolchain(cxx, bundler, "default").assembler
-
-
-@pytest.fixture(scope="module")
 def _gp_gfx1250(gfx1250_iim):
     from tensilelite.Common.GlobalParameters import globalParameters, assignGlobalParameters
 
@@ -533,6 +509,7 @@ class Stub:
                      "_dcpTokenSide", "_dcpCurrentToken", "_dcpTdmIssueTokens",
                      "tdmPairOnEveryWave", "removeStaggerCopies", "tdmHalfPlrReenableSgprs",
                      "removeStaggerIncs", "graIncrementMask", "releaseGlobalReadIncsSgprsAfterTdmWaveSep",
+                     "hplrMasksLoopIncrement", "hplrLastIterCompare",
                      "_emitTdmWaveSetSkipSCC"):
             fn = getattr(KernelWriterAssembly, name, None)
             if fn is not None:
@@ -2014,10 +1991,11 @@ def test_halfplr_masks_the_own_increment_of_every_set_without_a_shadow(fuse, mx,
     if not halfPLR:
         want = ()
     elif numWaves == 1:
-        # One wave takes TDMFuse=0 only, declining rows 1-3 to its row: a Group0 per tensor,
-        # and the mask zeroes each one's own increment.
+        # One wave takes TDMFuse=0 only, declining rows 1-3 to its row: a Group0 per tensor.
+        # tdmIncrementAB masks the last-iteration increment in a temporary, so no own
+        # increment is zeroed.
         assert _groupingAccepted(state) is (fuse == 0)
-        want = ("A", "B") + ("MXSA",) * mxA + ("MXSB",) * mxB
+        want = ()
     elif fuse in (2, 3) and mxA and mxB and numWaves == 2:
         want += ("MXSB",)  # MXSB shares wave 1 with MXSA on a set of its own
     assert TF.tdmHalfPlrMaskedIncs(state) == want
@@ -2446,7 +2424,8 @@ def sparseKernel(gfx1250_iim, tmp_path_factory):
 
 
 def _mainLoopMetadata(source):
-    """Main-loop (metadata address advances, metadata issues, odd-wave skips)."""
+    """(metadata address advances, metadata issues, odd-wave skip branches) in the main loop, and
+    the odd-wave NULL-descriptor clears before it."""
     k = _AsmKernel(source)
     begin, end = k.mainLoop()
     # The increment reaches the add through the StaggerU wrap select, so match the self-add.
@@ -2455,7 +2434,10 @@ def _mainLoopMetadata(source):
     issues = k.tdmIssues(begin, end).count(k.setIndex("tdmMetadataGroup0"))
     skips = [name for name, pos in k.labels.items()
              if "TdmMetadataSkipOddWave" in name and begin <= pos < end]
-    return len(advances), issues, len(skips)
+    # Odd waves get count = 0 (a NULL tensor) in Group 0 dword 0 once, before the loop.
+    nullInits = [ops for mnemonic, ops in k.instructions[:begin]
+                 if mnemonic == "s_cmov_b32" and tuple(ops) == ("s[sgprtdmMetadataGroup0+0]", "0")]
+    return len(advances), issues, len(skips), len(nullInits)
 
 
 # With MX scales the TDMFuse=0 reference itself overflows SGPRs (err -2, develop included), so the
@@ -2466,10 +2448,14 @@ def _mainLoopMetadata(source):
 @pytest.mark.parametrize("fuse", [1, 2, 3])
 def test_sparse_rows_load_and_advance_the_metadata_as_tdmfuse0_does(
         gfx1250_iim, sparseKernel, fuse, mx, numWaves, sparse):
-    """Each main-loop iteration advances tdmMetadataGroup0 once and loads it on even waves only."""
+    """Each main-loop iteration advances tdmMetadataGroup0 and issues its load on every wave,
+    without a branch; odd waves hold a NULL descriptor (count = 0), so only even waves move data."""
     mxA, mxB = _MX_STATES[mx]
     reference = _mainLoopMetadata(sparseKernel(0, numWaves, mxA, mxB, sparse))
-    assert min(reference) >= 1, reference
+    advances, issues, skips, nullInits = reference
+    assert advances >= 1 and issues >= 1, reference
+    assert skips == 0, reference
+    assert nullInits >= 1, reference
     assert _mainLoopMetadata(sparseKernel(fuse, numWaves, mxA, mxB, sparse)) == reference
 
 

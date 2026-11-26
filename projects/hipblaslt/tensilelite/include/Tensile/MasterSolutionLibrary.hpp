@@ -28,6 +28,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <cassert>
 #include <chrono>
 #include <filesystem>
 #include <iterator>
@@ -36,6 +37,8 @@
 #include <vector>
 
 #include <Tensile/Debug.hpp>
+#include <Tensile/ReadMostlyMap.hpp>
+#include <Tensile/SingleSolutionLibrary.hpp>
 #include <Tensile/SolutionBlobCache.hpp>
 #include <Tensile/SolutionLibrary.hpp>
 #include <Tensile/Tensile.hpp>
@@ -117,6 +120,35 @@ namespace TensileLite
     }
 
     /**
+ * Like resolveContextSolution, but wraps the result in a
+ * SingleSolutionLibrary — the lazy (blobCache) or eager (solution map)
+ * form as appropriate.  Returns nullptr when the context is missing or
+ * the index is not found; the caller decides the error message.
+ */
+    template <typename MyProblem, typename MySolution>
+    std::shared_ptr<SingleSolutionLibrary<MyProblem, MySolution>>
+        resolveSSLibrary(LibraryIOContext<MySolution>* ctx, int index)
+    {
+        using SSLib = SingleSolutionLibrary<MyProblem, MySolution>;
+
+        if(ctx == nullptr || (ctx->solutions == nullptr && ctx->blobCache == nullptr))
+            return nullptr;
+
+        if(ctx->blobCache)
+        {
+            if(!ctx->blobCache->contains(index))
+                return nullptr;
+            return std::make_shared<SSLib>(index, ctx->blobCache);
+        }
+
+        auto iter = ctx->solutions->find(index);
+        if(iter == ctx->solutions->end())
+            return nullptr;
+
+        return std::make_shared<SSLib>(iter->second);
+    }
+
+    /**
  * \ingroup SolutionLibrary
  *
  * Root level library object. Contains all individual solutions in a map
@@ -158,10 +190,16 @@ namespace TensileLite
             indexLoadedLibraries;
 
         std::shared_ptr<SolutionLibrary<MyProblem, MySolution>> library;
-        mutable SolutionMap<MySolution>                         solutions;
-        std::string                                             version;
-        mutable std::mutex                                      solutionsGuard;
-        mutable std::atomic<bool>                               lastFindTopRetAll = false;
+        // Entries are never erased or replaced; resolvedSolutions relies on it.
+        mutable SolutionMap<MySolution> solutions;
+        std::string                     version;
+        mutable std::mutex              solutionsGuard;
+        // Indices resolveSolutionByIndex has returned, read without
+        // solutionsGuard; written under it. Holds the objects `solutions` holds.
+        mutable ReadMostlyMap<int, std::shared_ptr<MySolution>> resolvedSolutions;
+        // Per-shard load mutexes for loadLibrary, keyed by file prefix and
+        // guarded by solutionsGuard.
+        mutable std::map<std::string, std::shared_ptr<std::mutex>> shardLoadMutexes;
 
         // Indexed-format state. `blobCache` serves this file's own solutions;
         // `solutionSources` collects the caches of lazily loaded shards, keyed by
@@ -240,6 +278,21 @@ namespace TensileLite
             --it;
             std::string filePrefix = it->second;
             // load the file here directly and push the library for later use.
+            // Loads of one shard are serialized so it is parsed once; shards
+            // load in parallel. Lock order: shard mutex, then solutionsGuard.
+            std::shared_ptr<std::mutex> shardMutex;
+            {
+                std::lock_guard<std::mutex> lock(solutionsGuard);
+                if(loadedFiles.find(filePrefix) != loadedFiles.end())
+                {
+                    return;
+                }
+                auto& slot = shardLoadMutexes[filePrefix];
+                if(!slot)
+                    slot = std::make_shared<std::mutex>();
+                shardMutex = slot;
+            }
+            std::lock_guard<std::mutex> shardLock(*shardMutex);
             {
                 std::lock_guard<std::mutex> lock(solutionsGuard);
                 if(loadedFiles.find(filePrefix) != loadedFiles.end())
@@ -247,6 +300,7 @@ namespace TensileLite
                     return;
                 }
             }
+            beforeShardLoaded(filePrefix);
             if(Debug::Instance().printDataInit())
             {
                 std::cout << "Loading library for index " << index
@@ -258,7 +312,17 @@ namespace TensileLite
 
             auto newLibrary = LoadLibraryFile<MyProblem, MySolution>(path.string());
             auto mLibrary
-                = static_cast<MasterSolutionLibrary<MyProblem, MySolution>*>(newLibrary.get());
+                = dynamic_cast<MasterSolutionLibrary<MyProblem, MySolution>*>(newLibrary.get());
+
+            // Nothing is recorded for a shard that did not load, so a later
+            // lookup tries it again.
+            if(mLibrary == nullptr || mLibrary->library == nullptr)
+            {
+                if(Debug::Instance().printDataInit())
+                    std::cout << "Failed to load library for index " << index
+                              << " from file: " << path.string() << std::endl;
+                return;
+            }
 
             using std::begin;
             using std::end;
@@ -314,6 +378,12 @@ namespace TensileLite
                 return localLibrary ? localLibrary->lookupIndex(index)
                                     : std::shared_ptr<MySolution>();
 #endif
+            if(auto const* resolved = resolvedSolutions.find(index))
+            {
+                assert(resolvedMatchesSolutions(index, *resolved));
+                return *resolved;
+            }
+
             // Idempotent, and a no-op unless this is a lazy-loading master.
             loadLibrary(index);
 
@@ -321,7 +391,11 @@ namespace TensileLite
                 std::lock_guard<std::mutex> lock(solutionsGuard);
                 auto                        iter = solutions.find(index);
                 if(iter != solutions.end())
+                {
+                    if(iter->second)
+                        resolvedSolutions.insert(index, iter->second);
                     return iter->second;
+                }
             }
 
             std::shared_ptr<MySolution> solution;
@@ -352,7 +426,10 @@ namespace TensileLite
             // Publish so the workspace fixups below run once per solution and
             // later lookups take the map hit.
             std::lock_guard<std::mutex> lock(solutionsGuard);
-            return solutions.emplace(index, solution).first->second;
+            auto const& published = solutions.emplace(index, solution).first->second;
+            if(published)
+                resolvedSolutions.insert(index, published);
+            return published;
         }
 
         /// Parses every solution this library can serve and publishes it into
@@ -433,12 +510,28 @@ namespace TensileLite
             {
                 return std::shared_ptr<MySolution>();
             }
-            if(solution->requiredHostWorkspaceSizePerProblem == static_cast<size_t>(-1))
-            {
-                solution->requiredHostWorkspaceSizePerProblem
-                    = solution->requiredHostSizeGroupedGemmSingle(problem, hardware);
-            }
+            solution->ensureRequiredHostWorkspaceSize(problem, hardware);
             return solution;
+        }
+
+        /// getSolutionByIndex for a caller that uses the solution only during
+        /// the call. A resolved index is returned without touching its
+        /// reference count: resolvedSolutions keeps it for the library's
+        /// lifetime. Any other index, including every local-kernel index, is
+        /// resolved by getSolutionByIndex and also returned in `owner`.
+        MySolution const* getSolutionByIndexForCall(MyProblem const&             problem,
+                                                    Hardware const&              hardware,
+                                                    const int                    index,
+                                                    std::shared_ptr<MySolution>& owner) const
+        {
+            auto const* resolved = resolvedSolutions.find(index);
+            if(!resolved)
+            {
+                owner = getSolutionByIndex(problem, hardware, index);
+                return owner.get();
+            }
+            (*resolved)->ensureRequiredHostWorkspaceSize(problem, hardware);
+            return resolved->get();
         }
 
         virtual std::shared_ptr<MySolution> getSolutionByIndex(Hardware const& hardware,
@@ -487,8 +580,7 @@ namespace TensileLite
                                                       nop,
                                                       solution->problemType.useGateResidual,
                                                       solution->problemType.gateResidualDataTypeWhiteList);
-                solution->requiredHostWorkspaceSizePerProblem
-                    = solution->requiredHostSizeGroupedGemmSingle(problem, hardware);
+                solution->ensureRequiredHostWorkspaceSize(problem, hardware);
             }
             return solution;
         }
@@ -544,7 +636,8 @@ namespace TensileLite
                     Task task(hardware, problem, *(selected_solution));
                     if((*selected_solution->problemPredicate)(problem)
                        && (*selected_solution->taskPredicate)(task)
-                       && (*selected_solution->hardwarePredicate)(hardware))
+                       && (*selected_solution->hardwarePredicate)(hardware)
+                       && selected_solution->deviceScalarAlphaSupported(problem))
                         rv = selected_solution;
                     else
                         return nullptr;
@@ -636,24 +729,13 @@ namespace TensileLite
             {
                 SolutionVector<MySolution> rv{local};
                 if(numSolutions == 1)
-                {
-                    lastFindTopRetAll = false;
                     return rv;
-                }
-                auto rest         = library->findTopSolutions(problem, hardware, numSolutions - 1);
-                lastFindTopRetAll = library->lastFindTopAlreadyRetAll();
+                auto rest = library->findTopSolutions(problem, hardware, numSolutions - 1);
                 rv.insert(rv.end(), rest.begin(), rest.end());
                 return rv;
             }
 #endif
-            auto result       = library->findTopSolutions(problem, hardware, numSolutions);
-            lastFindTopRetAll = library->lastFindTopAlreadyRetAll();
-            return result;
-        }
-
-        virtual bool lastFindTopAlreadyRetAll() const override
-        {
-            return lastFindTopRetAll;
+            return library->findTopSolutions(problem, hardware, numSolutions);
         }
 
         virtual SolutionVector<MySolution>
@@ -663,6 +745,19 @@ namespace TensileLite
         {
             return library->findTopSolutionsGroupedGemm(problems, hardware, numSolutions);
         }
+
+    private:
+        bool resolvedMatchesSolutions(int index, std::shared_ptr<MySolution> const& resolved) const
+        {
+            std::lock_guard<std::mutex> lock(solutionsGuard);
+            auto                        iter = solutions.find(index);
+            return iter != solutions.end() && iter->second == resolved;
+        }
+
+    protected:
+        // Runs in loadLibrary under the shard's load mutex, before the shard
+        // file is parsed. If it throws, nothing is registered.
+        virtual void beforeShardLoaded(std::string const& /*filePrefix*/) const {}
     };
 
 } // namespace TensileLite
