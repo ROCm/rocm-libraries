@@ -572,7 +572,7 @@ void testing_trmm(const Arguments& arg)
         {
             if(i == number_cold_calls)
             {
-                getFrequencyMonitor().start();
+                getFrequencyMonitor().start(stream);
                 gpu_time_used = get_time_us_sync(stream);
             }
 

@@ -123,13 +123,18 @@ void testing_set_get_vector(const Arguments& arg)
         for(int iter = 0; iter < total_calls; iter++)
         {
             if(iter == number_cold_calls)
+            {
+                // the copies block the host, so nothing is queued: sample from now
+                getFrequencyMonitor().start();
                 gpu_time_used = get_time_us_no_sync();
+            }
 
             DAPI_DISPATCH(rocblas_set_vector_fn, (N, sizeof(T), hx, incx, db, ldd));
             DAPI_DISPATCH(rocblas_get_vector_fn, (N, sizeof(T), db, ldd, hy, incy));
         }
 
         gpu_time_used = get_time_us_no_sync() - gpu_time_used;
+        getFrequencyMonitor().stop();
 
         ArgumentModel<e_N, e_incx, e_incy, e_ldd>{}.log_args<T>(rocblas_cout,
                                                                 arg,

@@ -249,7 +249,7 @@ void testing_nrm2_batched(const Arguments& arg)
         {
             if(iter == number_cold_calls)
             {
-                getFrequencyMonitor().start();
+                getFrequencyMonitor().start(stream);
                 gpu_time_used = get_time_us_sync(stream); // in microseconds
             }
 

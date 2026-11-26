@@ -77,7 +77,7 @@ void Benchmark<LAMBDA>::run_timer()
         m_lambda_to_benchmark(iter % m_flush_batch_count);
     m_cold_time = get_time_us_sync(m_stream) - cold_start;
 
-    getFrequencyMonitor().start();
+    getFrequencyMonitor().start(m_stream);
     double hot_start = get_time_us_sync(m_stream);
     for(; iter < m_arg.iters + m_arg.cold_iters; iter++)
         m_lambda_to_benchmark(iter % m_flush_batch_count);

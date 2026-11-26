@@ -530,7 +530,7 @@ void testing_symm_hemm_batched(const Arguments& arg)
         {
             if(i == number_cold_calls)
             {
-                getFrequencyMonitor().start();
+                getFrequencyMonitor().start(stream);
                 gpu_time_used = get_time_us_sync(stream); // in microseconds
             }
             DAPI_DISPATCH(rocblas_fn,

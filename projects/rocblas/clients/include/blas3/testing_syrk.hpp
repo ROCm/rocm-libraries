@@ -440,7 +440,7 @@ void testing_syrk(const Arguments& arg)
 
         hipStream_t stream;
         CHECK_ROCBLAS_ERROR(rocblas_get_stream(handle, &stream));
-        getFrequencyMonitor().start();
+        getFrequencyMonitor().start(stream);
         gpu_time_used = get_time_us_sync(stream); // in microseconds
         for(int i = 0; i < number_hot_calls; i++)
         {
