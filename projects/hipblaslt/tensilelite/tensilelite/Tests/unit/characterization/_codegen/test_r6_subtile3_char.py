@@ -545,7 +545,7 @@ def test_r6_globalReadLDSBufferSwap_scale_path():
         "_DepthUA": 256, "_DepthUB": 256,
             "_DepthUMXSA": 8, "_DepthUMXSB": 8,
             "_ScalePeriodUA": 256, "_ScalePeriodUB": 256,
-        "MIWaveGroup": [2, 2], "WavefrontSize": 64,
+        "MIWaveGroup": [2, 2], "MIWaveTile": [4, 4], "WavefrontSize": 64,
     }
     # Construct scale TileInfos
     w_mxsa = _make_writer()

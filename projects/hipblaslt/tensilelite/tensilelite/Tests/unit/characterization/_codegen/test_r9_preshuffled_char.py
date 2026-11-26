@@ -114,6 +114,7 @@ def _kernel(swizzleA=False, swizzleB=False, miwavegroup=(4, 4), depthU=256):
         "_DepthUB": depthU,
         "DepthU": depthU,
         "MIWaveGroup": list(miwavegroup),
+        "MIWaveTile": [256 // (16 * miwavegroup[0]), 256 // (16 * miwavegroup[1])],
         "WavefrontSize": 64,
         "ProblemType": {
             "SwizzleTensorA": swizzleA,

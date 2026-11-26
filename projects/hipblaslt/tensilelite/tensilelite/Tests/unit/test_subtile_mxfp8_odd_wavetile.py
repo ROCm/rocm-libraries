@@ -14,8 +14,9 @@ two address registers set up for the runtime start parity
 These tests pin the contract:
   * odd MIWaveTile mxfp8 solutions VALIDATE on the dual-period path (DU128,
     PGR2): 16-wide, 48/80-wide single-wave, multi-wave, and both dims odd.
-  * they are rejected off that path (DU256), as is 16x16 (not dual-period) and
-    a tile whose data global read would start a wave mid-load.
+  * single-data-DU odd tiles ALSO validate off that path (DU256, single-period
+    scale emit); a tile whose data global read would start a wave mid-load
+    stays rejected there.
   * a small even tile like [2,2] still does not take dual-period at DU128.
   * the emitted assembly has the per-tile structure (one scale read per tile,
     two address registers, the start-parity setup).
@@ -160,23 +161,39 @@ def test_even_non_partitionable_avoids_dual_period(_gp_gfx950, gfx950_iim, assem
 
 
 # ---------------------------------------------------------------------------
-# Unsupported configs must be REJECTED (not emitted as a wrong kernel):
-#  - any odd MIWaveTile off the dual-period path (DU256): the legacy scale emit
-#    pairs tiles at compile time,
-#  - 16x16: cannot partition, so it is not dual-period at DU128 either,
-#  - a wave that would start on the second strip of a shared data global read
-#    (wrong results on GPU, also with unit scales).
+# Odd MIWaveTile mxfp8 is also supported off the dual-period path (DU256,
+# single-period scale emit) for tiles that resolve to a single data-DU round:
+# the per-tile scale read is emitted the same way, so they validate and run on
+# DU256 instead of being rejected.  (Multi-data-DU tiles at DU256 are a
+# separate, pre-existing PGR2 restriction, not an odd-tile limit.)
 # ---------------------------------------------------------------------------
-@pytest.mark.parametrize("mi", _ODD_SUPPORTED + [_SKINNY_SQ, _SHARED_GR])
-def test_odd_rejected_off_dual_period(_gp_gfx950, gfx950_iim, assembler, mi):
+_DU256_VALID = [_ODD_M3, _ODD_M5_1W, _BOTH_ODD, _SKINNY_MWG, _SKINNY_SQ]
+
+
+@pytest.mark.parametrize("mi", _DU256_VALID)
+def test_odd_valid_off_dual_period(_gp_gfx950, gfx950_iim, assembler, mi):
     sol = _solve(gfx950_iim, assembler, mi, depth_u=256)
-    assert sol.get("Valid") is False, f"odd MIWaveTile must be rejected at DU256: mi={mi}"
+    assert sol.get("Valid") is True, f"odd MIWaveTile should validate at DU256: mi={mi}"
+    assert sol.get("_DualPeriodMXFP8") is False, f"DU256 is the single-period path: mi={mi}"
 
 
+# ---------------------------------------------------------------------------
+# Unsupported configs must be REJECTED (not emitted as a wrong kernel):
+#  - 16x16: cannot partition, so it is not dual-period at DU128,
+#  - a wave that would start on the second strip of a shared data global read
+#    (wrong results on GPU, also with unit scales) -- rejected on both paths.
+# ---------------------------------------------------------------------------
 @pytest.mark.parametrize("mi", [_SKINNY_SQ, _SHARED_GR])
 def test_unsupported_odd_rejected(_gp_gfx950, gfx950_iim, assembler, mi):
     sol = _solve(gfx950_iim, assembler, mi, depth_u=128)
     assert sol.get("Valid") is False, f"unsupported config must be rejected: mi={mi}"
+
+
+def test_shared_gr_rejected_off_dual_period(_gp_gfx950, gfx950_iim, assembler):
+    # The data-GR shared-strip limit is independent of the scale path, so the
+    # shared-GR tile stays rejected at DU256 as well.
+    sol = _solve(gfx950_iim, assembler, _SHARED_GR, depth_u=256)
+    assert sol.get("Valid") is False, "shared data-GR odd tile must stay rejected at DU256"
 
 
 # ---------------------------------------------------------------------------
