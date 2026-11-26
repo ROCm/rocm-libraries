@@ -130,6 +130,7 @@ from .lanes import (
 )
 
 __all__ = [
+    "ISSUE_PATTERN",
     "LANE_TICKETS",
     "MEASURED_BUDGETS",
     "PENDING",
@@ -163,7 +164,7 @@ TEAMS: tuple[str, ...] = (_LIBRARY, _PLATFORM)
 PENDING_MAX_DAYS = 90
 QUARANTINE_MAX_DAYS = 30
 # A Jira id (AICK-1234) or a GitHub issue (ROCm/rocm-libraries#123).
-_ISSUE = re.compile(r"[A-Z][A-Z0-9]+-[0-9]+|ROCm/[A-Za-z0-9._-]+#[0-9]+")
+ISSUE_PATTERN = re.compile(r"[A-Z][A-Z0-9]+-[0-9]+|ROCm/[A-Za-z0-9._-]+#[0-9]+")
 
 
 def _require_test_path(kind: str, path: str) -> None:
@@ -214,7 +215,7 @@ def _require_recorded(
 
 def _require_issue(kind: str, subject: str, issue: str) -> None:
     """Fail unless ``issue`` is a tracked one: a Jira id or a GitHub issue."""
-    if not _ISSUE.fullmatch(issue):
+    if not ISSUE_PATTERN.fullmatch(issue):
         raise ValueError(
             f"{kind} failed - {subject}, issue={issue!r}, expected the issue that "
             "tracks it: a Jira id (AICK-1234) or ROCm/<repo>#<number>; file one "

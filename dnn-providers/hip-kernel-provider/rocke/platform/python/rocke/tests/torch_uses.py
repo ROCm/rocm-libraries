@@ -37,13 +37,13 @@ import argparse
 import ast
 import enum
 import re
-import shutil
-import subprocess
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
 from ..assets import platform_root
+from . import source_allowlist
+from .source_allowlist import tracked_files
 
 __all__ = [
     "TorchUse",
@@ -312,35 +312,9 @@ def torch_named_identifiers(source: str, filename: str) -> list[tuple[int, str]]
 def tree_files(root: Path) -> list[str]:
     """The files under ``root`` that the gate reads, relative POSIX paths, sorted:
     Python files and config files (:func:`is_config_file`) that git tracks or
-    would track (untracked but not ignored), so build trees, virtual environments
-    and ignored scratch directories are never read.
-
-    Raises ``RuntimeError`` when git is missing or ``root`` is not in a git
-    work tree: the gate checks a source checkout.
-    """
-    git = shutil.which("git")
-    if git is None:
-        raise RuntimeError(
-            f"tree_files failed - root={str(root)!r}, expected git on PATH to list "
-            "the source tree"
-        )
-    listing = subprocess.run(
-        [git, "ls-files", "-z", "--cached", "--others", "--exclude-standard"],
-        cwd=root,
-        capture_output=True,
-        check=False,
-    )
-    if listing.returncode != 0:
-        raise RuntimeError(
-            f"tree_files failed - root={str(root)!r}, expected a git work tree: "
-            f"{listing.stderr.decode(errors='replace').strip()}"
-        )
-    paths = {item for item in listing.stdout.decode().split("\0") if item}
-    return sorted(
-        path
-        for path in paths
-        if (path.endswith(".py") or is_config_file(Path(path)))
-        and (root / path).is_file()
+    would track (:func:`rocke.tests.source_allowlist.tracked_files`)."""
+    return tracked_files(
+        root, lambda path: path.endswith(".py") or is_config_file(Path(path))
     )
 
 
@@ -356,86 +330,44 @@ def tree_torch_uses(root: Path) -> dict[str, list[TorchUse]]:
 
 def file_kinds(uses: Sequence[TorchUse]) -> frozenset[TorchUseKind]:
     """The distinct kinds of ``uses``."""
-    return frozenset(use.kind for use in uses)
+    return source_allowlist.file_kinds(uses)
 
 
 def format_allowlist_entry(path: str, kinds: frozenset[TorchUseKind]) -> str:
     """One allowlist line: ``path: kind kind``, kinds sorted."""
-    return f"{path}: {' '.join(sorted(kind.value for kind in kinds))}"
+    return source_allowlist.format_allowlist_entry(path, kinds)
 
 
 def read_allowlist(path: Path) -> dict[str, frozenset[TorchUseKind]]:
     """The allowlist at ``path``: one ``file: kind kind`` line per file, ``#``
     comments and blank lines ignored. A malformed line, an unknown kind or a file
     listed twice is a ``ValueError`` naming the line."""
-    known = {kind.value: kind for kind in TorchUseKind}
-    allowed: dict[str, frozenset[TorchUseKind]] = {}
-    for number, raw in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
-        line = raw.strip()
-        if not line or line.startswith("#"):
-            continue
-        listed, separator, kinds_text = line.partition(": ")
-        kinds = kinds_text.split()
-        where = f"{path.name}:{number}"
-        if not separator or not kinds:
-            raise ValueError(
-                f"read_allowlist failed - {where}={line!r}, expected 'file: kind ...'"
-            )
-        unknown = [kind for kind in kinds if kind not in known]
-        if unknown:
-            raise ValueError(
-                f"read_allowlist failed - {where} kind={unknown[0]!r}, expected one "
-                f"of {sorted(known)}"
-            )
-        if listed in allowed:
-            raise ValueError(
-                f"read_allowlist failed - {where} file={listed!r}, expected each file "
-                "listed once"
-            )
-        allowed[listed] = frozenset(known[kind] for kind in kinds)
-    return allowed
-
-
-def _lines_of(uses: Sequence[TorchUse], kinds: frozenset[TorchUseKind]) -> str:
-    return "; ".join(
-        f"line {use.line} {use.kind.value}: {use.detail}"
-        for use in uses
-        if use.kind in kinds
-    )
+    return {
+        listed: entry.kinds
+        for listed, entry in source_allowlist.read_allowlist(path, TorchUseKind).items()
+    }
 
 
 def allowlist_breaches(
     found: Mapping[str, Sequence[TorchUse]],
     allowed: Mapping[str, frozenset[TorchUseKind]],
 ) -> list[str]:
-    """What breaks the allowlist, one line per file, sorted by file.
+    """What breaks the allowlist, one line per file, sorted by file
+    (:func:`rocke.tests.source_allowlist.allowlist_breaches`).
 
     A file not on the list uses torch; a listed file uses a kind its entry does
     not list; a listed file no longer uses a kind its entry lists, or torch at
     all (the entry is stale: the list only shrinks, so its lines go when the
     uses go).
     """
-    breaches = []
-    for path in sorted(set(found) | set(allowed)):
-        uses = found.get(path, ())
-        kinds = file_kinds(uses)
-        listed = allowed.get(path)
-        if listed is None:
-            breaches.append(f"{path}: new torch use: {_lines_of(uses, kinds)}")
-            continue
-        if added := kinds - listed:
-            breaches.append(
-                f"{path}: new kind of torch use: {_lines_of(uses, frozenset(added))}"
-            )
-        if not kinds:
-            breaches.append(f"{path}: stale entry, no torch use left: delete its line")
-        elif gone := listed - kinds:
-            kept = format_allowlist_entry(path, listed - gone)
-            breaches.append(
-                f"{path}: stale kinds, no longer used: "
-                f"{' '.join(sorted(kind.value for kind in gone))}; make the line {kept!r}"
-            )
-    return breaches
+    return source_allowlist.allowlist_breaches(
+        found,
+        {
+            listed: source_allowlist.AllowlistEntry(kinds)
+            for listed, kinds in allowed.items()
+        },
+        subject="torch use",
+    )
 
 
 def _print_inventory(root: Path, *, names: bool) -> None:
