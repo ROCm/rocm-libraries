@@ -1438,6 +1438,21 @@ def emit_prefetch_global_regs_kloop(
     return list(for_op.results)[:_n_acc]
 
 
+def dma_lds_at(
+    b: IRBuilder, rsrc: Value, base: Value, imm: int, voff: Value, soff: Value
+) -> None:
+    """One 16-byte DRAM->LDS DMA per lane (``buffer_load_dwordx4 ... lds``) into
+    LDS at the wave-uniform ``base`` (an SGPR) plus the constant ``imm``: one
+    SGPR per stage instead of one per instruction. Inline asm, so the K loop's
+    explicit ``s_waitcnt`` is the only wait on it. Used by the ``dtl`` K loops
+    of the forward and dgrad builders."""
+    b.inline_asm(
+        f"s_add_u32 m0, $3, {imm}\n\tbuffer_load_dwordx4 $0, $1, $2 offen lds",
+        "v,s,s,s,~{m0},~{scc},~{memory}",
+        [voff, rsrc, soff, base],
+    )
+
+
 # -----------------------------------------------------------------------
 # Dynamic (AOT) descriptor builders — shared by all conv directions
 # -----------------------------------------------------------------------

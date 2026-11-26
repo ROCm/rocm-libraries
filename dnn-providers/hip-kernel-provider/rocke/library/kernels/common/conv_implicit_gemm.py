@@ -2352,7 +2352,7 @@ def _build_implicit_gemm_conv_impl(
         """dtl: one K tile of A and B as 16-byte DRAM->LDS DMAs; lane l of
         wave w in pass p fills packed slot (p * threads + w * 64 + l), whose
         row r and slot s take the global chunk s ^ (r & 7) of that row."""
-        from kernels.common.conv_direct_fwd_flex_mfma import _dma_lds_at
+        from kernels.common._conv_implicit_gemm_common import dma_lds_at
         from rocke.core.ir import I32 as _I32, I64 as _I64
 
         k_off_capture[0] = k_off
@@ -2380,7 +2380,7 @@ def _build_implicit_gemm_conv_impl(
                 voff = b.mul(off, c_eb)
                 if valid is not None:
                     voff = b.select(valid, voff, c_oob)
-                _dma_lds_at(b, rsrc, sbase, p_ * threads * 16, voff, c0)
+                dma_lds_at(b, rsrc, sbase, p_ * threads * 16, voff, c0)
 
     def emit_mfma_phase(
         A_src: Value, B_src: Value, iter_vars: Sequence[Value]

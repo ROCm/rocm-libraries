@@ -3675,7 +3675,7 @@ def _build_tilde_dgrad(
         before), refill the other stage, MFMAs on this one. An odd tile
         count's extra tile is past K: zeros.
         """
-        from kernels.common.conv_direct_fwd_flex_mfma import _dma_lds_at
+        from kernels.common._conv_implicit_gemm_common import dma_lds_at
         from rocke.core.ir import I64 as _I64
 
         c_oob = b.const_i32((1 << 31) - 1)
@@ -3716,7 +3716,7 @@ def _build_tilde_dgrad(
             a_add = b.mul(k0, c2)
             for p_, (base, ok, col) in enumerate(a_pass):
                 v = b.land(ok, b.cmp_lt(col, k_left))
-                _dma_lds_at(
+                dma_lds_at(
                     b,
                     dy_rsrc,
                     sa,
@@ -3728,7 +3728,7 @@ def _build_tilde_dgrad(
             b_add = b.mul(k0, c_kstep_b)
             for p_, (base, ok, row) in enumerate(b_pass):
                 v = b.land(ok, b.cmp_lt(row, k_left))
-                _dma_lds_at(
+                dma_lds_at(
                     b,
                     w_rsrc,
                     sb,
