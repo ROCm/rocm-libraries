@@ -152,7 +152,7 @@ CK_TILE_HOST double get_absolute_threshold(const double max_possible_num,
     // log2(0) = -inf; casting -inf to int is undefined behaviour and in practice yields INT_MIN,
     // which makes (discrete_expo - mant) overflow to a large positive and pow(2, ...) return +inf.
     // A zero or NaN reference means no non-zero output is expected, so the threshold is 0.
-    if(!(std::abs(max_possible_num) > 0))
+    if(!std::isfinite(max_possible_num) || !(std::abs(max_possible_num) > 0))
         return 0;
 
     // Use discrete exponent (floor of log2) to match actual floating-point exponent levels
