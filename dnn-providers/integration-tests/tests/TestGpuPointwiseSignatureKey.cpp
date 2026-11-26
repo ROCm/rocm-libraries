@@ -4,8 +4,8 @@
 // The CPU and GPU pointwise references list their modes and datatype tuples in unrelated places,
 // and the GPU key has no mode. TestPointwiseReferenceParity asks both executors about every
 // (mode, datatype tuple) either registry can express. Each difference has to be listed in
-// knownGaps(), and each listed gap has to still be a difference. TestGpuPointwiseExecutor runs one
-// mode of every tuple the GPU registers and compares it with the CPU reference.
+// knownGaps(), and each listed gap has to still be a difference. TestGpuPointwiseExecutorDevice runs
+// one mode of every tuple the GPU registers and compares it with the CPU reference.
 
 #include <gtest/gtest.h>
 
@@ -279,7 +279,7 @@ std::set<PointwiseTuple> gpuCandidateTuples()
 
 // One mode of each arity stands in for all of them: NEG for unary tuples, SUB for binary ones. The
 // tuples with a BOOLEAN output belong to CMP_GT, which SUB does not take, and BINARY_SELECT; both run
-// in TestGpuReferenceGraphExecutor.
+// in TestGpuReferenceGraphExecutorDeviceFp32.
 std::vector<PointwiseTuple> executedTuples()
 {
     std::vector<PointwiseTuple> tuples;
@@ -663,11 +663,11 @@ TEST(TestPointwiseReferenceParity, FiveDimensionCapDeclinesDeeperGraphsWhileTheC
 // The parity tests only ask isApplicable(); a plan that passes its datatypes to the kernel in the
 // wrong order is only seen when it runs. The CPU reference is the oracle because the CPU executor
 // declines the GPU-only tuples.
-class TestGpuPointwiseExecutor : public ::testing::TestWithParam<PointwiseTuple>
+class TestGpuPointwiseExecutorDevice : public ::testing::TestWithParam<PointwiseTuple>
 {
 };
 
-TEST_P(TestGpuPointwiseExecutor, MatchesCpuReference)
+TEST_P(TestGpuPointwiseExecutorDevice, MatchesCpuReference)
 {
     SKIP_IF_NO_DEVICES();
 
@@ -725,7 +725,7 @@ TEST_P(TestGpuPointwiseExecutor, MatchesCpuReference)
 
 // The name holds the mode and every datatype, so no two tuples share one.
 INSTANTIATE_TEST_SUITE_P(Registered,
-                         TestGpuPointwiseExecutor,
+                         TestGpuPointwiseExecutorDevice,
                          ::testing::ValuesIn(executedTuples()),
                          [](const ::testing::TestParamInfo<PointwiseTuple>& info) {
                              const auto& tuple = info.param;

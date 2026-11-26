@@ -526,13 +526,18 @@ if(HIPDNN_IT_YAML_CATEGORIZATION_ENABLED)
 
     # Every test of these binaries must run in exactly one tier, and every quick-tier
     # pattern must select a test: a test no tier selects never runs, and the YAML filters
-    # do not report one. Unlabeled, so the superbuild lane (which runs the suites that
-    # carry no tier label) runs it, and not the per-tier TheRock lanes.
+    # do not report one. The unit-test quick tier must also select no device test. Unlabeled,
+    # so the superbuild lane (which runs the suites that carry no tier label) runs it, and not
+    # the per-tier TheRock lanes.
     if(Python3_FOUND)
         foreach(_tp_target hipdnn_integration_tests_unit_tests hipdnn_gpu_ref_tests)
             set(_tp_yaml "${HIPDNN_IT_GTEST_CATEGORIES_YAML}")
+            # The unit-test quick tier must run on a host without a GPU, so it may select no
+            # test that skips for lack of a device. The gpu-ref quick tier runs on the GPU.
+            set(_tp_no_device_skips --no-device-skips quick)
             if(_tp_target STREQUAL "hipdnn_gpu_ref_tests")
                 set(_tp_yaml "${HIPDNN_IT_GPU_REF_CATEGORIES_YAML}")
+                set(_tp_no_device_skips)
             endif()
             add_test(
                 NAME ${_tp_target}_tier_partition
@@ -541,6 +546,7 @@ if(HIPDNN_IT_YAML_CATEGORIZATION_ENABLED)
                         --yaml ${_tp_yaml}
                         --exe $<TARGET_FILE:${_tp_target}>
                         --require-match quick
+                        ${_tp_no_device_skips}
             )
             if(TEST_ENVIRONMENT)
                 set_tests_properties(${_tp_target}_tier_partition

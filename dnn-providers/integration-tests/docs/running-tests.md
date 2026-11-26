@@ -550,10 +550,11 @@ lanes follow:
 
 `dnn-providers/integration-tests/test_categories.yaml` (for the harness unit
 tests and `hipdnn_golden_data_tests`) writes its quick tier as an exclusion: `*` minus
-`Standard*`, `Comprehensive*` and `Full*`, minus the plan and executor execution
-tests, which compile GPU kernels. Therefore any other test without a tier prefix
-goes into quick. If the quick tier starts to time out, look for a large shape that
-has no prefix.
+`Standard*`, `Comprehensive*` and `Full*`, minus the unit tests that need a device (suite
+names with the marker `Device`, for example `TestGpuMatmulPlanPureDeviceFp32`), which
+compile GPU kernels. Therefore any other test without a tier prefix goes into quick. If
+the quick tier starts to time out, look for a large shape that has no prefix, or for a
+device test whose suite lacks the marker.
 
 `test_categories_gpu_ref.yaml` (for `hipdnn_gpu_ref_tests`) does the opposite: quick is
 an opt-in list (`Quick/*` plus a short list of named tests, one fp32 case per kernel

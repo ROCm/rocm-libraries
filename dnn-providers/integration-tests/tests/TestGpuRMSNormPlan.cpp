@@ -696,7 +696,7 @@ void runBwdPlanExecuteVsCpuRef(const std::vector<int64_t>& ioDims,
 // FP32 plan execution tests
 // =========================
 
-TEST(TestGpuRMSNormFwdPlanFp32, ExecutePlanNchw)
+TEST(TestGpuRMSNormFwdPlanDeviceFp32, ExecutePlanNchw)
 {
     SKIP_IF_NO_DEVICES();
 
@@ -704,7 +704,7 @@ TEST(TestGpuRMSNormFwdPlanFp32, ExecutePlanNchw)
         {5, 4, 3, 2}, TensorLayout::NCHW, rmsnorm::getTolerance<float>());
 }
 
-TEST(TestGpuRMSNormFwdPlanFp32, ExecutePlanNhwc)
+TEST(TestGpuRMSNormFwdPlanDeviceFp32, ExecutePlanNhwc)
 {
     SKIP_IF_NO_DEVICES();
 
@@ -712,7 +712,7 @@ TEST(TestGpuRMSNormFwdPlanFp32, ExecutePlanNhwc)
         {5, 4, 3, 2}, TensorLayout::NHWC, rmsnorm::getTolerance<float>());
 }
 
-TEST(TestGpuRMSNormFwdPlanFp32, ExecutePlanWithDoubleEpsilon)
+TEST(TestGpuRMSNormFwdPlanDeviceFp32, ExecutePlanWithDoubleEpsilon)
 {
     SKIP_IF_NO_DEVICES();
 
@@ -720,7 +720,7 @@ TEST(TestGpuRMSNormFwdPlanFp32, ExecutePlanWithDoubleEpsilon)
         {5, 4, 3, 2}, TensorLayout::NCHW, rmsnorm::getTolerance<float>(), DataType::DOUBLE);
 }
 
-TEST(TestGpuRMSNormBwdPlanFp32, ExecutePlanNchw)
+TEST(TestGpuRMSNormBwdPlanDeviceFp32, ExecutePlanNchw)
 {
     SKIP_IF_NO_DEVICES();
 
@@ -728,7 +728,7 @@ TEST(TestGpuRMSNormBwdPlanFp32, ExecutePlanNchw)
         {5, 4, 3, 2}, TensorLayout::NCHW, rmsnorm::getTolerance<float>());
 }
 
-TEST(TestGpuRMSNormBwdPlanFp32, ExecutePlanNhwc)
+TEST(TestGpuRMSNormBwdPlanDeviceFp32, ExecutePlanNhwc)
 {
     SKIP_IF_NO_DEVICES();
 
@@ -740,7 +740,7 @@ TEST(TestGpuRMSNormBwdPlanFp32, ExecutePlanNhwc)
 // FP16 plan execution tests
 // =========================
 
-TEST(TestGpuRMSNormFwdPlanFp16, ExecutePlanNchw)
+TEST(TestGpuRMSNormFwdPlanDeviceFp16, ExecutePlanNchw)
 {
     SKIP_IF_NO_DEVICES();
 
@@ -748,7 +748,7 @@ TEST(TestGpuRMSNormFwdPlanFp16, ExecutePlanNchw)
         {5, 4, 3, 2}, TensorLayout::NCHW, rmsnorm::getTolerance<half>());
 }
 
-TEST(TestGpuRMSNormFwdPlanFp16, ExecutePlanNhwc)
+TEST(TestGpuRMSNormFwdPlanDeviceFp16, ExecutePlanNhwc)
 {
     SKIP_IF_NO_DEVICES();
 
@@ -756,7 +756,7 @@ TEST(TestGpuRMSNormFwdPlanFp16, ExecutePlanNhwc)
         {5, 4, 3, 2}, TensorLayout::NHWC, rmsnorm::getTolerance<half>());
 }
 
-TEST(TestGpuRMSNormBwdPlanFp16, ExecutePlanNchw)
+TEST(TestGpuRMSNormBwdPlanDeviceFp16, ExecutePlanNchw)
 {
     SKIP_IF_NO_DEVICES();
 
@@ -764,7 +764,7 @@ TEST(TestGpuRMSNormBwdPlanFp16, ExecutePlanNchw)
         {5, 4, 3, 2}, TensorLayout::NCHW, rmsnorm::getTolerance<half>());
 }
 
-TEST(TestGpuRMSNormBwdPlanFp16, ExecutePlanNhwc)
+TEST(TestGpuRMSNormBwdPlanDeviceFp16, ExecutePlanNhwc)
 {
     SKIP_IF_NO_DEVICES();
 
@@ -776,7 +776,7 @@ TEST(TestGpuRMSNormBwdPlanFp16, ExecutePlanNhwc)
 // BFP16 plan execution tests
 // =========================
 
-TEST(TestGpuRMSNormFwdPlanBfp16, ExecutePlanNchw)
+TEST(TestGpuRMSNormFwdPlanDeviceBfp16, ExecutePlanNchw)
 {
     SKIP_IF_NO_DEVICES();
 
@@ -784,7 +784,7 @@ TEST(TestGpuRMSNormFwdPlanBfp16, ExecutePlanNchw)
         {5, 4, 3, 2}, TensorLayout::NCHW, rmsnorm::getTolerance<bfloat16>());
 }
 
-TEST(TestGpuRMSNormFwdPlanBfp16, ExecutePlanNhwc)
+TEST(TestGpuRMSNormFwdPlanDeviceBfp16, ExecutePlanNhwc)
 {
     SKIP_IF_NO_DEVICES();
 
@@ -792,7 +792,7 @@ TEST(TestGpuRMSNormFwdPlanBfp16, ExecutePlanNhwc)
         {5, 4, 3, 2}, TensorLayout::NHWC, rmsnorm::getTolerance<bfloat16>());
 }
 
-TEST(TestGpuRMSNormBwdPlanBfp16, ExecutePlanNchw)
+TEST(TestGpuRMSNormBwdPlanDeviceBfp16, ExecutePlanNchw)
 {
     SKIP_IF_NO_DEVICES();
 
@@ -800,7 +800,7 @@ TEST(TestGpuRMSNormBwdPlanBfp16, ExecutePlanNchw)
         {5, 4, 3, 2}, TensorLayout::NCHW, rmsnorm::getTolerance<bfloat16>());
 }
 
-TEST(TestGpuRMSNormBwdPlanBfp16, ExecutePlanNhwc)
+TEST(TestGpuRMSNormBwdPlanDeviceBfp16, ExecutePlanNhwc)
 {
     SKIP_IF_NO_DEVICES();
 

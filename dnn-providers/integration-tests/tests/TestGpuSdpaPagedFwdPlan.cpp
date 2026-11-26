@@ -203,7 +203,7 @@ const std::vector<int32_t> V_BLOCKS = {2, 0, 1, 0};
 
 } // namespace
 
-TEST(TestGpuSdpaPagedFwdPlan, ExecutorMatchesCpuExecutor)
+TEST(TestGpuSdpaPagedFwdPlanDevice, ExecutorMatchesCpuExecutor)
 {
     SKIP_IF_NO_DEVICES();
     auto graph = makePagedGraph();
@@ -280,7 +280,7 @@ TEST(TestGpuSdpaPagedFwdPlan, ExecutorMatchesCpuExecutor)
 
 // K and V are paged by different tables over containers with different block sizes: each side is
 // addressed through its own table and its own block size.
-TEST(TestGpuSdpaPagedFwdPlan, PerSideTablesAndBlockSizesMatchCpuExecutor)
+TEST(TestGpuSdpaPagedFwdPlanDevice, PerSideTablesAndBlockSizesMatchCpuExecutor)
 {
     SKIP_IF_NO_DEVICES();
     PagedLayout layout;
@@ -290,7 +290,7 @@ TEST(TestGpuSdpaPagedFwdPlan, PerSideTablesAndBlockSizesMatchCpuExecutor)
 }
 
 // Only K is paged; V is dense.
-TEST(TestGpuSdpaPagedFwdPlan, OnlyKPagedMatchesCpuExecutor)
+TEST(TestGpuSdpaPagedFwdPlanDevice, OnlyKPagedMatchesCpuExecutor)
 {
     SKIP_IF_NO_DEVICES();
     PagedLayout layout;
@@ -300,7 +300,7 @@ TEST(TestGpuSdpaPagedFwdPlan, OnlyKPagedMatchesCpuExecutor)
 }
 
 // Only V is paged (blocks of 4); K is dense.
-TEST(TestGpuSdpaPagedFwdPlan, OnlyVPagedMatchesCpuExecutor)
+TEST(TestGpuSdpaPagedFwdPlanDevice, OnlyVPagedMatchesCpuExecutor)
 {
     SKIP_IF_NO_DEVICES();
     PagedLayout layout;

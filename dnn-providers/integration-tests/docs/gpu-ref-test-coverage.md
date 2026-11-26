@@ -127,9 +127,14 @@ small case therefore runs in both tiers; it costs milliseconds, because its kern
 A new reduced-precision or mixed-type case belongs in standard. Give a parameterized suite a
 `Standard` prefix. A plain `TEST` needs no prefix.
 
-The plan and executor execution tests in `hipdnn_integration_tests_unit_tests` (every suite that
-matches `*TestGpu*Plan*` or `*TestGpu*Executor*`, and a few others) also compile HipRTC kernels. They run
-in standard, by the name patterns in `test_categories.yaml`; quick runs the host-only unit tests.
+The unit tests in `hipdnn_integration_tests_unit_tests` that need a device (GPU reference plan and graph
+executor execution, device fills, device comparison sites) also compile HipRTC kernels. Their suite name
+carries the marker `Device` (`TestGpuMatmulPlanPureDeviceFp32`, `TestBundleVerificationHarnessDevice`;
+before a trailing datatype, because the test-name rule requires the datatype last). They run in standard
+by the `*Device*` patterns in `test_categories.yaml`, and quick runs the unit tests that need no device.
+A device test in a suite without the marker lands in quick; `hipdnn_integration_tests_unit_tests_tier_partition`
+runs the quick tier with no visible device (`HIP_VISIBLE_DEVICES=-1`) and fails if a test skips with
+"No devices available".
 
 ## What was kept, and why
 

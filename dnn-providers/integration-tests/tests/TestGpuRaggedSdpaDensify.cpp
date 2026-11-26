@@ -150,7 +150,7 @@ std::vector<uint8_t> withAuxStrides(const std::vector<uint8_t>& graph, int64_t s
 // seq_len shorter than the offset block: the live K/V rows are seq_len_kv, not the block, so the
 // padding rows of each block must not reach the softmax. Bias keeps the graph on the densify
 // path.
-TEST(TestGpuRaggedSdpaDensify, SeqLenShorterThanBlockMatchesCpu)
+TEST(TestGpuRaggedSdpaDensifyDevice, SeqLenShorterThanBlockMatchesCpu)
 {
     SKIP_IF_NO_DEVICES();
     std::vector<float> bias(static_cast<size_t>(SQ * SKV));
@@ -171,7 +171,7 @@ TEST(TestGpuRaggedSdpaDensify, SeqLenShorterThanBlockMatchesCpu)
 
 // The same, with the token offsets and seq_len tensors at batch stride 2 and the odd slots
 // poisoned: both executors' densify paths must read element b at b * 2.
-TEST(TestGpuRaggedSdpaDensify, StridedSeqLenMatchesCpu)
+TEST(TestGpuRaggedSdpaDensifyDevice, StridedSeqLenMatchesCpu)
 {
     SKIP_IF_NO_DEVICES();
     std::vector<float> bias(static_cast<size_t>(SQ * SKV));
@@ -191,7 +191,7 @@ TEST(TestGpuRaggedSdpaDensify, StridedSeqLenMatchesCpu)
         2);
 }
 
-TEST(TestGpuRaggedSdpaDensify, ForwardWithBiasMatchesCpu)
+TEST(TestGpuRaggedSdpaDensifyDevice, ForwardWithBiasMatchesCpu)
 {
     SKIP_IF_NO_DEVICES();
     std::vector<float> bias(static_cast<size_t>(SQ * SKV));
@@ -211,7 +211,7 @@ TEST(TestGpuRaggedSdpaDensify, ForwardWithBiasMatchesCpu)
 
 // Philox dropout over packed operands, validated through the dense RNG dump (SEM-015): both
 // executors apply the dump through the dense rewrite.
-TEST(TestGpuRaggedSdpaDensify, PhiloxDropoutWithItsDumpMatchesCpu)
+TEST(TestGpuRaggedSdpaDensifyDevice, PhiloxDropoutWithItsDumpMatchesCpu)
 {
     SKIP_IF_NO_DEVICES();
     std::vector<float> dump(static_cast<size_t>(B * H * SQ * SKV));
@@ -231,7 +231,7 @@ TEST(TestGpuRaggedSdpaDensify, PhiloxDropoutWithItsDumpMatchesCpu)
         {{SEED, {1234, 0}}, {OFFSET, {8, 0}}});
 }
 
-TEST(TestGpuRaggedSdpaDensify, BackwardMatchesCpu)
+TEST(TestGpuRaggedSdpaDensifyDevice, BackwardMatchesCpu)
 {
     SKIP_IF_NO_DEVICES();
     // O and the LSE need not come from a forward pass for a CPU/GPU comparison; any finite values
@@ -256,7 +256,7 @@ TEST(TestGpuRaggedSdpaDensify, BackwardMatchesCpu)
 
 // vLLM's shape: ragged Q over a paged K/V cache, with and without a sink, through the rewrite.
 // The unreferenced cache block holds NaN.
-TEST(TestGpuRaggedSdpaDensify, RaggedQOverPagedKvMatchesCpu)
+TEST(TestGpuRaggedSdpaDensifyDevice, RaggedQOverPagedKvMatchesCpu)
 {
     SKIP_IF_NO_DEVICES();
     const auto cacheSize = static_cast<size_t>(NUM_BLOCKS * H * BLOCK * D);
@@ -300,7 +300,7 @@ TEST(TestGpuRaggedSdpaDensify, RaggedQOverPagedKvMatchesCpu)
 
 // A seq_len or offset table whose values lie off the batch axis would be copied from the device
 // past its buffer; the executor declines such a graph instead of reading it.
-TEST(TestGpuRaggedSdpaDensify, AuxOffTheBatchAxisIsNotApplicable)
+TEST(TestGpuRaggedSdpaDensifyDevice, AuxOffTheBatchAxisIsNotApplicable)
 {
     SKIP_IF_NO_DEVICES();
     const auto reshape = [](const std::vector<uint8_t>& graph, int64_t uid, int64_t count) {

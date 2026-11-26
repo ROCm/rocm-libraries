@@ -38,11 +38,11 @@ TESTS = [
 
 @pytest.fixture
 def run(tmp_path, monkeypatch):
-    def _run(tests, yaml_text=YAML, require_match=("quick",)):
+    def _run(tests, yaml_text=YAML, require_match=("quick",), no_device_skips=()):
         path = tmp_path / "tiers.yaml"
         path.write_text(yaml_text, encoding="utf-8")
         monkeypatch.setattr(ctp, "list_tests", lambda exe: tests)
-        ctp.check(str(path), "exe", list(require_match))
+        ctp.check(str(path), "exe", list(require_match), list(no_device_skips))
 
     return _run
 
@@ -91,3 +91,50 @@ def test_question_mark_and_bracket_follow_gtest_rules():
     assert not ctp.matches("Suite?.Test", "Suite12.Test")
     assert ctp.matches("Suite.Test[0]", "Suite.Test[0]")
     assert not ctp.matches("Suite.Test[0]", "Suite.Test0")
+
+
+def test_gtest_filter_is_positive_minus_negative():
+    assert (
+        ctp.gtest_filter({"test_patterns": ["*"], "exclude": ["A*", "B*"]}) == "*-A*:B*"
+    )
+    assert ctp.gtest_filter({"test_patterns": ["Quick/*", "X.Y"]}) == "Quick/*:X.Y"
+
+
+def test_device_test_in_a_tier_that_must_run_without_a_device_fails(run, monkeypatch):
+    seen = []
+
+    def skipped(exe, filter_):
+        seen.append(filter_)
+        return ["TestHost.Named"]
+
+    monkeypatch.setattr(ctp, "tests_skipped_without_device", skipped)
+    with pytest.raises(
+        SystemExit,
+        match=r"TestHost.Named: in quick, but skips when no device is visible",
+    ):
+        run(TESTS, require_match=("quick",), no_device_skips=("quick",))
+    assert seen == ["Quick/*:TestHost.Named-*DISABLED*"]
+
+
+def test_tier_without_device_skips_passes(run, monkeypatch):
+    monkeypatch.setattr(ctp, "tests_skipped_without_device", lambda exe, filter_: [])
+    run(TESTS, require_match=("quick",), no_device_skips=("quick",))
+
+
+def test_no_device_skip_parser_reads_the_run_line_of_the_skipping_test(monkeypatch):
+    output = (
+        "[ RUN      ] TestA.Host\n"
+        "[       OK ] TestA.Host (0 ms)\n"
+        "[ RUN      ] TestA.Device\n"
+        "x.cpp(1): Skipped\n"
+        "No devices available. Skipping test.\n"
+        "[  SKIPPED ] TestA.Device (0 ms)\n"
+        "[==========] 2 tests ran.\n"
+    )
+
+    class Completed:
+        stdout = output
+        stderr = ""
+
+    monkeypatch.setattr(ctp.subprocess, "run", lambda *a, **k: Completed())
+    assert ctp.tests_skipped_without_device("exe", "*") == ["TestA.Device"]
