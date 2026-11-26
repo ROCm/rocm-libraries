@@ -2,9 +2,9 @@
 # SPDX-License-Identifier: MIT
 """Element types that ``zero_vec`` and LDS loads and stores accept or refuse.
 
-``zero_vec`` of f64, i16 and u8, LDS loads and stores of i16, LDS loads of the
-8-bit float types at their byte width, and the refusal of an LDS tile whose
-element has no whole-byte width.
+``zero_vec`` of f64, i16 and u8, LDS loads and stores of i16 and i64, LDS loads
+of the 8-bit float types at their byte width, and the refusal of an LDS tile
+whose element has no whole-byte width.
 
 ``zero_vec`` is what ``fill_fragment`` and ``load_fragment`` build on, so without f64 an f64
 fragment could not be zero-filled, and without u8 a u8 fragment could not be built. Lowering
@@ -26,6 +26,7 @@ from rocke.core.ir import (
     U8,
     IRBuilder,
     PtrType,
+    Type,
 )
 from rocke.core.isa.backend import wired_arches
 from rocke.core.lower_llvm import lower_kernel_to_llvm
@@ -50,18 +51,18 @@ def test_zero_vec_accepts_f64_i16_and_u8():
         IRBuilder("tf32_zero").zero_vec(TF32, 4)
 
 
-def _i16_lds_round_trip(n: int) -> IRBuilder:
-    """DST[i*n : i*n+n] = SRC[i*n : i*n+n], staged through LDS as <n x i16>."""
-    b = IRBuilder(f"lds_round_trip_i16_{n}")
-    src = b.param("SRC", PtrType(I16, "global"))
-    dst = b.param("DST", PtrType(I16, "global"))
+def _lds_round_trip(elem: Type, n: int) -> IRBuilder:
+    """DST[i*n : i*n+n] = SRC[i*n : i*n+n], staged through LDS as <n x elem>."""
+    b = IRBuilder(f"lds_round_trip_{elem.name}_{n}")
+    src = b.param("SRC", PtrType(elem, "global"))
+    dst = b.param("DST", PtrType(elem, "global"))
     tid = b.thread_id_x()
     base = b.mul(tid, b.const_i32(n))
-    smem = b.smem_alloc(I16, [64 * n])
-    elems = [b.global_load(src, b.add(base, b.const_i32(j)), I16) for j in range(n)]
-    value = elems[0] if n == 1 else b.vec_pack(elems, I16)
+    smem = b.smem_alloc(elem, [64 * n])
+    elems = [b.global_load(src, b.add(base, b.const_i32(j)), elem) for j in range(n)]
+    value = elems[0] if n == 1 else b.vec_pack(elems, elem)
     b.smem_store_vN(smem, [base], value, n)
-    loaded = b.smem_load_vN(smem, base, dtype=I16, n=n)
+    loaded = b.smem_load_vN(smem, base, dtype=elem, n=n)
     for j in range(n):
         b.global_store(dst, b.add(base, b.const_i32(j)), b.vec_extract(loaded, j))
     return b
@@ -69,7 +70,7 @@ def _i16_lds_round_trip(n: int) -> IRBuilder:
 
 @pytest.mark.parametrize("n", [1, 2, 4, 8])
 def test_lds_loads_and_stores_i16_at_natural_alignment(n):
-    text = lower_kernel_to_llvm(_i16_lds_round_trip(n).kernel, arch="gfx90a")
+    text = lower_kernel_to_llvm(_lds_round_trip(I16, n).kernel, arch="gfx90a")
     lds_lines = [line for line in text.splitlines() if "ptr addrspace(3)" in line]
     loads = [line for line in lds_lines if " = load " in line]
     stores = [line for line in lds_lines if line.strip().startswith("store ")]
@@ -78,6 +79,20 @@ def test_lds_loads_and_stores_i16_at_natural_alignment(n):
         assert "i16" in line and line.rstrip().endswith(f"align {2 * n}"), line
     if n > 1:
         assert any(f"<{n} x i16>" in line for line in loads)
+    assert_target_accepts(text, "gfx90a")
+
+
+@pytest.mark.parametrize("n", [1, 2])
+def test_lds_loads_and_stores_i64_at_natural_alignment(n):
+    text = lower_kernel_to_llvm(_lds_round_trip(I64, n).kernel, arch="gfx90a")
+    lds_lines = [line for line in text.splitlines() if "ptr addrspace(3)" in line]
+    loads = [line for line in lds_lines if " = load " in line]
+    stores = [line for line in lds_lines if line.strip().startswith("store ")]
+    assert loads and stores
+    for line in loads + stores:
+        assert "i64" in line and line.rstrip().endswith(f"align {8 * n}"), line
+    if n > 1:
+        assert any("<2 x i64>" in line for line in loads + stores)
     assert_target_accepts(text, "gfx90a")
 
 
@@ -144,10 +159,10 @@ def test_lds_loads_outside_the_element_rules_still_raise():
         ValueError,
         match=(
             r"^smem_load_vN supports f16 / bf16 / i16 / f32 / i32 / tf32 / f64 / "
-            r"fp8e4m3 / bf8e5m2 / i8, got i64$"
+            r"i64 / fp8e4m3 / bf8e5m2 / i8, got u8$"
         ),
     ):
-        b.smem_load_vN(smem, idx, dtype=I64, n=1)
+        b.smem_load_vN(smem, idx, dtype=U8, n=1)
 
 
 # Every arch rocke lowers for executes i16 LDS accesses.
@@ -161,5 +176,26 @@ def test_lds_round_trip_of_i16_on_gpu():
     # lane shows up as a wrong value.
     values = (np.arange(64 * n, dtype=np.int64) * 257 - 32768).astype(np.int16)
     buffers = {"SRC": values.copy(), "DST": np.zeros_like(values)}
-    run_on_device(_i16_lds_round_trip(n).kernel, buffers, 64, _EVERY_ARCH)
+    run_on_device(_lds_round_trip(I16, n).kernel, buffers, 64, _EVERY_ARCH)
+    np.testing.assert_array_equal(buffers["DST"], values)
+
+
+# The arches the i64 round trip has run green on; add one once it has.
+_I64_RUN_ARCHES = ("gfx90a", "gfx942", "gfx950")
+
+
+@pytest.mark.gpu
+def test_lds_round_trip_of_i64_on_gpu():
+    n = 2
+    # Both halves of every word vary, the sign bit included, and every fourth
+    # word is an f64 NaN pattern (quiet or signalling, either sign), so a
+    # dropped half, a sign extension or a float canonicalisation shows up as a
+    # wrong value.
+    lanes = np.arange(64 * n, dtype=np.uint64)
+    words = (lanes * np.uint64(0x9E3779B97F4A7C15)) ^ (lanes << np.uint64(59))
+    words[::8] = np.uint64(0x7FF0000000000001) + lanes[::8]
+    words[4::8] = np.uint64(0xFFF8000000000000) | lanes[4::8]
+    values = words.view(np.int64)
+    buffers = {"SRC": values.copy(), "DST": np.zeros_like(values)}
+    run_on_device(_lds_round_trip(I64, n).kernel, buffers, 64, _I64_RUN_ARCHES)
     np.testing.assert_array_equal(buffers["DST"], values)

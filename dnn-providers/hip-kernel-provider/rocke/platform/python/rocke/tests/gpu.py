@@ -50,6 +50,7 @@ _SIGNATURE_DTYPE = {
     np.float64: "f64",
     np.float32: "f32",
     np.float16: "f16",
+    np.int64: "i64",
     np.int32: "i32",
     np.int16: "i16",
     np.int8: "i8",
