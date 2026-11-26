@@ -33,6 +33,7 @@
 #include <Tensile/ContractionSolution.hpp>
 #include <Tensile/ContractionTaskPredicates.hpp>
 #include <Tensile/Debug.hpp>
+#include <Tensile/KernelArguments.hpp>
 #include <Tensile/hip/HipHardware.hpp>
 #include <origami/hardware.hpp>
 #include <origami/streamk.hpp>
@@ -259,25 +260,50 @@ TEST(StreamKLaunchSummaryTest, GroupedUniformSummationTurnsStaggerOff)
 {
     AnalyticalEnv       env;
     ContractionSolution solution;
-    initStreamKSolution(solution, 3);
-    solution.sizeMapping.workGroupMapping   = 1;
-    solution.sizeMapping.workGroupMappingXCC = 0;
-    solution.sizeMapping.staggerU           = 16;
-    solution.sizeMapping.staggerUMapping    = 1;
-    solution.sizeMapping.staggerStrideShift = 2;
-    solution.internalArgsSupport.staggerU   = true;
+    // The grouped gate admits uniform summation order only for a non-StreamK
+    // solution, since the grouped path resolves no StreamK grid.
+    initStreamKSolution(solution, 0);
+    solution.sizeMapping.workGroupMapping            = 1;
+    solution.sizeMapping.workGroupMappingXCC         = 0;
+    solution.sizeMapping.globalSplitU                = 1;
+    solution.sizeMapping.globalAccumulation          = 0;
+    solution.sizeMapping.staggerU                    = 16;
+    solution.sizeMapping.staggerUMapping             = 1;
+    solution.sizeMapping.staggerStrideShift          = 2;
+    solution.internalArgsSupport.staggerU            = true;
+    solution.problemType.supportDeviceUserArguments = true;
+    // Keeps argument names so the packed word can be looked up.
+    solution.kernelArgsLog = true;
 
     auto off = makeGemmProblem(1024, 1024, 1024);
     auto on  = makeGemmProblem(1024, 1024, 1024);
     off.setParams().setUniformSummationOrder(0);
     on.setParams().setUniformSummationOrder(1);
 
-    const auto stagger = [&](std::vector<ContractionProblemGemm> const& group) {
-        return std::get<1>(solution.calculateGroupedAutoStaggerU(group, &env.device, 1));
+    // solveGroupedGemmGPU() builds the launch through the same
+    // generateSingleCallGroupedGemm() as solveGroupedGemm() but, unlike it,
+    // copies nothing to the device.
+    const auto packed = [&](std::vector<ContractionProblemGemm> const& group) {
+        ContractionGroupedInputs inputs;
+        inputs.grouped.resize(group.size());
+        const auto launches
+            = solution.solveGroupedGemmGPU(group, inputs, env.device, nullptr, nullptr, nullptr);
+        KernelArguments const& args = launches.at(0).args;
+        auto                   arg  = KernelArguments::const_iterator(args, "internalArgs");
+        if(arg == args.end())
+        {
+            ADD_FAILURE() << "no internalArgs in the grouped launch";
+            return ~0u;
+        }
+        uint32_t internalArg0 = 0;
+        std::memcpy(&internalArg0, (*arg).first, sizeof(internalArg0));
+        return internalArg0;
     };
-    EXPECT_EQ(stagger({off, on}), 0u);
-    EXPECT_EQ(stagger({on, off}), 0u);
-    EXPECT_EQ(stagger({off, off}), 16u);
+    constexpr uint32_t shift = ContractionSolution::kInternalArg0StaggerUShift;
+    // StaggerU, its stride shift and its mapping fill the word from the shift up.
+    EXPECT_EQ(packed({off, on}) >> shift, 0u);
+    EXPECT_EQ(packed({on, off}) >> shift, 0u);
+    EXPECT_EQ((packed({off, off}) >> shift) & ContractionSolution::kInternalArg0StaggerUMask, 16u);
 }
 
 // ---------------------------------------------------------------------------

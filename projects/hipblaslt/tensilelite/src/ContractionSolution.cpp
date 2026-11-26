@@ -2239,12 +2239,12 @@ namespace TensileLite
             // an out-of-range value spills into neighbouring bits.
             size_t           sum          = (staggerUMapping & 0x7) << 13;
             size_t           sus          = staggerMask1 & (staggerUStrideShift << 8);
-            size_t           su           = mask8 & staggerU;
+            size_t           su           = kInternalArg0StaggerUMask & staggerU;
             if(Debug::Instance().disableStaggerU())
                 su = 0;
             su           = su | sus;
             su           = su | sum;
-            internalArg0 = internalArg0 | (su << 16);
+            internalArg0 = internalArg0 | (su << kInternalArg0StaggerUShift);
         }
         else if(T_Debug && Debug::Instance().disableStaggerU())
             std::cout << "solution doesn't support configurable staggerU" << std::endl;
