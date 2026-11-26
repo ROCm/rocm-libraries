@@ -1542,7 +1542,7 @@ _MLA_PREFILL = "library/tests/test_mla_prefill_gfx942.py"
 _COMPILER_20 = "ROCm 7.1 (AMD clang 20.0.0git, roc-7.1.0 25425)"
 # The llvm-project commits of two LLVM 24 compiler builds: the one CI pins, and
 # one a ROCm install ships.
-_LLVM_24_CI_COMMIT = "424729dba653"
+_LLVM_24_CI_COMMIT = "1c9b04d70bd8"
 _LLVM_24_ROCM_INSTALL_COMMIT = "d6f6cb691863"
 _COMPILER_24 = f"AMD clang 24.0.0git (llvm-project {_LLVM_24_CI_COMMIT})"
 _LLVM_20 = Compilers(llvm_major=20)
@@ -1784,7 +1784,7 @@ QUARANTINED: tuple[QuarantinedTest, ...] = (
         _SGPR_SPLIT_SPILL_ISSUE,
         "built by the LLVM 24 compiler CI pins, the gfx950 dgrad kernel at tile "
         "256x64x32, warp tile 32x32x16, compv4 miscompares on the fp16 depthwise "
-        f"stride-2 shape (rel_err 0.88): {_SGPR_SPLIT_SPILL}",
+        f"stride-2 shape (rel_err 0.89): {_SGPR_SPLIT_SPILL}",
         _LIBRARY,
         "2026-12-15",
         f"{_DGRAD_CORRECTNESS}::test_fp16_depthwise_stride2",
