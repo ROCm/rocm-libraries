@@ -7529,26 +7529,15 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
 
       # FIXME: Add back.
       if mEnd == 1:
-        #add misc vgpr to vgprPool
-        self.vgprPool.add(self.states.startVgprMisc , \
-          self.states.startVgpr - self.states.startVgprMisc, "misc vgpr") # Add as available
-        module.addComment1("Tail: add MISC Vgpr [%u...%u) to pool" % \
-                          (self.states.startVgprMisc, self.states.startVgpr))
-        if self.states.a.startVgprLocalReadAddr > self.states.startVgpr:
-          # Not in the MISC. Release here.
-          self.vgprPool.add(self.states.a.startVgprLocalReadAddr , \
-            self.states.a.numVgprLocalReadAddr, "LocalReadAddrA vgpr") # Add as available
-          module.addComment1("Tail: add LocalReadAddrA Vgpr [%u...%u) to pool" % \
-                            (self.states.a.startVgprLocalReadAddr, self.states.a.startVgprLocalReadAddr + self.states.a.numVgprLocalReadAddr))
-        if self.states.b.startVgprLocalReadAddr > self.states.startVgpr:
-          # Not in the MISC. Release here.
-          self.vgprPool.add(self.states.b.startVgprLocalReadAddr , \
-            self.states.b.numVgprLocalReadAddr, "LocalReadAddrB vgpr") # Add as available
-          module.addComment1("Tail: add LocalReadAddrB Vgpr [%u...%u) to pool" % \
-                            (self.states.b.startVgprLocalReadAddr, self.states.b.startVgprLocalReadAddr + self.states.b.numVgprLocalReadAddr))
+        module.add(self._releaseMiscAndLocalReadAddrVgprs())
     elif self.states.tailloopInNll:
       # always emit the skip-tail-loop label for NoTailLoop + tailloopInNll
       module.add(self.closeLoop(kernel, tensorParametersA, tensorParametersB, -1, None, emitEndLabelOnly=True))
+    elif kernel.get("_TailFolding", False) and not kernel["ReuseAcrossPersistent"]:
+      # TailFolding: the main loop already ran the K tail, so release the VGPRs the tail
+      # loop would have released (a tail-folding kernel has no DTV/DTL/sparse, so mEnd is 1).
+      # Holding them raises the store's VGPR peak and can cost occupancy.
+      module.add(self._releaseMiscAndLocalReadAddrVgprs())
 
     if self.states.tailloopInNll:
       # generate wait code for early exit
@@ -12138,6 +12127,21 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
 
   def tailFoldGsu(self, kernel):
     return False
+
+  def _releaseMiscAndLocalReadAddrVgprs(self):
+    """After the last local read: add the misc VGPRs and the LocalReadAddrA/B VGPRs to the pool."""
+    module = Module("releaseMiscAndLocalReadAddrVgprs")
+    self.vgprPool.add(self.states.startVgprMisc , \
+      self.states.startVgpr - self.states.startVgprMisc, "misc vgpr") # Add as available
+    module.addComment1("Tail: add MISC Vgpr [%u...%u) to pool" % \
+                      (self.states.startVgprMisc, self.states.startVgpr))
+    for tc, s in (("A", self.states.a), ("B", self.states.b)):
+      if s.startVgprLocalReadAddr > self.states.startVgpr:
+        # Not in the MISC. Release here.
+        self.vgprPool.add(s.startVgprLocalReadAddr, s.numVgprLocalReadAddr, "LocalReadAddr%s vgpr" % tc) # Add as available
+        module.addComment1("Tail: add LocalReadAddr%s Vgpr [%u...%u) to pool" % \
+                          (tc, s.startVgprLocalReadAddr, s.startVgprLocalReadAddr + s.numVgprLocalReadAddr))
+    return module
 
   def tailFoldingGL2Clamp(self, kernel):
     """TailFolding (not RAP): the last k-tile is partial, so the GL2 prefetch stops one k-tile

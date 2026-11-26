@@ -594,6 +594,42 @@ def test_fold_sgprs_match_tail_loop_kernel(tmp_path, monkeypatch, case):
     assert _next_free_sgpr(fold) == _next_free_sgpr(dev)
 
 
+def _next_free_vgpr(asm):
+    return int(re.search(r"\.amdhsa_next_free_vgpr (\d+)", asm).group(1))
+
+
+def _mt32x128x32_bias_sav_config():
+    # MT32x128x32 bf16 TN + bias + ScaleAlphaVec + activation: holding the tail-loop VGPRs took it from 144 to
+    # 148 VGPRs, one allocation granule (16) more, and cost 32x207648x64 21% on gfx1250
+    config = _store_kernarg_config(0, 0)
+    problem = config["BenchmarkProblems"][0][0]
+    problem.pop("UseScaleAB")
+    problem["ActivationType"] = "hipblaslt_all"
+    over = {"MatrixInstruction": [16, 16, 32, 1, 1, 2, 2, 1, 4], "WorkGroup": [16, 8, 1], "DepthU": 32, "VectorWidthA": 2,
+            "VectorWidthB": 2, "StoreVectorWidth": 2, "ClusterDim": [1, 1]}
+    fork = config["BenchmarkProblems"][0][1]["ForkParameters"]
+    fork[:] = [p for p in fork if next(iter(p)) not in over] + [{k: [v]} for k, v in over.items()]
+    return config
+
+
+_VGPR_CASES = dict(_SGPR_CASES, mt32x128x32_bias_sav=_mt32x128x32_bias_sav_config)
+
+
+@pytest.mark.parametrize("case", list(_VGPR_CASES))
+def test_fold_vgprs_match_tail_loop_kernel(tmp_path, monkeypatch, case):
+    # The tail loop releases the misc and LocalReadAddr VGPRs before the store; a folding kernel has no tail loop
+    # and must release them too, or the store's VGPR peak rises and can cost occupancy.
+    config = _VGPR_CASES[case]()
+    fold = _emit_one(tmp_path, config, "tf_vgpr_fold.yaml")
+    assert CEIL in fold and "label_TailLoopBeginL" not in fold
+    import sys
+    import tensilelite.SolutionStructs.Solution  # noqa: F401
+    monkeypatch.setattr(sys.modules["tensilelite.SolutionStructs.Solution"], "tdmSeparateABDescriptors", lambda state: True)   # fold unsupported -> develop code
+    dev = _emit_one(tmp_path, config, "tf_vgpr_dev.yaml")
+    assert CEIL not in dev and "label_TailLoopBeginL" in dev
+    assert _next_free_vgpr(fold) == _next_free_vgpr(dev)
+
+
 def _excluded(kind):
     config = _config()
     problem = config["BenchmarkProblems"][0][0]
