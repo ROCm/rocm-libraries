@@ -1,4 +1,22 @@
 {
-  "claims": {},
+  "claims": {
+    "ASM_SDPA_ENGINE": [
+      {
+        "cases": [
+          "bf16_20c7d16faaa0e1aa",
+          "bf16_66a5727db9e2ea40",
+          "bf16_a7b2b4504f231088"
+        ],
+        "support": {
+          "gfx942": [
+            "linux"
+          ],
+          "gfx950": [
+            "linux"
+          ]
+        }
+      }
+    ]
+  },
   "version": 1
 }

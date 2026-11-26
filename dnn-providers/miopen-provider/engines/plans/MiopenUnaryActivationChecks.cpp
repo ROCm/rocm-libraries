@@ -84,14 +84,8 @@ void checkReluParamsSupported(const PointwiseAttributes& attrs)
         }
         return; // Leaky ReLU
     }
-    if(lowerClip && *lowerClip != 0.f)
-    {
-        throw hipdnn_plugin_sdk::HipdnnPluginException(
-            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-            "Relu plan builder: standard relu with a non-zero lower_clip is not supported");
-    }
-
-    // Standard ReLU (including lower_clip == 0.0, which is a no-op lower clip).
+    // A non-zero lower_clip alone maps to CLAMP with no upper bound. Otherwise this is a
+    // standard ReLU (including lower_clip == 0.0, which is a no-op lower clip).
 }
 
 // Generic IO-tensor validation shared by every unary pointwise activation:

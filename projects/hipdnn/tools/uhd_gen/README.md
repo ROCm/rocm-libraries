@@ -304,7 +304,9 @@ It validates everything before writing anything, and refuses rather than half-su
   [Optional features are read through a default](#optional-features-are-read-through-a-default));
 - a `predict_engine` model for a descriptor-backed engine must record
   `trained_against.selector_revision`, which the runtime compares with the engine's
-  current selector revision. Every binding `hipdnn_bench` records carries it.
+  current selector revision. Every binding `hipdnn_bench` records carries it. A binding may
+  also carry `trained_against.codegen_revision`, a digest of the engine's code objects; the
+  model records it only when every measurement it trains on reports the same one.
 
 ## `evaluate`: regret against the best kernel that was measured
 
@@ -1160,6 +1162,24 @@ refused -- the engine stays applicable and reports UNAVAILABLE naming both revis
 Start a fresh consumer process after installing a model: a compiled model is cached
 for the lifetime of the engine that owns it.
 
+`trained_against.codegen_revision` is published by the generic (descriptor) engine and is
+recorded, never a compatibility key. It digests the bytes of the engine's code objects. A code
+object that carries a packer `identity` (one the packer compiled from rocKE IR) enters the
+selector revision by that compiler-independent identity instead, so a compiler bump within one
+LLVM flavor moves only the codegen revision (an LLVM-major bump that changes the IR flavor
+rocKE emits moves both). A prebuilt code object (FlyDSL) or a HIP-compiled one still enters
+by its `sha256`: a prebuilt one moves both only when it is regenerated, and a HIP-compiled one
+moves both on every compiler change. The runtime binds a model whose `codegen_revision` differs from the engine's and
+logs one warning. `uhd_gen` does the same where it checks a model against the bindings
+measurements or runtime predictions carry (`evaluate`), and never refuses measurements that
+differ only in it (collections, datasets, repeats of one shape). A model
+records the `codegen_revision` only when every measurement it trains on reports the same
+one; measurements from different compilers train together, the model records none, and the
+evaluation report's `warnings` says so. A `--provenance` or `--descriptor-tree` snapshot
+names the contract only: a `codegen_revision` it records that differs from the
+measurements' is warned about, and the model records the measurements'. A model that records
+a `codegen_revision` is written as UHD 1.2, the first version that carries the key.
+
 Install the intended catalog-ranking model before collecting L1 measurements.
 Changing that model changes the descriptor engine's immediate selector and can
 invalidate an existing L1 model. Collect and train L1 against the final selector;
@@ -1335,7 +1355,7 @@ holds for an unslotted engine, and for each slot of a slotted one unless stated 
 | Sweep kernel columns | `kernel.<field>` | `kernel.<slot>.<field>`, plus `kernel` (the composite id) and `slot_reference` |
 | Catalog ranker | one `sort_kernel_catalog` | one per slot, metric-less |
 | Engine estimate | `predict_engine` | `predict_engine`, engine-level; its `trained_against` names every slot's KMD in `kmds` |
-| Descriptor `version` | `1.0` | `1.1` for the UED, KDPs and slot-aware UHDs (`uhd.schema.json` accepts `1.0` and `1.1`) |
+| Descriptor `version` | `1.0` (a UHD that records `codegen_revision`: `1.2`) | `1.1` for the UED, KDPs and slot-aware UHDs, `1.2` for a UHD that also records `codegen_revision` (`uhd.schema.json` accepts `1.0`, `1.1` and `1.2`) |
 
 **Training data.** `hipdnn_bench --sweep` times every composite candidate: the product of the
 slot catalogs. `slot_reference` names the slots whose training rows a row is, joined by `|`:
@@ -1367,9 +1387,10 @@ slot's kernel id, `kernel.<slot>.<field>` becomes `kernel.<field>` (the ranker's
 `$kernel.<field>` signature), and the other slots' columns, `slot_reference` and `ws.*` are
 dropped. `generate --slot` also records the slot's provenance (`trained_against` with `slot`
 and that slot's KMD, from `--descriptor-tree` and `--engine`), and `train` writes a model whose
-`trained_against` carries `slot` or `kmds` as a `1.1` UHD (`1.0` otherwise). The dataset is a
-published one, so `generate` needs `--no-promote` and `--features` (or `--feature-signature`),
-needs at least five training problems plus held-out ones, and leaves installing to `promote`.
+`trained_against` carries `slot` or `kmds` as a `1.1` UHD (`1.0` otherwise; an L1 model that
+also records `codegen_revision` is `1.2`). The dataset is a published one, so `generate`
+needs `--no-promote` and `--features` (or `--feature-signature`), needs at least five
+training problems plus held-out ones, and leaves installing to `promote`.
 
 `dataset export`, `generate` and `knobs` accept `--slot`, and each refuses a corpus that is
 not a slotted sweep; `generate` also needs `--dataset`. `generate` refuses to collect
@@ -1385,7 +1406,7 @@ must be metric-less): `generate --adapter mlp_data --slot` is refused before any
 and `promote` and the packer refuse such a model bound to a slot. Use `tree_data` or
 `linear_data` for slot rankers. A slotted engine's own L1 estimate is another matter: its
 `predict_engine` model names a metric and records every slot's KMD in `trained_against.kmds`
-(a `1.1` UHD), and it may be `mlp_data`.
+(a `1.1` UHD, `1.2` with a `codegen_revision`), and it may be `mlp_data`.
 
 **Installing.** A slot ranker records its slot in `trained_against.slot` and installs under
 `heuristics/<ued-id>/<slot>/sort_kernel_catalog/<arch>/`; `predict_engine` installs at the
@@ -1554,7 +1575,7 @@ what `train` needs, and refuses a run that cannot meet it before it measures or 
   `tflops`.
 
 A slotted engine's L1 estimate may be `mlp_data` (its `trained_against` carries `kmds`, a `1.1`
-UHD); its slot rankers may not.
+UHD, or `1.2` with a `codegen_revision`); its slot rankers may not.
 
 ## Output
 

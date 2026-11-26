@@ -610,7 +610,12 @@ HIPDNN_BACKEND_EXPORT void hipdnnLoggingCallback_ext(hipdnnSeverity_t severity, 
  * @brief Sets the search paths for hipDNN engine plugins.
  *
  * This function configures the search paths for engine plugins and must be called before
- * creating a hipDNN handle, as plugins are loaded during handle creation.
+ * creating a hipDNN handle, as plugins are loaded during handle creation. With an active
+ * handle, a call succeeds only when `pluginPaths` equals the full configured path set
+ * (compared as written, ignoring order and duplicates) and `loadingMode` equals the current
+ * loading mode; it then changes nothing. This holds in `HIPDNN_PLUGIN_LOADING_ADDITIVE` mode
+ * too: adding a path that is already configured fails unless the call lists every
+ * configured path.
  *
  * Paths can be either directories or specific plugin files. Relative paths are resolved
  * from the location of the libhipdnn_backend.so file. The backend can resolve
@@ -623,7 +628,10 @@ HIPDNN_BACKEND_EXPORT void hipdnnLoggingCallback_ext(hipdnnSeverity_t severity, 
  *
  * @retval HIPDNN_STATUS_SUCCESS           The operation was successful.
  * @retval HIPDNN_STATUS_BAD_PARAM_NULL_POINTER         `pluginPaths` is nullptr when `numPaths` is greater than 0.
- * @retval HIPDNN_STATUS_NOT_SUPPORTED         Called with active handle.
+ * @retval HIPDNN_STATUS_NOT_SUPPORTED         Called with an active handle when `pluginPaths`
+ *                                             differs from the full configured path set or
+ *                                             `loadingMode` differs from the current loading
+ *                                             mode.
  * @retval HIPDNN_STATUS_INTERNAL_ERROR    An internal error occurred.
  */
 HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnSetEnginePluginPaths_ext(
@@ -634,7 +642,11 @@ HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnSetEnginePluginPaths_ext(
  *
  * Mirrors @ref hipdnnSetEnginePluginPaths_ext for the heuristic plugin search domain.
  * Must be called before creating a hipDNN handle, as heuristic plugins are loaded
- * during handle creation.
+ * during handle creation. With an active handle, a call succeeds only when `pluginPaths`
+ * equals the full configured heuristic path set (compared as written, ignoring order and
+ * duplicates) and `loadingMode` equals the current loading mode; it then changes nothing.
+ * This holds in `HIPDNN_PLUGIN_LOADING_ADDITIVE` mode too: adding a path that is already
+ * configured fails unless the call lists every configured path.
  *
  * Paths can be either directories or specific plugin files. Relative paths are resolved
  * from the location of the libhipdnn_backend.so file.
@@ -645,7 +657,11 @@ HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnSetEnginePluginPaths_ext(
  *
  * @retval HIPDNN_STATUS_SUCCESS                  The operation was successful.
  * @retval HIPDNN_STATUS_BAD_PARAM_NULL_POINTER   `pluginPaths` is nullptr when `numPaths` is greater than 0.
- * @retval HIPDNN_STATUS_NOT_SUPPORTED            Called with active handle.
+ * @retval HIPDNN_STATUS_NOT_SUPPORTED            Called with an active handle when
+ *                                                `pluginPaths` differs from the full
+ *                                                configured heuristic path set or
+ *                                                `loadingMode` differs from the current
+ *                                                loading mode.
  * @retval HIPDNN_STATUS_INTERNAL_ERROR           An internal error occurred.
  */
 HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnSetHeuristicPluginPaths_ext(

@@ -170,12 +170,39 @@ TEST(TestBatchnormBackwardNode, GatherHipdnnTensors)
     const GraphAttributes graphAttributes;
     const BatchnormBackwardNode node(std::move(batchnormAttributes), graphAttributes);
 
-    std::unordered_set<std::shared_ptr<TensorAttributes>> allTensors;
+    hipdnn_frontend::detail::OrderedTensorSet allTensors;
     node.gather_hipdnn_tensors(allTensors);
 
     EXPECT_TRUE(allTensors.find(peerStat1) != allTensors.end());
     EXPECT_TRUE(allTensors.find(peerStat2) != allTensors.end());
     EXPECT_EQ(allTensors.size(), 10);
+}
+
+TEST(TestBatchnormBackwardNode, GatherHipdnnTensorsIncludesPeerStatRaggedOffset)
+{
+    // The aux tensor carries no UID; gathering it is what lets the graph assign one.
+    auto peerStatOffset = std::make_shared<TensorAttributes>();
+    peerStatOffset->set_name("PeerStatOffset").set_dim({5}).set_stride({1});
+
+    auto peerStat = std::make_shared<TensorAttributes>();
+    peerStat->set_uid(9).set_name("PeerStat");
+    peerStat->set_ragged_offset(peerStatOffset);
+
+    BatchnormBackwardAttributes batchnormAttributes;
+    batchnormAttributes.set_peer_stats({peerStat});
+
+    const GraphAttributes graphAttributes;
+    const BatchnormBackwardNode node(std::move(batchnormAttributes), graphAttributes);
+
+    hipdnn_frontend::detail::OrderedTensorSet allTensors;
+    node.gather_hipdnn_tensors(allTensors);
+
+    // The aux tensor directly follows the tensor that carries it.
+    auto it = allTensors.find(peerStat);
+    ASSERT_TRUE(it != allTensors.end());
+    ++it;
+    ASSERT_TRUE(it != allTensors.end());
+    EXPECT_EQ(*it, peerStatOffset);
 }
 
 // ============================================================================

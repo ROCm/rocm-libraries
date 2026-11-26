@@ -5,6 +5,31 @@ solution. This first migration step provides the identifier format and
 maintenance tooling, but does not assign or consume UIDs in library generation
 or at runtime.
 
+## Solution indices and the UID
+
+A solution has three numbers:
+
+- `SolutionIndex` in logic YAML is the solution's position in that file. Every
+  file starts at 0, and the file's size table refers to solutions by this
+  position. Tuning, `TensileMergeLibrary`, and Geko renumber it when they add,
+  remove, or copy solutions.
+- The solution index used by `hipblaslt-bench --solution_index` and
+  `getIndexFromAlgo` is not stored in logic YAML. Each `TensileCreateLibrary`
+  run assigns it by numbering the solutions of every architecture and logic
+  file in the build, and writes it only to that build's outputs, such as
+  `MatchTable.yaml`. Adding, removing, or filtering logic files, or building a
+  different set of architectures, can change it.
+- `SolutionUID` is stored with the solution record and is not derived from
+  either position, so renumbering leaves it unchanged. Generation needs no
+  shared counter: the timestamp separates UIDs drawn in different
+  milliseconds, and the 24 random bits make a collision within one millisecond
+  unlikely. `test_solution_uid_uniqueness.py` (`tox -e logic-corpus`) fails on
+  a duplicate UID in the shipped logic files, which catches the rare collision.
+
+A UID is stable only while the YAML keeps it. Regenerating it with
+`TensileGenerateUID`, or a tool that writes a new solution record instead of
+copying the old one, gives the solution a new UID.
+
 ## Identifier format
 
 ```text
@@ -30,11 +55,11 @@ the optional, unquoted `SolutionUID` field immediately after the local
   SolutionUID: 0u3E
 ```
 
-YAML readers decode the text immediately and all identity, comparison, and
-mapping operations use the unsigned 64-bit value. New dict-format files from
-LibraryLogic (tuning) and TensileMergeLibrary keep `SolutionUID` immediately
-after `SolutionIndex`. Legacy list-format files keep keys in their existing
-alphabetical layout, so `SolutionUID` follows `SolutionNameMin`.
+Decoding is explicit: a reader calls `decode_solution_uid` and then uses the
+unsigned 64-bit value for identity, comparison, and mapping. New dict-format
+files from LibraryLogic (tuning) and TensileMergeLibrary keep `SolutionUID`
+immediately after `SolutionIndex`. Legacy list-format files keep keys in their
+existing alphabetical layout, so `SolutionUID` follows `SolutionNameMin`.
 
 ## Regenerate a UID
 

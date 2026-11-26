@@ -99,6 +99,39 @@ public:
                                        + std::to_string(x->get_dim().size()) + " dimensions");
         }
 
+        // Scale covers every block of x. block_size aligns to the trailing dimensions of x:
+        // entry i applies to dimension (rank - K + i) and the leading dimensions use block 1.
+        // A scale dimension may exceed the block count (padded scale layouts).
+        auto scale = attributes.get_scale();
+        if(detail::areTensorDimensionsSet(x) && detail::areTensorDimensionsSet(scale))
+        {
+            const auto& xDims = x->get_dim();
+            const auto& scaleDims = scale->get_dim();
+
+            HIPDNN_RETURN_IF_NE(
+                scaleDims.size(),
+                xDims.size(),
+                ErrorCode::INVALID_VALUE,
+                "BlockScaleDequantizeNode scale tensor rank (" + std::to_string(scaleDims.size())
+                    + ") must equal input tensor rank (" + std::to_string(xDims.size()) + ")");
+
+            const size_t leadingDims = xDims.size() - blockSize.size();
+            for(size_t d = 0; d < xDims.size(); ++d)
+            {
+                const int64_t block
+                    = d < leadingDims ? 1 : static_cast<int64_t>(blockSize[d - leadingDims]);
+                const int64_t blockCount = xDims[d] / block + (xDims[d] % block > 0 ? 1 : 0);
+                HIPDNN_RETURN_IF_LT(scaleDims[d],
+                                    blockCount,
+                                    ErrorCode::INVALID_VALUE,
+                                    "BlockScaleDequantizeNode scale dim[" + std::to_string(d)
+                                        + "] (" + std::to_string(scaleDims[d])
+                                        + ") must be at least ceil(" + std::to_string(xDims[d])
+                                        + " / " + std::to_string(block)
+                                        + ") = " + std::to_string(blockCount));
+            }
+        }
+
         return {ErrorCode::OK, ""};
     }
 

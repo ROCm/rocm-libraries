@@ -130,6 +130,19 @@ static bool multiple_devices_on_rank(const std::vector<fft_params::fft_brick>& b
     return false;
 }
 
+// Wait for the work on every device holding this rank's bricks, returning false if any wait failed.
+static bool synchronize_local_devices(const std::map<int, gpubuf>& local_bricks)
+{
+    bool success = true;
+    for(const auto& local_brick : local_bricks)
+    {
+        rocfft_scoped_device dev(local_brick.first);
+        if(hipDeviceSynchronize() != hipSuccess)
+            success = false;
+    }
+    return success;
+}
+
 // Gather a whole field to a host buffer on rank 0, using MPI_Gatherv.
 // This is only possible if each rank's bricks are on a single device.
 // local_bricks is the contiguous buffer allocated by
@@ -184,13 +197,13 @@ static void gather_field_v(MPI_Comm                                  mpi_comm,
     // gather brick(s) to rank 0 (to host memory)
     auto mpi_type = get_mpi_type(elem_size);
     // make sure init/execution kernels are done before sending data
-    const auto hip_status = hipDeviceSynchronize();
+    const bool synchronized = synchronize_local_devices(local_bricks);
     // check that all buffers are at least as large as they need
     // for what the process is expected to send
     const bool local_buffer_is_too_small
         = send_count > 0
           && (local_bricks.empty() || send_count > local_bricks.begin()->second.size() / elem_size);
-    bool global_check = hip_status != hipSuccess || local_buffer_is_too_small;
+    bool global_check = !synchronized || local_buffer_is_too_small;
     MPI_Allreduce(MPI_IN_PLACE, &global_check, 1, MPI_CXX_BOOL, MPI_LOR, mpi_comm);
     if(global_check)
     {
@@ -282,6 +295,12 @@ static void gather_field_p2p(MPI_Comm                                  mpi_comm,
 
     auto elem_size = var_size<size_t>(precision, array_type);
     auto mpi_type  = get_mpi_type(elem_size);
+
+    // make sure init/execution kernels are done before sending data
+    bool sync_failed = !synchronize_local_devices(local_bricks);
+    MPI_Allreduce(MPI_IN_PLACE, &sync_failed, 1, MPI_CXX_BOOL, MPI_LOR, mpi_comm);
+    if(sync_failed)
+        throw std::runtime_error("Device synchronization failed on some process");
 
     // map device -> offset, to keep track of the offset of each
     // brick in the per-device buffers

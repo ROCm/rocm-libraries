@@ -101,6 +101,7 @@ list(
     -Wunreachable-code # Warn about unreachable code
     -Wno-error=unused-command-line-argument # Disable error for unused command line arguments
     -Wswitch-default # Warn if a switch statement does not have a default case
+    -Wundef # Warn about #if on an undefined macro, e.g. a deleted WORKAROUND_ISSUE_* switch
     -Wno-ignored-attributes # disable warning about unused declspec(dllexport)
 )
 
@@ -127,6 +128,12 @@ include(ClangTidy)
 
 # Sanitizer support (Address Sanitizer, etc.)
 include(Sanitizers)
+
+if(HIPBLASLTPROVIDER_ENABLE_MX_GEMM)
+    # The MX scale relayout kernel is compiled at run time with HIPRTC for the
+    # device in use (compilation/Program.cpp), so the plugin carries no device code.
+    find_package(hiprtc REQUIRED)
+endif()
 
 # Stage System32-shadowed ROCm DLLs into the build bin dir (Windows)
 include(WindowsDllStaging)
@@ -181,6 +188,10 @@ add_library(
     engines/plans/HipblasltMatmulPlanBuilder.cpp
     $<$<BOOL:${HIPBLASLTPROVIDER_ENABLE_MX_GEMM}>:engines/plans/HipblasltMxMatmulPlan.cpp>
     $<$<BOOL:${HIPBLASLTPROVIDER_ENABLE_MX_GEMM}>:engines/plans/HipblasltMxMatmulPlanBuilder.cpp>
+    $<$<BOOL:${HIPBLASLTPROVIDER_ENABLE_MX_GEMM}>:engines/plans/HipblasltMxScaleLayout.cpp>
+    $<$<BOOL:${HIPBLASLTPROVIDER_ENABLE_MX_GEMM}>:compilation/Kernel.cpp>
+    $<$<BOOL:${HIPBLASLTPROVIDER_ENABLE_MX_GEMM}>:compilation/Program.cpp>
+    $<$<BOOL:${HIPBLASLTPROVIDER_ENABLE_MX_GEMM}>:compilation/ProgramCache.cpp>
     HipblasltMatmulDesc.cpp
     HipblasltMatrixLayout.cpp
     HipblasltMatrixTransformDesc.cpp
@@ -191,6 +202,17 @@ target_link_libraries(hipblaslt_plugin_private PUBLIC roc::hipblaslt hipdnn_data
 
 target_compile_options(hipblaslt_plugin_private PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})
 clang_tidy_check(hipblaslt_plugin_private)
+
+if(HIPBLASLTPROVIDER_ENABLE_MX_GEMM)
+    target_link_libraries(hipblaslt_plugin_private PUBLIC hiprtc::hiprtc)
+    include(KernelEmbedding)
+    hipblaslt_plugin_embed_kernels(
+        TARGET hipblaslt_plugin_private
+        OUTPUT_DIR ${CMAKE_CURRENT_BINARY_DIR}/generated/kernels
+        FILES ${CMAKE_CURRENT_SOURCE_DIR}/engines/kernels/MxScaleRelayout.cpp
+              ${CMAKE_CURRENT_SOURCE_DIR}/engines/kernels/MxScaleRelayoutParams.hpp
+    )
+endif()
 
 add_library(hipblaslt_plugin SHARED HipblasltPluginPublic.cpp)
 target_link_libraries(hipblaslt_plugin PRIVATE hipblaslt_plugin_private)

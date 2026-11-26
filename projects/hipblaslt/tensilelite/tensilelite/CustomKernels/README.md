@@ -176,27 +176,34 @@ its libraries at: either strip its `.amdhsa_code_object_version` directive so th
 assembler's flag applies, or emit it with `-mcode-object-version=4`.
 
 A kernel captured from rocRoller arrives carrying rocRoller's internal view of
-the kernel, in two forms that nothing here reads:
+the kernel, in three forms that nothing here reads:
 
 - a dump of the kernel representation inside `.amdgpu_metadata`, under the keys
   `.kernel_graph`, `.kernel_graph_dot` and `.command`;
+- the launch metadata rocRoller's own host side evaluates: `.workitem_count`,
+  `.dynamic_sharedmemory_bytes`, `.kernel_dimensions` and `.workgroup_size` on
+  the kernel entry, and `.expression` and `.variableType` on each `.args`
+  entry. hipBLASLt launches from `custom.config` instead, and the GPU runtime
+  ignores these keys. That holds only when `custom.config` declares a
+  `CustomKernel` block: without one, the arguments are rebuilt from
+  `.expression` and `.variableType`, so the strip refuses such a kernel;
 - whole-line `//` comments narrating codegen -- register allocation, expression
   lowering, liveness -- which outnumber the instructions by better than ten to
   one.
 
-Both dominate the file, and the graph dump also dominates the assembled object,
+They dominate the file, and the metadata also rides into the assembled object,
 so remove them before committing the kernel:
 
 ```bash
 python -m tensilelite.StripKernelGraphs tensilelite/CustomKernels/rocroller/<kernel>.s
 ```
 
-The comment strip runs only where `custom.config` says `Origin: rocroller`, and
-keeps any comment carrying a licence or an annotation marker (`TODO`, `FIXME`,
-`XXX`, `HACK`, `NOTE`, `WARNING`); the hand-written kernels elsewhere in this
-tree are left alone. Instructions keep their trailing `// (op N)` tags, so the
-assembled `.text` is unchanged -- only the metadata note shrinks, by exactly the
-three deleted keys.
+The launch-metadata and comment strips run only where `custom.config` says
+`Origin: rocroller`, and the comment strip keeps any comment carrying a licence
+or an annotation marker (`TODO`, `FIXME`, `XXX`, `HACK`, `NOTE`, `WARNING`); the
+hand-written kernels elsewhere in this tree are left alone. Instructions keep
+their trailing `// (op N)` tags, so the assembled `.text` is unchanged -- only
+the metadata note shrinks, by exactly the deleted keys.
 
 Pass `--check` instead to report without writing; it exits non-zero when
 provenance is still present, which suits a pre-commit or continuous-integration
@@ -230,3 +237,12 @@ Two ways to validate:
 | -------------------- | -------------------------------------------------------------------------------------------------------------------- |
 | Tensile-generated    | `InternalSupportParams.KernArgsVersion`                                                                              |
 | External (`Source:`) | All of: `Source.Origin`, `Features` (mapping), `InternalSupportParams.KernArgsVersion`, `Version`, `ProblemType`, `MatrixInstruction`, `CustomKernel` with `args` / `macrotile` / `threads` / `grid` |
+
+## Occupancy
+
+A custom kernel skips code generation, so nothing derives its `CUOccupancy`,
+which Origami uses to rank the kernels of a Prediction library. A logic entry
+that uses a custom kernel can declare it: a positive `CUOccupancy` there is
+kept on any architecture. Without one, gfx9 kernels get it computed from the
+resources their `.s` declares, and other kernels keep `-1`, which the host
+treats as 1. Every logic entry of a kernel must declare the same value.

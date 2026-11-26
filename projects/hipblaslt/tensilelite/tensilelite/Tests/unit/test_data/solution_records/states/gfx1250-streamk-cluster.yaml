@@ -34,7 +34,7 @@ DirectToVgprB: false
 DirectToVgprMXSA: false
 DirectToVgprMXSB: false
 DirectToVgprSparseMetadata: false
-DisableXdlArbStall: false
+DisableXdlArbStall: true
 DtlPlusLdsBuf: 0
 ESMRuntimeGate: false
 EdgeType: None

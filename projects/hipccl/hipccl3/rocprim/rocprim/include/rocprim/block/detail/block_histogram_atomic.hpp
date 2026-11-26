@@ -40,8 +40,7 @@ template<
     unsigned int BlockSizeY,
     unsigned int BlockSizeZ,
     unsigned int ItemsPerThread,
-    unsigned int Bins,
-    bool UseMatchAnyIntrinsic = true
+    unsigned int Bins
 >
 class block_histogram_atomic
 {
@@ -73,7 +72,7 @@ public:
 
             // Get a mask with the threads that have the same value for `bin`.
             ::rocprim::lane_mask_type peer_mask
-                = ::rocprim::match_any<::rocprim::Log2<Bins>::VALUE, UseMatchAnyIntrinsic>(bin);
+                = ::rocprim::match_any<::rocprim::Log2<Bins>::VALUE>(bin);
 
             // The total number of threads in the warp which also have this digit.
             const unsigned int bin_count = bit_count(peer_mask);

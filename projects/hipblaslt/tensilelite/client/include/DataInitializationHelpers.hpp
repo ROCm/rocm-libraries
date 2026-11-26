@@ -5,6 +5,8 @@
 #if HIPBLASLT_ENABLE_MXDATAGENERATOR
 
 #include "DataInitialization.hpp"
+#include "SwizzleStaging.hpp"
+#include "TensorDataManipulation.hpp"
 #include <mxDataGen.hpp>                          // hipDataType, generateMXInput
 #include <mxDataGenerator/PreSwizzle.hpp>         // DGen::preSwizzleScalesGFX950 / GFX1250
 #include <mxDataGenerator/dataTypeInfo.hpp>       // DGen::toFloat / toFloatPacked
@@ -20,6 +22,7 @@
 #include <cstdint>
 #include <cstring>                                // std::memset
 #include <limits>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <fstream>
@@ -353,6 +356,7 @@ namespace TensileLite
                     }
                 }
             }
+
         } // namespace detail
     } // namespace Client
 } // namespace TensileLite

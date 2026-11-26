@@ -835,8 +835,8 @@ A refusal at run time is not a defect, but the suite cannot yet accept a
 refusal as the expected outcome (ALMIOPEN-3247). The FlyDSL SDPA lanes have
 no skips for the 8 run-time zero and negative scale cases: no FlyDSL SDPA
 lane refuses them at run time (section 9.5).
-`ASM_SDPA_ENGINE` declines most of these cases. Its TOML file skips the
-4 cases that it refuses at run time, under ALMIOPEN-3247.
+`ASM_SDPA_ENGINE` declines the 4 zero-scale cases. Its TOML file has no skips
+for these 8 cases.
 
 ### 10.1 Running the cases
 
@@ -909,10 +909,11 @@ reason = "ALMIOPEN-NNNN: <what the engine does wrong>"
 - `archs` (optional): the GPU architectures on which the entry applies. An
   entry without `archs` applies on every GPU. Add `archs` only when the defect
   is specific to an architecture. Then list every architecture of the affected
-  family, not only the GPUs on which the cases were run. For example, the
-  `FP8_E4M3_FNUZ` entry lists the FNUZ-native targets `gfx940`, `gfx941` and
-  `gfx942`. The suite matches each value as part of the GPU's architecture
-  name, so `gfx942` matches `gfx942:sramecc+:xnack-`.
+  family, not only the GPUs on which the cases were run. For example, an
+  entry for a defect of the `FP8_E4M3_FNUZ` cases lists the FNUZ-native
+  targets `gfx940`, `gfx941` and `gfx942`. The suite matches each value as
+  part of the GPU's architecture name, so `gfx942` matches
+  `gfx942:sramecc+:xnack-`.
 
 #### Which cases an entry covers
 
@@ -921,37 +922,33 @@ setting or the value that the ticket names. It covers those cases on every GPU,
 unless the defect is specific to an architecture. It covers them also when some
 of them pass today. Some defects give a result that depends on the memory
 contents or on the GPU. Such a case can pass by chance, so a pass does not show
-that the engine is correct for it. Example:
-
-- ALMIOPEN-3042: every case with self-overlapping Q, K or V sequence strides,
-  and every case with a Stats layout that the kernel cannot address. The
-  result depends on the input data and on the memory contents.
+that the engine is correct for it.
 
 Use a list of exact names from measured failures only for a defect that has no
-known trigger. For example, the ALMIOPEN-3212 entry names the one case that
-showed the defect.
+known trigger.
 
-The ALMIOPEN-3041 and ALMIOPEN-3182 entries are not trigger-based yet. Each
-lists the cases that were measured to fail, not every case with the trigger:
-
-- ALMIOPEN-3041 (a Q, K, V or O head-dim stride other than 1, on a head dim
-  larger than 1): 385 of the 2,776 cases with the trigger. The engine reads
-  memory outside the layout, so the result depends on the contents of that
-  memory. The ASM forward applicability change that accepts more graphs made
-  the engine accept 12 of these cases. They compute a wrong O, so they are in
-  the list.
-- ALMIOPEN-3182 (a zero-stride broadcast Q or V): 64 of the 736 cases with the
-  trigger.
-
-The other cases with these triggers are not in an entry. The engine declined
-them or they passed in the measured runs. If an engine change accepts more of
-them while the defect remains, the suite reports them as failures. The checks
-in "Checking the entries" do not apply to these two entries.
+ALMIOPEN-3212 has no entry. Its case, `full_SdpaFwdPlan_Rng.bf16_edb982e24ace0136`,
+is not skipped: the defect did not reproduce in 60 runs on gfx942 and gfx950.
 
 ALMIOPEN-3123, ALMIOPEN-3124, ALMIOPEN-3126 and ALMIOPEN-3211 have no entry.
 With the ALMIOPEN-3123 fix, `ASM_SDPA_ENGINE` declines a graph that has a block
 mask, or a dropout mask and a dropout scale. It also declines the cases of the
 other three tickets, so they need no skip.
+
+ALMIOPEN-2273, ALMIOPEN-3041, ALMIOPEN-3042, ALMIOPEN-3182 and ALMIOPEN-3247
+also have no entry. On gfx942 and gfx950, `ASM_SDPA_ENGINE` declines every
+case that showed one of these defects. The engine declines a graph that has
+one of these settings:
+
+- fp8 inputs with a Q, K or V descale passed by value (ALMIOPEN-2273);
+- a Q, K, V or O head-dim stride other than 1 (ALMIOPEN-3041);
+- a Q, K, V or O sequence stride less than the head dim, which includes a
+  zero-stride broadcast along the sequence (ALMIOPEN-3042, ALMIOPEN-3182);
+- an O that overlaps itself (ALMIOPEN-3042);
+- a batch-mode Stats layout other than `[H * s_h, s_h, 1]` with `s_h >= Sq`
+  (ALMIOPEN-3042);
+- an attention scale that is not a finite, positive, normal float
+  (ALMIOPEN-3247).
 
 #### Building an entry from the bundles
 
@@ -1029,6 +1026,9 @@ entry when the blocking ticket is fixed, then follow section 10.4.
 - `ASM_SDPA_ENGINE` declines every graph that declares a tensor alignment
   below 16 bytes. So its lane gets no engine result for an `element_aligned` or
   `sub_element` row.
+- `ASM_SDPA_ENGINE` declines every graph whose K sequence stride is 0 (one
+  key row broadcast over the sequence). The kernel gives a correct O for some
+  of these cases where measured, but the lane gets no engine result for them.
 - Requests that hipDNN must refuse, and one request stated through different
   API routes, are not bundles. They belong to a rejection suite.
 - The sizes override cannot set the page size or the window bounds, so the

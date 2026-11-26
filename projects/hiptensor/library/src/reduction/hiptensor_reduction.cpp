@@ -311,6 +311,47 @@ hiptensorStatus_t hiptensorReduce(const hiptensorHandle_t handle,
         betaValue = hiptensor::readVal<double>(beta, typeCompute);
     }
 
+    // CK requires all the modes of the reduced tensors (C/D) to be sorted according to the
+    // non-reduced tensor mode (modeA).
+    //
+    // By permuting the reduced tensor modes and their lengths, if the strides are permuted
+    // following the same order, then it's possible to satisfy CK's requirement without
+    // physically permuting the data.
+    //
+    // For example:
+    //  - A lengths are [3, 5, 8], C/D modes are [2, 1].
+    //  - CK requires sorted modes as [1, 2] for C/D, and the respective lengths [5, 8].
+    //  - Strides of output are generated in this way:
+    //    - output dims are [2, 1]
+    //      => corresponding lengths are [8(2), 5(1)]
+    //      => strides are [5(2), 1(1)]
+    //      => permuted strides are [1(1), 5(2)]
+    //
+    // The code below implements this logic.
+    hiptensorTensorDescriptor sortedDescC    = *descC;
+    std::vector<int>          sortingIndices = {};
+
+    auto sortStatus = hiptensor::getSortingIndices(
+        modeA, descA->mLengths.size(), modeC, sortedDescC.mLengths.size(), sortingIndices);
+    if(sortStatus == HIPTENSOR_STATUS_SUCCESS)
+    {
+        sortStatus = hiptensor::applySortingIndices(sortingIndices, sortedDescC.mLengths);
+    }
+    if(sortStatus == HIPTENSOR_STATUS_SUCCESS)
+    {
+        sortStatus = hiptensor::applySortingIndices(sortingIndices, sortedDescC.mStrides);
+    }
+    if(sortStatus != HIPTENSOR_STATUS_SUCCESS)
+    {
+        snprintf(msg,
+                 sizeof(msg),
+                 "Invalid Argument Error : Failed to sort the modes of C and D by the modes of "
+                 "A (%s)",
+                 hiptensorGetErrorString(sortStatus));
+        logger->logError("hiptensorReduce", msg);
+        return sortStatus;
+    }
+
     if(C && C != D)
     {
         // CK API can only process $D = alpha * reduce(A) + beta * D$
@@ -333,31 +374,6 @@ hiptensorStatus_t hiptensorReduce(const hiptensorHandle_t handle,
             return errorCode;
         }
     }
-
-    // CK requires all the modes of the reduced tensors (C/D) to be sorted according to the
-    // non-reduced tensor mode (modeA).
-    //
-    // By permuting the reduced tensor modes and their lengths, if the strides are permuted
-    // following the same order, then it's possible to satisfy CK's requirement without
-    // physically permuting the data.
-    //
-    // For example:
-    //  - A lengths are [3, 5, 8], C/D modes are [2, 1].
-    //  - CK requires sorted modes as [1, 2] for C/D, and the respective lengths [5, 8].
-    //  - Strides of output are generated in this way:
-    //    - output dims are [2, 1]
-    //      => corresponding lengths are [8(2), 5(1)]
-    //      => strides are [5(2), 1(1)]
-    //      => permuted strides are [1(1), 5(2)]
-    //
-    // The code below implements this logic.
-    hiptensorTensorDescriptor sortedDescC    = *descC;
-    std::vector<int>          sortingIndices = {};
-
-    CHECK_HIPTENSOR_ERROR(hiptensor::getSortingIndices(
-        modeA, descA->mLengths.size(), modeC, sortedDescC.mLengths.size(), sortingIndices));
-    CHECK_HIPTENSOR_ERROR(hiptensor::applySortingIndices(sortingIndices, sortedDescC.mLengths));
-    CHECK_HIPTENSOR_ERROR(hiptensor::applySortingIndices(sortingIndices, sortedDescC.mStrides));
 
     for(auto pSolution : solutions)
     {

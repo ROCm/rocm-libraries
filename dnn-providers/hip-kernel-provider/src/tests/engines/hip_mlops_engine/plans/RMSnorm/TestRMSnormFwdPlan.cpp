@@ -709,6 +709,27 @@ TEST(TestRMSnormFwdPlan, CompileWithUnsupportedWorkgroupsThrowsForDoubleNodeGrap
     EXPECT_THROW(plan.compile(mockCompiler, deviceProps), hipdnn_plugin_sdk::HipdnnPluginException);
 }
 
+TEST(TestRMSnormFwdPlan, CompileWithBlockCountReachingThreadLimitThrows)
+{
+    const MockKernelCompiler mockCompiler;
+
+    // 2^24 workgroups of 256 threads is 2^32 threads
+    auto builder
+        = hipdnn_test_sdk::utilities::createValidRMSNormGraph({2, 1, 1, 1}, {16777216, 2, 1, 1});
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
+
+    const auto& node = graph.getNode(0);
+    const auto& attr = *node.attributes_as_RMSNormAttributes();
+
+    RMSnormFwdParams params(attr, graph.getTensorMap());
+    RMSnormFwdPlan plan(std::move(params));
+
+    auto deviceProps = createTestDeviceProps();
+
+    EXPECT_THROW(plan.compile(mockCompiler, deviceProps), hipdnn_plugin_sdk::HipdnnPluginException);
+}
+
 TEST(TestRMSnormFwdPlan, CompileWithChannelLastInputCorrectlySetsDefinesForSingleNodeGraph)
 {
     const MockKernelCompiler mockCompiler;

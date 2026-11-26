@@ -71,3 +71,19 @@ f16:
       - [256, 256, 64, 16, 16, 16, 2, 8]
       ...
 ```
+
+## W4A16 Baselines
+
+`test_w4a16_ranking_regression.py` keeps the rankings of the W4A16 kernel sets (int4 A with
+bf16/fp16 activations) in the `<arch>.yaml` file of each architecture that has them, in the
+same format. The top-level key is the kernel set (`i4_bf16_sym`, `i4_bf16_zp`, `i4_f16_sym`,
+`i4_f16_zp`) and the transpose is always `TN`.
+
+It differs from the generic test in its inputs:
+- `data/w4a16_configs.csv`: the kernels hipBLASLt ships, with their wave layout, Stream-K and
+  occupancy. `tokens` is the token count a decode kernel serves (0: any).
+- `data/w4a16_problem_data.csv`: W4A16 shapes, `m` weight rows, `n` tokens, `k`.
+
+```bash
+pytest tests/test_w4a16_ranking_regression.py -v --generate-baseline
+```

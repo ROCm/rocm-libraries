@@ -594,7 +594,7 @@ def test_packaging_and_canonical_schema_agree_on_uhd_headers(tmp_path, mutation)
     elif mutation == "format_1_1":
         doc["version"] = "1.1"
     elif mutation == "unsupported_format":
-        doc["version"] = "1.2"
+        doc["version"] = "1.3"
     elif mutation == "tflops_metric":
         doc["score"] = {"metric": "tflops", "calibrated": True, "transform": "log1p"}
     elif mutation == "time_metric":

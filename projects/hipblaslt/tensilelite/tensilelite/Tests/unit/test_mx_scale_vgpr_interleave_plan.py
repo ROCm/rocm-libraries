@@ -21,13 +21,16 @@ def _writer(numVgprBuffer=2, lrvwTile=1, valuPerBlock=(4, 4)):
     archCaps={"VgprBank": True},
     lrvwTileMXSA=lrvwTile,
     lrvwTileMXSB=lrvwTile,
+    kernelName="kernel",
     mxsa=SimpleNamespace(numVgprValu=16, numVgprValuPerBlock=valuPerBlock[0]),
     mxsb=SimpleNamespace(numVgprValu=16, numVgprValuPerBlock=valuPerBlock[1]),
   )
   writer = SimpleNamespace(states=states)
   writer._mxsDefaultBlocks = lambda kernel, tc: KernelWriter._mxsDefaultBlocks(writer, kernel, tc)
   writer._alignMXSB = lambda kernel, idx: KernelWriter._alignMXSB(writer, kernel, idx)
-  writer._mxsInterleavePlan = lambda kernel, tPA, tPB: KernelWriter._mxsInterleavePlan(writer, kernel, tPA, tPB)
+  writer._mxsInterleavePlan = lambda kernel, tPA, tPB, **kw: KernelWriter._mxsInterleavePlan(writer, kernel, tPA, tPB, **kw)
+  writer._mxsBudgetPlan = lambda *args: KernelWriter._mxsBudgetPlan(writer, *args)
+  writer._mxsLayoutConflicts = lambda *args, **kw: KernelWriter._mxsLayoutConflicts(writer, *args, **kw)
   return writer
 
 
@@ -42,6 +45,7 @@ def _kernel(**over):
     "ISA": (12, 5, 0),
     "UnrollMajorLDSA": 1, "UnrollMajorLDSB": 1,
     "SourceSwap": 1,
+    "MXScaleVgprInterleaveExtraVgpr": False,
   }
   kernel.update(over)
   return kernel
@@ -51,8 +55,8 @@ def _tensor(blockWidth=1):
   return {"localReadInstruction": SimpleNamespace(blockWidth=blockWidth)}
 
 
-def _plan(writer, kernel, widthA=1, widthB=1):
-  return KernelWriter._mxsInterleavePlan(writer, kernel, _tensor(widthA), _tensor(widthB))
+def _plan(writer, kernel, widthA=1, widthB=1, **kw):
+  return KernelWriter._mxsInterleavePlan(writer, kernel, _tensor(widthA), _tensor(widthB), **kw)
 
 
 def test_plan_packs_blocks_on_disjoint_banks():
@@ -159,22 +163,118 @@ def test_region_falls_back_when_the_plan_does_not_apply():
   assert (plan, regionLen) == (None, 0) and "ReuseAcrossPersistent" in reason
 
 
-def test_region_falls_back_when_the_layout_needs_more_vgprs_than_the_default():
-  writer = _writer()
-  writer.states.mxsa.numVgprValu = 1
-  writer.states.mxsb.numVgprValu = 1
-  plan, regionLen, reason = _region(writer, _kernel())
-  assert (plan, regionLen) == (None, 0) and "more than the default" in reason
+def _unbalanced_writer():
+  # MIWaveTile 4x13 on one side: a 4-VGPR MXSA block (one piece) against a 13-VGPR MXSB block
+  # (13 one-VGPR pieces), two buffers, so two pairing groups.
+  writer = _writer(valuPerBlock=(4, 13))
+  writer.states.mxsa.numVgprValu = 4 * 2
+  writer.states.mxsb.numVgprValu = 13 * 2
+  return writer
 
 
-@pytest.mark.parametrize("pap, applies", [(False, False), (True, True)])
-def test_region_needs_prefetch_global_read_or_pap(pap, applies):
-  plan, regionLen, reason = _region(_writer(), _kernel(PrefetchGlobalRead=0), papEnabled=pap)
-  assert (plan is not None) == applies
-  if not applies:
-    assert regionLen == 0 and "G2L" in reason
+def test_shared_groups_pack_into_each_others_holes():
+  writer = _unbalanced_writer()
+  stacked, _ = _plan(writer, _kernel())
+  shared, reason = _plan(writer, _kernel(), shareGroups=True)
+  assert reason is None
+  assert len(stacked["groups"]) == 2 and len(shared["groups"]) == 1
+  stackedSpan = sum(g["span"] for g in stacked["groups"])
+  sharedSpan = shared["groups"][0]["span"]
+  assert stackedSpan == 60
+  assert sharedSpan < stackedSpan
+  # the scales of the two groups are 2 * (4 + 13) VGPRs; none shares a VGPR
+  cells = shared["groups"][0]["cells"]
+  used = [c for pc, p in cells.items() for c in range(p, p + shared["piece"][pc[0]])]
+  assert len(used) == len(set(used)) == 2 * (4 + 13)
 
 
-def test_region_falls_back_past_v255():
-  plan, regionLen, reason = _region(_writer(), _kernel(), vgprIdx=250)
-  assert (plan, regionLen) == (None, 0) and "v255" in reason
+def test_shared_groups_keep_each_pairing_bank_disjoint():
+  writer = _unbalanced_writer()
+  shared, _ = _plan(writer, _kernel(), shareGroups=True)
+  cells = shared["groups"][0]["cells"]
+  piece = shared["piece"]
+  # A scale block and the B scale block a WMMA reads with it come from the same (bi, iui).
+  for key, offA in shared["blocks"]["A"].items():
+    offB = shared["blocks"]["B"][key]
+    banksA = {c % 8 for pc, p in cells.items() if pc[0] == "A" and pc[1] == offA for c in range(p, p + piece["A"])}
+    banksB = {c % 8 for pc, p in cells.items() if pc[0] == "B" and pc[1] == offB for c in range(p, p + piece["B"])}
+    assert banksA and banksB and not banksA & banksB
+
+
+def test_shared_groups_leave_a_single_group_alone():
+  writer = _writer(numVgprBuffer=2, lrvwTile=2)  # buffers alias: one pairing group
+  kernel = _kernel(UnrollMajorLDSA=0, UnrollMajorLDSB=0)
+  stacked, _ = _plan(writer, kernel)
+  shared, _ = _plan(writer, kernel, shareGroups=True)
+  assert shared["groups"][0]["cells"] == stacked["groups"][0]["cells"]
+  assert shared["groups"][0]["span"] == stacked["groups"][0]["span"]
+
+
+def _conflicts(plan, pairing):
+  """sum over pairing groups and banks of (#MXSA VGPRs on the bank) * (#MXSB VGPRs on the bank)"""
+  cells = plan["groups"][0]["cells"] if len(plan["groups"]) == 1 else None
+  total = 0
+  for grp in pairing:
+    count = {"A": [0] * 8, "B": [0] * 8}
+    for tc in "AB":
+      for off in grp[tc]:
+        for pc, p in cells.items():
+          if pc[0] == tc and pc[1] == off:
+            for c in range(p, p + plan["piece"][tc]):
+              count[tc][c % 8] += 1
+    total += sum(a * b for a, b in zip(count["A"], count["B"]))
+  return total
+
+
+def test_region_shares_groups_when_extra_vgprs_are_allowed():
+  writer = _unbalanced_writer()
+  # default: align(0 + 8) = 10, plus 26 MXSB VGPRs, from v0 -> 36; the stacked layout needs 60
+  plan, regionLen, reason = _region(writer, _kernel(MXScaleVgprInterleaveExtraVgpr=True), vgprIdx=0)
+  assert reason is None and len(plan["groups"]) == 1 and "conflicts" not in plan
+  assert 36 <= regionLen < 60
+  # a layout that already fits keeps its per-group stacking
+  plan, regionLen, reason = _region(_writer(), _kernel())
+  assert reason is None and len(plan["groups"]) == 2 and regionLen == 34
+
+
+def test_region_stays_in_the_default_length_with_the_fewest_conflicts():
+  writer = _unbalanced_writer()
+  stacked, _ = _plan(writer, _kernel())
+  plan, regionLen, reason = _region(writer, _kernel(), vgprIdx=0)
+  assert reason is None
+  assert regionLen == 36  # the default length: no extra VGPRs
+  assert plan["groups"][0]["span"] <= regionLen
+  # the pieces do not overlap
+  cells = plan["groups"][0]["cells"]
+  used = [c for pc, p in cells.items() for c in range(p, p + plan["piece"][pc[0]])]
+  assert len(used) == len(set(used)) == 2 * (4 + 13)
+  # never worse than keeping the default layout (MXSA from 0, MXSB from 10 = align(8))
+  default = {pc: (0 if pc[0] == "A" else 10) + pc[1] + pc[2] * stacked["piece"][pc[0]] for g in stacked["groups"]
+             for pc in g["cells"]}
+  defaultPlan = {"piece": stacked["piece"], "groups": [{"cells": default}]}
+  assert plan["conflicts"] == _conflicts(plan, stacked["groups"])
+  assert plan["conflicts"] <= _conflicts(defaultPlan, stacked["groups"])
+  # and it does remove conflicts the default layout has
+  assert plan["conflicts"] < _conflicts(defaultPlan, stacked["groups"])
+
+
+def test_region_without_a_fitting_conflict_free_layout_is_conflict_free_when_one_fits():
+  # a balanced kernel: the conflict-free layout fits the default length and is used as is
+  plan, regionLen, reason = _region(_writer(), _kernel())
+  assert reason is None and "conflicts" not in plan
+
+
+def test_layout_conflicts_count_shared_banks_of_the_default_layout():
+  writer = _unbalanced_writer()
+  stacked, _ = _plan(writer, _kernel())
+  # default layout: MXSA at 0..7 (two 4-VGPR blocks), MXSB from 10; per group 4 MXSA x 13 MXSB pairs
+  conflicts, pairs = KernelWriter._mxsLayoutConflicts(writer, stacked, 10)
+  assert pairs == 2 * 4 * 13
+  default = {pc: (0 if pc[0] == "A" else 10) + pc[1] + pc[2] * stacked["piece"][pc[0]] for g in stacked["groups"]
+             for pc in g["cells"]}
+  assert KernelWriter._mxsLayoutConflicts(writer, stacked, 10, default) == (conflicts, pairs)
+  assert 0 < conflicts < pairs
+  # the budget layout lowers it and reports the same number it gets from the same model
+  plan, _regionLen, _reason = _region(writer, _kernel(), vgprIdx=0)
+  assert KernelWriter._mxsLayoutConflicts(writer, stacked, 10, plan["groups"][0]["cells"])[0] == plan["conflicts"]
+  assert plan["conflicts"] < conflicts

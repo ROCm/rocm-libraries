@@ -451,7 +451,18 @@ validParameters = { # we need to make sure this matches develop
     # VectorWidthA and inherited VectorWidthMXSA retain their values.
     # WTA == VWA (MIWaveTile[0] == VectorWidthA) keeps the original path.
     # B keeps its VectorWidthB layout and iterate setting.
+    # When active with LDSSegmentInterleave, requires paired LDS buffers;
+    # persistent unpaired fallback (including PrefetchAcrossPersistent) is rejected.
     "WaveTileContiguousA": [False, True],
+    # MXScaleVgprInterleaveExtraVgpr (gfx1250, MX kernels on both A and B): the scale-VGPR interleave
+    # lays MXSA/MXSB on disjoint VGPR banks so v_wmma_scale avoids the +1 cycle bank-conflict penalty.
+    #   False (default): never use more VGPRs than the default layout; when the conflict-free layout does
+    #        not fit, use the layout with the fewest bank conflicts that does.
+    #   True: let the scale region grow to hold the conflict-free layout. The kernel then uses more VGPRs
+    #        and can exceed the 1024 VGPR limit, in which case it does not build. It is rejected where the
+    #        interleave does not apply (not gfx1250, or MX scales not on both A and B) and folded into False
+    #        where the conflict-free layout already fits the default span (the kernel would be identical).
+    "MXScaleVgprInterleaveExtraVgpr": [False, True],
     # Persistent loop: use the current tile's no-load-loop window to
     # issue the first global-read group for the next persistent tile. The
     # generated code keeps that first-PGR data durable and restores borrowed
@@ -605,6 +616,14 @@ validParameters = { # we need to make sure this matches develop
     # When True, uses a subtile scheduling strategy with DTL global reads and
     # an optimized storeD path. Automatically forced False on non-gfx950.
     "UseSubtileImpl": [False, True],
+    # Store cacheline align on the MXF4 -> 16-bit subtile store (gfx950, MI16, permlane16 store).
+    # A paired store fills half of each 128B line; with this on, two paired stores that
+    # hold the two halves of the same lines are blended in place so each store writes
+    # full lines, which removes the partial-line write traffic. It applies to the plain
+    # post-loop store's guard-free interior body and to the staged and woven fused
+    # stores, and is a no-op on kernels and store paths where it cannot apply. On by
+    # default.
+    "StoreCachelineAlign": [False, True],
     # FusedA2A=A2AGemm: K sub-rounds per peer shard, each with its own flag.
     "A2ASubRounds": [1, 2, 4],
     # Load options:

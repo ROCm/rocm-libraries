@@ -262,6 +262,56 @@ public:
             }
         }
 
+        // Rule 6d: the dropout mask comes either from dropout_probability (Philox, drawn from
+        // the seed and offset tensors) or from a custom dropout mask with its scale, never
+        // both: cuDNN rejects a custom mask with any dropout_probability. A positive
+        // probability needs seed and offset; cuDNN builds no RNG at probability 0.
+        HIPDNN_RETURN_IF_TRUE(
+            attributes.dropout_probability.has_value() && attributes.get_dropout_mask(),
+            ErrorCode::ATTRIBUTE_NOT_SET,
+            "SdpaFwdNode: using both a custom dropout mask and dropout_probability is "
+            "ill-formed");
+        HIPDNN_RETURN_IF_TRUE(attributes.dropout_probability.has_value()
+                                  && attributes.dropout_probability.value() > 0.0f
+                                  && (!attributes.get_seed() || !attributes.get_offset()),
+                              ErrorCode::ATTRIBUTE_NOT_SET,
+                              "SdpaFwdNode: dropout_probability requires seed and offset tensors");
+
+        // Rule 6e: the ATTN_MASK leading dims, right-aligned to the score [B, H_q, S_q, S_kv],
+        // broadcast: batch is B or 1, heads is H_q or 1 (cuDNN's pointwise broadcast).
+        if(attnMask)
+        {
+            const auto& maskDims = attnMask->get_dim();
+            const auto maskRank = maskDims.size();
+            if(maskRank == reqRank)
+            {
+                HIPDNN_RETURN_IF_TRUE(maskDims[0] != qDims[0] && maskDims[0] != 1,
+                                      ErrorCode::INVALID_VALUE,
+                                      "SdpaFwdNode: ATTN_MASK batch dim must equal batch ("
+                                          + std::to_string(qDims[0]) + ") or 1, got "
+                                          + std::to_string(maskDims[0]));
+            }
+            if(maskRank >= 3)
+            {
+                const auto maskHeads = maskDims[maskRank - 3];
+                HIPDNN_RETURN_IF_TRUE(maskHeads != numHeads && maskHeads != 1,
+                                      ErrorCode::INVALID_VALUE,
+                                      "SdpaFwdNode: ATTN_MASK num_heads dim must equal num_heads ("
+                                          + std::to_string(numHeads) + ") or 1, got "
+                                          + std::to_string(maskHeads));
+            }
+        }
+
+        // Rule 6f: padding_mask needs a Q-side length (seq_len_q or cu_seq_len_q) and a KV-side
+        // length (seq_len_kv or cu_seq_len_kv), as cuDNN does. A ragged Q also supplies the
+        // Q side: its offsets give the query lengths (SdpaSemanticsRegister SEM-028).
+        const bool hasQLengths = seqLenQ || cuSeqLenQ || q->has_ragged_offset();
+        const bool hasKvLengths = seqLenKv || cuSeqLenKv;
+        HIPDNN_RETURN_IF_TRUE(attributes.padding_mask && (!hasQLengths || !hasKvLengths),
+                              ErrorCode::ATTRIBUTE_NOT_SET,
+                              "SdpaFwdNode: padding_mask requires seq_len_q and seq_len_kv (or "
+                              "cu_seq_len_q/cu_seq_len_kv; a ragged Q supplies the query lengths)");
+
         // Rule 7: If O has dims already set, validate them
         const auto& oDims = o->get_dim();
         if(!oDims.empty())

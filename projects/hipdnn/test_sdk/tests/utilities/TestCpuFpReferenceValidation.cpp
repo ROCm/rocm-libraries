@@ -32,6 +32,19 @@ float validationEpsilon()
 {
     return static_cast<float>(std::numeric_limits<T>::epsilon());
 }
+
+bool fp64AllClose(double reference,
+                  double implementation,
+                  float absoluteTolerance,
+                  float relativeTolerance)
+{
+    const CpuFpReferenceValidation<double> refValidation(absoluteTolerance, relativeTolerance);
+    Tensor<double> referenceTensor({1});
+    Tensor<double> implementationTensor({1});
+    referenceTensor.setHostValue(reference, 0);
+    implementationTensor.setHostValue(implementation, 0);
+    return refValidation.allClose(referenceTensor, implementationTensor);
+}
 } // namespace
 
 /* ======== CpuFpReferenceValidation tests ======== */
@@ -368,6 +381,65 @@ TEST(TestCpuFpReferenceValidation, TensorSameElementCountDifferentDims)
     // Should return false because dimensions don't match
     // even though element counts are the same
     EXPECT_FALSE(refValidation.allClose(tensor1, tensor2));
+}
+
+TEST(TestCpuFpReferenceValidationFp64, FailsForOrderOfMagnitudeErrorNear1e300)
+{
+    EXPECT_TRUE(fp64AllClose(1e300, 1e300 * (1.0 + 5e-7), 0.0f, 1e-6f));
+    EXPECT_FALSE(fp64AllClose(1e300, 1e301, 0.0f, 1e-6f));
+}
+
+TEST(TestCpuFpReferenceValidationFp64, FailsForSignFlipNear1e300)
+{
+    EXPECT_TRUE(fp64AllClose(1e300, 1e300 * (1.0 - 5e-7), 0.0f, 1e-6f));
+    EXPECT_TRUE(fp64AllClose(-1e300, -1e300 * (1.0 + 5e-7), 0.0f, 1e-6f));
+    EXPECT_FALSE(fp64AllClose(1e300, -1e300, 0.0f, 1e-6f));
+    EXPECT_FALSE(fp64AllClose(-1e300, 1e300, 0.0f, 1e-6f));
+}
+
+TEST(TestCpuFpReferenceValidationFp64, FailsForDifferingValuesAboveFloatMax)
+{
+    const double aboveFloatMax = 1e39;
+    ASSERT_GT(aboveFloatMax, static_cast<double>(std::numeric_limits<float>::max()));
+
+    EXPECT_TRUE(fp64AllClose(aboveFloatMax, aboveFloatMax, 0.0f, 0.0f));
+    EXPECT_FALSE(fp64AllClose(aboveFloatMax,
+                              std::nextafter(aboveFloatMax, std::numeric_limits<double>::max()),
+                              0.0f,
+                              0.0f));
+
+    EXPECT_TRUE(fp64AllClose(aboveFloatMax, aboveFloatMax * (1.0 + 5e-7), 0.0f, 1e-6f));
+    EXPECT_FALSE(fp64AllClose(aboveFloatMax, 2.0 * aboveFloatMax, 0.0f, 1e-6f));
+}
+
+TEST(TestCpuFpReferenceValidationFp64, FailsForWrongValueAgainstReferenceAboveFloatMax)
+{
+    const double aboveFloatMax = 1e39;
+
+    EXPECT_TRUE(fp64AllClose(aboveFloatMax, aboveFloatMax * (1.0 - 5e-7), 0.0f, 1e-6f));
+    EXPECT_FALSE(fp64AllClose(aboveFloatMax, 1.0, 0.0f, 1e-6f));
+    EXPECT_FALSE(fp64AllClose(-aboveFloatMax, 0.0, 0.0f, 1e-6f));
+}
+
+TEST(TestCpuFpReferenceValidationFp64, FailsForDriftBelowFloatResolution)
+{
+    EXPECT_TRUE(fp64AllClose(1.0, 1.0 + 1e-13, 1e-12f, 0.0f));
+    EXPECT_FALSE(fp64AllClose(1.0, 1.0 + 1e-9, 1e-12f, 0.0f));
+}
+
+TEST(TestCpuFpReferenceValidation, RelativeToleranceScalesWithTheReference)
+{
+    const CpuFpReferenceValidation<float> refValidation(0.0f, 0.6f);
+    Tensor<float> reference({1});
+    Tensor<float> implementation({1});
+
+    reference.setHostValue(1.0f, 0);
+    implementation.setHostValue(2.0f, 0);
+    EXPECT_FALSE(refValidation.allClose(reference, implementation));
+
+    reference.setHostValue(2.0f, 0);
+    implementation.setHostValue(1.0f, 0);
+    EXPECT_TRUE(refValidation.allClose(reference, implementation));
 }
 
 /* ================================================= */

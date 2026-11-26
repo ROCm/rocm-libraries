@@ -12,8 +12,10 @@
 #include "compilation/IRunnableKernel.hpp"
 #include "core/Handle.hpp"
 #include "core/Utils.hpp"
+#include "engines/hip_mlops_engine/plans/PlanUtils.hpp"
 
 #include <memory>
+#include <vector>
 
 namespace hip_kernel_provider
 {
@@ -79,6 +81,10 @@ public:
     RMSnormBwdPlan(RMSnormBwdPlan&&) = default;
     RMSnormBwdPlan& operator=(RMSnormBwdPlan&&) = delete;
 
+    // Every kernel launch of the plan for a problem of the given outer size, stride and inner size.
+    static std::vector<KernelLaunchShape>
+        launchShapes(int64_t outerSize, int64_t stride, int64_t innerSize);
+
     void compile(const IKernelCompiler& kernelCompiler, const hipDeviceProp_t& deviceProperties);
 
     size_t getWorkspaceSize(const Handle& handle) const override;
@@ -89,6 +95,8 @@ public:
                  void* workspace = nullptr) const override;
 
 private:
+    static constexpr int64_t LOCAL_SIZE = 256;
+
     RMSnormBwdParams _params;
 
     // Populated by compile()
