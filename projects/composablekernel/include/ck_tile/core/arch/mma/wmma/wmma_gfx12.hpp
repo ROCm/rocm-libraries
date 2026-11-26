@@ -7,6 +7,7 @@
 #include "ck_tile/core/arch/mma/amdgcn_mma.hpp"
 #include "ck_tile/core/arch/mma/mma_data_format.hpp"
 #include "ck_tile/core/arch/mma/mma_op_family.hpp"
+#include "ck_tile/core/arch/mma/wmma/wmma_gfx1250_f8_16x16x128.hpp"
 #include "ck_tile/core/arch/mma/wmma/wmma_traits.hpp"
 #include "ck_tile/core/config.hpp"
 #include "ck_tile/core/numeric/bfloat16.hpp"
@@ -784,12 +785,8 @@ struct amdgcn_mma<fp8_t, fp8_t, fp16_t, 16u, 16u, 128u, CompilerTarget, MmaOpFam
     exec(AVecType const& aVec, BVecType const& bVec, CVecType const& cVec)
     {
 #if defined(__gfx125__)
-        return {__builtin_amdgcn_wmma_f16_16x16x128_fp8_fp8(bit_cast<int32x16_t>(aVec),
-                                                            bit_cast<int32x16_t>(bVec),
-                                                            0, // C_mod
-                                                            cVec,
-                                                            0,   // matrix_a_reuse
-                                                            0)}; // matrix_b_reuse
+        return {wmma_f16_16x16x128_f8<fp8_t, fp8_t>(
+            bit_cast<int32x16_t>(aVec), bit_cast<int32x16_t>(bVec), cVec)};
 #else
         ignore(aVec, bVec);
         return cVec;
@@ -818,12 +815,8 @@ struct amdgcn_mma<fp8_t, bf8_t, fp16_t, 16u, 16u, 128u, CompilerTarget, MmaOpFam
     exec(AVecType const& aVec, BVecType const& bVec, CVecType const& cVec)
     {
 #if defined(__gfx125__)
-        return {__builtin_amdgcn_wmma_f16_16x16x128_fp8_bf8(bit_cast<int32x16_t>(aVec),
-                                                            bit_cast<int32x16_t>(bVec),
-                                                            0, // C_mod
-                                                            cVec,
-                                                            0,   // matrix_a_reuse
-                                                            0)}; // matrix_b_reuse
+        return {wmma_f16_16x16x128_f8<fp8_t, bf8_t>(
+            bit_cast<int32x16_t>(aVec), bit_cast<int32x16_t>(bVec), cVec)};
 #else
         ignore(aVec, bVec);
         return cVec;
@@ -852,12 +845,8 @@ struct amdgcn_mma<bf8_t, fp8_t, fp16_t, 16u, 16u, 128u, CompilerTarget, MmaOpFam
     exec(AVecType const& aVec, BVecType const& bVec, CVecType const& cVec)
     {
 #if defined(__gfx125__)
-        return {__builtin_amdgcn_wmma_f16_16x16x128_bf8_fp8(bit_cast<int32x16_t>(aVec),
-                                                            bit_cast<int32x16_t>(bVec),
-                                                            0, // C_mod
-                                                            cVec,
-                                                            0,   // matrix_a_reuse
-                                                            0)}; // matrix_b_reuse
+        return {wmma_f16_16x16x128_f8<bf8_t, fp8_t>(
+            bit_cast<int32x16_t>(aVec), bit_cast<int32x16_t>(bVec), cVec)};
 #else
         ignore(aVec, bVec);
         return cVec;
@@ -886,12 +875,8 @@ struct amdgcn_mma<bf8_t, bf8_t, fp16_t, 16u, 16u, 128u, CompilerTarget, MmaOpFam
     exec(AVecType const& aVec, BVecType const& bVec, CVecType const& cVec)
     {
 #if defined(__gfx125__)
-        return {__builtin_amdgcn_wmma_f16_16x16x128_bf8_bf8(bit_cast<int32x16_t>(aVec),
-                                                            bit_cast<int32x16_t>(bVec),
-                                                            0, // C_mod
-                                                            cVec,
-                                                            0,   // matrix_a_reuse
-                                                            0)}; // matrix_b_reuse
+        return {wmma_f16_16x16x128_f8<bf8_t, bf8_t>(
+            bit_cast<int32x16_t>(aVec), bit_cast<int32x16_t>(bVec), cVec)};
 #else
         ignore(aVec, bVec);
         return cVec;
@@ -1024,12 +1009,8 @@ struct amdgcn_mma<fp8_t, fp8_t, fp32_t, 16u, 16u, 128u, CompilerTarget, MmaOpFam
     exec(AVecType const& aVec, BVecType const& bVec, CVecType const& cVec)
     {
 #if defined(__gfx125__)
-        return {__builtin_amdgcn_wmma_f32_16x16x128_fp8_fp8(bit_cast<int32x16_t>(aVec),
-                                                            bit_cast<int32x16_t>(bVec),
-                                                            0, // C_mod
-                                                            cVec,
-                                                            0,   // matrix_a_reuse
-                                                            0)}; // matrix_b_reuse
+        return {wmma_f32_16x16x128_f8<fp8_t, fp8_t>(
+            bit_cast<int32x16_t>(aVec), bit_cast<int32x16_t>(bVec), cVec)};
 #else
         ignore(aVec, bVec);
         return cVec;
@@ -1058,12 +1039,8 @@ struct amdgcn_mma<fp8_t, bf8_t, fp32_t, 16u, 16u, 128u, CompilerTarget, MmaOpFam
     exec(AVecType const& aVec, BVecType const& bVec, CVecType const& cVec)
     {
 #if defined(__gfx125__)
-        return {__builtin_amdgcn_wmma_f32_16x16x128_fp8_bf8(bit_cast<int32x16_t>(aVec),
-                                                            bit_cast<int32x16_t>(bVec),
-                                                            0, // C_mod
-                                                            cVec,
-                                                            0,   // matrix_a_reuse
-                                                            0)}; // matrix_b_reuse
+        return {wmma_f32_16x16x128_f8<fp8_t, bf8_t>(
+            bit_cast<int32x16_t>(aVec), bit_cast<int32x16_t>(bVec), cVec)};
 #else
         ignore(aVec, bVec);
         return cVec;
@@ -1092,12 +1069,8 @@ struct amdgcn_mma<bf8_t, fp8_t, fp32_t, 16u, 16u, 128u, CompilerTarget, MmaOpFam
     exec(AVecType const& aVec, BVecType const& bVec, CVecType const& cVec)
     {
 #if defined(__gfx125__)
-        return {__builtin_amdgcn_wmma_f32_16x16x128_bf8_fp8(bit_cast<int32x16_t>(aVec),
-                                                            bit_cast<int32x16_t>(bVec),
-                                                            0, // C_mod
-                                                            cVec,
-                                                            0,   // matrix_a_reuse
-                                                            0)}; // matrix_b_reuse
+        return {wmma_f32_16x16x128_f8<bf8_t, fp8_t>(
+            bit_cast<int32x16_t>(aVec), bit_cast<int32x16_t>(bVec), cVec)};
 #else
         ignore(aVec, bVec);
         return cVec;
@@ -1126,12 +1099,8 @@ struct amdgcn_mma<bf8_t, bf8_t, fp32_t, 16u, 16u, 128u, CompilerTarget, MmaOpFam
     exec(AVecType const& aVec, BVecType const& bVec, CVecType const& cVec)
     {
 #if defined(__gfx125__)
-        return {__builtin_amdgcn_wmma_f32_16x16x128_bf8_bf8(bit_cast<int32x16_t>(aVec),
-                                                            bit_cast<int32x16_t>(bVec),
-                                                            0, // C_mod
-                                                            cVec,
-                                                            0,   // matrix_a_reuse
-                                                            0)}; // matrix_b_reuse
+        return {wmma_f32_16x16x128_f8<bf8_t, bf8_t>(
+            bit_cast<int32x16_t>(aVec), bit_cast<int32x16_t>(bVec), cVec)};
 #else
         ignore(aVec, bVec);
         return cVec;

@@ -45,6 +45,15 @@ if(CK_TILE_GFX125_TARGETS)
         PROPERTY HIP_ARCHITECTURES ${CK_TILE_GFX125_TARGETS})
     add_dependencies(tests test_ck_tile_compiler_target_gfx125)
     add_dependencies(smoke test_ck_tile_compiler_target_gfx125)
+
+    # Same idea for the FP8/BF8 16x16x128 dense WMMA wrappers: gfx1250-strict lacks those
+    # instructions, so a wrapper that emits them there fails to compile (ROCM-35020).
+    set_source_files_properties(test_wmma_f8_16x16x128_gfx125.cpp PROPERTIES LANGUAGE HIP)
+    add_library(test_ck_tile_wmma_f8_16x16x128_gfx125 OBJECT test_wmma_f8_16x16x128_gfx125.cpp)
+    set_property(TARGET test_ck_tile_wmma_f8_16x16x128_gfx125
+        PROPERTY HIP_ARCHITECTURES ${CK_TILE_GFX125_TARGETS})
+    add_dependencies(tests test_ck_tile_wmma_f8_16x16x128_gfx125)
+    add_dependencies(smoke test_ck_tile_wmma_f8_16x16x128_gfx125)
 endif()
 
 # Ungated: split_barrier.hpp has a split-barrier path on gfx12 and a full-barrier fallback
