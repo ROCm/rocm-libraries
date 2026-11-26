@@ -20,7 +20,8 @@ function(add_cpu_gemm_test TEST_NAME)
     endif()
 
     set(thread_limits 8)
-    if("--outputAmaxD" IN_LIST ARG_ARGS)
+    # Multiple thread limits exercise the AMAX-D reduction, not argument rejection.
+    if("--outputAmaxD" IN_LIST ARG_ARGS AND NOT DEFINED ARG_EXPECTED_ERROR)
         list(APPEND thread_limits 1 3)
     endif()
 
