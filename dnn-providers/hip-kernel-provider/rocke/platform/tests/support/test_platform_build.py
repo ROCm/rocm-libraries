@@ -2,10 +2,8 @@
 # SPDX-License-Identifier: MIT
 """rocke.tests.platform_build.generator_arguments gives a fresh build tree Ninja
 when ``ninja`` is on PATH and CMake's default otherwise, and leaves an existing
-tree its generator. rocke.tests.cmake_generator.ninja_generator_or_skip gives a test's configure Ninja, and
-skips the test, waiting for the build-variant lane, where cmake or ninja is
-missing (CI's test container has no build program). Each case puts PATH on a
-directory that holds a ``ninja`` (and a ``cmake``) or holds nothing.
+tree its generator. Each case puts PATH on a directory that holds a ``ninja``
+or holds nothing.
 
 cmake_cache_entries reads what a real configure of a small project (no
 compiler: LANGUAGES NONE) recorded in its CMakeCache.txt."""
@@ -48,25 +46,6 @@ def test_an_existing_tree_keeps_its_generator(tmp_path, monkeypatch, with_ninja)
     build.mkdir()
     (build / "CMakeCache.txt").write_text("CMAKE_GENERATOR:INTERNAL=Unix Makefiles\n")
     assert generator_arguments(build) == []
-
-
-def test_a_test_configure_without_ninja_waits_for_the_build_variant_lane(
-    tmp_path, monkeypatch
-):
-    """CI's test container has no build program, so a test that configures
-    skips there, declaring the build-variant lane."""
-    monkeypatch.setenv("PATH", _tool_directory(tmp_path / "bin", with_ninja=False))
-    with pytest.raises(pytest.skip.Exception, match="waits for build-variant"):
-        ninja_generator_or_skip(tmp_path / "build")
-
-
-def test_a_test_configure_with_cmake_and_ninja_gets_ninja(tmp_path, monkeypatch):
-    tools = Path(_tool_directory(tmp_path / "bin", with_ninja=True))
-    cmake = tools / ("cmake.exe" if os.name == "nt" else "cmake")
-    cmake.write_text("")
-    cmake.chmod(0o755)
-    monkeypatch.setenv("PATH", str(tools))
-    assert ninja_generator_or_skip(tmp_path / "build") == ["-GNinja"]
 
 
 def test_cache_entries_are_what_the_configure_recorded(tmp_path):

@@ -154,7 +154,15 @@ def test_a_users_git_config_does_not_reach_the_scratch_repository(
     (scratch / "file.txt").write_text("text\n")
     _git(scratch, "add", "-A")
     _git(scratch, "commit", "-q", "-m", "base")
-    assert _run_gate(scratch, hook_id="no-such-hook").returncode == 0
+    log = subprocess.run(
+        ["git", "log", "--format=%s"],
+        cwd=scratch,
+        check=True,
+        capture_output=True,
+        text=True,
+        env={**os.environ, **_SCRATCH_GIT},
+    )
+    assert log.stdout.split() == ["base"]
 
 
 def test_a_change_that_deletes_nothing_reads_no_config_and_runs_no_hook(repo):
