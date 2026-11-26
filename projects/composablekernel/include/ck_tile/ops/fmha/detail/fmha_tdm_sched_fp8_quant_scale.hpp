@@ -343,9 +343,7 @@ struct FmhaTdmSchedFp8QuantScale
         return static_cast<int32_t>(fmha_tdm_sched_fp8_lds_offset(p));
     }
 
-    // Rescales row_sum like l and adds the row sums of the fp8 P that gemm_1 consumes.
-    // WMMAs against all-ones fp8 sum them exactly: each partial sum of q(256 P) is a multiple of
-    // 2^-9 below 2^15. K64 halves keep the ones operand at eight VGPRs.
+    // Rescales row_sum like l and adds the exact all-ones-WMMA row sums of the fp8 P of gemm_1.
     template <typename Gemm1, typename PTile, typename RowTile>
     CK_TILE_DEVICE static void
     AccumulateQuantizedMass(const PTile& p_tile, RowTile& row_sum, float scale_m0, float scale_m1)
@@ -354,7 +352,7 @@ struct FmhaTdmSchedFp8QuantScale
         using AWarpDstr   = typename WarpGemm::AWarpDstr;
         using AWarpTensor = typename WarpGemm::AWarpTensor;
         static_assert(Gemm1::KIterPerWarp == 1 && Gemm1::MIterPerWarp == Geometry::kPvMIter &&
-                      AWarpTensor::get_thread_buffer_size() == 64);
+                      Geometry::kPvMIter == 2 && AWarpTensor::get_thread_buffer_size() == 64);
         constexpr auto a_warp_y_lengths =
             to_sequence(AWarpDstr{}.get_ys_to_d_descriptor().get_lengths());
         constexpr auto a_warp_y_index_zeros = uniform_sequence_gen_t<AWarpDstr::NDimY, 0>{};

@@ -253,8 +253,7 @@ struct FmhaFwdKernel
     static constexpr index_t kAsyncOStoreBytes          = 16;
     static constexpr index_t kAsyncOStoreVec            = kAsyncOStoreBytes / sizeof(ODataType);
     static constexpr uint64_t kAsyncOTileSpanLimitBytes = uint64_t{1} << 32;
-    // GetTileIndex additionally requires batch BHSD, square causal attention, one V tile,
-    // and no dropout for this order.
+    // GetTileIndex also needs batch BHSD, square causal, one V tile and no dropout for this order.
     static constexpr bool kUseBatchLocalCausalOrder =
         kCausalTileOrder == detail::FmhaFwdCausalTileOrder::kBatchLocal ||
         kCausalTileOrder == detail::FmhaFwdCausalTileOrder::kBatchLocalXcd;

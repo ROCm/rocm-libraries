@@ -54,8 +54,7 @@ struct uses_qr_tdm_lds_arena<Pipeline, std::void_t<decltype(Pipeline::kUsesLdsAr
 template <typename Pipeline>
 inline constexpr bool uses_qr_tdm_lds_arena_v = uses_qr_tdm_lds_arena<Pipeline>::value;
 
-// Opt-in capability markers read by FmhaFwdKernel; a pipeline that omits one gets false.
-// Markers are inherited: a pipeline derived from one that declares them must restate them.
+// Opt-in markers read by FmhaFwdKernel (absent: false); a derived pipeline overrides unsupported.
 template <template <typename> class Marker, typename T>
 inline constexpr bool pipeline_marker_v = []() {
     if constexpr(is_detected<Marker, T>::value)
@@ -64,8 +63,7 @@ inline constexpr bool pipeline_marker_v = []() {
         return false;
 }();
 
-// Takes k/v descale pointers, block_scale_size_kv and v_descale after its LDS arguments, and
-// expects PERHEAD and BLOCKSCALE q descales folded into scale_s (FmhaFwdKernel::GetSoftmaxScale).
+// Takes k/v descales after the LDS arguments; PERHEAD/BLOCKSCALE q descales fold into scale_s.
 template <typename T>
 using takes_quant_descales_marker = std::bool_constant<T::kTakesQuantDescales>;
 // Takes MX E8M0 descales: Pipeline::MakeMxDescales builds them from the kernel arguments.

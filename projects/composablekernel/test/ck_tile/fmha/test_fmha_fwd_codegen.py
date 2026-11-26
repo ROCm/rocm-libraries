@@ -64,8 +64,6 @@ _SUPPORTED_FEATURE_FILTER = (
 )
 _D192_PIPELINE = "qr_tdm_sched"
 _HOST_CXX = shutil.which("c++")
-_ROCM_ROOT = Path(os.environ.get("ROCM_PATH", "/opt/rocm"))
-_HIP_HOST_CXX = _ROCM_ROOT / "llvm" / "bin" / "clang++"
 _RENDERED_CALL = re.compile(
     r"using trait_ = (fmha_fwd_traits_<[^;\n]+>);\s*"
     r"return fmha_fwd_<trait_, ([^>]+)>\(s, a\);"
@@ -2153,92 +2151,6 @@ class TestGfx125V128Codegen(unittest.TestCase):
                 fresh = factory.get_hdim_tile_size_dict(dtype)[(hdim, 128)]
                 restored = next(t for t in fresh if t.name == original_name)
                 self.assertNotEqual(str(restored.F_constraint), "false")
-
-    @unittest.skipUnless(
-        _HIP_HOST_CXX.is_file() and (_ROCM_ROOT / "include").is_dir(),
-        "ROCm clang and HIP headers are required for generated TU host syntax",
-    )
-    def test_sched_generated_occupancy_contract(self):
-        _, kernels = get_fwd_blobs(["gfx1250"], "*", 200, [-1], "simplified")
-        candidates = {}
-        diagnostic = "qr_tdm_sched codegen occupancy must match policy tuning"
-        for kernel in kernels:
-            if kernel.F_pipeline.tag != "qr_tdm_sched":
-                self.assertNotIn(diagnostic, kernel.render())
-            elif kernel.F_dtype in ("bf16", "fp16"):
-                key = (
-                    kernel.F_dtype,
-                    kernel.F_hdim,
-                    kernel.F_tile.F_bn0,
-                    kernel.F_tile.F_bn1,
-                )
-                candidates.setdefault(key, kernel)
-        self.assertEqual(
-            set(candidates),
-            {
-                (dtype, head, n, v)
-                for dtype in ("bf16", "fp16")
-                for head, n, v in (
-                    (64, 64, 64),
-                    (128, 128, 128),
-                    (192, 64, 128),
-                    (192, 128, 128),
-                )
-            },
-        )
-        with tempfile.TemporaryDirectory(
-            prefix="fmha-occupancy-contract-"
-        ) as directory:
-            root = Path(directory)
-            for key, kernel in candidates.items():
-                for changed in (False, True):
-                    with self.subTest(config=key, changed_occupancy=changed):
-                        rendered = (
-                            replace(
-                                kernel,
-                                F_tile=replace(
-                                    kernel.F_tile,
-                                    F_occupancy=kernel.F_tile.F_occupancy + 1,
-                                ),
-                            )
-                            if changed
-                            else kernel
-                        ).render()
-                        self.assertIn(diagnostic, rendered)
-                        source = root / "generated.cpp"
-                        source.write_text(rendered)
-                        result = subprocess.run(
-                            [
-                                str(_HIP_HOST_CXX),
-                                "-x",
-                                "hip",
-                                "--offload-host-only",
-                                "-nogpuinc",
-                                "-nogpulib",
-                                "-include",
-                                "__clang_hip_runtime_wrapper.h",
-                                "-std=c++20",
-                                "-DUSE_NEW_UNIFIED_FRAMEWORK=0",
-                                "-DCK_TILE_FMHA_FWD_FAST_EXP2=1",
-                                "-I",
-                                str(_CK_ROOT / "include"),
-                                "-I",
-                                str(_CK_ROOT),
-                                "-I",
-                                str(_CK_ROOT / "library" / "include"),
-                                "-I",
-                                str(_FMHA_EXAMPLE_DIR),
-                                "-I",
-                                str(_ROCM_ROOT / "include"),
-                                "-fsyntax-only",
-                                str(source),
-                            ],
-                            capture_output=True,
-                            text=True,
-                            timeout=60,
-                        )
-                        # The policy takes the occupancy from the traits, so any value holds.
-                        self.assertEqual(result.returncode, 0, result.stderr)
 
     @unittest.skipUnless(shutil.which("cmake"), "cmake is required")
     def test_cmake_family_esm2_exact_scope(self):

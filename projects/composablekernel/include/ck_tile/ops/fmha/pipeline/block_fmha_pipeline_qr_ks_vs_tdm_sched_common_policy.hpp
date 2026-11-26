@@ -141,6 +141,11 @@ struct BlockFmhaPipelineQRKSVSTdmSchedCommonPolicy : BlockFmhaPipelineQRKSVSTdmD
         }
     };
 
+    // Scaled D192 runs K64 steps 0+1 as one K128 WMMA; step 2 stays zero-padded.
+    template <typename BlockGemm>
+    static constexpr bool kPairsScaledK64 =
+        BlockGemm::WarpGemm::kK != 128 && BlockGemm::KIterPerWarp == 3;
+
     // One QK WMMA of a K group; with scales, K64 runs as Derived's paired or zero-padded K128.
     template <index_t WmmaOrdinal,
               typename BlockGemm,
@@ -182,9 +187,8 @@ struct BlockFmhaPipelineQRKSVSTdmSchedCommonPolicy : BlockFmhaPipelineQRKSVSTdmD
             (WmmaOrdinal / BlockGemm::MIterPerWarp) % BlockGemm::KIterPerWarp;
         constexpr index_t m_iter = WmmaOrdinal % BlockGemm::MIterPerWarp;
 
-        // Scaled D192 runs K64 steps 0+1 as one K128 WMMA; step 2 stays zero-padded.
-        constexpr bool kPairedK64 = !std::is_same_v<AScaleFn, NoScale> && WarpGemm::kK != 128 &&
-                                    BlockGemm::KIterPerWarp == 3;
+        constexpr bool kPairedK64 =
+            !std::is_same_v<AScaleFn, NoScale> && kPairsScaledK64<BlockGemm>;
         if constexpr(kPairedK64 && k_iter == 0)
             return;
 

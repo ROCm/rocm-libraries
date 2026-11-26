@@ -152,6 +152,8 @@ struct BlockFmhaPipelineQRKSVSTdmSched16
                       PvMmaShape::kN == Geometry::PvWmma::kN &&
                       PvMmaShape::kK == Geometry::PvWmma::kK,
                   "gemm_1 dispatched a different physical WMMA shape");
+    static_assert(kBlockPerCu * Policy::GetLdsArenaSize() <= static_cast<index_t>(get_lds_size()),
+                  "kBlockPerCu workgroups must fit the CU's LDS");
 #endif
 
     CK_TILE_HOST_DEVICE static constexpr index_t GetSmemSize()

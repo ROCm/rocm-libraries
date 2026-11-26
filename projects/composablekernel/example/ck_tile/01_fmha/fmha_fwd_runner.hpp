@@ -2906,8 +2906,7 @@ fwd_result fmha_fwd_run(mode_enum mode,
                     const double alpha_rows = static_cast<double>(
                         mask.type == mask_enum::no_mask ? real_seqlen_q
                                                         : std::min(real_seqlen_q, real_seqlen_k));
-                    // alpha_k is the policy knob: the worst correct head measured needed 1.07 at 2.
-                    // 1/12 is the variance of a half-ULP round-to-nearest.
+                    // alpha_k is the policy knob; 1/12 is the half-ULP round-to-nearest variance.
                     const double alpha_tol =
                         alpha_k * std::sqrt(u_p * u_p / (12 * alpha_rows) +
                                             u_o * u_o / (12 * alpha_rows * hdim_v));

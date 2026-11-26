@@ -171,7 +171,7 @@ template<>
 float fmha_fwd_<trait, {F_arch.tag}>(const ck_tile::stream_config& s, fmha_fwd_args a)
 {{
     using k_ = fmha_kernel;
-{F_occupancy_contract}    if(a.selected_kernel_name != nullptr)
+    if(a.selected_kernel_name != nullptr)
         *a.selected_kernel_name = "{F_kname}";
     if(s.log_level_ > 0)
         std::cout << ", {F_kname}" << std::flush;
@@ -982,13 +982,6 @@ class FmhaFwdKernel:
             F_qscale=QSCALE_MAP[self.F_pipeline.F_qscale],
             F_skip=BOOL_MAP[self.F_pipeline.F_skip],
             F_occupancy=self.F_tile.F_occupancy,
-            F_occupancy_contract=(
-                "    static_assert(fmha_pipeline_problem::kBlockPerCu == k_::kBlockPerCu,\n"
-                f'                  "{self.F_pipeline.tag} codegen occupancy must match '
-                'policy tuning");\n'
-                if self.F_pipeline.tag == "qr_tdm_sched"
-                else ""
-            ),
             F_pipeline_enum=PIPELINE_ENUM_MAP[self.F_pipeline.tag],
             F_mask=get_mask_cpp_type(self.F_pipeline.F_mask),
             F_mode=MODE_MAP[self.F_mode],
@@ -2022,12 +2015,11 @@ class KernelComponentFactoryGfx125(CompatibilityRuleFactory):
     # Pipelines whose tiles carry F_pipeline_tag (see check_tile_owner).
     _PIPELINES_WITH_OWN_TILES = ("qr_tdm_pingpong",)
 
-    # FP8 scheduled pipeline dtypes: FP8, FP8BF16, MXFP8.
-    _DT_QR_TDM_SCHED_FP8 = QR_TDM_SCHED_FP8_DTYPES
+    # FP8 scheduled pipeline dtypes: FP8, FP8BF16, MXFP8, MXFP8BF16.
+    _DT_QR_TDM_SCHED_FP8 = _DT_FP8_FP8BF16 + _DT_MXFP8
+    assert _DT_QR_TDM_SCHED_FP8 == QR_TDM_SCHED_FP8_DTYPES
 
-    # Scheduled tiles by dtype group, then (hdim, hdim_v). Codegen inventory and pipeline
-    # compatibility share these entries; runtime constraints are attached to copies.
-    # The last tile field is the workgroups per CU the pipeline takes from the traits.
+    # Scheduled tiles by dtype group and (hdim, hdim_v); the last field is workgroups per CU.
     _QR_TDM_SCHED_TILES = {
         # FP16/BF16: K32 QK and PV WMMA.
         _DT_FP16_BF16: {
@@ -2052,7 +2044,7 @@ class KernelComponentFactoryGfx125(CompatibilityRuleFactory):
                 FmhaFwdTileSize(128, 128, 128, 128, 128, 128, 4, 1, 1, 4, 1, 1, 16, 16, 128, 16, 16, 128, 2),
                 FmhaFwdTileSize(128, 128, 128, 128, 128, 128, 4, 1, 1, 4, 1, 1, 16, 16, 128, 16, 16, 128, 1),
             ),
-            # D192 one-per-CU tile (MX, bias, packed GQA) goes first so two-per-CU does not shadow it.
+            # D192 one-per-CU tile (MX, packed GQA) goes first so two-per-CU does not shadow it.
             (192, 128): (
                 FmhaFwdTileSize(128, 128, 192, 128, 128, 192, 4, 1, 1, 4, 1, 1, 16, 16, 64, 16, 16, 128, 1),
                 FmhaFwdTileSize(128, 128, 192, 128, 128, 192, 4, 1, 1, 4, 1, 1, 16, 16, 64, 16, 16, 128, 2),
@@ -2080,7 +2072,6 @@ class KernelComponentFactoryGfx125(CompatibilityRuleFactory):
             ),
         },
     }  # fmt: skip
-    # Workgroups per CU; the pipeline takes them from the generated traits.
     # Every quantization mode fits 512 VGPRs without mainloop spills, so all run two per CU.
     _QR_TDM_SCHED_FP8_OCCUPANCY = 2
     # Bias: D64/D128 run as fast at one per CU and keep the split sink loop; D192 runs two.
@@ -2192,8 +2183,7 @@ class KernelComponentFactoryGfx125(CompatibilityRuleFactory):
             )
         return CppConstraint(expr)
 
-    # Launch-bound occupancy of the one-wavefront tiles: target 2 per SIMD; D128/D192 are
-    # LDS-bound to 1 until the one-wavefront LDS footprint shrinks.
+    # Launch-bound occupancy of the one-wavefront tiles (D128/D192 LDS-bound to 1 for now).
     _QR_TDM_SCHED_FP8_ONE_WAVE_OCCUPANCY = {64: 2, 128: 2, 192: 2, 256: 1}
 
     @classmethod

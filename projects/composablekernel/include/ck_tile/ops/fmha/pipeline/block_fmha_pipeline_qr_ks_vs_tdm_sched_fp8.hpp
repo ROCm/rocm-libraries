@@ -138,8 +138,7 @@ struct BlockFmhaPipelineQRKSVSTdmSchedFp8
     static_assert(!kLdsSegSplit || kFmhaTdmSchedFp8LdsSegLayout<Problem>,
                   "the segmented LDS layout supports dense D256 problems only");
 
-    // D256 streams V inside PV: row r pairs V chunk r / 2 with P block r % 2; others run fragment
-    // r.
+    // D256 streams V in PV: row r pairs V chunk r / 2 with P block r % 2; others run fragment r.
     CK_TILE_HOST_DEVICE static constexpr index_t PvOrdinal(index_t row)
     {
         if constexpr(!kD256)
@@ -196,6 +195,8 @@ struct BlockFmhaPipelineQRKSVSTdmSchedFp8
     static_assert(!kBiasViaTdm || std::is_same_v<BiasDataType, float>);
     // Bias TDM transfers per wavefront and tile, counted into every later tensorcnt wait.
     static constexpr index_t kBiasTdmOps = kBiasViaTdm ? BiasLoad::kTdmOps : 0;
+    // fp32 bias elements per 16-byte LDS read.
+    static constexpr index_t kBiasElemsPerRead = 16 / static_cast<index_t>(sizeof(float));
     // The bias tile shares the O staging LDS, which only the epilogue writes.
     static constexpr bool kOwnsOutputLds = kBiasViaTdm;
     static constexpr index_t kOutputLdsBytes =
@@ -215,6 +216,13 @@ struct BlockFmhaPipelineQRKSVSTdmSchedFp8
                                QuantScale::kMxStepScaleBytes * QuantScale::kMxQkScaleDwords &&
                            QuantScale::kPScaleGranularity == QuantScale::kMxGranularity),
                   "MX needs whole K64/K128 QK steps and a 32-element P/V scale block");
+#if defined(__HIP_DEVICE_COMPILE__) && defined(__gfx125__)
+    static_assert(
+        !kMx || QuantScale::kMxPairedK64 ==
+                    Policy::template kPairsScaledK64<
+                        remove_cvref_t<decltype(Policy::template GetQKBlockGemmSu<Problem>())>>,
+        "MX Q/K scale pairing must match the paired K128 QK WMMA");
+#endif
     // Read by the kernel's host-side argument checks.
     static constexpr index_t kKVScaleAlign   = QuantScale::kKVScaleAlign;
     static constexpr index_t kMxQkScaleAlign = QuantScale::kMxQkScaleAlign;
@@ -675,7 +683,7 @@ struct BlockFmhaPipelineQRKSVSTdmSchedFp8
                         make_naive_tensor_descriptor(
                             make_tuple(number<kM0>{}, number<kN0>{}),
                             make_tuple(number<BiasLoad::kRowPitch>{}, number<1>{}),
-                            number<4>{},
+                            number<kBiasElemsPerRead>{},
                             number<1>{})),
                     make_tuple(number<kM0>{}, number<kN0>{}),
                     {0, 0},
@@ -1334,7 +1342,7 @@ struct BlockFmhaPipelineQRKSVSTdmSchedFp8
                         if constexpr(c + 1 < kChunks)
                             load_chunk(number<c + 1>{});
                         static_for<0, kChunk, 1>{}([&](auto i) {
-                            static_for<0, 4, 1>{}([&](auto j) {
+                            static_for<0, kBiasElemsPerRead, 1>{}([&](auto j) {
                                 constexpr index_t e =
                                     BiasRead::template DestinationOffset<typename BiasWindow::Base,
                                                                          c * kChunk + i>(j);
@@ -1695,7 +1703,7 @@ struct BlockFmhaPipelineQRKSVSTdmSchedFp8
             };
 
             auto advance_iteration = [&]() {
-                // Fixed boundary: wait for the next K tile before advancing.
+                // Fixed boundary: wait for the next K tile; without K prefetch drain all, bias too.
                 s_wait_tensorcnt_barrier<Policy::kKPrefetchTensorCount == 0
                                              ? 0
                                              : Policy::kKPrefetchTensorCount + kBiasTdmOps>();
@@ -1744,6 +1752,7 @@ struct BlockFmhaPipelineQRKSVSTdmSchedFp8
         }
         else if constexpr(Features::kSinkEscapeLoop)
         {
+            static_assert(!kUseCountdownLoop, "the sink-escape loop picks buffers by tile parity");
             // Only the leading tiles can hold sink keys, so only they run the per-lane escape.
             const index_t sink_end     = mask.GetWindowY() < mask.GetYTotal() ? mask.GetSink() : 0;
             const index_t escape_loops = min(integer_divide_ceil(sink_end, kN0), num_total_loop);

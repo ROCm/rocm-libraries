@@ -65,7 +65,8 @@ struct BlockFmhaPipelineQRKSVSTdmSchedPolicy
     static constexpr index_t kVRowBytes = Geometry::kDv * sizeof(typename Geometry::VDataType);
     using KPadding                      = detail::LdsPaddingConfig<false, 0, 0>;
     using VPadding = detail::LdsPaddingConfig<true, kVRowBytes, (kVPadAmount + 1) * 4>;
-    static_assert(detail::EncodedTdmPadding<VPadding>::kPadInterval == kVPadInterval);
+    static_assert(detail::EncodedTdmPadding<VPadding>::kPadInterval == kVPadInterval &&
+                  detail::EncodedTdmPadding<VPadding>::kPadAmount == kVPadAmount);
     // Named geometry knobs. Values frozen to the current D128/D192 formulas.
     static constexpr bool kEarlyOutputRescale = Geometry::kHeadDimQK == 128;
     static constexpr bool kLeadFirstLoad      = Geometry::kHeadDimQK == 128;
