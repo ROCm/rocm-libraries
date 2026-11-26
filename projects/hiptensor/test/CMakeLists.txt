@@ -486,6 +486,7 @@ set(_HIPTENSOR_HOST_TESTS
   concurrency_test
   contraction_mode_test
   elementwise_cpu_test
+  elementwise_instance_selection_test
   elementwise_mode_test
   elementwise_op_test
   hiptensor_options_test
