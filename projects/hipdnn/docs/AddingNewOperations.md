@@ -270,20 +270,23 @@ one of two decisions in `plugin_sdk/include/hipdnn_plugin_sdk/heuristics/EngineF
   `case NodeAttributes::<Op>Attributes: return flopsOf(graph, node.attributes_as_<Op>Attributes());`.
   Count the problem's **logical** work, not the work an implementation executes
   ([RFC 0019 §6.8](./rfcs/0019_UniversalHeuristicDescriptor.md#68-the-work-model)): a
-  multiply-add is 2, elementwise work 1 per output element, a transcendental 1; tile padding,
-  recomputation and skipped blocks do not count, so every engine reports the same number.
+  multiply-add is 2 whatever the element type (an integer GEMM's count is its operations),
+  elementwise work 1 per output element, a transcendental 1; tile padding, recomputation and
+  skipped blocks do not count, so every engine reports the same number.
   Return `std::nullopt` (unknown, never 0) when the operands do not determine the count: a
   missing tensor, a non-positive dim, shapes that do not compose. The `perElement`, `windowed`,
   `convolutionFlops` and `attentionFlops` helpers cover the common shapes. Add the formula to the
-  table in RFC 0019 §6.8.
+  table in RFC 0019 §6.8. An op whose work its schema cannot express may take the count from a
+  declared attribute instead, as `CustomOpAttributes` does with `declared_flops`: its plugin
+  states the work, and an undeclared node is unknown.
 - **No counting convention.** Add the member to `NO_COUNTING_CONVENTION`, with a one-line
-  reason above it, as for `CustomOpAttributes` (opaque: the graph does not say what it
-  computes); it then needs no overload and no case. Every node of that type has unknown work,
-  so a graph containing one publishes no `graph.flops` and no `graph.arithmetic_intensity`:
+  reason above it, as for `NONE` (not an operation); it then needs no overload and no case.
+  Every node of that type has unknown work, so a graph containing one publishes no
+  `graph.flops` and no `graph.arithmetic_intensity`:
   its benchmark rows carry no `tflops` label, no `tflops` model can score it, and no feature
   derived from FLOPs can be extracted for it. Its `graph.flops_by_type.<Type>` is absent; other
   types' entries are not. Models of `time` are unaffected, since measured time needs no work
-  count. Reserve this for ops whose work the graph does not describe at all.
+  count. Reserve this for ops whose work neither the graph describes nor a plugin can declare.
 
 An operand marked `work_data_dependent` does not make the count unknown: count the problem the
 graph **declares** (padded lengths, every routed row, a paged cache's declared keys), and the

@@ -122,6 +122,24 @@ TEST_F(TestCustomOpOperationFromNode, PreservesComputeDataType)
     ASSERT_EQ(desc->getComputeDataType(), DataType::HALF);
 }
 
+TEST_F(TestCustomOpOperationFromNode, PreservesDeclaredFlops)
+{
+    auto node = createStandardNode();
+    node.attributes.AsCustomOpAttributes()->declared_flops = 4096;
+    auto desc = CustomOpOperationDescriptor::fromNode(node, _tensorMap);
+
+    EXPECT_EQ(desc->getData().declared_flops, 4096);
+    EXPECT_EQ(desc->buildNode()->attributes.AsCustomOpAttributes()->declared_flops, 4096);
+}
+
+TEST_F(TestCustomOpOperationFromNode, RejectsNonPositiveDeclaredFlops)
+{
+    auto node = createStandardNode();
+    node.attributes.AsCustomOpAttributes()->declared_flops = 0;
+    ASSERT_THROW_HIPDNN_STATUS(CustomOpOperationDescriptor::fromNode(node, _tensorMap),
+                               HIPDNN_STATUS_BAD_PARAM);
+}
+
 TEST_F(TestCustomOpOperationFromNode, SetsTensorReferences)
 {
     auto node = createStandardNode();

@@ -57,6 +57,7 @@ TEST_F(IntegrationCustomOpDescriptorLowering, CustomOpGraphRoundTrip)
     CustomOpAttributes attrs;
     attrs.set_custom_op_id(K_CUSTOM_OP_ID)
         .set_data(K_CUSTOM_OP_OPAQUE_DATA)
+        .set_declared_flops(4096)
         .set_name("test_custom_op");
 
     auto outputs = graph->custom_op({input0, input1}, 1, attrs);
@@ -110,6 +111,7 @@ TEST_F(IntegrationCustomOpDescriptorLowering, CustomOpGraphRoundTrip)
     EXPECT_EQ(customOp->output_tensor_uids[0], K_CUSTOM_OP_OUTPUT_UID_0);
 
     EXPECT_EQ(customOp->data, K_CUSTOM_OP_OPAQUE_DATA);
+    EXPECT_EQ(customOp->declared_flops, 4096);
 }
 
 // Verifies minimal custom op with 1 input, 1 output, and no opaque data payload.
@@ -145,6 +147,7 @@ TEST_F(IntegrationCustomOpDescriptorLowering, MinimalCustomOpRoundTrip)
     ASSERT_EQ(customOp->input_tensor_uids.size(), 1u);
     ASSERT_EQ(customOp->output_tensor_uids.size(), 1u);
     EXPECT_TRUE(customOp->data.empty());
+    EXPECT_FALSE(customOp->declared_flops.has_value());
 }
 
 // Verifies that tensor UIDs auto-assigned by the frontend are preserved

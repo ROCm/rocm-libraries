@@ -42,6 +42,7 @@ TEST(TestCustomOpAttributes, DefaultValues)
     EXPECT_TRUE(attr.get_inputs().empty());
     EXPECT_TRUE(attr.get_outputs().empty());
     EXPECT_TRUE(attr.get_data().empty());
+    EXPECT_FALSE(attr.get_declared_flops().has_value());
 }
 
 TEST(TestCustomOpAttributes, SettersAndGetters)
@@ -85,6 +86,29 @@ TEST(TestCustomOpAttributes, Data)
     attr.set_data(payload);
 
     EXPECT_EQ(attr.get_data(), payload);
+}
+
+TEST(TestCustomOpAttributes, DeclaredFlops)
+{
+    CustomOpAttributes attr;
+    EXPECT_EQ(&attr.set_declared_flops(4096), &attr);
+    EXPECT_EQ(attr.get_declared_flops(), 4096);
+}
+
+// The declared work is part of the problem the graph states, as the cache key holds it.
+TEST(TestCustomOpAttributes, EqualityComparesDeclaredFlops)
+{
+    const auto lhs = makeEqualityAttributes();
+
+    auto declared = makeEqualityAttributes();
+    declared.set_declared_flops(4096);
+    EXPECT_FALSE(lhs.logicallyEquals(declared));
+    EXPECT_FALSE(lhs == declared);
+
+    auto same = makeEqualityAttributes();
+    same.set_declared_flops(4096);
+    EXPECT_TRUE(declared.logicallyEquals(same));
+    EXPECT_TRUE(declared == same);
 }
 
 TEST(TestCustomOpAttributes, FillFromContext)

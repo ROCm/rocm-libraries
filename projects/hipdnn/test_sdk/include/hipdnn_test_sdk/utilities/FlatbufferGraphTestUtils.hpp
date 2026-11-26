@@ -3424,7 +3424,10 @@ inline flatbuffers::FlatBufferBuilder
     return builder;
 }
 
-inline flatbuffers::FlatBufferBuilder createValidCustomOpGraph()
+/// A one-node custom op graph, input uid 1 to output uid 2; @p declaredFlops sets the node's
+/// declared work when given.
+inline flatbuffers::FlatBufferBuilder
+    createValidCustomOpGraph(flatbuffers::Optional<int64_t> declaredFlops = flatbuffers::nullopt)
 {
     flatbuffers::FlatBufferBuilder builder;
     std::vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::TensorAttributes>>
@@ -3453,7 +3456,7 @@ inline flatbuffers::FlatBufferBuilder createValidCustomOpGraph()
     const std::vector<uint8_t> data = {0x01, 0x02};
 
     auto customOpAttr = hipdnn_flatbuffers_sdk::data_objects::CreateCustomOpAttributesDirect(
-        builder, "my_plugin_op", &inputUids, &outputUids, &data);
+        builder, "my_plugin_op", &inputUids, &outputUids, &data, declaredFlops);
 
     std::vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::Node>> nodes;
     nodes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateNodeDirect(

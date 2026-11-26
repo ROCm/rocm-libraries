@@ -771,6 +771,51 @@ TEST(TestEngineFeatures, UnsupportedFusedWorkDoesNotPublishAPartialGraphRate)
                      0.0);
 }
 
+// An opaque op's work is what its graph declares: the plugin providing it states the count,
+// so a fused graph holding it publishes a whole-graph rate. Undeclared or non-positive work
+// stays unknown, never 0.
+TEST(TestEngineFeatures, CustomOpCountsTheWorkItDeclares)
+{
+    const auto fused = [](std::optional<int64_t> declared) {
+        GraphT graph;
+        addTensor(graph, 1, {3, 4});
+        addTensor(graph, 2, {4, 7});
+        addTensor(graph, 3, {3, 7}, {}, true);
+        addTensor(graph, 4, {3, 7});
+        MatmulAttributesT matmul;
+        matmul.a_tensor_uid = 1;
+        matmul.b_tensor_uid = 2;
+        matmul.c_tensor_uid = 3;
+        addNode(graph, matmul);
+        CustomOpAttributesT custom;
+        custom.custom_op_id = "example.rope";
+        custom.input_tensor_uids = {3};
+        custom.output_tensor_uids = {4};
+        custom.declared_flops = declared;
+        addNode(graph, custom);
+        return graph;
+    };
+
+    const auto published = features(fused(int64_t{1000}));
+    EXPECT_DOUBLE_EQ(published.at("graph.nodes[1].flops").get<double>(), 1000.0);
+    EXPECT_DOUBLE_EQ(published.at("graph.flops").get<double>(), 2.0 * 3 * 7 * 4 + 1000.0);
+    EXPECT_DOUBLE_EQ(published.at("graph.flops_by_type.CustomOpAttributes").get<double>(), 1000.0);
+    EXPECT_TRUE(published.contains("graph.arithmetic_intensity"));
+    // The declaration is also an operand feature a model may read.
+    EXPECT_EQ(published.at("graph.nodes[1].declared_flops"), 1000);
+
+    for(const auto declared :
+        {std::optional<int64_t>{}, std::optional<int64_t>{0}, std::optional<int64_t>{-5}})
+    {
+        SCOPED_TRACE(declared ? std::to_string(*declared) : "undeclared");
+        const auto unknown = features(fused(declared));
+        EXPECT_FALSE(unknown.contains("graph.nodes[1].flops"));
+        EXPECT_FALSE(unknown.contains("graph.flops"));
+        EXPECT_FALSE(unknown.contains("graph.flops_by_type.CustomOpAttributes"));
+        EXPECT_DOUBLE_EQ(unknown.at("graph.nodes[0].flops").get<double>(), 2.0 * 3 * 7 * 4);
+    }
+}
+
 // nlohmann compares 1 and 1.0 equal; a model reading a feature can still tell them apart.
 std::string kind(const nlohmann::json& value)
 {
@@ -2052,6 +2097,16 @@ TEST(TestEngineFeatures, EveryNodeTypeHasDeclaredWorkOrNoCountingConvention)
                  {{16, 2, 8}, {16, 2, 8}, {16, 4, 6}, {16, 4, 8}, {16, 4}, {3}, {16, 4, 6}}, kda);
          },
          18432.0},
+        // The work the graph declares for an opaque op.
+        {[] {
+             CustomOpAttributesT custom;
+             custom.custom_op_id = "example.rope";
+             custom.input_tensor_uids = {1};
+             custom.output_tensor_uids = {2};
+             custom.declared_flops = 4096;
+             return single({{4, 8}, {4, 8}}, custom);
+         },
+         4096.0},
     };
     std::set<NodeAttributes> counted;
     for(const auto& [make, flops] : cases)
@@ -2140,6 +2195,43 @@ TEST(TestEngineFeatures, UnknownWorkIsAbsentNeverZero)
         EXPECT_FALSE(published.contains("graph.flops_by_type." + type));
         // A type the graph does not contain has no work: 0, not unknown.
         EXPECT_DOUBLE_EQ(published.at("graph.flops_by_type.MatmulAttributes").get<double>(), 0.0);
+    }
+}
+
+// A multiply-add is 2 whatever the element type (RFC 0019 section 6.8 rule 2): an int8 GEMM
+// accumulating into int32, or an int8 convolution, counts as its floating-point twin does, so
+// its `tflops` is its tera-ops. A boolean operand holds no number to multiply.
+TEST(TestEngineFeatures, IntegerMultiplyAddsCountAsFloatingPointOnesDo)
+{
+    auto matmul = matmulBroadcastGraph();
+    matmul.tensors[0]->data_type = DataType::INT8;
+    matmul.tensors[1]->data_type = DataType::INT8;
+    matmul.tensors[2]->data_type = DataType::INT32;
+    EXPECT_DOUBLE_EQ(features(matmul).at("graph.flops").get<double>(), 840.0);
+
+    auto conv = convFwdGraph();
+    for(auto& value : conv.tensors)
+    {
+        value->data_type = DataType::INT8;
+    }
+    EXPECT_DOUBLE_EQ(features(conv).at("graph.flops").get<double>(), 86400.0);
+
+    for(const auto type : {DataType::UINT8, DataType::INT4, DataType::INT64})
+    {
+        SCOPED_TRACE(EnumNameDataType(type));
+        auto widened = matmulBroadcastGraph();
+        widened.tensors[0]->data_type = type;
+        EXPECT_DOUBLE_EQ(features(widened).at("graph.flops").get<double>(), 840.0);
+    }
+
+    for(const auto type : {DataType::BOOLEAN, DataType::UNSET})
+    {
+        SCOPED_TRACE(EnumNameDataType(type));
+        auto refused = matmulBroadcastGraph();
+        refused.tensors[1]->data_type = type;
+        const auto published = features(refused);
+        EXPECT_FALSE(published.contains("graph.nodes[0].flops"));
+        EXPECT_FALSE(published.contains("graph.flops"));
     }
 }
 

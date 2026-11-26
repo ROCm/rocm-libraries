@@ -58,6 +58,14 @@ inline Error
                                                 "custom op data"));
     }
 
+    // Set declared logical FLOPs (no-op when undeclared)
+    HIPDNN_CHECK_ERROR(
+        setDescriptorAttrOptionalScalar(opDesc.get(),
+                                        HIPDNN_ATTR_OPERATION_CUSTOM_OP_DECLARED_FLOPS_EXT,
+                                        HIPDNN_TYPE_INT64,
+                                        attributes.get_declared_flops(),
+                                        "custom op declared FLOPs"));
+
     // Set compute data type
     HIPDNN_CHECK_ERROR(setDescriptorAttrDataType(opDesc.get(),
                                                  HIPDNN_ATTR_CUSTOM_OP_COMP_TYPE_EXT,

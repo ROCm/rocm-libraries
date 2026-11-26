@@ -58,5 +58,9 @@ class TestCustomOpAttributeBindings:
                 ("set_inputs", ([input_tensor],), "get_inputs", [input_tensor]),
                 ("set_outputs", ([output_tensor],), "get_outputs", [output_tensor]),
                 ("set_data", ([0, 1, 2],), "get_data", [0, 1, 2]),
+                ("set_declared_flops", (4096,), "get_declared_flops", 4096),
             ),
         )
+
+    def test_declared_flops_defaults_to_unset(self):
+        assert hipdnn.CustomOpAttributes().get_declared_flops() is None

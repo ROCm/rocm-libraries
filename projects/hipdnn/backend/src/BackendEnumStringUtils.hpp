@@ -956,6 +956,8 @@ inline const char* hipdnnGetAttributeNameString(hipdnnBackendAttributeName_t att
         return "HIPDNN_ATTR_OPERATION_CUSTOM_OP_DATA_EXT";
     case HIPDNN_ATTR_CUSTOM_OP_COMP_TYPE_EXT:
         return "HIPDNN_ATTR_CUSTOM_OP_COMP_TYPE_EXT";
+    case HIPDNN_ATTR_OPERATION_CUSTOM_OP_DECLARED_FLOPS_EXT:
+        return "HIPDNN_ATTR_OPERATION_CUSTOM_OP_DECLARED_FLOPS_EXT";
 
     // Reduction operation attributes
     case HIPDNN_ATTR_OPERATION_REDUCTION_XDESC:

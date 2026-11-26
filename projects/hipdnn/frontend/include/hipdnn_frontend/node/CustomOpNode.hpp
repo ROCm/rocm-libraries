@@ -125,6 +125,15 @@ public:
             }
         }
 
+        // A count of 0 or less would read as known work the node does not do.
+        if(attributes.declared_flops.has_value() && *attributes.declared_flops <= 0)
+        {
+            return {ErrorCode::INVALID_VALUE,
+                    "Node " + attributes.name + " declares "
+                        + std::to_string(*attributes.declared_flops)
+                        + " FLOPs; declared_flops must be positive when set"};
+        }
+
         return {ErrorCode::OK, ""};
     }
 

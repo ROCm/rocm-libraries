@@ -192,6 +192,32 @@ TEST(TestCustomOpNode, PreValidateFailsWithNullInput)
     EXPECT_EQ(err.code, ErrorCode::INVALID_VALUE);
 }
 
+TEST(TestCustomOpNode, PreValidateFailsWithNonPositiveDeclaredFlops)
+{
+    GraphAttributes graphAttrs;
+    graphAttrs.set_compute_data_type(DataType::FLOAT);
+
+    for(const int64_t declared : {int64_t{0}, int64_t{-1}})
+    {
+        SCOPED_TRACE(declared);
+        CustomOpAttributes attr;
+        attr.set_name("test_op")
+            .set_custom_op_id("example.my_add")
+            .set_outputs({makeTensor("output", 2, {2, 3}, DataType::FLOAT)})
+            .set_declared_flops(declared);
+        const CustomOpNode node(std::move(attr), graphAttrs);
+        EXPECT_EQ(node.pre_validate_node().code, ErrorCode::INVALID_VALUE);
+    }
+
+    CustomOpAttributes positive;
+    positive.set_name("test_op")
+        .set_custom_op_id("example.my_add")
+        .set_outputs({makeTensor("output", 2, {2, 3}, DataType::FLOAT)})
+        .set_declared_flops(1);
+    const CustomOpNode node(std::move(positive), graphAttrs);
+    EXPECT_EQ(node.pre_validate_node().code, ErrorCode::OK);
+}
+
 TEST(TestCustomOpNode, PreValidateFailsWithNullOutput)
 {
     GraphAttributes graphAttrs;

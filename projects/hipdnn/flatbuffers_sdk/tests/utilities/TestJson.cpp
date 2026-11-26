@@ -321,6 +321,33 @@ TEST(TestJson, SdpaGraphWithoutCuSeqLenKeysStillLoads)
     EXPECT_EQ(sdpa->o_tensor_uid(), sourceSdpa->o_tensor_uid());
 }
 
+TEST(TestJson, CustomOpDeclaredFlopsRoundTrips)
+{
+    auto graphBuilder = hipdnn_test_sdk::utilities::createValidCustomOpGraph(int64_t{4096});
+    const auto* graph = GetGraph(graphBuilder.GetBufferPointer());
+    const nlohmann::json graphJson = *graph;
+    EXPECT_EQ(graphJson.at("nodes").at(0).at("declared_flops"), 4096);
+
+    toJsonAndBackTestSuite(graph, "(custom op with declared FLOPs)");
+}
+
+// Graphs serialized before declared_flops existed omit the key; the reader must treat it as
+// absent, so the node's work stays unknown rather than failing to load.
+TEST(TestJson, CustomOpGraphWithoutDeclaredFlopsKeyStillLoads)
+{
+    auto sourceBuilder = hipdnn_test_sdk::utilities::createValidCustomOpGraph();
+    nlohmann::json graphJson = *GetGraph(sourceBuilder.GetBufferPointer());
+    ASSERT_EQ(graphJson.at("nodes").at(0).erase("declared_flops"), 1U);
+
+    flatbuffers::FlatBufferBuilder builder;
+    builder.Finish(hipdnn_flatbuffers_sdk::json::to<Graph>(builder, graphJson));
+    const auto* custom
+        = GetGraph(builder.GetBufferPointer())->nodes()->Get(0)->attributes_as_CustomOpAttributes();
+    ASSERT_NE(custom, nullptr);
+    EXPECT_FALSE(custom->declared_flops().has_value());
+    EXPECT_EQ(custom->custom_op_id()->str(), "my_plugin_op");
+}
+
 TEST(TestJson, GraphVersionSerializesToJson)
 {
     flatbuffers::FlatBufferBuilder builder;
