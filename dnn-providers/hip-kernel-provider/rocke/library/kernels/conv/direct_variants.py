@@ -32,6 +32,7 @@ __all__ = [
     "DIRECT_FWD_SMALLC_MFMA",
     "DIRECT_FWD_SMALLK_MFMA",
     "DIRECT_FWD_FLEX_MFMA",
+    "DIRECT_DGRAD_FLEX_MFMA",
     "DIRECT_FWD_PP_MFMA",
     "DIRECT_FWD_SMALLK_WMMA",
     "DIRECT_FWD_WMMA",
@@ -152,6 +153,10 @@ DIRECT_SPLIT_REDUCE = "direct_split_reduce"
 # of any filter / stride / dilation / padding (conv_direct_fwd_flex_mfma);
 # split_c > 1 writes the direct_split_reduce workspace.
 DIRECT_FWD_FLEX_MFMA = "direct_fwd_flex_mfma"
+# The same kernel running a strided dense dgrad in one launch over the
+# stride's output phases, on the dgrad's own filter (FwdFlexMfmaSpec ds + wt);
+# dgrad ABI, split_c > 1 folds through direct_split_reduce.
+DIRECT_DGRAD_FLEX_MFMA = "direct_dgrad_flex_mfma"
 # Stride-1 depthwise dgrad through the output-stationary forward kernel with
 # the filter rotated by 180 degrees (DirectDepthwiseTiledSpec(dgrad=True)).
 DIRECT_DEPTHWISE_TILED_DGRAD = "direct_depthwise_tiled_dgrad"
@@ -164,6 +169,7 @@ DIRECT_DEPTHWISE_TILED_DGRAD = "direct_depthwise_tiled_dgrad"
 PER_AXIS_PAD_VARIANTS = (
     DIRECT_DEPTHWISE_TILED_DGRAD,
     DIRECT_FWD_FLEX_MFMA,
+    DIRECT_DGRAD_FLEX_MFMA,
     DIRECT_FWD_SMALLK_WMMA,
     DIRECT_FWD_SMALLK_MFMA,
     DIRECT_FWD_WMMA,
@@ -497,6 +503,12 @@ def make_direct_spec(variant: str, problem, knobs: dict, wave_size: int = 64):
         from kernels.common.conv_direct_fwd_flex_mfma import FwdFlexMfmaSpec
 
         return FwdFlexMfmaSpec(problem=problem, name="rocke_fwd_flex_mfma", **knobs)
+    if variant == DIRECT_DGRAD_FLEX_MFMA:
+        from kernels.common.conv_direct_fwd_flex_mfma import FwdFlexMfmaSpec
+
+        return FwdFlexMfmaSpec(
+            problem=problem, name="rocke_dgrad_flex_mfma", ds=True, **knobs
+        )
     if variant == "direct_wgrad_small_c":
         # Bakes its channel counts: the im2col decode walks the (s, c) run.
         return dc.DirectConvWgradSpec(
@@ -519,7 +531,7 @@ def make_direct_spec(variant: str, problem, knobs: dict, wave_size: int = 64):
         return dc.DirectReorganizeWeightsSpec(problem=problem, **knobs)
     if variant == DIRECT_DGRAD_TRANSPOSE_RTC:
         return dc.DirectTransposeWeightsDgradSpec(
-            problem=problem, runtime_channels=True
+            problem=problem, runtime_channels=True, **knobs
         )
     if variant == DIRECT_DGRAD_REORGANIZE_RTC:
         return dc.DirectReorganizeWeightsSpec(
@@ -886,7 +898,7 @@ def validate_direct_spec(variant: str, spec, arch: str) -> tuple[bool, str]:
         if variant == DIRECT_SPLIT_REDUCE:
             spec.validate()
             return True, "ok"
-        if variant == DIRECT_FWD_FLEX_MFMA:
+        if variant in (DIRECT_FWD_FLEX_MFMA, DIRECT_DGRAD_FLEX_MFMA):
             from kernels.common.conv_direct_fwd_flex_mfma import fwd_flex_mfma_reason
 
             why = fwd_flex_mfma_reason(spec, arch)
@@ -975,6 +987,7 @@ def select_direct_kernel_builder(variant: str, spec, arch: str):
         DIRECT_DGRAD_REORGANIZE_RTC: dc.build_direct_reorganize_weights,
         DIRECT_SPLIT_REDUCE: dn.build_direct_conv_split_reduce,
         DIRECT_FWD_FLEX_MFMA: ffx.build_fwd_flex_mfma,
+        DIRECT_DGRAD_FLEX_MFMA: ffx.build_fwd_flex_mfma,
     }
     return builders[variant](spec, arch=arch)
 
