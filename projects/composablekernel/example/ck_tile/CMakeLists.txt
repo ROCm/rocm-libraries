@@ -42,6 +42,16 @@ add_subdirectory(54_gemm_comp_tdm_v3_bf16)
 add_subdirectory(55_gemm_comp_tdm_v3_mx_fp8)
 add_subdirectory(56_gemm_comp_tdm_scheduled_mx)
 add_subdirectory(57_gemm_pooler_unpooler)
+add_subdirectory(58_megakernel_gemm_chain)
+add_subdirectory(59_megakernel_epilogues)
+add_subdirectory(60_megakernel_attention)
+add_subdirectory(61_megakernel_router)
+add_subdirectory(62_megakernel_moe)
+add_subdirectory(63_megakernel_head)
+add_subdirectory(64_megakernel_icache)
+add_subdirectory(65_megakernel_xgpu)
+add_subdirectory(66_megakernel_small_m_gemm)
+add_subdirectory(67_megakernel_decoder_layer)
 
 # Collect the tile_example_* executables configured above. Each example
 # directory decides for itself which targets a given architecture gets, so the
