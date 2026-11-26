@@ -7,6 +7,7 @@
 
 #include <cmath>
 #include <cstdint>
+#include <cstring>
 #include <limits>
 #include <random>
 #include <type_traits>
@@ -14,13 +15,16 @@
 
 #include <gtest/gtest.h>
 
+#include "ck_tile/host/host_tensor.hpp"
 #include "ck_tile/host/mx_processing.hpp"
+#include "ck_tile/host/reference/reference_gemm.hpp"
 #include "ck_tile/host/reference/reference_mx_gemm_tdm_scheduled.hpp"
 
 namespace {
 
 using ck_tile::index_t;
 using ck_tile::long_index_t;
+using F6        = ck_tile::pk_fp6x16_t;
 namespace sched = ck_tile::mx_tdm_scheduled;
 
 /// Bytes of a K-major scale array of `rows` rows.
@@ -98,6 +102,46 @@ TEST(MxGemmTdmScheduledHostRef, Fp8CodecsRoundTripEveryCode)
     EXPECT_EQ(sched::decode_element<ck_tile::pk_fp4_t>(row, 1), 1.0f);
     EXPECT_EQ(sched::decode_element<ck_tile::pk_fp4_t>(row, 2), 6.0f);
     EXPECT_EQ(sched::decode_element<ck_tile::pk_fp4_t>(row, 3), -6.0f);
+    uint8_t written[2]     = {};
+    const uint8_t codes[4] = {0x1, 0x2, 0x7, 0xF};
+    for(long_index_t k = 0; k < 4; ++k)
+        sched::set_element_code<ck_tile::pk_fp4_t>(written, k, codes[k]);
+    EXPECT_EQ(written[0], row[0]);
+    EXPECT_EQ(written[1], row[1]);
+}
+
+// set_element_code and decode_element against pk_fp6x16_t's own pack and decoder, for every code
+// at each of the 32 positions of two packs: a row continues across the 12-byte boundary between
+// packs.
+TEST(MxGemmTdmScheduledHostRef, Fp6CodecMatchesThePackForEveryCodeAtEveryPosition)
+{
+    for(int code = 0; code < 64; ++code)
+    {
+        const float value = F6::fp6_e2m3_to_float(code);
+        for(long_index_t pos = 0; pos < 32; ++pos)
+        {
+            F6 packs[2] = {};
+            packs[pos / 16].pack(code, static_cast<index_t>(pos % 16));
+            uint8_t want[2 * sizeof(F6)];
+            std::memcpy(want, packs, sizeof(want));
+            uint8_t row[2 * sizeof(F6)] = {};
+            sched::set_element_code<F6>(row, pos, static_cast<uint8_t>(code));
+            ASSERT_EQ(std::memcmp(row, want, sizeof(row)), 0) << code << " at " << pos;
+            for(long_index_t k = 0; k < 32; ++k)
+                ASSERT_EQ(sched::decode_element<F6>(row, k), k == pos ? value : 0.0f)
+                    << code << " at " << pos << ", read at " << k;
+            // Over a row of ones (code 0x3F, -7.5) the code replaces element pos and nothing else.
+            uint8_t ones[2 * sizeof(F6)];
+            std::memset(ones, 0xFF, sizeof(ones));
+            sched::set_element_code<F6>(ones, pos, static_cast<uint8_t>(code));
+            for(long_index_t k = 0; k < 32; ++k)
+                ASSERT_EQ(sched::decode_element<F6>(ones, k), k == pos ? value : -7.5f)
+                    << code << " at " << pos << " over ones, read at " << k;
+        }
+    }
+    EXPECT_EQ(sched::row_bytes<F6>(16), static_cast<long_index_t>(sizeof(F6)));
+    EXPECT_EQ(sched::row_bytes<F6>(160), 120);
+    EXPECT_EQ(sched::row_bytes<F6>(5), 4); // bits 0 to 29
 }
 
 TEST(MxGemmTdmScheduledHostRef, Fp8RoundsToNearestEven)
@@ -166,7 +210,7 @@ struct Operands
     std::vector<uint8_t> a, b, a_natural, b_natural, a_scale, b_scale;
 };
 
-// Exact-sum inputs: elements in {-2, -1, 0, 1, 2} (FP4 / FP8 codes), scales 2^-1..2^1.
+// Exact-sum inputs: elements in {-2, -1, 0, 1, 2} (FP4, FP6, FP8 and BF8 codes), scales 2^-1..2^1.
 template <typename T>
 Operands make_operands(index_t M, index_t N, long_index_t K, uint32_t seed)
 {
@@ -177,17 +221,16 @@ Operands make_operands(index_t M, index_t N, long_index_t K, uint32_t seed)
     auto fill = [&](index_t rows) {
         std::vector<uint8_t> x(static_cast<std::size_t>(rows * rb), 0);
         static constexpr uint8_t kFp4[5] = {0xC, 0xA, 0x0, 0x2, 0x4};
+        static constexpr uint8_t kFp6[5] = {0x30, 0x28, 0x00, 0x08, 0x10};
         static constexpr uint8_t kFp8[5] = {0xC0, 0xB8, 0x00, 0x38, 0x40};
         static constexpr uint8_t kBf8[5] = {0xC0, 0xBC, 0x00, 0x3C, 0x40};
+        const uint8_t* codes             = std::is_same_v<T, ck_tile::pk_fp4_t> ? kFp4
+                                           : std::is_same_v<T, F6>              ? kFp6
+                                           : std::is_same_v<T, ck_tile::fp8_t>  ? kFp8
+                                                                                : kBf8;
         for(index_t r = 0; r < rows; ++r)
             for(long_index_t k = 0; k < K; ++k)
-            {
-                const int pick = rng() % 5;
-                if constexpr(std::is_same_v<T, ck_tile::pk_fp4_t>)
-                    x[r * rb + k / 2] |= kFp4[pick] << (4 * (k % 2));
-                else
-                    x[r * rb + k] = std::is_same_v<T, ck_tile::fp8_t> ? kFp8[pick] : kBf8[pick];
-            }
+                sched::set_element_code<T>(&x[r * rb], k, codes[rng() % 5]);
         return x;
     };
     o.a         = fill(M);
@@ -205,6 +248,65 @@ Operands make_operands(index_t M, index_t N, long_index_t K, uint32_t seed)
     return o;
 }
 
+// C of the plain MX GEMM in f32 over the natural scales. FP6 goes through
+// ck_tile::reference_mx_gemm, CK's FP6 reference, which unpacks the rows as pk_fp6x16_t packs
+// with its own code, so the FP6 row layout of the K-major reference is not checked against
+// itself. The other types keep the loop over decode_element.
+template <typename T>
+std::vector<float> plain_reference(const Operands& o, index_t M, index_t N, long_index_t K)
+{
+    const long_index_t groups = (K + 31) / 32;
+    if constexpr(std::is_same_v<T, F6>)
+    {
+        constexpr auto row = ck_tile::bool_constant<true>{};
+        constexpr auto col = ck_tile::bool_constant<false>{};
+        // A (M x K row-major) and B (K x N column-major) are rows of K values, as o.a and o.b are.
+        ck_tile::HostTensor<F6> a(ck_tile::host_tensor_descriptor(M, K, K, row));
+        ck_tile::HostTensor<F6> b(ck_tile::host_tensor_descriptor(K, N, K, col));
+        ck_tile::HostTensor<ck_tile::e8m0_t> a_scale(
+            ck_tile::host_tensor_descriptor(M, groups, groups, row));
+        ck_tile::HostTensor<ck_tile::e8m0_t> b_scale(
+            ck_tile::host_tensor_descriptor(groups, N, groups, col));
+        static_assert(std::is_trivially_copyable_v<F6>, "rows are memcpy'd into the packs");
+        // Whole packs only (K a multiple of 16): otherwise o's byte rows are longer than the
+        // tensor's packs and do not share their layout.
+        if(a.mData.size() * sizeof(F6) != o.a.size() || b.mData.size() * sizeof(F6) != o.b.size())
+        {
+            ADD_FAILURE() << "FP6 rows of K = " << K << " are not whole pk_fp6x16_t packs";
+            return {};
+        }
+        std::memcpy(a.mData.data(), o.a.data(), o.a.size());
+        std::memcpy(b.mData.data(), o.b.data(), o.b.size());
+        for(index_t m = 0; m < M; ++m)
+            for(long_index_t g = 0; g < groups; ++g)
+                a_scale(m, g) = ck_tile::e8m0_t{o.a_natural[m * groups + g]};
+        for(index_t n = 0; n < N; ++n)
+            for(long_index_t g = 0; g < groups; ++g)
+                b_scale(g, n) = ck_tile::e8m0_t{o.b_natural[n * groups + g]};
+        ck_tile::HostTensor<float> c(ck_tile::host_tensor_descriptor(M, N, N, row));
+        ck_tile::reference_mx_gemm<F6, F6, ck_tile::e8m0_t, ck_tile::e8m0_t, float, float>(
+            a, b, c, a_scale, b_scale, sched::kScaleGroupK);
+        return c.mData;
+    }
+    else
+    {
+        const long_index_t rb = sched::row_bytes<T>(K);
+        std::vector<float> c(static_cast<std::size_t>(M) * N);
+        for(index_t m = 0; m < M; ++m)
+            for(index_t n = 0; n < N; ++n)
+            {
+                float acc = 0.0f;
+                for(long_index_t k = 0; k < K; ++k)
+                    acc += sched::decode_element<T>(&o.a[m * rb], k) *
+                           sched::e8m0_to_float(o.a_natural[m * groups + k / 32]) *
+                           sched::decode_element<T>(&o.b[n * rb], k) *
+                           sched::e8m0_to_float(o.b_natural[n * groups + k / 32]);
+                c[m * N + n] = acc;
+            }
+        return c;
+    }
+}
+
 template <typename T, typename O>
 void check_kmajor_reference()
 {
@@ -212,10 +314,9 @@ void check_kmajor_reference()
     {
         SCOPED_TRACE(K);
         const index_t M = 37, N = 23;
-        const Operands o          = make_operands<T>(M, N, K, 3 + static_cast<uint32_t>(K));
-        const long_index_t rb     = sched::row_bytes<T>(K);
-        const long_index_t groups = (K + 31) / 32;
-        const index_t ob          = sched::out_bytes<O>();
+        const Operands o      = make_operands<T>(M, N, K, 3 + static_cast<uint32_t>(K));
+        const long_index_t rb = sched::row_bytes<T>(K);
+        const index_t ob      = sched::out_bytes<O>();
         std::vector<uint8_t> d(M * N * ob), want(M * N * ob);
         ck_tile::reference_mx_gemm_tdm_scheduled<T, T, O>(o.a.data(),
                                                           rb,
@@ -229,17 +330,10 @@ void check_kmajor_reference()
                                                           N,
                                                           K,
                                                           4);
-        for(index_t m = 0; m < M; ++m)
-            for(index_t n = 0; n < N; ++n)
-            {
-                float acc = 0.0f;
-                for(long_index_t k = 0; k < K; ++k)
-                    acc += sched::decode_element<T>(&o.a[m * rb], k) *
-                           sched::e8m0_to_float(o.a_natural[m * groups + k / 32]) *
-                           sched::decode_element<T>(&o.b[n * rb], k) *
-                           sched::e8m0_to_float(o.b_natural[n * groups + k / 32]);
-                sched::store_out<O>(want.data(), m * N + n, acc);
-            }
+        const std::vector<float> c = plain_reference<T>(o, M, N, K);
+        ASSERT_EQ(c.size(), static_cast<std::size_t>(M) * N);
+        for(std::size_t i = 0; i < c.size(); ++i)
+            sched::store_out<O>(want.data(), i, c[i]);
         ASSERT_EQ(d, want);
     }
 }
@@ -255,6 +349,7 @@ void check_kmajor_reference_outs()
 TEST(MxGemmTdmScheduledHostRef, KMajorReferenceEqualsThePlainReference)
 {
     check_kmajor_reference_outs<ck_tile::pk_fp4_t>();
+    check_kmajor_reference_outs<F6>();
     check_kmajor_reference_outs<ck_tile::fp8_t>();
     check_kmajor_reference_outs<ck_tile::bf8_t>();
 }

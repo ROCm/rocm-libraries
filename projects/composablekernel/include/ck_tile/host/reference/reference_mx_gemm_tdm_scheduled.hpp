@@ -22,10 +22,13 @@
  * rounding of its epilogue and a reference GEMM over its K-major scales (mx_scale_to_kmajor in
  * host/mx_processing.hpp).
  *
- * Elements. A and B rows are K-contiguous bytes: FP4 two per byte (K even in the low nibble), FP8
- * E4M3 (OCP, no infinity) and BF8 E5M2 one per byte. C and D are row-major in the output type.
+ * Elements. A and B rows are K-contiguous bytes: FP4 two per byte (K even in the low nibble), FP6
+ * E2M3 four in three bytes (value k at bits 6k..6k+5 of the row, LSB first, as pk_fp6x16_t packs
+ * 16 values in 12 bytes), FP8 E4M3 (OCP, no infinity) and BF8 E5M2 one per byte. C and D are
+ * row-major in the output type.
  * The decoders follow the hardware encodings, including E8M0 0x00 (2^-127) and BF8 infinities,
- * which type_convert decodes differently.
+ * which type_convert decodes differently. FP6 codes go through pk_fp6x16_t's E2M3 decoder, as in
+ * reference_mx_gemm.
  */
 
 namespace ck_tile {
@@ -70,26 +73,80 @@ CK_TILE_HOST float bf8_e5m2_to_float(uint8_t b)
     return (b & 0x80) ? -v : v;
 }
 
-/// Element k of a K-contiguous A or B row of T (pk_fp4_t, fp8_t or bf8_t).
+/// Element k of a K-contiguous A or B row of T (pk_fp4_t, pk_fp6x16_t, fp8_t or bf8_t).
 template <typename T>
 CK_TILE_HOST float decode_element(const uint8_t* row, long_index_t k)
 {
     if constexpr(std::is_same_v<T, pk_fp4_t>)
         return fp4_e2m1_to_float((row[k / 2] >> (4 * (k % 2))) & 0xF);
+    else if constexpr(std::is_same_v<T, pk_fp6x16_t>)
+    {
+        // Bits 6k..6k+5 of the row; a code starting at bit 4 or 6 of a byte ends in the next byte.
+        const long_index_t bit = 6 * k;
+        const uint8_t* p       = row + bit / 8;
+        const unsigned shift   = static_cast<unsigned>(bit % 8);
+        const unsigned lo      = p[0];
+        const unsigned bits    = shift > 2 ? lo | (static_cast<unsigned>(p[1]) << 8) : lo;
+        return pk_fp6x16_t::fp6_e2m3_to_float(static_cast<int32_t>((bits >> shift) & 0x3F));
+    }
     else if constexpr(std::is_same_v<T, fp8_t>)
         return fp8_e4m3_to_float(row[k]);
     else
     {
-        static_assert(std::is_same_v<T, bf8_t>, "decode_element: A and B are fp4, fp8 or bf8");
+        static_assert(std::is_same_v<T, bf8_t>, "decode_element: A and B are fp4, fp6, fp8 or bf8");
         return bf8_e5m2_to_float(row[k]);
     }
 }
 
-/// Bytes of an A or B row of K elements of T.
+/// Sets element k of a K-contiguous A or B row of T to `code` (its low 4, 6 or 8 bits), leaving
+/// the other bits of the row as they are: the layout decode_element reads.
+template <typename T>
+CK_TILE_HOST void set_element_code(uint8_t* row, long_index_t k, uint8_t code)
+{
+    if constexpr(std::is_same_v<T, pk_fp4_t>)
+    {
+        const unsigned shift = 4 * static_cast<unsigned>(k % 2);
+        row[k / 2] =
+            static_cast<uint8_t>((row[k / 2] & ~(0xFu << shift)) | ((code & 0xFu) << shift));
+    }
+    else if constexpr(std::is_same_v<T, pk_fp6x16_t>)
+    {
+        // Bits 6k..6k+5 of the row; a code starting at bit 4 or 6 of a byte ends in the next byte.
+        const long_index_t bit = 6 * k;
+        uint8_t* p             = row + bit / 8;
+        const unsigned shift   = static_cast<unsigned>(bit % 8);
+        const unsigned mask    = 0x3Fu << shift;
+        const unsigned bits    = (code & 0x3Fu) << shift;
+        p[0]                   = static_cast<uint8_t>((p[0] & ~mask) | bits);
+        if(shift > 2)
+            p[1] = static_cast<uint8_t>((p[1] & ~(mask >> 8)) | (bits >> 8));
+    }
+    else
+    {
+        // Protects the one-byte store: only FP8 and BF8 hold one K value per byte. Any other T (a
+        // BF6 pack, a 16-bit type) would get rows of the wrong layout without an error.
+        static_assert(std::is_same_v<T, fp8_t> || std::is_same_v<T, bf8_t>,
+                      "set_element_code: A and B are fp4, fp6, fp8 or bf8");
+        row[k] = code;
+    }
+}
+
+/// Bytes of an A or B row of K elements of T; FP4 and FP6 rows are rounded up to a whole byte.
 template <typename T>
 CK_TILE_HOST long_index_t row_bytes(long_index_t K)
 {
-    return std::is_same_v<T, pk_fp4_t> ? (K + 1) / 2 : K;
+    if constexpr(std::is_same_v<T, pk_fp4_t>)
+        return (K + 1) / 2;
+    else if constexpr(std::is_same_v<T, pk_fp6x16_t>)
+        return (3 * K + 3) / 4;
+    else
+    {
+        // Protects the K bytes: only FP8 and BF8 hold one K value per byte. Any other T (a BF6
+        // pack, a 16-bit type) would size its rows wrong without an error.
+        static_assert(std::is_same_v<T, fp8_t> || std::is_same_v<T, bf8_t>,
+                      "row_bytes: A and B are fp4, fp6, fp8 or bf8");
+        return K;
+    }
 }
 
 CK_TILE_HOST uint32_t float_bits(float x)
@@ -228,7 +285,8 @@ CK_TILE_HOST void store_out(void* data, std::size_t i, float v)
  * exact in any order (the tests' sparse check inputs) this is the kernel's accumulator bit for bit.
  * Then the output rounding (FP8 saturating).
  *
- * ADataType and BDataType are pk_fp4_t, fp8_t or bf8_t, ODataType fp8_t, half_t or bf16_t.
+ * ADataType and BDataType are pk_fp4_t, pk_fp6x16_t, fp8_t or bf8_t, ODataType fp8_t, half_t or
+ * bf16_t.
  * A and B are M (N) rows of row_bytes<T>(K) bytes, lda (ldb) bytes apart; the scales are
  * K-major (mx_scale_to_kmajor); E is row-major M x N in the output type, lde elements apart.
  * With `rows` set only those num_rows rows of E are computed, stored compactly: e's row i is

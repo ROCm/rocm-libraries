@@ -123,10 +123,11 @@ using Shape = ck_tile::MxTdmScheduledGemmTraits<EdgeM, EdgeN, false, false, fals
 
 /// The sparse check: A and B nonzero only in a few 128-K steps
 /// (the first and last, both sides of the first and last tile boundaries, then random ones up to
-/// 12), FP4 all 16 codes with E8M0 2^-2..2^1, 8-bit +-(1 + m / 2^bits) * 2^e, e in {-1, 0}, with
-/// E8M0 2^-1..2^0. An alpha of 2^-6 is folded into the scales, 2^-3 on each operand
-/// (kSparseScaleShift), which keeps E in FP8 range. Every FP32 partial sum is exact, so E is
-/// checked bit for bit at any K, and at any scale shift that keeps the sums finite and normal.
+/// 12), FP4 all 16 codes with E8M0 2^-2..2^1; FP6 the 48 codes of magnitude below 4 (exponent
+/// field 0 to 2) and 8-bit +-(1 + m / 2^bits) * 2^e, e in {-1, 0}, both with E8M0 2^-1..2^0. An
+/// alpha of 2^-6 is folded into the scales, 2^-3 on each operand (kSparseScaleShift), which keeps
+/// E in FP8 range. Every FP32 partial sum is exact, so E is checked bit for bit at any K, and at
+/// any scale shift that keeps the sums finite and normal.
 struct Inputs
 {
     std::vector<uint8_t> a;       // M rows of row_bytes<A>(K)
@@ -163,6 +164,13 @@ uint8_t sparse_code(std::mt19937& rng)
 {
     if constexpr(std::is_same_v<T, ck_tile::pk_fp4_t>)
         return static_cast<uint8_t>(rng() % 16);
+    if constexpr(std::is_same_v<T, ck_tile::pk_fp6x16_t>)
+    {
+        // Exponent field 0 to 2 with any mantissa and sign: the 48 codes of magnitude below 4.
+        const int magnitude = static_cast<int>(rng() % 24);
+        const int sign      = static_cast<int>(rng() % 2);
+        return static_cast<uint8_t>((sign << 5) | magnitude);
+    }
     const int bits     = std::is_same_v<T, ck_tile::fp8_t> ? 3 : 2;
     const int bias     = std::is_same_v<T, ck_tile::fp8_t> ? 7 : 15;
     const int mantissa = static_cast<int>(rng() % (1u << bits));
@@ -171,7 +179,7 @@ uint8_t sparse_code(std::mt19937& rng)
     return static_cast<uint8_t>((sign << 7) | (exponent << bits) | mantissa);
 }
 
-/// The sparse inputs of A and B types A and B (pk_fp4_t, fp8_t or bf8_t).
+/// The sparse inputs of A and B types A and B (pk_fp4_t, pk_fp6x16_t, fp8_t or bf8_t).
 template <typename A, typename B>
 Inputs make_inputs(index_t M,
                    index_t N,
@@ -190,14 +198,7 @@ Inputs make_inputs(index_t M,
         for(index_t r = 0; r < rows; ++r)
             for(long_index_t s : steps)
                 for(long_index_t k = s * 128; k < std::min(K, (s + 1) * 128); ++k)
-                {
-                    const uint8_t code = sparse_code<T>(rng);
-                    uint8_t* row       = data.data() + r * row_bytes;
-                    if constexpr(std::is_same_v<T, ck_tile::pk_fp4_t>)
-                        row[k / 2] |= static_cast<uint8_t>(k % 2 ? code << 4 : code);
-                    else
-                        row[k] = code;
-                }
+                    sched::set_element_code<T>(data.data() + r * row_bytes, k, sparse_code<T>(rng));
         return data;
     };
     in.a                      = operand(A{}, M);
