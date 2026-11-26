@@ -116,7 +116,7 @@ ROCSOLVER_BEGIN_NAMESPACE
     40, 56
 #define GETRF_NPVT_BATCH_INNBLKSIZES_REAL                   \
     {1, 1, 1},                                              \
-    {1, 1, 32},                                             \
+    {1, 32, 32},                                           \
     {1, 16, 32}
 
 #define GETRF_NUMROWS_COMPLEX 21
@@ -564,6 +564,11 @@ void rocsolver_getrf_getMemorySize(rocblas_handle handle,
     I dim = std::min(m, n);
     I blk = getrf_get_blksize<ISBATCHED, T>(dim, pivot);
 
+    // GETF2's small-matrix kernel takes at most GETF2_SSKER_MAX_N columns. A wider matrix with
+    // fewer rows is factorized as its leading m x m block followed by a TRSM update of the rest.
+    if(blk == 0 && m < n && n > GETF2_SSKER_MAX_N)
+        blk = dim;
+
     if(blk == 0)
     {
         // requirements for one single GETF2
@@ -658,6 +663,11 @@ rocblas_status rocsolver_getrf_template(rocblas_handle handle,
 
     // size of outer blocks
     I blk = getrf_get_blksize<ISBATCHED, T>(dim, pivot);
+
+    // GETF2's small-matrix kernel takes at most GETF2_SSKER_MAX_N columns. A wider matrix with
+    // fewer rows is factorized as its leading m x m block followed by a TRSM update of the rest.
+    if(blk == 0 && m < n && n > GETF2_SSKER_MAX_N)
+        blk = dim;
 
     if(blk == 0)
         return rocsolver_getf2_template<ISBATCHED, T>(handle, m, n, A, shiftA, inca, lda, strideA,
