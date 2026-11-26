@@ -164,7 +164,7 @@ INSTANTIATE_TEST_SUITE_P(DataTypesTest,
                                            rocisa::DataType::Int8x4,
                                            rocisa::DataType::Int32));
 
-// A CustomArgType that toString() emits but fromStringCustomArgType() cannot parse
+// A CustomArgType that toString() emits but enumFromString() cannot parse
 // makes that type unusable in a custom kernel's custom.config, and only fails once
 // someone writes a config using it. Walk the whole enum so new types stay covered.
 TEST(DataTypesTest, CustomArgTypeRoundTrip)
@@ -177,7 +177,7 @@ TEST(DataTypesTest, CustomArgTypeRoundTrip)
         std::string name  = TensileLite::toString(value);
 
         EXPECT_FALSE(name.empty()) << "CustomArgType " << i << " has no string form";
-        EXPECT_EQ(TensileLite::fromStringCustomArgType(name), value)
+        EXPECT_EQ(TensileLite::enumFromString<CustomArgType>(name), value)
             << "round trip failed for \"" << name << "\"";
     }
 }
