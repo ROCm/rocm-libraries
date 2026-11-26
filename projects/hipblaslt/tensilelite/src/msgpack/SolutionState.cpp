@@ -1762,6 +1762,7 @@ namespace TensileLite
             rv.staggerU                  = isp.truthy("SupportCustomStaggerU");
             rv.perTileExtraIters         = isp.truthy("SupportStreamKPerTileExtraIters", false);
             rv.arrivalFixup              = isp.truthy("SupportStreamKArrivalFixup", false);
+            rv.dynamicUnevenParts        = isp.truthy("SupportStreamKDynamicUnevenParts", false);
             rv.occupancyProbe            = isp.truthy("SupportOccupancyProbe", false);
             rv.useUniversalArgs          = isp.truthy("UseUniversalArgs");
             rv.useSFC                    = useSFC;

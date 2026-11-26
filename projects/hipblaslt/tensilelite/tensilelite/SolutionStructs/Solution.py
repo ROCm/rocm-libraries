@@ -505,6 +505,14 @@ def _supportStreamKArrivalFixup(state, hasSAtomic):
                                           state.get("_PrefetchAcrossPersistentEnabled", False)))
 
 
+def _supportStreamKDynamicUnevenParts(state):
+  """SupportStreamKDynamicUnevenParts: generated StreamK kernels with a dynamic
+  path (DynamicWorkQueue, or Hybrid's dynamic sub-mode), all of which decode
+  uneven parts (StreamK.dynamicPartRange)."""
+  return bool(isStreamK(state) and (hasDynamicAssignment(state) or hasHybridAssignment(state))
+              and not isCustomKernelConfig(state))
+
+
 def _supportOccupancyProbe(state):
   """Whether this solution's asm takes the ProbeAddr/ProbeEpoch/ProbeGrid tail args.
 
@@ -8348,6 +8356,8 @@ class Solution(collections.abc.Mapping):
     # generator knows which fixup protocol it emits (StreamK.arrivalFixupSupported).
     state["InternalSupportParams"]["SupportStreamKArrivalFixup"] = \
         _supportStreamKArrivalFixup(state, isaInfoMap[isa].asmCaps["HasSAtomic"])
+    state["InternalSupportParams"]["SupportStreamKDynamicUnevenParts"] = \
+        _supportStreamKDynamicUnevenParts(state)
     state["AssignedDerivedParameters"] = True
 
     # Set E

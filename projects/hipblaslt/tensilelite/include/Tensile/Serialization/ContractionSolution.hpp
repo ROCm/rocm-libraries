@@ -278,6 +278,7 @@ namespace TensileLite
                 iot::mapOptional(io, "perTileExtraIters", s.perTileExtraIters);
                 // Optional so older logic files deserialize as false.
                 iot::mapOptional(io, "arrivalFixup", s.arrivalFixup);
+                iot::mapOptional(io, "dynamicUnevenParts", s.dynamicUnevenParts);
                 iot::mapOptional(io, "occupancyProbe", s.occupancyProbe);
                 iot::mapRequired(io, "useUniversalArgs", s.useUniversalArgs);
                 iot::mapRequired(io, "useSFC", s.useSFC);

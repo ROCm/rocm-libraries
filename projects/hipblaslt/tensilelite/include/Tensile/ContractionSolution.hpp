@@ -1173,6 +1173,11 @@ namespace TensileLite
             // SupportStreamKArrivalFixup (GlobalParameters.py): dynamic tiles
             // are split only for these. Older/custom kernels leave this false.
             bool arrivalFixup = false;
+            // SupportStreamKDynamicUnevenParts: the dynamic path decodes split
+            // parts of unequal length (StreamK::Dynamic::partIterRange()), so
+            // tiles split into exactly the parts asked for. Older/custom kernels
+            // decode equal parts and leave this false.
+            bool dynamicUnevenParts = false;
             // Kernel takes the ProbeAddr/ProbeEpoch/ProbeGrid tail args (CU-occupancy probe).
             bool occupancyProbe     = false;
             bool useUniversalArgs   = true;
