@@ -142,7 +142,10 @@ stage, the call path from the public entry point, the traced gate and `path:line
 
 ## Exempt: do not report
 
-- Benchmarking paths (contract 4) and persistent handle-create state.
+- Benchmarking paths (contract 4).
+- Persistent state at handle creation and destruction. These are not stages (*Stages*): allocating per-handle state there, and
+  the free and initialization that go with it, are not findings. Report only scratch or workspace allocated per handle
+  (contract 4), or a per-handle buffer that execute overwrites while the device or a captured graph still reads it.
 - A code-object load at plan build or deserialization.
 - A by-value scalar frozen into a capture; replay-after-destroy arguments.
 - The approved plan-constant data routes (step 6), and kernel-argument size below 256 KiB.
