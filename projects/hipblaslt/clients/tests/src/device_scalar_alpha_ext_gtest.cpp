@@ -535,6 +535,17 @@ TEST(pre_checkin_complex_scale_type, DescriptorRejectsMismatchedScale)
             ASSERT_EQ(hipblasLtGroupedMatrixLayoutCreate(
                           &grouped, tc.matrix, 2, nullptr, nullptr, nullptr),
                       HIPBLAS_STATUS_SUCCESS);
+            // A fixed group shape, so the placeholder bound does not reject the layout first.
+            // With the f32 scale only the complex type rejects it; a complex scale is also
+            // rejected by the grouped f32-scale rule.
+            const uint64_t extent = n;
+            const int64_t  ld     = n;
+            for(auto attr : {HIPBLASLT_MATRIX_LAYOUT_ROWS, HIPBLASLT_MATRIX_LAYOUT_COLS})
+                ASSERT_EQ(hipblasLtMatrixLayoutSetAttribute(grouped, attr, &extent, sizeof(extent)),
+                          HIPBLAS_STATUS_SUCCESS);
+            ASSERT_EQ(hipblasLtMatrixLayoutSetAttribute(
+                          grouped, HIPBLASLT_MATRIX_LAYOUT_LD, &ld, sizeof(ld)),
+                      HIPBLAS_STATUS_SUCCESS);
             hipblaslt_local_matmul_descr     desc(HIPBLAS_OP_N, HIPBLAS_OP_N, tc.compute, scale);
             hipblaslt_local_preference       preference;
             hipblasLtMatmulHeuristicResult_t result{};

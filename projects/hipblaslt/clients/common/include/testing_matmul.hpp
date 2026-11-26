@@ -2174,12 +2174,13 @@ void testing_matmul(const Arguments& arg)
         const int32_t gemm_count_pe = std::max(1, arg.grouped_gemm);
         for(int32_t i = 0; i < gemm_count_pe; i++)
         {
-            // Each batch of B must hold its own +/- pattern (NN, so B is ldb x N).
+            // Each batch of B must hold its own +/- pattern, indexed per full ldb x N matrix (NN),
+            // so a batch stride below ldb * N cannot be probed.
             if(arg.batch_count > 1 && arg.stride_b[i] > 0
                && arg.stride_b[i] < arg.ldb[i] * arg.N[i])
             {
                 hipblaslt_cout
-                    << "Skipping fp16_accumulator_probe: overlapping B batches (stride_b="
+                    << "Skipping fp16_accumulator_probe: B batch stride below ldb * N (stride_b="
                     << arg.stride_b[i] << ")" << std::endl;
                 return;
             }
@@ -2860,14 +2861,6 @@ void testing_matmul_with_bias(const Arguments& arg,
     bool do_swizzle_b = arg.swizzle_b && isSwizzleSupported(TiB);
     bool mx_use_rocroller = MXUseRocroller();
 
-    // Overlapping batches (0 < stride < ld * cols) need room for everything the GEMM reads:
-    // ld * cols + (batches - 1) * stride elements, more than rotating_tensor_elements gives.
-    const auto tensor_elements = [](int64_t ld, int64_t cols, int64_t batches, int64_t stride) {
-        const int64_t matrix = hipblaslt_bench::size_mul(ld, cols);
-        if(batches <= 1 || stride <= 0 || stride >= matrix)
-            return hipblaslt_bench::rotating_tensor_elements(ld, cols, batches, stride);
-        return hipblaslt_bench::size_add(matrix, hipblaslt_bench::size_mul(batches - 1, stride));
-    };
     // Need to split into two for loop to calculate the rotating buffer
     int64_t totalRotatingSizeNeeded = 0;
     for(int i = 0; i < gemm_count; i++)
@@ -2911,7 +2904,8 @@ void testing_matmul_with_bias(const Arguments& arg,
 
         if(batchMode == HIPBLASLT_BATCH_MODE_STRIDED)
         {
-            size_A[i] = tensor_elements(lda[i], A_col[i], num_batches[i], stride_a[i]);
+            size_A[i] = hipblaslt_bench::strided_tensor_elements(
+                lda[i], A_col[i], num_batches[i], stride_a[i]);
         }
         else
         {
@@ -2940,7 +2934,8 @@ void testing_matmul_with_bias(const Arguments& arg,
 
         if(batchMode == HIPBLASLT_BATCH_MODE_STRIDED)
         {
-            size_B[i] = tensor_elements(ldb[i], B_col[i], num_batches[i], stride_b[i]);
+            size_B[i] = hipblaslt_bench::strided_tensor_elements(
+                ldb[i], B_col[i], num_batches[i], stride_b[i]);
         }
         else
         {
@@ -2968,9 +2963,13 @@ void testing_matmul_with_bias(const Arguments& arg,
         }
         if(batchMode == HIPBLASLT_BATCH_MODE_STRIDED)
         {
-            size_C[i] = tensor_elements(ldc[i], N[i], num_batches[i], stride_c[i]);
-            size_D[i] = tensor_elements(ldd[i], N[i], num_batches[i], stride_d[i]);
-            size_E[i] = arg.use_e ? tensor_elements(lde[i], N[i], num_batches[i], stride_e[i]) : 0;
+            size_C[i] = hipblaslt_bench::strided_tensor_elements(
+                ldc[i], N[i], num_batches[i], stride_c[i]);
+            size_D[i] = hipblaslt_bench::strided_tensor_elements(
+                ldd[i], N[i], num_batches[i], stride_d[i]);
+            size_E[i] = arg.use_e ? hipblaslt_bench::strided_tensor_elements(
+                                        lde[i], N[i], num_batches[i], stride_e[i])
+                                  : 0;
         }
         else
         {

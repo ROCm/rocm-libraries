@@ -199,6 +199,19 @@ namespace hipblaslt_bench
         return ld <= stride ? size_mul(stride, batches) : size_mul(ld, cols);
     }
 
+    // The elements to allocate for a strided GEMM operand. A batch stride below a full matrix
+    // (0 < stride < ld * cols) needs ld * cols + (batches - 1) * stride, which covers the
+    // ld * (cols - 1) + rows + (batches - 1) * stride elements the GEMM reads (such batches may
+    // share elements, or only padding). Otherwise rotating_tensor_elements.
+    inline int64_t
+        strided_tensor_elements(int64_t ld, int64_t cols, int64_t batches, int64_t stride)
+    {
+        const int64_t matrix = size_mul(ld, cols);
+        if(batches <= 1 || stride <= 0 || stride >= matrix)
+            return rotating_tensor_elements(ld, cols, batches, stride);
+        return size_add(matrix, size_mul(batches - 1, stride));
+    }
+
     // The elements a bias vector of `length` takes in one rotation block: the
     // bias batch stride per batch when one is set.
     inline int64_t rotating_bias_elements(int64_t length, int64_t bias_stride, int64_t batches)

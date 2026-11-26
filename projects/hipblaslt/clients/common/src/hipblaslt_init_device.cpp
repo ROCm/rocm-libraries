@@ -189,11 +189,10 @@ static T maf_round(double v)
 }
 
 // The elements a MAF fill may copy: its extent, capped at what testing_matmul allocates for the
-// layout (rotating_tensor_elements). A batch stride below lda gets a single lda * N buffer, which
-// is shorter than the extent once the interleaved batches reach past column N - 1.
+// layout (strided_tensor_elements), which covers every element a strided GEMM reads.
 static size_t maf_copy_elements(size_t extent, size_t lda, size_t N, size_t batches, size_t stride)
 {
-    const int64_t allocated = hipblaslt_bench::rotating_tensor_elements(
+    const int64_t allocated = hipblaslt_bench::strided_tensor_elements(
         int64_t(lda), int64_t(N), int64_t(batches), int64_t(stride));
     return std::min(extent, size_t(allocated));
 }
@@ -1110,7 +1109,7 @@ void hipblaslt_init_device(ABC_dims                 abc,
                 constexpr unsigned int kNormDistOneSpecialSeed = 12345u;
                 // Match integer_exact B / fp16_accumulator_probe B: stride==0 means packed batches,
                 // so fill_batch must see a non-zero stride to cover every batch slab. A nonzero
-                // stride is kept as is, so overlapping batches stay inside the buffer.
+                // stride is kept as is, so batches closer than lda * N stay inside the buffer.
                 size_t effective_stride = stride ? stride : lda * N;
                 size_t size_64            = lda * N + size_t(batch_count - 1) * effective_stride;
                 if(size_64 == 0)
