@@ -104,11 +104,13 @@ import itertools
 from pprint import pprint
 
 
-def _needsPreLoopLocalReadDrain(kernel, numItersPLR, preLoopLocalReadDrainEmitted):
-  # CMS schedules the loop body independently of the prologue. Any effective
-  # local prefetch therefore needs an explicit drain unless an earlier path
-  # already emitted one; ForceUnrollSubIter does not change that dependency.
-  return bool(numItersPLR and kernel["UseCustomMainLoopSchedule"]
+def _needsPreLoopLocalReadDrain(kernel, numItersPLR, preLoopLocalReadDrainEmitted,
+                                papLocalReadIssued=False):
+  # CMS schedules independently of the prologue. PAP's carried reads arrive
+  # through the previous persistent iteration and bypass the entry read site.
+  # Both need completion before any first-WMMA route, after setup has overlapped
+  # the loads; ForceUnrollSubIter does not change the CMS dependency.
+  return bool(numItersPLR and (kernel["UseCustomMainLoopSchedule"] or papLocalReadIssued)
               and not preLoopLocalReadDrainEmitted)
 
 
@@ -3159,13 +3161,15 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
       # Wave-separated TDM increment: subtile uses per-wave descriptors and
       # does not need parity-based increment selection.
       if tdmA and tdmB and kernel["NumWaves"] > 1 and not kernel["UseSubtileImpl"]:
-        module.add(self.initTDMDescriptorWaveSeparated(kernel, tensorParametersA, tensorParametersB))
+        descriptors = Module("Ordinary wave-separated TDM entry descriptors")
+        descriptors.add(self.initTDMDescriptorWaveSeparated(kernel, tensorParametersA, tensorParametersB))
         # The scale pair passes None for a scale the problem does not carry.
         if kernel["ProblemType"]["MXBlockA"] or kernel["ProblemType"]["MXBlockB"]:
-          module.add(self.initTDMDescriptorWaveSeparated(kernel, tensorParametersA.get("MX"), tensorParametersB.get("MX")))
-        module.add(self.tdmGlobalOffsetWaveSeparated(kernel, tensorParametersA, tensorParametersB))
+          descriptors.add(self.initTDMDescriptorWaveSeparated(kernel, tensorParametersA.get("MX"), tensorParametersB.get("MX")))
+        descriptors.add(self.tdmGlobalOffsetWaveSeparated(kernel, tensorParametersA, tensorParametersB))
         if kernel["ProblemType"]["MXBlockA"] or kernel["ProblemType"]["MXBlockB"]:
-          module.add(self.tdmGlobalOffsetWaveSeparated(kernel, tensorParametersA.get("MX"), tensorParametersB.get("MX")))
+          descriptors.add(self.tdmGlobalOffsetWaveSeparated(kernel, tensorParametersA.get("MX"), tensorParametersB.get("MX")))
+        module.add(self.papRestoreNextTileDescriptors(kernel, tensorParametersA, tensorParametersB, descriptors))
         tdmInited = True
 
       # Tile offset assignment A(MXSA)
@@ -3426,9 +3430,7 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
           module.add(self.tdmSetupIncrementWaveSeparated(kernel, tensorParametersA.get("MX"), tensorParametersB.get("MX")))
 
         if isPersistent(kernel):
-          module.add(self.tdmApplyTileKOffsetWaveSeparated(kernel, tensorParametersA, tensorParametersB))
-          if kernel["ProblemType"]["MXBlockA"] or kernel["ProblemType"]["MXBlockB"]:
-            module.add(self.tdmApplyTileKOffsetWaveSeparated(kernel, tensorParametersA.get("MX"), tensorParametersB.get("MX")))
+          module.add(self.papApplyEntryKOffset(kernel, tensorParametersA, tensorParametersB))
 
         if not self.states.staggerUCode:
           module.add(self.releaseGlobalReadIncsSgprsAfterTdmWaveSep(kernel))
@@ -3611,8 +3613,8 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
         if usePrimedSkip:
           module.add(lbl_prefetchPrimedMerge)
           if self.papPgr2PipelineEnabled(kernel, tensorParametersA, tensorParametersB):
-            module.add(SAndB32(dst=sgpr("PersistentPrefetchState"), src0=sgpr("PersistentPrefetchState"), src1=11,
-                              comment="PAP first PGR merge retains issued-group and bank state"))
+            module.add(SAndB32(dst=sgpr("PersistentPrefetchState"), src0=sgpr("PersistentPrefetchState"), src1=27,
+                              comment="PAP first PGR merge retains issued-group, bank and PLR readiness"))
           else:
             module.add(SMovB32(dst=sgpr("PersistentPrefetchState"), src=0, comment="clear after first PGR group merge"))
         tPA = tensorParametersA
@@ -3884,7 +3886,14 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
       emitPrefetchGroup()
     if skipZeroIterLoads is not None:
       module.add(skipZeroIterLoads)
-    module.add(SMovB32(dst=sgpr("PersistentPrefetchState"), src=1, comment="first PGR group for next persistent iter prefetched"))
+    if (getattr(self.states, "papNextTileVgpr", -1) >= 0
+        and getattr(self.states, "papAddressCarrier", None) is not None):
+      module.add(SAndB32(dst=sgpr("PersistentPrefetchState"), src0=sgpr("PersistentPrefetchState"), src1=4,
+                        comment="PAP retain coordinate preparation until issued handoff publication"))
+      module.add(SOrB32(dst=sgpr("PersistentPrefetchState"), src0=sgpr("PersistentPrefetchState"), src1=1,
+                       comment="first PGR group for next persistent iter prefetched"))
+    else:
+      module.add(SMovB32(dst=sgpr("PersistentPrefetchState"), src=1, comment="first PGR group for next persistent iter prefetched"))
     if ((kernel["DirectToLdsA"] or kernel["DirectToLdsB"])
         and not (kernel["enableTDMA"] and kernel["enableTDMB"])):
       module.add(self.papDtlSaveLdsBank(kernel, tensorParametersA, tensorParametersB))
@@ -4699,7 +4708,7 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
                                    NLLnum=NLLnum, useTailloopInNll=useTailloopInNll, remainPgr=remainPgr))
 
     if isPapNll:
-      module.add(self.papPgr2PublishGroup0(kernel, tensorParametersA, tensorParametersB))
+      module.add(self.papPrefetchLocalRead(kernel, tensorParametersA, tensorParametersB))
 
     if self.do["executeToLoopEnd"] and isOptNLL:
       module.add(self.functionEnd(kernel, addLabel=False))
@@ -6281,7 +6290,7 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
             module.add(self.directToLdsM0Update(kernel, 1, tPM))
             module.add(self.globalReadDo(kernel, 0, tPM, g2lBufIdx=0))
           if papSecondMerge is not None:
-            module.add(papSecondMerge)
+            module.add(self.papPgr2SecondGroupRoute(kernel, tensorParametersA, tensorParametersB, papSecondMerge))
           if idxPgr < kernel["PrefetchGlobalRead"] - 1:
             # generate GR inc code except for the last prefetch
             prefetchIdx = kernel["PrefetchGlobalRead"] - 1 - idxPgr
@@ -6314,8 +6323,7 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
         for idxPgr in range(0, kernel["PrefetchGlobalRead"] + 1):
           module.add(self.closePrefetchGlobalRead2orMore(kernel, tensorParametersA, tensorParametersB, idxPgr))
         if self.papPgr2PipelineEnabled(kernel, tensorParametersA, tensorParametersB):
-          module.add(SMovB32(dst=sgpr("PersistentPrefetchState"), src=0,
-                            comment="PAP second PGR common merge consumes issued-group state"))
+          module.add(self.papPgr2EntryMerge(kernel, tensorParametersA, tensorParametersB))
 
       self.states.subTileIdx = 0
 
@@ -6407,8 +6415,11 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
                 else:
                   pack[plrIdx].add(packCodeB)
               prefetchReadModules = {"A": prefetchReadsA, "B": prefetchReadsB}
-              module.add(prefetchReadModules[self.states.localReadSideOrder[0]])
-              module.add(prefetchReadModules[self.states.localReadSideOrder[1]])
+              firstPlrReads = Module("First local prefetch reads")
+              firstPlrReads.add(prefetchReadModules[self.states.localReadSideOrder[0]])
+              firstPlrReads.add(prefetchReadModules[self.states.localReadSideOrder[1]])
+              module.add(self.papLocalReadEntry(kernel, firstPlrReads,
+                  (pack[plrIdx], packPrePrefetchA, packPrePrefetchB)))
               if not kernel["ForceUnrollSubIter"] and (iui*self.states.numReadsIterCoalescedA < kernel["InnerUnroll"]):
                 module.addComment1("local read inc a")
                 module.add(self.localReadInc(kernel, iui, tensorParametersA))
@@ -6529,11 +6540,18 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
         primeWhy = "PGR=0" if not kernel["PrefetchGlobalRead"] else "single LDS blk"
         module.add(SBarrier(comment=f"TDM {primeWhy}: prime barrier before loop"))
       if _needsPreLoopLocalReadDrain(kernel, self.states.numItersPLR,
-                                     preLoopLocalReadDrainEmitted):
+                                     preLoopLocalReadDrainEmitted,
+                                     papLocalReadIssued=getattr(self.states, "papFirstPlrReads", None) is not None):
         module.add(SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1,
                             comment="complete one-time pre-loop local reads"))
+        if getattr(self.states, "papFirstPlrReads", None) is not None:
+          # Reuse the DP cluster entry gate: other loop-copy/dispatch layouts
+          # have not established this producer-completion boundary.
+          module.add(self.papLocalReadCompletion(completeGroup0=
+              self.papPgr2DeferredClusterReadyEnabled(kernel, tensorParametersA, tensorParametersB)))
       self.states.papAddressRoutingReset = Module("PAP address NGLL routing reset")
       module.add(self.states.papAddressRoutingReset)
+      module.add(self.papCompleteDeferredClusterReady(kernel, tensorParametersA, tensorParametersB))
       module.add(self.openLoop(kernel, tensorParametersA, tensorParametersB, self.states.unrollIdx, beginLabelOnly=False, nta=nta, ntb=ntb))
 
       loop = Module("loopBody")
@@ -6856,6 +6874,7 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
               module.add(self.noLoadLoop(kernel, tensorParametersA, tensorParametersB, isOptNLL=False, isNGLL=False, pack=deepCopyPack, packPre=deepCopyPackPre, NLLindex=NLLindex, NLLnum=NLLnum))
               self.restoreLocalPointers(kernel, tensorParametersA, tensorParametersB)
       if papCarrier is not None:
+        module.add(self.papPublishNextTileCoordinates())
         module.add(self.papClearPreparedAddress("PAP: discard preparation at common NLL exit"))
     return pack
 
@@ -7126,7 +7145,7 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
 
     module.add(VNop(self.states.miVALUInstrDataHazard, "Add v_nop before releasing ValuA/B"))
     reclaimStart, reclaimSize = self.rapReclaimableValuABRange(kernel)
-    self.vgprPool.add(reclaimStart, reclaimSize, "ValuAB")
+    self.papReclaimValuRegisters(kernel, reclaimStart, reclaimSize, "ValuAB")
     module.addComment1("Tail: add ValuA/B vgpr buffer [%u...%u) to pool" % \
         (reclaimStart, self.states.lastValuAB))
     if kernel["ReuseAcrossPersistent"]:
@@ -7159,6 +7178,9 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
         "ReuseAcrossPersistent tail-folds the K remainder into the main loop and has no tail loop"
       self.states.inTailLoop = True
       module.addComment2("Tail Loop")
+      papTailBorrowed = self.papTailBorrowedPayloadRanges(kernel)
+      for start, size in papTailBorrowed:
+        self.vgprPool.add(start, size, "PAP tail borrows retained PLR operands")
 
       # F32XEmu case, need to disable index transpose and generate transpose code for wider local read
       # Disable doFullPackCodePrefetchas.
@@ -7661,6 +7683,8 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
 
       # tail: close
       self.states.inTailLoop = False
+      for start, size in papTailBorrowed:
+        self.vgprPool.remove(start, size, "PAP retained PLR operands return from tail")
 
       # FIXME: Add back.
       if mEnd == 1:
@@ -7693,7 +7717,7 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
 
     if self.states.lastValuMXSAB:
       mxsStart, mxsSize = self.rapReclaimableValuMXSABRange(kernel)
-      self.vgprPool.add(mxsStart, mxsSize, "ValuMXSAB")
+      self.papReclaimValuRegisters(kernel, mxsStart, mxsSize, "ValuMXSAB")
       module.addComment1("Tail: add ValuA/B vgpr buffer [%u...%u) to pool" % \
           (mxsStart, self.states.lastValuMXSAB))
       if kernel["ReuseAcrossPersistent"]:
@@ -8628,6 +8652,18 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
       if self.states.dcpTokenGate:
         usedTokens.update(token for row in self.states.memTokenLdsDcp.values() for token in row)
       self.states.memTokenEpilogue = max(usedTokens) + 1
+    # A separate completion token tracks carried PLR reads without making
+    # their consumer rendezvous a new dependency on either tensor producer.
+    usedTokens = set(range(self.states.numLDSBlk)) | {
+        self.states.memTokenLdsBufferMeta, self.states.memTokenEpilogue}
+    usedTokens.update(token for row in self.states.memTokenLdsSplit for token in row)
+    if self.states.dcpTokenGate:
+      usedTokens.update(token for row in self.states.memTokenLdsDcp.values() for token in row)
+    self.states.memTokenPapPlr = max(usedTokens) + 1
+    self.states.memTokenPapReaders = {
+        self.states.memTokenLdsBuffer0: max(usedTokens) + 2,
+        self.states.memTokenLdsBuffer1: max(usedTokens) + 3,
+    }
     self.states.ldsReadTokenIdx = self.states.memTokenLdsBuffer0
     self.states.ldsTensorTokenIdx = self.states.memTokenLdsBuffer0
     self.states.ldsDirectToLDSTokenIdx = self.states.memTokenLdsBuffer0
@@ -10507,13 +10543,14 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
       if kernel["PrefetchGL2"]:
         vgprIdx = self.allocGL2PrefetchAddrVgprs(kernel, tensorParametersA, tensorParametersB, vgprIdx)
 
-      # One lane-packed VGPR carries StreamK identity and prepared addresses.
+      # One lane-packed VGPR survives both the epilogue and entry scratch.
       # Keep it outside every reclaimable operand/address range, beside Serial.
       # Leave sixteen scratch registers after the payload and Serial, matching
-      # the conservative local-address scratch margin.
+      # the conservative local-address margin for the retained PLR payload.
       if (self.papTdmSupportsShadowAddressPair(kernel, tensorParametersA, tensorParametersB)
-          and isStreamK(kernel) and not isStreamKSpatialCluster(kernel)
-          and kernel["NoTailLoop"] and not kernel["HalfPLR"]
+          and not isStreamKSpatialCluster(kernel)
+          and (kernel["NoTailLoop"] or self.papPgr2RuntimeTailSplit(kernel))
+          and not kernel["HalfPLR"]
           and max(vgprIdx, self.states.c.numVgprValu) + 18 <= self.states.regCaps["MaxVgpr"]):
         vgprIdx = max(vgprIdx, self.states.c.numVgprValu)
         self.states.papNextTileVgpr = vgprIdx
@@ -12460,6 +12497,23 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
 
     _flattenLeaves(rootModule)
 
+    # The carried-PLR path can leave a younger tensor producer outstanding.
+    # A read-to-write bank release only completes the old readers; naming the
+    # producer token again creates a false tensor dependency across the loop.
+    # Retain bank tokens on reads for acquisition/WAR dependencies, and add a
+    # separate reader-completion token used solely by release rendezvous.
+    from .Common import persistentSpatialCluster
+    papReaderTokens = {}
+    if (getattr(self.states, "papFirstPlrReads", None) is not None
+            and not persistentSpatialCluster(kernel)):
+      papReaderTokens = self.states.memTokenPapReaders
+      for leaf, _, _ in flatLeaves:
+        if isinstance(leaf, DSLoadInstruction):
+          tokens = _getTokenList(leaf)
+          completion = [papReaderTokens[t] for t in tokens if t in papReaderTokens]
+          if completion:
+            leaf.setMemToken(MemTokenData(sorted(set(tokens + completion))))
+
     labelDefIndex = {}
     for idx, (leaf, _leafMod, _leafPos) in enumerate(flatLeaves):
       if _isLabelDef(leaf):
@@ -12729,8 +12783,10 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
 
       if barrierTokens:
         uniqueTokens = sorted(set(barrierTokens))
+        waitTokens = ([papReaderTokens.get(t, t) for t in uniqueTokens]
+                      if access == "write" else uniqueTokens)
         if not openGuards:
-          plannedBarriers.append((owner, pos, uniqueTokens, "auto token transition barrier"))
+          plannedBarriers.append((owner, pos, waitTokens, "auto token transition barrier"))
         else:
           outer = openGuards[0]
           blockers = sorted(outer[4].intersection(uniqueTokens))
@@ -12741,7 +12797,7 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
           else:
             reason = None
           if reason is None:
-            plannedBarriers.append((outer[2], outer[3], uniqueTokens,
+            plannedBarriers.append((outer[2], outer[3], waitTokens,
                                     "auto token transition barrier (ahead of a wave-divergent branch)"))
           else:
             unsafeBarriers.append(
@@ -12793,6 +12849,13 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
         barrier = SBarrier(comment=f"{prefix}, {syncComments}")
         barrier.setMemToken(MemTokenData(tokens))
         items.insert(pos, barrier)
+        if papReaderTokens and any(t in papReaderTokens.values() for t in tokens):
+          # The release token intentionally excludes tensor producers. Keep
+          # the following tensor write after the workgroup rendezvous even
+          # though it does not name this reader-only dependency token.
+          from rocisa.instruction import SSchedulingFence
+          items.insert(pos + 1, SSchedulingFence(
+              comment="PAP preserve reader release before tensor issue"))
         insertedCount += 1
       owner.setItems(items)
 

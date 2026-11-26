@@ -87,7 +87,7 @@ from .segment_interleave import evaluate as segIntEval, aligned_budget_ok as seg
   b_rotate_reason as segBRotateReason, \
   paired_buffer_reason as segPairedReason, paired_buffer_offsets as segPairedOffsets, \
   paired_buffer_layout_reason as segPairedLayoutReason, \
-  persistent_keeps_unpaired as segPersistentKeepsUnpaired
+  persistent_unpaired_reason as segPersistentUnpairedReason
 from ..Toolchain.Component import Assembler
 from ..Components.CustomSchedule import hasCustomSchedule
 
@@ -7538,10 +7538,11 @@ class Solution(collections.abc.Mapping):
         return
     # Tight layouts pair each component's ping/pong buffers when supported. Persistent
     # kernels retain their existing unpaired interleave if pairing is unavailable;
-    # those that cannot afford the swap-mask SGPRs skip the attempt entirely.
-    if state["LDSSegmentInterleave"] == 1 and not state["TDMSplit"] and (not _segAligned or state.get("WaveTileContiguousA")) \
-        and not (isPersistent(state) and segPersistentKeepsUnpaired(state)):
-      _pairedReason = None if state["LDSSegmentBRotate"] else segPairedReason(state)
+    # so do those that cannot afford the swap-mask SGPRs.
+    if state["LDSSegmentInterleave"] == 1 and not state["TDMSplit"] and (not _segAligned or state.get("WaveTileContiguousA")):
+      _pairedReason = segPersistentUnpairedReason(state) if isPersistent(state) else None
+      if _pairedReason is None:
+        _pairedReason = None if state["LDSSegmentBRotate"] else segPairedReason(state)
       if _pairedReason is None:
         _pairedOffsets = segPairedOffsets(state)
         _pairedReason = "layout exceeds MaxLDS" if _pairedOffsets is None else segPairedLayoutReason(state, _pairedOffsets)
@@ -7560,6 +7561,9 @@ class Solution(collections.abc.Mapping):
         # Non-persistent auto mode disables interleave when pairing fails. Persistent
         # kernels keep the unpaired interleave offsets, swaps and byte count above.
         state["LDSSegmentInterleave"] = 0
+      elif _segRequested == 1 and printRejectionReason:
+        printWarning("LDSSegmentInterleave=1: persistent kernel keeps separate ping/pong blocks: %s"
+                     % _pairedReason)
     # Contiguous A skips the aligned unpaired buffer-stride reservation above.
     # Reject both a failed pairing attempt and persistent paths that skip it.
     if state.get("WaveTileContiguousA") and state["LDSSegmentInterleave"] == 1 \

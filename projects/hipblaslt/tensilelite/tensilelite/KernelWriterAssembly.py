@@ -4023,12 +4023,12 @@ class KernelWriterAssembly(KernelWriter):
       if not kernel["UseSubtileImpl"]:
         if self.states.lastValuMXSAB:
           mxsStart, mxsSize = self.rapReclaimableValuMXSABRange(kernel)
-          self.vgprPool.add(mxsStart, mxsSize, "ValuMXSAB") # Add as available
+          self.papReclaimValuRegisters(kernel, mxsStart, mxsSize, "ValuMXSAB") # Add as available
           moduleWg.addComment0("init: add vgpr [%u...%u) to pool" % \
                               (mxsStart, self.states.lastValuMXSAB+self.states.mxsa.startVgprValu))
 
         reclaimStart, reclaimSize = self.rapReclaimableValuABRange(kernel)
-        self.vgprPool.add(reclaimStart, reclaimSize, "ValuAB") # Add as available
+        self.papReclaimValuRegisters(kernel, reclaimStart, reclaimSize, "ValuAB") # Add as available
         moduleWg.addComment0("init: add vgpr [%u...%u) to pool" % \
                             (reclaimStart, self.states.lastValuAB+self.states.a.startVgprValu))
 
@@ -4675,6 +4675,13 @@ class KernelWriterAssembly(KernelWriter):
     gsuComponent = Component.GSU.find(self)
     module.add(gsuComponent.graWorkGroup(self, kernel))
 
+    # Prepared coordinates already include the supported WGM transform.
+    preparedMapping = getattr(self.states, "papNextTileVgpr", -1) >= 0
+    if preparedMapping:
+      mapped = Label(self.labels.getNameInc("PapEntryWorkgroupMapped"), "")
+      module.add(SBitcmp1B32(src0=sgpr("PersistentPrefetchState"), src1=5))
+      module.add(SCBranchSCC1(labelName=mapped.getLabelName(), comment="PAP skip repeated workgroup mapping"))
+
     # Start of WGM algos
     sgprWGM = "WGM"
     if len(kernel["SpaceFillingAlgo"]):
@@ -4683,6 +4690,10 @@ class KernelWriterAssembly(KernelWriter):
       module.add(SpaceFillingCurveWalk(self, kernel, sgprWGM))
     else:
       module.add(DefaultWGM(self, kernel, sgprWGM))
+    if preparedMapping:
+      module.add(mapped)
+      module.add(SAndB32(dst=sgpr("PersistentPrefetchState"), src0=sgpr("PersistentPrefetchState"), src1=hex(0xffffffdf),
+                        comment="PAP consume retained coordinate handoff"))
 
     # Resolving &counter3 here makes the per-work-group tally in the epilogue a bare
     # atomic on a register pair rather than a kernarg load it has to wait on.
@@ -7923,7 +7934,7 @@ class KernelWriterAssembly(KernelWriter):
     # registers which were never added raises "already unavailable" warnings.
     if self.states.lastValuMXSAB:
       mxsStart, mxsSize = self.rapReclaimableValuMXSABRange(kernel)
-      self.vgprPool.remove(mxsStart, mxsSize, "ValuMXSAB")
+      self.papReclaimValuRegisters(kernel, mxsStart, mxsSize, "ValuMXSAB", add=False)
       module.addComment1("initC: remove ValuMXSA/B vgpr buffer [%u...%u) from pool"%(mxsStart, self.states.lastValuMXSAB))
 
     self.vgprPool.remove(self.states.c.startVgprValu, self.states.c.numVgprValu, "ValuC")
@@ -7932,7 +7943,7 @@ class KernelWriterAssembly(KernelWriter):
     self.agprPool.remove(0, numAccvgprs, "ValuC")
     module.addComment1("initC: remove acc vgpr buffer [%u...%u) from pool"%(0, numAccvgprs))
     reclaimStart, reclaimSize = self.rapReclaimableValuABRange(kernel)
-    self.vgprPool.remove(reclaimStart, reclaimSize, "ValuAB")
+    self.papReclaimValuRegisters(kernel, reclaimStart, reclaimSize, "ValuAB", add=False)
     module.addComment1("initC: remove ValuA/B vgpr buffer [%u...%u) from pool"%(reclaimStart, self.states.lastValuAB))
     numCVgpr = self.states.c.numVgprValu + numAccvgprs
 
@@ -26436,7 +26447,64 @@ class KernelWriterAssembly(KernelWriter):
 
   ##############################################################################
   # PAP TDM/DTL LDS-bank helpers.
+  #
+  # Unpaired layouts place the high bank LdsOffsetA_Blk above the low one for
+  # every tensor. Paired layouts give each tensor its own ping-to-pong distance
+  # (bufferStride<tc>) and each wave's descriptor set its own swap mask
+  # (PairedTDMSwap, or PairedTDMScaleSwap for the MX scale set). Ping is always
+  # the lower address, so "high bank" means pong in either layout.
   ##############################################################################
+  @staticmethod
+  def papPairedBuffers(kernel: Mapping) -> bool:
+    return bool((kernel.get("LDSSegInterleaveOffsets") or {}).get("pairedBuffers"))
+
+  @staticmethod
+  def papPairedSwapMask(ldsAddrSgprName: str) -> str:
+    return "PairedTDMScaleSwap" if ldsAddrSgprName.startswith("tdmMXS") else "PairedTDMSwap"
+
+  @staticmethod
+  def papHasLdsBanks(kernel: Mapping) -> bool:
+    return KernelWriterAssembly.papPairedBuffers(kernel) or kernel["LdsOffsetA_Blk"] != 0
+
+  @staticmethod
+  def papBankStride(kernel: Mapping, tc: str) -> int:
+    """Byte distance from tc's low-bank local reads to its high-bank copy."""
+    if KernelWriterAssembly.papPairedBuffers(kernel):
+      return kernel["LDSSegInterleaveOffsets"]["bufferStride" + tc]
+    return kernel["LdsOffsetA_Blk"]
+
+  @staticmethod
+  def papTdmTestHighBank(kernel: Mapping, ldsAddrSgpr: str, tmpSgpr: int) -> Module:
+    """Set SCC when the descriptor writes its high LDS bank; tmpSgpr is scratch."""
+    mod = Module("PAP TDM test high LDS bank")
+    if KernelWriterAssembly.papPairedBuffers(kernel):
+      mod.add(SXorB32(dst=sgpr(tmpSgpr), src0=sgpr(ldsAddrSgpr),
+                      src1=sgpr(KernelWriterAssembly.papPairedSwapMask(ldsAddrSgpr)),
+                      comment="other paired buffer of this descriptor"))
+      mod.add(SCmpLtU32(src0=sgpr(tmpSgpr), src1=sgpr(ldsAddrSgpr), comment="PAP descriptor in its paired pong buffer?"))
+    else:
+      blkOffset: int = kernel["LdsOffsetA_Blk"]
+      mod.add(SCmpGeU32(src0=sgpr(ldsAddrSgpr), src1=blkOffset,
+              comment=f"PAP descriptor in high LDS bank ({blkOffset:#x})?"))
+    return mod
+
+  @staticmethod
+  def papLocalReadTensors(kernel: Mapping, tPA: Mapping, tPB: Mapping) -> list:
+    tensors = [tPA, tPB]
+    if kernel["ProblemType"]["MXBlockA"]:
+      tensors.append(tPA["MX"])
+    if kernel["ProblemType"]["MXBlockB"]:
+      tensors.append(tPB["MX"])
+    return tensors
+
+  def papShiftLocalReadAddrs(self, tc: str, src, comment: str) -> Module:
+    """Add src to every LocalReadAddr VGPR of tc; extra windows and 2D MX phases move with +0."""
+    mod = Module(f"PAP shift LocalReadAddr{tc}")
+    for i in range(getattr(self.states, tc.lower()).numVgprLocalReadAddr):
+      addr = vgpr(f"LocalReadAddr{tc}+{i}")
+      mod.add(VAddU32(dst=addr, src0=addr, src1=src, comment=comment))
+    return mod
+
   def papTdmRecomputeWaveIdx(self, kernel: Mapping, waveIdxSgpr: int | str) -> Module:
     mod = Module("PAP TDM recompute WaveIdx")
     with self.allocTmpSgpr(1) as tmpSgprRes:
@@ -26497,7 +26565,7 @@ class KernelWriterAssembly(KernelWriter):
     mod.add(resetDescriptor)
     for pairA, pairB in pairs:
       mod.add(self.resetTDMDescriptorForTailWaveSeparated(kernel, pairA, pairB))
-    if kernel["LdsOffsetA_Blk"] == 0:
+    if not KernelWriterAssembly.papHasLdsBanks(kernel):
       mod.add(done)
       return mod
     mod.add(SBitcmp1B32(src0=sgpr("PersistentPrefetchState"), src1=0,
@@ -26727,6 +26795,7 @@ class KernelWriterAssembly(KernelWriter):
     # (ldsConstOffset + wId * mxBytes) does for odd wId, which silently moved
     # the next tile's scale writes into the A region.
     blkOffset: int = kernel["LdsOffsetA_Blk"]
+    paired = KernelWriterAssembly.papPairedBuffers(kernel)
     with self.allocTmpSgpr(1) as waveIdxSgprRes:
       waveIdxSgpr = waveIdxSgprRes.idx
       mod.add(self.papTdmRecomputeWaveIdx(kernel, waveIdxSgpr))
@@ -26737,18 +26806,25 @@ class KernelWriterAssembly(KernelWriter):
       if incremental:
         mod.add(self.initTDMDescriptorWaveSeparated(kernel, tPA, tPB, waveIdxSgpr, updateOnly=True,
                                                      preparedGlobalAddr=preparedGlobalAddr))
-      elif blkOffset != 0:
+      elif KernelWriterAssembly.papHasLdsBanks(kernel):
         with self.allocTmpSgpr(1) as tmpSgprRes:
           papBankSgpr = tmpSgprRes.idx
-          mod.add(SCmpGeU32(src0=sgpr(ldsAddrSgpr), src1=blkOffset,
-                  comment=f"descriptor in high LDS bank ({blkOffset:#x})?"))
-          mod.add(SCSelectB32(dst=sgpr(papBankSgpr), src0=blkOffset, src1=0,
+          mod.add(KernelWriterAssembly.papTdmTestHighBank(kernel, ldsAddrSgpr, papBankSgpr))
+          # Paired sets keep a bank select; each one applies it to its own mask.
+          mod.add(SCSelectB32(dst=sgpr(papBankSgpr), src0=-1 if paired else blkOffset, src1=0,
                   comment="preserve PAP LDS bank before descriptor refresh"))
           for pairA, pairB in pairs:
             mod.add(self.initTDMDescriptorWaveSeparated(kernel, pairA, pairB, waveIdxSgpr))
           for bankSgpr in bankSgprs:
-            mod.add(SAddU32(dst=sgpr(bankSgpr), src0=sgpr(bankSgpr), src1=sgpr(papBankSgpr),
-                    comment="restore PAP LDS bank after descriptor refresh"))
+            if paired:
+              with self.allocTmpSgpr(1) as maskSgprRes:
+                mod.add(SAndB32(dst=sgpr(maskSgprRes.idx), src0=sgpr(KernelWriterAssembly.papPairedSwapMask(bankSgpr)),
+                        src1=sgpr(papBankSgpr), comment="paired swap mask if PAP used pong"))
+                mod.add(SXorB32(dst=sgpr(bankSgpr), src0=sgpr(bankSgpr), src1=sgpr(maskSgprRes.idx),
+                        comment="restore PAP paired buffer after descriptor refresh"))
+            else:
+              mod.add(SAddU32(dst=sgpr(bankSgpr), src0=sgpr(bankSgpr), src1=sgpr(papBankSgpr),
+                      comment="restore PAP LDS bank after descriptor refresh"))
       else:
         for pairA, pairB in pairs:
           mod.add(self.initTDMDescriptorWaveSeparated(kernel, pairA, pairB, waveIdxSgpr))
@@ -26766,13 +26842,11 @@ class KernelWriterAssembly(KernelWriter):
     mod = Module("TDM save PAP LDS bank in PersistentPrefetchState")
     comp: TensorDataMoverLoad = TensorDataMoverLoad.find(self)
     ldsAddrSgpr: str = comp.getLdsAddrSgprName("tdmAGroup0")
-    blkOffset: int = kernel["LdsOffsetA_Blk"]
-    if blkOffset == 0:
+    if not KernelWriterAssembly.papHasLdsBanks(kernel):
       return mod
     with self.allocTmpSgpr(1) as tmpSgprRes:
       papBankSgpr = tmpSgprRes.idx
-      mod.add(SCmpGeU32(src0=sgpr(ldsAddrSgpr), src1=blkOffset,
-              comment=f"PAP descriptor in high LDS bank ({blkOffset:#x})?"))
+      mod.add(KernelWriterAssembly.papTdmTestHighBank(kernel, ldsAddrSgpr, papBankSgpr))
       mod.add(SCSelectB32(dst=sgpr(papBankSgpr), src0=2, src1=0,
               comment="encode PAP high-bank flag in bit 1"))
       mod.add(SOrB32(dst=sgpr("PersistentPrefetchState"), src0=sgpr("PersistentPrefetchState"), src1=sgpr(papBankSgpr),
@@ -26786,11 +26860,19 @@ class KernelWriterAssembly(KernelWriter):
     skipLbl = Label(self.labels.getNameInc("SkipPapBankRestore"), "")
 
     blkOffset: int = kernel["LdsOffsetA_Blk"]
-    if blkOffset == 0:
+    if not KernelWriterAssembly.papHasLdsBanks(kernel):
       return mod
 
     mod.add(SBitcmp1B32(src0=sgpr("PersistentPrefetchState"), src1=0, comment="primed?"))
     mod.add(SCBranchSCC0(labelName=skipLbl.getLabelName(), comment="not primed, skip bank restore"))
+
+    def shiftSet(ldsAddrSgpr: str, comment: str):
+      if KernelWriterAssembly.papPairedBuffers(kernel):
+        # Entry programmed ping; this wave's mask moves the set to its pong buffer.
+        mod.add(SXorB32(dst=sgpr(ldsAddrSgpr), src0=sgpr(ldsAddrSgpr),
+                src1=sgpr(KernelWriterAssembly.papPairedSwapMask(ldsAddrSgpr)), comment=comment))
+      else:
+        mod.add(SAddU32(dst=sgpr(ldsAddrSgpr), src0=sgpr(ldsAddrSgpr), src1=blkOffset, comment=comment))
 
     with self.allocTmpSgpr(1) as tmpSgprRes:
       papBankSgpr = tmpSgprRes.idx
@@ -26799,34 +26881,20 @@ class KernelWriterAssembly(KernelWriter):
       mod.add(SCmpEQU32(src0=sgpr(papBankSgpr), src1=0, comment="PAP wrote to bank 0?"))
       mod.add(SCBranchSCC1(labelName=skipLbl.getLabelName(), comment="bank 0, no adjustment needed"))
 
-      ldsAddrSgpr: str = comp.getLdsAddrSgprName("tdmAGroup0")
-      mod.add(SAddU32(dst=sgpr(ldsAddrSgpr), src0=sgpr(ldsAddrSgpr), src1=blkOffset,
-              comment="shift A/B descriptor to PAP bank"))
+      shiftSet(comp.getLdsAddrSgprName("tdmAGroup0"), "shift A/B descriptor to PAP bank")
 
       if tdmSeparateABDescriptors(kernel):
         # A's set moved above; the scales alias a data set or own a set listed here.
         for owner in self.papTdmDescriptorSetOwners(kernel)[1:]:
-          setLdsAddrSgpr: str = comp.getLdsAddrSgprName(f"tdm{owner}Group0")
-          mod.add(SAddU32(dst=sgpr(setLdsAddrSgpr), src0=sgpr(setLdsAddrSgpr), src1=blkOffset,
-                  comment=f"shift tdm{owner}Group0 descriptor set to PAP bank"))
+          shiftSet(comp.getLdsAddrSgprName(f"tdm{owner}Group0"),
+                   f"shift tdm{owner}Group0 descriptor set to PAP bank")
       elif kernel["ProblemType"]["MXBlockA"] and kernel["ProblemType"]["MXBlockB"]:
-        mxLdsAddrSgpr: str = comp.getLdsAddrSgprName("tdmMXSAGroup0")
-        mod.add(SAddU32(dst=sgpr(mxLdsAddrSgpr), src0=sgpr(mxLdsAddrSgpr), src1=blkOffset,
-                comment="shift MX descriptor to PAP bank"))
+        shiftSet(comp.getLdsAddrSgprName("tdmMXSAGroup0"), "shift MX descriptor to PAP bank")
 
-      for tP in (tPA, tPB):
+      for tP in KernelWriterAssembly.papLocalReadTensors(kernel, tPA, tPB):
         tc = tP["tensorChar"]
-        mod.add(VAddU32(dst=vgpr(f"LocalReadAddr{tc}"), src0=vgpr(f"LocalReadAddr{tc}"),
-                src1=blkOffset, comment=f"shift LocalReadAddr{tc} to PAP bank"))
-
-      if kernel["ProblemType"]["MXBlockA"]:
-        tcMX = tPA["MX"]["tensorChar"]
-        mod.add(VAddU32(dst=vgpr(f"LocalReadAddr{tcMX}"), src0=vgpr(f"LocalReadAddr{tcMX}"),
-                src1=blkOffset, comment=f"shift LocalReadAddr{tcMX} to PAP bank"))
-      if kernel["ProblemType"]["MXBlockB"]:
-        tcMX = tPB["MX"]["tensorChar"]
-        mod.add(VAddU32(dst=vgpr(f"LocalReadAddr{tcMX}"), src0=vgpr(f"LocalReadAddr{tcMX}"),
-                src1=blkOffset, comment=f"shift LocalReadAddr{tcMX} to PAP bank"))
+        mod.add(self.papShiftLocalReadAddrs(tc, KernelWriterAssembly.papBankStride(kernel, tc),
+                                            f"shift LocalReadAddr{tc} to PAP bank"))
 
     mod.add(skipLbl)
     return mod
@@ -26892,30 +26960,22 @@ class KernelWriterAssembly(KernelWriter):
             mod.add(SOrB32(dst=sgpr(f"LocalWriteAddr{tc}"), src0=sgpr(f"LocalWriteAddr{tc}"),
                     src1=sgpr(papBankSgpr), comment=f"shift LocalWriteAddr{tc} to PAP DTL bank"))
 
-      for tP in (tPA, tPB):
+      for tP in KernelWriterAssembly.papLocalReadTensors(kernel, tPA, tPB):
         tc = tP["tensorChar"]
-        mod.add(VAddU32(dst=vgpr(f"LocalReadAddr{tc}"), src0=vgpr(f"LocalReadAddr{tc}"),
-                src1=sgpr(papBankSgpr), comment=f"shift LocalReadAddr{tc} to PAP DTL bank"))
-
-      if kernel["ProblemType"]["MXBlockA"]:
-        tcMX = tPA["MX"]["tensorChar"]
-        mod.add(VAddU32(dst=vgpr(f"LocalReadAddr{tcMX}"), src0=vgpr(f"LocalReadAddr{tcMX}"),
-                src1=sgpr(papBankSgpr), comment=f"shift LocalReadAddr{tcMX} to PAP DTL bank"))
-      if kernel["ProblemType"]["MXBlockB"]:
-        tcMX = tPB["MX"]["tensorChar"]
-        mod.add(VAddU32(dst=vgpr(f"LocalReadAddr{tcMX}"), src0=vgpr(f"LocalReadAddr{tcMX}"),
-                src1=sgpr(papBankSgpr), comment=f"shift LocalReadAddr{tcMX} to PAP DTL bank"))
+        mod.add(self.papShiftLocalReadAddrs(tc, sgpr(papBankSgpr), f"shift LocalReadAddr{tc} to PAP DTL bank"))
 
     mod.add(skipLbl)
     return mod
 
   def papTdmSelectTailLdsBank(self, kernel: Mapping, dstSgpr: int) -> Module:
+    """dstSgpr = the tail's high-bank offset, or 0. Paired layouts select all ones,
+    which each consumer masks with its own swap mask or buffer stride."""
     mod = Module("TDM select tail LDS bank")
-    blkOffset: int = kernel["LdsOffsetA_Blk"]
+    highBank: int = -1 if KernelWriterAssembly.papPairedBuffers(kernel) else kernel["LdsOffsetA_Blk"]
     mod.add(SAndB32(dst=sgpr(dstSgpr), src0=sgpr("PersistentPrefetchState"), src1=2,
                     comment="extract PAP high-bank flag"))
     mod.add(SCmpEQU32(src0=sgpr(dstSgpr), src1=0, comment="PAP wrote bank 0?"))
-    mod.add(SCSelectB32(dst=sgpr(dstSgpr), src0=blkOffset, src1=0,
+    mod.add(SCSelectB32(dst=sgpr(dstSgpr), src0=highBank, src1=0,
                        comment="tail uses opposite physical LDS bank"))
     mod.add(SBitcmp1B32(src0=sgpr("PersistentPrefetchState"), src1=0, comment="PAP data ready?"))
     mod.add(SCSelectB32(dst=sgpr(dstSgpr), src0=sgpr(dstSgpr), src1=0, comment="no primed PAP, keep tail in bank 0"))
@@ -26923,6 +26983,15 @@ class KernelWriterAssembly(KernelWriter):
 
   def papTdmSetTailLdsBank(self, kernel: Mapping, ldsAddrSgprName: str, tailBankSgpr: int) -> Module:
     mod = Module("TDM set tail LDS bank")
+    if KernelWriterAssembly.papPairedBuffers(kernel):
+      # Normalize to ping, then take this set's pong when the tail selects it.
+      mod.add(self.tdmResetTailLdsBuffer(kernel, ldsAddrSgprName))
+      with self.allocTmpSgpr(1, tag="papTdmSetTailPaired") as tmpSgprRes:
+        mod.add(SAndB32(dst=sgpr(tmpSgprRes.idx), src0=sgpr(KernelWriterAssembly.papPairedSwapMask(ldsAddrSgprName)),
+                        src1=sgpr(tailBankSgpr), comment="paired swap mask if the tail uses pong"))
+        mod.add(SXorB32(dst=sgpr(ldsAddrSgprName), src0=sgpr(ldsAddrSgprName), src1=sgpr(tmpSgprRes.idx),
+                        comment="set TDM tail write bank opposite PAP"))
+      return mod
     blkOffset: int = kernel["LdsOffsetA_Blk"]
     descriptorInBank0 = Label(self.labels.getNameInc("PapTailDescriptorInBank0"), "")
     mod.add(SCmpLtU32(src0=sgpr(ldsAddrSgprName), src1=blkOffset,
@@ -26988,23 +27057,20 @@ class KernelWriterAssembly(KernelWriter):
 
   def papTdmShiftTailLdsBank(self, kernel: Mapping, tPA: Mapping, tPB: Mapping) -> Module:
     mod = Module("TDM shift tail local-read LDS bank")
-    if kernel["LdsOffsetA_Blk"] == 0:
+    if not KernelWriterAssembly.papHasLdsBanks(kernel):
       return mod
-    with self.allocTmpSgpr(1) as tmpSgprRes:
+    paired = KernelWriterAssembly.papPairedBuffers(kernel)
+    with self.allocTmpSgpr(2 if paired else 1) as tmpSgprRes:
       tailBankSgpr = tmpSgprRes.idx
       mod.add(self.papTdmSelectTailLdsBank(kernel, tailBankSgpr))
-      for tP in (tPA, tPB):
+      for tP in KernelWriterAssembly.papLocalReadTensors(kernel, tPA, tPB):
         tc = tP["tensorChar"]
-        mod.add(VAddU32(dst=vgpr(f"LocalReadAddr{tc}"), src0=vgpr(f"LocalReadAddr{tc}"),
-                        src1=sgpr(tailBankSgpr), comment=f"shift tail LocalReadAddr{tc} to TDM write bank"))
-      if kernel["ProblemType"]["MXBlockA"]:
-        tcMX = tPA["MX"]["tensorChar"]
-        mod.add(VAddU32(dst=vgpr(f"LocalReadAddr{tcMX}"), src0=vgpr(f"LocalReadAddr{tcMX}"),
-                        src1=sgpr(tailBankSgpr), comment=f"shift tail LocalReadAddr{tcMX} to TDM write bank"))
-      if kernel["ProblemType"]["MXBlockB"]:
-        tcMX = tPB["MX"]["tensorChar"]
-        mod.add(VAddU32(dst=vgpr(f"LocalReadAddr{tcMX}"), src0=vgpr(f"LocalReadAddr{tcMX}"),
-                        src1=sgpr(tailBankSgpr), comment=f"shift tail LocalReadAddr{tcMX} to TDM write bank"))
+        shift = sgpr(tailBankSgpr)
+        if paired:
+          shift = sgpr(tailBankSgpr + 1)
+          mod.add(SAndB32(dst=shift, src0=sgpr(tailBankSgpr), src1=KernelWriterAssembly.papBankStride(kernel, tc),
+                          comment=f"tail {tc} paired buffer stride if the tail uses pong"))
+        mod.add(self.papShiftLocalReadAddrs(tc, shift, f"shift tail LocalReadAddr{tc} to TDM write bank"))
     return mod
 
   def tdmIncrementAB(self, kernel, tP, loopIdx=None, prefetchIndex=0) -> Module:

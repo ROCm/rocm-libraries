@@ -49,8 +49,8 @@ def test_scalar_destinations_distinguish_writes_from_sources(line, expected):
 
 @pytest.mark.parametrize("carrier_mode", ["five", "seven", "fragmented_fallback"])
 def test_complete_ngll_preserves_pap_carrier(monkeypatch, carrier_mode):
-    # The runtime tail split moves this tail kernel to the two-group pipeline,
-    # which borrows the carrier coordinates inside the NGLL by design.
+    # The runtime tail split moves this tail kernel to the VGPR payload; the
+    # SGPR carriers remain the multicast and allocation-failure fallback.
     monkeypatch.setattr(PersistentKernelState, "papPgr2RuntimeTailSplit", staticmethod(lambda kernel: False))
     if carrier_mode == "five":
         checkout = RegisterPool.checkOutAligned

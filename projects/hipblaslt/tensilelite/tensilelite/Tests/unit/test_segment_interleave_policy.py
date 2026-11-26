@@ -569,7 +569,7 @@ def test_streamk_pairs_unless_mx_with_shadow_init(derive, mode, mx, shadow_init,
 @pytest.mark.parametrize("mode", [-1, 1])
 @pytest.mark.parametrize("mx", [False, True], ids=["fp8", "mxfp8"])
 @pytest.mark.parametrize("strategy", ["StreamK", "DataParallel"])
-def test_persistent_prefetch_keeps_unpaired_interleave(derive, mode, mx, strategy):
+def test_persistent_prefetch_pairs_interleave(derive, mode, mx, strategy):
     # Disable shadow init so MX kernels exercise the pairing attempt too.
     sol, out = _derive_shipped_streamk(
         derive, mode, mx, ForceDisableShadowInit=True, PrefetchAcrossPersistent=1,
@@ -577,30 +577,41 @@ def test_persistent_prefetch_keeps_unpaired_interleave(derive, mode, mx, strateg
     assert sol["Valid"], out
     assert sol["LDSSegmentInterleave"] == 1
     assert sol["TileProcessingStrategy"] == strategy
+    assert sol["PrefetchAcrossPersistent"] == 1
     assert sol["NumLdsBlk"] == 2
-    assert sol["StoreSwapAddr"] is False
-    expected = {
-        "ldsBaseB": 8448, "writeStrideBytes": 92928, "footprintPacked": True,
-        "bBaseline": True,
-    }
-    if mx:
-        expected.update(ldsBaseMXSA=101376, ldsBaseMXSB=101888)
-    assert sol["LDSSegInterleaveOffsets"] == expected
-    assert sol["LdsNumBytes"] == (235520 if mx else 232448)
+    offsets = sol["LDSSegInterleaveOffsets"]
+    if mx and strategy == "StreamK":
+        # StreamK MX kernels with PAP cannot afford the swap-mask SGPRs.
+        assert not offsets.get("pairedBuffers")
+        assert sol["StoreSwapAddr"] is False
+        assert ("keeps separate ping/pong blocks: StreamK MX kernels with "
+                "PrefetchAcrossPersistent" in out) is (mode == 1)
+        return
+    # PAP restores its LDS bank through the per-set paired masks.
+    assert offsets["pairedBuffers"] is True
+    assert sol["StoreSwapAddr"] is True
+    assert offsets["pairedUsedBytes"] <= sol["LdsNumBytes"] <= sol["MaxLDS"]
+    assert "keeps separate ping/pong blocks" not in out
 
 
 @pytest.mark.parametrize("mode", [-1, 1])
 def test_persistent_paired_budget_failure_keeps_unpaired_interleave(derive, monkeypatch, mode):
     import importlib
     solution_module = importlib.import_module("tensilelite.SolutionStructs.Solution")
-    # The same persistent geometry can keep its existing layout if pairing exceeds MaxLDS.
-    reference, out = _derive_shipped_streamk(derive, mode, mx=False, PrefetchAcrossPersistent=1)
+    # The same persistent geometry keeps its unpaired layout whether pairing is
+    # unsupported or exceeds MaxLDS, and an explicit request reports the fallback.
+    with monkeypatch.context() as patch:
+        patch.setattr(solution_module, "segPairedReason", lambda state: "unit: unsupported")
+        reference, out = _derive_shipped_streamk(derive, mode, mx=False, PrefetchAcrossPersistent=1)
     assert reference["Valid"], out
+    assert not reference["LDSSegInterleaveOffsets"].get("pairedBuffers")
+    assert ("keeps separate ping/pong blocks: unit: unsupported" in out) is (mode == 1)
     monkeypatch.setattr(solution_module, "segPairedOffsets", lambda state: None)
-    sol, out = _derive_shipped_streamk(derive, mode, mx=False)
+    sol, out = _derive_shipped_streamk(derive, mode, mx=False, PrefetchAcrossPersistent=1)
     assert sol["Valid"], out
     assert sol["LDSSegmentInterleave"] == 1
     assert _lds_configuration(sol) == _lds_configuration(reference)
+    assert ("keeps separate ping/pong blocks: layout exceeds MaxLDS" in out) is (mode == 1)
 
 
 @pytest.mark.parametrize("problem_index", [0, 1, 2], ids=["bf16", "fp8-shared-B", "mxfp8"])
@@ -644,6 +655,85 @@ def test_persistent_yaml_reaches_paired_tail_reset(problem_index):
             assert mask == f"s[sgpr{expected_mask}]", swap
         if problem_index == 2:
             assert any(reset[1].startswith("s[sgprtdmMXS") for _, reset in resets), name
+
+
+@pytest.mark.parametrize("problem_index", [0, 1, 2], ids=["bf16", "fp8-shared-B", "mxfp8"])
+def test_persistent_prefetch_yaml_moves_paired_banks_by_swap_mask(problem_index, tmp_path, capsys,
+                                                                  monkeypatch):
+    from pathlib import Path
+    from config_harness import solutions_from_config, emit_kernels_from_config
+    from tensilelite.Common.GlobalParameters import globalParameters
+
+    # The warning is read from sys.stdout, so derive in-process: pool workers
+    # write to the inherited fd and capsys never sees them.
+    monkeypatch.setitem(globalParameters, "CpuThreads", 1)
+
+    source = (Path(__file__).resolve().parents[1] / "common" / "streamk" /
+              "gfx1250" / "core" / "paired_lds_tail.yaml").read_text()
+    # WorkGroupMapping=1 lets the PGR2 forks take the PAP two-group pipeline.
+    config = tmp_path / "paired_lds_tail_pap.yaml"
+    config.write_text(source.replace("- PrefetchAcrossPersistent: [0]",
+                                     "- PrefetchAcrossPersistent: [1]\n    - WorkGroupMapping: [1]"))
+    solutions = solutions_from_config(config, arch="gfx1250", problem_index=problem_index,
+                                     expected_fork_count=4)
+    out = capsys.readouterr().out
+    assert len(solutions) == 4
+    strides = {}
+    for sol in solutions:
+        assert sol["PrefetchAcrossPersistent"] == 1
+        key = ("SK" if sol["TileProcessingStrategy"] == "StreamK" else "DP", sol["PrefetchGlobalRead"])
+        offsets = sol["LDSSegInterleaveOffsets"]
+        # StreamK MX kernels with PAP keep separate blocks to stay within the SGPR budget.
+        assert bool(offsets.get("pairedBuffers")) is (problem_index != 2 or key[0] == "DP"), key
+        if offsets.get("pairedBuffers"):
+            strides[key] = {k[len("bufferStride"):]: v for k, v in offsets.items()
+                            if k.startswith("bufferStride")}
+    assert ("StreamK MX kernels with PrefetchAcrossPersistent cannot afford the paired "
+            "swap-mask SGPRs" in out) is (problem_index == 2)
+
+    tensors = ["A", "B"] + (["MXSA", "MXSB"] if problem_index == 2 else [])
+    emitted = emit_kernels_from_config(config, arch="gfx1250", limit=None, canonical=False,
+                                       problem_index=problem_index, expected_fork_count=4)
+    assert len(emitted) == 4
+    pipelined = False
+    for name, source, error in emitted:
+        assert error == 0, name
+        key = ("SK" if "_TPSSK_" in source else "DP", 2 if "_PGR2_" in source else 1)
+        assert f"_TPS{key[0]}_" in source and f"_PGR{key[1]}_" in source, name
+        lines = []
+        for line in source.splitlines():
+            code, _, comment = line.partition("//")
+            inst = code.replace(",", " ").split()
+            if inst:
+                lines.append((inst, comment.strip()))
+        if key not in strides:
+            assert "PairedTDMSwap" not in source, name
+            continue
+        stride = strides[key]
+        restores = [inst for inst, comment in lines
+                    if comment.endswith("to PAP bank") and inst[1].startswith("s[sgprtdm")]
+        assert restores, name
+        for opcode, dst, src0, mask in restores:
+            expected_mask = "PairedTDMScaleSwap" if dst.startswith("s[sgprtdmMXS") else "PairedTDMSwap"
+            assert (opcode, src0, mask) == ("s_xor_b32", dst, f"s[sgpr{expected_mask}]"), (name, dst)
+        shifted = {}
+        for inst, comment in lines:
+            for tc in tensors:
+                if comment == f"shift LocalReadAddr{tc} to PAP bank":
+                    shifted.setdefault(tc, set()).add(inst[3])
+                elif comment == f"tail {tc} paired buffer stride if the tail uses pong":
+                    assert inst[3] == str(stride[tc]), (name, inst)
+        assert shifted == {tc: {str(stride[tc])} for tc in tensors}, name
+        assert any(inst[0] == "s_cmp_lt_u32" for inst, comment in lines
+                   if comment == "PAP descriptor in its paired pong buffer?"), name
+        tail = [inst for inst, comment in lines if comment == "set TDM tail write bank opposite PAP"]
+        assert tail and all(inst[0] == "s_xor_b32" for inst in tail), name
+        if "PAP PGR2 group0 actually issued" in source:
+            pipelined = True
+            selected = {comment.rsplit(" ", 1)[1] for _, comment in lines
+                        if comment.startswith("PAP select group0 bank for ")}
+            assert selected == set(tensors), name
+    assert pipelined
 
 
 @pytest.mark.parametrize("wave_tile,width", [(7, 1), (6, 1), (6, 2)])
