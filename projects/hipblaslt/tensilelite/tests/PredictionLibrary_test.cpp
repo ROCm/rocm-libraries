@@ -34,6 +34,7 @@
 
 #include <map>
 #include <memory>
+#include <set>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -41,6 +42,8 @@
 #include <Tensile/AMDGPUPredicates.hpp>
 #include <Tensile/ContractionLibrary.hpp>
 #include <Tensile/ContractionSolution.hpp>
+#include <Tensile/Debug.hpp>
+#include <Tensile/MLPClassificationLibrary.hpp>
 #include <Tensile/MasterSolutionLibrary.hpp>
 
 #if defined(TENSILE_MSGPACK)
@@ -428,6 +431,90 @@ TEST(PredictionLibraryTest, Gfx950ConfigsKeepTheirDeclaredValues)
     EXPECT_EQ(config.tensile().workgroup_mapping_xcc_group, 64);
     EXPECT_EQ(config.cache_hints_a, 4);
     EXPECT_EQ(config.cache_hints_b, 0);
+}
+
+namespace
+{
+    // fp32 and fp16 solutions with the same transposes: a GEMM-type-only search for an
+    // fp32 problem must return only the first. Reaching a leaf library, such a search
+    // has not evaluated the type rows above it.
+    void makeHalf(ContractionSolution& solution)
+    {
+        auto& type             = solution.problemType;
+        type.aType             = rocisa::DataType::Half;
+        type.bType             = rocisa::DataType::Half;
+        type.cType             = rocisa::DataType::Half;
+        type.dType             = rocisa::DataType::Half;
+        type.computeInputTypeA = rocisa::DataType::Half;
+        type.computeInputTypeB = rocisa::DataType::Half;
+    }
+
+    // The solution indices of a search result; prints readably when a check fails.
+    std::set<int> indices(SolutionSet<ContractionSolution> const& found)
+    {
+        std::set<int> rv;
+        for(auto const& solution : found)
+            rv.insert(solution->index);
+        return rv;
+    }
+
+    template <typename Library>
+    void expectGemmTypeOnlyFilter(Library const&                              lib,
+                                  std::shared_ptr<ContractionSolution> const& f32,
+                                  std::shared_ptr<ContractionSolution> const& f16)
+    {
+        const AMDGPU hardware(AMDGPU::Processor::gfx900, 64, "type filter test");
+        auto problem = ContractionProblemGemm::GEMM(false, false, 64, 64, 64, 64, 64, 64, 1.0, false, 1);
+        // Both solutions take the problem's GEMM type, the fp16 one then other data types.
+        for(auto const& solution : {f32, f16})
+        {
+            auto& type       = solution->problemType;
+            type.transA      = problem.transA();
+            type.transB      = problem.transB();
+            type.aType       = problem.a().dataType();
+            type.bType       = problem.b().dataType();
+            type.cType       = problem.c().dataType();
+            type.dType       = problem.d().dataType();
+            type.computeType = problem.computeType();
+        }
+        makeHalf(*f16);
+        ASSERT_TRUE(isGemmTypeSame(*f32, problem));
+        ASSERT_FALSE(isGemmTypeSame(*f16, problem));
+        for(auto search : {SolutionLibrarySearchType::GEMM_TYPE_ONLY,
+                           SolutionLibrarySearchType::GEMM_TYPE_ONLY_NO_RANKING})
+        {
+            EXPECT_EQ(indices(lib.findAllSolutions(problem, hardware, search)),
+                      std::set<int>{f32->index});
+            EXPECT_EQ(indices(lib.findAllSolutionsGroupedGemm({problem}, hardware, search)),
+                      std::set<int>{f32->index});
+        }
+        // A hardware-only search is not a type search and keeps both.
+        EXPECT_EQ(lib.findAllSolutions(problem, hardware, SolutionLibrarySearchType::HARDWARE_ONLY)
+                      .size(),
+                  2u);
+    }
+}
+
+TEST(PredictionLibraryTest, GemmTypeOnlySearchKeepsTheQueriedType)
+{
+    auto f32 = makeMappedSolution(0);
+    auto f16 = makeMappedSolution(1);
+    SolutionMap<ContractionSolution> solutions{{0, f32}, {1, f16}};
+    ContractionProblemPredictionLibrary lib;
+    loadPredictionLibrary({0, 1}, solutions, lib);
+    expectGemmTypeOnlyFilter(lib, f32, f16);
+}
+
+TEST(PredictionLibraryTest, MlpGemmTypeOnlySearchKeepsTheQueriedType)
+{
+    // MLPClassificationLibrary searches only under experimental selection.
+    if(!Debug::Instance().useExperimentalSelection())
+        GTEST_SKIP() << "set TENSILE_SOLUTION_SELECTION_METHOD=1 to run";
+    auto f32 = makeMappedSolution(0);
+    auto f16 = makeMappedSolution(1);
+    MLPClassificationLibrary<ContractionProblemGemm> lib;
+    lib.solutionmap = {{0, f32}, {1, f16}};
+    expectGemmTypeOnlyFilter(lib, f32, f16);
 }
 
 // W4A16 Prediction libraries rank problems whose A is Int4.

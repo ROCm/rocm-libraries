@@ -41,6 +41,8 @@ Full documentation for hipBLASLt is available at [rocm.docs.amd.com/projects/hip
 
 ### Resolved issues
 
+* Fixed `hipblaslt_ext::getAllAlgos` returning, from the Origami (Prediction) and MLP classification libraries, solutions of other data types that share the queried transposes.
+* Fixed `hipblasLtMatmul`, `hipblaslt_ext::Gemm::initialize` and `hipblaslt_ext::GroupedGemm::initialize` running a caller's algo whose Tensile solution computes another kind of GEMM (data types, transposes, conjugation or epilogue); they now return `HIPBLAS_STATUS_INVALID_VALUE`, while sizes are still not checked.
 * Fixed `hipblaslt-bench` and `hipblaslt-test` rejecting a compute-input type override for A alone and accepting an unsupported override for B alone.
 * `hipblasLtMatmul` with a null algo failed for a problem that `hipblasLtMatmulAlgoGetHeuristic` finds an algorithm for, when no ranked library row covers the problem: for example, FP32 with A and B transposed on gfx1151, whose libraries for that case select by exact size only. The null-algo path now tops up with the same size-independent algorithms as the heuristic.
 * `hipblasLtMatmul` with a null algo returned `HIPBLAS_STATUS_INTERNAL_ERROR` when no algorithm supports the problem. It now returns `HIPBLAS_STATUS_NOT_SUPPORTED`, and logs the problem with `HIPBLASLT_LOG_LEVEL` set to 1 (error) or higher. Block-scaled problems that rocRoller generates kernels for still return `HIPBLAS_STATUS_INTERNAL_ERROR`, because rocRoller reports a failed kernel generation the same way as no algorithm.

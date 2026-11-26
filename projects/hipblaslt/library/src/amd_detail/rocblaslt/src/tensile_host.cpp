@@ -3944,6 +3944,45 @@ namespace
         return rocblaslt_status_invalid_value;
     }
 
+    // An algo index can name a solution for another kind of GEMM: other data types,
+    // transposes or conjugation, or an epilogue the kernel was not built with. That
+    // kernel reads and writes the tensors as its own kind, or skips the epilogue, so it
+    // must not run this problem, whatever kind of kernel it is. Every algo that
+    // selection returns for the problem passes: kernelKindPredicate() holds only terms of
+    // the problem predicate selection evaluated, compute-input types are left to its
+    // TypesEqual term, F32XdlMathOp allows the Float fallback of an XFloat32 problem, and
+    // AmaxD output is compared without the GSU clause of AmaxDCheck. groupedGemm is left
+    // to checkGroupedGemmMatch.
+    rocblaslt_status checkKernelKindMatch(const char*                                caller,
+                                          const TensileLite::ContractionProblemGemm& problem,
+                                          const TensileLite::ContractionSolution&    solution)
+    {
+        const auto& type     = solution.problemType;
+        const bool  sameType = type.transA == problem.transA() && type.transB == problem.transB()
+                              && type.aType == problem.a().dataType()
+                              && type.bType == problem.b().dataType()
+                              && type.cType == problem.c().dataType()
+                              && type.dType == problem.d().dataType()
+                              && type.outputAmaxD == problem.outputAmaxD();
+        const bool xdlMathOp = type.f32XdlMathOp == problem.f32XdlMathOp()
+                               || (type.f32XdlMathOp == rocisa::DataType::Float
+                                   && problem.f32XdlMathOp() == rocisa::DataType::XFloat32);
+        auto const& kind = solution.kernelKindPredicate();
+        if(sameType && xdlMathOp && kind(problem))
+            return rocblaslt_status_success;
+        if(get_logger_layer_mode() & rocblaslt_layer_mode_log_info)
+        {
+            std::ostringstream msg;
+            msg << "Kernel kind match: " << solution.description();
+            kind.debugEval(problem, msg);
+            log_info(caller, msg.str());
+        }
+        log_error(caller,
+                  "the algo's solution is for another kind of GEMM (data types, transposes, "
+                  "conjugation or epilogue); query an algo for this problem instead");
+        return rocblaslt_status_invalid_value;
+    }
+
     // A hand-written kernel may rely on its problem predicates to stay inside the
     // tensors (fixed sizes or strides, no bounds checks) and takes plain tensor
     // addresses, so an algo for one is refused once the problem it runs no longer
@@ -6428,6 +6467,22 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
             return known;
         };
 
+        // An algo the caller passed may be for another kind of GEMM. Refuse it before
+        // re-selection, tuning or logging act on it. Re-selection, tuning and cache
+        // replay only choose among solutions selection accepts for this problem.
+        if(callerSuppliedAlgo)
+        {
+            if(auto chosen = solutionAt(*(int*)algo->data))
+            {
+                if(auto st = checkGroupedGemmMatch(__func__, false, *chosen);
+                   st != rocblaslt_status_success)
+                    return st;
+                if(auto st = checkKernelKindMatch(__func__, data->problem, *chosen);
+                   st != rocblaslt_status_success)
+                    return st;
+            }
+        }
+
         // Before re-selection, tuning or logging act on it. The index they settle
         // on is checked again below, before the launch state is written.
         if(data->mxScaleNeed != rocblaslt_mx_scale_need::Any)
@@ -7251,6 +7306,9 @@ rocblaslt_status makeArgument(rocblaslt_handle             handle,
             if(auto st = checkGroupedGemmMatch(__func__, false, *solution);
                st != rocblaslt_status_success)
                 return st;
+            if(auto st = checkKernelKindMatch(__func__, data->problem, *solution);
+               st != rocblaslt_status_success)
+                return st;
             if(auto st = checkMxScaleLayout(__func__, data->mxScaleNeed, *solution);
                st != rocblaslt_status_success)
                 return st;
@@ -7338,6 +7396,10 @@ rocblaslt_status makeArgument(rocblaslt_handle             handle,
             if(auto st = checkGroupedGemmMatch(__func__, true, *solution);
                st != rocblaslt_status_success)
                 return st;
+            for(const auto& gemm : data->problem.gemms)
+                if(auto st = checkKernelKindMatch(__func__, gemm, *solution);
+                   st != rocblaslt_status_success)
+                    return st;
             if(auto st = checkMxScaleLayout(__func__, data->mxScaleNeed, *solution);
                st != rocblaslt_status_success)
                 return st;
