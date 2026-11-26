@@ -7812,6 +7812,11 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
         25 if kernel["ProblemType"]["DataTypeA"].numBytes() < 1 else 30
       if self.states.localReadSideOrder[0] == "B":
         stinky_module_options["DsReadOrder"] = 0  # Preserve selected B-then-A emission.
+      if kernel.get("_TailFolding", False) and not kernel["ReuseAcrossPersistent"]:
+        # TailFolding runs K <= DepthU (and the K tail) through the no-load loop instead of the
+        # tail loop. Spreading its ds_loads over the WMMAs leaves a wait for each pair with no
+        # next trip to cover it; issue them up front, as the tail loop does.
+        stinky_module_options["DsSpreadLoopOnly"] = True
       # Tuning overrides from GlobalParameters win over the values above.
       stinky_module_options.update(globalParameters.get("StinkyTofuModuleOptions") or {})
 

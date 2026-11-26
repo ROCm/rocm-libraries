@@ -630,6 +630,28 @@ def test_fold_vgprs_match_tail_loop_kernel(tmp_path, monkeypatch, case):
     assert _next_free_vgpr(fold) == _next_free_vgpr(dev)
 
 
+def _mt80x192x32_bias_sav_config():
+    # MT80x192x32 (15 WMMAs, 16 ds_loads per k-tile): K <= DepthU runs the one k-tile in the no-load loop
+    config = _mt32x128x32_bias_sav_config()
+    over = {"MatrixInstruction": [16, 16, 32, 1, 1, 5, 3, 1, 4], "VectorWidthA": 1, "VectorWidthB": 1, "StoreVectorWidth": 1}
+    fork = config["BenchmarkProblems"][0][1]["ForkParameters"]
+    fork[:] = [p for p in fork if next(iter(p)) not in over] + [{k: [v]} for k, v in over.items()]
+    return config
+
+
+def test_fold_nll_issues_ds_loads_up_front(tmp_path):
+    # The no-load loop runs once, so pacing its ds_loads over the WMMAs (StinkyTofu DsSpread) leaves an exposed
+    # s_wait_dscnt before each WMMA group; a folding kernel issues them all before the first WMMA, as the tail
+    # loop it replaces does (80x3616x16 b23009 lost 2.9%).
+    asm = _emit_one(tmp_path, _mt80x192x32_bias_sav_config(), "tf_nll_ds.yaml")
+    assert CEIL in asm
+    nll = asm[asm.index("label_toPGR1:"):asm.index("label_toPGR1end_OptNLL:")]
+    body = [line.split("//")[0].strip() for line in nll.splitlines()]
+    first_wmma = next(i for i, line in enumerate(body) if line.startswith("v_wmma"))
+    assert sum(line.startswith("ds_load") for line in body[:first_wmma]) == 16
+    assert not any(line.startswith("ds_load") for line in body[first_wmma:])
+
+
 def _excluded(kind):
     config = _config()
     problem = config["BenchmarkProblems"][0][0]

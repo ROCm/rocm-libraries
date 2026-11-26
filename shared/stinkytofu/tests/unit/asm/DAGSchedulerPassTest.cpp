@@ -1380,6 +1380,62 @@ TEST_F(DAGSchedulerPassTest, PrefetchLeadKeepsClearOfAnotherMovementsTensorLoad)
                          << scheduleOrder(*bb);
 }
 
+// DsSpreadLoopOnly: 8 WMMAs, each fed by its own two ds_loads. A block outside a loop runs once,
+// so with the option its ds_loads all issue before the first WMMA; without it DsSpread paces them
+// over the WMMAs. In a loop body the option changes nothing.
+class DsSpreadLoopOnlyTest : public DAGSchedulerPassTest {
+   protected:
+    void build(bool loop) {
+        if (loop) bb->addSuccessor(bb);
+        for (int i = 0; i < 8; ++i) {
+            createMovableDsLoad(/*destReg=*/100 + i * 8, /*addrReg=*/900, /*ldsToken=*/0);
+            createMovableDsLoad(/*destReg=*/104 + i * 8, /*addrReg=*/901, /*ldsToken=*/0);
+        }
+        for (int i = 0; i < 8; ++i)
+            createWmmaF32_16x16x16_bf16(/*destStart=*/1000 + i * 8, /*src0Start=*/100 + i * 8);
+    }
+    void run(bool loopOnly) {
+        PassContext ctx;
+        ctx.setGemmTileConfig(config);
+        PassFeatureConfig pfc;
+        pfc.loopConfig.unrollGemm = true;
+        pfc.dagFeatures.dsSpread = true;
+        pfc.dagFeatures.dsSpreadLoopOnly = loopOnly;
+        ctx.setPassFeatureConfig(pfc);
+        pass->run(*func, ctx, am);
+    }
+    // ds_loads scheduled after the first WMMA.
+    int dsAfterFirstWmma() const {
+        bool seenWmma = false;
+        int count = 0;
+        for (const IRBase& ir : *bb) {
+            const auto* inst = dyn_cast<StinkyInstruction>(&ir);
+            if (inst == nullptr) continue;
+            if (isMatrixInstruction(*inst)) seenWmma = true;
+            else if (seenWmma && isDSRead(*inst)) ++count;
+        }
+        return count;
+    }
+};
+
+TEST_F(DsSpreadLoopOnlyTest, StraightLineLoadsIssueBeforeTheFirstWmma) {
+    build(/*loop=*/false);
+    run(/*loopOnly=*/true);
+    EXPECT_EQ(dsAfterFirstWmma(), 0) << scheduleOrder(*bb);
+}
+
+TEST_F(DsSpreadLoopOnlyTest, StraightLineLoadsAreSpreadWithoutTheOption) {
+    build(/*loop=*/false);
+    run(/*loopOnly=*/false);
+    EXPECT_GT(dsAfterFirstWmma(), 0) << scheduleOrder(*bb);
+}
+
+TEST_F(DsSpreadLoopOnlyTest, LoopBodyKeepsTheSpread) {
+    build(/*loop=*/true);
+    run(/*loopOnly=*/true);
+    EXPECT_GT(dsAfterFirstWmma(), 0) << scheduleOrder(*bb);
+}
+
 // Same overlap as above, with DsSpread on. The after barrier lands on the parent WMMA, so the
 // stage anchor must not put the dropped drain back. A restored drain would be the 24th WMMA.
 TEST_F(DAGSchedulerPassTest, StageAnchorLeavesOverlapParentFloorInPlace) {

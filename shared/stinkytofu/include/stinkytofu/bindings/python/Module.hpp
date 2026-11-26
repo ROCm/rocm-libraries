@@ -147,6 +147,7 @@
     X(PrefetchLeadWmmas, int, 25)         /* 0 = prefetch issues when ready */                     \
     X(PrefetchLeadMinStageWmmas, int, 64) /* shorter stages run with no lead */                    \
     X(DsSpread, bool, true)               /* even ds_load spread over the WMMAs */                 \
+    X(DsSpreadLoopOnly, bool, false)      /* DsSpread only in loop bodies */                       \
     X(DsBatchWmmas, int, 4)               /* WMMAs per ds_load pacing batch */                     \
     X(DsCatchUpPace, int, 2)              /* extra ds_loads per batch when behind the even line */ \
     X(WmmaQueueCoverCycles, int, -1)      /* queued WMMA cover kept; < 0 = automatic, 0 = off */   \
