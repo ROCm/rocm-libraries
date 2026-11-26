@@ -58,8 +58,8 @@ int main(int argc, char* argv[])
         const std::string kind = arg_parser.get_str("gemm_kind");
         if(kind == "layer")
         {
-            if(prec != "fp4xfp4")
-                throw std::runtime_error("layer: only mx_prec=fp4xfp4");
+            if(prec != "fp4xfp4" && prec != "fp8xfp4")
+                throw std::runtime_error("layer: mx_prec must be fp4xfp4 or fp8xfp4");
             MxMoeLayerCase l;
             l.experts    = arg_parser.get_int("experts");
             l.num_tokens = arg_parser.get_int("NumTokens");
@@ -78,12 +78,13 @@ int main(int argc, char* argv[])
                 std::cout << "plan: " << (plan.per_slot ? "per-slot" : "atomic") << ", "
                           << (plan.persistent ? "persistent" : "two kernels") << std::endl;
             }
-            l.init       = arg_parser.get_int("init");
-            l.seed       = arg_parser.get_uint32("seed");
-            l.validate   = arg_parser.get_int("validate") != 0;
-            l.warmup     = arg_parser.get_int("warmup");
-            l.repeat     = arg_parser.get_int("repeat");
-            const auto r = run_mx_moe_layer(l);
+            l.init     = arg_parser.get_int("init");
+            l.seed     = arg_parser.get_uint32("seed");
+            l.validate = arg_parser.get_int("validate") != 0;
+            l.warmup   = arg_parser.get_int("warmup");
+            l.repeat   = arg_parser.get_int("repeat");
+            const auto r =
+                prec == "fp8xfp4" ? run_mx_moe_layer<ck_tile::fp8_t>(l) : run_mx_moe_layer(l);
             if(l.repeat > 0)
                 std::cout << "time gate_up(+quant) " << r.ms_gate_up << " ms, down " << r.ms_down
                           << " ms" << std::endl;

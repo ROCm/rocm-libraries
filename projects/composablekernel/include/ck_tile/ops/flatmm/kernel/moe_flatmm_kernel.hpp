@@ -33,7 +33,7 @@ struct MoeFlatmmHostArgs : ScaleFlatmmHostArgs<ScaleM, ScaleN, 0>
     const ck_tile::index_t n_padded_zeros;
     const ck_tile::index_t k_padded_zeros;
     ExpertBias exp_bias;
-    // kFFN_gemm1_gate_up_mx_quant only: output e8m0 scales of the quantized intermediate.
+    // kFFN_gemm1_gate_up_mx_quant / _mxfp8_quant only: output e8m0 scales of the intermediate.
     void* e_scale_ptr = nullptr;
 
     CK_TILE_HOST MoeFlatmmHostArgs() noexcept = default;
@@ -152,6 +152,10 @@ enum class MoeFlatmmKind
     // gemm2 / gemm2_per_slot on the gfx1250 MX path, so no separate quantization kernel is needed.
     // Requires an fp32 epilogue output type (the LDS staging type).
     kFFN_gemm1_gate_up_mx_quant,
+    // kFFN_gemm1_gate_up_mx_quant with an MX FP8 (OCP e4m3) intermediate instead of MXFP4: one
+    // byte per value (I of each stride_C-byte row), the same e8m0 scales and scale layout. That is
+    // the A operand of an a8w4 (MX FP8 x MXFP4) gemm2 / gemm2_per_slot.
+    kFFN_gemm1_gate_up_mxfp8_quant,
 };
 
 namespace moe {
@@ -258,8 +262,11 @@ struct MoeFlatmmKernel
     // A rows are (token, slot) rows, [NumTokens * TopK, K]: gemm2 and its per-slot variant.
     static constexpr bool AGatherPerSlot =
         kind == MoeFlatmmKind::kFFN_gemm2 || kind == MoeFlatmmKind::kFFN_gemm2_per_slot;
-    // gate_up output, quantized to MXFP4 in the epilogue (see kFFN_gemm1_gate_up_mx_quant).
-    static constexpr bool IsMxQuantOut  = kind == MoeFlatmmKind::kFFN_gemm1_gate_up_mx_quant;
+    // gate_up output, quantized to MXFP4 or MX FP8 in the epilogue (see
+    // kFFN_gemm1_gate_up_mx_quant and kFFN_gemm1_gate_up_mxfp8_quant).
+    static constexpr bool IsMxFp8QuantOut = kind == MoeFlatmmKind::kFFN_gemm1_gate_up_mxfp8_quant;
+    static constexpr bool IsMxQuantOut =
+        kind == MoeFlatmmKind::kFFN_gemm1_gate_up_mx_quant || IsMxFp8QuantOut;
     static constexpr bool IsGateUp      = kind == MoeFlatmmKind::kFFN_gemm1_gate_up || IsMxQuantOut;
     static constexpr bool IsGemm1SplitK = kind == MoeFlatmmKind::kFFN_gemm1_split_k;
     static constexpr bool IsBShuffled   = true;
@@ -340,7 +347,7 @@ struct MoeFlatmmKernel
         ScaleM scale_m;
         ScaleN scale_n;
         ExpertBias exp_bias;
-        void* e_scale_ptr; // kFFN_gemm1_gate_up_mx_quant only
+        void* e_scale_ptr; // kFFN_gemm1_gate_up_mx_quant / _mxfp8_quant only
     };
 
     template <class ScaleM     = FlatmmScalePointer<-1>,
@@ -1061,13 +1068,15 @@ struct MoeFlatmmKernel
         } while(UsePersistentKernel && partition_idx < total_valid_tile_cnt);
     }
 
-    // kFFN_gemm1_gate_up_mx_quant: quantizes one shuffled chunk of the intermediate (fp32 in LDS,
-    // [MPerIterationShuffle rows, LDS columns]) to MXFP4 and stores it. Each thread holds 8
-    // consecutive values of a row, so a 32-column MX block lies on 4 adjacent lanes: they reduce
-    // the block's largest magnitude with two XOR shuffles. The e8m0 scale is
-    // 2^(floor(log2(amax)) - 2) (2 = largest exponent of fp4 e2m1), and the values are converted
-    // with round-to-nearest-even and saturation. Packed fp4 goes to the token-slot row; one lane
-    // per block writes the scale byte to the sorted row in the gfx1250 MX scale layout.
+    // kFFN_gemm1_gate_up_mx_quant / _mxfp8_quant: quantizes one shuffled chunk of the intermediate
+    // (fp32 in LDS, [MPerIterationShuffle rows, LDS columns]) to MXFP4 or MX FP8 and stores it.
+    // Each thread holds 8 consecutive values of a row, so a 32-column MX block lies on 4 adjacent
+    // lanes: they reduce the block's largest magnitude with two XOR shuffles. The e8m0 scale is
+    // 2^(floor(log2(amax)) - emax), emax the largest exponent of the element type (2 for fp4
+    // e2m1, 8 for fp8 e4m3), and the values are converted with round-to-nearest-even and
+    // saturation (the fp8 conversion does not saturate, so values are clamped to +-448 x scale
+    // first). The values go to the token-slot row; one lane per block writes the scale byte to the
+    // sorted row in the gfx1250 MX scale layout.
     template <typename LdsWindow, typename Kargs>
     CK_TILE_DEVICE static void store_mx_quant(const LdsWindow& out_lds_window,
                                               const Kargs& kargs,
@@ -1078,7 +1087,7 @@ struct MoeFlatmmKernel
         using EpiProblem                = typename EpiloguePipeline::Problem;
         constexpr index_t Rows          = LdsWindow{}.get_window_lengths()[number<0>{}];
         constexpr index_t Cols          = LdsWindow{}.get_window_lengths()[number<1>{}];
-        constexpr index_t QVec          = 8;  // fp4 values per conversion and per store
+        constexpr index_t QVec          = 8;  // values per conversion and per store
         constexpr index_t BlockK        = 32; // MX block
         constexpr index_t LanesPerBlock = BlockK / QVec;
         using Pattern =
@@ -1092,20 +1101,22 @@ struct MoeFlatmmKernel
                           Pattern::X0 % LanesPerBlock == 0 && Cols % BlockK == 0,
                       "MX quant store expects 8 consecutive values per thread");
         static_assert(std::is_same_v<typename LdsWindow::DataType, float>,
-                      "kFFN_gemm1_gate_up_mx_quant needs an fp32 epilogue output type");
-        constexpr auto dstr = Pattern::make_2d_static_tile_distribution();
-        const auto values   = load_tile(make_tile_window(out_lds_window, dstr));
-        const auto idx      = dstr.calculate_index(); // [row, col] of this thread's first value
+                      "kFFN_gemm1_gate_up_mx(fp8)_quant needs an fp32 epilogue output type");
+        constexpr int ElemMaxExp = IsMxFp8QuantOut ? 8 : 2; // largest exponent of e4m3 / e2m1
+        constexpr auto dstr      = Pattern::make_2d_static_tile_distribution();
+        const auto values        = load_tile(make_tile_window(out_lds_window, dstr));
+        const auto idx = dstr.calculate_index(); // [row, col] of this thread's first value
 
         constexpr index_t token_id_offset = 24;
         constexpr index_t token_id_mask   = (1 << token_id_offset) - 1;
-        const index_t inter               = kargs.N / 2;        // intermediate size
-        const index_t row_bytes           = kargs.stride_C / 2; // packed fp4, >= inter / 2
-        const index_t k_packs             = inter / (BlockK * 4);
-        const index_t col                 = col0 + idx[number<1>{}];
-        const index_t lane                = get_lane_id();
-        auto* data                        = static_cast<uint8_t*>(kargs.e_ptr);
-        auto* scales                      = static_cast<uint8_t*>(kargs.e_scale_ptr);
+        const index_t inter               = kargs.N / 2; // intermediate size
+        // Bytes per row and per value offset: fp8 one byte per value, fp4 two values per byte.
+        const index_t row_bytes = IsMxFp8QuantOut ? kargs.stride_C : kargs.stride_C / 2;
+        const index_t k_packs   = inter / (BlockK * 4);
+        const index_t col       = col0 + idx[number<1>{}];
+        const index_t lane      = get_lane_id();
+        auto* data              = static_cast<uint8_t*>(kargs.e_ptr);
+        auto* scales            = static_cast<uint8_t*>(kargs.e_scale_ptr);
 
         static_for<0, Pattern::Y2, 1>{}([&](auto y2) {
             const index_t row = sorted_row0 + idx[number<0>{}] + y2;
@@ -1118,11 +1129,24 @@ struct MoeFlatmmKernel
             amax = max(amax, warp_shuffle(amax, lane ^ 1));
             amax = max(amax, warp_shuffle(amax, lane ^ 2));
             // floor(log2(amax)) from the f32 exponent; 0 and subnormals give the smallest scale.
-            const int exp_amax    = static_cast<int>((bit_cast<uint32_t>(amax) >> 23) & 0xff) - 127;
-            const int shared      = max(-127, min(127, exp_amax - 2));
-            const float scale     = shared >= -126 ? bit_cast<float>(uint32_t(shared + 127) << 23)
-                                                   : bit_cast<float>(uint32_t(0x00400000)); // 2^-127
-            const uint32_t packed = __builtin_amdgcn_cvt_scalef32_pk8_fp4_f32(v, scale);
+            const int exp_amax = static_cast<int>((bit_cast<uint32_t>(amax) >> 23) & 0xff) - 127;
+            const int shared   = max(-127, min(127, exp_amax - ElemMaxExp));
+            const float scale  = shared >= -126 ? bit_cast<float>(uint32_t(shared + 127) << 23)
+                                                : bit_cast<float>(uint32_t(0x00400000)); // 2^-127
+            // 8 values per conversion: 4 bytes of fp4 or 8 bytes of fp8.
+            const auto packed = [&] {
+                if constexpr(IsMxFp8QuantOut)
+                {
+                    const float lim = 448.f * scale; // e4m3 max; the conversion gives NaN beyond
+                    static_for<0, QVec, 1>{}([&](auto j) {
+                        v[j.value] = __builtin_fminf(__builtin_fmaxf(v[j.value], -lim), lim);
+                    });
+                    return bit_cast<uint64_t>(__builtin_amdgcn_cvt_scalef32_pk8_fp8_f32(v, scale));
+                }
+                else
+                    return static_cast<uint32_t>(
+                        __builtin_amdgcn_cvt_scalef32_pk8_fp4_f32(v, scale));
+            }();
 
             const index_t fused = kargs.p_sorted_token_ids[row];
             const index_t token = fused & token_id_mask;
@@ -1133,7 +1157,8 @@ struct MoeFlatmmKernel
                 // Device-scope stores: once they complete they are visible device-wide, so
                 // MoeMxPersistentKernel publishes the intermediate without a cache writeback.
                 __scoped_atomic_store_n(
-                    reinterpret_cast<uint32_t*>(data + slot_row * row_bytes + col / 2),
+                    reinterpret_cast<remove_cvref_t<decltype(packed)>*>(
+                        data + slot_row * row_bytes + (IsMxFp8QuantOut ? col : col / 2)),
                     packed,
                     __ATOMIC_RELAXED,
                     __MEMORY_SCOPE_DEVICE);

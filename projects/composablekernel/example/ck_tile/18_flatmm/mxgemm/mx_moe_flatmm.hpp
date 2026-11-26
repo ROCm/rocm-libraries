@@ -26,6 +26,7 @@
 #include <hip/hip_runtime.h>
 
 #include <algorithm>
+#include <cmath>
 #include <cstring>
 #include <iostream>
 #include <numeric>
@@ -704,9 +705,20 @@ struct MxMoeLayerResult
     int sorted_rows;
 };
 
-inline MxMoeLayerResult run_mx_moe_layer(const MxMoeLayerCase& c)
+// AType: the activations' element type, ck_tile::pk_fp4_t (a4w4: MXFP4 X and intermediate) or
+// ck_tile::fp8_t (a8w4: MX FP8 X and intermediate). The weights are MXFP4 either way.
+template <typename AType = ck_tile::pk_fp4_t>
+MxMoeLayerResult run_mx_moe_layer(const MxMoeLayerCase& c)
 {
-    using F4                = ck_tile::pk_fp4_t;
+    using F4 = ck_tile::pk_fp4_t;
+    using A  = AType;
+    static_assert(std::is_same_v<A, F4> || std::is_same_v<A, ck_tile::fp8_t>,
+                  "AType is ck_tile::pk_fp4_t or ck_tile::fp8_t");
+    constexpr bool Fp8 = std::is_same_v<A, ck_tile::fp8_t>;
+    using K            = ck_tile::MoeFlatmmKind;
+    // gate_up with an epilogue that quantizes the intermediate to A's MX format.
+    constexpr K QuantKind =
+        Fp8 ? K::kFFN_gemm1_gate_up_mxfp8_quant : K::kFFN_gemm1_gate_up_mx_quant;
     using ScaleType         = ck_tile::e8m0_t;
     const int E             = c.experts;
     const int T             = c.num_tokens;
@@ -730,7 +742,8 @@ inline MxMoeLayerResult run_mx_moe_layer(const MxMoeLayerCase& c)
     auto [xl, xs]   = tensor2d(T, H);
     auto [w1l, w1s] = tensor2d(std::size_t(E) * 2 * I, H);
     auto [w2l, w2s] = tensor2d(std::size_t(E) * H, I);
-    ck_tile::HostTensor<F4> x(xl, xs), w1(w1l, w1s), w2(w2l, w2s);
+    ck_tile::HostTensor<A> x(xl, xs);
+    ck_tile::HostTensor<F4> w1(w1l, w1s), w2(w2l, w2s);
     auto [xsl, xss]   = tensor2d(T, H / kScaleBlockK);
     auto [w1sl, w1ss] = tensor2d(std::size_t(E) * 2 * I, H / kScaleBlockK);
     auto [w2sl, w2ss] = tensor2d(std::size_t(E) * H, I / kScaleBlockK);
@@ -773,13 +786,14 @@ inline MxMoeLayerResult run_mx_moe_layer(const MxMoeLayerCase& c)
     }
 
     using OutDataType = float; // the atomic gemm2 output; per-slot writes bf16
-    // Row stride of the MXFP4 intermediate, in fp4 values: the persistent kernel needs whole
-    // 256-byte rows (see MoeMxPersistentKernel::IsSupportedArgument).
-    const int I_stride = c.persistent ? ck_tile::integer_least_multiple(I, 512) : I;
+    // Row stride of the intermediate, in values: the persistent kernel needs whole 256-byte rows
+    // (512 fp4 or 256 fp8 values; see MoeMxPersistentKernel::IsSupportedArgument).
+    const int I_stride = c.persistent ? ck_tile::integer_least_multiple(I, Fp8 ? 256 : 512) : I;
+    const std::size_t mid_bytes = std::size_t(T) * topk * I_stride / (Fp8 ? 1 : 2);
     ck_tile::DeviceMem x_dev(x.get_element_space_size_in_bytes()), w1_dev(w1_shuf.size()),
         w2_dev(w2_shuf.size()), xs_dev(x_scale_sorted.size()), w1s_dev(w1_scale.size()),
-        w2s_dev(w2_scale.size()), mid_dev(std::size_t(T) * topk * I_stride / 2),
-        mids_dev(std::size_t(M) * IB), p_dev(std::size_t(T) * topk * H * sizeof(float)),
+        w2s_dev(w2_scale.size()), mid_dev(mid_bytes), mids_dev(std::size_t(M) * IB),
+        p_dev(std::size_t(T) * topk * H * sizeof(float)),
         out_dev(std::size_t(T) * H * sizeof(OutDataType)),
         out16_dev(std::size_t(T) * H * sizeof(ck_tile::bf16_t)), // per-slot combine output
         ids_dev(rt.sorted_ids.size() * sizeof(ck_tile::index_t)),
@@ -823,7 +837,7 @@ inline MxMoeLayerResult run_mx_moe_layer(const MxMoeLayerCase& c)
                  H,
                  H,
                  H,
-                 I_stride, // stride_C: the intermediate's row stride, in fp4 values
+                 I_stride, // stride_C: the intermediate's row stride, in values
                  SP{static_cast<const ScaleType*>(xs_dev.GetDeviceBuffer()), M},
                  SP{static_cast<const ScaleType*>(w1s_dev.GetDeviceBuffer()), 2 * I},
                  {}};
@@ -852,15 +866,13 @@ inline MxMoeLayerResult run_mx_moe_layer(const MxMoeLayerCase& c)
               {}};
     const auto* tw = static_cast<const float*>(tw_dev.GetDeviceBuffer());
 
-    using K   = ck_tile::MoeFlatmmKind;
     auto run1 = [&](const ck_tile::stream_config& s) {
-        return launch_mx_moe_gemm<K::kFFN_gemm1_gate_up_mx_quant, F4, F4, float>(gate_up, s, false);
+        return launch_mx_moe_gemm<QuantKind, A, F4, float>(gate_up, s, false);
     };
-    using GateUpKernel =
-        typename MxMoeKernelTypes<K::kFFN_gemm1_gate_up_mx_quant, F4, F4, float>::Kernel;
-    using DownKernel = typename MxMoeKernelTypes<K::kFFN_gemm2, F4, F4, float>::Kernel;
+    using GateUpKernel = typename MxMoeKernelTypes<QuantKind, A, F4, float>::Kernel;
+    using DownKernel   = typename MxMoeKernelTypes<K::kFFN_gemm2, A, F4, float>::Kernel;
     // Persistent task-queue launch; its counters live in a workspace zeroed once here.
-    using DownSlotKernel = typename MxMoeKernelTypes<K::kFFN_gemm2_per_slot, F4, F4, float>::Kernel;
+    using DownSlotKernel = typename MxMoeKernelTypes<K::kFFN_gemm2_per_slot, A, F4, float>::Kernel;
     using PersistentAtomic  = ck_tile::MoeMxPersistentKernel<GateUpKernel, DownKernel>;
     using PersistentPerSlot = ck_tile::MoeMxPersistentKernel<GateUpKernel, DownSlotKernel>;
     // Most K slices of the persistent down tasks (the kernel picks how many it uses): max_slices
@@ -899,9 +911,9 @@ inline MxMoeLayerResult run_mx_moe_layer(const MxMoeLayerCase& c)
         return ck_tile::launch_kernel_time_mask(s, clear_out, launch(PersistentAtomic{}));
     };
     auto run2 = [&](const ck_tile::stream_config& s, bool clear) {
-        return per_slot_out ? launch_mx_moe_gemm<K::kFFN_gemm2_per_slot, F4, F4, float>(
+        return per_slot_out ? launch_mx_moe_gemm<K::kFFN_gemm2_per_slot, A, F4, float>(
                                   down, s, false, tw, out16_dev.GetDeviceBuffer())
-                            : launch_mx_moe_gemm<K::kFFN_gemm2, F4, F4, float>(down, s, clear);
+                            : launch_mx_moe_gemm<K::kFFN_gemm2, A, F4, float>(down, s, clear);
     };
     if(c.persistent)
     {
@@ -915,7 +927,7 @@ inline MxMoeLayerResult run_mx_moe_layer(const MxMoeLayerCase& c)
         run2(ck_tile::stream_config{nullptr, false}, true);
     }
 
-    std::vector<uint8_t> mid(std::size_t(T) * topk * I_stride / 2), mid_scale(std::size_t(M) * IB);
+    std::vector<uint8_t> mid(mid_bytes), mid_scale(std::size_t(M) * IB);
     mid_dev.FromDevice(mid.data());
     mids_dev.FromDevice(mid_scale.data());
     std::vector<float> out(std::size_t(T) * H);
@@ -945,14 +957,15 @@ inline MxMoeLayerResult run_mx_moe_layer(const MxMoeLayerCase& c)
         return res;
 
     // ---- reference ----
-    std::vector<float> xf(std::size_t(T) * H), w1f(w1.mData.size() * 2), w2f(w2.mData.size() * 2);
+    std::vector<float> xf(std::size_t(T) * H), w1f(std::size_t(E) * 2 * I * H),
+        w2f(std::size_t(E) * H * I);
     auto dequant =
         [&](std::vector<float>& dst, const auto& v, const auto& sc, std::size_t rows, int K) {
             ck_tile::make_ParallelTensorFunctor(
                 [&](std::size_t r) {
                     for(int k = 0; k < K; ++k)
-                        dst[r * K + k] =
-                            fp4_at(v, r, k) * ck_tile::type_convert<float>(sc(r, k / kScaleBlockK));
+                        dst[r * K + k] = elem_at(v, r, k) *
+                                         ck_tile::type_convert<float>(sc(r, k / kScaleBlockK));
                 },
                 rows)(std::thread::hardware_concurrency());
         };
@@ -973,7 +986,7 @@ inline MxMoeLayerResult run_mx_moe_layer(const MxMoeLayerCase& c)
         if(t < T)
             sorted_row[std::size_t(t) * topk + s] = r;
     }
-    // Intermediate: CPU SiLU(gate) * up quantized to MXFP4 vs the GPU's, both dequantized.
+    // Intermediate: CPU SiLU(gate) * up quantized to MXFP4 / MX FP8 vs the GPU's, both dequantized.
     std::vector<float> mid_gpu(std::size_t(T) * topk * I);
     std::vector<long> mismatches(std::size_t(T) * topk, 0);
     ck_tile::make_ParallelTensorFunctor(
@@ -991,29 +1004,66 @@ inline MxMoeLayerResult run_mx_moe_layer(const MxMoeLayerCase& c)
                     amax = std::max(amax, std::abs(h[kb * kScaleBlockK + j]));
                 const int e_amax =
                     static_cast<int>((ck_tile::bit_cast<uint32_t>(amax) >> 23) & 0xff) - 127;
-                const int shared      = std::max(-127, std::min(127, e_amax - 2));
+                // Scale exponent: floor(log2(amax)) - largest element exponent (fp4 2, fp8 8).
+                const int shared      = std::max(-127, std::min(127, e_amax - (Fp8 ? 8 : 2)));
                 const float scale_ref = std::ldexp(1.f, shared);
                 const int code = mid_scale[std::size_t(r / 32) * (I / 128) * 128 + (kb / 4) * 128 +
                                            (r % 32) * 4 + kb % 4];
                 const float scale_gpu = std::ldexp(1.f, code - 127);
                 for(int j = 0; j < kScaleBlockK; ++j)
                 {
-                    const int n        = kb * kScaleBlockK + j;
-                    const uint8_t byte = mid[rc * (I_stride / 2) + n / 2];
-                    const uint8_t nib  = n % 2 == 0 ? (byte & 0xf) : (byte >> 4);
-                    const float gpu =
-                        ck_tile::type_convert<float>(ck_tile::pk_fp4_t(ck_tile::pk_fp4_raw_t(nib))
-                                                         .template unpack<>(ck_tile::number<0>{})) *
-                        scale_gpu;
-                    // Saturate here: CK's host fp4 conversion maps every value beyond the fp4
-                    // range (6 after scaling) to +6, dropping the sign.
-                    const float hc = std::max(-6.f * scale_ref, std::min(6.f * scale_ref, h[n]));
-                    const auto q   = ck_tile::float_to_pk_fp4(hc, scale_ref);
-                    const float ref =
-                        ck_tile::type_convert<float>(q.template unpack<>(ck_tile::number<0>{})) *
-                        scale_ref;
+                    const int n = kb * kScaleBlockK + j;
+                    float gpu;
+                    // CPU quantization of a value: clamp to the element range after scaling (CK's
+                    // host conversions do not saturate correctly: fp4 maps every value beyond 6
+                    // to +6, dropping the sign; the kernel clamps fp8 to 448 itself), then round
+                    // to nearest even.
+                    auto quantize = [&](float val) {
+                        if constexpr(Fp8)
+                        {
+                            const float xc =
+                                std::max(-448.f * scale_ref, std::min(448.f * scale_ref, val));
+                            return ck_tile::type_convert<float>(
+                                       ck_tile::type_convert<ck_tile::fp8_t>(xc / scale_ref)) *
+                                   scale_ref;
+                        }
+                        else
+                        {
+                            const float xc =
+                                std::max(-6.f * scale_ref, std::min(6.f * scale_ref, val));
+                            return ck_tile::type_convert<float>(
+                                       ck_tile::float_to_pk_fp4(xc, scale_ref)
+                                           .template unpack<>(ck_tile::number<0>{})) *
+                                   scale_ref;
+                        }
+                    };
+                    if constexpr(Fp8)
+                        gpu = ck_tile::type_convert<float>(
+                                  ck_tile::bit_cast<ck_tile::fp8_t>(mid[rc * I_stride + n])) *
+                              scale_gpu;
+                    else
+                    {
+                        const uint8_t byte = mid[rc * (I_stride / 2) + n / 2];
+                        const uint8_t nib  = n % 2 == 0 ? (byte & 0xf) : (byte >> 4);
+                        gpu                = ck_tile::type_convert<float>(
+                                  ck_tile::pk_fp4_t(ck_tile::pk_fp4_raw_t(nib))
+                                      .template unpack<>(ck_tile::number<0>{})) *
+                              scale_gpu;
+                    }
+                    const float ref = quantize(h[n]);
+                    // The CPU sums the dot products in another order than the GPU, so a value on
+                    // a rounding midpoint can round either way (seen for fp8, about 1 value in
+                    // millions). Count only differences that a 1e-5 relative nudge of the CPU
+                    // value does not explain.
+                    // NaN compares false either way, so test it explicitly.
+                    const bool differs = std::isnan(gpu) || gpu < ref || gpu > ref;
+                    const bool tie     = differs && !std::isnan(gpu) &&
+                                     (!(gpu < quantize(h[n] * (1.f + 1e-5f)) ||
+                                        gpu > quantize(h[n] * (1.f + 1e-5f))) ||
+                                      !(gpu < quantize(h[n] * (1.f - 1e-5f)) ||
+                                        gpu > quantize(h[n] * (1.f - 1e-5f))));
                     mid_gpu[rc * I + n] = gpu;
-                    mismatches[rc] += (gpu < ref || gpu > ref) ? 1 : 0;
+                    mismatches[rc] += differs && !tie ? 1 : 0;
                 }
             }
         },
@@ -1051,7 +1101,7 @@ inline MxMoeLayerResult run_mx_moe_layer(const MxMoeLayerCase& c)
         ck_tile::check_err(out, ref, "layer output: incorrect results!", 1e-2, 1e-3 * ref_max);
     res.pass = mid_ok && out_ok;
     if(c.verbose)
-        std::cout << "mx_moe layer ("
+        std::cout << "mx_moe layer " << (Fp8 ? "a8w4" : "a4w4") << " ("
                   << (c.persistent
                           ? std::string("persistent, ") + (per_slot_out ? "per-slot" : "atomic")
                       : per_slot_out ? std::string("per-slot")

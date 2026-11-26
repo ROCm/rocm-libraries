@@ -11,9 +11,9 @@ namespace ck_tile {
 // A whole MX MoE layer in one persistent launch, gfx1250, scheduled as tasks:
 //
 //   gate_up task (row tile m, gate_up column tile g): GateUpKernel
-//       (MoeFlatmmKind::kFFN_gemm1_gate_up_mx_quant) writes its 32 x (N_Tile / 2) part of the
-//       MXFP4 intermediate, then publishes it by incrementing ready[m][s] of each K slice s of
-//       the down projection whose reach (below) contains it.
+//       (MoeFlatmmKind::kFFN_gemm1_gate_up_mx_quant or _mxfp8_quant) writes its 32 x (N_Tile / 2)
+//       part of the MXFP4 or MX FP8 intermediate, then publishes it by incrementing ready[m][s] of
+//       each K slice s of the down projection whose reach (below) contains it.
 //   down task (row tile m, K slice s, output column tile n): waits until ready[m][s] counts every
 //       gate_up tile of the reach of slice s, then runs DownKernel over that slice of K:
 //       kFFN_gemm2 adds the
@@ -30,8 +30,9 @@ namespace ck_tile {
 // gate_up tasks that overlap them).
 //
 // The reach of a slice is its columns rounded out to kReachCols: caches fill 256 bytes (512 fp4
-// values) at a time on gfx1250, so reading a slice can bring a neighbouring slice's bytes of the
-// same slot row into a cache; waiting for those too means no cache ever holds a stale copy.
+// or 256 fp8 values) at a time on gfx1250, so reading a slice can bring a neighbouring slice's
+// bytes of the same slot row into a cache; waiting for those too means no cache ever holds a stale
+// copy.
 //
 // The task list holds every gate_up task, row tile by row tile, then every down task in the same
 // order. Workgroup w runs tasks w, w + grid, w + 2 grid, ...: it finishes all its gate_up tasks
@@ -64,10 +65,18 @@ struct MoeMxPersistentKernel
     using DownKernel      = remove_cvref_t<DownKernel_>;
     using TilePartitioner = typename GateUpKernel::TilePartitioner;
 
-    static_assert(GateUpKernel::Kind == MoeFlatmmKind::kFFN_gemm1_gate_up_mx_quant &&
+    static_assert((GateUpKernel::Kind == MoeFlatmmKind::kFFN_gemm1_gate_up_mx_quant ||
+                   GateUpKernel::Kind == MoeFlatmmKind::kFFN_gemm1_gate_up_mxfp8_quant) &&
                       (DownKernel::Kind == MoeFlatmmKind::kFFN_gemm2 ||
                        DownKernel::Kind == MoeFlatmmKind::kFFN_gemm2_per_slot),
-                  "gate_up quantizes to MXFP4; down is gemm2 or gemm2_per_slot");
+                  "gate_up quantizes to MXFP4 or MX FP8; down is gemm2 or gemm2_per_slot");
+    // The intermediate's element type, as the down projection reads it.
+    using InterDataType = typename DownKernel::ADataType;
+    static_assert(GateUpKernel::Kind == MoeFlatmmKind::kFFN_gemm1_gate_up_mxfp8_quant
+                      ? std::is_same_v<InterDataType, fp8_t>
+                      : std::is_same_v<InterDataType, pk_fp4_t>,
+                  "the down projection's A type must be the intermediate gate_up writes: fp8_t "
+                  "for _mxfp8_quant, pk_fp4_t for _mx_quant");
     static_assert(GateUpKernel::kBlockSize == DownKernel::kBlockSize &&
                       TilePartitioner::MPerBlock == DownKernel::TilePartitioner::MPerBlock,
                   "both task kinds must use the same block and row tile");
@@ -82,8 +91,10 @@ struct MoeMxPersistentKernel
     // int32 words between counters: each in its own 256 bytes, so polls of different counters go
     // to different L2 channels instead of queueing on one line.
     static constexpr index_t kCounterStride = 64;
-    // Intermediate columns per 256-byte block of a slot row (see the reach above).
-    static constexpr index_t kReachCols = 512;
+    // Intermediate columns per 256-byte block of a slot row (see the reach above): 512 fp4 or
+    // 256 fp8 values.
+    static constexpr index_t kReachCols =
+        256 * numeric_traits<InterDataType>::PackedSize / sizeof(InterDataType);
 
     template <typename GateUpKargs, typename DownKargs>
     struct Kargs
@@ -125,7 +136,7 @@ struct MoeMxPersistentKernel
     {
         // The down tasks have no device-scope acquire, so no cache may hold part of a row
         // tile's intermediate before that row tile is complete. Caches fill 256 bytes at a time
-        // on gfx1250, so every slot row (stride / 2 bytes) and every row tile's scale block
+        // on gfx1250, so every slot row (stride values) and every row tile's scale block
         // (K bytes) must be whole 256-byte blocks: neighbouring slot rows belong to other row
         // tiles, and with a row stride that is not a multiple of 256 bytes the down projection
         // reads wrong values. Within a slot row, slices that share a 256-byte block wait for each
@@ -133,13 +144,13 @@ struct MoeMxPersistentKernel
         // slices are multiples of 256.
         if(kargs.workspace == nullptr || kargs.gate_up.N != 2 * kargs.down.K ||
            kargs.down.K % 256 != 0 || kargs.gate_up.stride_C != kargs.down.stride_A ||
-           kargs.down.stride_A % 512 != 0 || kargs.gate_up.M != kargs.down.M ||
+           kargs.down.stride_A % kReachCols != 0 || kargs.gate_up.M != kargs.down.M ||
            kargs.gate_up.N % GateUpNPerBlock != 0 || kargs.down.N % DownNPerBlock != 0)
         {
             std::cerr << "MoeMxPersistentKernel: needs a workspace, N of gate_up = 2 x the down "
                          "projection's K (a multiple of 256), the intermediate's row stride "
-                         "(stride_C of gate_up = stride_A of down) a multiple of 512, and the "
-                         "same sorted rows for both"
+                         "(stride_C of gate_up = stride_A of down) a multiple of "
+                      << kReachCols << " values (256 bytes), and the same sorted rows for both"
                       << std::endl;
             return false;
         }
