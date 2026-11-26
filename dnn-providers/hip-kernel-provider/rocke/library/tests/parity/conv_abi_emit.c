@@ -16,6 +16,9 @@
  *  13  fwd two_stage (split-K)    14  direction "bwd" (rejected)
  *  15  direct wgrad                16  direct "bwd" (rejected)
  *  17  fwd 3-D two_stage (split-K) 18  dgrad two_stage (rejected)
+ *  19  direct wgrad signature fp16          20  ... fp16 dw16
+ *  21  direct wgrad signature bf16 dw16     22  direct fwd signature bf16 dw16
+ *  (19..22 print "name type": D carries rocke_conv_direct_output_dtype)
  */
 #include <stdio.h>
 #include <stdlib.h>
@@ -50,6 +53,49 @@ static int print_deep_signature(void)
     for(size_t i = 0; i < count; ++i)
         printf("%s %s\n", items[i].name, items[i].type);
     rocke_arena_destroy(&arena);
+    return 0;
+}
+
+/* conv_direct_args_signature(dtype, direction=, dw16=): the direct ABI with
+ * the manifest pointer types of kernels/common/conv_abi.py _conv_signature. */
+static const char* ir_ptr_type(const char* dt)
+{
+    if(strcmp(dt, "fp16") == 0)
+        return "ptr<f16, global>";
+    if(strcmp(dt, "bf16") == 0)
+        return "ptr<bf16, global>";
+    return "ptr<f32, global>";
+}
+
+static int print_direct_signature(const char* dtype, const char* direction, bool dw16)
+{
+    rocke_conv_arg_list_t l;
+    if(!rocke_conv_direct_arg_names(direction, &l))
+        return 1;
+    const char* d_dtype = rocke_conv_direct_output_dtype(dtype, direction, dw16);
+    for(int i = 0; i < l.count; ++i)
+    {
+        const char* ty = "i32";
+        switch(l.items[i].kind)
+        {
+        case ROCKE_CONV_ARG_A:
+        case ROCKE_CONV_ARG_B:
+            ty = ir_ptr_type(dtype);
+            break;
+        case ROCKE_CONV_ARG_D:
+            ty = ir_ptr_type(d_dtype);
+            break;
+        case ROCKE_CONV_ARG_F32_PTR:
+            ty = "ptr<f32, global>";
+            break;
+        case ROCKE_CONV_ARG_I32_PTR:
+            ty = "ptr<i32, global>";
+            break;
+        case ROCKE_CONV_ARG_I32:
+            break;
+        }
+        printf("%s %s\n", l.items[i].name, ty);
+    }
     return 0;
 }
 
@@ -129,6 +175,14 @@ int main(int argc, char** argv)
     case 18:
         ok = rocke_conv_arg_names("dgrad", false, true, &list);
         break;
+    case 19:
+        return print_direct_signature("fp16", "wgrad", false);
+    case 20:
+        return print_direct_signature("fp16", "wgrad", true);
+    case 21:
+        return print_direct_signature("bf16", "wgrad", true);
+    case 22:
+        return print_direct_signature("bf16", "fwd", true);
     default:
         fprintf(stderr, "unknown config index %d\n", idx);
         return 2;

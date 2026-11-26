@@ -27,7 +27,10 @@
  * non-grouped spec; from index 218 the fp32-storage configs of the grouped
  * kernels, see make_f32_cfg; from index 318 the gfx1250 wave32 and
  * image-per-block wgrad spec, from index 349 the depthwise wgrad spec and
- * from index 356 the small-C wgrad stems of the AOT grid) identically to the
+ * from index 356 the small-C wgrad stems of the AOT grid, from index 359 the
+ * auto-launch and ping-pong tiled wgrad and from index 371 the tiled wgrad's
+ * dW / tile / launch knobs, rocke_direct_wgrad_slab_fold_spec_t and the grouped
+ * rocke_direct_wgrad_gather_spec_t) identically to the
  * Python emitter
  * conv_direct_grouped_emit.py, builds the
  * kernel via the matching rocke_build_direct_conv_*_new function and lowers via
@@ -77,7 +80,8 @@ enum
     KIND_DW_WGRAD_MFMA = 21,
     KIND_GROUPED_WGRAD_MFMA = 22,
     KIND_DW_DGRAD_STREAM = 23,
-    KIND_DW_WGRAD = 24
+    KIND_DW_WGRAD = 24,
+    KIND_SLAB_FOLD = 25
 };
 
 #define NONGROUPED_CFG_BASE 42
@@ -173,6 +177,9 @@ static int make_4c_bf16_cfg(int idx, rocke_direct_conv_4c_spec_t* s4, const char
 #define WGRAD_STEM_CFG_BASE 356
 #define WGRAD_AUTO_CFG_BASE 359
 #define WGRAD_PP_CFG_BASE 364
+/* Tiled wgrad knobs, the slab fold and the grouped gather wgrad follow the 7
+ * ping-pong ones (see _wgrad_knob_spec in the Python emitter). */
+#define WGRAD_KNOB_CFG_BASE 371
 
 /* Problem helper mirroring prob() in the Python _dw_wgrad_spec: N=2, H=9,
  * W=13, groups = C, cpg = kpg. */
@@ -2570,6 +2577,7 @@ typedef struct wgrad_direct_specs
     rocke_direct_wgrad_gather_spec_t gather;
     rocke_dw_wgrad_mfma_spec_t dw_mfma;
     rocke_grouped_wgrad_mfma_spec_t grouped_mfma;
+    rocke_direct_wgrad_slab_fold_spec_t slab_fold;
 } wgrad_direct_specs_t;
 
 /* _wp(): N=2 H=16 W=32 groups=1 cpg=kpg=64 3x3 PAD=1 stride=1 bf16. */
@@ -3083,6 +3091,359 @@ static int make_wgrad_pp_cfg(int idx, rocke_direct_wgrad_tiled_spec_t* ts)
     }
 }
 
+/* Tiled wgrad knobs (0..28), the slab fold (29..37) and the grouped gather
+ * wgrad (38..44), emitted as WGRAD_KNOB_CFG_BASE + idx (see _wgrad_knob_spec in
+ * the Python emitter). Returns 0 on success, -1 if unknown. */
+static int make_wgrad_knob_cfg(int idx, int* kind, wgrad_direct_specs_t* w)
+{
+    rocke_direct_wgrad_tiled_spec_t* ts = &w->tiled;
+    rocke_direct_wgrad_gather_spec_t* gs = &w->gather;
+    rocke_direct_wgrad_slab_fold_spec_t* fs = &w->slab_fold;
+    *ts = rocke_direct_wgrad_tiled_spec_default();
+    *gs = rocke_direct_wgrad_gather_spec_default();
+    *fs = rocke_direct_wgrad_slab_fold_spec_default();
+    ts->problem = mk_wp();
+    gs->problem = mk_wp();
+    if(idx <= 28)
+        *kind = KIND_WGRAD_TILED;
+    else if(idx <= 37)
+        *kind = KIND_SLAB_FOLD;
+    else
+        *kind = KIND_WGRAD_GATHER;
+    rocke_direct_conv_problem_t* p = &ts->problem;
+    /* q4 / q2 / auto of the Python table. */
+#define Q4()                 \
+    do                       \
+    {                        \
+        ts->q_groups = 4;    \
+        ts->pingpong = true; \
+        ts->pp_tight = true; \
+        ts->waves_k = 1;     \
+        ts->waves_c = 2;     \
+    } while(0)
+#define Q2()                 \
+    do                       \
+    {                        \
+        ts->q_groups = 2;    \
+        ts->pingpong = true; \
+        ts->waves_k = 2;     \
+        ts->wave_k16 = 1;    \
+        ts->prefetch = 3;    \
+    } while(0)
+#define AUTO_RT()             \
+    do                        \
+    {                         \
+        ts->row_tail = true;  \
+        ts->rows_per_seg = 0; \
+    } while(0)
+    switch(idx)
+    {
+    case 0: /* one_split + dw16, row tail */
+        p->H = 13;
+        p->dtype = "fp16";
+        ts->one_split = true;
+        ts->dw16 = true;
+        AUTO_RT();
+        return 0;
+    case 1:
+        p->H = 13;
+        ts->one_split = true;
+        ts->dw16 = true;
+        ts->target_blocks = 64;
+        AUTO_RT();
+        return 0;
+    case 2: /* q_groups 4, pp_tight, slab */
+        p->H = 14;
+        p->dtype = "fp16";
+        ts->slab = true;
+        ts->unfold_n = 2;
+        ts->wave_c16 = 1;
+        ts->target_blocks = 32;
+        Q4();
+        AUTO_RT();
+        return 0;
+    case 3:
+        p->H = 14;
+        ts->slab = true;
+        ts->unfold_n = 2;
+        ts->wave_c16 = 1;
+        Q4();
+        AUTO_RT();
+        return 0;
+    case 4: /* q_groups 4 with pk16 */
+        p->cpg = 128;
+        p->kpg = 128;
+        p->dtype = "fp16";
+        ts->pk16 = true;
+        ts->rows_per_seg = 12;
+        ts->target_blocks = 16;
+        Q4();
+        ts->waves_k = 2;
+        ts->waves_c = 1;
+        return 0;
+    case 5: /* gpack + pk16, a partial last block */
+        p->groups = 6;
+        p->cpg = 16;
+        p->kpg = 16;
+        p->dtype = "fp16";
+        ts->gpack = true;
+        ts->pk16 = true;
+        ts->wave_k16 = 1;
+        ts->wave_c16 = 1;
+        ts->waves_k = 2;
+        ts->waves_c = 2;
+        AUTO_RT();
+        return 0;
+    case 6: /* gpack + slab */
+        p->groups = 6;
+        p->cpg = 16;
+        p->kpg = 16;
+        ts->gpack = true;
+        ts->slab = true;
+        ts->wave_k16 = 1;
+        ts->wave_c16 = 1;
+        ts->waves_k = 2;
+        ts->waves_c = 2;
+        AUTO_RT();
+        return 0;
+    case 7: /* l64: Nx1 over eight packed images, column padding 0 */
+        p->N = 12;
+        p->H = 20;
+        p->W = 6;
+        p->KW = 1;
+        p->pad_w = 0;
+        p->dtype = "fp16";
+        ts->l64 = true;
+        ts->pingpong = true;
+        ts->unfold_n = 8;
+        AUTO_RT();
+        return 0;
+    case 8:
+        ts->l64 = true;
+        ts->pingpong = true;
+        ts->rows_per_seg = 12;
+        return 0;
+    case 9: /* pp_sched on the q_groups 2 ping-pong, slab */
+        p->H = 13;
+        p->dtype = "fp16";
+        ts->pp_sched = true;
+        ts->slab = true;
+        ts->target_blocks = 64;
+        Q2();
+        AUTO_RT();
+        return 0;
+    case 10: /* the q_groups 2 epilogue: dw16 */
+        p->H = 13;
+        ts->one_split = true;
+        ts->dw16 = true;
+        Q2();
+        AUTO_RT();
+        return 0;
+    case 11: /* ... and pk16 */
+        p->H = 13;
+        p->dtype = "fp16";
+        ts->pk16 = true;
+        ts->target_blocks = 64;
+        Q2();
+        AUTO_RT();
+        return 0;
+    case 12: /* pk16, kpg % 8 == 4 */
+        p->kpg = 36;
+        p->dtype = "fp16";
+        ts->pk16 = true;
+        ts->rows_per_seg = 12;
+        return 0;
+    case 13: /* pp_sched on the ping-pong in halves */
+        ts->pingpong = true;
+        ts->pp_sched = true;
+        ts->slab = true;
+        ts->rows_per_seg = 12;
+        return 0;
+    case 14: /* slab, column padding 0 */
+        p->W = 30;
+        p->pad_w = 0;
+        p->dtype = "fp16";
+        ts->slab = true;
+        ts->rows_per_seg = 15;
+        ts->row_unroll = 3;
+        return 0;
+    case 15: /* q_groups 4 ping-pong in halves with the extra row buffer */
+        p->H = 13;
+        p->dtype = "fp16";
+        ts->q_groups = 4;
+        ts->pingpong = true;
+        ts->waves_k = 1;
+        ts->waves_c = 2;
+        ts->wave_k16 = 1;
+        ts->wave_c16 = 1;
+        AUTO_RT();
+        return 0;
+    case 16: /* q_groups 4 without the ping-pong; one reduction buffer */
+        p->cpg = 128;
+        p->kpg = 128;
+        ts->q_groups = 4;
+        ts->slab = true;
+        ts->waves_k = 1;
+        ts->waves_c = 2;
+        ts->prefetch = 3;
+        ts->rows_per_seg = 12;
+        return 0;
+    /* Must reject, one per new rule. */
+    case 17:
+        ts->dw16 = true;
+        return 0;
+    case 18:
+        ts->pk16 = true;
+        return 0;
+    case 19:
+        p->dtype = "fp16";
+        ts->pk16 = true;
+        ts->one_split = true;
+        return 0;
+    case 20:
+        ts->slab = true;
+        ts->one_split = true;
+        return 0;
+    case 21:
+        ts->row_tail = true;
+        ts->rows_per_seg = 12;
+        return 0;
+    case 22:
+        ts->pp_tight = true;
+        ts->rows_per_seg = 12;
+        return 0;
+    case 23:
+        ts->pp_sched = true;
+        ts->rows_per_seg = 12;
+        return 0;
+    case 24:
+        ts->unfold_n = 8;
+        ts->rows_per_seg = 12;
+        return 0;
+    case 25:
+        ts->q_groups = 3;
+        ts->rows_per_seg = 12;
+        return 0;
+    case 26:
+        p->groups = 4;
+        p->cpg = 16;
+        p->kpg = 32;
+        ts->gpack = true;
+        ts->wave_k16 = 1;
+        ts->wave_c16 = 1;
+        return 0;
+    case 27:
+        p->H = 1024;
+        p->W = 1024;
+        p->cpg = 512;
+        p->kpg = 512;
+        ts->l64 = true;
+        ts->unfold_n = 4;
+        ts->rows_per_seg = 12;
+        return 0;
+    case 28:
+        p->kpg = 38;
+        ts->rows_per_seg = 12;
+        return 0;
+    /* WgradSlabFoldSpec */
+    case 29:
+        fs->out = "fp16";
+        return 0;
+    case 30:
+        fs->out = "bf16";
+        return 0;
+    case 31:
+        fs->out = "fp32";
+        fs->slices = 2;
+        return 0;
+    case 32:
+        fs->out = "fp16";
+        fs->slices = 1;
+        return 0;
+    case 33:
+        fs->out = "bf16";
+        fs->slices = 1;
+        return 0;
+    case 34:
+        fs->out = "fp32";
+        fs->slices = 1;
+        return 0;
+    case 35:
+        fs->out = "bf16";
+        fs->slices = 64;
+        fs->name = "fold64";
+        return 0;
+    case 36: /* must reject: 3 does not divide 256 */
+        fs->slices = 3;
+        return 0;
+    case 37: /* must reject: no 8-bit output */
+        fs->out = "fp8e4m3";
+        return 0;
+    /* Grouped WgradGatherSpec */
+    case 38:
+        gs->problem.groups = 4;
+        gs->problem.cpg = 16;
+        gs->problem.kpg = 16;
+        gs->problem.dtype = "fp16";
+        gs->grouped = true;
+        gs->wave_k16 = 1;
+        gs->waves_k = 4;
+        return 0;
+    case 39: /* stride 2 */
+        gs->problem.groups = 8;
+        gs->problem.cpg = 8;
+        gs->problem.kpg = 8;
+        gs->problem.stride = 2;
+        gs->problem.H = 30;
+        gs->problem.W = 40;
+        gs->grouped = true;
+        gs->wave_k16 = 1;
+        gs->waves_k = 2;
+        gs->rows_per_seg = 8;
+        return 0;
+    case 40: /* 5x5 */
+        gs->problem.groups = 4;
+        gs->problem.cpg = 16;
+        gs->problem.kpg = 16;
+        mk_filter(&gs->problem, 5, 5, 2, 1);
+        gs->grouped = true;
+        gs->wave_k16 = 1;
+        gs->waves_k = 2;
+        gs->target_blocks = 256;
+        return 0;
+    case 41: /* must reject: K % 8 */
+        gs->problem.groups = 16;
+        gs->problem.cpg = 4;
+        gs->problem.kpg = 4;
+        gs->problem.PAD = 0;
+        gs->problem.dtype = "fp16";
+        gs->grouped = true;
+        gs->prefetch = 1;
+        return 0;
+    case 42: /* must reject: one group */
+        gs->problem.cpg = 16;
+        gs->problem.kpg = 16;
+        gs->grouped = true;
+        return 0;
+    case 43: /* must reject: cpg != kpg */
+        gs->problem.groups = 4;
+        gs->problem.cpg = 8;
+        gs->problem.kpg = 16;
+        gs->grouped = true;
+        return 0;
+    case 44: /* must reject: grouped layer, dense kernel */
+        gs->problem.groups = 2;
+        gs->problem.cpg = 8;
+        gs->problem.kpg = 8;
+        return 0;
+    default:
+        return -1;
+    }
+#undef Q4
+#undef Q2
+#undef AUTO_RT
+}
+
 /* The spec slots make_f32_cfg may fill (one per kernel kind it covers). */
 typedef struct f32_specs
 {
@@ -3492,7 +3853,15 @@ int main(int argc, char** argv)
     rocke_direct_depthwise_dgrad_stream_spec_t sdgs;
     rocke_direct_depthwise_wgrad_spec_t sdww;
     const char* arch = "gfx950";
-    if(idx >= WGRAD_PP_CFG_BASE)
+    if(idx >= WGRAD_KNOB_CFG_BASE)
+    {
+        if(make_wgrad_knob_cfg(idx - WGRAD_KNOB_CFG_BASE, &kind, &swd) != 0)
+        {
+            fprintf(stderr, "unknown config index %d\n", idx);
+            return 2;
+        }
+    }
+    else if(idx >= WGRAD_PP_CFG_BASE)
     {
         if(make_wgrad_pp_cfg(idx - WGRAD_PP_CFG_BASE, &swd.tiled) != 0)
         {
@@ -3684,6 +4053,8 @@ int main(int argc, char** argv)
         kernel = rocke_build_dw_wgrad_lds_new(&b, &swd.lds, arch);
     else if(kind == KIND_WGRAD_GATHER)
         kernel = rocke_build_direct_wgrad_gather_new(&b, &swd.gather, arch);
+    else if(kind == KIND_SLAB_FOLD)
+        kernel = rocke_build_direct_wgrad_slab_fold_new(&b, &swd.slab_fold, arch);
     else if(kind == KIND_SPLIT_REDUCE)
         kernel = rocke_build_direct_conv_split_reduce_new(&b, &sred, arch);
     else if(kind == KIND_DW_WGRAD_MFMA)

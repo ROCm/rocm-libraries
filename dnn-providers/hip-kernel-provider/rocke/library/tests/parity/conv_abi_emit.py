@@ -30,11 +30,18 @@
 #   16 -- conv_direct_arg_names("bwd")           (rejected)
 #   17 -- conv_arg_names("fwd", is_3d, two_stage)
 #   18 -- conv_arg_names("dgrad", two_stage)     (rejected)
+#   19 -- conv_direct_args_signature("fp16", "wgrad")            (fp32 dW)
+#   20 -- conv_direct_args_signature("fp16", "wgrad", dw16)      (16-bit dW)
+#   21 -- conv_direct_args_signature("bf16", "wgrad", dw16)
+#   22 -- conv_direct_args_signature("bf16", "fwd", dw16)        (no effect)
+# 19..22 print "name type" lines: the launch signature's types, whose D
+# carries conv_direct_output_dtype.
 import sys
 
 from kernels.common.conv_abi import (
     conv_arg_names,
     conv_direct_arg_names,
+    conv_direct_args_signature,
     conv_fwd_problem_block,
 )
 
@@ -49,6 +56,11 @@ def _deep_signature():
         h=64, w=128, c=8, k0=16, k1=16, r=3, s=3, pool_tile_h=4, pool_tile_w=8
     )
     return [(e["name"], e["type"]) for e in deep_fused_conv_pool_signature(spec)]
+
+
+def _direct_signature(dtype, direction, dw16=False):
+    sig = conv_direct_args_signature(dtype, direction=direction, dw16=dw16)
+    return [(e["name"], e["type"]) for e in sig]
 
 
 _CONFIGS = {
@@ -71,6 +83,10 @@ _CONFIGS = {
     16: lambda: conv_direct_arg_names(direction="bwd"),
     17: lambda: conv_arg_names(direction="fwd", is_3d=True, two_stage=True),
     18: lambda: conv_arg_names(direction="dgrad", two_stage=True),
+    19: lambda: _direct_signature("fp16", "wgrad"),
+    20: lambda: _direct_signature("fp16", "wgrad", dw16=True),
+    21: lambda: _direct_signature("bf16", "wgrad", dw16=True),
+    22: lambda: _direct_signature("bf16", "fwd", dw16=True),
 }
 
 

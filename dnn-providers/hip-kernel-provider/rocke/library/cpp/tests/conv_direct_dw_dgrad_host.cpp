@@ -1021,6 +1021,131 @@ static void test_wgrad_tiled_geometry(void)
           reason);
 }
 
+/* The launch geometry and LDS budget of the tiled wgrad's dW / tile knobs,
+ * the slab fold and the grouped gather wgrad: the values Python computes for
+ * the same specs (configs 371, 376, 387, 400, 406 and 409 of the
+ * conv_direct_grouped parity pair). */
+static void test_wgrad_knob_geometry(void)
+{
+    char reason[ERR_CAP];
+    char name[256];
+    int grid[3], block[3];
+
+    /* one_split + dw16 with the row tail: one split, the 16-bit dW flags. */
+    rocke_direct_wgrad_tiled_spec_t os = rocke_direct_wgrad_tiled_spec_default();
+    os.problem = dense_problem(13, 32, 64, 64);
+    os.problem.dtype = "fp16";
+    os.one_split = true;
+    os.dw16 = true;
+    os.row_tail = true;
+    os.rows_per_seg = 0;
+    CHECK(rocke_direct_wgrad_tiled_is_valid_spec(&os, "gfx950", reason, sizeof(reason)),
+          "wgrad_tiled one_split refused: %s",
+          reason);
+    CHECK(rocke_direct_wgrad_tiled_n_channel_tiles(&os) == 1
+              && rocke_direct_wgrad_tiled_n_segments(&os) == 2
+              && rocke_direct_wgrad_tiled_n_splits(&os) == 1
+              && rocke_direct_wgrad_tiled_lds_bytes(&os) == 49152,
+          "wgrad_tiled one_split geometry");
+    CHECK(rocke_direct_wgrad_tiled_kernel_name(&os, name, sizeof(name)) == ROCKE_OK
+              && strcmp(name, "direct_wgrad_tiled_f3x3p1_wt32x32_w4x2_rpsH_pf2_tb256_rt_os_d16")
+                     == 0,
+          "wgrad_tiled one_split name: %s",
+          name);
+
+    /* gpack: four groups per block over six groups, 256 threads. */
+    rocke_direct_wgrad_tiled_spec_t gp = rocke_direct_wgrad_tiled_spec_default();
+    gp.problem = dense_problem(16, 32, 16, 16);
+    gp.problem.groups = 6;
+    gp.problem.dtype = "fp16";
+    gp.gpack = true;
+    gp.pk16 = true;
+    gp.row_tail = true;
+    gp.rows_per_seg = 0;
+    gp.wave_k16 = 1;
+    gp.wave_c16 = 1;
+    gp.waves_k = 2;
+    gp.waves_c = 2;
+    CHECK(rocke_direct_wgrad_tiled_is_valid_spec(&gp, "gfx950", reason, sizeof(reason)),
+          "wgrad_tiled gpack refused: %s",
+          reason);
+    rocke_direct_wgrad_tiled_launch_geometry(&gp, grid, block);
+    CHECK(rocke_direct_wgrad_tiled_n_channel_tiles(&gp) == 2 && grid[0] == 4 && block[0] == 256
+              && rocke_direct_wgrad_tiled_lds_bytes(&gp) == 36864,
+          "wgrad_tiled gpack geometry: grid %d block %d",
+          grid[0],
+          block[0]);
+
+    /* q_groups 4 without the ping-pong: the rings leave room for one
+     * reduction buffer only (160 KiB exactly). */
+    rocke_direct_wgrad_tiled_spec_t q4 = rocke_direct_wgrad_tiled_spec_default();
+    q4.problem = dense_problem(16, 32, 128, 128);
+    q4.q_groups = 4;
+    q4.slab = true;
+    q4.waves_k = 1;
+    q4.waves_c = 2;
+    q4.prefetch = 3;
+    q4.rows_per_seg = 12;
+    CHECK(rocke_direct_wgrad_tiled_is_valid_spec(&q4, "gfx950", reason, sizeof(reason)),
+          "wgrad_tiled q_groups 4 refused: %s",
+          reason);
+    rocke_direct_wgrad_tiled_launch_geometry(&q4, grid, block);
+    CHECK(rocke_direct_wgrad_tiled_lds_bytes(&q4) == 163840 && grid[0] == 8 && block[0] == 512,
+          "wgrad_tiled q_groups 4 geometry: lds %ld grid %d block %d",
+          rocke_direct_wgrad_tiled_lds_bytes(&q4),
+          grid[0],
+          block[0]);
+
+    /* The slab fold: 4 * 256 / slices elements per block. */
+    rocke_direct_wgrad_slab_fold_spec_t fs = rocke_direct_wgrad_slab_fold_spec_default();
+    rocke_direct_wgrad_slab_fold_launch_geometry(&fs, 1000, grid, block);
+    CHECK(rocke_direct_wgrad_slab_fold_elems_per_block(&fs) == 128 && grid[0] == 8
+              && block[0] == 256,
+          "slab fold geometry: grid %d",
+          grid[0]);
+    CHECK(rocke_direct_wgrad_slab_fold_kernel_name(&fs, name, sizeof(name)) == ROCKE_OK
+              && strcmp(name, "direct_wgrad_slab_fold_s8_fp16") == 0,
+          "slab fold name: %s",
+          name);
+    fs.out = "bf16";
+    fs.slices = 64;
+    fs.name = "fold64";
+    rocke_direct_wgrad_slab_fold_launch_geometry(&fs, 1000, grid, block);
+    CHECK(grid[0] == 63, "slab fold s64 grid %d", grid[0]);
+    CHECK(rocke_direct_wgrad_slab_fold_kernel_name(&fs, name, sizeof(name)) == ROCKE_OK
+              && strcmp(name, "fold64_s64_bf16") == 0,
+          "slab fold s64 name: %s",
+          name);
+    fs.slices = 3;
+    CHECK(!rocke_direct_wgrad_slab_fold_is_valid_spec(&fs, reason, sizeof(reason))
+              && strcmp(reason, "slices must divide 256 (at most 64)") == 0,
+          "slab fold slices=3 reason: %s",
+          reason);
+
+    /* Grouped gather: the fold covers groups * kpg channels. */
+    rocke_direct_wgrad_gather_spec_t gs = rocke_direct_wgrad_gather_spec_default();
+    gs.problem = dense_problem(16, 32, 16, 16);
+    gs.problem.groups = 4;
+    gs.problem.dtype = "fp16";
+    gs.grouped = true;
+    gs.wave_k16 = 1;
+    gs.waves_k = 4;
+    CHECK(rocke_direct_wgrad_gather_is_valid_spec(&gs, "gfx950", reason, sizeof(reason)),
+          "wgrad_gather grouped refused: %s",
+          reason);
+    rocke_direct_wgrad_gather_launch_geometry(&gs, grid, block);
+    CHECK(rocke_direct_wgrad_gather_lds_bytes(&gs) == 61600
+              && rocke_direct_wgrad_gather_n_partitions(&gs) == 2
+              && rocke_direct_wgrad_gather_fold_taps(&gs) == 144
+              && rocke_direct_wgrad_gather_workspace_bytes(&gs) == 73728 && grid[0] == 1
+              && grid[1] == 2 && block[0] == 256,
+          "wgrad_gather grouped geometry");
+    CHECK(rocke_direct_wgrad_gather_kernel_name(&gs, name, sizeof(name)) == ROCKE_OK
+              && strcmp(name, "direct_wgrad_gather_f3x3p1s1c16_wk1x4_pf2_rps16_tb1024_grp") == 0,
+          "wgrad_gather grouped name: %s",
+          name);
+}
+
 /* Every validator whose builder keeps a channel total in an int refuses
  * groups * cpg or groups * kpg past INT32_MAX first, with Python's
  * channel_totals_reason text (test_conv_direct_grouped_backend_parity.py pins
@@ -1171,6 +1296,7 @@ int main(void)
     test_channel_totals_refused();
     test_wgrad_dilation_reason();
     test_wgrad_tiled_geometry();
+    test_wgrad_knob_geometry();
     test_total_channels_past_i32();
     test_ceil_floor_div();
     test_problem_output_extents();
