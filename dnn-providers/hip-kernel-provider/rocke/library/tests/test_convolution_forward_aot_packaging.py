@@ -95,7 +95,9 @@ def _unmerged(identity: KernelIdentity) -> bool:
     """A packaged implicit-GEMM identity whose widths are its own (no group merge):
     the width classes and rocKE's width selection below are about these.
 
-    Also excludes split-K identities (``split_k`` / ``split_k_cluster`` off their
+    Also excludes the register-prefetch, LDS K pad and patch-embedding identities
+    (``prefetch_global_regs`` / ``lds_k_pad`` / ``patch`` / ``chiplet_swizzle`` /
+    ``dtl``) and split-K identities (``split_k`` / ``split_k_cluster`` off their
     default): the packaged contract does not carry those fields, so
     :func:`gfx950_conv_fwd_aot_spec_for_identity` refuses them with their own
     reason, and a sample built for ``supports_gfx950_conv_fwd_aot`` must not pick
@@ -106,7 +108,17 @@ def _unmerged(identity: KernelIdentity) -> bool:
         return False
     if identity.is_direct:
         return True
-    return identity.split_k == 1 and identity.split_k_cluster == 0
+    return (
+        identity.split_k == 1
+        and identity.split_k_cluster == 0
+        and not (
+            identity.prefetch_global_regs
+            or identity.lds_k_pad
+            or identity.patch
+            or identity.chiplet_swizzle
+            or identity.dtl
+        )
+    )
 
 
 def _spec(identity: KernelIdentity) -> Gfx950ConvFwdAotSpec:

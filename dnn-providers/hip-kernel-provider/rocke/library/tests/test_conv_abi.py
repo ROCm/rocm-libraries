@@ -2528,7 +2528,8 @@ def test_aot_grid_capability_axes(monkeypatch):
     )
     assert not any(j.identity.is_pointwise for j in jobs)
     # Only grouped binaries: they serve groups == 1 as well.
-    assert all(j.identity.grouped for j in jobs)
+    # (the patch-embedding GEMMs are ungrouped by construction).
+    assert all(j.identity.grouped or j.identity.patch for j in jobs)
     merged = [j for j in jobs if j.identity.group_merge > 1]
     assert {j.direction for j in merged} == {"fwd", "wgrad"}
     for j in merged:
