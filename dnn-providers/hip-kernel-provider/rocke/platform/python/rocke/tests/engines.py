@@ -62,11 +62,13 @@ same engines through ``compile_kernel`` and similar entry points.
 
 A kernel family's C++ builder is reached only through the C++ engine's Python
 modules (``rocke_engine``, ``rocke_library_engine``), which
-``engine_modules_available`` reports. ``lower_spec_with_all_engines`` lowers an
-instance spec with both builders where the modules are built, each engine
-building the kernel with its own builder (``instance_llvm_from_all_engines``
-does the same through an instance's binding entry point, for an instance with
-no ``rocke.core.backend.lower_*`` entry point).
+``engine_modules_available`` reports. ``lower_spec_with_engine`` lowers an
+instance spec as one engine's builder builds it: the ``"python"`` case runs in
+every lane, and the ``"cpp"`` case builds the kernel with each engine's own
+builder, requires the same IR, and skips without the modules
+(``instance_llvm_from_engine`` does the same through an instance's binding
+entry point, for an instance with no ``rocke.core.backend.lower_*`` entry
+point).
 
 The helpers above drive each engine directly. ``assert_backend_lane_rejects``
 instead checks one refusal through the public ``lower_kernel_to_llvm``
@@ -142,11 +144,11 @@ __all__ = [
     "engine_modules_available",
     "hide_shared_engine",
     "hip_outcomes_of_both_engines",
-    "instance_llvm_from_all_engines",
+    "instance_llvm_from_engine",
     "ir_lower_cli_hip_outcomes",
     "lower_hip_with_both_engines",
     "lower_hip_with_engine",
-    "lower_spec_with_all_engines",
+    "lower_spec_with_engine",
     "lower_with_both_engines",
     "lower_with_engine",
     "native_engine_or_skip",
@@ -217,59 +219,75 @@ def engine_modules_available() -> bool:
     return importlib.util.find_spec("rocke_engine") is not None
 
 
-def lower_spec_with_all_engines(
+def lower_spec_with_engine(
     spec: object,
     arch: str,
     *,
+    engine: Engine,
     build_kernel: Callable[..., KernelDef],
     lower_spec: Callable[..., object],
 ) -> str:
-    """The LLVM IR of the instance ``spec`` describes, for ``arch``, from every
-    engine in ``available_engines()``.
+    """The LLVM IR of the instance ``spec`` describes, for ``arch``, as
+    ``engine``'s builder builds it.
 
-    With the C++ engine's Python modules (:func:`engine_modules_available`),
-    each engine's builder builds the kernel from the spec
-    (``lower_spec(spec, arch=arch, backend="both")``, an instance's
-    ``rocke.core.backend.lower_*`` entry point), both kernels are lowered, and
-    the two texts must be the same byte for byte. Without them,
-    ``build_kernel(spec, arch=arch)``, the Python builder, lowered by the
-    default lowerer; a ``lower_*`` entry point needs the modules even for the
-    Python backend.
+    ``"python"``: the Python builder's kernel (``build_kernel(spec,
+    arch=arch)``) lowered by the Python engine, in every lane. ``"cpp"``: each
+    engine's builder builds the kernel from the spec (``lower_spec(spec,
+    arch=arch, backend="both")``, an instance's ``rocke.core.backend.lower_*``
+    entry point), both kernels are lowered, and the two texts must be the same
+    byte for byte. The C++ builder is reached only through the C++ engine's
+    Python modules, so without them (:func:`engine_modules_available`) the
+    ``"cpp"`` case skips as waiting for the build-variant lane.
     """
-    if engine_modules_available():
-        return lower_spec(spec, arch=arch, backend="both").llvm_text
-    return lower_kernel_to_llvm(build_kernel(spec, arch=arch), arch=arch)
+    if _require_builder_engine(engine) is None:
+        return _python_llvm(build_kernel(spec, arch=arch), arch, None)
+    return lower_spec(spec, arch=arch, backend="both").llvm_text
 
 
-def instance_llvm_from_all_engines(
+def instance_llvm_from_engine(
     spec: object,
     arch: str,
     *,
+    engine: Engine,
     build_kernel: Callable[..., KernelDef],
     binding: str,
 ) -> str:
-    """The LLVM IR of the instance ``spec`` describes, for ``arch``: the Python
-    builder's kernel (``build_kernel(spec, arch=arch)``) lowered by the Python
-    engine and, with the ``rocke_engine`` binding, the C++ builder's, through
-    the binding's ``binding`` entry point (``<family>_lower_llvm``) fed the
-    spec's fields that are not None; the two texts must be the same byte for
-    byte.
+    """The LLVM IR of the instance ``spec`` describes, for ``arch``, as
+    ``engine``'s builder builds it, for an instance with no
+    ``rocke.core.backend.lower_*`` entry point (:func:`lower_spec_with_engine`
+    covers those).
 
-    For an instance with no ``rocke.core.backend.lower_*`` entry point
-    (:func:`lower_spec_with_all_engines` covers those).
+    ``"python"``: the Python builder's kernel (``build_kernel(spec,
+    arch=arch)``) lowered by the Python engine, in every lane. ``"cpp"``: the
+    C++ builder's, through the ``rocke_engine`` binding's ``binding`` entry
+    point (``<family>_lower_llvm``) fed the spec's fields that are not None,
+    which must be the same byte for byte as the Python text; without the
+    binding the case skips as waiting for the build-variant lane. Either way
+    the Python text is returned.
     """
+    binding_module = _require_builder_engine(engine)
     python_ir = _python_llvm(build_kernel(spec, arch=arch), arch, None)
-    if engine_modules_available():
-        fields = {
-            name: value
-            for name, value in dataclasses.asdict(spec).items()
-            if value is not None
-        }
-        native_ir = getattr(_require_native_engine(), binding)(fields, arch=arch)
-        assert (
-            native_ir == python_ir
-        ), f"the C++ builder emitted different LLVM IR for {binding} on {arch}"
+    if binding_module is None:
+        return python_ir
+    fields = {
+        name: value
+        for name, value in dataclasses.asdict(spec).items()
+        if value is not None
+    }
+    native_ir = getattr(binding_module, binding)(fields, arch=arch)
+    assert (
+        native_ir == python_ir
+    ), f"the C++ builder emitted different LLVM IR for {binding} on {arch}"
     return python_ir
+
+
+def _require_builder_engine(engine: Engine) -> ModuleType | None:
+    """Validate ``engine``; for ``"cpp"``, return the ``rocke_engine`` binding,
+    the route to the C++ builders, or skip the calling test as waiting for the
+    build-variant lane when it is not built, before any engine runs. None for
+    ``"python"``."""
+    _validate_engine(engine)
+    return _require_native_engine() if engine == "cpp" else None
 
 
 def _require_native_engine() -> ModuleType:

@@ -14,6 +14,12 @@ from __future__ import annotations
 
 import unittest
 
+import pytest
+
+# Module level only because the parametrize below needs it at collection; the
+# tests import the rest of rocke inside their bodies.
+from rocke.tests.engines import ENGINES
+
 
 def _spec(**kw):
     from rocke.instances.common.moe_fused_mega_fp8 import FusedMegaKernelSpecFp8
@@ -145,34 +151,42 @@ class TestMoeFusedMegaFp8LdsBudget(unittest.TestCase):
         self.assertIn("Hidden_smem", msg)
 
 
-class TestMoeFusedMegaFp8HiddenRequantBound(unittest.TestCase):
-    def test_requantizes_to_the_largest_value_of_the_target_encoding(self):
-        """The block scale is ``amax / bound``, so the block's largest value
-        converts to the bound: 240 for gfx942's e4m3 FNUZ (448 would convert to
-        NaN there; the conversion does not saturate), 448 for gfx950's OCP
-        e4m3. Both engines' builders emit the same IR."""
-        from rocke.core.lower_llvm import llvm_f32_literal
-        from rocke.instances.common.moe_fused_mega_fp8 import (
-            build_moe_fused_mega_gemm_fp8,
-        )
-        from rocke.tests.engines import instance_llvm_from_all_engines
+# (arch, gate/up and down MFMA K, the target's e4m3 bound, the other target's)
+_REQUANT_BOUNDS = [("gfx942", 32, 240.0, 448.0), ("gfx950", 128, 448.0, 240.0)]
 
-        def reciprocal_of(bound):
-            return f"= fdiv float {llvm_f32_literal(1.0)}, {llvm_f32_literal(bound)}\n"
 
-        for arch, spec, bound, other in (
-            ("gfx942", _spec(gate_up_k=32, down_k=32), 240.0, 448.0),
-            ("gfx950", _spec(), 448.0, 240.0),
-        ):
-            with self.subTest(arch=arch):
-                text = instance_llvm_from_all_engines(
-                    spec,
-                    arch,
-                    build_kernel=build_moe_fused_mega_gemm_fp8,
-                    binding="moe_fused_mega_fp8_lower_llvm",
-                )
-                self.assertEqual(text.count(reciprocal_of(bound)), 1)
-                self.assertNotIn(reciprocal_of(other), text)
+@pytest.mark.parametrize("engine", ENGINES)
+@pytest.mark.parametrize(
+    "arch, atom_k, bound, other",
+    _REQUANT_BOUNDS,
+    ids=[arch for arch, *_ in _REQUANT_BOUNDS],
+)
+def test_requantizes_to_the_largest_value_of_the_target_encoding(
+    arch, atom_k, bound, other, engine
+):
+    """The block scale is ``amax / bound``, so the block's largest value
+    converts to the bound: 240 for gfx942's e4m3 FNUZ (448 would convert to
+    NaN there; the conversion does not saturate), 448 for gfx950's OCP e4m3.
+    Checked in the Python builder's kernel and in the C++ builder's, which
+    emits the same IR."""
+    from rocke.core.lower_llvm import llvm_f32_literal
+    from rocke.instances.common.moe_fused_mega_fp8 import (
+        build_moe_fused_mega_gemm_fp8,
+    )
+    from rocke.tests.engines import instance_llvm_from_engine
+
+    def reciprocal_of(value):
+        return f"= fdiv float {llvm_f32_literal(1.0)}, {llvm_f32_literal(value)}\n"
+
+    text = instance_llvm_from_engine(
+        _spec(gate_up_k=atom_k, down_k=atom_k),
+        arch,
+        engine=engine,
+        build_kernel=build_moe_fused_mega_gemm_fp8,
+        binding="moe_fused_mega_fp8_lower_llvm",
+    )
+    assert text.count(reciprocal_of(bound)) == 1
+    assert reciprocal_of(other) not in text
 
 
 if __name__ == "__main__":
