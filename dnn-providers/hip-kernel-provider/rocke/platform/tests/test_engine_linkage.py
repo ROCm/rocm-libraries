@@ -373,6 +373,24 @@ def test_every_entry_sets_a_resource_class_timeout(tmp_path, provider_subdir):
         assert not off_limit, (tree.name, off_limit)
 
 
+@requires_cmake
+def test_no_installed_entry_argument_quotes_a_value_inside_it(tmp_path):
+    """CMake keeps a quote that follows ``=`` inside a generated argument, so
+    ``--ignore=\"<path>\"`` reaches pytest as a path that starts with a quote
+    and ignores nothing. Every installed entry passes such a value as its own
+    token (``--ignore \"<path>\"``)."""
+    _, ctest_dir = configure_installed_ctest(
+        tmp_path, f"-DROCKE_INSTALL_PROVIDER_CTEST_SUBDIR={PROVIDER_CTEST_SUBDIR}"
+    )
+    quoted = [
+        (test["name"], argument)
+        for test in list_installed_ctest_entries(ctest_dir, tmp_path)
+        for argument in test.get("command", [])
+        if '="' in argument
+    ]
+    assert not quoted, quoted
+
+
 def gpu_test_limit() -> float:
     """The per-test limit of the GPU pytest entries that
     tests/cmake/TestTimeouts.cmake sets (ROCKE_TEST_ITEM_TIMEOUT_GPU), in
