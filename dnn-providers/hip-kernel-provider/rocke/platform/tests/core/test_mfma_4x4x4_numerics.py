@@ -203,7 +203,7 @@ def test_hip_lowering_emits_expected_builtin(dtype):
     assert _BUILTIN[dtype] in lower_kernel_to_hip(_build(dtype))
     # The HIP lowering of each engine applies the same catalog gate. Both
     # engines' HIP text for the listing targets is pinned by
-    # test_mma_operand_register_type.py (test_hip_batched_4x4x4_mfma_lowers_in_both_engines).
+    # test_mma_operand_register_type.py (test_hip_16_bit_mfma_lowers_in_both_engines).
     for arch in known_arches():
         if arch in _LISTED_ON[_op_id(dtype)]:
             assert _BUILTIN[dtype] in lower_kernel_to_hip(_build(dtype), arch=arch)
