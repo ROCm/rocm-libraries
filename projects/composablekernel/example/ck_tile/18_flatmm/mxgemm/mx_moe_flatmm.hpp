@@ -662,38 +662,56 @@ struct MxMoeLayerPlan
     bool persistent;
 };
 
-// Picks the faster plan for a layer from crossovers measured on gfx1250 (7 shapes: 8 to 256
-// experts, top-k 2 to 8, hidden 2048 to 7168, intermediate 768 to 7168; 1 to 1024 tokens; worst
-// pick 6% slower than the best plan, 0.4% on average):
+// Picks the faster plan for a layer from crossovers measured on gfx1250 (1 to 1024 tokens; row
+// tiles are estimated as one per active expert plus one per 32 pairs):
 // - Atomic combine for up to 128 (token, slot) pairs; past that its atomics cost more than the
 //   per-slot store and the combine launch.
-// - Persistent with the atomic combine when its tasks fit in half the resident grid (its
+// - Persistent with the atomic combine when its tasks fit in part of the resident grid (its
 //   synchronization then costs next to nothing, a launch is saved, and idle workgroups take K
 //   slices of the down projection), or with at most 8 experts, whose long tasks gain the most
 //   from overlapping the two projections.
-// - Persistent with the per-slot combine from 1024 pairs, with at most 16 experts or an
-//   intermediate of 4096 or more.
-// Row tiles are estimated as one per active expert plus one per 32 pairs.
-inline MxMoeLayerPlan
+// - Persistent with the per-slot combine from some number of pairs, where the overlap of the two
+//   projections outweighs the task synchronization.
+// The thresholds depend on the activation type (AType):
+// - a4w4 (pk_fp4_t; 7 shapes: 8 to 256 experts, top-k 2 to 8, hidden 2048 to 7168, intermediate
+//   768 to 7168; worst pick 6% slower than the best plan, 0.4% on average): atomic tasks within
+//   half the grid; per-slot persistent from 1024 pairs with at most 16 experts or an intermediate
+//   of 4096 or more.
+// - a8w4 (fp8_t; 6 shapes: 8 to 128 experts, same ranges otherwise; worst pick 7% slower, 1.0%
+//   on average): the heavier MX FP8 intermediate makes the overlap pay sooner: atomic tasks
+//   within three quarters of the grid; per-slot persistent from 256 pairs with at most 128
+//   experts.
+template <typename AType = ck_tile::pk_fp4_t>
+MxMoeLayerPlan
 choose_mx_moe_layer_plan(int experts, int num_tokens, int topk, int hidden, int inter)
 {
-    using K      = ck_tile::MoeFlatmmKind;
-    using F4     = ck_tile::pk_fp4_t;
-    using GateUp = typename MxMoeKernelTypes<K::kFFN_gemm1_gate_up_mx_quant, F4, F4, float>::Kernel;
-    using Down   = typename MxMoeKernelTypes<K::kFFN_gemm2, F4, F4, float>::Kernel;
-    using P      = ck_tile::MoeMxPersistentKernel<GateUp, Down>;
-    using SP     = ck_tile::FlatmmScalePointer<1, kScaleBlockK, ck_tile::e8m0_t>;
-    using Args   = ck_tile::MoeFlatmmHostArgs<SP, SP, ck_tile::FlatmmScalePointer<-1>>;
-    using PKargs = decltype(P::MakeKargs(std::declval<Args>(), std::declval<Args>(), nullptr));
+    using K            = ck_tile::MoeFlatmmKind;
+    using F4           = ck_tile::pk_fp4_t;
+    constexpr bool Fp8 = std::is_same_v<AType, ck_tile::fp8_t>;
+    static_assert(Fp8 || std::is_same_v<AType, F4>, "AType is ck_tile::pk_fp4_t or ck_tile::fp8_t");
+    constexpr K QuantKind =
+        Fp8 ? K::kFFN_gemm1_gate_up_mxfp8_quant : K::kFFN_gemm1_gate_up_mx_quant;
+    using GateUp    = typename MxMoeKernelTypes<QuantKind, AType, F4, float>::Kernel;
+    using Down      = typename MxMoeKernelTypes<K::kFFN_gemm2, AType, F4, float>::Kernel;
+    using P         = ck_tile::MoeMxPersistentKernel<GateUp, Down>;
+    using SP        = ck_tile::FlatmmScalePointer<1, kScaleBlockK, ck_tile::e8m0_t>;
+    using Args      = ck_tile::MoeFlatmmHostArgs<SP, SP, ck_tile::FlatmmScalePointer<-1>>;
+    using PKargs    = decltype(P::MakeKargs(std::declval<Args>(), std::declval<Args>(), nullptr));
     const int pairs = num_tokens * topk;
     if(pairs <= 128)
     {
         const int row_tiles = std::min(experts, pairs) + pairs / MXMoeFlatmmConfig::M_Tile;
         const int tasks     = row_tiles * (2 * inter / MXMoeFlatmmConfig::N_Tile +
                                        hidden / MXMoeFlatmmConfig::N_Tile);
-        return {false, experts <= 8 || 2 * tasks <= P::template MaxResidentWorkgroups<PKargs>()};
+        const int grid      = P::template MaxResidentWorkgroups<PKargs>();
+        // Atomic tasks within half (a4w4) or three quarters (a8w4) of the grid.
+        const bool one_wave = Fp8 ? 4 * tasks <= 3 * grid : 2 * tasks <= grid;
+        return {false, experts <= 8 || one_wave};
     }
-    return {true, pairs >= 1024 && (experts <= 16 || inter >= 4096)};
+    if constexpr(Fp8)
+        return {true, pairs >= 256 && experts <= 128};
+    else
+        return {true, pairs >= 1024 && (experts <= 16 || inter >= 4096)};
 }
 
 struct MxMoeLayerResult

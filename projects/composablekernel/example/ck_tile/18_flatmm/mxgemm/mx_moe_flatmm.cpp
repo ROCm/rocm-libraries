@@ -71,10 +71,13 @@ int main(int argc, char* argv[])
             l.persistent = arg_parser.get_int("persistent") != 0;
             if(arg_parser.get_str("combine") == "auto")
             {
-                const auto plan =
-                    choose_mx_moe_layer_plan(l.experts, l.num_tokens, l.topk, l.hidden, l.inter);
-                l.per_slot   = plan.per_slot;
-                l.persistent = plan.persistent;
+                const auto plan = prec == "fp8xfp4"
+                                      ? choose_mx_moe_layer_plan<ck_tile::fp8_t>(
+                                            l.experts, l.num_tokens, l.topk, l.hidden, l.inter)
+                                      : choose_mx_moe_layer_plan(
+                                            l.experts, l.num_tokens, l.topk, l.hidden, l.inter);
+                l.per_slot      = plan.per_slot;
+                l.persistent    = plan.persistent;
                 std::cout << "plan: " << (plan.per_slot ? "per-slot" : "atomic") << ", "
                           << (plan.persistent ? "persistent" : "two kernels") << std::endl;
             }

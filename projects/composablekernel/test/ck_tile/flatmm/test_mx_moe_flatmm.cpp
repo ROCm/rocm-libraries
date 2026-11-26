@@ -150,21 +150,21 @@ class MxMoeLayerA8W4 : public ::testing::TestWithParam<LayerCase>
 // Two kernels per-slot and atomic; the whole layer in one MoeMxPersistentKernel launch (gate_up and
 // down tasks synchronized by per-row-tile counters), launched twice so that the second runs on the
 // counters the first reset; and whatever plan choose_mx_moe_layer_plan picks for the case.
-#define MX_MOE_LAYER_TESTS(Suite, AType)                                                  \
-    TEST_P(Suite, PerSlot) { run_layer<AType>(GetParam(), true); }                        \
-    TEST_P(Suite, Atomic) { run_layer<AType>(GetParam(), false); }                        \
-    TEST_P(Suite, PersistentPerSlot) { run_layer<AType>(GetParam(), true, true); }        \
-    TEST_P(Suite, PersistentAtomic) { run_layer<AType>(GetParam(), false, true); }        \
-    TEST_P(Suite, AutoPlan)                                                               \
-    {                                                                                     \
-        const auto& t = GetParam();                                                       \
-        const auto plan =                                                                 \
-            choose_mx_moe_layer_plan(t.experts, t.num_tokens, t.topk, t.hidden, t.inter); \
-        run_layer<AType>(t, plan.per_slot, plan.persistent);                              \
-    }                                                                                     \
-    INSTANTIATE_TEST_SUITE_P(                                                             \
-        Layer, Suite, ::testing::ValuesIn(kLayerCases), [](const auto& param_info) {      \
-            return std::string(param_info.param.name);                                    \
+#define MX_MOE_LAYER_TESTS(Suite, AType)                                                         \
+    TEST_P(Suite, PerSlot) { run_layer<AType>(GetParam(), true); }                               \
+    TEST_P(Suite, Atomic) { run_layer<AType>(GetParam(), false); }                               \
+    TEST_P(Suite, PersistentPerSlot) { run_layer<AType>(GetParam(), true, true); }               \
+    TEST_P(Suite, PersistentAtomic) { run_layer<AType>(GetParam(), false, true); }               \
+    TEST_P(Suite, AutoPlan)                                                                      \
+    {                                                                                            \
+        const auto& t = GetParam();                                                              \
+        const auto plan =                                                                        \
+            choose_mx_moe_layer_plan<AType>(t.experts, t.num_tokens, t.topk, t.hidden, t.inter); \
+        run_layer<AType>(t, plan.per_slot, plan.persistent);                                     \
+    }                                                                                            \
+    INSTANTIATE_TEST_SUITE_P(                                                                    \
+        Layer, Suite, ::testing::ValuesIn(kLayerCases), [](const auto& param_info) {             \
+            return std::string(param_info.param.name);                                           \
         })
 
 MX_MOE_LAYER_TESTS(MxMoeLayerA4W4, ck_tile::pk_fp4_t);
