@@ -7092,8 +7092,6 @@ void testing_matmul_with_bias(const Arguments& arg,
                                                                         stride_d[i],
                                                                         num_batches[i],
                                                                         stream));
-            if(partitionedRun)
-                partitionedRun->checkpoint();
         }
         if(!verifyOutputs)
             return;
