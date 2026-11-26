@@ -98,6 +98,10 @@ typedef struct rocke_dconv_params
     rocke_value_t* p_B_stride_n;
     rocke_value_t* p_B_stride_hi;
     rocke_value_t* p_B_stride_wi;
+    /* fwd + bias only (rocke_dconv_emit_bias_params): the per-output-channel
+     * bias tail after the block; NULL otherwise. */
+    rocke_value_t* Bias;
+    rocke_value_t* Bias_bytes;
 } rocke_dconv_params_t;
 
 /* Declare the block. direction is "fwd", "dgrad" or "wgrad"; io_type is the
@@ -107,6 +111,13 @@ void rocke_dconv_emit_params(rocke_ir_builder_t* b,
                              rocke_dconv_params_t* params,
                              const char* direction,
                              const rocke_type_t* io_type);
+
+/* Python emit_direct_params(direction="fwd", bias=True): the forward block,
+ * then the (Bias, Bias_bytes) tail (rocke_conv_bias_declare_params) with the
+ * io_type bias pointer. */
+void rocke_dconv_emit_params_bias(rocke_ir_builder_t* b,
+                                  rocke_dconv_params_t* params,
+                                  const rocke_type_t* io_type);
 
 /* A[N,H,W,total_c] with runtime extents + the two conv-spatial embeds.
  * w_upper_0 / w_upper_1 name the column pair ("q_pos"/"W_lds_pos" for the

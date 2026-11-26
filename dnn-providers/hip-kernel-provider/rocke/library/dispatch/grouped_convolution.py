@@ -656,7 +656,12 @@ def _signature(spec: ConvInstanceSpec) -> tuple[dict, ...]:
         or direct_dgrad_kernarg_direction(spec.identity.algorithm) == "fwd"
         else spec.direction
     )
-    return tuple(conv_direct_args_signature(spec.dtype, direction=direction))
+    bias = bool(getattr(spec.identity, "bias", False))
+    return tuple(
+        conv_direct_args_signature(
+            spec.dtype, direction=direction, **({"bias": True} if bias else {})
+        )
+    )
 
 
 @functools.lru_cache(maxsize=4096)

@@ -7,6 +7,8 @@
  */
 #include "rocke/instance_conv_bias.h"
 
+#include "rocke/ir_internal.h" /* rocke_i_set_err */
+
 #include <string.h>
 
 /* The widest MMA fragment grid a conv kernel builds (mfmas_n per warp). */
@@ -50,6 +52,43 @@ rocke_value_t* rocke_conv_bias_load_f32(rocke_ir_builder_t* b,
     rocke_value_t* off = rocke_b_mul(b, k, c_eb);
     rocke_value_t* v = rocke_b_buffer_load(b, rsrc, off, c0, elem);
     return rocke_b_cast_to_f32(b, v);
+}
+
+rocke_value_t* rocke_conv_bias_load_vec_f32(rocke_ir_builder_t* b,
+                                            rocke_value_t* rsrc,
+                                            rocke_value_t* k,
+                                            int n,
+                                            const rocke_type_t* elem,
+                                            rocke_value_t* c0)
+{
+    const int eb = strcmp(elem->name, "f32") == 0 ? 4 : 2;
+    const int per = n < 16 / eb ? n : 16 / eb;
+    rocke_value_t* comps[ROCKE_CONV_BIAS_MAX_SLOTS];
+    int count = 0;
+    if(n <= 0 || n > ROCKE_CONV_BIAS_MAX_SLOTS || n % per != 0)
+    {
+        rocke_i_set_err(
+            b, ROCKE_ERR_VALUE, "load_conv_bias_vec_f32: %d elements in loads of %d", n, per);
+        return NULL;
+    }
+    rocke_value_t* c_eb = rocke_b_const_i32(b, eb);
+    rocke_value_t* off = rocke_b_mul(b, k, c_eb);
+    for(int j = 0; j < n; j += per)
+    {
+        rocke_value_t* voff = off;
+        if(j != 0)
+        {
+            rocke_value_t* c_j = rocke_b_const_i32(b, j * eb);
+            voff = rocke_b_add(b, off, c_j);
+        }
+        rocke_value_t* v = rocke_b_buffer_load_vN(b, rsrc, voff, c0, elem, per);
+        for(int i = 0; i < per; ++i)
+        {
+            rocke_value_t* e = rocke_b_vec_extract(b, v, i);
+            comps[count++] = rocke_b_cast_to_f32(b, e);
+        }
+    }
+    return rocke_b_vec_pack(b, comps, count, rocke_f32());
 }
 
 void rocke_conv_bias_add_to_accs(rocke_ir_builder_t* b,

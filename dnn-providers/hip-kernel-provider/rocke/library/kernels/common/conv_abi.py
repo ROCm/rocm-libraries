@@ -437,7 +437,9 @@ def conv_arg_names(
     )
 
 
-def conv_direct_arg_names(*, direction: str = "fwd") -> List[ArgSpec]:
+def conv_direct_arg_names(
+    *, direction: str = "fwd", bias: bool = False
+) -> List[ArgSpec]:
     """Direct grouped convolution: ``A`` (NHWC), ``B`` (KRSC), ``D`` (NHWK).
 
     Direct conv splits its parameters differently from implicit GEMM. The
@@ -462,6 +464,11 @@ def conv_direct_arg_names(*, direction: str = "fwd") -> List[ArgSpec]:
     ``direction="wgrad"`` binds dY (NHWK) to ``A`` and X (NHWC) to ``B``; ``D``
     is the fp32 dW the kernel atomically accumulates into, which is
     filter-shaped and so needs no stride args either.
+
+    ``bias`` (fwd only) appends the per-output-channel bias tail
+    (:func:`conv_bias_arg_names`) after everything else, the implicit-GEMM
+    forward's convention: a direct forward kernel built with ``bias``, and the
+    split-C fold that launches with the same block.
     """
     # Without this check any other string fell through to the forward ABI and
     # handed back a signature for a kernel that does not exist.
@@ -470,6 +477,8 @@ def conv_direct_arg_names(*, direction: str = "fwd") -> List[ArgSpec]:
             f"direct conv has no {direction!r} kernel; "
             f"expected 'fwd', 'dgrad' or 'wgrad'"
         )
+    if bias and direction != "fwd":
+        raise ValueError(f"bias extends the fwd ABI only (got direction={direction!r})")
     out: List[ArgSpec] = [
         ("A", "a"),
         ("B", "b"),
@@ -518,6 +527,8 @@ def conv_direct_arg_names(*, direction: str = "fwd") -> List[ArgSpec]:
             ("p_D_stride_ho", "i32"),  # Wo*total_k
             ("p_D_stride_wo", "i32"),  # total_k
         ]
+    if bias:
+        out += conv_bias_arg_names()
     return out
 
 
@@ -609,17 +620,20 @@ def conv_args_signature(
 
 
 def conv_direct_args_signature(
-    dtype: str = "fp16", *, direction: str = "fwd"
+    dtype: str = "fp16", *, direction: str = "fwd", bias: bool = False
 ) -> List[Dict[str, Any]]:
     """Direct grouped-conv AOT launch signature.
 
     ``dtype`` is the activation/filter element type (``fp16`` or ``bf16``).
     The wgrad kernel accumulates dW through fp32 atomics, so its ``D`` is
-    always ``fp32``.
+    always ``fp32``. ``bias`` (fwd only) adds the per-output-channel bias tail.
     """
     dtype_d = "fp32" if direction == "wgrad" else dtype
     return _conv_signature(
-        conv_direct_arg_names(direction=direction), dtype, dtype, dtype_d
+        conv_direct_arg_names(direction=direction, **({"bias": True} if bias else {})),
+        dtype,
+        dtype,
+        dtype_d,
     )
 
 

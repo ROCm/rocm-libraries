@@ -499,9 +499,9 @@ class ConvArgs:
         if self.algorithm == "direct":
             if two_stage or streamk is not None:
                 raise ValueError("direct conv has no two-stage or stream-K variant")
-            if bias:
-                raise ValueError("direct conv has no bias variant yet")
-            return conv_direct_arg_names(direction=self.direction)
+            return conv_direct_arg_names(
+                direction=self.direction, **({"bias": True} if bias else {})
+            )
         return conv_arg_names(
             direction=self.direction,
             is_3d=self.geom.is_3d,

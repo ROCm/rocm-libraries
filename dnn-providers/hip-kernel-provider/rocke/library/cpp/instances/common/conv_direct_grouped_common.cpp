@@ -31,6 +31,7 @@
 #include "rocke/helper_rocke.helpers.io.h" /* rocke_b_concat_tree, rocke_b_smem_load_fragment */
 #include "rocke/helper_rocke.helpers.transforms.h"
 #include "rocke/instance_conv_abi.h"
+#include "rocke/instance_conv_bias.h"
 #include "rocke/instance_conv_direct_grouped_internal.h"
 #include "rocke/ir.h"
 #include "rocke/ir_internal.h" /* rocke_i_set_err */
@@ -137,6 +138,15 @@ void rocke_dconv_emit_params(rocke_ir_builder_t* b,
     }
     rocke_conv_emit_param_block(
         b, &abi, dconv_declare_ptr, &decl, slots, (int)(sizeof(slots) / sizeof(slots[0])));
+}
+
+void rocke_dconv_emit_params_bias(rocke_ir_builder_t* b,
+                                  rocke_dconv_params_t* params,
+                                  const rocke_type_t* io_type)
+{
+    rocke_dconv_emit_params(b, params, "fwd", io_type);
+    rocke_conv_bias_declare_params(
+        b, io_type ? io_type : rocke_f16(), &params->Bias, &params->Bias_bytes);
 }
 
 /* ===================================================================== *

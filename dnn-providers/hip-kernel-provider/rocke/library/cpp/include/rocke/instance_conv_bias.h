@@ -15,6 +15,7 @@
  *   rocke_conv_bias_declare_params()      <->  declare_conv_bias_params()
  *   rocke_conv_bias_rsrc()                <->  conv_bias_rsrc()
  *   rocke_conv_bias_load_f32()            <->  load_conv_bias_f32()
+ *   rocke_conv_bias_load_vec_f32()        <->  load_conv_bias_vec_f32()
  *   rocke_conv_bias_add_to_accs()         <->  add_conv_bias_to_accs()
  *   rocke_conv_bias_apply_implicit_gemm() <->  apply_implicit_gemm_conv_bias()
  *
@@ -48,6 +49,16 @@ rocke_value_t* rocke_conv_bias_load_f32(rocke_ir_builder_t* b,
                                         rocke_value_t* k,
                                         const rocke_type_t* elem,
                                         rocke_value_t* c0);
+
+/* bias[k .. k+n) widened to an <n x f32> vector, read in loads of at most 16
+ * bytes (the direct kernels, which store runs of channels). n must be a whole
+ * number of such loads. */
+rocke_value_t* rocke_conv_bias_load_vec_f32(rocke_ir_builder_t* b,
+                                            rocke_value_t* rsrc,
+                                            rocke_value_t* k,
+                                            int n,
+                                            const rocke_type_t* elem,
+                                            rocke_value_t* c0);
 
 /* out[mi*mfmas_n + ni] = accs[mi*mfmas_n + ni] + splat(bias_per_ni[ni]).
  * Valid when every slot of a lane's fragment lies in one output column (all

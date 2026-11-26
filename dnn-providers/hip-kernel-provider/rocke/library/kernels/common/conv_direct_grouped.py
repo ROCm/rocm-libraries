@@ -108,7 +108,7 @@ from rocke.helpers.transforms import (
 
 
 def emit_direct_params(
-    b: IRBuilder, *, direction: str = "fwd", io_type=F16
+    b: IRBuilder, *, direction: str = "fwd", io_type=F16, bias: bool = False
 ) -> Dict[str, Value]:
     """Declare the direct-conv kernarg block in :mod:`conv_abi` order.
 
@@ -123,7 +123,20 @@ def emit_direct_params(
     ``direction="wgrad"`` binds dY to A and X to B, and D is the fp32 dW the
     kernel ``global_atomic_add``s into: an atomic reads its target, so it is
     not ``writeonly``, and a scalar f32 atomic only needs dword alignment.
+
+    ``bias`` (fwd only) declares the per-output-channel bias tail after the
+    block -- ``Bias`` (``io_type``) and ``Bias_bytes`` -- through
+    :func:`kernels.common.conv_bias.declare_conv_bias_params`; without it the
+    block is unchanged.
     """
+    if bias:
+        if direction != "fwd":
+            raise ValueError(f"bias extends the fwd ABI only (got {direction!r})")
+        from kernels.common.conv_bias import declare_conv_bias_params
+
+        out = emit_direct_params(b, direction=direction, io_type=io_type)
+        out["Bias"], out["Bias_bytes"] = declare_conv_bias_params(b, io_type)
+        return out
     out: Dict[str, Value] = {}
     for name, kind in conv_direct_arg_names(direction=direction):
         if kind == "i32":

@@ -21,6 +21,8 @@ The pieces are generic, so every conv family uses the same ones:
 * :func:`declare_conv_bias_params` -- the two kernargs, after every other one;
 * :func:`conv_bias_rsrc` -- the buffer resource over them;
 * :func:`load_conv_bias_f32` -- ``bias[k]`` as an fp32 value;
+* :func:`load_conv_bias_vec_f32` -- ``bias[k .. k+n)`` as an ``<n x f32>``
+  vector (the direct kernels, which store runs of channels);
 * :func:`add_conv_bias_to_accs` -- add one value per fragment column to MMA
   accumulator fragments;
 * :func:`apply_implicit_gemm_conv_bias` -- the implicit-GEMM forward's use of
@@ -42,6 +44,7 @@ __all__ = [
     "conv_bias_rsrc",
     "declare_conv_bias_params",
     "load_conv_bias_f32",
+    "load_conv_bias_vec_f32",
 ]
 
 
@@ -134,3 +137,26 @@ def apply_implicit_gemm_conv_bias(
         k_ni = k if ni == 0 else b.add(k, b.const_i32(ni * warp_tile_n))
         vals.append(load_conv_bias_f32(b, rsrc, k_ni, elem, c0))
     return add_conv_bias_to_accs(b, accs, vals, mfmas_m=mfmas_m, mfmas_n=mfmas_n)
+
+
+def load_conv_bias_vec_f32(
+    b: IRBuilder, rsrc: Value, k: Value, n: int, elem: Type, c0: Value
+) -> Value:
+    """``bias[k .. k+n)`` widened to an ``<n x f32>`` vector.
+
+    The run is read in loads of at most 16 bytes (one for 16-bit ``elem`` up
+    to ``n = 8``), each element widened, then packed. ``k`` is the element
+    index of the first channel; ``c0`` is the soffset (an i32 zero). A run
+    that ends past ``Bias_bytes`` reads 0 there.
+    """
+    eb = 4 if elem == F32 else 2
+    per = min(n, 16 // eb)
+    if n % per != 0:
+        raise ValueError(f"load_conv_bias_vec_f32: {n} elements in loads of {per}")
+    off = b.mul(k, b.const_i32(eb))
+    comps: List[Value] = []
+    for j in range(0, n, per):
+        voff = off if j == 0 else b.add(off, b.const_i32(j * eb))
+        v = b.buffer_load_vN(rsrc, voff, c0, elem, per)
+        comps += [b.cast_to_f32(b.vec_extract(v, i)) for i in range(per)]
+    return b.vec_pack(comps, F32)
