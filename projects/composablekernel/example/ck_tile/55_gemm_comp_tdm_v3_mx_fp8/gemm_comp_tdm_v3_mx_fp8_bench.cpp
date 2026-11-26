@@ -1073,6 +1073,30 @@ int dispatch_tile(const ck_tile::ArgParser& arg, const std::string& name)
             CK_EX55_SC(32, 128, 1, 1)
             CK_EX55_SC(32, 128, 1, 2)
             CK_EX55_SC(32, 128, 2, 2)
+            // round 4: 32x32 cluster shapes up to 16 workgroups, and a 512-deep K tile
+            CK_EX55_SC(32, 32, 1, 8)
+            CK_EX55_SC(32, 32, 2, 8)
+            CK_EX55_SC(32, 32, 4, 2)
+            CK_EX55_SC(32, 32, 8, 2)
+#define CK_EX55_SC512(TM, TN, CM, CN)                \
+    if(t == #TM "x" #TN "x512" && cl == #CM "x" #CN) \
+        return run<Instance<TM, TN, 512, 2, 2, TdmEpi, CDataType, 16, CM, CN>>(arg, name);
+            CK_EX55_SC512(32, 32, 2, 4)
+            CK_EX55_SC512(32, 32, 2, 2)
+            CK_EX55_SC512(32, 64, 2, 2)
+            // round 5: more clusters at K 512, and a 1024-deep K tile
+            CK_EX55_SC512(32, 32, 2, 8)
+            CK_EX55_SC512(32, 32, 4, 2)
+            CK_EX55_SC512(32, 64, 2, 4)
+            CK_EX55_SC512(64, 64, 2, 2)
+#define CK_EX55_SC1024(TM, TN, CM, CN)                \
+    if(t == #TM "x" #TN "x1024" && cl == #CM "x" #CN) \
+        return run<Instance<TM, TN, 1024, 2, 2, TdmEpi, CDataType, 16, CM, CN>>(arg, name);
+            CK_EX55_SC1024(32, 32, 2, 4)
+            CK_EX55_SC1024(32, 32, 2, 2)
+            CK_EX55_SC1024(32, 64, 2, 2)
+#undef CK_EX55_SC1024
+#undef CK_EX55_SC512
 #endif
 #undef CK_EX55_SC
 #endif
@@ -1256,6 +1280,15 @@ int dispatch_tile(const ck_tile::ArgParser& arg, const std::string& name)
         return run<Instance<256, 16, 128, 4, 1, TdmEpi, CDataType>>(arg, name);
     if(tile == "128x16x128")
         return run<Instance<128, 16, 128, 4, 1, TdmEpi, CDataType>>(arg, name);
+#if defined(CK_EX55_NARROW_K512)
+    // EXPERIMENT: -DCK_EX55_NARROW_K512: the 16-column tiles with a 512-deep K tile
+    if(tile == "256x16x512")
+        return run<Instance<256, 16, 512, 4, 1, TdmEpi, CDataType>>(arg, name);
+    if(tile == "128x16x512")
+        return run<Instance<128, 16, 512, 4, 1, TdmEpi, CDataType>>(arg, name);
+    if(tile == "64x16x512")
+        return run<Instance<64, 16, 512, 4, 1, TdmEpi, CDataType>>(arg, name);
+#endif
     std::printf("unknown -tile=%s (32x256x256, 32x128x256, 32x64x256, 64x256x256, 256x256x256, "
                 "16x512x256, 16x256x256, 16x128x256, 16x64x256, 512x16x256, 256x16x256, "
                 "128x16x256, 64x16x256, 256x16x128, 128x16x128)\n",
