@@ -1252,6 +1252,11 @@ RppStatus set_kernel_launch_config_2d(RpptGenericDescPtr srcGenericDescPtr, int&
 
             Rpp32u partialSumArrLength =
                 srcGenericDescPtr->dims[0] * srcGenericDescPtr->dims[1] * globalThreads_x;
+            // Same buffer, same rule: this form grows with the batch, the channels
+            // and the width.
+            constexpr Rpp32u kScratchBufferFloats = 8294400;
+            if (static_cast<Rpp64u>(partialSumArrLength) > kScratchBufferFloats)
+                return RPP_ERROR_OUT_OF_BOUND_SCRATCH_MEMORY_SIZE;
             RPP_HIP_RETURN_IF_ERROR(hipMemsetAsync(
                 partialSumArr, 0, partialSumArrLength * sizeof(Rpp32f), handle.GetStream()));
             RPP_HIP_RETURN_IF_ERROR(hipStreamSynchronize(handle.GetStream()));
