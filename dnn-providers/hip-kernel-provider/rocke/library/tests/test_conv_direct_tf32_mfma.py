@@ -38,6 +38,7 @@ from dataclasses import replace
 from pathlib import Path
 
 import numpy as np
+import pytest
 from rocke.core.lower_llvm import lower_kernel_to_llvm
 from rocke.numeric import storage
 from rocke.numeric.compare import peak_relative_error
@@ -854,6 +855,7 @@ _DGRAD_CASES = (
 )
 
 
+@pytest.mark.gpu
 @unittest.skipIf(_GPU_SKIP, _GPU_SKIP or "gpu")
 class TestDirectTf32Gpu(unittest.TestCase):
     """Every variant, fp32 and tf32, on gfx942 / gfx950 against a float64 reference."""

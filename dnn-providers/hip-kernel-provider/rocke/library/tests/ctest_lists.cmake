@@ -215,7 +215,8 @@ string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
 # Both entries collect the same files and split them with one -k
 # expression and its negation, so every test runs in exactly one of them; a
 # test the expression does not name runs in the first. The GPU classes (all
-# named *Gpu*) are deselected from both and run in the GPU list.
+# named *Gpu*, and marked gpu where they launch through the runtime directly)
+# are deselected from both and run in the GPU list.
 # test_conv_direct_grouped_backend_parity.py runs in
 # rocke_library_conv_pytest, not here. Their own entries rather than part
 # of rocke_library_conv_pytest: the build-and-lower matrices take tens of
@@ -244,7 +245,7 @@ foreach(_rocke_conv_tf32_test ${_ROCKE_LIBRARY_CONV_TF32_TEST_RELPATHS})
          " \"${ROCKE_TEST_CTEST_REL}${_rocke_conv_tf32_test}\"")
 endforeach()
 string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
-       "add_test(rocke_library_conv_tf32_pytest ${_ROCKE_INSTALLED_PYTEST}${_ROCKE_LIBRARY_CONV_TF32_TESTS} -k \"not Gpu and not (${_ROCKE_LIBRARY_CONV_TF32_LOWERING_K})\" -v -rs --timeout=60)\n")
+       "add_test(rocke_library_conv_tf32_pytest ${_ROCKE_INSTALLED_PYTEST}${_ROCKE_LIBRARY_CONV_TF32_TESTS} -m \"not gpu\" -k \"not Gpu and not (${_ROCKE_LIBRARY_CONV_TF32_LOWERING_K})\" -v -rs --timeout=60)\n")
 string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
        "set_tests_properties(rocke_library_conv_tf32_pytest PROPERTIES\n"
        "  LABELS \"ckc;python;conv;host;standard\"\n"
@@ -254,7 +255,7 @@ if(WIN32)
   message(STATUS "rocKE: rocke_library_conv_tf32_lowering_pytest not registered on Windows (CI shard time; see comment above)")
 else()
   string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
-         "add_test(rocke_library_conv_tf32_lowering_pytest ${_ROCKE_INSTALLED_PYTEST}${_ROCKE_LIBRARY_CONV_TF32_TESTS} -k \"not Gpu and (${_ROCKE_LIBRARY_CONV_TF32_LOWERING_K})\" -v -rs --timeout=120)\n")
+         "add_test(rocke_library_conv_tf32_lowering_pytest ${_ROCKE_INSTALLED_PYTEST}${_ROCKE_LIBRARY_CONV_TF32_TESTS} -m \"not gpu\" -k \"not Gpu and (${_ROCKE_LIBRARY_CONV_TF32_LOWERING_K})\" -v -rs --timeout=120)\n")
   string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
          "set_tests_properties(rocke_library_conv_tf32_lowering_pytest PROPERTIES\n"
          "  LABELS \"ckc;python;conv;host;standard\"\n"
