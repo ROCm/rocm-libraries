@@ -116,6 +116,32 @@ ATOMIC_16BIT_MAX_SPLIT_K = 128
 # ws_bytes is an i32 kernarg, so a two-stage workspace above this overflows it.
 MAX_WGRAD_WS_BYTES = (1 << 31) - 4
 
+# A non-addr64 wgrad kernel's dY/X byte offsets are i32 kernargs
+# (conv_abi.py's _wgrad_arg_names). Splitting K partitions *which* CTA
+# computes a given K_wg index, not the absolute byte offset that index maps
+# to -- a high-slice_id CTA still decodes the same high end of the N range
+# a degree-1 launch would, so no split-K degree narrows the byte range a
+# single launch's addressing must reach. The only two fixes for a genuinely
+# overflowing dY/X extent are addr64 (i64 everywhere) or N-batching into
+# separate launches (kernels.common conv_split_k has neither context nor
+# business doing that); this limit exists so the resolver fails fast with a
+# clear reason instead of handing back a degree that silently wraps.
+_INT32_MAX = (1 << 31) - 1
+
+
+def _wgrad_activation_bytes_exceed_i32(p: ConvProblem, dtype_a: str, dtype_b: str) -> bool:
+    """Whether ``p``'s dY or X operand needs more than an i32 byte offset.
+
+    Mirrors ``benchmarks.common.benchmark_implicit_gemm_conv._activation_bytes_exceed_i32``
+    (kernels may not import benchmarks -- see the layering rule in CLAUDE.md --
+    so this is the independent, split-K-resolver-local copy of that check).
+    """
+    dY_elems = p.N * p.Ho * (p.Do if p.is_3d else 1) * p.Wo * p.K
+    X_elems = p.N * p.Hi * (p.Di if p.is_3d else 1) * p.Wi * p.C
+    dY_bytes = dY_elems * _operand_bytes(dtype_a)
+    X_bytes = X_elems * _operand_bytes(dtype_b)
+    return max(dY_bytes, X_bytes) > _INT32_MAX
+
 # Targets the split-K forward kernel is built and validated for (the AOT cache
 # builds it for these only). Elsewhere an auto forward request resolves to 1.
 # gfx950 runs it on MFMA (wave64): the same plain K loop over one slice and the
@@ -622,7 +648,23 @@ def _resolve_wgrad(
     override: int | None,
     num_cus: int | None,
     num_xcds: int | None,
+    addr64: bool = False,
+    dtype_a: str | None = None,
+    dtype_b: str | None = None,
 ) -> ConvSplitK:
+    if not addr64 and _wgrad_activation_bytes_exceed_i32(
+        p, dtype_a or dtype, dtype_b or dtype
+    ):
+        # No split-K degree narrows this: see _INT32_MAX's docstring. A
+        # non-addr64 kernel built or run here would silently wrap its dY/X
+        # byte offsets, so fail the resolution itself rather than hand back a
+        # degree that still produces a corrupting kernel.
+        raise ValueError(
+            "wgrad split-K cannot be resolved for a non-addr64 kernel: "
+            f"this problem's dY/X extent exceeds i32 byte addressing "
+            f"(N={p.N}, Ho={p.Ho}, Wo={p.Wo}, Hi={p.Hi}, Wi={p.Wi}); pass "
+            "addr64=True (and build an addr64 spec)"
+        )
     gm = max(1, group_merge)
     ws_replicas = ws_replicas if ws_replicas > 0 else _DEFAULT_WS_REPLICAS
     grid_groups = max(1, p.groups // gm)
@@ -955,6 +997,9 @@ def resolve_conv_split_k(
     override: int | None = None,
     num_cus: int | None = None,
     num_xcds: int | None = None,
+    addr64: bool = False,
+    dtype_a: str | None = None,
+    dtype_b: str | None = None,
 ) -> ConvSplitK:
     """Resolve the split-K degree and, for wgrad, the reduction path.
 
@@ -992,6 +1037,20 @@ def resolve_conv_split_k(
         num_cus, num_xcds: CU and XCD counts of the device the kernel runs
             on, for a part built differently from its arch's default;
             ``None`` keeps the arch default.
+        addr64: wgrad only. Whether the resolved degree serves an addr64
+            (i64-addressed) kernel. ``False`` (the default, every non-wgrad
+            direction) rejects a problem whose dY/X extent exceeds i32 byte
+            addressing: splitting K does not narrow the absolute byte range
+            a single launch's CTAs reach (see
+            :func:`_wgrad_activation_bytes_exceed_i32`), so no degree can
+            rescue a plain kernel there -- the caller must build/select an
+            addr64 spec instead.
+        dtype_a, dtype_b: wgrad only, and only load-bearing when ``addr64``
+            is ``False``: the dY/X operand dtypes the i32-overflow check
+            above sizes against. ``None`` falls back to ``dtype`` (the
+            output dtype), which is exact whenever dY/X/dW share one dtype --
+            pass them explicitly for a mixed-precision spec, where dY/X's own
+            element size can differ from dW's.
 
     Forward convolution splits only on :data:`FWD_SPLIT_K_ARCHS` (the
     two-stage kernel); elsewhere, and for the problems that kernel cannot
@@ -1007,6 +1066,9 @@ def resolve_conv_split_k(
         raise ValueError(f"reduction={reduction!r} applies to wgrad only")
     if direction != "wgrad":
         epilogue = None
+        addr64 = False
+        dtype_a = None
+        dtype_b = None
     if override is not None and override < 1:
         raise ValueError(f"override must be None or >= 1, got {override}")
     return _resolve_cached(
@@ -1029,6 +1091,9 @@ def resolve_conv_split_k(
         override=override,
         num_cus=num_cus,
         num_xcds=num_xcds,
+        addr64=addr64,
+        dtype_a=dtype_a,
+        dtype_b=dtype_b,
     )
 
 
@@ -1055,6 +1120,9 @@ def _resolve_cached(
     override: int | None,
     num_cus: int | None,
     num_xcds: int | None,
+    addr64: bool,
+    dtype_a: str | None,
+    dtype_b: str | None,
 ) -> ConvSplitK:
     common = {
         "arch": arch,
@@ -1089,5 +1157,8 @@ def _resolve_cached(
         ws_replicas=ws_replicas,
         reduction=reduction,
         epilogue=epilogue,
+        addr64=addr64,
+        dtype_a=dtype_a,
+        dtype_b=dtype_b,
         **common,
     )

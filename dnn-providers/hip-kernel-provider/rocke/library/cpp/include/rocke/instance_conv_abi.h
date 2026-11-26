@@ -73,19 +73,24 @@ bool rocke_conv_arg_names(const char* direction,
                           bool two_stage,
                           rocke_conv_arg_list_t* out);
 
-/* As above, plus wgrad's stream-K variant and fwd's addr64 large-tensor
- * variant: `streamk` names the reduction ("atomic", "workspace", "linear" or
- * "tree") of a stream-K kernel, or is NULL for a kernel without stream-K. A
- * stream-K list carries the reduction's buffers after ks_count and then the
- * partition block. `addr64` selects the large-tensor forward-addressing ABI:
- * fwd-only, 2D-only, and mutually exclusive with two_stage (no split-K
- * builder for it yet) -- widens the byte triple, p_M, and the strides
- * multiplying a possibly-huge leading coord to i64, and drops the m_ magic
- * pair (addr64's M-decode is exact division, not magic). Returns false for a
- * non-wgrad direction with streamk set, an unknown reduction, stream-K
- * combined with two_stage, addr64 on a non-fwd direction, addr64 combined
- * with is_3d, or addr64 combined with two_stage -- the cases
- * conv_arg_names()/_fwd_arg_names() raise on. */
+/* As above, plus wgrad's stream-K variant and the addr64 large-tensor
+ * variant (fwd or wgrad): `streamk` names the reduction ("atomic",
+ * "workspace", "linear" or "tree") of a stream-K kernel, or is NULL for a
+ * kernel without stream-K. A stream-K list carries the reduction's buffers
+ * after ks_count and then the partition block. `addr64` selects the
+ * large-tensor addressing ABI, 2D-only: on fwd it widens the byte triple,
+ * p_M, and the strides multiplying a possibly-huge leading coord to i64 and
+ * drops the m_ magic pair (exact division instead of magic), and is
+ * mutually exclusive with two_stage (no split-K builder for fwd addr64
+ * yet); on wgrad it widens the byte triple, p_wg_K, the dY/X leading
+ * strides and ks to i64 and drops the k_ magic pair, and freely combines
+ * with two_stage/split-K (the point of the wgrad addr64 slice) -- dW stays
+ * i32-addressed either way, since it is bounded by the filter, never by
+ * K_wg. Returns false for a non-wgrad direction with streamk set, an
+ * unknown reduction, stream-K combined with two_stage, addr64 on neither
+ * fwd nor wgrad, addr64 combined with is_3d, or addr64+two_stage on fwd --
+ * the cases conv_arg_names()/_fwd_arg_names()/_wgrad_arg_names() raise
+ * on. */
 bool rocke_conv_arg_names_ex(const char* direction,
                              bool is_3d,
                              bool two_stage,

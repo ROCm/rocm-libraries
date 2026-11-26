@@ -1376,6 +1376,20 @@ def main() -> int:
         help="verify every kernel against the torch reference; ranking skips failures",
     )
     parser.add_argument(
+        "--verify-ramp",
+        action="store_true",
+        dest="verify_ramp",
+        help=(
+            "wgrad only: verify against a closed-form reference instead of "
+            "torch.nn.grad.conv2d_weight (dY=1, X[n]=n%%2048 broadcast over "
+            "C/Hi/Wi, so every (y,x) kernel-window tap's expected dW is a "
+            "tiny sum, independent of k/c). No torch backward call, no "
+            "full-tensor reference computation -- use at problem sizes where "
+            "the torch reference itself is too slow or unreliable (observed "
+            "wrong at large channel counts). Implies --verify."
+        ),
+    )
+    parser.add_argument(
         "--dump-fail",
         default=None,
         metavar="PATH",
@@ -4960,7 +4974,12 @@ def _run_from_cache(args, arch, target, cases, cache, directions) -> int:
             # FLOP count stay the case's own -- the fold keeps every byte.
             run_problem = _launch_problem(direction, problem)
             try:
-                batch_chunks = _batch_chunks(direction, run_problem, case_dtype)
+                batch_chunks = _batch_chunks(
+                    direction,
+                    run_problem,
+                    case_dtype,
+                    addr64=args.addr64 and direction in ("fwd", "wgrad"),
+                )
             except ValueError as e:
                 print(
                     f"Case {case_idx} {problem.short()} {case_dtype} {direction}: {e}",
@@ -5019,6 +5038,22 @@ def _run_from_cache(args, arch, target, cases, cache, directions) -> int:
                         f"no compatible kernel (depthwise runs split-K and "
                         f"stream-K kernels only; the cache has none for this "
                         f"shape)",
+                        flush=True,
+                    )
+                    continue
+            if len(batch_chunks) == 1 and _activation_bytes_exceed_i32(
+                direction, fit_problem, case_dtype
+            ):
+                # The single slice itself overflows i32 addressing: only
+                # offered because --addr64 told _batch_chunks to skip the
+                # split. A plain i32 kernel would silently wrap its offsets
+                # on this slice, so only addr64 kernels may serve it.
+                candidates = [c for c in candidates if c[0].addr64]
+                if not candidates:
+                    print(
+                        f"Case {case_idx} {problem.short()} {case_dtype} {direction}: "
+                        f"no compatible kernel (this slice's activations exceed "
+                        f"i32 addressing; only an addr64 kernel can serve it)",
                         flush=True,
                     )
                     continue
@@ -5123,7 +5158,11 @@ def _run_from_cache(args, arch, target, cases, cache, directions) -> int:
             else:
                 a_shape, b_shape, d_shape = nhwc, krsc, nhwk
 
-            if direction == "fwd":
+            if args.verify_ramp and direction == "wgrad":
+                from builders.common.conv_reference import wgrad_ramp_operands
+
+                A_t, B_t = wgrad_ramp_operands(run_problem, torch_dtype=torch_dt)
+            elif direction == "fwd":
                 A_t = conv_fill.fill_x(torch.empty(*a_shape, dtype=torch_dt))
                 B_t = conv_fill.fill_w(
                     torch.empty(*b_shape, dtype=torch_dt), case_dtype
@@ -5145,11 +5184,18 @@ def _run_from_cache(args, arch, target, cases, cache, directions) -> int:
             results = []
             # --verify / --dump-fail: one reference per case and direction;
             # every cached kernel is checked against it before it is timed.
-            ref_out = (
-                _cache_reference(direction, problem, A_t, B_t, torch_dt, arch)
-                if args.verify or args.dump_fail
-                else None
-            )
+            if args.verify_ramp and direction == "wgrad":
+                from builders.common.conv_reference import wgrad_ramp_reference_tensor
+
+                ref_out = wgrad_ramp_reference_tensor(run_problem)
+                if arch != "gfx1250":
+                    ref_out = ref_out.cuda()
+            else:
+                ref_out = (
+                    _cache_reference(direction, problem, A_t, B_t, torch_dt, arch)
+                    if args.verify or args.dump_fail
+                    else None
+                )
             _stop = EarlyStop.for_case(args, problem, case_dtype, direction)
             n_failed = 0
 
@@ -5335,6 +5381,9 @@ def _run_from_cache(args, arch, target, cases, cache, directions) -> int:
                                 arch=arch,
                                 compute_dtype=case_dtype,
                                 ref_floor=conv_fill.ref_floor(direction),
+                                extra_tensors={"dY": A_t, "X": B_t}
+                                if direction == "wgrad"
+                                else None,
                             )
                         except (HipError, RuntimeError) as e:
                             print(f"  verify {label}: FAIL({e})", flush=True)
@@ -5864,13 +5913,17 @@ def _signature_for_identity(ident, dtype):
             is_3d=ident.is_3d,
             two_stage=ident.two_stage,
             streamk=ident.streamk_reduction if ident.streamk != "off" else None,
+            addr64=ident.addr64,
         )
     if ident.direction == "dgrad":
         return conv_args_signature(
             storage_dtype(dtype), direction="dgrad", is_3d=ident.is_3d
         )
     return conv_args_signature(
-        storage_dtype(dtype), is_3d=ident.is_3d, two_stage=ident.two_stage
+        storage_dtype(dtype),
+        is_3d=ident.is_3d,
+        two_stage=ident.two_stage,
+        addr64=ident.addr64,
     )
 
 
@@ -6347,7 +6400,22 @@ def _runtime_split_ks(
 _INT32_MAX = 2**31 - 1
 
 
-def _batch_chunks(direction, problem, dtype) -> list:
+def _activation_bytes_exceed_i32(direction, problem, dtype) -> bool:
+    """Whether ``problem``'s per-N-slice activations overflow i32 addressing.
+
+    Shared by :func:`_batch_chunks` (to decide whether a split is needed at
+    all) and by the candidate filter in :func:`_run_from_cache` (to decide
+    whether only addr64 kernels -- not plain i32 ones, which would silently
+    wrap -- may serve a single, unsplit slice).
+    """
+    elem = 4 if storage_dtype(dtype) == "fp32" else 2
+    spatial_in = (problem.Di or 1) * problem.Hi * problem.Wi
+    spatial_out = (problem.Do if problem.is_3d else 1) * problem.Ho * problem.Wo
+    per_image = max(spatial_in * problem.C, spatial_out * problem.K) * elem
+    return per_image * problem.N > _INT32_MAX
+
+
+def _batch_chunks(direction, problem, dtype, addr64: bool = False) -> list:
     """``[(n0, n), ...]``: the batch slices one launch each covers.
 
     An AOT conv kernel takes its operand byte sizes as i32 kernargs and
@@ -6364,7 +6432,16 @@ def _batch_chunks(direction, problem, dtype) -> list:
     computes the whole reduction. The caller offers only such kernels when
     this returns more than one slice (see :func:`_wgrad_accumulates`).
 
-    Raises ``ValueError`` for a problem no split can bring into range.
+    ``addr64=True`` (the caller requested addr64 kernels, which widen the
+    activation operands' byte offsets to i64) skips the activation-side split
+    entirely: a single, unsplit launch is offered instead, and the caller is
+    responsible for restricting candidates to addr64-capable kernels for it
+    (see :func:`_activation_bytes_exceed_i32`) -- a plain i32 kernel launched
+    on such a slice would silently wrap its offsets. The weight tensor stays
+    i32-bounded regardless of addr64 (dW/the ABI's D operand is never widened).
+
+    Raises ``ValueError`` for a problem no split (or, under addr64, no
+    addr64 kernel) can bring into range.
     """
     elem = 4 if storage_dtype(dtype) == "fp32" else 2
     spatial_in = (problem.Di or 1) * problem.Hi * problem.Wi
@@ -6377,6 +6454,8 @@ def _batch_chunks(direction, problem, dtype) -> list:
             f"2^31-byte operand addressing"
         )
     if per_image * problem.N <= _INT32_MAX:
+        return [(0, problem.N)]
+    if addr64:
         return [(0, problem.N)]
     if per_image > _INT32_MAX:
         raise ValueError(

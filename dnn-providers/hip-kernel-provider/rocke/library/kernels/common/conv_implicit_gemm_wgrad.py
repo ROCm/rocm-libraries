@@ -90,6 +90,7 @@ from rocke.core.ir import (
     F16,
     F32,
     I32,
+    I64,
     IRBuilder,
     KernelDef,
     PtrType,
@@ -105,7 +106,11 @@ from rocke.helpers.mfma_gemm_inner import decode_mfma_lanes
 from rocke.helpers.pipeline import SoftwarePipeline
 from rocke.helpers.schedule import SchedulePolicy
 from rocke.helpers.spec import kernel_name_join
-from rocke.helpers.tensor_view import make_buffer_resource
+from rocke.helpers.tensor_view import (
+    make_buffer_resource,
+    make_tile_buffer_resource,
+    tile_origin_decode_i64,
+)
 from rocke.helpers.transforms import (
     TensorDescriptor,
     DynamicTensorDescriptor,
@@ -127,10 +132,14 @@ from kernels.common._conv_implicit_gemm_common import (
     _load_mma_operand,
     _mfma_issues_per_mma,
     _tf32_conv_spec_reason,
+    addr64_dy_origin_bytes,
+    addr64_x_origin_bytes,
     emit_param_block,
     make_a_descriptor,
     make_a_descriptor_dynamic,
     make_b_descriptor_dynamic,
+    make_dy_descriptor_addr64,
+    make_x_wgrad_descriptor_addr64,
     spatial_unmerge_dynamic,
     vector_width_reason,
 )
@@ -436,6 +445,10 @@ def make_dw_descriptor_dynamic(
 # field docs on :class:`WgradConvSpec` for why more than one slab is needed.
 _DEFAULT_WS_REPLICAS = 8
 
+# Element byte width for the addr64 tile-origin byte-offset math (mirrors
+# conv_implicit_gemm.py's identical fwd addr64 table).
+_ADDR64_ELEM_BYTES = {"fp16": 2, "f16": 2, "bf16": 2, "fp32": 4}
+
 
 @dataclass(frozen=True)
 class WgradConvSpec:
@@ -667,6 +680,28 @@ class WgradConvSpec:
     # later CTAs, which ascending dispatch always starts (see
     # wgrad_streamk_default_ctas).
     streamk_ctas: int = -1
+    # Large-tensor (addr64) wgrad addressing: widens the byte offsets along
+    # K_wg = N*[Do*]Ho*Wo (the reduction axis dY/X scale with) from i32 to
+    # i64, so a K_wg large enough to overflow a 32-bit byte offset no longer
+    # silently corrupts memory. Unlike fwd's addr64 (which widens the M-origin,
+    # decoded once per CTA), this widens the K-tile base the reduction loop
+    # advances -- see conv_abi.py's _wgrad_arg_names docstring for the exact
+    # ABI shape. dW stays i32 (bounded by the filter, never by K_wg).
+    #
+    # The K-tile origin (n0, ho0, wo0) is decoded once per K-loop iteration
+    # (tile_origin_decode_i64, i64 exact division -- cheap: scalar/uniform,
+    # once per iteration, not once per lane or per load) via
+    # make_tile_buffer_resource, exactly mirroring fwd's once-per-CTA
+    # M-origin decode except anchored to the current K-tile instead of a
+    # fixed M range. See validate() for the exact scope this is wired for
+    # (2D, MFMA, non-pointwise, non-group_merge, non-streamk, plain sync
+    # K-loop) and the Ho*Wo % tile_k precondition this relies on.
+    #
+    # KNOWN GAP: no C++ mirror yet (platform/AGENTS.md's byte-identity rule
+    # is not satisfied), same as fwd's addr64. Direct-conv wgrad and the
+    # split-K resolver's overflow-safety floor are also not covered by this
+    # flag -- see the plan this was built from for what's still open.
+    addr64: bool = False
 
     @property
     def block_size(self) -> int:
@@ -824,10 +859,57 @@ class WgradConvSpec:
                 # kernel could collide with a BF16 one in the compile cache.
                 # Last, and only when set, so every other name is unchanged.
                 "tf32": self.data.is_tf32,
+                # Large-tensor addressing; see the addr64 field's docstring.
+                "a64": self.addr64,
             },
         )
 
     def validate(self) -> None:
+        if self.addr64:
+            # 2D, MFMA (checked in the builder, arch-dependent), non-pointwise,
+            # non-group_merge, non-streamk, non-chiplet-swizzle, plain sync
+            # K-loop only (no unroll/prefetch/async) -- the scope the K-loop's
+            # per-iteration i64 origin decode has actually been wired for.
+            # Grouped conv and split-K ARE allowed: the group fold lands on
+            # the (bounded) channel/free axis, orthogonal to the i64 spatial
+            # decode, and split-K's slice start is exactly the quantity that
+            # needed widening (see conv_abi.py's addr64 ``ks``/``p_wg_K``).
+            if self.problem.is_3d:
+                raise ValueError("wgrad addr64 does not yet support is_3d (2D only)")
+            if self.problem.is_pointwise:
+                raise ValueError("wgrad addr64 does not yet support is_pointwise")
+            if self.group_merge > 1:
+                raise ValueError("wgrad addr64 does not yet support group_merge")
+            if self.streamk != "off":
+                raise ValueError("wgrad addr64 does not yet support stream-K")
+            if self.chiplet_swizzle:
+                raise ValueError("wgrad addr64 does not yet support chiplet_swizzle")
+            if self.async_dma or self.unroll_k or self.prefetch_addr:
+                raise ValueError(
+                    "wgrad addr64 only supports the plain sync K-loop (no "
+                    "async_dma/unroll_k/prefetch_addr)"
+                )
+            if self.prefetch_global_regs:
+                raise ValueError(
+                    "wgrad addr64 does not yet support prefetch_global_regs"
+                )
+            if self.lds_k_outer:
+                raise ValueError("wgrad addr64 does not yet support lds_k_outer")
+            # The addr64 K-tile descriptor (make_dy_descriptor_addr64 /
+            # make_x_wgrad_descriptor_addr64) computes hi/wi absolutely
+            # against a tile origin that only carries n0's contribution, so
+            # every lane's K-tile must decode to the same image (n) as the
+            # tile origin -- i.e. a tile_k-wide run of K_wg can never cross
+            # an (Ho*Wo)-aligned image boundary. See
+            # _conv_implicit_gemm_common.make_a_descriptor_addr64's
+            # docstring for the identical fwd precondition on block_m.
+            if (self.problem.Ho * self.problem.Wo) % self.tile_k != 0:
+                raise ValueError(
+                    "wgrad addr64 requires Ho*Wo to be a multiple of tile_k "
+                    f"(got Ho*Wo={self.problem.Ho * self.problem.Wo}, "
+                    f"tile_k={self.tile_k}) so no K-tile crosses an image "
+                    "boundary"
+                )
         _tf32_why = _wgrad_tf32_reason(self)
         if _tf32_why:
             raise ValueError(_tf32_why)
@@ -2459,6 +2541,9 @@ def build_implicit_gemm_conv_wgrad(
             epilogue=None if spec.two_stage else spec.epilogue,
             # A two-stage spec is a split-K kernel: degree 1 would not validate.
             allow_unsplit=not spec.two_stage,
+            addr64=spec.addr64,
+            dtype_a=spec.data.dtype_a,
+            dtype_b=spec.data.dtype_b,
         )
         spec = dc_replace(spec, split_k=resolved.split_k)
 
@@ -2561,6 +2646,7 @@ def build_implicit_gemm_conv_wgrad(
             is_3d=p.is_3d,
             two_stage=_is_two_stage,
             streamk=spec.streamk_reduction if _is_streamk else None,
+            addr64=spec.addr64,
         ),
         declare_ptr=_declare_wgrad_ptr,
     )
@@ -2599,6 +2685,11 @@ def build_implicit_gemm_conv_wgrad(
     # -------------------------------------------------------------------------
 
     op = _resolve_wgrad_op(spec, arch)
+    if spec.addr64 and op.family != "mma":
+        raise ValueError(
+            f"wgrad addr64 is only implemented for the MFMA path (got "
+            f"op.family={op.family!r})"
+        )
     atom = spec.atom if op.family == "mma" else None
     a_per_lane = op.a_frag_len
     b_per_lane = op.b_frag_len
@@ -2660,8 +2751,13 @@ def build_implicit_gemm_conv_wgrad(
     warp_n_idx = grid.warp_n_idx
 
     c0 = b.const_i32(0)
-    c_block_k = b.const_i32(block_k)
-    c_wg_K = p_wg_K  # runtime Value (was b.const_i32(wg_K))
+    # Under addr64 the K-loop induction variable (and everything derived from
+    # it: k_lo/k_hi/the loop bound) is i64, since K_wg can overflow i32 -- see
+    # conv_abi.py's _wgrad_arg_names docstring. scf_for_iter's induction
+    # variable takes its type from ``lower``, so stepping the loop in i64
+    # only needs an i64 step constant here.
+    c_block_k = b.const_i64(block_k) if spec.addr64 else b.const_i32(block_k)
+    c_wg_K = p_wg_K  # runtime Value (was b.const_i32(wg_K)); i64 under addr64
 
     # Grouped wgrad: the group index rides on ``block_id_z`` (grid-per-group,
     # matching forward).  The group and the K-slice SHARE the z axis: the grid
@@ -2709,8 +2805,15 @@ def build_implicit_gemm_conv_wgrad(
                 slice_v = slice_id
         else:
             slice_id = b.mod(z_id, _ks_count_param)
-        k_lo = b.to_sgpr_u32(b.mul(slice_id, c_ks))
-        k_hi = b.to_sgpr_u32(b.add(k_lo, c_ks))
+        if spec.addr64:
+            # slice_id/group_v stay i32 (ks_count and the group count are
+            # both bounded, never K_wg-scaled); only the slice *offset*
+            # (slice_id * ks) can be large, so it is the one term widened.
+            k_lo = b.mul(b.zext(slice_id, I64), c_ks)
+            k_hi = b.add(k_lo, c_ks)
+        else:
+            k_lo = b.to_sgpr_u32(b.mul(slice_id, c_ks))
+            k_hi = b.to_sgpr_u32(b.add(k_lo, c_ks))
 
     # Chiplet swizzle (same logic as forward; tile counts from wgrad GEMM dims).
     # The tile counts are runtime kernargs — the host computes them from the
@@ -2855,6 +2958,15 @@ def build_implicit_gemm_conv_wgrad(
         _c_wgM_ir = p_wg_M
         _c_wgN_ir = p_wg_N
         _c_wgK_ir = p_wg_K
+    elif spec.addr64:
+        # The addr64 K-wg decode has no magic-number pair (conv_abi.py's
+        # ``_wgrad_arg_names`` drops it under addr64), so the ordinary
+        # magic-division descriptors cannot be built at all here -- they are
+        # replaced per K-loop-iteration inside emit_load_phase instead (see
+        # make_dy_descriptor_addr64 / make_x_wgrad_descriptor_addr64).
+        dY_desc = None
+        X_desc = None
+        _c_K_ir = _c_C_ir = _c_wgM_ir = _c_wgN_ir = _c_wgK_ir = None
     else:
         dY_desc = make_dy_descriptor_dynamic(b, params, is_3d=p.is_3d)
         x_params = params
@@ -2880,22 +2992,51 @@ def build_implicit_gemm_conv_wgrad(
         )
         _c_K_ir = _c_C_ir = _c_wgM_ir = _c_wgN_ir = _c_wgK_ir = None
 
-    dy_buf_rsrc = make_buffer_resource(b, dY, num_bytes=dY_bytes)
-    x_buf_rsrc = make_buffer_resource(b, X, num_bytes=X_bytes)
+    # dY_bytes/X_bytes are i64 kernargs under addr64 (the ABI widens the
+    # whole byte triple together), so they cannot feed make_buffer_resource's
+    # plain i32 num_bytes -- the addr64 path instead rebuilds a fresh
+    # dy_rsrc/x_rsrc every K-loop iteration from the *current tile's* i64
+    # origin (see emit_load_phase), exactly mirroring fwd's once-per-CTA
+    # a_buf_rsrc/d_buf_rsrc except recomputed per iteration since K_wg (not
+    # M) is wgrad's large axis. dW stays i32-bounded regardless, so
+    # dw_buf_rsrc is unaffected and built once as before.
+    if spec.addr64:
+        dy_rsrc = None
+        x_rsrc = None
+    else:
+        dy_buf_rsrc = make_buffer_resource(b, dY, num_bytes=dY_bytes)
+        x_buf_rsrc = make_buffer_resource(b, X, num_bytes=X_bytes)
+        dy_rsrc = dy_buf_rsrc.rsrc
+        x_rsrc = x_buf_rsrc.rsrc
     dw_buf_rsrc = make_buffer_resource(b, dW, num_bytes=dW_bytes)
-    dy_rsrc = dy_buf_rsrc.rsrc
-    x_rsrc = x_buf_rsrc.rsrc
     dw_rsrc = dw_buf_rsrc.rsrc
 
     k_off_capture: List[Optional[Value]] = [None]
+    # addr64 only: this K-loop iteration's descriptor objects / buffer
+    # resources, rebuilt once per iteration in emit_load_phase from the
+    # current tile's i64 origin (dy_descriptor/x_descriptor below are called
+    # once per lane per iteration -- many times -- so the descriptor object
+    # itself must be built exactly once per iteration, not per lane, which is
+    # why this is a capture rather than a per-call construction).
+    addr64_dy_desc_capture: List[object] = [None]
+    addr64_x_desc_capture: List[object] = [None]
+    addr64_dy_rsrc_capture: List[Optional[Value]] = [None]
+    addr64_x_rsrc_capture: List[Optional[Value]] = [None]
 
     def dy_descriptor(b_: IRBuilder, row: Value, col: Value):
         k_out = b_.add(block_m_off_v, row)
         if grouped:
             # dY is NHWK with the full K; group g owns the output-channel slab
             # [g*kpg, (g+1)*kpg).  Fold the group base into the (stride-1) k_out
-            # coord — no descriptor change needed.
+            # coord — no descriptor change needed. Bounded by K (never by
+            # K_wg), so this stays i32 even under addr64.
             k_out = b_.add(k_out, b_.mul(group_v, c_kpg))
+        if spec.addr64:
+            # col is the per-lane delta from this iteration's i64 origin
+            # (bounded by tile_k); the origin's "n" contribution is already
+            # folded into addr64_dy_rsrc_capture's pointer, not recomputed
+            # here -- see make_dy_descriptor_addr64.
+            return addr64_dy_desc_capture[0].offset(b_, k_wg=col, k_out=k_out)
         k_wg_red = b_.add(k_off_capture[0], col)
         if p.is_pointwise:
             # Flat: offset = k_wg_red * K + k_out
@@ -2907,6 +3048,12 @@ def build_implicit_gemm_conv_wgrad(
 
     def x_descriptor(b_: IRBuilder, row: Value, col: Value):
         k_val = b_.add(block_n_off_v, row)  # N_wg: filter+channel position
+        if spec.addr64:
+            if grouped:
+                return addr64_x_desc_capture[0].offset(
+                    b_, k_wg=col, n_wg=k_val, group=group_v
+                )
+            return addr64_x_desc_capture[0].offset(b_, k_wg=col, n_wg=k_val)
         m_val = b_.add(k_off_capture[0], col)  # K_wg: output spatial position
         if p.is_pointwise:
             # Flat: offset = k_wg * C + n_wg (n_wg == c for 1x1)
@@ -3018,6 +3165,49 @@ def build_implicit_gemm_conv_wgrad(
     def emit_load_phase(k_off: Value, A_dst: Value, B_dst: Value) -> None:
         k_off_capture[0] = k_off
 
+        if spec.addr64:
+            # Decode this K-tile's i64 origin once per iteration (cheap:
+            # wave-uniform scalar arithmetic, not per-lane) -- the addr64
+            # counterpart of fwd's once-per-CTA M-origin decode, anchored to
+            # the current K-tile instead of a fixed M range since K_wg (not
+            # M) is wgrad's large axis. validate() guarantees Ho*Wo is a
+            # multiple of tile_k, so every lane's tile stays within one
+            # image (n).
+            _ho_i64 = b.zext(p_Ho, I64)
+            _wo_i64 = b.zext(p_Wo, I64)
+            _n0_i64, _ho0_i64, _wo0_i64 = tile_origin_decode_i64(
+                b, k_off, [_ho_i64, _wo_i64]
+            )
+            _origin_coords = [
+                b.trunc(_n0_i64, I32),
+                b.trunc(_ho0_i64, I32),
+                b.trunc(_wo0_i64, I32),
+            ]
+            addr64_dy_desc_capture[0] = make_dy_descriptor_addr64(
+                b, params, origin_coords=_origin_coords
+            )
+            addr64_x_desc_capture[0] = make_x_wgrad_descriptor_addr64(
+                b, params, origin_coords=_origin_coords, grouped=grouped
+            )
+            _dy_elem_bytes = _ADDR64_ELEM_BYTES.get(spec.data.dtype_a, 2)
+            _x_elem_bytes = _ADDR64_ELEM_BYTES.get(spec.data.dtype_b, 2)
+            addr64_dy_rsrc_capture[0] = make_tile_buffer_resource(
+                b,
+                dY,
+                origin_i64=addr64_dy_origin_bytes(
+                    b, params, n0_i64=_n0_i64, elem_bytes=_dy_elem_bytes
+                ),
+                total_bytes_i64=dY_bytes,
+            ).rsrc
+            addr64_x_rsrc_capture[0] = make_tile_buffer_resource(
+                b,
+                X,
+                origin_i64=addr64_x_origin_bytes(
+                    b, params, n0_i64=_n0_i64, elem_bytes=_x_elem_bytes
+                ),
+                total_bytes_i64=X_bytes,
+            ).rsrc
+
         if spec.lds_k_outer:
             # The K-outer tile is indexed (k, free); the descriptors take
             # (free, k). Swap the two coordinates -- the descriptors themselves
@@ -3069,11 +3259,13 @@ def build_implicit_gemm_conv_wgrad(
             )
             return
 
+        _dy_rsrc_now = addr64_dy_rsrc_capture[0] if spec.addr64 else dy_rsrc
+        _x_rsrc_now = addr64_x_rsrc_capture[0] if spec.addr64 else x_rsrc
         a_sync_loader.load(
-            b, tid=tid, smem_dst=A_dst, descriptor=a_desc_fn, rsrc=dy_rsrc
+            b, tid=tid, smem_dst=A_dst, descriptor=a_desc_fn, rsrc=_dy_rsrc_now
         )
         b_sync_loader.load(
-            b, tid=tid, smem_dst=B_dst, descriptor=b_desc_fn, rsrc=x_rsrc
+            b, tid=tid, smem_dst=B_dst, descriptor=b_desc_fn, rsrc=_x_rsrc_now
         )
 
     def _split_desc_fns():

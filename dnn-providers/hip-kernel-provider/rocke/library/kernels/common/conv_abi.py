@@ -205,6 +205,7 @@ def _wgrad_arg_names(
     is_3d: bool = False,
     two_stage: bool = False,
     streamk: Optional[str] = None,
+    addr64: bool = False,
 ) -> List[ArgSpec]:
     """Weight-gradient conv: ``dY`` (N[D]HWK), ``X`` (N[D]HWC), ``dW`` (K[Z]YXC).
 
@@ -238,32 +239,47 @@ def _wgrad_arg_names(
     ``ks_count``, and every reduction then appends the partition block
     (``_STREAMK_SCALARS``). A stream-K kernel ignores ``ks``/``ks_count`` --
     it partitions K itself -- but keeps them so the prefix is unchanged.
+
+    ``addr64`` is the large-tensor wgrad-addressing variant: ``K_wg =
+    N*[Do*]Ho*Wo`` is the reduction axis (not ``M``, unlike fwd), so the
+    byte-size pair for the operands that scale with it (``dY_bytes``,
+    ``X_bytes``) and their leading strides (``p_dY_stride_n``/``_do``,
+    ``p_X_stride_n``/``_di``) widen to ``"i64"``. ``dW`` is ``kpg*[Z*]Y*X*cpg``
+    sized -- bounded by the filter, never by ``K_wg`` -- so ``dW_bytes`` and
+    ``p_dW_stride_*`` stay ``"i32"``. The ``k_`` magic pair (``k_wg -> (n,
+    [do,] ho, wo)``) is dropped since addr64 decodes it by exact i64 division;
+    ``n_`` is unaffected (bounded by the filter, same as fwd's ``k_``).
     """
+    byte_kind = "i64" if addr64 else "i32"
     out: List[ArgSpec] = [
         ("dY", "a"),
         ("X", "b"),
         ("dW", "d"),
-        ("dY_bytes", "i32"),
-        ("X_bytes", "i32"),
+        ("dY_bytes", byte_kind),
+        ("X_bytes", byte_kind),
         ("dW_bytes", "i32"),
     ]
     out += _dims(is_3d)
-    out += [("p_wg_M", "i32"), ("p_wg_N", "i32"), ("p_wg_K", "i32")]
-    out += [("p_dY_stride_n", "i32")]
+    out += [("p_wg_M", "i32"), ("p_wg_N", "i32"), ("p_wg_K", byte_kind)]
+    out += [("p_dY_stride_n", byte_kind)]
     if is_3d:
-        out += [("p_dY_stride_do", "i32")]
+        out += [("p_dY_stride_do", byte_kind)]
     out += [("p_dY_stride_ho", "i32"), ("p_dY_stride_wo", "i32")]
-    out += [("p_X_stride_n", "i32")]
+    out += [("p_X_stride_n", byte_kind)]
     if is_3d:
-        out += [("p_X_stride_di", "i32")]
+        out += [("p_X_stride_di", byte_kind)]
     out += [("p_X_stride_hi", "i32"), ("p_X_stride_wi", "i32")]
     out += [("p_dW_stride_k", "i32")]
     if is_3d:
         out += [("p_dW_stride_z", "i32")]
     out += [("p_dW_stride_y", "i32"), ("p_dW_stride_x", "i32")]
-    # k_wg -> (n, [do,] ho, wo): divisors Wo, Ho[, Do].
-    out += _magic("k_", (["Do"] if is_3d else []) + ["Ho", "Wo"])
-    # n_wg -> ([z,] y, x, c): divisors cpg, X[, Y].
+    if not addr64:
+        # k_wg -> (n, [do,] ho, wo): divisors Wo, Ho[, Do]. addr64 decodes
+        # k_wg by exact i64 division instead (see docstring), so it carries
+        # no magic pair.
+        out += _magic("k_", (["Do"] if is_3d else []) + ["Ho", "Wo"])
+    # n_wg -> ([z,] y, x, c): divisors cpg, X[, Y]. Unaffected by addr64:
+    # bounded by the filter size, never by K_wg.
     out += _magic("n_", (["Y"] if is_3d else []) + ["X", "cpg"])
     out += _grid()
     # ---- variant-specific extras ----
@@ -272,7 +288,7 @@ def _wgrad_arg_names(
     # The split-K slice width and degree, always. `ks` alone is not enough:
     # decoding block_id_z needs the number of slices, which is a different
     # quantity from how wide each one is.
-    out += [("ks", "i32"), ("ks_count", "i32")]
+    out += [("ks", byte_kind), ("ks_count", "i32")]
     if streamk in ("linear", "tree"):
         out += [("sk_flags", "i32*"), ("sk_partials", "f32*")]
     if streamk is not None:
@@ -353,8 +369,9 @@ def conv_arg_names(
     kernel without stream-K. Stream-K partitions K itself, so it excludes the
     two-stage split-K variant.
 
-    ``addr64`` is the large-tensor forward-addressing variant (fwd only, 2D
-    only for now) -- see :func:`_fwd_arg_names`.
+    ``addr64`` is the large-tensor addressing variant: ``fwd`` (2D only) or
+    ``wgrad`` (2D only, any of plain / grouped / split-K / two-stage) -- see
+    :func:`_fwd_arg_names` / :func:`_wgrad_arg_names`.
     """
     if two_stage and direction not in ("wgrad", "fwd"):
         raise ValueError(
@@ -372,14 +389,16 @@ def conv_arg_names(
             )
         if two_stage:
             raise ValueError("streamk and two_stage are exclusive: both partition K_wg")
-    if addr64 and direction != "fwd":
-        raise ValueError(f"addr64 is a fwd-only variant (got direction={direction!r})")
+    if addr64 and direction not in ("fwd", "wgrad"):
+        raise ValueError(f"addr64 is a fwd/wgrad-only variant (got direction={direction!r})")
     if addr64 and is_3d:
-        raise ValueError("addr64 does not yet support is_3d (Phase 1 slice A is 2D only)")
+        raise ValueError("addr64 does not yet support is_3d (2D only)")
     if direction == "fwd":
         return _fwd_arg_names(is_3d=is_3d, split_k=two_stage, addr64=addr64)
     if direction == "wgrad":
-        return _wgrad_arg_names(is_3d=is_3d, two_stage=two_stage, streamk=streamk)
+        return _wgrad_arg_names(
+            is_3d=is_3d, two_stage=two_stage, streamk=streamk, addr64=addr64
+        )
     if direction == "dgrad":
         return _dgrad_arg_names(is_3d=is_3d)
     raise ValueError(
@@ -532,7 +551,7 @@ def conv_args_signature(
     mixed-precision configs need. ``two_stage`` adds wgrad's f32 workspace
     pair and is rejected for the other two directions; ``streamk`` selects a
     stream-K wgrad kernel's ABI by its reduction. ``addr64`` selects the
-    large-tensor forward-addressing ABI (fwd, 2D only) -- see
+    large-tensor addressing ABI (fwd or wgrad, 2D only) -- see
     :func:`conv_arg_names`.
 
     One entry point rather than three: the direction is already a value every

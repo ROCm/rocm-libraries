@@ -289,6 +289,10 @@ def _build_implicit_only_args(args) -> list[str]:
     a: list[str] = []
     if args.addr64:
         a += ["--addr64"]
+    if args.all_vector_sizes:
+        a += ["--all-vector-sizes"]
+    if args.kernels_file is not None:
+        a += ["--kernels-file", args.kernels_file]
     if args.sample is not None:
         a += ["--sample", str(args.sample)]
     if args.seed != 0:
@@ -694,12 +698,35 @@ def main() -> int:
         action="store_true",
         dest="addr64",
         help=(
-            "large-tensor forward-addressing (addr64) kernels -- fwd only. "
+            "large-tensor addressing (addr64) kernels -- fwd or wgrad. "
             "Forwarded to benchmark_implicit_gemm_conv.py, where it only "
             "affects that script's own --compile-all (it has no effect here "
             "unless that script is later run with --compile-all too). "
             "Forwarded to implicit-GEMM only -- direct conv has no addr64 "
             "variant."
+        ),
+    )
+    implicit_grp.add_argument(
+        "--all-vector-sizes",
+        action="store_true",
+        dest="all_vector_sizes",
+        help=(
+            "--run-from-cache: run every cached vector-width variant instead "
+            "of only the widest per capability group. addr64 kernels are "
+            "built with scalar (width-1) vector sizes, so without this flag "
+            "they are pruned in favour of wider non-addr64 kernels of the "
+            "same shape. Forwarded to implicit-GEMM only."
+        ),
+    )
+    implicit_grp.add_argument(
+        "--kernels-file",
+        default=None,
+        dest="kernels_file",
+        metavar="FILE",
+        help=(
+            "run only the cached kernels named in FILE (one label per line; "
+            "see benchmark_implicit_gemm_conv.py --help). Forwarded to "
+            "implicit-GEMM only."
         ),
     )
     implicit_grp.add_argument(

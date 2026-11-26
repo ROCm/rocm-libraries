@@ -1837,6 +1837,119 @@ def addr64_d_origin_bytes(
     return b.mul(origin_elems, b.const_i64(elem_bytes))
 
 
+def make_dy_descriptor_addr64(
+    b: IRBuilder,
+    params: Dict[str, Value],
+    *,
+    origin_coords: Sequence[Value],
+    name: Optional[str] = None,
+):
+    """addr64 counterpart of :func:`make_dy_descriptor_dynamic` (wgrad's A
+    operand): ``(d, k_out) -> N HWK``, 2D only. ``d`` is the per-lane delta
+    from the *current K-tile's* i64 origin (``k_wg`` is wgrad's reduction
+    axis, decoded once per K-loop iteration, not once per workgroup like
+    fwd's ``m``) -- see :func:`spatial_unmerge_addr64`. Structurally
+    identical to :func:`make_d_descriptor_addr64`, just named for wgrad's dY
+    operand and its ``p_dY_stride_*`` kernargs (dY and fwd's D are the same
+    N[D]HWK tensor shape).
+
+    Same image-boundary precondition as :func:`make_a_descriptor_addr64`:
+    every lane's delta in one call (the whole K-tile, ``[0, block_k)``) must
+    decode to the same ``n`` as ``origin_coords``' ``n0`` -- callers must
+    only reach this when ``Ho*Wo`` is a multiple of ``tile_k``.
+    """
+    transforms = [spatial_unmerge_addr64(params, upper="k_wg", origin_coords=origin_coords)]
+    coord_names = ["ho", "wo", "k_out"]
+    strides = [params["p_dY_stride_ho"], params["p_dY_stride_wo"], b.const_i32(1)]
+    return DynamicTensorDescriptor.create(
+        name or "dY_nhwk_addr64", coord_names=coord_names, strides=strides
+    ).transform(*transforms)
+
+
+def make_x_wgrad_descriptor_addr64(
+    b: IRBuilder,
+    params: Dict[str, Value],
+    *,
+    origin_coords: Sequence[Value],
+    grouped: bool = False,
+    name: Optional[str] = None,
+):
+    """addr64 counterpart of :func:`make_x_wgrad_descriptor_dynamic` (wgrad's
+    B operand): ``(d, n_wg) -> N HWC``, 2D only. Same structure as
+    :func:`make_a_descriptor_addr64`, with wgrad's ``n_`` channel-magic
+    family and ``p_X_stride_*`` kernargs, and ``grouped`` threaded through
+    (unlike fwd's addr64, which hardcodes ``grouped=False`` since fwd
+    rejects grouped+addr64 entirely) -- the group index here only ever folds
+    into the channel coord (bounded by ``C``, never by ``K_wg``), so it is
+    orthogonal to the i64 spatial decode and safe in i32 regardless of
+    addr64.
+
+    Same image-boundary precondition as :func:`make_a_descriptor_addr64`
+    (``Ho*Wo`` a multiple of ``tile_k``).
+    """
+    neg_pH = b.sub(b.const_i32(0), params["p_pH"])
+    neg_pW = b.sub(b.const_i32(0), params["p_pW"])
+    transforms = [
+        spatial_unmerge_addr64(params, upper="k_wg", origin_coords=origin_coords),
+        embed_dynamic(
+            upper=["ho", "y"],
+            lower="hi",
+            strides=[params["p_sH"], params["p_dH"]],
+            offset=neg_pH,
+            lo=0,
+            hi=params["p_Hi"],
+        ),
+        embed_dynamic(
+            upper=["wo", "x"],
+            lower="wi",
+            strides=[params["p_sW"], params["p_dW"]],
+            offset=neg_pW,
+            lo=0,
+            hi=params["p_Wi"],
+        ),
+        *_a_channel_decode_dynamic(
+            b, params, is_3d=False, grouped=grouped, upper="n_wg", prefix="n_"
+        ),
+        *filter_pads_dynamic(params, is_3d=False),
+    ]
+    coord_names = ["hi", "wi", "c"]
+    strides = [params["p_X_stride_hi"], params["p_X_stride_wi"], b.const_i32(1)]
+    return DynamicTensorDescriptor.create(
+        name or "X_nhwc_addr64", coord_names=coord_names, strides=strides
+    ).transform(*transforms)
+
+
+def addr64_dy_origin_bytes(
+    b: IRBuilder,
+    params: Dict[str, Value],
+    *,
+    n0_i64: Value,
+    elem_bytes: int,
+) -> Value:
+    """The dY operand's i64 K-tile-origin byte offset: ``n0 * stride_n``,
+    elements, times ``elem_bytes``. Analogue of :func:`addr64_d_origin_bytes`
+    for wgrad's dY kernargs; recomputed once per K-loop iteration (not once
+    per kernel) since ``n0`` tracks the current K-tile, not a fixed M-tile.
+    """
+    origin_elems = b.mul(n0_i64, params["p_dY_stride_n"])
+    return b.mul(origin_elems, b.const_i64(elem_bytes))
+
+
+def addr64_x_origin_bytes(
+    b: IRBuilder,
+    params: Dict[str, Value],
+    *,
+    n0_i64: Value,
+    elem_bytes: int,
+) -> Value:
+    """The X operand's i64 K-tile-origin byte offset: ``n0 * stride_n``,
+    elements, times ``elem_bytes``. Analogue of :func:`addr64_a_origin_bytes`
+    for wgrad's X kernargs; recomputed once per K-loop iteration.
+    """
+    origin_elems = b.mul(n0_i64, params["p_X_stride_n"])
+    return b.mul(origin_elems, b.const_i64(elem_bytes))
+
+
 def emit_direct_epilogue_wmma(
     b,
     spec,

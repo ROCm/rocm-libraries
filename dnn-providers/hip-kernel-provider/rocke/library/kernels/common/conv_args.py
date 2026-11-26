@@ -762,8 +762,14 @@ class ConvArgs:
                 f"stream-K partitions K itself; launch it with split_k=1 "
                 f"(got {split_k})"
             )
-        if addr64 and (split_k != 1 or ws_ptr is not None or streamk is not None):
-            raise ValueError("addr64 does not yet support split-K or stream-K")
+        if addr64 and streamk is not None:
+            raise ValueError("addr64 does not yet support stream-K")
+        if (
+            addr64
+            and self.direction == "fwd"
+            and (split_k != 1 or ws_ptr is not None)
+        ):
+            raise ValueError("fwd addr64 does not yet support split-K")
         abi = self.arg_names(
             two_stage=ws_ptr is not None and streamk is None,
             streamk=streamk.reduction if streamk is not None else None,

@@ -201,21 +201,37 @@ bool streamk_reduction_known(const char* red)
            || strcmp(red, "tree") == 0;
 }
 
-void wgrad_arg_names(rocke_conv_arg_list_t* out, bool is_3d, bool two_stage, const char* streamk)
+/* addr64: the large-tensor wgrad-addressing ABI -- K_wg = N*[Do*]Ho*Wo is the
+ * reduction axis here (not M, unlike fwd), so the byte triple, p_wg_K, the
+ * dY/X leading strides and ks widen to i64, and the k_ magic pair (k_wg ->
+ * (n, [do,] ho, wo)) drops since addr64 decodes it by exact i64 division.
+ * dW's strides stay i32: dW is kpg*[Z*]Y*X*cpg-sized, bounded by the filter,
+ * never by K_wg. Callers reject addr64 combined with is_3d before reaching
+ * here (see rocke_conv_arg_names_ex). */
+void wgrad_arg_names(
+    rocke_conv_arg_list_t* out, bool is_3d, bool two_stage, const char* streamk, bool addr64)
 {
-    leading(out, "dY", "X", "dW");
+    /* Not leading(): dW_bytes stays i32 under addr64 (dW is bounded by the
+     * filter, never by K_wg), unlike fwd where all three operands scale with
+     * a possibly-huge coordinate. */
+    push(out, "dY", ROCKE_CONV_ARG_A);
+    push(out, "X", ROCKE_CONV_ARG_B);
+    push(out, "dW", ROCKE_CONV_ARG_D);
+    push_scalar(out, "dY_bytes", addr64);
+    push_scalar(out, "X_bytes", addr64);
+    push_i32(out, "dW_bytes");
     dims(out, is_3d);
     push_i32(out, "p_wg_M");
     push_i32(out, "p_wg_N");
-    push_i32(out, "p_wg_K");
-    push_i32(out, "p_dY_stride_n");
+    push_scalar(out, "p_wg_K", addr64);
+    push_scalar(out, "p_dY_stride_n", addr64);
     if(is_3d)
-        push_i32(out, "p_dY_stride_do");
+        push_scalar(out, "p_dY_stride_do", addr64);
     push_i32(out, "p_dY_stride_ho");
     push_i32(out, "p_dY_stride_wo");
-    push_i32(out, "p_X_stride_n");
+    push_scalar(out, "p_X_stride_n", addr64);
     if(is_3d)
-        push_i32(out, "p_X_stride_di");
+        push_scalar(out, "p_X_stride_di", addr64);
     push_i32(out, "p_X_stride_hi");
     push_i32(out, "p_X_stride_wi");
     push_i32(out, "p_dW_stride_k");
@@ -223,9 +239,14 @@ void wgrad_arg_names(rocke_conv_arg_list_t* out, bool is_3d, bool two_stage, con
         push_i32(out, "p_dW_stride_z");
     push_i32(out, "p_dW_stride_y");
     push_i32(out, "p_dW_stride_x");
-    /* k_wg -> (n, [do,] ho, wo): divisors Wo, Ho[, Do]. */
-    magic_2d3d(out, "k_", is_3d, "Do", "Ho", "Wo");
-    /* n_wg -> ([z,] y, x, c): divisors cpg, X[, Y]. */
+    if(!addr64)
+    {
+        /* k_wg -> (n, [do,] ho, wo): divisors Wo, Ho[, Do]. addr64 decodes
+         * k_wg by exact i64 division instead, so it carries no magic pair. */
+        magic_2d3d(out, "k_", is_3d, "Do", "Ho", "Wo");
+    }
+    /* n_wg -> ([z,] y, x, c): divisors cpg, X[, Y]. Unaffected by addr64:
+     * bounded by the filter size, never by K_wg. */
     magic_2d3d(out, "n_", is_3d, "Y", "X", "cpg");
     grid(out);
     /* ---- variant-specific extras ---- */
@@ -235,7 +256,7 @@ void wgrad_arg_names(rocke_conv_arg_list_t* out, bool is_3d, bool two_stage, con
         push_i32(out, "ws_bytes");
     }
     /* The split-K slice width and degree, always. */
-    push_i32(out, "ks");
+    push_scalar(out, "ks", addr64);
     push_i32(out, "ks_count");
     if(streamk != NULL)
     {
@@ -337,15 +358,21 @@ bool rocke_conv_arg_names_ex(const char* direction,
     }
     if(addr64)
     {
-        /* fwd-only, 2D-only, no split-K builder for it yet -- same rejections
-         * as the Python conv_arg_names(addr64=True). */
-        if(strcmp(direction, "fwd") != 0 || is_3d || two_stage)
+        /* fwd or wgrad, 2D-only -- same rejections as the Python
+         * conv_arg_names(addr64=True). fwd has no split-K builder for addr64
+         * yet (_fwd_arg_names raises on addr64+split_k); wgrad freely
+         * combines addr64 with two_stage/split-K. */
+        const bool is_fwd = strcmp(direction, "fwd") == 0;
+        const bool is_wgrad = strcmp(direction, "wgrad") == 0;
+        if((!is_fwd && !is_wgrad) || is_3d)
+            return false;
+        if(is_fwd && two_stage)
             return false;
     }
     if(strcmp(direction, "fwd") == 0)
         fwd_arg_names(out, is_3d, two_stage, addr64);
     else if(strcmp(direction, "wgrad") == 0)
-        wgrad_arg_names(out, is_3d, two_stage, streamk);
+        wgrad_arg_names(out, is_3d, two_stage, streamk, addr64);
     else if(strcmp(direction, "dgrad") == 0)
         dgrad_arg_names(out, is_3d);
     else
