@@ -61,9 +61,17 @@ class TensorDataMoverLoad(TensorDataMover):
         mod.add(gsucLabel)
         with writer.allocTmpSgpr(3, tag="TDM_gsuIterOffset") as tmpSgprRes:
             numIterSgpr = tmpSgprRes.idx + 2
-            mod.add(SLShiftRightB32(dst=sgpr(numIterSgpr), src=sgpr("SizesSum"), \
-                shiftHex=int(log2(kernel["DepthU"])), \
-                comment="numIterL = SizesSum / DepthU(%u)"%kernel["DepthU"]))
+            if kernel.get("_TailFolding", False) and not kernel["ReuseAcrossPersistent"]:
+                # tail folding: GSU distributes ceil(K / DepthU) k-tiles (the partial one included)
+                mod.add(SAddU32(dst=sgpr(numIterSgpr), src0=sgpr("SizesSum"), src1=kernel["DepthU"] - 1, \
+                    comment="TailFolding: SizesSum + DepthU - 1"))
+                mod.add(SLShiftRightB32(dst=sgpr(numIterSgpr), src=sgpr(numIterSgpr), \
+                    shiftHex=int(log2(kernel["DepthU"])), \
+                    comment="TailFolding: numIterL = ceil(SizesSum / DepthU(%u))"%kernel["DepthU"]))
+            else:
+                mod.add(SLShiftRightB32(dst=sgpr(numIterSgpr), src=sgpr("SizesSum"), \
+                    shiftHex=int(log2(kernel["DepthU"])), \
+                    comment="numIterL = SizesSum / DepthU(%u)"%kernel["DepthU"]))
             mod.add(writer.calculateLoopNumIterOffsetGsu(kernel, numIterSgpr, \
                 ContinuousRegister(idx=tmpSgprRes.idx, size=2)))
             mod.add(SMovB32(sgpr(dstSgpr), sgpr(tmpSgprRes.idx), \
