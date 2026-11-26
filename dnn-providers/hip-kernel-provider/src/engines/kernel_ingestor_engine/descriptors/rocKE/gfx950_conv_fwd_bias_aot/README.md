@@ -14,7 +14,9 @@ and a bias `B`. `B` is a non-virtual device tensor of the io dtype, dims `(1, K,
 `(K, 1, 1)`, contiguous along K. The ADD's output is the stored, packed NHWK `y`.
 
 The kernel computes `y = round(acc_fp32 + float(B[k]))` with one rounding; `k` is the absolute
-output channel (`g * K/groups + k_in_group`).
+output channel (`g * K/groups + k_in_group`). A graph that declares the convolution's output in the
+io dtype is served the same way: the kernel skips that intermediate rounding, so its result is
+closer to the FP32 sum than the graph's two-rounding reference.
 
 ## Kernels and ABI
 
