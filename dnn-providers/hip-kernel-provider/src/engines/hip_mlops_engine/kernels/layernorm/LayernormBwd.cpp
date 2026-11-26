@@ -46,7 +46,7 @@ extern "C" __global__ void LayernormBwd(const OutputType* __restrict__ dy,
     }
 
     float sum_dy_scale = 0.0f;
-    float sum_dy_scale_x = 0.0f;
+    float sum_dy_scale_xc = 0.0f;
 
     for(unsigned int i = lid; i < INNER_SIZE; i += LOCAL_SIZE)
     {
@@ -56,15 +56,15 @@ extern "C" __global__ void LayernormBwd(const OutputType* __restrict__ dy,
                            * hip_kernel_provider::cast<float>(scale[i]);
 
         sum_dy_scale += pdy_pscale;
-        sum_dy_scale_x += pdy_pscale * hip_kernel_provider::cast<float>(x[idx]);
+        sum_dy_scale_xc += pdy_pscale * (hip_kernel_provider::cast<float>(x[idx]) - pmean);
     }
 
 #if defined(__gfx1250__)
     hip_kernel_provider::batchnorm::reduction::reduce2<float, float, LOCAL_SIZE>(
-        sum_dy_scale, sum_dy_scale_x, 1.0f, lid);
+        sum_dy_scale, sum_dy_scale_xc, 1.0f, lid);
 #else
     ltmp1[lid] = sum_dy_scale;
-    ltmp2[lid] = sum_dy_scale_x;
+    ltmp2[lid] = sum_dy_scale_xc;
     __syncthreads();
     for(unsigned int i = LOCAL_SIZE >> 1; i > 0; i >>= 1)
     {
@@ -76,11 +76,12 @@ extern "C" __global__ void LayernormBwd(const OutputType* __restrict__ dy,
         __syncthreads();
     }
     sum_dy_scale = ltmp1[0];
-    sum_dy_scale_x = ltmp2[0];
+    sum_dy_scale_xc = ltmp2[0];
 #endif
     constexpr float inverseInnerSize = 1.0f / INNER_SIZE;
-    float a = prstd * prstd * prstd * inverseInnerSize * (sum_dy_scale_x - sum_dy_scale * pmean);
-    float b = prstd * sum_dy_scale * inverseInnerSize - a * pmean;
+    // x is centered on the mean so dx stays accurate in fp32 when |mean| >> std.
+    float a = prstd * prstd * prstd * inverseInnerSize * sum_dy_scale_xc;
+    float b = prstd * sum_dy_scale * inverseInnerSize;
 
     for(unsigned int i = lid; i < INNER_SIZE; i += LOCAL_SIZE)
     {
@@ -89,7 +90,8 @@ extern "C" __global__ void LayernormBwd(const OutputType* __restrict__ dy,
         float pdy = hip_kernel_provider::cast<float>(dy[idx]);
         float pscale = hip_kernel_provider::cast<float>(scale[i]);
 
-        float value = prstd * pdy * pscale - a * hip_kernel_provider::cast<float>(x[idx]) - b;
+        float value
+            = prstd * pdy * pscale - a * (hip_kernel_provider::cast<float>(x[idx]) - pmean) - b;
         dx[idx] = hip_kernel_provider::cast<InputType>(value);
     }
 }

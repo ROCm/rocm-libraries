@@ -1892,15 +1892,24 @@ def _check_engine_name_scoped(config: IngestorConfig) -> None:
 
 
 #: What ``hipdnn_data_sdk::utilities::Version``'s constructor accepts: three
-#: separate integers parsed with ``istringstream >>``, which skips surrounding
-#: whitespace and stops at the first character that cannot continue the number,
-#: so a sign is legal and trailing text ignored. Matched exactly rather than
-#: tightened: a stricter check would reject a config the runtime loads.
-_SDK_VERSION_PATTERN = re.compile(r"\s*([+-]?\d+)\s*\.\s*([+-]?\d+)\s*\.\s*([+-]?\d+)")
-#: The range each component is read into (``int``), and the range a descriptor's
-#: ``priority`` is read into (``int64_t``, via ``requireInt64``).
-_INT_MIN, _INT_MAX = -(2**31), 2**31 - 1
+#: unsigned decimal integers separated by '.', with no sign or whitespace,
+#: optionally followed by '.' and an alphanumeric tweak that it ignores. Matched
+#: with ``fullmatch`` so trailing text fails here as it fails in the loader.
+_SDK_VERSION_PATTERN = re.compile(
+    r"([0-9]+)\.([0-9]+)\.([0-9]+)(?:\.[A-Za-z0-9]+)?", re.ASCII
+)
+#: The largest value a version component is read into (``int``), and the range a
+#: descriptor's ``priority`` is read into (``int64_t``, via ``requireInt64``).
+_INT_MAX = 2**31 - 1
 _INT64_MIN, _INT64_MAX = -(2**63), 2**63 - 1
+
+
+def _version_component_fits(part: str) -> bool:
+    """Whether a run of decimal digits fits ``int`` as ``std::from_chars`` reads it:
+    any number of leading zeros, a value of at most ``_INT_MAX``. The length bound
+    comes before ``int()``, which refuses strings longer than 4300 digits."""
+    digits = part.lstrip("0") or "0"
+    return len(digits) <= len(str(_INT_MAX)) and int(digits) <= _INT_MAX
 
 
 def _reject_repeats(values: list, what: str, where: str) -> None:
@@ -1934,15 +1943,14 @@ def _check_engine_declaration(config: IngestorConfig) -> None:
             f"float, and the loader's requireString refuses a number outright. "
             f"Quote it, with all three components: '1.0.0'."
         )
-    match = _SDK_VERSION_PATTERN.match(version)
-    if not match or not all(
-        _INT_MIN <= int(part) <= _INT_MAX for part in match.groups()
-    ):
+    match = _SDK_VERSION_PATTERN.fullmatch(version)
+    if not match or not all(_version_component_fits(part) for part in match.groups()):
         raise ConfigError(
             f"engine.sdk_version '{version}' is not a version the loader can "
-            f"parse. hipdnn_data_sdk::utilities::Version reads three integers "
-            f"'<major>.<minor>.<patch>' and throws on anything else, which fails "
-            f"the engine descriptor and loads none of its packs. Use e.g. '1.0.0'."
+            f"parse. hipdnn_data_sdk::utilities::Version reads three unsigned "
+            f"integers '<major>.<minor>.<patch>' with no sign or whitespace and "
+            f"throws on anything else, which fails the engine descriptor and "
+            f"loads none of its packs. Use e.g. '1.0.0'."
         )
     _reject_repeats(config.engine.knobs, "knob", "engine.knobs")
     _reject_repeats(

@@ -125,6 +125,60 @@ struct BinaryOp<POINTWISE_BINARY_OP_RELU_BWD, ComputeType, OutputType>
     }
 };
 
+// MAX and MIN mirror the CPU reference's std::max / std::min: (x0 < x1) ? x1 : x0 and
+// (x1 < x0) ? x1 : x0. A NaN first operand propagates; a NaN second operand is dropped.
+template <typename ComputeType, typename OutputType>
+struct BinaryOp<POINTWISE_BINARY_OP_MAX, ComputeType, OutputType>
+{
+    __device__ BinaryOp(float, float, float) {}
+
+    template <typename X0, typename X1>
+    static __forceinline__ __device__ OutputType impl(const X0& x0, const X1& x1)
+    {
+        ComputeType x0Compute = static_cast<ComputeType>(x0);
+        ComputeType x1Compute = static_cast<ComputeType>(x1);
+        return static_cast<OutputType>((x0Compute < x1Compute) ? x1Compute : x0Compute);
+    }
+};
+
+template <typename ComputeType, typename OutputType>
+struct BinaryOp<POINTWISE_BINARY_OP_MIN, ComputeType, OutputType>
+{
+    __device__ BinaryOp(float, float, float) {}
+
+    template <typename X0, typename X1>
+    static __forceinline__ __device__ OutputType impl(const X0& x0, const X1& x1)
+    {
+        ComputeType x0Compute = static_cast<ComputeType>(x0);
+        ComputeType x1Compute = static_cast<ComputeType>(x1);
+        return static_cast<OutputType>((x1Compute < x0Compute) ? x1Compute : x0Compute);
+    }
+};
+
+// OutputType is bool; any comparison with NaN is false, as on the CPU.
+template <typename ComputeType, typename OutputType>
+struct BinaryOp<POINTWISE_BINARY_OP_CMP_GT, ComputeType, OutputType>
+{
+    __device__ BinaryOp(float, float, float) {}
+
+    template <typename X0, typename X1>
+    static __forceinline__ __device__ OutputType impl(const X0& x0, const X1& x1)
+    {
+        // Two integral inputs compare exactly, as on the CPU; rounding them through ComputeType
+        // would make large values compare equal.
+        if constexpr(__is_integral(X0) && __is_integral(X1))
+        {
+            return static_cast<OutputType>(static_cast<long long>(x0) > static_cast<long long>(x1));
+        }
+        else
+        {
+            ComputeType x0Compute = static_cast<ComputeType>(x0);
+            ComputeType x1Compute = static_cast<ComputeType>(x1);
+            return static_cast<OutputType>(x0Compute > x1Compute);
+        }
+    }
+};
+
 extern "C" __global__ void PointwiseBinaryRef(PointwiseBinaryArgs args)
 {
     auto* input0 = static_cast<const INPUT0_TYPE*>(args.input0);
