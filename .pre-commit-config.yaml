@@ -511,6 +511,17 @@ repos:
         additional_dependencies: *rocke_dependencies
         files: ^dnn-providers/hip-kernel-provider/rocke/.*\.(py|toml|txt|cmake|ini|json)$
         pass_filenames: false
+      # No new toolchain pin in rocKE's test and library code
+      # (rocke_toolchain_pins_check). The check reads Python files and its
+      # allowlist; importing rocke adds ini and JSON files. A change to any
+      # other file cannot change its outcome, so it skips the hook.
+      - id: rocke-toolchain-pins
+        name: rocKE adds no toolchain pin
+        entry: python -B -m pytest -p no:cacheprovider -q dnn-providers/hip-kernel-provider/rocke/platform/tests/tools/test_toolchain_pins.py
+        language: python
+        additional_dependencies: *rocke_dependencies
+        files: ^dnn-providers/hip-kernel-provider/rocke/.*\.(py|txt|ini|json)$
+        pass_filenames: false
 
       # The engines' parity checks need no build. Each fires on what can change
       # its outcome: the files whose content it compares and the modules it

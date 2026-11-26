@@ -342,6 +342,7 @@ test_categories:
       # git (see rocke/platform/tests/cmake/CoreTests.cmake).
       - "rocke_compliance_pytest"
       - "rocke_no_torch_check"
+      - "rocke_toolchain_pins_check"
       # Lists every split entry to project each shard: seconds, not quick.
       - "rocke_entry_time_check"
     labels:

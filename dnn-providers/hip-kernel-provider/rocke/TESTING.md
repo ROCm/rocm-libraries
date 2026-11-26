@@ -965,6 +965,7 @@ runs on each pull request to develop that changes rocKE:
 - `rocke-compliance-rules`: when the patterns or their scanner change, the
   scanner's tests and a scan of the whole tree;
 - `rocke-no-torch`: no new torch use;
+- `rocke-toolchain-pins`: no new toolchain pin in test or library code;
 - `rocke-arch-table-engine-parity`: the two engines' arch tables agree;
 - `rocke-gemm-spec-dict-binding-parity`: the GEMM spec dicts match the engine
   binding;

@@ -140,6 +140,25 @@ if(BUILD_TESTING)
           TIMEOUT ${ROCKE_TEST_TIMEOUT_CPU}
           ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/../python")
     endif()
+
+    # No new toolchain pin in the test and library code under rocke/: no
+    # LLVM-flavor or ROCm-release pin, no decision on the comgr's ROCm release,
+    # no private runtime or lowering name in library code. Each remaining pin is
+    # on the allowlist beside the test, which only shrinks. Kept in step with the
+    # rocke-toolchain-pins hook in the root .pre-commit-config.yaml; like the
+    # entry above it lists the source checkout through git and reads library/.
+    if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../../library")
+      add_test(
+        NAME rocke_toolchain_pins_check
+        COMMAND "${Python3_EXECUTABLE}" -m pytest
+                "${CMAKE_CURRENT_SOURCE_DIR}/tools/test_toolchain_pins.py" -q)
+      set_tests_properties(
+        rocke_toolchain_pins_check
+        PROPERTIES
+          LABELS "ckc;python;host"
+          TIMEOUT ${ROCKE_TEST_TIMEOUT_CPU}
+          ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/../python")
+    endif()
   else()
     message(WARNING
             "rocKE: Python3 interpreter not found; the Python-driven build-tree "
