@@ -232,70 +232,41 @@ endif()
 # test_attention_dense_spec_vectors.py regenerates it and checks the Python
 # against it (library -> platform, the allowed direction). The file is embedded
 # into this binary at configure time so the installed test needs no data path.
-set(_rocke_dense_spec_vectors "${CMAKE_CURRENT_SOURCE_DIR}/golden/attention_dense_spec_vectors.json")
-if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/instances/test_attention_dense_spec.cpp")
-  set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${_rocke_dense_spec_vectors}")
-  file(READ "${_rocke_dense_spec_vectors}" _rocke_dense_spec_hex HEX)
-  string(REGEX REPLACE "([0-9a-f][0-9a-f])" "0x\\1," _rocke_dense_spec_bytes
-                       "${_rocke_dense_spec_hex}")
-  string(REGEX REPLACE "(0x..,0x..,0x..,0x..,0x..,0x..,0x..,0x..,0x..,0x..,0x..,0x..,0x..,0x..,0x..,0x..,)"
-                       "\\1\n" _rocke_dense_spec_bytes "${_rocke_dense_spec_bytes}")
-  # configure_file rewrites the .inc only when the bytes change, so a
-  # reconfigure does not force a recompile.
-  file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/generated/attention_dense_spec_vectors.inc.tmp"
-       "${_rocke_dense_spec_bytes}\n")
-  configure_file("${CMAKE_CURRENT_BINARY_DIR}/generated/attention_dense_spec_vectors.inc.tmp"
-                 "${CMAKE_CURRENT_BINARY_DIR}/generated/attention_dense_spec_vectors.inc"
-                 COPYONLY)
-  add_executable(rocke_attention_dense_spec instances/test_attention_dense_spec.cpp)
-  target_include_directories(rocke_attention_dense_spec
-                             PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/generated")
-  target_link_libraries(rocke_attention_dense_spec PRIVATE rocke_core)
-  if(UNIX)
-    target_link_libraries(rocke_attention_dense_spec PRIVATE m)
+function(rocke_add_embedded_vectors_test name source json)
+  if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/${source}")
+    return()
   endif()
-  add_test(NAME rocke_attention_dense_spec COMMAND rocke_attention_dense_spec)
-  set_tests_properties(rocke_attention_dense_spec PROPERTIES LABELS "ckc;unit;host")
-  rocke_cxx_test_installed_name(_rocke_installed_name rocke_attention_dense_spec)
-  set_target_properties(rocke_attention_dense_spec
-                        PROPERTIES OUTPUT_NAME "${_rocke_installed_name}")
-  install(TARGETS rocke_attention_dense_spec
-          RUNTIME DESTINATION ${ROCKE_CXX_TEST_INSTALL_DIR})
-  set_property(GLOBAL APPEND PROPERTY ROCKE_INSTALL_TEST_TARGETS
-               rocke_attention_dense_spec)
-endif()
+  set(vectors "${CMAKE_CURRENT_SOURCE_DIR}/${json}")
+  get_filename_component(stem "${json}" NAME_WE)
+  set(generated "${CMAKE_CURRENT_BINARY_DIR}/generated")
+  set(inc "${generated}/${stem}.inc")
+  set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${vectors}")
+  file(READ "${vectors}" hex HEX)
+  string(REGEX REPLACE "([0-9a-f][0-9a-f])" "0x\\1," bytes "${hex}")
+  string(REGEX REPLACE "(0x..,0x..,0x..,0x..,0x..,0x..,0x..,0x..,0x..,0x..,0x..,0x..,0x..,0x..,0x..,0x..,)"
+                       "\\1\n" bytes "${bytes}")
+  # Only replace the included file when the bytes actually change.
+  file(WRITE "${inc}.tmp" "${bytes}\n")
+  configure_file("${inc}.tmp" "${inc}" COPYONLY)
 
-# Concrete gfx950 host spec: the same raw-input oracle as the Python drift guard.
-set(_rocke_gfx950_spec_vectors "${CMAKE_CURRENT_SOURCE_DIR}/golden/attention_dense_gfx950_spec_vectors.json")
-if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/instances/test_attention_dense_gfx950_spec.cpp")
-  set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${_rocke_gfx950_spec_vectors}")
-  file(READ "${_rocke_gfx950_spec_vectors}" _rocke_gfx950_spec_hex HEX)
-  string(REGEX REPLACE "([0-9a-f][0-9a-f])" "0x\\1," _rocke_gfx950_spec_bytes
-                       "${_rocke_gfx950_spec_hex}")
-  string(REGEX REPLACE "(0x..,0x..,0x..,0x..,0x..,0x..,0x..,0x..,0x..,0x..,0x..,0x..,0x..,0x..,0x..,0x..,)"
-                       "\\1\n" _rocke_gfx950_spec_bytes "${_rocke_gfx950_spec_bytes}")
-  file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/generated/attention_dense_gfx950_spec_vectors.inc.tmp"
-       "${_rocke_gfx950_spec_bytes}\n")
-  configure_file("${CMAKE_CURRENT_BINARY_DIR}/generated/attention_dense_gfx950_spec_vectors.inc.tmp"
-                 "${CMAKE_CURRENT_BINARY_DIR}/generated/attention_dense_gfx950_spec_vectors.inc"
-                 COPYONLY)
-  add_executable(rocke_attention_dense_gfx950_spec instances/test_attention_dense_gfx950_spec.cpp)
-  target_include_directories(rocke_attention_dense_gfx950_spec
-                             PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/generated")
-  target_link_libraries(rocke_attention_dense_gfx950_spec PRIVATE rocke_core)
+  add_executable(${name} "${source}")
+  target_include_directories(${name} PRIVATE "${generated}")
+  target_link_libraries(${name} PRIVATE rocke_core)
   if(UNIX)
-    target_link_libraries(rocke_attention_dense_gfx950_spec PRIVATE m)
+    target_link_libraries(${name} PRIVATE m)
   endif()
-  add_test(NAME rocke_attention_dense_gfx950_spec COMMAND rocke_attention_dense_gfx950_spec)
-  set_tests_properties(rocke_attention_dense_gfx950_spec PROPERTIES LABELS "ckc;unit;host")
-  rocke_cxx_test_installed_name(_rocke_installed_name rocke_attention_dense_gfx950_spec)
-  set_target_properties(rocke_attention_dense_gfx950_spec
-                        PROPERTIES OUTPUT_NAME "${_rocke_installed_name}")
-  install(TARGETS rocke_attention_dense_gfx950_spec
-          RUNTIME DESTINATION ${ROCKE_CXX_TEST_INSTALL_DIR})
-  set_property(GLOBAL APPEND PROPERTY ROCKE_INSTALL_TEST_TARGETS
-               rocke_attention_dense_gfx950_spec)
-endif()
+  add_test(NAME ${name} COMMAND ${name})
+  set_tests_properties(${name} PROPERTIES LABELS "ckc;unit;host")
+  rocke_cxx_test_installed_name(installed_name ${name})
+  set_target_properties(${name} PROPERTIES OUTPUT_NAME "${installed_name}")
+  install(TARGETS ${name} RUNTIME DESTINATION ${ROCKE_CXX_TEST_INSTALL_DIR})
+  set_property(GLOBAL APPEND PROPERTY ROCKE_INSTALL_TEST_TARGETS ${name})
+endfunction()
+
+rocke_add_embedded_vectors_test(rocke_attention_dense_spec
+  instances/test_attention_dense_spec.cpp golden/attention_dense_spec_vectors.json)
+rocke_add_embedded_vectors_test(rocke_attention_dense_gfx950_spec
+  instances/test_attention_dense_gfx950_spec.cpp golden/attention_dense_gfx950_spec_vectors.json)
 
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/instances/test_sha256.cpp")
   add_executable(rocke_sha256 instances/test_sha256.cpp)

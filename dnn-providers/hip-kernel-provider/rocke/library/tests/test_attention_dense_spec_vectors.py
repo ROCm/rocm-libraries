@@ -1208,6 +1208,9 @@ def _gfx950_cases():
         dict(fp8, head_size=64, block_n=32),
         dict(fp8, head_size=64, block_n=64),
         dict(fp8, head_size=64, block_n=32, kv_segments=0),
+        # Both pass construction: segment and tile checks must each precede sinks.
+        dict(fp8, use_sinks=True, kv_segments=0),
+        dict(fp8, use_sinks=True, head_size=64, block_n=32),
         # Two K/V heads of D128: 2^22 rows reach 2 GiB only at two bytes;
         # 2^23 rows reach it even at one. Keep Q/O small throughout.
         dict(seqlen_kv=1 << 22),
@@ -1306,7 +1309,7 @@ def _gfx950_expect(spec, arch="gfx950"):
     except ValueError as e:
         valid, reason = False, str(e)
     except ZeroDivisionError:
-        # Same interpreter-dependent exception exemption as the PR1 table.
+        # Same interpreter-dependent exception exemption as the shared-spec _CASES table.
         valid, reason = False, None
     ok, why = gfx.supports_attention_dense(spec, arch=arch)
     if reason is None and arch == "gfx950":

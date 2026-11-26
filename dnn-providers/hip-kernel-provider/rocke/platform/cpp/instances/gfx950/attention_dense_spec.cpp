@@ -4,8 +4,10 @@
  * validator/decode registry remains in instances/common/attention_dense_spec.cpp.
  * No builder, launcher, or provider dependencies belong in this layer. */
 #include "../common/attention_dense_spec_internal.h"
+#include "rocke/arch_target.h"
 #include "rocke/float_format.h"
 #include "rocke/instance_gfx950_attention_dense.h"
+#include "rocke/intexpr.h"
 #include "rocke/sha256.h"
 
 #include <limits.h>
@@ -195,12 +197,12 @@ bool validate_arch(const void* ctx, char* reason, size_t cap)
  * decimals, one double, and the two legal short loop-order strings. */
 struct KnobRepr
 {
-    char text[1024] = "[";
-    size_t used = 1;
+    char text[1024];
+    size_t used = 0;
     bool add(const char* name, const char* value)
     {
         const int n = snprintf(
-            text + used, sizeof(text) - used, "%s('%s', %s)", used == 1 ? "" : ", ", name, value);
+            text + used, sizeof(text) - used, "%s('%s', %s)", used == 0 ? "[" : ", ", name, value);
         if(n < 0 || (size_t)n >= sizeof(text) - used)
             return false;
         used += (size_t)n;
@@ -211,12 +213,8 @@ struct KnobRepr
 rocke_status_t codegen_token(const rocke_gfx950_attention_dense_spec_t* s, char out[11])
 {
     out[0] = '\0';
-    if(s->lds_num_buffers == 2 && s->lazy_rescale_threshold == 8.0 && s->use_exp2_fast
-       && !s->has_exp_per_pv_step && s->partial_vmcnt_prefetch && s->pv_priority == 1
-       && !s->has_pv_sched_fence && s->pv_sched_fence_mask == 0 && !s->has_pv_sched_group_template
-       && s->pv_sched_group_ds_read == 2 && !s->has_iglp_mode && s->pv_loop_order == NULL
-       && s->causal_diag_split && s->o_store_width == 4)
-        return ROCKE_OK;
+    using Spec = rocke_gfx950_attention_dense_spec_t;
+    static const Spec defaults = rocke_gfx950_attention_dense_spec_default();
     KnobRepr repr;
     bool ok = true;
     auto add_int = [&](const char* name, int value) {
@@ -227,14 +225,21 @@ rocke_status_t codegen_token(const rocke_gfx950_attention_dense_spec_t* s, char 
     auto add_bool = [&](const char* name, bool value) {
         ok = ok && repr.add(name, value ? "True" : "False");
     };
+    auto add_optional = [&](const char* name, bool Spec::*present, auto field, auto emit) {
+        if(s->*present)
+        {
+            if(!(defaults.*present) || s->*field != defaults.*field)
+                emit(name, s->*field);
+        }
+        else if(defaults.*present)
+            ok = ok && repr.add(name, "None");
+    };
     // sorted(changed), not dataclass declaration order, and raw optional values.
-    if(!s->causal_diag_split)
+    if(s->causal_diag_split != defaults.causal_diag_split)
         add_bool("causal_diag_split", s->causal_diag_split);
-    if(s->has_exp_per_pv_step)
-        add_int("exp_per_pv_step", s->exp_per_pv_step);
-    if(s->has_iglp_mode)
-        add_int("iglp_mode", s->iglp_mode);
-    if(s->lazy_rescale_threshold != 8.0)
+    add_optional("exp_per_pv_step", &Spec::has_exp_per_pv_step, &Spec::exp_per_pv_step, add_int);
+    add_optional("iglp_mode", &Spec::has_iglp_mode, &Spec::iglp_mode, add_int);
+    if(s->lazy_rescale_threshold != defaults.lazy_rescale_threshold)
     {
         rocke_strbuf_t number{};
         rocke_append_python_float_repr(&number, s->lazy_rescale_threshold);
@@ -245,33 +250,37 @@ rocke_status_t codegen_token(const rocke_gfx950_attention_dense_spec_t* s, char 
         if(oom)
             return ROCKE_ERR_OOM;
     }
-    if(s->lds_num_buffers != 2)
+    if(s->lds_num_buffers != defaults.lds_num_buffers)
         add_int("lds_num_buffers", s->lds_num_buffers);
-    if(s->o_store_width != 4)
+    if(s->o_store_width != defaults.o_store_width)
         add_int("o_store_width", s->o_store_width);
-    if(!s->partial_vmcnt_prefetch)
+    if(s->partial_vmcnt_prefetch != defaults.partial_vmcnt_prefetch)
         add_bool("partial_vmcnt_prefetch", s->partial_vmcnt_prefetch);
-    if(s->pv_loop_order != NULL)
+    if(s->pv_loop_order != defaults.pv_loop_order
+       && !streq(s->pv_loop_order, defaults.pv_loop_order))
     {
         char value[32];
         if(rocke_py_str_repr(s->pv_loop_order, value, sizeof(value)) >= sizeof(value))
             return ROCKE_ERR_VALUE;
         ok = ok && repr.add("pv_loop_order", value);
     }
-    if(s->pv_priority != 1)
+    if(s->pv_priority != defaults.pv_priority)
         add_int("pv_priority", s->pv_priority);
-    if(s->has_pv_sched_fence)
-        add_bool("pv_sched_fence", s->pv_sched_fence);
-    if(s->pv_sched_fence_mask != 0)
+    add_optional("pv_sched_fence", &Spec::has_pv_sched_fence, &Spec::pv_sched_fence, add_bool);
+    if(s->pv_sched_fence_mask != defaults.pv_sched_fence_mask)
         add_int("pv_sched_fence_mask", s->pv_sched_fence_mask);
-    if(s->pv_sched_group_ds_read != 2)
+    if(s->pv_sched_group_ds_read != defaults.pv_sched_group_ds_read)
         add_int("pv_sched_group_ds_read", s->pv_sched_group_ds_read);
-    if(s->has_pv_sched_group_template)
-        add_bool("pv_sched_group_template", s->pv_sched_group_template);
-    if(!s->use_exp2_fast)
+    add_optional("pv_sched_group_template",
+                 &Spec::has_pv_sched_group_template,
+                 &Spec::pv_sched_group_template,
+                 add_bool);
+    if(s->use_exp2_fast != defaults.use_exp2_fast)
         add_bool("use_exp2_fast", s->use_exp2_fast);
     if(!ok || repr.used + 1 >= sizeof(repr.text))
         return ROCKE_ERR_VALUE;
+    if(repr.used == 0)
+        return ROCKE_OK;
     repr.text[repr.used++] = ']';
     uint8_t digest[32];
     rocke_sha256(repr.text, repr.used, digest);
@@ -313,22 +322,6 @@ bool append_literal(char parts[][ROCKE_ATTENTION_DENSE_NAME_PART_CAP],
     return true;
 }
 
-bool multiply(int64_t a, int64_t b, int64_t* out)
-{
-    if(a > 0 ? (b > 0 ? a > INT64_MAX / b : b < INT64_MIN / a)
-             : (a < 0 && (b > 0 ? a < INT64_MIN / b : b < 0 && a < INT64_MAX / b)))
-        return false;
-    *out = a * b;
-    return true;
-}
-
-bool add(int64_t a, int64_t b, int64_t* out)
-{
-    if((b > 0 && a > INT64_MAX - b) || (b < 0 && a < INT64_MIN - b))
-        return false;
-    *out = a + b;
-    return true;
-}
 } // namespace
 
 rocke_gfx950_attention_dense_spec_t rocke_gfx950_attention_dense_spec_default(void)
@@ -548,14 +541,18 @@ rocke_status_t rocke_gfx950_dense_static_lds_bytes(int head_size,
     if(wide)
     {
         const int64_t rows = 4LL * (head_size / 64) * rocke_floor_div(block_n, 8);
-        return multiply(rows, 1024LL + k_row_pad + v_row_pad, out) ? ROCKE_OK : ROCKE_ERR_VALUE;
+        return rocke_intexpr_checked_mul(rows, 1024LL + k_row_pad + v_row_pad, out)
+                   ? ROCKE_OK
+                   : ROCKE_ERR_VALUE;
     }
     if(head_size == 128)
-        return multiply(4LL * block_n, 256LL + k_row_pad + v_row_pad, out) ? ROCKE_OK
-                                                                           : ROCKE_ERR_VALUE;
+        return rocke_intexpr_checked_mul(4LL * block_n, 256LL + k_row_pad + v_row_pad, out)
+                   ? ROCKE_OK
+                   : ROCKE_ERR_VALUE;
     int64_t k, v;
-    if(!multiply(4LL * rocke_floor_div(block_n, 2), 128LL + k_group_pad, &k)
-       || !multiply(4LL * block_n, head_size, &v) || !add(k, v, out))
+    if(!rocke_intexpr_checked_mul(4LL * rocke_floor_div(block_n, 2), 128LL + k_group_pad, &k)
+       || !rocke_intexpr_checked_mul(4LL * block_n, head_size, &v)
+       || !rocke_intexpr_checked_add(k, v, out))
         return ROCKE_ERR_VALUE;
     return ROCKE_OK;
 }
@@ -564,6 +561,7 @@ size_t rocke_gfx950_dense_tile_legality(int head_size, int out[ROCKE_GFX950_DENS
 {
     if(head_size != 64 && head_size != 128)
         return 0;
+    const int capacity = rocke_arch_target_from_gfx("gfx950")->lds_capacity_bytes;
     size_t count = 0;
     for(int bm : {128, 256})
         for(int bn = 32; bn <= bm; bn += 32)
@@ -573,7 +571,7 @@ size_t rocke_gfx950_dense_tile_legality(int head_size, int out[ROCKE_GFX950_DENS
             int64_t bytes;
             if(rocke_gfx950_dense_static_lds_bytes(head_size, bn, 8, 32, 8, false, &bytes)
                    != ROCKE_OK
-               || bytes > ROCKE_GFX950_DENSE_LDS_CAPACITY_BYTES)
+               || bytes > capacity)
                 continue;
             if(out != NULL)
             {
@@ -630,14 +628,15 @@ bool rocke_gfx950_supports_attention_dense(const rocke_gfx950_attention_dense_sp
                                            &bytes)
        != ROCKE_OK)
         ROCKE_SPEC_FAIL(reason, cap, "static LDS byte count is outside int64");
-    if(bytes > ROCKE_GFX950_DENSE_LDS_CAPACITY_BYTES)
+    const int capacity = rocke_arch_target_from_gfx("gfx950")->lds_capacity_bytes;
+    if(bytes > capacity)
         ROCKE_SPEC_FAIL(reason,
                         cap,
                         "static LDS %lld bytes for head_size=%d block_n=%d exceeds gfx950's %d",
                         (long long)bytes,
                         b.head_size,
                         b.block_n,
-                        ROCKE_GFX950_DENSE_LDS_CAPACITY_BYTES);
+                        capacity);
     if(!rocke_attention_dense_check_kv_segments(&b, s->kv_segments, s->emit_lse, reason, cap))
         return false;
     if(s->kv_storage_dtype != NULL)

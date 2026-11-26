@@ -379,7 +379,9 @@ With `kv_storage_dtype="fp8e4m3"`, only K and V are FP8. The signature adds
 arguments. These scales are supplied by the caller, not by `runtime_args`.
 The K/V address bound uses the stored element width; Q/O remain at the compute
 dtype. The host cases include the one- versus two-byte limit and plain causal
-D64 paging without a sliding window.
+D64 paging without a sliding window. For FP8 K/V with attention sinks, the
+vectors also pin which rejection wins: an invalid KV segment count or an
+incompatible tile is reported before the unsupported sinks.
 
 This port is host metadata only. The gfx950 dense C++ GPU builders and their
 paired IR emitters are separate work; these tests do not establish builder
