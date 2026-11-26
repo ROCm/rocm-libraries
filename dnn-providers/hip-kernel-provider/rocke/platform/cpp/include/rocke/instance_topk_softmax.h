@@ -51,7 +51,6 @@ typedef struct rocke_topk_softmax_spec
     const char* out_dtype; /* output Y dtype, default "f32"                 */
     int block_size; /* default 64                                    */
     const char* name; /* default "rocke_topk_softmax"                 */
-    bool cross_wave_argmax; /* default false (reserved; BS>64 uses LDS path) */
 } rocke_topk_softmax_spec_t;
 
 /* Default-constructed spec (every field == Python dataclass default). The

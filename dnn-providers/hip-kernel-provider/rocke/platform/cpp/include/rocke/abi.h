@@ -159,7 +159,8 @@ extern "C" {
  *     rocke_grouped_gemm_problem_t with other layouts; the fused-MoE instance's
  *     own entries in rocke/instance_fused_moe_e2e.h
  *     (rocke_build_fused_moe_forward, rocke_fused_moe_forward_free and
- *     rocke_fused_moe_forward_lower_to_llvm) stay. */
+ *     rocke_fused_moe_forward_lower_to_llvm) stay. rocke_topk_softmax_spec_t lost
+ *     cross_wave_argmax, which no lowering read, so its size changes. */
 #define ROCKE_ABI_VERSION 23
 
 /* Wire ABI: the CBOR recipe/bundle/guard vocabulary this engine understands.

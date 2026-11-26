@@ -92,7 +92,6 @@ _SPECS = [
         dtype="f32",
         out_dtype="bf16",
         block_size=128,
-        cross_wave_argmax=True,
     ),
     TopkSoftmaxSpec(n_per_row=128, k=1, dtype="f16", out_dtype="f32", block_size=256),
 ]

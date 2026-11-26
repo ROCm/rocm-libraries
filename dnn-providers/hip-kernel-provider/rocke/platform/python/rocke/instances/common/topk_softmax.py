@@ -188,9 +188,6 @@ class TopkSoftmaxSpec:
     out_dtype: DType = "f32"  # output Y dtype
     block_size: int = 64
     name: str = "rocke_topk_softmax"
-    # Accepted for compatibility and ignored: every multi-wave block runs a
-    # butterfly per wave and folds the waves' winners through LDS.
-    cross_wave_argmax: bool = False
 
     @property
     def elems_per_thread(self) -> int:

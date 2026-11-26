@@ -79,7 +79,6 @@ rocke_topk_softmax_spec_t rocke_topk_softmax_spec_default(void)
     s.out_dtype = "f32";
     s.block_size = 64;
     s.name = "rocke_topk_softmax";
-    s.cross_wave_argmax = false;
     return s;
 }
 
