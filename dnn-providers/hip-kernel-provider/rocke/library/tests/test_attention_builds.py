@@ -33,7 +33,7 @@ import pytest
 
 from rocke import lower_kernel_to_llvm
 from rocke.core.ir import KernelDef
-from rocke.tests.comgr import loaded_compiler_build
+from rocke.tests.comgr import compile_kernel_or_skip, loaded_compiler_build
 from rocke.tests.compiler_tools import require_hsaco_tools, require_tools_or_skip
 from rocke.tests.lanes import TICKET, import_or_skip_until
 from rocke.tests.pending_lanes import (
@@ -91,22 +91,6 @@ def _patch_resolved_arch(arch: str):
 # helpers below reach comgr and additionally assert the emitted kernel fits the
 # arch resource budget (LDS today; the readelf-parsed HSACO also carries VGPR/
 # SGPR for future soft-occupancy checks).
-
-
-def _compile_or_skip(kernel, *, arch: str):
-    """Compile ``kernel`` through comgr for ``arch``; skip (not fail) when the
-    comgr toolchain is unavailable so the test is a no-op on hosts without it.
-
-    A failed *compile* (raised ``ComgrError``) is a real defect and propagates.
-    Only a missing/broken toolchain skips."""
-    try:
-        from rocke.helpers.compile import compile_kernel
-    except Exception as e:  # pragma: no cover - env-dependent
-        require_tools_or_skip(f"comgr toolchain unavailable: {e}")
-    try:
-        return compile_kernel(kernel, arch=arch, capture_ir_text=False)
-    except ImportError as e:  # pragma: no cover - env-dependent
-        require_tools_or_skip(f"comgr toolchain unavailable: {e}")
 
 
 # Some shipped attention kernels are tuned for a wave count that pins VGPR at the
@@ -639,7 +623,7 @@ def _check_budget_cases(test_case: unittest.TestCase, cases: list[_BudgetCase]) 
     for case in cases:
         with test_case.subTest(**case.params):
             kernel = case.build()
-            art = _compile_or_skip(kernel, arch=case.arch)
+            art = compile_kernel_or_skip(kernel, arch=case.arch)
             test_case.assertGreater(art.hsaco_bytes, 0)
             _assert_resources_fit(art, arch=case.arch, kernel_name=kernel.name)
 
@@ -1230,7 +1214,7 @@ class TestAttentionHelpers(unittest.TestCase):
         self.assertIn("@llvm.amdgcn.mfma.f32.16x16x16f16", ll)
         # Reach comgr: valid IR is not enough -- assert it actually codegens and
         # fits the LDS cap (the step the IR-text asserts above never exercise).
-        art = _compile_or_skip(k, arch="gfx950")
+        art = compile_kernel_or_skip(k, arch="gfx950")
         self.assertGreater(art.hsaco_bytes, 0)
         _assert_resources_fit(art, arch="gfx950", kernel_name=k.name)
         # Cross-lane softmax reduction. The 16-lane intra-row-group
@@ -1619,10 +1603,10 @@ class TestAttentionHelpers(unittest.TestCase):
         self.assertNotIn("@llvm.exp2.f32", red_ll)
         self.assertIn("fcmp ogt", red_ll)
         # Reach comgr for both the segment and reduce kernels + LDS budget.
-        seg_art = _compile_or_skip(seg, arch="gfx950")
+        seg_art = compile_kernel_or_skip(seg, arch="gfx950")
         self.assertGreater(seg_art.hsaco_bytes, 0)
         _assert_resources_fit(seg_art, arch="gfx950", kernel_name=seg.name)
-        red_art = _compile_or_skip(red, arch="gfx950")
+        red_art = compile_kernel_or_skip(red, arch="gfx950")
         self.assertGreater(red_art.hsaco_bytes, 0)
         _assert_resources_fit(red_art, arch="gfx950", kernel_name=red.name)
 
@@ -3442,7 +3426,7 @@ class TestAttentionDenseWavesPerEu(unittest.TestCase):
                     lower_kernel_to_llvm(kernel, arch="gfx950").encode()
                 ).hexdigest()
                 # Each variant must survive codegen, not just lowering.
-                _compile_or_skip(kernel, arch="gfx950")
+                compile_kernel_or_skip(kernel, arch="gfx950")
 
         self.assertNotEqual(
             ir_hashes[1],
