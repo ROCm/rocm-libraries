@@ -608,6 +608,7 @@ def conv_direct_nongrouped_spec_to_dict(spec: Any) -> Dict[str, Any]:
         split_c=spec.split_c,
         grouped=spec.grouped,
         group_merge=spec.group_merge,
+        bias=spec.bias,
     )
 
 

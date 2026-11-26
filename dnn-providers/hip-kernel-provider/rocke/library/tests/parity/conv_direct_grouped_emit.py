@@ -27,12 +27,14 @@
 # DirectNongroupedConvSpec, from index 218 the fp32-storage configs of every
 # grouped kernel that serves them, see _f32_spec, from index 318 the gfx1250
 # wave32 and image-per-block DirectConvWgradSpec, from index 349
-# DirectDepthwiseWgradSpec and from index 356 the small-C wgrad stems of the
-# AOT grid), builds the kernel via the matching build_direct_conv_* function
+# DirectDepthwiseWgradSpec, from index 356 the small-C wgrad stems of the
+# AOT grid and from index 371 the conv + bias forms of forward configs, see
+# _bias_spec), builds the kernel via the matching build_direct_conv_* function
 # (arch=<cfg arch>) and prints
 # _native_lower(arch=<cfg arch>) to stdout so it can be byte-compared with
 # the C emitter conv_direct_grouped_emit.c.
 import sys
+from dataclasses import replace
 
 from kernels.common.conv_direct_grouped import (
     DirectConvProblem,
@@ -2520,8 +2522,55 @@ def _wgrad_pp_spec(idx: int):
     return ("wgrad_tiled", sel, "gfx950")
 
 
+# ---------------------------------------------------------------------------
+# Conv + bias forward, indices 371..: a forward config above rebuilt with
+# ``bias=True`` (the Bias / Bias_bytes kernarg tail and the fp32 bias add
+# before the store). The split-C conv passes only declare the tail; the folds
+# (DirectSplitReduceSpec) add the bias.
+# ---------------------------------------------------------------------------
+_BIAS_CFG_BASE = 371
+# The forward config each bias config rebuilds, in index order.
+_BIAS_CFGS = (
+    # 0..5: DirectNongroupedConvSpec -- bf16 / fp16 32x32x16, 16x16x32 on a
+    # partial W tile, fp16 16x16x16, gfx942 32x32x8, 5x5 with a partial K tile.
+    42,
+    43,
+    49,
+    50,
+    51,
+    53,
+    # 6..10: split-C conv passes (bf16 two splits, fp16 16-wide atom, gfx942)
+    # and the folds (fp16 two slabs, bf16 eight slabs on a 128-thread block).
+    95,
+    98,
+    99,
+    100,
+    101,
+    # 11..13: the grouped mode (group_merge 1 and 8, grouped + split-C).
+    103,
+    104,
+    107,
+    # 14..15: fp32 storage (gfx950 TF32, gfx942 fp32).
+    201,
+    204,
+)
+
+
+def _bias_spec(idx: int):
+    """Return (kind, spec, arch) for bias config ``_BIAS_CFG_BASE + idx``, or None."""
+    if not 0 <= idx < len(_BIAS_CFGS):
+        return None
+    kind, spec, arch = _spec(_BIAS_CFGS[idx])
+    return kind, replace(spec, bias=True), arch
+
+
 def _spec(idx: int):
     """Return (kind, spec, arch) for config index `idx`."""
+    if idx >= _BIAS_CFG_BASE:
+        sel = _bias_spec(idx - _BIAS_CFG_BASE)
+        if sel is not None:
+            return sel
+        raise SystemExit(f"unknown config index {idx}")
     if idx >= _WGRAD_PP_CFG_BASE:
         sel = _wgrad_pp_spec(idx - _WGRAD_PP_CFG_BASE)
         if sel is not None:

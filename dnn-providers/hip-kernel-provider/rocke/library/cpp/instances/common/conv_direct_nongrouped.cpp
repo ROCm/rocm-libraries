@@ -38,6 +38,7 @@
 #include "rocke/helper_rocke.helpers.grid.h" /* rocke_chiplet_aware_super_tile_dynamic */
 #include "rocke/helper_rocke.helpers.io.h" /* rocke_b_io_ir_type, rocke_b_smem_load_fragment */
 #include "rocke/helper_rocke.helpers.spec.h" /* rocke_kernel_name_join */
+#include "rocke/instance_conv_bias.h"
 #include "rocke/instance_conv_direct_grouped_internal.h" /* rocke_dconv_emit_params */
 #include "rocke/lower_llvm.h"
 
@@ -314,7 +315,7 @@ rocke_status_t rocke_direct_conv_nongrouped_kernel_name(
     char grp_buf[24];
     char d_buf[32];
     char pad_buf[24];
-    const char* parts[14];
+    const char* parts[15];
     const char* dtype;
     const char* dtype_flag;
 
@@ -389,8 +390,9 @@ rocke_status_t rocke_direct_conv_nongrouped_kernel_name(
     /* _DTYPE_FLAG.get(dtype, dtype): fp16 has none (the historical names);
      * fp32 storage needs one or its binaries would collide with the fp16 names. */
     dtype_flag = strcmp(dtype, "fp16") == 0 ? "" : dtype;
-    parts[13] = dtype_flag;
-    return rocke_kernel_name_join(spec->name, parts, 14, NULL, NULL, 0, out, out_cap, NULL);
+    parts[13] = spec->bias ? "cbias" : "";
+    parts[14] = dtype_flag;
+    return rocke_kernel_name_join(spec->name, parts, 15, NULL, NULL, 0, out, out_cap, NULL);
 }
 
 /* ===================================================================== *
@@ -930,7 +932,14 @@ bool nongrouped_prologue(nongrouped_ctx& c, const char* arch)
         rocke_attr_set_int(b, &b->kernel->attrs, "waves_per_eu", spec->waves_per_eu);
     }
 
-    rocke_dconv_emit_params(b, &c.params, "fwd", c.io_type);
+    if(spec->bias)
+    {
+        rocke_dconv_emit_params_bias(b, &c.params, c.io_type);
+    }
+    else
+    {
+        rocke_dconv_emit_params(b, &c.params, "fwd", c.io_type);
+    }
     if(!rocke_ir_builder_ok(b))
     {
         return false;
@@ -1814,6 +1823,30 @@ void nongrouped_epilogue(nongrouped_ctx& c, const std::vector<rocke_value_t*>& a
     {
         img_out_base = rocke_b_mul(b, c.n_img, prm->p_D_stride_n);
     }
+    /* Conv + bias: bias[k .. k+4) of every quad this lane stores, as fp32,
+     * loaded once ahead of the stores. A split_c > 1 pass leaves its partial
+     * sums raw (the fold adds the bias). */
+    std::vector<rocke_value_t*> bias_q;
+    if(c.spec->bias && !split)
+    {
+        rocke_value_t* bias_rsrc = rocke_conv_bias_rsrc(b, prm->Bias, prm->Bias_bytes);
+        for(mt = 0; mt < c.MT_W; ++mt)
+        {
+            for(q = 0; q < c.QUADS; ++q)
+            {
+                k = nongrouped_c(c, (int64_t)mt * c.AT);
+                t0 = rocke_b_add(b, k_lane_base, k);
+                k = nongrouped_c(c, (int64_t)q * (c.AT / 4));
+                t0 = rocke_b_add(b, t0, k);
+                if(c.GROUPED)
+                {
+                    t0 = rocke_b_add(b, t0, c.k_glob_base);
+                }
+                bias_q.push_back(
+                    rocke_conv_bias_load_vec_f32(b, bias_rsrc, t0, 4, c.io_type, c.c0));
+            }
+        }
+    }
 
     for(mt = 0; mt < c.MT_W; ++mt)
     {
@@ -1897,6 +1930,10 @@ void nongrouped_epilogue(nongrouped_ctx& c, const std::vector<rocke_value_t*>& a
                         comps[jj] = rocke_b_vec_extract(b, acc, 4 * q + jj);
                     }
                     quad = rocke_b_vec_pack(b, comps, 4, rocke_f32());
+                    if(!bias_q.empty())
+                    {
+                        quad = rocke_b_fadd(b, quad, bias_q[(size_t)mt * c.QUADS + q]);
+                    }
                     if(c.F32S)
                     {
                         rocke_dconv_store_from_f32(b, c.dtype, c.d_rsrc, safe, c.c0, quad, 4);
@@ -2070,7 +2107,7 @@ rocke_status_t rocke_direct_conv_split_reduce_kernel_name(
 {
     char sc_buf[24];
     char b_buf[24];
-    const char* parts[3];
+    const char* parts[4];
 
     if(spec == NULL || out == NULL || out_cap == 0)
     {
@@ -2080,8 +2117,9 @@ rocke_status_t rocke_direct_conv_split_reduce_kernel_name(
     snprintf(b_buf, sizeof(b_buf), "b%d", spec->threads);
     parts[0] = sc_buf;
     parts[1] = b_buf;
-    parts[2] = split_reduce_is_bf16(spec) ? "bf16" : "";
-    return rocke_kernel_name_join(spec->name, parts, 3, NULL, NULL, 0, out, out_cap, NULL);
+    parts[2] = spec->bias ? "cbias" : "";
+    parts[3] = split_reduce_is_bf16(spec) ? "bf16" : "";
+    return rocke_kernel_name_join(spec->name, parts, 4, NULL, NULL, 0, out, out_cap, NULL);
 }
 
 rocke_status_t rocke_direct_conv_split_reduce_validate(
@@ -2171,7 +2209,14 @@ rocke_kernel_def_t* rocke_build_direct_conv_split_reduce(
     bf16 = split_reduce_is_bf16(spec);
 
     rocke_attr_set_int(b, &b->kernel->attrs, "max_workgroup_size", spec->threads);
-    rocke_dconv_emit_params(b, &params, "fwd", io_type);
+    if(spec->bias)
+    {
+        rocke_dconv_emit_params_bias(b, &params, io_type);
+    }
+    else
+    {
+        rocke_dconv_emit_params(b, &params, "fwd", io_type);
+    }
     if(!rocke_ir_builder_ok(b))
     {
         return NULL;
@@ -2247,6 +2292,15 @@ rocke_kernel_def_t* rocke_build_direct_conv_split_reduce(
     t = rocke_b_mul(b, d_elems, k);
     d_off = rocke_b_select(b, valid, t, oob_base);
     t = rocke_b_vec_concat(b, sum_lo, sum_hi);
+    if(spec->bias)
+    {
+        /* The vector's 8 elements are channels k .. k+7 of one pixel (K is a
+         * multiple of 16, elem of 8): bias[k .. k+8) once, after the fold. */
+        rocke_value_t* bias_rsrc = rocke_conv_bias_rsrc(b, params.Bias, params.Bias_bytes);
+        rocke_value_t* bias_v = rocke_conv_bias_load_vec_f32(
+            b, bias_rsrc, kk, ROCKE_DCONV_SPLIT_REDUCE_VEC, io_type, c0);
+        t = rocke_b_fadd(b, t, bias_v);
+    }
     if(bf16)
     {
         out = rocke_b_vec_trunc_f32_to_bf16(b, t);

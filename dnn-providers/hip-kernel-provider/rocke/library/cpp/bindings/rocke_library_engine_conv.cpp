@@ -1869,6 +1869,7 @@ rocke_direct_conv_nongrouped_spec_t dnongrouped_build_spec(const py::dict& d,
     s.split_c = dict_int(d, "split_c", s.split_c);
     s.grouped = dict_bool(d, "grouped", s.grouped);
     s.group_merge = dict_int(d, "group_merge", s.group_merge);
+    s.bias = dict_bool(d, "bias", s.bias);
     /* The C spec encodes None as a sentinel (-1 / 0). An explicit value in the
      * sentinel range would silently read as None here, so reject it with the
      * message Python's validate() raises for the same spec. */

@@ -112,6 +112,13 @@ extern "C" {
  *      split_c: int = 1
  *      grouped: bool = False
  *      group_merge: int = 1                # groups per workgroup (grouped only)
+ *      bias: bool = False                  # conv + bias (Bias / Bias_bytes tail)
+ *
+ *  bias: the kernel takes the (Bias, Bias_bytes) tail after the direct-conv
+ *  block and adds bias[k] to the fp32 accumulators before the store. A
+ *  split_c > 1 conv pass declares the tail but leaves its partial sums raw:
+ *  the fold (split-reduce spec with bias) adds the bias exactly once, and the
+ *  two passes launch with one shared kernarg block.
  * ===================================================================== */
 typedef struct rocke_direct_conv_nongrouped_spec
 {
@@ -137,6 +144,7 @@ typedef struct rocke_direct_conv_nongrouped_spec
     int split_c; /* default 1 */
     bool grouped; /* default false */
     int group_merge; /* default 1 */
+    bool bias; /* default false */
 } rocke_direct_conv_nongrouped_spec_t;
 
 /* Spec with the Python dataclass defaults; problem == problem_default() with
@@ -160,7 +168,7 @@ long long
 
 /* kernel_name(): kernel_name_join(name, problem.short(), [d{dh}x{dw}],
  * t{h}x{w}x{k}, ck{ck}, w{wm}x{wn}, a{atom}, g{wgm}|gnone, [db], [iglp{n}],
- * [we{n}], [sc{n}], [grp{group_merge}], [p{lds_pad}], [dtype]): p{lds_pad} only
+ * [we{n}], [sc{n}], [grp{group_merge}], [p{lds_pad}], [cbias], [dtype]): p{lds_pad} only
  * for fp32 storage with a pad other than 4; the dtype flag is empty for fp16
  * and the dtype itself otherwise (bf16 / fp32 / tf32). */
 rocke_status_t rocke_direct_conv_nongrouped_kernel_name(
@@ -210,10 +218,14 @@ rocke_status_t
  *      split_c: int = 2
  *      threads: int = 256
  *      name: str = "direct_conv_split_reduce"
+ *      bias: bool = False
  *
  *  Sums the split_c fp32 slabs of the packed [split_c, N, Ho, Wo, K] workspace
  *  (bound to A) and writes the output (D, NHWK through the p_D_stride_*
  *  kernargs) in dtype. Takes the forward direct-conv kernarg block; B unused.
+ *  bias: the fold of a conv + bias forward takes the (Bias, Bias_bytes) tail
+ *  (the block it shares with the conv pass) and adds bias[k], k = elem % K, to
+ *  the sum before the one rounding.
  * ===================================================================== */
 typedef struct rocke_direct_conv_split_reduce_spec
 {
@@ -221,11 +233,12 @@ typedef struct rocke_direct_conv_split_reduce_spec
     int split_c; /* default 2   */
     int threads; /* default 256 */
     const char* name; /* default "direct_conv_split_reduce" */
+    bool bias; /* default false */
 } rocke_direct_conv_split_reduce_spec_t;
 
 rocke_direct_conv_split_reduce_spec_t rocke_direct_conv_split_reduce_spec_default(void);
 
-/* kernel_name(): kernel_name_join(name, sc{n}, b{threads}, [bf16]). */
+/* kernel_name(): kernel_name_join(name, sc{n}, b{threads}, [cbias], [bf16]). */
 rocke_status_t rocke_direct_conv_split_reduce_kernel_name(
     const rocke_direct_conv_split_reduce_spec_t* spec, char* out, size_t out_cap);
 
