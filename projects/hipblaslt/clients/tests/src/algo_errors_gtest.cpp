@@ -488,6 +488,106 @@ namespace
         ASSERT_GE(index, 0);
         EXPECT_EQ(isSupported(tensile.algo), HIPBLAS_STATUS_INVALID_VALUE);
     }
+
+    // rocRoller's Stream-K kernels split K across workgroups, so an algo naming one is
+    // refused once uniform summation order is on, even when it was chosen with it off.
+    TEST_F(AlgoErrors, smoke_RocRollerStreamKAlgoIsRefusedUnderUniformSummationOrder)
+    {
+        int             device = 0;
+        hipDeviceProp_t props{};
+        ASSERT_EQ(hipGetDevice(&device), hipSuccess);
+        ASSERT_EQ(hipGetDeviceProperties(&props, device), hipSuccess);
+        if(std::string(props.gcnArchName).find("gfx1250") != std::string::npos)
+            GTEST_SKIP() << "gfx1250 handles never use rocRoller";
+
+        hipblasLtHandle_t rocroller = nullptr;
+        {
+            ScopedEnv use("HIPBLASLT_USE_ROCROLLER", "1");
+            ASSERT_EQ(hipblasLtCreate(&rocroller), HIPBLAS_STATUS_SUCCESS);
+        }
+        const std::unique_ptr<void, decltype(&hipblasLtDestroy)> owner(rocroller,
+                                                                       &hipblasLtDestroy);
+
+        // One output tile with a long K, which rocRoller runs as Stream-K.
+        constexpr int64_t       m = 128, n = 256, k = 4096;
+        hipblasLtMatrixLayout_t lA = nullptr, lB = nullptr, lCD = nullptr;
+        ASSERT_EQ(hipblasLtMatrixLayoutCreate(&lA, kType, m, k, m), HIPBLAS_STATUS_SUCCESS);
+        const LayoutPtr ownA(lA, &hipblasLtMatrixLayoutDestroy);
+        ASSERT_EQ(hipblasLtMatrixLayoutCreate(&lB, kType, k, n, k), HIPBLAS_STATUS_SUCCESS);
+        const LayoutPtr ownB(lB, &hipblasLtMatrixLayoutDestroy);
+        ASSERT_EQ(hipblasLtMatrixLayoutCreate(&lCD, kType, m, n, m), HIPBLAS_STATUS_SUCCESS);
+        const LayoutPtr ownCD(lCD, &hipblasLtMatrixLayoutDestroy);
+
+        auto setUniformOrder = [&](int32_t value) {
+            return hipblasLtMatmulDescSetAttribute(
+                desc, HIPBLASLT_MATMUL_DESC_UNIFORM_SUMMATION_ORDER_EXT, &value, sizeof(value));
+        };
+        // The heuristic and matmulIsAlgoSupported both cap the workspace at this, and rocRoller
+        // drops a Stream-K kernel whose workspace does not fit.
+        constexpr size_t kMaxWorkspace = size_t(64) << 20;
+        ASSERT_EQ(hipblasLtMatmulPreferenceSetAttribute(pref,
+                                                        HIPBLASLT_MATMUL_PREF_MAX_WORKSPACE_BYTES,
+                                                        &kMaxWorkspace,
+                                                        sizeof(kMaxWorkspace)),
+                  HIPBLAS_STATUS_SUCCESS);
+        auto isSupported = [&](hipblasLtMatmulAlgo_t algo, size_t& workspace) {
+            workspace = kMaxWorkspace;
+            return hipblaslt_ext::matmulIsAlgoSupported(
+                rocroller, desc, &alpha, lA, lB, &beta, lCD, lCD, algo, workspace);
+        };
+
+        ASSERT_EQ(setUniformOrder(0), HIPBLAS_STATUS_SUCCESS);
+        hipblasLtMatmulHeuristicResult_t result{};
+        int                              count = 0;
+        ASSERT_EQ(hipblasLtMatmulAlgoGetHeuristic(
+                      rocroller, desc, lA, lB, lCD, lCD, pref, 1, &result, &count),
+                  HIPBLAS_STATUS_SUCCESS);
+        if(count == 0
+           || hipblaslt_ext::getKernelNameFromAlgo(rocroller, result.algo).find("_sk")
+                  == std::string::npos)
+            GTEST_SKIP() << "rocRoller chose no Stream-K kernel for this problem on "
+                         << props.gcnArchName;
+        size_t workspaceSize = 0;
+        ASSERT_EQ(isSupported(result.algo, workspaceSize), HIPBLAS_STATUS_SUCCESS);
+
+        // Sized for the Stream-K kernel, so only uniform summation order can refuse it.
+        auto  freeBuffer = [](void* p) { static_cast<void>(hipFree(p)); };
+        void *bigA = nullptr, *bigB = nullptr, *bigCD = nullptr, *workspace = nullptr;
+        ASSERT_EQ(hipMalloc(&bigA, m * k * sizeof(uint16_t)), hipSuccess);
+        const std::unique_ptr<void, decltype(freeBuffer)> ownBigA(bigA, freeBuffer);
+        ASSERT_EQ(hipMalloc(&bigB, k * n * sizeof(uint16_t)), hipSuccess);
+        const std::unique_ptr<void, decltype(freeBuffer)> ownBigB(bigB, freeBuffer);
+        ASSERT_EQ(hipMalloc(&bigCD, m * n * sizeof(uint16_t)), hipSuccess);
+        const std::unique_ptr<void, decltype(freeBuffer)> ownBigCD(bigCD, freeBuffer);
+        ASSERT_EQ(hipMalloc(&workspace, std::max<size_t>(workspaceSize, 1)), hipSuccess);
+        const std::unique_ptr<void, decltype(freeBuffer)> ownWorkspace(workspace, freeBuffer);
+
+        auto matmul = [&]() {
+            return hipblasLtMatmul(rocroller,
+                                   desc,
+                                   &alpha,
+                                   bigA,
+                                   lA,
+                                   bigB,
+                                   lB,
+                                   &beta,
+                                   bigCD,
+                                   lCD,
+                                   bigCD,
+                                   lCD,
+                                   &result.algo,
+                                   workspace,
+                                   workspaceSize,
+                                   nullptr);
+        };
+        ASSERT_EQ(matmul(), HIPBLAS_STATUS_SUCCESS);
+        ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
+
+        ASSERT_EQ(setUniformOrder(1), HIPBLAS_STATUS_SUCCESS);
+        size_t unused = 0;
+        EXPECT_EQ(isSupported(result.algo, unused), HIPBLAS_STATUS_INVALID_VALUE);
+        EXPECT_EQ(matmul(), HIPBLAS_STATUS_INVALID_VALUE);
+    }
 #endif
 
     // No kernel applies an aux scale, so both APIs refuse a non-null one.
