@@ -64,6 +64,7 @@
 #include <iterator>
 #include <map>
 #include <memory>
+#include <ostream>
 #include <random>
 #include <string>
 #include <utility>
@@ -1325,6 +1326,13 @@ namespace
         int64_t     m = 4096;
     };
 
+    // gtest's default printer dumps the raw bytes, padding included, which valgrind flags.
+    void PrintTo(const MXFp6Case& c, std::ostream* os)
+    {
+        *os << "{name=" << c.name << " type=" << c.type << " k=" << c.k
+            << " gfx950Pick=" << c.gfx950Pick << " tiledB=" << c.tiledB << " m=" << c.m << "}";
+    }
+
     // The gfx950 chips the MXFP6 128x4 kernels are registered for: MI350X and MI355X.
     bool onMXFp6RegisteredChip()
     {
@@ -1775,6 +1783,13 @@ namespace
         float       beta;
         bool        hasKernel;
     };
+
+    // gtest's default printer dumps the raw bytes, padding included, which valgrind flags.
+    void PrintTo(const MXFp6SelectionCase& c, std::ostream* os)
+    {
+        *os << "{name=" << c.name << " type=" << c.type << " k=" << c.k << " tiledB=" << c.tiledB
+            << " alpha=" << c.alpha << " beta=" << c.beta << " hasKernel=" << c.hasKernel << "}";
+    }
 
     class RowUniformityMXFp6Selection_smoke
         : public ::testing::TestWithParam<MXFp6SelectionCase>
@@ -3269,6 +3284,35 @@ namespace
             return out;
 
         out.streamK = true;
+
+        // Clustered Stream-K schedules spatial blocks and may switch parallel
+        // reduction to tree or fall back to whole blocks, so read the launch
+        // settings from resolvePersistentSettings().
+        if(solution.usesStreamKSpatialCluster())
+        {
+            const auto  launch  = solution.resolvePersistentSettings(tensile, hardware);
+            const auto& cluster = launch.clusterSchedule;
+            out.staticPacking   = true;
+            out.tree            = launch.reduction == origami::reduction_t::tree;
+            out.tiles           = cluster.blocks;
+            out.itersPerTile    = cluster.itersPerTile;
+            out.grid            = launch.grid;
+            if(!out.tree || out.grid == 0)
+                return out;
+            out.split             = cluster.split;
+            out.perTileExtraIters = solution.internalArgsSupport.perTileExtraIters;
+            out.rowUniform        = TensileLite::StreamK::Static::isRowUniform(
+                out.split,
+                out.tiles,
+                out.itersPerTile,
+                out.grid,
+                out.perTileExtraIters,
+                tensile.getParams().uniformSummationOrder(),
+                solution.skKGranularity());
+            out.newlyAdmitted
+                = out.rowUniform && out.split.args.skTiles != 0 && out.tiles % out.grid != 0;
+            return out;
+        }
 
         const bool effectiveDynamic = solution.sizeMapping.workAssignment == TensileLite::WorkAssignment::Hybrid
                                           ? solution.streamK5EffectiveDynamic(tensile, hardware)

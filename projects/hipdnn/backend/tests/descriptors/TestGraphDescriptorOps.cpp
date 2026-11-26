@@ -415,7 +415,12 @@ TEST_F(TestGraphDescriptorOps, ConvolutionAttributesPreserved)
 
     HipdnnBackendDescriptor* x = conv.xDesc.get();
     HipdnnBackendDescriptor* w = conv.wDesc.get();
-    HipdnnBackendDescriptor* y = conv.yDesc.get();
+    // Spatial extents consistent with the custom padding and stride:
+    // (32 + 2 + 4 - 3) / 2 + 1 = 18 and (32 + 3 + 5 - 3) / 2 + 1 = 19.
+    const std::vector<int64_t> customYDims = {1, 64, 18, 19};
+    const std::vector<int64_t> customYStrides = {21888, 342, 19, 1};
+    auto customYDesc = createFinalizedTensor(K_FPROP_TENSOR_Y_UID, customYDims, customYStrides);
+    HipdnnBackendDescriptor* y = customYDesc.get();
 
     convDesc->setAttribute(HIPDNN_ATTR_OPERATION_CONVOLUTION_FORWARD_X,
                            HIPDNN_TYPE_BACKEND_DESCRIPTOR,
@@ -481,8 +486,8 @@ TEST_F(TestGraphDescriptorOps, ConvolutionAttributesPreserved)
                  DataType::FLOAT);
     verifyTensor(findTensorByUid(*graphT, K_FPROP_TENSOR_Y_UID),
                  K_FPROP_TENSOR_Y_UID,
-                 toVec(K_FPROP_TENSOR_Y_DIMS),
-                 toVec(K_FPROP_TENSOR_Y_STRIDES),
+                 customYDims,
+                 customYStrides,
                  DataType::FLOAT);
 
     // Verify node with asymmetric padding and non-unit stride

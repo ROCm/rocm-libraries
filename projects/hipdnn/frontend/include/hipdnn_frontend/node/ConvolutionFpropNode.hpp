@@ -10,6 +10,7 @@
 #include <hipdnn_frontend/detail/ConvolutionFpropPacker.hpp>
 #include <hipdnn_frontend/detail/ConvolutionFpropUnpacker.hpp>
 #include <hipdnn_frontend/detail/ScopedHipdnnBackendDescriptor.hpp>
+#include <hipdnn_frontend/node/detail/CheckedShapeMath.hpp>
 
 namespace hipdnn_frontend::graph
 {
@@ -201,8 +202,18 @@ public:
                 auto kernelSize = wDims[i + 2];
                 auto outputSize = yDims[i + 2];
 
-                auto dilatedKernelSize = (dilationVal * (kernelSize - 1)) + 1;
-                auto numerator = inputSize + prePad + postPad - dilatedKernelSize;
+                int64_t dilatedKernelSize = 0;
+                HIPDNN_CHECK_ERROR(detail::checkedDilatedKernelSize(
+                    "ConvolutionFpropNode", i, dilationVal, kernelSize, dilatedKernelSize));
+
+                int64_t numerator = 0;
+                HIPDNN_CHECK_ERROR(detail::checkedPaddedNumerator("ConvolutionFpropNode",
+                                                                  i,
+                                                                  inputSize,
+                                                                  prePad,
+                                                                  postPad,
+                                                                  dilatedKernelSize,
+                                                                  numerator));
 
                 HIPDNN_RETURN_IF_LT(numerator,
                                     0,
@@ -213,7 +224,9 @@ public:
                                         + std::to_string(kernelSize) + ") and dilation ("
                                         + std::to_string(dilationVal) + ")");
 
-                const int64_t expectedOutputSize = (numerator / strideVal) + 1;
+                int64_t expectedOutputSize = 0;
+                HIPDNN_CHECK_ERROR(detail::checkedStridedExtent(
+                    "ConvolutionFpropNode", i, numerator, strideVal, expectedOutputSize));
 
                 HIPDNN_RETURN_IF_NE(
                     outputSize,
@@ -315,10 +328,22 @@ public:
                                     "ConvolutionFpropNode: Post-padding must be non-negative");
 
                 // Calculate dilated kernel size
-                auto dilatedKernelSize = (dilationVal * (kernelSize - 1)) + 1;
+                int64_t dilatedKernelSize = 0;
+                HIPDNN_CHECK_ERROR(detail::checkedDilatedKernelSize("ConvolutionFpropNode",
+                                                                    spatialIdx,
+                                                                    dilationVal,
+                                                                    kernelSize,
+                                                                    dilatedKernelSize));
 
                 // Calculate output dimension
-                auto numerator = inputSize + prePad + postPad - dilatedKernelSize;
+                int64_t numerator = 0;
+                HIPDNN_CHECK_ERROR(detail::checkedPaddedNumerator("ConvolutionFpropNode",
+                                                                  spatialIdx,
+                                                                  inputSize,
+                                                                  prePad,
+                                                                  postPad,
+                                                                  dilatedKernelSize,
+                                                                  numerator));
                 HIPDNN_RETURN_IF_LT(
                     numerator,
                     0,
@@ -326,7 +351,8 @@ public:
                     "ConvolutionFpropNode: Invalid convolution parameters result in negative "
                     "output size");
 
-                yDims[i] = (numerator / strideVal) + 1;
+                HIPDNN_CHECK_ERROR(detail::checkedStridedExtent(
+                    "ConvolutionFpropNode", spatialIdx, numerator, strideVal, yDims[i]));
             }
 
             // Set the inferred dimensions

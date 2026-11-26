@@ -321,6 +321,31 @@ TEST_F(TestStaticOrderingBuiltIn, FallbackEnvOverridesDefaultOrdering)
     EXPECT_EQ(sorted[2], MIOPEN_ENGINE_ID);
 }
 
+class TestStaticOrderingDuplicateFallbackEntries : public TestStaticOrderingBuiltIn,
+                                                   public ::testing::WithParamInterface<std::string>
+{
+};
+
+TEST_P(TestStaticOrderingDuplicateFallbackEntries, KeepsFirstOccurrence)
+{
+    const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter env(FALLBACK_ORDERING_ENV,
+                                                                          GetParam());
+    const std::array<int64_t, 3> ids{MIOPEN_ENGINE_ID, CUSTOM_ENGINE_ID, MIOPEN_DETERMINISTIC_ID};
+    _plugin->setEngineIds(_desc, ids.data(), ids.size());
+
+    ASSERT_TRUE(_plugin->finalize(_desc));
+    EXPECT_EQ(_plugin->getSortedEngineIds(_desc),
+              (std::vector<int64_t>{MIOPEN_DETERMINISTIC_ID, MIOPEN_ENGINE_ID}));
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    FallbackEnv,
+    TestStaticOrderingDuplicateFallbackEntries,
+    ::testing::Values("MIOPEN_ENGINE_DETERMINISTIC,MIOPEN_ENGINE_DETERMINISTIC,MIOPEN_ENGINE",
+                      "MIOPEN_ENGINE_DETERMINISTIC," + std::to_string(MIOPEN_DETERMINISTIC_ID)
+                          + ",MIOPEN_ENGINE",
+                      "MIOPEN_ENGINE_DETERMINISTIC,MIOPEN_ENGINE,MIOPEN_ENGINE_DETERMINISTIC"));
+
 TEST_F(TestStaticOrderingBuiltIn, FallbackEnvSubsetDropsUnlistedCandidates)
 {
     // Env names only MIOPEN_ENGINE; CUSTOM and DETERMINISTIC must be dropped

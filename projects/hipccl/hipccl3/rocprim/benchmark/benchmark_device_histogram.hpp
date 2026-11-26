@@ -38,40 +38,6 @@
 #include <type_traits>
 #include <vector>
 
-template<typename T>
-std::vector<T> generate(size_t items, int entropy_reduction, int lower_level, int upper_level)
-{
-    if(entropy_reduction >= 5)
-    {
-        return std::vector<T>(items, static_cast<T>((lower_level + upper_level) / 2));
-    }
-
-    const size_t max_random_size = 1024 * 1024 + 4321;
-
-    const unsigned int seed = 123;
-    engine_type        gen(seed);
-    std::vector<T>     data(items);
-    std::generate(data.begin(),
-                  data.begin() + std::min(items, max_random_size),
-                  [&]()
-                  {
-                      // Reduce enthropy by applying bitwise AND to random bits
-                      // "An Improved Supercomputer Sorting Benchmark", 1992
-                      // Kurt Thearling & Stephen Smith
-                      auto v = gen();
-                      for(int e = 0; e < entropy_reduction; ++e)
-                      {
-                          v &= gen();
-                      }
-                      return T(lower_level + v % (upper_level - lower_level));
-                  });
-    for(size_t i = max_random_size; i < items; i += max_random_size)
-    {
-        std::copy_n(data.begin(), std::min(items - i, max_random_size), data.begin() + i);
-    }
-    return data;
-}
-
 template<typename Config>
 constexpr auto config_name()
 {
@@ -91,19 +57,6 @@ constexpr auto config_name()
             .add("shared_impl_histograms", config.shared_impl_histograms)
             .add("global_hist_bs", config.histogram_global_config.block_size)
             .add("global_hist_ipt", config.histogram_global_config.items_per_thread);
-    }
-}
-
-inline int get_entropy_percents(int entropy_reduction)
-{
-    switch(entropy_reduction)
-    {
-        case 0: return 100;
-        case 1: return 81;
-        case 2: return 54;
-        case 3: return 33;
-        case 4: return 20;
-        default: return 0;
     }
 }
 
@@ -142,7 +95,8 @@ struct device_histogram_even_benchmark : public primbench::benchmark_interface
         const level_type upper_level = m_bins * m_scale;
 
         // Generate data
-        std::vector<T> input = generate<T>(items, m_entropy_reduction, lower_level, upper_level);
+        std::vector<T> input
+            = generate_histogram_input<T>(items, m_entropy_reduction, lower_level, upper_level);
 
         common::device_ptr<T>            d_input(input);
         common::device_ptr<counter_type> d_histogram(m_bins);
@@ -235,8 +189,10 @@ struct device_multi_histogram_even_benchmark : public primbench::benchmark_inter
         }
 
         // Generate data
-        std::vector<T> input
-            = generate<T>(items * Channels, m_entropy_reduction, lower_level[0], upper_level[0]);
+        std::vector<T> input = generate_histogram_input<T>(items * Channels,
+                                                           m_entropy_reduction,
+                                                           lower_level[0],
+                                                           upper_level[0]);
 
         common::device_ptr<T> d_input(input);
         counter_type*         d_histogram[ActiveChannels];
