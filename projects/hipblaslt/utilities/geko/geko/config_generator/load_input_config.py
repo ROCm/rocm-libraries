@@ -466,7 +466,18 @@ def apply_input_config_defaults(config: Dict[str, Any]) -> None:
         config["MAX_NUM_KERNELS_PER_CONFIG"] = sys.maxsize
     else:
         config.setdefault("MAX_NUM_KERNELS_PER_CONFIG", MAX_NUM_KERNELS_PER_CONFIG)
-    
+
+    # MXFP6 (F6): TensileLite's persistent StreamK path emits an fp32 fixup/
+    # reduction store whose vector width (e.g. gwvw=5 -> bps=20) FP6 tiles land
+    # on, which KernelWriterAssembly.bufferStoreImpl cannot encode ("bad bps"),
+    # so every StreamK F6 kernel fails codegen. Until that store path supports
+    # FP6, force non-persistent kernels (TileProcessingStrategy: None) for F6.
+    _is_f6 = str(config.get("DataType", "")) == "F6" or any(
+        gp.gemm_type.data_type == "F6" for gp in config.get("GemmProblems", [])
+    )
+    if _is_f6 and config.get("StreamK"):
+        config["StreamK"] = False
+
     _apply_env_config_overrides(config)
 
 def load_prepared_config_from_yaml(

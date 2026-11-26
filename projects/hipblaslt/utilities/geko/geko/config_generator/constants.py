@@ -7,9 +7,9 @@ VERSION = "2.01"
 # apply value with N_dim <=step
 stepValue_EnqueuesPerSync = [[64*64*8192,200], [256*256*8192,30], [1024*1024*8192,20], [1000000000000000,10]]
 
-dataSize = {'H': 2, 'B': 2, 'S': 4, 'D': 8, 'C': 8, 'Z': 16, 'I8': 1, 'X': 4, 'F8': 1, 'F8N': 1, 'F8B8': 1, 'B8F8': 1, 'X1': 4, 'F4': 1}
+dataSize = {'H': 2, 'B': 2, 'S': 4, 'D': 8, 'C': 8, 'Z': 16, 'I8': 1, 'X': 4, 'F8': 1, 'F8N': 1, 'F8B8': 1, 'B8F8': 1, 'X1': 4, 'F4': 1, 'F6': 1}
 
-LIST_OF_MIN_DIM={'H': 7, 'B': 7, 'S': 3, 'D': 1, 'C': 1, 'Z': 1, 'I8': 7, 'X': 3, 'F8': 7, 'F8N': 7, 'F8B8': 7, 'B8F8': 7, 'X1': 4, 'F4': 7}
+LIST_OF_MIN_DIM={'H': 7, 'B': 7, 'S': 3, 'D': 1, 'C': 1, 'Z': 1, 'I8': 7, 'X': 3, 'F8': 7, 'F8N': 7, 'F8B8': 7, 'B8F8': 7, 'X1': 4, 'F4': 7, 'F6': 7}
 
 depthURange = {}  # [for small/mid MT], [for large  MT]
 depthURange['H'] = [[64,128,256,512], [32,64,128,256], [32,64,128], [32,64]]
@@ -27,8 +27,11 @@ depthURange['F8B8'] = depthURange['F8']
 depthURange['B8F8'] = depthURange['F8']
 # fp4 MI16x16x128: DepthU must be a multiple of 2*MI_K = 256.
 depthURange['F4'] = [[256,512,768,1024], [256,512,768], [256,512], [256]]
+# fp6 shares the F8F6F4 MI16x16x128 / MI32x32x64 family with fp4, so the same
+# DepthU constraint (multiple of 2*MI_K = 256) applies.
+depthURange['F6'] = depthURange['F4']
 
-computeDataTypeSize = {'H': 4, 'B': 4, 'S': 4, 'D': 8, 'C': 8, 'Z': 16, 'I8': 4, 'I': 4, 'X': 4, 'F8': 4, 'F8N': 4, 'F8B8': 4, 'B8F8': 4, 'X1': 4, 'F4': 4}
+computeDataTypeSize = {'H': 4, 'B': 4, 'S': 4, 'D': 8, 'C': 8, 'Z': 16, 'I8': 4, 'I': 4, 'X': 4, 'F8': 4, 'F8N': 4, 'F8B8': 4, 'B8F8': 4, 'X1': 4, 'F4': 4, 'F6': 4}
 
 # TODO update for every new arch, or import from tensilelite commons
 validMFMA = {}
@@ -43,6 +46,9 @@ validMFMA["X"] = validMFMA["B"]
 validMFMA["X1"] = validMFMA["B"]
 validMFMA["F8"] = [[32,32,16,1], [16,16,32,1], [32,32,64,1], [16,16,128,1]]
 validMFMA["F4"] = [[16,16,128,1], [32,32,64,1], [32,16,128,1]]
+# fp6 uses the same F8F6F4 MFMA family as fp4 on CDNA4 (gfx950), minus the
+# fp4-only wide [32,16,128,1] WMMA: MXFP6 uses 16x16x128 and 32x32x64 only.
+validMFMA["F6"] = [[16,16,128,1], [32,32,64,1]]
 validMFMA["B8"] = validMFMA["F8"]
 validMFMA["F8N"] = validMFMA["F8"]
 validMFMA["F8B8"] = validMFMA["F8"]
@@ -84,6 +90,7 @@ def _build_mt_max_size(large: int, regular: int):
         'F8B8': large,
         'B8F8': large,
         'F4': large,
+        'F6': large,
     }
 
 
@@ -159,6 +166,11 @@ ONLY_INCLUDE_MIs_GFX950 = {
         [32, 32, 64, 1],
     ],
     'F4':  # fp4 / MX
+    [
+        [16, 16, 128, 1],
+        [32, 32, 64, 1],
+    ],
+    'F6':  # fp6 / MX (same F8F6F4 MFMA family as fp4 on gfx950)
     [
         [16, 16, 128, 1],
         [32, 32, 64, 1],
@@ -253,6 +265,9 @@ ONLY_INCLUDE_MIs_MI45X = {
     'F8B8': [[16, 16, 128, 1]],
     'B8F8': [[16, 16, 128, 1]],
     'F4': [[16, 16, 128, 1], [32, 16, 128, 1]],
+    # fp6 shares the F8F6F4 WMMA family with fp4 on gfx1250 (MI45X), but only the
+    # 16x16x128 shape is used for MXFP6 -- the wide 32x16x128 WMMA is fp4-only.
+    'F6': [[16, 16, 128, 1]],
     # 'X': [[16, 16, 32, 1]],
     # 'X1': [[16, 16, 32, 1]],
     'S': [[16, 16, 4, 1]],
@@ -324,9 +339,11 @@ _LIBRARY_LOGIC_FIELDS_GFX1250_STRICT_MC = {
 # A0 (gfx1250-strict) lacks the wide fp4 WMMA, so it takes the baseline minus
 # [32, 16, 128, 1]. Spelled out rather than derived by subscript so that
 # re-commenting 'F4' above cannot turn this into an import-time KeyError.
+# fp6 mirrors fp4 here: the wide [32, 16, 128, 1] WMMA is dropped on A0.
 ONLY_INCLUDE_MIs_MI45X_STRICT = {
     **ONLY_INCLUDE_MIs_MI45X,
     'F4': [[16, 16, 128, 1]],
+    'F6': [[16, 16, 128, 1]],
 }
 
 # gfx-style ARCH (YAML) → CUs, XCC, dtype→MI allowlist, TensileLite LibraryLogic fields, MX scale value,

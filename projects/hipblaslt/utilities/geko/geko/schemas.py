@@ -327,8 +327,8 @@ class GemmType:
         }
 
 
-_MX_ONLY_DATA_TYPES = frozenset({"F4"})
-_MX_COMPATIBLE_DATA_TYPES = frozenset({"F4", "F8"})
+_MX_ONLY_DATA_TYPES = frozenset({"F4", "F6"})
+_MX_COMPATIBLE_DATA_TYPES = frozenset({"F4", "F6", "F8"})
 _MX_BLOCKS = (16, 32)
 _MX_SCALE_TYPES = ("E8", "F8", "E5M3")
 

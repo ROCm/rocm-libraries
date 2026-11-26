@@ -494,7 +494,7 @@ def run_optimize(
     verbose: int = 1,
     bench_freq: bool = False,
     stall_timeout: float = 900.0,
-    abort_after_consecutive_failures: int = 8,
+    abort_after_consecutive_failures: int = 0,
     max_shape_failures: int = 0,
 ) -> None:
     """Run optim.run, merge 3_LibraryLogic YAMLs, analyze, and optionally write final_libs.

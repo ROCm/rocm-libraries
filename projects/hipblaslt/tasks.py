@@ -857,8 +857,18 @@ def _install_system_deps(
         lib_sles += ["rocm-llvm-devel", "zstd"]
 
     if not legacy_hipblas_direct:
-        lib_ubuntu.append("hipblas-common-dev")
-        lib_centos8.append("hipblas-common-devel")
+        # The hipblas-common-dev/-devel package only provides the header-only
+        # hipblas-common library. On some ROCm installs (e.g. internal builds)
+        # the header is already present under ${ROCM_PATH} even though apt has
+        # no package record for it, which would make the apt install fail with
+        # "Unable to locate package". Skip it when the header already exists.
+        rocm_path = os.environ.get("ROCM_PATH", "/opt/rocm")
+        hipblas_common_header = os.path.join(
+            rocm_path, "include", "hipblas-common", "hipblas-common.h"
+        )
+        if not os.path.exists(hipblas_common_header):
+            lib_ubuntu.append("hipblas-common-dev")
+            lib_centos8.append("hipblas-common-devel")
 
     if distro in ("centos", "rhel", "almalinux"):
         lib_centos.append("numactl" if version_major < 7 else "numactl-libs")
