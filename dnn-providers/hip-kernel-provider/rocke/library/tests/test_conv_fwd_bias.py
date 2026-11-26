@@ -210,19 +210,32 @@ class TestFwdBiasValidator(unittest.TestCase):
             spec.validate()
         self.assertEqual(_cpp_is_valid(spec, arch), (False, why))
 
-    def test_split_k_refused(self):
+    def test_split_k_without_an_owner_refused(self):
         p3 = _problem(Di=5, Z=3, sD=1, pD=1, dD=1, C=64, K=64)
-        # The 3-D split is the atomic one.
+        # The 3-D split is the atomic one; split_det gives it an owner.
+        for kw in (dict(split_k=2), dict(split_k=-1)):
+            with self.subTest(**kw):
+                self._refused(
+                    _spec(p3, dtype="bf16", **kw), "gfx942", "atomic split-K forward"
+                )
+        # The 2-D atomic split (split_atomic).
         self._refused(
-            _spec(p3, dtype="bf16", split_k=2), "gfx942", "atomic split-K forward"
+            _spec(_problem(), split_k=2, split_atomic=True),
+            "gfx942",
+            "atomic split-K forward",
         )
-        # The 2-D gfx950 split is the two-stage workspace one; auto may be it.
-        self._refused(
-            _spec(_problem(), tile=(64, 64, 64, 2, 2, 32, 16), split_k=2),
-            "gfx950",
-            "raw partial sums",
-        )
-        self._refused(_spec(_problem(), split_k=-1), "gfx942", "raw partial sums")
+        # The stream-K / hybrid segment loops, split_det or not.
+        for kw in (
+            dict(split_hybrid=4, split_det=1),
+            dict(split_hybrid=4, split_det=3),
+            dict(split_streamk=True, split_det=1),
+        ):
+            with self.subTest(**kw):
+                self._refused(
+                    _spec(p3, dtype="bf16", tile=_T256, split_k=2, **kw),
+                    "gfx942",
+                    "stream-K split-K forward",
+                )
 
     def test_plain_spec_accepted_by_both_engines(self):
         from kernels.common.conv_implicit_gemm import is_valid_spec
@@ -295,6 +308,252 @@ class TestFwdBiasFragmentLayouts(unittest.TestCase):
                     self.assertEqual(len(c), 1, f"lane {lane}: columns {c}")
                     cols.append(c.pop())
                 self.assertEqual(sorted(set(cols)), list(range(n)))
+
+
+def _p3_det(**kw):
+    return _problem(Di=5, Z=3, sD=1, pD=1, dD=1, C=64, K=64, **kw)
+
+
+def _strip_bias_tail(ll: str, name: str, plain_name: str) -> str:
+    """``ll`` of a bias kernel with its name and its trailing Bias /
+    Bias_bytes parameters taken out."""
+    import re
+
+    ll = ll.replace(name, plain_name)
+    return re.sub(r", ptr addrspace\(1\)[^,]*%Bias, i32 %Bias_bytes\)", ")", ll)
+
+
+class TestFwdBiasSplitK(unittest.TestCase):
+    """The split-K forward forms that have one owner of every output value
+    take the bias, added exactly once (fwd_bias_stage)."""
+
+    def _forms(self):
+        p2, p3 = _problem(), _p3_det()
+        wmma = dict(wave_size=32, tile=(32, 32, 32, 1, 1, 16, 32))
+        return [
+            # (spec, arch, stage)
+            (_spec(p2, split_k=2), "gfx942", "reduce"),
+            (_spec(p2, split_k=2, epilogue="default"), "gfx950", "reduce"),
+            (_spec(p2, split_k=-1), "gfx950", "reduce"),
+            (_spec(p2, dtype="bf16", split_k=2, **wmma), "gfx1250", "reduce"),
+            (
+                _spec(
+                    _problem(K=64), dtype="bf16", split_k=2, split_k_cluster=4, **wmma
+                ),
+                "gfx1250",
+                "cluster",
+            ),
+            (
+                _spec(p3, dtype="bf16", tile=_T256, split_k=2, split_det=1),
+                "gfx942",
+                "owner",
+            ),
+            (
+                _spec(
+                    p3,
+                    dtype="bf16",
+                    tile=_T256,
+                    split_k=2,
+                    split_det=2,
+                    split_tail=True,
+                ),
+                "gfx942",
+                "owner",
+            ),
+            (
+                _spec(p3, dtype="bf16", tile=_T256, split_k=2, split_det=3),
+                "gfx942",
+                "reduce",
+            ),
+        ]
+
+    def test_stage(self):
+        from kernels.common.conv_implicit_gemm import fwd_bias_stage
+
+        self.assertEqual(fwd_bias_stage(_spec(_problem())), "epilogue")
+        self.assertEqual(
+            fwd_bias_stage(replace(_spec(_problem(), split_k=2), bias=False)), ""
+        )
+        for spec, _, stage in self._forms():
+            with self.subTest(name=spec.kernel_name()):
+                self.assertEqual(fwd_bias_stage(spec), stage)
+
+    def test_accepted_by_both_engines(self):
+        from kernels.common.conv_implicit_gemm import is_valid_spec
+
+        for spec, arch, _ in self._forms():
+            if spec.split_k == -1:
+                continue  # resolved before validation
+            with self.subTest(name=spec.kernel_name(), arch=arch):
+                self.assertEqual(is_valid_spec(spec, arch), (True, "ok"))
+                self.assertEqual(_cpp_is_valid(spec, arch), (True, "ok"))
+                spec.validate()
+
+    def test_split_forms_take_the_bias_tail(self):
+        from kernels.common.conv_implicit_gemm import build_implicit_gemm_conv
+
+        for spec, arch, _ in self._forms():
+            if spec.split_k == -1 or spec.split_k_cluster:
+                continue  # cluster_barrier needs llvm23; parity covers it
+            with self.subTest(name=spec.kernel_name()):
+                names = [
+                    p.name for p in build_implicit_gemm_conv(spec, arch=arch).params
+                ]
+                self.assertEqual(names[-2:], ["Bias", "Bias_bytes"])
+
+    def test_reduce_form_kernel_does_not_read_the_bias(self):
+        # The two-stage and split_det 3 kernels store raw partial sums: the
+        # bias tail is in their ABI (one kernarg block for both launches), the
+        # code is the kernel's without bias.
+        from rocke.core.lower_llvm import _lower_kernel_to_llvm_python
+
+        from kernels.common.conv_implicit_gemm import build_implicit_gemm_conv
+
+        for spec, arch, stage in self._forms():
+            if stage != "reduce" or spec.split_k == -1 or arch == "gfx1250":
+                continue
+            with self.subTest(name=spec.kernel_name()):
+                plain = replace(spec, bias=False)
+
+                def ll(s):
+                    return _lower_kernel_to_llvm_python(
+                        build_implicit_gemm_conv(s, arch=arch), arch=arch
+                    )
+
+                biased = ll(spec)
+                self.assertIn("%Bias_bytes", biased)
+                self.assertEqual(
+                    _strip_bias_tail(biased, spec.kernel_name(), plain.kernel_name()),
+                    ll(plain),
+                )
+
+    def test_owner_form_adds_the_bias(self):
+        from kernels.common.conv_implicit_gemm import build_implicit_gemm_conv
+        from rocke.core.lower_llvm import _lower_kernel_to_llvm_python
+
+        for spec, arch, stage in self._forms():
+            if stage != "owner":
+                continue
+            with self.subTest(name=spec.kernel_name()):
+                ll = _lower_kernel_to_llvm_python(
+                    build_implicit_gemm_conv(spec, arch=arch), arch=arch
+                )
+                self.assertIn("%Bias_bytes", ll.split("{", 1)[1])
+
+    def test_launch_values_end_with_the_bias(self):
+        from kernels.common.conv_args import ConvArgs
+
+        p3 = _p3_det()
+        args = ConvArgs.from_problem(p3, tile_m=256, tile_n=64, tile_k=32)
+        v = args.to_launch_values(
+            1, 2, 3, 10, 20, 30, split_k=2, sk_flags=5, sk_partials=6, bias_ptr=7
+        )
+        self.assertEqual(
+            list(v)[-4:], ["sk_flags", "sk_partials", "Bias", "Bias_bytes"]
+        )
+        args2 = ConvArgs.from_problem(_problem(), tile_m=64, tile_n=64, tile_k=32)
+        v2 = args2.to_launch_values(
+            1, 2, 3, 10, 20, 30, split_k=2, ws_ptr=8, ws_bytes=9, bias_ptr=7
+        )
+        self.assertEqual(list(v2)[-6:-2], ["ws_ptr", "ws_bytes", "ks", "ks_count"])
+        self.assertEqual(list(v2)[-2:], ["Bias", "Bias_bytes"])
+
+
+class TestFwdBiasReduceKernels(unittest.TestCase):
+    """The fold kernels of the "reduce" forms: Stage 2 of the two-stage split
+    (conv_fwd_split_k_reduce) and the split_det 3 fold
+    (conv_wgrad_workspace_reduce) add the bias to the folded fp32 sum."""
+
+    def test_stage2_name_abi(self):
+        from kernels.common.conv_fwd_split_k_reduce import (
+            FwdSplitKReduceSpec,
+            build_conv_fwd_split_k_reduce,
+            fwd_split_k_reduce_signature,
+        )
+
+        spec = FwdSplitKReduceSpec(dtype_d="fp16", vec=4, degree=3, bias=True)
+        plain = replace(spec, bias=False)
+        self.assertEqual(
+            spec.kernel_name(), plain.kernel_name().replace("_fp16", "_cbias_fp16")
+        )
+        names = [p.name for p in build_conv_fwd_split_k_reduce(spec).params]
+        plain_names = [p.name for p in build_conv_fwd_split_k_reduce(plain).params]
+        self.assertEqual(names, plain_names + ["K", "Bias", "Bias_bytes"])
+        sig = fwd_split_k_reduce_signature(spec)
+        self.assertEqual([e["name"] for e in sig], names)
+        self.assertEqual(sig[-2]["type"], "ptr<f16, global>")
+
+    def test_det3_fold_name_abi(self):
+        from kernels.common._conv_implicit_gemm_common import ConvProblem
+        from kernels.common.conv_wgrad_workspace_reduce import (
+            WgradReduceSpec,
+            build_conv_wgrad_workspace_reduce,
+            wgrad_reduce_signature,
+        )
+
+        prob = ConvProblem(N=1, Hi=1, Wi=1, C=96, K=144, Y=1, X=1)
+        for kw in (dict(), dict(vec=4), dict(vec=4, ws_replicas=9, fold_loop=4)):
+            with self.subTest(**kw):
+                spec = WgradReduceSpec(
+                    problem=prob, dtype_d="bf16", ws_replicas=3, bias=True
+                )
+                spec = replace(spec, **kw)
+                plain = replace(spec, bias=False)
+                self.assertTrue(spec.kernel_name().endswith("_cbias_bf16"))
+                names = [p.name for p in build_conv_wgrad_workspace_reduce(spec).params]
+                plain_names = [
+                    p.name for p in build_conv_wgrad_workspace_reduce(plain).params
+                ]
+                self.assertEqual(names, plain_names + ["Bias", "Bias_bytes"])
+                self.assertEqual(
+                    [e["name"] for e in wgrad_reduce_signature(spec)], names
+                )
+
+    def test_det3_fold_refusals(self):
+        from kernels.common._conv_implicit_gemm_common import ConvProblem
+        from kernels.common.conv_wgrad_workspace_reduce import (
+            WgradReduceSpec,
+            build_conv_wgrad_workspace_reduce,
+        )
+
+        prob = ConvProblem(N=1, Hi=1, Wi=1, C=96, K=144, Y=1, X=1)
+        for kw in (dict(groups=2), dict(vec=4, rezero=1)):
+            with self.subTest(**kw):
+                spec = WgradReduceSpec(problem=prob, dtype_d="bf16", bias=True, **kw)
+                with self.assertRaisesRegex(ValueError, "split_det 3 fold"):
+                    build_conv_wgrad_workspace_reduce(spec)
+
+    def test_cpp_binding_agrees(self):
+        from rocke.core.backend import BackendError, import_engine
+        from rocke.core.lower_llvm import _lower_kernel_to_llvm_python
+
+        from kernels.common.conv_fwd_split_k_reduce import (
+            FwdSplitKReduceSpec,
+            build_conv_fwd_split_k_reduce,
+        )
+        from kernels.conv.engine_bridge import ENGINE_MODULE
+
+        try:
+            eng = import_engine(ENGINE_MODULE)
+        except BackendError as e:
+            raise unittest.SkipTest(f"C++ engine not importable: {e}") from None
+        for kw in (dict(vec=4), dict(vec=1, dtype_d="fp16"), dict(vec=2, degree=3)):
+            with self.subTest(**kw):
+                spec = FwdSplitKReduceSpec(bias=True, **kw)
+                d = dict(
+                    dtype_d=spec.dtype_d,
+                    vec=spec.vec,
+                    block_size=spec.block_size,
+                    degree=spec.degree,
+                    bias=True,
+                )
+                self.assertEqual(
+                    eng.conv_fwd_split_k_reduce_lower_llvm(d, "gfx942"),
+                    _lower_kernel_to_llvm_python(
+                        build_conv_fwd_split_k_reduce(spec, arch="gfx942"),
+                        arch="gfx942",
+                    ),
+                )
 
 
 # ---------------------------------------------------------------------------
@@ -486,6 +745,288 @@ class TestFwdBiasGpu(unittest.TestCase):
             )
         )
         self._check(_spec(_p3(groups=2), dtype="bf16", tile=_T256, epi_store_fast=True))
+
+
+def _run_split(spec, degree, *, full_tiles=None, launches=2):
+    """Build and launch a split-K forward with bias at ``degree`` (the
+    two-stage split with its bias Stage 2, or a split_det form with its bias
+    fold) and verify it; returns the error pair of :func:`_run`. Every launch
+    takes the one kernarg block (bias tail included) the form shares between
+    its launches; D is poisoned before each launch."""
+    import torch
+    from builders.common.conv_reference import conv_reference
+    from kernels.common._conv_implicit_gemm_common import ConvProblem
+    from kernels.common.conv_abi import conv_args_signature
+    from kernels.common.conv_args import ConvArgs
+    from kernels.common.conv_fwd_split_k_reduce import (
+        FwdSplitKReduceSpec,
+        build_conv_fwd_split_k_reduce,
+        fwd_split_k_reduce_grid,
+        fwd_split_k_reduce_signature,
+        fwd_split_k_reduce_vec,
+        fwd_split_k_workspace_nbytes,
+    )
+    from kernels.common.conv_implicit_gemm import (
+        build_implicit_gemm_conv,
+        fwd_bias_stage,
+        fwd_split_det_slabs,
+        fwd_split_det_slots,
+        is_valid_spec,
+    )
+    from kernels.common.conv_wgrad_workspace_reduce import (
+        WgradReduceSpec,
+        build_conv_wgrad_workspace_reduce,
+        wgrad_reduce_grid,
+        wgrad_reduce_signature,
+    )
+    from rocke import compile_kernel
+    from rocke.runtime.hip_module import Runtime, get_device_arch
+    from rocke.runtime.launcher import KernelLauncher, LaunchConfig
+
+    arch = get_device_arch().split(":")[0]
+    ok, why = is_valid_spec(spec, arch)
+    assert ok, why
+    p = spec.problem
+    det = spec.split_det
+    stage = fwd_bias_stage(spec)
+    dt = spec.data.dtype_d
+    tdt = {"fp16": torch.float16, "bf16": torch.bfloat16}[dt]
+    art = compile_kernel(build_implicit_gemm_conv(spec, arch=arch), arch=arch)
+    conv_k = KernelLauncher(
+        hsaco=art.hsaco,
+        kernel_name=art.kernel_name,
+        signature=conv_args_signature(
+            dt,
+            is_3d=p.is_3d,
+            two_stage=not det,
+            split_k=bool(det),
+            split_tail=spec.split_tail,
+            split_det=bool(det),
+            bias=True,
+        ),
+    )
+    depth = (p.Di,) if p.is_3d else ()
+    filt = (p.Z,) if p.is_3d else ()
+    out_depth = (p.Do,) if p.is_3d else ()
+    torch.manual_seed(0)
+    A = torch.empty(p.N, *depth, p.Hi, p.Wi, p.C).uniform_(-1, 1).to(tdt)
+    B = torch.empty(p.K, *filt, p.Y, p.X, p.cpg).uniform_(-1, 1).to(tdt)
+    # Wide enough to stand out of the deeper 3-D sums (a missing or doubled
+    # add must miss the tolerance by far).
+    bias = torch.empty(p.K).uniform_(-16, 16).to(tdt)
+    D = torch.empty(p.N, *out_depth, p.Ho, p.Wo, p.K, dtype=tdt)
+    conv = conv_reference(A, B, p).cpu().float()
+    ref = (conv + bias.float()).to(tdt).float()
+    args = ConvArgs.from_problem(
+        p, tile_m=spec.tile_m, tile_n=spec.tile_n, tile_k=spec.tile_k
+    )
+    M = args.gemm_m
+    tiles = args.num_pid_m * args.num_pid_n
+    if det:
+        flag_bytes = 8 * tiles * max(1, p.groups)
+        if det == 3:
+            slabs = fwd_split_det_slabs(tiles, degree)
+            part_bytes = 4 * M * p.K * slabs
+        else:
+            part_bytes = (
+                4
+                * spec.tile_m
+                * spec.tile_n
+                * max(
+                    1,
+                    fwd_split_det_slots(
+                        tiles,
+                        max(1, p.groups),
+                        degree,
+                        split_tail=spec.split_tail,
+                        full_tiles=full_tiles or 0,
+                    ),
+                )
+            )
+        ws_bytes = flag_bytes + part_bytes
+    else:
+        ws_bytes = fwd_split_k_workspace_nbytes(M, p.K, degree)
+    rt = Runtime()
+    ptrs = [rt.alloc(t.nbytes) for t in (A, B, D, bias)]
+    ws = rt.alloc(ws_bytes)
+    outs = []
+    try:
+        rt.memcpy_h2d(ptrs[0], _u8(A), A.nbytes)
+        rt.memcpy_h2d(ptrs[1], _u8(B), B.nbytes)
+        rt.memcpy_h2d(ptrs[3], _u8(bias), bias.nbytes)
+        rt.memset(ws, 0, ws_bytes)
+        split = (
+            dict(
+                sk_flags=int(ws),
+                sk_partials=int(ws) + flag_bytes,
+                full_tiles=full_tiles if spec.split_tail else None,
+            )
+            if det
+            else dict(ws_ptr=int(ws), ws_bytes=ws_bytes)
+        )
+        values = args.to_launch_values(
+            *ptrs[:3],
+            A.nbytes,
+            B.nbytes,
+            D.nbytes,
+            split_k=degree,
+            bias_ptr=ptrs[3],
+            bias_bytes=bias.nbytes,
+            **split,
+        )
+        fold = None
+        if stage == "reduce" and det == 3:
+            fspec = WgradReduceSpec(
+                problem=ConvProblem(N=1, Hi=1, Wi=1, C=p.K, K=M, Y=1, X=1),
+                dtype_d=dt,
+                ws_replicas=slabs,
+                vec=4,
+                bias=True,
+            )
+            fart = compile_kernel(build_conv_wgrad_workspace_reduce(fspec), arch=arch)
+            fold = (
+                KernelLauncher(
+                    hsaco=fart.hsaco,
+                    kernel_name=fart.kernel_name,
+                    signature=wgrad_reduce_signature(fspec),
+                ),
+                dict(
+                    ws_ptr=int(ws) + flag_bytes,
+                    dw_ptr=ptrs[2],
+                    wg_M=fspec.wg_M,
+                    wg_N=fspec.wg_N,
+                    ws_bytes=part_bytes,
+                    dw_bytes=D.nbytes,
+                    groups=1,
+                    Bias=ptrs[3],
+                    Bias_bytes=bias.nbytes,
+                ),
+                LaunchConfig(
+                    grid=wgrad_reduce_grid(fspec),
+                    block=(fspec.block_size, 1, 1),
+                    fence=True,
+                ),
+            )
+        elif stage == "reduce":
+            elems = M * p.K
+            rspec = FwdSplitKReduceSpec(
+                dtype_d=dt, vec=fwd_split_k_reduce_vec(p.K), degree=degree, bias=True
+            )
+            rart = compile_kernel(build_conv_fwd_split_k_reduce(rspec), arch=arch)
+            fold = (
+                KernelLauncher(
+                    hsaco=rart.hsaco,
+                    kernel_name=rart.kernel_name,
+                    signature=fwd_split_k_reduce_signature(rspec),
+                ),
+                dict(
+                    ws_ptr=int(ws),
+                    d_ptr=ptrs[2],
+                    elems=elems,
+                    ws_bytes=ws_bytes,
+                    d_bytes=D.nbytes,
+                    ks_count=degree,
+                    K=p.K,
+                    Bias=ptrs[3],
+                    Bias_bytes=bias.nbytes,
+                ),
+                LaunchConfig(
+                    grid=fwd_split_k_reduce_grid(rspec, elems),
+                    block=(rspec.block_size, 1, 1),
+                    fence=True,
+                ),
+            )
+        for _ in range(launches):
+            rt.memset(ptrs[2], 0xFF, D.nbytes)
+            conv_k(
+                values,
+                config=LaunchConfig(
+                    grid=args.grid(degree),
+                    block=(spec.launch_block_size, 1, 1),
+                    fence=True,
+                ),
+            )
+            if fold is not None:
+                fold[0](fold[1], config=fold[2])
+            out = torch.empty_like(D)
+            rt.memcpy_d2h(_u8(out), ptrs[2], D.nbytes)
+            outs.append(out.float())
+    finally:
+        for q in ptrs + [ws]:
+            rt.free(q)
+    for o in outs[1:]:
+        assert bool((o == outs[0]).all()), "split-K bias output not reproducible"
+    out = outs[0]
+    scale = ref.abs().max().clamp(min=1.0)
+    err = float((out - ref).abs().max() / scale)
+    no_bias = float((out - conv.to(tdt).float()).abs().max() / scale)
+    return err, no_bias
+
+
+@pytest.mark.gpu
+@unittest.skipIf(_GPU_SKIP, _GPU_SKIP)
+class TestFwdBiasSplitKGpu(unittest.TestCase):
+    """Each split form adds the bias exactly once: a second add (or none)
+    is off by the bias, far past the tolerance."""
+
+    def _check(self, spec, degrees, **kw):
+        tol = _TOL[spec.data.dtype_d]
+        for degree in degrees:
+            with self.subTest(name=spec.kernel_name(), degree=degree):
+                err, no_bias = _run_split(spec, degree, **kw)
+                print(
+                    f"  {spec.kernel_name()} s{degree}: rel err {err:.2e} "
+                    f"(without bias {no_bias:.2e})"
+                )
+                self.assertLess(err, tol)
+                self.assertGreater(no_bias, 3 * tol)
+
+    def test_two_stage(self):
+        # Stage 2 adds bias[idx % K]; K = 40 (vec 4 over 10 channel quads).
+        for dtype in ("fp16", "bf16"):
+            for epi in ("cshuffle", "default"):
+                with self.subTest(dtype=dtype, epilogue=epi):
+                    self._check(
+                        _spec(_problem(), dtype=dtype, epilogue=epi, split_k=2),
+                        (2, 3, 5),
+                    )
+        # Grouped: the packed [M][G*kpg] row; K = 2 * 21 (Stage 2 vec 2).
+        self._check(
+            _spec(_problem(groups=2, K=42, C=32), dtype="bf16", split_k=2), (2, 4)
+        )
+
+    def test_split_det_owner(self):
+        for mode in (1, 2):
+            with self.subTest(mode=mode):
+                self._check(
+                    _spec(
+                        _p3_det(), dtype="bf16", tile=_T256, split_k=2, split_det=mode
+                    ),
+                    (2, 3),
+                )
+        # split_tail: whole-K tiles store plainly (and add the bias), the
+        # tail tiles go through the owner's fold.
+        self._check(
+            _spec(
+                _p3_det(N=2),
+                dtype="bf16",
+                tile=_T256,
+                split_k=2,
+                split_det=2,
+                split_tail=True,
+            ),
+            (3,),
+            full_tiles=1,
+        )
+
+    def test_split_det_slabs(self):
+        self._check(
+            _spec(_p3_det(), dtype="bf16", tile=_T256, split_k=2, split_det=3), (2, 3)
+        )
+        self._check(
+            _spec(_p3_det(groups=2), dtype="bf16", tile=_T256, split_k=2, split_det=3),
+            (2,),
+        )
 
 
 if __name__ == "__main__":
