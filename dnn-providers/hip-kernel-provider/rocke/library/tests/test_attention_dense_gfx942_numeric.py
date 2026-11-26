@@ -2316,7 +2316,7 @@ class TestDensePagedNumeric:
         """Request -> dispatch -> bind -> launch, with the block count taken from the
         cache at bind."""
         window = 1024
-        q, k, v, out = run_dispatched_paged("gfx942", "gfx942_dense", window=window)
+        _, q, k, v, out = run_dispatched_paged("gfx942", "gfx942_dense", window=window)
         assert torch.isfinite(out).all()
         scale = 1.0 / math.sqrt(q.shape[-1])
         sq = q.shape[1]

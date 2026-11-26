@@ -384,13 +384,12 @@ _DENSE_AUTO_ORDER = {
     "gfx950": gfx950_dense.dense_auto_order,
 }
 
-# The same for unpinned paged requests; an empty order keeps unified. gfx950
-# shares the contiguous order: each body's admission (one sequence for the
-# persistent bodies, pages of at least a KV tile for wide DMA) leaves the rest
-# to the grid.
+# The same for unpinned paged requests; an empty order keeps unified. Each
+# body's admission (one sequence for the persistent bodies, pages of at least a
+# KV tile for wide DMA) leaves the rest to the grid.
 _DENSE_PAGED_AUTO_ORDER = {
     "gfx942": gfx942_dense.dense_paged_auto_order,
-    "gfx950": gfx950_dense.dense_auto_order,
+    "gfx950": gfx950_dense.dense_paged_auto_order,
 }
 
 

@@ -87,12 +87,51 @@ def test_gfx950_dense_layout_picks_default_body(overrides, candidate):
 @pytest.mark.parametrize(
     "overrides, candidate",
     [
-        # Paged requests share the contiguous order; each body's own admission
-        # sends the rest down it.
+        # Each body's own admission sends what it refuses down the order.
         ({}, "attention_gfx950_dense_persist_widedma"),
         # Wide DMA needs a page per KV tile at least.
         ({"kv_block_size": 16}, "attention_gfx950_dense_persist"),
-        ({"sliding_window": 1024}, "attention_gfx950_dense_persist"),
+        ({"sliding_window": 1024}, "attention_gfx950_dense_persist_widedma"),
+        (
+            {"seqlen_q": 512, "seqlen_k": 512, "sliding_window": 128},
+            "attention_gfx950_dense_persist_widedma",
+        ),
+        (
+            {"sliding_window": 1024, "kv_block_size": 16},
+            "attention_gfx950_dense_persist",
+        ),
+        ({"sliding_window": 1024, "use_sinks": True}, "attention_gfx950_dense_persist"),
+        ({"sliding_window": 1024, "batch": 4}, "attention_gfx950_dense_grid"),
+        (
+            {"seqlen_q": 512, "seqlen_k": 512, "hdim_q": 64, "hdim_v": 64},
+            "attention_gfx950_dense_persist",
+        ),
+        (
+            {
+                "seqlen_q": 512,
+                "seqlen_k": 512,
+                "hdim_q": 64,
+                "hdim_v": 64,
+                "sliding_window": 128,
+                "kv_block_size": 16,
+            },
+            "attention_gfx950_dense_persist",
+        ),
+        (
+            {"seqlen_q": 512, "seqlen_k": 512, "hdim_q": 64, "hdim_v": 64, "batch": 4},
+            "attention_gfx950_dense_grid",
+        ),
+        # The moving bottom-right diagonal runs only on the grid body.
+        (
+            {
+                "seqlen_q": 512,
+                "seqlen_k": 8192,
+                "hdim_q": 64,
+                "hdim_v": 64,
+                "mask_type": 2,
+            },
+            "attention_gfx950_dense_grid",
+        ),
         # Sinks rule out wide DMA, as for contiguous K/V.
         ({"use_sinks": True}, "attention_gfx950_dense_persist"),
         # The persistent bodies take one sequence.

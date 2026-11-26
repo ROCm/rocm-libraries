@@ -29,16 +29,18 @@ def paged_cache(k, v, block_size):
     return k_cache, v_cache, block_tables, kv_lens
 
 
-def run_dispatched_paged(arch, spec_id, *, window=1024):
-    """Request -> dispatch -> bind -> launch of the paged spec ``spec_id`` on one
-    fp16 D128 sequence, with the block count taken from the cache at bind.
+def run_dispatched_paged(
+    arch, spec_id, *, window=1024, sq=2048, d=128, block_size=16, hq=16, hkv=4
+):
+    """Request -> dispatch -> bind -> launch of the paged spec ``spec_id`` (``None``:
+    the unpinned auto route) on one fp16 sequence, with the block count taken from
+    the cache at bind.
 
-    Returns ``(q, k, v, out)``; ``k``/``v`` are the contiguous tensors the cache was
-    scattered from, for the caller's reference."""
+    Returns ``(result, q, k, v, out)``: the dispatch result, and ``k``/``v`` the
+    contiguous tensors the cache was scattered from, for the caller's reference."""
     import torch
     from dispatch.attention import AttentionRequest, dispatch_attention
 
-    sq, hq, hkv, d = 2048, 16, 4, 128
     request = AttentionRequest(
         batch=1,
         nhead_q=hq,
@@ -52,14 +54,16 @@ def run_dispatched_paged(arch, spec_id, *, window=1024):
         dtype="fp16",
         sliding_window=window,
         layout="paged",
-        kv_block_size=16,
+        kv_block_size=block_size,
     )
-    result = dispatch_attention(pinned(request, spec_id))
+    result = dispatch_attention(
+        request if spec_id is None else pinned(request, spec_id)
+    )
     torch.manual_seed(0)
     q = torch.randn(1, sq, hq, d, device="cuda", dtype=torch.float16)
     k = torch.randn(1, sq, hkv, d, device="cuda", dtype=torch.float16)
     v = torch.randn_like(k)
-    k_cache, v_cache, block_tables, kv_lens = paged_cache(k, v, 16)
+    k_cache, v_cache, block_tables, kv_lens = paged_cache(k, v, block_size)
     out = torch.empty_like(q)
     result.bind_torch(
         {
@@ -72,4 +76,4 @@ def run_dispatched_paged(arch, spec_id, *, window=1024):
         }
     ).launch()
     torch.cuda.synchronize()
-    return q, k, v, out
+    return result, q, k, v, out

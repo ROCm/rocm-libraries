@@ -2531,9 +2531,31 @@ class TestDensePagedNumeric:
         """Request -> dispatch -> bind -> launch, with the block count taken from the
         cache at bind."""
         window = 1024
-        q, k, v, out = run_dispatched_paged("gfx950", spec_id, window=window)
+        _, q, k, v, out = run_dispatched_paged("gfx950", spec_id, window=window)
         assert torch.isfinite(out).all()
         scale = 1.0 / math.sqrt(q.shape[-1])
+        ref = _standard_reference(q, k, v, scale, sliding_window=window)
+        assert (out.float() - ref).abs().max().item() < _tolerance("fp16")
+
+    @requires_gfx950_gpu
+    @pytest.mark.gpu
+    @pytest.mark.parametrize(
+        "window, d, block_size, candidate",
+        [
+            # Below the work count, where the contiguous order keeps the grid.
+            (0, 64, 16, "attention_gfx950_dense_persist"),
+            (128, 128, 64, "attention_gfx950_dense_persist_widedma"),
+        ],
+    )
+    def test_auto_routed_paged(self, window, d, block_size, candidate):
+        """The bodies the gfx950 paged auto order puts first, through dispatch,
+        bind and launch of an unpinned request."""
+        result, q, k, v, out = run_dispatched_paged(
+            "gfx950", None, window=window, sq=512, d=d, block_size=block_size
+        )
+        assert result.candidate.name == candidate
+        assert torch.isfinite(out).all()
+        scale = 1.0 / math.sqrt(d)
         ref = _standard_reference(q, k, v, scale, sliding_window=window)
         assert (out.float() - ref).abs().max().item() < _tolerance("fp16")
 

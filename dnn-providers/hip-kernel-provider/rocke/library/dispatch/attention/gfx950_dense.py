@@ -13,8 +13,9 @@ tuning geometry: ``spec_id`` names it and ``tuning_id`` names one
 configuration from its knob space -- the tile (``block_m`` / ``block_n``)
 included -- with ``auto`` being the candidate's default spec. The candidates
 are opt-in: only an explicit ``algorithm`` + ``spec_id`` selects one, except
-that an unpinned request for contiguous tensors (``layout='dense'``) with more
-than one query row is pinned to the body :func:`dense_auto_order` names (see
+that an unpinned ``layout='dense'`` or ``layout='paged'`` request with more
+than one query row is pinned to the first body of :func:`dense_auto_order` or
+:func:`dense_paged_auto_order` that admits it (see
 :func:`dispatch.attention.dispatch_attention`). Admission is the kernel's own
 ``supports_attention_dense``; dispatch adds no stricter gate.
 """
@@ -383,7 +384,8 @@ def _base_spec(req: AttentionRequest, variant: Gfx950DenseVariant):
 
 
 def dense_auto_order(req: AttentionRequest) -> Tuple[str, ...]:
-    """Candidate names, best first, for an unpinned contiguous or paged request.
+    """Candidate names, best first, for an unpinned contiguous request (paged:
+    :func:`dense_paged_auto_order`).
 
     The persistent body pays off once the default tile yields at least one
     work item per persistent CTA and the causal diagonal is fixed (the moving
@@ -424,6 +426,21 @@ def dense_auto_order(req: AttentionRequest) -> Tuple[str, ...]:
     else:
         order = ("grid",)
     return tuple(by_id[v] for v in order)
+
+
+def dense_paged_auto_order(req: AttentionRequest) -> Tuple[str, ...]:
+    """:func:`dense_auto_order` with the body that measures faster on paged K/V
+    moved to the front. Sinks keep wide DMA out: no test covers that pair.
+    """
+    order = dense_auto_order(req)
+    if int(req.hdim_q) == 64:
+        first = "persist"
+    elif int(req.hdim_q) == 128 and int(req.sliding_window) and not req.use_sinks:
+        first = "persist_widedma"
+    else:
+        return order
+    name = {v.variant_id: v.candidate_name for v in GFX950_DENSE_VARIANTS}[first]
+    return (name, *(n for n in order if n != name)) if order else order
 
 
 def _supports(spec, *, arch):

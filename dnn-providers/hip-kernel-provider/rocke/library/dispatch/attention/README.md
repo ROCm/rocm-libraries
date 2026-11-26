@@ -105,8 +105,10 @@ pinned to the arch's dense kernel at its default spec (the gfx950 body --
 grid, persistent, or persistent with wide DMA -- comes from
 `gfx950_dense.dense_auto_order`). A single-row `layout="dense"` request goes
 to `attention_strided_decode`, which reads the contiguous K/V as a strided view
-and takes the dense tensor ABI (`q`/`k`/`v`/`out`, BSHD or BHSD). Paged or
-unspecified layouts keep the unified route.
+and takes the dense tensor ABI (`q`/`k`/`v`/`out`, BSHD or BHSD). A `layout="paged"`
+request with more than one query row takes the first dense body of
+`gfx942_dense.dense_paged_auto_order` / `gfx950_dense.dense_paged_auto_order`
+that admits it, else the unified route, as does an unspecified layout.
 
 ## Tuning knob space
 
