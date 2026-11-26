@@ -28,7 +28,9 @@
 #include <cassert>
 #include <chrono>
 #include <cmath>
+#include <complex>
 #include <iostream>
+#include <limits>
 #include <random>
 #include <stdexcept>
 #include <string>
@@ -39,6 +41,7 @@
 #include "Reference.hpp"
 #include "rocisa/include/enum.hpp"
 #include <Tensile/Activation.hpp>
+#include <Tensile/DataTypes.hpp>
 
 /*
  * CPU GEMM Driver and Validator
@@ -61,6 +64,27 @@
  * # BF16 run with validation enabled
  * ./cpu_gemm_driver --type bf16 --M 512 --N 512 --K 256 --validate 1
  *
+ * # Int8 inputs, Int8 output, float alpha/beta
+ * ./cpu_gemm_driver --type i8 --typeCD i8 --typeAlpha f32 --alpha 0.001953125 --validate
+ *
+ * # Int8 inputs, Int8 output, int32 alpha/beta, A/B in [-3, 3] (mostly unsaturated D)
+ * ./cpu_gemm_driver --type i8 --typeCD i8 --int8Min -3 --int8Max 3 --validate --tryFastPath
+ *
+ * # Float8 x Half inputs (MAC on Half), Float8 output
+ * ./cpu_gemm_driver --typeA f8 --typeB f16 --computeInputA f16 --typeCD f8 --validate
+ *
+ * # Complex float (C_C_C) with conjugated A
+ * ./cpu_gemm_driver --type c --transA --conjA --validate --tryFastPath
+ *
+ * # Half with bias and relu, also writing E (the value before activation)
+ * ./cpu_gemm_driver --type f16 --bias --activation relu --useE --validate --tryFastPath
+ *
+ * # Half gradient GEMM: D times relu(E) (E an input), bias gradient reduced from A
+ * ./cpu_gemm_driver --type f16 --gradient --activation relu --useE --bias --biasSrc a --validate
+ *
+ * # MXFP4 with K not a multiple of the MX block (partial last block)
+ * ./cpu_gemm_driver --type f4 --mxBlockA 32 --mxBlockB 32 -M 64 -N 64 -K 333 --transA --validate --tryFastPath
+ *
  * # Benchmark mode (validation disabled)
  * ./cpu_gemm_driver --M 2048 --N 2048 --K 2048 --validate 0 --tryFastPath 1
  *
@@ -73,65 +97,37 @@ namespace
     using namespace TensileLite;
     using namespace TensileLite::Client;
 
-    // Helper traits to map C++ storage types to rocisa data type enums.
     template <typename T>
-    struct TypeTraits;
+    constexpr bool isComplexV = TypeInfo<T>::IsComplex;
 
-    template <>
-    struct TypeTraits<float>
+    // 8-bit float storage family: OCP (Float8, BFloat8) or fnuz (Float8_fnuz, BFloat8_fnuz).
+    enum class Float8Family
     {
-        static constexpr rocisa::DataType value = rocisa::DataType::Float;
+        None,
+        OCP,
+        Fnuz
     };
 
-    template <>
-    struct TypeTraits<double>
+    template <typename T>
+    constexpr Float8Family float8Family()
     {
-        static constexpr rocisa::DataType value = rocisa::DataType::Double;
-    };
+        if constexpr(std::is_same_v<T, TensileLite::Float8>
+                     || std::is_same_v<T, TensileLite::BFloat8>)
+            return Float8Family::OCP;
+        else if constexpr(std::is_same_v<T, TensileLite::Float8_fnuz>
+                          || std::is_same_v<T, TensileLite::BFloat8_fnuz>)
+            return Float8Family::Fnuz;
+        else
+            return Float8Family::None;
+    }
 
-    template <>
-    struct TypeTraits<TensileLite::Half>
+    bool scalarScaleConsumedBeforeNarrowing(rocisa::DataType storage, rocisa::DataType compute)
     {
-        static constexpr rocisa::DataType value = rocisa::DataType::Half;
-    };
-
-    template <>
-    struct TypeTraits<TensileLite::BFloat16>
-    {
-        static constexpr rocisa::DataType value = rocisa::DataType::BFloat16;
-    };
-
-    template <>
-    struct TypeTraits<TensileLite::Float8>
-    {
-        static constexpr rocisa::DataType value = rocisa::DataType::Float8;
-    };
-
-    template <>
-    struct TypeTraits<TensileLite::BFloat8>
-    {
-        static constexpr rocisa::DataType value = rocisa::DataType::BFloat8;
-    };
-
-    template <>
-    struct TypeTraits<TensileLite::Float8_fnuz>
-    {
-        static constexpr rocisa::DataType value = rocisa::DataType::Float8_fnuz;
-    };
-
-    template <>
-    struct TypeTraits<TensileLite::BFloat8_fnuz>
-    {
-        static constexpr rocisa::DataType value = rocisa::DataType::BFloat8_fnuz;
-    };
-
-#ifndef _WIN32
-    template <>
-    struct TypeTraits<TensileLite::Float4x2>
-    {
-        static constexpr rocisa::DataType value = rocisa::DataType::Float4;
-    };
-#endif
+        return storage == rocisa::DataType::Half
+               && (compute == rocisa::DataType::Float8 || compute == rocisa::DataType::BFloat8
+                   || compute == rocisa::DataType::Float8_fnuz
+                   || compute == rocisa::DataType::BFloat8_fnuz);
+    }
 
     // A slow, easy to understand, golden reference implementation of GEMM.
     // Used strictly for validating the correctness of the optimized path.
@@ -145,16 +141,60 @@ namespace
     //
     // scaleA is always indexed by row (M), scaleB always by col (N).
     // factorDim only affects scaleAlphaVec: 0 = row-dim (length M), 1 = col-dim (length N).
+    // preQuantizeScaleA/B apply consumed Scalar scales before quantizeA/B;
+    // the caller folds the remaining Scalar scales into alpha.
+    //
+    // preActivation (if not null) receives the value before activation, i.e.
+    // after bias, which the reference writes to E (useE).
+    //
+    // gradientE (if not null) makes it a gradient GEMM: the caller passes no bias
+    // (the reference adds none), and with an activation the value is multiplied by
+    // the activation of gradientE[i + j * m] (E, an input) instead of activated.
     //
     // Template parameters:
-    //   AccumT         — accumulation type (float or double)
+    //   AccumT         — epilogue type (float, double or int32_t): alpha, beta,
+    //                    the scale/bias vectors, C and D are in this type. It is
+    //                    also the K-loop accumulation type unless MacT is given.
+    //                    Complex inputs use their own type (std::complex<float>
+    //                    or std::complex<double>) for everything, as the
+    //                    reference's C_C_C/Z_Z_Z do; A or B is conjugated by the
+    //                    caller (no scale vectors, bias or activation).
     //   OperandMathOpT — per-operand math type used immediately before multiply.
     //                    XFloat32, for example, truncates float operands to a
     //                    10-bit mantissa.
+    //   MacT           — K-loop multiply-accumulate type; A and B are passed in
+    //                    it. Int8 inputs use int64_t: the sum is exact, and it
+    //                    must fit in int32_t (the GPU's Int8 accumulator) or the
+    //                    call throws. The sum is then converted to AccumT once,
+    //                    before alpha.
+    //
+    // Int8 oracle pseudocode (TypeAlpha = AccumT; TypeCD = C/D storage type):
+    //   dot64 = sum_k(int64_t(A[i,k]) * int64_t(B[k,j]));
+    //   require_int32_range(dot64);
+    //   dot = TypeAlpha(dot64);
+    //   value = effectiveAlpha * dot;         // alpha/scales as above
+    //   value = value + beta * TypeAlpha(C[i,j]);
+    //   if (bias) value = value + bias[i];
+    //   value = activation(value);
+    //   D[i,j] = SaturateCast<TypeCD>(value);   // storage conversion below
+    //
+    // I8_I8_I32 and I8_I32_I32 use TypeAlpha = int32_t. I8_I32_S,
+    // I8_I8_S, I8_H_S and I8_B_S use TypeAlpha = float. The int64_t dot
+    // product lets the oracle detect overflow before the TypeAlpha cast.
+    // The slow reference also reduces in integers, interpreting its 32-bit
+    // result as signed Int32 before converting once to TypeAlpha (#15765).
+    // The oracle rejects sums outside Int32 rather than validating wrapping.
+    //
+    // An int32_t epilogue is computed in int64_t and every intermediate is
+    // checked against the int32_t range: the reference computes it in int32_t,
+    // where overflow is undefined, so a test that overflows throws instead of
+    // comparing undefined values.
     //
     // When both MX operand descriptors are populated, the K-reduction is
     // block-structured: accumulate min(mxA.block, mxB.block) products, then
-    // scale by the MX scale factors before adding to the running sum.
+    // scale by the MX scale factors before adding to the running sum. When K
+    // is not a multiple of the blocks, the last segment only sums the
+    // products below K.
 
     // Quantize a value through `Narrow`, then return as float. This mirrors
     // what the GPU MFMA path does when storage is wider than the MAC input
@@ -181,6 +221,19 @@ namespace
         default:
             throw std::runtime_error("Unsupported compute-input type for golden GEMM quantizer.");
         }
+    }
+
+    // A golden operand rounded through its compute-input type (quantize == nullptr:
+    // unchanged). Complex operands have no compute-input override.
+    template <typename MacT>
+    MacT quantizeOperand(QuantizeFn quantize, MacT v, MacT preQuantizeScale)
+    {
+        if(!quantize)
+            return v;
+        if constexpr(isComplexV<MacT>)
+            throw std::runtime_error("Complex operands cannot be quantized.");
+        else
+            return static_cast<MacT>(quantize(static_cast<float>(v * preQuantizeScale)));
     }
 
 #ifndef _WIN32
@@ -233,9 +286,29 @@ namespace
     }
 #endif
 
-    template <typename AccumT = float, typename OperandMathOpT = AccumT>
-    void columnMajorGemm(const AccumT*  a,
-                         const AccumT*  b,
+    // Golden arithmetic type for an epilogue type: int32_t epilogues run in
+    // int64_t, and each intermediate goes through checkedInt32 (see below).
+    template <typename AccumT>
+    using GoldenWideT = std::conditional_t<std::is_integral_v<AccumT>, int64_t, AccumT>;
+
+    // Throws if an integer intermediate does not fit in int32_t; floating-point
+    // values pass through unchanged.
+    template <typename T>
+    T checkedInt32(T v)
+    {
+        if constexpr(std::is_integral_v<T>)
+        {
+            if(v < std::numeric_limits<int32_t>::min() || v > std::numeric_limits<int32_t>::max())
+                throw std::runtime_error(
+                    "CPU reference GEMM: integer value " + std::to_string(v)
+                    + " overflows the int32_t accumulator/epilogue; use smaller inputs.");
+        }
+        return v;
+    }
+
+    template <typename AccumT = float, typename OperandMathOpT = AccumT, typename MacT = AccumT>
+    void columnMajorGemm(const MacT*    a,
+                         const MacT*    b,
                          const AccumT*  c,
                          AccumT*        d,
                          size_t         m,
@@ -245,20 +318,24 @@ namespace
                          bool           transB,
                          AccumT         alpha,
                          AccumT         beta,
-                         const AccumT*  biasVec       = nullptr,
-                         const AccumT*  scaleAlphaVec = nullptr,
-                         ActivationType activation    = ActivationType::None,
-                         const AccumT*  scaleAVec     = nullptr,
-                         const AccumT*  scaleBVec     = nullptr,
-                         int            factorDim     = 0,
-                         QuantizeFn     quantizeA     = nullptr,
-                         QuantizeFn     quantizeB     = nullptr
+                         const AccumT*  biasVec           = nullptr,
+                         const AccumT*  scaleAlphaVec     = nullptr,
+                         ActivationType activation        = ActivationType::None,
+                         const AccumT*  scaleAVec         = nullptr,
+                         const AccumT*  scaleBVec         = nullptr,
+                         int            factorDim         = 0,
+                         QuantizeFn     quantizeA         = nullptr,
+                         QuantizeFn     quantizeB         = nullptr,
+                         MacT           preQuantizeScaleA = MacT(1),
+                         MacT           preQuantizeScaleB = MacT(1),
+                         AccumT*        preActivation = nullptr,
+                         const AccumT*  gradientE     = nullptr
 #ifndef _WIN32
-                         ,
-                         MXGemmOperand  mxA           = {},
-                         MXGemmOperand  mxB           = {}
+                             ,
+                         MXGemmOperand mxA = {},
+                         MXGemmOperand mxB = {}
 #endif
-                         )
+    )
     {
 
         switch(activation)
@@ -276,6 +353,8 @@ namespace
         size_t strideBK = transB ? n : 1;
         size_t strideBN = transB ? 1 : k;
 
+        using WideT = GoldenWideT<AccumT>;
+
 #ifndef _WIN32
         const bool hasMX = validateMXGemmOperands(mxA, mxB);
 #endif
@@ -284,7 +363,7 @@ namespace
         {
             for(size_t j = 0; j < n; j++)
             {
-                AccumT sum = AccumT(0);
+                MacT sum = MacT(0);
 
 #ifndef _WIN32
                 // MX scale tensor layout follows the ContractionProblem tensor
@@ -304,17 +383,17 @@ namespace
                         std::min(mxA.block, mxB.block));
                     for(size_t lBase = 0; lBase < k; lBase += step)
                     {
-                        AccumT blockSum = AccumT(0);
-                        for(size_t t = 0; t < step; t++)
+                        MacT blockSum = MacT(0);
+                        for(size_t t = 0; t < step && lBase + t < k; t++)
                         {
                             size_t l    = lBase + t;
-                            AccumT aVal = a[i * strideAM + l * strideAK];
-                            AccumT bVal = b[l * strideBK + j * strideBN];
-                            if(quantizeA) aVal = static_cast<AccumT>(quantizeA(static_cast<float>(aVal)));
-                            if(quantizeB) bVal = static_cast<AccumT>(quantizeB(static_cast<float>(bVal)));
+                            MacT   aVal = a[i * strideAM + l * strideAK];
+                            MacT   bVal = b[l * strideBK + j * strideBN];
+                            aVal        = quantizeOperand(quantizeA, aVal, preQuantizeScaleA);
+                            bVal        = quantizeOperand(quantizeB, bVal, preQuantizeScaleB);
                             blockSum
-                                += static_cast<AccumT>(static_cast<OperandMathOpT>(aVal))
-                                   * static_cast<AccumT>(static_cast<OperandMathOpT>(bVal));
+                                += static_cast<MacT>(static_cast<OperandMathOpT>(aVal))
+                                   * static_cast<MacT>(static_cast<OperandMathOpT>(bVal));
                         }
 
                         size_t blkA = lBase / static_cast<size_t>(mxA.block);
@@ -328,7 +407,7 @@ namespace
                         AccumT mxScale
                             = static_cast<AccumT>(static_cast<float>(mxA.scale[mxsaIdx]))
                             * static_cast<AccumT>(static_cast<float>(mxB.scale[mxsbIdx]));
-                        sum += blockSum * mxScale;
+                        sum += static_cast<MacT>(blockSum * mxScale);
                     }
                 }
                 else
@@ -336,40 +415,97 @@ namespace
                 {
                     for(size_t l = 0; l < k; l++)
                     {
-                        AccumT aVal = a[i * strideAM + l * strideAK];
-                        AccumT bVal = b[l * strideBK + j * strideBN];
-                        if(quantizeA) aVal = static_cast<AccumT>(quantizeA(static_cast<float>(aVal)));
-                        if(quantizeB) bVal = static_cast<AccumT>(quantizeB(static_cast<float>(bVal)));
-                        sum += static_cast<AccumT>(static_cast<OperandMathOpT>(aVal))
-                               * static_cast<AccumT>(static_cast<OperandMathOpT>(bVal));
+                        MacT aVal = a[i * strideAM + l * strideAK];
+                        MacT bVal = b[l * strideBK + j * strideBN];
+                        aVal      = quantizeOperand(quantizeA, aVal, preQuantizeScaleA);
+                        bVal      = quantizeOperand(quantizeB, bVal, preQuantizeScaleB);
+                        sum += static_cast<MacT>(static_cast<OperandMathOpT>(aVal))
+                               * static_cast<MacT>(static_cast<OperandMathOpT>(bVal));
                     }
                 }
 
-                AccumT effectiveAlpha = alpha;
+                // alpha * sum, beta * C and bias are added in separate steps,
+                // each rounded on its own, as in the slow path.
+                WideT effectiveAlpha = alpha;
                 if(scaleAVec)
-                    effectiveAlpha *= static_cast<AccumT>(scaleAVec[i]);
+                    effectiveAlpha
+                        = checkedInt32(effectiveAlpha * static_cast<WideT>(scaleAVec[i]));
                 if(scaleBVec)
-                    effectiveAlpha *= static_cast<AccumT>(scaleBVec[j]);
+                    effectiveAlpha
+                        = checkedInt32(effectiveAlpha * static_cast<WideT>(scaleBVec[j]));
                 if(scaleAlphaVec)
-                    effectiveAlpha *= static_cast<AccumT>(
-                        scaleAlphaVec[factorDim == 0 ? i : j]);
+                    effectiveAlpha = checkedInt32(
+                        effectiveAlpha * static_cast<WideT>(scaleAlphaVec[factorDim == 0 ? i : j]));
 
-                AccumT result = effectiveAlpha * sum + beta * c[i + j * m];
+                WideT result = checkedInt32(
+                    effectiveAlpha * static_cast<WideT>(static_cast<AccumT>(checkedInt32(sum))));
+                result
+                    = checkedInt32(result + checkedInt32(static_cast<WideT>(beta) * c[i + j * m]));
 
                 if(biasVec)
-                    result += static_cast<AccumT>(biasVec[i]);
+                    result = checkedInt32(result + static_cast<WideT>(biasVec[i]));
+
+                if(preActivation)
+                    preActivation[i + j * m] = static_cast<AccumT>(result);
 
                 if(activation == ActivationType::Relu)
                 {
-                    result = std::max(AccumT(0), result);
+                    if constexpr(!isComplexV<AccumT>)
+                    {
+                        if(gradientE)
+                            result = checkedInt32(
+                                result
+                                * std::max(WideT(0), static_cast<WideT>(gradientE[i + j * m])));
+                        else
+                            result = std::max(WideT(0), result);
+                    }
+                    else
+                        throw std::runtime_error(
+                            "CPU reference GEMM: no activation for complex types.");
                 }
                 else
                 {
                     assert(activation == ActivationType::None);
                 }
 
-                d[i + j * m] = result;
+                d[i + j * m] = static_cast<AccumT>(result);
             }
+        }
+    }
+
+    // Converts a golden epilogue value to the C/D storage type the way the
+    // reference's SaturateCast<DType> (client/src/Reference.cpp) does:
+    //   int8_t:  from a floating-point epilogue, round to nearest even, then
+    //            clamp to [-128, 127]; from an int32_t epilogue, clamp only.
+    //   int32_t: plain static_cast (truncation from floating point, no clamp).
+    //            Out-of-range conversion is undefined, so it throws here.
+    //   others:  plain static_cast (Float8/BFloat8: round to nearest even, saturate
+    //            to the largest finite value).
+    template <typename OutT, typename AccumT>
+    OutT saturateCastLikeReference(AccumT val)
+    {
+        if constexpr(std::is_same_v<OutT, int8_t>)
+        {
+            if constexpr(std::is_floating_point_v<AccumT>)
+                val = std::nearbyint(val); // round to even
+            if(val > static_cast<AccumT>(127))
+                val = static_cast<AccumT>(127);
+            else if(val < static_cast<AccumT>(-128))
+                val = static_cast<AccumT>(-128);
+            return static_cast<OutT>(val);
+        }
+        else if constexpr(std::is_same_v<OutT, int32_t> && std::is_floating_point_v<AccumT>)
+        {
+            if(!(static_cast<double>(val) > -2147483649.0
+                 && static_cast<double>(val) < 2147483648.0))
+                throw std::runtime_error("CPU reference GEMM: D value "
+                                         + std::to_string(static_cast<double>(val))
+                                         + " is out of the int32_t range; use smaller inputs.");
+            return static_cast<OutT>(val);
+        }
+        else
+        {
+            return static_cast<OutT>(val);
         }
     }
 }
@@ -379,16 +515,26 @@ namespace
  * Handles memory allocation, data initialization, execution, and validation.
  *
  * InputT: The C++ type used for storage of A and B matrices (e.g. float, half).
- * AccumulateT: The type used for accumulation (currently restricted to float).
+ * AccumulateT: alpha/beta type, which is also the reference's epilogue type
+ *              (float, double, int32_t for Int8 inputs, or the complex input type).
+ * OutputT: C/D storage type (defaults to AccumulateT).
+ * conjA/conjB: TensorOp::ComplexConjugate on A/B (complex inputs only).
+ * useE: the reference also writes E (the value before activation), in OutputT.
+ * gradient: gradient GEMM. E (useE) is an input instead, and with an activation D
+ *           is multiplied by the activation of E. With useBias the bias is an output
+ *           instead: the bias gradient, reduced from biasSrc (D, A or B).
  */
-template <typename InputAT, typename InputBT = InputAT, typename AccumulateT = float>
+template <typename InputAT,
+          typename InputBT     = InputAT,
+          typename AccumulateT = float,
+          typename OutputT     = AccumulateT>
 int runGemm(size_t         m,
             size_t         n,
             size_t         k,
             bool           transA,
             bool           transB,
-            float          alpha,
-            float          beta,
+            double         alpha,
+            double         beta,
             bool           validate,
             bool           injectValidationFailure,
             bool           tryFastPath,
@@ -403,15 +549,22 @@ int runGemm(size_t         m,
             int                mxBlockB      = 0,
             size_t             batchCount    = 1,
             bool               isTF32        = false,
-            bool               outputAmaxD   = false)
+            bool               outputAmaxD   = false,
+            int                int8Min       = -128,
+            int                int8Max       = 127,
+            bool               conjA         = false,
+            bool               conjB         = false,
+            bool               useE          = false,
+            bool               gradient      = false,
+            ContractionProblemGemm::TENSOR biasSrc = ContractionProblemGemm::D)
 {
     if(batchCount == 0)
     {
         std::cerr << "Error: batchCount (" << batchCount << ") must be >= 1" << std::endl;
         return 1;
     }
-    constexpr rocisa::DataType dtypeEnumA = TypeTraits<InputAT>::value;
-    constexpr rocisa::DataType dtypeEnumB = TypeTraits<InputBT>::value;
+    constexpr rocisa::DataType dtypeEnumA = TypeInfo<InputAT>::Enum;
+    constexpr rocisa::DataType dtypeEnumB = TypeInfo<InputBT>::Enum;
     if(computeInputA == rocisa::DataType::None) computeInputA = dtypeEnumA;
     if(computeInputB == rocisa::DataType::None) computeInputB = dtypeEnumB;
 
@@ -424,6 +577,18 @@ int runGemm(size_t         m,
 #else
     constexpr bool isFP4 = false;
 #endif
+
+    constexpr bool isInt8 = std::is_same_v<InputAT, int8_t>;
+    static_assert(isInt8 == std::is_same_v<InputBT, int8_t>,
+                  "Int8 input storage must be used for both A and B, or neither.");
+    // Golden K-loop type: exact integer accumulation for Int8 (see columnMajorGemm).
+    using MacT = std::conditional_t<isInt8, int64_t, AccumulateT>;
+
+    constexpr bool isComplex = isComplexV<InputAT>;
+    static_assert(!isComplex
+                      || (std::is_same_v<InputAT, InputBT> && std::is_same_v<InputAT, AccumulateT>
+                          && std::is_same_v<InputAT, OutputT>),
+                  "Complex inputs use one complex type for A, B, C, D and alpha/beta.");
 
     if constexpr(!isFP4)
     {
@@ -442,7 +607,7 @@ int runGemm(size_t         m,
                       << "); set both > 0 or both 0." << std::endl;
             return 1;
         }
-        auto checkSide = [&](const char* name, int b) -> int {
+        auto checkSide = [](const char* name, int b) -> int {
             if(b <= 0) return 0;
             if((b & (b - 1)) != 0)
             {
@@ -450,23 +615,13 @@ int runGemm(size_t         m,
                           << std::endl;
                 return 1;
             }
-            if(k < static_cast<size_t>(b))
-            {
-                std::cerr << "Error: K (" << k << ") must be >= " << name << " (" << b << ")"
-                          << std::endl;
-                return 1;
-            }
-            if(k % static_cast<size_t>(b) != 0)
-            {
-                std::cerr << "Error: K (" << k << ") must be a multiple of " << name
-                          << " (" << b << ")" << std::endl;
-                return 1;
-            }
             return 0;
         };
         if(int rc = checkSide("mxBlockA", mxBlockA)) return rc;
         if(int rc = checkSide("mxBlockB", mxBlockB)) return rc;
 
+        // Both paths stop their final MX segment at K, so equal-block MX
+        // supports K below the block size and K not divisible by that size.
         // Asymmetric MX (mxBlockA != mxBlockB) is only supported on the fast
         // path. The production slow path's MX inner loop uses a single scale
         // per max(mxBlockA, mxBlockB)-sized segment, which collapses the
@@ -488,8 +643,9 @@ int runGemm(size_t         m,
     size_t ldb        = transB ? n : k;
     size_t ldc        = m;
 
-    // C/D and alpha/beta types: use AccumulateT's DataType
-    constexpr rocisa::DataType accumDtypeEnum = TypeTraits<AccumulateT>::value;
+    // alpha/beta (and bias, scale vectors, AMAX-D) use AccumulateT; C/D use OutputT.
+    constexpr rocisa::DataType accumDtypeEnum  = TypeInfo<AccumulateT>::Enum;
+    constexpr rocisa::DataType outputDtypeEnum = TypeInfo<OutputT>::Enum;
 
     // Define the contraction problem (geometry, strides, types)
     ContractionProblemGemm contraction
@@ -497,8 +653,8 @@ int runGemm(size_t         m,
                                                transB,
                                                dtypeEnumA,
                                                dtypeEnumB,
-                                               accumDtypeEnum,
-                                               accumDtypeEnum,
+                                               outputDtypeEnum,
+                                               outputDtypeEnum,
                                                m,
                                                n,
                                                k,
@@ -520,6 +676,11 @@ int runGemm(size_t         m,
 
     if(isTF32)
         contraction.setF32XdlMathOp(rocisa::DataType::XFloat32);
+
+    if(conjA)
+        contraction.setAOps({TensorOp::ComplexConjugate()});
+    if(conjB)
+        contraction.setBOps({TensorOp::ComplexConjugate()});
 
     // Allocate host memory for inputs and outputs. Each batch slice is packed.
     size_t numA = m * k;
@@ -543,8 +704,12 @@ int runGemm(size_t         m,
 
     std::vector<InputAT>     a(storageA);
     std::vector<InputBT>     b(storageB);
-    std::vector<AccumulateT> c(numC * batchCount);
-    std::vector<AccumulateT> d(numC * batchCount);
+    std::vector<OutputT>     c(numC * batchCount);
+    std::vector<OutputT>     d(numC * batchCount);
+    // E (useE) has D's sizes, a packed layout and the C/D type. It starts at zero,
+    // so an unwritten E fails validation (almost every golden value is nonzero);
+    // with --gradient it is an input, set below.
+    std::vector<OutputT>     e(useE ? numC * batchCount : 0);
 
     // Initialize inputs with random values. We use ±1 (binary) for A and B by
     // default because it is exactly representable in every supported storage
@@ -559,12 +724,26 @@ int runGemm(size_t         m,
     //
     // For FP4 with mxBlockA/B>0 (mxfp4), inputs are drawn from the discrete
     // E2M1-representable value set so the MX-scale logic is exercised.
+    //
+    // Int8 inputs are drawn from [int8Min, int8Max], by default the full range
+    // [-128, 127], so the integer accumulation, large sums and saturating Int8
+    // output are exercised. A narrower range keeps most Int8 outputs in range.
+    //
+    // Complex A, B and C get +-1 in both the real and the imaginary part, so a
+    // missing or misplaced conjugation changes the result.
     size_t                                seed = 42;
     std::mt19937                          gen(seed);
     std::uniform_int_distribution<>       binary_distribution(0, 1);
     std::uniform_real_distribution<float> realDist(-1.0f, 1.0f);
 
     auto randomGen = [&]() { return binary_distribution(gen) ? 1.0f : -1.0f; };
+    // A complex T with +-1 parts, real part drawn first.
+    auto randomComplexGen = [&](auto tag) {
+        using T       = decltype(tag);
+        const auto re = static_cast<typename T::value_type>(randomGen());
+        const auto im = static_cast<typename T::value_type>(randomGen());
+        return T(re, im);
+    };
 
 #ifndef _WIN32
     if constexpr(isFP4)
@@ -617,7 +796,17 @@ int runGemm(size_t         m,
             }
             else
 #endif
-            if(quantizes)
+            if constexpr(std::is_same_v<T, int8_t>)
+            {
+                std::uniform_int_distribution<int> int8Dist(int8Min, int8Max);
+                std::generate(vec.begin(), vec.end(),
+                              [&]() { return static_cast<T>(int8Dist(gen)); });
+            }
+            else if constexpr(isComplexV<T>)
+            {
+                std::generate(vec.begin(), vec.end(), [&]() { return randomComplexGen(T{}); });
+            }
+            else if(quantizes)
             {
                 // Values representable in storage but not on the compute-input grid -
                 // for storage=Half/compute=F8N, values like 0.7 that Half holds
@@ -637,19 +826,41 @@ int runGemm(size_t         m,
         initOperand(a, quantizesA);
         initOperand(b, quantizesB);
     }
-    std::generate(c.begin(), c.end(), [&]() { return static_cast<AccumulateT>(randomGen()); });
+    if constexpr(isComplex)
+        std::generate(c.begin(), c.end(), [&]() { return randomComplexGen(OutputT{}); });
+    else
+        std::generate(c.begin(), c.end(), [&]() { return static_cast<OutputT>(randomGen()); });
+
+    // Gradient E (an input): +-1 and +-2, exact in every C/D type, so the relu of E
+    // scales D by 0, 1 or 2.
+    if(gradient)
+        std::generate(e.begin(), e.end(), [&]() {
+            return static_cast<OutputT>(randomGen() * (binary_distribution(gen) ? 2.0f : 1.0f));
+        });
 
     // Optional feature buffers — typed as AccumulateT so the slow path's
     // GetValue(alphaType, ...) reads the correct byte width.
     std::vector<AccumulateT> biasVec;
     std::vector<AccumulateT> scaleAlphaVecBuf;
 
+    // The bias is one M vector added to D. With --gradient it is an output, the bias
+    // gradient: reduced from D or A (length M) or B (length N). It then starts as
+    // NaN (integers: the largest value), so an unwritten element fails validation.
     if(useBias)
     {
-        biasVec.resize(m);
-        std::generate(biasVec.begin(), biasVec.end(), [&]() { return static_cast<AccumulateT>(randomGen()); });
+        const size_t biasLength = (gradient && biasSrc == ContractionProblemGemm::B) ? n : m;
+        biasVec.resize(biasLength);
+        if(!gradient)
+            std::generate(biasVec.begin(), biasVec.end(), [&]() {
+                return static_cast<AccumulateT>(randomGen());
+            });
+        else if constexpr(std::is_floating_point_v<AccumulateT>)
+            std::fill(
+                biasVec.begin(), biasVec.end(), std::numeric_limits<AccumulateT>::quiet_NaN());
+        else
+            std::fill(biasVec.begin(), biasVec.end(), std::numeric_limits<AccumulateT>::max());
         contraction.setUseBias(1);
-        contraction.setBias(accumDtypeEnum, m, m);
+        contraction.setBias(accumDtypeEnum, biasLength, biasLength, /*isOutput=*/gradient, biasSrc);
     }
 
     if(useScaleAlphaVec)
@@ -702,6 +913,9 @@ int runGemm(size_t         m,
         contraction.setParams().setActivationEnum(activation);
     }
 
+    if(gradient)
+        contraction.setUseGradient(true);
+
     // AMAX-D: the reference writes max |D| over every batch as one AccumulateT.
     // Start from -1, which no absolute maximum can be, so an unwritten value
     // fails validation.
@@ -710,6 +924,15 @@ int runGemm(size_t         m,
     {
         contraction.setOutputAmaxD(true);
         contraction.setAmaxD(accumDtypeEnum, /*isOutput=*/true);
+    }
+
+    // useE must be set before setE, which skips the tensor otherwise. With
+    // --gradient E is an input.
+    if(useE)
+    {
+        contraction.setUseE(true);
+        contraction.setE(
+            outputDtypeEnum, contraction.d().sizes(), /*strides=*/{}, /*isOutput=*/!gradient);
     }
 
 #ifndef _WIN32
@@ -759,6 +982,7 @@ int runGemm(size_t         m,
     inputs.scaleA        = (useScaleAB != "none") ? scaleABuf.data() : nullptr;
     inputs.scaleB        = (useScaleAB != "none") ? scaleBBuf.data() : nullptr;
     inputs.amaxD         = outputAmaxD ? &amaxD : nullptr;
+    inputs.e             = useE ? e.data() : nullptr;
 
 #ifndef _WIN32
     if constexpr(isFP4)
@@ -770,11 +994,12 @@ int runGemm(size_t         m,
 
     auto start = std::chrono::high_resolution_clock::now();
 
-    if(tryFastPath && !TensileLite::Client::isFastPathEligible(contraction))
+    std::string rejectionReason;
+    if(tryFastPath && !TensileLite::Client::isFastPathEligible(contraction, &rejectionReason))
     {
-        throw std::runtime_error(
-            "--tryFastPath was requested but the problem is not eligible "
-            "for the fast CPU GEMM path.");
+        throw std::runtime_error("--tryFastPath was requested but the problem is not eligible "
+                                 "for the fast CPU GEMM path: "
+                                 + rejectionReason + ".");
     }
 
     // Execute the 'device under test'.
@@ -786,8 +1011,11 @@ int runGemm(size_t         m,
     auto                                      end      = std::chrono::high_resolution_clock::now();
     std::chrono::duration<double, std::milli> duration = end - start;
     std::cout << "Execution Time: " << duration.count() << " ms" << std::endl;
-    if(outputAmaxD)
-        std::cout << "AmaxD: " << static_cast<double>(amaxD) << std::endl;
+    if constexpr(!isComplex)
+    {
+        if(outputAmaxD)
+            std::cout << "AmaxD: " << static_cast<double>(amaxD) << std::endl;
+    }
 
     if(injectValidationFailure)
     {
@@ -796,31 +1024,38 @@ int runGemm(size_t         m,
             std::cerr << "Error: cannot inject validation failure into empty D" << std::endl;
             return 1;
         }
-        d[0] += static_cast<AccumulateT>(16.0);
+        if constexpr(std::is_integral_v<OutputT>)
+            d[0] = static_cast<OutputT>(d[0] > 0 ? d[0] - 16 : d[0] + 16); // stays in range
+        else if constexpr(float8Family<OutputT>() != Float8Family::None)
+            // d[0] + 16 could saturate back to d[0]; flip the sign instead (16 is exact).
+            d[0] = static_cast<OutputT>(static_cast<float>(d[0]) > 0.0f ? -16.0f : 16.0f);
+        else
+            d[0] = static_cast<OutputT>(static_cast<AccumulateT>(d[0])
+                                        + static_cast<AccumulateT>(16.0));
     }
 
     if(validate)
     {
         std::cout << "Validating..." << std::endl;
 
-        // Convert inputs to AccumulateT for the golden reference comparison.
+        // Convert A/B to the golden K-loop type (MacT) and C to AccumulateT.
         // For batched problems, A/B/C are batchCount slices of size numA/numB/numC
         // (column-major packed; batch stride = numA / numB / numC).
         size_t totalA = numA * batchCount;
         size_t totalB = numB * batchCount;
         size_t totalC = numC * batchCount;
 
-        std::vector<AccumulateT> aRef, bRef;
+        std::vector<MacT> aRef, bRef;
 
 #ifndef _WIN32
         if constexpr(isFP4)
         {
             aRef.resize(totalA);
             for(size_t i = 0; i < totalA; i++)
-                aRef[i] = static_cast<AccumulateT>(a[i / 2].getElement(i % 2));
+                aRef[i] = static_cast<MacT>(a[i / 2].getElement(i % 2));
             bRef.resize(totalB);
             for(size_t i = 0; i < totalB; i++)
-                bRef[i] = static_cast<AccumulateT>(b[i / 2].getElement(i % 2));
+                bRef[i] = static_cast<MacT>(b[i / 2].getElement(i % 2));
         }
         else if constexpr(std::is_same_v<InputAT, Float4x2> || std::is_same_v<InputBT, Float4x2>)
         {
@@ -831,14 +1066,37 @@ int runGemm(size_t         m,
         {
             aRef.resize(totalA);
             for(size_t i = 0; i < totalA; i++)
-                aRef[i] = static_cast<AccumulateT>(a[i]);
+                aRef[i] = static_cast<MacT>(a[i]);
             bRef.resize(totalB);
             for(size_t i = 0; i < totalB; i++)
-                bRef[i] = static_cast<AccumulateT>(b[i]);
+                bRef[i] = static_cast<MacT>(b[i]);
+            if constexpr(isComplex)
+            {
+                if(conjA)
+                    std::transform(aRef.begin(), aRef.end(), aRef.begin(), [](MacT v) {
+                        return std::conj(v);
+                    });
+                if(conjB)
+                    std::transform(bRef.begin(), bRef.end(), bRef.begin(), [](MacT v) {
+                        return std::conj(v);
+                    });
+            }
         }
 
-        std::vector<AccumulateT> cRef(c.begin(), c.end());
+        std::vector<AccumulateT> cRef(c.size());
+        for(size_t i = 0; i < c.size(); i++)
+            cRef[i] = static_cast<AccumulateT>(c[i]);
+        // dRef holds the golden epilogue result before the cast to OutputT
+        // (AMAX-D is computed on it); D is compared after the cast.
         std::vector<AccumulateT> dRef(d.size());
+        // eRef: the golden value before activation (useE), compared with E after
+        // the cast to OutputT, as D is.
+        std::vector<AccumulateT> eRef(gradient ? 0 : e.size());
+        // Gradient: E (an input) as the reference reads it, in AccumulateT; zero
+        // without useE.
+        std::vector<AccumulateT> gradientERef(gradient ? totalC : 0);
+        for(size_t i = 0; i < e.size() && gradient; i++)
+            gradientERef[i] = static_cast<AccumulateT>(e[i]);
 
         // If the storage type is wider than the compute-input type, the GPU
         // (and slow-path validator) quantize the operand down before the MAC.
@@ -869,6 +1127,25 @@ int runGemm(size_t         m,
         }
 #endif
 
+        // The GPU consumes a Scalar scale before Half-to-Float8 narrowing.
+        // Apply it during quantization and fold only remaining scales into
+        // alpha, in A-then-B order. Keep the source arrays unscaled.
+        using GoldenAlphaT     = GoldenWideT<AccumulateT>;
+        GoldenAlphaT wideAlpha = static_cast<GoldenAlphaT>(static_cast<AccumulateT>(alpha));
+        MacT         preQuantizeScaleA = MacT(1), preQuantizeScaleB = MacT(1);
+        if(useScaleAB == "Scalar")
+        {
+            if(scalarScaleConsumedBeforeNarrowing(dtypeEnumA, computeInputA))
+                preQuantizeScaleA = static_cast<MacT>(scaleABuf[0]);
+            else
+                wideAlpha = checkedInt32(wideAlpha * static_cast<GoldenAlphaT>(scaleABuf[0]));
+            if(scalarScaleConsumedBeforeNarrowing(dtypeEnumB, computeInputB))
+                preQuantizeScaleB = static_cast<MacT>(scaleBBuf[0]);
+            else
+                wideAlpha = checkedInt32(wideAlpha * static_cast<GoldenAlphaT>(scaleBBuf[0]));
+        }
+        const AccumulateT goldenAlpha = static_cast<AccumulateT>(wideAlpha);
+
         // Run the golden reference per-batch.
         // When isTF32, use XFloat32 as OperandMathOpT so the golden ref
         // truncates each A/B element to 10-bit mantissa before multiply.
@@ -876,12 +1153,15 @@ int runGemm(size_t         m,
             using MathOpT = decltype(mathOpTag);
             for(size_t batch = 0; batch < batchCount; ++batch)
             {
-                const AccumulateT* aPtr = aRef.data() + batch * numA;
-                const AccumulateT* bPtr = bRef.data() + batch * numB;
+                const MacT*        aPtr = aRef.data() + batch * numA;
+                const MacT*        bPtr = bRef.data() + batch * numB;
                 const AccumulateT* cPtr = cRef.data() + batch * numC;
                 AccumulateT*       dPtr = dRef.data() + batch * numC;
+                AccumulateT*       ePtr = eRef.empty() ? nullptr : eRef.data() + batch * numC;
+                const AccumulateT* gradientEPtr
+                    = gradient ? gradientERef.data() + batch * numC : nullptr;
 
-                columnMajorGemm<AccumulateT, MathOpT>(
+                columnMajorGemm<AccumulateT, MathOpT, MacT>(
                     aPtr,
                     bPtr,
                     cPtr,
@@ -891,42 +1171,64 @@ int runGemm(size_t         m,
                     k,
                     transA,
                     transB,
-                    static_cast<AccumulateT>(
-                        (useScaleAB == "Scalar") ? alpha * scaleABuf[0] * scaleBBuf[0] : alpha),
+                    goldenAlpha,
                     static_cast<AccumulateT>(beta),
-                    useBias ? biasVec.data() : nullptr,
+                    (useBias && !gradient) ? biasVec.data() : nullptr,
                     useScaleAlphaVec ? scaleAlphaVecBuf.data() : nullptr,
                     activation,
                     (useScaleAB == "Vector") ? scaleABuf.data() : nullptr,
                     (useScaleAB == "Vector") ? scaleBBuf.data() : nullptr,
                     factorDim,
                     quantA,
-                    quantB
+                    quantB,
+                    preQuantizeScaleA,
+                    preQuantizeScaleB,
+                    ePtr,
+                    gradientEPtr
 #ifndef _WIN32
                     ,
-                    MXGemmOperand{
-                        (isFP4 && mxBlockA > 0) ? mxsa.data() + batch * mxsaBatchStride : nullptr,
-                        mxBlockA,
-                        mxsaStrideM,
-                        mxsaStrideKBlk},
-                    MXGemmOperand{
-                        (isFP4 && mxBlockB > 0) ? mxsb.data() + batch * mxsbBatchStride : nullptr,
-                        mxBlockB,
-                        mxsbStrideN,
-                        mxsbStrideKBlk}
+                    MXGemmOperand{(isFP4 && mxBlockA > 0) ? mxsa.data() + batch * mxsaBatchStride
+                                                          : nullptr,
+                                  mxBlockA,
+                                  mxsaStrideM,
+                                  mxsaStrideKBlk},
+                    MXGemmOperand{(isFP4 && mxBlockB > 0) ? mxsb.data() + batch * mxsbBatchStride
+                                                          : nullptr,
+                                  mxBlockB,
+                                  mxsbStrideN,
+                                  mxsbStrideKBlk}
 #endif
                 );
             }
         };
 
-        if(isTF32)
+        // Int8 and complex: no operand math-op type (the MAC type itself).
+        if constexpr(isInt8 || isComplex)
+            runGoldenRef(MacT{});
+        else if(isTF32)
             runGoldenRef(XFloat32{});
         else
             runGoldenRef(AccumulateT{});
 
         // Compare results — reduced-precision types need wider tolerance.
         // TF32 loses 13 of 23 mantissa bits; errors accumulate over K.
+        // Int8 inputs must match exactly: the golden accumulates exactly and
+        // applies the epilogue in the reference's epilogue type, rounding each
+        // step as the reference does. (It folds scaleAlphaVec into alpha before
+        // multiplying by the sum, the reference multiplies after; the driver's
+        // scaleAlphaVec values are +-1, so both give the same value.)
+        // Float8/BFloat8 outputs must match exactly too: with this driver's data every
+        // K-loop sum is exact in float. Products are +-1, or (one operand quantized to
+        // e4m3 from (-1, 1), the other +-1) multiples of 2^-9 (fnuz: 2^-10), whose sums
+        // are exact while |partial sum| < 2^15 (fnuz: 2^14). C, bias and scaleAlphaVec
+        // are +-1 and the ScaleAB scales integers, so the golden and the reference round
+        // the same epilogue operations to the same float values before the cast, and a
+        // wrong rounding or saturation is off by at least one F8 step.
+        constexpr bool isFloat8Output = float8Family<OutputT>() != Float8Family::None;
+
         double tolerance = [&]() {
+            if(isInt8 || isFloat8Output)
+                return 0.0;
             if(isFP4)
                 return 0.5;
             if(isTF32)
@@ -934,56 +1236,121 @@ int runGemm(size_t         m,
             return 0.05;
         }();
 
-        bool   allClose = true;
-        double maxDiff  = 0.0;
+        // Equal values (also equal infinities) and NaN on both sides match; a NaN on
+        // one side only (e.g. an unsaturated Float8 overflow) is an infinite difference,
+        // which the tolerance check below would otherwise miss.
+        auto valueDiff = [](double valDut, double valRef) {
+            const bool bothNaN = std::isnan(valDut) && std::isnan(valRef);
+            double     diff    = (valDut == valRef || bothNaN) ? 0.0 : std::abs(valDut - valRef);
+            if(std::isnan(diff))
+                diff = std::numeric_limits<double>::infinity();
+            return diff;
+        };
 
-        for(size_t i = 0; i < totalC; i++)
-        {
-            double valDut = static_cast<double>(d[i]);
-            double valRef = static_cast<double>(dRef[i]);
-            double diff   = std::abs(valDut - valRef);
-            maxDiff       = std::max(maxDiff, diff);
-
-            if(diff > tolerance)
+        // Compares an output (D or E in OutputT, or the bias gradient in AccumulateT)
+        // with its golden values cast to the output's type and prints the result, each
+        // line starting with `label`. Returns true if every element is within the
+        // tolerance.
+        auto compareOutput = [&](auto const&                     dut,
+                                 std::vector<AccumulateT> const& ref,
+                                 std::string const&              label) {
+            using DutT      = typename std::decay_t<decltype(dut)>::value_type;
+            bool   allClose = true;
+            double maxDiff  = 0.0;
+            for(size_t i = 0; i < dut.size(); i++)
             {
-                allClose = false;
-                if(i < 10)
+                // Complex: the larger of the real-part and imaginary-part differences.
+                const auto valDut = dut[i];
+                const auto valRef = saturateCastLikeReference<DutT>(ref[i]);
+                double     diff;
+                if constexpr(isComplex)
+                    diff = std::max(valueDiff(valDut.real(), valRef.real()),
+                                    valueDiff(valDut.imag(), valRef.imag()));
+                else
+                    diff = valueDiff(static_cast<double>(valDut), static_cast<double>(valRef));
+                maxDiff = std::max(maxDiff, diff);
+
+                if(diff > tolerance)
                 {
-                    std::cout << "Mismatch at " << i << ": observed=" << valDut
-                              << " expected=" << valRef << " diff=" << diff << std::endl;
+                    allClose = false;
+                    if(i < 10)
+                    {
+                        std::cout << label << "Mismatch at " << i << ": observed=";
+                        if constexpr(isComplex)
+                            std::cout << valDut << " expected=" << valRef;
+                        else
+                            std::cout << static_cast<double>(valDut)
+                                      << " expected=" << static_cast<double>(valRef);
+                        std::cout << " diff=" << diff << std::endl;
+                    }
                 }
             }
-        }
 
-        if(allClose)
-        {
-            std::cout << "PASSED! (max diff: " << maxDiff << ")" << std::endl;
-        }
-        else
-        {
-            std::cout << "FAILED! (max diff: " << maxDiff << ")" << std::endl;
+            std::cout << label << (allClose ? "PASSED!" : "FAILED!") << " (max diff: " << maxDiff
+                      << ")" << std::endl;
+            return allClose;
+        };
+
+        if(!compareOutput(d, dRef, ""))
             return 1;
+
+        // E (the value before activation) is checked against the golden as D is
+        // (with --gradient it is an input).
+        if(useE && !gradient && !compareOutput(e, eRef, "E "))
+            return 1;
+
+        // The bias gradient: bias[i] is the sum, in AccumulateT and in the reference's
+        // order (ReductionCPU), of the golden D before its cast to OutputT along N
+        // (source D), of A as stored along K (source A), or of B along K (source B,
+        // bias[j]). One batch (the driver rejects more).
+        if(gradient && useBias)
+        {
+            using WideT = GoldenWideT<AccumulateT>;
+            std::vector<AccumulateT> biasRef(biasVec.size());
+            for(size_t i = 0; i < biasRef.size(); i++)
+            {
+                const bool fromD = (biasSrc == ContractionProblemGemm::D);
+                const bool fromA = (biasSrc == ContractionProblemGemm::A);
+                WideT      sum   = WideT(0);
+                for(size_t l = 0; l < (fromD ? n : k); l++)
+                {
+                    AccumulateT val;
+                    if(fromD)
+                        val = dRef[i + l * m];
+                    else if(fromA)
+                        val = static_cast<AccumulateT>(aRef[transA ? l + i * k : i + l * m]);
+                    else
+                        val = static_cast<AccumulateT>(bRef[transB ? i + l * n : l + i * k]);
+                    sum = checkedInt32(sum + static_cast<WideT>(val));
+                }
+                biasRef[i] = static_cast<AccumulateT>(sum);
+            }
+            if(!compareOutput(biasVec, biasRef, "Bias "))
+                return 1;
         }
 
         // AMAX-D is checked against the golden D, whichever CPU path computed it.
-        if(outputAmaxD)
+        if constexpr(!isComplex)
         {
-            double goldenAmaxD = 0.0;
-            for(size_t i = 0; i < totalC; i++)
-                goldenAmaxD = std::max(goldenAmaxD, std::abs(static_cast<double>(dRef[i])));
+            if(outputAmaxD)
+            {
+                double goldenAmaxD = 0.0;
+                for(size_t i = 0; i < totalC; i++)
+                    goldenAmaxD = std::max(goldenAmaxD, std::abs(static_cast<double>(dRef[i])));
 
-            double amaxDiff = std::abs(static_cast<double>(amaxD) - goldenAmaxD);
-            if(amaxDiff <= tolerance)
-            {
-                std::cout << "AmaxD PASSED! (observed=" << static_cast<double>(amaxD)
-                          << " expected=" << goldenAmaxD << ")" << std::endl;
-            }
-            else
-            {
-                std::cout << "AmaxD FAILED! (observed=" << static_cast<double>(amaxD)
-                          << " expected=" << goldenAmaxD << " diff=" << amaxDiff << ")"
-                          << std::endl;
-                return 1;
+                double amaxDiff = std::abs(static_cast<double>(amaxD) - goldenAmaxD);
+                if(amaxDiff <= tolerance)
+                {
+                    std::cout << "AmaxD PASSED! (observed=" << static_cast<double>(amaxD)
+                              << " expected=" << goldenAmaxD << ")" << std::endl;
+                }
+                else
+                {
+                    std::cout << "AmaxD FAILED! (observed=" << static_cast<double>(amaxD)
+                              << " expected=" << goldenAmaxD << " diff=" << amaxDiff << ")"
+                              << std::endl;
+                    return 1;
+                }
             }
         }
     }
@@ -1001,11 +1368,13 @@ int main(int argc, char* argv[])
         "K", po::value<size_t>()->default_value(128), "Matrix K dimension")(
         "transA", po::value<bool>()->default_value(false), "Transpose A")(
         "transB", po::value<bool>()->default_value(false), "Transpose B")(
-        "alpha", po::value<float>()->default_value(1.0f), "Alpha scalar")(
-        "beta", po::value<float>()->default_value(0.0f), "Beta scalar")(
-        "type", po::value<std::string>()->default_value("f32"), "Data type for A and B (f32, f64, tf32, f16, bf16, f8, bf8, f8fnuz, bf8fnuz, f4)")(
+        "alpha", po::value<double>()->default_value(1.0), "Alpha scalar")(
+        "beta", po::value<double>()->default_value(0.0), "Beta scalar")(
+        "type", po::value<std::string>()->default_value("f32"), "Data type for A and B (f32, f64, tf32, f16, bf16, f8, bf8, f8fnuz, bf8fnuz, f4, i8, c = complex f32, z = complex f64)")(
         "typeA", po::value<std::string>()->default_value(""), "Override A storage type (defaults to --type)")(
         "typeB", po::value<std::string>()->default_value(""), "Override B storage type (defaults to --type)")(
+        "typeCD", po::value<std::string>()->default_value(""), "C/D (output) type: f32, f64, f16, bf16, i8, i32, f8, bf8, f8fnuz, bf8fnuz. Defaults to i32 for i8 inputs, f64 for f64 inputs, the input type for c/z inputs, else f32; i8 inputs take any of i8, i32, f16, bf16; 8-bit float inputs of one family (OCP or fnuz) take that family's f8/bf8, f8 x f16 takes f8 (f8fnuz x f16: f8fnuz); other inputs only the default")(
+        "typeAlpha", po::value<std::string>()->default_value(""), "Alpha/beta type, also the reference's epilogue type: f32, f64, i32. Defaults to i32 when --typeCD is i8 or i32, f64 for f64 inputs, the input type for c/z inputs (real --alpha/--beta), else f32; i32 needs integer --alpha/--beta")(
         "computeInputA", po::value<std::string>()->default_value(""), "Override A compute-input type for MAC (defaults to --typeA). Set smaller than storage to mimic kernels that quantize A.")(
         "computeInputB", po::value<std::string>()->default_value(""), "Override B compute-input type for MAC (defaults to --typeB). Set smaller than storage to mimic kernels that quantize B.")(
         "validate", po::value<bool>()->default_value(true), "Run validation against ref")(
@@ -1016,10 +1385,17 @@ int main(int argc, char* argv[])
         "scaleAlphaVec", po::value<bool>()->default_value(false), "Enable per-row alpha scaling")(
         "factorDim", po::value<int>()->default_value(0), "ScaleAlphaVec dimension: 0=row(M), 1=col(N)")(
         "useScaleAB", po::value<std::string>()->default_value("none"), "ScaleAB mode (none, Scalar, Vector)")(
-        "mxBlockA", po::value<int>()->default_value(0), "MX block size for the A side (FP4 only, must be power of 2; both --mxBlockA and --mxBlockB must be set together)")(
-        "mxBlockB", po::value<int>()->default_value(0), "MX block size for the B side (FP4 only, must be power of 2; both --mxBlockA and --mxBlockB must be set together)")(
+        "mxBlockA", po::value<int>()->default_value(0), "MX block size for the A side (FP4 only, must be power of 2; both --mxBlockA and --mxBlockB must be set together; unequal blocks need --tryFastPath)")(
+        "mxBlockB", po::value<int>()->default_value(0), "MX block size for the B side (FP4 only, must be power of 2; both --mxBlockA and --mxBlockB must be set together; unequal blocks need --tryFastPath)")(
         "batchCount", po::value<size_t>()->default_value(1), "Batch count (default 1)")(
-        "outputAmaxD", po::value<bool>()->default_value(false), "Also output AMAX-D (max |D|) and validate it against the golden GEMM");
+        "outputAmaxD", po::value<bool>()->default_value(false), "Also output AMAX-D (max |D|) and validate it against the golden GEMM")(
+        "int8Min", po::value<int>()->default_value(-128), "Smallest i8 A/B value (i8 inputs only; default -128)")(
+        "int8Max", po::value<int>()->default_value(127), "Largest i8 A/B value (i8 inputs only; default 127)")(
+        "conjA", po::value<bool>()->default_value(false), "Conjugate A (TensorOp::ComplexConjugate; c/z inputs only)")(
+        "conjB", po::value<bool>()->default_value(false), "Conjugate B (TensorOp::ComplexConjugate; c/z inputs only)")(
+        "useE", po::value<bool>()->default_value(false), "Also output E (the value before activation, in the C/D type) and validate it against the golden GEMM (not for c/z inputs)")(
+        "gradient", po::value<bool>()->default_value(false), "Gradient GEMM (not for c/z inputs): no bias is added; with --activation relu, D is multiplied by relu(E), E being an input with --useE (else zero); with --bias, the reference writes the bias gradient (see --biasSrc; --batchCount 1 only), validated against the golden GEMM")(
+        "biasSrc", po::value<std::string>()->default_value("d"), "Bias-gradient source with --gradient --bias: d (bias[i] = sum over N of D), a (sum over K of A, length M), b (sum over K of B, length N; a and b not for f4 inputs)");
 
     po::variables_map vm;
     try
@@ -1044,8 +1420,8 @@ int main(int argc, char* argv[])
     size_t      k                = vm["K"].as<size_t>();
     bool        transA           = vm["transA"].as<bool>();
     bool        transB           = vm["transB"].as<bool>();
-    float       alpha            = vm["alpha"].as<float>();
-    float       beta             = vm["beta"].as<float>();
+    double      alpha            = vm["alpha"].as<double>();
+    double      beta             = vm["beta"].as<double>();
     std::string typeStr          = vm["type"].as<std::string>();
     std::string typeAStr         = vm["typeA"].as<std::string>();
     std::string typeBStr         = vm["typeB"].as<std::string>();
@@ -1066,6 +1442,9 @@ int main(int argc, char* argv[])
         if(s == "bf8")            { out = rocisa::DataType::BFloat8;      return true; }
         if(s == "f8fnuz")         { out = rocisa::DataType::Float8_fnuz;  return true; }
         if(s == "bf8fnuz")        { out = rocisa::DataType::BFloat8_fnuz; return true; }
+        if(s == "i8")             { out = rocisa::DataType::Int8;         return true; }
+        if(s == "c")              { out = rocisa::DataType::ComplexFloat; return true; }
+        if(s == "z")              { out = rocisa::DataType::ComplexDouble; return true; }
 #ifndef _WIN32
         if(s == "f4")             { out = rocisa::DataType::Float4;       return true; }
 #endif
@@ -1093,6 +1472,13 @@ int main(int argc, char* argv[])
     int         mxBlockB                 = vm["mxBlockB"].as<int>();
     size_t      batchCount               = vm["batchCount"].as<size_t>();
     bool        outputAmaxD              = vm["outputAmaxD"].as<bool>();
+    int         int8Min                  = vm["int8Min"].as<int>();
+    int         int8Max                  = vm["int8Max"].as<int>();
+    bool        conjA                    = vm["conjA"].as<bool>();
+    bool        conjB                    = vm["conjB"].as<bool>();
+    bool        useE                     = vm["useE"].as<bool>();
+    bool        gradient                 = vm["gradient"].as<bool>();
+    std::string biasSrcStr               = vm["biasSrc"].as<std::string>();
     const bool  typeAIsTF32              = (typeAStr == "tf32");
     const bool  typeBIsTF32              = (typeBStr == "tf32");
     const bool  isTF32                   = typeAIsTF32 && typeBIsTF32;
@@ -1103,6 +1489,110 @@ int main(int argc, char* argv[])
                   << "inputs or neither (typeA=" << typeAStr << ", typeB=" << typeBStr
                   << ")" << std::endl;
         return 1;
+    }
+
+    // Int8 inputs: A and B both i8, MAC on Int8 (no compute-input override).
+    // The supported C/D and alpha/beta types are the reference's Int8 type
+    // combinations (TypedGemm_I8_*); other inputs keep C/D and alpha/beta at
+    // their defaults.
+    const bool typeAIsInt8 = (typeAStr == "i8");
+    const bool typeBIsInt8 = (typeBStr == "i8");
+    const bool isInt8      = typeAIsInt8 && typeBIsInt8;
+    if(typeAIsInt8 != typeBIsInt8)
+    {
+        std::cerr << "Error: mixed i8 / non-i8 input is not supported (typeA=" << typeAStr
+                  << ", typeB=" << typeBStr << ")" << std::endl;
+        return 1;
+    }
+    if(isInt8 && (computeInputAStr != "i8" || computeInputBStr != "i8"))
+    {
+        std::cerr << "Error: i8 inputs do not support a computeInput override" << std::endl;
+        return 1;
+    }
+    const bool isFullInt8Range = (int8Min == -128 && int8Max == 127);
+    if(isInt8 ? !(-128 <= int8Min && int8Min <= int8Max && int8Max <= 127) : !isFullInt8Range)
+    {
+        std::cerr << "Error: --int8Min/--int8Max need i8 inputs and -128 <= int8Min <= int8Max"
+                  << " <= 127 (int8Min=" << int8Min << ", int8Max=" << int8Max << ")" << std::endl;
+        return 1;
+    }
+
+    // Complex inputs (c, z): A and B of one complex type, which is also the C/D and
+    // alpha/beta type (the reference's C_C_C / Z_Z_Z), optionally conjugated
+    // (--conjA, --conjB). The reference's fast path takes no bias, ScaleAB,
+    // scaleAlphaVec, activation or AMAX-D for them (the slow path reads complex bias
+    // and scale values as zero), and the golden has no complex activation. The
+    // reference writes no complex E (SetValue has no complex case).
+    const bool typeAIsComplex = (typeAStr == "c" || typeAStr == "z");
+    const bool typeBIsComplex = (typeBStr == "c" || typeBStr == "z");
+    const bool isComplex      = typeAIsComplex && typeBIsComplex;
+    if(typeAIsComplex != typeBIsComplex || (isComplex && typeAStr != typeBStr))
+    {
+        std::cerr << "Error: complex inputs need the same complex type for A and B (typeA="
+                  << typeAStr << ", typeB=" << typeBStr << ")" << std::endl;
+        return 1;
+    }
+    if(isComplex && (computeInputAStr != typeAStr || computeInputBStr != typeBStr))
+    {
+        std::cerr << "Error: complex inputs do not support a computeInput override" << std::endl;
+        return 1;
+    }
+    if(isComplex
+       && (useBias || activationStr != "none" || useScaleAlphaVec || useScaleAB != "none"
+           || outputAmaxD || useE || gradient))
+    {
+        std::cerr << "Error: complex inputs do not support --bias, --activation, --scaleAlphaVec,"
+                  << " --useScaleAB, --outputAmaxD, --useE or --gradient" << std::endl;
+        return 1;
+    }
+    if(!isComplex && (conjA || conjB))
+    {
+        std::cerr << "Error: --conjA/--conjB need complex inputs (c or z)" << std::endl;
+        return 1;
+    }
+
+    const bool        isF64        = (typeAStr == "f64" && typeBStr == "f64");
+    std::string       typeCDStr    = vm["typeCD"].as<std::string>();
+    std::string       typeAlphaStr = vm["typeAlpha"].as<std::string>();
+    // Default C/D and alpha/beta type for non-integer outputs: the input type for f64
+    // and complex inputs, else f32.
+    const std::string defaultType  = isF64 ? "f64" : (isComplex ? typeAStr : "f32");
+    const std::string defaultCD    = isInt8 ? "i32" : defaultType;
+    if(typeCDStr.empty())
+        typeCDStr = defaultCD;
+    const bool        isIntCD      = (typeCDStr == "i8" || typeCDStr == "i32");
+    const std::string defaultAlpha = isIntCD ? "i32" : defaultType;
+    if(typeAlphaStr.empty())
+        typeAlphaStr = defaultAlpha;
+
+    // Float8/BFloat8 C/D: the input types are checked at dispatch (runFloat8Output).
+    const bool isFloat8CD = (typeCDStr == "f8" || typeCDStr == "bf8" || typeCDStr == "f8fnuz"
+                             || typeCDStr == "bf8fnuz");
+
+    rocisa::DataType typeCD = rocisa::DataType::None;
+    if(isFloat8CD)
+        strToDataType(typeCDStr, typeCD);
+
+    if(!isInt8 && ((typeCDStr != defaultCD && !isFloat8CD) || typeAlphaStr != defaultAlpha))
+    {
+        std::cerr << "Error: --typeCD " << typeCDStr << " / --typeAlpha " << typeAlphaStr
+                  << " is only supported for i8 inputs, or f8/bf8/f8fnuz/bf8fnuz C/D with f32"
+                  << " alpha (defaults here: " << defaultCD << " / " << defaultAlpha << ")"
+                  << std::endl;
+        return 1;
+    }
+
+    if(typeAlphaStr == "i32")
+    {
+        auto isInt32Value = [](double v) {
+            return std::nearbyint(v) == v && v >= -2147483648.0 && v < 2147483648.0;
+        };
+        if(!isInt32Value(alpha) || !isInt32Value(beta))
+        {
+            std::cerr << "Error: --typeAlpha i32 needs integer --alpha and --beta (alpha="
+                      << alpha << ", beta=" << beta << ")" << std::endl;
+            return 1;
+        }
     }
 
     if(mxBlockA < 0 || mxBlockB < 0)
@@ -1162,8 +1652,38 @@ int main(int argc, char* argv[])
         return 1;
     }
 
+    // Bias gradient: the reference reduces one batch only (ReductionCPU), and has no
+    // reduction of FP4 A or B.
+    ContractionProblemGemm::TENSOR biasSrc = ContractionProblemGemm::D;
+    if(biasSrcStr == "a")
+        biasSrc = ContractionProblemGemm::A;
+    else if(biasSrcStr == "b")
+        biasSrc = ContractionProblemGemm::B;
+    else if(biasSrcStr != "d")
+    {
+        std::cerr << "Unknown biasSrc: " << biasSrcStr << " (d, a or b)" << std::endl;
+        return 1;
+    }
+    if(biasSrc != ContractionProblemGemm::D && !(gradient && useBias))
+    {
+        std::cerr << "Error: --biasSrc needs --gradient and --bias" << std::endl;
+        return 1;
+    }
+    if(gradient && useBias && batchCount > 1)
+    {
+        std::cerr << "Error: --gradient with --bias needs --batchCount 1 (the reference"
+                  << " reduces the bias gradient of one batch only)" << std::endl;
+        return 1;
+    }
+    if(biasSrc != ContractionProblemGemm::D && typeAStr == "f4")
+    {
+        std::cerr << "Error: --biasSrc a/b is not supported for f4 inputs" << std::endl;
+        return 1;
+    }
+
     std::cout << "Running GEMM with: M=" << m << " N=" << n << " K=" << k
               << " TypeA=" << typeAStr << " TypeB=" << typeBStr
+              << " TypeCD=" << typeCDStr << " TypeAlpha=" << typeAlphaStr
               << " ComputeInA=" << computeInputAStr << " ComputeInB=" << computeInputBStr
               << " FastPath=" << tryFastPath;
     if(isTF32)
@@ -1180,10 +1700,63 @@ int main(int argc, char* argv[])
     resolveAccumStorage(typeAStr);
     resolveAccumStorage(typeBStr);
 
+    auto runTyped = [&](auto aTag, auto bTag, auto accTag, auto outTag) -> int {
+        return runGemm<decltype(aTag), decltype(bTag), decltype(accTag), decltype(outTag)>(
+            m, n, k, transA, transB, alpha, beta,
+            validate, injectValidationFailure, tryFastPath,
+            useBias, activation, useScaleAlphaVec, useScaleAB, factorDim,
+            computeInputA, computeInputB, mxBlockA, mxBlockB, batchCount, isTF32,
+            outputAmaxD, int8Min, int8Max, conjA, conjB, useE, gradient, biasSrc);
+    };
+
+    // Float8/BFloat8 C/D with float alpha/beta: the reference's Float8-output type ids.
+    // A and B are 8-bit floats of one family, with a Float8 or BFloat8 C/D of that
+    // family; or Float8 x Half in either order, with a C/D of the Float8 operand's type.
+    // The compute-input types must match one of those type ids, too (e.g. f8 x f16
+    // with --computeInputA f16 or --computeInputB f8), or the reference rejects them.
+    auto runFloat8Output = [&](auto aTag, auto bTag) -> int {
+        using AT                       = decltype(aTag);
+        using BT                       = decltype(bTag);
+        constexpr Float8Family familyA = float8Family<AT>();
+        constexpr Float8Family familyB = float8Family<BT>();
+        constexpr bool aIsFloat8 = std::is_same_v<AT, Float8> || std::is_same_v<AT, Float8_fnuz>;
+        constexpr bool bIsFloat8 = std::is_same_v<BT, Float8> || std::is_same_v<BT, Float8_fnuz>;
+        if constexpr(familyA != Float8Family::None && familyA == familyB)
+        {
+            constexpr bool isOCP = (familyA == Float8Family::OCP);
+            using F8T            = std::conditional_t<isOCP, Float8, Float8_fnuz>;
+            using BF8T           = std::conditional_t<isOCP, BFloat8, BFloat8_fnuz>;
+            if(typeCD == TypeInfo<F8T>::Enum)
+                return runTyped(AT{}, BT{}, float{}, F8T{});
+            if(typeCD == TypeInfo<BF8T>::Enum)
+                return runTyped(AT{}, BT{}, float{}, BF8T{});
+        }
+        else if constexpr(aIsFloat8 && std::is_same_v<BT, Half>)
+        {
+            if(typeCD == TypeInfo<AT>::Enum)
+                return runTyped(AT{}, BT{}, float{}, AT{});
+        }
+        else if constexpr(std::is_same_v<AT, Half> && bIsFloat8)
+        {
+            if(typeCD == TypeInfo<BT>::Enum)
+                return runTyped(AT{}, BT{}, float{}, BT{});
+        }
+        std::cerr << "Error: unsupported --typeCD " << typeCDStr << " for typeA=" << typeAStr
+                  << " typeB=" << typeBStr
+                  << " (supported: 8-bit float A and B of one family with that family's f8 or"
+                  << " bf8 C/D, or f8 x f16 / f8fnuz x f16 in either order with an f8 / f8fnuz"
+                  << " C/D)" << std::endl;
+        return 1;
+    };
+
     auto dispatchB = [&](auto aTag) -> int {
         using AT = decltype(aTag);
         auto callB = [&](auto bTag) -> int {
             using BT = decltype(bTag);
+            constexpr bool isAInt8 = std::is_same_v<AT, int8_t>;
+            constexpr bool isBInt8 = std::is_same_v<BT, int8_t>;
+            constexpr bool isAComplex = isComplexV<AT>;
+            constexpr bool isBComplex = isComplexV<BT>;
 #ifndef _WIN32
             constexpr bool isMixedFP4 = std::is_same_v<AT, Float4x2>
                                         != std::is_same_v<BT, Float4x2>;
@@ -1195,16 +1768,54 @@ int main(int argc, char* argv[])
             }
             else
 #endif
+            if constexpr(isAInt8 != isBInt8)
             {
+                std::cerr << "Error: mixed i8 / non-i8 input is not supported." << std::endl;
+                return 1;
+            }
+            else if constexpr(isAComplex || isBComplex)
+            {
+                // C_C_C / Z_Z_Z: the complex type for every tensor and alpha/beta.
+                if constexpr(std::is_same_v<AT, BT>)
+                {
+                    return runTyped(AT{}, BT{}, AT{}, AT{});
+                }
+                else
+                {
+                    std::cerr << "Error: complex inputs need the same complex type for A and B."
+                              << std::endl;
+                    return 1;
+                }
+            }
+            else if constexpr(isAInt8)
+            {
+                // C/D type x alpha/beta type: the reference's TypedGemm_I8_* ids.
+                if(typeCDStr == "i8" && typeAlphaStr == "i32")
+                    return runTyped(AT{}, BT{}, int32_t{}, int8_t{}); // I8_I8_I32
+                if(typeCDStr == "i32" && typeAlphaStr == "i32")
+                    return runTyped(AT{}, BT{}, int32_t{}, int32_t{}); // I8_I32_I32
+                if(typeCDStr == "i32" && typeAlphaStr == "f32")
+                    return runTyped(AT{}, BT{}, float{}, int32_t{}); // I8_I32_S
+                if(typeCDStr == "i8" && typeAlphaStr == "f32")
+                    return runTyped(AT{}, BT{}, float{}, int8_t{}); // I8_I8_S
+                if(typeCDStr == "f16" && typeAlphaStr == "f32")
+                    return runTyped(AT{}, BT{}, float{}, Half{}); // I8_H_S
+                if(typeCDStr == "bf16" && typeAlphaStr == "f32")
+                    return runTyped(AT{}, BT{}, float{}, BFloat16{}); // I8_B_S
+                std::cerr << "Error: unsupported i8 type combination --typeCD " << typeCDStr
+                          << " --typeAlpha " << typeAlphaStr
+                          << " (supported: i8/i32, i32/i32, i32/f32, i8/f32, f16/f32, bf16/f32)"
+                          << std::endl;
+                return 1;
+            }
+            else
+            {
+                if(isFloat8CD)
+                    return runFloat8Output(AT{}, BT{});
                 // Promote AccumulateT to double when both A and B storage are double (f64).
                 using AccT = std::conditional_t<
                     std::is_same_v<AT, double> && std::is_same_v<BT, double>, double, float>;
-                return runGemm<AT, BT, AccT>(
-                    m, n, k, transA, transB, alpha, beta,
-                    validate, injectValidationFailure, tryFastPath,
-                    useBias, activation, useScaleAlphaVec, useScaleAB, factorDim,
-                    computeInputA, computeInputB, mxBlockA, mxBlockB, batchCount, isTF32,
-                    outputAmaxD);
+                return runTyped(AT{}, BT{}, AccT{}, AccT{});
             }
         };
         if(typeBStr == "f32")        return callB(float{});
@@ -1215,6 +1826,9 @@ int main(int argc, char* argv[])
         if(typeBStr == "bf8")        return callB(BFloat8{});
         if(typeBStr == "f8fnuz")     return callB(Float8_fnuz{});
         if(typeBStr == "bf8fnuz")    return callB(BFloat8_fnuz{});
+        if(typeBStr == "i8")         return callB(int8_t{});
+        if(typeBStr == "c")          return callB(std::complex<float>{});
+        if(typeBStr == "z")          return callB(std::complex<double>{});
 #ifndef _WIN32
         if(typeBStr == "f4")         return callB(Float4x2{});
 #endif
@@ -1232,6 +1846,9 @@ int main(int argc, char* argv[])
         if(typeAStr == "bf8")        return dispatchB(BFloat8{});
         if(typeAStr == "f8fnuz")     return dispatchB(Float8_fnuz{});
         if(typeAStr == "bf8fnuz")    return dispatchB(BFloat8_fnuz{});
+        if(typeAStr == "i8")         return dispatchB(int8_t{});
+        if(typeAStr == "c")          return dispatchB(std::complex<float>{});
+        if(typeAStr == "z")          return dispatchB(std::complex<double>{});
 #ifndef _WIN32
         if(typeAStr == "f4")         return dispatchB(Float4x2{});
 #endif
@@ -1240,7 +1857,10 @@ int main(int argc, char* argv[])
     }
     catch(const std::exception& e)
     {
-        std::cerr << "Runtime Error: " << e.what() << std::endl;
+        std::cerr << "Runtime Error: " << e.what() << " [typeA=" << typeAStr
+                  << ", typeB=" << typeBStr << ", computeInputA=" << computeInputAStr
+                  << ", computeInputB=" << computeInputBStr << ", typeCD=" << typeCDStr
+                  << ", typeAlpha=" << typeAlphaStr << "]" << std::endl;
         return 1;
     }
 

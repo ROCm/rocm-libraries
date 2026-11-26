@@ -90,6 +90,12 @@ sections. The first line is `# <LANE> (round <N>, <$HEAD_SHORT>)`. Sections, in 
 
    `ROCK-f1` writes `Timing: <entry> <family> <exposure> base <s>s delta <s>s (<source>) bound <s>s/<N> shards limit <s>s`. The
    formats are defined in [lanes/therock.md](lanes/therock.md).
+
+   `TIER` and `TIER-f1` write one `Tier: <path or suite> <n> cases [(<arch>=<n> ...)] [rows +<added> -<removed>] [work: <note>] [lanes <list>] class <basic|not basic|n/a> declared <tier|none> effective <tier> cost <s>s (<source>) recommend <tier|keep>`
+   line per test group (an unmeasured cost is `UNMEASURED (static [INFERENCE])`), and one `split: missing <YAML> binaries <list>`,
+   `split: present <YAML>`, `split: n/a <YAML> (<reason>)` or `split: exempt <YAML>` line per YAML the split check reads; `TIER-f1` adds
+   `Tier-total: <tier> added <s>s baseline <s>s budget <s>s` for `quick` and `standard`. The formats are
+   defined in [lanes/test-tiers.md](lanes/test-tiers.md).
 4. **Handoffs:** `<target lane>: <one line>` for issues outside the brief.
 5. **Approval requests:** command, architecture, test selection, expected duration and
    where it runs, for anything needing a GPU, remote compute or another approval.

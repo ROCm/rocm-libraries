@@ -215,6 +215,9 @@ add_library(
     engines/plans/MiopenConvPlanBuilder.cpp
     engines/plans/MiopenConvWrwPlan.cpp
     engines/plans/MiopenPointwiseTensorChecks.cpp
+    engines/plans/MiopenReductionChecks.cpp
+    engines/plans/MiopenReductionPlan.cpp
+    engines/plans/MiopenReductionPlanBuilder.cpp
     engines/plans/MiopenUnaryActivationChecks.cpp
     engines/plans/MiopenUnaryActivationPlan.cpp
     engines/plans/MiopenUnaryActivationPlanBuilder.cpp
@@ -223,6 +226,7 @@ add_library(
     MiopenContainer.cpp
     MiopenConvDescriptor.cpp
     MiopenPluginPublic.cpp
+    MiopenReduceTensorDescriptor.cpp
     MiopenTensor.cpp
     MiopenUtils.cpp
 )
@@ -392,10 +396,11 @@ if(NOT MIOPENPROVIDER_SKIP_TESTS)
             $<TARGET_PROPERTY:miopen_plugin_impl,INTERFACE_COMPILE_DEFINITIONS>)
         target_link_libraries(miopen_plugin_public_stand_in PRIVATE
             MIOpen hipdnn_data_sdk hipdnn_flatbuffers_sdk hipdnn_plugin_sdk)
-        # --as-needed drops libraries nothing needs. libMIOpen_private.so stays, because the
-        # stand-in calls the three *GetWorkSpaceSizeRange functions that only it exports, so
-        # check-plugin rejects the stand-in for linking the public library and for needing
-        # public entry points, not for missing the private one.
+        # --as-needed drops libraries nothing needs. The stand-in calls only public entry
+        # points, and libMIOpen.so exports all of them, including the three
+        # *GetWorkSpaceSizeRange functions, so it ends up with no libMIOpen_private.so
+        # dependency. check-plugin rejects it for linking the public library, for needing
+        # public entry points and for lacking the private library.
         target_link_options(miopen_plugin_public_stand_in PRIVATE -Wl,--as-needed)
         target_compile_options(miopen_plugin_public_stand_in PRIVATE
             --system-header-prefix=miopen/ ${MIOPENPROVIDER_WARNING_COMPILE_OPTIONS})

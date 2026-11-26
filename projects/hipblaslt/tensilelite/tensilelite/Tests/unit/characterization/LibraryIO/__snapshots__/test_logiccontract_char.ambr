@@ -76,6 +76,7 @@
       'MIArchVgpr': False,
       'MXLoadInst': 'Auto',
       'MXScaleFormat': 'Auto',
+      'MXScaleVgprInterleaveExtraVgpr': False,
       'MagicDivAlg': 2,
       'MatrixInstruction': list([
       ]),
@@ -141,6 +142,7 @@
       'StaggerUMapping': 0,
       'StaggerUStride': 256,
       'StinkyTofuRegisterAllocation': 0,
+      'StoreCachelineAlign': True,
       'StorePriorityOpt': False,
       'StoreRemapVectorWidth': 0,
       'StoreSyncOpt': 0,
@@ -190,6 +192,7 @@
       'WaveSeparateGlobalReadB': 0,
       'WaveSeparateGlobalReadMetadata': 0,
       'WaveSplitK': False,
+      'WaveTileContiguousA': False,
       'WavefrontSize': -1,
       'WorkAssignment': 'StaticGrid',
       'WorkGroup': list([
@@ -336,6 +339,7 @@
       'MIArchVgpr': False,
       'MXLoadInst': 'Auto',
       'MXScaleFormat': 'Auto',
+      'MXScaleVgprInterleaveExtraVgpr': False,
       'MagicDivAlg': 2,
       'MatrixInstruction': list([
       ]),
@@ -401,6 +405,7 @@
       'StaggerUMapping': 0,
       'StaggerUStride': 256,
       'StinkyTofuRegisterAllocation': 0,
+      'StoreCachelineAlign': True,
       'StorePriorityOpt': False,
       'StoreRemapVectorWidth': 0,
       'StoreSyncOpt': 0,
@@ -450,6 +455,7 @@
       'WaveSeparateGlobalReadB': 0,
       'WaveSeparateGlobalReadMetadata': 0,
       'WaveSplitK': False,
+      'WaveTileContiguousA': False,
       'WavefrontSize': -1,
       'WorkAssignment': 'StaticGrid',
       'WorkGroup': list([
@@ -584,6 +590,7 @@
       'MIArchVgpr': False,
       'MXLoadInst': 'Auto',
       'MXScaleFormat': 'Auto',
+      'MXScaleVgprInterleaveExtraVgpr': False,
       'MagicDivAlg': 2,
       'MatrixInstruction': list([
       ]),
@@ -649,6 +656,7 @@
       'StaggerUMapping': 0,
       'StaggerUStride': 256,
       'StinkyTofuRegisterAllocation': 0,
+      'StoreCachelineAlign': True,
       'StorePriorityOpt': False,
       'StoreRemapVectorWidth': 0,
       'StoreSyncOpt': 0,
@@ -698,6 +706,7 @@
       'WaveSeparateGlobalReadB': 0,
       'WaveSeparateGlobalReadMetadata': 0,
       'WaveSplitK': False,
+      'WaveTileContiguousA': False,
       'WavefrontSize': -1,
       'WorkAssignment': 'StaticGrid',
       'WorkGroup': list([
@@ -847,6 +856,7 @@
       'MIArchVgpr': False,
       'MXLoadInst': 'Auto',
       'MXScaleFormat': 'Auto',
+      'MXScaleVgprInterleaveExtraVgpr': False,
       'MagicDivAlg': 2,
       'MatrixInstruction': list([
       ]),
@@ -912,6 +922,7 @@
       'StaggerUMapping': 0,
       'StaggerUStride': 256,
       'StinkyTofuRegisterAllocation': 0,
+      'StoreCachelineAlign': True,
       'StorePriorityOpt': False,
       'StoreRemapVectorWidth': 0,
       'StoreSyncOpt': 0,
@@ -961,6 +972,7 @@
       'WaveSeparateGlobalReadB': 0,
       'WaveSeparateGlobalReadMetadata': 0,
       'WaveSplitK': False,
+      'WaveTileContiguousA': False,
       'WavefrontSize': -1,
       'WorkAssignment': 'StaticGrid',
       'WorkGroup': list([
@@ -1127,6 +1139,7 @@
       'MIArchVgpr': False,
       'MXLoadInst': 'Auto',
       'MXScaleFormat': 'Auto',
+      'MXScaleVgprInterleaveExtraVgpr': False,
       'MagicDivAlg': 2,
       'MatrixInstruction': list([
       ]),
@@ -1192,6 +1205,7 @@
       'StaggerUMapping': 0,
       'StaggerUStride': 256,
       'StinkyTofuRegisterAllocation': 0,
+      'StoreCachelineAlign': True,
       'StorePriorityOpt': False,
       'StoreRemapVectorWidth': 0,
       'StoreSyncOpt': 0,
@@ -1241,6 +1255,7 @@
       'WaveSeparateGlobalReadB': 0,
       'WaveSeparateGlobalReadMetadata': 0,
       'WaveSplitK': False,
+      'WaveTileContiguousA': False,
       'WavefrontSize': -1,
       'WorkAssignment': 'StaticGrid',
       'WorkGroup': list([
@@ -1387,6 +1402,7 @@
       'MIArchVgpr': False,
       'MXLoadInst': 'Auto',
       'MXScaleFormat': 'Auto',
+      'MXScaleVgprInterleaveExtraVgpr': False,
       'MagicDivAlg': 2,
       'MatrixInstruction': list([
       ]),
@@ -1452,6 +1468,7 @@
       'StaggerUMapping': 0,
       'StaggerUStride': 256,
       'StinkyTofuRegisterAllocation': 0,
+      'StoreCachelineAlign': True,
       'StorePriorityOpt': False,
       'StoreRemapVectorWidth': 0,
       'StoreSyncOpt': 0,
@@ -1501,6 +1518,7 @@
       'WaveSeparateGlobalReadB': 0,
       'WaveSeparateGlobalReadMetadata': 0,
       'WaveSplitK': False,
+      'WaveTileContiguousA': False,
       'WavefrontSize': -1,
       'WorkAssignment': 'StaticGrid',
       'WorkGroup': list([
@@ -1661,6 +1679,7 @@
       'MIArchVgpr': False,
       'MXLoadInst': 'Auto',
       'MXScaleFormat': 'Auto',
+      'MXScaleVgprInterleaveExtraVgpr': False,
       'MagicDivAlg': 2,
       'MatrixInstruction': list([
       ]),
@@ -1726,6 +1745,7 @@
       'StaggerUMapping': 0,
       'StaggerUStride': 256,
       'StinkyTofuRegisterAllocation': 0,
+      'StoreCachelineAlign': True,
       'StorePriorityOpt': False,
       'StoreRemapVectorWidth': 0,
       'StoreSyncOpt': 0,
@@ -1775,6 +1795,7 @@
       'WaveSeparateGlobalReadB': 0,
       'WaveSeparateGlobalReadMetadata': 0,
       'WaveSplitK': False,
+      'WaveTileContiguousA': False,
       'WavefrontSize': -1,
       'WorkAssignment': 'StaticGrid',
       'WorkGroup': list([
@@ -1924,6 +1945,7 @@
       'MIArchVgpr': False,
       'MXLoadInst': 'Auto',
       'MXScaleFormat': 'Auto',
+      'MXScaleVgprInterleaveExtraVgpr': False,
       'MagicDivAlg': 2,
       'MatrixInstruction': list([
       ]),
@@ -1989,6 +2011,7 @@
       'StaggerUMapping': 0,
       'StaggerUStride': 256,
       'StinkyTofuRegisterAllocation': 0,
+      'StoreCachelineAlign': True,
       'StorePriorityOpt': False,
       'StoreRemapVectorWidth': 0,
       'StoreSyncOpt': 0,
@@ -2038,6 +2061,7 @@
       'WaveSeparateGlobalReadB': 0,
       'WaveSeparateGlobalReadMetadata': 0,
       'WaveSplitK': False,
+      'WaveTileContiguousA': False,
       'WavefrontSize': -1,
       'WorkAssignment': 'StaticGrid',
       'WorkGroup': list([
@@ -2187,6 +2211,7 @@
       'MIArchVgpr': False,
       'MXLoadInst': 'Auto',
       'MXScaleFormat': 'Auto',
+      'MXScaleVgprInterleaveExtraVgpr': False,
       'MagicDivAlg': 2,
       'MatrixInstruction': list([
       ]),
@@ -2252,6 +2277,7 @@
       'StaggerUMapping': 0,
       'StaggerUStride': 256,
       'StinkyTofuRegisterAllocation': 0,
+      'StoreCachelineAlign': True,
       'StorePriorityOpt': False,
       'StoreRemapVectorWidth': 0,
       'StoreSyncOpt': 0,
@@ -2301,6 +2327,7 @@
       'WaveSeparateGlobalReadB': 0,
       'WaveSeparateGlobalReadMetadata': 0,
       'WaveSplitK': False,
+      'WaveTileContiguousA': False,
       'WavefrontSize': -1,
       'WorkAssignment': 'StaticGrid',
       'WorkGroup': list([
@@ -2438,6 +2465,7 @@
       'MIArchVgpr': False,
       'MXLoadInst': 'Auto',
       'MXScaleFormat': 'Auto',
+      'MXScaleVgprInterleaveExtraVgpr': False,
       'MagicDivAlg': 2,
       'MatrixInstruction': list([
       ]),
@@ -2503,6 +2531,7 @@
       'StaggerUMapping': 0,
       'StaggerUStride': 256,
       'StinkyTofuRegisterAllocation': 0,
+      'StoreCachelineAlign': True,
       'StorePriorityOpt': False,
       'StoreRemapVectorWidth': 0,
       'StoreSyncOpt': 0,
@@ -2552,6 +2581,7 @@
       'WaveSeparateGlobalReadB': 0,
       'WaveSeparateGlobalReadMetadata': 0,
       'WaveSplitK': False,
+      'WaveTileContiguousA': False,
       'WavefrontSize': -1,
       'WorkAssignment': 'StaticGrid',
       'WorkGroup': list([
@@ -2701,6 +2731,7 @@
       'MIArchVgpr': False,
       'MXLoadInst': 'Auto',
       'MXScaleFormat': 'Auto',
+      'MXScaleVgprInterleaveExtraVgpr': False,
       'MagicDivAlg': 2,
       'MatrixInstruction': list([
       ]),
@@ -2766,6 +2797,7 @@
       'StaggerUMapping': 0,
       'StaggerUStride': 256,
       'StinkyTofuRegisterAllocation': 0,
+      'StoreCachelineAlign': True,
       'StorePriorityOpt': False,
       'StoreRemapVectorWidth': 0,
       'StoreSyncOpt': 0,
@@ -2815,6 +2847,7 @@
       'WaveSeparateGlobalReadB': 0,
       'WaveSeparateGlobalReadMetadata': 0,
       'WaveSplitK': False,
+      'WaveTileContiguousA': False,
       'WavefrontSize': -1,
       'WorkAssignment': 'StaticGrid',
       'WorkGroup': list([
@@ -2963,6 +2996,7 @@
       'MIArchVgpr': False,
       'MXLoadInst': 'Auto',
       'MXScaleFormat': 'Auto',
+      'MXScaleVgprInterleaveExtraVgpr': False,
       'MagicDivAlg': 2,
       'MatrixInstruction': list([
       ]),
@@ -3028,6 +3062,7 @@
       'StaggerUMapping': 0,
       'StaggerUStride': 256,
       'StinkyTofuRegisterAllocation': 0,
+      'StoreCachelineAlign': True,
       'StorePriorityOpt': False,
       'StoreRemapVectorWidth': 0,
       'StoreSyncOpt': 0,
@@ -3077,6 +3112,7 @@
       'WaveSeparateGlobalReadB': 0,
       'WaveSeparateGlobalReadMetadata': 0,
       'WaveSplitK': False,
+      'WaveTileContiguousA': False,
       'WavefrontSize': -1,
       'WorkAssignment': 'StaticGrid',
       'WorkGroup': list([

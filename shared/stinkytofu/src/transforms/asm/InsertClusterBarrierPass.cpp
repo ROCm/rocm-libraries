@@ -24,8 +24,10 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <cstdlib>
 #include <deque>
 #include <iostream>
+#include <limits>
 #include <optional>
 #include <random>
 #include <string>
@@ -77,9 +79,9 @@ constexpr const char* kTailLoopMarker = "Tail Loop";
 /// the range instead, which lands it closer than the configured Rule 3 signal
 /// lead rather than further away.
 constexpr int kRule3SignalMaxLeadCycles = 900;
-// ReduceClusterBarrierPerLoop normally coalesces nearby Rule 3 triggers in one
-// loop. A long fall-through unroll copy may need another handshake; measure
-// trigger-to-trigger distance with EstimateAsmCyclesPerInstructionAnalysis.
+// ReduceClusterBarrierPerLoop coalesces the Rule 3 triggers of one loop into one handshake per
+// this many estimated cycles of loop body (EstimateAsmCyclesPerInstructionAnalysis), and picks
+// which triggers get one by signal lead and spacing; see selectReducedHandshakeTriggers.
 constexpr uint32_t kReducedClusterBarrierIntervalCycles = 2000;
 
 /// Segment edges one handshake may climb across when its own segment is too
@@ -131,8 +133,11 @@ bool isWorkgroupBarrierSignal(const StinkyInstruction& inst) {
 }
 
 bool isClusterBarrierWait(const StinkyInstruction& inst) {
+    // Memory tokens select LDS dependencies; the physical barrier ID still
+    // identifies a cluster rendezvous. Explicit typed waits must remain hard
+    // stops and count toward cluster-token balance and idempotency.
     return isBarrierWithLiteralId(inst, /*wantSignal=*/false, kClusterBarrierId,
-                                  /*rejectMemToken=*/true);
+                                  /*rejectMemToken=*/false);
 }
 
 bool isClusterBarrierSignal(const StinkyInstruction& inst) {
@@ -491,18 +496,24 @@ bool isFollowedByClusterBarrierHandshakeOrSignal(StinkyInstruction* anchor) {
     return sym == kWaveIdxSymbol || sym == kLoopCounterLSymbol;
 }
 
-/// Forward scan from ``wgSignal`` for its paired ``s_barrier_wait -1`` and
-/// return the first real instruction after that wait.
-IRBase* anchorAfterWorkgroupBarrierPair(StinkyInstruction* wgSignal, IRBase* defaultAnchor) {
+/// Scan only within the hard stop's segment and before the wait being led.
+/// A later WG pair cannot anchor an earlier signal, and labels/branches/calls
+/// end the straight-line proof even though labels are pseudo instructions.
+IRBase* anchorAfterWorkgroupBarrierPair(StinkyInstruction* wgSignal, IRBase* defaultAnchor,
+                                        const IRBase* limit) {
     BasicBlock* parent = wgSignal->getParent();
     if (parent == nullptr) return defaultAnchor;
     for (auto it = std::next(BasicBlock::iterator(wgSignal)); it != parent->end(); ++it) {
+        if (it.getNodePtr() == limit) break;
         auto* inst = dyn_cast<StinkyInstruction>(it.getNodePtr());
+        if (inst != nullptr && isSegmentBoundary(*inst)) break;
         if (inst == nullptr || isPseudoInst(inst)) continue;
         if (isWorkgroupBarrierSignal(*inst)) break;
         if (!isWorkgroupBarrierWait(*inst)) continue;
         for (auto after = std::next(it); after != parent->end(); ++after) {
+            if (after.getNodePtr() == limit) break;
             auto* next = dyn_cast<StinkyInstruction>(after.getNodePtr());
+            if (next != nullptr && isSegmentBoundary(*next)) break;
             if (next == nullptr || isPseudoInst(next)) continue;
             return next;
         }
@@ -511,17 +522,19 @@ IRBase* anchorAfterWorkgroupBarrierPair(StinkyInstruction* wgSignal, IRBase* def
     return defaultAnchor;
 }
 
-/// Forward scan from ``afterWait`` for the next workgroup barrier handshake
-/// (signal then wait).  Returns the first real instruction after that wait, or
-/// ``defaultAnchor`` when the pair is missing or incomplete.
-IRBase* anchorAfterWorkgroupBarrierFollowing(StinkyInstruction* afterWait, IRBase* defaultAnchor) {
+/// Find a complete earlier WG pair after the previous cluster wait. Missing or
+/// out-of-bounds pairs leave the signal co-located with its own wait.
+IRBase* anchorAfterWorkgroupBarrierFollowing(StinkyInstruction* afterWait, IRBase* defaultAnchor,
+                                             const IRBase* limit) {
     BasicBlock* parent = afterWait->getParent();
     if (parent == nullptr) return defaultAnchor;
     for (auto it = std::next(BasicBlock::iterator(afterWait)); it != parent->end(); ++it) {
+        if (it.getNodePtr() == limit) break;
         auto* inst = dyn_cast<StinkyInstruction>(it.getNodePtr());
+        if (inst != nullptr && isSegmentBoundary(*inst)) break;
         if (inst == nullptr || isPseudoInst(inst)) continue;
         if (!isWorkgroupBarrierSignal(*inst)) continue;
-        return anchorAfterWorkgroupBarrierPair(inst, defaultAnchor);
+        return anchorAfterWorkgroupBarrierPair(inst, defaultAnchor, limit);
     }
     return defaultAnchor;
 }
@@ -894,9 +907,9 @@ Rule3SignalAnchor findRule3SignalAnchorByCycleLead(
     // which is where the group is gathered again.
     auto hardStopAnchor = [&](StinkyInstruction* inst) -> IRBase* {
         if (isClusterBarrierWait(*inst))
-            return anchorAfterWorkgroupBarrierFollowing(inst, defaultAnchor);
+            return anchorAfterWorkgroupBarrierFollowing(inst, defaultAnchor, sccLimit(inst));
         if (isWorkgroupBarrierSignal(*inst) && priorWaitAnchors.count(inst) != 0)
-            return anchorAfterWorkgroupBarrierPair(inst, defaultAnchor);
+            return anchorAfterWorkgroupBarrierPair(inst, defaultAnchor, sccLimit(inst));
         return nullptr;
     };
 
@@ -1736,6 +1749,128 @@ void splitLoopBodyByWave(StinkyInstruction* loopHead, BasicBlock& bb, GfxArchID 
     }
 }
 
+using CycleMap = std::unordered_map<const StinkyInstruction*, uint32_t>;
+
+/// One Rule 3 trigger that ReduceClusterBarrierPerLoop may or may not give a handshake to.
+/// Which ones do is decided after the whole block has been scanned, not by arrival order.
+struct ReduceCandidate {
+    StinkyInstruction* trigger = nullptr;
+    StinkyInstruction* head = nullptr;
+    BasicBlock::iterator segBegin;
+    /// Where the cluster wait would land, hoisted over the counter drains parked on the trigger.
+    IRBase* waitAnchor = nullptr;
+    StinkyInstruction* waitAnchorInst = nullptr;
+    bool alreadyHasWait = false;
+    std::optional<uint32_t> cycle;
+    /// min(signal lead the climb reaches, the configured Rule 3 lead), in estimated cycles.
+    int64_t lead = 0;
+};
+
+/// Estimated cycles of one trip through the loop that \p head opens, from the first timed
+/// instruction after the head to the last one up to its latch branch.
+std::optional<uint32_t> estimateLoopBodyCycles(StinkyInstruction* head, const CycleMap& cycleMap) {
+    StinkyInstruction* latch = findLatchBranchFor(head);
+    BasicBlock* parent = head->getParent();
+    if (latch == nullptr || parent == nullptr) return std::nullopt;
+    std::optional<uint32_t> first;
+    std::optional<uint32_t> last;
+    for (auto it = std::next(BasicBlock::iterator(head)); it != parent->end(); ++it) {
+        auto* inst = dyn_cast<StinkyInstruction>(it.getNodePtr());
+        if (inst == nullptr) continue;
+        const auto cycleIt = cycleMap.find(inst);
+        if (cycleIt != cycleMap.end()) {
+            if (!first) first = cycleIt->second;
+            last = cycleIt->second;
+        }
+        if (inst == latch) break;
+    }
+    if (!first || !last || *last < *first) return std::nullopt;
+    return *last - *first;
+}
+
+/// How far ahead of its wait the Rule 3 signal for \p cand can go, capped at \p leadCycles.
+/// This is the same climb the real placement runs, so a signal pinned near a loop head or in
+/// front of a tensor-counter drain reports the short distance it would actually get. No other
+/// handshake is assumed to exist: whichever ones get chosen are not known yet.
+int64_t measureReducedHandshakeLead(const ReduceCandidate& cand, const CycleMap& cycleMap,
+                                    int leadCycles, int maxHops) {
+    if (leadCycles <= 0) return 0;
+    static const std::unordered_set<StinkyInstruction*> kNoPriorWaits;
+    const Rule3SignalAnchor found = findRule3SignalAnchorByCycleLead(
+        cand.waitAnchorInst, cand.segBegin, cand.waitAnchor, cycleMap, leadCycles,
+        kRule3SignalMaxLeadCycles, kNoPriorWaits, maxHops, cand.head);
+    // A hop is only taken when the segment alone cannot hold the lead, and it lands
+    // with the lead met.
+    if (found.hops > 0) return leadCycles;
+    if (found.anchor == cand.waitAnchor) return 0;
+    auto* anchorInst = dyn_cast<StinkyInstruction>(found.anchor);
+    const auto waitCycle = cycleMap.find(cand.waitAnchorInst);
+    if (anchorInst == nullptr || waitCycle == cycleMap.end()) return 0;
+    for (auto it = BasicBlock::iterator(anchorInst);
+         it != BasicBlock::iterator(cand.waitAnchorInst); ++it) {
+        auto* inst = dyn_cast<StinkyInstruction>(it.getNodePtr());
+        if (inst == nullptr) continue;
+        const auto cycleIt = cycleMap.find(inst);
+        if (cycleIt == cycleMap.end()) continue;
+        const int64_t lead =
+            static_cast<int64_t>(waitCycle->second) - static_cast<int64_t>(cycleIt->second);
+        return std::clamp<int64_t>(lead, 0, leadCycles);
+    }
+    return 0;
+}
+
+/// Chooses which of one loop's triggers take a cluster handshake, in the order chosen.
+///
+/// The count is max(1, ceil(period / interval)): one handshake per \p interval cycles of loop
+/// body, wrap-around included. The first pick is the trigger with the largest lead, the
+/// earliest one on a tie. Each later pick takes, among the largest lead still unpicked, the
+/// trigger whose distance to the nearest earlier pick is closest to \p interval. The distance is
+/// measured around the loop (the shorter way), since the body repeats.
+std::vector<size_t> selectReducedHandshakeTriggers(
+    const std::vector<int64_t>& leads, const std::vector<std::optional<uint32_t>>& cycles,
+    std::optional<uint32_t> period, uint32_t interval) {
+    const size_t count = leads.size();
+    size_t target = 1;
+    if (period && *period > 0) target = std::max<size_t>(1, (*period + interval - 1) / interval);
+    target = std::min(target, count);
+
+    std::vector<size_t> picked;
+    std::vector<bool> taken(count, false);
+    constexpr int64_t kUnknown = std::numeric_limits<int64_t>::max();
+    while (picked.size() < target) {
+        int64_t bestLead = std::numeric_limits<int64_t>::min();
+        for (size_t i = 0; i < count; ++i)
+            if (!taken[i]) bestLead = std::max(bestLead, leads[i]);
+
+        size_t best = count;
+        int64_t bestKey = kUnknown;
+        for (size_t i = 0; i < count; ++i) {
+            if (taken[i] || leads[i] != bestLead) continue;
+            int64_t key = 0;  // the first pick has nothing to be spaced from: earliest wins
+            if (!picked.empty()) {
+                int64_t nearest = kUnknown;
+                for (size_t p : picked) {
+                    if (!cycles[i] || !cycles[p]) continue;
+                    int64_t d = std::llabs(static_cast<int64_t>(*cycles[i]) -
+                                           static_cast<int64_t>(*cycles[p]));
+                    if (period && static_cast<int64_t>(*period) >= d)
+                        d = std::min<int64_t>(d, static_cast<int64_t>(*period) - d);
+                    nearest = std::min(nearest, d);
+                }
+                key = nearest == kUnknown ? kUnknown
+                                          : std::llabs(nearest - static_cast<int64_t>(interval));
+            }
+            if (best == count || key < bestKey) {
+                best = i;
+                bestKey = key;
+            }
+        }
+        taken[best] = true;
+        picked.push_back(best);
+    }
+    return picked;
+}
+
 class InsertClusterBarrierPassImpl : public Pass {
    public:
     static char ID;
@@ -1838,17 +1973,13 @@ class InsertClusterBarrierPassImpl : public Pass {
             };
             std::vector<TriggerSite> triggers;
             std::unordered_set<StinkyInstruction*> seenTriggers;
-            // reduceClusterBarrierPerLoop_: the first Rule 3 trigger of each
-            // enclosing loop handshakes. A later trigger may handshake again
-            // after kReducedClusterBarrierIntervalCycles estimated cycles from
-            // the last accepted trigger. Existing waits also establish the
-            // baseline, which keeps a second pass idempotent.
-            struct ReducedLoopHandshakeState {
-                bool claimed = false;
-                std::optional<uint32_t> lastCycle;
-            };
-            std::unordered_map<StinkyInstruction*, ReducedLoopHandshakeState>
-                reducedLoopHandshakeState;
+            // reduceClusterBarrierPerLoop_: every trigger is only recorded during the scan.
+            // Once the block has been read, each loop takes
+            // ceil(loop cycles / kReducedClusterBarrierIntervalCycles) handshakes, on the
+            // triggers with the longest signal lead, spaced about one interval apart
+            // (selectReducedHandshakeTriggers). A loop that already holds a cluster wait is
+            // left as it is, which keeps a second pass idempotent.
+            std::vector<ReduceCandidate> reduceCandidates;
             // Anchors (instruction right after each cooperative tensor_load
             // group) for the producer-side drain; see
             // insertProducerTensorDrainBefore.
@@ -1878,40 +2009,19 @@ class InsertClusterBarrierPassImpl : public Pass {
 
                     bool emitHandshake = false;
                     if (reduceClusterBarrierPerLoop_) {
-                        ReducedLoopHandshakeState& state = reducedLoopHandshakeState[head];
-                        const auto cycleIt = cycleMap.find(trigger);
-                        const std::optional<uint32_t> triggerCycle =
-                            cycleIt != cycleMap.end() ? std::optional<uint32_t>(cycleIt->second)
-                                                      : std::nullopt;
-                        const bool alreadyHasWait =
-                            isImmediatelyPrecededByClusterBarrierWait(trigger);
-                        const bool intervalReached = state.lastCycle.has_value() &&
-                                                     triggerCycle.has_value() &&
-                                                     *triggerCycle >= *state.lastCycle &&
-                                                     *triggerCycle - *state.lastCycle >=
-                                                         kReducedClusterBarrierIntervalCycles;
-                        const auto previousCycle = state.lastCycle;
-
-                        if (alreadyHasWait) {
-                            // A pre-existing handshake is authoritative even if
-                            // the estimate or interval changed since it was
-                            // planted. Use it as the next spacing baseline.
-                            state.claimed = true;
-                            state.lastCycle = triggerCycle;
-                        } else if (!state.claimed || intervalReached) {
-                            emitHandshake = true;
-                            state.claimed = true;
-                            state.lastCycle = triggerCycle;
+                        ReduceCandidate cand;
+                        cand.trigger = trigger;
+                        cand.head = head;
+                        cand.segBegin = segBegin;
+                        cand.alreadyHasWait = isImmediatelyPrecededByClusterBarrierWait(trigger);
+                        if (const auto cycleIt = cycleMap.find(trigger); cycleIt != cycleMap.end())
+                            cand.cycle = cycleIt->second;
+                        if (!cand.alreadyHasWait) {
+                            cand.waitAnchor = hoistAboveLeadingWaitCnts(trigger);
+                            auto* hoistedInst = dyn_cast<StinkyInstruction>(cand.waitAnchor);
+                            cand.waitAnchorInst = hoistedInst != nullptr ? hoistedInst : trigger;
                         }
-                        PASS_DEBUG(std::cerr
-                                   << "[InsertClusterBarrier] reduce trigger=" << trigger
-                                   << " head=" << head << " cycle="
-                                   << (triggerCycle ? std::to_string(*triggerCycle) : "none")
-                                   << " previousCycle="
-                                   << (previousCycle ? std::to_string(*previousCycle) : "none")
-                                   << " alreadyHasWait=" << alreadyHasWait
-                                   << " intervalReached=" << intervalReached
-                                   << " emitHandshake=" << emitHandshake << "\n");
+                        reduceCandidates.push_back(cand);
                     } else if (isImmediatelyPrecededByClusterBarrierWait(trigger)) {
                         // A re-run skips a trigger that already has its wait, and
                         // skips the drain recording below with it.
@@ -1959,6 +2069,67 @@ class InsertClusterBarrierPassImpl : public Pass {
                                 (postIt != bb.end()) ? postIt.getNodePtr() : nullptr);
                         }
                     }
+                }
+            }
+
+            if (!reduceCandidates.empty()) {
+                const int reduceMaxHops = cluster_barrier::kRule3CrossLoop ? kMaxSegmentHops : 0;
+                std::vector<StinkyInstruction*> heads;
+                std::unordered_map<StinkyInstruction*, std::vector<size_t>> byHead;
+                for (size_t i = 0; i < reduceCandidates.size(); ++i) {
+                    auto& group = byHead[reduceCandidates[i].head];
+                    if (group.empty()) heads.push_back(reduceCandidates[i].head);
+                    group.push_back(i);
+                }
+
+                std::vector<bool> chosen(reduceCandidates.size(), false);
+                for (StinkyInstruction* head : heads) {
+                    const std::vector<size_t>& group = byHead[head];
+                    const bool hasExistingWait =
+                        std::any_of(group.begin(), group.end(),
+                                    [&](size_t i) { return reduceCandidates[i].alreadyHasWait; });
+                    if (hasExistingWait) {
+                        // A handshake already in the loop is authoritative: the estimate
+                        // moves once it is in, so counting again would add more every pass.
+                        PASS_DEBUG(std::cerr << "[InsertClusterBarrier] reduce head=" << head
+                                             << " keeps its existing handshake\n");
+                        continue;
+                    }
+
+                    std::vector<int64_t> leads;
+                    std::vector<std::optional<uint32_t>> cycles;
+                    for (size_t i : group) {
+                        ReduceCandidate& cand = reduceCandidates[i];
+                        cand.lead = measureReducedHandshakeLead(
+                            cand, cycleMap, rule3SignalLeadCycles_, reduceMaxHops);
+                        leads.push_back(cand.lead);
+                        cycles.push_back(cand.cycle);
+                    }
+                    const std::optional<uint32_t> period = estimateLoopBodyCycles(head, cycleMap);
+                    const std::vector<size_t> picks = selectReducedHandshakeTriggers(
+                        leads, cycles, period, kReducedClusterBarrierIntervalCycles);
+                    PASS_DEBUG(std::cerr << "[InsertClusterBarrier] reduce head=" << head
+                                         << " candidates=" << group.size() << " period="
+                                         << (period ? std::to_string(*period) : "none")
+                                         << " picks=" << picks.size() << "\n");
+                    for (size_t k = 0; k < group.size(); ++k) {
+                        PASS_DEBUG(std::cerr
+                                   << "[InsertClusterBarrier]   trigger="
+                                   << reduceCandidates[group[k]].trigger
+                                   << " cycle=" << (cycles[k] ? std::to_string(*cycles[k]) : "none")
+                                   << " lead=" << leads[k] << " picked="
+                                   << (std::find(picks.begin(), picks.end(), k) != picks.end())
+                                   << "\n");
+                    }
+                    for (size_t k : picks) chosen[group[k]] = true;
+                }
+
+                // Back in program order, as the inline decision used to leave them.
+                for (size_t i = 0; i < reduceCandidates.size(); ++i) {
+                    if (!chosen[i]) continue;
+                    const ReduceCandidate& cand = reduceCandidates[i];
+                    triggers.push_back(
+                        {cand.trigger, cand.segBegin, cand.waitAnchor, cand.waitAnchorInst});
                 }
             }
 

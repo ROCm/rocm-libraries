@@ -26,6 +26,10 @@
           "3_2_2_2_fp16_nhwc"
         ],
         "support": {
+          "gfx1151": [
+            "linux",
+            "windows"
+          ],
           "gfx1201": [
             "linux"
           ],
@@ -42,6 +46,10 @@
       },
       {
         "cases": [
+          "1_16_256_256_fp32_nchw_mean10000",
+          "1_16_65_65_fp32_nchw",
+          "1_16_65_65_fp32_nchw_mean10000",
+          "1_16_65_65_fp32_nhwc_mean10000",
           "1_3_14_14_bfp16_nchw",
           "1_3_14_14_bfp16_nhwc",
           "1_3_14_14_bfp16_upcast_nchw",
@@ -98,6 +106,9 @@
             "windows"
           ],
           "gfx1200": [
+            "linux"
+          ],
+          "gfx1201": [
             "linux"
           ],
           "gfx90a": [

@@ -127,6 +127,10 @@ namespace hiptensor
         {
             mGcnArch = hipGcnArch_t::GFX1250;
         }
+        else if(deviceName.find("gfx1251") != std::string::npos)
+        {
+            mGcnArch = hipGcnArch_t::GFX1251;
+        }
 
         switch(mProps.warpSize)
         {
@@ -168,7 +172,8 @@ namespace hiptensor
         return (mGcnArch == HipDevice::hipGcnArch_t::GFX90A
                 || mGcnArch == HipDevice::hipGcnArch_t::GFX942
                 || mGcnArch == HipDevice::hipGcnArch_t::GFX950
-                || mGcnArch == HipDevice::hipGcnArch_t::GFX1250);
+                || mGcnArch == HipDevice::hipGcnArch_t::GFX1250
+                || mGcnArch == HipDevice::hipGcnArch_t::GFX1251);
     }
 
     bool HipDevice::matrixCoreSupport(hiptensorComputeDescriptor_t typeCompute) const
@@ -179,14 +184,16 @@ namespace hiptensor
         case HIPTENSOR_COMPUTE_DESC_C64F:
             return (mGcnArch == HipDevice::hipGcnArch_t::GFX90A
                     || mGcnArch == HipDevice::hipGcnArch_t::GFX942
-                    || mGcnArch == HipDevice::hipGcnArch_t::GFX950);
+                    || mGcnArch == HipDevice::hipGcnArch_t::GFX950
+                    || mGcnArch == HipDevice::hipGcnArch_t::GFX1251);
         case HIPTENSOR_COMPUTE_DESC_32F:
         case HIPTENSOR_COMPUTE_DESC_C32F:
             return (mGcnArch == HipDevice::hipGcnArch_t::GFX908
                     || mGcnArch == HipDevice::hipGcnArch_t::GFX90A
                     || mGcnArch == HipDevice::hipGcnArch_t::GFX942
                     || mGcnArch == HipDevice::hipGcnArch_t::GFX950
-                    || mGcnArch == HipDevice::hipGcnArch_t::GFX1250);
+                    || mGcnArch == HipDevice::hipGcnArch_t::GFX1250
+                    || mGcnArch == HipDevice::hipGcnArch_t::GFX1251);
         case HIPTENSOR_COMPUTE_DESC_16F:
         case HIPTENSOR_COMPUTE_DESC_16BF:
             return (mGcnArch == HipDevice::hipGcnArch_t::GFX908
@@ -205,7 +212,8 @@ namespace hiptensor
                     || mGcnArch == HipDevice::hipGcnArch_t::GFX1171
                     || mGcnArch == HipDevice::hipGcnArch_t::GFX1200
                     || mGcnArch == HipDevice::hipGcnArch_t::GFX1201
-                    || mGcnArch == HipDevice::hipGcnArch_t::GFX1250);
+                    || mGcnArch == HipDevice::hipGcnArch_t::GFX1250
+                    || mGcnArch == HipDevice::hipGcnArch_t::GFX1251);
         default:
             return false;
         }

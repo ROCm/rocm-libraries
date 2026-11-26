@@ -46,7 +46,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional
 
-from . import __version__
+from . import GENERATOR_VERSION
 from .Common import print1, printExit, printWarning, ensurePath, HR, isRhel8, \
                            LIBRARY_LOGIC_DIR, setVerbosity, IsaInfo, makeDebugConfig, \
                            DebugConfig, IsaVersion, coVersionMap
@@ -149,6 +149,7 @@ def executeStepsInConfig(
                 buildOnly,
                 solutionPoolFiles,
                 archNames=archNames,
+                hasLibraryLogic="LibraryLogic" in config,
             )
         flush_timing_buffer()
         print1("")
@@ -616,7 +617,7 @@ def main(argv=None):
     print1("")
     print1(HR)
     print1("#")
-    print1("#  TensileLite v%s" % (__version__))
+    print1("#  TensileLite v%s" % (GENERATOR_VERSION))
 
     argParser = argparse.ArgumentParser(prog="tensilelite run")
     argParser.add_argument("ConfigFile", type=os.path.realpath, nargs="+",
@@ -624,7 +625,7 @@ def main(argv=None):
     argParser.add_argument("OutputPath", \
             help="Path to conduct benchmark and write output files")
     argParser.add_argument("--version", action="version", \
-            version="%(prog)s {version}".format(version=__version__))
+            version="%(prog)s {version}".format(version=GENERATOR_VERSION))
     argParser.add_argument("--alternate-format", dest="AlternateFormat", action="store_true",
             help="Alternate format for config_file(s): first file is alternate config "
             "and optional second file is size list")

@@ -46,6 +46,15 @@ namespace TensileLite
 {
     namespace hip
     {
+        /// Whose failure an unrecordable launch event is. Strict returns it as
+        /// the launch's error; BestEffort costs the measurement, not the launch,
+        /// and leaves no error behind.
+        enum class EventRecording
+        {
+            Strict,
+            BestEffort,
+        };
+
         class TENSILELITEHOST_EXPORT SolutionAdapter : public TensileLite::SolutionAdapter
         {
         public:
@@ -107,6 +116,16 @@ namespace TensileLite
                                      hipEvent_t                           stopEvent,
                                      bool                                 isKernelLoaded = false);
 
+            // With EventRecording::BestEffort a swallowed start also skips the
+            // stop. An overload, because the existing mangled name is part of the
+            // installed ABI.
+            hipError_t launchKernels(std::vector<KernelInvocation> const& kernels,
+                                     hipStream_t                          stream,
+                                     hipEvent_t                           startEvent,
+                                     hipEvent_t                           stopEvent,
+                                     bool                                 isKernelLoaded,
+                                     EventRecording                       recording);
+
             hipError_t launchKernels(std::vector<KernelInvocation> const& kernels,
                                      hipStream_t                          stream,
                                      std::vector<hipEvent_t> const&       startEvents,
@@ -132,7 +151,9 @@ namespace TensileLite
             size_t localCodeObjectCount();
 #endif
 
-            hipError_t initKernel(std::string const& name);
+            // codeObjectFile, when given, names the code object the kernel is
+            // in, so the lookup can start in that module.
+            hipError_t initKernel(std::string const& name, std::string const& codeObjectFile = {});
 
             hipError_t initKernels(std::vector<std::string> const& kernelNames);
 
@@ -159,8 +180,20 @@ namespace TensileLite
             int numRotationModules();
 
         private:
+            // startSwallowed carries the first kernel's start record to the last
+            // kernel's stop.
+            hipError_t launchKernelMeasured(KernelInvocation const& kernel,
+                                            hipStream_t             stream,
+                                            hipEvent_t              startEvent,
+                                            hipEvent_t              stopEvent,
+                                            bool                    isKernelLoaded,
+                                            EventRecording          recording,
+                                            bool&                   startSwallowed);
+
             hipError_t loadCodeObjectFileOnce(std::string const& path);
-            hipError_t getKernel(hipFunction_t& rv, std::string const& name);
+            hipError_t getKernel(hipFunction_t&     rv,
+                                 std::string const& name,
+                                 std::string const& codeObjectFile = {});
             // Cached function for `name`, or null. Takes no lock.
             hipFunction_t cachedKernel(std::string const& name) const;
 
@@ -180,6 +213,12 @@ namespace TensileLite
             // Written under m_access, read without it by FindCodeObject().
             // Recovery resets entries to false instead of removing them.
             ReadMostlyMap<std::string, std::atomic<bool>> m_loadedCOFiles;
+
+            // The module each code object file was loaded into, keyed like
+            // m_loadedCOFiles, so getKernel can look there first: a lookup in a
+            // module that lacks the kernel fails, and the failure replaces an
+            // error the caller had pending. Guarded by m_access.
+            std::unordered_map<std::string, hipModule_t> m_moduleByCodeObject;
 
             // Code objects read into memory because their path was too long for
             // hipModuleLoad. HIP keeps using the buffer passed to

@@ -13,6 +13,7 @@
 #include <stdexcept>
 #include <type_traits>
 #include <utility>
+#include <variant>
 
 namespace
 {
@@ -61,11 +62,18 @@ namespace
 {
     using namespace DGen;
 
+    // Base seed of the maf2_0 MX streams: 2^31 above the non-MX maf2_0 base (1713573849), so
+    // the two families of mt19937(seed + 32 * index + thread) streams never meet.
+    constexpr uint32_t kMaf2_0MXSeed = 1713573849u + 0x80000000u;
+
     void applyInitMethodString(DataGeneratorOptions&  opt,
                                std::string_view const initMethod,
                                hipDataType            dataType,
                                float                  min_val,
-                               float                  max_val)
+                               float                  max_val,
+                               hipDataType            scaleType    = HIP_R_8F_UE8M0,
+                               uint64_t               elementCount = 0,
+                               uint32_t               seedIndex    = 0)
     {
         opt.min         = initMethod == "uniform_01" ? 0. : (initMethod == "hpl" ? -.5 : min_val);
         opt.max         = initMethod == "uniform_01" ? 1. : (initMethod == "hpl" ? .5 : max_val);
@@ -120,13 +128,40 @@ namespace
             auto const range = randIntRangeFor(dataType);
             opt.initMode     = DataInitMode(RandInt{range.first, range.second});
         }
+        else if(initMethod == "maf1_0")
+        {
+            // MAF1.0: A = sin(idx), B = cos(idx), idx = i + j * rows + batch * rows * cols of the
+            // stored matrix (seedIndex = abc + 3 * batch); every block scale 0.5.
+            Maf1_0 mode;
+            mode.useCos      = seedIndex % 3 != 0;
+            mode.indexOffset = uint64_t(seedIndex / 3) * elementCount;
+            opt.initMode     = DataInitMode(mode);
+        }
+        else if(initMethod == "maf2_0")
+        {
+            // MAF2.0: E8M0 block scales are 2^Binomial; FP4 with a UE4M3 or UE5M3 scale takes
+            // N(0.34375, 0.08) scales instead.
+            Maf2_0 mode;
+            mode.normalScale = static_cast<int>(dataType) == static_cast<int>(HIP_R_4F_E2M1)
+                               && (scaleType == HIP_R_8F_E4M3
+                                   || scaleType == static_cast<hipDataType>(HIP_R_8F_E5M3_EXT));
+            opt.initMode = DataInitMode(mode);
+        }
+        else if(initMethod == "maf2_0_unit_scale")
+        {
+            // MAF2.0 X=1 rows (MXFP8, FP4): every block scale 1.0, N(0,1) data.
+            Maf2_0 mode;
+            mode.unitScaleNormalData = true;
+            opt.initMode             = DataInitMode(mode);
+        }
         else
             throw std::runtime_error(
                 std::string("generateMXInput: unsupported initMethod '")
                 + std::string(initMethod)
                 + "'. Supported methods: Bounded/uniform_01, hpl, "
                   "uniform_low_precision, "
-                  "TrigonometricFromFloat/trig_float, norm_dist, rand_int, "
+                  "TrigonometricFromFloat/trig_float, norm_dist, rand_int, maf1_0, "
+                  "maf2_0, maf2_0_unit_scale, "
                   "Sequential, RowIndex, ColIndex, Checkerboard, ScaledDiagonal, "
                   "Identity, Ones, Zeros/zero, Twos, NegOnes, MaxVals, "
                   "DenormMins, DenormMaxs, NaNs, Infs.");
@@ -386,6 +421,59 @@ void makeIntegerExactMX(std::vector<uint8_t>& dataBytes,
     }
 }
 
+std::vector<float> restrideReference(std::vector<float> dense,
+                                      size_t             rows,
+                                      size_t             cols,
+                                      size_t             stride)
+{
+    if(stride == rows)
+        return dense;
+
+    std::vector<float> strided(stride * cols);
+    for(size_t col = 0; col < cols; ++col)
+        std::memcpy(strided.data() + col * stride,
+                    dense.data() + col * rows,
+                    rows * sizeof(float));
+    return strided;
+}
+
+template <typename DT>
+void restrideMXData(std::vector<uint8_t> const& unpackedDense,
+                    void*                       data,
+                    size_t                      rows,
+                    size_t                      cols,
+                    size_t                      stride)
+{
+    if(stride == rows)
+    {
+        if constexpr(std::is_same_v<DT, DGen::ocp_e5m2_mxfp8>
+                     || std::is_same_v<DT, DGen::ocp_e4m3_mxfp8>)
+            std::memcpy(data, unpackedDense.data(), unpackedDense.size());
+        else
+            packData<DT>(unpackedDense, static_cast<uint8_t*>(data));
+        return;
+    }
+
+    size_t const outputElements = stride * (cols - 1) + rows;
+    if constexpr(std::is_same_v<DT, DGen::ocp_e5m2_mxfp8>
+                 || std::is_same_v<DT, DGen::ocp_e4m3_mxfp8>)
+    {
+        auto* output = static_cast<uint8_t*>(data);
+        std::memset(output, 0, outputElements);
+        for(size_t col = 0; col < cols; ++col)
+            std::memcpy(output + col * stride, unpackedDense.data() + col * rows, rows);
+    }
+    else
+    {
+        std::vector<uint8_t> stridedUnpacked(outputElements);
+        for(size_t col = 0; col < cols; ++col)
+            std::memcpy(stridedUnpacked.data() + col * stride,
+                        unpackedDense.data() + col * rows,
+                        rows);
+        packData<DT>(stridedUnpacked, static_cast<uint8_t*>(data));
+    }
+}
+
 template <typename T, typename DT>
 std::vector<float> generateData(T                           dgen,
                                 void*                       data,
@@ -402,28 +490,15 @@ std::vector<float> generateData(T                           dgen,
 {
     using namespace DGen;
 
+    if(strides[1] < sizes[0])
+        throw std::invalid_argument(
+            "MX leading dimension must be at least the stored row count");
+
     // The non-K-major reference indexes scales canonically, whereas these device
     // swizzles use a different grid. Do not return inconsistent exact reference values.
     if(integerExact && scaleLayout != MXScaleLayout::None && isMatrixA != isTranspose)
         throw std::runtime_error(
             "integer_exact MX data with swizzled scales requires K along the stored rows");
-
-    // The K-major reference covers the generator's stride * cols buffer, whose scales the
-    // generator counts per whole run of sizes[0] elements; past the last whole run there are none.
-    // sizes[0] is the divisor below. A zero row count is SIGFPE, and the generator would have
-    // rejected a non-positive size with invalid_argument before writing. Check that first.
-    if(integerExact && isMatrixA == isTranspose)
-    {
-        if(sizes[0] == 0 || sizes[1] == 0)
-            throw std::invalid_argument(
-                "Invalid dimensions: dimension sizes must be greater than 0.");
-        if(strides[1] * sizes[1] % sizes[0] != 0)
-            throw std::runtime_error(
-                "integer_exact MX data requires the stride times the columns to be a multiple of "
-                "the rows, got stride "
-                + std::to_string(strides[1]) + ", " + std::to_string(sizes[1]) + " columns and "
-                + std::to_string(sizes[0]) + " rows");
-    }
 
     // Non-K-major integer_exact (non-transposed A, transposed B) realigns through
     // getAlignedFloat. A partial trailing K block makes that helper form a data index one
@@ -437,14 +512,12 @@ std::vector<float> generateData(T                           dgen,
             + std::to_string(elementsPerMXBlock) + ", got " + std::to_string(sizes[1]));
 
     dgen.setSeed(seed);
-    dgen.generate(sizes, strides, opt);
+    dgen.generate(sizes, {1, sizes[0]}, opt);
 
     std::vector<uint8_t> dataBytes = dgen.getDataBytes();
     std::vector<uint8_t> scaleBytes = dgen.getScaleBytes();
     if(integerExact)
         makeIntegerExactMX<DT>(dataBytes, scaleBytes, isMatrixA);
-
-    std::memcpy(data, dataBytes.data(), dataBytes.size() * sizeof(uint8_t));
 
     // Apply per-architecture scale swizzle on top of the natural-packed
     // scales mxDataGenerator wrote. Layouts are mutually exclusive by
@@ -489,13 +562,6 @@ std::vector<float> generateData(T                           dgen,
         // Number of scale rows in scaleBytes. The generator emits one scale per
         // (MN, K block) pair, so scaleBytes.size() == mnExtent * kBlocks and the
         // row count divides straight back out.
-        //
-        // This is read from the buffer instead of from sizes[] because the
-        // generator sizes the buffer from the strides it was passed, which can
-        // span more rows than M*N when the caller pads its leading dimension.
-        // The swizzle rejects any grid whose product is not exactly
-        // scaleBytes.size(), so the grid has to describe the buffer that exists,
-        // not the logical extent.
         size_t const mnExtent
             = (kBlocks > 0 && scaleBytes.size() % kBlocks == 0)
                   ? scaleBytes.size() / kBlocks
@@ -561,18 +627,35 @@ std::vector<float> generateData(T                           dgen,
         = swizzledScaleBytes.empty() ? scaleBytes : swizzledScaleBytes;
     std::memcpy(scale, deviceScaleBytes.data(), deviceScaleBytes.size() * sizeof(uint8_t));
 
-    if((isMatrixA && isTranspose) || (!isMatrixA && !isTranspose))
+    // Maf1_0 already writes element (i, j) of the stored matrix at i + j * stride with its
+    // sin/cos(i + j * row) code, and every block has the same scale. getAlignedFloat's reordering
+    // only exists to pair runs of data with their block scale, so it would just move elements
+    // away from their index; keep the generator's layout and reference instead.
+    bool const maf1_0 = std::holds_alternative<DGen::Maf1_0>(opt.initMode);
+    if((isMatrixA && isTranspose) || (!isMatrixA && !isTranspose) || maf1_0)
     {
         // For (1) transposed matrixA and (2) non-transposed matrixB,
         // return the reference float directly since they are aligned already.
+        // FP4/FP6 generator bytes are packed, so restride them as unpacked elements.
+        if constexpr(std::is_same_v<DT, DGen::ocp_e5m2_mxfp8>
+                     || std::is_same_v<DT, DGen::ocp_e4m3_mxfp8>)
+            restrideMXData<DT>(dataBytes, data, sizes[0], sizes[1], strides[1]);
+        else
+            restrideMXData<DT>(unpackData<DT>(dataBytes, sizes[0] * sizes[1]),
+                                data,
+                                sizes[0],
+                                sizes[1],
+                                strides[1]);
+
         if(!integerExact)
-            return dgen.getReferenceFloat();
-        // The generator's reference floats describe its own values, which integerExact replaced;
-        // recompute them from the bytes, over the generator's whole buffer of stride * cols
-        // elements as its own reference does, so a padded leading dimension keeps its layout.
-        // The generator's scale mapping blocks each run of sizes[0] elements of that buffer, so a
-        // partial block at the end of a run keeps its own scale.
-        size_t const       count = static_cast<size_t>(strides[1]) * static_cast<size_t>(sizes[1]);
+            return restrideReference(
+                dgen.getReferenceFloat(), sizes[0], sizes[1], strides[1]);
+
+        // The generator's reference floats describe its own values, which integerExact replaced.
+        // Recompute the dense logical reference from the replacement bytes, then apply the caller's
+        // leading dimension below.
+        size_t const count
+            = static_cast<size_t>(sizes[0]) * static_cast<size_t>(sizes[1]);
         std::vector<float> ref(count);
         for(size_t idx = 0; idx < count; idx++)
         {
@@ -585,7 +668,7 @@ std::vector<float> generateData(T                           dgen,
                 ref[idx]
                     = DGen::toFloat<DT>(scaleBytes.data(), dataBytes.data(), scaleIndex, dataIndex);
         }
-        return ref;
+        return restrideReference(std::move(ref), sizes[0], sizes[1], strides[1]);
     }
 
     // For types smaller than 8-bit, mxDataGenerator returns packed data (i.e., two FP4 will be
@@ -595,8 +678,8 @@ std::vector<float> generateData(T                           dgen,
     {
         auto ret = getAlignedFloat<DT>(
             dataBytes, scaleBytes, {sizes[0], sizes[1]}, elementsPerMXBlock, isMatrixA);
-        std::memcpy(data, dataBytes.data(), dataBytes.size() * sizeof(uint8_t));
-        return ret;
+        restrideMXData<DT>(dataBytes, data, sizes[0], sizes[1], strides[1]);
+        return restrideReference(std::move(ret), sizes[0], sizes[1], strides[1]);
     }
     else if constexpr(std::is_same_v<DT, DGen::ocp_e3m2_mxfp6>
                       || std::is_same_v<DT, DGen::ocp_e2m3_mxfp6>)
@@ -605,9 +688,9 @@ std::vector<float> generateData(T                           dgen,
         auto         unpackedDataBytes = unpackData<DT>(dataBytes, elementCount);
         auto ret               = getAlignedFloat<DT>(
             unpackedDataBytes, scaleBytes, {sizes[0], sizes[1]}, elementsPerMXBlock, isMatrixA);
-        // GPU expects the data are packed
-        packData<DT>(unpackedDataBytes, static_cast<uint8_t*>(data));
-        return ret;
+        // GPU expects the data are packed in the caller's padded leading dimension.
+        restrideMXData<DT>(unpackedDataBytes, data, sizes[0], sizes[1], strides[1]);
+        return restrideReference(std::move(ret), sizes[0], sizes[1], strides[1]);
     }
     else if constexpr(std::is_same_v<DT, DGen::ocp_e2m1_mxfp4>
                       || std::is_same_v<DT, DGen::ocp_e2m1_mxfp4_e5m3>
@@ -617,9 +700,9 @@ std::vector<float> generateData(T                           dgen,
         auto         unpackedDataBytes = unpackData<DT>(dataBytes, elementCount);
         auto ret               = getAlignedFloat<DT>(
             unpackedDataBytes, scaleBytes, {sizes[0], sizes[1]}, elementsPerMXBlock, isMatrixA);
-        // GPU expects the data are packed
-        packData<DT>(unpackedDataBytes, static_cast<uint8_t*>(data));
-        return ret;
+        // GPU expects the data are packed in the caller's padded leading dimension.
+        restrideMXData<DT>(unpackedDataBytes, data, sizes[0], sizes[1], strides[1]);
+        return restrideReference(std::move(ret), sizes[0], sizes[1], strides[1]);
     }
     else
     {
@@ -649,16 +732,22 @@ std::vector<float> generateMXInput(hipDataType            dataType,
                                    std::string_view const initMethod,
                                    float                  min_val,
                                    float                  max_val,
-                                   std::string_view const scaleInitMethod)
+                                   std::string_view const scaleInitMethod,
+                                   uint32_t               seedIndex)
 {
     using namespace DGen;
 
     DataGeneratorOptions opt;
     opt.blockScaling = scaleBlockRowSize * scaleBlockColSize;
-    applyInitMethodString(opt, initMethod, dataType, min_val, max_val);
+    applyInitMethodString(
+        opt, initMethod, dataType, min_val, max_val, scaleType, row * col, seedIndex);
     applyScaleInitMethodString(opt, scaleInitMethod, dataType);
 
-    const uint32_t seed = 1713573849;
+    // maf2_0 salts the seed per matrix and batch (seedIndex = abc + 3 * batch) from its own
+    // base, so its streams differ between A and B and between batches, and stay clear of the
+    // non-MX maf2_0 streams that start at 1713573849. Other methods keep the single seed.
+    const bool     maf2_0 = initMethod == "maf2_0" || initMethod == "maf2_0_unit_scale";
+    const uint32_t seed   = maf2_0 ? kMaf2_0MXSeed + 32u * seedIndex : 1713573849;
 
     std::vector<index_t> sizes = {row, col};
     std::vector<index_t> strides;

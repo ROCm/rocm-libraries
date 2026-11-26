@@ -230,6 +230,10 @@ _warned_inherited: set[str] = set()
 EVALUATOR_NAME = "hipdnn_uhd_features"
 EVALUATOR_ENV_VAR = "HIPDNN_UHD_FEATURE_EVALUATOR"
 
+#: The largest request `hipdnn_uhd_features` reads (MAX_REQUEST_BYTES in UhdFeatures.cpp).
+#: Feature extraction splits its rows into requests of at most this many bytes.
+MAX_REQUEST_BYTES = 256 * 1024 * 1024
+
 #: Evaluator locations under a search root: install/venv `bin`, or in-tree `build/bin`.
 _EVALUATOR_RELATIVE_DIRS = ("bin", "build/bin")
 
@@ -303,25 +307,35 @@ def evaluator_feature_semantics_revision(executable: str | Path | None = None) -
     return _run_feature_evaluator([], None, [], executable)[2]
 
 
-def _run_feature_evaluator(
-    signature: list,
-    categorical_encoding: dict | None,
-    rows: list,
-    executable: str | Path | None,
-) -> tuple[str, list[list[float]], int]:
-    """The only crossing into FeatureExtractor, which owns both the digest and the values.
-
-    Entries are parsed first only for a readable error; the evaluator does the hashing.
+def run_evaluator(
+    request: dict | None,
+    executable: str | Path | None = None,
+    mode: str | None = None,
+) -> dict:
+    """Send `request` (None: nothing) to hipdnn_uhd_features and return its parsed answer,
+    whatever the mode (`--lint`, `--optional-features`, or the default feature extraction).
+    A nonzero exit or an unparsable answer is a ValueError.
     """
-    parsed = [parse_signature_entry(entry) for entry in signature]
-    request = {
-        "signature": parsed,
-        "categorical_encoding": categorical_encoding or {},
-        "rows": rows,
-    }
+    return _send_to_evaluator(
+        (
+            ""
+            if request is None
+            else json.dumps(request, ensure_ascii=False, allow_nan=False)
+        ),
+        executable,
+        mode,
+    )
+
+
+def _send_to_evaluator(
+    text: str, executable: str | Path | None, mode: str | None = None
+) -> dict:
+    """The only crossing into hipdnn_uhd_features: resolve it, write `text` to its stdin and
+    parse its answer."""
+    flags = [] if mode is None else [mode]
     result = subprocess.run(
-        [resolve_feature_evaluator(executable)],
-        input=json.dumps(request, ensure_ascii=False, allow_nan=False),
+        [resolve_feature_evaluator(executable), *flags],
+        input=text,
         capture_output=True,
         text=True,
         encoding="utf-8",
@@ -329,29 +343,106 @@ def _run_feature_evaluator(
     )
     if result.returncode:
         raise ValueError(
-            f"{EVALUATOR_NAME} failed ({result.returncode}): {result.stderr.strip()}"
+            f"{' '.join([EVALUATOR_NAME, *flags])} failed ({result.returncode}): "
+            f"{result.stderr.strip()}"
         )
     try:
-        response = json.loads(result.stdout)
-        digest, values = response["features_hash"], response["values"]
-        # An evaluator that omits it predates the field: revision 1 by definition.
-        revision = response.get("feature_semantics_revision", 1)
-        if isinstance(revision, bool) or not isinstance(revision, int) or revision < 1:
-            raise ValueError(
-                f"feature_semantics_revision must be an integer >= 1, got {revision!r}"
-            )
-        if not isinstance(digest, str) or not digest.startswith("sha256:"):
-            raise ValueError("missing features_hash")
-        if len(values) != len(rows) or any(len(row) != len(parsed) for row in values):
-            raise ValueError("feature matrix shape does not match the request")
-        if any(
-            not isinstance(value, (int, float)) or not math.isfinite(value)
-            for row in values
-            for value in row
-        ):
-            raise ValueError("non-finite or non-numeric feature result")
-    except (KeyError, TypeError, ValueError) as error:
+        return json.loads(result.stdout)
+    except ValueError as error:
         raise ValueError(f"invalid {EVALUATOR_NAME} response: {error}") from error
+
+
+def _request_texts(prefix: str, rows: list) -> list[tuple[str, int]]:
+    """Requests `prefix` + `[row, ...]` + `}` of at most MAX_REQUEST_BYTES (UTF-8), each with
+    its row count, keeping row order. Rows are serialized once. No rows: one empty request,
+    which still answers the digest and revision.
+    """
+    head = len(prefix.encode("utf-8")) + len("[]}")
+    requests: list[tuple[str, int]] = []
+    batch: list[str] = []
+    size = head
+    for index, row in enumerate(rows):
+        text = json.dumps(row, ensure_ascii=False, allow_nan=False)
+        length = len(text.encode("utf-8"))
+        if head + length > MAX_REQUEST_BYTES:
+            raise ValueError(
+                f"feature row {index} alone exceeds the {MAX_REQUEST_BYTES}-byte "
+                f"{EVALUATOR_NAME} request bound"
+            )
+        # A row after the first adds its separating comma.
+        if batch and size + 1 + length > MAX_REQUEST_BYTES:
+            requests.append((prefix + "[" + ",".join(batch) + "]}", len(batch)))
+            batch, size = [], head
+        size += length + (1 if batch else 0)
+        batch.append(text)
+    requests.append((prefix + "[" + ",".join(batch) + "]}", len(batch)))
+    return requests
+
+
+def _run_feature_evaluator(
+    signature: list,
+    categorical_encoding: dict | None,
+    rows: list,
+    executable: str | Path | None,
+) -> tuple[str, list[list[float]], int]:
+    """Features and digest of `signature` over `rows`, from FeatureExtractor, which owns both.
+
+    Entries are parsed first only for a readable error; the evaluator does the hashing. Rows
+    go in as many requests as the evaluator's size bound needs, in order, and every request
+    must answer the same digest and revision.
+    """
+    parsed = [parse_signature_entry(entry) for entry in signature]
+    prefix = (
+        '{"signature":'
+        + json.dumps(parsed, ensure_ascii=False, allow_nan=False)
+        + ',"categorical_encoding":'
+        + json.dumps(categorical_encoding or {}, ensure_ascii=False, allow_nan=False)
+        + ',"rows":'
+    )
+    digest = None
+    revision = None
+    values: list[list[float]] = []
+    for text, count in _request_texts(prefix, rows):
+        response = _send_to_evaluator(text, executable)
+        try:
+            batch_digest, batch_values = response["features_hash"], response["values"]
+            # An evaluator that omits it predates the field: revision 1 by definition.
+            batch_revision = response.get("feature_semantics_revision", 1)
+            if (
+                isinstance(batch_revision, bool)
+                or not isinstance(batch_revision, int)
+                or batch_revision < 1
+            ):
+                raise ValueError(
+                    "feature_semantics_revision must be an integer >= 1, "
+                    f"got {batch_revision!r}"
+                )
+            if not isinstance(batch_digest, str) or not batch_digest.startswith(
+                "sha256:"
+            ):
+                raise ValueError("missing features_hash")
+            if digest is not None and (batch_digest, batch_revision) != (
+                digest,
+                revision,
+            ):
+                raise ValueError(
+                    "requests of one signature answered different features_hash or "
+                    "feature_semantics_revision values"
+                )
+            if len(batch_values) != count or any(
+                len(row) != len(parsed) for row in batch_values
+            ):
+                raise ValueError("feature matrix shape does not match the request")
+            if any(
+                not isinstance(value, (int, float)) or not math.isfinite(value)
+                for row in batch_values
+                for value in row
+            ):
+                raise ValueError("non-finite or non-numeric feature result")
+        except (KeyError, TypeError, ValueError) as error:
+            raise ValueError(f"invalid {EVALUATOR_NAME} response: {error}") from error
+        digest, revision = batch_digest, batch_revision
+        values.extend(batch_values)
     return digest, values, revision
 
 

@@ -37,9 +37,10 @@ from .features import (
     require_admissible_kernel_axes,
     signature_references,
 )
+from .optional import require_safe_signature
 from .provenance import (
     ROLES,
-    SUPPORTED_FILE_VERSIONS,
+    UHD_FILE_VERSIONS,
     ProvenanceError,
     compare_provenance,
     declared_slots,
@@ -50,6 +51,7 @@ from .provenance import (
     require_feature_semantics,
     revision,
     select_engine,
+    uhd_version_refusal,
     validate_provenance,
 )
 from .immediate import ROLE, validate_model
@@ -298,6 +300,23 @@ def _correctness_gate(model_dir: Path, corpus: Path | None) -> list[str]:
             f"their timings were trained on without being shown correct"
         ]
     return []
+
+
+def _require_scorable(descriptor, descriptor_path, feature_evaluator):
+    """RFC 0019 §6.7 (absent is not zero) and §6.8 item 9: refuse a model that reads bare a
+    feature a valid graph may leave unbound, since the engine could not score such a graph
+    and would lose its estimate or ranking there."""
+    if not descriptor.get("features_signature"):
+        return
+    try:
+        require_safe_signature(
+            descriptor["features_signature"],
+            _score_metric(descriptor),
+            str(descriptor_path),
+            feature_evaluator,
+        )
+    except ValueError as error:
+        raise PromoteError(str(error)) from error
 
 
 def _opaque_plan(
@@ -834,6 +853,8 @@ def _build_plan(
             uhd_ids,
             manifest,
         )
+        # After every refusal the plan itself makes, as for an engine with a UED.
+        _require_scorable(descriptor, descriptor_path, feature_evaluator)
         opaque.warnings.extend(gate_warnings)
         return opaque
     ued_path, original_ued = select_engine(index, engine)
@@ -965,6 +986,8 @@ def _build_plan(
         raise PromoteError(
             "explicit knob removal requires training provenance for the intended revised UED; retrain first"
         )
+    # After every refusal the runtime would make itself (see _require_scorable).
+    _require_scorable(descriptor, descriptor_path, feature_evaluator)
 
     target = (ued_path.resolve(), _role_key(role, slot), arch)
     # Every binding except the ones this promotion replaces, including other metrics here.
@@ -1226,20 +1249,13 @@ def _validate_descriptor(document: dict, path: Path) -> None:
         raise PromoteError(
             f"{path}: unknown UHD fields {sorted(set(document) - known)}"
         )
-    if document.get("version") not in SUPPORTED_FILE_VERSIONS:
+    if document.get("version") not in UHD_FILE_VERSIONS:
         raise PromoteError(
             f"{path}: unsupported UHD file-format version {document.get('version')!r}"
         )
-    recorded = document.get("trained_against")
-    if (
-        document["version"] == "1.0"
-        and isinstance(recorded, dict)
-        and ({"slot", "kmds"} & set(recorded))
-    ):
-        raise PromoteError(
-            f"{path}: trained_against uses slot provenance ('slot' or 'kmds'), which "
-            "requires UHD version 1.1"
-        )
+    refusal = uhd_version_refusal(document["version"], document.get("trained_against"))
+    if refusal is not None:
+        raise PromoteError(f"{path}: {refusal}")
     if not isinstance(document.get("name"), str) or not document["name"]:
         raise PromoteError(f"{path}: missing required name")
     adapter = document.get("adapter")

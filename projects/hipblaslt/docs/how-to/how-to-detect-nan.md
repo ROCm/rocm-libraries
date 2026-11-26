@@ -43,6 +43,15 @@ line as soon as NaN is detected** and then suppress further scans — no
 GPU sync, no manual drain, no Python shim. Works with PyTorch out of the
 box.
 
+The scanner claims the first NaN with an atomic in device memory, then
+publishes that call id to the host with an ordinary store. A device atomic
+directly to mapped host memory is a PCIe AtomicOp, and some root ports
+(typical of a PCH-attached GPU) drop those, so the call id would stay 0
+even after a later sync. The device atomic plus the plain store still
+auto-drains on those links. If the host mirror cannot be allocated, the
+same call id is reported by `hipblasLtCheckNumericsDrain` or at handle
+teardown instead of the mid-run host peek.
+
 ---
 
 ## 1.1 Verify the scanner is active

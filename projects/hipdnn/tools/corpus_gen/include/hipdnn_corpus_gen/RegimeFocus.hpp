@@ -14,6 +14,7 @@
 #include <cstdint>
 #include <map>
 #include <optional>
+#include <random>
 #include <set>
 #include <string>
 #include <vector>
@@ -23,14 +24,21 @@
 ///
 /// Regimes defined by an equality (`decode` is `seqlen_q == 1`) are almost never hit by a free
 /// walk, so a focus pins/ties those parameters and walks the rest. Every candidate is still
-/// checked with `regimeLabel`, so a focus never puts a point in the wrong regime.
+/// checked with `regimeLabel` (or, for a form, the form's own facet), so a focus never puts a
+/// point in the wrong regime.
 namespace hipdnn_corpus_gen
 {
 
 /// @brief The relations a regime label pins, and the label itself as the final word.
+///
+/// Also the focus of a form label (`--form-floor`): @ref formAxis then names the axis whose
+/// facet @ref label is read from, instead of the joined regime.
 struct RegimeFocus
 {
     std::string label;
+
+    /// The form axis @ref label belongs to; empty means @ref label is a joined regime label.
+    std::string formAxis;
 
     /// Numeric parameters a clause fixes to a constant (`seqlen_q == 1`).
     std::map<std::string, int64_t> pins;
@@ -188,6 +196,33 @@ inline void foldEqualities(const OperationMetadata& metadata,
 
 } // namespace detail
 
+namespace detail
+{
+
+/// Folds into @p focus what @p axis's clause for @p label pins. Only a label named by exactly
+/// one clause pins anything: several clauses are a disjunction, and `otherwise` implies only
+/// negations.
+inline void foldLabelClause(const OperationMetadata& metadata,
+                            const RegimeAxis& axis,
+                            const std::string& label,
+                            RegimeFocus& focus)
+{
+    std::vector<size_t> clauses;
+    for(size_t i = 0; i < axis.labels.size(); ++i)
+    {
+        if(axis.labels[i] == label)
+        {
+            clauses.push_back(i);
+        }
+    }
+    if(clauses.size() == 1 && clauses.front() < axis.whens.size())
+    {
+        foldEqualities(metadata, axis.whens[clauses.front()], focus);
+    }
+}
+
+} // namespace detail
+
 /// @brief The focus for @p label under @p metadata's declared facets, or nullopt with @p error
 /// set when no assignment of the declared labels spells it.
 ///
@@ -207,22 +242,39 @@ inline std::optional<RegimeFocus> compileRegimeFocus(const OperationMetadata& me
     focus.label = label;
     for(size_t axis = 0; axis < chosen->size(); ++axis)
     {
-        const auto& declared = metadata.regimeLabel[axis];
-        std::vector<size_t> clauses;
-        for(size_t i = 0; i < declared.labels.size(); ++i)
-        {
-            if(declared.labels[i] == (*chosen)[axis])
-            {
-                clauses.push_back(i);
-            }
-        }
-        // Only a label named by exactly one clause pins anything: several clauses are a
-        // disjunction, and `otherwise` implies only negations.
-        if(clauses.size() == 1 && clauses.front() < declared.whens.size())
-        {
-            detail::foldEqualities(metadata, declared.whens[clauses.front()], focus);
-        }
+        detail::foldLabelClause(metadata, metadata.regimeLabel[axis], (*chosen)[axis], focus);
     }
+    return focus;
+}
+
+/// @brief The focus for form @p label of @p axis under @p metadata's `form_label`, or nullopt
+/// with @p error set when @p metadata declares no such axis or label.
+inline std::optional<RegimeFocus> compileFormFocus(const OperationMetadata& metadata,
+                                                   const std::string& axis,
+                                                   const std::string& label,
+                                                   std::string& error)
+{
+    const auto declared
+        = std::find_if(metadata.formLabel.begin(),
+                       metadata.formLabel.end(),
+                       [&](const auto& candidate) { return candidate.name == axis; });
+    if(declared == metadata.formLabel.end())
+    {
+        error = "'" + axis + "' is not a form axis " + metadata.operation + " declares";
+        return std::nullopt;
+    }
+    if(label != declared->otherwise
+       && std::find(declared->labels.begin(), declared->labels.end(), label)
+              == declared->labels.end())
+    {
+        error
+            = "'" + label + "' is not a label of form axis '" + axis + "' of " + metadata.operation;
+        return std::nullopt;
+    }
+    RegimeFocus focus;
+    focus.label = label;
+    focus.formAxis = axis;
+    detail::foldLabelClause(metadata, *declared, label, focus);
     return focus;
 }
 
@@ -299,12 +351,39 @@ inline std::map<std::string, RegimeFocus> regimeFloors(const OperationMetadata& 
     return floors;
 }
 
+/// @brief A focus per label of every form axis @p metadata declares, keyed `<axis>:<label>` (see
+/// formQuotaKey), for `--form-floor`. Each axis's declared labels and its `otherwise`; a label
+/// that compiles to nothing is left out rather than refused, as regimeFloors leaves one out.
+inline std::map<std::string, RegimeFocus> formFloors(const OperationMetadata& metadata)
+{
+    std::map<std::string, RegimeFocus> floors;
+    for(const auto& axis : metadata.formLabel)
+    {
+        std::vector<std::string> options = axis.labels;
+        options.push_back(axis.otherwise);
+        for(const auto& label : options)
+        {
+            std::string error;
+            auto focus = compileFormFocus(metadata, axis.name, label, error);
+            if(focus.has_value())
+            {
+                floors.emplace(formQuotaKey(axis.name, label), std::move(*focus));
+            }
+        }
+    }
+    return floors;
+}
+
 /// @brief What a focused search delivered for one regime.
 struct RegimeSearchResult
 {
     std::vector<ProblemPoint> problems;
 
-    /// Every combination searched stopped because growing found no new point in the regime.
+    /// The regime is shown to hold no more problems than were found: the focus enumerated every
+    /// candidate, every combination's categorical values leave it empty, or the declared
+    /// constraints refuse every proposal in it. A search that only stopped, because a probe
+    /// found nothing or doubling its budget added nothing, shows nothing of an engine or a
+    /// region a walk reaches rarely, and leaves this false: the regime was not reached.
     bool saturated = false;
 
     /// A combination stopped at the budget limit while still finding points. More exist.
@@ -319,12 +398,37 @@ struct RegimeSearchResult
     int64_t admissible = 0;
 };
 
+namespace detail
+{
+
+/// The label @p point carries for @p focus: its form axis's facet, or the joined regime label.
+inline std::string focusedLabel(const OperationMetadata& metadata,
+                                const RegimeFocus& focus,
+                                const ProblemPoint& point)
+{
+    if(focus.formAxis.empty())
+    {
+        return regimeLabel(metadata, point);
+    }
+    for(auto& facet : regimeFacets(metadata.formLabel, point))
+    {
+        if(facet.first == focus.formAxis)
+        {
+            return std::move(facet.second);
+        }
+    }
+    return {};
+}
+
+} // namespace detail
+
 /// @brief Up to @p wanted problems in @p focus's regime that @p admits accepts, none of them
 /// @p held.
 ///
 /// Walks the parameters the focus leaves free, seeded by @p anchors (served points in any
-/// regime) projected onto them. Grows like `exploreProblemSpace`, stopping saturated or at the
-/// growth limit; the two are reported apart.
+/// regime) projected onto them. Grows like `exploreProblemSpace`, stopping at the growth limit
+/// or, short of the want, saturated only with a proof (RegimeSearchResult::saturated); the two
+/// are reported apart.
 inline RegimeSearchResult exploreRegime(const OperationMetadata& metadata,
                                         const RegimeFocus& focus,
                                         const ExplorationRequest& request,
@@ -352,7 +456,13 @@ inline RegimeSearchResult exploreRegime(const OperationMetadata& metadata,
     size_t totalCombinations = 0;
     std::vector<ProblemPoint> combinations;
     for(auto& combination : detail::categoricalCombinations(
-            metadata.parameters, request.maxCombinations, totalCombinations))
+            metadata.parameters,
+            request.maxCombinations,
+            totalCombinations,
+            [&metadata](const ProblemPoint& candidate) {
+                return !detail::excludedByCategoricals(metadata, candidate);
+            },
+            request.keep))
     {
         bool matches = true;
         for(const auto& [name, value] : focus.categoricalPins)
@@ -434,7 +544,7 @@ inline RegimeSearchResult exploreRegime(const OperationMetadata& metadata,
         {
             const auto point = complete(categorical, Shape{});
             ++outcome.proposed;
-            if(regimeLabel(metadata, point) == focus.label)
+            if(detail::focusedLabel(metadata, focus, point) == focus.label)
             {
                 ++outcome.inRegime;
                 if(detail::satisfiesConstraints(metadata, point) && admits(point)
@@ -461,7 +571,12 @@ inline RegimeSearchResult exploreRegime(const OperationMetadata& metadata,
         int64_t cells = 0;
         int64_t reached = 0;
         bool saturated = false;
+        /// The categorical values leave the lane empty (excludedByCategoricals): it holds
+        /// nothing, which a search that merely stopped does not show.
+        bool excluded = false;
         bool capped = false;
+        /// Probed already; the weighted search probes a lane when it first has a share to grow.
+        bool probed = false;
     };
     std::vector<Lane> lanes(served.size());
 
@@ -519,7 +634,7 @@ inline RegimeSearchResult exploreRegime(const OperationMetadata& metadata,
             const auto point = complete(lane.categorical, shape);
             ++outcome.proposed;
             bool verdict = false;
-            if(regimeLabel(metadata, point) == focus.label)
+            if(detail::focusedLabel(metadata, focus, point) == focus.label)
             {
                 ++outcome.inRegime;
                 if(detail::satisfiesConstraints(metadata, point))
@@ -560,12 +675,12 @@ inline RegimeSearchResult exploreRegime(const OperationMetadata& metadata,
         return sum;
     };
 
-    // Probe each lane at the first pass's probe budget, as the main search does: a combination
-    // the engine does not serve in this regime is set aside before it is given the full budget
-    // and its doublings. The memo keeps the probe's answers for the lanes that go on.
-    if(request.probeBudget < request.budgetPerCombination)
-    {
-        for(auto& lane : lanes)
+    // Probe a lane at the first pass's probe budget, as the main search does: a combination the
+    // engine does not serve in this regime is set aside before it is given the full budget and
+    // its doublings. The memo keeps the probe's answers for the lanes that go on.
+    const auto probe = [&](Lane& lane) {
+        lane.probed = true;
+        if(request.probeBudget < request.budgetPerCombination)
         {
             lane.search.oracleBudget = request.probeBudget;
             lane.search.targetCount = 1;
@@ -576,6 +691,46 @@ inline RegimeSearchResult exploreRegime(const OperationMetadata& metadata,
                 lane.saturated = true;
             }
         }
+    };
+
+    // Unweighted, every lane is probed up front and the need is split evenly. Weighted (864 lanes
+    // for SDPA), the need is split by combination size over every open lane, as apportion
+    // splits it (the rounded-up units drawn in the order of a seeded hash, not by position), and
+    // only a lane that receives a share is probed and run: at most `need` lanes, however many
+    // are declared, and a share each way that keeps the realised share of every value at its
+    // weight. A lane that declines hands its share back, and the next round splits what is still
+    // missing.
+    const bool weighted = detail::anyWeighted(metadata.parameters);
+    const auto sizes = detail::combinationSizes(metadata, served);
+    // The regime is part of the key seed: otherwise every regime draws its lanes in the same
+    // order, and a sparse regime is built from the same few lanes each time (or fails the same
+    // way for all of them).
+    uint64_t labelHash = 0xcbf29ce484222325ULL; // FNV-1a
+    for(const auto character : focus.label)
+    {
+        labelHash = (labelHash ^ static_cast<unsigned char>(character)) * 0x100000001b3ULL;
+    }
+    std::vector<uint64_t> tieKeys(lanes.size());
+    for(size_t i = 0; i < lanes.size(); ++i)
+    {
+        tieKeys[i] = detail::tieKey(request.seed ^ labelHash, i);
+        // A lane its categorical values leave empty is never tried, and is not an untried lane
+        // a saturated regime could be hiding.
+        if(sizes[i] <= 0.0)
+        {
+            lanes[i].excluded = true;
+            lanes[i].saturated = true;
+        }
+    }
+    if(!weighted)
+    {
+        for(auto& lane : lanes)
+        {
+            if(!lane.saturated)
+            {
+                probe(lane);
+            }
+        }
     }
 
     // Split what is still wanted over the lanes not yet spent, so a combination that cannot
@@ -584,21 +739,39 @@ inline RegimeSearchResult exploreRegime(const OperationMetadata& metadata,
     {
         const auto need = wanted - total();
         std::vector<Lane*> open;
-        for(auto& lane : lanes)
+        std::vector<double> openSizes;
+        std::vector<uint64_t> openKeys;
+        for(size_t i = 0; i < lanes.size(); ++i)
         {
+            auto& lane = lanes[i];
             if(!lane.saturated && !lane.capped)
             {
                 open.push_back(&lane);
+                openSizes.push_back(sizes[i]);
+                openKeys.push_back(tieKeys[i]);
             }
         }
         if(need <= 0 || open.empty())
         {
             break;
         }
-        const auto share
-            = (need + static_cast<int64_t>(open.size()) - 1) / static_cast<int64_t>(open.size());
-        for(auto* lane : open)
+        const auto shares = detail::splitNeed(need, weighted, openSizes, openKeys);
+        for(size_t slot = 0; slot < open.size(); ++slot)
         {
+            auto* lane = open[slot];
+            const auto share = shares[slot];
+            if(share == 0)
+            {
+                continue;
+            }
+            if(!lane->probed)
+            {
+                probe(*lane);
+                if(lane->saturated)
+                {
+                    continue;
+                }
+            }
             const auto target = static_cast<int64_t>(lane->fresh.size()) + share;
             lane->search.targetCount = target;
             // Run at the current budget first (a larger target re-tessellates existing
@@ -654,8 +827,13 @@ inline RegimeSearchResult exploreRegime(const OperationMetadata& metadata,
             }
         }
     }
+    // Short of the want, saturated only on a proof: no lane can hold anything, or the declared
+    // constraints refuse every proposal in the regime. A lane whose search stopped is no proof.
+    const bool shown
+        = std::all_of(lanes.begin(), lanes.end(), [](const Lane& lane) { return lane.excluded; })
+          || (outcome.inRegime > 0 && outcome.admissible == 0);
     outcome.saturated
-        = static_cast<int64_t>(outcome.problems.size()) < wanted && !outcome.searchCapped;
+        = static_cast<int64_t>(outcome.problems.size()) < wanted && !outcome.searchCapped && shown;
     return outcome;
 }
 

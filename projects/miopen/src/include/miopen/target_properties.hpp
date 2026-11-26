@@ -171,6 +171,7 @@ class TargetProperties
 
     std::string name;
     std::string dbId;
+    std::string systemDbId;
     static const std::size_t MaxWaveScratchSize;
     static const std::size_t MaxLocalMemorySize;
 
@@ -186,6 +187,10 @@ public:
 
     virtual const std::string& Name() const { return name; }
     const std::string& DbId() const { return dbId; }
+    /// DbId() without a target-variant suffix in the device name ("gfx1250-strict" ->
+    /// "gfx1250"): the id the shipped system find-db and perf-db files are named by. User
+    /// databases and kernel caches keep DbId(), as a variant's code objects may differ.
+    const std::string& SystemDbId() const { return systemDbId; }
 
     virtual bool isXnackEnabled() const { return xnack.isEnabled(); }
 

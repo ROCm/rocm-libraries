@@ -55,7 +55,8 @@ python3 $UHD/scripts/decide.py l1 --rows rows.json --candidate-dir <model dir> -
   for every graph it executes; `--min-available` relaxes it, `--min-graphs` sets how many it
   must execute), `metric` (the candidate's `score.metric` and every answer name the declared
   metric), `selector_revision` (the engine reports the revision the model was trained
-  against), `accuracy` (candidate median |error| ≤ incumbent × 1.05, `--max-regression`
+  against; the gate also reports the engine's and the candidate's `codegen_revision`, with a
+  note when they differ, and never fails on them), `accuracy` (candidate median |error| ≤ incumbent × 1.05, `--max-regression`
   changes it). Both models' accuracy is always reported. With no incumbent, pass
   `--no-incumbent`: the accuracy gate then asks only that the candidate was scored, and the
   report says `baseline: none`.
@@ -165,5 +166,6 @@ serves every product of its arch once installed; say which products it was valid
 | L2 `read` fails | the runtime refused the ranker (a knob axis missing from the UED's knobs or the KMD fields, a features hash from another `hipdnn_uhd_features`); see [triage.md](triage.md) |
 | L2 `winner_records` fails | the build carries a benchmark winner record that outranks any model |
 | every config `config_not_applicable` | the tree handed in is one engine's folder, not the per-arch root that owns `kpack/` |
+| promote refuses: reads features a valid graph may leave unbound | the model reads an optional feature bare (an optional attribute, a field of an optional tensor, a vector element past the node's rank); `python -m uhd_gen rewrite-signature <installed heuristic.uhd.json>` reads each through a default without retraining (a `table` model is retrained instead). Rewriting a `sort_kernel_catalog` model changes its engine's selector revision: restamp or retrain the `predict_engine` models its report names |
 | promote refuses an invalid marker | training rows carry `numerically_valid: false`: a kernel or UMD fix, not a retrain |
 | promote refuses the arch key | the UED's role map uses `default` or another key than the model was trained for |

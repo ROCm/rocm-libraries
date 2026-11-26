@@ -31,14 +31,16 @@ import gc
 import glob
 import itertools
 import os
+import random
 import shutil
 import subprocess
 import sys
 import pickle
 import sys
 import zlib
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import Future, ThreadPoolExecutor
 from contextlib import contextmanager
+from dataclasses import dataclass
 from pathlib import Path
 from timeit import default_timer as timer
 from typing import Collection, Dict, List, NamedTuple, Optional, Union
@@ -46,6 +48,7 @@ from typing import Collection, Dict, List, NamedTuple, Optional, Union
 from .. import LibraryIO
 from ..Common import (
     CHeader,
+    CPUThreadCount,
     DebugConfig,
     ensurePath,
     HR,
@@ -69,9 +72,12 @@ from ..Common.GlobalParameters import assignGlobalParameters, globalParameters
 from ..Common.TimingInstrumentation import timing_context
 from ..SolutionStructs.Naming import RegisterAllocationMerges, getKernelCompileKey, \
     getKernelFileBase, getKeyNoInternalArgs, getKernelNameMin
+from ..SolutionStructs import CompactSolution as _compact
+from ..SolutionStructs.CompactSolution import CompactSolution, compactLibrarySolutions, hydrateSolution
 
 from ..CustomYamlLoader import load_logic_gfx_arch, archMatch
 from ..KernelHelperNaming import kernelObjectNameCallables, initHelperKernelObjects
+from ..MatchingTable import numpyAvailable
 from ..KernelWriterAssembly import KernelWriterAssembly
 from ..KernelWriterBase import (
     KERNEL_HELPER_FILENAME_CPP,
@@ -106,6 +112,10 @@ def _parseLogicFileForLibrary(*args) -> LibraryIO.LibraryLogic:
     list and raw exact logic are about 40% of that volume.
     """
     logic = LibraryIO.LibraryLogic._make(LibraryIO.parseLibraryLogicFile(*args))
+    if isinstance(logic.library, MasterSolutionLibrary):
+        # Compact before returning to the parent so it retains only the summary
+        # and compressed generator state. splitGSU is the third positional argument.
+        compactLibrarySolutions(logic.library, args[2], kernelObjectNameCallables())
     return logic._replace(solutions=None, exactLogic=None)
 
 
@@ -138,6 +148,9 @@ def _baseArchs(archs: Collection[str]) -> List[str]:
 # run they must not disturb, so only they have to leave siblings alone; every
 # other run owns build_tmp outright and clears it as it always did.
 _GROUP_BUILD_ENV = "TENSILE_GROUP_BUILD"
+# Fixed seed for the kernel-order shuffle in writeSolutionsAndKernelsTCL: the
+# order is arbitrary but must be the same on every run of the same inputs.
+_KERNEL_ORDER_SEED = 0x7E45
 
 
 def buildTmpRoot(outputPath: Union[str, Path]) -> Path:
@@ -276,9 +289,9 @@ def groupKernelRecords(kernels, splitGSU: bool):
     artifactOwners = {}
     merges = RegisterAllocationMerges()
     for kernel in kernels:
-        key = getKernelCompileKey(kernel, splitGSU)
-        symbol = getKernelNameMin(kernel, splitGSU)
-        base = getKernelFileBase(splitGSU, kernel)
+        key = _compileKey(kernel, splitGSU)
+        symbol = _symbolName(kernel, splitGSU)
+        base = _fileBase(splitGSU, kernel)
         owner = artifactOwners.setdefault(base, key)
         if owner != key:
             raise RuntimeError(
@@ -457,12 +470,20 @@ def _emitKernel(kernelWriterAssembly, splitGSU, kernel, compress=False) -> Kerne
 def processKernelSource(kernelWriterAssembly, data, outOptions, splitGSU, kernel, compress = False) -> KernelCodeGenResult:
     """Generate source for a single kernel."""
     kernelWriterAssembly.setRocIsa(data, outOptions)
-    return _emitKernel(kernelWriterAssembly, splitGSU, kernel, compress)
+    return _emitKernel(kernelWriterAssembly, splitGSU, hydrateSolution(kernel), compress)
 
 
-def _mapKernels(fn, kernels):
+def _processKernelSourceItem(compress, item) -> KernelCodeGenResult:
+    """processKernelSource for one (kernelWriterAssembly, rocisaData, outOptions, splitGSU,
+    kernel) item of generateBenchmarkKernels."""
+    kernelWriterAssembly, data, outOptions, splitGSU, kernel = item
+    return processKernelSource(kernelWriterAssembly, data, outOptions, splitGSU, kernel, compress)
+
+
+def _mapKernels(fn, kernels, procs=None):
     """Map ``fn`` over ``kernels`` in order on the parallel worker pool."""
-    return ParallelMap2(fn, kernels, "Generating assembly kernels", multiArg=False, return_as="list")
+    return ParallelMap2(fn, kernels, "Generating assembly kernels", multiArg=False, return_as="list",
+                        procs=procs)
 
 
 def _checkInvalidSolutionsAndKernels(errorTolerant, result, kernel):
@@ -490,8 +511,13 @@ def _checkInvalidSolutions(splitGSU, removeKernelNames, solutions):
     return invalids
 
 def removeInvalidSolutionsAndKernels(results, kernels, solutions, errorTolerant, printLevel: bool, splitGSU: bool):
-    removeKernelsAndResultsFlag = ParallelMap2(functools.partial(_checkInvalidSolutionsAndKernels, errorTolerant),
-                                               zip(results, kernels), "check invalid kernels and results", return_as="list")
+    # In the parent: the check is one attribute test per kernel. In a process pool each task
+    # pickled the codegen result and the kernel's state to a worker and back, and the pool had to
+    # be restarted or shrunk to the number of kernels and grown again for the next step.
+    removeKernelsAndResultsFlag = [
+        _checkInvalidSolutionsAndKernels(errorTolerant, result, kernel)
+        for result, kernel in zip(results, kernels)
+    ]
 
     if any(removeKernelsAndResultsFlag) and not errorTolerant:
         printExit("** kernel generation failure **")
@@ -552,34 +578,78 @@ def _applyCustomKernelDefToSol(sol, result):
     Contractions-level customKernel attribute."""
     ckDef = getattr(result, 'customKernelDef', None)
     if ckDef is not None:
-        sol.originalSolution._state["CustomKernel"] = ckDef
+        _setSolutionState(sol.originalSolution, "CustomKernel", ckDef)
         from ..Contractions import CustomKernel as CK
         sol.customKernel = CK.FromOriginalState(ckDef)
+
+def _setSolutionState(solution, key, value):
+    """Write one state key of a Solution or CompactSolution.
+
+    A real Solution is written through _state, as before, so its cached name
+    is not invalidated; a CompactSolution records the write in its overlay.
+    """
+    if isinstance(solution, CompactSolution):
+        solution[key] = value
+    else:
+        solution._state[key] = value
+
+
+def _compileKey(kernel, splitGSU: bool) -> str:
+    """getKernelCompileKey, served from the summary for a CompactSolution."""
+    if isinstance(kernel, CompactSolution):
+        kernel.checkSplitGSU(splitGSU)
+        return kernel.kernelNameMin
+    return getKernelCompileKey(kernel, splitGSU)
+
+
+def _symbolName(kernel, splitGSU: bool) -> str:
+    """getKernelNameMin, served from the summary for a CompactSolution."""
+    if isinstance(kernel, CompactSolution):
+        kernel.checkSplitGSU(splitGSU)
+        return kernel.kernelNameMin
+    return getKernelNameMin(kernel, splitGSU)
+
+
+def _fileBase(splitGSU: bool, kernel) -> str:
+    """getKernelFileBase, served from the summary for a CompactSolution."""
+    if isinstance(kernel, CompactSolution):
+        kernel.checkSplitGSU(splitGSU)
+        return kernel.baseName
+    return getKernelFileBase(splitGSU, kernel)
+
+
+def _dedupeKey(kernel, splitGSU: bool) -> str:
+    """getKeyNoInternalArgs, served from the summary for a CompactSolution."""
+    if isinstance(kernel, CompactSolution):
+        kernel.checkSplitGSU(splitGSU)
+        return kernel.dedupeKey()
+    return getKeyNoInternalArgs(kernel, splitGSU)
+
 
 def passPostKernelInfoToLibrary(results, kernels, masterLibraries, splitGSU: bool):
     resultDict = {}
     for kernIdx, r in enumerate(results):
-        kName = getKernelCompileKey(kernels[kernIdx], splitGSU)
+        kName = _compileKey(kernels[kernIdx], splitGSU)
         resultDict["%s"%kName] = r
     for archName, masterLibrary in masterLibraries.items():
         for solIdx, sol in masterLibrary.solutions.items():
             solutionKernels = sol.originalSolution.getKernels()
             for kernel in solutionKernels:
-                kName = getKernelCompileKey(kernel, splitGSU)
+                kName = _compileKey(kernel, splitGSU)
                 try:
                     result = resultDict["%s"%kName]
                     sol.sizeMapping.CUOccupancy = result.cuoccupancy
                     sol.sizeMapping.MathClocksUnrolledLoop = result.mathclk
-                    sol.sizeMapping.PrefetchGlobalRead = sol.originalSolution._state['PrefetchGlobalRead']
-                    sol.sizeMapping.NonTemporalA = sol.originalSolution._state['NonTemporalA']
-                    sol.sizeMapping.NonTemporalB = sol.originalSolution._state['NonTemporalB']
-                    sol.sizeMapping.adaptiveGemmNTAB = sol.originalSolution._state.get('AdaptiveGemmNTAB', 0)
-                    sol.sizeMapping.NonTemporalD = sol.originalSolution._state['NonTemporalD']
-                    sol.sizeMapping.WaveSeparateGlobalReadA = sol.originalSolution._state['WaveSeparateGlobalReadA']
-                    sol.sizeMapping.WaveSeparateGlobalReadB = sol.originalSolution._state['WaveSeparateGlobalReadB']
-                    sol.sizeMapping.UnrollLoopSwapGlobalReadOrder = sol.originalSolution._state['UnrollLoopSwapGlobalReadOrder']
-                    sol.sizeMapping.DirectToVgprA = bool(sol.originalSolution._state['DirectToVgprA'])
-                    sol.sizeMapping.DirectToVgprB = bool(sol.originalSolution._state['DirectToVgprB'])
+                    sol.sizeMapping.PrefetchGlobalRead = kernel['PrefetchGlobalRead']
+                    sol.sizeMapping.NonTemporalA = kernel['NonTemporalA']
+                    sol.sizeMapping.NonTemporalB = kernel['NonTemporalB']
+                    sol.sizeMapping.adaptiveGemmNTAB = kernel.get('AdaptiveGemmNTAB', 0)
+                    sol.sizeMapping.NonTemporalD = kernel['NonTemporalD']
+                    sol.sizeMapping.WaveSeparateGlobalReadA = kernel['WaveSeparateGlobalReadA']
+                    sol.sizeMapping.WaveSeparateGlobalReadB = kernel['WaveSeparateGlobalReadB']
+                    sol.sizeMapping.UnrollLoopSwapGlobalReadOrder = kernel['UnrollLoopSwapGlobalReadOrder']
+                    sol.sizeMapping.DirectToVgprA = bool(kernel['DirectToVgprA'])
+                    sol.sizeMapping.DirectToVgprB = bool(kernel['DirectToVgprB'])
                     _applyCustomKernelDefToSol(sol, result)
                 except KeyError:
                     print(f"\n{'='*80}")
@@ -596,21 +666,21 @@ def passPostKernelInfoToLibrary(results, kernels, masterLibraries, splitGSU: boo
             for solIdx, sol in lib.solutions.items():
                 solutionKernels = sol.originalSolution.getKernels()
                 for kernel in solutionKernels:
-                    kName = getKernelCompileKey(kernel, splitGSU)
+                    kName = _compileKey(kernel, splitGSU)
                     try:
                         result = resultDict["%s"%kName]
                         sol.sizeMapping.CUOccupancy = result.cuoccupancy
                         sol.sizeMapping.MathClocksUnrolledLoop = result.mathclk
-                        sol.sizeMapping.PrefetchGlobalRead = sol.originalSolution._state['PrefetchGlobalRead']
-                        sol.sizeMapping.NonTemporalA = sol.originalSolution._state['NonTemporalA']
-                        sol.sizeMapping.NonTemporalB = sol.originalSolution._state['NonTemporalB']
-                        sol.sizeMapping.adaptiveGemmNTAB = sol.originalSolution._state.get('AdaptiveGemmNTAB', 0)
-                        sol.sizeMapping.NonTemporalD = sol.originalSolution._state['NonTemporalD']
-                        sol.sizeMapping.WaveSeparateGlobalReadA = sol.originalSolution._state['WaveSeparateGlobalReadA']
-                        sol.sizeMapping.WaveSeparateGlobalReadB = sol.originalSolution._state['WaveSeparateGlobalReadB']
-                        sol.sizeMapping.UnrollLoopSwapGlobalReadOrder = sol.originalSolution._state['UnrollLoopSwapGlobalReadOrder']
-                        sol.sizeMapping.DirectToVgprA = bool(sol.originalSolution._state['DirectToVgprA'])
-                        sol.sizeMapping.DirectToVgprB = bool(sol.originalSolution._state['DirectToVgprB'])
+                        sol.sizeMapping.PrefetchGlobalRead = kernel['PrefetchGlobalRead']
+                        sol.sizeMapping.NonTemporalA = kernel['NonTemporalA']
+                        sol.sizeMapping.NonTemporalB = kernel['NonTemporalB']
+                        sol.sizeMapping.adaptiveGemmNTAB = kernel.get('AdaptiveGemmNTAB', 0)
+                        sol.sizeMapping.NonTemporalD = kernel['NonTemporalD']
+                        sol.sizeMapping.WaveSeparateGlobalReadA = kernel['WaveSeparateGlobalReadA']
+                        sol.sizeMapping.WaveSeparateGlobalReadB = kernel['WaveSeparateGlobalReadB']
+                        sol.sizeMapping.UnrollLoopSwapGlobalReadOrder = kernel['UnrollLoopSwapGlobalReadOrder']
+                        sol.sizeMapping.DirectToVgprA = bool(kernel['DirectToVgprA'])
+                        sol.sizeMapping.DirectToVgprB = bool(kernel['DirectToVgprB'])
                         _applyCustomKernelDefToSol(sol, result)
                     except KeyError:
                         print(f"\n{'='*80}")
@@ -668,7 +738,93 @@ def writeHelpers(
         kernelHeaderFile.write(HeaderText)
 
 
-def writeSolutionsAndKernels(
+def _timedBuildSourceCodeObjectFiles(*args):
+    """buildSourceCodeObjectFiles under the python_kernel_build_src_co timer, which runs
+    concurrently with kernel generation and assembly (see prepareSolutionsAndKernels)."""
+    with timing_context("python_kernel_build_src_co"):
+        return buildSourceCodeObjectFiles(*args)
+
+
+def overlapsHelperCompile() -> bool:
+    """Whether the benchmark helper kernels are compiled while the pools run: only with a pool
+    budget above one, since the compile takes one slot of it."""
+    return CPUThreadCount() > 1
+
+
+def benchmarkPoolSize(generateSourcesAndExit: bool) -> int:
+    """Process pool size for every pool of a benchmark run: solution generation in
+    BenchmarkProblems, codegen (generateBenchmarkKernels) and the invalid-kernel check and
+    assembly (finishSolutionsAndKernels).
+
+    When the helper compiles overlap (overlapsHelperCompile) they take one slot of the budget
+    (helperCompileExecutor runs one at a time), so the pools get one process less. All pools of
+    the run use that size, also those that never run beside a compile: joblib resizes its worker
+    pool whenever the size changes (stopping a worker, then starting one that imports Tensile
+    again), and alternating sizes every benchmark step made subtile_mxfp4's build 85 -> 150 s."""
+    budget = CPUThreadCount()
+    if overlapsHelperCompile() and not generateSourcesAndExit:
+        return budget - 1
+    return budget
+
+
+@contextmanager
+def helperCompileExecutor():
+    """The thread that compiles the benchmark helper kernels (Kernels.cpp) of the builds prepared
+    with it (prepareSolutionsAndKernels), one after the other and in the order they were
+    prepared: the compiles take one slot of the pool budget (benchmarkPoolSize), and a step whose
+    helper kernels an earlier step already compiled hits the helper-kernel cache, as when the
+    steps were built one after the other. Leaving the block, also through an exception, waits
+    for the running compile and cancels the queued ones, so no compile is left running."""
+    executor = ThreadPoolExecutor(max_workers=1)
+    try:
+        yield executor
+    finally:
+        executor.shutdown(wait=True, cancel_futures=True)
+
+
+@dataclass
+class BenchmarkKernelBuild:
+    """The kernels of one benchmark step between the phases of their build: prepared
+    (prepareSolutionsAndKernels), generated (generateBenchmarkKernels, which takes the builds of
+    several steps at once) and finished (finishSolutionsAndKernels)."""
+
+    outputPath: Path
+    asmToolchain: object
+    solutions: list
+    kernelWriterAssembly: KernelWriterAssembly
+    splitGSU: bool
+    archNames: Dict[IsaVersion, str]
+    errorTolerant: bool
+    generateSourcesAndExit: bool
+    compress: bool
+    removeTemporaries: bool
+    destRoot: Path
+    buildTmpPath: Path
+    assemblyTmpPath: Path
+    asmGroups: list
+    asmKernels: list
+    rocisaData: object
+    outOptions: object
+    poolSize: int
+    # The helper compile, while it may still be running (None: none, or already waited for).
+    helperBuild: Optional[Future]
+    # Set by generateBenchmarkKernels.
+    asmResults: Optional[List[KernelCodeGenResult]] = None
+
+
+def _profileKernelBuild(running: bool):
+    """PythonProfile profiles the kernel build only: each phase below starts the profiler and
+    stops it again, so the work between the phases (e.g. the next steps' solution generation)
+    is left out, as when each step was built in one call. Stats add up over the starts."""
+    if globalParameters["PythonProfile"]:
+        import yappi
+        if running:
+            yappi.start()
+        else:
+            yappi.stop()
+
+
+def prepareSolutionsAndKernels(
     outputPath,
     asmToolchain,
     srcToolchain,
@@ -678,19 +834,22 @@ def writeSolutionsAndKernels(
     kernelWriterAssembly,
     splitGSU: bool,
     cmdlineArchs: List[str],
+    helperExecutor: ThreadPoolExecutor,
     disableAsmComments: bool=False,
     errorTolerant: bool=False,
     generateSourcesAndExit: bool=False,
     compress: bool=True,
     removeTemporaries: bool=True,
-):
+) -> BenchmarkKernelBuild:
+    """The first phase of a benchmark step's kernel build: the build directories, the
+    representative assembly kernels to generate, and the helper kernels, written to Kernels.cpp
+    and queued for compiling on helperExecutor (helperCompileExecutor). Their compile only needs
+    the helper kernels, so it runs while the assembly kernels are generated, assembled and
+    linked. With a budget of one there is no slot to spare: the compile then finishes here."""
     if globalParameters["PythonProfile"]:
         globalParameters["CpuThreads"] = 0
         printWarning("Python profiling is enabled. CpuThreads set to 0.")
-        import yappi
-        yappi.start()
-
-    codeObjectFiles = []
+    _profileKernelBuild(True)
 
     archNames = archNamesByIsa(cmdlineArchs)
 
@@ -731,20 +890,107 @@ def writeSolutionsAndKernels(
         numAsmKernels = len(asmKernels)
         numKernels = len(asmKernels)
         assert numKernels == numAsmKernels, "Only assembly kernels are supported in TensileLite"
-        memcompress = numAsmKernels > 10000
-        unaryProcessKernelSource = functools.partial(
-            processKernelSource,
-            kernelWriterAssembly,
-            rocisa.rocIsa.getInstance().getData(),
-            outOptions,
-            splitGSU,
-            compress=memcompress,
+
+    with timing_context("python_kernel_write_helpers"):
+        writeHelpers(outputPath, kernelHelperObjs, KERNEL_HELPER_FILENAME_CPP, KERNEL_HELPER_FILENAME_H)
+    srcKernelFile = outputPath / "Kernels.cpp"
+
+    helperBuild = None
+    if not generateSourcesAndExit:
+        helperBuild = helperExecutor.submit(
+            _timedBuildSourceCodeObjectFiles,
+            srcToolchain.compiler,
+            srcToolchain.bundler,
+            destRoot,
+            objectTmpPath,
+            outputPath,
+            srcKernelFile,
+            cmdlineArchs,
         )
+        if not overlapsHelperCompile():
+            with timing_context("python_kernel_build_src_co_wait"):
+                helperBuild.result()
+            helperBuild = None
+
+    _profileKernelBuild(False)
+    return BenchmarkKernelBuild(
+        outputPath=outputPath,
+        asmToolchain=asmToolchain,
+        solutions=solutions,
+        kernelWriterAssembly=kernelWriterAssembly,
+        splitGSU=splitGSU,
+        archNames=archNames,
+        errorTolerant=errorTolerant,
+        generateSourcesAndExit=generateSourcesAndExit,
+        compress=compress,
+        removeTemporaries=removeTemporaries,
+        destRoot=destRoot,
+        buildTmpPath=buildTmpPath,
+        assemblyTmpPath=assemblyTmpPath,
+        asmGroups=asmGroups,
+        asmKernels=asmKernels,
+        rocisaData=rocisa.rocIsa.getInstance().getData(),
+        outOptions=outOptions,
+        poolSize=benchmarkPoolSize(generateSourcesAndExit),
+        helperBuild=helperBuild,
+    )
+
+
+def generateBenchmarkKernels(builds: List[BenchmarkKernelBuild]):
+    """Generate the assembly kernels of the given builds in one pool, so that the benchmark steps
+    of a config share it instead of each filling and draining a pool of its own. Each build
+    gets the results of its own kernels, in order."""
+    if not builds:
+        return
+    asmIter = list(itertools.chain.from_iterable(
+        zip(
+            itertools.repeat(build.kernelWriterAssembly),
+            itertools.repeat(build.rocisaData),
+            itertools.repeat(build.outOptions),
+            itertools.repeat(build.splitGSU),
+            build.asmKernels,
+        )
+        for build in builds
+    ))
+    # The generated sources are held until their step is finished: compress them, as for a
+    # step of more than 10000 kernels, when several steps share the pool.
+    memcompress = len(builds) > 1 or sum(len(build.asmKernels) for build in builds) > 10000
+    # Every build of a run has the same pool size (benchmarkPoolSize).
+    poolSize = builds[0].poolSize
+    _profileKernelBuild(True)
     with timing_context("python_kernel_codegen"):
-        asmResults = _mapKernels(unaryProcessKernelSource, asmKernels)
+        asmResults = _mapKernels(
+            functools.partial(_processKernelSourceItem, memcompress), asmIter, procs=poolSize
+        )
+    _profileKernelBuild(False)
+    start = 0
+    for build in builds:
+        build.asmResults = asmResults[start : start + len(build.asmKernels)]
+        start += len(build.asmKernels)
+
+
+def finishSolutionsAndKernels(build: BenchmarkKernelBuild):
+    """The last phase of a benchmark step's kernel build, after generateBenchmarkKernels: drop
+    the solutions whose kernels failed, copy the codegen results back to the solutions, assemble
+    and link the kernels, and wait for the helper compile. Returns the code object files and the
+    number of kernels."""
+    asmToolchain = build.asmToolchain
+    solutions = build.solutions
+    splitGSU = build.splitGSU
+    archNames = build.archNames
+    asmResults = build.asmResults
+    asmKernels = build.asmKernels
+    asmGroups = build.asmGroups
+    assemblyTmpPath = build.assemblyTmpPath
+    removeTemporaries = build.removeTemporaries
+    poolSize = build.poolSize
+    numKernels = len(asmKernels)
+    _profileKernelBuild(True)
+    codeObjectFiles = []
+
     with timing_context("python_kernel_validate"):
         removeInvalidSolutionsAndKernels(
-            asmResults, asmKernels, solutions, errorTolerant, getVerbosity(), splitGSU
+            asmResults, asmKernels, solutions, build.errorTolerant, getVerbosity(), splitGSU,
         )
         validKeys = {
             getKernelCompileKey(kernel, splitGSU) for kernel in asmKernels
@@ -754,6 +1000,7 @@ def writeSolutionsAndKernels(
             asmResults, asmKernels, solutions, splitGSU
         )
 
+    # assemble goes to the pool workers: it must not refer to build (helperBuild is a Future).
     def assemble(ret):
         p, isa, wavefrontsize, _ = ret
         o_path = p.with_suffix(".o")
@@ -778,7 +1025,10 @@ def writeSolutionsAndKernels(
             "Writing assembly kernels",
             return_as="list",
             multiArg=False,
+            procs=poolSize,
         )
+    # The generated sources are written: do not hold them until every step is finished.
+    build.asmResults = None
 
     # Remove solutions whose representative kernel failed to assemble.
     failedKeys = {
@@ -792,11 +1042,8 @@ def writeSolutionsAndKernels(
         asmGroups[:] = [group for group in asmGroups if group.key not in failedKeys]
         asmKernels[:] = [group.representative for group in asmGroups]
 
-    with timing_context("python_kernel_write_helpers"):
-        writeHelpers(outputPath, kernelHelperObjs, KERNEL_HELPER_FILENAME_CPP, KERNEL_HELPER_FILENAME_H)
-    srcKernelFile = Path(outputPath) / "Kernels.cpp"
-
     if globalParameters["PythonProfile"]:
+        import yappi
         yappi.stop()
         yappi.get_func_stats().save("yappi_results.profile", type="callgrind")
         with open("yappi_results.txt", "w") as f:
@@ -805,31 +1052,24 @@ def writeSolutionsAndKernels(
             with open("yappi_thread_stats.txt", "w") as f:
                 yappi.get_thread_stats().print_all(out=f)
 
-    if not generateSourcesAndExit:
+    if not build.generateSourcesAndExit:
         with timing_context("python_kernel_build_co"):
             codeObjectFiles += buildAssemblyCodeObjectFiles(
                 asmToolchain.linker,
                 asmToolchain.bundler,
                 asmGroups,
-                destRoot,
+                build.destRoot,
                 assemblyTmpPath,
-                compress,
+                build.compress,
                 archNames=archNames,
             )
 
-        with timing_context("python_kernel_build_src_co"):
-            buildSourceCodeObjectFiles(
-                srcToolchain.compiler,
-                srcToolchain.bundler,
-                destRoot,
-                objectTmpPath,
-                outputPath,
-                srcKernelFile,
-                cmdlineArchs,
-            )
+    if build.helperBuild is not None:
+        with timing_context("python_kernel_build_src_co_wait"):
+            build.helperBuild.result()
 
-    if removeTemporaries and not generateSourcesAndExit:
-        removeScratch(outputPath, buildTmpPath)
+    if removeTemporaries and not build.generateSourcesAndExit:
+        removeScratch(build.outputPath, build.buildTmpPath)
 
     return codeObjectFiles, numKernels
 
@@ -944,6 +1184,15 @@ def writeSolutionsAndKernelsTCL(
             cmdlineArchs,
         )
 
+        # Kernels arrive grouped by logic file, so the largest kernels (those
+        # of the GridBased libraries) land on all workers at once and set the
+        # build's memory peak. A fixed-seed shuffle spreads them over the run.
+        # This lowers the expected number of large kernels in flight together;
+        # it is not a bound on the peak, and a different logic set can still
+        # draw an unlucky order. Results stay aligned with this list, and
+        # nothing downstream depends on the order (code objects link sorted,
+        # kernel info is keyed by kernel name).
+        random.Random(_KERNEL_ORDER_SEED).shuffle(uniqueAsmKernels)
         results = _mapKernels(
             compose(unaryAssemble, unaryWriteAssembly, unaryProcessKernelSource),
             uniqueAsmKernels,
@@ -979,7 +1228,7 @@ def generateKernelObjectsFromSolutions(solutions):
     for solution in solutions:
         solutionKernels = solution.getKernels()
         for kernel in solutionKernels:
-            kName = getKeyNoInternalArgs(kernel, False)
+            kName = _dedupeKey(kernel, False)
             if kName not in kernelNames:
                 kernels.append(kernel)
                 kernelNames.add(kName)
@@ -1006,10 +1255,17 @@ def generateKernelHelperObjects(solutions: List[Solution], cxxCompiler: str, isa
     """
     khos = []
     visited = set()
+    nameCallables = kernelObjectNameCallables()
     for solution in solutions:
-        for kernelHelperType, callable in kernelObjectNameCallables():
+        # A CompactSolution carries the names its parse worker computed, so
+        # only the few solutions that introduce a new helper are hydrated.
+        precomputed = getattr(solution, "helperNames", None)
+        if precomputed is not None:
+            perType = precomputed
+        else:
+            perType = [(t, c(solution)) for t, c in nameCallables]
+        for kernelHelperType, names in perType:
             buildMask = []
-            names = callable(solution)
             if names:
                 sortByEnum = lambda x: ("Enum" in x, names.index(x))
                 names = sorted(names, key=sortByEnum, reverse=True)
@@ -1020,7 +1276,7 @@ def generateKernelHelperObjects(solutions: List[Solution], cxxCompiler: str, isa
                     else:
                         buildMask.append(False)
                 if any(buildMask):
-                    kho = initHelperKernelObjects(solution, kernelHelperType, cxxCompiler, isaInfoMap)
+                    kho = initHelperKernelObjects(hydrateSolution(solution), kernelHelperType, cxxCompiler, isaInfoMap)
                     kho = list(itertools.compress(kho, buildMask))
                     if kho:
                         khos.extend(kho)
@@ -1192,6 +1448,13 @@ def generateLogicDataAndSolutions(logicFiles, args, assembler: Assembler, isaInf
     # raiseIfTypeMismatches() can format the existing fatal aggregate error.
     typeMismatchAggregate: dict = {}
     skippedGemmA2AFusion = 0
+    # The parse workers share this interpreter's environment, so one warning
+    # here covers every table they will keep as row dicts.
+    if not numpyAvailable():
+        printWarning(
+            "NumPy is not installed: matching tables are kept as row dicts, which "
+            "costs the parent several times the memory of the column form"
+        )
     # Every library pulled out of the generator below is retained for the rest
     # of the run, which makes the cyclic collector the dominant cost of this
     # phase (5x) if left running. See deferCyclicGC.
@@ -1271,18 +1534,19 @@ def generateLogicDataAndSolutions(logicFiles, args, assembler: Assembler, isaInf
             solIndex.append(sol.index)
         for name, lib in masterLibrary.lazyLibraries.items():
             for _, sol in lib.solutions.items():
-                sol.originalSolution._state["codeObjectFile"] = name
+                _setSolutionState(sol.originalSolution, "codeObjectFile", name)
                 solutions.append(sol.originalSolution)
                 solIndex.append(sol.index)
 
     # Get the solution index and it's codeObjectFile name
     codeObjectFilesIndex = {}
     for solution, index in zip(solutions, solIndex):
-        if "codeObjectFile" in solution._state and solution._state["codeObjectFile"] is not None:
-            if solution._state["codeObjectFile"] in codeObjectFilesIndex:
-                codeObjectFilesIndex[solution._state["codeObjectFile"]] = min(index, codeObjectFilesIndex[solution._state["codeObjectFile"]])
+        coFile = solution.get("codeObjectFile")
+        if coFile is not None:
+            if coFile in codeObjectFilesIndex:
+                codeObjectFilesIndex[coFile] = min(index, codeObjectFilesIndex[coFile])
             else:
-                codeObjectFilesIndex[solution._state["codeObjectFile"]] = index
+                codeObjectFilesIndex[coFile] = index
 
     # Reorder to int: name format
     codeObjectFilesIndex = {v: k for k, v in codeObjectFilesIndex.items()}
@@ -1630,14 +1894,6 @@ def main(argv=None):
     stop_pki = timer()
     print(f"Time to pass kernel info to library (s): {(stop_pki-start_pki):3.2f}")
 
-    solDict = {}
-    for solution in solutions:
-        solutionKernels = solution.getKernels()
-        for kernel in solutionKernels:
-            kName = getKeyNoInternalArgs(kernel, False)
-            if kName not in solDict:
-                solDict["%s"%kName] = kernel
-
     # The per-arch subdirectories these loops write into were created by
     # writeSolutionsAndKernelsTCL above, from the same requested names; LibraryIO.write
     # does not create them.
@@ -1711,6 +1967,7 @@ def main(argv=None):
 
     print(f"Total time (s): {(stop-start):3.2f}")
     print(f"Total kernels processed: {numKernels}")
+    print1(f"CompactSolution fallback reads in parent: {_compact.fallbackReads}")
     print(f"Kernels processed per second: {(numKernels/(stop-start)):3.2f}")
     print(f"KernelHelperObjs: {len(kernelHelperObjs)}")
     return 0

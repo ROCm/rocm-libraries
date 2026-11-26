@@ -16,6 +16,7 @@
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <initializer_list>
 #include <optional>
 #include <sstream>
 #include <string>
@@ -206,6 +207,35 @@ namespace
         memory_pool<h_memory>::ReleaseCached();
     }
 
+    TEST(HostMemory_pre_checkin, released_buffer_goes_back_to_the_pool_once)
+    {
+        if(memory_pool<h_memory>::FreesBeforeEachGet())
+            GTEST_SKIP() << "the pool on this host frees its idle buffers before every request";
+        ScopedLimit no_limit(nullptr);
+        memory_pool<h_memory>::ReleaseCached();
+        const void* first  = nullptr;
+        size_t      cached = 0;
+        {
+            HipHostBuffer released(HIP_R_8I, kSmall);
+            SKIP_UNLESS_PINNED(released.buf());
+            first = released.buf();
+            released.release();
+            EXPECT_EQ(released.buf(), nullptr);
+            EXPECT_EQ(released.memcheck(), hipErrorOutOfMemory);
+            cached = memory_pool<h_memory>::CachedBytes();
+            EXPECT_GE(cached, kSmall);
+        }
+        // The destructor does not hand the memory back a second time.
+        EXPECT_EQ(memory_pool<h_memory>::CachedBytes(), cached);
+        {
+            // The next buffer of the same size takes the released memory, not a new allocation.
+            HipHostBuffer again(HIP_R_8I, kSmall);
+            EXPECT_EQ(again.buf(), first);
+            EXPECT_EQ(memory_pool<h_memory>::CachedBytes(), 0u);
+        }
+        memory_pool<h_memory>::ReleaseCached();
+    }
+
     TEST(HostMemory_pre_checkin, failed_host_allocation_is_reported_not_used)
     {
         // Far beyond any host: the allocation fails and leaves a null buffer.
@@ -224,6 +254,21 @@ namespace
         EXPECT_NE(why.find("could not allocate 1.07e+09 GiB of pinned host memory"),
                   std::string::npos)
             << why;
+    }
+
+    TEST(HostMemory_pre_checkin, buffer_emptied_after_allocating_is_not_a_failure)
+    {
+        // A test that hands a buffer's memory on early leaves a null buffer in its vector, and a
+        // later allocation check of that vector must not report it as a memory shortage.
+        std::vector<HipHostBuffer> group;
+        group.emplace_back(HIP_R_8I, 4096);
+        ASSERT_EQ(group[0].memcheck(), hipSuccess);
+        HipHostBuffer taken = std::move(group[0]);
+        ASSERT_EQ(group[0].buf(), nullptr);
+        EXPECT_FALSE(group[0].allocation_failed());
+        EXPECT_EQ(host_allocation_failure(group[0]), "");
+        EXPECT_EQ(host_allocation_failure({&group}), "");
+        EXPECT_EQ(taken.memcheck(), hipSuccess);
     }
 
     TEST(HostMemory_pre_checkin, memory_shortages_are_listed_with_their_reasons)
@@ -246,6 +291,44 @@ namespace
                   "[ MEMORY   ] Suite.big: this case needs 48 GiB of host memory and 30 GiB is "
                   "available\n"
                   "[ MEMORY   ] Suite.huge: a device allocation failed: out of memory\n");
+    }
+
+    TEST(HostMemory_pre_checkin, allocation_stop_fails_the_tests_the_pr_tiers_run)
+    {
+        auto fails = [](const char* setting, const char* name) {
+            return hipblaslt_memory_stop_fails(setting, name, false);
+        };
+        EXPECT_TRUE(fails(nullptr, "_/matmul_test.matmul/pre_checkin_gemm"));
+        EXPECT_TRUE(fails(nullptr, "_/matmul_test.matmul/quick_gemm"));
+        EXPECT_TRUE(fails("", "_/matmul_test.matmul/smoke_gemm"));
+        EXPECT_TRUE(fails(nullptr, "MatmulMemory_pre_checkin.case"));
+        EXPECT_FALSE(fails(nullptr, "_/matmul_test.matmul/nightly_gemm"));
+        EXPECT_FALSE(fails(nullptr, "_/matmul_test.matmul/stress_gemm"));
+        EXPECT_FALSE(fails(nullptr, "_/matmul_test.matmul/HMM_gemm"));
+        EXPECT_FALSE(fails(nullptr, ""));
+    }
+
+    TEST(HostMemory_pre_checkin, preflight_stop_skips_by_default)
+    {
+        // A runner with less host memory than a pre_checkin case needs skips the case rather than
+        // failing the job.
+        EXPECT_FALSE(
+            hipblaslt_memory_stop_fails(nullptr, "_/matmul_test.matmul/pre_checkin_gemm", true));
+        EXPECT_FALSE(hipblaslt_memory_stop_fails("", "_/matmul_test.matmul/smoke_gemm", true));
+    }
+
+    TEST(HostMemory_pre_checkin, memory_stop_setting_overrides_the_default)
+    {
+        for(bool preflight : {false, true})
+        {
+            SCOPED_TRACE(preflight);
+            EXPECT_FALSE(hipblaslt_memory_stop_fails(
+                "0", "_/matmul_test.matmul/pre_checkin_gemm", preflight));
+            EXPECT_TRUE(
+                hipblaslt_memory_stop_fails("1", "_/matmul_test.matmul/stress_gemm", preflight));
+            EXPECT_TRUE(
+                hipblaslt_memory_stop_fails("yes", "_/matmul_test.matmul/nightly_gemm", preflight));
+        }
     }
 
 #ifndef _WIN32

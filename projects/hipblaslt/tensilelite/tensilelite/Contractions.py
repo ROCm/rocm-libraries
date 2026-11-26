@@ -33,6 +33,12 @@ from .Common import state, state_key_ordering, IsaInfo
 from .Common.Architectures import gfxToIsa
 from .Common.DataType import DataType
 from .Common.GlobalParameters import internalParameters
+from .Common.ValidParameters import (
+    ASSERT_DIM_MULTIPLE_PARAMETERS,
+    checkAssertAnySizeLessThanIsValid,
+    checkAssertMultipleMapIsValid,
+    checkAssertSizeMapIsValid,
+)
 from .SolutionStructs import Solution as OriginalSolution
 from .SolutionStructs.Problem import getBiasDataTypeListDefault, getGateResidualDataTypeListDefault
 from .Toolchain.Component import Assembler
@@ -518,6 +524,8 @@ ASSERT_DIM_MAP_PREDICATES = {
     "AssertSizeLessThan": "SizeLessThan",
     "AssertStrideAEqual": "StrideAEqual",
     "AssertStrideBEqual": "StrideBEqual",
+    "AssertStrideAMultiple": "StrideAMultiple",
+    "AssertStrideBMultiple": "StrideBMultiple",
     "AssertStrideCEqual": "StrideCEqual",
     "AssertStrideDEqual": "StrideDEqual",
 }
@@ -586,11 +594,34 @@ class ProblemPredicate(Properties.Predicate):
             return cls("AIGreaterThanEqual", value=value) if value > 0 else None
         if key == "AssertAILessThanEqual":
             return cls("AILessThanEqual", value=value) if value > 0 else None
+        if key == "AssertAnySizeLessThan":
+            if value == -1:
+                return None
+            if not isinstance(value, dict):
+                raise RuntimeError(
+                    "{} must be a dict of {{index: value}}, got {!r}".format(key, value)
+                )
+            try:
+                checkAssertAnySizeLessThanIsValid(key, value)
+            except Exception as e:
+                raise RuntimeError(str(e)) from e
+            predicates = [
+                cls("SizeLessThan", index=pos, value=val) for pos, val in value.items() if val != -1
+            ]
+            return cls.Or(predicates) if predicates else None
         if key in ASSERT_DIM_MAP_PREDICATES:
             if not isinstance(value, dict):
                 raise RuntimeError(
                     "{} must be a dict of {{index: value}}, got {!r}".format(key, value)
                 )
+            if key in ASSERT_DIM_MULTIPLE_PARAMETERS:
+                # Checked here as well as on the YAML inputs because logic-file
+                # and custom.config values reach the predicate without that gate.
+                try:
+                    checkAssertSizeMapIsValid(key, value)
+                    checkAssertMultipleMapIsValid(key, value)
+                except Exception as e:
+                    raise RuntimeError(str(e)) from e
             return extractDimPredicate(cls, value, ASSERT_DIM_MAP_PREDICATES[key])
         if key == "AssertAlphaValue":
             if value not in ASSERT_ALPHA_VALUE_NAMES:
@@ -598,6 +629,24 @@ class ProblemPredicate(Properties.Predicate):
                     "AssertAlphaValue must be one of {}, got {!r}".format(
                         sorted(ASSERT_ALPHA_VALUE_NAMES), value))
             return cls("AlphaValue", value=ASSERT_ALPHA_VALUE_NAMES[value])
+
+        if key == "AssertTensorBytesLessThan":
+            if value == -1:
+                return None
+            if type(value) is not int or value <= 0:
+                raise RuntimeError(
+                    "{} must be a positive int or -1, got {!r}".format(key, value)
+                )
+            return cls("TensorBytesLessThan", value=value)
+
+        if key == "AssertMXScalesPreSwizzled":
+            if value == -1:
+                return None
+            if value is not True:
+                raise RuntimeError(
+                    "{} must be True or -1, got {!r}".format(key, value)
+                )
+            return cls("MXScalesPreSwizzled")
 
         if key.endswith('Multiple'):
             if value == 1:
@@ -749,8 +798,62 @@ class ProblemPredicate(Properties.Predicate):
         if problemType.mxBlockA or problemType.mxBlockB:
             rv += [cls('MXScaleFormatEquals', value=mxScaleFormatId(state))]
 
-        if state['ProblemType']['FusedA2A'] == 'GemmA2A':
+        # Develop names this FusedA2A ('GemmA2A', 'A2AGemm', or 'Disabled').
+        # Older states used a bool FusedGemmA2A. A missing key, and 'Disabled',
+        # are not a fused GEMM.
+        fusedA2A = state['ProblemType'].get('FusedA2A')
+        fusedGemm = state['ProblemType'].get('FusedGemmA2A')
+        if fusedA2A == 'GemmA2A' or fusedGemm is True:
             rv += [cls('GemmA2AShape', value=state['MacroTile0'])]
+
+        # A rocRoller custom kernel is a pre-assembled object captured at one tile.
+        # It carries no generated edge handling in M and no partial-k-tile drain, so
+        # it is correct only where M is a whole number of its MacroTile0 and K a
+        # whole number of its DepthU. Without these predicates a GridBased lookup
+        # hands the kernel neighbouring sizes it was not captured for.
+        #
+        # Measured on gfx950 across the FP8, BF8 and FP4 families: with M % tile
+        # and K % depthU both zero the result is stable and correct; break either
+        # and the result is wrong and nondeterministic run to run.
+        #
+        # N is deliberately not constrained: N = 160, 192 and 320 against a
+        # 128-wide tile all verify clean, so the kernels do handle the N edge, and
+        # constraining it would reject working sizes. The rocRoller-off path
+        # (getRocRollerSelectedSolutions) guards all three; that is stricter than
+        # correctness requires.
+        customKernel = state.get('CustomKernel') if hasattr(state, 'get') else None
+        if customKernel and str(customKernel.get('name', '')).startswith('RR_GEMM_'):
+            # [MacroTile0, MacroTile1, DepthU], computed in CustomKernels.py from
+            # the kernel's own MatrixInstruction/WaveTile/WorkGroup. Scoped by the
+            # RR_GEMM_ prefix, which is how matchesRocRollerSelectedKernel in
+            # tensile_host.cpp identifies the same family. Other custom-kernel
+            # families are deliberately untouched: no equivalent measurement.
+            macroTile = customKernel.get('macrotile') or []
+            if len(macroTile) == 3:
+                tileM, _, depthU = macroTile
+                if tileM and tileM > 1:
+                    rv += [cls('Free0SizeMultiple', index=0, value=tileM)]
+                if depthU and depthU > 1:
+                    rv += [cls('BoundSizeMultiple', index=-1, value=depthU)]
+            else:
+                # A macrotile that is not [M, N, K] used to skip both guards
+                # and still publish the kernel. Name it: one logic file
+                # predicates every custom kernel in the same pass.
+                raise ValueError(
+                    "custom kernel {!r} has macrotile {!r}; expected 3 elements "
+                    "[MacroTile0, MacroTile1, DepthU]".format(
+                        customKernel.get('name', ''), macroTile))
+
+            # The kernels are 2-D. They carry no batch strides and never read
+            # workgroup_id_z, but their grid is [TilesX, TilesY, Batch], so every
+            # z-slice recomputes batch 0 and batches 1..N-1 come back wrong.
+            rv += [cls('BatchSizeEqual', index=0, value=1)]
+
+            # Each tensor gets one buffer descriptor sized over the whole tensor
+            # with a 32-bit num_records, so at 4 GiB the output is zeroed rather
+            # than the launch failing. The rocRoller-on path rejects the same
+            # problems in RocRollerGemmKernel::exceedsBufferAddressingLimit.
+            rv += [cls('BufferAddressingLimitCheck')]
 
         # Exact-size custom kernels record the M/N/K window they won. Without
         # it, a multi-solution lookup also accepts the neighboring tile.
@@ -778,7 +881,7 @@ class ProblemPredicate(Properties.Predicate):
             rv += [cls('SizeLessThan', index=kIdx,
                        value=kTiles * state['DepthU'] + 1)]
 
-        if state['ProblemType']['FusedA2A'] == 'A2AGemm':
+        if state['ProblemType'].get('FusedA2A') == 'A2AGemm':
             rv += [cls('A2AGemmShape', value=state['DepthU'] * state['A2ASubRounds'])]
 
         return rv

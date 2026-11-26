@@ -54,5 +54,10 @@
     "split_c",
     "prefetch_rows",
     "w_fold"
-  ]
+  ],
+  "predict_engine": {
+    "gfx950": [
+      "2f15f022-f8e5-4d85-8fa5-e9d696093ad5"
+    ]
+  }
 }

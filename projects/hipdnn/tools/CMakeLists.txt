@@ -2,11 +2,15 @@
 # SPDX-License-Identifier:  MIT
 
 if(HIPDNN_ENABLE_KERNEL_INGESTOR)
-    # Headers both command-line tools below share; tools-internal, never installed.
+    # Headers the command-line tools share; tools-internal, never installed. Includes the
+    # operand table and optional-feature analysis only the UHD tools read (OptionalFeatures.hpp).
     add_library(hipdnn_tools_common INTERFACE)
     target_include_directories(hipdnn_tools_common
         INTERFACE $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/common/include>)
     target_link_libraries(hipdnn_tools_common INTERFACE hipdnn_data_sdk hipdnn_flatbuffers_sdk)
+    if(NOT HIPDNN_SKIP_TESTS)
+        add_subdirectory(common/tests)
+    endif()
 
     # The training-corpus harvester; it feeds uhd_gen, so it ships with the rest of the UHD
     # training tooling.
@@ -18,7 +22,7 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
 
     add_executable(hipdnn_uhd_features uhd_gen/UhdFeatures.cpp)
     target_compile_options(hipdnn_uhd_features PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})
-    target_link_libraries(hipdnn_uhd_features PRIVATE hipdnn_plugin_sdk)
+    target_link_libraries(hipdnn_uhd_features PRIVATE hipdnn_plugin_sdk hipdnn_tools_common)
     target_compile_definitions(hipdnn_uhd_features PRIVATE HIPDNN_ENABLE_KERNEL_INGESTOR)
     clang_tidy_check(hipdnn_uhd_features)
     install(TARGETS hipdnn_uhd_features RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
@@ -302,7 +306,7 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
 
     add_executable(hipdnn_validate_descriptors IngestorGenerator/ValidateDescriptors.cpp)
     target_compile_definitions(hipdnn_validate_descriptors PRIVATE __HIP_PLATFORM_AMD__)
-    target_link_libraries(hipdnn_validate_descriptors PRIVATE hipdnn_plugin_sdk hip::host)
+    target_link_libraries(hipdnn_validate_descriptors PRIVATE hipdnn_plugin_sdk hipdnn_tools_common hip::host)
     install(TARGETS hipdnn_validate_descriptors RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
 
     # Smoke test: run the validator over a real descriptor bundle and assert it reports
@@ -378,6 +382,9 @@ endif()
         # copy of ROOT in HIPDNN_VALIDATE_DESCRIPTORS_WORKDIR, and the copy is what the tool
         # validates. HIPDNN_VALIDATE_DESCRIPTORS_FEATURE_SAMPLES, when set, is passed to the
         # tool as --feature-samples.
+        # HIPDNN_VALIDATE_DESCRIPTORS_UNGUARDED, when set, is the exact
+        # `unguarded_optional_features` of the first model check (the space-separated references
+        # the model reads bare), or `none` when that field must be absent.
         file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/ValidateDescriptorsModelChecksTest.cmake" [[
 if(NOT DEFINED HIPDNN_VALIDATE_DESCRIPTORS_TOOL
    OR NOT DEFINED HIPDNN_VALIDATE_DESCRIPTORS_ROOT
@@ -482,6 +489,26 @@ if(DEFINED HIPDNN_VALIDATE_DESCRIPTORS_DIAGNOSTIC)
             "no diagnostic contains '${HIPDNN_VALIDATE_DESCRIPTORS_DIAGNOSTIC}'")
     endif()
 endif()
+
+if(DEFINED HIPDNN_VALIDATE_DESCRIPTORS_UNGUARDED)
+    string(JSON unguardedFeatures ERROR_VARIABLE unguardedError
+           GET "${toolStdout}" model_checks 0 unguarded_optional_features)
+    if(HIPDNN_VALIDATE_DESCRIPTORS_UNGUARDED STREQUAL "none")
+        if(NOT unguardedError)
+            message(FATAL_ERROR
+                "model_checks[0] lists unguarded_optional_features '${unguardedFeatures}'; "
+                "expected none")
+        endif()
+    elseif(unguardedError)
+        message(FATAL_ERROR
+            "model_checks[0] has no unguarded_optional_features; expected "
+            "'${HIPDNN_VALIDATE_DESCRIPTORS_UNGUARDED}'")
+    elseif(NOT unguardedFeatures STREQUAL HIPDNN_VALIDATE_DESCRIPTORS_UNGUARDED)
+        message(FATAL_ERROR
+            "model_checks[0] lists unguarded_optional_features '${unguardedFeatures}'; "
+            "expected '${HIPDNN_VALIDATE_DESCRIPTORS_UNGUARDED}'")
+    endif()
+endif()
 ]])
         # cmake-format: on
 
@@ -511,7 +538,9 @@ endif()
         endforeach()
 
         # <fixture>:<exit status>:<model checks>[:<diagnostic>], as the fixtures' README states
-        # them; the optional diagnostic is a colon-free text a reported diagnostic must contain. A
+        # them; the optional diagnostic is a colon-free text a reported diagnostic must contain.
+        # An overlay fixture holds only the files it changes, laid over slotted_valid or, for
+        # the l2_*_optional and l2_tflops_work_feature fixtures, over l2_dynamic_features. A
         # predict_engine model is admitted only through the L1 guards, so a static_order
         # estimate fails the run while a static_order kernel ranker does not. A ranker whose
         # features need a sample, run without one, is admitted with extraction skipped.
@@ -522,11 +551,17 @@ endif()
             slotted_two_ws_tokens
             slotted_ranker_names_other_slot
             slotted_multi_launch
+            l2_unguarded_optional
+            l2_guarded_optional
+            l2_tflops_work_feature
         )
         foreach(
             roleFixture
             "l2_static_order:0:sort_kernel_catalog=true"
             "l2_dynamic_features:0:sort_kernel_catalog=true"
+            "l2_unguarded_optional:0:sort_kernel_catalog=true"
+            "l2_guarded_optional:0:sort_kernel_catalog=true"
+            "l2_tflops_work_feature:0:sort_kernel_catalog=true"
             "l1_static_order:1:sort_kernel_catalog=true,predict_engine=false"
             "l1_native:0:sort_kernel_catalog=true,predict_engine=true"
             "slotted_valid:0:sort_kernel_catalog@dkdv=true,sort_kernel_catalog@dq=true,predict_engine=true"
@@ -555,12 +590,26 @@ endif()
                     "-DHIPDNN_VALIDATE_DESCRIPTORS_OVERLAY=${fixtureRoot}"
                     "-DHIPDNN_VALIDATE_DESCRIPTORS_WORKDIR=${CMAKE_CURRENT_BINARY_DIR}/vdo/${fixtureName}"
                 )
-                set(fixtureRoot "${HIPDNN_VALIDATE_DESCRIPTORS_FIXTURES}/slotted_valid")
+                if(fixtureName MATCHES "^l2_")
+                    set(fixtureRoot "${HIPDNN_VALIDATE_DESCRIPTORS_FIXTURES}/l2_dynamic_features")
+                else()
+                    set(fixtureRoot "${HIPDNN_VALIDATE_DESCRIPTORS_FIXTURES}/slotted_valid")
+                endif()
             elseif(fixtureName STREQUAL "slotted_feature_samples_ws")
                 set(fixtureCaseArgs
                     "-DHIPDNN_VALIDATE_DESCRIPTORS_FEATURE_SAMPLES=${fixtureRoot}/feature_samples.json"
                 )
                 set(fixtureRoot "${HIPDNN_VALIDATE_DESCRIPTORS_FIXTURES}/slotted_valid")
+            endif()
+            # l2_tflops_work_feature also reads $graph.flops bare, which a tflops model may: only
+            # the scale is reported.
+            if(fixtureName STREQUAL "l2_unguarded_optional"
+               OR fixtureName STREQUAL "l2_tflops_work_feature")
+                list(APPEND fixtureCaseArgs
+                     "-DHIPDNN_VALIDATE_DESCRIPTORS_UNGUARDED=$graph.nodes[0].attn_scale_value"
+                )
+            elseif(fixtureName STREQUAL "l2_guarded_optional")
+                list(APPEND fixtureCaseArgs "-DHIPDNN_VALIDATE_DESCRIPTORS_UNGUARDED=none")
             endif()
             add_test(
                 NAME hipdnn_validate_descriptors_${fixtureName}
@@ -635,10 +684,13 @@ endif()
             )
 
             # test_verify_variant_sets_multi_launch_rocke.py packs with the real compiler and
-            # fails without one. Name the hipcc find_package(hip) resolved, as the packaging
-            # suite's own ctest entries do: the ROCm bin directory is not on every lane's PATH.
-            if(HIP_HIPCC_EXECUTABLE)
-                list(APPEND _hipdnn_ingestor_pytest_env "HKP_HIPCC=${HIP_HIPCC_EXECUTABLE}")
+            # fails without one.  Use CMAKE_HIP_COMPILER (TheRock) or CMAKE_CXX_COMPILER
+            # (standalone CXX-only builds) directly: HKP_HIP_COMPILER is scoped to the
+            # packaging directory and not visible here.
+            if(CMAKE_HIP_COMPILER)
+                list(APPEND _hipdnn_ingestor_pytest_env "HKP_HIP_COMPILER=${CMAKE_HIP_COMPILER}")
+            elseif(CMAKE_CXX_COMPILER)
+                list(APPEND _hipdnn_ingestor_pytest_env "HKP_HIP_COMPILER=${CMAKE_CXX_COMPILER}")
             endif()
 
             # Include directories for test_native_stub.py, one per line. TARGET_PROPERTY does not

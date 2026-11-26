@@ -26,7 +26,7 @@ from functools import lru_cache
 
 from ..Common.Constants import MAX_FILENAME_LENGTH
 from ..Common.RequiredParameters import getRequiredParametersMin, getRequiredParametersFull
-from ..Common.Utilities import isMxf4SubtilePath, plsinDataTypes, printWarning
+from ..Common.Utilities import isMxf4SubtilePath, plsinDataTypes, printWarning, storeCachelineAlignEnabled
 from ..Common.ValidParameters import parseStinkyTofuRegisterAllocation
 
 from .Problem import ProblemType
@@ -318,6 +318,15 @@ def _getName(state, requiredParameters: frozenset, splitGSU: bool, ignoreInterna
     else:
       requiredParametersTemp.discard("TDMFuse")
 
+    # StoreCachelineAlign only changes codegen on the gfx950 MXF4 subtile path, and there
+    # only on kernels whose waves hold both halves of a line. Name it only where it acts,
+    # so every other kernel keeps its existing name.
+    if storeCachelineAlignEnabled(state) \
+        and tuple(state.get("ISA", ())[:2]) == (9, 5) and isMxf4SubtilePath(state):
+      requiredParametersTemp.add("StoreCachelineAlign")
+    else:
+      requiredParametersTemp.discard("StoreCachelineAlign")
+
     # StinkyTofuRegisterAllocation=0 leaves Tensile's colouring, so naming it
     # would rename every kernel that does not opt in. Any other value changes
     # the colouring (and mode 3 changes which kernels are accepted), so it
@@ -338,6 +347,11 @@ def _getName(state, requiredParameters: frozenset, splitGSU: bool, ignoreInterna
     else:
       requiredParametersTemp.discard("LDSSegmentBRotate")
 
+    if state.get("WaveTileContiguousA", False):
+      requiredParametersTemp.add("WaveTileContiguousA")
+    else:
+      requiredParametersTemp.discard("WaveTileContiguousA")
+
     # ClusterAIDMapping=-1 (disabled) is the default; naming it would rename every kernel.
     if state.get("ClusterAIDMapping", -1) != -1:
       requiredParametersTemp.add("ClusterAIDMapping")
@@ -350,6 +364,10 @@ def _getName(state, requiredParameters: frozenset, splitGSU: bool, ignoreInterna
     # PrefetchGL2SAddr=False (vgpr-pair address) is the default; naming it would rename every kernel.
     if not state.get("PrefetchGL2SAddr", False):
       requiredParametersTemp.discard("PrefetchGL2SAddr")
+    # MXScaleVgprInterleaveExtraVgpr=False (interleave within the default VGPR span) is the default;
+    # naming it would rename every kernel.
+    if not state.get("MXScaleVgprInterleaveExtraVgpr", False):
+      requiredParametersTemp.discard("MXScaleVgprInterleaveExtraVgpr")
 
     for key in sorted(requiredParametersTemp):
       if key not in state or key == "CustomKernel":

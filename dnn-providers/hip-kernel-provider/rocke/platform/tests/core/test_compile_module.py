@@ -152,6 +152,7 @@ def test_compile_module_lowers_each_kernel_and_links_in_order() -> None:
     assert build.call_args.args[0] == texts
     assert build.call_args.kwargs["isa"] == "amdgcn-amd-amdhsa--gfx1101"
     assert build.call_args.kwargs["options"] == ["-O3"]
+    assert artifact.options == ("-O3",)
     single.assert_not_called()
     assert artifact.llvm_texts == texts
     assert artifact.hsaco == b"hsaco"
