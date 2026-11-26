@@ -35,9 +35,11 @@ from rocke.core.ir import (
 )
 from rocke.core.mma_operand import mma_operand_needs_reinterpret
 from rocke.tests.engines import (
+    ENGINES,
     assert_both_engines_reject,
     assert_both_engines_reject_hip,
     lower_hip_with_both_engines,
+    lower_hip_with_engine,
     lower_with_both_engines,
 )
 from rocke.tests.ir_validity import assert_target_accepts
@@ -449,7 +451,8 @@ def test_hip_16_bit_mfma_lowers_in_both_engines(
     _assert_hipcc_accepts(source, arch, tmp_path)
 
 
-def test_hip_integer_wmma_reinterprets_only_the_packed_byte_operand(tmp_path):
+@pytest.mark.parametrize("engine", ENGINES)
+def test_hip_integer_wmma_reinterprets_only_the_packed_byte_operand(engine, tmp_path):
     kernel = _mma_kernel(
         "gfx1151",
         "wmma_i32_16x16x16_iu8",
@@ -458,7 +461,7 @@ def test_hip_integer_wmma_reinterprets_only_the_packed_byte_operand(tmp_path):
         _zeros(I32, 8),
         I32,
     )
-    source = lower_hip_with_both_engines(kernel, "gfx1151")
+    source = lower_hip_with_engine(kernel, "gfx1151", engine=engine)
     assert re.search(
         r"\(true, __builtin_bit_cast\(i32x4, \w+\), true, \w+, \w+, false\);",
         _mma_builtin_call(source),
@@ -466,7 +469,8 @@ def test_hip_integer_wmma_reinterprets_only_the_packed_byte_operand(tmp_path):
     _assert_hipcc_accepts(source, "gfx1151", tmp_path)
 
 
-def test_hip_integer_wmma_takes_packed_words_unchanged():
+@pytest.mark.parametrize("engine", ENGINES)
+def test_hip_integer_wmma_takes_packed_words_unchanged(engine):
     kernel = _mma_kernel(
         "gfx1151",
         "wmma_i32_16x16x16_iu4",
@@ -475,11 +479,14 @@ def test_hip_integer_wmma_takes_packed_words_unchanged():
         _zeros(I32, 8),
         I32,
     )
-    call = _mma_builtin_call(lower_hip_with_both_engines(kernel, "gfx1151"))
+    call = _mma_builtin_call(lower_hip_with_engine(kernel, "gfx1151", engine=engine))
     assert "__builtin_bit_cast" not in call
 
 
-def test_hip_gfx1250_fp8_wmma_reinterprets_each_operand_as_its_catalog_format():
+@pytest.mark.parametrize("engine", ENGINES)
+def test_hip_gfx1250_fp8_wmma_reinterprets_each_operand_as_its_catalog_format(
+    engine,
+):
     kernel = _mma_kernel(
         "gfx1250",
         "wmma_gfx1250_f32_16x16x64_fp8_bf8",
@@ -488,5 +495,5 @@ def test_hip_gfx1250_fp8_wmma_reinterprets_each_operand_as_its_catalog_format():
         _zeros(F32, 8),
         F32,
     )
-    call = _mma_builtin_call(lower_hip_with_both_engines(kernel, "gfx1250"))
+    call = _mma_builtin_call(lower_hip_with_engine(kernel, "gfx1250", engine=engine))
     assert len(re.findall(r"__builtin_bit_cast\(i32x8, \w+\)", call)) == 2

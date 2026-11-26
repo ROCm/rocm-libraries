@@ -30,7 +30,7 @@ from rocke.core.arch.target import integer_mma_op_ids
 from rocke.core.ir import IRBuilder, PtrType, VectorType, dtype_to_ir_type
 from rocke.core.isa.matrix_calls import MATRIX_CALLS, MatrixOperand
 from rocke.core.lower_llvm import LLVM_FLAVORS
-from rocke.tests.engines import lower_hip_with_both_engines, lower_with_both_engines
+from rocke.tests.engines import ENGINES, lower_hip_with_engine, lower_with_both_engines
 from rocke.tests.ir_validity import assert_target_accepts, target_mnemonics
 from rocke.tests.lanes import SOURCE_TREE, skip_until
 
@@ -161,12 +161,14 @@ def _hip_flags(source: str, op_id: str) -> tuple[str, str]:
     return arguments[0], arguments[2]
 
 
+@pytest.mark.parametrize("engine", ENGINES)
 @pytest.mark.parametrize("op_id, flags", _GFX11_ROWS)
-def test_the_hip_lowering_passes_the_bools_the_row_gives(op_id, flags):
-    """Every gfx11 integer row, signed or not, lowers in both engines to its
-    builtin with one bool per operand taken from the row."""
-    source = lower_hip_with_both_engines(
-        _kernel("gfx11-generic", op_id), "gfx11-generic"
+def test_the_hip_lowering_passes_the_bools_the_row_gives(op_id, flags, engine):
+    """Every gfx11 integer row, signed or not, lowers to its builtin with one
+    bool per operand taken from the row, in the Python engine and in the C++
+    engine, which emits the same source."""
+    source = lower_hip_with_engine(
+        _kernel("gfx11-generic", op_id), "gfx11-generic", engine=engine
     )
     assert _hip_flags(source, op_id) == tuple(_HIP_BOOL[flag] for flag in flags)
 
