@@ -17,8 +17,10 @@ from :func:`fixture_session_environment`, so it records nothing; one that runs
 the product's test files records them, as the entry's own sessions do.
 
 A record names the test file by its absolute path in the tree that ran it
-(an installed tree or a source checkout) and the test by its pytest node name
-after the file (``[Class::]test[params]``). Its ``event`` is one of:
+(an installed tree or a source checkout), written with forward slashes on
+every operating system so that one reader reads the records of any of them,
+and the test by its pytest node name after the file
+(``[Class::]test[params]``). Its ``event`` is one of:
 
 - ``collected``: the test was collected (before any filter removed it);
 - ``deselected``: a filter removed it; ``reason`` is the reason the plugin that
@@ -123,7 +125,7 @@ def note_deselection(item: pytest.Item, reason: str) -> None:
 class RunRecord:
     """One event of one test (or one test file) in a run."""
 
-    file: str  # absolute path of the test file in the tree that ran it
+    file: str  # absolute path of the test file in the tree that ran it, "/"-separated
     node: str  # pytest node name after the file; "" for a file-level event
     event: str
     reason: str = ""
@@ -210,7 +212,7 @@ class _Recorder:
         )
 
     def _write(self, file: Path, node: str, event: str, reason: str = "") -> None:
-        record = RunRecord(str(file.resolve()), node, event, reason)
+        record = RunRecord(_portable_path(file), node, event, reason)
         self._write_line(asdict(record))
 
     def _write_line(self, fields: dict[str, str]) -> None:
@@ -227,7 +229,7 @@ class _Recorder:
         for item in items:
             self._write_line(
                 {
-                    "file": str(item.path.resolve()),
+                    "file": _portable_path(item.path),
                     "node": _node_name(item),
                     "event": _SELECTED,
                 }
@@ -276,6 +278,11 @@ class _Recorder:
 
     def pytest_unconfigure(self) -> None:
         self._out.close()
+
+
+def _portable_path(file: Path) -> str:
+    """``file``'s absolute path with "/" separators, as every record names it."""
+    return file.resolve().as_posix()
 
 
 def _node_name(item: pytest.Item) -> str:

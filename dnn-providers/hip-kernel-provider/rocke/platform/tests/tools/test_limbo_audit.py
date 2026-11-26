@@ -17,6 +17,7 @@ is quarantined.
 from __future__ import annotations
 
 import importlib.util
+import json
 import subprocess
 import sys
 import textwrap
@@ -513,15 +514,60 @@ def test_an_installed_path_maps_to_its_source_file():
     )
     # Two source files of that name and no longer suffix in common: none.
     assert source_paths.source_of("/elsewhere/test_dtypes.py") is None
+    # A path a Windows run wrote maps the same on any reader's OS.
+    assert (
+        source_paths.source_of(r"C:\x\hip_kernel_provider\tests\core\test_dtypes.py")
+        == "platform/tests/core/test_dtypes.py"
+    )
+
+
+def _as_windows_records(records: Path, destination: Path) -> Path:
+    """A copy of the run records in ``records`` with each file path written as
+    a run on Windows writes it without run_records' "/" separators: a drive
+    and backslashes."""
+    destination.mkdir()
+    for path in records.glob("*.jsonl"):
+        lines = []
+        for line in path.read_text(encoding="utf-8").splitlines():
+            fields = json.loads(line)
+            if fields["file"]:
+                fields["file"] = "C:" + fields["file"].replace("/", "\\")
+            lines.append(json.dumps(fields))
+        (destination / path.name).write_text("\n".join(lines) + "\n", "utf-8")
+    return destination
+
+
+# A test that skips with a reason no registry entry records.
+_SKIPS_WHY = "def test_skips():\n    import pytest; pytest.skip('why')\n"
+
+
+def test_records_a_windows_run_wrote_are_audited_on_any_os(tmp_path):
+    tree = _tree_with(tmp_path, {UNREGISTERED_FILE: _SKIPS_WHY})
+    records = _run_lane(tree, tmp_path / "gfx1100", "gfx1100")
+    windows = _as_windows_records(records, tmp_path / "windows")
+    assert _audit(tree, {"gfx1100": windows}) == {
+        (UNREGISTERED_FILE, "test_skips"): {"gfx1100": "why"}
+    }
+
+
+def test_a_lane_whose_records_name_no_source_test_file_fails_the_audit(tmp_path):
+    """Records of another tree (or none at all) are no evidence that the lane
+    ran anything: the audit fails rather than reporting no test in limbo."""
+    tree = _tree_with(tmp_path, {UNREGISTERED_FILE: "def test_passes():\n    pass\n"})
+    other = _tree_with(tmp_path / "other", {"tests/test_elsewhere.py": "x = 1\n"})
+    records = _run_lane(tree, tmp_path / "gfx942", "gfx942")
+    report = tmp_path / "limbo.md"
+    arguments = ["--lane", f"gfx942={records}", "--report", str(report)]
+    assert limbo_audit.main([*arguments, "--tree", str(tree)]) == 0
+    assert limbo_audit.main([*arguments, "--tree", str(other)]) == 1
+    assert (
+        "Lanes with no record naming a source test file, so no evidence: gfx942"
+        in report.read_text()
+    )
 
 
 def test_the_command_fails_on_a_test_in_limbo_and_writes_its_report(tmp_path):
-    tree = _tree_with(
-        tmp_path,
-        {
-            UNREGISTERED_FILE: "def test_skips():\n    import pytest; pytest.skip('why')\n"
-        },
-    )
+    tree = _tree_with(tmp_path, {UNREGISTERED_FILE: _SKIPS_WHY})
     records = _run_lane(tree, tmp_path / "gfx942", "gfx942")
     report = tmp_path / "limbo.md"
     arguments = [
