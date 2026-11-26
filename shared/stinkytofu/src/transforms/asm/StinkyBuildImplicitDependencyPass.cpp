@@ -94,11 +94,14 @@ static bool processBarrier(StinkyInstruction& inst, const MemTokenData& mt,
     return true;
 }
 
-// LDS writers (tensor_load, ds_write): LDS tokens to dest.
+// LDS writers (tensor_load, ds_write, global_load_async_to_lds_*): LDS tokens to dest.
 static void processLdsWriter(StinkyInstruction& inst, const MemTokenData& mt,
                              [[maybe_unused]] const std::string& bbLabel) {
     PASS_DEBUG(std::cerr << "[BuildImplicitDep] LDS writer ("
-                         << (isTensorLoad(inst) ? "tensor_load" : "ds_write") << ") tokens=[";
+                         << (isTensorLoad(inst)             ? "tensor_load"
+                             : isGlobalLoadAsyncToLds(inst) ? "global_load_async_to_lds"
+                                                            : "ds_write")
+                         << ") tokens=[";
                for (int t
                     : mt.tokens) std::cerr
                << t << " ";
@@ -136,7 +139,7 @@ void setPseudoRegistersInBlock(BasicBlock& bb, PassContext& passCtx) {
 
         if (isBarrier(*inst))
             processBarrier(*inst, *mt, bb.getLabel());
-        else if (isTensorLoad(*inst) || isDSWrite(*inst))
+        else if (isTensorLoad(*inst) || isDSWrite(*inst) || isGlobalLoadAsyncToLds(*inst))
             processLdsWriter(*inst, *mt, bb.getLabel());
         else if (isDSRead(*inst) || isGlobalStoreAsyncFromLds(*inst))
             processLdsReader(*inst, *mt, bb.getLabel());
@@ -146,7 +149,8 @@ void setPseudoRegistersInBlock(BasicBlock& bb, PassContext& passCtx) {
             // this pass. If reordered, teach this branch to tolerate wait-cnt insts.
             assert(false &&
                    "instruction has MemTokenData but is not a barrier, fence, "
-                   "tensor_load, ds_write, ds_read, or global_store_async_from_lds");
+                   "tensor_load, ds_write, ds_read, global_store_async_from_lds, or "
+                   "global_load_async_to_lds");
     }
 }
 

@@ -775,14 +775,28 @@ DEF_FORMAT(VGLOBAL_ATOMIC_SADDR,
 )
 
 // VGLOBAL_ASYNC_FROM_LDS - gfx1250 async store LDS -> global:
-//   global_store_async_from_lds_* vaddr(64), dsaddr(32), saddr(64); no dest.
+//   global_store_async_from_lds_* vaddr(32), vsrc(32), saddr(64); no dest.
 // Shared by all size variants (b8/b32/b64/b128) via the DEF_BATCH.
 DEF_FORMAT(VGLOBAL_ASYNC_FROM_LDS,
     .parent = VGLOBAL,
     .flags = {GLOBALStoreAsyncFromLds},
     .fields = {
-        {S0, vaddr, vgpr, 64},
+        {S0, vaddr, vgpr, 32},
         {S1, vsrc, vgpr, 32},
+        {S2, saddr, sreg, 64},
+    },
+)
+
+// VGLOBAL_ASYNC_TO_LDS - gfx1250 async load global -> LDS:
+//   global_load_async_to_lds_* vdst(32), vaddr(32), saddr(64); no dest.
+// vdst holds the destination LDS address and is read, not written; the data goes
+// straight to LDS.
+DEF_FORMAT(VGLOBAL_ASYNC_TO_LDS,
+    .parent = VGLOBAL,
+    .flags = {GLOBALLoadAsyncToLds},
+    .fields = {
+        {S0, vdst, vgpr, 32},
+        {S1, vaddr, vgpr, 32},
         {S2, saddr, sreg, 64},
     },
 )

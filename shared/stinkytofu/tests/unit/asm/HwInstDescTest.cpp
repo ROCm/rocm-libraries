@@ -709,3 +709,49 @@ TEST_F(HwInstDescTest, TensorStoreFromLdsIsAnOrderedStoreNotALoad) {
         EXPECT_EQ(storeFields[i].fieldSizeBits, loadFields[i].fieldSizeBits) << i;
     }
 }
+
+// ---------------------------------------------------------------------------
+// gfx1250 scalar, VOP2 and DS instructions with SCC and read-write destination metadata
+// ---------------------------------------------------------------------------
+TEST_F(HwInstDescTest, SCtzI32B32HasNoScc) {
+    auto* desc = getDescByMnemonic("s_ctz_i32_b32");
+    ASSERT_NE(desc, nullptr);
+    EXPECT_EQ(desc->microcode, MicrocodeFormat::MC_SOP1);
+    EXPECT_FALSE(desc->has(IF_ImplicitReadSCC));
+    EXPECT_FALSE(desc->has(IF_ImplicitWriteSCC));
+}
+
+TEST_F(HwInstDescTest, SSubCoCiU32ReadsAndWritesScc) {
+    auto* desc = getDescByMnemonic("s_sub_co_ci_u32");
+    ASSERT_NE(desc, nullptr);
+    EXPECT_EQ(desc->microcode, MicrocodeFormat::MC_SOP2);
+    EXPECT_TRUE(desc->has(IF_ImplicitReadSCC));
+    EXPECT_TRUE(desc->has(IF_ImplicitWriteSCC));
+}
+
+TEST_F(HwInstDescTest, VMaxU32AndVMinU32AreCommutativeVop2) {
+    for (const char* mnemonic : {"v_max_u32", "v_min_u32"}) {
+        auto* desc = getDescByMnemonic(mnemonic);
+        ASSERT_NE(desc, nullptr) << mnemonic;
+        EXPECT_EQ(desc->microcode, MicrocodeFormat::MC_VOP2) << mnemonic;
+        EXPECT_EQ(desc->unit, ExecUnit::VALU) << mnemonic;
+
+        auto fields = desc->operandFields;
+        ASSERT_EQ(fields.size(), 3u) << mnemonic;
+        EXPECT_TRUE(fields[0].isDest) << mnemonic;
+        EXPECT_EQ(fields[0].fieldType, FieldType::vgpr) << mnemonic;
+    }
+}
+
+TEST_F(HwInstDescTest, DsLoadU16D16ReadsAndWritesItsDestination) {
+    auto* desc = getDescByMnemonic("ds_load_u16_d16");
+    ASSERT_NE(desc, nullptr);
+    EXPECT_EQ(desc->microcode, MicrocodeFormat::MC_VDS);
+
+    auto fields = desc->operandFields;
+    ASSERT_EQ(fields.size(), 2u);
+    EXPECT_TRUE(fields[0].isDest);
+    EXPECT_TRUE(fields[0].isReadWrite);
+    EXPECT_EQ(fields[0].fieldType, FieldType::vgpr);
+    EXPECT_EQ(fields[1].fieldType, FieldType::vgpr);
+}
