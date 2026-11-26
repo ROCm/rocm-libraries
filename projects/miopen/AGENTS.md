@@ -90,6 +90,8 @@ The `miopen-with-provider` preset also includes hipDNN and its MIOpen provider. 
 ## Code Conventions & Common Patterns
 
 - **Formatting:** follow the nearest `.clang-format`; the project-local file (not the super-repo root one) applies, and `src/hipconv/` has its own. The project style: four spaces, no tabs, 100 columns, custom Allman-style braces, left-aligned pointers, no automatic include sorting. Preserve existing header guards and license headers on edit. New files use the two-line AMD copyright and `SPDX-License-Identifier: MIT` header (see `src/solver/conv/conv_hip_dir2D11x11.cpp`), not a copied legacy MIT block.
+- **Header guards:** new headers use `#pragma once`, as most headers in `src/`, `test/` and `driver/` do. Keep the existing guard when editing a header that has one.
+- **Tickets and host names:** do not put ticket IDs (Jira, issue or PR numbers) in code or code comments. The exception is a workaround: there the comment names the ticket so a reader knows what is being worked around and when it can go. Do not put host names, runner names or CI job IDs in PR text or commit messages; name the architecture and device (e.g. gfx942, MI300X) instead.
 - **Naming:** public functions use `miopen...`; internal types/methods use names such as `TensorDescriptor`, `Handle`, and `GetSolution` in `miopen` namespaces.
 - **Errors:** `MIOPEN_THROW` carries status information. Most status-returning APIs translate exceptions with `miopen::try_` and use `miopen::deref` for checked access. Inspect the specific API before assuming exception/null-check coverage.
 - **Logging:** `MIOPEN_ENABLE_LOGGING` enables API-call logging; `MIOPEN_LOG_LEVEL` independently controls severity; `MIOPEN_ENABLE_LOGGING_CMD` emits the associated MIOpenDriver command lines, which are incomplete for some paths (e.g. pooling with FP8 types). Reuse `MIOPEN_LOG_FUNCTION` and `MIOPEN_LOG_E/W/I/I2/T`.
@@ -117,6 +119,7 @@ Public entry-point changes touch two hand-written headers: `include/miopen/miope
 - `driver/README.md`, `docs/reference/env_variables.rst`, `docs/how-to/debug-log.rst`: reproduction and diagnostics. Edit navigation template `docs/sphinx/_toc.yml.in`, not generated `_toc.yml`.
 - `CONTRIBUTING.md`, `.github/pull_request_template.md`, `CHANGELOG.md`: contribution expectations and release notes.
 - `Jenkinsfile`, `vars/utils.groovy`: Jenkins hardware/datatype lanes and `rocm/miopen-dev` image publishing. `../../.github/workflows/component-ci-miopen.yml`: GitHub PR build variants, clang-tidy, naming, header, and ABI gates. `../../.github/workflows/miopen-wrapper-flag-on.yml`: manual-dispatch wrapper-ON lane (`wrapper_abi_check`, installed-header check, parity registration); it does not gate PRs.
+- The HIP package CI naming check and packaged GPU-free dbsync runner build rocjitsu with Ninja. See `test/gtest/README.md` for dbsync validation.
 
 ## Runtime/Tooling Preferences
 
