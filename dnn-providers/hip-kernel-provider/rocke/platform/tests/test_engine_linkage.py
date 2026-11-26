@@ -881,9 +881,10 @@ def test_installed_ctest_entries_get_scoped_environment_contracts(
             == comgr_only_environment
         )
 
-        # The C++ HIP lowering entries are not registered on Windows. On every
-        # platform the platform pytest part that holds each of their files
-        # leaves it out. Elsewhere each entry names the installed
+        # The C++ HIP lowering entries are not registered on Windows. Where an
+        # entry is registered, the platform pytest part that holds each of its
+        # files leaves it out; on Windows the part keeps it, so its
+        # Python-engine checks still run. Elsewhere each entry names the installed
         # rocke_ir_lower_cli, and the parity entry also gets the compiler tools
         # for its hipcc checks.
         files_by_entry = {
@@ -906,11 +907,12 @@ def test_installed_ctest_entries_get_scoped_environment_contracts(
                 path = f"{test_ctest_rel}{test_file}"
                 if entry is not None:
                     assert path in entry["command"]
-                platform_part = next(
+                part_command = next(
                     test for test in tests if test["name"] == f"rocke_pytest_{part}"
-                )
-                ignored = platform_part["command"].index(path)
-                assert platform_part["command"][ignored - 1] == "--ignore"
+                )["command"]
+                assert (path in part_command) == (entry is not None), test_file
+                if entry is not None:
+                    assert part_command[part_command.index(path) - 1] == "--ignore"
         if os.name != "nt":
             ir_lower_cli = native_artifact("rocke_ir_lower_cli")
             identity_environment = environment_for(tests, "rocke_hip_source_identity")

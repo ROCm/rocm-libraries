@@ -1042,12 +1042,15 @@ if(ROCKE_INSTALL_TESTS)
       # The HIP source identity test and the HIP lowering parity files run in
       # their own entries (above): their both-engine checks need the C++ HIP
       # lowering, which the installed tree reaches only through
-      # rocke_ir_lower_cli. On Windows, where those entries are not
-      # registered, the files run in none, so their other checks do not run
-      # there either.
-      list(APPEND _ROCKE_PLATFORM_PYTEST_IGNORE_instances_dispatch
-           ${_ROCKE_HIP_SOURCE_IDENTITY_TEST})
-      list(APPEND _ROCKE_PLATFORM_PYTEST_IGNORE_core ${_ROCKE_HIP_LOWERING_PARITY_TESTS})
+      # rocke_ir_lower_cli. Where those entries are not registered (Windows),
+      # the files stay in their directory's part, so their Python-engine
+      # checks still run there. (A Windows build installs no shared engine,
+      # so their C++ cases have no engine to compare there.)
+      if(_ROCKE_IR_LOWER_CLI_ENVIRONMENT)
+        list(APPEND _ROCKE_PLATFORM_PYTEST_IGNORE_instances_dispatch
+             ${_ROCKE_HIP_SOURCE_IDENTITY_TEST})
+        list(APPEND _ROCKE_PLATFORM_PYTEST_IGNORE_core ${_ROCKE_HIP_LOWERING_PARITY_TESTS})
+      endif()
       set(_ROCKE_PLATFORM_PYTEST_GROUP_core core)
       set(_ROCKE_PLATFORM_PYTEST_GROUP_instances_dispatch instances dispatch)
       set(_ROCKE_PLATFORM_PYTEST_GROUP_runtime_tools
