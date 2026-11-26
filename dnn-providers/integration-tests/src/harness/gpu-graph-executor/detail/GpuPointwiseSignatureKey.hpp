@@ -22,6 +22,9 @@ struct GpuPointwiseSignatureKey
         hipdnn_flatbuffers_sdk::data_objects::DataType::UNSET};
     hipdnn_flatbuffers_sdk::data_objects::DataType input1DataType{
         hipdnn_flatbuffers_sdk::data_objects::DataType::UNSET};
+    // Only set for ternary modes (the BINARY_SELECT mask)
+    hipdnn_flatbuffers_sdk::data_objects::DataType input2DataType{
+        hipdnn_flatbuffers_sdk::data_objects::DataType::UNSET};
     hipdnn_flatbuffers_sdk::data_objects::DataType outputDataType{
         hipdnn_flatbuffers_sdk::data_objects::DataType::UNSET};
     hipdnn_flatbuffers_sdk::data_objects::DataType computeDataType{
@@ -34,6 +37,19 @@ struct GpuPointwiseSignatureKey
                                        hipdnn_flatbuffers_sdk::data_objects::DataType compute)
         : input0DataType(input0)
         , input1DataType(input1)
+        , outputDataType(output)
+        , computeDataType(compute)
+    {
+    }
+
+    constexpr GpuPointwiseSignatureKey(hipdnn_flatbuffers_sdk::data_objects::DataType input0,
+                                       hipdnn_flatbuffers_sdk::data_objects::DataType input1,
+                                       hipdnn_flatbuffers_sdk::data_objects::DataType input2,
+                                       hipdnn_flatbuffers_sdk::data_objects::DataType output,
+                                       hipdnn_flatbuffers_sdk::data_objects::DataType compute)
+        : input0DataType(input0)
+        , input1DataType(input1)
+        , input2DataType(input2)
         , outputDataType(output)
         , computeDataType(compute)
     {
@@ -65,6 +81,9 @@ struct GpuPointwiseSignatureKey
         auto in1TensorAttr = nodeAttributes->in_1_tensor_uid().has_value()
                                  ? tensorMap.at(nodeAttributes->in_1_tensor_uid().value())
                                  : nullptr;
+        auto in2TensorAttr = nodeAttributes->in_2_tensor_uid().has_value()
+                                 ? tensorMap.at(nodeAttributes->in_2_tensor_uid().value())
+                                 : nullptr;
         auto outTensorAttr = tensorMap.at(nodeAttributes->out_0_tensor_uid());
         if(in0TensorAttr == nullptr || outTensorAttr == nullptr)
         {
@@ -77,6 +96,10 @@ struct GpuPointwiseSignatureKey
         if(in1TensorAttr != nullptr)
         {
             input1DataType = in1TensorAttr->data_type();
+        }
+        if(in2TensorAttr != nullptr)
+        {
+            input2DataType = in2TensorAttr->data_type();
         }
         computeDataType = computeType;
         outputDataType = outTensorAttr->data_type();
@@ -93,13 +116,15 @@ struct GpuPointwiseSignatureKey
                ^ (static_cast<std::size_t>(static_cast<int>(input0DataType)) << 4)
                ^ (static_cast<std::size_t>(static_cast<int>(input1DataType)) << 8)
                ^ (static_cast<std::size_t>(static_cast<int>(outputDataType)) << 12)
-               ^ (static_cast<std::size_t>(static_cast<int>(computeDataType)) << 16);
+               ^ (static_cast<std::size_t>(static_cast<int>(computeDataType)) << 16)
+               ^ (static_cast<std::size_t>(static_cast<int>(input2DataType)) << 20);
     }
 
     bool operator==(const GpuPointwiseSignatureKey& other) const noexcept
     {
         return nodeType == other.nodeType && input0DataType == other.input0DataType
-               && input1DataType == other.input1DataType && outputDataType == other.outputDataType
+               && input1DataType == other.input1DataType && input2DataType == other.input2DataType
+               && outputDataType == other.outputDataType
                && computeDataType == other.computeDataType;
     }
 
@@ -158,6 +183,107 @@ struct GpuPointwiseSignatureKey
                        hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16,
                        hipdnn_flatbuffers_sdk::data_objects::DataType::HALF,
                        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT>(map);
+        // fp16 / bf16 computed in their own type: the CPU reference registers these too.
+        addPlanBuilder<hipdnn_flatbuffers_sdk::data_objects::DataType::HALF,
+                       hipdnn_flatbuffers_sdk::data_objects::DataType::HALF,
+                       hipdnn_flatbuffers_sdk::data_objects::DataType::HALF,
+                       hipdnn_flatbuffers_sdk::data_objects::DataType::HALF>(map);
+        addPlanBuilder<hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16,
+                       hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16,
+                       hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16,
+                       hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16>(map);
+        // One fp32 operand with one fp16 / bf16 operand. A fused conv or matmul hands its
+        // epilogue a virtual fp32 tensor, so every fp16 / bf16 bias, scale or residual add
+        // after it is one of these.
+        addPlanBuilder<hipdnn_flatbuffers_sdk::data_objects::DataType::HALF,
+                       hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+                       hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+                       hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT>(map);
+        addPlanBuilder<hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16,
+                       hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+                       hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+                       hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT>(map);
+        addPlanBuilder<hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+                       hipdnn_flatbuffers_sdk::data_objects::DataType::HALF,
+                       hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+                       hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT>(map);
+        addPlanBuilder<hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+                       hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16,
+                       hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+                       hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT>(map);
+        addPlanBuilder<hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+                       hipdnn_flatbuffers_sdk::data_objects::DataType::HALF,
+                       hipdnn_flatbuffers_sdk::data_objects::DataType::HALF,
+                       hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT>(map);
+        addPlanBuilder<hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+                       hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16,
+                       hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16,
+                       hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT>(map);
+
+        // CMP_GT: BOOLEAN output. Registered for the operand types the CPU reference has.
+        addPlanBuilder<hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+                       hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+                       hipdnn_flatbuffers_sdk::data_objects::DataType::BOOLEAN,
+                       hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT>(map);
+        addPlanBuilder<hipdnn_flatbuffers_sdk::data_objects::DataType::HALF,
+                       hipdnn_flatbuffers_sdk::data_objects::DataType::HALF,
+                       hipdnn_flatbuffers_sdk::data_objects::DataType::BOOLEAN,
+                       hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT>(map);
+        addPlanBuilder<hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16,
+                       hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16,
+                       hipdnn_flatbuffers_sdk::data_objects::DataType::BOOLEAN,
+                       hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT>(map);
+        addPlanBuilder<hipdnn_flatbuffers_sdk::data_objects::DataType::INT32,
+                       hipdnn_flatbuffers_sdk::data_objects::DataType::INT32,
+                       hipdnn_flatbuffers_sdk::data_objects::DataType::BOOLEAN,
+                       hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT>(map);
+        // CMP_GT also accepts operands of different floating-point types.
+        addPlanBuilder<hipdnn_flatbuffers_sdk::data_objects::DataType::HALF,
+                       hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16,
+                       hipdnn_flatbuffers_sdk::data_objects::DataType::BOOLEAN,
+                       hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT>(map);
+        addPlanBuilder<hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16,
+                       hipdnn_flatbuffers_sdk::data_objects::DataType::HALF,
+                       hipdnn_flatbuffers_sdk::data_objects::DataType::BOOLEAN,
+                       hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT>(map);
+        addPlanBuilder<hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+                       hipdnn_flatbuffers_sdk::data_objects::DataType::HALF,
+                       hipdnn_flatbuffers_sdk::data_objects::DataType::BOOLEAN,
+                       hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT>(map);
+        addPlanBuilder<hipdnn_flatbuffers_sdk::data_objects::DataType::HALF,
+                       hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+                       hipdnn_flatbuffers_sdk::data_objects::DataType::BOOLEAN,
+                       hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT>(map);
+        addPlanBuilder<hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+                       hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16,
+                       hipdnn_flatbuffers_sdk::data_objects::DataType::BOOLEAN,
+                       hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT>(map);
+        addPlanBuilder<hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16,
+                       hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+                       hipdnn_flatbuffers_sdk::data_objects::DataType::BOOLEAN,
+                       hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT>(map);
+
+        // Ternary plans (BINARY_SELECT): Input0, Input1, BOOLEAN mask, Output, Compute
+        addPlanBuilder<hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+                       hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+                       hipdnn_flatbuffers_sdk::data_objects::DataType::BOOLEAN,
+                       hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+                       hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT>(map);
+        addPlanBuilder<hipdnn_flatbuffers_sdk::data_objects::DataType::HALF,
+                       hipdnn_flatbuffers_sdk::data_objects::DataType::HALF,
+                       hipdnn_flatbuffers_sdk::data_objects::DataType::BOOLEAN,
+                       hipdnn_flatbuffers_sdk::data_objects::DataType::HALF,
+                       hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT>(map);
+        addPlanBuilder<hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16,
+                       hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16,
+                       hipdnn_flatbuffers_sdk::data_objects::DataType::BOOLEAN,
+                       hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16,
+                       hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT>(map);
+        addPlanBuilder<hipdnn_flatbuffers_sdk::data_objects::DataType::INT32,
+                       hipdnn_flatbuffers_sdk::data_objects::DataType::INT32,
+                       hipdnn_flatbuffers_sdk::data_objects::DataType::BOOLEAN,
+                       hipdnn_flatbuffers_sdk::data_objects::DataType::INT32,
+                       hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT>(map);
 
         // Unary plans: Input0, Output, Compute
         addPlanBuilder<hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
@@ -206,6 +332,27 @@ struct GpuPointwiseSignatureKey
                                                              ComputeDataTypeEnum>>();
     }
 
+    template <hipdnn_flatbuffers_sdk::data_objects::DataType Input0DataTypeEnum,
+              hipdnn_flatbuffers_sdk::data_objects::DataType Input1DataTypeEnum,
+              hipdnn_flatbuffers_sdk::data_objects::DataType Input2DataTypeEnum,
+              hipdnn_flatbuffers_sdk::data_objects::DataType OutputDataTypeEnum,
+              hipdnn_flatbuffers_sdk::data_objects::DataType ComputeDataTypeEnum>
+    static void addPlanBuilder(std::unordered_map<GpuPointwiseSignatureKey,
+                                                  std::unique_ptr<IGpuGraphNodePlanBuilder>,
+                                                  GpuPointwiseSignatureKey>& map)
+    {
+        map[GpuPointwiseSignatureKey(Input0DataTypeEnum,
+                                     Input1DataTypeEnum,
+                                     Input2DataTypeEnum,
+                                     OutputDataTypeEnum,
+                                     ComputeDataTypeEnum)]
+            = std::make_unique<GpuPointwiseTernaryPlanBuilder<Input0DataTypeEnum,
+                                                              Input1DataTypeEnum,
+                                                              Input2DataTypeEnum,
+                                                              OutputDataTypeEnum,
+                                                              ComputeDataTypeEnum>>();
+    }
+
     template <hipdnn_flatbuffers_sdk::data_objects::DataType InputDataTypeEnum,
               hipdnn_flatbuffers_sdk::data_objects::DataType OutputDataTypeEnum,
               hipdnn_flatbuffers_sdk::data_objects::DataType ComputeDataTypeEnum>
@@ -223,7 +370,8 @@ struct GpuPointwiseSignatureKey
 inline std::ostream& operator<<(std::ostream& os, const GpuPointwiseSignatureKey& key)
 {
     os << "GpuPointwise(in0=" << key.input0DataType << ", in1=" << key.input1DataType
-       << ", out=" << key.outputDataType << ", compute=" << key.computeDataType << ")";
+       << ", in2=" << key.input2DataType << ", out=" << key.outputDataType
+       << ", compute=" << key.computeDataType << ")";
     return os;
 }
 

@@ -3161,8 +3161,8 @@ class GlobalWriteBatchWriter:
     """Compute the ATOMIC target peer_flagPtr[p] + myRank*4 into outAddrS (2
     SGPRs), a 64-bit add.  flagBaseS is peer_flagPtr[p]; tmpS is one scratch SGPR.
 
-    The flag is indexed by SOURCE rank only -- source j's tokenTiles ATOMICs
-    accumulate into one slot, matching the "== tokenTiles" drain predicate.
+    The flag is indexed by SOURCE rank only: source j raises it once per launch,
+    matching the "== 1" drain predicate.
     """
     module.add(SLShiftLeftB32(dst=sgpr(tmpS), src=sgpr(myRankS), shiftHex=2,
                               comment="myRank * 4 (u32 flag-slot byte offset: the ATOMIC is an ADD_RTN_32)"))
@@ -3173,19 +3173,17 @@ class GlobalWriteBatchWriter:
 
   def _emitFusedA2ASdmaIssue(self, module, dstRankSgpr, myRankSgpr, nShardSgpr,
                              flagBaseSgpr, tmpSgpr):
-    """Build and submit this (peer, token-tile)'s SDMA packet pair, from the
-    single elected lane of the elected WG.
+    """Build and submit this (peer, token-tile)'s SDMA COPY, from the single
+    elected lane of the elected WG.
 
     The SDMA engine reads the completed band from HBM, which is why every A2A
     store carries sc1.
 
-    Two packets, ONE reservation:
       COPY_LINEAR_SUBWIN  D[j*MT1 .. , dst_rank*nShard ..]  ->  peer's recv slot
-      ATOMIC ADD_RTN_32   peer_flagPtr[dst_rank][my_rank] += 1
-    They must share a reservation so the engine executes them back to back: the
-    flag increment is what releases the peer's DRAIN, and it may not overtake its
-    own copy. One queue per peer, selected by dst_rank out of the flattened
-    per-queue pointer groups in the kernarg segment.
+
+    No signal follows it here: _emitFusedA2AQueueTailAtomics closes the queue
+    once its last COPY is submitted. One queue per peer, selected by dst_rank
+    out of the flattened per-queue pointer groups in the kernarg segment.
 
     src_pitch is the real StrideD1J (== ldd), so a padded ldd is handled.  This
     packet DOES still assume D is COLUMN MAJOR (feature contiguous, dMStride ==
@@ -3203,13 +3201,12 @@ class GlobalWriteBatchWriter:
       dstRankSgpr:  1 SGPR, the peer rank p (== this WG's dst_rank).
       myRankSgpr:   1 SGPR, this card's rank.
       nShardSgpr:   persistent SGPR, n_shard (also dst_pitch and rect_x).
-      flagBaseSgpr: 4 SGPRs, peer_flagPtr[dst_rank] then peer_bufPtr[dst_rank]
-                    (untouched bases, never offset in place).
+      flagBaseSgpr: 4 SGPRs, peer_flagPtr[dst_rank] then peer_bufPtr[dst_rank];
+                    peer_bufPtr is folded in place, peer_flagPtr is left intact.
       tmpSgpr:      2 scratch SGPRs.
     """
     from .Signature import fusedA2AKernArgLayout
-    from .SdmaPacketEmitter import (SdmaPacketEmitter, COPY_PACKET_DWORDS,
-                                    ATOMIC_PACKET_DWORDS)
+    from .SdmaPacketEmitter import SdmaPacketEmitter, COPY_PACKET_DWORDS
     from .SdmaRingEmitter import SdmaRingEmitter, CURSOR_PAIR_BYTES
 
     kw        = self.parentWriter
@@ -3217,9 +3214,8 @@ class GlobalWriteBatchWriter:
     fusedBase = kw.states.fusedA2AKernArgBase
     pkt       = SdmaPacketEmitter()
     ring      = SdmaRingEmitter(groupImm=fusedBase + layout["peer_0_flagPtr"])
-    totalDwords = COPY_PACKET_DWORDS + ATOMIC_PACKET_DWORDS
 
-    module.addComment1("fused-A2A: build + submit the SDMA COPY_SUBWIN + ATOMIC packet pair")
+    module.addComment1("fused-A2A: build + submit the SDMA COPY_SUBWIN packet")
 
     # --- this queue's cursor pair sits at the front of the counter block, so
     #     the base is FusedCounterPtr and only the per-queue stride is
@@ -3270,12 +3266,7 @@ class GlobalWriteBatchWriter:
                                     tmpSgpr, tokenRowS, tmp64Sgpr)
     kw.sgprPool.checkIn(tmp64Sgpr)  # dead once the two bases are folded
 
-    # --- packet dwords: ONE block, built and placed once per packet. ---
-    # The block is SGPRs because the ring stores are scalar, and it is sized for
-    # the COPY packet (13 dwords) alone: the ATOMIC is 8 and REUSES the same
-    # registers further down, once the COPY's stores have been emitted. That
-    # ordering is the whole safety argument -- see emitPlacePacket's reuse note.
-    #
+    # --- packet dwords: SGPRs because the ring stores are scalar. ---
     # 4-ALIGNED, which is stricter than the 2-alignment the VGPR layout needed.
     # SMEM requires SDATA to be a multiple of four for stores wider than two
     # Dwords, so a 4-aligned start is what lets 13 dwords go out as x4/x4/x4/x1
@@ -3290,27 +3281,15 @@ class GlobalWriteBatchWriter:
     kw.sgprPool.checkIn(fldSgpr)
     kw.sgprPool.checkIn(srcBaseSgpr)
 
-    # --- reserve once for both packets, place them back to back, submit once. ---
     curSgpr  = kw.sgprPool.checkOutAligned(2, 2, tag="fusedA2A_sdmaCur", preventOverflow=False)
     pendSgpr = kw.sgprPool.checkOutAligned(2, 2, tag="fusedA2A_sdmaPend", preventOverflow=False)
     offSgpr  = kw.sgprPool.checkOut(1, tag="fusedA2A_sdmaOff", preventOverflow=False)
     ring.emitReserveQueueSpace(module, kw, "FusedPeerGroupPtr", "FusedCounterPtr", cursorOffSgpr,
-                               cachedIdxSgpr, totalDwords * 4, curSgpr, offSgpr)
+                               cachedIdxSgpr, COPY_PACKET_DWORDS * 4, curSgpr, offSgpr)
     module.add(SMovB64(dst=sgpr(pendSgpr, 2), src=sgpr(curSgpr, 2),
                        comment="pending = reserved base"))
     ring.emitPlacePacket(module, kw, "FusedPeerGroupPtr", pktSgpr, COPY_PACKET_DWORDS,
                          pendSgpr, offSgpr)
-
-    # Second packet of the SAME reservation, into the SAME register block: the
-    # build has to stay below the placement above (emitPlacePacket, BLOCK REUSE).
-    # The wrap padding went out with that placement, so the offset is 0.
-    module.add(SMovB32(dst=sgpr(offSgpr), src=0, comment="ATOMIC follows the COPY: no further padding"))
-    flagAddrSgpr = kw.sgprPool.checkOutAligned(2, 2, tag="fusedA2A_sdmaFlagAddr", preventOverflow=False)
-    self._fusedA2AComputeFlagAddr(module, flagBaseSgpr, myRankSgpr, flagAddrSgpr, tmpSgpr)
-    pkt.emitBuildAtomicPacket(module, pktSgpr, flagAddrSgpr)
-    kw.sgprPool.checkIn(flagAddrSgpr)
-    ring.emitPlacePacket(module, kw, "FusedPeerGroupPtr", pktSgpr,
-                         ATOMIC_PACKET_DWORDS, pendSgpr, offSgpr)
     ring.emitSubmitPacket(module, kw, "FusedPeerGroupPtr", "FusedCounterPtr", cursorOffSgpr,
                           curSgpr, pendSgpr)
 
@@ -3321,19 +3300,22 @@ class GlobalWriteBatchWriter:
     kw.sgprPool.checkIn(cachedIdxSgpr)
     kw.sgprPool.checkIn(cursorOffSgpr)
 
-  def _emitFusedA2AOutboundSignal(self, module, dstRankSgpr, myRankSgpr):
-    """Submit an ATOMIC ADD_RTN_32 raising THIS card's own outbound counter by 1,
-    on the queue this work-group just handed its band to.
+  def _emitFusedA2AQueueTailAtomics(self, module, dstRankSgpr, myRankSgpr,
+                                    flagBaseSgpr, tmpSgpr):
+    """Close this card's queue to dst_rank with two ATOMIC ADD_RTN_32 in one
+    reservation, behind every COPY already on it:
+      peer_flagPtr[dst_rank][my_rank]               += 1   (dst_rank's DRAIN_RECV)
+      peer_flagPtr[my_rank] + FUSED_A2A_OUTBOUND_OFFSET += 1   (this card's DRAIN_SEND)
+    Once every queue has carried them, each flag slot reads 1 and the outbound
+    counter reads W.
 
-    One reservation, one 8-dword packet, no COPY.  The target is
-    peer_flagPtr[my_rank] + FUSED_A2A_OUTBOUND_OFFSET, so once every queue has
-    carried one of these the counter reads W.
-
-    MUST be emitted after _emitFusedA2ASdmaIssue's submit on this queue.
+    MUST be emitted after the last _emitFusedA2ASdmaIssue submit on this queue.
 
     Args:
-      dstRankSgpr: 1 SGPR, the peer rank whose queue carries the signal.
-      myRankSgpr:  1 SGPR, this card's rank.
+      dstRankSgpr:  1 SGPR, the peer rank whose queue carries the signals.
+      myRankSgpr:   1 SGPR, this card's rank.
+      flagBaseSgpr: 2 SGPRs, peer_flagPtr[dst_rank].
+      tmpSgpr:      1 scratch SGPR.
     """
     from .Signature import (FUSED_A2A_OUTBOUND_OFFSET, fusedA2AKernArgLayout)
     from .SdmaPacketEmitter import SdmaPacketEmitter, ATOMIC_PACKET_DWORDS
@@ -3345,7 +3327,7 @@ class GlobalWriteBatchWriter:
     pkt       = SdmaPacketEmitter()
     ring      = SdmaRingEmitter(groupImm=fusedBase + layout["peer_0_flagPtr"])
 
-    module.addComment1("fused-A2A: build + submit the SDMA outbound-completion ATOMIC")
+    module.addComment1("fused-A2A: build + submit the SDMA queue-tail ATOMICs (peer flag, outbound)")
 
     # A SCRATCH group offset: the loader overwrites it, and the ring emitters
     # below need FusedPeerGroupPtr left pointing at dst_rank's queue.
@@ -3371,15 +3353,25 @@ class GlobalWriteBatchWriter:
 
     pktSgpr = kw.sgprPool.checkOutAligned(ATOMIC_PACKET_DWORDS, 4,
                                           tag="fusedA2A_obPacket", preventOverflow=False)
-    pkt.emitBuildAtomicPacket(module, pktSgpr, selfBaseSgpr)
+    flagAddrSgpr = kw.sgprPool.checkOutAligned(2, 2, tag="fusedA2A_obFlagAddr", preventOverflow=False)
+    self._fusedA2AComputeFlagAddr(module, flagBaseSgpr, myRankSgpr, flagAddrSgpr, tmpSgpr)
+    pkt.emitBuildAtomicPacket(module, pktSgpr, flagAddrSgpr)
+    kw.sgprPool.checkIn(flagAddrSgpr)
 
     curSgpr  = kw.sgprPool.checkOutAligned(2, 2, tag="fusedA2A_obCur", preventOverflow=False)
     pendSgpr = kw.sgprPool.checkOutAligned(2, 2, tag="fusedA2A_obPend", preventOverflow=False)
     offSgpr  = kw.sgprPool.checkOut(1, tag="fusedA2A_obOff", preventOverflow=False)
     ring.emitReserveQueueSpace(module, kw, "FusedPeerGroupPtr", "FusedCounterPtr", cursorOffSgpr,
-                               cachedIdxSgpr, ATOMIC_PACKET_DWORDS * 4, curSgpr, offSgpr)
+                               cachedIdxSgpr, 2 * ATOMIC_PACKET_DWORDS * 4, curSgpr, offSgpr)
     module.add(SMovB64(dst=sgpr(pendSgpr, 2), src=sgpr(curSgpr, 2),
                        comment="pending = reserved base"))
+    ring.emitPlacePacket(module, kw, "FusedPeerGroupPtr", pktSgpr, ATOMIC_PACKET_DWORDS,
+                         pendSgpr, offSgpr)
+
+    # Second packet into the same block, below the placement above
+    # (emitPlacePacket, BLOCK REUSE); the wrap padding went out with it.
+    module.add(SMovB32(dst=sgpr(offSgpr), src=0, comment="outbound ATOMIC follows the flag ATOMIC: no further padding"))
+    pkt.emitBuildAtomicPacket(module, pktSgpr, selfBaseSgpr)
     ring.emitPlacePacket(module, kw, "FusedPeerGroupPtr", pktSgpr, ATOMIC_PACKET_DWORDS,
                          pendSgpr, offSgpr)
     ring.emitSubmitPacket(module, kw, "FusedPeerGroupPtr", "FusedCounterPtr", cursorOffSgpr,
@@ -3414,9 +3406,9 @@ class GlobalWriteBatchWriter:
   def _emitFusedA2AHandshake(self, module: Module):
     """Emit the once-per-WG cross-card handshake for PUSH work-groups: wait for
     this WG's stores, elect one lane, bump the per-(dst_rank, token-tile) counter,
-    submit the SDMA packet pair on election, then the grid-wide counter3 tally
-    elects the DRAIN owner.  See the inline comments at each step below for the
-    per-step invariants."""
+    submit the SDMA COPY on election, close the queue to dst_rank after its last
+    COPY, then the grid-wide counter3 tally elects the DRAIN owner.  See the
+    inline comments at each step below for the per-step invariants."""
     kw = self.parentWriter
     module.addComment2("fused-A2A cross-card handshake: counter election + SDMA packet submit + DRAIN")
 
@@ -3550,15 +3542,10 @@ class GlobalWriteBatchWriter:
     self._emitFusedA2ASdmaIssue(module, dstRankSgpr, myRankSgpr, nShardSgpr,
                                 flagBaseSgpr, tmpSgpr2)
 
-    # (6) second-level, per-peer counter: converge the DRAIN spinners from tokenTiles
-    # per peer down to exactly one, since the DRAIN poll address below depends only
-    # on dst_rank.  counter2 is a MAX_RANKS-entry u32 array at a fixed byte offset in
-    # the counter block (FUSED_A2A_COUNTER2_OFFSET).
-    # It is incremented AFTER _emitFusedA2ASdmaIssue returns, so the WG that reads
-    # back tokenTiles-1 is the one that submitted this card's LAST packet to dst_rank.
-    #
-    # counter3 (below) owns the DRAIN election; this one elects the work-group that
-    # signals outbound completion on this card's queue to dst_rank.
+    # (6) per-peer counter: elects the work-group that puts the queue-tail ATOMICs on this
+    # card's queue to dst_rank, the one whose increment reads back tokenTiles-1. counter2 is a
+    # MAX_RANKS-entry u32 array at FUSED_A2A_COUNTER2_OFFSET in the counter block. Incremented
+    # only after _emitFusedA2ASdmaIssue returns, so the tail ATOMICs land behind every COPY.
     counter2PtrSgpr = kw.sgprPool.checkOutAligned(2, 2, tag="fusedA2A_hsCounter2Ptr", preventOverflow=False)
     c2Limit         = kw.sgprPool.checkOut(1, tag="fusedA2A_hsCounter2Limit", preventOverflow=False)
     module.add(SLShiftLeftB32(dst=sgpr(tmpSgpr2), src=sgpr(dstRankSgpr), shiftHex=2,
@@ -3582,9 +3569,10 @@ class GlobalWriteBatchWriter:
     kw.sgprPool.checkIn(c2Limit)
     module.add(SCBranchSCC0(labelName=skipReleaseLabel.getLabelName(),
                             comment="not the last submitter for dst_rank -> skip the "
-                                    "outbound-completion signal"))
+                                    "queue-tail ATOMICs"))
 
-    self._emitFusedA2AOutboundSignal(module, dstRankSgpr, myRankSgpr)
+    self._emitFusedA2AQueueTailAtomics(module, dstRankSgpr, myRankSgpr,
+                                       flagBaseSgpr, tmpSgpr2)
 
     module.add(skipReleaseLabel)
     # The PUSH path has already done its wave-0 election, so it jumps OVER the local
@@ -3637,15 +3625,14 @@ class GlobalWriteBatchWriter:
 
     # --- (i) DRAIN barrier: make kernel-exit == this card has
     # received all its incoming data.  The globally last WG waits until every one of
-    # THIS card's W flag slots has reached tokenTiles.
+    # THIS card's W flag slots has reached 1.
     #
     # All W slots, not one: the owner is elected grid-wide and stands in for every
     # peer, so a per-peer predicate would release it as soon as one peer finished.
     #
-    # The predicate is an ACCUMULATED COUNT, not a one-shot sentinel: each source
-    # rank sends tokenTiles packet pairs, each pair's SDMA ATOMIC ADD_RTN_32 adding
-    # 1 to the same 4-byte slot, so "all of source j's data has landed" is
-    # flag[j] == tokenTiles.
+    # Source j's queue to this card ends with one SDMA ATOMIC ADD_RTN_32 adding 1
+    # to slot j, behind all of its COPYs, so "all of source j's data has landed"
+    # is flag[j] == 1.
     #
     # The p == my_rank packet also routes through SDMA (loopback queue, local recv
     # slot), so this card's own flag slot has a real producer and polling it is
@@ -3660,7 +3647,7 @@ class GlobalWriteBatchWriter:
     skipSendLabel  = Label(kw.labels.getNameInc("fusedA2A_drain_skipsend"),
                            "fused-A2A: DRAIN_SEND clear -> skip the outbound segment")
     drainPollLabel = Label(kw.labels.getNameInc("fusedA2A_drain_poll"),
-                           "fused-A2A: DRAIN poll all W self flags until each == tokenTiles")
+                           "fused-A2A: DRAIN poll all W self flags until each == 1")
     sendPollLabel  = Label(kw.labels.getNameInc("fusedA2A_drain_sendpoll"),
                            "fused-A2A: drainSend poll the outbound counter until == W")
 
@@ -3743,8 +3730,8 @@ class GlobalWriteBatchWriter:
       modifier=GLOBALModifiers(glc=True, slc=True, scope=CacheScope.SCOPE_NONE, isStore=False),
       comment="poll self flag[lane] low dword (system scope, sc0 sc1)"))
     module.add(SWaitCnt(vlcnt=0, comment="fused-A2A: wait poll load"))
-    module.add(VCmpNeU32(VCC(), vgpr(vPollVal), sgpr("FusedTokenTiles"),
-                         comment="any lane's flag != tokenTiles? (peer still sending)"))
+    module.add(VCmpNeU32(VCC(), 1, vgpr(vPollVal),
+                         comment="any lane's flag != 1? (peer still sending)"))
     module.add(SCBranchVCCNZ(labelName=drainPollLabel.getLabelName(),
                              comment="some peer incomplete -> spin (poll again)"))
 

@@ -15,6 +15,7 @@
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceReduction.hpp>
 #include <hipdnn_test_sdk/utilities/TestTolerances.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
+#include <tuple>
 #include <unordered_map>
 #include <vector>
 
@@ -1804,6 +1805,275 @@ TEST(TestGpuReferenceGraphExecutorFp32, PointwiseBinaryExecutes)
     {
         const float expected = static_cast<float*>(input0Tensor.rawHostData())[i]
                                + static_cast<float*>(input1Tensor.rawHostData())[i];
+        EXPECT_EQ(expected, static_cast<float*>(outputTensor.rawHostData())[i])
+            << "Mismatch at index " << i;
+    }
+}
+
+// A fused fp16 bias or residual add: the conv output is a virtual fp32 tensor and the
+// bias is fp16, so the ADD sees one fp32 and one fp16 operand.
+TEST(TestGpuReferenceGraphExecutor, PointwiseBinaryMixedOperandTypesExecutes)
+{
+    SKIP_IF_NO_DEVICES();
+
+    constexpr int64_t IN_0_UID = 10;
+    constexpr int64_t IN_1_UID = 11;
+    constexpr int64_t OUT_UID = 12;
+    const std::vector<int64_t> dims = {2, 3, 4, 4};
+    auto strides = generateStrides(dims);
+
+    flatbuffers::FlatBufferBuilder builder;
+    std::vector<flatbuffers::Offset<TensorAttributes>> tensors;
+    for(const auto& [uid, name, type] : {std::tuple{IN_0_UID, "in_0", DataType::FLOAT},
+                                         std::tuple{IN_1_UID, "in_1", DataType::HALF},
+                                         std::tuple{OUT_UID, "out_0", DataType::FLOAT}})
+    {
+        tensors.push_back(CreateTensorAttributesDirect(builder,
+                                                       uid,
+                                                       name,
+                                                       type,
+                                                       &strides,
+                                                       &dims,
+                                                       /*virtual_=*/false,
+                                                       TensorValue::NONE,
+                                                       /*value=*/0,
+                                                       false));
+    }
+
+    auto pointwiseAttrs = CreatePointwiseAttributes(builder,
+                                                    PointwiseMode::ADD,
+                                                    flatbuffers::nullopt,
+                                                    flatbuffers::nullopt,
+                                                    flatbuffers::nullopt,
+                                                    flatbuffers::nullopt,
+                                                    IN_0_UID,
+                                                    IN_1_UID,
+                                                    flatbuffers::nullopt,
+                                                    OUT_UID);
+    std::vector<flatbuffers::Offset<Node>> nodes;
+    nodes.push_back(CreateNodeDirect(builder,
+                                     "pointwise_node",
+                                     DataType::FLOAT,
+                                     NodeAttributes::PointwiseAttributes,
+                                     pointwiseAttrs.Union()));
+    auto graph = CreateGraphDirect(
+        builder, "TestGraph", DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, &tensors, &nodes);
+    builder.Finish(graph);
+
+    GpuReferenceGraphExecutor gpuExecutor;
+    ASSERT_TRUE(gpuExecutor.isApplicable(builder.GetBufferPointer(), builder.GetSize()));
+
+    hipdnn_data_sdk::utilities::Tensor<float> input0Tensor(dims, strides);
+    hipdnn_data_sdk::utilities::Tensor<hipdnn_data_sdk::types::half> input1Tensor(dims, strides);
+    hipdnn_data_sdk::utilities::Tensor<float> outputTensor(dims, strides);
+    fillWithRandomValues(input0Tensor, -1.0f, 1.0f);
+    fillWithRandomValues(
+        input1Tensor, hipdnn_data_sdk::types::half(-1.0f), hipdnn_data_sdk::types::half(1.0f));
+    outputTensor.fillWithValue(0);
+    input0Tensor.memory().hostData();
+    input1Tensor.memory().hostData();
+
+    std::unordered_map<int64_t, void*> variantPack;
+    variantPack[IN_0_UID] = input0Tensor.rawDeviceData();
+    variantPack[IN_1_UID] = input1Tensor.rawDeviceData();
+    variantPack[OUT_UID] = outputTensor.rawDeviceData();
+
+    gpuExecutor.execute(builder.GetBufferPointer(), builder.GetSize(), variantPack);
+    outputTensor.markDeviceModified();
+
+    const auto* in0 = static_cast<float*>(input0Tensor.rawHostData());
+    const auto* in1 = static_cast<hipdnn_data_sdk::types::half*>(input1Tensor.rawHostData());
+    const auto* out = static_cast<float*>(outputTensor.rawHostData());
+    for(size_t i = 0; i < outputTensor.elementCount(); ++i)
+    {
+        EXPECT_EQ(in0[i] + static_cast<float>(in1[i]), out[i]) << "Mismatch at index " << i;
+    }
+}
+
+TEST(TestGpuReferenceGraphExecutorFp32, PointwiseMaxMinExecutes)
+{
+    SKIP_IF_NO_DEVICES();
+
+    constexpr int64_t IN_0_UID = 1;
+    constexpr int64_t OUT_UID = 2;
+    constexpr int64_t IN_1_UID = 3;
+    const std::vector<int64_t> dims = {2, 3, 4, 4};
+    auto strides = generateStrides(dims);
+
+    for(const auto mode : {PointwiseMode::MAX_OP, PointwiseMode::MIN_OP})
+    {
+        auto spec = hipdnn_test_sdk::utilities::PointwiseGraphSpec::binary(
+            mode, dims, strides, dims, strides, dims, strides);
+        auto builder = hipdnn_test_sdk::utilities::createPointwiseGraph(spec);
+
+        hipdnn_data_sdk::utilities::Tensor<float> input0Tensor(dims, strides);
+        hipdnn_data_sdk::utilities::Tensor<float> input1Tensor(dims, strides);
+        hipdnn_data_sdk::utilities::Tensor<float> outputTensor(dims, strides);
+        fillWithRandomValues(input0Tensor, -1.0f, 1.0f);
+        fillWithRandomValues(input1Tensor, -1.0f, 1.0f);
+        outputTensor.fillWithValue(0);
+
+        // Single non-const access to trigger migration as, despite a comment claiming otherwise, MigratableMemory cannot migrate via a const access
+        input0Tensor.memory().hostData();
+        input1Tensor.memory().hostData();
+
+        std::unordered_map<int64_t, void*> variantPack;
+        variantPack[IN_0_UID] = input0Tensor.rawDeviceData();
+        variantPack[IN_1_UID] = input1Tensor.rawDeviceData();
+        variantPack[OUT_UID] = outputTensor.rawDeviceData();
+
+        GpuReferenceGraphExecutor gpuExecutor;
+        ASSERT_TRUE(gpuExecutor.isApplicable(builder.GetBufferPointer(), builder.GetSize()));
+        gpuExecutor.execute(builder.GetBufferPointer(), builder.GetSize(), variantPack);
+        outputTensor.markDeviceModified();
+
+        for(size_t i = 0; i < outputTensor.elementCount(); ++i)
+        {
+            const float x0 = static_cast<float*>(input0Tensor.rawHostData())[i];
+            const float x1 = static_cast<float*>(input1Tensor.rawHostData())[i];
+            const float expected
+                = (mode == PointwiseMode::MAX_OP) ? std::max(x0, x1) : std::min(x0, x1);
+            EXPECT_EQ(expected, static_cast<float*>(outputTensor.rawHostData())[i])
+                << "Mismatch at index " << i;
+        }
+    }
+}
+
+TEST(TestGpuReferenceGraphExecutorFp32, PointwiseCmpGtExecutes)
+{
+    SKIP_IF_NO_DEVICES();
+
+    constexpr int64_t IN_0_UID = 10;
+    constexpr int64_t IN_1_UID = 11;
+    constexpr int64_t OUT_UID = 12;
+    const std::vector<int64_t> dims = {2, 3, 4, 4};
+    auto strides = generateStrides(dims);
+
+    flatbuffers::FlatBufferBuilder builder;
+    std::vector<flatbuffers::Offset<TensorAttributes>> tensors;
+    for(const auto& [uid, name, type] : {std::tuple{IN_0_UID, "in_0", DataType::FLOAT},
+                                         std::tuple{IN_1_UID, "in_1", DataType::FLOAT},
+                                         std::tuple{OUT_UID, "out_0", DataType::BOOLEAN}})
+    {
+        tensors.push_back(CreateTensorAttributesDirect(builder,
+                                                       uid,
+                                                       name,
+                                                       type,
+                                                       &strides,
+                                                       &dims,
+                                                       /*virtual_=*/false,
+                                                       TensorValue::NONE,
+                                                       /*value=*/0,
+                                                       false));
+    }
+
+    auto pointwiseAttrs = CreatePointwiseAttributes(builder,
+                                                    PointwiseMode::CMP_GT,
+                                                    flatbuffers::nullopt,
+                                                    flatbuffers::nullopt,
+                                                    flatbuffers::nullopt,
+                                                    flatbuffers::nullopt,
+                                                    IN_0_UID,
+                                                    IN_1_UID,
+                                                    flatbuffers::nullopt,
+                                                    OUT_UID);
+    std::vector<flatbuffers::Offset<Node>> nodes;
+    nodes.push_back(CreateNodeDirect(builder,
+                                     "pointwise_node",
+                                     DataType::FLOAT,
+                                     NodeAttributes::PointwiseAttributes,
+                                     pointwiseAttrs.Union()));
+    auto graph = CreateGraphDirect(
+        builder, "TestGraph", DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, &tensors, &nodes);
+    builder.Finish(graph);
+
+    GpuReferenceGraphExecutor gpuExecutor;
+    ASSERT_TRUE(gpuExecutor.isApplicable(builder.GetBufferPointer(), builder.GetSize()));
+
+    hipdnn_data_sdk::utilities::Tensor<float> input0Tensor(dims, strides);
+    hipdnn_data_sdk::utilities::Tensor<float> input1Tensor(dims, strides);
+    hipdnn_data_sdk::utilities::Tensor<bool> outputTensor(dims, strides);
+    fillWithRandomValues(input0Tensor, -1.0f, 1.0f, 1U);
+    fillWithRandomValues(input1Tensor, -1.0f, 1.0f, 2U);
+    outputTensor.fillWithValue(false);
+
+    // Single non-const access to trigger migration as, despite a comment claiming otherwise, MigratableMemory cannot migrate via a const access
+    input0Tensor.memory().hostData();
+    input1Tensor.memory().hostData();
+
+    std::unordered_map<int64_t, void*> variantPack;
+    variantPack[IN_0_UID] = input0Tensor.rawDeviceData();
+    variantPack[IN_1_UID] = input1Tensor.rawDeviceData();
+    variantPack[OUT_UID] = outputTensor.rawDeviceData();
+
+    gpuExecutor.execute(builder.GetBufferPointer(), builder.GetSize(), variantPack);
+    outputTensor.markDeviceModified();
+
+    for(size_t i = 0; i < outputTensor.elementCount(); ++i)
+    {
+        const bool expected = static_cast<float*>(input0Tensor.rawHostData())[i]
+                              > static_cast<float*>(input1Tensor.rawHostData())[i];
+        EXPECT_EQ(expected, static_cast<bool*>(outputTensor.rawHostData())[i])
+            << "Mismatch at index " << i;
+    }
+}
+
+TEST(TestGpuReferenceGraphExecutorFp32, PointwiseBinarySelectExecutes)
+{
+    SKIP_IF_NO_DEVICES();
+
+    constexpr int64_t IN_0_UID = 1;
+    constexpr int64_t OUT_UID = 2;
+    constexpr int64_t IN_1_UID = 3;
+    constexpr int64_t MASK_UID = 4;
+    const std::vector<int64_t> dims = {2, 3, 4, 4};
+    auto strides = generateStrides(dims);
+
+    // The mask broadcasts along every dimension but the channels
+    const std::vector<int64_t> maskDims = {1, 3, 1, 1};
+    auto maskStrides = generateStrides(maskDims);
+
+    auto spec = hipdnn_test_sdk::utilities::PointwiseGraphSpec::binary(
+        PointwiseMode::BINARY_SELECT, dims, strides, dims, strides, dims, strides);
+    spec.thirdInputDims = maskDims;
+    spec.thirdInputStrides = maskStrides;
+    spec.thirdInputDataType = DataType::BOOLEAN;
+    auto builder = hipdnn_test_sdk::utilities::createPointwiseGraph(spec);
+
+    GpuReferenceGraphExecutor gpuExecutor;
+    ASSERT_TRUE(gpuExecutor.isApplicable(builder.GetBufferPointer(), builder.GetSize()));
+
+    hipdnn_data_sdk::utilities::Tensor<float> input0Tensor(dims, strides);
+    hipdnn_data_sdk::utilities::Tensor<float> input1Tensor(dims, strides);
+    hipdnn_data_sdk::utilities::Tensor<bool> maskTensor(maskDims, maskStrides);
+    hipdnn_data_sdk::utilities::Tensor<float> outputTensor(dims, strides);
+    fillWithRandomValues(input0Tensor, -1.0f, 1.0f, 1U);
+    fillWithRandomValues(input1Tensor, -1.0f, 1.0f, 2U);
+    maskTensor.setHostValue(true, 0, 0, 0, 0);
+    maskTensor.setHostValue(false, 0, 1, 0, 0);
+    maskTensor.setHostValue(true, 0, 2, 0, 0);
+    outputTensor.fillWithValue(0);
+
+    // Single non-const access to trigger migration as, despite a comment claiming otherwise, MigratableMemory cannot migrate via a const access
+    input0Tensor.memory().hostData();
+    input1Tensor.memory().hostData();
+
+    std::unordered_map<int64_t, void*> variantPack;
+    variantPack[IN_0_UID] = input0Tensor.rawDeviceData();
+    variantPack[IN_1_UID] = input1Tensor.rawDeviceData();
+    variantPack[MASK_UID] = maskTensor.rawDeviceData();
+    variantPack[OUT_UID] = outputTensor.rawDeviceData();
+
+    gpuExecutor.execute(builder.GetBufferPointer(), builder.GetSize(), variantPack);
+    outputTensor.markDeviceModified();
+
+    const auto channelCount = static_cast<size_t>(dims[1]);
+    const auto spatialSize = static_cast<size_t>(dims[2] * dims[3]);
+    for(size_t i = 0; i < outputTensor.elementCount(); ++i)
+    {
+        const size_t channel = (i / spatialSize) % channelCount;
+        const float expected = (channel != 1) ? static_cast<float*>(input0Tensor.rawHostData())[i]
+                                              : static_cast<float*>(input1Tensor.rawHostData())[i];
         EXPECT_EQ(expected, static_cast<float*>(outputTensor.rawHostData())[i])
             << "Mismatch at index " << i;
     }
