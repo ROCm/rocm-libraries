@@ -26,6 +26,7 @@
 #include "rocke/arch_target.h" /* rocke_arch_target_from_gfx, rocke_mma_catalog_has_shape */
 #include "rocke/helper_rocke.core.arch.h" /* rocke_archtarget_{async_lds_max_dwords,mma} */
 #include "rocke/helper_rocke.helpers.spec.h" /* rocke_kernel_name_join, rocke_ceil_div */
+#include "rocke/instance_conv_bias.h"
 #include "rocke/instance_conv_direct_grouped_internal.h" /* rocke_dconv_emit_params */
 #include "rocke/intexpr.h" /* rocke_intexpr_checked_mul */
 
@@ -36,7 +37,7 @@ namespace rocke_pp
 namespace
 {
 
-const char* bf16_flag[1] = {"bf16"};
+const char* name_flags[2] = {"cbias", "bf16"};
 
 int in_h(const PpSpec& s)
 {
@@ -198,8 +199,8 @@ rocke_status_t pp_kernel_name(const PpSpec& s, char* out, size_t out_cap)
     snprintf(p_buf, sizeof p_buf, "p%d", p->PAD);
     snprintf(bk_buf, sizeof bk_buf, "bk%d", s.block_k);
     const char* parts[3] = {f_buf, p_buf, bk_buf};
-    int on[1] = {problem_is_bf16(p) ? 1 : 0};
-    return rocke_kernel_name_join(s.name, parts, 3, bf16_flag, on, 1, out, out_cap, NULL);
+    int on[2] = {s.bias ? 1 : 0, problem_is_bf16(p) ? 1 : 0};
+    return rocke_kernel_name_join(s.name, parts, 3, name_flags, on, 2, out, out_cap, NULL);
 }
 
 bool pp_is_valid_spec(
@@ -347,7 +348,14 @@ rocke_kernel_def_t* emit_pp_mfma(rocke_ir_builder_t* b, const PpSpec& spec, PpWe
     rocke_attr_set_bool(b, &b->kernel->attrs, "lds_alias_scopes", true);
     rocke_attr_set_int(b, &b->kernel->attrs, "waves_per_eu", 2);
     rocke_dconv_params_t P;
-    rocke_dconv_emit_params(b, &P, "fwd", io_type);
+    if(spec.bias)
+    {
+        rocke_dconv_emit_params_bias(b, &P, io_type);
+    }
+    else
+    {
+        rocke_dconv_emit_params(b, &P, "fwd", io_type);
+    }
     if(!rocke_ir_builder_ok(b))
     {
         return NULL;
@@ -704,6 +712,17 @@ rocke_kernel_def_t* emit_pp_mfma(rocke_ir_builder_t* b, const PpSpec& spec, PpWe
     k_lane = e.add(k_lane, e.muli(lane_hi, 4));
     V ow = e.add(ow0, l16);
     V w_ok = e.lt(ow, p_Wo);
+    /* Conv + bias: bias[k .. k+4) of every fragment's channels, as fp32. */
+    std::vector<V> bias_kf;
+    if(spec.bias)
+    {
+        V bias_rsrc = rocke_conv_bias_rsrc(b, P.Bias, P.Bias_bytes);
+        for(int kf = 0; kf < KF; ++kf)
+        {
+            V kb = e.addi(k_lane, kf * kAtom);
+            bias_kf.push_back(rocke_conv_bias_load_vec_f32(b, bias_rsrc, kb, 4, io_type, c0));
+        }
+    }
     for(int jb = 0; jb < 8; ++jb)
     {
         V hh = e.addi(e.muli(wave_j, 8), jb);
@@ -717,7 +736,12 @@ rocke_kernel_def_t* emit_pp_mfma(rocke_ir_builder_t* b, const PpSpec& spec, PpWe
             V ok = e.land(hw_ok, e.lt(k, K));
             V voff = e.mul(e.add(pix, k), c2);
             voff = e.select(ok, voff, oob);
-            V val = rocke_dconv_trunc_f32(b, bf16, accs[kf * 8 + jb]);
+            V acc = accs[kf * 8 + jb];
+            if(!bias_kf.empty())
+            {
+                acc = rocke_b_fadd(b, acc, bias_kf[(size_t)kf]);
+            }
+            V val = rocke_dconv_trunc_f32(b, bf16, acc);
             rocke_dconv_buf_store_vN(b, bf16, d_rsrc, voff, c0, val, 2);
         }
     }

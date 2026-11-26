@@ -57,6 +57,7 @@ extern "C" {
  *      waves: int = 8
  *      waves_per_eu: int = 0
  *      name: str = "conv_wino_fused1d"
+ *      bias: bool = False     # per-output-channel conv bias (Bias tail)
  * ===================================================================== */
 typedef struct rocke_winograd_fused_1d_spec
 {
@@ -75,6 +76,8 @@ typedef struct rocke_winograd_fused_1d_spec
     int waves; /* default 8   */
     int waves_per_eu; /* default 0   */
     const char* name; /* default "conv_wino_fused1d" */
+    bool bias; /* default false: add the per-output-channel conv bias in the
+                * output transform (trailing Bias / Bias_bytes kernargs) */
 } rocke_winograd_fused_1d_spec_t;
 
 /* Spec with the Python dataclass defaults (problem zeroed, axis F(4, 3)). */

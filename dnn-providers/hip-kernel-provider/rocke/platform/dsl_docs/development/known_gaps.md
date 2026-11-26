@@ -411,6 +411,16 @@ caller passes one to `dispatch/conv_routes.py`. The other callers are
 `Winograd3dDropin`, `benchmarks/common/benchmark_winograd3d.py`,
 `benchmarks/common/conv_route_check.py` and the tests.
 
+**Conv bias (forward):** `WinogradYxSpec.bias` adds a per-output-channel bias in
+fp32 in the epilogue of every main-kernel variant (before the bf16 rounding and the
+`bps_out` amax). With `ksplit` the main kernel keeps writing raw partials and
+`KsReduceSpec.bias` adds it in the reduction. The trailing `Bias` / `Bias_bytes`
+kernargs follow the conv bias ABI (`kernels/conv/conv_bias.py`). A caller reaches it
+through `Winograd3dDropin(..., bias=)` on a forward plan. `winograd_steps` refuses a
+bias spec, because a route request carries no bias tensor. Like the rest of the
+family, the bias has no C++ twin, parity pair or golden entry. It is checked by
+`library/tests/test_conv_winograd_bias.py` (CPU, and GPU on gfx942 against torch).
+
 | What's missing | Where |
 |---|---|
 | C twins of the specs and their validators: `Winograd3dSpec` (`is_valid_spec`), `WinogradYxSpec` (`is_valid_yx_spec`, `dropin_spec_error`), `WinogradXSpec`, and the auxiliary specs (`XToC8Spec` / `XToC8RangeSpec` / `XToC8LdsSpec`, `PadCopyKernelSpec`, `YxWeightTransformSpec` / `V2Spec` / `V3Spec`, `YxAuxSpec`, `KsReduceSpec`) | `library/cpp/include/rocke/` |

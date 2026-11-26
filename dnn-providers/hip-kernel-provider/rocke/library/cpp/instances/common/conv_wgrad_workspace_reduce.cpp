@@ -20,6 +20,7 @@
 #include "rocke/error_boundary.hpp" /* ckc::guard_builder */
 #include "rocke/helper_rocke.helpers.io.h" /* rocke_b_io_ir_type, rocke_b_store_scalar_from_f32 */
 #include "rocke/helper_rocke.helpers.spec.h" /* rocke_kernel_name_join, SignatureBuilder */
+#include "rocke/instance_conv_bias.h" /* rocke_conv_bias_* (spec->bias) */
 #include "rocke/ir.h"
 #include "rocke/ir_internal.h" /* rocke_i_set_err */
 #include "rocke/lower_llvm.h"
@@ -104,6 +105,8 @@ rocke_status_t
         snprintf(sp_buf, sizeof(sp_buf), "sp%d", spec->slab_par);
         parts[n_parts++] = sp_buf;
     }
+    if(spec->bias)
+        parts[n_parts++] = "cbias";
     parts[n_parts++] = spec->dtype_d ? spec->dtype_d : "fp16";
     return rocke_kernel_name_join(spec->name, parts, n_parts, NULL, NULL, 0, out, out_cap, NULL);
 }
@@ -211,7 +214,42 @@ bool rocke_wgrad_reduce_is_valid_spec(const rocke_wgrad_reduce_spec_t* spec,
             snprintf(reason, reason_cap, "WgradReduceSpec.slab_par needs fold_loop");
         return false;
     }
+    if(spec->bias && (spec->groups > 1 || spec->rezero))
+    {
+        if(reason)
+            snprintf(reason,
+                     reason_cap,
+                     "WgradReduceSpec.bias is the forward split_det 3 fold: one group "
+                     "(wg_N = the output channels), no rezero");
+        return false;
+    }
     return true;
+}
+
+/* spec.bias: the bias buffer resource, the soffset zero and the bias element
+ * type (Python's (rsrc, c0, elem) tuple); rsrc NULL when off. */
+typedef struct
+{
+    rocke_value_t* rsrc;
+    rocke_value_t* c0;
+    const rocke_type_t* elem;
+} wr_bias_t;
+
+/* Python _add_bias: tot[i] + bias[c_n + i] in fp32. */
+static void wr_add_bias(
+    rocke_ir_builder_t* b, const wr_bias_t* bias, rocke_value_t** tot, int v, rocke_value_t* c_n)
+{
+    for(int i = 0; i < v; ++i)
+    {
+        rocke_value_t* k = c_n;
+        if(i != 0)
+        {
+            rocke_value_t* c_i = rocke_b_const_i32(b, i);
+            k = rocke_b_add(b, c_n, c_i);
+        }
+        rocke_value_t* bv = rocke_conv_bias_load_f32(b, bias->rsrc, k, bias->elem, bias->c0);
+        tot[i] = rocke_b_fadd(b, tot[i], bv);
+    }
 }
 
 /* ---- vector / looped folds (Python _emit_vec_fold / _emit_loop_fold) ---- */
@@ -263,7 +301,8 @@ static void wr_emit_vec_fold(rocke_ir_builder_t* b,
                              rocke_value_t* wg_N_p,
                              rocke_value_t* c_m,
                              rocke_value_t* c_n,
-                             rocke_value_t* grp_id)
+                             rocke_value_t* grp_id,
+                             const wr_bias_t* bias)
 {
     const int v = spec->vec;
     c_n = rocke_b_mul(b, c_n, rocke_b_const_i32(b, v));
@@ -308,6 +347,8 @@ static void wr_emit_vec_fold(rocke_ir_builder_t* b,
                     x = rocke_b_cast_to_f32(b, x);
                 tot[i] = r == 0 ? x : rocke_b_fadd(b, tot[i], x);
             }
+        if(bias->rsrc != NULL)
+            wr_add_bias(b, bias, tot, v, c_n);
         if(spec->rezero)
         {
             rocke_value_t* z = rocke_b_zero_vec_f32(b, v);
@@ -331,7 +372,8 @@ static void wr_emit_loop_fold(rocke_ir_builder_t* b,
                               rocke_value_t* dw_ptr,
                               rocke_value_t* wg_M_p,
                               rocke_value_t* wg_N_p,
-                              rocke_value_t* tid)
+                              rocke_value_t* tid,
+                              const wr_bias_t* bias)
 {
     if(spec->vec <= 1)
     {
@@ -467,6 +509,8 @@ static void wr_emit_loop_fold(rocke_ir_builder_t* b,
             for(int i = 0; i < v; ++i)
                 tot[i] = q == 0 ? xs[i] : rocke_b_fadd(b, tot[i], xs[i]);
         }
+        if(bias->rsrc != NULL)
+            wr_add_bias(b, bias, tot, v, c_n);
         wr_fold_store(b, spec, dw_ptr, elem, tot, v);
         rocke_b_region_leave(b);
     }
@@ -474,6 +518,8 @@ static void wr_emit_loop_fold(rocke_ir_builder_t* b,
     {
         rocke_if_t g = rocke_b_scf_if(b, in_bounds);
         rocke_b_region_enter(b, g.then_region);
+        if(bias->rsrc != NULL)
+            wr_add_bias(b, bias, acc, v, c_n);
         wr_fold_store(b, spec, dw_ptr, elem, acc, v);
         rocke_b_region_leave(b);
     }
@@ -546,12 +592,24 @@ rocke_kernel_def_t* rocke_build_wgrad_workspace_reduce(rocke_ir_builder_t* b,
     /* groups is in the ABI so callers can pass it; the kernel uses block_id_z
      * for the group index instead, so the IR value itself is unused. */
     rocke_b_param(b, "groups", rocke_i32(), NULL);
+    /* spec.bias (the forward split_det 3 fold): the Bias / Bias_bytes tail,
+     * read through a buffer resource. */
+    wr_bias_t bias = {NULL, NULL, NULL};
+    if(spec->bias)
+    {
+        rocke_value_t* p_bias = NULL;
+        rocke_value_t* p_bias_bytes = NULL;
+        rocke_conv_bias_declare_params(b, dw_elem, &p_bias, &p_bias_bytes);
+        bias.rsrc = rocke_conv_bias_rsrc(b, p_bias, p_bias_bytes);
+        bias.c0 = rocke_b_const_i32(b, 0);
+        bias.elem = dw_elem;
+    }
 
     /* ---- thread / block indices ------------------------------------------ */
     rocke_value_t* tid = rocke_b_thread_id_x(b);
     if(spec->fold_loop)
     {
-        wr_emit_loop_fold(b, spec, ws_ptr, dw_ptr, wg_M_p, wg_N_p, tid);
+        wr_emit_loop_fold(b, spec, ws_ptr, dw_ptr, wg_M_p, wg_N_p, tid, &bias);
         return rocke_ir_builder_ok(b) ? b->kernel : NULL;
     }
     rocke_value_t* blk_m = rocke_b_block_id_y(b); /* M tiles (local within group) */
@@ -572,7 +630,7 @@ rocke_kernel_def_t* rocke_build_wgrad_workspace_reduce(rocke_ir_builder_t* b,
 
     if(spec->vec > 1)
     {
-        wr_emit_vec_fold(b, spec, ws_ptr, dw_ptr, wg_M_p, wg_N_p, c_m, c_n, grp_id);
+        wr_emit_vec_fold(b, spec, ws_ptr, dw_ptr, wg_M_p, wg_N_p, c_m, c_n, grp_id, &bias);
         return rocke_ir_builder_ok(b) ? b->kernel : NULL;
     }
 
@@ -630,6 +688,8 @@ rocke_kernel_def_t* rocke_build_wgrad_workspace_reduce(rocke_ir_builder_t* b,
             for(int r = 1; r < reps; ++r)
                 total = rocke_b_fadd(b, total, partials[r]);
         }
+        if(bias.rsrc != NULL)
+            wr_add_bias(b, &bias, &total, 1, c_n);
 
         /* Store: fp32 output is already the right type; f16/bf16 need cast. */
         if(is_fp32_out)
@@ -693,6 +753,11 @@ rocke_status_t rocke_wgrad_reduce_signature(rocke_arena_t* arena,
     rocke_signature_builder_scalar(&sb, "ws_bytes", "i32");
     rocke_signature_builder_scalar(&sb, "dw_bytes", "i32");
     rocke_signature_builder_scalar(&sb, "groups", "i32");
+    if(spec->bias)
+    {
+        rocke_signature_builder_ptr(&sb, "Bias", dtype_d, NULL);
+        rocke_signature_builder_scalar(&sb, "Bias_bytes", "i32");
+    }
     return rocke_signature_builder_build(&sb, out_items, out_count);
 }
 

@@ -77,6 +77,7 @@ from rocke.core.codegen_policy import (
 from rocke.core.ir import I32, IRBuilder, KernelDef, Value
 from rocke.helpers.spec import align_up, ceil_div
 
+from kernels.conv.conv_bias import conv_bias_rsrc, load_conv_bias_vec_f32
 from kernels.common.conv_direct_fwd_wmma import (
     _lds_frag16,
     _tdm_descriptor_3d,
@@ -119,6 +120,9 @@ class DirectFwdTapOuterSpec:
     # Transfers per operand and step: the window rows and the weight rows are
     # cut in tdm_split slabs, slab j issued by waves 2j (X) and 2j + 1 (W).
     tdm_split: int = 1
+    # Conv + bias forward: the Bias / Bias_bytes kernarg tail; bias[k .. k+8)
+    # of a lane's accumulator vector is added in fp32 before the LDS staging.
+    bias: bool = False
 
     @property
     def block_k(self) -> int:
@@ -181,6 +185,7 @@ class DirectFwdTapOuterSpec:
             "pf" if self.prefetch else "",
             f"s{self.sched}" if self.sched else "",
             f"ts{self.tdm_split}" if self.tdm_split > 1 else "",
+            "cbias" if self.bias else "",
             flags={"bf16": p.dtype == "bf16"},
         )
 
@@ -299,7 +304,7 @@ def build_direct_fwd_tapouter_wmma(
     b.kernel.attrs["max_workgroup_size"] = THREADS
     if spec.sched:
         apply_codegen_policy(b.kernel, CodegenPolicy(scheduler_strategy=spec.sched))
-    params = emit_direct_params(b, direction="fwd", io_type=io_type)
+    params = emit_direct_params(b, direction="fwd", io_type=io_type, bias=spec.bias)
     Xp, Wp, Yp = params["A"], params["B"], params["D"]
 
     c0 = b.const_i32(0)
@@ -531,17 +536,27 @@ def build_direct_fwd_tapouter_wmma(
         """Stage the Y tile in LDS as [row][col][channel] and store it with one
         TDM transfer, which clips it to the image and the group's channels."""
         b.sync_lds_only()
+        if spec.bias:
+            bias_rsrc = conv_bias_rsrc(b, params["Bias"], params["Bias_bytes"])
         for m in range(TM):
             col = b.add(
                 b.mul(b.add(b.mul(wave_k, b.const_i32(TM)), b.const_i32(m)), c16),
                 b.mul(lhalf, c8),
             )
+            if spec.bias:
+                # The lane's 8 accumulator slots are channels col .. col+7.
+                bv = load_conv_bias_vec_f32(
+                    b, bias_rsrc, b.add(k_out, col), 8, io_type, c0
+                )
             for tn in range(TN):
                 px = b.add(
                     b.mul(b.add(b.mul(wave_p, b.const_i32(TN)), b.const_i32(tn)), c16),
                     l16,
                 )
-                val = b.vec_cast_f32_to(accs[m * TN + tn], io_type)
+                acc = accs[m * TN + tn]
+                if spec.bias:
+                    acc = b.fadd(acc, bv)
+                val = b.vec_cast_f32_to(acc, io_type)
                 b.smem_store_vN(
                     lds, [c0, b.add(b.mul(px, b.const_i32(EPITCH)), col)], val, n=8
                 )

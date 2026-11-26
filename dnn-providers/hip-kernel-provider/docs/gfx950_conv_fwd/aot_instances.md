@@ -155,7 +155,7 @@ are where the packaged guard is knowingly stricter: spatial at exactly 64 groups
 before), and graphs whose two axes differ in stride or padding, which rocKE's direct
 problem cannot state.
 
-Natively, `aotDirectInstance` in `Gfx950ConvFwdNative.cpp` parses the variant and its
+Natively, `aotDirectInstance` in `Gfx950ConvFwdAotCommon.cpp` parses the variant and its
 knobs (`aotDirectVariantUses`), and `conv::directInstanceLaunch` in
 `Gfx950ConvFwdGeometry.hpp` applies the variant's rule (`depthwiseTileLaunch`,
 `groupedDirectLaunch`, `nongroupedDirectLaunch` for both DirectNongroupedConvSpec

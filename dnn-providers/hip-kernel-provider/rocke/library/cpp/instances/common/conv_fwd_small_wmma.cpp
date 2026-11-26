@@ -26,6 +26,7 @@
 #include "rocke/helper_rocke.core.arch.h" /* rocke_archtarget_fits_lds, max_threads_per_block */
 #include "rocke/helper_rocke.helpers.io.h" /* rocke_b_io_ir_type */
 #include "rocke/helper_rocke.helpers.spec.h" /* rocke_kernel_name_join, rocke_ceil_div, ... */
+#include "rocke/instance_conv_bias.h"
 #include "rocke/instance_conv_direct_grouped_internal.h" /* rocke_dconv_emit_params */
 #include "rocke/instance_conv_fwd_wmma_gate_internal.h" /* rocke_wmma_fwd_gate */
 #include "rocke/instance_conv_fwd_wmma_tdm_internal.h" /* rocke_fwd_tdm_descriptor_3d */
@@ -249,8 +250,20 @@ rocke_status_t rocke_fwd_smallc_wmma_kernel_name(const rocke_fwd_smallc_wmma_spe
     snprintf(tb, sizeof tb, "tb%d", spec->tiles_per_block);
     if(spec->sched != NULL && spec->sched[0] != '\0')
         sched = std::string("s") + spec->sched;
-    const char* parts[]
-        = {f, st, pad, cc, wk, wp, tk, tp, oh, ow, tb, spec->tdm_store ? "ts" : "", sched.c_str()};
+    const char* parts[] = {f,
+                           st,
+                           pad,
+                           cc,
+                           wk,
+                           wp,
+                           tk,
+                           tp,
+                           oh,
+                           ow,
+                           tb,
+                           spec->tdm_store ? "ts" : "",
+                           sched.c_str(),
+                           spec->bias ? "cbias" : ""};
     const char* flag_names[] = {"bf16"};
     int flag_on[] = {rocke_direct_conv_problem_is_bf16(p) ? 1 : 0};
     return rocke_kernel_name_join(spec->name ? spec->name : "fwd_smallc_wmma",
@@ -454,7 +467,8 @@ rocke_status_t rocke_fwd_smallk_wmma_kernel_name(const rocke_fwd_smallk_wmma_spe
                            ck,
                            sg,
                            spec->prefetch ? "pf" : "",
-                           sched.c_str()};
+                           sched.c_str(),
+                           spec->bias ? "cbias" : ""};
     const char* flag_names[] = {"bf16"};
     int flag_on[] = {rocke_direct_conv_problem_is_bf16(p) ? 1 : 0};
     return rocke_kernel_name_join(spec->name ? spec->name : "fwd_smallk_wmma",
@@ -661,7 +675,15 @@ struct sc_ctx
 
     std::vector<std::vector<rocke_value_t*>> a_frags;
     std::vector<rocke_value_t*> lane_ty, lane_tx, lane_off;
+    /* Conv + bias: bias[k .. k+8) of M tile m as fp32 (NULL without bias). */
+    std::vector<rocke_value_t*> bias_k;
 };
+
+/* Accumulator acc of M tile m, plus the bias when there is one. */
+static rocke_value_t* sc_biased(sc_ctx& c, rocke_value_t* acc, int m)
+{
+    return c.bias_k[m] == NULL ? acc : rocke_b_fadd(c.b, acc, c.bias_k[m]);
+}
 
 struct sc_geom
 {
@@ -877,7 +899,8 @@ void sc_compute(sc_ctx& c, rocke_value_t* tile, int buf)
                     oi = rocke_b_add(b, z, u);
                 }
                 rocke_value_t* idx[2] = {c.c0, oi};
-                rocke_value_t* val = rocke_dconv_trunc_f32(b, c.bf16, accs[m * c.TN + tn]);
+                rocke_value_t* acc = sc_biased(c, accs[m * c.TN + tn], m);
+                rocke_value_t* val = rocke_dconv_trunc_f32(b, c.bf16, acc);
                 rocke_b_smem_store_vN(b, c.lds, idx, 2, val, 8);
             }
         }
@@ -974,7 +997,8 @@ void sc_compute(sc_ctx& c, rocke_value_t* tile, int buf)
             scf_if_enter(b, cond);
             {
                 rocke_value_t* idx = rocke_b_add(b, px_off, k);
-                rocke_value_t* val = rocke_dconv_trunc_f32(b, c.bf16, accs[m * c.TN + tn]);
+                rocke_value_t* acc = sc_biased(c, accs[m * c.TN + tn], m);
+                rocke_value_t* val = rocke_dconv_trunc_f32(b, c.bf16, acc);
                 rocke_b_global_store_vN(b, params->D, idx, val, 8, 16);
             }
             rocke_b_region_leave(b);
@@ -1031,7 +1055,10 @@ rocke_kernel_def_t*
     rocke_attr_set_int(b, &b->kernel->attrs, "max_workgroup_size", c.THREADS);
     if(spec->sched != NULL)
         rocke_attr_set_str(b, &b->kernel->attrs, "scheduler_strategy", spec->sched);
-    rocke_dconv_emit_params(b, &c.params, "fwd", c.io_type);
+    if(spec->bias)
+        rocke_dconv_emit_params_bias(b, &c.params, c.io_type);
+    else
+        rocke_dconv_emit_params(b, &c.params, "fwd", c.io_type);
     const rocke_dconv_params_t* params = &c.params;
 
     c.c0 = ci(b, 0);
@@ -1167,6 +1194,26 @@ rocke_kernel_def_t*
         rocke_value_t* e0 = ci(b, c.E0);
         rocke_value_t* h = rocke_b_mul(b, c.lhalf, e0);
         c.lane_off[tn] = rocke_b_add(b, s, h);
+    }
+    /* Conv + bias: the lane's 8 accumulator slots of M tile m are output
+     * channels k_blk + (wave_k * TM + m) * 16 + lhalf * 8 .. +7 for every tile
+     * the block walks: load them once. */
+    c.bias_k.assign(c.TM, NULL);
+    if(spec->bias)
+    {
+        rocke_value_t* bias_rsrc = rocke_conv_bias_rsrc(b, params->Bias, params->Bias_bytes);
+        for(int m = 0; m < c.TM; ++m)
+        {
+            rocke_value_t* x = ci(b, c.TM);
+            rocke_value_t* y = rocke_b_mul(b, c.wave_k, x);
+            rocke_value_t* z = ci(b, m);
+            rocke_value_t* u = rocke_b_add(b, y, z);
+            rocke_value_t* v = rocke_b_mul(b, u, c.c16);
+            rocke_value_t* w = rocke_b_mul(b, c.lhalf, c.c8);
+            rocke_value_t* t = rocke_b_add(b, v, w);
+            rocke_value_t* k = rocke_b_add(b, c.k_blk, t);
+            c.bias_k[m] = rocke_conv_bias_load_vec_f32(b, bias_rsrc, k, 8, c.io_type, c.c0);
+        }
     }
 
     rocke_value_t* first;
@@ -1449,7 +1496,10 @@ rocke_kernel_def_t*
     rocke_attr_set_int(b, &b->kernel->attrs, "max_workgroup_size", THREADS);
     if(spec->sched != NULL)
         rocke_attr_set_str(b, &b->kernel->attrs, "scheduler_strategy", spec->sched);
-    rocke_dconv_emit_params(b, &c.params, "fwd", c.io_type);
+    if(spec->bias)
+        rocke_dconv_emit_params_bias(b, &c.params, c.io_type);
+    else
+        rocke_dconv_emit_params(b, &c.params, "fwd", c.io_type);
     const rocke_dconv_params_t* params = &c.params;
 
     c.c0 = ci(b, 0);
@@ -1679,7 +1729,18 @@ rocke_kernel_def_t*
     }
     rocke_b_sync_lds_only(b);
 
-    /* ---- epilogue 2: overlap-add, one output pixel (all K) per thread. */
+    /* ---- epilogue 2: overlap-add, one output pixel (all K) per thread.
+     * Conv + bias: the K bias values, as fp32, loaded once for every pixel. */
+    std::vector<rocke_value_t*> bias_s;
+    if(spec->bias)
+    {
+        rocke_value_t* bias_rsrc = rocke_conv_bias_rsrc(b, params->Bias, params->Bias_bytes);
+        for(int k = 0; k < c.K; ++k)
+        {
+            rocke_value_t* kv = ci(b, k);
+            bias_s.push_back(rocke_conv_bias_load_f32(b, bias_rsrc, kv, c.io_type, c.c0));
+        }
+    }
     int E = OH * OW;
     for(int it = 0; it < (int)rocke_ceil_div(E, THREADS); ++it)
     {
@@ -1743,6 +1804,11 @@ rocke_kernel_def_t*
                         rocke_value_t* zv = rocke_b_smem_load_vN(b, c.lds, idx, 2, rocke_f32(), nk);
                         acc = (acc == NULL) ? zv : rocke_b_vector_add(b, acc, zv);
                     }
+                if(!bias_s.empty())
+                {
+                    rocke_value_t* bv = rocke_b_vec_pack(b, &bias_s[k0], nk, rocke_f32());
+                    acc = rocke_b_fadd(b, acc, bv);
+                }
                 if(out == NULL)
                     out = nhw_off(b,
                                   n_img,

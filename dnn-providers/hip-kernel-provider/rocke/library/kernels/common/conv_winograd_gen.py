@@ -56,6 +56,8 @@ from kernels.common._conv_implicit_gemm_common import ConvProblem
 from kernels.common.conv_winograd_fwd import (
     _CPOL_NT,
     _MAX_BUFFER_BYTES,
+    _bias_f32,
+    _bias_rsrc,
     _ir_dtype,
     _load_raw,
     _oob_sel,
@@ -214,6 +216,9 @@ class WinogradGenSpec:
         io_dtype: x, w, y dtype. operand_dtype: U, V, M dtype (fp16).
         vec: channel vector width (largest power of two <= vec dividing the
             channel extent is used).
+        bias: K4 adds the per-output-channel conv bias in fp32 before the
+            rounding (trailing ``Bias`` / ``Bias_bytes`` kernargs); the K4
+            kernel name carries ``cbias``.
     """
 
     problem: ConvProblem
@@ -225,6 +230,7 @@ class WinogradGenSpec:
     block_size: int = 256
     nt_stores: bool = True
     name: str = "conv_winograd_gen"
+    bias: bool = False
 
     def __post_init__(self) -> None:
         p = self.problem
@@ -331,6 +337,8 @@ class WinogradGenSpec:
         return "_".join(tags)
 
     def kernel_name(self, stage: str) -> str:
+        if self.bias and stage == "output":
+            return kernel_name_join(self.name, stage, self.short(), "cbias")
         return kernel_name_join(self.name, stage, self.short())
 
 
@@ -657,20 +665,23 @@ def output_transform_grid(spec: WinogradGenSpec) -> Tuple[int, int, int]:
 
 
 def output_transform_signature(spec: WinogradGenSpec) -> list:
-    return (
+    sb = (
         SignatureBuilder()
         .ptr("mm", spec.operand_dtype)
         .ptr("y", spec.io_dtype)
         .scalar("m_bytes", "i32")
         .scalar("y_bytes", "i32")
-        .build()
     )
+    if spec.bias:
+        sb = sb.ptr("Bias", spec.io_dtype).scalar("Bias_bytes", "i32")
+    return sb.build()
 
 
 def build_output_transform(
     spec: WinogradGenSpec, *, arch: str = "gfx1250"
 ) -> KernelDef:
-    """K4: ``y = A_y^T M A_x`` per tile (halo tiles skipped), cropped."""
+    """K4: ``y = A_y^T M A_x`` per tile (halo tiles skipped), cropped
+    (``+ bias[k]`` in fp32 with ``spec.bias``)."""
     del arch
     p = spec.problem
     vec = spec.vec_k
@@ -693,6 +704,7 @@ def build_output_transform(
     )
     m_rsrc = b.buffer_rsrc(mm, b.param("m_bytes", I32))
     y_rsrc = b.buffer_rsrc(y, b.param("y_bytes", I32))
+    bias_rsrc = _bias_rsrc(b, spec.io_dtype) if spec.bias else None
     tc = _flat_tile(b, spec, p.K // vec, spec.tiles_w)
     k = b.mul(tc.cv, b.const_i32(vec))
     mbase = _oob_sel(
@@ -713,6 +725,9 @@ def build_output_transform(
         ]
         for uu in range(ny)
     ]
+    bias = None
+    if bias_rsrc is not None:
+        bias = _bias_f32(b, bias_rsrc, k, spec.io_dtype, vec)
     ho0 = b.add(tc.a, b.mul(tc.ti, b.const_i32(p.dH * my)))
     wo0 = b.add(tc.bs, b.mul(tc.tj, b.const_i32(p.dW * mx)))
     img = b.mul(tc.n, b.const_i32(p.Ho))
@@ -753,6 +768,8 @@ def build_output_transform(
                 _lincomb_f(b, [(aty[i][uu], tx[uu][j][ch]) for uu in range(ny)])
                 for ch in range(vec)
             ]
+            if bias is not None:
+                vals = [b.fadd(x_, bv) for x_, bv in zip(vals, bias)]
             pending.append(
                 (b.add(yrow[i], ycol[j]), _pack_vec_f32(b, vals, spec.io_dtype))
             )

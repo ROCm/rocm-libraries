@@ -26,6 +26,7 @@
 #  11  phase_split at stride 1
 #  12  cpg 16 != kpg 32
 #  13  column padding 0 with PAD 1
+from dataclasses import replace
 from _emit_common import run_emit
 from kernels.common.conv_direct_fwd_gstream_wmma import (
     FwdGstreamWmmaSpec,
@@ -66,7 +67,7 @@ def _k(wk, wp, tk, tp, tw, walk, st, ps=False, pd=1, **kw):
     )
 
 
-def _spec(idx: int):
+def _base_spec(idx: int):
     S = FwdGstreamWmmaSpec
     cfgs = {
         0: (S(problem=_p(8, 8), **_k(1, 2, 2, 2, 8, 2, 2)), "gfx1250"),
@@ -112,6 +113,29 @@ def _spec(idx: int):
 
 def _build(spec, arch):
     return build_fwd_gstream_wmma(spec, arch=arch)
+
+
+# Conv + bias forward, configs 14..: the config _BIAS_CFGS[idx - 14]
+# above rebuilt with bias=True (the Bias / Bias_bytes kernarg tail and the
+# fp32 bias add before the store).
+_BIAS_CFG_BASE = 14
+_BIAS_CFGS = (
+    0,
+    3,
+    4,
+    6,
+)
+
+
+def _spec(idx: int):
+    if idx < _BIAS_CFG_BASE:
+        return _base_spec(idx)
+    if idx - _BIAS_CFG_BASE >= len(_BIAS_CFGS):
+        raise SystemExit(f"unknown config index {idx}")
+    sel = _base_spec(_BIAS_CFGS[idx - _BIAS_CFG_BASE])
+    if isinstance(sel, tuple):
+        return replace(sel[0], bias=True), sel[1]
+    return replace(sel, bias=True)
 
 
 def main() -> int:

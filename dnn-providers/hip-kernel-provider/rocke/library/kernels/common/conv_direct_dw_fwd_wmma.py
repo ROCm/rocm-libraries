@@ -27,6 +27,10 @@ results as a scalar kernel up to fp32 summation order.
 AOT: N, H, W, Ho, Wo, groups and the strides are kernargs; KH, KW and PAD are
 capabilities; block_waves, block_h, w_fold and prefetch_rows are knobs.
 
+Conv + bias: ``bias=True`` is the Toeplitz builder's forward bias (the
+``Bias`` / ``Bias_bytes`` tail, ``bias[c]`` added to the fp32 accumulators
+before the rounding), passed through :func:`dw_fwd_wmma_win_spec`.
+
 C++ twin: ``library/cpp/instances/common/conv_direct_dw_fwd_wmma.cpp``
 (``instance_conv_direct_dw_fwd_wmma.h``).
 """
@@ -88,6 +92,9 @@ class DwFwdWmmaSpec:
     block_h: int = 8
     w_fold: int = 1
     prefetch_rows: int = 2
+    # Conv + bias forward: the Bias / Bias_bytes kernarg tail; bias[c] is
+    # added to the fp32 accumulators before the rounding.
+    bias: bool = False
 
     @property
     def wave_size(self) -> int:
@@ -158,6 +165,7 @@ class DwFwdWmmaSpec:
             f"bh{self.block_h}",
             f"f{self.w_fold}",
             f"pf{self.prefetch_rows}",
+            "cbias" if self.bias else "",
             flags={"bf16": p.dtype == "bf16"},
         )
 
@@ -257,6 +265,7 @@ def dw_fwd_wmma_win_spec(spec: DwFwdWmmaSpec) -> DirectDepthwiseDgradWindowedSpe
         prefetch_rows=spec.prefetch_rows,
         wave_size=DW_FWD_WMMA_WAVE,
         fwd=True,
+        bias=spec.bias,
     )
 
 

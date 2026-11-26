@@ -1,0 +1,57 @@
+{
+  "version": "1.0",
+  "id": "2e9d8cfa-98f6-4c1f-b234-4ac2aa50441d",
+  "name": "hipkernel:Gfx950ConvFwdBiasAot",
+  "sdk_version": "1.0.0",
+  "graph_match": {
+    "native": "hipkernel.gfx950_conv_fwd_bias_aot.graph_match"
+  },
+  "metadata": "c7cb8550-974e-4dae-8e8b-42fc82ed9e12",
+  "sort_kernel_catalog": {
+    "default": [
+      "30132974-a5a4-45de-8824-3d3f67311262"
+    ]
+  },
+  "knobs": [
+    "kernel_family",
+    "direct_variant",
+    "tile_m",
+    "tile_n",
+    "tile_k",
+    "warp_m",
+    "warp_n",
+    "warp_tile_m",
+    "warp_tile_n",
+    "warp_tile_k",
+    "pipeline",
+    "epilogue",
+    "vector_size_a",
+    "vector_size_b",
+    "vector_size_c",
+    "unroll_k",
+    "async_dma",
+    "async_chunk_a",
+    "async_chunk_b",
+    "block_w",
+    "block_waves",
+    "block_h",
+    "unroll_rows",
+    "block_q",
+    "block_groups",
+    "double_buffer",
+    "tile_h",
+    "tile_w",
+    "tile_k_out",
+    "ck",
+    "waves_m",
+    "waves_n",
+    "atom",
+    "swizzle_wgm",
+    "iglp",
+    "waves_per_eu",
+    "group_merge",
+    "split_c",
+    "prefetch_rows",
+    "w_fold"
+  ]
+}

@@ -98,6 +98,10 @@ typedef struct rocke_dconv_params
     rocke_value_t* p_B_stride_n;
     rocke_value_t* p_B_stride_hi;
     rocke_value_t* p_B_stride_wi;
+    /* fwd + bias only (rocke_dconv_emit_bias_params): the per-output-channel
+     * bias tail after the block; NULL otherwise. */
+    rocke_value_t* Bias;
+    rocke_value_t* Bias_bytes;
 } rocke_dconv_params_t;
 
 /* Declare the block. direction is "fwd", "dgrad" or "wgrad"; io_type is the
@@ -107,6 +111,13 @@ void rocke_dconv_emit_params(rocke_ir_builder_t* b,
                              rocke_dconv_params_t* params,
                              const char* direction,
                              const rocke_type_t* io_type);
+
+/* Python emit_direct_params(direction="fwd", bias=True): the forward block,
+ * then the (Bias, Bias_bytes) tail (rocke_conv_bias_declare_params) with the
+ * io_type bias pointer. */
+void rocke_dconv_emit_params_bias(rocke_ir_builder_t* b,
+                                  rocke_dconv_params_t* params,
+                                  const rocke_type_t* io_type);
 
 /* A[N,H,W,total_c] with runtime extents + the two conv-spatial embeds.
  * w_upper_0 / w_upper_1 name the column pair ("q_pos"/"W_lds_pos" for the
@@ -350,6 +361,9 @@ typedef struct rocke_dconv_16c_ctx
      * acc_tiles[qt][slot]; q_subtiles x KH. Updated in place by the MFMA
      * phase and the flush/reset phase, exactly like the Python list-of-lists. */
     rocke_value_t* acc_tiles[ROCKE_DCONV_MAX_QTILES][ROCKE_DCONV_MAX_ACC_SLOTS];
+    /* conv + bias: the bias of the lane's accumulator channels as fp32
+     * (NULL without bias) */
+    rocke_value_t* bias_acc;
 } rocke_dconv_16c_ctx_t;
 
 /* Upper bound on the 4c fused-dgrad LDS staging passes; mirrors
@@ -465,6 +479,9 @@ typedef struct rocke_dconv_4c_ctx
     /* ---- accumulator iter-state across the unrolled H-loop -- *
      * acc_tiles[qt][slot]; q_tiles_per_wave x KH. */
     rocke_value_t* acc_tiles[ROCKE_DCONV_MAX_QTILES][ROCKE_DCONV_MAX_ACC_SLOTS];
+    /* conv + bias: the bias of the lane's accumulator channels as fp32
+     * (NULL without bias) */
+    rocke_value_t* bias_acc;
 } rocke_dconv_4c_ctx_t;
 
 /* ===================================================================== *
@@ -678,6 +695,9 @@ typedef struct rocke_dconv_8c_ctx
     const rocke_tensor_descriptor_t* d_desc;
 
     rocke_value_t* acc_tiles[ROCKE_DCONV_MAX_QTILES][ROCKE_DCONV_MAX_ACC_SLOTS];
+    /* conv + bias: the bias of the lane's accumulator channels as fp32
+     * (NULL without bias) */
+    rocke_value_t* bias_acc;
 } rocke_dconv_8c_ctx_t;
 
 /* ===================================================================== *
@@ -780,6 +800,9 @@ typedef struct rocke_dconv_32c_ctx
 
     /* acc_tiles[qt][slot]: <16 x float> per (q_subtile, circular slot) */
     rocke_value_t* acc_tiles[ROCKE_DCONV_MAX_QTILES][ROCKE_DCONV_MAX_ACC_SLOTS];
+    /* conv + bias: the bias of the lane's accumulator channels as fp32
+     * (NULL without bias) */
+    rocke_value_t* bias_acc;
 } rocke_dconv_32c_ctx_t;
 
 /* ===================================================================== *
@@ -848,6 +871,8 @@ typedef struct rocke_dconv_dw_ctx
 
     /* weights_f32[r][s]: KH x KW preloaded f32 scalars */
     rocke_value_t* weights_f32[ROCKE_DCONV_DW_MAX_KH][ROCKE_DCONV_DW_MAX_KW];
+    /* conv + bias: bias[ch] as fp32 (NULL without bias) */
+    rocke_value_t* bias_f32;
 
     /* acc[w_out][slot]: BLOCK_W x KH f32 circular accumulators */
     rocke_value_t* acc[ROCKE_DCONV_DW_MAX_BLOCK_W][ROCKE_DCONV_MAX_ACC_SLOTS];

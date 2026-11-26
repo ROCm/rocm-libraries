@@ -683,6 +683,9 @@ typedef struct rocke_conv_build_ctx
     bool fetch_skip_b;
     /* _fetch_part["hi"] (pp_end_guard): the uniform-tap fetch's end bound. */
     rocke_value_t* fetch_hi;
+    /* spec.bias: the Bias / Bias_bytes kernargs (NULL off). */
+    rocke_value_t* fwd_p_bias;
+    rocke_value_t* fwd_p_bias_bytes;
 } rocke_conv_build_ctx_t;
 
 /* One kk step's MFMA operands (Python load_frags' (a_rows, b_cols)). */
@@ -775,6 +778,22 @@ int rocke_conv_xhalo_b_rows(const rocke_implicit_gemm_conv_spec_t* s);
 bool rocke_conv_fwd_asplit_conflict_ok(const rocke_implicit_gemm_conv_spec_t* s,
                                        char* reason,
                                        size_t reason_cap);
+/* fwd_bias_conflict(spec): false with Python's reason when spec.bias is set on
+ * a forward with no single owner of an output value (the atomic split-K and
+ * the stream-K / hybrid segment loops). */
+bool rocke_conv_fwd_bias_ok(const rocke_implicit_gemm_conv_spec_t* s,
+                            char* reason,
+                            size_t reason_cap);
+/* fwd_bias_stage(spec): where a bias kernel adds its bias. */
+typedef enum
+{
+    ROCKE_CONV_BIAS_NONE = 0, /* ""         -- no bias */
+    ROCKE_CONV_BIAS_EPILOGUE, /* "epilogue" -- unsplit: the accumulator fragments */
+    ROCKE_CONV_BIAS_OWNER, /* "owner"    -- split_det 1/2: the owner's fold */
+    ROCKE_CONV_BIAS_CLUSTER, /* "cluster"  -- split_k_cluster: the cluster fold */
+    ROCKE_CONV_BIAS_REDUCE /* "reduce"   -- two-stage / split_det 3: the fold kernel */
+} rocke_conv_bias_stage_t;
+rocke_conv_bias_stage_t rocke_conv_fwd_bias_stage(const rocke_implicit_gemm_conv_spec_t* s);
 /* _fwd_kloop_conflict(spec) for the knobs the C port carries (xcd_remap,
  * m_band): false with the reason when Python's returns a non-empty string. */
 bool rocke_conv_fwd_kloop_conflict_ok(const rocke_implicit_gemm_conv_spec_t* s,

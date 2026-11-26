@@ -1,0 +1,6 @@
+{
+  "version": "1.0",
+  "id": "c942f88b-4e4a-4d5a-a145-07bab10cdfbb",
+  "name": "Gfx950ConvFwdBiasAot split_c dispatch",
+  "dispatch_symbol": "hipkernel.gfx950_conv_fwd_bias_aot.split_c_dispatch"
+}

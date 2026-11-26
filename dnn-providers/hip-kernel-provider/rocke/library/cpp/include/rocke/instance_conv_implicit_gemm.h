@@ -379,6 +379,11 @@ typedef struct rocke_implicit_gemm_conv_spec
     bool rpf_fetch_late;
     /* AMDGPU machine-scheduler strategy (0 = default, 1..5). */
     int sched_strategy;
+    /* Per-output-channel bias (Python ImplicitGemmConvSpec.bias): the trailing
+     * Bias / Bias_bytes kernargs; bias[g*kpg + k] is added in fp32 to the
+     * accumulators before acc_epilogue and the rounding to dtype_d (see
+     * instance_conv_bias.h). Name tag "cbias". */
+    bool bias; /* default false */
 } rocke_implicit_gemm_conv_spec_t;
 
 /* Default-constructed spec (every field == Python dataclass default). The caller

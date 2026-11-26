@@ -41,6 +41,7 @@
 #include "rocke/helper_rocke.helpers.grid.h" /* chiplet_transform_chunked_runtime */
 #include "rocke/helper_rocke.helpers.io.h"
 #include "rocke/helper_rocke.helpers.transforms.h"
+#include "rocke/instance_conv_bias.h"
 #include "rocke/instance_conv_direct_grouped.h"
 #include "rocke/instance_conv_direct_grouped_internal.h"
 #include "rocke/ir.h"
@@ -366,7 +367,10 @@ rocke_kernel_def_t* rocke_build_direct_conv(rocke_ir_builder_t* b,
     rocke_attr_set_int(b, &b->kernel->attrs, "max_workgroup_size", THREADS);
     if(spec->waves_per_eu > 0)
         rocke_attr_set_int(b, &b->kernel->attrs, "waves_per_eu", (int64_t)spec->waves_per_eu);
-    rocke_dconv_emit_params(b, &ctx->params, "fwd", ctx->io_type);
+    if(spec->bias)
+        rocke_dconv_emit_params_bias(b, &ctx->params, ctx->io_type);
+    else
+        rocke_dconv_emit_params(b, &ctx->params, "fwd", ctx->io_type);
     rocke_dconv_params_t* params = &ctx->params;
     rocke_value_t* p_Hi = params->p_Hi;
     rocke_value_t* p_Wo = params->p_Wo;
@@ -828,6 +832,28 @@ rocke_kernel_def_t* rocke_build_direct_conv(rocke_ir_builder_t* b,
     for(int i = 0; i < n_acc; ++i)
         acc[i] = zero_acc;
 #define DCONV_GEN_ACC(qt, m, slot) acc[((qt) * N_M_TILES + (m)) * KH + (slot)]
+    /* Conv + bias: bias[g*kpg + m*16 + c4*4 .. +4) of every M-tile this lane
+     * stores, as fp32, loaded once per cell (one element at a time: kpg need
+     * not be a multiple of 4). Added to each flushed quad before its store. */
+    rocke_value_t** bias_m = NULL;
+    if(spec->bias)
+    {
+        bias_m = (rocke_value_t**)rocke_arena_alloc(&b->arena,
+                                                    (size_t)M_LOCAL * sizeof(rocke_value_t*));
+        if(bias_m == NULL)
+            return NULL;
+        rocke_value_t* bias_rsrc = rocke_conv_bias_rsrc(b, params->Bias, params->Bias_bytes);
+        for(int m = 0; m < M_LOCAL; ++m)
+        {
+            rocke_value_t* m1 = rocke_b_mul(b, g, c_kpg);
+            rocke_value_t* c_m = rocke_b_const_i32(b, m * 16);
+            rocke_value_t* m2 = rocke_b_mul(b, c4, rocke_b_const_i32(b, 4));
+            rocke_value_t* k_b = rocke_b_add(b, m1, rocke_b_add(b, c_m, m2));
+            if(wm_base16 != NULL)
+                k_b = rocke_b_add(b, k_b, wm_base16);
+            bias_m[m] = rocke_conv_bias_load_run_f32(b, bias_rsrc, k_b, 4, ctx->io_type, c0);
+        }
+    }
 
     /* ---- Weight preloading (WAVES_K > 1) ---- */
     rocke_value_t** preloaded = NULL;
@@ -1545,8 +1571,10 @@ rocke_kernel_def_t* rocke_build_direct_conv(rocke_ir_builder_t* b,
                         rocke_value_t* m1 = rocke_b_mul(b, col, c_so_stride);
                         so_idx = rocke_b_add(b, m1, ch);
                     }
-                    rocke_value_t* h
-                        = rocke_dconv_acc_to_storage(b, ctx->dtype, DCONV_GEN_ACC(qt, m, so_slot));
+                    rocke_value_t* so_acc = DCONV_GEN_ACC(qt, m, so_slot);
+                    if(bias_m != NULL)
+                        so_acc = rocke_b_fadd(b, so_acc, bias_m[m]);
+                    rocke_value_t* h = rocke_dconv_acc_to_storage(b, ctx->dtype, so_acc);
                     rocke_dconv_smem_store_elems(b, ctx->dtype, so_buf, c0, so_idx, h, 4);
                 }
             }
@@ -1716,6 +1744,8 @@ rocke_kernel_def_t* rocke_build_direct_conv(rocke_ir_builder_t* b,
                                 rocke_value_t* off_bytes = rocke_b_mul(b, d_base, c_half_bytes);
                                 rocke_value_t* safe_d
                                     = rocke_b_select(b, store_ok, off_bytes, oob_sentinel);
+                                if(bias_m != NULL) /* once, on the reduced sum */
+                                    partial = rocke_b_fadd(b, partial, bias_m[m]);
                                 rocke_dconv_store_from_f32(
                                     b, ctx->dtype, d_rsrc, safe_d, c0, partial, 4);
                             }
@@ -1727,6 +1757,8 @@ rocke_kernel_def_t* rocke_build_direct_conv(rocke_ir_builder_t* b,
                             rocke_value_t* off_bytes = rocke_b_mul(b, d_base, c_half_bytes);
                             rocke_value_t* safe_d
                                 = rocke_b_select(b, store_ok, off_bytes, oob_sentinel);
+                            if(bias_m != NULL)
+                                acc_to_flush = rocke_b_fadd(b, acc_to_flush, bias_m[m]);
                             rocke_dconv_store_from_f32(
                                 b, ctx->dtype, d_rsrc, safe_d, c0, acc_to_flush, 4);
                         }

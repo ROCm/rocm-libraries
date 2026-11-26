@@ -78,6 +78,12 @@ magnitude order), in one of two ways:
   tile's max over its patch pixels. Used with the LDS path and when
   ``C / vec > 1024``.
 
+Bias (optional, K4). With ``bias`` the output transform also takes the
+per-output-channel conv bias (the trailing ``Bias`` / ``Bias_bytes`` kernargs
+of :mod:`kernels.conv.conv_bias`) and computes ``y = round(A^T M A * 2**e +
+bias[k])``: the bias is added in fp32 after the prescale, before the one
+rounding to the I/O dtype. K1, K2a, K2 and K3 do not change.
+
 All transform arithmetic is fp32. ``B^T`` and ``A^T`` are small integers,
 applied with shared subexpressions (:func:`bt_1d`, :func:`at_1d`: 14 instead of
 22 operations per F4 input column); ``G`` is applied as integer numerators
@@ -110,6 +116,7 @@ from rocke.core.ir import (
 )
 from rocke.helpers.spec import SignatureBuilder, ceil_div, kernel_name_join
 from kernels.common._conv_implicit_gemm_common import ConvProblem
+from kernels.conv.conv_bias import conv_bias_rsrc, declare_conv_bias_params
 
 # Interpolation points of the Toom-Cook construction (plus the point at
 # infinity).
@@ -305,6 +312,9 @@ class WinogradFwdSpec:
                        holds all channels of its runs) or ``split`` (a
                        separate per-pixel max pass, K2a). ``fused`` needs
                        ``C / vec <= 1024`` and falls back to ``split``.
+        bias:          K4 adds the per-output-channel conv bias (trailing
+                       ``Bias`` / ``Bias_bytes`` kernargs); the kernel names
+                       of the stages with K4 carry ``cbias``.
     """
 
     problem: ConvProblem
@@ -328,6 +338,7 @@ class WinogradFwdSpec:
     # ``m_w`` columns per tile, ``(m + 2) * (m_w + 2)`` bins.
     m_w: int = 0
     name: str = "conv_winograd_fwd"
+    bias: bool = False
 
     def __post_init__(self) -> None:
         p = self.problem
@@ -534,7 +545,17 @@ class WinogradFwdSpec:
         return "_".join(tags)
 
     def kernel_name(self, stage: str) -> str:
+        if self.bias and _stage_tag_has_output(stage):
+            return kernel_name_join(self.name, stage, self.short(), "cbias")
         return kernel_name_join(self.name, stage, self.short())
+
+
+def _stage_tag_has_output(stage: str) -> bool:
+    """Whether a kernel-name stage tag (``output``, or ``merged_<stages>``)
+    includes the K4 output transform, the only stage the bias changes."""
+    if stage == "output":
+        return True
+    return stage.startswith("merged_") and "k4" in stage.split("_")[1:]
 
 
 # Smallest fraction of an LDS region's tiles that must be real tiles for K2
@@ -785,6 +806,20 @@ def _store_packed(
         b.buffer_store_vN_f16(rsrc, byte_off, zero, packed, n // 2, cachepolicy=cpol)
     else:
         b.buffer_store_vN_bf16(rsrc, byte_off, zero, packed, n // 2, cachepolicy=cpol)
+
+
+def _bias_rsrc(b: IRBuilder, io_dtype: str) -> Value:
+    """Declare the ``Bias`` / ``Bias_bytes`` kernargs (call after every other
+    one) and return the buffer resource the bias is read through."""
+    bias, bias_bytes = declare_conv_bias_params(b, _ir_dtype(io_dtype))
+    return conv_bias_rsrc(b, bias, bias_bytes)
+
+
+def _bias_f32(b: IRBuilder, rsrc: Value, k: Value, io_dtype: str, n: int):
+    """``bias[k : k + n]`` as fp32 values: one ``n``-element buffer load (a
+    channel past ``Bias_bytes`` reads 0)."""
+    raw = _load_raw(b, rsrc, b.mul(k, b.const_i32(2)), io_dtype, n)
+    return _raw_to_f32(b, raw, n)
 
 
 def _store_vec_f32(
@@ -1794,15 +1829,17 @@ def output_transform_block(spec: WinogradFwdSpec) -> int:
 
 
 def output_transform_signature(spec: WinogradFwdSpec) -> list:
-    return (
+    sb = (
         SignatureBuilder()
         .ptr("mm", spec.operand_dtype)
         .ptr("e", "i32")
         .ptr("y", spec.io_dtype)
         .scalar("m_bytes", "i32")
         .scalar("y_bytes", "i32")
-        .build()
     )
+    if spec.bias:
+        sb = sb.ptr("Bias", spec.io_dtype).scalar("Bias_bytes", "i32")
+    return sb.build()
 
 
 def build_winograd_output_transform(
@@ -1813,6 +1850,8 @@ def build_winograd_output_transform(
     One thread per (tile, ``vec_k`` channels): ``n2`` vector loads, the
     separable transform with shared subexpressions (column pass first, so
     only ``m x n`` intermediates per channel are live), ``m2`` vector stores.
+    With ``spec.bias`` the thread's ``vec_k`` bias values are added in fp32
+    after the prescale, before the rounding.
     """
     p = spec.problem
     n, m = spec.nh, spec.mh
@@ -1836,6 +1875,7 @@ def build_winograd_output_transform(
     y_bytes = b.param("y_bytes", I32)
     m_rsrc = b.buffer_rsrc(mm, m_bytes)
     y_rsrc = b.buffer_rsrc(y, y_bytes)
+    bias_rsrc = _bias_rsrc(b, spec.io_dtype) if spec.bias else None
 
     rc = _run_coords(b, spec, rm)
     t = rc.t0
@@ -1861,6 +1901,9 @@ def build_winograd_output_transform(
     if spec.prescale:
         t_safe = b.select(ok, t, b.const_i32(0))
         scale = _pow2_f32(b, b.global_load_i32(e_ptr, t_safe))
+    bias = None
+    if bias_rsrc is not None:
+        bias = _bias_f32(b, bias_rsrc, k, spec.io_dtype, vec)
 
     ho0 = b.add(rc.a, b.mul(rc.ti, b.const_i32(p.dH * m)))
     wo0 = b.add(rc.bsub, b.mul(rc.tj0, b.const_i32(p.dW * mw)))
@@ -1904,6 +1947,8 @@ def build_winograd_output_transform(
             vals = [outs[ch][j] for ch in range(vec)]
             if scale is not None:
                 vals = [b.fmul(x_, scale) for x_ in vals]
+            if bias is not None:
+                vals = [b.fadd(x_, bv) for x_, bv in zip(vals, bias)]
             pending.append(
                 (b.add(yrow[i], ycol[j]), _pack_vec_f32(b, vals, spec.io_dtype))
             )

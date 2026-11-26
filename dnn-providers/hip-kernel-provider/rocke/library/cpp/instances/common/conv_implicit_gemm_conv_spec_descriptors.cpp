@@ -386,6 +386,7 @@ rocke_status_t rocke_implicit_gemm_conv_spec_kernel_name(const rocke_implicit_ge
      *     f"a{warp_tile_m}x{warp_tile_n}x{warp_tile_k}",
      *     f"{pipeline}_{epilogue}",
      *     self.acc_epilogue.tag(),
+     *     "cbias" if self.bias else "",
      *     flags={"async": self.async_dma, "noalc": self.cshuffle_no_alias,
      *            "unroll": self.unroll_k,
      *            f"gm{group_merge}": group_merge > 1,
@@ -398,7 +399,7 @@ rocke_status_t rocke_implicit_gemm_conv_spec_kernel_name(const rocke_implicit_ge
     char a_buf[48];
     char pe_buf[64];
     char tag_buf[256];
-    const char* parts[6];
+    const char* parts[7];
     const char* flag_names[64];
     int flag_on[64];
     rocke_status_t st;
@@ -434,6 +435,7 @@ rocke_status_t rocke_implicit_gemm_conv_spec_kernel_name(const rocke_implicit_ge
     parts[3] = a_buf;
     parts[4] = pe_buf;
     parts[5] = tag_buf; /* "" when identity -> skipped by kernel_name_join */
+    parts[6] = s->bias ? "cbias" : ""; /* right after the acc_epilogue tag */
 
     /* The flags in the Python dict's order (kernel_name_join keeps it). The
      * knobs the C port does not carry yet stay off; the flag table lists them
@@ -530,7 +532,7 @@ rocke_status_t rocke_implicit_gemm_conv_spec_kernel_name(const rocke_implicit_ge
 #undef ROCKE_FLAG
 
     return rocke_kernel_name_join(
-        s->name, parts, 6, flag_names, flag_on, (size_t)nf, out, out_cap, NULL);
+        s->name, parts, 7, flag_names, flag_on, (size_t)nf, out, out_cap, NULL);
 }
 
 /* ---- group merging (Gm) -------------------------------------------------- *
@@ -1187,6 +1189,52 @@ bool rocke_conv_fwd_split_atomic_ok(const rocke_implicit_gemm_conv_spec_t* s,
     return true;
 }
 
+/* fwd_bias_stage(spec): where a bias kernel adds its bias. The "reduce"
+ * forms store raw fp32 partials and leave the add to their fold kernel
+ * (conv_fwd_split_k_reduce / conv_wgrad_workspace_reduce with bias), yet
+ * still take the Bias / Bias_bytes tail, so both launches can share one
+ * kernarg block. */
+rocke_conv_bias_stage_t rocke_conv_fwd_bias_stage(const rocke_implicit_gemm_conv_spec_t* s)
+{
+    if(!s->bias)
+        return ROCKE_CONV_BIAS_NONE;
+    if(s->split_k == 1 && !s->split_k_cluster)
+        return ROCKE_CONV_BIAS_EPILOGUE;
+    if(s->split_k_cluster)
+        return ROCKE_CONV_BIAS_CLUSTER;
+    if(s->split_det == 1 || s->split_det == 2)
+        return ROCKE_CONV_BIAS_OWNER;
+    return ROCKE_CONV_BIAS_REDUCE;
+}
+
+/* fwd_bias_conflict(spec): the bias reaches every output exactly once, so
+ * the forms without one owner of an output value are refused: the atomic
+ * split-K (whatever degree split_k == -1 resolves to) and the stream-K /
+ * hybrid segment loops. */
+bool rocke_conv_fwd_bias_ok(const rocke_implicit_gemm_conv_spec_t* s,
+                            char* reason,
+                            size_t reason_cap)
+{
+    if(!s->bias)
+        return true;
+    if(s->split_k != 1 || s->split_k_cluster)
+    {
+        if(s->split_streamk || s->split_hybrid)
+            ROCKE_SPEC_FAIL(reason,
+                            reason_cap,
+                            "bias: the stream-K split-K forward has no single owner of an "
+                            "output tile, so the bias cannot be added exactly once");
+        /* The form any split degree of this spec builds (fwd_split_k_atomic). */
+        const bool atomic = s->wave_size == 64 && (s->problem.is_3d || s->split_atomic);
+        if(atomic && !s->split_det)
+            ROCKE_SPEC_FAIL(reason,
+                            reason_cap,
+                            "bias: the atomic split-K forward adds every slice into D, so "
+                            "the bias cannot be added exactly once; use split_det or split_k=1");
+    }
+    return true;
+}
+
 /* fwd_split_k_conflict(spec), wave64 MFMA atomic split (split_k > 1). */
 bool rocke_conv_fwd_asplit_conflict_ok(const rocke_implicit_gemm_conv_spec_t* s,
                                        char* reason,
@@ -1777,6 +1825,12 @@ bool rocke_implicit_gemm_conv_spec_validate(const rocke_implicit_gemm_conv_spec_
                         hi);
     }
 
+    /* _bias_why = fwd_bias_conflict(self) */
+    if(!rocke_conv_fwd_bias_ok(s, reason, reason_cap))
+    {
+        return false;
+    }
+
     /* Last, matching Python's ordering. The SAME gate also backs
      * rocke_implicit_gemm_conv_is_valid_spec -- two copies of a merge gate is
      * exactly how the dispatcher came to hand the builder a spec the builder
@@ -1887,6 +1941,10 @@ bool rocke_implicit_gemm_conv_is_valid_spec(const rocke_implicit_gemm_conv_spec_
      * delegate here so the dispatcher cannot admit a spec the builder rejects.
      * Positioned to match Python is_valid_spec: after the block-size cap,
      * before the wave-size/catalog checks. */
+    if(!rocke_conv_fwd_bias_ok(s, reason, reason_cap))
+    {
+        return false;
+    }
     if(!rocke_conv_fwd_group_merge_available(s, arch, reason, reason_cap))
     {
         return false;

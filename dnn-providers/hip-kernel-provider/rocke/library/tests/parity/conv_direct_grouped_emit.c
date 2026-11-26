@@ -26,8 +26,9 @@
  * and per-axis-padded filters; from index 201 the fp32-storage (fp32 / tf32)
  * non-grouped spec; from index 218 the fp32-storage configs of the grouped
  * kernels, see make_f32_cfg; from index 318 the gfx1250 wave32 and
- * image-per-block wgrad spec, from index 349 the depthwise wgrad spec and
- * from index 356 the small-C wgrad stems of the AOT grid) identically to the
+ * image-per-block wgrad spec, from index 349 the depthwise wgrad spec, from
+ * index 356 the small-C wgrad stems of the AOT grid and from index 371 the
+ * conv + bias forms of forward configs, see BIAS_CFGS) identically to the
  * Python emitter
  * conv_direct_grouped_emit.py, builds the
  * kernel via the matching rocke_build_direct_conv_*_new function and lowers via
@@ -173,6 +174,88 @@ static int make_4c_bf16_cfg(int idx, rocke_direct_conv_4c_spec_t* s4, const char
 #define WGRAD_STEM_CFG_BASE 356
 #define WGRAD_AUTO_CFG_BASE 359
 #define WGRAD_PP_CFG_BASE 364
+/* Conv + bias forward, 371..: the forward config BIAS_CFGS[idx] rebuilt with
+ * bias = true (mirrors Python _bias_spec / _BIAS_CFGS). */
+#define BIAS_CFG_BASE 371
+static const int BIAS_CFGS[] = {
+    /* 0..5: non-grouped -- bf16 / fp16 32x32x16, 16x16x32 partial W, fp16
+     * 16x16x16, gfx942 32x32x8, 5x5 with a partial K tile. */
+    42,
+    43,
+    49,
+    50,
+    51,
+    53,
+    /* 6..10: split-C conv passes and the folds. */
+    95,
+    98,
+    99,
+    100,
+    101,
+    /* 11..13: the grouped mode. */
+    103,
+    104,
+    107,
+    /* 14..15: fp32 storage. */
+    201,
+    204,
+    /* 16..26: the generic DirectConvSpec. */
+    75,
+    76,
+    77,
+    78,
+    79,
+    80,
+    81,
+    82,
+    86,
+    242,
+    250,
+    /* 27..33: depthwise. */
+    8,
+    22,
+    166,
+    170,
+    171,
+    172,
+    176,
+    /* 34..36: spatial. */
+    10,
+    23,
+    167,
+    /* 37..39: column-streamed. */
+    32,
+    33,
+    169,
+    /* 40..45: tiled. */
+    57,
+    58,
+    59,
+    168,
+    173,
+    174,
+    /* 46: tiled dgrad + bias (rejected). */
+    190,
+    /* 47..50: fp32 storage. */
+    293,
+    300,
+    305,
+    312,
+    /* 51..63: 16c, 4c, 8c, 32c. */
+    0,
+    4,
+    17,
+    218,
+    2,
+    163,
+    164,
+    6,
+    18,
+    228,
+    7,
+    21,
+    232,
+};
 
 /* Problem helper mirroring prob() in the Python _dw_wgrad_spec: N=2, H=9,
  * W=13, groups = C, cpg = kpg. */
@@ -3492,6 +3575,18 @@ int main(int argc, char** argv)
     rocke_direct_depthwise_dgrad_stream_spec_t sdgs;
     rocke_direct_depthwise_wgrad_spec_t sdww;
     const char* arch = "gfx950";
+    bool bias = false;
+    if(idx >= BIAS_CFG_BASE)
+    {
+        const int j = idx - BIAS_CFG_BASE;
+        if(j >= (int)(sizeof(BIAS_CFGS) / sizeof(BIAS_CFGS[0])))
+        {
+            fprintf(stderr, "unknown config index %d\n", idx);
+            return 2;
+        }
+        idx = BIAS_CFGS[j];
+        bias = true;
+    }
     if(idx >= WGRAD_PP_CFG_BASE)
     {
         if(make_wgrad_pp_cfg(idx - WGRAD_PP_CFG_BASE, &swd.tiled) != 0)
@@ -3638,6 +3733,38 @@ int main(int argc, char** argv)
     {
         fprintf(stderr, "unknown config index %d\n", idx);
         return 2;
+    }
+
+    if(bias)
+    {
+        /* The forward kinds a bias config selects. */
+        if(kind == KIND_NONGROUPED)
+            snongrouped.bias = true;
+        else if(kind == KIND_SPLIT_REDUCE)
+            sred.bias = true;
+        else if(kind == KIND_GENERIC)
+            sgen.bias = true;
+        else if(kind == KIND_DW)
+            sdw.bias = true;
+        else if(kind == KIND_SPATIAL)
+            ssp.bias = true;
+        else if(kind == KIND_DWCOL)
+            sdwc.bias = true;
+        else if(kind == KIND_DW_TILED)
+            stiled.bias = true;
+        else if(kind == KIND_16C)
+            s16.bias = true;
+        else if(kind == KIND_4C)
+            s4.bias = true;
+        else if(kind == KIND_8C)
+            s8.bias = true;
+        else if(kind == KIND_32C)
+            s32.bias = true;
+        else
+        {
+            fprintf(stderr, "config %d: kind %d has no bias form\n", idx, kind);
+            return 2;
+        }
     }
 
     rocke_ir_builder_t b;

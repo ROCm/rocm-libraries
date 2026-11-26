@@ -428,6 +428,17 @@ CACHE_SPATIAL_3D: Tuple[bool, ...] = tuple(
 CACHE_DGRAD_TAPK_PREFETCH: Tuple[int, ...] = tuple(
     int(v) for v in _os.environ.get("ROCKE_AOT_DGRAD_TPF", "0").split(",") if v.strip()
 )
+# The per-output-channel bias of the forward kernels (ImplicitGemmConvSpec.bias,
+# identity tag cbias): False = the plain binary, True = its bias twin, the same
+# job built with the bias epilogue and the trailing (Bias, Bias_bytes) kernargs.
+# Only the plain binaries are built by default; ROCKE_AOT_FWD_BIAS (e.g. "0,1")
+# adds the twins. A twin whose spec cannot add the bias exactly once (split-K,
+# fwd_bias_conflict) is refused by the spec validator like any other job.
+CACHE_FWD_BIAS: Tuple[bool, ...] = tuple(
+    bool(int(v))
+    for v in _os.environ.get("ROCKE_AOT_FWD_BIAS", "0").split(",")
+    if v.strip()
+)
 # The x-halo mode of the stride-1 tap-outer dgrad loop
 # (DgradConvSpec.tapk_xhalo; filter width baked, pW == 0 served) next to the
 # plain tap-outer binary, one per tapk_prefetch value listed in
@@ -2651,6 +2662,30 @@ def _job_flavor(llvm_flavor: Optional[str]) -> str:
     return llvm_flavor if llvm_flavor is not None else current_llvm_flavor()
 
 
+def fwd_bias_twin(job: BuildJob) -> BuildJob:
+    """``job`` built with the per-output-channel bias epilogue: the same spec
+    kwargs and capability axes plus ``bias``, recorded in the identity (tag
+    ``cbias``). Whether the spec can take the bias is its validator's call
+    (``fwd_bias_conflict``)."""
+    if job.direction != "fwd":
+        raise ValueError(f"only a forward job has a bias twin, got {job.direction}")
+    return BuildJob(
+        identity=_dc_replace(job.identity, bias=True),
+        direction=job.direction,
+        spec_kwargs=dict(job.spec_kwargs, bias=True),
+        caps=job.caps,
+    )
+
+
+def _fwd_bias_axis(jobs: Iterator[BuildJob], biases: Sequence[bool]):
+    """``jobs`` along the bias axis: each plain job (False in ``biases``) and/or
+    its bias twin (True). The plain-only axis passes ``jobs`` through as is."""
+    biases = tuple(biases)
+    if biases == (False,):
+        return jobs
+    return (fwd_bias_twin(job) if bias else job for job in jobs for bias in biases)
+
+
 def _fwd_jobs(
     arch: str,
     dtype: str,
@@ -2660,13 +2695,40 @@ def _fwd_jobs(
     *,
     geometries: Optional[Sequence[tuple]] = None,
     llvm_flavor: Optional[str] = None,
+    biases: Optional[Sequence[bool]] = None,
 ) -> Iterator[BuildJob]:
     """Every forward implicit-GEMM variant worth caching for this arch/dtype.
 
     ``geometries`` restricts the walk to a slice of :func:`_geometries` (the
     parallel enumeration hands each worker one); ``llvm_flavor`` pins the
-    identity's flavor (see :func:`_job_flavor`).
+    identity's flavor (see :func:`_job_flavor`); ``biases`` is the bias axis
+    (default :data:`CACHE_FWD_BIAS`; see :func:`fwd_bias_twin`).
     """
+    return _fwd_bias_axis(
+        _fwd_plain_jobs(
+            arch,
+            dtype,
+            wave_size,
+            mma_family,
+            target,
+            geometries=geometries,
+            llvm_flavor=llvm_flavor,
+        ),
+        CACHE_FWD_BIAS if biases is None else biases,
+    )
+
+
+def _fwd_plain_jobs(
+    arch: str,
+    dtype: str,
+    wave_size: int,
+    mma_family: str,
+    target,
+    *,
+    geometries: Optional[Sequence[tuple]] = None,
+    llvm_flavor: Optional[str] = None,
+) -> Iterator[BuildJob]:
+    """:func:`_fwd_jobs` without the bias axis: the plain binaries."""
     da, db, dd = dtype_triple(dtype)
     flavor = _job_flavor(llvm_flavor)
     for (
@@ -4337,6 +4399,9 @@ def _grid_job_for_identity(identity: KernelIdentity) -> BuildJob:
         if identity.direction == "wgrad" and identity.streamk != "off"
         else {}
     )
+    # The bias axis is the identity's own: a bias twin is found among the
+    # twins of its plain job, whatever ROCKE_AOT_FWD_BIAS builds.
+    biases = {"biases": (identity.bias,)} if identity.direction == "fwd" else {}
     for job in _direction_jobs(
         identity.direction,
         identity.arch,
@@ -4347,6 +4412,7 @@ def _grid_job_for_identity(identity: KernelIdentity) -> BuildJob:
         geometries=[geometry],
         llvm_flavor=identity.llvm_flavor,
         **streamk,
+        **biases,
     ):
         if job.identity.stable_hash() == want:
             return job
@@ -4822,7 +4888,7 @@ def count_jobs(
                 # at c = 1, on the lds_xor loops only.
                 lean = geo[7] == "default" and 1 not in _VECS
                 g6 = geo[:6]
-                total += (len(_VECS) if lean else vecs) * sum(
+                fwd = (len(_VECS) if lean else vecs) * sum(
                     sum(
                         len(_fwd_split_atomic_variants(kl, v))
                         for v in _fwd_job_variants(kl, g6, geo[7], caps, wave_size)
@@ -4831,11 +4897,13 @@ def count_jobs(
                     if (not lean or kl.get("lds_xor")) and _fwd_kloop_in_scope(kl, *g6)
                 )
                 if _fwd_merged_geometry(geo):
-                    total += len(_FWD_GROUP_MERGES) * len(_fwd_merged_k_loops())
+                    fwd += len(_FWD_GROUP_MERGES) * len(_fwd_merged_k_loops())
                 if fwd_split and _fwd_split_geometry(geo):
-                    total += len(_fwd_split_vecs(geo[8])) ** 2
+                    fwd += len(_fwd_split_vecs(geo[8])) ** 2
                 if fwd_cluster and _fwd_split_cluster_geometry(geo):
-                    total += len(CACHE_FWD_SPLIT_K_CLUSTER_DEGREES)
+                    fwd += len(CACHE_FWD_SPLIT_K_CLUSTER_DEGREES)
+                # Every job once per bias-axis value (_fwd_bias_axis).
+                total += fwd * len(CACHE_FWD_BIAS)
             elif direction == "wgrad":
                 in_cover = _wgrad_wmma_cover(mma_family, geo)
                 if geo[7] != "default" and not in_cover:

@@ -10,6 +10,15 @@ the ``ks_count`` slabs element-wise in a fixed order and converts the result to
 ``dtype_d`` into the output tensor ``D`` (N[D]HWK, the same packed layout as one
 slab). The result is deterministic.
 
+``bias`` (the conv + bias forward, ``ImplicitGemmConvSpec.bias`` on the
+two-stage split): Stage 1 keeps storing raw partial sums and this kernel adds
+``bias[k]`` (``k = idx % K``, the output channel of the packed ``[M][K]``
+element) to the folded fp32 sum before the cast, so the bias is added exactly
+once with one rounding. The variant takes ``K`` and the ``Bias`` /
+``Bias_bytes`` pair (conv_abi ``conv_bias_arg_names``) after ``ks_count``.
+Each of a thread's ``vec`` elements takes its own channel, so any ``vec``
+that divides the element count serves any ``K``.
+
 The degree is a kernarg, so one binary per (``dtype_d``, ``vec``) serves every
 split. Each thread owns ``vec`` consecutive output elements: one vector load per
 slab, ``vec`` adds, one vector store. ``vec`` must divide the element count
@@ -23,6 +32,9 @@ Kernel signature::
     ws_bytes : i32 -- workspace byte size (ABI boundary)
     d_bytes  : i32 -- output byte size (ABI boundary)
     ks_count : i32 -- number of slabs (the split-K degree)
+    K          : i32 -- (bias only) output channels per row (groups * kpg)
+    Bias       : dtype_d global ptr, readonly -- (bias only) bias[K]
+    Bias_bytes : i32 -- (bias only) the bias byte size
 
 Grid: ``(ceil(elems / (vec * block_size)), 1, 1)``; block ``(block_size, 1, 1)``.
 """
@@ -36,6 +48,12 @@ from rocke.core.ir import F32, I32, IRBuilder, KernelDef, PtrType
 from rocke.helpers.io import io_ir_type, pack_f32_to, store_scalar_from_f32
 from rocke.helpers.spec import SignatureBuilder, ceil_div, kernel_name_join
 
+from kernels.conv.conv_bias import (
+    conv_bias_rsrc,
+    declare_conv_bias_params,
+    load_conv_bias_f32,
+)
+
 
 @dataclass(frozen=True)
 class FwdSplitKReduceSpec:
@@ -45,6 +63,9 @@ class FwdSplitKReduceSpec:
     loop is unrolled, so all of a thread's loads issue back to back instead of
     one per dependent loop trip (``ks_count`` must then equal it). 0 keeps the
     runtime loop over ``ks_count``.
+
+    ``bias`` adds the per-output-channel bias to the folded sum (see the
+    module docstring); tags ``cbias``.
     """
 
     dtype_d: str = "bf16"
@@ -52,11 +73,14 @@ class FwdSplitKReduceSpec:
     block_size: int = 256
     degree: int = 0
     name: str = "conv_fwd_splitk_reduce"
+    bias: bool = False
 
     def kernel_name(self) -> str:
         parts = [f"v{self.vec}", f"b{self.block_size}"]
         if self.degree:
             parts.append(f"s{self.degree}")
+        if self.bias:
+            parts.append("cbias")
         return kernel_name_join(self.name, *parts, self.dtype_d)
 
     def validate(self) -> None:
@@ -90,6 +114,9 @@ def build_conv_fwd_split_k_reduce(
     _ws_bytes = b.param("ws_bytes", I32)  # noqa: F841 -- ABI boundary
     _d_bytes = b.param("d_bytes", I32)  # noqa: F841 -- ABI boundary
     ks_count = b.param("ks_count", I32)
+    if spec.bias:
+        p_K = b.param("K", I32)
+        p_bias, p_bias_bytes = declare_conv_bias_params(b, io_ir_type(spec.dtype_d))
 
     gid = b.add(b.mul(b.block_id_x(), b.const_i32(spec.block_size)), b.thread_id_x())
     idx = b.mul(gid, b.const_i32(vec))
@@ -120,6 +147,24 @@ def build_conv_fwd_split_k_reduce(
                 parts = _load(b.add(b.mul(s, elems), idx))
                 b.scf_yield(*[b.fadd(a, p) for a, p in zip(accs, parts)])
             total = list(loop.results)
+        if spec.bias:
+            # Each element's own channel: a thread's vec elements cross a row
+            # end when vec does not divide K (K is a kernarg).
+            rsrc = conv_bias_rsrc(b, p_bias, p_bias_bytes)
+            c0 = b.const_i32(0)
+            total = [
+                b.fadd(
+                    t,
+                    load_conv_bias_f32(
+                        b,
+                        rsrc,
+                        b.mod(idx if i == 0 else b.add(idx, b.const_i32(i)), p_K),
+                        io_ir_type(spec.dtype_d),
+                        c0,
+                    ),
+                )
+                for i, t in enumerate(total)
+            ]
         if vec == 1:
             store_scalar_from_f32(b, d_ptr, idx, total[0], dtype=spec.dtype_d)
         else:
@@ -136,7 +181,7 @@ def fwd_split_k_reduce_grid(
 
 
 def fwd_split_k_reduce_signature(spec: FwdSplitKReduceSpec) -> list:
-    return (
+    sig = (
         SignatureBuilder()
         .ptr("ws_ptr", "fp32")
         .ptr("d_ptr", spec.dtype_d)
@@ -144,8 +189,12 @@ def fwd_split_k_reduce_signature(spec: FwdSplitKReduceSpec) -> list:
         .scalar("ws_bytes", "i32")
         .scalar("d_bytes", "i32")
         .scalar("ks_count", "i32")
-        .build()
     )
+    if spec.bias:
+        sig = (
+            sig.scalar("K", "i32").ptr("Bias", spec.dtype_d).scalar("Bias_bytes", "i32")
+        )
+    return sig.build()
 
 
 def fwd_split_k_reduce_vec(elems: int) -> int:

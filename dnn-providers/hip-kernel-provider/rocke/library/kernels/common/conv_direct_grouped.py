@@ -89,6 +89,12 @@ from rocke.core.ir import (
 )
 from kernels.common._conv_layouts import ConvKOuterFragmentReader
 from kernels.common.conv_abi import conv_direct_arg_names
+from kernels.conv.conv_bias import (
+    conv_bias_rsrc,
+    load_conv_bias_f32,
+    load_conv_bias_run_f32,
+    load_conv_bias_vec_f32,
+)
 from rocke.helpers.fuse import dtype_to_ir
 from rocke.helpers.spec import ceil_div
 from rocke.helpers.grid import chiplet_transform_chunked_runtime
@@ -108,7 +114,7 @@ from rocke.helpers.transforms import (
 
 
 def emit_direct_params(
-    b: IRBuilder, *, direction: str = "fwd", io_type=F16
+    b: IRBuilder, *, direction: str = "fwd", io_type=F16, bias: bool = False
 ) -> Dict[str, Value]:
     """Declare the direct-conv kernarg block in :mod:`conv_abi` order.
 
@@ -123,7 +129,20 @@ def emit_direct_params(
     ``direction="wgrad"`` binds dY to A and X to B, and D is the fp32 dW the
     kernel ``global_atomic_add``s into: an atomic reads its target, so it is
     not ``writeonly``, and a scalar f32 atomic only needs dword alignment.
+
+    ``bias`` (fwd only) declares the per-output-channel bias tail after the
+    block -- ``Bias`` (``io_type``) and ``Bias_bytes`` -- through
+    :func:`kernels.conv.conv_bias.declare_conv_bias_params`; without it the
+    block is unchanged.
     """
+    if bias:
+        if direction != "fwd":
+            raise ValueError(f"bias extends the fwd ABI only (got {direction!r})")
+        from kernels.conv.conv_bias import declare_conv_bias_params
+
+        out = emit_direct_params(b, direction=direction, io_type=io_type)
+        out["Bias"], out["Bias_bytes"] = declare_conv_bias_params(b, io_type)
+        return out
     out: Dict[str, Value] = {}
     for name, kind in conv_direct_arg_names(direction=direction):
         if kind == "i32":
@@ -804,6 +823,10 @@ class DirectConv16cSpec:
     wave_size: int = 64
     double_buffer: bool = True
     fold_k32: bool = True
+    # Conv + bias forward: the Bias / Bias_bytes kernarg tail; the bias of
+    # the lane's output channels is added to each flushed accumulator in fp32
+    # before the store.
+    bias: bool = False
 
     @property
     def threads_per_block(self) -> int:
@@ -827,6 +850,7 @@ class DirectConv16cSpec:
                 "k32": self.fold_k32,
                 "bf16": p.dtype == "bf16",
                 **_mfma_dtype_flags(p.dtype),
+                "cbias": self.bias,
             },
         )
 
@@ -1080,7 +1104,7 @@ def build_direct_conv_16c(
     b = IRBuilder(spec.kernel_name())
     b.kernel.attrs["max_workgroup_size"] = THREADS
 
-    params = emit_direct_params(b, io_type=io_type)
+    params = emit_direct_params(b, io_type=io_type, bias=spec.bias)
     A = params["A"]
     Bp = params["B"]
     D = params["D"]
@@ -1467,6 +1491,19 @@ def build_direct_conv_16c(
     # Output descriptor: D[N, Ho, Wo, total_k] in NHWK. Built ONCE outside
     # the loop so each iteration only pays one ``d_desc.offset`` emission.
     d_desc = direct_d_descriptor_dynamic(b, params)
+    # Conv + bias: bias[g*kpg + c4*4 .. +4) of the lane's
+    # accumulator quad, as fp32, added to every flushed quad.
+    bias_acc = None
+    if spec.bias:
+        bias_rsrc = conv_bias_rsrc(b, params["Bias"], params["Bias_bytes"])
+        bias_acc = load_conv_bias_vec_f32(
+            b,
+            bias_rsrc,
+            b.add(b.mul(g, c_kpg), b.mul(c4, b.const_i32(4))),
+            4,
+            io_type,
+            c0,
+        )
 
     # One accumulator per (q_subtile, KH slot), carried across the loop.
     acc_args = [
@@ -1611,6 +1648,8 @@ def build_direct_conv_16c(
             for qt in range(q_subtiles):
                 flat = _acc_index(qt, P_FLUSH)
                 acc_to_flush = accs_flat[flat]
+                if bias_acc is not None:
+                    acc_to_flush = b.fadd(acc_to_flush, bias_acc)
                 out_q = b.add(b.add(q_tile_start, b.const_i32(qt * 16)), q_in_lane)
                 store_ok = b.land(row_ok, b.cmp_lt(out_q, c_W))
                 k_val = b.add(b.mul(g, c_kpg), b.mul(c4, b.const_i32(4)))
@@ -1670,6 +1709,10 @@ class DirectConv4cSpec:
     # stage_rows only: waves per workgroup along q (4 columns each), so
     # block_q == 4 * waves_q. Every wave reads the shared staged row.
     waves_q: int = 1
+    # Conv + bias forward (the plain kernel only: the fused-weight and
+    # row-staged forms serve the dgrad): the Bias / Bias_bytes kernarg tail;
+    # bias[g*4 .. +4) added to each flushed accumulator in fp32.
+    bias: bool = False
 
     @property
     def threads_per_block(self) -> int:
@@ -1689,6 +1732,7 @@ class DirectConv4cSpec:
                 "fw": self.dgrad_fused_weights and not self.dgrad_weights_lds,
                 "fwl": self.dgrad_fused_weights and self.dgrad_weights_lds,
                 f"sr{self.waves_q}": self.stage_rows,
+                "cbias": self.bias,
             },
         )
 
@@ -1698,6 +1742,11 @@ class DirectConv4cSpec:
             raise ValueError(_DIRECT_4C_F32_WHY.format(dtype=p.dtype))
         if p.dtype not in ("fp16", "bf16"):
             raise ValueError(f"DirectConv4cSpec: unsupported dtype {p.dtype!r}")
+        if self.bias and (self.dgrad_fused_weights or self.stage_rows):
+            raise ValueError(
+                "DirectConv4cSpec bias is a forward epilogue of the plain kernel; "
+                "the fused-weight and row-staged forms serve the dgrad"
+            )
         if p.cpg != 4 or p.kpg != 4:
             raise ValueError(
                 f"DirectConv4cSpec expects cpg=kpg=4 (got {p.cpg}, {p.kpg})"
@@ -2221,7 +2270,7 @@ def build_direct_conv_4c(spec: DirectConv4cSpec, *, arch: str = "gfx950") -> Ker
 
     io_type = _io_type(p.dtype)
 
-    params = emit_direct_params(b, io_type=io_type)
+    params = emit_direct_params(b, io_type=io_type, bias=spec.bias)
     A = params["A"]
     Bp = params["B"]
     D = params["D"]
@@ -2354,6 +2403,12 @@ def build_direct_conv_4c(spec: DirectConv4cSpec, *, arch: str = "gfx950") -> Ker
 
     # Output descriptor: D[N, Ho, Wo, total_k] in NHWK.
     d_desc = direct_d_descriptor_dynamic(b, params)
+    # Conv + bias: bias[g*kpg .. +4) (the lane's output channels), as
+    # fp32, added to every flushed accumulator.
+    bias_acc = None
+    if spec.bias:
+        bias_rsrc = conv_bias_rsrc(b, params["Bias"], params["Bias_bytes"])
+        bias_acc = load_conv_bias_vec_f32(b, bias_rsrc, b.mul(g, c_kpg), 4, io_type, c0)
 
     c_val_groupc = b.mul(g, c_cpg)
     # ``q_pos = q_base + lane_q`` (= ``wo`` for the embed) is the same
@@ -2449,6 +2504,8 @@ def build_direct_conv_4c(spec: DirectConv4cSpec, *, arch: str = "gfx950") -> Ker
             for qt in range(q_tiles_per_wave):
                 flat = _acc_index(qt, P_FLUSH)
                 acc = accs_flat[flat]
+                if bias_acc is not None:
+                    acc = b.fadd(acc, bias_acc)
                 q_base = b.add(q_tile_start, b.const_i32(qt * 4))
                 out_q = b.add(q_base, lane_q)
                 store_ok = b.land(row_ok, b.cmp_lt(out_q, c_W))
@@ -2514,6 +2571,10 @@ class DirectConv8cSpec:
     block_groups: int = 8
     wave_size: int = 64
     double_buffer: bool = True
+    # Conv + bias forward: the Bias / Bias_bytes kernarg tail; the bias of
+    # the lane's output channels is added to each flushed accumulator in fp32
+    # before the store.
+    bias: bool = False
 
     @property
     def threads_per_block(self) -> int:
@@ -2529,7 +2590,11 @@ class DirectConv8cSpec:
             f"bq{self.block_q}",
             f"bg{self.block_groups}",
             "db" if self.double_buffer else "sb",
-            flags={"bf16": p.dtype == "bf16", **_mfma_dtype_flags(p.dtype)},
+            flags={
+                "bf16": p.dtype == "bf16",
+                **_mfma_dtype_flags(p.dtype),
+                "cbias": self.bias,
+            },
         )
 
     def validate(self) -> None:
@@ -2649,7 +2714,7 @@ def build_direct_conv_8c(spec: DirectConv8cSpec, arch: str = "gfx950") -> Kernel
     b = IRBuilder(spec.kernel_name())
     b.kernel.attrs["max_workgroup_size"] = THREADS
 
-    params = emit_direct_params(b, io_type=io_type)
+    params = emit_direct_params(b, io_type=io_type, bias=spec.bias)
     A = params["A"]
     Bp = params["B"]
     D = params["D"]
@@ -2876,6 +2941,19 @@ def build_direct_conv_8c(spec: DirectConv8cSpec, arch: str = "gfx950") -> Kernel
     n_iters_v = b.add(p_Hi, b.const_i32(p.KH - 1))
 
     d_desc = direct_d_descriptor_dynamic(b, params)
+    # Conv + bias: bias[g*kpg + c4*4 .. +4) of the lane's
+    # accumulator quad (rows past kpg are never stored), as fp32.
+    bias_acc = None
+    if spec.bias:
+        bias_rsrc = conv_bias_rsrc(b, params["Bias"], params["Bias_bytes"])
+        bias_acc = load_conv_bias_vec_f32(
+            b,
+            bias_rsrc,
+            b.add(b.mul(g, c_kpg), b.mul(c4, b.const_i32(4))),
+            4,
+            io_type,
+            c0,
+        )
 
     acc_args = [
         (f"acc_q{qt}_p{pi}", zero_acc) for qt in range(q_subtiles) for pi in range(p.KH)
@@ -2955,6 +3033,8 @@ def build_direct_conv_8c(spec: DirectConv8cSpec, arch: str = "gfx950") -> Kernel
             for qt in range(q_subtiles):
                 flat = _acc_index(qt, P_FLUSH)
                 acc_to_flush = accs_flat[flat]
+                if bias_acc is not None:
+                    acc_to_flush = b.fadd(acc_to_flush, bias_acc)
                 out_q = b.add(b.add(q_tile_start, b.const_i32(qt * 16)), q_in_lane)
                 out_q_valid = b.cmp_lt(out_q, c_W)
                 # C output layout for mfma_f32_16x16x16_f16 (wave64):
@@ -3022,6 +3102,10 @@ class DirectConv32cSpec:
     block_groups: int = 4
     wave_size: int = 64
     double_buffer: bool = True
+    # Conv + bias forward: the Bias / Bias_bytes kernarg tail; the bias of
+    # the lane's output channels is added to each flushed accumulator in fp32
+    # before the store.
+    bias: bool = False
 
     @property
     def threads_per_block(self) -> int:
@@ -3037,7 +3121,11 @@ class DirectConv32cSpec:
             f"bq{self.block_q}",
             f"bg{self.block_groups}",
             "db" if self.double_buffer else "sb",
-            flags={"bf16": p.dtype == "bf16", **_mfma_dtype_flags(p.dtype)},
+            flags={
+                "bf16": p.dtype == "bf16",
+                **_mfma_dtype_flags(p.dtype),
+                "cbias": self.bias,
+            },
         )
 
     def validate(self) -> None:
@@ -3149,7 +3237,7 @@ def build_direct_conv_32c(spec: DirectConv32cSpec, arch: str = "gfx950") -> Kern
     b = IRBuilder(spec.kernel_name())
     b.kernel.attrs["max_workgroup_size"] = THREADS
 
-    params = emit_direct_params(b, io_type=io_type)
+    params = emit_direct_params(b, io_type=io_type, bias=spec.bias)
     A = params["A"]
     Bp = params["B"]
     D = params["D"]
@@ -3335,6 +3423,26 @@ def build_direct_conv_32c(spec: DirectConv32cSpec, arch: str = "gfx950") -> Kern
     n_iters_v = b.add(p_Hi, b.const_i32(p.KH - 1))
 
     d_desc = direct_d_descriptor_dynamic(b, params)
+    # Conv + bias: slot i of the lane's 16-slot accumulator is channel
+    # g*kpg + (i//4)*8 + k_blk*4 + i%4, so its bias is four runs of 4.
+    bias_acc = None
+    if spec.bias:
+        bias_rsrc = conv_bias_rsrc(b, params["Bias"], params["Bias_bytes"])
+        k_bias = b.add(b.mul(g, c_kpg), b.mul(k_blk, b.const_i32(4)))
+        runs = [
+            load_conv_bias_vec_f32(
+                b,
+                bias_rsrc,
+                k_bias if octant == 0 else b.add(k_bias, b.const_i32(octant * 8)),
+                4,
+                io_type,
+                c0,
+            )
+            for octant in range(4)
+        ]
+        bias_acc = b.vec_pack(
+            [b.vec_extract(run, i) for run in runs for i in range(4)], F32
+        )
 
     acc_args = [
         (f"acc_q{qt}_p{pi}", zero_acc) for qt in range(q_subtiles) for pi in range(p.KH)
@@ -3423,6 +3531,8 @@ def build_direct_conv_32c(spec: DirectConv32cSpec, arch: str = "gfx950") -> Kern
             for qt in range(q_subtiles):
                 flat = _acc_index(qt, P_FLUSH)
                 acc_to_flush = accs_flat[flat]
+                if bias_acc is not None:
+                    acc_to_flush = b.fadd(acc_to_flush, bias_acc)
                 out_q = b.add(b.add(q_tile_start, b.const_i32(qt * 32)), q_in_lane)
                 store_ok = b.land(row_ok, b.cmp_lt(out_q, c_W))
 
@@ -3498,6 +3608,10 @@ def _direct_conv_weight_knobs_reason(spec: DirectConvSpec) -> str | None:
     extent, so it is the same on the AOT probe and on the real problem.
     """
     p = spec.problem
+    if spec.bias and spec.dgrad_fused_weights:
+        return (
+            "bias is a forward epilogue; a dgrad_fused_weights kernel computes a dgrad"
+        )
     if spec.dgrad_fused_weights and _is_f32_storage(p.dtype):
         # The fused-weights fragment is gathered with 16-bit scalar loads (or,
         # LDS-staged, read back with the 16-bit transpose read): no fp32 form.
@@ -3726,6 +3840,11 @@ class DirectConvSpec:
     # staging, barriers and masked flushes -- not just its MFMAs. One
     # block-uniform scalar check per row from the first flush on.
     row_exit: bool = False
+    # Conv + bias forward: take the Bias / Bias_bytes kernarg tail and add
+    # bias[g*kpg + k] to each flushed accumulator quad in fp32 before the
+    # store (or before the stage_out LDS tile). Not with dgrad_fused_weights
+    # (that kernel computes a dgrad).
+    bias: bool = False
 
     @property
     def threads_per_block(self) -> int:
@@ -3800,6 +3919,7 @@ class DirectConvSpec:
             "so" if self.stage_out else "",
             "rg" if self.row_guard else "",
             "rx" if self.row_exit else "",
+            "cbias" if self.bias else "",
             flags=_mfma_dtype_flags(p.dtype),
         )
 
@@ -4199,7 +4319,7 @@ def build_direct_conv(spec: "DirectConvSpec", arch: str = "gfx950") -> KernelDef
     if spec.waves_per_eu > 0:
         b.kernel.attrs["waves_per_eu"] = spec.waves_per_eu
 
-    params = emit_direct_params(b, io_type=io_type)
+    params = emit_direct_params(b, io_type=io_type, bias=spec.bias)
     A = params["A"]
     Bp = params["B"]
     D = params["D"]
@@ -4600,6 +4720,21 @@ def build_direct_conv(spec: "DirectConvSpec", arch: str = "gfx950") -> KernelDef
     acc_tiles: List[List[List[Value]]] = [
         [[zero_acc] * p.KH for _ in range(M_LOCAL)] for _ in range(q_subtiles)
     ]
+    # Conv + bias: bias[g*kpg + m*16 + c4*4 .. +4) of every M-tile this lane
+    # stores, as fp32, loaded once per cell (one element at a time: kpg need
+    # not be a multiple of 4). Added to each flushed quad before its store.
+    bias_m: Optional[List[Value]] = None
+    if spec.bias:
+        bias_rsrc = conv_bias_rsrc(b, params["Bias"], params["Bias_bytes"])
+        bias_m = []
+        for m in range(M_LOCAL):
+            k_b = b.add(
+                b.mul(g, c_kpg),
+                b.add(b.const_i32(m * 16), b.mul(c4, b.const_i32(4))),
+            )
+            if wm_base16 is not None:
+                k_b = b.add(k_b, wm_base16)
+            bias_m.append(load_conv_bias_run_f32(b, bias_rsrc, k_b, 4, io_type, c0))
 
     # ---- Weight preloading (WAVES_K > 1 path) --------------------------------
     # When waves_k > 1 each wave handles only N_K_LOCAL K-atoms. Preloading all
@@ -5239,13 +5374,16 @@ def build_direct_conv(spec: "DirectConvSpec", arch: str = "gfx950") -> KernelDef
                     if wm_base16 is not None:
                         _ch = b.add(_ch, wm_base16)
                     _so_idx = b.add(b.mul(_col, c_so_stride), _ch)
+                    _so_acc = acc_tiles[qt][m][_so_slot]
+                    if bias_m is not None:
+                        _so_acc = b.fadd(_so_acc, bias_m[m])
                     _smem_store_elems(
                         b,
                         p.dtype,
                         _so_buf,
                         c0,
                         _so_idx,
-                        _acc_to_storage(b, p.dtype, acc_tiles[qt][m][_so_slot]),
+                        _acc_to_storage(b, p.dtype, _so_acc),
                         4,
                     )
         if spec.lds_only_sync:
@@ -5377,12 +5515,17 @@ def build_direct_conv(spec: "DirectConvSpec", arch: str = "gfx950") -> KernelDef
                             safe_d = b.select(
                                 store_ok, b.mul(d_base, c_half_bytes), oob_sentinel
                             )
+                            if bias_m is not None:
+                                # Once, on the reduced sum.
+                                partial = b.fadd(partial, bias_m[m])
                             _store_from_f32(b, p.dtype, d_rsrc, safe_d, c0, partial, 4)
                         b.sync()  # allow red_lds reuse by next flush
                     else:
                         safe_d = b.select(
                             store_ok, b.mul(d_base, c_half_bytes), oob_sentinel
                         )
+                        if bias_m is not None:
+                            acc_to_flush = b.fadd(acc_to_flush, bias_m[m])
                         _store_from_f32(b, p.dtype, d_rsrc, safe_d, c0, acc_to_flush, 4)
 
         for qt in range(q_subtiles):
@@ -10843,6 +10986,10 @@ class DirectDepthwiseDgradWindowedSpec:
     # column of the stride-1 grid the kernel walks (the problem is then that
     # grid's: see :func:`dw_win_fwd_problem`), skipping the odd rows' MFMAs.
     out_stride: int = 1
+    # Conv + bias forward (``fwd`` only): the Bias / Bias_bytes kernarg tail;
+    # the bias of a lane's output channels is added to its accumulator
+    # fragment in fp32 before the rounding and the dX staging.
+    bias: bool = False
 
     @property
     def threads_per_block(self) -> int:
@@ -10948,6 +11095,7 @@ class DirectDepthwiseDgradWindowedSpec:
                     "fwd": self.fwd,
                     f"g{p.cpg}": self.grouped,
                     "s2": self.out_stride == 2,
+                    "cbias": self.bias,
                 },
             )
         return kernel_name_join(
@@ -11052,6 +11200,8 @@ def _depthwise_dgrad_win_check(
     p = spec.problem
     if p.dtype not in ("fp16", "bf16"):
         return False, f"unsupported dtype {p.dtype!r}; expected fp16 or bf16"
+    if spec.bias and not spec.fwd:
+        return False, "bias is a forward epilogue: it needs fwd (the dgrad has none)"
     grouped = (
         spec.mfma
         and spec.fwd
@@ -11630,7 +11780,9 @@ def _build_dw_dgrad_win_toeplitz(
 
     b = IRBuilder(kernel_name or spec.kernel_name())
     b.kernel.attrs["max_workgroup_size"] = THREADS
-    params = emit_direct_params(b, direction="fwd" if FWD else "dgrad", io_type=io_type)
+    params = emit_direct_params(
+        b, direction="fwd" if FWD else "dgrad", io_type=io_type, bias=spec.bias
+    )
     p_N = params["p_N"]
     if FWD:
         # The forward ABI: the rows this kernel produces (its dX) are the
@@ -11757,6 +11909,14 @@ def _build_dw_dgrad_win_toeplitz(
         o_ch = wave_ch
     else:
         o_ch = b.add(wave_ch, b.mul(b.mod(t, b.const_i32(2)), b.const_i32(4)))
+    # Conv + bias (fwd): the bias of the acc_len output channels the lane's
+    # fragment holds (block channel o_ch), as fp32, added before the rounding.
+    bias_v = None
+    if spec.bias:
+        bias_rsrc = conv_bias_rsrc(b, params["Bias"], params["Bias_bytes"])
+        bias_v = load_conv_bias_vec_f32(
+            b, bias_rsrc, b.add(ch_blk, o_ch), atom.acc_len, io_type, c0
+        )
     n_out = F * (TW // S) * PER_PX
     c_TW = b.const_i32(TW)
     if S > 1:
@@ -11956,7 +12116,8 @@ def _build_dw_dgrad_win_toeplitz(
         if not 0 <= hi_local < ROWS or hi_local % S:
             continue
         slot = hi_local % KH
-        pend_out = (_trunc_f32(b, p.dtype, acc[slot]), dx_row_part(hi_local))
+        out_acc = acc[slot] if bias_v is None else b.fadd(acc[slot], bias_v)
+        pend_out = (_trunc_f32(b, p.dtype, out_acc), dx_row_part(hi_local))
         acc[slot] = zero_acc
     if pend_out is not None:
         buf = b.const_i32(n_rows % 2)
@@ -12008,6 +12169,10 @@ class DirectDepthwiseSpec:
     # channels: input and output move as one ``cpl``-wide vector per lane and
     # the taps run as packed ``<2 x f32>`` FMAs over channel pairs.
     cpl: int = 1
+    # Conv + bias forward: the Bias / Bias_bytes kernarg tail; bias[ch] is
+    # loaded once per lane (channel run) and added to every flushed output in
+    # fp32 before the store.
+    bias: bool = False
 
     @property
     def threads_per_block(self) -> int:
@@ -12024,6 +12189,8 @@ class DirectDepthwiseSpec:
         parts = [self.name, p.short(), f"bw{self.block_w}", f"bw{self.block_waves}wv"]
         if self.cpl > 1:
             parts.append(f"cpl{self.cpl}")
+        if self.bias:
+            parts.append("cbias")
         return kernel_name_join(*parts, flags=_scalar_name_flags(p.dtype))
 
     def validate(self) -> None:
@@ -12170,7 +12337,7 @@ def build_direct_depthwise(
 
     io_type = _io_type(p.dtype)
 
-    params = emit_direct_params(b, io_type=io_type)
+    params = emit_direct_params(b, io_type=io_type, bias=spec.bias)
     A = params["A"]
     Bp = params["B"]
     D = params["D"]
@@ -12239,6 +12406,11 @@ def build_direct_depthwise(
             w_f32 = b.select(ch_in_range, b.cast_to_f32(w_h), zero_f32)
             row.append(w_f32)
         weights_f32.append(row)
+    # Conv + bias: bias[ch] as fp32, added to every flushed output.
+    bias_f32 = None
+    if spec.bias:
+        bias_rsrc = conv_bias_rsrc(b, params["Bias"], params["Bias_bytes"])
+        bias_f32 = load_conv_bias_f32(b, bias_rsrc, ch, io_type, c0)
 
     # ---- H-streaming loop ----
     # AOT: the row count follows the runtime height, so only the
@@ -12338,6 +12510,8 @@ def build_direct_depthwise(
             acc_val = accs[P_FLUSH_j * BLOCK_W + w_out]  # STATIC index
             d_off, _ = d_desc.offset(b, n=n, h=ho_row_j, w=out_q, k=ch)
             safe_d = b.select(store_ok, b.mul(d_off, c_half_bytes), oob_sentinel)
+            if bias_f32 is not None:
+                acc_val = b.fadd(acc_val, bias_f32)
             _scalar_store(b, p.dtype, d_rsrc, safe_d, c0, acc_val)
 
         for w_out in range(BLOCK_W):
@@ -12479,7 +12653,7 @@ def _build_direct_depthwise_packed(spec: "DirectDepthwiseSpec", arch: str) -> Ke
 
     b = IRBuilder(spec.kernel_name())
     b.kernel.attrs["max_workgroup_size"] = THREADS
-    params = emit_direct_params(b, io_type=_io_type(p.dtype))
+    params = emit_direct_params(b, io_type=_io_type(p.dtype), bias=spec.bias)
     p_Hi = params["p_Hi"]
     load1, loadv, to_pairs, store = _dw_packed_helpers(b, p, CPL)
 
@@ -12520,6 +12694,18 @@ def _build_direct_depthwise_packed(spec: "DirectDepthwiseSpec", arch: str) -> Ke
                 vals.append(b.cast_to_f32(load1(b_rsrc, safe)))
             row.append([b.vec_pack(vals[2 * k : 2 * k + 2], F32) for k in range(NP)])
         weights.append(row)
+    # Conv + bias: bias[ch .. ch+CPL) as <2 x f32> channel pairs, added to
+    # every flushed output.
+    bias_pairs = None
+    if spec.bias:
+        bias_rsrc = conv_bias_rsrc(b, params["Bias"], params["Bias_bytes"])
+        bias_v = load_conv_bias_vec_f32(b, bias_rsrc, ch, CPL, _io_type(p.dtype), c0)
+        bias_pairs = [
+            b.vec_pack(
+                [b.vec_extract(bias_v, 2 * k), b.vec_extract(bias_v, 2 * k + 1)], F32
+            )
+            for k in range(NP)
+        ]
 
     # Streaming loop bounds and column terms as in build_direct_depthwise.
     c_KH = b.const_i32(p.KH)
@@ -12579,11 +12765,11 @@ def _build_direct_depthwise_packed(spec: "DirectDepthwiseSpec", arch: str) -> Ke
             out_q = b.add(q_tile_start, b.const_i32(w_out))
             ok = b.land(b.land(b.cmp_lt(out_q, c_W), ch_in_range), should_flush)
             d_off, _ = d_desc.offset(b, n=n, h=ho_row_j, w=out_q, k=ch)
-            store(
-                d_rsrc,
-                b.select(ok, b.mul(d_off, c_half), oob_sentinel),
-                slots[P_FLUSH_j * BLOCK_W + w_out],
-            )
+            d_safe = b.select(ok, b.mul(d_off, c_half), oob_sentinel)
+            out_pairs = slots[P_FLUSH_j * BLOCK_W + w_out]
+            if bias_pairs is not None:
+                out_pairs = [b.fadd(v, bv) for v, bv in zip(out_pairs, bias_pairs)]
+            store(d_rsrc, d_safe, out_pairs)
             slots[P_FLUSH_j * BLOCK_W + w_out] = [zero2] * NP
 
     PF = min(p.KH, -(-16 // n_cols))
@@ -12755,6 +12941,9 @@ class DirectDepthwiseTiledSpec:
     # Channels per lane (see DirectDepthwiseSpec.cpl): ``cpl``-wide vector
     # loads and stores, taps as packed ``<2 x f32>`` FMAs over channel pairs.
     cpl: int = 1
+    # Conv + bias forward (not with ``dgrad``): the Bias / Bias_bytes kernarg
+    # tail; bias[ch] added to every output in fp32 before the store.
+    bias: bool = False
 
     @property
     def threads_per_block(self) -> int:
@@ -12815,12 +13004,18 @@ class DirectDepthwiseTiledSpec:
             flags={
                 "ur": self.unroll_rows,
                 "dg": self.dgrad,
+                "cbias": self.bias,
                 **_scalar_name_flags(p.dtype),
             },
         )
 
     def validate(self) -> None:
         p = self.problem
+        if self.bias and self.dgrad:
+            raise ValueError(
+                "DirectDepthwiseTiledSpec(dgrad=True) computes a dgrad: bias is "
+                "a forward epilogue"
+            )
         why = pad_w_reason(p)
         if why is not None:
             raise ValueError(f"DirectDepthwiseTiledSpec: {why}")
@@ -12957,7 +13152,7 @@ def build_direct_depthwise_tiled(
         params["p_A_stride_wi"] = params["p_dY_stride_wo"]
         PAD, PAD_W = KH - 1 - PAD, KW - 1 - p.PAD_W
     else:
-        params = emit_direct_params(b, io_type=_io_type(p.dtype))
+        params = emit_direct_params(b, io_type=_io_type(p.dtype), bias=spec.bias)
         PAD_W = PAD
     p_Hi = params["p_Hi"]
     p_Ho = params["p_Ho"]
@@ -13096,7 +13291,12 @@ def build_direct_depthwise_tiled(
             b.scf_yield(*new_accs, *(v for row in rows[1:] for v in row), *w_next)
         accs = list(loop.results[:n_acc])
 
-    # Epilogue: one store per output of the tile.
+    # Epilogue: one store per output of the tile. Conv + bias (forward only):
+    # bias[ch] as fp32, added to every output before its store.
+    bias_f32 = None
+    if spec.bias:
+        bias_rsrc = conv_bias_rsrc(b, params["Bias"], params["Bias_bytes"])
+        bias_f32 = load_conv_bias_f32(b, bias_rsrc, ch, _io_type(p.dtype), c0)
     d_desc = None if DG else direct_d_descriptor_dynamic(b, params)
     for t in range(TH):
         ho = b.add(h0, b.const_i32(t))
@@ -13116,6 +13316,8 @@ def build_direct_depthwise_tiled(
                 d_off, _ = d_desc.offset(b, n=n, h=ho, w=wo, k=ch)
             safe_d = b.select(ok, b.mul(d_off, c_half), oob_sentinel)
             acc = accs[t * BW + w_out]
+            if bias_f32 is not None:
+                acc = b.fadd(acc, bias_f32)
             _scalar_store(b, p.dtype, d_rsrc, safe_d, c0, acc)
 
     return b.kernel
@@ -13143,7 +13345,7 @@ def _build_direct_depthwise_tiled_packed(
 
     b = IRBuilder(spec.kernel_name())
     b.kernel.attrs["max_workgroup_size"] = THREADS
-    params = emit_direct_params(b, io_type=_io_type(p.dtype))
+    params = emit_direct_params(b, io_type=_io_type(p.dtype), bias=spec.bias)
     p_Hi = params["p_Hi"]
     p_Ho = params["p_Ho"]
     load1, loadv, to_pairs, store = _dw_packed_helpers(b, p, CPL)
@@ -13268,6 +13470,18 @@ def _build_direct_depthwise_tiled_packed(
             b.scf_yield(*new_accs, *(v for row in rows[1:] for v in row), *w_next)
         accs = list(loop.results[:n_acc])
 
+    # Conv + bias: bias[ch .. ch+CPL) as <2 x f32> channel pairs, added to
+    # every output before its store.
+    bias_pairs = None
+    if spec.bias:
+        bias_rsrc = conv_bias_rsrc(b, params["Bias"], params["Bias_bytes"])
+        bias_v = load_conv_bias_vec_f32(b, bias_rsrc, ch, CPL, _io_type(p.dtype), c0)
+        bias_pairs = [
+            b.vec_pack(
+                [b.vec_extract(bias_v, 2 * k), b.vec_extract(bias_v, 2 * k + 1)], F32
+            )
+            for k in range(NP)
+        ]
     d_desc = direct_d_descriptor_dynamic(b, params)
     for t in range(TH):
         ho = b.add(h0, b.const_i32(t))
@@ -13277,11 +13491,11 @@ def _build_direct_depthwise_tiled_packed(
             ok = b.land(h_ok, b.cmp_lt(wo, params["p_Wo"]))
             d_off, _ = d_desc.offset(b, n=n, h=ho, w=wo, k=ch)
             base = (t * BW + w_out) * NP
-            store(
-                d_rsrc,
-                b.select(ok, b.mul(d_off, c_half), oob_sentinel),
-                accs[base : base + NP],
-            )
+            d_safe = b.select(ok, b.mul(d_off, c_half), oob_sentinel)
+            out_pairs = accs[base : base + NP]
+            if bias_pairs is not None:
+                out_pairs = [b.fadd(v, bv) for v, bv in zip(out_pairs, bias_pairs)]
+            store(d_rsrc, d_safe, out_pairs)
 
     return b.kernel
 
@@ -13358,6 +13572,9 @@ class DirectDepthwiseColSpec:
     # kernarg.  It must be > 0: an untiled kernel would have to bake Ho into
     # its trip count, which is exactly what AOT forbids.
     block_h: int = 16
+    # Conv + bias forward: the Bias / Bias_bytes kernarg tail; bias[ch] added
+    # to every output in fp32 before the store.
+    bias: bool = False
 
     @property
     def threads_per_block(self) -> int:
@@ -13438,6 +13655,7 @@ class DirectDepthwiseColSpec:
             f"bh{self.block_h}",
             f"bw{self.block_w}",
             f"bw{self.block_waves}wv",
+            "cbias" if self.bias else "",
         ]
         return kernel_name_join(*parts)
 
@@ -13639,7 +13857,7 @@ def build_direct_depthwise_col(
     DT = _dw_col_storage(spec.dtype)
     ELEM_BYTES = 4 if DT.name == "f32" else 2
 
-    params = emit_direct_params(b, io_type=DT)
+    params = emit_direct_params(b, io_type=DT, bias=spec.bias)
     A = params["A"]
     Bp = params["B"]
     D = params["D"]
@@ -13789,6 +14007,11 @@ def build_direct_depthwise_col(
     # Single drain after the column loop: the whole band is complete. The last
     # row tile of an image may be partial, so the rows are bounded by p_Ho.
     final_accs = col_loop.results
+    # Conv + bias: bias[ch] as fp32, added to every output before its store.
+    bias_f32 = None
+    if spec.bias:
+        bias_rsrc = conv_bias_rsrc(b, params["Bias"], params["Bias_bytes"])
+        bias_f32 = load_conv_bias_f32(b, bias_rsrc, ch, DT, c0)
     for h_out in range(BLOCK_H):
         out_h = b.add(ho_start, b.const_i32(h_out))
         row_ok = b.land(b.cmp_lt(out_h, p_Ho), ch_in_range)
@@ -13797,6 +14020,8 @@ def build_direct_depthwise_col(
             store_ok = b.land(row_ok, b.cmp_lt(out_q, c_W))
             d_off, _ = d_desc.offset(b, n=n, h=out_h, w=out_q, k=ch)
             acc_val = final_accs[h_out * BLOCK_W + w_out]
+            if bias_f32 is not None:
+                acc_val = b.fadd(acc_val, bias_f32)
             store_elem(d_rsrc, addr(d_off, store_ok), acc_val)
 
     return b.kernel
@@ -13832,6 +14057,9 @@ class DirectDepthwiseSpatialSpec:
     name: str = "direct_depthwise_spatial"
     block_waves: int = 1
     wave_size: int = 64
+    # Conv + bias forward: the Bias / Bias_bytes kernarg tail; bias[ch] added
+    # to every flushed output in fp32 before the store.
+    bias: bool = False
 
     @property
     def n_w_per_wave(self) -> int:
@@ -13853,6 +14081,7 @@ class DirectDepthwiseSpatialSpec:
             self.name,
             p.short(),
             f"bwv{self.block_waves}",
+            "cbias" if self.bias else "",
             flags=_scalar_name_flags(p.dtype),
         )
 
@@ -13943,7 +14172,7 @@ def build_direct_depthwise_spatial(
 
     io_type = _io_type(p.dtype)
 
-    params = emit_direct_params(b, io_type=io_type)
+    params = emit_direct_params(b, io_type=io_type, bias=spec.bias)
     A = params["A"]
     Bp = params["B"]
     D = params["D"]
@@ -14005,6 +14234,11 @@ def build_direct_depthwise_spatial(
             w_h = _scalar_load(b, p.dtype, b_rsrc, safe_w, c0)
             row.append(b.select(w_valid, b.cast_to_f32(w_h), zero_f32))
         weights_f32.append(row)
+    # Conv + bias: bias[ch] as fp32, added to every flushed output.
+    bias_f32 = None
+    if spec.bias:
+        bias_rsrc = conv_bias_rsrc(b, params["Bias"], params["Bias_bytes"])
+        bias_f32 = load_conv_bias_f32(b, bias_rsrc, ch, io_type, c0)
 
     c1 = b.const_i32(1)
     c_KH = b.const_i32(p.KH)
@@ -14105,6 +14339,8 @@ def build_direct_depthwise_spatial(
             acc_val = new_accs[P_FLUSH_j]  # STATIC index
             d_off, _ = d_desc.offset(b, n=n, h=ho_row_j, w=q_out, k=ch)
             safe_d = b.select(store_ok, b.mul(d_off, c_half_bytes), oob_sentinel)
+            if bias_f32 is not None:
+                acc_val = b.fadd(acc_val, bias_f32)
             _scalar_store(b, p.dtype, d_rsrc, safe_d, c0, acc_val)
 
             new_accs[P_FLUSH_j] = zero_f32  # unconditional static reset

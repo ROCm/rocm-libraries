@@ -2945,6 +2945,7 @@ def _identity(
     caps: DirectCaps,
     knobs: dict,
     dtype: str = DIRECT_DTYPE,
+    bias: bool = False,
 ) -> KernelIdentity:
     dtype_a, dtype_b, dtype_d = direct_dtype_triple(dtype)
     return KernelIdentity(
@@ -2980,6 +2981,9 @@ def _identity(
         cpg=caps.cpg,
         kpg=caps.kpg,
         knobs=json.dumps(knobs, sort_keys=True),
+        # The conv + bias form of a forward kernel (or of the split-C fold):
+        # an identity field, not a knob, and out of the hash while False.
+        **({"bias": True} if bias else {}),
     )
 
 
@@ -3024,7 +3028,11 @@ _NO_CAPS = DirectCaps(KH=0, PAD=0, stride=0, cpg=0, kpg=0)
 
 
 def _split_reduce_identity(
-    arch: str, wave_size: int, split_c: int, dtype: str = DIRECT_DTYPE
+    arch: str,
+    wave_size: int,
+    split_c: int,
+    dtype: str = DIRECT_DTYPE,
+    bias: bool = False,
 ) -> KernelIdentity:
     return _identity(
         arch,
@@ -3034,6 +3042,7 @@ def _split_reduce_identity(
         _NO_CAPS,
         {"split_c": split_c},
         dtype,
+        bias,
     )
 
 
@@ -3053,10 +3062,14 @@ def wgrad_reduce_identity(
 
 
 def _split_reduce_job(
-    arch: str, wave_size: int, split_c: int, dtype: str = DIRECT_DTYPE
+    arch: str,
+    wave_size: int,
+    split_c: int,
+    dtype: str = DIRECT_DTYPE,
+    bias: bool = False,
 ) -> BuildJob:
     return _job(
-        _split_reduce_identity(arch, wave_size, split_c, dtype),
+        _split_reduce_identity(arch, wave_size, split_c, dtype, bias),
         _NO_CAPS,
         {"split_c": split_c},
     )
@@ -3570,11 +3583,19 @@ def direct_kernel_for_job(job: BuildJob, arch: str, dtype: str):
         raise ValueError(f"direct conv builds {DIRECT_DTYPES}, not {dtype!r}")
     caps = DirectCaps(**job.caps)
     variant = job.identity.algorithm
+    bias = {"bias": True} if job.identity.bias else {}
+    if bias and job.identity.direction not in ("direct_fwd", _FWD_HELPER):
+        # A dgrad variant may build a forward spec over the transposed
+        # problem; its launch (and ABI) still has no bias tail.
+        raise ValueError(
+            f"{job.identity.direction} {variant}: only a forward kernel (or "
+            f"the split-C fold) takes a bias"
+        )
     if variant == _SPLIT_REDUCE:
-        spec = make_spec(variant, _DtypeOnly(dtype), job.spec_kwargs)
+        spec = make_spec(variant, _DtypeOnly(dtype), job.spec_kwargs, **bias)
         return _build_kernel(variant, spec, arch), {}
     probe = probe_problem(caps, dtype, variant, job.spec_kwargs)
-    spec = make_spec(variant, probe, job.spec_kwargs, job.identity.wave_size)
+    spec = make_spec(variant, probe, job.spec_kwargs, job.identity.wave_size, **bias)
     ok, why = validate_spec(variant, spec, arch)
     if not ok:
         raise ValueError(why)
@@ -3603,13 +3624,22 @@ def direct_job_for_identity(identity: KernelIdentity) -> BuildJob:
         raise LookupError(
             f"direct conv builds {DIRECT_DTYPES}, not {identity.dtype_a!r}"
         )
+    if identity.bias and identity.direction not in ("direct_fwd", _FWD_HELPER):
+        raise LookupError(
+            f"{identity.direction} {identity.algorithm}: only a forward kernel "
+            f"(or the split-C fold) takes a bias"
+        )
     caps = _caps_of(identity)
     knobs = json.loads(identity.knobs) if identity.knobs else {}
     if identity.direction == _FWD_HELPER:
         split_c = knobs.get("split_c")
         rebuilt = (
             _split_reduce_identity(
-                identity.arch, identity.wave_size, split_c, identity.dtype_a
+                identity.arch,
+                identity.wave_size,
+                split_c,
+                identity.dtype_a,
+                identity.bias,
             )
             if identity.algorithm == _SPLIT_REDUCE and isinstance(split_c, int)
             else None
@@ -3640,6 +3670,7 @@ def direct_job_for_identity(identity: KernelIdentity) -> BuildJob:
             caps,
             knobs,
             identity.dtype_a,
+            identity.bias,
         )
     rebuilt = replace(rebuilt, llvm_flavor=identity.llvm_flavor)
     if (caps.kw or caps.pad_w >= 0) and identity.algorithm not in PER_AXIS_PAD_VARIANTS:
@@ -3658,7 +3689,16 @@ def direct_job_for_identity(identity: KernelIdentity) -> BuildJob:
         # computes (a dilated grouped kernel, say): ask the kernel's validator.
         variant = identity.algorithm
         probe = probe_problem(caps, identity.dtype_a, variant, knobs)
-        spec = make_spec(variant, probe, knobs, identity.wave_size)
+        try:
+            spec = make_spec(
+                variant,
+                probe,
+                knobs,
+                identity.wave_size,
+                **({"bias": True} if identity.bias else {}),
+            )
+        except ValueError as e:
+            raise LookupError(f"the direct grid cannot build this identity: {e}")
         ok, why = validate_spec(variant, spec, identity.arch)
         if not ok:
             raise LookupError(f"the direct grid cannot build this identity: {why}")

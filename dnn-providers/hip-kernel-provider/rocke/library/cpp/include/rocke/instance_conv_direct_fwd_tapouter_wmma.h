@@ -62,6 +62,8 @@ extern "C" {
  *      sched: str | None = None
  *      wave_size: int = 32
  *      tdm_split: int = 1
+ *      bias: bool = False   # conv + bias: Bias / Bias_bytes tail, bias[k] added
+ *                           # to the fp32 accumulators before the LDS staging
  * ===================================================================== */
 typedef struct rocke_fwd_tapouter_wmma_spec
 {
@@ -78,6 +80,7 @@ typedef struct rocke_fwd_tapouter_wmma_spec
     const char* sched; /* default NULL */
     int wave_size; /* default 32 */
     int tdm_split; /* default 1 */
+    bool bias; /* default false */
 } rocke_fwd_tapouter_wmma_spec_t;
 
 /* Spec with the Python dataclass defaults; problem == problem_default(). */

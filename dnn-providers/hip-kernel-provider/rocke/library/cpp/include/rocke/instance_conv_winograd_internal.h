@@ -9,7 +9,8 @@
  *     (conv_winograd_gen.POINTS, which includes the F(m, 3) sets of
  *     conv_winograd_fwd._POINTS), as rationals;
  *   * the small IR helpers of conv_winograd_fwd (_load_raw, _raw_to_f32,
- *     _pack_vec_f32, _store_packed, _store_vec_f32, _oob_sel, _lincomb) and
+ *     _pack_vec_f32, _store_packed, _store_vec_f32, _bias_rsrc, _bias_f32,
+ *     _oob_sel, _lincomb) and
  *     conv_winograd_gen._lincomb_f.
  *
  * C++ only (not part of the C ABI).
@@ -110,6 +111,12 @@ void store_vec_f32(rocke_ir_builder_t* b,
                    rocke_value_t* off,
                    const std::vector<rocke_value_t*>& vals,
                    const char* dtype);
+/* _bias_rsrc: declare the Bias / Bias_bytes kernargs (after every other one)
+ * and return the buffer resource the bias is read through. */
+rocke_value_t* bias_rsrc(rocke_ir_builder_t* b, const char* io_dtype);
+/* _bias_f32: bias[k : k + n] as fp32 (one n-element buffer load). */
+std::vector<rocke_value_t*> bias_f32(
+    rocke_ir_builder_t* b, rocke_value_t* rsrc, rocke_value_t* k, const char* io_dtype, int n);
 /* _oob_sel: select(ok, off, _OOB). */
 rocke_value_t* oob_sel(rocke_ir_builder_t* b, rocke_value_t* ok, rocke_value_t* off);
 /* conv_winograd_fwd._lincomb: sum(c * v) over the non-zero integer c, fp32. */

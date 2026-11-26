@@ -49,6 +49,7 @@ extern "C" {
  *      name: str = "fwd_pp_mfma"
  *      block_k: int = 128           # output channels per block (64, 128 or 256)
  *      wave_size: int = 64
+ *      bias: bool = False           # conv + bias (Bias / Bias_bytes tail)
  * ===================================================================== */
 typedef struct rocke_fwd_pp_mfma_spec
 {
@@ -56,6 +57,7 @@ typedef struct rocke_fwd_pp_mfma_spec
     const char* name; /* default "fwd_pp_mfma" */
     int block_k; /* default 128 */
     int wave_size; /* default 64 */
+    bool bias; /* default false */
 } rocke_fwd_pp_mfma_spec_t;
 
 /* Spec with the Python dataclass defaults; problem == problem_default(). */

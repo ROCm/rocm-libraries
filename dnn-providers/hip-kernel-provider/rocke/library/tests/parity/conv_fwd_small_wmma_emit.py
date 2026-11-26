@@ -48,6 +48,7 @@
 #  20  fp16, 3x3 s1 PAD 1, K=6, 1x3 waves, 4x3 tiles, 6x16 tile, ck 32
 #  rejected by both engines:
 #  21  fwd_smallk_wmma 1x7 with column PAD 7 (outside 0..KW-1)
+from dataclasses import replace
 from _emit_common import run_emit
 from kernels.common.conv_direct_grouped import DirectConvProblem
 from kernels.common.conv_fwd_small_wmma import (
@@ -75,7 +76,7 @@ def _p(*, K=3, PAD=1, S=1, C=3, Kout=64, dtype="bf16", H=32, W=40, KW=None, pad_
     )
 
 
-def _spec(idx: int):
+def _base_spec(idx: int):
     C = FwdSmallcWmmaSpec
     K = FwdSmallkWmmaSpec
     cfgs = {
@@ -267,6 +268,32 @@ def _build(spec, arch):
     if isinstance(spec, FwdSmallcWmmaSpec):
         return build_fwd_smallc_wmma(spec, arch=arch)
     return build_fwd_smallk_wmma(spec, arch=arch)
+
+
+# Conv + bias forward, configs 22..: the config _BIAS_CFGS[idx - 22]
+# above rebuilt with bias=True (the Bias / Bias_bytes kernarg tail and the
+# fp32 bias add before the store).
+_BIAS_CFG_BASE = 22
+_BIAS_CFGS = (
+    0,
+    1,
+    2,
+    8,
+    15,
+    17,
+    19,
+)
+
+
+def _spec(idx: int):
+    if idx < _BIAS_CFG_BASE:
+        return _base_spec(idx)
+    if idx - _BIAS_CFG_BASE >= len(_BIAS_CFGS):
+        raise SystemExit(f"unknown config index {idx}")
+    sel = _base_spec(_BIAS_CFGS[idx - _BIAS_CFG_BASE])
+    if isinstance(sel, tuple):
+        return replace(sel[0], bias=True), sel[1]
+    return replace(sel, bias=True)
 
 
 def main() -> int:

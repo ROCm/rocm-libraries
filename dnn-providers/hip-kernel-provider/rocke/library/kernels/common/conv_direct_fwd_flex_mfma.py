@@ -35,6 +35,11 @@ chunks:
 * **Split-C.** With ``split_c`` > 1 an item is (tile, piece of the chunks)
   and the block writes an fp32 slab of the packed ``[split_c, N, Ho, Wo, K]``
   workspace that ``direct_split_reduce`` folds into the output.
+* **Conv + bias.** ``bias=True`` takes the ``Bias`` / ``Bias_bytes`` tail and
+  adds ``bias[k]`` to the fp32 accumulators before the rounding. A split-C
+  kernel declares the tail (the conv pass and the fold launch with one
+  shared kernarg block) but writes its slabs raw: the fold
+  (``DirectSplitReduceSpec(bias=True)``) adds the bias once.
 * **Register epilogue.** The output-channel order inside each 16-channel MFMA
   tile is interleaved by the weight DMA so that one ``permlane32_swap`` per
   dword pair gives every lane 8 consecutive channels: 16-byte stores.
@@ -54,6 +59,7 @@ from rocke.core.ir import BF16, F16, I32, I64, IRBuilder, KernelDef, Value
 from rocke.core.ir import VectorType
 from rocke.helpers.spec import ceil_div
 
+from kernels.conv.conv_bias import conv_bias_rsrc, load_conv_bias_vec_f32
 from kernels.common.conv_direct_grouped import (
     I32_MAX,
     DirectConvProblem,
@@ -85,6 +91,9 @@ class FwdFlexMfmaSpec:
     split_c: int = 1  # pieces of the channel chunks (fp32 slabs when > 1)
     name: str = "fwd_flex_mfma"
     wave_size: int = 64
+    # Conv + bias forward (the Bias / Bias_bytes tail; a split_c > 1 pass only
+    # declares it, the fold adds the bias).
+    bias: bool = False
 
     @property
     def kt(self) -> int:
@@ -106,7 +115,7 @@ class FwdFlexMfmaSpec:
             f"d{p.dil_h}x{p.dil_w}",
             f"k{self.bk}",
             f"sc{self.split_c}",
-            flags={"bf16": p.dtype == "bf16"},
+            flags={"cbias": self.bias, "bf16": p.dtype == "bf16"},
         )
 
     def items(self) -> int:
@@ -206,7 +215,7 @@ def build_fwd_flex_mfma(spec: FwdFlexMfmaSpec, *, arch: str = "gfx950") -> Kerne
     b.kernel.attrs["max_workgroup_size"] = spec.threads_per_block
     b.kernel.attrs["lds_alias_scopes"] = True
     b.kernel.attrs["waves_per_eu"] = 2
-    params = emit_direct_params(b, io_type=io_type)
+    params = emit_direct_params(b, io_type=io_type, bias=spec.bias)
 
     def ci(v: int) -> Value:
         return b.const_i32(v)
@@ -464,6 +473,12 @@ def build_fwd_flex_mfma(spec: FwdFlexMfmaSpec, *, arch: str = "gfx950") -> Kerne
     half8 = VectorType(BF16 if dtype == "bf16" else F16, 8)
 
     d_rsrc = b.buffer_rsrc(params["D"], params["D_bytes"])
+    # Conv + bias, unsplit only: a split_c > 1 pass leaves its slabs raw.
+    bias_rsrc = (
+        conv_bias_rsrc(b, params["Bias"], params["Bias_bytes"])
+        if spec.bias and SP == 1
+        else None
+    )
 
     def epilogue(accs, t: Value):
         tl = b.div(t, ci(SP))
@@ -477,14 +492,37 @@ def build_fwd_flex_mfma(spec: FwdFlexMfmaSpec, *, arch: str = "gfx950") -> Kerne
         kbase = b.add(b.mul(tk, ci(BK)), b.mul(wk, ci(KT * 16)))
         if SP == 1:
             kq = b.add(b.mul(b.div(q, c2), ci(16)), b.mul(b.mod(q, c2), ci(8)))
+            bias_kt = None
+            if bias_rsrc is not None:
+                # Before the swap, accumulator kt of a lane holds the 4
+                # channels kbase + kt*16 + (q%2)*8 + (q/2)*4 .. +3 (the
+                # split-C slab order): one bias quad per kt, for every xt.
+                kqb = b.add(b.mul(b.mod(q, c2), ci(8)), b.mul(b.div(q, c2), ci(4)))
+                bias_kt = [
+                    load_conv_bias_vec_f32(
+                        b,
+                        bias_rsrc,
+                        b.add(b.add(kbase, ci(kt * 16)), kqb),
+                        4,
+                        io_type,
+                        c0,
+                    )
+                    for kt in range(KT)
+                ]
+
+            def acc_of(i: int) -> Value:
+                if bias_kt is None:
+                    return accs[i]
+                return b.fadd(accs[i], bias_kt[i % KT])
+
             for xt in range(_XT):
                 x = b.add(xbase, ci(xt * 16))
                 for cc in range(KT // 2):
                     da = b.vec_bitcast(
-                        _trunc_f32(b, dtype, accs[xt * KT + 2 * cc]), i32x2
+                        _trunc_f32(b, dtype, acc_of(xt * KT + 2 * cc)), i32x2
                     )
                     db = b.vec_bitcast(
-                        _trunc_f32(b, dtype, accs[xt * KT + 2 * cc + 1]), i32x2
+                        _trunc_f32(b, dtype, acc_of(xt * KT + 2 * cc + 1)), i32x2
                     )
                     lo0, hi0 = b.permlane32_swap(
                         b.vec_extract(da, 0), b.vec_extract(db, 0)

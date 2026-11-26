@@ -15,14 +15,15 @@ under `HIPKERNELPROVIDER_ENABLE_TESTS`. It holds the rocKE bundles below, plus
 | `rocKE/gfx942_attention_dense/` | `hipkernel:Gfx942AttentionDense` | `packs/Gfx942AttentionDenseNative.cpp` (shares `packs/AttentionDenseNative.cpp` with gfx950) |
 | `rocKE/gfx1151_wmma_attention/` | `hipkernel:Gfx1151WmmaAttention` | `packs/Gfx1151WmmaAttentionNative.cpp` |
 | `rocKE/gfx1151_wmma_attention_decode/` | `hipkernel:Gfx1151WmmaAttentionDecode` | `packs/Gfx1151WmmaAttentionNative.cpp` |
-| `rocKE/gfx950_conv_fwd_aot/` | `hipkernel:Gfx950ConvFwdAot` | `packs/Gfx950ConvFwdNative.cpp` |
+| `rocKE/gfx950_conv_fwd_aot/` | `hipkernel:Gfx950ConvFwdAot` | `packs/Gfx950ConvFwdNative.cpp` (on `packs/Gfx950ConvFwdAotCommon.cpp`) |
+| `rocKE/gfx950_conv_fwd_bias_aot/` | `hipkernel:Gfx950ConvFwdBiasAot` | `packs/Gfx950ConvFwdBiasNative.cpp` (on `packs/Gfx950ConvFwdAotCommon.cpp`) |
 | `rocKE/gfx950_conv_dgrad_aot/` | `hipkernel:Gfx950ConvDgradAot` | `packs/ConvDgradAotNative.cpp` |
 | `rocKE/gfx1250_conv_dgrad_aot/` | `hipkernel:Gfx1250ConvDgradAot` | `packs/ConvDgradAotNative.cpp` (shared with gfx950) |
 
 The `gfx950_attention_dense`, `gfx950_attention_unified_2d`, `gfx950_attention_unified_3d`,
 `gfx942_attention_unified_2d`, `gfx942_attention_unified_3d`, `gfx942_attention_dense`,
-`gfx950_conv_fwd_aot`, `gfx950_conv_dgrad_aot` and `gfx1250_conv_dgrad_aot` KDPs are stored in
-DVC (see [Large rocKE files live in DVC](#large-rocke-files-live-in-dvc) below) and declare
+`gfx950_conv_fwd_aot`, `gfx950_conv_fwd_bias_aot`, `gfx950_conv_dgrad_aot` and
+`gfx1250_conv_dgrad_aot` KDPs are stored in DVC (see [Large rocKE files live in DVC](#large-rocke-files-live-in-dvc) below) and declare
 gfx950, gfx942 or gfx1250 only; `gfx1151_wmma_attention` and `gfx1151_wmma_attention_decode`
 KDPs are in
 git and declare the gfx11 and gfx12 RDNA targets. Each bundle packs for a build that has
@@ -135,8 +136,9 @@ rocKE/<bundle>/
 
 One pointer per bundle keeps the pointer count and the pull small, and the whole bundle
 updates atomically. Files are stored uncompressed, one blob each. `gfx950_attention_dense`,
-`gfx942_attention_unified_3d`, `gfx950_conv_fwd_aot` and `gfx950_conv_dgrad_aot` (the last
-two with `heuristics.dvc`) use this layout. A single large file with its own
+`gfx942_attention_unified_3d`, `gfx950_conv_fwd_aot`, `gfx950_conv_fwd_bias_aot` and
+`gfx950_conv_dgrad_aot` (`gfx950_conv_fwd_aot` and `gfx950_conv_dgrad_aot` with
+`heuristics.dvc`) use this layout. A single large file with its own
 `<name>.kdp.json.dvc` pointer is also
 accepted.
 

@@ -848,6 +848,32 @@ AOT_REFUSED_SPLIT_REDUCE = (
     "launch of a split-C non-grouped instance, not a convolution"
 )
 
+#: Instance families (:func:`aot_bias_family`) whose bias twin (``bias`` = 1:
+#: the per-output-channel bias added to the fp32 accumulator, and the trailing
+#: ``(Bias, Bias_bytes)`` kernargs) is packaged. The others are refused with
+#: :func:`aot_bias_error`'s reason; packaging one is adding it here. A split-C
+#: instance's conv pass and fold both take the tail, and only the fold adds it.
+AOT_BIAS_FAMILIES = ("implicit_gemm", "direct", "split_c")
+
+
+def aot_bias_family(*, direct: bool, split_c: int = 1) -> str:
+    """The bias family of an instance: ``implicit_gemm``, ``direct`` or
+    ``split_c`` (a split-C direct instance, whose conv pass and fold both take
+    the bias tail and whose fold adds it)."""
+    if not direct:
+        return "implicit_gemm"
+    return "split_c" if split_c > 1 else "direct"
+
+
+def aot_bias_error(family: str) -> str:
+    """Why a bias instance of ``family`` is not packaged, or ``""``."""
+    if family in AOT_BIAS_FAMILIES:
+        return ""
+    return (
+        f"bias=True is not packaged for {family} instances yet (packaged bias "
+        f"families: {', '.join(AOT_BIAS_FAMILIES)})"
+    )
+
 
 def aot_direct_grouped_block_h() -> int:
     """The row tile a grouped direct instance compiles: DirectConvSpec's default,
@@ -946,6 +972,12 @@ class Gfx950ConvFwdAotSpec:
     workgroup owns that many groups, and records its builder-derived vector
     widths as 0, as rocKE's sweep does.
 
+    ``bias`` (last, 0 by default) is 1 for an instance built with the
+    per-output-channel bias epilogue (``KernelIdentity.bias``): its kernel
+    adds ``bias[k]`` to the fp32 accumulator before the store and takes the
+    trailing ``(Bias, Bias_bytes)`` kernargs. Only the families in
+    ``AOT_BIAS_FAMILIES`` package it.
+
     :meth:`identity` is the rocKE ``KernelIdentity`` the fields spell; a
     packageable instance's ``instance_id`` is its ``stable_hash()``.
     """
@@ -1005,10 +1037,16 @@ class Gfx950ConvFwdAotSpec:
     split_c: int = 1
     prefetch_rows: int = 0
     w_fold: int = 0
+    bias: int = 0
 
     @property
     def is_direct(self) -> bool:
         return self.kernel_family == KERNEL_FAMILY_DIRECT_DEPTHWISE
+
+    @property
+    def bias_family(self) -> str:
+        """:func:`aot_bias_family` of this instance."""
+        return aot_bias_family(direct=self.is_direct, split_c=self.split_c)
 
     @property
     def is_merged(self) -> bool:
@@ -1110,6 +1148,7 @@ class Gfx950ConvFwdAotSpec:
             unroll_k=bool(self.unroll_k),
             async_dma=bool(self.async_dma),
             group_merge=self.group_merge,
+            bias=bool(self.bias),
         )
 
     def to_instance_spec(self) -> _conv.ImplicitGemmConvSpec:
@@ -1126,7 +1165,9 @@ class Gfx950ConvFwdAotSpec:
                 dtype_a=self.dtype, dtype_b=self.dtype, dtype_d=self.dtype
             ),
             name=self.kernel_symbol_prefix(),
-            **job.spec_kwargs,
+            # The job of a bias identity is its plain job's bias twin
+            # (aot_jobs.fwd_bias_twin), so its kwargs already hold it.
+            **dict(job.spec_kwargs, bias=bool(self.bias)),
         )
 
     def direct_knobs(self) -> dict:
@@ -1159,7 +1200,11 @@ class Gfx950ConvFwdAotSpec:
         if not self.is_direct:
             raise ValueError("an implicit-GEMM instance has no direct spec")
         spec = make_direct_spec(self.algorithm, problem, self.direct_knobs())
-        return replace(spec, name=self.kernel_symbol_prefix())
+        return self._with_bias(replace(spec, name=self.kernel_symbol_prefix()))
+
+    def _with_bias(self, spec):
+        """A direct kernel spec of this instance with its ``bias``."""
+        return replace(spec, bias=True) if self.bias else spec
 
     def to_direct_spec(self):
         """The rocKE builder spec ``direct_aot_jobs.direct_kernel_for_job``
@@ -1173,7 +1218,7 @@ class Gfx950ConvFwdAotSpec:
             DirectCaps(**job.caps), self.dtype, self.algorithm, job.spec_kwargs
         )
         spec = make_direct_spec(self.algorithm, probe, job.spec_kwargs)
-        return replace(spec, name=self.kernel_symbol_prefix())
+        return self._with_bias(replace(spec, name=self.kernel_symbol_prefix()))
 
     def kernel_symbol_prefix(self) -> str:
         # rocKE appends the probe problem and tuning to this; the instance id
@@ -1284,7 +1329,9 @@ class Gfx950ConvFwdAotSpec:
             self.probe_problem(),
             {"split_c": self.split_c},
         )
-        return replace(spec, name=f"hkp_conv_fwd_sr_aot_gfx950_{self.instance_id[:24]}")
+        return self._with_bias(
+            replace(spec, name=f"hkp_conv_fwd_sr_aot_gfx950_{self.instance_id[:24]}")
+        )
 
     def split_workspace_bytes(self, problem: Gfx950ConvFwdSpec) -> int:
         """Bytes of the fp32 ``[split_c, N, Ho, Wo, K]`` workspace a split-C
@@ -1315,9 +1362,13 @@ class Gfx950ConvFwdAotSpec:
         return tuple(self.launch_step(problem).grid)
 
     def launch_signature(self) -> list[dict]:
+        """The kernel's arguments; a bias instance's end in the
+        ``(Bias, Bias_bytes)`` tail, the same for both families."""
+        bias = bool(self.bias)
         if self.is_direct:
-            return conv_direct_args_signature(self.dtype)
-        return conv_args_signature(self.dtype)
+            tail = conv_args_signature(self.dtype, bias=True)[-2:] if bias else []
+            return conv_direct_args_signature(self.dtype) + tail
+        return conv_args_signature(self.dtype, bias=bias)
 
     def launch_values(
         self,
@@ -1328,12 +1379,33 @@ class Gfx950ConvFwdAotSpec:
         a_bytes: int,
         b_bytes: int,
         d_bytes: int,
+        *,
+        bias_ptr: int | None = None,
+        bias_bytes: int | None = None,
     ) -> dict[str, int]:
         """Every kernel argument for ``problem``: the dispatcher's launch plan,
-        computed by rocKE's ``ConvArgs``."""
+        computed by rocKE's ``ConvArgs``. A bias instance takes the bias
+        vector's pointer and byte size, and only it does."""
+        if bool(self.bias) != (bias_ptr is not None):
+            raise ValueError(
+                "a bias instance takes bias_ptr and bias_bytes"
+                if self.bias
+                else "an instance without bias takes no bias_ptr"
+            )
+        bias = {}
+        if self.bias:
+            # The kernel reads bias[0, K) of the io dtype (2 bytes) through a
+            # buffer resource of bias_bytes; a smaller one reads 0 past its end.
+            need = 2 * problem.K
+            if bias_bytes is None or bias_bytes < need:
+                raise ValueError(
+                    f"bias_bytes={bias_bytes}: the {self.dtype} bias of "
+                    f"K={problem.K} channels is {need} bytes"
+                )
+            bias = dict(bias_ptr=bias_ptr, bias_bytes=bias_bytes)
         step = self.launch_step(problem)
         return step.args.to_launch_values(
-            a_ptr, b_ptr, d_ptr, a_bytes, b_bytes, d_bytes
+            a_ptr, b_ptr, d_ptr, a_bytes, b_bytes, d_bytes, **bias
         )
 
 
@@ -1345,6 +1417,7 @@ def _aot_identity_fields(spec: Gfx950ConvFwdAotSpec) -> dict:
         dtype_b=spec.dtype,
         dtype_d=spec.dtype,
         **{name: getattr(spec, name) for name in AOT_IMPLICIT_GEMM_CARRIED},
+        bias=bool(spec.bias),
     )
     for name in ("unroll_k", "async_dma", "grouped"):
         values[name] = bool(values[name])
@@ -1592,6 +1665,12 @@ def supports_gfx950_conv_fwd_aot(
             f"{KERNEL_FAMILY_DIRECT_DEPTHWISE} (direct depthwise), "
             f"got {spec.kernel_family!r}"
         )
+    if type(spec.bias) is not int or spec.bias not in (0, 1):
+        return False, "bias must be 0 or 1"
+    if spec.bias:
+        error = aot_bias_error(spec.bias_family)
+        if error:
+            return False, error
     if spec.is_direct:
         error = _aot_direct_error(spec)
         if error:
@@ -1694,7 +1773,11 @@ def gfx950_conv_fwd_aot_spec_for_identity(
     * the direct algorithms without a packaged launch: any one outside
       ``AOT_DIRECT_ALGORITHMS``, and ``direct_split_reduce``, which ships as the
       second launch of each split-C instance (``AOT_REFUSED_SPLIT_REDUCE``);
+    * a bias identity (``bias`` set) of a family outside ``AOT_BIAS_FAMILIES``
+      (:func:`aot_bias_error`);
     * anything :func:`supports_gfx950_conv_fwd_aot` declines.
+
+    ``bias`` is carried: the instance of a bias identity has ``bias`` = 1.
     """
     if not isinstance(identity, KernelIdentity):
         return None, "expected a KernelIdentity"
@@ -1713,6 +1796,11 @@ def gfx950_conv_fwd_aot_spec_for_identity(
         # capabilities and knobs, and the kernel's validator must take them.
         try:
             fields_ = aot_direct_instance_fields(identity)
+            if identity.bias:
+                family = aot_bias_family(direct=True, split_c=fields_.get("split_c", 1))
+                error = aot_bias_error(family)
+                if error:
+                    return None, error
             direct_job_for_identity(identity)
         except (KeyError, LookupError, TypeError, ValueError) as exc:
             return None, str(exc)
@@ -1720,6 +1808,7 @@ def gfx950_conv_fwd_aot_spec_for_identity(
             dtype=identity.dtype_a,
             wave_size=identity.wave_size,
             instance_id=identity.stable_hash(),
+            bias=int(identity.bias),
             **_AOT_DIRECT_PLACEHOLDERS,
             **fields_,
         )
@@ -1728,7 +1817,7 @@ def gfx950_conv_fwd_aot_spec_for_identity(
             if (
                 name in AOT_IMPLICIT_GEMM_CARRIED
                 or name in _AOT_IDENTITY_KEYS
-                or name == "group_merge"
+                or name in ("group_merge", "bias")
             ):
                 continue
             if getattr(identity, name) != default:
@@ -1743,6 +1832,7 @@ def gfx950_conv_fwd_aot_spec_for_identity(
             dtype=identity.dtype_a,
             instance_id=identity.stable_hash(),
             group_merge=identity.group_merge,
+            bias=int(identity.bias),
             **values,
         )
     else:

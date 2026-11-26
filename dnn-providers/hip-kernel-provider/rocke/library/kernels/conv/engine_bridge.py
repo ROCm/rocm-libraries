@@ -229,6 +229,7 @@ def conv_direct_grouped_spec_to_dict(spec: Any, kind: str) -> Dict[str, Any]:
         "lds_pad",
         "stage_out",
         "row_exit",
+        "bias",
     ):
         v = getattr(spec, f, None)
         if v is not None:
@@ -271,6 +272,7 @@ def conv_direct_fwd_smallc_wmma_spec_to_dict(spec: Any) -> Dict[str, Any]:
         tdm_store=spec.tdm_store,
         sched=spec.sched,
         wave_size=spec.wave_size,
+        bias=spec.bias,
     )
 
 
@@ -291,6 +293,7 @@ def conv_direct_fwd_smallk_wmma_spec_to_dict(spec: Any) -> Dict[str, Any]:
         prefetch=spec.prefetch,
         sched=spec.sched,
         wave_size=spec.wave_size,
+        bias=spec.bias,
     )
 
 
@@ -308,6 +311,7 @@ def conv_direct_fwd_smallc_mfma_spec_to_dict(spec: Any) -> Dict[str, Any]:
         tiles_per_block=spec.tiles_per_block,
         prefetch=spec.prefetch,
         wave_size=spec.wave_size,
+        bias=spec.bias,
     )
 
 
@@ -320,6 +324,7 @@ def conv_direct_fwd_smallk_mfma_spec_to_dict(spec: Any) -> Dict[str, Any]:
         out_h=spec.out_h,
         out_w=spec.out_w,
         wave_size=spec.wave_size,
+        bias=spec.bias,
     )
 
 
@@ -330,6 +335,7 @@ def conv_direct_fwd_pp_mfma_spec_to_dict(spec: Any) -> Dict[str, Any]:
         name=spec.name,
         block_k=spec.block_k,
         wave_size=spec.wave_size,
+        bias=spec.bias,
     )
 
 
@@ -341,6 +347,7 @@ def conv_direct_fwd_flex_mfma_spec_to_dict(spec: Any) -> Dict[str, Any]:
         split_c=spec.split_c,
         name=spec.name,
         wave_size=spec.wave_size,
+        bias=spec.bias,
     )
 
 
@@ -353,6 +360,7 @@ def conv_direct_dw_fwd_wmma_spec_to_dict(spec: Any) -> Dict[str, Any]:
         block_h=spec.block_h,
         w_fold=spec.w_fold,
         prefetch_rows=spec.prefetch_rows,
+        bias=spec.bias,
     )
 
 
@@ -374,6 +382,7 @@ def conv_direct_fwd_gstream_wmma_spec_to_dict(spec: Any) -> Dict[str, Any]:
         pf_depth=spec.pf_depth,
         sched=spec.sched,
         wave_size=spec.wave_size,
+        bias=spec.bias,
     )
 
 
@@ -394,6 +403,7 @@ def conv_direct_fwd_tapouter_wmma_spec_to_dict(spec: Any) -> Dict[str, Any]:
         sched=spec.sched,
         wave_size=spec.wave_size,
         tdm_split=spec.tdm_split,
+        bias=spec.bias,
     )
 
 
@@ -562,6 +572,7 @@ def conv_direct_fwd_wmma_spec_to_dict(spec: Any) -> Dict[str, Any]:
         strided_view=spec.strided_view,
         fold_n=spec.fold_n,
         poly_view=spec.poly_view,
+        bias=spec.bias,
     )
 
 
@@ -608,6 +619,7 @@ def conv_direct_nongrouped_spec_to_dict(spec: Any) -> Dict[str, Any]:
         split_c=spec.split_c,
         grouped=spec.grouped,
         group_merge=spec.group_merge,
+        bias=spec.bias,
     )
 
 
@@ -1352,6 +1364,7 @@ def conv_winograd_fwd_spec_to_dict(spec: Any, stages: Any) -> Dict[str, Any]:
         filter_rows=spec.filter_rows,
         filter_vec=spec.filter_vec,
         name=spec.name,
+        bias=spec.bias,
     )
     if isinstance(stages, str):
         d["stage"] = stages
@@ -1552,6 +1565,7 @@ def conv_winograd_gen_spec_to_dict(spec: Any, stage: str) -> Dict[str, Any]:
         block_size=spec.block_size,
         nt_stores=spec.nt_stores,
         name=spec.name,
+        bias=spec.bias,
         stage=stage,
     )
 
@@ -1642,6 +1656,7 @@ def conv_winograd_fused_1d_spec_to_dict(spec: Any) -> Dict[str, Any]:
         waves=spec.waves,
         waves_per_eu=spec.waves_per_eu,
         name=spec.name,
+        bias=spec.bias,
     )
 
 

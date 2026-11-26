@@ -216,6 +216,7 @@ typedef struct rocke_direct_conv_16c_spec
     int wave_size; /* default 64 */
     bool double_buffer; /* default true  */
     bool fold_k32; /* default true  */
+    bool bias; /* default false -- conv + bias: bias added to each flushed accumulator */
 } rocke_direct_conv_16c_spec_t;
 
 /* Default 16c spec (name "direct_conv_16c", block_q 16, block_groups 8,
@@ -291,6 +292,9 @@ typedef struct rocke_direct_conv_4c_spec
     bool stage_rows; /* default false */
     /* stage_rows only: waves along q (4 columns each); block_q == 4*waves_q. */
     int waves_q; /* default 1 */
+    /* Conv + bias on the plain forward kernel (refused with the fused-weight
+     * and row-staged dgrad forms). */
+    bool bias; /* default false */
 } rocke_direct_conv_4c_spec_t;
 
 /* Default 4c spec (name "direct_conv_4c", block_q 4, block_groups 16,
@@ -355,6 +359,7 @@ typedef struct rocke_direct_conv_8c_spec
     int block_groups; /* default 8  */
     int wave_size; /* default 64 */
     bool double_buffer; /* default true */
+    bool bias; /* default false -- conv + bias: bias added to each flushed accumulator */
 } rocke_direct_conv_8c_spec_t;
 
 rocke_direct_conv_8c_spec_t rocke_direct_conv_8c_spec_default(void);
@@ -390,6 +395,7 @@ typedef struct rocke_direct_conv_32c_spec
     int block_groups; /* default 4  */
     int wave_size; /* default 64 */
     bool double_buffer; /* default true */
+    bool bias; /* default false -- conv + bias: bias added to each flushed accumulator */
 } rocke_direct_conv_32c_spec_t;
 
 rocke_direct_conv_32c_spec_t rocke_direct_conv_32c_spec_default(void);
@@ -428,6 +434,7 @@ typedef struct rocke_direct_depthwise_spec
     int block_waves; /* default 1  */
     int wave_size; /* default 64 */
     int cpl; /* default 1  */
+    bool bias; /* default false -- conv + bias: bias[ch] added before the store */
 } rocke_direct_depthwise_spec_t;
 
 rocke_direct_depthwise_spec_t rocke_direct_depthwise_spec_default(void);
@@ -481,6 +488,7 @@ typedef struct rocke_direct_depthwise_col_spec
      * <0 = invalid; is_valid_spec() will reject it. */
     int max_live_f32;
     int block_h; /* default 16; output rows per block (the unrolled row tile) */
+    bool bias; /* default false -- conv + bias: bias[ch] added before the store */
 } rocke_direct_depthwise_col_spec_t;
 
 rocke_direct_depthwise_col_spec_t rocke_direct_depthwise_col_spec_default(void);
@@ -525,6 +533,7 @@ typedef struct rocke_direct_depthwise_spatial_spec
     const char* name; /* default "direct_depthwise_spatial" */
     int block_waves; /* default 1  */
     int wave_size; /* default 64 */
+    bool bias; /* default false -- conv + bias: bias[ch] added before the store */
 } rocke_direct_depthwise_spatial_spec_t;
 
 rocke_direct_depthwise_spatial_spec_t rocke_direct_depthwise_spatial_spec_default(void);
@@ -579,6 +588,7 @@ typedef struct rocke_direct_depthwise_tiled_spec
     int wave_size; /* default 64 */
     bool dgrad; /* default false */
     int cpl; /* default 1  */
+    bool bias; /* default false -- conv + bias (not with dgrad) */
 } rocke_direct_depthwise_tiled_spec_t;
 
 /* Register budget and unrolled-FMA cap (Python: _DW_TILED_REG_BUDGET /
@@ -706,6 +716,7 @@ bool rocke_direct_depthwise_dgrad_is_valid_spec(const rocke_direct_depthwise_dgr
  *                                # a forward problem may be grouped, cpg = kpg
  *                                # a multiple of 8 up to ROCKE_DW_WIN_MAX_GROUP_CH
  *      out_stride: int = 1       # fwd: 2 keeps every 2nd row/col of the grid
+ *      bias: bool = False        # fwd: conv + bias, added before the rounding
  *
  *  AOT: with fwd=False, takes the direct dgrad kernarg block (N, H, W, Ho, Wo,
  *  groups and the dY/dX strides are runtime); with fwd=True, the rotated
@@ -743,6 +754,7 @@ typedef struct rocke_direct_depthwise_dgrad_win_spec
     int wave_size; /* default 64 */
     bool fwd; /* default false */
     int out_stride; /* default 1; 2 with fwd */
+    bool bias; /* default false; fwd only: conv + bias (Bias / Bias_bytes tail) */
 } rocke_direct_depthwise_dgrad_win_spec_t;
 
 rocke_direct_depthwise_dgrad_win_spec_t rocke_direct_depthwise_dgrad_win_spec_default(void);
@@ -1140,6 +1152,11 @@ rocke_kernel_def_t* rocke_build_direct_conv_wgrad_new(rocke_ir_builder_t* b,
  *      lds_pad: int = 0
  *      stage_out: bool = False
  *      row_exit: bool = False
+ *      bias: bool = False
+ *
+ *  bias: the conv + bias forward -- the (Bias, Bias_bytes) kernarg tail, and
+ *  bias[g*kpg + k] added to each flushed quad in fp32 before the store (or the
+ *  stage_out LDS tile). Refused with dgrad_fused_weights.
  *
  *  The forward kernel the MFMA dgrad pipeline runs on the transposed problem.
  *  With runtime_channels the per-group channel counts come from
@@ -1182,6 +1199,7 @@ typedef struct rocke_direct_conv_spec
     int lds_pad; /* default 0 -- extra elements per staged input column */
     bool stage_out; /* default false -- 8-element stores via an LDS output tile */
     bool row_exit; /* default false -- leave once the next flush is past p_Hi */
+    bool bias; /* default false -- conv + bias forward (Bias / Bias_bytes tail) */
 } rocke_direct_conv_spec_t;
 
 /* DirectConvSpec with the dataclass defaults (problem == problem_default()). */

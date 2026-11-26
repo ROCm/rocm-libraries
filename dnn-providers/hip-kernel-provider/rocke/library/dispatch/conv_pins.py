@@ -426,6 +426,8 @@ def pinned_kernel_signature(identity, dtype: str | None = None) -> tuple[dict, .
     if identity.direction == "dgrad":
         return tuple(conv_args_signature(dt, direction="dgrad", is_3d=identity.is_3d))
     extra = {"split_det": True} if getattr(identity, "split_det", False) else {}
+    if getattr(identity, "bias", False):
+        extra["bias"] = True
     return tuple(
         conv_args_signature(
             dt,

@@ -53,6 +53,7 @@
 #include "rocke/helper_rocke.core.arch.h" /* rocke_archtarget_async_lds_max_dwords */
 #include "rocke/helper_rocke.helpers.grid.h" /* chiplet_aware_super_tile_dynamic */
 #include "rocke/instance_conv_abi.h"
+#include "rocke/instance_conv_bias.h"
 #include "rocke/instance_conv_implicit_gemm.h"
 #include "rocke/instance_conv_implicit_gemm_internal.h"
 #include "rocke/instance_conv_m_band.h"
@@ -413,6 +414,18 @@ bool rocke_conv_build_ctx_init(rocke_conv_build_ctx_t* ctx,
             const int64_t dims[3] = {1, 1, spec->split_k_cluster};
             rocke_attr_set_int_list(b, &b->kernel->attrs, "cluster_dims", dims, 3);
         }
+    }
+    /* Per-output-channel bias: the Bias / Bias_bytes tail, after every other
+     * kernarg (conv_abi conv_bias_arg_names). */
+    if(spec->bias)
+    {
+        if(overrides != NULL && overrides->epilogue_override != NULL)
+        {
+            rocke_i_set_err(b, ROCKE_ERR_VALUE, "bias is not supported with an epilogue_override");
+            return false;
+        }
+        rocke_conv_bias_declare_params(
+            b, rocke_conv_ir_dtype(b, spec->dtype_d), &ctx->fwd_p_bias, &ctx->fwd_p_bias_bytes);
     }
 
     if(ctx->fwd_asplit && spec->split_tail && spec->split_tail_compact)

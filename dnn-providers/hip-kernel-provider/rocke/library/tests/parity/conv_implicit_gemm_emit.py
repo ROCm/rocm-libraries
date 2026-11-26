@@ -610,9 +610,91 @@ def _spec_raw(idx: int):
         return _mfma_gate_spec(idx)
     if 82 <= idx <= 85:
         return _tf32_split_k_spec(idx)
+    if idx >= _BIAS_FIRST:
+        return _bias_spec(idx)
     if idx >= 54 + _GFX942_3D_OFFSET:
         return _gfx942_3d_spec(idx - _GFX942_3D_OFFSET)
     raise SystemExit(f"unknown config index {idx}")
+
+
+# Per-output-channel bias (ImplicitGemmConvSpec.bias): an existing config, by
+# index, built with bias=True. Keep in lockstep with make_cfg_bias() in
+# conv_implicit_gemm_emit.c.
+#   192-195: gfx950 MFMA: mem/default, compv4/default, depthwise merged
+#            (group_merge 8) cshuffle, grouped pointwise cshuffle
+#   196-200: WMMA: gfx1250 grouped mem/cshuffle, grouped wavelet/cshuffle,
+#            depthwise mem/default, grouped pointwise direct; gfx1151 merged
+#   201:     gfx950 TF32 (fp32 storage: an fp32 bias)
+#   202-207: gfx942 3-D: fp16 cshuffle, bf16 grouped cshuffle, bf16 32x32
+#            default, epi_quad_xpose 1, the x-halo loop (epi_quad_xpose 4),
+#            epi_store_fast
+#   208-210: split-K: gfx950 workspace split (the Stage 2 fold adds the
+#            bias), gfx942 3-D atomic split (rejected by both engines),
+#            gfx1250 wavelet workspace split (Stage 2 adds the bias)
+#   211:     192 with an acc_epilogue (scalar bias + relu) after the bias
+#   212-219: the two-stage and cluster split-K forward: gfx1250 WMMA
+#            mem/cshuffle, mem/default, grouped wavelet (Stage 2 adds the
+#            bias); cluster S=4, grouped cluster, cluster mem/default (the
+#            cluster fold adds it); gfx950 MFMA grouped 4-wide, compv3/default
+#            (Stage 2 adds it)
+#   220-224: gfx942 3-D split_det: mode 1, mode 2 + split_tail (the owner's
+#            fold and the whole-K tiles add the bias), mode 2 + split_tail +
+#            m_band, mode 3 (the workspace fold adds it), mode 3 +
+#            split_xcd_remap
+#   225-229: rejected by both engines: the gfx942 3-D atomic split, stream-K,
+#            split_hybrid + split_det 1, split_hybrid + split_det 3, the 2-D
+#            split_atomic
+_BIAS_FIRST = 192
+_BIAS_BASE = {
+    192: 0,
+    193: 1,
+    194: 22,
+    195: 37,
+    196: 33,
+    197: 35,
+    198: 34,
+    199: 39,
+    200: 32,
+    201: 54,
+    202: 86,
+    203: 87,
+    204: 88,
+    205: 186,
+    206: 146,
+    207: 168,
+    208: 49,
+    209: 189,
+    210: 40,
+    211: 0,
+    212: 41,
+    213: 42,
+    214: 43,
+    215: 44,
+    216: 47,
+    217: 48,
+    218: 68,
+    219: 70,
+    220: 126,  # gfx942 3-D config 94
+    221: 124,  # gfx942 3-D config 92
+    222: 128,  # gfx942 3-D config 96
+    223: 137,  # gfx942 3-D config 105
+    224: 136,  # gfx942 3-D config 104
+    225: 95,  # gfx942 3-D config 63
+    226: 142,  # gfx942 3-D config 110
+    227: 143,  # gfx942 3-D config 111
+    228: 140,  # gfx942 3-D config 108
+    229: 183,  # gfx942 3-D config 151
+}
+
+
+def _bias_spec(idx: int):
+    if idx not in _BIAS_BASE:
+        raise SystemExit(f"unknown config index {idx}")
+    spec, arch = _spec(_BIAS_BASE[idx])
+    kw = dict(bias=True)
+    if idx == 211:
+        kw["acc_epilogue"] = ConvAccumulatorEpilogue(bias=1.0, relu=True)
+    return replace(spec, **kw), arch
 
 
 # Split-K forward (split_k > 1) and its single-launch cluster form

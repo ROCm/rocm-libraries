@@ -94,6 +94,17 @@ static int make_cfg(int idx, rocke_fwd_pp_mfma_spec_t* s, const char** arch)
     case 12: /* rejected by both engines: C = 12 */
         s->problem = make_problem(3, "bf16", 12);
         return 0;
+    case 13: /* configs 0, 3, 5 and 6 with the conv + bias */
+    case 14:
+    case 15:
+    case 16:
+    {
+        static const int base[4] = {0, 3, 5, 6};
+        if(make_cfg(base[idx - 13], s, arch) != 0)
+            return -1;
+        s->bias = true;
+        return 0;
+    }
     default:
         return -1;
     }

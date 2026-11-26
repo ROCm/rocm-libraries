@@ -52,6 +52,8 @@ from kernels.common.conv_winograd_fwd import (
     _PRESCALE_LOG2_LIMIT,
     PRESCALE_BETA,
     _abs_bits_vec,
+    _bias_f32,
+    _bias_rsrc,
     _bits_to_f32,
     _hmax_bits,
     _IROps,
@@ -424,7 +426,8 @@ class RtInputSpec:
 
 @dataclass(frozen=True)
 class RtOutputSpec:
-    """K4: ``M -> y`` (``x 2**e``); ``vec`` divides K."""
+    """K4: ``M -> y`` (``x 2**e``, ``+ bias[k]`` with ``bias``); ``vec``
+    divides K."""
 
     mh: int = 4
     mw: int = 4
@@ -434,6 +437,7 @@ class RtOutputSpec:
     block_size: int = 256
     prescale: bool = False
     nt_stores: bool = True
+    bias: bool = False
 
     def __post_init__(self):
         _check_common(self.mh, self.mw, self.io_dtype, self.operand_dtype, self.vec)
@@ -453,6 +457,8 @@ class RtOutputSpec:
             tags.append("ps")
         if not self.nt_stores:
             tags.append("rt")
+        if self.bias:
+            tags.append("cbias")
         return kernel_name_join("wino_rt_output", *tags)
 
     def reason(self, geo: RtGeometry) -> Optional[str]:
@@ -1246,13 +1252,18 @@ def output_signature(spec: RtOutputSpec) -> list:
     )
     for nm in _OUTPUT_GEOM:
         sb = sb.scalar(nm, "i32")
-    return _run_sig(sb).build()
+    sb = _run_sig(sb)
+    if spec.bias:
+        sb = sb.ptr("Bias", spec.io_dtype).scalar("Bias_bytes", "i32")
+    return sb.build()
 
 
 def build_output(
     spec: RtOutputSpec, *, arch: str = "gfx1250"
 ) -> KernelDef:  # noqa: ARG001
-    """K4 of :func:`conv_winograd_fwd.build_winograd_output_transform`, extents at run time."""
+    """K4 of :func:`conv_winograd_fwd.build_winograd_output_transform`, extents at run time.
+    With ``spec.bias`` the ``Bias`` / ``Bias_bytes`` kernargs follow the run
+    scalars and the bias is added in fp32 after the prescale."""
     n, m = spec.mh + 2, spec.mh
     nw, mw = spec.mw + 2, spec.mw
     vec = spec.vec
@@ -1275,6 +1286,7 @@ def build_output(
     m_rsrc = b.buffer_rsrc(mm, m_bytes)
     y_rsrc = b.buffer_rsrc(y, y_bytes)
     rc = _run_coords(b, 1)
+    bias_rsrc = _bias_rsrc(b, spec.io_dtype) if spec.bias else None
 
     K, Ho, Wo = g["K"], g["Ho"], g["Wo"]
     kb2 = b.mul(K, _c(b, 2))
@@ -1296,6 +1308,9 @@ def build_output(
     if spec.prescale:
         t_safe = b.select(ok, t, _c(b, 0))
         scale = _pow2_f32(b, b.global_load_i32(e_ptr, t_safe))
+    bias = None
+    if bias_rsrc is not None:
+        bias = _bias_f32(b, bias_rsrc, k, spec.io_dtype, vec)
 
     ho0 = b.add(rc.a, b.mul(rc.ti, g["dHm"]))
     wo0 = b.add(rc.bsub, b.mul(rc.tj0, g["dWm"]))
@@ -1331,6 +1346,8 @@ def build_output(
             vals = [outs[ch][j] for ch in range(vec)]
             if scale is not None:
                 vals = [b.fmul(x_, scale) for x_ in vals]
+            if bias is not None:
+                vals = [b.fadd(x_, bv) for x_, bv in zip(vals, bias)]
             pending.append(
                 (b.add(yrow[i], ycol[j]), _pack_vec_f32(b, vals, spec.io_dtype))
             )

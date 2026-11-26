@@ -1,0 +1,22 @@
+{
+  "claims": {
+    "hipkernel:Gfx950ConvFwdBiasAot": [
+      {
+        "cases": [
+          "pointwise_c64_k96_bfloat16",
+          "pointwise_c64_k96_half",
+          "smoke_bfloat16",
+          "smoke_half",
+          "stride2_c32_k64_bfloat16",
+          "stride2_c32_k64_half"
+        ],
+        "support": {
+          "gfx950": [
+            "linux"
+          ]
+        }
+      }
+    ]
+  },
+  "version": 1
+}

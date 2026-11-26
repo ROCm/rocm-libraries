@@ -27,6 +27,7 @@ import pytest
 from benchmarks.common import direct_kernel_sweep, kernel_sweep
 from benchmarks.common.kernel_cache import KernelCache, KernelIdentity
 from builders.common.convolution_forward import (
+    AOT_BIAS_FAMILIES,
     AOT_DIRECT_ALGORITHMS,
     AOT_REFUSED_SPLIT_REDUCE,
     DIRECT_VARIANT_GROUPED,
@@ -36,6 +37,8 @@ from builders.common.convolution_forward import (
     KERNEL_FAMILY_DIRECT_DEPTHWISE,
     Gfx950ConvFwdAotSpec,
     Gfx950ConvFwdSpec,
+    aot_bias_error,
+    aot_bias_family,
     aot_direct_fields_from_knobs,
     aot_direct_instance_fields,
     build_gfx950_conv_fwd_aot,
@@ -48,11 +51,16 @@ from builders.common.convolution_forward import (
     supports_gfx950_conv_fwd_aot,
     supports_gfx950_conv_fwd_aot_problem,
 )
-from dispatch.grouped_convolution import ConvGroupedRequest, _admits
-from kernels.common.conv_abi import conv_direct_args_signature
+from dispatch.grouped_convolution import (
+    ConvGroupedRequest,
+    _admits,
+    load_instance_list,
+)
+from kernels.common.conv_abi import conv_args_signature, conv_direct_args_signature
 from kernels.common.conv_args import ConvArgs
 from kernels.common.conv_direct_grouped import DirectConvProblem
 from kernels.common.conv_direct_nongrouped import _OOB_BASE
+from kernels.conv import aot_jobs
 from rocke.core.arch import ArchTarget
 from rocke.core.lower_llvm import _lower_kernel_to_llvm_python
 
@@ -1455,3 +1463,214 @@ def test_implicit_instances_leave_every_direct_field_at_its_default(sweep_jobs, 
     )
     ok, why = supports_gfx950_conv_fwd_aot(replace(plain, **change))
     assert not ok, why
+
+
+# ---- The bias axis: hipkernel:Gfx950ConvFwdBiasAot's instances ----
+
+_FWD_CATALOG = (
+    Path(__file__).resolve().parents[1]
+    / "dispatch/grouped_convolution_instances/gfx950_fwd.json"
+)
+
+
+@pytest.fixture(scope="module")
+def catalog_identities():
+    """Every identity of rocKE's gfx950 forward dispatcher list (the catalog the
+    AOT engines package)."""
+    return load_instance_list(_FWD_CATALOG).identities
+
+
+def _ir(kernel) -> str:
+    return _lower_kernel_to_llvm_python(
+        kernel, arch="gfx950", llvm_flavor=kernel_sweep.current_llvm_flavor()
+    ).replace(kernel.name, "@K")
+
+
+def test_the_bias_axis_adds_each_jobs_twin_and_leaves_the_plain_walk_alone():
+    target = ArchTarget.from_gfx("gfx950")
+    geometries = aot_jobs._geometry_list(target, "fp16", "fwd")[:2]
+    walk = dict(
+        arch="gfx950",
+        dtype="fp16",
+        wave_size=target.wave_size,
+        mma_family="mma",
+        target=target,
+        geometries=geometries,
+    )
+    plain = list(aot_jobs._fwd_plain_jobs(**walk))
+    assert plain and list(aot_jobs._fwd_jobs(**walk, biases=(False,))) == plain
+    both = list(aot_jobs._fwd_jobs(**walk, biases=(False, True)))
+    assert both[0::2] == plain
+    for job, twin in zip(plain, both[1::2]):
+        assert twin == aot_jobs.fwd_bias_twin(job)
+        assert twin.identity == replace(job.identity, bias=True)
+        assert twin.spec_kwargs == dict(job.spec_kwargs, bias=True)
+        assert twin.caps == job.caps
+        assert "-cbias-" in twin.identity.label()
+        assert KernelIdentity.from_label(twin.identity.label()) == twin.identity
+        assert twin.identity.stable_hash() != job.identity.stable_hash()
+    assert list(aot_jobs._fwd_jobs(**walk, biases=(True,))) == both[1::2]
+    with pytest.raises(ValueError, match="forward"):
+        aot_jobs.fwd_bias_twin(replace(plain[0], direction="wgrad"))
+
+
+def test_count_jobs_counts_the_bias_axis(monkeypatch):
+    target = ArchTarget.from_gfx("gfx950")
+    count = dict(dtype="fp16", target=target, directions=("fwd",))
+    plain = aot_jobs.count_jobs(**count)
+    monkeypatch.setattr(aot_jobs, "CACHE_FWD_BIAS", (False, True))
+    assert aot_jobs.count_jobs(**count) == 2 * plain
+
+
+def test_the_sweep_finds_a_bias_twin_by_its_identity(sweep_jobs):
+    for _, job in sweep_jobs[:4]:
+        twin = aot_jobs.fwd_bias_twin(job)
+        assert aot_jobs.job_for_identity(twin.identity) == twin
+        assert aot_jobs.job_for_identity(job.identity) == job
+
+
+def test_every_catalog_implicit_gemm_bias_twin_is_packaged(catalog_identities):
+    implicit = [i for i in catalog_identities if i.algorithm == "implicit_gemm"]
+    assert len(implicit) == 178
+    for identity in implicit:
+        plain, _ = gfx950_conv_fwd_aot_spec_for_identity(identity)
+        twin = replace(identity, bias=True)
+        spec, reason = gfx950_conv_fwd_aot_spec_for_identity(twin)
+        assert reason == "" and spec.bias == 1, (twin.label(), reason)
+        assert plain.bias == 0
+        assert spec == replace(plain, bias=1, instance_id=twin.stable_hash())
+        assert spec.identity() == twin
+        assert spec.to_instance_spec().bias and not plain.to_instance_spec().bias
+        assert spec.launch_signature() == conv_args_signature(spec.dtype, bias=True)
+        assert [a["name"] for a in spec.launch_signature()] == [
+            a["name"] for a in plain.launch_signature()
+        ] + ["Bias", "Bias_bytes"]
+
+
+def test_a_bias_instance_is_the_sweeps_bias_twin_up_to_its_symbol(
+    catalog_identities,
+):
+    """One instance per pipeline, epilogue and K loop of the catalog: the packaged
+    bias kernel is the sweep's twin job's kernel, and not the plain one."""
+    picked = {}
+    for identity in catalog_identities:
+        if identity.algorithm == "implicit_gemm":
+            key = (
+                identity.pipeline,
+                identity.epilogue,
+                identity.unroll_k,
+                identity.group_merge > 1,
+            )
+            picked.setdefault(key, identity)
+    assert len(picked) >= 6
+    for identity in picked.values():
+        spec, _ = gfx950_conv_fwd_aot_spec_for_identity(replace(identity, bias=True))
+        twin = aot_jobs.fwd_bias_twin(aot_jobs.job_for_identity(identity))
+        theirs, _ = kernel_sweep.kernel_for_job(twin, "gfx950", spec.dtype)
+        ours = _ir(build_gfx950_conv_fwd_aot(spec))
+        assert ours == _ir(theirs), identity.label()
+        plain, _ = gfx950_conv_fwd_aot_spec_for_identity(identity)
+        assert ours != _ir(build_gfx950_conv_fwd_aot(plain)), identity.label()
+
+
+def test_every_catalog_direct_and_split_c_bias_twin_is_packaged(catalog_identities):
+    assert AOT_BIAS_FAMILIES == ("implicit_gemm", "direct", "split_c")
+    families: dict = {}
+    for identity in catalog_identities:
+        if identity.algorithm == "implicit_gemm":
+            continue
+        plain, _ = gfx950_conv_fwd_aot_spec_for_identity(identity)
+        family = aot_bias_family(direct=True, split_c=plain.split_c)
+        assert family == plain.bias_family
+        families[family] = families.get(family, 0) + 1
+        twin = replace(identity, bias=True)
+        spec, reason = gfx950_conv_fwd_aot_spec_for_identity(twin)
+        assert reason == "" and spec.bias == 1, (twin.label(), reason)
+        assert spec == replace(plain, bias=1, instance_id=twin.stable_hash())
+        assert spec.identity() == twin
+        assert spec.to_direct_spec().bias and not plain.to_direct_spec().bias
+        names = [a["name"] for a in spec.launch_signature()]
+        assert names == [a["name"] for a in plain.launch_signature()] + [
+            "Bias",
+            "Bias_bytes",
+        ]
+        assert [p.name for p in build_gfx950_conv_fwd_aot(spec).params] == names
+        if spec.is_split_c:
+            # One kernarg block for both launches: the fold takes the conv
+            # pass's arguments, bias tail included, and adds the bias.
+            assert spec.split_reduce_spec().bias
+            fold = build_gfx950_conv_fwd_aot_split_reduce(spec)
+            assert [p.name for p in fold.params] == names
+    assert families == {"direct": 222, "split_c": 66}
+    assert "not packaged for winograd" in aot_bias_error("winograd")
+    assert aot_bias_error("direct") == aot_bias_error("split_c") == ""
+
+
+def test_a_direct_bias_instance_is_the_sweeps_bias_kernel_up_to_its_symbol(
+    catalog_identities,
+):
+    """One instance per direct variant and split form of the catalog: the
+    packaged bias kernel (and a split-C instance's fold) is the direct sweep's
+    kernel of the bias identity, and not the plain one."""
+    picked = {}
+    for identity in catalog_identities:
+        if identity.algorithm != "implicit_gemm":
+            split = "split_c" in json.loads(identity.knobs or "{}")
+            picked.setdefault((identity.algorithm, split), identity)
+    assert len(picked) >= 7
+    for identity in picked.values():
+        spec, _ = gfx950_conv_fwd_aot_spec_for_identity(replace(identity, bias=True))
+        job = direct_kernel_sweep.direct_job_for_identity(spec.identity())
+        theirs, _ = direct_kernel_sweep.direct_kernel_for_job(job, "gfx950", spec.dtype)
+        ours = _ir(build_gfx950_conv_fwd_aot(spec))
+        assert ours == _ir(theirs), identity.label()
+        plain, _ = gfx950_conv_fwd_aot_spec_for_identity(identity)
+        assert ours != _ir(build_gfx950_conv_fwd_aot(plain)), identity.label()
+        if spec.is_split_c:
+            fold = direct_kernel_sweep._split_reduce_identity(
+                "gfx950", spec.wave_size, spec.split_c, spec.dtype, True
+            )
+            theirs, _ = direct_kernel_sweep.direct_kernel_for_job(
+                direct_kernel_sweep.direct_job_for_identity(fold),
+                "gfx950",
+                spec.dtype,
+            )
+            ours = _ir(build_gfx950_conv_fwd_aot_split_reduce(spec))
+            assert ours == _ir(theirs), identity.label()
+            assert ours != _ir(build_gfx950_conv_fwd_aot_split_reduce(plain))
+
+
+def test_a_bias_instance_launches_with_the_bias_tail(catalog_identities):
+    request = ConvGroupedRequest(
+        N=2, Hi=14, Wi=14, C=64, K=64, Y=3, X=3, pad_h=1, pad_w=1, arch="gfx950"
+    )
+    problem = gfx950_conv_fwd_aot_problem_for_request(request)
+    for identity in catalog_identities:
+        if identity.algorithm != "implicit_gemm" or identity.dtype_a != "fp16":
+            continue
+        plain, _ = gfx950_conv_fwd_aot_spec_for_identity(identity)
+        if gfx950_conv_fwd_aot_serves(plain, problem)[0]:
+            break
+    else:
+        pytest.fail("no catalog instance serves the problem")
+    spec, _ = gfx950_conv_fwd_aot_spec_for_identity(replace(identity, bias=True))
+    assert gfx950_conv_fwd_aot_serves(spec, problem)[0]
+    values = spec.launch_values(problem, 0, 0, 0, 1, 2, 3, bias_ptr=7, bias_bytes=128)
+    assert values == {
+        **plain.launch_values(problem, 0, 0, 0, 1, 2, 3),
+        "Bias": 7,
+        "Bias_bytes": 128,
+    }
+    assert list(values) == [a["name"] for a in spec.launch_signature()]
+    with pytest.raises(ValueError, match="takes bias_ptr"):
+        spec.launch_values(problem, 0, 0, 0, 1, 2, 3)
+    # Bias_bytes bounds the kernel's bias reads: K fp16 values, no fewer.
+    for short in (None, 0, 2 * 64 - 1):
+        with pytest.raises(ValueError, match="bias of K=64 channels is 128 bytes"):
+            spec.launch_values(problem, 0, 0, 0, 1, 2, 3, bias_ptr=7, bias_bytes=short)
+    with pytest.raises(ValueError, match="takes no bias_ptr"):
+        plain.launch_values(problem, 0, 0, 0, 1, 2, 3, bias_ptr=7, bias_bytes=128)
+    assert supports_gfx950_conv_fwd_aot(replace(spec, bias=2)) == (
+        False,
+        "bias must be 0 or 1",
+    )

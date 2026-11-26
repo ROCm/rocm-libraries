@@ -45,6 +45,15 @@ Kernel signature::
 
 Grid: ``(ceil(wg_N / tile_n), ceil(wg_M / tile_m), groups)``
 Block: ``(block_size, 1, 1)`` where ``block_size = tile_m * tile_n`` (flat)
+
+The same fold serves the forward ``split_det`` 3 (deterministic split-K
+forward): its per-slice ``[M][K]`` f32 slabs are this kernel's replicas, with
+``wg_M`` = the GEMM M and ``wg_N`` = the output channels K (one group).
+``bias`` (that forward built with ``ImplicitGemmConvSpec.bias``) adds
+``bias[n]`` -- ``n`` is the output channel -- to the folded fp32 sum before
+the cast, the one place the whole sum exists; the kernel then takes the
+``Bias`` / ``Bias_bytes`` pair (conv_abi ``conv_bias_arg_names``) after
+``groups``.
 """
 
 from __future__ import annotations
@@ -56,6 +65,11 @@ from rocke.core.ir import F32, I32, IRBuilder, KernelDef, PtrType
 from rocke.helpers.io import store_scalar_from_f32
 from rocke.helpers.spec import SignatureBuilder, ceil_div, kernel_name_join
 from kernels.common._conv_implicit_gemm_common import ConvProblem
+from kernels.conv.conv_bias import (
+    conv_bias_rsrc,
+    declare_conv_bias_params,
+    load_conv_bias_f32,
+)
 from kernels.common.conv_implicit_gemm_wgrad import (
     _DEFAULT_WS_REPLICAS,
     _wg_M,
@@ -105,6 +119,11 @@ def wgrad_reduce_spec_conflict(spec: "WgradReduceSpec") -> str:
         return f"WgradReduceSpec.slab_par must be >= 1 (got {spec.slab_par})"
     if spec.slab_par > 1 and not spec.fold_loop:
         return "WgradReduceSpec.slab_par needs fold_loop"
+    if spec.bias and (spec.groups > 1 or spec.rezero):
+        return (
+            "WgradReduceSpec.bias is the forward split_det 3 fold: one group "
+            "(wg_N = the output channels), no rezero"
+        )
     return ""
 
 
@@ -159,6 +178,11 @@ class WgradReduceSpec:
     # The workgroup is tile_m * tile_n * slab_par threads. Needs fold_loop.
     # Tags ``sp<n>``. Default 1.
     slab_par: int = 1
+    # The forward split_det 3 fold of a conv + bias forward: add bias[n] (n
+    # = the column, the output channel) to the folded sum before the cast;
+    # appends the Bias / Bias_bytes kernargs. One group, no rezero. Tags
+    # ``cbias``. Default False: unchanged.
+    bias: bool = False
 
     @property
     def block_size(self) -> int:
@@ -189,6 +213,8 @@ class WgradReduceSpec:
             parts.append(f"fl{self.fold_loop}")
         if self.slab_par > 1:
             parts.append(f"sp{self.slab_par}")
+        if self.bias:
+            parts.append("cbias")
         parts.append(self.dtype_d)
         return kernel_name_join(self.name, *parts)
 
@@ -254,11 +280,16 @@ def build_conv_wgrad_workspace_reduce(
     _groups = b.param(
         "groups", I32
     )  # noqa: F841 — ABI boundary; the group index comes from block_id_z
+    bias = None
+    if spec.bias:
+        bias_elem = dw_pty.pointee
+        p_bias, p_bias_bytes = declare_conv_bias_params(b, bias_elem)
+        bias = (conv_bias_rsrc(b, p_bias, p_bias_bytes), b.const_i32(0), bias_elem)
 
     # Thread flat index within the workgroup.
     tid = b.thread_id_x()
     if spec.fold_loop:
-        _emit_loop_fold(b, spec, ws_ptr, dw_ptr, wg_M_param, wg_N_param, tid)
+        _emit_loop_fold(b, spec, ws_ptr, dw_ptr, wg_M_param, wg_N_param, tid, bias)
         return b.kernel
 
     # Grid is (ceil(wg_N/tile_n), ceil(wg_M/tile_m), groups):
@@ -278,7 +309,7 @@ def build_conv_wgrad_workspace_reduce(
 
     if spec.vec > 1:
         _emit_vec_fold(
-            b, spec, ws_ptr, dw_ptr, wg_M_param, wg_N_param, c_m, c_n, grp_id
+            b, spec, ws_ptr, dw_ptr, wg_M_param, wg_N_param, c_m, c_n, grp_id, bias
         )
         return b.kernel
 
@@ -316,6 +347,8 @@ def build_conv_wgrad_workspace_reduce(
             total = partials[0]
             for partial in partials[1:]:
                 total = b.fadd(total, partial)
+        if bias is not None:
+            (total,) = _add_bias(b, bias, [total], c_n)
 
         if _is_fp32_out:
             # Scratch is already f32 — plain store, no conversion needed.
@@ -326,7 +359,23 @@ def build_conv_wgrad_workspace_reduce(
     return b.kernel
 
 
-def _emit_vec_fold(b, spec, ws_ptr, dw_ptr, wg_M_param, wg_N_param, c_m, c_n, grp_id):
+def _add_bias(b, bias, tot, c_n):
+    """``tot[i] + bias[c_n + i]`` in fp32 (``bias`` = (rsrc, c0, elem))."""
+    rsrc, c0, elem = bias
+    return [
+        b.fadd(
+            t,
+            load_conv_bias_f32(
+                b, rsrc, c_n if i == 0 else b.add(c_n, b.const_i32(i)), elem, c0
+            ),
+        )
+        for i, t in enumerate(tot)
+    ]
+
+
+def _emit_vec_fold(
+    b, spec, ws_ptr, dw_ptr, wg_M_param, wg_N_param, c_m, c_n, grp_id, bias=None
+):
     """``vec`` consecutive N elements per thread (wg_N % vec == 0): one
     ``vec``-wide f32 load per slab, the fold, one ``vec``-wide store."""
     from rocke.helpers.io import io_ir_type, pack_f32_to
@@ -385,6 +434,8 @@ def _emit_vec_fold(b, spec, ws_ptr, dw_ptr, wg_M_param, wg_N_param, c_m, c_n, gr
             tot = [b.vec_extract(parts[0], i) for i in range(v)]
             for pv in parts[1:]:
                 tot = [b.fadd(t, b.vec_extract(pv, i)) for i, t in enumerate(tot)]
+        if bias is not None:
+            tot = _add_bias(b, bias, tot, c_n)
         if spec.rezero:
             z = b.zero_vec_f32(v)
             for r in range(reps):
@@ -402,7 +453,7 @@ def _emit_vec_fold(b, spec, ws_ptr, dw_ptr, wg_M_param, wg_N_param, c_m, c_n, gr
             )
 
 
-def _emit_loop_fold(b, spec, ws_ptr, dw_ptr, wg_M_param, wg_N_param, tid):
+def _emit_loop_fold(b, spec, ws_ptr, dw_ptr, wg_M_param, wg_N_param, tid, bias=None):
     """``fold_loop``: deterministic fold of R = ws_replicas slabs (ungrouped).
 
     Thread (p, e): e = tid % (tile_m * tile_n) owns ``vec`` consecutive N
@@ -512,9 +563,13 @@ def _emit_loop_fold(b, spec, ws_ptr, dw_ptr, wg_M_param, wg_N_param, tid):
                 )
                 xs = [b.vec_extract(pv, i) for i in range(v)]
                 tot = xs if tot is None else [b.fadd(t, x) for t, x in zip(tot, xs)]
+            if bias is not None:
+                tot = _add_bias(b, bias, tot, c_n)
             _fold_store(b, spec, dw_ptr, elem, tot, v, pack_f32_to)
     else:
         with b.scf_if(in_bounds):
+            if bias is not None:
+                acc = _add_bias(b, bias, acc, c_n)
             _fold_store(b, spec, dw_ptr, elem, acc, v, pack_f32_to)
 
 
@@ -536,7 +591,7 @@ def wgrad_reduce_grid(spec: WgradReduceSpec) -> Tuple[int, int, int]:
 
 def wgrad_reduce_signature(spec: WgradReduceSpec) -> list:
     """Return the kernel signature list for :class:`KernelLauncher`."""
-    return (
+    sig = (
         SignatureBuilder()
         .ptr("ws_ptr", "fp32")
         .ptr("dw_ptr", spec.dtype_d)
@@ -545,5 +600,7 @@ def wgrad_reduce_signature(spec: WgradReduceSpec) -> list:
         .scalar("ws_bytes", "i32")
         .scalar("dw_bytes", "i32")
         .scalar("groups", "i32")
-        .build()
     )
+    if spec.bias:
+        sig = sig.ptr("Bias", spec.dtype_d).scalar("Bias_bytes", "i32")
+    return sig.build()

@@ -32,6 +32,7 @@ typedef struct cfg
     int bh, bw, wgr, nt, lanes, frows, fvec;
     const char* stage;
     const char* arch;
+    int bias; /* 0 unless given */
 } cfg_t;
 
 static const cfg_t CONFIGS[] = {
@@ -141,6 +142,20 @@ static const cfg_t CONFIGS[] = {
      256, 0,  1,  "fused", 0,  0, 1, 1, 32, 1, 0, "K2a,K1", "gfx1250"}, /* 51: rejected: merged K2a without a split prescale */
     {2,   20, 24, 64,      96, 3, 3, 1, 1,  1, 2, 0,    "fp16",   "fp16", 8,
      256, 0,  4,  "fused", 2,  3, 1, 1, 32, 1, 0, "K2", "gfx1250"}, /* 52: rejected: tiles_per_thread does not divide the LDS block */
+    {2,   20, 24, 64,      96, 3, 3, 1, 1,  1, 4, 0,    "fp16",    "fp16", 8,
+     256, 0,  1,  "fused", 0,  0, 1, 1, 32, 1, 0, "K4", "gfx1250", 1}, /* 53: bias: F4 fp16 K4 */
+    {2,   20, 24, 64,      96, 3, 3, 1, 1,  1, 6, 4,    "bf16",    "fp16", 8,
+     256, 1,  1,  "fused", 0,  0, 1, 1, 32, 1, 0, "K4", "gfx1250", 1}, /* 54: bias: F(6x4) bf16 prescale K4 */
+    {1,   13, 11, 33,      35, 3, 3, 1, 1,  1, 4, 0,    "fp16",    "fp16", 8,
+     256, 0,  1,  "fused", 0,  0, 1, 1, 32, 1, 0, "K4", "gfx1250", 1}, /* 55: bias: F4 odd channels (vec 1) K4 */
+    {1,   40, 40, 128,     64, 3, 3, 2, 2,  1, 4, 0,    "fp16",    "fp16", 4,
+     256, 0,  1,  "fused", 0,  0, 1, 1, 32, 1, 0, "K4", "gfx1250", 1}, /* 56: bias: F4 dilation 2 K4 (vec 4) */
+    {2,   20, 24, 64,      96, 3, 3, 1, 1,  1, 2, 0,    "bf16",    "bf16", 8,
+     256, 0,  1,  "fused", 0,  0, 1, 0, 32, 1, 0, "K4", "gfx1250", 1}, /* 57: bias: F2 bf16 operands K4, regular stores */
+    {2,   20, 24, 64,      96, 3, 3, 1, 1,  1, 6, 4,    "bf16",   "fp16", 8,
+     256, 1,  1,  "fused", 0,  0, 1, 1, 32, 1, 0, "K4", "gfx950", 1}, /* 58: bias: gfx950: F(6x4) bf16 prescale K4 */
+    {2,   20, 24, 64,      96, 3, 3, 1, 1,  1, 4, 0,    "fp16",    "fp16", 8,
+     256, 0,  1,  "fused", 0,  0, 1, 1, 32, 1, 0, "K1", "gfx1250", 1}, /* 59: bias: F4 K1 (unchanged, no tag) */
 };
 static const int NUM_CONFIGS = (int)(sizeof(CONFIGS) / sizeof(CONFIGS[0]));
 
@@ -194,6 +209,7 @@ int main(int argc, char** argv)
     s.lds_lanes = c->lanes;
     s.filter_rows = c->frows;
     s.filter_vec = c->fvec;
+    s.bias = c->bias != 0;
 
     rocke_winograd_fwd_stage_t stages[4];
     int n = parse_stages(c->stage, stages, 4);

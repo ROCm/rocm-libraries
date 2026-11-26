@@ -418,3 +418,31 @@ def test_committed_instance_lists_are_what_the_tool_enumerates(tmp_path, monkeyp
     for dtype, path in committed.items():
         written = out / tool.INSTANCE_LIST.format(dtype=dtype)
         assert written.read_bytes() == path.read_bytes(), dtype
+
+
+def test_committed_bias_instance_lists_are_what_the_tool_enumerates(
+    tmp_path, monkeypatch
+):
+    """The bias catalog's lists (``--bias``) are the tool's output too: every
+    catalog instance's bias twin the packaging adapter packages, which is every
+    instance: implicit GEMM, direct and split-C."""
+    committed = {
+        dtype: _CONFIGS / tool.BIAS_INSTANCE_LIST.format(dtype=dtype)
+        for dtype in tool.DTYPES
+    }
+    with committed["fp16"].open() as handle:
+        handle.readline()
+        flavor = json.loads(handle.readline().rstrip(",\n"))["llvm_flavor"]
+    monkeypatch.setenv("ROCKE_LLVM_FLAVOR", flavor)
+    out = tmp_path / "lists"
+    jobs = str(min(16, os.cpu_count() or 1))
+    argv = ["--rocke-root", str(_ROCKE), "--output-dir", str(out), "--jobs", jobs]
+    assert tool.main(argv + ["--bias"]) == 0
+    for dtype, path in committed.items():
+        written = out / tool.BIAS_INSTANCE_LIST.format(dtype=dtype)
+        assert written.read_bytes() == path.read_bytes(), dtype
+        plain = json.loads(
+            (_CONFIGS / tool.INSTANCE_LIST.format(dtype=dtype)).read_text()
+        )
+        twins = json.loads(written.read_text())
+        assert twins == [dict(i, bias=True) for i in plain]

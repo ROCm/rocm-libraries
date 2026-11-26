@@ -29,6 +29,8 @@
 #  13  rejected by both engines: H != 1
 #  14  rejected by both engines: B^T of F(6,6) is not fp16-exact (WMMA transform)
 #  15  rejected by both engines: gfx950 (no wave32 WMMA atom)
+#  16  bias: 1x11 3xF(4,4), C=128, sel (merged output + input phase)
+#  17  bias: 1x11 2xF(6,6), C=64, VALU transform, fp32 M, q2 fk2
 from _emit_common import run_emit
 from kernels.common._conv_implicit_gemm_common import ConvProblem
 from kernels.common.conv_winograd_fused_1d_wmma import (
@@ -89,6 +91,10 @@ def _spec(idx: int):
         13: lambda: S(problem=_p(Hi=2), ax=ax11),
         14: lambda: S(problem=_p(C=64, K=64), ax=WinoAxis(6, 11, 2), xf="wmma"),
         15: lambda: (S(problem=_p(), ax=ax11, **SEL), "gfx950"),
+        16: lambda: S(problem=_p(), ax=ax11, bias=True, **SEL),
+        17: lambda: S(
+            problem=_p(C=64, K=64), ax=WinoAxis(6, 11, 2), q=2, fk=2, bias=True
+        ),
     }
     if idx not in cfgs:
         raise SystemExit(f"unknown config index {idx}")

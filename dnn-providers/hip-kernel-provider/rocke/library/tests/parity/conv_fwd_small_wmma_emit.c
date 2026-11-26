@@ -254,6 +254,19 @@ static int make_cfg(int idx,
     }
 }
 
+/* Conv + bias forward, configs 22..: the config BIAS_CFGS[idx - 22]
+ * rebuilt with bias = true (mirrors Python _BIAS_CFGS). */
+#define BIAS_CFG_BASE 22
+static const int BIAS_CFGS[] = {
+    0,
+    1,
+    2,
+    8,
+    15,
+    17,
+    19,
+};
+
 int main(int argc, char** argv)
 {
     if(argc < 2)
@@ -267,12 +280,25 @@ int main(int argc, char** argv)
     rocke_fwd_smallc_wmma_spec_t cspec;
     rocke_fwd_smallk_wmma_spec_t kspec;
     const char* arch = "gfx1250";
+    bool bias = false;
+    if(idx >= BIAS_CFG_BASE)
+    {
+        if(idx - BIAS_CFG_BASE >= (int)(sizeof(BIAS_CFGS) / sizeof(BIAS_CFGS[0])))
+        {
+            fprintf(stderr, "unknown config index %d\n", idx);
+            return 2;
+        }
+        idx = BIAS_CFGS[idx - BIAS_CFG_BASE];
+        bias = true;
+    }
     int which = make_cfg(idx, &cspec, &kspec, &arch);
     if(which < 0)
     {
         fprintf(stderr, "unknown config index %d\n", idx);
         return 2;
     }
+    cspec.bias = bias;
+    kspec.bias = bias;
 
     rocke_ir_builder_t b;
     rocke_kernel_def_t* kernel = (which == 0) ? rocke_build_fwd_smallc_wmma_new(&b, &cspec, arch)

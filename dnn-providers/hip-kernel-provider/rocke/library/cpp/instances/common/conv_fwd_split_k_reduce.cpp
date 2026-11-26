@@ -18,6 +18,7 @@
 #include "rocke/error_boundary.hpp" /* ckc::guard_builder */
 #include "rocke/helper_rocke.helpers.io.h" /* io_ir_type, pack_f32_to, store_scalar_from_f32 */
 #include "rocke/helper_rocke.helpers.spec.h" /* rocke_kernel_name_join, SignatureBuilder */
+#include "rocke/instance_conv_bias.h" /* rocke_conv_bias_* (spec->bias) */
 #include "rocke/ir.h"
 #include "rocke/ir_internal.h" /* rocke_i_set_err */
 #include "rocke/lower_llvm.h"
@@ -44,11 +45,12 @@ rocke_status_t rocke_fwd_split_k_reduce_kernel_name(const rocke_fwd_split_k_redu
                                                     size_t out_cap)
 {
     /* Python: kernel_name_join(name, f"v{vec}", f"b{block_size}",
-     *                          [f"s{degree}"] if degree, dtype_d) */
+     *                          [f"s{degree}"] if degree, ["cbias"] if bias,
+     *                          dtype_d) */
     char v_buf[24];
     char b_buf[24];
     char s_buf[24];
-    const char* parts[4];
+    const char* parts[5];
     int n_parts = 0;
     if(spec == NULL || out == NULL || spec->dtype_d == NULL)
         return ROCKE_ERR_VALUE;
@@ -61,6 +63,8 @@ rocke_status_t rocke_fwd_split_k_reduce_kernel_name(const rocke_fwd_split_k_redu
         snprintf(s_buf, sizeof(s_buf), "s%d", spec->degree);
         parts[n_parts++] = s_buf;
     }
+    if(spec->bias)
+        parts[n_parts++] = "cbias";
     parts[n_parts++] = spec->dtype_d;
     return rocke_kernel_name_join(spec->name ? spec->name : "conv_fwd_splitk_reduce",
                                   parts,
@@ -171,6 +175,14 @@ rocke_kernel_def_t* rocke_build_conv_fwd_split_k_reduce(rocke_ir_builder_t* b,
     rocke_b_param(b, "ws_bytes", rocke_i32(), NULL); /* ABI boundary */
     rocke_b_param(b, "d_bytes", rocke_i32(), NULL); /* ABI boundary */
     rocke_value_t* ks_count = rocke_b_param(b, "ks_count", rocke_i32(), NULL);
+    rocke_value_t* p_K = NULL;
+    rocke_value_t* p_bias = NULL;
+    rocke_value_t* p_bias_bytes = NULL;
+    if(spec->bias)
+    {
+        p_K = rocke_b_param(b, "K", rocke_i32(), NULL);
+        rocke_conv_bias_declare_params(b, rocke_b_io_ir_type(b, dtype_d), &p_bias, &p_bias_bytes);
+    }
 
     /* gid = block_id_x * block_size + thread_id_x; idx = gid * vec */
     rocke_value_t* bid = rocke_b_block_id_x(b);
@@ -249,6 +261,26 @@ rocke_kernel_def_t* rocke_build_conv_fwd_split_k_reduce(rocke_ir_builder_t* b,
         rocke_b_region_leave(b);
         for(int i = 0; i < vec; ++i)
             total[i] = loop.op->results[i];
+    }
+    if(spec->bias)
+    {
+        /* Each element's own channel: a thread's vec elements cross a row end
+         * when vec does not divide K (K is a kernarg). */
+        rocke_value_t* rsrc = rocke_conv_bias_rsrc(b, p_bias, p_bias_bytes);
+        rocke_value_t* c0 = rocke_b_const_i32(b, 0);
+        for(int i = 0; i < vec; ++i)
+        {
+            rocke_value_t* e = idx;
+            if(i != 0)
+            {
+                rocke_value_t* c_i = rocke_b_const_i32(b, i);
+                e = rocke_b_add(b, idx, c_i);
+            }
+            rocke_value_t* k = rocke_b_mod(b, e, p_K);
+            rocke_value_t* bv
+                = rocke_conv_bias_load_f32(b, rsrc, k, rocke_b_io_ir_type(b, dtype_d), c0);
+            total[i] = rocke_b_fadd(b, total[i], bv);
+        }
     }
     if(vec == 1)
     {
@@ -335,6 +367,12 @@ rocke_status_t rocke_fwd_split_k_reduce_signature(rocke_arena_t* arena,
     rocke_signature_builder_scalar(&sb, "ws_bytes", "i32");
     rocke_signature_builder_scalar(&sb, "d_bytes", "i32");
     rocke_signature_builder_scalar(&sb, "ks_count", "i32");
+    if(spec->bias)
+    {
+        rocke_signature_builder_scalar(&sb, "K", "i32");
+        rocke_signature_builder_ptr(&sb, "Bias", spec->dtype_d, NULL);
+        rocke_signature_builder_scalar(&sb, "Bias_bytes", "i32");
+    }
     return rocke_signature_builder_build(&sb, out_items, out_count);
 }
 

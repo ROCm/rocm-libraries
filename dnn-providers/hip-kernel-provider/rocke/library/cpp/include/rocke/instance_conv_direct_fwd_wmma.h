@@ -72,6 +72,8 @@ extern "C" {
  *      strided_view: bool = False # 1x1 / KxK stride-K as a strided GEMM
  *      fold_n: bool = False      # strided_view: the batch folded into rows
  *      poly_view: bool = False   # 1 x m*S stride S as 1 x m over a polyphase view
+ *      bias: bool = False        # conv + bias: Bias / Bias_bytes tail, bias[k]
+ *                                # added to the fp32 accumulators (both epilogues)
  * ===================================================================== */
 typedef struct rocke_direct_fwd_wmma_spec
 {
@@ -101,6 +103,7 @@ typedef struct rocke_direct_fwd_wmma_spec
     bool strided_view; /* default false */
     bool fold_n; /* default false */
     bool poly_view; /* default false */
+    bool bias; /* default false */
 } rocke_direct_fwd_wmma_spec_t;
 
 /* Spec with the Python dataclass defaults; problem == problem_default(). */

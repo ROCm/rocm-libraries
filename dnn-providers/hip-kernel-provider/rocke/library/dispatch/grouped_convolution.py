@@ -634,7 +634,10 @@ def _signature(spec: ConvInstanceSpec) -> tuple[dict, ...]:
     if not spec.is_direct:
         return tuple(
             conv_args_signature(
-                spec.dtype, direction=spec.direction, is_3d=spec.identity.is_3d
+                spec.dtype,
+                direction=spec.direction,
+                is_3d=spec.identity.is_3d,
+                bias=bool(getattr(spec.identity, "bias", False)),
             )
         )
     # The MFMA dgrad's own kernel, and the FPROP_SINGLE dgrad variants
@@ -653,7 +656,12 @@ def _signature(spec: ConvInstanceSpec) -> tuple[dict, ...]:
         or direct_dgrad_kernarg_direction(spec.identity.algorithm) == "fwd"
         else spec.direction
     )
-    return tuple(conv_direct_args_signature(spec.dtype, direction=direction))
+    bias = bool(getattr(spec.identity, "bias", False))
+    return tuple(
+        conv_direct_args_signature(
+            spec.dtype, direction=direction, **({"bias": True} if bias else {})
+        )
+    )
 
 
 @functools.lru_cache(maxsize=4096)

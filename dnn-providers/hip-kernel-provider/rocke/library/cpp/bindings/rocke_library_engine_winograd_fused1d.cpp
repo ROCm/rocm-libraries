@@ -57,6 +57,7 @@ rocke_winograd_fused_1d_spec_t fu_build_spec(const py::dict& d, std::deque<std::
     s.merge = dict_bool(d, "merge", s.merge);
     s.waves = dict_int(d, "waves", s.waves);
     s.waves_per_eu = dict_int(d, "waves_per_eu", s.waves_per_eu);
+    s.bias = dict_bool(d, "bias", s.bias);
     return s;
 }
 

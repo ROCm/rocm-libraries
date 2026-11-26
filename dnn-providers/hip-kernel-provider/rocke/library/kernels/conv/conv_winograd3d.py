@@ -947,6 +947,11 @@ class WinogradYxSpec:
     # "nomfma" skips the MFMAs, "nowait" uses no barriers in the main loop
     dbg: str = ""
     name: str = "conv3d_winoyx"
+    # per-output-channel conv bias (forward): the epilogue adds bias[k] in fp32 to every
+    # output before the bf16 rounding (after oscale / the bps scale, before the bps_out
+    # amax); trailing Bias / Bias_bytes kernargs (kernels.conv.conv_bias). With ksplit
+    # the main kernel writes raw partials and the reduction adds it (KsReduceSpec.bias).
+    bias: bool = False
 
     @property
     def Do(self) -> int:
@@ -1049,6 +1054,7 @@ class WinogradYxSpec:
             *(["xpf"] if self.xpf else []),
             *([f"el{self.bps_el}"] if self.bps == 3 and self.bps_el != 8 else []),
             *([f"dbg{self.dbg}"] if self.dbg else []),
+            *(["cbias"] if self.bias else []),
         )
 
 
@@ -1464,6 +1470,44 @@ def _pack4_f16_rtz(b, vals):
     return b.vec_cast_f32_to(v, F16)
 
 
+def _yx_bias_rsrc(b, spec):
+    """``spec.bias``: declare the ``Bias`` / ``Bias_bytes`` kernargs (after every other
+    one) and return the bias buffer resource; else None (also for a ksplit main kernel,
+    whose raw partials the reduction adds the bias to)."""
+    if not getattr(spec, "bias", False) or getattr(spec, "ksplit", 1) > 1:
+        return None
+    from kernels.conv.conv_bias import conv_bias_rsrc, declare_conv_bias_params
+
+    return conv_bias_rsrc(b, *declare_conv_bias_params(b, BF16))
+
+
+def _bf16x_f32(b, rsrc, k, n):
+    """``n`` consecutive bf16 values from element ``k`` of ``rsrc`` as an f32 vector."""
+    raw = b.buffer_load_vN(rsrc, b.mul(k, b.const_i32(2)), b.const_i32(0), BF16, n)
+    return b.vec_pack([b.cast_to_f32(b.vec_extract(raw, i)) for i in range(n)], F32)
+
+
+def _yx_bias_values(b, spec, rsrc, ld, lane, n_glob):
+    """The bias of the channels this lane stores, as f32 (loaded once per epilogue, the
+    channels do not depend on the output plane or role): epi16 -- channels n_base + 8 g
+    .. +7 (g = lane % 4) as two 4-vectors; epi_vec -- n_base + 4 (lane % 8) .. +3 as a
+    4-vector; the scalar store -- channel n_glob."""
+    ci = b.const_i32
+    if getattr(spec, "epi16", False) and hasattr(ld, "ld4"):
+        v = _bf16x_f32(b, rsrc, b.add(ld.n_base, b.mul(b.mod(lane, ci(4)), ci(8))), 8)
+        return (
+            b.vec_pack([b.vec_extract(v, i) for i in range(4)], F32),
+            b.vec_pack([b.vec_extract(v, i) for i in range(4, 8)], F32),
+        )
+    if getattr(spec, "epi_vec", False) and hasattr(ld, "ld4"):
+        return _bf16x_f32(
+            b, rsrc, b.add(ld.n_base, b.mul(b.mod(lane, ci(8)), ci(4))), 4
+        )
+    from kernels.conv.conv_bias import load_conv_bias_f32
+
+    return load_conv_bias_f32(b, rsrc, n_glob, BF16, ci(0))
+
+
 def _yx_epilogue(
     b,
     spec,
@@ -1483,9 +1527,12 @@ def _yx_epilogue(
     ks_i=None,
     oscale=None,
     amax_out=None,
+    bias=None,
 ):
     """``zt_w``: output planes of this wave (default z_tile); ``wb``: the wave's y-point
-    index b (default ``wave``); ``zh``: its z group (waves zh*4 .. zh*4+3 combine)."""
+    index b (default ``wave``); ``zh``: its z group (waves zh*4 .. zh*4+3 combine);
+    ``bias``: the bias resource (:func:`_yx_bias_rsrc`; not applied to ksplit partials).
+    """
     ci = b.const_i32
     ZT, K, Ho, Wo = spec.z_tile, spec.K, spec.Ho, spec.Wo
     if zt_w is not None:
@@ -1541,6 +1588,8 @@ def _yx_epilogue(
         ld.ks_i = ks_i
         if amax_out is not None:
             ld.amax = [ci(0)]
+    if bias is not None and getattr(spec, "ksplit", 1) == 1:
+        ld.bias = _yx_bias_values(b, spec, bias, ld, lane, n_glob)
 
     def _coefs(oy):
         # ATY[oy][bb] as wave-uniform f32 coefficients
@@ -1713,6 +1762,8 @@ def _yx_epi_store(
                         else b.vector_fma(cvec[bb], pv, out)
                     )
                 xo = b.add(b.mul(ttx, ci(2)), ci(ox))
+                if hasattr(ld, "bias"):
+                    out = b.vector_add(out, ld.bias)
                 obf = None
                 if hasattr(ld, "amax"):
                     obf = b.vec_trunc_f32_to_bf16(out)
@@ -1789,6 +1840,8 @@ def _yx_epi_store(
                         else b.fma(coef[bb], pv, out)
                     )
                 xo = b.add(b.mul(ttx, ci(2)), ci(ox))
+                if hasattr(ld, "bias"):
+                    out = b.fadd(out, ld.bias)
                 yoff = b.add(
                     b.mul(
                         b.add(b.mul(b.add(b.mul(zz, ci(Ho)), yo), ci(Wo)), xo), ci(K)
@@ -1912,6 +1965,9 @@ def _yx_epi_store16(b, spec, zo, ld, wbase, ih, oy, coef, tb, z0, ry, mask=None)
             )
         lo = b.select(is1, ob, oa)
         hi = b.select(is1, oa, ob)
+        if hasattr(ld, "bias"):
+            lo = b.vector_add(lo, ld.bias[0])
+            hi = b.vector_add(hi, ld.bias[1])
         obf = None
         if hasattr(ld, "amax"):
             obf = b.vec_trunc_f32_to_bf16(b.vec_concat(lo, hi))
@@ -1985,6 +2041,7 @@ def build_winograd_yx_fwd(spec: WinogradYxSpec, *, arch: str = "gfx942") -> Kern
     X = b.param("X", PtrType(BF16, "global"), noalias=True, readonly=True, align=16)
     U = b.param("U", PtrType(op_t, "global"), noalias=True, readonly=True, align=16)
     Y = b.param("Y", PtrType(BF16, "global"), noalias=True, writeonly=True, align=16)
+    bias_rsrc = _yx_bias_rsrc(b, spec)
 
     ci = b.const_i32
     tid = b.thread_id_x()
@@ -2135,7 +2192,7 @@ def build_winograd_yx_fwd(spec: WinogradYxSpec, *, arch: str = "gfx942") -> Kern
             b.scf_yield(*accs)
     acc = loop.results[: 4 * ZT]
 
-    _yx_epilogue(b, spec, acc, wave, lane, kq, tb, z0, n_glob, Y)
+    _yx_epilogue(b, spec, acc, wave, lane, kq, tb, z0, n_glob, Y, bias=bias_rsrc)
     b.ret()
     return b.kernel
 
@@ -2188,6 +2245,7 @@ def build_winograd_yx_lds_fwd(
     X = b.param("X", PtrType(BF16, "global"), noalias=True, readonly=True, align=16)
     U = b.param("U", PtrType(op_t, "global"), noalias=True, readonly=True, align=16)
     Y = b.param("Y", PtrType(BF16, "global"), noalias=True, writeonly=True, align=16)
+    bias_rsrc = _yx_bias_rsrc(b, spec)
 
     ci = b.const_i32
     tid = b.thread_id_x()
@@ -2411,6 +2469,7 @@ def build_winograd_yx_lds_fwd(
         zt_w=ZTW,
         wb=wb,
         zh=zh,
+        bias=bias_rsrc,
     )
     b.ret()
     return b.kernel
@@ -2443,6 +2502,7 @@ def _lds16_loop_b16(
     n_glob,
     Y,
     lds,
+    bias_rsrc=None,
 ):
     """lds16 main loop unrolled by two chunks with 16-byte weight-fragment loads."""
     ci = b.const_i32
@@ -2520,6 +2580,7 @@ def _lds16_loop_b16(
         wb=wb,
         zh=grp,
         gpr=2,
+        bias=bias_rsrc,
     )
 
 
@@ -2559,6 +2620,7 @@ def build_winograd_yx_lds16p_fwd(
     X = b.param("X", PtrType(BF16, "global"), noalias=True, readonly=True, align=16)
     U = b.param("U", PtrType(op_t, "global"), noalias=True, readonly=True, align=16)
     Y = b.param("Y", PtrType(BF16, "global"), noalias=True, writeonly=True, align=16)
+    bias_rsrc = _yx_bias_rsrc(b, spec)
 
     ci = b.const_i32
     tid = b.thread_id_x()
@@ -2816,6 +2878,7 @@ def build_winograd_yx_lds16p_fwd(
             wb=wb,
             zh=grp,
             gpr=2,
+            bias=bias_rsrc,
         )
         b.sync_lds_only()
         store_fill(nraw0, ci(0))
@@ -3095,6 +3158,7 @@ def build_winograd_yx_lds16_fwd(
         if spec.bps_out
         else None
     )
+    bias_rsrc = _yx_bias_rsrc(b, spec)
 
     ci = b.const_i32
     tid = b.thread_id_x()
@@ -3738,6 +3802,7 @@ def build_winograd_yx_lds16_fwd(
             wb=wb,
             zh=grp,
             gpr=2,
+            bias=bias_rsrc,
         )
         b.ret()
         return b.kernel
@@ -3790,6 +3855,7 @@ def build_winograd_yx_lds16_fwd(
             wb=wb,
             zh=grp,
             gpr=2,
+            bias=bias_rsrc,
         )
         b.ret()
         return b.kernel
@@ -3821,6 +3887,7 @@ def build_winograd_yx_lds16_fwd(
             n_glob,
             Y,
             lds,
+            bias_rsrc,
         )
         b.ret()
         return b.kernel
@@ -3959,6 +4026,7 @@ def build_winograd_yx_lds16_fwd(
                 ks_i=ks_i if KS > 1 else None,
                 oscale=OS_,
                 amax_out=amax_out,
+                bias=bias_rsrc,
             )
 
         if not track:
@@ -4430,6 +4498,7 @@ def build_winograd_yx_wlds_fwd(
     X = b.param("X", PtrType(BF16, "global"), noalias=True, readonly=True, align=16)
     U = b.param("U", PtrType(op_t, "global"), noalias=True, readonly=True, align=16)
     Y = b.param("Y", PtrType(BF16, "global"), noalias=True, writeonly=True, align=16)
+    bias_rsrc = _yx_bias_rsrc(b, spec)
 
     ci = b.const_i32
     tid = b.thread_id_x()
@@ -4627,6 +4696,7 @@ def build_winograd_yx_wlds_fwd(
         wb=wb,
         zh=grp,
         gpr=2,
+        bias=bias_rsrc,
     )
     b.ret()
     return b.kernel
@@ -5630,20 +5700,32 @@ def build_yx_frel_aux(spec: WinogradYxSpec, *, arch: str = "gfx942") -> KernelDe
 
 @dataclass(frozen=True)
 class KsReduceSpec:
-    """The split-K reduction (:func:`build_ks_reduce`): ``nel`` outputs, ``ks`` slices."""
+    """The split-K reduction (:func:`build_ks_reduce`): ``nel`` outputs, ``ks`` slices.
+    ``bias``: add the per-output-channel conv bias of the NDHWC output's ``K`` channels
+    (trailing ``Bias`` / ``Bias_bytes`` kernargs) to the sum before the rounding."""
 
     nel: int
     ks: int
+    K: int = 0
+    bias: bool = False
 
 
 def build_ks_reduce(spec: KsReduceSpec, *, arch: str = "gfx942") -> KernelDef:
     """Split-K reduction: P [ks][nel] f32 -> Y [nel] bf16 (8 elements per thread)."""
     nel, ks = spec.nel, spec.ks
     _check_buffers("ks_reduce", P=ks * nel * 4, Y=nel * 2)
-    b = IRBuilder(f"wino_ks_reduce_n{nel}_k{ks}")
+    if spec.bias and (spec.K <= 0 or spec.K % 8 or nel % spec.K):
+        raise ValueError(
+            f"ks_reduce: bias needs K a multiple of 8 dividing nel (K={spec.K}, nel={nel})"
+        )
+    name = f"wino_ks_reduce_n{nel}_k{ks}"
+    if spec.bias:
+        name += f"_K{spec.K}_cbias"
+    b = IRBuilder(name)
     b.kernel.attrs["max_workgroup_size"] = 256
     P = b.param("P", PtrType(F32, "global"), noalias=True, readonly=True, align=16)
     Yo = b.param("Y", PtrType(BF16, "global"), noalias=True, writeonly=True, align=16)
+    bias_rsrc = _yx_bias_rsrc(b, spec)
     ci = b.const_i32
     e = b.mul(b.add(b.mul(b.block_id_x(), ci(256)), b.thread_id_x()), ci(8))
     rp = b.buffer_rsrc(P, ci(ks * nel * 4))
@@ -5659,6 +5741,17 @@ def build_ks_reduce(spec: KsReduceSpec, *, arch: str = "gfx942") -> KernelDef:
             (v0, v1)
             if acc is None
             else (b.vector_add(acc[0], v0), b.vector_add(acc[1], v1))
+        )
+    if bias_rsrc is not None:
+        # 8 consecutive elements of one voxel: channels e % K .. +7
+        bv = _bf16x_f32(b, bias_rsrc, b.mod(eo, ci(spec.K)), 8)
+        acc = (
+            b.vector_add(
+                acc[0], b.vec_pack([b.vec_extract(bv, i) for i in range(4)], F32)
+            ),
+            b.vector_add(
+                acc[1], b.vec_pack([b.vec_extract(bv, i) for i in range(4, 8)], F32)
+            ),
         )
     b.buffer_store_vN_bf16(
         ry,

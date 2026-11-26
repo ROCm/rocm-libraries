@@ -1,0 +1,925 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "id": "grouped_g4_c32_k64_half",
+      "values": {
+        "io_data_type": "half",
+        "intermediate_data_type": "float",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              2,
+              64,
+              14,
+              14
+            ],
+            "strides": [
+              12544,
+              1,
+              896,
+              64
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              2,
+              64,
+              14,
+              14
+            ],
+            "strides": [
+              12544,
+              1,
+              896,
+              64
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              64,
+              8,
+              3,
+              3
+            ],
+            "strides": [
+              72,
+              1,
+              24,
+              8
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              2,
+              32,
+              14,
+              14
+            ],
+            "strides": [
+              6272,
+              1,
+              448,
+              32
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 4,
+            "dims": [
+              1,
+              64,
+              1,
+              1
+            ],
+            "strides": [
+              64,
+              1,
+              64,
+              64
+            ],
+            "data_type": "half"
+          }
+        ],
+        "attributes": {
+          "parameters__dilation": [
+            1,
+            1
+          ],
+          "parameters__post_padding": [
+            1,
+            1
+          ],
+          "parameters__pre_padding": [
+            1,
+            1
+          ],
+          "parameters__stride": [
+            1,
+            1
+          ]
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "manual",
+        "generator_version": "1.0.0",
+        "notes": "Grouped channels-last convolution (4 groups) plus a per-output-channel bias, indexed by the absolute output channel.",
+        "operation": "ConvolutionFwd+bias",
+        "seed": 1
+      }
+    },
+    {
+      "id": "depthwise_c32_3x3_half",
+      "values": {
+        "io_data_type": "half",
+        "intermediate_data_type": "float",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              2,
+              32,
+              14,
+              14
+            ],
+            "strides": [
+              6272,
+              1,
+              448,
+              32
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              2,
+              32,
+              14,
+              14
+            ],
+            "strides": [
+              6272,
+              1,
+              448,
+              32
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              32,
+              1,
+              3,
+              3
+            ],
+            "strides": [
+              9,
+              1,
+              3,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              2,
+              32,
+              14,
+              14
+            ],
+            "strides": [
+              6272,
+              1,
+              448,
+              32
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 4,
+            "dims": [
+              1,
+              32,
+              1,
+              1
+            ],
+            "strides": [
+              32,
+              1,
+              32,
+              32
+            ],
+            "data_type": "half"
+          }
+        ],
+        "attributes": {
+          "parameters__dilation": [
+            1,
+            1
+          ],
+          "parameters__post_padding": [
+            1,
+            1
+          ],
+          "parameters__pre_padding": [
+            1,
+            1
+          ],
+          "parameters__stride": [
+            1,
+            1
+          ]
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "manual",
+        "generator_version": "1.0.0",
+        "notes": "Depthwise channels-last convolution (C=K=groups) plus a per-channel bias.",
+        "operation": "ConvolutionFwd+bias",
+        "seed": 1
+      }
+    },
+    {
+      "id": "depthwise_c96_3x3_s2_odd_half",
+      "values": {
+        "io_data_type": "half",
+        "intermediate_data_type": "float",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              2,
+              96,
+              9,
+              9
+            ],
+            "strides": [
+              7776,
+              1,
+              864,
+              96
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              2,
+              96,
+              9,
+              9
+            ],
+            "strides": [
+              7776,
+              1,
+              864,
+              96
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              96,
+              1,
+              3,
+              3
+            ],
+            "strides": [
+              9,
+              1,
+              3,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              2,
+              96,
+              17,
+              17
+            ],
+            "strides": [
+              27744,
+              1,
+              1632,
+              96
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 4,
+            "dims": [
+              1,
+              96,
+              1,
+              1
+            ],
+            "strides": [
+              96,
+              1,
+              96,
+              96
+            ],
+            "data_type": "half"
+          }
+        ],
+        "attributes": {
+          "parameters__dilation": [
+            1,
+            1
+          ],
+          "parameters__post_padding": [
+            1,
+            1
+          ],
+          "parameters__pre_padding": [
+            1,
+            1
+          ],
+          "parameters__stride": [
+            2,
+            2
+          ]
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "manual",
+        "generator_version": "1.0.0",
+        "notes": "Depthwise channels-last convolution (C=K=groups), stride 2, odd input, plus a per-channel bias.",
+        "operation": "ConvolutionFwd+bias",
+        "seed": 1
+      }
+    },
+    {
+      "id": "depthwise_c64_3x3_tall_half",
+      "values": {
+        "io_data_type": "half",
+        "intermediate_data_type": "float",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              2,
+              64,
+              70,
+              40
+            ],
+            "strides": [
+              179200,
+              1,
+              2560,
+              64
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              2,
+              64,
+              70,
+              40
+            ],
+            "strides": [
+              179200,
+              1,
+              2560,
+              64
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              64,
+              1,
+              3,
+              3
+            ],
+            "strides": [
+              9,
+              1,
+              3,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              2,
+              64,
+              70,
+              40
+            ],
+            "strides": [
+              179200,
+              1,
+              2560,
+              64
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 4,
+            "dims": [
+              1,
+              64,
+              1,
+              1
+            ],
+            "strides": [
+              64,
+              1,
+              64,
+              64
+            ],
+            "data_type": "half"
+          }
+        ],
+        "attributes": {
+          "parameters__dilation": [
+            1,
+            1
+          ],
+          "parameters__post_padding": [
+            1,
+            1
+          ],
+          "parameters__pre_padding": [
+            1,
+            1
+          ],
+          "parameters__stride": [
+            1,
+            1
+          ]
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "manual",
+        "generator_version": "1.0.0",
+        "notes": "Depthwise channels-last convolution (C=K=groups) on a tall image, plus a per-channel bias.",
+        "operation": "ConvolutionFwd+bias",
+        "seed": 1
+      }
+    },
+    {
+      "id": "grouped_g4_c32_k64_bfloat16",
+      "values": {
+        "io_data_type": "bfloat16",
+        "intermediate_data_type": "float",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              2,
+              64,
+              14,
+              14
+            ],
+            "strides": [
+              12544,
+              1,
+              896,
+              64
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              2,
+              64,
+              14,
+              14
+            ],
+            "strides": [
+              12544,
+              1,
+              896,
+              64
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              64,
+              8,
+              3,
+              3
+            ],
+            "strides": [
+              72,
+              1,
+              24,
+              8
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              2,
+              32,
+              14,
+              14
+            ],
+            "strides": [
+              6272,
+              1,
+              448,
+              32
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 4,
+            "dims": [
+              1,
+              64,
+              1,
+              1
+            ],
+            "strides": [
+              64,
+              1,
+              64,
+              64
+            ],
+            "data_type": "bfloat16"
+          }
+        ],
+        "attributes": {
+          "parameters__dilation": [
+            1,
+            1
+          ],
+          "parameters__post_padding": [
+            1,
+            1
+          ],
+          "parameters__pre_padding": [
+            1,
+            1
+          ],
+          "parameters__stride": [
+            1,
+            1
+          ]
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "manual",
+        "generator_version": "1.0.0",
+        "notes": "Grouped channels-last convolution (4 groups) plus a per-output-channel bias, indexed by the absolute output channel.",
+        "operation": "ConvolutionFwd+bias",
+        "seed": 1
+      }
+    },
+    {
+      "id": "depthwise_c32_3x3_bfloat16",
+      "values": {
+        "io_data_type": "bfloat16",
+        "intermediate_data_type": "float",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              2,
+              32,
+              14,
+              14
+            ],
+            "strides": [
+              6272,
+              1,
+              448,
+              32
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              2,
+              32,
+              14,
+              14
+            ],
+            "strides": [
+              6272,
+              1,
+              448,
+              32
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              32,
+              1,
+              3,
+              3
+            ],
+            "strides": [
+              9,
+              1,
+              3,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              2,
+              32,
+              14,
+              14
+            ],
+            "strides": [
+              6272,
+              1,
+              448,
+              32
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 4,
+            "dims": [
+              1,
+              32,
+              1,
+              1
+            ],
+            "strides": [
+              32,
+              1,
+              32,
+              32
+            ],
+            "data_type": "bfloat16"
+          }
+        ],
+        "attributes": {
+          "parameters__dilation": [
+            1,
+            1
+          ],
+          "parameters__post_padding": [
+            1,
+            1
+          ],
+          "parameters__pre_padding": [
+            1,
+            1
+          ],
+          "parameters__stride": [
+            1,
+            1
+          ]
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "manual",
+        "generator_version": "1.0.0",
+        "notes": "Depthwise channels-last convolution (C=K=groups) plus a per-channel bias.",
+        "operation": "ConvolutionFwd+bias",
+        "seed": 1
+      }
+    },
+    {
+      "id": "depthwise_c96_3x3_s2_odd_bfloat16",
+      "values": {
+        "io_data_type": "bfloat16",
+        "intermediate_data_type": "float",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              2,
+              96,
+              9,
+              9
+            ],
+            "strides": [
+              7776,
+              1,
+              864,
+              96
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              2,
+              96,
+              9,
+              9
+            ],
+            "strides": [
+              7776,
+              1,
+              864,
+              96
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              96,
+              1,
+              3,
+              3
+            ],
+            "strides": [
+              9,
+              1,
+              3,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              2,
+              96,
+              17,
+              17
+            ],
+            "strides": [
+              27744,
+              1,
+              1632,
+              96
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 4,
+            "dims": [
+              1,
+              96,
+              1,
+              1
+            ],
+            "strides": [
+              96,
+              1,
+              96,
+              96
+            ],
+            "data_type": "bfloat16"
+          }
+        ],
+        "attributes": {
+          "parameters__dilation": [
+            1,
+            1
+          ],
+          "parameters__post_padding": [
+            1,
+            1
+          ],
+          "parameters__pre_padding": [
+            1,
+            1
+          ],
+          "parameters__stride": [
+            2,
+            2
+          ]
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "manual",
+        "generator_version": "1.0.0",
+        "notes": "Depthwise channels-last convolution (C=K=groups), stride 2, odd input, plus a per-channel bias.",
+        "operation": "ConvolutionFwd+bias",
+        "seed": 1
+      }
+    },
+    {
+      "id": "depthwise_c64_3x3_tall_bfloat16",
+      "values": {
+        "io_data_type": "bfloat16",
+        "intermediate_data_type": "float",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              2,
+              64,
+              70,
+              40
+            ],
+            "strides": [
+              179200,
+              1,
+              2560,
+              64
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              2,
+              64,
+              70,
+              40
+            ],
+            "strides": [
+              179200,
+              1,
+              2560,
+              64
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              64,
+              1,
+              3,
+              3
+            ],
+            "strides": [
+              9,
+              1,
+              3,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              2,
+              64,
+              70,
+              40
+            ],
+            "strides": [
+              179200,
+              1,
+              2560,
+              64
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 4,
+            "dims": [
+              1,
+              64,
+              1,
+              1
+            ],
+            "strides": [
+              64,
+              1,
+              64,
+              64
+            ],
+            "data_type": "bfloat16"
+          }
+        ],
+        "attributes": {
+          "parameters__dilation": [
+            1,
+            1
+          ],
+          "parameters__post_padding": [
+            1,
+            1
+          ],
+          "parameters__pre_padding": [
+            1,
+            1
+          ],
+          "parameters__stride": [
+            1,
+            1
+          ]
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "manual",
+        "generator_version": "1.0.0",
+        "notes": "Depthwise channels-last convolution (C=K=groups) on a tall image, plus a per-channel bias.",
+        "operation": "ConvolutionFwd+bias",
+        "seed": 1
+      }
+    }
+  ]
+}

@@ -55,6 +55,7 @@ from rocke.core.arch import ArchTarget
 from rocke.core.ir import F32, I64, IRBuilder, KernelDef, Value, VectorType
 from rocke.helpers.spec import ceil_div
 
+from kernels.conv.conv_bias import conv_bias_rsrc, load_conv_bias_vec_f32
 from kernels.common.conv_direct_grouped import (
     I32_MAX,
     DirectConvProblem,
@@ -141,7 +142,8 @@ class PpMfmaSpec:
             f"f{p.KH}x{p.KW}",
             f"p{p.PAD}",
             f"bk{self.block_k}",
-            flags={"bf16": p.dtype == "bf16"},
+            # Only the forward subclass has a bias (FwdPpMfmaSpec.bias).
+            flags={"cbias": getattr(self, "bias", False), "bf16": p.dtype == "bf16"},
         )
 
     def grid(self) -> Tuple[int, int, int]:
@@ -354,7 +356,9 @@ def emit_pp_mfma(spec: PpMfmaSpec, weights: PpWeights) -> KernelDef:
     b.kernel.attrs["max_workgroup_size"] = spec.threads_per_block
     b.kernel.attrs["lds_alias_scopes"] = True
     b.kernel.attrs["waves_per_eu"] = 2
-    params = emit_direct_params(b, io_type=io_type)
+    # The conv + bias forward (FwdPpMfmaSpec.bias); the dgrad spec has none.
+    bias = getattr(spec, "bias", False)
+    params = emit_direct_params(b, io_type=io_type, bias=bias)
 
     def ci(v: int) -> Value:
         return b.const_i32(v)
@@ -614,6 +618,16 @@ def emit_pp_mfma(spec: PpMfmaSpec, weights: PpWeights) -> KernelDef:
     k_lane = b.add(b.add(k0, b.mul(wave_k, ci(spec.wave_k))), b.mul(lane_hi, ci(4)))
     ow = b.add(ow0, l16)
     w_ok = b.cmp_lt(ow, p_Wo)
+    # Conv + bias: bias[k .. k+4) of every fragment's channels, as fp32.
+    bias_kf = None
+    if bias:
+        bias_rsrc = conv_bias_rsrc(b, params["Bias"], params["Bias_bytes"])
+        bias_kf = [
+            load_conv_bias_vec_f32(
+                b, bias_rsrc, b.add(k_lane, ci(kf * ATOM)), 4, io_type, c0
+            )
+            for kf in range(KF)
+        ]
     for jb in range(8):
         oh = b.add(oh0, b.add(b.mul(wave_j, ci(8)), ci(jb)))
         hw_ok = b.land(w_ok, b.cmp_lt(oh, p_Ho))
@@ -622,6 +636,9 @@ def emit_pp_mfma(spec: PpMfmaSpec, weights: PpWeights) -> KernelDef:
             k = b.add(k_lane, ci(kf * ATOM))
             ok = b.land(hw_ok, b.cmp_lt(k, K))
             voff = b.select(ok, b.mul(b.add(pix, k), c2), oob)
-            val = _trunc_f32(b, dtype, accs[kf * 8 + jb])
+            acc = accs[kf * 8 + jb]
+            if bias_kf is not None:
+                acc = b.fadd(acc, bias_kf[kf])
+            val = _trunc_f32(b, dtype, acc)
             _buf_store_vN(b, dtype, d_rsrc, voff, c0, val, 2)
     return b.kernel

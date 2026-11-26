@@ -392,6 +392,11 @@ _GEMM_AXES = {
 # tile past that extent, so the bound keeps a bit of headroom below 2**24.
 MUL24_REDUCTION_LIMIT = 1 << 23
 
+# The forward bias vector carries the output dtype: at least 2 bytes per
+# channel (fp16 / bf16; fp32 has 4). Its byte count is an i32 kernarg.
+_BIAS_MIN_ELEM_BYTES = 2
+_I32_MAX = (1 << 31) - 1
+
 
 @dataclass
 class ConvArgs:
@@ -488,16 +493,20 @@ class ConvArgs:
         split_tail: bool = False,
         split_flags: bool = False,
         split_det: bool = False,
+        bias: bool = False,
     ) -> List[ArgSpec]:
         """The ordered kernarg ABI of the kernel these args launch.
 
         ``streamk`` is the stream-K reduction of a stream-K wgrad kernel;
-        ``split_k`` selects the fwd split-K binary's ABI.
+        ``split_k`` selects the fwd split-K binary's ABI; ``bias`` the fwd
+        per-output-channel bias tail.
         """
         if self.algorithm == "direct":
             if two_stage or streamk is not None:
                 raise ValueError("direct conv has no two-stage or stream-K variant")
-            return conv_direct_arg_names(direction=self.direction)
+            return conv_direct_arg_names(
+                direction=self.direction, **({"bias": True} if bias else {})
+            )
         return conv_arg_names(
             direction=self.direction,
             is_3d=self.geom.is_3d,
@@ -507,6 +516,7 @@ class ConvArgs:
             split_tail=split_tail,
             **({"split_flags": True} if split_flags else {}),
             **({"split_det": True} if split_det else {}),
+            **({"bias": True} if bias else {}),
         )
 
     # ---- GEMM view (implicit GEMM only) ----
@@ -726,6 +736,8 @@ class ConvArgs:
         sk_flags: Optional[int] = None,
         sk_partials: Optional[int] = None,
         full_tiles: Optional[int] = None,
+        bias_ptr: Optional[int] = None,
+        bias_bytes: Optional[int] = None,
     ) -> Dict[str, int]:
         """Return the ``values`` dict for ``KernelLauncher.__call__()``.
 
@@ -744,6 +756,9 @@ class ConvArgs:
           fills its partition block. The ``workspace`` reduction takes
           ``ws_ptr``/``ws_bytes``; ``linear``/``tree`` take ``sk_flags`` and
           ``sk_partials`` (see ``wgrad_streamk_workspace_layout``).
+        * ``bias_ptr`` / ``bias_bytes`` -- the per-output-channel bias vector
+          of a fwd kernel built with ``bias``. Passing ``bias_ptr`` selects its
+          ABI.
 
         Anything the ABI needs but was not passed, and anything passed that
         the ABI does not have, is an error here rather than a misread on the
@@ -774,6 +789,23 @@ class ConvArgs:
                 f"split_tail: full_tiles={full_tiles} outside [0, "
                 f"{self.num_pid_m * self.num_pid_n}] (the launch's tiles)"
             )
+        if bias_ptr is not None:
+            if self.direction != "fwd":
+                raise ValueError(
+                    f"bias_ptr: only a forward kernel takes a bias "
+                    f"(got {self.direction})"
+                )
+            # Bias_bytes sizes the buffer resource the kernel reads bias[0, K)
+            # through: a channel past it reads 0, a silent wrong answer. The
+            # output dtype is not known here, so the floor is K values of the
+            # narrowest output (2 bytes); a caller that knows the dtype checks
+            # the exact size (Gfx950ConvFwdAotSpec.launch_values).
+            need = self.geom.K * _BIAS_MIN_ELEM_BYTES
+            if bias_bytes is None or not need <= bias_bytes <= _I32_MAX:
+                raise ValueError(
+                    f"bias_bytes={bias_bytes}: the bias of K={self.geom.K} "
+                    f"channels needs at least {need} bytes (and fits an i32)"
+                )
         abi = self.arg_names(
             two_stage=ws_ptr is not None and streamk is None,
             streamk=streamk.reduction if streamk is not None else None,
@@ -803,6 +835,8 @@ class ConvArgs:
                 if self.direction == "fwd" and sk_partials is not None
                 else {}
             ),
+            # A fwd bias binary: passing bias_ptr selects its ABI.
+            **({"bias": True} if bias_ptr is not None else {}),
         )
         names = [n for n, _ in abi]
         values: Dict[str, int] = dict(
@@ -816,6 +850,8 @@ class ConvArgs:
             "sk_flags": sk_flags,
             "sk_partials": sk_partials,
             "full_tiles": full_tiles,
+            "Bias": bias_ptr,
+            "Bias_bytes": bias_bytes,
         }
         supplied = {k: v for k, v in supplied.items() if v is not None}
         named = self._named_values()

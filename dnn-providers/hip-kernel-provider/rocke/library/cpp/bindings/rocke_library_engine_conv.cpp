@@ -383,6 +383,7 @@ rocke_direct_conv_16c_spec_t dg16_build_spec(const py::dict& d, std::deque<std::
     s.wave_size = dict_int(d, "wave_size", s.wave_size);
     s.double_buffer = dict_bool(d, "double_buffer", s.double_buffer);
     s.fold_k32 = dict_bool(d, "fold_k32", s.fold_k32);
+    s.bias = dict_bool(d, "bias", s.bias);
     return s;
 }
 
@@ -407,6 +408,7 @@ rocke_direct_conv_4c_spec_t dg4_build_spec(const py::dict& d, std::deque<std::st
     s.dgrad_weights_lds = dict_bool(d, "dgrad_weights_lds", s.dgrad_weights_lds);
     s.stage_rows = dict_bool(d, "stage_rows", s.stage_rows);
     s.waves_q = dict_int(d, "waves_q", s.waves_q);
+    s.bias = dict_bool(d, "bias", s.bias);
     return s;
 }
 
@@ -452,6 +454,7 @@ rocke_direct_conv_spec_t dgg_build_spec(const py::dict& d, std::deque<std::strin
     s.lds_pad = dict_int(d, "lds_pad", s.lds_pad);
     s.stage_out = dict_bool(d, "stage_out", s.stage_out);
     s.row_exit = dict_bool(d, "row_exit", s.row_exit);
+    s.bias = dict_bool(d, "bias", s.bias);
     return s;
 }
 
@@ -623,6 +626,7 @@ rocke_fwd_smallc_wmma_spec_t fscw_build_spec(const py::dict& d, std::deque<std::
     s.tiles_per_block = dict_int(d, "tiles_per_block", s.tiles_per_block);
     s.tdm_store = dict_bool(d, "tdm_store", s.tdm_store);
     s.wave_size = dict_int(d, "wave_size", s.wave_size);
+    s.bias = dict_bool(d, "bias", s.bias);
     return s;
 }
 
@@ -640,6 +644,7 @@ rocke_fwd_smallk_wmma_spec_t fskw_build_spec(const py::dict& d, std::deque<std::
     s.stages = dict_int(d, "stages", s.stages);
     s.prefetch = dict_bool(d, "prefetch", s.prefetch);
     s.wave_size = dict_int(d, "wave_size", s.wave_size);
+    s.bias = dict_bool(d, "bias", s.bias);
     return s;
 }
 
@@ -766,6 +771,7 @@ rocke_fwd_smallc_mfma_spec_t fscm_build_spec(const py::dict& d, std::deque<std::
     s.tiles_per_block = dict_int(d, "tiles_per_block", s.tiles_per_block);
     s.prefetch = dict_bool(d, "prefetch", s.prefetch);
     s.wave_size = dict_int(d, "wave_size", s.wave_size);
+    s.bias = dict_bool(d, "bias", s.bias);
     return s;
 }
 
@@ -777,6 +783,7 @@ rocke_fwd_smallk_mfma_spec_t fskm_build_spec(const py::dict& d, std::deque<std::
     s.out_h = dict_int(d, "out_h", s.out_h);
     s.out_w = dict_int(d, "out_w", s.out_w);
     s.wave_size = dict_int(d, "wave_size", s.wave_size);
+    s.bias = dict_bool(d, "bias", s.bias);
     return s;
 }
 
@@ -924,6 +931,7 @@ rocke_fwd_pp_mfma_spec_t fpp_build_spec(const py::dict& d, std::deque<std::strin
     }
     s.block_k = dict_int(d, "block_k", s.block_k);
     s.wave_size = dict_int(d, "wave_size", s.wave_size);
+    s.bias = dict_bool(d, "bias", s.bias);
     return s;
 }
 
@@ -1019,6 +1027,7 @@ rocke_fwd_flex_mfma_spec_t ffx_build_spec(const py::dict& d, std::deque<std::str
     s.bk = dict_int(d, "bk", s.bk);
     s.split_c = dict_int(d, "split_c", s.split_c);
     s.wave_size = dict_int(d, "wave_size", s.wave_size);
+    s.bias = dict_bool(d, "bias", s.bias);
     return s;
 }
 
@@ -1089,6 +1098,7 @@ rocke_direct_dw_fwd_wmma_spec_t dfw_build_spec(const py::dict& d, std::deque<std
     s.block_h = dict_int(d, "block_h", s.block_h);
     s.w_fold = dict_int(d, "w_fold", s.w_fold);
     s.prefetch_rows = dict_int(d, "prefetch_rows", s.prefetch_rows);
+    s.bias = dict_bool(d, "bias", s.bias);
     return s;
 }
 
@@ -1163,6 +1173,7 @@ rocke_fwd_gstream_wmma_spec_t fgs_build_spec(const py::dict& d, std::deque<std::
     s.prefetch = dict_bool(d, "prefetch", s.prefetch);
     s.pf_depth = dict_int(d, "pf_depth", s.pf_depth);
     s.wave_size = dict_int(d, "wave_size", s.wave_size);
+    s.bias = dict_bool(d, "bias", s.bias);
     return s;
 }
 
@@ -1238,6 +1249,7 @@ rocke_fwd_tapouter_wmma_spec_t fto_build_spec(const py::dict& d, std::deque<std:
     s.prefetch = dict_bool(d, "prefetch", s.prefetch);
     s.wave_size = dict_int(d, "wave_size", s.wave_size);
     s.tdm_split = dict_int(d, "tdm_split", s.tdm_split);
+    s.bias = dict_bool(d, "bias", s.bias);
     return s;
 }
 
@@ -1767,6 +1779,7 @@ rocke_direct_fwd_wmma_spec_t dfww_build_spec(const py::dict& d, std::deque<std::
     s.strided_view = dict_bool(d, "strided_view", s.strided_view);
     s.fold_n = dict_bool(d, "fold_n", s.fold_n);
     s.poly_view = dict_bool(d, "poly_view", s.poly_view);
+    s.bias = dict_bool(d, "bias", s.bias);
     if(d.contains("sched") && !d["sched"].is_none())
         s.sched = keep(d["sched"].cast<std::string>());
     return s;
@@ -1869,6 +1882,7 @@ rocke_direct_conv_nongrouped_spec_t dnongrouped_build_spec(const py::dict& d,
     s.split_c = dict_int(d, "split_c", s.split_c);
     s.grouped = dict_bool(d, "grouped", s.grouped);
     s.group_merge = dict_int(d, "group_merge", s.group_merge);
+    s.bias = dict_bool(d, "bias", s.bias);
     /* The C spec encodes None as a sentinel (-1 / 0). An explicit value in the
      * sentinel range would silently read as None here, so reject it with the
      * message Python's validate() raises for the same spec. */
@@ -2612,6 +2626,9 @@ rocke_fwd_split_k_reduce_spec_t conv_fwd_split_k_reduce_build_spec(const py::dic
     /* The unrolled fold bakes the slab count: it must match the launch's
      * ks_count, so it is parsed rather than left at the runtime-loop default. */
     s.degree = dict_int(d, "degree", s.degree);
+    /* The bias variant adds a K / Bias / Bias_bytes tail: dropping it would
+     * build a kernel with a shorter ABI than the launch packs. */
+    s.bias = dict_bool(d, "bias", s.bias);
     {
         std::string v;
         if(dict_str(d, "dtype_d", v))

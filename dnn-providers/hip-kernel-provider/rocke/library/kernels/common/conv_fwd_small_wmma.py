@@ -56,6 +56,11 @@ from rocke.core.codegen_policy import (
 from rocke.core.ir import F32, I32, IRBuilder, KernelDef, Value
 from rocke.helpers.spec import align_up, ceil_div
 
+from kernels.conv.conv_bias import (
+    conv_bias_rsrc,
+    load_conv_bias_f32,
+    load_conv_bias_vec_f32,
+)
 from kernels.common.conv_direct_fwd_wmma import (
     _lds_frag16,
     _tdm_descriptor_3d,
@@ -128,6 +133,9 @@ class FwdSmallcWmmaSpec:
     tdm_store: bool = False  # stage the output tile in LDS, one TDM store
     sched: str | None = None
     wave_size: int = 32
+    # Conv + bias forward: the Bias / Bias_bytes kernarg tail; bias[k] is
+    # added to the fp32 output values before the rounding.
+    bias: bool = False
 
     @property
     def S(self) -> int:
@@ -204,6 +212,7 @@ class FwdSmallcWmmaSpec:
             f"tb{self.tiles_per_block}",
             "ts" if self.tdm_store else "",
             f"s{self.sched}" if self.sched else "",
+            "cbias" if self.bias else "",
             flags={"bf16": p.dtype == "bf16"},
         )
 
@@ -297,7 +306,7 @@ def build_fwd_smallc_wmma(spec: FwdSmallcWmmaSpec, arch: str = "gfx1250") -> Ker
     b.kernel.attrs["max_workgroup_size"] = THREADS
     if spec.sched:
         apply_codegen_policy(b.kernel, CodegenPolicy(scheduler_strategy=spec.sched))
-    params = emit_direct_params(b, direction="fwd", io_type=io_type)
+    params = emit_direct_params(b, direction="fwd", io_type=io_type, bias=spec.bias)
     A, Bp, D = params["A"], params["B"], params["D"]
 
     c0 = b.const_i32(0)
@@ -384,6 +393,25 @@ def build_fwd_smallc_wmma(spec: FwdSmallcWmmaSpec, arch: str = "gfx1250") -> Ker
                 b.mul(lhalf, b.const_i32(E0)),
             )
         )
+    # Conv + bias: the lane's 8 accumulator slots of M tile m are output
+    # channels k_blk + (wave_k * TM + m) * 16 + lhalf * 8 .. +7 for every
+    # tile the block walks: load them once.
+    bias_k = [None] * TM
+    if spec.bias:
+        bias_rsrc = conv_bias_rsrc(b, params["Bias"], params["Bias_bytes"])
+        for m in range(TM):
+            k = b.add(
+                k_blk,
+                b.add(
+                    b.mul(b.add(b.mul(wave_k, b.const_i32(TM)), b.const_i32(m)), c16),
+                    b.mul(lhalf, c8),
+                ),
+            )
+            bias_k[m] = load_conv_bias_vec_f32(b, bias_rsrc, k, 8, io_type, c0)
+
+    def _biased(acc: Value, m: int) -> Value:
+        """Accumulator ``acc`` of M tile ``m``, plus the bias when there is one."""
+        return acc if bias_k[m] is None else b.fadd(acc, bias_k[m])
 
     def _tile_geom(tile: Value):
         tw = b.mod(tile, n_wt)
@@ -498,7 +526,10 @@ def build_fwd_smallc_wmma(spec: FwdSmallcWmmaSpec, arch: str = "gfx1250") -> Ker
                     )
                     oi = b.add(b.add(b.mul(q, b.const_i32(BK)), kl), b.const_i32(OUT0))
                     b.smem_store_vN(
-                        lds, [c0, oi], _trunc_f32(b, p.dtype, accs[m * TN + tn]), n=8
+                        lds,
+                        [c0, oi],
+                        _trunc_f32(b, p.dtype, _biased(accs[m * TN + tn], m)),
+                        n=8,
                     )
             b.sync_lds_only()
             with b.scf_if(b.cmp_eq(wave_id, c0)):
@@ -556,7 +587,7 @@ def build_fwd_smallc_wmma(spec: FwdSmallcWmmaSpec, arch: str = "gfx1250") -> Ker
                     b.global_store_vN(
                         D,
                         b.add(px_off, k),
-                        _trunc_f32(b, p.dtype, accs[m * TN + tn]),
+                        _trunc_f32(b, p.dtype, _biased(accs[m * TN + tn], m)),
                         8,
                         align=16,
                     )
@@ -613,6 +644,9 @@ class FwdSmallkWmmaSpec:
     prefetch: bool = False
     sched: str | None = None
     wave_size: int = 32
+    # Conv + bias forward: the Bias / Bias_bytes kernarg tail; bias[k] is
+    # added to the fp32 output values before the rounding.
+    bias: bool = False
 
     @property
     def S(self) -> int:
@@ -690,6 +724,7 @@ class FwdSmallkWmmaSpec:
             f"st{self.stages}",
             "pf" if self.prefetch else "",
             f"s{self.sched}" if self.sched else "",
+            "cbias" if self.bias else "",
             flags={"bf16": p.dtype == "bf16"},
         )
 
@@ -780,7 +815,7 @@ def build_fwd_smallk_wmma(spec: FwdSmallkWmmaSpec, arch: str = "gfx1250") -> Ker
     b.kernel.attrs["max_workgroup_size"] = THREADS
     if spec.sched:
         apply_codegen_policy(b.kernel, CodegenPolicy(scheduler_strategy=spec.sched))
-    params = emit_direct_params(b, direction="fwd", io_type=io_type)
+    params = emit_direct_params(b, direction="fwd", io_type=io_type, bias=spec.bias)
     A, Bp, D = params["A"], params["B"], params["D"]
 
     c0 = b.const_i32(0)
@@ -974,6 +1009,14 @@ def build_fwd_smallk_wmma(spec: FwdSmallkWmmaSpec, arch: str = "gfx1250") -> Ker
     b.sync_lds_only()
 
     # ---- epilogue 2: overlap-add, one output pixel (all K) per thread.
+    # Conv + bias: the K bias values, as fp32, loaded once for every pixel.
+    bias_s = None
+    if spec.bias:
+        bias_rsrc = conv_bias_rsrc(b, params["Bias"], params["Bias_bytes"])
+        bias_s = [
+            load_conv_bias_f32(b, bias_rsrc, b.const_i32(k), io_type, c0)
+            for k in range(K)
+        ]
     E = OH * OW
     for it in range(ceil_div(E, THREADS)):
         e = b.add(tid, b.const_i32(it * THREADS))
@@ -1012,6 +1055,8 @@ def build_fwd_smallk_wmma(spec: FwdSmallkWmmaSpec, arch: str = "gfx1250") -> Ker
                             n=nk,
                         )
                         acc = z if acc is None else b.vector_add(acc, z)
+                if bias_s is not None:
+                    acc = b.fadd(acc, b.vec_pack(bias_s[k0 : k0 + nk], F32))
                 if out is None:
                     out = b.add(
                         b.add(

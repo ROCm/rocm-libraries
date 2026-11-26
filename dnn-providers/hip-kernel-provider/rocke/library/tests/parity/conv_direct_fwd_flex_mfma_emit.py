@@ -28,6 +28,13 @@
 #  14  rejected by both engines: K = 100 (not a multiple of 8)
 #  15  rejected by both engines: split_c 16 > C / 64
 #  16  rejected by both engines: 7x7 (more than 32 taps)
+#  17  config 0 with the conv + bias (bf16, bk 256)
+#  18  config 1 with the conv + bias (fp16, bk 128)
+#  19  config 5 with the conv + bias (fp16, dil 12)
+#  20  config 2 with the conv + bias: split_c 2 declares the tail only (the
+#      fold adds the bias)
+from dataclasses import replace
+
 from _emit_common import run_emit
 from kernels.common.conv_direct_fwd_flex_mfma import (
     FwdFlexMfmaSpec,
@@ -86,6 +93,9 @@ def _spec(idx: int):
         15: (S(problem=_p(), split_c=16), "gfx950"),
         16: (S(problem=_p(KH=7, KW=7, PAD=3)), "gfx950"),
     }
+    for i, base in enumerate((0, 1, 5, 2)):
+        spec, arch = cfgs[base]
+        cfgs[17 + i] = (replace(spec, bias=True), arch)
     if idx not in cfgs:
         raise SystemExit(f"unknown config index {idx}")
     return cfgs[idx]

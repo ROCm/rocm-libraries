@@ -62,7 +62,8 @@
     X_BOOL(xh_pad)                                \
     X_BOOL(rpf_lds_barrier)                       \
     X_BOOL(rpf_fetch_late)                        \
-    X_INT(sched_strategy)
+    X_INT(sched_strategy)                         \
+    X_BOOL(bias)
 
 /* DgradConvSpec knobs. */
 #define ROCKE_CONV_DGRAD_KNOB_FIELDS(X_INT, X_BOOL) \
@@ -147,6 +148,7 @@
     X_INT(rezero)                                          \
     X_BOOL(ws_bf16)                                        \
     X_INT(fold_loop)                                       \
-    X_INT(slab_par)
+    X_INT(slab_par)                                        \
+    X_BOOL(bias)
 
 #endif /* ROCKE_BINDINGS_CONV_KNOB_FIELDS_HPP */

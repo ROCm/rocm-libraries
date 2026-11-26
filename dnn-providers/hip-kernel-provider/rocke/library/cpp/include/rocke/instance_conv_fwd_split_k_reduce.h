@@ -21,6 +21,14 @@
  *   ws_bytes : i32 -- workspace byte size (ABI boundary)
  *   d_bytes  : i32 -- output byte size (ABI boundary)
  *   ks_count : i32 -- number of slabs (the split-K degree)
+ *   K          : i32 -- (bias only) output channels per row (groups * kpg)
+ *   Bias       : dtype_d global ptr (readonly) -- (bias only) bias[K]
+ *   Bias_bytes : i32 -- (bias only) the bias byte size
+ *
+ * bias (the conv + bias forward on the two-stage split): the folded fp32 sum
+ * of element idx gets bias[idx % K] before the cast, so the bias is added
+ * exactly once with one rounding. Each of a thread's vec elements takes its
+ * own channel, so any vec dividing the element count serves any K.
  *
  * Grid: (ceil(elems / (vec * block_size)), 1, 1); block (block_size, 1, 1).
  */
@@ -49,6 +57,8 @@ extern "C" {
  *                              slabs (ks_count must then equal it); 0 keeps
  *                              the runtime loop over ks_count
  *   name:       str = "conv_fwd_splitk_reduce"
+ *   bias:       bool = False -- add bias[idx % K]; takes K, Bias, Bias_bytes
+ *                               after ks_count; name tag "cbias"
  */
 typedef struct rocke_fwd_split_k_reduce_spec
 {
@@ -57,6 +67,7 @@ typedef struct rocke_fwd_split_k_reduce_spec
     int block_size; /* default 256 */
     int degree; /* default 0 */
     const char* name; /* default "conv_fwd_splitk_reduce" */
+    bool bias; /* default false */
 } rocke_fwd_split_k_reduce_spec_t;
 
 /* Default-constructed spec (every field == the Python dataclass default). */

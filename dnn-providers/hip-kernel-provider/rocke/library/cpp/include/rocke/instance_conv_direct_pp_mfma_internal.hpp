@@ -46,6 +46,8 @@ struct PpSpec
     const char* name;
     int block_k;
     int wave_size;
+    /* The conv + bias forward (FwdPpMfmaSpec.bias); the dgrad leaves it off. */
+    bool bias = false;
 };
 
 /* What pp_mfma_reason takes besides the spec: the family's name in the

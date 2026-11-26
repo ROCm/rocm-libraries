@@ -408,6 +408,10 @@ class KernelIdentity:
     dy_halo_kouter_pad: int = 0
     num_load_waves: int = 0
     cshuffle_no_alias: bool = False
+    # fwd only (ImplicitGemmConvSpec.bias): the per-output-channel bias added to
+    # the fp32 accumulators before the store; the binary takes the Bias /
+    # Bias_bytes kernarg tail. Left out of the hash while False.
+    bias: bool = False
     # ---- capability: bounds which problems this binary can serve ----
     is_3d: bool = False
     is_pointwise: bool = False
@@ -685,6 +689,7 @@ class KernelIdentity:
             "xh_epi_lin",
             "xh_tap_rsrc",
             "xh_dx_wmask",
+            "bias",
         ):
             if not fields[name]:
                 del fields[name]
@@ -1593,6 +1598,10 @@ IDENTITY_CAPABILITY_FIELDS = (
     "split_hybrid",
     "xh_fast_a",
     "xh_dlds",
+    # Not read by identity_supports_problem, which answers the shape alone;
+    # KernelCache.supports_problem refuses a conv + bias binary, so the cache
+    # must not group one with its plain twin.
+    "bias",
 )
 
 #: Problem attributes the predicate reads when the identity is a *direct* one.

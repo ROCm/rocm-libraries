@@ -452,6 +452,27 @@ static int make_f32_cfg(int idx,
     return 0;
 }
 
+/* Conv + bias configs, emitted as BIAS_CFG_BASE + idx (mirrors _BIAS_CFGS):
+ * the config `base` rebuilt with bias = true; `unfuse` swaps the fused dgrad
+ * weights for the plain preload. */
+#define BIAS_CFG_BASE 89
+typedef struct bias_cfg
+{
+    int base;
+    int unfuse;
+} bias_cfg_t;
+static const bias_cfg_t BIAS_CFGS[] = {
+    {32, 0}, {41, 0}, {42, 0}, {43, 0}, /* generic */
+    {33, 1}, {34, 1}, {35, 1}, {36, 1}, {38, 1}, /* generic row stream */
+    {30, 0}, /* fused weights + bias: rejected */
+    {73, 0}, {77, 0}, /* fp32 storage */
+    {45, 0}, {46, 0}, {47, 0}, {50, 0}, {51, 0},
+    {53, 0}, {56, 0}, {57, 0}, {59, 0}, {61, 0}, /* Toeplitz MFMA fwd */
+    {71, 0}, /* Toeplitz WMMA fwd */
+    {11, 0}, /* Toeplitz dgrad + bias: rejected */
+    {20, 0}, /* 4c fused-weight dgrad + bias: rejected */
+};
+
 int main(int argc, char** argv)
 {
     if(argc < 2)
@@ -468,6 +489,20 @@ int main(int argc, char** argv)
     const char* arch = "gfx950";
     int is_4c = 0;
     int is_generic = 0;
+    int bias = 0;
+    int unfuse = 0;
+    if(idx >= BIAS_CFG_BASE)
+    {
+        const int j = idx - BIAS_CFG_BASE;
+        if(j >= (int)(sizeof(BIAS_CFGS) / sizeof(BIAS_CFGS[0])))
+        {
+            fprintf(stderr, "unknown config index %d\n", idx);
+            return 2;
+        }
+        idx = BIAS_CFGS[j].base;
+        unfuse = BIAS_CFGS[j].unfuse;
+        bias = 1;
+    }
     if(idx >= F32_CFG_BASE)
     {
         const int k = make_f32_cfg(idx - F32_CFG_BASE, &specgen, &spec4c, &arch);
@@ -503,6 +538,24 @@ int main(int argc, char** argv)
     {
         fprintf(stderr, "unknown config index %d\n", idx);
         return 2;
+    }
+
+    if(bias)
+    {
+        if(is_4c)
+            spec4c.bias = true;
+        else if(is_generic)
+        {
+            if(unfuse)
+            {
+                specgen.dgrad_fused_weights = false;
+                specgen.dgrad_weights_lds = false;
+                specgen.preload_weights = true;
+            }
+            specgen.bias = true;
+        }
+        else
+            spec.bias = true;
     }
 
     rocke_ir_builder_t b;

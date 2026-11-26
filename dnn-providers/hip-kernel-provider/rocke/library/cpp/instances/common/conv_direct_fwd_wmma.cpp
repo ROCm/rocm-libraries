@@ -29,6 +29,7 @@
 #include "rocke/helper_rocke.core.arch.h" /* rocke_archtarget_fits_lds, max_threads_per_block */
 #include "rocke/helper_rocke.helpers.io.h" /* rocke_b_io_ir_type */
 #include "rocke/helper_rocke.helpers.spec.h" /* rocke_kernel_name_join, rocke_ceil_div, ... */
+#include "rocke/instance_conv_bias.h"
 #include "rocke/instance_conv_direct_grouped_internal.h" /* rocke_dconv_emit_params */
 #include "rocke/instance_conv_fwd_wmma_gate_internal.h" /* rocke_wmma_fwd_gate */
 #include "rocke/instance_conv_fwd_wmma_tdm_internal.h" /* rocke_fwd_tdm_descriptor_3d */
@@ -325,7 +326,8 @@ rocke_status_t rocke_direct_fwd_wmma_kernel_name(const rocke_direct_fwd_wmma_spe
                            spec->tap_shift ? "tsh" : "",
                            spec->strided_view ? "sv" : "",
                            spec->fold_n ? "fn" : "",
-                           spec->poly_view ? "pv" : ""};
+                           spec->poly_view ? "pv" : "",
+                           spec->bias ? "cbias" : ""};
     const char* flag_names[] = {"bf16"};
     int flag_on[] = {rocke_direct_conv_problem_is_bf16(&spec->problem) ? 1 : 0};
     return rocke_kernel_name_join(spec->name ? spec->name : "direct_fwd_wmma",
@@ -667,6 +669,7 @@ struct fww_ctx
     bool RR, TU, TSH, SB, PP;
     bool SV; /* strided_view */
     bool PV; /* poly_view */
+    bool BIAS; /* conv + bias */
     int PV_PAD; /* poly_view: the real column padding */
     int RKH; /* the real problem's KH (strided_view patch runs) */
     int TWF;
@@ -1249,6 +1252,9 @@ void epilogue(fww_ctx& c, V const* accs)
     rocke_ir_builder_t* b = c.b;
     const rocke_dconv_params_t* params = &c.params;
     rocke_b_sync_lds_only(b);
+    V bias_rsrc = NULL;
+    if(c.BIAS)
+        bias_rsrc = rocke_conv_bias_rsrc(b, params->Bias, params->Bias_bytes);
     for(int m = 0; m < c.TM; ++m)
     {
         V col;
@@ -1259,6 +1265,13 @@ void epilogue(fww_ctx& c, V const* accs)
             V w = mul(c, c.lhalf, c.c8);
             col = add(c, v, w);
         }
+        V bv = NULL;
+        if(c.BIAS)
+        {
+            /* The lane's 8 accumulator slots are channels col .. col+7. */
+            V k = add(c, c.k_out, col);
+            bv = rocke_conv_bias_load_vec_f32(b, bias_rsrc, k, 8, c.io_type, c.c0);
+        }
         for(int tn = 0; tn < c.TN; ++tn)
         {
             V px;
@@ -1268,7 +1281,10 @@ void epilogue(fww_ctx& c, V const* accs)
                 V v = mul(c, u, c.c16);
                 px = add(c, v, c.l16);
             }
-            V val = rocke_b_vec_cast_f32_to(b, accs[m * c.TN + tn], c.io_type);
+            V acc = accs[m * c.TN + tn];
+            if(c.BIAS)
+                acc = rocke_b_fadd(b, acc, bv);
+            V val = rocke_b_vec_cast_f32_to(b, acc, c.io_type);
             V y = mulk(c, px, c.EPITCH);
             V z = add(c, y, col);
             V idx[2] = {c.c0, z};
@@ -1334,6 +1350,13 @@ void epilogue_wave(fww_ctx& c, V const* accs)
     int WPX = c.TN * 16;
     int EP = c.TM * 16 + ROCKE_FWD_WMMA_CH_PAD;
     int ROWS = WPX / c.TW;
+    V bias_rsrc = NULL, k_wave = NULL;
+    if(c.BIAS)
+    {
+        bias_rsrc = rocke_conv_bias_rsrc(b, params->Bias, params->Bias_bytes);
+        V x = mulk(c, c.wave_k, c.TM * 16);
+        k_wave = add(c, c.k_out, x);
+    }
     V base = mulk(c, c.wave_id, (int64_t)WPX * EP);
     for(int m = 0; m < c.TM; ++m)
     {
@@ -1343,6 +1366,12 @@ void epilogue_wave(fww_ctx& c, V const* accs)
             V y = mul(c, c.lhalf, c.c8);
             col = add(c, x, y);
         }
+        V bv = NULL;
+        if(c.BIAS)
+        {
+            V k = add(c, k_wave, col);
+            bv = rocke_conv_bias_load_vec_f32(b, bias_rsrc, k, 8, c.io_type, c.c0);
+        }
         for(int tn = 0; tn < c.TN; ++tn)
         {
             V px;
@@ -1350,7 +1379,10 @@ void epilogue_wave(fww_ctx& c, V const* accs)
                 V x = ci(c, tn * 16);
                 px = add(c, x, c.l16);
             }
-            V val = rocke_b_vec_cast_f32_to(b, accs[m * c.TN + tn], c.io_type);
+            V acc = accs[m * c.TN + tn];
+            if(c.BIAS)
+                acc = rocke_b_fadd(b, acc, bv);
+            V val = rocke_b_vec_cast_f32_to(b, acc, c.io_type);
             V y = mulk(c, px, EP);
             V z = add(c, y, col);
             V w = add(c, base, z);
@@ -1572,7 +1604,11 @@ rocke_kernel_def_t* rocke_build_direct_fwd_wmma(rocke_ir_builder_t* b,
     rocke_attr_set_int(b, &b->kernel->attrs, "max_workgroup_size", c.THREADS);
     if(spec->sched != NULL && spec->sched[0] != '\0')
         rocke_attr_set_str(b, &b->kernel->attrs, "scheduler_strategy", spec->sched);
-    rocke_dconv_emit_params(b, &c.params, "fwd", c.io_type);
+    c.BIAS = spec->bias;
+    if(c.BIAS)
+        rocke_dconv_emit_params_bias(b, &c.params, c.io_type);
+    else
+        rocke_dconv_emit_params(b, &c.params, "fwd", c.io_type);
     const rocke_dconv_params_t* params = &c.params;
 
     c.c0 = ci(c, 0);

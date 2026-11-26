@@ -57,6 +57,7 @@ set(_ROCKE_LIBRARY_CONV_TEST_RELPATHS
     "tests/library/tests/test_direct_fwd_wmma.py"
     "tests/library/tests/test_direct_fwd_pp_mfma.py"
     "tests/library/tests/test_direct_fwd_flex_mfma.py"
+    "tests/library/tests/test_conv_direct_fwd_bias.py"
     "tests/library/tests/test_conv_fwd_split_k.py"
     "tests/library/tests/test_conv_winograd_fwd_cpu.py"
     "tests/library/tests/test_conv_winograd_fwd_rt_cpu.py"
@@ -201,6 +202,7 @@ set(_ROCKE_LIBRARY_CONV3D_TEST_RELPATHS
     "tests/library/tests/test_conv_fwd_3d_lds_knobs.py"
     "tests/library/tests/test_conv_fwd_3d_xpd.py"
     "tests/library/tests/test_conv_fwd_3d_xyr.py"
+    "tests/library/tests/test_conv_fwd_bias.py"
     "tests/library/tests/test_conv_fwd_pingpong.py"
     "tests/library/tests/test_conv_fwd_split_det.py"
     "tests/library/tests/test_conv_fwd_split_store.py"
@@ -216,6 +218,7 @@ set(_ROCKE_LIBRARY_CONV3D_TEST_RELPATHS
     "tests/library/tests/test_conv_wgrad_stage2_policy.py"
     "tests/library/tests/test_conv_wgrad_xwin.py"
     "tests/library/tests/test_conv_winograd3d.py"
+    "tests/library/tests/test_conv_winograd_bias.py"
     "tests/library/tests/test_det_classify.py")
 set(_ROCKE_LIBRARY_CONV3D_TESTS "")
 foreach(_rocke_conv3d_test ${_ROCKE_LIBRARY_CONV3D_TEST_RELPATHS})
@@ -675,6 +678,7 @@ set(_ROCKE_LIBRARY_GPU_TEST_RELPATHS
     "tests/library/tests/test_conv_wgrad_streamk_gpu.py"
     "tests/library/tests/test_conv_dgrad_correctness.py"
     "tests/library/tests/test_direct_conv_correctness.py"
+    "tests/library/tests/test_conv_direct_fwd_bias.py"
     "tests/library/tests/test_conv_dgrad_depthwise_windowed.py"
     "tests/library/tests/test_direct_depthwise_dgrad_v2.py"
     "tests/library/tests/test_conv_dgrad_4c.py"
@@ -758,6 +762,7 @@ set(_ROCKE_LIBRARY_CONV3D_GPU_TEST_RELPATHS
     "tests/library/tests/test_conv_routes_gpu.py"
     "tests/library/tests/test_conv_pin_table_gpu.py"
     "tests/library/tests/test_conv_winograd3d_gpu.py"
+    "tests/library/tests/test_conv_winograd_bias.py"
     "tests/library/tests/test_conv_fwd_3d_fxd.py::TestFwd3dXHaloDma"
     "tests/library/tests/test_conv_fwd_3d_fxd.py::TestFwd3dMBandSplitTail"
     "tests/library/tests/test_conv_fwd_3d_kloop_knobs.py::TestFwd3dKLoopKnobs"
@@ -768,6 +773,7 @@ set(_ROCKE_LIBRARY_CONV3D_GPU_TEST_RELPATHS
     "tests/library/tests/test_conv_fwd_3d_lds_knobs.py::TestFwd3dMBand"
     "tests/library/tests/test_conv_fwd_3d_xpd.py::TestFwd3dXHaloPad"
     "tests/library/tests/test_conv_fwd_3d_xyr.py::TestFwd3dXHaloYRing"
+    "tests/library/tests/test_conv_fwd_bias.py::TestFwdBiasGpu"
     "tests/library/tests/test_conv_fwd_pingpong.py::TestFwdPingPong"
     "tests/library/tests/test_conv_fwd_split_det.py::TestFwdSplitDet"
     "tests/library/tests/test_conv_fwd_split_store.py::TestFwdSplitStore"

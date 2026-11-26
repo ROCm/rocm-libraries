@@ -1,0 +1,695 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "id": "smoke_half",
+      "values": {
+        "io_data_type": "half",
+        "intermediate_data_type": "float",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              2,
+              32,
+              14,
+              14
+            ],
+            "strides": [
+              6272,
+              1,
+              448,
+              32
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              2,
+              32,
+              14,
+              14
+            ],
+            "strides": [
+              6272,
+              1,
+              448,
+              32
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              32,
+              32,
+              3,
+              3
+            ],
+            "strides": [
+              288,
+              1,
+              96,
+              32
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              2,
+              32,
+              14,
+              14
+            ],
+            "strides": [
+              6272,
+              1,
+              448,
+              32
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 4,
+            "dims": [
+              1,
+              32,
+              1,
+              1
+            ],
+            "strides": [
+              32,
+              1,
+              32,
+              32
+            ],
+            "data_type": "half"
+          }
+        ],
+        "attributes": {
+          "parameters__dilation": [
+            1,
+            1
+          ],
+          "parameters__post_padding": [
+            1,
+            1
+          ],
+          "parameters__pre_padding": [
+            1,
+            1
+          ],
+          "parameters__stride": [
+            1,
+            1
+          ]
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "manual",
+        "generator_version": "1.0.0",
+        "notes": "Channels-last convolution plus a per-output-channel bias, fused by the packaged gfx950 bias engine.",
+        "operation": "ConvolutionFwd+bias",
+        "seed": 1
+      }
+    },
+    {
+      "id": "pointwise_c64_k96_half",
+      "values": {
+        "io_data_type": "half",
+        "intermediate_data_type": "float",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              2,
+              96,
+              8,
+              8
+            ],
+            "strides": [
+              6144,
+              1,
+              768,
+              96
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              2,
+              96,
+              8,
+              8
+            ],
+            "strides": [
+              6144,
+              1,
+              768,
+              96
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              96,
+              64,
+              1,
+              1
+            ],
+            "strides": [
+              64,
+              1,
+              64,
+              64
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              2,
+              64,
+              8,
+              8
+            ],
+            "strides": [
+              4096,
+              1,
+              512,
+              64
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 4,
+            "dims": [
+              1,
+              96,
+              1,
+              1
+            ],
+            "strides": [
+              96,
+              1,
+              96,
+              96
+            ],
+            "data_type": "half"
+          }
+        ],
+        "attributes": {
+          "parameters__dilation": [
+            1,
+            1
+          ],
+          "parameters__post_padding": [
+            0,
+            0
+          ],
+          "parameters__pre_padding": [
+            0,
+            0
+          ],
+          "parameters__stride": [
+            1,
+            1
+          ]
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "manual",
+        "generator_version": "1.0.0",
+        "notes": "1x1 channels-last convolution plus a per-output-channel bias.",
+        "operation": "ConvolutionFwd+bias",
+        "seed": 1
+      }
+    },
+    {
+      "id": "stride2_c32_k64_half",
+      "values": {
+        "io_data_type": "half",
+        "intermediate_data_type": "float",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              2,
+              64,
+              8,
+              8
+            ],
+            "strides": [
+              4096,
+              1,
+              512,
+              64
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              2,
+              64,
+              8,
+              8
+            ],
+            "strides": [
+              4096,
+              1,
+              512,
+              64
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              64,
+              32,
+              3,
+              3
+            ],
+            "strides": [
+              288,
+              1,
+              96,
+              32
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              2,
+              32,
+              15,
+              15
+            ],
+            "strides": [
+              7200,
+              1,
+              480,
+              32
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 4,
+            "dims": [
+              1,
+              64,
+              1,
+              1
+            ],
+            "strides": [
+              64,
+              1,
+              64,
+              64
+            ],
+            "data_type": "half"
+          }
+        ],
+        "attributes": {
+          "parameters__dilation": [
+            1,
+            1
+          ],
+          "parameters__post_padding": [
+            1,
+            1
+          ],
+          "parameters__pre_padding": [
+            1,
+            1
+          ],
+          "parameters__stride": [
+            2,
+            2
+          ]
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "manual",
+        "generator_version": "1.0.0",
+        "notes": "Strided channels-last convolution plus a per-output-channel bias.",
+        "operation": "ConvolutionFwd+bias",
+        "seed": 1
+      }
+    },
+    {
+      "id": "smoke_bfloat16",
+      "values": {
+        "io_data_type": "bfloat16",
+        "intermediate_data_type": "float",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              2,
+              32,
+              14,
+              14
+            ],
+            "strides": [
+              6272,
+              1,
+              448,
+              32
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              2,
+              32,
+              14,
+              14
+            ],
+            "strides": [
+              6272,
+              1,
+              448,
+              32
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              32,
+              32,
+              3,
+              3
+            ],
+            "strides": [
+              288,
+              1,
+              96,
+              32
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              2,
+              32,
+              14,
+              14
+            ],
+            "strides": [
+              6272,
+              1,
+              448,
+              32
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 4,
+            "dims": [
+              1,
+              32,
+              1,
+              1
+            ],
+            "strides": [
+              32,
+              1,
+              32,
+              32
+            ],
+            "data_type": "bfloat16"
+          }
+        ],
+        "attributes": {
+          "parameters__dilation": [
+            1,
+            1
+          ],
+          "parameters__post_padding": [
+            1,
+            1
+          ],
+          "parameters__pre_padding": [
+            1,
+            1
+          ],
+          "parameters__stride": [
+            1,
+            1
+          ]
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "manual",
+        "generator_version": "1.0.0",
+        "notes": "Channels-last convolution plus a per-output-channel bias, fused by the packaged gfx950 bias engine.",
+        "operation": "ConvolutionFwd+bias",
+        "seed": 1
+      }
+    },
+    {
+      "id": "pointwise_c64_k96_bfloat16",
+      "values": {
+        "io_data_type": "bfloat16",
+        "intermediate_data_type": "float",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              2,
+              96,
+              8,
+              8
+            ],
+            "strides": [
+              6144,
+              1,
+              768,
+              96
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              2,
+              96,
+              8,
+              8
+            ],
+            "strides": [
+              6144,
+              1,
+              768,
+              96
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              96,
+              64,
+              1,
+              1
+            ],
+            "strides": [
+              64,
+              1,
+              64,
+              64
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              2,
+              64,
+              8,
+              8
+            ],
+            "strides": [
+              4096,
+              1,
+              512,
+              64
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 4,
+            "dims": [
+              1,
+              96,
+              1,
+              1
+            ],
+            "strides": [
+              96,
+              1,
+              96,
+              96
+            ],
+            "data_type": "bfloat16"
+          }
+        ],
+        "attributes": {
+          "parameters__dilation": [
+            1,
+            1
+          ],
+          "parameters__post_padding": [
+            0,
+            0
+          ],
+          "parameters__pre_padding": [
+            0,
+            0
+          ],
+          "parameters__stride": [
+            1,
+            1
+          ]
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "manual",
+        "generator_version": "1.0.0",
+        "notes": "1x1 channels-last convolution plus a per-output-channel bias.",
+        "operation": "ConvolutionFwd+bias",
+        "seed": 1
+      }
+    },
+    {
+      "id": "stride2_c32_k64_bfloat16",
+      "values": {
+        "io_data_type": "bfloat16",
+        "intermediate_data_type": "float",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              2,
+              64,
+              8,
+              8
+            ],
+            "strides": [
+              4096,
+              1,
+              512,
+              64
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              2,
+              64,
+              8,
+              8
+            ],
+            "strides": [
+              4096,
+              1,
+              512,
+              64
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              64,
+              32,
+              3,
+              3
+            ],
+            "strides": [
+              288,
+              1,
+              96,
+              32
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              2,
+              32,
+              15,
+              15
+            ],
+            "strides": [
+              7200,
+              1,
+              480,
+              32
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 4,
+            "dims": [
+              1,
+              64,
+              1,
+              1
+            ],
+            "strides": [
+              64,
+              1,
+              64,
+              64
+            ],
+            "data_type": "bfloat16"
+          }
+        ],
+        "attributes": {
+          "parameters__dilation": [
+            1,
+            1
+          ],
+          "parameters__post_padding": [
+            1,
+            1
+          ],
+          "parameters__pre_padding": [
+            1,
+            1
+          ],
+          "parameters__stride": [
+            2,
+            2
+          ]
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "manual",
+        "generator_version": "1.0.0",
+        "notes": "Strided channels-last convolution plus a per-output-channel bias.",
+        "operation": "ConvolutionFwd+bias",
+        "seed": 1
+      }
+    }
+  ]
+}

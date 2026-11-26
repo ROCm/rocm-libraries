@@ -675,6 +675,16 @@ so one binary serves any image. Take the grid from
 than re-deriving them at the call site; the formulas below document what those
 helpers compute.
 
+A forward spec built with `bias` (every forward variant of
+`direct_variants.DIRECT_FWD_BIAS_VARIANTS`, name and label tag `cbias`)
+takes the trailing `Bias` / `Bias_bytes` kernargs
+(`conv_direct_arg_names(direction="fwd", bias=True)`, launched with
+`to_launch_values(..., bias_ptr=, bias_bytes=)`) and adds
+`Bias[g*kpg + k]` (the absolute output channel, output dtype) to the fp32
+accumulators before the one rounding. The dgrad and wgrad variants, and the
+forward kernels a dgrad variant reuses over the transposed problem, have no
+bias form.
+
 ### Grouped variants
 
 ```

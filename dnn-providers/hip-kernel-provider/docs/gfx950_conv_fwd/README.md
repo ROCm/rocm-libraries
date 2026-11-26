@@ -39,3 +39,18 @@ instance is, which graphs it serves, the shipped catalog, build and packaging,
 selection among many candidates, and the GPU test suites (including the
 test-only seed engine, `hipkernel:Gfx950ConvFwdAotSeed`, that pins a small
 catalog slice instance by instance).
+
+## Convolution plus bias
+
+`hipkernel:Gfx950ConvFwdBiasAot` serves the same convolutions fused with a
+per-output-channel bias: a graph of the convolution (its output virtual) and a
+pointwise `ADD` of a bias tensor of dims `(1, K, 1, 1)` or `(K, 1, 1)` in the
+io dtype, contiguous along K. Its kernels are the bias twins of this engine's
+catalog (rocKE's `bias`, kernel and label tag `cbias`): they add `bias[k]`, `k`
+the absolute output channel, to the FP32 accumulator and round once, and take
+the bias pointer and its byte size after the plain arguments. A split-C
+instance's fold adds it. Each engine admits only its own kernels, so the plain
+engine never runs a bias kernel and declines the fused graph. Like this engine,
+it serves 2-D convolutions only. The bundle, its ABI and how to regenerate it
+are in
+[`gfx950_conv_fwd_bias_aot/README.md`](../../src/engines/kernel_ingestor_engine/descriptors/rocKE/gfx950_conv_fwd_bias_aot/README.md).

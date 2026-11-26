@@ -63,6 +63,7 @@ from rocke.core.codegen_policy import (
 from rocke.core.ir import I32, IRBuilder, KernelDef
 from rocke.helpers.spec import align_up, ceil_div
 
+from kernels.conv.conv_bias import conv_bias_rsrc, load_conv_bias_vec_f32
 from kernels.common.conv_direct_fwd_wmma import (
     _lds_frag16,
     _tdm_descriptor_3d,
@@ -109,6 +110,10 @@ class FwdGstreamWmmaSpec:
     pf_depth: int = 1
     sched: str | None = None
     wave_size: int = 32
+    # Conv + bias forward: the Bias / Bias_bytes kernarg tail; bias[k .. k+8)
+    # of a lane's accumulator vector, loaded once per block, is added in fp32
+    # before every store.
+    bias: bool = False
 
     @property
     def span16(self) -> bool:
@@ -246,6 +251,7 @@ class FwdGstreamWmmaSpec:
             "pf" if self.prefetch else "",
             f"pd{self.pf_depth}" if self.prefetch and self.pf_depth > 1 else "",
             f"s{self.sched}" if self.sched else "",
+            "cbias" if self.bias else "",
             flags={"bf16": p.dtype == "bf16"},
         )
 
@@ -363,7 +369,7 @@ def build_fwd_gstream_wmma(
     b.kernel.attrs["max_workgroup_size"] = THREADS
     if spec.sched:
         apply_codegen_policy(b.kernel, CodegenPolicy(scheduler_strategy=spec.sched))
-    params = emit_direct_params(b, direction="fwd", io_type=io_type)
+    params = emit_direct_params(b, direction="fwd", io_type=io_type, bias=spec.bias)
     Xp, Wp, Yp = params["A"], params["B"], params["D"]
 
     c0 = b.const_i32(0)
@@ -640,6 +646,15 @@ def build_fwd_gstream_wmma(
             ep_ch[m] = b.add(
                 b.mul(b.div(v, b.const_i32(KPAD)), b.const_i32(p.kpg)), r_in
             )
+    # Conv + bias: the lane's 8 accumulator slots of M tile m are output
+    # channels ep_ch[m] .. +7 for every band of the walk: load them once.
+    ep_bias = [None] * TM
+    if spec.bias:
+        bias_rsrc = conv_bias_rsrc(b, params["Bias"], params["Bias_bytes"])
+        ep_bias = [
+            load_conv_bias_vec_f32(b, bias_rsrc, ep_ch[m], 8, io_type, c0)
+            for m in range(TM)
+        ]
 
     def _epilogue(task, accs) -> None:
         n = b.div(task, n_bands)
@@ -655,7 +670,10 @@ def build_fwd_gstream_wmma(
                 off = b.mul(b.add(pix, ep_ch[m]), c2)
                 okm = ok if ep_ok[m] is None else b.land(ok, ep_ok[m])
                 voff = b.select(okm, off, params["D_bytes"])
-                val = b.vec_cast_f32_to(accs[m * TN + tn], io_type)
+                acc = accs[m * TN + tn]
+                if ep_bias[m] is not None:
+                    acc = b.fadd(acc, ep_bias[m])
+                val = b.vec_cast_f32_to(acc, io_type)
                 _buf_store_vN(b, p.dtype, y_rsrc, voff, c0, val, 4)
 
     # ---- the walk.

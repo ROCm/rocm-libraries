@@ -180,6 +180,19 @@ static int make_cfg(int idx,
     case 16:
         k->problem = make_problem(3, 1, 1, 36, 4, "bf16", 32, 40);
         return 1;
+    case 17: /* conv + bias forms of configs 0, 1, 6, 8, 9 and 12 */
+    case 18:
+    case 19:
+    case 20:
+    case 21:
+    case 22:
+    {
+        static const int base[6] = {0, 1, 6, 8, 9, 12};
+        const int which = make_cfg(base[idx - 17], c, k, arch);
+        c->bias = true;
+        k->bias = true;
+        return which;
+    }
     default:
         return -1;
     }

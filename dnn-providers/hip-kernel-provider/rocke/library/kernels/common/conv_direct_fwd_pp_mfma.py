@@ -51,9 +51,15 @@ BLOCK_K = (64, 128, 256)
 
 @dataclass(frozen=True)
 class FwdPpMfmaSpec(PpMfmaSpec):
-    """One configuration of :func:`build_fwd_pp_mfma`."""
+    """One configuration of :func:`build_fwd_pp_mfma`.
+
+    ``bias`` is the conv + bias forward: the ``Bias`` / ``Bias_bytes`` kernarg
+    tail, ``bias[k]`` added to the fp32 accumulators before the rounding. The
+    dgrad subclass of the shared spec has no such field.
+    """
 
     name: str = "fwd_pp_mfma"
+    bias: bool = False
 
 
 def fwd_pp_mfma_tile_efficiency(spec: FwdPpMfmaSpec) -> float:

@@ -34,6 +34,7 @@ __all__ = [
     "DIRECT_FWD_FLEX_MFMA",
     "DIRECT_FWD_PP_MFMA",
     "DIRECT_FWD_SMALLK_WMMA",
+    "DIRECT_FWD_BIAS_VARIANTS",
     "DIRECT_FWD_WMMA",
     "DIRECT_DW_FWD_WMMA",
     "DIRECT_FWD_GSTREAM_WMMA",
@@ -254,7 +255,51 @@ def direct_spec_takes_target_wave(variant: str, knobs: dict) -> bool:
     return variant == "direct_depthwise_dgrad_win" and bool(knobs.get("mfma"))
 
 
-def make_direct_spec(variant: str, problem, knobs: dict, wave_size: int = 64):
+# The forward variants (and the split-C fold of the forward kernels) whose
+# spec carries ``bias``: the per-output-channel bias of a conv + bias forward
+# (kernels.conv.conv_bias), added in fp32 before the one rounding to the
+# output dtype. A variant's own validator refuses the forms it cannot serve;
+# every other variant (dgrad and wgrad, and their helpers -- including the
+# forward kernels a dgrad variant reuses over the transposed problem) has no
+# bias at all.
+DIRECT_FWD_BIAS_VARIANTS = (
+    "direct_grouped",
+    "direct_nongrouped",
+    DIRECT_GROUPED_HALO,
+    "direct_depthwise",
+    "direct_depthwise_spatial",
+    "direct_depthwise_tiled",
+    "direct_depthwise_col",
+    DIRECT_DEPTHWISE_WIN_FWD,
+    DIRECT_FWD_WMMA,
+    DIRECT_FWD_SMALLC_WMMA,
+    DIRECT_FWD_SMALLK_WMMA,
+    DIRECT_FWD_SMALLC_MFMA,
+    DIRECT_FWD_SMALLK_MFMA,
+    DIRECT_FWD_PP_MFMA,
+    DIRECT_FWD_FLEX_MFMA,
+    DIRECT_DW_FWD_WMMA,
+    DIRECT_FWD_GSTREAM_WMMA,
+    DIRECT_FWD_TAPOUTER_WMMA,
+    DIRECT_SPLIT_REDUCE,
+)
+
+
+def make_direct_spec(
+    variant: str, problem, knobs: dict, wave_size: int = 64, bias: bool = False
+):
+    """The spec ``variant`` builds for ``problem``; with ``bias`` the conv +
+    bias form of a forward variant (:data:`DIRECT_FWD_BIAS_VARIANTS`; any other
+    raises ``ValueError``). The bias is a kernel identity field
+    (``KernelIdentity.bias``), not a tuning knob.
+    """
+    if bias and variant not in DIRECT_FWD_BIAS_VARIANTS:
+        raise ValueError(f"direct variant {variant!r} has no bias form")
+    spec = _make_direct_spec(variant, problem, knobs, wave_size)
+    return replace(spec, bias=True) if bias else spec
+
+
+def _make_direct_spec(variant: str, problem, knobs: dict, wave_size: int = 64):
     """The spec ``variant`` builds for ``problem``.
 
     For the MFMA dgrad pipeline this is the spec of its compute pass (a
@@ -1004,7 +1049,12 @@ def direct_entry_wave_reason(
 
 
 def direct_spec_for_problem(
-    variant: str, problem, knobs: dict, arch: str, wave_size: int = 64
+    variant: str,
+    problem,
+    knobs: dict,
+    arch: str,
+    wave_size: int = 64,
+    bias: bool = False,
 ) -> tuple[object | None, str]:
     """``(spec, "ok")`` when a binary of ``variant``/``knobs`` serves ``problem``.
 
@@ -1015,8 +1065,8 @@ def direct_spec_for_problem(
     ...). The spec is rebuilt on the real problem and run through the kernel's
     own validator, so a binary is only offered where a fresh build would accept
     the shape too. The returned spec is the one its launch geometry comes from.
-    ``wave_size`` is the binary's (its identity's). Returns ``(None, why)``
-    otherwise.
+    ``wave_size`` is the binary's (its identity's), ``bias`` its identity's
+    conv + bias form. Returns ``(None, why)`` otherwise.
     """
     if variant in DIRECT_MFMA_DGRAD:
         why = direct_mfma_knobs_reason(problem, knobs, arch)
@@ -1036,7 +1086,9 @@ def direct_spec_for_problem(
             f"one padding for both axes (only {', '.join(PER_AXIS_PAD_VARIANTS)} "
             "take a column padding of their own)"
         )
-    spec = make_direct_spec(variant, problem, knobs, wave_size)
+    spec = make_direct_spec(
+        variant, problem, knobs, wave_size, **({"bias": True} if bias else {})
+    )
     ok, why = validate_direct_spec(variant, spec, arch)
     if not ok:
         return None, why

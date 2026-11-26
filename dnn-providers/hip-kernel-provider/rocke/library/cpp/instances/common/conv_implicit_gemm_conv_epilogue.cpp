@@ -20,6 +20,7 @@
 
 #include "rocke/arena.h"
 #include "rocke/helper_rocke.helpers.io.h" /* rocke_b_pack_f32_to */
+#include "rocke/instance_conv_bias.h"
 #include "rocke/instance_conv_implicit_gemm_internal.h"
 #include <stdio.h>
 
@@ -458,6 +459,28 @@ static rocke_value_t* conv_ws_addr(rocke_ir_builder_t* b,
     return rocke_b_add(b, w->slab, rocke_b_add(b, mk, n_val));
 }
 
+/* Python _apply_bias: bias[g*kpg + k] (fp32) added to the accumulator
+ * fragments accs (num = mfmas_m * mfmas_n), written to out. */
+static void
+    conv_apply_bias(rocke_conv_build_ctx_t* ctx, rocke_value_t* const* accs, rocke_value_t** out)
+{
+    const rocke_implicit_gemm_conv_spec_t* spec = ctx->spec;
+    rocke_conv_bias_apply_implicit_gemm(ctx->b,
+                                        accs,
+                                        ctx->op,
+                                        rocke_conv_ir_dtype(ctx->b, spec->dtype_d),
+                                        ctx->fwd_p_bias,
+                                        ctx->fwd_p_bias_bytes,
+                                        ctx->lane,
+                                        ctx->warp_n_idx,
+                                        ctx->block_n_off_v,
+                                        ctx->k_out_group_base,
+                                        rocke_implicit_gemm_conv_spec_mfmas_per_warp_m(spec),
+                                        rocke_implicit_gemm_conv_spec_mfmas_per_warp_n(spec),
+                                        spec->warp_tile_n,
+                                        out);
+}
+
 /* Python _atomic() of the wave64 atomic split-K forward: the plain cshuffle
  * atomic store into D, or (split_det 1/2) the deterministic owner fold. */
 static void conv_fwd_split_store(rocke_conv_build_ctx_t* ctx,
@@ -771,15 +794,16 @@ static void conv_fwd_split_store(rocke_conv_build_ctx_t* ctx,
             rocke_b_scf_yield(b, nw, num_accs);
         }
         rocke_b_region_leave(b);
-        rocke_cshuffle_epilogue_store(b,
-                                      epi,
-                                      fold.op->results,
-                                      num_accs,
-                                      rocke_conv_d_addr,
-                                      (void*)dctx,
-                                      d_rsrc,
-                                      bound_m,
-                                      bound_n);
+        /* The whole sum is here: an "owner" bias kernel adds the bias once. */
+        rocke_value_t* const* folded = fold.op->results;
+        rocke_value_t* biased[ROCKE_CONV_MAX_ACCS];
+        if(rocke_conv_fwd_bias_stage(spec) == ROCKE_CONV_BIAS_OWNER)
+        {
+            conv_apply_bias(ctx, folded, biased);
+            folded = biased;
+        }
+        rocke_cshuffle_epilogue_store(
+            b, epi, folded, num_accs, rocke_conv_d_addr, (void*)dctx, d_rsrc, bound_m, bound_n);
     }
     rocke_b_region_leave(b);
 }
@@ -998,8 +1022,22 @@ void rocke_conv_emit_cshuffle_epilogue(rocke_ir_builder_t* b,
         /* split_tail: a whole-K tile stores plainly; a tail slice adds. */
         rocke_if_else_t ie = rocke_b_scf_if_else(b, sctx->fwd_is_full);
         rocke_b_region_enter(b, ie.then_region);
-        rocke_cshuffle_epilogue_store(
-            b, &epi, accs, num_accs, rocke_conv_d_addr, (void*)&dctx, d_rsrc, bound_m, bound_n);
+        rocke_value_t* const* full_accs = accs;
+        rocke_value_t* biased[ROCKE_CONV_MAX_ACCS];
+        if(rocke_conv_fwd_bias_stage(spec) == ROCKE_CONV_BIAS_OWNER)
+        {
+            conv_apply_bias(sctx, accs, biased);
+            full_accs = biased;
+        }
+        rocke_cshuffle_epilogue_store(b,
+                                      &epi,
+                                      full_accs,
+                                      num_accs,
+                                      rocke_conv_d_addr,
+                                      (void*)&dctx,
+                                      d_rsrc,
+                                      bound_m,
+                                      bound_n);
         rocke_b_region_leave(b);
         rocke_b_region_enter(b, ie.else_region);
         conv_fwd_split_store(sctx,
@@ -1068,6 +1106,18 @@ static void rocke_conv_emit_cluster_fold(rocke_conv_build_ctx_t* ctx)
     rocke_value_t* n0 = ctx->block_n_off_v;
     rocke_value_t* n_bound = ctx->merged ? ctx->c_gm : ctx->p_kpg;
     rocke_value_t* k_base = ctx->k_out_group_base;
+    /* A "cluster" bias kernel adds bias[k_out .. k_out + 3] to the folded sum
+     * before the cast. */
+    const bool with_bias = rocke_conv_fwd_bias_stage(spec) == ROCKE_CONV_BIAS_CLUSTER;
+    const rocke_type_t* bias_elem = NULL;
+    rocke_value_t* bias_rsrc = NULL;
+    rocke_value_t* bias_c0 = NULL;
+    if(with_bias)
+    {
+        bias_elem = rocke_conv_ir_dtype(b, spec->dtype_d);
+        bias_rsrc = rocke_conv_bias_rsrc(b, ctx->fwd_p_bias, ctx->fwd_p_bias_bytes);
+        bias_c0 = rocke_b_const_i32(b, 0);
+    }
 
     rocke_b_cluster_barrier(b);
     rocke_value_t* c_rows = rocke_b_const_i32(b, rows);
@@ -1126,6 +1176,21 @@ static void rocke_conv_emit_cluster_fold(rocke_conv_build_ctx_t* ctx)
             {
                 for(int i = 0; i < 4; ++i)
                     tot[i] = rocke_b_fadd(b, tot[i], parts[s_i][i]);
+            }
+            if(with_bias)
+            {
+                for(int i = 0; i < 4; ++i)
+                {
+                    rocke_value_t* k_i = k_out;
+                    if(i != 0)
+                    {
+                        rocke_value_t* c_i = rocke_b_const_i32(b, i);
+                        k_i = rocke_b_add(b, k_out, c_i);
+                    }
+                    rocke_value_t* bv
+                        = rocke_conv_bias_load_f32(b, bias_rsrc, k_i, bias_elem, bias_c0);
+                    tot[i] = rocke_b_fadd(b, tot[i], bv);
+                }
             }
             rocke_value_t* packed = rocke_b_pack_f32_to(b, tot, 4, spec->dtype_d);
             rocke_b_global_store_vN(b, ctx->D, off, packed, 4, 0);
@@ -1317,6 +1382,17 @@ void rocke_conv_emit_epilogue(rocke_conv_build_ctx_t* ctx)
     const rocke_implicit_gemm_conv_spec_t* spec = ctx->spec;
     int num_accs = ctx->num_final_accs;
     int i;
+
+    /* if _bias_stage == "epilogue": final_accs = _apply_bias(final_accs) --
+     * bias[g*kpg + k] in fp32, before the accumulator epilogue and the
+     * rounding (the split forms add it in their fold, fwd_bias_stage). */
+    if(rocke_conv_fwd_bias_stage(spec) == ROCKE_CONV_BIAS_EPILOGUE)
+    {
+        rocke_value_t* biased[ROCKE_CONV_MAX_ACCS];
+        conv_apply_bias(ctx, ctx->final_accs, biased);
+        for(i = 0; i < num_accs; ++i)
+            ctx->final_accs[i] = biased[i];
+    }
 
     /* final_accs = _apply_accumulator_epilogue(b, spec.acc_epilogue, final_accs) */
     rocke_value_t* final_accs[ROCKE_CONV_MAX_ACCS];

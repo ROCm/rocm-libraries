@@ -292,6 +292,11 @@ for each thread's coalesced output chunk:
   buffer_store_vN_f16(d_rsrc, d_off*2, 0, v, dwords=4)
 ```
 
+With `ImplicitGemmConvSpec.bias` (the conv + bias forward, tag `cbias`) the epilogue first adds
+`Bias[k_out]` (absolute output channel, output dtype, read through a buffer resource of the trailing
+`Bias_bytes` kernarg) to every fp32 slot, then stores as above. The split forms add it once, in the
+kernel that holds the whole sum (see `README_conv_implicit_gemm.md`, "Per-output-channel bias").
+
 ### Split-K Forward (gfx1250, gfx950)
 
 `ImplicitGemmConvSpec.split_k > 1` builds the split-K forward binary (WMMA `mem` or `wavelet` pipeline on gfx1250, MFMA `mem` / `compv3` / `compv4` on gfx950; fp16 / bf16 output on both, not fp32 or TF32, since Stage 2 has no fp32 form -- the plain K loop whose bounds become the slice; 2-D, not pointwise, no `async_dma` / `unroll_k` / `chiplet_swizzle` / `group_merge`, identity `acc_epilogue` since the reduction only adds the raw partials; checked by `fwd_split_k_reason`). It is one binary for every degree: the ABI (`conv_arg_names("fwd", two_stage=True)`) appends `ws_ptr`, `ws_bytes`, `ks` and `ks_count`, and the kernel name gains a `splitk` tag.

@@ -34,7 +34,7 @@ const rocke_pp::PpFamily kFamily
 
 rocke_pp::PpSpec pp_spec(const rocke_fwd_pp_mfma_spec_t* s)
 {
-    return {&s->problem, s->name, s->block_k, s->wave_size};
+    return {&s->problem, s->name, s->block_k, s->wave_size, s->bias};
 }
 
 /* _FwdWeights: KRSC weights staged as [block_k rows][64 channels] per tap. */

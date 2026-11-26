@@ -32,6 +32,23 @@ shipped engine's native code: the test-only seed is
 ``hipkernel:Gfx950ConvFwdAotSeed``. The config is an intermediate, regenerated from
 the lists on every run; only the seed's small one is kept, as a worked example.
 
+``--bias`` emits the bias engine, ``hipkernel:Gfx950ConvFwdBiasAot``, from a catalog of
+bias instances (identities with ``bias`` set: rocKE's forward AOT sweeps' bias axis),
+e.g. ``configs/gfx950_conv_fwd_bias_aot_<dtype>.instances.json``. Its kernels add a
+per-output-channel bias to the fp32 accumulator and take it as a trailing
+``(Bias*, Bias_bytes)`` argument pair; every descriptor carries ``bias`` = 1, which the
+native kernel matchers read (a bias kernel serves only the bias engine's
+conv + ADD graph, every other kernel only the unfused one). The bias engine has
+native symbols of its own (``hipkernel.gfx950_conv_fwd_bias_aot``) and its kernel ids
+are derived under its own name; a non-bias catalog with ``--bias``, or a bias
+identity without it, is refused::
+
+    python tools/make_conv_aot_config.py --bias --rocke-root "$ROCKE" \\
+        --instances configs/gfx950_conv_fwd_bias_aot_{fp16,bf16}.instances.json \\
+        --output "$WORK"/bias.yaml
+    python generate.py --config "$WORK"/bias.yaml --output-dir "$GENERATED" --force
+    python tools/make_conv_aot_config.py --bias --stabilize-ids "$GENERATED"/<...>/*.kdp.json
+
 Then run ``generate.py --config <output>`` and ``--stabilize-ids`` on the emitted
 bundle: the generator mints random kernel UUIDs, and a recorded autotune winner is
 keyed by kernel UUID, so this tool re-derives each kernel's UUID from its
@@ -66,6 +83,13 @@ INSTANCE_UUID_NAMESPACE = _common.INSTANCE_UUID_NAMESPACE
 #: The shipped engine. Its native symbols are the ones every bundle this tool emits
 #: names; another engine name (a test-only subset of the catalog) borrows them.
 PRODUCT_ENGINE = "hipkernel:Gfx950ConvFwdAot"
+#: The engine of the bias catalog (``--bias``): the same instances built with a
+#: per-output-channel bias epilogue, served for a conv + ADD graph by native symbols
+#: of its own.
+BIAS_ENGINE = "hipkernel:Gfx950ConvFwdBiasAot"
+#: The KMD field and spec field that mark a bias instance: 1 on every bias
+#: descriptor; the unfused engine's KMD declares no such field.
+BIAS_FIELD = "bias"
 
 _UUID = _common._UUID
 _kernels = _common._kernels
@@ -286,12 +310,37 @@ SPLIT_C_LAUNCHES = {
 _bind_rocke = _common.bind_rocke
 
 
-def spec_order(spec) -> tuple:
-    """The descriptor spec order of ``spec``'s family and direct variant."""
+def spec_order(spec, bias: bool = False) -> tuple:
+    """The descriptor spec order of ``spec``'s family and direct variant; a bias
+    instance (``bias``) states :data:`BIAS_FIELD` last."""
     if not spec.is_direct:
-        return MERGED_SPEC_ORDER if spec.is_merged else SPEC_ORDER
-    order = DIRECT_SPEC_ORDER + DIRECT_VARIANT_FIELDS[spec.direct_variant]
-    return order + ("split_c",) if spec.is_split_c else order
+        order = MERGED_SPEC_ORDER if spec.is_merged else SPEC_ORDER
+    else:
+        order = DIRECT_SPEC_ORDER + DIRECT_VARIANT_FIELDS[spec.direct_variant]
+        if spec.is_split_c:
+            order += ("split_c",)
+    return order + (BIAS_FIELD,) if bias else order
+
+
+def spec_bias(spec) -> int:
+    """``spec``'s bias flag (0 or 1); 0 for a spec that declares none."""
+    return int(getattr(spec, BIAS_FIELD, 0) or 0)
+
+
+def product_engine(bias: bool = False) -> str:
+    """The engine whose native symbols and kernel ids a bundle of the plain
+    (``bias`` False) or bias catalog is emitted for."""
+    return BIAS_ENGINE if bias else PRODUCT_ENGINE
+
+
+def _variant_name(pattern: str, bias: bool) -> str:
+    """A generator variant (kernel name) pattern of the bias catalog when ``bias``:
+    the engine slug in the name follows the engine."""
+    return (
+        pattern.replace("gfx950_conv_fwd_aot_", "gfx950_conv_fwd_bias_aot_")
+        if bias
+        else pattern
+    )
 
 
 def instance_spec(identity_dict: dict):
@@ -366,9 +415,10 @@ def shard_name(spec, sharding: str = "dtype") -> str:
 
 def build_config(
     specs: list,
-    engine_name: str = PRODUCT_ENGINE,
+    engine_name: str | None = None,
     authored_subpath: str = "",
     sharding: str = "dtype",
+    bias: bool = False,
 ) -> dict:
     """The generator config for ``specs`` (already validated, de-duplicated).
 
@@ -385,11 +435,29 @@ def build_config(
     their builder_default. Direct instances are one variant per direct kernel
     (std and spatial share one), each stating DIRECT_FIELDS and its own block
     knobs (DIRECT_VARIANT_FIELDS) and leaving the others to theirs.
+
+    ``bias`` emits the bias catalog (:data:`BIAS_ENGINE` by default): every spec
+    must be a bias instance, every variant states :data:`BIAS_FIELD` and the KMD
+    declares it, without a default. Without ``bias`` a bias instance is refused:
+    its trailing bias pointer would be launched without a value.
     """
+    product = product_engine(bias)
+    if engine_name is None:
+        engine_name = product
+    mismatched = [s.instance_id for s in specs if spec_bias(s) != int(bias)]
+    if mismatched:
+        kind = "a non-bias" if bias else "a bias"
+        raise ValueError(
+            f"{len(mismatched)} {kind} instance(s) in the "
+            f"{'bias' if bias else 'plain'} catalog, e.g. {mismatched[0]}"
+        )
     kmd = [
         {"name": name, "type": "int" if name in _INT_FIELDS else "string"}
         for name in SPEC_ORDER
-    ] + [
+    ]
+    if bias:
+        kmd.append({"name": BIAS_FIELD, "type": "int"})
+    kmd += [
         {
             "name": name,
             "type": "int" if name in _INT_FIELDS else "string",
@@ -399,6 +467,8 @@ def build_config(
         for name, default in {**DIRECT_FIELDS, **DIRECT_KNOB_FIELDS}.items()
     ]
     metadata = list(DIRECT_SPEC_ORDER + tuple(DIRECT_KNOB_FIELDS))
+    if bias:
+        metadata.append(BIAS_FIELD)
     shards = collections.defaultdict(list)
     for spec in specs:
         shards[shard_name(spec, sharding)].append(spec)
@@ -409,12 +479,20 @@ def build_config(
         if implicit:
             variants.append(
                 _variant(
-                    "gfx950_conv_fwd_aot_{dtype}_{instance_id}", SPEC_ORDER, implicit
+                    _variant_name("gfx950_conv_fwd_aot_{dtype}_{instance_id}", bias),
+                    spec_order(implicit[0], bias),
+                    implicit,
                 )
             )
         merged = [s for s in shards[shard] if s.is_merged]
         if merged:
-            variants.append(_variant(_MERGED_VARIANT_NAME, MERGED_SPEC_ORDER, merged))
+            variants.append(
+                _variant(
+                    _variant_name(_MERGED_VARIANT_NAME, bias),
+                    spec_order(merged[0], bias),
+                    merged,
+                )
+            )
         # std and spatial share one variant, as before the other direct variants.
         for group in (
             ("std", "spatial"),
@@ -433,15 +511,19 @@ def build_config(
             if members:
                 variants.append(
                     _variant(
-                        _DIRECT_VARIANT_NAMES[group[0]],
-                        spec_order(members[0]),
+                        _variant_name(_DIRECT_VARIANT_NAMES[group[0]], bias),
+                        spec_order(members[0], bias),
                         members,
                     )
                 )
         split = [s for s in shards[shard] if s.is_split_c]
         if split:
             variants.append(
-                _variant(_SPLIT_C_VARIANT_NAME, spec_order(split[0]), split)
+                _variant(
+                    _variant_name(_SPLIT_C_VARIANT_NAME, bias),
+                    spec_order(split[0], bias),
+                    split,
+                )
             )
         defaults = {
             "kind": "rocke",
@@ -465,8 +547,10 @@ def build_config(
         "knobs": list(ENGINE_KNOBS),
         "heuristic": "native",
     }
-    if engine_name != PRODUCT_ENGINE:
-        engine["native_symbols_from"] = PRODUCT_NATIVE_NAMESPACE
+    if engine_name != product:
+        engine["native_symbols_from"] = (
+            f"{product.split(':', 1)[0]}.{engine_slug(product)}"
+        )
     return {
         "dialect": "packaged",
         "authored_subpath": authored_subpath or f"rocKE/{engine_slug(engine_name)}",
@@ -490,10 +574,13 @@ dump_config = _common.dump_config
 
 
 def stabilize_ids(
-    kdp_path: Path, engine_name: str = PRODUCT_ENGINE, product: str = PRODUCT_ENGINE
+    kdp_path: Path, engine_name: str = PRODUCT_ENGINE, product: str | None = None
 ) -> int:
     """:func:`conv_aot_common.stabilize_ids` with :data:`PRODUCT_ENGINE` as the
-    default for both arguments."""
+    default for both arguments; ``product`` defaults to ``engine_name`` when that is
+    :data:`BIAS_ENGINE`, whose ids are its own."""
+    if product is None:
+        product = BIAS_ENGINE if engine_name == BIAS_ENGINE else PRODUCT_ENGINE
     return _common.stabilize_ids(kdp_path, engine_name, product)
 
 
@@ -524,10 +611,15 @@ def main(argv=None) -> int:
     )
     parser.add_argument(
         "--engine-name",
-        default=PRODUCT_ENGINE,
+        default=None,
         help="Engine the bundle declares, and whose kernel ids --stabilize-ids "
-        "derives (default: %(default)s). Another name borrows that engine's native "
-        "symbols.",
+        f"derives (default: {PRODUCT_ENGINE}, or {BIAS_ENGINE} with --bias). Another "
+        "name borrows that engine's native symbols.",
+    )
+    parser.add_argument(
+        "--bias",
+        action="store_true",
+        help=f"The catalog is of bias instances: emit {BIAS_ENGINE}'s bundle.",
     )
     parser.add_argument(
         "--authored-subpath",
@@ -555,10 +647,12 @@ def main(argv=None) -> int:
         help="Rewrite each generated .kdp.json's kernel UUIDs from instance_id, then exit.",
     )
     args = parser.parse_args(argv)
+    if args.engine_name is None:
+        args.engine_name = product_engine(args.bias)
 
     if args.stabilize_ids:
         for kdp in args.stabilize_ids:
-            count = stabilize_ids(kdp, args.engine_name)
+            count = stabilize_ids(kdp, args.engine_name, product_engine(args.bias))
             print(f"{kdp}: stabilized {count} kernel id(s)")
         return 0
     if not (args.rocke_root and args.instances and args.output):
@@ -583,6 +677,17 @@ def main(argv=None) -> int:
     for index, (spec, reason) in zip(identities, converted):
         if spec is None:
             rejected.append((index, reason))
+        elif spec_bias(spec) != int(args.bias):
+            rejected.append(
+                (
+                    index,
+                    (
+                        "a bias instance; pass --bias"
+                        if spec_bias(spec)
+                        else "not a bias instance, in a --bias catalog"
+                    ),
+                )
+            )
         elif spec.instance_id not in seen:
             seen.add(spec.instance_id)
             specs.append(spec)
@@ -603,7 +708,9 @@ def main(argv=None) -> int:
         f"# Generated by tools/make_conv_aot_config.py from {sources}; "
         "do not edit by hand.\n"
     )
-    config = build_config(specs, args.engine_name, args.authored_subpath, args.sharding)
+    config = build_config(
+        specs, args.engine_name, args.authored_subpath, args.sharding, args.bias
+    )
     args.output.write_text(header + dump_config(config))
     print(
         f"{len(specs)} instance(s) written to {args.output} "

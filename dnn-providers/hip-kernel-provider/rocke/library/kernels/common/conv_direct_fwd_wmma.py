@@ -71,6 +71,13 @@ Batch, spatial extents, the group count and both channel counts are kernargs
 (the direct-conv forward block of :func:`kernels.common.conv_abi.conv_direct_arg_names`).
 The filter, stride, dilation and padding shape the halo and the unrolled tap
 loop, so they are build-time capabilities, like the tile geometry.
+
+Conv + bias
+-----------
+``bias=True`` takes the ``Bias`` / ``Bias_bytes`` tail after the block
+(``kernels.conv.conv_bias``) and adds ``bias[k .. k+8)`` -- the 8 output
+channels of a lane's accumulator vector -- to the fp32 accumulators before
+they are rounded and staged in LDS, in both epilogues.
 """
 
 from __future__ import annotations
@@ -85,6 +92,7 @@ from rocke.core.codegen_policy import (
 from rocke.core.ir import I32, IRBuilder, KernelDef, Value, VectorType
 from rocke.helpers.spec import align_up, ceil_div
 
+from kernels.conv.conv_bias import conv_bias_rsrc, load_conv_bias_vec_f32
 from kernels.common.conv_direct_grouped import (
     DirectConvProblem,
     _io_type,
@@ -204,6 +212,9 @@ class DirectFwdWmmaSpec:
     # first pixel is a leading zero for the chunks with i < pw (zeroed per
     # chunk) and its last a trailing one for the others (the TDM extent).
     poly_view: bool = False
+    # Conv + bias forward: the Bias / Bias_bytes kernarg tail, bias[k] added
+    # to the fp32 accumulators before the store (see the module docstring).
+    bias: bool = False
 
     @property
     def vp(self) -> DirectConvProblem:
@@ -390,6 +401,7 @@ class DirectFwdWmmaSpec:
             "sv" if self.strided_view else "",
             "fn" if self.fold_n else "",
             "pv" if self.poly_view else "",
+            "cbias" if self.bias else "",
             flags={"bf16": p.dtype == "bf16"},
         )
 
@@ -735,7 +747,7 @@ def build_direct_fwd_wmma(spec: DirectFwdWmmaSpec, arch: str = "gfx1250") -> Ker
     b.kernel.attrs["max_workgroup_size"] = THREADS
     if spec.sched:
         apply_codegen_policy(b.kernel, CodegenPolicy(scheduler_strategy=spec.sched))
-    params = emit_direct_params(b, direction="fwd", io_type=io_type)
+    params = emit_direct_params(b, direction="fwd", io_type=io_type, bias=spec.bias)
     Xp, Wp, Yp = params["A"], params["B"], params["D"]
 
     c0 = b.const_i32(0)
@@ -1274,17 +1286,27 @@ def build_direct_fwd_wmma(spec: DirectFwdWmmaSpec, arch: str = "gfx1250") -> Ker
         with one TDM transfer per image; the transfer clips the tile to the
         image and to the group's channels (the pad columns lie past them)."""
         b.sync_lds_only()
+        if spec.bias:
+            bias_rsrc = conv_bias_rsrc(b, params["Bias"], params["Bias_bytes"])
         for m in range(TM):
             col = b.add(
                 b.mul(b.add(b.mul(wave_k, b.const_i32(TM)), b.const_i32(m)), c16),
                 b.mul(lhalf, c8),
             )
+            if spec.bias:
+                # The lane's 8 accumulator slots are channels col .. col+7.
+                bv = load_conv_bias_vec_f32(
+                    b, bias_rsrc, b.add(k_out, col), 8, io_type, c0
+                )
             for tn in range(TN):
                 px = b.add(
                     b.mul(b.add(b.mul(wave_p, b.const_i32(TN)), b.const_i32(tn)), c16),
                     l16,
                 )
-                val = b.vec_cast_f32_to(accs[m * TN + tn], io_type)
+                acc = accs[m * TN + tn]
+                if spec.bias:
+                    acc = b.fadd(acc, bv)
+                val = b.vec_cast_f32_to(acc, io_type)
                 b.smem_store_vN(
                     lds, [c0, b.add(b.mul(px, b.const_i32(EPITCH)), col)], val, n=8
                 )
@@ -1323,12 +1345,22 @@ def build_direct_fwd_wmma(spec: DirectFwdWmmaSpec, arch: str = "gfx1250") -> Ker
         WPX = TN * 16
         EP = TM * 16 + CH_PAD
         ROWS = WPX // TW
+        if spec.bias:
+            bias_rsrc = conv_bias_rsrc(b, params["Bias"], params["Bias_bytes"])
+            k_wave = b.add(k_out, b.mul(wave_k, b.const_i32(TM * 16)))
         base = b.mul(wave_id, b.const_i32(WPX * EP))
         for m in range(TM):
             col = b.add(b.const_i32(m * 16), b.mul(lhalf, c8))
+            if spec.bias:
+                bv = load_conv_bias_vec_f32(
+                    b, bias_rsrc, b.add(k_wave, col), 8, io_type, c0
+                )
             for tn in range(TN):
                 px = b.add(b.const_i32(tn * 16), l16)
-                val = b.vec_cast_f32_to(accs[m * TN + tn], io_type)
+                acc = accs[m * TN + tn]
+                if spec.bias:
+                    acc = b.fadd(acc, bv)
+                val = b.vec_cast_f32_to(acc, io_type)
                 b.smem_store_vN(
                     lds,
                     [c0, b.add(base, b.add(b.mul(px, b.const_i32(EP)), col))],

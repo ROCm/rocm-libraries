@@ -100,6 +100,17 @@ workspace bound to ``D``, and :func:`build_direct_conv_split_reduce` folds
 the slabs into the output. It fills the device on small maps with deep
 channel loops (7x7..12x12, C >= 512).
 
+Conv + bias
+-----------
+``bias=True`` adds a per-output-channel bias (``kernels.conv.conv_bias``):
+the kernel takes the ``Bias`` / ``Bias_bytes`` tail after the direct-conv
+block and adds ``bias[k]`` to the fp32 accumulators before the one rounding to
+the output dtype. With ``split_c > 1`` the conv pass declares the tail but
+does not read it -- its slabs stay raw partial sums -- and the fold
+(:class:`DirectSplitReduceSpec` with ``bias=True``) adds ``bias[k]`` exactly
+once: the two passes launch with one shared kernarg block, so both carry the
+tail.
+
 ``grouped=True`` serves ``groups > 1`` with the same pipeline: ``p_groups``
 and the per-group channel counts are runtime, and a workgroup owns
 ``group_merge`` consecutive groups, run as one dense problem whose weights
@@ -145,6 +156,7 @@ from kernels.common.conv_direct_grouped import (
     _trunc_f32,
     emit_direct_params,
 )
+from kernels.conv.conv_bias import conv_bias_rsrc, load_conv_bias_vec_f32
 
 # Global load width for the activation staging path, in halves (dwordx4).
 _X_LOAD_VEC = 8
@@ -267,6 +279,11 @@ class DirectNongroupedConvSpec:
     # memory-bound. ``grouped=False`` is the dense (``groups == 1``) kernel.
     grouped: bool = False
     group_merge: int = 1
+    # Conv + bias forward: take the Bias / Bias_bytes kernarg tail and add
+    # bias[k] to the fp32 accumulators before the store. A split_c > 1 conv
+    # pass only declares the tail (the fold adds the bias; see the module
+    # docstring).
+    bias: bool = False
 
     # ---- derived geometry -------------------------------------------------
 
@@ -436,6 +453,7 @@ class DirectNongroupedConvSpec:
                 and self.lds_pad != default_lds_pad(p.dtype)
                 else ""
             ),
+            "cbias" if self.bias else "",
             _DTYPE_FLAG.get(p.dtype, p.dtype),
         )
 
@@ -1106,7 +1124,7 @@ def build_direct_conv_nongrouped(
     if spec.waves_per_eu is not None:
         b.kernel.attrs["waves_per_eu"] = spec.waves_per_eu
 
-    params = emit_direct_params(b, io_type=io_type)
+    params = emit_direct_params(b, io_type=io_type, bias=spec.bias)
     A = params["A"]
     Bp = params["B"]
     D = params["D"]
@@ -1634,6 +1652,31 @@ def build_direct_conv_nongrouped(
         c_f32 = b.const_i32(4)
     else:
         img_out_base = b.mul(n_img, params["p_D_stride_n"])
+    # Conv + bias: bias[k .. k+4) of every quad this lane stores, as fp32,
+    # loaded once ahead of the stores. A split_c > 1 pass leaves its
+    # partial sums raw (the fold adds the bias).
+    bias_q = None
+    if spec.bias and SPLIT == 1:
+        bias_rsrc = conv_bias_rsrc(b, params["Bias"], params["Bias_bytes"])
+        bias_q = [
+            [
+                load_conv_bias_vec_f32(
+                    b,
+                    bias_rsrc,
+                    k_store(
+                        b.add(
+                            b.add(k_lane_base, b.const_i32(mt * AT)),
+                            b.const_i32(q * (AT // 4)),
+                        )
+                    ),
+                    4,
+                    io_type,
+                    c0,
+                )
+                for q in range(QUADS)
+            ]
+            for mt in range(MT_W)
+        ]
 
     for mt in range(MT_W):
         k_mt = b.add(k_lane_base, b.const_i32(mt * AT))
@@ -1673,6 +1716,8 @@ def build_direct_conv_nongrouped(
                     quad = b.vec_pack(
                         [b.vec_extract(acc, 4 * q + j) for j in range(4)], F32
                     )
+                    if bias_q is not None:
+                        quad = b.fadd(quad, bias_q[mt][q])
                     if F32S:
                         _store_from_f32(b, dtype, d_rsrc, safe, c0, quad, 4)
                         continue
@@ -1703,12 +1748,19 @@ class DirectSplitReduceSpec:
     kernarg block, so one :class:`ConvArgs` launches both passes; ``B`` is
     unused. ``split_c`` is baked: the fold is ``split_c`` independent loads,
     unrolled, and MUST match the conv pass that filled the workspace.
+
+    ``bias`` is the fold of a conv + bias forward: it takes the ``Bias`` /
+    ``Bias_bytes`` tail (the same shared kernarg block as the conv pass, which
+    declares it too but leaves its partial sums raw) and adds ``bias[k]``,
+    ``k = elem % K``, to the sum before the one rounding -- exactly once per
+    output element.
     """
 
     dtype: str = "fp16"
     split_c: int = 2
     threads: int = 256
     name: str = "direct_conv_split_reduce"
+    bias: bool = False
 
     def kernel_name(self) -> str:
         from rocke.helpers.spec import kernel_name_join
@@ -1717,6 +1769,7 @@ class DirectSplitReduceSpec:
             self.name,
             f"sc{self.split_c}",
             f"b{self.threads}",
+            "cbias" if self.bias else "",
             "bf16" if self.dtype == "bf16" else "",
         )
 
@@ -1753,7 +1806,7 @@ def build_direct_conv_split_reduce(
 
     b = IRBuilder(spec.kernel_name())
     b.kernel.attrs["max_workgroup_size"] = THREADS
-    params = emit_direct_params(b, io_type=io_type)
+    params = emit_direct_params(b, io_type=io_type, bias=spec.bias)
     p_N, p_Ho, p_Wo = params["p_N"], params["p_Ho"], params["p_Wo"]
     K = params["p_total_k"]
 
@@ -1800,6 +1853,13 @@ def build_direct_conv_split_reduce(
         b.add(b.mul(wo, params["p_D_stride_wo"]), k),
     )
     d_off = b.select(valid, b.mul(d_elems, b.const_i32(2)), oob_base)
-    out = _trunc_f32(b, dtype, b.vec_concat(sum_lo, sum_hi))
+    total_sum = b.vec_concat(sum_lo, sum_hi)
+    if spec.bias:
+        # The vector's 8 elements are channels k .. k+7 of one pixel (K is a
+        # multiple of 16, elem of 8): bias[k .. k+8) once, after the fold.
+        bias_rsrc = conv_bias_rsrc(b, params["Bias"], params["Bias_bytes"])
+        bias_v = load_conv_bias_vec_f32(b, bias_rsrc, k, _REDUCE_VEC, io_type, c0)
+        total_sum = b.fadd(total_sum, bias_v)
+    out = _trunc_f32(b, dtype, total_sum)
     _buf_store_vN(b, dtype, d_rsrc, d_off, c0, out, 4)
     return b.kernel

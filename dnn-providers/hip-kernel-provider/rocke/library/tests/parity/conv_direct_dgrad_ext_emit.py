@@ -40,6 +40,13 @@
 # on gfx950) and 70 (wave64 on gfx1250) reject; 71 is the depthwise fwd at
 # stride 1 (the gfx1250 depthwise forward's kernel) and 72 (fwd at stride 2,
 # a wave64 mode) rejects.
+# Indices 89..: the conv + bias forward (``bias=True``) of forward configs
+# above (_BIAS_CFGS): the generic DirectConvSpec (the fused-weight rows with
+# their weights preloaded instead) and the windowed Toeplitz forward, MFMA
+# and WMMA; a fused-weights spec, a dgrad (no fwd) spec and the 4c dgrad with
+# bias reject.
+from dataclasses import replace
+
 from _emit_common import run_emit
 from kernels.common.conv_direct_grouped import (
     DirectConv4cSpec,
@@ -676,6 +683,67 @@ def _f32_spec(idx: int):
     return None
 
 
+# Conv + bias configs from index _BIAS_CFG_BASE: (config, unfuse) -- the
+# config above rebuilt with bias=True; unfuse swaps the fused dgrad weights
+# for the plain preload (the forward the row-stream knobs serve).
+_BIAS_CFG_BASE = _F32_CFG_BASE + len(_F32_GENERIC_CFGS) + len(_F32_FOURC_CFGS)
+_BIAS_CFGS = (
+    # 0..3: generic -- preload, persistent + runtime K loop, waves_q x waves_k,
+    # runtime channels.
+    (32, False),
+    (41, False),
+    (42, False),
+    (43, False),
+    # 4..8: generic row-stream knobs (staged output, LDS pad, XCD tiles, row
+    # exit, fold_k32 + waves_m, 5x5 prefetch 3, gfx942).
+    (33, True),
+    (34, True),
+    (35, True),
+    (36, True),
+    (38, True),
+    # 9: fused dgrad weights with bias -- both engines reject.
+    (30, False),
+    # 10..11: fp32 storage (tf32 row stream, gfx942 tf32 staged output).
+    (73, False),
+    (77, False),
+    # 12..21: the windowed Toeplitz MFMA forward -- depthwise (w_fold 2,
+    # ragged rows, 3x3), grouped cpg 8 / 16, stride 2 (depthwise, cpg 16),
+    # cpg 24, cpg 64 at stride 2.
+    (45, False),
+    (46, False),
+    (47, False),
+    (50, False),
+    (51, False),
+    (53, False),
+    (56, False),
+    (57, False),
+    (59, False),
+    (61, False),
+    # 22: the WMMA (gfx1250) depthwise forward.
+    (71, False),
+    # 23: the Toeplitz dgrad (no fwd) with bias -- both engines reject.
+    (11, False),
+    # 24: the 4c fused-weight dgrad with bias -- both engines reject.
+    (20, False),
+)
+
+
+def _bias_spec(idx: int):
+    """Config ``_BIAS_CFG_BASE + idx``, or None past the last one."""
+    if not 0 <= idx < len(_BIAS_CFGS):
+        return None
+    base, unfuse = _BIAS_CFGS[idx]
+    spec, arch = _spec(base)
+    if unfuse:
+        spec = replace(
+            spec,
+            dgrad_fused_weights=False,
+            dgrad_weights_lds=False,
+            preload_weights=True,
+        )
+    return replace(spec, bias=True), arch
+
+
 def _win_spec(cfg):
     N, H, W, G, KH, KW, PAD, dtype, arch, knobs = cfg
     problem = DirectConvProblem(
@@ -703,6 +771,11 @@ def _build(spec, arch):
 
 
 def _spec(idx: int):
+    if idx >= _BIAS_CFG_BASE:
+        sel = _bias_spec(idx - _BIAS_CFG_BASE)
+        if sel is None:
+            raise SystemExit(f"unknown config index {idx}")
+        return sel
     if idx >= _F32_CFG_BASE:
         sel = _f32_spec(idx - _F32_CFG_BASE)
         if sel is None:

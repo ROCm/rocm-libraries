@@ -658,8 +658,9 @@ def test_direct_instances_are_variants_stating_their_own_fields(
         for f in dataclasses.fields(Gfx950ConvFwdAotSpec)
         if f.name in defaults
     } == defaults
+    # The bias flag comes last; only the bias catalog's KMD declares it.
     assert [f.name for f in dataclasses.fields(Gfx950ConvFwdAotSpec)] == list(
-        tool.SPEC_ORDER + tuple(defaults)
+        tool.SPEC_ORDER + tuple(defaults) + (tool.BIAS_FIELD,)
     )
     assert config["engine"]["knobs"] == list(tool.ENGINE_KNOBS)
     kmd = {field["name"] for field in config["kmd_fields"]}
@@ -1150,4 +1151,100 @@ def test_native_direct_launch_cases_are_the_adapters():
         (v, ok)
         for v in ("TILED", "COL", "GROUPED", "NONGROUPED")
         for ok in (True, False)
+    }
+
+
+# ---- --bias: hipkernel:Gfx950ConvFwdBiasAot ----
+
+_BIAS_DIR = _PROVIDER / "descriptors/rocKE/gfx950_conv_fwd_bias_aot"
+
+
+class _Biased:
+    """A spec of the bias catalog: ``spec`` with ``bias`` set, as rocKE's bias axis
+    builds it. A stand-in, so the config's shape is tested without a bias catalog."""
+
+    def __init__(self, spec):
+        self._spec = spec
+        self.bias = 1
+
+    def __getattr__(self, name):
+        return getattr(self._spec, name)
+
+
+def test_the_bias_catalog_is_its_own_engine_stating_the_bias(seed_specs):
+    biased = [_Biased(spec) for spec in seed_specs]
+    config = tool.build_config(biased, bias=True)
+    assert config["engine"]["name"] == tool.BIAS_ENGINE
+    # Native symbols of its own: hipkernel.gfx950_conv_fwd_bias_aot.*.
+    assert "native_symbols_from" not in config["engine"]
+    assert config["authored_subpath"] == "rocKE/gfx950_conv_fwd_bias_aot"
+    names = [field["name"] for field in config["kmd_fields"]]
+    assert names.index(tool.BIAS_FIELD) == names.index("layout") + 1
+    (bias_field,) = [f for f in config["kmd_fields"] if f["name"] == tool.BIAS_FIELD]
+    assert bias_field == {"name": tool.BIAS_FIELD, "type": "int"}
+    assert tool.BIAS_FIELD in config["specialization"]["metadata_fields"]
+    plain = tool.build_config(seed_specs)
+    for pack, plain_pack in zip(config["packs"], plain["packs"]):
+        assert pack["name"] == plain_pack["name"]
+        assert pack.get("dispatch") == plain_pack.get("dispatch")
+        for variant, plain_variant in zip(pack["variants"], plain_pack["variants"]):
+            assert variant["name"].startswith("gfx950_conv_fwd_bias_aot_")
+            assert variant["spec_order"] == plain_variant["spec_order"] + [
+                tool.BIAS_FIELD
+            ]
+            assert variant["metadata"] == variant["spec_order"]
+            assert all(shape[tool.BIAS_FIELD] == 1 for shape in variant["shapes"])
+
+
+def test_the_plain_and_bias_catalogs_refuse_each_others_instances(seed_specs):
+    with pytest.raises(ValueError, match="non-bias"):
+        tool.build_config(seed_specs, bias=True)
+    with pytest.raises(ValueError, match="a bias instance"):
+        tool.build_config([_Biased(seed_specs[0])] + seed_specs[1:])
+    # A test-only subset of the bias catalog borrows the bias engine's symbols.
+    subset = tool.build_config(
+        [_Biased(spec) for spec in seed_specs], f"{tool.BIAS_ENGINE}Seed", bias=True
+    )
+    assert (
+        subset["engine"]["native_symbols_from"] == "hipkernel.gfx950_conv_fwd_bias_aot"
+    )
+
+
+def test_bias_kernel_ids_are_derived_under_the_bias_engine(seed_specs):
+    instance_id = seed_specs[0].instance_id
+    assert tool.kernel_uuid(
+        instance_id, tool.BIAS_ENGINE, tool.BIAS_ENGINE
+    ) == tool.kernel_uuid(instance_id)
+    assert tool.product_engine(bias=True) == tool.BIAS_ENGINE
+    assert tool.product_engine() == tool.PRODUCT_ENGINE
+
+
+def test_the_shipped_bias_descriptors_are_the_configs(seed_specs):
+    config = tool.build_config([_Biased(spec) for spec in seed_specs], bias=True)
+    slug = tool.engine_slug(tool.BIAS_ENGINE)
+    kmd = json.loads((_BIAS_DIR / f"{slug}.kmd.json").read_text())
+    expected = [
+        {key: value for key, value in field.items() if key != "builder_default"}
+        for field in config["kmd_fields"]
+    ]
+    assert kmd["fields"] == expected
+    ued = json.loads((_BIAS_DIR / f"{slug}.ued.json").read_text())
+    assert ued["name"] == tool.BIAS_ENGINE
+    assert ued["metadata"] == kmd["id"]
+    assert ued["knobs"] == config["engine"]["knobs"]
+    assert ued["graph_match"] == {
+        "native": "hipkernel.gfx950_conv_fwd_bias_aot.graph_match"
+    }
+    for name, symbol in (
+        (f"{slug}.udd.json", "hipkernel.gfx950_conv_fwd_bias_aot.dispatch"),
+        (
+            f"{slug}_split_c.udd.json",
+            "hipkernel.gfx950_conv_fwd_bias_aot.split_c_dispatch",
+        ),
+    ):
+        assert json.loads((_BIAS_DIR / name).read_text())["dispatch_symbol"] == symbol
+    # No document id repeats one of the unfused engine's bundle.
+    shipped = {json.loads(p.read_text())["id"] for p in _SHIPPED_DIR.glob("*.json")}
+    assert not shipped & {
+        json.loads(p.read_text())["id"] for p in _BIAS_DIR.glob("*.json")
     }

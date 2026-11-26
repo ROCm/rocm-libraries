@@ -44,6 +44,7 @@
 
 #include "rocke/helper_rocke.helpers.io.h"
 #include "rocke/helper_rocke.helpers.transforms.h"
+#include "rocke/instance_conv_bias.h"
 #include "rocke/instance_conv_direct_grouped.h"
 #include "rocke/instance_conv_direct_grouped_internal.h"
 #include "rocke/ir.h"
@@ -216,7 +217,10 @@ rocke_kernel_def_t* rocke_build_direct_depthwise_spatial(
     /* ---- parameters ---- */
     {
         /* The AOT kernarg block, in conv_abi order. */
-        rocke_dconv_emit_params(bld, &params, "fwd", rocke_dconv_io_type(bld, dtype));
+        if(spec->bias)
+            rocke_dconv_emit_params_bias(bld, &params, rocke_dconv_io_type(bld, dtype));
+        else
+            rocke_dconv_emit_params(bld, &params, "fwd", rocke_dconv_io_type(bld, dtype));
         A = params.A;
         Bp = params.Bp;
         D = params.D;
@@ -318,6 +322,14 @@ rocke_kernel_def_t* rocke_build_direct_depthwise_spatial(
                     = rocke_b_select(bld, w_valid, rocke_b_cast_to_f32(bld, w_h), zero_f32);
             }
         }
+    }
+    /* Conv + bias: bias[ch] as fp32, added to every flushed output. */
+    rocke_value_t* bias_f32 = NULL;
+    if(spec->bias)
+    {
+        rocke_value_t* bias_rsrc = rocke_conv_bias_rsrc(bld, params.Bias, params.Bias_bytes);
+        bias_f32
+            = rocke_conv_bias_load_f32(bld, bias_rsrc, ch, rocke_dconv_io_type(bld, dtype), c0);
     }
 
     /* ================================================================== *
@@ -545,6 +557,8 @@ rocke_kernel_def_t* rocke_build_direct_depthwise_spatial(
 
             safe_d = rocke_b_select(
                 bld, store_ok, rocke_b_mul(bld, d_off, c_half_bytes), oob_sentinel);
+            if(bias_f32 != NULL)
+                acc_val = rocke_b_fadd(bld, acc_val, bias_f32);
             rocke_dconv_scalar_store(bld, dtype, d_rsrc, safe_d, c0, acc_val);
 
             /* Unconditional static reset */

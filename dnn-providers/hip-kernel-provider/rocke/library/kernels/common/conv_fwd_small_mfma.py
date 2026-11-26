@@ -42,6 +42,10 @@ for the ``tiles_per_block`` output tiles a block walks; the accumulator of a
 as one 8-byte write. With ``prefetch`` the next tile's window loads are issued
 before the current tile's compute and stores, so they are in flight meanwhile.
 
+Conv + bias (``bias=True`` on either spec): the ``Bias`` / ``Bias_bytes``
+kernarg tail, ``bias[k]`` added to the fp32 sums before the rounding -- per
+accumulator quad (small C) or per channel after the overlap-add (small K).
+
 AOT: batch, extents and the *other* channel count are kernargs; filter,
 stride, padding, the small channel count and the tile geometry are baked.
 """
@@ -54,6 +58,11 @@ from rocke.core.arch import ArchTarget
 from rocke.core.ir import IRBuilder, KernelDef, Value
 from rocke.helpers.spec import ceil_div
 
+from kernels.conv.conv_bias import (
+    conv_bias_rsrc,
+    load_conv_bias_f32,
+    load_conv_bias_vec_f32,
+)
 from kernels.common.conv_direct_grouped import (
     DirectConvProblem,
     _io_type,
@@ -123,6 +132,8 @@ class FwdSmallcMfmaSpec:
     # flight meanwhile (the window load otherwise stalls each tile in turn).
     prefetch: bool = False
     wave_size: int = 64
+    # Conv + bias forward (the Bias / Bias_bytes kernarg tail).
+    bias: bool = False
 
     @property
     def S(self) -> int:
@@ -194,7 +205,7 @@ class FwdSmallcMfmaSpec:
             f"ow{self.out_w}",
             f"tb{self.tiles_per_block}",
             "pf" if self.prefetch else "",
-            flags={"bf16": p.dtype == "bf16"},
+            flags={"cbias": self.bias, "bf16": p.dtype == "bf16"},
         )
 
     def n_tiles(self) -> int:
@@ -291,7 +302,7 @@ def build_fwd_smallc_mfma(spec: FwdSmallcMfmaSpec, arch: str = "gfx950") -> Kern
 
     b = IRBuilder(spec.kernel_name())
     b.kernel.attrs["max_workgroup_size"] = THREADS
-    params = emit_direct_params(b, direction="fwd", io_type=io_type)
+    params = emit_direct_params(b, direction="fwd", io_type=io_type, bias=spec.bias)
     A, Bp, D = params["A"], params["B"], params["D"]
 
     c0 = b.const_i32(0)
@@ -346,6 +357,22 @@ def build_fwd_smallc_mfma(spec: FwdSmallcMfmaSpec, arch: str = "gfx950") -> Kern
                 )
             per_step.append(b.vec_pack(elems, io_type))
         a_frags.append(per_step)
+
+    # ---- conv + bias: bias[k .. k+4) of each m tile's lane quad (tile
+    # independent), as fp32.
+    bias_m = None
+    if spec.bias:
+        bias_rsrc = conv_bias_rsrc(b, params["Bias"], params["Bias_bytes"])
+        bias_m = []
+        for m in range(TM):
+            k = b.add(
+                k_blk,
+                b.add(
+                    b.mul(b.add(b.mul(wave_k, b.const_i32(TM)), b.const_i32(m)), c16),
+                    b.mul(lgrp, c4),
+                ),
+            )
+            bias_m.append(load_conv_bias_vec_f32(b, bias_rsrc, k, 4, io_type, c0))
 
     # ---- the window offset of each fragment element, relative to the pixel's
     # (tap 0, channel 0) element; past-the-filter indices read offset 0.
@@ -498,10 +525,13 @@ def build_fwd_smallc_mfma(spec: FwdSmallcMfmaSpec, arch: str = "gfx950") -> Kern
                     ),
                 )
                 with b.scf_if(b.land(px_ok, b.cmp_lt(k, c_K))):
+                    acc = accs[m * TN + tn]
+                    if bias_m is not None:
+                        acc = b.fadd(acc, bias_m[m])
                     b.global_store_vN(
                         D,
                         b.add(px_off, k),
-                        _trunc_f32(b, p.dtype, accs[m * TN + tn]),
+                        _trunc_f32(b, p.dtype, acc),
                         4,
                         align=8,
                     )
@@ -563,6 +593,8 @@ class FwdSmallkMfmaSpec:
     out_h: int = 16  # output rows per block
     out_w: int = 16  # output columns per block
     wave_size: int = 64
+    # Conv + bias forward (the Bias / Bias_bytes kernarg tail).
+    bias: bool = False
 
     @property
     def S(self) -> int:
@@ -615,7 +647,7 @@ class FwdSmallkMfmaSpec:
             f"w{self.waves}",
             f"oh{self.out_h}",
             f"ow{self.out_w}",
-            flags={"bf16": p.dtype == "bf16"},
+            flags={"cbias": self.bias, "bf16": p.dtype == "bf16"},
         )
 
     def grid(self) -> tuple[int, int, int]:
@@ -686,7 +718,7 @@ def build_fwd_smallk_mfma(spec: FwdSmallkMfmaSpec, arch: str = "gfx950") -> Kern
 
     b = IRBuilder(spec.kernel_name())
     b.kernel.attrs["max_workgroup_size"] = THREADS
-    params = emit_direct_params(b, direction="fwd", io_type=io_type)
+    params = emit_direct_params(b, direction="fwd", io_type=io_type, bias=spec.bias)
     A, Bp, D = params["A"], params["B"], params["D"]
 
     c0 = b.const_i32(0)
@@ -799,6 +831,16 @@ def build_fwd_smallk_mfma(spec: FwdSmallkMfmaSpec, arch: str = "gfx950") -> Kern
                 b.smem_store_vN(zl, [c0, zi], b.vec_extract(acc, i), n=1)
     b.sync_lds_only()
 
+    # ---- conv + bias: bias[k] of each of the K channels, as fp32, added to
+    # the overlap-added sums.
+    bias_k = None
+    if spec.bias:
+        bias_rsrc = conv_bias_rsrc(b, params["Bias"], params["Bias_bytes"])
+        bias_k = [
+            load_conv_bias_f32(b, bias_rsrc, b.const_i32(k), io_type, c0)
+            for k in range(K)
+        ]
+
     # ---- overlap-add: one output pixel (all K channels) per thread and pass.
     for it in range(ceil_div(OH * OW, THREADS)):
         px = b.add(tid, b.const_i32(it * THREADS))
@@ -829,6 +871,8 @@ def build_fwd_smallk_mfma(spec: FwdSmallkMfmaSpec, arch: str = "gfx950") -> Kern
                     )
                     v = b.vec_extract(b.smem_load_vN(zl, c0, zi, dtype=F32, n=1), 0)
                     acc = v if acc is None else b.fadd(acc, v)
+            if bias_k is not None:
+                acc = b.fadd(acc, bias_k[k])
             sums.append(acc)
         y_off = b.add(
             b.add(

@@ -25,6 +25,7 @@
 #include "rocke/instance_conv_direct_grouped.h"
 #include <stdio.h>
 
+#include "rocke/instance_conv_bias.h"
 #include "rocke/instance_conv_direct_grouped_internal.h"
 #include "rocke/ir.h"
 #include "rocke/ir_internal.h" /* rocke_i_set_err */
@@ -84,7 +85,10 @@ bool rocke_dconv32c_prologue(rocke_dconv_32c_ctx_t* ctx)
     rocke_attr_set_int(b, &b->kernel->attrs, "max_workgroup_size", ctx->THREADS);
 
     /* params: the AOT kernarg block, in conv_abi order. */
-    rocke_dconv_emit_params(b, &ctx->params, "fwd", ctx->io_type);
+    if(ctx->spec->bias)
+        rocke_dconv_emit_params_bias(b, &ctx->params, ctx->io_type);
+    else
+        rocke_dconv_emit_params(b, &ctx->params, "fwd", ctx->io_type);
     ctx->A = ctx->params.A;
     ctx->Bp = ctx->params.Bp;
     ctx->D = ctx->params.D;
@@ -491,6 +495,30 @@ rocke_kernel_def_t* rocke_dconv32c_stream_h_loop(rocke_dconv_32c_ctx_t* ctx)
             return NULL;
         ctx->d_desc = &d_dyn->base;
     }
+    /* Conv + bias: slot i of the lane's 16-slot accumulator is channel
+     * g*kpg + (i/4)*8 + k_blk*4 + i%4, so its bias is four runs of 4. */
+    if(ctx->spec->bias)
+    {
+        rocke_value_t* bias_rsrc
+            = rocke_conv_bias_rsrc(b, ctx->params.Bias, ctx->params.Bias_bytes);
+        rocke_value_t* m_g = rocke_b_mul(b, ctx->g, ctx->c_kpg);
+        rocke_value_t* m_kb = rocke_b_mul(b, ctx->k_blk, rocke_b_const_i32(b, 4));
+        rocke_value_t* k_bias = rocke_b_add(b, m_g, m_kb);
+        rocke_value_t* runs[4];
+        rocke_value_t* elems[16];
+        for(int octant = 0; octant < 4; ++octant)
+        {
+            rocke_value_t* k_o = k_bias;
+            if(octant != 0)
+                k_o = rocke_b_add(b, k_bias, rocke_b_const_i32(b, octant * 8));
+            runs[octant]
+                = rocke_conv_bias_load_vec_f32(b, bias_rsrc, k_o, 4, ctx->io_type, ctx->c0);
+        }
+        for(int octant = 0; octant < 4; ++octant)
+            for(int i = 0; i < 4; ++i)
+                elems[octant * 4 + i] = rocke_b_vec_extract(b, runs[octant], i);
+        ctx->bias_acc = rocke_b_vec_pack(b, elems, 16, rocke_f32());
+    }
 
     if(num_accs > (int)(sizeof(iter_args) / sizeof(iter_args[0])))
     {
@@ -654,6 +682,8 @@ rocke_kernel_def_t* rocke_dconv32c_stream_h_loop(rocke_dconv_32c_ctx_t* ctx)
         {
             int flat = qt * KH + P_FLUSH;
             rocke_value_t* acc_to_flush = accs_flat[flat];
+            if(ctx->bias_acc != NULL)
+                acc_to_flush = rocke_b_fadd(b, acc_to_flush, ctx->bias_acc);
             rocke_value_t* out_q;
             rocke_value_t* store_ok;
             rocke_value_t* k_base;

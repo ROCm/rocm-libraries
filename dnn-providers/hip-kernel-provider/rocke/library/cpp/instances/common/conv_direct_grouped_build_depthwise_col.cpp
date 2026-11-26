@@ -47,6 +47,7 @@
 
 #include "rocke/helper_rocke.helpers.fuse.h"
 #include "rocke/helper_rocke.helpers.transforms.h"
+#include "rocke/instance_conv_bias.h"
 #include "rocke/instance_conv_direct_grouped.h"
 #include "rocke/instance_conv_direct_grouped_internal.h"
 #include "rocke/ir.h"
@@ -166,7 +167,10 @@ bool rocke_dconv_dwcol_prologue(rocke_dconv_dwcol_ctx_t* ctx)
     rocke_attr_set_int(b, &b->kernel->attrs, "max_workgroup_size", ctx->THREADS);
 
     /* params: the AOT kernarg block, in conv_abi order. */
-    rocke_dconv_emit_params(b, &ctx->params, "fwd", ctx->DT);
+    if(spec->bias)
+        rocke_dconv_emit_params_bias(b, &ctx->params, ctx->DT);
+    else
+        rocke_dconv_emit_params(b, &ctx->params, "fwd", ctx->DT);
     ctx->A = ctx->params.A;
     ctx->Bp = ctx->params.Bp;
     ctx->D = ctx->params.D;
@@ -420,6 +424,14 @@ rocke_kernel_def_t* rocke_dconv_dwcol_col_loop(rocke_dconv_dwcol_ctx_t* ctx)
     /* Drain the band once, after the column loop.  The last row tile of an
      * image may be partial, so the rows are bounded by p_Ho. */
     final_accs = col_loop.op->results;
+    /* Conv + bias: bias[ch] as fp32, added to every output before its store. */
+    rocke_value_t* bias_f32 = NULL;
+    if(ctx->spec->bias)
+    {
+        rocke_value_t* bias_rsrc
+            = rocke_conv_bias_rsrc(b, ctx->params.Bias, ctx->params.Bias_bytes);
+        bias_f32 = rocke_conv_bias_load_f32(b, bias_rsrc, ctx->ch, ctx->DT, ctx->c0);
+    }
     for(h_out = 0; h_out < BLOCK_H; ++h_out)
     {
         rocke_value_t* out_h = rocke_b_add(b, ctx->ho_start, rocke_b_const_i32(b, h_out));
@@ -442,10 +454,10 @@ rocke_kernel_def_t* rocke_dconv_dwcol_col_loop(rocke_dconv_dwcol_ctx_t* ctx)
             d_vals[3] = ctx->ch;
             rocke_transforms_descriptor_offset(
                 b, ctx->d_desc, d_names, d_vals, 4, &d_off, &d_valid);
-            dwcol_store_elem(ctx,
-                             ctx->d_rsrc,
-                             dwcol_addr(ctx, d_off, store_ok),
-                             final_accs[h_out * BLOCK_W + w_out]);
+            rocke_value_t* acc_val = final_accs[h_out * BLOCK_W + w_out];
+            if(bias_f32 != NULL)
+                acc_val = rocke_b_fadd(b, acc_val, bias_f32);
+            dwcol_store_elem(ctx, ctx->d_rsrc, dwcol_addr(ctx, d_off, store_ok), acc_val);
         }
     }
 

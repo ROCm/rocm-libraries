@@ -30,6 +30,13 @@ plain default, plus every field that differs from its default;
 
     python tools/enumerate_conv_aot_instances.py --rocke-root "$ROCKE" \\
         --output-dir configs
+
+``--bias`` writes the bias catalog instead (:data:`BIAS_INSTANCE_LIST`, the input of
+``make_conv_aot_config.py --bias``): the same instances with rocKE's ``bias`` set,
+each one built with the per-output-channel bias epilogue. An instance the packaged
+launch does not run with a bias (``make_conv_aot_config.py`` refuses its bias twin,
+naming the reason) is left out and reported, not fatal: rocKE adds the bias family by
+family, and the catalog follows what it builds.
 """
 
 from __future__ import annotations
@@ -46,6 +53,8 @@ DTYPES = ("fp16", "bf16")
 #: File name of one dtype's instance list. One file per dtype keeps each below the
 #: 50 MB a source host accepts.
 INSTANCE_LIST = "gfx950_conv_fwd_aot_{dtype}.instances.json"
+#: File name of one dtype's bias instance list (``--bias``).
+BIAS_INSTANCE_LIST = "gfx950_conv_fwd_bias_aot_{dtype}.instances.json"
 
 _HERE = Path(__file__).resolve().parent
 if str(_HERE) not in sys.path:
@@ -158,6 +167,21 @@ def validate(identities: list, jobs: int = 1) -> list:
     ]
 
 
+def bias_twins(identities: list, jobs: int = 1) -> tuple[list, list]:
+    """``(twins, refused)``: each identity with rocKE's ``bias`` set, kept when the
+    converter packages it, and ``(stable_hash, reason)`` of each twin it refuses."""
+    import dataclasses
+
+    from benchmarks.common.kernel_cache import KernelIdentity
+
+    if "bias" not in {field.name for field in dataclasses.fields(KernelIdentity)}:
+        raise ValueError("this rocKE's KernelIdentity has no bias field")
+    twins = [dict(identity, bias=True) for identity in identities]
+    refused = dict(validate(twins, jobs))
+    kept = [twin for twin in twins if stable_hash(twin) not in refused]
+    return kept, sorted(refused.items())
+
+
 compact_identity = _common.compact_identity
 write_instances = _common.write_instances
 
@@ -199,6 +223,12 @@ def main(argv=None) -> int:
         type=int,
         default=os.cpu_count() or 1,
         help="Worker processes (default: %(default)s).",
+    )
+    parser.add_argument(
+        "--bias",
+        action="store_true",
+        help=f"Write the bias catalog ({BIAS_INSTANCE_LIST}): every instance's bias "
+        "twin the packaged launch runs.",
     )
     args = parser.parse_args(argv)
     _bind_rocke(args.rocke_root)
@@ -246,12 +276,28 @@ def main(argv=None) -> int:
         implicit, direct = sorted(families[True]), sorted(families[False])
         print(f"{dtype:6s} {len(implicit):8d} {len(direct):6d}")
         lists[dtype] = [i for _, i in implicit] + [i for _, i in direct]
+        if args.bias and not failed:
+            try:
+                lists[dtype], refused = bias_twins(lists[dtype], args.jobs)
+            except ValueError as error:
+                print(error, file=sys.stderr)
+                return 1
+            for instance_id, reason in refused:
+                print(f"no bias twin {instance_id}: {reason}", file=sys.stderr)
+            print(f"{dtype:6s} bias twins {len(lists[dtype])}, left out {len(refused)}")
     if failed:
         print("unsupported catalog entries; nothing written", file=sys.stderr)
         return 1
+    if args.bias and not any(lists.values()):
+        print(
+            "the packaged launch runs no bias instance; nothing written",
+            file=sys.stderr,
+        )
+        return 1
     args.output_dir.mkdir(parents=True, exist_ok=True)
     for dtype, identities in lists.items():
-        path = args.output_dir / INSTANCE_LIST.format(dtype=dtype)
+        name = BIAS_INSTANCE_LIST if args.bias else INSTANCE_LIST
+        path = args.output_dir / name.format(dtype=dtype)
         write_instances(path, identities)
         print(f"{len(identities)} instance(s) written to {path}")
     return 0

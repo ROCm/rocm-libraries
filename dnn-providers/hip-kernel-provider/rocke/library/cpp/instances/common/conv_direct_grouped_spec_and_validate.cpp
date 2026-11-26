@@ -175,8 +175,8 @@ rocke_status_t rocke_direct_conv_16c_kernel_name(const rocke_direct_conv_16c_spe
     char bg_buf[32];
     const char* db_part;
     const char* parts[4];
-    const char* flag_names[4];
-    int flag_on[4];
+    const char* flag_names[5];
+    int flag_on[5];
     rocke_status_t st;
     const char* dtype;
 
@@ -211,8 +211,10 @@ rocke_status_t rocke_direct_conv_16c_kernel_name(const rocke_direct_conv_16c_spe
     flag_names[2] = "f32";
     flag_names[3] = "tf32";
     rocke_dconv_mfma_dtype_flags(dtype, &flag_on[2], &flag_on[3]);
+    flag_names[4] = "cbias";
+    flag_on[4] = spec->bias ? 1 : 0;
 
-    return rocke_kernel_name_join(spec->name, parts, 4, flag_names, flag_on, 4, out, out_cap, NULL);
+    return rocke_kernel_name_join(spec->name, parts, 4, flag_names, flag_on, 5, out, out_cap, NULL);
 }
 
 /* Why a forward direct-conv kernel cannot compute `p`; false when it can.
@@ -673,8 +675,8 @@ rocke_status_t rocke_direct_conv_4c_kernel_name(const rocke_direct_conv_4c_spec_
     parts[2] = bg_buf;
     {
         const char* dt4c = spec->problem.dtype ? spec->problem.dtype : "fp16";
-        const char* flag_names4c[4];
-        int flag_on4c[4];
+        const char* flag_names4c[5];
+        int flag_on4c[5];
         char sr_buf[32];
         snprintf(sr_buf, sizeof(sr_buf), "sr%d", spec->waves_q);
         flag_names4c[0] = "bf16";
@@ -685,8 +687,10 @@ rocke_status_t rocke_direct_conv_4c_kernel_name(const rocke_direct_conv_4c_spec_
         flag_on4c[1] = (spec->dgrad_fused_weights && !spec->dgrad_weights_lds) ? 1 : 0;
         flag_on4c[2] = (spec->dgrad_fused_weights && spec->dgrad_weights_lds) ? 1 : 0;
         flag_on4c[3] = spec->stage_rows ? 1 : 0;
+        flag_names4c[4] = "cbias";
+        flag_on4c[4] = spec->bias ? 1 : 0;
         return rocke_kernel_name_join(
-            spec->name, parts, 3, flag_names4c, flag_on4c, 4, out, out_cap, NULL);
+            spec->name, parts, 3, flag_names4c, flag_on4c, 5, out, out_cap, NULL);
     }
 }
 
@@ -729,6 +733,15 @@ rocke_status_t rocke_direct_conv_4c_validate(const rocke_direct_conv_4c_spec_t* 
             }
             return ROCKE_ERR_VALUE;
         }
+    }
+    if(spec->bias && (spec->dgrad_fused_weights || spec->stage_rows))
+    {
+        if(reason != NULL && reason_cap > 0)
+            snprintf(reason,
+                     reason_cap,
+                     "DirectConv4cSpec bias is a forward epilogue of the plain kernel; the "
+                     "fused-weight and row-staged forms serve the dgrad");
+        return ROCKE_ERR_VALUE;
     }
     /* if p.cpg != 4 or p.kpg != 4: raise ValueError(...) */
     if(p->cpg != 4 || p->kpg != 4)
@@ -1011,13 +1024,14 @@ rocke_status_t rocke_direct_conv_8c_kernel_name(const rocke_direct_conv_8c_spec_
     {
         /* flags={"bf16": dtype=="bf16"} */
         /* flags={"bf16": ..., **_mfma_dtype_flags(p.dtype)} */
-        const char* flag_names8c[3] = {"bf16", "f32", "tf32"};
+        const char* flag_names8c[4] = {"bf16", "f32", "tf32", "cbias"};
         const char* dt8c = spec->problem.dtype ? spec->problem.dtype : "fp16";
-        int flag_on8c[3];
+        int flag_on8c[4];
         flag_on8c[0] = (strcmp(dt8c, "bf16") == 0) ? 1 : 0;
         rocke_dconv_mfma_dtype_flags(dt8c, &flag_on8c[1], &flag_on8c[2]);
+        flag_on8c[3] = spec->bias ? 1 : 0;
         return rocke_kernel_name_join(
-            spec->name, parts, 4, flag_names8c, flag_on8c, 3, out, out_cap, NULL);
+            spec->name, parts, 4, flag_names8c, flag_on8c, 4, out, out_cap, NULL);
     }
 }
 
@@ -1254,13 +1268,14 @@ rocke_status_t rocke_direct_conv_32c_kernel_name(const rocke_direct_conv_32c_spe
     {
         /* flags={"bf16": dtype=="bf16"} */
         /* flags={"bf16": ..., **_mfma_dtype_flags(p.dtype)} */
-        const char* flag_names32c[3] = {"bf16", "f32", "tf32"};
+        const char* flag_names32c[4] = {"bf16", "f32", "tf32", "cbias"};
         const char* dt32c = spec->problem.dtype ? spec->problem.dtype : "fp16";
-        int flag_on32c[3];
+        int flag_on32c[4];
         flag_on32c[0] = (strcmp(dt32c, "bf16") == 0) ? 1 : 0;
         rocke_dconv_mfma_dtype_flags(dt32c, &flag_on32c[1], &flag_on32c[2]);
+        flag_on32c[3] = spec->bias ? 1 : 0;
         return rocke_kernel_name_join(
-            spec->name, parts, 4, flag_names32c, flag_on32c, 3, out, out_cap, NULL);
+            spec->name, parts, 4, flag_names32c, flag_on32c, 4, out, out_cap, NULL);
     }
 }
 
@@ -1470,7 +1485,7 @@ rocke_status_t rocke_direct_depthwise_kernel_name(const rocke_direct_depthwise_s
                                                   size_t out_cap)
 {
     char prob_short[128];
-    const char* parts[4];
+    const char* parts[5];
     char bw_buf[24];
     char bwv_buf[24];
     char cpl_buf[24];
@@ -1496,6 +1511,8 @@ rocke_status_t rocke_direct_depthwise_kernel_name(const rocke_direct_depthwise_s
         snprintf(cpl_buf, sizeof(cpl_buf), "cpl%d", spec->cpl);
         parts[n_parts++] = cpl_buf;
     }
+    if(spec->bias)
+        parts[n_parts++] = "cbias";
     {
         /* flags=_scalar_name_flags(dtype) */
         const char* flag_names[2] = {"bf16", "f32"};
@@ -1729,7 +1746,7 @@ rocke_status_t rocke_direct_depthwise_spatial_kernel_name(
     const rocke_direct_depthwise_spatial_spec_t* spec, char* out, size_t out_cap)
 {
     char prob_short[128];
-    const char* parts[2];
+    const char* parts[3];
     char bwv_buf[32];
 
     if(spec == NULL || out == NULL || out_cap == 0)
@@ -1744,6 +1761,7 @@ rocke_status_t rocke_direct_depthwise_spatial_kernel_name(
     snprintf(bwv_buf, sizeof(bwv_buf), "bwv%d", spec->block_waves);
     parts[0] = prob_short;
     parts[1] = bwv_buf;
+    parts[2] = spec->bias ? "cbias" : "";
     {
         /* flags=_scalar_name_flags(dtype) */
         const char* flag_names[2] = {"bf16", "f32"};
@@ -1752,7 +1770,7 @@ rocke_status_t rocke_direct_depthwise_spatial_kernel_name(
         flag_on[0] = (strcmp(dt, "bf16") == 0) ? 1 : 0;
         flag_on[1] = rocke_dconv_scalar_f32_flag(dt);
         return rocke_kernel_name_join(
-            spec->name, parts, 2, flag_names, flag_on, 2, out, out_cap, NULL);
+            spec->name, parts, 3, flag_names, flag_on, 2, out, out_cap, NULL);
     }
 }
 
@@ -2039,7 +2057,7 @@ rocke_status_t rocke_direct_depthwise_col_kernel_name(const rocke_direct_depthwi
     char bh_buf[24];
     char bw_buf[24];
     char bwv_buf[24];
-    const char* parts[8];
+    const char* parts[9];
 
     if(spec == NULL || out == NULL || out_cap == 0)
     {
@@ -2070,7 +2088,8 @@ rocke_status_t rocke_direct_depthwise_col_kernel_name(const rocke_direct_depthwi
     parts[5] = bh_buf;
     parts[6] = bw_buf;
     parts[7] = bwv_buf;
-    return rocke_kernel_name_join(spec->name, parts, 8, NULL, NULL, 0, out, out_cap, NULL);
+    parts[8] = spec->bias ? "cbias" : "";
+    return rocke_kernel_name_join(spec->name, parts, 9, NULL, NULL, 0, out, out_cap, NULL);
 }
 
 /* Prerequisite check only (cpg=kpg=1, block_h > 0).
@@ -3602,16 +3621,17 @@ rocke_status_t rocke_direct_depthwise_tiled_kernel_name(
         parts[n_parts++] = cpl_buf;
     }
     {
-        /* flags={"ur", "dg", **_scalar_name_flags(dtype)} */
-        const char* flag_names[4] = {"ur", "dg", "bf16", "f32"};
-        int flag_on[4];
+        /* flags={"ur", "dg", "cbias", **_scalar_name_flags(dtype)} */
+        const char* flag_names[5] = {"ur", "dg", "cbias", "bf16", "f32"};
+        int flag_on[5];
         const char* dt = spec->problem.dtype ? spec->problem.dtype : "fp16";
         flag_on[0] = spec->unroll_rows ? 1 : 0;
         flag_on[1] = spec->dgrad ? 1 : 0;
-        flag_on[2] = (strcmp(dt, "bf16") == 0) ? 1 : 0;
-        flag_on[3] = rocke_dconv_scalar_f32_flag(dt);
+        flag_on[2] = spec->bias ? 1 : 0;
+        flag_on[3] = (strcmp(dt, "bf16") == 0) ? 1 : 0;
+        flag_on[4] = rocke_dconv_scalar_f32_flag(dt);
         return rocke_kernel_name_join(
-            spec->name, parts, n_parts, flag_names, flag_on, 4, out, out_cap, NULL);
+            spec->name, parts, n_parts, flag_names, flag_on, 5, out, out_cap, NULL);
     }
 }
 
@@ -3622,6 +3642,15 @@ rocke_status_t rocke_direct_depthwise_tiled_validate(
     if(spec == NULL)
         return ROCKE_ERR_VALUE;
     p = &spec->problem;
+    if(spec->bias && spec->dgrad)
+    {
+        if(reason && reason_cap > 0)
+            snprintf(reason,
+                     reason_cap,
+                     "DirectDepthwiseTiledSpec(dgrad=True) computes a dgrad: bias is a "
+                     "forward epilogue");
+        return ROCKE_ERR_VALUE;
+    }
     if(rocke_dconv_dw_tiled_padding_reason(spec, reason, reason_cap))
         return ROCKE_ERR_VALUE;
     {
@@ -3873,6 +3902,7 @@ rocke_direct_conv_spec_t rocke_direct_conv_spec_default(void)
     s.lds_pad = 0;
     s.stage_out = false;
     s.row_exit = false;
+    s.bias = false;
     return s;
 }
 
@@ -3966,7 +3996,7 @@ rocke_status_t
     char pf_buf[32];
     char wm_buf[32];
     char lp_buf[32];
-    const char* parts[22];
+    const char* parts[23];
     const char* dtype;
     rocke_status_t st;
 
@@ -4007,7 +4037,7 @@ rocke_status_t
 
     /* kernel_name_join(name, p.short(), bq, bg, db|sb, bh, wq, wk, rk, k32,
      *                  bf16, rtc, pw, fw|fwl, we, pf, lso, wm, xc, lp, so, rg,
-     *                  rx) -- empty parts are dropped. */
+     *                  rx, cbias) -- empty parts are dropped. */
     parts[0] = short_buf;
     parts[1] = bq_buf;
     parts[2] = bg_buf;
@@ -4030,13 +4060,14 @@ rocke_status_t
     parts[19] = spec->stage_out ? "so" : "";
     parts[20] = spec->row_guard ? "rg" : "";
     parts[21] = spec->row_exit ? "rx" : "";
+    parts[22] = spec->bias ? "cbias" : "";
     {
         /* flags=_mfma_dtype_flags(p.dtype) */
         const char* flag_names[2] = {"f32", "tf32"};
         int flag_on[2];
         rocke_dconv_mfma_dtype_flags(dtype, &flag_on[0], &flag_on[1]);
         return rocke_kernel_name_join(
-            spec->name, parts, 22, flag_names, flag_on, 2, out, out_cap, NULL);
+            spec->name, parts, 23, flag_names, flag_on, 2, out, out_cap, NULL);
     }
 }
 
@@ -4047,6 +4078,12 @@ static int
     dconv_gen_weight_knobs_reason(const rocke_direct_conv_spec_t* spec, char* out, size_t cap)
 {
     const rocke_direct_conv_problem_t* p = &spec->problem;
+    if(spec->bias && spec->dgrad_fused_weights)
+    {
+        snprintf(
+            out, cap, "bias is a forward epilogue; a dgrad_fused_weights kernel computes a dgrad");
+        return 1;
+    }
     if(spec->dgrad_fused_weights && rocke_dconv_is_f32_storage(p->dtype))
     {
         /* The fused-weights fragment is gathered with 16-bit loads (or the

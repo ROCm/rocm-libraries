@@ -515,6 +515,53 @@ if(HIPKERNELPROVIDER_ENABLE_TESTS)
                        "gfx950-conv-fwd-aot-external-integration-check")
     endif()
 
+    # The same check for hipkernel:Gfx950ConvFwdBiasAot, which claims
+    # integration-test-bundles/*/Gfx950ConvFwdBias/ (a convolution plus a per-channel bias
+    # ADD). Gated the same way: until its kernel bundle (descriptors/rocKE/
+    # gfx950_conv_fwd_bias_aot/artifacts) is in the `product` root, gfx950 ships no kernel
+    # of it and the check is not registered.
+    set(_hkp_conv_fwd_bias_aot_available FALSE)
+    if(HIPDNN_ENABLE_KERNEL_INGESTOR)
+        hkp_product_ships_engine_for_arch(_hkp_conv_fwd_bias_aot_available
+                                          "hipkernel:Gfx950ConvFwdBiasAot" gfx950)
+    endif()
+    if(_hkp_conv_fwd_bias_aot_available AND TARGET hipdnn_integration_tests)
+        _hkp_census_external_test_file(_hkp_conv_fwd_bias_aot_shard_ctest gfx950)
+        set(_hkp_conv_fwd_bias_aot_config
+            "${CMAKE_CURRENT_SOURCE_DIR}/../config/hipkernel_Gfx950ConvFwdBiasAot.toml")
+        hkp_reserve_census_shard(_hkp_conv_fwd_bias_aot_shard_dest gfx950
+                                 FILES "${_hkp_conv_fwd_bias_aot_config}")
+
+        set(_hkp_conv_fwd_bias_aot_category_args "")
+        if(HIPKERNELPROVIDER_YAML_CATEGORIZATION_ENABLED)
+            list(APPEND _hkp_conv_fwd_bias_aot_category_args
+                TEST_CATEGORIES_YAML "${HIPKERNELPROVIDER_GFX950_CONV_FWD_BIAS_AOT_INTEGRATION_CATEGORIES_YAML}"
+                INSTALL_TEST_FILE "${_hkp_conv_fwd_bias_aot_shard_ctest}"
+                TEST_NAME_PREFIX ${PROJECT_NAME}-gfx950-conv-fwd-bias-aot-external-integration
+            )
+        endif()
+
+        add_external_integration_test_target(
+            TARGET_NAME    ${PROJECT_NAME}-gfx950-conv-fwd-bias-aot-external-integration-check
+            PLUGIN_TARGET  hip_kernel_provider
+            ENGINE_NAME    "hipkernel:Gfx950ConvFwdBiasAot"
+            INSTALL_SUBDIR hip_kernel_provider
+            INSTALL_DESTINATION "${_hkp_conv_fwd_bias_aot_shard_dest}"
+            INSTALL_STAGING_KEY hkp_census_gfx950
+            TEST_CONFIG    "${_hkp_conv_fwd_bias_aot_config}"
+            ENVIRONMENT    ${TEST_ENVIRONMENT}
+            ENVIRONMENT_MODIFICATION ${TEST_ENVIRONMENT_MODIFICATION}
+            ${_hkp_conv_fwd_bias_aot_category_args}
+        )
+        message(STATUS "Created ${PROJECT_NAME}-gfx950-conv-fwd-bias-aot-external-integration-check target")
+    elseif(NOT _hkp_conv_fwd_bias_aot_available)
+        message(STATUS "hipkernel:Gfx950ConvFwdBiasAot not shipped by this configuration - "
+                       "skipping gfx950-conv-fwd-bias-aot-external-integration-check")
+    else()
+        message(STATUS "hipdnn_integration_tests not found - skipping "
+                       "gfx950-conv-fwd-bias-aot-external-integration-check")
+    endif()
+
     # One engine-pinned external integration entry per HKP_PINNED_ATTENTION_ENGINES engine,
     # serving the bundles its filter variable names (the unified 3D engines serve only
     # their decode, seqlen_q 1, cases and decline the rest).

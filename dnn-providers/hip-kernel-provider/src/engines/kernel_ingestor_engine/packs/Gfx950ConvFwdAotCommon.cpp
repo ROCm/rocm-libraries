@@ -1,0 +1,1453 @@
+// Copyright © Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier:  MIT
+
+#ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
+
+#include "engines/kernel_ingestor_engine/packs/Gfx950ConvFwdAotCommon.hpp"
+
+#include <algorithm>
+#include <array>
+#include <cstddef>
+#include <cstdint>
+#include <initializer_list>
+#include <limits>
+#include <memory>
+#include <optional>
+#include <set>
+#include <string>
+#include <string_view>
+#include <tuple>
+#include <utility>
+#include <variant>
+#include <vector>
+
+#include <hipdnn_flatbuffers_sdk/data_objects/convolution_fwd_attributes_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/tensor_attributes_generated.h>
+#include <hipdnn_flatbuffers_sdk/utilities/FlatbufferUtils.hpp>
+#include <hipdnn_plugin_sdk/ArchMatch.hpp>
+#include <hipdnn_plugin_sdk/PluginDeviceBuffers.hpp>
+#include <hipdnn_plugin_sdk/PluginException.hpp>
+#include <hipdnn_plugin_sdk/ingestor/IKernelDispatchHandler.hpp>
+#include <hipdnn_plugin_sdk/ingestor/KernelDefinition.hpp>
+#include <hipdnn_plugin_sdk/ingestor/MatchContext.hpp>
+
+#include "compilation/KpackKernelLoader.hpp"
+#include "core/Handle.hpp"
+#include "engines/kernel_ingestor_engine/IngestorKernelCode.hpp"
+#include "engines/kernel_ingestor_engine/LaunchKernelDefinition.hpp"
+#include "engines/kernel_ingestor_engine/packs/ConvAotGraphPredicates.hpp"
+#include "engines/kernel_ingestor_engine/packs/Gfx950ConvFwdAotSelection.hpp"
+#include "engines/kernel_ingestor_engine/packs/Gfx950ConvFwdGeometry.hpp"
+
+namespace hip_kernel_provider::kernel_ingestor_engine::gfx950_conv_fwd_aot
+{
+
+using namespace hipdnn_plugin_sdk::ingestor;
+namespace data_objects = hipdnn_flatbuffers_sdk::data_objects;
+
+using conv_aot::hasPackedNhwcStrides;
+using conv_aot::hasSpatialRankTwo;
+using conv_aot::isDeviceTensor;
+
+/// The problem token's value count without a bias uid (problemTokenValues).
+constexpr size_t PROBLEM_TOKEN_SIZE = 18;
+
+const data_objects::TensorAttributes* findTensor(const MatchContext& context, int64_t uid)
+{
+    const auto& tensors = context.graph.getTensorMap();
+    const auto it = tensors.find(uid);
+    return it == tensors.end() ? nullptr : it->second;
+}
+
+bool servesDeviceAndGraph(const MatchContext& context, unsigned int nodeCount)
+{
+    return context.graph.isValid() && !context.graph.getGraph().is_override_shape_enabled()
+           && hipdnn_plugin_sdk::archMatches(context.deviceProperties.gcnArchName,
+                                             "gfx950",
+                                             hipdnn_plugin_sdk::ArchMatchMode::PREFIX)
+           && context.deviceProperties.warpSize == 64 && context.graph.nodeCount() == nodeCount;
+}
+
+bool outputMatches(const data_objects::TensorAttributes* output, const MatchedProblem& matched)
+{
+    return hasPackedNhwcStrides(output) && output->dims()->Get(0) == matched.problem.n
+           && output->dims()->Get(1) == matched.problem.k
+           && output->dims()->Get(2) == matched.geometry.ho
+           && output->dims()->Get(3) == matched.geometry.wo;
+}
+
+std::optional<MatchedProblem>
+    matchedOf(const Binding& binding, const conv::Problem& problem, data_objects::DataType dtype)
+{
+    auto chunks = conv::nongroupedBatchChunks(problem);
+    if(const auto geometry = conv::deriveGeometry(problem))
+    {
+        return MatchedProblem{binding, problem, *geometry, dtype, std::move(chunks), true};
+    }
+    if(chunks.empty())
+    {
+        return std::nullopt;
+    }
+    auto largest = problem;
+    largest.n = chunks.front();
+    const auto geometry = conv::deriveGeometry(largest);
+    if(!geometry)
+    {
+        return std::nullopt;
+    }
+    return MatchedProblem{binding, problem, *geometry, dtype, std::move(chunks), false};
+}
+
+std::optional<MatchedProblem>
+    matchConvolution(const MatchContext& context,
+                     const data_objects::ConvolutionFwdAttributes& attributes,
+                     int64_t yUid,
+                     std::optional<int64_t> bias)
+{
+    if(attributes.conv_mode() != data_objects::ConvMode::CROSS_CORRELATION
+       || !hasSpatialRankTwo(attributes.pre_padding())
+       || !hasSpatialRankTwo(attributes.post_padding()) || !hasSpatialRankTwo(attributes.stride())
+       || !hasSpatialRankTwo(attributes.dilation()))
+    {
+        return std::nullopt;
+    }
+    for(flatbuffers::uoffset_t axis = 0; axis < 2; ++axis)
+    {
+        if(attributes.pre_padding()->Get(axis) != attributes.post_padding()->Get(axis))
+        {
+            return std::nullopt;
+        }
+    }
+
+    const Binding binding{attributes.x_tensor_uid(), attributes.w_tensor_uid(), yUid, bias};
+    const auto* x = findTensor(context, binding.x);
+    const auto* w = findTensor(context, binding.w);
+    const auto* y = findTensor(context, binding.y);
+    if(binding.x == binding.w || binding.x == binding.y || binding.w == binding.y
+       || !isDeviceTensor(x) || !isDeviceTensor(w) || !isDeviceTensor(y) || !hasPackedNhwcStrides(x)
+       || !hasPackedNhwcStrides(w) || x->data_type() != w->data_type()
+       || x->data_type() != y->data_type())
+    {
+        return std::nullopt;
+    }
+    const auto* xDims = x->dims();
+    const auto* wDims = w->dims();
+    // hipDNN carries no groups attribute: a filter holding C / groups channels encodes it.
+    // The layout checks above already made both channel counts positive.
+    const auto channelsPerGroup = wDims->Get(1);
+    if(channelsPerGroup <= 0 || xDims->Get(1) % channelsPerGroup != 0)
+    {
+        return std::nullopt;
+    }
+    const auto groups = xDims->Get(1) / channelsPerGroup;
+    // gridDim.z carries the group, and each group owns K / groups output channels.
+    if(groups < 1 || groups > 65535 || wDims->Get(0) % groups != 0)
+    {
+        return std::nullopt;
+    }
+    const conv::Problem problem{xDims->Get(0),
+                                xDims->Get(1),
+                                wDims->Get(0),
+                                xDims->Get(2),
+                                xDims->Get(3),
+                                wDims->Get(2),
+                                wDims->Get(3),
+                                attributes.stride()->Get(0),
+                                attributes.stride()->Get(1),
+                                attributes.pre_padding()->Get(0),
+                                attributes.pre_padding()->Get(1),
+                                attributes.dilation()->Get(0),
+                                attributes.dilation()->Get(1),
+                                groups};
+    // Grouped pointwise graphs are matched too. rocKE's pointwise shortcut ignores groups,
+    // but no packaged pointwise binary is grouped (the adapter refuses to build one) and
+    // conv::implicitGemmServes gives a grouped graph only grouped binaries, which index
+    // through their descriptors.
+    auto matched = matchedOf(binding, problem, x->data_type());
+    if(!matched || !outputMatches(y, *matched))
+    {
+        return std::nullopt;
+    }
+    return matched;
+}
+
+std::vector<int64_t> problemTokenValues(const MatchedProblem& matched)
+{
+    const auto& p = matched.problem;
+    std::vector<int64_t> values{matched.binding.x,
+                                matched.binding.w,
+                                matched.binding.y,
+                                p.n,
+                                p.c,
+                                p.k,
+                                p.hi,
+                                p.wi,
+                                p.y,
+                                p.x,
+                                p.strideH,
+                                p.strideW,
+                                p.padH,
+                                p.padW,
+                                p.dilationH,
+                                p.dilationW,
+                                p.groups,
+                                static_cast<int64_t>(matched.dtype)};
+    if(matched.binding.bias)
+    {
+        values.push_back(*matched.binding.bias);
+    }
+    return values;
+}
+
+std::optional<MatchedProblem> matchedFromBound(const ConvFwdAotEngine& engine,
+                                               const MatchContext& context,
+                                               const BoundTokens& bound)
+{
+    const bool hasBias = !engine.biasToken.empty();
+    const auto it = bound.find(engine.problemToken);
+    const auto* values
+        = it == bound.end() ? nullptr : std::get_if<std::vector<int64_t>>(&it->second);
+    if(values == nullptr || values->size() != PROBLEM_TOKEN_SIZE + (hasBias ? 1 : 0))
+    {
+        return engine.matchProblem(context);
+    }
+    const auto& v = *values;
+    const conv::Problem problem{
+        v[3], v[4], v[5], v[6], v[7], v[8], v[9], v[10], v[11], v[12], v[13], v[14], v[15], v[16]};
+    Binding binding{v[0], v[1], v[2]};
+    if(hasBias)
+    {
+        binding.bias = v[PROBLEM_TOKEN_SIZE];
+    }
+    return matchedOf(binding, problem, static_cast<data_objects::DataType>(v[17]));
+}
+
+std::optional<BoundTokens> graphMatches(const ConvFwdAotEngine& engine, const MatchContext& context)
+{
+    const auto matched = engine.matchProblem(context);
+    if(!matched)
+    {
+        return std::nullopt;
+    }
+    BoundTokens bound{{engine.xToken, matched->binding.x},
+                      {engine.wToken, matched->binding.w},
+                      {engine.yToken, matched->binding.y},
+                      {engine.problemToken, problemTokenValues(*matched)}};
+    if(!engine.biasToken.empty() && matched->binding.bias)
+    {
+        bound[engine.biasToken] = *matched->binding.bias;
+    }
+    return bound;
+}
+
+namespace
+{
+
+template <typename T>
+bool metadataEquals(const KernelDefinition& kernel, const char* field, const T& expected)
+{
+    const auto it = kernel.metadata.find(field);
+    if(it == kernel.metadata.end())
+    {
+        return false;
+    }
+    const auto* value = std::get_if<T>(&it->second);
+    return value != nullptr && *value == expected;
+}
+
+std::optional<int64_t> intMetadata(const KernelDefinition& kernel, const char* field)
+{
+    const auto it = kernel.metadata.find(field);
+    const auto* value = it == kernel.metadata.end() ? nullptr : std::get_if<int64_t>(&it->second);
+    return value == nullptr ? std::nullopt : std::optional<int64_t>(*value);
+}
+
+const std::string* stringMetadata(const KernelDefinition& kernel, const char* field)
+{
+    const auto it = kernel.metadata.find(field);
+    return it == kernel.metadata.end() ? nullptr : std::get_if<std::string>(&it->second);
+}
+
+/// Whether @p kernel's implicit-GEMM pipeline has the launch this pack computes. These
+/// pipelines all launch warp_m * warp_n * 64 threads over an (N-tiles, M-tiles, groups)
+/// grid with static LDS; "wavelet" appends load waves and is not accepted.
+bool hasReviewedPipeline(const KernelDefinition& kernel)
+{
+    const auto* pipelineName = stringMetadata(kernel, "pipeline");
+    return pipelineName != nullptr
+           && (*pipelineName == "mem" || *pipelineName == "compv3" || *pipelineName == "compv4"
+               || *pipelineName == "basic");
+}
+
+// ---- The shape-generic AOT instances ----
+//
+// Each kernel is one rocKE forward KernelIdentity, implicit GEMM or direct depthwise: its
+// metadata holds tuning and capability fields only, and the problem reaches the kernel as
+// AOT arguments computed from the graph. Matching is therefore a capability check
+// (conv::aotInstanceLaunch, conv::directInstanceLaunch), not an equality on the geometry.
+
+/// Integer instance fields; supports_gfx950_conv_fwd_aot validated every one at build.
+constexpr std::array<const char*, 13> AOT_INT_FIELDS{"tile_m",
+                                                     "tile_n",
+                                                     "tile_k",
+                                                     "warp_m",
+                                                     "warp_n",
+                                                     "warp_tile_m",
+                                                     "warp_tile_n",
+                                                     "warp_tile_k",
+                                                     "vector_size_a",
+                                                     "vector_size_b",
+                                                     "vector_size_c",
+                                                     "async_chunk_a",
+                                                     "async_chunk_b"};
+constexpr std::array<const char*, 3> AOT_FLAG_FIELDS{"unroll_k", "async_dma", "grouped"};
+/// What a direct instance compiles in, in conv::DirectCapabilities order.
+constexpr std::array<const char*, 8> AOT_DIRECT_FIELDS{
+    "filter_h", "filter_w", "stride_h", "stride_w", "pad_h", "pad_w", "dilation_h", "dilation_w"};
+
+/// The block knobs after block_w and block_waves, with the KMD default each holds where
+/// its variant does not use it (_AOT_DIRECT_KNOB_DEFAULTS in convolution_forward.py, less
+/// the string "atom"). iglp -1 and waves_per_eu 0 stand for rocKE's None.
+constexpr std::array<std::pair<const char*, int64_t>, 20> AOT_DIRECT_KNOB_DEFAULTS{{
+    {"block_h", 0},
+    {"unroll_rows", 0},
+    {"block_q", 0},
+    {"block_groups", 0},
+    {"double_buffer", 0},
+    {"cpg", 0},
+    {"kpg", 0},
+    {"tile_h", 0},
+    {"tile_w", 0},
+    {"tile_k_out", 0},
+    {"ck", 0},
+    {"waves_m", 0},
+    {"waves_n", 0},
+    {"swizzle_wgm", 0},
+    {"iglp", -1},
+    {"waves_per_eu", 0},
+    {"group_merge", 1},
+    {"split_c", 1},
+    {"prefetch_rows", 0},
+    {"w_fold", 0},
+}};
+
+/// The fields of block_w, block_waves, AOT_DIRECT_KNOB_DEFAULTS and "atom" that
+/// @p variant states (AOT_DIRECT_KNOBS and _AOT_DIRECT_EXTRA_FIELDS in
+/// convolution_forward.py); every other one must hold its default.
+bool aotDirectVariantUses(conv::DirectVariant variant, std::string_view field)
+{
+    const auto among = [&](std::initializer_list<std::string_view> fields) {
+        return std::find(fields.begin(), fields.end(), field) != fields.end();
+    };
+    switch(variant)
+    {
+    case conv::DirectVariant::STD:
+        return among({"block_w", "block_waves"});
+    case conv::DirectVariant::SPATIAL:
+        return among({"block_waves"});
+    case conv::DirectVariant::TILED:
+        return among({"block_w", "block_h", "block_waves", "unroll_rows"});
+    case conv::DirectVariant::COL:
+        return among({"block_w", "block_h", "block_waves"});
+    case conv::DirectVariant::GROUPED:
+        return among({"block_h", "block_q", "block_groups", "double_buffer", "cpg", "kpg"});
+    case conv::DirectVariant::NONGROUPED:
+        return among({"tile_h",
+                      "tile_w",
+                      "tile_k_out",
+                      "ck",
+                      "waves_m",
+                      "waves_n",
+                      "atom",
+                      "swizzle_wgm",
+                      "iglp",
+                      "waves_per_eu",
+                      "split_c"});
+    case conv::DirectVariant::GROUPED_HALO:
+        return among({"tile_h",
+                      "tile_w",
+                      "tile_k_out",
+                      "ck",
+                      "waves_m",
+                      "waves_n",
+                      "atom",
+                      "swizzle_wgm",
+                      "iglp",
+                      "waves_per_eu",
+                      "group_merge"});
+    case conv::DirectVariant::WIN:
+        return among({"block_waves", "block_h", "cpg", "kpg", "prefetch_rows", "w_fold"});
+    case conv::DirectVariant::NONE:
+    default:
+        return false;
+    }
+}
+
+/// One instance of either family: an implicit-GEMM identity or a direct one.
+using AotKernel = std::variant<conv::AotInstance, conv::DirectInstance>;
+
+/// The implicit-GEMM instance @p kernel describes: a reviewed pipeline (unroll_k and
+/// async_dma change only the K loop), a default or cshuffle epilogue, and positive
+/// tuning. Unlike the exact-shape engine, the store width is the identity's
+/// vector_size_c, not derived; a group-merged instance (@p groupMerge > 1) records its
+/// builder-derived widths as 0, which conv::mergedInstanceLaunch requires.
+std::optional<conv::AotInstance> aotImplicitGemmInstance(const KernelDefinition& kernel,
+                                                         int64_t groupMerge)
+{
+    if(groupMerge < 1)
+    {
+        return std::nullopt;
+    }
+    if(!hasReviewedPipeline(kernel)
+       || (!metadataEquals(kernel, "epilogue", std::string("default"))
+           && !metadataEquals(kernel, "epilogue", std::string("cshuffle"))))
+    {
+        return std::nullopt;
+    }
+    std::array<int64_t, AOT_INT_FIELDS.size()> values{};
+    for(size_t i = 0; i < AOT_INT_FIELDS.size(); ++i)
+    {
+        const auto value = intMetadata(kernel, AOT_INT_FIELDS[i]);
+        // Every field but the async chunk widths is positive; those are 0 without async,
+        // and a merged instance's vector widths (8 to 10) are 0.
+        const bool mayBeZero = i >= 11 || (groupMerge > 1 && i >= 8);
+        if(!value || *value < (mayBeZero ? 0 : 1))
+        {
+            return std::nullopt;
+        }
+        values[i] = *value;
+    }
+    std::array<bool, AOT_FLAG_FIELDS.size()> flags{};
+    for(size_t i = 0; i < AOT_FLAG_FIELDS.size(); ++i)
+    {
+        const auto value = intMetadata(kernel, AOT_FLAG_FIELDS[i]);
+        if(!value || (*value != 0 && *value != 1))
+        {
+            return std::nullopt;
+        }
+        flags[i] = *value == 1;
+    }
+    return conv::AotInstance{values[0],
+                             values[1],
+                             values[3],
+                             values[4],
+                             values[8],
+                             values[9],
+                             values[10],
+                             flags[1],
+                             values[11],
+                             values[12],
+                             flags[2],
+                             groupMerge};
+}
+
+/// The direct instance @p kernel describes. Its implicit-GEMM fields hold the values
+/// rocKE's direct sweep writes into a direct identity (0, and "direct" for the pipeline
+/// and epilogue), so a forced tile_k of 64 or 128 never selects one. Each variant states
+/// its own block knobs (aotDirectVariantUses) and leaves every other one at its KMD
+/// default; the flags hold 0 or 1. The knobs' ranges are checked where they are used, by
+/// conv::directInstanceLaunch.
+std::optional<conv::DirectInstance> aotDirectInstance(const KernelDefinition& kernel,
+                                                      conv::DirectVariant variant,
+                                                      int64_t blockW,
+                                                      int64_t blockWaves)
+{
+    if(variant == conv::DirectVariant::NONE
+       || !metadataEquals(kernel, "pipeline", std::string("direct"))
+       || !metadataEquals(kernel, "epilogue", std::string("direct")))
+    {
+        return std::nullopt;
+    }
+    const auto isZero
+        = [&](const char* field) { return metadataEquals(kernel, field, int64_t{0}); };
+    if(!std::all_of(AOT_INT_FIELDS.begin(), AOT_INT_FIELDS.end(), isZero)
+       || !std::all_of(AOT_FLAG_FIELDS.begin(), AOT_FLAG_FIELDS.end(), isZero))
+    {
+        return std::nullopt;
+    }
+    std::array<int64_t, AOT_DIRECT_FIELDS.size()> compiled{};
+    for(size_t i = 0; i < AOT_DIRECT_FIELDS.size(); ++i)
+    {
+        const auto value = intMetadata(kernel, AOT_DIRECT_FIELDS[i]);
+        if(!value)
+        {
+            return std::nullopt;
+        }
+        compiled[i] = *value;
+    }
+    if((!aotDirectVariantUses(variant, "block_w") && blockW != 0)
+       || (!aotDirectVariantUses(variant, "block_waves") && blockWaves != 0))
+    {
+        return std::nullopt;
+    }
+    std::array<int64_t, AOT_DIRECT_KNOB_DEFAULTS.size()> knobs{};
+    for(size_t i = 0; i < AOT_DIRECT_KNOB_DEFAULTS.size(); ++i)
+    {
+        const auto& [field, unset] = AOT_DIRECT_KNOB_DEFAULTS[i];
+        const auto value = intMetadata(kernel, field);
+        if(!value || (!aotDirectVariantUses(variant, field) && *value != unset))
+        {
+            return std::nullopt;
+        }
+        knobs[i] = *value;
+    }
+    const auto knob = [&](std::string_view field) {
+        for(size_t i = 0; i < AOT_DIRECT_KNOB_DEFAULTS.size(); ++i)
+        {
+            if(AOT_DIRECT_KNOB_DEFAULTS[i].first == field)
+            {
+                return knobs[i];
+            }
+        }
+        return int64_t{-1};
+    };
+    // Compile-only knobs: they shape the code, not the launch, but must be well formed.
+    for(const auto* flag : {"unroll_rows", "double_buffer"})
+    {
+        if(knob(flag) != 0 && knob(flag) != 1)
+        {
+            return std::nullopt;
+        }
+    }
+    if(knob("iglp") < -1 || knob("waves_per_eu") < 0 || knob("swizzle_wgm") < 0)
+    {
+        return std::nullopt;
+    }
+    const auto* atom = stringMetadata(kernel, "atom");
+    if(atom == nullptr)
+    {
+        return std::nullopt;
+    }
+    int64_t atomTile = 0;
+    int64_t atomFragment = 0;
+    if(aotDirectVariantUses(variant, "atom"))
+    {
+        const auto tile = conv::nongroupedAtomTile(*atom);
+        const auto fragment = conv::nongroupedAtomFragment(*atom);
+        if(!tile || !fragment || knob("swizzle_wgm") < 1)
+        {
+            return std::nullopt;
+        }
+        atomTile = *tile;
+        atomFragment = *fragment;
+    }
+    else if(*atom != "none")
+    {
+        return std::nullopt;
+    }
+    conv::DirectInstance instance{{compiled[0],
+                                   compiled[1],
+                                   compiled[2],
+                                   compiled[3],
+                                   compiled[4],
+                                   compiled[5],
+                                   compiled[6],
+                                   compiled[7]},
+                                  variant,
+                                  blockW,
+                                  blockWaves};
+    instance.blockH = knob("block_h");
+    instance.blockQ = knob("block_q");
+    instance.blockGroups = knob("block_groups");
+    instance.cpg = knob("cpg");
+    instance.kpg = knob("kpg");
+    instance.tileH = knob("tile_h");
+    instance.tileW = knob("tile_w");
+    instance.tileKOut = knob("tile_k_out");
+    instance.ck = knob("ck");
+    instance.wavesM = knob("waves_m");
+    instance.wavesN = knob("waves_n");
+    instance.atomTile = atomTile;
+    instance.atomFragment = atomFragment;
+    instance.groupMerge = knob("group_merge");
+    instance.splitC = knob("split_c");
+    instance.prefetchRows = knob("prefetch_rows");
+    instance.wFold = knob("w_fold");
+    return instance;
+}
+
+/// The instance @p kernel describes, when its metadata is a complete instance of either
+/// family with a launch contract this pack reviewed. kernel_family is read first, so
+/// neither family's checks run on the other's placeholders. Both value sets are closed
+/// and a missing field (the loader completes them from the KMD defaults) is malformed
+/// metadata.
+std::optional<AotKernel> aotInstance(const KernelDefinition& kernel)
+{
+    // A multi-launch (split-C) kernel ships its code in `sources`, one entry per launch.
+    const auto isKpack
+        = [](const auto& launch) { return launch.second.kind == KernelSourceKind::KPACK; };
+    const bool prebuilt = kernel.sources.empty()
+                              ? kernel.source.kind == KernelSourceKind::KPACK
+                              : std::all_of(kernel.sources.begin(), kernel.sources.end(), isKpack);
+    if(!prebuilt || !metadataEquals(kernel, "layout", std::string("NHWC"))
+       || !metadataEquals(kernel, "wave_size", int64_t{64}))
+    {
+        return std::nullopt;
+    }
+    const auto familyValue = intMetadata(kernel, "kernel_family");
+    const auto family = familyValue ? conv::parseKernelFamily(*familyValue) : std::nullopt;
+    const auto* variantName = stringMetadata(kernel, "direct_variant");
+    const auto variant
+        = variantName == nullptr ? std::nullopt : conv::parseDirectVariant(*variantName);
+    const auto blockW = intMetadata(kernel, "block_w");
+    const auto blockWaves = intMetadata(kernel, "block_waves");
+    if(!family || !variant || !blockW || !blockWaves)
+    {
+        return std::nullopt;
+    }
+    if(*family == conv::KernelFamily::DIRECT_DEPTHWISE)
+    {
+        return aotDirectInstance(kernel, *variant, *blockW, *blockWaves);
+    }
+    // An implicit-GEMM instance leaves every direct field at its KMD default, so no
+    // descriptor carries a direct arm that this branch would launch as implicit GEMM.
+    if(*variant != conv::DirectVariant::NONE || *blockW != 0 || *blockWaves != 0)
+    {
+        return std::nullopt;
+    }
+    // group_merge is the one shared field an implicit-GEMM instance carries itself.
+    const auto groupMerge = intMetadata(kernel, "group_merge");
+    if(!groupMerge
+       || !std::all_of(AOT_DIRECT_FIELDS.begin(),
+                       AOT_DIRECT_FIELDS.end(),
+                       [&](const char* field) { return metadataEquals(kernel, field, int64_t{0}); })
+       || !std::all_of(AOT_DIRECT_KNOB_DEFAULTS.begin(),
+                       AOT_DIRECT_KNOB_DEFAULTS.end(),
+                       [&](const auto& knob) {
+                           return std::string_view(knob.first) == "group_merge"
+                                  || metadataEquals(kernel, knob.first, knob.second);
+                       })
+       || !metadataEquals(kernel, "atom", std::string("none")))
+    {
+        return std::nullopt;
+    }
+    return aotImplicitGemmInstance(kernel, *groupMerge);
+}
+
+/// What an engine of this family reads of one kernel on every graph, decoded from its
+/// metadata once: its dtype and epilogue, its instance (nullopt for metadata no reviewed
+/// launch contract describes), and its bias: the `bias` field of a bias engine's KMD,
+/// 0 for a kernel whose KMD declares none.
+struct AotPrepared
+{
+    std::string dtype;
+    std::optional<std::string> epilogue;
+    std::optional<AotKernel> instance;
+    int64_t bias = 0;
+};
+
+AotPrepared decodeAot(const KernelDefinition& kernel)
+{
+    const auto* dtype = stringMetadata(kernel, "dtype");
+    const auto* epilogue = stringMetadata(kernel, "epilogue");
+    // A `bias` that is not an integer is malformed and serves no graph (-1).
+    const auto biasIt = kernel.metadata.find("bias");
+    const auto bias
+        = biasIt == kernel.metadata.end() ? std::optional<int64_t>(0) : intMetadata(kernel, "bias");
+    return AotPrepared{dtype == nullptr ? std::string() : *dtype,
+                       epilogue == nullptr ? std::nullopt : std::optional<std::string>(*epilogue),
+                       aotInstance(kernel),
+                       bias.value_or(-1)};
+}
+
+} // namespace
+
+std::shared_ptr<const void> aotPrepare(const KernelDefinition& kernel)
+{
+    return std::make_shared<const AotPrepared>(decodeAot(kernel));
+}
+
+namespace
+{
+
+/// @p kernel's AotPrepared: the one aotPrepare stored, or one decoded into @p scratch for
+/// a definition that carries none (one built outside the engine's shared state).
+const AotPrepared& preparedOf(const KernelDefinition& kernel, AotPrepared& scratch)
+{
+    if(kernel.preparedBy == &aotPrepare && kernel.prepared != nullptr)
+    {
+        return *static_cast<const AotPrepared*>(kernel.prepared.get());
+    }
+    scratch = decodeAot(kernel);
+    return scratch;
+}
+std::optional<ConvLaunch> batchSplitLaunch(const MatchedProblem& matched,
+                                           const conv::DirectInstance& direct);
+
+/// The launch of @p instance on @p matched, through the family's own capability check
+/// and ABI (conv::aotInstanceLaunch or conv::directInstanceLaunch). A non-grouped or
+/// grouped-halo kernel runs a batch rocKE splits in pieces (batchSplitLaunch); every
+/// other kernel needs the whole problem in one launch.
+std::optional<ConvLaunch> aotInstanceLaunch(const MatchedProblem& matched,
+                                            const AotKernel& instance)
+{
+    const auto* direct = std::get_if<conv::DirectInstance>(&instance);
+    if(direct != nullptr && !matched.batchChunks.empty()
+       && (direct->variant == conv::DirectVariant::NONGROUPED
+           || direct->variant == conv::DirectVariant::GROUPED_HALO))
+    {
+        return batchSplitLaunch(matched, *direct);
+    }
+    if(!matched.wholeGeometry)
+    {
+        return std::nullopt;
+    }
+    if(direct != nullptr)
+    {
+        const auto launch = conv::directInstanceLaunch(matched.problem, matched.geometry, *direct);
+        if(!launch)
+        {
+            return std::nullopt;
+        }
+        ConvLaunch convLaunch{*launch, conv::directKernargs(matched.problem, matched.geometry)};
+        if(direct->splitC > 1)
+        {
+            convLaunch.reduce = conv::splitReduceLaunch(matched.problem, matched.geometry);
+            convLaunch.workspaceBytes
+                = conv::splitWorkspaceBytes(matched.problem, matched.geometry, *direct);
+        }
+        return convLaunch;
+    }
+    const auto launch = conv::aotInstanceLaunch(
+        matched.problem, matched.geometry, std::get<conv::AotInstance>(instance));
+    const auto kernargs
+        = launch ? conv::implicitGemmKernargs(matched.problem, matched.geometry, *launch)
+                 : std::nullopt;
+    if(!kernargs)
+    {
+        return std::nullopt;
+    }
+    return ConvLaunch{*launch, *kernargs};
+}
+
+/// One launch per batch chunk, each its images as a problem of its own, as rocKE's
+/// direct_kernel_sweep._batch_split_plan runs it: every chunk must launch, and a split-C
+/// kernel, whose workspace would span the whole batch, is refused.
+std::optional<ConvLaunch> batchSplitLaunch(const MatchedProblem& matched,
+                                           const conv::DirectInstance& direct)
+{
+    if(direct.splitC != 1)
+    {
+        return std::nullopt;
+    }
+    std::vector<BatchChunkLaunch> chunks;
+    chunks.reserve(matched.batchChunks.size());
+    for(const auto images : matched.batchChunks)
+    {
+        auto sub = matched.problem;
+        sub.n = images;
+        const auto geometry = conv::deriveGeometry(sub);
+        const auto launch
+            = geometry ? conv::directInstanceLaunch(sub, *geometry, direct) : std::nullopt;
+        if(!launch)
+        {
+            return std::nullopt;
+        }
+        chunks.push_back(
+            {images, *launch, conv::directKernargs(sub, *geometry), geometry->tensorBytes});
+    }
+    ConvLaunch launch{chunks.front().geometry, chunks.front().kernargs};
+    launch.batchChunks = std::move(chunks);
+    return launch;
+}
+
+} // namespace
+
+std::optional<ConvLaunch> aotKernelFits(const MatchedProblem& matched,
+                                        const KernelDefinition& kernel)
+{
+    const char* dtype = matched.dtype == data_objects::DataType::HALF ? "fp16" : "bf16";
+    AotPrepared scratch;
+    const auto& prepared = preparedOf(kernel, scratch);
+    // A bias kernel reads the bias pointer its ABI ends with, so it serves only a graph
+    // that binds one, and a kernel without one only a graph that binds none.
+    if(prepared.dtype != dtype || !prepared.instance
+       || prepared.bias != (matched.binding.bias ? 1 : 0))
+    {
+        return std::nullopt;
+    }
+    return aotInstanceLaunch(matched, *prepared.instance);
+}
+
+bool aotKernelMatches(const ConvFwdAotEngine& engine,
+                      const MatchContext& context,
+                      const BoundTokens& bound,
+                      const KernelDefinition& kernel)
+{
+    const auto matched = matchedFromBound(engine, context, bound);
+    return matched && aotKernelFits(*matched, kernel).has_value();
+}
+
+double aotScore(const ConvFwdAotEngine& engine,
+                const MatchContext& context,
+                const BoundTokens& bound,
+                const KernelDefinition& kernel)
+{
+    // Deterministic fallback only. Only kernels the kernel matcher admitted are scored,
+    // so a refusal here is a contract violation, ranked last (-1). A depthwise direct
+    // instance (std, spatial, tiled, col) ranks above every
+    // implicit-GEMM one (conv::aotInstanceScore stays in [0, 2)), the default direct arm
+    // first: implicit GEMM leaves most lanes idle on one channel per group. An instance
+    // carries no build group count, so the default arm is the one for the graph's.
+    //
+    // The grouped and non-grouped direct kernels compete with implicit GEMM on ordinary
+    // graphs, and nothing yet measures which wins where. Until rocKE's dispatcher or a
+    // tuned heuristic ranks them, they take a neutral placeholder below every
+    // implicit-GEMM instance (and above a refusal): an unbenchmarked plan keeps serving
+    // implicit GEMM wherever it can, and the direct kernels are chosen by benchmarking,
+    // a recorded winner, the kernel_family knob, or where nothing else serves.
+    const auto matched = matchedFromBound(engine, context, bound);
+    AotPrepared scratch;
+    const auto& instance = preparedOf(kernel, scratch).instance;
+    const auto launch = matched && instance ? aotInstanceLaunch(*matched, *instance) : std::nullopt;
+    if(!launch)
+    {
+        return -1.0;
+    }
+    if(const auto* direct = std::get_if<conv::DirectInstance>(&*instance))
+    {
+        // win packages both a pure-depthwise arm (cpg == 1, which competes with
+        // std/spatial/tiled/col) and a grouped one (cpg a multiple of 8): only the
+        // former is pure depthwise.
+        const bool pureDepthwise = direct->variant == conv::DirectVariant::WIN
+                                       ? direct->cpg <= 1
+                                       : conv::isDepthwiseDirectVariant(direct->variant);
+        if(!pureDepthwise)
+        {
+            return -0.5;
+        }
+        return conv::isDefaultDirectArm(
+                   matched->problem.groups, direct->variant, direct->blockW, direct->blockWaves)
+                   ? 4.0
+                   : 3.0;
+    }
+    return conv::aotInstanceScore(matched->problem,
+                                  matched->geometry,
+                                  std::get<conv::AotInstance>(*instance),
+                                  launch->geometry);
+}
+
+/// Which of the instances serving a graph run: the CandidateFilterFn registered under the
+/// kernel matcher's symbol, so it sees every instance aotKernelMatches admitted at once.
+/// Among implicit-GEMM instances it keeps the problem's widest vector widths, or every
+/// serving instance when none bakes them (conv::widestVectorSelection); "serves" is the
+/// capability, this is the policy. rocKE's direct benchmark runs every direct kernel that
+/// serves, so direct instances all stay, and so do group-merged ones.
+std::vector<bool> aotCandidateFilter(const ConvFwdAotEngine& engine,
+                                     const MatchContext& context,
+                                     const BoundTokens& /*bound*/,
+                                     const std::vector<const KernelDefinition*>& candidates)
+{
+    std::vector<bool> keep(candidates.size(), true);
+    std::vector<size_t> implicitGemm;
+    std::vector<conv::AotSelectionKey> keys;
+    AotPrepared scratch;
+    for(size_t i = 0; i < candidates.size(); ++i)
+    {
+        const auto& prepared = preparedOf(*candidates[i], scratch);
+        const auto* gemm
+            = prepared.instance ? std::get_if<conv::AotInstance>(&*prepared.instance) : nullptr;
+        // A merged instance records derived widths (0), so no width comparison applies
+        // to it: like a direct one, it stays.
+        if(gemm != nullptr && gemm->groupMerge == 1 && prepared.epilogue)
+        {
+            implicitGemm.push_back(i);
+            keys.push_back({*prepared.epilogue, gemm->vectorA, gemm->vectorB, gemm->vectorC});
+        }
+    }
+    if(keys.empty())
+    {
+        return keep;
+    }
+    // Every candidate was admitted by aotKernelMatches, so the graph matches.
+    const auto matched = engine.matchProblem(context);
+    if(!matched)
+    {
+        return keep;
+    }
+    const auto& problem = matched->problem;
+    const auto selected
+        = conv::widestVectorSelection(keys, problem.c / problem.groups, problem.k / problem.groups);
+    for(size_t j = 0; j < implicitGemm.size(); ++j)
+    {
+        keep[implicitGemm[j]] = selected[j];
+    }
+    return keep;
+}
+
+namespace
+{
+
+/// How this family admits a kernel for a matched graph and launches it (aotKernelFits).
+using KernelFits = std::optional<ConvLaunch> (*)(const MatchedProblem&, const KernelDefinition&);
+
+void requireBindings(const ConvFwdAotEngine& engine,
+                     const BoundTokens& bound,
+                     const Binding& binding)
+{
+    if(tryGetBoundInt(bound, engine.xToken) != std::optional<int64_t>(binding.x)
+       || tryGetBoundInt(bound, engine.wToken) != std::optional<int64_t>(binding.w)
+       || tryGetBoundInt(bound, engine.yToken) != std::optional<int64_t>(binding.y)
+       || (!engine.biasToken.empty() && tryGetBoundInt(bound, engine.biasToken) != binding.bias))
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+            engine.label + " dispatch requires this graph matcher's tensor bindings");
+    }
+}
+
+/// Defense-in-depth: the graph match already declines a graph whose output isn't NHWK, so
+/// this never throws for a kernel reached through the engine's own matchers. It stays as
+/// prepare()'s own invariant check regardless.
+void requireOutput(const ConvFwdAotEngine& engine,
+                   const MatchContext& context,
+                   const MatchedProblem& matched)
+{
+    const auto* output = findTensor(context, matched.binding.y);
+    if(!outputMatches(output, matched))
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+            engine.label + " requires packed NHWK output with the inferred convolution dimensions");
+    }
+}
+
+/// The ABI kernelSignature names: (A*, B*, D*, A_bytes:i32, B_bytes:i32, D_bytes:i32),
+/// @p names as i32s, then, for a bias kernel, (Bias*, Bias_bytes:i32).
+///
+/// NAMES ARE LOAD-BEARING. Every problem argument is a by_value i32, so kind and size alone
+/// cannot tell p_Hi from p_Wi; a reordered list would launch with every argument past the
+/// first divergence shifted. requireSignatureMatch compares names whenever both sides
+/// carry one, and hkp_pack records the builder's parameter names.
+template <size_t Count>
+std::vector<KernelArgument> convFwdKernelSignature(const std::array<std::string_view, Count>& names,
+                                                   bool bias)
+{
+    constexpr auto POINTER_BYTES = static_cast<uint32_t>(sizeof(void*));
+    constexpr auto I32_BYTES = static_cast<uint32_t>(sizeof(int32_t));
+    std::vector<KernelArgument> signature;
+    uint32_t offset = 0;
+    for(const auto* name : {"A", "B", "D"})
+    {
+        signature.push_back({"global_buffer", POINTER_BYTES, offset, name});
+        offset += POINTER_BYTES;
+    }
+    for(const auto* name : {"A_bytes", "B_bytes", "D_bytes"})
+    {
+        signature.push_back({"by_value", I32_BYTES, offset, name});
+        offset += I32_BYTES;
+    }
+    for(const auto name : names)
+    {
+        signature.push_back({"by_value", I32_BYTES, offset, std::string(name)});
+        offset += I32_BYTES;
+    }
+    if(bias)
+    {
+        // A pointer starts on its own alignment in the kernarg segment.
+        offset = (offset + POINTER_BYTES - 1) / POINTER_BYTES * POINTER_BYTES;
+        signature.push_back({"global_buffer", POINTER_BYTES, offset, "Bias"});
+        offset += POINTER_BYTES;
+        signature.push_back({"by_value", I32_BYTES, offset, "Bias_bytes"});
+    }
+    return signature;
+}
+
+/// One launch of a batch-split kernel, ready to run: its code with this chunk's grid,
+/// and the byte offsets of its activation and output windows.
+struct PreparedBatchChunk
+{
+    IngestorKernelCode code;
+    int64_t activationOffset;
+    int64_t outputOffset;
+    std::array<int32_t, 3> bytes;
+    ConvKernargs kernargs;
+};
+
+class PreparedConvFwd : public PreparedDispatch
+{
+public:
+    PreparedConvFwd(IngestorKernelCode code,
+                    std::optional<IngestorKernelCode> reduceCode,
+                    Binding binding,
+                    std::array<int32_t, 3> bytes,
+                    ConvKernargs kernargs,
+                    int64_t workspaceBytes,
+                    int32_t biasBytes)
+        : _code(std::move(code))
+        , _reduceCode(std::move(reduceCode))
+        , _binding(binding)
+        , _bytes(bytes)
+        , _kernargs(kernargs)
+        , _workspaceBytes(workspaceBytes)
+        , _biasBytes(biasBytes)
+    {
+    }
+
+    /// A hipModule_t belongs to the device it loaded on, so the kernel is resolved per
+    /// launch stream rather than held as one pointer.
+    compilation::IRunnableKernel& kernelForStream(hipStream_t stream) const
+    {
+        return _code.kernelForStream(stream);
+    }
+    /// The fold of a split-C kernel, launched after it; null for every other kernel.
+    compilation::IRunnableKernel* reduceKernelForStream(hipStream_t stream) const
+    {
+        return _reduceCode ? &_reduceCode->kernelForStream(stream) : nullptr;
+    }
+    const Binding& binding() const
+    {
+        return _binding;
+    }
+    const std::array<int32_t, 3>& bytes() const
+    {
+        return _bytes;
+    }
+    const ConvKernargs& kernargs() const
+    {
+        return _kernargs;
+    }
+    int64_t workspaceBytes() const
+    {
+        return _workspaceBytes;
+    }
+    /// The bias vector's bytes (K elements), for a kernel that takes one; 0 otherwise.
+    int32_t biasBytes() const
+    {
+        return _biasBytes;
+    }
+    /// The launches of a batch-split kernel, in batch order; empty for every other kernel.
+    const std::vector<PreparedBatchChunk>& batchChunks() const
+    {
+        return _batchChunks;
+    }
+    /// The whole tensors' byte counts a batch-split kernel's chunks cover.
+    const std::array<int64_t, 3>& wholeBytes() const
+    {
+        return _wholeBytes;
+    }
+    void setBatchChunks(std::vector<PreparedBatchChunk> chunks, std::array<int64_t, 3> wholeBytes)
+    {
+        _batchChunks = std::move(chunks);
+        _wholeBytes = wholeBytes;
+    }
+
+private:
+    // Holds both the program/module and its kernel view; owns no MatchContext data.
+    IngestorKernelCode _code;
+    std::optional<IngestorKernelCode> _reduceCode;
+    Binding _binding;
+    std::array<int32_t, 3> _bytes;
+    ConvKernargs _kernargs;
+    int64_t _workspaceBytes;
+    int32_t _biasBytes;
+    std::vector<PreparedBatchChunk> _batchChunks;
+    std::array<int64_t, 3> _wholeBytes{};
+};
+
+/// The bias a bias kernel's launch appends: its pointer and byte count.
+struct BiasArgument
+{
+    void* ptr;
+    int32_t bytes;
+};
+
+/// One launch of @p kernel: A*, B*, D*, A_bytes:i32, B_bytes:i32, D_bytes:i32, then the
+/// family's AOT problem block in kernelSignature's order, then @p bias when the kernel
+/// takes one. The byte counts are storage sizes, not element counts.
+void launchConvKernel(compilation::IRunnableKernel& kernel,
+                      hipStream_t stream,
+                      const std::array<void*, 3>& pointers,
+                      const std::array<int32_t, 3>& bytes,
+                      const ConvKernargs& kernargs,
+                      const std::optional<BiasArgument>& bias)
+{
+    std::visit(
+        [&](const auto& values) {
+            std::apply(
+                [&](const auto&... args) {
+                    if(bias)
+                    {
+                        kernel.launch(stream,
+                                      pointers[0],
+                                      pointers[1],
+                                      pointers[2],
+                                      bytes[0],
+                                      bytes[1],
+                                      bytes[2],
+                                      args...,
+                                      bias->ptr,
+                                      bias->bytes);
+                        return;
+                    }
+                    kernel.launch(stream,
+                                  pointers[0],
+                                  pointers[1],
+                                  pointers[2],
+                                  bytes[0],
+                                  bytes[1],
+                                  bytes[2],
+                                  args...);
+                },
+                values);
+        },
+        kernargs);
+}
+
+/// Whether the storage [@p a, @p a + @p aBytes) and [@p b, @p b + @p bBytes) are disjoint.
+bool rangesDisjoint(const void* a, int64_t aBytes, const void* b, int64_t bBytes)
+{
+    const auto lhs = reinterpret_cast<uintptr_t>(a);
+    const auto rhs = reinterpret_cast<uintptr_t>(b);
+    return aBytes > 0 && bBytes > 0
+           && lhs <= std::numeric_limits<uintptr_t>::max() - static_cast<uintptr_t>(aBytes)
+           && rhs <= std::numeric_limits<uintptr_t>::max() - static_cast<uintptr_t>(bBytes)
+           && (lhs >= rhs ? lhs - rhs >= static_cast<uintptr_t>(bBytes)
+                          : rhs - lhs >= static_cast<uintptr_t>(aBytes));
+}
+
+class ConvFwdDispatchHandler : public IKernelDispatchHandler<Handle>
+{
+public:
+    ConvFwdDispatchHandler(const ConvFwdAotEngine& engine,
+                           const compilation::KpackKernelLoader& loader,
+                           KernelFits fits,
+                           std::set<std::string> launchNames)
+        : _engine(engine)
+        , _loader(loader)
+        , _fits(fits)
+        , _launchNames(std::move(launchNames))
+    {
+    }
+
+    std::set<std::string> launchNames() const override
+    {
+        return _launchNames;
+    }
+
+    size_t workspaceBytes(const MatchContext& context,
+                          const BoundTokens& /*bound*/,
+                          const KernelDefinition& kernel) const override
+    {
+        // Implicit GEMM uses registers and statically allocated LDS only, the direct
+        // kernels at most static LDS; only a split-C kernel's partial sums need scratch.
+        if(_launchNames.empty())
+        {
+            return 0;
+        }
+        const auto matched = _engine.matchProblem(context);
+        const auto launch = matched ? _fits(*matched, kernel) : std::nullopt;
+        return launch ? static_cast<size_t>(launch->workspaceBytes) : 0;
+    }
+
+    std::unique_ptr<PreparedDispatch> prepare(const MatchContext& context,
+                                              const BoundTokens& bound,
+                                              const KernelDefinition& kernel) const override
+    {
+        const auto matched = _engine.matchProblem(context);
+        const auto launch = matched ? _fits(*matched, kernel) : std::nullopt;
+        // A split-C kernel launches through this pack's two-launch handler only, and
+        // every kernel of that pack is split-C.
+        if(!launch || launch->reduce.has_value() != !_launchNames.empty())
+        {
+            throw hipdnn_plugin_sdk::HipdnnPluginException(
+                HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+                _engine.label
+                    + " graph or packaged kernel does not satisfy the convolution "
+                      "contract");
+        }
+        requireBindings(_engine, bound, matched->binding);
+        requireOutput(_engine, context, *matched);
+
+        // This pack ships prebuilt code objects only; _fits already refused every
+        // other source kind. Each family has its own ABI, so the signature follows it.
+        // No kernel of this pack uses dynamic LDS.
+        const auto& signature
+            = kernelSignature(launch->kernargs, matched->binding.bias.has_value());
+        // K bias elements of the io dtype, sized like x, w and y (tensorByteSize: the
+        // 16-bit storage types the graph match admits); the match bounded K.
+        const auto biasSize = matched->binding.bias
+                                  ? conv::tensorByteSize({1, matched->problem.k, 1, 1})
+                                  : std::optional<int32_t>{0};
+        if(!biasSize)
+        {
+            throw hipdnn_plugin_sdk::HipdnnPluginException(
+                HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+                _engine.label + " bias byte size exceeds the signed 32-bit kernel ABI");
+        }
+        const int32_t biasBytes = *biasSize;
+        const auto load
+            = [&](const KernelDefinition& definition, const conv::LaunchGeometry& geometry) {
+                  auto code = buildIngestorKernelCode(_loader, context, definition, signature);
+                  code.setBlockSize(geometry.blockX, 1, 1);
+                  code.setGridSize(geometry.gridX, geometry.gridY, geometry.gridZ);
+                  code.setSharedMemBytes(0);
+                  return code;
+              };
+        if(!launch->batchChunks.empty())
+        {
+            return prepareBatchSplit(*matched, *launch, load, kernel, biasBytes);
+        }
+        if(!launch->reduce)
+        {
+            return std::make_unique<PreparedConvFwd>(load(kernel, launch->geometry),
+                                                     std::nullopt,
+                                                     matched->binding,
+                                                     matched->geometry.tensorBytes,
+                                                     launch->kernargs,
+                                                     0,
+                                                     biasBytes);
+        }
+        // The fold takes the forward direct-conv arguments of the conv pass (rocKE runs
+        // both with one ConvArgs), so one kernarg block serves both launches; so does
+        // the bias, which only the fold adds.
+        auto conv = load(launchKernelDefinition(kernel, SPLIT_C_CONV_LAUNCH), launch->geometry);
+        auto reduce = load(launchKernelDefinition(kernel, SPLIT_C_REDUCE_LAUNCH), *launch->reduce);
+        return std::make_unique<PreparedConvFwd>(std::move(conv),
+                                                 std::move(reduce),
+                                                 matched->binding,
+                                                 matched->geometry.tensorBytes,
+                                                 launch->kernargs,
+                                                 launch->workspaceBytes,
+                                                 biasBytes);
+    }
+
+    void launch(const Handle& handle,
+                const PreparedDispatch& prepared,
+                const hipdnnPluginDeviceBuffer_t* deviceBuffers,
+                uint32_t numDeviceBuffers,
+                void* workspace) const override
+    {
+        const auto& convPrepared = dynamic_cast<const PreparedConvFwd&>(prepared);
+        if(deviceBuffers == nullptr)
+        {
+            throw hipdnn_plugin_sdk::HipdnnPluginException(
+                HIPDNN_PLUGIN_STATUS_BAD_PARAM, _engine.label + " requires device buffers");
+        }
+        const auto& binding = convPrepared.binding();
+        const auto a
+            = hipdnn_plugin_sdk::findDeviceBuffer(binding.x, deviceBuffers, numDeviceBuffers);
+        const auto b
+            = hipdnn_plugin_sdk::findDeviceBuffer(binding.w, deviceBuffers, numDeviceBuffers);
+        const auto d
+            = hipdnn_plugin_sdk::findDeviceBuffer(binding.y, deviceBuffers, numDeviceBuffers);
+        for(const auto* ptr : {a.ptr, b.ptr, d.ptr})
+        {
+            if(ptr == nullptr || reinterpret_cast<uintptr_t>(ptr) % 16 != 0)
+            {
+                throw hipdnn_plugin_sdk::HipdnnPluginException(
+                    HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+                    _engine.label + " requires non-null device pointers aligned to 16 bytes");
+            }
+        }
+        const auto bias = biasArgument(convPrepared, deviceBuffers, numDeviceBuffers);
+        const auto stream = handle.getStream();
+        if(!convPrepared.batchChunks().empty())
+        {
+            launchBatchSplit(convPrepared, stream, {a.ptr, b.ptr, d.ptr}, bias);
+            return;
+        }
+        const auto& bytes = convPrepared.bytes();
+        if(!conv::bufferRangesDoNotOverlap({reinterpret_cast<uintptr_t>(a.ptr),
+                                            reinterpret_cast<uintptr_t>(b.ptr),
+                                            reinterpret_cast<uintptr_t>(d.ptr)},
+                                           bytes))
+        {
+            throw hipdnn_plugin_sdk::HipdnnPluginException(
+                HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+                _engine.label + " requires nonoverlapping input, filter, and output storage");
+        }
+        requireBiasApart(bias, d.ptr, bytes[2]);
+        auto* reduce = convPrepared.reduceKernelForStream(stream);
+        if(reduce == nullptr)
+        {
+            launchConvKernel(convPrepared.kernelForStream(stream),
+                             stream,
+                             {a.ptr, b.ptr, d.ptr},
+                             bytes,
+                             convPrepared.kernargs(),
+                             bias);
+            return;
+        }
+
+        // Split-C: the conv pass writes the fp32 [split_c, N, Ho, Wo, K] partial sums
+        // through D into the workspace, which nongroupedDirectLaunch kept below the
+        // masked-access offset (so its byte count is an i32); the fold reads them through
+        // A and writes the output through D. B is unused by the fold.
+        const auto workspaceBytes = static_cast<int32_t>(convPrepared.workspaceBytes());
+        if(workspace == nullptr || reinterpret_cast<uintptr_t>(workspace) % 16 != 0
+           || !conv::bufferRangesDoNotOverlap(
+               {reinterpret_cast<uintptr_t>(a.ptr),
+                reinterpret_cast<uintptr_t>(b.ptr),
+                reinterpret_cast<uintptr_t>(workspace)},
+               std::array<int32_t, 3>{bytes[0], bytes[1], workspaceBytes})
+           || !conv::bufferRangesDoNotOverlap(
+               {reinterpret_cast<uintptr_t>(workspace),
+                reinterpret_cast<uintptr_t>(b.ptr),
+                reinterpret_cast<uintptr_t>(d.ptr)},
+               std::array<int32_t, 3>{workspaceBytes, bytes[1], bytes[2]}))
+        {
+            throw hipdnn_plugin_sdk::HipdnnPluginException(
+                HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+                _engine.label
+                    + " split-C requires a 16-byte aligned workspace of the "
+                      "requested size that overlaps no tensor");
+        }
+        requireBiasApart(bias, workspace, workspaceBytes);
+        launchConvKernel(convPrepared.kernelForStream(stream),
+                         stream,
+                         {a.ptr, b.ptr, workspace},
+                         {bytes[0], bytes[1], workspaceBytes},
+                         convPrepared.kernargs(),
+                         bias);
+        launchConvKernel(*reduce,
+                         stream,
+                         {workspace, b.ptr, d.ptr},
+                         {workspaceBytes, bytes[1], bytes[2]},
+                         convPrepared.kernargs(),
+                         bias);
+    }
+
+private:
+    /// The bias a bias kernel takes: its bound buffer, non-null and 16-byte aligned like
+    /// every other tensor of the launch. nullopt for a kernel without one.
+    std::optional<BiasArgument> biasArgument(const PreparedConvFwd& prepared,
+                                             const hipdnnPluginDeviceBuffer_t* deviceBuffers,
+                                             uint32_t numDeviceBuffers) const
+    {
+        const auto& binding = prepared.binding();
+        if(!binding.bias)
+        {
+            return std::nullopt;
+        }
+        const auto buffer
+            = hipdnn_plugin_sdk::findDeviceBuffer(*binding.bias, deviceBuffers, numDeviceBuffers);
+        if(buffer.ptr == nullptr || reinterpret_cast<uintptr_t>(buffer.ptr) % 16 != 0)
+        {
+            throw hipdnn_plugin_sdk::HipdnnPluginException(
+                HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+                _engine.label + " requires a non-null bias pointer aligned to 16 bytes");
+        }
+        return BiasArgument{buffer.ptr, prepared.biasBytes()};
+    }
+
+    /// The bias is read while @p storage is written, so the two must not share bytes.
+    /// The input and filter are only read, as is the bias, so they may.
+    void requireBiasApart(const std::optional<BiasArgument>& bias,
+                          const void* storage,
+                          int64_t storageBytes) const
+    {
+        if(bias && !rangesDisjoint(bias->ptr, bias->bytes, storage, storageBytes))
+        {
+            throw hipdnn_plugin_sdk::HipdnnPluginException(
+                HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+                _engine.label + " requires bias storage that overlaps no written storage");
+        }
+    }
+
+    /// A batch-split kernel: one code object per chunk, each with its own grid, over
+    /// consecutive windows of the activation and output; the filter and the bias are
+    /// whole in each.
+    template <typename Load>
+    static std::unique_ptr<PreparedDispatch> prepareBatchSplit(const MatchedProblem& matched,
+                                                               const ConvLaunch& launch,
+                                                               const Load& load,
+                                                               const KernelDefinition& kernel,
+                                                               int32_t biasBytes)
+    {
+        const auto& problem = matched.problem;
+        const auto& geometry = matched.geometry;
+        // Bytes of one image of the activation and of the output; matchedOf bounded both.
+        const int64_t activationImage = 2 * problem.hi * problem.wi * problem.c;
+        const int64_t outputImage = 2 * geometry.ho * geometry.wo * problem.k;
+        std::vector<PreparedBatchChunk> chunks;
+        chunks.reserve(launch.batchChunks.size());
+        int64_t done = 0;
+        for(const auto& chunk : launch.batchChunks)
+        {
+            chunks.push_back({load(kernel, chunk.geometry),
+                              done * activationImage,
+                              done * outputImage,
+                              chunk.tensorBytes,
+                              chunk.kernargs});
+            done += chunk.images;
+        }
+        // The dispatch's own code is the first chunk's; only the chunks launch.
+        auto prepared = std::make_unique<PreparedConvFwd>(load(kernel, launch.geometry),
+                                                          std::nullopt,
+                                                          matched.binding,
+                                                          launch.batchChunks.front().tensorBytes,
+                                                          launch.kernargs,
+                                                          0,
+                                                          biasBytes);
+        prepared->setBatchChunks(
+            std::move(chunks),
+            {done * activationImage, int64_t{geometry.tensorBytes[1]}, done * outputImage});
+        return prepared;
+    }
+
+    /// Each chunk of a batch-split kernel in order on one stream, after checking the whole
+    /// tensors do not overlap: each chunk sees only its own windows.
+    void launchBatchSplit(const PreparedConvFwd& prepared,
+                          hipStream_t stream,
+                          const std::array<void*, 3>& pointers,
+                          const std::optional<BiasArgument>& bias) const
+    {
+        if(!conv::bufferRangesDoNotOverlap({reinterpret_cast<uintptr_t>(pointers[0]),
+                                            reinterpret_cast<uintptr_t>(pointers[1]),
+                                            reinterpret_cast<uintptr_t>(pointers[2])},
+                                           prepared.wholeBytes()))
+        {
+            throw hipdnn_plugin_sdk::HipdnnPluginException(
+                HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+                _engine.label + " requires nonoverlapping input, filter, and output storage");
+        }
+        requireBiasApart(bias, pointers[2], prepared.wholeBytes()[2]);
+        for(const auto& chunk : prepared.batchChunks())
+        {
+            launchConvKernel(chunk.code.kernelForStream(stream),
+                             stream,
+                             {static_cast<char*>(pointers[0]) + chunk.activationOffset,
+                              pointers[1],
+                              static_cast<char*>(pointers[2]) + chunk.outputOffset},
+                             chunk.bytes,
+                             chunk.kernargs,
+                             bias);
+        }
+    }
+
+    const ConvFwdAotEngine& _engine;
+    const compilation::KpackKernelLoader& _loader;
+    KernelFits _fits;
+    std::set<std::string> _launchNames;
+};
+
+} // namespace
+
+const std::vector<KernelArgument>& kernelSignature(const ConvKernargs& kernargs, bool bias)
+{
+    static const auto s_implicitGemm
+        = convFwdKernelSignature(conv::IMPLICIT_GEMM_KERNARG_NAMES, false);
+    static const auto s_direct = convFwdKernelSignature(conv::DIRECT_KERNARG_NAMES, false);
+    static const auto s_implicitGemmBias
+        = convFwdKernelSignature(conv::IMPLICIT_GEMM_KERNARG_NAMES, true);
+    static const auto s_directBias = convFwdKernelSignature(conv::DIRECT_KERNARG_NAMES, true);
+    if(std::holds_alternative<conv::DirectKernargs>(kernargs))
+    {
+        return bias ? s_directBias : s_direct;
+    }
+    return bias ? s_implicitGemmBias : s_implicitGemm;
+}
+
+std::unique_ptr<IKernelDispatchHandler<Handle>>
+    makeDispatchHandler(const ConvFwdAotEngine& engine,
+                        const compilation::KpackKernelLoader& loader,
+                        std::set<std::string> launchNames)
+{
+    return std::make_unique<ConvFwdDispatchHandler>(
+        engine, loader, &aotKernelFits, std::move(launchNames));
+}
+
+} // namespace hip_kernel_provider::kernel_ingestor_engine::gfx950_conv_fwd_aot
+
+#endif // HIPDNN_ENABLE_KERNEL_INGESTOR

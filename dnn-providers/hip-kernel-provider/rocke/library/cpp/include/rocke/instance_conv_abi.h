@@ -39,7 +39,8 @@ typedef enum
     ROCKE_CONV_ARG_D, /* "d"    -- pointer with the D operand dtype */
     ROCKE_CONV_ARG_F32_PTR, /* "f32*" */
     ROCKE_CONV_ARG_I32_PTR, /* "i32*" */
-    ROCKE_CONV_ARG_I32 /* "i32"  -- scalar */
+    ROCKE_CONV_ARG_I32, /* "i32"  -- scalar */
+    ROCKE_CONV_ARG_BIAS /* "bias" -- pointer to the per-channel bias (D dtype) */
 } rocke_conv_arg_kind_t;
 
 #define ROCKE_CONV_ARG_NAME_CAP 32
@@ -57,7 +58,7 @@ typedef struct
     int count;
 } rocke_conv_arg_list_t;
 
-/* The Python kind string ("a", "b", "d", "f32*", "i32*", "i32"). */
+/* The Python kind string ("a", "b", "d", "f32*", "i32*", "i32", "bias"). */
 const char* rocke_conv_arg_kind_str(rocke_conv_arg_kind_t kind);
 
 /* Implicit-GEMM ABI for one direction ("fwd", "wgrad", "dgrad"). two_stage
@@ -85,6 +86,11 @@ bool rocke_conv_arg_names_ex(const char* direction,
 /* Direct grouped conv ABI ("fwd", "dgrad" or "wgrad"); false for any other
  * direction. */
 bool rocke_conv_direct_arg_names(const char* direction, rocke_conv_arg_list_t* out);
+
+/* Append the per-output-channel bias tail of a forward kernel built with
+ * bias -- ("Bias", bias), ("Bias_bytes", i32) -- to `out`, after everything
+ * else (Python conv_bias_arg_names / conv_arg_names(bias=True)). */
+void rocke_conv_append_bias_args(rocke_conv_arg_list_t* out);
 
 /* The forward problem block without the leading pointer/byte-size six, for a
  * fused kernel that keeps its own pointer convention (deep_fused_conv_pool). */

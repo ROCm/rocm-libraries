@@ -1,0 +1,24 @@
+{
+  "claims": {
+    "hipkernel:Gfx950ConvFwdBiasAot": [
+      {
+        "cases": [
+          "depthwise_c32_3x3_bfloat16",
+          "depthwise_c32_3x3_half",
+          "depthwise_c64_3x3_tall_bfloat16",
+          "depthwise_c64_3x3_tall_half",
+          "depthwise_c96_3x3_s2_odd_bfloat16",
+          "depthwise_c96_3x3_s2_odd_half",
+          "grouped_g4_c32_k64_bfloat16",
+          "grouped_g4_c32_k64_half"
+        ],
+        "support": {
+          "gfx950": [
+            "linux"
+          ]
+        }
+      }
+    ]
+  },
+  "version": 1
+}

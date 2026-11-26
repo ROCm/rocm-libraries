@@ -27,6 +27,7 @@
 #  10  cpg 12
 #  11  tdm_split 3
 #  12  column padding 1 with PAD 2
+from dataclasses import replace
 from _emit_common import run_emit
 from kernels.common.conv_direct_fwd_tapouter_wmma import (
     DirectFwdTapOuterSpec,
@@ -67,7 +68,7 @@ def _k(wk, wp, tk, tp, tw, ck, st, **kw):
     )
 
 
-def _spec(idx: int):
+def _base_spec(idx: int):
     S = DirectFwdTapOuterSpec
     cfgs = {
         0: (S(problem=_p(2), **_k(1, 4, 8, 2, 16, 64, 2)), "gfx1250"),
@@ -111,6 +112,29 @@ def _spec(idx: int):
 
 def _build(spec, arch):
     return build_direct_fwd_tapouter_wmma(spec, arch=arch)
+
+
+# Conv + bias forward, configs 13..: the config _BIAS_CFGS[idx - 13]
+# above rebuilt with bias=True (the Bias / Bias_bytes kernarg tail and the
+# fp32 bias add before the store).
+_BIAS_CFG_BASE = 13
+_BIAS_CFGS = (
+    0,
+    1,
+    3,
+    6,
+)
+
+
+def _spec(idx: int):
+    if idx < _BIAS_CFG_BASE:
+        return _base_spec(idx)
+    if idx - _BIAS_CFG_BASE >= len(_BIAS_CFGS):
+        raise SystemExit(f"unknown config index {idx}")
+    sel = _base_spec(_BIAS_CFGS[idx - _BIAS_CFG_BASE])
+    if isinstance(sel, tuple):
+        return replace(sel[0], bias=True), sel[1]
+    return replace(sel, bias=True)
 
 
 def main() -> int:

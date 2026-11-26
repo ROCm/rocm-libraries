@@ -28,6 +28,7 @@
 #include "rocke/helper_rocke.core.arch.h" /* rocke_archtarget_fits_lds, max_threads_per_block */
 #include "rocke/helper_rocke.helpers.io.h" /* rocke_b_io_ir_type */
 #include "rocke/helper_rocke.helpers.spec.h" /* rocke_kernel_name_join, rocke_ceil_div, ... */
+#include "rocke/instance_conv_bias.h"
 #include "rocke/instance_conv_direct_fwd_gstream_wmma.h"
 #include "rocke/instance_conv_direct_grouped.h"
 #include "rocke/instance_conv_direct_grouped_internal.h" /* rocke_dconv_emit_params */
@@ -263,7 +264,8 @@ rocke_status_t rocke_fwd_gstream_wmma_kernel_name(const rocke_fwd_gstream_wmma_s
                            spec->phase_split ? "ps" : "",
                            spec->prefetch ? "pf" : "",
                            pd,
-                           sched.c_str()};
+                           sched.c_str(),
+                           spec->bias ? "cbias" : ""};
     const char* flag_names[] = {"bf16"};
     int flag_on[] = {rocke_direct_conv_problem_is_bf16(p) ? 1 : 0};
     return rocke_kernel_name_join(spec->name ? spec->name : "direct_fwd_gstream_wmma",
@@ -443,7 +445,10 @@ rocke_kernel_def_t* rocke_build_fwd_gstream_wmma(rocke_ir_builder_t* b,
     if(spec->sched != NULL && spec->sched[0] != '\0')
         rocke_attr_set_str(b, &b->kernel->attrs, "scheduler_strategy", spec->sched);
     rocke_dconv_params_t prm;
-    rocke_dconv_emit_params(b, &prm, "fwd", io_type);
+    if(spec->bias)
+        rocke_dconv_emit_params_bias(b, &prm, io_type);
+    else
+        rocke_dconv_emit_params(b, &prm, "fwd", io_type);
     if(!rocke_ir_builder_ok(b))
         return NULL;
     V Xp = prm.A, Wp = prm.Bp, Yp = prm.D;
@@ -898,6 +903,15 @@ rocke_kernel_def_t* rocke_build_fwd_gstream_wmma(rocke_ir_builder_t* b,
             V y = rocke_b_mul(b, x, ci(b, p->kpg));
             ep_ch[m] = rocke_b_add(b, y, r_in);
         }
+    /* Conv + bias: the lane's 8 accumulator slots of M tile m are output
+     * channels ep_ch[m] .. +7 for every band of the walk: load them once. */
+    std::vector<V> ep_bias(TM, (V)NULL);
+    if(spec->bias)
+    {
+        V bias_rsrc = rocke_conv_bias_rsrc(b, prm.Bias, prm.Bias_bytes);
+        for(int m = 0; m < TM; ++m)
+            ep_bias[m] = rocke_conv_bias_load_vec_f32(b, bias_rsrc, ep_ch[m], 8, io_type, c0);
+    }
 
     auto epilogue = [&](V task, const std::vector<V>& accs) {
         V n = rocke_b_div(b, task, n_bands);
@@ -933,7 +947,10 @@ rocke_kernel_def_t* rocke_build_fwd_gstream_wmma(rocke_ir_builder_t* b,
                 }
                 V okm = ep_ok[m] == NULL ? ok : rocke_b_land(b, ok, ep_ok[m]);
                 V voff = rocke_b_select(b, okm, off, prm.D_bytes);
-                V val = rocke_b_vec_cast_f32_to(b, accs[m * TN + tn], io_type);
+                V acc = accs[m * TN + tn];
+                if(ep_bias[m] != NULL)
+                    acc = rocke_b_fadd(b, acc, ep_bias[m]);
+                V val = rocke_b_vec_cast_f32_to(b, acc, io_type);
                 rocke_dconv_buf_store_vN(b, bf16, y_rsrc, voff, c0, val, 4);
             }
         }

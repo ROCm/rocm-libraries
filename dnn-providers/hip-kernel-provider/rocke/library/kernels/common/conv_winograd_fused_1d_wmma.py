@@ -28,7 +28,9 @@ dilation) as ``F(m, r)`` or segmented ``S x F(m, m)`` Winograd
      reads ``Q + S - 1`` V fragments per 32-channel step instead of ``Q S``.
      Accumulators go to LDS as fp32 ``M[b][j][k]``;
   4. output transform (fp32 VALU): ``y[(t0 + j) m + i] = sum_b A^T[i][b] M_b[j]``,
-     8 channels per lane, 16-byte stores (positions past ``Wo`` dropped).
+     8 channels per lane, 16-byte stores (positions past ``Wo`` dropped);
+     with ``bias`` the lane's 8 bias values (trailing ``Bias`` /
+     ``Bias_bytes`` kernargs) are added in fp32 before the rounding.
 
 All LDS regions are exclusive allocations (no liveness aliasing across the
 persistent loop). Every barrier is outside any wave-dependent branch and the
@@ -44,7 +46,13 @@ from rocke.core.arch import ArchTarget
 from rocke.core.ir import F16, F32, I32, IRBuilder, KernelDef, PtrType
 from rocke.helpers.spec import SignatureBuilder, ceil_div, kernel_name_join
 from kernels.common._conv_implicit_gemm_common import ConvProblem
-from kernels.common.conv_winograd_fwd import _OOB, _load_raw, _raw_to_f32
+from kernels.common.conv_winograd_fwd import (
+    _OOB,
+    _bias_f32,
+    _bias_rsrc,
+    _load_raw,
+    _raw_to_f32,
+)
 from kernels.common.conv_winograd_gen import WinoAxis
 
 WAVES = 8
@@ -81,6 +89,8 @@ class FusedWino1DSpec:
     # so two workgroups can share a CU (LDS permitting).
     waves_per_eu: int = 0
     name: str = "conv_wino_fused1d"
+    # Add the per-output-channel conv bias in the output transform.
+    bias: bool = False
 
     def __post_init__(self) -> None:
         why = self.reason()
@@ -277,6 +287,8 @@ class FusedWino1DSpec:
             tag += f"_o{self.waves_per_eu}"
         if self.m_f16:
             tag += "_mh"
+        if self.bias:
+            tag += "_cbias"
         return tag
 
     def kernel_name(self) -> str:
@@ -284,7 +296,7 @@ class FusedWino1DSpec:
 
 
 def fused_signature(spec: FusedWino1DSpec) -> list:
-    return (
+    sb = (
         SignatureBuilder()
         .ptr("x", "fp16")
         .ptr("u", "fp16")
@@ -292,8 +304,10 @@ def fused_signature(spec: FusedWino1DSpec) -> list:
         .scalar("x_bytes", "i32")
         .scalar("u_bytes", "i32")
         .scalar("y_bytes", "i32")
-        .build()
     )
+    if spec.bias:
+        sb = sb.ptr("Bias", "fp16").scalar("Bias_bytes", "i32")
+    return sb.build()
 
 
 def fused_grid(spec: FusedWino1DSpec) -> Tuple[int, int, int]:
@@ -332,6 +346,7 @@ def build_fused_wino_1d(spec: FusedWino1DSpec, *, arch: str = "gfx1250") -> Kern
     x_rsrc = b.buffer_rsrc(x, b.param("x_bytes", I32))
     u_rsrc = b.buffer_rsrc(u, b.param("u_bytes", I32))
     y_rsrc = b.buffer_rsrc(y, b.param("y_bytes", I32))
+    bias_rsrc = _bias_rsrc(b, "fp16") if spec.bias else None
     ci = b.const_i32
     c0 = ci(0)
     oob = ci(_OOB)
@@ -642,6 +657,9 @@ def build_fused_wino_1d(spec: FusedWino1DSpec, *, arch: str = "gfx1250") -> Kern
             okit = b.cmp_lt(item, ci(n_o))
             j = b.select(okit, b.div(item, ci(KV)), c0)
             kc = b.mul(b.mod(item, ci(KV)), ci(VEC))
+            bias = None
+            if bias_rsrc is not None:
+                bias = _bias_f32(b, bias_rsrc, b.add(k0, kc), "fp16", VEC)
             ms = []
             for bb in range(n):
                 r_ = b.add(mb, b.add(ci(bb * TB), j))
@@ -675,6 +693,8 @@ def build_fused_wino_1d(spec: FusedWino1DSpec, *, arch: str = "gfx1250") -> Kern
                         else:
                             acc = b.fma(b.const_f32(cf), mv, acc)
                     vals.append(acc if acc is not None else b.const_f32(0.0))
+                if bias is not None:
+                    vals = [b.fadd(v_, bv) for v_, bv in zip(vals, bias)]
                 wo = b.add(a, b.mul(b.add(b.mul(tile, ci(m)), ci(i)), ci(d)))
                 ok = b.land(okit, b.cmp_lt(wo, ci(p.Wo)))
                 off = b.mul(b.add(b.mul(b.add(yimg, wo), ci(K)), b.add(k0, kc)), ci(2))

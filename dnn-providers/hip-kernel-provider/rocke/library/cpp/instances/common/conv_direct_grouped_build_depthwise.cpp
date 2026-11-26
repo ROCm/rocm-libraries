@@ -32,6 +32,7 @@
 
 #include "rocke/helper_rocke.helpers.io.h"
 #include "rocke/helper_rocke.helpers.transforms.h"
+#include "rocke/instance_conv_bias.h"
 #include "rocke/instance_conv_direct_grouped.h"
 #include "rocke/instance_conv_direct_grouped_internal.h"
 #include "rocke/ir.h"
@@ -86,7 +87,10 @@ bool rocke_dconv_dw_prologue(rocke_dconv_dw_ctx_t* ctx)
     ctx->is_bf16 = (ctx->p.dtype && strcmp(ctx->p.dtype, "bf16") == 0) ? 1 : 0;
     ctx->dtype = rocke_direct_conv_problem_dtype(&ctx->p);
     /* params: the AOT kernarg block, in conv_abi order. */
-    rocke_dconv_emit_params(b, &ctx->params, "fwd", rocke_dconv_io_type(b, ctx->dtype));
+    if(spec->bias)
+        rocke_dconv_emit_params_bias(b, &ctx->params, rocke_dconv_io_type(b, ctx->dtype));
+    else
+        rocke_dconv_emit_params(b, &ctx->params, "fwd", rocke_dconv_io_type(b, ctx->dtype));
     ctx->A = ctx->params.A;
     ctx->Bp = ctx->params.Bp;
     ctx->D = ctx->params.D;
@@ -213,6 +217,15 @@ void rocke_dconv_dw_load_weights(rocke_dconv_dw_ctx_t* ctx)
                     b, ctx->ch_in_range, rocke_b_cast_to_f32(b, w_h), ctx->zero_f32);
             }
         }
+    }
+    /* Conv + bias: bias[ch] as fp32, added to every flushed output. */
+    ctx->bias_f32 = NULL;
+    if(ctx->spec->bias)
+    {
+        rocke_value_t* bias_rsrc
+            = rocke_conv_bias_rsrc(b, ctx->params.Bias, ctx->params.Bias_bytes);
+        ctx->bias_f32 = rocke_conv_bias_load_f32(
+            b, bias_rsrc, ctx->ch, rocke_dconv_io_type(b, ctx->dtype), ctx->c0);
     }
 }
 
@@ -353,6 +366,8 @@ static void dw_flush(rocke_dconv_dw_ctx_t* ctx,
 
         safe_d = rocke_b_select(
             b, store_ok, rocke_b_mul(b, d_off, ctx->c_half_bytes), ctx->oob_sentinel);
+        if(ctx->bias_f32 != NULL)
+            acc_val = rocke_b_fadd(b, acc_val, ctx->bias_f32);
         rocke_dconv_scalar_store(b, ctx->dtype, ctx->d_rsrc, safe_d, ctx->c0, acc_val);
     }
 

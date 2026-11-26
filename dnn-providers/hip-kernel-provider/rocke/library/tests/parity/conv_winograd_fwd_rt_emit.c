@@ -29,6 +29,7 @@ typedef struct cfg
     const char* io;
     const char* op;
     int vec, fr, block, ps, tpt, bh, bw, lanes, nt, fused;
+    int bias; /* 0 unless given */
 } cfg_t;
 
 /* clang-format off */
@@ -83,6 +84,10 @@ static const cfg_t CONFIGS[] = {
     {"K2", "gfx1250", 2, 2, "fp16", "fp16", 8, 1, 256, 0, 4, 4, 8, 3, 1, 0}, /* 47: rejected: LDS lanes not a power of two */
     {"K2", "gfx1250", 2, 2, "fp16", "fp16", 8, 1, 256, 0, 4, 4, 8, 0, 1, 0}, /* 48: rejected: LDS lanes 0 */
     {"K2", "gfx1250", 2, 2, "fp16", "fp16", 8, 1, 256, 0, 1, 4, 0, 16, 1, 0}, /* 49: rejected: LDS region of zero width */
+    {"K4", "gfx1250", 4, 4, "fp16", "fp16", 8, 1, 256, 0, 1, 0, 0, 16, 1, 0, 1}, /* 50: bias: F4 K4 */
+    {"K4", "gfx1250", 6, 4, "bf16", "fp16", 4, 1, 256, 1, 1, 0, 0, 16, 1, 0, 1}, /* 51: bias: F(6x4) bf16 K4 prescale */
+    {"K4", "gfx1250", 2, 2, "fp16", "fp16", 1, 1, 64, 0, 1, 0, 0, 16, 0, 0, 1}, /* 52: bias: F2 K4 vec 1 block 64, regular stores */
+    {"K4", "gfx950", 4, 4, "bf16", "fp16", 8, 1, 256, 1, 1, 0, 0, 16, 1, 0, 1}, /* 53: bias: gfx950: F4 bf16 K4 prescale */
 };
 /* clang-format on */
 
@@ -141,6 +146,8 @@ int main(int argc, char** argv)
         s.prescale = c->ps != 0;
         s.nt_stores = c->nt != 0;
     }
+    if(stage == ROCKE_WINOGRAD_RT_K4)
+        s.bias = c->bias != 0;
     if(stage == ROCKE_WINOGRAD_RT_K2)
     {
         s.tiles_per_thread = c->tpt;
