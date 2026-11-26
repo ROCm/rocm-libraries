@@ -27,6 +27,7 @@
 
 namespace
 {
+    // Test names carry pre_checkin so every CTest category (test_categories.yaml) runs them.
     std::vector<float> copy_to_host(const float* device, size_t n)
     {
         std::vector<float> host(n);
@@ -36,7 +37,7 @@ namespace
     }
 
     // Seven copies: the doubling fill does a partial last transfer.
-    TEST(hipblas_flush, rotating_buffer_copies_match_the_operand)
+    TEST(pre_checkin_hipblas_flush, rotating_buffer_copies_match_the_operand)
     {
         constexpr size_t   n = 1000;
         std::vector<float> values(n);
@@ -60,7 +61,7 @@ namespace
         EXPECT_EQ((float*)dx, single[0]);
     }
 
-    TEST(hipblas_flush, batch_count_uses_the_bytes_a_call_accesses)
+    TEST(pre_checkin_hipblas_flush, batch_count_uses_the_bytes_a_call_accesses)
     {
         Arguments arg{};
         arg.flush_memory_size = 1 << 20;
@@ -85,7 +86,7 @@ namespace
         EXPECT_EQ(5u, hipblas_flush_batch_count(arg, dA, dx));
     }
 
-    TEST(hipblas_flush, batch_count_fits_in_device_memory)
+    TEST(pre_checkin_hipblas_flush, batch_count_fits_in_device_memory)
     {
         size_t free_bytes = 0, total_bytes = 0;
         ASSERT_EQ(hipSuccess, hipMemGetInfo(&free_bytes, &total_bytes));
