@@ -47,7 +47,7 @@ def rocm(tmp_path):
     return root
 
 
-def run(tmp_path, rocm, source, *, extra=(), timeout=20, workers=0, env=()):
+def run(tmp_path, rocm, source, *, timeout=20, workers=0, env=()):
     test = tmp_path / "test_example.py"
     test.write_text(source)
     reports = tmp_path / "reports"
@@ -63,17 +63,15 @@ def run(tmp_path, rocm, source, *, extra=(), timeout=20, workers=0, env=()):
         "-p",
         "no:cacheprovider",
         "-q",
-        *extra,
         str(test),
     ]
     if workers:
         command += ["-p", "xdist.plugin", "-n", str(workers)]
-    # A CI job's own install, shard and summary settings must not leak in.
+    # A CI job's own install and shard settings must not leak in.
     ci_names = (
         "THEROCK_BIN_DIR",
         "SHARD_INDEX",
         "TOTAL_SHARDS",
-        "GITHUB_STEP_SUMMARY",
         "PYTEST_NUM_WORKERS",
         "PYTEST_TEST_TIMEOUT",
     )
@@ -83,7 +81,6 @@ def run(tmp_path, rocm, source, *, extra=(), timeout=20, workers=0, env=()):
         "AMDGPU_TARGETS": "gfx1250",
         "ROCJITSU_REPORT_DIR": str(reports),
         "ROCJITSU_SUITE_TIMEOUT": str(timeout),
-        "ROCJITSU_SUITE_GRACE": "0.3",
         "ROCJITSU_DURATIONS": str(tmp_path / "durations.json"),
         "PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1",
         "PYTHONDONTWRITEBYTECODE": "1",
@@ -91,14 +88,13 @@ def run(tmp_path, rocm, source, *, extra=(), timeout=20, workers=0, env=()):
     }
     run_env.pop("PYTEST_ADDOPTS", None)
     result = subprocess.run(command, env=run_env, capture_output=True, text=True, timeout=60)
-    execution = json.loads((reports / "execution.json").read_text())
     progress = json.loads((reports / "progress.json").read_text())
-    return result, execution, progress
+    return result, progress
 
 
 @linux_only
 def test_xdist_reports_failures_skips_and_teardown_errors(tmp_path, rocm):
-    result, execution, progress = run(
+    result, progress = run(
         tmp_path,
         rocm,
         """
@@ -117,52 +113,13 @@ def test_teardown(cleanup): pass
         workers=2,
     )
     assert result.returncode == 1, result.stdout + result.stderr
-    assert execution["complete"]
     assert (progress["selected"], progress["finished"]) == (5, 5)
     assert (progress["passed"], progress["failed"], progress["skipped"]) == (1, 2, 2)
-    assert "failed: " in result.stdout
-
-
-@linux_only
-def test_job_summary_lists_tests_that_did_not_pass(tmp_path, rocm):
-    summary = tmp_path / "summary.md"
-    summary.write_text("earlier step\n")
-    result, execution, progress = run(
-        tmp_path,
-        rocm,
-        "def test_pass(): pass\ndef test_fail(): assert False\n",
-        env={"GITHUB_STEP_SUMMARY": str(summary)},
-    )
-    assert result.returncode == 1
-    text = summary.read_text()
-    assert text.startswith("earlier step\n### rocjitsu gfx1250 shard 1/1: failed\n")
-    assert "| 2 | 1 | 1 | 0 | 0 | 0 |" in text
-    assert "Failed:\n- `" in text and "::test_fail`" in text
-    assert "test_pass" not in text
-
-
-def test_not_passed_separates_timeouts():
-    def test(outcome, detail=None):
-        return dict(outcome=outcome, phases=dict(call=dict(detail=detail)))
-
-    progress = dict(
-        tests={
-            "a": test("passed"),
-            "b": test("failed", "E   AssertionError"),
-            "c": test("failed", "E   Failed: Timeout (>7200.0s) from pytest-timeout."),
-            "d": test("incomplete"),
-        }
-    )
-    assert launcher.not_passed(progress) == {
-        "failed": ["b"],
-        "timed out": ["c"],
-        "incomplete": ["d"],
-    }
 
 
 @linux_only
 def test_reaps_detached_client_after_success(tmp_path, rocm):
-    result, execution, progress = run(
+    result, progress = run(
         tmp_path,
         rocm,
         """
@@ -175,7 +132,7 @@ def test_client():
 """,
     )
     assert result.returncode == 0, result.stdout + result.stderr
-    assert execution["complete"] and progress["passed"] == 1
+    assert progress["finished"] == progress["passed"] == 1
     pid = int((tmp_path / "test_example.pid").read_text())
     assert not Path(f"/proc/{pid}").exists(), "orphan was not reaped"
 
@@ -184,7 +141,7 @@ def test_client():
 def test_timeout_preserves_partial_results_and_reaps_clients(tmp_path, rocm):
     (tmp_path / "reports").mkdir()
     (tmp_path / "reports" / "progress.json").write_text('{"passed": 999}')
-    result, execution, progress = run(
+    result, progress = run(
         tmp_path,
         rocm,
         """
@@ -201,7 +158,7 @@ def test_hang():
         timeout=3,
     )
     assert result.returncode == 124, result.stdout + result.stderr
-    assert execution["timed_out"] and not execution["complete"]
+    assert "incomplete: " in result.stdout
     assert (progress["selected"], progress["passed"], progress["incomplete"]) == (2, 1, 1)
     pid = int((tmp_path / "test_example.pid").read_text())
     assert not Path(f"/proc/{pid}").exists(), "timed-out client was not reaped"
@@ -212,7 +169,7 @@ def test_durations_pair_longest_with_shortest(tmp_path, rocm):
     (tmp_path / "durations.json").write_text(
         json.dumps({"test_run[a]": 1, "test_run[b]": 3, "test_run[c]": 5})
     )
-    result, execution, progress = run(
+    result, progress = run(
         tmp_path,
         rocm,
         """
@@ -247,7 +204,7 @@ def test_run(name):
     for index in (1, 2):
         ran = tmp_path / "test_example.ran"
         ran.unlink(missing_ok=True)
-        result, execution, progress = run(
+        result, progress = run(
             tmp_path, rocm, source, env={"SHARD_INDEX": str(index), "TOTAL_SHARDS": "2"}
         )
         assert result.returncode == 0, result.stdout + result.stderr
@@ -260,34 +217,8 @@ def test_run(name):
 
 
 @linux_only
-def test_records_processes_of_a_long_running_test(tmp_path, rocm):
-    result, execution, progress = run(
-        tmp_path,
-        rocm,
-        """
-import subprocess, sys, time
-from pathlib import Path
-def test_slow():
-    child = subprocess.Popen([sys.executable, '-c',
-        'import threading, time; threading.Thread(target=time.sleep, args=(30,)).start(); time.sleep(30)'])
-    Path(__file__).with_suffix('.pid').write_text(str(child.pid))
-    time.sleep(10)
-    child.kill()
-""",
-        extra=["--rocjitsu-stall-dump-after", "1"],
-    )
-    assert result.returncode == 0, result.stdout + result.stderr
-    pid = (tmp_path / "test_example.pid").read_text()
-    (stall,) = (tmp_path / "reports" / "stalls").iterdir()
-    text = stall.read_text()
-    assert "test_slow still running" in text and f"pid {pid}: " in text
-    # The CI job uploads no files, so stall dumps go to the log.
-    assert "--- stall dump" in result.stdout
-
-
-@linux_only
 def test_all_skipped_is_not_success(tmp_path, rocm):
-    result, execution, progress = run(
+    result, progress = run(
         tmp_path, rocm, "import pytest\ndef test_skip(): pytest.skip('unsupported')\n"
     )
     assert result.returncode == 1
@@ -406,7 +337,6 @@ def test_emulation_setup(tmp_path, rocm):
     assert run_env["CU"] == "256"
     assert (run_env["PYTEST_NUM_WORKERS"], run_env["OMP_THREAD_LIMIT"]) == ("16", "6")
     assert run_env["PYTEST_TEST_TIMEOUT"] == "7200"
-    assert run_env["ROCJITSU_STALL_DUMP_AFTER"] == "6900"
     assert run_env["PYTHONPATH"] == f"{EMULATION.resolve()}{os.pathsep}/keep"
     runtime = Path(run_env["ROCJITSU_RUNTIME_DIR"])
     assert runtime.is_dir() and runtime.stat().st_mode & 0o777 == 0o700
@@ -422,7 +352,6 @@ def test_emulation_setup_keeps_overrides(tmp_path, rocm):
     }
     _, run_env = launcher.emulation_setup(env, 96, tmp_path)
     assert (run_env["PYTEST_NUM_WORKERS"], run_env["PYTEST_TEST_TIMEOUT"]) == ("3", "600")
-    assert run_env["ROCJITSU_STALL_DUMP_AFTER"] == "300"
 
 
 @linux_only
@@ -437,11 +366,16 @@ def test_main_requires_a_command():
         launcher.main([], {})
 
 
-def test_durations_cover_emu_slow_configs():
+def test_durations_cover_rocjitsu_slow_configs():
     durations = json.loads(plugin.DEFAULT_DURATIONS.read_text())
     common = EMULATION.parent / "common"
-    slow = [p for p in common.rglob("*.yaml") if "emu_slow" in p.read_text()]
+    slow = [p for p in common.rglob("*.yaml") if "rocjitsu_slow" in p.read_text()]
     assert len(slow) == 5
+    # The marker means "over the per-test limit under rocjitsu" (pytest.ini).
+    limit = launcher.DEFAULT_TEST_TIMEOUT
     for path in slow:
         key = f"test_config[tensilelite/Tests/common/{path.relative_to(common).as_posix()}]"
-        assert durations[key] >= 10800, key
+        assert durations[key] > limit, key
+    # And every recorded config over the limit is marked.
+    marked = {f"test_config[tensilelite/Tests/common/{p.relative_to(common).as_posix()}]" for p in slow}
+    assert {key for key, seconds in durations.items() if seconds > limit} <= marked
