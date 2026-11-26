@@ -322,6 +322,9 @@ namespace hipblaslt_jit::files
             ::unlink(temporary.c_str());
             return systemFailure(target, "rename", error);
         }
+        // rename published the complete file. The directory sync only makes
+        // that entry durable. A reader takes no lock and may already have
+        // opened the file, so a failure here leaves it in place.
         const auto parent    = target.parent_path();
         const int  directory = ::open(parent.c_str(), O_RDONLY | O_DIRECTORY | O_CLOEXEC);
         if(directory < 0)

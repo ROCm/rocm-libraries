@@ -25,6 +25,30 @@ namespace
 
     const char* const kernelName = "hipblaslt_jit_builder_test_scale";
 
+    // One JIT executable has its own scratch directory, so parallel CTest jobs
+    // do not share it. The directory is removed when the case returns, including
+    // when an assertion fails.
+    struct Scratch
+    {
+        fs::path path;
+
+        explicit Scratch(fs::path directory)
+            : path(std::move(directory))
+        {
+            fs::remove_all(path);
+            fs::create_directories(path);
+        }
+
+        ~Scratch()
+        {
+            std::error_code error;
+            fs::remove_all(path, error);
+        }
+
+        Scratch(const Scratch&)            = delete;
+        Scratch& operator=(const Scratch&) = delete;
+    };
+
     // The kernel and target an assembly file declares in its .amdhsa_kernel
     // and .amdgcn_target directives.
     struct Assembly
@@ -283,10 +307,8 @@ TEST_CASE("HIP_PATH is the ROCm prefix when it is set", "[jit-cpu]")
 
 TEST_CASE("comgr builds the HIP kernel and every committed assembly file", "[jit-cpu]")
 {
-    const auto source  = hipblaslt_jit_test::readFile(fs::u8path(HIPBLASLT_JIT_KERNEL));
-    const auto scratch = fs::u8path(HIPBLASLT_JIT_SCRATCH);
-    fs::remove_all(scratch);
-    fs::create_directories(scratch);
+    const auto         source = hipblaslt_jit_test::readFile(fs::u8path(HIPBLASLT_JIT_KERNEL));
+    const Scratch      scratch{fs::u8path(HIPBLASLT_JIT_SCRATCH)};
     const hj::Artifact kernel{"builder_test_kernel.hip",
                               hj::Artifact::Kind::Hip,
                               std::vector<uint8_t>(source.begin(), source.end())};
@@ -301,11 +323,11 @@ TEST_CASE("comgr builds the HIP kernel and every committed assembly file", "[jit
         hip.mainKernel  = kernel;
         hip.target      = files.front().second.target;
         hip.kernelNames = {kernelName};
-        build(hip, hj::BuildKind::Executable, scratch);
-        const auto relocatable = build(hip, hj::BuildKind::Relocatable, scratch);
+        build(hip, hj::BuildKind::Executable, scratch.path);
+        const auto relocatable = build(hip, hj::BuildKind::Relocatable, scratch.path);
         for(const auto& [file, assembly] : files)
         {
-            buildAssembly(file, assembly, kernel, relocatable, scratch);
+            buildAssembly(file, assembly, kernel, relocatable, scratch.path);
             ++built;
         }
     }
@@ -330,9 +352,7 @@ TEST_CASE("comgr builds the HIP kernel and every committed assembly file", "[jit
 // builds for a device whose target ID has features.
 TEST_CASE("comgr refuses assembly declared for another target", "[jit-cpu]")
 {
-    const auto scratch = fs::u8path(HIPBLASLT_JIT_SCRATCH) / "targets";
-    fs::remove_all(scratch);
-    fs::create_directories(scratch);
+    const Scratch scratch{fs::u8path(HIPBLASLT_JIT_SCRATCH) / "targets"};
     for(const auto& committed : committedAssembly())
     {
         const auto& file      = committed.first;
@@ -382,7 +402,7 @@ TEST_CASE("comgr refuses assembly declared for another target", "[jit-cpu]")
             assemblyBundle(name, text, assembly.kernel, targetOf(processor + ":sramecc+:xnack-")),
             hj::BuildKind::Executable,
             built);
-        hj::keepBuildLog(status, scratch);
+        hj::keepBuildLog(status, scratch.path);
         JIT_REQUIRE(name + " was not built for " + processor
                         + ":sramecc+:xnack-: " + status.message,
                     status.ok() && built.kind == hj::Artifact::Kind::Executable);
