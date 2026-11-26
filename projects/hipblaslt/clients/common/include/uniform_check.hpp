@@ -35,9 +35,9 @@ hipError_t uniform_check_fill_cols_device(void*       buf,
                                           int64_t     batches,
                                           hipStream_t stream);
 
-// Sets each element of row r to the low bytes of r, so an element a kernel leaves unwritten
-// differs from row 0 of its column, except, for a 1-byte element, in a row that is a multiple of
-// 256. Any element_size.
+// Sets each element of row r to the low bytes of r, or of its column c if by_column, so an
+// element a kernel leaves unwritten differs from row 0 (column 0), except, for a 1-byte element,
+// in a row (column) that is a multiple of 256. Any element_size.
 hipError_t uniform_check_fill_row_index_device(void*       buf,
                                                size_t      element_size,
                                                int64_t     rows,
@@ -45,7 +45,8 @@ hipError_t uniform_check_fill_row_index_device(void*       buf,
                                                int64_t     ld,
                                                int64_t     stride,
                                                int64_t     batches,
-                                               hipStream_t stream);
+                                               hipStream_t stream,
+                                               bool        by_column = false);
 
 // A line is a column of D for the row direction and a row of D for the column direction.
 struct UniformCheckDeviceResult

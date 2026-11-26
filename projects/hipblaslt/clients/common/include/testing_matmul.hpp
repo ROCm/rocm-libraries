@@ -7155,17 +7155,17 @@ void testing_matmul_with_bias(const Arguments& arg,
             for(auto& d : dD)
                 fillWithSentinel(d, To);
         // When uniform_check is the only check, an element of D the kernel leaves unwritten keeps
-        // its row index (see uniform_check_fill_row_index_device). With c_equal_d beta is 0 (else
-        // uniform_check is skipped), so C, which is D, is not read. With c_equal_d and a value
-        // check, the later C restore replaces this fill and the value check catches unwritten
-        // elements.
+        // its row index, or column index for the column check (see
+        // uniform_check_fill_row_index_device). With c_equal_d beta is 0 (else uniform_check is
+        // skipped), so C, which is D, is not read. With c_equal_d and a value check, the later C
+        // restore replaces this fill and the value check catches unwritten elements.
         else if(ucRows || ucCols)
         {
             const size_t elem = realDataTypeSize(To);
             if(batchMode == HIPBLASLT_BATCH_MODE_POINTER_ARRAY)
                 for(int b = 0; b < arg.batch_count; b++)
                     CHECK_HIP_ERROR(uniform_check_fill_row_index_device(
-                        (*dDp)[b].buf(), elem, M[0], N[0], ldd[0], 0, 1, stream));
+                        (*dDp)[b].buf(), elem, M[0], N[0], ldd[0], 0, 1, stream, ucCols));
             else
                 for(int i = 0; i < gemm_count; i++)
                     CHECK_HIP_ERROR(uniform_check_fill_row_index_device((*dDp)[i].buf(),
@@ -7175,7 +7175,8 @@ void testing_matmul_with_bias(const Arguments& arg,
                                                                         ldd[i],
                                                                         stride_d[i],
                                                                         num_batches[i],
-                                                                        stream));
+                                                                        stream,
+                                                                        ucCols));
         }
         if(!verifyOutputs)
             return;

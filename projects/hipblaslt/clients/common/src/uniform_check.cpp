@@ -40,14 +40,15 @@ namespace
         }
     }
 
-    // Byte j of element (r, c) of every batch takes byte j of r.
-    __global__ void row_index_kernel(uint8_t* buf,
-                                     uint64_t elem,
-                                     uint64_t rows,
-                                     uint64_t cols,
-                                     uint64_t ld,
-                                     uint64_t stride,
-                                     uint64_t total)
+    // Byte j of element (r, c) of every batch takes byte j of r, or of c if by_column.
+    __global__ void index_kernel(uint8_t* buf,
+                                 uint64_t elem,
+                                 uint64_t rows,
+                                 uint64_t cols,
+                                 uint64_t ld,
+                                 uint64_t stride,
+                                 uint64_t total,
+                                 bool     by_column)
     {
         const uint64_t step = uint64_t(gridDim.x) * blockDim.x;
         for(uint64_t i = blockIdx.x * uint64_t(blockDim.x) + threadIdx.x; i < total; i += step)
@@ -58,7 +59,8 @@ namespace
             const uint64_t c = (e / rows) % cols;
             const uint64_t b = e / (rows * cols);
 
-            buf[(b * stride + c * ld + r) * elem + j] = j < 8 ? uint8_t(r >> (8 * j)) : 0;
+            const uint64_t index = by_column ? c : r;
+            buf[(b * stride + c * ld + r) * elem + j] = j < 8 ? uint8_t(index >> (8 * j)) : 0;
         }
     }
 
@@ -236,7 +238,8 @@ hipError_t uniform_check_fill_row_index_device(void*       buf,
                                                int64_t     ld,
                                                int64_t     stride,
                                                int64_t     batches,
-                                               hipStream_t stream)
+                                               hipStream_t stream,
+                                               bool        by_column)
 {
     const uint64_t total
         = uint64_t(rows) * uint64_t(cols) * uint64_t(batches) * uint64_t(element_size);
@@ -244,7 +247,7 @@ hipError_t uniform_check_fill_row_index_device(void*       buf,
         return hipSuccess;
     constexpr int threads = 256;
     const auto    blocks  = unsigned(std::min<uint64_t>((total + threads - 1) / threads, 65536));
-    hipLaunchKernelGGL(row_index_kernel,
+    hipLaunchKernelGGL(index_kernel,
                        dim3(blocks),
                        dim3(threads),
                        0,
@@ -255,7 +258,8 @@ hipError_t uniform_check_fill_row_index_device(void*       buf,
                        uint64_t(cols),
                        uint64_t(ld),
                        uint64_t(stride),
-                       total);
+                       total,
+                       by_column);
     return hipGetLastError();
 }
 

@@ -681,7 +681,7 @@ namespace
         {
             const auto& r = results.GetTestPartResult(i);
             if(r.failed()
-               && std::string(r.message()).find("uniform_check failed") != std::string::npos)
+               && std::string(r.message()).find("uniform_check row failed") != std::string::npos)
                 uniformFailures++;
             else
                 ADD_FAILURE() << r.message();
