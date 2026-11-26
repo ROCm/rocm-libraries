@@ -89,6 +89,23 @@
             "linux"
           ]
         }
+      },
+      {
+        "cases": [
+          "4_8_56_fp32_ncl",
+          "4_8_56_fp32_nlc"
+        ],
+        "support": {
+          "gfx1151": [
+            "windows"
+          ],
+          "gfx942": [
+            "linux"
+          ],
+          "gfx950": [
+            "linux"
+          ]
+        }
       }
     ],
     "MIOPEN_ENGINE": [

@@ -153,7 +153,7 @@ This document outlines the development roadmap for hipDNN, a comprehensive graph
 
 ### GEMM
 - **MX GEMM in the hipBLASLt provider** ⏳
-  - gfx1250 enablement ⏳
+  - gfx1250 enablement ✅
   - Enabled by default ⏳
 
 ### Convolution

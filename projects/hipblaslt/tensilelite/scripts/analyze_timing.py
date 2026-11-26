@@ -67,15 +67,9 @@ TIMING_HIERARCHY = {
             "python_kernel_write_assemble": {},
             "python_kernel_write_helpers": {},
             "python_kernel_build_co": {},
-            "python_kernel_build_src_co": {
-                "python_kernel_build_src_co.setup": {},
-                "python_kernel_build_src_co.cache_check": {},
-                "python_kernel_build_src_co.cache_hit": {},
-                "python_kernel_build_src_co.compile": {},
-                "python_kernel_build_src_co.unbundle": {},
-                "python_kernel_build_src_co.move": {},
-                "python_kernel_build_src_co.cache_populate": {},
-            },
+            # The helper-kernel compile (python_kernel_build_src_co, in OVERLAPPING_TOTALS) runs
+            # in a background thread during codegen; this is the time the build then waits for it.
+            "python_kernel_build_src_co_wait": {},
             "python_kernel_bench_postprocess": {
                 "python_benchpost_naming": {},
                 "python_benchpost_lib_construction": {},
@@ -165,6 +159,23 @@ TIMING_HIERARCHY = {
             "solution_selection": {},
             "pre_solution": {
                 "pre_solution_listener.ReferenceValidator": {
+                    # DataInitialization's input epoch did not move, so the reference is reused
+                    # (count-only marker).
+                    "pre_solution_ref_skipped": {},
+                    # Per-solution recompute because the input epoch moved (inputs were really
+                    # regenerated). "inputs_unchanged" only appears with
+                    # --verify-reference-reuse / TENSILELITE_VERIFY_REFERENCE_REUSE=1, which
+                    # recomputes anyway to check the reuse is exact; it is the old behaviour's
+                    # redundant work and also what older client builds always did.
+                    "cpu_reference_gemm_per_solution_inputs_changed": {
+                        "solve_cpu_fast_per_solution_inputs_changed": {},
+                        "solve_cpu_slow_per_solution_inputs_changed": {},
+                    },
+                    "cpu_reference_gemm_per_solution_inputs_unchanged": {
+                        "solve_cpu_fast_per_solution_inputs_unchanged": {},
+                        "solve_cpu_slow_per_solution_inputs_unchanged": {},
+                    },
+                    # Older logs (before the changed/unchanged split).
                     "cpu_reference_gemm_per_solution": {
                         "solve_cpu_fast_per_solution": {},
                         "solve_cpu_slow_per_solution": {},
@@ -172,7 +183,24 @@ TIMING_HIERARCHY = {
                 },
                 "pre_solution_listener.DataInitialization": {
                     "pre_solution_mx_check": {},
-                    "pre_solution_mx_init_data": {},
+                    # initOneMXSide runs once per side (A, B) per call: it either reuses its
+                    # cache, rewrites canonical host inputs, or rebuilds only GPU scales.
+                    "pre_solution_mx_init_data": {
+                        "pre_solution_mx_side_cache_hit": {},
+                        "pre_solution_mx_side_host_regenerate": {},
+                        "pre_solution_mx_side_swizzle_rebuild": {},
+                        # Older logs counted GPU-only rebuilds as regeneration.
+                        "pre_solution_mx_side_regenerate": {},
+                    },
+                    # These run for every gated solution; the suffix says whether the MX data
+                    # was regenerated on the host in that same call.
+                    "pre_solution_mx_copy_valid_to_gpu_after_regen": {},
+                    "pre_solution_mx_copy_valid_to_gpu_no_regen": {},
+                    "pre_solution_mx_copy_inputs_d2d_after_regen": {},
+                    "pre_solution_mx_copy_inputs_d2d_no_regen": {},
+                    "pre_solution_mx_cpu_sync_after_regen": {},
+                    "pre_solution_mx_cpu_sync_no_regen": {},
+                    # Older logs (before the regen split).
                     "pre_solution_mx_copy_valid_to_gpu": {},
                     "pre_solution_mx_copy_inputs_d2d": {},
                     "pre_solution_mx_cpu_sync": {},
@@ -499,11 +527,15 @@ def _categories_with_children(d, out=None):
 
 CATEGORIES_WITH_CHILDREN = _categories_with_children(TIMING_HIERARCHY)
 
-# Timers that wrap other timers (diagnostics added to localize untracked time).
+# Timers that wrap other timers (diagnostics added to localize untracked time), and timers that run
+# concurrently with the tree's timers.
 # python_client_subprocess = process_startup + main_total + flush + main_teardown_locals + process_exit
 # main_total              = parse_args + calibration + factory + setup + problem_total + finalize
 # problem_total           = problem children + solution_total
 # solution_total          = solution children + run_iteration_total
+# python_kernel_build_src_co (and its parts) = the helper-kernel compile, which runs in a background
+#   thread during codegen (the tree has python_kernel_build_src_co_wait). Older logs ran it after
+#   the assembly build, so there its time shows as untracked in python_kernel_compilation.
 OVERLAPPING_TOTALS_ORDER = [
     "python_client_subprocess",
     "main_total",
@@ -513,6 +545,14 @@ OVERLAPPING_TOTALS_ORDER = [
     # ReferenceValidator's validateSolution(): wraps the per-tensor timers below it.
     "validate_total",
     "validate_check_results_typed",
+    "python_kernel_build_src_co",
+    "python_kernel_build_src_co.setup",
+    "python_kernel_build_src_co.cache_check",
+    "python_kernel_build_src_co.cache_hit",
+    "python_kernel_build_src_co.compile",
+    "python_kernel_build_src_co.unbundle",
+    "python_kernel_build_src_co.move",
+    "python_kernel_build_src_co.cache_populate",
 ]
 OVERLAPPING_TOTALS = set(OVERLAPPING_TOTALS_ORDER)
 
@@ -1302,11 +1342,12 @@ def print_summary(timings: Dict[str, List[float]], problem_timings: List[Problem
         for cat, count, total_ms, mean_ms, pct in unknown_rows:
             fmt_row(0, cat, count, total_ms, mean_ms, pct, None)
 
-    # Overlapping totals: wrap other timers, so they are not part of the tree (they would be
-    # double counted) but are useful to check that the tree accounts for all the time.
+    # Overlapping totals: wrap other timers or run concurrently with them, so they are not part of
+    # the tree (they would be double counted). The wrappers are useful to check that the tree
+    # accounts for all the time.
     if overlapping_rows:
         print()
-        print("  Overlapping Totals (wrap other timers; not summed into the tree)")
+        print("  Overlapping Totals (wrap or overlap other timers; not summed into the tree)")
         print(f"  {'-' * (TABLE_WIDTH - 2)}")
         for cat, count, total_ms, mean_ms, pct in overlapping_rows:
             fmt_row(0, cat, count, total_ms, mean_ms, pct, None)

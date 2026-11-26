@@ -77,7 +77,7 @@ struct HeuristicPolicyInfo
  * auto [handle, err] = createHipdnnHandle();
  * auto [policies, err2] = getLoadedHeuristicPolicyInfos(*handle);
  * if (err2.is_bad()) {
- *     std::cerr << "Failed to query policies: " << err2.what() << std::endl;
+ *     std::cerr << "Failed to query policies: " << err2.get_message() << std::endl;
  * } else {
  *     std::cout << "Loaded " << policies.size() << " heuristic policies" << std::endl;
  *     for (const auto& policy : policies) {

@@ -1356,4 +1356,34 @@ TEST_F(TestCudnnShimEngineFilterReplacement, FilterRetryAfterFailedPlanCreationU
     expectExecutes(graph, PLAN_B);
 }
 
+// As in cuDNN FE, a copy owns its plan list and filters: filtering, recreating plans and
+// building through the copy leave the original's built plan and filters alone.
+TEST_F(TestCudnnShimEngineFilterReplacement, ACopyOwnsItsPlansAndFilters)
+{
+    installRegisteredEnginePlanMocks();
+    fe::graph::Graph graph;
+    ASSERT_NO_FATAL_FAILURE(createPlans(graph));
+    ASSERT_TRUE(graph.build_plans(fe::BuildPlanPolicy_t::HEURISTICS_CHOICE).is_good());
+
+    fe::graph::Graph copy = graph;
+    copy.deselect_engines(std::vector<std::string>{nameA()});
+    ASSERT_TRUE(copy.create_execution_plans({fe::HeurMode_t::A}).is_good());
+    auto copyBuilt = copy.build_plans(fe::BuildPlanPolicy_t::HEURISTICS_CHOICE);
+    ASSERT_TRUE(copyBuilt.is_good()) << copyBuilt.get_message();
+    std::string copyPlan;
+    ASSERT_TRUE(copy.get_plan_name(copyPlan).is_good());
+    EXPECT_EQ(copyPlan, nameB());
+
+    std::string plan;
+    ASSERT_TRUE(graph.get_plan_name(plan).is_good());
+    EXPECT_EQ(plan, nameA());
+    expectExecutes(graph, PLAN_A);
+
+    // The copy's filter never reached the original, so building every plan bars none.
+    auto built = graph.build_plans(fe::BuildPlanPolicy_t::ALL);
+    ASSERT_TRUE(built.is_good()) << built.get_message();
+    expectExecutes(graph, PLAN_A);
+    expectExecutes(graph, PLAN_B);
+}
+
 } // namespace

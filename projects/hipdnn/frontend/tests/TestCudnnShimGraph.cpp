@@ -21,8 +21,8 @@
 namespace cudnn_frontend = hipdnn_frontend::compatibility::cudnn_frontend;
 
 static_assert(std::is_move_constructible_v<cudnn_frontend::graph::Graph>);
-// Upstream's Graph is copyable and samples rely on it; see the aliasing-copy
-// tests below for what a copy actually shares.
+// Upstream's Graph is copyable and samples rely on it; see the copy tests below
+// for what a copy shares.
 static_assert(std::is_copy_constructible_v<cudnn_frontend::graph::Graph>);
 static_assert(std::is_copy_assignable_v<cudnn_frontend::graph::Graph>);
 static_assert(std::is_same_v<cudnn_frontend::graph::TensorAttributes,
@@ -404,16 +404,9 @@ TEST(TestCudnnShimGraph, CopiesOutOfABuilderIntoATuple)
     EXPECT_EQ(tensor->get_uid(), 1);
 }
 
-// A copy shares the native graph rather than duplicating it. Observable once both
-// sides already hold native state: a node added through the copy is validated by
-// the original. Matches upstream, whose copy shares its nodes and backend
-// descriptors through shared_ptr.
-//
-// Wrapper-side scalars are NOT shared. A copy of a node-less graph still reports
-// Empty after the copy adds its first node, so this test seeds a node before
-// copying. That asymmetry is the documented caveat on Graph's copy constructor,
-// not an accident.
-TEST(TestCudnnShimGraph, CopyOfANativeGraphSharesLaterNodes)
+// As in cuDNN FE, a copy shares the nodes and tensors it was made from, but a node added
+// through the copy is not in the original.
+TEST(TestCudnnShimGraph, NodesAddedToACopyAreNotInTheOriginal)
 {
     constexpr int64_t N = 4;
     auto squareTensor = [](fe::graph::Graph& g, int64_t uid) {
@@ -432,7 +425,7 @@ TEST(TestCudnnShimGraph, CopyOfANativeGraphSharesLaterNodes)
         .set_uid(3);
     ASSERT_TRUE(original.validate().is_good());
 
-    fe::graph::Graph copy = original; // NOLINT(performance-unnecessary-copy-initialization)
+    fe::graph::Graph copy = original;
 
     // A second output node whose dims cannot be inferred: invalid on whichever
     // graph owns it.
@@ -441,8 +434,8 @@ TEST(TestCudnnShimGraph, CopyOfANativeGraphSharesLaterNodes)
         ->set_output(true)
         .set_uid(5);
 
-    // The original now sees it, which is only possible if the native graph is shared.
-    EXPECT_TRUE(original.validate().is_bad());
+    EXPECT_TRUE(copy.validate().is_bad());
+    EXPECT_TRUE(original.validate().is_good());
 }
 
 // Gaps intentionally not tested host-only (documented, not faked):

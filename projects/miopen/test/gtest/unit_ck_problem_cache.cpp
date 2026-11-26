@@ -174,7 +174,9 @@ std::optional<int> Query(IntCache& cache, int key, int& computed)
 
 } // namespace
 
-TEST(CPU_CKProblemCache_NONE, ComputesEachProblemOnce)
+using CPU_CKProblemCache_NONE = ::testing::TestWithParam<int>;
+
+TEST_P(CPU_CKProblemCache_NONE, ComputesEachProblemOnce)
 {
     const CacheSwitch on{true};
     IntCache cache;
@@ -186,7 +188,7 @@ TEST(CPU_CKProblemCache_NONE, ComputesEachProblemOnce)
     EXPECT_EQ(cache.Size(), 2u);
 }
 
-TEST(CPU_CKProblemCache_NONE, KeepsTheFirstAnswer)
+TEST_P(CPU_CKProblemCache_NONE, KeepsTheFirstAnswer)
 {
     const CacheSwitch on{true};
     IntCache cache;
@@ -194,7 +196,7 @@ TEST(CPU_CKProblemCache_NONE, KeepsTheFirstAnswer)
     EXPECT_EQ(cache.GetOrCompute(1, [] { return std::optional<int>{6}; }), 5);
 }
 
-TEST(CPU_CKProblemCache_NONE, DoesNotStoreAMissingAnswer)
+TEST_P(CPU_CKProblemCache_NONE, DoesNotStoreAMissingAnswer)
 {
     const CacheSwitch on{true};
     IntCache cache;
@@ -209,7 +211,7 @@ TEST(CPU_CKProblemCache_NONE, DoesNotStoreAMissingAnswer)
     EXPECT_EQ(cache.Size(), 0u);
 }
 
-TEST(CPU_CKProblemCache_NONE, StartsOverWhenFull)
+TEST_P(CPU_CKProblemCache_NONE, StartsOverWhenFull)
 {
     const CacheSwitch on{true};
     IntCache cache{2};
@@ -229,7 +231,7 @@ TEST(CPU_CKProblemCache_NONE, StartsOverWhenFull)
     EXPECT_EQ(cache.Size(), 2u);
 }
 
-TEST(CPU_CKProblemCache_NONE, SwitchedOffComputesEveryTime)
+TEST_P(CPU_CKProblemCache_NONE, SwitchedOffComputesEveryTime)
 {
     IntCache cache;
     int computed = 0;
@@ -249,7 +251,7 @@ TEST(CPU_CKProblemCache_NONE, SwitchedOffComputesEveryTime)
 // Solution queries run from several threads at once. Overlapping keys across threads, with a
 // capacity small enough that the cache keeps starting over while others read it, must still give
 // every caller its own key's answer and never let the cache grow past its capacity.
-TEST(CPU_CKProblemCache_NONE, ConcurrentQueriesGetTheirOwnAnswers)
+TEST_P(CPU_CKProblemCache_NONE, ConcurrentQueriesGetTheirOwnAnswers)
 {
     const CacheSwitch on{true};
     constexpr std::size_t capacity = 16;
@@ -279,12 +281,16 @@ TEST(CPU_CKProblemCache_NONE, ConcurrentQueriesGetTheirOwnAnswers)
     EXPECT_LE(cache.Size(), capacity);
 }
 
-TEST(CPU_DefaultConfigKey_NONE, SameProblemSameKey)
+INSTANTIATE_TEST_SUITE_P(Quick, CPU_CKProblemCache_NONE, ::testing::Values(0));
+
+using CPU_DefaultConfigKey_NONE = ::testing::TestWithParam<int>;
+
+TEST_P(CPU_DefaultConfigKey_NONE, SameProblemSameKey)
 {
     EXPECT_EQ(Key(MakeProblem(Spec{})), Key(MakeProblem(Spec{})));
 }
 
-TEST(CPU_DefaultConfigKey_NONE, EveryProblemFieldChangesTheKey)
+TEST_P(CPU_DefaultConfigKey_NONE, EveryProblemFieldChangesTheKey)
 {
     const ProblemDescription base = MakeProblem(Spec{});
     for(const auto& v : SingleFieldVariations())
@@ -296,7 +302,7 @@ TEST(CPU_DefaultConfigKey_NONE, EveryProblemFieldChangesTheKey)
     }
 }
 
-TEST(CPU_DefaultConfigKey_NONE, DeviceSolverAndRankingChangeTheKey)
+TEST_P(CPU_DefaultConfigKey_NONE, DeviceSolverAndRankingChangeTheKey)
 {
     const ProblemDescription p = MakeProblem(Spec{});
     const std::string base     = Key(p);
@@ -305,7 +311,7 @@ TEST(CPU_DefaultConfigKey_NONE, DeviceSolverAndRankingChangeTheKey)
     EXPECT_NE(Key(p, "gfx942", true, "ConvHipImplicitGemm3DGroupWrwXdlops"), base) << "solver";
 }
 
-TEST(CPU_DefaultConfigKey_NONE, AiHeuristicsAndComputeUnitsChangeTheHeuristicKey)
+TEST_P(CPU_DefaultConfigKey_NONE, AiHeuristicsAndComputeUnitsChangeTheHeuristicKey)
 {
     using miopen::solver::conv::HeuristicConfigKey;
     const ProblemDescription p = MakeProblem(Spec{});
@@ -316,6 +322,8 @@ TEST(CPU_DefaultConfigKey_NONE, AiHeuristicsAndComputeUnitsChangeTheHeuristicKey
     EXPECT_NE(key(304, true), key(304, false)) << "AI heuristics";
     EXPECT_NE(key(304, true), key(228, true)) << "compute units read by the AI features";
 }
+
+INSTANTIATE_TEST_SUITE_P(Quick, CPU_DefaultConfigKey_NONE, ::testing::Values(0));
 
 #if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
 
@@ -330,12 +338,14 @@ struct KeyProbe : CKArgsSplitK<KeyProbe>
 
 } // namespace
 
-TEST(CPU_CKArgsSplitKKey_NONE, SameProblemSameKey)
+using CPU_CKArgsSplitKKey_NONE = ::testing::TestWithParam<int>;
+
+TEST_P(CPU_CKArgsSplitKKey_NONE, SameProblemSameKey)
 {
     EXPECT_EQ(KeyProbe{MakeProblem(Spec{})}.Key(), KeyProbe{MakeProblem(Spec{})}.Key());
 }
 
-TEST(CPU_CKArgsSplitKKey_NONE, EveryProblemFieldChangesTheKey)
+TEST_P(CPU_CKArgsSplitKKey_NONE, EveryProblemFieldChangesTheKey)
 {
     for(const Direction dir : {Direction::BackwardWeights, Direction::BackwardData})
     {
@@ -352,5 +362,7 @@ TEST(CPU_CKArgsSplitKKey_NONE, EveryProblemFieldChangesTheKey)
         }
     }
 }
+
+INSTANTIATE_TEST_SUITE_P(Quick, CPU_CKArgsSplitKKey_NONE, ::testing::Values(0));
 
 #endif // MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL

@@ -1,4 +1,35 @@
 {
-  "claims": {},
+  "claims": {
+    "hipkernel:flydsl_sdpa_cdna": [
+      {
+        "cases": [
+          "bf16_3c28f211050721a5",
+          "bf16_4f96d27e47eb94d4"
+        ],
+        "support": {
+          "gfx942": [
+            "linux"
+          ],
+          "gfx950": [
+            "linux"
+          ]
+        }
+      }
+    ],
+    "hipkernel:flydsl_sdpa_rdna": [
+      {
+        "cases": [
+          "bf16_3c28f211050721a5",
+          "bf16_4f96d27e47eb94d4"
+        ],
+        "support": {
+          "gfx1151": [
+            "linux",
+            "windows"
+          ]
+        }
+      }
+    ]
+  },
   "version": 1
 }

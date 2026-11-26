@@ -4,6 +4,7 @@
 #include <cstdio>
 #include <functional>
 #include <gtest/gtest.h>
+#include <limits>
 #include <ostream>
 #include <string>
 
@@ -23,6 +24,78 @@
 using hipdnn_test_sdk::utilities::MockEngineConfig;
 using namespace hip_kernel_provider;
 using namespace hip_kernel_provider::resample;
+
+namespace
+{
+
+// x is [1, 1, height, width] and y is [1, 1, outHeight, outWidth].
+flatbuffers::FlatBufferBuilder createResampleFwdGraph(int64_t height,
+                                                      int64_t width,
+                                                      int64_t outHeight,
+                                                      int64_t outWidth,
+                                                      const std::vector<int64_t>& prePadding,
+                                                      const std::vector<int64_t>& postPadding,
+                                                      const std::vector<int64_t>& stride,
+                                                      const std::vector<int64_t>& window)
+{
+    flatbuffers::FlatBufferBuilder builder;
+    const std::vector<int64_t> dims = {1, 1, height, width};
+    const std::vector<int64_t> strides = {height * width, height * width, width, 1};
+    const std::vector<int64_t> outDims = {1, 1, outHeight, outWidth};
+    const std::vector<int64_t> outStrides
+        = {outHeight * outWidth, outHeight * outWidth, outWidth, 1};
+
+    std::vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::TensorAttributes>>
+        tensorAttributes;
+    tensorAttributes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
+        builder, 1, "x", hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT, &strides, &dims));
+    tensorAttributes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
+        builder,
+        2,
+        "y",
+        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+        &outStrides,
+        &outDims));
+
+    auto resampleAttr = hipdnn_flatbuffers_sdk::data_objects::CreateResampleFwdAttributesDirect(
+        builder,
+        1,
+        2,
+        ::flatbuffers::nullopt,
+        &prePadding,
+        &postPadding,
+        &stride,
+        &window,
+        hipdnn_flatbuffers_sdk::data_objects::ResampleMode::MAXPOOL,
+        hipdnn_flatbuffers_sdk::data_objects::PaddingMode::ZERO_PAD,
+        ::flatbuffers::nullopt);
+
+    std::vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::Node>> nodes;
+    nodes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateNodeDirect(
+        builder,
+        "resample_fwd",
+        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+        hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::ResampleFwdAttributes,
+        resampleAttr.Union()));
+
+    builder.Finish(hipdnn_flatbuffers_sdk::data_objects::CreateGraphDirect(
+        builder,
+        "test",
+        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+        &tensorAttributes,
+        &nodes));
+    return builder;
+}
+
+// A 1x1 pooling window with stride 1, so y has the dims of x: [1, 1, height, width].
+flatbuffers::FlatBufferBuilder createResampleFwdGraphWithOutputSize(int64_t height, int64_t width)
+{
+    return createResampleFwdGraph(height, width, height, width, {0, 0}, {0, 0}, {1, 1}, {1, 1});
+}
+
+} // namespace
 
 class TestResamplePlanBuilder : public ::testing::Test
 {
@@ -63,6 +136,26 @@ TEST_F(TestResamplePlanBuilder, IsApplicableReturnsTrueForValidGraph)
         builder.GetBufferPointer(), builder.GetSize());
 
     EXPECT_TRUE(_planBuilder.isApplicable(_dummyHandle, graph));
+}
+
+// 16777215 * 256 = 2^32 - 256 output elements is 2^24 - 1 blocks of 256 threads.
+TEST_F(TestResamplePlanBuilder, IsApplicableReturnsTrueForOutputAtThreadLimit)
+{
+    auto builder = createResampleFwdGraphWithOutputSize(16777215, 256);
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
+
+    EXPECT_TRUE(_planBuilder.isApplicable(_dummyHandle, graph));
+}
+
+// 401 * 10710641 = 2^32 - 255 output elements needs 2^24 blocks, which is 2^32 threads.
+TEST_F(TestResamplePlanBuilder, IsApplicableReturnsFalseForOutputOverThreadLimit)
+{
+    auto builder = createResampleFwdGraphWithOutputSize(401, 10710641);
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
+
+    EXPECT_FALSE(_planBuilder.isApplicable(_dummyHandle, graph));
 }
 
 TEST_F(TestResamplePlanBuilder, IsApplicableReturnsFalseForNonResampleGraph)
@@ -109,6 +202,51 @@ TEST_F(TestResamplePlanBuilder, GetCustomKnobsReturnsEmpty)
 
 // ============================================================================
 // Attributes the kernel reads or writes: a graph that changes them is declined
+// x and y are [1, 1, 1, 1]. A stride of INT64_MAX keeps y at one element whatever the padding
+// and window, so each row isolates one int64_t limit of the shape inference. An overflowing
+// padding row sets the output height to 2, the value the unchecked expression wraps to.
+TEST_F(TestResamplePlanBuilder, SpatialParametersAtTheInt64Limit)
+{
+    constexpr int64_t MAX = std::numeric_limits<int64_t>::max();
+    constexpr int64_t TWO_31 = int64_t{1} << 31;
+    constexpr int64_t TWO_32 = int64_t{1} << 32;
+    struct Row
+    {
+        const char* name;
+        std::vector<int64_t> prePadding;
+        std::vector<int64_t> postPadding;
+        std::vector<int64_t> window;
+        int64_t outHeight;
+        bool expected;
+    };
+    for(const auto& row : {
+            Row{"pre_padding fills the padded extent", {MAX - 1, 0}, {0, 0}, {1, 1}, 1, true},
+            Row{"pre_padding overflows the padded extent", {MAX, 0}, {0, 0}, {1, 1}, 2, false},
+            Row{"post_padding fills the padded extent", {0, 0}, {MAX - 1, 0}, {1, 1}, 1, true},
+            Row{"post_padding overflows the padded extent", {0, 0}, {MAX, 0}, {1, 1}, 2, false},
+            Row{"window product fits",
+                {TWO_32 - 2, TWO_31 - 1},
+                {0, 0},
+                {TWO_32 - 1, TWO_31},
+                1,
+                true},
+            Row{"window product overflows",
+                {TWO_32 - 1, TWO_31 - 1},
+                {0, 0},
+                {TWO_32, TWO_31},
+                1,
+                false},
+        })
+    {
+        SCOPED_TRACE(row.name);
+        auto builder = createResampleFwdGraph(
+            1, 1, row.outHeight, 1, row.prePadding, row.postPadding, {MAX, MAX}, row.window);
+        const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+            builder.GetBufferPointer(), builder.GetSize());
+        EXPECT_EQ(_planBuilder.isApplicable(_dummyHandle, graph), row.expected);
+    }
+}
+
 // ============================================================================
 
 namespace

@@ -27,7 +27,7 @@ namespace hipdnn_frontend::graph
  *
  * PointwiseAttributes specifies the parameters for pointwise operations that
  * operate element-wise on tensors. This includes:
- * - Activation functions: RELU, SIGMOID, TANH, GELU, ELU, SWISH, etc.
+ * - Activation functions: RELU_FWD, SIGMOID_FWD, TANH_FWD, GELU_FWD, ELU_FWD, SWISH_FWD, etc.
  * - Arithmetic operations: ADD, MUL, SUB, DIV, etc.
  * - Comparison operations: CMP_EQ, CMP_GT, etc.
  * - Other supported pointwise operations as defined in PointwiseMode
@@ -35,7 +35,7 @@ namespace hipdnn_frontend::graph
  * @code{.cpp}
  * // ReLU activation
  * auto y = graph.pointwise(x, PointwiseAttributes()
- *              .set_mode(PointwiseMode::RELU));
+ *              .set_mode(PointwiseMode::RELU_FWD));
  *
  * // Leaky ReLU with negative slope
  * auto y = graph.pointwise(x, PointwiseAttributes()
@@ -108,7 +108,7 @@ public:
     {
         return softplus_beta;
     }
-    /// @brief Get axis for operations like softmax
+    /// @brief Get the axis for axis-dependent modes (GEN_INDEX)
     // NOLINTNEXTLINE(readability-identifier-naming)
     std::optional<int64_t> get_axis() const
     {
@@ -260,7 +260,7 @@ public:
     std::optional<float> relu_lower_clip = std::nullopt; ///< ReLU lower clip bound
     std::optional<float> relu_upper_clip = std::nullopt; ///< ReLU upper clip bound
     std::optional<float> relu_lower_clip_slope = std::nullopt; ///< Leaky ReLU slope
-    std::optional<int64_t> axis = std::nullopt; ///< Axis for reductions
+    std::optional<int64_t> axis = std::nullopt; ///< Axis for GEN_INDEX
     std::optional<float> swish_beta = std::nullopt; ///< Swish beta parameter
     std::optional<float> elu_alpha = std::nullopt; ///< ELU alpha parameter
     std::optional<float> softplus_beta = std::nullopt; ///< Softplus beta parameter

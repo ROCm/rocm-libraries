@@ -16,12 +16,14 @@
  *        and a bound engine predictor (L1) must record the selector revision this build
  *        computes.
  *
- * The engine selector's revision digests, among other things, every launch's code-object
- * hash. Those are compiled at pack time, so a build that compiles them differently (a
- * compiler bump, a rocKE change) reports another revision, and GenericEngine then refuses
- * an L1 (PredictionStatus::UNAVAILABLE) with nothing but a log line. Engine selection
- * falls back to priority as if no model shipped, and every other census case stays green.
- * This suite reads the revision the way makeEngine() does and fails the build instead.
+ * The engine selector's revision digests, among other things, every launch's code identity:
+ * the packager's compiler-independent digest of what it compiled. A rocKE change reports
+ * another revision, and GenericEngine then refuses an L1 (PredictionStatus::UNAVAILABLE)
+ * with nothing but a log line. Engine selection falls back to priority as if no model
+ * shipped, and every other census case stays green. This suite reads the revision the way
+ * makeEngine() does and fails the build instead. A compiler bump that only rebuilds the code
+ * objects moves the codegen revision, which the suite reports as a note; it also checks that
+ * every code object carries an identity, without which a compiler bump would refuse the L1.
  *
  * A bound model the packed tree lacks (its `model.bin` never pulled) is judged as
  * ModelBindingTestSupport.hpp describes.
@@ -47,8 +49,9 @@ TEST(TestGfx942AttentionDenseModelBinding, TheBoundL2KernelRankerLoads)
 
 TEST(TestGfx942AttentionDenseModelBinding, TheBoundL1EnginePredictorLoadsAndMatchesThisBuild)
 {
-    expectBoundPredictorMatchesThisBuild(
-        loadedSet(GFX942_ATTENTION_DENSE_ENGINE_NAME), METRIC, ARCH);
+    const auto& set = loadedSet(GFX942_ATTENTION_DENSE_ENGINE_NAME);
+    expectEveryPackedKernelIdentified(set);
+    expectBoundPredictorMatchesThisBuild(set, METRIC, ARCH);
 }
 
 } // namespace

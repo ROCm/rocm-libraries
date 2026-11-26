@@ -7,6 +7,7 @@ Full documentation for hipTensor is available at [rocm.docs.amd.com/projects/hip
 ### Added
 * Added support for the following new GPU targets:
   * gfx11-7: gfx1170, gfx1171.
+  * gfx12: gfx1251.
 * Added fp64 support to hiptensorPermute for ranks 2-6.
 * Added bf16 support to hiptensorPermute for ranks 2-6, with a bf16 or fp32 scalar type.
 * Added bf16 support to `hiptensorElementwiseTrinaryExecute` for ranks 2-6, with a bf16 or fp32 scalar type, and fp32 scalar support for fp16 tensors. Trinary now accepts the same data type combinations as `hiptensorElementwiseBinaryExecute`.

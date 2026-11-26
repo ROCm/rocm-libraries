@@ -31,13 +31,14 @@ from hkp_pack.desk_check import compiled_agreement, load_kernels
 from hkp_pack.kpack_resolver import load_kpack
 from pack_helpers import GENERIC_TARGETS, GENERIC_TARGETS_JSON, write_shipped
 
-# quick: no hipcc/comgr (the marker's definition); TestRealArchiveReaders needs only
+# quick: no HIP compiler/comgr (the marker's definition); TestRealArchiveReaders needs only
 # rocm_kpack, as other quick files do.
 pytestmark = pytest.mark.quick
 
 ARCH = "gfx942"
 PAYLOAD = b"\x7fELF-not-really-a-code-object"
 PAYLOAD_SHA = hashlib.sha256(PAYLOAD).hexdigest()
+PAYLOAD_IDENTITY = hashlib.sha256(b"what PAYLOAD was compiled from").hexdigest()
 SYMBOL = "attention_dense_bf16_d128"
 # One argument in the shape kernel_signature emits -- `name` is present only when the
 # code object carries one, so a bare kind/size/offset triple is a valid produced entry.
@@ -143,6 +144,7 @@ def observe_for(spec, *consumers, schema=FULL_KMD):
     observations["arch"] = ARCH
     observations["symbol"] = SYMBOL
     observations["code_object_sha256"] = PAYLOAD_SHA
+    observations["code_object_identity"] = PAYLOAD_IDENTITY
     return observations
 
 
@@ -499,7 +501,8 @@ def shipped_ukd(**overrides):
         build=None,
         symbol=SYMBOL,
         variant_key="vk-demo",
-        extra=overrides.pop("extra", {}),
+        # Every authored UKD carries a version.
+        extra={"version": "1.0", **overrides.pop("extra", {})},
         origin_kind="rocke",
         builder="demo_builder",
         spec={"head_size": 64},
@@ -542,6 +545,21 @@ def restamp_authored_spec(doc):
     doc["provenance"]["spec"] = {"head_size": 128}
     evidence = doc["provenance"]["effective_spec"]
     evidence["descriptor_digest"] = agreement.descriptor_binding(doc)
+
+
+def restamp_identity(identity):
+    """A mutation that sets the packed `identity` (dropping it for None) and re-stamps the
+    descriptor digest over it, so the identity's own binding to the evidence speaks."""
+
+    def mutate(doc):
+        if identity is None:
+            del doc["kernel_source"]["identity"]
+        else:
+            doc["kernel_source"]["identity"] = identity
+        evidence = doc["provenance"]["effective_spec"]
+        evidence["descriptor_digest"] = agreement.descriptor_binding(doc)
+
+    return mutate
 
 
 class TestProducerEvidenceReservation:
@@ -611,6 +629,23 @@ class TestPackedVerification:
                 ),
                 "code-object binding mismatch",
                 id="observed-code-object",
+            ),
+            pytest.param(
+                lambda d: observations_of(d).__setitem__(
+                    "code_object_identity", "0" * 64
+                ),
+                "code-object identity binding mismatch",
+                id="observed-identity",
+            ),
+            pytest.param(
+                restamp_identity("1" * 64),
+                "code-object identity binding mismatch",
+                id="restamped-identity",
+            ),
+            pytest.param(
+                restamp_identity(None),
+                "code-object identity binding mismatch",
+                id="dropped-identity",
             ),
             pytest.param(
                 lambda d: observations_of(d).__setitem__("symbol", "other"),

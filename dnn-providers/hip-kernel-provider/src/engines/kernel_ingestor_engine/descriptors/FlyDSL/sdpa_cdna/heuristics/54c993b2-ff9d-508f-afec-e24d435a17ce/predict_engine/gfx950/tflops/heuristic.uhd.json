@@ -1,29 +1,19 @@
 {
   "version": "1.0",
-  "id": "1440bcab-5ead-4c26-a710-e1b35acd4607",
-  "name": "hipkernel:flydsl_sdpa_cdna (gfx950, 79 contribution(s))",
+  "id": "99f042a2-2bf4-4b14-8ad9-56fa0557239d",
+  "name": "hipkernel:flydsl_sdpa_cdna (gfx950, 87 contribution(s))",
   "adapter": "mlp_data",
   "features_signature": [
-    "$device.total_global_mem",
-    "$flydsl_sdpa_cdna.bias.uid",
     "$flydsl_sdpa_cdna.bias.vectorized",
     "$flydsl_sdpa_cdna.causal",
     "$flydsl_sdpa_cdna.diag_bottom_right",
     "$flydsl_sdpa_cdna.diag_offset",
-    "$flydsl_sdpa_cdna.dropout_offset.uid",
     "$flydsl_sdpa_cdna.dropout_p",
-    "$flydsl_sdpa_cdna.dropout_seed.uid",
-    "$flydsl_sdpa_cdna.ragged_offset_kv.uid",
-    "$flydsl_sdpa_cdna.ragged_offset_q.uid",
-    "$flydsl_sdpa_cdna.scale",
     "$flydsl_sdpa_cdna.scale_source",
-    "$flydsl_sdpa_cdna.seq_len_kv.uid",
-    "$flydsl_sdpa_cdna.seq_len_q.uid",
     "$flydsl_sdpa_cdna.sink.stride",
-    "$flydsl_sdpa_cdna.sink.uid",
     "$flydsl_sdpa_cdna.stats.packed",
-    "$flydsl_sdpa_cdna.stats.uid",
     "$flydsl_sdpa_cdna.v.heads",
+    "$flydsl_sdpa_cdna.window_lo",
     "$graph.arithmetic_intensity",
     "$graph.flops",
     "$graph.flops_by_type.SdpaAttributes",
@@ -55,12 +45,6 @@
     {
       "value_or_default": [
         "$graph.nodes[0].attn_mask.dims[3]",
-        -1
-      ]
-    },
-    {
-      "value_or_default": [
-        "$graph.nodes[0].attn_mask.numel",
         -1
       ]
     },
@@ -100,12 +84,6 @@
         -1
       ]
     },
-    {
-      "value_or_default": [
-        "$graph.nodes[0].attn_scale_value",
-        1.0
-      ]
-    },
     "$graph.nodes[0].data_dependent",
     "$graph.nodes[0].diagonal_alignment",
     {
@@ -128,16 +106,20 @@
     "$graph.nodes[0].k.dims[1]",
     "$graph.nodes[0].k.dims[2]",
     "$graph.nodes[0].k.dims[3]",
-    "$graph.nodes[0].k.numel",
     "$graph.nodes[0].k.strides[0]",
     "$graph.nodes[0].k.strides[1]",
     "$graph.nodes[0].k.strides[2]",
+    {
+      "value_or_default": [
+        "$graph.nodes[0].left_bound",
+        -1
+      ]
+    },
     "$graph.nodes[0].o.data_type",
     "$graph.nodes[0].o.dims[0]",
     "$graph.nodes[0].o.dims[1]",
     "$graph.nodes[0].o.dims[2]",
     "$graph.nodes[0].o.dims[3]",
-    "$graph.nodes[0].o.numel",
     "$graph.nodes[0].o.strides[0]",
     "$graph.nodes[0].o.strides[1]",
     "$graph.nodes[0].o.strides[2]",
@@ -168,12 +150,6 @@
     {
       "value_or_default": [
         "$graph.nodes[0].offset.dims[3]",
-        -1
-      ]
-    },
-    {
-      "value_or_default": [
-        "$graph.nodes[0].offset.numel",
         -1
       ]
     },
@@ -219,7 +195,6 @@
     "$graph.nodes[0].q.dims[1]",
     "$graph.nodes[0].q.dims[2]",
     "$graph.nodes[0].q.dims[3]",
-    "$graph.nodes[0].q.numel",
     "$graph.nodes[0].q.strides[0]",
     "$graph.nodes[0].q.strides[1]",
     "$graph.nodes[0].q.strides[2]",
@@ -256,12 +231,6 @@
     {
       "value_or_default": [
         "$graph.nodes[0].scale.dims[3]",
-        -1
-      ]
-    },
-    {
-      "value_or_default": [
-        "$graph.nodes[0].scale.numel",
         -1
       ]
     },
@@ -333,12 +302,6 @@
     },
     {
       "value_or_default": [
-        "$graph.nodes[0].seed.numel",
-        -1
-      ]
-    },
-    {
-      "value_or_default": [
         "$graph.nodes[0].seed.rank",
         -1
       ]
@@ -400,12 +363,6 @@
     {
       "value_or_default": [
         "$graph.nodes[0].seq_len_kv.dims[3]",
-        -1
-      ]
-    },
-    {
-      "value_or_default": [
-        "$graph.nodes[0].seq_len_kv.numel",
         -1
       ]
     },
@@ -477,12 +434,6 @@
     },
     {
       "value_or_default": [
-        "$graph.nodes[0].seq_len_q.numel",
-        -1
-      ]
-    },
-    {
-      "value_or_default": [
         "$graph.nodes[0].seq_len_q.rank",
         -1
       ]
@@ -544,12 +495,6 @@
     {
       "value_or_default": [
         "$graph.nodes[0].sink_token.dims[3]",
-        -1
-      ]
-    },
-    {
-      "value_or_default": [
-        "$graph.nodes[0].sink_token.numel",
         -1
       ]
     },
@@ -621,12 +566,6 @@
     },
     {
       "value_or_default": [
-        "$graph.nodes[0].stats.numel",
-        -1
-      ]
-    },
-    {
-      "value_or_default": [
         "$graph.nodes[0].stats.rank",
         -1
       ]
@@ -666,45 +605,66 @@
     "$graph.nodes[0].v.dims[1]",
     "$graph.nodes[0].v.dims[2]",
     "$graph.nodes[0].v.dims[3]",
-    "$graph.nodes[0].v.numel",
     "$graph.nodes[0].v.strides[0]",
     "$graph.nodes[0].v.strides[1]",
     "$graph.nodes[0].v.strides[2]",
     "$graph.tensor_count",
-    "$graph.tensors[0].data_type",
-    "$graph.tensors[0].dims[0]",
-    "$graph.tensors[0].dims[1]",
-    "$graph.tensors[0].dims[2]",
-    "$graph.tensors[0].dims[3]",
-    "$graph.tensors[0].strides[0]",
-    "$graph.tensors[0].strides[1]",
-    "$graph.tensors[0].strides[2]",
-    "$graph.tensors[1].data_type",
-    "$graph.tensors[1].dims[0]",
-    "$graph.tensors[1].dims[1]",
-    "$graph.tensors[1].dims[2]",
-    "$graph.tensors[1].dims[3]",
-    "$graph.tensors[1].strides[0]",
-    "$graph.tensors[1].strides[1]",
-    "$graph.tensors[1].strides[2]",
-    "$graph.tensors[2].data_type",
-    "$graph.tensors[2].dims[0]",
-    "$graph.tensors[2].dims[1]",
-    "$graph.tensors[2].dims[2]",
-    "$graph.tensors[2].dims[3]",
-    "$graph.tensors[2].strides[0]",
-    "$graph.tensors[2].strides[1]",
-    "$graph.tensors[2].strides[2]",
-    "$graph.tensors[3].data_type",
-    "$graph.tensors[3].dims[0]",
-    "$graph.tensors[3].dims[1]",
-    "$graph.tensors[3].dims[2]",
-    "$graph.tensors[3].dims[3]",
-    "$graph.tensors[3].strides[0]",
-    "$graph.tensors[3].strides[1]",
-    "$graph.tensors[3].strides[2]"
+    {
+      "!=": [
+        "$flydsl_sdpa_cdna.bias.uid",
+        -1
+      ]
+    },
+    {
+      "!=": [
+        "$flydsl_sdpa_cdna.dropout_offset.uid",
+        -1
+      ]
+    },
+    {
+      "!=": [
+        "$flydsl_sdpa_cdna.dropout_seed.uid",
+        -1
+      ]
+    },
+    {
+      "!=": [
+        "$flydsl_sdpa_cdna.ragged_offset_kv.uid",
+        -1
+      ]
+    },
+    {
+      "!=": [
+        "$flydsl_sdpa_cdna.ragged_offset_q.uid",
+        -1
+      ]
+    },
+    {
+      "!=": [
+        "$flydsl_sdpa_cdna.seq_len_kv.uid",
+        -1
+      ]
+    },
+    {
+      "!=": [
+        "$flydsl_sdpa_cdna.seq_len_q.uid",
+        -1
+      ]
+    },
+    {
+      "!=": [
+        "$flydsl_sdpa_cdna.sink.uid",
+        -1
+      ]
+    },
+    {
+      "!=": [
+        "$flydsl_sdpa_cdna.stats.uid",
+        -1
+      ]
+    }
   ],
-  "features_hash": "sha256:561340feee98926a",
+  "features_hash": "sha256:47dd466bb88d44af",
   "trained_against": {
     "ued": {
       "id": "54c993b2-ff9d-508f-afec-e24d435a17ce",
@@ -720,7 +680,7 @@
         "revision": "1.0"
       }
     ],
-    "selector_revision": "generic-untuned-v1/916d51f66650784c4dd98805423af6d1bd493cb212b98be8590c8f06c9693d80",
+    "selector_revision": "generic-untuned-v1/ec6621f06654e2baa290525bea5eba20a4c261c339b61300f249f2cd99f48ac7",
     "feature_semantics_revision": 1
   },
   "objective": "max",
@@ -731,6 +691,6 @@
   },
   "mlp_data": {
     "artifact": "model.bin",
-    "hash": "cf5b21a66cb713be4450953bbe04d9ae7d0a0506de354294938c27c9344a2943"
+    "hash": "562539cedb164615cc55b0bf647281309cef823a65b20e5bffe2d735cc58fd71"
   }
 }

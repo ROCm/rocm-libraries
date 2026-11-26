@@ -608,6 +608,11 @@ void EngineHeuristicDescriptor::getEngineConfigs(hipdnnBackendAttributeType_t at
                 HIPDNN_STATUS_BAD_PARAM,
                 "EngineHeuristicDescriptor failed to get engine configs: Invalid attribute type.");
 
+    THROW_IF_TRUE(requestedElementCount < 0,
+                  HIPDNN_STATUS_BAD_PARAM,
+                  "EngineHeuristicDescriptor failed to get engine configs: Negative requested "
+                  "element count.");
+
     // Return the number of engine configs if they aren't requesting any.
     if(requestedElementCount == 0)
     {

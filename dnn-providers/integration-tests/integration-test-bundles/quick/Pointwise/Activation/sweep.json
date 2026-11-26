@@ -1344,6 +1344,118 @@
         "notes": "Ported from C++ graph test Smoke/IntegrationGpuActivationForwardFp16.Correctness",
         "reference_source": "c++ integration suite: Smoke/IntegrationGpuActivationForwardFp16"
       }
+    },
+    {
+      "id": "2_4_8_8_fp16_nchw_relu_lo",
+      "values": {
+        "io_data_type": "half",
+        "intermediate_data_type": "half",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              2,
+              4,
+              8,
+              8
+            ],
+            "strides": [
+              256,
+              64,
+              8,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              2,
+              4,
+              8,
+              8
+            ],
+            "strides": [
+              256,
+              64,
+              8,
+              1
+            ],
+            "data_type": "half"
+          }
+        ],
+        "attributes": {
+          "operation": "relu_fwd",
+          "relu_lower_clip": 0.10000000149011612,
+          "relu_lower_clip_slope": null,
+          "relu_upper_clip": null
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "ported from c++ tests",
+        "generator_version": "1.0.0",
+        "operation": "Smoke/IntegrationGpuActivationForwardFp16",
+        "seed": 1,
+        "notes": "Adapted from 2_4_8_8_fp16_nchw_relu6: relu_lower_clip 0.1 and no relu_upper_clip",
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuActivationForwardFp16"
+      }
+    },
+    {
+      "id": "2_4_8_8_fp32_nchw_relu_lo",
+      "values": {
+        "io_data_type": "float",
+        "intermediate_data_type": "float",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              2,
+              4,
+              8,
+              8
+            ],
+            "strides": [
+              256,
+              64,
+              8,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              2,
+              4,
+              8,
+              8
+            ],
+            "strides": [
+              256,
+              64,
+              8,
+              1
+            ],
+            "data_type": "float"
+          }
+        ],
+        "attributes": {
+          "operation": "relu_fwd",
+          "relu_lower_clip": 0.10000000149011612,
+          "relu_lower_clip_slope": null,
+          "relu_upper_clip": null
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "ported from c++ tests",
+        "generator_version": "1.0.0",
+        "operation": "Smoke/IntegrationGpuActivationForwardFp32",
+        "seed": 1,
+        "notes": "Adapted from 2_4_8_8_fp32_nchw_relu6: relu_lower_clip 0.1 and no relu_upper_clip",
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuActivationForwardFp32"
+      }
     }
   ]
 }

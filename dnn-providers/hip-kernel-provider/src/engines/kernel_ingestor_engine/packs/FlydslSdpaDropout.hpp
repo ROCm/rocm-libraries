@@ -65,7 +65,8 @@ struct SdpaDropout
  * - On the device: INT64 only, at an 8-byte-aligned base, since the kernels read 8 bytes there
  *   (PyTorch-ROCm passes its seed and offset this way, so such a graph binds with no copy).
  * - Pass-by-value (a host scalar, constant or supplied at execute): INT64 or INT32, widened to
- *   64 bits on the host.
+ *   64 bits on the host. The dims and strides must still be `[1, 1, 1, 1]`: the frontend's
+ *   `set_value()` resets them to `{1}`, so `set_dim()` and `set_stride()` follow it.
  * - Never virtual or ragged. INT32 on the device declines: the kernels would read 8 bytes.
  */
 inline bool isServablePhiloxTensor(const MatchContext& context, int64_t uid)

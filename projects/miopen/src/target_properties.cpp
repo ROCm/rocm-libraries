@@ -106,6 +106,9 @@ void TargetProperties::InitDbId()
     }
     if(xnack.isEnabled())
         dbId += "_xnack";
+    // Everything from the first '-' of the name is a target variant (gfx1250 reports
+    // "gfx1250-strict"); the feature suffixes above follow the name in dbId.
+    systemDbId = name.substr(0, name.find('-')) + dbId.substr(name.size());
 }
 
 } // namespace miopen

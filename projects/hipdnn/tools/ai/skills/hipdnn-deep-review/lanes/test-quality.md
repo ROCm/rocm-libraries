@@ -31,6 +31,10 @@ Judge whether each added or changed test, and each change to test configuration,
     `--enforce-support-claims` (default on), a skipped case its sidecar claims fails; a case with no claim stays a silent skip.
 - **Determinism and isolation.** Fixed seeds, no timing dependence, no shared global state, no reliance on test order or the
   developer's machine.
+- **No assertions on another tool's prose.** Flag a test that matches an external tool's human-readable wording (ctest, pytest
+  or compiler summary lines, log phrases), e.g. `"100% tests passed, 0 tests failed out of 4"`, which CTest 4.4 rewords. Prefer
+  the exit code, machine-readable output (`ctest --output-junit`, JSON) or per-item status. `SUGGESTION` by default;
+  `IMPORTANT` when the tool's next version is known to change the text.
 - **Tolerances and references.** Each tolerance is justified by data type and reduction size; the reference is independent of the
   code under test.
 - **Conventions.** Names and tiers follow `projects/hipdnn/docs/TESTING.md`, `projects/hipdnn/test_categories.yaml` and the

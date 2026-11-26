@@ -115,7 +115,7 @@ class RegClassSet {
         std::string text;
         for (RegType type : kLiftableRegClasses) {
             if (!contains(type)) continue;
-            if (!text.empty()) text += ",";
+            if (!text.empty()) text += ',';
             text += regTypeToString(type);
         }
         return text.empty() ? "none" : text;

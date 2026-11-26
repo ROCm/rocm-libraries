@@ -42,6 +42,7 @@ from ..Common.Capabilities import applyArchCapOverrides, makeIsaInfoMap
 from ..Common.DataType import DataType
 from ..Common.GlobalParameters import assignGlobalParameters, restoreDefaultGlobalParameters
 from ..Common.Types import IsaVersion
+from ..SgprHazards import withSgprHazardWaits
 from ..Toolchain.Validators import ToolchainDefaults, validateToolchain
 
 def kernel_header(name: str, gfx_arch: str, vgpr: int, sgpr: int, lds: int, xnack: bool = False):
@@ -998,7 +999,7 @@ if __name__ == '__main__':
     meta.update_args_offsets()
     k_str = '\n'.join([kernel_header(func_name, arch, layernorm.vgpr_pool.size(), layernorm.sgpr_pool.size(), layernorm.lds_usage_byte, xnack),
                        meta_str((meta,)),
-                       str(kernel_body)])
+                       withSgprHazardWaits(str(kernel_body), _global_ti.getArchCaps())])
 
     with open(output_path, 'w') as f:
         f.write(k_str)
