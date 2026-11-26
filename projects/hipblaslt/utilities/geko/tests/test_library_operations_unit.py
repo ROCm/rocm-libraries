@@ -99,6 +99,19 @@ def test_merge_solutions_happy_path(tmp_path: Path) -> None:
     assert merged[0].name == "x.yaml"
 
 
+def test_merge_solutions_rejects_library_type_mismatch(tmp_path: Path) -> None:
+    for build, lib_type in (("b1", "Equality"), ("b2", "GridBased")):
+        ldir = tmp_path / build / "3_LibraryLogic"
+        ldir.mkdir(parents=True)
+        path = _write_library_yaml(ldir, "x.yaml")
+        data = yaml.safe_load(path.read_text())
+        data[11] = lib_type
+        yaml.safe_dump(data, path.open("w"), sort_keys=False)
+
+    with pytest.raises(ValueError, match="Library type mismatch"):
+        operations.merge_solutions(tmp_path, epilogues=False)
+
+
 def test_merge_rejects_missing_hipblaslt_path(tmp_path: Path) -> None:
     with pytest.raises(FileNotFoundError):
         operations.merge(tmp_path / "missing", "orig", "inc", "out")
@@ -405,7 +418,7 @@ def test_extract_solutions_happy_path(tmp_path: Path) -> None:
     assert len(libs[0].sizes) == 1
 
 
-def test_extract_solutions_fill_perf_uses_measured_gflops(tmp_path: Path) -> None:
+def test_extract_solutions_ignores_measured_gflops(tmp_path: Path) -> None:
     lib_dir = tmp_path / "libs"
     lib_dir.mkdir()
     p = _write_library_yaml(lib_dir, "a.yaml")
@@ -425,13 +438,12 @@ def test_extract_solutions_fill_perf_uses_measured_gflops(tmp_path: Path) -> Non
         ]
     )
 
-    libs_default = operations.extract_solutions(df, mt)
-    assert libs_default[0].sizes[0][0] == [16, 16, 1, 16]
-    assert libs_default[0].sizes[0][1][1] == 0.0
+    libs = operations.extract_solutions(df, mt)
+    assert libs[0].sizes[0][0] == [16, 16, 1, 16]
+    assert libs[0].sizes[0][1][1] == 0.0
 
-    libs_filled = operations.extract_solutions(df, mt, fill_perf=True)
-    assert libs_filled[0].sizes[0][0] == [16, 16, 1, 16]
-    assert libs_filled[0].sizes[0][1][1] == 123.4
+    with pytest.raises(TypeError):
+        operations.extract_solutions(df, mt, fill_perf=True)
 
 
 def test_extract_solutions_all_numeric_dataframe(tmp_path: Path) -> None:
@@ -459,13 +471,13 @@ def test_extract_solutions_all_numeric_dataframe(tmp_path: Path) -> None:
     )
     assert df.dtypes.apply(lambda dt: dt.kind in "if").all()
 
-    libs = operations.extract_solutions(df, mt, fill_perf=True)
+    libs = operations.extract_solutions(df, mt)
     assert len(libs) == 1
     size, (sol_idx, perf) = libs[0].sizes[0]
     assert size == [16, 16, 1, 16]
     assert all(isinstance(v, int) for v in size)
     assert sol_idx == 0
-    assert perf == 123.4
+    assert perf == 0.0
 
 
 def test_prune_library_missing_hipblaslt_raises(tmp_path: Path) -> None:

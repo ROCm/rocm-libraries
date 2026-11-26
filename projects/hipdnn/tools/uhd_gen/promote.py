@@ -40,7 +40,7 @@ from .features import (
 from .optional import require_safe_signature
 from .provenance import (
     ROLES,
-    SUPPORTED_FILE_VERSIONS,
+    UHD_FILE_VERSIONS,
     ProvenanceError,
     compare_provenance,
     declared_slots,
@@ -51,6 +51,7 @@ from .provenance import (
     require_feature_semantics,
     revision,
     select_engine,
+    uhd_version_refusal,
     validate_provenance,
 )
 from .immediate import ROLE, validate_model
@@ -1248,20 +1249,13 @@ def _validate_descriptor(document: dict, path: Path) -> None:
         raise PromoteError(
             f"{path}: unknown UHD fields {sorted(set(document) - known)}"
         )
-    if document.get("version") not in SUPPORTED_FILE_VERSIONS:
+    if document.get("version") not in UHD_FILE_VERSIONS:
         raise PromoteError(
             f"{path}: unsupported UHD file-format version {document.get('version')!r}"
         )
-    recorded = document.get("trained_against")
-    if (
-        document["version"] == "1.0"
-        and isinstance(recorded, dict)
-        and ({"slot", "kmds"} & set(recorded))
-    ):
-        raise PromoteError(
-            f"{path}: trained_against uses slot provenance ('slot' or 'kmds'), which "
-            "requires UHD version 1.1"
-        )
+    refusal = uhd_version_refusal(document["version"], document.get("trained_against"))
+    if refusal is not None:
+        raise PromoteError(f"{path}: {refusal}")
     if not isinstance(document.get("name"), str) or not document["name"]:
         raise PromoteError(f"{path}: missing required name")
     adapter = document.get("adapter")

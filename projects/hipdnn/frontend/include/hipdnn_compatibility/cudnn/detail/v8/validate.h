@@ -9,6 +9,7 @@
 
 #pragma once
 
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstddef>
@@ -755,21 +756,36 @@ constexpr OperationTarget
     }
 }
 
-// hipDNN's layernorm normalized-dim count. A full-rank scale normalizes every
-// dimension from its first non-1 one onward (at least 1), so [1, H, 1, 1]
-// normalizes the last three; a scale that omits the batch dims normalizes all
-// of them.
+// hipDNN's layernorm normalized-dim count (matching node/detail/Utilities.hpp's
+// deriveLayernormNormalizedDimCount; this layer derives it unconditionally, with no
+// explicit-count attribute to override it):
+//   1. A scale of the same rank as x normalizes every dim from its first non-1 dim
+//      onward, at least the last one (cuDNN's rule): scale [1, C, H, W] on x
+//      [N, C, H, W] normalizes the last three; scale [1, 1, 1, C] normalizes only
+//      the last (count 1).
+//   2. A lower-rank scale equal to x's own trailing dims takes that rank directly:
+//      x [1, 1, 1, 1] with scale [1, 1, 1] -> 3; x [2, 1, 14, 14] with scale
+//      [1, 14, 14] -> 3.
+//   3. Any other lower-rank scale is right-aligned to rank(x) by prepending 1s, then
+//      rule 1 applies to the padded scale.
+// Rules 2 and 3 are hipDNN extensions: cuDNN requires a full-rank scale and applies only
+// rule 1. Rule 2 keeps develop's count for a scale that matches x's trailing dims.
 inline std::int64_t layernormNormalizedDimCount(const TensorRecord& x, const TensorRecord& scale)
 {
+    const std::vector<std::int64_t>& xDims = x.dimensions();
     const std::vector<std::int64_t>& scaleDims = scale.dimensions();
-    const auto rank = static_cast<std::int64_t>(scaleDims.size());
-    if(x.dimensions().size() != scaleDims.size())
+    const auto rank = static_cast<std::int64_t>(xDims.size());
+    const auto scaleRank = static_cast<std::int64_t>(scaleDims.size());
+    if(scaleRank < rank && std::equal(scaleDims.begin(), scaleDims.end(), xDims.end() - scaleRank))
     {
-        return rank;
+        return scaleRank;
     }
+    const std::int64_t padding = rank - scaleRank;
     for(std::int64_t i = 0; i < rank - 1; ++i)
     {
-        if(scaleDims[static_cast<std::size_t>(i)] != 1)
+        const std::int64_t paddedDim
+            = i < padding ? 1 : scaleDims[static_cast<std::size_t>(i - padding)];
+        if(paddedDim != 1)
         {
             return rank - i;
         }

@@ -1009,11 +1009,12 @@ TEST(TestFlydslSdpaBwdMergedKernel, EN3DeclinesAPackedObjectWhoseHeadStrideSpans
 TEST(TestFlydslSdpaBwdMergedKernel, EN3ServesAPackedObjectOnlyWhenTheStatsRowsFit32Bits)
 {
     // Q, dO and O share one head (stride 0), so their spans fit; two rows per head keep the
-    // pack_split bound at 2^30. A token-major layout puts the group's 268435455 interleaved
-    // heads between rows: the matcher declines it, as the kernels address padded rows past the
-    // two real ones at that token stride. A head-major layout has token stride 1 and is served,
-    // by the packed object as well.
-    constexpr int64_t HEADS = 268435455;
+    // pack_split bound far inside. A token-major layout puts the group's 2^23 interleaved
+    // heads between rows: the matcher declines it, as the kernels address 256 padded rows
+    // (256 x 2^23 x 4 bytes = 2^33) past the two real ones at that token stride. A head-major
+    // layout has token stride 1 and is served, by the packed object as well. One block per
+    // head: 2^23 + 1 blocks of 256 threads stay under 2^32 work-items.
+    constexpr int64_t HEADS = int64_t{1} << 23;
     constexpr int64_t SEQ = 2;
     RowSpec packed = plainRow();
     packed.gqaPack = 1;
@@ -1042,13 +1043,14 @@ TEST(TestFlydslSdpaBwdMergedKernel, EN3ServesAPackedObjectOnlyWhenTheStatsRowsFi
 TEST(TestFlydslSdpaBwdMergedKernel,
      EN3DeclinesAPackedObjectWhenThePaddedStatsGroupSpansMoreThan32Bits)
 {
-    // The same graph as above with the stats heads padded to four floats apart: one head's rows
+    // The same graph as above with the stats heads padded to 128 floats apart: one head's rows
     // still fit a 32-bit descriptor, so the matcher serves the graph, but the group's heads
-    // reach (268435454 * 4 + 2) * 4 bytes, past it. Only the packed object, whose descriptor
-    // covers the group, declines; the unpacked row rebases per head and is served.
-    constexpr int64_t HEADS = 268435455;
+    // reach ((2^23 - 1) * 128 + 2) * 4 bytes (about 2^32), past it. Only the packed object,
+    // whose descriptor covers the group, declines; the unpacked row rebases per head and is
+    // served. The launch is 2^23 + 1 blocks of 256 threads, under 2^32 work-items.
+    constexpr int64_t HEADS = int64_t{1} << 23;
     constexpr int64_t SEQ = 2;
-    constexpr int64_t PAD = 4;
+    constexpr int64_t PAD = 128;
     RowSpec packed = plainRow();
     packed.gqaPack = 1;
     const auto stats = [&](int64_t headStride) {
@@ -1241,17 +1243,42 @@ TEST(TestFlydslSdpaBwdMergedKernel, DeclinesARecordMissingAField)
 
 TEST(TestFlydslSdpaBwdMergedKernel, DeclinesALaunchGridPastInt32)
 {
-    // One block per tile of one row: B * (Hk * Sk + Hq * Sq) blocks.
+    // One block per tile of one row: B * (Hk * Sk + Hq * Sq) = B * 256 blocks at the default
+    // shape. A one-thread block keeps the work-item bound out of reach: 2^23 batches make 2^31
+    // blocks, past int32 workgroups and under 2^32 work-items.
     RowSpec tiny = plainRow();
     tiny.blockKv = 1;
     tiny.blockM = 1;
+    tiny.blockThreads = 1;
     Shape fits;
     fits.batch = int64_t{1} << 20;
     Shape overflows;
-    overflows.batch = int64_t{1} << 26;
+    overflows.batch = int64_t{1} << 23;
     EXPECT_TRUE(serves(specOf(fits), tiny));
     EXPECT_FALSE(serves(specOf(overflows), tiny));
     expectBadParam([&] { static_cast<void>(dumpOf(specOf(overflows), tiny)); });
+}
+
+TEST(TestFlydslSdpaBwdMergedKernel, DeclinesALaunchPastThirtyTwoBitWorkItems)
+{
+    // One head and one-row sequences with one-row tiles: two blocks per batch. At 1024
+    // threads x holds 2^22 - 1 blocks before it passes 2^32 work-items.
+    RowSpec tiny = plainRow();
+    tiny.blockKv = 1;
+    tiny.blockM = 1;
+    tiny.blockThreads = 1024;
+    const auto batches = [](int64_t batch) {
+        Shape shape;
+        shape.batch = batch;
+        shape.heads = 1;
+        shape.kvHeads = 1;
+        shape.seqQ = 1;
+        shape.seqKv = 1;
+        return specOf(shape);
+    };
+    EXPECT_TRUE(serves(batches((int64_t{1} << 21) - 1), tiny));
+    EXPECT_FALSE(serves(batches(int64_t{1} << 21), tiny));
+    expectBadParam([&] { static_cast<void>(dumpOf(batches(int64_t{1} << 21), tiny)); });
 }
 
 TEST(TestFlydslSdpaBwdMergedKernel, DeclinesADbiasReducePastTheGridRowLimit)

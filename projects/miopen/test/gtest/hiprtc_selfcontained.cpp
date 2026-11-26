@@ -210,10 +210,12 @@ private:
 
 } // namespace
 
+using CPU_HipRtcSelfContained_NONE = testing::TestWithParam<int>;
+
 // Regression test: the kernel headers must not depend on the
 // host STL being parseable, even where one is reachable (so this runs on Linux
 // comgr too, unlike the -nostdinc test below).
-TEST(CPU_HipRtcSelfContained_NONE, RtIgnoresUnusableHostStl)
+TEST_P(CPU_HipRtcSelfContained_NONE, RtIgnoresUnusableHostStl)
 {
     auto&& h = get_handle();
     RecordProperty("device", h.GetTargetProperties().Name());
@@ -231,7 +233,7 @@ TEST(CPU_HipRtcSelfContained_NONE, RtIgnoresUnusableHostStl)
 
 // A real host STL header that was included before the kernel headers must be
 // respected: defining the built-in fallbacks as well would redefine std types.
-TEST(CPU_HipRtcSelfContained_NONE, RtRespectsPreincludedHostStl)
+TEST_P(CPU_HipRtcSelfContained_NONE, RtRespectsPreincludedHostStl)
 {
     auto&& h = get_handle();
     RecordProperty("device", h.GetTargetProperties().Name());
@@ -254,7 +256,7 @@ TEST(CPU_HipRtcSelfContained_NONE, RtRespectsPreincludedHostStl)
     }
 }
 
-TEST(CPU_HipRtcSelfContained_NONE, RtCompilesInlineKernelWithoutHostStl)
+TEST_P(CPU_HipRtcSelfContained_NONE, RtCompilesInlineKernelWithoutHostStl)
 {
     auto&& h = get_handle();
 
@@ -300,3 +302,5 @@ TEST(CPU_HipRtcSelfContained_NONE, RtCompilesInlineKernelWithoutHostStl)
         RunSelfContainedKernel(h, "");
     }
 }
+
+INSTANTIATE_TEST_SUITE_P(Quick, CPU_HipRtcSelfContained_NONE, testing::Values(0));
