@@ -23,6 +23,8 @@ import re
 
 import numpy as np
 
+from ..core.ir import fits_i32
+
 __all__ = ["KernelIR", "intrinsic_calls"]
 
 _DEFINITION = re.compile(r"^\s*(%[\w.]+) = (.*)$")
@@ -32,6 +34,14 @@ _INCOMING = re.compile(r"\[\s*([^,\]]+?)\s*,\s*(%[\w.]+)\s*\]")
 _LOOP_BOUND = re.compile(r"icmp slt i32 (%[\w.]+), (\d+)$")
 _BUFFER_LOAD = "llvm.amdgcn.raw.ptr.buffer.load"
 _BUFFER_RESOURCE = "llvm.amdgcn.make.buffer.rsrc"
+
+
+def _all_fit_i32(values: np.ndarray | np.int64) -> bool:
+    """Whether every element of ``values`` is a signed i32 (:func:`rocke.core.ir.fits_i32`)."""
+    array = np.asarray(values)
+    return array.size == 0 or (
+        fits_i32(int(array.min())) and fits_i32(int(array.max()))
+    )
 
 
 def intrinsic_calls(llvm_text: str, intrinsic: str) -> list[str]:
@@ -257,8 +267,12 @@ class KernelIR:
         round toward zero, as LLVM's do, so an index below zero (a reversed
         view addresses back from its pointer) divides as on the GPU; a
         ``readfirstlane`` passes its operand through, which is right for the
-        wave-uniform values the lowering reads that way. An instruction this
-        does not know fails the test."""
+        wave-uniform values the lowering reads that way. An ``nsw`` ``add``,
+        ``sub`` or ``mul`` of i32 values whose result leaves the i32 range is
+        poison in LLVM, and a literal operand of one outside the range is
+        another number to LLVM; either fails the test
+        (:func:`rocke.core.ir.fits_i32`). An instruction this does not know
+        fails the test too."""
         if not name.startswith("%"):
             return np.int64(name)
         if name in inputs:
@@ -267,12 +281,17 @@ class KernelIR:
         args = [self.evaluate(v, inputs) for v in self.operands(name)]
         if op in ("sext", "zext", "trunc", "llvm.amdgcn.readfirstlane"):
             return args[0]
-        if op == "add":
-            return args[0] + args[1]
-        if op == "sub":
-            return args[0] - args[1]
-        if op == "mul":
-            return args[0] * args[1]
+        if op in ("add", "sub", "mul"):
+            left, right = args
+            result = {"add": left + right, "sub": left - right, "mul": left * right}[op]
+            definition = self.definitions[name]
+            if definition.startswith(f"{op} nsw i32 "):
+                # Operands too: LLVM reads a literal outside i32 as another number.
+                for value in (left, right, result):
+                    assert _all_fit_i32(
+                        value
+                    ), f"{name} = {definition} leaves i32: {value}"
+            return result
         if op == "shl":
             return args[0] << args[1]
         if op == "or":

@@ -16,9 +16,10 @@ it.
 These tests lower a tile copy (``load_fragment`` then ``store_fragment``) with each engine and
 check, in the LLVM IR, that every per-element load reads the base or ``add nsw base, C`` off one
 shared base, and that the index each load reads is the element the layout puts in that register,
-for every lane. A packed sub-byte tile over a reversed view is checked the same way, loads and
-stores both: its constant is a negative number of 32-bit words. Host only: nothing is compiled or
-launched.
+for every lane. Two edges of that form are checked the same way, loads and stores both: a packed
+sub-byte tile over a reversed view, whose constant is a negative number of 32-bit words, and a
+tile whose registers lie further apart than an i32 constant reaches, whose far register is
+addressed from its own position instead. Host only: nothing is compiled or launched.
 """
 
 from __future__ import annotations
@@ -171,3 +172,32 @@ def test_a_packed_reversed_view_addresses_each_run_by_whole_words(
             np.testing.assert_array_equal(
                 ir.evaluate(index, inputs), want, err_msg=f"{pointer} access {access}"
             )
+
+
+# Rows 2**31 elements apart and columns 2**30 apart: the tile at row 1 spans element indices
+# -2**31 to 0, all inside i32, but its last register lies 2**31 elements past its first, which no
+# i32 constant holds. Every lane holds the whole 2x2 tile (64 lanes broadcast).
+@pytest.mark.parametrize("engine", ENGINES)
+def test_a_register_beyond_i32_reach_of_the_base_is_addressed_from_its_position(
+    engine: Engine,
+) -> None:
+    tile = make_tile_desc(
+        shape=[1, 2, 2],
+        thread_tile=[1, 2, 2],
+        thread_dist=[1, 1, 1],
+        thread_broadcast=64,
+        wave_size=64,
+    )
+    tensor = make_tensor_desc((2, 2, 2), (-(2**31), 2**30, 2**30), U8)
+    kernel = window_copy_kernel("far_registers", tile, tensor, (1, 0, 0), U8)
+    ir = KernelIR(lower_with_engine(kernel, "gfx942", engine=engine))
+    expected = [
+        -(2**31) + (row + column) * 2**30 for row in range(2) for column in range(2)
+    ]
+    inputs = {ir.call_named("llvm.amdgcn.workitem.id.x"): np.arange(64)}
+    for pointer in ("%src", "%dst"):
+        indices = _access_indices(ir, pointer)
+        # evaluate fails on an nsw step whose operands or result leave the i32 range.
+        assert [
+            int(ir.evaluate(index, inputs)) for index in indices
+        ] == expected, pointer

@@ -23,7 +23,7 @@ from collections.abc import Iterator, Sequence
 from typing import Any, Callable
 
 from ...core.dtypes import dtype_info
-from ...core.ir import I8, Type, VectorType
+from ...core.ir import I8, Type, VectorType, fits_i32
 from ...core.passes import constant_int
 from ...core.storage import (
     element_bytes,
@@ -375,6 +375,7 @@ def _register_index(
     b: Any,
     window: TensorWindow,
     tile_desc: TileDesc,
+    thread: Any,
     base_index: Any,
     register: int,
     dtype: Any,
@@ -384,7 +385,13 @@ def _register_index(
     strides and converted to units (:func:`rocke.core.storage.offset_to_storage`). Consecutive
     registers' indices then differ by a constant, which the backend vectorizer can merge; it is
     bit-exact with :func:`_address` of the register's positions by linearity. The offset keeps its
-    sign: a negative stride (a reversed view) gives a negative offset."""
+    sign: a negative stride (a reversed view) gives a negative offset.
+
+    The base and the register's index both fit the i32 address arithmetic, but the distance
+    between them need not: with large strides, two registers of one tile can lie further apart
+    than an i32 constant reaches (base ``-2**31``, register ``0``). Such a register's index is
+    computed from its own positions instead (:func:`_address`), as a wide load addresses its run.
+    """
     deltas = _register_coord_offsets(tile_desc.layout, register)
     lead = _leading_rank(window, len(deltas))
     offset = offset_to_storage(
@@ -394,7 +401,12 @@ def _register_index(
             for axis, delta in enumerate(deltas)
         ),
     )
-    return base_index if offset == 0 else b.add(base_index, b.const_i32(offset))
+    if offset == 0:
+        return base_index
+    if not fits_i32(offset):
+        coords = emit_tensor_coordinates(b, tile_desc.layout, thread, register)
+        return _unit_index(b, _address(b, window, _positions(b, window, coords)), dtype)
+    return b.add(base_index, b.const_i32(offset))
 
 
 def _origin_misaligned(origin: Any, extent: int) -> bool:
@@ -890,7 +902,9 @@ def _lds_index(
     element's swizzled address does not depend on the rank of the tile that reaches it.
     """
     if not lds_swizzle:
-        return _register_index(b, window, tile_desc, base_index, register, dtype)
+        return _register_index(
+            b, window, tile_desc, thread, base_index, register, dtype
+        )
     coords = emit_tensor_coordinates(b, tile_desc.layout, thread, register)
     lead = _leading_rank(window, len(coords))
     leading = [_as_value(b, window.origin[axis]) for axis in range(lead)]
@@ -1092,7 +1106,9 @@ def load_fragment(
     zero: Any = None  # the pad scalar, emitted lazily on the first clipped access
     for register in range(0, tile_desc.register_count, step):
         positions = _register_positions(b, tile_desc, base_positions, register)
-        address = _register_index(b, window, tile_desc, base_index, register, dtype)
+        address = _register_index(
+            b, window, tile_desc, thread, base_index, register, dtype
+        )
         slots = storage_slots(dtype, tile_desc.register_count, register, step)
         mask = _clip_mask(b, window, positions, tile_desc.shape)
         if mask is not None:
@@ -1245,7 +1261,9 @@ def store_fragment(
     base_index = _unit_index(b, base_index, out_dtype)
     for register in range(0, tile_desc.register_count, step):
         positions = _register_positions(b, tile_desc, base_positions, register)
-        address = _register_index(b, window, tile_desc, base_index, register, out_dtype)
+        address = _register_index(
+            b, window, tile_desc, thread, base_index, register, out_dtype
+        )
         slots = storage_slots(fragment.dtype, tile_desc.register_count, register, step)
         units = [_stored_unit(b, fragment, slot, out_dtype) for slot in slots]
         mask = _clip_mask(b, window, positions, tile_desc.shape)

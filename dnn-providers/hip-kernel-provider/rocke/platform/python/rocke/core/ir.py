@@ -1331,10 +1331,17 @@ def _check_u32(op: str, field: str, value: int) -> int:
     return v
 
 
+def fits_i32(value: int) -> bool:
+    """Whether ``value`` is a signed ``i32``: -2147483648 to 2147483647. LLVM reads
+    an ``i32`` literal outside that range as another number, and an ``nsw`` result
+    outside it is poison."""
+    return -(1 << 31) <= value < (1 << 31)
+
+
 def _check_i32(op: str, field: str, value: int) -> int:
     """Range-check a signed byte offset carried by an LLVM ``i32``."""
     v = int(value)
-    if not -(1 << 31) <= v < (1 << 31):
+    if not fits_i32(v):
         raise ValueError(
             f"{op} {field} must fit a signed i32 (-2147483648..2147483647), got {v}"
         )
