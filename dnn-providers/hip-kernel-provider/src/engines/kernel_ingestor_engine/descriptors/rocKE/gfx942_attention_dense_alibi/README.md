@@ -7,9 +7,16 @@ engine, dispatch and KMD (the descriptors live there), with a KDP of its own. Bu
 ## Coverage
 
 - Architecture: gfx942 only.
-- Variants: 44, at the 128/64 tile, KMD `use_alibi` 1: on the `qb_minor` grid every head size (D64, D128), dtype,
-  window (none, 128, 512, 1024, 2048) and `emit_lse` (40), and on the D128 persistent grid each dtype and `emit_lse`
-  without a window (4). seqlen_q and seqlen_kv must be multiples of 128 and 64.
+- Variants: 88, KMD `use_alibi` 1, 44 at each of the 128/64 and 256/64 tiles: one-CTA-per-block grids for every head
+  size (D64, D128), dtype, window (none, 128, 512, 1024, 2048) and `emit_lse` (40), and the D128 persistent grid for
+  each dtype and `emit_lse` without a window (4). The grids follow the home catalog's at each tile: `qb_minor`, except
+  `bt_hkv_minor` for the window-free 256/64 kernels (`qb_minor` is the slower order there). seqlen_q and seqlen_kv
+  must be multiples of 128 and 64; the 256/64 kernels serve seqlen_q multiples of 256, where the trained ranker picks
+  between the two tiles.
+- Differences from the home catalog's causal kernels, which the trained ranker also sees: the home adds the 64/64
+  and 256/32 tiles, serves windows at 64/64, 256/32 and 256/64 but not at 128/64 (the satellite serves them at
+  128/64 and 256/64), carries `hq_minor_swz` and more persistent decodes at 256/64, and several body-lever variants
+  per cell (the satellite: one kernel per cell and grid).
 - ALiBi (`alibi_mask`): hipDNN's slopes (SdpaSemanticsRegister SEM-021), computed in the kernel from the query head
   count; the launch passes a null `alibi_slopes_ptr`. Top-left causal band only (any left window, no right bound),
   the one band hipDNN defines ALiBi on.
@@ -20,7 +27,7 @@ engine, dispatch and KMD (the descriptors live there), with a KDP of its own. Bu
 
 | File | In | Notes |
 |---|---|---|
-| `artifacts/gfx942_attention_dense.kdp.json` | DVC | the 44 variants; same KDP name as the home's, its own ids. Pointer: `artifacts.dvc` |
+| `artifacts/gfx942_attention_dense.kdp.json` | DVC | the 88 variants; same KDP name as the home's, its own ids. Pointer: `artifacts.dvc` |
 
 ## Notes
 

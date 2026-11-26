@@ -273,11 +273,14 @@ kernel_name_template: "attention_dense.{dtype}_d{head_size}_c{causal}_swa{slidin
 enumerate:
   candidates: dispatch.attention:attention_candidates
   request: dispatch.attention.common:AttentionRequest
-  # The qb_minor grid, the only grid with window kernels (all four windows, each a multiple
-  # of block_n 64), plus the D128 persistent grid that cold selection puts first at D128
-  # (no window); emit_lse twins throughout. Every kernel is its grid's default spec but:
-  # - the 128/64 tile: kernel_match needs Sq % block_m == 0, and every Sq a 256 tile
-  #   serves a 128 tile serves too;
+  # The grids of the home catalog's causal kernels at these tiles: the qb_minor grid, the
+  # only grid with window kernels (all four windows, each a multiple of block_n 64), the
+  # bt_hkv_minor grid at 256/64 without a window (in place of qb_minor there, which is
+  # slower at that tile), and the D128 persistent grid that cold selection puts first at
+  # D128 (no window); emit_lse twins throughout. Every kernel is its grid's default spec but:
+  # - the tile, 128/64 or 256/64, each in its own sections: kernel_match needs
+  #   Sq % block_m == 0, so 128/64 covers every Sq % 128 graph, and the trained ranker
+  #   picks between the two where Sq % 256 == 0 (neither wins on every shape there);
   # - use_cfvst and use_exp2_fast, which the default spec leaves unset for the kernel to
   #   resolve by head size, dtype and grid: a `space: slice` section does not resolve them
   #   into metadata, so each section pins the resolved values (one section per value
@@ -364,7 +367,127 @@ enumerate:
       spec_overrides: {block_m: 128, block_n: 64, use_cfvst: true, use_exp2_fast: true}
       spec_fields: *spec_fields
       max_kernels: 4
-
+    - pin: {algorithm: attention_dense, spec_id: gfx942_dense_qbminor}
+      fixed: {arch: gfx942, batch: 1, seqlen_q: 512, seqlen_k: 512, nhead_q: 8, nhead_k: 8}
+      cells:
+        - fields: [hdim_q, hdim_v]
+          values:
+            - [64, 64]
+        - fields: [dtype]
+          values: [bf16, fp16]
+        - fields: [mask_type, sliding_window, use_alibi]
+          values:
+            - [TOP_LEFT_CAUSAL, 128, true]
+            - [TOP_LEFT_CAUSAL, 512, true]
+            - [TOP_LEFT_CAUSAL, 1024, true]
+            - [TOP_LEFT_CAUSAL, 2048, true]
+        - fields: [emit_lse]
+          values: [false, true]
+      spec_overrides: {block_m: 256, block_n: 64, use_cfvst: false, use_exp2_fast: true}
+      spec_fields: *spec_fields
+      max_kernels: 16
+    - pin: {algorithm: attention_dense, spec_id: gfx942_dense_btminor_aot}
+      fixed: {arch: gfx942, batch: 1, seqlen_q: 512, seqlen_k: 512, nhead_q: 8, nhead_k: 8}
+      cells:
+        - fields: [hdim_q, hdim_v]
+          values:
+            - [64, 64]
+        - fields: [dtype]
+          values: [bf16, fp16]
+        - fields: [mask_type, sliding_window, use_alibi]
+          values:
+            - [TOP_LEFT_CAUSAL, 0, true]
+        - fields: [emit_lse]
+          values: [false, true]
+      spec_overrides: {block_m: 256, block_n: 64, use_cfvst: false, use_exp2_fast: true}
+      spec_fields: *spec_fields
+      max_kernels: 4
+    - pin: {algorithm: attention_dense, spec_id: gfx942_dense_qbminor}
+      fixed: {arch: gfx942, batch: 1, seqlen_q: 512, seqlen_k: 512, nhead_q: 8, nhead_k: 8}
+      cells:
+        - fields: [hdim_q, hdim_v]
+          values:
+            - [128, 128]
+        - fields: [dtype]
+          values: [bf16]
+        - fields: [mask_type, sliding_window, use_alibi]
+          values:
+            - [TOP_LEFT_CAUSAL, 128, true]
+            - [TOP_LEFT_CAUSAL, 512, true]
+            - [TOP_LEFT_CAUSAL, 1024, true]
+            - [TOP_LEFT_CAUSAL, 2048, true]
+        - fields: [emit_lse]
+          values: [false, true]
+      spec_overrides: {block_m: 256, block_n: 64, use_cfvst: true, use_exp2_fast: false}
+      spec_fields: *spec_fields
+      max_kernels: 8
+    - pin: {algorithm: attention_dense, spec_id: gfx942_dense_btminor_aot}
+      fixed: {arch: gfx942, batch: 1, seqlen_q: 512, seqlen_k: 512, nhead_q: 8, nhead_k: 8}
+      cells:
+        - fields: [hdim_q, hdim_v]
+          values:
+            - [128, 128]
+        - fields: [dtype]
+          values: [bf16]
+        - fields: [mask_type, sliding_window, use_alibi]
+          values:
+            - [TOP_LEFT_CAUSAL, 0, true]
+        - fields: [emit_lse]
+          values: [false, true]
+      spec_overrides: {block_m: 256, block_n: 64, use_cfvst: true, use_exp2_fast: false}
+      spec_fields: *spec_fields
+      max_kernels: 2
+    - pin: {algorithm: attention_dense, spec_id: gfx942_dense_qbminor}
+      fixed: {arch: gfx942, batch: 1, seqlen_q: 512, seqlen_k: 512, nhead_q: 8, nhead_k: 8}
+      cells:
+        - fields: [hdim_q, hdim_v]
+          values:
+            - [128, 128]
+        - fields: [dtype]
+          values: [fp16]
+        - fields: [mask_type, sliding_window, use_alibi]
+          values:
+            - [TOP_LEFT_CAUSAL, 128, true]
+            - [TOP_LEFT_CAUSAL, 512, true]
+            - [TOP_LEFT_CAUSAL, 1024, true]
+            - [TOP_LEFT_CAUSAL, 2048, true]
+        - fields: [emit_lse]
+          values: [false, true]
+      spec_overrides: {block_m: 256, block_n: 64, use_cfvst: true, use_exp2_fast: true}
+      spec_fields: *spec_fields
+      max_kernels: 8
+    - pin: {algorithm: attention_dense, spec_id: gfx942_dense_btminor_aot}
+      fixed: {arch: gfx942, batch: 1, seqlen_q: 512, seqlen_k: 512, nhead_q: 8, nhead_k: 8}
+      cells:
+        - fields: [hdim_q, hdim_v]
+          values:
+            - [128, 128]
+        - fields: [dtype]
+          values: [fp16]
+        - fields: [mask_type, sliding_window, use_alibi]
+          values:
+            - [TOP_LEFT_CAUSAL, 0, true]
+        - fields: [emit_lse]
+          values: [false, true]
+      spec_overrides: {block_m: 256, block_n: 64, use_cfvst: true, use_exp2_fast: true}
+      spec_fields: *spec_fields
+      max_kernels: 2
+    - pin: {algorithm: attention_dense, spec_id: gfx942_dense_persist_aot}
+      fixed: {arch: gfx942, batch: 1, seqlen_q: 512, seqlen_k: 512, nhead_q: 8, nhead_k: 8}
+      cells:
+        - fields: [hdim_q, hdim_v]
+          values:
+            - [128, 128]
+        - fields: [dtype]
+          values: [bf16, fp16]
+        - fields: [mask_type, sliding_window, use_alibi]
+          values:
+            - [TOP_LEFT_CAUSAL, 0, true]
+        - fields: [emit_lse]
+          values: [false, true]
+      spec_overrides: {block_m: 256, block_n: 64, use_cfvst: true, use_exp2_fast: true}
+      spec_fields: *spec_fields
+      max_kernels: 4
 # How the variant space is reduced; copied verbatim into the generated config.
 # Feature fields define a cell; performance knobs are the tuning arms, in priority order.
 reduction:

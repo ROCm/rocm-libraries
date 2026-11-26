@@ -475,7 +475,7 @@ std::vector<KnobCase> knobCases()
     // ALiBi with hipDNN's slopes (SdpaSemanticsRegister SEM-021), each with its LSE twin:
     // non-power-of-two Hq, which takes hipDNN's second slope series, GQA, B > 1 and
     // Sq != Skv (an odd multiple of 128 too), on the qb_minor grid and the persistent grid,
-    // and the deprecated causal flag. ALiBi kernels ship at the 128/64 tile only.
+    // and the deprecated causal flag, at 128/64.
     addClass({"Alibi_D128_Bf16Hq40Kv8_Sq256Skv384",
               withAlibi(makeShape(BF16, 128, 40, 8, Mask::BOUNDS_TOP_LEFT, 0, 2, 256, 384)),
               FORCED,
@@ -505,16 +505,38 @@ std::vector<KnobCase> knobCases()
               withAlibi(makeShape(BF16, 128, 40, 8, Mask::WINDOW_TOP_LEFT, 128, 1, 640, 576)),
               FORCED,
               Tile{128, 64}});
+    // The 256/64 tile: each grid it ships (bt_hkv_minor also with the causal flag).
+    addClass({"Alibi256_D128_Bf16Hq40Kv8_Sq512Skv768",
+              withAlibi(makeShape(BF16, 128, 40, 8, Mask::BOUNDS_TOP_LEFT, 0, 2, 512, 768)),
+              FORCED,
+              Tile{256, 64},
+              Grid{false, "bt_hkv_minor"}});
+    addClass({"Alibi256_D64_Fp16Hq12Kv4_Sq768Skv1024CausalFlag",
+              withAlibi(makeShape(FP16, 64, 12, 4, Mask::CAUSAL_MASK_FLAG, 0, 1, 768, 1024)),
+              FORCED,
+              Tile{256, 64},
+              Grid{false, "bt_hkv_minor"}});
+    addClass({"Alibi256_Persist_D128_Fp16Hq40Kv8",
+              withAlibi(makeShape(FP16, 128, 40, 8, Mask::BOUNDS_TOP_LEFT, 0, 3, 1024, 1024)),
+              FORCED,
+              Tile{256, 64},
+              persistentGrid("bt_hkv_minor")});
+    addClass({"Alibi256_Window512_D64_Bf16Hq12Kv4_Sq768Skv1024",
+              withAlibi(makeShape(BF16, 64, 12, 4, Mask::WINDOW_TOP_LEFT, 512, 2, 768, 1024)),
+              FORCED,
+              Tile{256, 64}});
     cases.push_back(
         {"Cold_AlibiWindow1024D128",
          withAlibi(makeShape(BF16, 128, 8, 2, Mask::WINDOW_TOP_LEFT, 1024, 1, 2048, 2048)),
          COLD,
-         Tile{128, 64}});
+         Tile{256, 64}});
     cases.push_back(
         {"Cold_AlibiD128",
          withAlibi(makeShape(BF16, 128, 40, 8, Mask::BOUNDS_TOP_LEFT, 0, 2, 1024, 1024)),
          COLD,
-         Tile{128, 64}});
+         Tile{256, 64}});
+    // The score ranks the qb_minor grid first, and the D64 ALiBi kernels without a window
+    // ship on it at 128/64 only.
     cases.push_back({"Cold_AlibiD64",
                      withAlibi(makeShape(FP16, 64, 6, 6, Mask::BOUNDS_TOP_LEFT, 0, 1, 512, 512)),
                      COLD,

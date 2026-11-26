@@ -43,6 +43,10 @@ MANIFESTS = (
     GEN / "configs/gfx942_attention_dense_alibi.engine.yaml",
 )
 PERSIST_PIN = "gfx942_dense_persist_aot"
+# The tile the cold score ranks first (BASELINE_BLOCK_M/N in packs/Gfx942AttentionDenseNative.cpp).
+POLICY_TILE = (256, 64)
+# The one-CTA-per-block orders in AttentionDenseGridOrder's order, which the score ranks by.
+GRID_ORDERS = ("qb_minor", "bt_hkv_minor", "hq_minor_swz")
 # The shape every catalog record is built at; the C++ test's records carry the same.
 CANONICAL = {
     "batch": 1,
@@ -102,11 +106,15 @@ def score_rows():
                 ):
                     base = section.base_spec(cell, persist[0])
                     persist_base.setdefault(cells.index(cell), base)
-        # A section with spec_overrides (the ALiBi tile) has no raw base spec: its
-        # persistent policy arm is its one kernel per cell.
+        # A section with spec_overrides (the ALiBi tiles) has no raw base spec: its one
+        # kernel per cell is a persistent arm, and where several such sections serve a cell
+        # the policy arm is the one at the cold score's policy tile (POLICY_TILE).
         for (cell, spec, _), section in zip(enumeration.rows, enumeration.sections):
             if section.spec_overrides and section.pin["spec_id"] == PERSIST_PIN:
-                persist_base.setdefault(cells.index(cell), spec)
+                index = cells.index(cell)
+                at_policy_tile = (spec.block_m, spec.block_n) == POLICY_TILE
+                if index not in persist_base or at_policy_tile:
+                    persist_base[index] = spec
         assert len(persist_base) > arms_before, f"{path.name}: no persistent policy arm"
 
     def cell_index(cell):
@@ -114,6 +122,7 @@ def score_rows():
 
     rows = []
     seen_persist = set()
+    override_defaults = {}
     for (cell, spec, is_default), kernel, section in enumerated:
         # The grid policy arm is the cell's default on the one-CTA-per-block grid; an
         # override section on the persistent grid keeps a default of its own, which is
@@ -127,8 +136,25 @@ def score_rows():
         if persistent_policy:
             assert index not in seen_persist, kernel["name"]
             seen_persist.add(index)
+        if is_default and section.spec_overrides:
+            override_defaults.setdefault(index, []).append(len(rows))
         rows.append((index, md, is_default, persistent_policy))
     assert seen_persist == set(persist_base), sorted(set(persist_base) - seen_persist)
+    # Several override sections (the ALiBi tiles) serve a cell, each with a default of its
+    # own: the grid policy arm is the one the score ranks first, by block order (the
+    # AttentionDenseGridOrder enum), then the policy tile.
+    for positions in override_defaults.values():
+        lead = min(
+            positions,
+            key=lambda pos: (
+                GRID_ORDERS.index(rows[pos][1]["nonpersist_decode"]),
+                (rows[pos][1]["block_m"], rows[pos][1]["block_n"]) != POLICY_TILE,
+            ),
+        )
+        for pos in positions:
+            if pos != lead:
+                index, md, _, persistent_policy = rows[pos]
+                rows[pos] = (index, md, False, persistent_policy)
     return rows
 
 

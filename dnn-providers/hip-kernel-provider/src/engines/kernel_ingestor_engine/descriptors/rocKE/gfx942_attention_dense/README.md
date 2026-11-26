@@ -41,7 +41,7 @@ builder `build_attention_dense`). Engine: `hipkernel:Gfx942AttentionDense`.
   score like any other (a row of them gets the uniform softmax), and a NaN on a visible
   key makes its row NaN, as in the reference.
 - ALiBi (`alibi_mask`, SdpaSemanticsRegister SEM-021): the `use_alibi` variants (KMD field
-  `use_alibi` 1, name slot `_alibi`; 44 kernels in the satellite bundle `../gfx942_attention_dense_alibi/`,
+  `use_alibi` 1, name slot `_alibi`; 88 kernels in the satellite bundle `../gfx942_attention_dense_alibi/`,
   same engine and KMD, KDP of its own) add hipDNN's ALiBi term with slopes the kernel
   computes from the query head count; the launch passes a null `alibi_slopes_ptr` after
   the shape and any fast-division pairs, before `lse_ptr`. hipDNN defines ALiBi only on
@@ -49,9 +49,11 @@ builder `build_attention_dense`). Engine: `hipkernel:Gfx942AttentionDense`.
   mask or a bottom-right diagonal is declined. An ALiBi graph is served only by them and
   every other graph only by the `use_alibi` 0 variants (a record without the field is
   one). They ship for every causal cell, the four windows included, D64 and D128, both
-  dtypes, with and without LSE, at the 128/64 tile on the `qb_minor` grid and (D128,
-  without a window) on the persistent grid, so an ALiBi graph needs seqlen_q and
-  seqlen_kv multiples of 128 and 64. Their plans save under
+  dtypes, with and without LSE, at the 128/64 and 256/64 tiles on the grids this catalog
+  uses there (`qb_minor`; `bt_hkv_minor` at 256/64 without a window; D128 persistent without
+  a window), so an ALiBi graph needs seqlen_q and
+  seqlen_kv multiples of 128 and 64; where seqlen_q is a multiple of 256 the trained
+  ranker picks the tile. Their plans save under
   `hipkernel.gfx942_attention_dense.dispatch.alibi.v1`.
 - ALiBi together with an `attn_mask`: no kernel adds both, so the engine declines such a
   graph under the cause `alibi_mask`.

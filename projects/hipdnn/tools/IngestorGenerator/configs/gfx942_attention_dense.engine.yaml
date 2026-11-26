@@ -21,7 +21,7 @@
 # (alibi_mask, SdpaSemanticsRegister SEM-021) with slopes it computes from the query head
 # count, so its launch passes one null alibi_slopes_ptr. hipDNN defines ALiBi only on the
 # top-left causal band (any left window, no right bound), so only the causal cells carry
-# ALiBi kernels, at the 128/64 tile, in the satellite bundle gfx942_attention_dense_alibi
+# ALiBi kernels, at the 128/64 and 256/64 tiles, in the satellite bundle gfx942_attention_dense_alibi
 # (configs/gfx942_attention_dense_alibi.engine.yaml).
 #
 # emit_lse is a compile-time variant: an emit_lse kernel also writes the softmax
