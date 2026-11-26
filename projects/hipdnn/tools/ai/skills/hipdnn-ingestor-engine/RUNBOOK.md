@@ -645,8 +645,11 @@ metric, and fails the run when the loader refuses one. A trained model whose rec
 model whose features read an undeclared KMD field or whose `features_hash` disagrees. At
 runtime the same model is only disabled, with declared-order fallback. A signature that
 reads dynamic bindings is extracted only for engines a `--feature-samples` entry covers;
-without one the extraction check is skipped with a warning. See stage 6, **Trained
-heuristics survive regeneration only by intent**.
+without one the extraction check is skipped with a warning. A model that reads bare a
+feature a valid graph may leave unbound (an optional attribute, a field of an optional
+tensor) is warned about here and refused by `promote`; `python -m uhd_gen rewrite-signature
+<installed heuristic.uhd.json>` fixes an installed model without retraining. See stage 6,
+**Trained heuristics survive regeneration only by intent**.
 
 **The embedded-source invariant.** A staged tree holds descriptor JSON, provenance
 sidecars and packed markers only, so an `embedded_source` descriptor resolves its

@@ -3,38 +3,44 @@
 
 """Clients sharing hardware serialize; independent emulators can overlap."""
 
-import importlib.util
+import importlib
 from pathlib import Path
-from types import SimpleNamespace
 
-import filelock
 import pytest
 
+with pytest.MonkeyPatch.context() as patch:
+    patch.syspath_prepend(Path(__file__).parents[1])
+    client_lock = importlib.import_module("client_lock")
 
-def test_client_lock_scope(tmp_path, monkeypatch, pytestconfig):
-    spec = importlib.util.spec_from_file_location(
-        "tensile_test_fixtures", Path(__file__).parents[1] / "conftest.py"
-    )
-    fixtures = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(fixtures)
-    monkeypatch.delenv("HSA_MODEL_MEMFILE", raising=False)
-    factory = SimpleNamespace(getbasetemp=lambda: tmp_path / "worker")
 
-    def paths():
-        return [
-            fixtures.worker_lock_path.__wrapped__(factory, worker, "0", pytestconfig)
-            for worker in ("gw0", "gw1")
-        ]
+def paths(tmp_path, scope, environ):
+    return [
+        client_lock.client_lock_path(tmp_path, worker, "0", scope, environ)
+        for worker in ("gw0", "gw1")
+    ]
 
-    # The default must still protect a single physical GPU from both workers.
-    assert pytestconfig.getoption("--client-lock-scope") == "gpu"
-    first, second = paths()
-    with filelock.FileLock(first):
-        with pytest.raises(filelock.Timeout):
-            filelock.FileLock(second).acquire(timeout=0)
 
-    # Explicit local emulation allows both clients to run concurrently.
-    monkeypatch.setattr(pytestconfig.option, "client_lock_scope", "worker")
-    first, second = paths()
-    with filelock.FileLock(first), filelock.FileLock(second, timeout=0):
-        assert first != second
+def test_hardware_default_shares_one_lock_per_gpu(tmp_path):
+    first, second = paths(tmp_path, None, {})
+    assert first == second == tmp_path / "client_execution_gpu0.lock"
+
+
+@pytest.mark.parametrize("variable", client_lock.EMULATOR_VARIABLES)
+def test_emulator_default_gives_each_worker_its_own_lock(tmp_path, variable):
+    first, second = paths(tmp_path, None, {variable: "set"})
+    assert first != second
+
+
+def test_explicit_gpu_scope_wins_over_an_emulator(tmp_path):
+    first, second = paths(tmp_path, "gpu", {"HSA_MODEL_MEMFILE": "/dev/shm/model"})
+    assert first == second
+
+
+def test_worker_scope_is_refused_on_hardware(tmp_path):
+    with pytest.raises(ValueError, match="race on one GPU"):
+        paths(tmp_path, "worker", {})
+
+
+def test_no_gpu_id_falls_back_to_a_lock_per_worker(tmp_path):
+    first = client_lock.client_lock_path(tmp_path, "gw0", None, "gpu", {})
+    assert first == tmp_path / "client_execution_gw0.lock"
