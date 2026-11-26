@@ -390,6 +390,20 @@ process. Benchmarking is invalid under HIP graph capture. Winner records are rea
 regardless of whether benchmarking is on, so an untuned comparison needs an empty
 cache root or `HIPDNN_DISABLE_CACHE=1`.
 
+To tell a benchmark run from a record hit, set `HIPDNN_LOG_LEVEL=info` and read the
+ingestor's log. For an engine with one plan: a benchmark run logs `ingestor: engine
+'<name>' will benchmark N candidate(s) ...` at build and `ingestor: benchmarking selected
+kernel <id> ...` on the first execute; a record hit logs `ingestor: engine '<name>' served
+kernel <id> at rank R from a benchmarked record ...` and no `will benchmark` line. A
+slotted engine (the gfx950 backward may be `hipkernel:flydsl_sdpa_bwd_split`) never logs
+the `served kernel ... from a benchmarked record` line: a benchmark run logs `ingestor:
+engine '<name>' will benchmark its slot program: K kernel(s) in uncovered slot(s)` plus
+per-candidate records on the first execute, while a record hit logs only one `slot '<slot>'
+selected kernel <id> at rank R ...` line per slot, and under
+`HIPDNN_FORCE_BENCHMARKING=1` a fully covered program skips the `will benchmark its slot
+program` line. Without benchmarking a slotted miss logs the same `selected kernel` lines,
+so there the log alone cannot tell a hit from a miss.
+
 **Census.** Rows carry the prefix `grad ` for a grad-eligible forward and `bwd ` for its
 backward; `bwd_totals()` sums the `bwd ` rows and `format_report()` prints a `BWD
 TOTAL` line once any exist. Extra markers: `dropout=1` when `p>0`, `recompute=1` on a
@@ -400,6 +414,13 @@ that had to recompute natively (counted `native`, not `aot`, even though its mat
 `aot` equals the number of attention calls, every engine is named (not hex), and
 `fallback_reasons()` is empty — a run full of `bwd_recompute` rows looks served in
 `aot` but fails that check because those rows also count `native`.
+
+**Reading the census.** The package exports only `census()` (keyed by op: `{op: {census_key:
+{"aot", "native", ...}}}`, so the SDPA rows are `hipdnn_torch.census()["sdpa"]`),
+`report()` and `reset()`. `totals()`, `bwd_totals()` and `fallback_reasons()` are methods of
+the override object, reached with `ov = hipdnn_torch.overrides()["sdpa"]`: `ov.totals()` and
+`ov.bwd_totals()` return `(aot, native)` (forward/non-`bwd ` rows and `bwd ` rows),
+`ov.census()` returns that op's rows and `ov.fallback_reasons()` returns `{reason: count}`.
 
 **Not in scope.** A learned float `attn_mask` / dBias stays native
 (`grad: attn_mask requires grad`) even though some engines could serve a bias.
