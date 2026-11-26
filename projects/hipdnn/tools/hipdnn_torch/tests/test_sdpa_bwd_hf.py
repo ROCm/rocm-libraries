@@ -494,12 +494,29 @@ def test_use_cache_true_mixed_layout_matches_native(torch, transformers, arch):
     # Prefill and decode are different shapes (Sq=s_prefill vs Sq=1) and may
     # decline independently under FlyDSL OFF: ASM's shape rules need not
     # cover a decode-step Sq=1/Skv=s_prefill+1 just because they cover the
-    # prefill shape of the same arch (observed: olmo2's prefill served by
-    # ASM, its decode step native). The prefill keeps the full per-arch
-    # expectation; the decode step only needs served-or-grad-decline.
-    _assert_served_or_declined(
-        ov, s_prefill, s_prefill, head_dim, arch=arch, masked=False
-    )
+    # prefill shape of the same arch. With FlyDSL off, the prefill step also
+    # has a mixed Q/K-V layout, not just the decode step: ``DynamicCache``
+    # builds K/V through ``torch.cat`` even on its first (lazily-initialized,
+    # empty-tensor) call, so K/V are already contiguous BHSD at prefill while
+    # Q stays HF's fresh BSHD transpose view -- confirmed by direct stride
+    # inspection of ``DynamicCache.update``, not by assumption. No rule in
+    # ``SdpaFwdPlanBuilder.cpp`` or ``UnifiedAttentionGraphMatch.hpp`` compares
+    # Q's layout against K/V's explicitly [INFERENCE]: every per-tensor
+    # stride/shape check in the former passes identically either way, and the
+    # latter's stricter per-tensor BSHD rule (``hasBshdStrides``) only runs
+    # when FlyDSL is loaded. Observed on gfx950 (FlyDSL off): olmo2's prefill,
+    # served here in ``test_use_cache_false_no_mask_matches_native_and_layout``
+    # where K/V stay a matching BSHD view, goes native for this mixed-layout
+    # call instead; the prefill step is loosened to the decode step's
+    # coverage-boundary check accordingly. FlyDSL on is unaffected (strict).
+    if _flydsl_state() == "off":
+        _assert_served_or_any_grad_decline(
+            ov, s_prefill, s_prefill, head_dim, label=f"{arch} prefill"
+        )
+    else:
+        _assert_served_or_declined(
+            ov, s_prefill, s_prefill, head_dim, arch=arch, masked=False
+        )
     _assert_served_or_any_grad_decline(
         ov, 1, s_prefill + 1, head_dim, label=f"{arch} decode step"
     )
