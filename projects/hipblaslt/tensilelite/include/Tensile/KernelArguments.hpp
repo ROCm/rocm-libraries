@@ -35,6 +35,7 @@
 #include <vector>
 
 #include <Tensile/DataTypes.hpp>
+#include <Tensile/CustomArgSemantic.hpp>
 #include <tensilelitehost/export.h>
 
 namespace TensileLite
