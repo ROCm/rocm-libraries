@@ -1088,15 +1088,17 @@ def test_mt1_not_a_multiple_of_the_waves(gp_gfx1250, gfx1250_iim, assembler, cap
   """MacroTile1 48 over 32 waves (MIWaveGroup [8, 1] with LocalSplitU 4): each wave stores ceil(MacroTile1/32)
   columns, so the columns of the last waves reach past the tile. Every TDM block ends tensor_dim1 at the column bound
   min(SizeJ, (wg1+1)*MT1), against which each wave tests its skip, and the staged tile is reserved for the columns of
-  every wave. With MacroTile1 a multiple of the waves there is no column bound. MacroTile1 80, where one wave's
-  columns straddle the end of the tile, runs in the tdm_store yamls."""
+  the waves that transfer: MacroTile1 rounded up to a multiple of a wave's columns. With MacroTile1 a multiple of the
+  waves there is no column bound. MacroTile1 80, where one wave's columns straddle the end of the tile, runs in the
+  tdm_store yamls."""
   tdm = 1
   sol, asm = _emit_asm(gfx1250_iim, assembler, mi=[16, 16, 32, 1, 1, 1, 3, 8, 1], TDMStoreInst=tdm,
                        WorkGroup=[16, 16, 4], DepthU=128)
   assert sol.get("Valid"), capsys.readouterr().out
   waves = sol["NumThreads"] // sol["WavefrontSize"]
   assert sol["MacroTile1"] % waves
-  assert tdmStoreLdsBytes(sol) == sol["MacroTile0"] * -(-sol["MacroTile1"] // waves) * waves * 2
+  columns = -(-sol["MacroTile1"] // waves)
+  assert tdmStoreLdsBytes(sol) == sol["MacroTile0"] * -(-sol["MacroTile1"] // columns) * columns * 2
   assert sol["LdsNumBytes"] >= sol["_TDMStoreLdsOffset"] + tdmStoreLdsBytes(sol)
   blocks = len(re.findall(r"^label_TDMStore(?:LoadC)?Skip\w*:", asm, re.M))
   bounds = [line for line in asm.splitlines() if _code(line).startswith("s_min_u32") and "column bound" in line]

@@ -248,13 +248,16 @@ def tdmStoreLdsBytes(state):
   """Return the LDS bytes of the D tile the TDM block stages in LDS (0 without TDMStoreInst).
 
   The reservation follows the parameter, not the store blocks tdmStoreBlocks picks for the kernel, and
-  covers the columns of every wave, MacroTile1 rounded up to a multiple of the number of waves.
+  covers the columns of the waves that transfer: MacroTile1 rounded up to a multiple of a wave's columns, since a
+  wave that straddles the end of the tile loads and stores all of its columns, and its tensor_load_to_lds writes
+  zeros past the column bound. A wave whose first column lies past the tile skips its transfer.
   Reserving too much costs LDS only; reserving too little would stage over live LDS.
   """
   if not state["TDMStoreInst"]:
     return 0
-  waves = state["NumThreads"] // state["WavefrontSize"]
-  return state["MacroTile0"] * _waveColumns(state) * waves * int(state["ProblemType"]["DestDataType"].numBytes())
+  columns = _waveColumns(state)
+  transferred = -(-state["MacroTile1"] // columns) * columns
+  return state["MacroTile0"] * transferred * int(state["ProblemType"]["DestDataType"].numBytes())
 
 
 def storesFinalD(kernel, atomic):
