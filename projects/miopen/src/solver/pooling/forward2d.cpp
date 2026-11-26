@@ -224,9 +224,11 @@ ConvSolution PoolingForward2d::GetSolution(const ExecutionContext& context,
         // gfx12 the Y and Z workgroup IDs are 16 bits wide, so when the Y or Z workgroup count
         // exceeds the device limit the linear variant is used: all workgroups go to X, in
         // (batch * channel, vertical tile, horizontal tile) order. In that variant X carries
-        // tiles * N * C * grp_tile0 work-items, which can reach 2^32 only for tensors far beyond
-        // what the 32-bit offsets in the kernel can address (ValidateGlobalWorkSize() rejects
-        // it then). Otherwise nothing differs from the original launch.
+        // tiles * N * C * grp_tile0 work-items. That reaches 2^32 for tensors of a few hundred
+        // MiB when the planes are tiny (for example N * C = 2^27 with a 32-wide tile
+        // configuration), and ValidateGlobalWorkSize() then rejects the launch with
+        // miopenStatusInternalError, where the original grid would have wrapped silently.
+        // Otherwise nothing differs from the original launch.
         if(linear_grid)
         {
             kernel.g_wk.push_back(static_cast<std::size_t>(g_wk_width) * g_wk_height *

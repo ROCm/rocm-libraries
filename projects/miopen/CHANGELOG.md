@@ -103,7 +103,9 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
   unchanged.
 * [Pooling][BatchNorm] Fixed wrong results on gfx12 for launches with more than 65535 workgroups
   in Y or Z ([#15001](https://github.com/ROCm/rocm-libraries/issues/15001)); other launches
-  through `HIPOCKernelInvoke` over the limit now fail with `miopenStatusInternalError`.
+  through `HIPOCKernelInvoke` over the limit now fail with `miopenStatusInternalError`. Pooling
+  on gfx12 with N*C of at least 2^27 and 1x1 planes can also return `miopenStatusInternalError`
+  for a wide tile configuration, because the linearized X work-item count reaches 2^32.
 * [BatchNorm] Fixed wrong `dx`, `dscale` and `dbias` in NCHW backward training without saved
   statistics when H*W is at least 4096 and not a multiple of 4. Also fixed BF16 conversion that
   ignored `MIOPEN_USE_RNE_BFLOAT16=OFF`, unsafe NHWC forward configurations and wave-width choice.
