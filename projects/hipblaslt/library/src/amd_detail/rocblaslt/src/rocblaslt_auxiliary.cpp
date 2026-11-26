@@ -41,6 +41,7 @@
 #include <cstring>
 #endif
 
+#include "OnlineTuner.hpp"
 #include "UserDrivenTuningParser.hpp"
 #include "definitions.h"
 #include "handle.h"
@@ -770,19 +771,20 @@ int tuning_cache_replay(rocblaslt_handle                    handle,
     if(index < 0 && !countMiss)
         return index;
 
-    auto& counters = TensileLite::TuningCounters::instance();
-    if(index >= 0)
-        counters.hits++;
-    else
-        counters.misses++;
-
     const int tally = index >= 0 ? 2 : 1;
     int       told  = candidates->tallied.load(std::memory_order_relaxed);
     while(told < tally && !candidates->tallied.compare_exchange_weak(told, tally))
     {
     }
     if(told < tally)
-        TensileLite::recordTuningLookup(key, index >= 0);
+        static_cast<void>(TensileLite::recordTuningLookup(key, index >= 0));
+
+    // Calls, in every mode, like hits.
+    auto& counters = TensileLite::TuningCounters::instance();
+    if(index >= 0)
+        counters.hits++;
+    else
+        counters.misses++;
 
     log_lookup(__func__, key, index >= 0, index);
     return index;
@@ -1356,6 +1358,13 @@ rocblaslt_status rocblaslt_matrix_layout_set_attribute(rocblaslt_matrix_layout  
                 {
                     int32_t mode = 0;
                     memcpy(&mode, buf, sizeof(int32_t));
+                    if(mode != HIPBLASLT_BATCH_MODE_STRIDED
+                       && mode != HIPBLASLT_BATCH_MODE_POINTER_ARRAY
+                       && mode != HIPBLASLT_BATCH_MODE_GROUPED)
+                    {
+                        log_error(__func__, "invalid batch mode", mode);
+                        return rocblaslt_status_invalid_value;
+                    }
                     // Grouped layouts come only from rocblaslt_grouped_matrix_layout_create.
                     if((mode == HIPBLASLT_BATCH_MODE_GROUPED)
                        != (matLayout->batch_mode == HIPBLASLT_BATCH_MODE_GROUPED))
@@ -3234,6 +3243,10 @@ rocblaslt_status
         }
 #endif
 
+        // Before the file lookup, so it is reported whether or not a row answers.
+        if(rocblaslt::OnlineTuner::getInstance().enabled())
+            TensileLite::noteOnlineScopeEvent(TensileLite::OnlineScopeEvent::HeuristicQuery);
+
         const auto tuningFile       = TensileLite::selectTuningFile();
         bool       override_success = false;
 
@@ -3265,6 +3278,8 @@ rocblaslt_status
                                                        : heuristicResultsArray,
                                       returnAlgoCount,
                                       pref->max_workspace_bytes,
+                                      SolutionLookup::Heuristic,
+                                      nullptr,
                                       &layoutRuledOut);
         }
 
@@ -3932,6 +3947,7 @@ extern "C" HIPBLASLT_EXPORT void hipblaslt_tuning_reset_for_test()
     TensileLite::TuningModeSingleton::getInstance().reloadForTest();
     TensileLite::OverrideMap::getMap().resetForTest();
     OverrideSingleton::getInstance().reloadForTest();
+    rocblaslt::OnlineTuner::getInstance().reloadForTest();
     TensileLite::resetTuningDiagnosticsForTest();
     TensileLite::resetReplayLoadForTest();
     ReplayCandidatesByKey::instance().clear();
@@ -3944,6 +3960,7 @@ extern "C" HIPBLASLT_EXPORT void hipblaslt_tuning_reset_for_test()
     counters.tuned         = 0;
     counters.skipped       = 0;
     counters.attempts      = 0;
+    counters.unrecorded    = 0;
 
     tuningInjectFailureForTest(0);
     static_cast<void>(tuningLastLaunchedIndexForTest());
