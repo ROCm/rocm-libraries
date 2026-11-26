@@ -741,12 +741,11 @@ class TensorDataMoverStore:
         return sgpr(base if off == 0 else f"{base}+{off}")
 
     def initOperands(self, group0: int | str, group1: int | str) -> Module:
+        # The caller writes group0+1..3, type field included, and setTensorStride0 writes group1+5..6, so only the
+        # other words are cleared. Each setter below ORs its field into a word that holds no other bits there yet.
         mod = Module("tdmInit")
-        for i in range(self.GROUP0_NUM_SGPR):
-            val = 1 if i == 0 else 0  # group0[0] bit0 = count = 1
-            mod.add(SMovB32(self._sg(group0, i), val))
-        mod.add(SOrB32(self._sg(group0, 3), self._sg(group0, 3), hex(2 << 30), "set type field to 2(image)"))
-        for i in range(self.GROUP1_NUM_SGPR):
+        mod.add(SMovB32(self._sg(group0, 0), 1))  # group0[0] bit0 = count = 1
+        for i in (0, 1, 2, 3, 4, 7):
             mod.add(SMovB32(self._sg(group1, i), 0))
         return mod
 
@@ -754,16 +753,14 @@ class TensorDataMoverStore:
         mod = Module()
         assert numBytes in (1, 2, 4, 8), f"unsupported element size for TDM data_size: {numBytes}"
         dataSizeOp = int(log2(numBytes))
-        mod.add(SAndB32(self._sg(group1), self._sg(group1), hex(0xFFFCFFFF), "Reset data_size"))
-        mod.add(SOrB32(self._sg(group1), self._sg(group1), hex(dataSizeOp << 16), f"Set data_size to {dataSizeOp}"))
+        if dataSizeOp:
+            mod.add(SOrB32(self._sg(group1), self._sg(group1), hex(dataSizeOp << 16), f"Set data_size to {dataSizeOp}"))
         return mod
 
     def setTensorDim0(self, group1: int | str, sgprDim0: int | str, sgprTmp: int) -> Module:
         # tensor_dim0 bit176: group1+1 hi16 + group1+2 lo16; sgprTmp is overwritten
         mod = Module()
         mod.addComment("TDM set tensor dim 0")
-        mod.add(SAndB32(self._sg(group1, 1), self._sg(group1, 1), hex(0x0000FFFF)))
-        mod.add(SAndB32(self._sg(group1, 2), self._sg(group1, 2), hex(0xFFFF0000)))
         mod.add(SLShiftLeftB32(sgpr(sgprTmp), hex(16), sgpr(sgprDim0)))
         mod.add(SOrB32(self._sg(group1, 1), self._sg(group1, 1), sgpr(sgprTmp)))
         mod.add(SLShiftRightB32(sgpr(sgprTmp), hex(16), sgpr(sgprDim0)))
@@ -774,8 +771,6 @@ class TensorDataMoverStore:
         # tensor_dim1 bit208: group1+2 hi16 + group1+3 lo16; sgprTmp is overwritten
         mod = Module()
         mod.addComment("TDM set tensor dim 1")
-        mod.add(SAndB32(self._sg(group1, 2), self._sg(group1, 2), hex(0x0000FFFF)))
-        mod.add(SAndB32(self._sg(group1, 3), self._sg(group1, 3), hex(0xFFFF0000)))
         mod.add(SLShiftLeftB32(sgpr(sgprTmp), hex(16), sgpr(sgprDim1)))
         mod.add(SOrB32(self._sg(group1, 2), self._sg(group1, 2), sgpr(sgprTmp)))
         mod.add(SLShiftRightB32(sgpr(sgprTmp), hex(16), sgpr(sgprDim1)))
@@ -787,7 +782,6 @@ class TensorDataMoverStore:
         assert 0 < tile0 <= 0xFFFF, f"tile_dim0 {tile0} is outside 1..0xFFFF"
         mod = Module()
         mod.addComment("TDM set tensor tile 0")
-        mod.add(SAndB32(self._sg(group1, 3), self._sg(group1, 3), hex(0x0000FFFF)))
         mod.add(SOrB32(self._sg(group1, 3), self._sg(group1, 3), hex(tile0 << 16), f"set tile0 to {tile0}"))
         return mod
 
@@ -796,7 +790,6 @@ class TensorDataMoverStore:
         assert 0 < tile1 <= 0xFFFF, f"tile_dim1 {tile1} is outside 1..0xFFFF"
         mod = Module()
         mod.addComment("TDM set tensor tile 1")
-        mod.add(SAndB32(self._sg(group1, 4), self._sg(group1, 4), hex(0xFFFF0000)))
         mod.add(SOrB32(self._sg(group1, 4), self._sg(group1, 4), hex(tile1), f"set tile1 to {tile1}"))
         return mod
 

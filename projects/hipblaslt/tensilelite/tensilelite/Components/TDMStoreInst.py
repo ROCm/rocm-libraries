@@ -338,7 +338,8 @@ def emitTDMStoreSetup(gwb) -> Module:
   module.add(VAddU32(dst=vgpr(base), src0=vgpr(base), src1=vgpr(kw.vgprs.coord0), comment="+ coord0"))
   module.add(SMulI32(dst=sgpr(gwb.tmpS01), src0=sgpr("WorkGroup0"), src1=mt0, comment="wg0*MT0"))
   module.add(VSubU32(dst=vgpr(base), src0=vgpr(base), src1=sgpr(gwb.tmpS01), comment="- wg0*MT0"))
-  module.add(VLShiftLeftB32(dst=vgpr(base), shiftHex=int(log2(kw.states.bpeCexternalGSU1)), src=vgpr(base), comment="* bpe"))
+  if kw.states.bpeCexternalGSU1 > 1:
+    module.add(VLShiftLeftB32(dst=vgpr(base), shiftHex=int(log2(kw.states.bpeCexternalGSU1)), src=vgpr(base), comment="* bpe"))
   if gwb.kernel["_TDMStoreLdsOffset"]:
     module.add(VAddU32(dst=vgpr(base), src0=gwb.kernel["_TDMStoreLdsOffset"], src1=vgpr(base), comment="+ LDS offset of the staged tile"))
   return module
@@ -534,7 +535,8 @@ def _tdmStoreDescriptor(gwb, module: Module, tdm, g0, g1, tmp, tc):
   module.add(SMulI32(dst=sgpr(dim), src0=sgpr("WorkGroup0"), src1=mt0, comment="wg0*MT0"))
   module.add(SAddU32(dst=sgpr(g0 + 2), src0=sgpr(g0 + 2), src1=sgpr(dim), comment="+ wg0*MT0"))
   module.add(SAddCU32(dst=sgpr(g0 + 3), src0=sgpr(g0 + 3), src1=0, comment="carry"))
-  module.add(SLShiftLeftB64(dst=sgpr(g0 + 2, 2), src=sgpr(g0 + 2, 2), shiftHex=int(log2(bpe)), comment="64-bit byte offset from %s" % srd))
+  if bpe > 1:
+    module.add(SLShiftLeftB64(dst=sgpr(g0 + 2, 2), src=sgpr(g0 + 2, 2), shiftHex=int(log2(bpe)), comment="64-bit byte offset from %s" % srd))
   module.add(SAddU32(dst=sgpr(g0 + 2), src0=sgpr(g0 + 2), src1=sgpr(srd), comment="global address lo"))
   module.add(SAddCU32(dst=sgpr(g0 + 3), src0=sgpr(g0 + 3), src1=sgpr("%s+1" % srd), comment="global address hi"))
   # The type field, bits 30-31, is ORed in after the add, which cannot carry into it: the address is 57-bit.
