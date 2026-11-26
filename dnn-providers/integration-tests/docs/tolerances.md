@@ -1180,10 +1180,11 @@ NaN or an infinity. That leaves out the mixed-layout class `F15`
 On gfx90a, 13 float32 backward-weights cases (the multipass Winograd
 backward-weights solver and 4 assembly implicit-GEMM shapes) err by about 3e-5
 to 1.9e-4 relative, and two bfloat16 assembly backward-weights outputs were
-wrong on one seed: MIOpen accuracy defects, not data for the fit. These cases
-and the failing half `F21` backward cases are in the conv-dgrad test-plan
-bundles, not in this tree, and their gfx90a skips go with those bundles. The
-left-out tests number 455 on gfx942 and 525 on gfx90a.
+wrong on one seed: MIOpen accuracy defects (ALMIOPEN-3564), not data for the
+fit. These cases and the failing half `F21` backward cases come from the
+conv-dgrad test-plan bundles and the backward-weights bundles derived from them
+for the calibration; neither set is in this tree, so no skip goes with this
+change. The left-out tests number 455 on gfx942 and 525 on gfx90a.
 
 | Arch | Direction | Output | Correct outputs | Fail the per-op default | Fail MIOpen's allowance | Smallest headroom (MIOpen's) | Conforming outputs | Fail the SDK defaults | Smallest headroom (SDK, conforming) |
 |---|---|---|---|---|---|---|---|---|---|
