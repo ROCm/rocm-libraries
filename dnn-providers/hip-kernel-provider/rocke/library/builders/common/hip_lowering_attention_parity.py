@@ -405,7 +405,7 @@ def main() -> int:
     for r in results:
         compile_status = ""
         if args.compile_hip:
-            compile_status = f" hipcc={'OK' if r.hip_compile_ok else 'FAIL'}"
+            compile_status = f" hip_compile={'OK' if r.hip_compile_ok else 'FAIL'}"
         status = "OK" if r.ok else "FAIL"
         print(
             f"{status:4} {r.group:9} {r.name:28} "
