@@ -185,7 +185,7 @@ void testing_iamax_iamin(const Arguments& arg, FUNC func)
         {
             if(iter == arg.cold_iters)
             {
-                getFrequencyMonitor().start();
+                getFrequencyMonitor().start(stream);
                 gpu_time_used = get_time_us_sync(stream);
             }
 

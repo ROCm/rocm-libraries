@@ -429,7 +429,7 @@ void testing_syrk_batched(const Arguments& arg)
         {
             if(iter == arg.cold_iters)
             {
-                getFrequencyMonitor().start();
+                getFrequencyMonitor().start(stream);
                 gpu_time_used = get_time_us_sync(stream);
             }
 

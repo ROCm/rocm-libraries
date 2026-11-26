@@ -226,7 +226,7 @@ void testing_her(const Arguments& arg)
         {
             if(iter == arg.cold_iters)
             {
-                getFrequencyMonitor().start();
+                getFrequencyMonitor().start(stream);
                 gpu_time_used = get_time_us_sync(stream);
             }
             DAPI_DISPATCH(hipblasHerFn, (handle, uplo, N, d_alpha, dx, incx, dA, lda));

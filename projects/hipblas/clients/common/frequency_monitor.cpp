@@ -158,16 +158,19 @@ public:
 
     void start() override
     {
-        if(!m_enabled || !bind_device())
+        begin(false);
+    }
+
+    void start(hipStream_t stream) override
+    {
+        if(!m_enabled)
             return;
-        {
-            std::lock_guard<std::mutex> lock(m_mutex);
-            m_SYSCLK.assign(m_XCDCount, {});
-            m_MEMCLK.clear();
-            m_active = true;
-            ++m_run;
-        }
-        m_cv.notify_all();
+        // the sampling thread waits for this event, which the stream reaches when the timed
+        // calls queued after it start. Not destroyed: the monitor is thread_local and may outlive
+        // the HIP runtime at exit.
+        if(!m_anchor && hipEventCreateWithFlags(&m_anchor, hipEventDisableTiming) != hipSuccess)
+            m_anchor = nullptr;
+        begin(m_anchor && hipEventRecord(m_anchor, stream) == hipSuccess);
     }
 
     void stop() override
@@ -226,6 +229,21 @@ private:
         double              mem = 0;
     };
 
+    void begin(bool anchored)
+    {
+        if(!m_enabled || !bind_device())
+            return;
+        {
+            std::lock_guard<std::mutex> lock(m_mutex);
+            m_SYSCLK.assign(m_XCDCount, {});
+            m_MEMCLK.clear();
+            m_anchored = anchored;
+            m_active   = true;
+            ++m_run;
+        }
+        m_cv.notify_all();
+    }
+
     // Lowest clock of the XCDs that reported one; the slowest XCD bounds the kernel
     static double lowest(const std::vector<double>& clocks)
     {
@@ -236,6 +254,8 @@ private:
         return result;
     }
 
+    // Called from the benchmark thread only. The sampling thread reads m_processor and
+    // m_XCDCount under m_mutex, as a snapshot per run, so they change only under m_mutex.
     bool bind_device()
     {
         int device = -1;
@@ -244,25 +264,31 @@ private:
         if(device == m_device)
             return m_processor != nullptr;
 
-        m_device    = device;
-        m_processor = nullptr;
-        m_XCDCount  = 1;
+        m_device = device;
+
+        amdsmi_processor_handle processor = nullptr;
+        int                     xcd_count = 1;
         {
             std::lock_guard<std::mutex> lock(smi_mutex());
             if(smi_init())
-                m_processor = find_processor(device);
-            if(!m_processor)
-            {
-                std::cerr << "hipblas-bench: amd-smi cannot query HIP device " << device
-                          << "; clock columns are reported as 0" << std::endl;
-                return false;
-            }
+                processor = find_processor(device);
 #if AMDSMI_LIB_VERSION_MAJOR >= 25
-            uint16_t xcd_count = 0;
-            if(amdsmi_get_gpu_xcd_counter(m_processor, &xcd_count) == AMDSMI_STATUS_SUCCESS
-               && xcd_count > 0)
-                m_XCDCount = std::min<int>(xcd_count, AMDSMI_MAX_NUM_GFX_CLKS);
+            uint16_t count = 0;
+            if(processor && amdsmi_get_gpu_xcd_counter(processor, &count) == AMDSMI_STATUS_SUCCESS
+               && count > 0)
+                xcd_count = std::min<int>(count, AMDSMI_MAX_NUM_GFX_CLKS);
 #endif
+        }
+        {
+            std::lock_guard<std::mutex> lock(m_mutex);
+            m_processor = processor;
+            m_XCDCount  = xcd_count;
+        }
+        if(!processor)
+        {
+            std::cerr << "hipblas-bench: amd-smi cannot query HIP device " << device
+                      << "; clock columns are reported as 0" << std::endl;
+            return false;
         }
 
         if(!m_thread.joinable())
@@ -270,10 +296,11 @@ private:
         return true;
     }
 
-    sample read_sample()
+    // processor and xcd_count are the run's snapshot, taken under m_mutex
+    static sample read_sample(amdsmi_processor_handle processor, int xcd_count)
     {
         sample s;
-        s.gfx.assign(m_XCDCount, 0.0);
+        s.gfx.assign(xcd_count, 0.0);
 
         std::lock_guard<std::mutex> lock(smi_mutex());
         amdsmi_frequencies_t        freq;
@@ -281,18 +308,18 @@ private:
 #if AMDSMI_LIB_VERSION_MAJOR >= 25
         amdsmi_gpu_metrics_t metrics;
         bool                 have_metrics
-            = amdsmi_get_gpu_metrics_info(m_processor, &metrics) == AMDSMI_STATUS_SUCCESS;
+            = amdsmi_get_gpu_metrics_info(processor, &metrics) == AMDSMI_STATUS_SUCCESS;
         if(have_metrics)
-            for(int i = 0; i < m_XCDCount; i++)
+            for(int i = 0; i < xcd_count; i++)
                 if(valid_clock(metrics.current_gfxclks[i]))
                     s.gfx[i] = metrics.current_gfxclks[i];
 #endif
         if(s.gfx[0] == 0
-           && amdsmi_get_clk_freq(m_processor, AMDSMI_CLK_TYPE_SYS, &freq) == AMDSMI_STATUS_SUCCESS
+           && amdsmi_get_clk_freq(processor, AMDSMI_CLK_TYPE_SYS, &freq) == AMDSMI_STATUS_SUCCESS
            && freq.current < freq.num_supported)
             s.gfx[0] = freq.frequency[freq.current] * 1e-6;
 
-        if(amdsmi_get_clk_freq(m_processor, AMDSMI_CLK_TYPE_MEM, &freq) == AMDSMI_STATUS_SUCCESS
+        if(amdsmi_get_clk_freq(processor, AMDSMI_CLK_TYPE_MEM, &freq) == AMDSMI_STATUS_SUCCESS
            && freq.current < freq.num_supported)
             s.mem = freq.frequency[freq.current] * 1e-6;
 #if AMDSMI_LIB_VERSION_MAJOR >= 25
@@ -320,11 +347,25 @@ private:
         {
             m_cv.wait(lock, [this] { return m_exit || m_active; });
 
-            const uint64_t run     = m_run;
-            auto           stopped = [this, run] { return m_exit || !m_active || run != m_run; };
+            const uint64_t                run       = m_run;
+            const bool                    anchored  = m_anchored;
+            const amdsmi_processor_handle processor = m_processor;
+            const int                     xcd_count = m_XCDCount;
+            auto stopped = [this, run] { return m_exit || !m_active || run != m_run; };
 
-            // start() follows a stream synchronization, so the GPU is idle; let the timed calls
-            // start before the first sample. Loops shorter than this report 0 (no sample).
+            // start(stream): wait until the stream reaches the timed calls; start() is called
+            // before the timer synchronizes, so cold calls may still be running
+            if(anchored)
+            {
+                lock.unlock();
+                (void)hipEventSynchronize(m_anchor);
+                lock.lock();
+                if(stopped())
+                    continue;
+            }
+
+            // The first sample is 5 ms after the timed calls start, so loops shorter than that
+            // report 0 (no sample)
             if(m_cv.wait_for(lock, std::chrono::milliseconds(5), stopped))
                 continue;
 
@@ -332,7 +373,7 @@ private:
             do
             {
                 lock.unlock();
-                sample s = read_sample();
+                sample s = read_sample(processor, xcd_count);
                 lock.lock();
                 if(!stopped())
                     store(s);
@@ -350,9 +391,11 @@ private:
     std::thread             m_thread;
     std::mutex              m_mutex;
     std::condition_variable m_cv;
-    bool                    m_active = false;
-    bool                    m_exit   = false;
-    uint64_t                m_run    = 0;
+    bool                    m_active   = false;
+    bool                    m_exit     = false;
+    bool                    m_anchored = false;
+    uint64_t                m_run      = 0;
+    hipEvent_t              m_anchor   = nullptr; // recorded by start(stream)
 
     std::vector<std::vector<double>> m_SYSCLK;
     std::vector<double>              m_MEMCLK;
@@ -387,6 +430,7 @@ public:
     }
 
     void start() override {}
+    void start(hipStream_t) override {}
     void stop() override {}
 
     double getLowestAverageSYSCLK() override

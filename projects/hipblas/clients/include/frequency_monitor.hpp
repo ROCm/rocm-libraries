@@ -22,6 +22,7 @@
 
 #pragma once
 
+#include <hip/hip_runtime_api.h>
 #include <vector>
 
 // Samples the GPU engine (per XCD) and memory clocks with amd-smi while a
@@ -36,8 +37,12 @@ public:
     virtual bool enabled()        = 0;
     virtual bool detailedReport() = 0;
 
-    virtual void start() = 0;
-    virtual void stop()  = 0;
+    // start(stream) samples once the work queued on stream so far has finished, so the first
+    // sample comes from the timed calls rather than from cold calls still draining. start()
+    // samples from now.
+    virtual void start()                   = 0;
+    virtual void start(hipStream_t stream) = 0;
+    virtual void stop()                    = 0;
 
     virtual double              getLowestAverageSYSCLK() = 0;
     virtual double              getLowestMedianSYSCLK()  = 0;

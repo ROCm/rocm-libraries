@@ -256,7 +256,7 @@ void testing_scal_batched_ex(const Arguments& arg)
         {
             if(iter == arg.cold_iters)
             {
-                getFrequencyMonitor().start();
+                getFrequencyMonitor().start(stream);
                 gpu_time_used = get_time_us_sync(stream);
             }
 
