@@ -209,6 +209,7 @@
       'MIWaveTileMetadata',
       'MXLoadInst',
       'MXScaleFormat',
+      'MXScaleVgprInterleaveExtraVgpr',
       'MacroTile0',
       'MacroTile1',
       'MacroTileA',
