@@ -30,7 +30,7 @@ The lane applies it as follows:
 8. **Cross-thread hazard.** An allocation, free or module unload on one thread, in default Global capture mode, during another
    thread's Global capture invalidates that capture. This is why build and destroy are in scope.
 
-Inputs beyond the packet: Orient's **Options and guards** (the flag that ships the code, below) and the optional
+Inputs beyond the packet: Orient's **Options and guards** (the flags that ship the code, below) and the optional
 `Contract knowledge:` field (*Contract knowledge* below).
 
 ## Stages
@@ -136,9 +136,10 @@ when a claim cannot be proved from source at all.
 | The same violation's reach from engines that existed at `$BASE`; unreachable paths; code the change does not touch | `FUTURE WORK` | Not introduced by this change |
 | Plan-constant table written with one memset per word or run (step 6) | `SUGGESTION` at most | Contract-clean; GPU cost only |
 
-Build-flag-gated and default-OFF engines take the same tiers as default engines; the finding names the flag that ships the code,
-found in Orient's **Options and guards** (or by grepping CMake). A finding at `IMPORTANT` or above carries in **Proof** the
-stage, the call path from the public entry point, the traced gate and `path:line`.
+Build-flag-gated and default-OFF engines take the same tiers as default engines. The finding names the flag that ships the
+engine: the one that installs its descriptor or registration, so the engine is selectable. When the code compiles under a
+different flag, it names that flag too. Both come from Orient's **Options and guards** (or by grepping CMake). A finding at
+`IMPORTANT` or above carries in **Proof** the stage, the call path from the public entry point, the traced gate and `path:line`.
 
 ## Exempt: do not report
 
