@@ -86,6 +86,11 @@ LayernormFwdPlan::LayernormFwdPlan(LayernormFwdParams&& params)
 {
 }
 
+std::vector<KernelLaunchShape> LayernormFwdPlan::launchShapes(int64_t outerSize, int64_t stride)
+{
+    return {{"LayernormFwd", outerSize * stride, LayernormFwdParams::LOCAL_SIZE}};
+}
+
 size_t LayernormFwdPlan::getWorkspaceSize([[maybe_unused]] const Handle& handle) const
 {
     // No workspace needed for layernorm
@@ -112,8 +117,14 @@ void LayernormFwdPlan::compile(const IKernelCompiler& kernelCompiler,
     const int64_t innerSize = problem.innerSize();
     const int64_t stride = problem.stride();
 
-    const int64_t xlocalsize = 1024;
-    const int64_t xgridsize = outerSize * stride;
+    const auto shapes = launchShapes(outerSize, stride);
+    for(const auto& shape : shapes)
+    {
+        checkLaunchFitsThreadLimit(shape);
+    }
+
+    const int64_t xlocalsize = shapes[0].threadsPerBlock;
+    const int64_t xgridsize = shapes[0].blocks;
     const int64_t ylocalsize = 1;
     const int64_t ygridsize = 1;
     const int64_t zlocalsize = 1;

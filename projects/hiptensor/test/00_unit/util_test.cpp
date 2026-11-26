@@ -53,6 +53,29 @@ TEST(stridesFromLengthsTest, UtilTest)
     EXPECT_EQ(output, expected);
 }
 
+TEST(elementSpaceFromLengthsAndStridesTest, UtilTest)
+{
+    using V = std::vector<std::size_t>;
+
+    // Packed strides span exactly the element count, in either order.
+    EXPECT_EQ(hiptensor::elementSpaceFromLengthsAndStrides(V{3, 4, 5}, V{1, 3, 12}), 60u);
+    EXPECT_EQ(hiptensor::elementSpaceFromLengthsAndStrides(V{3, 4, 5}, V{20, 5, 1}), 60u);
+
+    // Padded strides span one past the offset of the last element.
+    EXPECT_EQ(hiptensor::elementSpaceFromLengthsAndStrides(V{3, 4}, V{1, 10}), 33u);
+    EXPECT_EQ(hiptensor::elementSpaceFromLengthsAndStrides(V{3, 4, 5}, V{1, 8, 64}), 3u + 24 + 256);
+
+    // A broadcast (stride 0) mode adds nothing.
+    EXPECT_EQ(hiptensor::elementSpaceFromLengthsAndStrides(V{3, 4}, V{1, 0}), 3u);
+
+    // An empty tensor spans nothing; a rank-0 tensor holds one element.
+    EXPECT_EQ(hiptensor::elementSpaceFromLengthsAndStrides(V{3, 0}, V{1, 3}), 0u);
+    EXPECT_EQ(hiptensor::elementSpaceFromLengthsAndStrides(V{}, V{}), 1u);
+
+    // Without matching strides, fall back to the packed element count.
+    EXPECT_EQ(hiptensor::elementSpaceFromLengthsAndStrides(V{3, 4}, V{}), 12u);
+}
+
 TEST(alignStridesToModesTest, UtilTest)
 {
     std::vector<std::size_t> const strides = {1, 3, 12}; // packed col-major for {3, 4, 5}

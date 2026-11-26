@@ -237,3 +237,12 @@ Two ways to validate:
 | -------------------- | -------------------------------------------------------------------------------------------------------------------- |
 | Tensile-generated    | `InternalSupportParams.KernArgsVersion`                                                                              |
 | External (`Source:`) | All of: `Source.Origin`, `Features` (mapping), `InternalSupportParams.KernArgsVersion`, `Version`, `ProblemType`, `MatrixInstruction`, `CustomKernel` with `args` / `macrotile` / `threads` / `grid` |
+
+## Occupancy
+
+A custom kernel skips code generation, so nothing derives its `CUOccupancy`,
+which Origami uses to rank the kernels of a Prediction library. A logic entry
+that uses a custom kernel can declare it: a positive `CUOccupancy` there is
+kept on any architecture. Without one, gfx9 kernels get it computed from the
+resources their `.s` declares, and other kernels keep `-1`, which the host
+treats as 1. Every logic entry of a kernel must declare the same value.

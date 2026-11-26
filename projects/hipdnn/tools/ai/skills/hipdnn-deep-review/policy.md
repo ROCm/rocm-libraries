@@ -74,9 +74,14 @@ diff; reformat churn mixed into a functional change.
   shows it or the flag is OFF at both. An install into a component the artifact does not request (hipkernelprovider `share/doc`) is
   `SUGGESTION`.
 - A CTest entry whose projected per-shard time (CI baseline plus the change's measured delta) exceeds its tier timeout, or a job whose
-  summed entry times plus the delta share exceed its `timeout_minutes`, is `BLOCKING` when presubmit runs the entry (run-all `quick`,
-  scoped `standard`) on a presubmit family, a case behind a flag that main turns ON included; `IMPORTANT` with only nightly
-  (`comprehensive`) exposure.
+  summed entry times plus the delta share exceed its `timeout_minutes`, is `BLOCKING` when presubmit runs the entry (at the tier
+  presubmit runs; see [lanes/therock.md](lanes/therock.md) **Tier**) on a presubmit family, a case behind a flag that main turns ON
+  included; `IMPORTANT` with only a `schedule` exposure.
+- A test the change adds to `quick` that is not a basic (host-only) unit test, or a basic unit test over 2 s, or a change that adds more than
+  30 s to `quick`, is `IMPORTANT` whatever its measured time: `quick` is paid for in every run of every tier and holds only ultra-fast
+  tests (budget 5 min). A non-unit test (a GPU test, a bundle, a kernel build) holds `Closure: OPEN` until the reviewer moves it or
+  accepts it as `ACCEPTED-RISK`. Thresholds and the other tier rules are in [lanes/test-tiers.md](lanes/test-tiers.md); a timeout
+  overrun stays `BLOCKING` by the rule above.
 - A Windows path over 259 characters that a test or loader passes to a file API is `BLOCKING` when a required set provably fails to
   load, else `IMPORTANT`; a caller that uses a `\\?\` path is exempt.
 - Documentation is prose that no tool, build, install, packaging or CI step reads:

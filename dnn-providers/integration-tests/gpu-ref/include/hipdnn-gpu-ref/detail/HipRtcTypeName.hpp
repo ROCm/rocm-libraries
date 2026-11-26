@@ -47,6 +47,12 @@ struct HipRtcTypeName<double>
 };
 
 template <>
+struct HipRtcTypeName<bool>
+{
+    static constexpr const char* VALUE = "bool";
+};
+
+template <>
 struct HipRtcTypeName<int8_t>
 {
     static constexpr const char* VALUE = "signed char";
