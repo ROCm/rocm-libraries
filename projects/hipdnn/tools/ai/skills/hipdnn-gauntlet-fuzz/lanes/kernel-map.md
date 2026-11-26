@@ -1,6 +1,6 @@
 # Lane: kernel dispatch map (`KMAP`)
 
-**Trigger:** always. **Agent:** `scout`. **Output:** `R/lanes/KMAP.md`: the map, then ideas.
+**Trigger:** always. **Agent:** `task` (it reads the plan, matcher and kernel). **Output:** `R/lanes/KMAP.md`: the map, then ideas.
 
 Every kernel or variant the engine can launch must be hit by at least one fuzzed graph. Build the map that proves it.
 

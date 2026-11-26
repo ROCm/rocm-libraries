@@ -1,6 +1,6 @@
 # Lane: memory and layout (`MEM`)
 
-**Trigger:** the op takes strided tensors, or the engine sizes a workspace. **Agent:** `scout`. **Output:** `R/lanes/MEM.md`, ideas.
+**Trigger:** the op takes strided tensors, or the engine sizes a workspace. **Agent:** `task`. **Output:** `R/lanes/MEM.md`, ideas.
 
 ## Look for
 

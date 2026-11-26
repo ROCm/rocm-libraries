@@ -53,10 +53,12 @@ both; `PIN.md` has every field.
 1. Read what already exists for this engine: its coverage doc and rule ids, `projects/hipdnn/docs/KNOWN_DIVERGENCES.md`, earlier
    rounds under `<run-dir>`, and the engine `LEDGER.md` if there is one.
 2. If `<run-dir>/engines/<engine-slug>/BRIEF.md` exists, run [lanes/orient.md](lanes/orient.md) in **update** mode with its
-   `Describes:` commit and the new one; else in **write** mode. Use one read-only subagent and wait for it.
+   `Describes:` commit and the new one; else in **write** mode. Use one subagent that can write files (a `task` agent) and wait for
+   it. The brief ends with **code cards**: the few hundred lines of matcher, plan and kernel code every later lane needs, quoted with
+   `path:line`. Lanes read the cards and open source only by range, so their context goes to finding ideas, not to re-reading files.
 
-**Gate:** `BRIEF.md` exists, its `Describes:` line is the PR build's commit, it has the nine sections of `lanes/orient.md`, and every
-path it cites exists in the PR worktree.
+**Gate:** `BRIEF.md` exists, its `Describes:` line is the PR build's commit, it has the nine sections and the code cards of
+`lanes/orient.md`, and every path it cites exists in the PR worktree.
 
 ## Partition
 
@@ -74,7 +76,14 @@ Choose the search lanes. Each lane brief opens with its **Trigger**; run every l
 | `NUM` | [numerics](lanes/numerics.md) | always |
 | `DIFF` | [pr-diff](lanes/pr-diff.md) | the target is a PR |
 
-Write `R/dispatch.tsv` (header `lane file kind`, `kind` = `search`, `triage` or `verify`) with one row per lane.
+Write `R/dispatch.tsv` (header `lane file kind`; `kind` = `search`, `triage` or `verify`; `file` = the path inside the round directory
+where that lane's REPORT goes, not the brief) with one row per lane, for example:
+
+```
+lane	file	kind
+KMAP	lanes/KMAP.md	search
+GROUP1	triage/GROUP1.md	triage
+```
 
 **Gate:** every always-lane and every triggered lane has a row; a skipped triggered lane has a `# skipped <LANE>: <reason>` line.
 
@@ -90,9 +99,19 @@ Ledger:    <abs path of LEDGER.md> (already known: do not re-report a row; cite 
 Approved:  <the GPU plan, or "none: read-only">
 ```
 
-Run each search lane as its own **read-only** subagent with this block, the lane's brief path and its output path
-`R/lanes/<LANE>.md`, at most the subagent limit at once. `KEDGE` starts when `KMAP` returns. Without subagents, work through the
-lanes yourself in turn, one report each.
+Run each search lane as its own subagent with this block, the lane's brief path and its output path `R/lanes/<LANE>.md`, at most the
+subagent limit at once. `KEDGE` starts when `KMAP` returns. Without subagents, work through the lanes yourself in turn, one report each.
+
+**Context budget.** A lane that overflows its context returns partial reads and `[INFERENCE]` claims. Keep each lane small:
+- Pick the agent kind by size. A narrow lane (one source area, a few files) can be a read-only `scout` (about 100K tokens of context).
+  A lane that must read a whole plan, matcher and kernel (kernel-map, kernel-edges, memory) is a `task` agent (about ten times the
+  context); it can also write each idea to `R/lanes/<LANE>.md` as it finds it, so an overflow loses nothing.
+- Prefer more, narrower lanes over one broad lane: split by source area (matcher, plan, kernel, frontend, backend) when the engine is
+  large, and give each lane its file list in the task.
+- Every task states: read the brief and its code cards first; open source by `path:line` range, `grep` before reading, never read a
+  file over 300 lines whole; the report format (the Idea block is in [lanes/common.md](lanes/common.md)); a tool-call budget (about 25),
+  after which the lane reports what it has and lists what it did not read under `## Handoffs`.
+- Extract the knowledge-base rows a lane needs into the brief once; lanes do not open knowledge-base articles.
 
 **Gate:** `ledger.py gate lanes R` exits 0: every `search` row of `dispatch.tsv` has a report in the [findings.md](findings.md)
 format, with parseable idea blocks or a `None:` line.
@@ -189,7 +208,9 @@ The oracle is checked before the engine.
    `running-tests.md`). Dumps are several MB a case: delete them when the grading is done.
 3. SDPA backward: grade with `gauntlet/tools/sdpa_bwd_aotriton_check.py --dumps <dump>/<Space> --run <Space>`, then
    `calibration_report.py --rows <cal_rows>/<Space> --graded <json>`. Other ops: compare the CPU and GPU references on the same
-   rows. The grader needs torch on the CPU: `python3 -m venv <venv> && <venv>/bin/pip install numpy torch --index-url
+   rows. For bundle runs the reference is chosen with `HIPDNN_TEST_VERIFICATION_MODE=cpu|gpu` (the outcome records say
+   `"verifier":"cpu_ref"` or `"gpu_ref"`; `HIPDNN_TEST_REFERENCE_EXECUTOR` is for C++ graph tests only and changes nothing here). The
+   grader needs torch on the CPU: `python3 -m venv <venv> && <venv>/bin/pip install numpy torch --index-url
    https://download.pytorch.org/whl/cpu`.
 4. ORACLE flags concentrated on an axis value: bound it or move it to a probe, back to *Spaces*. ORACLE across a whole feature: the
    grader's rebuild is wrong, fix the grader. Mostly VACUOUS limits for a dtype and domain: note it for the report.
@@ -240,7 +261,8 @@ that a running driver reads from.
 2. SDPA backward: grade every dump with `tools/sdpa_bwd_aotriton_check.py`, then delete the dumps.
 3. `class_check.py` on every WRONG set; `triage_wrong.py --class-tol` for the class-tolerance replay.
 4. `collect_report.py --root <work> --run <dir> ... --out R/report --title "<PR>: <engine>, <arch>" [--aot-rule <dir>] [--class-check
-   cc.json] [--base <dir>]`.
+   cc.json] [--base <dir>]`. It keys problem folders by the last part of the space id, so give each space its own work dir and `--run`
+   when several spaces share a name (for example several `<Op>.MlopsProbe` spaces), or their cases overwrite each other.
 5. **Kernel hits.** Compare `summary.json` `kernels` and each record's `kernels` with the brief's kernel dispatch map; list kernels
    no case ran. An engine with `kernel_unreported` for every case is covered only by construction: say so.
 6. Write `R/groups.tsv` ([findings.md](findings.md) *Groups*): start from the report's categories and rule groups, then split or

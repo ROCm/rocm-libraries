@@ -1,6 +1,6 @@
 # Lane: kernel edge cases (`KEDGE`)
 
-**Trigger:** always, after `KMAP`. **Agent:** `scout`. **Input:** `R/lanes/KMAP.md`. **Output:** `R/lanes/KEDGE.md`, ideas.
+**Trigger:** always, after `KMAP`. **Agent:** `task`. **Input:** `R/lanes/KMAP.md`. **Output:** `R/lanes/KEDGE.md`, ideas.
 
 For each kernel in the map, find the shapes its code handles specially and could get wrong.
 

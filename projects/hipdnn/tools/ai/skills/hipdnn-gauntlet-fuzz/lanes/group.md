@@ -20,7 +20,8 @@ is not a finding; a cause is.
 4. **Two references** (SDPA backward). From the grader output: the truth recomputed from Q, K, V, and the fp64 backward from the O and
    LSE the engine was given. Fails both: engine. Matches the given-inputs reference only: conditioning. `harness_ref_vs_torch` above
    1% of the tensor's range: the oracle cannot judge the graph, or the grader's rebuild is wrong for this feature. For other ops,
-   compare the CPU and GPU references.
+   compare the CPU and GPU references: for bundle runs set `HIPDNN_TEST_VERIFICATION_MODE=cpu` or `gpu` and check the outcome record's
+   `verifier` (`cpu_ref`, `gpu_ref`); `HIPDNN_TEST_REFERENCE_EXECUTOR` does not apply to bundle runs.
 5. **Baseline.** The same graphs on base or on a shipped engine (another arch): pre-existing or not.
 6. **Batch dependence.** Replay solo; if the failure disappears, follow [../policy.md](../policy.md) *Proof per kind* (rerun,
    `--batch-size 1`, 10 solo replays, base A/B with a restricted variant space).
