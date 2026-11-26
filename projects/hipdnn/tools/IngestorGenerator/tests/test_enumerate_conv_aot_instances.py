@@ -424,8 +424,8 @@ def test_committed_bias_instance_lists_are_what_the_tool_enumerates(
     tmp_path, monkeypatch
 ):
     """The bias catalog's lists (``--bias``) are the tool's output too: every
-    catalog instance's bias twin the packaging adapter packages, which today is
-    every implicit-GEMM instance and no direct one."""
+    catalog instance's bias twin the packaging adapter packages, which is every
+    instance: implicit GEMM, direct and split-C."""
     committed = {
         dtype: _CONFIGS / tool.BIAS_INSTANCE_LIST.format(dtype=dtype)
         for dtype in tool.DTYPES
@@ -445,6 +445,4 @@ def test_committed_bias_instance_lists_are_what_the_tool_enumerates(
             (_CONFIGS / tool.INSTANCE_LIST.format(dtype=dtype)).read_text()
         )
         twins = json.loads(written.read_text())
-        assert twins == [
-            dict(i, bias=True) for i in plain if i["algorithm"] == "implicit_gemm"
-        ]
+        assert twins == [dict(i, bias=True) for i in plain]
