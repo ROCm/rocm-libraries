@@ -38,6 +38,7 @@ from __future__ import annotations
 import ast
 import datetime
 import functools
+import itertools
 import os
 import posixpath
 import re
@@ -893,6 +894,13 @@ def _quarantined(test_id: str, **overrides: object) -> QuarantinedTest:
 def test_a_quarantined_test_needs_an_item_an_issue_and_its_recorded_reason():
     with pytest.raises(ValueError, match="expected <test file>::<pytest node name>"):
         _quarantined("library/tests/test_x.py")
+    with pytest.raises(ValueError, match="expected a test function or one of its"):
+        _quarantined("library/tests/test_x.py::TestX")
+    with pytest.raises(ValueError, match="expected a test function or one of its"):
+        _quarantined("library/tests/test_x.py::testing_helper")
+    assert _quarantined("library/tests/test_x.py::TestX::test_y").node_name == (
+        "TestX::test_y"
+    )
     with pytest.raises(ValueError, match="expected a test under one of"):
         _quarantined("platform/python/rocke/tests/test_x.py::test_y")
     with pytest.raises(ValueError, match="expected the issue that tracks it"):
@@ -1111,13 +1119,15 @@ def _defines_test(test_file: Path, node_name: str) -> bool:
 def quarantine_breaches(
     entries: Iterable[QuarantinedTest], today: datetime.date
 ) -> list[str]:
-    """What fails the quarantine record, whatever the change: an item listed
-    twice, more items than ``QUARANTINE_CAP``, or an expired entry."""
+    """What fails the quarantine record, whatever the change: two entries
+    that may hold out the same item, more items than ``QUARANTINE_CAP``, or an
+    expired entry."""
     entries = list(entries)
-    ids = [entry.test_id for entry in entries]
     breaches = [
-        f"quarantined more than once: {test_id}"
-        for test_id in sorted({test_id for test_id in ids if ids.count(test_id) > 1})
+        f"quarantined twice: {first.test_id} and {second.test_id} may hold out "
+        "the same tests; keep one entry per test"
+        for first, second in itertools.combinations(entries, 2)
+        if first.overlaps(second)
     ]
     if len(entries) > QUARANTINE_CAP:
         breaches.append(
@@ -1145,8 +1155,39 @@ def test_a_quarantine_fails_when_expired_listed_twice_or_over_the_cap():
         )
     ]
     assert quarantine_breaches([current, current], today) == [
-        "quarantined more than once: library/tests/test_x.py::test_y"
+        (
+            "quarantined twice: library/tests/test_x.py::test_y and "
+            "library/tests/test_x.py::test_y may hold out the same tests; keep one "
+            "entry per test"
+        )
     ]
+    # A function and one of its cases, two narrowings of one function, or one
+    # function on two arches: an item both cover would be held out only where
+    # the first one says, so one entry names both arches.
+    method = "library/tests/test_x.py::TestX::test_y"
+    for first, second in (
+        (_quarantined(method), _quarantined(f"{method}[a]", arches=("gfx950",))),
+        (
+            _quarantined(method, params=("bf16",)),
+            _quarantined(method, params=("mha",)),
+        ),
+        (
+            _quarantined(method, arches=("gfx942",)),
+            _quarantined(method, arches=("gfx950",)),
+        ),
+    ):
+        assert quarantine_breaches([first, second], today) == [
+            (
+                f"quarantined twice: {first.test_id} and {second.test_id} may hold "
+                "out the same tests; keep one entry per test"
+            )
+        ]
+    assert (
+        quarantine_breaches(
+            [_quarantined(f"{method}[a]"), _quarantined(f"{method}[b]")], today
+        )
+        == []
+    )
     over_the_cap = [
         _quarantined(f"library/tests/test_x.py::test_{index}")
         for index in range(QUARANTINE_CAP + 1)

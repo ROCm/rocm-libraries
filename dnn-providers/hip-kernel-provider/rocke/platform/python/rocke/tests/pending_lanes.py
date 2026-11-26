@@ -426,10 +426,13 @@ class QuarantinedTest:
     """One test known to fail, skipped in every run until its issue is fixed.
 
     ``test_id`` is the test file relative to the rocke directory, ``::`` and the
-    pytest node name: ``...::test_x[gfx942]`` names one parameter of
-    ``test_x``, ``...::test_x`` all of them, ``...::TestX`` each test of a
-    class. ``arches`` names the GPU arches it fails on, where it is held out;
-    empty (the default) holds it out everywhere. ``runs_files`` names the test
+    pytest node name of a test function: ``...::test_x[gfx942]`` names one
+    parameter of ``test_x``, ``...::test_x`` (or ``...::TestX::test_x``) all of
+    them. A whole class is refused: one entry would hold out every test in it,
+    and ``QUARANTINE_CAP`` counts entries. One entry holds out each test (see
+    :meth:`overlaps`), so it names every arch and compiler the test fails on.
+    ``arches`` names the GPU arches it fails on, where it is held out; empty
+    (the default) holds it out everywhere. ``runs_files`` names the test
     files the quarantined test runs in a child process, which it holds out
     with it. ``compilers`` names the compiler builds it fails with, and holds
     it out only while the loaded COMGR's compiler is one of them
@@ -460,6 +463,12 @@ class QuarantinedTest:
                 "<test file>::<pytest node name>"
             )
         _require_test_path("QuarantinedTest", path)
+        if not node_name.rpartition("::")[2].startswith("test_"):
+            raise ValueError(
+                f"QuarantinedTest failed - test_id={self.test_id!r}, expected a "
+                "test function or one of its cases; a class would hold out every "
+                "test in it as one entry of QUARANTINE_CAP"
+            )
         if not path.startswith(tuple(f"{tree}/" for tree in QUARANTINE_TREES)):
             raise ValueError(
                 f"QuarantinedTest failed - test_id={self.test_id!r}, expected a "
@@ -534,6 +543,17 @@ class QuarantinedTest:
         them (:meth:`Compilers.include`)."""
         return self.compilers is None or self.compilers.include(build)
 
+    def overlaps(self, other: QuarantinedTest) -> bool:
+        """Whether this entry and ``other`` may hold out the same item: same
+        file, and one names the other's test or case, whatever their
+        ``params``, ``arches`` and ``compilers``. Each item is held out by at
+        most one entry, so the one that covers it decides where and with which
+        compilers: a test that fails on two arches names both in one entry."""
+        return self.path == other.path and (
+            _names_case(self.node_name, other.node_name)
+            or _names_case(other.node_name, self.node_name)
+        )
+
     def covers(self, path: str, node_name: str) -> bool:
         """Whether this entry quarantines the item ``node_name`` of ``path``."""
         if path != self.path or not _names_case(self.node_name, node_name):
@@ -557,7 +577,9 @@ def _names_case(test: str, node_name: str) -> bool:
 
 def quarantined_test(path: str, node_name: str) -> QuarantinedTest | None:
     """The ``QUARANTINED`` entry for the pytest item ``node_name`` of the test
-    file ``path`` (relative to the rocke directory), or None."""
+    file ``path`` (relative to the rocke directory), or None. No two entries
+    overlap (:meth:`QuarantinedTest.overlaps`; the registry check refuses
+    them), so at most one covers the item."""
     return next((entry for entry in QUARANTINED if entry.covers(path, node_name)), None)
 
 
