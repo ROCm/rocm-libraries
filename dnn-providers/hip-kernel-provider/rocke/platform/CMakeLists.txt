@@ -1237,7 +1237,9 @@ if(ROCKE_INSTALL_TESTS)
 
       # Each installed architecture retains its own GPU CTest result, which
       # covers every variant installed for it; the gpu limit covers the at most
-      # two variants one entry runs, each at its five-minute request timeout.
+      # two variants one entry runs, each request of a case stopping at the
+      # worker's 100 s request timeout (PINNED_REQUEST_TIMEOUT_SECONDS), below
+      # the 120 s per-test limit of the GPU pytest entries.
       # library/tests/reference_common/docs/gpu-reference-workflow.md records
       # this trade-off and when to register one CTest per variant instead.
       foreach(_arch IN LISTS _ROCKE_${_operation_upper}_INSTALLED_ARCHITECTURES)
