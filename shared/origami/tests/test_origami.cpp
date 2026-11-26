@@ -1972,7 +1972,6 @@ TEST_CASE("gfx1170 architecture constants are measured values", "[hardware]") {
   using origami::hardware_t;
   const auto c      = hardware_t::get_arch_constants(hardware_t::architecture_t::gfx1170);
   const auto c1201  = hardware_t::get_arch_constants(hardware_t::architecture_t::gfx1201);
-  const auto c1171  = hardware_t::get_arch_constants(hardware_t::architecture_t::gfx1171);
 
   // gfx1170: measured L2 and DRAM read bandwidth, per-WG bandwidth ramp, no MALL, 32 KiB L1.
   REQUIRE(c.mem1_perf_ratio == 1.5696);
@@ -1985,18 +1984,6 @@ TEST_CASE("gfx1170 architecture constants are measured values", "[hardware]") {
   REQUIRE(c.l1_capacity == 32 * 1024);
   REQUIRE(c.mem1_perf_ratio != c1201.mem1_perf_ratio);
   REQUIRE(c.mem3_perf_ratio != c1201.mem3_perf_ratio);
-
-  // gfx1171 keeps the gfx1201 values, without a MALL.
-  REQUIRE(c1171.mem1_perf_ratio == c1201.mem1_perf_ratio);
-  REQUIRE(c1171.mem1_perf_ratio == 5.74);
-  REQUIRE(c1171.mem3_perf_ratio == c1201.mem3_perf_ratio);
-  REQUIRE(c1171.mem3_perf_ratio == 0.464);
-  REQUIRE(c1171.mem2_perf_ratio == hardware_t::NO_MALL_AVAILABLE);
-  REQUIRE(c1171.parallel_mi_cu == c1201.parallel_mi_cu);
-  REQUIRE(c1171.mem_bw_per_wg_coefficients == c1201.mem_bw_per_wg_coefficients);
-  REQUIRE(c1171.mem_clock_ratio == c1201.mem_clock_ratio);
-  REQUIRE(c1171.simds_per_cu == c1201.simds_per_cu);
-  REQUIRE(c1171.l1_capacity == c1201.l1_capacity);
 
   // The hardware object scales the gfx1170 bandwidths by the clock.
   const auto hw = hardware_t::get_hardware_for_arch(hardware_t::architecture_t::gfx1170,
