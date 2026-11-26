@@ -1442,7 +1442,6 @@
     'MIArchVgpr',
     'MXLoadInst',
     'MXScaleFormat',
-    'MXScaleVgprInterleaveExtraVgpr',
     'MacroTile',
     'MagicDivAlg',
     'MatrixInstruction',
@@ -2234,14 +2233,6 @@
         'HostPreSwizzle',
       ]),
       'len': 5,
-      'type': 'list',
-    }),
-    'MXScaleVgprInterleaveExtraVgpr': dict({
-      'head': list([
-        False,
-        True,
-      ]),
-      'len': 2,
       'type': 'list',
     }),
     'MacroTile': dict({

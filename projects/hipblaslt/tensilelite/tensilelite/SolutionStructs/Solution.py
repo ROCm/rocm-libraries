@@ -81,7 +81,6 @@ from ..Common.ValidParameters import validParameters, \
                                             SW_INSTRUCTION_PREFETCH_ABSOLUTE, \
                                             SW_INSTRUCTION_PREFETCH_AUTO
 from .Naming import getSolutionNameFull
-from .mxs_interleave_extra import extraVgprMatters
 from .Problem import ProblemType
 from .lds_layout import format_lds_layout
 from .segment_interleave import evaluate as segIntEval, aligned_budget_ok as segAlignedBudget, \
@@ -8048,12 +8047,6 @@ class Solution(collections.abc.Mapping):
         reject(state, printRejectionReason, "with PrefetchLocalRead %u LoopIters %u LocalReadVectorWidthB %u, not enough LoopIters to prefetch %ux%u iterations, " \
           % (state["PrefetchLocalRead"],state["LoopIters"],state["LocalReadVectorWidthB"], state["PrefetchLocalRead"] , wlrMultiple) )
 
-    # Only the gfx1250 MX scale-VGPR interleave reads MXScaleVgprInterleaveExtraVgpr.
-    if state["MXScaleVgprInterleaveExtraVgpr"] and not (
-        state["ISA"][:2] == (12, 5) and state["ProblemType"]["MXBlockA"] and state["ProblemType"]["MXBlockB"]):
-      reject(state, printRejectionReason, "MXScaleVgprInterleaveExtraVgpr requires gfx1250 with MX scales on both A and B")
-      return
-
     if state["PrefetchGL2"] == 0:
       state["PrefetchGL2Inc64Bit"] = False
       state["PrefetchGL2SAddr"] = False
@@ -8548,12 +8541,6 @@ class Solution(collections.abc.Mapping):
       kMax = Solution.rapMaxResidentKTiles(
           state, problemType, isa, isaInfoMap, packedC0, packedC1)
       state["_RAPNumResidentKTiles"] = max(state["PrefetchGlobalRead"] + 1, kMax or 0)
-
-    # MXScaleVgprInterleaveExtraVgpr only changes the scale layout when the conflict-free layout does not
-    # fit the default VGPR span. Elsewhere True builds the same kernel as False under another name, so fold
-    # it into False (undecidable cases keep True). Last, so every derived input is final.
-    if state["MXScaleVgprInterleaveExtraVgpr"] and extraVgprMatters(state, isaInfoMap[isa]) is False:
-      state["MXScaleVgprInterleaveExtraVgpr"] = False
 
   ########################################
   @ staticmethod
