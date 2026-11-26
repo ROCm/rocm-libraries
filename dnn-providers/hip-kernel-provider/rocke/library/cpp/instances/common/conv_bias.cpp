@@ -41,13 +41,25 @@ rocke_value_t*
     return rocke_b_buffer_rsrc(b, bias, bias_bytes);
 }
 
+/* Bytes of one bias element: the output dtypes a conv forward stores. Any
+ * other dtype is an error (2 keeps the emission going; the builder fails). */
+static int conv_bias_elem_bytes(rocke_ir_builder_t* b, const rocke_type_t* elem)
+{
+    if(strcmp(elem->name, "f32") == 0)
+        return 4;
+    if(strcmp(elem->name, "f16") != 0 && strcmp(elem->name, "bf16") != 0)
+        rocke_i_set_err(
+            b, ROCKE_ERR_VALUE, "conv bias: no %s bias (f16, bf16 or f32 only)", elem->name);
+    return 2;
+}
+
 rocke_value_t* rocke_conv_bias_load_f32(rocke_ir_builder_t* b,
                                         rocke_value_t* rsrc,
                                         rocke_value_t* k,
                                         const rocke_type_t* elem,
                                         rocke_value_t* c0)
 {
-    const int eb = strcmp(elem->name, "f32") == 0 ? 4 : 2;
+    const int eb = conv_bias_elem_bytes(b, elem);
     rocke_value_t* c_eb = rocke_b_const_i32(b, eb);
     rocke_value_t* off = rocke_b_mul(b, k, c_eb);
     rocke_value_t* v = rocke_b_buffer_load(b, rsrc, off, c0, elem);
@@ -61,7 +73,7 @@ rocke_value_t* rocke_conv_bias_load_vec_f32(rocke_ir_builder_t* b,
                                             const rocke_type_t* elem,
                                             rocke_value_t* c0)
 {
-    const int eb = strcmp(elem->name, "f32") == 0 ? 4 : 2;
+    const int eb = conv_bias_elem_bytes(b, elem);
     const int per = n < 16 / eb ? n : 16 / eb;
     rocke_value_t* comps[ROCKE_CONV_BIAS_MAX_SLOTS];
     int count = 0;
@@ -125,6 +137,23 @@ void rocke_conv_bias_add_to_accs(rocke_ir_builder_t* b,
                                  rocke_value_t** out)
 {
     rocke_value_t* splat[ROCKE_CONV_BIAS_MAX_NI];
+    bool fits = mfmas_n > 0 && mfmas_n <= ROCKE_CONV_BIAS_MAX_NI;
+    for(int ni = 0; fits && ni < mfmas_n; ++ni)
+        fits = accs[ni]->type->count <= ROCKE_CONV_BIAS_MAX_SLOTS;
+    if(!fits)
+    {
+        rocke_i_set_err(b,
+                        ROCKE_ERR_VALUE,
+                        "add_conv_bias_to_accs: a %dx%d fragment grid past %d columns of "
+                        "%d slots",
+                        mfmas_m,
+                        mfmas_n,
+                        ROCKE_CONV_BIAS_MAX_NI,
+                        ROCKE_CONV_BIAS_MAX_SLOTS);
+        for(int i = 0; i < mfmas_m * mfmas_n; ++i)
+            out[i] = accs[i];
+        return;
+    }
     for(int ni = 0; ni < mfmas_n; ++ni)
     {
         rocke_value_t* elems[ROCKE_CONV_BIAS_MAX_SLOTS];
@@ -153,6 +182,17 @@ void rocke_conv_bias_apply_implicit_gemm(rocke_ir_builder_t* b,
                                          rocke_value_t** out)
 {
     rocke_value_t* vals[ROCKE_CONV_BIAS_MAX_NI];
+    if(mfmas_n <= 0 || mfmas_n > ROCKE_CONV_BIAS_MAX_NI)
+    {
+        rocke_i_set_err(b,
+                        ROCKE_ERR_VALUE,
+                        "apply_implicit_gemm_conv_bias: %d fragment columns (at most %d)",
+                        mfmas_n,
+                        ROCKE_CONV_BIAS_MAX_NI);
+        for(int i = 0; i < mfmas_m * mfmas_n; ++i)
+            out[i] = accs[i];
+        return;
+    }
     rocke_value_t* rsrc = rocke_conv_bias_rsrc(b, bias, bias_bytes);
     rocke_value_t* c0 = rocke_b_const_i32(b, 0);
     rocke_value_t* row = NULL;

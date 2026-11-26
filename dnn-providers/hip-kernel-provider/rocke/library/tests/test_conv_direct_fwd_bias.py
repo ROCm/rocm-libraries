@@ -178,6 +178,22 @@ class TestDirectBiasSpecs(unittest.TestCase):
         )
         with self.assertRaises(LookupError):
             direct_job_for_identity(replace(dgrad, bias=True))
+        # Nor does a forward variant a dgrad identity runs over the
+        # transposed problem: its launch has no bias tail.
+        with self.assertRaisesRegex(LookupError, "only a forward kernel"):
+            direct_job_for_identity(replace(ident, direction="direct_dgrad"))
+
+    def test_bias_dtypes(self):
+        """The bias carries a stored output dtype: f16 / bf16 (2 bytes) or
+        f32 (4); any other is refused rather than read at a wrong stride."""
+        from rocke.core.ir import BF16, F16, F32, I8, I32
+
+        from kernels.conv.conv_bias import _bias_elem_bytes
+
+        self.assertEqual([_bias_elem_bytes(t) for t in (F16, BF16, F32)], [2, 2, 4])
+        for t in (I8, I32):
+            with self.assertRaisesRegex(ValueError, "f16, bf16 or f32 only"):
+                _bias_elem_bytes(t)
 
     def test_engine_bridge_forwards_bias(self):
         from kernels.conv.engine_bridge import conv_direct_nongrouped_spec_to_dict

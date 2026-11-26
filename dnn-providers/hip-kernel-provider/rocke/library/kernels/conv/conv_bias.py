@@ -38,7 +38,7 @@ from __future__ import annotations
 
 from typing import List, Optional, Sequence, Tuple
 
-from rocke.core.ir import F32, I32, IRBuilder, PtrType, Type, Value
+from rocke.core.ir import BF16, F16, F32, I32, IRBuilder, PtrType, Type, Value
 
 __all__ = [
     "add_conv_bias_to_accs",
@@ -66,12 +66,21 @@ def conv_bias_rsrc(b: IRBuilder, bias: Value, bias_bytes: Value) -> Value:
     return b.buffer_rsrc(bias, bias_bytes)
 
 
+def _bias_elem_bytes(elem: Type) -> int:
+    """Bytes of one bias element: the output dtypes a conv forward stores."""
+    if elem == F32:
+        return 4
+    if elem in (F16, BF16):
+        return 2
+    raise ValueError(f"conv bias: no {elem} bias (f16, bf16 or f32 only)")
+
+
 def load_conv_bias_f32(
     b: IRBuilder, rsrc: Value, k: Value, elem: Type, c0: Value
 ) -> Value:
     """``bias[k]`` (element index ``k``) widened to fp32. ``c0`` is the
     soffset (an i32 zero)."""
-    off = b.mul(k, b.const_i32(4 if elem == F32 else 2))
+    off = b.mul(k, b.const_i32(_bias_elem_bytes(elem)))
     return b.cast_to_f32(b.buffer_load(rsrc, off, c0, elem))
 
 
@@ -152,7 +161,7 @@ def load_conv_bias_vec_f32(
     index of the first channel; ``c0`` is the soffset (an i32 zero). A run
     that ends past ``Bias_bytes`` reads 0 there.
     """
-    eb = 4 if elem == F32 else 2
+    eb = _bias_elem_bytes(elem)
     per = min(n, 16 // eb)
     if n % per != 0:
         raise ValueError(f"load_conv_bias_vec_f32: {n} elements in loads of {per}")

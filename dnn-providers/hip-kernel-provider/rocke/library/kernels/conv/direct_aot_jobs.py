@@ -3584,6 +3584,13 @@ def direct_kernel_for_job(job: BuildJob, arch: str, dtype: str):
     caps = DirectCaps(**job.caps)
     variant = job.identity.algorithm
     bias = {"bias": True} if job.identity.bias else {}
+    if bias and job.identity.direction not in ("direct_fwd", _FWD_HELPER):
+        # A dgrad variant may build a forward spec over the transposed
+        # problem; its launch (and ABI) still has no bias tail.
+        raise ValueError(
+            f"{job.identity.direction} {variant}: only a forward kernel (or "
+            f"the split-C fold) takes a bias"
+        )
     if variant == _SPLIT_REDUCE:
         spec = make_spec(variant, _DtypeOnly(dtype), job.spec_kwargs, **bias)
         return _build_kernel(variant, spec, arch), {}
@@ -3616,6 +3623,11 @@ def direct_job_for_identity(identity: KernelIdentity) -> BuildJob:
     if identity.dtype_a not in DIRECT_DTYPES:
         raise LookupError(
             f"direct conv builds {DIRECT_DTYPES}, not {identity.dtype_a!r}"
+        )
+    if identity.bias and identity.direction not in ("direct_fwd", _FWD_HELPER):
+        raise LookupError(
+            f"{identity.direction} {identity.algorithm}: only a forward kernel "
+            f"(or the split-C fold) takes a bias"
         )
     caps = _caps_of(identity)
     knobs = json.loads(identity.knobs) if identity.knobs else {}
