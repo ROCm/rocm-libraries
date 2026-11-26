@@ -1099,3 +1099,147 @@ TEST(PersistentArgumentLayout, OccupancyProbeDisabledForMultiDimGridBelowMinGrid
     EXPECT_EQ(value<uint32_t>(call.args, "ProbeGrid"),
               call.numWorkGroups.x * call.numWorkGroups.y * call.numWorkGroups.z);
 }
+
+namespace
+{
+    // Generated static two-tile StreamK on the linear (non-cluster) layout.
+    void configureStaticStreamK(ContractionSolution& solution)
+    {
+        configureClusterStreamK(solution, 1, 1);
+        solution.sizeMapping.clusterDim = {1, 1, 1};
+        solution.internalArgsSupport.persistentLoopArgsVersion = 0;
+        solution.internalArgsSupport.perTileExtraIters = false;
+    }
+
+    // Reference model of the static kernel's data-parallel section: with
+    // skTiles == 0 every tile is data-parallel, and workgroup w runs the whole
+    // tiles w, w + grid, w + 2 * grid, ... Returns each workgroup's tiles.
+    std::vector<std::vector<size_t>> dataParallelTiles(size_t tiles, size_t grid, uint32_t skTiles)
+    {
+        std::vector<std::vector<size_t>> owned(grid);
+        const size_t dpTiles = tiles - skTiles;
+        for(size_t w = 0; w < grid; ++w)
+            for(size_t tile = w; tile < dpTiles; tile += grid)
+                owned[w].push_back(tile);
+        return owned;
+    }
+}
+
+// Under uniform summation order a static StreamK grid below the tile count used
+// to snap up to one tile per workgroup, which drops the persistent loop. It now
+// keeps the grid and packs skTiles = 0 (all data-parallel), and every host site
+// -- grid, packed args, workspace, decisions snapshot and the uniform-order gate
+// -- has to agree on that.
+TEST(PersistentArgumentLayout, UniformOrderStaticGridBelowTilesRunsAllDataParallel)
+{
+    // 768x768 with 128x128 tiles -> 36 tiles; K=1024 with DepthU 64 -> 16 iterations.
+    // 7 is ragged, 9 and 12 divide the tile count (the mixed split's shape).
+    for(size_t requested : {size_t{7}, size_t{9}, size_t{12}})
+    for(size_t workspace : {std::numeric_limits<size_t>::max(), size_t{0}})
+    {
+        SCOPED_TRACE(::testing::Message() << "grid=" << requested << " workspace=" << workspace);
+        ContractionSolution solution;
+        configureStaticStreamK(solution);
+        auto problem = clusterProblem(768, 768, 1024, 1);
+        problem.setWorkspaceSize(workspace);
+        problem.setParams().setUniformSummationOrder(1);
+        const auto device = persistentDevice(requested);
+
+        const auto launch = solution.resolvePersistentSettings(problem, device);
+        ASSERT_EQ(launch.totalTiles, 36u);
+        EXPECT_EQ(launch.grid, requested) << "the requested persistent grid must be kept";
+        EXPECT_EQ(launch.reduction, origami::reduction_t::tree);
+        EXPECT_EQ(launch.workspaceBytes, 0u) << "whole tiles write no partials";
+        EXPECT_EQ(solution.requiredWorkspaceSize(problem, device), 0u);
+        EXPECT_TRUE(solution.streamKUniformOrderDataParallel(
+            problem, device, launch.totalTiles, launch.grid, nullptr));
+
+        const auto inputs = clusterInputs();
+        const auto call
+            = solution.generateSingleCall<true>(problem, inputs, device, launch, GSUSettings{});
+        EXPECT_EQ(call.numWorkGroups.x, requested);
+        EXPECT_EQ(value<uint32_t>(call.args, "skGrid"), requested);
+        EXPECT_EQ(value<uint32_t>(call.args, "skTiles"), 0u);
+        EXPECT_EQ(value<uint32_t>(call.args, "SKItersPerWG"), 0u);
+        // Tree reduction keeps the Flags pointer, which is what routes the
+        // kernel to the two-tile init rather than the parallel-reduction init.
+        EXPECT_EQ(value<void*>(call.args, "Flags"), inputs.Synchronizer);
+
+        StreamK::Static::Split packed;
+        packed.args.skTiles    = value<uint32_t>(call.args, "skTiles");
+        packed.args.itersPerWG = value<uint32_t>(call.args, "SKItersPerWG");
+        EXPECT_TRUE(StreamK::Static::isRowUniform(packed, 36, 16, requested, false, true));
+        EXPECT_TRUE(solution.uniformSummationOrderSupported(problem, device));
+
+        const auto decisions = solution.computeStreamKDecisions(problem, device);
+        EXPECT_EQ(decisions.grid(), requested);
+        EXPECT_EQ(decisions.skTiles(), 0u);
+        EXPECT_FALSE(decisions.partialsPresent);
+        EXPECT_FALSE(decisions.workspaceDPFallbackFired);
+        EXPECT_EQ(decisions.requiredWorkspaceBytes, 0u);
+
+        // Every tile is computed whole exactly once, and every workgroup loops
+        // over floor or ceil(tiles / grid) of them.
+        const auto owned = dataParallelTiles(36, requested, packed.args.skTiles);
+        std::vector<int> hits(36, 0);
+        for(auto const& tiles : owned)
+        {
+            EXPECT_GE(tiles.size(), 36 / requested);
+            EXPECT_LE(tiles.size(), (36 + requested - 1) / requested);
+            EXPECT_GT(tiles.size(), 1u) << "a persistent workgroup must own several tiles";
+            for(size_t tile : tiles)
+                ++hits[tile];
+        }
+        EXPECT_EQ(std::count(hits.begin(), hits.end(), 1), 36);
+    }
+}
+
+// The predicate is limited to launches whose kernel packs the static two-tile
+// split; every other StreamK flavour keeps its own split.
+TEST(PersistentArgumentLayout, UniformOrderDataParallelPredicateScope)
+{
+    auto problem = clusterProblem(768, 768, 1024, 1);
+    problem.setParams().setUniformSummationOrder(1);
+    const auto device = persistentDevice(7);
+    const bool dynamic = true;
+    const bool staticSubMode = false;
+
+    EXPECT_FALSE(StreamK::Static::uniformOrderDataParallel(false, 36, 7));
+    EXPECT_FALSE(StreamK::Static::uniformOrderDataParallel(true, 36, 0));
+    EXPECT_FALSE(StreamK::Static::uniformOrderDataParallel(true, 36, 36));
+    EXPECT_TRUE(StreamK::Static::uniformOrderDataParallel(true, 36, 35));
+
+    ContractionSolution solution;
+    configureStaticStreamK(solution);
+    EXPECT_TRUE(solution.streamKUniformOrderDataParallel(problem, device, 36, 7, nullptr));
+
+    ContractionSolution hybrid;
+    configureStaticStreamK(hybrid);
+    hybrid.sizeMapping.workAssignment = WorkAssignment::Hybrid;
+    EXPECT_TRUE(hybrid.streamKUniformOrderDataParallel(problem, device, 36, 7, &staticSubMode));
+    EXPECT_FALSE(hybrid.streamKUniformOrderDataParallel(problem, device, 36, 7, &dynamic));
+
+    ContractionSolution queue;
+    configureStaticStreamK(queue);
+    queue.sizeMapping.workAssignment = WorkAssignment::DynamicWorkQueue;
+    EXPECT_FALSE(queue.streamKUniformOrderDataParallel(problem, device, 36, 7, nullptr));
+
+    ContractionSolution atomic;
+    configureStaticStreamK(atomic);
+    atomic.sizeMapping.streamKAtomic = 1;
+    EXPECT_FALSE(atomic.streamKUniformOrderDataParallel(problem, device, 36, 7, nullptr));
+
+    ContractionSolution spatial;
+    configureClusterStreamK(spatial, 2, 1);
+    EXPECT_FALSE(spatial.streamKUniformOrderDataParallel(problem, device, 36, 7, nullptr));
+
+    ContractionSolution handwritten;
+    configureStaticStreamK(handwritten);
+    handwritten.customKernel.name      = "handwritten_streamk";
+    handwritten.customKernel.generated = false;
+    EXPECT_FALSE(handwritten.streamKUniformOrderDataParallel(problem, device, 36, 7, nullptr));
+
+    ContractionSolution dataParallel;
+    configurePersistentSolution(dataParallel, 3, 0);
+    EXPECT_FALSE(dataParallel.streamKUniformOrderDataParallel(problem, device, 36, 7, nullptr));
+}

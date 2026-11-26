@@ -1170,12 +1170,15 @@ namespace TensileLite
                     }
                     else
                     {
+                        // skTiles = 0 when uniform summation order keeps the
+                        // grid below the tile count (all data-parallel).
                         const StreamK::Static::Split sk3_split = StreamK::Static::computeSplit(
                             sk3_tiles,
                             sk3_itersPerTile,
                             launch.grid,
                             pAMDGPU->skFullTiles,
-                            false,
+                            streamKUniformOrderDataParallel(
+                                problem, *hardware, sk3_tiles, launch.grid, &effectiveDynamic),
                             skKGranularity());
                         sk3_skTiles      = sk3_split.args.skTiles;
                         sk3_skItersPerWG = sk3_split.args.itersPerWG;
@@ -1267,15 +1270,19 @@ namespace TensileLite
                     AMDGPU const* pAMDGPU = dynamic_cast<AMDGPU const*>(hardware);
                     assert(pAMDGPU != nullptr && pAMDGPU->computeUnitCount != 0);
 
+                    // skTiles = 0 when uniform summation order keeps the grid
+                    // below the tile count (all data-parallel).
                     const StreamK::Static::Split split
                         = usesStreamKSpatialCluster()
                               ? launch.clusterSchedule.split
-                              : StreamK::Static::computeSplit(tiles,
-                                                              itersPerTile,
-                                                              launch.grid,
-                                                              pAMDGPU->skFullTiles,
-                                                              false,
-                                                              skKGranularity());
+                              : StreamK::Static::computeSplit(
+                                  tiles,
+                                  itersPerTile,
+                                  launch.grid,
+                                  pAMDGPU->skFullTiles,
+                                  streamKUniformOrderDataParallel(
+                                      problem, *hardware, tiles, launch.grid, nullptr),
+                                  skKGranularity());
 
                     args.template append<uint32_t>("SKItersPerWG", split.args.itersPerWG);
                     args.template append<uint32_t>("skGrid", launch.grid);
@@ -5858,7 +5865,9 @@ namespace TensileLite
                         size += idealWorkspace;
                 }
                 else if(StreamK::straddlesTiles(itersPerTile, skGrid, tiles) && !streamKDP
-                        && !forceDPOnly)
+                        && !forceDPOnly
+                        && !streamKUniformOrderDataParallel(
+                            problem, hardware, tiles, skGrid, &effectiveDynamic))
                 {
                     // The workspace holds the partial tiles only. The per-XCD
                     // work-queue counters live at the base of the flag buffer
@@ -6276,6 +6285,32 @@ namespace TensileLite
         return !customKernel.name.empty() && !customKernel.generated;
     }
 
+    bool ContractionSolution::streamKUniformOrderDataParallel(Problem const&  problem,
+                                                              Hardware const& hardware,
+                                                              size_t          tiles,
+                                                              size_t          grid,
+                                                              bool const* effectiveDynamicHint) const
+    {
+        // Cheap arithmetic first, so most launches never resolve the sub-mode.
+        if(!StreamK::Static::uniformOrderDataParallel(
+               problem.getParams().uniformSummationOrder() != 0, tiles, grid))
+            return false;
+        // Only the generated static two-tile kernel is known to run skTiles = 0 as
+        // a whole-tile loop; atomic fixup is refused under uniform summation order
+        // anyway.
+        if(!sizeMapping.isStreamK() || sizeMapping.streamKAtomic != 0
+           || usesStreamKSpatialCluster() || handwrittenCustomKernel())
+            return false;
+        if(sizeMapping.hasStaticAssignment())
+            return true;
+        if(!sizeMapping.hasHybridAssignment())
+            return false;
+        const bool effectiveDynamic = effectiveDynamicHint != nullptr
+                                          ? *effectiveDynamicHint
+                                          : streamK5EffectiveDynamic(problem, hardware);
+        return !effectiveDynamic;
+    }
+
     StreamKSettings ContractionSolution::resolveClusteredStreamKSettings(
         Problem const& problem, Hardware const& hardware) const
     {
@@ -6550,12 +6585,16 @@ namespace TensileLite
 
         const bool streamKDP   = Debug::Instance().useStreamKDataParrallel();
         const bool forceDPOnly = sizeMapping.isPersistentDataParallel();
+        // An all-data-parallel uniform-summation-order launch has no partial
+        // tiles, so it neither reserves partials nor falls back to grid = tiles.
+        const bool uniformOrderDP = streamKUniformOrderDataParallel(
+            problem, hardware, tiles, sk.grid, &effectiveDynamic);
         const size_t itersPerTile
             = std::max(size_t{1}, problem.getItersPerTile(sizeMapping));
         if(sk.grid > 0
            && (sk.reduction == origami::reduction_t::parallel
                || (StreamK::straddlesTiles(itersPerTile, sk.grid, tiles) && !streamKDP
-                   && !forceDPOnly)))
+                   && !forceDPOnly && !uniformOrderDP)))
         {
             // The workspace holds the partial tiles only. The per-XCD work-queue
             // counters live at the base of the flag buffer (AddressFlags), not
@@ -6583,7 +6622,8 @@ namespace TensileLite
         {
             if(sk.reduction == origami::reduction_t::parallel && tiles > 0)
                 sk.workspaceBytes = requiredWorkspaceSizeGsu(problem, hardware, sk.grid / tiles);
-            else if(StreamK::straddlesTiles(itersPerTile, sk.grid, tiles) && !streamKDP)
+            else if(StreamK::straddlesTiles(itersPerTile, sk.grid, tiles) && !streamKDP
+                    && !uniformOrderDP)
                 sk.workspaceBytes = partialTileSize(sk.grid);
         }
         return sk;
@@ -6991,7 +7031,9 @@ namespace TensileLite
                               itersPerTile,
                               launch.grid,
                               pAMDGPU != nullptr ? pAMDGPU->skFullTiles : 1,
-                              sizeMapping.isPersistentDataParallel(),
+                              sizeMapping.isPersistentDataParallel()
+                                  || streamKUniformOrderDataParallel(
+                                      problem, hardware, tiles, launch.grid, &effectiveDynamic),
                               skKGranularity());
 
                     // Capability AND the mode bit: the packer only sets
@@ -7402,9 +7444,13 @@ namespace TensileLite
 
             // Under uniform-summation-order + static two-tile packing, snap the chain output
             // g0 onto an admissible uniform grid. F-star is never-upward
-            // (g0 > tiles). When g0 < tiles, snap up to tiles (all-full): mixed
-            // GridDividesTiles (tiles % g0 == 0) is two-tile DP+SK that gfx950
-            // does not store (workspace skipped, SK D rows stay poison). Must
+            // (g0 > tiles). When g0 < tiles, keep g0 and run all data-parallel
+            // (skTiles = 0, see streamKUniformOrderDataParallel) so workgroups
+            // still loop over several whole tiles. The mixed two-tile DP+SK split
+            // is not an option there: ragged grids are not row-uniform, and
+            // GridDividesTiles (tiles % g0 == 0) is a split gfx950 does not store
+            // (workspace skipped, SK D rows stay poison). Kernels that cannot
+            // take that path snap up to tiles (all-full) as before. Must
             // run before the magic-division guard below so that guard still
             // validates the final grid (a snap after it can emit out-of-range
             // itersPerWG). Same ABI predicate as checkUniformSummationOrder.
@@ -7489,7 +7535,9 @@ namespace TensileLite
                         }
                         grid = tiles * FStar;
                     }
-                    else if(g0 < tiles)
+                    else if(g0 < tiles
+                            && !self.streamKUniformOrderDataParallel(
+                                problem, hardware, tiles, g0, &effectiveDynamic))
                     {
                         grid = tiles;
                     }
@@ -7597,6 +7645,10 @@ namespace TensileLite
             //     which this clamp does not: clamping a grid whose flags are
             //     never written is only conservative, and widening the grid
             //     here would be a grid decision, not an allocation one.
+            //   - a uniform-summation-order all-data-parallel launch packs
+            //     skTiles = 0 (streamKUniformOrderDataParallel), so every tile
+            //     is whole and no flag is ever written; clamping it would only
+            //     throw away workgroups it chose to keep
             //
             // Clamping outside those cases would shrink a grid that has no flag
             // region to overrun, and against the data-parallel fallbacks it
@@ -7605,10 +7657,22 @@ namespace TensileLite
             // return the launch to the K-split it was escaping. grid defaults
             // to the CU count, well inside the bound on a 256-CU gfx950, but
             // TENSILE_STREAMK_GRID_MULTIPLIER scales it with no cap of its own.
+            //
+            // Resolves the hybrid WorkAssignment's arm only for a launch that could be
+            // all data-parallel under uniform summation order.
+            auto uniformOrderDataParallel = [&]() -> bool {
+                if(!StreamK::Static::uniformOrderDataParallel(
+                       problem.getParams().uniformSummationOrder() != 0, tiles, grid))
+                    return false;
+                const bool effectiveDynamic = sk5DynamicSubMode();
+                return self.streamKUniformOrderDataParallel(
+                    problem, hardware, tiles, grid, &effectiveDynamic);
+            };
             const bool usesFlagRegion = self.sizeMapping.streamKAtomic == 0
                                         && !self.sizeMapping.isPersistentDataParallel()
                                         && reductionStrat != origami::reduction_t::parallel
-                                        && grid > 0 && (tiles % grid) != 0;
+                                        && grid > 0 && (tiles % grid) != 0
+                                        && !uniformOrderDataParallel();
 
             // SK4 and the SK4 sub-path of SK5 start their flags after the
             // per-XCD work-queue counters, so they index fewer entries than the
@@ -7787,6 +7851,10 @@ namespace TensileLite
         const bool forceDPOnly = sizeMapping.isPersistentDataParallel();
         d.streamKDP            = streamKDP;
         d.forceDPOnly          = forceDPOnly;
+        // Same predicate the packers and resolveStreamKSettings() use on the
+        // same pre-fallback grid; it keeps the workspace guard from firing.
+        const bool uniformOrderDP = streamKUniformOrderDataParallel(
+            problem, hardware, tiles, grid, &effectiveDynamic);
 
         const bool isDynamic = StreamK::Dynamic::usesQueue(sizeMapping, effectiveDynamic);
         d.isDynamic          = isDynamic;
@@ -7807,7 +7875,7 @@ namespace TensileLite
         if(grid > 0
            && (reduction == origami::reduction_t::parallel
                || (StreamK::straddlesTiles(itersPerTile, grid, tiles) && !streamKDP
-                   && !forceDPOnly)))
+                   && !forceDPOnly && !uniformOrderDP)))
         {
             needPartials = true;
             // The workspace holds the partial tiles only. The per-XCD work-queue
@@ -7856,7 +7924,8 @@ namespace TensileLite
             AMDGPU const*            pAMDGPU   = dynamic_cast<AMDGPU const*>(&hardware);
             const int                fullTiles = pAMDGPU ? pAMDGPU->skFullTiles : 1;
             const StreamK::Static::Split split = StreamK::Static::computeSplit(
-                tiles, itersPerTile, grid, fullTiles, forceDPOnly, skKGranularity());
+                tiles, itersPerTile, grid, fullTiles, forceDPOnly || uniformOrderDP,
+                skKGranularity());
 
             StreamK::Static::KernelArguments staticStreamkArgs;
             staticStreamkArgs.skTiles    = split.args.skTiles;
