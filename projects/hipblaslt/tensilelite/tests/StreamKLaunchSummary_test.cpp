@@ -2375,6 +2375,28 @@ TEST(StreamKDynamicSplitTest, ManyTilesStayWhole)
     EXPECT_EQ(e.grid, 256u);
 }
 
+// The dynamic grid fills every CU to the kernel's occupancy, within the flag
+// slots after the queue counters.
+TEST(StreamKDynamicSplitTest, MaxGridFollowsTheOccupancy)
+{
+    AMDGPU gpu;
+    gpu.computeUnitCount   = 256;
+    const size_t flagSlots = 1792;
+    for(auto [occupancy, expected] : std::vector<std::pair<int, size_t>>{
+            {-1, 256}, {0, 256}, {1, 256}, {3, 768}, {4, 1024}, {7, 1792}, {8, 1792}})
+    {
+        SCOPED_TRACE("occupancy " + std::to_string(occupancy));
+        EXPECT_EQ(StreamK::Dynamic::maxGrid(gpu, occupancy, flagSlots), expected);
+    }
+    EXPECT_EQ(StreamK::Dynamic::maxGrid(gpu, 8, 0), 2048u) << "0 flag slots leaves it unbounded";
+    EXPECT_EQ(StreamK::Dynamic::maxGrid(gpu, 8, 100), 100u);
+
+    gpu.persistentMaxCUs = 300;
+    EXPECT_EQ(StreamK::Dynamic::maxGrid(gpu, 8, flagSlots), 300u);
+    gpu.persistentFixedGrid = 200;
+    EXPECT_EQ(StreamK::Dynamic::maxGrid(gpu, 8, flagSlots), 200u);
+}
+
 // Fewer tiles than CUs: the static grid's split (see StreamK::Dynamic::computeSplit).
 TEST(StreamKDynamicSplitTest, SplitFollowsTheStaticFactors)
 {
@@ -3053,6 +3075,39 @@ TEST_F(StreamKDynamicSplitSolveTest, FitMatchesTheReservation)
 {
     for(size_t slots : {size_t{1}, size_t{2}, size_t{45}, size_t{256}, size_t{1792}})
         EXPECT_EQ(solution->partialTileSize(slots), slots * solution->partialTileSize(1));
+}
+
+// Whole tiles launch up to the kernel's occupancy per CU, bounded by the flag
+// slots so getSKGrid never has to clamp. Splits are sized for the CUs, so
+// occupancy leaves them alone.
+TEST_F(StreamKDynamicSplitSolveTest, GridFollowsTheOccupancy)
+{
+    const Shape  manyTiles{6400, 6400, 1024, 1}; // 2500 tiles
+    auto         problem = dynamicSplitGemm(manyTiles);
+    const size_t tiles   = problem.getNumTiles(solution->sizeMapping, 1);
+    ASSERT_EQ(tiles, 2500u);
+    const auto   split      = dynamicSplitGemm(longKTiles(20));
+    const size_t splitTiles = split.getNumTiles(solution->sizeMapping, 1);
+    const auto   splitAtOne = solution->streamKDynamicDecomposition(split, device, splitTiles);
+    ASSERT_GT(splitAtOne.tiles, 0u);
+
+    for(auto [occupancy, expected] :
+        std::vector<std::pair<int, size_t>>{{1, 256}, {3, 768}, {4, 1024}, {8, 1792}})
+    {
+        SCOPED_TRACE("occupancy " + std::to_string(occupancy));
+        solution->sizeMapping.CUOccupancy = occupancy;
+        const auto d = solution->streamKDynamicDecomposition(problem, device, tiles);
+        EXPECT_EQ(d.tiles, 0u);
+        EXPECT_EQ(d.grid, expected);
+        ASSERT_NE(tiles % expected, 0u) << "getSKGrid's flag clamp applies to this grid";
+        EXPECT_EQ(solution->getSKGrid(problem, device, tiles, origami::reduction_t::tree),
+                  expected);
+        EXPECT_EQ(solution->computeStreamKDecisions(problem, device).grid(), expected);
+        EXPECT_EQ(solution->requiredWorkspaceSize(problem, device), 0u);
+
+        expectSameSplit(solution->streamKDynamicDecomposition(split, device, splitTiles),
+                        splitAtOne);
+    }
 }
 
 // Uniform summation order: the dynamic split gives every tile the same parts

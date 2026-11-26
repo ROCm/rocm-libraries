@@ -491,10 +491,12 @@ namespace TensileLite
         return r;
     }
 
-    size_t StreamK::Dynamic::maxGrid(AMDGPU const& gpu, int cuOccupancy)
+    size_t StreamK::Dynamic::maxGrid(AMDGPU const& gpu, int cuOccupancy, size_t flagSlots)
     {
         const size_t occupancy = std::max(cuOccupancy, 1);
-        size_t       maxGrid   = gpu.computeUnitCount * std::min(occupancy, MaxOccupancy);
+        size_t       maxGrid   = gpu.computeUnitCount * occupancy;
+        if(flagSlots > 0)
+            maxGrid = std::min(maxGrid, flagSlots);
         if(gpu.persistentMaxCUs > 0)
             maxGrid = std::min(maxGrid, static_cast<size_t>(gpu.persistentMaxCUs));
         if(gpu.persistentFixedGrid > 0)

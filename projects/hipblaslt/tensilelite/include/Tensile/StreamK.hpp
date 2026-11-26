@@ -174,10 +174,10 @@ namespace TensileLite
                 size_t kGranularity = 1;
 
                 // Launch limits. maxGrid: workgroups the dynamic grid policy may launch
-                // (CUs x occupancy). splitCUs: CUs the split is sized for, like origami's
-                // cu_count for the static grid: device CUs within maxGrid, capped by
-                // smCountTarget. flagSlots: flag-region entries left after the per-XCD
-                // queue counters.
+                // (CUs x occupancy within flagSlots, see maxGrid()). splitCUs: CUs the
+                // split is sized for, like origami's cu_count for the static grid:
+                // device CUs within maxGrid, capped by smCountTarget. flagSlots:
+                // flag-region entries left after the per-XCD queue counters.
                 size_t maxGrid          = 0;
                 size_t splitCUs         = 0;
                 size_t flagSlots        = 0;
@@ -254,15 +254,16 @@ namespace TensileLite
                                                                           size_t kGranularity,
                                                                           size_t part);
 
-            // Workgroups per CU the dynamic grid launches at most.
-            // TODO Verify this limit is best
-            static constexpr size_t MaxOccupancy = 3;
-
-            // Workgroups the dynamic grid launches at most: up to MaxOccupancy per
-            // CU, within TENSILE_STREAMK_MAX_CUS and a fixed grid
-            // (TENSILE_STREAMK_FIXED_GRID), so every split part keeps a workgroup of
-            // its own.
-            TENSILELITEHOST_EXPORT static size_t maxGrid(AMDGPU const& gpu, int cuOccupancy);
+            // Workgroups the dynamic grid launches at most: as many per CU as the
+            // kernel's occupancy allows, so short whole tiles fill every resident
+            // slot. Bounded by flagSlots, the flag-region entries after the queue
+            // counters, so getSKGrid's backstop clamp of a grid that leaves
+            // tiles % grid != 0 to those entries does not cut it. flagSlots == 0
+            // leaves it unbounded, which is unreachable today: it takes a queue
+            // prefix of StreamKFlagElements (2048) entries or more. Also bounded by
+            // TENSILE_STREAMK_MAX_CUS and a fixed grid (TENSILE_STREAMK_FIXED_GRID).
+            TENSILELITEHOST_EXPORT static size_t
+                maxGrid(AMDGPU const& gpu, int cuOccupancy, size_t flagSlots);
 
             // Whether tiles that all split alike keep uniform summation order. The
             // fixup and PostGSU add the parts in part order from the raw accumulator
