@@ -399,6 +399,24 @@ def test_gpu_strided_view_keeps_the_view_start():
 
 
 @pytest.mark.gpu
+@pytest.mark.parametrize("offset", [64, 65], ids=["offset_exact", "offset_short"])
+def test_gpu_an_offset_view_backs_the_elements_from_its_start(offset):
+    """A launch check bounds an index by ``backed_elements``, so a view that
+    starts ``offset`` elements into a buffer backs only the elements from its
+    start, never the buffer's whole size; and it cannot reach past the
+    buffer."""
+    current_device_arch()
+    buffer = DeviceArray(np.zeros(320, np.float32))
+    view = buffer.view((320 - offset,), offset=offset)
+    assert view.info().backed_elements == 320 - offset
+    assert array_info(view).backed_elements == 320 - offset
+    with pytest.raises(
+        ValueError, match=r"reaches past the 320 elements from its origin"
+    ):
+        buffer.view((321 - offset,), offset=offset)
+
+
+@pytest.mark.gpu
 def test_gpu_device_values_of_a_device_array_kind():
     current_device_arch()
     lengths = device_values(
