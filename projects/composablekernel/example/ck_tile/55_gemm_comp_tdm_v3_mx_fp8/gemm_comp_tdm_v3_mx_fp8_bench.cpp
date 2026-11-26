@@ -1041,6 +1041,27 @@ int dispatch_tile(const ck_tile::ArgParser& arg, const std::string& name)
                 return run<Instance<64, 64, 256, 2, 2, TdmEpi, CDataType, 16, 2, 2>>(arg, name);
             if(t == "128x64x256" && cl == "1x1")
                 return run<Instance<128, 64, 256, 2, 2, TdmEpi, CDataType, 16>>(arg, name);
+#if defined(CK_EX55_SMALL_CLUSTERS)
+                // EXPERIMENT: -DCK_EX55_SMALL_CLUSTERS: cluster shapes around 64x64 at 2x2, and 2x2
+                // clusters on the neighbouring tiles
+#define CK_EX55_SC(TM, TN, CM, CN)                   \
+    if(t == #TM "x" #TN "x256" && cl == #CM "x" #CN) \
+        return run<Instance<TM, TN, 256, 2, 2, TdmEpi, CDataType, 16, CM, CN>>(arg, name);
+            CK_EX55_SC(64, 64, 1, 2)
+            CK_EX55_SC(64, 64, 2, 1)
+            CK_EX55_SC(64, 64, 1, 4)
+            CK_EX55_SC(64, 64, 4, 1)
+            CK_EX55_SC(64, 64, 2, 4)
+            CK_EX55_SC(64, 64, 4, 2)
+            CK_EX55_SC(64, 64, 4, 4)
+            CK_EX55_SC(128, 64, 2, 2)
+            CK_EX55_SC(64, 128, 2, 2)
+#if !defined(CK_EX55_RA)
+            CK_EX55_SC(32, 64, 2, 2)
+            CK_EX55_SC(64, 32, 2, 2)
+#endif
+#undef CK_EX55_SC
+#endif
 #if !defined(CK_EX55_RA)
             // (not with the read-ahead loop: its LDS scale reads need whole groups of four scale
             // words per lane, i.e. two M and N iterations and two K atoms)
