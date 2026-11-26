@@ -223,6 +223,10 @@ public:
      * set_is_pass_by_value(true), or the (scalar, ScalarType::RUNTIME_PARAM)
      * constructor for a runtime-with-default scalar that floors the provider
      * at 1.2.0.
+     *
+     * set_value() sets the dims and strides to {1}. Call set_dim() and set_stride()
+     * afterwards when the scalar needs another rank (for example the [1, 1, 1, 1]
+     * SDPA dropout seed and offset).
      */
     template <typename T>
     TensorAttributes& set_value(T v) // NOLINT(readability-identifier-naming)
@@ -605,7 +609,7 @@ public:
      * @return Error indicating success or describing what is invalid
      *
      * Checks that:
-     * - Data type is set
+     * - Data type is set and has a hipDNN backend mapping
      * - Virtual tensors are not pass-by-value
      * - Dimensions and strides have matching sizes
      * - Dimensions are non-empty and positive
@@ -618,6 +622,11 @@ public:
             return {ErrorCode::ATTRIBUTE_NOT_SET,
                     "Tensor " + _name + " does not have a data type set"};
         }
+
+        HIPDNN_RETURN_IF_FALSE(toHipdnnDataType(_dataType).has_value(),
+                               ErrorCode::INVALID_VALUE,
+                               "Tensor " + _name + " data type " + to_string(_dataType)
+                                   + " is not supported by hipDNN lowering");
 
         HIPDNN_RETURN_IF_TRUE(_isVirtual && _isRuntimePassByValue,
                               ErrorCode::INVALID_VALUE,
@@ -678,7 +687,8 @@ public:
     }
 
     /// @brief Checks if two tensors are logically identical in terms of shape,
-    /// layout, data type, value, and structural role in the graph.
+    /// layout, data type, value, alignment, ragged layout (ragged offset tensor
+    /// compared logically, and its multiplier), and structural role in the graph.
     /// @note This intentionally ignores the human-readable string name.
     bool logicallyEquals(const TensorAttributes& other) const
     {
@@ -707,11 +717,28 @@ public:
         {
             return false;
         }
+        if(this->_alignment != other._alignment)
+        {
+            return false;
+        }
+        if(this->_raggedOffsetMultiplier != other._raggedOffsetMultiplier)
+        {
+            return false;
+        }
+        if(static_cast<bool>(this->_raggedOffset) != static_cast<bool>(other._raggedOffset))
+        {
+            return false;
+        }
+        if(this->_raggedOffset && !this->_raggedOffset->logicallyEquals(*other._raggedOffset))
+        {
+            return false;
+        }
 
         return true;
     }
 
     /// @brief Absolute equality check including non-functional metadata like names.
+    /// The ragged offset tensor is compared strictly as well.
     bool operator==(const TensorAttributes& other) const
     {
 
@@ -728,6 +755,10 @@ public:
             return false;
         }
         if(this->_uidSet && (this->_uid != other._uid))
+        {
+            return false;
+        }
+        if(this->_raggedOffset && *this->_raggedOffset != *other._raggedOffset)
         {
             return false;
         }

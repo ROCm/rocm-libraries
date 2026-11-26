@@ -246,6 +246,7 @@ BenchmarkProblems:
       BenchmarkFinalParameters:
         - ProblemSizes:
           - Exact: [256, 256, 1, 128]
+          - Exact: [256, 256, 1, 256, 256, 256, 320, 320] # padded lda/ldb
           - Exact: [256, 256, 1, 384]
           - Exact: [256, 256, 1, 640]
           - Exact: [256, 256, 1, 896]

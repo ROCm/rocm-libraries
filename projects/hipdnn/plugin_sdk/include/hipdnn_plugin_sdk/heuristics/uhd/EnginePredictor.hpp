@@ -52,9 +52,10 @@ inline std::shared_ptr<const Model> model(const UhdConfig& config)
         if(config.trainedAgainst.is_object())
         {
             // A slotted engine's model records `kmds` (RFC 0021 §9). The document's own
-            // version was gated when it was parsed, so both forms are admitted here.
+            // version was gated when it was parsed, so every form this build reads is
+            // admitted here.
             parser_detail::provenance(
-                config.trainedAgainst, "L1 UHD trained_against", /*slotForms=*/true);
+                config.trainedAgainst, "L1 UHD trained_against", parser_detail::UHD_VERSION_MINOR);
         }
         // Features from another revision: UNAVAILABLE, like a stale selector revision
         // (RFC 0019 §11.2). Covers configs that bypassed the loader's check.

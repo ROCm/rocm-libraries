@@ -128,6 +128,52 @@ TEST_F(TestLayernormPlanBuilder, IsApplicableReturnsTrueForValidBpropGraph)
 }
 
 // ============================================================================
+// isApplicable - launch thread limit
+// ============================================================================
+
+// Layernorm launches outerSize * stride blocks of 1024 threads, which must stay below 2^32
+// threads, so the largest accepted outer size is 2^22 - 1.
+TEST_F(TestLayernormPlanBuilder, IsApplicableFpropAcceptsOuterSizeBelowThreadLimit)
+{
+    auto builder = hipdnn_test_sdk::utilities::createValidLayernormFpropGraph({4, 1, 1, 1},
+                                                                              {4194303, 4, 1, 1});
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
+
+    EXPECT_TRUE(_planBuilder.isApplicable(_dummyHandle, graph));
+}
+
+TEST_F(TestLayernormPlanBuilder, IsApplicableFpropDeclinesOuterSizeAtThreadLimit)
+{
+    auto builder = hipdnn_test_sdk::utilities::createValidLayernormFpropGraph({4, 1, 1, 1},
+                                                                              {4194304, 4, 1, 1});
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
+
+    EXPECT_FALSE(_planBuilder.isApplicable(_dummyHandle, graph));
+}
+
+TEST_F(TestLayernormPlanBuilder, IsApplicableBpropAcceptsOuterSizeBelowThreadLimit)
+{
+    auto builder = hipdnn_test_sdk::utilities::createValidLayernormBwdGraph({4, 1, 1, 1},
+                                                                            {4194303, 4, 1, 1});
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
+
+    EXPECT_TRUE(_planBuilder.isApplicable(_dummyHandle, graph));
+}
+
+TEST_F(TestLayernormPlanBuilder, IsApplicableBpropDeclinesOuterSizeAtThreadLimit)
+{
+    auto builder = hipdnn_test_sdk::utilities::createValidLayernormBwdGraph({4, 1, 1, 1},
+                                                                            {4194304, 4, 1, 1});
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
+
+    EXPECT_FALSE(_planBuilder.isApplicable(_dummyHandle, graph));
+}
+
+// ============================================================================
 // isApplicable - invalid graphs
 // ============================================================================
 
@@ -380,11 +426,15 @@ TEST_F(TestLayernormPlanBuilder, GetCustomKnobsReturnsEmptyBprop)
 
 TEST_F(TestLayernormPlanBuilder, ElementCountAtTheKernelIndexLimit)
 {
-    constexpr int64_t LAST_FITTING = int64_t{UINT32_MAX} - 1;
     for(const bool backward : {false, true})
     {
         SCOPED_TRACE(backward ? "backward" : "forward");
-        for(const auto [columns, expected] : {std::pair{LAST_FITTING, true},
+        // Forward is bounded by the element index. Backward's LayernormBwdScaleBias launches
+        // ceil(columns / 1024) blocks of 1024 threads, so its last column count whose launch stays
+        // below 2^32 threads is 2^32 - 1024.
+        const int64_t lastFitting = backward ? (int64_t{1} << 32) - 1024 : int64_t{UINT32_MAX} - 1;
+        for(const auto [columns, expected] : {std::pair{lastFitting, true},
+                                              std::pair{lastFitting + 1, false},
                                               std::pair{int64_t{UINT32_MAX}, false},
                                               std::pair{(int64_t{1} << 32) + 1, false}})
         {

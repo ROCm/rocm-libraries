@@ -270,6 +270,7 @@ namespace TensileLite
                     for(auto module : copyModules)
                         detachImage(module);
                 m_loadedModuleNames.clear();
+                m_moduleByCodeObject.clear();
                 m_loadedCOFiles.forEachValue([](std::atomic<bool>& loaded) {
                     loaded.store(false, std::memory_order_release);
                 });
@@ -339,20 +340,23 @@ namespace TensileLite
                 std::cout << "loaded code object " << path << std::endl;
 
             {
-                std::lock_guard<std::mutex> guard(m_access);
-                recordModule(pending, m_moduleImages, [this](hipModule_t module) {
-                    m_modules.push_back(module);
-                });
-                m_loadedModuleNames.push_back(concatenate("File ", path));
-
                 //Isolate filename
                 size_t start = path.rfind('/');
                 start        = (start == std::string::npos) ? 0 : start + 1;
                 std::string fileName(path.begin() + start, path.end());
+                std::string key = removeXnack(fileName);
+
+                std::lock_guard<std::mutex> guard(m_access);
+                hipModule_t                 module
+                    = recordModule(pending, m_moduleImages, [this](hipModule_t module) {
+                          m_modules.push_back(module);
+                      });
+                m_moduleByCodeObject[key] = module;
+                m_loadedModuleNames.push_back(concatenate("File ", path));
+
                 if(fileName.rfind("Kernels.so-000-", 0) == 0)
                     m_helperKernelPath = path;
-                m_loadedCOFiles.insert(removeXnack(fileName), true)
-                    .store(true, std::memory_order_release);
+                m_loadedCOFiles.insert(key, true).store(true, std::memory_order_release);
             }
             Debug::Instance().markerStop();
             return hipSuccess;
@@ -721,10 +725,11 @@ namespace TensileLite
             return true;
         }
 
-        hipError_t SolutionAdapter::initKernel(std::string const& name)
+        hipError_t SolutionAdapter::initKernel(std::string const& name,
+                                               std::string const& codeObjectFile)
         {
             hipFunction_t function;
-            return getKernel(function, name);
+            return getKernel(function, name, codeObjectFile);
         }
 
         hipError_t SolutionAdapter::initKernels(std::vector<std::string> const& kernelNames)
@@ -748,7 +753,9 @@ namespace TensileLite
             return entry ? entry->load(std::memory_order_acquire) : nullptr;
         }
 
-        hipError_t SolutionAdapter::getKernel(hipFunction_t& rv, std::string const& name)
+        hipError_t SolutionAdapter::getKernel(hipFunction_t&     rv,
+                                              std::string const& name,
+                                              std::string const& codeObjectFile)
         {
             int copyIdx = m_currentRotationCopy.load();
 
@@ -788,6 +795,24 @@ namespace TensileLite
             {
                 rv = cached;
                 return hipSuccess;
+            }
+            else if(!codeObjectFile.empty())
+            {
+                // The kernel's own code object first, so a kernel that is there
+                // needs no lookup that fails.
+                auto own = m_moduleByCodeObject.find(removeXnack(codeObjectFile));
+                if(own != m_moduleByCodeObject.end())
+                {
+                    err = m_moduleApi.getFunction(&rv, own->second, name.c_str());
+                    if(err == hipSuccess)
+                    {
+                        m_kernels.insert(name, rv).store(rv, std::memory_order_release);
+                        return err;
+                    }
+                    if(err != hipErrorNotFound)
+                        return err;
+                    (void)m_moduleApi.getLastError(); // clear hipErrorNotFound
+                }
             }
 
             for(auto module : modules)
@@ -1223,7 +1248,7 @@ namespace TensileLite
                         return err;
                 }
 #endif
-                return getKernel(function, kernel.kernelName);
+                return getKernel(function, kernel.kernelName, kernel.codeObjectFile);
             };
             HIP_CHECK_RETURN_WITH_LOG(
                 findKernel(), [&](hipError_t error) {

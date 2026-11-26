@@ -152,6 +152,66 @@ def test_a_dataset_holds_one_binding(tmp_path):
         store.add(dataset, *store.from_collection(other))
 
 
+def test_contributions_built_by_different_compilers_join_one_dataset_with_a_warning(
+    tmp_path, capsys
+):
+    """The dataset's binding is the hard provenance; each contribution keeps its own
+    `codegen_revision`, and adding a second one says the timings mix compilers."""
+    dataset = tmp_path / "ds"
+
+    def built_by(name, codegen, selector="r"):
+        return _collection(
+            tmp_path,
+            name,
+            trained_against={
+                "selector_revision": selector,
+                "codegen_revision": codegen,
+            },
+        )
+
+    assert (
+        store.main(["--into", str(dataset), "--collection", str(built_by("a", "cg-A"))])
+        == 0
+    )
+    assert json.loads(capsys.readouterr().out)["warnings"] == []
+    assert (
+        store.main(["--into", str(dataset), "--collection", str(built_by("b", "cg-B"))])
+        == 0
+    )
+    printed = capsys.readouterr()
+    (warning,) = json.loads(printed.out)["warnings"]
+    assert "cg-A, cg-B" in warning and warning in printed.err
+    manifest = store.read_manifest(dataset)
+    assert manifest["trained_against"] == {"selector_revision": "r"}
+    assert [
+        c["trained_against"]["codegen_revision"] for c in manifest["contributions"]
+    ] == [
+        "cg-A",
+        "cg-B",
+    ]
+    # The selector revision is still the dataset's binding.
+    with pytest.raises(store.DatasetError, match="on trained_against"):
+        store.add(dataset, *store.from_collection(built_by("c", "cg-A", selector="s")))
+
+
+def test_a_holdout_from_another_compiler_does_not_warn_about_training(tmp_path, capsys):
+    """The warning is over the training contributions, as `load_dataset` decides the
+    model's `codegen_revision` over them: a holdout from another compiler leaves it, and a
+    dataset that holds no training contribution yet has nothing to warn about."""
+    dataset = tmp_path / "ds"
+    for name, codegen, purpose in (("b", "cg-B", "holdout"), ("a", "cg-A", "training")):
+        collection = _collection(
+            tmp_path,
+            name,
+            trained_against={"selector_revision": "r", "codegen_revision": codegen},
+        )
+        command = ["--into", str(dataset), "--collection", str(collection)]
+        assert store.main([*command, "--purpose", purpose]) == 0
+        printed = capsys.readouterr()
+        assert json.loads(printed.out)["warnings"] == []
+        assert "warning" not in printed.err
+
+
 def test_knob_addressing_that_contradicts_the_dataset_is_refused_and_nothing_is_written(
     tmp_path,
 ):

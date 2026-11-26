@@ -238,7 +238,7 @@ const std::vector<Refusal> REFUSALS = {
     {"RootIsNotAnObject", Base::NATIVE, [](nlohmann::json& doc) { doc = nlohmann::json::array(); }},
     {"UnknownRootKey", Base::NATIVE, [](nlohmann::json& doc) { doc["featuresHash"] = "x"; }},
     {"MissingVersion", Base::NATIVE, [](nlohmann::json& doc) { doc.erase("version"); }},
-    {"UnsupportedVersion", Base::NATIVE, [](nlohmann::json& doc) { doc["version"] = "1.2"; }},
+    {"UnsupportedVersion", Base::NATIVE, [](nlohmann::json& doc) { doc["version"] = "1.3"; }},
     {"IdIsNotAUuid", Base::NATIVE, [](nlohmann::json& doc) { doc["id"] = "model-1"; }},
     {"EmptyName", Base::NATIVE, [](nlohmann::json& doc) { doc["name"] = ""; }},
     {"NameIsNotAString", Base::NATIVE, [](nlohmann::json& doc) { doc["name"] = 3; }},
@@ -502,6 +502,33 @@ TEST(TestUhdParser, AcceptsEachSlotProvenanceForm)
     one["trained_against"]["kmds"] = nlohmann::json::array({one["trained_against"]["kmds"][0]});
     one["trained_against"]["kmds"][0]["slot"] = "p_9";
     EXPECT_NO_THROW(parseUhdConfig(one, descriptorPath()));
+}
+
+/// `codegen_revision` arrived with UHD 1.2: an older document recording it is refused, naming
+/// the version it needs, and a 1.2 one is read.
+TEST(TestUhdParser, ReadsACodegenRevisionOnlyFromVersion12)
+{
+    auto document = baseDocument(Base::NATIVE);
+    document["trained_against"]["codegen_revision"] = "codegen-a";
+    for(const auto* version : {"1.0", "1.1"})
+    {
+        SCOPED_TRACE(version);
+        document["version"] = version;
+        try
+        {
+            (void)parseUhdConfig(document, descriptorPath());
+            ADD_FAILURE() << "a codegen_revision under " << version << " was accepted";
+        }
+        catch(const std::invalid_argument& error)
+        {
+            const std::string message = error.what();
+            EXPECT_NE(message.find("records codegen_revision"), std::string::npos) << message;
+            EXPECT_NE(message.find("requires UHD version 1.2"), std::string::npos) << message;
+        }
+    }
+    document["version"] = "1.2";
+    EXPECT_EQ(parseUhdConfig(document, descriptorPath()).trainedAgainst.at("codegen_revision"),
+              "codegen-a");
 }
 
 /// The `trained_against` header grammar of RFC 0021 §9: the rows the packer, its schema and

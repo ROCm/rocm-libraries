@@ -10,6 +10,7 @@
 #include <hipdnn_frontend/detail/LayernormBackwardPacker.hpp>
 #include <hipdnn_frontend/detail/LayernormBackwardUnpacker.hpp>
 #include <hipdnn_frontend/detail/ScopedHipdnnBackendDescriptor.hpp>
+#include <hipdnn_frontend/node/detail/Utilities.hpp>
 
 namespace hipdnn_frontend::graph
 {
@@ -94,75 +95,33 @@ public:
                 || attributes.get_dbias()->get_dim() == attributes.get_scale()->get_dim(),
             ErrorCode::INVALID_VALUE,
             "LayernormBackwardNode requires equal shapes for dbias (output) and scale (input)");
-        if(attributes.normalized_dim_count != 0)
+        HIPDNN_RETURN_IF_FALSE(
+            attributes.get_normalized_dim_count() >= 0,
+            ErrorCode::INVALID_VALUE,
+            "LayernormBackwardNode requires a non-negative normalized_dim_count");
+
+        const auto& xDims = attributes.get_x()->get_dim();
+        const auto& scaleDims = attributes.get_scale()->get_dim();
+        if(xDims.empty() || scaleDims.empty())
         {
-            HIPDNN_RETURN_IF_FALSE(
-                attributes.get_normalized_dim_count() >= 0,
-                ErrorCode::INVALID_VALUE,
-                "LayernormBackwardNode requires a positive normalized_dim_count");
-            HIPDNN_RETURN_IF_FALSE(attributes.get_normalized_dim_count() <= static_cast<int64_t>(
-                                       attributes.get_x()->get_dim().size()),
-                                   ErrorCode::INVALID_VALUE,
-                                   "LayernormBackwardNode requires that normalized_dim_count is "
-                                   "less than or equal to the number of dimensions of x (input)");
-            auto batchDimCount = static_cast<int64_t>(attributes.get_x()->get_dim().size())
-                                 - attributes.get_normalized_dim_count();
-            auto scaleOnePadded
-                = attributes.get_scale()->get_dim().size() == attributes.get_x()->get_dim().size();
-            if(scaleOnePadded)
-            {
-                for(size_t i = 0; i < static_cast<size_t>(batchDimCount); ++i)
-                {
-                    HIPDNN_RETURN_IF_FALSE(
-                        attributes.get_scale()->get_dim()[i] == 1,
-                        ErrorCode::INVALID_VALUE,
-                        "LayernormBackwardNode requires that one-padded scale (input) conforms to "
-                        "the specified normalized_dim_count");
-                }
-            }
-            else
-            {
-                HIPDNN_RETURN_IF_FALSE(
-                    static_cast<int64_t>(attributes.get_scale()->get_dim().size())
-                        == attributes.get_normalized_dim_count(),
-                    ErrorCode::INVALID_VALUE,
-                    "LayernormBackwardNode requires that scale (input) conforms to the specified "
-                    "normalized_dim_count");
-            }
-            if(attributes.get_mean() != nullptr)
-            {
-                auto meanOnePadded = attributes.get_mean()->get_dim().size()
-                                     == attributes.get_x()->get_dim().size();
-                HIPDNN_RETURN_IF_TRUE(
-                    meanOnePadded ^ scaleOnePadded,
-                    ErrorCode::INVALID_VALUE,
-                    "LayernormBackwardNode requires that both mean (input) and scale (input) are "
-                    "one-padded or that both mean (input) and scale (input) are not one-padded");
-                if(meanOnePadded)
-                {
-                    for(auto i = static_cast<size_t>(batchDimCount);
-                        i < attributes.get_x()->get_dim().size();
-                        ++i)
-                    {
-                        HIPDNN_RETURN_IF_FALSE(
-                            attributes.get_mean()->get_dim()[i] == 1,
-                            ErrorCode::INVALID_VALUE,
-                            "LayernormBackwardNode requires that one-padded mean (input) conforms "
-                            "to the specified normalized_dim_count");
-                    }
-                }
-                else
-                {
-                    HIPDNN_RETURN_IF_TRUE(
-                        attributes.get_mean() != nullptr
-                            && static_cast<int64_t>(attributes.get_mean()->get_dim().size())
-                                   != batchDimCount,
-                        ErrorCode::INVALID_VALUE,
-                        "LayernormBackwardNode requires that mean (input) conforms to the "
-                        "specified normalized_dim_count");
-                }
-            }
+            return {};
         }
+
+        // Scale holds the last k dims of x, optionally preceded by 1s; mean and inv_variance
+        // hold the first n - k (batch) dims of x, optionally followed by k 1s.
+        int64_t normalizedDimCount = 0;
+        HIPDNN_CHECK_ERROR(
+            detail::deriveLayernormNormalizedDimCount(xDims,
+                                                      scaleDims,
+                                                      attributes.get_normalized_dim_count(),
+                                                      "LayernormBackwardNode",
+                                                      normalizedDimCount));
+        HIPDNN_CHECK_ERROR(detail::validateLayernormAffineIfSet(
+            attributes.get_scale(), xDims, normalizedDimCount, "Scale tensor"));
+        HIPDNN_CHECK_ERROR(detail::validateLayernormStatsIfSet(
+            attributes.get_mean(), xDims, normalizedDimCount, "Mean tensor"));
+        HIPDNN_CHECK_ERROR(detail::validateLayernormStatsIfSet(
+            attributes.get_inv_variance(), xDims, normalizedDimCount, "Inverse variance tensor"));
 
         return {};
     }
@@ -236,33 +195,19 @@ public:
             attributes.get_dbias()->set_stride(attributes.get_scale()->get_stride());
         }
 
-        // Infer normalized dimension count if not available
-        if(attributes.get_normalized_dim_count() <= 0)
+        // Normalized dim count: the explicit attribute if set, else derived from x and scale
+        const auto& xDims = attributes.get_x()->get_dim();
+        const auto& scaleDims = attributes.get_scale()->get_dim();
+        if(!xDims.empty() && !scaleDims.empty())
         {
-            if(attributes.get_x()->get_dim().size()
-               == attributes.get_scale()
-                      ->get_dim()
-                      .size()) // Dimensions not used by scale have been set to 1
-            {
-                int64_t normalizedDimCount = 1;
-                for(int64_t i = static_cast<int64_t>(attributes.get_scale()->get_dim().size()) - 1;
-                    i >= 0;
-                    --i)
-                {
-                    if(attributes.get_scale()->get_dim()[static_cast<size_t>(i)] == 1)
-                    {
-                        break;
-                    }
-                    normalizedDimCount
-                        = static_cast<int64_t>(attributes.get_scale()->get_dim().size()) - i;
-                }
-                attributes.set_normalized_dim_count(normalizedDimCount);
-            }
-            else // Dimensions not used by scale have been omitted
-            {
-                attributes.set_normalized_dim_count(
-                    static_cast<int64_t>(attributes.get_scale()->get_dim().size()));
-            }
+            int64_t normalizedDimCount = 0;
+            HIPDNN_CHECK_ERROR(
+                detail::deriveLayernormNormalizedDimCount(xDims,
+                                                          scaleDims,
+                                                          attributes.get_normalized_dim_count(),
+                                                          "LayernormBackwardNode",
+                                                          normalizedDimCount));
+            attributes.set_normalized_dim_count(normalizedDimCount);
         }
 
         return {};

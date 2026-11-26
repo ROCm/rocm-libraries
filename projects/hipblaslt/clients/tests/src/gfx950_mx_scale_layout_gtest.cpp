@@ -344,8 +344,8 @@ namespace
             auto packedResults = heuristic(packed, 1);
             if(packedResults.empty())
             {
-                // No kernel at all, which hipblasLtMatmul reports as for any problem.
-                EXPECT_EQ(matmul(packed, nullptr), HIPBLAS_STATUS_INTERNAL_ERROR);
+                // No kernel at all, which hipblasLtMatmul reports as NOT_SUPPORTED for any problem.
+                EXPECT_EQ(matmul(packed, nullptr), HIPBLAS_STATUS_NOT_SUPPORTED);
             }
             else
             {

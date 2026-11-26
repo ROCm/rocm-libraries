@@ -576,7 +576,7 @@ class TestGpuVsCpuValidation : public ::testing::Test
 {
 };
 
-using GpuCpuFpTypes = ::testing::Types<float, HalfType, BFloat16Type>;
+using GpuCpuFpTypes = ::testing::Types<float, HalfType, BFloat16Type, double>;
 TYPED_TEST_SUITE(TestGpuVsCpuValidation, GpuCpuFpTypes, );
 
 TYPED_TEST(TestGpuVsCpuValidation, AgreeOnPass)
@@ -637,6 +637,50 @@ TYPED_TEST(TestGpuVsCpuValidation, AgreeOnFail)
 
     ASSERT_EQ(gpuResult, cpuResult)
         << "GPU and CPU validators disagree: GPU=" << gpuResult << ", CPU=" << cpuResult;
+}
+
+TEST(TestGpuVsCpuValidationFp64, AgreeBeyondFloatRangeAndResolution)
+{
+    SKIP_IF_NO_DEVICES();
+
+    struct Case
+    {
+        double reference;
+        double implementation;
+        float atol;
+        float rtol;
+        bool expectedPass;
+    };
+    const double aboveFloatMax = 1e39;
+    const std::vector<Case> cases = {
+        {1e300, 1e300 * (1.0 + 5e-7), 0.0f, 1e-6f, true},
+        {1e300, 1e301, 0.0f, 1e-6f, false},
+        {1e300, -1e300, 0.0f, 1e-6f, false},
+        {aboveFloatMax, aboveFloatMax * (1.0 + 5e-7), 0.0f, 1e-6f, true},
+        {aboveFloatMax, 2.0 * aboveFloatMax, 0.0f, 1e-6f, false},
+        {aboveFloatMax, 1.0, 0.0f, 1e-6f, false},
+        {1.0, 1.0 + 1e-13, 1e-12f, 0.0f, true},
+        {1.0, 1.0 + 1e-9, 1e-12f, 0.0f, false},
+    };
+
+    for(const auto& testCase : cases)
+    {
+        SCOPED_TRACE(::testing::Message()
+                     << "reference=" << testCase.reference
+                     << " implementation=" << testCase.implementation << " atol=" << testCase.atol
+                     << " rtol=" << testCase.rtol);
+
+        Tensor<double> ref({1});
+        Tensor<double> impl({1});
+        ref.memory().hostData()[0] = testCase.reference;
+        impl.memory().hostData()[0] = testCase.implementation;
+
+        const GpuFpReferenceValidation<double> gpuValidator(testCase.atol, testCase.rtol);
+        const CpuFpReferenceValidation<double> cpuValidator(testCase.atol, testCase.rtol);
+
+        EXPECT_EQ(gpuValidator.allClose(ref, impl), testCase.expectedPass);
+        EXPECT_EQ(cpuValidator.allClose(ref, impl), testCase.expectedPass);
+    }
 }
 
 // ============================================================================

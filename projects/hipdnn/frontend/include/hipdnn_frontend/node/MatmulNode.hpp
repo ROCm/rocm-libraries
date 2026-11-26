@@ -74,6 +74,12 @@ public:
         const auto batchDims = aRank - minRank;
         HIPDNN_CHECK_ERROR(validateBroadcastableBatchDims(aDims, bDims, batchDims));
 
+        // Validate user-set output dimensions against the broadcast result [..., M, N]
+        if(detail::areTensorDimensionsSet(c))
+        {
+            HIPDNN_CHECK_ERROR(validateOutputDims(aDims, bDims, c->get_dim(), batchDims));
+        }
+
         return {};
     }
 
@@ -158,6 +164,48 @@ private:
                                       + std::to_string(i) + ": A has dim=" + std::to_string(aDimVal)
                                       + ", B has dim=" + std::to_string(bDimVal));
         }
+
+        return {};
+    }
+
+    static Error validateOutputDims(const std::vector<int64_t>& aDims,
+                                    const std::vector<int64_t>& bDims,
+                                    const std::vector<int64_t>& cDims,
+                                    size_t batchDims)
+    {
+        HIPDNN_RETURN_IF_NE(cDims.size(),
+                            aDims.size(),
+                            ErrorCode::INVALID_VALUE,
+                            std::string("MatmulNode: Output tensor C must have the same rank as ")
+                                + "A and B: C has rank=" + std::to_string(cDims.size())
+                                + ", A has rank=" + std::to_string(aDims.size()));
+
+        for(size_t i = 0; i < batchDims; ++i)
+        {
+            const auto expected = std::max(aDims[i], bDims[i]);
+            HIPDNN_RETURN_IF_NE(cDims[i],
+                                expected,
+                                ErrorCode::INVALID_VALUE,
+                                "MatmulNode: Output tensor C batch dimension at index "
+                                    + std::to_string(i) + " must be " + std::to_string(expected)
+                                    + " (max of A and B), got " + std::to_string(cDims[i]));
+        }
+
+        const auto aM = aDims[batchDims];
+        const auto cM = cDims[batchDims];
+        HIPDNN_RETURN_IF_NE(cM,
+                            aM,
+                            ErrorCode::INVALID_VALUE,
+                            "MatmulNode: Output rows must match (c[...,M,N] vs a[...,M,K]). Got "
+                                + std::to_string(cM) + " vs " + std::to_string(aM));
+
+        const auto bN = bDims[batchDims + 1];
+        const auto cN = cDims[batchDims + 1];
+        HIPDNN_RETURN_IF_NE(cN,
+                            bN,
+                            ErrorCode::INVALID_VALUE,
+                            "MatmulNode: Output columns must match (c[...,M,N] vs b[...,K,N]). Got "
+                                + std::to_string(cN) + " vs " + std::to_string(bN));
 
         return {};
     }

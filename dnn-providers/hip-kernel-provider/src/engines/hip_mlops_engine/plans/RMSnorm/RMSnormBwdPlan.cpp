@@ -110,6 +110,13 @@ RMSnormBwdPlan::RMSnormBwdPlan(RMSnormBwdParams&& params)
 {
 }
 
+std::vector<KernelLaunchShape>
+    RMSnormBwdPlan::launchShapes(int64_t outerSize, int64_t stride, int64_t innerSize)
+{
+    return {{"RMSnormBwdData", outerSize * stride, LOCAL_SIZE},
+            {"RMSnormBwdScaleBias", (innerSize + LOCAL_SIZE - 1) / LOCAL_SIZE, LOCAL_SIZE}};
+}
+
 size_t RMSnormBwdPlan::getWorkspaceSize([[maybe_unused]] const Handle& handle) const
 {
     // No workspace needed for RMS norm
@@ -133,11 +140,10 @@ void RMSnormBwdPlan::compile([[maybe_unused]] const IKernelCompiler& kernelCompi
     const int64_t stride = problem.stride();
     const int64_t outerSize = problem.outerSize();
     const int64_t innerSize = problem.innerSize();
-    if(outerSize * stride >= UINT32_MAX)
+    const auto shapes = launchShapes(outerSize, stride, innerSize);
+    for(const auto& shape : shapes)
     {
-        throw hipdnn_plugin_sdk::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-                                                       "Unsupported number of workgroups: "
-                                                           + std::to_string(outerSize * stride));
+        checkLaunchFitsThreadLimit(shape);
     }
 
     // Get activation parameters and activation mode
@@ -164,10 +170,9 @@ void RMSnormBwdPlan::compile([[maybe_unused]] const IKernelCompiler& kernelCompi
     const std::string yTypeString = getKernelParamTypeString(yDataType);
 
     // Calculate block and grid dimensions
-    const unsigned int xlocalsize = 256;
-    const auto xgridsizeBwdData = static_cast<unsigned int>(outerSize * stride);
-    const auto xgridsizeBwdScaleBias
-        = static_cast<unsigned int>((innerSize + xlocalsize - 1) / xlocalsize);
+    const auto xlocalsize = static_cast<unsigned int>(LOCAL_SIZE);
+    const auto xgridsizeBwdData = static_cast<unsigned int>(shapes[0].blocks);
+    const auto xgridsizeBwdScaleBias = static_cast<unsigned int>(shapes[1].blocks);
     const unsigned int ylocalsize = 1;
     const unsigned int ygridsize = 1;
     const unsigned int zlocalsize = 1;

@@ -248,7 +248,7 @@ TEST(TestBatchnormInferenceNodeVarianceExt, GatherHipdnnTensors)
     const GraphAttributes graphAttributes;
     const BatchnormInferenceNodeVarianceExt node(std::move(bnAttributes), graphAttributes);
 
-    std::unordered_set<std::shared_ptr<TensorAttributes>> allTensors;
+    hipdnn_frontend::detail::OrderedTensorSet allTensors;
     node.gather_hipdnn_tensors(allTensors);
 
     EXPECT_TRUE(allTensors.find(xTensor) != allTensors.end());

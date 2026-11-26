@@ -1542,24 +1542,24 @@ namespace TensileLite
                 {
                     if(problemType.activationComputeDataType == rocisa::DataType::BFloat16)
                     {
-                        args.template append<float>(name.c_str(), 0.f);
+                        args.template append<float>(name, 0.f);
                     }
                     else
                     {
-                        args.append(name.c_str(), 0, problemType.activationComputeDataType);
+                        args.append(name, 0, problemType.activationComputeDataType);
                     }
                 }
                 else
                 {
                     if(problemType.activationComputeDataType == rocisa::DataType::BFloat16)
                     {
-                        args.template append<float>(name.c_str(),
+                        args.template append<float>(name,
                                                     static_cast<float>((*std::get_if<BFloat16>(
                                                         &inputs.activationArgs[i]))));
                     }
                     else
                     {
-                        args.append(name.c_str(),
+                        args.append(name,
                                     inputs.activationArgs[i],
                                     problemType.activationComputeDataType);
                     }
@@ -4177,8 +4177,28 @@ namespace TensileLite
 
         if(!problemType.useScaleAB.empty()) // GSU dep
         {
-            args.template append<void const*>("scaleA", inputs.scaleA);
-            args.template append<void const*>("scaleB", inputs.scaleB);
+            auto scaleA = inputs.scaleA;
+            auto scaleB = inputs.scaleB;
+            if(problemType.useScaleAB == "Scalar")
+            {
+                // Only Half-to-Float8 narrowing consumes the Scalar scale in
+                // the main kernel. Null selects unit scale in conversion;
+                // other conversions still need their original scales here.
+                auto preScaledBeforeNarrowing
+                    = [](rocisa::DataType storage, rocisa::DataType compute) {
+                          return storage == rocisa::DataType::Half
+                                 && (compute == rocisa::DataType::Float8
+                                     || compute == rocisa::DataType::BFloat8
+                                     || compute == rocisa::DataType::Float8_fnuz
+                                     || compute == rocisa::DataType::BFloat8_fnuz);
+                      };
+                if(preScaledBeforeNarrowing(problem.a().dataType(), problem.computeInputTypeA()))
+                    scaleA = nullptr;
+                if(preScaledBeforeNarrowing(problem.b().dataType(), problem.computeInputTypeB()))
+                    scaleB = nullptr;
+            }
+            args.template append<void const*>("scaleA", scaleA);
+            args.template append<void const*>("scaleB", scaleB);
         }
         if(problemType.useScaleCD) // GSU dep
         {
@@ -4219,24 +4239,24 @@ namespace TensileLite
                 {
                     if(problemType.activationComputeDataType == rocisa::DataType::BFloat16)
                     {
-                        args.template append<float>(name.c_str(), 0.f);
+                        args.template append<float>(name, 0.f);
                     }
                     else
                     {
-                        args.append(name.c_str(), 0, problemType.activationComputeDataType);
+                        args.append(name, 0, problemType.activationComputeDataType);
                     }
                 }
                 else
                 {
                     if(problemType.activationComputeDataType == rocisa::DataType::BFloat16)
                     {
-                        args.template append<float>(name.c_str(),
+                        args.template append<float>(name,
                                                     static_cast<float>((*std::get_if<BFloat16>(
                                                         &inputs.activationArgs[i]))));
                     }
                     else
                     {
-                        args.append(name.c_str(),
+                        args.append(name,
                                     inputs.activationArgs[i],
                                     problemType.activationComputeDataType);
                     }
@@ -7250,30 +7270,26 @@ namespace TensileLite
                                   << " (<=0) for kernel '" << self.kernelName
                                   << "'; clamping to 1 for origami grid selection.\n";
                     }
-                    origami::config_t origami_config = {
-                        .mt = {static_cast<size_t>(self.sizeMapping.macroTile.x),
-                               static_cast<size_t>(self.sizeMapping.macroTile.y),
-                               static_cast<size_t>(self.sizeMapping.depthU)},
-                        .mi = {static_cast<size_t>(self.sizeMapping.matrixInstruction[0]),
-                               static_cast<size_t>(self.sizeMapping.matrixInstruction[1]),
-                               static_cast<size_t>(self.sizeMapping.matrixInstruction[2])},
-                        .occupancy = std::max(self.sizeMapping.CUOccupancy, static_cast<int>(1)),
-                        .workgroup_mapping         = self.sizeMapping.workGroupMapping,
-                        // The spatial-cluster schedule re-cuts this grid and checks its own
-                        // (unpadded) workspace requirement, so the per-WG tile check must not
-                        // turn the exact size it reports into a whole-tile grid.
-                        .workspace_size            = self.usesStreamKSpatialCluster()
-                                                         ? std::numeric_limits<size_t>::max()
-                                                         : problem.workspaceSize(),
-                        .workspace_size_per_elem_c = self.sizeMapping.isPersistentDataParallel()
-                                                         ? static_cast<size_t>(DataTypeInfo::Get(self.problemType.computeType).elementSize)
-                                                         : self.sizeMapping.workspaceSizePerElemC,
-                        // The existing grid predictor was calibrated with this model
-                        // for whole-tile launches. This adapter preserves its grid policy;
-                        // the DataParallel launch itself has no reduction strategy.
-                        .reduction_strategy = self.sizeMapping.isPersistentDataParallel()
-                                                  ? origami::reduction_t::tree : reductionStrat,
-                    };
+                    // The config Origami ranked this kernel with, and the launch's own workspace
+                    // and reduction.
+                    origami::config_t origami_config = makeOrigamiConfig(self);
+                    // The spatial-cluster schedule re-cuts this grid and checks its own
+                    // (unpadded) workspace requirement, so the per-WG tile check must not
+                    // turn the exact size it reports into a whole-tile grid.
+                    origami_config.workspace_size = self.usesStreamKSpatialCluster()
+                                                        ? std::numeric_limits<size_t>::max()
+                                                        : problem.workspaceSize();
+                    origami_config.workspace_size_per_elem_c
+                        = self.sizeMapping.isPersistentDataParallel()
+                              ? static_cast<size_t>(
+                                    DataTypeInfo::Get(self.problemType.computeType).elementSize)
+                              : self.sizeMapping.workspaceSizePerElemC;
+                    // The existing grid predictor was calibrated with this model
+                    // for whole-tile launches. This adapter preserves its grid policy;
+                    // the DataParallel launch itself has no reduction strategy.
+                    origami_config.reduction_strategy = self.sizeMapping.isPersistentDataParallel()
+                                                            ? origami::reduction_t::tree
+                                                            : reductionStrat;
 
                     TENSILE_ASSERT_EXC(hipAMDGPU->analyticalHardware != nullptr);
 

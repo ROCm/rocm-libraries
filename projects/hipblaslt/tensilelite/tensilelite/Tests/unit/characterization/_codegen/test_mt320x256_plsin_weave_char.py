@@ -1,6 +1,7 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
-"""MT320x256 last-K PLSIN Weave: fused arm uses permlane16, plain keeps ds_bpermute.
+"""MT320x256 last-K PLSIN Weave: fused arm uses permlane16, plain keeps ds_bpermute
+unless the store cacheline align moves it to permlane16 as well.
 
 MIWT [10,8] has a tile product of 80, past the 64 ``spillFree`` admits, so this
 is the one emit in the unit suite that resolves PLSIN True through
@@ -67,13 +68,25 @@ def test_mt320x256_plsin_weave_solutions_are_in_scope():
         assert st["MIWaveTile"][0] * st["MIWaveTile"][1] > 64
 
 
-def test_mt320x256_plsin_weave_emits_dual_shuffle():
-    results = emit_kernels_from_config(_CONFIG, limit=2, arch=_ARCH, canonical=True)
-    assert results, f"no kernels from {_CONFIG}"
+def _emit_group0(config):
+    results = emit_kernels_from_config(config, limit=2, arch=_ARCH, canonical=True)
+    assert results, f"no kernels from {config}"
     assert all(err == 0 for (_b, _s, err) in results), (
         f"emit failed: {[(b, e) for b, _s, e in results if e != 0]}"
     )
-    for base, src, _err in results:
+    return results
+
+
+def test_mt320x256_plsin_weave_emits_dual_shuffle(tmp_path):
+    """Without the store cacheline align each arm keeps its own shuffle."""
+    with open(_CONFIG) as f:
+        text = f.read()
+    gate = "        - PostLoopStoreInNll: [true]\n"
+    assert gate in text, f"{_CONFIG}: no PostLoopStoreInNll fork to hang the override on"
+    config = tmp_path / "mt320x256_plsin_weave_noalign.yaml"
+    config.write_text(text.replace(gate, gate + "        - StoreCachelineAlign: [false]\n"))
+
+    for base, src, _err in _emit_group0(str(config)):
         fused, rest = _split_fused_vs_rest(base, src)
         assert "v_permlane16_swap_b32" in fused, (
             f"{base}: fused Weave store should use v_permlane16_swap"
@@ -82,6 +95,50 @@ def test_mt320x256_plsin_weave_emits_dual_shuffle():
         assert "ds_bpermute_b32" in rest, (
             f"{base}: plain NLL/post-loop should keep ds_bpermute"
         )
+
+
+def test_mt320x256_store_cacheline_align_puts_the_plain_store_on_permlane16():
+    """With the store cacheline align (the default) the plain store takes the permlane16
+    layout too: the align blends in that layout, so the plain arm cannot stay on
+    ds_bpermute. The fused arm is unchanged."""
+    for base, src, _err in _emit_group0(_CONFIG):
+        fused, rest = _split_fused_vs_rest(base, src)
+        assert "v_permlane16_swap_b32" in fused, (
+            f"{base}: fused Weave store should use v_permlane16_swap"
+        )
+        assert rest, f"{base}: missing plain-NLL / post-loop tail"
+        assert "v_permlane16_swap_b32" in rest, (
+            f"{base}: the aligned plain store should use v_permlane16_swap"
+        )
+        assert "ds_bpermute_b32" not in rest, (
+            f"{base}: the aligned plain store should not keep ds_bpermute"
+        )
+
+
+def test_one_pair_wave_is_untouched_by_the_store_cacheline_align(tmp_path):
+    """A wave two MFMA tiles tall holds one paired store per column, never both halves of
+    a line, so the align has nothing to blend. Such a kernel must come out the same with
+    the parameter on (the default) as with it off: same code, and no SCA token in its
+    name. Same problem as above with the wave tile cut to [2, 2] (MT64x64)."""
+    with open(_CONFIG) as f:
+        text = f.read()
+    tile = "          - [16, 16, 128, 1,  1, 10, 8,  2, 2]  # MT 320x256, MIWT=[10,8]\n"
+    gate = "        - PostLoopStoreInNll: [true]\n"
+    assert tile in text and gate in text, f"{_CONFIG}: fork lines this test rewrites have moved"
+    small = text.replace(tile, "          - [16, 16, 128, 1,  1, 2, 2,  2, 2]\n")
+    on = tmp_path / "mt64x64_align_default.yaml"
+    off = tmp_path / "mt64x64_align_off.yaml"
+    on.write_text(small)
+    off.write_text(small.replace(gate, gate + "        - StoreCachelineAlign: [false]\n"))
+
+    r_on = emit_kernels_from_config(str(on), limit=1, arch=_ARCH, canonical=True)
+    r_off = emit_kernels_from_config(str(off), limit=1, arch=_ARCH, canonical=True)
+    assert r_on and r_off and all(e == 0 for _b, _s, e in r_on + r_off)
+    (base_on, src_on, _), (base_off, src_off, _) = r_on[0], r_off[0]
+    assert "_MIWT2_2_" in src_on, f"{base_on}: not the one-pair wave this test is about"
+    assert "_SCA1" not in src_on, f"{base_on}: named as aligned though nothing can be aligned"
+    assert base_on == base_off
+    assert src_on == src_off
 
 
 # ── PGR=2: the NGLL arms ──────────────────────────────────────────────────

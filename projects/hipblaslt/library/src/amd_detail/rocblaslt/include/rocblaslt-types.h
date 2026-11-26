@@ -188,6 +188,8 @@ typedef enum rocblaslt_epilogue_
     ROCBLASLT_EPILOGUE_SIGMOID            = 1024,
     ROCBLASLT_EPILOGUE_SWISH_EXT          = 65536,
     ROCBLASLT_EPILOGUE_SWISH_BIAS_EXT     = 65540,
+    ROCBLASLT_EPILOGUE_SWISH_AUX_EXT      = 65664,
+    ROCBLASLT_EPILOGUE_SWISH_AUX_BIAS_EXT = 65668,
     ROCBLASLT_EPILOGUE_CLAMP_EXT          = 131072,
     ROCBLASLT_EPILOGUE_CLAMP_BIAS_EXT     = 131076,
     ROCBLASLT_EPILOGUE_CLAMP_AUX_EXT      = 131200,
@@ -272,7 +274,8 @@ typedef enum rocblaslt_status_
     rocblaslt_status_not_initialized         = 10, /**< descriptor has not been initialized. */
     rocblaslt_status_type_mismatch           = 11, /**< index types do not match. */
     rocblaslt_status_requires_sorted_storage = 12, /**< sorted storage required. */
-    rocblaslt_status_continue                = 13  /**< nothing preventing function to proceed. */
+    rocblaslt_status_continue                = 13, /**< nothing preventing function to proceed. */
+    rocblaslt_status_not_supported           = 14  /**< no algorithm supports the problem. */
 } rocblaslt_status;
 
 /*! \ingroup types_module

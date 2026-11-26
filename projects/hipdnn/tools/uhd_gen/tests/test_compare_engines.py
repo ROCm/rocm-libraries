@@ -12,14 +12,14 @@ pd = pytest.importorskip("pandas")
 from uhd_gen.compare_engines import main  # noqa: E402
 
 
-def _spec(path, engine, metric, rows, label=None):
+def _spec(path, engine, metric, rows, label=None, trained_against=None):
     """`LABEL=corpus.csv` for rows of (graph, tflops, avgTimeMs[, device]) collected under
-    `metric`."""
+    `metric`, by an engine bound to `trained_against`."""
     binding = json.dumps(
         {
             "engine": engine,
             "metric": metric,
-            "trained_against": {"selector_revision": "r1"},
+            "trained_against": trained_against or {"selector_revision": "r1"},
         }
     )
     pd.DataFrame(
@@ -84,6 +84,35 @@ def test_a_label_naming_two_engines_in_one_metric_is_refused(monkeypatch, tmp_pa
     ]
     with pytest.raises(SystemExit, match="mixes engines"):
         _run(monkeypatch, tmp_path, specs)
+
+
+@pytest.mark.parametrize("drift", ["codegen_revision", "selector_revision"])
+def test_corpora_from_another_compiler_are_one_contract_another_selector_is_not(
+    monkeypatch, tmp_path, drift
+):
+    """Two corpora of one label: code objects rebuilt by another compiler are measured
+    together, the best of both; another selector revision is another contract."""
+    bound = {"selector_revision": "r1", "codegen_revision": "cg-A"}
+    specs = [
+        _spec(tmp_path / "a1.csv", "A", "tflops", [("g1", 100, 1.0)], None, bound),
+        _spec(
+            tmp_path / "a2.csv",
+            "A",
+            "tflops",
+            [("g1", 120, 0.8)],
+            None,
+            {**bound, drift: "other"},
+        ),
+        _spec(tmp_path / "b.csv", "B", "tflops", [("g1", 110, 0.9)]),
+    ]
+    if drift == "selector_revision":
+        with pytest.raises(SystemExit, match="mixes engines or selector contracts"):
+            _run(monkeypatch, tmp_path, specs)
+        return
+    code, report = _run(monkeypatch, tmp_path, specs)
+    assert code == 0
+    tflops = json.loads(report.read_text(encoding="utf-8"))["metrics"]["tflops"]
+    assert tflops["per_graph"]["g1"] == {"A": 120.0, "B": 110.0}
 
 
 def test_an_engines_measurements_on_two_devices_are_not_merged(monkeypatch, tmp_path):
