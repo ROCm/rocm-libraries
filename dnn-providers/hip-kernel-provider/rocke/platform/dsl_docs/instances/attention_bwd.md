@@ -70,7 +70,7 @@ knob value, a refused value, or a recorded design; no shipped kernel emits it.
 | `library/kernels/{gfx942,gfx950}/attention_dense_bwd.py` | `Gfx942AttentionDenseBwdSpec` / `Gfx950AttentionDenseBwdSpec`: `ArchAttentionDenseBwdSpec` (`attention_dense_bwd_spec.py`, the shared spec plus `body_variant`) bound to the target, and `build_attention_dense_bwd(spec, *, arch)` |
 | `library/kernels/common/attention_dense_bwd_plan.py` | `dense_bwd_spec_for`, `attn_dense_bwd_plan` (general prep / converts / workspace, dense main launch, dense dQ launch under split) |
 | `library/kernels/common/attention_dense_bwd_dq.py` | `AttentionDenseBwdDqSpec`, `validate_attn_dense_bwd_dq_spec`, `dense_dq_static_classes`, the `rocke.attn_dense_bwd_dq.v1` ABI list, `build_attention_dense_bwd_dq` (the dense split dQ kernel) |
-| `library/kernels/common/attention_bwd_comgr.py` | the production comgr of the compile-only paths without importing torch (`ROCKE_COMGR_LIB` pinned by path) and the process-tree comgr cache directory (11) |
+| `library/kernels/common/attention_bwd_comgr.py` | the process-tree directory of comgr's code-object cache (11) |
 | `library/kernels/common/attention_bwd_cache.py` | the on-disk code-object cache shared by the run glue (opt-in, `ROCKE_BWD_HSACO_CACHE`), the tests' pre-build, the sweep and the timing harness: toolchain identity, source hash, keys, atomic entries |
 | `library/dispatch/attention_bwd/tuning_common.py` | the knob registry (`KnobAxis`), `backward_spec_legality` and the known-wrong values `BWD_KNOWN_WRONG_KNOBS` (empty) |
 | `library/dispatch/attention_bwd/unified_tuning.py` | the unified family's knob axes, `unified_spec_legality` and the tuned page-tile table (8.3) |
@@ -114,14 +114,11 @@ share, and relies on two that the platform now carries itself:
   the parity emitter `library/tests/parity/barrier_fence_emit.py` (the C++
   engine lowers its serialized probe and backward kernels to the Python
   bytes, `tests/test_barrier_fence_parity_emit.py`).
-* **The LLVM flavor of a pinned torch comgr**: both engines resolve an AUTO
+* **The LLVM flavor of the loaded comgr**: both engines resolve an AUTO
   flavor from the LLVM version of the comgr they load (`platform/cpp/core/
   lower_llvm/core.cpp`, `ll_resolve_flavor`; `core/lower_llvm.py`,
-  `_detect_llvm_flavor`), so a `ROCKE_COMGR_LIB` naming torch's bundled comgr
-  gives one flavor in both (`platform/tests/test_rocke.py`,
-  `TestCrossEngineFlavorAutoResolution`). The package's `version.py` still
-  dates the library for the toolchain identity
-  (`runtime/comgr.py::resolved_lib_rocm_version`, Python only).
+  `_detect_llvm_flavor`), so a `ROCKE_COMGR_LIB` gives one flavor in both
+  (`platform/tests/test_rocke.py`, `TestCrossEngineFlavorAutoResolution`).
 * **The gfx942 3-D tiled attention kernel name**: the C++ glue
   (`platform/cpp/instances/gfx942/attention_tiled_3d_gfx942_attn_tiled_3d_public_glue.cpp`)
   adds the `fnuz` name token of an fp8 KV cache that the Python builder
@@ -953,7 +950,7 @@ flight) and stores them to their slot at the end of the step; the DMA ring
 with a source-side XOR) and waits `vmcnt(N)` with `N` from its wait model. The
 copy's 64-bit global base is an SGPR operand (`"s"`): it is the slab pointer
 formed again from its base and a `readfirstlane`'d byte offset
-(`RowSlab.sgpr_ptr`, `WsSlab.sgpr_ptr`), since the production compiler can keep
+(`RowSlab.sgpr_ptr`, `WsSlab.sgpr_ptr`), since the compiler can keep
 the wave-uniform pointer in a VGPR pair and hand that to the operand, which
 the assembler rejects (gfx950 debug d128 THD tiles with `stage_table_atomics`).
 Every in-step barrier is LDS-only; the step ends with the ring's wait and one
@@ -1534,7 +1531,7 @@ audit of whole `asm_g13` kernels built at the floor, with and without
 `s_in_agpr`, checks that every asm MFMA result
 is read no earlier than the table allows and that no VALU write of an asm MFMA
 source lands inside the lead window. Before the lead `s_nop`, that audit
-flagged a gfx950 d64 `asm_g13` kernel over `xt_lds` (production comgr: a
+flagged a gfx950 d64 `asm_g13` kernel over `xt_lds` (on the llvm22 lane: a
 `v_cvt_pk_f16_f32` one wait state before an asm MFMA), and the kernel gave
 non-finite dV on the device; with it the audit is clean and the asm variants
 pass under every XT / `xor` configuration on gfx942 and gfx950. The same audit
@@ -2298,7 +2295,7 @@ Runtime and aux values:
 | Barrier-fence parity (`tests/parity/barrier_fence_emit.py` with `tests/test_barrier_fence_parity_emit.py`; `platform/tests/core/test_barrier_fence.{py,cpp}`) | CPU; the cross-engine part with `rocke_engine` built | each barrier gets exactly its fence emission in both engines; the serialized IR keeps the fence; the C++ engine lowers the serialized backward kernels to the Python bytes | that LLVM keeps LDS accesses on their side of a barrier (next row) |
 | Fence in the code object (`tests/test_attention_bwd_barrier_fence.py`) | compile (comgr + `llvm-objdump`) | LDS bytes read and written between consecutive prologue barriers are the same in the ISA as in the IR; the unfenced kernel shows the crossing (negative control) | |
 | IR structure (`tests/test_attention_bwd_ir.py` and the family IR tests; list below) | CPU | ABI order, barrier placement, matrix-op and atomic counts, address widths, knob effects | numerics |
-| Resource gate (below) | compile, `llvm22` with the production comgr | zero scratch and spills, register and LDS budgets, AGPR copy budget on every enumerated instance | correctness, speed |
+| Resource gate (below) | compile, on its reference toolchain until AICK-3320 (other compilers skip) | zero scratch and spills, register and LDS budgets, AGPR copy budget on every enumerated instance | correctness, speed |
 | Device numerics (`tests/test_attention_bwd_numeric.py` and the family numeric tests) | gfx942, gfx950, gfx1151, gfx1201 | results within the declared per-dtype tolerance of an independent float64 oracle (`tests/_attention_bwd_harness.py`, `rocke.numeric.sdpa_reference`), bitwise claims of the bitwise levers, dead rows, negative controls | speed |
 | Mutation tests (`tests/test_attention_bwd_mutations.py`, `test_attention_bwd_unified_mutations.py`) | device | the numeric tests catch injected kernel defects | |
 | Host checks (`tests/test_attention_bwd_host_checks.py`) and the paged block-id guard (`tests/test_attention_bwd_paged_guard.py`) | CPU; the guard's canary runs on a device | every host-check code is reached by a malformed input and valid inputs pass (12.7); an out-of-range block id never addresses outside the caches | that a caller runs the checks (the run API trusts its pointers) |
@@ -2313,33 +2310,33 @@ Runtime and aux values:
   `accum_offset`), occupancy at least 1, LDS within the per-arch capacity and
   not above the planner's total, AGPR copies in every matrix loop within
   `agpr_copy_budget`, and an SGPR watch level whose crossing is treated as a
-  failure. A result counts only on the `llvm22` flavor with the production
-  comgr vintage (`GATE_FLAVOR`, `GATE_COMGR_ROCM`); other toolchains skip.
+  failure. Tests use the loaded compiler
+  ([the rule](../reference/env_flags.md#compiler-detection-and-provenance));
+  this gate is the one exception left: its thresholds were calibrated on one
+  toolchain (`GATE_FLAVOR`, `GATE_COMGR_ROCM`) and a result counts only there,
+  until AICK-3320 unpins it. On any other compiler its cases skip, as their
+  `rocke.tests.pending_lanes` records say.
   The gate tests compile through `compile_or_skip`: a compile error skips
   only where the loaded toolchain is not the gate's (another flavor, another
   comgr, or a comgr without the target); on the gate's toolchain a kernel the
   validator admits must compile, so the error fails the test.
-  The production comgr is the torch wheel's bundled library. The library
-  `conftest`, the compile cache's toolchain identity and the gate tests pin it
-  by path (`ROCKE_COMGR_LIB`) without importing torch
-  (`kernels/common/attention_bwd_comgr.py`; the platform names the ROCm
-  vintage of a library in a torch package's `lib` directory from that
-  package's `version.py` text, so the flavor follows it here and in the fresh
-  compile processes, which inherit the pin); an explicit `ROCKE_COMGR_LIB`
-  wins and `ROCKE_BWD_NO_COMGR_PIN=1` opts out. No compile-only path (IR
-  checks, resource gate, pre-build, sweep candidate compile) imports torch.
-  The same step gives comgr's own code-object cache a directory of the
-  process tree: a new `<temp>/rocke-comgr-cache-<user>-*` made by the first
+  No compile-only path (IR checks, resource gate, pre-build, sweep candidate
+  compile) imports torch, and none chooses the comgr: each uses the one
+  rocKE's discovery loads. The library `conftest` and the compile cache's
+  toolchain identity give comgr's own code-object cache a directory of the
+  process tree (`kernels/common/attention_bwd_comgr.py`;
+  `ROCKE_BWD_NO_COMGR_PIN=1` opts out).
+  That directory is a new `<temp>/rocke-comgr-cache-<user>-*` made by the first
   process that pins it, inherited by its children (pool workers, shards) and
   removed when that process exits (an explicit `AMD_COMGR_CACHE_DIR` is kept;
-  `AMD_COMGR_CACHE=0` turns the cache off). Its default under `~/.cache` on a
+  `AMD_COMGR_CACHE=0` turns the cache off). comgr's default under `~/.cache` on a
   network home is shared by every job: looking up, writing and pruning it
   cost more than the compile, and it can return an object another job's
   process compiled (for an `iglp_opt(1)` kernel that object depends on that
   process's compile history; rocKE compiles such a kernel in a fresh process,
   section 3.5a).
   The resolved specs that fail the gate (or crash the code-object compiler)
-  on the production compiler, found by compiling every gate row of the
+  on the gate's reference toolchain, found by compiling every gate row of the
   suites (the IR suite's instances and knob instances, the schedule values
   over the gate variants, the knob value sets on the default tiles and on the
   device test's cases, the counted-wait and mirror-pairing rows and their

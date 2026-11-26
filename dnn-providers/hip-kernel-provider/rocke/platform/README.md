@@ -35,18 +35,17 @@ two engines must stay byte-identical (see [`dsl_docs/development/engine_parity.m
 
 ## Prerequisites
 
-- **ROCm 7.x** with `libamd_comgr` and `libamdhip64` on the dynamic-linker path
-  (7.2 recommended). AUTO selects the IR flavor from the loaded COMGR
-  compiler’s LLVM version; ROCm release metadata does not select it. ROCm is a
-  system dependency, not a pip package.
+- **ROCm 10.x** with `libamd_comgr` and `libamdhip64`, which rocKE finds itself
+  ([BUILD.md](BUILD.md#runtime-finding-rocm-libamd_comgr--libamdhip64);
+  `ROCKE_COMGR_LIB` / `ROCKE_HIP_LIB` select others). AUTO selects the IR flavor
+  from the loaded COMGR compiler’s LLVM version; ROCm release metadata does not
+  select it. ROCm is a system dependency, not a pip package.
 - **Python 3.10+**, a C++20 compiler (`amdclang++`/`clang++`/`g++`), CMake 3.16+
   (3.18+ for the `cpp/bindings` pybind module). The C++ build needs the Python
   interpreter too: it generates the engine's intrinsic arch-domain table from the
   committed JSON columns (`tools/gen_arch_domain_cpp.py`), standard library only.
 - Python deps: `pip install -r requirements.txt` (adds `numpy`, plus `pytest` /
-  `pybind11` in the `dev` extra). **torch** must be the ROCm build for your
-  system, installed separately from the ROCm wheel index (not via this repo),
-  for example: `pip install --index-url https://download.pytorch.org/whl/rocm7.0 torch`.
+  `pybind11` in the `dev` extra). rocKE does not use torch.
 - GPU lanes need a HIP-visible device; on a shared box that may require running
   under `sudo -E` (or membership in the `video`/`render` groups).
 

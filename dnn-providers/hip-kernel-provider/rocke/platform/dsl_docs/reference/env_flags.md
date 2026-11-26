@@ -204,3 +204,16 @@ and a kernel that needs an option the loaded compiler lacks raises
 contract and the table are in `rocke.runtime.compiler_options`;
 `tools/gen_compiler_options.py` measures it, and the CTest
 `rocke_compiler_options_reproducibility` re-measures the loaded compiler's column.
+
+**Tests.** A test uses the compiler this discovery loads on the host it runs
+on (ROCm 10.x; `ROCKE_COMGR_LIB` when set, else the search in
+[`BUILD.md`](../../BUILD.md#runtime-finding-rocm-libamd_comgr--libamdhip64)),
+and asks that compiler what it can do (`loaded_compiler_info()`,
+`rocke.tests.comgr.require_comgr_target`). It pins no LLVM flavor and no ROCm
+release, decides nothing on the comgr's ROCm release, and uses neither torch
+nor torch's comgr. A test that cannot hold on some compilers has a record in
+`rocke.tests.pending_lanes` (a measured budget or a quarantine names the
+compilers), with a ticket and an expiry, and nowhere else.
+`rocke_toolchain_pins_check` and `rocke_no_torch_check` hold the tree to this
+(see the "No toolchain pins" and "No torch" properties in
+[`TESTING.md`](../../../TESTING.md)).

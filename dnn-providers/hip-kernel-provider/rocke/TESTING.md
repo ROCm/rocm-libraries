@@ -704,13 +704,14 @@ work to quick/standard pre-merge and post-merge runs;
 [§5.0.2](#502-ci-shards-and-rocke-item-sharding) says which CI jobs run
 comprehensive and full today. Fast
 counted/resource files remain source-runner coverage rather than expanding the
-existing attention CTest. The compiler gate preserves the
-existing resource-table qualification:
-LLVM 22 with the reference ROCm 7.2 comgr. Its register thresholds and final-ISA
-expectations are calibrated to that toolchain; LLVM 23 and LLVM 24 remain valid
-emission/parity profiles but are not qualified by this code-object resource gate.
-An unavailable or mismatched reference compiler produces one gate-level outcome
-before any rows compile. Exact installed
+existing attention CTest. Tests use the loaded compiler
+([the rule](platform/dsl_docs/reference/env_flags.md#compiler-detection-and-provenance)).
+The backward resource gate is the one exception left: its thresholds keep the
+toolchain they were calibrated on until AICK-3320 unpins it, so on any other
+compiler the compiler gate's preflight skips every row, as its
+`rocke.tests.pending_lanes` record says, and the source runner reports
+INCOMPLETE. A missing target or `llvm-objdump` still stops the gate before any
+rows compile. Exact installed
 CTest names and scopes live in the
 [rocKE test inventory](platform/tests/README.md#library-unit-and-explicit-host-gates).
 
@@ -1753,6 +1754,17 @@ Cross-cutting properties every change must preserve:
   remove a use, remove its line (or its kind); never add one. Names that only
   carry torch (`run_unified_attention_torch`) are not uses:
   `python -m rocke.tests.torch_uses --names` lists them.
+- **No toolchain pins** — tests use the compiler rocKE's discovery loads; the
+  rule is in
+  [`env_flags.md`](platform/dsl_docs/reference/env_flags.md#compiler-detection-and-provenance).
+  `rocke_toolchain_pins_check` (`platform/tests/tools/test_toolchain_pins.py`,
+  build tree, standard tier; in pull-request CI the `rocke-toolchain-pins`
+  pre-commit hook) reads every test and library Python file with
+  `rocke.tests.toolchain_pins` (which names the kinds of pin) and fails on a
+  pin that `platform/tests/tools/toolchain_pins_allowlist.txt` does not list,
+  and on a listed line that no longer matches the tree. Each line names the
+  issue that removes it; when you remove a pin, remove its line (or its kind);
+  never add one.
 
 ## 7. Current state vs target: the gap registry (WIP)
 
