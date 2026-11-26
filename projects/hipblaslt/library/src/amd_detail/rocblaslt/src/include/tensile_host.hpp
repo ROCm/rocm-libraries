@@ -374,7 +374,9 @@ int tuningLastLaunchedIndexForTest();
  * after the first measured candidate the way an expiring budget does, 5 makes
  * a configured budget read as already spent, 6 makes the device refuse the
  * scratch allocation, 7 fails seeding the rotation blocks, 8 fails timing the
- * instruction cache flush; 0 restores normal behaviour.
+ * instruction cache flush, 9 reports a negative duration and stops after the
+ * first measurement, 10 skips the baseline and stops after measuring another
+ * candidate; 0 restores normal behaviour.
  */
 void tuningInjectFailureForTest(int stage);
 
