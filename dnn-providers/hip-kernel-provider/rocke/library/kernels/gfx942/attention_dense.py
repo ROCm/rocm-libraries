@@ -199,6 +199,7 @@ from rocke.core.ir import (
     BF16,
     F16,
     F32,
+    FP8E4M3,
     I32,
     I64,
 )
@@ -217,13 +218,20 @@ from kernels.common.attention_dense_decode import (
     fastdiv_kernargs,
     make_fastdiv,
 )
+from kernels.common._attention_fp8_kv_load import (
+    fp8_kv_chunks_per_thread,
+    issue_fp8_kv_dequant_tile_load,
+)
 from kernels.common.attention_dense_spec import (
     AttentionDenseSpec,
+    Fp8KvStorageSpecMixin,
     DENSE_TILE_GEOMETRIES,
     attention_dense_cache_key,
     check_dense_scale,
     check_dense_spec_preflight,
     partial_tile_reason,
+    require_fp8_kv_dtype,
+    require_fp8_kv_scale,
 )
 
 # C-output lane maps: IDENTICAL between the 32x32x8 (gfx942) and 32x32x16 (gfx950)
@@ -321,7 +329,7 @@ check_bias_constants(_MASK_SENTINEL, LOG2E)
 
 
 @dataclass(frozen=True)
-class Gfx942AttentionDenseSpec(AttentionDenseSpec):
+class Gfx942AttentionDenseSpec(Fp8KvStorageSpecMixin, AttentionDenseSpec):
     """The gfx942 dense prefill spec: the shared spec plus gfx942-private knobs.
 
     A SUBCLASS of :class:`AttentionDenseSpec`, not a fork and not a sidecar struct.
@@ -559,6 +567,9 @@ class Gfx942AttentionDenseSpec(AttentionDenseSpec):
     #   ``use_additive_bias``; a value other than None with the bias off is rejected,
     #   and with it off the field never reaches the name or the IR.
     use_bias_x4: bool | None = field(default=None, kw_only=True)
+    # kv_storage_dtype, kv_elem_bytes and the name part come from
+    # Fp8KvStorageSpecMixin. gfx942 decodes the fp8 byte as FNUZ; see the G3
+    # note in ``kernels.common.fmha_fwd_fp8``.
 
     @classmethod
     def supported_persist_decodes(cls) -> frozenset[str]:
@@ -576,6 +587,7 @@ class Gfx942AttentionDenseSpec(AttentionDenseSpec):
 
     def __post_init__(self) -> None:
         super().__post_init__()
+        self.validate_kv_storage_dtype()
         require_bool("emit_lse", self.emit_lse)
         # Reject, never coerce: bool("false") is True, so a truthiness read would
         # silently build the CFVST kernel the caller asked to turn off.
@@ -1290,16 +1302,10 @@ def supports_attention_dense(
             "gfx942 attention_dense: causal_bottom_right is not supported with "
             "sliding_window>0"
         )
-    # fp8 KV dequant is a gfx950-only loader, so the field lives on the gfx950
-    # spec and a gfx942 spec has none. getattr, not attribute access: this
-    # validator is also handed foreign specs, and one carrying fp8 must be
-    # refused rather than emit a bf16-identical kernel under an fp8 name.
-    kv_storage_dtype = getattr(spec, "kv_storage_dtype", None)
-    if kv_storage_dtype is not None:
-        return False, (
-            "gfx942 attention_dense: fp8 KV storage is gfx950-only "
-            f"(got kv_storage_dtype={kv_storage_dtype!r})"
-        )
+    # fp8 KV is gated below, after the promotion: the knob lives on the gfx942
+    # spec, the base spec has no such field, and _as_gfx942_spec refuses a
+    # foreign concrete subclass outright -- so nothing carrying another arch's
+    # fp8 knob can reach the gate.
     try:
         spec = _as_gfx942_spec(spec)
     except TypeError as exc:
@@ -1558,6 +1564,83 @@ def supports_attention_dense(
             f"D={spec.head_size}, which exceeds the {arch} LDS capacity ({capacity} B)"
         )
 
+    if spec.kv_storage_dtype is not None:
+        ok, why = _fp8_kv_refusal(spec)
+        if not ok:
+            return False, why
+
+    return True, ""
+
+
+def _fp8_kv_refusal(spec: Gfx942AttentionDenseSpec) -> tuple[bool, str]:
+    """``(ok, reason)`` for one fp8-KV gfx942 dense spec.
+
+    An fp8 KV cache cannot ride this kernel's ``buffer_load ... lds`` DMA -- that
+    instruction has no register stop for the dequant -- so the fp8 path swaps the
+    DMA for the shared sync loader in
+    ``kernels.common._attention_fp8_kv_load``, which fills K_lds/V_lds with
+    dequantised ``dtype`` exactly as the DMA would have. Everything downstream of
+    the LDS store is shared with bf16; what this gate protects is the set of
+    shapes and layouts that loader can actually fill.
+    """
+    # The loader streams KV in flat groups of FP8_KV_CHUNK_ELEMS per thread with
+    # no tail guard, so the tile element count must divide evenly. Ask the loader
+    # itself rather than restating its arithmetic: fp8_kv_chunks_per_thread
+    # exists so a spec-validation path can reject an unservable tile at host
+    # time, and a second copy of the rule here could drift from the loop that
+    # actually runs. Its ValueError text already names every term, so it becomes
+    # the refusal reason.
+    try:
+        fp8_kv_chunks_per_thread(
+            block_n=spec.block_n,
+            head_size=spec.head_size,
+            threads=(spec.block_m // 32) * 64,
+        )
+    except ValueError as exc:
+        return False, f"gfx942 attention_dense: {exc} (block_m={spec.block_m})"
+    # cfvst stores V TRANSPOSED into V_lds via a perm_b32 byte-select 2x2
+    # transpose fed from its own register stop, not from the DMA. The sync
+    # loader writes the natural [token, dim] layout, so it cannot fill a
+    # transposed V_lds. Serving fp8 under cfvst means dequantising at that
+    # register stop instead, which is the follow-up.
+    #
+    # This is a TILE predicate, not a head-size one. cfvst is only available at
+    # D128, but it is not on for every D128 spec, and the D128 tile dispatch
+    # picks for an fp8 request leaves it off -- so both head sizes are served
+    # here. Gate on resolved_use_cfvst() rather than head_size, or D128 shapes
+    # that work get refused.
+    if spec.resolved_use_cfvst():
+        return False, (
+            "gfx942 attention_dense: fp8 KV is not yet supported with the "
+            "conflict-free transposed V path (use_cfvst); the sync-dequant "
+            "loader fills the natural [token, dim] V_lds, not the V^T layout"
+        )
+    # The loader addresses KV with a flat base + row-stride computation and an
+    # out-of-range clamp, so an indirected (paged) or ragged (varlen) KV range
+    # is a follow-up rather than something it silently mis-addresses.
+    if spec.paged or spec.varlen:
+        return False, (
+            "gfx942 attention_dense: fp8 KV is not yet supported with "
+            f"paged={spec.paged} / varlen={spec.varlen}; the sync-dequant "
+            "loader reads a contiguous KV range"
+        )
+    if spec.persistent:
+        return False, (
+            "gfx942 attention_dense: fp8 KV is not yet supported with "
+            "persistent=True"
+        )
+    if spec.use_sinks:
+        return False, (
+            "gfx942 attention_dense: fp8 KV is not yet supported with "
+            "attention sinks"
+        )
+    # No separate 32-bit addressing gate here on purpose. The sync loader
+    # indexes KV with an i32 ELEMENT offset through a raw pointer, and
+    # check_dense_spec_preflight already refuses a cache at or past INT32_LIMIT
+    # *bytes* using spec.kv_elem_bytes -- which is 1 under fp8, so that shared
+    # check is exactly the element-count bound this loader needs, and it became
+    # fp8-aware the moment kv_elem_bytes landed on this spec. Adding a second
+    # threshold here would be a copy that can drift from it.
     return True, ""
 
 
@@ -1667,6 +1750,11 @@ def _build_attention_dense_single_buffer(
     PV_PRIORITY = spec.pv_priority
     PV_FENCE_MASK = spec.pv_sched_fence_mask
     DIAG_SPLIT = spec.causal_diag_split
+    # fp8 KV cache: K/V are 1-byte in HBM and are dequantised to ``dtype`` on the
+    # way into LDS, so every stage after the LDS store is shared with bf16. The
+    # loader that does it replaces the async DMA (which has no register stop for
+    # the dequant); see the fp8 branch of load_tile below.
+    KV_FP8 = spec.kv_storage_dtype == "fp8e4m3"
 
     b = IRBuilder(spec.kernel_name())
     b.kernel.attrs["max_workgroup_size"] = WAVES * 64
@@ -1678,16 +1766,26 @@ def _build_attention_dense_single_buffer(
     q = b.param(
         "q_ptr", PtrType(dtype, "global"), noalias=True, readonly=True, align=16
     )
+    # KV pointers carry the STORAGE dtype, which is fp8 under an fp8 KV cache and
+    # the compute dtype otherwise. Q and O always stay at the compute dtype.
+    kv_dtype = FP8E4M3 if KV_FP8 else dtype
     k = b.param(
-        "k_ptr", PtrType(dtype, "global"), noalias=True, readonly=True, align=16
+        "k_ptr", PtrType(kv_dtype, "global"), noalias=True, readonly=True, align=16
     )
     v = b.param(
-        "v_ptr", PtrType(dtype, "global"), noalias=True, readonly=True, align=16
+        "v_ptr", PtrType(kv_dtype, "global"), noalias=True, readonly=True, align=16
     )
     o = b.param(
         "o_ptr", PtrType(dtype, "global"), noalias=True, writeonly=True, align=16
     )
     scale = b.param("scale", F32)
+    if KV_FP8:
+        # Declared right after scale and ahead of the shape kernargs, which is the
+        # order attention_dense_signature mirrors. Per-tensor dequant scales: the
+        # loader applies them as an unfused multiply, so a non-power-of-two scale
+        # is exact.
+        k_scale_p = b.param("k_scale", F32)
+        v_scale_p = b.param("v_scale", F32)
     # Problem shape as kernel params, so ONE compiled binary serves every
     # (batch, seqlen_q, seqlen_kv, num_query_heads, num_kv_heads). Declared right
     # after scale, one i32 per ``spec.runtime_kernarg_fields`` entry in that tuple's
@@ -1876,9 +1974,15 @@ def _build_attention_dense_single_buffer(
     # kernel serves every (seqlen, head count), and a baked bound would silently drop
     # valid reads for a larger one (buffer loads past num_records return 0 with no
     # fault). The baked branch keeps const_i32(B*Skv*...) verbatim.
-    _kv_elem_bytes = Hkv * D * 2
+    # spec.kv_elem_bytes, not a baked 2: under an fp8 KV cache K/V are 1 byte in
+    # HBM, and a 2x-too-large extent here would let an out-of-range buffer load
+    # read real memory instead of returning 0.
+    _KVB = spec.kv_elem_bytes
+    _kv_row_bytes = Hkv * D * _KVB
     if spec.runtime_shape:
-        kv_bytes = b.mul(b.mul(b.mul(batch_p, seqlen_kv_p), hkv_p), b.const_i32(D * 2))
+        kv_bytes = b.mul(
+            b.mul(b.mul(batch_p, seqlen_kv_p), hkv_p), b.const_i32(D * _KVB)
+        )
         k_rsrc = b.buffer_rsrc(k, kv_bytes)
         v_rsrc = b.buffer_rsrc(v, kv_bytes)
     elif spec.paged:
@@ -1886,8 +1990,8 @@ def _build_attention_dense_single_buffer(
         k_rsrc = b.buffer_rsrc(k, b.const_i32(paged_cache_bytes(spec)))
         v_rsrc = b.buffer_rsrc(v, b.const_i32(paged_cache_bytes(spec)))
     else:
-        k_rsrc = b.buffer_rsrc(k, b.const_i32(B * Skv * _kv_elem_bytes))
-        v_rsrc = b.buffer_rsrc(v, b.const_i32(B * Skv * _kv_elem_bytes))
+        k_rsrc = b.buffer_rsrc(k, b.const_i32(B * Skv * _kv_row_bytes))
+        v_rsrc = b.buffer_rsrc(v, b.const_i32(B * Skv * _kv_row_bytes))
 
     # ---- conflict-free V (P1): perm_b32 store-path transpose into V_lds[dim, token] ----
     # Load V naturally [token, dim] (coalesced VMEM over the contiguous dim axis),
@@ -2141,12 +2245,59 @@ def _build_attention_dense_single_buffer(
                         _DMA_DWORDS,
                     )
 
+        def _sync_fp8_load(ptr, lds, scale_p, tile_key0, packed_group):
+            """fp8 KV tile -> dequant -> ``dtype`` LDS, in the bf16 path's layout.
+
+            The loop is the shared loader in
+            ``kernels.common._attention_fp8_kv_load``, the same one the gfx950
+            dense kernel calls; this closure only binds the tile geometry and
+            the addressing this builder captures. ``_stride_k`` is handed over
+            uncalled on purpose -- the helper calls it per chunk, which is what
+            keeps two runtime-shape specs that share a cache key from lowering
+            to different IR."""
+            issue_fp8_kv_dequant_tile_load(
+                b,
+                ptr=ptr,
+                lds=lds,
+                buf_val=b.const_i32(0),
+                tile_key0=tile_key0,
+                scale=scale_p,
+                kv_base=k_base,
+                kv_row_stride=_stride_k,
+                seqlen_kv=(seqlen_kv_p if spec.runtime_shape else b.const_i32(Skv)),
+                tid=tid,
+                threads=THREADS,
+                block_n=BN,
+                head_size=D,
+                kv_dtype=kv_dtype,
+                dtype=dtype,
+                packed_group=packed_group,
+            )
+
         def load_tile(tile_idx):
             # cfvst (D128): K only; V is fed through the perm_b32 store path below
             # (async DMA would land V in the WRONG [token, dim] orientation for a
             # conflict-free read). Naive (D64): K and V both via async DMA, natural
             # [token, dim].
             tk0 = b.mul(tile_idx, b.const_i32(BN))
+            if KV_FP8:
+                # fp8 KV cannot ride the async DMA: buffer_load-to-LDS has no
+                # register stop for the dequant. Fill K_lds/V_lds synchronously
+                # instead, with the same dequantised dtype values and the same
+                # layout the DMA would have landed. (cfvst is refused under fp8
+                # -- see _fp8_kv_refusal -- so V is always the natural
+                # [token, dim] layout here.)
+                _sync_fp8_load(k, K_lds, k_scale_p, tk0, K_GROUP if KPAD_D64 else 1)
+                _sync_fp8_load(v, V_lds, v_scale_p, tk0, 1)
+                # LOAD-BEARING, do not delete. Unlike the bf16 DMA below, these
+                # stores are in-loop ds_writes, so the caller's tile-start barrier
+                # needs an lgkm drain ahead of it or gfx90a+ FeatureBackOffBarrier
+                # lets LLVM sink the wait past the barrier to the ds_read consumer
+                # (the P0 read-after-barrier race). Emitting it here, as the last
+                # op before returning, lands it immediately before the caller's
+                # vmcnt wait and barrier -- the order sync_lds_only would give.
+                b.s_waitcnt(lgkmcnt=0)
+                return
             _async_load(k_rsrc, K_lds_addr, tk0, group_pad=KPAD_D64)
             if not USE_CFVST:
                 _async_load(v_rsrc, V_lds_addr, tk0)
@@ -2579,11 +2730,20 @@ def _build_attention_dense_single_buffer(
                 # barrier (CK Tile block_sync_lds). vmcnt is already 0, no full sync.
                 b.sync_lds_only()
             else:
-                # Naive (D64): K and V both async-DMA'd into their natural layout.
-                # Drain the DMA (vmcnt) then a plain barrier -- V is not an in-loop
-                # ds_write here, so the tile-start barrier needs no lgkm drain (the
-                # DMA landed the data; the trailing sync_lds_only guards the
-                # read-before-overwrite).
+                # Naive (D64): K and V both land in their natural layout.
+                #
+                # bf16: both are async-DMA'd, so neither is an in-loop ds_write and
+                # the tile-start barrier needs no lgkm drain (the DMA landed the
+                # data; the trailing sync_lds_only guards the read-before-overwrite).
+                # Draining the DMA (vmcnt) then a plain barrier is enough.
+                #
+                # fp8: both ARE in-loop ds_writes (the sync-dequant loader), so this
+                # barrier DOES need an lgkm drain for the same P0 read-after-barrier
+                # reason as the cfvst branch above. load_tile emits it as its last
+                # op before returning, which puts it immediately before the vmcnt
+                # wait and the barrier here -- the same order sync_lds_only would
+                # produce. That drain is load-bearing: it looks redundant sitting
+                # next to a vmcnt wait, but removing it reintroduces the race.
                 load_tile(j)
                 b.s_waitcnt(vmcnt=0)
                 b.s_barrier_bare()
@@ -3129,14 +3289,19 @@ def attention_dense_signature(spec: AttentionDenseSpec):
     """
     from rocke.helpers.spec import SignatureBuilder
 
+    kv_ptr_dtype = getattr(spec, "kv_storage_dtype", None) or spec.dtype
     sig = (
         SignatureBuilder()
         .ptr("q_ptr", spec.dtype)
-        .ptr("k_ptr", spec.dtype)
-        .ptr("v_ptr", spec.dtype)
+        .ptr("k_ptr", kv_ptr_dtype)
+        .ptr("v_ptr", kv_ptr_dtype)
         .ptr("o_ptr", spec.dtype)
         .scalar("scale", "f32")
     )
+    if getattr(spec, "kv_storage_dtype", None) == "fp8e4m3":
+        # Mirrors the k_scale/v_scale params build_attention_dense declares right
+        # after scale under fp8 KV, ahead of the shape kernargs.
+        sig = sig.scalar("k_scale", "f32").scalar("v_scale", "f32")
     # The same tuple, in the same order, that build_attention_dense declares as
     # params right after scale -- cross-checked against KernelDef.params by
     # test_signature_matches_the_built_kernels_params in
@@ -3186,6 +3351,8 @@ def run_attention_dense_torch(
     v,
     out,
     scale: float,
+    k_scale: float | None = None,
+    v_scale: float | None = None,
     stream: int = 0,
     arch: str = "gfx942",
     cu_seqlens_q=None,
@@ -3252,6 +3419,20 @@ def run_attention_dense_torch(
     if not ok:
         raise NotImplementedError(f"attention_dense unsupported for spec: {why}")
     check_dense_scale(scale)
+    if spec.kv_storage_dtype == "fp8e4m3":
+        # Validate here too, not only in the dispatch binding: direct callers of
+        # this runner bypass that guard. Both call the same checkers, so the two
+        # entry points cannot drift apart. The dtype rule is arch-parametrised --
+        # gfx942 decodes the fp8 byte as FNUZ, gfx950 as OCP.
+        require_fp8_kv_dtype((("k", k), ("v", v)), arch=arch)
+        for _name, _s in (("k_scale", k_scale), ("v_scale", v_scale)):
+            require_fp8_kv_scale(_name, _s, "fp8 dense")
+    elif k_scale is not None or v_scale is not None:
+        raise ValueError(
+            "k_scale / v_scale are fp8-KV arguments but spec.kv_storage_dtype is "
+            f"{spec.kv_storage_dtype!r}; the kernel has no scale kernargs to pack "
+            "them into"
+        )
     if cu_seqlens_q is not None or cu_seqlens_kv is not None:
         raise ValueError(
             "cu_seqlens_* provided but gfx942 attention_dense is dense-only (varlen "
@@ -3314,6 +3495,9 @@ def run_attention_dense_torch(
         )
         _DENSE_LAUNCHER_CACHE[key] = launcher
     vals = {"q_ptr": q, "k_ptr": k, "v_ptr": v, "o_ptr": out, "scale": float(scale)}
+    if spec.kv_storage_dtype == "fp8e4m3":
+        vals["k_scale"] = float(k_scale)
+        vals["v_scale"] = float(v_scale)
     vals.update(attention_dense_runtime_args(spec))
     if spec.use_sinks:
         vals["sink_ptr"] = sinks
