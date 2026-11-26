@@ -18,10 +18,10 @@ versus the Python engine across every kernel family (see
   0 mismatch**.
 
 None of the gaps below are on the *valid-config emission path*, which is why the
-gate is fully green, with one exception: §5 (additive bias) covers a
-Python-engine-only feature on the dense kernels that *is* reachable from a valid
-config — see that section for why the gate stays green anyway. They fall into
-three kinds:
+gate is fully green, with two exceptions: §5 (additive bias on the dense kernels)
+and §5b (gfx942 K from HBM) cover Python-engine-only features that *are* reachable
+from a valid config — see those sections for why the gate stays green anyway. They
+fall into three kinds:
 
 1. **Faithful rejection mirrors** — a `ROCKE_ERR_NOTIMPL` (or a reject-message)
    that translates a Python `raise NotImplementedError` / `ValueError` /
@@ -245,6 +245,25 @@ needs no third copy: it turns the bias feature on in its arch descriptor.
 
 ---
 
+## 5b. gfx942 tiled 2D — K read straight from HBM (Python engine only)
+
+**Subsystem:** `instances/gfx942/attention_tiled_2d.cpp` (`rocke_attention_tiled_2d_spec_validate`)
+
+Python's gfx942 tiled-2D spec accepts `use_k_hbm_direct`; the C++ validator
+refuses it with `ROCKE_ERR_NOTIMPL` ("use_k_hbm_direct is not ported to the C++
+engine yet"), and the C++ engine has no K-from-HBM loader. Python's version stages
+Q through the one-element K LDS stub it allocates for this mode, so porting it
+as-is would copy that bug. No selector sets the flag; only the tuning sweep or a
+hand-built spec reaches it, and no parity config uses it. Unblocked by a port that
+stages Q correctly in both engines (the Q-staging fix plus the C++ K-from-HBM
+loader), which then removes this refusal.
+
+Related: the C++ validator also refuses `use_fast_paged_kv_desc` together with
+`use_k_hbm_direct` or `use_v_hbm_direct`, with the text Python's validator gains
+in the same fix; until then Python fails later, while building the kernel.
+
+---
+
 ## 6. gfx942 MLA prefill — Python-only kernel builder
 
 **Subsystem:** `library/kernels/mla/`, `library/dispatch/mla/`
@@ -252,7 +271,7 @@ needs no third copy: it turns the bias feature on in its arch descriptor.
 The gfx942 bf16 MLA prefill family has **no C++ twin** of its kernel builder,
 spec, or dispatch selector; it is built and selected in Python only. This
 follows the gfx942/gfx950 `attention_dense` family, which also ships without a
-C++ builder mirror (§8).
+C++ builder mirror (§7).
 
 **What is gated:** the C++ *lowerer* is family-agnostic, so its byte-identity
 against the Python lowerer is checked on every MLA golden case at every
@@ -266,45 +285,7 @@ mirrors; until then, keep emission changes gated by the two tests above.
 
 ---
 
-## 7. Unified attention LSE output (`emit_lse`) — not requestable from C
-
-**Subsystem:** `instances/common/attention_unified_selectors.cpp` (and its
-header), `rocke_unified_attn_problem_t`
-
-The C engine builds every LSE-on unified attention kernel byte-identically to
-Python: the split-KV reduce (gfx942, gfx950) and the default tiled 2D builders
-(gfx942, gfx950, including the gfx950 `fastkv_regp` wrapper). They share
-`include/rocke/instance_lse_store_internal.h`, the C twin of
-`kernels/common/_lse_store.py`. The parity emitters build LSE-on configs for
-each store site (`gfx9{42,50}_attention_tiled_2d_emit`, the gfx950
-`_fastkv_regp_emit`, `gfx9{42,50}_attention_tiled_3d_emit`), so
-`check_byte_identity` gates them.
-
-What is still Python-only is *asking* for LSE: the request side.
-
-| What's missing | Where |
-|---|---|
-| `emit_lse` on the unified problem, the `_reject_lse` support gate, and the gfx942 4-warp cohort exclusion (`library/kernels/common/attention_unified.py`: `_gfx942_4warp_eligible` is false under LSE, so the D256 bf16 and D128 sliding-window cohorts take the default 2D builder) | `rocke_unified_attn_problem_t`; the C selectors have no support gates yet, and `d256_gfx942_fast` (`attention_unified_selectors.cpp`) has no LSE clause. No C selector sets `emit_lse`, so a C-selected spec is always LSE-off and C output is unaffected |
-
-Additive bias + LSE on the gfx950 tiled 2D kernel is built by both engines
-(the four bias params precede `lse_ptr`) and is pinned by a bias + LSE config
-in `gfx950_attention_tiled_2d_emit`.
-
-**Why deferred:** the C entry points take selector output, and no C caller
-requests LSE today; the Python host and dispatcher are the only request path.
-
-**What closes it:** an `emit_lse` field on `rocke_unified_attn_problem_t`, the
-support-gate refusals mirrored into the C selectors, `!emit_lse` mirrored into
-`d256_gfx942_fast` (without it the C selector would keep the 4-warp cohort's
-tile size for an LSE request while Python picks the default builder's spec),
-and selector parity cases with LSE on.
-
-**Sign-off:** avirgoel (owner), 2026-10-20 (reduce, Python-only); 2026-10-28
-(reduce and tiled 2D kernels mirrored in C; request side remains).
-
----
-
-## 8. Dense attention prefill (`attention_dense`) — Python-only kernel builder
+## 7. Dense attention prefill (`attention_dense`) — Python-only kernel builder
 
 **Subsystem:** `library/kernels/common/attention_dense_spec.py`,
 `library/kernels/common/attention_dense_decode.py`,
@@ -344,7 +325,7 @@ cross-engine parity test and the representative golden above.
 
 **Sign-off:** rocKE attention maintainer, 2026-10-30.
 
-## 9. Tiling primitives — Python-only authoring layer
+## 8. Tiling primitives — Python-only authoring layer
 
 **Subsystem:** `python/rocke/helpers/tiling/` (the fragment verbs, `TileMma`, the MMA catalog
 `traits/data/mma_traits.json` and the backend coverage record `traits/data/backend_coverage.json`)
@@ -366,44 +347,6 @@ itself is measured with the Python lowerer at one LLVM flavor.
 package emits gets a lowering test parametrized over `ENGINES`.
 
 ---
-
-## 9. gfx942 4-warp GQA attention body — Python-only kernel builder
-
-**Subsystem:** `library/kernels/gfx942/attention_tiled_2d.py`
-(`build_gfx942_4warp_gqa`, `_build_gfx942_4warp_gqa_lean`),
-`library/kernels/common/attention_unified.py` (`_gfx942_4warp_route`)
-
-The gfx942 4-warp GQA paged-attention body (the D192/D256 bf16 lean body and
-the D128 sliding-window head-fold) has **no C++ twin**. The C selector mirrors
-the cohort predicate (`d256_gfx942_fast` in
-`instances/common/attention_unified_selectors.cpp` picks tile size 32 for it),
-but `instances/gfx942/attention_tiled_2d*.cpp` builds only the default tiled 2D
-body; nothing in `platform/cpp/` emits the 4-warp V-transpose kernel.
-
-| What's missing | Where |
-|---|---|
-| A C builder for `build_gfx942_4warp_gqa` (lean D192/D256 body and D128 fold) | `cpp/instances/gfx942/` |
-| The `_gfx942_4warp_route` launch geometry (BLOCK_M 128, 256 threads) | the C selectors return a tile size only |
-
-**What is gated:** the Python IR of each body is pinned at every
-`GOLDEN_FLAVORS` flavor by
-`platform/tests/golden/rocke_representative_ir_sha256/attention_d256.json`
-(`attention_d256/gfx942/4warp_gqa`, `4warp_gqa_d192`) and
-`attention_d128_swa.json` (`attention_d128_swa/gfx942/4warp_gqa_fold`), and the
-C++ *lowerer* is checked byte-identical against the Python lowerer on the
-`attention_d256` family
-(`library/tests/test_attention_ir_cpp_parity.py::test_attention_ir_cpp_python_byte_identity`).
-A body fix therefore re-blesses those goldens and needs no C++ change; the
-row-bound, block-table and keyless-row fixes of #13115 are one such change.
-
-**Why deferred:** the same owner decision as §6 and §8 — per-family C++ builder
-mirrors are not maintained for attention bodies added after the port.
-
-**What closes it:** a decision to restore per-family C++ builder mirrors, or
-retiring the C engine.
-
----
-
 ## Structural debt (not per-family gaps)
 
 These are codebase-level risks worth tracking independently of any single

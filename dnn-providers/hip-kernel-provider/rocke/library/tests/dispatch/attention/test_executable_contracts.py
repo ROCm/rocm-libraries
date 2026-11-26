@@ -228,14 +228,6 @@ class TestRegistrySplit(unittest.TestCase):
                 "block_table",
                 _Tensor((2, 32), "torch.int32", [list(range(32))] * 2),
             ),
-            "block_table_value": (
-                "block_table",
-                _Tensor(
-                    (1, 64),
-                    "torch.int32",
-                    [[64] + list(range(1, 64))],
-                ),
-            ),
             "block_table_stride": (
                 "block_table",
                 _Tensor(
@@ -248,6 +240,33 @@ class TestRegistrySplit(unittest.TestCase):
         }
         for label, (name, replacement) in cases.items():
             with self.subTest(name=label), self.assertRaises(ValueError):
+                tensors = dict(valid)
+                tensors[name] = replacement
+                attention_bindings.validate_tuning_attention_tensors(problem, tensors)
+        content_cases = {
+            "cu_start": (
+                "cu_seqlens_q",
+                _Tensor((2,), "torch.int32", [1, 1024]),
+                "must start at 0",
+            ),
+            "cu_end": (
+                "cu_seqlens_q",
+                _Tensor((2,), "torch.int32", [0, 1000]),
+                "end at total_q",
+            ),
+            "block_table_negative": (
+                "block_table",
+                _Tensor((1, 64), "torch.int32", [[-1] + list(range(1, 64))]),
+                r"block_table\[0, 0\]=-1 is outside",
+            ),
+            "block_table_past_cache": (
+                "block_table",
+                _Tensor((1, 64), "torch.int32", [[64] + list(range(1, 64))]),
+                r"block_table\[0, 0\]=64 is outside \[0, 64\)",
+            ),
+        }
+        for label, (name, replacement, message) in content_cases.items():
+            with self.subTest(name=label), self.assertRaisesRegex(ValueError, message):
                 tensors = dict(valid)
                 tensors[name] = replacement
                 attention_bindings.validate_tuning_attention_tensors(problem, tensors)
@@ -267,6 +286,31 @@ class TestRegistrySplit(unittest.TestCase):
                 problem, tensors, validate_contents=False
             ),
             64,
+        )
+
+    def test_explicit_binding_rejects_a_table_narrower_than_max_seqlen_k(self):
+        # A row of 63 blocks of 16 holds 1008 tokens, fewer than max_seqlen_k=1024: a
+        # sequence of max_seqlen_k would read past its row. Refused without reading
+        # contents, even though this sequence's 1000 tokens fit.
+        problem = attention_problem(_req())
+        tensors = _paged_tensors()
+        tensors["seqused_k"] = _Tensor((1,), "torch.int32", [1000])
+        tensors["block_table"] = _Tensor((1, 63), "torch.int32", [list(range(63))])
+        for validate_contents in (True, False):
+            with self.subTest(validate_contents=validate_contents):
+                with self.assertRaisesRegex(ValueError, "max_seqlen_k=1024"):
+                    attention_bindings.validate_tuning_attention_tensors(
+                        problem, tensors, validate_contents=validate_contents
+                    )
+
+    def test_explicit_binding_accepts_a_table_exactly_max_seqlen_k_wide(self):
+        # ceil(1000 / 16) = 63 columns hold 1008 >= 1000 tokens.
+        problem = attention_problem(_req(seqlen_k=1000))
+        tensors = _paged_tensors()
+        tensors["seqused_k"] = _Tensor((1,), "torch.int32", [1000])
+        tensors["block_table"] = _Tensor((1, 63), "torch.int32", [list(range(63))])
+        self.assertEqual(
+            attention_bindings.validate_tuning_attention_tensors(problem, tensors), 64
         )
 
     def test_explicit_binding_ignores_invalid_unused_table_columns(self):

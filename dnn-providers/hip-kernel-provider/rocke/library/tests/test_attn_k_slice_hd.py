@@ -426,6 +426,27 @@ def test_validator_accepts_legal_width(width):
     assert _ring_spec(k_slice_hd=width).k_slice_hd == width
 
 
+def test_validator_rejects_the_ring_on_the_fast_paged_kv_descriptor():
+    # The one geometry the fast descriptor admits, with the ring on: refused at the
+    # spec instead of failing inside the builder.
+    with pytest.raises(ValueError, match="does not support use_k_sliced_ring"):
+        _spec(
+            dtype="bf16",
+            d=64,
+            block_size=32,
+            num_query_heads=64,
+            num_warps=4,
+            block_m_per_warp=32,
+            tile_size=64,
+            use_mfma_32x32x8=True,
+            use_transposed_qk_32x32=True,
+            use_conflict_free_v_store=True,
+            use_k_sliced_ring=True,
+            ring_depth=2,
+            use_fast_paged_kv_desc=True,
+        )
+
+
 def test_validator_ignores_width_off_the_ring():
     # Off the ring the field is unused, so an odd value must not be an error --
     # only the ring schedule constrains it.

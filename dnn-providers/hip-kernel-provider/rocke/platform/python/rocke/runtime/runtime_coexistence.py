@@ -238,6 +238,27 @@ def _rocm_sdk_dll(stem: str) -> Optional[str]:
     return None
 
 
+def torch_runtime_libs() -> dict[str, str]:
+    """The HIP runtime and COMGR files torch's ROCm runtime uses in this process.
+
+    Returns ``{"amdhip64": path, "amd_comgr": path}``, each key present only
+    when found. These are the files rocke's own resolution picks next to an
+    imported torch (:func:`_torch_bundled_lib`, then TheRock's
+    ``_rocm_sdk_core`` DLLs on Windows), so a tool that pins
+    ``ROCKE_HIP_LIB`` / ``ROCKE_COMGR_LIB`` to them keeps the process on one
+    runtime without restating the wheel layout. Empty unless torch is already
+    imported; never imports it.
+    """
+    if "torch" not in sys.modules:
+        return {}
+    found: dict[str, str] = {}
+    for stem in ("amdhip64", "amd_comgr"):
+        path = _torch_bundled_lib(stem) or _rocm_sdk_dll(stem)
+        if path:
+            found[stem] = path
+    return found
+
+
 def _torch_rocm_version(bundled: Optional[str] = None) -> Optional[tuple]:
     """``(major, minor)`` ROCm **release** of torch's bundled comgr, or None.
 

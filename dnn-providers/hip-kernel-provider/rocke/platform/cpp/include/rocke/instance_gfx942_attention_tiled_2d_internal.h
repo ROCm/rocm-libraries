@@ -3,10 +3,10 @@
  *
  * rocke/instance_gfx942_attention_tiled_2d_internal.h -- PRIVATE shared state +
  * phase-function contract for the C99 port of build_unified_attention_2d_tiled
- * (rocke/instances/gfx942/attention_tiled_2d.py, build body lines 1104-5287).
+ * (library/kernels/gfx942/attention_tiled_2d.py).
  *
  * WHY THIS HEADER EXISTS.
- *   build_unified_attention_2d_tiled() in Python is a single ~4000-line function
+ *   build_unified_attention_2d_tiled() in Python is a single long function
  *   whose body is a deep stack of NESTED CLOSURES: the V-LDS slot/store/load
  *   helpers (_v_t_slot, _v_t_store, _v_t_load, _v_load1), the per-lane row map
  *   (_in_warp_row, _state_row, _bit2, _select_lane_rg), the P permute/pack
@@ -71,6 +71,7 @@
 #include "rocke/helper_rocke.helpers.atoms.h" /* rocke_mfma_atom_t                     */
 #include "rocke/helper_rocke.helpers.attention.h" /* binary_search / softmax reduces     */
 #include "rocke/helper_rocke.helpers.transforms.h" /* rocke_tensor_descriptor_t             */
+#include "rocke/instance_attention_paged_kv_copies_internal.h" /* rocke_kv_page_copies_t */
 #include "rocke/instance_gfx942_attention_tiled_2d.h" /* spec_t + config_t (via helper hdr) */
 #include "rocke/ir.h"
 
@@ -134,6 +135,7 @@ typedef struct rocke_gfx942_attn2d_build_ctx
     bool TRANSPOSED_SCALAR_STATE, TRANSPOSED_INVARIANT_HOIST;
     bool TRANSPOSED_MASK_ONCE, TRANSPOSED_HALF_LOCAL_PV;
     bool SKIP_LEGACY_QREG, TRANSPOSED_MASK_LIMIT, GROUPED_KV2;
+    bool CAUSAL_MASK_PHASE_SPLIT, V_HBM_DIRECT;
     bool FAST_PAGED_KV_DESC, I64_KV_ADDR, EARLY_V_SCHEDULE;
     /* fp8 K/V cache predicates */
     bool KV_FP8, FP8_MFMA_QK, FP8_MFMA_PV, FP8_NATIVE_QK;
@@ -294,7 +296,11 @@ typedef struct rocke_gfx942_attn2d_build_ctx
     rocke_tensor_descriptor_t* q_desc; /* output/query [token,head,dim]   */
     rocke_tensor_descriptor_t* kv_desc; /* paged K/V byte descriptor       */
     rocke_value_t* seq_base; /* to_sgpr_u32(seq_idx*bt_stride)  */
-    rocke_value_t* block_table_max_idx; /* to_sgpr_u32(num_seqs*bt_stride) */
+    rocke_value_t* block_table_max_idx; /* to_sgpr_u32(seq_base + ceil(seq_len/BS)) */
+    /* bf16/fp16 loaders addressing copies by page (Python page_copies,
+     * PAGE_COPIES; set up in emit_preloop). */
+    rocke_kv_page_copies_t page_copies;
+    bool PAGE_COPIES;
     rocke_value_t* kv_block_bytes_c_v; /* one-block bound: kv_stride_blk_b_v, or its const */
     rocke_value_t* kv_stride_tok_b_v; /* num_kv_p*HD*KV_BYTES */
     rocke_value_t* kv_stride_blk_b_v; /* kv_stride_tok_b_v*BS */
@@ -348,14 +354,13 @@ typedef struct rocke_gfx942_attn2d_build_ctx
     rocke_value_t* hoist_q_pos[ROCKE_GFX942_ATTN2D_MAX_REGS_PER_LANE];
     rocke_value_t* hoist_q_head[ROCKE_GFX942_ATTN2D_MAX_REGS_PER_LANE];
     rocke_value_t* hoist_row_mask[ROCKE_GFX942_ATTN2D_MAX_REGS_PER_LANE];
-
-    /* ---- transposed-32x32 invariant hoist (Python st_* before the KV loop,
-     * TRANSPOSED_INVARIANT_HOIST); NULL otherwise. st_alibi_slope is the per-lane
-     * slope of the per-score add (LEGACY_ALIBI only). ---- */
-    rocke_value_t* st_qp;
-    rocke_value_t* st_row_ok;
-    rocke_value_t* st_causal_lim;
-    rocke_value_t* st_alibi_slope;
+    /* Transposed-32x32 per-lane invariants hoisted before the KV loop under
+     * TRANSPOSED_INVARIANT_HOIST (NULL otherwise). st_alibi_slope_hoist is the
+     * per-lane slope of the per-score add (LEGACY_ALIBI only). */
+    rocke_value_t* st_qp_hoist;
+    rocke_value_t* st_row_ok_hoist;
+    rocke_value_t* st_causal_lim_hoist;
+    rocke_value_t* st_alibi_slope_hoist;
 
     /* ---- ALiBi arms (Python _alibi_design and the ad_* state) ---- *
      * ALIBI_DESIGN is the resolved design (ROCKE_GFX942_ATTN2D_AD_*); NONE keeps
@@ -396,6 +401,9 @@ typedef struct rocke_gfx942_attn2d_build_ctx
      * reused by the post-QK K issue. */
     rocke_value_t* nxt_buf_v;
     bool skip_mask;
+    /* Set while emitting a mask-free phase whose V loads stay inside the
+     * sequence: the V loader then skips the tail bound (v_tail=False). */
+    bool v_no_tail;
     rocke_value_t* m_cur[ROCKE_GFX942_ATTN2D_MAX_REGS_PER_LANE];
     rocke_value_t* l_cur[ROCKE_GFX942_ATTN2D_MAX_REGS_PER_LANE];
     rocke_value_t* acc_cur[ROCKE_GFX942_ATTN2D_MAX_ACCS];
@@ -499,6 +507,12 @@ rocke_value_t* rocke_gfx942_attn2d_v_t_load(rocke_gfx942_attn2d_build_ctx_t* ctx
                                             rocke_value_t* dim,
                                             rocke_value_t* tok,
                                             int n);
+/* _v_hbm_elem: one V[tok, dim] element of KV tile `tile` read straight from
+ * HBM (V_HBM_DIRECT), zero past the valid KV length. */
+rocke_value_t* rocke_gfx942_attn2d_v_hbm_elem(rocke_gfx942_attn2d_build_ctx_t* ctx,
+                                              rocke_value_t* tile,
+                                              rocke_value_t* tok,
+                                              rocke_value_t* dim);
 rocke_value_t* rocke_gfx942_attn2d_v_load1(rocke_gfx942_attn2d_build_ctx_t* ctx,
                                            rocke_value_t* v_buf,
                                            rocke_value_t* v_row,

@@ -131,12 +131,15 @@ A change is not done until it clears [`KERNEL_AUTHORING.md`](KERNEL_AUTHORING.md
 for its change type (new family / new knob / new feature / perf optimization) — the
 single doc for the Definition of Done, the process map, and commit/branch
 conventions. Build and test references: [`BUILDING.md`](BUILDING.md),
-[`TESTING.md`](TESTING.md). Kernel changes that enrolled pinned GPU reference
+[`TESTING.md`](TESTING.md); perf and parity numbers come from the CI-matched venv
+(`tools/setup_dev_env.py`, see BUILDING.md). Kernel changes that enrolled pinned GPU reference
 cases reach must keep those suites green, and new pinned coverage starts at the
 [pinned reference quickstart](library/tests/reference_common/docs/quickstart.md).
 Language style:
 [`style/PYTHON_STYLE.md`](style/PYTHON_STYLE.md),
-[`style/CPP_STYLE.md`](style/CPP_STYLE.md).
+[`style/CPP_STYLE.md`](style/CPP_STYLE.md). Advisory static analysis (pyright types,
+radon complexity, vulture dead code; non-blocking pre-push hooks, not part of the
+DoD) and how to read its reports: [`docs/static-analysis.md`](docs/static-analysis.md).
 
 ## Optimization doc routing — READ the matching doc BEFORE optimizing a kernel
 

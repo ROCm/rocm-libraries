@@ -345,7 +345,138 @@ static int make_spec(int idx, rocke_unified_attention_3d_tiled_spec_t* s)
         s->kv_storage_dtype = NULL;
         s->emit_lse = true;
         break;
+
     case 21:
+        /* Two-page tiles from strided (non-paged) K/V into swizzled LDS, with
+         * softcap. */
+        s->head_size = 128;
+        s->block_size = 16;
+        s->num_query_heads = 32;
+        s->num_kv_heads = 4;
+        s->dtype = "fp16";
+        s->num_segments = 32;
+        s->use_sinks = false;
+        s->sliding_window = 0;
+        s->has_softcap = true;
+        s->kv_storage_dtype = NULL;
+        s->num_seqs = 4;
+        s->has_tile_size_override = true;
+        s->tile_size_override = 32;
+        s->use_decode_grid = true;
+        s->kv_cache_policy = "stream";
+        s->use_kv_lds_swizzle = true;
+        s->kv_layout = "strided";
+        break;
+
+    case 22:
+        /* Decode grid with SC0 + NT K/V copies. */
+        s->head_size = 128;
+        s->block_size = 16;
+        s->num_query_heads = 64;
+        s->num_kv_heads = 8;
+        s->dtype = "bf16";
+        s->num_segments = 16;
+        s->use_sinks = false;
+        s->sliding_window = 0;
+        s->has_softcap = false;
+        s->kv_storage_dtype = NULL;
+        s->use_decode_grid = true;
+        s->kv_cache_policy = "nt";
+        break;
+
+    case 23:
+        /* Decode grid with globally cached K/V copies. */
+        s->head_size = 128;
+        s->block_size = 16;
+        s->num_query_heads = 64;
+        s->num_kv_heads = 8;
+        s->dtype = "bf16";
+        s->num_segments = 16;
+        s->use_sinks = false;
+        s->sliding_window = 0;
+        s->has_softcap = false;
+        s->kv_storage_dtype = NULL;
+        s->use_decode_grid = true;
+        s->kv_cache_policy = "global";
+        break;
+
+    case 24:
+        /* Reduce with the LSE output, decode grid. */
+        s->head_size = 128;
+        s->block_size = 16;
+        s->num_query_heads = 32;
+        s->num_kv_heads = 8;
+        s->dtype = "bf16";
+        s->num_segments = 16;
+        s->use_sinks = false;
+        s->sliding_window = 0;
+        s->has_softcap = false;
+        s->kv_storage_dtype = NULL;
+        s->use_decode_grid = true;
+        break;
+
+    case 25:
+        /* Reduce with the LSE output. */
+        s->head_size = 64;
+        s->block_size = 16;
+        s->num_query_heads = 8;
+        s->num_kv_heads = 8;
+        s->dtype = "fp16";
+        s->num_segments = 8;
+        s->use_sinks = false;
+        s->sliding_window = 0;
+        s->has_softcap = false;
+        s->kv_storage_dtype = NULL;
+        break;
+
+    case 26:
+        /* Top-left causal mask (context_len pinned to 0). */
+        s->head_size = 128;
+        s->block_size = 16;
+        s->num_query_heads = 32;
+        s->num_kv_heads = 8;
+        s->dtype = "bf16";
+        s->num_segments = 16;
+        s->use_sinks = false;
+        s->sliding_window = 0;
+        s->has_softcap = false;
+        s->kv_storage_dtype = NULL;
+        s->causal_top_left = true;
+        break;
+
+    case 27:
+        /* Right bound of 8 keys with a sliding window and sinks. */
+        s->head_size = 64;
+        s->block_size = 16;
+        s->num_query_heads = 8;
+        s->num_kv_heads = 8;
+        s->dtype = "fp16";
+        s->num_segments = 8;
+        s->use_sinks = true;
+        s->sliding_window = 128;
+        s->has_softcap = false;
+        s->kv_storage_dtype = NULL;
+        s->right_bound = 8;
+        break;
+
+    case 28:
+        /* Top-left unbounded band, fp8 K/V, decode grid. */
+        s->head_size = 128;
+        s->block_size = 16;
+        s->num_query_heads = 64;
+        s->num_kv_heads = 8;
+        s->dtype = "bf16";
+        s->num_segments = 16;
+        s->use_sinks = false;
+        s->sliding_window = 0;
+        s->has_softcap = false;
+        s->kv_storage_dtype = "fp8e4m3";
+        s->use_decode_grid = true;
+        s->causal_top_left = true;
+        s->right_bound = -1;
+        break;
+
+    case 29:
         /* Additive bias composed with ALiBi, QQ bias and softcap (all on the
          * score before the mask select). */
         s->head_size = 128;
@@ -362,7 +493,7 @@ static int make_spec(int idx, rocke_unified_attention_3d_tiled_spec_t* s)
         s->use_additive_bias = true;
         s->kv_storage_dtype = NULL;
         break;
-    case 22:
+    case 30:
         /* Additive bias on the decode grid with multi-page tiles and sinks. */
         s->head_size = 64;
         s->block_size = 32;
@@ -380,7 +511,7 @@ static int make_spec(int idx, rocke_unified_attention_3d_tiled_spec_t* s)
         s->use_decode_grid = true;
         s->kv_cache_policy = "stream";
         break;
-    case 23:
+    case 31:
         /* Additive bias with an fp8 K/V cache and a sliding window. */
         s->head_size = 128;
         s->block_size = 16;
@@ -394,7 +525,7 @@ static int make_spec(int idx, rocke_unified_attention_3d_tiled_spec_t* s)
         s->use_additive_bias = true;
         s->kv_storage_dtype = "fp8e4m3";
         break;
-    case 24:
+    case 32:
         /* QQ bias alone, so the bound cmp_ge/cmp_lt order of the QQ mask is
          * pinned without additive bias, ALiBi or softcap riding along. */
         s->head_size = 64;
@@ -431,7 +562,7 @@ static void make_reduce_spec(int idx,
     r->num_segments = s->num_segments;
     r->has_waves_per_eu = s->has_waves_per_eu;
     r->waves_per_eu = s->waves_per_eu;
-    r->emit_lse = (idx == 18 || idx == 19 || idx == 20);
+    r->emit_lse = (idx == 18 || idx == 19 || idx == 20 || idx == 24 || idx == 25);
 }
 
 /* Build kernel via `which` (0=segment, 1=reduce), lower to .ll, print to stdout.

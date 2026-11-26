@@ -38,6 +38,7 @@
 #include "rocke/helper_helper_rocke.helpers.attention.h" /* rocke_binary_search_seq_idx */
 #include "rocke/helper_rocke.helpers.attention_arch_caps.h"
 #include "rocke/helper_rocke.instances.common._attention_alibi.h"
+#include "rocke/helper_rocke.instances.common.attention_arch.h" /* rocke_require_tiled_attention_arch */
 #include "rocke/instance_gfx942_attention_tiled_2d_internal.h"
 
 /* ---------------------------------------------------------------- helpers */
@@ -49,56 +50,6 @@ static bool rocke_a2d_streq(const char* a, const char* c)
     if(!a || !c)
         return false;
     return strcmp(a, c) == 0;
-}
-
-/* The narrow-atom arch gate. Faithful inline port of
- * instances/common/attention_arch.validate_tiled_attention_arch +
- * require_tiled_attention_arch for the gfx942 narrow path: a target is admitted
- * when it has the wide-K + ds_read_tr path (gfx950) OR, restricted to the
- * narrow-tiled-2d arch set ({"gfx942"}), the narrow 16x16x16 f16 AND bf16 atom.
- * Returns true on accept; on reject latches a NotImplementedError on b. */
-static bool rocke_a2d_require_tiled_attention_arch(rocke_ir_builder_t* b, const char* arch)
-{
-    const rocke_archtarget_t* target = rocke_archtarget_from_gfx(arch);
-    if(target == NULL)
-    {
-        /* Python: KeyError from ArchTarget.from_gfx -> str(e) reason. */
-        if(b)
-        {
-            b->status = ROCKE_ERR_NOTIMPL;
-            snprintf(b->err, ROCKE_ERR_MSG_CAP, "unknown gfx target: %s", arch ? arch : "(null)");
-        }
-        return false;
-    }
-    const rocke_arch_mma_catalog_t* mma = rocke_archtarget_mma(target);
-    bool wide_k = rocke_mma_catalog_has_shape(mma, "mma", "f16", "f16", "fp32", 16, 16, 32)
-                  || target->memory.has_ds_read_tr;
-    if(wide_k && target->memory.has_ds_read_tr)
-        return true;
-    bool narrow_arch = rocke_a2d_streq(arch, "gfx942");
-    bool narrow_k = rocke_mma_catalog_has_shape(mma, "mma", "f16", "f16", "fp32", 16, 16, 16)
-                    && rocke_mma_catalog_has_shape(mma, "mma", "bf16", "bf16", "fp32", 16, 16, 16);
-    if(narrow_arch && narrow_k)
-        return true;
-    if(b)
-    {
-        b->status = ROCKE_ERR_NOTIMPL;
-        if(!wide_k)
-            snprintf(b->err,
-                     ROCKE_ERR_MSG_CAP,
-                     "tiled attention requires either the wide-K MFMA atoms "
-                     "(mfma_f32_16x16x32 / mfma_f32_32x32x16, gfx950) or, on a narrow "
-                     "variant arch (gfx942), the 16x16x16 f16/bf16 atom; neither path is "
-                     "available on %s",
-                     arch ? arch : "(null)");
-        else
-            snprintf(b->err,
-                     ROCKE_ERR_MSG_CAP,
-                     "tiled attention requires LDS transpose reads (ds_read_b64_tr_b16) "
-                     "for the wide-K path, absent on %s",
-                     arch ? arch : "(null)");
-    }
-    return false;
 }
 
 /* Python _alibi_design(spec): the spec's alibi_design, else the measured
@@ -200,7 +151,7 @@ bool rocke_gfx942_attn2d_build_ctx_init(rocke_gfx942_attn2d_build_ctx_t* ctx,
     }
 
     /* ---- require_tiled_attention_arch(arch) (lines 1139-1141) ---- */
-    if(!rocke_a2d_require_tiled_attention_arch(b, arch))
+    if(!rocke_require_tiled_attention_arch(b, arch))
         return false;
 
     /* ---- dtype gate (lines 1143-1145) ---- */
@@ -284,6 +235,8 @@ bool rocke_gfx942_attn2d_build_ctx_init(rocke_gfx942_attn2d_build_ctx_t* ctx,
     ctx->SKIP_LEGACY_QREG = spec->use_mfma32_skip_legacy_qreg;
     ctx->TRANSPOSED_MASK_LIMIT = spec->use_transposed_mask_limit;
     ctx->GROUPED_KV2 = spec->use_grouped_kv2_softmax;
+    ctx->CAUSAL_MASK_PHASE_SPLIT = spec->use_causal_mask_phase_split;
+    ctx->V_HBM_DIRECT = spec->use_v_hbm_direct;
     ctx->FAST_PAGED_KV_DESC = spec->use_fast_paged_kv_desc;
     ctx->I64_KV_ADDR = spec->use_i64_kv_addr;
     ctx->EARLY_V_SCHEDULE = spec->use_early_v_schedule;
@@ -305,24 +258,6 @@ bool rocke_gfx942_attn2d_build_ctx_init(rocke_gfx942_attn2d_build_ctx_t* ctx,
     ctx->CONFLICT_FREE_V_STORE = CONFLICT_FREE_V_STORE;
     ctx->K_SINGLE_BUF = spec->use_k_single_buffer;
     const bool K_SLICED_RING = spec->use_k_sliced_ring;
-    /* The sliced-K ring is carried in the spec but not emitted by this engine.
-     * Python's __post_init__ accepts it and the Python builder emits it; this
-     * twin has the ring's shape and none of its schedule -- K_lds is sized as
-     * [ring_depth, T, k_slice_hd] below, but no slice DMA is ever issued and the
-     * QK body still reads K_lds through the double-buffer index, so a ring spec
-     * would lower to a kernel reading slices nothing staged. Reject rather than
-     * emit that, the same contract the gfx950 twin applies to its unported
-     * V-double-buffer family. Replace this with the real emit when the schedule
-     * is ported; the geometry fields it needs are already carried. */
-    if(K_SLICED_RING)
-    {
-        b->status = ROCKE_ERR_NOTIMPL;
-        snprintf(b->err,
-                 ROCKE_ERR_MSG_CAP,
-                 "use_k_sliced_ring: the gfx942 C twin does not emit the sliced-K "
-                 "ring schedule (not yet ported)");
-        return false;
-    }
     /* This shared narrow/default-geometry driver has no additive-bias score
      * site (that lives only in the gfx950-specific ctx-init/driver). Reject
      * rather than silently build an ordinary kernel under a biased name --
@@ -607,6 +542,38 @@ bool rocke_gfx942_attn2d_build_ctx_init(rocke_gfx942_attn2d_build_ctx_t* ctx,
     ctx->K_SLICE_HD = K_SLICE_HD;
     ctx->K_SLICE_SLOTS = K_SLICE_SLOTS;
     ctx->K_SLICED_ACTIVE = K_SLICED_ACTIVE;
+    if(K_SLICED_ACTIVE)
+    {
+        /* The ring's partial vmcnt fence counts one slice's DMA calls: the slice
+         * must split into whole calls, and the count must fit the 6-bit vmcnt
+         * field. */
+        const int kv_halves_per_call = ctx->THREADS * ctx->KV_DMA_HALVES_PER_LANE;
+        if((T * K_SLICE_HD) % kv_halves_per_call != 0)
+        {
+            b->status = ROCKE_ERR_VALUE;
+            snprintf(b->err,
+                     ROCKE_ERR_MSG_CAP,
+                     "T=%d * k_slice_hd=%d must be a multiple of KV_HALVES_PER_CALL=%d so the "
+                     "ring's partial vmcnt fence counts whole slice prefetches",
+                     T,
+                     K_SLICE_HD,
+                     kv_halves_per_call);
+            return false;
+        }
+        if((T * K_SLICE_HD) / kv_halves_per_call > 63)
+        {
+            b->status = ROCKE_ERR_VALUE;
+            snprintf(b->err,
+                     ROCKE_ERR_MSG_CAP,
+                     "ring partial-vmcnt count %d exceeds the 6-bit vmcnt field (T=%d, "
+                     "k_slice_hd=%d, KV_HALVES_PER_CALL=%d)",
+                     (T * K_SLICE_HD) / kv_halves_per_call,
+                     T,
+                     K_SLICE_HD,
+                     kv_halves_per_call);
+            return false;
+        }
+    }
     ctx->K_LDS_ELEM_BYTES = K_LDS_ELEM_BYTES;
     ctx->K_BUF_BYTES = K_BUF_BYTES;
     ctx->K_BUFS = K_BUFS;
@@ -1229,34 +1196,37 @@ void rocke_gfx942_attn2d_emit_licm_hoist(rocke_gfx942_attn2d_build_ctx_t* ctx)
         }
     }
 
-    /* Transposed-32x32 per-lane query invariants (Python st_*), hoisted out of the
-     * KV loop under TRANSPOSED_INVARIANT_HOIST. */
-    rocke_value_t* st_qh = NULL;
+    /* Transposed-32x32 per-lane invariants, once before the KV loop. */
+    ctx->st_qp_hoist = NULL;
+    ctx->st_row_ok_hoist = NULL;
+    ctx->st_causal_lim_hoist = NULL;
+    ctx->st_alibi_slope_hoist = NULL;
     if(ctx->USE_MFMA_32X32 && ctx->TRANSPOSED_QK_32X32 && ctx->TRANSPOSED_INVARIANT_HOIST)
     {
         rocke_value_t* st_q_row
             = rocke_b_add(b, ctx->wave_row_base, rocke__mfma_32x32_c_col(b, ctx->lane, 0));
-        rocke_value_t* nqk_a = rocke_b_const_i32(b, ctx->NQK);
-        ctx->st_qp = rocke_b_add(b, ctx->qb_start_pos, rocke_b_div(b, st_q_row, nqk_a));
-        rocke_value_t* qh_mul = rocke_b_mul(b, ctx->kv_head_idx, rocke_b_const_i32(b, ctx->NQK));
-        rocke_value_t* qh_mod = rocke_b_mod(b, st_q_row, rocke_b_const_i32(b, ctx->NQK));
-        st_qh = rocke_b_add(b, qh_mul, qh_mod);
-        rocke_value_t* ok_pos = rocke_b_cmp_lt(b, ctx->st_qp, ctx->cur_batch_q_len);
-        rocke_value_t* ok_qh = rocke_b_cmp_lt(b, st_qh, ctx->num_qh_p);
-        rocke_value_t* ok_inner = rocke_b_land(b, ok_pos, ok_qh);
+        rocke_value_t* st_qp = rocke_b_add(
+            b, ctx->qb_start_pos, rocke_b_div(b, st_q_row, rocke_b_const_i32(b, ctx->NQK)));
+        rocke_value_t* st_qh_mul = rocke_b_mul(b, ctx->kv_head_idx, rocke_b_const_i32(b, ctx->NQK));
+        rocke_value_t* st_qh_mod = rocke_b_mod(b, st_q_row, rocke_b_const_i32(b, ctx->NQK));
+        rocke_value_t* st_qh = rocke_b_add(b, st_qh_mul, st_qh_mod);
+        rocke_value_t* st_ok_qp = rocke_b_cmp_lt(b, st_qp, ctx->cur_batch_q_len);
+        rocke_value_t* st_ok_qh = rocke_b_cmp_lt(b, st_qh, ctx->num_qh_p);
+        rocke_value_t* st_ok_inner = rocke_b_land(b, st_ok_qp, st_ok_qh);
         if(ctx->VALID_ROWS < ctx->BLOCK_M)
         {
-            rocke_value_t* ok_vr
+            rocke_value_t* st_ok_vr
                 = rocke_b_cmp_lt(b, st_q_row, rocke_b_const_i32(b, ctx->VALID_ROWS));
-            ctx->st_row_ok = rocke_b_land(b, ok_inner, ok_vr);
+            ctx->st_row_ok_hoist = rocke_b_land(b, st_ok_inner, st_ok_vr);
         }
         else
         {
-            ctx->st_row_ok = ok_inner;
+            ctx->st_row_ok_hoist = st_ok_inner;
         }
-        ctx->st_causal_lim = rocke_b_add(b, ctx->context_len, ctx->st_qp);
+        ctx->st_qp_hoist = st_qp;
+        ctx->st_causal_lim_hoist = rocke_b_add(b, ctx->context_len, st_qp);
         if(ctx->LEGACY_ALIBI)
-            ctx->st_alibi_slope
+            ctx->st_alibi_slope_hoist
                 = rocke_attn_alibi_slope(b, st_qh, ctx->num_qh_p, ctx->alibi_slopes_ptr);
     }
 

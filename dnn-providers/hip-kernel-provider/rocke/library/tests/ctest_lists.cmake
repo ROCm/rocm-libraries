@@ -231,8 +231,10 @@ endif()
 # oracle-free uniform-probability checker and subject contracts, the gfx942
 # dense golden IR hashes (pure text lowering, a few seconds), the dense
 # packed-offset host checks (test_attention_dense_varlen_keys.py), the gfx950
-# dense varlen K/V buffer bound on the emitted IR, and the backward-test memo
-# bound in tests/conftest.py.
+# dense varlen K/V buffer bound on the emitted IR, the tiled-2D spec validators'
+# refusals (their engine-comparison cases skip here, where rocke_engine is not
+# built), the gfx942 sliced-K ring's slice width and refusals
+# (test_attn_k_slice_hd.py), and the backward-test memo bound in tests/conftest.py.
 # File-list style (same pattern as conv_pytest) so PYTHONPATH resolves rocke/
 # correctly from the installed tree.
 set(_ROCKE_LIBRARY_ATTENTION_CPU_TEST_RELPATHS
@@ -259,11 +261,13 @@ set(_ROCKE_LIBRARY_ATTENTION_CPU_TEST_RELPATHS
     "tests/library/tests/test_attention_tiled_2d_mask_type.py"
     "tests/library/tests/test_attention_tiled_2d_head_counts_gfx942.py"
     "tests/library/tests/test_attn_tiled_2d_gfx950_k_lds_read.py"
+    "tests/library/tests/test_attn_k_slice_hd.py"
     "tests/library/tests/test_attention_tiled_3d_decode_split.py"
     "tests/library/tests/test_attention_3d_workspace_i32_guard.py"
     "tests/library/tests/test_attention_tiled_3d_kv_cache_policy.py"
     "tests/library/tests/test_attention_tiled_launch_signature.py"
     "tests/library/tests/test_attention_tiled_cpp_entry_guards.py"
+    "tests/library/tests/test_attention_binding_spec_fields.py"
     "tests/library/tests/test_attention_dense_kv_split_combine_abi.py"
     "tests/library/tests/test_attention_tiled_3d_mask_type.py"
     "tests/library/tests/test_attention_tiled_3d_module.py"
@@ -281,6 +285,8 @@ set(_ROCKE_LIBRARY_ATTENTION_CPU_TEST_RELPATHS
     "tests/library/tests/test_fmha_mfma_free_stride.py"
     "tests/library/tests/test_sdpa_free_stride_layouts.py"
     "tests/library/tests/test_bwd_memo_bound.py"
+    "tests/library/tests/test_attention_bwd_dq_refusal_rows.py"
+    "tests/library/tests/test_attention_bwd_layout_spill_rows.py"
     "tests/library/tests/oracle_free/test_contracts.py"
     "tests/library/tests/oracle_free/test_permutation_contracts.py"
     "tests/library/tests/test_attention_dense_gfx942.py"
@@ -351,6 +357,27 @@ string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
        "  LABELS \"ckc\\;python\\;attention\\;host\\;standard\"\n"
        "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\"\n"
        "  TIMEOUT 900)\n")
+
+# Attention backward hipDNN lowering and plan tests (no GPU): the graph lowering and
+# verdicts hipkernel:AttentionGeneralBwd's C++ mirrors, its shipped catalog, the
+# backward plan and the host-side length checks.
+set(_ROCKE_LIBRARY_ATTENTION_BWD_HIPDNN_TEST_RELPATHS
+    "tests/library/tests/test_attention_bwd_hipdnn.py"
+    "tests/library/tests/test_attention_bwd_hipdnn_catalog.py"
+    "tests/library/tests/test_attention_bwd_plan.py"
+    "tests/library/tests/test_attention_bwd_host_checks.py")
+set(_ROCKE_LIBRARY_ATTENTION_BWD_HIPDNN_TESTS "")
+foreach(_t ${_ROCKE_LIBRARY_ATTENTION_BWD_HIPDNN_TEST_RELPATHS})
+  string(APPEND _ROCKE_LIBRARY_ATTENTION_BWD_HIPDNN_TESTS
+         " \"${ROCKE_TEST_CTEST_REL}${_t}\"")
+endforeach()
+string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
+       "add_test(rocke_library_attention_bwd_hipdnn_pytest ${_ROCKE_INSTALLED_PYTEST}${_ROCKE_LIBRARY_ATTENTION_BWD_HIPDNN_TESTS} -v -rs --timeout=60)\n")
+string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
+       "set_tests_properties(rocke_library_attention_bwd_hipdnn_pytest PROPERTIES\n"
+       "  LABELS \"ckc\\;python\\;attention\\;host\\;quick\"\n"
+       "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\"\n"
+       "  TIMEOUT 180)\n")
 
 # Exhaustive counted-sync gates are intentionally outside normal pytest
 # discovery. The structural gate is host-only; the compiler gate additionally
@@ -655,6 +682,7 @@ set(_ROCKE_LIBRARY_GPU_TEST_RELPATHS
     "tests/library/tests/test_gfx942_cfvst_i64_kv_addr_numeric.py"
     "tests/library/tests/test_gfx942_4wgqa_bounds_numeric.py"
     "tests/library/tests/test_attention_gfx942_kv_pages.py"
+    "tests/library/tests/test_attention_kv_tail_numeric.py"
     "tests/library/tests/test_attention_tiled_runtime_shape_numeric.py"
     "tests/library/tests/test_attention_tiled_3d_kv_lds_swizzle.py"
     "tests/library/tests/test_attention_tiled_3d_running_max.py"

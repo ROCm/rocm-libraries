@@ -7,7 +7,8 @@
  * Ported: UnifiedAttention2DTiledSpec (-> rocke_attention_tiled_2d_spec_t +
  * default/validate/derived-property helpers), the build-head config derivation
  * (-> rocke_unified_attention_2d_tiled_config_from_spec), _mfma_32x32_c_row /
- * _mfma_32x32_c_col, and the kernel build entry (stub-to-link).
+ * _mfma_32x32_c_col. The kernel build entry lives in the attention_tiled_2d_*
+ * part-files.
  *
  * The two 32x32 C helpers reproduce the Python builder-call sequence
  * byte-faithfully: same div/mod constants, same calculate_x ys/ps wiring, same
@@ -35,6 +36,8 @@
 
 #include "rocke/error.hpp"
 #include "rocke/helper_helper_rocke.instances.gfx942.attention_tiled_2d.h"
+#include "rocke/helper_rocke.instances.common._attention_alibi.h"
+#include "rocke/instance_attention_unified_internal.h"
 #include "rocke/ir.h"
 
 /* ------------------------------------------------------------- error latch */
@@ -132,6 +135,14 @@ rocke_attention_tiled_2d_spec_t rocke_attention_tiled_2d_spec_default(void)
     s.use_qblock_reverse = false;
     s.emit_lse = false;
     s.lse_head_major = false;
+    s.use_kq_lds_pad = false;
+    s.kq_lds_pad_halves = 8;
+    s.use_mask_phase_split = false;
+    s.use_v_hbm_direct = false;
+    s.use_k_hbm_direct = false;
+    s.use_causal_mask_phase_split = false;
+    s.causal_top_left = false;
+    s.right_bound = 0;
     return s;
 }
 
@@ -207,6 +218,36 @@ int rocke_attention_tiled_2d_spec_n_blocks_per_tile(const rocke_attention_tiled_
     return rocke_attention_tiled_2d_spec_tile_size_eff(s) / bs;
 }
 
+int rocke_attention_tiled_2d_spec_kq_lds_pad_slab_rows(const rocke_attention_tiled_2d_spec_t* s)
+{
+    if(!s->use_kq_lds_pad || s->use_fp8_mfma_qk || s->kq_lds_pad_halves == 0
+       || !s->use_k_single_buffer || s->head_size <= 0
+       || ROCKE_ATTENTION_KQ_PAD_SLAB_HALVES % s->head_size != 0 || s->kq_lds_pad_halves % 8 != 0)
+        return 0;
+    const int slab_rows = ROCKE_ATTENTION_KQ_PAD_SLAB_HALVES / s->head_size;
+    return rocke_attention_tiled_2d_spec_tile_size_eff(s) % slab_rows == 0 ? slab_rows : 0;
+}
+
+bool rocke_attention_tiled_2d_spec_q_staged_in_k_lds(const rocke_attention_tiled_2d_spec_t* s)
+{
+    if(s->use_fp8_mfma_qk || s->use_q_reread || s->use_q_direct_reg)
+        return false;
+    const long q_bytes = (long)rocke_attention_tiled_2d_spec_block_m(s) * s->head_size * 2;
+    const long k_slots_bytes
+        = 2L * rocke_attention_tiled_2d_spec_tile_size_eff(s) * s->head_size * 2;
+    return q_bytes <= k_slots_bytes;
+}
+
+const char* rocke_attention_tiled_2d_spec_kq_pad_refusal(const rocke_attention_tiled_2d_spec_t* s)
+{
+    if(!rocke_attention_tiled_2d_spec_kq_lds_pad_slab_rows(s)
+       || !rocke_attention_tiled_2d_spec_q_staged_in_k_lds(s))
+        return NULL;
+    return "KQ LDS pad failed - use_q_reread=False, use_q_direct_reg=False, expected one of "
+           "them True (transposed 32x32 path) or use_kq_lds_pad=False (Q staged in the "
+           "padded single K slot is read unpadded)";
+}
+
 const rocke_type_t* rocke_attention_tiled_2d_spec_dtype_ir(const rocke_attention_tiled_2d_spec_t* s)
 {
     if(s != NULL && rocke_streq(s->dtype, "fp16"))
@@ -248,22 +289,113 @@ bool rocke_attention_tiled_2d_spec_validate(rocke_ir_builder_t* b,
         rocke_attn2d_set_err(b, ROCKE_ERR_VALUE, "attention_tiled_2d spec is NULL");
         return false;
     }
+    if(s->block_size <= 0)
+    {
+        rocke_attn2d_set_err(
+            b, ROCKE_ERR_VALUE, "block_size must be positive, got %d", s->block_size);
+        return false;
+    }
 
-    /* gfx950-only experimental knobs rejected up front on gfx942.
+    /* The ALiBi arms fold the term into the scale op or the QK accumulator, so
+     * nothing may sit between the scale and the term. */
+    if(s->alibi_design != NULL)
+    {
+        if(rocke_attn_alibi_design_token(s->alibi_design) == NULL)
+        {
+            rocke_attn2d_set_err(b,
+                                 ROCKE_ERR_VALUE,
+                                 "alibi_design must be one of ['fma_split', 'fma_tile', "
+                                 "'seed_split', 'seed_tile'] or None (got '%s')",
+                                 s->alibi_design);
+            return false;
+        }
+        if(!s->use_alibi)
+        {
+            rocke_attn2d_set_err(b, ROCKE_ERR_VALUE, "alibi_design requires use_alibi");
+            return false;
+        }
+        if(s->has_softcap)
+        {
+            rocke_attn2d_set_err(b,
+                                 ROCKE_ERR_VALUE,
+                                 "alibi_design=%s is not supported on softcap: softcap applies "
+                                 "between the scale and the ALiBi term",
+                                 s->alibi_design);
+            return false;
+        }
+        if(s->use_qq_bias)
+        {
+            rocke_attn2d_set_err(b,
+                                 ROCKE_ERR_VALUE,
+                                 "alibi_design=%s is not supported with QQ bias: ALiBi plus a "
+                                 "score bias is out of scope",
+                                 s->alibi_design);
+            return false;
+        }
+        if((s->use_mfma_32x32 || s->use_mfma_32x32x8) && !s->use_transposed_qk_32x32)
+        {
+            rocke_attn2d_set_err(b,
+                                 ROCKE_ERR_VALUE,
+                                 "alibi_design=%s is not supported on the non-transposed 32x32 "
+                                 "path: no fast variant runs on it",
+                                 s->alibi_design);
+            return false;
+        }
+    }
+
+    /* The Python gfx942 spec has no band fields; only a hand-built C spec can
+     * carry one, so this message has no Python counterpart. */
+    if(s->causal_top_left || s->right_bound != 0)
+    {
+        char label[64];
+        rocke_attn_unified_band_label(s->causal_top_left, s->right_bound, label, sizeof(label));
+        rocke_attn2d_set_err(
+            b, ROCKE_ERR_VALUE, "gfx942 tiled attention does not implement %s masks", label);
+        return false;
+    }
+
+    /* gfx950-only experimental knobs rejected up front on gfx942, named in
+     * Python's order.
      * NOTE: use_agpr_alloc_zero is NOT an ISA feature -- it is a backend codegen
      * hint ("amdgpu-agpr-alloc"="0,0" + -amdgpu-mfma-vgpr-form) that keeps MFMA
      * accumulators in VGPR. It is legal on the gfx942 wide x8 transposed path;
-     * the detailed pairing guard below enforces that (mirrors Python
-     * attention_tiled_2d.py line 765). So it is gated there, not blanket-rejected
-     * here. */
-    if(s->use_mfma_32x32 || s->use_transposed_half_local_pv || s->use_mfma32_skip_legacy_qreg
-       || s->use_grouped_kv2_softmax || s->use_fp8_mfma_qk || s->use_fp8_mfma_pv)
+     * the detailed pairing guard below enforces that. So it is gated there, not
+     * blanket-rejected here. */
     {
-        rocke_attn2d_set_err(b,
-                             ROCKE_ERR_VALUE,
-                             "gfx942 tiled-2D attention supports only the narrow 16x16x16 "
-                             "default path; gfx950-only knobs are not available on gfx942");
-        return false;
+        const char* const names[] = {"use_mfma_32x32",
+                                     "use_transposed_half_local_pv",
+                                     "use_mfma32_skip_legacy_qreg",
+                                     "use_grouped_kv2_softmax",
+                                     "use_fp8_mfma_qk",
+                                     "use_fp8_mfma_pv"};
+        const bool on[] = {s->use_mfma_32x32,
+                           s->use_transposed_half_local_pv,
+                           s->use_mfma32_skip_legacy_qreg,
+                           s->use_grouped_kv2_softmax,
+                           s->use_fp8_mfma_qk,
+                           s->use_fp8_mfma_pv};
+        char knobs[256] = "";
+        size_t len = 0;
+        for(size_t i = 0; i < sizeof(names) / sizeof(names[0]); ++i)
+        {
+            if(on[i])
+            {
+                len += (size_t)snprintf(
+                    knobs + len, sizeof(knobs) - len, "%s%s", len ? ", " : "", names[i]);
+            }
+        }
+        if(len > 0)
+        {
+            /* All six knobs exceed ROCKE_ERR_MSG_CAP, so raise directly rather
+             * than through rocke_attn2d_set_err's buffer. */
+            char msg[512];
+            snprintf(msg,
+                     sizeof(msg),
+                     "gfx942 tiled-2D attention supports only the narrow 16x16x16 default path "
+                     "and the K=8 32x32x8 wide path; these are not available on gfx942: %s",
+                     knobs);
+            ckc::raise_status(ROCKE_ERR_VALUE, msg);
+        }
     }
 
     /* The gfx942 Python spec has no additive-bias field. */
@@ -287,8 +419,8 @@ bool rocke_attention_tiled_2d_spec_validate(rocke_ir_builder_t* b,
     {
         rocke_attn2d_set_err(b,
                              ROCKE_ERR_VALUE,
-                             "gfx942 tiled-2D attention has no fp8 K/V cache path "
-                             "(kv_storage_dtype must be None on gfx942)");
+                             "gfx942 tiled-2D attention does not support the fp8 K/V cache "
+                             "(its PV path uses ds_read_tr_b8, a gfx950-only transpose read)");
         return false;
     }
 
@@ -389,8 +521,10 @@ bool rocke_attention_tiled_2d_spec_validate(rocke_ir_builder_t* b,
     {
         if(!(s->use_mfma_32x32x8 && s->use_transposed_qk_32x32))
         {
-            rocke_attn2d_set_err(
-                b, ROCKE_ERR_VALUE, "use_k_single_buffer requires the transposed-x8 path");
+            rocke_attn2d_set_err(b,
+                                 ROCKE_ERR_VALUE,
+                                 "use_k_single_buffer requires the transposed-x8 PV orientation "
+                                 "(use_mfma_32x32x8 + use_transposed_qk_32x32)");
             return false;
         }
         if(!(rocke_streq(s->dtype, "fp16") || rocke_streq(s->dtype, "bf16")))
@@ -401,8 +535,12 @@ bool rocke_attention_tiled_2d_spec_validate(rocke_ir_builder_t* b,
         block_m = rocke_attention_tiled_2d_spec_block_m(s);
         if(block_m > t_eff)
         {
-            rocke_attn2d_set_err(
-                b, ROCKE_ERR_VALUE, "use_k_single_buffer requires BLOCK_M <= tile_size_eff");
+            rocke_attn2d_set_err(b,
+                                 ROCKE_ERR_VALUE,
+                                 "use_k_single_buffer requires BLOCK_M <= tile_size so Q still "
+                                 "aliases the single K slot (BLOCK_M=%d, tile_size=%d)",
+                                 block_m,
+                                 t_eff);
             return false;
         }
     }
@@ -545,6 +683,57 @@ bool rocke_attention_tiled_2d_spec_validate(rocke_ir_builder_t* b,
         return false;
     }
 
+    {
+        const char* const hbm_names[] = {"use_k_hbm_direct", "use_v_hbm_direct"};
+        const bool hbm_on[] = {s->use_k_hbm_direct, s->use_v_hbm_direct};
+        for(int i = 0; i < 2; ++i)
+        {
+            if(hbm_on[i] && s->use_i64_kv_addr)
+            {
+                rocke_attn2d_set_err(b,
+                                     ROCKE_ERR_VALUE,
+                                     "%s reads K/V with i32 offsets; it cannot be combined "
+                                     "with use_i64_kv_addr",
+                                     hbm_names[i]);
+                return false;
+            }
+        }
+    }
+
+    if(s->use_k_hbm_direct)
+    {
+        if(!(s->use_mfma_32x32x8 && s->use_transposed_qk_32x32))
+        {
+            rocke_attn2d_set_err(b,
+                                 ROCKE_ERR_VALUE,
+                                 "use_k_hbm_direct requires transposed-x8 "
+                                 "(use_mfma_32x32x8 + use_transposed_qk_32x32); "
+                                 "the 16x16 QK loop always reads K_lds");
+            return false;
+        }
+        if(s->use_k_sliced_ring)
+        {
+            rocke_attn2d_set_err(b,
+                                 ROCKE_ERR_VALUE,
+                                 "use_k_hbm_direct is mutually exclusive with use_k_sliced_ring");
+            return false;
+        }
+        if(s->use_global_load_lds_k)
+        {
+            rocke_attn2d_set_err(b,
+                                 ROCKE_ERR_VALUE,
+                                 "use_k_hbm_direct is mutually exclusive with "
+                                 "use_global_load_lds_k");
+            return false;
+        }
+        /* The C++ engine has no K-from-HBM loader: Python's version aliases Q
+         * into a K stub too small to hold it, so the flag stays refused until
+         * that staging is fixed in both engines. */
+        rocke_attn2d_set_err(
+            b, ROCKE_ERR_NOTIMPL, "use_k_hbm_direct is not ported to the C++ engine yet");
+        return false;
+    }
+
     if(s->use_global_load_lds_k && s->kv_storage_dtype != NULL)
     {
         rocke_attn2d_set_err(
@@ -556,6 +745,56 @@ bool rocke_attention_tiled_2d_spec_validate(rocke_ir_builder_t* b,
     {
         rocke_attn2d_set_err(
             b, ROCKE_ERR_VALUE, "use_mfma32_skip_legacy_qreg requires use_mfma_32x32");
+        return false;
+    }
+
+    /* The grouped_kv2 arm of the Python check is unreachable here: grouped_kv2 is
+     * rejected up front on gfx942. */
+    if(s->use_transposed_mask_limit)
+    {
+        if(!((s->use_mfma_32x32 || s->use_mfma_32x32x8) && s->use_transposed_qk_32x32
+             && s->use_transposed_scalar_state && s->use_transposed_mask_once))
+        {
+            rocke_attn2d_set_err(
+                b, ROCKE_ERR_VALUE, "transposed softmax VALU opts require the R4_s1mask path");
+            return false;
+        }
+        if(s->sliding_window > 0)
+        {
+            rocke_attn2d_set_err(
+                b, ROCKE_ERR_VALUE, "transposed softmax VALU opts require no sliding window");
+            return false;
+        }
+        if(s->has_softcap || s->use_qq_bias)
+        {
+            rocke_attn2d_set_err(b,
+                                 ROCKE_ERR_VALUE,
+                                 "transposed softmax VALU opts do not support softcap or QQ bias");
+            return false;
+        }
+    }
+
+    if(s->use_fast_paged_kv_desc
+       && !(rocke_streq(s->dtype, "bf16") && s->kv_storage_dtype == NULL && s->head_size == 64
+            && s->block_size == 32 && t_eff == 64 && s->num_query_heads == 64
+            && s->num_kv_heads == 8 && s->num_warps == 4))
+    {
+        rocke_attn2d_set_err(b,
+                             ROCKE_ERR_VALUE,
+                             "use_fast_paged_kv_desc is restricted to bf16 h64kv8 "
+                             "HD=64 BS=32 T=64 num_warps=4");
+        return false;
+    }
+    if(s->use_fast_paged_kv_desc && (s->use_k_hbm_direct || s->use_v_hbm_direct))
+    {
+        rocke_attn2d_set_err(b,
+                             ROCKE_ERR_VALUE,
+                             "gfx942 tiled 2D spec failed - use_fast_paged_kv_desc=True with "
+                             "use_k_hbm_direct=%s, use_v_hbm_direct=%s, expected both False: "
+                             "the direct K and V reads address the cache through the paged-KV "
+                             "descriptor, which the fast descriptor path does not build",
+                             s->use_k_hbm_direct ? "True" : "False",
+                             s->use_v_hbm_direct ? "True" : "False");
         return false;
     }
 
@@ -578,6 +817,40 @@ bool rocke_attention_tiled_2d_spec_validate(rocke_ir_builder_t* b,
                                  "(use_mfma_32x32x8 + use_transposed_qk_32x32)");
             return false;
         }
+    }
+
+    /* The use_mfma_32x32 and fp8 K/V arms of the Python check are unreachable
+     * here: both are rejected up front on gfx942. */
+    if(s->use_register_pv)
+    {
+        if(!rocke_streq(s->dtype, "bf16"))
+        {
+            rocke_attn2d_set_err(
+                b, ROCKE_ERR_VALUE, "use_register_pv v1 is restricted to dtype='bf16'");
+            return false;
+        }
+        if(s->sliding_window > 0 || s->has_softcap)
+        {
+            rocke_attn2d_set_err(
+                b, ROCKE_ERR_VALUE, "use_register_pv v1 requires no sliding window and no softcap");
+            return false;
+        }
+        if(s->use_qq_bias)
+        {
+            rocke_attn2d_set_err(b, ROCKE_ERR_VALUE, "use_register_pv v1 does not support QQ bias");
+            return false;
+        }
+    }
+
+    if(s->has_tile_size && (s->tile_size <= 0 || s->tile_size % s->block_size != 0))
+    {
+        rocke_attn2d_set_err(b,
+                             ROCKE_ERR_VALUE,
+                             "tile_size must be a positive multiple of block_size "
+                             "(got tile_size=%d, block_size=%d)",
+                             s->tile_size,
+                             s->block_size);
+        return false;
     }
 
     return true;
@@ -809,13 +1082,8 @@ rocke_value_t* rocke__mfma_32x32_c_col(rocke_ir_builder_t* b, rocke_value_t* lan
     return rocke_b_add(b, rocke_b_const_i32(b, (int64_t)(n_tile32 * 32)), col);
 }
 
-/* ------------------------------------------------- kernel build (stub) */
-
 /* NOTE: the kernel build entry ``rocke_build_unified_attention_2d_tiled_scalar``
- * formerly lived here as a STUB-TO-LINK placeholder. The faithful, full
- * IR-emitting port now lives in the chunked instance part-files
- * (instance_gfx942_attention_tiled_2d_*_public_entry_glue.c drives the phase
- * functions). This TU keeps only the host-side spec/config/derivation helpers
- * and the two 32x32 C-row/C-col helpers that the part-files consume
- * (rocke__mfma_32x32_c_row / rocke__mfma_32x32_c_col); the build entry is defined
- * once, by the part-file, to avoid a duplicate-symbol link error. */
+ * lives in the chunked instance part-files (attention_tiled_2d_public_entry_glue.cpp
+ * drives the phase functions). This TU keeps only the host-side
+ * spec/config/derivation helpers and the two 32x32 C-row/C-col helpers that the
+ * part-files consume (rocke__mfma_32x32_c_row / rocke__mfma_32x32_c_col). */
