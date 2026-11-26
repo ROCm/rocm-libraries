@@ -128,6 +128,7 @@ from .lanes import (
     Lane,
     lanes_waited_for,
 )
+from .source_tree import source_files
 
 __all__ = [
     "ISSUE_PATTERN",
@@ -150,6 +151,7 @@ __all__ = [
     "measured_budget_kernels",
     "measured_scratch_allowance",
     "quarantined_test",
+    "python_files_under_test_roots",
     "tree_test_files",
     "utc_today",
     "waiting_entry",
@@ -1875,11 +1877,27 @@ def waiting_entry(
     )
 
 
+def python_files_under_test_roots(rocke_dir: Path) -> list[str]:
+    """Every Python file under :data:`TEST_FILE_ROOTS` of the source checkout
+    at ``rocke_dir``, relative to it, sorted: the files a run may collect tests
+    from (an entry may name a test module that is not ``test_*.py``). Only the
+    files git tracks or would track
+    (:func:`~rocke.tests.source_tree.source_files`), so a build tree or virtual
+    environment inside the checkout, which may hold copies of the tests, adds
+    none."""
+    return [
+        path
+        for path in source_files(rocke_dir)
+        if path.endswith(".py")
+        and any(path.startswith(f"{root}/") for root in TEST_FILE_ROOTS)
+    ]
+
+
 def tree_test_files(rocke_dir: Path) -> set[str]:
-    """Every test file of the source tree at ``rocke_dir``, relative to it."""
+    """Every test file of the source checkout at ``rocke_dir``, relative to it:
+    the ``test_*.py`` files of :func:`python_files_under_test_roots`."""
     return {
-        file.relative_to(rocke_dir).as_posix()
-        for root in TEST_FILE_ROOTS
-        for file in (rocke_dir / root).rglob("test_*.py")
-        if "__pycache__" not in file.parts
+        path
+        for path in python_files_under_test_roots(rocke_dir)
+        if path.rsplit("/", 1)[-1].startswith("test_")
     }

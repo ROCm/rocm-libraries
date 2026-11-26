@@ -47,6 +47,7 @@ from ..assets import platform_root
 from . import source_allowlist
 from .source_allowlist import AllowlistEntry
 from .source_ast import dotted_name, string_constant
+from .source_tree import source_files
 
 __all__ = [
     "TorchUse",
@@ -320,11 +321,18 @@ def torch_named_identifiers(source: str, filename: str) -> list[tuple[int, str]]
 
 def tree_files(root: Path) -> list[str]:
     """The files under ``root`` that the gate reads, relative POSIX paths, sorted:
-    Python files and config files (:func:`is_config_file`) that git tracks or
-    would track (:func:`rocke.tests.source_allowlist.tracked_files`)."""
-    return source_allowlist.tracked_files(
-        root, lambda path: path.endswith(".py") or is_config_file(Path(path))
-    )
+    the Python files and config files (:func:`is_config_file`) of
+    :func:`~rocke.tests.source_tree.source_files`, so build trees, virtual
+    environments and ignored scratch directories are never read.
+
+    Raises ``RuntimeError`` when git is missing or ``root`` is not in a git
+    work tree: the gate checks a source checkout.
+    """
+    return [
+        path
+        for path in source_files(root)
+        if path.endswith(".py") or is_config_file(Path(path))
+    ]
 
 
 def tree_torch_uses(root: Path) -> dict[str, list[TorchUse]]:

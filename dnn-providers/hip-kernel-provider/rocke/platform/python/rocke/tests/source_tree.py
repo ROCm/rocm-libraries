@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: MIT
 
 """Test helpers: reach the ``dsl_docs`` and ``library`` source trees, which exist
-only in a source checkout.
+only in a source checkout, and list the files of a source checkout.
 
 The installed test payload carries the ``rocke`` package and most of the test
 tree, but not ``dsl_docs/`` (documentation and authoring tools) and not the
@@ -22,16 +22,22 @@ exists, a file missing from it (a renamed or deleted doc) fails the test.
 Use this for a source-tree check inside a test file that is otherwise installed.
 A test file that is source-tree tooling throughout is instead left out of the
 install (the exclusion list in ``platform/CMakeLists.txt``).
+
+:func:`source_files` lists the files of a checkout through git, so a build tree,
+a virtual environment or a scratch directory inside it is never taken for
+source.
 """
 
 from __future__ import annotations
 
+import shutil
+import subprocess
 from pathlib import Path
 
 from rocke.assets import dsl_docs_dir, library_root
 from rocke.tests.lanes import SOURCE_TREE, skip_until
 
-__all__ = ["require_dsl_docs", "require_library_tree"]
+__all__ = ["require_dsl_docs", "require_library_tree", "source_files"]
 
 
 def _require_source_tree(tree: Path, name: str) -> Path:
@@ -54,3 +60,33 @@ def require_dsl_docs() -> Path:
 def require_library_tree() -> Path:
     """Return the ``library`` source root, or skip the test when this layout lacks it."""
     return _require_source_tree(library_root(), "library")
+
+
+def source_files(root: Path) -> list[str]:
+    """The files under ``root`` that git tracks or would track (untracked but not
+    ignored), as POSIX paths relative to ``root``, sorted: what ``.gitignore``
+    leaves out (build trees, virtual environments, scratch directories) is not
+    listed.
+
+    Raises ``RuntimeError`` when git is missing or ``root`` is not in a git work
+    tree: only a source checkout has source files to list.
+    """
+    git = shutil.which("git")
+    if git is None:
+        raise RuntimeError(
+            f"source_files failed - root={str(root)!r}, expected git on PATH to "
+            "list the source tree"
+        )
+    listing = subprocess.run(
+        [git, "ls-files", "-z", "--cached", "--others", "--exclude-standard"],
+        cwd=root,
+        capture_output=True,
+        check=False,
+    )
+    if listing.returncode != 0:
+        raise RuntimeError(
+            f"source_files failed - root={str(root)!r}, expected a git work tree: "
+            f"{listing.stderr.decode(errors='replace').strip()}"
+        )
+    paths = {item for item in listing.stdout.decode().split("\0") if item}
+    return sorted(path for path in paths if (root / path).is_file())

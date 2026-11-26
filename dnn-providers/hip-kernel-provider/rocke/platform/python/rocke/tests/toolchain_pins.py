@@ -54,6 +54,7 @@ from ..assets import platform_root
 from . import source_allowlist
 from .source_allowlist import AllowlistEntry
 from .source_ast import dotted_name, string_constant
+from .source_tree import source_files
 
 __all__ = [
     "DETECTOR_TESTS",
@@ -441,11 +442,14 @@ def toolchain_pins_in_python(
 
 
 def tree_files(root: Path) -> list[str]:
-    """The Python files under ``root`` that the gate reads (test and library
-    code that git tracks or would track), relative POSIX paths, sorted."""
-    return source_allowlist.tracked_files(
-        root, lambda path: path.endswith(".py") and bool(checked_kinds(path))
-    )
+    """The Python files under ``root`` that the gate reads: the test and library
+    code of :func:`~rocke.tests.source_tree.source_files`, relative POSIX paths,
+    sorted."""
+    return [
+        path
+        for path in source_files(root)
+        if path.endswith(".py") and checked_kinds(path)
+    ]
 
 
 def tree_toolchain_pins(root: Path) -> dict[str, list[ToolchainPin]]:

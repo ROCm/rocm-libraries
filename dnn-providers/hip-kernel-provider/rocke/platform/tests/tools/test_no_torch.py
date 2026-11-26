@@ -114,7 +114,7 @@ def test_a_directory_outside_a_git_work_tree_is_refused(tmp_path):
     ):
         pytest.fail(f"expected {outside} outside any git work tree")
     with pytest.raises(
-        RuntimeError, match=r"tracked_files failed - root=.*git work tree"
+        RuntimeError, match=r"source_files failed - root=.*git work tree"
     ):
         tree_files(outside)
 

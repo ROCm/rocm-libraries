@@ -1,8 +1,9 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""The shared half of the tree-wide source checks: which files a check reads, and
-the allowlist that holds the findings it tolerates until they are removed.
+"""The shared half of the tree-wide source checks: the allowlist that holds the
+findings a check tolerates until they are removed. (The files a check reads are
+those of :func:`rocke.tests.source_tree.source_files`.)
 
 A source check (``rocke.tests.torch_uses``, ``rocke.tests.toolchain_pins``)
 reports findings: each has a 1-based ``line``, a ``kind`` (a member of the
@@ -24,9 +25,7 @@ that removes it, after the kinds; a list read without it names none::
 from __future__ import annotations
 
 import enum
-import shutil
-import subprocess
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
@@ -40,7 +39,6 @@ __all__ = [
     "file_kinds",
     "format_allowlist_entry",
     "read_allowlist",
-    "tracked_files",
 ]
 
 _ISSUE_MARK = "  # "
@@ -66,35 +64,6 @@ class AllowlistEntry:
 
     kinds: frozenset[enum.Enum]
     issue: str | None = None
-
-
-def tracked_files(root: Path, wanted: Callable[[str], bool]) -> list[str]:
-    """The files under ``root`` that git tracks or would track (untracked but not
-    ignored) and ``wanted`` accepts, as sorted relative POSIX paths, so build
-    trees, virtual environments and ignored scratch directories are never read.
-
-    Raises ``RuntimeError`` when git is missing or ``root`` is not in a git
-    work tree: a source check reads a source checkout.
-    """
-    git = shutil.which("git")
-    if git is None:
-        raise RuntimeError(
-            f"tracked_files failed - root={str(root)!r}, expected git on PATH to list "
-            "the source tree"
-        )
-    listing = subprocess.run(
-        [git, "ls-files", "-z", "--cached", "--others", "--exclude-standard"],
-        cwd=root,
-        capture_output=True,
-        check=False,
-    )
-    if listing.returncode != 0:
-        raise RuntimeError(
-            f"tracked_files failed - root={str(root)!r}, expected a git work tree: "
-            f"{listing.stderr.decode(errors='replace').strip()}"
-        )
-    paths = {item for item in listing.stdout.decode().split("\0") if item}
-    return sorted(path for path in paths if wanted(path) and (root / path).is_file())
 
 
 def file_kinds(findings: Sequence[Finding]) -> frozenset[enum.Enum]:

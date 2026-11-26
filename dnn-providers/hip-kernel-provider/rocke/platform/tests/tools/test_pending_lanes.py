@@ -286,6 +286,23 @@ def test_audit_finds_files_in_limbo_and_stale_entries():
     )
 
 
+def test_the_tree_test_files_are_the_source_files_git_lists(tmp_path):
+    """A build tree inside the checkout stages copies of the tests; they are
+    no source test files, so they are in no CI entry's limbo."""
+    git = shutil.which("git") or "git"
+    subprocess.run([git, "init", "-q"], cwd=tmp_path, check=True)
+    (tmp_path / ".gitignore").write_text("build/\n", encoding="utf-8")
+    for path in (
+        "platform/tests/test_source.py",
+        "platform/tests/helper.py",
+        "platform/build/tests/test_staged_copy.py",
+        "elsewhere/test_outside_the_roots.py",
+    ):
+        (tmp_path / path).parent.mkdir(parents=True, exist_ok=True)
+        (tmp_path / path).write_text("", encoding="utf-8")
+    assert tree_test_files(tmp_path) == {"platform/tests/test_source.py"}
+
+
 def test_a_file_may_wait_for_several_lanes_but_a_whole_file_entry_is_alone():
     hardware = _pending("a/test_x.py", RUNNER_HARDWARE)
     build = _pending("a/test_x.py", BUILD_VARIANT)
