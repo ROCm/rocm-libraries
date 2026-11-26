@@ -156,17 +156,20 @@ def decide(env, changed_files, rules):
     return Decision(True, True, None)
 
 
-def list_files_from_api(repo, pr):
-    """The PR's changed files from the GitHub API, or None if the call fails."""
+def list_files_from_api(repo, pr, expected=None):
+    """The PR's changed files from the GitHub API, or None if the call fails or the list
+    is incomplete (the API stops at 3000 files; `expected` is the PR's changed_files).
+    """
     command = [
         "gh",
         "api",
         "--paginate",
         f"repos/{repo}/pulls/{pr}/files",
         "--jq",
-        # A renamed file counts at both paths: a TensileLite file moved into library/
-        # still runs the TensileLite tests, and a source file moved into docs/ still runs the job.
-        ".[] | .filename, (.previous_filename // empty)",
+        # One line per changed file: its path, then a renamed file's old path, so a
+        # TensileLite file moved into library/ still runs the TensileLite tests and a
+        # source file moved into docs/ still runs the job.
+        '.[] | [.filename, (.previous_filename // "")] | @tsv',
     ]
     log.info("Listing PR #%s's changed files: %s", pr, " ".join(command))
     result = subprocess.run(command, capture_output=True, text=True)
@@ -175,7 +178,15 @@ def list_files_from_api(repo, pr):
             f"::warning::could not list PR #{pr}'s changed files: {result.stderr.strip()}"
         )
         return None
-    return [line for line in result.stdout.splitlines() if line.strip()]
+    rows = [line for line in result.stdout.splitlines() if line.strip()]
+    # Count changed files, not paths: a rename's second path must not hide a truncated list.
+    if expected and len(rows) < int(expected):
+        print(
+            f"::warning::the files API listed {len(rows)} of PR #{pr}'s {expected} "
+            "changed files"
+        )
+        return None
+    return [path for row in rows for path in row.split("\t") if path]
 
 
 def list_files_from_git(base):
@@ -203,7 +214,9 @@ def main(argv=None):
     changed_files = []
     if event == "pull_request":
         if env.get("REPO") and env.get("PR"):
-            changed_files = list_files_from_api(env["REPO"], env["PR"])
+            changed_files = list_files_from_api(
+                env["REPO"], env["PR"], env.get("CHANGED_FILES")
+            )
         else:
             changed_files = list_files_from_git(args.base)
         if changed_files is not None:
