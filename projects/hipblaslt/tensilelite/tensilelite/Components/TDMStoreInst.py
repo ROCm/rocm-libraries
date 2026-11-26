@@ -145,9 +145,8 @@ def tdmStoreRejectReason(state):
   (tile_dim1) in 16 bits. A TDMStoreLdsPad needs TDMStoreInst and a pad of whole DWORDs, or 1 with a 16-bit D, which
   starts the odd columns at 2 mod 4 bytes. The pad moves column c of the staged tile by c * TDMStoreLdsPad elements, so
   a pad whose bytes are not a multiple of the widest DS access of a staged vector, min(its bytes, 16), leaves that
-  access below its native alignment (MI400 Shader Programming Guide PDF p.46). It is then correct only in the
-  UNALIGNED SH_MEM_CONFIG.alignment_mode, which the KFD sets for the queues it creates, since the other modes clear
-  the low address bits (3.3.4.1, PDF p.45).
+  access below its native alignment. It is then correct only in the UNALIGNED SH_MEM_CONFIG.alignment_mode, which the
+  KFD sets for the queues it creates, since the other modes clear the low address bits.
   The store vectors the block stages are checked by tdmStoreVectorRejectReason, once their widths are final.
   """
   if not state["TDMStoreInst"]:
@@ -563,8 +562,8 @@ def _tdmStoreDescriptor(gwb, module: Module, tdm, g0, g1, tmp, tc):
   module.add(SOrB32(dst=sgpr(g0 + 3), src0=sgpr(g0 + 3), src1=hex(2 << 30), comment="set type field to 2(image)"))
   module.add(SSubU32(dst=sgpr(dim), src0=sizeI, src1=sgpr(dim), comment="tensor_dim0 = SizeI - wg0*MT0"))
   if tdmStorePitch(gwb.kernel) > mt0:
-    # A transfer from LDS to memory ignores pad_enable, so the pad rows are part of the tile (MI400 Shader Programming
-    # Guide PDF p.209, p.212); past tensor_dim0 a store is dropped and a load reads zero (PDF p.208, p.214).
+    # A transfer from LDS to memory ignores pad_enable, so the pad rows are part of the tile; past tensor_dim0 a store
+    # is dropped and a load reads zero.
     module.add(SMinU32(dst=sgpr(dim), src0=sgpr(dim), src1=mt0, comment="at most MT0, so the pad rows lie outside the tensor"))
   if units > 1:
     module.add(SAddU32(dst=sgpr(dim), src0=sgpr(dim), src1=sgpr(dim), comment="tensor_dim0 in 8-byte units"))
@@ -600,8 +599,7 @@ def emitTDMStoreLoadC(gwb) -> Module:
   reads its C elements where it stages their D, so only the barrier after the loads is needed. The
   load carries C's cache hints, as the buffer loads of C would. With a TDMStoreLdsPad it shares the store's
   descriptor, pad rows included, and writes zeros to them, TDMStoreLdsPad / MacroTile0 of its LDS writes: pad_enable,
-  which inserts whole DWORDs, could skip them for some pads only, and the store cannot skip them at all (MI400 Shader
-  Programming Guide PDF p.209, p.212).
+  which inserts whole DWORDs, could skip them for some pads only, and the store cannot skip them at all.
   """
   from .TensorDataMover import TensorDataMoverStore
   module = Module("TDMStoreLoadC")
