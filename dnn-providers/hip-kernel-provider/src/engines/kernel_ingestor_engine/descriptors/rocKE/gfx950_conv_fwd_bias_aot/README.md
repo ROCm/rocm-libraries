@@ -27,13 +27,15 @@ bias. A batch-split kernel passes the whole bias to every chunk.
 
 ## Artifact
 
-The KDPs are rocKE's bias catalog: the bias twin of every implicit-GEMM instance of the
-unfused engine's catalog, 89 per dtype in 12 packs (`<dtype>_{mem,compv3,compv4}_{plain,unroll}`).
-The direct and split-C instances have no bias twin yet: the packaging adapter
-(`gfx950_conv_fwd_aot_spec_for_identity`) refuses them by family (`AOT_BIAS_FAMILIES` in
-`rocke/library/builders/common/convolution_forward.py`), and `enumerate_conv_aot_instances.py
---bias` reports and leaves them out. A KDP is a list of rocKE specs (`bias` = 1) that the build
-compiles at pack time from this tree's `rocke/`, so the build makes the kernels itself.
+The KDPs are rocKE's bias catalog: the bias twin of every instance of the unfused engine's
+catalog, 233 per dtype in 16 packs. Per dtype: 89 implicit-GEMM instances in
+`<dtype>_{mem,compv3,compv4}_{plain,unroll}`, 111 direct ones in `<dtype>_direct` and 33
+split-C ones in `<dtype>_direct_split`, whose fold is built with the bias too. The packaging
+adapter (`gfx950_conv_fwd_aot_spec_for_identity`) packages a bias twin by family
+(`AOT_BIAS_FAMILIES` in `rocke/library/builders/common/convolution_forward.py`: implicit GEMM,
+direct and split-C), and `enumerate_conv_aot_instances.py --bias` reports and leaves out any twin
+it refuses. A KDP is a list of rocKE specs (`bias` = 1) that the build compiles at pack time
+from this tree's `rocke/`, so the build makes the kernels itself.
 Like the unfused engine's, the KDPs are in DVC: `artifacts/`, tracked by `artifacts.dvc`
 (layout in `../../README.md`, "Large rocKE files live in DVC"); fetch them with
 `dvc pull -r ingestor artifacts.dvc` from this folder. Without them the bundle carries no
