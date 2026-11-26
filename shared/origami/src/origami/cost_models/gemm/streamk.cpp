@@ -1,12 +1,21 @@
 // Copyright Advanced Micro Devices, Inc., or its affiliates.
-// SPDX-License-Identifier:  MIT
+// SPDX-License-Identifier: MIT
 
-#include "origami/streamk.hpp"
+#include <algorithm>
+#include <cmath>
+#include <cstddef>
+#include <limits>
+#include <tuple>
+#include <utility>
+#include <vector>
+
 #include "origami/gemm.hpp"
 #include "origami/hardware.hpp"
-#include "origami/heuristics.hpp"
 #include "origami/math.hpp"
+#include "origami/streamk.hpp"
 #include "origami/types.hpp"
+
+#include "model.hpp"
 
 namespace origami {
 namespace streamk {
@@ -301,8 +310,8 @@ size_t grid_analytical(const problem_t& problem,
 
   // Honor the caller's CU budget (problem.num_cus); 0 means use all CUs.
   const size_t cu_count = resolve_num_cus(problem.num_cus, hardware.N_CU);
-  size_t max_hw_split = std::floor(cu_count / grid);
-  size_t MAX_SPLIT    = std::min(biggest_allowable_split, max_hw_split);
+  size_t max_hw_split   = std::floor(cu_count / grid);
+  size_t MAX_SPLIT      = std::min(biggest_allowable_split, max_hw_split);
 
   size_t best_split   = 1;
   double best_latency = std::numeric_limits<double>::infinity();
@@ -319,17 +328,14 @@ size_t grid_analytical(const problem_t& problem,
   }
 
   size_t best_grid = best_split * grid;
-
-  // you now have both `grid` and `best_split`—
-  // return whichever is appropriate (here we stick with split):
   return best_grid;
 }
 
 static size_t correct_sk_grid_for_partial_tiles(size_t sk_grid,
-                                          size_t tiles,
-                                          size_t iters_per_tile,
-                                          size_t cu_count,
-                                          size_t batch) {
+                                                size_t tiles,
+                                                size_t iters_per_tile,
+                                                size_t cu_count,
+                                                size_t batch) {
   if (sk_grid == 0 || sk_grid >= tiles) return sk_grid;
 
   // Batched GEMMs benefit from SK tile-streaming (consecutive batch tiles share
@@ -387,7 +393,7 @@ static size_t grid_k_split_aware_w4a16(const problem_t& problem,
                                        const hardware_t& hardware,
                                        const config_t& config,
                                        size_t cu_count) {
-  using D = w4a16_params_t;
+  using D            = w4a16_params_t;
   const size_t tiles = compute_number_of_output_tiles(
       config.mt.m, config.mt.n, problem.size.m, problem.size.n, problem.batch);
   const size_t tile_size = config.mt.m * config.mt.n * config.workspace_size_per_elem_c;
@@ -396,13 +402,15 @@ static size_t grid_k_split_aware_w4a16(const problem_t& problem,
   int waves              = D::DEFAULT_WAVES_PER_WORKGROUP;
   if (config.has_tensile_params()) {
     const auto& tp = config.tensile();
-    waves = std::max(tp.wave_group_m, 1) * std::max(tp.wave_group_n, 1) * std::max(tp.local_split_u, 1);
+    waves =
+        std::max(tp.wave_group_m, 1) * std::max(tp.wave_group_n, 1) * std::max(tp.local_split_u, 1);
   }
   if (tiles <= cu_count) {
     // Rule 1.
     if (waves >= D::FULL_CU_WAVES) return tiles;
     // Rule 2.
-    if (k_iters <= D::SK_SPLIT_MIN_K_ITERS || (k_iters <= D::SK_SPLIT_MIN_K_ITERS_OVER_HALF && 2 * tiles > cu_count))
+    if (k_iters <= D::SK_SPLIT_MIN_K_ITERS ||
+        (k_iters <= D::SK_SPLIT_MIN_K_ITERS_OVER_HALF && 2 * tiles > cu_count))
       return tiles;
     // Rule 3.
     if (tiles == cu_count || tile_size * cu_count <= config.workspace_size) return cu_count;
@@ -411,15 +419,16 @@ static size_t grid_k_split_aware_w4a16(const problem_t& problem,
   } else {
     // Rule 4.
     const bool token_tile = config.mt.n <= D::TOKEN_TILE_MAX_N;
-    const bool token_row  = token_tile && problem.size.n <= config.mt.n && tiles <= shared * cu_count;
+    const bool token_row =
+        token_tile && problem.size.n <= config.mt.n && tiles <= shared * cu_count;
     if (!token_row) {
       double max_rounding = D::DP_MAX_WAVE_ROUNDING;
       if (waves >= D::FULL_CU_WAVES)
         max_rounding = D::DP_MAX_WAVE_ROUNDING_FULL_CU;
       else if (waves <= 4 && !token_tile)
         max_rounding = D::DP_MAX_WAVE_ROUNDING_4_WAVES;
-      if (static_cast<double>(math::safe_ceil_div(tiles, cu_count) * cu_count)
-          < max_rounding * static_cast<double>(tiles))
+      if (static_cast<double>(math::safe_ceil_div(tiles, cu_count) * cu_count) <
+          max_rounding * static_cast<double>(tiles))
         return tiles;
     }
     // Rules 5 and 6.
@@ -526,8 +535,8 @@ size_t grid_k_split_aware(const problem_t& problem,
   // case (tiles > cu_count).  K-split grids (tiles <= cu_count) intentionally
   // produce non-tile-aligned grids and must not be corrected to DP.
   if (tiles > cu_count)
-    sk_grid = correct_sk_grid_for_partial_tiles(sk_grid, tiles, iters_per_tile, cu_count,
-                                                problem.batch);
+    sk_grid =
+        correct_sk_grid_for_partial_tiles(sk_grid, tiles, iters_per_tile, cu_count, problem.batch);
   return sk_grid;
 }
 size_t select_grid_size(const problem_t& problem,
@@ -572,47 +581,133 @@ hybrid_mode_t select_hybrid_mode(const problem_t& problem,
                                  const hardware_t& hardware,
                                  const config_t& config,
                                  size_t sm_count_target) {
-  // Fit on gfx950 (MI350X) sweeps only; other architectures stay static
-  // until tuned in a follow-up PR.
-  if (hardware.arch != hardware_t::architecture_t::gfx950)
-    return hybrid_mode_t::static_;
-
-  const size_t MT_M  = config.mt.m;
-  const size_t MT_N  = config.mt.n;
-  const size_t batch = std::max<size_t>(problem.batch, 1);
-  const size_t tiles = compute_number_of_output_tiles(
-      MT_M, MT_N, problem.size.m, problem.size.n, batch);
-
-  // Too little work in the grid for dynamic rebalancing to be worth its
-  // overhead.
-  if (tiles <= streamk_hybrid_defaults_t::MIN_TILES_FOR_DYNAMIC) return hybrid_mode_t::static_;
-
-  size_t available_cus = (sm_count_target > 0)
-                             ? std::min<size_t>(sm_count_target, hardware.N_CU)
-                             : hardware.N_CU;
-  if (available_cus == 0) available_cus = hardware.N_CU;
-
-  // No cotenant means static already matches the full CU count -- nothing
-  // left for dynamic to rebalance.
-  const bool has_cotenant = available_cus < hardware.N_CU;
-  if (!has_cotenant) return hybrid_mode_t::static_;
-
-  // Few wavefronts resident per CU means little overlap to absorb a
-  // cotenant's CU-count mismatch on its own, so dynamic rebalancing helps
-  // regardless of tiles_per_cu. (occupancy <= 0 means "unknown" -- fall
-  // through to the tiles_per_cu check instead.)
-  if (config.occupancy > 0 &&
-      config.occupancy <= streamk_hybrid_defaults_t::MAX_OCCUPANCY_FOR_UNCONDITIONAL_DYNAMIC)
-    return hybrid_mode_t::dynamic;
-
-  // At higher occupancy that overlap already absorbs small mismatches, so
-  // dynamic only pays off once the grid is heavily overloaded relative to
-  // the CUs actually available to it.
-  const double tiles_per_cu =
-      static_cast<double>(tiles) / static_cast<double>(available_cus);
-  return (tiles_per_cu > streamk_hybrid_defaults_t::TILES_PER_CU_THRESHOLD_HIGH_OCCUPANCY)
-             ? hybrid_mode_t::dynamic
-             : hybrid_mode_t::static_;
+  return gemm::for_family(hardware, [&](auto family) {
+    return family.tile_schedule(problem, hardware, config, sm_count_target);
+  });
 }
 }  // namespace streamk
+}  // namespace origami
+
+namespace origami {
+namespace gemm {
+
+// ---------------------------------------------------------------------------
+// Launch
+// ---------------------------------------------------------------------------
+
+size_t base_model::cluster_size(const config_t&) { return 1; }
+
+// Clusters running at once: each is placed whole inside one shader engine (two per XCD).
+size_t clusters_per_wave(const hardware_t& hardware, size_t usable_cus, size_t cluster) {
+  const size_t num_se     = std::max<size_t>(hardware.NUM_XCD * 2, 1);
+  const size_t wgp_per_se = std::max<size_t>(usable_cus / num_se, 1);
+  return std::max<size_t>(num_se * (wgp_per_se / std::max<size_t>(cluster, 1)), 1);
+}
+
+// Cs x Ck blocks of output tiles covering the grid; boundary blocks are padded.
+size_t cluster_blocks(const problem_t& problem, const config_t& config) {
+  return math::safe_ceil_div(math::safe_ceil_div(problem.size.m, config.mt.m),
+                             std::max<size_t>(config.cluster_dim.m, 1)) *
+         math::safe_ceil_div(math::safe_ceil_div(problem.size.n, config.mt.n),
+                             std::max<size_t>(config.cluster_dim.n, 1)) *
+         std::max<size_t>(problem.batch, 1);
+}
+
+struct spatial_streamk_launch_t {
+  size_t num_wgs;
+  size_t tiles;
+  reduction_t reduction;
+};
+
+// Static StreamK with a cluster runs TensileLite's spatial schedule
+// (resolveClusteredStreamKSettings): each cluster works a K range of one block, and boundary
+// blocks keep all their peers, which load and synchronize but own no output.  The grid chosen
+// for the real tiles is re-cut into whole clusters over the padded blocks.  A whole-tile grid
+// becomes whole blocks, and a parallel split keeps its split count per block while the
+// resident WGs allow it.  Otherwise the tree schedule follows the uniform summation order
+// hipBLASLt requests by default: every block takes the same number of K chunks, at least 8
+// iterations each, or the blocks run whole, at most one cluster each.
+static spatial_streamk_launch_t spatial_streamk_launch(const problem_t& problem,
+                                                       const hardware_t& hardware,
+                                                       const config_t& config,
+                                                       size_t c,
+                                                       size_t num_mts,
+                                                       size_t grid,
+                                                       reduction_t reduction) {
+  const size_t blocks = cluster_blocks(problem, config);
+  const size_t padded = blocks * c;
+  if (grid == num_mts) return {padded, padded, reduction_t::tree};
+
+  const size_t iters = std::max<size_t>(math::safe_ceil_div(problem.size.k, config.mt.k), 1);
+  size_t budget      = grid;
+  if (grid > num_mts)
+    budget = (reduction == reduction_t::parallel) ? padded * std::min(grid / num_mts, iters)
+                                                  : std::max(grid, padded);
+  const size_t resident = hardware.N_CU * std::max<size_t>(config.occupancy, 1);
+  const size_t clusters =
+      std::max<size_t>(std::min({std::max(budget, c) / c, resident / c, blocks * iters}), 1);
+
+  size_t splits = std::min(clusters / blocks, iters);
+  if (reduction == reduction_t::parallel && splits >= 2)
+    return {padded * splits, padded, reduction};
+  if (clusters % blocks != 0)
+    while (splits >= 2 && (iters % splits != 0 || iters / splits < 8)) --splits;
+  if (splits >= 2) return {padded * splits, padded, reduction_t::tree};
+  return {std::min(clusters, blocks) * c, padded, reduction_t::tree};
+}
+
+// Compute the launch parameters for the kernel.
+std::tuple<reduction_t, size_t, size_t, size_t, size_t> compute_launch_parameters(
+    const problem_t& problem,
+    const hardware_t& hardware,
+    const config_t& config,
+    grid_selection_t grid_selection) {
+  const size_t num_mts = streamk::compute_number_of_output_tiles(
+      config.mt.m, config.mt.n, problem.size.m, problem.size.n, problem.batch);
+  size_t num_wgs                 = num_mts;
+  reduction_t reduction_strategy = reduction_t::none;
+
+  if (config.stream_k > 0) {
+    reduction_strategy = streamk::select_reduction(problem, hardware, config, grid_selection);
+    auto config_with_reduction               = config;
+    config_with_reduction.reduction_strategy = reduction_strategy;
+    num_wgs = streamk::select_grid_size(problem, hardware, config_with_reduction, grid_selection);
+  }
+
+  // There are cases in which StreamK combines multiple output MTs and assigns to 1 WG.
+  // That means, we artifically observe one full timesteps, but that is not what actually happens
+  // under the hood. From a theoretical point of view, these distributions change all of the
+  // computations in Origami. With current implementation, it is hard to capture that
+  // behaviour analytically. So for now, if the num_wgs is less than the num_mts, we calculate
+  // num_timesteps based on the num_mts. Otherwise, we use num_wgs to compute num_timesteps.
+  // Usable CU count: derived from the problem's CU budget (problem.num_cus).
+  const size_t usable_cus = resolve_num_cus(problem.num_cus, hardware.N_CU);
+  size_t num_timesteps    = num_wgs > num_mts ? math::safe_ceil_div(num_wgs, usable_cus)
+                                              : math::safe_ceil_div(num_mts, usable_cus);
+  size_t scheduled_tiles  = num_mts;
+
+  // Cluster kernels run in waves of whole clusters.  Static StreamK re-cuts its grid into the
+  // spatial schedule, and a non-persistent kernel pads its grid to whole clusters; padded
+  // workgroups exit at once but are charged their slot.
+  const size_t c = for_family(hardware, [&](auto family) { return family.cluster_size(config); });
+  if (c > 1 && config.stream_k == 3) {
+    const auto spatial =
+        spatial_streamk_launch(problem, hardware, config, c, num_mts, num_wgs, reduction_strategy);
+    reduction_strategy = spatial.reduction;
+    num_wgs            = spatial.num_wgs;
+    scheduled_tiles    = spatial.tiles;
+    const size_t wave  = std::min(num_wgs, clusters_per_wave(hardware, usable_cus, c) * c);
+    num_timesteps      = math::safe_ceil_div(std::max(num_wgs, scheduled_tiles), wave);
+  } else if (c > 1 && config.stream_k == 0) {
+    num_timesteps = math::safe_ceil_div(cluster_blocks(problem, config),
+                                        clusters_per_wave(hardware, usable_cus, c));
+  }
+  const size_t num_active_cus   = num_wgs < usable_cus ? num_wgs : usable_cus;
+  const size_t splitting_factor = math::safe_ceil_div(num_wgs, scheduled_tiles);
+
+  return std::make_tuple(
+      reduction_strategy, num_wgs, num_active_cus, num_timesteps, splitting_factor);
+}
+
+}  // namespace gemm
 }  // namespace origami

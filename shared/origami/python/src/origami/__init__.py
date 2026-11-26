@@ -12,6 +12,8 @@ try:
     from .origami import (
         # Enums
         architecture_t,
+        family_t,
+        variant_t,
         data_type_t,
         transpose_t,
         grid_selection_t,
@@ -19,6 +21,7 @@ try:
         hybrid_mode_t,
         prediction_modes_t,
         model_t,
+        rejection_t,
         # Data structures
         dim3_t,
         dim4_t,
@@ -30,9 +33,12 @@ try:
         problem_t,
         hardware_t,
         context_t,
+        memory_terms_t,
+        tile_terms_t,
         # Hardware functions
         get_hardware_for_device,
         get_hardware_for_arch,
+        resolve_variant,
         # Data type functions
         int_to_data_type,
         datatype_to_bits,
@@ -43,6 +49,8 @@ try:
         rank_configs,
         select_config_mnk,
         select_topk_configs,
+        admit,
+        rejection_to_string,
         # Performance functions
         compute_perf_gflops,
         compute_total_latency,
@@ -63,7 +71,7 @@ try:
         estimate_cache_hit_rates,
         # Latency functions
         compute_tile_latency,
-        compute_timestep_latency,
+        compute_tile_terms,
         # StreamK functions
         select_grid_size,
         select_reduction,
@@ -104,6 +112,8 @@ __all__ = [
     "__version__",
     # Enums
     "architecture_t",
+    "family_t",
+    "variant_t",
     "data_type_t",
     "transpose_t",
     "grid_selection_t",
@@ -111,6 +121,7 @@ __all__ = [
     "hybrid_mode_t",
     "prediction_modes_t",
     "model_t",
+    "rejection_t",
     # Data structures
     "dim3_t",
     "dim4_t",
@@ -121,9 +132,12 @@ __all__ = [
     "problem_t",
     "hardware_t",
     "context_t",
+    "memory_terms_t",
+    "tile_terms_t",
     # Hardware functions
     "get_hardware_for_device",
     "get_hardware_for_arch",
+    "resolve_variant",
     # Data type functions
     "int_to_data_type",
     "datatype_to_bits",
@@ -134,6 +148,8 @@ __all__ = [
     "rank_configs",
     "select_config_mnk",
     "select_topk_configs",
+    "admit",
+    "rejection_to_string",
     # Performance functions
     "compute_perf_gflops",
     "compute_total_latency",
@@ -153,7 +169,7 @@ __all__ = [
     "compute_memory_latency",
     # Latency functions
     "compute_tile_latency",
-    "compute_timestep_latency",
+    "compute_tile_terms",
     # StreamK functions
     "select_grid_size",
     "select_reduction",

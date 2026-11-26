@@ -1,17 +1,11 @@
-/*******************************************************************************
- *
- * Copyright (C) 2026 Advanced Micro Devices, Inc. All rights reserved.
- * SPDX-License-Identifier: MIT
- *
- *******************************************************************************/
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #include <catch2/catch_test_macros.hpp>
 #include <limits>
 #include "common.hpp"
 
 namespace {
-
-using origami::streamk_hybrid_defaults_t;
 
 // Builds a problem with exactly `tiles` output tiles for the given macrotile
 // (a single row of `tiles` tile columns), so callers get precise control over
@@ -36,13 +30,13 @@ TEST_CASE("Origami streamk: select_hybrid_mode tile-count gate is inclusive of t
   // unconditionally, a grid at or below MIN_TILES_FOR_DYNAMIC stays static_.
   auto hardware = make_hardware(950);
   auto config   = make_config(1, 1, 32, 16, 16, 16, false, 1, /*occupancy=*/1);
-  auto at_gate =
-      make_problem_with_tile_count(1, 1, streamk_hybrid_defaults_t::MIN_TILES_FOR_DYNAMIC);
+  auto at_gate  = make_problem_with_tile_count(
+      1, 1, origami::CDNA4_CONSTANTS_ID75A0.HYBRID_MIN_TILES_FOR_DYNAMIC);
   REQUIRE(origami::streamk::select_hybrid_mode(at_gate, hardware, config, hardware.N_CU / 2) ==
           origami::hybrid_mode_t::static_);
 
-  auto above_gate =
-      make_problem_with_tile_count(1, 1, streamk_hybrid_defaults_t::MIN_TILES_FOR_DYNAMIC + 1);
+  auto above_gate = make_problem_with_tile_count(
+      1, 1, origami::CDNA4_CONSTANTS_ID75A0.HYBRID_MIN_TILES_FOR_DYNAMIC + 1);
   REQUIRE(origami::streamk::select_hybrid_mode(above_gate, hardware, config, hardware.N_CU / 2) ==
           origami::hybrid_mode_t::dynamic);
 }
@@ -53,8 +47,8 @@ TEST_CASE("Origami streamk: select_hybrid_mode requires a cotenant to go dynamic
   // holding any CU away from this kernel, static_ is already optimal.
   auto hardware = make_hardware(950);
   auto config   = make_config(128, 128, 32, 16, 16, 16, false, 1, /*occupancy=*/1);
-  auto problem =
-      make_problem_with_tile_count(128, 128, streamk_hybrid_defaults_t::MIN_TILES_FOR_DYNAMIC + 1);
+  auto problem  = make_problem_with_tile_count(
+      128, 128, origami::CDNA4_CONSTANTS_ID75A0.HYBRID_MIN_TILES_FOR_DYNAMIC + 1);
 
   REQUIRE(origami::streamk::select_hybrid_mode(problem, hardware, config, /*sm_count_target=*/0) ==
           origami::hybrid_mode_t::static_);
@@ -66,11 +60,11 @@ TEST_CASE("Origami streamk: select_hybrid_mode requires a cotenant to go dynamic
 TEST_CASE("Origami streamk: select_hybrid_mode low occupancy goes dynamic unconditionally",
           "[origami][streamk][hybrid]") {
   auto hardware = make_hardware(950);
-  auto problem =
-      make_problem_with_tile_count(128, 128, streamk_hybrid_defaults_t::MIN_TILES_FOR_DYNAMIC + 1);
+  auto problem  = make_problem_with_tile_count(
+      128, 128, origami::CDNA4_CONSTANTS_ID75A0.HYBRID_MIN_TILES_FOR_DYNAMIC + 1);
 
   for (int occupancy = 1;
-       occupancy <= streamk_hybrid_defaults_t::MAX_OCCUPANCY_FOR_UNCONDITIONAL_DYNAMIC;
+       occupancy <= origami::CDNA4_CONSTANTS_ID75A0.HYBRID_MAX_OCCUPANCY_FOR_UNCONDITIONAL_DYNAMIC;
        ++occupancy) {
     DYNAMIC_SECTION("occupancy=" << occupancy) {
       auto config = make_config(128, 128, 32, 16, 16, 16, false, 1, occupancy);
@@ -91,7 +85,7 @@ TEST_CASE("Origami streamk: select_hybrid_mode falls back to tiles_per_cu "
   auto big   = make_problem_with_tile_count(128, 128, static_cast<size_t>(available_cus * 9.0));
 
   for (int occupancy :
-       {0, streamk_hybrid_defaults_t::MAX_OCCUPANCY_FOR_UNCONDITIONAL_DYNAMIC + 1}) {
+       {0, origami::CDNA4_CONSTANTS_ID75A0.HYBRID_MAX_OCCUPANCY_FOR_UNCONDITIONAL_DYNAMIC + 1}) {
     DYNAMIC_SECTION("occupancy=" << occupancy) {
       auto config = make_config(128, 128, 32, 16, 16, 16, false, 1, occupancy);
       REQUIRE(origami::streamk::select_hybrid_mode(small, hardware, config, available_cus) ==
@@ -106,9 +100,9 @@ TEST_CASE("Origami streamk: select_hybrid_mode non-gfx950 always static",
           "[origami][streamk][hybrid]") {
   // Large grid, cotenant present, low occupancy: would select dynamic on
   // gfx950, but the architecture guard forces static_ elsewhere.
-  auto config = make_config(128, 128, 32, 16, 16, 16, false, 1, /*occupancy=*/1);
-  auto problem =
-      make_problem_with_tile_count(128, 128, streamk_hybrid_defaults_t::MIN_TILES_FOR_DYNAMIC + 1);
+  auto config  = make_config(128, 128, 32, 16, 16, 16, false, 1, /*occupancy=*/1);
+  auto problem = make_problem_with_tile_count(
+      128, 128, origami::CDNA4_CONSTANTS_ID75A0.HYBRID_MIN_TILES_FOR_DYNAMIC + 1);
 
   auto hardware_gfx950 = make_hardware(950);
   REQUIRE(origami::streamk::select_hybrid_mode(
@@ -126,7 +120,7 @@ TEST_CASE("Origami streamk: select_hybrid_mode batch multiplies tiles, crossing 
   auto hardware = make_hardware(950);
   auto config   = make_config(128, 128, 32, 16, 16, 16, false, 1, /*occupancy=*/1);
   auto base     = make_problem_with_tile_count(
-      128, 128, streamk_hybrid_defaults_t::MIN_TILES_FOR_DYNAMIC, /*batch=*/1);
+      128, 128, origami::CDNA4_CONSTANTS_ID75A0.HYBRID_MIN_TILES_FOR_DYNAMIC, /*batch=*/1);
   REQUIRE(origami::streamk::select_hybrid_mode(base, hardware, config, hardware.N_CU / 2) ==
           origami::hybrid_mode_t::static_);
 
@@ -291,14 +285,14 @@ TEST_CASE("Origami streamk: grid_k_split_aware partial-tile correction", "[strea
   auto run = [](size_t tiles, size_t ipt, size_t cu_count, size_t batch = 1) {
     constexpr size_t MT_M = 16, MT_N = 16, MT_K = 32;
     const size_t K = std::max<size_t>(ipt, 1) * MT_K;
-    auto p = make_problem(MT_M, MT_N * tiles / batch, K,
-                          origami::transpose_t::T, origami::transpose_t::N, batch);
-    auto c = make_config(MT_M, MT_N, MT_K);
+    auto p         = make_problem(
+        MT_M, MT_N * tiles / batch, K, origami::transpose_t::T, origami::transpose_t::N, batch);
+    auto c                      = make_config(MT_M, MT_N, MT_K);
     c.workspace_size            = std::numeric_limits<size_t>::max();
     c.workspace_size_per_elem_c = std::numeric_limits<size_t>::max();
-    p.num_cus = cu_count;
-    return origami::streamk::select_grid_size(p, make_hardware(950), c,
-                                              origami::grid_selection_t::k_split_aware);
+    p.num_cus                   = cu_count;
+    return origami::streamk::select_grid_size(
+        p, make_hardware(950), c, origami::grid_selection_t::k_split_aware);
   };
 
   // ---- Group A: ipt == 1 (tile-streaming, no K-split) --------------------
@@ -460,18 +454,18 @@ TEST_CASE("Origami streamk: ipt <= 1 switches to DP above two waves of workgroup
 
 TEST_CASE("Origami streamk: W4A16 on gfx1151 shares partial waves over the CUs",
           "[streamk][grid][w4a16]") {
-  auto hw = make_hardware(950);
-  hw.arch = origami::hardware_t::architecture_t::gfx1151;
+  auto hw   = make_hardware(950);
+  hw.arch   = origami::hardware_t::architecture_t::gfx1151;
   auto grid = [&](size_t m,
                   size_t n,
                   size_t mt_m,
                   size_t mt_n,
                   origami::data_type_t a_dtype,
-                  size_t k   = 4096) {
-    auto p    = make_problem(m, n, k);
-    p.a_dtype = a_dtype;
-    p.num_cus = 40;
-    auto c    = make_config(mt_m, mt_n, 64);
+                  size_t k = 4096) {
+    auto p                      = make_problem(m, n, k);
+    p.a_dtype                   = a_dtype;
+    p.num_cus                   = 40;
+    auto c                      = make_config(mt_m, mt_n, 64);
     c.workspace_size            = std::numeric_limits<size_t>::max() / 2;
     c.workspace_size_per_elem_c = 4;
     return origami::streamk::select_grid_size(p, hw, c, origami::grid_selection_t::k_split_aware);
@@ -506,14 +500,17 @@ TEST_CASE("Origami streamk: W4A16 on gfx1151 shares partial waves over the CUs",
 
 TEST_CASE("Origami streamk: W4A16 on gfx1151 with at most a tile per CU",
           "[streamk][grid][w4a16]") {
-  auto hw = make_hardware(950);
-  hw.arch = origami::hardware_t::architecture_t::gfx1151;
-  auto grid = [&](size_t m, size_t mt_m, int waves, size_t workspace = 0,
+  auto hw   = make_hardware(950);
+  hw.arch   = origami::hardware_t::architecture_t::gfx1151;
+  auto grid = [&](size_t m,
+                  size_t mt_m,
+                  int waves,
+                  size_t workspace             = 0,
                   origami::data_type_t a_dtype = origami::data_type_t::Int4) {
-    auto p    = make_problem(m, 256, 4096);
-    p.a_dtype = a_dtype;
-    p.num_cus = 40;
-    auto c    = make_config(mt_m, 256, 64);
+    auto p                      = make_problem(m, 256, 4096);
+    p.a_dtype                   = a_dtype;
+    p.num_cus                   = 40;
+    auto c                      = make_config(mt_m, 256, 64);
     c.workspace_size            = workspace ? workspace : std::numeric_limits<size_t>::max() / 2;
     c.workspace_size_per_elem_c = 4;
     c.tensile().wave_group_m    = waves / 2;
@@ -533,18 +530,17 @@ TEST_CASE("Origami streamk: W4A16 on gfx1151 with at most a tile per CU",
   REQUIRE(grid(1024, 64, 8, 1) == 16);
 }
 
-TEST_CASE("Origami streamk: the W4A16 grid needs a bf16/fp16 MI type",
-          "[streamk][grid][w4a16]") {
+TEST_CASE("Origami streamk: the W4A16 grid needs a bf16/fp16 MI type", "[streamk][grid][w4a16]") {
   // The grid rule and the W4A16 latency model share is_w4a16(): an
   // int4-A problem on gfx1151 with another MI type (W4A8, say) gets neither.
-  auto hw = make_hardware(950);
-  hw.arch = origami::hardware_t::architecture_t::gfx1151;
+  auto hw   = make_hardware(950);
+  hw.arch   = origami::hardware_t::architecture_t::gfx1151;
   auto grid = [&](origami::data_type_t a_dtype, origami::data_type_t mi_dtype) {
-    auto p     = make_problem(256, 256, 4096);
-    p.a_dtype  = a_dtype;
-    p.mi_dtype = mi_dtype;
-    p.num_cus  = 40;
-    auto c     = make_config(64, 256, 64);
+    auto p                      = make_problem(256, 256, 4096);
+    p.a_dtype                   = a_dtype;
+    p.mi_dtype                  = mi_dtype;
+    p.num_cus                   = 40;
+    auto c                      = make_config(64, 256, 64);
     c.workspace_size            = std::numeric_limits<size_t>::max() / 2;
     c.workspace_size_per_elem_c = 4;
     c.tensile().wave_group_m    = 2;
@@ -562,13 +558,13 @@ TEST_CASE("Origami streamk: the W4A16 grid needs a bf16/fp16 MI type",
 
 TEST_CASE("Origami streamk: W4A16 on gfx1151 runs data parallel when its last wave wastes little",
           "[streamk][grid][w4a16]") {
-  auto hw = make_hardware(950);
-  hw.arch = origami::hardware_t::architecture_t::gfx1151;
+  auto hw   = make_hardware(950);
+  hw.arch   = origami::hardware_t::architecture_t::gfx1151;
   auto grid = [&](size_t m, size_t n, size_t mt_m, size_t mt_n, int waves) {
-    auto p    = make_problem(m, n, 4096);
-    p.a_dtype = origami::data_type_t::Int4;
-    p.num_cus = 40;
-    auto c    = make_config(mt_m, mt_n, 64);
+    auto p                      = make_problem(m, n, 4096);
+    p.a_dtype                   = origami::data_type_t::Int4;
+    p.num_cus                   = 40;
+    auto c                      = make_config(mt_m, mt_n, 64);
     c.workspace_size            = std::numeric_limits<size_t>::max() / 2;
     c.workspace_size_per_elem_c = 4;
     c.tensile().wave_group_m    = waves / 2;
@@ -593,14 +589,18 @@ TEST_CASE("Origami streamk: W4A16 on gfx1151 runs data parallel when its last wa
 
 TEST_CASE("Origami streamk: W4A16 on gfx1150 follows gfx1151's rules, without sharing tiles",
           "[streamk][grid][w4a16]") {
-  auto grid = [&](origami::hardware_t::architecture_t arch, size_t m, size_t n, size_t mt_m,
-                  size_t mt_n, int waves) {
-    auto hw   = make_hardware(950);
-    hw.arch   = arch;
-    auto p    = make_problem(m, n, 4096);
-    p.a_dtype = origami::data_type_t::Int4;
-    p.num_cus = 16;
-    auto c    = make_config(mt_m, mt_n, 64);
+  auto grid = [&](origami::hardware_t::architecture_t arch,
+                  size_t m,
+                  size_t n,
+                  size_t mt_m,
+                  size_t mt_n,
+                  int waves) {
+    auto hw                     = make_hardware(950);
+    hw.arch                     = arch;
+    auto p                      = make_problem(m, n, 4096);
+    p.a_dtype                   = origami::data_type_t::Int4;
+    p.num_cus                   = 16;
+    auto c                      = make_config(mt_m, mt_n, 64);
     c.workspace_size            = std::numeric_limits<size_t>::max() / 2;
     c.workspace_size_per_elem_c = 4;
     c.tensile().wave_group_m    = waves / 2;

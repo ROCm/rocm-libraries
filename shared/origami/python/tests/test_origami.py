@@ -309,11 +309,11 @@ def test_gfx950_bfloat16_recommended_matrix_instruction():
         (1.0, 1.0, 1.0),  # mem_bw_per_wg_coefficients
         None,  # pci_chip_id
     )
-    
+
     # Get recommended matrix instruction for bfloat16
     bfloat16_dtype = origami.data_type_t.BFloat16
     recommended_mi = hardware.get_recommended_matrix_instruction(bfloat16_dtype)
-    
+
     # Verify it's 16x16x32
     assert recommended_mi.m == 16, f"Expected m=16, got {recommended_mi.m}"
     assert recommended_mi.n == 16, f"Expected n=16, got {recommended_mi.n}"
@@ -334,19 +334,19 @@ def test_prediction_modes_enum_exists():
 def test_config_has_formocast_fields():
     """Test that config_t has Formocast-specific fields via variant backend."""
     config = origami.config_t()
-    
+
     # Check prediction_mode field
     assert hasattr(config, 'prediction_mode')
-    
+
     # Check tensile accessor method exists
     assert hasattr(config, 'tensile')
     assert callable(config.tensile)
     assert hasattr(config, 'has_tensile_params')
     assert hasattr(config, 'set_tensile_params')
-    
+
     # Get tensile params (initializes if not set)
     tensile = config.tensile()
-    
+
     # Check vectorization fields on config (generic, not Tensile-specific)
     assert hasattr(config, 'grvw_a')
     assert hasattr(config, 'grvw_b')
@@ -356,7 +356,7 @@ def test_config_has_formocast_fields():
     assert hasattr(config, 'cache_hints_d')
     assert hasattr(config, 'stream_k')
     assert hasattr(config, 'index')
-    
+
     # Check Tensile-specific fields
     assert hasattr(tensile, 'depth_u')
     assert hasattr(tensile, 'global_split_u')
@@ -375,7 +375,7 @@ def test_config_has_formocast_fields():
     assert hasattr(tensile, 'unroll_major_lds_b')
     assert hasattr(tensile, 'lds_transpose_read_a')
     assert hasattr(tensile, 'lds_transpose_read_b')
-    
+
     # Verify has_tensile_params returns True after accessing
     assert config.has_tensile_params()
 
@@ -411,7 +411,7 @@ def test_simulation_mode_returns_valid_latency():
     problem.c_dtype = origami.data_type_t.Half
     problem.d_dtype = origami.data_type_t.Half
     problem.mi_dtype = origami.data_type_t.Half
-    
+
     # Create config with simulation mode
     config = origami.config_t()
     config.mt = origami.dim3_t(128, 128, 32)
@@ -419,7 +419,7 @@ def test_simulation_mode_returns_valid_latency():
     config.occupancy = 2
     config.workgroup_mapping = 8
     config.prediction_mode = origami.prediction_modes_t.simulation
-    
+
     # Set Formocast-specific parameters (via tensile nested struct)
     config.tensile().depth_u = 32
     config.tensile().global_split_u = 1
@@ -430,10 +430,10 @@ def test_simulation_mode_returns_valid_latency():
     config.tensile().wave_group_m = 2
     config.tensile().wave_group_n = 2
     config.tensile().prefetch_global_read = 2
-    
+
     # Call compute_total_latency with simulation mode
     latency = origami.compute_total_latency(problem, hardware, config)
-    
+
     assert latency > 0, f"Expected positive latency, got {latency}"
 
 
@@ -456,7 +456,7 @@ def test_simulation_mode_via_compute_total_latency():
         (0.0, 0.015, 0.0),  # mem_bw_per_wg_coefficients
         None,
     )
-    
+
     # Create problem
     problem = origami.problem_t()
     problem.size = origami.dim3_t(2048, 2048, 2048)
@@ -468,7 +468,7 @@ def test_simulation_mode_via_compute_total_latency():
     problem.c_dtype = origami.data_type_t.Half
     problem.d_dtype = origami.data_type_t.Half
     problem.mi_dtype = origami.data_type_t.Half
-    
+
     # Create config with estimation mode
     config_estimation = origami.config_t()
     config_estimation.mt = origami.dim3_t(128, 128, 32)
@@ -476,7 +476,7 @@ def test_simulation_mode_via_compute_total_latency():
     config_estimation.occupancy = 2
     config_estimation.workgroup_mapping = 8
     config_estimation.prediction_mode = origami.prediction_modes_t.estimation
-    
+
     # Create config with simulation mode
     config_simulation = origami.config_t()
     config_simulation.mt = origami.dim3_t(128, 128, 32)
@@ -493,17 +493,17 @@ def test_simulation_mode_via_compute_total_latency():
     config_simulation.tensile().wave_group_m = 2
     config_simulation.tensile().wave_group_n = 2
     config_simulation.tensile().prefetch_global_read = 2
-    
+
     # Get latencies from both modes
     latency_estimation = origami.compute_total_latency(
         problem, hardware, config_estimation)
     latency_simulation = origami.compute_total_latency(
         problem, hardware, config_simulation)
-    
+
     # Both should return positive values
     assert latency_estimation > 0, f"Estimation latency should be positive: {latency_estimation}"
     assert latency_simulation > 0, f"Simulation latency should be positive: {latency_simulation}"
-    
+
     # The values should be different (different models)
     # Note: They use different units (cycles vs microseconds), so they will definitely differ
     assert latency_estimation != latency_simulation, \
@@ -524,7 +524,7 @@ def test_simulation_mode_various_problem_sizes(m, n, k):
         origami.architecture_t.gfx942,
         304, 65536, 512 * 1024, 8, 1.0, 1.0, 1.0, 4000000, 1.5, 1, (0.0, 0.015, 0.0), None
     )
-    
+
     problem = origami.problem_t()
     problem.size = origami.dim3_t(m, n, k)
     problem.batch = 1
@@ -535,7 +535,7 @@ def test_simulation_mode_various_problem_sizes(m, n, k):
     problem.c_dtype = origami.data_type_t.Half
     problem.d_dtype = origami.data_type_t.Half
     problem.mi_dtype = origami.data_type_t.Half
-    
+
     config = origami.config_t()
     config.mt = origami.dim3_t(128, 128, 32)
     config.mi = origami.dim3_t(16, 16, 16)
@@ -550,6 +550,6 @@ def test_simulation_mode_various_problem_sizes(m, n, k):
     config.tensile().wave_num = 4
     config.tensile().wave_group_m = 2
     config.tensile().wave_group_n = 2
-    
+
     latency = origami.compute_total_latency(problem, hardware, config)
     assert latency > 0, f"Expected positive latency for {m}x{n}x{k}, got {latency}"

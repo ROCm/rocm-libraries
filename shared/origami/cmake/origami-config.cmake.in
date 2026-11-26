@@ -10,7 +10,7 @@ block(SCOPE_FOR VARIABLES)
     if(NOT TARGET roc::origami)
         message(FATAL_ERROR "roc::origami target is missing")
     endif()
-    
+
     get_target_property(link_libraries roc::origami INTERFACE_LINK_LIBRARIES)
 
     if(link_libraries AND "hip::device" IN_LIST link_libraries)

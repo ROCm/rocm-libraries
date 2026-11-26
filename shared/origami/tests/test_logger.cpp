@@ -1,32 +1,9 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright 2026 AMD ROCm(TM) Software
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
+#include <atomic>
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_string.hpp>
-#include <atomic>
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
@@ -42,7 +19,7 @@
 
 static std::string unique_temp_path(const std::string& prefix, const std::string& ext) {
   static std::atomic<int> counter{0};
-  auto dir  = std::filesystem::temp_directory_path();
+  auto dir = std::filesystem::temp_directory_path();
 #ifdef _WIN32
   auto pid = _getpid();
 #else
@@ -81,7 +58,7 @@ static origami::config_t make_logger_config(int gpu_arch) {
 
 static void disable_logger() {
   portable_unsetenv("ORIGAMI_LOG_FILE");
-  portable_unsetenv("ANALYTICAL_GEMM_DEBUG");
+  portable_unsetenv("ORIGAMI_DEBUG");
   origami::Logger::instance().update_from_env();
   origami::runtime_options::get().update_from_env();
 }
@@ -95,7 +72,7 @@ TEST_CASE("Logger: text log writes debug messages when enabled", "[logger]") {
   std::remove(log_path.c_str());
 
   portable_setenv("ORIGAMI_LOG_FILE", log_path.c_str(), 1);
-  portable_setenv("ANALYTICAL_GEMM_DEBUG", "1", 1);
+  portable_setenv("ORIGAMI_DEBUG", "1", 1);
   origami::Logger::instance().update_from_env();
   origami::runtime_options::get().update_from_env();
 
@@ -130,7 +107,7 @@ TEST_CASE("Logger: text log is not written when debug is disabled", "[logger]") 
   std::remove(log_path.c_str());
 
   portable_setenv("ORIGAMI_LOG_FILE", log_path.c_str(), 1);
-  portable_unsetenv("ANALYTICAL_GEMM_DEBUG");
+  portable_unsetenv("ORIGAMI_DEBUG");
   origami::Logger::instance().update_from_env();
   origami::runtime_options::get().update_from_env();
 
@@ -220,7 +197,7 @@ TEST_CASE("Logger: CSV output from GEMM evaluation contains expected columns", "
   std::remove(csv_path.c_str());
 
   portable_setenv("ORIGAMI_LOG_FILE", csv_path.c_str(), 1);
-  portable_setenv("ANALYTICAL_GEMM_DEBUG", "1", 1);
+  portable_setenv("ORIGAMI_DEBUG", "1", 1);
   origami::Logger::instance().update_from_env();
   origami::runtime_options::get().update_from_env();
 
@@ -280,7 +257,7 @@ TEST_CASE("Logger: CSV escape handles special characters", "[logger][csv]") {
 // ---------------------------------------------------------------------------
 
 TEST_CASE("Logger: debug logging produces consistent latency values", "[logger]") {
-  portable_setenv("ANALYTICAL_GEMM_DEBUG", "1", 1);
+  portable_setenv("ORIGAMI_DEBUG", "1", 1);
   origami::runtime_options::get().update_from_env();
 
   for (int gpu_arch : test_architectures) {
@@ -297,7 +274,7 @@ TEST_CASE("Logger: debug logging produces consistent latency values", "[logger]"
     }
   }
 
-  portable_unsetenv("ANALYTICAL_GEMM_DEBUG");
+  portable_unsetenv("ORIGAMI_DEBUG");
   origami::runtime_options::get().update_from_env();
 }
 
@@ -308,11 +285,11 @@ TEST_CASE("Logger: latency matches between debug enabled and disabled", "[logger
       auto problem  = make_problem(4096, 4096, 2048);
       auto config   = make_logger_config(gpu_arch);
 
-      portable_unsetenv("ANALYTICAL_GEMM_DEBUG");
+      portable_unsetenv("ORIGAMI_DEBUG");
       origami::runtime_options::get().update_from_env();
       double latency_no_debug = origami::gemm::compute_total_latency(problem, hardware, config);
 
-      portable_setenv("ANALYTICAL_GEMM_DEBUG", "1", 1);
+      portable_setenv("ORIGAMI_DEBUG", "1", 1);
       origami::runtime_options::get().update_from_env();
       double latency_with_debug = origami::gemm::compute_total_latency(problem, hardware, config);
 
@@ -320,20 +297,42 @@ TEST_CASE("Logger: latency matches between debug enabled and disabled", "[logger
     }
   }
 
-  portable_unsetenv("ANALYTICAL_GEMM_DEBUG");
+  portable_unsetenv("ORIGAMI_DEBUG");
   origami::runtime_options::get().update_from_env();
 }
 
-TEST_CASE("Logger: ANALYTICAL_GEMM_DEBUG env var controls debug_enabled flag", "[logger]") {
-  portable_setenv("ANALYTICAL_GEMM_DEBUG", "1", 1);
+TEST_CASE("Logger: ORIGAMI_DEBUG env var controls debug_enabled flag", "[logger]") {
+  portable_setenv("ORIGAMI_DEBUG", "1", 1);
   origami::runtime_options::get().update_from_env();
   REQUIRE(origami::runtime_options::get().debug_enabled == true);
 
-  portable_setenv("ANALYTICAL_GEMM_DEBUG", "0", 1);
+  portable_setenv("ORIGAMI_DEBUG", "0", 1);
   origami::runtime_options::get().update_from_env();
   REQUIRE(origami::runtime_options::get().debug_enabled == false);
 
-  portable_unsetenv("ANALYTICAL_GEMM_DEBUG");
+  portable_unsetenv("ORIGAMI_DEBUG");
   origami::runtime_options::get().update_from_env();
   REQUIRE(origami::runtime_options::get().debug_enabled == false);
+}
+
+TEST_CASE("Runtime options: the former ANALYTICAL_GEMM_ names are read when the new one is unset",
+          "[options]") {
+  portable_unsetenv("ORIGAMI_DEBUG");
+  portable_setenv("ANALYTICAL_GEMM_DEBUG", "1", 1);
+  REQUIRE(origami::runtime_options::read_debug_from_env());
+
+  // The ORIGAMI_ name wins when both are set.
+  portable_setenv("ORIGAMI_DEBUG", "0", 1);
+  REQUIRE_FALSE(origami::runtime_options::read_debug_from_env());
+
+  portable_unsetenv("ORIGAMI_DEBUG");
+  portable_unsetenv("ANALYTICAL_GEMM_DEBUG");
+  REQUIRE_FALSE(origami::runtime_options::read_debug_from_env());
+
+  portable_setenv("ANALYTICAL_GEMM_PICK", "128x256x32", 1);
+  REQUIRE(origami::runtime_options::read_gemm_pick_from_env() == origami::dim3_t{128, 256, 32});
+  portable_setenv("ORIGAMI_GEMM_PICK", "64x64x16", 1);
+  REQUIRE(origami::runtime_options::read_gemm_pick_from_env() == origami::dim3_t{64, 64, 16});
+  portable_unsetenv("ORIGAMI_GEMM_PICK");
+  portable_unsetenv("ANALYTICAL_GEMM_PICK");
 }

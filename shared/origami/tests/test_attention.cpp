@@ -1,4 +1,4 @@
-// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
 #include <catch2/catch_approx.hpp>
@@ -129,8 +129,9 @@ TEST_CASE("Attention: compute_cu_occupancy", "[attention]") {
   for (int gpu_arch : test_architectures) {
     DYNAMIC_SECTION("gfx" << gpu_arch << " - basic occupancy with split=1") {
       auto hardware = make_hardware(gpu_arch);
-      auto problem  = make_problem(4096, 4096, 1024, origami::transpose_t::T, origami::transpose_t::N, 1, 0, 1);
-      auto config   = make_config(256, 256, 64, 32, 32, 8, false, 1);
+      auto problem =
+          make_problem(4096, 4096, 1024, origami::transpose_t::T, origami::transpose_t::N, 1, 0, 1);
+      auto config = make_config(256, 256, 64, 32, 32, 8, false, 1);
 
       auto result = origami::attention::compute_cu_occupancy(
           problem, hardware, config, origami::grid_selection_t::k_split_aware, hardware.N_CU, 1UL);
@@ -145,8 +146,9 @@ TEST_CASE("Attention: compute_cu_occupancy", "[attention]") {
 
     DYNAMIC_SECTION("gfx" << gpu_arch << " - occupancy with split > 1") {
       auto hardware = make_hardware(gpu_arch);
-      auto problem  = make_problem(4096, 4096, 1024, origami::transpose_t::T, origami::transpose_t::N, 1, 0, 1);
-      auto config   = make_config(256, 256, 64, 32, 32, 8, false, 1);
+      auto problem =
+          make_problem(4096, 4096, 1024, origami::transpose_t::T, origami::transpose_t::N, 1, 0, 1);
+      auto config = make_config(256, 256, 64, 32, 32, 8, false, 1);
 
       auto result = origami::attention::compute_cu_occupancy(
           problem, hardware, config, origami::grid_selection_t::k_split_aware, hardware.N_CU, 4UL);
@@ -159,8 +161,9 @@ TEST_CASE("Attention: compute_cu_occupancy", "[attention]") {
 
     DYNAMIC_SECTION("gfx" << gpu_arch << " - occupancy with max_cus limit") {
       auto hardware = make_hardware(gpu_arch);
-      auto problem  = make_problem(4096, 4096, 1024, origami::transpose_t::T, origami::transpose_t::N, 1, 0, 1);
-      auto config   = make_config(256, 256, 64, 32, 32, 8, false, 1);
+      auto problem =
+          make_problem(4096, 4096, 1024, origami::transpose_t::T, origami::transpose_t::N, 1, 0, 1);
+      auto config = make_config(256, 256, 64, 32, 32, 8, false, 1);
 
       auto result = origami::attention::compute_cu_occupancy(
           problem, hardware, config, origami::grid_selection_t::k_split_aware, 100, 1UL);
@@ -170,8 +173,9 @@ TEST_CASE("Attention: compute_cu_occupancy", "[attention]") {
 
     DYNAMIC_SECTION("gfx" << gpu_arch << " - batched problem") {
       auto hardware = make_hardware(gpu_arch);
-      auto problem  = make_problem(1024, 1024, 128, origami::transpose_t::T, origami::transpose_t::N, 8, 0, 1);
-      auto config   = make_config(128, 128, 64, 16, 16, 16, false, 1);
+      auto problem =
+          make_problem(1024, 1024, 128, origami::transpose_t::T, origami::transpose_t::N, 8, 0, 1);
+      auto config = make_config(128, 128, 64, 16, 16, 16, false, 1);
 
       auto result = origami::attention::compute_cu_occupancy(
           problem, hardware, config, origami::grid_selection_t::k_split_aware, hardware.N_CU, 1UL);
@@ -183,8 +187,9 @@ TEST_CASE("Attention: compute_cu_occupancy", "[attention]") {
 
     DYNAMIC_SECTION("gfx" << gpu_arch << " - single tile") {
       auto hardware = make_hardware(gpu_arch);
-      auto problem  = make_problem(64, 64, 64, origami::transpose_t::T, origami::transpose_t::N, 1, 0, 1);
-      auto config   = make_config(128, 128, 64, 16, 16, 16, false, 1);
+      auto problem =
+          make_problem(64, 64, 64, origami::transpose_t::T, origami::transpose_t::N, 1, 0, 1);
+      auto config = make_config(128, 128, 64, 16, 16, 16, false, 1);
 
       auto result = origami::attention::compute_cu_occupancy(
           problem, hardware, config, origami::grid_selection_t::k_split_aware, hardware.N_CU, 1UL);
@@ -235,7 +240,8 @@ TEST_CASE("Attention: compute_mem_bw_from_occupancy", "[attention]") {
     DYNAMIC_SECTION("gfx" << gpu_arch << " - exceeding N_CU returns 1.0") {
       auto hardware = make_hardware(gpu_arch);
 
-      auto result = origami::attention::compute_mem_bw_from_occupancy(hardware, hardware.N_CU + 100);
+      auto result =
+          origami::attention::compute_mem_bw_from_occupancy(hardware, hardware.N_CU + 100);
       REQUIRE(result == 1.0);
     }
 
@@ -349,8 +355,8 @@ TEST_CASE("Attention: emulated_tf32_arithmetic_intensity", "[attention]") {
     }
 
     DYNAMIC_SECTION("gfx" << gpu_arch << " - 3x arithmetic intensity ratio") {
-      double ai    = origami::attention::arithmetic_intensity(2047, 2047, 4096, 2);
-      double tf32  = origami::attention::emulated_tf32_arithmetic_intensity(2047, 2047, 4096, 2);
+      double ai   = origami::attention::arithmetic_intensity(2047, 2047, 4096, 2);
+      double tf32 = origami::attention::emulated_tf32_arithmetic_intensity(2047, 2047, 4096, 2);
       REQUIRE(tf32 == Approx(3.0 * ai).epsilon(1e-6));
     }
 
@@ -452,8 +458,8 @@ TEST_CASE("Attention: check_lds_capacity", "[attention]") {
       auto hardware = make_hardware(gpu_arch);
       origami::dim3_t mt{256, 256, 64};
 
-      auto fits = origami::attention::check_lds_capacity(
-          hardware, mt, origami::data_type_t::BFloat16);
+      auto fits =
+          origami::attention::check_lds_capacity(hardware, mt, origami::data_type_t::BFloat16);
       REQUIRE(fits == true);
     }
 
@@ -565,7 +571,8 @@ TEST_CASE("Attention: estimate_mall_hit", "[attention]") {
       auto problem  = make_problem(2047, 2047, 4096);
       auto config   = make_config(256, 256, 64, 32, 32, 8, false, 1);
 
-      auto result = origami::attention::estimate_mall_hit(problem, hardware, config, hardware.N_CU, 0);
+      auto result =
+          origami::attention::estimate_mall_hit(problem, hardware, config, hardware.N_CU, 0);
       REQUIRE(result == 0.875);
     }
 
@@ -648,8 +655,9 @@ TEST_CASE("Attention: compute_l2_hit_rate_global", "[attention]") {
 TEST_CASE("Attention: compute_memory_latency", "[attention]") {
   for (int gpu_arch : test_architectures) {
     DYNAMIC_SECTION("gfx" << gpu_arch << " - smaller tiles have lower memory latency") {
-      auto hardware     = make_hardware(gpu_arch);
-      auto problem      = make_problem(4096, 4096, 1024, origami::transpose_t::T, origami::transpose_t::N, 1);
+      auto hardware = make_hardware(gpu_arch);
+      auto problem =
+          make_problem(4096, 4096, 1024, origami::transpose_t::T, origami::transpose_t::N, 1);
       auto config_small = make_config(128, 128, 64, 32, 32, 8, false, 8);
       auto config_large = make_config(256, 256, 128, 32, 32, 8, false, 8);
 
@@ -666,7 +674,8 @@ TEST_CASE("Attention: compute_memory_latency", "[attention]") {
       auto problem  = make_problem(4096, 4096, 128);
       auto config   = make_config(128, 128, 64, 16, 16, 16, false, 1);
 
-      auto latency = origami::attention::compute_memory_latency(problem, hardware, config, hardware.N_CU, 1);
+      auto latency =
+          origami::attention::compute_memory_latency(problem, hardware, config, hardware.N_CU, 1);
       REQUIRE(latency > 0.0);
     }
   }
@@ -675,8 +684,9 @@ TEST_CASE("Attention: compute_memory_latency", "[attention]") {
 TEST_CASE("Attention: compute_tile_latency", "[attention]") {
   for (int gpu_arch : test_architectures) {
     DYNAMIC_SECTION("gfx" << gpu_arch << " - larger tiles have higher latency") {
-      auto hardware     = make_hardware(gpu_arch);
-      auto problem      = make_problem(4096, 4096, 1024, origami::transpose_t::T, origami::transpose_t::N, 2);
+      auto hardware = make_hardware(gpu_arch);
+      auto problem =
+          make_problem(4096, 4096, 1024, origami::transpose_t::T, origami::transpose_t::N, 2);
       auto config_small = make_config(128, 128, 64, 32, 32, 8, false, 6);
       auto config_large = make_config(256, 256, 128, 32, 32, 8, false, 6);
 
@@ -693,7 +703,8 @@ TEST_CASE("Attention: compute_tile_latency", "[attention]") {
       auto problem  = make_problem(2048, 2048, 128);
       auto config   = make_config(128, 128, 64, 16, 16, 16, false, 1);
 
-      auto latency = origami::attention::compute_tile_latency(problem, hardware, config, hardware.N_CU, 1);
+      auto latency =
+          origami::attention::compute_tile_latency(problem, hardware, config, hardware.N_CU, 1);
       REQUIRE(latency > 0.0);
     }
 
@@ -702,8 +713,10 @@ TEST_CASE("Attention: compute_tile_latency", "[attention]") {
       auto problem  = make_problem(2048, 2048, 128);
       auto config   = make_config(128, 128, 64, 16, 16, 16, false, 1);
 
-      auto result1 = origami::attention::compute_tile_latency(problem, hardware, config, hardware.N_CU, 1);
-      auto result2 = origami::attention::compute_tile_latency(problem, hardware, config, hardware.N_CU, 1);
+      auto result1 =
+          origami::attention::compute_tile_latency(problem, hardware, config, hardware.N_CU, 1);
+      auto result2 =
+          origami::attention::compute_tile_latency(problem, hardware, config, hardware.N_CU, 1);
       REQUIRE(result1 == result2);
     }
   }
@@ -713,11 +726,14 @@ TEST_CASE("Attention: compute_timestep_latency", "[attention]") {
   for (int gpu_arch : test_architectures) {
     DYNAMIC_SECTION("gfx" << gpu_arch << " - timestep equals tile latency") {
       auto hardware = make_hardware(gpu_arch);
-      auto problem  = make_problem(4096, 4096, 1024, origami::transpose_t::T, origami::transpose_t::N, 2);
-      auto config   = make_config(128, 128, 64, 32, 32, 8, false, 8);
+      auto problem =
+          make_problem(4096, 4096, 1024, origami::transpose_t::T, origami::transpose_t::N, 2);
+      auto config = make_config(128, 128, 64, 32, 32, 8, false, 8);
 
-      auto tile_latency     = origami::attention::compute_tile_latency(problem, hardware, config, 304, 4);
-      auto timestep_latency = origami::attention::compute_timestep_latency(problem, hardware, config, 304, 4);
+      auto tile_latency =
+          origami::attention::compute_tile_latency(problem, hardware, config, 304, 4);
+      auto timestep_latency =
+          origami::attention::compute_timestep_latency(problem, hardware, config, 304, 4);
 
       REQUIRE(timestep_latency == Approx(tile_latency));
     }
@@ -727,13 +743,17 @@ TEST_CASE("Attention: compute_timestep_latency", "[attention]") {
 TEST_CASE("Attention: compute_total_latency", "[attention]") {
   for (int gpu_arch : test_architectures) {
     DYNAMIC_SECTION("gfx" << gpu_arch << " - larger problems have higher total latency") {
-      auto hardware       = make_hardware(gpu_arch);
-      auto problem_small  = make_problem(4096, 4096, 1024, origami::transpose_t::T, origami::transpose_t::N, 2);
-      auto problem_large  = make_problem(8192, 8192, 2048, origami::transpose_t::T, origami::transpose_t::N, 2);
-      auto config         = make_config(128, 128, 64, 32, 32, 8, false, 1);
+      auto hardware = make_hardware(gpu_arch);
+      auto problem_small =
+          make_problem(4096, 4096, 1024, origami::transpose_t::T, origami::transpose_t::N, 2);
+      auto problem_large =
+          make_problem(8192, 8192, 2048, origami::transpose_t::T, origami::transpose_t::N, 2);
+      auto config = make_config(128, 128, 64, 32, 32, 8, false, 1);
 
-      auto latency_small = origami::attention::compute_total_latency(problem_small, hardware, config);
-      auto latency_large = origami::attention::compute_total_latency(problem_large, hardware, config);
+      auto latency_small =
+          origami::attention::compute_total_latency(problem_small, hardware, config);
+      auto latency_large =
+          origami::attention::compute_total_latency(problem_large, hardware, config);
 
       REQUIRE(latency_small < latency_large);
     }
@@ -748,10 +768,12 @@ TEST_CASE("Attention: compute_total_latency", "[attention]") {
     }
 
     DYNAMIC_SECTION("gfx" << gpu_arch << " - total latency scales with batch") {
-      auto hardware    = make_hardware(gpu_arch);
-      auto problem_b1  = make_problem(2048, 2048, 128, origami::transpose_t::T, origami::transpose_t::N, 1);
-      auto problem_b8  = make_problem(2048, 2048, 128, origami::transpose_t::T, origami::transpose_t::N, 8);
-      auto config      = make_config(128, 128, 64, 16, 16, 16, false, 1);
+      auto hardware = make_hardware(gpu_arch);
+      auto problem_b1 =
+          make_problem(2048, 2048, 128, origami::transpose_t::T, origami::transpose_t::N, 1);
+      auto problem_b8 =
+          make_problem(2048, 2048, 128, origami::transpose_t::T, origami::transpose_t::N, 8);
+      auto config = make_config(128, 128, 64, 16, 16, 16, false, 1);
 
       auto latency_b1 = origami::attention::compute_total_latency(problem_b1, hardware, config);
       auto latency_b8 = origami::attention::compute_total_latency(problem_b8, hardware, config);
@@ -768,7 +790,8 @@ TEST_CASE("Attention: compute_total_latency", "[attention]") {
 
       // Total latency should include prologue + at least 1 loop iteration + epilogue
       // So it should be greater than just the tile latency alone
-      auto tile_latency = origami::attention::compute_tile_latency(problem, hardware, config, hardware.N_CU, 1);
+      auto tile_latency =
+          origami::attention::compute_tile_latency(problem, hardware, config, hardware.N_CU, 1);
       REQUIRE(total > tile_latency);
     }
 
@@ -783,8 +806,9 @@ TEST_CASE("Attention: compute_total_latency", "[attention]") {
 
     DYNAMIC_SECTION("gfx" << gpu_arch << " - very large problem is finite") {
       auto hardware = make_hardware(gpu_arch);
-      auto problem  = make_problem(16384, 16384, 256, origami::transpose_t::T, origami::transpose_t::N, 64);
-      auto config   = make_config(128, 128, 64, 16, 16, 16, false, 1);
+      auto problem =
+          make_problem(16384, 16384, 256, origami::transpose_t::T, origami::transpose_t::N, 64);
+      auto config = make_config(128, 128, 64, 16, 16, 16, false, 1);
 
       auto total = origami::attention::compute_total_latency(problem, hardware, config);
       REQUIRE(total > 0.0);
@@ -832,12 +856,11 @@ TEST_CASE("Attention: edge cases - batch scaling", "[attention][edge]") {
 
       double prev_latency = 0.0;
       for (size_t batch : {1UL, 2UL, 4UL, 8UL, 16UL, 32UL}) {
-        auto problem = make_problem(2048, 2048, 128, origami::transpose_t::T, origami::transpose_t::N, batch);
+        auto problem =
+            make_problem(2048, 2048, 128, origami::transpose_t::T, origami::transpose_t::N, batch);
         auto total = origami::attention::compute_total_latency(problem, hardware, config);
         REQUIRE(total > 0.0);
-        if (batch > 1) {
-          REQUIRE(total > prev_latency);
-        }
+        if (batch > 1) { REQUIRE(total > prev_latency); }
         prev_latency = total;
       }
     }

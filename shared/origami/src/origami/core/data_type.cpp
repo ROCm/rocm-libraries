@@ -1,58 +1,11 @@
 // Copyright Advanced Micro Devices, Inc., or its affiliates.
-// SPDX-License-Identifier:  MIT
+// SPDX-License-Identifier: MIT
 
-#include "origami/types.hpp"
-
-#include <cmath>
-#include <cstdio>
-#include <cstdlib>
 #include <string>
 
+#include "origami/core/data_type.hpp"
+
 namespace origami {
-
-runtime_options::runtime_options() { update_from_env(); }
-
-runtime_options::runtime_options(bool debug, bool heuristics, double variance)
-    : debug_enabled(debug), heuristics_enabled(heuristics), heuristics_variance(variance) {}
-
-bool runtime_options::read_debug_from_env() {
-  const char* env = std::getenv("ANALYTICAL_GEMM_DEBUG");
-  return env && std::string(env) == "1";
-}
-
-bool runtime_options::read_heuristics_from_env() {
-  const char* env = std::getenv("ANALYTICAL_GEMM_HEURISTICS");
-  return !(env && std::string(env) == "0");
-}
-
-double runtime_options::read_heuristics_variance_from_env() {
-  constexpr double default_variance = 0.0;  // Disabled by default
-
-  if (const char* env = std::getenv("ANALYTICAL_GEMM_HEURISTICS_VARIANCE")) {
-    try {
-      double val = std::stod(env);
-      if (std::isfinite(val) && val >= 0.0) { return val; }
-    } catch (...) {
-      // fall through to default
-    }
-  }
-  return default_variance;
-}
-
-dim3_t runtime_options::read_gemm_pick_from_env() {
-  if (const char* env = std::getenv("ANALYTICAL_GEMM_PICK")) {
-    size_t m = 0, n = 0, k = 0;
-    if (std::sscanf(env, "%zux%zux%zu", &m, &n, &k) == 3) { return {m, n, k}; }
-  }
-  return {0, 0, 0};
-}
-
-void runtime_options::update_from_env() {
-  debug_enabled       = read_debug_from_env();
-  heuristics_enabled  = read_heuristics_from_env();
-  heuristics_variance = read_heuristics_variance_from_env();
-  gemm_pick           = read_gemm_pick_from_env();
-}
 
 int datatype_to_bits(data_type_t type) {
   switch (type) {
@@ -108,15 +61,6 @@ std::string datatype_to_string(data_type_t type) {
     case data_type_t::Float6: return "Float6";
     case data_type_t::BFloat6: return "BFloat6";
     case data_type_t::Float4: return "Float4";
-    default: return "Invalid";
-  }
-}
-
-std::string hybrid_mode_to_string(hybrid_mode_t mode) {
-  switch (mode) {
-    case hybrid_mode_t::static_: return "static";
-    case hybrid_mode_t::dynamic: return "dynamic";
-    case hybrid_mode_t::none: return "none";
     default: return "Invalid";
   }
 }
