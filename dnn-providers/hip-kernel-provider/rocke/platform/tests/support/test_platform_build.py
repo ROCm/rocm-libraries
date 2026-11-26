@@ -2,8 +2,10 @@
 # SPDX-License-Identifier: MIT
 """rocke.tests.platform_build.generator_arguments gives a fresh build tree Ninja
 when ``ninja`` is on PATH and CMake's default otherwise, and leaves an existing
-tree its generator. Each case puts PATH on a directory that holds a ``ninja``
-or holds nothing.
+tree its generator. rocke.tests.cmake_generator.ninja_generator_or_skip gives a test's configure Ninja, and
+skips the test, waiting for the build-variant lane, where cmake or ninja is
+missing (CI's test container has no build program). Each case puts PATH on a
+directory that holds a ``ninja`` (and a ``cmake``) or holds nothing.
 
 cmake_cache_entries reads what a real configure of a small project (no
 compiler: LANGUAGES NONE) recorded in its CMakeCache.txt."""
@@ -11,12 +13,11 @@ compiler: LANGUAGES NONE) recorded in its CMakeCache.txt."""
 from __future__ import annotations
 
 import os
-import shutil
 import subprocess
 from pathlib import Path
 
 import pytest
-from rocke.tests.lanes import BUILD_VARIANT, skip_until
+from rocke.tests.cmake_generator import ninja_generator_or_skip
 from rocke.tests.platform_build import cmake_cache_entries, generator_arguments
 
 
@@ -49,17 +50,43 @@ def test_an_existing_tree_keeps_its_generator(tmp_path, monkeypatch, with_ninja)
     assert generator_arguments(build) == []
 
 
+def test_a_test_configure_without_ninja_waits_for_the_build_variant_lane(
+    tmp_path, monkeypatch
+):
+    """CI's test container has no build program, so a test that configures
+    skips there, declaring the build-variant lane."""
+    monkeypatch.setenv("PATH", _tool_directory(tmp_path / "bin", with_ninja=False))
+    with pytest.raises(pytest.skip.Exception, match="waits for build-variant"):
+        ninja_generator_or_skip(tmp_path / "build")
+
+
+def test_a_test_configure_with_cmake_and_ninja_gets_ninja(tmp_path, monkeypatch):
+    tools = Path(_tool_directory(tmp_path / "bin", with_ninja=True))
+    cmake = tools / ("cmake.exe" if os.name == "nt" else "cmake")
+    cmake.write_text("")
+    cmake.chmod(0o755)
+    monkeypatch.setenv("PATH", str(tools))
+    assert ninja_generator_or_skip(tmp_path / "build") == ["-GNinja"]
+
+
 def test_cache_entries_are_what_the_configure_recorded(tmp_path):
-    if shutil.which("cmake") is None:
-        skip_until(BUILD_VARIANT, reason="cmake is not on PATH")
     source = tmp_path / "source"
     source.mkdir()
     (source / "CMakeLists.txt").write_text(
         "cmake_minimum_required(VERSION 3.16)\nproject(cache_demo LANGUAGES NONE)\n"
     )
     build = tmp_path / "build"
+    generator = ninja_generator_or_skip(build)
     subprocess.run(
-        ["cmake", "-S", str(source), "-B", str(build), "-DDEMO_VALUE:STRING=a=b"],
+        [
+            "cmake",
+            "-S",
+            str(source),
+            "-B",
+            str(build),
+            "-DDEMO_VALUE:STRING=a=b",
+            *generator,
+        ],
         check=True,
         capture_output=True,
         timeout=60,

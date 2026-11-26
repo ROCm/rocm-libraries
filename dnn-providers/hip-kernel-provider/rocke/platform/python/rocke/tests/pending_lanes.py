@@ -1453,6 +1453,7 @@ PENDING: tuple[PendingTest, ...] = (
         _PLATFORM,
         "platform/tests/core/test_compile_target_with_this_hosts_compiler.py",
         "platform/tests/support/test_cmake_file_api.py",
+        "platform/tests/support/test_platform_build.py",
         "platform/tests/tools/test_run_all.py",
     ),
     *_waiting_tests(

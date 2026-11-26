@@ -10,13 +10,11 @@ generator a fresh platform tree gets (``rocke.tests.platform_build``).
 
 from __future__ import annotations
 
-import shutil
 import subprocess
 
 import pytest
 from rocke.tests.cmake_file_api import read_codemodel, request_codemodel
-from rocke.tests.lanes import BUILD_VARIANT, skip_until
-from rocke.tests.platform_build import generator_arguments
+from rocke.tests.cmake_generator import ninja_generator_or_skip
 
 PROJECT = """\
 cmake_minimum_required(VERSION 3.16)
@@ -42,14 +40,7 @@ def configured(tmp_path_factory):
     for name in ("base.txt", "top.txt", "other.txt"):
         (source / name).write_text("text\n")
     build = scratch / "build"
-    generator = generator_arguments(build)
-    # The tree is fresh, so no generator argument means ninja is not on PATH.
-    if shutil.which("cmake") is None or not generator:
-        skip_until(
-            BUILD_VARIANT,
-            reason="needs cmake and ninja on PATH: it configures with Ninja, the "
-            "generator a fresh platform tree gets",
-        )
+    generator = ninja_generator_or_skip(build)
     request_codemodel(build)
     subprocess.run(
         [
