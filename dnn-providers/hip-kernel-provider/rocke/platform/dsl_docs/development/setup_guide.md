@@ -10,7 +10,7 @@ engine-internals work see [`engine_contributing.md`](./engine_contributing.md).
 ## 1. Recommended stack
 
 The DSL generates AMDGPU LLVM IR text and compiles it to a HSACO with
-`libamd_comgr` (no amdclang++, no MLIR). The **comgr version drives codegen**, so the
+`libamd_comgr` (no compiler driver, no MLIR). The **comgr version drives codegen**, so the
 recommended stack pins a recent, consistent ROCm:
 
 | Component | Recommended | Also works |

@@ -18,7 +18,7 @@ Authoring style:
     writes `gm // (Ho * Wo)` by hand; the same SSA gets generated, but
     via the algebra.
   - The kernel emits straight to AMDGPU LLVM IR + HSACO in-process
-    (no hipcc / MLIR / clang). Codegen time for one kernel is
+    (no compiler driver / MLIR). Codegen time for one kernel is
     typically <150 ms wall.
 
 Reference: CK Tile's `cktile_fixed_lean` for this shape reaches
