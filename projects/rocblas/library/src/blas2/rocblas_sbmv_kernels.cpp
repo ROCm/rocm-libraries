@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2019-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2019-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -181,6 +181,7 @@ rocblas_sbmv_kernel(rocblas_int    n,
 
     for(; batch < batch_count; batch += c_YZ_grid_launch_limit)
     {
+        rocblas_batch_loop_barrier(batch);
 
         auto alpha = load_scalar(alpha_device_host, batch, stride_alpha);
         auto beta  = load_scalar(beta_device_host, batch, stride_beta);

@@ -1697,9 +1697,7 @@ rocblas_gemvn_double_buffered_kernel(rocblas_int    m,
 
     for(; batch < batch_count; batch += c_YZ_grid_launch_limit)
     {
-        // The previous batch's reduction may still be reading shared memory.
-        if(batch != blockIdx.z)
-            __syncthreads();
+        rocblas_batch_loop_barrier(batch);
 
         auto alpha = load_scalar(alpha_device_host, batch, stride_alpha);
 
@@ -1748,9 +1746,7 @@ rocblas_gemvt_double_buffered_kernel(rocblas_int    m,
 
     for(; batch < batch_count; batch += c_YZ_grid_launch_limit)
     {
-        // The previous batch's reduction may still be reading shared memory.
-        if(batch != blockIdx.z)
-            __syncthreads();
+        rocblas_batch_loop_barrier(batch);
 
         auto alpha = load_scalar(alpha_device_host, batch, stride_alpha);
 
@@ -1799,9 +1795,7 @@ rocblas_gemvn_kernel(rocblas_int    m,
 
     for(; batch < batch_count; batch += c_YZ_grid_launch_limit)
     {
-        // The previous batch's reduction may still be reading shared memory.
-        if(batch != blockIdx.z)
-            __syncthreads();
+        rocblas_batch_loop_barrier(batch);
 
         auto alpha = load_scalar(alpha_device_host, batch, stride_alpha);
         auto beta  = load_scalar(beta_device_host, batch, stride_beta);
@@ -1866,10 +1860,7 @@ rocblas_gemvn_sm_kernel(rocblas_int    m,
 
     for(; batch < batch_count; batch += c_YZ_grid_launch_limit)
     {
-        // The previous batch's reduction may still be reading shared memory.
-        if(batch != blockIdx.z)
-            __syncthreads();
-
+        rocblas_batch_loop_barrier(batch);
         auto alpha = load_scalar(alpha_device_host, batch, stride_alpha);
 
         // alpha is applied once, in the reduce; a zero alpha still has to reach

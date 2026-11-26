@@ -525,7 +525,7 @@ void testing_hpmv_strided_batched(const Arguments& arg)
                     = norm_check_general<T>('F', 1, N, incy, stride_y, hy_gold, hy, batch_count);
             }
         }
-        if(arg.pointer_mode_host)
+        if(arg.pointer_mode_device)
         {
             CHECK_HIP_ERROR(hy.transfer_from(dy));
 

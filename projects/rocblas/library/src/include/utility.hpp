@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2016-2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2016-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -184,6 +184,16 @@ __forceinline__ __device__ __host__ T*
     return cond ? load_ptr_batch( p, block, offset, stride) : nullptr;
 }
 // clang-format on
+
+// Kernels that loop over batches in steps of c_YZ_grid_launch_limit reuse a block's shared
+// memory for every batch, and their reductions end without a barrier. Call this at the top of
+// the batch loop so that no thread writes shared memory for the next batch while other threads
+// of the block are still reading it for the previous one. The first batch needs no barrier.
+__forceinline__ __device__ void rocblas_batch_loop_barrier(uint32_t batch)
+{
+    if(batch != blockIdx.z)
+        __syncthreads();
+}
 
 /*******************************************************************************
  * \brief convert hipError_t to rocblas_status

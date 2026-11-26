@@ -235,6 +235,19 @@ Tests:
     - ger_batched: *single_precision
     - ger_strided_batched: *single_precision
 
+# batch_count > c_YZ_grid_launch_limit, so each workgroup loops over several batches
+# and reuses its shared memory.
+- name: ger_strided_batched_grid_z_batch_loop
+  category: pre_checkin
+  arguments:
+    - { M: 33, N: 17, lda: 33, incx: 1, incy: 1, stride_a: 561 }
+  batch_count: [ 131071 ] # 2 * 65535 + 1
+  alpha: [ 2.0 ]
+  pointer_mode_host: false
+  function:
+    - ger_strided_batched: *double_precision
+  stride_scale: 1
+
 # ger_strided_batched
 - name: ger_strided_batched_fortran
   category: quick

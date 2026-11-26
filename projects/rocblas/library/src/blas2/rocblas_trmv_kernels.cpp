@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2019-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining A copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -142,6 +142,7 @@ rocblas_trmvn_kernel(rocblas_int    n,
 
     for(; batch < batch_count; batch += c_YZ_grid_launch_limit)
     {
+        rocblas_batch_loop_barrier(batch);
 
         rocblas_trmvn_kernel_calc<DIM_X, DIM_Y, LOWER, UNIT>(
             n,

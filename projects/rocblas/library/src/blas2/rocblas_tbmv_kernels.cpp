@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2019-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2019-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -275,6 +275,7 @@ rocblas_tbmvx_kernel(rocblas_operation transA,
 
     for(; batch < batch_count; batch += c_YZ_grid_launch_limit)
     {
+        rocblas_batch_loop_barrier(batch);
 
         const auto* A        = load_ptr_batch(Aa, batch, shifta, strideA);
         const auto* w_x_copy = load_ptr_batch(w_xa_copy, batch, 0, n);

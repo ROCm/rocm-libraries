@@ -1,5 +1,5 @@
 /*************************************************************************
- * Copyright (C) 2019-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2019-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -2554,6 +2554,7 @@ rocblas_hemvn_kernel_upper(rocblas_int    n,
 
     for(; batch < batch_count; batch += c_YZ_grid_launch_limit)
     {
+        rocblas_batch_loop_barrier(batch);
 
         auto alpha = load_scalar(alpha_device_host, batch, stride_alpha);
         auto beta  = load_scalar(beta_device_host, batch, stride_beta);
@@ -2611,6 +2612,7 @@ rocblas_hemvn_kernel_lower(rocblas_int    n,
 
     for(; batch < batch_count; batch += c_YZ_grid_launch_limit)
     {
+        rocblas_batch_loop_barrier(batch);
 
         auto alpha = load_scalar(alpha_device_host, batch, stride_alpha);
         auto beta  = load_scalar(beta_device_host, batch, stride_beta);
@@ -2800,6 +2802,7 @@ rocblas_symv_kernel_upper_double_buffered_non_diagonal_generic(bool           ho
 
     for(; batch < batch_count; batch += c_YZ_grid_launch_limit)
     {
+        rocblas_batch_loop_barrier(batch);
         const auto alpha = host_ptr_mode ? alpha_device_host.value
                                          : load_scalar(alpha_device_host.ptr, batch, stride_alpha);
 

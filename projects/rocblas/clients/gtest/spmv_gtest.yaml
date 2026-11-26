@@ -212,6 +212,20 @@ Tests:
     - spmv_strided_batched: *single_precision
   stride_scale: 1
 
+# batch_count > c_YZ_grid_launch_limit, so each workgroup loops over several batches
+# and reuses its shared memory reduction buffer.
+- name: spmv_strided_batched_grid_z_batch_loop
+  category: pre_checkin
+  arguments:
+    - { N: 33, incx: 1, incy: 1 }
+  batch_count: [ 131071 ] # 2 * 65535 + 1
+  alpha_beta: *alpha_beta_range_small
+  uplo: [ L ]
+  pointer_mode_host: false
+  function:
+    - spmv_strided_batched: *double_precision
+  stride_scale: 1
+
   # strided batched
 - name: spmv_strided_batched_bad
   category: quick

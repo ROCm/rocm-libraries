@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2016-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2016-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -54,7 +54,9 @@ rocblas_ger_kernel(rocblas_int    m,
                    rocblas_stride strideA,
                    rocblas_int    batch_count)
 {
-    __shared__ T xdata[DIM_X];
+    // xdata alternates between two buffers from one batch to the next, so row 0 can store the
+    // next batch's x while the other rows are still reading the current one.
+    __shared__ T xdata[2][DIM_X];
     __shared__ T ydata[DIM_Y * WIN];
 
     int num_blocksx = (m - 1) / DIM_X + 1;
@@ -66,6 +68,8 @@ rocblas_ger_kernel(rocblas_int    m,
 
     // shared data base index
     int tyi = threadIdx.y * WIN;
+
+    int xbuf = 0;
 
     uint32_t batch = blockIdx.z;
 
@@ -85,7 +89,7 @@ rocblas_ger_kernel(rocblas_int    m,
 
         if(threadIdx.y == 0)
         {
-            xdata[threadIdx.x] = tx < m ? x[tx * int64_t(incx)] : 0;
+            xdata[xbuf][threadIdx.x] = tx < m ? x[tx * int64_t(incx)] : 0;
         }
 
         if(threadIdx.x < WIN)
@@ -98,7 +102,7 @@ rocblas_ger_kernel(rocblas_int    m,
 
         if(tx < m)
         {
-            T x_value = alpha * xdata[threadIdx.x];
+            T x_value = alpha * xdata[xbuf][threadIdx.x];
 
             for(int i = 0; i < WIN; i++)
             {
@@ -108,6 +112,8 @@ rocblas_ger_kernel(rocblas_int    m,
                         += x_value * (CONJ ? conj(ydata[tyi + i]) : ydata[tyi + i]);
             }
         }
+
+        xbuf ^= 1;
     }
 }
 

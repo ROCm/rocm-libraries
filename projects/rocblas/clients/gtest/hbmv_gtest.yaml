@@ -250,6 +250,20 @@ Tests:
     - hbmv_strided_batched: *single_precision_complex
   stride_scale: 1
 
+# batch_count > c_YZ_grid_launch_limit, so each workgroup loops over several batches
+# and reuses its shared memory reduction buffer.
+- name: hbmv_strided_batched_grid_z_batch_loop
+  category: pre_checkin
+  arguments:
+    - { N: 33, K: 3, lda: 4, incx: 1, incy: 1 }
+  batch_count: [ 131071 ] # 2 * 65535 + 1
+  alpha_beta: *alpha_beta_range_small
+  uplo: [ L ]
+  pointer_mode_host: false
+  function:
+    - hbmv_strided_batched: *double_precision_complex
+  stride_scale: 1
+
 # hbmv_strided_batched
 - name: hbmv_strided_batched_NaN
   category: pre_checkin
