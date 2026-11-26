@@ -27,14 +27,19 @@ bias. A batch-split kernel passes the whole bias to every chunk.
 
 ## Artifact
 
-The KDPs and kernel objects are not in this tree yet: they come from rocKE's bias catalog and
-belong in a DVC folder `artifacts/` (layout in `../../README.md`, "Large rocKE files live in
+The KDPs are not in this tree yet: they come from rocKE's bias catalog. A KDP is a list of
+rocKE specs that the build compiles at pack time from this tree's `rocke/`, so the build makes
+the kernels itself once the KDPs exist; like the unfused engine's, they belong in a DVC folder
+`artifacts/` (layout in `../../README.md`, "Large rocKE files live in
 DVC"). Until it is added, the bundle carries no kernel, gfx950 ships no kernel of the engine, and
 its integration check (`src/CMakeLists.txt`) is not registered; the build is unaffected. To add
 it, from `projects/hipdnn/tools/IngestorGenerator`:
 
-1. Write the bias catalog lists `configs/gfx950_conv_fwd_bias_aot_{fp16,bf16}.instances.json`:
-   the forward catalog's identities with rocKE's `bias` set, as rocKE's bias AOT axis lists them.
+1. `python tools/enumerate_conv_aot_instances.py --bias --rocke-root "$ROCKE"` writes the bias
+   catalog lists `configs/gfx950_conv_fwd_bias_aot_{fp16,bf16}.instances.json`: the forward
+   catalog's instances with rocKE's `bias` set, those whose bias twin the packaging adapter
+   (`gfx950_conv_fwd_aot_spec_for_identity`) packages. It needs a rocKE whose AOT forward spec
+   carries `bias`; until then every twin is refused and nothing is written.
 2. `python tools/make_conv_aot_config.py --bias --rocke-root "$ROCKE" --instances
    configs/gfx950_conv_fwd_bias_aot_{fp16,bf16}.instances.json --output "$WORK"/bias.yaml`
 3. `python generate.py --config "$WORK"/bias.yaml --output-dir "$GENERATED" --force`, then
