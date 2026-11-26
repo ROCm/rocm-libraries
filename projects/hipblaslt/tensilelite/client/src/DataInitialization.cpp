@@ -3395,6 +3395,12 @@ namespace TensileLite
                                                    permuted.getDesc().flattenSize(),
                                                    hipMemcpyHostToDevice);
                         }
+                        // The fallback swizzle depends only on this scale descriptor, and
+                        // gpuInput.valid now holds it. Tag it so later solutions on the
+                        // same problem reuse it instead of redoing the host permute.
+                        // A NoSwizzle solution clears the tag when it uploads canonical bytes.
+                        if(ptr != nullptr)
+                            m_mxSwizzledDescriptor[i] = desc;
                     }
                 }
                 else
