@@ -61,11 +61,16 @@ repos:
         language: python
         files: ^lib/
 """
-_GIT_IDENTITY = {
+# The scratch repositories are throwaway: their commits need an identity, and
+# no user or system git config (commit signing, a hooks path, init templates)
+# may apply to them, so a developer's or runner's settings cannot fail a case.
+_SCRATCH_GIT = {
     "GIT_AUTHOR_NAME": "test",
     "GIT_AUTHOR_EMAIL": "test@example.com",
     "GIT_COMMITTER_NAME": "test",
     "GIT_COMMITTER_EMAIL": "test@example.com",
+    "GIT_CONFIG_GLOBAL": os.devnull,
+    "GIT_CONFIG_NOSYSTEM": "1",
 }
 
 
@@ -75,7 +80,7 @@ def _git(repo: Path, *arguments: str) -> None:
         cwd=repo,
         check=True,
         capture_output=True,
-        env={**os.environ, **_GIT_IDENTITY},
+        env={**os.environ, **_SCRATCH_GIT},
     )
 
 
@@ -99,6 +104,7 @@ def _run_gate(repo: Path, hook_id: str = "registry", refs: tuple[str, str] = ())
         for name, value in os.environ.items()
         if name not in ("PRE_COMMIT_FROM_REF", "PRE_COMMIT_TO_REF")
     }
+    environment.update(_SCRATCH_GIT)
     if refs:
         environment["PRE_COMMIT_FROM_REF"], environment["PRE_COMMIT_TO_REF"] = refs
     # pre-commit puts the hook environment's bin directory first on PATH, so
@@ -125,6 +131,30 @@ def _commit_on_branch(repo: Path, *git_steps: tuple[str, ...]) -> None:
     for step in git_steps:
         _git(repo, *step)
     _git(repo, "commit", "-q", "-m", "change")
+
+
+def test_a_users_git_config_does_not_reach_the_scratch_repository(
+    tmp_path, monkeypatch
+):
+    """A global config that signs every commit and runs a failing hook would
+    fail each commit of a scratch repository; it does not apply there."""
+    hooks = tmp_path / "hooks"
+    hooks.mkdir()
+    hook = hooks / "pre-commit"
+    hook.write_text("#!/bin/sh\nexit 1\n")
+    hook.chmod(0o755)
+    hostile = tmp_path / "gitconfig"
+    hostile.write_text(
+        f"[commit]\n\tgpgsign = true\n[core]\n\thooksPath = {hooks.as_posix()}\n"
+    )
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(hostile))
+    scratch = tmp_path / "scratch"
+    scratch.mkdir()
+    _git(scratch, "init", "-q", "-b", "main")
+    (scratch / "file.txt").write_text("text\n")
+    _git(scratch, "add", "-A")
+    _git(scratch, "commit", "-q", "-m", "base")
+    assert _run_gate(scratch, hook_id="no-such-hook").returncode == 0
 
 
 def test_a_change_that_deletes_nothing_reads_no_config_and_runs_no_hook(repo):
