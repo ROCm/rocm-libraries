@@ -977,8 +977,11 @@ bool hasServedStatsAlignment(std::string_view engine,
 }
 
 /// The stats (LSE) operand: (write, uid), the uid being O's when stats are off; nullopt
-/// for malformed stats. LSE is FP32 [B, Hq, Sq, 1] with dense strides.
-std::optional<std::pair<bool, int64_t>> lseFor(const MatchContext& context,
+/// for malformed stats. LSE is FP32 [B, Hq, Sq, 1] with dense strides. hasRowRoomForTailStores
+/// applies only when @p engine is the prefill engine: the decode kernel predicates its LSE
+/// store on row_ok instead of relying on the buffer resource bound.
+std::optional<std::pair<bool, int64_t>> lseFor(std::string_view engine,
+                                               const MatchContext& context,
                                                const data_objects::SdpaAttributes& attributes,
                                                const Problem& p)
 {
@@ -995,7 +998,8 @@ std::optional<std::pair<bool, int64_t>> lseFor(const MatchContext& context,
     }
     const int64_t lseUid = attributes.stats_tensor_uid().value();
     const auto* lse = findTensor(context, lseUid);
-    if(lse == nullptr || !isWellFormedOperand(*lse) || !hasRowRoomForTailStores(*lse)
+    if(lse == nullptr || !isWellFormedOperand(*lse)
+       || (engine == PREFILL_ENGINE_NAME && !hasRowRoomForTailStores(*lse))
        || lse->data_type() != data_objects::DataType::FLOAT
        || lse->dims()->Get(BATCH_AXIS) != p.batch || lse->dims()->Get(HEAD_AXIS) != p.queryHeads
        || lse->dims()->Get(SEQ_AXIS) != p.seqLenQ || lse->dims()->Get(HEAD_SIZE_AXIS) != 1
@@ -1366,7 +1370,7 @@ std::optional<BoundTokens>
         logDecline(engine, "stats", "the paged kernels write no stats for a ragged Q");
         return std::nullopt;
     }
-    const auto lse = lseFor(context, attributes, p);
+    const auto lse = lseFor(engine, context, attributes, p);
     BoundTokens bound;
     if(!lse.has_value() || !hasServedStatsAlignment(engine, context, *lse))
     {
@@ -1434,7 +1438,7 @@ std::optional<BoundTokens> graphMatchesFor(std::string_view engine, const MatchC
     const auto* o = findTensor(context, attributes.o_tensor_uid());
     if(q == nullptr || k == nullptr || v == nullptr || o == nullptr || !isWellFormedOperand(*q)
        || !isWellFormedOperand(*k) || !isWellFormedOperand(*v) || !isWellFormedOperand(*o)
-       || !hasRowRoomForTailStores(*o))
+       || (engine == PREFILL_ENGINE_NAME && !hasRowRoomForTailStores(*o)))
     {
         return std::nullopt;
     }
@@ -1490,7 +1494,7 @@ std::optional<BoundTokens> graphMatchesFor(std::string_view engine, const MatchC
         logDecline(engine, "sinks", "only the paged prefill objects take attention sinks");
         return std::nullopt;
     }
-    const auto lse = lseFor(context, attributes, p);
+    const auto lse = lseFor(engine, context, attributes, p);
     const auto bias = biasFor(context, attributes, p);
     BoundTokens bound;
     if(!lse.has_value() || !bias.has_value()

@@ -208,28 +208,14 @@ TEST_F(TestAsmSdpaEngine, GetDetailsReportsGraphCaptureSupport)
         ::testing::Contains(static_cast<int32_t>(HIPDNN_BEHAVIOR_NOTE_SUPPORTS_GRAPH_CAPTURE)));
 }
 
-TEST_F(TestAsmSdpaEngine, GetDetailsLeavesNumericalNotesAbsentForAForwardGraphWhileUnclaimed)
+TEST_F(TestAsmSdpaEngine, GetDetailsLeavesNumericalNotesAbsent)
 {
-    auto builder = hipdnn_test_sdk::utilities::createValidSdpaFwdGraph();
+    // numericalNotes does not depend on which graph is passed in (or on whether any
+    // builder claims it), so a device-free batchnorm graph is enough here too.
+    auto builder = hipdnn_test_sdk::utilities::createValidBatchnormInferenceGraph();
     const GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
-    hipdnnPluginConstData_t result;
-    _engine.getDetails(_handle, graph, result);
 
-    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::EngineDetailsWrapper details(result.ptr,
-                                                                                     result.size);
-    EXPECT_EQ(details.numericalNotes(), std::nullopt);
-}
-
-TEST_F(TestAsmSdpaEngine, GetDetailsLeavesNumericalNotesAbsentForABackwardGraph)
-{
-    auto builder = hipdnn_test_sdk::utilities::createValidSdpaBwdGraph();
-    const GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
-    hipdnnPluginConstData_t result;
-    _engine.getDetails(_handle, graph, result);
-
-    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::EngineDetailsWrapper details(result.ptr,
-                                                                                     result.size);
-    EXPECT_EQ(details.numericalNotes(), std::nullopt);
+    EXPECT_EQ(details(graph).numericalNotes(), std::nullopt);
 }
 
 TEST_F(TestAsmSdpaEngine, IsApplicableReturnsFalseForNonSdpaGraph)

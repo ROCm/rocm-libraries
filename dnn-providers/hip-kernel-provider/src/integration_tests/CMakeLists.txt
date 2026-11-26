@@ -316,22 +316,22 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
         foreach(_hkp_selection_op IN ITEMS sdpa_rdna sdpa_rdna_decode sdpa_aiw sdpa_cdna
                                            sdpa_cdna_decode sdpa_cdna_dualwave)
             list(APPEND _hkp_selection_fwd_archs
-                 ${HIPKERNELPROVIDER_FLYDSL_CONTENT_ARCHS_${_hkp_selection_op}})
+                 ${HIPKERNELPROVIDER_FLYDSL_ARCHS_${_hkp_selection_op}})
         endforeach()
         # hipkernel:flydsl_sdpa_cdna, _rdna and _aiw are never claimed (the head-pad copy they
         # wrap is unproven), so their architectures are tracked separately: a row's forward graph
         # is theirs alone, not a claimed engine's, wherever only they serve it.
         list(APPEND _hkp_selection_flydsl_cdna_archs
-             ${HIPKERNELPROVIDER_FLYDSL_CONTENT_ARCHS_sdpa_cdna})
+             ${HIPKERNELPROVIDER_FLYDSL_ARCHS_sdpa_cdna})
         list(APPEND _hkp_selection_flydsl_rdna_archs
-             ${HIPKERNELPROVIDER_FLYDSL_CONTENT_ARCHS_sdpa_rdna})
+             ${HIPKERNELPROVIDER_FLYDSL_ARCHS_sdpa_rdna})
         list(APPEND _hkp_selection_flydsl_aiw_archs
-             ${HIPKERNELPROVIDER_FLYDSL_CONTENT_ARCHS_sdpa_aiw})
+             ${HIPKERNELPROVIDER_FLYDSL_ARCHS_sdpa_aiw})
         list(APPEND _hkp_selection_bwd_claimed_archs
-             ${HIPKERNELPROVIDER_FLYDSL_CONTENT_ARCHS_sdpa_bwd_merged})
-        foreach(_hkp_selection_arch IN LISTS HIPKERNELPROVIDER_FLYDSL_CONTENT_ARCHS_sdpa_bwd_prep)
-            if(_hkp_selection_arch IN_LIST HIPKERNELPROVIDER_FLYDSL_CONTENT_ARCHS_sdpa_bwd_dkdv
-               AND _hkp_selection_arch IN_LIST HIPKERNELPROVIDER_FLYDSL_CONTENT_ARCHS_sdpa_bwd_dq)
+             ${HIPKERNELPROVIDER_FLYDSL_ARCHS_sdpa_bwd_merged})
+        foreach(_hkp_selection_arch IN LISTS HIPKERNELPROVIDER_FLYDSL_ARCHS_sdpa_bwd_prep)
+            if(_hkp_selection_arch IN_LIST HIPKERNELPROVIDER_FLYDSL_ARCHS_sdpa_bwd_dkdv
+               AND _hkp_selection_arch IN_LIST HIPKERNELPROVIDER_FLYDSL_ARCHS_sdpa_bwd_dq)
                 list(APPEND _hkp_selection_bwd_claimed_archs ${_hkp_selection_arch})
             endif()
         endforeach()

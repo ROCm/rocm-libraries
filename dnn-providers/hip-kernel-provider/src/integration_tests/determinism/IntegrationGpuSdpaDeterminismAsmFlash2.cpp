@@ -34,34 +34,36 @@ using hipdnn_frontend::DiagonalAlignment;
 constexpr const char* ASM_ENGINE = "ASM_SDPA_ENGINE";
 
 // ASM forward. Each CSV row (asm_kernels/<arch>/fmha_v3_fwd/fmha_fwd.csv) is one prebuilt
-// object, launched once with no workspace (SdpaFwdPlan.cpp:21-25): grid = Q tiles x heads x
-// batch with no KV axis (SdpaFwdLaunchParams.hpp:56-105). A row's rows below therefore reach:
+// object, launched once with no workspace (SdpaFwdPlan::execute): grid = Q tiles x heads x
+// batch with no KV axis (computeFwdLaunchParams, SdpaFwdLaunchParams.hpp). A row's rows below
+// therefore reach:
 //  - every CSV row of the arch, batch and group (ragged THD) mode, fp8bf16 on gfx942;
-//  - the Q-tile count: ts_qo is 256 (hd128) or 128 (hd192x128), so every row has Sq of at least
-//    three tiles plus a partial tail, and Skv a tail of the K tile (ts_kv 32 gfx942 bf16, 64
-//    gfx942 fp8 and gfx950 hd128, 128 gfx950 hd192);
+//  - the Q-tile count: ts_qo is 256 (hd128) or 128 (hd192x128), so every row has Sq of at
+//    least three tiles plus a partial tail (Fp8Hd128Causal excepted: kernelServesQTiles holds
+//    fp8 causal objects to one Q tile, so its Sq stays at or below ts_qo), and Skv a tail of
+//    the K tile (ts_kv 32 gfx942 bf16, 64 gfx942 fp8 and gfx950 hd128, 128 gfx950 hd192);
 //  - tgDiv=2 (a bottom-right causal mask merges head and tail Q tiles onto shared workgroups,
-//    SdpaFwdLaunchParams.hpp:72), which needs at least four Q tiles: the causal rows have four;
-//    gfx942 hd192x128 batch keeps its own grid layout (:86-95) and gfx942 hd192x128 group keeps
-//    tgDiv=1 (:73-76), each with its own row;
+//    computeFwdLaunchParams), which needs at least four Q tiles: the bf16 causal rows have
+//    four; the fp8 causal row never reaches the merge, held within kernelServesQTiles' one-tile
+//    limit instead; gfx942 hd192x128 batch keeps its own grid layout and gfx942 hd192x128 group
+//    keeps tgDiv=1 (same function), each with its own row;
 //  - tune_opt 3 (a causal row with Hq not a multiple of 8 or Sq above 16384,
-//    SdpaFwdLaunchParams.hpp:73-76; tune_opt 0 is the gfx942 hd192x128 rows, :77-80) and GQA
-//    (Hq a multiple of Hkv, hasConsistentFwdShapes, SdpaPlanUtils.hpp:224-250);
+//    computeFwdLaunchParams; tune_opt 0 is the gfx942 hd192x128 rows) and GQA (Hq a multiple of
+//    Hkv, hasConsistentFwdShapes);
 //  - LSE on and off: admitted in batch mode with packed strides [H * s_h, s_h, 1] and a 32-bit
 //    LSE offset, or in group mode on the Q/O ragged offset tensor with a unit sequence stride
-//    (isSupportedStatsTensor, SdpaFwdPlanBuilder.cpp:517-593); not gated by causal.
+//    (checkStatsTensor); not gated by causal.
 // Causal: the CSV mask 2 serves bottom-right, and top-left too when every batch's Q and K/V
-// lengths are equal (fwdKernelMaskType, SdpaFwdPlanBuilder.cpp:97-109); this suite's causal rows
-// stay bottom-right.
+// lengths are equal (fwdKernelMaskType); this suite's causal rows stay bottom-right.
 // The gfx942 batch rows are written for both SKUs: the engine loads MI308/<co> on an MI308X
-// device and MI300/<co> elsewhere (AsmKernelPath.hpp:56-65, isMi308Device
-// SdpaFwdPlanBuilder.cpp:215-240); a MI308 row's name ends in mi308x. gfx950 ships one set.
-// gfx950 has no batch causal row (gfx950 fmha_fwd.csv:2-7), so its causal rows are group rows.
+// device and MI300/<co> elsewhere (getFwdKernelTocKey, AsmKernelPath.hpp; isMi308Device,
+// SdpaFwdPlanBuilder.cpp); a MI308 row's name ends in mi308x. gfx950 ships one set.
+// gfx950 has no batch causal row (gfx950 fmha_fwd.csv), so its causal rows are group rows.
 // Group rows never reach a fully masked query row (every sequence has no more queries than
 // keys), so no output element is undefined by the mask. Group tensors are packed THD with Q/O
 // and K/V token offset tables whose multiplier is the sequence stride, the AITER contract
-// (isApplicable hasAiterCompatibleRaggedAddressing, SdpaFwdPlanBuilder.cpp:189-229); the
-// precedent is asm_sdpa_engine/IntegrationGpuSdpaForwardRagged.cpp.
+// (isApplicable checkAiterRaggedAddressing); the precedent is
+// asm_sdpa_engine/IntegrationGpuSdpaForwardRagged.cpp.
 struct AsmFwdCase
 {
     const char* caseName;
@@ -137,8 +139,9 @@ void addAsmFwdRows(std::vector<DeterminismRow>& rows,
     }
 }
 
-// Shapes. hd128 (ts_qo 256): Sq 1000 = three tiles + 232, four tiles. hd192x128 (ts_qo 128):
-// Sq 500 = three tiles + 116, four tiles. Skv 1100 / 1200 / 600: tails of every K tile size.
+// Shapes. hd128 (ts_qo 256): Sq 1000 = three tiles + 232, four tiles, except Fp8Hd128Causal,
+// held to Sq 200 (within one Q tile) by kernelServesQTiles. hd192x128 (ts_qo 128): Sq 500 =
+// three tiles + 116, four tiles. Skv 1100 / 1200 / 600: tails of every K tile size.
 // A causal Skv above Sq keeps every query row's visible keys non-empty.
 const std::vector<int32_t> GROUP_Q_HD128 = {333, 1000, 129};
 const std::vector<int32_t> GROUP_KV_HD128 = {400, 1100, 600};
@@ -178,7 +181,7 @@ std::vector<AsmFwdCase> asmGfx942Cases()
         // :6-7 fp8bf16 hd128 batch (K tile 64), no mask with LSE on and off, and causal.
         {"Fp8Hd128Lse", 128, 128, false, false, true, true, 2, 8, 8, 1000, 1100, {}, {}},
         {"Fp8Hd128NoLse", 128, 128, false, false, true, false, 2, 8, 8, 1000, 1100, {}, {}},
-        {"Fp8Hd128Causal", 128, 128, true, false, true, false, 2, 8, 8, 1000, 1200, {}, {}},
+        {"Fp8Hd128Causal", 128, 128, true, false, true, false, 2, 8, 8, 200, 1200, {}, {}},
         // :8-9 bf16 hd128 group, no mask and causal (ragged, no LSE).
         {"Bf16Hd128Group",
          128,

@@ -80,9 +80,11 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR AND HIPDNN_ENABLE_SDPA)
     _hkp_determinism_add_group(IntegrationGpuSdpaDeterminismWmma.cpp
         DEFINITIONS ${_hkp_determinism_definitions})
 
-    # The FlyDSL engines: the existing frontend lane's gate (../CMakeLists.txt) plus FlyDSL
-    # content for every op the engine serves, so a build whose product root ships no content
-    # for an op compiles no row of it.
+    # The FlyDSL engines: the existing frontend lane's gate (../CMakeLists.txt) plus this
+    # build's shipped FlyDSL content for every op the engine serves
+    # (HIPKERNELPROVIDER_FLYDSL_ARCHS_<op>, empty unless the content was both pulled and packed
+    # for this build's targets, unlike the .dvc-pointer-derived CONTENT_ARCHS_<op>), so a build
+    # whose product root ships no content for an op compiles no row of it.
     set(_hkp_determinism_flydsl_fwd
         sdpa_rdna_decode RDNA_DECODE
         sdpa_cdna_decode CDNA_DECODE
@@ -93,19 +95,19 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR AND HIPDNN_ENABLE_SDPA)
     if(HIPKERNELPROVIDER_ENABLE_FLYDSL AND HIPKERNELPROVIDER_FLYDSL_ACTIVE)
         while(_hkp_determinism_flydsl_fwd)
             list(POP_FRONT _hkp_determinism_flydsl_fwd _op _token)
-            if(HIPKERNELPROVIDER_FLYDSL_CONTENT_ARCHS_${_op})
+            if(HIPKERNELPROVIDER_FLYDSL_ARCHS_${_op})
                 list(APPEND _hkp_determinism_flydsl_fwd_definitions
                     HKP_DETERMINISM_FLYDSL_SDPA_${_token}=1)
             endif()
         endwhile()
-        if(HIPKERNELPROVIDER_FLYDSL_CONTENT_ARCHS_sdpa_bwd_merged)
+        if(HIPKERNELPROVIDER_FLYDSL_ARCHS_sdpa_bwd_merged)
             list(APPEND _hkp_determinism_flydsl_bwd_definitions
                 HKP_DETERMINISM_FLYDSL_BWD_MERGED=1)
         endif()
         # The split engine is three ops: prep, dkdv and dq.
-        if(HIPKERNELPROVIDER_FLYDSL_CONTENT_ARCHS_sdpa_bwd_prep
-           AND HIPKERNELPROVIDER_FLYDSL_CONTENT_ARCHS_sdpa_bwd_dkdv
-           AND HIPKERNELPROVIDER_FLYDSL_CONTENT_ARCHS_sdpa_bwd_dq)
+        if(HIPKERNELPROVIDER_FLYDSL_ARCHS_sdpa_bwd_prep
+           AND HIPKERNELPROVIDER_FLYDSL_ARCHS_sdpa_bwd_dkdv
+           AND HIPKERNELPROVIDER_FLYDSL_ARCHS_sdpa_bwd_dq)
             list(APPEND _hkp_determinism_flydsl_bwd_definitions
                 HKP_DETERMINISM_FLYDSL_BWD_SPLIT=1)
         endif()

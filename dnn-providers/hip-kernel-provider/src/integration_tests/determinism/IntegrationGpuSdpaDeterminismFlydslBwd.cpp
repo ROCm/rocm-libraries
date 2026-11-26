@@ -39,23 +39,25 @@
  * Which graphs an engine admits is read from the shared matcher (FlydslSdpaBwdCommon.hpp), the
  * engine matchers and the objects each target ships (the SOURCE.md beside each descriptor
  * folder under descriptors/FlyDSL/sdpa_bwd_*):
- *  - Merged: matchSdpaBackward with default options (FlydslSdpaBwdMergedNative.cpp:288), so
- *    16-bit only (FlydslSdpaBwdCommon.hpp:726-735, acceptFloat off), no f32 bias (:1383-1397) and
- *    V heads equal to K's (:1360); head dims <= 32 (padded tile 32) or Dqk = Dv at 64 to 256 in
- *    steps of 32 (:307-321); dBias needs a store_db object (:461-463); the bias must satisfy the
- *    LDS staging contract (:322-332). gfx950 only.
- *  - Split: SPLIT_MATCH_OPTIONS (FlydslSdpaBwdSplitNative.cpp:467), so fp32, an f32 bias beside
- *    a 16-bit Q and Hv != Hk at D 64 and 128 (:403-451, FlydslSdpaBwdCommon.hpp:131-143);
- *    kernel_match :943-1024; head-dim bands :734-743. gfx950, gfx942, gfx90a and gfx11-generic
- *    (run on gfx1100); gfx942 and gfx90a fp32 reuse the gfx950 fp32 kernels.
- *  - Every graph: bias with a causal mask or padding_mask declines (FlydslSdpaBwdCommon.hpp:
- *    1438-1445), so the bias rows are dense and non-causal; dBias strides are multiples of 8
- *    elements (:1497-1509); a row-broadcast bias is left out (defect 15643); padding_mask
- *    needs both lengths (:1262-1299); dropout needs seed and offset tensors of one form (:1597-1688);
- *    a head dim off 8 (off 4 for fp32) needs a row pitch of at least ceil8(D) (:894-906).
+ *  - Merged: bwd::matchSdpaBackward with default options, so 16-bit only (checkDataTypes,
+ *    acceptFloat off), no f32 bias and V heads equal to K's (checkBias); head dims <= 32
+ *    (padded tile 32) or Dqk = Dv at 64 to 256 in steps of 32 (servesHeadDims,
+ *    flydslSdpaBwdMergedGraphMatches); dBias needs a store_db object
+ *    (flydslSdpaBwdMergedKernelMatches); the bias must satisfy the LDS staging contract
+ *    (flydslSdpaBwdMergedGraphMatches). gfx950 only.
+ *  - Split: SPLIT_MATCH_OPTIONS (MatchOptions' acceptFloat, acceptF32Bias, acceptValueHeads), so
+ *    fp32, an f32 bias beside a 16-bit Q and Hv != Hk at D 64 and 128 are served within the bands
+ *    the shipped rows cover (flydslSdpaBwdSplitGraphMatches, parityBandsOf); kernel_match
+ *    flydslSdpaBwdSplitKernelMatches. gfx950, gfx942, gfx90a and gfx11-generic (run on gfx1100);
+ *    gfx942 and gfx90a fp32 reuse the gfx950 fp32 kernels.
+ *  - Every graph: bias with a causal mask or padding_mask declines, dBias strides are multiples
+ *    of 8 elements, and dBias with a row-broadcast bias declines -- a row-broadcast bias with no
+ *    dBias is served and rowed below (checkBias); padding_mask needs both lengths (checkVarlen);
+ *    dropout needs seed and offset tensors of one form (checkDropout); a head dim off 8 (off 4
+ *    for fp32) needs a row pitch of at least ceil8(D) (checkTensorLayout).
  *  - No row sets a sink or dSink: the frontend marks the backward sink tokens unsupported
- *    (SdpaBackwardAttributes.hpp:652-664) and the split prep refuses the sink twin
- *    (FlydslSdpaBwdSplitNative.cpp:957-964), so no graph reaches the dsink_reduce kernel.
+ *    (set_sink_token, set_dsink_token) and the split prep refuses the sink twin
+ *    (flydslSdpaBwdSplitKernelMatches), so no graph reaches the dsink_reduce kernel.
  *
  * Plain 16-bit rows at head size 64 and 128 use the harness graph, whose O and LSE come from one
  * forward launch. Every other row builds its own graph in this file: O is bounded and finite
@@ -177,18 +179,21 @@ struct BwdCase
     return graph;
 }
 
-/// A bias over [B, Hq, Sq, Skv], with batch and/or head extents of 1 where broadcast; with its
-/// gradient when @p gradient. Call after the shape is set.
+/// A bias over [B, Hq, Sq, Skv], with batch, head and/or row (Sq) extents of 1 where broadcast;
+/// with its gradient when @p gradient. A row-broadcast bias (@p rowBroadcast) with a gradient
+/// declines (checkBias: BI-4), so callers pair it with @p gradient false. Call after the shape
+/// is set.
 [[maybe_unused]] BwdCase withBias(BwdCase graph,
                                   DataType type,
                                   bool gradient,
                                   bool batchBroadcast = false,
-                                  bool headBroadcast = false)
+                                  bool headBroadcast = false,
+                                  bool rowBroadcast = false)
 {
     graph.bias = BiasSpec{type,
                           {batchBroadcast ? 1 : graph.batch,
                            headBroadcast ? 1 : graph.queryHeads,
-                           graph.seqQ,
+                           rowBroadcast ? 1 : graph.seqQ,
                            graph.seqKv},
                           gradient};
     return graph;
@@ -541,7 +546,7 @@ std::vector<DeterminismRow> flydslBackwardRows()
         // No row pins num_stream_buffers 1 or 2 on the merged engine: it is no knob of the merged UED
         // (flydsl_sdpa_bwd_merged.ued.json knobs) or KMD, and no merged object name carries nsb
         // (sdpa_bwd_merged/gfx950.SOURCE.md). The only nsb object is the split dkdv
-        // sdpa_bwd_dkdv_bf16_d160_causal1_pad1_flg1_dfbk_nsb1 (dkdv/gfx950.SOURCE.md:140).
+        // sdpa_bwd_dkdv_bf16_d160_causal1_pad1_flg1_dfbk_nsb1 (dkdv/gfx950.SOURCE.md).
 
         // Head sizes (objects d32 to d256 ship; hd160 has no f16 object) and the dK/dV
         // geometry classes: the default objects, the dkv_shards 2 object (nw2_mr32_dks2, d128
@@ -669,8 +674,15 @@ std::vector<DeterminismRow> flydslBackwardRows()
 
         // Bias and dBias (dense, non-causal): the in-place dB store (store_db objects), the
         // reduce launch for a bias broadcast over batch, heads or both, packed GQA with dBias,
-        // and a bias with no dB store. A dBias needs a store_db object, so no d64 sdb0 row.
+        // a bias with no dB store, and a row-broadcast bias (one row for every query row, a zero
+        // row stride): dBias with a row-broadcast bias declines, so this is a plain bias, no
+        // dBias. A dBias needs a store_db object, so no d64 sdb0 row.
         addCase(rows, MERGED, "Bf16Hd64Bias", archs, withBias(graphOf(BF16, 64), BF16, false));
+        addCase(rows,
+                MERGED,
+                "Bf16Hd64BiasRowBroadcast",
+                archs,
+                withBias(graphOf(BF16, 64), BF16, false, false, false, true));
         addCase(rows, MERGED, "Bf16Hd128Dbias", archs, withBias(graphOf(BF16, 128), BF16, true));
         addCase(rows, MERGED, "F16Hd128Dbias", archs, withBias(graphOf(F16, 128), F16, true));
         addCase(rows,
@@ -791,20 +803,20 @@ std::vector<DeterminismRow> flydslBackwardRows()
         addCase(rows, SPLIT, "F32Hd512", cdna, withBatchHeads(graphOf(F32, 512), 1, 2));
         addCase(rows, SPLIT, "F32Hd64Gqa", all, withHeads(graphOf(F32, 64), 8, 2));
         // gfx11-generic bakes contraction_shards, split_head_dim and transposed_source per tile by
-        // policy, not by a knob (the table rows leave them at policy: _instances.py:5558 tables,
-        // knobs :2711-2735; no UED knob, KMD field or object-name token carries them), so a row
-        // selects an object by its tile, which head_dim pins in both slots (an INT KMD field, a
-        // UED knob of the dq and dkdv slots).
-        //  - dq contraction_shards: 1 up to d96, 2 at d128 to d224, 4 at d256
-        //    (fmha_tuning_bwd_dq_gfx11.py:57-71). Reached by existing rows: shards 2 by F16Hd128,
+        // policy, not by a knob (the table rows leave them at policy: SDPA_BWD_GFX11_TABLES,
+        // SDPA_BWD_GFX11_KNOBS in _instances.py; no UED knob, KMD field or object-name token
+        // carries them), so a row selects an object by its tile, which head_dim pins in both
+        // slots (an INT KMD field, a UED knob of the dq and dkdv slots).
+        //  - dq contraction_shards: 1 up to d96, 2 at d128 to d224, 4 at d256 (bwd_dq_knobs's
+        //    POLICY table). Reached by existing rows: shards 2 by F16Hd128,
         //    F16Hd128DbiasBothBroadcast and the D100 padded rows (tile 128), shards 4 by Bf16Hd256.
         //  - dkdv: team split C1 (shards 1) at d96 and d128, C2 (shards 2) from d160
-        //    (fmha_tuning_bwd_dkdv_gfx11.py:73-85). C1 is reached by F16Hd128, C2 by Bf16Hd256.
+        //    (bwd_dkdv_knobs's POLICY table). C1 is reached by F16Hd128, C2 by Bf16Hd256.
         //  - Not reached by an existing row: tiles d96, d160, d192 and d224 (the 8-wave and
         //    16-wave schedules differ), so the four rows below pin them.
-        //  - transposed_source: gfx11-generic objects are all `tile` (:285, unpinned and no policy
-        //    value); `derived` ships only for gfx942 and gfx90a (POLICY_MFMA16, :94-107), which
-        //    every 16-bit split row on those targets reaches. No gfx1100 row for it.
+        //  - transposed_source: gfx11-generic objects are all `tile` (bwd_dkdv_knobs, unpinned
+        //    and no policy value); `derived` ships only for gfx942 and gfx90a (POLICY_MFMA16),
+        //    which every 16-bit split row on those targets reaches. No gfx1100 row for it.
         const std::vector<std::string> gfx1100 = {"gfx1100"};
         addCase(rows,
                 SPLIT,
@@ -851,10 +863,9 @@ std::vector<DeterminismRow> flydslBackwardRows()
                 {{"dkdv.dkv_shards", 1}},
                 KnobClass::STRUCTURE);
         // dkdv num_stream_buffers 1 (nsb1: the object sdpa_bwd_dkdv_bf16_d160_causal1_pad1_flg1_dfbk_nsb1,
-        // dkdv/gfx950.SOURCE.md:140). Every other gfx950 dkdv row reaches the default of two
-        // buffers (fmha_tuning_bwd_dkdv_gfx950.py:828-833: 2 unless 4 slots exceed the LDS cap),
-        // for instance Bf16Hd64Causal and F16Hd128; the pin is an integer knob (the field
-        // addresses itself, KernelIngestorStateManager.hpp:1631).
+        // dkdv/gfx950.SOURCE.md). Every other gfx950 dkdv row reaches the default of two buffers
+        // (_with_buffers: 2 unless 4 slots exceed the LDS cap), for instance Bf16Hd64Causal and
+        // F16Hd128; the pin is an integer knob (knobOrdinal: an INT field addresses itself).
         addCase(rows,
                 SPLIT,
                 "Bf16Hd160CausalNsb1Pin",
@@ -876,8 +887,15 @@ std::vector<DeterminismRow> flydslBackwardRows()
         addCase(rows, SPLIT, "F32Hd98Padded", all, graphOf(F32, 98));
 
         // Bias and dBias (dense, non-causal): the dB store of dq, the reduce launch for a
-        // broadcast bias, an f32 bias beside a 16-bit Q (head sizes 64 and 128 only), fp32 bias.
+        // broadcast bias, an f32 bias beside a 16-bit Q (head sizes 64 and 128 only), fp32 bias,
+        // and a row-broadcast bias (one row for every query row, a zero row stride): dBias with
+        // a row-broadcast bias declines (checkBias), so this is a plain bias, no dBias.
         addCase(rows, SPLIT, "Bf16Hd64Bias", all, withBias(graphOf(BF16, 64), BF16, false));
+        addCase(rows,
+                SPLIT,
+                "Bf16Hd64BiasRowBroadcast",
+                all,
+                withBias(graphOf(BF16, 64), BF16, false, false, false, true));
         addCase(rows, SPLIT, "Bf16Hd64Dbias", all, withBias(graphOf(BF16, 64), BF16, true));
         addCase(rows,
                 SPLIT,

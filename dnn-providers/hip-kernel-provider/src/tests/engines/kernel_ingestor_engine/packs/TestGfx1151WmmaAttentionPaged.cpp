@@ -439,6 +439,28 @@ TEST(TestGfx1151WmmaAttentionPaged, BindsUniformDecodeOverTheInterleavedCache)
     EXPECT_FALSE(tryGetBoundInt(*bound, Q_OFFSET_UID_TOKEN).has_value());
 }
 
+// The overlap check (DeclinesMalformedPagedGraphs's "an overlapping O" case) sorts
+// (stride, extent) pairs over axes of extent above one, so Sq=1 never puts the sequence
+// axis in that sort: an O sequence stride narrower than D then passes unnoticed. The
+// prefill kernel masks a wave tile's tail rows only by sizing the O buffer resource to
+// the live row span, and with one row that span collapses to D itself, so a narrower
+// stride keeps a tail-row store in range instead of dropping it; hasRowRoomForTailStores
+// (Gfx1151WmmaAttentionNative.cpp) guards this dense-Q layout's O the same way the dense
+// layout's does. The decode engine never reaches this layout (TheDecodeEngineDeclines
+// EveryPagedGraph), so it needs no case here.
+TEST(TestGfx1151WmmaAttentionPaged, PrefillEngineDeclinesOneRowOutputWithoutRowRoom)
+{
+    // B=4, Hq=8, Sq=1, D=128: the default Q/O strides are {1024, 128, 1024, 1}.
+    PagedSpec declined;
+    declined.oStrides = std::vector<int64_t>{1024, 128, 8, 1};
+    EXPECT_FALSE(matches(declined));
+
+    // A control: an O sequence stride at least D still matches.
+    PagedSpec control;
+    control.oStrides = std::vector<int64_t>{1024, 128, 128, 1};
+    EXPECT_TRUE(matches(control));
+}
+
 TEST(TestGfx1151WmmaAttentionPaged, BindsSpeculativeDecodeWithStats)
 {
     PagedSpec spec;

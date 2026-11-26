@@ -108,7 +108,7 @@ A claim is run-to-run: repeated launches of one plan on the same inputs, on one 
 - race-detection tooling;
 - ragged offset tables whose sequences overlap (the offsets are device data that no host check reads);
 - aliasing between the buffers of different tensors (no engine checks it).
-- sliding-window and keyless-row graphs for `flydsl_sdpa_cdna_decode`, `flydsl_sdpa_rdna_decode` and `hipkernel:Gfx1151WmmaAttention` (keyless covered by the paged rows): source-traced, not device-tested. `hipkernel:Gfx1151WmmaAttentionDecode`'s window is device-tested (`Bf16Hd128CausalWindow2048LseHq8Kv2B1S1x8192`, gfx1100 and gfx1201).
+- sliding-window graphs for `flydsl_sdpa_cdna_decode`, `flydsl_sdpa_rdna_decode`, `hipkernel:Gfx1151WmmaAttention`, `flydsl_sdpa_bwd_merged` and `flydsl_sdpa_bwd_split`, and keyless-row graphs for `flydsl_sdpa_cdna_decode`, `flydsl_sdpa_rdna_decode` and `hipkernel:Gfx1151WmmaAttention`: source-traced, not device-tested. `hipkernel:Gfx1151WmmaAttentionDecode`'s window is device-tested (`Bf16Hd128CausalWindow2048LseHq8Kv2B1S1x8192`, gfx1100 and gfx1201).
 
 ## Engine filtering
 

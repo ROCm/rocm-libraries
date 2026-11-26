@@ -968,49 +968,70 @@ TEST(TestGfx1151WmmaAttentionMatchers, DeclinesOverlappingOutputAndStats)
     EXPECT_TRUE(matchGraph(control).has_value());
 }
 
-// The overlap check above sorts (stride, extent) pairs over axes of extent above one,
-// so a Sq=1 graph never puts the sequence axis in that sort: an O or LSE sequence
-// stride narrower than the operand's own row width then passes unnoticed. The prefill
-// kernel masks a wave tile's tail rows only by sizing the O/LSE buffer resource to the
-// live row span, and with one row that span collapses to the row width itself, so a
-// narrower stride keeps a tail-row store in range instead of dropping it.
-TEST(TestGfx1151WmmaAttentionMatchers, DeclinesOneRowOutputWithoutRowRoom)
+// The overlap check above sorts (stride, extent) pairs over axes of extent above one, so
+// a Sq=1 graph never puts the sequence axis in that sort: an O or LSE sequence stride
+// narrower than the operand's own row width then passes unnoticed. The prefill kernel
+// masks a wave tile's tail rows only by sizing the O/LSE buffer resource to the live row
+// span, and with one row that span collapses to the row width itself, so a narrower
+// stride keeps a tail-row store in range instead of dropping it; hasRowRoomForTailStores
+// (Gfx1151WmmaAttentionNative.cpp) guards the prefill engine against it. The decode
+// kernel instead predicates its O and LSE stores on row_ok, so it carries no such guard
+// and serves every case below.
+struct RowRoomCase
 {
-    // B=2, Hq=8, Sq=1, D=96: the default packed O strides are {768, 96, 768, 1}; the
-    // default packed LSE strides are {8, 1, 8, 1}.
-    struct Case
-    {
-        std::string what;
-        std::optional<std::vector<int64_t>> oStrides;
-        std::optional<std::vector<int64_t>> lseStrides;
-    };
-    const std::vector<Case> cases{
+    std::string what;
+    std::optional<std::vector<int64_t>> oStrides;
+    std::optional<std::vector<int64_t>> lseStrides;
+};
+
+// B=2, Hq=8, Sq=1, D=96: the default packed O strides are {768, 96, 768, 1}; the default
+// packed LSE strides are {8, 1, 8, 1}.
+std::vector<RowRoomCase> rowRoomCases()
+{
+    return {
         {"O: zero seq stride", std::vector<int64_t>{768, 96, 0, 1}, std::nullopt},
         {"O: seq stride below the row width", std::vector<int64_t>{768, 96, 8, 1}, std::nullopt},
         {"LSE: zero seq stride", std::nullopt, std::vector<int64_t>{8, 1, 0, 1}},
     };
-    for(const auto& c : cases)
+}
+
+TEST(TestGfx1151WmmaAttentionMatchers, PrefillEngineDeclinesOneRowOutputWithoutRowRoom)
+{
+    for(const auto& c : rowRoomCases())
     {
         GraphSpec spec;
         spec.queryLength = 1;
         spec.oStrides = c.oStrides;
         spec.lseStrides = c.lseStrides;
-        for(const auto& engine : BOTH_ENGINES)
-        {
-            SCOPED_TRACE(c.what + ", " + std::string(engine.name));
-            EXPECT_FALSE(Fixture(spec).bound(*engine.symbols).has_value());
-        }
+        SCOPED_TRACE(c.what);
+        EXPECT_FALSE(Fixture(spec).bound(PREFILL_SYMBOLS).has_value());
     }
 
-    // A control: Sq=1 with the ordinary dense strides (a sequence stride at least the
-    // row width) still matches on both engines.
+    // A control: Sq=1 with the ordinary dense strides (a sequence stride at least the row
+    // width) still matches.
     GraphSpec control;
     control.queryLength = 1;
-    for(const auto& engine : BOTH_ENGINES)
+    EXPECT_TRUE(Fixture(control).bound(PREFILL_SYMBOLS).has_value());
+}
+
+// The decode kernel's O and LSE stores are predicated on row_ok (wmma_fmha_decode.py),
+// not on the buffer resource span the prefill kernel relies on, so the decode engine
+// serves every graph the prefill engine above declines for want of row room.
+TEST(TestGfx1151WmmaAttentionMatchers, DecodeEngineAcceptsOneRowOutputWithoutRowRoom)
+{
+    for(const auto& c : rowRoomCases())
     {
-        SCOPED_TRACE(std::string("control, ") + std::string(engine.name));
-        EXPECT_TRUE(Fixture(control).bound(*engine.symbols).has_value());
+        GraphSpec spec;
+        spec.queryLength = 1;
+        spec.oStrides = c.oStrides;
+        spec.lseStrides = c.lseStrides;
+        SCOPED_TRACE(c.what);
+        EXPECT_TRUE(Fixture(spec).bound(DECODE_SYMBOLS).has_value());
     }
+
+    GraphSpec control;
+    control.queryLength = 1;
+    EXPECT_TRUE(Fixture(control).bound(DECODE_SYMBOLS).has_value());
 }
 
 TEST(TestGfx1151WmmaAttentionMatchers, AcceptsValueHeadsDividingQueryHeads)

@@ -142,21 +142,19 @@ std::vector<DeterminismRow> flydslForwardRows()
     {
         // The generic kernel in split-KV mode: a main launch writing f32 partials and LSEs to the
         // workspace, then the merge kernel (ascending split loops, one writer per O element). The
-        // split count is min(device bound, work bound, 64): candidateSplits,
-        // FlydslSdpaCdnaCommon.hpp:1391-1404.
+        // split count is min(device bound, work bound, 64): candidateSplits.
         //  - SplitCap: B1 Hq2 Hkv1 Skv16384 -> work bound 64 on every device (device bound >= 104).
         //  - DeviceBoundSplit: B4 Hq32 Hkv8 Skv8192 -> grid 32 workgroups, so the split count is
         //    units / 32 (6 on a 104-CU gfx90a, 19 on gfx942, 16 on gfx950): CU dependent.
-        //  - SingleSplit: Skv128 -> one split writes O directly, no merge (U:5696-5700).
+        //  - SingleSplit: Skv128 -> one split writes O directly, no merge.
         //  - EmptySplit: Skv1600 -> 25 key tiles, 6 splits of 5 tiles, the last split empty
         //    [INFERENCE from the tile arithmetic: the main kernel's own BLOCK_N was not read]; the
         //    padded rows below also leave splits past a batch's short key length empty.
         //  - Wide: absorbed MLA 576/512 and 512/512 with dv_split 4 (gfx950 bucket 1024, gfx942
-        //    and gfx90a bucket 768 with k_chunk 256): _instances.py:1374-1399,
-        //    IntegrationGpuFlydslSdpaFrontendFeatures.cpp:351-372 pins this engine at hd512.
+        //    and gfx90a bucket 768 with k_chunk 256): SDPA_CDNA_WIDE_TIERS in _instances.py;
+        //    aotritonCases pins this engine at hd512.
         //  - Declines (never rows): f32, dropout, packed, bias, V heads of their own
-        //    (FlydslSdpaCdnaCommon.hpp:1620-1639, :1718-1722); padded needs a bottom-right
-        //    diagonal when causal.
+        //    (familyKernelMatches); padded needs a bottom-right diagonal when causal.
         //  - Objects: exact 64/128/256 and sink 64/128 on every arch, SOURCE.md of
         //    sdpa_cdna_decode.
         constexpr const char* DECODE = "hipkernel:flydsl_sdpa_cdna_decode";
@@ -220,9 +218,8 @@ std::vector<DeterminismRow> flydslForwardRows()
             {},
             split);
         // More than one row tile: the packed group rows (Hq/Hkv * Sq = 128) exceed block_m 64, so
-        // the grid has two row tiles per KV head (candidateGrid pack_gqa branch,
-        // FlydslSdpaCdnaCommon.hpp:1363-1375). The engine serves any Sq (the matcher bounds no
-        // Sq; frontend lane pins it at Sq 289, FrontendFeatures.cpp:351-372).
+        // the grid has two row tiles per KV head (candidateGrid's pack_gqa branch). The engine
+        // serves any Sq (the matcher bounds no Sq; aotritonCases pins it at Sq 289).
         add(rows,
             DECODE,
             "F16Hd64MultiRowTileSplit",
@@ -286,14 +283,13 @@ std::vector<DeterminismRow> flydslForwardRows()
     {
         // gfx950's dual-wave kernel: one launch, split-K compiled out of every shipped object
         // (num_kv_splits 1) [INFERENCE: the objects were not scanned], row reductions by
-        // fixed trees. It declines padding,
-        // packing, sink, dropout, f32, windows and strided LSEs (FlydslSdpaCdnaCommon.hpp:1597-1682),
-        // so none of those is a row. Objects: _instances.py:1160-1180 (hd64/128), :1261-1272 (hd256,
-        // 4 waves), :1289-1300 (bias hd64/128); SOURCE.md sdpa_cdna_dualwave/gfx950 rows 36-46.
+        // fixed trees. It declines padding, packing, sink, dropout, f32, windows and strided LSEs
+        // (familyKernelMatches), so none of those is a row. Objects: _SDPA_CDNA_DUALWAVE (hd64/128),
+        // SDPA_CDNA_DUALWAVE_WIDE_TIERS (hd256, 4 waves), SDPA_CDNA_BIAS_TIERS (bias hd64/128) in
+        // _instances.py; SOURCE.md sdpa_cdna_dualwave/gfx950 rows 36-46.
         // Causal at hd128 ships an offset-0 build (any_diagonal 0) and an any-diagonal build: the
-        // Sq == Skv row takes the first, the Skv > Sq row the second
-        // (FlydslSdpaCdnaCommon.hpp:1590-1596). The hd256 shapes are the frontend lane's
-        // (IntegrationGpuFlydslSdpaFrontend.cpp:209-226).
+        // Sq == Skv row takes the first, the Skv > Sq row the second (familyKernelMatches). The
+        // hd256 shapes are frontendDualwaveHeadDim256Cases's.
         constexpr const char* DUALWAVE = "hipkernel:flydsl_sdpa_cdna_dualwave";
         const std::vector<std::string> archs = {"gfx950"};
 
@@ -349,13 +345,13 @@ std::vector<DeterminismRow> flydslForwardRows()
     {
         // The RDNA decode kernel: split-KV main launch with an in-workgroup wave combine
         // (w = 0..3, compile order) and the merge kernel (ascending splits, one workgroup per
-        // (b, h, s)). Splits =
-        // min(work bound, device bound, 64), decodeSplits, FlydslSdpaRdnaDecodeNative.cpp:137-146;
-        // the work bound needs Skv >= 2048 for a second split, so Skv 16384 gives 16 splits where
-        // the device bound (2 x the reported unit count over B*Hkv) is larger. The column split
-        // (dv_split 2 at hd256, 4 at the wide objects) is a launch-set class
-        // (_instances.py:407-416). Declined, so never rows: packed (:273-279), f32 (RdnaCommon
-        // :515-521), dropout (no decode object drops). Kernel matcher :264-311.
+        // (b, h, s)). Splits = min(work bound, device bound, 64) (decodeSplits); the work bound
+        // needs Skv >= 2048 for a second split, so Skv 16384 gives 16 splits where the device
+        // bound (2 x the reported unit count over B*Hkv) is larger. The column split (dv_split 2
+        // at hd256, 4 at the wide objects) is a launch-set class (SDPA_DECODE_GENERIC_HEAD_DIM_MAX,
+        // SDPA_DECODE_WIDE_HEAD_DIMS in _instances.py). Declined, so never rows: packed, f32
+        // (flydslSdpaRdnaGraphMatchesFor), dropout (no decode object drops). Kernel matcher
+        // flydslSdpaRdnaDecodeKernelMatches.
         constexpr const char* DECODE = "hipkernel:flydsl_sdpa_rdna_decode";
         const std::vector<std::string> archs = {"gfx1100", "gfx1201"};
         const auto split = KnobClass::STRUCTURE;
