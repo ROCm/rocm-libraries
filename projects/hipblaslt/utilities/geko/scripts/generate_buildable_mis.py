@@ -86,6 +86,7 @@ def main() -> None:
 
     mi_candidates.MI_LISTS_DIR = args.output_dir
     source = _source(hipblaslt)
+    written = 0
     for types in args.types:
         dt, dd, cd = types.split(":")
         for layout in args.layouts:
@@ -118,6 +119,7 @@ def main() -> None:
             path = buildable_list_path(args.arch, name)
             B.write_buildable_list(path, verdicts, arch=args.arch, gemm_name=name, source=source,
                                    depthu=B.searched_depthu(space))
+            written += 1
             stages = {}
             for v in verdicts:
                 stages[v.stage or "unbuildable"] = stages.get(v.stage or "unbuildable", 0) + 1
@@ -153,6 +155,8 @@ def main() -> None:
                 print(f"  WARNING: MIs whose kernel built over a modelled cap, by resource: {over_cap}", flush=True)
             if args.report_dir:
                 B.write_report(args.report_dir / args.arch / f"{name}.csv", verdicts)
+    if not written:
+        sys.exit(f"No list written: every requested GEMM type on {args.arch} was skipped.")
 
 
 if __name__ == "__main__":
