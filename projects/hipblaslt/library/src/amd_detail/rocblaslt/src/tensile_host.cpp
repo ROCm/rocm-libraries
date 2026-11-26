@@ -56,7 +56,7 @@
 #include "../../hipblaslt-jit-problem-type.hpp"
 #include "../../hipblaslt_internal.hpp"
 #include <cstring>
-namespace jit = hipblaslt_ext::experimental::jit::detail;
+namespace jit = hipblaslt_jit;
 #endif
 
 #include <hipblaslt/hipblaslt-opt-in-features.h>

@@ -22,6 +22,7 @@ namespace TensileLite
 // Compiled-in stages of JIT solution generation. This is not a plugin ABI.
 namespace hipblaslt_jit
 {
+    struct GemmRequest;
     // True when kernel is one of names.
     inline bool excludedKernel(const std::vector<std::string>& names, const std::string& kernel)
     {
@@ -173,8 +174,6 @@ namespace hipblaslt_jit
     // Appends status.log to <scratch>/comgr.log and names
     // that file in the message. Does nothing without a log or a scratch directory.
     void keepBuildLog(Status& status, const std::filesystem::path& scratch);
-
-    using GemmRequest = hipblaslt_ext::experimental::jit::detail::GemmRequest;
 
     // The Target of a device: gcnArchName parsed.
     struct DeviceTarget : Target

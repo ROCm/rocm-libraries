@@ -94,15 +94,6 @@ namespace hipblaslt_jit_test
                     status == HIPBLAS_STATUS_SUCCESS);
     }
 
-#define HIP(expression) hipblaslt_jit_test::checkHip((expression), #expression)
-// A failure also reports diag.message, read after expression runs.
-#define BLAS(expression, diag)                                               \
-    do                                                                       \
-    {                                                                        \
-        const auto status_ = (expression);                                   \
-        hipblaslt_jit_test::checkBlas(status_, #expression, (diag).message); \
-    } while(false)
-
     struct Device
     {
         void* pointer{};
@@ -273,10 +264,10 @@ namespace hipblaslt_jit_test
             checkBlas(hipblasLtMatmulDescCreate(&desc, HIPBLAS_COMPUTE_32F, HIP_R_32F),
                       "hipblasLtMatmulDescCreate");
             checkHip(hipStreamCreate(&stream), "hipStreamCreate");
-            hipblaslt_ext::experimental::jit::Diagnostics diagnostics;
-            const auto status = hipblaslt_ext::experimental::jit::replay::createBackend(
+            hipblaslt_jit::Diagnostics diagnostics;
+            const auto                 status = hipblaslt_jit::createReplayBackend(
                 {{hipblaslt_jit::files::utf8String(bundles / "plain")}}, backend, diagnostics);
-            JIT_REQUIRE(std::string("replay::createBackend: status ") + std::to_string(status)
+            JIT_REQUIRE(std::string("createReplayBackend: status ") + std::to_string(status)
                             + diagnostics.message,
                         status == HIPBLAS_STATUS_SUCCESS);
         }

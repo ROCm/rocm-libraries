@@ -13,7 +13,7 @@
 #include <stdexcept>
 #include <tuple>
 
-namespace hipblaslt_ext::experimental::jit::replay
+namespace hipblaslt_jit
 {
     namespace
     {
@@ -77,7 +77,7 @@ namespace hipblaslt_ext::experimental::jit::replay
         class ReplayBackend final : public hipblaslt_jit::Backend
         {
         public:
-            explicit ReplayBackend(const Options& options)
+            explicit ReplayBackend(const ReplayOptions& options)
                 : m_info{"replay", replayVersion}
                 , m_builder(hipblaslt_jit::makeComgrBuilder())
             {
@@ -200,20 +200,20 @@ namespace hipblaslt_ext::experimental::jit::replay
         };
     }
 
-    std::shared_ptr<const hipblaslt_jit::Backend> makeBackend(const Options& options)
+    std::shared_ptr<const hipblaslt_jit::Backend> makeReplayBackend(const ReplayOptions& options)
     {
         return std::make_shared<const ReplayBackend>(options);
     }
 
-    hipblasStatus_t createBackend(const Options&                             options,
-                                  std::shared_ptr<const hipblaslt_jit::Jit>& jit,
-                                  Diagnostics&                               diagnostics)
+    hipblasStatus_t createReplayBackend(const ReplayOptions&                       options,
+                                        std::shared_ptr<const hipblaslt_jit::Jit>& jit,
+                                        Diagnostics&                               diagnostics)
     {
         jit         = {};
         diagnostics = {};
         try
         {
-            jit = hipblaslt_jit::makeJit(makeBackend(options));
+            jit = hipblaslt_jit::makeJit(makeReplayBackend(options));
             return HIPBLAS_STATUS_SUCCESS;
         }
         catch(const std::bad_alloc&)

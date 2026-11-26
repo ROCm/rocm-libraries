@@ -153,8 +153,9 @@ namespace
                  && std::sscanf(kernel.c_str() + at, "_MT%dx%d", &tile0, &tile1) == 2));
         int             device = -1;
         hipDeviceProp_t properties{};
-        HIP(hipGetDevice(&device));
-        HIP(hipGetDeviceProperties(&properties, device));
+        hipblaslt_jit_test::checkHip(hipGetDevice(&device), "hipGetDevice(&device)");
+        hipblaslt_jit_test::checkHip(hipGetDeviceProperties(&properties, device),
+                                     "hipGetDeviceProperties(&properties, device)");
         const int groups = ((M + tile0 - 1) / tile0) * ((N + tile1 - 1) / tile1);
         return static_cast<float>(groups) / static_cast<float>(properties.multiProcessorCount);
     }
@@ -305,7 +306,7 @@ namespace
                                                           &workspaceLimit,
                                                           sizeof(workspaceLimit))
                         == HIPBLAS_STATUS_SUCCESS);
-        HIP(hipStreamCreate(&stream));
+        hipblaslt_jit_test::checkHip(hipStreamCreate(&stream), "hipStreamCreate(&stream)");
 
         constexpr int kBuffer = kWide > kNarrow ? kWide : kNarrow;
         Device        A(static_cast<size_t>(M) * kBuffer * 2);
@@ -333,9 +334,9 @@ namespace
         }
         {
             const hipblaslt_jit_test::ReplayFixture replay(HIPBLASLT_JIT_DATA);
-            hipblaslt_ext::experimental::jit::addHeuristicBackend(replay.backend);
+            hipblaslt_jit::addHeuristicBackend(replay.backend);
             if(mode == "forced")
-                hipblaslt_ext::experimental::jit::addHeuristicBackend(replay.backend);
+                hipblaslt_jit::addHeuristicBackend(replay.backend);
         }
 #endif
         // One result fills the request, so the C++ query returns the same index.

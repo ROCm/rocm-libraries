@@ -1842,7 +1842,7 @@ std::string rocblaslt_get_solution_name_from_algo(rocblaslt_handle             h
 }
 
 #ifdef HIPBLASLT_ENABLE_JIT
-hipblaslt_ext::experimental::jit::detail::GemmRequest::GemmRequest(
+hipblaslt_jit::GemmRequest::GemmRequest(
     const RocblasltContractionProblem& source)
     : problem(source)
 {
@@ -1858,7 +1858,7 @@ hipblaslt_ext::experimental::jit::detail::GemmRequest::GemmRequest(
     problem.beta  = source.beta ? beta.data() : nullptr;
 }
 
-rocblaslt_status hipblaslt_ext::experimental::jit::detail::createGemmRequest(
+rocblaslt_status hipblaslt_jit::createGemmRequest(
     rocblaslt_handle                    handle,
     rocblaslt_matmul_desc               desc,
     const void*                         alpha,

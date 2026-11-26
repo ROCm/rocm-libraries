@@ -15,7 +15,7 @@
 // K=256 as JIT kernel indices; each runs through hipblasLtMatmul and
 // hipblaslt_ext::Gemm, and through getAlgosFromIndex, and D is checked against
 // the host. A second lookup returns the same JIT solution library index.
-namespace jit = hipblaslt_ext::experimental::jit;
+namespace jit = hipblaslt_jit;
 
 namespace
 {
@@ -39,7 +39,9 @@ namespace
         const auto       label = "index " + std::to_string(index) + ", K=" + std::to_string(K);
         std::vector<int> wanted{index};
         std::vector<hipblasLtMatmulHeuristicResult_t> results;
-        BLAS(hipblaslt_ext::getAlgosFromIndex(handle, wanted, results), diagnostics);
+        hipblaslt_jit_test::checkBlas(hipblaslt_ext::getAlgosFromIndex(handle, wanted, results),
+                                      "hipblaslt_ext::getAlgosFromIndex(handle, wanted, results)",
+                                      diagnostics.message);
         JIT_REQUIRE(label + " did not resolve",
                     results.size() == 1
                         && hipblaslt_ext::getIndexFromAlgo(results[0].algo) == index);
@@ -49,17 +51,18 @@ namespace
         Fp16Gemm matrices(K);
         float    alpha = 1.25f, beta = 0.5f;
         size_t   bytes = 0;
-        BLAS(hipblaslt_ext::matmulIsAlgoSupported(handle,
-                                                  desc,
-                                                  &alpha,
-                                                  matrices.layoutA,
-                                                  matrices.layoutB,
-                                                  &beta,
-                                                  matrices.layoutC,
-                                                  matrices.layoutD,
-                                                  results[0].algo,
-                                                  bytes),
-             diagnostics);
+        hipblaslt_jit_test::checkBlas(hipblaslt_ext::matmulIsAlgoSupported(handle,
+                                                                           desc,
+                                                                           &alpha,
+                                                                           matrices.layoutA,
+                                                                           matrices.layoutB,
+                                                                           &beta,
+                                                                           matrices.layoutC,
+                                                                           matrices.layoutD,
+                                                                           results[0].algo,
+                                                                           bytes),
+                                      "matmulIsAlgoSupported",
+                                      diagnostics.message);
         Device workspace(std::max<size_t>(bytes, 1));
         matrices.matmul(handle,
                         desc,
@@ -82,36 +85,43 @@ namespace
              const std::string&                               suffix)
     {
         int device = -1;
-        HIP(hipGetDevice(&device));
+        hipblaslt_jit_test::checkHip(hipGetDevice(&device), "hipGetDevice(&device)");
         jit::Diagnostics diagnostics;
         const auto       label = "K=" + std::to_string(K);
         Fp16Gemm         matrices(K);
 
         // Generate (replay), build with comgr, then publish a JIT library index.
-        std::shared_ptr<const jit::detail::GemmRequest> request;
-        float                                           alpha = 1.25f, beta = 0.5f;
-        BLAS(jit::makeGemmRequest(handle,
-                                  desc,
-                                  &alpha,
-                                  matrices.A.pointer,
-                                  matrices.layoutA,
-                                  matrices.B.pointer,
-                                  matrices.layoutB,
-                                  &beta,
-                                  matrices.C.pointer,
-                                  matrices.layoutC,
-                                  matrices.D.pointer,
-                                  matrices.layoutD,
-                                  request,
-                                  diagnostics),
-             diagnostics);
+        std::shared_ptr<const jit::GemmRequest> request;
+        float                                   alpha = 1.25f, beta = 0.5f;
+        hipblaslt_jit_test::checkBlas(jit::makeGemmRequest(handle,
+                                                           desc,
+                                                           &alpha,
+                                                           matrices.A.pointer,
+                                                           matrices.layoutA,
+                                                           matrices.B.pointer,
+                                                           matrices.layoutB,
+                                                           &beta,
+                                                           matrices.C.pointer,
+                                                           matrices.layoutC,
+                                                           matrices.D.pointer,
+                                                           matrices.layoutD,
+                                                           request,
+                                                           diagnostics),
+                                      "makeGemmRequest",
+                                      diagnostics.message);
         hipblasLtMatmulHeuristicResult_t result{};
-        BLAS(jit::getJitAlgo(device, request, backend, 64 << 20, result, diagnostics), diagnostics);
+        hipblaslt_jit_test::checkBlas(
+            jit::getJitAlgo(device, request, backend, 64 << 20, result, diagnostics),
+            "jit::getJitAlgo(device, request, backend, 64 << 20, result, diagnostics)",
+            diagnostics.message);
         const int index = hipblaslt_ext::getIndexFromAlgo(result.algo);
         JIT_REQUIRE(label + " returned " + std::to_string(index) + ", not a JIT library index",
                     TensileLite::isJitKernelIndex(index) && result.state == HIPBLAS_STATUS_SUCCESS);
         hipblasLtMatmulHeuristicResult_t repeat{};
-        BLAS(jit::getJitAlgo(device, request, backend, 64 << 20, repeat, diagnostics), diagnostics);
+        hipblaslt_jit_test::checkBlas(
+            jit::getJitAlgo(device, request, backend, 64 << 20, repeat, diagnostics),
+            "jit::getJitAlgo(device, request, backend, 64 << 20, repeat, diagnostics)",
+            diagnostics.message);
         JIT_REQUIRE(label + " published a different index on the second lookup",
                     hipblaslt_ext::getIndexFromAlgo(repeat.algo) == index);
         Device     workspace(result.workspaceSize);
@@ -141,26 +151,34 @@ namespace
                                  HIP_R_16F,
                                  HIPBLAS_COMPUTE_32F);
         float               gemmAlpha = -0.75f, gemmBeta = 0.25f;
-        BLAS(gemm.setProblem(desc,
-                             &gemmAlpha,
-                             matrices.A.pointer,
-                             matrices.layoutA,
-                             matrices.B.pointer,
-                             matrices.layoutB,
-                             &gemmBeta,
-                             matrices.C.pointer,
-                             matrices.layoutC,
-                             matrices.D.pointer,
-                             matrices.layoutD),
-             diagnostics);
+        hipblaslt_jit_test::checkBlas(gemm.setProblem(desc,
+                                                      &gemmAlpha,
+                                                      matrices.A.pointer,
+                                                      matrices.layoutA,
+                                                      matrices.B.pointer,
+                                                      matrices.layoutB,
+                                                      &gemmBeta,
+                                                      matrices.C.pointer,
+                                                      matrices.layoutC,
+                                                      matrices.D.pointer,
+                                                      matrices.layoutD),
+                                      "Gemm::setProblem",
+                                      diagnostics.message);
         size_t needed = 0;
-        BLAS(gemm.isAlgoSupported(result.algo, needed), diagnostics);
+        hipblaslt_jit_test::checkBlas(gemm.isAlgoSupported(result.algo, needed),
+                                      "gemm.isAlgoSupported(result.algo, needed)",
+                                      diagnostics.message);
         JIT_REQUIRE("isAlgoSupported returned another workspace size",
                     needed == result.workspaceSize);
-        HIP(hipMemset(matrices.D.pointer, 0xff, static_cast<size_t>(M) * N * sizeof(__half)));
-        BLAS(gemm.initialize(result.algo, workspace.pointer, true, stream), diagnostics);
-        BLAS(gemm.run(stream), diagnostics);
-        HIP(hipStreamSynchronize(stream));
+        hipblaslt_jit_test::checkHip(
+            hipMemset(matrices.D.pointer, 0xff, static_cast<size_t>(M) * N * sizeof(__half)),
+            "hipMemset(matrices.D.pointer, 0xff, static_cast<size_t>(M) * N * sizeof(__half))");
+        hipblaslt_jit_test::checkBlas(
+            gemm.initialize(result.algo, workspace.pointer, true, stream),
+            "gemm.initialize(result.algo, workspace.pointer, true, stream)",
+            diagnostics.message);
+        hipblaslt_jit_test::checkBlas(gemm.run(stream), "gemm.run(stream)", diagnostics.message);
+        hipblaslt_jit_test::checkHip(hipStreamSynchronize(stream), "hipStreamSynchronize(stream)");
         hipblaslt_jit_test::checkFp16("hipblaslt_ext::Gemm, " + label,
                                       M,
                                       N,
@@ -192,30 +210,42 @@ namespace
         hipblasLtMatrixLayout_t  lt{}, lb{}, lc{};
         const hipblasOperation_t transpose = HIPBLAS_OP_T;
         float                    alpha = 1.25f, beta = 0.5f;
-        BLAS(hipblasLtMatmulDescCreate(&tn, HIPBLAS_COMPUTE_32F, HIP_R_32F), diagnostics);
-        BLAS(hipblasLtMatmulDescSetAttribute(
-                 tn, HIPBLASLT_MATMUL_DESC_TRANSA, &transpose, sizeof(transpose)),
-             diagnostics);
-        BLAS(hipblasLtMatrixLayoutCreate(&lt, HIP_R_16F, K, M, K), diagnostics);
-        BLAS(hipblasLtMatrixLayoutCreate(&lb, HIP_R_16F, K, N, K), diagnostics);
-        BLAS(hipblasLtMatrixLayoutCreate(&lc, HIP_R_16F, M, N, M), diagnostics);
-        std::shared_ptr<const jit::detail::GemmRequest> transposed;
-        hipblasLtMatmulHeuristicResult_t                unsolved{};
-        BLAS(jit::makeGemmRequest(handle,
-                                  tn,
-                                  &alpha,
-                                  A.pointer,
-                                  lt,
-                                  B.pointer,
-                                  lb,
-                                  &beta,
-                                  C.pointer,
-                                  lc,
-                                  D.pointer,
-                                  lc,
-                                  transposed,
-                                  diagnostics),
-             diagnostics);
+        hipblaslt_jit_test::checkBlas(
+            hipblasLtMatmulDescCreate(&tn, HIPBLAS_COMPUTE_32F, HIP_R_32F),
+            "hipblasLtMatmulDescCreate(&tn, HIPBLAS_COMPUTE_32F, HIP_R_32F)",
+            diagnostics.message);
+        hipblaslt_jit_test::checkBlas(
+            hipblasLtMatmulDescSetAttribute(
+                tn, HIPBLASLT_MATMUL_DESC_TRANSA, &transpose, sizeof(transpose)),
+            "hipblasLtMatmulDescSetAttribute",
+            diagnostics.message);
+        hipblaslt_jit_test::checkBlas(hipblasLtMatrixLayoutCreate(&lt, HIP_R_16F, K, M, K),
+                                      "hipblasLtMatrixLayoutCreate(&lt, HIP_R_16F, K, M, K)",
+                                      diagnostics.message);
+        hipblaslt_jit_test::checkBlas(hipblasLtMatrixLayoutCreate(&lb, HIP_R_16F, K, N, K),
+                                      "hipblasLtMatrixLayoutCreate(&lb, HIP_R_16F, K, N, K)",
+                                      diagnostics.message);
+        hipblaslt_jit_test::checkBlas(hipblasLtMatrixLayoutCreate(&lc, HIP_R_16F, M, N, M),
+                                      "hipblasLtMatrixLayoutCreate(&lc, HIP_R_16F, M, N, M)",
+                                      diagnostics.message);
+        std::shared_ptr<const jit::GemmRequest> transposed;
+        hipblasLtMatmulHeuristicResult_t        unsolved{};
+        hipblaslt_jit_test::checkBlas(jit::makeGemmRequest(handle,
+                                                           tn,
+                                                           &alpha,
+                                                           A.pointer,
+                                                           lt,
+                                                           B.pointer,
+                                                           lb,
+                                                           &beta,
+                                                           C.pointer,
+                                                           lc,
+                                                           D.pointer,
+                                                           lc,
+                                                           transposed,
+                                                           diagnostics),
+                                      "makeGemmRequest",
+                                      diagnostics.message);
         JIT_REQUIRE(
             "The replay backend accepted a problem its bundle does not solve",
             jit::getJitAlgo(device, transposed, fixture.backend, 64 << 20, unsolved, diagnostics)
@@ -239,26 +269,31 @@ namespace
         jit::Diagnostics      diagnostics;
         hipblasLtHandle_t     handle{};
         hipblasLtMatmulDesc_t desc{};
-        BLAS(hipblasLtCreate(&handle), diagnostics);
-        BLAS(hipblasLtMatmulDescCreate(&desc, HIPBLAS_COMPUTE_16F, HIP_R_32F), diagnostics);
-        Fp16Gemm                                        matrices(512);
-        const float                                     alpha = 1.25f, beta = 0.5f;
-        std::shared_ptr<const jit::detail::GemmRequest> request;
-        BLAS(jit::makeGemmRequest(handle,
-                                  desc,
-                                  &alpha,
-                                  matrices.A.pointer,
-                                  matrices.layoutA,
-                                  matrices.B.pointer,
-                                  matrices.layoutB,
-                                  &beta,
-                                  matrices.C.pointer,
-                                  matrices.layoutC,
-                                  matrices.D.pointer,
-                                  matrices.layoutD,
-                                  request,
-                                  diagnostics),
-             diagnostics);
+        hipblaslt_jit_test::checkBlas(
+            hipblasLtCreate(&handle), "hipblasLtCreate(&handle)", diagnostics.message);
+        hipblaslt_jit_test::checkBlas(
+            hipblasLtMatmulDescCreate(&desc, HIPBLAS_COMPUTE_16F, HIP_R_32F),
+            "hipblasLtMatmulDescCreate(&desc, HIPBLAS_COMPUTE_16F, HIP_R_32F)",
+            diagnostics.message);
+        Fp16Gemm                                matrices(512);
+        const float                             alpha = 1.25f, beta = 0.5f;
+        std::shared_ptr<const jit::GemmRequest> request;
+        hipblaslt_jit_test::checkBlas(jit::makeGemmRequest(handle,
+                                                           desc,
+                                                           &alpha,
+                                                           matrices.A.pointer,
+                                                           matrices.layoutA,
+                                                           matrices.B.pointer,
+                                                           matrices.layoutB,
+                                                           &beta,
+                                                           matrices.C.pointer,
+                                                           matrices.layoutC,
+                                                           matrices.D.pointer,
+                                                           matrices.layoutD,
+                                                           request,
+                                                           diagnostics),
+                                      "makeGemmRequest",
+                                      diagnostics.message);
         JIT_REQUIRE("The request did not keep the FP32 alpha and beta",
                     *static_cast<const float*>(request->problem.alpha) == alpha
                         && *static_cast<const float*>(request->problem.beta) == beta);

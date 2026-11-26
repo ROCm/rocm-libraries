@@ -6,7 +6,7 @@
 #include "rocblaslt-types.h"
 #include <array>
 
-namespace hipblaslt_ext::experimental::jit::detail
+namespace hipblaslt_jit
 {
     // Reuse hipBLASLt's validated GEMM representation. Device buffers and
     // execution resources retain their normal caller lifetime.

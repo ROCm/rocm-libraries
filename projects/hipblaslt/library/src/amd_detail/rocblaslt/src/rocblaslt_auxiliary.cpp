@@ -1236,6 +1236,11 @@ rocblaslt_status selectDefaultContractionAlgo(rocblaslt_handle                  
                                               bool*                               layoutRuledOut)
 {
     const auto providerRows = bestSolutionRows(handle, prob, gemmData, prob.workspaceSize);
+    // One slot: this fills a null-algo matmul, which asks for one algorithm.
+    // getAllAlgos does not come here. It lists the prebuilt library for a
+    // datatype through getAllSolutions on a dummy 1x1 problem, and does not
+    // call the JIT ranker. Heuristic queries that ask for several algorithms
+    // pass that count to rankJitHeuristic.
     const auto ranked
         = rankJitHeuristic(handle, &prob, prob.workspaceSize, 1, nullptr, 0, providerRows);
     if(!ranked.handled)
