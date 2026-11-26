@@ -39,7 +39,7 @@ says. A file whose cases wait for several lanes has one entry per lane.
         lane=RUNNER_HARDWARE,
         reason="its device cases need gfx950, which no CI GPU stage has",
         team=_LIBRARY,
-        issue="AICK-3411",
+        issue="AICK-1234",
         expires="2027-02-12",
     )
 
@@ -55,6 +55,19 @@ CI does not select, or whose skip cannot name its lane:
         issue="AICK-3410",
         expires="2027-01-15",
         node="test_sweep",
+    )
+
+Pending entries that one issue tracks for one lane take their lane, issue and
+expiry from a lane ticket (:class:`LaneTicket`, listed in ``LANE_TICKETS``), so
+the lane has one date, when its capability is expected, by which all of them
+are re-decided:
+
+    _GFX1250_RUNNERS = LaneTicket("AICK-1234", RUNNER_HARDWARE, "2027-02-12")
+
+    _GFX1250_RUNNERS.waiting(
+        "library/tests/test_example.py",
+        "its device cases need gfx1250, which no CI GPU stage has",
+        _LIBRARY,
     )
 
 The file-level check cannot see single cases. ``tools/limbo_audit.py`` checks
@@ -129,6 +142,7 @@ from .lanes import (
 )
 
 __all__ = [
+    "LANE_TICKETS",
     "MEASURED_BUDGETS",
     "PENDING",
     "PENDING_MAX_DAYS",
@@ -140,6 +154,7 @@ __all__ = [
     "TEAMS",
     "TEST_FILE_ROOTS",
     "Compilers",
+    "LaneTicket",
     "MeasuredBudget",
     "PendingTest",
     "QuarantinedTest",
@@ -205,12 +220,22 @@ def _require_recorded(
             f"{kind} failed - {subject}, team={team!r}, expected one of {TEAMS}, "
             "the GitHub team that owns the test"
         )
+    _require_issue(kind, subject, issue)
+    _require_expiry(kind, subject, expires, max_days)
+
+
+def _require_issue(kind: str, subject: str, issue: str) -> None:
+    """Fail unless ``issue`` is a tracked one: a Jira id or a GitHub issue."""
     if not _ISSUE.fullmatch(issue):
         raise ValueError(
             f"{kind} failed - {subject}, issue={issue!r}, expected the issue that "
             "tracks it: a Jira id (AICK-1234) or ROCm/<repo>#<number>; file one "
             "first"
         )
+
+
+def _require_expiry(kind: str, subject: str, expires: str, max_days: int) -> None:
+    """Fail unless ``expires`` is an ISO date at most ``max_days`` away."""
     try:
         expiry = datetime.date.fromisoformat(expires)
     except ValueError:
@@ -301,6 +326,55 @@ class PendingTest:
     @property
     def expiry_date(self) -> datetime.date:
         return datetime.date.fromisoformat(self.expires)
+
+
+@dataclass(frozen=True)
+class LaneTicket:
+    """The issue that tracks the records waiting for one lane, and the one
+    date by which they are all re-decided: when the lane's capability is
+    expected, at most ``PENDING_MAX_DAYS`` away.
+
+    Its pending entries take their lane, issue and expiry from it
+    (:meth:`waiting`), so the lane has one date, not one per entry;
+    ``LANE_TICKETS`` lists every lane ticket, and the registry check refuses a
+    pending entry that names one's issue with another lane or date.
+    """
+
+    issue: str
+    lane: Lane
+    expires: str
+
+    def __post_init__(self) -> None:
+        subject = f"issue={self.issue!r}"
+        _require_issue("LaneTicket", subject, self.issue)
+        if self.lane not in LANES:
+            raise ValueError(
+                f"LaneTicket failed - {subject}, lane={self.lane.name!r}, expected "
+                "one of rocke.tests.lanes.LANES"
+            )
+        _require_expiry("LaneTicket", subject, self.expires, PENDING_MAX_DAYS)
+
+    def waiting(
+        self,
+        path: str,
+        reason: str,
+        team: str,
+        *,
+        node: str = "",
+        whole_file: bool = False,
+    ) -> PendingTest:
+        """The record of ``path`` (or its test ``node``) waiting for this
+        ticket's lane, with its issue and expiry."""
+        return PendingTest(
+            path,
+            self.lane,
+            reason,
+            team,
+            self.issue,
+            self.expires,
+            node=node,
+            whole_file=whole_file,
+        )
 
 
 # An llvm-project commit: at least 12 of its lowercase hex digits.
@@ -618,14 +692,48 @@ def _waiting_tests(
     )
 
 
+def _waiting_on(
+    ticket: LaneTicket,
+    reason: str,
+    team: str,
+    *paths: str,
+    whole_file: bool = False,
+) -> tuple[PendingTest, ...]:
+    """One entry per path, all waiting on ``ticket`` for the same reason."""
+    return _waiting(
+        ticket.lane,
+        reason,
+        team,
+        ticket.issue,
+        ticket.expires,
+        *paths,
+        whole_file=whole_file,
+    )
+
+
+# The attention backward CTest entries, not registered yet.
+_ATTENTION_BWD_ENTRIES = LaneTicket("AICK-3259", TICKET, "2026-12-31")
+# The cases that take torch tensors or capture a graph, until they run without
+# torch.
+_TORCH_CASES = LaneTicket("AICK-3408", TICKET, "2027-01-08")
+# The runtime's torch interop cases.
+_RUNTIME_TORCH_INTEROP = LaneTicket("AICK-3409", TICKET, "2027-01-08")
+# The device cases that need a gfx950 GPU.
+_GFX950_RUNNERS = LaneTicket("AICK-3411", RUNNER_HARDWARE, "2027-02-09")
+LANE_TICKETS: tuple[LaneTicket, ...] = (
+    _ATTENTION_BWD_ENTRIES,
+    _TORCH_CASES,
+    _RUNTIME_TORCH_INTEROP,
+    _GFX950_RUNNERS,
+)
+
+
 PENDING: tuple[PendingTest, ...] = (
-    *_waiting(
-        TICKET,
+    *_waiting_on(
+        _ATTENTION_BWD_ENTRIES,
         "the attention backward CTest entries (CPU and gfx942 GPU) are not registered "
         "yet; their slow tests are cut down first (AICK-3218)",
         _LIBRARY,
-        "AICK-3259",
-        "2026-12-31",
         "library/tests/dispatch/attention_bwd/test_dense_tuning_registry.py",
         "library/tests/dispatch/attention_bwd/test_gfx950_tuning.py",
         "library/tests/dispatch/attention_bwd/test_known_wrong_knobs.py",
@@ -683,14 +791,12 @@ PENDING: tuple[PendingTest, ...] = (
         "library/tests/test_lse_store_numeric.py",
         whole_file=True,
     ),
-    *_waiting(
-        TICKET,
+    *_waiting_on(
+        _ATTENTION_BWD_ENTRIES,
         "in the exhaustive cohort (library/tests/_affordable_lane.py): too slow for a "
         "pull-request tier; the attention backward CTest entries add a sample of it "
         "to the standard tier",
         _LIBRARY,
-        "AICK-3259",
-        "2026-12-31",
         "library/tests/test_attention_bwd_agpr_probe.py",
         "library/tests/test_attention_bwd_barrier_fence.py",
         "library/tests/test_attention_bwd_dq.py",
@@ -710,13 +816,11 @@ PENDING: tuple[PendingTest, ...] = (
         "library/tests/test_barrier_fence_parity_emit.py",
         whole_file=True,
     ),
-    *_waiting(
-        TICKET,
+    *_waiting_on(
+        _ATTENTION_BWD_ENTRIES,
         "per-lever device twins of the backward kernel, left out of the attention "
         "backward GPU entry; they need a GPU run on gfx942 and gfx950 first",
         _LIBRARY,
-        "AICK-3259",
-        "2026-12-31",
         "library/tests/test_attention_bwd_aux_numeric.py",
         "library/tests/test_attention_bwd_gemm_numeric.py",
         "library/tests/test_attention_bwd_ring_numeric.py",
@@ -736,41 +840,33 @@ PENDING: tuple[PendingTest, ...] = (
         "library/tests/test_library_test_tiers.py",
         whole_file=True,
     ),
-    *_waiting(
-        TICKET,
+    *_waiting_on(
+        _TORCH_CASES,
         "its torch-caller cases bind torch GPU tensors, as the production callers do, "
         "and skip without torch (the DeviceArray cases run)",
         _LIBRARY,
-        "AICK-3408",
-        "2027-01-08",
         "library/tests/sdpa/test_dense_sdpa_numeric.py",
         "library/tests/sdpa/test_unified_sdpa_numeric.py",
     ),
-    *_waiting(
-        TICKET,
+    *_waiting_on(
+        _TORCH_CASES,
         "its graph-replay case captures through torch and skips without it",
         _LIBRARY,
-        "AICK-3408",
-        "2027-01-08",
         "library/tests/test_attention_unified_lse_numeric.py",
     ),
-    *_waiting(
-        TICKET,
+    *_waiting_on(
+        _TORCH_CASES,
         "its torch-caller cases (graph replay, the concurrent workspace on torch "
         "streams, the prepared decode lifecycle) take torch tensors and skip without "
         "torch",
         _LIBRARY,
-        "AICK-3408",
-        "2027-01-08",
         "library/tests/test_strided_kv_decode_numeric.py",
     ),
-    *_waiting(
-        TICKET,
+    *_waiting_on(
+        _TORCH_CASES,
         "its torch cases exercise a torch API of rocKE (torch tensor inputs, "
         "to_torch, torch custom ops) and skip without torch",
         _LIBRARY,
-        "AICK-3408",
-        "2027-01-08",
         "library/tests/sdpa/test_dense_sdpa_binding.py",
         "library/tests/sdpa/test_sdpa_bwd_case_table.py",
         "library/tests/sdpa/test_sdpa_case_table.py",
@@ -820,14 +916,11 @@ PENDING: tuple[PendingTest, ...] = (
         "2027-01-15",
         node="test_modifier_mixes",
     ),
-    PendingTest(
+    _TORCH_CASES.waiting(
         "library/tests/test_conv_winograd_fwd_gpu.py",
-        TICKET,
         "its graph mode captures the transform chain into a HIP graph, which needs a "
         "rocKE graph primitive; graph replay is decided with its users",
         _LIBRARY,
-        "AICK-3408",
-        "2027-01-08",
         node="test_winograd_fwd_gpu_pipeline_modes[graph_merge_chunks_f2]",
     ),
     *_waiting(
@@ -862,32 +955,25 @@ PENDING: tuple[PendingTest, ...] = (
         "platform/python/rocke/heuristics/tests/test_train.py",
         whole_file=True,
     ),
-    *_waiting(
-        TICKET,
+    *_waiting_on(
+        _TORCH_CASES,
         "its torch cases exercise a torch API of rocKE (torch tensor inputs, "
         "to_torch, torch custom ops) and skip without torch",
         _PLATFORM,
-        "AICK-3408",
-        "2027-01-08",
         "platform/tests/instances/test_gfx1250_qwen_integration.py",
         "platform/tests/test_rocke.py",
     ),
-    PendingTest(
+    _TORCH_CASES.waiting(
         "platform/tests/instances/test_rocke_numeric.py",
-        TICKET,
         "FusedMoeForward takes torch tensors, so its forward parity case skips "
         "without torch",
         _PLATFORM,
-        "AICK-3408",
-        "2027-01-08",
         node="TestNumericVerification::test_moe_e2e_forward",
     ),
-    *_waiting(
-        TICKET,
+    *_waiting_on(
+        _RUNTIME_TORCH_INTEROP,
         "its torch cases exercise the runtime's torch interop and skip without torch",
         _PLATFORM,
-        "AICK-3409",
-        "2027-01-08",
         "platform/tests/runtime/test_device_array.py",
     ),
     *_waiting(
@@ -1244,12 +1330,10 @@ PENDING: tuple[PendingTest, ...] = (
         "platform/python/rocke/benchmark/perf/tests/test_occupancy.py",
         "platform/tests/benchmark/test_occupancy_targets.py",
     ),
-    *_waiting(
-        RUNNER_HARDWARE,
+    *_waiting_on(
+        _GFX950_RUNNERS,
         "its device cases need gfx950, which no CI GPU stage has",
         _LIBRARY,
-        "AICK-3411",
-        "2027-02-12",
         "library/tests/test_attention_additive_bias_gfx950_numeric.py",
         "library/tests/test_attention_dense_gfx950_numeric.py",
         "library/tests/test_attention_tiled_2d_gfx950_biased_numeric.py",
@@ -1289,13 +1373,11 @@ PENDING: tuple[PendingTest, ...] = (
         "library/tests/test_conv_wgrad_correctness.py",
         "library/tests/test_direct_conv_correctness.py",
     ),
-    *_waiting(
-        RUNNER_HARDWARE,
+    *_waiting_on(
+        _GFX950_RUNNERS,
         "its gfx950 reference cases wait for a gfx950 runner: the gfx942 reference "
         "entry deselects them, and the gfx950 one exits on the CI runners",
         _LIBRARY,
-        "AICK-3411",
-        "2027-02-12",
         "library/tests/test_conv_pinned_reference.py",
     ),
     *_waiting(
@@ -1332,14 +1414,11 @@ PENDING: tuple[PendingTest, ...] = (
         "library/tests/test_fwd_small_wmma.py",
         "library/tests/test_gfx1250_attention.py",
     ),
-    PendingTest(
+    _GFX950_RUNNERS.waiting(
         "library/tests/test_conv_dgrad_correctness.py",
-        RUNNER_HARDWARE,
         "its cases use the (32, 32, 16) bf16 and fp16 warp tile, which gfx942 does "
         "not support, so they run on gfx950",
         _LIBRARY,
-        "AICK-3411",
-        "2027-02-12",
         node="TestConvDgradUniformKDecode",
     ),
     PendingTest(
@@ -1391,13 +1470,11 @@ PENDING: tuple[PendingTest, ...] = (
         "2027-02-16",
         "platform/python/rocke/tests/helpers/tiling/mma/test_mma_k_coupling.py",
     ),
-    *_waiting(
-        RUNNER_HARDWARE,
+    *_waiting_on(
+        _GFX950_RUNNERS,
         "its device cases need gfx950 (the multi-GPU sweep, two of them), which no CI "
         "GPU stage has",
         _PLATFORM,
-        "AICK-3411",
-        "2027-02-09",
         "platform/python/rocke/benchmark/gemm/tests/test_fp16_rcr_multigpu.py",
         "platform/tests/core/test_f8f6f4_16x16x128.py",
         "platform/tests/core/test_xf32_bf16x3_device.py",
@@ -1451,12 +1528,10 @@ PENDING: tuple[PendingTest, ...] = (
         "platform/tests/core/test_u8_arith.py",
         "platform/tests/numeric/test_gfx90a_mfma_ops.py",
     ),
-    *_waiting(
-        RUNNER_HARDWARE,
+    *_waiting_on(
+        _GFX950_RUNNERS,
         "its device cases need gfx950, which no CI GPU stage has",
         _PLATFORM,
-        "AICK-3411",
-        "2027-02-09",
         "platform/tests/instances/test_flatmm_numeric.py",
         "platform/tests/instances/test_gfx950_grouped_gemm.py",
         "platform/tests/numeric/test_warp_shuffle_xor_dpp_numeric.py",
