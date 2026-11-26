@@ -762,6 +762,28 @@ void testing_aux_matmul_set_get_attr(const Arguments& arg)
 
     ASSERT_TRUE(scale_mode_b_r == scale_mode_b); // validate
 
+    // HIPBLASLT_MATMUL_MATRIX_SCALE_VEC128_UE8M0_EXT reads back on A and B, through the
+    // descriptor and through the extension API's GemmEpilogue.
+    const hipblasLtMatmulMatrixScale_t scale_mode_vec128
+        = HIPBLASLT_MATMUL_MATRIX_SCALE_VEC128_UE8M0_EXT;
+    for(auto attr : {HIPBLASLT_MATMUL_DESC_A_SCALE_MODE, HIPBLASLT_MATMUL_DESC_B_SCALE_MODE})
+    {
+        hipblasLtMatmulMatrixScale_t scale_mode_r = HIPBLASLT_MATMUL_MATRIX_SCALE_END;
+        EXPECT_HIPBLAS_STATUS(
+            hipblasLtMatmulDescSetAttribute(matmul, attr, &scale_mode_vec128, sizeof(uint32_t)),
+            HIPBLAS_STATUS_SUCCESS);
+        EXPECT_HIPBLAS_STATUS(hipblasLtMatmulDescGetAttribute(
+                                  matmul, attr, &scale_mode_r, sizeof(uint32_t), &sizeWritten),
+                              HIPBLAS_STATUS_SUCCESS);
+        ASSERT_TRUE(scale_mode_r == scale_mode_vec128); // validate
+    }
+
+    hipblaslt_ext::GemmEpilogue epilogue_vec128;
+    epilogue_vec128.setScalingAType(scale_mode_vec128);
+    epilogue_vec128.setScalingBType(scale_mode_vec128);
+    ASSERT_TRUE(epilogue_vec128.getScalingAType() == scale_mode_vec128); // validate
+    ASSERT_TRUE(epilogue_vec128.getScalingBType() == scale_mode_vec128); // validate
+
     scale_mode_a = HIPBLASLT_MATMUL_MATRIX_SCALE_SCALAR_32F;
     scale_mode_b = HIPBLASLT_MATMUL_MATRIX_SCALE_SCALAR_32F;
 

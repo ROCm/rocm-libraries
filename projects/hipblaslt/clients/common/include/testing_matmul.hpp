@@ -4752,6 +4752,10 @@ void testing_matmul_with_bias(const Arguments& arg,
                 {
                     mode = HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_128_4_EXT;
                 }
+                else if(arg.scaleA == hipblaslt_scaling_format::Block_128_UE8M0)
+                {
+                    mode = HIPBLASLT_MATMUL_MATRIX_SCALE_VEC128_UE8M0_EXT;
+                }
                 else if(isW4A16Scaling(arg.scaleA))
                 {
                     // Client scale values match the public API enum.
@@ -4817,6 +4821,10 @@ void testing_matmul_with_bias(const Arguments& arg,
                 else if(arg.scaleB == hipblaslt_scaling_format::Block_32_UE8M0_128_4_EXT)
                 {
                     mode = HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_128_4_EXT;
+                }
+                else if(arg.scaleB == hipblaslt_scaling_format::Block_128_UE8M0)
+                {
+                    mode = HIPBLASLT_MATMUL_MATRIX_SCALE_VEC128_UE8M0_EXT;
                 }
 
                 if(mode != HIPBLASLT_MATMUL_MATRIX_SCALE_SCALAR_32F)
@@ -5369,6 +5377,8 @@ void testing_matmul_with_bias(const Arguments& arg,
                             return HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_32_8_EXT;
                         case hipblaslt_scaling_format::Block_32_UE8M0_128_4_EXT:
                             return HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_128_4_EXT;
+                        case hipblaslt_scaling_format::Block_128_UE8M0:
+                            return HIPBLASLT_MATMUL_MATRIX_SCALE_VEC128_UE8M0_EXT;
                         default:
                             // Client scale values match the public API enum.
                             if(isW4A16Scaling(f))

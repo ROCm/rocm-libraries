@@ -428,6 +428,8 @@ namespace hipblaslt_ext
                 return RocblasltContractionProblem::ScalingFormat::Block_32_UE5M3;
             case HIPBLASLT_MATMUL_MATRIX_SCALE_VEC16_UE5M3_EXT:
                 return RocblasltContractionProblem::ScalingFormat::Block_16_UE5M3;
+            case HIPBLASLT_MATMUL_MATRIX_SCALE_VEC128_UE8M0_EXT:
+                return RocblasltContractionProblem::ScalingFormat::Block_128_UE8M0;
             case HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_32_8_EXT:
                 return RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_32_8_EXT;
             case HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_128_4_EXT:
@@ -461,6 +463,8 @@ namespace hipblaslt_ext
                 return HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_UE5M3_EXT;
             case RocblasltContractionProblem::ScalingFormat::Block_16_UE5M3:
                 return HIPBLASLT_MATMUL_MATRIX_SCALE_VEC16_UE5M3_EXT;
+            case RocblasltContractionProblem::ScalingFormat::Block_128_UE8M0:
+                return HIPBLASLT_MATMUL_MATRIX_SCALE_VEC128_UE8M0_EXT;
             case RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_32_8_EXT:
                 return HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_32_8_EXT;
             case RocblasltContractionProblem::ScalingFormat::Block_32_BF16:

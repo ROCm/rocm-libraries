@@ -32,6 +32,7 @@ inline rocblaslt_mx_scale_need
     case Scale::Block_16_UE4M3:
     case Scale::Block_32_UE5M3:
     case Scale::Block_16_UE5M3:
+    case Scale::Block_128_UE8M0:
         return rocblaslt_mx_scale_need::Natural;
     case Scale::Block_32_UE8M0_32_8_EXT:
         return rocblaslt_mx_scale_need::PreSwizzled;

@@ -94,6 +94,7 @@ inline hipDataType scaleDataType(hipblaslt_scaling_format s)
     case hipblaslt_scaling_format::Block_16_UE8M0:
     case hipblaslt_scaling_format::Block_32_UE8M0_32_8_EXT:
     case hipblaslt_scaling_format::Block_32_UE8M0_128_4_EXT:
+    case hipblaslt_scaling_format::Block_128_UE8M0:
         return HIP_R_8F_UE8M0;
     case hipblaslt_scaling_format::Block_32_UE4M3:
     case hipblaslt_scaling_format::Block_16_UE4M3:
@@ -115,6 +116,7 @@ inline const char* mxScaleFormatName(hipblaslt_scaling_format s)
     case hipblaslt_scaling_format::Block_32_UE8M0:
     case hipblaslt_scaling_format::Block_16_UE8M0:
     case hipblaslt_scaling_format::Block_32_UE8M0_32_8_EXT:
+    case hipblaslt_scaling_format::Block_128_UE8M0:
         return "UE8M0";
     case hipblaslt_scaling_format::Block_32_UE4M3:
     case hipblaslt_scaling_format::Block_16_UE4M3:
@@ -189,6 +191,7 @@ inline bool isBlockScaling(hipblaslt_scaling_format s)
     case hipblaslt_scaling_format::Block_16_UE5M3:
     case hipblaslt_scaling_format::Block_32_UE8M0_32_8_EXT:
     case hipblaslt_scaling_format::Block_32_UE8M0_128_4_EXT:
+    case hipblaslt_scaling_format::Block_128_UE8M0:
         return true;
     default:
         return false;
@@ -209,6 +212,8 @@ inline int blockSize(hipblaslt_scaling_format s)
     case hipblaslt_scaling_format::Block_16_UE4M3:
     case hipblaslt_scaling_format::Block_16_UE5M3:
         return 16;
+    case hipblaslt_scaling_format::Block_128_UE8M0:
+        return 128;
     default:
         return 1;
     }
