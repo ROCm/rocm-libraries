@@ -35,10 +35,11 @@ either).
 Both engines at once: ``lower_with_both_engines``,
 ``assert_both_engines_reject``, ``lower_hip_with_both_engines`` and
 ``assert_both_engines_reject_hip`` run the same checks for the Python and the
-C++ engine, and skip as a whole when the C++ lowering they need cannot run.
-Their refusal checks compare the C++ engine's message but not its status,
-which some older refusals do not yet share with the Python engine's exception
-type.
+C++ engine. Where the C++ lowering they need cannot run, the two lowering
+helpers skip as a whole, and the two refusal helpers skip after checking the
+Python engine's refusal. Their refusal checks compare the C++ engine's message
+but not its status, which some older refusals do not yet share with the Python
+engine's exception type.
 
 The C++ HIP lowering runs in process when the shared library is found, and
 otherwise through the ``rocke_ir_lower_cli`` program that
@@ -500,12 +501,14 @@ def assert_both_engines_reject(
 ) -> None:
     """Assert that both engines refuse ``kernel`` for ``arch`` with ``message``.
 
-    The C++ engine's status is not compared; see the module docstring.
+    The C++ engine's status is not compared; see the module docstring. The
+    Python engine is checked first, so a lane without the C++ engine still
+    checks it before the skip.
     """
-    native_engine_or_skip()
     _assert_python_rejects(
         lambda: _python_llvm(kernel, arch, llvm_flavor), error_type, message
     )
+    native_engine_or_skip()
     _assert_native_rejects(
         lambda: _native_llvm(kernel, arch, llvm_flavor), message, None
     )
@@ -525,12 +528,13 @@ def assert_both_engines_reject_hip(
 ) -> None:
     """Assert that both HIP lowerings refuse ``kernel`` for ``arch`` with ``message``.
 
-    The C++ engine's status is not compared; see the module docstring.
+    The C++ engine's status is not compared; see the module docstring. The
+    Python engine is checked first, as in :func:`assert_both_engines_reject`.
     """
-    skip_without_native_hip_lowering()
     _assert_python_rejects(
         lambda: lower_kernel_to_hip(kernel, arch=arch), error_type, message
     )
+    skip_without_native_hip_lowering()
     _assert_native_hip_rejects(kernel, arch, message, None)
 
 
