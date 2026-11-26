@@ -206,6 +206,11 @@ constexpr int64_t WGRAD_ASSUMED_WAVES_PER_CU = 2;
 /// conv_split_k.WGRAD_TARGET_WAVES_PER_CU: the grouped formula's target, in waves.
 constexpr int64_t WGRAD_TARGET_WAVES_PER_CU = 16;
 
+inline bool isPowerOfTwo(int64_t value)
+{
+    return value > 0 && (value & (value - 1)) == 0;
+}
+
 /// select_split_k_wgrad's CK formula for the wg_M x wg_N x wg_K GEMM (merged over
 /// group_merge groups) launched over @p groups grid groups. Ungrouped: floor(2 * CUs /
 /// tiles), clamped to wg_K. Grouped: blocks per CU from the target waves, the real
@@ -1280,7 +1285,10 @@ inline std::optional<Plan> implicitPlan(const Problem& problem, const ImplicitIn
     }
     if(!instance.twoStage)
     {
-        Plan plan{problem, g, {}, {}, splitK > 1, splitK};
+        // A binary built split (instance.splitK > 1) carries the packed-atomic epilogue,
+        // which adds into dW at every launch degree, 1 included: dW is cleared whenever
+        // the binary is atomic (_implicit_plan's zero_dw=spec.split_k > 1).
+        Plan plan{problem, g, {}, {}, instance.splitK > 1, splitK};
         plan.steps.push_back(Step{PlanKernel::SELF,
                                   Abi::IMPLICIT,
                                   grid,

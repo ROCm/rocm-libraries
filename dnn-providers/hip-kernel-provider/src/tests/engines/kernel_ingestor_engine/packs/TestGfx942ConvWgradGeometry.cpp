@@ -568,81 +568,57 @@ TEST(TestGfx942ConvWgradGeometry, DeriveGeometryRefusesWhatTheGraphContractRefus
 // from the real shipped catalog, plus TheSplitKDegreeIsALaunchValueNotTheBakedPlaceholder
 // below, which covers the splitK==1 short-circuit explicitly.
 
-TEST(TestGfx942ConvWgradGeometry, SplitKCandidatesFollowTheLadderAndXcdRules)
+TEST(TestGfx942ConvWgradGeometry, CkFormulaSplitKFollowsSelectSplitKWgrad)
 {
-    const wgrad::SplitKCostModel cost{};
-    // Ungrouped: the ladder plus divisors / multiples of 256, smallest degrees per K-iter
-    // count and round edges; 5 tiles over 49 K iterations.
-    const wgrad::SplitKProblem dense{64, 576, 1568, 1, 2, 2};
-    const wgrad::SplitKKernel kernel{128, 128, 32, 4};
-    const auto degrees = wgrad::splitKDegrees(dense, kernel, cost, 16);
-    for(const auto expected : {2, 3, 4, 5, 6, 7, 8, 9, 10, 13, 16})
-    {
-        EXPECT_NE(std::find(degrees.begin(), degrees.end(), expected), degrees.end()) << expected;
-    }
-    // ceil(49 / 12) == ceil(49 / 11): 12 only adds CTAs.
-    EXPECT_EQ(std::find(degrees.begin(), degrees.end(), 12), degrees.end());
-    // Grouped with one tile per group: off the ladder only the degrees that keep the
-    // flat-id stride between groups a multiple of the 8 XCDs.
-    const wgrad::SplitKProblem grouped{8, 64, 6272, 32, 2, 2};
-    const auto groupedDegrees
-        = wgrad::splitKDegrees(grouped, wgrad::SplitKKernel{64, 64, 64, 4}, cost, 64);
-    for(const auto s : groupedDegrees)
-    {
-        EXPECT_TRUE(wgrad::isPowerOfTwo(s) || s % 8 == 0) << s;
-    }
-    EXPECT_NE(std::find(groupedDegrees.begin(), groupedDegrees.end(), 24), groupedDegrees.end());
-    EXPECT_EQ(std::find(groupedDegrees.begin(), groupedDegrees.end(), 12), groupedDegrees.end());
-    // The degree never passes the packed atomic's accuracy cap; the f32 workspace has none.
-    const wgrad::SplitKProblem deep{16, 16, 1 << 24, 1, 2, 2};
-    const wgrad::SplitKReduction atomic{cost.atomicBf16BytesPerLatency,
-                                        wgrad::ATOMIC_16BIT_MAX_SPLIT_K};
-    EXPECT_LE(wgrad::selectSplitK(deep, {16, 16, 16, 1}, atomic, true, cost),
-              std::optional<int64_t>(wgrad::ATOMIC_16BIT_MAX_SPLIT_K));
-    const wgrad::SplitKReduction workspace{cost.atomicFp32BytesPerLatency, std::nullopt, true, 8};
-    EXPECT_GT(wgrad::selectSplitK(deep, {16, 16, 16, 1}, workspace, false, cost),
-              std::optional<int64_t>(wgrad::ATOMIC_16BIT_MAX_SPLIT_K));
-    // Without the unsplit candidate a reduction with no room to split has no degree.
-    const wgrad::SplitKProblem oneTile{16, 16, 16, 1, 2, 2};
-    EXPECT_FALSE(wgrad::selectSplitK(oneTile, {16, 16, 16, 1}, workspace, false, cost));
-    EXPECT_EQ(wgrad::selectSplitK(oneTile, {16, 16, 16, 1}, atomic, true, cost),
-              std::optional<int64_t>(1));
-}
-
-TEST(TestGfx942ConvWgradGeometry, TheFp16PackedAtomicSharesTheBf16Bandwidth)
-{
-    // split_k_planner's gfx950 atomic_bytes_per_latency: fp16 takes bf16's constant once
-    // its lowering stopped fencing every add.
-    const wgrad::SplitKCostModel cost{};
-    EXPECT_EQ(cost.atomicFp16BytesPerLatency, 328579.7);
-    EXPECT_EQ(cost.atomicBf16BytesPerLatency, 328579.7);
-    EXPECT_EQ(cost.atomicFp32BytesPerLatency, 1344520.3);
+    // gfx942 has no fitted split-K cost model: conv_split_k.select_split_k_wgrad's CK
+    // formula picks the degree. Expected values are Python's for the same arguments.
+    // Ungrouped: floor(2 waves * 304 CUs / 5 tiles), clamped to wg_K.
+    EXPECT_EQ(wgrad::ckFormulaSplitK(64, 576, 1568, 128, 128, 1, 256), 121);
+    EXPECT_EQ(wgrad::ckFormulaSplitK(16, 16, int64_t{1} << 24, 16, 16, 1, 64), 608);
+    // Grouped: 16 target waves per CU over the real no-split CTA count, then snapped to a
+    // multiple of the XCD step (8 XCDs / gcd(tiles, 8)).
+    EXPECT_EQ(wgrad::ckFormulaSplitK(1, 9, 100352, 16, 64, 256, 256), 8);
+    EXPECT_EQ(wgrad::ckFormulaSplitK(8, 72, 6272, 64, 64, 32, 256), 16);
 }
 
 TEST(TestGfx942ConvWgradGeometry, TheSplitKDegreeIsALaunchValueNotTheBakedPlaceholder)
 {
-    // The catalog's split_k field is a placeholder: two binaries differing only in it plan
-    // the same degree on a problem both serve, and it lands on the plan and as ks_count.
+    // A one-stage binary built split (its packed-atomic epilogue) runs the resolved degree,
+    // which lands on the plan, grid z and ks; its dW is cleared at any degree. The same
+    // tile built unsplit (split_k == 1) has no atomic epilogue and stays at degree 1.
     const Problem dense3x3{2, 64, 64, 28, 28, 3, 3, 1, 1, 1, 1, 1, 1, 1, FP16};
-    ImplicitInstance auto_{128, 128, 32, 2, 2, 8, 8, 8, Epilogue::CSHUFFLE, 1, -1};
-    ImplicitInstance placeholder = auto_;
-    placeholder.splitK = 2;
-    const auto a = wgrad::instancePlan(dense3x3, implicitInstance(auto_));
-    const auto b = wgrad::instancePlan(dense3x3, implicitInstance(placeholder));
-    ASSERT_TRUE(a && b);
-    // resolve_conv_split_k's degree for this problem and tile (fp16 shares bf16's atomic
-    // bandwidth, so both dtypes resolve 17).
-    EXPECT_EQ(a->splitK, 17);
-    EXPECT_EQ(wgrad::planDigest(*a), wgrad::planDigest(*b));
-    EXPECT_EQ(a->steps[0].grid[2], 17);
-    // ks = ceil(1568 / (32 * 17)) * 32.
-    EXPECT_EQ(a->steps[0].values[wgrad::IMPLICIT_KERNARG_NAMES.size() - 2], 96);
-    // A one-stage binary built split (its packed-atomic epilogue) still needs an even
-    // store vector: vector_size_c 1 refuses, the unsplit-built twin serves.
-    placeholder.vectorC = 1;
-    auto unsplit = placeholder;
+    ImplicitInstance atomic{128, 128, 32, 2, 2, 8, 8, 8, Epilogue::CSHUFFLE};
+    atomic.splitK = 2;
+    const auto a = wgrad::instancePlan(dense3x3, implicitInstance(atomic));
+    ASSERT_TRUE(a);
+    // resolve_conv_split_k on gfx942: CK formula floor(608 / 5) = 121, under the 16-bit
+    // atomic's cap of 128.
+    EXPECT_EQ(a->splitK, 121);
+    EXPECT_EQ(a->steps[0].grid[2], 121);
+    EXPECT_TRUE(a->zeroDw);
+    // ks = ceil(1568 / (32 * 121)) * 32.
+    EXPECT_EQ(a->steps[0].values[wgrad::IMPLICIT_KERNARG_NAMES.size() - 2], 32);
+    auto unsplit = atomic;
     unsplit.splitK = 1;
-    EXPECT_FALSE(wgrad::instancePlan(dense3x3, implicitInstance(placeholder)));
+    const auto u = wgrad::instancePlan(dense3x3, implicitInstance(unsplit));
+    ASSERT_TRUE(u);
+    EXPECT_EQ(u->splitK, 1);
+    EXPECT_FALSE(u->zeroDw);
+    // The default epilogue emits no packed 16-bit atomic: an atomic-built binary with it
+    // runs unsplit, but still clears dW (its epilogue accumulates at degree 1 too).
+    auto defaultEpilogue = atomic;
+    defaultEpilogue.epilogue = Epilogue::DEFAULT;
+    const auto d = wgrad::instancePlan(dense3x3, implicitInstance(defaultEpilogue));
+    if(d)
+    {
+        EXPECT_EQ(d->splitK, 1);
+        EXPECT_TRUE(d->zeroDw);
+    }
+    // A one-stage binary built split still needs an even store vector: vector_size_c 1
+    // refuses, the unsplit-built twin serves.
+    atomic.vectorC = 1;
+    unsplit.vectorC = 1;
+    EXPECT_FALSE(wgrad::instancePlan(dense3x3, implicitInstance(atomic)));
     EXPECT_TRUE(wgrad::instancePlan(dense3x3, implicitInstance(unsplit)));
 }
 
@@ -696,9 +672,12 @@ TEST(TestGfx942ConvWgradGeometry, TwoStagePlansZeroTheScratchAndFoldItIntoDw)
                                         static_cast<int32_t>(64 * wgN * 2),
                                         1}));
     }
-    // One K tile leaves nothing to split, and a two-stage binary has no unsplit form.
+    // One K tile: gfx942's CK formula still splits it (the extra slices add zeros) where
+    // gfx950's cost model refuses -- the plan is two-stage at the formula's degree.
     const Problem oneTile{1, 64, 64, 2, 2, 1, 1, 1, 1, 0, 0, 1, 1, 1, FP16};
-    EXPECT_FALSE(wgrad::instancePlan(oneTile, implicitInstance(twoStage)));
+    const auto oneTilePlan = wgrad::instancePlan(oneTile, implicitInstance(twoStage));
+    ASSERT_TRUE(oneTilePlan);
+    EXPECT_TRUE(oneTilePlan->zeroWs);
     auto oneStage = twoStage;
     oneStage.twoStage = false;
     oneStage.splitK = 1;
@@ -1078,30 +1057,22 @@ TEST(TestGfx942ConvWgradGeometry, EveryCatalogInstanceParses)
                 ++directByVariant[entry.text("direct_variant")];
             }
         }
-        // 156 implicit GEMM (110 two-stage) + 67 selectable direct + 9 fold helpers + the
-        // Stage 2 fold at 8 slabs and at one (the direct pipelines' cast) per dtype (the
-        // gfx950 wgrad AOT catalog: see IngestorGenerator's
-        // test_enumerate_conv_wgrad_aot_instances.py / test_make_conv_wgrad_aot_config.py).
-        EXPECT_EQ(implicitCount, 156U) << dtype;
-        EXPECT_EQ(helpers, 11U) << dtype;
+        // The gfx942 catalog (gfx942_wgrad.json, pruned to keep every cases_wgrad.txt case
+        // within 1% of its best, plus the helpers its pipelines launch): fp16 is 186
+        // implicit GEMM and the two-stage Stage 2; bf16 is 87 implicit GEMM, 2
+        // direct_wgrad_dw_cols and their fold, cast and the Stage 2. These track the
+        // catalog: a re-pruned one updates them (and test_make_conv_wgrad_aot_config.py's).
+        const bool fp16 = std::string_view(dtype) == "fp16";
+        EXPECT_EQ(implicitCount, fp16 ? 186U : 87U) << dtype;
+        EXPECT_EQ(helpers, fp16 ? 1U : 3U) << dtype;
         size_t directTotal = 0;
         for(const auto& [variant, count] : directByVariant)
         {
             directTotal += count;
         }
-        EXPECT_EQ(directTotal, 67U) << dtype;
-        EXPECT_EQ(catalog::catalog(dtype).size(), 234U) << dtype;
-        // All seven direct pipelines are represented.
-        for(const auto* variant : {"direct_wgrad",
-                                   "direct_wgrad_tiled",
-                                   "direct_wgrad_dw",
-                                   "direct_wgrad_dw_cols",
-                                   "direct_wgrad_dw_mfma",
-                                   "direct_wgrad_gather",
-                                   "direct_wgrad_grouped_mfma"})
-        {
-            EXPECT_GT(directByVariant[variant], 0U) << dtype << " " << variant;
-        }
+        EXPECT_EQ(directTotal, fp16 ? 0U : 2U) << dtype;
+        EXPECT_EQ(directByVariant["direct_wgrad_dw_cols"], directTotal) << dtype;
+        EXPECT_EQ(catalog::catalog(dtype).size(), fp16 ? 187U : 92U) << dtype;
     }
 }
 
@@ -1144,15 +1115,8 @@ TEST(TestGfx942ConvWgradGeometry, PlansMatchTheAdapterOverTheCatalog)
         }
         EXPECT_EQ(folded, row.digest) << describe(problem) << " " << row.dtype;
     }
-    // Implicit GEMM and all seven direct pipelines are among the served rows.
-    for(const auto* family : {"implicit",
-                              "direct_wgrad",
-                              "direct_wgrad_tiled",
-                              "direct_wgrad_dw",
-                              "direct_wgrad_dw_cols",
-                              "direct_wgrad_dw_mfma",
-                              "direct_wgrad_gather",
-                              "direct_wgrad_grouped_mfma"})
+    // Implicit GEMM and the one direct pipeline the catalog ships are among the served rows.
+    for(const auto* family : {"implicit", "direct_wgrad_dw_cols"})
     {
         EXPECT_GT(servedByFamily[family], 0U) << family;
     }
@@ -1160,7 +1124,8 @@ TEST(TestGfx942ConvWgradGeometry, PlansMatchTheAdapterOverTheCatalog)
 
 TEST(TestGfx942ConvWgradGeometry, FullPlansMatchTheAdapter)
 {
-    ASSERT_GT(vectors::fullPlans().size(), 8U);
+    // One full plan per instance kind the catalog ships (one-stage, two-stage, direct).
+    ASSERT_GE(vectors::fullPlans().size(), 3U);
     for(const auto& full : vectors::fullPlans())
     {
         const auto& row = vectors::servedMatrix()[full.row];
@@ -1184,7 +1149,7 @@ using namespace hip_kernel_provider::kernel_ingestor_engine::testing;
 using namespace hipdnn_plugin_sdk::ingestor;
 namespace data_objects = hipdnn_flatbuffers_sdk::data_objects;
 
-constexpr PackSymbols GFX950_CONV_WGRAD_AOT{"hipkernel:Gfx942ConvWgradAot",
+constexpr PackSymbols GFX942_CONV_WGRAD_AOT{"hipkernel:Gfx942ConvWgradAot",
                                             "hipkernel.gfx942_conv_wgrad_aot.graph_match",
                                             "",
                                             "hipkernel.gfx942_conv_wgrad_aot.kernel_match",
@@ -1254,7 +1219,7 @@ flatbuffers::FlatBufferBuilder buildWgradGraph(const Problem& p, bool dwFloat)
 GraphFixture wgradFixture(const Problem& p, bool dwFloat)
 {
     DeviceProperties properties;
-    properties.gcnArchName = "gfx950";
+    properties.gcnArchName = "gfx942";
     properties.warpSize = 64;
     return GraphFixture(buildWgradGraph(p, dwFloat), properties);
 }
@@ -1297,7 +1262,7 @@ void prepareAll(std::vector<KernelDefinition>& kernels)
 {
     hip_kernel_provider::kernel_ingestor_engine::registerNativeIngestorSymbols();
     const auto prepareFn
-        = KernelPrepareRegistry::tryResolve(std::string(GFX950_CONV_WGRAD_AOT.kernelMatcher));
+        = KernelPrepareRegistry::tryResolve(std::string(GFX942_CONV_WGRAD_AOT.kernelMatcher));
     ASSERT_NE(prepareFn, nullptr);
     for(auto& kernel : kernels)
     {
@@ -1335,18 +1300,18 @@ TEST(TestGfx942ConvWgradNative, GraphMatcherBindsTheWrwTensorsAndRefusesOtherNod
 {
     const Problem dense3x3{2, 64, 64, 28, 28, 3, 3, 1, 1, 1, 1, 1, 1, 1, FP16};
     const auto fixture = wgradFixture(dense3x3, false);
-    const auto bound = matchesGraph(GFX950_CONV_WGRAD_AOT, fixture.context());
+    const auto bound = matchesGraph(GFX942_CONV_WGRAD_AOT, fixture.context());
     ASSERT_TRUE(bound);
-    EXPECT_EQ(tryGetBoundInt(*bound, GFX950_CONV_WGRAD_AOT.inputAToken), std::optional<int64_t>(1));
-    EXPECT_EQ(tryGetBoundInt(*bound, GFX950_CONV_WGRAD_AOT.inputBToken), std::optional<int64_t>(2));
-    EXPECT_EQ(tryGetBoundInt(*bound, GFX950_CONV_WGRAD_AOT.outputToken), std::optional<int64_t>(3));
-    EXPECT_TRUE(matchesGraph(GFX950_CONV_WGRAD_AOT, wgradFixture(dense3x3, true).context()));
+    EXPECT_EQ(tryGetBoundInt(*bound, GFX942_CONV_WGRAD_AOT.inputAToken), std::optional<int64_t>(1));
+    EXPECT_EQ(tryGetBoundInt(*bound, GFX942_CONV_WGRAD_AOT.inputBToken), std::optional<int64_t>(2));
+    EXPECT_EQ(tryGetBoundInt(*bound, GFX942_CONV_WGRAD_AOT.outputToken), std::optional<int64_t>(3));
+    EXPECT_TRUE(matchesGraph(GFX942_CONV_WGRAD_AOT, wgradFixture(dense3x3, true).context()));
     // Another architecture.
-    DeviceProperties gfx942;
-    gfx942.gcnArchName = "gfx942";
-    gfx942.warpSize = 64;
-    EXPECT_FALSE(matchesGraph(GFX950_CONV_WGRAD_AOT,
-                              GraphFixture(buildWgradGraph(dense3x3, false), gfx942).context()));
+    DeviceProperties gfx950;
+    gfx950.gcnArchName = "gfx950";
+    gfx950.warpSize = 64;
+    EXPECT_FALSE(matchesGraph(GFX942_CONV_WGRAD_AOT,
+                              GraphFixture(buildWgradGraph(dense3x3, false), gfx950).context()));
 }
 
 TEST(TestGfx942ConvWgradNative, WorkspaceBytesAndPrepareRefuseInLockstep)
@@ -1373,7 +1338,7 @@ TEST(TestGfx942ConvWgradNative, WorkspaceBytesAndPrepareRefuseInLockstep)
                                           // without its fold.
                                           kernelOf(dwMetadata(), 10, 74)};
     prepareAll(kernels);
-    const auto& handler = dispatchHandler(GFX950_CONV_WGRAD_AOT);
+    const auto& handler = dispatchHandler(GFX942_CONV_WGRAD_AOT);
 
     const Problem dense3x3{2, 64, 64, 28, 28, 3, 3, 1, 1, 1, 1, 1, 1, 1, FP16};
     const Problem depthwise{4, 64, 64, 56, 56, 3, 3, 1, 1, 1, 1, 1, 1, 64, FP16};
@@ -1407,17 +1372,17 @@ TEST(TestGfx942ConvWgradNative, WorkspaceBytesAndPrepareRefuseInLockstep)
     for(const auto& c : cases)
     {
         const auto fixture = wgradFixture(c.problem, c.dwFloat);
-        const auto bound = matchesGraph(GFX950_CONV_WGRAD_AOT, fixture.context());
+        const auto bound = matchesGraph(GFX942_CONV_WGRAD_AOT, fixture.context());
         ASSERT_TRUE(bound) << c.what;
         const auto& kernel = kernels[c.kernel];
         // The matcher, workspaceBytes() and prepare() take one path (aotKernelPlan), so
         // each refusal is all three's and each admission all three's.
-        EXPECT_EQ(matchesKernel(GFX950_CONV_WGRAD_AOT, fixture.context(), kernel, *bound), c.served)
+        EXPECT_EQ(matchesKernel(GFX942_CONV_WGRAD_AOT, fixture.context(), kernel, *bound), c.served)
             << c.what;
         EXPECT_EQ(handler.workspaceBytes(fixture.context(), *bound, kernel), c.workspace) << c.what;
         const auto refusal = prepareRefusal(handler, fixture, *bound, kernel);
         EXPECT_EQ(!refusal.has_value(), c.served) << c.what << ": " << refusal.value_or("");
-        const auto score = scoreKernel(GFX950_CONV_WGRAD_AOT, fixture.context(), kernel, *bound);
+        const auto score = scoreKernel(GFX942_CONV_WGRAD_AOT, fixture.context(), kernel, *bound);
         if(c.served)
         {
             EXPECT_GT(score, 0.0) << c.what;
@@ -1429,7 +1394,7 @@ TEST(TestGfx942ConvWgradNative, WorkspaceBytesAndPrepareRefuseInLockstep)
     }
     // A helper's refusal names the adapter's reason.
     const auto denseFixture = wgradFixture(dense3x3, false);
-    const auto denseBound = matchesGraph(GFX950_CONV_WGRAD_AOT, denseFixture.context());
+    const auto denseBound = matchesGraph(GFX942_CONV_WGRAD_AOT, denseFixture.context());
     ASSERT_TRUE(denseBound);
     const auto helperRefusal = prepareRefusal(handler, denseFixture, *denseBound, kernels[5]);
     ASSERT_TRUE(helperRefusal);
@@ -1437,7 +1402,7 @@ TEST(TestGfx942ConvWgradNative, WorkspaceBytesAndPrepareRefuseInLockstep)
         << *helperRefusal;
     // Bindings other than the graph matcher's are refused.
     auto otherBound = *denseBound;
-    otherBound[std::string(GFX950_CONV_WGRAD_AOT.outputToken)] = int64_t{7};
+    otherBound[std::string(GFX942_CONV_WGRAD_AOT.outputToken)] = int64_t{7};
     EXPECT_THROW(handler.prepare(denseFixture.context(), otherBound, kernels[0]),
                  hipdnn_plugin_sdk::HipdnnPluginException);
 }
@@ -1489,15 +1454,16 @@ TEST(TestGfx942ConvWgradNative, TheShippedPacksServeEveryPlannedInstance)
         }
         prepareAll(byDtype[dtype]);
     }
-    // Implicit, the seven direct pipelines, the fold and the Stage 2, per dtype.
-    EXPECT_EQ(packs.size(), 20U);
+    // The shards the catalog ships: implicit and the Stage 2 per dtype, plus bf16's
+    // direct_wgrad_dw_cols and its fold.
+    EXPECT_EQ(packs.size(), 6U);
 
     std::map<std::string, size_t> servedBySteps;
     for(const auto& row : vectors::servedMatrix())
     {
         const auto problem = catalog::toProblem(row.problem, row.dtype);
         const auto fixture = wgradFixture(problem, problem.dwFloat);
-        const auto bound = matchesGraph(GFX950_CONV_WGRAD_AOT, fixture.context());
+        const auto bound = matchesGraph(GFX942_CONV_WGRAD_AOT, fixture.context());
         const auto& kernels = byDtype.at(row.dtype);
         if(!bound)
         {
@@ -1510,7 +1476,7 @@ TEST(TestGfx942ConvWgradNative, TheShippedPacksServeEveryPlannedInstance)
         for(size_t i = 0; i < kernels.size(); ++i)
         {
             const bool expected = row.served[i] == '1';
-            EXPECT_EQ(matchesKernel(GFX950_CONV_WGRAD_AOT, fixture.context(), kernels[i], *bound),
+            EXPECT_EQ(matchesKernel(GFX942_CONV_WGRAD_AOT, fixture.context(), kernels[i], *bound),
                       expected)
                 << entries[i].text("direct_variant") << " " << entries[i].text("instance_id")
                 << " on " << describe(problem) << " " << row.dtype
