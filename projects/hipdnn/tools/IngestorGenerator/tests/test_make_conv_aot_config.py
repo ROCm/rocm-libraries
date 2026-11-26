@@ -658,8 +658,9 @@ def test_direct_instances_are_variants_stating_their_own_fields(
         for f in dataclasses.fields(Gfx950ConvFwdAotSpec)
         if f.name in defaults
     } == defaults
+    # The bias flag comes last; only the bias catalog's KMD declares it.
     assert [f.name for f in dataclasses.fields(Gfx950ConvFwdAotSpec)] == list(
-        tool.SPEC_ORDER + tuple(defaults)
+        tool.SPEC_ORDER + tuple(defaults) + (tool.BIAS_FIELD,)
     )
     assert config["engine"]["knobs"] == list(tool.ENGINE_KNOBS)
     kmd = {field["name"] for field in config["kmd_fields"]}
