@@ -369,9 +369,13 @@ def _sdpa_autograd_fn(torch):
             # hipDNN forward has already run by then, so it must be counted
             # here -- waiting until after save_for_backward would lose it to
             # that signal propagating out uncounted.
-            recompute_extra = {}
-            if torch.is_grad_enabled() and torch._C._current_graph_task_id() != -1:
-                recompute_extra["recompute"] = 1
+            #
+            # "recompute" is read from payload, not computed here:
+            # torch.is_grad_enabled() is unconditionally False inside
+            # Function.forward (autograd runs it under its own no-grad guard),
+            # so it can never see the caller's real grad mode; _call_grad
+            # computes the flag before calling apply() and threads it through.
+            recompute_extra = {"recompute": 1} if payload["recompute"] else {}
             dropout_extra = {"dropout": 1} if payload["dropout_p"] else {}
             ov.note_aot(
                 payload["grad_key"],
@@ -1257,6 +1261,13 @@ class SdpaOverride(OpOverride):
                     torch, seed, offset, query.device
                 )
 
+            # Computed here, not inside Function.forward: autograd always runs
+            # forward() under its own no-grad guard, so torch.is_grad_enabled()
+            # can never see the caller's real grad mode there. grad_enabled is
+            # exactly that real mode, captured before any Function machinery
+            # runs, so this is correct for both branches below.
+            recompute = grad_enabled and torch._C._current_graph_task_id() != -1
+
             payload = {
                 "ov": self,
                 "entry_fwd": entry_fwd,
@@ -1274,6 +1285,7 @@ class SdpaOverride(OpOverride):
                 "grad_key": grad_key,
                 "bwd_key": bwd_key,
                 "mask_extras": mask_extras,
+                "recompute": recompute,
                 "dq_layout": (q_dq_alloc, q_dq_inv),
                 "dk_layout": (k_dk_alloc, k_dk_inv),
                 "dv_layout": (v_dv_alloc, v_dv_inv),
@@ -1300,9 +1312,7 @@ class SdpaOverride(OpOverride):
                     variant[_SEED_UID] = seed_t.data_ptr()
                     variant[_OFFSET_UID] = offset_t.data_ptr()
                 self._execute(entry_fwd, variant, device)
-                recompute_extra = {}
-                if torch.is_grad_enabled() and torch._C._current_graph_task_id() != -1:
-                    recompute_extra["recompute"] = 1
+                recompute_extra = {"recompute": 1} if recompute else {}
                 dropout_extra = {"dropout": 1} if dropout_p else {}
                 self.note_aot(
                     grad_key,

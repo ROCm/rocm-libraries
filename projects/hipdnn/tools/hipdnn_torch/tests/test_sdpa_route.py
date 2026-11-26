@@ -569,7 +569,7 @@ class _FailingExecuteOverride(_FakeOverride):
         raise NotApplicable("execute: boom")
 
 
-def _fake_fn_payload(ov):
+def _fake_fn_payload(ov, recompute=False):
     return {
         "ov": ov,
         "entry_fwd": {"engine": "fake_fwd"},
@@ -587,6 +587,7 @@ def _fake_fn_payload(ov):
         "grad_key": "grad x",
         "bwd_key": "bwd x",
         "mask_extras": {},
+        "recompute": recompute,
         "dq_layout": ([2, 2], [0, 1]),
         "dk_layout": ([2, 2], [0, 1]),
         "dv_layout": ([2, 2], [0, 1]),
@@ -615,6 +616,27 @@ def test_function_forward_counts_execute_before_checkpoint_stop_signal():
 
     assert ov.aot_calls == [("grad x", "fake_fwd", {})]
     assert ov.native_calls == []
+
+
+def test_function_forward_counts_recompute_flag_from_payload_not_grad_mode():
+    # torch.autograd.Function.forward always runs with grad mode disabled
+    # internally (autograd's own no-grad guard), so torch.is_grad_enabled()
+    # evaluated *inside* forward can never see the caller's real grad mode --
+    # even with torch.enable_grad() active around the apply() call below, as
+    # a genuine reentrant-checkpoint recompute would have. The recompute flag
+    # must come from payload (computed by the caller before apply()), not be
+    # recomputed here, or it is silently never set.
+    ov = _FakeOverride()
+    fn_cls = _sdpa_autograd_fn(torch)
+    payload = _fake_fn_payload(ov, recompute=True)
+    q = torch.randn(2, 2, requires_grad=True)
+    k = torch.randn(2, 2, requires_grad=True)
+    v = torch.randn(2, 2, requires_grad=True)
+
+    with torch.enable_grad():
+        fn_cls.apply(q, k, v, None, None, None, payload)
+
+    assert ov.aot_calls == [("grad x", "fake_fwd", {"recompute": 1})]
 
 
 def test_function_forward_execute_failure_counts_nothing_and_propagates():
