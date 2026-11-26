@@ -1,8 +1,9 @@
 # OOB BBS TN exact tuning, category 1, M=608 N=432 K=32 (pure GEMM, lda=ldb=128 = ceil(K/128)*128), gfx1250.
-# Full original candidate search for this size, merged from tune_1111/tune_1112 sets: p_ (1 file), s_ (1 file), pc_ (11/12 ClusterDim / ClusterAIDMapping / WorkGroupMapping round, 1 file).
-# Candidates: 114 groups in (incl. 2 ruler(s)) -> 64 after exact de-dup and removing 18 StreamK (cat1 rule), keeping only ClusterAIDMapping -2 for cluster kernels of the pc_ set (16 CAIDM -1 cluster groups not taken; the public winner is a CAIDM -1 cluster kernel and is kept). Per set in->kept (first occurrence wins): ruler 2->1; p 33->15; s 20->6; pc 59->42.
-# Group 1 = public winner (logic in this category); the previous logic kernel (logic_1109a) is StreamK -> it is only a comparison ruler in the separate 2nd BenchmarkProblems section at the end.
+# Full original candidate search for this size, merged from tune_1111/tune_1112 sets: p_ (1 file), s_ (1 file), pc_ (11/12 ClusterDim / ClusterAIDMapping / WorkGroupMapping round, 1 file); 11/21-11/27 TailFolding retune sets: tf21A_ (retune_1121 pass A/A2/A3), tf21B_ (pass B), tf21C_ (pass C), tf22_ (retune_tf1_1122 pass A), ff23_ (fixfold_1123 pass A), r27_ (retune_1127: WaveTileContiguousA x LDSSegmentInterleave, TPS None, TDMSI0 reference).
+# Candidates: 114 groups in (incl. 2 ruler(s)) -> 64 after exact de-dup and removing 18 StreamK (cat1 rule), keeping only ClusterAIDMapping -2 for cluster kernels of the pc_ set (16 CAIDM -1 cluster groups not taken; the public winner is a CAIDM -1 cluster kernel and is kept). Per set in->kept (first occurrence wins): ruler 2->1; p 33->15; s 20->6; pc 59->42. 11/27 merge (new sets, in->kept after de-dup against everything before): tf21A_ 1 file(s) 108->105; tf21B_ 1 file(s) 7->0; tf21C_ 0 file(s) 0->0; tf22_ 1 file(s) 48->13; ff23_ 1 file(s) 47->0; r27_ 1 file(s) 1->0. Total now 182 groups.
+# Group 1 = new winner (retune_1127, logic in this category) = previous winner (11/12 logic); the logic_1109a kernel is StreamK -> comparison ruler in the separate 2nd BenchmarkProblems section at the end.
 # cat1: no StreamK candidates (Ray); the only StreamK kernel is the comparison ruler in the 2nd section.
+# Needs develop with TailFolding (#16312) + TDMStoreInst PR #15133 (head 4eb56fa3f5a): TDMStoreInst 1 groups use AdaptiveGemm 0; the retune-tree knobs TailFolding / TailFoldingTestOff are removed (develop folds whenever legal).
 # EnqueuesPerSync 1000 / NumWarmups 300 / NumBenchmarks 5 / RotatingBufferSize 384 / CSVMergeSameProblemID false.
 GlobalParameters:
   MinimumRequiredVersion: 5.0.0
@@ -69,7 +70,6 @@ BenchmarkProblems:
     - MinGRIncPerMfma: [1]
     - PostLoopStoreInNll: [false]
     - PrefetchGlobalRead: [2]
-    - PrefetchLocalRead: [0]
     - ScheduleGROverBarrier: [0]
     - ScheduleIterAlg: [4]
     - StaggerU: [0]
@@ -88,13 +88,14 @@ BenchmarkProblems:
     - LdsBlockSizePerPadB: [256]
     - LdsPadA: [8]
     - LdsPadB: [8]
-    - HalfPLR: [0]
     - TDMIterateMode: [0]
     - MIArchVgpr: [true]
     - LDSSegmentBRotate: [0]
     - ActivationFuncCall: [true]
     - Groups:
-      - - ClusterAIDMapping: -1
+      - - PrefetchLocalRead: 0
+          HalfPLR: 0
+          ClusterAIDMapping: -1
           PrefetchGL2: 0
           StoreRemapVectorWidth: 0
           MatrixInstruction: [16, 16, 32, 1, 1, 1, 2, 1, 4]
@@ -108,7 +109,11 @@ BenchmarkProblems:
           ClusterDim: [4, 4]
           SourceSwap: true
           WorkGroupMapping: 8
-        - ClusterAIDMapping: -1
+          TDMStoreInst: false
+          PrefetchGL2SAddr: false
+        - PrefetchLocalRead: 0
+          HalfPLR: 0
+          ClusterAIDMapping: -1
           PrefetchGL2: 0
           StoreRemapVectorWidth: 0
           MatrixInstruction: [16, 16, 32, 1, 1, 1, 1, 2, 1]
@@ -122,7 +127,11 @@ BenchmarkProblems:
           ClusterDim: [2, 2]
           SourceSwap: true
           WorkGroupMapping: 8
-        - ClusterAIDMapping: -1
+          TDMStoreInst: false
+          PrefetchGL2SAddr: false
+        - PrefetchLocalRead: 0
+          HalfPLR: 0
+          ClusterAIDMapping: -1
           PrefetchGL2: 0
           StoreRemapVectorWidth: 0
           MatrixInstruction: [16, 16, 32, 1, 1, 1, 1, 2, 1]
@@ -136,7 +145,11 @@ BenchmarkProblems:
           ClusterDim: [2, 2]
           SourceSwap: false
           WorkGroupMapping: 8
-        - ClusterAIDMapping: -2
+          TDMStoreInst: false
+          PrefetchGL2SAddr: false
+        - PrefetchLocalRead: 0
+          HalfPLR: 0
+          ClusterAIDMapping: -2
           PrefetchGL2: 0
           StoreRemapVectorWidth: 0
           MatrixInstruction: [16, 16, 32, 1, 1, 1, 1, 1, 4]
@@ -150,7 +163,11 @@ BenchmarkProblems:
           ClusterDim: [1, 2]
           SourceSwap: false
           WorkGroupMapping: 8
-        - ClusterAIDMapping: -2
+          TDMStoreInst: false
+          PrefetchGL2SAddr: false
+        - PrefetchLocalRead: 0
+          HalfPLR: 0
+          ClusterAIDMapping: -2
           PrefetchGL2: 0
           StoreRemapVectorWidth: 0
           MatrixInstruction: [16, 16, 32, 1, 1, 1, 1, 1, 4]
@@ -164,7 +181,11 @@ BenchmarkProblems:
           ClusterDim: [1, 2]
           SourceSwap: false
           WorkGroupMapping: 8
-        - ClusterAIDMapping: -2
+          TDMStoreInst: false
+          PrefetchGL2SAddr: false
+        - PrefetchLocalRead: 0
+          HalfPLR: 0
+          ClusterAIDMapping: -2
           PrefetchGL2: 0
           StoreRemapVectorWidth: 0
           MatrixInstruction: [16, 16, 32, 1, 1, 1, 1, 1, 4]
@@ -178,7 +199,11 @@ BenchmarkProblems:
           ClusterDim: [1, 2]
           SourceSwap: true
           WorkGroupMapping: 8
-        - ClusterAIDMapping: -2
+          TDMStoreInst: false
+          PrefetchGL2SAddr: false
+        - PrefetchLocalRead: 0
+          HalfPLR: 0
+          ClusterAIDMapping: -2
           PrefetchGL2: 0
           StoreRemapVectorWidth: 0
           MatrixInstruction: [16, 16, 32, 1, 1, 1, 1, 1, 4]
@@ -192,7 +217,11 @@ BenchmarkProblems:
           ClusterDim: [1, 2]
           SourceSwap: true
           WorkGroupMapping: 8
-        - ClusterAIDMapping: -2
+          TDMStoreInst: false
+          PrefetchGL2SAddr: false
+        - PrefetchLocalRead: 0
+          HalfPLR: 0
+          ClusterAIDMapping: -2
           PrefetchGL2: 1
           StoreRemapVectorWidth: -1
           MatrixInstruction: [16, 16, 32, 1, 1, 1, 1, 1, 4]
@@ -206,7 +235,11 @@ BenchmarkProblems:
           ClusterDim: [1, 2]
           SourceSwap: false
           WorkGroupMapping: 8
-        - ClusterAIDMapping: -2
+          TDMStoreInst: false
+          PrefetchGL2SAddr: false
+        - PrefetchLocalRead: 0
+          HalfPLR: 0
+          ClusterAIDMapping: -2
           PrefetchGL2: 1
           StoreRemapVectorWidth: -1
           MatrixInstruction: [16, 16, 32, 1, 1, 1, 1, 1, 4]
@@ -220,7 +253,11 @@ BenchmarkProblems:
           ClusterDim: [1, 2]
           SourceSwap: false
           WorkGroupMapping: 8
-        - ClusterAIDMapping: -2
+          TDMStoreInst: false
+          PrefetchGL2SAddr: false
+        - PrefetchLocalRead: 0
+          HalfPLR: 0
+          ClusterAIDMapping: -2
           PrefetchGL2: 1
           StoreRemapVectorWidth: -1
           MatrixInstruction: [16, 16, 32, 1, 1, 1, 1, 1, 4]
@@ -234,7 +271,11 @@ BenchmarkProblems:
           ClusterDim: [1, 2]
           SourceSwap: true
           WorkGroupMapping: 8
-        - ClusterAIDMapping: -2
+          TDMStoreInst: false
+          PrefetchGL2SAddr: false
+        - PrefetchLocalRead: 0
+          HalfPLR: 0
+          ClusterAIDMapping: -2
           PrefetchGL2: 1
           StoreRemapVectorWidth: -1
           MatrixInstruction: [16, 16, 32, 1, 1, 1, 1, 1, 4]
@@ -248,7 +289,11 @@ BenchmarkProblems:
           ClusterDim: [1, 2]
           SourceSwap: true
           WorkGroupMapping: 8
-        - ClusterAIDMapping: -2
+          TDMStoreInst: false
+          PrefetchGL2SAddr: false
+        - PrefetchLocalRead: 0
+          HalfPLR: 0
+          ClusterAIDMapping: -2
           PrefetchGL2: 0
           StoreRemapVectorWidth: 0
           MatrixInstruction: [16, 16, 32, 1, 1, 1, 2, 1, 4]
@@ -262,7 +307,11 @@ BenchmarkProblems:
           ClusterDim: [1, 2]
           SourceSwap: false
           WorkGroupMapping: 8
-        - ClusterAIDMapping: -2
+          TDMStoreInst: false
+          PrefetchGL2SAddr: false
+        - PrefetchLocalRead: 0
+          HalfPLR: 0
+          ClusterAIDMapping: -2
           PrefetchGL2: 0
           StoreRemapVectorWidth: 0
           MatrixInstruction: [16, 16, 32, 1, 1, 1, 2, 1, 4]
@@ -276,7 +325,11 @@ BenchmarkProblems:
           ClusterDim: [1, 2]
           SourceSwap: false
           WorkGroupMapping: 8
-        - ClusterAIDMapping: -2
+          TDMStoreInst: false
+          PrefetchGL2SAddr: false
+        - PrefetchLocalRead: 0
+          HalfPLR: 0
+          ClusterAIDMapping: -2
           PrefetchGL2: 0
           StoreRemapVectorWidth: 0
           MatrixInstruction: [16, 16, 32, 1, 1, 1, 3, 1, 2]
@@ -290,7 +343,11 @@ BenchmarkProblems:
           ClusterDim: [1, 2]
           SourceSwap: false
           WorkGroupMapping: 8
-        - ClusterAIDMapping: -2
+          TDMStoreInst: false
+          PrefetchGL2SAddr: false
+        - PrefetchLocalRead: 0
+          HalfPLR: 0
+          ClusterAIDMapping: -2
           PrefetchGL2: 0
           StoreRemapVectorWidth: 0
           MatrixInstruction: [16, 16, 32, 1, 1, 1, 2, 1, 2]
@@ -304,7 +361,11 @@ BenchmarkProblems:
           ClusterDim: [1, 2]
           SourceSwap: false
           WorkGroupMapping: 8
-        - ClusterAIDMapping: -1
+          TDMStoreInst: false
+          PrefetchGL2SAddr: false
+        - PrefetchLocalRead: 0
+          HalfPLR: 0
+          ClusterAIDMapping: -1
           PrefetchGL2: 0
           StoreRemapVectorWidth: 0
           MatrixInstruction: [16, 16, 32, 1, 1, 1, 2, 1, 4]
@@ -318,7 +379,11 @@ BenchmarkProblems:
           ClusterDim: [1, 2]
           SourceSwap: false
           WorkGroupMapping: 8
-        - ClusterAIDMapping: -1
+          TDMStoreInst: false
+          PrefetchGL2SAddr: false
+        - PrefetchLocalRead: 0
+          HalfPLR: 0
+          ClusterAIDMapping: -1
           PrefetchGL2: 0
           StoreRemapVectorWidth: 0
           MatrixInstruction: [16, 16, 32, 1, 1, 1, 2, 1, 4]
@@ -332,7 +397,11 @@ BenchmarkProblems:
           ClusterDim: [1, 2]
           SourceSwap: false
           WorkGroupMapping: 8
-        - ClusterAIDMapping: -1
+          TDMStoreInst: false
+          PrefetchGL2SAddr: false
+        - PrefetchLocalRead: 0
+          HalfPLR: 0
+          ClusterAIDMapping: -1
           PrefetchGL2: 0
           StoreRemapVectorWidth: 0
           MatrixInstruction: [16, 16, 32, 1, 1, 1, 2, 1, 4]
@@ -346,7 +415,11 @@ BenchmarkProblems:
           ClusterDim: [1, 2]
           SourceSwap: false
           WorkGroupMapping: 8
-        - ClusterAIDMapping: -1
+          TDMStoreInst: false
+          PrefetchGL2SAddr: false
+        - PrefetchLocalRead: 0
+          HalfPLR: 0
+          ClusterAIDMapping: -1
           PrefetchGL2: 0
           StoreRemapVectorWidth: 0
           MatrixInstruction: [16, 16, 32, 1, 1, 1, 2, 1, 4]
@@ -360,7 +433,11 @@ BenchmarkProblems:
           ClusterDim: [1, 2]
           SourceSwap: true
           WorkGroupMapping: 8
-        - ClusterAIDMapping: -1
+          TDMStoreInst: false
+          PrefetchGL2SAddr: false
+        - PrefetchLocalRead: 0
+          HalfPLR: 0
+          ClusterAIDMapping: -1
           PrefetchGL2: 0
           StoreRemapVectorWidth: 0
           MatrixInstruction: [16, 16, 32, 1, 1, 1, 2, 1, 4]
@@ -374,7 +451,11 @@ BenchmarkProblems:
           ClusterDim: [1, 2]
           SourceSwap: true
           WorkGroupMapping: 8
-        - ClusterAIDMapping: -1
+          TDMStoreInst: false
+          PrefetchGL2SAddr: false
+        - PrefetchLocalRead: 0
+          HalfPLR: 0
+          ClusterAIDMapping: -1
           PrefetchGL2: 0
           StoreRemapVectorWidth: 0
           MatrixInstruction: [16, 16, 32, 1, 1, 1, 2, 1, 4]
@@ -388,7 +469,11 @@ BenchmarkProblems:
           ClusterDim: [1, 2]
           SourceSwap: false
           WorkGroupMapping: 8
-        - ClusterAIDMapping: -1
+          TDMStoreInst: false
+          PrefetchGL2SAddr: false
+        - PrefetchLocalRead: 0
+          HalfPLR: 0
+          ClusterAIDMapping: -1
           PrefetchGL2: 0
           StoreRemapVectorWidth: 0
           MatrixInstruction: [16, 16, 32, 1, 1, 1, 2, 1, 4]
@@ -402,7 +487,11 @@ BenchmarkProblems:
           ClusterDim: [1, 2]
           SourceSwap: true
           WorkGroupMapping: 8
-        - ClusterAIDMapping: -1
+          TDMStoreInst: false
+          PrefetchGL2SAddr: false
+        - PrefetchLocalRead: 0
+          HalfPLR: 0
+          ClusterAIDMapping: -1
           PrefetchGL2: 0
           StoreRemapVectorWidth: 0
           MatrixInstruction: [16, 16, 32, 1, 1, 1, 2, 1, 4]
@@ -416,7 +505,11 @@ BenchmarkProblems:
           ClusterDim: [1, 2]
           SourceSwap: true
           WorkGroupMapping: 8
-        - ClusterAIDMapping: -1
+          TDMStoreInst: false
+          PrefetchGL2SAddr: false
+        - PrefetchLocalRead: 0
+          HalfPLR: 0
+          ClusterAIDMapping: -1
           PrefetchGL2: 0
           StoreRemapVectorWidth: 0
           MatrixInstruction: [16, 16, 32, 1, 1, 1, 1, 2, 1]
@@ -430,7 +523,11 @@ BenchmarkProblems:
           ClusterDim: [1, 1]
           SourceSwap: true
           WorkGroupMapping: 1
-        - ClusterAIDMapping: -1
+          TDMStoreInst: false
+          PrefetchGL2SAddr: false
+        - PrefetchLocalRead: 0
+          HalfPLR: 0
+          ClusterAIDMapping: -1
           PrefetchGL2: 0
           StoreRemapVectorWidth: 0
           MatrixInstruction: [16, 16, 32, 1, 1, 1, 1, 2, 1]
@@ -444,7 +541,11 @@ BenchmarkProblems:
           ClusterDim: [1, 1]
           SourceSwap: true
           WorkGroupMapping: 4
-        - ClusterAIDMapping: -1
+          TDMStoreInst: false
+          PrefetchGL2SAddr: false
+        - PrefetchLocalRead: 0
+          HalfPLR: 0
+          ClusterAIDMapping: -1
           PrefetchGL2: 0
           StoreRemapVectorWidth: 0
           MatrixInstruction: [16, 16, 32, 1, 1, 1, 1, 2, 1]
@@ -458,7 +559,11 @@ BenchmarkProblems:
           ClusterDim: [1, 1]
           SourceSwap: true
           WorkGroupMapping: 8
-        - ClusterAIDMapping: -1
+          TDMStoreInst: false
+          PrefetchGL2SAddr: false
+        - PrefetchLocalRead: 0
+          HalfPLR: 0
+          ClusterAIDMapping: -1
           PrefetchGL2: 0
           StoreRemapVectorWidth: 0
           MatrixInstruction: [16, 16, 32, 1, 1, 1, 1, 2, 1]
@@ -472,7 +577,11 @@ BenchmarkProblems:
           ClusterDim: [1, 1]
           SourceSwap: true
           WorkGroupMapping: 16
-        - ClusterAIDMapping: -1
+          TDMStoreInst: false
+          PrefetchGL2SAddr: false
+        - PrefetchLocalRead: 0
+          HalfPLR: 0
+          ClusterAIDMapping: -1
           PrefetchGL2: 0
           StoreRemapVectorWidth: 0
           MatrixInstruction: [16, 16, 32, 1, 1, 1, 1, 2, 1]
@@ -486,7 +595,11 @@ BenchmarkProblems:
           ClusterDim: [1, 1]
           SourceSwap: true
           WorkGroupMapping: 32
-        - ClusterAIDMapping: -2
+          TDMStoreInst: false
+          PrefetchGL2SAddr: false
+        - PrefetchLocalRead: 0
+          HalfPLR: 0
+          ClusterAIDMapping: -2
           PrefetchGL2: 0
           StoreRemapVectorWidth: 0
           MatrixInstruction: [16, 16, 32, 1, 1, 1, 1, 2, 1]
@@ -500,7 +613,11 @@ BenchmarkProblems:
           ClusterDim: [2, 2]
           SourceSwap: true
           WorkGroupMapping: 8
-        - ClusterAIDMapping: -2
+          TDMStoreInst: false
+          PrefetchGL2SAddr: false
+        - PrefetchLocalRead: 0
+          HalfPLR: 0
+          ClusterAIDMapping: -2
           PrefetchGL2: 0
           StoreRemapVectorWidth: 0
           MatrixInstruction: [16, 16, 32, 1, 1, 1, 1, 2, 1]
@@ -514,7 +631,11 @@ BenchmarkProblems:
           ClusterDim: [4, 2]
           SourceSwap: true
           WorkGroupMapping: 8
-        - ClusterAIDMapping: -2
+          TDMStoreInst: false
+          PrefetchGL2SAddr: false
+        - PrefetchLocalRead: 0
+          HalfPLR: 0
+          ClusterAIDMapping: -2
           PrefetchGL2: 0
           StoreRemapVectorWidth: 0
           MatrixInstruction: [16, 16, 32, 1, 1, 1, 1, 2, 1]
@@ -528,7 +649,11 @@ BenchmarkProblems:
           ClusterDim: [4, 4]
           SourceSwap: true
           WorkGroupMapping: 8
-        - ClusterAIDMapping: -1
+          TDMStoreInst: false
+          PrefetchGL2SAddr: false
+        - PrefetchLocalRead: 0
+          HalfPLR: 0
+          ClusterAIDMapping: -1
           PrefetchGL2: 0
           StoreRemapVectorWidth: 0
           MatrixInstruction: [16, 16, 32, 1, 1, 1, 1, 2, 1]
@@ -542,7 +667,11 @@ BenchmarkProblems:
           ClusterDim: [1, 1]
           SourceSwap: false
           WorkGroupMapping: 1
-        - ClusterAIDMapping: -1
+          TDMStoreInst: false
+          PrefetchGL2SAddr: false
+        - PrefetchLocalRead: 0
+          HalfPLR: 0
+          ClusterAIDMapping: -1
           PrefetchGL2: 0
           StoreRemapVectorWidth: 0
           MatrixInstruction: [16, 16, 32, 1, 1, 1, 1, 2, 1]
@@ -556,7 +685,11 @@ BenchmarkProblems:
           ClusterDim: [1, 1]
           SourceSwap: false
           WorkGroupMapping: 4
-        - ClusterAIDMapping: -1
+          TDMStoreInst: false
+          PrefetchGL2SAddr: false
+        - PrefetchLocalRead: 0
+          HalfPLR: 0
+          ClusterAIDMapping: -1
           PrefetchGL2: 0
           StoreRemapVectorWidth: 0
           MatrixInstruction: [16, 16, 32, 1, 1, 1, 1, 2, 1]
@@ -570,7 +703,11 @@ BenchmarkProblems:
           ClusterDim: [1, 1]
           SourceSwap: false
           WorkGroupMapping: 8
-        - ClusterAIDMapping: -1
+          TDMStoreInst: false
+          PrefetchGL2SAddr: false
+        - PrefetchLocalRead: 0
+          HalfPLR: 0
+          ClusterAIDMapping: -1
           PrefetchGL2: 0
           StoreRemapVectorWidth: 0
           MatrixInstruction: [16, 16, 32, 1, 1, 1, 1, 2, 1]
@@ -584,7 +721,11 @@ BenchmarkProblems:
           ClusterDim: [1, 1]
           SourceSwap: false
           WorkGroupMapping: 16
-        - ClusterAIDMapping: -1
+          TDMStoreInst: false
+          PrefetchGL2SAddr: false
+        - PrefetchLocalRead: 0
+          HalfPLR: 0
+          ClusterAIDMapping: -1
           PrefetchGL2: 0
           StoreRemapVectorWidth: 0
           MatrixInstruction: [16, 16, 32, 1, 1, 1, 1, 2, 1]
@@ -598,7 +739,11 @@ BenchmarkProblems:
           ClusterDim: [1, 1]
           SourceSwap: false
           WorkGroupMapping: 32
-        - ClusterAIDMapping: -2
+          TDMStoreInst: false
+          PrefetchGL2SAddr: false
+        - PrefetchLocalRead: 0
+          HalfPLR: 0
+          ClusterAIDMapping: -2
           PrefetchGL2: 0
           StoreRemapVectorWidth: 0
           MatrixInstruction: [16, 16, 32, 1, 1, 1, 1, 2, 1]
@@ -612,7 +757,11 @@ BenchmarkProblems:
           ClusterDim: [2, 2]
           SourceSwap: false
           WorkGroupMapping: 8
-        - ClusterAIDMapping: -2
+          TDMStoreInst: false
+          PrefetchGL2SAddr: false
+        - PrefetchLocalRead: 0
+          HalfPLR: 0
+          ClusterAIDMapping: -2
           PrefetchGL2: 0
           StoreRemapVectorWidth: 0
           MatrixInstruction: [16, 16, 32, 1, 1, 1, 1, 2, 1]
@@ -626,7 +775,11 @@ BenchmarkProblems:
           ClusterDim: [4, 2]
           SourceSwap: false
           WorkGroupMapping: 8
-        - ClusterAIDMapping: -2
+          TDMStoreInst: false
+          PrefetchGL2SAddr: false
+        - PrefetchLocalRead: 0
+          HalfPLR: 0
+          ClusterAIDMapping: -2
           PrefetchGL2: 0
           StoreRemapVectorWidth: 0
           MatrixInstruction: [16, 16, 32, 1, 1, 1, 1, 2, 1]
@@ -640,7 +793,11 @@ BenchmarkProblems:
           ClusterDim: [4, 4]
           SourceSwap: false
           WorkGroupMapping: 8
-        - ClusterAIDMapping: -1
+          TDMStoreInst: false
+          PrefetchGL2SAddr: false
+        - PrefetchLocalRead: 0
+          HalfPLR: 0
+          ClusterAIDMapping: -1
           PrefetchGL2: 0
           StoreRemapVectorWidth: 0
           MatrixInstruction: [16, 16, 32, 1, 1, 1, 2, 1, 4]
@@ -654,7 +811,11 @@ BenchmarkProblems:
           ClusterDim: [1, 1]
           SourceSwap: true
           WorkGroupMapping: 1
-        - ClusterAIDMapping: -1
+          TDMStoreInst: false
+          PrefetchGL2SAddr: false
+        - PrefetchLocalRead: 0
+          HalfPLR: 0
+          ClusterAIDMapping: -1
           PrefetchGL2: 0
           StoreRemapVectorWidth: 0
           MatrixInstruction: [16, 16, 32, 1, 1, 1, 2, 1, 4]
@@ -668,7 +829,11 @@ BenchmarkProblems:
           ClusterDim: [1, 1]
           SourceSwap: true
           WorkGroupMapping: 4
-        - ClusterAIDMapping: -1
+          TDMStoreInst: false
+          PrefetchGL2SAddr: false
+        - PrefetchLocalRead: 0
+          HalfPLR: 0
+          ClusterAIDMapping: -1
           PrefetchGL2: 0
           StoreRemapVectorWidth: 0
           MatrixInstruction: [16, 16, 32, 1, 1, 1, 2, 1, 4]
@@ -682,7 +847,11 @@ BenchmarkProblems:
           ClusterDim: [1, 1]
           SourceSwap: true
           WorkGroupMapping: 8
-        - ClusterAIDMapping: -1
+          TDMStoreInst: false
+          PrefetchGL2SAddr: false
+        - PrefetchLocalRead: 0
+          HalfPLR: 0
+          ClusterAIDMapping: -1
           PrefetchGL2: 0
           StoreRemapVectorWidth: 0
           MatrixInstruction: [16, 16, 32, 1, 1, 1, 2, 1, 4]
@@ -696,7 +865,11 @@ BenchmarkProblems:
           ClusterDim: [1, 1]
           SourceSwap: true
           WorkGroupMapping: 16
-        - ClusterAIDMapping: -1
+          TDMStoreInst: false
+          PrefetchGL2SAddr: false
+        - PrefetchLocalRead: 0
+          HalfPLR: 0
+          ClusterAIDMapping: -1
           PrefetchGL2: 0
           StoreRemapVectorWidth: 0
           MatrixInstruction: [16, 16, 32, 1, 1, 1, 2, 1, 4]
@@ -710,7 +883,11 @@ BenchmarkProblems:
           ClusterDim: [1, 1]
           SourceSwap: true
           WorkGroupMapping: 32
-        - ClusterAIDMapping: -2
+          TDMStoreInst: false
+          PrefetchGL2SAddr: false
+        - PrefetchLocalRead: 0
+          HalfPLR: 0
+          ClusterAIDMapping: -2
           PrefetchGL2: 0
           StoreRemapVectorWidth: 0
           MatrixInstruction: [16, 16, 32, 1, 1, 1, 2, 1, 4]
@@ -724,7 +901,11 @@ BenchmarkProblems:
           ClusterDim: [2, 2]
           SourceSwap: true
           WorkGroupMapping: 8
-        - ClusterAIDMapping: -2
+          TDMStoreInst: false
+          PrefetchGL2SAddr: false
+        - PrefetchLocalRead: 0
+          HalfPLR: 0
+          ClusterAIDMapping: -2
           PrefetchGL2: 0
           StoreRemapVectorWidth: 0
           MatrixInstruction: [16, 16, 32, 1, 1, 1, 2, 1, 4]
@@ -738,7 +919,11 @@ BenchmarkProblems:
           ClusterDim: [4, 2]
           SourceSwap: true
           WorkGroupMapping: 8
-        - ClusterAIDMapping: -2
+          TDMStoreInst: false
+          PrefetchGL2SAddr: false
+        - PrefetchLocalRead: 0
+          HalfPLR: 0
+          ClusterAIDMapping: -2
           PrefetchGL2: 0
           StoreRemapVectorWidth: 0
           MatrixInstruction: [16, 16, 32, 1, 1, 1, 2, 1, 4]
@@ -752,7 +937,11 @@ BenchmarkProblems:
           ClusterDim: [4, 4]
           SourceSwap: true
           WorkGroupMapping: 8
-        - ClusterAIDMapping: -2
+          TDMStoreInst: false
+          PrefetchGL2SAddr: false
+        - PrefetchLocalRead: 0
+          HalfPLR: 0
+          ClusterAIDMapping: -2
           PrefetchGL2: 0
           StoreRemapVectorWidth: 0
           MatrixInstruction: [16, 16, 32, 1, 1, 1, 2, 1, 4]
@@ -766,7 +955,11 @@ BenchmarkProblems:
           ClusterDim: [1, 2]
           SourceSwap: true
           WorkGroupMapping: 8
-        - ClusterAIDMapping: -1
+          TDMStoreInst: false
+          PrefetchGL2SAddr: false
+        - PrefetchLocalRead: 0
+          HalfPLR: 0
+          ClusterAIDMapping: -1
           PrefetchGL2: 0
           StoreRemapVectorWidth: 0
           MatrixInstruction: [16, 16, 32, 1, 1, 1, 2, 1, 4]
@@ -780,7 +973,11 @@ BenchmarkProblems:
           ClusterDim: [1, 1]
           SourceSwap: true
           WorkGroupMapping: 1
-        - ClusterAIDMapping: -1
+          TDMStoreInst: false
+          PrefetchGL2SAddr: false
+        - PrefetchLocalRead: 0
+          HalfPLR: 0
+          ClusterAIDMapping: -1
           PrefetchGL2: 0
           StoreRemapVectorWidth: 0
           MatrixInstruction: [16, 16, 32, 1, 1, 1, 2, 1, 4]
@@ -794,7 +991,11 @@ BenchmarkProblems:
           ClusterDim: [1, 1]
           SourceSwap: true
           WorkGroupMapping: 4
-        - ClusterAIDMapping: -1
+          TDMStoreInst: false
+          PrefetchGL2SAddr: false
+        - PrefetchLocalRead: 0
+          HalfPLR: 0
+          ClusterAIDMapping: -1
           PrefetchGL2: 0
           StoreRemapVectorWidth: 0
           MatrixInstruction: [16, 16, 32, 1, 1, 1, 2, 1, 4]
@@ -808,7 +1009,11 @@ BenchmarkProblems:
           ClusterDim: [1, 1]
           SourceSwap: true
           WorkGroupMapping: 8
-        - ClusterAIDMapping: -1
+          TDMStoreInst: false
+          PrefetchGL2SAddr: false
+        - PrefetchLocalRead: 0
+          HalfPLR: 0
+          ClusterAIDMapping: -1
           PrefetchGL2: 0
           StoreRemapVectorWidth: 0
           MatrixInstruction: [16, 16, 32, 1, 1, 1, 2, 1, 4]
@@ -822,7 +1027,11 @@ BenchmarkProblems:
           ClusterDim: [1, 1]
           SourceSwap: true
           WorkGroupMapping: 16
-        - ClusterAIDMapping: -1
+          TDMStoreInst: false
+          PrefetchGL2SAddr: false
+        - PrefetchLocalRead: 0
+          HalfPLR: 0
+          ClusterAIDMapping: -1
           PrefetchGL2: 0
           StoreRemapVectorWidth: 0
           MatrixInstruction: [16, 16, 32, 1, 1, 1, 2, 1, 4]
@@ -836,7 +1045,11 @@ BenchmarkProblems:
           ClusterDim: [1, 1]
           SourceSwap: true
           WorkGroupMapping: 32
-        - ClusterAIDMapping: -2
+          TDMStoreInst: false
+          PrefetchGL2SAddr: false
+        - PrefetchLocalRead: 0
+          HalfPLR: 0
+          ClusterAIDMapping: -2
           PrefetchGL2: 0
           StoreRemapVectorWidth: 0
           MatrixInstruction: [16, 16, 32, 1, 1, 1, 2, 1, 4]
@@ -850,7 +1063,11 @@ BenchmarkProblems:
           ClusterDim: [2, 2]
           SourceSwap: true
           WorkGroupMapping: 8
-        - ClusterAIDMapping: -2
+          TDMStoreInst: false
+          PrefetchGL2SAddr: false
+        - PrefetchLocalRead: 0
+          HalfPLR: 0
+          ClusterAIDMapping: -2
           PrefetchGL2: 0
           StoreRemapVectorWidth: 0
           MatrixInstruction: [16, 16, 32, 1, 1, 1, 2, 1, 4]
@@ -864,7 +1081,11 @@ BenchmarkProblems:
           ClusterDim: [4, 2]
           SourceSwap: true
           WorkGroupMapping: 8
-        - ClusterAIDMapping: -2
+          TDMStoreInst: false
+          PrefetchGL2SAddr: false
+        - PrefetchLocalRead: 0
+          HalfPLR: 0
+          ClusterAIDMapping: -2
           PrefetchGL2: 0
           StoreRemapVectorWidth: 0
           MatrixInstruction: [16, 16, 32, 1, 1, 1, 2, 1, 4]
@@ -878,7 +1099,11 @@ BenchmarkProblems:
           ClusterDim: [4, 4]
           SourceSwap: true
           WorkGroupMapping: 8
-        - ClusterAIDMapping: -2
+          TDMStoreInst: false
+          PrefetchGL2SAddr: false
+        - PrefetchLocalRead: 0
+          HalfPLR: 0
+          ClusterAIDMapping: -2
           PrefetchGL2: 0
           StoreRemapVectorWidth: 0
           MatrixInstruction: [16, 16, 32, 1, 1, 1, 2, 1, 4]
@@ -892,7 +1117,11 @@ BenchmarkProblems:
           ClusterDim: [1, 2]
           SourceSwap: true
           WorkGroupMapping: 8
-        - ClusterAIDMapping: -1
+          TDMStoreInst: false
+          PrefetchGL2SAddr: false
+        - PrefetchLocalRead: 0
+          HalfPLR: 0
+          ClusterAIDMapping: -1
           PrefetchGL2: 0
           StoreRemapVectorWidth: 0
           MatrixInstruction: [16, 16, 32, 1, 1, 1, 3, 1, 2]
@@ -906,7 +1135,11 @@ BenchmarkProblems:
           ClusterDim: [1, 1]
           SourceSwap: false
           WorkGroupMapping: 1
-        - ClusterAIDMapping: -1
+          TDMStoreInst: false
+          PrefetchGL2SAddr: false
+        - PrefetchLocalRead: 0
+          HalfPLR: 0
+          ClusterAIDMapping: -1
           PrefetchGL2: 0
           StoreRemapVectorWidth: 0
           MatrixInstruction: [16, 16, 32, 1, 1, 1, 3, 1, 2]
@@ -920,7 +1153,11 @@ BenchmarkProblems:
           ClusterDim: [1, 1]
           SourceSwap: false
           WorkGroupMapping: 4
-        - ClusterAIDMapping: -1
+          TDMStoreInst: false
+          PrefetchGL2SAddr: false
+        - PrefetchLocalRead: 0
+          HalfPLR: 0
+          ClusterAIDMapping: -1
           PrefetchGL2: 0
           StoreRemapVectorWidth: 0
           MatrixInstruction: [16, 16, 32, 1, 1, 1, 3, 1, 2]
@@ -934,7 +1171,11 @@ BenchmarkProblems:
           ClusterDim: [1, 1]
           SourceSwap: false
           WorkGroupMapping: 8
-        - ClusterAIDMapping: -1
+          TDMStoreInst: false
+          PrefetchGL2SAddr: false
+        - PrefetchLocalRead: 0
+          HalfPLR: 0
+          ClusterAIDMapping: -1
           PrefetchGL2: 0
           StoreRemapVectorWidth: 0
           MatrixInstruction: [16, 16, 32, 1, 1, 1, 3, 1, 2]
@@ -948,7 +1189,11 @@ BenchmarkProblems:
           ClusterDim: [1, 1]
           SourceSwap: false
           WorkGroupMapping: 16
-        - ClusterAIDMapping: -1
+          TDMStoreInst: false
+          PrefetchGL2SAddr: false
+        - PrefetchLocalRead: 0
+          HalfPLR: 0
+          ClusterAIDMapping: -1
           PrefetchGL2: 0
           StoreRemapVectorWidth: 0
           MatrixInstruction: [16, 16, 32, 1, 1, 1, 3, 1, 2]
@@ -962,7 +1207,11 @@ BenchmarkProblems:
           ClusterDim: [1, 1]
           SourceSwap: false
           WorkGroupMapping: 32
-        - ClusterAIDMapping: -2
+          TDMStoreInst: false
+          PrefetchGL2SAddr: false
+        - PrefetchLocalRead: 0
+          HalfPLR: 0
+          ClusterAIDMapping: -2
           PrefetchGL2: 0
           StoreRemapVectorWidth: 0
           MatrixInstruction: [16, 16, 32, 1, 1, 1, 3, 1, 2]
@@ -976,7 +1225,11 @@ BenchmarkProblems:
           ClusterDim: [4, 1]
           SourceSwap: false
           WorkGroupMapping: 8
-        - ClusterAIDMapping: -2
+          TDMStoreInst: false
+          PrefetchGL2SAddr: false
+        - PrefetchLocalRead: 0
+          HalfPLR: 0
+          ClusterAIDMapping: -2
           PrefetchGL2: 0
           StoreRemapVectorWidth: 0
           MatrixInstruction: [16, 16, 32, 1, 1, 1, 3, 1, 2]
@@ -990,6 +1243,2132 @@ BenchmarkProblems:
           ClusterDim: [2, 1]
           SourceSwap: false
           WorkGroupMapping: 8
+          TDMStoreInst: false
+          PrefetchGL2SAddr: false
+        - PrefetchLocalRead: 0
+          HalfPLR: 0
+          ClusterAIDMapping: -1
+          PrefetchGL2: 1
+          StoreRemapVectorWidth: 0
+          MatrixInstruction: [16, 16, 32, 1, 1, 1, 2, 1, 4]
+          WorkGroup: [32, 1, 1]
+          DepthU: 32
+          VectorWidthB: 2
+          StoreVectorWidth: 1
+          LDSSegmentInterleave: 1
+          AdaptiveGemm: 1
+          CompactLoopStore: false
+          ClusterDim: [1, 1]
+          SourceSwap: true
+          WorkGroupMapping: 8
+          TDMStoreInst: false
+          PrefetchGL2SAddr: false
+        - PrefetchLocalRead: 0
+          HalfPLR: 0
+          ClusterAIDMapping: -1
+          PrefetchGL2: 1
+          StoreRemapVectorWidth: 0
+          MatrixInstruction: [16, 16, 32, 1, 1, 1, 2, 1, 4]
+          WorkGroup: [32, 1, 1]
+          DepthU: 32
+          VectorWidthB: 2
+          StoreVectorWidth: 1
+          LDSSegmentInterleave: 1
+          AdaptiveGemm: 1
+          CompactLoopStore: false
+          ClusterDim: [1, 1]
+          SourceSwap: true
+          WorkGroupMapping: 8
+          TDMStoreInst: false
+          PrefetchGL2SAddr: true
+        - PrefetchLocalRead: 0
+          HalfPLR: 0
+          ClusterAIDMapping: -1
+          PrefetchGL2: 2
+          StoreRemapVectorWidth: 0
+          MatrixInstruction: [16, 16, 32, 1, 1, 1, 2, 1, 4]
+          WorkGroup: [32, 1, 1]
+          DepthU: 32
+          VectorWidthB: 2
+          StoreVectorWidth: 1
+          LDSSegmentInterleave: 1
+          AdaptiveGemm: 1
+          CompactLoopStore: false
+          ClusterDim: [1, 1]
+          SourceSwap: true
+          WorkGroupMapping: 8
+          TDMStoreInst: false
+          PrefetchGL2SAddr: false
+        - PrefetchLocalRead: 0
+          HalfPLR: 0
+          ClusterAIDMapping: -1
+          PrefetchGL2: 2
+          StoreRemapVectorWidth: 0
+          MatrixInstruction: [16, 16, 32, 1, 1, 1, 2, 1, 4]
+          WorkGroup: [32, 1, 1]
+          DepthU: 32
+          VectorWidthB: 2
+          StoreVectorWidth: 1
+          LDSSegmentInterleave: 1
+          AdaptiveGemm: 1
+          CompactLoopStore: false
+          ClusterDim: [1, 1]
+          SourceSwap: true
+          WorkGroupMapping: 8
+          TDMStoreInst: false
+          PrefetchGL2SAddr: true
+        - PrefetchLocalRead: 0
+          HalfPLR: 0
+          ClusterAIDMapping: -1
+          PrefetchGL2: 0
+          StoreRemapVectorWidth: 0
+          MatrixInstruction: [16, 16, 32, 1, 1, 1, 2, 1, 4]
+          WorkGroup: [32, 1, 1]
+          DepthU: 32
+          VectorWidthB: 2
+          StoreVectorWidth: 1
+          LDSSegmentInterleave: 1
+          AdaptiveGemm: 1
+          CompactLoopStore: false
+          ClusterDim: [2, 2]
+          SourceSwap: true
+          WorkGroupMapping: 8
+          TDMStoreInst: false
+          PrefetchGL2SAddr: false
+        - PrefetchLocalRead: 0
+          HalfPLR: 0
+          ClusterAIDMapping: -1
+          PrefetchGL2: 1
+          StoreRemapVectorWidth: 0
+          MatrixInstruction: [16, 16, 32, 1, 1, 1, 2, 1, 4]
+          WorkGroup: [32, 1, 1]
+          DepthU: 32
+          VectorWidthB: 2
+          StoreVectorWidth: 1
+          LDSSegmentInterleave: 1
+          AdaptiveGemm: 1
+          CompactLoopStore: false
+          ClusterDim: [2, 2]
+          SourceSwap: true
+          WorkGroupMapping: 8
+          TDMStoreInst: false
+          PrefetchGL2SAddr: false
+        - PrefetchLocalRead: 0
+          HalfPLR: 0
+          ClusterAIDMapping: -1
+          PrefetchGL2: 1
+          StoreRemapVectorWidth: 0
+          MatrixInstruction: [16, 16, 32, 1, 1, 1, 2, 1, 4]
+          WorkGroup: [32, 1, 1]
+          DepthU: 32
+          VectorWidthB: 2
+          StoreVectorWidth: 1
+          LDSSegmentInterleave: 1
+          AdaptiveGemm: 1
+          CompactLoopStore: false
+          ClusterDim: [2, 2]
+          SourceSwap: true
+          WorkGroupMapping: 8
+          TDMStoreInst: false
+          PrefetchGL2SAddr: true
+        - PrefetchLocalRead: 0
+          HalfPLR: 0
+          ClusterAIDMapping: -1
+          PrefetchGL2: 2
+          StoreRemapVectorWidth: 0
+          MatrixInstruction: [16, 16, 32, 1, 1, 1, 2, 1, 4]
+          WorkGroup: [32, 1, 1]
+          DepthU: 32
+          VectorWidthB: 2
+          StoreVectorWidth: 1
+          LDSSegmentInterleave: 1
+          AdaptiveGemm: 1
+          CompactLoopStore: false
+          ClusterDim: [2, 2]
+          SourceSwap: true
+          WorkGroupMapping: 8
+          TDMStoreInst: false
+          PrefetchGL2SAddr: false
+        - PrefetchLocalRead: 0
+          HalfPLR: 0
+          ClusterAIDMapping: -1
+          PrefetchGL2: 2
+          StoreRemapVectorWidth: 0
+          MatrixInstruction: [16, 16, 32, 1, 1, 1, 2, 1, 4]
+          WorkGroup: [32, 1, 1]
+          DepthU: 32
+          VectorWidthB: 2
+          StoreVectorWidth: 1
+          LDSSegmentInterleave: 1
+          AdaptiveGemm: 1
+          CompactLoopStore: false
+          ClusterDim: [2, 2]
+          SourceSwap: true
+          WorkGroupMapping: 8
+          TDMStoreInst: false
+          PrefetchGL2SAddr: true
+        - PrefetchLocalRead: 0
+          HalfPLR: 0
+          ClusterAIDMapping: -1
+          PrefetchGL2: 0
+          StoreRemapVectorWidth: 0
+          MatrixInstruction: [16, 16, 32, 1, 1, 1, 2, 1, 4]
+          WorkGroup: [32, 1, 1]
+          DepthU: 32
+          VectorWidthB: 2
+          StoreVectorWidth: 1
+          LDSSegmentInterleave: 1
+          AdaptiveGemm: 1
+          CompactLoopStore: false
+          ClusterDim: [4, 2]
+          SourceSwap: true
+          WorkGroupMapping: 8
+          TDMStoreInst: false
+          PrefetchGL2SAddr: false
+        - PrefetchLocalRead: 0
+          HalfPLR: 0
+          ClusterAIDMapping: -1
+          PrefetchGL2: 1
+          StoreRemapVectorWidth: 0
+          MatrixInstruction: [16, 16, 32, 1, 1, 1, 2, 1, 4]
+          WorkGroup: [32, 1, 1]
+          DepthU: 32
+          VectorWidthB: 2
+          StoreVectorWidth: 1
+          LDSSegmentInterleave: 1
+          AdaptiveGemm: 1
+          CompactLoopStore: false
+          ClusterDim: [4, 2]
+          SourceSwap: true
+          WorkGroupMapping: 8
+          TDMStoreInst: false
+          PrefetchGL2SAddr: false
+        - PrefetchLocalRead: 0
+          HalfPLR: 0
+          ClusterAIDMapping: -1
+          PrefetchGL2: 1
+          StoreRemapVectorWidth: 0
+          MatrixInstruction: [16, 16, 32, 1, 1, 1, 2, 1, 4]
+          WorkGroup: [32, 1, 1]
+          DepthU: 32
+          VectorWidthB: 2
+          StoreVectorWidth: 1
+          LDSSegmentInterleave: 1
+          AdaptiveGemm: 1
+          CompactLoopStore: false
+          ClusterDim: [4, 2]
+          SourceSwap: true
+          WorkGroupMapping: 8
+          TDMStoreInst: false
+          PrefetchGL2SAddr: true
+        - PrefetchLocalRead: 0
+          HalfPLR: 0
+          ClusterAIDMapping: -1
+          PrefetchGL2: 2
+          StoreRemapVectorWidth: 0
+          MatrixInstruction: [16, 16, 32, 1, 1, 1, 2, 1, 4]
+          WorkGroup: [32, 1, 1]
+          DepthU: 32
+          VectorWidthB: 2
+          StoreVectorWidth: 1
+          LDSSegmentInterleave: 1
+          AdaptiveGemm: 1
+          CompactLoopStore: false
+          ClusterDim: [4, 2]
+          SourceSwap: true
+          WorkGroupMapping: 8
+          TDMStoreInst: false
+          PrefetchGL2SAddr: false
+        - PrefetchLocalRead: 0
+          HalfPLR: 0
+          ClusterAIDMapping: -1
+          PrefetchGL2: 2
+          StoreRemapVectorWidth: 0
+          MatrixInstruction: [16, 16, 32, 1, 1, 1, 2, 1, 4]
+          WorkGroup: [32, 1, 1]
+          DepthU: 32
+          VectorWidthB: 2
+          StoreVectorWidth: 1
+          LDSSegmentInterleave: 1
+          AdaptiveGemm: 1
+          CompactLoopStore: false
+          ClusterDim: [4, 2]
+          SourceSwap: true
+          WorkGroupMapping: 8
+          TDMStoreInst: false
+          PrefetchGL2SAddr: true
+        - PrefetchLocalRead: 0
+          HalfPLR: 0
+          ClusterAIDMapping: -1
+          PrefetchGL2: 1
+          StoreRemapVectorWidth: 0
+          MatrixInstruction: [16, 16, 32, 1, 1, 1, 2, 1, 4]
+          WorkGroup: [32, 1, 1]
+          DepthU: 32
+          VectorWidthB: 2
+          StoreVectorWidth: 1
+          LDSSegmentInterleave: 1
+          AdaptiveGemm: 1
+          CompactLoopStore: false
+          ClusterDim: [4, 4]
+          SourceSwap: true
+          WorkGroupMapping: 8
+          TDMStoreInst: false
+          PrefetchGL2SAddr: false
+        - PrefetchLocalRead: 0
+          HalfPLR: 0
+          ClusterAIDMapping: -1
+          PrefetchGL2: 1
+          StoreRemapVectorWidth: 0
+          MatrixInstruction: [16, 16, 32, 1, 1, 1, 2, 1, 4]
+          WorkGroup: [32, 1, 1]
+          DepthU: 32
+          VectorWidthB: 2
+          StoreVectorWidth: 1
+          LDSSegmentInterleave: 1
+          AdaptiveGemm: 1
+          CompactLoopStore: false
+          ClusterDim: [4, 4]
+          SourceSwap: true
+          WorkGroupMapping: 8
+          TDMStoreInst: false
+          PrefetchGL2SAddr: true
+        - PrefetchLocalRead: 0
+          HalfPLR: 0
+          ClusterAIDMapping: -1
+          PrefetchGL2: 2
+          StoreRemapVectorWidth: 0
+          MatrixInstruction: [16, 16, 32, 1, 1, 1, 2, 1, 4]
+          WorkGroup: [32, 1, 1]
+          DepthU: 32
+          VectorWidthB: 2
+          StoreVectorWidth: 1
+          LDSSegmentInterleave: 1
+          AdaptiveGemm: 1
+          CompactLoopStore: false
+          ClusterDim: [4, 4]
+          SourceSwap: true
+          WorkGroupMapping: 8
+          TDMStoreInst: false
+          PrefetchGL2SAddr: false
+        - PrefetchLocalRead: 0
+          HalfPLR: 0
+          ClusterAIDMapping: -1
+          PrefetchGL2: 2
+          StoreRemapVectorWidth: 0
+          MatrixInstruction: [16, 16, 32, 1, 1, 1, 2, 1, 4]
+          WorkGroup: [32, 1, 1]
+          DepthU: 32
+          VectorWidthB: 2
+          StoreVectorWidth: 1
+          LDSSegmentInterleave: 1
+          AdaptiveGemm: 1
+          CompactLoopStore: false
+          ClusterDim: [4, 4]
+          SourceSwap: true
+          WorkGroupMapping: 8
+          TDMStoreInst: false
+          PrefetchGL2SAddr: true
+        - PrefetchLocalRead: 0
+          HalfPLR: 0
+          ClusterAIDMapping: -1
+          PrefetchGL2: 1
+          StoreRemapVectorWidth: 0
+          MatrixInstruction: [16, 16, 32, 1, 1, 1, 2, 1, 4]
+          WorkGroup: [32, 1, 1]
+          DepthU: 32
+          VectorWidthB: 2
+          StoreVectorWidth: 1
+          LDSSegmentInterleave: 1
+          AdaptiveGemm: 1
+          CompactLoopStore: false
+          ClusterDim: [1, 2]
+          SourceSwap: true
+          WorkGroupMapping: 8
+          TDMStoreInst: false
+          PrefetchGL2SAddr: false
+        - PrefetchLocalRead: 0
+          HalfPLR: 0
+          ClusterAIDMapping: -1
+          PrefetchGL2: 1
+          StoreRemapVectorWidth: 0
+          MatrixInstruction: [16, 16, 32, 1, 1, 1, 2, 1, 4]
+          WorkGroup: [32, 1, 1]
+          DepthU: 32
+          VectorWidthB: 2
+          StoreVectorWidth: 1
+          LDSSegmentInterleave: 1
+          AdaptiveGemm: 1
+          CompactLoopStore: false
+          ClusterDim: [1, 2]
+          SourceSwap: true
+          WorkGroupMapping: 8
+          TDMStoreInst: false
+          PrefetchGL2SAddr: true
+        - PrefetchLocalRead: 0
+          HalfPLR: 0
+          ClusterAIDMapping: -1
+          PrefetchGL2: 2
+          StoreRemapVectorWidth: 0
+          MatrixInstruction: [16, 16, 32, 1, 1, 1, 2, 1, 4]
+          WorkGroup: [32, 1, 1]
+          DepthU: 32
+          VectorWidthB: 2
+          StoreVectorWidth: 1
+          LDSSegmentInterleave: 1
+          AdaptiveGemm: 1
+          CompactLoopStore: false
+          ClusterDim: [1, 2]
+          SourceSwap: true
+          WorkGroupMapping: 8
+          TDMStoreInst: false
+          PrefetchGL2SAddr: false
+        - PrefetchLocalRead: 0
+          HalfPLR: 0
+          ClusterAIDMapping: -1
+          PrefetchGL2: 2
+          StoreRemapVectorWidth: 0
+          MatrixInstruction: [16, 16, 32, 1, 1, 1, 2, 1, 4]
+          WorkGroup: [32, 1, 1]
+          DepthU: 32
+          VectorWidthB: 2
+          StoreVectorWidth: 1
+          LDSSegmentInterleave: 1
+          AdaptiveGemm: 1
+          CompactLoopStore: false
+          ClusterDim: [1, 2]
+          SourceSwap: true
+          WorkGroupMapping: 8
+          TDMStoreInst: false
+          PrefetchGL2SAddr: true
+        - PrefetchLocalRead: 0
+          HalfPLR: 0
+          ClusterAIDMapping: -1
+          PrefetchGL2: 0
+          StoreRemapVectorWidth: 0
+          MatrixInstruction: [16, 16, 32, 1, 1, 1, 2, 1, 4]
+          WorkGroup: [32, 1, 1]
+          DepthU: 32
+          VectorWidthB: 2
+          StoreVectorWidth: 1
+          LDSSegmentInterleave: 1
+          AdaptiveGemm: 1
+          CompactLoopStore: false
+          ClusterDim: [2, 1]
+          SourceSwap: true
+          WorkGroupMapping: 8
+          TDMStoreInst: false
+          PrefetchGL2SAddr: false
+        - PrefetchLocalRead: 0
+          HalfPLR: 0
+          ClusterAIDMapping: -1
+          PrefetchGL2: 1
+          StoreRemapVectorWidth: 0
+          MatrixInstruction: [16, 16, 32, 1, 1, 1, 2, 1, 4]
+          WorkGroup: [32, 1, 1]
+          DepthU: 32
+          VectorWidthB: 2
+          StoreVectorWidth: 1
+          LDSSegmentInterleave: 1
+          AdaptiveGemm: 1
+          CompactLoopStore: false
+          ClusterDim: [2, 1]
+          SourceSwap: true
+          WorkGroupMapping: 8
+          TDMStoreInst: false
+          PrefetchGL2SAddr: false
+        - PrefetchLocalRead: 0
+          HalfPLR: 0
+          ClusterAIDMapping: -1
+          PrefetchGL2: 1
+          StoreRemapVectorWidth: 0
+          MatrixInstruction: [16, 16, 32, 1, 1, 1, 2, 1, 4]
+          WorkGroup: [32, 1, 1]
+          DepthU: 32
+          VectorWidthB: 2
+          StoreVectorWidth: 1
+          LDSSegmentInterleave: 1
+          AdaptiveGemm: 1
+          CompactLoopStore: false
+          ClusterDim: [2, 1]
+          SourceSwap: true
+          WorkGroupMapping: 8
+          TDMStoreInst: false
+          PrefetchGL2SAddr: true
+        - PrefetchLocalRead: 0
+          HalfPLR: 0
+          ClusterAIDMapping: -1
+          PrefetchGL2: 2
+          StoreRemapVectorWidth: 0
+          MatrixInstruction: [16, 16, 32, 1, 1, 1, 2, 1, 4]
+          WorkGroup: [32, 1, 1]
+          DepthU: 32
+          VectorWidthB: 2
+          StoreVectorWidth: 1
+          LDSSegmentInterleave: 1
+          AdaptiveGemm: 1
+          CompactLoopStore: false
+          ClusterDim: [2, 1]
+          SourceSwap: true
+          WorkGroupMapping: 8
+          TDMStoreInst: false
+          PrefetchGL2SAddr: false
+        - PrefetchLocalRead: 0
+          HalfPLR: 0
+          ClusterAIDMapping: -1
+          PrefetchGL2: 2
+          StoreRemapVectorWidth: 0
+          MatrixInstruction: [16, 16, 32, 1, 1, 1, 2, 1, 4]
+          WorkGroup: [32, 1, 1]
+          DepthU: 32
+          VectorWidthB: 2
+          StoreVectorWidth: 1
+          LDSSegmentInterleave: 1
+          AdaptiveGemm: 1
+          CompactLoopStore: false
+          ClusterDim: [2, 1]
+          SourceSwap: true
+          WorkGroupMapping: 8
+          TDMStoreInst: false
+          PrefetchGL2SAddr: true
+        - PrefetchLocalRead: 0
+          HalfPLR: 0
+          ClusterAIDMapping: -1
+          PrefetchGL2: 0
+          StoreRemapVectorWidth: 0
+          MatrixInstruction: [16, 16, 32, 1, 1, 1, 2, 1, 4]
+          WorkGroup: [32, 1, 1]
+          DepthU: 32
+          VectorWidthB: 2
+          StoreVectorWidth: 1
+          LDSSegmentInterleave: 1
+          AdaptiveGemm: 1
+          CompactLoopStore: false
+          ClusterDim: [1, 4]
+          SourceSwap: true
+          WorkGroupMapping: 8
+          TDMStoreInst: false
+          PrefetchGL2SAddr: false
+        - PrefetchLocalRead: 0
+          HalfPLR: 0
+          ClusterAIDMapping: -1
+          PrefetchGL2: 1
+          StoreRemapVectorWidth: 0
+          MatrixInstruction: [16, 16, 32, 1, 1, 1, 2, 1, 4]
+          WorkGroup: [32, 1, 1]
+          DepthU: 32
+          VectorWidthB: 2
+          StoreVectorWidth: 1
+          LDSSegmentInterleave: 1
+          AdaptiveGemm: 1
+          CompactLoopStore: false
+          ClusterDim: [1, 4]
+          SourceSwap: true
+          WorkGroupMapping: 8
+          TDMStoreInst: false
+          PrefetchGL2SAddr: false
+        - PrefetchLocalRead: 0
+          HalfPLR: 0
+          ClusterAIDMapping: -1
+          PrefetchGL2: 1
+          StoreRemapVectorWidth: 0
+          MatrixInstruction: [16, 16, 32, 1, 1, 1, 2, 1, 4]
+          WorkGroup: [32, 1, 1]
+          DepthU: 32
+          VectorWidthB: 2
+          StoreVectorWidth: 1
+          LDSSegmentInterleave: 1
+          AdaptiveGemm: 1
+          CompactLoopStore: false
+          ClusterDim: [1, 4]
+          SourceSwap: true
+          WorkGroupMapping: 8
+          TDMStoreInst: false
+          PrefetchGL2SAddr: true
+        - PrefetchLocalRead: 0
+          HalfPLR: 0
+          ClusterAIDMapping: -1
+          PrefetchGL2: 2
+          StoreRemapVectorWidth: 0
+          MatrixInstruction: [16, 16, 32, 1, 1, 1, 2, 1, 4]
+          WorkGroup: [32, 1, 1]
+          DepthU: 32
+          VectorWidthB: 2
+          StoreVectorWidth: 1
+          LDSSegmentInterleave: 1
+          AdaptiveGemm: 1
+          CompactLoopStore: false
+          ClusterDim: [1, 4]
+          SourceSwap: true
+          WorkGroupMapping: 8
+          TDMStoreInst: false
+          PrefetchGL2SAddr: false
+        - PrefetchLocalRead: 0
+          HalfPLR: 0
+          ClusterAIDMapping: -1
+          PrefetchGL2: 2
+          StoreRemapVectorWidth: 0
+          MatrixInstruction: [16, 16, 32, 1, 1, 1, 2, 1, 4]
+          WorkGroup: [32, 1, 1]
+          DepthU: 32
+          VectorWidthB: 2
+          StoreVectorWidth: 1
+          LDSSegmentInterleave: 1
+          AdaptiveGemm: 1
+          CompactLoopStore: false
+          ClusterDim: [1, 4]
+          SourceSwap: true
+          WorkGroupMapping: 8
+          TDMStoreInst: false
+          PrefetchGL2SAddr: true
+        - PrefetchLocalRead: 0
+          HalfPLR: 0
+          ClusterAIDMapping: -1
+          PrefetchGL2: 0
+          StoreRemapVectorWidth: 0
+          MatrixInstruction: [16, 16, 32, 1, 1, 1, 2, 1, 4]
+          WorkGroup: [32, 1, 1]
+          DepthU: 32
+          VectorWidthB: 2
+          StoreVectorWidth: 1
+          LDSSegmentInterleave: 1
+          AdaptiveGemm: 1
+          CompactLoopStore: false
+          ClusterDim: [4, 1]
+          SourceSwap: true
+          WorkGroupMapping: 8
+          TDMStoreInst: false
+          PrefetchGL2SAddr: false
+        - PrefetchLocalRead: 0
+          HalfPLR: 0
+          ClusterAIDMapping: -1
+          PrefetchGL2: 1
+          StoreRemapVectorWidth: 0
+          MatrixInstruction: [16, 16, 32, 1, 1, 1, 2, 1, 4]
+          WorkGroup: [32, 1, 1]
+          DepthU: 32
+          VectorWidthB: 2
+          StoreVectorWidth: 1
+          LDSSegmentInterleave: 1
+          AdaptiveGemm: 1
+          CompactLoopStore: false
+          ClusterDim: [4, 1]
+          SourceSwap: true
+          WorkGroupMapping: 8
+          TDMStoreInst: false
+          PrefetchGL2SAddr: false
+        - PrefetchLocalRead: 0
+          HalfPLR: 0
+          ClusterAIDMapping: -1
+          PrefetchGL2: 1
+          StoreRemapVectorWidth: 0
+          MatrixInstruction: [16, 16, 32, 1, 1, 1, 2, 1, 4]
+          WorkGroup: [32, 1, 1]
+          DepthU: 32
+          VectorWidthB: 2
+          StoreVectorWidth: 1
+          LDSSegmentInterleave: 1
+          AdaptiveGemm: 1
+          CompactLoopStore: false
+          ClusterDim: [4, 1]
+          SourceSwap: true
+          WorkGroupMapping: 8
+          TDMStoreInst: false
+          PrefetchGL2SAddr: true
+        - PrefetchLocalRead: 0
+          HalfPLR: 0
+          ClusterAIDMapping: -1
+          PrefetchGL2: 2
+          StoreRemapVectorWidth: 0
+          MatrixInstruction: [16, 16, 32, 1, 1, 1, 2, 1, 4]
+          WorkGroup: [32, 1, 1]
+          DepthU: 32
+          VectorWidthB: 2
+          StoreVectorWidth: 1
+          LDSSegmentInterleave: 1
+          AdaptiveGemm: 1
+          CompactLoopStore: false
+          ClusterDim: [4, 1]
+          SourceSwap: true
+          WorkGroupMapping: 8
+          TDMStoreInst: false
+          PrefetchGL2SAddr: false
+        - PrefetchLocalRead: 0
+          HalfPLR: 0
+          ClusterAIDMapping: -1
+          PrefetchGL2: 2
+          StoreRemapVectorWidth: 0
+          MatrixInstruction: [16, 16, 32, 1, 1, 1, 2, 1, 4]
+          WorkGroup: [32, 1, 1]
+          DepthU: 32
+          VectorWidthB: 2
+          StoreVectorWidth: 1
+          LDSSegmentInterleave: 1
+          AdaptiveGemm: 1
+          CompactLoopStore: false
+          ClusterDim: [4, 1]
+          SourceSwap: true
+          WorkGroupMapping: 8
+          TDMStoreInst: false
+          PrefetchGL2SAddr: true
+        - PrefetchLocalRead: 0
+          HalfPLR: 0
+          ClusterAIDMapping: -1
+          PrefetchGL2: 0
+          StoreRemapVectorWidth: 0
+          MatrixInstruction: [16, 16, 32, 1, 1, 1, 2, 1, 4]
+          WorkGroup: [32, 1, 1]
+          DepthU: 32
+          VectorWidthB: 2
+          StoreVectorWidth: 1
+          LDSSegmentInterleave: 1
+          AdaptiveGemm: 1
+          CompactLoopStore: false
+          ClusterDim: [2, 4]
+          SourceSwap: true
+          WorkGroupMapping: 8
+          TDMStoreInst: false
+          PrefetchGL2SAddr: false
+        - PrefetchLocalRead: 0
+          HalfPLR: 0
+          ClusterAIDMapping: -1
+          PrefetchGL2: 1
+          StoreRemapVectorWidth: 0
+          MatrixInstruction: [16, 16, 32, 1, 1, 1, 2, 1, 4]
+          WorkGroup: [32, 1, 1]
+          DepthU: 32
+          VectorWidthB: 2
+          StoreVectorWidth: 1
+          LDSSegmentInterleave: 1
+          AdaptiveGemm: 1
+          CompactLoopStore: false
+          ClusterDim: [2, 4]
+          SourceSwap: true
+          WorkGroupMapping: 8
+          TDMStoreInst: false
+          PrefetchGL2SAddr: false
+        - PrefetchLocalRead: 0
+          HalfPLR: 0
+          ClusterAIDMapping: -1
+          PrefetchGL2: 1
+          StoreRemapVectorWidth: 0
+          MatrixInstruction: [16, 16, 32, 1, 1, 1, 2, 1, 4]
+          WorkGroup: [32, 1, 1]
+          DepthU: 32
+          VectorWidthB: 2
+          StoreVectorWidth: 1
+          LDSSegmentInterleave: 1
+          AdaptiveGemm: 1
+          CompactLoopStore: false
+          ClusterDim: [2, 4]
+          SourceSwap: true
+          WorkGroupMapping: 8
+          TDMStoreInst: false
+          PrefetchGL2SAddr: true
+        - PrefetchLocalRead: 0
+          HalfPLR: 0
+          ClusterAIDMapping: -1
+          PrefetchGL2: 2
+          StoreRemapVectorWidth: 0
+          MatrixInstruction: [16, 16, 32, 1, 1, 1, 2, 1, 4]
+          WorkGroup: [32, 1, 1]
+          DepthU: 32
+          VectorWidthB: 2
+          StoreVectorWidth: 1
+          LDSSegmentInterleave: 1
+          AdaptiveGemm: 1
+          CompactLoopStore: false
+          ClusterDim: [2, 4]
+          SourceSwap: true
+          WorkGroupMapping: 8
+          TDMStoreInst: false
+          PrefetchGL2SAddr: false
+        - PrefetchLocalRead: 0
+          HalfPLR: 0
+          ClusterAIDMapping: -1
+          PrefetchGL2: 2
+          StoreRemapVectorWidth: 0
+          MatrixInstruction: [16, 16, 32, 1, 1, 1, 2, 1, 4]
+          WorkGroup: [32, 1, 1]
+          DepthU: 32
+          VectorWidthB: 2
+          StoreVectorWidth: 1
+          LDSSegmentInterleave: 1
+          AdaptiveGemm: 1
+          CompactLoopStore: false
+          ClusterDim: [2, 4]
+          SourceSwap: true
+          WorkGroupMapping: 8
+          TDMStoreInst: false
+          PrefetchGL2SAddr: true
+        - PrefetchLocalRead: 1
+          HalfPLR: 0
+          ClusterAIDMapping: -1
+          PrefetchGL2: 0
+          StoreRemapVectorWidth: 0
+          MatrixInstruction: [16, 16, 32, 1, 1, 1, 2, 1, 4]
+          WorkGroup: [32, 1, 1]
+          DepthU: 32
+          VectorWidthB: 2
+          StoreVectorWidth: 1
+          LDSSegmentInterleave: 1
+          AdaptiveGemm: 1
+          CompactLoopStore: false
+          ClusterDim: [4, 4]
+          SourceSwap: true
+          WorkGroupMapping: 8
+          TDMStoreInst: false
+          PrefetchGL2SAddr: false
+        - PrefetchLocalRead: 1
+          HalfPLR: 0
+          ClusterAIDMapping: -1
+          PrefetchGL2: 1
+          StoreRemapVectorWidth: 0
+          MatrixInstruction: [16, 16, 32, 1, 1, 1, 2, 1, 4]
+          WorkGroup: [32, 1, 1]
+          DepthU: 32
+          VectorWidthB: 2
+          StoreVectorWidth: 1
+          LDSSegmentInterleave: 1
+          AdaptiveGemm: 1
+          CompactLoopStore: false
+          ClusterDim: [4, 4]
+          SourceSwap: true
+          WorkGroupMapping: 8
+          TDMStoreInst: false
+          PrefetchGL2SAddr: false
+        - PrefetchLocalRead: 1
+          HalfPLR: 0
+          ClusterAIDMapping: -1
+          PrefetchGL2: 1
+          StoreRemapVectorWidth: 0
+          MatrixInstruction: [16, 16, 32, 1, 1, 1, 2, 1, 4]
+          WorkGroup: [32, 1, 1]
+          DepthU: 32
+          VectorWidthB: 2
+          StoreVectorWidth: 1
+          LDSSegmentInterleave: 1
+          AdaptiveGemm: 1
+          CompactLoopStore: false
+          ClusterDim: [4, 4]
+          SourceSwap: true
+          WorkGroupMapping: 8
+          TDMStoreInst: false
+          PrefetchGL2SAddr: true
+        - PrefetchLocalRead: 1
+          HalfPLR: 0
+          ClusterAIDMapping: -1
+          PrefetchGL2: 2
+          StoreRemapVectorWidth: 0
+          MatrixInstruction: [16, 16, 32, 1, 1, 1, 2, 1, 4]
+          WorkGroup: [32, 1, 1]
+          DepthU: 32
+          VectorWidthB: 2
+          StoreVectorWidth: 1
+          LDSSegmentInterleave: 1
+          AdaptiveGemm: 1
+          CompactLoopStore: false
+          ClusterDim: [4, 4]
+          SourceSwap: true
+          WorkGroupMapping: 8
+          TDMStoreInst: false
+          PrefetchGL2SAddr: false
+        - PrefetchLocalRead: 1
+          HalfPLR: 0
+          ClusterAIDMapping: -1
+          PrefetchGL2: 2
+          StoreRemapVectorWidth: 0
+          MatrixInstruction: [16, 16, 32, 1, 1, 1, 2, 1, 4]
+          WorkGroup: [32, 1, 1]
+          DepthU: 32
+          VectorWidthB: 2
+          StoreVectorWidth: 1
+          LDSSegmentInterleave: 1
+          AdaptiveGemm: 1
+          CompactLoopStore: false
+          ClusterDim: [4, 4]
+          SourceSwap: true
+          WorkGroupMapping: 8
+          TDMStoreInst: false
+          PrefetchGL2SAddr: true
+        - PrefetchLocalRead: 1
+          HalfPLR: 0
+          ClusterAIDMapping: -1
+          PrefetchGL2: 0
+          StoreRemapVectorWidth: 0
+          MatrixInstruction: [16, 16, 32, 1, 1, 1, 2, 1, 4]
+          WorkGroup: [32, 1, 1]
+          DepthU: 32
+          VectorWidthB: 2
+          StoreVectorWidth: 1
+          LDSSegmentInterleave: 1
+          AdaptiveGemm: 0
+          CompactLoopStore: false
+          ClusterDim: [4, 4]
+          SourceSwap: true
+          WorkGroupMapping: 8
+          TDMStoreInst: true
+          PrefetchGL2SAddr: false
+        - PrefetchLocalRead: 1
+          HalfPLR: 0
+          ClusterAIDMapping: -1
+          PrefetchGL2: 1
+          StoreRemapVectorWidth: 0
+          MatrixInstruction: [16, 16, 32, 1, 1, 1, 2, 1, 4]
+          WorkGroup: [32, 1, 1]
+          DepthU: 32
+          VectorWidthB: 2
+          StoreVectorWidth: 1
+          LDSSegmentInterleave: 1
+          AdaptiveGemm: 0
+          CompactLoopStore: false
+          ClusterDim: [4, 4]
+          SourceSwap: true
+          WorkGroupMapping: 8
+          TDMStoreInst: true
+          PrefetchGL2SAddr: false
+        - PrefetchLocalRead: 1
+          HalfPLR: 0
+          ClusterAIDMapping: -1
+          PrefetchGL2: 1
+          StoreRemapVectorWidth: 0
+          MatrixInstruction: [16, 16, 32, 1, 1, 1, 2, 1, 4]
+          WorkGroup: [32, 1, 1]
+          DepthU: 32
+          VectorWidthB: 2
+          StoreVectorWidth: 1
+          LDSSegmentInterleave: 1
+          AdaptiveGemm: 0
+          CompactLoopStore: false
+          ClusterDim: [4, 4]
+          SourceSwap: true
+          WorkGroupMapping: 8
+          TDMStoreInst: true
+          PrefetchGL2SAddr: true
+        - PrefetchLocalRead: 1
+          HalfPLR: 0
+          ClusterAIDMapping: -1
+          PrefetchGL2: 2
+          StoreRemapVectorWidth: 0
+          MatrixInstruction: [16, 16, 32, 1, 1, 1, 2, 1, 4]
+          WorkGroup: [32, 1, 1]
+          DepthU: 32
+          VectorWidthB: 2
+          StoreVectorWidth: 1
+          LDSSegmentInterleave: 1
+          AdaptiveGemm: 0
+          CompactLoopStore: false
+          ClusterDim: [4, 4]
+          SourceSwap: true
+          WorkGroupMapping: 8
+          TDMStoreInst: true
+          PrefetchGL2SAddr: false
+        - PrefetchLocalRead: 1
+          HalfPLR: 0
+          ClusterAIDMapping: -1
+          PrefetchGL2: 2
+          StoreRemapVectorWidth: 0
+          MatrixInstruction: [16, 16, 32, 1, 1, 1, 2, 1, 4]
+          WorkGroup: [32, 1, 1]
+          DepthU: 32
+          VectorWidthB: 2
+          StoreVectorWidth: 1
+          LDSSegmentInterleave: 1
+          AdaptiveGemm: 0
+          CompactLoopStore: false
+          ClusterDim: [4, 4]
+          SourceSwap: true
+          WorkGroupMapping: 8
+          TDMStoreInst: true
+          PrefetchGL2SAddr: true
+        - PrefetchLocalRead: 1
+          HalfPLR: 1
+          ClusterAIDMapping: -1
+          PrefetchGL2: 0
+          StoreRemapVectorWidth: 0
+          MatrixInstruction: [16, 16, 32, 1, 1, 1, 2, 1, 4]
+          WorkGroup: [32, 1, 1]
+          DepthU: 32
+          VectorWidthB: 2
+          StoreVectorWidth: 1
+          LDSSegmentInterleave: 1
+          AdaptiveGemm: 1
+          CompactLoopStore: false
+          ClusterDim: [4, 4]
+          SourceSwap: true
+          WorkGroupMapping: 8
+          TDMStoreInst: false
+          PrefetchGL2SAddr: false
+        - PrefetchLocalRead: 1
+          HalfPLR: 1
+          ClusterAIDMapping: -1
+          PrefetchGL2: 1
+          StoreRemapVectorWidth: 0
+          MatrixInstruction: [16, 16, 32, 1, 1, 1, 2, 1, 4]
+          WorkGroup: [32, 1, 1]
+          DepthU: 32
+          VectorWidthB: 2
+          StoreVectorWidth: 1
+          LDSSegmentInterleave: 1
+          AdaptiveGemm: 1
+          CompactLoopStore: false
+          ClusterDim: [4, 4]
+          SourceSwap: true
+          WorkGroupMapping: 8
+          TDMStoreInst: false
+          PrefetchGL2SAddr: false
+        - PrefetchLocalRead: 1
+          HalfPLR: 1
+          ClusterAIDMapping: -1
+          PrefetchGL2: 1
+          StoreRemapVectorWidth: 0
+          MatrixInstruction: [16, 16, 32, 1, 1, 1, 2, 1, 4]
+          WorkGroup: [32, 1, 1]
+          DepthU: 32
+          VectorWidthB: 2
+          StoreVectorWidth: 1
+          LDSSegmentInterleave: 1
+          AdaptiveGemm: 1
+          CompactLoopStore: false
+          ClusterDim: [4, 4]
+          SourceSwap: true
+          WorkGroupMapping: 8
+          TDMStoreInst: false
+          PrefetchGL2SAddr: true
+        - PrefetchLocalRead: 1
+          HalfPLR: 1
+          ClusterAIDMapping: -1
+          PrefetchGL2: 2
+          StoreRemapVectorWidth: 0
+          MatrixInstruction: [16, 16, 32, 1, 1, 1, 2, 1, 4]
+          WorkGroup: [32, 1, 1]
+          DepthU: 32
+          VectorWidthB: 2
+          StoreVectorWidth: 1
+          LDSSegmentInterleave: 1
+          AdaptiveGemm: 1
+          CompactLoopStore: false
+          ClusterDim: [4, 4]
+          SourceSwap: true
+          WorkGroupMapping: 8
+          TDMStoreInst: false
+          PrefetchGL2SAddr: false
+        - PrefetchLocalRead: 1
+          HalfPLR: 1
+          ClusterAIDMapping: -1
+          PrefetchGL2: 2
+          StoreRemapVectorWidth: 0
+          MatrixInstruction: [16, 16, 32, 1, 1, 1, 2, 1, 4]
+          WorkGroup: [32, 1, 1]
+          DepthU: 32
+          VectorWidthB: 2
+          StoreVectorWidth: 1
+          LDSSegmentInterleave: 1
+          AdaptiveGemm: 1
+          CompactLoopStore: false
+          ClusterDim: [4, 4]
+          SourceSwap: true
+          WorkGroupMapping: 8
+          TDMStoreInst: false
+          PrefetchGL2SAddr: true
+        - PrefetchLocalRead: 1
+          HalfPLR: 1
+          ClusterAIDMapping: -1
+          PrefetchGL2: 0
+          StoreRemapVectorWidth: 0
+          MatrixInstruction: [16, 16, 32, 1, 1, 1, 2, 1, 4]
+          WorkGroup: [32, 1, 1]
+          DepthU: 32
+          VectorWidthB: 2
+          StoreVectorWidth: 1
+          LDSSegmentInterleave: 1
+          AdaptiveGemm: 0
+          CompactLoopStore: false
+          ClusterDim: [4, 4]
+          SourceSwap: true
+          WorkGroupMapping: 8
+          TDMStoreInst: true
+          PrefetchGL2SAddr: false
+        - PrefetchLocalRead: 1
+          HalfPLR: 1
+          ClusterAIDMapping: -1
+          PrefetchGL2: 1
+          StoreRemapVectorWidth: 0
+          MatrixInstruction: [16, 16, 32, 1, 1, 1, 2, 1, 4]
+          WorkGroup: [32, 1, 1]
+          DepthU: 32
+          VectorWidthB: 2
+          StoreVectorWidth: 1
+          LDSSegmentInterleave: 1
+          AdaptiveGemm: 0
+          CompactLoopStore: false
+          ClusterDim: [4, 4]
+          SourceSwap: true
+          WorkGroupMapping: 8
+          TDMStoreInst: true
+          PrefetchGL2SAddr: false
+        - PrefetchLocalRead: 1
+          HalfPLR: 1
+          ClusterAIDMapping: -1
+          PrefetchGL2: 1
+          StoreRemapVectorWidth: 0
+          MatrixInstruction: [16, 16, 32, 1, 1, 1, 2, 1, 4]
+          WorkGroup: [32, 1, 1]
+          DepthU: 32
+          VectorWidthB: 2
+          StoreVectorWidth: 1
+          LDSSegmentInterleave: 1
+          AdaptiveGemm: 0
+          CompactLoopStore: false
+          ClusterDim: [4, 4]
+          SourceSwap: true
+          WorkGroupMapping: 8
+          TDMStoreInst: true
+          PrefetchGL2SAddr: true
+        - PrefetchLocalRead: 1
+          HalfPLR: 1
+          ClusterAIDMapping: -1
+          PrefetchGL2: 2
+          StoreRemapVectorWidth: 0
+          MatrixInstruction: [16, 16, 32, 1, 1, 1, 2, 1, 4]
+          WorkGroup: [32, 1, 1]
+          DepthU: 32
+          VectorWidthB: 2
+          StoreVectorWidth: 1
+          LDSSegmentInterleave: 1
+          AdaptiveGemm: 0
+          CompactLoopStore: false
+          ClusterDim: [4, 4]
+          SourceSwap: true
+          WorkGroupMapping: 8
+          TDMStoreInst: true
+          PrefetchGL2SAddr: false
+        - PrefetchLocalRead: 1
+          HalfPLR: 1
+          ClusterAIDMapping: -1
+          PrefetchGL2: 2
+          StoreRemapVectorWidth: 0
+          MatrixInstruction: [16, 16, 32, 1, 1, 1, 2, 1, 4]
+          WorkGroup: [32, 1, 1]
+          DepthU: 32
+          VectorWidthB: 2
+          StoreVectorWidth: 1
+          LDSSegmentInterleave: 1
+          AdaptiveGemm: 0
+          CompactLoopStore: false
+          ClusterDim: [4, 4]
+          SourceSwap: true
+          WorkGroupMapping: 8
+          TDMStoreInst: true
+          PrefetchGL2SAddr: true
+        - PrefetchLocalRead: 1
+          HalfPLR: 2
+          ClusterAIDMapping: -1
+          PrefetchGL2: 0
+          StoreRemapVectorWidth: 0
+          MatrixInstruction: [16, 16, 32, 1, 1, 1, 2, 1, 4]
+          WorkGroup: [32, 1, 1]
+          DepthU: 32
+          VectorWidthB: 2
+          StoreVectorWidth: 1
+          LDSSegmentInterleave: 1
+          AdaptiveGemm: 1
+          CompactLoopStore: false
+          ClusterDim: [4, 4]
+          SourceSwap: true
+          WorkGroupMapping: 8
+          TDMStoreInst: false
+          PrefetchGL2SAddr: false
+        - PrefetchLocalRead: 1
+          HalfPLR: 2
+          ClusterAIDMapping: -1
+          PrefetchGL2: 1
+          StoreRemapVectorWidth: 0
+          MatrixInstruction: [16, 16, 32, 1, 1, 1, 2, 1, 4]
+          WorkGroup: [32, 1, 1]
+          DepthU: 32
+          VectorWidthB: 2
+          StoreVectorWidth: 1
+          LDSSegmentInterleave: 1
+          AdaptiveGemm: 1
+          CompactLoopStore: false
+          ClusterDim: [4, 4]
+          SourceSwap: true
+          WorkGroupMapping: 8
+          TDMStoreInst: false
+          PrefetchGL2SAddr: false
+        - PrefetchLocalRead: 1
+          HalfPLR: 2
+          ClusterAIDMapping: -1
+          PrefetchGL2: 1
+          StoreRemapVectorWidth: 0
+          MatrixInstruction: [16, 16, 32, 1, 1, 1, 2, 1, 4]
+          WorkGroup: [32, 1, 1]
+          DepthU: 32
+          VectorWidthB: 2
+          StoreVectorWidth: 1
+          LDSSegmentInterleave: 1
+          AdaptiveGemm: 1
+          CompactLoopStore: false
+          ClusterDim: [4, 4]
+          SourceSwap: true
+          WorkGroupMapping: 8
+          TDMStoreInst: false
+          PrefetchGL2SAddr: true
+        - PrefetchLocalRead: 1
+          HalfPLR: 2
+          ClusterAIDMapping: -1
+          PrefetchGL2: 2
+          StoreRemapVectorWidth: 0
+          MatrixInstruction: [16, 16, 32, 1, 1, 1, 2, 1, 4]
+          WorkGroup: [32, 1, 1]
+          DepthU: 32
+          VectorWidthB: 2
+          StoreVectorWidth: 1
+          LDSSegmentInterleave: 1
+          AdaptiveGemm: 1
+          CompactLoopStore: false
+          ClusterDim: [4, 4]
+          SourceSwap: true
+          WorkGroupMapping: 8
+          TDMStoreInst: false
+          PrefetchGL2SAddr: false
+        - PrefetchLocalRead: 1
+          HalfPLR: 2
+          ClusterAIDMapping: -1
+          PrefetchGL2: 2
+          StoreRemapVectorWidth: 0
+          MatrixInstruction: [16, 16, 32, 1, 1, 1, 2, 1, 4]
+          WorkGroup: [32, 1, 1]
+          DepthU: 32
+          VectorWidthB: 2
+          StoreVectorWidth: 1
+          LDSSegmentInterleave: 1
+          AdaptiveGemm: 1
+          CompactLoopStore: false
+          ClusterDim: [4, 4]
+          SourceSwap: true
+          WorkGroupMapping: 8
+          TDMStoreInst: false
+          PrefetchGL2SAddr: true
+        - PrefetchLocalRead: 1
+          HalfPLR: 2
+          ClusterAIDMapping: -1
+          PrefetchGL2: 0
+          StoreRemapVectorWidth: 0
+          MatrixInstruction: [16, 16, 32, 1, 1, 1, 2, 1, 4]
+          WorkGroup: [32, 1, 1]
+          DepthU: 32
+          VectorWidthB: 2
+          StoreVectorWidth: 1
+          LDSSegmentInterleave: 1
+          AdaptiveGemm: 0
+          CompactLoopStore: false
+          ClusterDim: [4, 4]
+          SourceSwap: true
+          WorkGroupMapping: 8
+          TDMStoreInst: true
+          PrefetchGL2SAddr: false
+        - PrefetchLocalRead: 1
+          HalfPLR: 2
+          ClusterAIDMapping: -1
+          PrefetchGL2: 1
+          StoreRemapVectorWidth: 0
+          MatrixInstruction: [16, 16, 32, 1, 1, 1, 2, 1, 4]
+          WorkGroup: [32, 1, 1]
+          DepthU: 32
+          VectorWidthB: 2
+          StoreVectorWidth: 1
+          LDSSegmentInterleave: 1
+          AdaptiveGemm: 0
+          CompactLoopStore: false
+          ClusterDim: [4, 4]
+          SourceSwap: true
+          WorkGroupMapping: 8
+          TDMStoreInst: true
+          PrefetchGL2SAddr: false
+        - PrefetchLocalRead: 1
+          HalfPLR: 2
+          ClusterAIDMapping: -1
+          PrefetchGL2: 1
+          StoreRemapVectorWidth: 0
+          MatrixInstruction: [16, 16, 32, 1, 1, 1, 2, 1, 4]
+          WorkGroup: [32, 1, 1]
+          DepthU: 32
+          VectorWidthB: 2
+          StoreVectorWidth: 1
+          LDSSegmentInterleave: 1
+          AdaptiveGemm: 0
+          CompactLoopStore: false
+          ClusterDim: [4, 4]
+          SourceSwap: true
+          WorkGroupMapping: 8
+          TDMStoreInst: true
+          PrefetchGL2SAddr: true
+        - PrefetchLocalRead: 1
+          HalfPLR: 2
+          ClusterAIDMapping: -1
+          PrefetchGL2: 2
+          StoreRemapVectorWidth: 0
+          MatrixInstruction: [16, 16, 32, 1, 1, 1, 2, 1, 4]
+          WorkGroup: [32, 1, 1]
+          DepthU: 32
+          VectorWidthB: 2
+          StoreVectorWidth: 1
+          LDSSegmentInterleave: 1
+          AdaptiveGemm: 0
+          CompactLoopStore: false
+          ClusterDim: [4, 4]
+          SourceSwap: true
+          WorkGroupMapping: 8
+          TDMStoreInst: true
+          PrefetchGL2SAddr: false
+        - PrefetchLocalRead: 1
+          HalfPLR: 2
+          ClusterAIDMapping: -1
+          PrefetchGL2: 2
+          StoreRemapVectorWidth: 0
+          MatrixInstruction: [16, 16, 32, 1, 1, 1, 2, 1, 4]
+          WorkGroup: [32, 1, 1]
+          DepthU: 32
+          VectorWidthB: 2
+          StoreVectorWidth: 1
+          LDSSegmentInterleave: 1
+          AdaptiveGemm: 0
+          CompactLoopStore: false
+          ClusterDim: [4, 4]
+          SourceSwap: true
+          WorkGroupMapping: 8
+          TDMStoreInst: true
+          PrefetchGL2SAddr: true
+        - PrefetchLocalRead: 2
+          HalfPLR: 0
+          ClusterAIDMapping: -1
+          PrefetchGL2: 0
+          StoreRemapVectorWidth: 0
+          MatrixInstruction: [16, 16, 32, 1, 1, 1, 2, 1, 4]
+          WorkGroup: [32, 1, 1]
+          DepthU: 32
+          VectorWidthB: 2
+          StoreVectorWidth: 1
+          LDSSegmentInterleave: 1
+          AdaptiveGemm: 1
+          CompactLoopStore: false
+          ClusterDim: [4, 4]
+          SourceSwap: true
+          WorkGroupMapping: 8
+          TDMStoreInst: false
+          PrefetchGL2SAddr: false
+        - PrefetchLocalRead: 2
+          HalfPLR: 0
+          ClusterAIDMapping: -1
+          PrefetchGL2: 1
+          StoreRemapVectorWidth: 0
+          MatrixInstruction: [16, 16, 32, 1, 1, 1, 2, 1, 4]
+          WorkGroup: [32, 1, 1]
+          DepthU: 32
+          VectorWidthB: 2
+          StoreVectorWidth: 1
+          LDSSegmentInterleave: 1
+          AdaptiveGemm: 1
+          CompactLoopStore: false
+          ClusterDim: [4, 4]
+          SourceSwap: true
+          WorkGroupMapping: 8
+          TDMStoreInst: false
+          PrefetchGL2SAddr: false
+        - PrefetchLocalRead: 2
+          HalfPLR: 0
+          ClusterAIDMapping: -1
+          PrefetchGL2: 1
+          StoreRemapVectorWidth: 0
+          MatrixInstruction: [16, 16, 32, 1, 1, 1, 2, 1, 4]
+          WorkGroup: [32, 1, 1]
+          DepthU: 32
+          VectorWidthB: 2
+          StoreVectorWidth: 1
+          LDSSegmentInterleave: 1
+          AdaptiveGemm: 1
+          CompactLoopStore: false
+          ClusterDim: [4, 4]
+          SourceSwap: true
+          WorkGroupMapping: 8
+          TDMStoreInst: false
+          PrefetchGL2SAddr: true
+        - PrefetchLocalRead: 2
+          HalfPLR: 0
+          ClusterAIDMapping: -1
+          PrefetchGL2: 2
+          StoreRemapVectorWidth: 0
+          MatrixInstruction: [16, 16, 32, 1, 1, 1, 2, 1, 4]
+          WorkGroup: [32, 1, 1]
+          DepthU: 32
+          VectorWidthB: 2
+          StoreVectorWidth: 1
+          LDSSegmentInterleave: 1
+          AdaptiveGemm: 1
+          CompactLoopStore: false
+          ClusterDim: [4, 4]
+          SourceSwap: true
+          WorkGroupMapping: 8
+          TDMStoreInst: false
+          PrefetchGL2SAddr: false
+        - PrefetchLocalRead: 2
+          HalfPLR: 0
+          ClusterAIDMapping: -1
+          PrefetchGL2: 2
+          StoreRemapVectorWidth: 0
+          MatrixInstruction: [16, 16, 32, 1, 1, 1, 2, 1, 4]
+          WorkGroup: [32, 1, 1]
+          DepthU: 32
+          VectorWidthB: 2
+          StoreVectorWidth: 1
+          LDSSegmentInterleave: 1
+          AdaptiveGemm: 1
+          CompactLoopStore: false
+          ClusterDim: [4, 4]
+          SourceSwap: true
+          WorkGroupMapping: 8
+          TDMStoreInst: false
+          PrefetchGL2SAddr: true
+        - PrefetchLocalRead: 2
+          HalfPLR: 0
+          ClusterAIDMapping: -1
+          PrefetchGL2: 0
+          StoreRemapVectorWidth: 0
+          MatrixInstruction: [16, 16, 32, 1, 1, 1, 2, 1, 4]
+          WorkGroup: [32, 1, 1]
+          DepthU: 32
+          VectorWidthB: 2
+          StoreVectorWidth: 1
+          LDSSegmentInterleave: 1
+          AdaptiveGemm: 0
+          CompactLoopStore: false
+          ClusterDim: [4, 4]
+          SourceSwap: true
+          WorkGroupMapping: 8
+          TDMStoreInst: true
+          PrefetchGL2SAddr: false
+        - PrefetchLocalRead: 2
+          HalfPLR: 0
+          ClusterAIDMapping: -1
+          PrefetchGL2: 1
+          StoreRemapVectorWidth: 0
+          MatrixInstruction: [16, 16, 32, 1, 1, 1, 2, 1, 4]
+          WorkGroup: [32, 1, 1]
+          DepthU: 32
+          VectorWidthB: 2
+          StoreVectorWidth: 1
+          LDSSegmentInterleave: 1
+          AdaptiveGemm: 0
+          CompactLoopStore: false
+          ClusterDim: [4, 4]
+          SourceSwap: true
+          WorkGroupMapping: 8
+          TDMStoreInst: true
+          PrefetchGL2SAddr: false
+        - PrefetchLocalRead: 2
+          HalfPLR: 0
+          ClusterAIDMapping: -1
+          PrefetchGL2: 1
+          StoreRemapVectorWidth: 0
+          MatrixInstruction: [16, 16, 32, 1, 1, 1, 2, 1, 4]
+          WorkGroup: [32, 1, 1]
+          DepthU: 32
+          VectorWidthB: 2
+          StoreVectorWidth: 1
+          LDSSegmentInterleave: 1
+          AdaptiveGemm: 0
+          CompactLoopStore: false
+          ClusterDim: [4, 4]
+          SourceSwap: true
+          WorkGroupMapping: 8
+          TDMStoreInst: true
+          PrefetchGL2SAddr: true
+        - PrefetchLocalRead: 2
+          HalfPLR: 0
+          ClusterAIDMapping: -1
+          PrefetchGL2: 2
+          StoreRemapVectorWidth: 0
+          MatrixInstruction: [16, 16, 32, 1, 1, 1, 2, 1, 4]
+          WorkGroup: [32, 1, 1]
+          DepthU: 32
+          VectorWidthB: 2
+          StoreVectorWidth: 1
+          LDSSegmentInterleave: 1
+          AdaptiveGemm: 0
+          CompactLoopStore: false
+          ClusterDim: [4, 4]
+          SourceSwap: true
+          WorkGroupMapping: 8
+          TDMStoreInst: true
+          PrefetchGL2SAddr: false
+        - PrefetchLocalRead: 2
+          HalfPLR: 0
+          ClusterAIDMapping: -1
+          PrefetchGL2: 2
+          StoreRemapVectorWidth: 0
+          MatrixInstruction: [16, 16, 32, 1, 1, 1, 2, 1, 4]
+          WorkGroup: [32, 1, 1]
+          DepthU: 32
+          VectorWidthB: 2
+          StoreVectorWidth: 1
+          LDSSegmentInterleave: 1
+          AdaptiveGemm: 0
+          CompactLoopStore: false
+          ClusterDim: [4, 4]
+          SourceSwap: true
+          WorkGroupMapping: 8
+          TDMStoreInst: true
+          PrefetchGL2SAddr: true
+        - PrefetchLocalRead: 0
+          HalfPLR: 0
+          ClusterAIDMapping: -1
+          PrefetchGL2: 0
+          StoreRemapVectorWidth: 0
+          MatrixInstruction: [16, 16, 32, 1, 1, 1, 2, 1, 4]
+          WorkGroup: [32, 1, 1]
+          DepthU: 32
+          VectorWidthB: 2
+          StoreVectorWidth: 1
+          LDSSegmentInterleave: 1
+          AdaptiveGemm: 0
+          CompactLoopStore: false
+          ClusterDim: [4, 4]
+          SourceSwap: true
+          WorkGroupMapping: 8
+          TDMStoreInst: true
+          PrefetchGL2SAddr: false
+        - PrefetchLocalRead: 0
+          HalfPLR: 0
+          ClusterAIDMapping: -1
+          PrefetchGL2: 1
+          StoreRemapVectorWidth: 0
+          MatrixInstruction: [16, 16, 32, 1, 1, 1, 2, 1, 4]
+          WorkGroup: [32, 1, 1]
+          DepthU: 32
+          VectorWidthB: 2
+          StoreVectorWidth: 1
+          LDSSegmentInterleave: 1
+          AdaptiveGemm: 0
+          CompactLoopStore: false
+          ClusterDim: [4, 4]
+          SourceSwap: true
+          WorkGroupMapping: 8
+          TDMStoreInst: true
+          PrefetchGL2SAddr: false
+        - PrefetchLocalRead: 0
+          HalfPLR: 0
+          ClusterAIDMapping: -1
+          PrefetchGL2: 1
+          StoreRemapVectorWidth: 0
+          MatrixInstruction: [16, 16, 32, 1, 1, 1, 2, 1, 4]
+          WorkGroup: [32, 1, 1]
+          DepthU: 32
+          VectorWidthB: 2
+          StoreVectorWidth: 1
+          LDSSegmentInterleave: 1
+          AdaptiveGemm: 0
+          CompactLoopStore: false
+          ClusterDim: [4, 4]
+          SourceSwap: true
+          WorkGroupMapping: 8
+          TDMStoreInst: true
+          PrefetchGL2SAddr: true
+        - PrefetchLocalRead: 0
+          HalfPLR: 0
+          ClusterAIDMapping: -1
+          PrefetchGL2: 2
+          StoreRemapVectorWidth: 0
+          MatrixInstruction: [16, 16, 32, 1, 1, 1, 2, 1, 4]
+          WorkGroup: [32, 1, 1]
+          DepthU: 32
+          VectorWidthB: 2
+          StoreVectorWidth: 1
+          LDSSegmentInterleave: 1
+          AdaptiveGemm: 0
+          CompactLoopStore: false
+          ClusterDim: [4, 4]
+          SourceSwap: true
+          WorkGroupMapping: 8
+          TDMStoreInst: true
+          PrefetchGL2SAddr: false
+        - PrefetchLocalRead: 0
+          HalfPLR: 0
+          ClusterAIDMapping: -1
+          PrefetchGL2: 2
+          StoreRemapVectorWidth: 0
+          MatrixInstruction: [16, 16, 32, 1, 1, 1, 2, 1, 4]
+          WorkGroup: [32, 1, 1]
+          DepthU: 32
+          VectorWidthB: 2
+          StoreVectorWidth: 1
+          LDSSegmentInterleave: 1
+          AdaptiveGemm: 0
+          CompactLoopStore: false
+          ClusterDim: [4, 4]
+          SourceSwap: true
+          WorkGroupMapping: 8
+          TDMStoreInst: true
+          PrefetchGL2SAddr: true
+        - PrefetchLocalRead: 0
+          HalfPLR: 0
+          ClusterAIDMapping: -1
+          PrefetchGL2: 0
+          StoreRemapVectorWidth: 0
+          MatrixInstruction: [16, 16, 32, 1, 1, 1, 2, 1, 4]
+          WorkGroup: [32, 1, 1]
+          DepthU: 64
+          VectorWidthB: 2
+          StoreVectorWidth: 1
+          LDSSegmentInterleave: 1
+          AdaptiveGemm: 1
+          CompactLoopStore: false
+          ClusterDim: [4, 4]
+          SourceSwap: true
+          WorkGroupMapping: 8
+          TDMStoreInst: false
+          PrefetchGL2SAddr: false
+        - PrefetchLocalRead: 0
+          HalfPLR: 0
+          ClusterAIDMapping: -1
+          PrefetchGL2: 0
+          StoreRemapVectorWidth: 0
+          MatrixInstruction: [16, 16, 32, 1, 1, 1, 2, 1, 4]
+          WorkGroup: [32, 1, 1]
+          DepthU: 64
+          VectorWidthB: 2
+          StoreVectorWidth: 1
+          LDSSegmentInterleave: 1
+          AdaptiveGemm: 1
+          CompactLoopStore: false
+          ClusterDim: [1, 1]
+          SourceSwap: true
+          WorkGroupMapping: 8
+          TDMStoreInst: false
+          PrefetchGL2SAddr: false
+        - PrefetchLocalRead: 0
+          HalfPLR: 0
+          ClusterAIDMapping: -1
+          PrefetchGL2: 0
+          StoreRemapVectorWidth: 0
+          MatrixInstruction: [16, 16, 32, 1, 1, 1, 2, 1, 4]
+          WorkGroup: [32, 1, 1]
+          DepthU: 64
+          VectorWidthB: 2
+          StoreVectorWidth: 1
+          LDSSegmentInterleave: 1
+          AdaptiveGemm: 1
+          CompactLoopStore: false
+          ClusterDim: [2, 2]
+          SourceSwap: true
+          WorkGroupMapping: 8
+          TDMStoreInst: false
+          PrefetchGL2SAddr: false
+        - PrefetchLocalRead: 0
+          HalfPLR: 0
+          ClusterAIDMapping: -1
+          PrefetchGL2: 0
+          StoreRemapVectorWidth: 0
+          MatrixInstruction: [16, 16, 32, 1, 1, 1, 2, 1, 4]
+          WorkGroup: [32, 1, 1]
+          DepthU: 64
+          VectorWidthB: 2
+          StoreVectorWidth: 1
+          LDSSegmentInterleave: 1
+          AdaptiveGemm: 1
+          CompactLoopStore: false
+          ClusterDim: [4, 2]
+          SourceSwap: true
+          WorkGroupMapping: 8
+          TDMStoreInst: false
+          PrefetchGL2SAddr: false
+        - PrefetchLocalRead: 0
+          HalfPLR: 0
+          ClusterAIDMapping: -1
+          PrefetchGL2: 0
+          StoreRemapVectorWidth: 0
+          MatrixInstruction: [16, 16, 32, 1, 1, 1, 2, 1, 4]
+          WorkGroup: [32, 1, 1]
+          DepthU: 64
+          VectorWidthB: 2
+          StoreVectorWidth: 1
+          LDSSegmentInterleave: 1
+          AdaptiveGemm: 1
+          CompactLoopStore: false
+          ClusterDim: [1, 2]
+          SourceSwap: true
+          WorkGroupMapping: 8
+          TDMStoreInst: false
+          PrefetchGL2SAddr: false
+        - PrefetchLocalRead: 0
+          HalfPLR: 0
+          ClusterAIDMapping: -1
+          PrefetchGL2: 0
+          StoreRemapVectorWidth: 0
+          MatrixInstruction: [16, 16, 32, 1, 1, 1, 2, 1, 4]
+          WorkGroup: [32, 1, 1]
+          DepthU: 64
+          VectorWidthB: 2
+          StoreVectorWidth: 1
+          LDSSegmentInterleave: 1
+          AdaptiveGemm: 1
+          CompactLoopStore: false
+          ClusterDim: [2, 1]
+          SourceSwap: true
+          WorkGroupMapping: 8
+          TDMStoreInst: false
+          PrefetchGL2SAddr: false
+        - PrefetchLocalRead: 0
+          HalfPLR: 0
+          ClusterAIDMapping: -1
+          PrefetchGL2: 0
+          StoreRemapVectorWidth: 0
+          MatrixInstruction: [16, 16, 32, 1, 1, 1, 2, 1, 4]
+          WorkGroup: [32, 1, 1]
+          DepthU: 64
+          VectorWidthB: 2
+          StoreVectorWidth: 1
+          LDSSegmentInterleave: 1
+          AdaptiveGemm: 1
+          CompactLoopStore: false
+          ClusterDim: [1, 4]
+          SourceSwap: true
+          WorkGroupMapping: 8
+          TDMStoreInst: false
+          PrefetchGL2SAddr: false
+        - PrefetchLocalRead: 0
+          HalfPLR: 0
+          ClusterAIDMapping: -1
+          PrefetchGL2: 0
+          StoreRemapVectorWidth: 0
+          MatrixInstruction: [16, 16, 32, 1, 1, 1, 2, 1, 4]
+          WorkGroup: [32, 1, 1]
+          DepthU: 64
+          VectorWidthB: 2
+          StoreVectorWidth: 1
+          LDSSegmentInterleave: 1
+          AdaptiveGemm: 1
+          CompactLoopStore: false
+          ClusterDim: [4, 1]
+          SourceSwap: true
+          WorkGroupMapping: 8
+          TDMStoreInst: false
+          PrefetchGL2SAddr: false
+        - PrefetchLocalRead: 0
+          HalfPLR: 0
+          ClusterAIDMapping: -1
+          PrefetchGL2: 0
+          StoreRemapVectorWidth: 0
+          MatrixInstruction: [16, 16, 32, 1, 1, 1, 2, 1, 4]
+          WorkGroup: [32, 1, 1]
+          DepthU: 64
+          VectorWidthB: 2
+          StoreVectorWidth: 1
+          LDSSegmentInterleave: 1
+          AdaptiveGemm: 1
+          CompactLoopStore: false
+          ClusterDim: [2, 4]
+          SourceSwap: true
+          WorkGroupMapping: 8
+          TDMStoreInst: false
+          PrefetchGL2SAddr: false
+        - PrefetchLocalRead: 0
+          HalfPLR: 0
+          ClusterAIDMapping: -1
+          PrefetchGL2: 1
+          StoreRemapVectorWidth: 0
+          MatrixInstruction: [16, 16, 32, 1, 1, 1, 2, 1, 4]
+          WorkGroup: [32, 1, 1]
+          DepthU: 64
+          VectorWidthB: 2
+          StoreVectorWidth: 1
+          LDSSegmentInterleave: 1
+          AdaptiveGemm: 1
+          CompactLoopStore: false
+          ClusterDim: [4, 4]
+          SourceSwap: true
+          WorkGroupMapping: 8
+          TDMStoreInst: false
+          PrefetchGL2SAddr: false
+        - PrefetchLocalRead: 0
+          HalfPLR: 0
+          ClusterAIDMapping: -1
+          PrefetchGL2: 1
+          StoreRemapVectorWidth: 0
+          MatrixInstruction: [16, 16, 32, 1, 1, 1, 2, 1, 4]
+          WorkGroup: [32, 1, 1]
+          DepthU: 64
+          VectorWidthB: 2
+          StoreVectorWidth: 1
+          LDSSegmentInterleave: 1
+          AdaptiveGemm: 1
+          CompactLoopStore: false
+          ClusterDim: [4, 4]
+          SourceSwap: true
+          WorkGroupMapping: 8
+          TDMStoreInst: false
+          PrefetchGL2SAddr: true
+        - PrefetchLocalRead: 0
+          HalfPLR: 0
+          ClusterAIDMapping: -1
+          PrefetchGL2: 2
+          StoreRemapVectorWidth: 0
+          MatrixInstruction: [16, 16, 32, 1, 1, 1, 2, 1, 4]
+          WorkGroup: [32, 1, 1]
+          DepthU: 64
+          VectorWidthB: 2
+          StoreVectorWidth: 1
+          LDSSegmentInterleave: 1
+          AdaptiveGemm: 1
+          CompactLoopStore: false
+          ClusterDim: [4, 4]
+          SourceSwap: true
+          WorkGroupMapping: 8
+          TDMStoreInst: false
+          PrefetchGL2SAddr: false
+        - PrefetchLocalRead: 0
+          HalfPLR: 0
+          ClusterAIDMapping: -1
+          PrefetchGL2: 2
+          StoreRemapVectorWidth: 0
+          MatrixInstruction: [16, 16, 32, 1, 1, 1, 2, 1, 4]
+          WorkGroup: [32, 1, 1]
+          DepthU: 64
+          VectorWidthB: 2
+          StoreVectorWidth: 1
+          LDSSegmentInterleave: 1
+          AdaptiveGemm: 1
+          CompactLoopStore: false
+          ClusterDim: [4, 4]
+          SourceSwap: true
+          WorkGroupMapping: 8
+          TDMStoreInst: false
+          PrefetchGL2SAddr: true
+        - PrefetchLocalRead: 1
+          HalfPLR: 0
+          ClusterAIDMapping: -1
+          PrefetchGL2: 0
+          StoreRemapVectorWidth: 0
+          MatrixInstruction: [16, 16, 32, 1, 1, 1, 2, 1, 4]
+          WorkGroup: [32, 1, 1]
+          DepthU: 64
+          VectorWidthB: 2
+          StoreVectorWidth: 1
+          LDSSegmentInterleave: 1
+          AdaptiveGemm: 1
+          CompactLoopStore: false
+          ClusterDim: [4, 4]
+          SourceSwap: true
+          WorkGroupMapping: 8
+          TDMStoreInst: false
+          PrefetchGL2SAddr: false
+        - PrefetchLocalRead: 1
+          HalfPLR: 1
+          ClusterAIDMapping: -1
+          PrefetchGL2: 0
+          StoreRemapVectorWidth: 0
+          MatrixInstruction: [16, 16, 32, 1, 1, 1, 2, 1, 4]
+          WorkGroup: [32, 1, 1]
+          DepthU: 64
+          VectorWidthB: 2
+          StoreVectorWidth: 1
+          LDSSegmentInterleave: 1
+          AdaptiveGemm: 1
+          CompactLoopStore: false
+          ClusterDim: [4, 4]
+          SourceSwap: true
+          WorkGroupMapping: 8
+          TDMStoreInst: false
+          PrefetchGL2SAddr: false
+        - PrefetchLocalRead: 1
+          HalfPLR: 2
+          ClusterAIDMapping: -1
+          PrefetchGL2: 0
+          StoreRemapVectorWidth: 0
+          MatrixInstruction: [16, 16, 32, 1, 1, 1, 2, 1, 4]
+          WorkGroup: [32, 1, 1]
+          DepthU: 64
+          VectorWidthB: 2
+          StoreVectorWidth: 1
+          LDSSegmentInterleave: 1
+          AdaptiveGemm: 1
+          CompactLoopStore: false
+          ClusterDim: [4, 4]
+          SourceSwap: true
+          WorkGroupMapping: 8
+          TDMStoreInst: false
+          PrefetchGL2SAddr: false
+        - PrefetchLocalRead: 2
+          HalfPLR: 0
+          ClusterAIDMapping: -1
+          PrefetchGL2: 0
+          StoreRemapVectorWidth: 0
+          MatrixInstruction: [16, 16, 32, 1, 1, 1, 2, 1, 4]
+          WorkGroup: [32, 1, 1]
+          DepthU: 64
+          VectorWidthB: 2
+          StoreVectorWidth: 1
+          LDSSegmentInterleave: 1
+          AdaptiveGemm: 1
+          CompactLoopStore: false
+          ClusterDim: [4, 4]
+          SourceSwap: true
+          WorkGroupMapping: 8
+          TDMStoreInst: false
+          PrefetchGL2SAddr: false
+        - PrefetchLocalRead: 0
+          HalfPLR: 0
+          ClusterAIDMapping: -1
+          PrefetchGL2: 0
+          StoreRemapVectorWidth: 0
+          MatrixInstruction: [16, 16, 32, 1, 1, 1, 2, 1, 4]
+          WorkGroup: [32, 1, 1]
+          DepthU: 64
+          VectorWidthB: 2
+          StoreVectorWidth: 1
+          LDSSegmentInterleave: 1
+          AdaptiveGemm: 0
+          CompactLoopStore: false
+          ClusterDim: [4, 4]
+          SourceSwap: true
+          WorkGroupMapping: 8
+          TDMStoreInst: true
+          PrefetchGL2SAddr: false
+        - PrefetchLocalRead: 0
+          HalfPLR: 0
+          ClusterAIDMapping: -1
+          PrefetchGL2: 0
+          StoreRemapVectorWidth: 0
+          MatrixInstruction: [16, 16, 32, 1, 1, 1, 2, 1, 4]
+          WorkGroup: [32, 1, 1]
+          DepthU: 64
+          VectorWidthB: 2
+          StoreVectorWidth: 1
+          LDSSegmentInterleave: 0
+          AdaptiveGemm: 1
+          CompactLoopStore: false
+          ClusterDim: [4, 4]
+          SourceSwap: true
+          WorkGroupMapping: 8
+          TDMStoreInst: false
+          PrefetchGL2SAddr: false
+        - PrefetchLocalRead: 0
+          HalfPLR: 0
+          ClusterAIDMapping: -1
+          PrefetchGL2: 0
+          StoreRemapVectorWidth: 0
+          MatrixInstruction: [16, 16, 32, 1, 1, 2, 2, 1, 4]
+          WorkGroup: [32, 1, 1]
+          DepthU: 32
+          VectorWidthB: 2
+          StoreVectorWidth: 1
+          LDSSegmentInterleave: 1
+          AdaptiveGemm: 1
+          CompactLoopStore: false
+          ClusterDim: [4, 4]
+          SourceSwap: true
+          WorkGroupMapping: 8
+          TDMStoreInst: false
+          PrefetchGL2SAddr: false
+        - PrefetchLocalRead: 0
+          HalfPLR: 0
+          ClusterAIDMapping: -1
+          PrefetchGL2: 0
+          StoreRemapVectorWidth: 0
+          MatrixInstruction: [16, 16, 32, 1, 1, 2, 2, 1, 4]
+          WorkGroup: [32, 1, 1]
+          DepthU: 64
+          VectorWidthB: 2
+          StoreVectorWidth: 1
+          LDSSegmentInterleave: 1
+          AdaptiveGemm: 1
+          CompactLoopStore: false
+          ClusterDim: [4, 4]
+          SourceSwap: true
+          WorkGroupMapping: 8
+          TDMStoreInst: false
+          PrefetchGL2SAddr: false
+        - PrefetchLocalRead: 0
+          HalfPLR: 0
+          ClusterAIDMapping: -1
+          PrefetchGL2: 0
+          StoreRemapVectorWidth: 0
+          MatrixInstruction: [16, 16, 32, 1, 1, 2, 2, 1, 4]
+          WorkGroup: [32, 1, 1]
+          DepthU: 64
+          VectorWidthB: 2
+          StoreVectorWidth: 1
+          LDSSegmentInterleave: 0
+          AdaptiveGemm: 1
+          CompactLoopStore: false
+          ClusterDim: [4, 4]
+          SourceSwap: true
+          WorkGroupMapping: 8
+          TDMStoreInst: false
+          PrefetchGL2SAddr: false
+        - PrefetchLocalRead: 0
+          HalfPLR: 0
+          ClusterAIDMapping: -1
+          PrefetchGL2: 0
+          StoreRemapVectorWidth: 0
+          MatrixInstruction: [16, 16, 32, 1, 1, 1, 4, 1, 4]
+          WorkGroup: [32, 1, 1]
+          DepthU: 32
+          VectorWidthB: 2
+          StoreVectorWidth: 1
+          LDSSegmentInterleave: 1
+          AdaptiveGemm: 1
+          CompactLoopStore: false
+          ClusterDim: [4, 4]
+          SourceSwap: true
+          WorkGroupMapping: 8
+          TDMStoreInst: false
+          PrefetchGL2SAddr: false
+        - PrefetchLocalRead: 0
+          HalfPLR: 0
+          ClusterAIDMapping: -1
+          PrefetchGL2: 0
+          StoreRemapVectorWidth: 0
+          MatrixInstruction: [16, 16, 32, 1, 1, 1, 4, 1, 4]
+          WorkGroup: [32, 1, 1]
+          DepthU: 64
+          VectorWidthB: 2
+          StoreVectorWidth: 1
+          LDSSegmentInterleave: 1
+          AdaptiveGemm: 1
+          CompactLoopStore: false
+          ClusterDim: [4, 4]
+          SourceSwap: true
+          WorkGroupMapping: 8
+          TDMStoreInst: false
+          PrefetchGL2SAddr: false
+        - PrefetchLocalRead: 0
+          HalfPLR: 0
+          ClusterAIDMapping: -1
+          PrefetchGL2: 0
+          StoreRemapVectorWidth: 0
+          MatrixInstruction: [16, 16, 32, 1, 1, 1, 4, 1, 4]
+          WorkGroup: [32, 1, 1]
+          DepthU: 64
+          VectorWidthB: 2
+          StoreVectorWidth: 1
+          LDSSegmentInterleave: 0
+          AdaptiveGemm: 1
+          CompactLoopStore: false
+          ClusterDim: [4, 4]
+          SourceSwap: true
+          WorkGroupMapping: 8
+          TDMStoreInst: false
+          PrefetchGL2SAddr: false
+        - PrefetchLocalRead: 0
+          HalfPLR: 0
+          ClusterAIDMapping: -1
+          PrefetchGL2: 0
+          StoreRemapVectorWidth: 0
+          MatrixInstruction: [16, 16, 32, 1, 1, 1, 1, 1, 4]
+          WorkGroup: [32, 1, 1]
+          DepthU: 32
+          VectorWidthB: 2
+          StoreVectorWidth: 1
+          LDSSegmentInterleave: 1
+          AdaptiveGemm: 1
+          CompactLoopStore: false
+          ClusterDim: [4, 4]
+          SourceSwap: true
+          WorkGroupMapping: 8
+          TDMStoreInst: false
+          PrefetchGL2SAddr: false
+        - PrefetchLocalRead: 0
+          HalfPLR: 0
+          ClusterAIDMapping: -1
+          PrefetchGL2: 0
+          StoreRemapVectorWidth: 0
+          MatrixInstruction: [16, 16, 32, 1, 1, 1, 1, 1, 4]
+          WorkGroup: [32, 1, 1]
+          DepthU: 32
+          VectorWidthB: 1
+          StoreVectorWidth: 1
+          LDSSegmentInterleave: 1
+          AdaptiveGemm: 1
+          CompactLoopStore: false
+          ClusterDim: [4, 4]
+          SourceSwap: true
+          WorkGroupMapping: 8
+          TDMStoreInst: false
+          PrefetchGL2SAddr: false
+        - PrefetchLocalRead: 0
+          HalfPLR: 0
+          ClusterAIDMapping: -1
+          PrefetchGL2: 0
+          StoreRemapVectorWidth: 0
+          MatrixInstruction: [16, 16, 32, 1, 1, 1, 1, 1, 4]
+          WorkGroup: [32, 1, 1]
+          DepthU: 64
+          VectorWidthB: 2
+          StoreVectorWidth: 1
+          LDSSegmentInterleave: 1
+          AdaptiveGemm: 1
+          CompactLoopStore: false
+          ClusterDim: [4, 4]
+          SourceSwap: true
+          WorkGroupMapping: 8
+          TDMStoreInst: false
+          PrefetchGL2SAddr: false
+        - PrefetchLocalRead: 0
+          HalfPLR: 0
+          ClusterAIDMapping: -1
+          PrefetchGL2: 0
+          StoreRemapVectorWidth: 0
+          MatrixInstruction: [16, 16, 32, 1, 1, 1, 1, 1, 4]
+          WorkGroup: [32, 1, 1]
+          DepthU: 64
+          VectorWidthB: 2
+          StoreVectorWidth: 1
+          LDSSegmentInterleave: 0
+          AdaptiveGemm: 1
+          CompactLoopStore: false
+          ClusterDim: [4, 4]
+          SourceSwap: true
+          WorkGroupMapping: 8
+          TDMStoreInst: false
+          PrefetchGL2SAddr: false
+        - PrefetchLocalRead: 0
+          HalfPLR: 0
+          ClusterAIDMapping: -1
+          PrefetchGL2: 0
+          StoreRemapVectorWidth: 0
+          MatrixInstruction: [16, 16, 32, 1, 1, 1, 1, 1, 4]
+          WorkGroup: [32, 1, 1]
+          DepthU: 64
+          VectorWidthB: 1
+          StoreVectorWidth: 1
+          LDSSegmentInterleave: 1
+          AdaptiveGemm: 1
+          CompactLoopStore: false
+          ClusterDim: [4, 4]
+          SourceSwap: true
+          WorkGroupMapping: 8
+          TDMStoreInst: false
+          PrefetchGL2SAddr: false
+        - PrefetchLocalRead: 0
+          HalfPLR: 0
+          ClusterAIDMapping: -1
+          PrefetchGL2: 0
+          StoreRemapVectorWidth: 0
+          MatrixInstruction: [16, 16, 32, 1, 1, 1, 1, 1, 4]
+          WorkGroup: [32, 1, 1]
+          DepthU: 64
+          VectorWidthB: 1
+          StoreVectorWidth: 1
+          LDSSegmentInterleave: 0
+          AdaptiveGemm: 1
+          CompactLoopStore: false
+          ClusterDim: [4, 4]
+          SourceSwap: true
+          WorkGroupMapping: 8
+          TDMStoreInst: false
+          PrefetchGL2SAddr: false
     BenchmarkJoinParameters: null
     BenchmarkFinalParameters:
     - ProblemSizes:

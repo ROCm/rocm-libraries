@@ -276,14 +276,14 @@ DefaultSolution:
   WorkGroupReduction: false
   WorkQueueStealing: 0
 Solutions:
-- AdaptiveGemm: 1
+- A2ASubRounds: 1
   AssignedDerivedParameters: false
   AssignedProblemIndependentDerivedParameters: true
   CUCount: null
   CUOccupancy: 1
   ClusterBarrier: false
+  ClusterLocalRead: 0
   CodeObjectVersion: '4'
-  CompactLoopStore: true
   DepthU: 128
   DirectToLdsA: false
   DirectToLdsB: false
@@ -305,7 +305,8 @@ Solutions:
   GuaranteeNoPartialA: true
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
-  HalfPLRA: false
+  HalfPLR: 1
+  HalfPLRA: true
   HalfPLRB: false
   ISA: [12, 5, 0]
   InitCIterWmma: 1
@@ -333,6 +334,7 @@ Solutions:
     pairedUsedBytes: 232960
     writeStrideBytes: 166400
   LDSSegmentInterleave: 1
+  LDSTrStoreShuffle: 0
   LSCA: 128
   LSCB: 128
   LSPA: 192
@@ -396,6 +398,7 @@ Solutions:
   MIWaveTileMetadata: 0
   MXLoadInst: TDM
   MXScaleFormat: InMemorySwizzle
+  MXScaleVgprInterleaveExtraVgpr: false
   MacroTile0: 192
   MacroTile1: 256
   MacroTileA: 192
@@ -414,7 +417,7 @@ Solutions:
   MinGRIncPerMfma: 1
   Multicast: false
   NoLdsWriteCode: true
-  NoTailLoop: false
+  NoTailLoop: true
   NonDTLTailLoopA: false
   NonDTLTailLoopB: false
   NonDTLTailLoopMetadata: false
@@ -440,14 +443,18 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
+  SolutionIndex: 0
   SourceSwap: true
+  StoreCachelineAlign: true
   StoreSwapAddr: true
   StoreVectorWidth: 4
   SubGroup0: 2
   SubGroup1: 64
   SubGroupA: 2
   SubGroupB: 64
+  SuppressNoLoadLoop: true
   TDMInst: 3
+  TDMStoreInst: true
   ThreadTile: [1, 1]
   ThreadTile0: 96
   ThreadTile1: 4
@@ -471,6 +478,7 @@ Solutions:
   Valid: true
   VectorWidthA: 4
   VectorWidthB: 4
+  WaveTileContiguousA: false
   WavefrontSize: 32
   WorkGroup: [16, 8, 1]
   WorkGroupMapping: 16
@@ -492,6 +500,8 @@ Solutions:
   _ScheduleIterAlg: 0
   _SeparateEpilogueLds: false
   _StinkyTofuOptLevel: 3
+  _TDMStoreLdsOffset: 0
+  _TailFolding: true
   _UseSgprForGRO: 1
   _VectorStore: 1
   _WorkspaceSizePerElemBias: 0
@@ -519,8 +529,7 @@ Solutions:
   reorderGRInstForDTVB: false
   tailLoopOptA: false
   tailLoopOptB: false
-  SolutionIndex: 0
-- AdaptiveGemm: 1
+- A2ASubRounds: 1
   AssertFree0ElementMultiple: 8
   AssignedDerivedParameters: false
   AssignedProblemIndependentDerivedParameters: true
@@ -547,7 +556,6 @@ Solutions:
   ForceUnrollSubIter: false
   GlobalReadVectorWidthA: 1
   GlobalReadVectorWidthB: 1
-  GlobalSplitUWorkGroupMappingRoundRobin: true
   GlobalWriteVectorWidth: 8
   GuaranteeNoPartialA: true
   GuaranteeNoPartialB: true
@@ -580,6 +588,7 @@ Solutions:
     readAddressWindowsB: [0, 2]
     writeStrideBytes: 132608
   LDSSegmentInterleave: 1
+  LDSTrStoreShuffle: 0
   LSCA: 128
   LSCB: 128
   LSPA: 256
@@ -643,6 +652,7 @@ Solutions:
   MIWaveTileMetadata: 0
   MXLoadInst: TDM
   MXScaleFormat: InMemorySwizzle
+  MXScaleVgprInterleaveExtraVgpr: false
   MacroTile0: 256
   MacroTile1: 256
   MacroTileA: 256
@@ -661,7 +671,7 @@ Solutions:
   MinGRIncPerMfma: 1
   Multicast: true
   NoLdsWriteCode: true
-  NoTailLoop: false
+  NoTailLoop: true
   NonDTLTailLoopA: false
   NonDTLTailLoopB: false
   NonDTLTailLoopMetadata: false
@@ -682,15 +692,16 @@ Solutions:
   PackedC1IdxChars: [J]
   PackedC1IndicesX: [1]
   PostLoopStoreInNll: false
-  PrefetchGL2: 2
   PrefetchGL2Inc64Bit: false
   PrefetchGL2SAddr: false
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
+  SolutionIndex: 1
   SourceSwap: true
   StaggerU: 0
   StaggerUStride: 0
+  StoreCachelineAlign: true
   StoreSwapAddr: true
   StoreVectorWidth: 8
   SubGroup0: 4
@@ -700,6 +711,7 @@ Solutions:
   SuppressNoLoadLoop: true
   TDMInst: 3
   TDMIterateMode: 1
+  TDMStoreInst: true
   ThreadTile: [1, 1]
   ThreadTile0: 64
   ThreadTile1: 8
@@ -723,6 +735,7 @@ Solutions:
   Valid: true
   VectorWidthA: 8
   VectorWidthB: 4
+  WaveTileContiguousA: false
   WavefrontSize: 32
   WorkGroup: [32, 4, 1]
   WorkspaceCheck: [4, 0, 1]
@@ -744,6 +757,8 @@ Solutions:
   _SeparateEpilogueLds: false
   _StinkyTofuOptLevel: 3
   _TDMIterateModeA: true
+  _TDMStoreLdsOffset: 0
+  _TailFolding: true
   _UseSgprForGRO: 1
   _VectorStore: 1
   _WorkspaceSizePerElemBias: 0
@@ -771,8 +786,7 @@ Solutions:
   reorderGRInstForDTVB: false
   tailLoopOptA: false
   tailLoopOptB: false
-  SolutionIndex: 1
-- AdaptiveGemm: 1
+- A2ASubRounds: 1
   AssignedDerivedParameters: false
   AssignedProblemIndependentDerivedParameters: true
   CUCount: null
@@ -818,6 +832,7 @@ Solutions:
     UseUniversalArgs: true
   Kernel: true
   LDSSegInterleaveOffsets: null
+  LDSTrStoreShuffle: 0
   LSCA: 128
   LSCB: 128
   LSPA: 384
@@ -881,6 +896,7 @@ Solutions:
   MIWaveTileMetadata: 0
   MXLoadInst: TDM
   MXScaleFormat: InMemorySwizzle
+  MXScaleVgprInterleaveExtraVgpr: false
   MacroTile0: 384
   MacroTile1: 160
   MacroTileA: 384
@@ -899,7 +915,7 @@ Solutions:
   MinGRIncPerMfma: 1
   Multicast: false
   NoLdsWriteCode: true
-  NoTailLoop: false
+  NoTailLoop: true
   NonDTLTailLoopA: false
   NonDTLTailLoopB: false
   NonDTLTailLoopMetadata: false
@@ -925,7 +941,9 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
+  SolutionIndex: 2
   SourceSwap: true
+  StoreCachelineAlign: true
   StoreSwapAddr: true
   StoreVectorWidth: 2
   SubGroup0: 8
@@ -934,6 +952,7 @@ Solutions:
   SubGroupB: 16
   SuppressNoLoadLoop: true
   TDMInst: 3
+  TDMStoreInst: true
   ThreadTile: [1, 1]
   ThreadTile0: 48
   ThreadTile1: 10
@@ -957,6 +976,7 @@ Solutions:
   Valid: true
   VectorWidthA: 2
   VectorWidthB: 2
+  WaveTileContiguousA: false
   WavefrontSize: 32
   WorkGroup: [64, 2, 1]
   WorkGroupMapping: 32
@@ -978,6 +998,8 @@ Solutions:
   _ScheduleIterAlg: 0
   _SeparateEpilogueLds: false
   _StinkyTofuOptLevel: 3
+  _TDMStoreLdsOffset: 0
+  _TailFolding: true
   _UseSgprForGRO: 1
   _VectorStore: 1
   _WorkspaceSizePerElemBias: 0
@@ -1005,8 +1027,8 @@ Solutions:
   reorderGRInstForDTVB: false
   tailLoopOptA: false
   tailLoopOptB: false
-  SolutionIndex: 2
-- AdaptiveGemm: 1
+- A2ASubRounds: 1
+  AdaptiveGemm: 1
   AssignedDerivedParameters: false
   AssignedProblemIndependentDerivedParameters: true
   CUCount: null
@@ -1033,6 +1055,9 @@ Solutions:
   ForceUnrollSubIter: false
   GlobalReadVectorWidthA: 1
   GlobalReadVectorWidthB: 1
+  GlobalSplitU: 0
+  GlobalSplitUAlgorithm: SingleBuffer
+  GlobalSplitUWorkGroupMappingRoundRobin: true
   GlobalWriteVectorWidth: 4
   GuaranteeNoPartialA: true
   GuaranteeNoPartialB: true
@@ -1044,16 +1069,17 @@ Solutions:
   InitCIterWmma: 1
   InternalSupportParams:
     KernArgsVersion: 3
-    PersistentLoopArgsVersion: 0
+    PersistentLoopArgsVersion: 1
     SupportCustomStaggerU: false
     SupportCustomWGM: true
     SupportOccupancyProbe: false
     SupportStreamKPerTileExtraIters: false
-    SupportUserGSU: true
+    SupportUserGSU: false
     UseSFC: false
     UseUniversalArgs: true
   Kernel: true
   LDSSegInterleaveOffsets: null
+  LDSTrStoreShuffle: 0
   LSCA: 128
   LSCB: 128
   LSPA: 192
@@ -1117,6 +1143,7 @@ Solutions:
   MIWaveTileMetadata: 0
   MXLoadInst: TDM
   MXScaleFormat: InMemorySwizzle
+  MXScaleVgprInterleaveExtraVgpr: false
   MacroTile0: 192
   MacroTile1: 320
   MacroTileA: 192
@@ -1156,14 +1183,17 @@ Solutions:
   PackedC1IdxChars: [J]
   PackedC1IndicesX: [1]
   PostLoopStoreInNll: false
+  PrefetchGL2: 2
   PrefetchGL2Inc64Bit: false
-  PrefetchGL2SAddr: false
+  PrefetchGL2SAddr: true
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
+  SolutionIndex: 3
   SourceSwap: true
   StaggerU: 0
   StaggerUStride: 0
+  StoreCachelineAlign: true
   StoreSwapAddr: true
   StoreVectorWidth: 4
   SubGroup0: 2
@@ -1172,11 +1202,13 @@ Solutions:
   SubGroupB: 64
   SuppressNoLoadLoop: true
   TDMInst: 3
+  TDMStoreInst: false
   ThreadTile: [1, 1]
   ThreadTile0: 96
   ThreadTile1: 5
   ThreadTileA: 96
   ThreadTileB: 5
+  TileProcessingStrategy: DataParallel
   TransposeLDS: 1
   ULSGRODoubleG2L: 0
   UnrollMajorLDSA: true
@@ -1195,17 +1227,18 @@ Solutions:
   Valid: true
   VectorWidthA: 4
   VectorWidthB: 1
+  WaveTileContiguousA: false
   WavefrontSize: 32
   WorkGroup: [16, 8, 1]
-  WorkspaceCheck: [4, 0, 1]
+  WorkspaceCheck: [0, 0, 1]
   _DepthU: 128
   _DepthUA: 128
   _DepthUB: 128
   _DepthUMetadata: 128
   _DualPeriodMXFP8: false
-  _GlobalAccumulation: MultipleBuffer
+  _GlobalAccumulation: null
   _HasTemporalHint: 1
-  _PersistentLoop: false
+  _PersistentLoop: true
   _PersistentVectorEpilogueLds: false
   _PrefetchAcrossPersistentEnabled: false
   _ScalePeriodUA: 128
@@ -1215,10 +1248,11 @@ Solutions:
   _ScheduleIterAlg: 0
   _SeparateEpilogueLds: false
   _StinkyTofuOptLevel: 3
+  _TDMStoreLdsOffset: 0
   _UseSgprForGRO: 1
   _VectorStore: 1
   _WorkspaceSizePerElemBias: 0
-  _WorkspaceSizePerElemC: 4
+  _WorkspaceSizePerElemC: 0
   _inputVWA_was_auto: false
   _inputVWB_was_auto: false
   _staggerStrideShift: 0
@@ -1242,16 +1276,15 @@ Solutions:
   reorderGRInstForDTVB: false
   tailLoopOptA: false
   tailLoopOptB: false
-  SolutionIndex: 3
-- AdaptiveGemm: 1
+- A2ASubRounds: 1
   AssignedDerivedParameters: false
   AssignedProblemIndependentDerivedParameters: true
   CUCount: null
   CUOccupancy: 1
-  ClusterBarrier: false
+  ClusterBarrier: true
+  ClusterDim: [2, 1]
   ClusterLocalRead: 0
   CodeObjectVersion: '4'
-  CompactLoopStore: true
   DepthU: 128
   DirectToLdsA: false
   DirectToLdsB: false
@@ -1290,6 +1323,7 @@ Solutions:
     UseUniversalArgs: true
   Kernel: true
   LDSSegInterleaveOffsets: null
+  LDSTrStoreShuffle: 0
   LSCA: 128
   LSCB: 128
   LSPA: 320
@@ -1353,6 +1387,7 @@ Solutions:
   MIWaveTileMetadata: 0
   MXLoadInst: TDM
   MXScaleFormat: InMemorySwizzle
+  MXScaleVgprInterleaveExtraVgpr: false
   MacroTile0: 320
   MacroTile1: 256
   MacroTileA: 320
@@ -1369,9 +1404,9 @@ Solutions:
   MbskPrefetchMethod: 0
   MfmaInitCVgprs: false
   MinGRIncPerMfma: 1
-  Multicast: false
+  Multicast: true
   NoLdsWriteCode: true
-  NoTailLoop: false
+  NoTailLoop: true
   NonDTLTailLoopA: false
   NonDTLTailLoopB: false
   NonDTLTailLoopMetadata: false
@@ -1392,15 +1427,16 @@ Solutions:
   PackedC1IdxChars: [J]
   PackedC1IndicesX: [1]
   PostLoopStoreInNll: false
-  PrefetchGL2: 2
   PrefetchGL2Inc64Bit: false
   PrefetchGL2SAddr: false
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
+  SolutionIndex: 4
   SourceSwap: true
   StaggerU: 0
   StaggerUStride: 0
+  StoreCachelineAlign: true
   StoreSwapAddr: true
   StoreVectorWidth: 2
   SubGroup0: 4
@@ -1409,6 +1445,7 @@ Solutions:
   SubGroupB: 32
   SuppressNoLoadLoop: true
   TDMInst: 3
+  TDMStoreInst: true
   ThreadTile: [1, 1]
   ThreadTile0: 80
   ThreadTile1: 8
@@ -1432,9 +1469,9 @@ Solutions:
   Valid: true
   VectorWidthA: 2
   VectorWidthB: 4
+  WaveTileContiguousA: false
   WavefrontSize: 32
   WorkGroup: [32, 4, 1]
-  WorkGroupMapping: 16
   WorkspaceCheck: [4, 0, 1]
   _DepthU: 128
   _DepthUA: 128
@@ -1453,6 +1490,8 @@ Solutions:
   _ScheduleIterAlg: 0
   _SeparateEpilogueLds: false
   _StinkyTofuOptLevel: 3
+  _TDMStoreLdsOffset: 0
+  _TailFolding: true
   _UseSgprForGRO: 1
   _VectorStore: 1
   _WorkspaceSizePerElemBias: 0
@@ -1480,13 +1519,12 @@ Solutions:
   reorderGRInstForDTVB: false
   tailLoopOptA: false
   tailLoopOptB: false
-  SolutionIndex: 4
-- AdaptiveGemm: 1
+- A2ASubRounds: 1
+  AdaptiveGemm: 1
   AssignedDerivedParameters: false
   AssignedProblemIndependentDerivedParameters: true
   CUCount: null
   CUOccupancy: 1
-  ClusterAIDMapping: -2
   ClusterBarrier: true
   ClusterDim: [4, 4]
   ClusterLocalRead: 0
@@ -1541,6 +1579,7 @@ Solutions:
     pairedUsedBytes: 302080
     writeStrideBytes: 235520
   LDSSegmentInterleave: 1
+  LDSTrStoreShuffle: 0
   LSCA: 128
   LSCB: 128
   LSPA: 256
@@ -1604,6 +1643,7 @@ Solutions:
   MIWaveTileMetadata: 0
   MXLoadInst: TDM
   MXScaleFormat: InMemorySwizzle
+  MXScaleVgprInterleaveExtraVgpr: false
   MacroTile0: 256
   MacroTile1: 320
   MacroTileA: 256
@@ -1622,7 +1662,7 @@ Solutions:
   MinGRIncPerMfma: 1
   Multicast: true
   NoLdsWriteCode: true
-  NoTailLoop: false
+  NoTailLoop: true
   NonDTLTailLoopA: false
   NonDTLTailLoopB: false
   NonDTLTailLoopMetadata: false
@@ -1645,13 +1685,15 @@ Solutions:
   PostLoopStoreInNll: false
   PrefetchGL2: 2
   PrefetchGL2Inc64Bit: false
-  PrefetchGL2SAddr: false
+  PrefetchGL2SAddr: true
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
+  SolutionIndex: 5
   SourceSwap: true
   StaggerU: 0
   StaggerUStride: 0
+  StoreCachelineAlign: true
   StoreSwapAddr: true
   StoreVectorWidth: 8
   SubGroup0: 4
@@ -1660,6 +1702,7 @@ Solutions:
   SubGroupB: 32
   SuppressNoLoadLoop: true
   TDMInst: 3
+  TDMStoreInst: false
   ThreadTile: [1, 1]
   ThreadTile0: 64
   ThreadTile1: 10
@@ -1683,6 +1726,7 @@ Solutions:
   Valid: true
   VectorWidthA: 8
   VectorWidthB: 2
+  WaveTileContiguousA: false
   WavefrontSize: 32
   WorkGroup: [32, 4, 1]
   WorkspaceCheck: [4, 0, 1]
@@ -1703,6 +1747,8 @@ Solutions:
   _ScheduleIterAlg: 0
   _SeparateEpilogueLds: false
   _StinkyTofuOptLevel: 3
+  _TDMStoreLdsOffset: 0
+  _TailFolding: true
   _UseSgprForGRO: 1
   _VectorStore: 1
   _WorkspaceSizePerElemBias: 0
@@ -1730,8 +1776,7 @@ Solutions:
   reorderGRInstForDTVB: false
   tailLoopOptA: false
   tailLoopOptB: false
-  SolutionIndex: 5
-- AdaptiveGemm: 1
+- A2ASubRounds: 1
   AssignedDerivedParameters: false
   AssignedProblemIndependentDerivedParameters: true
   CUCount: null
@@ -1741,7 +1786,6 @@ Solutions:
   ClusterDim: [2, 2]
   ClusterLocalRead: 0
   CodeObjectVersion: '4'
-  CompactLoopStore: true
   DepthU: 128
   DirectToLdsA: false
   DirectToLdsB: false
@@ -1759,13 +1803,14 @@ Solutions:
   ForceUnrollSubIter: false
   GlobalReadVectorWidthA: 1
   GlobalReadVectorWidthB: 1
+  GlobalSplitUWorkGroupMappingRoundRobin: true
   GlobalWriteVectorWidth: 2
   GuaranteeNoPartialA: true
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
-  HalfPLR: 2
-  HalfPLRA: false
-  HalfPLRB: true
+  HalfPLR: 1
+  HalfPLRA: true
+  HalfPLRB: false
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
@@ -1792,6 +1837,7 @@ Solutions:
     pairedUsedBytes: 251392
     writeStrideBytes: 184832
   LDSSegmentInterleave: 1
+  LDSTrStoreShuffle: 0
   LSCA: 128
   LSCB: 128
   LSPA: 224
@@ -1855,6 +1901,7 @@ Solutions:
   MIWaveTileMetadata: 0
   MXLoadInst: TDM
   MXScaleFormat: InMemorySwizzle
+  MXScaleVgprInterleaveExtraVgpr: false
   MacroTile0: 224
   MacroTile1: 256
   MacroTileA: 224
@@ -1873,7 +1920,7 @@ Solutions:
   MinGRIncPerMfma: 1
   Multicast: true
   NoLdsWriteCode: true
-  NoTailLoop: false
+  NoTailLoop: true
   NonDTLTailLoopA: false
   NonDTLTailLoopB: false
   NonDTLTailLoopMetadata: false
@@ -1894,14 +1941,17 @@ Solutions:
   PackedC1IdxChars: [J]
   PackedC1IndicesX: [1]
   PostLoopStoreInNll: false
+  PrefetchGL2: 2
   PrefetchGL2Inc64Bit: false
-  PrefetchGL2SAddr: false
+  PrefetchGL2SAddr: true
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
+  SolutionIndex: 6
   SourceSwap: true
   StaggerU: 0
   StaggerUStride: 0
+  StoreCachelineAlign: true
   StoreSwapAddr: true
   StoreVectorWidth: 2
   SubGroup0: 2
@@ -1910,6 +1960,7 @@ Solutions:
   SubGroupB: 64
   SuppressNoLoadLoop: true
   TDMInst: 3
+  TDMStoreInst: true
   ThreadTile: [1, 1]
   ThreadTile0: 112
   ThreadTile1: 4
@@ -1933,6 +1984,7 @@ Solutions:
   Valid: true
   VectorWidthA: 2
   VectorWidthB: 4
+  WaveTileContiguousA: false
   WavefrontSize: 32
   WorkGroup: [16, 8, 1]
   WorkspaceCheck: [4, 0, 1]
@@ -1953,6 +2005,8 @@ Solutions:
   _ScheduleIterAlg: 0
   _SeparateEpilogueLds: false
   _StinkyTofuOptLevel: 3
+  _TDMStoreLdsOffset: 0
+  _TailFolding: true
   _UseSgprForGRO: 1
   _VectorStore: 1
   _WorkspaceSizePerElemBias: 0
@@ -1980,14 +2034,12 @@ Solutions:
   reorderGRInstForDTVB: false
   tailLoopOptA: false
   tailLoopOptB: false
-  SolutionIndex: 6
-- AdaptiveGemm: 1
-  AssertFree0ElementMultiple: 8
+- A2ASubRounds: 1
+  AdaptiveGemm: 1
   AssignedDerivedParameters: false
   AssignedProblemIndependentDerivedParameters: true
   CUCount: null
   CUOccupancy: 1
-  ClusterAIDMapping: -2
   ClusterBarrier: true
   ClusterDim: [4, 4]
   ClusterLocalRead: 0
@@ -2015,9 +2067,9 @@ Solutions:
   GuaranteeNoPartialA: true
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
-  HalfPLR: 2
-  HalfPLRA: false
-  HalfPLRB: true
+  HalfPLR: 1
+  HalfPLRA: true
+  HalfPLRB: false
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
@@ -2043,6 +2095,7 @@ Solutions:
     pairedUsedBytes: 301056
     writeStrideBytes: 235008
   LDSSegmentInterleave: 1
+  LDSTrStoreShuffle: 0
   LSCA: 128
   LSCB: 128
   LSPA: 256
@@ -2051,7 +2104,7 @@ Solutions:
   LVCB: 128
   LVPA: 256
   LVPB: 320
-  LdsBlockSizePerPadA: 2048
+  LdsBlockSizePerPadA: 1024
   LdsBlockSizePerPadB: 512
   LdsBlockSizePerPadMXSA: 0
   LdsBlockSizePerPadMXSB: 0
@@ -2077,7 +2130,7 @@ Solutions:
   LdsOffsetMXSB_Blk: 216576
   LdsOffsetMetadata: 66048
   LdsOffsetMetadata_Blk: 216576
-  LdsPadA: 8
+  LdsPadA: 4
   LdsPadB: 8
   LdsPadMXSA: 0
   LdsPadMXSB: 0
@@ -2106,6 +2159,7 @@ Solutions:
   MIWaveTileMetadata: 0
   MXLoadInst: TDM
   MXScaleFormat: InMemorySwizzle
+  MXScaleVgprInterleaveExtraVgpr: false
   MacroTile0: 256
   MacroTile1: 320
   MacroTileA: 256
@@ -2124,7 +2178,7 @@ Solutions:
   MinGRIncPerMfma: 1
   Multicast: true
   NoLdsWriteCode: true
-  NoTailLoop: false
+  NoTailLoop: true
   NonDTLTailLoopA: false
   NonDTLTailLoopB: false
   NonDTLTailLoopMetadata: false
@@ -2151,9 +2205,11 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
+  SolutionIndex: 7
   SourceSwap: true
   StaggerU: 0
   StaggerUStride: 0
+  StoreCachelineAlign: true
   StoreSwapAddr: true
   StoreVectorWidth: 8
   SubGroup0: 4
@@ -2162,7 +2218,7 @@ Solutions:
   SubGroupB: 32
   SuppressNoLoadLoop: true
   TDMInst: 3
-  TDMIterateMode: 1
+  TDMStoreInst: false
   ThreadTile: [1, 1]
   ThreadTile0: 64
   ThreadTile1: 10
@@ -2186,6 +2242,7 @@ Solutions:
   Valid: true
   VectorWidthA: 8
   VectorWidthB: 2
+  WaveTileContiguousA: false
   WavefrontSize: 32
   WorkGroup: [32, 4, 1]
   WorkspaceCheck: [4, 0, 1]
@@ -2206,7 +2263,8 @@ Solutions:
   _ScheduleIterAlg: 0
   _SeparateEpilogueLds: false
   _StinkyTofuOptLevel: 3
-  _TDMIterateModeA: true
+  _TDMStoreLdsOffset: 0
+  _TailFolding: true
   _UseSgprForGRO: 1
   _VectorStore: 1
   _WorkspaceSizePerElemBias: 0
@@ -2234,16 +2292,15 @@ Solutions:
   reorderGRInstForDTVB: false
   tailLoopOptA: false
   tailLoopOptB: false
-  SolutionIndex: 7
-- AdaptiveGemm: 1
+- A2ASubRounds: 1
   AssignedDerivedParameters: false
   AssignedProblemIndependentDerivedParameters: true
   CUCount: null
   CUOccupancy: 1
-  ClusterBarrier: false
+  ClusterBarrier: true
+  ClusterDim: [2, 1]
   ClusterLocalRead: 0
   CodeObjectVersion: '4'
-  CompactLoopStore: true
   DepthU: 128
   DirectToLdsA: false
   DirectToLdsB: false
@@ -2261,19 +2318,19 @@ Solutions:
   ForceUnrollSubIter: false
   GlobalReadVectorWidthA: 1
   GlobalReadVectorWidthB: 1
-  GlobalWriteVectorWidth: 2
+  GlobalWriteVectorWidth: 1
   GuaranteeNoPartialA: true
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
-  HalfPLR: 1
-  HalfPLRA: true
-  HalfPLRB: false
+  HalfPLR: 2
+  HalfPLRA: false
+  HalfPLRB: true
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
     KernArgsVersion: 3
     PersistentLoopArgsVersion: 0
-    SupportCustomStaggerU: true
+    SupportCustomStaggerU: false
     SupportCustomWGM: true
     SupportOccupancyProbe: false
     SupportStreamKPerTileExtraIters: false
@@ -2281,41 +2338,54 @@ Solutions:
     UseSFC: false
     UseUniversalArgs: true
   Kernel: true
-  LDSSegInterleaveOffsets: null
+  LDSSegInterleaveOffsets:
+    aBaseline: true
+    activeTC: B
+    bufferStrideA: 65280
+    bufferStrideB: 33280
+    footprintPacked: true
+    ldsBaseA: 66560
+    ldsBaseB: 0
+    pairedBuffers: true
+    pairedOperandIsolation: false
+    pairedUsedBytes: 263680
+    writeStrideBytes: 197120
+  LDSSegmentInterleave: 1
+  LDSTrStoreShuffle: 0
   LSCA: 128
   LSCB: 128
-  LSPA: 160
-  LSPB: 384
+  LSPA: 240
+  LSPB: 256
   LVCA: 128
   LVCB: 128
-  LVPA: 160
-  LVPB: 384
-  LdsBlockSizePerPadA: 512
-  LdsBlockSizePerPadB: 512
+  LVPA: 240
+  LVPB: 256
+  LdsBlockSizePerPadA: 256
+  LdsBlockSizePerPadB: 1024
   LdsBlockSizePerPadMXSA: 0
   LdsBlockSizePerPadMXSB: 0
   LdsBlockSizePerPadMetadata: 0
-  LdsBytesNoAmax: 287232
+  LdsBytesNoAmax: 263680
   LdsInitCVgprs: false
-  LdsNumBytes: 287232
-  LdsNumElementsAlignedA: 42240
-  LdsNumElementsAlignedB: 101376
+  LdsNumBytes: 263680
+  LdsNumElementsAlignedA: 65280
+  LdsNumElementsAlignedB: 66560
   LdsNumElementsAlignedMXSA: 0
   LdsNumElementsAlignedMXSB: 0
   LdsNumElementsAlignedMetadata: 0
   LdsOffsetA: 0
-  LdsOffsetA_Blk: 143616
-  LdsOffsetB: 42240
-  LdsOffsetB_Blk: 185856
+  LdsOffsetA_Blk: 131840
+  LdsOffsetB: 65280
+  LdsOffsetB_Blk: 197120
   LdsOffsetBias: 0
   LdsOffsetBiasGSU: 0
   LdsOffsetBiasNonGSU: 0
-  LdsOffsetMXSA: 42240
-  LdsOffsetMXSA_Blk: 185856
-  LdsOffsetMXSB: 42240
-  LdsOffsetMXSB_Blk: 185856
-  LdsOffsetMetadata: 42240
-  LdsOffsetMetadata_Blk: 185856
+  LdsOffsetMXSA: 65280
+  LdsOffsetMXSA_Blk: 197120
+  LdsOffsetMXSB: 65280
+  LdsOffsetMXSB_Blk: 197120
+  LdsOffsetMetadata: 65280
+  LdsOffsetMetadata_Blk: 197120
   LdsPadA: 8
   LdsPadB: 8
   LdsPadMXSA: 0
@@ -2339,16 +2409,17 @@ Solutions:
   MIOutputVectorWidth: 8
   MIRegPerOut: 1
   MIWaveGroup: [1, 4]
-  MIWaveTile: [10, 6]
-  MIWaveTileA: 10
-  MIWaveTileB: 6
+  MIWaveTile: [15, 4]
+  MIWaveTileA: 15
+  MIWaveTileB: 4
   MIWaveTileMetadata: 0
   MXLoadInst: TDM
   MXScaleFormat: InMemorySwizzle
-  MacroTile0: 160
-  MacroTile1: 384
-  MacroTileA: 160
-  MacroTileB: 384
+  MXScaleVgprInterleaveExtraVgpr: false
+  MacroTile0: 240
+  MacroTile1: 256
+  MacroTileA: 240
+  MacroTileB: 256
   MathClocksUnrolledLoop: 0
   MatrixInstB: 1
   MatrixInstBM: 1
@@ -2361,14 +2432,14 @@ Solutions:
   MbskPrefetchMethod: 0
   MfmaInitCVgprs: false
   MinGRIncPerMfma: 1
-  Multicast: false
+  Multicast: true
   NoLdsWriteCode: true
-  NoTailLoop: false
+  NoTailLoop: true
   NonDTLTailLoopA: false
   NonDTLTailLoopB: false
   NonDTLTailLoopMetadata: false
   NumElementsPerThread: 480
-  NumGlobalWriteVectorsPerThread: 240
+  NumGlobalWriteVectorsPerThread: 480
   NumLdsBlk: 2
   NumLoadsA: 1
   NumLoadsB: 1
@@ -2389,20 +2460,25 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
+  SolutionIndex: 8
   SourceSwap: true
+  StaggerU: 0
+  StaggerUStride: 0
+  StoreCachelineAlign: true
   StoreSwapAddr: true
-  StoreVectorWidth: 2
+  StoreVectorWidth: 1
   SubGroup0: 2
   SubGroup1: 64
   SubGroupA: 2
   SubGroupB: 64
   SuppressNoLoadLoop: true
   TDMInst: 3
+  TDMStoreInst: true
   ThreadTile: [1, 1]
-  ThreadTile0: 80
-  ThreadTile1: 6
-  ThreadTileA: 80
-  ThreadTileB: 6
+  ThreadTile0: 120
+  ThreadTile1: 4
+  ThreadTileA: 120
+  ThreadTileB: 4
   TransposeLDS: 1
   ULSGRODoubleG2L: 0
   UnrollMajorLDSA: true
@@ -2419,8 +2495,9 @@ Solutions:
   UseGeneralizedNLCOneMetadata: false
   UseMFMAF32XEmulation: false
   Valid: true
-  VectorWidthA: 2
-  VectorWidthB: 2
+  VectorWidthA: 1
+  VectorWidthB: 4
+  WaveTileContiguousA: false
   WavefrontSize: 32
   WorkGroup: [16, 8, 1]
   WorkspaceCheck: [4, 0, 1]
@@ -2441,6 +2518,8 @@ Solutions:
   _ScheduleIterAlg: 0
   _SeparateEpilogueLds: false
   _StinkyTofuOptLevel: 3
+  _TDMStoreLdsOffset: 0
+  _TailFolding: true
   _UseSgprForGRO: 1
   _VectorStore: 1
   _WorkspaceSizePerElemBias: 0
@@ -2458,8 +2537,8 @@ Solutions:
   enableTDMA: true
   enableTDMB: true
   enableTDMMetadata: false
-  ldsNumBytesA: 42240
-  ldsNumBytesB: 101376
+  ldsNumBytesA: 65280
+  ldsNumBytesB: 66560
   ldsNumBytesMXSA: 0
   ldsNumBytesMXSB: 0
   ldsNumBytesMetadata: 0
@@ -2468,8 +2547,7 @@ Solutions:
   reorderGRInstForDTVB: false
   tailLoopOptA: false
   tailLoopOptB: false
-  SolutionIndex: 8
-- AdaptiveGemm: 1
+- A2ASubRounds: 1
   AssignedDerivedParameters: false
   AssignedProblemIndependentDerivedParameters: true
   CUCount: null
@@ -2478,7 +2556,6 @@ Solutions:
   ClusterDim: [4, 4]
   ClusterLocalRead: 0
   CodeObjectVersion: '4'
-  CompactLoopStore: true
   DepthU: 128
   DirectToLdsA: false
   DirectToLdsB: false
@@ -2518,6 +2595,7 @@ Solutions:
     UseUniversalArgs: true
   Kernel: true
   LDSSegInterleaveOffsets: null
+  LDSTrStoreShuffle: 0
   LSCA: 128
   LSCB: 128
   LSPA: 192
@@ -2581,6 +2659,7 @@ Solutions:
   MIWaveTileMetadata: 0
   MXLoadInst: TDM
   MXScaleFormat: InMemorySwizzle
+  MXScaleVgprInterleaveExtraVgpr: false
   MacroTile0: 192
   MacroTile1: 384
   MacroTileA: 192
@@ -2599,7 +2678,7 @@ Solutions:
   MinGRIncPerMfma: 1
   Multicast: true
   NoLdsWriteCode: true
-  NoTailLoop: false
+  NoTailLoop: true
   NonDTLTailLoopA: false
   NonDTLTailLoopB: false
   NonDTLTailLoopMetadata: false
@@ -2622,13 +2701,15 @@ Solutions:
   PostLoopStoreInNll: false
   PrefetchGL2: 2
   PrefetchGL2Inc64Bit: false
-  PrefetchGL2SAddr: false
+  PrefetchGL2SAddr: true
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
+  SolutionIndex: 9
   SourceSwap: true
   StaggerU: 0
   StaggerUStride: 0
+  StoreCachelineAlign: true
   StoreSwapAddr: true
   StoreVectorWidth: 4
   SubGroup0: 2
@@ -2637,6 +2718,7 @@ Solutions:
   SubGroupB: 64
   SuppressNoLoadLoop: true
   TDMInst: 3
+  TDMStoreInst: true
   ThreadTile: [1, 1]
   ThreadTile0: 96
   ThreadTile1: 6
@@ -2660,6 +2742,7 @@ Solutions:
   Valid: true
   VectorWidthA: 4
   VectorWidthB: 2
+  WaveTileContiguousA: false
   WavefrontSize: 32
   WorkGroup: [16, 8, 1]
   WorkspaceCheck: [4, 0, 1]
@@ -2680,6 +2763,8 @@ Solutions:
   _ScheduleIterAlg: 0
   _SeparateEpilogueLds: false
   _StinkyTofuOptLevel: 3
+  _TDMStoreLdsOffset: 0
+  _TailFolding: true
   _UseSgprForGRO: 1
   _VectorStore: 1
   _WorkspaceSizePerElemBias: 0
@@ -2707,7 +2792,6 @@ Solutions:
   reorderGRInstForDTVB: false
   tailLoopOptA: false
   tailLoopOptB: false
-  SolutionIndex: 9
 IndexOrder: [2, 3, 0, 1]
 ExactLogic:
 - - [4928, 4848, 1, 7216]

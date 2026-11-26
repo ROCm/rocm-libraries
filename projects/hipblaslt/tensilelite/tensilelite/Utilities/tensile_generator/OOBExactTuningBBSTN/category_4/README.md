@@ -1,10 +1,77 @@
 # OOB BBS TN exact tuning, category 4 (gfx1250, BF16 in/out, FP32 compute, TN)
 
-Two variants, each in its own directory with a logic file and tuning configs. Both logic files hold only the 10 sizes of this
+Three variants (`pure_LdaPadded/`, `fused_ldaPadded/`, `fused_ldaK/`), each in its own directory with a logic file and tuning configs. Both logic files hold only the 10 sizes of this
 category, use the fused problem type (Bias + ScaleAlphaVec, ActivationFuncCall true on every solution), and key
 ExactLogic on [M, N, 1, K] only (no strides).
 
-### Pure GEMM, LDA/LDB padded (`pure_LdaPadded/`)
+## 2026-11-27 update: TailFolding retune (`pure_LdaPadded/` logic + tuning) and new `fused_ldaPadded/`
+
+- **Requires** develop with TailFolding (PR #16312, merged as 0b95005e6af) **plus** the TDMStoreInst PR #15133 (head 4eb56fa3f5a, not merged yet).
+  Checked on develop bec78032039 + #15133 4eb56fa3f5a. Under that PR head, TDMStoreInst 1 + AdaptiveGemm 1 is rejected for a pure GEMM, so the TDMStoreInst 1 winners use AdaptiveGemm 0.
+- `fused_ldaK/` is unchanged.
+- `pure_LdaPadded/logic`: the 10 winners of the 11/21–11/27 TailFolding retune. Fused problem type, ActivationFuncCall true, ExactLogic [M, N, 1, K], same treatment as before.
+- `pure_LdaPadded/tuning`: the existing full-candidate file + the retune sets (all existing candidates kept, exact de-dup).
+  - Sets: retune_1121 pass A/B/C, retune_tf1_1122, fixfold_1123, retune_1127 (WaveTileContiguousA × LDSSegmentInterleave, TPS None copies of persistent winners, TDMStoreInst 0 reference).
+  - Group 1 = new winner, group 2 = previous (11/12) winner. The header lists the merged sets and the candidate count.
+  - The retune trees' test knobs TailFolding / TailFoldingTestOff are removed (develop folds whenever legal).
+  - Category 1 takes no StreamK candidates, as before.
+- `fused_ldaPadded/` (new): the same winners built as fused GEMM kernels and called as the pure GEMM problem. See the section below.
+- Checks (CPU, on that tree): TensileCreateLibrary --architecture=gfx1250 on the 4 logic files of each variant: **0 rejects, 0 codegen failures**.
+  - Built kernel names = benched kernel names (except AFC).
+  - Every tuning yaml parses and passes the Tensile parameter check; its group count matches the header.
+
+### pure_LdaPadded results (Tensile client, GPU3, 2026-11-26, pure GEMM, LDA = LDB = ceil(K/128)*128, median of rounds 1+)
+
+Category mean vs MAIDAS: **81.6%**.
+The 11/12 us comes from the 11/12 table below (GPU3, older develop, different run), so it is a reference only, not a same-run gain.
+The retune itself switched a winner only when it was >= 1% faster than the incumbent in the same client run on all 4 runs (fwd / rev × 2).
+
+| size (MxNxK) | LDA=LDB | sol | MAIDAS us | 11/12 us | new us | vs 11/12 | new vs MAIDAS | winner | kernel |
+|---|---|---|---|---|---|---|---|---|---|
+| 540528x7600x1008 | 1024 | 0 | 2886.03 | 3968.57 | 3872.88 | +2.5% | 74.5% | 11/27: TPS None copy of the persistent winner | MT256x320x128, MIWT8_10, MIWG2_2, CD1_1, TPS None, SS1, VWA8, VWB2, HPLR2, LSI1, TDMSI0, AG1, PGL0 |
+| 721520x6032x1072 | 1152 | 1 | 3227.64 | 4490.00 | 4454.77 | +0.8% | 72.5% | TF retune winner (fixfold 11/23) | MT256x320x128, MIWT8_10, MIWG2_2, CD1_1, TPS StreamK, SS1, VWA8, VWB2, HPLR2, LSI1, TDMSI0, AG1, PGL0 |
+| 315952x3696x1424 | 1536 | 2 | 1153.90 | 1518.32 | 1473.89 | +3.0% | 78.3% | TF retune winner (fixfold 11/23) | MT256x320x128, MIWT8_10, MIWG2_2, CD4_4, TPS None, SS1, VWA8, VWB2, HPLR2, LSI1, TDMSI0, AG1, PGL0 |
+| 11600x7936x6048 | 6144 | 3 | 338.04 | 417.37 | 405.48 | +2.9% | 83.4% | TF retune winner (fixfold 11/23) | MT256x320x128, MIWT8_10, MIWG2_2, CD2_2, TPS None, SS1, VWA8, VWB2, HPLR2, LSI1, TDMSI0, AG1, PGL0 |
+| 563008x2192x8080 | 8192 | 4 | 6000.28 | 7141.75 | 7104.55 | +0.5% | 84.5% | TF retune winner (fixfold 11/23) | MT256x320x128, MIWT8_10, MIWG2_2, CD1_1, TPS None, SS1, VWA8, VWB2, HPLR1, LSI1, TDMSI1, AG0, PGL0 |
+| 411648x3248x5008 | 5120 | 5 | 4031.32 | 4790.60 | 4765.70 | +0.5% | 84.6% | TF retune winner (fixfold 11/23) | MT256x256x128, MIWT8_8, MIWG2_2, CD1_1, TPS None, SS1, VWA8, VWB4, HPLR1, LSI1, TDMSI0, AG0, PGL0 |
+| 814128x5376x2912 | 2944 | 6 | 7758.79 | 9455.81 | 9350.24 | +1.1% | 83.0% | TF retune winner (fixfold 11/23) | MT256x320x128, MIWT8_10, MIWG2_2, CD1_1, TPS None, SS1, VWA8, VWB2, HPLR1, LSI1, TDMSI0, AG1, PGL0 |
+| 573776x7936x6512 | 6528 | 7 | 17463.58 | 20794.85 | 20541.95 | +1.2% | 85.0% | TF retune winner (fixfold 11/23) | MT256x320x128, MIWT8_10, MIWG2_2, CD1_1, TPS StreamK, SS1, VWA4, VWB2, HPLR2, LSI0, TDMSI0, AG1, PGL0 |
+| 838752x5696x3584 | 3584 | 8 | 10095.91 | 12680.45 | 11933.10 | +6.3% | 84.6% | TF retune winner (fixfold 11/23) | MT256x288x128, MIWT8_9, MIWG2_2, CD4_4, TPS None, SS1, VWA8, VWB1, HPLR1, LSI1, TDMSI0, AG1, PGL0 |
+| 168464x3200x6368 | 6400 | 9 | 2037.76 | 2459.32 | 2376.06 | +3.5% | 85.8% | TF retune winner (fixfold 11/23) | MT256x320x128, MIWT8_10, MIWG2_2, CD4_2, TPS None, SS1, VWA8, VWB2, HPLR2, LSI1, TDMSI0, AG1, PGL1 |
+
+- 540528x7600x1008: the only 11/27 switch. The persistent DataParallel winner was replaced by its TileProcessingStrategy None copy (GSU 1, MultipleBuffer), **+1.95%** in the same run (+1.92..+1.99%).
+
+- WaveTileContiguousA × LDSSegmentInterleave (11/27) did not win anywhere. With SourceSwap it needs VWA 1 and a native store width; best per size −0.2% .. −65%.
+
+### fused_ldaPadded (new variant)
+
+- Kernels: the `pure_LdaPadded` winners built as fused GEMM kernels: Bias [s, B] + ScaleAlphaVec + hipblaslt_all activation, ActivationFuncCall true.
+  - CompactLoopStore 1, so the pure-gemm store pass (#15650) exists. TailFolding / TDMStoreInst as in the winner. No runtime pure bit.
+  - Called as the **pure GEMM problem**: bias / ScaleAlphaVec null, activation none, beta 0. LDA = LDB padded to 256 B.
+- `logic/`: ExactLogic [M, N, 1, K] for the 10 sizes, same file name and format as the other variants.
+- `tuning/`: the `pure_LdaPadded` tuning file converted to the fused problem type.
+  - Every candidate is kept, with ActivationFuncCall true + CompactLoopStore true (candidates that became identical are merged; the header gives the counts). Group 1 = fused winner.
+  - NOEPI call: the problem type carries Bias + SAV, so after the Tensile build edit each ClientParameters.ini to `use-bias=0`, `use-scaleAlphaVec=0`, `activation-enum-args=None`, `init-beta=Zero`.
+- Numbers: the 11/27 Excel column "20261127 Winner (g04-2 gpu0) - 256B alignment (Fused GEMM kernel + Pure GEMM problem)".
+  - Tensile client, GPU0, NOEPI call, 4 runs (fwd / rev × 2), median of rounds 1+.
+  - In those runs the fused kernel is −0.0 .. −0.7% vs the pure winner for most sizes of categories 3–4. Category 1 is −6 .. −22%, because without a runtime pure bit the store pass is picked in the epilogue.
+
+Category mean vs MAIDAS: **79.5%**.
+
+| size (MxNxK) | LDA=LDB | sol | MAIDAS us | us | vs MAIDAS | gflops | kernel |
+|---|---|---|---|---|---|---|---|
+| 540528x7600x1008 | 1024 | 0 | 2886.03 | 3947.655 | 73.1% | 2097892 | retune winner + CompactLoopStore 1 |
+| 721520x6032x1072 | 1152 | 1 | 3227.64 | 4568.915 | 70.6% | 2042309 | retune winner + CompactLoopStore 1 |
+| 315952x3696x1424 | 1536 | 2 | 1153.90 | 1495.275 | 77.2% | 2224191 | retune winner + CompactLoopStore 1 |
+| 11600x7936x6048 | 6144 | 3 | 338.04 | 409.855 | 82.5% | 2716888 | retune winner + CompactLoopStore 1 |
+| 563008x2192x8080 | 8192 | 4 | 6000.28 | 7397.110 | 81.1% | 2696090 | retune winner + CompactLoopStore 1 |
+| 411648x3248x5008 | 5120 | 5 | 4031.32 | 4882.595 | 82.6% | 2742746 | retune winner + CompactLoopStore 1 |
+| 814128x5376x2912 | 2944 | 6 | 7758.79 | 9747.375 | 79.6% | 2615084 | retune winner + CompactLoopStore 1 |
+| 573776x7936x6512 | 6528 | 7 | 17463.58 | 21087.850 | 82.8% | 2812264 | retune winner + CompactLoopStore 1 |
+| 838752x5696x3584 | 3584 | 8 | 10095.91 | 12267.850 | 82.3% | 2791471 | retune winner + CompactLoopStore 1 |
+| 168464x3200x6368 | 6400 | 9 | 2037.76 | 2436.915 | 83.6% | 2817408 | retune winner + CompactLoopStore 1 |
+
+### Pure GEMM, LDA/LDB padded (`pure_LdaPadded/`; 11/12 description, see the 2026-11-27 update for the current files)
 
 - `pure_LdaPadded/logic/gfx1250_Cijk_Alik_Bljk_BBS_BH_Bias_HA_S_SAV_UserArgs.yaml`: ExactLogic for the 10 sizes below, 9 solutions.
   Winners tuned as pure GEMM (no bias / ScaleAlphaVec / activation) with LDA = LDB = ceil(K/128)*128.
@@ -27,7 +94,7 @@ ExactLogic on [M, N, 1, K] only (no strides).
   `Exact: [M, N, 1, K, M, M, K, K]` (LDA = LDB = K, LDC = LDD = M),
   EnqueuesPerSync 200 / NumWarmups 80 / NumBenchmarks 3, RotatingBufferSize 384.
 
-## Results, pure GEMM, LDA/LDB padded (`pure_LdaPadded/`; Tensile client, GPU3, median of rounds 1+)
+## Results, pure GEMM, LDA/LDB padded (11/12 logic, superseded by the 2026-11-27 update above; Tensile client, GPU3, median of rounds 1+)
 
 Category mean: gain vs previous **+1.6%**, vs MAIDAS **78.6% -> 79.8%**
 (logic_1109a: 74.7%; 6 of 10 sizes have a new winner; vs MAIDAS = MAIDAS us / measured us).
@@ -69,7 +136,7 @@ whose winner was re-selected afterwards, re-measured on GPU3 (compare gains, not
 | 814128x5376x2912 | 5 | GPU0 | 7758.79 | 11624.10 | 11434.50 | +1.7% | 66.7% | 67.9% | new |
 | 838752x5696x3584 | 7 | GPU3 | 10095.91 | 13119.10 | 12772.85 | +2.7% | 77.0% | 79.0% | new |
 
-## Winner key parameters, pure GEMM, LDA/LDB padded (`pure_LdaPadded/`)
+## Winner key parameters, pure GEMM, LDA/LDB padded (11/12 logic, superseded)
 
 | size | sol | kernel | winner |
 |---|---|---|---|
