@@ -109,6 +109,9 @@ def conv_implicit_gemm_spec_to_dict(spec: Any) -> Dict[str, Any]:
         epilogue=spec.epilogue,
         async_dma=spec.async_dma,
         unroll_k=spec.unroll_k,
+        # The register-prefetch K loop; dropped, the engine would build the
+        # plain loop under the spec's name.
+        prefetch_global_regs=spec.prefetch_global_regs,
         chiplet_swizzle=spec.chiplet_swizzle,
         chiplet_wgm=spec.chiplet_wgm,
         chiplet_num_xcds=spec.chiplet_num_xcds,

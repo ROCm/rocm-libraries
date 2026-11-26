@@ -112,6 +112,7 @@ def build_conv(
     split_k_cluster=0,
     dtype="fp16",
     tf32=False,
+    prefetch_global_regs=False,
 ):
     def _build():
         from kernels.common.conv_implicit_gemm import (
@@ -142,6 +143,7 @@ def build_conv(
             group_merge=group_merge,
             split_k=split_k,
             split_k_cluster=split_k_cluster,
+            prefetch_global_regs=prefetch_global_regs,
         )
         return build_implicit_gemm_conv(spec, arch=arch)
 
@@ -1372,6 +1374,34 @@ def cases():
                 epilogue="cshuffle",
                 split_k=2,
                 dtype=dtype,
+            ),
+        )
+    # gfx950 register-prefetch K loop (prefetch_global_regs): tile k+1's reads
+    # held in VGPRs under tile k's MFMAs, behind LDS-only barriers. compv3 fp16
+    # with the 16x16x32 atom, compv4 bf16 with the 32x32x16 one.
+    for tag, pipeline, dtype, wt in (
+        ("pgr_compv3_fp16", "compv3", "fp16", (16, 16, 32)),
+        ("pgr_compv4_bf16", "compv4", "bf16", (32, 32, 16)),
+    ):
+        add(
+            "conv",
+            f"conv/gfx950/n1h7c256k64r3/{tag}",
+            "gfx950",
+            build_conv(
+                "irhash_conv_950_" + tag,
+                "gfx950",
+                conv_small_m,
+                wave_size=64,
+                wtm=wt[0],
+                wtn=wt[1],
+                wtk=wt[2],
+                tile_m=64,
+                tile_n=64,
+                tile_k=64,
+                pipeline=pipeline,
+                epilogue="cshuffle",
+                dtype=dtype,
+                prefetch_global_regs=True,
             ),
         )
     # Its Stage 2: the runtime slab loop and the degree-unrolled fold.

@@ -134,6 +134,17 @@ Compare a gfx950 result against an fp32 (or fp64) reference.
 
 ## Changelog
 
+### Register-prefetch K loop (`prefetch_global_regs`, MFMA)
+
+The plain synchronous K loop waited for each tile's global reads before its
+MFMAs and never had the next tile in flight. `prefetch_global_regs=True` keeps
+tile k+1's reads in VGPRs under tile k's MFMAs and writes them to LDS at the
+top of the next iteration, behind LDS-only barriers. It is the wgrad loop of the
+same name (`emit_prefetch_global_regs_kloop`), mirrored in the C++ engine;
+rejected with `async_dma`, `unroll_k`, the `wavelet` pipeline and on WMMA, and
+when a tile needs more than 32 global loads per thread per operand. Name tag
+`pgr`.
+
 ### Initial implementation
 
 - Introduced `ImplicitGemmConvSpec` and `build_implicit_gemm_conv`.

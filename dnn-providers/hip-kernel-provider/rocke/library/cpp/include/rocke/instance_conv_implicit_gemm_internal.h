@@ -588,6 +588,11 @@ typedef struct rocke_conv_build_ctx
     rocke_value_t* split_ystep; /* dH * A_stride_hi */
     rocke_value_t* split_xstep; /* dW * A_stride_wi */
     rocke_value_t* split_group_base; /* group_idx * cpg (c_gm merged), NULL when ungrouped */
+
+    /* spec.patch: the width-folded patch GEMM's A/B addressing (see
+     * ImplicitGemmConvSpec.patch); patch_kgemm = Y * cpg, B's bound. */
+    bool patch;
+    rocke_value_t* patch_kgemm;
 } rocke_conv_build_ctx_t;
 
 /* Python mul_u24: x * y with both operands masked to 24 bits so the backend
@@ -638,6 +643,18 @@ int rocke_conv_default_load_vec(const rocke_implicit_gemm_conv_spec_t* spec);
  * (the merged B tile is 1/Gm dense and its diagonal mask is per-element, which
  * a vector load cannot express). */
 int rocke_conv_default_load_vec_b(const rocke_implicit_gemm_conv_spec_t* spec);
+
+/* Python _fwd_prefetch_global_regs_conflict: true (reason filled) when
+ * spec->prefetch_global_regs cannot be honoured (async_dma, unroll_k, wavelet,
+ * or more than ROCKE_CTL_MAX_VECS_PER_THREAD loads per thread per operand). */
+/* Python is_fwd_patch_problem / _fwd_patch_conflict (ImplicitGemmConvSpec.patch). */
+bool rocke_conv_is_fwd_patch_problem(const rocke_conv_problem_t* p);
+bool rocke_conv_fwd_patch_reason(const rocke_implicit_gemm_conv_spec_t* s,
+                                 char* reason,
+                                 size_t reason_cap);
+bool rocke_conv_fwd_prefetch_global_regs_reason(const rocke_implicit_gemm_conv_spec_t* s,
+                                                char* reason,
+                                                size_t reason_cap);
 
 /* _emit_mfma(b, atom, a, bv, c): atom.emit MFMA dispatch. */
 rocke_value_t* rocke_conv_emit_mfma(rocke_ir_builder_t* b,
@@ -814,6 +831,13 @@ void rocke_conv_emit_kloop_unroll(rocke_conv_build_ctx_t* ctx);
 /* not-async branch (lines 1311-1319): single scf.for_iter load+sync+mfma+sync.
  * Covers mem, compv3, compv4, and basic (basic now uses the same runtime loop). */
 void rocke_conv_emit_kloop_simple(rocke_conv_build_ctx_t* ctx);
+
+/* prefetch_global_regs branch (forward and wgrad): the register-prefetch form
+ * of the single-buffer synchronous loop. Tile k+1's global reads are issued
+ * after the LDS-only barrier that publishes tile k and are carried in VGPRs
+ * into the next iteration. Mirrors Python emit_prefetch_global_regs_kloop
+ * (_conv_implicit_gemm_common.py), which both builders call. */
+void rocke_conv_emit_kloop_prefetch_global_regs(rocke_conv_build_ctx_t* ctx);
 
 /* async_dma branch (lines 1320-1347): SoftwarePipeline.run_ping_pong over the
  * AsyncTileLoader path. (SoftwarePipeline is a peer port; the driver reproduces
