@@ -481,11 +481,11 @@ namespace rocsparse
         case rocsparse_datatype_f64_c:
             return binsearch_transform_i_type<WF_SIZE, rocsparse_double_complex>(A, sleep);
         default:
-            return nullptr;
+            break;
         }
+        THROW_IF_ROCSPARSE_ERROR(rocsparse_status_internal_error);
     }
 
-    // find_csrildlt0_kernel_binsearch_launch: select based on device and matrix properties
     csrildlt0_kernel_launch_t
         find_csrildlt0_kernel_binsearch_launch(rocsparse_handle            handle,
                                                rocsparse_csrildlt0_info    csrildlt0_info,
