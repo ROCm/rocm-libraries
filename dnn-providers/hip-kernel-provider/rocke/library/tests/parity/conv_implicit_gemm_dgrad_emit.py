@@ -1244,6 +1244,8 @@ def _spec(idx: int):
         return _tf32_spec(idx)
     if 67 <= idx <= 70:
         return _split_k_cshuffle_spec(idx)
+    if 71 <= idx <= 84:
+        return _gfx950_knob_spec(idx)
 
     raise SystemExit(f"unknown config index {idx}")
 
@@ -1389,6 +1391,140 @@ def _split_k_cshuffle_spec(idx: int):
         vector_size_c=2,
         split_k=2,
     )
+    base.update(kw)
+    return DgradConvSpec(**base), "gfx950"
+
+
+# gfx950 dgrad knobs: the DMA-staged two-stage K loop (dtl), the
+# register-prefetch uniform_k_decode loop (prefetch_global_regs), the
+# XCD-grouped tile order on the patch GEMM (chiplet_swizzle), the 16-element A
+# row pad (lds_k_pad=16), tile_k 128, patch split-K through the cshuffle
+# epilogue, and the run-time zero-residue fill (1x1 stride-2 shapes). 16x16x32
+# atom, cshuffle, K-outer B, 8-wide vectors unless noted. Patch problem: N=1
+# 16x16 C=K=64 2x2 stride 2. Keep in lockstep with make_cfg_gfx950_knobs() in
+# conv_implicit_gemm_dgrad_emit.c.
+#   71: fp16 patch + dtl + chiplet, 128x128x64, 2x2 warps, mem
+#   72: bf16 patch + dtl + chiplet, 32x64x128 (tile_k 128), 2x2 warps, mem
+#   73: fp16 patch + chiplet, uniform_k_decode, 64x128x64, 4x2 warps, compv4
+#   74: bf16 patch + chiplet + pgr + lds_k_pad 16, uniform_k_decode,
+#       128x128x64, 2x2 warps, mem
+#   75: fp16 patch + pgr + lds_k_pad 16, uniform_k_decode, 32x64x128, mem
+#   76: bf16 grouped (groups=2) 3x3 stride 2 + pgr + lds_k_pad 16,
+#       uniform_k_decode, 128x128x64, 2x4 warps, 32x32x16 atom, compv3
+#   77: fp16 3x3 stride 1 + pgr, uniform_k_decode, M-outer B, default
+#       epilogue, 64x64x64, 32x32x16 atom
+#   78: fp16 patch, split_k=2 (atomic dX through the patch columns)
+#   79: bf16 1x1 stride 2 (the zero-residue fill shape), K=96 (the peeled
+#       uniform_k_decode tail), 64x64x64, mem
+#   80: dtl without patch: rejected by both engines
+#   81: pgr without uniform_k_decode: rejected by both engines
+#   82: patch split_k=2 with the default epilogue: rejected by both engines
+#   83: chiplet_swizzle without patch: rejected by both engines
+#   84: dtl with pgr: rejected by both engines
+_PATCH_P = dict(N=1, Hi=16, Wi=16, C=64, K=64, Y=2, X=2, sH=2, sW=2)
+_BF16 = ConvDataSpec("bf16", "bf16", "bf16")
+
+
+def _gfx950_knob_spec(idx: int):
+    base = dict(
+        problem=_cp(**_PATCH_P),
+        tile_m=128,
+        tile_n=128,
+        tile_k=64,
+        warp_m=2,
+        warp_n=2,
+        warp_tile_m=16,
+        warp_tile_n=16,
+        warp_tile_k=32,
+        pipeline="mem",
+        epilogue="cshuffle",
+        lds_k_outer=True,
+        vector_size_a=8,
+        vector_size_b=8,
+        vector_size_c=8,
+        patch=True,
+        uniform_k_decode=True,
+    )
+    dtl = dict(uniform_k_decode=False, chiplet_swizzle=True, dtl=True)
+    kw = {
+        71: dtl,
+        72: dict(dtl, data=_BF16, tile_m=32, tile_n=64, tile_k=128),
+        73: dict(
+            tile_m=64, tile_n=128, warp_m=4, pipeline="compv4", chiplet_swizzle=True
+        ),
+        74: dict(
+            data=_BF16,
+            chiplet_swizzle=True,
+            prefetch_global_regs=True,
+            lds_k_pad=16,
+        ),
+        75: dict(
+            tile_m=32,
+            tile_n=64,
+            tile_k=128,
+            prefetch_global_regs=True,
+            lds_k_pad=16,
+        ),
+        76: dict(
+            problem=_cp(
+                N=1,
+                Hi=16,
+                Wi=16,
+                C=128,
+                K=128,
+                Y=3,
+                X=3,
+                sH=2,
+                sW=2,
+                pH=1,
+                pW=1,
+                groups=2,
+            ),
+            data=_BF16,
+            warp_n=4,
+            warp_tile_m=32,
+            warp_tile_n=32,
+            warp_tile_k=16,
+            pipeline="compv3",
+            patch=False,
+            prefetch_global_regs=True,
+            lds_k_pad=16,
+        ),
+        77: dict(
+            problem=_cp(N=2, Hi=16, Wi=16, C=64, K=64, Y=3, X=3, pH=1, pW=1),
+            tile_m=64,
+            tile_n=64,
+            warp_tile_m=32,
+            warp_tile_n=32,
+            warp_tile_k=16,
+            epilogue="default",
+            lds_k_outer=False,
+            vector_size_c=None,
+            patch=False,
+            prefetch_global_regs=True,
+        ),
+        78: dict(split_k=2, uniform_k_decode=False),
+        79: dict(
+            problem=_cp(N=2, Hi=16, Wi=16, C=64, K=96, Y=1, X=1, sH=2, sW=2),
+            data=_BF16,
+            tile_m=64,
+            tile_n=64,
+            patch=False,
+        ),
+        80: dict(dtl, patch=False),
+        81: dict(uniform_k_decode=False, prefetch_global_regs=True),
+        82: dict(
+            split_k=2, uniform_k_decode=False, epilogue="default", vector_size_c=None
+        ),
+        83: dict(
+            problem=_cp(
+                N=2, Hi=16, Wi=16, C=64, K=64, Y=3, X=3, sH=2, sW=2, pH=1, pW=1
+            ),
+            patch=False,
+            chiplet_swizzle=True,
+        ),
+        84: dict(dtl, prefetch_global_regs=True),
+    }[idx]
     base.update(kw)
     return DgradConvSpec(**base), "gfx950"
 

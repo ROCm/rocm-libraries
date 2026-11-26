@@ -908,6 +908,118 @@ static int make_cfg_pgr(int idx, rocke_implicit_gemm_conv_spec_t* spec, const ch
     }
 }
 
+/* gfx950 forward knobs: the width-folded patch GEMM (patch), its DMA-staged
+ * two-stage K loop (dtl), the XCD-grouped tile order on it (chiplet_swizzle)
+ * and the 16-element LDS K-row pad (lds_k_pad=16). Keep in lockstep with
+ * _patch_dtl_spec() in conv_implicit_gemm_emit.py (which lists what each
+ * index covers). */
+static int make_cfg_patch_dtl(int idx, rocke_implicit_gemm_conv_spec_t* spec, const char** arch)
+{
+    *spec = rocke_implicit_gemm_conv_spec_default();
+    spec->problem = rocke_conv_problem_make(1, 16, 8, 128, 64, 2, 1, 2, 1, 0, 0, 1, 1);
+    spec->tile_m = 32;
+    spec->tile_n = 32;
+    spec->tile_k = 64;
+    spec->warp_m = 2;
+    spec->warp_n = 2;
+    spec->warp_tile_m = 16;
+    spec->warp_tile_n = 16;
+    spec->warp_tile_k = 32;
+    spec->pipeline = "mem";
+    spec->epilogue = "cshuffle";
+    spec->has_vector_size_a = true;
+    spec->vector_size_a = 8;
+    spec->has_vector_size_b = true;
+    spec->vector_size_b = 8;
+    spec->has_vector_size_c = true;
+    spec->vector_size_c = 8;
+    spec->patch = true;
+    *arch = "gfx950";
+
+    const bool bf16 = idx == 99 || idx == 101 || idx == 105;
+    if(bf16)
+    {
+        spec->dtype_a = "bf16";
+        spec->dtype_b = "bf16";
+        spec->dtype_d = "bf16";
+    }
+    if(idx == 99 || idx == 101)
+    {
+        spec->warp_tile_m = 32;
+        spec->warp_tile_n = 32;
+        spec->warp_tile_k = 16;
+    }
+    if(idx == 104 || idx == 105)
+    {
+        spec->problem = rocke_conv_problem_make(1, 16, 16, 128, 128, 3, 3, 1, 1, 1, 1, 1, 1);
+        spec->problem.groups = 2;
+        spec->patch = false;
+        spec->has_lds_k_pad = true;
+        spec->lds_k_pad = 16;
+    }
+    switch(idx)
+    {
+    case 98:
+        spec->chiplet_swizzle = true;
+        return 0;
+    case 99:
+        spec->tile_m = 64;
+        spec->tile_n = 64;
+        spec->pipeline = "compv4";
+        spec->chiplet_swizzle = true;
+        spec->prefetch_global_regs = true;
+        return 0;
+    case 100:
+        spec->chiplet_swizzle = true;
+        spec->dtl = true;
+        return 0;
+    case 101:
+        spec->tile_m = 64;
+        spec->tile_n = 64;
+        spec->chiplet_swizzle = true;
+        spec->dtl = true;
+        return 0;
+    case 102:
+        spec->tile_m = 64;
+        spec->tile_n = 64;
+        spec->tile_k = 32;
+        spec->pipeline = "compv3";
+        return 0;
+    case 103:
+        spec->tile_m = 64;
+        spec->tile_n = 64;
+        spec->tile_k = 32;
+        spec->dtl = true;
+        return 0;
+    case 104:
+        spec->tile_n = 64;
+        spec->warp_m = 1;
+        spec->warp_n = 4;
+        return 0;
+    case 105:
+        spec->tile_m = 16;
+        spec->tile_n = 16;
+        spec->warp_m = 1;
+        spec->warp_n = 1;
+        spec->pipeline = "compv3";
+        spec->prefetch_global_regs = true;
+        return 0;
+    case 106:
+        spec->patch = false;
+        spec->dtl = true;
+        return 0;
+    case 107:
+        spec->dtl = true;
+        spec->prefetch_global_regs = true;
+        return 0;
+    case 108:
+        spec->problem = rocke_conv_problem_make(1, 16, 16, 64, 64, 3, 3, 1, 1, 1, 1, 1, 1);
+        return 0;
+    default:
+        return -1;
+    }
+}
+
 /* The default epilogue stores one element per lane, so the validator rejects
  * it with the vec_c the spec would auto-derive from kpg (8 here). Configs that
  * leave vector_size_c unset get vector_size_c=1 -- otherwise they do not build
@@ -943,6 +1055,11 @@ static int make_cfg(int idx, rocke_implicit_gemm_conv_spec_t* spec, const char**
     else if(idx >= 86 && idx <= 97)
     {
         if(make_cfg_pgr(idx, spec, arch) != 0)
+            return -1;
+    }
+    else if(idx >= 98 && idx <= 108)
+    {
+        if(make_cfg_patch_dtl(idx, spec, arch) != 0)
             return -1;
     }
     else if(make_cfg_raw(idx, spec, arch) != 0)

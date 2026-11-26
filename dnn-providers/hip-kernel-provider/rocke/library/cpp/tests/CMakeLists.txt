@@ -24,8 +24,9 @@ install(TARGETS rocke_wgrad_streamk_host
 set_property(GLOBAL APPEND PROPERTY ROCKE_INSTALL_TEST_TARGETS
              rocke_wgrad_streamk_host)
 
-# Forward implicit-GEMM gates around the gfx950 MFMA split-K (parity configs
-# 66..85 of conv_implicit_gemm_emit, whose spec table it compiles in): the C++
+# Forward implicit-GEMM gates around the gfx950 MFMA split-K, the
+# register-prefetch loop and the patch GEMM (parity configs 66..108 of
+# conv_implicit_gemm_emit, whose spec table it compiles in): the C++
 # verdicts and reasons against Python's. CI checks those configs with the
 # Python engine only, and the pybind engine-agreement tests skip there.
 add_executable(rocke_conv_implicit_gemm_spec_guards conv_implicit_gemm_spec_guards.cpp)
@@ -45,6 +46,28 @@ install(TARGETS rocke_conv_implicit_gemm_spec_guards
         RUNTIME DESTINATION ${ROCKE_CXX_TEST_INSTALL_DIR})
 set_property(GLOBAL APPEND PROPERTY ROCKE_INSTALL_TEST_TARGETS
              rocke_conv_implicit_gemm_spec_guards)
+
+# Implicit-GEMM dgrad gates of the gfx950 knobs (dtl, prefetch_global_regs,
+# chiplet_swizzle on the patch GEMM; parity configs 71..84 of
+# conv_implicit_gemm_dgrad_emit, whose spec table it compiles in): the C++
+# verdicts and reasons against Python's.
+add_executable(rocke_conv_implicit_gemm_dgrad_spec_guards conv_implicit_gemm_dgrad_spec_guards.cpp)
+target_include_directories(rocke_conv_implicit_gemm_dgrad_spec_guards
+                           PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/../../tests/parity")
+target_link_libraries(rocke_conv_implicit_gemm_dgrad_spec_guards PRIVATE rocke_library_core)
+if(UNIX)
+  target_link_libraries(rocke_conv_implicit_gemm_dgrad_spec_guards PRIVATE m)
+endif()
+add_test(NAME rocke_conv_implicit_gemm_dgrad_spec_guards
+         COMMAND rocke_conv_implicit_gemm_dgrad_spec_guards)
+set_tests_properties(rocke_conv_implicit_gemm_dgrad_spec_guards PROPERTIES LABELS "ckc;unit;host")
+rocke_cxx_test_installed_name(_rocke_installed_name rocke_conv_implicit_gemm_dgrad_spec_guards)
+set_target_properties(rocke_conv_implicit_gemm_dgrad_spec_guards
+                      PROPERTIES OUTPUT_NAME "${_rocke_installed_name}")
+install(TARGETS rocke_conv_implicit_gemm_dgrad_spec_guards
+        RUNTIME DESTINATION ${ROCKE_CXX_TEST_INSTALL_DIR})
+set_property(GLOBAL APPEND PROPERTY ROCKE_INSTALL_TEST_TARGETS
+             rocke_conv_implicit_gemm_dgrad_spec_guards)
 
 # The C++ validator of the gfx950 ping-pong direct forward: CI does not build
 # the rocke_library_engine extension, so its refusal texts are pinned to

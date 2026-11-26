@@ -612,6 +612,8 @@ def _spec_raw(idx: int):
         return _tf32_split_k_spec(idx)
     if 86 <= idx <= 97:
         return _pgr_spec(idx)
+    if 98 <= idx <= 108:
+        return _patch_dtl_spec(idx)
     raise SystemExit(f"unknown config index {idx}")
 
 
@@ -1007,6 +1009,88 @@ def _pgr_spec(idx: int):
         97: dict(tile_m=128, tile_n=64, vector_size_a=1, vector_size_b=1),
     }[idx]
     return replace(spec, **kw), arch
+
+
+# gfx950 forward knobs: the width-folded patch GEMM (patch), its DMA-staged
+# two-stage K loop (dtl), the XCD-grouped tile order on it (chiplet_swizzle)
+# and the 16-element LDS K-row pad (lds_k_pad=16). 16x16x32 atom, cshuffle,
+# 8-wide vectors unless noted. Patch problem: N=1 16x8 C=128 K=64, a 2x1
+# filter at stride (2, 1) (the width-folded patch embedding). Keep in
+# lockstep with make_cfg_patch_dtl() in conv_implicit_gemm_emit.c.
+#   98: fp16 patch + chiplet, 32x32x64, 2x2 warps, mem
+#   99: bf16 patch + chiplet + pgr, 64x64x64, 2x2 warps, 32x32x16 atom,
+#       compv4
+#  100: fp16 patch + chiplet + dtl, 32x32x64, 2x2 warps, mem
+#  101: bf16 patch + chiplet + dtl, 64x64x64, 2x2 warps, 32x32x16 atom, mem
+#  102: fp16 patch, 64x64x32 (tile_k 32: 4 chunks a row), 2x2 warps, compv3
+#  103: fp16 patch + dtl, 64x64x32 (tile_k 32), 2x2 warps, mem
+#  104: fp16 grouped (groups=2) 3x3, lds_k_pad 16, 32x64x64, 1x4 warps, mem
+#  105: bf16 grouped 3x3, lds_k_pad 16 + pgr, 16x16x64, 1x1 warp, compv3
+#  106: dtl without patch: rejected by both engines
+#  107: patch + dtl + pgr: rejected by both engines
+#  108: patch on a padded 3x3 problem: rejected by both engines
+_FWD_PATCH = dict(N=1, Hi=16, Wi=8, C=128, K=64, fy=2, fx=1, sH=2, sW=1)
+
+
+def _patch_dtl_spec(idx: int):
+    bf16 = ConvDataSpec("bf16", "bf16", "bf16")
+    wt32 = dict(warp_tile_m=32, warp_tile_n=32, warp_tile_k=16)
+    base = dict(
+        problem=_cp(**_FWD_PATCH),
+        tile_m=32,
+        tile_n=32,
+        tile_k=64,
+        warp_m=2,
+        warp_n=2,
+        warp_tile_m=16,
+        warp_tile_n=16,
+        warp_tile_k=32,
+        pipeline="mem",
+        epilogue="cshuffle",
+        vector_size_a=8,
+        vector_size_b=8,
+        vector_size_c=8,
+        patch=True,
+    )
+    grouped = dict(
+        problem=_cp(N=1, Hi=16, Wi=16, C=128, K=128, fy=3, fx=3, pH=1, pW=1, groups=2),
+        patch=False,
+        lds_k_pad=16,
+    )
+    kw = {
+        98: dict(chiplet_swizzle=True),
+        99: dict(
+            wt32,
+            data=bf16,
+            tile_m=64,
+            tile_n=64,
+            pipeline="compv4",
+            chiplet_swizzle=True,
+            prefetch_global_regs=True,
+        ),
+        100: dict(chiplet_swizzle=True, dtl=True),
+        101: dict(
+            wt32, data=bf16, tile_m=64, tile_n=64, chiplet_swizzle=True, dtl=True
+        ),
+        102: dict(tile_m=64, tile_n=64, tile_k=32, pipeline="compv3"),
+        103: dict(tile_m=64, tile_n=64, tile_k=32, dtl=True),
+        104: dict(grouped, tile_n=64, warp_m=1, warp_n=4),
+        105: dict(
+            grouped,
+            data=bf16,
+            tile_m=16,
+            tile_n=16,
+            warp_m=1,
+            warp_n=1,
+            pipeline="compv3",
+            prefetch_global_regs=True,
+        ),
+        106: dict(patch=False, dtl=True),
+        107: dict(dtl=True, prefetch_global_regs=True),
+        108: dict(problem=_cp(N=1, Hi=16, Wi=16, C=64, K=64, fy=3, fx=3, pH=1, pW=1)),
+    }[idx]
+    base.update(kw)
+    return ImplicitGemmConvSpec(**base), "gfx950"
 
 
 def main() -> int:

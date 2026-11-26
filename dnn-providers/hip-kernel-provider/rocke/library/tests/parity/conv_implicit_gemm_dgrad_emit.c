@@ -137,6 +137,140 @@ static int make_cfg_split_k_cshuffle(int idx, rocke_dgrad_conv_spec_t* spec, con
     return 0;
 }
 
+/* gfx950 dgrad knobs: dtl, prefetch_global_regs, chiplet_swizzle on the
+ * patch GEMM, lds_k_pad 16, tile_k 128, patch split-K, the run-time
+ * zero-residue fill. Keep in lockstep with _gfx950_knob_spec() in
+ * conv_implicit_gemm_dgrad_emit.py (which lists what each index covers). */
+static int make_cfg_gfx950_knobs(int idx, rocke_dgrad_conv_spec_t* spec, const char** arch)
+{
+    spec->problem = rocke_conv_problem_make(1, 16, 16, 64, 64, 2, 2, 2, 2, 0, 0, 1, 1);
+    spec->tile_m = 128;
+    spec->tile_n = 128;
+    spec->tile_k = 64;
+    spec->warp_m = 2;
+    spec->warp_n = 2;
+    spec->warp_tile_m = 16;
+    spec->warp_tile_n = 16;
+    spec->warp_tile_k = 32;
+    spec->pipeline = "mem";
+    spec->epilogue = "cshuffle";
+    spec->lds_k_outer = true;
+    spec->has_vector_size_a = true;
+    spec->vector_size_a = 8;
+    spec->has_vector_size_b = true;
+    spec->vector_size_b = 8;
+    spec->has_vector_size_c = true;
+    spec->vector_size_c = 8;
+    spec->patch = true;
+    spec->uniform_k_decode = true;
+    *arch = "gfx950";
+    if(idx == 72 || idx == 74 || idx == 76 || idx == 79)
+    {
+        spec->dtype_a = "bf16";
+        spec->dtype_b = "bf16";
+        spec->dtype_d = "bf16";
+    }
+    /* dtl: the DMA-staged loop replaces uniform_k_decode, XCD-grouped order */
+    if(idx == 71 || idx == 72 || idx == 80 || idx == 84)
+    {
+        spec->uniform_k_decode = false;
+        spec->chiplet_swizzle = true;
+        spec->dtl = true;
+    }
+    switch(idx)
+    {
+    case 71:
+        return 0;
+    case 72:
+        spec->tile_m = 32;
+        spec->tile_n = 64;
+        spec->tile_k = 128;
+        return 0;
+    case 73:
+        spec->tile_m = 64;
+        spec->tile_n = 128;
+        spec->warp_m = 4;
+        spec->pipeline = "compv4";
+        spec->chiplet_swizzle = true;
+        return 0;
+    case 74:
+        spec->chiplet_swizzle = true;
+        spec->prefetch_global_regs = true;
+        spec->has_lds_k_pad = true;
+        spec->lds_k_pad = 16;
+        return 0;
+    case 75:
+        spec->tile_m = 32;
+        spec->tile_n = 64;
+        spec->tile_k = 128;
+        spec->prefetch_global_regs = true;
+        spec->has_lds_k_pad = true;
+        spec->lds_k_pad = 16;
+        return 0;
+    case 76:
+        spec->problem = rocke_conv_problem_make(1, 16, 16, 128, 128, 3, 3, 2, 2, 1, 1, 1, 1);
+        spec->problem.groups = 2;
+        spec->warp_n = 4;
+        spec->warp_tile_m = 32;
+        spec->warp_tile_n = 32;
+        spec->warp_tile_k = 16;
+        spec->pipeline = "compv3";
+        spec->patch = false;
+        spec->prefetch_global_regs = true;
+        spec->has_lds_k_pad = true;
+        spec->lds_k_pad = 16;
+        return 0;
+    case 77:
+        spec->problem = rocke_conv_problem_make(2, 16, 16, 64, 64, 3, 3, 1, 1, 1, 1, 1, 1);
+        spec->tile_m = 64;
+        spec->tile_n = 64;
+        spec->warp_tile_m = 32;
+        spec->warp_tile_n = 32;
+        spec->warp_tile_k = 16;
+        spec->epilogue = "default";
+        spec->lds_k_outer = false;
+        spec->has_vector_size_c = false;
+        spec->vector_size_c = 0;
+        spec->patch = false;
+        spec->prefetch_global_regs = true;
+        return 0;
+    case 78:
+        spec->split_k = 2;
+        spec->uniform_k_decode = false;
+        return 0;
+    case 79:
+        spec->problem = rocke_conv_problem_make(2, 16, 16, 64, 96, 1, 1, 2, 2, 0, 0, 1, 1);
+        spec->tile_m = 64;
+        spec->tile_n = 64;
+        spec->patch = false;
+        return 0;
+    case 80:
+        spec->patch = false;
+        return 0;
+    case 81:
+        spec->uniform_k_decode = false;
+        spec->prefetch_global_regs = true;
+        return 0;
+    case 82:
+        spec->split_k = 2;
+        spec->uniform_k_decode = false;
+        spec->epilogue = "default";
+        spec->has_vector_size_c = false;
+        spec->vector_size_c = 0;
+        return 0;
+    case 83:
+        spec->problem = rocke_conv_problem_make(2, 16, 16, 64, 64, 3, 3, 2, 2, 1, 1, 1, 1);
+        spec->patch = false;
+        spec->chiplet_swizzle = true;
+        return 0;
+    case 84:
+        spec->prefetch_global_regs = true;
+        return 0;
+    default:
+        return -1;
+    }
+}
+
 static int make_cfg(int idx, rocke_dgrad_conv_spec_t* spec, const char** arch)
 {
     *spec = rocke_dgrad_conv_spec_default();
@@ -155,6 +289,8 @@ static int make_cfg(int idx, rocke_dgrad_conv_spec_t* spec, const char** arch)
         return make_cfg_tf32(idx, spec, arch);
     if(idx >= 67 && idx <= 70)
         return make_cfg_split_k_cshuffle(idx, spec, arch);
+    if(idx >= 71 && idx <= 84)
+        return make_cfg_gfx950_knobs(idx, spec, arch);
 
     switch(idx)
     {
