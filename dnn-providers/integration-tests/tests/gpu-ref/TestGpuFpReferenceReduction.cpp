@@ -352,7 +352,7 @@ TEST_P(TestGpuReductionRef5DBfp16, MatchesCpuRef)
 // 4D tests
 // ============================================================================
 
-INSTANTIATE_TEST_SUITE_P(Quick,
+INSTANTIATE_TEST_SUITE_P(StandardBasic,
                          TestGpuReductionRef4DFp32,
                          ::testing::ValuesIn(makeReductionTestCases(getReductionSmall4DShapes(),
                                                                     getReduction4DLayouts(),
@@ -384,7 +384,7 @@ INSTANTIATE_TEST_SUITE_P(Comprehensive,
 // 5D tests
 // ============================================================================
 
-INSTANTIATE_TEST_SUITE_P(Quick,
+INSTANTIATE_TEST_SUITE_P(StandardBasic,
                          TestGpuReductionRef5DFp32,
                          ::testing::ValuesIn(makeReductionTestCases(getReductionSmall5DShapes(),
                                                                     getReduction5DLayouts(),

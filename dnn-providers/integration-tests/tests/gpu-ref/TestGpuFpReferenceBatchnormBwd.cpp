@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "GpuBatchnormBwdRefTestFixture.hpp"
+#include "SmokeCases.hpp"
 
 using namespace hipdnn_data_sdk::types;
 using namespace hipdnn_data_sdk::utilities;
@@ -61,7 +62,12 @@ const std::vector<BatchnormTestCase> QUICK_4D_CASES = {{{2, 3, 4, 5}}};
 const std::vector<BatchnormTestCase> STANDARD_4D_CASES = {{{4, 3, 17, 19}}};
 const std::vector<BatchnormTestCase> STANDARD_5D_CASES = {{{3, 2, 5, 7, 11}}};
 
-INSTANTIATE_TEST_SUITE_P(Quick,
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         TestGpuBatchnormBwdRefFp32,
+                         testing::Combine(testing::Values(TensorLayout::NCHW),
+                                          testing::ValuesIn(smokeCase(QUICK_4D_CASES)),
+                                          testing::Values(false)));
+INSTANTIATE_TEST_SUITE_P(StandardBasic,
                          TestGpuBatchnormBwdRefFp32,
                          testing::Combine(testing::Values(TensorLayout::NCHW, TensorLayout::NHWC),
                                           testing::ValuesIn(QUICK_4D_CASES),

@@ -3,6 +3,7 @@
 
 #include "GpuMatmulRefTestFixture.hpp"
 #include "MatmulShapeCatalog.hpp"
+#include "SmokeCases.hpp"
 #include "hipdnn-gpu-ref/GpuFpReferenceMatmul.hpp"
 #include <hipdnn_data_sdk/utilities/Constants.hpp>
 #include <hipdnn_data_sdk/utilities/ShallowTensor.hpp>
@@ -423,7 +424,10 @@ TEST_P(TestGpuMatmulRefUpcastBfp16, MatchesCpuRef)
 // 2D tests
 // ========
 
-INSTANTIATE_TEST_SUITE_P(Quick,
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         TestGpuMatmulRefPureFp32,
+                         ::testing::ValuesIn(smokeCase(getMatmulSmallTestCases())));
+INSTANTIATE_TEST_SUITE_P(StandardBasic,
                          TestGpuMatmulRefPureFp32,
                          ::testing::ValuesIn(getMatmulSmallTestCases()));
 INSTANTIATE_TEST_SUITE_P(Standard,

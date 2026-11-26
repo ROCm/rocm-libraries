@@ -591,9 +591,9 @@ TEST_P(TestGpuRMSNormFwdRef5DBfp16, MatchesCpuRef)
 // 4D (NCHW/NHWC) tests
 // ============================================================================
 
-// --- Quick tests (fp32) + Standard small-shape reduced precision ---
+// --- fp32 small shapes (StandardBasic) + Standard small-shape reduced precision ---
 
-INSTANTIATE_TEST_SUITE_P(Quick,
+INSTANTIATE_TEST_SUITE_P(StandardBasic,
                          TestGpuRMSNormFwdRef4DFp32,
                          ::testing::ValuesIn(getRMSnormSmall4DTestCases()));
 INSTANTIATE_TEST_SUITE_P(Standard,
@@ -617,7 +617,7 @@ INSTANTIATE_TEST_SUITE_P(Comprehensive,
 // 5D (NCDHW/NDHWC) shape tests
 // ============================================================================
 
-INSTANTIATE_TEST_SUITE_P(Quick,
+INSTANTIATE_TEST_SUITE_P(StandardBasic,
                          TestGpuRMSNormFwdRef5DFp32,
                          ::testing::ValuesIn(getRMSnormSmall5DTestCases()));
 INSTANTIATE_TEST_SUITE_P(Standard,

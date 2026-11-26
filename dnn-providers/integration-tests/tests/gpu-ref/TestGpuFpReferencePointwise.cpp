@@ -3,6 +3,7 @@
 
 #include "GpuPointwiseRefTestFixture.hpp"
 #include "PointwiseShapeCatalog.hpp"
+#include "SmokeCases.hpp"
 #include <hipdnn_data_sdk/types/Half.hpp>
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
 
@@ -1545,10 +1546,13 @@ TEST_P(TestGpuPointwiseUnarySpecialValuesFp32, MatchesCpuRef)
 // 4D tests
 // ============================================================================
 
-INSTANTIATE_TEST_SUITE_P(Quick,
+INSTANTIATE_TEST_SUITE_P(StandardBasic,
                          TestGpuPointwiseUnaryRef4DFp32,
                          ::testing::ValuesIn(getSmall4dCoreUnaryPointwiseCases()));
-INSTANTIATE_TEST_SUITE_P(Quick,
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         TestGpuPointwiseBinaryRef4DFp32,
+                         ::testing::ValuesIn(smokeCase(getSmall4dCoreBinaryPointwiseCases())));
+INSTANTIATE_TEST_SUITE_P(StandardBasic,
                          TestGpuPointwiseBinaryRef4DFp32,
                          ::testing::ValuesIn(getSmall4dCoreBinaryPointwiseCases()));
 // The extended modes compile kernels the core modes do not, so their small fp32 cases run in the
@@ -1620,10 +1624,13 @@ INSTANTIATE_TEST_SUITE_P(Comprehensive,
 // 5D tests
 // ============================================================================
 
-INSTANTIATE_TEST_SUITE_P(Quick,
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         TestGpuPointwiseUnaryRef5DFp32,
+                         ::testing::ValuesIn(smokeCase(getSmall5dCoreUnaryPointwiseCases())));
+INSTANTIATE_TEST_SUITE_P(StandardBasic,
                          TestGpuPointwiseUnaryRef5DFp32,
                          ::testing::ValuesIn(getSmall5dCoreUnaryPointwiseCases()));
-INSTANTIATE_TEST_SUITE_P(Quick,
+INSTANTIATE_TEST_SUITE_P(StandardBasic,
                          TestGpuPointwiseBinaryRef5DFp32,
                          ::testing::ValuesIn(getSmall5dCoreBinaryPointwiseCases()));
 // The extended modes compile kernels the core modes do not, so their small fp32 cases run in the

@@ -6,7 +6,7 @@
 # GTest-filter categories applied to the component's own GTest binaries
 # (hipdnn_integration_tests_unit_tests and hipdnn_golden_data_tests) via
 # apply_test_category_labels(). hipdnn_gpu_ref_tests uses
-# test_categories_gpu_ref.yaml instead (fp32-only quick tier). Each category
+# test_categories_gpu_ref.yaml instead (opt-in quick list). Each category
 # becomes one CTest suite whose --gtest_filter is built from test_patterns/exclude;
 # labels are cumulative so `ctest -L standard` runs quick + standard, etc.
 #
@@ -42,12 +42,13 @@ test_categories:
       - "comprehensive_*"
       - "Full*"
       - "full_*"
-      # Pointwise modes added with the CPU-parity work: device runs that compile new kernels
-      - "TestGpuPointwise*Plan*.ExecutePlan*"
-      - "TestGpuReferenceGraphExecutor.PointwiseBinaryMixedOperandTypesExecutes"
-      - "TestGpuReferenceGraphExecutorFp32.PointwiseMaxMinExecutes"
-      - "TestGpuReferenceGraphExecutorFp32.PointwiseCmpGtExecutes"
-      - "TestGpuReferenceGraphExecutorFp32.PointwiseBinarySelectExecutes"
+      # Tests that execute a GPU reference plan or graph executor (see standard test_patterns)
+      - "*TestGpu*Plan*"
+      - "*TestGpu*Executor*"
+      - "*TestGpuOutputComparison*"
+      - "*TestOutputComparisonSite*"
+      - "*TestReferenceBenchmarkDeviceSite*"
+      - "*TestGpuRaggedSdpaDensify*"
     labels:
       - "quick"
       - "standard"
@@ -59,12 +60,16 @@ test_categories:
     test_patterns:
       - "Standard*"
       - "standard_*"
-      # Pointwise modes added with the CPU-parity work: device runs that compile new kernels
-      - "TestGpuPointwise*Plan*.ExecutePlan*"
-      - "TestGpuReferenceGraphExecutor.PointwiseBinaryMixedOperandTypesExecutes"
-      - "TestGpuReferenceGraphExecutorFp32.PointwiseMaxMinExecutes"
-      - "TestGpuReferenceGraphExecutorFp32.PointwiseCmpGtExecutes"
-      - "TestGpuReferenceGraphExecutorFp32.PointwiseBinarySelectExecutes"
+      # Tests that execute a GPU reference plan or graph executor. Each compiles HipRTC
+      # kernels (~0.4 s per kernel variant), which was most of the unit-test quick tier; the
+      # kernels themselves are covered in quick by hipdnn_gpu_ref_tests (Smoke/*).
+      # The same list appears twice (quick exclude, standard test_patterns): change both.
+      - "*TestGpu*Plan*"
+      - "*TestGpu*Executor*"
+      - "*TestGpuOutputComparison*"
+      - "*TestOutputComparisonSite*"
+      - "*TestReferenceBenchmarkDeviceSite*"
+      - "*TestGpuRaggedSdpaDensify*"
     exclude:
       - "*DISABLED*"
     labels:

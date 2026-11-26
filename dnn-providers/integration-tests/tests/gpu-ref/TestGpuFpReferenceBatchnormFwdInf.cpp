@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "GpuBatchnormFwdInfRefTestFixture.hpp"
+#include "SmokeCases.hpp"
 #include <cstdint>
 #include <hipdnn_data_sdk/utilities/ShallowTensor.hpp>
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
@@ -954,7 +955,7 @@ TEST_P(TestGpuBatchnormFwdInfRef5DBfp16, MatchesCpuRef)
 // 3D (NCL/NLC) tests
 // ============================================================================
 
-INSTANTIATE_TEST_SUITE_P(Quick,
+INSTANTIATE_TEST_SUITE_P(StandardBasic,
                          TestGpuBatchnormFwdInfRef3DFp32,
                          testing::Combine(testing::Values(TensorLayout::NCL, TensorLayout::NLC),
                                           ::testing::ValuesIn(getBatchnormSmall3DTestCases())));
@@ -986,7 +987,7 @@ INSTANTIATE_TEST_SUITE_P(
 // 4D (NCHW/NHWC) tests
 // ============================================================================
 
-INSTANTIATE_TEST_SUITE_P(Quick,
+INSTANTIATE_TEST_SUITE_P(StandardBasic,
                          TestGpuBatchnormFwdInfRef4DFp32,
                          testing::Combine(testing::Values(TensorLayout::NCHW, TensorLayout::NHWC),
                                           ::testing::ValuesIn(getBatchnormSmall4DTestCases())));
@@ -1016,7 +1017,12 @@ INSTANTIATE_TEST_SUITE_P(
 // 5D (NCDHW/NDHWC) shape tests
 // ============================================================================
 
-INSTANTIATE_TEST_SUITE_P(Quick,
+INSTANTIATE_TEST_SUITE_P(
+    Smoke,
+    TestGpuBatchnormFwdInfRef5DFp32,
+    testing::Combine(testing::Values(TensorLayout::NCDHW),
+                     ::testing::ValuesIn(smokeCase(getBatchnormSmall5DTestCases()))));
+INSTANTIATE_TEST_SUITE_P(StandardBasic,
                          TestGpuBatchnormFwdInfRef5DFp32,
                          testing::Combine(testing::Values(TensorLayout::NCDHW, TensorLayout::NDHWC),
                                           ::testing::ValuesIn(getBatchnormSmall5DTestCases())));

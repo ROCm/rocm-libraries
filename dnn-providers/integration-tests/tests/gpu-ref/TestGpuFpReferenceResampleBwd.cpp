@@ -1330,9 +1330,9 @@ TEST_P(TestGpuResampleBwdRef5DBfp16, MatchesCpuRef)
 // 4D tests
 // ============================================================================
 
-// --- Quick tests (fp32) + Standard small-shape reduced precision ---
+// --- fp32 small shapes (StandardBasic) + Standard small-shape reduced precision ---
 
-INSTANTIATE_TEST_SUITE_P(Quick,
+INSTANTIATE_TEST_SUITE_P(StandardBasic,
                          TestGpuResampleBwdRef4DFp32,
                          ::testing::ValuesIn(makeResampleTestCases(getResampleSmall4DShapes(),
                                                                    getResample4DLayouts(),
@@ -1380,9 +1380,9 @@ INSTANTIATE_TEST_SUITE_P(Comprehensive,
 // 5D tests
 // ============================================================================
 
-// --- Quick tests (fp32) + Standard small-shape reduced precision ---
+// --- fp32 small shapes (StandardBasic) + Standard small-shape reduced precision ---
 
-INSTANTIATE_TEST_SUITE_P(Quick,
+INSTANTIATE_TEST_SUITE_P(StandardBasic,
                          TestGpuResampleBwdRef5DFp32,
                          ::testing::ValuesIn(makeResampleTestCases(getResampleSmall5DShapes(),
                                                                    getResample5DLayouts(),

@@ -4,6 +4,7 @@
 #include "GpuConvWgradRefTestFixture.hpp"
 
 #include "ConvShapeCatalog.hpp"
+#include "SmokeCases.hpp"
 
 #include <cstdint>
 #include <stdexcept>
@@ -517,22 +518,35 @@ TEST_P(TestGpuConvWrwRefNdhwc3dFp32, MatchesCpuRef)
 
 // ============================================================================
 // Default layout (NCHW/NCDHW/NCL) instantiations.
-// Smoke (fp32-only) shapes run on every commit; fp16/bfp16 small shapes are in Standard;
-// Standard/Full shapes filtered via --gtest_filter.
+// Smoke runs one fp32 case per dimensionality in the quick tier; the fp32 small catalogs
+// (StandardBasic) and the fp16/bfp16 small shapes run in Standard; Standard/Full shapes are
+// filtered via --gtest_filter.
 // ============================================================================
 
 // fp32 NCHW/NCDHW
 INSTANTIATE_TEST_SUITE_P(Smoke,
                          TestGpuConvWrwRef2dFp32,
-                         ::testing::ValuesIn(getSmall2dConvCases()),
+                         ::testing::ValuesIn(smokeCase(getSmall2dConvCases())),
                          byTag());
 INSTANTIATE_TEST_SUITE_P(Smoke,
+                         TestGpuConvWrwRef3dFp32,
+                         ::testing::ValuesIn(smokeCase(getSmall3dConvCases())),
+                         byTag());
+INSTANTIATE_TEST_SUITE_P(StandardBasic,
+                         TestGpuConvWrwRef2dFp32,
+                         ::testing::ValuesIn(getSmall2dConvCases()),
+                         byTag());
+INSTANTIATE_TEST_SUITE_P(StandardBasic,
                          TestGpuConvWrwRef3dFp32,
                          ::testing::ValuesIn(getSmall3dConvCases()),
                          byTag());
 
 // fp32 NCL: 1D shapes
 INSTANTIATE_TEST_SUITE_P(Smoke,
+                         TestGpuConvWrwRef1dFp32,
+                         ::testing::ValuesIn(smokeCase(getSmall1dConvCases())),
+                         byTag());
+INSTANTIATE_TEST_SUITE_P(StandardBasic,
                          TestGpuConvWrwRef1dFp32,
                          ::testing::ValuesIn(getSmall1dConvCases()),
                          byTag());
@@ -570,15 +584,15 @@ INSTANTIATE_TEST_SUITE_P(Standard,
 // ============================================================================
 
 // fp32 NHWC/NDHWC/NLC (P2: no fp16/bfp16 channel-last; stride-only layout)
-INSTANTIATE_TEST_SUITE_P(Smoke,
+INSTANTIATE_TEST_SUITE_P(StandardBasic,
                          TestGpuConvWrwRefNhwc2dFp32,
                          ::testing::ValuesIn(withChannelLastLayout(getSmall2dConvCases())),
                          byTag());
-INSTANTIATE_TEST_SUITE_P(Smoke,
+INSTANTIATE_TEST_SUITE_P(StandardBasic,
                          TestGpuConvWrwRefNdhwc3dFp32,
                          ::testing::ValuesIn(withChannelLastLayout(getSmall3dConvCases())),
                          byTag());
-INSTANTIATE_TEST_SUITE_P(Smoke,
+INSTANTIATE_TEST_SUITE_P(StandardBasic,
                          TestGpuConvWrwRefNlc1dFp32,
                          ::testing::ValuesIn(withChannelLastLayout(getSmall1dConvCases())),
                          byTag());

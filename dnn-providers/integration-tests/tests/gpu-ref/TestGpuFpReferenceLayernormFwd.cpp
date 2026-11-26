@@ -618,13 +618,13 @@ TEST_P(TestGpuLayernormFwdRef5DBfp16, MatchesCpuRef)
 // 4D (NCHW/NHWC) tests
 // ============================================================================
 
-// --- Quick tests (fp32) + Standard small-shape reduced precision ---
+// --- fp32 small shapes (StandardBasic) + Standard small-shape reduced precision ---
 
-INSTANTIATE_TEST_SUITE_P(Quick,
+INSTANTIATE_TEST_SUITE_P(StandardBasic,
                          TestGpuLayernormFwdRef4DFp32,
                          ::testing::ValuesIn(getLayernormSmall4DTestCases()));
 // P1 (dtype orthogonality): reduced-precision runs use the minimal dtype catalog in the standard
-// tier (small shapes); Quick is fp32-only smoke.
+// tier (small shapes); StandardBasic is fp32-only.
 INSTANTIATE_TEST_SUITE_P(Standard,
                          TestGpuLayernormFwdRef4DFp16,
                          ::testing::ValuesIn(getLayernormSmall4DDtypeTestCases()));
@@ -648,7 +648,7 @@ INSTANTIATE_TEST_SUITE_P(StandardSmall,
                          TestGpuLayernormFwdRef5DFp32,
                          ::testing::ValuesIn(getLayernormSmall5DTestCases()));
 // P1 (dtype orthogonality): reduced-precision runs use the minimal dtype catalog in the standard
-// tier (small shapes); Quick is fp32-only smoke.
+// tier (small shapes); StandardBasic is fp32-only.
 INSTANTIATE_TEST_SUITE_P(Standard,
                          TestGpuLayernormFwdRef5DFp16,
                          ::testing::ValuesIn(getLayernormSmall5DDtypeTestCases()));

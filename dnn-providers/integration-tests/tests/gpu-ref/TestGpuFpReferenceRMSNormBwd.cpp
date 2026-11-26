@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "GpuRMSNormBwdRefTestFixture.hpp"
+#include "SmokeCases.hpp"
 
 // --- Valid configurations ---
 
@@ -791,9 +792,9 @@ TEST_P(TestGpuRMSNormBwdRef5DBfp16, MatchesCpuRef)
 // 4D (NCHW/NHWC) tests
 // ============================================================================
 
-// --- Quick tests (fp32) + Standard small-shape reduced precision ---
+// --- fp32 small shapes (StandardBasic) + Standard small-shape reduced precision ---
 
-INSTANTIATE_TEST_SUITE_P(Quick,
+INSTANTIATE_TEST_SUITE_P(StandardBasic,
                          TestGpuRMSNormBwdRef4DFp32,
                          ::testing::ValuesIn(getRMSnormSmall4DTestCases()));
 INSTANTIATE_TEST_SUITE_P(Standard,
@@ -817,7 +818,10 @@ INSTANTIATE_TEST_SUITE_P(Comprehensive,
 // 5D (NCDHW/NDHWC) shape tests
 // ============================================================================
 
-INSTANTIATE_TEST_SUITE_P(Quick,
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         TestGpuRMSNormBwdRef5DFp32,
+                         ::testing::ValuesIn(smokeCase(getRMSnormSmall5DTestCases())));
+INSTANTIATE_TEST_SUITE_P(StandardBasic,
                          TestGpuRMSNormBwdRef5DFp32,
                          ::testing::ValuesIn(getRMSnormSmall5DTestCases()));
 INSTANTIATE_TEST_SUITE_P(Standard,
