@@ -1,0 +1,135 @@
+{
+  "_comment": "mx_env_sweep.py config, MX at 256x2048x2048 with small tiles (ROCKE_EXP_SWEEP_TILE, 2x2 waves, warp tile 16) and clusters (N, M order: \"4,2\" is 4 tiles along N by 2 along M). mx: the plain MX K loop (scale swizzle off: it needs 4 | repeats); mx_ra: the B0 read-ahead variant (pk0pf6 without packed scales), which builds only where the N repeat is even.",
+  "base_env": {
+    "ROCKE_EXP_MX": "1",
+    "ROCKE_EXP_MX_SWZ": "0",
+    "ROCKE_EXP_MX_SCALE_MC": "0",
+    "ROCKE_EXP_MX_KFENCE": "1",
+    "ROCKE_EXP_MX_SCALE_NOCLIP": "1",
+    "ROCKE_EXP_MC_SOLO0": "1"
+  },
+  "variants": [
+    {
+      "name": "mx",
+      "env": {}
+    },
+    {
+      "name": "mx_ra",
+      "env": {
+        "ROCKE_EXP_MX_RA": "2",
+        "ROCKE_EXP_MX_RA_BAR": "0",
+        "ROCKE_EXP_TDM_SPLIT": "2",
+        "ROCKE_EXP_MX_RA_CB": "1",
+        "ROCKE_EXP_MX_RA_CW": "0",
+        "ROCKE_EXP_MX_RA_CS": "0",
+        "ROCKE_EXP_MX_RA_NOBRANCH": "1",
+        "ROCKE_EXP_GL2_PREFETCH": "6",
+        "ROCKE_EXP_GL2_CLUSTER": "2",
+        "ROCKE_EXP_MX_RA_NB1": "0",
+        "ROCKE_EXP_EPI_BATCH": "64",
+        "ROCKE_EXP_MX_RA_PRO": "1",
+        "ROCKE_EXP_GL2_SCALES": "1"
+      }
+    }
+  ],
+  "arms": [
+    {
+      "name": "t32x32x512_c4x2",
+      "env": {
+        "ROCKE_EXP_SWEEP_TILE": "32,32,512,2,2"
+      },
+      "cluster": "4,2"
+    },
+    {
+      "name": "t32x32x512_c2x2",
+      "env": {
+        "ROCKE_EXP_SWEEP_TILE": "32,32,512,2,2"
+      },
+      "cluster": "2,2"
+    },
+    {
+      "name": "t32x32x512",
+      "env": {
+        "ROCKE_EXP_SWEEP_TILE": "32,32,512,2,2"
+      }
+    },
+    {
+      "name": "t64x32x512_c4x2",
+      "env": {
+        "ROCKE_EXP_SWEEP_TILE": "64,32,512,2,2"
+      },
+      "cluster": "4,2"
+    },
+    {
+      "name": "t64x32x512_c2x2",
+      "env": {
+        "ROCKE_EXP_SWEEP_TILE": "64,32,512,2,2"
+      },
+      "cluster": "2,2"
+    },
+    {
+      "name": "t64x32x512",
+      "env": {
+        "ROCKE_EXP_SWEEP_TILE": "64,32,512,2,2"
+      }
+    },
+    {
+      "name": "t32x64x512_c2x2",
+      "env": {
+        "ROCKE_EXP_SWEEP_TILE": "32,64,512,2,2"
+      },
+      "cluster": "2,2"
+    },
+    {
+      "name": "t32x64x512_c4x2",
+      "env": {
+        "ROCKE_EXP_SWEEP_TILE": "32,64,512,2,2"
+      },
+      "cluster": "4,2"
+    },
+    {
+      "name": "t64x64x256_c4x2",
+      "env": {
+        "ROCKE_EXP_SWEEP_TILE": "64,64,256,2,2"
+      },
+      "cluster": "4,2"
+    },
+    {
+      "name": "t64x64x256_c2x2",
+      "env": {
+        "ROCKE_EXP_SWEEP_TILE": "64,64,256,2,2"
+      },
+      "cluster": "2,2"
+    },
+    {
+      "name": "t64x64x256",
+      "env": {
+        "ROCKE_EXP_SWEEP_TILE": "64,64,256,2,2"
+      }
+    },
+    {
+      "name": "t64x64x512_c2x2",
+      "env": {
+        "ROCKE_EXP_SWEEP_TILE": "64,64,512,2,2"
+      },
+      "cluster": "2,2"
+    },
+    {
+      "name": "t32x32x256_c4x2",
+      "env": {
+        "ROCKE_EXP_SWEEP_TILE": "32,32,256,2,2"
+      },
+      "cluster": "4,2"
+    }
+  ],
+  "shapes": [
+    [
+      256,
+      2048,
+      2048
+    ]
+  ],
+  "rounds": 5,
+  "warmup": 50,
+  "repeat": 100
+}

@@ -474,14 +474,17 @@ def main():
                             tainted, why = True, ["amd-smi failed"]
                         if tainted:
                             _log("  pair busy: " + "; ".join(w for w in why if any(f"HIP {i} " in w for i in pair) or w == "amd-smi failed"))
-                    args = prob.args(plain_of[t])
+                    # prepare_launch: the args are packed once, so the timed loop
+                    # issues launches faster than a small kernel runs (a loop of
+                    # rt.launch measures the host on small shapes such as 256x2048)
+                    go = rt.prepare_launch(fns[t], *geom[t], prob.args(plain_of[t]), cluster=launch_cluster[t])
                     for _ in range(warm):
-                        rt.launch(fns[t], *geom[t], args, cluster=launch_cluster[t])
+                        go()
                     rt.wait_stream(0)
                     e0, e1 = rt.event(), rt.event()
                     e0.record()
                     for _ in range(rep):
-                        rt.launch(fns[t], *geom[t], args, cluster=launch_cluster[t])
+                        go()
                     e1.record()
                     e1.synchronize()
                     tf = fl / (e0.elapsed_to(e1) / rep * 1e9)
