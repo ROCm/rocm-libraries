@@ -4,7 +4,7 @@
 # Fixed-Point Emulation (FP32/FP64) via Ozaki Scheme II (INT8 tensor cores + CRT).
 #
 # This translation unit is built as a standalone OBJECT library so that its
-# object files can be linked PRIVATE into both the hipblaslt shared library
+# object files can be linked PRIVATE into both the hipblaslt library
 # (where the symbols stay hidden, leaving the public ABI unchanged) and the
 # hipblaslt-test harness (which needs to call the internal entry points
 # directly).  This avoids exporting internal symbols from the release .so.
@@ -26,10 +26,21 @@ target_link_libraries(hipblaslt-fixed-point-emulation PRIVATE
 # ROCM_USE_FLOAT16, __HIP_HCC_COMPAT_MODE__, etc.)
 target_compile_definitions(hipblaslt-fixed-point-emulation PRIVATE
     $<TARGET_PROPERTY:hipblaslt,COMPILE_DEFINITIONS>)
+# Inherit the compile options as well: hipblaslt's sanitizer
+# (HIPBLASLT_ENABLE_ASAN/TSAN) and coverage (HIPBLASLT_ENABLE_COVERAGE) options
+# are private, so emulation.cpp would otherwise build without them. The coverage
+# options are added after this file is processed, which is fine because the
+# generator expression is evaluated at generate time.
+target_compile_options(hipblaslt-fixed-point-emulation PRIVATE
+    $<TARGET_PROPERTY:hipblaslt,COMPILE_OPTIONS>)
 target_include_directories(hipblaslt-fixed-point-emulation PRIVATE
     "${PROJECT_SOURCE_DIR}/library/src/amd_detail/rocblaslt/include"
     "${PROJECT_SOURCE_DIR}/library/src/amd_detail/rocblaslt/src/include"
     "${PROJECT_SOURCE_DIR}/library/src/amd_detail/include"
     "${CMAKE_CURRENT_SOURCE_DIR}/include"
 )
-target_link_libraries(hipblaslt PRIVATE hipblaslt-fixed-point-emulation)
+# BUILD_INTERFACE keeps the object library out of hipblaslt's exported link
+# interface. A static hipblaslt (HIPBLASLT_BUILD_SHARED_LIBS=OFF) would otherwise
+# export it, and it is not in any export set. The object files still go into
+# the library.
+target_link_libraries(hipblaslt PRIVATE $<BUILD_INTERFACE:hipblaslt-fixed-point-emulation>)
