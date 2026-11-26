@@ -75,6 +75,9 @@ def _capture_sdpa_args():
         scale=None,
         enable_gqa=False,
     ):
+        captured["q_shape"] = tuple(query.shape)
+        captured["k_shape"] = tuple(key.shape)
+        captured["v_shape"] = tuple(value.shape)
         captured["q_stride"] = tuple(query.stride())
         captured["k_stride"] = tuple(key.stride())
         captured["v_stride"] = tuple(value.stride())
@@ -120,6 +123,23 @@ def _bhsd_contig_stride(h, s, d):
 
 def _gpt2_fused_stride(s, hq, d):
     return (s * 3 * hq * d, d, 3 * hq * d, 1)
+
+
+def _assert_stride_matches(label, shape, got_stride, want_stride):
+    """Compare strides only on axes with extent > 1: a size-1 axis (an
+    Hkv=1 GQA head axis, or the S=1 decode-step sequence axis) is never
+    stepped along, so its stride is whatever the parent buffer happened to
+    leave there -- not part of the layout class a stride tuple names."""
+    assert len(shape) == len(got_stride) == len(want_stride)
+    mismatches = [
+        i
+        for i, extent in enumerate(shape)
+        if extent > 1 and got_stride[i] != want_stride[i]
+    ]
+    assert not mismatches, (
+        f"{label}: stride mismatch on real axis(es) {mismatches} -- "
+        f"shape={shape}, got={got_stride}, want={want_stride}"
+    )
 
 
 def _flydsl_state():
@@ -228,10 +248,12 @@ def _run_layer(torch, arch, layer, hidden, attention_mask, cache):
 def _assert_served_or_declined(ov, sq, skv, d, *, arch, masked):
     """(q): with the kernel ingestor on, every variant here is served; with
     it off only unmasked MHA D=128 (olmo2) is served (by a named engine,
-    not necessarily ASM) -- GQA archs go native with a reason starting
-    ``grad:`` (not necessarily at the bwd stage), D=64 without #16337
-    declines at the bwd stage, and a mask always declines at the fwd+stats
-    stage (both ASM builders reject any bias)."""
+    not necessarily ASM) -- GQA archs and D=64 without #16337 go native with
+    a reason starting ``grad:`` (not necessarily at the bwd stage: the real
+    HF layer's layout, e.g. GPT-2's fused c_attn slice, can make the decline
+    stage differ from a clean synthetic BSHD-view shape of the same
+    Sq/Skv/D), and a mask always declines at the fwd+stats stage (both ASM
+    builders reject any bias)."""
     aot, native = ov.totals()
     bwd_aot, bwd_native = ov.bwd_totals()
     flydsl = _flydsl_state()
@@ -242,9 +264,10 @@ def _assert_served_or_declined(ov, sq, skv, d, *, arch, masked):
         )
 
     if flydsl == "on":
-        assert (
-            aot > 0 and native == 0
-        ), f"{arch}: expected served, got aot={aot} native={native}"
+        assert aot > 0 and native == 0, (
+            f"{arch}: expected served, got aot={aot} native={native}, "
+            f"reasons={ov.fallback_reasons()}"
+        )
         assert bwd_aot > 0 and bwd_native == 0
         row = ov.census()[_census_key(_GRAD_PREFIX, sq, skv, d, "bf16")]
         bwd = ov.census()[_census_key(_BWD_PREFIX, sq, skv, d, "bf16")]
@@ -272,7 +295,7 @@ def _assert_served_or_declined(ov, sq, skv, d, *, arch, masked):
         if pr16337 == "out":
             assert aot == 0 and native > 0
             reasons = ov.fallback_reasons()
-            assert any(r.startswith("grad: bwd:") for r in reasons), reasons
+            assert any(r.startswith("grad:") for r in reasons), reasons
             return None, None
         # #16337 in: ASM now serves gfx950 D=64.
         assert aot > 0 and native == 0
@@ -322,9 +345,9 @@ def test_use_cache_false_no_mask_matches_native_and_layout(torch, transformers, 
     else:
         want_q = _bshd_stride(s, hq, head_dim)
         want_k = want_v = _bshd_stride(s, hkv, head_dim)
-    assert captured["q_stride"] == want_q, (captured["q_stride"], want_q)
-    assert captured["k_stride"] == want_k, (captured["k_stride"], want_k)
-    assert captured["v_stride"] == want_v, (captured["v_stride"], want_v)
+    _assert_stride_matches("q", captured["q_shape"], captured["q_stride"], want_q)
+    _assert_stride_matches("k", captured["k_shape"], captured["k_stride"], want_k)
+    _assert_stride_matches("v", captured["v_shape"], captured["v_stride"], want_v)
     if hkv != hq and arch != "gpt2":
         assert captured["enable_gqa"] is True, (
             "the unmasked, no-cache GQA variant is the only one that "
@@ -385,12 +408,15 @@ def test_use_cache_true_mixed_layout_matches_native(torch, transformers, arch):
     # for the rotary archs, but GPT-2's q is still a fused c_attn slice even
     # at decode (its projection never changes shape); k/v become the
     # cache's contiguous BHSD cat for every arch.
-    if arch == "gpt2":
-        assert captured["q_stride"] == _gpt2_fused_stride(1, hq, head_dim)
-    else:
-        assert captured["q_stride"] == _bshd_stride(1, hq, head_dim)
-    assert captured["k_stride"] == _bhsd_contig_stride(hkv, s_prefill + 1, head_dim)
-    assert captured["v_stride"] == _bhsd_contig_stride(hkv, s_prefill + 1, head_dim)
+    want_q = (
+        _gpt2_fused_stride(1, hq, head_dim)
+        if arch == "gpt2"
+        else _bshd_stride(1, hq, head_dim)
+    )
+    want_kv = _bhsd_contig_stride(hkv, s_prefill + 1, head_dim)
+    _assert_stride_matches("q", captured["q_shape"], captured["q_stride"], want_q)
+    _assert_stride_matches("k", captured["k_shape"], captured["k_stride"], want_kv)
+    _assert_stride_matches("v", captured["v_shape"], captured["v_stride"], want_kv)
 
     _assert_served_or_declined(ov, 1, s_prefill + 1, head_dim, arch=arch, masked=False)
 
@@ -432,7 +458,7 @@ def test_padded_mask_matches_native(torch, transformers, arch):
         if arch == "gpt2"
         else _bshd_stride(s, hq, head_dim)
     )
-    assert captured["q_stride"] == want_q, (captured["q_stride"], want_q)
+    _assert_stride_matches("q", captured["q_shape"], captured["q_stride"], want_q)
     if hkv != hq and arch != "gpt2":
         assert (
             captured["enable_gqa"] is False
