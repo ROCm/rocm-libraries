@@ -59,10 +59,8 @@ shard to the limit and its gap to the budget.
 ``check`` judges one operating system: the one it runs on, or ``--column``.
 The registration it lists is that system's, so another system's column cannot
 be judged from it. ``check`` also fails when an entry a CI tier runs has no
-time in that column, so a new entry cannot count as 0 s, and when a registered
-entry has a time in the committed ``entry_times.json`` but none in the
-``--entry-times`` file it projects from, so a time cannot drop out of the
-projection unnoticed.
+time in that column, so neither a new entry nor one whose time was removed can
+count as 0 s.
 
 The installed test tree carries this file and ``entry_times.json`` in
 ``tests/tools``, and the check needs that tree: the registration CTest lists
@@ -80,6 +78,12 @@ seconds come from the logs that carry pytest's ``--durations`` report, for the
 tests of at least ``TEST_SECONDS_FLOOR``::
 
     python check_entry_times.py record --column linux --source "<what these are>" LOG...
+
+Drop one column's times for entries the registration no longer holds (a
+listing of that operating system's registration), so renamed or removed
+entries do not linger::
+
+    python check_entry_times.py prune --column linux --ctest-dir .
 
 Lower a ceiling to the current projection, rounded up to 10 s::
 
@@ -101,6 +105,7 @@ import tempfile
 from collections.abc import Iterable, Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -144,10 +149,10 @@ __all__ = [
     "host_column",
     "load_entry_times",
     "lowered_ceiling",
+    "pruned_column",
     "registered_entries",
     "slow_test_seconds_from_ctest_logs",
     "split_entry_shard_seconds",
-    "times_dropped_from",
     "untimed_entries",
 ]
 
@@ -539,26 +544,30 @@ def untimed_entries(
     ]
 
 
-def times_dropped_from(
-    entries: Iterable[RegisteredEntry],
-    committed: Mapping[str, Mapping],
-    projected: Mapping[str, Mapping],
-) -> list[str]:
-    """Registered entries ``committed`` has a time for and ``projected`` lacks.
-
-    An entry without a time is not counted, so losing one would make a tier
-    look cheaper than it is.
+def pruned_column(
+    column: Mapping[str, Any], entries: Iterable[RegisteredEntry]
+) -> tuple[dict[str, Any], list[str]]:
+    """``column`` (one operating system's data) without the entry times and
+    slow-test times of entries that ``entries`` does not register, and the
+    names it dropped from either, sorted. Its other keys (source, ceilings)
+    are kept as they are.
     """
     registered = {entry.name for entry in entries}
-    dropped = []
-    for column, recorded in committed.items():
-        kept = projected.get(column, {}).get("seconds", {})
-        dropped += [
-            f"{column}: {name} has a committed time but none in the projected data"
-            for name in sorted(registered & set(recorded["seconds"]))
-            if name not in kept
-        ]
-    return dropped
+    timed = set(column.get("seconds", {})) | set(column.get("test_seconds", {}))
+    dropped = sorted(timed - registered)
+    kept = dict(column)
+    kept["seconds"] = {
+        name: seconds
+        for name, seconds in column.get("seconds", {}).items()
+        if name in registered
+    }
+    if "test_seconds" in column:
+        kept["test_seconds"] = {
+            name: tests
+            for name, tests in column["test_seconds"].items()
+            if name in registered
+        }
+    return kept, dropped
 
 
 def lowered_ceiling(verdict: TierVerdict) -> float | None:
@@ -881,9 +890,6 @@ def _check(arguments: argparse.Namespace) -> int:
             "(divided evenly): " + ", ".join(not_placed)
         )
     breaches = untimed_entries(entries, column)
-    breaches += times_dropped_from(
-        entries, load_entry_times(arguments.committed_times), entry_times
-    )
     for verdict in evaluate_tiers(entries, column, entry_keys):
         print(verdict.summary())
         breaches += verdict.breaches()
@@ -912,6 +918,25 @@ def _record(arguments: argparse.Namespace) -> int:
     print(
         f"recorded {len(seconds)} entries and the slow tests of "
         f"{len(test_seconds)} into {arguments.column}"
+    )
+    return 0
+
+
+def _prune(arguments: argparse.Namespace) -> int:
+    entry_times = load_entry_times(arguments.entry_times)
+    column = _column_of(entry_times, arguments.column, "prune")
+    entries = _registration(arguments)
+    if not entries:
+        raise ValueError(
+            "prune failed - the registration has no rocke_* entries, expected "
+            "the listing of a configured rocKE test tree"
+        )
+    kept, dropped = pruned_column(column[arguments.column], entries)
+    entry_times[arguments.column] = kept
+    _write_entry_times(entry_times, arguments.entry_times)
+    print(
+        f"dropped {len(dropped)} unregistered entries from {arguments.column}"
+        + "".join(f"\n  {name}" for name in dropped)
     )
     return 0
 
@@ -989,12 +1014,6 @@ def _add_registration_source(parser: argparse.ArgumentParser) -> None:
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument("--entry-times", type=Path, default=ENTRY_TIMES_PATH)
-    parser.add_argument(
-        "--committed-times",
-        type=Path,
-        default=ENTRY_TIMES_PATH,
-        help="data whose registered entries `check` may not lose a time for",
-    )
     commands = parser.add_subparsers(dest="command", required=True)
 
     check = commands.add_parser("check", help="fail if a shard would exceed its limit")
@@ -1018,6 +1037,13 @@ def main(argv: Sequence[str] | None = None) -> int:
     record.add_argument("--source", required=True, help="which jobs and dates")
     record.add_argument("logs", type=Path, nargs="+", help="ctest -V logs (.gz ok)")
     record.set_defaults(run=_record)
+
+    prune = commands.add_parser(
+        "prune", help="drop one column's times for entries no longer registered"
+    )
+    prune.add_argument("--column", required=True, help="operating system, e.g. linux")
+    _add_registration_source(prune)
+    prune.set_defaults(run=_prune)
 
     lower = commands.add_parser(
         "lower-ceiling", help="move one ceiling down to the current projection"

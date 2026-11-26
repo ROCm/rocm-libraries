@@ -538,10 +538,9 @@ def test_test_seconds_sum_each_slow_test_of_a_rocke_entry(tmp_path) -> None:
     }
 
 
-def _data_options(times: Path, committed: Path | None = None) -> list[str]:
-    """Project from ``times``; ``committed`` (``times`` itself by default) is the
-    data the check may not lose a registered entry's time from."""
-    return ["--entry-times", str(times), "--committed-times", str(committed or times)]
+def _data_options(times: Path) -> list[str]:
+    """Project from ``times``."""
+    return ["--entry-times", str(times)]
 
 
 def _write_inputs(tmp_path: Path, seconds: float) -> tuple[Path, Path]:
@@ -967,17 +966,27 @@ def test_record_updates_logged_entries_and_keeps_the_rest(tmp_path) -> None:
     }
 
 
-def test_times_dropped_from_names_registered_entries_only() -> None:
+def test_pruned_column_keeps_only_registered_entries() -> None:
     entries = check.registered_entries(
         [_test("rocke_golden_static", ["quick"], WHOLE_COMMAND)]
     )
-    committed = _column(rocke_golden_static=30.0, rocke_unregistered=5.0)
-    assert check.times_dropped_from(entries, committed, committed) == []
-    dropped = (
-        "linux: rocke_golden_static has a committed time but none in the projected "
-        "data"
-    )
-    assert check.times_dropped_from(entries, committed, _column()) == [dropped]
+    column = {
+        "source": "test data",
+        "seconds": {"rocke_golden_static": 30.0, "rocke_gone": 5.0},
+        "test_seconds": {
+            "rocke_gone": {"t.py::test": 4.0},
+            "rocke_timed_by_test_only": {"t.py::test": 2.0},
+        },
+        "ceilings": {"standard": 540.0},
+    }
+    kept, dropped = check.pruned_column(column, entries)
+    assert dropped == ["rocke_gone", "rocke_timed_by_test_only"]
+    assert kept == {
+        "source": "test data",
+        "seconds": {"rocke_golden_static": 30.0},
+        "test_seconds": {},
+        "ceilings": {"standard": 540.0},
+    }
 
 
 # The line a run that checks prints first; a shard that leaves the check to
@@ -1132,24 +1141,64 @@ def test_the_default_column_is_this_operating_system() -> None:
     assert check.host_column() == expected
 
 
-def test_check_fails_when_the_projection_drops_a_committed_time(
-    tmp_path, capsys
-) -> None:
-    listing, committed = _write_inputs(tmp_path, 30.0)
-    projected = tmp_path / "projected.json"
-    projected.write_text(json.dumps(_column()), encoding="utf-8")
+def test_check_fails_when_an_entry_loses_its_time(tmp_path, capsys) -> None:
+    """Removing a CI entry's time from the data it projects from fails the
+    check, whatever data it is given: the entry would count as 0 s."""
+    listing, times = _write_inputs(tmp_path, 30.0)
     argv = [
-        *_data_options(projected, committed),
+        *_data_options(times),
         "check",
         "--column",
         "linux",
         "--listing",
         str(listing),
     ]
+    assert check.main(argv) == 0
+    times.write_text(json.dumps(_column()), encoding="utf-8")
     assert check.main(argv) == 1
-    assert "FAIL linux: rocke_golden_static has a committed time" in (
+    assert "FAIL linux: rocke_golden_static has no time in the data" in (
         capsys.readouterr().out
     )
+
+
+def test_prune_drops_the_times_of_unregistered_entries(tmp_path, capsys) -> None:
+    listing, times = _write_inputs(tmp_path, 30.0)
+    data = json.loads(times.read_text(encoding="utf-8"))
+    data["linux"]["seconds"]["rocke_gone"] = 5.0
+    times.write_text(json.dumps(data), encoding="utf-8")
+    argv = [
+        *_data_options(times),
+        "prune",
+        "--column",
+        "linux",
+        "--listing",
+        str(listing),
+    ]
+    assert check.main(argv) == 0
+    assert json.loads(times.read_text(encoding="utf-8"))["linux"]["seconds"] == {
+        "rocke_golden_static": 30.0
+    }
+    assert "dropped 1 unregistered entries from linux\n  rocke_gone" in (
+        capsys.readouterr().out
+    )
+
+
+def test_prune_refuses_a_registration_without_rocke_entries(tmp_path) -> None:
+    _, times = _write_inputs(tmp_path, 30.0)
+    listing = tmp_path / "empty.json"
+    listing.write_text(json.dumps(_listing()), encoding="utf-8")
+    argv = [
+        *_data_options(times),
+        "prune",
+        "--column",
+        "linux",
+        "--listing",
+        str(listing),
+    ]
+    with pytest.raises(
+        ValueError, match="prune failed - the registration has no rocke_"
+    ):
+        check.main(argv)
 
 
 def test_record_refuses_logs_without_rocke_entries(tmp_path) -> None:
