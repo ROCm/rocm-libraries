@@ -23,9 +23,43 @@ namespace TensileLite
         inline double g_calibratedPerCallOverheadMs = 0;
 
         // Set while the per-solution CPU reference recompute runs, so the SolveCPU timers
-        // ("solve_cpu_fast"/"solve_cpu_slow") are reported under *_per_solution names and
-        // do not get attributed to the per-problem cpu_reference_gemm timer.
-        inline thread_local bool g_inPerSolutionReference = false;
+        // ("solve_cpu_fast"/"solve_cpu_slow") are reported under per-solution names and
+        // do not get attributed to the per-problem cpu_reference_gemm timer. The kind says
+        // whether the MX inputs actually changed since the reference was last computed, which
+        // separates necessary recomputes from redundant ones.
+        enum class PerSolutionRefKind
+        {
+            None,
+            InputsChanged,
+            InputsUnchanged,
+        };
+        inline thread_local PerSolutionRefKind g_perSolutionRefKind = PerSolutionRefKind::None;
+
+        inline const char* solveCpuFastCategory()
+        {
+            switch(g_perSolutionRefKind)
+            {
+            case PerSolutionRefKind::InputsChanged:
+                return "solve_cpu_fast_per_solution_inputs_changed";
+            case PerSolutionRefKind::InputsUnchanged:
+                return "solve_cpu_fast_per_solution_inputs_unchanged";
+            default:
+                return "solve_cpu_fast";
+            }
+        }
+
+        inline const char* solveCpuSlowCategory()
+        {
+            switch(g_perSolutionRefKind)
+            {
+            case PerSolutionRefKind::InputsChanged:
+                return "solve_cpu_slow_per_solution_inputs_changed";
+            case PerSolutionRefKind::InputsUnchanged:
+                return "solve_cpu_slow_per_solution_inputs_unchanged";
+            default:
+                return "solve_cpu_slow";
+            }
+        }
 
         // Set by main() around the per-run "gpu_input_reset" call of prepareGPUInputs() so the
         // sub-timers inside it are reported as gpu_input_reset_* instead of gpu_input_prep_*.

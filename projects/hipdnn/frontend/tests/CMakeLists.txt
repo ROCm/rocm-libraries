@@ -30,6 +30,7 @@ add_executable(
     TestBatchnormInferenceNode.cpp
     TestBatchnormInferenceNodeVarianceExt.cpp
     TestBatchnormNode.cpp
+    TestCheckedShapeMath.cpp
     TestCustomOpAttributes.cpp
     TestCustomOpNode.cpp
     TestConvolutionDgradAttributes.cpp

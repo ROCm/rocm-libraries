@@ -174,6 +174,18 @@ ORIGAMI_EXPORT std::tuple<reduction_t, size_t, size_t, size_t, size_t> compute_l
     grid_selection_t grid_selection);
 
 /**
+ * @brief Data type operand A has in LDS
+ *
+ * The type of A in global memory, unless the kernel converts A before writing it to LDS (a
+ * W4A16 kernel dequantizes its int4 A to the MI type).
+ *
+ * @param problem Problem characteristics (@see origami::problem_t)
+ * @param hardware Hardware characteristics (@see origami::hardware_t)
+ * @return data_type_t Type of A's elements in LDS
+ */
+ORIGAMI_EXPORT data_type_t lds_dtype_a(const problem_t& problem, const hardware_t& hardware);
+
+/**
  * @brief Check if MT fits in LDS
  *
  * @param hardware Hardware characteristics (@see origami::hardware_t)

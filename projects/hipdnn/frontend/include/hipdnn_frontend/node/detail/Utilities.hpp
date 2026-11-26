@@ -21,10 +21,13 @@
 namespace hipdnn_frontend::detail
 {
 
-// Find common shape from inputs.
-// Takes the max in each dim, and if any dim is not 1, or equal, then it's incompatible.
+// Find the NumPy broadcast shape of the inputs.
+// Shapes are aligned on their trailing dimension, and a shape with fewer dimensions is treated as
+// having leading 1s. Two extents are compatible if they are equal or one of them is 1; the result
+// takes the non-1 extent. Empty shapes are ignored.
 // For example:
-// input_shapes = {{1, 2}, {1, 2}, {1, 2, 5}} -> common_shape = {1, 2, 5}
+// input_shapes = {{3, 1, 4}, {1, 2, 4}, {2, 4}} -> common_shape = {3, 2, 4}
+// input_shapes = {{4, 1}, {4}} -> common_shape = {4, 4}
 // input_shapes = {{1, 2, 3}, {1, 2, 4}, {1, 2}} -> error
 inline Error findCommonShape(const std::vector<std::vector<int64_t>>& inputShapes,
                              std::vector<int64_t>& commonShape)
@@ -34,26 +37,36 @@ inline Error findCommonShape(const std::vector<std::vector<int64_t>>& inputShape
         return {ErrorCode::INVALID_VALUE, "Input shapes cannot be empty"};
     }
 
-    const size_t dims
-        = std::max_element(inputShapes.begin(),
-                           inputShapes.end(),
-                           [](const std::vector<int64_t>& a, const std::vector<int64_t>& b) {
-                               return a.size() < b.size();
-                           })
-              ->size();
-
-    commonShape.resize(dims, 1);
-
-    for(auto& current : inputShapes)
+    size_t rank = 0;
+    for(const auto& shape : inputShapes)
     {
-        for(size_t j = current.size(); j-- > 0;)
-        {
-            if(commonShape[j] != current[j] && commonShape[j] != 1 && current[j] != 1)
-            {
-                return {ErrorCode::INVALID_VALUE, "Incompatible shapes"};
-            }
+        rank = std::max(rank, shape.size());
+    }
 
-            commonShape[j] = std::max(commonShape[j], current[j]);
+    if(rank == 0)
+    {
+        return {ErrorCode::INVALID_VALUE, "All input shapes are empty"};
+    }
+
+    commonShape.assign(rank, 1);
+
+    for(const auto& shape : inputShapes)
+    {
+        const size_t offset = rank - shape.size();
+        for(size_t i = 0; i < shape.size(); ++i)
+        {
+            auto& common = commonShape[offset + i];
+            if(common == 1)
+            {
+                common = shape[i];
+            }
+            else if(shape[i] != 1 && shape[i] != common)
+            {
+                return {ErrorCode::INVALID_VALUE,
+                        "Incompatible shapes: extents " + std::to_string(common) + " and "
+                            + std::to_string(shape[i]) + " at dimension "
+                            + std::to_string(offset + i) + " cannot be broadcast"};
+            }
         }
     }
 
@@ -476,6 +489,187 @@ inline Error validateNormStatsShapeIfSet(const std::shared_ptr<graph::TensorAttr
     }
 
     return {ErrorCode::OK, ""};
+}
+
+// Derives the LayerNorm normalized dim count k from x and scale dims. A positive
+// explicitCount is used as given (0 means unset). Otherwise:
+//   1. A scale of the same rank as x normalizes every dim from its first non-1 dim
+//      onward, at least the last one (cuDNN's rule):
+//        x [N, C, H, W], scale [1, C, H, W]  → k = 3
+//        x [N, C, 1, 1], scale [1, C, 1, 1]  → k = 3
+//        x [N, 1, H, W], scale [1, 1, H, W]  → k = 2
+//        x [N, C, 1, 1], scale [1, 1, 1, 1]  → k = 1 (no non-1 dim: default stands)
+//   2. A lower-rank scale equal to x's own trailing dims takes that rank directly:
+//        x [N, C, H, W], scale [C, H, W]      → k = 3
+//        x [2, 1, 14, 14], scale [1, 14, 14]  → k = 3 (stats rank 1: [2])
+//        x [1, 1, 1, 1], scale [1, 1, 1]      → k = 3
+//   3. Any other lower-rank scale is right-aligned to rank(x) by prepending 1s, then
+//      rule 1 applies to the padded scale:
+//        x [2, 3, 4, 5], scale [1, 5]  → pad [1, 1, 1, 5] → k = 1
+//        x [2, 3, 4, 1], scale [1, 1]  → pad [1, 1, 1, 1] → k = 1
+// Rules 2 and 3 are hipDNN extensions: cuDNN requires a full-rank scale and applies only
+// rule 1. Rule 2 keeps develop's count for a scale that matches x's trailing dims.
+inline Error deriveLayernormNormalizedDimCount(const std::vector<int64_t>& xDims,
+                                               const std::vector<int64_t>& scaleDims,
+                                               int64_t explicitCount,
+                                               const std::string& nodeName,
+                                               int64_t& normalizedDimCount)
+{
+    const auto rank = static_cast<int64_t>(xDims.size());
+    const auto scaleRank = static_cast<int64_t>(scaleDims.size());
+
+    HIPDNN_RETURN_IF_LT(explicitCount,
+                        0,
+                        ErrorCode::INVALID_VALUE,
+                        nodeName + " normalized_dim_count must not be negative, got "
+                            + std::to_string(explicitCount));
+    HIPDNN_RETURN_IF_TRUE(explicitCount > rank,
+                          ErrorCode::INVALID_VALUE,
+                          nodeName + " normalized_dim_count (" + std::to_string(explicitCount)
+                              + ") must not exceed the rank of x (" + std::to_string(rank) + ")");
+    HIPDNN_RETURN_IF_TRUE(scaleRank > rank,
+                          ErrorCode::INVALID_VALUE,
+                          nodeName + " scale rank (" + std::to_string(scaleRank)
+                              + ") must not exceed the rank of x (" + std::to_string(rank) + ")");
+
+    if(explicitCount > 0)
+    {
+        normalizedDimCount = explicitCount;
+        return {};
+    }
+
+    // Rule 2: a lower-rank scale equal to x's trailing scaleRank dims normalizes all of
+    // them.
+    if(scaleRank < rank && std::equal(scaleDims.begin(), scaleDims.end(), xDims.end() - scaleRank))
+    {
+        normalizedDimCount = scaleRank;
+        return {};
+    }
+
+    // Rules 1/3: right-align the scale to rank(x) by prepending 1s (a no-op when already
+    // full rank), then normalize from its first non-1 dim onward (cuDNN's rule; at least
+    // the last dim, so an all-1 padded scale leaves k at its default of 1).
+    const int64_t padding = rank - scaleRank;
+    normalizedDimCount = 1;
+    for(int64_t i = 0; i < rank - 1; ++i)
+    {
+        const int64_t paddedDim = i < padding ? 1 : scaleDims[static_cast<size_t>(i - padding)];
+        if(paddedDim != 1)
+        {
+            normalizedDimCount = rank - i;
+            break;
+        }
+    }
+
+    return {};
+}
+
+// Validates a LayerNorm scale-shaped tensor (scale, bias and their gradients): its last
+// normalizedDimCount dims equal the last normalizedDimCount dims of x, and any dims before
+// them are 1. A normalizedDimCount that leaves a non-1 dim before the normalized dims conflicts
+// with the tensor's shape and is rejected. normalizedDimCount must be in [1, rank of x].
+// Only validates if tensor dimensions are already set.
+inline Error validateLayernormAffineIfSet(const std::shared_ptr<graph::TensorAttributes>& tensor,
+                                          const std::vector<int64_t>& xDims,
+                                          int64_t normalizedDimCount,
+                                          const std::string& fallbackName = "Tensor")
+{
+    if(!areTensorDimensionsSet(tensor))
+    {
+        return {ErrorCode::OK, ""}; // Dimensions not set yet, will be inferred
+    }
+
+    const auto& dims = tensor->get_dim();
+    const auto count = static_cast<size_t>(normalizedDimCount);
+
+    HIPDNN_RETURN_IF_TRUE(dims.size() < count || dims.size() > xDims.size(),
+                          ErrorCode::INVALID_VALUE,
+                          getTensorNameForError(tensor, fallbackName) + " rank must be between "
+                              + std::to_string(count) + " (normalized dim count) and "
+                              + std::to_string(xDims.size()) + " (rank of x), got "
+                              + std::to_string(dims.size()));
+
+    const size_t leadingCount = dims.size() - count;
+    const size_t xBatchCount = xDims.size() - count;
+    for(size_t i = 0; i < count; ++i)
+    {
+        HIPDNN_RETURN_IF_NE(dims[leadingCount + i],
+                            xDims[xBatchCount + i],
+                            ErrorCode::INVALID_VALUE,
+                            getTensorNameForError(tensor, fallbackName) + " dimension at index "
+                                + std::to_string(leadingCount + i)
+                                + " must match the normalized dim of x ("
+                                + std::to_string(xDims[xBatchCount + i]) + "), got "
+                                + std::to_string(dims[leadingCount + i]));
+    }
+
+    const auto leadingEnd = dims.begin() + static_cast<std::ptrdiff_t>(leadingCount);
+    if(std::any_of(dims.begin(), leadingEnd, [](int64_t dim) { return dim != 1; }))
+    {
+        std::string dimsText;
+        for(const auto dim : dims)
+        {
+            dimsText += dimsText.empty() ? "[" : ",";
+            dimsText += std::to_string(dim);
+        }
+        dimsText += "]";
+        return {ErrorCode::INVALID_VALUE,
+                "normalized_dim_count " + std::to_string(count) + " does not match "
+                    + getTensorNameForError(tensor, fallbackName) + " dims " + dimsText
+                    + ": the dims before the last " + std::to_string(count) + " must be 1"};
+    }
+
+    return {ErrorCode::OK, ""};
+}
+
+// Validates a LayerNorm statistics tensor (mean, inv_variance): its rank is
+// rank(x) - normalizedDimCount or rank(x), its first rank(x) - normalizedDimCount dims equal the
+// batch dims of x, and any dims after them are 1. normalizedDimCount must be in [1, rank of x].
+// Only validates if tensor dimensions are already set.
+inline Error validateLayernormStatsIfSet(const std::shared_ptr<graph::TensorAttributes>& tensor,
+                                         const std::vector<int64_t>& xDims,
+                                         int64_t normalizedDimCount,
+                                         const std::string& fallbackName = "Tensor")
+{
+    if(!areTensorDimensionsSet(tensor))
+    {
+        return {ErrorCode::OK, ""}; // Dimensions not set yet, will be inferred
+    }
+
+    const auto& dims = tensor->get_dim();
+    const size_t batchCount = xDims.size() - static_cast<size_t>(normalizedDimCount);
+
+    HIPDNN_RETURN_IF_TRUE(dims.size() != batchCount && dims.size() != xDims.size(),
+                          ErrorCode::INVALID_VALUE,
+                          getTensorNameForError(tensor, fallbackName) + " rank must be "
+                              + std::to_string(batchCount) + " (batch dims of x) or "
+                              + std::to_string(xDims.size()) + " (rank of x), got "
+                              + std::to_string(dims.size()));
+
+    for(size_t i = 0; i < dims.size(); ++i)
+    {
+        const int64_t expected = i < batchCount ? xDims[i] : 1;
+        HIPDNN_RETURN_IF_NE(dims[i],
+                            expected,
+                            ErrorCode::INVALID_VALUE,
+                            getTensorNameForError(tensor, fallbackName) + " dimension at index "
+                                + std::to_string(i) + " must be " + std::to_string(expected)
+                                + (i < batchCount ? " (batch dim of x)" : " (normalized dim)")
+                                + ", got " + std::to_string(dims[i]));
+    }
+
+    return {ErrorCode::OK, ""};
+}
+
+// Full-rank LayerNorm statistics dims: the batch dims of x followed by 1s.
+// For x [B, S, D] with normalizedDimCount 1 this gives [B, S, 1].
+inline std::vector<int64_t> inferLayernormStatsDims(const std::vector<int64_t>& xDims,
+                                                    int64_t normalizedDimCount)
+{
+    auto statsDims = xDims;
+    std::fill(
+        statsDims.end() - static_cast<std::ptrdiff_t>(normalizedDimCount), statsDims.end(), 1);
+    return statsDims;
 }
 
 // Validates an SDPA diagonal band (forward and backward share the domain). hipDNN follows

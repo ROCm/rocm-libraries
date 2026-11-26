@@ -117,4 +117,19 @@ namespace hiptensor
             options->setLogOstream(options->logFilename());
         }
     }
+
+    void printHelp(char* programName)
+    {
+        // Parse just the program name so the usage line names the binary.
+        char* args[] = {programName};
+        llvm::cl::HideUnrelatedOptions(HiptensorCategory);
+        llvm::cl::ParseCommandLineOptions(1, args);
+        // --help shows --help-list when it prints categorized help; do the same.
+        if(auto helpList = llvm::cl::getRegisteredOptions().find("help-list");
+           helpList != llvm::cl::getRegisteredOptions().end())
+        {
+            helpList->second->setHiddenFlag(llvm::cl::NotHidden);
+        }
+        llvm::cl::PrintHelpMessage(/*Hidden=*/false, /*Categorized=*/true);
+    }
 }

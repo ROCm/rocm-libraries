@@ -43,6 +43,7 @@ inline void registerAllAnalyses(AnalysisManager& AM) {
     AM.registerPass<SSALiveIntervalsAnalysis>();
     AM.registerPass<Layer2BarrierOverlapAnalysis>();
     AM.registerPass<EstimateAsmCyclesAnalysis>();
+    AM.registerPass<EstimateAsmCyclePhasesAnalysis>();
     AM.registerPass<EstimateAsmCyclesPerInstructionAnalysis>();
 }
 

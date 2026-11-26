@@ -1,7 +1,7 @@
 MinimumRequiredVersion: 5.0.0
-ScheduleName: {Architecture: gfx942, CUCount: 152}
+ScheduleName: aquavanjaram
 ArchitectureName: gfx942
-CUCount: null
+CUCount: 152
 DeviceNames: [Device 0049, Device 0050]
 ProblemType:
   Activation: true

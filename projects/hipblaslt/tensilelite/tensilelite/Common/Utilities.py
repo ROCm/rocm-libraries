@@ -76,6 +76,23 @@ def plsinDataTypes(kernel) -> bool:
         and pt["DestDataType"].isBFloat16()
 
 
+def storeCachelineAlignEnabled(kernel) -> bool:
+    """The StoreCachelineAlign solution parameter, on a kernel it can act on: two paired
+    16-bit stores that are the two halves of the same 128B lines are blended so each
+    store writes full lines.
+
+    A paired store covers two MFMA tiles in M, half a line. A wave that is only two tiles
+    tall (MIWaveTile[0] < 4) holds one pair per column and never has both halves of a
+    line, so nothing can be aligned there. Those kernels are treated as off: same code
+    and same name as without the parameter, instead of carrying its bookkeeping (the
+    address temp, a per-store address add) for no aligned store.
+    """
+    if not kernel.get("StoreCachelineAlign", False):
+        return False
+    miWaveTile = kernel.get("MIWaveTile")
+    return miWaveTile is None or miWaveTile[0] >= 4
+
+
 def isMxf4SubtilePath(kernel) -> bool:
     """Scope gate for the MXF4 subtile optimizations: TN, subtile, MXF4->bf16.
 
@@ -580,6 +597,10 @@ def wmmaV3InputVgprLayout(wmma: Sequence[int], dtypeBitWidth: Optional[int] = No
         assert False, f"Unsupported datatype bitwidth: {dtypeBitWidth}"
     else:
         assert False, f"Unhandled WMMA: {wmma}"
+
+# The host swizzles 16 free-dim rows per nO tile (the rows of a 16x16 WMMA) on every architecture. A taller
+# WMMA (32x16x128 = two stacked 16x16x128) reads several consecutive nO tiles per operand tile.
+SWIZZLE_BLOCK_ROWS = 16
 
 # Bytes moved by one buffer_load_dwordx4, the widest global load we issue.
 SWIZZLE_LOAD_BYTES = 16

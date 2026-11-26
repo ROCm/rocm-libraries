@@ -539,3 +539,38 @@ TEST(TestBatchnormAttributes, LogicalAndStrictEquality)
     EXPECT_FALSE(attr1 == attr2);
     EXPECT_TRUE(attr1.logicallyEquals(attr2));
 }
+
+TEST(TestBatchnormAttributes, LogicalEqualityTreatsNullOutputAsAbsent)
+{
+    auto makeTensor = [](int64_t uid, const std::string& name) {
+        auto tensor = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+        tensor->set_uid(uid)
+            .set_name(name)
+            .set_data_type(hipdnn_frontend::DataType::FLOAT)
+            .set_dim({1, 2, 3, 4})
+            .set_stride({24, 12, 4, 1});
+        return tensor;
+    };
+
+    // Graph::batchnorm stores null next-running outputs when there are no running stats;
+    // the lifted graph never sets them
+    hipdnn_frontend::graph::BatchnormAttributes withNulls;
+    withNulls.set_compute_data_type(hipdnn_frontend::DataType::FLOAT);
+    withNulls.set_x(makeTensor(1, "X")).set_scale(makeTensor(2, "Scale"));
+    withNulls.set_next_running_mean(nullptr).set_next_running_variance(nullptr);
+
+    hipdnn_frontend::graph::BatchnormAttributes withoutEntries;
+    withoutEntries.set_compute_data_type(hipdnn_frontend::DataType::FLOAT);
+    withoutEntries.set_x(makeTensor(1, "X")).set_scale(makeTensor(2, "Scale"));
+
+    EXPECT_TRUE(withNulls.logicallyEquals(withoutEntries));
+    EXPECT_TRUE(withoutEntries.logicallyEquals(withNulls));
+    EXPECT_TRUE(withNulls == withoutEntries);
+    EXPECT_TRUE(withoutEntries == withNulls);
+
+    // A real tensor still differs from a null or absent entry
+    withoutEntries.set_next_running_mean(makeTensor(3, "NextRunningMean"));
+    EXPECT_FALSE(withNulls.logicallyEquals(withoutEntries));
+    EXPECT_FALSE(withoutEntries.logicallyEquals(withNulls));
+    EXPECT_FALSE(withNulls == withoutEntries);
+}

@@ -29,7 +29,8 @@ LAUNCH_NAME = re.compile(r"[a-z][a-z0-9_]*\Z")
 
 # The first UKD document version that may carry `sources`.
 SOURCES_VERSION = "1.1"
-_SOURCES_VERSION = (1, 1)
+# The first UKD document version whose packed kernel sources may carry `identity`.
+IDENTITY_VERSION = "1.2"
 
 # Stands for the builder's primary kernel in claim lists. Not an identifier, so no
 # role can spell it.
@@ -59,10 +60,19 @@ def refuse_authored_kind(where, name, kind):
     return HkpPackError(f"{head}, {tail}")
 
 
-def reads_sources(version):
-    """Whether a UKD document `version` ('<major>.<minor>') may carry `sources`."""
+def _parsed(version):
     major, minor = version.split(".")
-    return (int(major), int(minor)) >= _SOURCES_VERSION
+    return int(major), int(minor)
+
+
+def reads(version, floor):
+    """Whether a UKD document `version` ('<major>.<minor>') is `floor` or later."""
+    return _parsed(version) >= _parsed(floor)
+
+
+def at_least(version, floor):
+    """`version` raised to `floor` when it is earlier; a later version is kept."""
+    return version if reads(version, floor) else floor
 
 
 def kernel_sources(ukd):

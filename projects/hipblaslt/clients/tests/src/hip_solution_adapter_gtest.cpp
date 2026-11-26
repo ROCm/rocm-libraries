@@ -57,6 +57,9 @@ namespace
         std::deque<std::pair<std::string, hipError_t>> expected;
         std::map<hipModule_t, std::unique_ptr<int>>    live;
         std::vector<hipModule_t>                       functionModules;
+        std::map<std::string, hipModule_t>             loadedFrom;
+        // Whether a module exports a kernel; unset, every module exports every one.
+        std::function<bool(hipModule_t, const char*)>  exports;
         hipError_t                                     lastError = hipSuccess;
         unsigned                                       unloads   = 0;
         // Runs once, inside the next module unload.
@@ -129,6 +132,7 @@ namespace
             auto storage = std::make_unique<int>(0);
             *module      = reinterpret_cast<hipModule_t>(storage.get());
             hipLoads->live.emplace(*module, std::move(storage));
+            hipLoads->loadedFrom[path] = *module;
         }
         else
             hipLoads->lastError = error;
@@ -149,11 +153,17 @@ namespace
         return std::exchange(hipLoads->lastError, hipSuccess);
     }
 
-    // Every module exports every kernel; the handle is the module's.
-    hipError_t getFunction(hipFunction_t* function, hipModule_t module, const char*)
+    // A kernel's handle is its module's. A module without it fails the lookup the
+    // way HIP does, replacing the thread's last error.
+    hipError_t getFunction(hipFunction_t* function, hipModule_t module, const char* name)
     {
         EXPECT_EQ(hipLoads->live.count(module), 1u) << "kernel lookup in an unloaded module";
         hipLoads->functionModules.push_back(module);
+        if(hipLoads->exports && !hipLoads->exports(module, name))
+        {
+            hipLoads->lastError = hipErrorNotFound;
+            return hipErrorNotFound;
+        }
         *function = reinterpret_cast<hipFunction_t>(module);
         return hipSuccess;
     }
@@ -186,6 +196,53 @@ namespace
         expectLoad(primary, hipErrorOutOfMemory);
         EXPECT_EQ(adapter->loadCodeObjectFile(primary), hipErrorOutOfMemory);
         EXPECT_EQ(loads.unloads, 0u);
+    }
+
+    // A kernel is looked up in its own code object first. The helpers load first,
+    // so scanning in load order fails in their module, and that failure replaces
+    // an error the caller left pending.
+    TEST_F(HipSolutionAdapterTest, smoke_KernelLookupStartsInItsOwnCodeObject)
+    {
+        expectLoad(helper);
+        ASSERT_EQ(adapter->initializeLazyLoading("gfx942", "/library"), hipSuccess);
+        expectLoad(primary);
+        ASSERT_EQ(adapter->loadCodeObjectFile(primary), hipSuccess);
+        const hipModule_t own = loads.loadedFrom.at(primary);
+        loads.exports         = [own](hipModule_t module, const char*) { return module == own; };
+
+        loads.lastError = hipErrorOutOfMemory;
+        ASSERT_EQ(adapter->initKernel("kernel", "primary.co"), hipSuccess);
+        EXPECT_EQ(loads.functionModules, std::vector<hipModule_t>{own})
+            << "the lookup tried another module first";
+        EXPECT_EQ(loads.lastError, hipErrorOutOfMemory) << "the caller's error was replaced";
+
+        // Without its code object, the lookup still finds the kernel.
+        loads.lastError = hipSuccess;
+        ASSERT_EQ(adapter->initKernel("other"), hipSuccess);
+        EXPECT_EQ(loads.functionModules.back(), own);
+    }
+
+    // A launch starts the lookup in the code object its invocation names. No
+    // module exports the kernel, so the launch ends at the lookup, before
+    // anything could reach a device.
+    TEST_F(HipSolutionAdapterTest, smoke_LaunchPassesTheKernelsCodeObjectToTheLookup)
+    {
+        expectLoad(helper);
+        ASSERT_EQ(adapter->initializeLazyLoading("gfx942", "/library"), hipSuccess);
+        expectLoad(primary);
+        ASSERT_EQ(adapter->loadCodeObjectFile(primary), hipSuccess);
+        loads.exports = [](hipModule_t, const char*) { return false; };
+
+        TensileLite::KernelInvocation kernel;
+        kernel.kernelName     = "kernel";
+        kernel.codeObjectFile = "primary.co";
+        kernel.workGroupSize  = TensileLite::dim3(256, 1, 1);
+        kernel.numWorkGroups  = TensileLite::dim3(1, 1, 1);
+        kernel.numWorkItems   = TensileLite::dim3(256, 1, 1);
+        EXPECT_EQ(adapter->launchKernel(kernel), hipErrorNotFound);
+        ASSERT_FALSE(loads.functionModules.empty());
+        EXPECT_EQ(loads.functionModules.front(), loads.loadedFrom.at(primary))
+            << "the launch looked in another module first";
     }
 
     TEST_P(HipSolutionAdapterRecoveryTest, smoke_MissingContextPreservesPrimaryError)

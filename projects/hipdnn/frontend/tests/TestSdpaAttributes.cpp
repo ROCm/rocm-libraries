@@ -589,6 +589,23 @@ TEST(TestSdpaAttributes, NativeSetUnfuseFmaSetsHintNotUnsupported)
     EXPECT_FALSE(attrs.hasUnsupportedUsage());
 }
 
+TEST(TestSdpaAttributes, StrictEqualityDistinguishesUnfuseFmaHint)
+{
+    SdpaAttributes hinted;
+    hinted.set_compute_data_type(DataType::FLOAT);
+    hinted.set_unfuse_fma(true);
+    SdpaAttributes unhinted;
+    unhinted.set_compute_data_type(DataType::FLOAT);
+
+    EXPECT_FALSE(hinted == unhinted);
+    EXPECT_TRUE(hinted != unhinted);
+    // The hint is advisory and not lowered: logical equality ignores it
+    EXPECT_TRUE(hinted.logicallyEquals(unhinted));
+
+    unhinted.set_unfuse_fma(true);
+    EXPECT_TRUE(hinted == unhinted);
+}
+
 // -- cu_seq_len_q / cu_seq_len_kv: the setters store the tensor as given; the node promotes a 1-D
 // (B+1) tensor during validation (see TestSdpaFwdNode) --
 

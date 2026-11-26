@@ -126,8 +126,9 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
   backward-weights solvers (2D and 3D).
 * [Build] ROCm builds now enable `MIOPEN_ENABLE_HIPDNN_WRAPPER` by default. MIOpen is built as a
   thin public `libMIOpen.so` over the new `libMIOpen_private.so`; set it to `Off` for the previous
-  single-library build. Programs that link a hand-written `-lMIOpen` and call functions not
-  declared in `miopen.h` must also link `-lMIOpen_private`; see `docs/install/build-source.rst`.
+  single-library build. Programs that link a hand-written `-lMIOpen` need no change; only programs
+  that use MIOpen's internal C++ symbols must also link `-lMIOpen_private`. See
+  `docs/install/build-source.rst`.
 * [hipDNN] Added experimental hipDNN forwarding of `miopenConvolutionForward`,
   `miopenConvolutionBackwardData`, `miopenConvolutionBackwardWeights` and
   `miopenConvolutionBiasActivationForward`. It is off by default and not intended for production

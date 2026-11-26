@@ -399,6 +399,27 @@ def _validate_hsaco_source(ks, where):
         raise HkpPackError(f"{where} hsaco 'symbol' must be ASCII")
 
 
+def _validate_kpack_source(ks, where, version):
+    """A packed kernel_source's required keys and its optional `identity`, 64
+    lowercase hex like the loader requires, under a UKD `version` that reads it;
+    shared by a UKD's `kernel_source` and each packed `sources` entry."""
+    _require(ks, ["library", "toc_key", "symbol", "sha256", "signature"], where)
+    if "identity" not in ks:
+        return
+    if not (isinstance(ks["identity"], str) and _SHA256_RE.fullmatch(ks["identity"])):
+        raise HkpPackError(
+            f"{where} kpack 'identity' must be 64 lowercase hexadecimal digits, "
+            f"got {ks['identity']!r}"
+        )
+    if not isinstance(version, str) or not sourcesmod.reads(
+        version, sourcesmod.IDENTITY_VERSION
+    ):
+        raise HkpPackError(
+            f"{where} carries 'identity' under version '{version}' "
+            f"(needs {sourcesmod.IDENTITY_VERSION} or later)"
+        )
+
+
 def _require_hsaco_arch(ukd, where):
     """An hsaco UKD's non-empty `arch`, for one launch or a `sources` map. Its code
     objects are built for specific archs, so a wildcard would ship their bytes into
@@ -465,11 +486,7 @@ def _validate_sources(ukd, where):
             else:
                 _validate_hsaco_source(ks, f"{where} sources '{name}'")
         else:
-            _require(
-                ks,
-                ["library", "toc_key", "symbol", "sha256", "signature"],
-                f"{where} sources '{name}'",
-            )
+            _validate_kpack_source(ks, f"{where} sources '{name}'", ukd.get("version"))
             if "role" in ks:
                 raise HkpPackError(
                     f"{where} sources '{name}' carries 'role', which is authored-only"
@@ -479,7 +496,9 @@ def _validate_sources(ukd, where):
     kind = kinds.pop()
     if kind == "kpack":
         version = ukd.get("version")
-        if not isinstance(version, str) or not sourcesmod.reads_sources(version):
+        if not isinstance(version, str) or not sourcesmod.reads(
+            version, sourcesmod.SOURCES_VERSION
+        ):
             raise HkpPackError(
                 f"{where} carries sources under version '{version}' "
                 f"(needs {sourcesmod.SOURCES_VERSION} or later)"
@@ -543,7 +562,7 @@ def _validate_ukd_fields(ukd, where, log=print):
         _validate_hsaco_source(ks, where)
         _require_hsaco_arch(ukd, where)
     elif kind == "kpack":
-        _require(ks, ["library", "toc_key", "symbol", "sha256", "signature"], where)
+        _validate_kpack_source(ks, where, ukd.get("version"))
     else:
         _require(ks, ["source_file", "entry_point"], where)
         _validate_embedded_source_file(ks["source_file"], where)
@@ -913,21 +932,32 @@ def _string(value, where):
         raise HkpPackError(f"{where} must be a nonempty string")
 
 
-def _validate_trained_against(value, where, slot_forms):
+#: UHD file-format versions, and each `trained_against` member a version gates, in the order
+#: UhdParser.hpp checks them: the first version it may appear in and how a refusal names it
+#: (uhd_gen's provenance.py keeps the same table).
+_UHD_VERSIONS = ("1.0", "1.1", "1.2")
+_UHD_MEMBER_RULES = {
+    "slot": ("1.1", "uses slot provenance ('slot' or 'kmds')"),
+    "kmds": ("1.1", "uses slot provenance ('slot' or 'kmds')"),
+    "codegen_revision": ("1.2", "records codegen_revision"),
+}
+
+
+def _validate_trained_against(value, where, version):
     # RFC 0019 §4.1: names either the descriptor set (ued/kmd/umd, all or none) or,
     # for a model bound by provider-declared UUID, a selector_revision. Either may add
-    # feature_semantics_revision (integer >= 1). RFC 0021 §9 adds the slot forms,
-    # valid only in a 1.1 UHD (@p slot_forms): `slot` beside `kmd`, or `kmds` in place
-    # of `kmd`. Loader is authoritative: UhdParser.hpp.
-    if (
-        not slot_forms
-        and isinstance(value, dict)
-        and ("slot" in value or "kmds" in value)
-    ):
-        raise HkpPackError(
-            f"{where} uses slot provenance ('slot' or 'kmds'), which requires "
-            "UHD version 1.1"
-        )
+    # feature_semantics_revision (integer >= 1) and codegen_revision (nonempty string,
+    # from UHD 1.2); neither stands in for the descriptor set or selector_revision.
+    # RFC 0021 §9 adds the slot forms, valid from UHD 1.1: `slot` beside `kmd`, or
+    # `kmds` in place of `kmd`. @p version is the UHD's own. Loader is authoritative:
+    # UhdParser.hpp.
+    for member, (first, refusal) in _UHD_MEMBER_RULES.items():
+        if (
+            isinstance(value, dict)
+            and member in value
+            and _UHD_VERSIONS.index(version) < _UHD_VERSIONS.index(first)
+        ):
+            raise HkpPackError(f"{where} {refusal}, which requires UHD version {first}")
     _known_keys(
         value,
         (
@@ -938,6 +968,7 @@ def _validate_trained_against(value, where, slot_forms):
             "umd",
             "selector_revision",
             "feature_semantics_revision",
+            "codegen_revision",
         ),
         where,
     )
@@ -951,6 +982,8 @@ def _validate_trained_against(value, where, slot_forms):
             raise HkpPackError(
                 f"{where}.feature_semantics_revision must be an integer >= 1"
             )
+    if "codegen_revision" in value:
+        _string(value["codegen_revision"], f"{where}.codegen_revision")
     names_descriptor_set = _names_descriptor_set(value)
     if "selector_revision" in value:
         revision = value["selector_revision"]
@@ -1038,7 +1071,7 @@ def _validate_uhd(desc, source_root, require_dvc=False):
         where,
     )
     _require(doc, ("version", "id", "name", "adapter"), where)
-    if doc["version"] not in ("1.0", "1.1"):
+    if doc["version"] not in _UHD_VERSIONS:
         raise HkpPackError(
             f"{where}: unsupported file-format version {doc['version']!r}"
         )
@@ -1077,7 +1110,7 @@ def _validate_uhd(desc, source_root, require_dvc=False):
             raise HkpPackError(f"{where}.features_hash must be a sha256 digest")
     if "trained_against" in doc:
         _validate_trained_against(
-            doc["trained_against"], f"{where}.trained_against", doc["version"] == "1.1"
+            doc["trained_against"], f"{where}.trained_against", doc["version"]
         )
     if "categorical_encoding" in doc:
         encoding = doc["categorical_encoding"]

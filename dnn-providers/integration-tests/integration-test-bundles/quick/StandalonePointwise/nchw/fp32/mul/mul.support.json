@@ -1,4 +1,17 @@
 {
-  "claims": {},
+  "claims": {
+    "hipkernel:StandalonePointwise": {
+      "gfx1151": [
+        "linux",
+        "windows"
+      ],
+      "gfx942": [
+        "linux"
+      ],
+      "gfx950": [
+        "linux"
+      ]
+    }
+  },
   "version": 1
 }

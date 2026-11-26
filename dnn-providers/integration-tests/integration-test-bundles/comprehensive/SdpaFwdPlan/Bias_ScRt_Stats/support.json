@@ -1,4 +1,99 @@
 {
-  "claims": {},
+  "claims": {
+    "ASM_SDPA_ENGINE": [
+      {
+        "cases": [
+          "bf16_9db5df0f6680c602"
+        ],
+        "support": {
+          "gfx942": [
+            "linux"
+          ],
+          "gfx950": [
+            "linux"
+          ]
+        }
+      }
+    ],
+    "hipkernel:flydsl_sdpa_cdna": [
+      {
+        "cases": [
+          "bf16_00e130a802bf3019",
+          "bf16_9db5df0f6680c602",
+          "bf16_a0c5ed6d790807a6",
+          "bf16_f0e5f490861a6ba3",
+          "bf16_f868d6ebe90cb757",
+          "fp16_9d1a0ce483ce4b75"
+        ],
+        "support": {
+          "gfx942": [
+            "linux"
+          ],
+          "gfx950": [
+            "linux"
+          ]
+        }
+      }
+    ],
+    "hipkernel:flydsl_sdpa_cdna_decode": [
+      {
+        "cases": [
+          "bf16_9db5df0f6680c602",
+          "fp16_9d1a0ce483ce4b75"
+        ],
+        "support": {
+          "gfx942": [
+            "linux"
+          ],
+          "gfx950": [
+            "linux"
+          ]
+        }
+      }
+    ],
+    "hipkernel:flydsl_sdpa_cdna_dualwave": [
+      {
+        "cases": [
+          "bf16_9db5df0f6680c602",
+          "fp16_9d1a0ce483ce4b75"
+        ],
+        "support": {
+          "gfx950": [
+            "linux"
+          ]
+        }
+      }
+    ],
+    "hipkernel:flydsl_sdpa_rdna": [
+      {
+        "cases": [
+          "bf16_00e130a802bf3019",
+          "bf16_9db5df0f6680c602",
+          "bf16_a0c5ed6d790807a6",
+          "bf16_f0e5f490861a6ba3",
+          "bf16_f868d6ebe90cb757",
+          "fp16_9d1a0ce483ce4b75"
+        ],
+        "support": {
+          "gfx1151": [
+            "windows"
+          ]
+        }
+      }
+    ],
+    "hipkernel:flydsl_sdpa_rdna_decode": [
+      {
+        "cases": [
+          "bf16_9db5df0f6680c602",
+          "fp16_9d1a0ce483ce4b75"
+        ],
+        "support": {
+          "gfx1151": [
+            "windows"
+          ]
+        }
+      }
+    ]
+  },
   "version": 1
 }
