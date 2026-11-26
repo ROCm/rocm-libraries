@@ -397,6 +397,47 @@ def test_backend_width_gate_runs_its_named_check_with_the_entrys_pytest_timeout(
     ]
 
 
+@pytest.mark.parametrize("keep_going", [False, True])
+def test_backend_width_gate_waits_for_the_fast_stages_unless_asked_to_keep_going(
+    runner, monkeypatch, tmp_path, capsys, keep_going
+):
+    """The gate compiles kernels, so a failed earlier stage stops the run before it
+    (TESTING.md, section 5.0.1); --keep-going runs it anyway, and the run stays red."""
+    calls = []
+
+    def run(command, **kwargs):
+        calls.append(command)
+        failed_gate = Path(command[1]).name == "check_byte_identity.py"
+        return subprocess.CompletedProcess(command, 1 if failed_gate else 0)
+
+    monkeypatch.setattr(runner.subprocess, "run", run)
+    monkeypatch.setattr(runner, "ctest_ready", lambda *_args: False)
+    monkeypatch.setattr(
+        runner.sys,
+        "argv",
+        [
+            "run_all.py",
+            "--no-guard",
+            "--no-ir-validity",
+            "--no-arch-domain",
+            "--no-pytest",
+            "--build-root",
+            str(tmp_path),
+            *(["--keep-going"] if keep_going else []),
+        ],
+    )
+
+    assert runner.main() == 1
+    width_checks = [
+        command
+        for command in calls
+        if any(Path(part).name == "check_backend_access_width.py" for part in command)
+    ]
+    assert len(width_checks) == (1 if keep_going else 0)
+    not_run = "backend access-width gate: NOT RUN" in capsys.readouterr().out
+    assert not_run == (not keep_going)
+
+
 @pytest.mark.parametrize(
     "selector",
     [

@@ -12,8 +12,9 @@
 #
 # Usage:
 #   python rocke/platform/tests/run_all.py [--no-guard] [--no-gate] [--no-pytest]
-#       [--no-both] [--no-backend-width] [--only SUBSTR] [--only-ir SUBSTR]
-#       [--build-root DIR] [--config CONFIG] [--pytest-target PATH_OR_NODE_ID]
+#       [--no-both] [--no-backend-width] [--keep-going] [--only SUBSTR]
+#       [--only-ir SUBSTR] [--build-root DIR] [--config CONFIG]
+#       [--pytest-target PATH_OR_NODE_ID]
 #
 # The two filters are separate by *vocabulary*, not by gate. `--only` selects
 # *families* for the byte-identity gate; `--only-ir` selects *case ids*
@@ -27,6 +28,11 @@
 # Filtering is separate from skipping: an unfiltered gate still runs in full;
 # use `--no-gate` / `--no-ir-validity` / `--no-arch-domain` /
 # `--no-backend-width` to opt out of one.
+#
+# The backend access-width gate is resource-bound (it compiles kernels), so it
+# does not start once an earlier stage has failed (TESTING.md, section 5.0.1);
+# `--keep-going` runs it anyway, to gather more failures in one run. It holds
+# that gate only: the ctest stage after it runs whatever came before.
 
 from __future__ import annotations
 
@@ -561,6 +567,12 @@ def main() -> int:
         "COMGR and check the width of every global access)",
     )
     ap.add_argument(
+        "--keep-going",
+        action="store_true",
+        help="run the backend access-width gate even after an earlier stage "
+        "failed (it holds that gate only; the ctest stage runs either way)",
+    )
+    ap.add_argument(
         "--only",
         default="",
         help="restrict byte-identity gate to families containing SUBSTR "
@@ -664,7 +676,13 @@ def main() -> int:
         status |= differential_pytest_pass(pytest_env, selected_pytests)
 
     if not args.no_backend_width:
-        status |= backend_width_gate()
+        if status and not args.keep_going:
+            print(
+                "\n== backend access-width gate: NOT RUN (an earlier stage failed; "
+                "pass --keep-going to run it) =="
+            )
+        else:
+            status |= backend_width_gate()
 
     build_root = Path(args.build_root)
     # Run the entire registered suite once any executable is built; partial
