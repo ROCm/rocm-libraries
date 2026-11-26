@@ -100,6 +100,13 @@ class TestDirectBiasAbi(unittest.TestCase):
         self.assertEqual(
             list(vals.items())[-2:], [("Bias", 0xB00), ("Bias_bytes", 128)]
         )
+        # Bias_bytes bounds the kernel's bias reads: K values, no fewer.
+        for short in (None, 127):
+            with self.subTest(bias_bytes=short):
+                with self.assertRaisesRegex(ValueError, "K=64 channels needs"):
+                    args.to_launch_values(
+                        1, 2, 3, 10, 20, 30, bias_ptr=0xB00, bias_bytes=short
+                    )
 
     def test_kernel_params_match_the_abi(self):
         from kernels.common.conv_abi import conv_direct_arg_names

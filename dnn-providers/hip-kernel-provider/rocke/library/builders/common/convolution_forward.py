@@ -1392,10 +1392,18 @@ class Gfx950ConvFwdAotSpec:
                 if self.bias
                 else "an instance without bias takes no bias_ptr"
             )
-        step = self.launch_step(problem)
         bias = {}
         if self.bias:
+            # The kernel reads bias[0, K) of the io dtype (2 bytes) through a
+            # buffer resource of bias_bytes; a smaller one reads 0 past its end.
+            need = 2 * problem.K
+            if bias_bytes is None or bias_bytes < need:
+                raise ValueError(
+                    f"bias_bytes={bias_bytes}: the {self.dtype} bias of "
+                    f"K={problem.K} channels is {need} bytes"
+                )
             bias = dict(bias_ptr=bias_ptr, bias_bytes=bias_bytes)
+        step = self.launch_step(problem)
         return step.args.to_launch_values(
             a_ptr, b_ptr, d_ptr, a_bytes, b_bytes, d_bytes, **bias
         )

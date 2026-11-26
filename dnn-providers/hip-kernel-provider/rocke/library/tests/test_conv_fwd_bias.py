@@ -128,6 +128,21 @@ class TestFwdBiasAbi(unittest.TestCase):
         self.assertEqual({k: biased[k] for k in plain}, plain)
         self.assertNotIn("Bias", plain)
 
+    def test_launch_values_refuse_a_short_bias(self):
+        """Bias_bytes bounds the kernel's bias reads (a channel past it reads
+        0), so it must cover K values of the narrowest (2-byte) output."""
+        from kernels.common.conv_args import ConvArgs
+
+        args = ConvArgs.from_problem(_problem(), tile_m=64, tile_n=64)
+        for short in (None, 0, 2 * 40 - 1, 1 << 31):
+            with self.subTest(bias_bytes=short):
+                with self.assertRaisesRegex(ValueError, "K=40 channels needs"):
+                    args.to_launch_values(
+                        1, 2, 3, 10, 20, 30, bias_ptr=4, bias_bytes=short
+                    )
+        with self.assertRaisesRegex(ValueError, "Bias_bytes"):
+            args.to_launch_values(1, 2, 3, 10, 20, 30, bias_bytes=80)
+
 
 class TestFwdBiasSpec(unittest.TestCase):
     def test_name_tag_after_the_acc_epilogue_tag(self):
@@ -446,14 +461,34 @@ class TestFwdBiasSplitK(unittest.TestCase):
         p3 = _p3_det()
         args = ConvArgs.from_problem(p3, tile_m=256, tile_n=64, tile_k=32)
         v = args.to_launch_values(
-            1, 2, 3, 10, 20, 30, split_k=2, sk_flags=5, sk_partials=6, bias_ptr=7
+            1,
+            2,
+            3,
+            10,
+            20,
+            30,
+            split_k=2,
+            sk_flags=5,
+            sk_partials=6,
+            bias_ptr=7,
+            bias_bytes=2 * p3.K,
         )
         self.assertEqual(
             list(v)[-4:], ["sk_flags", "sk_partials", "Bias", "Bias_bytes"]
         )
         args2 = ConvArgs.from_problem(_problem(), tile_m=64, tile_n=64, tile_k=32)
         v2 = args2.to_launch_values(
-            1, 2, 3, 10, 20, 30, split_k=2, ws_ptr=8, ws_bytes=9, bias_ptr=7
+            1,
+            2,
+            3,
+            10,
+            20,
+            30,
+            split_k=2,
+            ws_ptr=8,
+            ws_bytes=9,
+            bias_ptr=7,
+            bias_bytes=2 * 40,
         )
         self.assertEqual(list(v2)[-6:-2], ["ws_ptr", "ws_bytes", "ks", "ks_count"])
         self.assertEqual(list(v2)[-2:], ["Bias", "Bias_bytes"])

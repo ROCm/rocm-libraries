@@ -392,6 +392,11 @@ _GEMM_AXES = {
 # tile past that extent, so the bound keeps a bit of headroom below 2**24.
 MUL24_REDUCTION_LIMIT = 1 << 23
 
+# The forward bias vector carries the output dtype: at least 2 bytes per
+# channel (fp16 / bf16; fp32 has 4). Its byte count is an i32 kernarg.
+_BIAS_MIN_ELEM_BYTES = 2
+_I32_MAX = (1 << 31) - 1
+
 
 @dataclass
 class ConvArgs:
@@ -784,10 +789,23 @@ class ConvArgs:
                 f"split_tail: full_tiles={full_tiles} outside [0, "
                 f"{self.num_pid_m * self.num_pid_n}] (the launch's tiles)"
             )
-        if bias_ptr is not None and self.direction != "fwd":
-            raise ValueError(
-                f"bias_ptr: only a forward kernel takes a bias (got {self.direction})"
-            )
+        if bias_ptr is not None:
+            if self.direction != "fwd":
+                raise ValueError(
+                    f"bias_ptr: only a forward kernel takes a bias "
+                    f"(got {self.direction})"
+                )
+            # Bias_bytes sizes the buffer resource the kernel reads bias[0, K)
+            # through: a channel past it reads 0, a silent wrong answer. The
+            # output dtype is not known here, so the floor is K values of the
+            # narrowest output (2 bytes); a caller that knows the dtype checks
+            # the exact size (Gfx950ConvFwdAotSpec.launch_values).
+            need = self.geom.K * _BIAS_MIN_ELEM_BYTES
+            if bias_bytes is None or not need <= bias_bytes <= _I32_MAX:
+                raise ValueError(
+                    f"bias_bytes={bias_bytes}: the bias of K={self.geom.K} "
+                    f"channels needs at least {need} bytes (and fits an i32)"
+                )
         abi = self.arg_names(
             two_stage=ws_ptr is not None and streamk is None,
             streamk=streamk.reduction if streamk is not None else None,
@@ -833,7 +851,7 @@ class ConvArgs:
             "sk_partials": sk_partials,
             "full_tiles": full_tiles,
             "Bias": bias_ptr,
-            "Bias_bytes": (bias_bytes or 0) if bias_ptr is not None else bias_bytes,
+            "Bias_bytes": bias_bytes,
         }
         supplied = {k: v for k, v in supplied.items() if v is not None}
         named = self._named_values()

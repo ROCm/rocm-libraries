@@ -1664,6 +1664,10 @@ def test_a_bias_instance_launches_with_the_bias_tail(catalog_identities):
     assert list(values) == [a["name"] for a in spec.launch_signature()]
     with pytest.raises(ValueError, match="takes bias_ptr"):
         spec.launch_values(problem, 0, 0, 0, 1, 2, 3)
+    # Bias_bytes bounds the kernel's bias reads: K fp16 values, no fewer.
+    for short in (None, 0, 2 * 64 - 1):
+        with pytest.raises(ValueError, match="bias of K=64 channels is 128 bytes"):
+            spec.launch_values(problem, 0, 0, 0, 1, 2, 3, bias_ptr=7, bias_bytes=short)
     with pytest.raises(ValueError, match="takes no bias_ptr"):
         plain.launch_values(problem, 0, 0, 0, 1, 2, 3, bias_ptr=7, bias_bytes=128)
     assert supports_gfx950_conv_fwd_aot(replace(spec, bias=2)) == (
