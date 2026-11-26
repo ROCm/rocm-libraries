@@ -1737,6 +1737,21 @@ void add_device_grouped_conv2d_bwd_weight_wavelet_xdl_nhwgc_gkyxc_nhwgk_bf16_ins
 
 #endif
 
+#ifdef CK_ENABLE_FP32
+void add_device_grouped_conv2d_bwd_weight_xdl_cshufflev3_nhwgc_gkyxc_nhwgk_f32_instances_part1(
+    std::vector<std::unique_ptr<DeviceGroupedConvBwdWeight<2,
+                                                           NHWGC,
+                                                           GKYXC,
+                                                           NHWGK,
+                                                           F32,
+                                                           F32,
+                                                           F32,
+                                                           PassThrough,
+                                                           PassThrough,
+                                                           PassThrough>>>& instances);
+
+#endif
+
 } // namespace instance
 } // namespace device
 } // namespace tensor_operation

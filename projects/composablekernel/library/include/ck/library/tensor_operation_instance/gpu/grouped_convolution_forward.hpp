@@ -215,6 +215,8 @@ struct DeviceOperationInstanceFactory<ck::tensor_operation::device::DeviceGroupe
                 {
                     add_device_grouped_conv2d_fwd_wavelet_xdl_nhwgc_gkyxc_nhwgk_f32_instances(
                         op_ptrs);
+                    add_device_grouped_conv2d_fwd_wavelet_xdl_nhwgc_gkyxc_nhwgk_f32_instances_part2(
+                        op_ptrs);
                     add_device_grouped_conv2d_fwd_xdl_nhwgc_gkyxc_nhwgk_f32_instances(op_ptrs);
                     add_device_grouped_conv2d_fwd_xdl_nhwgc_gkyxc_nhwgk_f32_16x16_instances(
                         op_ptrs);
@@ -228,6 +230,8 @@ struct DeviceOperationInstanceFactory<ck::tensor_operation::device::DeviceGroupe
                     add_device_grouped_conv2d_fwd_xdl_nhwgc_gkyxc_nhwgk_f32_mem_intra_instances(
                         op_ptrs);
                     add_device_grouped_conv2d_fwd_xdl_nhwgc_gkyxc_nhwgk_f32_mem_inter_instances(
+                        op_ptrs);
+                    add_device_grouped_conv2d_fwd_xdl_cshuffle_nhwgc_gkyxc_nhwgk_f32_instances_part1(
                         op_ptrs);
                 }
 #endif
@@ -865,6 +869,15 @@ struct DeviceOperationInstanceFactory<ck::tensor_operation::device::DeviceGroupe
                 add_device_grouped_conv2d_fwd_wmma_cshufflev3_wave_transfer_nhwgc_gkyxc_nhwgk_bf16_instances(
                     op_ptrs);
                 add_device_grouped_conv2d_fwd_wmma_cshufflev3_nhwgc_gkyxc_nhwgk_bf16_instances_part5(
+                    op_ptrs);
+            }
+#endif
+#ifdef CK_ENABLE_FP32
+            if constexpr(is_same_v<InDataType, float> && is_same_v<WeiDataType, float> &&
+                         is_same_v<OutDataType, float> && is_same_v<AComputeType, float> &&
+                         is_same_v<BComputeType, float>)
+            {
+                add_device_grouped_conv2d_fwd_wmma_cshufflev3_nhwgc_gkyxc_nhwgk_f32_instances_part1(
                     op_ptrs);
             }
 #endif

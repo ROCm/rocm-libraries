@@ -59,6 +59,19 @@ using device_grouped_conv_bwd_weight_v3_xdl_c_shuffle_f32_instances = std::tuple
     // clang-format on
     >;
 
+template <index_t NDimSpatial,
+          typename ALayout,
+          typename BLayout,
+          typename ELayout,
+          typename DataType,
+          ConvolutionBackwardWeightSpecialization ConvSpec>
+using device_grouped_conv_bwd_weight_v3_xdl_c_shuffle_f32_small_tile_instances = std::tuple<
+    // clang-format off
+    DeviceGroupedConvBwdWeight_Xdl_CShuffleV3<NDimSpatial, ALayout, BLayout, ELayout, DataType, DataType, DataType, F32, PassThrough, PassThrough, PassThrough, ConvSpec, 128, 32, 64, 64, 4, 16, 16, 2, 2, S<16, 8, 1>, S<2, 0, 1>, S<2, 0, 1>, 1, 4, 4, 1, S<16, 8, 1>, S<2, 0, 1>, S<2, 0, 1>, 1, 4, 4, 1, 1, 1, S<1, 16, 1, 8>, 4>,
+    DeviceGroupedConvBwdWeight_Xdl_CShuffleV3<NDimSpatial, ALayout, BLayout, ELayout, DataType, DataType, DataType, F32, PassThrough, PassThrough, PassThrough, ConvSpec, 64, 16, 32, 64, 4, 16, 16, 1, 2, S<16, 4, 1>, S<2, 0, 1>, S<2, 0, 1>, 1, 4, 4, 1, S<16, 4, 1>, S<2, 0, 1>, S<2, 0, 1>, 1, 4, 4, 1, 1, 1, S<1, 16, 1, 4>, 4>
+    // clang-format on
+    >;
+
 template <ck::index_t NDimSpatial,
           typename ALayout,
           typename BLayout,

@@ -22,6 +22,7 @@ set(GROUPED_CONV2D_FWD_NHWGC
    wmma/device_grouped_conv2d_fwd_wmma_cshufflev3_wave_transfer_nhwgc_gkyxc_nhwgk_f16_instance.cpp
    wmma/device_grouped_conv2d_fwd_wmma_cshufflev3_nhwgc_gkyxc_nhwgk_f16_instance_part5.cpp
    wmma/device_grouped_conv2d_fwd_wmma_cshufflev3_nhwgc_gkyxc_nhwgk_bf16_instance_part5.cpp
+   wmma/device_grouped_conv2d_fwd_wmma_cshufflev3_nhwgc_gkyxc_nhwgk_f32_instance_part1.cpp
    wmma/device_grouped_conv2d_fwd_wmma_nhwgc_gkyxc_nhwgk_f16_1x1p0_instance.cpp
    wmma/device_grouped_conv2d_fwd_wmma_nhwgc_gkyxc_nhwgk_f16_1x1s1p0_instance.cpp
    wmma/device_grouped_conv2d_fwd_wmma_nhwgc_gkyxc_nhwgk_f16_instance.cpp
@@ -69,6 +70,7 @@ set(GROUPED_CONV2D_FWD_NHWGC
    xdl/mem/device_grouped_conv2d_fwd_xdl_nhwgc_gkyxc_nhwgk_f16_mem_inter_instance.cpp
    xdl/mem/device_grouped_conv2d_fwd_xdl_nhwgc_gkyxc_nhwgk_f16_mem_intra_instance.cpp
    xdl/mem/device_grouped_conv2d_fwd_xdl_nhwgc_gkyxc_nhwgk_f32_mem_inter_instance.cpp
+   xdl/cshuffle/device_grouped_conv2d_fwd_xdl_cshuffle_nhwgc_gkyxc_nhwgk_f32_instance_part1.cpp
    xdl/mem/device_grouped_conv2d_fwd_xdl_nhwgc_gkyxc_nhwgk_f32_mem_intra_instance.cpp
    xdl/mem/device_grouped_conv2d_fwd_xdl_nhwgc_gkyxc_nhwgk_f32_tf32_mem_inter_instance.cpp
    xdl/mem/device_grouped_conv2d_fwd_xdl_nhwgc_gkyxc_nhwgk_f32_tf32_mem_intra_instance.cpp
@@ -82,6 +84,7 @@ set(GROUPED_CONV2D_FWD_NHWGC
    xdl/wavelet/device_grouped_conv2d_fwd_xdl_wavelet_direct_load_nhwgc_gkyxc_nhwgk_f16_instance.cpp
    xdl/wavelet/device_grouped_conv2d_fwd_xdl_wavelet_nhwgc_gkyxc_nhwgk_f16_instance_part1.cpp
    xdl/wavelet/device_grouped_conv2d_fwd_xdl_wavelet_nhwgc_gkyxc_nhwgk_bf16_instance_part1.cpp
+   xdl/wavelet/device_grouped_conv2d_fwd_xdl_wavelet_nhwgc_gkyxc_nhwgk_f32_instance_part2.cpp
    xdl/wavelet/device_grouped_conv2d_fwd_xdl_wavelet_direct_load_nhwgc_gkyxc_nhwgk_bf16_instance.cpp
 )
 
