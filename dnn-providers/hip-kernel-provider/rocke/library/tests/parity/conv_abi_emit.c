@@ -16,6 +16,7 @@
  *  13  fwd two_stage (split-K)    14  direction "bwd" (rejected)
  *  15  direct wgrad                16  direct "bwd" (rejected)
  *  17  fwd 3-D two_stage (split-K) 18  dgrad two_stage (rejected)
+ *  19  fwd + bias tail             20  fwd 3-D two_stage + bias tail
  */
 #include <stdio.h>
 #include <stdlib.h>
@@ -128,6 +129,14 @@ int main(int argc, char** argv)
         break;
     case 18:
         ok = rocke_conv_arg_names("dgrad", false, true, &list);
+        break;
+    case 19:
+        ok = rocke_conv_arg_names("fwd", false, false, &list);
+        rocke_conv_append_bias_args(&list);
+        break;
+    case 20:
+        ok = rocke_conv_arg_names("fwd", true, true, &list);
+        rocke_conv_append_bias_args(&list);
         break;
     default:
         fprintf(stderr, "unknown config index %d\n", idx);

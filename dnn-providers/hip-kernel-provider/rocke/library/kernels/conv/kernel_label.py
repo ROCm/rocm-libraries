@@ -198,6 +198,7 @@ _BASELINE: Dict[str, Any] = dict(
     pp_box_det=0,
     dx_interior=0,
     dx_interior_axes=0,
+    bias=False,
     num_load_waves=0,
     cshuffle_no_alias=False,
     is_3d=False,
@@ -505,6 +506,7 @@ _TAGS: Tuple[_Tag, ...] = (
     _num(("pp_box_det",), "pbd"),
     _num(("dx_interior",), "dxi"),
     _num(("dx_interior_axes",), "dxa"),
+    _Tag(("bias",), "cbias"),
     _num(("max_sub_gemms",), "msg"),
     _num(("block_h",), "bh"),
 )

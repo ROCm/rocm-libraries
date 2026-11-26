@@ -30,6 +30,8 @@
 #   16 -- conv_direct_arg_names("bwd")           (rejected)
 #   17 -- conv_arg_names("fwd", is_3d, two_stage)
 #   18 -- conv_arg_names("dgrad", two_stage)     (rejected)
+#   19 -- conv_arg_names("fwd", bias)            (the conv + bias forward)
+#   20 -- conv_arg_names("fwd", is_3d, two_stage, bias)
 import sys
 
 from kernels.common.conv_abi import (
@@ -71,6 +73,8 @@ _CONFIGS = {
     16: lambda: conv_direct_arg_names(direction="bwd"),
     17: lambda: conv_arg_names(direction="fwd", is_3d=True, two_stage=True),
     18: lambda: conv_arg_names(direction="dgrad", two_stage=True),
+    19: lambda: conv_arg_names(direction="fwd", bias=True),
+    20: lambda: conv_arg_names(direction="fwd", is_3d=True, two_stage=True, bias=True),
 }
 
 

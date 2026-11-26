@@ -280,6 +280,8 @@ const char* rocke_conv_arg_kind_str(rocke_conv_arg_kind_t kind)
         return "i32*";
     case ROCKE_CONV_ARG_I32:
         return "i32";
+    case ROCKE_CONV_ARG_BIAS:
+        return "bias";
     }
     return "?";
 }
@@ -371,6 +373,12 @@ bool rocke_conv_direct_arg_names(const char* direction, rocke_conv_arg_list_t* o
         push_i32(out, "p_D_stride_wo");
     }
     return true;
+}
+
+void rocke_conv_append_bias_args(rocke_conv_arg_list_t* out)
+{
+    push(out, "Bias", ROCKE_CONV_ARG_BIAS);
+    push_i32(out, "Bias_bytes");
 }
 
 void rocke_conv_fwd_problem_block(bool is_3d, rocke_conv_arg_list_t* out)

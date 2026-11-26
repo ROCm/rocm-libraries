@@ -41,6 +41,7 @@ __all__ = [
     "ArgSpec",
     "conv_arg_names",
     "conv_args_signature",
+    "conv_bias_arg_names",
     "conv_desc_names",
     "conv_direct_arg_names",
     "conv_direct_args_signature",
@@ -54,6 +55,8 @@ _LEADING_ARGS = 6
 
 # ``(name, kind)`` where kind is one of:
 #   "a" / "b" / "d"  -- global pointer carrying the matching operand dtype
+#   "bias"           -- global pointer to the per-channel bias vector; it has
+#                       the output (D) dtype
 #   "f32*" / "i32*"  -- global pointer with a fixed element type
 #   "i32"            -- scalar
 ArgSpec = Tuple[str, str]
@@ -149,6 +152,18 @@ def _fwd_arg_names(*, is_3d: bool = False, split_k: bool = False) -> List[ArgSpe
         out += [("ws_ptr", "f32*"), ("ws_bytes", "i32")]
         out += [("ks", "i32"), ("ks_count", "i32")]
     return out
+
+
+def conv_bias_arg_names() -> List[ArgSpec]:
+    """The per-output-channel bias tail of a forward kernel built with ``bias``.
+
+    ``Bias`` points at a contiguous vector of K (= groups * kpg) values in the
+    output dtype; ``Bias_bytes`` sizes the buffer resource the kernel reads it
+    through, so a channel past it reads 0 (the A/B/D pointer + bytes
+    convention). Appended after every other argument, split-K tails included,
+    so a kernel without bias keeps its list unchanged.
+    """
+    return [("Bias", "bias"), ("Bias_bytes", "i32")]
 
 
 def conv_fwd_problem_block(*, is_3d: bool = False) -> List[ArgSpec]:
@@ -321,6 +336,7 @@ def conv_arg_names(
     split_tail: bool = False,
     split_flags: bool = False,
     split_det: bool = False,
+    bias: bool = False,
 ) -> List[ArgSpec]:
     """The implicit-GEMM conv kernarg ABI for one direction.
 
@@ -348,7 +364,13 @@ def conv_arg_names(
     ``two_stage``. ``split_tail`` (fwd split-K only) appends ``full_tiles``:
     the tiles, in launch order, that run the whole reduction unsplit
     (``ImplicitGemmConvSpec.split_tail``).
+
+    ``bias`` (fwd only) appends the per-output-channel bias tail
+    (:func:`conv_bias_arg_names`) after everything else
+    (``ImplicitGemmConvSpec.bias``).
     """
+    if bias and direction != "fwd":
+        raise ValueError(f"bias extends the fwd ABI only (got direction={direction!r})")
     if split_tail and not (split_k and direction == "fwd"):
         raise ValueError("split_tail extends the fwd split-K ABI only")
     if split_k and direction != "fwd":
@@ -396,6 +418,8 @@ def conv_arg_names(
                     "split_det extends the fwd split-K ABI only (no split_flags)"
                 )
             out += [("sk_flags", "i32*"), ("sk_partials", "f32*")]
+        if bias:
+            out += conv_bias_arg_names()
         return out
     if split_det:
         raise ValueError("split_det is a fwd-only variant")
@@ -526,6 +550,8 @@ def _conv_signature(
         "a": _ptr(dtype_a),
         "b": _ptr(dtype_b),
         "d": _ptr(dtype_d),
+        # The bias vector carries the output dtype.
+        "bias": _ptr(dtype_d),
         "f32*": "ptr<f32, global>",
         "i32*": "ptr<i32, global>",
         "i32": "i32",
@@ -550,6 +576,7 @@ def conv_args_signature(
     split_tail: bool = False,
     split_flags: bool = False,
     split_det: bool = False,
+    bias: bool = False,
 ) -> List[Dict[str, Any]]:
     """Implicit-GEMM conv launch signature for one direction.
 
@@ -573,6 +600,7 @@ def conv_args_signature(
             split_tail=split_tail,
             split_flags=split_flags,
             **({"split_det": True} if split_det else {}),
+            **({"bias": True} if bias else {}),
         ),
         dtype,
         dtype_b or dtype,

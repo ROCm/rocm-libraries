@@ -488,15 +488,19 @@ class ConvArgs:
         split_tail: bool = False,
         split_flags: bool = False,
         split_det: bool = False,
+        bias: bool = False,
     ) -> List[ArgSpec]:
         """The ordered kernarg ABI of the kernel these args launch.
 
         ``streamk`` is the stream-K reduction of a stream-K wgrad kernel;
-        ``split_k`` selects the fwd split-K binary's ABI.
+        ``split_k`` selects the fwd split-K binary's ABI; ``bias`` the fwd
+        per-output-channel bias tail.
         """
         if self.algorithm == "direct":
             if two_stage or streamk is not None:
                 raise ValueError("direct conv has no two-stage or stream-K variant")
+            if bias:
+                raise ValueError("direct conv has no bias variant yet")
             return conv_direct_arg_names(direction=self.direction)
         return conv_arg_names(
             direction=self.direction,
@@ -507,6 +511,7 @@ class ConvArgs:
             split_tail=split_tail,
             **({"split_flags": True} if split_flags else {}),
             **({"split_det": True} if split_det else {}),
+            **({"bias": True} if bias else {}),
         )
 
     # ---- GEMM view (implicit GEMM only) ----
@@ -726,6 +731,8 @@ class ConvArgs:
         sk_flags: Optional[int] = None,
         sk_partials: Optional[int] = None,
         full_tiles: Optional[int] = None,
+        bias_ptr: Optional[int] = None,
+        bias_bytes: Optional[int] = None,
     ) -> Dict[str, int]:
         """Return the ``values`` dict for ``KernelLauncher.__call__()``.
 
@@ -744,6 +751,9 @@ class ConvArgs:
           fills its partition block. The ``workspace`` reduction takes
           ``ws_ptr``/``ws_bytes``; ``linear``/``tree`` take ``sk_flags`` and
           ``sk_partials`` (see ``wgrad_streamk_workspace_layout``).
+        * ``bias_ptr`` / ``bias_bytes`` -- the per-output-channel bias vector
+          of a fwd kernel built with ``bias``. Passing ``bias_ptr`` selects its
+          ABI.
 
         Anything the ABI needs but was not passed, and anything passed that
         the ABI does not have, is an error here rather than a misread on the
@@ -774,6 +784,10 @@ class ConvArgs:
                 f"split_tail: full_tiles={full_tiles} outside [0, "
                 f"{self.num_pid_m * self.num_pid_n}] (the launch's tiles)"
             )
+        if bias_ptr is not None and self.direction != "fwd":
+            raise ValueError(
+                f"bias_ptr: only a forward kernel takes a bias (got {self.direction})"
+            )
         abi = self.arg_names(
             two_stage=ws_ptr is not None and streamk is None,
             streamk=streamk.reduction if streamk is not None else None,
@@ -803,6 +817,8 @@ class ConvArgs:
                 if self.direction == "fwd" and sk_partials is not None
                 else {}
             ),
+            # A fwd bias binary: passing bias_ptr selects its ABI.
+            **({"bias": True} if bias_ptr is not None else {}),
         )
         names = [n for n, _ in abi]
         values: Dict[str, int] = dict(
@@ -816,6 +832,8 @@ class ConvArgs:
             "sk_flags": sk_flags,
             "sk_partials": sk_partials,
             "full_tiles": full_tiles,
+            "Bias": bias_ptr,
+            "Bias_bytes": (bias_bytes or 0) if bias_ptr is not None else bias_bytes,
         }
         supplied = {k: v for k, v in supplied.items() if v is not None}
         named = self._named_values()
