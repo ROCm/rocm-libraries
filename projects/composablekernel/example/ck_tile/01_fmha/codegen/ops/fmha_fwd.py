@@ -2000,22 +2000,23 @@ GFX125_D192_N128_CONSTRAINT = CppConstraint(
     " && a.seqlen_q == a.seqlen_k))"
 )
 
-# d128 fp16/bf16 queries that qr_tdm_pingpong takes from qr_tdm_sched (from 128 rows)
-# and qr_tdm (below). qr_tdm_pingpong relies on several resident blocks to overlap
-# softmax with the gemms, while qr_tdm_sched and qr_tdm's double K/V buffer prefetch
-# a tile ahead. Measured on gfx1250, pingpong wins below 640 rows once there are at
-# least 2 (batch, head) pairs per num_cus (HIP's multiProcessorCount, 256 there);
-# with fewer, or with longer aligned queries, it loses up to 21%. A block count does
-# not draw that line: 16 x 16 heads of 512 rows (2048 blocks) lose 10%, while 1792 x 1
-# heads of 32 rows (1792 blocks) win 1.5x. In group mode qr_tdm_sched wins from 128
-# rows: on group-mode GQA prefill (16 or 8 query heads per KV head, 32-64 sequences of
-# 128-256 rows, prefix 0-71K keys, BF16) it takes 0.77-0.92x pingpong's time with
-# clang 24 and clang 23, so group mode keeps pingpong only below 128 rows, where
-# qr_tdm_sched does not apply.
+# d128 fp16/bf16 queries that qr_tdm_pingpong serves instead of qr_tdm (below 128 rows,
+# or when qr_tdm_sched does not apply) and batch-mode qr_tdm_sched (from 128 rows).
+# qr_tdm_pingpong relies on several resident blocks to overlap softmax with the gemms,
+# while qr_tdm_sched and qr_tdm's double K/V buffer prefetch a tile ahead. Measured on
+# gfx1250, pingpong wins below 640 rows once there are at least 2 (batch, head) pairs
+# per num_cus (HIP's multiProcessorCount, 256 there); with fewer, or with longer
+# aligned queries, it loses up to 21%. A block count does not draw that line: 16 x 16
+# heads of 512 rows (2048 blocks) lose 10%, while 1792 x 1 heads of 32 rows (1792
+# blocks) win 1.5x. In group mode qr_tdm_sched wins from 128 rows: on group-mode GQA
+# prefill (16 or 8 query heads per KV head, 32-64 sequences of 128-256 rows, prefix
+# 0-71K keys, BF16) it takes 0.77-0.92x pingpong's time with clang 24 and clang 23, so
+# sched_seqlen_q below does not yield group mode to pingpong; group-mode calls that
+# qr_tdm_sched rejects (bias, sink, unaligned O or padded head dims) still fall through
+# to pingpong here.
 GFX125_QR_TDM_PINGPONG_RANGE = (
     "a.max_seqlen_q < 640"
     " && a.batch * a.nhead_q >= 2 * static_cast<ck_tile::index_t>(num_cus)"
-    " && (!t.is_group_mode || a.max_seqlen_q < 128)"
 )
 
 # Paired gfx1250 FP16/BF16 measurements cover both layouts, supported padded strides,
@@ -2613,7 +2614,9 @@ class KernelComponentFactoryGfx125(CompatibilityRuleFactory):
                 # Finite virtual-sink logits retain the existing qr_tdm fallback.
                 sched_seqlen_q = "a.max_seqlen_q >= 128"
                 if (hdim, hdim_v) == (128, 128):
-                    sched_seqlen_q += f" && !({GFX125_QR_TDM_PINGPONG_RANGE})"
+                    sched_seqlen_q += (
+                        f" && (t.is_group_mode || !({GFX125_QR_TDM_PINGPONG_RANGE}))"
+                    )
                 sched_constraint = CppConstraint(
                     f"a.hdim_q == {hdim} && "
                     f"a.hdim_v == {hdim_v} && a.sink_ptr == nullptr && "
@@ -3170,9 +3173,9 @@ def get_fwd_blobs(
             if optdim_list != [-1] and hdim not in optdim_list:
                 continue
             for tile, next_tile in zip(tiles, tiles[1:]):
-                assert (
-                    next_tile.F_bm0 >= tile.F_bm0
-                ), "Tiles must be ordered by increasing bm0"
+                assert next_tile.F_bm0 >= tile.F_bm0, (
+                    "Tiles must be ordered by increasing bm0"
+                )
 
             for tile, pipeline in itertools.product(
                 tiles, factory.get_pipelines(dtype, hdim, hdim_v, receipt, mask_impl)

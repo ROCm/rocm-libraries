@@ -503,16 +503,18 @@ TEST_P(BatchXCDRemap, DataTypeConfig)
     CHECK_RESULT(result);
 }
 
-// d128 runs qr_tdm_pingpong below 640 rows with at least 2 (batch, head) pairs per
-// multiprocessor (GFX125_QR_TDM_PINGPONG_RANGE in fmha_fwd.py), so each case sizes its
-// grid to reach it on this device: the batch in batch mode; in group mode, where this
-// runner passes the packed total length as max_seqlen_q (kept below 640), the head
-// count for a given number of sequences (12 by default). The unpadded instance serves
+// d128 runs qr_tdm_pingpong below 640 rows in batch mode (below 128 rows in group mode,
+// or below 640 when qr_tdm_sched does not apply) with at least 2 (batch, head) pairs
+// per multiprocessor (GFX125_QR_TDM_PINGPONG_RANGE in fmha_fwd.py), so each case sizes
+// its grid to reach it on this device: the batch in batch mode; in group mode, where
+// this runner passes the packed total length as max_seqlen_q, the head count for a
+// given number of sequences (2 by default, keeping 2 x 50 below 128 and 2 x 192 below
+// 640). The unpadded instance serves
 // any seqlen_k except with an elementwise bias; causal masks take its causal kernel
 // ("_mc_", without LSE, bias or sink). ALiBi without a mask makes every K tile raise the
 // row maxima of the steep heads past the rebase threshold, so those cases take the
 // finite-to-finite rescale of o_acc and l on every trip, with and without LSE.
-std::pair<int, int> PingPongGrid(mode_enum mode, int nhead, int group_batch = 12)
+std::pair<int, int> PingPongGrid(mode_enum mode, int nhead, int group_batch = 2)
 {
     int device = 0;
     hipDeviceProp_t props{};
@@ -616,6 +618,7 @@ INSTANTIATE_TEST_SUITE_P(
            std::tuple{mode_enum::batch, 4, 232, 232, "t:50,64", "n", true, "_mask_", false},
            std::tuple{mode_enum::batch, 8, 100, 100, "2", "n", false, "_mc_", false},
            std::tuple{mode_enum::group, 4, 50, 100, "2", "n", true, "", false},
+           std::tuple{mode_enum::group, 4, 192, 192, "2", "e", true, "_bias_", false},
            std::tuple{mode_enum::batch, 4, 64, 64, "0", "n", true, "_npad_", true},
            std::tuple{mode_enum::batch, 8, 64, 192, "0", "a", true, "_alibi_", true},
            std::tuple{mode_enum::group, 4, 50, 100, "2", "n", true, "", true}));

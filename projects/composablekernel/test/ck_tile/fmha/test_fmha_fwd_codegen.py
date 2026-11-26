@@ -3345,7 +3345,8 @@ int main() {
         )
         self.assertEqual(run(seqlen_q=100, seqlen_k=512), [kernel("qr_tdm", 64)])
         # Group mode: qr_tdm_sched from 128 rows on the same big grids (it beats
-        # qr_tdm_pingpong on group-mode GQA prefill), qr_tdm_pingpong only below.
+        # qr_tdm_pingpong on group-mode GQA prefill); calls qr_tdm_sched rejects
+        # (e.g. bias or sink) and queries below 128 rows still take qr_tdm_pingpong.
         pingpong_ids = {
             index
             for k, index in dispatch.kernel_ids
@@ -3371,6 +3372,23 @@ int main() {
                 )[0],
                 sched_ids,
                 (cus, batch, rows, prefix),
+            )
+        for extra in (dict(bias=1), dict(has_sink_ptr=1)):
+            self.assertIn(
+                run(
+                    num_cus=256,
+                    group=1,
+                    batch=64,
+                    nhead_q=16,
+                    nhead_k=16,
+                    seqlen_q=64 * 384,
+                    max_seqlen_q=384,
+                    seqlen_k=64 * 384,
+                    **causal,
+                    **extra,
+                )[0],
+                pingpong_ids,
+                extra,
             )
         self.assertIn(
             run(

@@ -69,30 +69,41 @@ Generated `qr_tdm_sched` requires a null runtime `sink_ptr`; a finite virtual-si
 logit uses the existing `qr_tdm` fallback. This runtime pointer is independent
 of the compile-time sink-token flag.
 
-The generated API tries matching scheduled traits first. D64/V64 tries a
-128-by-128 Q/K sequence tile when its measured runtime gates pass
-(`GFX125_D64_N128_CONSTRAINT` in `codegen/ops/fmha_fwd.py`), then a 128-by-64
-tile matching the existing `qr_tdm` M128 geometry. Both use a compiler
-minimum-waves-per-EU hint of three. The launch API retains the
-historical `MinBlockPerCu` name; this hint does not establish achieved workgroup
-residency. Aligned batch K lengths use unpadded
-sequence traits; tails and group mode use padded traits. D64 uses compiler-scheduled
-softmax maximum chains; its N64 tile places each next-stage LDS read before the
-current WMMA, preserving read counts and stage-tail waits. Generated D64/D128/D192
-scheduled sources enable expert scheduling mode. D128 uses a
-128-by-128 Q/K sequence tile. D192 tries a 128-by-128 tile when average K length
-is at least 512, the Q grid fits within the CU count, logical length pointers
-are absent, and the mask is dense or square causal. Otherwise it uses a
-128-by-64 tile. Group mode compares packed K length against 512 times the batch
-count; its square-causal check compares packed Q/K totals. When
+The generated API tries matching scheduled traits first, ordered by ascending
+query tile height (`bm0`). In group mode, D64/V64 and D128/V128 first try a
+64-by-128 Q/K sequence tile when the 128-row grid leaves CUs idle or fills each
+CU once with at least 2048 query rows (for D128 only without a sliding window;
+`GFX125_D64_SCHED_M64_CONSTRAINT` and `GFX125_D128_SCHED_M64_CONSTRAINT` in
+`codegen/ops/fmha_fwd.py`), with D64's 64-by-128 tile also gated by
+`GFX125_D64_N128_CONSTRAINT` (attached to every D64 `bn0 == 128` scheduled
+trait). Otherwise (and in batch mode, which emits no 64-row scheduled tile),
+D64/V64 tries a 128-by-128 Q/K sequence tile under `GFX125_D64_N128_CONSTRAINT`
+and then a 128-by-64 tile matching the existing `qr_tdm` M128 geometry; all D64
+scheduled tiles use a compiler minimum-waves-per-EU hint of three. The launch
+API retains the historical `MinBlockPerCu` name; this hint does not establish
+achieved workgroup residency. Aligned batch K lengths use unpadded sequence
+traits; tails and group mode use padded traits. Every scheduled geometry forms
+row maxima by pairwise two-wide vector reductions (`PairLocalMax`); D64's
+128-by-64 tile places each next-stage LDS read before the current WMMA,
+preserving read counts and stage-tail waits. Generated D64/D128/D192 scheduled
+sources enable expert scheduling mode. D128/V128 uses a 128-by-128 Q/K sequence
+tile when its group-mode 64-by-128 tile does not apply (in batch mode yielding
+queries shorter than 640 rows on large grids to `qr_tdm_pingpong`, while in
+group mode `qr_tdm_sched` runs from 128 rows and unsupported features fall
+through to `qr_tdm_pingpong` or `qr_tdm`). D192 tries a 128-by-128 tile when
+average K length is at least 512, the Q grid fits within the CU count, logical
+length pointers are absent, and the mask is dense or square causal. Otherwise it
+uses a 128-by-64 tile. Group mode compares packed K length against 512 times the
+batch count; its square-causal check compares packed Q/K totals. When
 `max_seqlen_q` is below 128, the existing fallback candidates are used.
 
 WG indexing follows the existing shared kernel rules. For batch BHSD square
 causal attention with one V tile and no dropout, including top-left/bottom-right
 finite left windows with right window 0, sched D64/D128 visit the longest
 Q tile across heads within each batch first, subject to the grouped XCD path
-described below. Sched D192 keeps the existing
-head-major remap; group mode does not enter this batch-local branch. The XCC
+described below, while `qr_tdm_fp8_sched` visits the longest Q tile across all
+batches and heads first. Sched D192 keeps the existing
+head-major remap; group mode does not enter these batch-mode causal orders. The XCC
 mode 5/tm5r experiment remains disabled unless `CK_TILE_FMHA_PAIRED_XCC_ORDER`
 is explicitly defined to a nonzero value. Its eight-XCC mapping assumptions
 must be checked on the target hardware before enabling it.
