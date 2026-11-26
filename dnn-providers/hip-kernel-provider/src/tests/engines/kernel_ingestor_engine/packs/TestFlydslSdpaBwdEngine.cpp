@@ -1956,7 +1956,7 @@ TEST(TestFlydslSdpaBwdMergedReduce, RefusesABroadcastDbiasOnAnObjectWithoutARedu
 {
     auto unnamed = biasRow();
     unnamed.reduceSymbol = "";
-    auto const absent = biasRow();
+    const auto absent = biasRow();
     const auto spec = withBias(baseSpec(), true, {1, 8, 16, 16});
     expectBadParam([&] { static_cast<void>(dumpOf(spec, unnamed, WORKSPACE)); });
 

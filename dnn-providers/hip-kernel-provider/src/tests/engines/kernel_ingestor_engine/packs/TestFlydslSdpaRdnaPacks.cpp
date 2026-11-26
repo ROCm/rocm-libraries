@@ -360,7 +360,7 @@ TEST(TestFlydslSdpaRdnaPacks, RanksTheNarrowestServingObjectFirst)
     }
     ASSERT_GT(checked, 0U);
 
-    auto const lowest = [](const std::vector<Ranked>& v) {
+    const auto lowest = [](const std::vector<Ranked>& v) {
         int64_t p = std::numeric_limits<int64_t>::max();
         for(const auto& r : v)
         {
@@ -368,7 +368,7 @@ TEST(TestFlydslSdpaRdnaPacks, RanksTheNarrowestServingObjectFirst)
         }
         return p;
     };
-    auto const highest = [](const std::vector<Ranked>& v) {
+    const auto highest = [](const std::vector<Ranked>& v) {
         int64_t p = std::numeric_limits<int64_t>::lowest();
         for(const auto& r : v)
         {

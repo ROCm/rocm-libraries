@@ -3140,7 +3140,7 @@ void fillCdnaInputValues(const SdpaGraphSpec& spec,
     ASSERT_FALSE(spec.packedQkv);
     for(auto [operand, seed] : {std::pair{&q, 1U}, std::pair{&k, 2U}, std::pair{&v, 3U}})
     {
-        auto const next = sdpaInputValueSource(spec, seed);
+        const auto next = sdpaInputValueSource(spec, seed);
         for(auto& value : *operand)
         {
             value = T(next());
@@ -8061,7 +8061,7 @@ TEST(TestFlydslSdpaCdnaF32KernelMatch, RunsAnF32BiasDropoutAndZeroBiasOnTheF32Bu
     EXPECT_TRUE(cdnaAdmits(bias, f32Bucket(128, 0, 1)));
     EXPECT_FALSE(cdnaAdmits(bias, f32Bucket(128, 0, 0))) << "a plain object";
     // A vectorized-bias f32 object (none ships) never reads an f32 graph's bias.
-    auto const vectorized
+    const auto vectorized
         = makeCdnaKernel("generic", 128, 0, "f32", 128, 0, 1, 1, std::nullopt, int64_t{1});
     EXPECT_FALSE(cdnaAdmits(bias, vectorized));
     auto dropout = cdnaF32Spec();
