@@ -1,0 +1,115 @@
+// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
+/*
+ * conv_bias.cpp -- per-output-channel bias of the convolution forward kernels
+ * (C++ twin of the library's kernels/common/conv_bias.py). See
+ * instance_conv_bias.h.
+ */
+#include "rocke/instance_conv_bias.h"
+
+#include <string.h>
+
+/* The widest MMA fragment grid a conv kernel builds (mfmas_n per warp). */
+#define ROCKE_CONV_BIAS_MAX_NI 64
+/* The longest fp32 accumulator fragment (32x32 MFMA: 16 slots). */
+#define ROCKE_CONV_BIAS_MAX_SLOTS 64
+
+extern "C" {
+
+void rocke_conv_bias_declare_params(rocke_ir_builder_t* b,
+                                    const rocke_type_t* elem,
+                                    rocke_value_t** bias,
+                                    rocke_value_t** bias_bytes)
+{
+    rocke_param_opts_t o;
+    memset(&o, 0, sizeof(o));
+    o.noalias = true;
+    o.noalias_set = true;
+    o.readonly = true;
+    o.readonly_set = true;
+    o.align = 16;
+    o.align_set = true;
+    *bias = rocke_b_param(b, "Bias", rocke_ptr_type(b, elem, "global"), &o);
+    *bias_bytes = rocke_b_param(b, "Bias_bytes", rocke_i32(), NULL);
+}
+
+rocke_value_t*
+    rocke_conv_bias_rsrc(rocke_ir_builder_t* b, rocke_value_t* bias, rocke_value_t* bias_bytes)
+{
+    return rocke_b_buffer_rsrc(b, bias, bias_bytes);
+}
+
+rocke_value_t* rocke_conv_bias_load_f32(rocke_ir_builder_t* b,
+                                        rocke_value_t* rsrc,
+                                        rocke_value_t* k,
+                                        const rocke_type_t* elem,
+                                        rocke_value_t* c0)
+{
+    const int eb = strcmp(elem->name, "f32") == 0 ? 4 : 2;
+    rocke_value_t* c_eb = rocke_b_const_i32(b, eb);
+    rocke_value_t* off = rocke_b_mul(b, k, c_eb);
+    rocke_value_t* v = rocke_b_buffer_load(b, rsrc, off, c0, elem);
+    return rocke_b_cast_to_f32(b, v);
+}
+
+void rocke_conv_bias_add_to_accs(rocke_ir_builder_t* b,
+                                 rocke_value_t* const* accs,
+                                 rocke_value_t* const* bias_per_ni,
+                                 int mfmas_m,
+                                 int mfmas_n,
+                                 rocke_value_t** out)
+{
+    rocke_value_t* splat[ROCKE_CONV_BIAS_MAX_NI];
+    for(int ni = 0; ni < mfmas_n; ++ni)
+    {
+        rocke_value_t* elems[ROCKE_CONV_BIAS_MAX_SLOTS];
+        const int count = accs[ni]->type->count;
+        for(int i = 0; i < count; ++i)
+            elems[i] = bias_per_ni[ni];
+        splat[ni] = rocke_b_vec_pack(b, elems, count, rocke_f32());
+    }
+    for(int i = 0; i < mfmas_m * mfmas_n; ++i)
+        out[i] = rocke_b_fadd(b, accs[i], splat[i % mfmas_n]);
+}
+
+void rocke_conv_bias_apply_implicit_gemm(rocke_ir_builder_t* b,
+                                         rocke_value_t* const* accs,
+                                         const rocke_mmaop_t* op,
+                                         const rocke_type_t* elem,
+                                         rocke_value_t* bias,
+                                         rocke_value_t* bias_bytes,
+                                         rocke_value_t* lane,
+                                         rocke_value_t* warp_n_idx,
+                                         rocke_value_t* block_n_off,
+                                         rocke_value_t* k_out_group_base,
+                                         int mfmas_m,
+                                         int mfmas_n,
+                                         int warp_tile_n,
+                                         rocke_value_t** out)
+{
+    rocke_value_t* vals[ROCKE_CONV_BIAS_MAX_NI];
+    rocke_value_t* rsrc = rocke_conv_bias_rsrc(b, bias, bias_bytes);
+    rocke_value_t* c0 = rocke_b_const_i32(b, 0);
+    rocke_value_t* row = NULL;
+    rocke_value_t* col = NULL;
+    rocke_arch_layout_map_coord(rocke_mma_op_dst_layout(op, b), b, lane, 0, &row, &col);
+    (void)row;
+    rocke_value_t* c_wn = rocke_b_const_i32(b, mfmas_n * warp_tile_n);
+    rocke_value_t* warp_n_off = rocke_b_mul(b, warp_n_idx, c_wn);
+    rocke_value_t* k = rocke_b_add(b, rocke_b_add(b, block_n_off, warp_n_off), col);
+    if(k_out_group_base != NULL)
+        k = rocke_b_add(b, k_out_group_base, k);
+    for(int ni = 0; ni < mfmas_n; ++ni)
+    {
+        rocke_value_t* k_ni = k;
+        if(ni != 0)
+        {
+            rocke_value_t* c_ni = rocke_b_const_i32(b, ni * warp_tile_n);
+            k_ni = rocke_b_add(b, k, c_ni);
+        }
+        vals[ni] = rocke_conv_bias_load_f32(b, rsrc, k_ni, elem, c0);
+    }
+    rocke_conv_bias_add_to_accs(b, accs, vals, mfmas_m, mfmas_n, out);
+}
+
+} // extern "C"

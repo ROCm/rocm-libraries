@@ -56,6 +56,8 @@ _FWD = (
     176,
     178,
     180,
+    192,
+    211,
 )
 _DGRAD = (1, 8, 34, 50, 52, 87, 101, 116, 127, 128, 129, 130, 147, 151, 152)
 _WGRAD = (10, 17, 18, 20, 22, 33, 114, 117, 133, 139, 140, 141, 142, 143, 144)
@@ -70,7 +72,6 @@ _REDUCE_REFUSED = (16, 17, 18, 19, 20, 21)
 # cover and this list fails test_the_cover_reaches_every_emitter_knob.
 _NOT_IN_COVER = {
     "conv_implicit_gemm_emit": {
-        "acc_epilogue.bias",
         "data.mma_dtype",
         "lds_k_pad",
         "split_atomic",

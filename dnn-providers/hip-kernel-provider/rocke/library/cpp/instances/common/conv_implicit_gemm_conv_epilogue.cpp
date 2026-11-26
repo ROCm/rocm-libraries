@@ -20,6 +20,7 @@
 
 #include "rocke/arena.h"
 #include "rocke/helper_rocke.helpers.io.h" /* rocke_b_pack_f32_to */
+#include "rocke/instance_conv_bias.h"
 #include "rocke/instance_conv_implicit_gemm_internal.h"
 #include <stdio.h>
 
@@ -1317,6 +1318,29 @@ void rocke_conv_emit_epilogue(rocke_conv_build_ctx_t* ctx)
     const rocke_implicit_gemm_conv_spec_t* spec = ctx->spec;
     int num_accs = ctx->num_final_accs;
     int i;
+
+    /* if spec.bias: final_accs = _apply_bias(final_accs) -- bias[g*kpg + k] in
+     * fp32, before the accumulator epilogue and the rounding. */
+    if(spec->bias)
+    {
+        rocke_value_t* biased[ROCKE_CONV_MAX_ACCS];
+        rocke_conv_bias_apply_implicit_gemm(b,
+                                            ctx->final_accs,
+                                            ctx->op,
+                                            rocke_conv_ir_dtype(b, spec->dtype_d),
+                                            ctx->fwd_p_bias,
+                                            ctx->fwd_p_bias_bytes,
+                                            ctx->lane,
+                                            ctx->warp_n_idx,
+                                            ctx->block_n_off_v,
+                                            ctx->k_out_group_base,
+                                            rocke_implicit_gemm_conv_spec_mfmas_per_warp_m(spec),
+                                            rocke_implicit_gemm_conv_spec_mfmas_per_warp_n(spec),
+                                            spec->warp_tile_n,
+                                            biased);
+        for(i = 0; i < num_accs; ++i)
+            ctx->final_accs[i] = biased[i];
+    }
 
     /* final_accs = _apply_accumulator_epilogue(b, spec.acc_epilogue, final_accs) */
     rocke_value_t* final_accs[ROCKE_CONV_MAX_ACCS];

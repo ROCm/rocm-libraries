@@ -610,9 +610,60 @@ def _spec_raw(idx: int):
         return _mfma_gate_spec(idx)
     if 82 <= idx <= 85:
         return _tf32_split_k_spec(idx)
+    if idx >= _BIAS_FIRST:
+        return _bias_spec(idx)
     if idx >= 54 + _GFX942_3D_OFFSET:
         return _gfx942_3d_spec(idx - _GFX942_3D_OFFSET)
     raise SystemExit(f"unknown config index {idx}")
+
+
+# Per-output-channel bias (ImplicitGemmConvSpec.bias): an existing config, by
+# index, built with bias=True. Keep in lockstep with make_cfg_bias() in
+# conv_implicit_gemm_emit.c.
+#   192-195: gfx950 MFMA: mem/default, compv4/default, depthwise merged
+#            (group_merge 8) cshuffle, grouped pointwise cshuffle
+#   196-200: WMMA: gfx1250 grouped mem/cshuffle, grouped wavelet/cshuffle,
+#            depthwise mem/default, grouped pointwise direct; gfx1151 merged
+#   201:     gfx950 TF32 (fp32 storage: an fp32 bias)
+#   202-207: gfx942 3-D: fp16 cshuffle, bf16 grouped cshuffle, bf16 32x32
+#            default, epi_quad_xpose 1, the x-halo loop (epi_quad_xpose 4),
+#            epi_store_fast
+#   208-210: split-K (gfx950 workspace split, gfx942 3-D atomic split,
+#            gfx1250 wavelet workspace split): rejected by both engines
+#   211:     192 with an acc_epilogue (scalar bias + relu) after the bias
+_BIAS_FIRST = 192
+_BIAS_BASE = {
+    192: 0,
+    193: 1,
+    194: 22,
+    195: 37,
+    196: 33,
+    197: 35,
+    198: 34,
+    199: 39,
+    200: 32,
+    201: 54,
+    202: 86,
+    203: 87,
+    204: 88,
+    205: 186,
+    206: 146,
+    207: 168,
+    208: 49,
+    209: 189,
+    210: 40,
+    211: 0,
+}
+
+
+def _bias_spec(idx: int):
+    if idx not in _BIAS_BASE:
+        raise SystemExit(f"unknown config index {idx}")
+    spec, arch = _spec(_BIAS_BASE[idx])
+    kw = dict(bias=True)
+    if idx == 211:
+        kw["acc_epilogue"] = ConvAccumulatorEpilogue(bias=1.0, relu=True)
+    return replace(spec, **kw), arch
 
 
 # Split-K forward (split_k > 1) and its single-launch cluster form

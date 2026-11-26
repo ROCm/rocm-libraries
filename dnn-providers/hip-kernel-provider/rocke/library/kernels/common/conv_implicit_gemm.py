@@ -88,6 +88,10 @@ from rocke.helpers.transforms import (
 )
 from kernels.conv.conv_m_band import emit_m_band_order
 from kernels.common.conv_abi import conv_fwd_problem_block
+from kernels.common.conv_bias import (
+    apply_implicit_gemm_conv_bias,
+    declare_conv_bias_params,
+)
 from kernels.common.conv_fwd_split_k_reduce import FwdSplitKReduceSpec
 
 # ImplicitGemmConvSpec.sched_strategy -> AMDGPU machine-scheduler strategy.
@@ -835,6 +839,14 @@ class ImplicitGemmConvSpec:
     # tap bitmasks, built once per tile). Serves any padding (pad 0
     # included); dilation 1 on D / H (else the plain loop). Tags ``xpd``.
     xh_pad: bool = False
+    # Per-output-channel bias (conv + bias forward): the kernel takes a
+    # trailing ``Bias`` / ``Bias_bytes`` kernarg pair (conv_abi
+    # conv_bias_arg_names), loads bias[g*kpg + k] as fp32 and adds it to the
+    # fp32 accumulators before ``acc_epilogue`` and before the single rounding
+    # to dtype_d. The vector has K entries in the dtype_d type. Default False
+    # leaves the kernel, its name and its ABI unchanged; tags ``cbias`` right
+    # after the acc_epilogue tag.
+    bias: bool = False
 
     @property
     def block_size(self) -> int:
@@ -923,6 +935,7 @@ class ImplicitGemmConvSpec:
             f"a{self.warp_tile_m}x{self.warp_tile_n}x{self.warp_tile_k}",
             f"{self.pipeline}_{self.epilogue}",
             self.acc_epilogue.tag(),
+            "cbias" if self.bias else "",
             flags={
                 "async": self.async_dma,
                 "noalc": self.cshuffle_no_alias,
@@ -1049,6 +1062,9 @@ class ImplicitGemmConvSpec:
                 "acc_epilogue clamp_min must be <= clamp_max "
                 f"(got {self.acc_epilogue.clamp_min} > {self.acc_epilogue.clamp_max})"
             )
+        _bias_why = fwd_bias_conflict(self)
+        if _bias_why:
+            raise ValueError(_bias_why)
         _gm_ok, _gm_why = fwd_group_merge_available(self)
         if not _gm_ok:
             raise ValueError(_gm_why)
@@ -1991,6 +2007,36 @@ def fwd_split_det_slots(
     return groups * split_tiles * max(0, split_k - 1)
 
 
+def fwd_bias_conflict(spec: "ImplicitGemmConvSpec") -> str:
+    """Why ``spec.bias`` cannot be honoured, or ``""`` if it can.
+
+    The bias has to reach every output exactly once. The atomic split-K
+    forward (and its stream-K / hybrid forms) adds each slice's partial tile
+    into D with no single owner of the tile, and the workspace split-K forms
+    store raw partial sums that a later fold reduces, so a split forward is
+    refused for now; split_k == -1 (auto) is refused too because it may
+    resolve to one.
+    """
+    if not spec.bias:
+        return ""
+    if spec.split_k != 1 or spec.split_k_cluster:
+        if spec.split_streamk or spec.split_hybrid:
+            return (
+                "bias: the stream-K split-K forward has no single owner of an "
+                "output tile, so the bias cannot be added exactly once"
+            )
+        if spec.split_k > 1 and fwd_split_k_atomic(spec) and not spec.split_det:
+            return (
+                "bias: the atomic split-K forward adds every slice into D, so "
+                "the bias cannot be added exactly once; use split_k=1"
+            )
+        return (
+            "bias: the split-K forward reduces raw partial sums after the "
+            "kernel; the bias is not added on that path yet (use split_k=1)"
+        )
+    return ""
+
+
 def fwd_split_k_conflict(spec: "ImplicitGemmConvSpec") -> str:
     """Why ``spec.split_k`` cannot be honoured, or ``""`` if it can.
 
@@ -2261,6 +2307,9 @@ def is_valid_spec(spec: ImplicitGemmConvSpec, arch: str = "gfx950") -> Tuple[boo
             f"(hardware cap) on {arch}"
         )
 
+    _bias_why = fwd_bias_conflict(spec)
+    if _bias_why:
+        return False, _bias_why
     _gm_ok, _gm_why = fwd_group_merge_available(spec, arch)
     if not _gm_ok:
         return False, _gm_why
@@ -2840,6 +2889,12 @@ def _build_implicit_gemm_conv_impl(
         p_ks_count = b.param("ks_count", I32)
         if spec.split_k_cluster:
             b.set_cluster_dims(1, 1, spec.split_k_cluster)
+    # Per-output-channel bias: the Bias / Bias_bytes tail, after every other
+    # kernarg (conv_abi conv_bias_arg_names).
+    if spec.bias:
+        if epilogue_override is not None:
+            raise ValueError("bias is not supported with an epilogue_override")
+        p_bias, p_bias_bytes = declare_conv_bias_params(b, ir_dtype_d)
     if _split and spec.split_tail and spec.split_tail_compact:
         # Compact split_tail grid: decode the flat workgroup id into the
         # (x, y, z) the default launch would have given this (tile, slice),
@@ -4560,6 +4615,24 @@ def _build_implicit_gemm_conv_impl(
                 else:
                     b.buffer_store_vN_f16(d_rsrc, safe, c0, v, nw)
 
+    def _apply_bias(accs_in):
+        """Add bias[g*kpg + k] (fp32) to the accumulator fragments."""
+        return apply_implicit_gemm_conv_bias(
+            b,
+            accs_in,
+            op=op,
+            elem=ir_dtype_d,
+            bias=p_bias,
+            bias_bytes=p_bias_bytes,
+            lane=lane,
+            warp_n_idx=warp_n_idx,
+            block_n_off=block_n_off_v,
+            k_out_group_base=k_out_group_base,
+            mfmas_m=spec.mfmas_per_warp_m,
+            mfmas_n=spec.mfmas_per_warp_n,
+            warp_tile_n=spec.warp_tile_n,
+        )
+
     def _emit_fwd_epilogue(final_accs_in):
         """Store the accumulators through ``d_addr`` with runtime bounds."""
         if spec.epi_quad_xpose:
@@ -5062,6 +5135,8 @@ def _build_implicit_gemm_conv_impl(
         )
 
         def _fwd_epilogue_with_acc_transform(accs_in):
+            if spec.bias:
+                accs_in = _apply_bias(accs_in)
             _emit_fwd_epilogue(
                 _apply_accumulator_epilogue(b, spec.acc_epilogue, accs_in)
             )
@@ -8148,6 +8223,8 @@ def _build_implicit_gemm_conv_impl(
         )
 
     # ---- epilogue ----
+    if spec.bias:
+        final_accs = _apply_bias(final_accs)
     final_accs = _apply_accumulator_epilogue(b, spec.acc_epilogue, final_accs)
     if epilogue_override is not None:
         epilogue_override(b, spec, final_accs, grid, d_rsrc, extra_context)
