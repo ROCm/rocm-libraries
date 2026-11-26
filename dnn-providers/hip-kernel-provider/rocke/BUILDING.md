@@ -54,13 +54,17 @@ Properties:
   user site-packages — so the generic names `kernels` / `builders` / `dispatch`
   are confined to this venv.
 - **Inherits system torch.** The venv is created with `--system-site-packages`,
-  so the ROCm PyTorch you already have is reused, not reinstalled.
+  so the ROCm PyTorch you already have is reused, not reinstalled. When the
+  interpreter CMake finds is itself a virtualenv, the venv sees that
+  virtualenv's packages too, ahead of the base installation's.
 - **No package index in provider mode.** When rocKE is built as part of the
   hip-kernel-provider, the build runs `pip` with `--no-deps --no-build-isolation`
-  and never upgrades pip/setuptools, so it works offline. `setuptools>=61` must
-  already be installed for the Python interpreter CMake finds (configure fails
-  with a message otherwise). The wheels are built from temporary copies, so no
-  `build/` or `*.egg-info` is written into the source tree. Set
+  and never upgrades pip/setuptools, so it works offline. The Python interpreter
+  CMake finds must already have pip, setuptools 64 or newer, and the `wheel`
+  package if setuptools is older than 70.1. `cmake/make_pyenv.py` checks this at
+  configure time and again in the venv, and names what is missing. The wheels
+  are built from temporary copies, so no `build/` or `*.egg-info` is written
+  into the source tree. Set
   `SOURCE_DATE_EPOCH` to stamp the engine version with a reproducible date;
   without it the version is just `1.0.0`.
 
@@ -73,7 +77,7 @@ Equivalent to what CMake does, for editing/running outside the build:
 ```sh
 python3 -m venv --system-site-packages .venv
 . .venv/bin/activate
-pip install --upgrade pip "setuptools>=61" wheel
+pip install --upgrade pip "setuptools>=64" wheel
 # editable_mode=compat writes a .pth at the source root so newly added modules
 # are importable without reinstalling.
 pip install --config-settings editable_mode=compat -e rocke/platform

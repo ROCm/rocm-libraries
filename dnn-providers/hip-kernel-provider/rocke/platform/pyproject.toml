@@ -9,7 +9,10 @@
 # this wheel.
 
 [build-system]
-requires = ["setuptools>=61", "wheel"]
+# setuptools 64 is the first with editable builds (cmake/make_pyenv.py holds the
+# same floor). wheel is needed to build a wheel with a setuptools older than
+# 70.1, which a constrained build environment can still pick.
+requires = ["setuptools>=64", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
