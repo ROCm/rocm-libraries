@@ -390,6 +390,10 @@ void EngineDescriptor::getKnobInfo(hipdnnBackendAttributeType_t attributeType,
                 HIPDNN_TYPE_FLATBUFFER_DATA_STRUCT_EXT,
                 HIPDNN_STATUS_BAD_PARAM,
                 "EngineDescriptor failed to get knob info: Invalid attribute type.");
+    THROW_IF_LT(requestedElementCount,
+                0,
+                HIPDNN_STATUS_BAD_PARAM,
+                "EngineDescriptor failed to get knob info: requestedElementCount is negative.");
     ensureDetailsLoaded();
 
     const auto knobCount = static_cast<int64_t>(_knobSerializedBuffers.size());

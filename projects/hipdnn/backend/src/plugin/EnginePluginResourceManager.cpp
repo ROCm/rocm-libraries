@@ -50,18 +50,8 @@ std::mutex gEngineMutex;
 PluginLoadingConfig gEngineConfig;
 std::weak_ptr<EnginePluginManager> gEngineWeakPtr;
 std::shared_ptr<EnginePluginManager> gEnginePersistentPtr;
+// Set at process exit by the handlers PluginResourceManagerBase registers after each plugin load
 std::atomic<bool> gEngineShutdownFlag{false};
-
-// Register atexit handler to set shutdown flag
-struct EnginePluginShutdownRegistrar
-{
-    EnginePluginShutdownRegistrar()
-    {
-        std::atexit([]() { gEngineShutdownFlag.store(true, std::memory_order_release); });
-    }
-};
-
-EnginePluginShutdownRegistrar gEngineShutdownRegistrar;
 
 /// Missing override flag means false; other descriptor errors propagate.
 bool readIsOverrideShapeEnabled(const GraphDescriptor& graphDesc)
@@ -235,10 +225,12 @@ const std::vector<EngineInfo>& EnginePluginResourceManager::buildEngineIndex() c
                < std::tie(b.engineName, b.engineId, b.pluginName);
     });
 
-    // Built from the sorted vector, so it agrees with the enumeration. Admission
-    // ties each declared name to its own hash, so declared names cannot collide
-    // here; an unnamed engine is keyed by a rendering of its ID, which is unique
-    // for the same reason.
+    // Built from the sorted vector, so it agrees with the enumeration. Every
+    // resolved name reads back as its own engine's ID through
+    // engineNameOrIdToId(): admission ties each declared name to its own hash,
+    // resolveEngineName() replaces a declared name that reads as another ID, and
+    // a registry name or hexadecimal rendering stands for the ID it came from.
+    // IDs are unique, so names cannot collide here.
     auto& idsByName = _cachedEngineIdsByName.emplace();
     idsByName.reserve(infos.size());
     for(const auto& info : infos)
@@ -266,6 +258,27 @@ std::string EnginePluginResourceManager::resolveEngineName(
 
     if(entryPointName.has_value())
     {
+        // Admission ties every declared name to its own hash, so a name reads
+        // back through engineNameOrIdToId() as engineId unless it parses as an
+        // engine ID. Such a name addresses the ID it spells, not this engine.
+        const int64_t nameReadsAs
+            = hipdnn_data_sdk::utilities::detail::parseEngineNumericId(*entryPointName).has_value()
+                  ? hipdnn_data_sdk::utilities::engineNameOrIdToId(*entryPointName)
+                  : engineId;
+        if(nameReadsAs != engineId)
+        {
+            const std::string fallbackName = hipdnn_data_sdk::utilities::engineNameOrHex(engineId);
+            HIPDNN_BACKEND_LOG_WARN(
+                "Plugin '{}' names engine {} '{}' through hipdnnEnginePluginGetEngineName, but "
+                "that name reads as engine ID {}, so it cannot address this engine; using '{}'",
+                pluginName,
+                hipdnn_data_sdk::utilities::formatEngineIdHex(engineId),
+                *entryPointName,
+                hipdnn_data_sdk::utilities::formatEngineIdHex(nameReadsAs),
+                fallbackName);
+            return fallbackName;
+        }
+
         // The entry point is authoritative; a disagreement is a plugin defect
         // worth reporting, not worth failing over.
         if(detailsName.has_value() && !detailsName->empty() && *detailsName != *entryPointName)
@@ -280,7 +293,8 @@ std::string EnginePluginResourceManager::resolveEngineName(
                 *entryPointName);
         }
 
-        // Admission already established that this name hashes to engineId.
+        // Admission established that this name hashes to engineId, and the check
+        // above that it reads back as engineId.
         return *entryPointName;
     }
 
@@ -317,6 +331,13 @@ EnginePluginResourceManager::EnginePluginResourceManager()
 EnginePluginResourceManager::EnginePluginResourceManager(std::shared_ptr<EnginePluginManager> pm)
     : PluginResourceManagerBase(std::move(pm))
 {
+    // During process exit getOrCreatePluginManager() returns null; the resource manager then
+    // holds no plugins.
+    if(!_pm)
+    {
+        return;
+    }
+
     // Helper to safely destroy a handle during error cleanup, logging any failures
     const auto safeDestroyHandle = [](const EnginePlugin* plugin,
                                       hipdnnEnginePluginHandle_t handle) {
@@ -553,23 +574,19 @@ std::vector<int64_t> EnginePluginResourceManager::queryApplicableEngineIds(
 
         for(const auto& id : ids)
         {
+            // A plugin is never told which of its engines admission dropped, or
+            // kept for the plugin that declared them first, so it keeps offering
+            // them; skipping beats failing the whole graph.
             const auto handleIt = _engineIdToHandle.find(id);
-            if(handleIt == _engineIdToHandle.end())
+            const bool isOwned = handleIt != _engineIdToHandle.end();
+            if(!isOwned || handleIt->second != handle)
             {
-                // A plugin is never told which of its engines were dropped, so it
-                // keeps offering them; skipping beats failing the whole graph.
-                HIPDNN_BACKEND_LOG_INFO(
-                    "Skipping engine {} offered by plugin '{}': it was dropped at load time",
-                    hipdnn_data_sdk::utilities::formatEngineIdHex(id),
-                    plugin->cachedName());
+                HIPDNN_BACKEND_LOG_INFO("Skipping engine {} offered by plugin '{}': {}",
+                                        hipdnn_data_sdk::utilities::formatEngineIdHex(id),
+                                        plugin->cachedName(),
+                                        isOwned ? "another plugin owns it"
+                                                : "no loaded plugin owns it");
                 continue;
-            }
-
-            if(handleIt->second != handle)
-            {
-                throw HipdnnException(HIPDNN_STATUS_PLUGIN_ERROR,
-                                      "Engine ID " + std::to_string(id)
-                                          + " is already associated with a different plugin");
             }
 
             engineIds.push_back(id);

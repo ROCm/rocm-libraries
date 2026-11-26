@@ -4182,6 +4182,22 @@ TEST(TestDescriptorLoader, DropsAnEngineWhoseSdkVersionIsMalformed)
     EXPECT_TRUE(loadFrom(dir.path()).empty());
 }
 
+/// A sign is not part of the version grammar: "-1.2.0" names no schema, so the engine
+/// drops rather than claiming a negative major that compares below every floor.
+TEST(TestDescriptorLoader, DropsAnEngineWhoseSdkVersionIsSigned)
+{
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("signed_sdk_version"));
+    auto documents = makeSetDocuments('1', "test:signed_version");
+    documentOfType(documents, ".ued.json")["sdk_version"] = "-1.2.0";
+    writeDocuments(dir.path(), documents);
+
+    EXPECT_TRUE(loadFrom(dir.path()).empty());
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "key 'sdk_version'"));
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "is not a version"));
+}
+
 /// The inverse of the UED case: `version` is required on every type, with no absence-safe
 /// default. A KMD with no version drops, and the engine whose `metadata` named it goes
 /// with it -- which is what makes the rule enforceable rather than advisory.

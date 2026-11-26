@@ -1,6 +1,7 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
+#include "LastErrorTestUtils.hpp"
 #include "descriptors/DescriptorTestUtils.hpp"
 #include "descriptors/ScopedBackendDescriptor.hpp"
 #include "descriptors/mocks/MockDescriptor.hpp"
@@ -16,7 +17,6 @@
 #include <hip/hip_runtime.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/execution_plan_generated.h>
 
-#include <array>
 #include <cstdint>
 #include <memory>
 #include <string>
@@ -35,13 +35,6 @@ constexpr int64_t ENGINE_ID = 7;
 auto reportDevice(int device)
 {
     return DoAll(SetArgPointee<0>(device), Return(hipSuccess));
-}
-
-std::string takeLastErrorString()
-{
-    std::array<char, HIPDNN_ERROR_STRING_MAX_LENGTH> buffer{};
-    hipdnnGetLastErrorString(buffer.data(), buffer.size());
-    return buffer.data();
 }
 
 std::vector<uint8_t> makeSerializedPlan()

@@ -66,11 +66,30 @@ void GraphDescriptor::finalize()
                             _name,
                             hipdnn_flatbuffers_sdk::utilities::formatUuid(*_graphId));
 
-    if(logging::GraphLogger::isEnabled())
+    // The graph dump is a diagnostic: a failure to write it is logged and never changes the
+    // result of finalize().
+    try
     {
-        const auto serialized = getSerializedGraph();
-        logging::GraphLogger::logGraph(static_cast<const uint8_t*>(serialized.ptr),
-                                       serialized.size);
+        if(logging::GraphLogger::isEnabled())
+        {
+            const auto serialized = getSerializedGraph();
+            logging::GraphLogger::logGraph(static_cast<const uint8_t*>(serialized.ptr),
+                                           serialized.size);
+        }
+    }
+    catch(const std::exception& e)
+    {
+        HIPDNN_BACKEND_LOG_WARN("Failed to log graph \"{}\" with id {}: {}",
+                                _name,
+                                hipdnn_flatbuffers_sdk::utilities::formatUuid(*_graphId),
+                                e.what());
+    }
+    catch(...)
+    {
+        // Uncovered by tests: every throw on the graph-dump path derives from std::exception.
+        HIPDNN_BACKEND_LOG_WARN("Failed to log graph \"{}\" with id {}: unknown exception",
+                                _name,
+                                hipdnn_flatbuffers_sdk::utilities::formatUuid(*_graphId));
     }
 }
 
@@ -353,6 +372,10 @@ void GraphDescriptor::setOperations(hipdnnBackendAttributeType_t attributeType,
     THROW_IF_NULL(arrayOfElements,
                   HIPDNN_STATUS_BAD_PARAM_NULL_POINTER,
                   "GraphDescriptor::setOperations: arrayOfElements is null");
+    THROW_IF_LT(elementCount,
+                0,
+                HIPDNN_STATUS_BAD_PARAM,
+                "GraphDescriptor::setOperations: elementCount is negative");
 
     auto descriptors = static_cast<HipdnnBackendDescriptor* const*>(arrayOfElements);
 

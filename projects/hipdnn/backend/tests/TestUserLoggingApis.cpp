@@ -1,6 +1,7 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
+#include "LastErrorTestUtils.hpp"
 #include "hipdnn_backend.h"
 
 #include <atomic>
@@ -21,6 +22,7 @@
 #include <vector>
 
 using namespace hipdnn_test_sdk::utilities;
+using hipdnn_backend::test_utilities::takeLastErrorString;
 
 // Test fixture for backend user log callback API
 class IntegrationBackendUserLoggingApis : public ::testing::Test
@@ -194,28 +196,36 @@ TEST_F(IntegrationBackendUserLoggingApis, SyncCallbackImmediate)
     ASSERT_EQ(hipdnnDestroy(handle), HIPDNN_STATUS_SUCCESS);
 }
 
-// Test: Null userHandle is rejected
+// Test: Null userHandle is rejected with a reason
 TEST_F(IntegrationBackendUserLoggingApis, RejectsNullHandle)
 {
+    takeLastErrorString(); // Clear an error left by an earlier call on this thread
+
     const auto status
         = hipdnnSetUserLogCallback_ext(IsolatedLogRecorder::getIsolatedUserRecordingCallback(),
                                        HIPDNN_SEV_INFO,
                                        HIPDNN_LOG_CALLBACK_ASYNC,
                                        nullptr);
     EXPECT_EQ(status, HIPDNN_STATUS_BAD_PARAM);
+    EXPECT_FALSE(takeLastErrorString().empty());
 }
 
-// Test: Null callback is rejected
+// Test: Null callback is rejected with a reason
 TEST_F(IntegrationBackendUserLoggingApis, RejectsNullCallback)
 {
+    takeLastErrorString(); // Clear an error left by an earlier call on this thread
+
     const auto status
         = hipdnnSetUserLogCallback_ext(nullptr, HIPDNN_SEV_INFO, HIPDNN_LOG_CALLBACK_ASYNC, this);
     EXPECT_EQ(status, HIPDNN_STATUS_BAD_PARAM);
+    EXPECT_FALSE(takeLastErrorString().empty());
 }
 
-// Test: Invalid mode is rejected
+// Test: Invalid mode is rejected with a reason
 TEST_F(IntegrationBackendUserLoggingApis, RejectsInvalidMode)
 {
+    takeLastErrorString(); // Clear an error left by an earlier call on this thread
+
     const auto invalidMode = static_cast<hipdnnLogCallbackMode_t>(999);
     const auto status
         = hipdnnSetUserLogCallback_ext(IsolatedLogRecorder::getIsolatedUserRecordingCallback(),
@@ -223,6 +233,41 @@ TEST_F(IntegrationBackendUserLoggingApis, RejectsInvalidMode)
                                        invalidMode,
                                        this);
     EXPECT_EQ(status, HIPDNN_STATUS_BAD_PARAM);
+    EXPECT_FALSE(takeLastErrorString().empty());
+}
+
+// Test: Removing a callback that is not registered is rejected with a reason
+TEST_F(IntegrationBackendUserLoggingApis, RejectsRemovingUnregisteredCallback)
+{
+    int unregisteredHandle = 0;
+    takeLastErrorString(); // Clear an error left by an earlier call on this thread
+
+    auto status
+        = hipdnnSetUserLogCallback_ext(IsolatedLogRecorder::getIsolatedUserRecordingCallback(),
+                                       HIPDNN_SEV_OFF,
+                                       HIPDNN_LOG_CALLBACK_SYNC,
+                                       &unregisteredHandle);
+    EXPECT_EQ(status, HIPDNN_STATUS_BAD_PARAM);
+    EXPECT_FALSE(takeLastErrorString().empty());
+}
+
+// Test: An invalid global log level is rejected with a reason
+TEST_F(IntegrationBackendUserLoggingApis, RejectsInvalidGlobalLogLevel)
+{
+    takeLastErrorString(); // Clear an error left by an earlier call on this thread
+
+    EXPECT_EQ(hipdnnBackendSetGlobalLogLevel_ext(static_cast<hipdnnSeverity_t>(99)),
+              HIPDNN_STATUS_BAD_PARAM);
+    EXPECT_FALSE(takeLastErrorString().empty());
+}
+
+// Test: A null output for the global log level is rejected with a reason
+TEST_F(IntegrationBackendUserLoggingApis, RejectsNullGlobalLogLevelOutput)
+{
+    takeLastErrorString(); // Clear an error left by an earlier call on this thread
+
+    EXPECT_EQ(hipdnnBackendGetGlobalLogLevel_ext(nullptr), HIPDNN_STATUS_BAD_PARAM);
+    EXPECT_FALSE(takeLastErrorString().empty());
 }
 
 // Test: Callback respects log level filtering

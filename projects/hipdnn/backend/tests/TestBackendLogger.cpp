@@ -1,10 +1,18 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
+#include "hipdnn_backend.h"
 #include "gtest/internal/gtest-port.h"
+
 #include <atomic>
+#include <chrono>
+#include <cstdio>
+#include <cstdlib>
 #include <fcntl.h>
+#include <filesystem>
 #include <fstream>
+#include <functional>
+#include <future>
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 #include <iostream>
@@ -15,6 +23,7 @@
 
 #include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
 #include <hipdnn_test_sdk/utilities/ScopedEnvironmentVariableSetter.hpp>
+#include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 #include <logging/Logging.hpp>
 
 class TestBackendLogger : public ::testing::Test
@@ -435,4 +444,323 @@ TEST_F(TestBackendLogger, ConcurrentLoggingToFile)
 
     // Consume captured stderr to clean up for the fixture
     testing::internal::GetCapturedStderr();
+}
+
+namespace
+{
+
+constexpr auto K_CALL_DEADLINE = std::chrono::seconds(10);
+
+// Runs body on a worker thread with a deadline. A worker that misses the deadline can be
+// neither joined nor cancelled, so the test reports the failure and ends the process. The
+// fixture captures stderr, so the report goes to stdout.
+void runWithDeadline(const char* description, const std::function<void()>& body)
+{
+    auto worker = std::async(std::launch::async, body);
+    if(worker.wait_for(K_CALL_DEADLINE) == std::future_status::timeout)
+    {
+        std::fprintf(stdout,
+                     "FAILED: %s did not return within %lld s\n",
+                     description,
+                     static_cast<long long>(K_CALL_DEADLINE.count()));
+        std::fflush(nullptr);
+        std::_Exit(EXIT_FAILURE);
+    }
+    worker.get();
+}
+
+// Two HIPDNN_LOG_FILE values that cannot be opened: a file whose parent directory is missing
+// and cannot be created (a regular file occupies its path), and an existing directory.
+class UnopenableLogFilePaths
+{
+public:
+    UnopenableLogFilePaths()
+        : _root(std::filesystem::temp_directory_path()
+                / ("hipdnn_unopenable_log_"
+                   + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count())))
+    {
+        std::filesystem::create_directories(_root / "existing_directory");
+        std::ofstream(_root / "regular_file") << "not a directory";
+    }
+
+    ~UnopenableLogFilePaths()
+    {
+        std::error_code ec;
+        std::filesystem::remove_all(_root, ec);
+    }
+
+    UnopenableLogFilePaths(const UnopenableLogFilePaths&) = delete;
+    UnopenableLogFilePaths& operator=(const UnopenableLogFilePaths&) = delete;
+    UnopenableLogFilePaths(UnopenableLogFilePaths&&) = delete;
+    UnopenableLogFilePaths& operator=(UnopenableLogFilePaths&&) = delete;
+
+    std::vector<std::string> all() const
+    {
+        return {(_root / "regular_file" / "missing_directory" / "hipdnn.log").string(),
+                (_root / "existing_directory").string()};
+    }
+
+private:
+    std::filesystem::path _root;
+};
+
+struct SelfRemovalState
+{
+    std::atomic<int> invocations{0};
+    std::atomic<hipdnnStatus_t> removalStatus{HIPDNN_STATUS_INTERNAL_ERROR};
+};
+
+// Unregisters itself from its first message.
+void selfRemovingCallback(hipdnnUserLogCallbackHandle_t userHandle,
+                          hipdnnSeverity_t /*severity*/,
+                          const char* /*message*/)
+{
+    auto* state = static_cast<SelfRemovalState*>(userHandle);
+    if(state->invocations.fetch_add(1) == 0)
+    {
+        state->removalStatus.store(hipdnn_backend::logging::setUserLogCallback(
+            selfRemovingCallback, HIPDNN_SEV_OFF, HIPDNN_LOG_CALLBACK_SYNC, userHandle));
+    }
+}
+
+struct CallbackCounter
+{
+    std::atomic<int> invocations{0};
+};
+
+void countingCallback(hipdnnUserLogCallbackHandle_t userHandle,
+                      hipdnnSeverity_t /*severity*/,
+                      const char* /*message*/)
+{
+    static_cast<CallbackCounter*>(userHandle)->invocations.fetch_add(1);
+}
+
+struct AddingCallbackState
+{
+    std::atomic<int> invocations{0};
+    std::atomic<hipdnnStatus_t> addStatus{HIPDNN_STATUS_INTERNAL_ERROR};
+    CallbackCounter added;
+};
+
+// Registers countingCallback (with &state->added) from its first message.
+void addingCallback(hipdnnUserLogCallbackHandle_t userHandle,
+                    hipdnnSeverity_t /*severity*/,
+                    const char* /*message*/)
+{
+    auto* state = static_cast<AddingCallbackState*>(userHandle);
+    if(state->invocations.fetch_add(1) == 0)
+    {
+        state->addStatus.store(hipdnn_backend::logging::setUserLogCallback(
+            countingCallback, HIPDNN_SEV_INFO, HIPDNN_LOG_CALLBACK_SYNC, &state->added));
+    }
+}
+
+// Runs as the statement of a threadsafe death test, in a fresh process, so the backend
+// library's own logger is initialized here by the first C API call, with these variables.
+// The temporary paths are removed before exiting; any failed call is a nonzero exit status.
+[[noreturn]] void createHandleWithUnopenableLogFile(size_t pathIndex)
+{
+    int status = 0;
+    {
+        const UnopenableLogFilePaths unopenable;
+        hipdnn_data_sdk::utilities::setEnv("HIPDNN_LOG_LEVEL", "info");
+        hipdnn_data_sdk::utilities::setEnv("HIPDNN_LOG_FILE",
+                                           unopenable.all().at(pathIndex).c_str());
+
+        // hipdnnCreate is only the logging trigger here. An empty absolute plugin search path
+        // keeps provider plugins out of the unit binary.
+        if(hipdnnSetEnginePluginPaths_ext(0, nullptr, HIPDNN_PLUGIN_LOADING_ABSOLUTE)
+               != HIPDNN_STATUS_SUCCESS
+           || hipdnnSetHeuristicPluginPaths_ext(0, nullptr, HIPDNN_PLUGIN_LOADING_ABSOLUTE)
+                  != HIPDNN_STATUS_SUCCESS)
+        {
+            status = 2;
+        }
+
+        hipdnnHandle_t handle = nullptr;
+        if(hipdnnCreate(&handle) != HIPDNN_STATUS_SUCCESS || handle == nullptr)
+        {
+            status = 3;
+        }
+        else if(hipdnnDestroy(handle) != HIPDNN_STATUS_SUCCESS)
+        {
+            status = 4;
+        }
+    }
+    std::exit(status);
+}
+
+} // namespace
+
+// Port of the exploratory test Issue_A2_02_unopenable_log_file_terminates_process. An
+// HIPDNN_LOG_FILE that cannot be opened neither terminates the process nor changes the API
+// result: hipDNN warns on stderr, naming the variable, and logs to stderr instead.
+// hipdnnCreate reaches the logger inside the backend library, which this binary cannot reset
+// (TestBackendLogger resets the copy linked into the test binary), so each case runs in a
+// fresh process where that logger starts uninitialized.
+TEST(TestBackendLoggerFreshProcess, HandleCreationDoesNotTerminate)
+{
+    SKIP_IF_NO_DEVICES();
+
+    GTEST_FLAG_SET(death_test_style, "threadsafe");
+    // EXPECT_EXIT expands to a switch over AssumeRole() carrying no default label. The
+    // diagnostic is attributed to this expansion site rather than to the GoogleTest
+    // header, so -isystem does not suppress it and -Werror makes it fatal.
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wswitch-default"
+    // A file whose parent directory cannot be created
+    EXPECT_EXIT(
+        createHandleWithUnopenableLogFile(0), testing::ExitedWithCode(0), "HIPDNN_LOG_FILE");
+    // A path that is an existing directory
+    EXPECT_EXIT(
+        createHandleWithUnopenableLogFile(1), testing::ExitedWithCode(0), "HIPDNN_LOG_FILE");
+#pragma clang diagnostic pop
+}
+
+// Port of the exploratory test Issue_A2_02_unopenable_log_file_terminates_process, through
+// backendLoggingCallback, the function hipdnnLoggingCallback_ext forwards frontend log calls to.
+TEST_F(TestBackendLogger, FrontendLogCallDoesNotTerminate)
+{
+    const UnopenableLogFilePaths unopenable;
+    hipdnn_data_sdk::utilities::setEnv("HIPDNN_LOG_LEVEL", "info");
+
+    const auto paths = unopenable.all();
+    for(size_t i = 0; i < paths.size(); ++i)
+    {
+        hipdnn_backend::logging::loggerShutdown();
+        hipdnn_data_sdk::utilities::setEnv("HIPDNN_LOG_FILE", paths[i].c_str());
+
+        hipdnn_backend::logging::backendLoggingCallback(
+            HIPDNN_SEV_INFO, ("Frontend message " + std::to_string(i)).c_str());
+    }
+
+    const std::string logContent = getStderrContent();
+    EXPECT_THAT(logContent, ::testing::HasSubstr("HIPDNN_LOG_FILE"));
+    for(size_t i = 0; i < paths.size(); ++i)
+    {
+        EXPECT_THAT(logContent, ::testing::HasSubstr(paths[i]));
+        EXPECT_THAT(logContent, ::testing::HasSubstr("Frontend message " + std::to_string(i)));
+    }
+}
+
+// Port of the exploratory test Issue_C4_03_level_raised_after_first_call_leaves_stderr_silent.
+// Logging initialized while the level is OFF writes to stderr once the level is raised.
+TEST_F(TestBackendLogger, StderrReceivesLogsAfterLevelRaised)
+{
+    HIPDNN_BACKEND_LOG_INFO("Logged while the level is off");
+
+    EXPECT_EQ(hipdnn_backend::logging::setGlobalLogLevel(HIPDNN_SEV_INFO), HIPDNN_STATUS_SUCCESS);
+    HIPDNN_BACKEND_LOG_INFO("Logged after the level was raised");
+
+    const std::string logContent = getStderrContent();
+    EXPECT_THAT(logContent, ::testing::Not(::testing::HasSubstr("Logged while the level is off")));
+    EXPECT_THAT(logContent, ::testing::HasSubstr("Logged after the level was raised"));
+}
+
+// As StderrReceivesLogsAfterLevelRaised, with the level raised directly in the data SDK, so
+// only the first enabled message can create the console sink.
+TEST_F(TestBackendLogger, StderrReceivesLogsAfterSdkLevelRaised)
+{
+    HIPDNN_BACKEND_LOG_INFO("Logged while the level is off");
+
+    hipdnn_data_sdk::logging::setLogLevel(HIPDNN_SEV_INFO);
+    HIPDNN_BACKEND_LOG_INFO("Logged after the level was raised");
+
+    const std::string logContent = getStderrContent();
+    EXPECT_THAT(logContent, ::testing::HasSubstr("Logged after the level was raised"));
+}
+
+// As StderrReceivesLogsAfterLevelRaised, with HIPDNN_LOG_FILE set: no file exists while the
+// level is OFF, and the file receives the logs once the level is raised.
+TEST_F(TestBackendLogger, LogFileReceivesLogsAfterLevelRaised)
+{
+    _logFile = "level_raised_after_first_call_test.log";
+    std::remove(_logFile.c_str());
+    hipdnn_data_sdk::utilities::setEnv("HIPDNN_LOG_FILE", _logFile.c_str());
+
+    HIPDNN_BACKEND_LOG_INFO("Logged while the level is off");
+    EXPECT_FALSE(std::filesystem::exists(_logFile))
+        << "A log file was created while the level is OFF: " << _logFile;
+
+    EXPECT_EQ(hipdnn_backend::logging::setGlobalLogLevel(HIPDNN_SEV_INFO), HIPDNN_STATUS_SUCCESS);
+    HIPDNN_BACKEND_LOG_INFO("Logged after the level was raised");
+
+    const std::string stdErrContent = getStderrContent();
+
+    std::ifstream logFileStream(_logFile);
+    ASSERT_TRUE(logFileStream.is_open()) << "Log file was not created: " << _logFile;
+    const std::string logFileContent((std::istreambuf_iterator<char>(logFileStream)),
+                                     std::istreambuf_iterator<char>());
+
+    EXPECT_THAT(logFileContent, ::testing::HasSubstr("Logged after the level was raised"));
+    EXPECT_THAT(logFileContent,
+                ::testing::Not(::testing::HasSubstr("Logged while the level is off")));
+    EXPECT_THAT(stdErrContent,
+                ::testing::Not(::testing::HasSubstr("Logged after the level was raised")));
+}
+
+// As StderrReceivesLogsAfterLevelRaised, with logging initialized by registering a user
+// callback while the level is OFF.
+TEST_F(TestBackendLogger, StderrReceivesLogsAfterLevelRaisedWithCallbackRegisteredFirst)
+{
+    CallbackCounter counter;
+    EXPECT_EQ(hipdnn_backend::logging::setUserLogCallback(
+                  countingCallback, HIPDNN_SEV_INFO, HIPDNN_LOG_CALLBACK_SYNC, &counter),
+              HIPDNN_STATUS_SUCCESS);
+
+    EXPECT_EQ(hipdnn_backend::logging::setGlobalLogLevel(HIPDNN_SEV_INFO), HIPDNN_STATUS_SUCCESS);
+    HIPDNN_BACKEND_LOG_INFO("Logged after the level was raised");
+
+    // Shuts the logger down, which also unregisters the callback before counter goes away
+    const std::string logContent = getStderrContent();
+    EXPECT_THAT(logContent, ::testing::HasSubstr("Logged after the level was raised"));
+    EXPECT_GT(counter.invocations.load(), 0);
+}
+
+// Port of the exploratory test Issue_C4_05_callback_unregisters_itself_deadlocks. A SYNC
+// callback that unregisters itself from inside its own invocation returns, and receives no
+// later message.
+TEST_F(TestBackendLogger, SelfRemovalReturns)
+{
+    hipdnn_data_sdk::utilities::setEnv("HIPDNN_LOG_LEVEL", "info");
+
+    SelfRemovalState state;
+    EXPECT_EQ(hipdnn_backend::logging::setUserLogCallback(
+                  selfRemovingCallback, HIPDNN_SEV_INFO, HIPDNN_LOG_CALLBACK_SYNC, &state),
+              HIPDNN_STATUS_SUCCESS);
+
+    runWithDeadline("logging to a SYNC callback that unregisters itself", [] {
+        HIPDNN_BACKEND_LOG_INFO("First message, received by the callback");
+        HIPDNN_BACKEND_LOG_INFO("Second message, logged after the callback unregistered");
+    });
+
+    EXPECT_EQ(state.removalStatus.load(), HIPDNN_STATUS_SUCCESS);
+    EXPECT_EQ(state.invocations.load(), 1);
+
+    // Shuts the logger down, which also unregisters the callback before state goes away
+    static_cast<void>(getStderrContent());
+}
+
+// Port of the exploratory test Issue_C4_05_callback_unregisters_itself_deadlocks, adding a
+// callback instead of removing one: the registration returns and the added callback receives
+// later messages.
+TEST_F(TestBackendLogger, CallbackAddedFromCallbackReturns)
+{
+    hipdnn_data_sdk::utilities::setEnv("HIPDNN_LOG_LEVEL", "info");
+
+    AddingCallbackState state;
+    EXPECT_EQ(hipdnn_backend::logging::setUserLogCallback(
+                  addingCallback, HIPDNN_SEV_INFO, HIPDNN_LOG_CALLBACK_SYNC, &state),
+              HIPDNN_STATUS_SUCCESS);
+
+    runWithDeadline("logging to a SYNC callback that registers another callback", [] {
+        HIPDNN_BACKEND_LOG_INFO("First message, received by the registering callback");
+        HIPDNN_BACKEND_LOG_INFO("Second message, received by both callbacks");
+    });
+
+    EXPECT_EQ(state.addStatus.load(), HIPDNN_STATUS_SUCCESS);
+    EXPECT_GT(state.added.invocations.load(), 0);
+
+    // Shuts the logger down, which also unregisters both callbacks before state goes away
+    static_cast<void>(getStderrContent());
 }

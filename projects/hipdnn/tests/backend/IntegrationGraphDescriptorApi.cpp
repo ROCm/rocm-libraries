@@ -118,6 +118,33 @@ TEST_F(IntegrationGraphDescriptorApi, FinalizeInvalidOperationGraph)
     EXPECT_EQ(status, HIPDNN_STATUS_SUCCESS);
 }
 
+TEST_F(IntegrationGraphDescriptorApi, SetOperationsRejectsNegativeCountAndKeepsState)
+{
+    hipdnnBackendDescriptor_t descriptor = nullptr;
+    ASSERT_EQ(hipdnnBackendCreateDescriptor(HIPDNN_BACKEND_OPERATIONGRAPH_DESCRIPTOR, &descriptor),
+              HIPDNN_STATUS_SUCCESS);
+
+    std::array<hipdnnBackendDescriptor_t, 1> ops = {nullptr};
+    EXPECT_EQ(hipdnnBackendSetAttribute(descriptor,
+                                        HIPDNN_ATTR_OPERATIONGRAPH_OPS,
+                                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                                        -1,
+                                        static_cast<const void*>(ops.data())),
+              HIPDNN_STATUS_BAD_PARAM);
+
+    int64_t opCount = -1;
+    EXPECT_EQ(hipdnnBackendGetAttribute(descriptor,
+                                        HIPDNN_ATTR_OPERATIONGRAPH_OPS,
+                                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                                        0,
+                                        &opCount,
+                                        nullptr),
+              HIPDNN_STATUS_SUCCESS);
+    EXPECT_EQ(opCount, 0);
+
+    EXPECT_EQ(hipdnnBackendDestroyDescriptor(descriptor), HIPDNN_STATUS_SUCCESS);
+}
+
 TEST_F(IntegrationGraphDescriptorApi, GetSerializedGraphSucceedsWithoutFinalization)
 {
     hipdnnBackendDescriptor_t desc = nullptr;

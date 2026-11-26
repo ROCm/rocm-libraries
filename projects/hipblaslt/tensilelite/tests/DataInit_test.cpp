@@ -18,8 +18,10 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <complex>
 #include <cstddef>
 #include <cstdint>
+#include <cstdlib>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
@@ -30,9 +32,14 @@
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <type_traits>
+#include <tuple>
 #include <vector>
-#if HIPBLASLT_ENABLE_MXDATAGENERATOR
+#ifdef _OPENMP
+#include <omp.h>
+#endif
 #include <hip/hip_runtime.h>
+#if HIPBLASLT_ENABLE_MXDATAGENERATOR
 #include <mxDataGenerator/dataTypeInfo.hpp>
 #include <mxDataGenerator/ocp_e2m1_mxfp4.hpp>
 #include <mxDataGenerator/ocp_e2m3_mxfp6.hpp>
@@ -47,6 +54,7 @@ using TensileLite::DataTypeInfo;
 using TensileLite::KernelLanguage;
 using TensileLite::PerformanceMetric;
 using TensileLite::TensorDescriptor;
+using TensileLite::Client::DataInitialization;
 using TensileLite::Client::isMXProblem;
 using TensileLite::Client::isMXTensor;
 using TensileLite::TestUtils::makeMinimalClientArgs;
@@ -446,35 +454,538 @@ TEST(DataInitializationInputEpoch, PerSolutionEpochRequiresPreSolution)
     // A different solution that preSolution() has not seen is still rejected.
     EXPECT_THROW(dataInit.inputEpoch(&otherSolution), std::logic_error);
 }
-
-TEST(DataInitializationReferenceRecompute, Gfx1250ReusesPreswizzledMXAcrossSolutions)
-{
-    hipDeviceProp_t prop{};
-    ASSERT_EQ(hipGetDeviceProperties(&prop, 0), hipSuccess);
-    if(std::string(prop.gcnArchName).find("gfx1250") == std::string::npos)
-        GTEST_SKIP() << "gfx1250-specific reuse behavior is only observable on gfx1250";
-
-    auto problem = makeProblem(rocisa::DataType::Float8,
-                               rocisa::DataType::Float8,
-                               /*mxBlockA=*/32,
-                               /*mxBlockB=*/32);
-    auto args = makeMinimalClientArgs(/*mxScaleFormat=*/1);
-    TensileLite::Client::ClientProblemFactory factory(args);
-    TensileLite::Client::DataInitialization   dataInit(args, factory);
-
-    ContractionSolution swizzleSolution;
-    swizzleSolution.problemType.mxScaleFormat = 1;
-
-    EXPECT_FALSE(dataInit.referenceNeedsPerSolutionRecompute(problem, &swizzleSolution));
-}
+#endif
 
 namespace
 {
-    // Exposes the state DataInitialization keeps to reuse MX inputs across solutions.
-    class MXReuseProbe : public TensileLite::Client::DataInitialization
+    class UploadCacheProbe : public DataInitialization
     {
     public:
         using DataInitialization::DataInitialization;
+
+        auto& pristine(size_t tensor, TensorDescriptor const& descriptor)
+        {
+            return m_vdata[tensor].pristine.at(descriptor.dataType());
+        }
+        size_t rotatingPoolCount() const
+        {
+            return m_rm->getRotatingMemory().size();
+        }
+        void emptyRotatingPools()
+        {
+            m_rm = std::make_shared<TensileLite::RotatingMemory>(0);
+        }
+        void invalidateInput(size_t tensor, TensorDescriptor const& descriptor)
+        {
+            invalidateGPUValid(pristine(tensor, descriptor));
+        }
+    };
+
+    auto makeFloatUploadArgs()
+    {
+        auto args = makeMinimalClientArgs(0);
+        for(auto const* name : {"type",
+                                "a-type",
+                                "b-type",
+                                "c-type",
+                                "d-type",
+                                "compute-input-type-A",
+                                "compute-input-type-B"})
+            setOption(args, name, rocisa::DataType::Float);
+        for(auto const* name : {"init-a", "init-b", "init-c"})
+            setOption(args, name, TensileLite::Client::InitMode::SerialDim0);
+        setOption(args,
+                  "problem-size",
+                  std::vector<std::vector<size_t>>{{16, 24, 2, 32}, {200, 136, 3, 128}});
+        setOption(args, "verify-upload-skip", true);
+        setOption(args, "init-beta", TensileLite::Client::InitMode::One);
+        return args;
+    }
+}
+
+// =============================================================================
+//   Section 3b - prepareCPUInputs / prepareGPUInputs copy the current problem's extent
+//
+//   The copies only cover the current problem's tensors, not the run's largest one. With
+//   problem-independent data (Random) every GPU call after the first takes the fast path and
+//   copies no inputs, so the first copy must still fill the whole buffers: a later, larger
+//   problem reads them as they are. With problem-dependent data (SerialDim0) every call copies;
+//   its values depend on the coordinate, so a copy that misses part of a problem's extent
+//   leaves an earlier problem's values there, which the independent expectation catches.
+//   Sizes start below the run's maximum, shrink, then grow to it.
+//   Each problem is then reset as before a second solution: the host data has not changed, so
+//   the upload to the GPU's pristine copy is skipped, and the debug mode (verify-upload-skip)
+//   reads that copy back and throws if it differs from the host data.
+// =============================================================================
+class DataInitializationCopyExtentTest
+    : public ::testing::TestWithParam<TensileLite::Client::InitMode>
+{
+};
+
+TEST_P(DataInitializationCopyExtentTest, GpuInputsMatchCpuInputsWhenProblemsShrinkAndGrow)
+{
+    using TensileLite::Client::InitMode;
+
+    int deviceCount = 0;
+    if(hipGetDeviceCount(&deviceCount) != hipSuccess || deviceCount <= 0)
+        GTEST_SKIP() << "No HIP device";
+
+    auto args = makeMinimalClientArgs(/*mxScaleFormat=*/0);
+    for(auto const* name : {"type",
+                            "a-type",
+                            "b-type",
+                            "c-type",
+                            "d-type",
+                            "compute-input-type-A",
+                            "compute-input-type-B"})
+        setOption(args, name, rocisa::DataType::Float);
+    setOption(args,
+              "problem-size",
+              std::vector<std::vector<size_t>>{
+                  {96, 80, 1, 72}, {16, 24, 1, 8}, {200, 136, 2, 120}, {40, 40, 1, 40}});
+    for(auto const* name : {"init-a", "init-b", "init-c"})
+        setOption(args, name, GetParam());
+    setOption(args, "verify-upload-skip", true);
+
+    TensileLite::Client::ClientProblemFactory factory(args);
+    TensileLite::Client::DataInitialization   dataInit(args, factory);
+    ASSERT_EQ(factory.problems().size(), 4u);
+
+    for(size_t k = 0; k < factory.problems().size(); k++)
+    {
+        auto const& problem = dynamic_cast<ContractionProblemGemm const&>(*factory.problems()[k]);
+        // The client prepares the reference (CPU) inputs before the GPU ones.
+        auto cpu = std::dynamic_pointer_cast<TensileLite::ContractionInputs>(
+            dataInit.prepareCPUInputs(&problem));
+        for(char const* call : {"problem", "solution reset"})
+        {
+            std::shared_ptr<TensileLite::ContractionInputs> gpu;
+            ASSERT_NO_THROW(gpu = std::dynamic_pointer_cast<TensileLite::ContractionInputs>(
+                                dataInit.prepareGPUInputs(&problem)))
+                << call << " of problem " << k;
+            ASSERT_TRUE(cpu && gpu);
+
+            std::pair<void const*, void const*> const inputs[]
+                = {{cpu->a, gpu->a}, {cpu->b, gpu->b}, {cpu->c, gpu->c}};
+            for(size_t i = 0; i < std::size(inputs); i++)
+            {
+                auto const&          desc  = problem.tensors()[i];
+                size_t               bytes = desc.totalAllocatedBytes();
+                std::vector<uint8_t> fromGpu(bytes);
+                ASSERT_EQ(hipMemcpy(fromGpu.data(), inputs[i].second, bytes, hipMemcpyDeviceToHost),
+                          hipSuccess);
+                EXPECT_EQ(std::memcmp(fromGpu.data(), inputs[i].first, bytes), 0)
+                    << "tensor " << desc.getName() << " after the " << call << " of problem " << k;
+                if(GetParam() == InitMode::SerialDim0)
+                {
+                    // Packed tensors: every element of the extent is written.
+                    std::vector<float> expected(desc.totalAllocatedElements());
+                    DataInitialization::initArraySerialDim<float>(expected.data(), 0, desc);
+                    EXPECT_EQ(std::memcmp(expected.data(), inputs[i].first, bytes), 0)
+                        << "CPU tensor " << desc.getName() << " of problem " << k;
+                    EXPECT_EQ(std::memcmp(expected.data(), fromGpu.data(), bytes), 0)
+                        << "GPU tensor " << desc.getName() << " after the " << call
+                        << " of problem " << k;
+                }
+            }
+        }
+    }
+
+    // With problem-dependent data (SerialDim0) every reset takes the slow path, whose uploads
+    // are skipped and verified; Random takes the fast path, which uploads nothing.
+    testing::internal::CaptureStdout();
+    dataInit.finalizeReport();
+    std::string const report = testing::internal::GetCapturedStdout();
+    if(GetParam() == InitMode::SerialDim0)
+        EXPECT_EQ(report.find("Verified 0 "), std::string::npos) << report;
+    EXPECT_NE(report.find("skipped GPU input uploads against the host data"), std::string::npos)
+        << report;
+}
+
+INSTANTIATE_TEST_SUITE_P(InitModes,
+                         DataInitializationCopyExtentTest,
+                         ::testing::Values(TensileLite::Client::InitMode::Random,
+                                           TensileLite::Client::InitMode::SerialDim0),
+                         [](::testing::TestParamInfo<TensileLite::Client::InitMode> const& info) {
+                             return TensileLite::Client::ToString(info.param);
+                         });
+
+// =============================================================================
+//   Section 3c - batched-pointer arrays follow the bounds-check padding
+//
+//   prepareGPUInputs uploads, per tensor, an array with the start pointer of each batch
+//   (inputs->batchA..D), and skips the upload when the array was built from the same start
+//   pointer and batch geometry. The start pointer includes the bounds-check padding, which
+//   depends on the problem and, with GuardPageAll, flips between the two runs of one solution
+//   (GuardPageFront: no padding, GuardPageBack: the tensor ends at the guard page) without a new
+//   problem, input epoch or buffer. Each problem is run like the client runs two solutions
+//   (GuardPageAll: Front, Back, Front, Back). After every call the arrays must hold the pointers
+//   of that call's tensors; the debug mode (verify-upload-skip) reads back every skipped array
+//   and throws if it is stale. NaN mode keeps its padding for the whole problem, so its later
+//   runs skip the upload. GuardPageFront has no padding, so the start pointer stays the same
+//   across problems and only the batch geometry tells them apart: the second problem has other
+//   batch strides, the last one only another batch count.
+// =============================================================================
+class DataInitializationBatchedPointersTest
+    : public ::testing::TestWithParam<TensileLite::Client::BoundsCheckMode>
+{
+};
+
+TEST_P(DataInitializationBatchedPointersTest, FollowBoundsCheckRunsAndProblems)
+{
+    using TensileLite::Client::BoundsCheckMode;
+
+    int deviceCount = 0;
+    if(hipGetDeviceCount(&deviceCount) != hipSuccess || deviceCount <= 0)
+        GTEST_SKIP() << "No HIP device";
+
+    auto args = makeMinimalClientArgs(/*mxScaleFormat=*/0);
+    for(auto const* name : {"type",
+                            "a-type",
+                            "b-type",
+                            "c-type",
+                            "d-type",
+                            "compute-input-type-A",
+                            "compute-input-type-B"})
+        setOption(args, name, rocisa::DataType::Float);
+    // Sizes (i, j, batch, l): the second problem has other batch strides and paddings, the last
+    // one the third's strides with more batches.
+    setOption(args,
+              "problem-size",
+              std::vector<std::vector<size_t>>{
+                  {64, 48, 3, 40}, {32, 24, 5, 16}, {64, 48, 3, 40}, {64, 48, 5, 40}});
+    setOption(args, "bounds-check", GetParam());
+    setOption(args, "verify-upload-skip", true);
+
+    TensileLite::Client::ClientProblemFactory factory(args);
+    TensileLite::Client::DataInitialization   dataInit(args, factory);
+    ASSERT_EQ(factory.problems().size(), 4u);
+
+    TensileLite::Client::TimingEvents const noEvents({}, 0, 0);
+    for(size_t k = 0; k < factory.problems().size(); k++)
+    {
+        auto const& problem = dynamic_cast<ContractionProblemGemm const&>(*factory.problems()[k]);
+        ASSERT_EQ(problem.batchIndices().size(), 1u);
+        auto const   batchIndex = problem.batchIndices()[0];
+        size_t const batchCount = problem.batchSize(0);
+        dataInit.prepareCPUInputs(&problem);
+
+        void const* frontA = nullptr;
+        for(size_t run = 0; run < 4; run++)
+        {
+            bool const back = GetParam() == BoundsCheckMode::GuardPageAll && run % 2 == 1;
+            std::shared_ptr<TensileLite::ContractionInputs> gpu;
+            ASSERT_NO_THROW(gpu = std::dynamic_pointer_cast<TensileLite::ContractionInputs>(
+                                dataInit.prepareGPUInputs(&problem)))
+                << "run " << run << " of problem " << k;
+            ASSERT_TRUE(gpu);
+            if(!back)
+                frontA = frontA ? frontA : gpu->a;
+            // GuardPageAll's two runs use different start pointers, the same in both solutions.
+            EXPECT_EQ(gpu->a == frontA, !back) << "run " << run << " of problem " << k;
+
+            struct
+            {
+                void const*        start;
+                void const* const* batch;
+                size_t             index;
+            } const tensors[] = {{gpu->a, gpu->batchA, batchIndex.a},
+                                 {gpu->b, gpu->batchB, batchIndex.b},
+                                 {gpu->c, gpu->batchC, batchIndex.c},
+                                 {gpu->d, gpu->batchD, batchIndex.d}};
+            for(size_t i = 0; i < std::size(tensors); i++)
+            {
+                auto const&        desc = problem.tensors()[i];
+                std::vector<void*> onGpu(batchCount);
+                ASSERT_EQ(hipMemcpy(onGpu.data(),
+                                    tensors[i].batch,
+                                    batchCount * sizeof(void*),
+                                    hipMemcpyDeviceToHost),
+                          hipSuccess);
+                for(size_t b = 0; b < batchCount; b++)
+                {
+                    auto const* expected = static_cast<uint8_t const*>(tensors[i].start)
+                                           + b * desc.strides()[tensors[i].index] * sizeof(float);
+                    EXPECT_EQ(onGpu[b], expected) << "tensor " << desc.getName() << " batch " << b
+                                                  << ", run " << run << " of problem " << k;
+                }
+            }
+
+            // End of a run, then of a solution after its second run.
+            dataInit.validateWarmups({0}, noEvents, noEvents);
+            if(run % 2 == 1)
+                dataInit.postSolution();
+        }
+    }
+
+    testing::internal::CaptureStdout();
+    dataInit.finalizeReport();
+    std::string const report = testing::internal::GetCapturedStdout();
+    if(GetParam() != BoundsCheckMode::GuardPageAll)
+        EXPECT_EQ(report.find("Verified 0 skipped GPU batched-pointer uploads"), std::string::npos)
+            << report;
+    EXPECT_NE(report.find("skipped GPU batched-pointer uploads"), std::string::npos) << report;
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    BoundsCheckModes,
+    DataInitializationBatchedPointersTest,
+    ::testing::Values(TensileLite::Client::BoundsCheckMode::NaN,
+                      TensileLite::Client::BoundsCheckMode::GuardPageFront,
+                      TensileLite::Client::BoundsCheckMode::GuardPageAll),
+    [](::testing::TestParamInfo<TensileLite::Client::BoundsCheckMode> const& info) {
+        switch(info.param)
+        {
+        case TensileLite::Client::BoundsCheckMode::NaN:
+            return "NaN";
+        case TensileLite::Client::BoundsCheckMode::GuardPageFront:
+            return "GuardPageFront";
+        default:
+            return "GuardPageAll";
+        }
+    });
+
+// The unused destination tail distinguishes extent-limited copies from whole-buffer copies.
+// Sparse inputs exercise compressed data/metadata, and both rotating modes use the same uploads.
+struct CopyBoundaryParam
+{
+    TensileLite::Client::BoundsCheckMode bounds;
+    int                                  sparse;
+    int                                  rotatingMode; // -1 disables rotation
+};
+class DataInitializationCopyBoundaryTest : public ::testing::TestWithParam<CopyBoundaryParam>
+{
+};
+
+TEST_P(DataInitializationCopyBoundaryTest, LeavesUnusedCurrentBufferTailsUntouched)
+{
+    int deviceCount = 0;
+    if(hipGetDeviceCount(&deviceCount) != hipSuccess || deviceCount == 0)
+        GTEST_SKIP() << "No HIP device";
+    auto args = makeFloatUploadArgs();
+    setOption(args, "bounds-check", GetParam().bounds);
+    setOption(args, "sparse", GetParam().sparse);
+    if(GetParam().sparse)
+        for(auto const* name : {"a-type", "b-type", "compute-input-type-A", "compute-input-type-B"})
+            setOption(args, name, rocisa::DataType::Half);
+
+    if(GetParam().rotatingMode >= 0)
+    {
+        setOption(args, "rotating-buffer-size", 2);
+        setOption(args, "rotating-buffer-mode", GetParam().rotatingMode);
+    }
+    TensileLite::Client::ClientProblemFactory factory(args);
+    UploadCacheProbe                          init(args, factory);
+    auto const& problem = dynamic_cast<ContractionProblemGemm const&>(*factory.problems()[0]);
+    using Tensor        = ContractionProblemGemm::TENSOR;
+    std::vector<size_t> tensors{Tensor::A, Tensor::B, Tensor::C};
+    if(GetParam().sparse)
+    {
+        tensors.push_back(Tensor::COMPRESSED);
+        tensors.push_back(Tensor::METADATA);
+    }
+    constexpr uint8_t sentinel = 0xa5;
+    for(auto i : tensors)
+    {
+        auto const& desc  = problem.tensors()[i];
+        auto&       p     = init.pristine(i, desc);
+        size_t      bytes = TensileLite::multiplyElementSize(p.maxElements, desc.elementBytes());
+        std::memset(p.cpuInput.current.get(), sentinel, bytes);
+        ASSERT_EQ(hipMemset(p.gpuInput.current.get(), sentinel, bytes), hipSuccess);
+    }
+    init.prepareCPUInputs(problem);
+    auto gpuInputs = init.prepareGPUInputs(problem);
+    if(GetParam().rotatingMode >= 0)
+    {
+        auto rotated = init.prepareRotatingGPUOutput(3, &problem, gpuInputs, nullptr);
+        ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
+        size_t const expected
+            = GetParam().rotatingMode == 1 ? std::min(size_t{3}, init.rotatingPoolCount()) : 3;
+        ASSERT_GE(expected, 2u);
+        ASSERT_EQ(rotated.size(), expected);
+        for(size_t r = 1; r < rotated.size(); ++r)
+        {
+            auto const* inputs
+                = dynamic_cast<TensileLite::ContractionInputs const*>(rotated[r].get());
+            ASSERT_NE(inputs, nullptr);
+            void const* sources[] = {inputs->a, inputs->b, inputs->c};
+            for(size_t i = 0; i < std::size(sources); ++i)
+            {
+                auto const& desc = problem.tensors()[i];
+                auto&       p    = init.pristine(i, desc);
+                EXPECT_NE(sources[i], p.gpuInput.current.get());
+                std::vector<uint8_t> bytes(desc.totalAllocatedBytes());
+                ASSERT_EQ(hipMemcpy(bytes.data(), sources[i], bytes.size(), hipMemcpyDeviceToHost),
+                          hipSuccess);
+                EXPECT_EQ(std::memcmp(bytes.data(), p.cpuInput.valid.get(), bytes.size()), 0)
+                    << "rotating copy " << r << " tensor " << desc.getName();
+            }
+        }
+    }
+    for(auto i : tensors)
+    {
+        SCOPED_TRACE(problem.tensors()[i].getName());
+        auto const& desc   = problem.tensors()[i];
+        auto&       p      = init.pristine(i, desc);
+        size_t      bytes  = TensileLite::multiplyElementSize(p.maxElements, desc.elementBytes());
+        size_t      extent = desc.totalAllocatedBytes();
+        ASSERT_LT(extent, bytes);
+        auto const* cpu = static_cast<uint8_t const*>(p.cpuInput.current.get());
+        EXPECT_EQ(std::memcmp(cpu, p.cpuInput.valid.get(), extent), 0);
+        EXPECT_TRUE(
+            std::all_of(cpu + extent, cpu + bytes, [](uint8_t v) { return v == sentinel; }));
+        std::vector<uint8_t> gpu(bytes);
+        ASSERT_EQ(hipMemcpy(gpu.data(), p.gpuInput.current.get(), bytes, hipMemcpyDeviceToHost),
+                  hipSuccess);
+        EXPECT_EQ(std::memcmp(gpu.data(), p.cpuInput.valid.get(), extent), 0);
+        EXPECT_TRUE(
+            std::all_of(gpu.begin() + extent, gpu.end(), [](uint8_t v) { return v == sentinel; }));
+    }
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    Layouts,
+    DataInitializationCopyBoundaryTest,
+    ::testing::Values(
+        CopyBoundaryParam{TensileLite::Client::BoundsCheckMode::Disable, 0, -1},
+        CopyBoundaryParam{TensileLite::Client::BoundsCheckMode::GuardPageFront, 0, -1},
+        CopyBoundaryParam{TensileLite::Client::BoundsCheckMode::Disable, 1, -1},
+        CopyBoundaryParam{TensileLite::Client::BoundsCheckMode::GuardPageFront, 1, -1},
+        CopyBoundaryParam{TensileLite::Client::BoundsCheckMode::Disable, 2, -1},
+        CopyBoundaryParam{TensileLite::Client::BoundsCheckMode::GuardPageFront, 2, -1},
+        CopyBoundaryParam{TensileLite::Client::BoundsCheckMode::Disable, 0, 0},
+        CopyBoundaryParam{TensileLite::Client::BoundsCheckMode::Disable, 0, 1}),
+    [](::testing::TestParamInfo<CopyBoundaryParam> const& info) {
+        return std::string(info.param.bounds == TensileLite::Client::BoundsCheckMode::Disable
+                               ? "Disable"
+                               : "GuardFront")
+               + "Sparse" + std::to_string(info.param.sparse)
+               + (info.param.rotatingMode < 0
+                      ? "NoRotation"
+                      : "Rotating" + std::to_string(info.param.rotatingMode));
+    });
+
+TEST(DataInitializationRotatingTest, EmptyModeOnePoolsKeepOnlyOriginalInputs)
+{
+    int deviceCount = 0;
+    if(hipGetDeviceCount(&deviceCount) != hipSuccess || deviceCount == 0)
+        GTEST_SKIP() << "No HIP device";
+    auto args = makeFloatUploadArgs();
+    setOption(args, "rotating-buffer-size", 2);
+    setOption(args, "rotating-buffer-mode", 1);
+    TensileLite::Client::ClientProblemFactory factory(args);
+    UploadCacheProbe                          init(args, factory);
+    auto const& problem = dynamic_cast<ContractionProblemGemm const&>(*factory.problems()[0]);
+    init.prepareCPUInputs(problem);
+    auto inputs = init.prepareGPUInputs(problem);
+    // Normal allocation creates at least one pool. Exercise the defensive empty-pool
+    // path while the initializer retains the original GPU storage.
+    init.emptyRotatingPools();
+    ASSERT_EQ(init.rotatingPoolCount(), 0u);
+    auto rotated = init.prepareRotatingGPUOutput(3, &problem, inputs, nullptr);
+    ASSERT_EQ(rotated.size(), 1u);
+    EXPECT_EQ(rotated.front(), inputs);
+}
+
+class DataInitializationUploadVerificationTest : public ::testing::TestWithParam<bool>
+{
+};
+
+TEST_P(DataInitializationUploadVerificationTest, RejectsCorruptionAndRepairsAfterInvalidation)
+{
+    int deviceCount = 0;
+    if(hipGetDeviceCount(&deviceCount) != hipSuccess || deviceCount == 0)
+        GTEST_SKIP() << "No HIP device";
+    auto                                      args = makeFloatUploadArgs();
+    TensileLite::Client::ClientProblemFactory factory(args);
+    UploadCacheProbe                          init(args, factory);
+    auto const& problem = dynamic_cast<ContractionProblemGemm const&>(*factory.problems()[0]);
+    init.prepareCPUInputs(problem);
+    init.prepareGPUInputs(problem);
+    // Establish a successful verified cache hit before corrupting its contents.
+    ASSERT_NO_THROW(init.prepareGPUInputs(problem));
+    auto&      p     = init.pristine(ContractionProblemGemm::TENSOR::A, problem.a());
+    auto const epoch = init.inputEpoch();
+    if(GetParam())
+    {
+        void* corrupt = nullptr;
+        ASSERT_EQ(
+            hipMemcpy(p.gpuInput.batch.get(), &corrupt, sizeof(corrupt), hipMemcpyHostToDevice),
+            hipSuccess);
+    }
+    else
+    {
+        uint8_t corrupt = *static_cast<uint8_t*>(p.cpuInput.valid.get()) ^ 0xff;
+        ASSERT_EQ(
+            hipMemcpy(p.gpuInput.valid.get(), &corrupt, sizeof(corrupt), hipMemcpyHostToDevice),
+            hipSuccess);
+    }
+    try
+    {
+        init.prepareGPUInputs(problem);
+        FAIL() << "verification accepted corrupted cached contents";
+    }
+    catch(std::runtime_error const& error)
+    {
+        EXPECT_NE(std::string(error.what())
+                      .find(GetParam() ? "Stale GPU batched pointers" : "Stale GPU input"),
+                  std::string::npos);
+    }
+    EXPECT_EQ(init.inputEpoch(), epoch);
+    if(GetParam())
+        p.gpuBatchKey.reset();
+    else
+        init.invalidateInput(ContractionProblemGemm::TENSOR::A, problem.a());
+    ASSERT_NO_THROW(init.prepareGPUInputs(problem)); // repair
+    ASSERT_NO_THROW(init.prepareGPUInputs(problem)); // verify repaired bytes
+}
+
+INSTANTIATE_TEST_SUITE_P(Buffers,
+                         DataInitializationUploadVerificationTest,
+                         ::testing::Values(false, true),
+                         [](::testing::TestParamInfo<bool> const& info) {
+                             return info.param ? "BatchPointers" : "PristineInput";
+                         });
+
+TEST(DataInitializationCopyExtent, GroupedGemmsCopyTheWholePristineBuffer)
+{
+    int deviceCount = 0;
+    if(hipGetDeviceCount(&deviceCount) != hipSuccess || deviceCount == 0)
+        GTEST_SKIP() << "No HIP device";
+    auto args = makeFloatUploadArgs();
+    setOption(args, "grouped-gemm", true);
+    TensileLite::Client::ClientProblemFactory factory(args);
+    UploadCacheProbe                          init(args, factory);
+    ASSERT_EQ(factory.problems().size(), 1u);
+    auto const& problem
+        = dynamic_cast<TensileLite::ContractionProblemGroupedGemm const&>(*factory.problems()[0]);
+    ASSERT_EQ(problem.gemms.size(), 2u);
+    init.prepareCPUInputs(problem);
+    init.prepareGPUInputs(problem);
+    ASSERT_NO_THROW(init.prepareGPUInputs(problem));
+    for(size_t i = 0; i < 3; ++i)
+    {
+        auto const& desc = problem.gemms[0].tensors()[i];
+        auto&       p    = init.pristine(i, desc);
+        ASSERT_EQ(p.groupedGemmOffsets.size(), 2u);
+        size_t bytes = TensileLite::multiplyElementSize(p.maxElements, desc.elementBytes());
+        ASSERT_GT(bytes, desc.totalAllocatedBytes());
+        EXPECT_EQ(std::memcmp(p.cpuInput.current.get(), p.cpuInput.valid.get(), bytes), 0);
+        std::vector<uint8_t> gpu(bytes);
+        ASSERT_EQ(hipMemcpy(gpu.data(), p.gpuInput.current.get(), bytes, hipMemcpyDeviceToHost),
+                  hipSuccess);
+        EXPECT_EQ(std::memcmp(gpu.data(), p.cpuInput.valid.get(), bytes), 0);
+    }
+}
+
+#if HIPBLASLT_ENABLE_MXDATAGENERATOR
+namespace
+{
+    // Exposes the state DataInitialization keeps to reuse MX inputs across solutions.
+    class MXReuseProbe : public UploadCacheProbe
+    {
+    public:
+        using UploadCacheProbe::UploadCacheProbe;
 
         bool preswizzledA() const
         {
@@ -633,6 +1144,86 @@ TEST(DataInitializationInputEpoch, NonMXGeneratorWriterAdvancesOnlyOnDescriptorM
     dataInit.initializeNonMXB(problem);
     EXPECT_EQ(dataInit.inputEpoch(), after);
 }
+
+class DataInitializationMXUploadTest : public ::testing::TestWithParam<int>
+{
+};
+
+TEST_P(DataInitializationMXUploadTest, CanonicalAndSwizzledTransitionsReplaceWholeScaleBuffers)
+{
+    int deviceCount = 0;
+    if(hipGetDeviceCount(&deviceCount) != hipSuccess || deviceCount == 0)
+        GTEST_SKIP() << "No HIP device";
+    auto args = makeMXLaunchArgs({{128, 128, 1, 512}, {256, 256, 1, 512}});
+    setOption(args, "mx-data-generator", GetParam());
+    setOption(args, "verify-upload-skip", true);
+    TensileLite::Client::ClientProblemFactory factory(args);
+    MXReuseProbe                              init(args, factory);
+    init.useGfx950ScaleLayout(); // host transform only; no architecture-specific kernel is launched
+    auto*       problem = factory.problems()[0].get();
+    auto const& gemm    = dynamic_cast<ContractionProblemGemm const&>(*problem);
+    using Tensor        = ContractionProblemGemm::TENSOR;
+    ContractionSolution swizzle, canonical;
+    setMXSolution(swizzle, 1, 128);
+    setMXSolution(canonical, 0, 128);
+    init.preProblem(problem);
+    init.prepareCPUInputs(problem);
+    init.prepareGPUInputs(problem); // prepare buffers before selecting a solution
+
+    auto const epoch = init.inputEpoch();
+    auto       run   = [&](ContractionSolution& solution) {
+        for(auto tensor : {Tensor::MXSA, Tensor::MXSB})
+        {
+            auto const& desc = gemm.tensors()[tensor];
+            auto&       p    = init.pristine(tensor, desc);
+            size_t bytes = TensileLite::multiplyElementSize(p.maxElements, desc.elementBytes());
+            HIP_CHECK_EXC(hipMemset(p.gpuInput.current.get(), 0xa5, bytes));
+        }
+        init.preSolution(&solution);
+        init.prepareGPUInputs(problem);
+        init.postSolution();
+        std::vector<std::vector<uint8_t>> result;
+        for(auto tensor : {Tensor::MXSA, Tensor::MXSB})
+        {
+            auto const& desc = gemm.tensors()[tensor];
+            auto&       p    = init.pristine(tensor, desc);
+            size_t bytes = TensileLite::multiplyElementSize(p.maxElements, desc.elementBytes());
+            EXPECT_GT(bytes, desc.totalAllocatedBytes());
+            std::vector<uint8_t> gpu(bytes);
+            HIP_CHECK_EXC(
+                hipMemcpy(gpu.data(), p.gpuInput.current.get(), bytes, hipMemcpyDeviceToHost));
+            std::vector<uint8_t> pristine(bytes);
+            HIP_CHECK_EXC(
+                hipMemcpy(pristine.data(), p.gpuInput.valid.get(), bytes, hipMemcpyDeviceToHost));
+            EXPECT_EQ(gpu, pristine); // MX copies preserve the whole currently selected layout
+            if(solution.problemType.mxScaleFormat == 0)
+            {
+                EXPECT_EQ(std::memcmp(gpu.data(), p.cpuInput.valid.get(), bytes), 0);
+                EXPECT_EQ(std::memcmp(p.cpuInput.current.get(), p.cpuInput.valid.get(), bytes), 0);
+                EXPECT_EQ(p.gpuValidEpoch, epoch);
+                EXPECT_EQ(p.gpuValidElements, p.maxElements);
+            }
+            else
+                EXPECT_EQ(p.gpuValidElements, 0u);
+            // The next problem's unused tail is outside this layout and may retain canonical
+            // bytes after a format change. Compare only the current scale layout across runs.
+            gpu.resize(desc.totalAllocatedBytes());
+            result.push_back(std::move(gpu));
+        }
+        EXPECT_EQ(init.inputEpoch(), epoch);
+        return result;
+    };
+    auto const swizzled = run(swizzle);
+    EXPECT_EQ(run(swizzle), swizzled);
+    auto const unpermuted = run(canonical);
+    ASSERT_NE(unpermuted, swizzled) << "scale layouts must differ for the invalidation test";
+    EXPECT_EQ(run(canonical), unpermuted); // canonical upload cache hit
+    EXPECT_EQ(run(swizzle), swizzled); // canonical tag must be invalidated
+    EXPECT_EQ(run(canonical), unpermuted); // swizzled bytes must be replaced
+    init.postProblem();
+}
+
+INSTANTIATE_TEST_SUITE_P(GeneratorModes, DataInitializationMXUploadTest, ::testing::Values(0, 1));
 
 // From the second problem on, preSolution re-initializes the MX inputs before
 // prepareGPUInputs runs. With validation off, the non-MX tensors must still be
@@ -1546,7 +2137,7 @@ TEST(SwizzledStaging, RejectsAnUnpackedSubByteLeadingDimension)
 #endif // HIPBLASLT_ENABLE_MXDATAGENERATOR
 
 // =============================================================================
-//   Section 5 — TensileLite::hip::CopyTensorVoid
+//   Section 7 — TensileLite::hip::CopyTensorVoid
 // =============================================================================
 TEST(CopyTensorVoid, CopiesSource)
 {
@@ -1625,3 +2216,445 @@ TEST(RandomNarrowInit, BFloat16StaysInNarrowRange)
     expectRandomNarrowRange<TensileLite::BFloat16>(
         8, 7, [](TensileLite::BFloat16 v) { return uint32_t(v.data); });
 }
+
+// =============================================================================
+//   Section 10 - DataInitialization::initArrayTrig(array, tensor)
+//
+//       Each element gets getTrigValue(idx), idx being its logical (column-major) index, at
+//       tensor.index(coordinate of idx) / Packing. Packed descriptors take a flat loop, others
+//       a per-coordinate loop; both must write exactly the bytes of the original algorithm
+//       (initArrayTrigReference: CoordNumbered + TensorDescriptor::index per element, serial),
+//       and leave the stride gaps untouched.
+// =============================================================================
+namespace
+{
+    class InitArrayThreadTest : public ::testing::Test
+    {
+    protected:
+        void configureThreads(int requested)
+        {
+#ifdef _OPENMP
+            omp_set_dynamic(0);
+            omp_set_num_threads(requested);
+            int actual = 0;
+#pragma omp parallel
+            {
+#pragma omp single
+                actual = omp_get_num_threads();
+            }
+            ASSERT_EQ(actual, requested) << "parallel init coverage requires the requested team";
+#else
+            if(requested > 1)
+                GTEST_SKIP() << "parallel init coverage requires an OpenMP-enabled build";
+#endif
+        }
+
+        void TearDown() override
+        {
+#ifdef _OPENMP
+            omp_set_num_threads(m_previousThreads);
+            omp_set_dynamic(m_previousDynamic);
+#endif
+        }
+
+    private:
+#ifdef _OPENMP
+        int m_previousThreads = omp_get_max_threads();
+        int m_previousDynamic = omp_get_dynamic();
+#endif
+    };
+
+    template <typename T, bool useCos, bool useAbs>
+    void initArrayTrigReference(T* array, TensorDescriptor const& tensor)
+    {
+        auto const&  sizes = tensor.sizes();
+        size_t const count = TensileLite::CoordCount(sizes.begin(), sizes.end());
+        for(size_t idx = 0; idx < count; idx += TensileLite::TypeInfo<T>::Packing)
+        {
+            std::vector<size_t> coord(tensor.dimensions(), 0);
+            TensileLite::CoordNumbered(idx, coord.begin(), coord.end(), sizes.begin(), sizes.end());
+            array[tensor.index(coord) / TensileLite::TypeInfo<T>::Packing]
+                = DataInitialization::getTrigValue<T>(idx, useCos, useAbs);
+        }
+    }
+
+    struct TrigLayout
+    {
+        std::vector<size_t> sizes;
+        std::vector<size_t> strides; // empty: default (packed) strides
+        char const* name;
+
+        friend void PrintTo(TrigLayout const& layout, std::ostream* os)
+        {
+            *os << layout.name;
+        }
+    };
+
+    bool supportsPacking(TrigLayout const& layout, size_t packing)
+    {
+        if(packing == 1)
+            return true;
+        // Packs must stay within contiguous rows, and outer strides must start whole packs.
+        if(layout.sizes[0] % packing != 0)
+            return false;
+        if(layout.strides.empty())
+            return true;
+        if(layout.strides[0] != 1)
+            return false;
+        return std::all_of(layout.strides.begin() + 1, layout.strides.end(),
+                           [=](size_t stride) { return stride % packing == 0; });
+    }
+
+    template <typename T, bool useCos, bool useAbs>
+    void expectTrigMatchesReference(TrigLayout const& layout)
+    {
+        using Info = TensileLite::TypeInfo<T>;
+        if(!supportsPacking(layout, Info::Packing))
+            return;
+
+        TensorDescriptor const tensor
+            = layout.strides.empty()
+                  ? TensorDescriptor("t", Info::Enum, layout.sizes.begin(), layout.sizes.end())
+                  : TensorDescriptor("t",
+                                     Info::Enum,
+                                     layout.sizes.begin(),
+                                     layout.sizes.end(),
+                                     layout.strides.begin(),
+                                     layout.strides.end());
+        size_t const bytes = tensor.totalAllocatedElements() / Info::Packing * sizeof(T);
+
+        std::vector<unsigned char> expected(bytes, 0xcc);
+        std::vector<unsigned char> actual(bytes, 0xcc);
+        initArrayTrigReference<T, useCos, useAbs>(reinterpret_cast<T*>(expected.data()), tensor);
+        DataInitialization::initArrayTrig<T, useCos, useAbs>(reinterpret_cast<T*>(actual.data()),
+                                                             tensor);
+
+        auto const diff = std::mismatch(expected.begin(), expected.end(), actual.begin());
+        EXPECT_TRUE(diff.first == expected.end())
+            << "type=" << Info::Name() << " useCos=" << useCos << " useAbs=" << useAbs
+            << " tensor=" << tensor << ": first differing byte " << (diff.first - expected.begin())
+            << " of " << bytes;
+    }
+
+    template <typename T>
+    void expectTrigMatchesReferenceAllModes(TrigLayout const& layout)
+    {
+        expectTrigMatchesReference<T, false, false>(layout);
+        expectTrigMatchesReference<T, true, false>(layout);
+        expectTrigMatchesReference<T, false, true>(layout);
+        expectTrigMatchesReference<T, true, true>(layout);
+    }
+} // namespace
+
+class InitArrayTrigTest
+    : public InitArrayThreadTest,
+      public ::testing::WithParamInterface<std::tuple<TrigLayout, int>>
+{
+    void SetUp() override { configureThreads(std::get<1>(GetParam())); }
+};
+TEST_P(InitArrayTrigTest, MatchesPerElementAlgorithm)
+{
+    auto const& layout = std::get<0>(GetParam());
+    expectTrigMatchesReferenceAllModes<float>(layout);
+    expectTrigMatchesReferenceAllModes<double>(layout);
+    expectTrigMatchesReferenceAllModes<TensileLite::Half>(layout);
+    expectTrigMatchesReferenceAllModes<TensileLite::BFloat16>(layout);
+    expectTrigMatchesReferenceAllModes<TensileLite::Float8>(layout);
+    expectTrigMatchesReferenceAllModes<TensileLite::BFloat8_fnuz>(layout);
+    expectTrigMatchesReferenceAllModes<std::complex<float>>(layout);
+    expectTrigMatchesReferenceAllModes<std::complex<double>>(layout);
+#ifndef _WIN32
+    expectTrigMatchesReferenceAllModes<TensileLite::Float4x2>(layout);
+    expectTrigMatchesReferenceAllModes<TensileLite::Float6x32>(layout);
+    expectTrigMatchesReferenceAllModes<TensileLite::BFloat6x32>(layout);
+#endif
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    PackedAndStrided,
+    InitArrayTrigTest,
+    ::testing::Combine(::testing::Values(
+        // ----- packed: default strides (flat loop) -------------------------
+        TrigLayout{{4096}, {}, "Packed1D"},
+        TrigLayout{{52, 20, 2}, {}, "PackedDefaultStrides"},
+        TrigLayout{{64, 40}, {1, 64}, "PackedExplicitStrides"},
+        TrigLayout{{1000, 37, 2}, {1, 1000, 37000}, "PackedBatched"},
+        // 4800 FP6/BF6 packs cross the 4096-iteration schedule chunk boundary.
+        TrigLayout{{256, 600}, {}, "Packed32ElementPacks"},
+        // ----- strided (per-coordinate loop) -------------------------------
+        TrigLayout{{60, 40}, {1, 64}, "LeadingDimPadding"},
+        TrigLayout{{48, 36, 3}, {1, 48, 1800}, "BatchStridePadding"},
+        TrigLayout{{1000, 37, 2}, {1, 1004, 40000}, "LeadingDimAndBatchPadding"},
+        TrigLayout{{64, 1, 5}, {1, 4, 128}, "SizeOneDimNonDefaultStride"},
+        TrigLayout{{40, 64}, {64, 1}, "Transposed"},
+        TrigLayout{{256, 600}, {1, 288}, "Padded32ElementPacks"}
+    ), ::testing::Values(1, 4)),
+    [](::testing::TestParamInfo<std::tuple<TrigLayout, int>> const& info) {
+        return std::string(std::get<0>(info.param).name) + "Threads"
+               + std::to_string(std::get<1>(info.param));
+    }
+);
+
+// =============================================================================
+//   Section 11 - DataInitialization Serial / Identity init loops
+//
+//       SerialIdx, SerialDim0/1 and Identity values depend only on the element's logical index,
+//       so the parallel loops (dynamic schedule) must write exactly the bytes of a serial run
+//       of the same per-element algorithm, and leave the stride gaps untouched. The layouts
+//       with 74,000 elements span many schedule chunks.
+// =============================================================================
+namespace
+{
+    enum class SerialInit
+    {
+        SerialIdx,
+        SerialDim0,
+        SerialDim1,
+        Identity
+    };
+
+    char const* toString(SerialInit init)
+    {
+        switch(init)
+        {
+        case SerialInit::SerialIdx:
+            return "SerialIdx";
+        case SerialInit::SerialDim0:
+            return "SerialDim0";
+        case SerialInit::SerialDim1:
+            return "SerialDim1";
+        case SerialInit::Identity:
+            return "Identity";
+        }
+        return "?";
+    }
+
+    template <typename T>
+    void initArraySerialReference(T* array, TensorDescriptor const& tensor, SerialInit init)
+    {
+        using TensileLite::Half;
+        auto const&  sizes   = tensor.sizes();
+        size_t const count   = TensileLite::CoordCount(sizes.begin(), sizes.end());
+        size_t const packing = TensileLite::TypeInfo<T>::Packing;
+        // DataInitialization's SerialDim specialization for Half writes the coordinate as raw
+        // bits, for every element.
+        bool const halfBits = std::is_same_v<T, Half>
+                              && (init == SerialInit::SerialDim0 || init == SerialInit::SerialDim1);
+        for(size_t idx = 0; idx < count; idx += halfBits ? 1 : packing)
+        {
+            std::vector<size_t> coord(tensor.dimensions(), 0);
+            TensileLite::CoordNumbered(idx, coord.begin(), coord.end(), sizes.begin(), sizes.end());
+            size_t const tensorIndex = tensor.index(coord) / packing;
+            size_t       value       = 0;
+            switch(init)
+            {
+            case SerialInit::SerialIdx:
+                value = idx;
+                break;
+            case SerialInit::SerialDim0:
+                value = coord[0];
+                break;
+            case SerialInit::SerialDim1:
+                value = coord[1];
+                break;
+            case SerialInit::Identity:
+                value = coord[0] == coord[1] ? 1 : 0;
+                break;
+            }
+            if constexpr(std::is_same_v<T, Half>)
+            {
+                if(halfBits)
+                {
+                    uint16_t const bits = static_cast<uint16_t>(value);
+                    std::memcpy(&array[tensorIndex], &bits, sizeof(bits));
+                    continue;
+                }
+            }
+            array[tensorIndex] = DataInitialization::ConvertTo<T>(value);
+        }
+    }
+
+    template <typename T>
+    void runSerialInit(T* array, TensorDescriptor const& tensor, SerialInit init)
+    {
+        switch(init)
+        {
+        case SerialInit::SerialIdx:
+            DataInitialization::initArraySerialIdx<T>(array, tensor);
+            break;
+        case SerialInit::SerialDim0:
+            DataInitialization::initArraySerialDim<T>(array, 0, tensor);
+            break;
+        case SerialInit::SerialDim1:
+            DataInitialization::initArraySerialDim<T>(array, 1, tensor);
+            break;
+        case SerialInit::Identity:
+            DataInitialization::initArrayIdentity<T>(array, tensor);
+            break;
+        }
+    }
+
+    template <typename T>
+    void expectSerialMatchesReference(TrigLayout const& layout, SerialInit init)
+    {
+        using Info = TensileLite::TypeInfo<T>;
+        if(!supportsPacking(layout, Info::Packing))
+            return;
+        // SerialDim1 and Identity read the coordinate of dimension 1.
+        if(init != SerialInit::SerialIdx && init != SerialInit::SerialDim0
+           && layout.sizes.size() < 2)
+            return;
+
+        TensorDescriptor const tensor
+            = layout.strides.empty()
+                  ? TensorDescriptor("t", Info::Enum, layout.sizes.begin(), layout.sizes.end())
+                  : TensorDescriptor("t",
+                                     Info::Enum,
+                                     layout.sizes.begin(),
+                                     layout.sizes.end(),
+                                     layout.strides.begin(),
+                                     layout.strides.end());
+        size_t const bytes = tensor.totalAllocatedElements() / Info::Packing * sizeof(T);
+
+        std::vector<unsigned char> expected(bytes, 0xcc);
+        std::vector<unsigned char> actual(bytes, 0xcc);
+        initArraySerialReference<T>(reinterpret_cast<T*>(expected.data()), tensor, init);
+        runSerialInit<T>(reinterpret_cast<T*>(actual.data()), tensor, init);
+
+        auto const diff = std::mismatch(expected.begin(), expected.end(), actual.begin());
+        EXPECT_TRUE(diff.first == expected.end())
+            << "type=" << Info::Name() << " init=" << toString(init) << " tensor=" << tensor
+            << ": first differing byte " << (diff.first - expected.begin()) << " of " << bytes;
+    }
+
+    // The flat SerialIdx overload (array, elements) writes ConvertTo(i) to pack i.
+    template <typename T>
+    void expectFlatSerialMatchesReference(size_t elements)
+    {
+        using Info           = TensileLite::TypeInfo<T>;
+        size_t const   packs = elements / Info::Packing;
+        // A trailing sentinel keeps zero-pack storage valid and catches stray writes.
+        std::vector<T> expected(packs + 1);
+        std::vector<T> actual(packs + 1);
+        size_t const bytes = expected.size() * sizeof(T);
+        std::memset(expected.data(), 0xcc, bytes);
+        std::memset(actual.data(), 0xcc, bytes);
+        for(size_t i = 0; i < packs; i++)
+            expected[i] = DataInitialization::ConvertTo<T>(i);
+        DataInitialization::initArrayConvert<T>(actual.data(), elements);
+        EXPECT_EQ(std::memcmp(expected.data(), actual.data(), bytes), 0)
+            << "type=" << Info::Name() << " elements=" << elements;
+    }
+
+    template <typename T>
+    void expectSerialMatchesReferenceAllModes(TrigLayout const& layout)
+    {
+        for(SerialInit init : {SerialInit::SerialIdx,
+                               SerialInit::SerialDim0,
+                               SerialInit::SerialDim1,
+                               SerialInit::Identity})
+            expectSerialMatchesReference<T>(layout, init);
+    }
+} // namespace
+
+class InitArraySerialTest
+    : public InitArrayThreadTest,
+      public ::testing::WithParamInterface<std::tuple<TrigLayout, int>>
+{
+    void SetUp() override { configureThreads(std::get<1>(GetParam())); }
+};
+TEST_P(InitArraySerialTest, MatchesPerElementAlgorithm)
+{
+    auto const& layout = std::get<0>(GetParam());
+    expectSerialMatchesReferenceAllModes<float>(layout);
+    expectSerialMatchesReferenceAllModes<double>(layout);
+    expectSerialMatchesReferenceAllModes<TensileLite::Half>(layout);
+    expectSerialMatchesReferenceAllModes<TensileLite::BFloat16>(layout);
+    expectSerialMatchesReferenceAllModes<TensileLite::Float8>(layout);
+    expectSerialMatchesReferenceAllModes<TensileLite::BFloat8_fnuz>(layout);
+    expectSerialMatchesReferenceAllModes<int32_t>(layout);
+    expectSerialMatchesReferenceAllModes<int8_t>(layout);
+    expectSerialMatchesReferenceAllModes<std::complex<float>>(layout);
+    expectSerialMatchesReferenceAllModes<std::complex<double>>(layout);
+#ifndef _WIN32
+    expectSerialMatchesReferenceAllModes<TensileLite::Float4x2>(layout);
+    expectSerialMatchesReferenceAllModes<TensileLite::Float6x32>(layout);
+    expectSerialMatchesReferenceAllModes<TensileLite::BFloat6x32>(layout);
+#endif
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    PackedAndStrided,
+    InitArraySerialTest,
+    ::testing::Combine(::testing::Values(
+        TrigLayout{{4096}, {}, "Packed1D"},
+        TrigLayout{{52, 20, 2}, {}, "PackedDefaultStrides"},
+        TrigLayout{{1000, 37, 2}, {1, 1000, 37000}, "PackedBatched"},
+        TrigLayout{{60, 40}, {1, 64}, "LeadingDimPadding"},
+        TrigLayout{{1000, 37, 2}, {1, 1004, 40000}, "LeadingDimAndBatchPadding"},
+        TrigLayout{{40, 64}, {64, 1}, "Transposed"},
+        TrigLayout{{256, 600}, {}, "Packed32ElementPacks"},
+        TrigLayout{{256, 600}, {1, 288}, "Padded32ElementPacks"}
+    ), ::testing::Values(1, 4)),
+    [](::testing::TestParamInfo<std::tuple<TrigLayout, int>> const& info) {
+        return std::string(std::get<0>(info.param).name) + "Threads"
+               + std::to_string(std::get<1>(info.param));
+    }
+);
+
+class InitArrayConvertTest : public InitArrayThreadTest, public ::testing::WithParamInterface<int>
+{
+    void SetUp() override { configureThreads(GetParam()); }
+};
+
+TEST_P(InitArrayConvertTest, MatchesSerialLoop)
+{
+    for(size_t elements : {size_t(0), size_t(1), size_t(4096), size_t(74000), size_t(153600)})
+    {
+        expectFlatSerialMatchesReference<float>(elements);
+        expectFlatSerialMatchesReference<TensileLite::BFloat16>(elements);
+        expectFlatSerialMatchesReference<int32_t>(elements);
+#ifndef _WIN32
+        expectFlatSerialMatchesReference<TensileLite::Float4x2>(elements);
+        expectFlatSerialMatchesReference<TensileLite::Float6x32>(elements);
+        expectFlatSerialMatchesReference<TensileLite::BFloat6x32>(elements);
+#endif
+    }
+}
+
+INSTANTIATE_TEST_SUITE_P(ThreadCounts, InitArrayConvertTest, ::testing::Values(1, 4));
+
+class InitArraySeededRandomTest
+    : public InitArrayThreadTest, public ::testing::WithParamInterface<int>
+{
+    void SetUp() override { configureThreads(GetParam()); }
+};
+
+TEST_P(InitArraySeededRandomTest, SingleChunkMatchesSeededSerialDraws)
+{
+#ifndef _WIN32
+    using T = TensileLite::Float4x2; // This Random specialization draws from rand(), not random_device.
+    using TensileLite::Client::InitMode;
+    // The schedule chunk counts packs, so 4096 FP4 packs are 8192 logical elements.
+    for(size_t packs : {size_t(1), DataInitialization::initLoopChunk})
+        for(unsigned seed : {137u, 987u})
+        {
+            SCOPED_TRACE(::testing::Message() << "packs=" << packs << " seed=" << seed);
+            std::vector<T> expected(packs), actual(packs);
+            std::srand(seed);
+            for(T& value : expected)
+                value = DataInitialization::getValue<T, InitMode::Random>();
+            int const nextExpected = std::rand();
+
+            std::srand(seed);
+            DataInitialization::initArray<T, InitMode::Random>(
+                actual.data(), packs * TensileLite::TypeInfo<T>::Packing);
+            EXPECT_EQ(std::memcmp(expected.data(), actual.data(), packs * sizeof(T)), 0);
+            EXPECT_EQ(std::rand(), nextExpected) << "the fill must consume the same seeded draws";
+        }
+#else
+    GTEST_SKIP() << "the rand-backed FP4 initialization mode is unavailable on Windows";
+#endif
+}
+
+INSTANTIATE_TEST_SUITE_P(ThreadCounts, InitArraySeededRandomTest, ::testing::Values(1, 4));

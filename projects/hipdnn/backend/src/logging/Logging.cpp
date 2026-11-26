@@ -3,6 +3,7 @@
 
 #include "Logging.hpp"
 #include "GraphLogger.hpp"
+#include "LastErrorManager.hpp"
 #include "PlatformUtils.hpp"
 #include "UserCallbackSink.hpp"
 #include "plugin/EnginePluginResourceManager.hpp"
@@ -16,6 +17,8 @@
 #include <hipdnn_plugin_sdk/DeviceQuery.hpp>
 #include <iostream>
 #include <map>
+#include <string>
+#include <vector>
 
 #include <spdlog/async.h>
 #include <spdlog/sinks/basic_file_sink.h>
@@ -62,21 +65,27 @@ struct BackendLogState
     // Shared thread pool for async logger
     std::shared_ptr<spdlog::details::thread_pool> sharedThreadPool;
 
-    // Shared async logger with dist_sink containing:
-    //   - Console sink (if HIPDNN_LOG_LEVEL env var set, no HIPDNN_LOG_FILE)
-    //   - File sink (if HIPDNN_LOG_FILE env var set)
-    //   - User callback sinks (async mode)
+    // Shared async logger with two sinks:
+    //   - asyncSharedDistSink: the console sink, or the file sink if HIPDNN_LOG_FILE is set,
+    //     created the first time logging is enabled (see lockedCreateOutputSink())
+    //   - asyncCallbackSinks: user callback sinks (async mode)
     std::shared_ptr<spdlog::async_logger> asyncLogger;
     std::shared_ptr<spdlog::sinks::dist_sink_mt> asyncSharedDistSink;
+    std::shared_ptr<UserCallbackDispatchSink> asyncCallbackSinks;
 
     std::shared_ptr<spdlog::sinks::sink> consoleSink; // May be null
     std::shared_ptr<spdlog::sinks::sink> fileSink; // May be null
 
-    // Sync user callback logger with dist_sink
+    // Set once the console or file sink has been created (or its creation has failed and
+    // was reported); cleared by loggerShutdown().
+    std::atomic<bool> outputSinkCreated{false};
+
+    // Sync user callback logger
     std::shared_ptr<spdlog::logger> syncLogger;
-    std::shared_ptr<spdlog::sinks::dist_sink_mt> syncSharedDistSink;
-    std::atomic<int> syncSinkCount{0}; // Number of sinks in syncSharedDistSink
-    std::atomic<int> asyncSinkCount{0}; // Number of sinks in asyncSharedDistSink
+    std::shared_ptr<UserCallbackDispatchSink> syncCallbackSinks;
+    std::atomic<int> syncSinkCount{0}; // Number of sinks in syncCallbackSinks
+    // Number of sinks in asyncSharedDistSink and asyncCallbackSinks
+    std::atomic<int> asyncSinkCount{0};
 
     struct UserCallbackInfo
     {
@@ -138,6 +147,71 @@ BackendLogState& getBackendLogState()
     return *s_state;
 }
 
+// Creates the console sink, or the file sink if HIPDNN_LOG_FILE is set. Called under the unique
+// state lock once logging is enabled, so no log file is opened while the level is OFF. Never
+// throws: a file that cannot be opened is reported once on stderr and the console sink is used
+// instead. Failures are written with std::cerr because the backend log macros would re-enter
+// initialize().
+void lockedCreateOutputSink(BackendLogState& state)
+{
+    // Set first so that a failure below is reported once, not on every message.
+    state.outputSinkCreated.store(true, std::memory_order_release);
+
+    try
+    {
+        const std::string logFilePath = hipdnn_data_sdk::utilities::trim(
+            hipdnn_data_sdk::utilities::getEnv("HIPDNN_LOG_FILE", ""));
+
+        std::shared_ptr<spdlog::sinks::sink> sink;
+        if(!logFilePath.empty())
+        {
+            try
+            {
+                state.fileSink
+                    = std::make_shared<spdlog::sinks::basic_file_sink_mt>(logFilePath, false);
+                sink = state.fileSink;
+            }
+            catch(const std::exception& e)
+            {
+                std::cerr << "[hipDNN] WARNING: Cannot open HIPDNN_LOG_FILE '" << logFilePath
+                          << "': " << e.what() << ". Logging to stderr instead.\n";
+            }
+        }
+
+        if(sink == nullptr)
+        {
+            state.consoleSink = std::make_shared<spdlog::sinks::stderr_color_sink_mt>();
+            sink = state.consoleSink;
+        }
+
+        sink->set_level(spdlog::level::trace);
+        sink->set_pattern(BACKEND_LOGGER_PATTERN);
+        state.asyncSharedDistSink->add_sink(sink);
+        state.asyncSinkCount.fetch_add(1, std::memory_order_release);
+    }
+    catch(const std::exception& e)
+    {
+        std::cerr << "[hipDNN] WARNING: Failed to create the log sink; console and file logging "
+                     "is disabled: "
+                  << e.what() << '\n';
+    }
+}
+
+// Creates the console or file sink when logging was initialized while the level was OFF and
+// the level is no longer OFF.
+void ensureOutputSink(BackendLogState& state)
+{
+    const std::unique_lock<std::shared_mutex> lock(state.loggerStateMutex);
+    if(!sLoggerInitialized.load(std::memory_order_relaxed)
+       || state.outputSinkCreated.load(std::memory_order_relaxed)
+       || hipdnn_data_sdk::logging::getLogLevel() == HIPDNN_SEV_OFF)
+    {
+        return;
+    }
+
+    lockedCreateOutputSink(state);
+}
+
 } // namespace
 
 // NOLINTNEXTLINE(misc-no-recursion) Intentional: logging macros trigger lazy initialization
@@ -187,6 +261,18 @@ void initialize()
     }
 
     auto& state = getBackendLogState();
+
+    // initialize() runs inside API calls and log calls, so a failure never propagates from
+    // here: it is reported once on stderr and logging stays disabled until loggerShutdown().
+    const auto disableLogging = [&state](const char* reason) {
+        std::cerr << "[hipDNN] WARNING: Failed to initialize logger; logging is disabled: "
+                  << reason << '\n';
+        loggerShutdown();
+        const std::unique_lock<std::shared_mutex> lock(state.loggerStateMutex);
+        state.outputSinkCreated.store(true, std::memory_order_release);
+        sLoggerInitialized.store(true, std::memory_order_release);
+    };
+
     try
     {
         const std::unique_lock<std::shared_mutex> lock(state.loggerStateMutex);
@@ -206,52 +292,33 @@ void initialize()
                 );
         }
 
-        // Create async shared dist_sink and logger
+        // Create async shared dist_sink, async callback sinks and logger
         state.asyncSharedDistSink = std::make_shared<spdlog::sinks::dist_sink_mt>();
+        state.asyncCallbackSinks = std::make_shared<UserCallbackDispatchSink>();
 
-        state.asyncLogger
-            = std::make_shared<spdlog::async_logger>(S_BACKEND_ASYNC_LOGGER_NAME,
-                                                     state.asyncSharedDistSink,
-                                                     state.sharedThreadPool,
-                                                     spdlog::async_overflow_policy::block);
+        state.asyncLogger = std::make_shared<spdlog::async_logger>(
+            S_BACKEND_ASYNC_LOGGER_NAME,
+            spdlog::sinks_init_list{state.asyncSharedDistSink, state.asyncCallbackSinks},
+            state.sharedThreadPool,
+            spdlog::async_overflow_policy::block);
         state.asyncLogger->set_pattern(BACKEND_LOGGER_PATTERN);
         state.asyncLogger->set_level(spdlog::level::trace);
 
-        // Create sync shared dist_sink and logger
-        state.syncSharedDistSink = std::make_shared<spdlog::sinks::dist_sink_mt>();
+        // Create sync callback sinks and logger
+        state.syncCallbackSinks = std::make_shared<UserCallbackDispatchSink>();
 
-        state.syncLogger = std::make_shared<spdlog::logger>(
-            S_BACKEND_SYNC_LOGGER_NAME, // Use same name as async logger
-            state.syncSharedDistSink);
+        state.syncLogger
+            = std::make_shared<spdlog::logger>(S_BACKEND_SYNC_LOGGER_NAME, state.syncCallbackSinks);
         state.syncLogger->set_pattern(BACKEND_LOGGER_PATTERN);
         state.syncLogger->set_level(spdlog::level::trace);
 
-        // Add console or file sink to async dist_sink if logging enabled via env vars
         // getLogLevel() will read from environment on first call, or return cached value
-        // if setLogLevel() was called programmatically
+        // if setLogLevel() was called programmatically. While the level is OFF no console or
+        // file sink exists; ensureOutputSink() creates it once the level is raised.
         const hipdnnSeverity_t logLevel = hipdnn_data_sdk::logging::getLogLevel();
-        const std::string logFilePath = hipdnn_data_sdk::utilities::trim(
-            hipdnn_data_sdk::utilities::getEnv("HIPDNN_LOG_FILE", ""));
-
         if(logLevel != HIPDNN_SEV_OFF)
         {
-            if(!logFilePath.empty())
-            {
-                state.fileSink
-                    = std::make_shared<spdlog::sinks::basic_file_sink_mt>(logFilePath, false);
-                state.fileSink->set_level(spdlog::level::trace);
-                state.fileSink->set_pattern(BACKEND_LOGGER_PATTERN);
-                state.asyncSharedDistSink->add_sink(state.fileSink);
-                state.asyncSinkCount.fetch_add(1, std::memory_order_release);
-            }
-            else
-            {
-                state.consoleSink = std::make_shared<spdlog::sinks::stderr_color_sink_mt>();
-                state.consoleSink->set_level(spdlog::level::trace);
-                state.consoleSink->set_pattern(BACKEND_LOGGER_PATTERN);
-                state.asyncSharedDistSink->add_sink(state.consoleSink);
-                state.asyncSinkCount.fetch_add(1, std::memory_order_release);
-            }
+            lockedCreateOutputSink(state);
         }
 
         // Set global log level in data_sdk
@@ -261,11 +328,13 @@ void initialize()
     }
     catch(const std::exception& e)
     {
-        // Log to stderr since the logging infrastructure failed
-        std::cerr << "Failed to initialize logger: " << e.what() << '\n';
-        loggerShutdown();
-        // Either throw, or continue with logging disabled
-        throw;
+        disableLogging(e.what());
+        return;
+    }
+    catch(...)
+    {
+        disableLogging("unknown exception");
+        return;
     }
     // Backend logger is running. Log some system info details.
     HIPDNN_BACKEND_LOG_INFO("{}", platform_utilities::getSystemInfo());
@@ -275,46 +344,76 @@ void initialize()
 void loggerShutdown()
 {
     auto& state = getBackendLogState();
-    const std::unique_lock<std::shared_mutex> lock(state.loggerStateMutex);
-    sLoggerInitialized.store(false, std::memory_order_release);
 
-    // Clear all user callbacks first (atomically disable)
-    for(auto& [key, info] : state.userCallbacks)
+    // On Windows, loggerShutdown() also runs from ~BackendLogState while the loader detaches
+    // the library at process exit. ExitProcess has already terminated every other thread,
+    // including the pool worker and any thread that was inside a callback or held
+    // loggerStateMutex, so taking that lock or waiting for those threads could never return:
+    // the pool's destructor enqueues a terminate message for a worker that no longer exists.
+    // This thread is the only one left, so the pool is read without the lock and leaked;
+    // queued messages are dropped and nothing else is reset.
+    if(platform_utilities::isProcessTerminating())
     {
-        info.callbackHolder->store(nullptr, std::memory_order_release);
+        // NOLINTNEXTLINE(cppcoreguidelines-owning-memory) - deliberately never freed
+        static_cast<void>(
+            new std::shared_ptr<spdlog::details::thread_pool>(std::move(state.sharedThreadPool)));
+        return;
     }
 
-    // Ensure that any in-progress callbacks have completed before this function returns.
-    for(auto& [key, info] : state.userCallbacks)
+    std::vector<std::shared_ptr<UserCallbackSink>> removedSinks;
+    std::shared_ptr<spdlog::details::thread_pool> threadPool;
     {
-        if(info.sink != nullptr)
+        const std::unique_lock<std::shared_mutex> lock(state.loggerStateMutex);
+        sLoggerInitialized.store(false, std::memory_order_release);
+
+        // Clear all user callbacks first (atomically disable)
+        removedSinks.reserve(state.userCallbacks.size());
+        for(auto& [key, info] : state.userCallbacks)
         {
-            info.sink->waitForIdle();
+            info.callbackHolder->store(nullptr, std::memory_order_release);
+            removedSinks.push_back(std::move(info.sink));
+        }
+        state.userCallbacks.clear();
+
+        // Destroy loggers
+        state.syncLogger.reset();
+        state.asyncLogger.reset();
+
+        // Destroy dist_sink and callback sinks
+        state.syncCallbackSinks.reset();
+        state.asyncCallbackSinks.reset();
+        state.asyncSharedDistSink.reset();
+        state.syncSinkCount.store(0, std::memory_order_release);
+        state.asyncSinkCount.store(0, std::memory_order_release);
+
+        // Clear console/file sink references
+        state.consoleSink.reset();
+        state.fileSink.reset();
+        state.outputSinkCreated.store(false, std::memory_order_release);
+
+        // Joined below, after the lock is released
+        threadPool = std::move(state.sharedThreadPool);
+
+        // Logging may be re-started after loggerShutdown() is called; Clear the cached log
+        // level so that if/when the logger is restarted it will reread the value from the
+        // environment, following the original start-up behavior.
+        hipdnn_data_sdk::logging::resetLogLevelCache();
+        GraphLogger::resetCache();
+    }
+
+    // Ensure that any in-progress callbacks have completed before this function returns. The
+    // wait happens outside loggerStateMutex, so an in-flight callback that calls
+    // setUserLogCallback() cannot deadlock against it.
+    for(const auto& sink : removedSinks)
+    {
+        if(sink != nullptr)
+        {
+            sink->waitForIdle();
         }
     }
 
-    state.userCallbacks.clear();
-
-    // Destroy loggers
-    state.syncLogger.reset();
-    state.asyncLogger.reset();
-
-    // Destroy dist_sinks
-    state.syncSharedDistSink.reset();
-    state.asyncSharedDistSink.reset();
-
-    // Clear console/file sink references
-    state.consoleSink.reset();
-    state.fileSink.reset();
-
-    // Destroy thread pool (joins workers)
-    state.sharedThreadPool.reset();
-
-    // Logging may be re-started after loggerShutdown() is called; Clear the cached log
-    // level so that if/when the logger is restarted it will reread the value from the
-    // environment, following the original start-up behavior.
-    hipdnn_data_sdk::logging::resetLogLevelCache();
-    GraphLogger::resetCache();
+    // Destroy thread pool (drains the queue and joins workers)
+    threadPool.reset();
 }
 
 namespace
@@ -356,15 +455,15 @@ hipdnnStatus_t lockedAddUserCallback(BackendLogState& state,
 
     const bool isAsync = (mode == HIPDNN_LOG_CALLBACK_ASYNC);
 
-    // Add to appropriate dist_sink (loggers already created in initialize())
+    // Add to appropriate callback sinks (loggers already created in initialize())
     if(isAsync)
     {
-        state.asyncSharedDistSink->add_sink(sink);
+        state.asyncCallbackSinks->addSink(sink);
         state.asyncSinkCount.fetch_add(1, std::memory_order_release);
     }
     else
     {
-        state.syncSharedDistSink->add_sink(sink);
+        state.syncCallbackSinks->addSink(sink);
         state.syncSinkCount.fetch_add(1, std::memory_order_release);
     }
 
@@ -389,27 +488,27 @@ hipdnnStatus_t lockedUpdateUserCallback(BackendLogState& state,
 
     if(wasSyncNowAsync || wasAsyncNowSync)
     {
-        // Remove from old dist_sink
+        // Remove from old callback sinks
         if(info.mode == HIPDNN_LOG_CALLBACK_ASYNC)
         {
-            state.asyncSharedDistSink->remove_sink(info.sink);
+            state.asyncCallbackSinks->removeSink(info.sink);
             state.asyncSinkCount.fetch_sub(1, std::memory_order_release);
         }
         else
         {
-            state.syncSharedDistSink->remove_sink(info.sink);
+            state.syncCallbackSinks->removeSink(info.sink);
             state.syncSinkCount.fetch_sub(1, std::memory_order_release);
         }
 
-        // Add to new dist_sink (loggers already created in initialize())
+        // Add to new callback sinks (loggers already created in initialize())
         if(newMode == HIPDNN_LOG_CALLBACK_ASYNC)
         {
-            state.asyncSharedDistSink->add_sink(info.sink);
+            state.asyncCallbackSinks->addSink(info.sink);
             state.asyncSinkCount.fetch_add(1, std::memory_order_release);
         }
         else
         {
-            state.syncSharedDistSink->add_sink(info.sink);
+            state.syncCallbackSinks->addSink(info.sink);
             state.syncSinkCount.fetch_add(1, std::memory_order_release);
         }
 
@@ -422,9 +521,11 @@ hipdnnStatus_t lockedUpdateUserCallback(BackendLogState& state,
     return HIPDNN_STATUS_SUCCESS;
 }
 
-// Helper: Remove user callback (SEV_OFF)
+// Helper: Remove user callback (SEV_OFF). The removed sink is returned in removedSink; the
+// caller waits for it to go idle after releasing loggerStateMutex.
 hipdnnStatus_t lockedRemoveUserCallback(BackendLogState& state,
-                                        const BackendLogState::CallbackKey& key)
+                                        const BackendLogState::CallbackKey& key,
+                                        std::shared_ptr<UserCallbackSink>& removedSink)
 {
     const auto it = state.userCallbacks.find(key);
     if(it == state.userCallbacks.end())
@@ -437,25 +538,20 @@ hipdnnStatus_t lockedRemoveUserCallback(BackendLogState& state,
     // Atomically disable callback FIRST
     info.callbackHolder->store(nullptr, std::memory_order_release);
 
-    // Wait until any in-progress callback completes
-    // This ensures user can safely destroy data structures after this function returns
-    if(info.sink != nullptr)
-    {
-        info.sink->waitForIdle();
-    }
-
-    // Remove from dist_sink
+    // Remove from callback sinks
     const bool isAsync = (info.mode == HIPDNN_LOG_CALLBACK_ASYNC);
     if(isAsync)
     {
-        state.asyncSharedDistSink->remove_sink(info.sink);
+        state.asyncCallbackSinks->removeSink(info.sink);
         state.asyncSinkCount.fetch_sub(1, std::memory_order_release);
     }
     else
     {
-        state.syncSharedDistSink->remove_sink(info.sink);
+        state.syncCallbackSinks->removeSink(info.sink);
         state.syncSinkCount.fetch_sub(1, std::memory_order_release);
     }
+
+    removedSink = std::move(info.sink);
 
     // Remove from tracking
     state.userCallbacks.erase(it);
@@ -473,43 +569,73 @@ hipdnnStatus_t setUserLogCallback(hipdnnUserLogCallback_t callback,
     // Validate parameters
     if(callback == nullptr || userHandle == nullptr)
     {
-        return HIPDNN_STATUS_BAD_PARAM;
+        return LastErrorManager::setLastError(
+            HIPDNN_STATUS_BAD_PARAM,
+            "hipdnnSetUserLogCallback_ext: callback and userHandle must not be null");
     }
 
     if(mode != HIPDNN_LOG_CALLBACK_SYNC && mode != HIPDNN_LOG_CALLBACK_ASYNC)
     {
-        return HIPDNN_STATUS_BAD_PARAM;
+        return LastErrorManager::setLastError(
+            HIPDNN_STATUS_BAD_PARAM,
+            "hipdnnSetUserLogCallback_ext: mode " + std::to_string(static_cast<int>(mode))
+                + " is neither HIPDNN_LOG_CALLBACK_SYNC nor HIPDNN_LOG_CALLBACK_ASYNC");
     }
 
     // Ensure logging initialized
     initialize();
 
     auto& state = getBackendLogState();
-    const std::unique_lock<std::shared_mutex> lock(state.loggerStateMutex);
-
-    if(!sLoggerInitialized.load(std::memory_order_relaxed))
+    hipdnnStatus_t status = HIPDNN_STATUS_SUCCESS;
+    std::shared_ptr<UserCallbackSink> removedSink;
     {
-        return HIPDNN_STATUS_NOT_INITIALIZED;
+        const std::unique_lock<std::shared_mutex> lock(state.loggerStateMutex);
+
+        // Create composite key
+        const BackendLogState::CallbackKey key{callback, userHandle};
+
+        if(!sLoggerInitialized.load(std::memory_order_relaxed) || state.syncLogger == nullptr)
+        {
+            status = HIPDNN_STATUS_NOT_INITIALIZED;
+        }
+        else if(minLevel == HIPDNN_SEV_OFF)
+        {
+            status = lockedRemoveUserCallback(state, key, removedSink);
+        }
+        else
+        {
+            // Update an existing registration, or add a new one
+            auto it = state.userCallbacks.find(key);
+            status = it != state.userCallbacks.end()
+                         ? lockedUpdateUserCallback(state, it->second, minLevel, mode)
+                         : lockedAddUserCallback(state, key, callback, userHandle, minLevel, mode);
+        }
     }
 
-    // Create composite key
-    const BackendLogState::CallbackKey key{callback, userHandle};
-
-    // Check if removing (SEV_OFF)
-    if(minLevel == HIPDNN_SEV_OFF)
+    // Wait until any in-progress callback completes, so the user can safely destroy data
+    // structures after this function returns. The wait happens outside loggerStateMutex: an
+    // in-flight callback may itself call this function. A callback that removes itself does
+    // not wait for its own invocation.
+    if(removedSink != nullptr)
     {
-        return lockedRemoveUserCallback(state, key);
+        removedSink->waitForIdle();
     }
 
-    // Check if updating existing registration
-    const auto it = state.userCallbacks.find(key);
-    if(it != state.userCallbacks.end())
+    // setLastError() logs through the backend logger, which takes loggerStateMutex, so the
+    // reason is recorded only after the lock is released.
+    if(status == HIPDNN_STATUS_NOT_INITIALIZED)
     {
-        return lockedUpdateUserCallback(state, it->second, minLevel, mode);
+        return LastErrorManager::setLastError(
+            status, "hipdnnSetUserLogCallback_ext: the backend logger is not initialized");
     }
-
-    // Add new registration
-    return lockedAddUserCallback(state, key, callback, userHandle, minLevel, mode);
+    if(status == HIPDNN_STATUS_BAD_PARAM)
+    {
+        return LastErrorManager::setLastError(
+            status,
+            "hipdnnSetUserLogCallback_ext: cannot remove a callback that is not registered "
+            "for this userHandle");
+    }
+    return status;
 }
 
 void backendLoggingCallback(hipdnnSeverity_t severity, const char* msg)
@@ -556,6 +682,14 @@ void backendLoggingCallback(hipdnnSeverity_t severity, const char* msg)
     // Lazy-init; ensure backend logger is initialized.
     initialize();
 
+    auto& state = getBackendLogState();
+
+    // Logging initialized while the level was OFF has no console or file sink yet.
+    if(!state.outputSinkCreated.load(std::memory_order_acquire))
+    {
+        ensureOutputSink(state);
+    }
+
     const auto spdlogLevel = toSpdlogLevel(severity);
 
     // Copy logger shared_ptrs under read lock, then release lock before logging.
@@ -565,7 +699,6 @@ void backendLoggingCallback(hipdnnSeverity_t severity, const char* msg)
     std::shared_ptr<spdlog::logger> syncLogger;
 
     {
-        auto& state = getBackendLogState();
         const std::shared_lock<std::shared_mutex> lock(state.loggerStateMutex);
 
         if(state.asyncSinkCount.load(std::memory_order_acquire) > 0)
@@ -593,6 +726,18 @@ hipdnnStatus_t setGlobalLogLevel(hipdnnSeverity_t level)
 {
     // Set the global log level in data_sdk cache (backend's copy)
     hipdnn_data_sdk::logging::setLogLevel(level);
+
+    // Logging initialized while the level was OFF has no console or file sink yet; create it
+    // now that the level is raised.
+    if(level != HIPDNN_SEV_OFF && !sLoggingShutdown.load(std::memory_order_acquire)
+       && sLoggerInitialized.load(std::memory_order_acquire))
+    {
+        auto& state = getBackendLogState();
+        if(!state.outputSinkCreated.load(std::memory_order_acquire))
+        {
+            ensureOutputSink(state);
+        }
+    }
 
     // Notify all loaded plugins of the log level change
     plugin::EnginePluginResourceManager::setPluginLogLevel(level);

@@ -92,6 +92,13 @@ HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnCreate(hipdnnHandle_t* handle);
  *
  * @param [in] handle        An instance of hipdnnHandle_t
  *
+ * On Linux, a handle destroyed after process exit has begun (for example by the destructor of an
+ * object with static storage duration) is not released and the call returns
+ * HIPDNN_STATUS_SUCCESS, so that it never calls into plugins whose static objects are already
+ * destroyed. On Windows the backend's exit handler runs when the backend DLL detaches, after the
+ * caller's static destructors, so such a call releases the handle normally while the plugins are
+ * still loaded.
+ *
  * @retval HIPDNN_STATUS_BAD_PARAM          The descriptor is not a valid (NULL) descriptor.
  * @retval HIPDNN_STATUS_SUCCESS            The destruction was successful
  *
@@ -153,6 +160,11 @@ HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnBackendCreateDescriptor(
  *
  * @param  [in]  descriptor  Instance of hipdnnBackendDescriptor_t previously created by
  *                           hipdnnBackendCreateDescriptor()
+ *
+ * On Linux, a descriptor destroyed after process exit has begun is not released and the call
+ * returns HIPDNN_STATUS_SUCCESS. On Windows the backend's exit handler runs when the backend DLL
+ * detaches, after the caller's static destructors, so such a call releases the descriptor
+ * normally while the plugins are still loaded.
  *
  * @retval  HIPDNN_STATUS_SUCCESS       The memory was destroyed successfully
  * @retval  HIPDNN_STATUS_ALLOC_FAILED   The destruction of memory failed.
@@ -231,7 +243,8 @@ HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnBackendFinalize(hipdnnBackendDescript
  *                                         retrieve
  * @param  [in]   attributeName            The name of the attribute being get from the descriptor
  * @param  [in]   attributeType            The type of attribute
- * @param  [in]   requestedElementCount    Number of elements to output to arrayOfElements
+ * @param  [in]   requestedElementCount    Number of elements to output to arrayOfElements. Must not
+ *                                         be negative
  * @param  [out]  elementCount             Output pointer for the number of elements the descriptor
  *                                         attribute has. Note that hipdnnBackendGetAttribute() will
  *                                         only write the least of this and requestedElementCount
@@ -244,6 +257,7 @@ HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnBackendFinalize(hipdnnBackendDescript
  * @retval  HIPDNN_STATUS_BAD_PARAM         One or more invalid or inconsistent argument values were encountered. Some examples include:
  *                                              attributeName is not a valid attribute for the descriptor.
  *                                              attributeType is not one of the valid types for the attribute.
+ *                                              requestedElementCount is negative.
  * @retval  HIPDNN_STATUS_PLUGIN_ERROR      An engine plugin failed to provide valid metadata.
  * @retval  HIPDNN_STATUS_NOT_INITIALIZED   The descriptor has not been successfully finalized using hipdnnBackendFinalize().
  *
@@ -277,7 +291,7 @@ HIPDNN_BACKEND_EXPORT hipdnnStatus_t
  * @retval  HIPDNN_STATUS_BAD_PARAM         The function is called with arguments that correspond to invalid values. Some examples include:
  *                                              attributeName is not a settable attribute of descriptor.
  *                                              attributeType is incorrect for this attributeName.
- *                                              elementCount value is unexpected.
+ *                                              elementCount value is unexpected, for example negative.
  *                                              arrayOfElements contains values invalid for the attributeType.
  * @retval  HIPDNN_STATUS_NOT_SUPPORTED     The values to which the attributes are being set are not supported by the current version of hipDNN.
  *

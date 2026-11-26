@@ -22,18 +22,8 @@ std::mutex gHeuristicMutex;
 PluginLoadingConfig gHeuristicConfig;
 std::weak_ptr<HeuristicPluginManager> gHeuristicWeakPtr;
 std::shared_ptr<HeuristicPluginManager> gHeuristicPersistentPtr;
+// Set at process exit by the handlers PluginResourceManagerBase registers after each plugin load
 std::atomic<bool> gHeuristicShutdownFlag{false};
-
-// Register atexit handler to set shutdown flag
-struct HeuristicPluginShutdownRegistrar
-{
-    HeuristicPluginShutdownRegistrar()
-    {
-        std::atexit([]() { gHeuristicShutdownFlag.store(true, std::memory_order_release); });
-    }
-};
-
-HeuristicPluginShutdownRegistrar gHeuristicShutdownRegistrar;
 
 // Best-effort handle destruction used by both the constructor (rollback) and
 // the destructor. Plugin code is untrusted and may throw arbitrary types; we

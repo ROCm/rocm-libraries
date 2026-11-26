@@ -201,7 +201,7 @@ Every `cudnnCreate()` call maps cuDNN FE logging environment variables to hipDNN
 | `CUDNN_FRONTEND_LOG_INFO` > 0 and `CUDNN_FRONTEND_LOG_FILE=stdout` or `stderr` | `HIPDNN_LOG_LEVEL=info`, `HIPDNN_LOG_FILE` unset; both log to stderr |
 | any other combination, or `NV_CUDNN_FRONTEND_DISABLE_LOGGING` set to a non-zero value | `HIPDNN_LOG_LEVEL=off`, `HIPDNN_LOG_FILE` unset |
 
-Nothing changes when none of these variables is set. The level applies immediately. hipDNN picks the log destination (file or stderr) once, when its logging initializes: if that happens before `cudnnCreate()` (for example, on an earlier hipDNN call), the file mapping is ignored, and if the level was off at that point there is no console output either. `CUDNN_FE_LOG*` macros forward to hipDNN frontend logging at info level; compiling with `NV_CUDNN_FRONTEND_DISABLE_LOGGING` turns them into no-ops.
+Nothing changes when none of these variables is set. The level applies immediately. hipDNN picks the log destination (file or stderr) once, the first time its logging is enabled: if logging was already on before `cudnnCreate()` (for example, `HIPDNN_LOG_LEVEL` was set and an earlier hipDNN call logged), the file mapping is ignored. While logging is off, no log file is opened. `CUDNN_FE_LOG*` macros forward to hipDNN frontend logging at info level; compiling with `NV_CUDNN_FRONTEND_DISABLE_LOGGING` turns them into no-ops.
 
 ## cuDNN v8 API
 

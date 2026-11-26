@@ -53,7 +53,7 @@ struct HipdnnHandleDeleter
             return;
         }
 
-        if(*handlePtr != nullptr)
+        if(*handlePtr != nullptr && !detail::IHipdnnBackend::isShutdown())
         {
             const auto status = detail::hipdnnBackend()->destroy(*handlePtr);
             if(status != HIPDNN_STATUS_SUCCESS)

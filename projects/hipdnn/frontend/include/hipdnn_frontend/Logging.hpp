@@ -27,6 +27,9 @@
 #include <hipdnn_frontend/Error.hpp>
 #include <hipdnn_frontend/detail/HipdnnBackendInterface.hpp>
 
+#include <array>
+#include <string>
+
 #ifdef HIPDNN_FRONTEND_RUNTIME_LOAD_BACKEND
 #include <atomic>
 
@@ -63,6 +66,17 @@ HIPDNN_HIDDEN inline hipdnnCallback_t resolveBackendLoggingCallback()
 // BackendWrapper.hpp (which can't be included here due to a circular
 // dependency). The definition is always available before any call site.
 static std::shared_ptr<IHipdnnBackend> hipdnnBackend();
+
+// Builds the error for a failed backend logging call, with the backend's last error string
+// appended as HIPDNN_RETURN_ON_BACKEND_FAILURE does (Utilities.hpp includes this header, so
+// the macro is not available here).
+inline Error backendLoggingError(const char* message)
+{
+    std::array<char, 1024> backendErrorMessage{};
+    hipdnnBackend()->getLastErrorString(backendErrorMessage.data(), backendErrorMessage.size());
+    return {ErrorCode::HIPDNN_BACKEND_ERROR,
+            std::string(message) + " Backend error: " + backendErrorMessage.data()};
+}
 
 } // namespace detail
 
@@ -184,7 +198,7 @@ inline Error setUserLogCallback(hipdnnUserLogCallback_t callback,
         callback, minLevel, static_cast<hipdnnLogCallbackMode_t>(mode), userHandle);
     if(status != HIPDNN_STATUS_SUCCESS)
     {
-        return {ErrorCode::HIPDNN_BACKEND_ERROR, "Failed to set user log callback"};
+        return detail::backendLoggingError("Failed to set user log callback");
     }
     return {};
 }
@@ -193,21 +207,21 @@ inline Error setUserLogCallback(hipdnnUserLogCallback_t callback,
  * @brief Set the global log level.
  *
  * This controls which log messages are output to console/file AND to the global backend log output callback.
- * Updates BOTH frontend and backend log levels.
+ * Updates BOTH frontend and backend log levels. A level the backend rejects changes neither.
  *
  * @param level   The severity level to set
  * @return Error object indicating success or failure
  */
 inline Error setGlobalLogLevel(hipdnnSeverity_t level)
 {
-    // Update frontend's cache (in user executable)
-    hipdnn_data_sdk::logging::setLogLevel(level);
-
     const auto status = detail::hipdnnBackend()->backendSetGlobalLogLevelExt(level);
     if(status != HIPDNN_STATUS_SUCCESS)
     {
-        return {ErrorCode::HIPDNN_BACKEND_ERROR, "Failed to set global log level"};
+        return detail::backendLoggingError("Failed to set global log level");
     }
+
+    // Update frontend's cache (in user executable)
+    hipdnn_data_sdk::logging::setLogLevel(level);
     return {};
 }
 
