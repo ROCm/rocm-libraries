@@ -3,10 +3,10 @@
     "MIOPEN_ENGINE": [
       {
         "cases": [
-          "S17_2d_i16x16_n2c16k32_f3x3_bf16_cf",
-          "S3_2d_i16x16_n2c16k32_f3x3_fp16_cl",
-          "S3_2d_i16x16_n2c16k32_f3x3_fp32_cf",
-          "S3_3d_i8x8x4_n2c16k32_f3x3x3_fp32_cl"
+          "s17_2d_i16x16_n2c16k32_f3x3_bf16_cf",
+          "s3_2d_i16x16_n2c16k32_f3x3_fp16_cl",
+          "s3_2d_i16x16_n2c16k32_f3x3_fp32_cf",
+          "s3_3d_i8x8x4_n2c16k32_f3x3x3_fp32_cl"
         ],
         "support": {
           "gfx90a": [

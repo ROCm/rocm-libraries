@@ -2,7 +2,7 @@
   "version": 1,
   "cases": [
     {
-      "id": "S17_1d_i16_n2c16k32_f3_fp32_cf",
+      "id": "s17_1d_i16_n2c16k32_f3_fp32_cf",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -136,38 +136,38 @@
         ],
         "purpose": "probe",
         "size_class": "S",
-        "seed": 468359285,
+        "seed": 1546401157,
         "inputs": {
           "3": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 186890920
+            "seed": 1282712822
           },
           "4": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 1466084511
+            "seed": 1683542002
           },
           "5": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 1774562929
+            "seed": 1454520186
           },
           "6": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 1312878320
+            "seed": 721213359
           }
         },
         "notes": "probe: F28/F29/F36 topology"
       }
     },
     {
-      "id": "S19_1d_i16_n2c16k32_f2_fp32_cl",
+      "id": "s19_1d_i16_n2c16k32_f2_fp32_cl",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -301,38 +301,38 @@
         ],
         "purpose": "probe",
         "size_class": "S",
-        "seed": 1015266832,
+        "seed": 1705032655,
         "inputs": {
           "3": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 164786534
+            "seed": 177834846
           },
           "4": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 138006924
+            "seed": 866892192
           },
           "5": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 1463445153
+            "seed": 933962261
           },
           "6": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 1664571450
+            "seed": 744883256
           }
         },
         "notes": "probe: F28/F29/F36 topology"
       }
     },
     {
-      "id": "S23_1d_i16_n2c16k32_f1_fp16_cf",
+      "id": "s23_1d_i16_n2c16k32_f1_fp16_cf",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "float",
@@ -466,38 +466,38 @@
         ],
         "purpose": "probe",
         "size_class": "S",
-        "seed": 1101864958,
+        "seed": 1673872790,
         "inputs": {
           "3": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 398802257
+            "seed": 402914058
           },
           "4": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 2069910111
+            "seed": 924359949
           },
           "5": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 1474397124
+            "seed": 1336620413
           },
           "6": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 1907840089
+            "seed": 323712391
           }
         },
         "notes": "probe: F28/F29/F36 topology"
       }
     },
     {
-      "id": "S53_1d_i16_n2c16k16g16_f3_fp16_cl",
+      "id": "s53_1d_i16_n2c16k16g16_f3_fp16_cl",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "float",
@@ -631,38 +631,38 @@
         ],
         "purpose": "probe",
         "size_class": "S",
-        "seed": 1838657600,
+        "seed": 260922435,
         "inputs": {
           "3": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 364076126
+            "seed": 1937589056
           },
           "4": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 2102838911
+            "seed": 39239641
           },
           "5": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 169743971
+            "seed": 2112696733
           },
           "6": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 1277583804
+            "seed": 2044906154
           }
         },
         "notes": "probe: F28/F29/F36 topology"
       }
     },
     {
-      "id": "S1_1d_i16_n2c16k32_f1_bf16_cf",
+      "id": "s1_1d_i16_n2c16k32_f1_bf16_cf",
       "values": {
         "io_data_type": "bfloat16",
         "intermediate_data_type": "float",
@@ -796,38 +796,38 @@
         ],
         "purpose": "probe",
         "size_class": "S",
-        "seed": 1912932479,
+        "seed": 1297277514,
         "inputs": {
           "3": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 2043423439
+            "seed": 1793364614
           },
           "4": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 429444464
+            "seed": 1393006098
           },
           "5": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 309104899
+            "seed": 592281598
           },
           "6": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 320376083
+            "seed": 993017342
           }
         },
         "notes": "probe: F28/F29/F36 topology"
       }
     },
     {
-      "id": "S3_1d_i16_n2c16k32_f3_bf16_cl",
+      "id": "s3_1d_i16_n2c16k32_f3_bf16_cl",
       "values": {
         "io_data_type": "bfloat16",
         "intermediate_data_type": "float",
@@ -961,38 +961,38 @@
         ],
         "purpose": "probe",
         "size_class": "S",
-        "seed": 274434725,
+        "seed": 1857146488,
         "inputs": {
           "3": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 692105432
+            "seed": 29053903
           },
           "4": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 1215803633
+            "seed": 1665522872
           },
           "5": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 1639126410
+            "seed": 73942567
           },
           "6": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 1057839553
+            "seed": 1755507042
           }
         },
         "notes": "probe: F28/F29/F36 topology"
       }
     },
     {
-      "id": "S19_2d_i16x16_n2c16k32_f2x2_fp32_cf",
+      "id": "s19_2d_i16x16_n2c16k32_f2x2_fp32_cf",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -1144,38 +1144,38 @@
         ],
         "purpose": "probe",
         "size_class": "S",
-        "seed": 1242140941,
+        "seed": 140818924,
         "inputs": {
           "3": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 1304059926
+            "seed": 553060745
           },
           "4": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 1227902097
+            "seed": 1998865279
           },
           "5": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 1427545626
+            "seed": 334034307
           },
           "6": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 705784804
+            "seed": 556157537
           }
         },
         "notes": "probe: F28/F29/F36 topology"
       }
     },
     {
-      "id": "S23_2d_i16x16_n2c16k32_f1x1_fp32_cl",
+      "id": "s23_2d_i16x16_n2c16k32_f1x1_fp32_cl",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -1327,38 +1327,38 @@
         ],
         "purpose": "probe",
         "size_class": "S",
-        "seed": 1623276103,
+        "seed": 898620279,
         "inputs": {
           "3": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 1023487007
+            "seed": 1049553396
           },
           "4": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 1956654775
+            "seed": 548461870
           },
           "5": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 1105597148
+            "seed": 1559822176
           },
           "6": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 713211206
+            "seed": 1146637084
           }
         },
         "notes": "probe: F28/F29/F36 topology"
       }
     },
     {
-      "id": "S44_2d_i16x16_n2c64k64g8_f3x3_fp16_cf",
+      "id": "s44_2d_i16x16_n2c64k64g8_f3x3_fp16_cf",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "float",
@@ -1510,38 +1510,38 @@
         ],
         "purpose": "probe",
         "size_class": "S",
-        "seed": 494094878,
+        "seed": 1250262871,
         "inputs": {
           "3": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 1601660981
+            "seed": 554615743
           },
           "4": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 1396052445
+            "seed": 20979537
           },
           "5": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 1123270548
+            "seed": 66403118
           },
           "6": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 1131592008
+            "seed": 1469483693
           }
         },
         "notes": "probe: F28/F29/F36 topology"
       }
     },
     {
-      "id": "S53_2d_i16x16_n2c16k16g16_f3x3_fp16_cl",
+      "id": "s53_2d_i16x16_n2c16k16g16_f3x3_fp16_cl",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "float",
@@ -1693,38 +1693,38 @@
         ],
         "purpose": "probe",
         "size_class": "S",
-        "seed": 915950307,
+        "seed": 61314787,
         "inputs": {
           "3": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 280954944
+            "seed": 230461229
           },
           "4": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 886632704
+            "seed": 1406549478
           },
           "5": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 1401676801
+            "seed": 211950233
           },
           "6": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 1345371437
+            "seed": 1648623117
           }
         },
         "notes": "probe: F28/F29/F36 topology"
       }
     },
     {
-      "id": "S1_2d_i16x16_n2c16k32_f1x1_bf16_cf",
+      "id": "s1_2d_i16x16_n2c16k32_f1x1_bf16_cf",
       "values": {
         "io_data_type": "bfloat16",
         "intermediate_data_type": "float",
@@ -1876,38 +1876,38 @@
         ],
         "purpose": "probe",
         "size_class": "S",
-        "seed": 576644851,
+        "seed": 533169011,
         "inputs": {
           "3": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 838582563
+            "seed": 1660815906
           },
           "4": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 810344953
+            "seed": 1664845482
           },
           "5": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 1306581834
+            "seed": 1422733988
           },
           "6": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 554383164
+            "seed": 76154613
           }
         },
         "notes": "probe: F28/F29/F36 topology"
       }
     },
     {
-      "id": "S3_2d_i16x16_n2c16k32_f3x3_bf16_cl",
+      "id": "s3_2d_i16x16_n2c16k32_f3x3_bf16_cl",
       "values": {
         "io_data_type": "bfloat16",
         "intermediate_data_type": "float",
@@ -2059,38 +2059,38 @@
         ],
         "purpose": "probe",
         "size_class": "S",
-        "seed": 2040791184,
+        "seed": 381763983,
         "inputs": {
           "3": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 1479470825
+            "seed": 1259792982
           },
           "4": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 1075636241
+            "seed": 1680617006
           },
           "5": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 575023646
+            "seed": 915358643
           },
           "6": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 2095119954
+            "seed": 497435610
           }
         },
         "notes": "probe: F28/F29/F36 topology"
       }
     },
     {
-      "id": "S23_3d_i16x16x16_n2c16k32_f1x1x1_fp32_cf",
+      "id": "s23_3d_i16x16x16_n2c16k32_f1x1x1_fp32_cf",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -2260,38 +2260,38 @@
         ],
         "purpose": "probe",
         "size_class": "S",
-        "seed": 1211495980,
+        "seed": 268117135,
         "inputs": {
           "3": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 218147461
+            "seed": 855630261
           },
           "4": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 1069773390
+            "seed": 537503486
           },
           "5": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 1453682770
+            "seed": 1177578878
           },
           "6": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 2076145228
+            "seed": 798510673
           }
         },
         "notes": "probe: F28/F29/F36 topology"
       }
     },
     {
-      "id": "S53_3d_i16x8x8_n2c16k16g16_f3x3x3_fp32_cl",
+      "id": "s53_3d_i16x8x8_n2c16k16g16_f3x3x3_fp32_cl",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -2461,38 +2461,38 @@
         ],
         "purpose": "probe",
         "size_class": "S",
-        "seed": 133330711,
+        "seed": 2031323365,
         "inputs": {
           "3": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 1622676189
+            "seed": 280957729
           },
           "4": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 557356912
+            "seed": 347853042
           },
           "5": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 1742556597
+            "seed": 2025815549
           },
           "6": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 1812690237
+            "seed": 1805237308
           }
         },
         "notes": "probe: F28/F29/F36 topology"
       }
     },
     {
-      "id": "S1_3d_i16x8x8_n2c16k32_f1x1x1_fp16_cf",
+      "id": "s1_3d_i16x8x8_n2c16k32_f1x1x1_fp16_cf",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "float",
@@ -2662,38 +2662,38 @@
         ],
         "purpose": "probe",
         "size_class": "S",
-        "seed": 126723724,
+        "seed": 1188526469,
         "inputs": {
           "3": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 3470846
+            "seed": 1283059657
           },
           "4": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 2033226596
+            "seed": 883932878
           },
           "5": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 1313551690
+            "seed": 139913752
           },
           "6": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 292212843
+            "seed": 1764478638
           }
         },
         "notes": "probe: F28/F29/F36 topology"
       }
     },
     {
-      "id": "S3_3d_i8x8x4_n2c16k32_f3x3x3_fp16_cl",
+      "id": "s3_3d_i8x8x4_n2c16k32_f3x3x3_fp16_cl",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "float",
@@ -2863,38 +2863,38 @@
         ],
         "purpose": "probe",
         "size_class": "S",
-        "seed": 470784458,
+        "seed": 1916204987,
         "inputs": {
           "3": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 494580634
+            "seed": 563016214
           },
           "4": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 1209043957
+            "seed": 1519455962
           },
           "5": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 1000778980
+            "seed": 1425757289
           },
           "6": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 2067799257
+            "seed": 299022433
           }
         },
         "notes": "probe: F28/F29/F36 topology"
       }
     },
     {
-      "id": "S6_3d_i8x8x4_n2c16k32_f3x3x3_bf16_cf",
+      "id": "s6_3d_i8x8x4_n2c16k32_f3x3x3_bf16_cf",
       "values": {
         "io_data_type": "bfloat16",
         "intermediate_data_type": "float",
@@ -3064,38 +3064,38 @@
         ],
         "purpose": "probe",
         "size_class": "S",
-        "seed": 1846453435,
+        "seed": 451409752,
         "inputs": {
           "3": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 1275198963
+            "seed": 1546589658
           },
           "4": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 642812078
+            "seed": 1654938384
           },
           "5": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 1826536879
+            "seed": 421410929
           },
           "6": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 1380364930
+            "seed": 1172354803
           }
         },
         "notes": "probe: F28/F29/F36 topology"
       }
     },
     {
-      "id": "S8_3d_i16x8x4_n8c16k32_f1x1x1_bf16_cl",
+      "id": "s8_3d_i16x8x4_n8c16k32_f1x1x1_bf16_cl",
       "values": {
         "io_data_type": "bfloat16",
         "intermediate_data_type": "float",
@@ -3265,38 +3265,38 @@
         ],
         "purpose": "probe",
         "size_class": "S",
-        "seed": 165728142,
+        "seed": 525004922,
         "inputs": {
           "3": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 12181142
+            "seed": 2132226808
           },
           "4": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 1821590278
+            "seed": 1001477776
           },
           "5": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 966198647
+            "seed": 372013081
           },
           "6": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 441368073
+            "seed": 1322482388
           }
         },
         "notes": "probe: F28/F29/F36 topology"
       }
     },
     {
-      "id": "S13_1d_i16_n2c16k32_f16_fp32_cf",
+      "id": "s13_1d_i16_n2c16k32_f16_fp32_cf",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -3430,38 +3430,38 @@
         ],
         "purpose": "probe",
         "size_class": "S",
-        "seed": 587076941,
+        "seed": 499942966,
         "inputs": {
           "3": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 2085741296
+            "seed": 1989231350
           },
           "4": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 1227851410
+            "seed": 150722282
           },
           "5": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 564940992
+            "seed": 1075282643
           },
           "6": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 792625381
+            "seed": 1385036399
           }
         },
         "notes": "probe: F28/F29/F36 topology"
       }
     },
     {
-      "id": "S14_1d_i16_n2c16k32_f18_fp32_cl",
+      "id": "s14_1d_i16_n2c16k32_f18_fp32_cl",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -3595,38 +3595,38 @@
         ],
         "purpose": "probe",
         "size_class": "S",
-        "seed": 1143224596,
+        "seed": 1791171556,
         "inputs": {
           "3": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 1902553983
+            "seed": 1289134680
           },
           "4": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 1167642365
+            "seed": 258179698
           },
           "5": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 2078102397
+            "seed": 1645863871
           },
           "6": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 1774926777
+            "seed": 353941500
           }
         },
         "notes": "probe: F28/F29/F36 topology"
       }
     },
     {
-      "id": "S17_1d_i16_n2c16k32_f3_fp16_cf",
+      "id": "s17_1d_i16_n2c16k32_f3_fp16_cf",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "float",
@@ -3760,38 +3760,38 @@
         ],
         "purpose": "probe",
         "size_class": "S",
-        "seed": 697154440,
+        "seed": 1172355457,
         "inputs": {
           "3": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 249806323
+            "seed": 665132211
           },
           "4": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 1119705751
+            "seed": 1025114756
           },
           "5": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 170181212
+            "seed": 1342945319
           },
           "6": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 1610572414
+            "seed": 507294494
           }
         },
         "notes": "probe: F28/F29/F36 topology"
       }
     },
     {
-      "id": "S18_1d_i15_n2c16k32_f3_fp16_cl",
+      "id": "s18_1d_i15_n2c16k32_f3_fp16_cl",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "float",
@@ -3925,38 +3925,38 @@
         ],
         "purpose": "probe",
         "size_class": "S",
-        "seed": 1030107868,
+        "seed": 1068280403,
         "inputs": {
           "3": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 2100471419
+            "seed": 78888321
           },
           "4": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 1616433871
+            "seed": 1025850762
           },
           "5": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 607838581
+            "seed": 1129197606
           },
           "6": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 530200213
+            "seed": 1088730977
           }
         },
         "notes": "probe: F28/F29/F36 topology"
       }
     },
     {
-      "id": "S19_1d_i16_n2c16k32_f2_bf16_cf",
+      "id": "s19_1d_i16_n2c16k32_f2_bf16_cf",
       "values": {
         "io_data_type": "bfloat16",
         "intermediate_data_type": "float",
@@ -4090,38 +4090,38 @@
         ],
         "purpose": "probe",
         "size_class": "S",
-        "seed": 1190516070,
+        "seed": 189171536,
         "inputs": {
           "3": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 2059212019
+            "seed": 637977526
           },
           "4": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 833021356
+            "seed": 1159447190
           },
           "5": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 1786678398
+            "seed": 1762713804
           },
           "6": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 319961108
+            "seed": 1867625432
           }
         },
         "notes": "probe: F28/F29/F36 topology"
       }
     },
     {
-      "id": "S20_1d_i16_n2c16k32_f4_bf16_cl",
+      "id": "s20_1d_i16_n2c16k32_f4_bf16_cl",
       "values": {
         "io_data_type": "bfloat16",
         "intermediate_data_type": "float",
@@ -4255,38 +4255,38 @@
         ],
         "purpose": "probe",
         "size_class": "S",
-        "seed": 1127348808,
+        "seed": 1778975774,
         "inputs": {
           "3": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 1721721081
+            "seed": 298331536
           },
           "4": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 45200523
+            "seed": 274695312
           },
           "5": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 1270559409
+            "seed": 77195583
           },
           "6": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 901704776
+            "seed": 566350816
           }
         },
         "notes": "probe: F28/F29/F36 topology"
       }
     },
     {
-      "id": "S13_2d_i16x16_n2c16k32_f16x16_fp32_cf",
+      "id": "s13_2d_i16x16_n2c16k32_f16x16_fp32_cf",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -4438,38 +4438,38 @@
         ],
         "purpose": "probe",
         "size_class": "S",
-        "seed": 635487311,
+        "seed": 46630395,
         "inputs": {
           "3": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 48565621
+            "seed": 83635359
           },
           "4": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 593589103
+            "seed": 1328892861
           },
           "5": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 1422839653
+            "seed": 1953840950
           },
           "6": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 524490046
+            "seed": 86391627
           }
         },
         "notes": "probe: F28/F29/F36 topology"
       }
     },
     {
-      "id": "S14_2d_i16x16_n2c16k32_f18x18_fp32_cl",
+      "id": "s14_2d_i16x16_n2c16k32_f18x18_fp32_cl",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -4621,38 +4621,38 @@
         ],
         "purpose": "probe",
         "size_class": "S",
-        "seed": 1604085865,
+        "seed": 503448108,
         "inputs": {
           "3": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 1577189860
+            "seed": 1185928362
           },
           "4": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 1504782777
+            "seed": 1801057354
           },
           "5": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 10264743
+            "seed": 791411244
           },
           "6": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 2038199679
+            "seed": 1314239580
           }
         },
         "notes": "probe: F28/F29/F36 topology"
       }
     },
     {
-      "id": "S15_2d_i16x16_n2c16k32_f3x3_fp16_cf",
+      "id": "s15_2d_i16x16_n2c16k32_f3x3_fp16_cf",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "float",
@@ -4804,38 +4804,38 @@
         ],
         "purpose": "probe",
         "size_class": "S",
-        "seed": 119742930,
+        "seed": 1872857347,
         "inputs": {
           "3": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 1217458479
+            "seed": 595329141
           },
           "4": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 458431594
+            "seed": 1092995826
           },
           "5": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 779956456
+            "seed": 1181779554
           },
           "6": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 2001993258
+            "seed": 1467904275
           }
         },
         "notes": "probe: F28/F29/F36 topology"
       }
     },
     {
-      "id": "S17_2d_i16x16_n2c16k32_f3x3_fp16_cl",
+      "id": "s17_2d_i16x16_n2c16k32_f3x3_fp16_cl",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "float",
@@ -4987,38 +4987,38 @@
         ],
         "purpose": "probe",
         "size_class": "S",
-        "seed": 1011097005,
+        "seed": 1284296910,
         "inputs": {
           "3": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 1081529665
+            "seed": 161954324
           },
           "4": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 1399655882
+            "seed": 1328177243
           },
           "5": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 798149779
+            "seed": 431544355
           },
           "6": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 704464097
+            "seed": 1060938085
           }
         },
         "notes": "probe: F28/F29/F36 topology"
       }
     },
     {
-      "id": "S18_2d_i15x15_n2c16k32_f3x3_bf16_cf",
+      "id": "s18_2d_i15x15_n2c16k32_f3x3_bf16_cf",
       "values": {
         "io_data_type": "bfloat16",
         "intermediate_data_type": "float",
@@ -5170,38 +5170,38 @@
         ],
         "purpose": "probe",
         "size_class": "S",
-        "seed": 1181574050,
+        "seed": 1594744509,
         "inputs": {
           "3": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 89444223
+            "seed": 1964602352
           },
           "4": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 1203456009
+            "seed": 957883505
           },
           "5": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 812208361
+            "seed": 2128586154
           },
           "6": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 1993647902
+            "seed": 1406549197
           }
         },
         "notes": "probe: F28/F29/F36 topology"
       }
     },
     {
-      "id": "S19_2d_i16x16_n2c16k32_f2x2_bf16_cl",
+      "id": "s19_2d_i16x16_n2c16k32_f2x2_bf16_cl",
       "values": {
         "io_data_type": "bfloat16",
         "intermediate_data_type": "float",
@@ -5353,38 +5353,38 @@
         ],
         "purpose": "probe",
         "size_class": "S",
-        "seed": 66528895,
+        "seed": 1744706639,
         "inputs": {
           "3": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 1418196048
+            "seed": 1664025664
           },
           "4": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 394093931
+            "seed": 959831666
           },
           "5": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 1503241350
+            "seed": 1137858299
           },
           "6": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 1197254131
+            "seed": 1821147192
           }
         },
         "notes": "probe: F28/F29/F36 topology"
       }
     },
     {
-      "id": "S15_3d_i16x16x16_n2c16k32_f3x3x3_fp32_cf",
+      "id": "s15_3d_i16x16x16_n2c16k32_f3x3x3_fp32_cf",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -5554,38 +5554,38 @@
         ],
         "purpose": "probe",
         "size_class": "S",
-        "seed": 898737328,
+        "seed": 2118597544,
         "inputs": {
           "3": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 685392036
+            "seed": 317998064
           },
           "4": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 992083452
+            "seed": 1165303602
           },
           "5": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 79421069
+            "seed": 1150054769
           },
           "6": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 1993264445
+            "seed": 2069421025
           }
         },
         "notes": "probe: F28/F29/F36 topology"
       }
     },
     {
-      "id": "S17_3d_i16x16x16_n2c16k32_f3x3x3_fp32_cl",
+      "id": "s17_3d_i16x16x16_n2c16k32_f3x3x3_fp32_cl",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -5755,38 +5755,38 @@
         ],
         "purpose": "probe",
         "size_class": "S",
-        "seed": 397665060,
+        "seed": 478905583,
         "inputs": {
           "3": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 409966775
+            "seed": 1344128830
           },
           "4": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 1224915911
+            "seed": 903594846
           },
           "5": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 1298416306
+            "seed": 1736921450
           },
           "6": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 1366773645
+            "seed": 1321630376
           }
         },
         "notes": "probe: F28/F29/F36 topology"
       }
     },
     {
-      "id": "S18_3d_i15x15x15_n2c16k32_f3x3x3_fp16_cf",
+      "id": "s18_3d_i15x15x15_n2c16k32_f3x3x3_fp16_cf",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "float",
@@ -5956,38 +5956,38 @@
         ],
         "purpose": "probe",
         "size_class": "S",
-        "seed": 1674445307,
+        "seed": 585675945,
         "inputs": {
           "3": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 693874912
+            "seed": 23810133
           },
           "4": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 95697982
+            "seed": 175053159
           },
           "5": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 583163409
+            "seed": 1457219286
           },
           "6": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 1433112709
+            "seed": 1001786270
           }
         },
         "notes": "probe: F28/F29/F36 topology"
       }
     },
     {
-      "id": "S19_3d_i16x16x16_n2c16k32_f2x2x2_fp16_cl",
+      "id": "s19_3d_i16x16x16_n2c16k32_f2x2x2_fp16_cl",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "float",
@@ -6157,38 +6157,38 @@
         ],
         "purpose": "probe",
         "size_class": "S",
-        "seed": 980518497,
+        "seed": 638370643,
         "inputs": {
           "3": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 1404047187
+            "seed": 1404523481
           },
           "4": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 1106023309
+            "seed": 1025470512
           },
           "5": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 162790861
+            "seed": 1478445277
           },
           "6": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 1743476145
+            "seed": 1482182741
           }
         },
         "notes": "probe: F28/F29/F36 topology"
       }
     },
     {
-      "id": "S23_3d_i16x16x16_n2c16k32_f1x1x1_bf16_cf",
+      "id": "s23_3d_i16x16x16_n2c16k32_f1x1x1_bf16_cf",
       "values": {
         "io_data_type": "bfloat16",
         "intermediate_data_type": "float",
@@ -6358,38 +6358,38 @@
         ],
         "purpose": "probe",
         "size_class": "S",
-        "seed": 1883985272,
+        "seed": 1312197544,
         "inputs": {
           "3": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 1790324988
+            "seed": 588935734
           },
           "4": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 594729700
+            "seed": 647113626
           },
           "5": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 970203232
+            "seed": 1352366238
           },
           "6": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 1611796102
+            "seed": 922863040
           }
         },
         "notes": "probe: F28/F29/F36 topology"
       }
     },
     {
-      "id": "S24_3d_i16x16x16_n2c16k32_f3x3x3_bf16_cl",
+      "id": "s24_3d_i16x16x16_n2c16k32_f3x3x3_bf16_cl",
       "values": {
         "io_data_type": "bfloat16",
         "intermediate_data_type": "float",
@@ -6559,31 +6559,31 @@
         ],
         "purpose": "probe",
         "size_class": "S",
-        "seed": 111832435,
+        "seed": 1916682192,
         "inputs": {
           "3": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 1196616208
+            "seed": 252352380
           },
           "4": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 1716346674
+            "seed": 648068881
           },
           "5": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 707169271
+            "seed": 1245247647
           },
           "6": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 1943477530
+            "seed": 787022684
           }
         },
         "notes": "probe: F28/F29/F36 topology"

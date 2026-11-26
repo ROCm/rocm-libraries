@@ -2,7 +2,7 @@
   "version": 1,
   "cases": [
     {
-      "id": "S3_2d_i16x16_n2c16k32_f3x3_fp32_cl",
+      "id": "s3_2d_i16x16_n2c16k32_f3x3_fp32_cl",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -154,31 +154,31 @@
         ],
         "purpose": "probe",
         "size_class": "S",
-        "seed": 992516135,
+        "seed": 583167065,
         "inputs": {
           "3": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 10677030
+            "seed": 529564846
           },
           "4": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 1574302026
+            "seed": 1436897861
           },
           "5": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 553369475
+            "seed": 1784695538
           },
           "6": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 297735374
+            "seed": 284605000
           }
         },
         "notes": "probe: F28/F29/F36 topology"

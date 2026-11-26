@@ -2,7 +2,7 @@
   "version": 1,
   "cases": [
     {
-      "id": "S3_2d_i16x16_n2c16k32_f3x3_fp16_cl_relu",
+      "id": "s3_2d_i16x16_n2c16k32_f3x3_fp16_cl_relu",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "float",
@@ -129,25 +129,25 @@
         ],
         "purpose": "claim",
         "size_class": "S",
-        "seed": 1316434691,
+        "seed": 627001126,
         "inputs": {
           "2": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 1053405626
+            "seed": 258550659
           },
           "3": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 24341672
+            "seed": 2017898121
           },
           "4": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 409753359
+            "seed": 889963735
           }
         }
       }

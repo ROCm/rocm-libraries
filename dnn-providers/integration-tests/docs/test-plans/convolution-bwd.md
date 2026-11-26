@@ -253,6 +253,7 @@ fewer. The classes are grouped by the dgrad property they exercise.
 | S14 | filter = dx + 2, pad 1 | 1–3 | filter larger than dx |
 | S15 | stride (1, 2, 1), dilation (2, 1, 2), pad (1, 0, 1) | 2, 3 | per-dimension parameters |
 | S16a, S16b, S16c | filter 1×3 / 1×3×3; 3×1 / 3×1×1; 3×5 | 2, 3; 2, 3; 2 | non-square filters |
+| S84 | dilation 12, pad 12 | 1, 2 | the largest dilation: the dilated filter is 25 wide on a 16-wide dx |
 
 **Stride phases.**
 
@@ -281,7 +282,7 @@ fewer. The classes are grouped by the dgrad property they exercise.
 | S32 | C 1 | 1–3 | one dx channel |
 | S33 | C 3, K 64 | 2, 3 | input-image gradient |
 | S34 | C 4, K 320 | 2 | small output, long reduction (latent `conv_in`; MFMA kernels with 4 channels per group) |
-| S35 | K 1 | 1, 2 | the reduction is over taps only |
+| S35 | K 1 | 1–3 | the reduction is over taps only |
 | S36 | C 128, K 3 | 2, 3 | wide output, 3-channel reduction (image `conv_out`) |
 | S37 | C 64 / 256, K 2, filter 1 | 2 | binary head |
 | S38 | C 13 / 61, K 17 / 67, dx 15 / 55 | 1–3 | odd channels and odd dx |
@@ -293,6 +294,9 @@ fewer. The classes are grouped by the dgrad property they exercise.
 | S78 | C 128 / 256, K 21, filter 1 | 2 | class head: a reduction that is not a multiple of 8 |
 | S79 | C 128, K 4, filter 3 | 2 | latent `conv_out` |
 | S80 | C = K = 4, filter 1 | 2 | latent quant conv |
+| S81 | K 1, pad 2 (f − 1) | 1–3 | one dy channel with transposed padding 0: the dx border sums fewer taps |
+| S82 | K 1, stride 2 | 1–3 | one dy channel with `f % s ≠ 0` and a floor remainder |
+| S83 | G 4, C/G 8, K/G 1, stride 2, dilation 2, pad 2 | 1–3 | one dy channel per group with `gcd(s, d) > 1` |
 
 **Grouped convolution** (2D unless noted; per-group sizes are the class, the
 medium form raises the group count).
@@ -308,7 +312,7 @@ medium form raises the group count).
 | S49 | G 2 / 4, C/G 8 / 16, K/G 16 / 32 | 1–3 | K/G = 2·C/G |
 | S50 | G 4 / 32, C/G = K/G = 8 / 4, stride 2 | 1–3 | grouped and strided |
 | S51 | G 2 / 4, C/G = K/G = 8 / 16, filter 5, dilation 2, pad 4, dx 15 / 55 | 2 | grouped, dilated |
-| S52 | G 4 / 16, C/G 8, K/G 1 | 2 | one dy channel per group |
+| S52 | G 4 / 16, C/G 8, K/G 1 | 1–3 | one dy channel per group |
 
 **Depthwise** (G = C; 2D unless noted).
 
@@ -496,13 +500,13 @@ Cases generated (own level / cumulative):
 | Level | Plain dgrad | Fused | Own | Cumulative | Claim | Probe |
 |---|---|---|---|---|---|---|
 | quick | 4 | 4 | **8** | 8 | 5 | 3 |
-| PR | 260 | 203 | **463** | 471 | 249 | 214 |
-| nightly | 1,503 | 12 | **1,515** | 1,986 | 1,148 | 367 |
-| full | 1,150 | 0 | **1,150** | 3,136 | 662 | 488 |
+| PR | 274 | 203 | **477** | 485 | 263 | 214 |
+| nightly | 1,601 | 12 | **1,613** | 2,098 | 1,246 | 367 |
+| full | 1,206 | 0 | **1,206** | 3,304 | 718 | 488 |
 
-By size class: quick S 8. PR S 398, H 17, M 3, R 45. Nightly S 900, L 298,
-M 66, H 153, A 12, R 86. Full S 462, L 592, R 76, X 20. 656 distinct dgrad
-geometries. The trims of §4.3 remove 3,410 of the 6,546 generated cases.
+By size class: quick S 8. PR S 412, H 17, M 3, R 45. Nightly S 970, L 326,
+M 66, H 153, A 12, R 86. Full S 462, L 648, R 76, X 20. 684 distinct dgrad
+geometries. The trims of §4.3 remove 3,410 of the 6,714 generated cases.
 `generate_conv_bwd_bundles.py --report` prints the counts again.
 
 ### 4.2 Probes and regressions
@@ -539,7 +543,7 @@ covers the same risk instead, and what brings them back.
 |---|---|---|---|---|
 | D1 | Every backward activation × every S and L class × every layout and data type | An activation's backward is element-wise on dx (or dy); it depends on the data type, layout and fusion path, not on stride phases or channel classes. | Every activation on every core cell (PR) and over every S class of S1–S31 once (full, before T9). | A defect needs an activation and a geometry together, or an engine picks fused kernels by geometry class. |
 | D2 | Every extra data type, mixed pair, `CONVOLUTION` mode, mixed layout and non-packed stride × every S class × every layout and dtype | A data type, mode or layout changes kernel selection per tensor, visible on any geometry. | Each × rank × layout or dtype in nightly; each mixed pair, layout mix and stride kind paired with every S class of S1–S31 once in full. | An engine claims the type or mode, or a layout bug needs a geometry feature. |
-| D3 | The kernel-selecting classes S32–S80 (channels, groups, depthwise, tiling, rank-specific, heads) crossed with the fused topologies or the feature probes | These classes select the dgrad kernel itself; an epilogue or a per-tensor feature does not depend on which one runs. | Each class in plain dgrad from PR up, over every pair in nightly, and at L size in nightly and full. | A defect needs a fusion or a feature together with one of these classes. |
+| D3 | The kernel-selecting classes S32–S83 (channels, groups, depthwise, tiling, rank-specific, heads, one dy channel) crossed with the fused topologies or the feature probes | These classes select the dgrad kernel itself; an epilogue or a per-tensor feature does not depend on which one runs. | Each class in plain dgrad from PR up, over every pair in nightly, and at L size in nightly and full. | A defect needs a fusion or a feature together with one of these classes. |
 | D4 | Hazard shapes × every layout and dtype in 1D and 3D | Hazards act on C, K, N, G and extent; layout and dtype multiply compile work, not hazard cover. | 2D × every pair; 1D and 3D × two pairs (nightly). | A hazard depends on rank. |
 | D5 | Three-way products | Pairwise cover catches most interaction faults; the corpus R set adds the real three-way combinations. | All-pairs (§4); R. | A three-way fault is found: add that triple. |
 
@@ -560,21 +564,21 @@ only in full, and the others hold the evidence for the defects of §4.5.
 | Estimate | Value |
 |---|---|
 | FLOP per case | quick ≤ 14 M, PR ≤ 1.9 G (the three M cases), nightly ≤ 7.3 G, full 116 G (X2) |
-| Oracle | GPU reference, with the CPU reference as the fallback (§2). All 2,430 executed cases of the measurement run below were judged by the GPU reference. All 6,546 cases ran serially in 18 min (gfx942) and 21 min (gfx90a). |
+| Oracle | GPU reference, with the CPU reference as the fallback (§2). All 2,598 executed cases of the measurement run below were judged by the GPU reference. All 6,714 cases ran serially in 19 min (gfx942) and 22 min (gfx90a). |
 | Compile and solver search | paid once per unique shape on a cold cache |
 | Device memory | X1 ≈ 0.4 GB, X3 ≈ 13 GB (fp16), so `minimum_vram_mb` is set on those cases |
 
 ### 4.5 Measured run
 
 **Which cases execute.** T9 and T11 come from serial runs (one test at a time,
-chunks of 100 tests per process) of all 6,546 generated cases with the MIOpen
+chunks of 100 tests per process) of all 6,714 generated cases with the MIOpen
 plugin, the only engine that runs dgrad today, with the engine TOML's dgrad
 tolerance classes (§6):
 
 | Architecture | OK | Skipped | Failed | Crashed | Wall time |
 |---|---|---|---|---|---|
-| gfx90a (MI250) | 2,430 | 4,116 | 0 | 0 | 21 min |
-| gfx942 (MI325X) | 2,430 | 4,116 | 0 | 0 | 18 min |
+| gfx90a (MI250) | 2,598 | 4,116 | 0 | 0 | 22 min |
+| gfx942 (MI325X) | 2,598 | 4,116 | 0 | 0 | 19 min |
 
 - No fused graph executed on either architecture (3,389 cases, all four
   topologies), and F11, F13, F15, F19, F20, F30, F31 and F35 never executed. The
@@ -585,17 +589,21 @@ tolerance classes (§6):
   channels-first ones); the plugin declines the rest.
 - Every executed case was judged by the GPU reference (`[ VERIFIER ] gpu_ref`).
 - Without the TOML classes, 593 (gfx90a) and 295 (gfx942) of the 3,132 cases the plan
-  held before quick was reduced fail at the default tolerance, every one by the
+  held at an earlier revision fail at the default tolerance, every one by the
   numerical floor of its reduction length (§6). With them, the measurement run above
-  and the current set below pass.
+  and the current set below pass. The first fp32 class of that calibration never
+  failed at the default and has no entry; the first fp16 class is 0.12, about twice
+  gfx90a's worst error there.
 
-**The current set.** All 3,136 cases, serial, with the MIOpen plugin and the
-engine TOML:
+**The current set.** All 3,304 cases, serial, with the MIOpen plugin and the
+engine TOML. These are the trimmed subset of the measurement run above (the same
+results, restricted to the cases in the bundles); the gfx90a set was also run on its
+own, in 22 min:
 
-| Architecture | OK | Skipped | Failed | Crashed | Wall time |
-|---|---|---|---|---|---|
-| gfx90a (MI250) | 2,430 | 706 | 0 | 0 | 21 min |
-| gfx942 (MI325X) | 2,430 | 706 | 0 | 0 | 17 min |
+| Architecture | OK | Skipped | Failed | Crashed |
+|---|---|---|---|---|
+| gfx90a (MI250) | 2,598 | 706 | 0 | 0 |
+| gfx942 (MI325X) | 2,598 | 706 | 0 | 0 |
 
 Quick alone (8 cases) runs in under 30 s on either architecture: its four plain
 cases execute and pass, and its four fused cases are declined.
@@ -605,7 +613,7 @@ the mixed-type (F20), mixed-layout (F15), non-packed channels-last (part of F16)
 above-2³¹-element (X3) and the other graphs listed above. Before the plugin's
 decline rules (ALMIOPEN-3008) these probes were accepted and then failed or
 computed wrongly; they now show as skips, so a regression of a decline shows as an
-`unclaimed_support` or a failure. Claims are harvested from these runs: 2,029
+`unclaimed_support` or a failure. Claims are harvested from these runs: 2,197
 claim cases on each of gfx90a and gfx942 (linux), every claim case that executed;
 the other 35 claim cases are fused (`dact`), which no engine executes.
 
@@ -671,7 +679,9 @@ lands.
 | `purpose` | The harness ignores the tag. | The harvester skips probes. | I2 |
 
 Engine-specific tolerances and skips go in the engine TOML, keyed to the case
-ids: `<plan items>_<rank>d_i<dx spatial>_n<N>c<C>k<K>[g<G>]_f<filter>_<dtype>[_w<dtype>_dx<dtype>]_<layout | dy..w..dx..>[_<activation>]`.
+ids. A case id is lowercase_snake_case, as the bundle verifier requires; the plan
+item is its first token (`S3` is `s3`, `R074` is `r074`):
+`<plan items>_<rank>d_i<dx spatial>_n<N>c<C>k<K>[g<G>]_f<filter>_<dtype>[_w<dtype>_dx<dtype>]_<layout | dy..w..dx..>[_<activation>]`.
 A change that renames ids updates the TOML globs in the same pull request.
 
 ---

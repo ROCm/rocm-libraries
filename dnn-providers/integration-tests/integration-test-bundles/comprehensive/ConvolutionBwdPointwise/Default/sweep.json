@@ -2,7 +2,7 @@
   "version": 1,
   "cases": [
     {
-      "id": "S3_F30_1d_i16_n2c16k32_f3_fp16_cl_relu",
+      "id": "s3_f30_1d_i16_n2c16k32_f3_fp16_cl_relu",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "float",
@@ -116,32 +116,32 @@
         ],
         "purpose": "probe",
         "size_class": "S",
-        "seed": 1861528475,
+        "seed": 1801313944,
         "inputs": {
           "2": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 2041095022
+            "seed": 2043647110
           },
           "3": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 756868747
+            "seed": 1816965991
           },
           "4": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 406404250
+            "seed": 523502885
           }
         },
         "notes": "probe: F30 materialised intermediate"
       }
     },
     {
-      "id": "S3_F31_1d_i16_n2c16k32_f3_fp16_cl_relu",
+      "id": "s3_f31_1d_i16_n2c16k32_f3_fp16_cl_relu",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "half",
@@ -255,32 +255,32 @@
         ],
         "purpose": "probe",
         "size_class": "S",
-        "seed": 776547657,
+        "seed": 188804879,
         "inputs": {
           "2": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 404177507
+            "seed": 1669562658
           },
           "3": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 480809942
+            "seed": 2104655458
           },
           "4": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 1133828629
+            "seed": 1307743881
           }
         },
         "notes": "probe: F31 intermediate type"
       }
     },
     {
-      "id": "S3_F30_2d_i16x16_n2c16k32_f3x3_fp16_cl_relu",
+      "id": "s3_f30_2d_i16x16_n2c16k32_f3x3_fp16_cl_relu",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "float",
@@ -408,32 +408,32 @@
         ],
         "purpose": "probe",
         "size_class": "S",
-        "seed": 1575029067,
+        "seed": 520397344,
         "inputs": {
           "2": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 1516467643
+            "seed": 722185891
           },
           "3": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 1569291284
+            "seed": 1153089069
           },
           "4": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 1118385692
+            "seed": 2004200217
           }
         },
         "notes": "probe: F30 materialised intermediate"
       }
     },
     {
-      "id": "S3_F31_2d_i16x16_n2c16k32_f3x3_fp16_cl_relu",
+      "id": "s3_f31_2d_i16x16_n2c16k32_f3x3_fp16_cl_relu",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "half",
@@ -561,32 +561,32 @@
         ],
         "purpose": "probe",
         "size_class": "S",
-        "seed": 2093128679,
+        "seed": 747847284,
         "inputs": {
           "2": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 934151046
+            "seed": 817103086
           },
           "3": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 942844787
+            "seed": 101459585
           },
           "4": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 129544919
+            "seed": 850117383
           }
         },
         "notes": "probe: F31 intermediate type"
       }
     },
     {
-      "id": "S3_F30_3d_i16x16x16_n2c16k32_f3x3x3_fp16_cl_relu",
+      "id": "s3_f30_3d_i16x16x16_n2c16k32_f3x3x3_fp16_cl_relu",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "float",
@@ -728,32 +728,32 @@
         ],
         "purpose": "probe",
         "size_class": "S",
-        "seed": 1173894107,
+        "seed": 359689521,
         "inputs": {
           "2": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 272391399
+            "seed": 752642549
           },
           "3": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 618990768
+            "seed": 303493853
           },
           "4": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 138024751
+            "seed": 1429198065
           }
         },
         "notes": "probe: F30 materialised intermediate"
       }
     },
     {
-      "id": "S3_F31_3d_i16x16x16_n2c16k32_f3x3x3_fp16_cl_relu",
+      "id": "s3_f31_3d_i16x16x16_n2c16k32_f3x3x3_fp16_cl_relu",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "half",
@@ -895,25 +895,25 @@
         ],
         "purpose": "probe",
         "size_class": "S",
-        "seed": 833188564,
+        "seed": 1649335139,
         "inputs": {
           "2": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 1773277168
+            "seed": 7199281
           },
           "3": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 636462892
+            "seed": 533479878
           },
           "4": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 2000310382
+            "seed": 1569289090
           }
         },
         "notes": "probe: F31 intermediate type"

@@ -2,7 +2,7 @@
   "version": 1,
   "cases": [
     {
-      "id": "S3_2d_i16x16_n2c16k32_f3x3_fp32_cf",
+      "id": "s3_2d_i16x16_n2c16k32_f3x3_fp32_cf",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -89,25 +89,25 @@
         ],
         "purpose": "claim",
         "size_class": "S",
-        "seed": 514998900,
+        "seed": 1626058612,
         "inputs": {
           "1": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 2125273351
+            "seed": 1581728547
           },
           "2": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 620467217
+            "seed": 778498933
           }
         }
       }
     },
     {
-      "id": "S3_2d_i16x16_n2c16k32_f3x3_fp16_cl",
+      "id": "s3_2d_i16x16_n2c16k32_f3x3_fp16_cl",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "half",
@@ -194,25 +194,25 @@
         ],
         "purpose": "claim",
         "size_class": "S",
-        "seed": 1711703519,
+        "seed": 1122226728,
         "inputs": {
           "1": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 1485495520
+            "seed": 144165350
           },
           "2": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 1336317012
+            "seed": 235032168
           }
         }
       }
     },
     {
-      "id": "S17_2d_i16x16_n2c16k32_f3x3_bf16_cf",
+      "id": "s17_2d_i16x16_n2c16k32_f3x3_bf16_cf",
       "values": {
         "io_data_type": "bfloat16",
         "intermediate_data_type": "bfloat16",
@@ -299,25 +299,25 @@
         ],
         "purpose": "claim",
         "size_class": "S",
-        "seed": 305109372,
+        "seed": 1214491866,
         "inputs": {
           "1": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 535144844
+            "seed": 1755220323
           },
           "2": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 419219684
+            "seed": 273239279
           }
         }
       }
     },
     {
-      "id": "S3_3d_i8x8x4_n2c16k32_f3x3x3_fp32_cl",
+      "id": "s3_3d_i8x8x4_n2c16k32_f3x3x3_fp32_cl",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -414,19 +414,19 @@
         ],
         "purpose": "claim",
         "size_class": "S",
-        "seed": 1248655388,
+        "seed": 1192188709,
         "inputs": {
           "1": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 1523386908
+            "seed": 1139299447
           },
           "2": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 1554738472
+            "seed": 1776823933
           }
         }
       }

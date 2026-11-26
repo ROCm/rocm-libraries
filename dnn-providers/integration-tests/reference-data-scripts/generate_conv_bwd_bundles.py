@@ -328,7 +328,9 @@ def case_id(c):
         parts.append(f"dy{c['dyl']}w{c['wl']}dx{c['dxl']}")
     if c["topo"] in P.HAS_ACT_PLACEHOLDERS:
         parts.append(c["act"])
-    return "_".join(p for p in parts if p)
+    # The bundle verifier requires lowercase_snake_case ids. The plan items stay
+    # uppercase in the metadata (plan_items) and in the plan itself.
+    return "_".join(p for p in parts if p).lower()
 
 
 def sweep_case(c, cid):

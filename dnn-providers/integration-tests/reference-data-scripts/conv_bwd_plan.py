@@ -550,7 +550,7 @@ S_CLASSES = {
         dict(c=4, k=320),
         dict(c=4, k=320),
     ),  # small C, large K (latent conv_in)
-    "S35": (R12, dict(k=1), None),  # one dy channel: reduction over taps only
+    "S35": (R123, dict(k=1), None),  # one dy channel: reduction over taps only
     "S36": (R23, dict(c=128, k=3), dict(c=128, k=3)),  # wide dx, K 3 (image conv_out)
     "S37": (
         R2,
@@ -576,7 +576,7 @@ S_CLASSES = {
         _grp(2, 8, 8, f=5, d=2, pre=4, ins=(15, 15)),
         _grp(4, 16, 16, f=5, d=2, pre=4, ins=(55, 55)),
     ),
-    "S52": (R2, _grp(4, 8, 1), _grp(16, 8, 1)),  # K/G = 1: one dy channel per group
+    "S52": (R123, _grp(4, 8, 1), _grp(16, 8, 1)),  # K/G = 1: one dy channel per group
     # --- depthwise (G = C) ---------------------------------------------------
     "S53": (R123, _dw(16), _dw(64)),
     "S54": (R123, _dw(16, 2), _dw(64, 2)),  # multiplier 2
@@ -657,6 +657,18 @@ S_CLASSES = {
         dict(c=128, k=4, f=3, pre=1),
     ),  # latent conv_out
     "S80": (R2, dict(c=4, k=4, f=1, pre=0), dict(c=4, k=4, f=1, pre=0)),  # quant conv
+    # --- one dy channel (K/G = 1) with transposed padding 0, stride phases, groups
+    # The earlier hand-captured bundles held single-dy-channel graphs on every
+    # rank; these keep those behaviour classes.
+    "S81": (R123, dict(k=1, pre=2), None),  # K/G 1, pad f-1: transposed padding 0
+    "S82": (R123, dict(k=1, s=2), None),  # K/G 1, f%s != 0 (3 taps, stride 2)
+    "S83": (R123, _grp(4, 8, 1, s=2, d=2, pre=2), None),  # K/G 1, grouped, gcd(s, d) 2
+    # --- large dilation -------------------------------------------------------
+    "S84": (
+        R12,
+        dict(d=12, pre=12),
+        None,
+    ),  # dilation 12: the dilated filter is 25 wide
 }
 S_IDS = tuple(S_CLASSES)
 # Quick: one class from each group that every engine family meets.
