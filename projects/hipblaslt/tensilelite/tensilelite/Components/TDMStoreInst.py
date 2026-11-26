@@ -598,15 +598,24 @@ def emitTDMStoreLoadC(gwb) -> Module:
   return module
 
 
+def _storeWaitNeeded(kernel):
+  """Whether a wave waits for its tensor_store_from_lds before going on.
+
+  Every epilogue of a non-persistent kernel ends the program, and s_endpgm waits for outstanding tensor stores, so the
+  staged tile stays allocated until its store is done. A persistent kernel reuses that LDS for its next tile.
+  """
+  return isPersistent(kernel)
+
+
 def emitTDMStoreFlush(gwb) -> Module:
   """Store the staged D tile with one tensor_store_from_lds per wave.
 
   Each wave stores ceil(MacroTile1/numWaves) consecutive columns of the tile. In a persistent kernel the next tile
-  must not write LDS before every wave's store has read the staged tile: the barrier that ends the tile
-  handoff orders that when the handoff has one (WorkAssignment.splitPersistentTileHandoff), and otherwise the flush
-  ends with its own, which a Hybrid kernel executes on its static arm only. tensor_dim0/1 bound
-  the store to the part of the tile inside D; a wave whose columns all lie at or past the column
-  bound skips its store instead of relying on a zero tensor_dim.
+  must not write LDS before every wave's store has read the staged tile: each wave waits for its store
+  (_storeWaitNeeded), and the barrier that ends the tile handoff orders the waves when the handoff has one
+  (WorkAssignment.splitPersistentTileHandoff); otherwise the flush ends with its own, which a Hybrid kernel executes on
+  its static arm only. tensor_dim0/1 bound the store to the part of the tile inside D; a wave whose columns all lie at
+  or past the column bound skips its store instead of relying on a zero tensor_dim.
   """
   from .TensorDataMover import TensorDataMoverStore
   module = Module("TDMStoreFlush")
@@ -623,7 +632,8 @@ def emitTDMStoreFlush(gwb) -> Module:
       module.add(_skipTest(gwb, sizeJ, tmp))
       module.add(SCBranchSCC1(labelName=skipStore.getLabelName(), comment="skip the store"))
       module.add(tdm.issueStore(group0.idx, group1.idx, tensor=tdmStoreModifiers(kw.states.asmCaps, gwb.kernel)))
-      module.add(SWaitTensorcnt(tensorcnt=0, comment="wait for the TDM store"))
+      if _storeWaitNeeded(gwb.kernel):
+        module.add(SWaitTensorcnt(tensorcnt=0, comment="wait for the TDM store"))
       module.add(skipStore)
   k = gwb.kernel
   # syncThreads emits no barrier for one wave without a cluster barrier; the Hybrid branch would then skip nothing.

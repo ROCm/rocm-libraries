@@ -1258,26 +1258,57 @@ def test_tdm_staging_fold_waited_under_expert_scheduling(gp_gfx1250, gfx1250_iim
 @pytest.mark.parametrize("streamk", [0, 3])
 @pytest.mark.parametrize("tdm", [1])
 def test_tdm_waits_survive_stinkytofu(gp_gfx1250, gfx1250_iim, assembler, capsys, tdm, streamk):
-  """In the emitted assembly the drain of tensor_load_to_lds still comes before the next barrier, and
-  every tensor_store_from_lds is waited for before the next barrier or the end of the kernel."""
+  """In the emitted assembly the drain of tensor_load_to_lds still comes before the next barrier, every
+  tensor_store_from_lds follows an s_wait_dscnt after the last staging ds_store, and only the persistent kernel
+  (StreamK 3) waits for the store before its skip label: s_endpgm waits for it in the other."""
   sol, asm = _emit_asm(gfx1250_iim, assembler, TDMStoreInst=tdm, TDMInst=3, StreamK=streamk)
   assert sol.get("Valid"), capsys.readouterr().out
   lines = asm.splitlines()
   # Only the StinkyTofu pipeline writes STINKY_TOTAL_INST_BYTES.
   assert "STINKY_TOTAL_INST_BYTES" in asm
-  assert any(_code(line).startswith("s_wait_dscnt") for line in lines)
   drains = [i for i, line in enumerate(lines)
             if _code(line).startswith("s_wait_tensorcnt") and "drain tensor_load_to_lds" in line]
   assert drains
   for drain in drains:
     barrier = _nextLine(lines, drain, ("s_barrier",))
     assert barrier is not None and any("main-loop LDS" in line for line in lines[barrier:barrier + 3]), lines[drain]
+  _checkStoreWaits(lines, persistent=streamk == 3)
+
+
+def _checkStoreWaits(lines, persistent):
+  """Each tensor_store_from_lds follows an s_wait_dscnt after the last staging ds_store, and is waited for before its
+  skip label exactly when the kernel is persistent."""
   stores = [i for i, line in enumerate(lines) if _code(line).startswith("tensor_store_from_lds")]
   assert stores
   for store in stores:
-    end = _nextLine(lines, store, ("s_barrier", "s_endpgm"))
-    assert end is not None
-    assert any(_code(line).startswith("s_wait_tensorcnt") for line in lines[store + 1:end]), lines[store]
+    staged = max(i for i in range(store) if _code(lines[i]).startswith("ds_store"))
+    assert any(_code(line).startswith("s_wait_dscnt") for line in lines[staged + 1:store]), lines[staged:store + 1]
+    skip = _nextLine(lines, store, ("label_TDMStoreSkip",))
+    assert skip is not None, lines[store]
+    waited = any(_code(line).startswith("s_wait_tensorcnt") for line in lines[store + 1:skip])
+    assert waited == persistent, lines[store:skip + 1]
+
+
+# Kernels whose TDM blocks end the program, and a persistent one, whose next tile reuses the staged tile's LDS.
+_STORE_WAIT_PATHS = {
+  "regular": ({}, False),
+  "CompactLoopStore": ({"CompactLoopStore": True}, False),
+  "MultipleBufferSingleKernel": ({"GlobalSplitU": 2, "GlobalSplitUAlgorithm": "MultipleBufferSingleKernel",
+                                  "MbskPrefetchMethod": 0}, False),
+  "StreamK": ({"StreamK": 3}, True),
+}
+
+
+@pytest.mark.parametrize("path", sorted(_STORE_WAIT_PATHS))
+def test_tdm_store_waited_only_where_lds_is_reused(gp_gfx1250, gfx1250_iim, assembler, capsys, path):
+  """s_endpgm waits for outstanding tensor stores, so only a persistent kernel waits for its tensor_store_from_lds:
+  every other TDM block ends the program, the regular store, OptNLL, the reduced tile of MultipleBufferSingleKernel
+  and the store after the CompactLoopStore loop alike."""
+  overrides, persistent = _STORE_WAIT_PATHS[path]
+  sol, asm = _emit_asm(gfx1250_iim, assembler, TDMStoreInst=True, **overrides)
+  assert sol.get("Valid"), capsys.readouterr().out
+  assert all(sol[k] == v for k, v in overrides.items() if k == "CompactLoopStore")
+  _checkStoreWaits(asm.splitlines(), persistent)
 
 
 _HANDOFF = ("hand compute LDS back to persistent TDM prefetch", "hand epilogue LDS back to persistent compute",
