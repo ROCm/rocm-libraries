@@ -42,7 +42,6 @@ THRUST_NAMESPACE_BEGIN
  */
 namespace mr
 {
-
 /** \addtogroup memory_resources Memory Resources
  *  \ingroup memory_management
  *  \{
@@ -214,6 +213,5 @@ THRUST_HOST MR* get_global_resource()
 
 /*! \} // memory_resource
  */
-
 } // namespace mr
 THRUST_NAMESPACE_END

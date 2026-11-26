@@ -51,11 +51,8 @@ struct square
 
 int main()
 {
-  // initialize host array
-  float x[4] = {1.0, 2.0, 3.0, 4.0};
-
-  // transfer to device
-  thrust::device_vector<float> d_x(x, x + 4);
+  // initialize device vector directly
+  thrust::device_vector<float> d_x = {1.0, 2.0, 3.0, 4.0};
 
   // setup arguments
   square<float> unary_op;

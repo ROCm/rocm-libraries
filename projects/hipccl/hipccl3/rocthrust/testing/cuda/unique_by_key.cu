@@ -73,7 +73,7 @@ void TestUniqueByKeyDevice(ExecutionPolicy exec)
   Vector keys;
   Vector values;
 
-  using iter_pair = thrust::pair<typename Vector::iterator, typename Vector::iterator>;
+  using iter_pair = cuda::std::pair<typename Vector::iterator, typename Vector::iterator>;
   thrust::device_vector<iter_pair> new_last_vec(1);
   iter_pair new_last;
 
@@ -151,7 +151,7 @@ void TestUniqueByKeyCudaStreams(ExecutionPolicy policy)
   Vector keys;
   Vector values;
 
-  using iter_pair = thrust::pair<Vector::iterator, Vector::iterator>;
+  using iter_pair = cuda::std::pair<Vector::iterator, Vector::iterator>;
   iter_pair new_last;
 
   // basic test
@@ -255,7 +255,7 @@ void TestUniqueCopyByKeyDevice(ExecutionPolicy exec)
   Vector keys;
   Vector values;
 
-  using iter_pair = thrust::pair<typename Vector::iterator, typename Vector::iterator>;
+  using iter_pair = cuda::std::pair<typename Vector::iterator, typename Vector::iterator>;
   thrust::device_vector<iter_pair> new_last_vec(1);
   iter_pair new_last;
 
@@ -345,7 +345,7 @@ void TestUniqueCopyByKeyCudaStreams(ExecutionPolicy policy)
   Vector keys;
   Vector values;
 
-  using iter_pair = thrust::pair<Vector::iterator, Vector::iterator>;
+  using iter_pair = cuda::std::pair<Vector::iterator, Vector::iterator>;
   iter_pair new_last;
 
   // basic test

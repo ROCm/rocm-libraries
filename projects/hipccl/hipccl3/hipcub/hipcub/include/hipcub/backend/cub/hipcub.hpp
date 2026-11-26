@@ -32,6 +32,13 @@
 
 #include "../../config.hpp"
 
+#ifndef HIPCUB_DISABLE_CUB_NVRTC_COMPATIBILITY_CHECK
+    #if _CCCL_COMPILER(NVRTC)
+        #error \
+            "Including <hipcub/hipcub.hpp> is not supported when compiling with NVRTC. Include the specific device header instead (e.g. <hipcub/block/block_reduce.hpp>). You can define HIPCUB_DISABLE_CUB_NVRTC_COMPATIBILITY_CHECK to disable this warning."
+    #endif // _CCCL_COMPILER(NVRTC)
+#endif // HIPCUB_DISABLE_CUB_NVRTC_COMPATIBILITY_CHECK
+
 // Block
 #include <cub/block/block_adjacent_difference.cuh> // IWYU pragma: export
 #include <cub/block/block_discontinuity.cuh> // IWYU pragma: export
@@ -67,6 +74,7 @@
 #include "device/device_segmented_reduce.hpp"
 #include "device/device_segmented_sort.hpp"
 #include "device/device_select.hpp"
+#include "device/device_topk.hpp"
 #include "device/device_transform.hpp"
 
 // Grid

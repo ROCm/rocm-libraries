@@ -31,20 +31,13 @@
 #include <thrust/system/detail/generic/swap_ranges.h>
 #include <thrust/tuple.h>
 
-#if _THRUST_HAS_DEVICE_SYSTEM_STD
-#  include _THRUST_STD_INCLUDE(utility)
-#endif
+#include _THRUST_STD_INCLUDE(__utility/swap.h)
 
 THRUST_NAMESPACE_BEGIN
-namespace system
+namespace system::detail::generic
 {
 namespace detail
 {
-namespace generic
-{
-namespace detail
-{
-
 // XXX define this here rather than in internal_functional.h
 // to avoid circular dependence between swap.h & internal_functional.h
 struct swap_pair_elements
@@ -53,15 +46,10 @@ struct swap_pair_elements
   THRUST_HOST_DEVICE void operator()(Tuple t)
   {
     // use unqualified swap to allow ADL to catch any user-defined swap
-#if _THRUST_HAS_DEVICE_SYSTEM_STD
     using _THRUST_STD::swap;
-#else
-    using thrust::swap;
-#endif
     swap(thrust::get<0>(t), thrust::get<1>(t));
   }
 }; // end swap_pair_elements
-
 } // namespace detail
 
 template <typename DerivedPolicy, typename ForwardIterator1, typename ForwardIterator2>
@@ -81,8 +69,5 @@ THRUST_HOST_DEVICE ForwardIterator2 swap_ranges(
     detail::swap_pair_elements());
   return thrust::get<1>(result.get_iterator_tuple());
 } // end swap_ranges()
-
-} // namespace generic
-} // namespace detail
-} // namespace system
+} // namespace system::detail::generic
 THRUST_NAMESPACE_END

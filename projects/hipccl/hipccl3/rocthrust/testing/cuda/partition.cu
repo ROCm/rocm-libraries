@@ -204,7 +204,7 @@ void TestPartitionCopyDevice(ExecutionPolicy exec)
   thrust::device_vector<int> true_results(2);
   thrust::device_vector<int> false_results(3);
 
-  using pair_type = thrust::pair<iterator, iterator>;
+  using pair_type = cuda::std::pair<iterator, iterator>;
   thrust::device_vector<pair_type> iterators(1);
 
   partition_copy_kernel<<<1, 1>>>(
@@ -290,7 +290,7 @@ void TestPartitionCopyStencilDevice(ExecutionPolicy exec)
   thrust::device_vector<int> false_results(3);
 
   using iterator  = typename thrust::device_vector<int>::iterator;
-  using pair_type = thrust::pair<iterator, iterator>;
+  using pair_type = cuda::std::pair<iterator, iterator>;
   thrust::device_vector<pair_type> iterators(1);
 
   partition_copy_kernel<<<1, 1>>>(
@@ -491,7 +491,7 @@ void TestStablePartitionCopyDevice(ExecutionPolicy exec)
   thrust::device_vector<int> true_results(2);
   thrust::device_vector<int> false_results(3);
 
-  using pair_type = thrust::pair<iterator, iterator>;
+  using pair_type = cuda::std::pair<iterator, iterator>;
   thrust::device_vector<pair_type> iterators(1);
 
   stable_partition_copy_kernel<<<1, 1>>>(
@@ -577,7 +577,7 @@ void TestStablePartitionCopyStencilDevice(ExecutionPolicy exec)
   thrust::device_vector<int> false_results(3);
 
   using iterator  = typename thrust::device_vector<int>::iterator;
-  using pair_type = thrust::pair<iterator, iterator>;
+  using pair_type = cuda::std::pair<iterator, iterator>;
   thrust::device_vector<pair_type> iterators(1);
 
   stable_partition_copy_kernel<<<1, 1>>>(

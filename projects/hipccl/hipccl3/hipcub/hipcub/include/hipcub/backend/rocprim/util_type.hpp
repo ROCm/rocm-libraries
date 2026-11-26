@@ -42,8 +42,10 @@
 #include <hip/hip_runtime.h>
 #include <hip/hip_vector_types.h>
 
-#include _HIPCUB_STD_INCLUDE(limits)
-#include _HIPCUB_STD_INCLUDE(iterator)
+#include _HIPCUB_STD_INCLUDE(__limits/numeric_limits.h)
+#include _HIPCUB_STD_INCLUDE(__iterator/iterator_traits.h)
+#include _HIPCUB_STD_INCLUDE(__type_traits/integral_constant.h)
+#include _HIPCUB_STD_INCLUDE(__type_traits/is_same.h)
 
 #include <type_traits>
 
@@ -63,7 +65,7 @@ using NullType = ::rocprim::empty_type;
 #endif
 
 template<int N>
-struct PowerOfTwo
+struct HIPCUB_DEPRECATED_BECAUSE("Use hip::is_power_of_two(N) instead") PowerOfTwo
 {
     static constexpr bool VALUE = ::rocprim::detail::is_power_of_two(N);
 };
@@ -195,22 +197,6 @@ using is_integral_or_enum =
 
 }
 
-// CUB removed this API, and suggests to use `::cuda::ceil_div` instead,
-// which is implemented in file `libcudacxx/include/cuda/__cmath/ceil_div.h`.
-// Remove when hip::ceil_div is implemented.
-template<typename NumeratorT, typename DenominatorT>
-HIPCUB_DEPRECATED_BECAUSE("Use hip::ceil_div instead from 'libhipcxx'")
-HIPCUB_HOST_DEVICE __forceinline__ constexpr NumeratorT
-    DivideAndRoundUp(NumeratorT n, DenominatorT d)
-{
-  static_assert(hipcub::detail::is_integral_or_enum<NumeratorT>::value &&
-                hipcub::detail::is_integral_or_enum<DenominatorT>::value,
-                "DivideAndRoundUp is only intended for integral types.");
-
-  // Static cast to undo integral promotion.
-  return static_cast<NumeratorT>(n / d + (n % d != 0 ? 1 : 0));
-}
-
 #ifndef DOXYGEN_SHOULD_SKIP_THIS    // Do not document
 
 /******************************************************************************
@@ -221,35 +207,24 @@ HIPCUB_HOST_DEVICE __forceinline__ constexpr NumeratorT
 template <typename T>
 struct AlignBytes
 {
-    struct Pad
-    {
-        T       val;
-        char    byte;
-    };
-
-    enum
-    {
-        /// The "true CUDA" alignment of T in bytes
-        ALIGN_BYTES = sizeof(Pad) - sizeof(T)
-    };
+    /// The "true CUDA" alignment of T in bytes
+    static constexpr unsigned ALIGN_BYTES = alignof(T);
 
     /// The "truly aligned" type
     using Type = T;
 };
 
-// Specializations where host C++ compilers (e.g., 32-bit Windows) may disagree
-// with device C++ compilers (EDG) on types passed as template parameters through
-// kernel functions
+    // Specializations where host C++ compilers (e.g., 32-bit Windows) may disagree
+    // with device C++ compilers (EDG) on types passed as template parameters through
+    // kernel functions
 
-    #define __HIPCUB_ALIGN_BYTES(t, b)                  \
-        template<>                                      \
-        struct AlignBytes<t>                            \
-        {                                               \
-            enum                                        \
-            {                                           \
-                ALIGN_BYTES = b                         \
-            };                                          \
-            using Type = __attribute__((aligned(b))) t; \
+    #define __HIPCUB_ALIGN_BYTES(t, b)                 \
+        template<>                                     \
+        struct AlignBytes<t>                           \
+        {                                              \
+            static constexpr unsigned ALIGN_BYTES = b; \
+                                                       \
+            typedef __align__(b) t Type;               \
         };
 
 __HIPCUB_ALIGN_BYTES(short4, 8)
@@ -306,20 +281,17 @@ template <typename T> struct AlignBytes<const volatile T> : AlignBytes<T> {};
 template <typename T>
 struct UnitWord
 {
-    enum {
-        ALIGN_BYTES = AlignBytes<T>::ALIGN_BYTES
-    };
+    static constexpr auto ALIGN_BYTES = AlignBytes<T>::ALIGN_BYTES;
 
     template <typename Unit>
     struct IsMultiple
     {
-        enum {
-            UNIT_ALIGN_BYTES    = AlignBytes<Unit>::ALIGN_BYTES,
-            IS_MULTIPLE         = (sizeof(T) % sizeof(Unit) == 0) && (int(ALIGN_BYTES) % int(UNIT_ALIGN_BYTES) == 0)
-        };
+        static constexpr auto UNIT_ALIGN_BYTES = AlignBytes<Unit>::ALIGN_BYTES;
+        static constexpr bool IS_MULTIPLE
+            = (sizeof(T) % sizeof(Unit) == 0) && (int(ALIGN_BYTES) % int(UNIT_ALIGN_BYTES) == 0);
     };
 
-    /// Biggest shuffle word that T is a whole multiple of and is not larger than the alignment of T
+    /// Largest shuffle word such that sizeof(T) % sizeof(W) == 0 and alignof(W) <= alignof(T)
     using ShuffleWord =
         typename std::conditional<IsMultiple<int>::IS_MULTIPLE,
                                   unsigned int,
@@ -327,15 +299,15 @@ struct UnitWord
                                                             unsigned short,
                                                             unsigned char>::type>::type;
 
-    /// Biggest volatile word that T is a whole multiple of and is not larger than the alignment of T
+    /// Largest volatile word such that sizeof(T) % sizeof(W) == 0 and alignof(W) <= alignof(T)
     using VolatileWord = typename std::
         conditional<IsMultiple<long long>::IS_MULTIPLE, unsigned long long, ShuffleWord>::type;
 
-    /// Biggest memory-access word that T is a whole multiple of and is not larger than the alignment of T
+    /// Largest memory-access word such that sizeof(T) % sizeof(W) == 0 and alignof(W) <= alignof(T)
     using DeviceWord = typename std::
         conditional<IsMultiple<longlong2>::IS_MULTIPLE, ulonglong2, VolatileWord>::type;
 
-    /// Biggest texture reference word that T is a whole multiple of and is not larger than the alignment of T
+    /// Biggest texture reference word such that sizeof(T) % sizeof(W) == 0 and alignof(W) <= alignof(T)
     using TextureWord = typename std::conditional<
         IsMultiple<int4>::IS_MULTIPLE,
         uint4,
@@ -391,11 +363,8 @@ struct GenericCubVector
     static_assert(!sizeof(T), "CubVector can only have 1-4 elements");
 };
 
-enum
-{
-    /// The maximum number of elements in HIP vector types
-    MAX_VEC_ELEMENTS = 4,
-};
+/// The maximum number of elements in HIP vector types
+inline constexpr int MAX_VEC_ELEMENTS = 4;
 
 template<typename T>
 struct GenericCubVector<T, 1>
@@ -486,7 +455,7 @@ HIPCUB_DEFINE_VECTOR_TYPE(bool, unsigned char)
 template <typename T>
 struct Uninitialized
 {
-    /// Biggest memory-access word that T is a whole multiple of and is not larger than the alignment of T
+    /// Largest memory-access word such that sizeof(T) % sizeof(W) == 0 and alignof(W) <= alignof(T)
     using DeviceWord = typename UnitWord<T>::DeviceWord;
 
     static constexpr size_t DATA_SIZE = sizeof(T);

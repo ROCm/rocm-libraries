@@ -41,6 +41,8 @@
 #  include <thrust/iterator/permutation_iterator.h>
 #  include <thrust/system/hip/detail/transform.h>
 
+#  include _THRUST_STD_INCLUDE(__functional/identity.h)
+
 THRUST_NAMESPACE_BEGIN
 namespace hip_rocprim
 {

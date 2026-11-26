@@ -32,30 +32,27 @@
 
 #include "../../../config.hpp"
 
-#include _HIPCUB_STD_INCLUDE(functional)
+#include _HIPCUB_STD_INCLUDE(__algorithm/max.h)
+#include _HIPCUB_STD_INCLUDE(__algorithm/min.h)
+
+#include <hip/hip_fp16.h> // __half
 
 #include <iterator>
 
 BEGIN_HIPCUB_NAMESPACE
 
-#ifndef DOXYGEN_SHOULD_SKIP_THIS    // Do not document
-
 /**
  * \brief Computes the begin offsets into A and B for the specific diagonal
  *
  */
-template <
-    typename AIteratorT,
-    typename BIteratorT,
-    typename OffsetT,
-    typename CoordinateT>
-__host__ __device__ __forceinline__ void MergePathSearch(
-    OffsetT         diagonal,
-    AIteratorT      a,
-    BIteratorT      b,
-    OffsetT         a_len,
-    OffsetT         b_len,
-    CoordinateT&    path_coordinate)
+template<typename AIteratorT, typename BIteratorT, typename OffsetT, typename CoordinateT>
+HIPCUB_DEPRECATED HIPCUB_HOST_DEVICE
+HIPCUB_FORCEINLINE void MergePathSearch(OffsetT      diagonal,
+                                        AIteratorT   a,
+                                        BIteratorT   b,
+                                        OffsetT      a_len,
+                                        OffsetT      b_len,
+                                        CoordinateT& path_coordinate)
 {
     OffsetT split_min = _HIPCUB_STD::max(diagonal - b_len, 0);
     OffsetT split_max = _HIPCUB_STD::min(diagonal, a_len);
@@ -79,19 +76,21 @@ __host__ __device__ __forceinline__ void MergePathSearch(
     path_coordinate.y = diagonal - split_min;
 }
 
-
-
 /**
  * \brief Returns the offset of the first value within \p input which does not compare less than \p val
+ *
+ * \param[in] input
+ *   Input sequence
+ *
+ * \param[in] num_items
+ *   Input sequence length
+ *
+ * \param[in] val
+ *   Search key
  */
-template <
-    typename InputIteratorT,
-    typename OffsetT,
-    typename T>
-__device__ __forceinline__ OffsetT LowerBound(
-    InputIteratorT      input,              ///< [in] Input sequence
-    OffsetT             num_items,          ///< [in] Input sequence length
-    T                   val)                ///< [in] Search key
+template<typename InputIteratorT, typename OffsetT, typename T>
+HIPCUB_DEVICE
+HIPCUB_FORCEINLINE OffsetT LowerBound(InputIteratorT input, OffsetT num_items, T val)
 {
     OffsetT retval = 0;
     while (num_items > 0)
@@ -111,18 +110,21 @@ __device__ __forceinline__ OffsetT LowerBound(
     return retval;
 }
 
-
 /**
  * \brief Returns the offset of the first value within \p input which compares greater than \p val
+ *
+ * \param[in] input
+ *   Input sequence
+ *
+ * \param[in] num_items
+ *   Input sequence length
+ *
+ * \param[in] val
+ *   Search key
  */
-template <
-    typename InputIteratorT,
-    typename OffsetT,
-    typename T>
-__device__ __forceinline__ OffsetT UpperBound(
-    InputIteratorT      input,              ///< [in] Input sequence
-    OffsetT             num_items,          ///< [in] Input sequence length
-    T                   val)                ///< [in] Search key
+template<typename InputIteratorT, typename OffsetT, typename T>
+HIPCUB_DEVICE
+HIPCUB_FORCEINLINE OffsetT UpperBound(InputIteratorT input, OffsetT num_items, T val)
 {
     OffsetT retval = 0;
     while (num_items > 0)
@@ -142,7 +144,41 @@ __device__ __forceinline__ OffsetT UpperBound(
     return retval;
 }
 
-#endif
+/**
+ * \brief Returns the offset of the first value within \p input which compares greater than \p val
+ *
+ * \param[in] input
+ *   Input sequence
+ *
+ * \param[in] num_items
+ *   Input sequence length
+ *
+ * \param[in] val
+ *   Search key
+ */
+template<typename InputIteratorT, typename OffsetT>
+HIPCUB_DEVICE
+HIPCUB_FORCEINLINE OffsetT UpperBound(InputIteratorT input, OffsetT num_items, __half val)
+{
+    OffsetT retval = 0;
+    while(num_items > 0)
+    {
+        const OffsetT half = num_items >> 1;
+        if(__hlt(val, input[retval + half]))
+        {
+            num_items = half;
+        }
+        else
+        {
+            retval    = retval + (half + 1);
+            num_items = num_items - (half + 1);
+        }
+    }
+
+    return retval;
+}
+
+// Not hip_bfloat16 specialization because the < operator already works fine.
 
 END_HIPCUB_NAMESPACE
 

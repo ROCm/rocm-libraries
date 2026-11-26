@@ -16,7 +16,7 @@ cmake_minimum_required(VERSION 3.18 FATAL_ERROR)
 # find_package(rocthrust 4.x) consumers.
 set(VERSION_STRING "5.1.0")
 # Set the minimum required rocPRIM version
-set(MIN_ROCPRIM_PACKAGE_VERSION "5.0.0" CACHE STRING "Minimum version of rocPRIM to search for when ROCPRIM_FETCH_METHOD is set to PACKAGE.")
+set(MIN_ROCPRIM_PACKAGE_VERSION "5.1.0" CACHE STRING "Minimum version of rocPRIM to search for when ROCPRIM_FETCH_METHOD is set to PACKAGE.")
 # Set the minimum required rocRAND version
 set(MIN_ROCRAND_PACKAGE_VERSION "5.0.0" CACHE STRING "Minimum version of rocRAND to search for when ROCRAND_FETCH_METHOD is set to PACKAGE.")
 # Set download branch for dependencies rocPRIM and rocRAND

@@ -36,6 +36,7 @@
 
 #include <cub/device/device_scan.cuh> // IWYU pragma: export
 
+#include <cuda/std/execution>
 #include <cuda/std/functional>
 
 BEGIN_HIPCUB_NAMESPACE
@@ -153,6 +154,18 @@ public:
                                                                       stream));
     }
 
+    template<typename InputIteratorT,
+             typename OutputIteratorT,
+             typename NumItemsT,
+             typename EnvT = _HIPCUB_STD_EXEC::env<>>
+    [[nodiscard]]
+    HIPCUB_RUNTIME_FUNCTION
+    static hipError_t
+        ExclusiveSum(InputIteratorT d_in, OutputIteratorT d_out, NumItemsT num_items, EnvT env = {})
+    {
+        return hipCUDAErrorTohipError(::cub::DeviceScan::ExclusiveSum(d_in, d_out, num_items, env));
+    }
+
     template<typename IteratorT, typename NumItemsT>
     HIPCUB_RUNTIME_FUNCTION
     static hipError_t ExclusiveSum(void*       d_temp_storage,
@@ -187,6 +200,25 @@ public:
                                                                        init_value,
                                                                        num_items,
                                                                        stream));
+    }
+
+    template<typename InputIteratorT,
+             typename OutputIteratorT,
+             typename ScanOpT,
+             typename InitValueT,
+             typename NumItemsT,
+             typename EnvT = _HIPCUB_STD_EXEC::env<>>
+    [[nodiscard]]
+    HIPCUB_RUNTIME_FUNCTION
+    static hipError_t ExclusiveScan(InputIteratorT  d_in,
+                                    OutputIteratorT d_out,
+                                    ScanOpT         scan_op,
+                                    InitValueT      init_value,
+                                    NumItemsT       num_items,
+                                    EnvT            env = {})
+    {
+        return hipCUDAErrorTohipError(
+            ::cub::DeviceScan::ExclusiveScan(d_in, d_out, scan_op, init_value, num_items, env));
     }
 
     template<typename IteratorT, typename ScanOpT, typename InitValueT, typename NumItemsT>

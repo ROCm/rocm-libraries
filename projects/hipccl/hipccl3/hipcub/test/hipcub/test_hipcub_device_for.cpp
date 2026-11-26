@@ -25,9 +25,14 @@
 // required hipcub headers
 #include <hipcub/device/device_for.hpp>
 
+// required test headers
+#include "test_utils.hpp"
+
 #include <cstddef>
 #include <cstdint>
 #include <new>
+
+#include _HIPCUB_STD_INCLUDE(mdspan)
 
 // Params for tests
 template<class InputType, bool UseGraphs = false>
@@ -88,7 +93,7 @@ TYPED_TEST(HipcubDeviceForTests, ForEach)
     using T = typename TestFixture::input_type;
 
     hipStream_t stream = 0; // default
-    if(TestFixture::use_graphs)
+    if constexpr(TestFixture::use_graphs)
     {
         // Default stream does not support hipGraph stream capture, so create one
         HIP_CHECK(hipStreamCreateWithFlags(&stream, hipStreamNonBlocking));
@@ -118,7 +123,7 @@ TYPED_TEST(HipcubDeviceForTests, ForEach)
             std::for_each(expected.begin(), expected.end(), plus<T>());
 
             test_utils::GraphHelper gHelper;
-            if(TestFixture::use_graphs)
+            if constexpr(TestFixture::use_graphs)
             {
                 // Make sure previous ops on default stream (mem transfers) are done
                 HIP_CHECK(hipStreamSynchronize(0));
@@ -128,7 +133,7 @@ TYPED_TEST(HipcubDeviceForTests, ForEach)
             // Run
             HIP_CHECK(hipcub::DeviceFor::ForEach(d_input, d_input + size, plus<T>(), stream));
 
-            if (TestFixture::use_graphs)
+            if constexpr(TestFixture::use_graphs)
                 gHelper.createAndLaunchGraph(stream);
 
             HIP_CHECK(hipGetLastError());
@@ -143,14 +148,14 @@ TYPED_TEST(HipcubDeviceForTests, ForEach)
             // Check if output values are as expected
             ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(output, expected));
 
-            if(TestFixture::use_graphs)
+            if constexpr(TestFixture::use_graphs)
                 gHelper.cleanupGraphHelper();
 
             HIP_CHECK(hipFree(d_input));
         }
     }
 
-    if(TestFixture::use_graphs)
+    if constexpr(TestFixture::use_graphs)
         HIP_CHECK(hipStreamDestroy(stream));
 }
 
@@ -266,7 +271,7 @@ TYPED_TEST(HipcubDeviceForTests, ForEachN)
     using T = typename TestFixture::input_type;
 
     hipStream_t stream = 0; // default
-    if(TestFixture::use_graphs)
+    if constexpr(TestFixture::use_graphs)
     {
         // Default stream does not support hipGraph stream capture, so create one
         HIP_CHECK(hipStreamCreateWithFlags(&stream, hipStreamNonBlocking));
@@ -298,7 +303,7 @@ TYPED_TEST(HipcubDeviceForTests, ForEachN)
             std::for_each(expected.begin(), expected.begin() + n, plus<T>());
 
             test_utils::GraphHelper gHelper;
-            if(TestFixture::use_graphs)
+            if constexpr(TestFixture::use_graphs)
             {
                 // Make sure previous ops on default stream (mem transfers) are done
                 HIP_CHECK(hipStreamSynchronize(0));
@@ -308,7 +313,7 @@ TYPED_TEST(HipcubDeviceForTests, ForEachN)
             // Run
             HIP_CHECK(hipcub::DeviceFor::ForEachN(d_input, n, plus<T>(), stream));
 
-            if(TestFixture::use_graphs)
+            if constexpr(TestFixture::use_graphs)
             {
                 gHelper.createAndLaunchGraph(stream);
             }
@@ -325,7 +330,7 @@ TYPED_TEST(HipcubDeviceForTests, ForEachN)
             // Check if output values are as expected
             ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(output, expected));
 
-            if(TestFixture::use_graphs)
+            if constexpr(TestFixture::use_graphs)
             {
                 gHelper.cleanupGraphHelper();
             }
@@ -334,7 +339,7 @@ TYPED_TEST(HipcubDeviceForTests, ForEachN)
         }
     }
 
-    if(TestFixture::use_graphs)
+    if constexpr(TestFixture::use_graphs)
     {
         HIP_CHECK(hipStreamDestroy(stream));
     }
@@ -428,7 +433,7 @@ TYPED_TEST(HipcubDeviceForTests, ForEachCopy)
     using T = typename TestFixture::input_type;
 
     hipStream_t stream = 0; // default
-    if(TestFixture::use_graphs)
+    if constexpr(TestFixture::use_graphs)
     {
         // Default stream does not support hipGraph stream capture, so create one
         HIP_CHECK(hipStreamCreateWithFlags(&stream, hipStreamNonBlocking));
@@ -462,7 +467,7 @@ TYPED_TEST(HipcubDeviceForTests, ForEachCopy)
             std::for_each(input.begin(), input.end(), host_op);
 
             test_utils::GraphHelper gHelper;
-            if(TestFixture::use_graphs)
+            if constexpr(TestFixture::use_graphs)
             {
                 // Make sure previous ops on default stream (mem transfers) are done
                 HIP_CHECK(hipStreamSynchronize(0));
@@ -472,7 +477,7 @@ TYPED_TEST(HipcubDeviceForTests, ForEachCopy)
             // Run
             HIP_CHECK(hipcub::DeviceFor::ForEachCopy(d_input, d_input + size, device_op, stream));
 
-            if(TestFixture::use_graphs)
+            if constexpr(TestFixture::use_graphs)
             {
                 gHelper.createAndLaunchGraph(stream);
             }
@@ -487,7 +492,7 @@ TYPED_TEST(HipcubDeviceForTests, ForEachCopy)
             // Check if output values are as expected
             ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(h_count, expected));
 
-            if(TestFixture::use_graphs)
+            if constexpr(TestFixture::use_graphs)
             {
                 gHelper.cleanupGraphHelper();
             }
@@ -497,7 +502,7 @@ TYPED_TEST(HipcubDeviceForTests, ForEachCopy)
         }
     }
 
-    if(TestFixture::use_graphs)
+    if constexpr(TestFixture::use_graphs)
     {
         HIP_CHECK(hipStreamDestroy(stream));
     }
@@ -592,7 +597,7 @@ TYPED_TEST(HipcubDeviceForTests, ForEachCopyN)
     using T = typename TestFixture::input_type;
 
     hipStream_t stream = 0; // default
-    if(TestFixture::use_graphs)
+    if constexpr(TestFixture::use_graphs)
     {
         // Default stream does not support hipGraph stream capture, so create one
         HIP_CHECK(hipStreamCreateWithFlags(&stream, hipStreamNonBlocking));
@@ -626,7 +631,7 @@ TYPED_TEST(HipcubDeviceForTests, ForEachCopyN)
             std::for_each(input.begin(), input.end(), host_op);
 
             test_utils::GraphHelper gHelper;
-            if(TestFixture::use_graphs)
+            if constexpr(TestFixture::use_graphs)
             {
                 // Make sure previous ops on default stream (mem transfers) are done
                 HIP_CHECK(hipStreamSynchronize(0));
@@ -636,7 +641,7 @@ TYPED_TEST(HipcubDeviceForTests, ForEachCopyN)
             // Run
             HIP_CHECK(hipcub::DeviceFor::ForEachCopyN(d_input, size, device_op, stream));
 
-            if(TestFixture::use_graphs)
+            if constexpr(TestFixture::use_graphs)
             {
                 gHelper.createAndLaunchGraph(stream);
             }
@@ -651,7 +656,7 @@ TYPED_TEST(HipcubDeviceForTests, ForEachCopyN)
             // Check if output values are as expected
             ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(h_count, expected));
 
-            if(TestFixture::use_graphs)
+            if constexpr(TestFixture::use_graphs)
             {
                 gHelper.cleanupGraphHelper();
             }
@@ -661,7 +666,7 @@ TYPED_TEST(HipcubDeviceForTests, ForEachCopyN)
         }
     }
 
-    if(TestFixture::use_graphs)
+    if constexpr(TestFixture::use_graphs)
         HIP_CHECK(hipStreamDestroy(stream));
 }
 
@@ -852,37 +857,14 @@ TEST(HipcubDeviceForTests, ForEachCopyNTempStore)
     }
 }
 
-// ForEachInExtents only enables when the cccl mdspan extension is enabled
+// Extents' test only enable when the cccl mdspan extension is enabled
 #if defined(__HIP_PLATFORM_NVIDIA__) || defined(__HIP_PLATFORM_AMD__)
 
-template<class TestParams1, class TestParams2>
-struct HipcubTestParamsMerge
-{};
-
-template<class... Params1, class... Params2>
-struct HipcubTestParamsMerge<::testing::Types<Params1...>, ::testing::Types<Params2...>>
-{
-    using type = ::testing::Types<Params1..., Params2...>;
-};
-
-template<class TestParamsFirst, class... TestParams>
-struct HipcubTestParamsMergeAll
-{
-    using type = typename HipcubTestParamsMerge<
-        TestParamsFirst,
-        typename HipcubTestParamsMergeAll<TestParams...>::type>::type;
-};
-
-template<class TestParamsFirst>
-struct HipcubTestParamsMergeAll<TestParamsFirst>
-{
-    using type = TestParamsFirst;
-};
-
-template<class ExtentsType, bool UseGraphs = false>
-struct DeviceForEachInExtentsParams
+template<class ExtentsType, class LayoutPolicy, bool UseGraphs = false>
+struct DeviceExtentsParams
 {
     using extents_type               = ExtentsType;
+    using layout_policy              = LayoutPolicy;
     static constexpr bool use_graphs = UseGraphs;
 };
 
@@ -894,27 +876,28 @@ struct HipcubDeviceForEachInExtentsTests : public ::testing::Test
     static constexpr bool debug_synchronous = false;
 };
 
-template<class IndexType>
-using HipcubDeviceForEachInExtentsParamGenerator
-    = ::testing::Types<DeviceForEachInExtentsParams<::test_utils::extents<IndexType>>,
-                       DeviceForEachInExtentsParams<::test_utils::extents<IndexType, 5>>,
-                       DeviceForEachInExtentsParams<::test_utils::extents<IndexType, 5, 3>>,
-                       DeviceForEachInExtentsParams<::test_utils::extents<IndexType, 5, 3, 4>>,
-                       DeviceForEachInExtentsParams<::test_utils::extents<IndexType, 2, 5, 3, 4>>>;
+template<class IndexType, class LayoutPolicy = _HIPCUB_STD::layout_right>
+using HipcubExtentsParamGenerator = ::testing::Types<
+    DeviceExtentsParams<_HIPCUB_STD::extents<IndexType>, LayoutPolicy>,
+    DeviceExtentsParams<_HIPCUB_STD::extents<IndexType, 5>, LayoutPolicy>,
+    DeviceExtentsParams<_HIPCUB_STD::extents<IndexType, 5, 3>, LayoutPolicy>,
+    DeviceExtentsParams<_HIPCUB_STD::extents<IndexType, 5, 3, 4>, LayoutPolicy>,
+    DeviceExtentsParams<_HIPCUB_STD::extents<IndexType, 2, 5, 3, 4>, LayoutPolicy>>;
 
-using HipcubDeviceForEachInExtentsTestsParams = typename HipcubTestParamsMergeAll<
-    HipcubDeviceForEachInExtentsParamGenerator<std::int16_t>,
-    HipcubDeviceForEachInExtentsParamGenerator<uint16_t>,
-    HipcubDeviceForEachInExtentsParamGenerator<int32_t>,
-    HipcubDeviceForEachInExtentsParamGenerator<uint32_t>,
-    HipcubDeviceForEachInExtentsParamGenerator<_HIPCUB_STD::int64_t>,
-    HipcubDeviceForEachInExtentsParamGenerator<uint64_t>>::type;
+using HipcubDeviceForEachInExtentsTestsParams =
+    typename test_utils::merge_sequence<HipcubExtentsParamGenerator<std::int16_t>,
+                                        HipcubExtentsParamGenerator<uint16_t>,
+                                        HipcubExtentsParamGenerator<int32_t>,
+                                        HipcubExtentsParamGenerator<uint32_t>,
+                                        HipcubExtentsParamGenerator<_HIPCUB_STD::int64_t>,
+                                        HipcubExtentsParamGenerator<uint64_t>>::type;
 
-template<int Rank = 0,
+template<bool IsLayoutRight,
+         int  Rank,
          typename T,
          typename ExtentsType,
-         typename std::enable_if<Rank == ExtentsType::rank()>::type* = nullptr,
-         typename... IndicesType>
+         typename... IndicesType,
+         typename std::enable_if<sizeof...(IndicesType) == ExtentsType::rank()>::type* = nullptr>
 inline void fill_linear_impl(std::vector<T>& vector,
                              const ExtentsType&,
                              size_t& pos,
@@ -923,28 +906,50 @@ inline void fill_linear_impl(std::vector<T>& vector,
     vector[pos++] = {indices...};
 }
 
-template<
-    int Rank = 0,
-    typename T,
-    typename ExtentsType,
-    typename std::enable_if<Rank<ExtentsType::rank()>::type* = nullptr,
-                            typename... IndicesType> inline void
-        fill_linear_impl(
-            std::vector<T>& vector, const ExtentsType& ext, size_t& pos, IndicesType... indices)
+template<bool IsLayoutRight,
+         int  Rank,
+         typename T,
+         typename ExtentsType,
+         typename... IndicesType,
+         typename std::enable_if<(sizeof...(IndicesType) != ExtentsType::rank())>::type* = nullptr>
+inline void fill_linear_impl(std::vector<T>&    vector,
+                             const ExtentsType& ext,
+                             size_t&            pos,
+                             IndicesType... indices)
 {
     using extents_index_type = typename ExtentsType::index_type;
     for(extents_index_type i = 0; i < static_cast<extents_index_type>(ext.static_extent(Rank)); ++i)
     {
-        fill_linear_impl<Rank + 1>(vector, ext, pos, indices..., i);
+        if constexpr(IsLayoutRight)
+        {
+            fill_linear_impl<IsLayoutRight, Rank + 1>(vector, ext, pos, indices..., i);
+        }
+        else
+        {
+            fill_linear_impl<IsLayoutRight, Rank - 1>(vector, ext, pos, i, indices...);
+        }
     }
 }
 
-template<typename T, typename IndexType, size_t... Extents>
-inline void fill_linear(std::vector<T>&                                     vector,
-                        const ::test_utils::extents<IndexType, Extents...>& ext)
+template<bool IsLayoutRight, typename T, typename IndexType, size_t... Extents>
+inline void fill_linear(std::vector<T>&                                    vector,
+                        const _HIPCUB_STD::extents<IndexType, Extents...>& ext)
 {
-    size_t pos = 0;
-    fill_linear_impl(vector, ext, pos);
+    [[maybe_unused]]
+    size_t pos
+        = 0;
+    if constexpr(sizeof...(Extents) == 0)
+    {
+        return;
+    }
+    else if constexpr(IsLayoutRight)
+    {
+        fill_linear_impl<IsLayoutRight, 0>(vector, ext, pos);
+    }
+    else
+    {
+        fill_linear_impl<IsLayoutRight, (sizeof...(Extents) - 1)>(vector, ext, pos);
+    }
 }
 
 template<typename IndexType, int Size>
@@ -990,7 +995,7 @@ TEST(HipcubDeviceForEachInExtentsTests, ForEachInExtentsAPI)
 
     using item_t                = int;
     using data_t                = std::array<item_t, 3>;
-    using extents_type          = test_utils::extents<item_t, 3, 2, 2>;
+    using extents_type          = _HIPCUB_STD::extents<item_t, 3, 2, 2>;
     constexpr auto extents_size = test_utils::extents_size<extents_type>::value;
     constexpr auto memory_size  = extents_size * sizeof(data_t);
 
@@ -1048,7 +1053,7 @@ TYPED_TEST(HipcubDeviceForEachInExtentsTests, ForEachInExtentsStatic)
 
     std::vector<data_t> expected;
     expected.reserve(extents_size);
-    fill_linear(expected, ext);
+    fill_linear<true /*IsLayoutRight*/>(expected, ext);
 
     item_t* d_input = nullptr;
     HIP_CHECK(test_common_utils::hipMallocHelper(&d_input, memory_size));
@@ -1060,6 +1065,119 @@ TYPED_TEST(HipcubDeviceForEachInExtentsTests, ForEachInExtentsStatic)
 
     std::vector<data_t> h_output;
     h_output.reserve(extents_size);
+    HIP_CHECK(hipMemcpy(h_output.data(), d_input, memory_size, hipMemcpyDeviceToHost));
+    HIP_CHECK(hipDeviceSynchronize());
+
+    ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(h_output, expected));
+    HIP_CHECK(hipFree(d_input));
+}
+
+template<class Params>
+struct HipcubDeviceForEachInLayoutTests : public ::testing::Test
+{
+    using extents_type                      = typename Params::extents_type;
+    using layout_policy                     = typename Params::layout_policy;
+    static constexpr bool use_graphs        = Params::use_graphs;
+    static constexpr bool debug_synchronous = false;
+};
+
+using HipcubDeviceForEachInLayoutTestsParams = typename test_utils::merge_sequence<
+    HipcubExtentsParamGenerator<std::int16_t>,
+    HipcubExtentsParamGenerator<uint16_t>,
+    HipcubExtentsParamGenerator<int32_t, _HIPCUB_STD::layout_left>,
+    HipcubExtentsParamGenerator<uint32_t, _HIPCUB_STD::layout_left>,
+    HipcubExtentsParamGenerator<_HIPCUB_STD::int64_t, _HIPCUB_STD::layout_left>,
+    HipcubExtentsParamGenerator<uint64_t, _HIPCUB_STD::layout_left>>::type;
+
+TYPED_TEST_SUITE(HipcubDeviceForEachInLayoutTests, HipcubDeviceForEachInLayoutTestsParams);
+
+TEST(HipcubDeviceForEachInLayoutTests, ForEachInLayoutAPI)
+{
+    int device_id = test_common_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id = " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+
+    using item_t                = int;
+    using data_t                = std::array<item_t, 3>;
+    using extents_type          = _HIPCUB_STD::extents<item_t, 3, 2, 2>;
+    using mapping_left_type     = _HIPCUB_STD::layout_left::mapping<extents_type>;
+    constexpr auto extents_size = test_utils::extents_size<extents_type>::value;
+    constexpr auto memory_size  = extents_size * sizeof(data_t);
+
+    constexpr extents_type ext{};
+
+    std::vector<data_t> expected = {
+        {0, 0, 0},
+        {1, 0, 0},
+        {2, 0, 0},
+        {0, 1, 0},
+        {1, 1, 0},
+        {2, 1, 0},
+        {0, 0, 1},
+        {1, 0, 1},
+        {2, 0, 1},
+        {0, 1, 1},
+        {1, 1, 1},
+        {2, 1, 1}
+    };
+
+    item_t* d_input = nullptr;
+    HIP_CHECK(test_common_utils::hipMallocHelper(&d_input, memory_size));
+    HIP_CHECK(hipMemset(d_input, 0, memory_size));
+
+    HIP_CHECK(hipcub::DeviceFor::ForEachInLayout(mapping_left_type{ext},
+                                                 ForEachInExtentsOp<item_t>{d_input}));
+    HIP_CHECK(hipGetLastError());
+    HIP_CHECK(hipDeviceSynchronize());
+
+    std::vector<data_t> h_output(extents_size, {0, 0, 0});
+    HIP_CHECK(hipMemcpy(h_output.data(), d_input, memory_size, hipMemcpyDeviceToHost));
+    HIP_CHECK(hipDeviceSynchronize());
+
+    ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(h_output, expected));
+    HIP_CHECK(hipFree(d_input));
+}
+
+TYPED_TEST(HipcubDeviceForEachInLayoutTests, ForEachInLayoutStatic)
+{
+    using extents_type             = typename TestFixture::extents_type;
+    using layout_policy            = typename TestFixture::layout_policy;
+    using mapping_type             = typename layout_policy::template mapping<extents_type>;
+    using index_type               = typename extents_type::index_type;
+    constexpr bool is_layout_right = std::is_same_v<layout_policy, _HIPCUB_STD::layout_right>;
+
+    using item_t                = index_type;
+    using data_t                = std::array<item_t, extents_type::rank()>;
+    constexpr auto extents_size = test_utils::extents_size<extents_type>::value;
+    constexpr auto memory_size  = extents_size * sizeof(data_t);
+    constexpr auto rank         = extents_type::rank();
+    using store_op_t            = LinearStore<index_type, rank>;
+
+    extents_type ext{};
+
+    int device_id = test_common_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id = " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+
+    auto data_init_v = [&](item_t init_v)
+    {
+        data_t d{};
+        d.fill(init_v);
+        return d;
+    };
+
+    std::vector<data_t> h_output(extents_size, data_init_v(1));
+    std::vector<data_t> expected(extents_size, data_init_v(2));
+    fill_linear<is_layout_right>(expected, ext);
+
+    item_t* d_input = nullptr;
+    HIP_CHECK(test_common_utils::hipMallocHelper(&d_input, memory_size));
+    HIP_CHECK(hipMemcpy(d_input, h_output.data(), memory_size, hipMemcpyHostToDevice));
+
+    HIP_CHECK(hipcub::DeviceFor::ForEachInLayout(mapping_type{ext}, store_op_t{d_input}));
+    HIP_CHECK(hipGetLastError());
+    HIP_CHECK(hipDeviceSynchronize());
+
     HIP_CHECK(hipMemcpy(h_output.data(), d_input, memory_size, hipMemcpyDeviceToHost));
     HIP_CHECK(hipDeviceSynchronize());
 

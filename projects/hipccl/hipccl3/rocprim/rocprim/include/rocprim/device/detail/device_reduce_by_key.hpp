@@ -526,65 +526,12 @@ public:
     }
 };
 
-template<typename TargetConfig,
+template<class TargetConfig,
          lookback_scan_determinism Determinism,
-         typename AccumulatorType,
-         typename KeyIterator,
-         typename ValueIterator,
-         typename UniqueIterator,
-         typename ReductionIterator,
-         typename UniqueCountIterator,
-         typename CompareFunction,
-         typename BinaryOp,
-         typename LookbackScanState,
-         typename BlockIdWrapper>
-ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE auto kernel_impl(KeyIterator,
-                                                     ValueIterator,
-                                                     const UniqueIterator,
-                                                     const ReductionIterator,
-                                                     const UniqueCountIterator,
-                                                     const BinaryOp,
-                                                     const CompareFunction,
-                                                     const LookbackScanState,
-                                                     const std::size_t,
-                                                     const std::size_t,
-                                                     const std::size_t,
-                                                     const std::size_t* const,
-                                                     const AccumulatorType* const,
-                                                     BlockIdWrapper)
-    -> std::enable_if_t<!is_lookback_kernel_runnable<LookbackScanState>()>
-{
-    // No need to build the kernel with sleep on a device that does not require it
-}
-
-template<typename TargetConfig,
-         lookback_scan_determinism Determinism,
-         typename AccumulatorType,
-         typename KeyIterator,
-         typename ValueIterator,
-         typename UniqueIterator,
-         typename ReductionIterator,
-         typename UniqueCountIterator,
-         typename CompareFunction,
-         typename BinaryOp,
-         typename LookbackScanState,
-         typename BlockIdWrapper>
-ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE auto
-    kernel_impl(KeyIterator                    keys_input,
-                ValueIterator                  values_input,
-                const UniqueIterator           unique_keys,
-                const ReductionIterator        reductions,
-                const UniqueCountIterator      unique_count,
-                const BinaryOp                 reduce_op,
-                const CompareFunction          compare,
-                const LookbackScanState        scan_state,
-                const std::size_t              starting_block,
-                const std::size_t              total_number_of_blocks,
-                const std::size_t              size,
-                const std::size_t* const       global_head_count,
-                const AccumulatorType* const   previous_accumulated,
-                BlockIdWrapper                 ordered_bid)
-        -> std::enable_if_t<is_lookback_kernel_runnable<LookbackScanState>()>
+         class Key,
+         class Accumulator,
+         class BlockIdWrapper>
+struct kernel_impl_
 {
     static constexpr reduce_by_key_config_params params = TargetConfig::params;
 
@@ -595,10 +542,8 @@ ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE auto
     static constexpr block_scan_algorithm scan_algorithm     = params.scan_algorithm;
     static constexpr unsigned int         items_per_block    = block_size * items_per_thread;
 
-    using key_type = ::rocprim::detail::value_type_t<KeyIterator>;
-
-    using tile_processor = tile_helper<key_type,
-                                       AccumulatorType,
+    using tile_processor = tile_helper<Key,
+                                       Accumulator,
                                        block_size,
                                        items_per_thread,
                                        load_keys_method,
@@ -607,35 +552,90 @@ ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE auto
                                        Determinism,
                                        TargetConfig::wavefront>;
 
-    ROCPRIM_SHARED_MEMORY union
+    union storage_type
     {
         typename BlockIdWrapper::storage_type ordered_bid;
         typename tile_processor::storage_type tile;
-    } storage;
+    };
 
-    const unsigned int block_id
-        = ordered_bid.get(threadIdx.x,
-                          storage.ordered_bid); // rocprim::flat_block_id<block_size, 1, 1>();
-    const unsigned int  block_offset = block_id * items_per_block;
-    const KeyIterator   block_keys   = keys_input + block_offset;
-    const ValueIterator block_values = values_input + block_offset;
+    template<typename KeyIterator,
+            typename ValueIterator,
+            typename UniqueIterator,
+            typename ReductionIterator,
+            typename UniqueCountIterator,
+            typename CompareFunction,
+            typename BinaryOp,
+            typename LookbackScanState>
+    ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE auto reduce_by_key(KeyIterator,
+                                                        ValueIterator,
+                                                        const UniqueIterator,
+                                                        const ReductionIterator,
+                                                        const UniqueCountIterator,
+                                                        const BinaryOp,
+                                                        const CompareFunction,
+                                                        const LookbackScanState,
+                                                        const std::size_t,
+                                                        const std::size_t,
+                                                        const std::size_t,
+                                                        const std::size_t* const,
+                                                        const Accumulator* const,
+                                                        BlockIdWrapper,
+                                                        storage_type&)
+        -> std::enable_if_t<!is_lookback_kernel_runnable<LookbackScanState>()>
+    {
+        // No need to build the kernel with sleep on a device that does not require it
+    }
 
-    tile_processor{}.process_tile(block_keys,
-                                  block_values,
-                                  unique_keys,
-                                  reductions,
-                                  unique_count,
-                                  reduce_op,
-                                  compare,
-                                  scan_state,
-                                  block_id,
-                                  starting_block,
-                                  total_number_of_blocks,
-                                  size,
-                                  storage.tile,
-                                  global_head_count,
-                                  previous_accumulated);
-}
+    template<typename KeyIterator,
+            typename ValueIterator,
+            typename UniqueIterator,
+            typename ReductionIterator,
+            typename UniqueCountIterator,
+            typename CompareFunction,
+            typename BinaryOp,
+            typename LookbackScanState>
+    ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE auto
+        reduce_by_key(KeyIterator                    keys_input,
+                    ValueIterator                  values_input,
+                    const UniqueIterator           unique_keys,
+                    const ReductionIterator        reductions,
+                    const UniqueCountIterator      unique_count,
+                    const BinaryOp                 reduce_op,
+                    const CompareFunction          compare,
+                    const LookbackScanState        scan_state,
+                    const std::size_t              starting_block,
+                    const std::size_t              total_number_of_blocks,
+                    const std::size_t              size,
+                    const std::size_t* const       global_head_count,
+                    const Accumulator* const   previous_accumulated,
+                    BlockIdWrapper                 ordered_bid,
+                    storage_type&                 storage)
+            -> std::enable_if_t<is_lookback_kernel_runnable<LookbackScanState>()>
+    {
+        const unsigned int block_id
+            = ordered_bid.get(threadIdx.x,
+                              storage.ordered_bid); // rocprim::flat_block_id<block_size, 1, 1>();
+        const unsigned int  block_offset = block_id * items_per_block;
+        const KeyIterator   block_keys   = keys_input + block_offset;
+        const ValueIterator block_values = values_input + block_offset;
+
+        tile_processor{}.process_tile(block_keys,
+                                      block_values,
+                                      unique_keys,
+                                      reductions,
+                                      unique_count,
+                                      reduce_op,
+                                      compare,
+                                      scan_state,
+                                      block_id,
+                                      starting_block,
+                                      total_number_of_blocks,
+                                      size,
+                                      storage.tile,
+                                      global_head_count,
+                                      previous_accumulated);
+    }
+};
 
 } // namespace reduce_by_key
 

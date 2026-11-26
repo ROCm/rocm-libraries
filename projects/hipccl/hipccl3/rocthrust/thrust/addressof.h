@@ -15,11 +15,7 @@
 #  pragma system_header
 #endif // no system header
 
-#if _THRUST_HAS_DEVICE_SYSTEM_STD
-#  include _THRUST_STD_INCLUDE(__memory/addressof.h)
-#else
-#  include <thrust/detail/memory_wrapper.h>
-#endif
+#include _THRUST_STD_INCLUDE(__memory/addressof.h)
 
 THRUST_NAMESPACE_BEGIN
 using _THRUST_STD::addressof;

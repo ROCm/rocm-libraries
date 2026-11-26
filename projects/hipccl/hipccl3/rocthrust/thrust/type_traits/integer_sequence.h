@@ -32,13 +32,8 @@
 #  pragma system_header
 #endif // no system header
 
-#include _THRUST_STD_INCLUDE(utility)
-#if _THRUST_HAS_DEVICE_SYSTEM_STD
-#  include _THRUST_STD_INCLUDE(cstdint)
-#  include _THRUST_STD_INCLUDE(type_traits)
-#else
-#  include <cstddef>
-#endif
+#include _THRUST_STD_INCLUDE(__utility/integer_sequence.h)
+#include _THRUST_STD_INCLUDE(cstdint)
 
 THRUST_NAMESPACE_BEGIN
 
@@ -118,7 +113,6 @@ using make_index_sequence = _THRUST_STD::make_index_sequence<N>;
 
 namespace detail
 {
-
 /*! \brief Create a new \c integer_sequence containing the elements of \c
  *  Sequence0 followed by the elements of \c Sequence1. \c Sequence1::size() is
  *  added to each element from \c Sequence0 in the new sequence.
@@ -152,7 +146,6 @@ struct merge_and_renumber_reversed_integer_sequences_impl<integer_sequence<T, Is
 {
   using type = integer_sequence<T, (sizeof...(Is1) + Is0)..., Is1...>;
 };
-
 } // namespace detail
 
 /*! \endcond
@@ -211,7 +204,6 @@ using integer_sequence_push_back = typename detail::integer_sequence_push_back_i
 
 namespace detail
 {
-
 template <typename T, _THRUST_STD::size_t N>
 struct make_reversed_integer_sequence_impl
 {
@@ -250,7 +242,6 @@ struct integer_sequence_push_back_impl<T, I0, integer_sequence<T, Is...>>
 };
 
 ///////////////////////////////////////////////////////////////////////////////
-
 } // namespace detail
 
 /*! \endcond

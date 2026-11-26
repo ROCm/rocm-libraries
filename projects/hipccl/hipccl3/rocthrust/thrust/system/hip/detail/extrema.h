@@ -54,8 +54,8 @@
 // rocprim include
 #  include <rocprim/rocprim.hpp>
 
-#  include _THRUST_STD_INCLUDE(iterator)
-
+#  include _THRUST_STD_INCLUDE(__iterator/distance.h)
+#  include _THRUST_STD_INCLUDE(__utility/pair.h)
 #  include _THRUST_STD_INCLUDE(cstdint)
 
 THRUST_NAMESPACE_BEGIN
@@ -308,10 +308,10 @@ ItemsIt THRUST_HOST_DEVICE max_element(execution_policy<Derived>& policy, ItemsI
 
 THRUST_EXEC_CHECK_DISABLE
 template <class Derived, class ItemsIt, class BinaryPred>
-pair<ItemsIt, ItemsIt> THRUST_HOST_DEVICE
+_THRUST_STD::pair<ItemsIt, ItemsIt> THRUST_HOST_DEVICE
 minmax_element(execution_policy<Derived>& policy, ItemsIt first, ItemsIt last, BinaryPred binary_pred)
 {
-  auto ret = thrust::make_pair(last, last);
+  auto ret = _THRUST_STD::make_pair(last, last);
 
   using InputType = thrust::detail::it_value_t<ItemsIt>;
   using IndexType = thrust::detail::it_difference_t<ItemsIt>;
@@ -339,7 +339,7 @@ minmax_element(execution_policy<Derived>& policy, ItemsIt first, ItemsIt last, B
   zip_iterator begin    = make_zip_iterator(iter_tuple);
   two_pairs_type result = __extrema::extrema(
     policy, transform_t(begin, duplicate_t()), num_items, arg_minmax_t(binary_pred), (two_pairs_type*) (nullptr));
-  ret = thrust::make_pair(first + get<1>(get<0>(result)), first + get<1>(get<1>(result)));
+  ret = _THRUST_STD::make_pair(first + get<1>(get<0>(result)), first + get<1>(get<1>(result)));
 #  else // defined(__HIP_DEVICE_COMPILE__)
   ret = thrust::minmax_element(cvt_to_seq(derived_cast(policy)), first, last, binary_pred);
 #  endif // !defined(__HIP_DEVICE_COMPILE__)
@@ -347,7 +347,8 @@ minmax_element(execution_policy<Derived>& policy, ItemsIt first, ItemsIt last, B
 }
 
 template <class Derived, class ItemsIt>
-pair<ItemsIt, ItemsIt> THRUST_HOST_DEVICE minmax_element(execution_policy<Derived>& policy, ItemsIt first, ItemsIt last)
+_THRUST_STD::pair<ItemsIt, ItemsIt> THRUST_HOST_DEVICE
+minmax_element(execution_policy<Derived>& policy, ItemsIt first, ItemsIt last)
 {
   using value_type = thrust::detail::it_value_t<ItemsIt>;
   return hip_rocprim::minmax_element(policy, first, last, less<value_type>());

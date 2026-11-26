@@ -38,12 +38,9 @@ template<typename ValueType, typename Reference, bool AnySystemTag = true>
 struct IteratorCategory
 {
     using system_tag
-        = std::conditional<AnySystemTag, thrust::any_system_tag, thrust::device_system_tag>::type;
-    using type =
-        typename thrust::detail::iterator_facade_category<system_tag,
-                                                          thrust::random_access_traversal_tag,
-                                                          ValueType,
-                                                          Reference>::type;
+        = typename std::conditional<AnySystemTag, thrust::any_system_tag, thrust::device_system_tag>::type;
+    using type = thrust::detail::iterator_facade_category_t<system_tag,
+                                                            thrust::random_access_traversal_tag>;
 };
 
 } // namespace detail

@@ -30,7 +30,6 @@
 THRUST_NAMESPACE_BEGIN
 namespace detail
 {
-
 template <typename BaseAllocator>
 struct no_throw_allocator : BaseAllocator
 {
@@ -70,6 +69,5 @@ public:
     return super_t::operator!=(other);
   }
 }; // end no_throw_allocator
-
 } // namespace detail
 THRUST_NAMESPACE_END
