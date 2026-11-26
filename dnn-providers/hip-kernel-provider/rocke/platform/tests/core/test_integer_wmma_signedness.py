@@ -170,9 +170,7 @@ def test_hip_compiler_turns_the_hip_bools_into_the_rows_flags(op_id, flags):
         pytest.skip("amdclang++ not in PATH")
     from rocke.helpers.compile import emit_device_llvm_ir_via_hip
 
-    llvm = emit_device_llvm_ir_via_hip(
-        _kernel("gfx11-generic", op_id), arch="gfx1100"
-    )
+    llvm = emit_device_llvm_ir_via_hip(_kernel("gfx11-generic", op_id), arch="gfx1100")
     intrinsic = MATRIX_CALLS[op_id].intrinsic
     assert _flags(llvm, intrinsic) == tuple(_HIPCC_FLAG[flag] for flag in flags)
 

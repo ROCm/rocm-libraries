@@ -151,9 +151,7 @@ def run_cases(
     if arch != "gfx1250":
         raise RuntimeError(f"visible HIP device 0 must be gfx1250, got {arch!r}")
     kernel = build_block_scaled_gemm(spec, arch=arch)
-    compile_fn = (
-        compile_kernel if compile_route == "comgr" else compile_kernel_via_hip
-    )
+    compile_fn = compile_kernel if compile_route == "comgr" else compile_kernel_via_hip
     art = compile_fn(kernel, arch=arch)
     print(
         f"[{arch}/{compile_route}] compiled {art.kernel_name} isa={art.isa}", flush=True

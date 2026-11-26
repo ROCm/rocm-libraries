@@ -414,9 +414,7 @@ def test_gpu_from_artifact_checks_a_kernel_compiled_through_hip(stream):
     if shutil.which("amdclang++") is None:
         pytest.skip("amdclang++ is not on PATH")
     _check_door(
-        KernelLauncher.from_artifact(
-            compile_kernel_via_hip(_fill_kernel(), arch=arch)
-        ),
+        KernelLauncher.from_artifact(compile_kernel_via_hip(_fill_kernel(), arch=arch)),
         stream,
     )
 

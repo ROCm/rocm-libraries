@@ -188,9 +188,7 @@ def test_hip_source_compiles(tmp_path):
     if amdclangxx is None:
         pytest.skip("amdclang++ not found")
     source = tmp_path / "if_else.hip"
-    source.write_text(
-        lower_kernel_to_hip(_branch_kernel("if_else_hip"), arch="gfx942")
-    )
+    source.write_text(lower_kernel_to_hip(_branch_kernel("if_else_hip"), arch="gfx942"))
     subprocess.run(
         [amdclangxx, "--offload-device-only", "-x", "hip",
          "--offload-arch=gfx942", "-O3", str(source), "-o",

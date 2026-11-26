@@ -445,9 +445,7 @@ def _hip_compiler() -> str:
     ):
         if cand and Path(cand).exists():
             return cand
-    raise SystemExit(
-        "amdclang++ not found; put amdclang++ on PATH or set ROCM_PATH"
-    )
+    raise SystemExit("amdclang++ not found; put amdclang++ on PATH or set ROCM_PATH")
 
 
 def build(src: str, work: Path, check_asm: bool) -> tuple[Path, str | None]:
@@ -462,7 +460,17 @@ def build(src: str, work: Path, check_asm: bool) -> tuple[Path, str | None]:
     cc = _hip_compiler()
     if not exe.exists():
         subprocess.run(
-            [cc, "-x", "hip", "-O3", "-w", f"--offload-arch={ARCH}", str(hip), "-o", str(exe)],
+            [
+                cc,
+                "-x",
+                "hip",
+                "-O3",
+                "-w",
+                f"--offload-arch={ARCH}",
+                str(hip),
+                "-o",
+                str(exe),
+            ],
             check=True,
         )
     text = None

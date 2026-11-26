@@ -144,7 +144,9 @@ def test_hip_compiler_selects_targets(
     assert artifact.isa == f"amdgcn-amd-amdhsa--{compiler_target}"
 
 
-def test_hip_compiler_ir_maps_runtime_profile_to_compiler_target(kernel: KernelDef) -> None:
+def test_hip_compiler_ir_maps_runtime_profile_to_compiler_target(
+    kernel: KernelDef,
+) -> None:
     with (
         mock.patch.object(
             compile_module, "lower_kernel_to_hip", return_value="hip"
@@ -274,6 +276,8 @@ def test_an_unreadable_hip_compiler_version_is_refused(kernel: KernelDef) -> Non
 
     with (
         mock.patch.object(compile_module.subprocess, "run", side_effect=run),
-        pytest.raises(RuntimeError, match="cannot read the LLVM version of amdclang\\+\\+"),
+        pytest.raises(
+            RuntimeError, match="cannot read the LLVM version of amdclang\\+\\+"
+        ),
     ):
         compile_module.compile_kernel_via_hip(kernel, arch="gfx942")

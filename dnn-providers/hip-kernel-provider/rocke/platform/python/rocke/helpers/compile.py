@@ -645,7 +645,8 @@ def compile_kernel_via_hip(
             [
                 "amdclang++",
                 "--offload-device-only",
-                "-x", "hip",
+                "-x",
+                "hip",
                 f"--offload-arch={compiler_target}",
                 *flags,
                 str(src_path),
@@ -691,7 +692,11 @@ def _hip_compiler_llvm_major() -> int:
     about the names amdclang++ accepts.
     """
     proc = subprocess.run(
-        ["amdclang++", "--version"], capture_output=True, text=True, timeout=60, check=False
+        ["amdclang++", "--version"],
+        capture_output=True,
+        text=True,
+        timeout=60,
+        check=False,
     )
     match = re.search(r"clang version (\d+)\.", proc.stdout)
     if proc.returncode != 0 or match is None:
@@ -752,7 +757,8 @@ def emit_device_llvm_ir_via_hip(
             [
                 "amdclang++",
                 "--offload-device-only",
-                "-x", "hip",
+                "-x",
+                "hip",
                 f"--offload-arch={compiler_target}",
                 "-S",
                 "-emit-llvm",

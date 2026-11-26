@@ -936,7 +936,9 @@ class TestDatalayoutDriftGuard(unittest.TestCase):
                     # That is a toolchain limitation, NOT a datalayout drift, so
                     # skip this arch rather than fail -- the other arches still
                     # prove the gfx-invariant datalayout the flavor split needs.
-                    self.skipTest(f"amdclang++ cannot target {arch} on this toolchain: {e}")
+                    self.skipTest(
+                        f"amdclang++ cannot target {arch} on this toolchain: {e}"
+                    )
                 toolchain_dl = self._extract_datalayout_from_ir(ir)
                 if (
                     uses_llvm23_profile
