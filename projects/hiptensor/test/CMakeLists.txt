@@ -531,6 +531,7 @@ set(_HIPTENSOR_DEVICE_TESTS
   "plan_lifetime_test|NONE"
   "trinary_bilinear_contraction_test|NONE"
   "trinary_scale_contraction_test|NONE"
+  "trinary_contraction_workspace_test|NONE"
   "bilinear_contraction_with_unary_ops_test|NONE"
   "scale_contraction_with_unary_ops_test|NONE"
   "contraction_padded_strides_test|NONE"
