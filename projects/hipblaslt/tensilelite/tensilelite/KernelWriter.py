@@ -7538,7 +7538,13 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
           if mValue < mEnd and mValue % self.states.numReadsIterCoalescedB == 0:
             module.addComment1("local read inc b")
             module.add(self.localReadInc(kernel, iuiParam, tensorParametersB))
-        module.add(self._wait(kernel, tensorParametersA, tensorParametersB, -1, -1, 0, "4wait for local read"))
+        # [E] tail-loop per-iteration local-read wait: flip to a LogicalLeaf like
+        # the main/NGLL hot loop (hotLoopWait). skipGlobalRead=-1 so _wait always
+        # returns a bare SWaitCnt (never tdmWait); this is an inline emit (not
+        # scheduled), so its .dscnt is never rewritten -- byte-identical SWaitCnt
+        # leaf lowering (§10.11 2b). No-op off region/gfx1250/trial.
+        with logical_region("tailLoopWait"):
+          module.add(maybe_logical_leaf(self._wait(kernel, tensorParametersA, tensorParametersB, -1, -1, 0, "4wait for local read")))
         self.states.SubTileIdx = (self.states.SubTileIdx + 1) % kernel["numSubTiles"]
 
         module.add(pack[0])
