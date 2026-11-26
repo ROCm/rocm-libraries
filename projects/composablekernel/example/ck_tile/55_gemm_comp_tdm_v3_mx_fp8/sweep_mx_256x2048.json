@@ -1,5 +1,5 @@
 {
-  "_comment": "MX 256x2048x2048, round 2: cluster shapes around the 64x64 2x2-cluster best (current loop only; read-ahead lost about 5% at every tile in round 1): 64x64 at clusters 1x1 / 1x2 / 2x1 / 2x2 / 1x4 / 4x1 / 2x4 / 4x2 / 4x4, and 2x2 clusters on 128x64, 64x128, 32x64, 64x32.",
+  "_comment": "MX 256x2048x2048, round 3: 32-row tiles around the 32x64 2x2-cluster best (current loop): 32x64 at clusters 2x2 / 1x2 / 2x1 / 1x4 / 2x4 / 4x2 / 4x4, 32x32 at 2x2 / 1x4 / 2x4 / 4x4, 32x128 at 1x1 / 1x2 / 2x2; 64x64 at 2x2 as the anchor.",
   "default_defines": [
     "-DCK_EX55_BF16_TDM_ONLY",
     "-DCK_TILE_GFX125_FP8_K1PERLANE=16",
@@ -18,136 +18,6 @@
   "arms": [
     {
       "tile": "64x64x256",
-      "warps": "2x2",
-      "wt": 16,
-      "cluster": "1x1",
-      "shapes": [
-        [
-          256,
-          2048,
-          2048
-        ]
-      ]
-    },
-    {
-      "tile": "64x64x256",
-      "warps": "2x2",
-      "wt": 16,
-      "cluster": "2x2",
-      "shapes": [
-        [
-          256,
-          2048,
-          2048
-        ]
-      ]
-    },
-    {
-      "tile": "64x64x256",
-      "warps": "2x2",
-      "wt": 16,
-      "cluster": "1x2",
-      "shapes": [
-        [
-          256,
-          2048,
-          2048
-        ]
-      ]
-    },
-    {
-      "tile": "64x64x256",
-      "warps": "2x2",
-      "wt": 16,
-      "cluster": "2x1",
-      "shapes": [
-        [
-          256,
-          2048,
-          2048
-        ]
-      ]
-    },
-    {
-      "tile": "64x64x256",
-      "warps": "2x2",
-      "wt": 16,
-      "cluster": "1x4",
-      "shapes": [
-        [
-          256,
-          2048,
-          2048
-        ]
-      ]
-    },
-    {
-      "tile": "64x64x256",
-      "warps": "2x2",
-      "wt": 16,
-      "cluster": "4x1",
-      "shapes": [
-        [
-          256,
-          2048,
-          2048
-        ]
-      ]
-    },
-    {
-      "tile": "64x64x256",
-      "warps": "2x2",
-      "wt": 16,
-      "cluster": "2x4",
-      "shapes": [
-        [
-          256,
-          2048,
-          2048
-        ]
-      ]
-    },
-    {
-      "tile": "64x64x256",
-      "warps": "2x2",
-      "wt": 16,
-      "cluster": "4x2",
-      "shapes": [
-        [
-          256,
-          2048,
-          2048
-        ]
-      ]
-    },
-    {
-      "tile": "64x64x256",
-      "warps": "2x2",
-      "wt": 16,
-      "cluster": "4x4",
-      "shapes": [
-        [
-          256,
-          2048,
-          2048
-        ]
-      ]
-    },
-    {
-      "tile": "128x64x256",
-      "warps": "2x2",
-      "wt": 16,
-      "cluster": "2x2",
-      "shapes": [
-        [
-          256,
-          2048,
-          2048
-        ]
-      ]
-    },
-    {
-      "tile": "64x128x256",
       "warps": "2x2",
       "wt": 16,
       "cluster": "2x2",
@@ -173,7 +43,163 @@
       ]
     },
     {
-      "tile": "64x32x256",
+      "tile": "32x64x256",
+      "warps": "2x2",
+      "wt": 16,
+      "cluster": "1x2",
+      "shapes": [
+        [
+          256,
+          2048,
+          2048
+        ]
+      ]
+    },
+    {
+      "tile": "32x64x256",
+      "warps": "2x2",
+      "wt": 16,
+      "cluster": "2x1",
+      "shapes": [
+        [
+          256,
+          2048,
+          2048
+        ]
+      ]
+    },
+    {
+      "tile": "32x64x256",
+      "warps": "2x2",
+      "wt": 16,
+      "cluster": "1x4",
+      "shapes": [
+        [
+          256,
+          2048,
+          2048
+        ]
+      ]
+    },
+    {
+      "tile": "32x64x256",
+      "warps": "2x2",
+      "wt": 16,
+      "cluster": "2x4",
+      "shapes": [
+        [
+          256,
+          2048,
+          2048
+        ]
+      ]
+    },
+    {
+      "tile": "32x64x256",
+      "warps": "2x2",
+      "wt": 16,
+      "cluster": "4x2",
+      "shapes": [
+        [
+          256,
+          2048,
+          2048
+        ]
+      ]
+    },
+    {
+      "tile": "32x64x256",
+      "warps": "2x2",
+      "wt": 16,
+      "cluster": "4x4",
+      "shapes": [
+        [
+          256,
+          2048,
+          2048
+        ]
+      ]
+    },
+    {
+      "tile": "32x32x256",
+      "warps": "2x2",
+      "wt": 16,
+      "cluster": "2x2",
+      "shapes": [
+        [
+          256,
+          2048,
+          2048
+        ]
+      ]
+    },
+    {
+      "tile": "32x32x256",
+      "warps": "2x2",
+      "wt": 16,
+      "cluster": "1x4",
+      "shapes": [
+        [
+          256,
+          2048,
+          2048
+        ]
+      ]
+    },
+    {
+      "tile": "32x32x256",
+      "warps": "2x2",
+      "wt": 16,
+      "cluster": "2x4",
+      "shapes": [
+        [
+          256,
+          2048,
+          2048
+        ]
+      ]
+    },
+    {
+      "tile": "32x32x256",
+      "warps": "2x2",
+      "wt": 16,
+      "cluster": "4x4",
+      "shapes": [
+        [
+          256,
+          2048,
+          2048
+        ]
+      ]
+    },
+    {
+      "tile": "32x128x256",
+      "warps": "2x2",
+      "wt": 16,
+      "cluster": "1x1",
+      "shapes": [
+        [
+          256,
+          2048,
+          2048
+        ]
+      ]
+    },
+    {
+      "tile": "32x128x256",
+      "warps": "2x2",
+      "wt": 16,
+      "cluster": "1x2",
+      "shapes": [
+        [
+          256,
+          2048,
+          2048
+        ]
+      ]
+    },
+    {
+      "tile": "32x128x256",
       "warps": "2x2",
       "wt": 16,
       "cluster": "2x2",
