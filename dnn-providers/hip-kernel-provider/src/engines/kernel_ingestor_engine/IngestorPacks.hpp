@@ -295,6 +295,10 @@ void resetGfx950ConvDgradAotModuleCache();
 void registerGfx1250ConvDgradAotSymbols(hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope);
 void resetGfx1250ConvDgradAotModuleCache();
 
+/// @see packs/Gfx942ConvWgradNative.cpp (hipkernel:Gfx942ConvWgradAot)
+void registerGfx942ConvWgradAotSymbols(hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope);
+void resetGfx942ConvWgradAotModuleCache();
+
 /// Sets the per-image byte limit conv_dgrad_aot::batchChunks() slices a batch at (both
 /// dgrad engines share it), in the provider's own loaded copy of that test seam -- see
 /// ConvDgradAotGeometry.hpp::batchChunkByteLimitForTesting(). A test in another TU

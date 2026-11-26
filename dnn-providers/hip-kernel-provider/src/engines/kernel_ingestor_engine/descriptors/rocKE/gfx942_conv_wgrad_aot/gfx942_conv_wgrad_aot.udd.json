@@ -1,0 +1,6 @@
+{
+  "version": "1.0",
+  "id": "5a6fcdf0-d9b4-44a3-83e3-053fd8b74e72",
+  "name": "Gfx942ConvWgradAot dispatch",
+  "dispatch_symbol": "hipkernel.gfx942_conv_wgrad_aot.dispatch"
+}

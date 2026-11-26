@@ -89,6 +89,9 @@ const std::vector<IngestorPack>& ingestorPacks()
         {"hipkernel:Gfx1250ConvDgradAot",
          &registerGfx1250ConvDgradAotSymbols,
          &resetGfx1250ConvDgradAotModuleCache},
+        {"hipkernel:Gfx942ConvWgradAot",
+         &registerGfx942ConvWgradAotSymbols,
+         &resetGfx942ConvWgradAotModuleCache},
     };
     return s_packs;
 }

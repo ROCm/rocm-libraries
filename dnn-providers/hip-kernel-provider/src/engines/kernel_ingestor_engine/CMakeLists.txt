@@ -15,9 +15,9 @@ target_sources(hip_kernel_provider_impl PRIVATE
     # bundle also sits in descriptor-packaging/examples/descriptors, where the superbuild CI
     # lane points the production source root. Gfx950AttentionDense, Gfx950AttentionUnified2D,
     # Gfx950AttentionUnified3D, Gfx942AttentionUnified2D, Gfx942AttentionDense,
-    # Gfx950ConvFwdAot, Gfx950ConvDgradAot and Gfx1250ConvDgradAot ship from descriptors/; the
-    # two dense attention engines share AttentionDenseNative.cpp, the two dgrad engines
-    # ConvDgradAotNative.cpp.
+    # Gfx950ConvFwdAot, Gfx950ConvDgradAot, Gfx1250ConvDgradAot and Gfx942ConvWgradAot ship from
+    # descriptors/; the two dense attention engines share AttentionDenseNative.cpp, the two
+    # dgrad engines ConvDgradAotNative.cpp.
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/PointwiseNative.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/StandalonePointwiseNative.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/ConvNative.cpp
@@ -31,6 +31,7 @@ target_sources(hip_kernel_provider_impl PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/Gfx942AttentionDenseNative.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/Gfx1151WmmaAttentionNative.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/ConvDgradAotNative.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/packs/Gfx942ConvWgradNative.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/serialization/IngestorPlanHeader.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/serialization/IngestorPlanCodec.cpp
 )
