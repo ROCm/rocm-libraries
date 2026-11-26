@@ -64,43 +64,43 @@ std::vector<ClaimedEngine> claimedEngines()
 {
     std::vector<ClaimedEngine> engines;
 #ifdef HKP_DETERMINISM_ROCKE_GFX942_DENSE
-    // projects/hipdnn/tools/IngestorGenerator/configs/gfx942_attention_dense.yaml:284-285
+    // projects/hipdnn/tools/IngestorGenerator/configs/gfx942_attention_dense.yaml
     // (packs[0].arch: [gfx942]).
     engines.push_back({"hipkernel:Gfx942AttentionDense", {"gfx942"}});
 #endif
 #ifdef HKP_DETERMINISM_ROCKE_GFX942_UNIFIED_2D
-    // .../configs/gfx942_attention_unified_2d.yaml:175-176 (arch: [gfx942]).
+    // .../configs/gfx942_attention_unified_2d.yaml (arch: [gfx942]).
     engines.push_back({"hipkernel:Gfx942AttentionUnified2D", {"gfx942"}});
 #endif
 #ifdef HKP_DETERMINISM_ROCKE_GFX942_UNIFIED_3D
-    // .../configs/gfx942_attention_unified_3d.yaml:106-107 (arch: [gfx942]).
+    // .../configs/gfx942_attention_unified_3d.yaml (arch: [gfx942]).
     engines.push_back({"hipkernel:Gfx942AttentionUnified3d", {"gfx942"}});
 #endif
 #ifdef HKP_DETERMINISM_ROCKE_GFX950_DENSE
-    // .../configs/gfx950_attention_dense.yaml:191-192 (arch: [gfx950]).
+    // .../configs/gfx950_attention_dense.yaml (arch: [gfx950]).
     engines.push_back({"hipkernel:Gfx950AttentionDense", {"gfx950"}});
 #endif
 #ifdef HKP_DETERMINISM_ROCKE_GFX950_UNIFIED_2D
-    // .../configs/gfx950_attention_unified_2d.yaml:166-167 (arch: [gfx950]).
+    // .../configs/gfx950_attention_unified_2d.yaml (arch: [gfx950]).
     engines.push_back({"hipkernel:Gfx950AttentionUnified2D", {"gfx950"}});
 #endif
 #ifdef HKP_DETERMINISM_ROCKE_GFX950_UNIFIED_3D
-    // .../configs/gfx950_attention_unified_3d.yaml:114-115 (arch: [gfx950]).
+    // .../configs/gfx950_attention_unified_3d.yaml (arch: [gfx950]).
     engines.push_back({"hipkernel:Gfx950AttentionUnified3D", {"gfx950"}});
 #endif
 #ifdef HKP_DETERMINISM_WMMA_PREFILL
-    // .../configs/gfx1151_wmma_attention.yaml:135 ships the gfx11-generic and gfx12-generic
+    // .../configs/gfx1151_wmma_attention.yaml ships the gfx11-generic and gfx12-generic
     // families; a generic family is proven by running its code object on one named device,
     // the tokens IntegrationGpuSdpaDeterminismWmma.cpp's runArchs() returns.
     engines.push_back({"hipkernel:Gfx1151WmmaAttention", {"gfx1100", "gfx1201"}});
 #endif
 #ifdef HKP_DETERMINISM_WMMA_DECODE
-    // .../configs/gfx1151_wmma_attention_decode.yaml:86, same families and the same rule.
+    // .../configs/gfx1151_wmma_attention_decode.yaml, same families and the same rule.
     engines.push_back({"hipkernel:Gfx1151WmmaAttentionDecode", {"gfx1100", "gfx1201"}});
 #endif
 #ifdef HKP_DETERMINISM_FLYDSL_SDPA_CDNA_DECODE
-    // Same CDNA family targets as sdpa_cdna (_instances.py:1364); IntegrationGpuSdpaDeterminism
-    // FlydslFwd.cpp's cdna_decode table pins the same three archs.
+    // Same CDNA family targets as sdpa_cdna (SDPA_CDNA_DECODE_TIERS, _instances.py);
+    // IntegrationGpuSdpaDeterminismFlydslFwd.cpp's cdna_decode table pins the same three archs.
     engines.push_back({"hipkernel:flydsl_sdpa_cdna_decode", {"gfx90a", "gfx942", "gfx950"}});
 #endif
 #ifdef HKP_DETERMINISM_FLYDSL_SDPA_CDNA_DUALWAVE
@@ -113,13 +113,13 @@ std::vector<ClaimedEngine> claimedEngines()
     engines.push_back({"hipkernel:flydsl_sdpa_rdna_decode", {"gfx1100", "gfx1201"}});
 #endif
 #ifdef HKP_DETERMINISM_FLYDSL_BWD_MERGED
-    // _instances.py:2635 (SDPA_BWD_TARGET = "gfx950").
+    // _instances.py (SDPA_BWD_TARGET = "gfx950").
     engines.push_back({"hipkernel:flydsl_sdpa_bwd_merged", {"gfx950"}});
 #endif
 #ifdef HKP_DETERMINISM_FLYDSL_BWD_SPLIT
-    // _instances.py:2635 (SDPA_BWD_TARGET = "gfx950", reused for fp32 on gfx942/gfx90a),
-    // :2695 (SDPA_BWD_GFX11_TARGET = "gfx11-generic", run token gfx1100), :2698
-    // (SDPA_BWD_CDNA9_TARGETS = ("gfx942", "gfx90a")).
+    // _instances.py (SDPA_BWD_TARGET = "gfx950", reused for fp32 on gfx942/gfx90a;
+    // SDPA_BWD_GFX11_TARGET = "gfx11-generic", run token gfx1100;
+    // SDPA_BWD_CDNA9_TARGETS = ("gfx942", "gfx90a")).
     engines.push_back(
         {"hipkernel:flydsl_sdpa_bwd_split", {"gfx950", "gfx942", "gfx90a", "gfx1100"}});
 #endif

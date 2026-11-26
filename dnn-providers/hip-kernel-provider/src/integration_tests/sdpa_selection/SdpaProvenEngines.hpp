@@ -157,12 +157,12 @@ inline std::vector<SelectionRow> selectionRows()
 
     std::vector<Case> cases;
     // Forward: ASM forward declines the graph -- its kernel table has no bf16 head-size-64 row
-    // (key.empty(), SdpaFwdPlanBuilder.cpp:1041-1045) -- and Flash2 serves fp16 only
-    // (HipFlash2FwdPlanBuilder.cpp:178), so every claimed engine ranking it is a rocKE or WMMA
-    // one. hipkernel:flydsl_sdpa_cdna, _rdna and _aiw also rank this dense bf16/hd64/causal
+    // (key.empty(), checkFwdApplicability, SdpaFwdPlanBuilder.cpp) -- and Flash2 serves fp16 only
+    // (isApplicable, HipFlash2FwdPlanBuilder.cpp), so every claimed engine ranking it is a rocKE or
+    // WMMA one. hipkernel:flydsl_sdpa_cdna, _rdna and _aiw also rank this dense bf16/hd64/causal
     // shape through their generic unsplit prefill kernel (each engine's own determinism table,
-    // first class) but are never claimed, so an architecture only one of them serves (no
-    // rocKE/WMMA engine of this build targets it, e.g. gfx90a) gets no survivor.
+    // first class) but are never claimed, so an architecture only one of them serves (no rocKE/WMMA
+    // engine of this build targets it, e.g. gfx90a) gets no survivor.
     std::vector<std::string> fwdNoSurvivorArchs;
     for(const auto& arch : fwdServed)
     {
@@ -179,10 +179,10 @@ inline std::vector<SelectionRow> selectionRows()
                       {"hipkernel:flydsl_sdpa_rdna", rdnaArchs},
                       {"hipkernel:flydsl_sdpa_aiw", aiwArchs}},
                      fwdNoSurvivorArchs});
-    // Backward: ASM_SDPA_ENGINE accepts the packed bf16 hd128 graph (equal heads at
-    // SdpaBwdPlanBuilder.cpp:1185-1186, packed stats at :1196-1219) beside the FlyDSL split engine,
-    // on gfx942 and gfx950 (isSupportedArch :636-638, isBatchShapeSupported :699-721), and is never
-    // claimed, when this build has it.
+    // Backward: ASM_SDPA_ENGINE accepts the packed bf16 hd128 graph (equal heads and packed stats,
+    // both in checkBwdApplicability, SdpaBwdPlanBuilder.cpp) beside the FlyDSL split engine, on
+    // gfx942 and gfx950 (isSupportedArch, isBatchShapeSupported, both SdpaBwdPlanBuilder.cpp), and
+    // is never claimed, when this build has it.
     std::vector<UnclaimedEngine> bwdUnclaimed;
 #ifdef HKP_SDPA_SELECTION_ASM_ONLY
     bwdUnclaimed.push_back({"ASM_SDPA_ENGINE", {"gfx942", "gfx950"}});

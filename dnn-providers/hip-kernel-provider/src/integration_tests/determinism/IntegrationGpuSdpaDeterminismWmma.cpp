@@ -95,16 +95,17 @@
  *    decodeKvRange's visible keys, which changes decodePlanFor's numSplits (below).
  *
  * Limits of the table, each a fact of this tree and not a choice:
- *  - A sink_token in the Q data type is rejected by the frontend (SdpaFwdNode.hpp:309-326: sink
- *    must be FLOAT), so the Q-dtype sink objects (sink_is_f32 = 0) are unreachable through the
- *    frontend; every sink row uses the FLOAT sink.
+ *  - A sink_token in the Q data type is rejected by the frontend (validateSinkToken,
+ *    SdpaFwdNode.hpp: sink must be FLOAT), so the Q-dtype sink objects (sink_is_f32 = 0) are
+ *    unreachable through the frontend; every sink row uses the FLOAT sink.
  *  - The harness binds K and V as two tensors, so the interleaved K|V rows give K and V the
  *    interleaved strides (row of 2 x D) over two buffers; the launch arguments, and so the
  *    code path, are the ones of one buffer holding both halves (the native reads the K and V
- *    strides separately, NAT:2221).
+ *    strides separately, runtimeArguments in Gfx1151WmmaAttentionNative.cpp).
  *  - No row has a sequence with no key, so no LSE holds infinity.
- *  - hipkernel:Gfx1151WmmaAttentionDecode declines every paged graph (NAT:1519-1527) and has no
- *    sink objects, so neither exists for it.
+ *  - hipkernel:Gfx1151WmmaAttentionDecode declines every paged graph
+ *    (gfx1151WmmaAttentionDecodeGraphMatches, Gfx1151WmmaAttentionNative.cpp) and has no sink
+ *    objects, so neither exists for it.
  */
 
 namespace

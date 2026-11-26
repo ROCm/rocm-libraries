@@ -126,7 +126,7 @@ void addAsmFwdRows(std::vector<DeterminismRow>& rows,
         if(c.fp8)
         {
             // FP8 E4M3 FNUZ Q/K/V, BF16 O, three scalar FLOAT descales, mma_core_mode unset
-            // (SdpaFwdPlanBuilder.cpp:106-117, 650-671).
+            // (getDataTypeIdentifier, checkMmaCoreMode, checkFp8Descales; SdpaFwdPlanBuilder.cpp).
             DeterminismFwdSpec fp8;
             fp8.shape = shape;
             fp8.dtypes = {DataType::FP8_E4M3_FNUZ, DataType::BFLOAT16, DataType::FLOAT};
@@ -152,11 +152,13 @@ std::vector<AsmFwdCase> asmGfx942Cases()
 {
     // {name, hd, hdv, causal, group, fp8, lse, B, Hq, Hkv, Sq, Skv, lensQ, lensKv}
     return {
-        // gfx942 fmha_fwd.csv:2 bf16 hd128 batch, no mask; LSE on and off; GQA ratio 4.
+        // gfx942 fmha_fwd.csv (fwd_hd128_bf16_rtne.co): bf16 hd128 batch, no mask; LSE on and off;
+        // GQA ratio 4.
         {"Bf16Hd128Lse", 128, 128, false, false, false, true, 2, 8, 8, 1000, 1100, {}, {}},
         {"Bf16Hd128NoLse", 128, 128, false, false, false, false, 2, 8, 8, 1000, 1100, {}, {}},
         {"Bf16Hd128GqaLse", 128, 128, false, false, false, true, 2, 8, 2, 1000, 1100, {}, {}},
-        // :3 bf16 hd128 batch bottom-right causal (tgDiv 2); Hq 6 is tune_opt 3 with GQA 3.
+        // fmha_fwd.csv (fwd_hd128_bf16_causal_rtne.co): bf16 hd128 batch bottom-right causal (tgDiv
+        // 2); Hq 6 is tune_opt 3 with GQA 3.
         {"Bf16Hd128Causal", 128, 128, true, false, false, false, 2, 8, 8, 1000, 1200, {}, {}},
         {"Bf16Hd128CausalGqaTune3",
          128,
@@ -172,17 +174,21 @@ std::vector<AsmFwdCase> asmGfx942Cases()
          1200,
          {},
          {}},
-        // :4 bf16 hd192x128 batch (grid x = heads, y = Q tiles; tune_opt 0).
+        // fmha_fwd.csv (fwd_hd192x128_bf16_rtne.co): bf16 hd192x128 batch (grid x = heads, y = Q
+        // tiles; tune_opt 0).
         {"Bf16Hd192x128Lse", 192, 128, false, false, false, true, 2, 8, 8, 500, 600, {}, {}},
         {"Bf16Hd192x128NoLse", 192, 128, false, false, false, false, 2, 8, 8, 500, 600, {}, {}},
-        // :5 bf16 hd192x128 batch bottom-right causal, no tgDiv at this row; GQA ratio 4.
+        // fmha_fwd.csv (fwd_hd192x128_bf16_causal_rtne.co): bf16 hd192x128 batch bottom-right
+        // causal, no tgDiv at this row; GQA ratio 4.
         {"Bf16Hd192x128Causal", 192, 128, true, false, false, false, 2, 8, 8, 500, 700, {}, {}},
         {"Bf16Hd192x128CausalGqa", 192, 128, true, false, false, false, 2, 8, 2, 500, 700, {}, {}},
-        // :6-7 fp8bf16 hd128 batch (K tile 64), no mask with LSE on and off, and causal.
+        // fmha_fwd.csv (fwd_hd128_fp8.co, fwd_hd128_fp8_causal.co): fp8bf16 hd128 batch (K tile
+        // 64), no mask with LSE on and off, and causal.
         {"Fp8Hd128Lse", 128, 128, false, false, true, true, 2, 8, 8, 1000, 1100, {}, {}},
         {"Fp8Hd128NoLse", 128, 128, false, false, true, false, 2, 8, 8, 1000, 1100, {}, {}},
         {"Fp8Hd128Causal", 128, 128, true, false, true, false, 2, 8, 8, 200, 1200, {}, {}},
-        // :8-9 bf16 hd128 group, no mask and causal (ragged, no LSE).
+        // fmha_fwd.csv (fwd_hd128_bf16_rtne_group.co, fwd_hd128_bf16_causal_rtne_group.co): bf16
+        // hd128 group, no mask and causal (ragged, no LSE).
         {"Bf16Hd128Group",
          128,
          128,
@@ -211,7 +217,8 @@ std::vector<AsmFwdCase> asmGfx942Cases()
          1100,
          GROUP_Q_HD128,
          GROUP_KV_HD128},
-        // :10-11 bf16 hd192x128 group, no mask and causal (tgDiv 1 at this arch's group row).
+        // fmha_fwd.csv (fwd_hd192x128_bf16_rtne_group.co, fwd_hd192x128_bf16_causal_rtne_group.co):
+        // bf16 hd192x128 group, no mask and causal (tgDiv 1 at this arch's group row).
         {"Bf16Hd192x128Group",
          192,
          128,
@@ -246,15 +253,18 @@ std::vector<AsmFwdCase> asmGfx942Cases()
 std::vector<AsmFwdCase> asmGfx950Cases()
 {
     return {
-        // gfx950 fmha_fwd.csv:2 bf16 hd128 batch no mask (K tile 64), LSE on and off, GQA 4.
+        // gfx950 fmha_fwd.csv (fwd_hd128_bf16.co): bf16 hd128 batch no mask (K tile 64), LSE on and
+        // off, GQA 4.
         {"Bf16Hd128Lse", 128, 128, false, false, false, true, 2, 8, 8, 1000, 1100, {}, {}},
         {"Bf16Hd128NoLse", 128, 128, false, false, false, false, 2, 8, 8, 1000, 1100, {}, {}},
         {"Bf16Hd128GqaLse", 128, 128, false, false, false, true, 2, 8, 2, 1000, 1100, {}, {}},
-        // :5 bf16 hd192x128 batch no mask (K tile 128), LSE on and off, GQA 4.
+        // fmha_fwd.csv (fwd_hd192_hd128_bf16.co): bf16 hd192x128 batch no mask (K tile 128), LSE on
+        // and off, GQA 4.
         {"Bf16Hd192x128Lse", 192, 128, false, false, false, true, 2, 8, 8, 500, 600, {}, {}},
         {"Bf16Hd192x128NoLse", 192, 128, false, false, false, false, 2, 8, 8, 500, 600, {}, {}},
         {"Bf16Hd192x128GqaLse", 192, 128, false, false, false, true, 2, 8, 2, 500, 600, {}, {}},
-        // :3-4 bf16 hd128 group, no mask and causal (tgDiv 2).
+        // fmha_fwd.csv (fwd_hd128_bf16_group.co, fwd_hd128_bf16_causal_group.co): bf16 hd128 group,
+        // no mask and causal (tgDiv 2).
         {"Bf16Hd128Group",
          128,
          128,
@@ -283,7 +293,8 @@ std::vector<AsmFwdCase> asmGfx950Cases()
          1100,
          GROUP_Q_HD128,
          GROUP_KV_HD128},
-        // :6-7 bf16 hd192x128 group, no mask and causal (tgDiv 2 on gfx950).
+        // fmha_fwd.csv (fwd_hd192_hd128_bf16_group.co, fwd_hd192_hd128_bf16_causal_group.co): bf16
+        // hd192x128 group, no mask and causal (tgDiv 2 on gfx950).
         {"Bf16Hd192x128Group",
          192,
          128,
@@ -316,24 +327,22 @@ std::vector<AsmFwdCase> asmGfx950Cases()
 }
 
 // ASM backward A32 (the default accumulator; a16 is reachable through the published
-// hipkernel.sdpa.bwd.accumulator_type knob and unmeasured here): odo, dqdkdv with fp32 atomic
-// dQ into a zeroed workspace, dq_convert (SdpaBwdPlan.cpp:177-215). Workgroups of different K
-// tiles add into one dQ row, so the order of the adds is scheduling dependent: a known hazard,
-// measured and never proven. Rows have at least two K tiles per (b, h): the dqdkdv K tile ts is
-// 192 (hd128) or 64 (hd192) (fmha_bwd_dqdkdv.csv), and Skv 512 gives three and eight.
-// ASM_SDPA_ENGINE serves backward on gfx942 and gfx950 (isSupportedArch,
-// SdpaBwdPlanBuilder.cpp:636-639); these rows are gfx942 by choice. MHA only (GQA declined,
-// :1183-1189); BHSD packed strides; findDqdkdvConfig (:192-230) picks the smallest qualifying
-// (pssk, pddv) row for the shape (requestedPssk, :165-176): hd128 and hd192 take pssk = 1,
-// pddv = 1; hd64 has its own pssk = 1, pddv = 0 row (fmha_bwd_dqdkdv.csv), so no row is
-// missing. hd128 and hd192, bf16 and fp16, each have a no-mask (mask 0) and a bottom-right
-// causal (mask 2) row; top-left causal (mask 1) has rows too but is not written (the same
-// launch structure). Sq below Skv, as in
-// asm_sdpa_engine/IntegrationGpuSdpaBackward.cpp:98-101. O and the LSE come from one forward
-// launch of the first-ranked engine on the device (harness): a causal or fp16 or hd192 row
-// needs a non-ASM gfx942 forward that serves LSE for the row's shape (ASM forward is bf16
-// only, so every fp16 row needs one), for example flydsl_sdpa_cdna, so the row fails if none
-// serves it.
+// hipkernel.sdpa.bwd.accumulator_type knob and unmeasured here): odo, dqdkdv with fp32 atomic dQ
+// into a zeroed workspace, dq_convert (SdpaBwdPlan::execute). Workgroups of different K tiles add
+// into one dQ row, so the order of the adds is scheduling dependent: a known hazard, measured and
+// never proven. Rows have at least two K tiles per (b, h): the dqdkdv K tile ts is 192 (hd128) or
+// 64 (hd192) (fmha_bwd_dqdkdv.csv), and Skv 512 gives three and eight. ASM_SDPA_ENGINE serves
+// backward on gfx942 and gfx950 (isSupportedArch, SdpaBwdPlanBuilder.cpp); these rows are gfx942 by
+// choice. MHA only (GQA declined, checkBwdApplicability); BHSD packed strides; findDqdkdvConfig
+// picks the smallest qualifying (pssk, pddv) row for the shape (requestedPssk): hd128 and hd192
+// take pssk = 1, pddv = 1; hd64 has its own pssk = 1, pddv = 0 row (fmha_bwd_dqdkdv.csv), so no row
+// is missing. hd128 and hd192, bf16 and fp16, each have a no-mask (mask 0) and a bottom-right
+// causal (mask 2) row; top-left causal (mask 1) has rows too but is not written (the same launch
+// structure). Sq below Skv, as in getSdpaBwdComprehensiveTestCases' asymmetric Sq != Skv case
+// (asm_sdpa_engine/IntegrationGpuSdpaBackward.cpp). O and the LSE come from one forward launch of
+// the first-ranked engine on the device (harness): a causal or fp16 or hd192 row needs a non-ASM
+// gfx942 forward that serves LSE for the row's shape (ASM forward is bf16 only, so every fp16 row
+// needs one), for example flydsl_sdpa_cdna, so the row fails if none serves it.
 void addAsmBwdRows(std::vector<DeterminismRow>& rows)
 {
     struct BwdCase
@@ -381,26 +390,26 @@ void addAsmBwdRows(std::vector<DeterminismRow>& rows)
 
 constexpr const char* FLASH2_ENGINE = "HIP_FLASH2_ENGINE";
 
-// HIP_FLASH2 forward, gfx942, fp16, d64 and d128, no LSE (declined, HipFlash2FwdPlanBuilder.cpp:
-// 93-94), no mask or top-left causal (the bottom-right mask is declined, :165-167; the row
-// writes TOP_LEFT), Sq a multiple of 64 (:202-204), Hq a multiple of Hkv (GQA), no group mode,
-// head-dim stride 1 (:212-221). Split-K is forced to 1 (:294-295, Flash2Dispatch.hpp:60-68), so
-// there is no combine and no workspace; no kernel atomics.
+// HIP_FLASH2 forward, gfx942, fp16, d64 and d128, no LSE, no mask or top-left causal (the row
+// writes TOP_LEFT), Sq a multiple of 64, Hq a multiple of Hkv (GQA), no group mode, head-dim stride
+// 1 (all isApplicable, HipFlash2FwdPlanBuilder.cpp). Split-K is forced to 1 (buildPlan,
+// HipFlash2FwdPlanBuilder.cpp; K_FLASH2_SPLITK_EXECUTES, Flash2Dispatch.hpp), so there is no
+// combine and no workspace; no kernel atomics.
 //
-// selectFlash2Config (Flash2Dispatch.hpp:88-157) picks the tiling from the shape and the device
-// CU count (304 for an MI300X; rows below are chosen for 304, so they are Sku::MI300 rows and
-// the row's tiling name is that selection). The tilings w4q1k4, w8q1k4, w8q2k4, w8q3k2 and
-// w8q3k4 are separate objects built only with -DHIP_FLASH2_BUILD_VARIANTS=ON (CMakeLists.txt:
-// 121-133); a default build tracks only the legacy 64-thread object and
-// HipFlash2FwdPlanBuilder.cpp:297-320 falls back to it for every shape. A row named for a
-// tiling reaches that tiling only in a build with HIP_FLASH2_BUILD_VARIANTS; in a default build
-// it runs the legacy object. The two Legacy rows on MI308X (80 CUs, which selects differently)
-// run the legacy object of a default build there.
+// selectFlash2Config (Flash2Dispatch.hpp) picks the tiling from the shape and the device CU count
+// (304 for an MI300X; rows below are chosen for 304, so they are Sku::MI300 rows and the row's
+// tiling name is that selection). The tilings w4q1k4, w8q1k4, w8q2k4, w8q3k2 and w8q3k4 are
+// separate objects built only with -DHIP_FLASH2_BUILD_VARIANTS=ON (CMakeLists.txt); a default build
+// tracks only the legacy 64-thread object and buildPlan (HipFlash2FwdPlanBuilder.cpp) falls back to
+// it for every shape. A row named for a tiling reaches that tiling only in a build with
+// HIP_FLASH2_BUILD_VARIANTS; in a default build it runs the legacy object. The two Legacy rows on
+// MI308X (80 CUs, which selects differently) run the legacy object of a default build there.
 //
-// Shapes: Skv a multiple of the K tile (32 or 64) and not; Sq a multiple of the tiling's
-// queries per CTA and not (partial CTA tile); a shape with a split-K the selector computes but
-// the plan never runs (SplitK3: ctas256 112, SplitK4: ctas256 64, d128 Sq >= 1024, Flash2Dispatch.hpp:105-115); GQA.
-// The scalar K/V load path (k_stride_seq % 8 != 0, HipFlash2FwdPlanVariant.hip:195) is not
+// Shapes: Skv a multiple of the K tile (32 or 64) and not; Sq a multiple of the tiling's queries
+// per CTA and not (partial CTA tile); a shape with a split-K the selector computes but the plan
+// never runs (SplitK3: ctas256 112, SplitK4: ctas256 64, d128 Sq >= 1024; selectFlash2Config,
+// Flash2Dispatch.hpp); GQA.
+// The scalar K/V load path (vec_ok in flash2_body_v23, HipFlash2FwdPlanVariant.hip) is not
 // reachable: with d64 or d128 a packed BSHD K and V have a sequence stride of Hkv * d, always a
 // multiple of 8, and the frontend builder makes no other layout. It has no row.
 struct Flash2Case

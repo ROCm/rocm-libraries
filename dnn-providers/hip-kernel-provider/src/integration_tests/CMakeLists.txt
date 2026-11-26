@@ -260,12 +260,16 @@ endif()
 # claim list in sdpa_selection/SdpaProvenEngines.hpp (SelectionRow::unclaimedRanked names the
 # engines expected to report NONDETERMINISTIC for that row).
 # A row exists only for an architecture some engine of this build serves its graph on, as the
-# determinism device cases gate theirs (determinism/CMakeLists.txt). The lists are passed into
-# the code as comma-separated architectures: HKP_SDPA_SELECTION_FWD_ARCHS for the forward graph
-# (bf16, head size 64, causal: an offered rocKE engine on its target architecture, the WMMA
-# engines on gfx1100 and gfx1201, FlyDSL forward content; neither ASM forward nor Flash2 serves
-# it) and HKP_SDPA_SELECTION_BWD_ARCHS for the backward graph (ASM on gfx942 and gfx950, FlyDSL
-# content: merged and the split engine, which needs prep, dkdv and dq).
+# determinism device cases gate theirs (determinism/CMakeLists.txt). This binary's row lists are
+# host code shared by every shard of a multi-arch build, so FlyDSL's contribution below reads
+# HIPKERNELPROVIDER_FLYDSL_PULLED_ARCHS_<op> (objects pulled into this build's descriptor root),
+# never the GPU_TARGETS-and-packaging-filtered HIPKERNELPROVIDER_FLYDSL_ARCHS_<op>: the row
+# lists must not depend on which targets this particular shard was configured for.
+# The lists are passed into the code as comma-separated architectures: HKP_SDPA_SELECTION_FWD_ARCHS
+# for the forward graph (bf16, head size 64, causal: an offered rocKE engine on its target
+# architecture, the WMMA engines on gfx1100 and gfx1201, FlyDSL forward content; neither ASM
+# forward nor Flash2 serves it) and HKP_SDPA_SELECTION_BWD_ARCHS for the backward graph (ASM on
+# gfx942 and gfx950, FlyDSL content: merged and the split engine, which needs prep, dkdv and dq).
 # HKP_SDPA_SELECTION_FWD_CLAIMED_ARCHS is the subset of HKP_SDPA_SELECTION_FWD_ARCHS that ships a
 # claimed forward engine (rocKE and WMMA only: hipkernel:flydsl_sdpa_cdna, _rdna and _aiw rank
 # the same bf16/hd64/causal graph through their generic unsplit prefill kernel but are never
@@ -316,22 +320,22 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
         foreach(_hkp_selection_op IN ITEMS sdpa_rdna sdpa_rdna_decode sdpa_aiw sdpa_cdna
                                            sdpa_cdna_decode sdpa_cdna_dualwave)
             list(APPEND _hkp_selection_fwd_archs
-                 ${HIPKERNELPROVIDER_FLYDSL_ARCHS_${_hkp_selection_op}})
+                 ${HIPKERNELPROVIDER_FLYDSL_PULLED_ARCHS_${_hkp_selection_op}})
         endforeach()
         # hipkernel:flydsl_sdpa_cdna, _rdna and _aiw are never claimed (the head-pad copy they
         # wrap is unproven), so their architectures are tracked separately: a row's forward graph
         # is theirs alone, not a claimed engine's, wherever only they serve it.
         list(APPEND _hkp_selection_flydsl_cdna_archs
-             ${HIPKERNELPROVIDER_FLYDSL_ARCHS_sdpa_cdna})
+             ${HIPKERNELPROVIDER_FLYDSL_PULLED_ARCHS_sdpa_cdna})
         list(APPEND _hkp_selection_flydsl_rdna_archs
-             ${HIPKERNELPROVIDER_FLYDSL_ARCHS_sdpa_rdna})
+             ${HIPKERNELPROVIDER_FLYDSL_PULLED_ARCHS_sdpa_rdna})
         list(APPEND _hkp_selection_flydsl_aiw_archs
-             ${HIPKERNELPROVIDER_FLYDSL_ARCHS_sdpa_aiw})
+             ${HIPKERNELPROVIDER_FLYDSL_PULLED_ARCHS_sdpa_aiw})
         list(APPEND _hkp_selection_bwd_claimed_archs
-             ${HIPKERNELPROVIDER_FLYDSL_ARCHS_sdpa_bwd_merged})
-        foreach(_hkp_selection_arch IN LISTS HIPKERNELPROVIDER_FLYDSL_ARCHS_sdpa_bwd_prep)
-            if(_hkp_selection_arch IN_LIST HIPKERNELPROVIDER_FLYDSL_ARCHS_sdpa_bwd_dkdv
-               AND _hkp_selection_arch IN_LIST HIPKERNELPROVIDER_FLYDSL_ARCHS_sdpa_bwd_dq)
+             ${HIPKERNELPROVIDER_FLYDSL_PULLED_ARCHS_sdpa_bwd_merged})
+        foreach(_hkp_selection_arch IN LISTS HIPKERNELPROVIDER_FLYDSL_PULLED_ARCHS_sdpa_bwd_prep)
+            if(_hkp_selection_arch IN_LIST HIPKERNELPROVIDER_FLYDSL_PULLED_ARCHS_sdpa_bwd_dkdv
+               AND _hkp_selection_arch IN_LIST HIPKERNELPROVIDER_FLYDSL_PULLED_ARCHS_sdpa_bwd_dq)
                 list(APPEND _hkp_selection_bwd_claimed_archs ${_hkp_selection_arch})
             endif()
         endforeach()
