@@ -1233,8 +1233,10 @@ rocke_kernel_def_t* rocke_build_direct_conv_new(rocke_ir_builder_t* b,
 /* ===================================================================== *
  *  MFMA dgrad weight transforms
  *
- *  DirectTransposeWeightsDgradSpec(problem, runtime_channels=False)
- *      W[total_K, KH, KW, cpg] -> W_T[total_C, KH, KW, kpg], spatially flipped.
+ *  DirectTransposeWeightsDgradSpec(problem, runtime_channels=False, tiled=False)
+ *      W[total_K, KH, KW, cpg] -> W_T[total_C, KH, KW, kpg], spatially flipped
+ *      (tiled: by 64 x 64 (k, c) tiles through LDS, always runtime channels,
+ *      kernel name "..._rtc_t64").
  *  DirectReorganizeWeightsSpec(problem, fold_k32=False, runtime_channels=False)
  *      W_T -> W_coa, the coalesced per-(r, s, atom, m) preload layout.
  *
@@ -1246,6 +1248,9 @@ typedef struct rocke_direct_transpose_weights_dgrad_spec
 {
     rocke_direct_conv_problem_t problem;
     bool runtime_channels; /* default false */
+    /* 64 x 64 (k, c) tiles through LDS, 16-byte loads and stores (runtime
+     * channels; cpg and kpg multiples of 8); default false */
+    bool tiled;
 } rocke_direct_transpose_weights_dgrad_spec_t;
 
 typedef struct rocke_direct_reorganize_weights_spec
