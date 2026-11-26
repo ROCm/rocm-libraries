@@ -56,6 +56,14 @@ PACK_ABI = [
     ("sliding_window", "by_value"),
 ]
 
+# A bias kernel's: the attn_mask and its batch, head and query-row strides follow.
+PACK_BIAS_ABI = PACK_ABI + [
+    ("additive_bias_ptr", "global_buffer"),
+    ("additive_bias_batch_stride", "by_value"),
+    ("additive_bias_head_stride", "by_value"),
+    ("additive_bias_sq_stride", "by_value"),
+]
+
 
 def _selected_spec(spec_id, head_size):
     """The kernel spec the pinned tuning candidate selects for a bottom-right causal bf16
@@ -160,6 +168,43 @@ def test_a_shipped_geometry_packs_with_the_abi_the_native_pack_marshals(
     result = _run_cli(str(kdp), "--kpack-python-dir", rocm_kpack_dir, mode="full")
     assert result.returncode == 0, result.stdout + result.stderr
     assert "compiled specialization agreement: OK for 1 kernel(s)" in result.stdout
+
+
+@pytest.mark.parametrize(
+    "spec_id, head_size",
+    [
+        ("gfx942_u2d_narrow_nw2_mw32_t2xb_llvm", 128),
+        ("gfx942_u2d_narrow_nw4_mw32_t4xb_llvm", 64),
+    ],
+)
+def test_a_shipped_bias_kernel_packs_with_the_abi_the_native_pack_marshals(
+    tmp_path, hipcc, rocm_kpack_dir, rocke_available, spec_id, head_size
+):
+    """Each head size's bias kernel, on the narrow path the manifest's bias sections pin."""
+    from kernels.gfx942.attention_tiled_2d import build_unified_attention_2d_tiled
+
+    spec = dataclasses.replace(
+        _selected_spec(spec_id, head_size),
+        use_additive_bias=True,
+        use_mfma_32x32x8=False,
+        use_register_pv=False,
+    )
+    out = _pack(
+        _root(tmp_path, spec),
+        tmp_path,
+        hipcc,
+        rocm_kpack_dir,
+        export=f"gfx942_unified_2d_{spec_id}_addb",
+    )
+    kdp = out / ARCH / "attention.kdp.json"
+    ks = read_shipped(kdp)["kernelDescriptors"][0]["kernel_source"]
+    kernel = build_unified_attention_2d_tiled(spec, arch=ARCH)
+    kpack, _comp = load_kpack(rocm_kpack_dir)
+    archive = kpack.PackedKernelArchive.read(out / ARCH / ks["library"])
+    blob = bytes(archive.get_kernel(ks["toc_key"], ARCH))
+    assert ks["signature"] == kernel_signature(blob, ks["symbol"], "t")
+    assert [(a["name"], a["kind"]) for a in ks["signature"]] == PACK_BIAS_ABI
+    assert [p.name for p in kernel.params] == [name for name, _ in PACK_BIAS_ABI]
 
 
 def test_a_spec_the_predicate_refuses_is_refused_at_pack_time(

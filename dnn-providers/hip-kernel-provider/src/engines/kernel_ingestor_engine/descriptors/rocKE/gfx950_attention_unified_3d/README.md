@@ -15,7 +15,7 @@ the plan's workspace ahead of the segment scratch (`packs/Gfx950AttentionUnified
 
 - Architecture: gfx950 only.
 - Decode only: one query token per sequence (every kernel is built with the decode grid).
-- Variants: 239 (all `kind = rocke` multi-launch kernels, compiled at pack time):
+- Variants: 355 (all `kind = rocke` multi-launch kernels, compiled at pack time):
   - 123 without LSE: every one of the 116 cells at 16 segments, plus 7 variants at 32 or 64
     segments in the 5 cells where a gfx950 sweep measured them winning. This is
     `variant_reduce`'s cut of the 348-variant full space (116 cells at three segment counts).
@@ -23,6 +23,16 @@ the plan's workspace ahead of the segment scratch (`packs/Gfx950AttentionUnified
     also writes the SDPA stats output. At decode its token-major LSE is the head-major
     [B, Hq, 1, 1] stats layout. A graph that asks for stats matches only these; any other
     graph matches only the rest.
+  - 116 additive-bias twins (`*_addb`, KMD `use_additive_bias` 1): each cell's 16-segment
+    kernel, whose segment adds the graph's `attn_mask` to the scaled scores. A graph with an
+    `attn_mask` matches only these; any other graph matches only the rest.
+  The engine serves an fp32 `attn_mask` `[B|1, Hq|1, Sq|1, Skv]` (extent 1 or full on each
+  leading axis, indexed by the query head), real, not ragged and not pass-by-value, with a
+  unit-stride key axis and its largest element index below 2^31, and declines any other,
+  with the cause in the INFO log. It also declines an `attn_mask` together with the stats output, since no bias kernel writes the LSE. `-inf` masks a key; a row with no unmasked key
+  outputs 0, as the hipDNN reference does for a row of `-inf` scores. A finite value,
+  `finfo(float32).min` included, is a score like any other (a row of them gets the uniform
+  softmax), and a NaN on a visible key makes its row NaN, as in the reference.
 - dtype: bf16, fp16. head_size: 64, 128 (the bf16 D256 decode cohort is deferred).
 - mask: top-left causal and bottom-right causal (KMD `mask_type` 1, 2). A no-mask decode graph is
   served by the bottom-right causal kernel: with one query row the two admit the same keys, and
@@ -58,12 +68,15 @@ agree.
   when the shipped KDP no longer matches: any kernel added, removed, renamed or changed needs a
   retrain (the skill's `generate.md`), then the new ids and
   `tools/catalog_fingerprint.py <this bundle>/artifacts/<pack>.kdp.json` in both configs.
+- The bias kernels are one per cell, so a graph with an `attn_mask` has one kernel to pick
+  and the models make no bias choice. They were not shown a bias graph: the corpus tool
+  cannot yet emit one (AICK-3322).
 
 ## Files
 
 | File | In | Notes |
 |---|---|---|
-| `artifacts/gfx950_attention_unified_3d.kdp.json` | DVC | 0.52 MB, the 239 variants. Pointer: `artifacts.dvc` (one artifact for the folder) |
+| `artifacts/gfx950_attention_unified_3d.kdp.json` | DVC | 0.78 MB, the 355 variants. Pointer: `artifacts.dvc` (one artifact for the folder) |
 | `gfx950_attention_unified_3d.kmd.json` | git | variant fields |
 | `gfx950_attention_unified_3d.udd.json` | git | dispatch symbol |
 | `gfx950_attention_unified_3d.ued.json` | git | engine, knob `num_segments` |

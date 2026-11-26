@@ -85,6 +85,11 @@ kmd_fields:
 - name: emit_lse
   type: int
   default_value: 0
+# 1 for the additive-bias kernel, which adds an fp32 attn_mask [B|1, Hq|1, Sq|1, Skv] to
+# the scaled scores (four extra kernel arguments). A record without it reads as 0.
+- name: use_additive_bias
+  type: int
+  default_value: 0
 specialization:
   metadata_fields:
   - dtype
@@ -97,6 +102,7 @@ specialization:
   - num_segments
   - use_decode_grid
   - emit_lse
+  - use_additive_bias
   matcher_only_fields: []
   vocabulary:
     dtype:
@@ -123,6 +129,8 @@ specialization:
       field: use_decode_grid
     emit_lse:
       field: emit_lse
+    use_additive_bias:
+      field: use_additive_bias
 kernel_source_kind: rocke
 workspace_policy: derived
 
@@ -250,11 +258,21 @@ enumerate:
       spec_fields: *spec_fields
       spec_overrides: {emit_lse: true}
       kernel_name_template: attention_unified_3d.{dtype}_d{head_size}_hq{num_query_heads}_kv{num_kv_heads}_m{mask_type}_bs{block_size}_seg{num_segments}_lse.gfx950
+    # The additive-bias twin of each cell's seg16 kernel, for SDPA graphs with an FP32
+    # attn_mask: one per cell (`space: slice`), so the trained rankers have no bias choice
+    # to make. No bias kernel writes the LSE (a graph with both is declined).
+    - pin: {algorithm: unified_tuning, spec_id: gfx950_u3d_splitkv_seg16_t1xb}
+      fixed: *fixed
+      cells: *cells
+      space: slice
+      spec_fields: *spec_fields
+      spec_overrides: {use_additive_bias: true}
+      kernel_name_template: attention_unified_3d.{dtype}_d{head_size}_hq{num_query_heads}_kv{num_kv_heads}_m{mask_type}_bs{block_size}_seg{num_segments}_addb.gfx950
 
 reduction:
   fields:
     # Spec fields: the mask kind is the spec's (causal_top_left, right_bound) pair.
-    feature: [dtype, head_size, num_query_heads, num_kv_heads, causal_top_left, right_bound, sliding_window, block_size, use_decode_grid, emit_lse]
+    feature: [dtype, head_size, num_query_heads, num_kv_heads, causal_top_left, right_bound, sliding_window, block_size, use_decode_grid, emit_lse, use_additive_bias]
     performance:
       - {name: num_segments}
     ignored: [waves_per_eu, use_kv_lds_swizzle, use_wave_page_id_load]
@@ -305,7 +323,7 @@ launch_surface:
   - name: matcher
     python_source: kernels/gfx950/attention_tiled_3d.py:supports_tiled_3d
     cpp_mirror: dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/packs/Gfx950AttentionUnified3DNative.cpp
-    kmd_fields: [dtype, head_size, num_query_heads, num_kv_heads, block_size, mask_type, sliding_window, num_segments, use_decode_grid, emit_lse]
+    kmd_fields: [dtype, head_size, num_query_heads, num_kv_heads, block_size, mask_type, sliding_window, num_segments, use_decode_grid, emit_lse, use_additive_bias]
     guard: >
       kernelMatches() returns false (no panic) if emit_lse disagrees with whether the
       graph has a stats output, or if dtype, head_size, num_query_heads,

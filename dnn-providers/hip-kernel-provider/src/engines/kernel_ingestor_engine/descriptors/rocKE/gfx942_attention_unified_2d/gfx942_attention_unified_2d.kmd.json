@@ -81,6 +81,11 @@
       "name": "use_transposed_invariant_hoist",
       "type": "int",
       "default_value": 0
+    },
+    {
+      "name": "use_additive_bias",
+      "type": "int",
+      "default_value": 0
     }
   ]
 }

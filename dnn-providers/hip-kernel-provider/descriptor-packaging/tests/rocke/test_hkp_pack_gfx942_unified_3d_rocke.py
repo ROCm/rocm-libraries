@@ -169,6 +169,61 @@ def test_the_split_kv_module_packs_both_launches_from_one_object(
     assert "compiled specialization agreement: OK for 1 kernel(s)" in result.stdout
 
 
+def test_the_bias_module_packs_the_attn_mask_before_the_strided_kv_arguments(
+    tmp_path, hipcc, rocm_kpack_dir, rocke_available
+):
+    """The catalog's bias kernel: the segment takes the attn_mask and its three strides after
+    the runtime fields and before the strided K/V block, where the native pack marshals
+    them (gfx942Unified3dSegmentArguments); the reduce is unchanged."""
+    from kernels.gfx942.attention_tiled_3d import (
+        build_unified_attention_3d_tiled_module,
+    )
+
+    spec, _ = _selected_specs()
+    plain = build_unified_attention_3d_tiled_module(spec, arch=ARCH)
+    spec = dataclasses.replace(spec, use_additive_bias=True)
+    out = _pack(
+        _root(tmp_path, spec),
+        tmp_path,
+        hipcc,
+        rocm_kpack_dir,
+        export="gfx942_unified_3d_addb",
+    )
+    kdp = out / ARCH / "multi_launch.kdp.json"
+    sources = read_shipped(kdp)["kernelDescriptors"][0]["sources"]
+    segment, reduce = sources["segment"], sources["reduce"]
+
+    module = build_unified_attention_3d_tiled_module(spec, arch=ARCH)
+    kpack, _comp = load_kpack(rocm_kpack_dir)
+    archive = kpack.PackedKernelArchive.read(out / ARCH / segment["library"])
+    blob = bytes(archive.get_kernel(segment["toc_key"], ARCH))
+    for ks, kernel in (
+        (segment, module.primary),
+        (reduce, module.companions["reduce"]),
+    ):
+        assert ks["signature"] == kernel_signature(blob, ks["symbol"], "t")
+        assert [(a["name"], a["kind"]) for a in ks["signature"]] == (
+            _expected_signature(kernel)
+        )
+
+    base = _expected_signature(plain.primary)
+    at = [name for name, _ in base].index("sliding_window") + 1
+    assert (
+        _expected_signature(module.primary)
+        == base[:at]
+        + [
+            ("additive_bias_ptr", "global_buffer"),
+            ("additive_bias_batch_stride", "by_value"),
+            ("additive_bias_head_stride", "by_value"),
+            ("additive_bias_sq_stride", "by_value"),
+        ]
+        + base[at:]
+    )
+    assert _expected_signature(module.companions["reduce"]) == _expected_signature(
+        plain.companions["reduce"]
+    )
+
+
 def test_a_module_the_predicate_refuses_is_refused_at_pack_time(
     tmp_path, hipcc, rocm_kpack_dir, rocke_available
 ):

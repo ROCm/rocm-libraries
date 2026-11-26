@@ -101,6 +101,11 @@ kmd_fields:
 - name: num_segments
   type: int
   default_value: 16
+# 1 for the additive-bias kernel, which adds an fp32 attn_mask [B|1, Hq|1, Sq|1, Skv] to
+# the scaled scores (four extra kernel arguments). A record without it reads as 0.
+- name: use_additive_bias
+  type: int
+  default_value: 0
 specialization:
   metadata_fields:
   - dtype
@@ -110,6 +115,7 @@ specialization:
   - block_size
   - tile_size_override
   - num_segments
+  - use_additive_bias
   matcher_only_fields: []
   vocabulary:
     dtype:
@@ -130,6 +136,8 @@ specialization:
       method: resolved_tile_size_override
     num_segments:
       field: num_segments
+    use_additive_bias:
+      field: use_additive_bias
 kernel_source_kind: rocke
 # The workspace (segment partials, max, expsum, seqused_k, cu_seqlens_q) depends on
 # the graph's batch and the kernel's num_segments; the native pack sizes it.
@@ -154,7 +162,7 @@ enumerate:
   # Request fields every cell shares. num_cus 304 is the MI300X CU count, the
   # catalog's reference device; the runtime scorer reads the live count instead.
   # num_cus changes only which num_segments the split rule emits, never admission.
-  fixed: {arch: gfx942, kv_layout: strided, seqlen_q: 1, mask_type: BOTTOM_RIGHT_CAUSAL, num_cus: 304, sliding_window: 0}
+  fixed: &fixed {arch: gfx942, kv_layout: strided, seqlen_q: 1, mask_type: BOTTOM_RIGHT_CAUSAL, num_cus: 304, sliding_window: 0}
   # Crossed in order, first group outermost (the catalog order). Every cell is
   # admitted by the candidate: D 64/128/256 x fp16/bf16
   # x kv_block_size 16/32/64 x head pairs of the GQA ratios v1 ships (1/2/4/8/16).
@@ -263,7 +271,7 @@ enumerate:
   # (rocke/library/tests/test_attention_tiled_3d_module_gfx942.py); every kernel carries
   # the default's values (num_seqs 32, the default's head pair). The launch passes
   # the graph's batch and head counts.
-  neutral_fields: [num_seqs, num_query_heads, num_kv_heads]
+  neutral_fields: &neutral_fields [num_seqs, num_query_heads, num_kv_heads]
   # The head counts are neutral but their ratio is baked: one cell per ratio.
   cell_keyed_by: [num_queries_per_kv]
   # rocKE picks kv_cache_policy per call (stream above 256 MiB of K/V, else all);
@@ -274,7 +282,45 @@ enumerate:
   # enumerator enforces it only under `space: slice`. Under `space: full` it only
   # records the enumerated count; the aot_budget_per_arch WARN below is the live
   # check.
-  max_kernels: 560
+  max_kernels: 590
+  # The additive-bias twin of each cell's default kernel, for SDPA graphs with an FP32
+  # attn_mask: one per cell (`space: slice`), so the trained ranker has no bias choice to
+  # make. The cells, selector fields and cell keying are the primary's.
+  also:
+    - pin: {algorithm: strided_decode, spec_id: strided_decode}
+      fixed: *fixed
+      # Each cell's default combo only (its 8-KV-head pair, kv_block_size 16, batch 32,
+      # seqlen_k 8192), so the slice is the one kernel that combo's pick is.
+      cells:
+        - fields: [hdim_q, hdim_v, nhead_q, nhead_k]
+          values:
+            - [64, 64, 8, 8]
+            - [64, 64, 16, 8]
+            - [64, 64, 32, 8]
+            - [64, 64, 64, 8]
+            - [64, 64, 128, 8]
+            - [128, 128, 8, 8]
+            - [128, 128, 16, 8]
+            - [128, 128, 32, 8]
+            - [128, 128, 64, 8]
+            - [128, 128, 128, 8]
+            - [256, 256, 8, 8]
+            - [256, 256, 16, 8]
+            - [256, 256, 32, 8]
+            - [256, 256, 64, 8]
+            - [256, 256, 128, 8]
+        - fields: [dtype]
+          values: [bf16, fp16]
+        - fields: [kv_block_size]
+          values: [16]
+        - fields: [batch]
+          values: [32]
+        - fields: [seqlen_k]
+          values: [8192]
+      neutral_fields: *neutral_fields
+      space: slice
+      spec_overrides: {kv_cache_policy: stream, use_additive_bias: true}
+      kernel_name_template: attention_unified_3d.{dtype}_d{head_size}_g{num_queries_per_kv}_b{block_size}_t{tile_size_override}_seg{num_segments}_addb.gfx942
 
 # How the variant space is reduced; copied verbatim into the generated config.
 # Feature fields define a cell; performance knobs are the tuning arms, in priority order.
@@ -284,7 +330,7 @@ enumerate:
 # are keyed by.
 reduction:
   fields:
-    feature: [dtype, head_size, num_queries_per_kv, sliding_window]
+    feature: [dtype, head_size, num_queries_per_kv, sliding_window, use_additive_bias]
     performance:
       - {name: block_size}
       - {name: tile_size_override, unset_resolves_by: resolved_tile_size_override}
@@ -361,7 +407,7 @@ launch_surface:
   - name: admission
     python_source: dispatch/attention/strided_decode.py:make_candidate
     cpp_mirror: dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/packs/Gfx942AttentionUnified3dNative.cpp:gfx942AttentionUnified3dGraphMatches
-    kmd_fields: [dtype, head_size, num_queries_per_kv, sliding_window, block_size, tile_size_override, num_segments]
+    kmd_fields: [dtype, head_size, num_queries_per_kv, sliding_window, block_size, tile_size_override, num_segments, use_additive_bias]
     guard: >
       graph_match restates make_candidate().admits() within the v1 scope (Sq 1;
       fp16/bf16; not top-left causal) plus the strided binding's tensor

@@ -36,6 +36,11 @@
       "name": "num_segments",
       "type": "int",
       "default_value": 16
+    },
+    {
+      "name": "use_additive_bias",
+      "type": "int",
+      "default_value": 0
     }
   ]
 }

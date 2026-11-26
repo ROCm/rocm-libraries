@@ -681,7 +681,8 @@ def test_g5_catches_a_misspelled_and_an_unclaimed_dtype(manifest):
         _vocabulary_gaps(vocabulary, "// no literals")
 
 
-#: The gfx950 dense pack's one statement of the additive-bias index bound (inclusive).
+#: The one statement of the additive-bias index bound (inclusive), in the pack header
+#: (``SdpaAdditiveBias.hpp``) the dense and unified attention matchers share.
 _CPP_MAX_BIAS_INDEX = re.compile(
     r"constexpr int64_t MAX_BIAS_INDEX\s*=\s*std::numeric_limits<(\w+)>::max\(\);"
 )
@@ -698,8 +699,9 @@ def _cpp_max_bias_index(text: str) -> int:
 def test_the_bias_index_bound_is_the_same_in_both_engines():
     """rocKE's dense kernel indexes the additive bias in i32 and its host validators
     refuse an element index at ADDITIVE_BIAS_INDEX_LIMIT (exclusive); the hipDNN
-    gfx950 dense pack refuses a bias graph by MAX_BIAS_INDEX (inclusive). Neither
-    side can import the other, so this reads both."""
+    attention packs refuse a bias graph by MAX_BIAS_INDEX (inclusive), stated once in
+    a header the gfx950 dense matcher includes. Neither side can import the other, so
+    this reads both."""
     manifest = enumerator.load_manifest(
         str(_ROOT / "configs" / "gfx950_attention_dense.engine.yaml")
     )
@@ -707,7 +709,7 @@ def test_the_bias_index_bound_is_the_same_in_both_engines():
         pytest.skip(f"rocKE library not in this checkout: {_ROCKE_LIBRARY}")
     enumerator.bind_provider(manifest.get("provider_root"))
     bias = importlib.import_module("kernels.common._attention_additive_bias")
-    text = _matcher_source(manifest).read_text()
+    text = _matcher_text(_matcher_source(manifest))
     assert _cpp_max_bias_index(text) == bias.ADDITIVE_BIAS_INDEX_LIMIT - 1
 
 

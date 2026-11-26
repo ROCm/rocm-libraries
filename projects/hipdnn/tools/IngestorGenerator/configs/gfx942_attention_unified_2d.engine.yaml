@@ -140,6 +140,11 @@ kmd_fields:
 - name: use_transposed_invariant_hoist
   type: int
   default_value: 0
+# 1 for the additive-bias kernel, which adds an fp32 attn_mask [B|1, Hq|1, Sq|1, Skv] to
+# the scaled scores (four extra kernel arguments). A record without it reads as 0.
+- name: use_additive_bias
+  type: int
+  default_value: 0
 specialization:
   metadata_fields:
   - dtype
@@ -158,6 +163,7 @@ specialization:
   - use_conflict_free_v_store
   - use_transposed_mask_limit
   - use_transposed_invariant_hoist
+  - use_additive_bias
   matcher_only_fields: []
   vocabulary:
     dtype:
@@ -196,6 +202,8 @@ specialization:
       field: use_transposed_mask_limit
     use_transposed_invariant_hoist:
       field: use_transposed_invariant_hoist
+    use_additive_bias:
+      field: use_additive_bias
 kernel_source_kind: rocke
 workspace_policy: derived
 
@@ -389,11 +397,34 @@ enumerate:
       spec_fields: *production_spec_fields
       neutral_fields: *neutral
 
+    # The additive-bias kernel of each cell, for SDPA graphs with an FP32 attn_mask: rocKE
+    # adds the bias on the narrow 16x16 path only, so each head size's bias kernel is its
+    # default's tile, warps and rows on the 16x16 atom, with every codegen stack flag off.
+    # One per cell (`space: slice`): no bias choice for a ranker to make. The overrides keep
+    # the pinned spec on the narrow path, the only one rocKE adds the bias on.
+    - pin: {algorithm: unified_tuning, spec_id: gfx942_u2d_narrow_nw4_mw32_t4xb_llvm}
+      fixed: *fixed
+      cells: *d64_cells
+      space: slice
+      spec_fields: *spec_fields
+      neutral_fields: *neutral
+      hold_fields: []
+      spec_overrides: {use_additive_bias: true, use_mfma_32x32x8: false, use_register_pv: false}
+      kernel_name_template: attention_unified_2d.{dtype}_d{head_size}_g{num_queries_per_kv}_m{mask_type}_bs{block_size}_t{tile_size}_nw{num_warps}_mw{block_m_per_warp}_x{use_mfma_32x32x8}{use_transposed_qk_32x32}_f{use_k_sliced_ring}{use_q_direct_global}{use_conflict_free_v_store}{use_transposed_mask_limit}{use_transposed_invariant_hoist}_addb.gfx942
+    - pin: {algorithm: unified_tuning, spec_id: gfx942_u2d_narrow_nw2_mw32_t2xb_llvm}
+      fixed: *fixed
+      cells: *d128_cells
+      space: slice
+      spec_fields: *spec_fields
+      neutral_fields: *neutral
+      hold_fields: []
+      spec_overrides: {use_additive_bias: true, use_mfma_32x32x8: false, use_register_pv: false}
+      kernel_name_template: attention_unified_2d.{dtype}_d{head_size}_g{num_queries_per_kv}_m{mask_type}_bs{block_size}_t{tile_size}_nw{num_warps}_mw{block_m_per_warp}_x{use_mfma_32x32x8}{use_transposed_qk_32x32}_f{use_k_sliced_ring}{use_q_direct_global}{use_conflict_free_v_store}{use_transposed_mask_limit}{use_transposed_invariant_hoist}_addb.gfx942
 reduction:
   fields:
     # Spec fields and the ratio property the cells are keyed by. The mask is constant
     # (bottom-right causal) until the gfx942 body gains other bands.
-    feature: [dtype, head_size, num_queries_per_kv, sliding_window, block_size]
+    feature: [dtype, head_size, num_queries_per_kv, sliding_window, block_size, use_additive_bias]
     # The geometry: constant within a section, so variant reduction compares sections.
     performance:
       - {name: tile_size}
@@ -457,7 +488,7 @@ launch_surface:
   - name: matcher
     python_source: kernels/gfx942/attention_tiled_2d.py:supports_tiled_2d
     cpp_mirror: dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/packs/Gfx942AttentionUnified2DNative.cpp
-    kmd_fields: [dtype, head_size, num_queries_per_kv, block_size, mask_type, sliding_window, tile_size, num_warps, block_m_per_warp, use_mfma_32x32x8, use_transposed_qk_32x32, use_k_sliced_ring, use_q_direct_global, use_conflict_free_v_store, use_transposed_mask_limit, use_transposed_invariant_hoist]
+    kmd_fields: [dtype, head_size, num_queries_per_kv, block_size, mask_type, sliding_window, tile_size, num_warps, block_m_per_warp, use_mfma_32x32x8, use_transposed_qk_32x32, use_k_sliced_ring, use_q_direct_global, use_conflict_free_v_store, use_transposed_mask_limit, use_transposed_invariant_hoist, use_additive_bias]
     guard: >
       kernelMatches() returns false (no panic) if dtype, head_size, the GQA ratio,
       mask_type or sliding_window disagrees with the graph, Skv is not a multiple of

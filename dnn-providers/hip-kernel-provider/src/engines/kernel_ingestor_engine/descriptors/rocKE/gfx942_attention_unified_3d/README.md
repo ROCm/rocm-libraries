@@ -10,10 +10,10 @@ partials into the workspace and `reduce` combines them. Both launches share one 
 ## Coverage
 
 - Architecture: gfx942 only.
-- Variants: 560 in 30 cells (all `kind = rocke`, two launches each, compiled at pack
-  time). A cell is (dtype, head_size, GQA ratio): the kernels read the query and KV head
+- Variants: 590 in 30 cells (all `kind = rocke`, two launches each, compiled at pack
+  time): 560 without additive bias and 30 with it. A cell is (dtype, head_size, GQA ratio): the kernels read the query and KV head
   counts as kernel arguments and bake only their ratio, so one kernel serves every head
-  pair of its ratio. 560 is within the selection's 1000-kernel AOT budget.
+  pair of its ratio. 590 is within the selection's 1000-kernel AOT budget.
 - dtype: bf16, fp16.
 - head_size: 64, 128, 256.
 - GQA ratio (`num_queries_per_kv`): 1, 2, 4, 8, 16; any head counts with that ratio.
@@ -22,6 +22,17 @@ partials into the workspace and `reduce` combines them. Both launches share one 
 - K/V cache policy: `stream` in every variant, pinned by the manifest's
   `enumerate.spec_overrides`; the reason is in the header comment of
   `projects/hipdnn/tools/IngestorGenerator/configs/gfx942_attention_unified_3d.engine.yaml`.
+- Additive bias (`*_addb`, KMD `use_additive_bias` 1): one kernel per cell, the cell's
+  default (the split rule's pick for its 8-KV-head pair, kv_block_size 16, batch 32,
+  seqlen_k 8192), whose segment adds the graph's `attn_mask` to the scaled scores. A graph
+  with an `attn_mask` matches only these; any other graph matches only the rest.
+  The engine serves an fp32 `attn_mask` `[B|1, Hq|1, Sq|1, Skv]` (extent 1 or full on each
+  leading axis, indexed by the query head), real, not ragged and not pass-by-value, with a
+  unit-stride key axis and its largest element index below 2^31, and declines any other,
+  with the cause in the INFO log. `-inf` masks a key; a row with no unmasked key
+  outputs 0, as the hipDNN reference does for a row of `-inf` scores. A finite value,
+  `finfo(float32).min` included, is a score like any other (a row of them gets the uniform
+  softmax), and a NaN on a visible key makes its row NaN, as in the reference.
 - Fixed in every variant: strided (dense) KV, decode grid, no sliding window, no sinks,
   softcap, ALiBi or QQ bias.
 - `num_seqs` is recorded as 32 in every spec but is IR-neutral: the decode grid's code
@@ -32,7 +43,7 @@ partials into the workspace and `reduce` combines them. Both launches share one 
 
 | File | In | Notes |
 |---|---|---|
-| `artifacts/gfx942_attention_unified3d.kdp.json` | DVC | 1.4 MB, the 560 variants. Pointer: `artifacts.dvc` (one artifact for the folder) |
+| `artifacts/gfx942_attention_unified3d.kdp.json` | DVC | 1.52 MB, the 590 variants. Pointer: `artifacts.dvc` (one artifact for the folder) |
 | `gfx942_attention_unified3d.kmd.json` | git | variant fields |
 | `gfx942_attention_unified3d.udd.json` | git | dispatch symbol |
 | `gfx942_attention_unified3d.ued.json` | git | engine, knobs `block_size`, `num_segments` |
@@ -48,7 +59,8 @@ One trained model (UHD), the L2 `sort_kernel_catalog` kernel ranker `ced4e2d1-e6
 (ranks this catalog's kernels), is bound in the UED for gfx942. It is tracked at
 `heuristics/4208dcf6-3128-4146-ab2a-affa5b6ab4eb/sort_kernel_catalog/gfx942/tflops/` (the UED id,
 role, arch and metric): `heuristic.uhd.json`, `model.bin.dvc` and `.gitignore` in git, `model.bin`
-from DVC.
+from DVC. The bias kernels are one per cell, so a graph with an `attn_mask` has one kernel to
+pick and the ranker makes no bias choice; it was not shown a bias graph (AICK-3322).
 
 The L1 `predict_engine` (predicts the engine's TFLOPS) is held: its selector revision was recorded on
 an older build, so the runtime refuses it on a build of the current source. It follows in a separate

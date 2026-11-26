@@ -661,17 +661,20 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
             "HKP_REQUIRE_DVC_DESCRIPTORS=$<BOOL:${HIPKERNELPROVIDER_REQUIRE_DVC_DESCRIPTORS}>")
     set(_hkp_catalog_tiles_cases_gfx950_dense EveryShippedKernelsTileIsOneTheEngineLaunches)
     set(_hkp_catalog_tiles_cases_gfx950_unified_2d
-        EveryShippedKernelsGeometryIsOneTheEngineLaunches)
+        EveryShippedKernelsGeometryIsOneTheEngineLaunches
+        EveryCellShipsExactlyOneBiasKernel)
     set(_hkp_catalog_tiles_cases_gfx950_unified_3d
         EveryShippedKernelsGeometryIsOneTheEngineLaunches
-        EveryEntryLaunchesItsSegmentAndReduceKernels)
+        EveryEntryLaunchesItsSegmentAndReduceKernels
+        EveryCellShipsExactlyOneBiasKernel)
     set(_hkp_catalog_tiles_cases_gfx942_dense EveryShippedKernelsTileIsOneTheEngineLaunches)
     set(_hkp_catalog_tiles_cases_gfx942_unified_2d
         EveryShippedKernelsGeometryIsOneTheEngineLaunches
         EveryCellShipsItsHeadSizesDefaultGeometry
         EveryCellRockeServesWithItsProductionStackShipsIt
         EveryShippedKernelIsBottomRightCausalWithoutAWindow
-        TheShippedGqaRatioListIsTheCatalogsRatios)
+        TheShippedGqaRatioListIsTheCatalogsRatios
+        EveryCellShipsExactlyOneBiasKernel)
     set(_hkp_model_binding_cases_gfx942_unified_3d
         TheBoundL2KernelRankerLoads
         TheBoundL1EnginePredictorLoadsAndMatchesThisBuild)

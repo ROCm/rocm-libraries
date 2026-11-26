@@ -11,7 +11,7 @@ plan's workspace (`packs/Gfx950AttentionUnified2DGeometry.hpp`).
 ## Coverage
 
 - Architecture: gfx950 only.
-- Variants: 420 (all `kernel_source.kind = rocke`, compiled at pack time):
+- Variants: 618 (all `kernel_source.kind = rocke`, compiled at pack time):
   - 222 without LSE: every one of the 198 cells at the default geometry, plus 24 variants of
     two other geometries in the D128 (and one D64) cells where a gfx950 sweep measured them
     winning. This is `variant_reduce`'s cut of the 792-variant full space (198 cells at four
@@ -19,6 +19,16 @@ plan's workspace (`packs/Gfx950AttentionUnified2DGeometry.hpp`).
   - 198 LSE-on twins (`*_lsehm`, KMD `emit_lse` 1): each cell's default-geometry kernel, which
     also writes the SDPA stats output head-major ([B, Hq, S, 1], `lse_layout` head_major). A
     graph that asks for stats matches only these; any other graph matches only the rest.
+  - 198 additive-bias twins (`*_addb`, KMD `use_additive_bias` 1): each cell's default-geometry
+    kernel, which adds the graph's `attn_mask` to the scaled scores. A graph with an
+    `attn_mask` matches only these; any other graph matches only the rest.
+  The engine serves an fp32 `attn_mask` `[B|1, Hq|1, Sq|1, Skv]` (extent 1 or full on each
+  leading axis, indexed by the query head), real, not ragged and not pass-by-value, with a
+  unit-stride key axis and its largest element index below 2^31, and declines any other,
+  with the cause in the INFO log. It also declines an `attn_mask` together with the stats output, since no bias kernel writes the LSE. `-inf` masks a key; a row with no unmasked key
+  outputs 0, as the hipDNN reference does for a row of `-inf` scores. A finite value,
+  `finfo(float32).min` included, is a score like any other (a row of them gets the uniform
+  softmax), and a NaN on a visible key makes its row NaN, as in the reference.
 - dtype: bf16, fp16. head_size: 64, 128 (D256 prefill is deferred).
 - mask: no mask, top-left causal, bottom-right causal (KMD `mask_type` 0, 1, 2).
 - Query heads 4 to 128 and KV heads 1 to 128, varying per variant (group of 1 to 16).
@@ -60,12 +70,15 @@ agree.
   when the shipped KDP no longer matches: any kernel added, removed, renamed or changed needs a
   retrain (the skill's `generate.md`), then the new ids and
   `tools/catalog_fingerprint.py <this bundle>/artifacts/<pack>.kdp.json` in both configs.
+- The bias kernels are one per cell, so a graph with an `attn_mask` has one kernel to pick
+  and the models make no bias choice. They were not shown a bias graph: the corpus tool
+  cannot yet emit one (AICK-3322).
 
 ## Files
 
 | File | In | Notes |
 |---|---|---|
-| `artifacts/gfx950_attention_unified_2d.kdp.json` | DVC | 0.58 MB, the 420 variants. Pointer: `artifacts.dvc` (one artifact for the folder) |
+| `artifacts/gfx950_attention_unified_2d.kdp.json` | DVC | 0.87 MB, the 618 variants. Pointer: `artifacts.dvc` (one artifact for the folder) |
 | `gfx950_attention_unified_2d.kmd.json` | git | variant fields |
 | `gfx950_attention_unified_2d.udd.json` | git | dispatch symbol |
 | `gfx950_attention_unified_2d.ued.json` | git | engine, knobs `tile_size`, `num_warps`, `block_m_per_warp`, `use_mfma_32x32`, `use_transposed_qk_32x32` |
