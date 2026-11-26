@@ -1672,6 +1672,7 @@ namespace
         auto groupOf = [&](hipDataType type) {
             hipblaslt_ext::GroupedGemm grouped(
                 handle.get(), HIPBLAS_OP_N, HIPBLAS_OP_N, type, type, type, type, HIPBLAS_COMPUTE_32F);
+            grouped.setMaxWorkspaceBytes(kWorkspace);
             std::vector<int64_t>                     size(2, n), batch(2, 1);
             std::vector<hipblaslt_ext::GemmEpilogue> epilogues(2);
             std::vector<hipblaslt_ext::GemmInputs>   ins(2, inputs);
