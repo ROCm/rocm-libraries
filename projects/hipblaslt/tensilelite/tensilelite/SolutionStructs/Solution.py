@@ -57,9 +57,10 @@ from ..Components.DecouplePGR import pgrLevelsForTensors, ldsBlocksForPgrLevel, 
                                        pgrAutoPairRequested, \
                                        resolvePrefetchGlobalReadSpecialValues
 from ..Components.TDMFuse import TDM_FUSE_GROUPING, TDM_SCALE_TENSORS, tdmBothTensors, \
-                                       tdmGroupingName, tdmKDimTrackable, tdmLiveScales, \
+                                       tdmGroupingName, tdmKDimStepsInElements, tdmKDimTrackable, tdmLiveScales, \
                                        tdmPairOnEveryWave, \
-                                       tdmPapRejectReason, tdmWavePartition, tdmWaveSeparated
+                                       tdmPapRejectReason, tdmSeparateABDescriptors, tdmWavePartition, \
+                                       tdmWaveSeparated
 from ..Common.TypeValidationErrors import ConfigTypeError
 from ..CustomKernels import isCustomKernelConfig, supportsUserSgprKernargPreload, validateCustomPersistentArgs
 from ..SolutionStructs.LdsPadding import get_fp4_mt_config, get_fp8_mt_config, get_mxs_mt_config, \
@@ -80,6 +81,7 @@ from ..Common.ValidParameters import validParameters, \
                                             SW_INSTRUCTION_PREFETCH_ABSOLUTE, \
                                             SW_INSTRUCTION_PREFETCH_AUTO
 from .Naming import getSolutionNameFull
+from .mxs_interleave_extra import extraVgprMatters
 from .Problem import ProblemType
 from .lds_layout import format_lds_layout
 from .segment_interleave import evaluate as segIntEval, aligned_budget_ok as segAlignedBudget, \
@@ -4451,6 +4453,43 @@ class Solution(collections.abc.Mapping):
       reject(state, printRejectionReason, "1LDSBuffer must be 0 for TDM")
       return
 
+    # Tail folding (fixed at codegen): every kernel whose structure allows it folds a K tail into the
+    # unroll loop -- ceil(K/DepthU) unroll iterations, TDM zero-fills the partial last k-tile -- and
+    # emits no tail loop (NoTailLoop), the way RAP folds (RAP sets its own _TailFolding above). Any
+    # other kernel keeps the tail loop -- this never rejects a kernel. MX scales, sparse metadata and
+    # packed sub-byte types (F4/F6, whose TDM K dim does not step in elements) keep the tail loop.
+    # The K dim step is derived from the TDM address increment (KernelWriterAssembly.tailFoldStepShift),
+    # so A and B must also keep K contiguous at unit stride, unmirrored and unswizzled, with one
+    # power-of-2 element size, and the increments must stay in SGPRs (BufferLoad).
+    if not state["ReuseAcrossPersistent"]:
+      state.pop("_TailFolding", None)
+      du = state["DepthU"]
+      pt = state["ProblemType"]
+      elemBytes = {pt["DataType%s" % tc].numBytes() for tc in ("A", "B")}
+      unsupported = (
+        state["NoTailLoop"]                                        # no K tail to fold
+        or not (state["enableTDMA"] and state["enableTDMB"])       # the K dim lives in the TDM descriptor
+        or state["PrefetchGlobalRead"] not in (1, 2)
+        # PGR1 without a NoLoadLoop and without HalfPLR's TDM disable loads one k-tile past K
+        or (state["SuppressNoLoadLoop"] and not state["HalfPLR"])
+        or isPersistent(state)                                     # DataParallel / StreamK tiles start mid-K
+        or du & (du - 1) != 0
+        or not tdmWaveSeparated(state) or tdmSeparateABDescriptors(state) or tdmPairOnEveryWave(state, "A", "B")
+        or not tdmKDimTrackable(state, allowIterate=True)          # TDMIterateMode walks dim1, K stays in dim0
+        or not tdmKDimStepsInElements(state, allowIterate=True)    # packed sub-byte F4/F6
+        or state["ProblemType"]["MXBlockA"] or state["ProblemType"]["MXBlockB"] or state["ProblemType"]["Sparse"]
+        or state.get("TDMSplit", 0) or state["DirectToVgprA"] or state["DirectToVgprB"]
+        or state.get("UseSubtileImpl", False)
+        or not state["BufferLoad"]                                 # global read increments in VGPRs
+        or pt["SwizzleTensorA"] or pt["SwizzleTensorB"]
+        or pt["UseInitialStridesAB"]                               # runtime (non-unit) K stride
+        or any(pt["IndexAssignments%s" % tc][0] != pt["IndexUnroll"] or pt["IndexUnroll"] in pt["MirrorDims%s" % tc]
+               for tc in ("A", "B"))
+        or len(elemBytes) != 1 or next(iter(elemBytes)) not in (1, 2, 4, 8, 16))
+      if not unsupported:
+        state["_TailFolding"] = True
+        state["NoTailLoop"] = True
+
   @staticmethod
   def rapMaxResidentKTiles(state, problemType, isa, isaInfoMap, packedC0, packedC1):
     """Most k-tiles ReuseAcrossPersistent can hold without splitting the store.
@@ -8009,6 +8048,12 @@ class Solution(collections.abc.Mapping):
         reject(state, printRejectionReason, "with PrefetchLocalRead %u LoopIters %u LocalReadVectorWidthB %u, not enough LoopIters to prefetch %ux%u iterations, " \
           % (state["PrefetchLocalRead"],state["LoopIters"],state["LocalReadVectorWidthB"], state["PrefetchLocalRead"] , wlrMultiple) )
 
+    # Only the gfx1250 MX scale-VGPR interleave reads MXScaleVgprInterleaveExtraVgpr.
+    if state["MXScaleVgprInterleaveExtraVgpr"] and not (
+        state["ISA"][:2] == (12, 5) and state["ProblemType"]["MXBlockA"] and state["ProblemType"]["MXBlockB"]):
+      reject(state, printRejectionReason, "MXScaleVgprInterleaveExtraVgpr requires gfx1250 with MX scales on both A and B")
+      return
+
     if state["PrefetchGL2"] == 0:
       state["PrefetchGL2Inc64Bit"] = False
       state["PrefetchGL2SAddr"] = False
@@ -8503,6 +8548,12 @@ class Solution(collections.abc.Mapping):
       kMax = Solution.rapMaxResidentKTiles(
           state, problemType, isa, isaInfoMap, packedC0, packedC1)
       state["_RAPNumResidentKTiles"] = max(state["PrefetchGlobalRead"] + 1, kMax or 0)
+
+    # MXScaleVgprInterleaveExtraVgpr only changes the scale layout when the conflict-free layout does not
+    # fit the default VGPR span. Elsewhere True builds the same kernel as False under another name, so fold
+    # it into False (undecidable cases keep True). Last, so every derived input is final.
+    if state["MXScaleVgprInterleaveExtraVgpr"] and extraVgprMatters(state, isaInfoMap[isa]) is False:
+      state["MXScaleVgprInterleaveExtraVgpr"] = False
 
   ########################################
   @ staticmethod
