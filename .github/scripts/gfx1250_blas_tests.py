@@ -865,9 +865,10 @@ def parse_args(argv):
     tensilelite_parser.add_argument(
         "--workers", type=int, default=4, help="pytest-xdist workers"
     )
-    # decouple_pgr_tdm_fuse_gfx1250.yaml's sweep runs past 600 s.
+    # 600 s catches a hung config. The slowest common config, decouple_pgr_tdm_fuse_gfx1250,
+    # took 412 s on gfx1250 before its sweep was trimmed; the next slowest took 59 s.
     tensilelite_parser.add_argument(
-        "--timeout", type=int, default=1200, help="per-test timeout in seconds"
+        "--timeout", type=int, default=600, help="per-test timeout in seconds"
     )
     return parser.parse_args(argv)
 

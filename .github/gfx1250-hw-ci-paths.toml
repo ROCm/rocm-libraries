@@ -12,7 +12,11 @@ run = [
     "shared/origami/*",
     "shared/stinkytofu/*",
     "shared/mxdatagenerator/*",
-    "cmake/*",
+    # The two root CMake modules the build includes: shared/stinkytofu and TensileLite's
+    # rocisa include default_amdclang; the standalone TensileLite client build (the
+    # TensileLite step) includes fetch_rocm_cmake. hipBLASLt itself uses its own copies.
+    "cmake/modules/default_amdclang.cmake",
+    "cmake/modules/fetch_rocm_cmake.cmake",
     ".github/workflows/gfx1250_hipblaslt_tensilelite_test.yml",
     # therock-ref: a bump runs the job, so a compiler change shows up as the SDK warning.
     ".github/actions/ci-env/action.yml",
