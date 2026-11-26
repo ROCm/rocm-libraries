@@ -15,6 +15,7 @@
 
 #include "MiopenBatchnormApplicabilityChecks.hpp"
 #include "MiopenUtils.hpp"
+#include "Workarounds.hpp"
 
 namespace miopen_plugin
 {
@@ -846,16 +847,9 @@ void checkBatchnormActivationModeSupported(
                 "Batchnorm fused activation does not support Leaky ReLU.");
         }
 
-        // The provider's activation mapping does not yet express a lower-only clip (see
-        // MiopenUtils::mapPointwiseModeToMiopenActivation).
-        if(!activAttr.relu_upper_clip().has_value() && activAttr.relu_lower_clip().has_value()
-           && *activAttr.relu_lower_clip() != 0.f)
-        {
-            throw hipdnn_plugin_sdk::HipdnnPluginException(
-                HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-                "Batchnorm fused ReLU with a non-zero lower_clip and no upper_clip is not "
-                "supported.");
-        }
+        // MIOpen's invoker cache ignores the activation parameters, so a lower-clip-only ReLU
+        // (CLAMP with the float maximum as upper bound) can run with another graph's clip.
+        REJECT_IF_WORKAROUND_ISSUE_16803(activAttr);
         return;
     }
 

@@ -74,7 +74,9 @@ inline fmha_fwd_v3_args buildFwdKernelArgs(const SdpaFwdParams& params,
     args.s_lse = params.lseUid ? 1 : 0;
 
     // KV dimensions. Group mode passes hipDNN's S_kv (the maximum per-batch KV length),
-    // not a packed total. Precondition, not checked: S_kv >= every per-batch KV length.
+    // not a packed total. Precondition, not checked: S_kv >= every per-batch KV length,
+    // i.e. max_b(kvOffset[b+1] - kvOffset[b]), or max_b(cuSeqLenKv[b+1] - cuSeqLenKv[b])
+    // when the graph has cu_seq_len_kv.
     args.s_kv_seq_len = params.seqLenKv;
     args.s_qk_head_dim = params.headDimQk;
     args.s_v_head_dim = params.headDimV;
@@ -94,7 +96,10 @@ inline fmha_fwd_v3_args buildFwdKernelArgs(const SdpaFwdParams& params,
     args.ptr_qseq = nullptr;
     args.ptr_kseq = nullptr;
 
-    // LSE stride (head dimension, in bytes)
+    // LSE stride (head dimension, in bytes). In group mode the kernel forms each LSE row's
+    // address as h * s_lse_Hs + 4 * seqstart_q[b] in 32 bits, and the host cannot bound
+    // seqstart_q. Precondition, not checked: seqstart_q[b] + len_b <= head stride; under it,
+    // 4 * H * s_h <= UINT32_MAX (checked in isApplicable) bounds the LSE base.
     constexpr unsigned int K_FP32_SIZE = 4;
     args.s_lse_Hs = params.lseUid ? params.lseStrideHead * K_FP32_SIZE : 0;
 
@@ -138,7 +143,10 @@ inline fmha_fwd_v3_args buildFwdKernelArgs(const SdpaFwdParams& params,
 
         // Mirrors AITER's init_fmha_fwd_v3_args group branch: the padding pointers take the
         // physical starts, and the sequence pointers take the logical cumulative lengths when
-        // the graph has them, else the physical starts again.
+        // the graph has them, else the physical starts again. Without cu_seq_len the kernel
+        // takes each batch's length as the raw offset difference, while hipDNN defines it as
+        // min(offset[b+1] - offset[b], S_max). Precondition, not checked: every offset
+        // difference is at most its side's S_max, so the two agree.
         args.ptr_qseq_padding = bufferPtr(group->qoRaggedOffsetUid);
         args.ptr_kseq_padding = bufferPtr(group->kvRaggedOffsetUid);
         args.ptr_qseq

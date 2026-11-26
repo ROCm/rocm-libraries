@@ -14,7 +14,6 @@ GlobalParameters:
   SplitPlacementD: Shared
   BoundsCheck: 0
   CodeObjectVersion: "4"
-  CpuThreads: 1
   DataInitTypeA: 3
   DataInitTypeB: 3
   DataInitTypeC: 3

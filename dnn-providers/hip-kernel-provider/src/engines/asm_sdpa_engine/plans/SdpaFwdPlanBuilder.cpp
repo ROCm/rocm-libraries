@@ -9,6 +9,7 @@
 #include "plans/SdpaFwdPlan.hpp"
 #include "plans/SdpaPlanUtils.hpp"
 
+#include <algorithm>
 #include <cmath>
 #include <exception>
 #include <optional>
@@ -16,6 +17,7 @@
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
+#include <vector>
 
 #include <hip/hip_runtime.h>
 #include <hip_kernel_provider_common/SdpaConfigEnumerations.hpp>
@@ -186,7 +188,8 @@ static bool isTokenSeqstartTensor(
 
 // hipDNN addresses a ragged element at offset[b] * multiplier + strides . (h, s, d), while
 // AITER uses seqstart[b] * seq_stride + strides . (h, s, d) with one seqstart for Q/O and one
-// for K/V. The two agree for any stride permutation under the conditions below.
+// for K/V. The two agree for any stride permutation under the conditions below. The strides
+// must already be known to be rank 4.
 static Rejection checkAiterRaggedAddressing(
     const plan_utils::TensorMap& tensorMap,
     const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& qTensor,
@@ -206,8 +209,6 @@ static Rejection checkAiterRaggedAddressing(
                                        std::pair{"v", &vTensor},
                                        std::pair{"o", &oTensor}})
     {
-        HIP_KERNEL_REJECT_IF(tensor->strides() == nullptr || tensor->strides()->size() != 4,
-                             std::string(label) + " tensor must have rank 4 strides");
         HIP_KERNEL_REJECT_IF(
             tensor->ragged_offset_multiplier() != tensor->strides()->Get(SDPA_SEQ_AXIS),
             std::string(label) + " tensor ragged_offset_multiplier must equal its sequence "
@@ -315,6 +316,22 @@ static bool kernelServesHeadCounts(const std::string& archId,
 {
     return archId != "gfx950" || dataTypeId != "bf16" || q.dims()->Get(3) != 256
            || q.dims()->Get(1) == k.dims()->Get(1);
+}
+
+// The gfx942 fp8 causal forward kernel (fwd_hd128_fp8_causal.co, AITER v0.1.29; observed
+// on the MI300 object, the MI308 object shares the row) computes every Q tile after the
+// first wrongly: O off by up to about 0.5, or NaN, and a wrong LSE, with no error. One-tile
+// launches and the fp8 no-mask kernel are correct. Upstream AITER issue #7593 (open);
+// ALMIOPEN-3392. Keyed on the dispatched row, so a top-left causal graph fwdKernelMaskType
+// maps onto it is covered, and in group mode S_q is the maximum length. Every fp8 causal
+// row is held to it (AITER's gfx950 fp8 causal objects had a causal defect before
+// b0adff0d16): lift it for a row only once a fixed object is vendored and the
+// Fp8CausalQTiles integration cases pass on it with this check removed.
+static bool kernelServesQTiles(const fmha_v3_fwdConfig& row,
+                               const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& q)
+{
+    return row.dtype != "fp8bf16" || row.mask == static_cast<int>(plan_utils::MaskType::NO_MASK)
+           || q.dims()->Get(SDPA_SEQ_AXIS) <= static_cast<int64_t>(row.ts_qo);
 }
 
 static bool isMi308Device(hipStream_t stream)
@@ -507,9 +524,85 @@ static Rejection checkFwdByteRanges(const hipdnn_flatbuffers_sdk::data_objects::
     return std::nullopt;
 }
 
+// True when no two elements of the view share an address: the axes longer than one,
+// sorted by stride, each have a stride at least the span of the axes below them. A zero
+// stride on such an axis overlaps. A span past int64 does not count as addressable.
+static bool isNonOverlappingView(std::vector<std::pair<int64_t, int64_t>> strideExtents)
+{
+    std::sort(strideExtents.begin(), strideExtents.end());
+    int64_t span = 1;
+    for(const auto& [stride, extent] : strideExtents)
+    {
+        int64_t step = 0;
+        if(stride < span || __builtin_mul_overflow(extent - 1, stride, &step)
+           || __builtin_add_overflow(span, step, &span))
+        {
+            return false;
+        }
+    }
+    return true;
+}
+
+// Q, K, V and O layouts the kernels cannot address. The forward argument block carries only
+// batch, head and sequence strides, and each row is read or written as head-dim contiguous
+// elements, so:
+// - a head-dim stride other than 1 is taken as 1: rows read the gaps between elements, and a
+//   strided O is left partly unwritten;
+// - a sequence stride below the tensor's own head dim ends each (batch, head) slice early:
+//   the tail of the last row reads as zero and writes there are dropped. A zero sequence
+//   stride is declined with it: on Q and V it gives wrong results, and the kernels bound each
+//   buffer at S * sequence stride. A zero K sequence stride (one key row broadcast over the
+//   sequence) computed correctly where measured, so for K the decline is conservative.
+// Q, K and V may broadcast a batch or head with a zero stride; the kernels only re-read a
+// slice. O must not overlap itself, because each (batch, head) slice is written by its own
+// workgroups and aliased slices overwrite each other. Group mode locates each batch through
+// the Q/O offset table and ignores O's batch stride, so only O's head, sequence and head-dim
+// axes are checked there; whether two batches overlap depends on the offset values, which
+// only the device holds. Q, K, V and O dims and strides must already be known to be rank 4.
+static Rejection checkFwdIoLayouts(const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& q,
+                                   const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& k,
+                                   const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& v,
+                                   const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& o,
+                                   BatchMode batchMode)
+{
+    for(const auto& [label, tensor] :
+        {std::pair{"q", &q}, std::pair{"k", &k}, std::pair{"v", &v}, std::pair{"o", &o}})
+    {
+        const auto* dims = tensor->dims();
+        const auto* strides = tensor->strides();
+        HIP_KERNEL_REJECT_IF(strides->Get(3) != 1,
+                             std::string(label) + " tensor head-dim stride must be 1 (Actual: "
+                                 + std::to_string(strides->Get(3)) + ")");
+        HIP_KERNEL_REJECT_IF(strides->Get(SDPA_SEQ_AXIS) < dims->Get(3),
+                             std::string(label)
+                                 + " tensor sequence stride must be at least its head dim (Actual "
+                                 + "sequence stride: " + std::to_string(strides->Get(SDPA_SEQ_AXIS))
+                                 + ", head dim: " + std::to_string(dims->Get(3)) + ")");
+    }
+
+    std::vector<std::pair<int64_t, int64_t>> oStrideExtents;
+    const flatbuffers::uoffset_t firstAxis = (batchMode == BatchMode::GROUP) ? 1 : 0;
+    for(flatbuffers::uoffset_t axis = firstAxis; axis < 4; ++axis)
+    {
+        if(o.dims()->Get(axis) > 1)
+        {
+            oStrideExtents.emplace_back(o.strides()->Get(axis), o.dims()->Get(axis));
+        }
+    }
+    HIP_KERNEL_REJECT_IF(!isNonOverlappingView(std::move(oStrideExtents)),
+                         "o tensor strides make output elements share an address");
+    return std::nullopt;
+}
+
 unsigned int SdpaFwdPlanBuilder::maxThreadsPerBlock(const fmha_v3_fwdConfig& config) const
 {
     return static_cast<unsigned int>(config.max_flat_workgroup_size);
+}
+
+std::optional<std::string> SdpaFwdPlanBuilder::deviceArch(const Handle& handle) const
+{
+    return plan_utils::tryGetDeviceString(
+        handle.getStream(), "[SdpaFwdPlanBuilder::isApplicable] Could not query device string: ");
 }
 
 unsigned int fwdConfigBlockDimX(const fmha_v3_fwdConfig& config)
@@ -661,8 +754,8 @@ static Rejection
 // Validates the stats (LSE) output tensor generate_stats requests. Batch mode's layout is
 // checked by checkBatchStatsLayout. Group mode writes AITER's varlen layout [H, total_q]: one
 // FP32 per Q token at h * s_lse_Hs + seqstart_q[b] + s, with no per-token stride, so the stats
-// tensor must be ragged on the Q/O offset table in token units with a sequence stride of 1.
-// Q must already be validated rank 4.
+// tensor must be ragged on the Q/O offset table in token units with a sequence stride of 1 and,
+// with more than one head, a head stride of at least B * Sq. Q must already be validated rank 4.
 static Rejection checkStatsTensor(const hipdnn_flatbuffers_sdk::data_objects::SdpaAttributes& attrs,
                                   const plan_utils::TensorMap& tensorMap,
                                   const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& q,
@@ -706,6 +799,30 @@ static Rejection checkStatsTensor(const hipdnn_flatbuffers_sdk::data_objects::Sd
     if(!group.has_value())
     {
         HIP_KERNEL_RETURN_IF_REJECTED(checkBatchStatsLayout(stats));
+    }
+    else
+    {
+        // Heads write disjoint slots only when the head stride covers every physical Q token
+        // row: seqstart_q[b] + len_b <= head stride for every batch. That row count lives in the
+        // device-resident offset table, so the check takes B * Sq, the Q token capacity of a
+        // packed table. Sq is only a necessary lower bound: the frontend's default stats strides
+        // [H * Sq, Sq, 1, 1] meet it, yet with B > 1 a batch at offset Sq or later writes the
+        // next head's slots. B * Sq declines AITER's packed [H, total_q] layout whenever
+        // total_q < B * Sq. Such a graph is not guaranteed a fallback: on gfx942 and gfx950 no
+        // other engine may take it. A table whose rows reach past B * Sq stays the caller's
+        // precondition (SdpaFwdArgsBuilder.hpp). The check also declines a zero (broadcast)
+        // head stride, which the layout rule exempts but which makes every head write the
+        // same slots. A single head is never stepped.
+        const int64_t batch = stats.dims()->Get(0);
+        const int64_t heads = stats.dims()->Get(1);
+        const int64_t seqLenQ = stats.dims()->Get(2);
+        const int64_t headStride = stats.strides()->Get(1);
+        // headStride / batch < Sq is headStride < B * Sq without forming the product.
+        HIP_KERNEL_REJECT_IF(heads != 1 && (batch < 1 || headStride / batch < seqLenQ),
+                             "group-mode stats head stride must be at least B * Sq when "
+                             "H > 1 (head stride: "
+                                 + std::to_string(headStride) + ", B: " + std::to_string(batch)
+                                 + ", Sq: " + std::to_string(seqLenQ) + ")");
     }
 
     // Only the FP32 head stride reaches the kernel, which steps batches by H * head stride.
@@ -834,8 +951,7 @@ Rejection SdpaFwdPlanBuilder::checkFwdApplicability(
     HIP_KERNEL_RETURN_IF_REJECTED(
         plan_utils::checkSdpaGraphBasics(opGraph, NodeAttributes::SdpaAttributes));
 
-    const auto deviceStringOpt = plan_utils::tryGetDeviceString(
-        handle.getStream(), "[SdpaFwdPlanBuilder::isApplicable] Could not query device string: ");
+    const auto deviceStringOpt = deviceArch(handle);
     HIP_KERNEL_REJECT_IF(!deviceStringOpt, "Could not query device string");
     const std::string& deviceString = *deviceStringOpt;
     HIP_KERNEL_REJECT_IF(
@@ -861,13 +977,15 @@ Rejection SdpaFwdPlanBuilder::checkFwdApplicability(
     HIP_KERNEL_RETURN_IF_REJECTED(
         plan_utils::findRequiredTensor(tensorMap, "o", attrs.o_tensor_uid(), oTensor));
 
-    // Validate Q/K/V/O before accessing their dims by index.
+    // Validate Q/K/V/O before accessing their dims and strides by index.
     for(const auto& [label, tensor] : {std::pair{"q", qTensor},
                                        std::pair{"k", kTensor},
                                        std::pair{"v", vTensor},
                                        std::pair{"o", oTensor}})
     {
         HIP_KERNEL_RETURN_IF_REJECTED(plan_utils::checkRank4DeviceTensor(label, *tensor));
+        HIP_KERNEL_REJECT_IF(tensor->strides() == nullptr || tensor->strides()->size() != 4,
+                             std::string(label) + " tensor must have rank 4 strides");
     }
 
     HIP_KERNEL_RETURN_IF_REJECTED(
@@ -890,6 +1008,9 @@ Rejection SdpaFwdPlanBuilder::checkFwdApplicability(
         "K and V must share batch, head count and sequence length, the batch must match Q, "
         "K's head size must match Q's, Hq must be a multiple of Hkv, and O must be "
         "[B, Hq, Sq, Dv]");
+
+    HIP_KERNEL_RETURN_IF_REJECTED(
+        checkFwdIoLayouts(*qTensor, *kTensor, *vTensor, *oTensor, batchMode));
 
     HIP_KERNEL_RETURN_IF_REJECTED(checkSequenceLengths(attrs, tensorMap, *qTensor, batchMode));
     const auto group = (batchMode == BatchMode::GROUP)
@@ -938,9 +1059,16 @@ Rejection SdpaFwdPlanBuilder::checkFwdApplicability(
                              + std::to_string(qTensor->dims()->Get(1))
                              + ", kv heads: " + std::to_string(kTensor->dims()->Get(1)) + ")");
 
+    const auto& config = cfg_fmha_fwd.at(key);
+    HIP_KERNEL_REJECT_IF(!kernelServesQTiles(config, *qTensor),
+                         "fp8 causal forward kernel " + config.knl_name
+                             + " computes every Q tile after the first wrongly (AITER issue "
+                               "#7593); S_q must be at most one Q tile of "
+                             + std::to_string(config.ts_qo) + " rows (Actual S_q: "
+                             + std::to_string(qTensor->dims()->Get(SDPA_SEQ_AXIS)) + ")");
+
     // Q/K/V byte strides and the Ts product are scaled by the resolved input
     // size, which the datatype checks above have narrowed to bf16 or fp8bf16.
-    const auto& config = cfg_fmha_fwd.at(key);
     HIP_KERNEL_RETURN_IF_REJECTED(checkFwdByteRanges(
         *qTensor, *kTensor, *vTensor, *oTensor, fwdInputBytesPerElement(dataTypeId), config.ts_qo));
 

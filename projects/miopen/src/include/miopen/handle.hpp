@@ -253,7 +253,12 @@ struct MIOPEN_EXPORT Handle : miopenHandle
 
     static std::string GetDbBasename(const TargetProperties& target, size_t num_cu)
     {
-        auto ret = target.DbId() + [&]() {
+        return GetDbBasename(target.DbId(), num_cu);
+    }
+
+    static std::string GetDbBasename(const std::string& db_id, size_t num_cu)
+    {
+        auto ret = db_id + [&]() {
             std::ostringstream ss;
             if(num_cu <= 64)
                 ss << '_' << num_cu;
@@ -264,20 +269,30 @@ struct MIOPEN_EXPORT Handle : miopenHandle
         return ret;
     }
 
-    std::string GetDbBasename() const
+    std::string GetDbBasename() const { return DbBasenameFor(GetTargetProperties().DbId()); }
+
+    /// The basename of the shipped system databases for this device: GetDbBasename() of
+    /// TargetProperties::SystemDbId(), so a target variant such as gfx1250-strict loads the
+    /// gfx1250 system databases.
+    std::string GetSystemDbBasename() const
     {
-        const auto& target = GetTargetProperties();
-        const auto db_id   = target.DbId();
-        if(db_id == "gfx1100" || db_id == "gfx1102" || db_id == "gfx1151" || db_id == "gfx1200" ||
-           db_id == "gfx1201")
+        return DbBasenameFor(GetTargetProperties().SystemDbId());
+    }
+
+private:
+    std::string DbBasenameFor(const std::string& db_id) const
+    {
+        if(db_id == "gfx1100" || db_id == "gfx1101" || db_id == "gfx1102" || db_id == "gfx1151" ||
+           db_id == "gfx1200" || db_id == "gfx1201")
         {
             std::ostringstream ss;
             ss << db_id << std::hex << GetMaxHardwareComputeUnits();
             return ss.str();
         }
-        return GetDbBasename(target, GetMaxComputeUnits());
+        return GetDbBasename(db_id, GetMaxComputeUnits());
     }
 
+public:
     std::unique_ptr<HandleImpl> impl;
     std::unordered_map<std::string, std::vector<miopenConvSolution_t>> find_map;
 

@@ -105,8 +105,8 @@ void SharedLibrary::load(const std::filesystem::path& libraryPath)
     if(!std::filesystem::exists(_libraryPath))
     {
         throw HipdnnException(HIPDNN_STATUS_PLUGIN_ERROR,
-                              "Shared libary: plugin file does not exist: "
-                                  + _libraryPath.string());
+                              "Shared library: plugin file does not exist: " + _libraryPath.string()
+                                  + " (resolved from requested path " + libraryPath.string() + ")");
     }
 
     HIPDNN_BACKEND_LOG_INFO(

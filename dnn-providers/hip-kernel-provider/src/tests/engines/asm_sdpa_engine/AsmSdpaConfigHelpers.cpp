@@ -194,6 +194,7 @@ SdpaFwdGraph buildGraph(const GraphTestCase& testCase, LengthInputs lengthInputs
 
     const int64_t batch = testCase.batch;
     const int64_t numHeads = testCase.numHeads;
+    const int64_t numHeadsKv = testCase.numHeadsKv.value_or(numHeads);
     const int64_t seqQ = testCase.seqQ;
     const int64_t seqKv = testCase.seqKv;
 
@@ -205,8 +206,8 @@ SdpaFwdGraph buildGraph(const GraphTestCase& testCase, LengthInputs lengthInputs
 
     // Create tensor dimensions
     const std::vector<int64_t> qDims = {batch, numHeads, seqQ, config.hdim_q};
-    const std::vector<int64_t> kDims = {batch, numHeads, seqKv, config.hdim_q};
-    const std::vector<int64_t> vDims = {batch, numHeads, seqKv, config.hdim_v};
+    const std::vector<int64_t> kDims = {batch, numHeadsKv, seqKv, config.hdim_q};
+    const std::vector<int64_t> vDims = {batch, numHeadsKv, seqKv, config.hdim_v};
     // Use physical memory layout: B, Seq, H, D for compatibility with group mode
     const std::vector<int64_t> layout = {3, 1, 2, 0};
 
@@ -217,21 +218,21 @@ SdpaFwdGraph buildGraph(const GraphTestCase& testCase, LengthInputs lengthInputs
 
     auto q = std::make_shared<TensorAttributes>();
     q->set_uid(K_Q_UID)
-        .set_name("q")
+        .set_name(K_Q_TENSOR_NAME)
         .set_dim(qDims)
         .set_stride(generateStrides(qDims, layout))
         .set_data_type(inDataType);
 
     auto k = std::make_shared<TensorAttributes>();
     k->set_uid(K_K_UID)
-        .set_name("k")
+        .set_name(K_K_TENSOR_NAME)
         .set_dim(kDims)
         .set_stride(generateStrides(kDims, layout))
         .set_data_type(inDataType);
 
     auto v = std::make_shared<TensorAttributes>();
     v->set_uid(K_V_UID)
-        .set_name("v")
+        .set_name(K_V_TENSOR_NAME)
         .set_dim(vDims)
         .set_stride(generateStrides(vDims, layout))
         .set_data_type(inDataType);
@@ -310,9 +311,9 @@ SdpaFwdGraph buildGraph(const GraphTestCase& testCase, LengthInputs lengthInputs
                 .set_name(name);
             return descale;
         };
-        attributes.set_descale_q(makeDescale(K_DESCALE_Q_UID, "descale_q"));
-        attributes.set_descale_k(makeDescale(K_DESCALE_K_UID, "descale_k"));
-        attributes.set_descale_v(makeDescale(K_DESCALE_V_UID, "descale_v"));
+        attributes.set_descale_q(makeDescale(K_DESCALE_Q_UID, K_DESCALE_Q_TENSOR_NAME));
+        attributes.set_descale_k(makeDescale(K_DESCALE_K_UID, K_DESCALE_K_TENSOR_NAME));
+        attributes.set_descale_v(makeDescale(K_DESCALE_V_UID, K_DESCALE_V_TENSOR_NAME));
     }
 
     // Configure mask type

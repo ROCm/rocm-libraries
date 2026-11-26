@@ -69,6 +69,7 @@ endif()
 if(ENABLE_HIP_MLOPS_ENGINE)
     target_sources(hip_kernel_provider_integration_tests PRIVATE
         hip_mlops_engine/IntegrationGpuPassByValue.cpp
+        hip_mlops_engine/IntegrationGpuLayernormBackwardPrecision.cpp
     )
 endif()
 
@@ -388,6 +389,10 @@ foreach(_hkp_bwd_engine IN ITEMS split merged)
     endforeach()
 endforeach()
 
+# The ASM SDPA forward engine against the GPU reference, on the quick forward bundles. The
+# C++ suite this once named (Smoke/IntegrationGpuSdpaFwdBfp16) no longer builds by default
+# (BUILD_CPP_GRAPH_TESTS), so a filter on it ran zero tests and failed; the bundle suites
+# are always registered, and are named after their folder (quick_SdpaFwd_<layout>).
 if(ENABLE_ASM_SDPA_ENGINE AND HIPDNN_ENABLE_SDPA
    AND TARGET hipdnn_integration_tests AND COMMAND add_external_integration_test_target)
     add_external_integration_test_target(
@@ -397,7 +402,7 @@ if(ENABLE_ASM_SDPA_ENGINE AND HIPDNN_ENABLE_SDPA
         INSTALL_SUBDIR hip_kernel_provider
         REFERENCE_EXECUTOR gpu
         GTEST_FILTER
-            Smoke/IntegrationGpuSdpaFwdBfp16.Correctness/*
+            quick_SdpaFwd_*
         ENVIRONMENT_MODIFICATION
             ${TEST_ENVIRONMENT_MODIFICATION}
     )

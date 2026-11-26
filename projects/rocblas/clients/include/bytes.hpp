@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2020-2023 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2020-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -25,10 +25,17 @@
 
 #include "rocblas.h"
 
+#include <algorithm>
+
 /*!\file
  * \brief provides bandwidth measure as byte counts Basic Linear Algebra Subprograms (BLAS) of
  * Level 1, 2, 3. Where possible we are using the values of NOP from the legacy BLAS files
  * [sdcz]blas[23]time.f for byte counts.
+ *
+ * A count is the data a call moves between device memory and the GPU, as in BLAS++ (blas::Gbyte):
+ * each input is read once, each output is written once, and an operand that is both (such as y
+ * when beta != 0, or A in ger) is read and written. Matrices count the stored elements only: the
+ * triangle of symmetric, Hermitian and triangular matrices (also packed) and the band of banded ones.
  */
 
 /*
@@ -39,10 +46,10 @@
 
 /* \brief byte counts of SET/GET_MATRIX/_ASYNC */
 template <typename T>
-constexpr double set_get_matrix_gbyte_count(int64_t m, int64_t n)
+constexpr double set_get_matrix_gbyte_count(int64_t rows, int64_t cols)
 {
     // calls done in pairs for timing so x 2.0
-    return (sizeof(T) * m * n * 2.0) / 1e9;
+    return (sizeof(T) * rows * cols * 2.0) / 1e9;
 }
 
 /* \brief byte counts of SET/GET_VECTOR/_ASYNC */
@@ -153,39 +160,49 @@ inline size_t rocblas_packed_matrix_size(int64_t n)
     return (size_t(n) * (1 + n)) / 2;
 }
 
+// Elements in the band of an m x n matrix with kl subdiagonals and ku superdiagonals
+inline double band_count(int64_t m, int64_t n, int64_t kl, int64_t ku)
+{
+    double count = 0;
+    for(int64_t d = -std::min(kl, m - 1); d <= std::min(ku, n - 1); d++)
+        count += d < 0 ? std::min(m + d, n) : std::min(m, n - d);
+    return count;
+}
+
 /* \brief byte counts of GBMV */
 template <typename T>
 constexpr double
     gbmv_gbyte_count(rocblas_operation transA, int64_t m, int64_t n, int64_t kl, int64_t ku)
 {
-    size_t dim_x = transA == rocblas_operation_none ? n : m;
-
-    int64_t k1      = dim_x < kl ? dim_x : kl;
-    int64_t k2      = dim_x < ku ? dim_x : ku;
-    int64_t d1      = ((k1 * dim_x) - (k1 * (k1 + 1) / 2));
-    int64_t d2      = ((k2 * dim_x) - (k2 * (k2 + 1) / 2));
-    double  num_els = double(d1 + d2 + dim_x);
-    return (sizeof(T) * (num_els)) / 1e9;
+    int64_t dim_x = transA == rocblas_operation_none ? n : m;
+    int64_t dim_y = transA == rocblas_operation_none ? m : n;
+    // read band of A, x, y; write y
+    return (sizeof(T) * (band_count(m, n, kl, ku) + dim_x + 2.0 * dim_y)) / 1e9;
 }
 
 /* \brief byte counts of GEMV */
 template <typename T>
 constexpr double gemv_gbyte_count(rocblas_operation transA, int64_t m, int64_t n)
 {
-    return (sizeof(T) * (m * n + 2 * (transA == rocblas_operation_none ? n : m))) / 1e9;
+    int64_t dim_x = transA == rocblas_operation_none ? n : m;
+    int64_t dim_y = transA == rocblas_operation_none ? m : n;
+    // read A, x, y; write y
+    return (sizeof(T) * (double(m) * n + dim_x + 2.0 * dim_y)) / 1e9;
 }
 
 /* \brief byte counts of GER */
 template <typename T>
 constexpr double ger_gbyte_count(int64_t m, int64_t n)
 {
-    return (sizeof(T) * (m * n + m + n)) / 1e9;
+    // read and write of A + read of x and y
+    return (sizeof(T) * (2 * m * n + m + n)) / 1e9;
 }
 
 /* \brief byte counts of HEMV */
 template <typename T>
 constexpr double hemv_gbyte_count(int64_t n)
 {
+    // read triangle of A, x, y; write y
     return (sizeof(T) * (((n * (n + 1.0)) / 2.0) + 3.0 * n)) / 1e9;
 }
 
@@ -193,65 +210,72 @@ constexpr double hemv_gbyte_count(int64_t n)
 template <typename T>
 constexpr double hbmv_gbyte_count(int64_t n, int64_t k)
 {
-    int64_t k1 = k < n ? k : n;
-    return (sizeof(T) * (n * k1 - ((k1 * (k1 + 1)) / 2.0) + 3 * n)) / 1e9;
+    // read band of A (main diagonal and k superdiagonals), x, y; write y
+    return (sizeof(T) * (band_count(n, n, 0, k) + 3.0 * n)) / 1e9;
 }
 
 /* \brief byte counts of HPMV */
 template <typename T>
 constexpr double hpmv_gbyte_count(int64_t n)
 {
-    return (sizeof(T) * ((n * (n + 1.0)) / 2.0) + 3.0 * n) / 1e9;
+    // read triangle of A, x, y; write y
+    return (sizeof(T) * (((n * (n + 1.0)) / 2.0) + 3.0 * n)) / 1e9;
 }
 
 /* \brief byte counts of HPR */
 template <typename T>
 constexpr double hpr_gbyte_count(int64_t n)
 {
-    return (sizeof(T) * (tri_count(n) + n)) / 1e9;
+    // read and write of A + read of x
+    return (sizeof(T) * (tri_count(n) * 2 + n)) / 1e9;
 }
 
 /* \brief byte counts of HPR2 */
 template <typename T>
 constexpr double hpr2_gbyte_count(int64_t n)
 {
-    return (sizeof(T) * (tri_count(n) + 2.0 * n)) / 1e9;
+    // read and write of A + read of x and y
+    return (sizeof(T) * (tri_count(n) * 2 + 2.0 * n)) / 1e9;
 }
 
 /* \brief byte counts of SYMV */
 template <typename T>
 constexpr double symv_gbyte_count(int64_t n)
 {
-    return (sizeof(T) * (tri_count(n) + n)) / 1e9;
+    // read triangle of A, x, y; write y
+    return (sizeof(T) * (tri_count(n) + 3.0 * n)) / 1e9;
 }
 
 /* \brief byte counts of SPMV */
 template <typename T>
 constexpr double spmv_gbyte_count(int64_t n)
 {
-    return (sizeof(T) * (tri_count(n) + n)) / 1e9;
+    // read triangle of A, x, y; write y
+    return (sizeof(T) * (tri_count(n) + 3.0 * n)) / 1e9;
 }
 
 /* \brief byte counts of SBMV */
 template <typename T>
 constexpr double sbmv_gbyte_count(int64_t n, int64_t k)
 {
-    int64_t k1 = k < n ? k : n - 1;
-    return (sizeof(T) * (tri_count(n) - tri_count(n - (k1 + 1)) + n)) / 1e9;
+    // read band of A (main diagonal and k superdiagonals), x, y; write y
+    return (sizeof(T) * (band_count(n, n, 0, k) + 3.0 * n)) / 1e9;
 }
 
 /* \brief byte counts of HER */
 template <typename T>
 constexpr double her_gbyte_count(int64_t n)
 {
-    return (sizeof(T) * (tri_count(n) + n)) / 1e9;
+    // read and write of A + read of x
+    return (sizeof(T) * (tri_count(n) * 2 + n)) / 1e9;
 }
 
 /* \brief byte counts of HER2 */
 template <typename T>
 constexpr double her2_gbyte_count(int64_t n)
 {
-    return (sizeof(T) * (tri_count(n) + 2 * n)) / 1e9;
+    // read and write of A + read of x and y
+    return (sizeof(T) * (tri_count(n) * 2 + 2 * n)) / 1e9;
 }
 
 /* \brief byte counts of SPR */
@@ -288,31 +312,34 @@ constexpr double syr2_gbyte_count(int64_t n)
 
 /* \brief byte counts of TBMV */
 template <typename T>
-constexpr double tbmv_gbyte_count(int64_t m, int64_t k)
+constexpr double tbmv_gbyte_count(int64_t n, int64_t k)
 {
-    int64_t k1 = k < m ? k : m;
-    return (sizeof(T) * (m * k1 - ((k1 * (k1 + 1)) / 2.0) + 3 * m)) / 1e9;
+    // read band of A (main diagonal and k off-diagonals), x; write x
+    return (sizeof(T) * (band_count(n, n, 0, k) + 2.0 * n)) / 1e9;
 }
 
 /* \brief byte counts of TPMV */
 template <typename T>
-constexpr double tpmv_gbyte_count(int64_t m)
+constexpr double tpmv_gbyte_count(int64_t n)
 {
-    return (sizeof(T) * tri_count(m)) / 1e9;
+    // read triangle of A, x; write x
+    return (sizeof(T) * (tri_count(n) + 2.0 * n)) / 1e9;
 }
 
 /* \brief byte counts of TRMV */
 template <typename T>
-constexpr double trmv_gbyte_count(int64_t m)
+constexpr double trmv_gbyte_count(int64_t n)
 {
-    return (sizeof(T) * ((m * (m + 1.0)) / 2 + 2 * m)) / 1e9;
+    // read triangle of A, x; write x
+    return (sizeof(T) * ((n * (n + 1.0)) / 2 + 2 * n)) / 1e9;
 }
 
 /* \brief byte counts of TPSV */
 template <typename T>
 constexpr double tpsv_gbyte_count(int64_t n)
 {
-    return (sizeof(T) * (tri_count(n) + n)) / 1e9;
+    // read triangle of A, x; write x
+    return (sizeof(T) * (tri_count(n) + 2.0 * n)) / 1e9;
 }
 
 /*
@@ -325,8 +352,8 @@ constexpr double tpsv_gbyte_count(int64_t n)
 template <typename T>
 constexpr double syrk_gbyte_count(int64_t n, int64_t k)
 {
-    int64_t k1 = k < n ? k : n - 1;
-    return (sizeof(T) * (tri_count(n) + n * k)) / 1e9;
+    // read A, triangle of C; write triangle of C
+    return (sizeof(T) * (double(n) * k + 2.0 * tri_count(n))) / 1e9;
 }
 
 /* \brief byte counts of HERK */
