@@ -588,6 +588,84 @@ namespace
         EXPECT_EQ(isSupported(result.algo, unused), HIPBLAS_STATUS_INVALID_VALUE);
         EXPECT_EQ(matmul(), HIPBLAS_STATUS_INVALID_VALUE);
     }
+
+    // Under uniform summation order, a tile rocRoller would run as Stream-K is kept with
+    // Stream-K off, so the problem still gets kernels.
+    TEST_F(AlgoErrors, smoke_RocRollerKeepsStreamKTilesWithoutStreamKUnderUniformSummationOrder)
+    {
+        int             device = 0;
+        hipDeviceProp_t props{};
+        ASSERT_EQ(hipGetDevice(&device), hipSuccess);
+        ASSERT_EQ(hipGetDeviceProperties(&props, device), hipSuccess);
+        if(std::string(props.gcnArchName).find("gfx1250") != std::string::npos)
+            GTEST_SKIP() << "gfx1250 handles never use rocRoller";
+
+        hipblasLtHandle_t rocroller = nullptr;
+        {
+            ScopedEnv use("HIPBLASLT_USE_ROCROLLER", "1");
+            ASSERT_EQ(hipblasLtCreate(&rocroller), HIPBLAS_STATUS_SUCCESS);
+        }
+        const std::unique_ptr<void, decltype(&hipblasLtDestroy)> owner(rocroller,
+                                                                       &hipblasLtDestroy);
+
+        // One output tile with a long K, which rocRoller runs as Stream-K.
+        constexpr int64_t       m = 128, n = 256, k = 4096;
+        hipblasLtMatrixLayout_t lA = nullptr, lB = nullptr, lCD = nullptr;
+        ASSERT_EQ(hipblasLtMatrixLayoutCreate(&lA, kType, m, k, m), HIPBLAS_STATUS_SUCCESS);
+        const LayoutPtr ownA(lA, &hipblasLtMatrixLayoutDestroy);
+        ASSERT_EQ(hipblasLtMatrixLayoutCreate(&lB, kType, k, n, k), HIPBLAS_STATUS_SUCCESS);
+        const LayoutPtr ownB(lB, &hipblasLtMatrixLayoutDestroy);
+        ASSERT_EQ(hipblasLtMatrixLayoutCreate(&lCD, kType, m, n, m), HIPBLAS_STATUS_SUCCESS);
+        const LayoutPtr ownCD(lCD, &hipblasLtMatrixLayoutDestroy);
+
+        constexpr size_t kMaxWorkspace = size_t(64) << 20;
+        ASSERT_EQ(hipblasLtMatmulPreferenceSetAttribute(pref,
+                                                        HIPBLASLT_MATMUL_PREF_MAX_WORKSPACE_BYTES,
+                                                        &kMaxWorkspace,
+                                                        sizeof(kMaxWorkspace)),
+                  HIPBLAS_STATUS_SUCCESS);
+
+        // Each candidate is a JIT-compiled kernel, so only a few are requested.
+        std::array<hipblasLtMatmulHeuristicResult_t, 2> results{};
+        auto heuristicWithUniformOrder = [&](int32_t value, int& count) {
+            count = 0;
+            ASSERT_EQ(
+                hipblasLtMatmulDescSetAttribute(
+                    desc, HIPBLASLT_MATMUL_DESC_UNIFORM_SUMMATION_ORDER_EXT, &value, sizeof(value)),
+                HIPBLAS_STATUS_SUCCESS);
+            ASSERT_EQ(hipblasLtMatmulAlgoGetHeuristic(rocroller,
+                                                      desc,
+                                                      lA,
+                                                      lB,
+                                                      lCD,
+                                                      lCD,
+                                                      pref,
+                                                      results.size(),
+                                                      results.data(),
+                                                      &count),
+                      HIPBLAS_STATUS_SUCCESS);
+        };
+        auto nameOf = [&](hipblasLtMatmulAlgo_t algo) {
+            return hipblaslt_ext::getKernelNameFromAlgo(rocroller, algo);
+        };
+
+        int count = 0;
+        ASSERT_NO_FATAL_FAILURE(heuristicWithUniformOrder(0, count));
+        if(count == 0 || nameOf(results[0].algo).find("_sk") == std::string::npos)
+            GTEST_SKIP() << "rocRoller chose no Stream-K kernel for this problem on "
+                         << props.gcnArchName;
+
+        ASSERT_NO_FATAL_FAILURE(heuristicWithUniformOrder(1, count));
+        ASSERT_GT(count, 0);
+        for(int i = 0; i < count; ++i)
+            EXPECT_EQ(nameOf(results[i].algo).find("_sk"), std::string::npos)
+                << nameOf(results[i].algo);
+        size_t workspaceSize = kMaxWorkspace;
+        EXPECT_EQ(
+            hipblaslt_ext::matmulIsAlgoSupported(
+                rocroller, desc, &alpha, lA, lB, &beta, lCD, lCD, results[0].algo, workspaceSize),
+            HIPBLAS_STATUS_SUCCESS);
+    }
 #endif
 
     // No kernel applies an aux scale, so both APIs refuse a non-null one.
