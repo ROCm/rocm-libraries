@@ -454,15 +454,6 @@ validParameters = { # we need to make sure this matches develop
     # When active with LDSSegmentInterleave, requires paired LDS buffers;
     # persistent unpaired fallback (including PrefetchAcrossPersistent) is rejected.
     "WaveTileContiguousA": [False, True],
-    # MXScaleVgprInterleaveExtraVgpr (gfx1250, MX kernels on both A and B): the scale-VGPR interleave
-    # lays MXSA/MXSB on disjoint VGPR banks so v_wmma_scale avoids the +1 cycle bank-conflict penalty.
-    #   False (default): never use more VGPRs than the default layout; when the conflict-free layout does
-    #        not fit, use the layout with the fewest bank conflicts that does.
-    #   True: let the scale region grow to hold the conflict-free layout. The kernel then uses more VGPRs
-    #        and can exceed the 1024 VGPR limit, in which case it does not build. It is rejected where the
-    #        interleave does not apply (not gfx1250, or MX scales not on both A and B) and folded into False
-    #        where the conflict-free layout already fits the default span (the kernel would be identical).
-    "MXScaleVgprInterleaveExtraVgpr": [False, True],
     # Persistent loop: use the current tile's no-load-loop window to
     # issue the first global-read group for the next persistent tile. The
     # generated code keeps that first-PGR data durable and restores borrowed

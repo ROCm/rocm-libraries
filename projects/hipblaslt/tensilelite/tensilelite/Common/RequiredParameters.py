@@ -89,9 +89,6 @@ def getRequiredParametersMin() -> set:
         'LocalWritePerMfma',
         'MIArchVgpr',
         'MaxOccupancy',
-        # Named only when True (Naming.py drops the default False): the scale region may then grow past
-        # the default VGPR span, which produces different assembly.
-        'MXScaleVgprInterleaveExtraVgpr',
         'NonTemporal',
         'NonTemporalA',
         'NonTemporalB',
