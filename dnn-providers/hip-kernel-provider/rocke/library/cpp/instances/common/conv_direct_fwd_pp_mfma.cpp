@@ -30,7 +30,7 @@ namespace
 
 const int kBlockKs[3] = {64, 128, 256};
 const rocke_pp::PpFamily kFamily
-    = {"fwd_pp_mfma", kBlockKs, 3, "block_k must be 64, 128 or 256", false};
+    = {"fwd_pp_mfma", kBlockKs, 3, "block_k must be 64, 128 or 256", false, true, false};
 
 rocke_pp::PpSpec pp_spec(const rocke_fwd_pp_mfma_spec_t* s)
 {

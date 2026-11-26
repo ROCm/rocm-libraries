@@ -179,8 +179,10 @@ int pp_threads_per_block(const PpSpec& s)
 void pp_grid(const PpSpec& s, int grid[3])
 {
     const rocke_direct_conv_problem_t* p = s.problem;
-    long long n = (long long)p->N * cdiv(problem_ho(p), kTH) * cdiv(problem_wo(p), kTW)
-                  * cdiv((int)rocke_direct_conv_problem_total_k(p), s.block_k);
+    /* Grouped: the output-channel tiles of every group (one group per block,
+     * ceil(kpg / block_k) tiles each); dense: kpg == total_k. */
+    long long n = (long long)p->N * cdiv(problem_ho(p), kTH) * cdiv(problem_wo(p), kTW) * p->groups
+                  * cdiv(p->kpg, s.block_k);
     grid[0] = (int)n;
     grid[1] = 1;
     grid[2] = 1;
@@ -257,7 +259,7 @@ bool pp_is_valid_spec(
     {
         why = msg;
     }
-    else if(p->groups != 1)
+    else if(p->groups != 1 && !f.groups_ok)
     {
         why = "groups must be 1";
     }
@@ -273,7 +275,7 @@ bool pp_is_valid_spec(
     {
         why = "square odd filters >= 3 only";
     }
-    else if(p->PAD != (p->KH - 1) / 2)
+    else if(p->PAD != (p->KH - 1) / 2 && !(f.valid_ok && p->PAD == 0))
     {
         ROCKE_ERR_SNPRINTF(msg,
                            sizeof msg,
@@ -361,6 +363,16 @@ rocke_kernel_def_t* emit_pp_mfma(rocke_ir_builder_t* b, const PpSpec& spec, PpWe
     V p_Hi = P.p_Hi, p_Wi = P.p_Wi;
     V p_Ho = P.p_Ho, p_Wo = P.p_Wo;
     V C = P.p_total_c, K = P.p_total_k;
+    /* Grouped: one group per block, per-group channel counts baked; the group
+     * count is the runtime total over the baked kpg. */
+    const bool grouped = p.groups > 1;
+    V n_groups = NULL;
+    if(grouped)
+    {
+        n_groups = e.divi(K, p.kpg);
+        C = e.ci(p.cpg);
+        K = e.ci(p.kpg);
+    }
     V sa_n = P.p_A_stride_n, sa_h = P.p_A_stride_hi, sa_w = P.p_A_stride_wi;
     V sd_n = P.p_D_stride_n, sd_h = P.p_D_stride_ho, sd_w = P.p_D_stride_wo;
 
@@ -381,6 +393,14 @@ rocke_kernel_def_t* emit_pp_mfma(rocke_ir_builder_t* b, const PpSpec& spec, PpWe
     V rest = e.div(blk, n_kt);
     V w_tile = e.mod(rest, n_wt);
     rest = e.div(rest, n_wt);
+    V g_c = NULL, g_k = NULL;
+    if(grouped)
+    {
+        V grp = e.mod(rest, n_groups);
+        rest = e.div(rest, n_groups);
+        g_c = e.muli(grp, p.cpg);
+        g_k = e.muli(grp, p.kpg);
+    }
     V h_tile = e.mod(rest, n_ht);
     V n_img = e.div(rest, n_ht);
     V oh0 = e.muli(h_tile, kTH);
@@ -439,6 +459,7 @@ rocke_kernel_def_t* emit_pp_mfma(rocke_ir_builder_t* b, const PpSpec& spec, PpWe
               {w_bufs[0], w_bufs[1]},
               {w_addr[0], w_addr[1]},
               lds_at,
+              g_c,
               {}};
 
     /* ---- rank 0: weight DMA geometry (the family's) ---- */
@@ -512,6 +533,10 @@ rocke_kernel_def_t* emit_pp_mfma(rocke_ir_builder_t* b, const PpSpec& spec, PpWe
         V c_ok = e.lt(e.add(c_base, g.ch), C);
         V g_off = e.add(g.off, e.mul(ih, sa_h));
         g_off = e.add(g_off, c_base);
+        if(g_c != NULL)
+        {
+            g_off = e.add(g_off, g_c);
+        }
         V all = e.land(e.land(g.ok, row_ok), c_ok);
         V voff = e.mul(g_off, c2);
         voff = e.select(all, voff, oob);
@@ -711,6 +736,10 @@ rocke_kernel_def_t* emit_pp_mfma(rocke_ir_builder_t* b, const PpSpec& spec, PpWe
         V hw_ok = e.land(w_ok, e.lt(oh, p_Ho));
         V m1 = e.mul(oh, sd_h);
         V pix = e.add(m1, e.mul(ow, sd_w));
+        if(g_k != NULL)
+        {
+            pix = e.add(pix, g_k);
+        }
         for(int kf = 0; kf < KF; ++kf)
         {
             V k = e.addi(k_lane, kf * kAtom);

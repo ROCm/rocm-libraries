@@ -206,7 +206,8 @@ std::string kernel_name(const Spec* s)
                      s->io_dtype,
                      op,
                      v,
-                     "fr" + std::to_string(s->filter_rows)});
+                     "fr" + std::to_string(s->filter_rows),
+                     s->dgrad ? "dg" : ""});
     case ROCKE_WINOGRAD_RT_K2A:
         return join({"wino_rt_pmax", s->io_dtype, v});
     case ROCKE_WINOGRAD_RT_K2:
@@ -408,33 +409,84 @@ void emit_filter(E& e)
     V row_y = rocke_b_block_id_y(b);
     V ok = rocke_b_cmp_lt(b, gid, items);
     V kk, cm;
-    div_mod(e, cgv, gid, &kk, &cm);
-    V c = mul_c(e, cm, vec);
-    V cg2;
-    {
-        V k2 = ci(e, 2);
-        cg2 = rocke_b_mul(b, cg, k2);
-    }
-    V wbase;
-    {
-        V k9 = ci(e, 9);
-        V cg9 = rocke_b_mul(b, cg, k9);
-        V m1 = rocke_b_mul(b, kk, cg9);
-        V a1 = rocke_b_add(b, m1, c);
-        V k2 = ci(e, 2);
-        V m2 = rocke_b_mul(b, a1, k2);
-        wbase = oob(e, ok, m2);
-    }
+    V c, cg2;
     std::vector<std::vector<VV>> taps(3);
-    V off = wbase;
-    for(int ky = 0; ky < 3; ++ky)
+    if(s->dgrad)
     {
-        for(int kx = 0; kx < 3; ++kx)
+        /* cgv carries K here: neighbouring lanes take neighbouring outputs k,
+         * whose taps are adjacent in the original [C][3][3][K] filter. Tap
+         * (ky, kx) of this pass is original tap (2 - ky, 2 - kx), and each of
+         * the vec reduction channels is its own 9 K-element row. */
+        div_mod(e, cgv, gid, &cm, &kk);
+        c = mul_c(e, cm, vec);
         {
-            if(ky || kx)
-                off = rocke_b_add(b, off, cg2);
-            V raw = rocke_wino::load_raw(b, w_rsrc, off, s->io_dtype, vec);
-            taps[ky].push_back(rocke_wino::raw_to_f32(b, raw, vec));
+            V k2c = ci(e, 2);
+            cg2 = rocke_b_mul(b, cg, k2c);
+        }
+        V k2;
+        {
+            V kc = ci(e, 2);
+            k2 = rocke_b_mul(b, K, kc);
+        }
+        V row9;
+        {
+            V kc = ci(e, 9);
+            row9 = rocke_b_mul(b, k2, kc);
+        }
+        V base;
+        {
+            V m1 = rocke_b_mul(b, c, row9);
+            V kc = ci(e, 2);
+            V m2 = rocke_b_mul(b, kk, kc);
+            V a1 = rocke_b_add(b, m1, m2);
+            base = oob(e, ok, a1);
+        }
+        for(int ky = 0; ky < 3; ++ky)
+        {
+            for(int kx = 0; kx < 3; ++kx)
+            {
+                V t = mul_c(e, k2, (2 - ky) * 3 + (2 - kx));
+                VV vals;
+                for(int ch = 0; ch < vec; ++ch)
+                {
+                    V a = rocke_b_add(b, base, t);
+                    V off = rocke_b_add(b, a, mul_c(e, row9, ch));
+                    V raw = rocke_wino::load_raw(b, w_rsrc, off, s->io_dtype, 1);
+                    VV one = rocke_wino::raw_to_f32(b, raw, 1);
+                    vals.insert(vals.end(), one.begin(), one.end());
+                }
+                taps[ky].push_back(vals);
+            }
+        }
+    }
+    else
+    {
+        div_mod(e, cgv, gid, &kk, &cm);
+        c = mul_c(e, cm, vec);
+        {
+            V k2 = ci(e, 2);
+            cg2 = rocke_b_mul(b, cg, k2);
+        }
+        V wbase;
+        {
+            V k9 = ci(e, 9);
+            V cg9 = rocke_b_mul(b, cg, k9);
+            V m1 = rocke_b_mul(b, kk, cg9);
+            V a1 = rocke_b_add(b, m1, c);
+            V k2 = ci(e, 2);
+            V m2 = rocke_b_mul(b, a1, k2);
+            wbase = oob(e, ok, m2);
+        }
+        V off = wbase;
+        for(int ky = 0; ky < 3; ++ky)
+        {
+            for(int kx = 0; kx < 3; ++kx)
+            {
+                if(ky || kx)
+                    off = rocke_b_add(b, off, cg2);
+                V raw = rocke_wino::load_raw(b, w_rsrc, off, s->io_dtype, vec);
+                taps[ky].push_back(rocke_wino::raw_to_f32(b, raw, vec));
+            }
         }
     }
     V sc = rocke_b_const_f32(b, scale);
@@ -1621,6 +1673,7 @@ rocke_winograd_rt_spec_t rocke_winograd_rt_spec_default(rocke_winograd_rt_stage_
     s.operand_dtype = "fp16";
     s.vec = 8;
     s.filter_rows = 1;
+    s.dgrad = false;
     s.block_size = 256;
     s.prescale = false;
     s.tiles_per_thread = 1;

@@ -12349,8 +12349,10 @@ def _build_dw_dgrad_win_toeplitz(
             ch8 = b.mul(b.mod(idx, c_per_px), c8)
             img_i = b.add(img0, b.div(px, c_U))
             wo = b.add(x0, b.add(b.mod(px, c_U), b.const_i32(COL0)))
-            slot_ok = b.cmp_lt(idx, b.const_i32(n_in))
+            slot_ok = None
         ch_i = b.add(ch_blk, ch8)
+        if slot_ok is None:
+            slot_ok = b.cmp_lt(idx, b.const_i32(n_in))
         ok = b.land(slot_ok, b.cmp_lt(img_i, p_N))
         if IS > 1:
             # dY_up column wo is dY column wo / 2 when even, zero when odd.

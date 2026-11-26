@@ -602,6 +602,8 @@ extern "C" rocke_dw_wgrad_lds_spec_t rocke_dw_wgrad_lds_spec_default(void)
     s.prefetch = 2;
     s.rows_per_seg = 32;
     s.target_blocks = 1024;
+    s.lane_ch = 8;
+    s.xcd_pair = false;
     return s;
 }
 
@@ -610,7 +612,7 @@ namespace
 
 int lds_block_c(const rocke_dw_wgrad_lds_spec_t* s)
 {
-    return 8 * s->lanes_c;
+    return s->lane_ch * s->lanes_c;
 }
 
 int lds_block_wo(const rocke_dw_wgrad_lds_spec_t* s)
@@ -708,6 +710,7 @@ extern "C" rocke_status_t
     }
     const rocke_direct_conv_problem_t* p = &s->problem;
     char f_buf[64], lc_buf[24], lw_buf[24], cpl_buf[24], pf_buf[24], rps_buf[24], tb_buf[24];
+    char ch_buf[24];
     snprintf(f_buf, sizeof f_buf, "f%dx%dp%ds%d", p->KH, p->KW, p->PAD, p->stride);
     snprintf(lc_buf, sizeof lc_buf, "lc%d", s->lanes_c);
     snprintf(lw_buf, sizeof lw_buf, "lw%d", s->lanes_w);
@@ -715,9 +718,12 @@ extern "C" rocke_status_t
     snprintf(pf_buf, sizeof pf_buf, "pf%d", s->prefetch);
     snprintf(rps_buf, sizeof rps_buf, "rps%d", s->rows_per_seg);
     snprintf(tb_buf, sizeof tb_buf, "tb%d", s->target_blocks);
-    const char* parts[7] = {f_buf, lc_buf, lw_buf, cpl_buf, pf_buf, rps_buf, tb_buf};
-    int on[1] = {problem_is_bf16(p) ? 1 : 0};
-    return rocke_kernel_name_join(s->name, parts, 7, bf16_flag, on, 1, out, out_cap, NULL);
+    snprintf(ch_buf, sizeof ch_buf, "ch%d", s->lane_ch);
+    const char* parts[8] = {f_buf, lc_buf, lw_buf, cpl_buf, pf_buf, rps_buf, tb_buf, ch_buf};
+    static const char* flag_names[2] = {"bf16", "xcdp"};
+    int on[2] = {problem_is_bf16(p) ? 1 : 0, s->xcd_pair ? 1 : 0};
+    return rocke_kernel_name_join(
+        s->name, parts, s->lane_ch != 8 ? 8 : 7, flag_names, on, 2, out, out_cap, NULL);
 }
 
 extern "C" bool rocke_dw_wgrad_lds_is_valid_spec(const rocke_dw_wgrad_lds_spec_t* s,
@@ -771,7 +777,11 @@ extern "C" bool rocke_dw_wgrad_lds_is_valid_spec(const rocke_dw_wgrad_lds_spec_t
     {
         why = "threads must be a multiple of 64, at most 1024";
     }
-    else if(p->KH * p->KW * 8 > 128)
+    else if((s->lane_ch != 2 && s->lane_ch != 4 && s->lane_ch != 8) || lds_block_c(s) % 8)
+    {
+        why = "lane_ch must be 2, 4 or 8 and the channel tile a multiple of 8";
+    }
+    else if(p->KH * p->KW * s->lane_ch > 128)
     {
         why = "too many accumulators";
     }
@@ -829,6 +839,7 @@ rocke_kernel_def_t*
     const int TAPS = KH * KW;
     const int LC = spec->lanes_c, LW = spec->lanes_w, WL = spec->cols_per_lane;
     const int BC = lds_block_c(spec), BWO = lds_block_wo(spec);
+    const int LCH = spec->lane_ch;
     const int CH = BC / 8; /* 16-byte chunks per pixel */
     const int XC = lds_x_cols(spec);
     const int T = rocke_dw_wgrad_lds_threads(spec);
@@ -862,7 +873,11 @@ rocke_kernel_def_t*
     V lw = e.divi(tid, LC);
     V ctile = rocke_b_block_id_x(b);
     V part = rocke_b_block_id_y(b);
-    V c_blk0 = e.muli(ctile, BC);
+    V c_blk0 = NULL;
+    if(!spec->xcd_pair)
+    {
+        c_blk0 = e.muli(ctile, BC);
+    }
     V n_ct = e.cdivi(P.p_Wo, BWO);
     V n_hb = e.cdivi(P.p_Ho, RPS);
     V n_units = e.mul(e.mul(P.p_N, n_ct), n_hb);
@@ -871,6 +886,27 @@ rocke_kernel_def_t*
     V np = e.add(tb, e.sub(n_tiles, c1));
     np = e.div(np, n_tiles);
     V n_part = e.smin(n_units, np);
+    if(spec->xcd_pair)
+    {
+        /* Grid (n_tiles, n_part): re-key only when C % BC != 0 and 8 | n_part. */
+        V on = e.modi(p_C, BC);
+        on = rocke_b_cmp_ne(b, on, c0);
+        V on2 = e.ge(n_tiles, c2);
+        V on3 = e.modi(n_part, 8);
+        on3 = e.eq(on3, c0);
+        on2 = e.land(on2, on3);
+        on = e.land(on, on2);
+        V flat = e.add(ctile, e.mul(n_tiles, part));
+        V nt8 = e.muli(n_tiles, 8);
+        V rest = e.div(flat, nt8);
+        rest = e.muli(rest, 8);
+        rest = e.add(rest, e.modi(flat, 8));
+        V ct2 = e.divi(flat, 8);
+        ct2 = e.mod(ct2, n_tiles);
+        ctile = rocke_b_readfirstlane(b, e.select(on, ct2, ctile));
+        part = rocke_b_readfirstlane(b, e.select(on, rest, part));
+        c_blk0 = e.muli(ctile, BC);
+    }
 
     V a_rsrc = rocke_b_buffer_rsrc(b, P.A, P.A_bytes); /* dY */
     V b_rsrc = rocke_b_buffer_rsrc(b, P.Bp, P.B_bytes); /* X */
@@ -931,11 +967,11 @@ rocke_kernel_def_t*
     /* Fragment read element indices (lane: chunk lc of a column). */
     auto col_index = [&](V col) {
         V a = e.muli(col, BC);
-        return e.add(a, e.muli(lc, 8));
+        return e.add(a, e.muli(lc, LCH));
     };
     auto cvt8 = [&](V v) {
         std::vector<V> out;
-        for(int el = 0; el < 8; ++el)
+        for(int el = 0; el < LCH; ++el)
         {
             out.push_back(rocke_b_cast_to_f32(b, rocke_b_vec_extract(b, v, el)));
         }
@@ -943,7 +979,7 @@ rocke_kernel_def_t*
     };
 
     V zero = rocke_b_const_f32(b, 0.0);
-    const int n_acc = TAPS * 8;
+    const int n_acc = TAPS * LCH;
     const int PER_STEP = S * IX + IY;
 
     std::vector<V> accs = e.for_iter(
@@ -1047,7 +1083,7 @@ rocke_kernel_def_t*
                 {
                     V col = e.addi(e.muli(lw, WL), jw);
                     dyv.push_back(
-                        cvt8(e.smem_load(y_bufs[tm % NY], c0, col_index(col), io_type, 8)));
+                        cvt8(e.smem_load(y_bufs[tm % NY], c0, col_index(col), io_type, LCH)));
                 }
                 for(int r = 0; r < KH; ++r)
                 {
@@ -1062,12 +1098,12 @@ rocke_kernel_def_t*
                             {
                                 V col = e.addi(e.muli(lw, WL * S), xc);
                                 win[xc] = cvt8(
-                                    e.smem_load(x_bufs[slot], c0, col_index(col), io_type, 8));
+                                    e.smem_load(x_bufs[slot], c0, col_index(col), io_type, LCH));
                             }
                             const std::vector<V>& xv = win[xc];
-                            for(int el = 0; el < 8; ++el)
+                            for(int el = 0; el < LCH; ++el)
                             {
-                                int i = (r * KW + s) * 8 + el;
+                                int i = (r * KW + s) * LCH + el;
                                 la[i] = rocke_b_fma(b, dyv[jw][el], xv[el], la[i]);
                             }
                         }
@@ -1109,16 +1145,17 @@ rocke_kernel_def_t*
     for(int t = 0; t < TAPS; ++t)
     {
         V base = e.muli(lw, BC);
-        base = e.add(base, e.muli(lc, 8));
-        for(int e0 = 0; e0 < 8; e0 += 4)
+        base = e.add(base, e.muli(lc, LCH));
+        for(int e0 = 0; e0 < LCH; e0 += 4)
         {
+            const int nv = LCH - e0 < 4 ? LCH - e0 : 4;
             V comps[4];
-            for(int el = 0; el < 4; ++el)
+            for(int el = 0; el < nv; ++el)
             {
-                comps[el] = accs[t * 8 + e0 + el];
+                comps[el] = accs[t * LCH + e0 + el];
             }
-            V vec = rocke_b_vec_pack(b, comps, 4, rocke_f32());
-            e.smem_store_f32(red, c0, e.addi(base, e0), vec, 4);
+            V vec = rocke_b_vec_pack(b, comps, nv, rocke_f32());
+            e.smem_store_f32(red, c0, e.addi(base, e0), vec, nv);
         }
         rocke_b_sync(b);
         for(int k = 0; k < cdiv(BC, T); ++k)

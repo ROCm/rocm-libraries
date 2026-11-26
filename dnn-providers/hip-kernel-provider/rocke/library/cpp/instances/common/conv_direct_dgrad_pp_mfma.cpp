@@ -35,16 +35,39 @@ const rocke_pp::PpFamily kFamily
        kBlockKs,
        2,
        "block_k must be 128 or 256 (256-byte weight rows for the swizzle)",
-       true};
+       true,
+       false,
+       false};
+/* Grouped problems (one group per block): 64-output blocks for kpg <= 64,
+ * 128-byte weight rows with their own transposing-read swizzle. */
+const int kGroupedBlockKs[1] = {64};
+const rocke_pp::PpFamily kGroupedFamily = {"dgrad_pp_mfma",
+                                           kGroupedBlockKs,
+                                           1,
+                                           "grouped: block_k must be 64 (128-byte weight rows)",
+                                           true,
+                                           false,
+                                           true};
 
 rocke_pp::PpSpec pp_spec(const rocke_dgrad_pp_mfma_spec_t* s)
 {
     return {&s->problem, s->name, s->block_k, s->wave_size};
 }
 
-/* _tr_swz(b, row): 2 * (row % 4 + 4 * ((row // 8) % 2)). */
-V tr_swz(const Em& e, V row)
+/* _tr_swz(b, row, block_k): 2 * (row % 4 + 4 * ((row // 8) % 2)); with
+ * 64-output blocks (128-byte rows) 2 * ((row // 2) % 2 + 2 * ((row // 8) % 2)). */
+V tr_swz(const Em& e, V row, int block_k)
 {
+    if(block_k == 64)
+    {
+        V lo = e.divi(row, 2);
+        lo = e.modi(lo, 2);
+        V hi = e.divi(row, 8);
+        hi = e.modi(hi, 2);
+        V t = e.muli(hi, 2);
+        t = e.add(lo, t);
+        return e.muli(t, 2);
+    }
     V lo = e.modi(row, 4);
     V hi = e.divi(row, 8);
     hi = e.modi(hi, 2);
@@ -82,7 +105,7 @@ struct DgradWeights : rocke_pp::PpWeights
             V lr = e.divi(c.lane, GPR);
             V row = e.add(r, lr);
             V lg = e.modi(c.lane, GPR);
-            V gran = e.bxor(lg, tr_swz(e, row));
+            V gran = e.bxor(lg, tr_swz(e, row, BK));
             V cc = e.add(c.k0, e.muli(gran, rocke_pp::kGran));
             WPiece wp;
             wp.row = row;
@@ -99,7 +122,8 @@ struct DgradWeights : rocke_pp::PpWeights
         const int KH = c.spec.problem->KH, KW = c.spec.problem->KW;
         int r = tap / KW, s_ = tap % KW;
         int tap_f = (KH - 1 - r) * KW + (KW - 1 - s_);
-        V m1 = e.mul(c_base, row_len);
+        V c_row = c.g_c == NULL ? c_base : e.add(c_base, c.g_c);
+        V m1 = e.mul(c_row, row_len);
         V kt = e.ci(tap_f);
         V m2 = e.mul(kt, c.K);
         V base = e.add(m1, m2);
@@ -137,7 +161,7 @@ struct DgradWeights : rocke_pp::PpWeights
                     V mt = e.muli(tb, 8);
                     V row = e.add(e.add(kr, mt), ti);
                     V sl = e.divi(col, rocke_pp::kGran);
-                    V slot = e.bxor(sl, tr_swz(e, row));
+                    V slot = e.bxor(sl, tr_swz(e, row, BK));
                     V mr = e.muli(row, BK);
                     V ms = e.muli(slot, rocke_pp::kGran);
                     V mc = e.modi(col, rocke_pp::kGran);
@@ -204,7 +228,8 @@ extern "C" bool rocke_dgrad_pp_mfma_is_valid_spec(const rocke_dgrad_pp_mfma_spec
         rocke_spec_set_reason(reason, reason_cap, "null spec");
         return false;
     }
-    return rocke_pp::pp_is_valid_spec(pp_spec(s), kFamily, arch, reason, reason_cap);
+    return rocke_pp::pp_is_valid_spec(
+        pp_spec(s), s->problem.groups > 1 ? kGroupedFamily : kFamily, arch, reason, reason_cap);
 }
 
 extern "C" rocke_kernel_def_t* rocke_build_dgrad_pp_mfma(rocke_ir_builder_t* b,

@@ -282,7 +282,7 @@ class RtFilterSpec:
     operand_dtype: str = "fp16"
     vec: int = 8
     filter_rows: int = 1
-    #: Read the filter of the dgrad this forward runs as (python only):
+    #: Read the filter of the dgrad this forward runs as:
     #: ``w`` is the original ``[C][3][3][K]`` filter of a dense stride-1 dgrad
     #: (C = this pass's reduction, K its outputs) and K1 flips the taps and
     #: swaps the channel axes on the fly, so the dgrad runs as the forward over
@@ -524,7 +524,6 @@ def build_filter(
     gid = b.add(b.mul(b.block_id_x(), _c(b, _FILTER_BLOCK)), b.thread_id_x())
     row_y = b.block_id_y()
     ok = b.cmp_lt(gid, items)
-    cg2 = b.mul(cg, _c(b, 2))
     taps = []
     if spec.dgrad:
         # cgv carries K here: neighbouring lanes take neighbouring outputs k,
@@ -533,6 +532,7 @@ def build_filter(
         # the vec reduction channels is its own 9 K-element row.
         cm, k = cgv.divmod(gid)
         c = _mul_c(b, cm, vec)
+        cg2 = b.mul(cg, _c(b, 2))
         k2 = b.mul(K, _c(b, 2))
         row9 = b.mul(k2, _c(b, 9))
         base = _oob(b, ok, b.add(b.mul(c, row9), b.mul(k, _c(b, 2))))
@@ -551,6 +551,7 @@ def build_filter(
     else:
         k, cm = cgv.divmod(gid)
         c = _mul_c(b, cm, vec)
+        cg2 = b.mul(cg, _c(b, 2))
         wbase = _oob(b, ok, b.mul(b.add(b.mul(k, b.mul(cg, _c(b, 9))), c), _c(b, 2)))
         off = wbase
         for ky in range(3):

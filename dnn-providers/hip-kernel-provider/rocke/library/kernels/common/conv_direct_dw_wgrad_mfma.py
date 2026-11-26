@@ -457,10 +457,12 @@ def build_dw_wgrad_mfma(spec: DwWgradMfmaSpec, arch: str = "gfx950") -> KernelDe
     # channels 4 * (4b + j) .. + 3.
     tr_row = b.mod(b.div(lane, ci(4)), ci(4))
     tr_cg = b.add(b.mul(b.div(lane, ci(16)), ci(4)), b.mod(lane, ci(4)))
-    tr_col = b.mul(tr_cg, ci(4))
     if spec.swz:
+        tr_col = b.mul(tr_cg, ci(4))
         tr_col = b.xor(tr_col, b.mul(b.land(b.div(tr_row, c2), c1), ci(32)))
-    tr_base = b.add(b.mul(tr_row, ci(_BC)), tr_col)
+        tr_base = b.add(b.mul(tr_row, ci(_BC)), tr_col)
+    else:
+        tr_base = b.add(b.mul(tr_row, ci(_BC)), b.mul(tr_cg, ci(4)))
 
     def transpose_rows(stage_x, stage_y, with_x: bool):
         """Staged NHWC rows -> main_in / dnew, channel-major."""
@@ -752,12 +754,16 @@ def build_dw_wgrad_mfma(spec: DwWgradMfmaSpec, arch: str = "gfx950") -> KernelDe
         for rgi in range(RG):
             kk = b.add(lane4, ci(rgi * _TAPS))
             r = tap_of(kk, pa if PH else None, KH0)
-            ok_r = b.land(
-                b.cmp_lt(kk, ci(KH)), b.land(b.cmp_ge(r, c0), b.cmp_lt(r, ci(KH0)))
-            )
+            if PH:
+                ok_r = b.land(
+                    b.cmp_lt(kk, ci(KH)),
+                    b.land(b.cmp_ge(r, c0), b.cmp_lt(r, ci(KH0))),
+                )
             row0 = b.add(
                 b.mul(b.add(b.mul(part, ci(TAPS)), b.mul(r, ci(KW0))), p_C), c_glb
             )
+            if not PH:
+                ok_r = b.cmp_lt(r, ci(KH))
             with b.scf_if(b.land(c_ok, ok_r)):
                 for sgi in range(SG):
                     acc = accs[rgi * SG + sgi]

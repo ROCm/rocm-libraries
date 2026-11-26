@@ -561,6 +561,8 @@ def build_dw_wgrad_lds(spec: DwWgradLdsSpec, arch: str = "gfx950") -> KernelDef:
     lc = b.mod(tid, ci(LC))
     lw = b.div(tid, ci(LC))
     ctile, part = b.block_id_x(), b.block_id_y()
+    if not spec.xcd_pair:
+        c_blk0 = b.mul(ctile, ci(BC))
     n_ct = b.div(b.add(p_Wo, ci(BWO - 1)), ci(BWO))
     n_hb = b.div(b.add(p_Ho, ci(RPS - 1)), ci(RPS))
     n_units = b.mul(b.mul(params["p_N"], n_ct), n_hb)
@@ -583,7 +585,7 @@ def build_dw_wgrad_lds(spec: DwWgradLdsSpec, arch: str = "gfx950") -> KernelDef:
         )
         ctile = b.readfirstlane(b.select(on, b.mod(b.div(flat, ci(8)), n_tiles), ctile))
         part = b.readfirstlane(b.select(on, rest, part))
-    c_blk0 = b.mul(ctile, ci(BC))
+        c_blk0 = b.mul(ctile, ci(BC))
 
     a_rsrc = b.buffer_rsrc(params["A"], params["A_bytes"])  # dY
     b_rsrc = b.buffer_rsrc(params["B"], params["B_bytes"])  # X

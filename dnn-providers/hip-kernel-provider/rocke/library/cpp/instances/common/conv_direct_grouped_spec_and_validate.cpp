@@ -1701,6 +1701,7 @@ rocke_direct_depthwise_spatial_spec_t rocke_direct_depthwise_spatial_spec_defaul
     spec.name = "direct_depthwise_spatial";
     spec.block_waves = 1;
     spec.wave_size = 64;
+    spec.block_h = 0;
     return spec;
 }
 
@@ -1729,8 +1730,9 @@ rocke_status_t rocke_direct_depthwise_spatial_kernel_name(
     const rocke_direct_depthwise_spatial_spec_t* spec, char* out, size_t out_cap)
 {
     char prob_short[128];
-    const char* parts[2];
+    const char* parts[3];
     char bwv_buf[32];
+    char bh_buf[32];
 
     if(spec == NULL || out == NULL || out_cap == 0)
     {
@@ -1742,8 +1744,10 @@ rocke_status_t rocke_direct_depthwise_spatial_kernel_name(
     }
     /* kernel_name_join(name, p.short(), f"bwv{block_waves}", flags={"bf16": dtype=="bf16"}) */
     snprintf(bwv_buf, sizeof(bwv_buf), "bwv%d", spec->block_waves);
+    snprintf(bh_buf, sizeof(bh_buf), "bh%d", spec->block_h);
     parts[0] = prob_short;
     parts[1] = bwv_buf;
+    parts[2] = bh_buf;
     {
         /* flags=_scalar_name_flags(dtype) */
         const char* flag_names[2] = {"bf16", "f32"};
@@ -1752,7 +1756,7 @@ rocke_status_t rocke_direct_depthwise_spatial_kernel_name(
         flag_on[0] = (strcmp(dt, "bf16") == 0) ? 1 : 0;
         flag_on[1] = rocke_dconv_scalar_f32_flag(dt);
         return rocke_kernel_name_join(
-            spec->name, parts, 2, flag_names, flag_on, 2, out, out_cap, NULL);
+            spec->name, parts, spec->block_h ? 3 : 2, flag_names, flag_on, 2, out, out_cap, NULL);
     }
 }
 
@@ -1842,6 +1846,14 @@ bool rocke_direct_depthwise_spatial_is_valid_spec(const rocke_direct_depthwise_s
         }
         return false;
     }
+    if(spec->block_h < 0)
+    {
+        if(reason && reason_cap > 0)
+        {
+            snprintf(reason, reason_cap, "block_h must be >= 0 (got %d)", spec->block_h);
+        }
+        return false;
+    }
     rocke_spec_set_reason(reason, reason_cap, "ok");
     return true;
 }
@@ -1853,6 +1865,12 @@ rocke_status_t rocke_direct_depthwise_spatial_validate(
     if(spec == NULL)
         return ROCKE_ERR_VALUE;
     p = &spec->problem;
+    if(spec->block_h < 0)
+    {
+        if(reason && reason_cap > 0)
+            snprintf(reason, reason_cap, "block_h must be >= 0 (got %d)", spec->block_h);
+        return ROCKE_ERR_VALUE;
+    }
     /* if p.dtype not in ("fp16", "bf16"): raise ValueError(...) */
     {
         const char* dt = p->dtype ? p->dtype : "fp16";
