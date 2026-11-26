@@ -3,6 +3,12 @@
 Documentation for rocThrust available at
 [https://rocm.docs.amd.com/projects/rocThrust/en/latest/](https://rocm.docs.amd.com/projects/rocThrust/en/latest/).
 
+## rocThrust 5.2.0 for ROCm 10.4.0
+
+### Added
+
+* gfx1251 support.
+
 ## rocThrust 5.1.0 for ROCm 10.3.0
 
 ### Added

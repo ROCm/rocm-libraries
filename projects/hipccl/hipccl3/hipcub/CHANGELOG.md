@@ -2,6 +2,12 @@
 
 Full documentation for hipCUB is available at [https://rocm.docs.amd.com/projects/hipCUB/en/latest/](https://rocm.docs.amd.com/projects/hipCUB/en/latest/).
 
+## hipCUB-5.2.0 for ROCm 10.4.0
+
+### Added
+
+* gfx1251 support.
+
 ## hipCUB-5.1.0 for ROCm 10.3.0
 
 ### Changed
