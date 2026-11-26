@@ -541,6 +541,17 @@ void testing_gemm_ex_run(const Arguments& arg)
                     const double tol = K * sum_error_tolerance<Tc>;
                     near_check_general<To, To_hpa>(M, N, ldd, hD_gold, hD_1, tol);
                 }
+                else if(arg.initialization == rocblas_initialization::hpl)
+                {
+                    // HPL data is random reals, so a sum of K products is not exact and how it
+                    // rounds depends on the order of the additions, which the CPU reference and the
+                    // GPU kernel do not share. Allow about one rounding of the accumulation type
+                    // per product, scaled by alpha and beta.
+                    const double tol
+                        = K * sum_error_tolerance<Tc>
+                          * (double(rocblas_abs(h_alpha_Tc)) + double(rocblas_abs(h_beta_Tc)));
+                    near_check_general<To, To_hpa>(M, N, ldd, hD_gold, hD_1, tol);
+                }
                 else
                 {
                     unit_check_general<To, To_hpa>(M, N, ldd, hD_gold, hD_1);
@@ -570,6 +581,17 @@ void testing_gemm_ex_run(const Arguments& arg)
                     // For large K, rocblas_half tends to diverge proportional to K
                     // Tolerance is slightly greater than 1 / 1024.0
                     const double tol = K * sum_error_tolerance<Tc>;
+                    near_check_general<To, To_hpa>(M, N, ldd, hD_gold, hD_2, tol);
+                }
+                else if(arg.initialization == rocblas_initialization::hpl)
+                {
+                    // HPL data is random reals, so a sum of K products is not exact and how it
+                    // rounds depends on the order of the additions, which the CPU reference and the
+                    // GPU kernel do not share. Allow about one rounding of the accumulation type
+                    // per product, scaled by alpha and beta.
+                    const double tol
+                        = K * sum_error_tolerance<Tc>
+                          * (double(rocblas_abs(h_alpha_Tc)) + double(rocblas_abs(h_beta_Tc)));
                     near_check_general<To, To_hpa>(M, N, ldd, hD_gold, hD_2, tol);
                 }
                 else
