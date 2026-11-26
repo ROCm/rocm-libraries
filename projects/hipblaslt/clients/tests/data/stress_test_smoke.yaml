@@ -1,5 +1,5 @@
 # Quick smoke test - 10 representative kernels
-# Generated for non-determinism testing
+# For determinism testing, run with: --post_bench_verify_iters=10
 # Total test cases: 10
 
 ---
@@ -27,7 +27,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 10
+  iters: 5
 - name: smoke_02_M8192_N1152_K6144
   category: nightly
   function: matmul
@@ -48,7 +48,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 10
+  iters: 5
 - name: smoke_03_M8192_N1152_K3456
   category: nightly
   function: matmul
@@ -69,7 +69,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 10
+  iters: 5
 - name: smoke_04_M1152_N1152_K1152
   category: nightly
   function: matmul
@@ -90,7 +90,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 10
+  iters: 5
   batch_count: 13
   stride_a: 1327104
   stride_b: 1327104
@@ -116,7 +116,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 10
+  iters: 5
 - name: smoke_06_M384_N4096_K1024
   category: nightly
   function: matmul
@@ -137,7 +137,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 10
+  iters: 5
 - name: smoke_07_M384_N384_K147456
   category: nightly
   function: matmul
@@ -158,7 +158,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 10
+  iters: 5
 - name: smoke_08_M9216_N1024_K2048
   category: nightly
   function: matmul
@@ -179,7 +179,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 10
+  iters: 5
 - name: smoke_09_M384_N1024_K1024
   category: nightly
   function: matmul
@@ -200,7 +200,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 10
+  iters: 5
 - name: smoke_10_M9216_N256_K1024
   category: nightly
   function: matmul
@@ -221,4 +221,4 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 10
+  iters: 5

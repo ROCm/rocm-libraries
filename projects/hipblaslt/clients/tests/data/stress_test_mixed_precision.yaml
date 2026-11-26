@@ -1,5 +1,5 @@
-# Mixed precision (bf16 input, f32 output) kernels
-# Generated for non-determinism testing
+# Mixed precision (bf16 input, f32 output) for determinism testing
+# Run with: --post_bench_verify_iters=100 for bit-for-bit validation
 # Total test cases: 21
 
 ---
@@ -27,7 +27,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 100
+  iters: 10
 - name: mix_002_M384_N384_K147456_NN
   category: nightly
   function: matmul
@@ -48,7 +48,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 100
+  iters: 10
 - name: mix_003_M1024_N256_K9216_NN
   category: nightly
   function: matmul
@@ -69,7 +69,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 100
+  iters: 10
 - name: mix_004_M9216_N256_K1024_NN
   category: nightly
   function: matmul
@@ -90,7 +90,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 100
+  iters: 10
 - name: mix_005_M9216_N1024_K256_NN
   category: nightly
   function: matmul
@@ -111,7 +111,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 100
+  iters: 10
 - name: mix_006_M384_N1024_K1024_NN
   category: nightly
   function: matmul
@@ -132,7 +132,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 100
+  iters: 10
 - name: mix_007_M1024_N1024_K384_NN
   category: nightly
   function: matmul
@@ -153,7 +153,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 100
+  iters: 10
 - name: mix_008_M384_N1536_K384_NT
   category: nightly
   function: matmul
@@ -174,7 +174,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 100
+  iters: 10
   batch_count: 384
   stride_a: 147456
   stride_b: 589824
@@ -200,7 +200,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 100
+  iters: 10
   batch_count: 384
   stride_a: 884736
   stride_b: 884736
@@ -226,7 +226,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 100
+  iters: 10
   batch_count: 384
   stride_a: 147456
   stride_b: 884736
@@ -252,7 +252,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 100
+  iters: 10
   batch_count: 384
   stride_a: 147456
   stride_b: 884736
@@ -278,7 +278,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 100
+  iters: 10
   batch_count: 384
   stride_a: 147456
   stride_b: 884736
@@ -304,7 +304,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 100
+  iters: 10
   batch_count: 384
   stride_a: 147456
   stride_b: 147456
@@ -330,7 +330,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 100
+  iters: 10
   batch_count: 384
   stride_a: 147456
   stride_b: 147456
@@ -356,7 +356,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 100
+  iters: 10
 - name: mix_016_M1280_N4096_K1024_NN
   category: nightly
   function: matmul
@@ -377,7 +377,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 100
+  iters: 10
 - name: mix_017_M1280_N1024_K1024_NN
   category: nightly
   function: matmul
@@ -398,7 +398,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 100
+  iters: 10
 - name: mix_018_M1024_N1024_K1280_TN
   category: nightly
   function: matmul
@@ -419,7 +419,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 100
+  iters: 10
 - name: mix_019_M1280_N1024_K1024_NT
   category: nightly
   function: matmul
@@ -440,7 +440,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 100
+  iters: 10
 - name: mix_020_M1024_N4096_K1280_TN
   category: nightly
   function: matmul
@@ -461,7 +461,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 100
+  iters: 10
 - name: mix_021_M1280_N1024_K4096_NT
   category: nightly
   function: matmul
@@ -482,4 +482,4 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 100
+  iters: 10

@@ -1,5 +1,5 @@
-# Batched GEMM operations with alpha/beta variations
-# Generated for non-determinism testing
+# Batched GEMM with alpha/beta variations for determinism testing
+# Run with: --post_bench_verify_iters=50 for bit-for-bit validation
 # Total test cases: 120
 
 ---
@@ -27,7 +27,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 50
+  iters: 10
   batch_count: 384
   stride_a: 884736
   stride_b: 147456
@@ -53,7 +53,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 50
+  iters: 10
   batch_count: 384
   stride_a: 884736
   stride_b: 147456
@@ -79,7 +79,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 50
+  iters: 10
   batch_count: 384
   stride_a: 884736
   stride_b: 147456
@@ -105,7 +105,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 50
+  iters: 10
   batch_count: 384
   stride_a: 884736
   stride_b: 147456
@@ -131,7 +131,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 50
+  iters: 10
   batch_count: 384
   stride_a: 147456
   stride_b: 884736
@@ -157,7 +157,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 50
+  iters: 10
   batch_count: 384
   stride_a: 147456
   stride_b: 884736
@@ -183,7 +183,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 50
+  iters: 10
   batch_count: 384
   stride_a: 147456
   stride_b: 884736
@@ -209,7 +209,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 50
+  iters: 10
   batch_count: 384
   stride_a: 147456
   stride_b: 884736
@@ -235,7 +235,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 50
+  iters: 10
   batch_count: 384
   stride_a: 147456
   stride_b: 884736
@@ -261,7 +261,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 50
+  iters: 10
   batch_count: 384
   stride_a: 147456
   stride_b: 884736
@@ -287,7 +287,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 50
+  iters: 10
   batch_count: 384
   stride_a: 147456
   stride_b: 884736
@@ -313,7 +313,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 50
+  iters: 10
   batch_count: 384
   stride_a: 147456
   stride_b: 884736
@@ -339,7 +339,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 50
+  iters: 10
   batch_count: 384
   stride_a: 884736
   stride_b: 884736
@@ -365,7 +365,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 50
+  iters: 10
   batch_count: 384
   stride_a: 884736
   stride_b: 884736
@@ -391,7 +391,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 50
+  iters: 10
   batch_count: 384
   stride_a: 884736
   stride_b: 884736
@@ -417,7 +417,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 50
+  iters: 10
   batch_count: 384
   stride_a: 884736
   stride_b: 884736
@@ -443,7 +443,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 50
+  iters: 10
   batch_count: 384
   stride_a: 147456
   stride_b: 884736
@@ -469,7 +469,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 50
+  iters: 10
   batch_count: 384
   stride_a: 147456
   stride_b: 884736
@@ -495,7 +495,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 50
+  iters: 10
   batch_count: 384
   stride_a: 147456
   stride_b: 884736
@@ -521,7 +521,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 50
+  iters: 10
   batch_count: 384
   stride_a: 147456
   stride_b: 884736
@@ -547,7 +547,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 50
+  iters: 10
   batch_count: 56
   stride_a: 1048576
   stride_b: 1048576
@@ -573,7 +573,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 50
+  iters: 10
   batch_count: 56
   stride_a: 1048576
   stride_b: 1048576
@@ -599,7 +599,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 50
+  iters: 10
   batch_count: 56
   stride_a: 1048576
   stride_b: 1048576
@@ -625,7 +625,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 50
+  iters: 10
   batch_count: 56
   stride_a: 1048576
   stride_b: 1048576
@@ -651,7 +651,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 50
+  iters: 10
   batch_count: 384
   stride_a: 884736
   stride_b: 884736
@@ -677,7 +677,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 50
+  iters: 10
   batch_count: 384
   stride_a: 884736
   stride_b: 884736
@@ -703,7 +703,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 50
+  iters: 10
   batch_count: 384
   stride_a: 884736
   stride_b: 884736
@@ -729,7 +729,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 50
+  iters: 10
   batch_count: 384
   stride_a: 884736
   stride_b: 884736
@@ -755,7 +755,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 50
+  iters: 10
   batch_count: 384
   stride_a: 147456
   stride_b: 147456
@@ -781,7 +781,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 50
+  iters: 10
   batch_count: 384
   stride_a: 147456
   stride_b: 147456
@@ -807,7 +807,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 50
+  iters: 10
   batch_count: 384
   stride_a: 147456
   stride_b: 147456
@@ -833,7 +833,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 50
+  iters: 10
   batch_count: 384
   stride_a: 147456
   stride_b: 147456
@@ -859,7 +859,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 50
+  iters: 10
   batch_count: 13
   stride_a: 1327104
   stride_b: 1327104
@@ -885,7 +885,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 50
+  iters: 10
   batch_count: 13
   stride_a: 1327104
   stride_b: 1327104
@@ -911,7 +911,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 50
+  iters: 10
   batch_count: 13
   stride_a: 1327104
   stride_b: 1327104
@@ -937,7 +937,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 50
+  iters: 10
   batch_count: 13
   stride_a: 1327104
   stride_b: 1327104
@@ -963,7 +963,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 50
+  iters: 10
   batch_count: 4
   stride_a: 3538944
   stride_b: 3538944
@@ -989,7 +989,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 50
+  iters: 10
   batch_count: 4
   stride_a: 3538944
   stride_b: 3538944
@@ -1015,7 +1015,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 50
+  iters: 10
   batch_count: 4
   stride_a: 3538944
   stride_b: 3538944
@@ -1041,7 +1041,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 50
+  iters: 10
   batch_count: 4
   stride_a: 3538944
   stride_b: 3538944
@@ -1067,7 +1067,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 50
+  iters: 10
   batch_count: 384
   stride_a: 147456
   stride_b: 589824
@@ -1093,7 +1093,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 50
+  iters: 10
   batch_count: 384
   stride_a: 147456
   stride_b: 589824
@@ -1119,7 +1119,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 50
+  iters: 10
   batch_count: 384
   stride_a: 147456
   stride_b: 589824
@@ -1145,7 +1145,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 50
+  iters: 10
   batch_count: 384
   stride_a: 147456
   stride_b: 589824
@@ -1171,7 +1171,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 50
+  iters: 10
   batch_count: 384
   stride_a: 147456
   stride_b: 147456
@@ -1197,7 +1197,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 50
+  iters: 10
   batch_count: 384
   stride_a: 147456
   stride_b: 147456
@@ -1223,7 +1223,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 50
+  iters: 10
   batch_count: 384
   stride_a: 147456
   stride_b: 147456
@@ -1249,7 +1249,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 50
+  iters: 10
   batch_count: 384
   stride_a: 147456
   stride_b: 147456
@@ -1275,7 +1275,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 50
+  iters: 10
   batch_count: 384
   stride_a: 147456
   stride_b: 147456
@@ -1301,7 +1301,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 50
+  iters: 10
   batch_count: 384
   stride_a: 147456
   stride_b: 147456
@@ -1327,7 +1327,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 50
+  iters: 10
   batch_count: 384
   stride_a: 147456
   stride_b: 147456
@@ -1353,7 +1353,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 50
+  iters: 10
   batch_count: 384
   stride_a: 147456
   stride_b: 147456
@@ -1379,7 +1379,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 50
+  iters: 10
   batch_count: 384
   stride_a: 147456
   stride_b: 2304
@@ -1405,7 +1405,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 50
+  iters: 10
   batch_count: 384
   stride_a: 147456
   stride_b: 2304
@@ -1431,7 +1431,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 50
+  iters: 10
   batch_count: 384
   stride_a: 147456
   stride_b: 2304
@@ -1457,7 +1457,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 50
+  iters: 10
   batch_count: 384
   stride_a: 147456
   stride_b: 2304
@@ -1483,7 +1483,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 50
+  iters: 10
   batch_count: 12
   stride_a: 4096
   stride_b: 4096
@@ -1509,7 +1509,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 50
+  iters: 10
   batch_count: 12
   stride_a: 4096
   stride_b: 4096
@@ -1535,7 +1535,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 50
+  iters: 10
   batch_count: 12
   stride_a: 4096
   stride_b: 4096
@@ -1561,7 +1561,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 50
+  iters: 10
   batch_count: 12
   stride_a: 4096
   stride_b: 4096
@@ -1587,7 +1587,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 50
+  iters: 10
   batch_count: 12
   stride_a: 2304
   stride_b: 2304
@@ -1613,7 +1613,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 50
+  iters: 10
   batch_count: 12
   stride_a: 2304
   stride_b: 2304
@@ -1639,7 +1639,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 50
+  iters: 10
   batch_count: 12
   stride_a: 2304
   stride_b: 2304
@@ -1665,7 +1665,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 50
+  iters: 10
   batch_count: 12
   stride_a: 2304
   stride_b: 2304
@@ -1691,7 +1691,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 50
+  iters: 10
   batch_count: 12
   stride_a: 6144
   stride_b: 6144
@@ -1717,7 +1717,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 50
+  iters: 10
   batch_count: 12
   stride_a: 6144
   stride_b: 6144
@@ -1743,7 +1743,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 50
+  iters: 10
   batch_count: 12
   stride_a: 6144
   stride_b: 6144
@@ -1769,7 +1769,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 50
+  iters: 10
   batch_count: 12
   stride_a: 6144
   stride_b: 6144
@@ -1795,7 +1795,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 50
+  iters: 10
   batch_count: 384
   stride_a: 589824
   stride_b: 589824
@@ -1821,7 +1821,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 50
+  iters: 10
   batch_count: 384
   stride_a: 589824
   stride_b: 589824
@@ -1847,7 +1847,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 50
+  iters: 10
   batch_count: 384
   stride_a: 589824
   stride_b: 589824
@@ -1873,7 +1873,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 50
+  iters: 10
   batch_count: 384
   stride_a: 589824
   stride_b: 589824
@@ -1899,7 +1899,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 50
+  iters: 10
   batch_count: 384
   stride_a: 147456
   stride_b: 589824
@@ -1925,7 +1925,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 50
+  iters: 10
   batch_count: 384
   stride_a: 147456
   stride_b: 589824
@@ -1951,7 +1951,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 50
+  iters: 10
   batch_count: 384
   stride_a: 147456
   stride_b: 589824
@@ -1977,7 +1977,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 50
+  iters: 10
   batch_count: 384
   stride_a: 147456
   stride_b: 589824
@@ -2003,7 +2003,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 50
+  iters: 10
   batch_count: 384
   stride_a: 884736
   stride_b: 884736
@@ -2029,7 +2029,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 50
+  iters: 10
   batch_count: 384
   stride_a: 884736
   stride_b: 884736
@@ -2055,7 +2055,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 50
+  iters: 10
   batch_count: 384
   stride_a: 884736
   stride_b: 884736
@@ -2081,7 +2081,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 50
+  iters: 10
   batch_count: 384
   stride_a: 884736
   stride_b: 884736
@@ -2107,7 +2107,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 50
+  iters: 10
   batch_count: 384
   stride_a: 147456
   stride_b: 884736
@@ -2133,7 +2133,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 50
+  iters: 10
   batch_count: 384
   stride_a: 147456
   stride_b: 884736
@@ -2159,7 +2159,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 50
+  iters: 10
   batch_count: 384
   stride_a: 147456
   stride_b: 884736
@@ -2185,7 +2185,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 50
+  iters: 10
   batch_count: 384
   stride_a: 147456
   stride_b: 884736
@@ -2211,7 +2211,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 50
+  iters: 10
   batch_count: 384
   stride_a: 147456
   stride_b: 884736
@@ -2237,7 +2237,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 50
+  iters: 10
   batch_count: 384
   stride_a: 147456
   stride_b: 884736
@@ -2263,7 +2263,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 50
+  iters: 10
   batch_count: 384
   stride_a: 147456
   stride_b: 884736
@@ -2289,7 +2289,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 50
+  iters: 10
   batch_count: 384
   stride_a: 147456
   stride_b: 884736
@@ -2315,7 +2315,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 50
+  iters: 10
   batch_count: 384
   stride_a: 147456
   stride_b: 884736
@@ -2341,7 +2341,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 50
+  iters: 10
   batch_count: 384
   stride_a: 147456
   stride_b: 884736
@@ -2367,7 +2367,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 50
+  iters: 10
   batch_count: 384
   stride_a: 147456
   stride_b: 884736
@@ -2393,7 +2393,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 50
+  iters: 10
   batch_count: 384
   stride_a: 147456
   stride_b: 884736
@@ -2419,7 +2419,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 50
+  iters: 10
   batch_count: 384
   stride_a: 147456
   stride_b: 147456
@@ -2445,7 +2445,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 50
+  iters: 10
   batch_count: 384
   stride_a: 147456
   stride_b: 147456
@@ -2471,7 +2471,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 50
+  iters: 10
   batch_count: 384
   stride_a: 147456
   stride_b: 147456
@@ -2497,7 +2497,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 50
+  iters: 10
   batch_count: 384
   stride_a: 147456
   stride_b: 147456
@@ -2523,7 +2523,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 50
+  iters: 10
   batch_count: 384
   stride_a: 147456
   stride_b: 147456
@@ -2549,7 +2549,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 50
+  iters: 10
   batch_count: 384
   stride_a: 147456
   stride_b: 147456
@@ -2575,7 +2575,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 50
+  iters: 10
   batch_count: 384
   stride_a: 147456
   stride_b: 147456
@@ -2601,7 +2601,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 50
+  iters: 10
   batch_count: 384
   stride_a: 147456
   stride_b: 147456
@@ -2627,7 +2627,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 50
+  iters: 10
   batch_count: 2
   stride_a: 19660800
   stride_b: 9830400
@@ -2653,7 +2653,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 50
+  iters: 10
   batch_count: 2
   stride_a: 19660800
   stride_b: 9830400
@@ -2679,7 +2679,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 50
+  iters: 10
   batch_count: 2
   stride_a: 19660800
   stride_b: 9830400
@@ -2705,7 +2705,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 50
+  iters: 10
   batch_count: 2
   stride_a: 19660800
   stride_b: 9830400
@@ -2731,7 +2731,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 50
+  iters: 10
   batch_count: 48
   stride_a: 147456
   stride_b: 24576
@@ -2757,7 +2757,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 50
+  iters: 10
   batch_count: 48
   stride_a: 147456
   stride_b: 24576
@@ -2783,7 +2783,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 50
+  iters: 10
   batch_count: 48
   stride_a: 147456
   stride_b: 24576
@@ -2809,7 +2809,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 50
+  iters: 10
   batch_count: 48
   stride_a: 147456
   stride_b: 24576
@@ -2835,7 +2835,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 50
+  iters: 10
   batch_count: 1024
   stride_a: 81920
   stride_b: 81920
@@ -2861,7 +2861,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 50
+  iters: 10
   batch_count: 1024
   stride_a: 81920
   stride_b: 81920
@@ -2887,7 +2887,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 50
+  iters: 10
   batch_count: 1024
   stride_a: 81920
   stride_b: 81920
@@ -2913,7 +2913,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 50
+  iters: 10
   batch_count: 1024
   stride_a: 81920
   stride_b: 81920
@@ -2939,7 +2939,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 50
+  iters: 10
   batch_count: 1024
   stride_a: 81920
   stride_b: 102400
@@ -2965,7 +2965,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 50
+  iters: 10
   batch_count: 1024
   stride_a: 81920
   stride_b: 102400
@@ -2991,7 +2991,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 50
+  iters: 10
   batch_count: 1024
   stride_a: 81920
   stride_b: 102400
@@ -3017,7 +3017,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 50
+  iters: 10
   batch_count: 1024
   stride_a: 81920
   stride_b: 102400
@@ -3043,7 +3043,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 50
+  iters: 10
   batch_count: 1024
   stride_a: 102400
   stride_b: 81920
@@ -3069,7 +3069,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 50
+  iters: 10
   batch_count: 1024
   stride_a: 102400
   stride_b: 81920
@@ -3095,7 +3095,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 50
+  iters: 10
   batch_count: 1024
   stride_a: 102400
   stride_b: 81920
@@ -3121,7 +3121,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 50
+  iters: 10
   batch_count: 1024
   stride_a: 102400
   stride_b: 81920

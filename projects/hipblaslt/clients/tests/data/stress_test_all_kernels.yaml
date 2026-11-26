@@ -1,5 +1,5 @@
-# All unique kernel configurations - 100 iterations for determinism testing
-# Generated for non-determinism testing
+# All unique kernel configurations for determinism testing
+# Run with: --post_bench_verify_iters=100 for bit-for-bit validation
 # Total test cases: 189
 
 ---
@@ -27,7 +27,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 100
+  iters: 10
 - name: det_002_M384_N884736_K4_NN
   category: nightly
   function: matmul
@@ -48,7 +48,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 100
+  iters: 10
 - name: det_003_M147456_N384_K1536_NN
   category: nightly
   function: matmul
@@ -69,7 +69,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 100
+  iters: 10
 - name: det_004_M1536_N384_K147456_NN
   category: nightly
   function: matmul
@@ -90,7 +90,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 100
+  iters: 10
 - name: det_005_M147456_N384_K384_NN
   category: nightly
   function: matmul
@@ -111,7 +111,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 100
+  iters: 10
 - name: det_006_M2304_N384_K384_TN
   category: nightly
   function: matmul
@@ -132,7 +132,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 100
+  iters: 10
   batch_count: 384
   stride_a: 884736
   stride_b: 147456
@@ -158,7 +158,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 100
+  iters: 10
   batch_count: 384
   stride_a: 147456
   stride_b: 884736
@@ -184,7 +184,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 100
+  iters: 10
 - name: det_009_M384_N2304_K384_NN
   category: nightly
   function: matmul
@@ -205,7 +205,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 100
+  iters: 10
   batch_count: 384
   stride_a: 147456
   stride_b: 884736
@@ -231,7 +231,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 100
+  iters: 10
   batch_count: 384
   stride_a: 884736
   stride_b: 884736
@@ -257,7 +257,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 100
+  iters: 10
 - name: det_012_M384_N4_K884736_NN
   category: nightly
   function: matmul
@@ -278,7 +278,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 100
+  iters: 10
 - name: det_013_M384_N2304_K384_NT
   category: nightly
   function: matmul
@@ -299,7 +299,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 100
+  iters: 10
   batch_count: 384
   stride_a: 147456
   stride_b: 884736
@@ -325,7 +325,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 100
+  iters: 10
 - name: det_015_M3456_N1152_K8192_NN
   category: nightly
   function: matmul
@@ -346,7 +346,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 100
+  iters: 10
 - name: det_016_M1024_N1024_K1024_NT
   category: nightly
   function: matmul
@@ -367,7 +367,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 100
+  iters: 10
   batch_count: 56
   stride_a: 1048576
   stride_b: 1048576
@@ -393,7 +393,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 100
+  iters: 10
 - name: det_018_M384_N384_K2304_NT
   category: nightly
   function: matmul
@@ -414,7 +414,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 100
+  iters: 10
   batch_count: 384
   stride_a: 884736
   stride_b: 884736
@@ -440,7 +440,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 100
+  iters: 10
 - name: det_020_M8192_N3456_K1152_NN
   category: nightly
   function: matmul
@@ -461,7 +461,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 100
+  iters: 10
 - name: det_021_M8192_N1152_K3456_NN
   category: nightly
   function: matmul
@@ -482,7 +482,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 100
+  iters: 10
 - name: det_022_M4_N884736_K384_NN
   category: nightly
   function: matmul
@@ -503,7 +503,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 100
+  iters: 10
 - name: det_023_M384_N384_K384_NT
   category: nightly
   function: matmul
@@ -524,7 +524,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 100
+  iters: 10
   batch_count: 384
   stride_a: 147456
   stride_b: 147456
@@ -550,7 +550,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 100
+  iters: 10
 - name: det_025_M8192_N1152_K3072_NN
   category: nightly
   function: matmul
@@ -571,7 +571,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 100
+  iters: 10
 - name: det_026_M1152_N1152_K8192_NN
   category: nightly
   function: matmul
@@ -592,7 +592,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 100
+  iters: 10
 - name: det_027_M4096_N1024_K9600_NN
   category: nightly
   function: matmul
@@ -613,7 +613,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 100
+  iters: 10
 - name: det_028_M147456_N384_K16_NN
   category: nightly
   function: matmul
@@ -634,7 +634,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 100
+  iters: 10
 - name: det_029_M8192_N1152_K1152_NN
   category: nightly
   function: matmul
@@ -655,7 +655,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 100
+  iters: 10
 - name: det_030_M9600_N4096_K1024_NN
   category: nightly
   function: matmul
@@ -676,7 +676,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 100
+  iters: 10
 - name: det_031_M1152_N1152_K1152_NT
   category: nightly
   function: matmul
@@ -697,7 +697,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 100
+  iters: 10
   batch_count: 13
   stride_a: 1327104
   stride_b: 1327104
@@ -723,7 +723,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 100
+  iters: 10
   batch_count: 4
   stride_a: 3538944
   stride_b: 3538944
@@ -749,7 +749,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 100
+  iters: 10
 - name: det_034_M384_N1536_K384_NT
   category: nightly
   function: matmul
@@ -770,7 +770,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 100
+  iters: 10
   batch_count: 384
   stride_a: 147456
   stride_b: 589824
@@ -796,7 +796,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 100
+  iters: 10
 - name: det_036_M9600_N1024_K4096_NN
   category: nightly
   function: matmul
@@ -817,7 +817,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 100
+  iters: 10
 - name: det_037_M384_N384_K384_TT
   category: nightly
   function: matmul
@@ -838,7 +838,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 100
+  iters: 10
   batch_count: 384
   stride_a: 147456
   stride_b: 147456
@@ -864,7 +864,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 100
+  iters: 10
 - name: det_039_M384_N384_K384_TN
   category: nightly
   function: matmul
@@ -885,7 +885,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 100
+  iters: 10
   batch_count: 384
   stride_a: 147456
   stride_b: 147456
@@ -911,7 +911,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 100
+  iters: 10
 - name: det_041_M147456_N16_K384_NN
   category: nightly
   function: matmul
@@ -932,7 +932,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 100
+  iters: 10
 - name: det_042_M9600_N2048_K1024_NN
   category: nightly
   function: matmul
@@ -953,7 +953,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 100
+  iters: 10
 - name: det_043_M384_N768_K147456_NN
   category: nightly
   function: matmul
@@ -974,7 +974,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 100
+  iters: 10
 - name: det_044_M9600_N1024_K2048_NN
   category: nightly
   function: matmul
@@ -995,7 +995,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 100
+  iters: 10
 - name: det_045_M147456_N384_K768_NN
   category: nightly
   function: matmul
@@ -1016,7 +1016,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 100
+  iters: 10
 - name: det_046_M6_N384_K147456_NN
   category: nightly
   function: matmul
@@ -1037,7 +1037,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 100
+  iters: 10
 - name: det_047_M384_N1024_K4096_NN
   category: nightly
   function: matmul
@@ -1058,7 +1058,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 100
+  iters: 10
 - name: det_048_M147456_N6_K384_NN
   category: nightly
   function: matmul
@@ -1079,7 +1079,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 100
+  iters: 10
 - name: det_049_M147456_N768_K384_NN
   category: nightly
   function: matmul
@@ -1100,7 +1100,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 100
+  iters: 10
 - name: det_050_M1024_N1024_K9600_NN
   category: nightly
   function: matmul
@@ -1121,7 +1121,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 100
+  iters: 10
 - name: det_051_M384_N4096_K1024_NN
   category: nightly
   function: matmul
@@ -1142,7 +1142,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 100
+  iters: 10
 - name: det_052_M4096_N1024_K384_NN
   category: nightly
   function: matmul
@@ -1163,7 +1163,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 100
+  iters: 10
 - name: det_053_M384_N202_K147456_NN
   category: nightly
   function: matmul
@@ -1184,7 +1184,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 100
+  iters: 10
 - name: det_054_M147456_N384_K202_NN
   category: nightly
   function: matmul
@@ -1205,7 +1205,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 100
+  iters: 10
 - name: det_055_M9600_N1024_K1024_NN
   category: nightly
   function: matmul
@@ -1226,7 +1226,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 100
+  iters: 10
 - name: det_056_M1_N1024_K128_NN
   category: nightly
   function: matmul
@@ -1247,7 +1247,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 100
+  iters: 10
 - name: det_057_M1024_N2048_K9216_NN
   category: nightly
   function: matmul
@@ -1268,7 +1268,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 100
+  iters: 10
 - name: det_058_M1024_N1024_K384_NN
   category: nightly
   function: matmul
@@ -1289,7 +1289,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 100
+  iters: 10
 - name: det_059_M3072_N1024_K9216_NN
   category: nightly
   function: matmul
@@ -1310,7 +1310,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 100
+  iters: 10
 - name: det_060_M384_N1024_K1024_NN
   category: nightly
   function: matmul
@@ -1331,7 +1331,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 100
+  iters: 10
 - name: det_061_M384_N384_K147456_NN
   category: nightly
   function: matmul
@@ -1352,7 +1352,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 100
+  iters: 10
 - name: det_062_M1024_N1024_K2048_NT
   category: nightly
   function: matmul
@@ -1373,7 +1373,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 100
+  iters: 10
 - name: det_063_M2048_N1024_K9216_NN
   category: nightly
   function: matmul
@@ -1394,7 +1394,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 100
+  iters: 10
 - name: det_064_M9216_N3072_K1024_NN
   category: nightly
   function: matmul
@@ -1415,7 +1415,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 100
+  iters: 10
 - name: det_065_M9216_N1024_K3072_NN
   category: nightly
   function: matmul
@@ -1436,7 +1436,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 100
+  iters: 10
 - name: det_066_M147456_N384_K384_NN
   category: nightly
   function: matmul
@@ -1457,7 +1457,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 100
+  iters: 10
 - name: det_067_M9216_N2048_K1024_NN
   category: nightly
   function: matmul
@@ -1478,7 +1478,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 100
+  iters: 10
 - name: det_068_M147456_N384_K384_NN
   category: nightly
   function: matmul
@@ -1499,7 +1499,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 100
+  iters: 10
 - name: det_069_M384_N4_K1024_NN
   category: nightly
   function: matmul
@@ -1520,7 +1520,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 100
+  iters: 10
 - name: det_070_M1024_N4_K384_NN
   category: nightly
   function: matmul
@@ -1541,7 +1541,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 100
+  iters: 10
 - name: det_071_M9216_N1024_K2048_NN
   category: nightly
   function: matmul
@@ -1562,7 +1562,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 100
+  iters: 10
 - name: det_072_M1_N128_K1024_NN
   category: nightly
   function: matmul
@@ -1583,7 +1583,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 100
+  iters: 10
 - name: det_073_M1024_N128_K1_NN
   category: nightly
   function: matmul
@@ -1604,7 +1604,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 100
+  iters: 10
 - name: det_074_M147456_N384_K64_NN
   category: nightly
   function: matmul
@@ -1625,7 +1625,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 100
+  iters: 10
 - name: det_075_M384_N64_K147456_NN
   category: nightly
   function: matmul
@@ -1646,7 +1646,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 100
+  iters: 10
 - name: det_076_M1024_N4096_K384_NN
   category: nightly
   function: matmul
@@ -1667,7 +1667,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 100
+  iters: 10
 - name: det_077_M384_N1024_K4_NN
   category: nightly
   function: matmul
@@ -1688,7 +1688,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 100
+  iters: 10
 - name: det_078_M384_N384_K147456_NN
   category: nightly
   function: matmul
@@ -1709,7 +1709,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 100
+  iters: 10
 - name: det_079_M1024_N1024_K9216_NN
   category: nightly
   function: matmul
@@ -1730,7 +1730,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 100
+  iters: 10
 - name: det_080_M147456_N64_K384_NN
   category: nightly
   function: matmul
@@ -1751,7 +1751,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 100
+  iters: 10
 - name: det_081_M384_N1024_K1024_NN
   category: nightly
   function: matmul
@@ -1772,7 +1772,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 100
+  iters: 10
 - name: det_082_M9216_N1024_K1024_NN
   category: nightly
   function: matmul
@@ -1793,7 +1793,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 100
+  iters: 10
 - name: det_083_M384_N6_K384_NT
   category: nightly
   function: matmul
@@ -1814,7 +1814,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 100
+  iters: 10
   batch_count: 384
   stride_a: 147456
   stride_b: 2304
@@ -1840,7 +1840,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 100
+  iters: 10
 - name: det_085_M1024_N1024_K384_NN
   category: nightly
   function: matmul
@@ -1861,7 +1861,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 100
+  iters: 10
 - name: det_086_M384_N384_K768_NT
   category: nightly
   function: matmul
@@ -1882,7 +1882,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 100
+  iters: 10
 - name: det_087_M256_N143_K9216_NN
   category: nightly
   function: matmul
@@ -1903,7 +1903,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 100
+  iters: 10
 - name: det_088_M4_N4_K1024_NT
   category: nightly
   function: matmul
@@ -1924,7 +1924,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 100
+  iters: 10
   batch_count: 12
   stride_a: 4096
   stride_b: 4096
@@ -1950,7 +1950,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 100
+  iters: 10
 - name: det_090_M147456_N64_K64_NN
   category: nightly
   function: matmul
@@ -1971,7 +1971,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 100
+  iters: 10
 - name: det_091_M9216_N256_K1024_NN
   category: nightly
   function: matmul
@@ -1992,7 +1992,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 100
+  iters: 10
 - name: det_092_M384_N1024_K768_NN
   category: nightly
   function: matmul
@@ -2013,7 +2013,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 100
+  iters: 10
 - name: det_093_M9216_N1024_K256_NN
   category: nightly
   function: matmul
@@ -2034,7 +2034,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 100
+  iters: 10
 - name: det_094_M6_N6_K384_NT
   category: nightly
   function: matmul
@@ -2055,7 +2055,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 100
+  iters: 10
   batch_count: 12
   stride_a: 2304
   stride_b: 2304
@@ -2081,7 +2081,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 100
+  iters: 10
 - name: det_096_M128_N128_K1024_NT
   category: nightly
   function: matmul
@@ -2102,7 +2102,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 100
+  iters: 10
 - name: det_097_M16_N16_K384_NT
   category: nightly
   function: matmul
@@ -2123,7 +2123,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 100
+  iters: 10
   batch_count: 12
   stride_a: 6144
   stride_b: 6144
@@ -2149,7 +2149,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 100
+  iters: 10
 - name: det_099_M64_N64_K64_NT
   category: nightly
   function: matmul
@@ -2170,7 +2170,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 100
+  iters: 10
 - name: det_100_M64_N16_K147456_NN
   category: nightly
   function: matmul
@@ -2191,7 +2191,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 100
+  iters: 10
 - name: det_101_M1_N128_K1024_NN
   category: nightly
   function: matmul
@@ -2212,7 +2212,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 100
+  iters: 10
 - name: det_102_M1024_N2048_K384_NN
   category: nightly
   function: matmul
@@ -2233,7 +2233,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 100
+  iters: 10
 - name: det_103_M64_N64_K384_NT
   category: nightly
   function: matmul
@@ -2254,7 +2254,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 100
+  iters: 10
 - name: det_104_M384_N1024_K4096_NN
   category: nightly
   function: matmul
@@ -2275,7 +2275,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 100
+  iters: 10
 - name: det_105_M1024_N3_K9216_NN
   category: nightly
   function: matmul
@@ -2296,7 +2296,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 100
+  iters: 10
 - name: det_106_M9216_N256_K143_NN
   category: nightly
   function: matmul
@@ -2317,7 +2317,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 100
+  iters: 10
 - name: det_107_M9216_N1024_K3_NN
   category: nightly
   function: matmul
@@ -2338,7 +2338,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 100
+  iters: 10
 - name: det_108_M1024_N256_K9216_NN
   category: nightly
   function: matmul
@@ -2359,7 +2359,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 100
+  iters: 10
 - name: det_109_M1024_N1024_K2048_TN
   category: nightly
   function: matmul
@@ -2380,7 +2380,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 100
+  iters: 10
 - name: det_110_M147456_N64_K16_NN
   category: nightly
   function: matmul
@@ -2401,7 +2401,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 100
+  iters: 10
 - name: det_111_M1024_N128_K1_NN
   category: nightly
   function: matmul
@@ -2422,7 +2422,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 100
+  iters: 10
 - name: det_112_M9216_N3_K1024_NN
   category: nightly
   function: matmul
@@ -2443,7 +2443,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 100
+  iters: 10
 - name: det_113_M768_N1024_K384_NN
   category: nightly
   function: matmul
@@ -2464,7 +2464,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 100
+  iters: 10
 - name: det_114_M384_N1264_K1024_NN
   category: nightly
   function: matmul
@@ -2485,7 +2485,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 100
+  iters: 10
 - name: det_115_M384_N2048_K1024_NN
   category: nightly
   function: matmul
@@ -2506,7 +2506,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 100
+  iters: 10
 - name: det_116_M384_N768_K1024_NN
   category: nightly
   function: matmul
@@ -2527,7 +2527,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 100
+  iters: 10
 - name: det_117_M768_N1024_K384_NN
   category: nightly
   function: matmul
@@ -2548,7 +2548,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 100
+  iters: 10
 - name: det_118_M384_N768_K1024_NN
   category: nightly
   function: matmul
@@ -2569,7 +2569,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 100
+  iters: 10
 - name: det_119_M1_N1024_K128_NN
   category: nightly
   function: matmul
@@ -2590,7 +2590,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 100
+  iters: 10
 - name: det_120_M384_N4096_K1024_NN
   category: nightly
   function: matmul
@@ -2611,7 +2611,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 100
+  iters: 10
 - name: det_121_M21_N1024_K384_NN
   category: nightly
   function: matmul
@@ -2632,7 +2632,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 100
+  iters: 10
 - name: det_122_M9216_N256_K1024_NN
   category: nightly
   function: matmul
@@ -2653,7 +2653,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 100
+  iters: 10
 - name: det_123_M384_N1024_K21_NN
   category: nightly
   function: matmul
@@ -2674,7 +2674,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 100
+  iters: 10
 - name: det_124_M1024_N1264_K384_NN
   category: nightly
   function: matmul
@@ -2695,7 +2695,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 100
+  iters: 10
 - name: det_125_M4096_N1024_K384_NN
   category: nightly
   function: matmul
@@ -2716,7 +2716,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 100
+  iters: 10
 - name: det_126_M384_N1024_K2048_NN
   category: nightly
   function: matmul
@@ -2737,7 +2737,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 100
+  iters: 10
 - name: det_127_M384_N21_K1024_NN
   category: nightly
   function: matmul
@@ -2758,7 +2758,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 100
+  iters: 10
 - name: det_128_M1024_N4096_K384_NN
   category: nightly
   function: matmul
@@ -2779,7 +2779,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 100
+  iters: 10
 - name: det_129_M384_N1024_K1264_NN
   category: nightly
   function: matmul
@@ -2800,7 +2800,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 100
+  iters: 10
 - name: det_130_M1_N128_K128_NN
   category: nightly
   function: matmul
@@ -2821,7 +2821,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 100
+  iters: 10
 - name: det_131_M9216_N1024_K256_NN
   category: nightly
   function: matmul
@@ -2842,7 +2842,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 100
+  iters: 10
 - name: det_132_M1_N256_K64_NN
   category: nightly
   function: matmul
@@ -2863,7 +2863,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 100
+  iters: 10
 - name: det_133_M64_N256_K1_NN
   category: nightly
   function: matmul
@@ -2884,7 +2884,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 100
+  iters: 10
 - name: det_134_M1_N64_K256_NN
   category: nightly
   function: matmul
@@ -2905,7 +2905,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 100
+  iters: 10
 - name: det_135_M384_N1024_K1024_NN
   category: nightly
   function: matmul
@@ -2926,7 +2926,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 100
+  iters: 10
 - name: det_136_M128_N128_K1_NN
   category: nightly
   function: matmul
@@ -2947,7 +2947,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 100
+  iters: 10
 - name: det_137_M9216_N3_K3_NT
   category: nightly
   function: matmul
@@ -2968,7 +2968,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 100
+  iters: 10
 - name: det_138_M1024_N1024_K384_NN
   category: nightly
   function: matmul
@@ -2989,7 +2989,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 100
+  iters: 10
 - name: det_139_M128_N128_K1024_TN
   category: nightly
   function: matmul
@@ -3010,7 +3010,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 100
+  iters: 10
 - name: det_140_M1_N3_K3_NT
   category: nightly
   function: matmul
@@ -3031,7 +3031,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 100
+  iters: 10
 - name: det_141_M64_N64_K384_TN
   category: nightly
   function: matmul
@@ -3052,7 +3052,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 100
+  iters: 10
 - name: det_142_M9216_N3_K3_NN
   category: nightly
   function: matmul
@@ -3073,7 +3073,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 100
+  iters: 10
 - name: det_143_M384_N384_K1536_NN
   category: nightly
   function: matmul
@@ -3094,7 +3094,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 100
+  iters: 10
   batch_count: 384
   stride_a: 589824
   stride_b: 589824
@@ -3120,7 +3120,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 100
+  iters: 10
   batch_count: 384
   stride_a: 147456
   stride_b: 589824
@@ -3146,7 +3146,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 100
+  iters: 10
   batch_count: 384
   stride_a: 884736
   stride_b: 884736
@@ -3172,7 +3172,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 100
+  iters: 10
   batch_count: 384
   stride_a: 147456
   stride_b: 884736
@@ -3198,7 +3198,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 100
+  iters: 10
   batch_count: 384
   stride_a: 147456
   stride_b: 884736
@@ -3224,7 +3224,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 100
+  iters: 10
   batch_count: 384
   stride_a: 147456
   stride_b: 884736
@@ -3250,7 +3250,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 100
+  iters: 10
   batch_count: 384
   stride_a: 147456
   stride_b: 147456
@@ -3276,7 +3276,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 100
+  iters: 10
   batch_count: 384
   stride_a: 147456
   stride_b: 147456
@@ -3302,7 +3302,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 100
+  iters: 10
   batch_count: 2
   stride_a: 19660800
   stride_b: 9830400
@@ -3328,7 +3328,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 100
+  iters: 10
 - name: det_153_M384_N64_K384_TN
   category: nightly
   function: matmul
@@ -3349,7 +3349,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 100
+  iters: 10
   batch_count: 48
   stride_a: 147456
   stride_b: 24576
@@ -3375,7 +3375,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 100
+  iters: 10
 - name: det_155_M327680_N1024_K256_NN
   category: nightly
   function: matmul
@@ -3396,7 +3396,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 100
+  iters: 10
 - name: det_156_M320_N320_K256_NN
   category: nightly
   function: matmul
@@ -3417,7 +3417,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 100
+  iters: 10
   batch_count: 1024
   stride_a: 81920
   stride_b: 81920
@@ -3443,7 +3443,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 100
+  iters: 10
 - name: det_158_M409600_N4_K256_NN
   category: nightly
   function: matmul
@@ -3464,7 +3464,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 100
+  iters: 10
 - name: det_159_M409600_N1024_K256_NN
   category: nightly
   function: matmul
@@ -3485,7 +3485,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 100
+  iters: 10
 - name: det_160_M204800_N3072_K256_NN
   category: nightly
   function: matmul
@@ -3506,7 +3506,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 100
+  iters: 10
 - name: det_161_M204800_N256_K1536_NN
   category: nightly
   function: matmul
@@ -3527,7 +3527,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 100
+  iters: 10
 - name: det_162_M409600_N16_K256_NN
   category: nightly
   function: matmul
@@ -3548,7 +3548,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 100
+  iters: 10
 - name: det_163_M1280_N4096_K1024_NN
   category: nightly
   function: matmul
@@ -3569,7 +3569,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 100
+  iters: 10
 - name: det_164_M1280_N1024_K1024_NN
   category: nightly
   function: matmul
@@ -3590,7 +3590,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 100
+  iters: 10
 - name: det_165_M1280_N8192_K1024_NN
   category: nightly
   function: matmul
@@ -3611,7 +3611,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 100
+  iters: 10
 - name: det_166_M1280_N1024_K4096_NN
   category: nightly
   function: matmul
@@ -3632,7 +3632,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 100
+  iters: 10
 - name: det_167_M1280_N4096_K1024_NN
   category: nightly
   function: matmul
@@ -3653,7 +3653,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 100
+  iters: 10
 - name: det_168_M1280_N1024_K8192_NN
   category: nightly
   function: matmul
@@ -3674,7 +3674,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 100
+  iters: 10
 - name: det_169_M1024_N4096_K1280_NN
   category: nightly
   function: matmul
@@ -3695,7 +3695,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 100
+  iters: 10
 - name: det_170_M8192_N1024_K1280_NN
   category: nightly
   function: matmul
@@ -3716,7 +3716,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 100
+  iters: 10
 - name: det_171_M1024_N1024_K1280_TN
   category: nightly
   function: matmul
@@ -3737,7 +3737,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 100
+  iters: 10
 - name: det_172_M1280_N1024_K1024_NT
   category: nightly
   function: matmul
@@ -3758,7 +3758,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 100
+  iters: 10
 - name: det_173_M1024_N4096_K1280_TN
   category: nightly
   function: matmul
@@ -3779,7 +3779,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 100
+  iters: 10
 - name: det_174_M1280_N1024_K4096_NT
   category: nightly
   function: matmul
@@ -3800,7 +3800,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 100
+  iters: 10
 - name: det_175_M409600_N256_K16_NN
   category: nightly
   function: matmul
@@ -3821,7 +3821,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 100
+  iters: 10
 - name: det_176_M16_N256_K409600_NN
   category: nightly
   function: matmul
@@ -3842,7 +3842,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 100
+  iters: 10
 - name: det_177_M256_N1536_K204800_NN
   category: nightly
   function: matmul
@@ -3863,7 +3863,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 100
+  iters: 10
 - name: det_178_M204800_N1536_K256_NN
   category: nightly
   function: matmul
@@ -3884,7 +3884,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 100
+  iters: 10
 - name: det_179_M3072_N256_K204800_NN
   category: nightly
   function: matmul
@@ -3905,7 +3905,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 100
+  iters: 10
 - name: det_180_M204800_N256_K3072_NN
   category: nightly
   function: matmul
@@ -3926,7 +3926,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 100
+  iters: 10
 - name: det_181_M256_N256_K409600_NN
   category: nightly
   function: matmul
@@ -3947,7 +3947,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 100
+  iters: 10
 - name: det_182_M1024_N256_K409600_NN
   category: nightly
   function: matmul
@@ -3968,7 +3968,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 100
+  iters: 10
 - name: det_183_M409600_N256_K1024_NN
   category: nightly
   function: matmul
@@ -3989,7 +3989,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 100
+  iters: 10
 - name: det_184_M4_N256_K409600_NN
   category: nightly
   function: matmul
@@ -4010,7 +4010,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 100
+  iters: 10
 - name: det_185_M409600_N256_K4_NN
   category: nightly
   function: matmul
@@ -4031,7 +4031,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 100
+  iters: 10
 - name: det_186_M256_N320_K320_TN
   category: nightly
   function: matmul
@@ -4052,7 +4052,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 100
+  iters: 10
   batch_count: 1024
   stride_a: 81920
   stride_b: 102400
@@ -4078,7 +4078,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 100
+  iters: 10
   batch_count: 1024
   stride_a: 102400
   stride_b: 81920
@@ -4104,7 +4104,7 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 100
+  iters: 10
 - name: det_189_M327680_N256_K1024_NN
   category: nightly
   function: matmul
@@ -4125,4 +4125,4 @@ Tests:
   compute_type: c_f32_r
   scale_type: f32_r
   algo_method: 1
-  iters: 100
+  iters: 10
