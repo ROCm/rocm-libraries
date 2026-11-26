@@ -253,9 +253,16 @@ def _assert_served_or_declined(ov, sq, skv, d, *, arch, masked):
     HF layer's layout, e.g. GPT-2's fused c_attn slice, can make the decline
     stage differ from a clean synthetic BSHD-view shape of the same
     Sq/Skv/D), and a mask always declines at the fwd+stats stage (both ASM
-    builders reject any bias)."""
-    aot, native = ov.totals()
-    bwd_aot, bwd_native = ov.bwd_totals()
+    builders reject any bias). Reads the ONE row keyed by ``(sq, skv, d)``,
+    never ``ov.totals()``: a two-step call (prefill + decode) leaves more
+    than one shape in the same census, and a global total would blur
+    "this shape served" with "that other shape declined"."""
+    row = ov.census().get(_census_key(_GRAD_PREFIX, sq, skv, d, "bf16"))
+    bwd = ov.census().get(_census_key(_BWD_PREFIX, sq, skv, d, "bf16"))
+    aot = row["aot"] if row else 0
+    native = row["native"] if row else 0
+    bwd_aot = bwd["aot"] if bwd else 0
+    bwd_native = bwd["native"] if bwd else 0
     flydsl = _flydsl_state()
     if flydsl is None:
         pytest.skip(
@@ -265,24 +272,31 @@ def _assert_served_or_declined(ov, sq, skv, d, *, arch, masked):
 
     if flydsl == "on":
         assert aot > 0 and native == 0, (
-            f"{arch}: expected served, got aot={aot} native={native}, "
-            f"reasons={ov.fallback_reasons()}"
+            f"{arch} Sq={sq},Skv={skv}: expected served, got aot={aot} "
+            f"native={native}, reasons={ov.fallback_reasons()}"
         )
-        assert bwd_aot > 0 and bwd_native == 0
-        row = ov.census()[_census_key(_GRAD_PREFIX, sq, skv, d, "bf16")]
-        bwd = ov.census()[_census_key(_BWD_PREFIX, sq, skv, d, "bf16")]
+        assert bwd_aot > 0 and bwd_native == 0, (
+            f"{arch} Sq={sq},Skv={skv}: bwd not served, got aot={bwd_aot} "
+            f"native={bwd_native}, reasons={ov.fallback_reasons()}"
+        )
         assert bwd["engines"] and all(not e.startswith("0x") for e in bwd["engines"])
         return row, bwd
 
     # FlyDSL OFF.
     if masked:
-        assert aot == 0 and native > 0
         reasons = ov.fallback_reasons()
+        assert aot == 0 and native > 0, (
+            f"{arch} Sq={sq},Skv={skv}: expected native, got aot={aot} "
+            f"native={native}, reasons={reasons}"
+        )
         assert any(r.startswith("grad: fwd+stats:") for r in reasons), reasons
         return None, None
     if arch in ("qwen3", "qwen25_0_5b"):  # GQA: no engine serves it here
-        assert aot == 0 and native > 0
         reasons = ov.fallback_reasons()
+        assert aot == 0 and native > 0, (
+            f"{arch} Sq={sq},Skv={skv}: expected native, got aot={aot} "
+            f"native={native}, reasons={reasons}"
+        )
         assert any(r.startswith("grad:") for r in reasons), reasons
         return None, None
     if arch == "gpt2":  # D=64: depends on hip-kernel-provider#16337
@@ -293,22 +307,50 @@ def _assert_served_or_declined(ov, sq, skv, d, *, arch, masked):
                 "expectation depends on whether #16337 is in the build"
             )
         if pr16337 == "out":
-            assert aot == 0 and native > 0
             reasons = ov.fallback_reasons()
+            assert aot == 0 and native > 0, (
+                f"{arch} Sq={sq},Skv={skv}: expected native, got aot={aot} "
+                f"native={native}, reasons={reasons}"
+            )
             assert any(r.startswith("grad:") for r in reasons), reasons
             return None, None
         # #16337 in: ASM now serves gfx950 D=64.
-        assert aot > 0 and native == 0
-        row = ov.census()[_census_key(_GRAD_PREFIX, sq, skv, d, "bf16")]
-        bwd = ov.census()[_census_key(_BWD_PREFIX, sq, skv, d, "bf16")]
+        assert aot > 0 and native == 0, (
+            f"{arch} Sq={sq},Skv={skv}: expected served, got aot={aot} "
+            f"native={native}, reasons={ov.fallback_reasons()}"
+        )
         return row, bwd
     # olmo2: unmasked MHA D=128 -- served even with FlyDSL off, by some
     # named engine (not necessarily ASM).
-    assert aot > 0 and native == 0
-    row = ov.census()[_census_key(_GRAD_PREFIX, sq, skv, d, "bf16")]
-    bwd = ov.census()[_census_key(_BWD_PREFIX, sq, skv, d, "bf16")]
+    assert aot > 0 and native == 0, (
+        f"{arch} Sq={sq},Skv={skv}: expected served, got aot={aot} "
+        f"native={native}, reasons={ov.fallback_reasons()}"
+    )
     assert bwd["engines"] and all(not e.startswith("0x") for e in bwd["engines"])
     return row, bwd
+
+
+def _assert_served_or_any_grad_decline(ov, sq, skv, d, *, label):
+    """A shape whose exact serve/decline outcome this design does not fix
+    per arch (e.g. a cache-step shape: ASM's shape rules cover a prefill
+    shape without necessarily covering every decode-step Sq/Skv of the same
+    arch) -- accept served, or native with a reason starting ``grad:``;
+    reject a half-served split on the SAME shape (that would be a real
+    routing bug, not a coverage boundary)."""
+    row = ov.census().get(_census_key(_GRAD_PREFIX, sq, skv, d, "bf16"))
+    aot = row["aot"] if row else 0
+    native = row["native"] if row else 0
+    if aot > 0:
+        assert native == 0, (
+            f"{label} Sq={sq},Skv={skv}: served AND native on the same shape -- "
+            f"aot={aot} native={native}, reasons={ov.fallback_reasons()}"
+        )
+        return
+    reasons = ov.fallback_reasons()
+    assert native > 0 and any(r.startswith("grad:") for r in reasons), (
+        f"{label} Sq={sq},Skv={skv}: neither served nor declined with a "
+        f"grad: reason -- aot={aot} native={native}, reasons={reasons}"
+    )
 
 
 @pytest.mark.parametrize("arch", list(_ARCHS))
@@ -418,15 +460,31 @@ def test_use_cache_true_mixed_layout_matches_native(torch, transformers, arch):
     _assert_stride_matches("k", captured["k_shape"], captured["k_stride"], want_kv)
     _assert_stride_matches("v", captured["v_shape"], captured["v_stride"], want_kv)
 
-    _assert_served_or_declined(ov, 1, s_prefill + 1, head_dim, arch=arch, masked=False)
+    # Prefill and decode are different shapes (Sq=s_prefill vs Sq=1) and may
+    # decline independently under FlyDSL OFF: ASM's shape rules need not
+    # cover a decode-step Sq=1/Skv=s_prefill+1 just because they cover the
+    # prefill shape of the same arch (observed: olmo2's prefill served by
+    # ASM, its decode step native). The prefill keeps the full per-arch
+    # expectation; the decode step only needs served-or-grad-decline.
+    _assert_served_or_declined(
+        ov, s_prefill, s_prefill, head_dim, arch=arch, masked=False
+    )
+    _assert_served_or_any_grad_decline(
+        ov, 1, s_prefill + 1, head_dim, label=f"{arch} decode step"
+    )
 
 
 @pytest.mark.parametrize("arch", list(_ARCHS))
 def test_padded_mask_matches_native(torch, transformers, arch):
     """(q) A padded ``attention_mask``: `repeat_kv`'s expanded-MHA path
     (``enable_gqa=False``, ``is_causal=False``, bias from the bool mask);
-    always declines ``grad: fwd+stats:`` with FlyDSL off (both ASM builders
-    reject any bias)."""
+    declines ``grad: fwd+stats:`` with FlyDSL off (both ASM builders reject
+    any bias). For an Hkv=1 arch (qwen3), ``repeat_kv`` broadcasts the one
+    physical KV head across Hq via a stride-0 head axis, which FlyDSL CDNA
+    forward's ``servableStrides`` rejects outright (non-positive stride,
+    FlydslSdpaCdnaCommon.hpp:398); with ASM/dense also taking no bias, this
+    combination declines in every build -- a coverage gap, not a routing
+    bug."""
     builder, head_dim, hq, hkv = _ARCHS[arch]
     config, layer = builder(torch, transformers)
     b, s = 2, 16
@@ -464,4 +522,25 @@ def test_padded_mask_matches_native(torch, transformers, arch):
             captured["enable_gqa"] is False
         ), "a mask present forces repeat_kv (expanded MHA), never enable_gqa"
 
-    _assert_served_or_declined(ov, s, s, head_dim, arch=arch, masked=True)
+    if hkv == 1:
+        # repeat_kv's broadcast view for a single physical KV head: K/V gain
+        # a head axis of stride 0 at extent Hq (the view this design
+        # expects); tie the decline expectation to that observed cause.
+        assert captured["k_stride"][1] == 0, (
+            f"expected repeat_kv's broadcast head stride 0 on K, got "
+            f"{captured['k_stride']}"
+        )
+        row = ov.census().get(_census_key(_GRAD_PREFIX, s, s, head_dim, "bf16"))
+        aot = row["aot"] if row else 0
+        native = row["native"] if row else 0
+        reasons = ov.fallback_reasons()
+        assert aot == 0 and native > 0, (
+            f"{arch} masked, Hkv=1: expected native, got aot={aot} "
+            f"native={native}, reasons={reasons}"
+        )
+        if _flydsl_state() == "on":
+            assert any(r.startswith("grad: fwd+stats:") for r in reasons), reasons
+        else:
+            assert any(r.startswith("grad:") for r in reasons), reasons
+    else:
+        _assert_served_or_declined(ov, s, s, head_dim, arch=arch, masked=True)
