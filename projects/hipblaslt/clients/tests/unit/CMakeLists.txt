@@ -24,6 +24,7 @@ set(HIPBLASLT_HOST_UNIT_TEST_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/scaling_format_gtest.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/mxdatagen_maf1_0_gtest.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/mxdatagen_maf2_0_gtest.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/solution_index_case_gtest.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/yaml_conversion_gtest.cpp
 )
 
