@@ -109,8 +109,8 @@ CK_TILE_HOST_DEVICE typename T::raw_type convert_to_type(float value, float scal
         {
             if constexpr(!numeric<T>::has_inf())
             {
-
-                return (1 << (numeric_traits<T>::mant + numeric_traits<T>::exp)) - 1;
+                return sign << (numeric_traits<T>::exp + numeric_traits<T>::mant) |
+                       ((1 << (numeric_traits<T>::mant + numeric_traits<T>::exp)) - 1);
             }
             else
             {
