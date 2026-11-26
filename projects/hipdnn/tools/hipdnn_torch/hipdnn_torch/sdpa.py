@@ -750,8 +750,15 @@ class SdpaOverride(OpOverride):
         attrs.set_causal_mask(bool(causal))
         attrs.set_generate_stats(True)
         if dropout_p:
-            seed_t = _t("seed", [1], [1], hipdnn.DataType.INT64, _SEED_UID)
-            offset_t = _t("offset", [1], [1], hipdnn.DataType.INT64, _OFFSET_UID)
+            # Every FlyDSL forward matcher requires rank 4 (isServablePhiloxTensor,
+            # FlydslSdpaDropout.hpp:71-76, SDPA_RANK); the torch-side seed_t/offset_t
+            # device tensors stay [1] int64, only the pointer is bound.
+            seed_t = _t(
+                "seed", [1, 1, 1, 1], [1, 1, 1, 1], hipdnn.DataType.INT64, _SEED_UID
+            )
+            offset_t = _t(
+                "offset", [1, 1, 1, 1], [1, 1, 1, 1], hipdnn.DataType.INT64, _OFFSET_UID
+            )
             attrs.set_dropout(float(dropout_p), seed_t, offset_t)
         if bias_spec is not None:
             b_dims, b_str, b_dtype = bias_spec
@@ -831,8 +838,15 @@ class SdpaOverride(OpOverride):
         _set_scale(float(scale))
         attrs.set_causal_mask(bool(causal))
         if dropout_p:
-            seed_t = _t("seed", [1], [1], hipdnn.DataType.INT64, _SEED_UID)
-            offset_t = _t("offset", [1], [1], hipdnn.DataType.INT64, _OFFSET_UID)
+            # Rank 4 to match the forward graph's declaration; the backward
+            # matcher accepts any rank whose every extent is 1
+            # (FlydslSdpaBwdCommon.hpp:1541, checkSeedTensor), so this is safe here too.
+            seed_t = _t(
+                "seed", [1, 1, 1, 1], [1, 1, 1, 1], hipdnn.DataType.INT64, _SEED_UID
+            )
+            offset_t = _t(
+                "offset", [1, 1, 1, 1], [1, 1, 1, 1], hipdnn.DataType.INT64, _OFFSET_UID
+            )
             attrs.set_dropout(float(dropout_p), seed_t, offset_t)
         if bias_spec is not None:
             b_dims, b_str, b_dtype = bias_spec

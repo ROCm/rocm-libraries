@@ -14,6 +14,8 @@ import pytest
 import torch
 import torch.utils.checkpoint as _checkpoint
 
+from types import SimpleNamespace
+
 from hipdnn_torch.sdpa import (
     NotApplicable,
     SdpaOverride,
@@ -21,7 +23,9 @@ from hipdnn_torch.sdpa import (
     _dropout_advance,
     _grad_route,
     _needs_do_copy,
+    _OFFSET_UID,
     _reraise_checkpoint_stop,
+    _SEED_UID,
     _sdpa_autograd_fn,
     _unpack_philox,
 )
@@ -828,3 +832,190 @@ def test_autocast_cast_missing_api_disables_entirely():
         _NoAutocastTorch(), q, None, None, None
     )
     assert out_q is q
+
+
+# --------------------------------------------------------------------------- #
+# _fwd_stats_graph / _bwd_graph: dropout seed/offset tensors must be rank 4   #
+# --------------------------------------------------------------------------- #
+class _FakeDescriptorDtype:
+    def __init__(self, name):
+        self.name = name
+
+    def __repr__(self):
+        return f"<dtype {self.name}>"
+
+
+_F16 = _FakeDescriptorDtype("f16")
+
+
+class _FakeTensorBuilder:
+    """Stands in for the frontend's ``Tensor`` builder: every ``set_*`` call
+    mutates and returns ``self``, so the chain in ``sdpa.py``'s ``_t`` helper
+    works unchanged; the fully-configured object is what ``Graph.tensor``
+    receives."""
+
+    def __init__(self):
+        self.name = None
+        self.dims = None
+        self.strides = None
+        self.dtype = None
+        self.uid = None
+        self.output = False
+
+    def set_name(self, name):
+        self.name = name
+        return self
+
+    def set_dim(self, dims):
+        self.dims = list(dims)
+        return self
+
+    def set_stride(self, strides):
+        self.strides = list(strides)
+        return self
+
+    def set_data_type(self, dtype):
+        self.dtype = dtype
+        return self
+
+    def set_uid(self, uid):
+        self.uid = uid
+        return self
+
+    def set_output(self, flag):
+        self.output = flag
+        return self
+
+
+class _FakeGraph:
+    def __init__(self):
+        self.tensors_by_uid = {}
+
+    def set_io_data_type(self, dtype):
+        pass
+
+    def set_compute_data_type(self, dtype):
+        pass
+
+    def tensor(self, t):
+        self.tensors_by_uid[t.uid] = t
+        return t
+
+    def sdpa(self, q, k, v, attrs):
+        return _FakeTensorBuilder(), _FakeTensorBuilder()
+
+    def sdpa_backward(self, q, k, v, o, do, stats, attrs):
+        return _FakeTensorBuilder(), _FakeTensorBuilder(), _FakeTensorBuilder()
+
+
+class _FakeSdpaAttributes:
+    def set_attn_scale(self, scale):
+        return self
+
+    def set_causal_mask(self, causal):
+        return self
+
+    def set_generate_stats(self, flag):
+        return self
+
+    def set_dropout(self, p, seed_t, offset_t):
+        self.dropout = (p, seed_t, offset_t)
+        return self
+
+    def set_bias(self, bias_t):
+        return self
+
+
+class _FakeSdpaBackwardAttributes(_FakeSdpaAttributes):
+    pass
+
+
+class _FakeDataType:
+    FLOAT = "FLOAT"
+    INT64 = "INT64"
+
+
+class _FakeHipdnn:
+    Graph = _FakeGraph
+    Tensor = _FakeTensorBuilder
+    SdpaAttributes = _FakeSdpaAttributes
+    SdpaBackwardAttributes = _FakeSdpaBackwardAttributes
+    DataType = _FakeDataType
+
+
+def _graph_ov():
+    ov = SdpaOverride()
+    ov.state = SimpleNamespace(hipdnn=_FakeHipdnn(), dtype_map={_F16: "HALF"})
+    return ov
+
+
+def test_fwd_stats_graph_declares_seed_offset_rank4_int64():
+    # Every FlyDSL forward matcher requires rank 4 (isServablePhiloxTensor);
+    # the backend declines dropout entirely at rank 1.
+    ov = _graph_ov()
+    g = ov._fwd_stats_graph(
+        [2, 8, 128, 64],
+        [65536, 8192, 64, 1],
+        _F16,
+        [2, 8, 128, 64],
+        [65536, 8192, 64, 1],
+        _F16,
+        [2, 8, 128, 64],
+        [65536, 8192, 64, 1],
+        _F16,
+        [2, 8, 128, 64],
+        [65536, 8192, 64, 1],
+        _F16,
+        [2, 8, 128, 1],
+        [1024, 128, 1, 1],
+        1.0,
+        False,
+        0.1,
+        None,
+    )
+    seed_t = g.tensors_by_uid[_SEED_UID]
+    offset_t = g.tensors_by_uid[_OFFSET_UID]
+    assert seed_t.dims == [1, 1, 1, 1]
+    assert seed_t.strides == [1, 1, 1, 1]
+    assert seed_t.dtype == "INT64"
+    assert offset_t.dims == [1, 1, 1, 1]
+    assert offset_t.strides == [1, 1, 1, 1]
+    assert offset_t.dtype == "INT64"
+
+
+def test_bwd_graph_declares_seed_offset_rank4_int64():
+    ov = _graph_ov()
+    g = ov._bwd_graph(
+        [2, 8, 128, 64],
+        [65536, 8192, 64, 1],
+        _F16,
+        [2, 8, 128, 64],
+        [65536, 8192, 64, 1],
+        _F16,
+        [2, 8, 128, 64],
+        [65536, 8192, 64, 1],
+        _F16,
+        [2, 8, 128, 64],
+        [65536, 8192, 64, 1],
+        _F16,
+        [2, 8, 128, 1],
+        [1024, 128, 1, 1],
+        [2, 8, 128, 64],
+        [65536, 8192, 64, 1],
+        [2, 8, 128, 64],
+        [65536, 8192, 64, 1],
+        [2, 8, 128, 64],
+        [65536, 8192, 64, 1],
+        1.0,
+        False,
+        0.1,
+        None,
+    )
+    seed_t = g.tensors_by_uid[_SEED_UID]
+    offset_t = g.tensors_by_uid[_OFFSET_UID]
+    assert seed_t.dims == [1, 1, 1, 1]
+    assert seed_t.strides == [1, 1, 1, 1]
+    assert seed_t.dtype == "INT64"
+    assert offset_t.dims == [1, 1, 1, 1]
+    assert offset_t.strides == [1, 1, 1, 1]
+    assert offset_t.dtype == "INT64"
