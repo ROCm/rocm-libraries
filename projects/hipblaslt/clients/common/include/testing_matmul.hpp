@@ -3211,7 +3211,7 @@ void testing_matmul_with_bias(const Arguments& arg,
     if(ucRows)
     {
         if(std::all_of(M.begin(), M.end(), [](int64_t m) { return m <= 1; }))
-            skipUniformCheck(ucRows, "row", "M is 1: D has a single row, so no row is compared");
+            skipUniformCheck(ucRows, "row", "D has at most one row, so no row is compared");
         else if(arg.partitions > 1)
             skipUniformCheck(ucRows,
                              "row",
@@ -3239,7 +3239,7 @@ void testing_matmul_with_bias(const Arguments& arg,
     {
         if(std::all_of(N.begin(), N.end(), [](int64_t n) { return n <= 1; }))
             skipUniformCheck(
-                ucCols, "column", "N is 1: D has a single column, so no column is compared");
+                ucCols, "column", "D has at most one column, so no column is compared");
         else if(arg.partitions > 1)
             skipUniformCheck(ucCols,
                              "column",

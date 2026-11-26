@@ -748,12 +748,12 @@ namespace
 
     TEST(UniformCheckBench, pre_checkin_OneRowSkipsRowCheck)
     {
-        expectSingleLineSkips(hipblaslt_uniform_check::row, 1, 64, "M is 1");
+        expectSingleLineSkips(hipblaslt_uniform_check::row, 1, 64, "D has at most one row");
     }
 
     TEST(UniformCheckBench, pre_checkin_OneColumnSkipsColumnCheck)
     {
-        expectSingleLineSkips(hipblaslt_uniform_check::column, 64, 1, "N is 1");
+        expectSingleLineSkips(hipblaslt_uniform_check::column, 64, 1, "D has at most one column");
     }
 
     // Runs a 64 x 64 x 64 f32 GEMM with uniform_check in the given direction and one bit of D
