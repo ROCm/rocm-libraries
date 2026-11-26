@@ -70,7 +70,7 @@ from .SolutionStructs.segment_interleave import wave_tile_span
 from .AsmMemoryInstruction import MemoryInstruction
 from .Activation import ActivationModule
 from .Common import printWarning, roundUp, print2, DebugConfig, DataDirection, \
-  INDEX_CHARS, IsaVersion, log2, clusterEnabled, \
+  INDEX_CHARS, IsaVersion, log2, clusterEnabled, persistentSpatialCluster, \
   swizzleGeometry, isMxf4SubtilePath
 from .Common.GlobalParameters import globalParameters
 from .Common.ScaleAlphaVec import scaleAlphaSupportsDeviceScalar, scaleAlphaVectorMode
@@ -3553,9 +3553,15 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
         module.add(self.openSumAtLeastUnroll(kernel, prefetch=True, isOptNLL=isOptNLL))
         usePrimedSkip = self.isPrefetchAcrossPersistentEnabled(kernel)
         lbl_prefetchPrimedMerge = Label(self.labels.getNameInc("SK_PrefetchPrimedMerge"), "")
+        primedWait = Module()
+        if usePrimedSkip and persistentSpatialCluster(kernel):
+          primedWait = Component.WorkAssignment.find(self).persistentPrimedEntryClusterWait(self, kernel)
+        lbl_primedEntry = lbl_prefetchPrimedMerge
+        if primedWait.items():
+          lbl_primedEntry = Label(self.labels.getNameInc("SK_PrefetchPrimedClusterWait"), "")
         if usePrimedSkip:
           module.add(SBitcmp1B32(src0=sgpr("PersistentPrefetchState"), src1=0, comment="tail prefetch already issued first PGR group?"))
-          module.add(SCBranchSCC1(labelName=lbl_prefetchPrimedMerge.getLabelName(), comment="skip first PGR group if primed"))
+          module.add(SCBranchSCC1(labelName=lbl_primedEntry.getLabelName(), comment="skip first PGR group if primed"))
         moduleTmp = self.directToLdsM0Update(kernel, 0, tensorParameters1st)
         module.add(replaceHolder(moduleTmp, 0))
 
@@ -3582,6 +3588,10 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
           moduleTmp = self.directToLdsM0Update(kernel, 0, tPM)
           module.add(replaceHolder(moduleTmp, 0))
           module.add(self.globalReadDo(kernel, 0, tPM))
+        if primedWait.items():
+          module.add(SBranch(labelName=lbl_prefetchPrimedMerge.getLabelName(), comment="cold entry: first-load wait paired the tile-close arrive"))
+          module.add(lbl_primedEntry)
+          module.add(primedWait)
         if usePrimedSkip:
           module.add(lbl_prefetchPrimedMerge)
           module.add(SMovB32(dst=sgpr("PersistentPrefetchState"), src=0, comment="clear after first PGR group merge"))
@@ -3821,6 +3831,19 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
         lambda tP: emitTensorLoad(tP["MX"], skipWait=True),
         lambda: emitTensorLoad(tensorParameters2nd, skipWait=skip2ndWaitForDtl))
 
+    # A next K range holding only the partial last iteration runs no unrolled
+    # iteration, so its first PGR group is never consumed. Its full-DepthU TDM
+    # read would start at the K-advanced base, where tensor dim1 (SizeL) no
+    # longer bounds K, and can run past the end of A/B.
+    skipZeroIterLoads = None
+    if (kernel["enableTDMA"] and kernel["enableTDMB"] and not kernel["NoTailLoop"]
+        and self.states.currentTileWork.k_start is not None):
+      skipZeroIterLoads = Label(self.labels.getNameInc("PapSkipZeroIterLoads"), "")
+      module.add(SCmpEQU32(src0=sgpr(self.loopCounterName(kernel, self.states.unrollIdx)), src1=0,
+                           comment="PAP: next K range has no full DepthU iteration?"))
+      module.add(SCBranchSCC1(labelName=skipZeroIterLoads.getLabelName(),
+                              comment="PAP: skip loads past the next range's K extent"))
+
     staggerState = borrowedStaggerState() if papPrefetchUsesStagger else []
     if staggerState:
       numStaggerSnapshotSgprs = sum(size for _, size in staggerState)
@@ -3830,6 +3853,8 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
         restoreBorrowedStaggerState(tmpSgprInfo.idx, staggerState)
     else:
       emitPrefetchGroup()
+    if skipZeroIterLoads is not None:
+      module.add(skipZeroIterLoads)
     module.add(SMovB32(dst=sgpr("PersistentPrefetchState"), src=1, comment="first PGR group for next persistent iter prefetched"))
     if ((kernel["DirectToLdsA"] or kernel["DirectToLdsB"])
         and not (kernel["enableTDMA"] and kernel["enableTDMB"])):
@@ -12225,20 +12250,23 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
     modulesToScan = [rootModule]
     while modulesToScan:
       currentModule = modulesToScan.pop()
+      # An explicit cluster handshake owns its local rendezvous too: all waves
+      # must finish reading before the elected wave releases a peer's LDS bank.
+      # LDS-token transitions cannot reconstruct that peer-wide publication.
+      clusterHandoff = any(isinstance(item, SBarrier) and "-3" in str(item).split("//", 1)[0]
+                           for item in currentModule.items())
+      explicitPapHandoff = currentModule.name in (
+          "Persistent PAP explicit bank handoff", "Persistent PAP retained operand completion")
       keptItems = []
       for item in currentModule.items():
         if isinstance(item, Module):
           modulesToScan.append(item)
           keptItems.append(item)
-        elif isinstance(item, SBarrier) \
-             and "-3" not in str(item).split("//", 1)[0] \
-             and "PGR bypass sync" not in str(item):
-          # Pass-2 rebuilds only workgroup-scope barriers from token-state
-          # transitions, so only those are cleared here. Cluster-scope split
-          # barriers (s_barrier_signal/wait -3), e.g. the StreamKMulticast
-          # prologue arrive, are placed deliberately by other components and
-          # carry no LDS token, so preserve them rather than dropping a half of
-          # a cluster handshake.
+        elif isinstance(item, SBarrier) and not (
+            clusterHandoff or explicitPapHandoff or getattr(item, "tensorcnt", -1) >= 0
+            or "PGR bypass sync" in str(item)):
+          # Only ordinary workgroup barriers are rebuilt from LDS tokens.
+          # Preserve explicit cluster/PAP handoffs and PGR bypass syncs.
           removedCount += 1
           continue
         else:

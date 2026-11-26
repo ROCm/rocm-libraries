@@ -153,6 +153,8 @@ class LSUOn(LSU):
         numAccIdx    = len(self.LSUelementsArchIdx[0])
         numSetAccIdx = ceilDivide(numAccIdx, kernel["LocalSplitUReuseLDS"])
         maxLDSConstOffset = writer.states.regCaps["maxLDSConstOffset"]
+        # Nonzero only with PAP: the reduction scratch sits after the compute banks.
+        ldsOffsetLSU = kernel.get("LdsOffsetLSU", 0)
         # computeStoreVgprs
         if kernel["EnableMatrixInstruction"]:
             module.add(writer.computeStoreVgprs(kernel))
@@ -272,6 +274,9 @@ class LSUOn(LSU):
                     comment="tmp = (waveNum * dataPerWave) * lsu_id"))
                 module.add(VAddU32(vgpr(addr), vgpr(tmpVgpr), vgpr(addr), \
                     comment="addr += tmp"))
+                if ldsOffsetLSU:
+                    module.add(VAddU32(vgpr(addr), hex(ldsOffsetLSU), vgpr(addr), \
+                        comment="addr += LdsOffsetLSU (scratch after PAP banks)"))
 
             if reUseIdx > 0:
                 module.add(SWaitCnt(dscnt=0, comment="wait for all reads"))
@@ -316,6 +321,9 @@ class LSUOn(LSU):
                     comment="lsu offset = lsu_id * LSU Process Offset"))
                 module.add(VAddU32(dst=vgpr(addr), src0=vgpr(addr), src1=vgpr(tmpVgpr), \
                     comment="addr += lsu offset"))
+                if ldsOffsetLSU:
+                    module.add(VAddU32(dst=vgpr(addr), src0=hex(ldsOffsetLSU), src1=vgpr(addr), \
+                        comment="addr += LdsOffsetLSU (scratch after PAP banks)"))
                 for i in range(1,numAddr):
                     module.add(VAddU32(vgpr(addr+i), maxLDSConstOffset*i, vgpr(addr), \
                     comment="addr += maxLDSConstOffset*%u"%(i)))

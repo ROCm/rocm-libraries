@@ -1099,6 +1099,44 @@ def test_classic_pap_saves_direct_to_lds_bank_state_after_priming():
     assert writer.states.ldsTensorTokenIdx == writer.states.memTokenLdsBuffer1
 
 
+@pytest.mark.parametrize(
+    "no_tail_loop, k_start, guarded",
+    [(False, "StreamKLocalStart", True), (True, "StreamKLocalStart", False), (False, None, False)],
+    ids=["streamk-tail", "streamk-no-tail-loop", "data-parallel"],
+)
+def test_classic_tdm_pap_skips_loads_for_next_range_without_full_iteration(no_tail_loop, k_start, guarded):
+    """A StreamK range holding only the partial last K iteration must not issue PAP loads.
+
+    Its first-PGR TDM read starts at the K-advanced base, where tensor dim1 no
+    longer clips K, so the full-DepthU read can run past the end of A/B.
+    """
+    from rocisa.code import Label
+
+    writer = _ClassicPapWriter(version=(12, 5, 0))
+    writer.labels = _StubLabels()
+    writer.loopCounterName = lambda kernel, loop_idx: "LoopCounterL"
+    writer.states.currentTileWork = SimpleNamespace(k_start=k_start)
+    kernel = _classic_kernel(enableTDMA=True, enableTDMB=True, NoTailLoop=no_tail_loop)
+    tpa, tpb = _tensor_parameters()
+
+    items = _module_items(writer.setupPrefetchAcrossPersistentLoads(kernel, tpa, tpb))
+    checks = _instruction_indices(items, kwa_module.SCmpEQU32, src_contains="LoopCounterL")
+    skips = [i for i, item in enumerate(items)
+             if isinstance(item, kwa_module.SCBranchSCC1) and "PapSkipZeroIterLoads" in str(item)]
+    joins = [i for i, item in enumerate(items)
+             if isinstance(item, Label) and "PapSkipZeroIterLoads" in str(item)]
+
+    if not guarded:
+        assert not checks and not skips and not joins
+        return
+    gr_a = _module_index(items, "globalReadDo_A")
+    gr_b = _module_index(items, "globalReadDo_B")
+    primed = _instruction_index(items, kwa_module.SMovB32, "s[sgprPersistentPrefetchState]", "1")
+    assert len(checks) == len(skips) == len(joins) == 1
+    assert checks[0] < skips[0] < gr_a
+    assert gr_b < joins[0] < primed
+
+
 def _assert_loop_counters_checkpointed_in_vgprs(writer, items):
     loop_vgpr = next(base for base, _, tag in writer.vgprPool.checked_out if tag == "PAP loop counters")
     orig_loop_vgpr = loop_vgpr + 1
@@ -2241,6 +2279,43 @@ def test_cluster_close_handoff_covers_only_reachable_backedges(
     assert "s_wait_tensorcnt" not in close
 
 
+@pytest.mark.parametrize("tail_loop", [True, False])
+def test_cluster_pap_primed_entry_pairs_tile_close_arrive(
+        _gp_gfx1250, gfx1250_iim, assembler, capsys, tail_loop):
+    """A tail loop reads the bank primed entry refills after the PAP handoff
+    phase, so primed entry must wait for the tile-close arrive before it
+    issues the next PGR group; without a tail loop both stay skipped."""
+    sol, asm = _emit_asm(gfx1250_iim, assembler, **_NO_MX_EMIT,
+                         ClusterDim=[2, 2], PrefetchAcrossPersistent=1,
+                         ForceDisableShadowInit=True, ClusterLocalRead=0,
+                         AssertSummationElementMultiple=1 if tail_loop else 128)
+    assert sol.get("Valid") and asm, capsys.readouterr().out
+    assert sol["NoTailLoop"] != tail_loop
+    close = asm.split("label_PersistentLoopClose:", 1)[1].split("label_KernelEnd:", 1)[0]
+    assert close.count("s_barrier_signal -3") == 1
+    assert ("PersistentPrefetchState" in close) != tail_loop, \
+        "primed tiles must keep the tile-close arrive exactly when primed entry waits for it"
+
+    primed = re.findall(r"s_cbranch_scc1\s+(label_\w+)\s*//\s*skip first PGR group if primed", asm)
+    assert primed
+    for target in primed:
+        merge = re.search(r"(label_SK_PrefetchPrimedMerge\w*):", asm[asm.index(target + ":"):]
+                          if target + ":" in asm else "")
+        if not tail_loop:
+            assert target.startswith("label_SK_PrefetchPrimedMerge")
+            assert "label_SK_PrefetchPrimedClusterWait" not in asm
+            continue
+        assert target.startswith("label_SK_PrefetchPrimedClusterWait")
+        body = asm[asm.index(target + ":"):]
+        body = body[:body.index(merge.group(1) + ":")]
+        # Exactly one wait on the primed edge, nothing else that touches the cluster.
+        assert body.count("s_barrier_wait -3") == 1
+        assert "s_barrier_signal -3" not in body
+        # The cold edge reaches the merge without passing that wait.
+        cold = asm[:asm.index(target + ":")]
+        assert re.search(r"s_branch\s+%s\b" % merge.group(1), cold[cold.rindex(target):])
+
+
 @pytest.mark.parametrize("assignment,tdma,tdmb,threads,drains,barriers", [
     (StaticGrid, False, False, 64, 0, 0),
     (StaticGrid, True, False, 32, 0, 0),
@@ -2262,3 +2337,179 @@ def test_persistent_handoff_scope(assignment, tdma, tdmb, threads, drains, barri
     items = list(beforeReentry.flatitems())
     assert sum(isinstance(item, SWaitCnt) for item in items) == drains
     assert sum(isinstance(item, SBarrier) for item in items) == barriers
+@pytest.mark.parametrize("problem, reason", [
+    ({"UseBias": 1, "Gradient": True, "BiasSrc": "A"}, "bias"),
+    ({"UseBias": 1, "Gradient": True, "BiasSrc": "B"}, "bias"),
+])
+def test_pap_epilogue_lds_overwrite_rejected(_gp_gfx1250, gfx1250_iim, assembler, capsys,
+                                             problem, reason):
+    sol, out = _derive(gfx1250_iim, assembler, capsys,
+                       PrefetchAcrossPersistent=1, ProblemType=problem)
+    assert not sol.get("Valid"), "PAP accepted an epilogue that overwrites its LDS data"
+    assert reason + " epilogue LDS overwrite" in out
+
+
+def _lsu_params(gfx1250_iim, lsu, **overrides):
+    params = _make_params(gfx1250_iim, **overrides)
+    params["LocalSplitU"] = lsu
+    params["WorkGroup"] = params["WorkGroup"][:2] + [lsu]
+    return params
+
+
+def _lsu_derive(gfx1250_iim, assembler, capsys, lsu, **overrides):
+    sol = Solution(_lsu_params(gfx1250_iim, lsu, **overrides), False, True, False,
+                   assembler, gfx1250_iim)
+    return sol, capsys.readouterr().out
+
+
+def _lsu_scratch_model(compute_end, sol):
+    """Reference model: [start, end) of the PAP LocalSplitU reduction scratch.
+
+    The prefetched next-tile banks span [0, compute_end); the reduction holds
+    LocalSplitU partial MT0 x MT1 tiles of the compute type after them.
+    """
+    start = (compute_end + 15) // 16 * 16
+    size = (sol["LocalSplitU"] * sol["MacroTile0"] * sol["MacroTile1"]
+            * int(sol["ProblemType"]["ComputeDataType"].numBytes()))
+    return start, start + size
+
+
+_LSU_CASES = [
+    pytest.param(dict(mi=_MI_W4[:-2] + [2, 2]), {}, id="mxf8f4-wg2x2"),
+    pytest.param(dict(mi=[16, 16, 32, 1, 1, 2, 2, 2, 2], DepthU=128, SuppressNoLoadLoop=False),
+                 dict(_BF16_VECTOR_EPILOGUE, UseBias=1, UseScaleAlphaVec=1), id="bf16-bias-sav"),
+]
+
+
+@pytest.mark.parametrize("common, pt", _LSU_CASES)
+def test_pap_local_split_u_scratch_follows_compute_banks(_gp_gfx1250, gfx1250_iim, assembler,
+                                                         capsys, common, pt):
+    """PAP keeps the next tile's banks live through the epilogue, so the LSU
+    reduction is placed after them, and vector scratch after the reduction."""
+    compute_pt = {k: v for k, v in pt.items() if k not in ("UseBias", "UseScaleAlphaVec")}
+    ref, out = _lsu_derive(gfx1250_iim, assembler, capsys, 1, PrefetchAcrossPersistent=1,
+                           ProblemType=compute_pt, **common)
+    assert ref.get("Valid"), out
+    sol, out = _lsu_derive(gfx1250_iim, assembler, capsys, 2, PrefetchAcrossPersistent=1,
+                           ProblemType=pt, **common)
+    assert sol.get("Valid"), out
+    assert "epilogue LDS overwrite" not in out
+    # Without LSU or vector scratch, a PAP kernel occupies exactly its compute banks.
+    start, end = _lsu_scratch_model(ref["LdsNumBytes"], sol)
+    assert sol["LdsOffsetLSU"] == start
+    if pt:
+        assert sol["_SeparateEpilogueLds"]
+        assert sol["LdsOffsetBias"] == (end + 15) // 16 * 16
+        assert sol["LdsNumBytes"] > sol["LdsOffsetBias"]
+    else:
+        assert sol["LdsNumBytes"] == end
+    assert sol["LdsNumBytes"] <= sol["MaxLDS"]
+
+
+def test_pap_local_split_u_rejects_reduction_that_cannot_fit(_gp_gfx1250, gfx1250_iim, assembler,
+                                                             capsys):
+    """A reduction chunked over LDS (LocalSplitUReuseLDS > 1) would have to
+    reuse the live banks, so it is refused with a printed reason."""
+    sol, out = _lsu_derive(gfx1250_iim, assembler, capsys, 2, PrefetchAcrossPersistent=1,
+                           mi=_BF16_VECTOR_MI, DepthU=128, SuppressNoLoadLoop=False,
+                           ProblemType=_BF16_VECTOR_EPILOGUE)
+    assert not sol.get("Valid")
+    assert "LocalSplitU needs the whole reduction in LDS" in out
+
+
+def test_local_split_u_scratch_unchanged_without_pap(_gp_gfx1250, gfx1250_iim, assembler, capsys):
+    sol, out = _lsu_derive(gfx1250_iim, assembler, capsys, 2, PrefetchAcrossPersistent=0)
+    assert sol.get("Valid"), out
+    assert sol["LdsOffsetLSU"] == 0
+
+
+def _emit_solution_asm(sol, assembler):
+    """Assembly text for an already derived solution. CPU-only."""
+    import shutil
+    import rocisa
+    from tensilelite.Common.Types import DebugConfig
+    from tensilelite.KernelWriterAssembly import KernelWriterAssembly
+    from tensilelite.SolutionStructs.Naming import getKernelFileBase
+    from tensilelite.create_library.run import (generateKernelObjectsFromSolutions,
+                                                  processKernelSource)
+    from rocisa_test_state import preserve_rocisa_kernel_state
+
+    with preserve_rocisa_kernel_state():
+        kwa = KernelWriterAssembly(assembler, DebugConfig())
+        pieces = []
+        for kernel in generateKernelObjectsFromSolutions([sol]):
+            ri = rocisa.rocIsa.getInstance()
+            ri.init(tuple(kernel["ISA"]), shutil.which("amdclang++") or "/usr/bin/amdclang++")
+            ri.setKernel(tuple(kernel["ISA"]), kernel["WavefrontSize"])
+            kernel.duplicate = False
+            kernel["BaseName"] = getKernelFileBase(False, kernel)
+            src = processKernelSource(kwa, ri.getData(), ri.getOutputOptions(), False, kernel).src
+            if isinstance(src, (bytes, bytearray)):
+                src = src.decode(errors="replace")
+            pieces.append(src or "")
+    return "\n".join(pieces)
+
+
+def _section(asm, begin, end):
+    lo = asm.index(begin)
+    return asm[lo:asm.index(end, lo)]
+
+
+@pytest.mark.parametrize("pap", [0, 1])
+def test_pap_local_split_u_reduction_addresses_skip_compute_banks(
+        _gp_gfx1250, gfx1250_iim, assembler, capsys, pap):
+    """With PAP every LSU ds_store/ds_load is based at LdsOffsetLSU; without
+    PAP no base add is emitted (the reduction still starts at LDS 0)."""
+    sol, out = _lsu_derive(gfx1250_iim, assembler, capsys, 2, PrefetchAcrossPersistent=pap)
+    assert sol.get("Valid"), out
+    asm = _emit_solution_asm(sol, assembler)
+    offset = sol["LdsOffsetLSU"]
+    assert (offset > 0) == bool(pap)
+    write = _section(asm, "LocalSplitU: local write 1/1", "LocalSplitU: local read 1/1")
+    read = _section(asm, "LocalSplitU: local read 1/1", "LocalSplitU: global write indices")
+    size = 2 * sol["MacroTile0"] * sol["MacroTile1"] * 4
+    for section, op in ((write, "ds_store"), (read, "ds_load")):
+        first = section.index(op)
+        bases = re.findall(r"v_add_nc_u32 v(\d+), (0x[0-9a-f]+), v\1\s+// addr \+= LdsOffsetLSU",
+                           section[:first])
+        accesses = re.findall(r"^%s_b(?:32|64|128) .*$" % op, section, re.M)
+        assert accesses
+        if pap:
+            assert len(bases) == 1 and int(bases[0][1], 16) == offset, section[:first]
+            # Every reduction access uses the rebased address register.
+            assert all(re.search(r"\bv%s\b" % bases[0][0], a) for a in accesses), accesses
+        else:
+            assert not bases
+        # Immediates stay inside the scratch the solution reserved.
+        imms = [int(m) for a in accesses for m in re.findall(r"offset:(\d+)", a)]
+        assert max(imms, default=0) < size
+    assert offset + size <= sol["LdsNumBytes"]
+
+
+@pytest.mark.parametrize("problem", [
+    {"UseBias": 1}, {"UseScaleAlphaVec": 1}, {"UseScaleAB": "Vector"},
+])
+def test_pap_epilogue_lds_features_remain_valid_without_pap(_gp_gfx1250, gfx1250_iim,
+                                                          assembler, capsys, problem):
+    sol, out = _derive(gfx1250_iim, assembler, capsys,
+                       PrefetchAcrossPersistent=0, ProblemType=problem)
+    assert sol.get("Valid"), out
+
+
+@pytest.mark.parametrize("problem", [
+    {}, {"UseScaleAB": "Scalar"},
+    {"UseBias": 1, "Gradient": True, "BiasSrc": "D"},
+])
+def test_pap_epilogue_without_lds_overlap_remains_valid(_gp_gfx1250, gfx1250_iim,
+                                                       assembler, capsys, problem):
+    sol, out = _derive(gfx1250_iim, assembler, capsys,
+                       PrefetchAcrossPersistent=1, ProblemType=problem)
+    assert sol.get("Valid"), out
+
+
+def test_pap_amax_keeps_upstream_persistent_rejection(_gp_gfx1250, gfx1250_iim,
+                                                     assembler, capsys):
+    sol, out = _derive(gfx1250_iim, assembler, capsys,
+                       PrefetchAcrossPersistent=1, ProblemType={"OutputAmaxD": True})
+    assert not sol.get("Valid")
+    assert "OutputAmaxD is unsupported" in out

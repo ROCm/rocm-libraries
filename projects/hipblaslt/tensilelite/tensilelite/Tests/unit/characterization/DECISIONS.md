@@ -719,3 +719,10 @@ fields expose one new parser default; no existing saved value was re-recorded.
 
 Replace the four arbitrary-input snapshots with Solution-derived padding
 assertions and codegen checks in `test_LdsPadding.py`; production is unchanged.
+
+## D52 — Record the PAP LocalSplitU LDS offset
+
+**ADR:** [0039](adr/0039-record-pap-local-split-u-lds-offset.md)
+
+Solution state gains `LdsOffsetLSU`; the SolutionClass schema snapshots record the key (0 for the
+nonpersistent fixture). Placement is tested in `test_PrefetchAcrossPersistent.py`.
