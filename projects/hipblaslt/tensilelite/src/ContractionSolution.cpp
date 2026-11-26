@@ -4177,8 +4177,28 @@ namespace TensileLite
 
         if(!problemType.useScaleAB.empty()) // GSU dep
         {
-            args.template append<void const*>("scaleA", inputs.scaleA);
-            args.template append<void const*>("scaleB", inputs.scaleB);
+            auto scaleA = inputs.scaleA;
+            auto scaleB = inputs.scaleB;
+            if(problemType.useScaleAB == "Scalar")
+            {
+                // Only Half-to-Float8 narrowing consumes the Scalar scale in
+                // the main kernel. Null selects unit scale in conversion;
+                // other conversions still need their original scales here.
+                auto preScaledBeforeNarrowing
+                    = [](rocisa::DataType storage, rocisa::DataType compute) {
+                          return storage == rocisa::DataType::Half
+                                 && (compute == rocisa::DataType::Float8
+                                     || compute == rocisa::DataType::BFloat8
+                                     || compute == rocisa::DataType::Float8_fnuz
+                                     || compute == rocisa::DataType::BFloat8_fnuz);
+                      };
+                if(preScaledBeforeNarrowing(problem.a().dataType(), problem.computeInputTypeA()))
+                    scaleA = nullptr;
+                if(preScaledBeforeNarrowing(problem.b().dataType(), problem.computeInputTypeB()))
+                    scaleB = nullptr;
+            }
+            args.template append<void const*>("scaleA", scaleA);
+            args.template append<void const*>("scaleB", scaleB);
         }
         if(problemType.useScaleCD) // GSU dep
         {

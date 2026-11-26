@@ -218,12 +218,14 @@ operand with a 16-bit one, and two operands of the same 16-bit type may produce 
 FP16 with BFP16 only in `CMP_GT`. The GPU reference registers the opposite unary conversions and the binary
 FP16-with-BFP16 mixes (see
 [GPU Reference Implementation - Operation Support](../../../dnn-providers/integration-tests/docs/OperationSupport-GpuReferenceImpl.md#pointwise-modes)).
-Both references take an FP32 first input with a 16-bit second input and FP32 compute, with that 16-bit type or
-FP32 as the output; only this reference takes a 16-bit first input with an FP32 second one.
+Both references take an FP32 operand beside a 16-bit one with FP32 compute and an FP32 output, and an FP32 first
+input with a 16-bit second input that produces that 16-bit type; only this reference takes such a pair computed in
+the 16-bit type.
 
 **Compute datatype.** A node's `compute_data_type` has to match the compute column of a registered tuple, or
-the node is declined. The GPU reference does the same, but registers FP32 compute only, so the CPU tuples with
-FP16, BFP16 or FP64 compute have no GPU counterpart.
+the node is declined. The GPU reference does the same, but registers FP16 and BFP16 compute only for two operands
+of that type and FP64 compute not at all, so the other CPU tuples with FP16, BFP16 or FP64 compute have no GPU
+counterpart.
 
 **Parameters.**
 
